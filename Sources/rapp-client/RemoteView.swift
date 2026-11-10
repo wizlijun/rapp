@@ -1,0 +1,97 @@
+import AppKit
+import QuartzCore
+import RappCore
+
+/// Shows the remote window's picture, scaled to fit, and reports mouse and
+/// scroll input on it as messages.
+final class RemoteView: NSView {
+    /// Called with a `.mouse` or `.scroll` message.
+    var onMouse: ((Message) -> Void)?
+
+    /// Pixel size of the picture currently shown.
+    private(set) var imageSize = CGSize.zero
+
+    private var pressed = Set<MouseButton>()
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        // Layer-hosting: the layer is ours, so AppKit never replaces its contents.
+        let hosted = CALayer()
+        hosted.backgroundColor = NSColor.black.cgColor
+        hosted.contentsGravity = .resizeAspect
+        layer = hosted
+        wantsLayer = true
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) is not used")
+    }
+
+    override var isFlipped: Bool { true }
+    override var acceptsFirstResponder: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    /// `bgra` is B, G, R, X bytes, `width * 4` per row.
+    func show(bgra: [UInt8], width: Int, height: Int) {
+        guard width > 0, height > 0, bgra.count >= width * height * 4,
+              let provider = CGDataProvider(data: Data(bgra) as CFData),
+              let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+              let image = CGImage(
+                width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
+                space: colorSpace,
+                bitmapInfo: CGBitmapInfo(rawValue: CGBitmapInfo.byteOrder32Little.rawValue
+                                            | CGImageAlphaInfo.noneSkipFirst.rawValue),
+                provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+        else { return }
+        imageSize = CGSize(width: width, height: height)
+        layer?.contents = image
+    }
+
+    // MARK: Mouse
+
+    /// Position inside the picture as 0...1. Outside the picture this is nil,
+    /// unless `clamped`, which pins it to the nearest edge.
+    private func position(of event: NSEvent, clamped: Bool) -> (x: Float, y: Float)? {
+        let point = convert(event.locationInWindow, from: nil)
+        if let inside = normalizedPoint(point, imageSize: imageSize, viewSize: bounds.size) { return inside }
+        guard clamped else { return nil }
+        let rect = aspectFitRect(imageSize: imageSize, in: bounds.size)
+        guard rect.width > 0, rect.height > 0 else { return nil }
+        return (Float(min(max((point.x - rect.minX) / rect.width, 0), 1)),
+                Float(min(max((point.y - rect.minY) / rect.height, 0), 1)))
+    }
+
+    private func mouse(_ kind: MouseKind, _ button: MouseButton, _ event: NSEvent) {
+        switch kind {
+        case .down:
+            // A press on the empty border around the picture is not sent.
+            guard let p = position(of: event, clamped: false) else { return }
+            pressed.insert(button)
+            onMouse?(.mouse(kind: .down, button: button, x: p.x, y: p.y, clickCount: UInt8(clamping: event.clickCount)))
+        case .drag, .up:
+            // Once a press was sent, its drags and release always follow,
+            // even when the pointer has left the picture.
+            guard pressed.contains(button), let p = position(of: event, clamped: true) else { return }
+            if kind == .up { pressed.remove(button) }
+            onMouse?(.mouse(kind: kind, button: button, x: p.x, y: p.y, clickCount: UInt8(clamping: event.clickCount)))
+        }
+    }
+
+    override func mouseDown(with event: NSEvent) { mouse(.down, .left, event) }
+    override func mouseDragged(with event: NSEvent) { mouse(.drag, .left, event) }
+    override func mouseUp(with event: NSEvent) { mouse(.up, .left, event) }
+    override func rightMouseDown(with event: NSEvent) { mouse(.down, .right, event) }
+    override func rightMouseDragged(with event: NSEvent) { mouse(.drag, .right, event) }
+    override func rightMouseUp(with event: NSEvent) { mouse(.up, .right, event) }
+
+    override func scrollWheel(with event: NSEvent) {
+        guard let p = position(of: event, clamped: false) else { return }
+        var dx = event.scrollingDeltaX, dy = event.scrollingDeltaY
+        if !event.hasPreciseScrollingDeltas {
+            dx *= 10
+            dy *= 10
+        }
+        guard dx != 0 || dy != 0 else { return }
+        onMouse?(.scroll(x: p.x, y: p.y, dx: Float(dx), dy: Float(dy)))
+    }
+}

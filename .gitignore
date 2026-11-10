@@ -1,0 +1,9 @@
+.build/
+.build-logs/
+.swiftpm/
+.superpowers/
+.DS_Store
+rust/target/
+gui/build/
+gui/.dart_tool/
+dist/
