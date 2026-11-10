@@ -182,7 +182,7 @@ class ServiceMonitor extends ChangeNotifier {
     _connecting = true;
     try {
       final token = await readToken();
-      if (token == null || token.isEmpty) throw ServiceException('ipc.token not found');
+      if (token == null || token.isEmpty) throw ServiceException('no ipc.token');
       final cmd = await ServiceConnection.connect(token: token, port: port);
       final sub = await ServiceConnection.connect(token: token, port: port);
       _cmd = cmd;
