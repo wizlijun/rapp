@@ -1,0 +1,158 @@
+#!/usr/bin/env python3
+"""M4 end-to-end on one Mac: rapp-relay + rapp-service + rapp-hub with the
+real Swift rapp-host and rapp-client. For each path (lan, relay) it opens an
+app through the hub, waits, takes a screenshot, then kicks the session over
+the service IPC (what the --cm window's 断开 button sends) and waits for the
+hub's `closed` event.
+
+usage: scripts/e2e-local.py <work dir> [app id]   (default com.apple.Safari)
+Needs: swift build -c release, and cargo build --release in rust/.
+"""
+import json, os, re, socket, subprocess, sys, time
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+RUST = os.path.join(ROOT, "rust/target/release")
+SWIFT = os.path.join(ROOT, ".build/release")
+WORK = os.path.abspath(sys.argv[1])
+APP = sys.argv[2] if len(sys.argv) > 2 else "com.apple.Safari"
+KEY = "e2e-key"
+PASSWORD = "e2epass1"
+
+
+def free_udp_port():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    return port
+
+
+def wait_for(pred, seconds, what):
+    end = time.time() + seconds
+    while time.time() < end:
+        v = pred()
+        if v:
+            return v
+        time.sleep(0.1)
+    sys.exit(f"timed out waiting for {what}")
+
+
+def read_text(path):
+    try:
+        with open(path) as f:
+            return f.read()
+    except FileNotFoundError:
+        return ""
+
+
+class Hub:
+    def __init__(self, home, bins, force):
+        env = dict(os.environ, RAPP_HOME=home, RAPP_BIN_DIR=bins, RAPP_FORCE_PATH=force)
+        self.p = subprocess.Popen([os.path.join(RUST, "rapp-hub")], env=env, text=True, bufsize=1,
+                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                  stderr=open(os.path.join(WORK, f"hub-{force}.log"), "w"))
+        self.req = 0
+
+    def send(self, **cmd):
+        self.req += 1
+        cmd["req"] = self.req
+        self.p.stdin.write(json.dumps(cmd) + "\n")
+        return self.req
+
+    def wait(self, event, seconds=20, **match):
+        end = time.time() + seconds
+        while time.time() < end:
+            line = self.p.stdout.readline()
+            if not line:
+                sys.exit(f"hub exited while waiting for {event}")
+            ev = json.loads(line)
+            print("  hub:", line.strip())
+            if ev.get("event") == "error":
+                sys.exit(f"hub error: {ev}")
+            if ev.get("event") == event and all(ev.get(k) == v for k, v in match.items()):
+                return ev
+        sys.exit(f"timed out waiting for hub {event}")
+
+    def stop(self):
+        self.p.stdin.close()
+        self.p.wait(10)
+
+
+def ipc(port, token, cmd):
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as s:
+        f = s.makefile("rw")
+        f.write(json.dumps({"token": token}) + "\n")
+        f.write(json.dumps(cmd) + "\n")
+        f.flush()
+        return json.loads(f.readline())
+
+
+def main():
+    os.makedirs(WORK, exist_ok=True)
+    bins = os.path.join(WORK, "bin")
+    a_home, b_home = os.path.join(WORK, "a"), os.path.join(WORK, "b")
+    for d in (bins, a_home, b_home):
+        os.makedirs(d, exist_ok=True)
+    for name in ("rapp-host", "rapp-client"):
+        link = os.path.join(bins, name)
+        if os.path.lexists(link):
+            os.remove(link)
+        os.symlink(os.path.join(SWIFT, name), link)
+
+    port = free_udp_port()
+    relay_addr = f"127.0.0.1:{port}"
+    procs = []
+    try:
+        procs.append(subprocess.Popen(
+            [os.path.join(RUST, "rapp-relay"), "--key", KEY, "--listen", relay_addr,
+             "--db", os.path.join(WORK, "relay.json")],
+            stderr=open(os.path.join(WORK, "relay.log"), "w")))
+        with open(os.path.join(a_home, "service.json"), "w") as f:
+            json.dump({"relay": relay_addr, "key": KEY, "id": None, "secret": "", "name": "e2e-a",
+                       "password": PASSWORD, "port": 0, "ipc_port": 0}, f)
+        os.chmod(os.path.join(a_home, "service.json"), 0o600)
+        svc_log = os.path.join(WORK, "service.log")
+        procs.append(subprocess.Popen(
+            [os.path.join(RUST, "rapp-service")],
+            env=dict(os.environ, RAPP_HOME=a_home, RAPP_BIN_DIR=bins, RAPP_GUI="/nonexistent"),
+            stderr=open(svc_log, "w")))
+        ipc_port = int(wait_for(lambda: (re.search(r"ipc 127\.0\.0\.1:(\d+)", read_text(svc_log)) or [None, None])[1],
+                                10, "service ipc port"))
+        host_id = wait_for(lambda: json.load(open(os.path.join(a_home, "service.json"))).get("id"),
+                           10, "relay registration")
+        token = read_text(os.path.join(a_home, "ipc.token")).strip()
+        print(f"relay {relay_addr}; A registered as {host_id}; ipc {ipc_port}")
+        with open(os.path.join(b_home, "service.json"), "w") as f:
+            json.dump({"relay": relay_addr, "key": KEY}, f)
+
+        for force in ("lan", "relay"):
+            print(f"== path {force} ==")
+            hub = Hub(b_home, bins, force)
+            hub.send(cmd="add_host", id=host_id, password=PASSWORD)
+            hub.wait("host_added")
+            hub.send(cmd="apps", id=host_id)
+            apps = hub.wait("apps")
+            assert any(a["app"] == APP for a in apps["apps"]), f"{APP} not in apps"
+            hub.send(cmd="open", id=host_id, app=APP)
+            opened = hub.wait("opened")
+            assert opened["path"] == force, f"opened over {opened['path']}, wanted {force}"
+            time.sleep(5)
+            shot = os.path.join(WORK, f"shot-{force}.png")
+            subprocess.run(["screencapture", "-x", shot])
+            status = ipc(ipc_port, token, {"cmd": "status"})
+            sessions = [s for s in status["sessions"] if s["app"] == APP]
+            print("  service sessions:", sessions)
+            assert sessions, "service lists no session"
+            print("  kick:", ipc(ipc_port, token, {"cmd": "kick", "sid": sessions[0]["sid"]}))
+            closed = hub.wait("closed", sid=opened["sid"])
+            print(f"  OK {force}: opened path={opened['path']}, closed reason={closed.get('reason')!r}, screenshot {shot}")
+            hub.stop()
+    finally:
+        for p in procs:
+            p.terminate()
+        for p in procs:
+            p.wait(5)
+
+
+if __name__ == "__main__":
+    main()
