@@ -7,6 +7,9 @@ hub's `closed` event.
 
 usage: scripts/e2e-local.py <work dir> [app id]   (default com.apple.Safari)
 Needs: swift build -c release, and cargo build --release in rust/.
+With RAPP_E2E_BUNDLE=<path to rapp.app> the service, hub, host and client all
+come from the app's Contents/MacOS and RAPP_BIN_DIR is not set, so the
+"workers sit next to the service" lookup is what gets tested.
 """
 import json, os, re, socket, subprocess, sys, time
 
@@ -15,6 +18,8 @@ RUST = os.path.join(ROOT, "rust/target/release")
 SWIFT = os.path.join(ROOT, ".build/release")
 WORK = os.path.abspath(sys.argv[1])
 APP = sys.argv[2] if len(sys.argv) > 2 else "com.apple.Safari"
+BUNDLE = os.environ.get("RAPP_E2E_BUNDLE")
+SERVICE_DIR = os.path.join(BUNDLE, "Contents/MacOS") if BUNDLE else RUST
 KEY = "e2e-key"
 PASSWORD = "e2epass1"
 
@@ -47,8 +52,10 @@ def read_text(path):
 
 class Hub:
     def __init__(self, home, bins, force):
-        env = dict(os.environ, RAPP_HOME=home, RAPP_BIN_DIR=bins, RAPP_FORCE_PATH=force)
-        self.p = subprocess.Popen([os.path.join(RUST, "rapp-hub")], env=env, text=True, bufsize=1,
+        env = dict(os.environ, RAPP_HOME=home, RAPP_FORCE_PATH=force)
+        if bins:
+            env["RAPP_BIN_DIR"] = bins
+        self.p = subprocess.Popen([os.path.join(SERVICE_DIR, "rapp-hub")], env=env, text=True, bufsize=1,
                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                   stderr=open(os.path.join(WORK, f"hub-{force}.log"), "w"))
         self.req = 0
@@ -89,11 +96,12 @@ def ipc(port, token, cmd):
 
 def main():
     os.makedirs(WORK, exist_ok=True)
-    bins = os.path.join(WORK, "bin")
+    bins = None if BUNDLE else os.path.join(WORK, "bin")
     a_home, b_home = os.path.join(WORK, "a"), os.path.join(WORK, "b")
-    for d in (bins, a_home, b_home):
+    for d in (a_home, b_home):
         os.makedirs(d, exist_ok=True)
-    for name in ("rapp-host", "rapp-client"):
+    for name in ("rapp-host", "rapp-client") if bins else ():
+        os.makedirs(bins, exist_ok=True)
         link = os.path.join(bins, name)
         if os.path.lexists(link):
             os.remove(link)
@@ -112,9 +120,11 @@ def main():
                        "password": PASSWORD, "port": 0, "ipc_port": 0}, f)
         os.chmod(os.path.join(a_home, "service.json"), 0o600)
         svc_log = os.path.join(WORK, "service.log")
+        svc_env = dict(os.environ, RAPP_HOME=a_home, RAPP_GUI="/nonexistent")
+        if bins:
+            svc_env["RAPP_BIN_DIR"] = bins
         procs.append(subprocess.Popen(
-            [os.path.join(RUST, "rapp-service")],
-            env=dict(os.environ, RAPP_HOME=a_home, RAPP_BIN_DIR=bins, RAPP_GUI="/nonexistent"),
+            [os.path.join(SERVICE_DIR, "rapp-service")], env=svc_env,
             stderr=open(svc_log, "w")))
         ipc_port = int(wait_for(lambda: (re.search(r"ipc 127\.0\.0\.1:(\d+)", read_text(svc_log)) or [None, None])[1],
                                 10, "service ipc port"))

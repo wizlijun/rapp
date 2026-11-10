@@ -200,7 +200,7 @@ relay 在 A 的长连接上开一条流，发 `{"op":"relayed","token":T}`，然
 5. 用 ad-hoc 签名；
 6. 生成 `dist/rapp.dmg`。
 
-`rapp-relay` 另外用 `cargo build --release --target x86_64-unknown-linux-gnu` 交叉编译，脚本附一份 systemd 单元示例。Windows 和 Linux 的安装包、交叉编译，留到用户的实机上去做。
+`rapp-relay` 另外交叉编译成 `x86_64-unknown-linux-musl` 的静态二进制，脚本附一份 systemd 单元示例。（实现时改的：原定 `x86_64-unknown-linux-gnu`，但这台机器没有 Linux 的 gcc；musl 用 Apple clang 加 rust-lld 就能编，而且静态链接，不挑发行版的 glibc 版本。）Windows 和 Linux 的安装包、交叉编译，留到用户的实机上去做。
 
 ## 7. 验证
 - **Rust 集成测试**：同一个进程里起 relay、service、hub，service 用一个假的 `rapp-host` 脚本，覆盖这些情况：

@@ -102,6 +102,13 @@ A 和 B 可以是同一台机器，地址填 `127.0.0.1`。此时每次点击或
 - `Sources/rapp-host`：ScreenCaptureKit 采集、CGEvent 注入、辅助功能接口改窗口大小。
 - `Sources/rapp-client`：AppKit 窗口、输入条。
 
+```
+./scripts/package-macos.sh   # 生成 dist/rapp.dmg、dist/rapp-relay-x86_64-linux（静态）和 dist/rapp-relay.service
+python3 scripts/e2e-local.py <工作目录>   # 本机端到端：relay + service + hub，lan 和 relay 两条路各开一次 Safari
+```
+
+relay 部署到 VPS 的步骤写在 `scripts/rapp-relay.service` 开头的注释里，只需要开放 UDP 21116。
+
 ## 实测码率
 
 **整帧大小**：静止画面只在开始和变化时发送，下表是一帧完整画面压缩后的字节数，
