@@ -51,6 +51,8 @@ async fn registers_and_reports_status() {
 #[tokio::test]
 async fn first_start_generates_secret_and_password() {
     let (home, bins) = (tempfile::tempdir().unwrap(), bins());
+    // Only the ports are preset (never the real 21118/21119); everything else is generated.
+    rapp_net::config::write_json(&home.path().join("service.json"), &json!({"port":0,"ipc_port":0})).unwrap();
     let svc = start_service(home.path(), bins.path(), Duration::from_secs(60)).await;
     let cfg: Value = serde_json::from_slice(&std::fs::read(home.path().join("service.json")).unwrap()).unwrap();
     assert_eq!(cfg["secret"].as_str().unwrap().len(), 64);
