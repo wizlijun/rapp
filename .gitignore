@@ -7,3 +7,4 @@ rust/target/
 gui/build/
 gui/.dart_tool/
 dist/
+.claude/worktrees/
