@@ -172,17 +172,53 @@ final class QuantizeTests: XCTestCase {
         XCTAssertEqual(distinct(s, w: 16, bps: 1, 0, 16, 0, 16).count, 1)
     }
 
-    func testDuoBlackTextOnWhiteIsTwoSamples() {
-        // White, with a black column 6 and a grey anti-aliasing column 7.
+    func testDuoSharpBlackTextOnWhiteIsTwoSamples() {
+        let px = gen(16, 16) { x, _ in x == 6 ? (0, 0, 0) : (255, 255, 255) }
+        let s = quant(px, w: 16, h: 16, .duogray)
+        XCTAssertEqual(distinct(s, w: 16, bps: 1, 0, 16, 0, 16), [0, 15])
+    }
+
+    func testDuoAntialiasedEdgeKeepsAnIntermediateLevel() {
+        // White, with a black column 6 and a 50 % grey anti-aliasing column 7.
         let px = gen(16, 16) { x, _ in x == 6 ? (0, 0, 0) : x == 7 ? (128, 128, 128) : (255, 255, 255) }
         let s = quant(px, w: 16, h: 16, .duogray)
-        let set = distinct(s, w: 16, bps: 1, 0, 16, 0, 16)
-        XCTAssertEqual(set.count, 2)
-        XCTAssertEqual(s[6], set.min().map(UInt8.init))
-        XCTAssertEqual(s[0], set.max().map(UInt8.init))
-        XCTAssertTrue(s[7] == s[6] || s[7] == s[0], "grey edge goes to one side")
-        XCTAssertLessThanOrEqual(set.min()!, 2)
-        XCTAssertGreaterThanOrEqual(set.max()!, 13)
+        XCTAssertEqual(s[6], 0, "stroke keeps full black")
+        XCTAssertEqual(s[0], 15, "background keeps full white")
+        XCTAssertTrue(s[7] > 0 && s[7] < 15, "edge pixel is a blend, got \(s[7])")
+    }
+
+    func testDuoDarkToneIsTheStrokeNotTheEdgeAverage() {
+        // A black stroke flanked by dark-grey anti-aliasing: the stroke must stay black,
+        // not be averaged with its edges into a washed-out grey.
+        let px = gen(16, 16) { x, _ in
+            x == 6 ? (0, 0, 0) : (x == 5 || x == 7) ? (96, 96, 96) : (255, 255, 255)
+        }
+        let s = quant(px, w: 16, h: 16, .duogray)
+        XCTAssertEqual(s[6], 0)
+        XCTAssertEqual(s[0], 15)
+    }
+
+    func testDuoBlockHasAtMostFourSamples() {
+        // A full black-to-white ramp across the block.
+        let px = gen(16, 16) { x, _ in let v = UInt8(x * 17); return (v, v, v) }
+        for mode in [Mode.duogray, .duocolor] {
+            let s = quant(px, w: 16, h: 16, mode)
+            let set = distinct(s, w: 16, bps: mode.bytesPerSample, 0, 16, 0, 16)
+            XCTAssertLessThanOrEqual(set.count, 4, "\(mode)")
+            XCTAssertGreaterThanOrEqual(set.count, 3, "\(mode)")
+        }
+    }
+
+    func testDuoColorEdgeBlendsBetweenTheTwoTones() {
+        // Red text on white with a pink anti-aliasing column.
+        let px = gen(16, 16) { x, _ in x == 6 ? (255, 0, 0) : x == 7 ? (255, 128, 128) : (255, 255, 255) }
+        let s = quant(px, w: 16, h: 16, .duocolor)
+        let at = { (x: Int) in Int(s[x * 2]) | Int(s[x * 2 + 1]) << 8 }
+        XCTAssertEqual(at(6), 0xF800)
+        XCTAssertEqual(at(0), 0xFFFF)
+        XCTAssertNotEqual(at(7), 0xF800)
+        XCTAssertNotEqual(at(7), 0xFFFF)
+        XCTAssertEqual(at(7) >> 11, 31, "blend keeps full red")
     }
 
     func testDuoEdgeBlocksUseTheirOwnPixels() {

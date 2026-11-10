@@ -72,9 +72,9 @@ public enum Quantizer {
     /// sidebars, anti-aliased corner edges) are kept, un-premultiplied.
     ///
     /// Two-tone modes apply the same corner rule to the colours first, then
-    /// split every 16x16 block (aligned to the image origin; edge blocks keep
-    /// their real size) into at most two brightness groups, each painted with
-    /// its mean colour.
+    /// reduce every 16x16 block (aligned to the image origin; edge blocks keep
+    /// their real size) to two base tones (its darkest and lightest pixels) plus
+    /// two blend levels between them, so anti-aliased text edges stay smooth.
     public static func quantize(bgra: UnsafeRawBufferPointer, width: Int, height: Int,
                                 bytesPerRow: Int, mode: Mode) -> [UInt8] {
         precondition(bytesPerRow >= width * 4 && bgra.count >= (height - 1) * bytesPerRow + width * 4,
@@ -160,42 +160,43 @@ public enum Quantizer {
                                 i += 3
                             }
                         }
-                        // Pixels with brightness >= t are the light group; t above hi means one group.
-                        var t = hi + 1
-                        if hi - lo >= 24 {
-                            t = (lo + hi) / 2
-                            for _ in 0..<4 {
-                                var s0 = 0, c0 = 0, s1 = 0, c1 = 0
-                                for y in 0..<bh { for x in 0..<bw {
-                                    let l = lum[y * n + x]
-                                    if l >= t { s1 += l; c1 += 1 } else { s0 += l; c0 += 1 }
-                                } }
-                                if c0 == 0 || c1 == 0 { break }
-                                t = (s0 / c0 + s1 / c1 + 1) / 2
-                            }
-                        }
+                        // Two base tones: the mean colour of the darkest eighth of the
+                        // brightness range (the stroke) and of the lightest eighth (the
+                        // background), so anti-aliased edges don't wash them out. Every pixel
+                        // then takes the nearest of four levels from dark to light, which
+                        // keeps one or two blend steps on glyph edges. A block spanning less
+                        // than 24 brightness levels gets its mean colour.
                         var sum = [0, 0, 0, 0, 0, 0], cnt = [0, 0]
+                        let split = hi - lo >= 24
+                        let q = (hi - lo) / 8
                         for y in 0..<bh {
                             var i = ((by + y) * width + bx) * 3
                             for x in 0..<bw {
-                                let g = lum[y * n + x] >= t ? 1 : 0
-                                sum[g * 3] += Int(src[i]); sum[g * 3 + 1] += Int(src[i + 1]); sum[g * 3 + 2] += Int(src[i + 2])
-                                cnt[g] += 1
+                                let l = lum[y * n + x]
+                                let g = !split || l <= lo + q ? 0 : l >= hi - q ? 1 : -1
+                                if g >= 0 {
+                                    sum[g * 3] += Int(src[i]); sum[g * 3 + 1] += Int(src[i + 1]); sum[g * 3 + 2] += Int(src[i + 2])
+                                    cnt[g] += 1
+                                }
                                 i += 3
                             }
                         }
-                        var tone = [UInt8](repeating: 0, count: 4)
+                        let levels = split ? 4 : 1
+                        let d = (0..<3).map { sum[$0] / cnt[0] }
+                        let lt = split ? (0..<3).map { sum[3 + $0] / cnt[1] } : d
+                        let ld = luma(d[0], d[1], d[2]), span = max(1, luma(lt[0], lt[1], lt[2]) - ld)
+                        var tone = [UInt8](repeating: 0, count: 4 * bps)
                         tone.withUnsafeMutableBufferPointer { tb in
-                            for g in 0..<2 where cnt[g] > 0 {
-                                store(sum[g * 3] / cnt[g], sum[g * 3 + 1] / cnt[g], sum[g * 3 + 2] / cnt[g],
-                                      mode: mode, into: tb, at: g * bps)
+                            for k in 0..<levels {
+                                let mix = { (c: Int) in d[c] + ((lt[c] - d[c]) * k * 2 + 3) / 6 }
+                                store(mix(0), mix(1), mix(2), mode: mode, into: tb, at: k * bps)
                             }
                         }
                         for y in 0..<bh {
                             for x in 0..<bw {
-                                let g = lum[y * n + x] >= t ? 1 : 0
+                                let k = split ? min(3, max(0, ((lum[y * n + x] - ld) * 6 + span) / (span * 2))) : 0
                                 let o = ((by + y) * width + bx + x) * bps
-                                for k in 0..<bps { dst[o + k] = tone[g * bps + k] }
+                                for c in 0..<bps { dst[o + c] = tone[k * bps + c] }
                             }
                         }
                     }
