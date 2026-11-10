@@ -1,0 +1,21 @@
+[package]
+name = "rapp-relay"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "rapp-relay"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+quinn.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rand.workspace = true
+rapp-net.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
