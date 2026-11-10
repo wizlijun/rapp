@@ -1,0 +1,183 @@
+import XCTest
+@testable import RappCore
+
+final class WorkerCLITests: XCTestCase {
+    private let env = ["RAPP_TOKEN": "s3cret", "EMPTY": ""]
+
+    private func host(_ args: String...) throws -> HostCommand {
+        try parseHostArguments(args, environment: env)
+    }
+
+    private func client(_ args: String...) throws -> ClientCommand {
+        try parseClientArguments(args, environment: env)
+    }
+
+    // MARK: rapp-host arguments
+
+    func testHostLegacyForm() throws {
+        XCTAssertEqual(try host("--token", "abc"),
+                       .serve(HostServeOptions(app: nil, token: "abc", port: 47800, bind: nil, json: false)))
+        XCTAssertEqual(try host("--port", "5000", "--token", "abc"),
+                       .serve(HostServeOptions(app: nil, token: "abc", port: 5000, bind: nil, json: false)))
+    }
+
+    func testHostLegacyErrors() {
+        for bad in [[], ["--token"], ["--token", ""], ["--token", "a", "--port", "0"], ["--token", "a", "--port", "70000"],
+                    ["--token", "a", "--port"], ["--token", "a", "--json"], ["--token", "a", "extra"]] {
+            XCTAssertThrowsError(try parseHostArguments(bad, environment: env), "\(bad)")
+        }
+    }
+
+    func testHostServe() throws {
+        XCTAssertEqual(try host("serve", "--app", "com.apple.Safari", "--bind", "127.0.0.1", "--port", "0",
+                                "--token-env", "RAPP_TOKEN", "--json"),
+                       .serve(HostServeOptions(app: "com.apple.Safari", token: "s3cret", port: 0, bind: "127.0.0.1", json: true)))
+        XCTAssertEqual(try host("serve", "--token", "t", "--app", "a"),
+                       .serve(HostServeOptions(app: "a", token: "t", port: 47800, bind: nil, json: false)))
+    }
+
+    func testHostServeErrors() {
+        let bad: [[String]] = [
+            ["serve", "--token", "t"],                                  // no app
+            ["serve", "--app", "", "--token", "t"],                     // empty app
+            ["serve", "--app", "a"],                                    // no token
+            ["serve", "--app", "a", "--token-env", "MISSING"],          // unset variable
+            ["serve", "--app", "a", "--token-env", "EMPTY"],            // empty variable
+            ["serve", "--app", "a", "--token", "t", "--port", "65536"],
+            ["serve", "--app", "a", "--token", "t", "--port", "x"],
+            ["serve", "--app", "a", "--token", "t", "--bind"],
+            ["serve", "--app", "a", "--token", "t", "--what"],
+        ]
+        for args in bad {
+            XCTAssertThrowsError(try parseHostArguments(args, environment: env), "\(args)")
+        }
+    }
+
+    func testHostSubcommands() throws {
+        XCTAssertEqual(try host("version"), .version(json: false))
+        XCTAssertEqual(try host("version", "--json"), .version(json: true))
+        XCTAssertEqual(try host("check", "--json"), .check(json: true))
+        XCTAssertEqual(try host("list-apps"), .listApps(json: false))
+        XCTAssertThrowsError(try host("check", "--token", "x"))
+        XCTAssertThrowsError(try host("list-apps", "extra"))
+    }
+
+    // MARK: rapp-client arguments
+
+    func testClientLegacyForm() throws {
+        let url = "rapp://mac-a.local/com.apple.TextEdit?token=abc"
+        XCTAssertEqual(try client(url), .connect(try RemoteAddress(url: url), json: false))
+        XCTAssertThrowsError(try parseClientArguments([], environment: env))
+        XCTAssertThrowsError(try client(url, url))
+        XCTAssertThrowsError(try client("rapp://h/app"))  // no token anywhere
+    }
+
+    func testClientConnectWithTokenFromEnvironment() throws {
+        let expected = RemoteAddress(host: "127.0.0.1", port: 5000, bundleID: "", token: "s3cret", mode: .color16)
+        XCTAssertEqual(try client("rapp://127.0.0.1:5000/?mode=color16", "--token-env", "RAPP_TOKEN", "--json"),
+                       .connect(expected, json: true))
+        XCTAssertEqual(try client("connect", "--json", "rapp://127.0.0.1:5000/?mode=color16", "--token-env", "RAPP_TOKEN"),
+                       .connect(expected, json: true))
+        // A token in the address wins over the environment.
+        XCTAssertEqual(try client("rapp://h/app?token=inurl", "--token-env", "RAPP_TOKEN"),
+                       .connect(RemoteAddress(host: "h", port: 47800, bundleID: "app", token: "inurl", mode: .gray4), json: false))
+    }
+
+    func testClientErrors() {
+        for bad in [["rapp://h/?mode=color16", "--token-env", "MISSING"],
+                    ["rapp://h/?mode=color16", "--token-env", "EMPTY"],
+                    ["rapp://h/?token=t", "--token-env"],
+                    ["rapp://h/?token=t", "--bogus"],
+                    ["connect"],
+                    ["version", "extra"]] {
+            XCTAssertThrowsError(try parseClientArguments(bad, environment: env), "\(bad)")
+        }
+    }
+
+    func testClientVersion() throws {
+        XCTAssertEqual(try client("version"), .version(json: false))
+        XCTAssertEqual(try client("version", "--json"), .version(json: true))
+    }
+
+    func testAddressWithoutAppHasEmptyAppID() throws {
+        XCTAssertEqual(try RemoteAddress(url: "rapp://h/?token=t").bundleID, "")
+        XCTAssertEqual(try RemoteAddress(url: "rapp://h?token=t").bundleID, "")
+        XCTAssertThrowsError(try RemoteAddress(url: "rapp://h/a/b?token=t"))
+    }
+
+    // MARK: Bound app
+
+    func testHelloAppResolution() {
+        XCTAssertEqual(resolveHelloApp(requested: "com.x", bound: nil), .success("com.x"))
+        XCTAssertEqual(resolveHelloApp(requested: "", bound: "com.apple.Safari"), .success("com.apple.Safari"))
+        XCTAssertEqual(resolveHelloApp(requested: "com.apple.Safari", bound: "com.apple.Safari"), .success("com.apple.Safari"))
+        XCTAssertEqual(resolveHelloApp(requested: "com.x", bound: "com.apple.Safari"),
+                       .failure(CodecError("this host shares com.apple.Safari")))
+    }
+
+    // MARK: JSON output
+
+    func testEventLines() {
+        XCTAssertEqual(WorkerEvent.listening(port: 51234).jsonLine, #"{"event":"listening","port":51234}"#)
+        XCTAssertEqual(WorkerEvent.sessionStarted(client: "127.0.0.1:50000", mode: .color16, fps: 15).jsonLine,
+                       #"{"client":"127.0.0.1:50000","event":"session","fps":15,"mode":"color16","state":"started"}"#)
+        XCTAssertEqual(WorkerEvent.sessionEnded(reason: "client disconnected").jsonLine,
+                       #"{"event":"session","reason":"client disconnected","state":"ended"}"#)
+        XCTAssertEqual(WorkerEvent.rejected(reason: "busy").jsonLine, #"{"event":"rejected","reason":"busy"}"#)
+        XCTAssertEqual(WorkerEvent.stats(kbps: 12.34, fps: 15, width: 800, height: 600).jsonLine,
+                       #"{"event":"stats","fps":15,"height":600,"kbps":12.3,"width":800}"#)
+        XCTAssertEqual(WorkerEvent.ready(width: 800, height: 600, title: "Apple / “你好”").jsonLine,
+                       #"{"event":"ready","height":600,"title":"Apple / “你好”","width":800}"#)
+        XCTAssertEqual(WorkerEvent.exit(code: 3, reason: "say \"hi\"\n").jsonLine,
+                       #"{"code":3,"event":"exit","reason":"say \"hi\"\n"}"#)
+    }
+
+    func testStatsKbpsIsRoundedToOneDecimal() {
+        XCTAssertEqual(WorkerEvent.stats(kbps: 0, fps: 0, width: 0, height: 0).jsonLine,
+                       #"{"event":"stats","fps":0,"height":0,"kbps":0,"width":0}"#)
+        XCTAssertEqual(WorkerEvent.stats(kbps: 1234.567, fps: 5, width: 1, height: 2).jsonLine,
+                       #"{"event":"stats","fps":5,"height":2,"kbps":1234.6,"width":1}"#)
+    }
+
+    func testCommandOutputs() {
+        XCTAssertEqual(versionJSON(), #"{"protocol":3,"version":"0.2.0"}"#)
+        XCTAssertEqual(checkJSON(screenRecording: true, accessibility: false),
+                       #"{"accessibility":false,"screen_recording":true}"#)
+        XCTAssertEqual(appsJSON([SharedApp(app: "com.apple.Safari", name: "Safari")]),
+                       #"{"apps":[{"app":"com.apple.Safari","name":"Safari"}]}"#)
+        XCTAssertEqual(appsJSON([]), #"{"apps":[]}"#)
+    }
+
+    func testStdinCommands() {
+        XCTAssertEqual(parseWorkerCommand(#"{"cmd":"quit"}"#), "quit")
+        XCTAssertEqual(parseWorkerCommand(#"  {"cmd":"kick","extra":1}  "#), "kick")
+        XCTAssertNil(parseWorkerCommand(""))
+        XCTAssertNil(parseWorkerCommand("quit"))
+        XCTAssertNil(parseWorkerCommand(#"{"cmd":3}"#))
+        XCTAssertNil(parseWorkerCommand(#"["quit"]"#))
+    }
+
+    // MARK: list-apps
+
+    func testShareableApps() {
+        let apps: [Int32: SharedApp] = [
+            1: SharedApp(app: "com.apple.Safari", name: "Safari"),
+            2: SharedApp(app: "com.apple.TextEdit", name: "TextEdit"),
+            3: SharedApp(app: "com.apple.Calculator", name: "Calculator"),
+            4: SharedApp(app: "com.tiny", name: "Tiny"),
+        ]
+        let windows = [
+            WindowInfo(pid: 2, layer: 0, width: 600, height: 400),
+            WindowInfo(pid: 1, layer: 0, width: 800, height: 600),
+            WindowInfo(pid: 1, layer: 0, width: 300, height: 300),   // second Safari window: listed once
+            WindowInfo(pid: 3, layer: 25, width: 300, height: 300),  // not a normal window
+            WindowInfo(pid: 4, layer: 0, width: 49, height: 300),    // too small
+            WindowInfo(pid: 4, layer: 0, width: 300, height: 49),
+            WindowInfo(pid: 9, layer: 0, width: 300, height: 300),   // not a regular app
+            WindowInfo(pid: 3, layer: 0, width: 50, height: 50),
+        ]
+        XCTAssertEqual(shareableApps(windows: windows, regularApps: apps).map(\.name), ["Calculator", "Safari", "TextEdit"])
+        XCTAssertEqual(appsText(shareableApps(windows: windows, regularApps: apps)),
+                       "com.apple.Calculator\tCalculator\ncom.apple.Safari\tSafari\ncom.apple.TextEdit\tTextEdit\n")
+    }
+}

@@ -251,7 +251,8 @@ public func constantTimeEquals(_ a: String, _ b: String) -> Bool {
     return diff == 0
 }
 
-/// A parsed `rapp://host[:port]/bundle-id?token=...&mode=...&fps=...` address.
+/// A parsed `rapp://host[:port]/[bundle-id]?token=...&mode=...&fps=...` address.
+/// Without a bundle id the Hello's appID is empty: the host's bound app.
 /// A `scale` parameter from revision 1 is ignored.
 public struct RemoteAddress: Equatable {
     public var host: String
@@ -270,7 +271,8 @@ public struct RemoteAddress: Equatable {
         self.fps = fps
     }
 
-    public init(url: String) throws {
+    /// `fallbackToken` is used when the address carries no token.
+    public init(url: String, fallbackToken: String? = nil) throws {
         guard let c = URLComponents(string: url), c.scheme == "rapp" else {
             throw CodecError("address must start with rapp://")
         }
@@ -281,11 +283,13 @@ public struct RemoteAddress: Equatable {
             port = valid
         }
         let bundleID = String(c.path.drop(while: { $0 == "/" }))
-        guard !bundleID.isEmpty, !bundleID.contains("/") else { throw CodecError("address has no bundle id") }
+        guard !bundleID.contains("/") else { throw CodecError("bad bundle id \(bundleID)") }
 
         var query = [String: String]()
         for item in c.queryItems ?? [] { query[item.name] = item.value ?? "" }
-        guard let token = query["token"], !token.isEmpty else { throw CodecError("address has no token") }
+        guard let token = [query["token"], fallbackToken].compactMap({ $0 }).first(where: { !$0.isEmpty }) else {
+            throw CodecError("address has no token")
+        }
         var mode = Mode.gray4
         if let name = query["mode"] {
             guard let m = Mode(name: name) else {
