@@ -11,7 +11,7 @@ use rustls::{DigitallySignedStruct, SignatureScheme};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::Join;
+use tokio::io::{AsyncRead, AsyncWrite, Join};
 
 pub const ALPN_RELAY: &[u8] = b"rapp-relay/1";
 pub const ALPN_PEER: &[u8] = b"rapp/1";
@@ -22,6 +22,15 @@ pub type BiStream = Join<RecvStream, SendStream>;
 
 pub fn bi((send, recv): (SendStream, RecvStream)) -> BiStream {
     tokio::io::join(recv, send)
+}
+
+/// Copies both ways until both sides are done (64 KiB buffers).
+pub async fn splice<A, B>(a: &mut A, b: &mut B) -> std::io::Result<()>
+where
+    A: AsyncRead + AsyncWrite + Unpin + ?Sized,
+    B: AsyncRead + AsyncWrite + Unpin + ?Sized,
+{
+    tokio::io::copy_bidirectional_with_sizes(a, b, 64 * 1024, 64 * 1024).await.map(|_| ())
 }
 
 fn provider() -> Arc<CryptoProvider> {
