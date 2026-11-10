@@ -14,21 +14,23 @@
 - 结果：合并后 EXIT=0，108 个测试；提交 93adf58、e57fb20、a865b3a。未经实机验证：缺少权限时退出码 3 的分支（本机已授权）
 
 ## M2 Rust：relay、service、hub（§1–4）：`rust/`
-- [ ] 建 workspace，crate 有 `net`、`relay`、`service`、`hub`
-- [ ] relay：register、connect、incoming、限速、relay 对接、`relay.json`
-- [ ] service：配置文件、登记加重连、认证（令牌和局域网密码两种）、list_apps、open、worker 生命周期、IPC 加 subscribe、拉起 `--cm`
-- [ ] hub：hosts.json、选路（lan → direct → relay，可以用 `RAPP_FORCE_PATH` 强制）、open 时拉起 rapp-client 并对接、事件
+- [x] 建 workspace，crate 有 `net`、`relay`、`service`、`hub`
+- [x] relay：register、connect、incoming、限速、relay 对接、`relay.json`
+- [x] service：配置文件、登记加重连、认证（令牌和局域网密码两种）、list_apps、open、worker 生命周期、IPC 加 subscribe、拉起 `--cm`
+- [x] hub：hosts.json、选路（lan → direct → relay，可以用 `RAPP_FORCE_PATH` 强制）、open 时拉起 rapp-client 并对接、事件
 - 验证：`cargo test` 全部通过，集成测试覆盖 §7 列的 8 种情况，测试里用一个假的 rapp-host 脚本；`cargo clippy` 没有警告
+- 结果：合并后 `cargo test` 50 个全部通过，clippy 干净；提交 1510f14..43d0917（合并 36275d2）。只对假的 worker 跑过，没跑真 v3 的 rapp-host 和 rapp-client；没跨真 NAT 打洞，只测了 IPv4
 
 ## M3 Flutter GUI（§4）：`gui/`
-- [ ] 本机、主机、会话三块界面，托盘或菜单栏图标，关闭窗口只隐藏
-- [ ] 作为子进程拉起 rapp-hub，用 JSON 行通信；通过 IPC 连 service
-- [ ] `--cm` 模式
-- [ ] 服务的启动、停止、重启；macOS 上用 LaunchAgent
+- [x] 本机、主机、会话三块界面，托盘或菜单栏图标，关闭窗口只隐藏
+- [x] 作为子进程拉起 rapp-hub，用 JSON 行通信；通过 IPC 连 service
+- [x] `--cm` 模式
+- [x] 服务的启动、停止、重启；macOS 上用 LaunchAgent
 - 验证：`flutter analyze` 没有问题，`flutter test` 通过，`flutter build macos` 成功，并能实际启动
+- 结果：合并后 `flutter analyze` 没有问题，49 个测试通过；release 只能构建 arm64（这台机器上的 Xcode 做 universal 时 lipo 出错），部署目标提到 macOS 12；提交 ad26352..7d10467（合并 54988c9）。断开按钮没实际点过；Linux 和 Windows 没构建
 
 ## M4 合并与本机端到端
-- [ ] 合并 M1、M2、M3
+- [x] 合并 M1、M2、M3
 - [ ] 本机：relay 加 service（单独设一个 `RAPP_HOME`）加 hub。lan 和 relay 两条路都能打开 Safari；`--cm` 能断开会话
 - 验证：分别记下两条路上 hub 输出的 `opened` 和 `path`，再截图确认窗口确实显示出来
 
