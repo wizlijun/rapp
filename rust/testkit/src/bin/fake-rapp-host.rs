@@ -21,6 +21,15 @@ fn exit(code: i32, reason: &str) -> ! {
     std::process::exit(code)
 }
 
+/// Appends to `host.log` next to argv[0] (tests give each case its own bin dir).
+fn log(line: &str) {
+    let argv0 = std::path::PathBuf::from(std::env::args().next().unwrap_or_default());
+    let path = argv0.parent().unwrap_or(std::path::Path::new(".")).join("host.log");
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(f, "{line}");
+    }
+}
+
 fn flag(args: &[String], name: &str) -> Option<String> {
     args.iter().position(|a| a == name).and_then(|i| args.get(i + 1).cloned())
 }
@@ -49,7 +58,9 @@ fn serve(args: &[String]) -> ! {
     let Some(token) = token else { exit(2, "missing token") };
     let bind = flag(args, "--bind").unwrap_or_else(|| "0.0.0.0".into());
     let port: u16 = flag(args, "--port").and_then(|p| p.parse().ok()).unwrap_or(0);
+    let app = flag(args, "--app").unwrap_or_default();
     let listener = TcpListener::bind((bind.as_str(), port)).unwrap_or_else(|_| exit(1, "bind failed"));
+    log(&format!("start {app}"));
     emit(&format!(r#"{{"event":"listening","port":{}}}"#, listener.local_addr().unwrap().port()));
     std::thread::spawn(move || {
         for s in listener.incoming().flatten() {
@@ -64,6 +75,7 @@ fn serve(args: &[String]) -> ! {
             Err(_) => break,
         }
     }
+    log(&format!("exit {app}"));
     exit(0, "stdin closed")
 }
 
