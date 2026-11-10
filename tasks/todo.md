@@ -41,6 +41,8 @@
 - 结果：dmg 13 MB，里面的 rapp.app 带 rapp、rapp-service、rapp-hub、rapp-host、rapp-client，全是 arm64，ad-hoc 签名通过 `codesign --verify --deep --strict`，沙盒关闭。从 dmg 拷出来的 app：GUI 能启动并拉起自带的 rapp-hub（截图确认三块界面）；用 `RAPP_E2E_BUNDLE` 跑 e2e，service、hub、host、client 全用包里的，不设 `RAPP_BIN_DIR`，lan 和 relay 两条路都通过。没点 GUI 的"启动"（那会往 `~/Library/LaunchAgents` 写常驻服务）。relay 编成 x86_64 musl 静态二进制（4.4 MB，规格 §6 已改），没在 Linux 上跑过
 - [x] `rapp-0.2.0.pkg`：pkgbuild + productbuild，不可重定位；postinstall 给控制台用户写 LaunchAgent（与 GUI 的 `launchAgentPlist` 逐字节相同）、`launchctl bootstrap`、打开 GUI；`scripts/uninstall-macos.sh`
 - 结果：用户用 Installer 在本机装上。`launchctl print` 显示 state = running、program 是 /Applications/rapp.app/Contents/MacOS/rapp-service、keepalive | runatload；plist 和 GUI 生成的 `cmp` 相同、属主是用户；服务生成了 service.json 和 ipc.token（都是 600）；GUI 已打开；签名校验通过；盘上没有 `._` 文件。没测：卸载脚本（要 sudo，且会删掉刚装好的）、覆盖重装（postinstall 先 bootout 再 bootstrap）
+- [ ] Developer ID 签名与公证：脚本已支持（按 SHA-1 找 "Developer ID Application/Installer"，hardened runtime + 时间戳，由内向外签 frameworks → 辅助程序 → app；pkg 用 productbuild --sign；有 notarytool 档案就 submit --wait + staple）。钥匙串里只有 "Apple Distribution: Wuhan Fulin Technology Co., Ltd. (T5G56DH47L)"，它签不了 pkg（productsign 报 Could not find appropriate signing identity），签出的 app 在 App Store 外也过不了 Gatekeeper。缺两张 Developer ID 证书，只能由该团队 Account Holder 登录 Apple ID 创建
+- 结果（替身验证）：用 Apple Development 证书走同一条签名路径，pkg 里 7 个代码对象都是 flags=runtime、带时间戳，`codesign --verify --deep --strict` 通过；用 pkg 里的 app 跑 e2e（`RAPP_E2E_BUNDLE`，目标 Finder），lan、relay、id@ip 三轮都过。没测：productbuild --sign、公证、hardened runtime 下的 GUI 本身
 
 ## 无 relay：自生成 ID 与 `id@ip`
 - [x] service 首次启动自己生成 9 位 ID（relay 接受合法的新 ID）；status 加 `lan_ids`（每个可用 IPv4 一个 `id@ip`，跳过 198.18.0.0/15 代理假 IP）；密码认证成功回 `id`、`name`

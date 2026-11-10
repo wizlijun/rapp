@@ -3,11 +3,24 @@
 # host/client in one app)
 # and dist/rapp-relay-x86_64-linux (static, for the VPS) plus its systemd unit.
 # Needs: Xcode, cargo ($HOME/.cargo/bin), flutter ($HOME/development/flutter/bin).
+#
+# Signing: with a "Developer ID Application" identity in the keychain the app is
+# signed with it (hardened runtime, timestamp), with a "Developer ID Installer"
+# identity the pkg is signed too, and if the notarytool profile exists
+# (xcrun notarytool store-credentials rapp-notary ...) the pkg is notarized and
+# stapled. Override with RAPP_SIGN_APP / RAPP_SIGN_PKG / RAPP_NOTARY_PROFILE.
+# Without them everything is ad-hoc signed, as before.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT=$PWD
 export PATH="$HOME/.cargo/bin:$HOME/development/flutter/bin:$PATH"
 DIST=$ROOT/dist
+# By SHA-1: names can repeat (an expired and a renewed cert), hashes cannot.
+identity() { security find-identity -v -p basic | sed -n "s/^ *[0-9]*) \([0-9A-F]\{40\}\) \"$1:.*/\1/p" | head -1; }
+SIGN_APP=${RAPP_SIGN_APP-$(identity "Developer ID Application")}
+SIGN_PKG=${RAPP_SIGN_PKG-$(identity "Developer ID Installer")}
+NOTARY=${RAPP_NOTARY_PROFILE:-rapp-notary}
+echo "== signing: app ${SIGN_APP:-ad-hoc}; pkg ${SIGN_PKG:-unsigned}"
 rm -rf "$DIST" && mkdir -p "$DIST"
 
 echo "== swift (rapp-host, rapp-client)"
@@ -26,11 +39,17 @@ mkdir -p "$DIST/stage"
 cp -R gui/build/macos/Build/Products/Release/rapp.app "$APP"
 cp rust/target/release/rapp-service rust/target/release/rapp-hub "$APP/Contents/MacOS/"
 cp .build/release/rapp-host .build/release/rapp-client "$APP/Contents/MacOS/"
-# Ad-hoc signing: helpers first, then the app (keeping its entitlements).
+# Inside out: frameworks, helpers, then the app (keeping its entitlements).
+if [ -n "$SIGN_APP" ]; then
+    SIGN=(codesign --force --timestamp --options runtime --sign "$SIGN_APP")
+    "${SIGN[@]}" "$APP"/Contents/Frameworks/*.framework
+else
+    SIGN=(codesign --force --sign -)
+fi
 for b in rapp-service rapp-hub rapp-host rapp-client; do
-    codesign --force --sign - "$APP/Contents/MacOS/$b"
+    "${SIGN[@]}" "$APP/Contents/MacOS/$b"
 done
-codesign --force --sign - --preserve-metadata=entitlements "$APP"
+"${SIGN[@]}" --preserve-metadata=entitlements "$APP"
 codesign --verify --deep --strict "$APP"
 
 echo "== pkg (installs to /Applications, starts the LaunchAgent, opens the GUI)"
@@ -43,8 +62,16 @@ plutil -replace 0.BundleIsRelocatable -bool NO "$DIST/component.plist"
 pkgbuild --root "$DIST/stage" --component-plist "$DIST/component.plist" \
     --install-location /Applications --scripts scripts/pkg \
     --identifier com.rapp.pkg --version "$VERSION" "$DIST/component.pkg" >/dev/null
-productbuild --quiet --package "$DIST/component.pkg" "$DIST/rapp-$VERSION.pkg"
+PKG=$DIST/rapp-$VERSION.pkg
+productbuild --quiet ${SIGN_PKG:+--sign "$SIGN_PKG" --timestamp} --package "$DIST/component.pkg" "$PKG"
 rm "$DIST/component.plist" "$DIST/component.pkg"
+if [ -n "$SIGN_PKG" ] && [ -n "$SIGN_APP" ] && xcrun notarytool history --keychain-profile "$NOTARY" >/dev/null 2>&1; then
+    echo "== notarize (profile $NOTARY)"
+    xcrun notarytool submit "$PKG" --keychain-profile "$NOTARY" --wait
+    xcrun stapler staple "$PKG"
+elif [ -n "$SIGN_PKG" ]; then
+    echo "!! pkg signed but not notarized (no Developer ID app signature or no notarytool profile \"$NOTARY\")"
+fi
 
 ln -s /Applications "$DIST/stage/Applications"
 hdiutil create -quiet -volname rapp -srcfolder "$DIST/stage" -ov -format UDZO "$DIST/rapp.dmg"
