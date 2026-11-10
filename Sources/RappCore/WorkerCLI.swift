@@ -133,6 +133,11 @@ public func parseClientArguments(_ args: [String], environment: [String: String]
     return .connect(try RemoteAddress(url: parsed.positional[0], fallbackToken: fallback), json: parsed.json)
 }
 
+/// The client's exit code after the host sent `Error(reason)`.
+public func exitCode(forHostError reason: String) -> Int32 {
+    reason.hasPrefix("protocol version mismatch") ? ExitCode.version : ExitCode.runtime
+}
+
 /// The app a Hello asks for, given the app this host was started for (if any).
 public func resolveHelloApp(requested: String, bound: String?) -> Result<String, CodecError> {
     guard let bound else { return .success(requested) }

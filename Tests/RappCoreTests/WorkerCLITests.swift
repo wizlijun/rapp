@@ -105,6 +105,12 @@ final class WorkerCLITests: XCTestCase {
         XCTAssertThrowsError(try RemoteAddress(url: "rapp://h/a/b?token=t"))
     }
 
+    func testClientExitCodeForHostError() {
+        XCTAssertEqual(exitCode(forHostError: ProtocolVersionMismatch(client: 2).description), ExitCode.version)
+        XCTAssertEqual(exitCode(forHostError: "bad token"), ExitCode.runtime)
+        XCTAssertEqual(exitCode(forHostError: "busy"), ExitCode.runtime)
+    }
+
     // MARK: Bound app
 
     func testHelloAppResolution() {

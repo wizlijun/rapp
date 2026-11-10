@@ -3,18 +3,16 @@ import Foundation
 import RappCore
 
 let usage = """
-    usage: rapp-client "rapp://<host>[:port]/<bundle-id>?token=<secret>[&mode=gray4|color8|color16|duogray|duocolor][&fps=15|5]"
+    usage: rapp-client [connect] "rapp://<host>[:port]/[<bundle-id>][?token=<secret>][&mode=gray4|color8|color16|duogray|duocolor][&fps=15|5]" [--token-env <VAR>] [--json]
+           rapp-client version [--json]
     example: rapp-client "rapp://mac-a.local/com.apple.TextEdit?token=abc"
     """
-
-func writeError(_ message: String) {
-    FileHandle.standardError.write(Data((message + "\n").utf8))
-}
 
 let inputBarHeight: CGFloat = 28
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private let address: RemoteAddress
+    private let output: WorkerOutput
     private let connection: Connection
     private let decoder: FrameDecoder
     private let remoteView = RemoteView(frame: .zero)
@@ -36,8 +34,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// The stream settings last sent in Hello or SetStream.
     private var sentStream: (mode: Mode, fps: UInt8, density: Float)?
 
-    init(address: RemoteAddress) {
+    init(address: RemoteAddress, output: WorkerOutput) {
         self.address = address
+        self.output = output
         connection = Connection(address: address)
         decoder = FrameDecoder(mode: address.mode)
         traffic = TrafficLabel(mode: address.mode, fps: address.fps)
@@ -53,10 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         connection.onMessage = { [weak self] message in self?.handle(message) }
         connection.onBytes = { [weak self] count in self?.traffic.add(bytes: count) }
         traffic.onSelect = { [weak self] _, _, _ in self?.sendStreamIfChanged() }
-        connection.onClosed = { reason in
-            writeError("rapp-client: \(reason)")
-            exit(1)
-        }
+        connection.onClosed = { [output] reason in output.finish(ExitCode.runtime, "rapp-client: \(reason)") }
 
         // Command shortcuts: Command-Q always quits this client. With an empty
         // input bar the others go to the remote app; otherwise they edit the bar.
@@ -80,6 +76,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    /// The window was closed or Command-Q pressed.
+    func applicationWillTerminate(_ notification: Notification) {
+        output.finish(ExitCode.ok, "quit")
+    }
 
     private func buildWindow() {
         let content = NSRect(x: 0, y: 0, width: 800, height: 600 + inputBarHeight)
@@ -153,6 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         switch message {
         case let .ready(title, width, height):
             window.title = title
+            output.emit(.ready(width: Int(width), height: Int(height), title: title))
             traffic.start()
             // Open at the remote window's size so the picture starts 1:1.
             applyingRemoteSize = true
@@ -175,8 +177,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             do {
                 try decoder.decode(payload)
             } catch {
-                writeError("rapp-client: cannot decode frame: \(error)")
-                exit(1)
+                output.finish(ExitCode.runtime, "rapp-client: cannot decode frame: \(error)")
             }
             let bgra = Quantizer.expand(samples: decoder.samples, width: decoder.width, height: decoder.height,
                                         mode: decoder.mode)
@@ -184,8 +185,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case let .title(title):
             window.title = title
         case let .error(reason):
-            writeError("rapp-client: host says: \(reason)")
-            exit(1)
+            output.finish(exitCode(forHostError: reason), "rapp-client: host says: \(reason)")
         default:
             break
         }
@@ -273,20 +273,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 }
 
-guard CommandLine.arguments.count == 2 else {
-    writeError(usage)
-    exit(2)
-}
-let address: RemoteAddress
+let arguments = Array(CommandLine.arguments.dropFirst())
+let command: ClientCommand
 do {
-    address = try RemoteAddress(url: CommandLine.arguments[1])
+    command = try parseClientArguments(arguments, environment: ProcessInfo.processInfo.environment)
 } catch {
-    writeError("rapp-client: \(error)\n\(usage)")
-    exit(2)
+    let output = WorkerOutput(json: arguments.contains("--json"))
+    output.error(usage)
+    output.finish(ExitCode.usage, "rapp-client: \(error)")
 }
 
-let application = NSApplication.shared
-let delegate = AppDelegate(address: address)
-application.delegate = delegate
-application.setActivationPolicy(.regular)
-application.run()
+switch command {
+case let .version(json):
+    let output = WorkerOutput(json: json)
+    output.result(json ? versionJSON() : "rapp-client \(rappVersion) (protocol \(protocolVersion))")
+    output.finish(ExitCode.ok, "done")
+
+case let .connect(address, json):
+    let output = WorkerOutput(json: json)
+    let application = NSApplication.shared
+    let delegate = AppDelegate(address: address, output: output)
+    application.delegate = delegate
+    application.setActivationPolicy(.regular)
+    if json {
+        output.readCommands(onCommand: { command in
+            if command == "quit" {
+                DispatchQueue.main.async { output.finish(ExitCode.ok, "quit") }
+            } else {
+                output.error("unknown command \(command)")
+            }
+        }, onEOF: { DispatchQueue.main.async { output.finish(ExitCode.ok, "stdin closed") } })
+    }
+    application.run()
+}
