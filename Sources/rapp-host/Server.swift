@@ -13,15 +13,15 @@ private func describe(_ error: Error) -> String {
 
 /// Listens for one client at a time.
 final class Server {
-    private let port: UInt16
-    private let token: String
+    private let options: HostServeOptions
+    private let output: WorkerOutput
     private let queue = DispatchQueue(label: "rapp.server")
     private var listener: NWListener?
     private var session: Session?
 
-    init(port: UInt16, token: String) {
-        self.port = port
-        self.token = token
+    init(options: HostServeOptions, output: WorkerOutput) {
+        self.options = options
+        self.output = output
     }
 
     func start() throws {
@@ -29,16 +29,24 @@ final class Server {
         tcp.noDelay = true
         let parameters = NWParameters(tls: nil, tcp: tcp)
         parameters.allowLocalEndpointReuse = true
-        guard let nwPort = NWEndpoint.Port(rawValue: port) else { throw HostError("bad port \(port)") }
-        let listener = try NWListener(using: parameters, on: nwPort)
-        let listeningPort = port
-        listener.stateUpdateHandler = { state in
+        // Port 0 lets the system pick one; the `listening` line reports it.
+        let nwPort = NWEndpoint.Port(rawValue: options.port) ?? .any
+        let listener: NWListener
+        if let bind = options.bind {
+            parameters.requiredLocalEndpoint = .hostPort(host: NWEndpoint.Host(bind), port: nwPort)
+            listener = try NWListener(using: parameters)
+        } else {
+            listener = try NWListener(using: parameters, on: nwPort)
+        }
+        let (output, requested) = (self.output, options.port)
+        listener.stateUpdateHandler = { [weak listener] state in
             switch state {
             case .ready:
-                print("listening on \(listeningPort)")
+                let port = listener?.port?.rawValue ?? requested
+                output.log("listening on \(port)")
+                output.emit(.listening(port: port))
             case let .failed(error):
-                print("cannot listen on port \(listeningPort): \(error.localizedDescription)")
-                exit(1)
+                output.finish(ExitCode.runtime, "cannot listen on port \(requested): \(error.localizedDescription)")
             default:
                 break
             }
@@ -48,16 +56,39 @@ final class Server {
         self.listener = listener
     }
 
+    /// Ends the current session, if any; the host keeps listening.
+    func kick() {
+        queue.async { self.session?.fail("kicked by the host") }
+    }
+
+    /// Ends the current session, if any, then exits 0.
+    func stop(_ reason: String) {
+        queue.async {
+            self.session?.end("host stopped")
+            self.output.finish(ExitCode.ok, reason)
+        }
+    }
+
     private func accept(_ connection: NWConnection) {
         if session != nil {
+            output.log("rejected a connection: busy")
+            output.emit(.rejected(reason: "busy"))
             connection.start(queue: queue)
             connection.send(content: Data(Message.error("busy").encoded()),
                             completion: .contentProcessed { _ in connection.cancel() })
             return
         }
-        let newSession = Session(connection: connection, token: token, queue: queue) { [weak self] reason in
-            print("session ended: \(reason)")
-            self?.session = nil
+        let newSession = Session(connection: connection, token: options.token, boundApp: options.app,
+                                 output: output, queue: queue) { [weak self] reason, started in
+            guard let self else { return }
+            if started {
+                self.output.log("session ended: \(reason)")
+                self.output.emit(.sessionEnded(reason: reason))
+            } else {
+                self.output.log("rejected a connection: \(reason)")
+                self.output.emit(.rejected(reason: reason))
+            }
+            self.session = nil
         }
         session = newSession
         newSession.start()
@@ -69,11 +100,15 @@ final class Server {
 final class Session {
     private let connection: NWConnection
     private let token: String
+    private let boundApp: String?
+    private let output: WorkerOutput
     private let queue: DispatchQueue
-    private let onEnd: (String) -> Void
+    /// Called once with the reason, and whether the session had started (a valid Hello).
+    private let onEnd: (String, Bool) -> Void
 
     private var parser = MessageParser()
     private var greeted = false
+    private var started = false
     private var ended = false
     /// Guards `sampleMode`, `latestBuffer` and `latestSeq`, which the capture
     /// queue reads; everything else in a session lives on `queue`.
@@ -100,9 +135,12 @@ final class Session {
     private var lastHeight = 0
     private var lastTitle = ""
 
-    init(connection: NWConnection, token: String, queue: DispatchQueue, onEnd: @escaping (String) -> Void) {
+    init(connection: NWConnection, token: String, boundApp: String?, output: WorkerOutput, queue: DispatchQueue,
+         onEnd: @escaping (String, Bool) -> Void) {
         self.connection = connection
         self.token = token
+        self.boundApp = boundApp
+        self.output = output
         self.queue = queue
         self.onEnd = onEnd
     }
@@ -160,12 +198,19 @@ final class Session {
             guard !greeted else { fail("unexpected hello"); return }
             greeted = true
             guard constantTimeEquals(clientToken, token) else { fail("bad token"); return }
+            let app: String
+            switch resolveHelloApp(requested: bundleID, bound: boundApp) {
+            case let .success(resolved): app = resolved
+            case let .failure(error): fail(error.description); return
+            }
             sampleLock.withLock { sampleMode = mode }
             self.fps = Int(fps)
             self.density = density
             encoder = FrameEncoder(mode: mode)
-            print("client connected: \(bundleID), \(streamDescription(mode))")
-            startCapture(bundleID: bundleID)
+            started = true
+            output.log("client connected: \(app), \(streamDescription(mode))")
+            output.emit(.sessionStarted(client: clientDescription, mode: mode, fps: Int(fps)))
+            startCapture(bundleID: app)
         case .text, .key, .mouse, .scroll:
             injector?.handle(message)
         case let .resize(width, height):
@@ -175,6 +220,12 @@ final class Session {
         case .ready, .error, .frame, .title, .size:
             fail("unexpected message from client")
         }
+    }
+
+    /// The client's address as `ip:port`.
+    private var clientDescription: String {
+        if case let .hostPort(host, port) = connection.endpoint { return "\(host):\(port)" }
+        return "\(connection.endpoint)"
     }
 
     // MARK: Capture
@@ -293,8 +344,12 @@ final class Session {
 
     private func tick() {
         guard !ended, let capture else { return }
-        print(String(format: "[stats] %.1f kbps %d fps %dx%d",
-                     Double(bytesThisSecond) * 8 / 1000, framesThisSecond, lastWidth, lastHeight))
+        let kbps = Double(bytesThisSecond) * 8 / 1000
+        if output.json {
+            output.emit(.stats(kbps: kbps, fps: framesThisSecond, width: lastWidth, height: lastHeight))
+        } else {
+            output.log(String(format: "[stats] %.1f kbps %d fps %dx%d", kbps, framesThisSecond, lastWidth, lastHeight))
+        }
         bytesThisSecond = 0
         framesThisSecond = 0
         if capture.currentFrame == nil {
@@ -350,7 +405,7 @@ final class Session {
                 Task { await capture.setStream(fps: newFps, density: Double(newDensity)) }
             }
         }
-        print("stream -> \(streamDescription(newMode))")
+        output.log("stream -> \(streamDescription(newMode))")
         guard newMode != oldMode else { return }
         // A new encoder starts with a full frame, which also restarts both
         // ends' compression streams. Old-mode samples still queued are dropped.
@@ -380,7 +435,7 @@ final class Session {
         let size = windowSize(forContent: CGSize(width: width, height: height), titleRow: capture.titleRow,
                               origin: frame.origin, screen: CGDisplayBounds(display))
         guard WindowResizer.resize(pid: app.processIdentifier, currentFrame: frame, to: size) else {
-            print("could not resize the window (the app may not allow it)")
+            output.log("could not resize the window (the app may not allow it)")
             return
         }
         queue.asyncAfter(deadline: .now() + 0.2) { [weak self] in
@@ -398,14 +453,14 @@ final class Session {
     }
 
     /// Tells the client why, then ends the session.
-    private func fail(_ reason: String) {
+    func fail(_ reason: String) {
         guard !ended else { return }
         connection.send(content: Data(Message.error(reason).encoded()),
                         completion: .contentProcessed { [weak self] _ in self?.end(reason) })
         queue.asyncAfter(deadline: .now() + 1) { [weak self] in self?.end(reason) }
     }
 
-    private func end(_ reason: String) {
+    func end(_ reason: String) {
         guard !ended else { return }
         ended = true
         timer?.cancel()
@@ -415,6 +470,6 @@ final class Session {
         injector = nil
         pending = nil
         connection.cancel()
-        onEnd(reason)
+        onEnd(reason, started)
     }
 }
