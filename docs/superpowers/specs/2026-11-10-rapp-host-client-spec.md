@@ -134,7 +134,7 @@ u32  length    负载字节数，小端，最大 64 MiB（67 108 864）
 | 字段 | 合法值 | 不合法时 |
 |---|---|---|
 | `mode` | 0 gray4 · 1 color8 · 2 color16 · 3 duogray · 4 duocolor | `unknown mode` |
-| `fps` | 15、5 或 1 | `fps must be 15, 5 or 1` |
+| `fps` | 30、15、5 或 1 | `fps must be 30, 15, 5 or 1` |
 | `density` | 有限数，且 0 < density ≤ 8 | `density must be in (0, 8]` |
 | `isFull` / `down` | 0 或 1 | `bad frame flag` / `bad key state` |
 | `kind` / `button` | 见上表 | `unknown mouse event` / `unknown mouse button` |
@@ -166,7 +166,7 @@ u32  length    负载字节数，小端，最大 64 MiB（67 108 864）
 ### 3.5 地址格式（client 的输入）
 
 ```
-rapp://<host>[:<port>]/<appID>?token=<口令>[&mode=gray4|color8|color16|duogray|duocolor][&fps=15|5|1]
+rapp://<host>[:<port>]/<appID>?token=<口令>[&mode=gray4|color8|color16|duogray|duocolor][&fps=30|15|5|1]
 ```
 
 | 部分 | 规则 | 出错提示 |
@@ -177,7 +177,7 @@ rapp://<host>[:<port>]/<appID>?token=<口令>[&mode=gray4|color8|color16|duogray
 | 路径 | 去掉开头的 `/` 后就是 appID；不能为空，不能再含 `/` | `address has no bundle id` |
 | token | 必须有，不能为空 | `address has no token` |
 | mode | 省略为 gray4 | `mode must be gray4, color8, color16, duogray or duocolor` |
-| fps | 省略为 15 | `fps must be 15, 5 or 1` |
+| fps | 省略为 15 | `fps must be 30, 15, 5 or 1` |
 | 其他参数 | 忽略（旧的 `scale` 也被忽略） | — |
 
 ---
@@ -787,6 +787,7 @@ Ready 之前不发 SetStream。
 1 fps
 5 fps
 15 fps
+30 fps（看视频）    ← 帧率组例外地有四项（用户定）
 ```
 
 gray4、color8 不在菜单里，但地址里的 `mode=gray4|color8` 和协议照旧接受。

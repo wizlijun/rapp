@@ -18,6 +18,7 @@ final class ProtocolTests: XCTestCase {
         .setStream(mode: .color16, fps: 15, density: 1),
         .setStream(mode: .duocolor, fps: 5, density: 1.25),
         .setStream(mode: .duogray, fps: 1, density: 2),
+        .setStream(mode: .color16, fps: 30, density: 2),
         .hello(token: "t", bundleID: "b", mode: .duogray, fps: 1, density: 1),
         .size(width: 1200, height: 750),
         .frame(FramePayload(mode: .color16, width: 130, height: 70, isFull: true, data: [1, 2, 3, 250])),
@@ -148,8 +149,9 @@ final class ProtocolTests: XCTestCase {
                                         token: "t", mode: .color16, fps: 5))
     }
 
-    func testAddressAcceptsOneFps() throws {
+    func testAddressAcceptsOneAndThirtyFps() throws {
         XCTAssertEqual(try RemoteAddress(url: "rapp://h/b?token=t&fps=1").fps, 1)
+        XCTAssertEqual(try RemoteAddress(url: "rapp://h/b?token=t&fps=30").fps, 30)
     }
 
     func testAddressTwoToneModesAndIgnoredScale() throws {

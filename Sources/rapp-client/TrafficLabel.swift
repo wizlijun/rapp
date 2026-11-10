@@ -27,6 +27,7 @@ final class TrafficLabel: NSTextField {
         ("1 fps", 1),
         ("5 fps", 5),
         ("15 fps", 15),
+        ("30 fps（看视频）", 30),
     ]
     private static let presetItems: [(String, StreamPreset)] = [
         ("最省流（双色·灰度 + 自适应 + 1 fps）", .leastTraffic),

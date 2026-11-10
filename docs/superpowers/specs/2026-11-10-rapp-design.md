@@ -21,7 +21,7 @@
 >
 > **修订 3（2026-11-11，与用户确认）：菜单精简。** 顶部两个预设"最省流"（双色·灰度 + 自适应 + 1 fps）和
 > "最清晰"（高彩 + 原画 + 15 fps）取代"极限省流"；档位只列双色·灰度、双色·彩色、高彩；
-> 清晰度改为"省流 1x / 自适应（即原来的跟随 B 屏幕）/ 原画（按 A 自己的像素）"；帧率 1 / 5 / 15（新增 1 fps，仍是协议 3：旧主机收到 1 会回 `fps must be 15 or 5`）。
+> 清晰度改为"省流 1x / 自适应（即原来的跟随 B 屏幕）/ 原画（按 A 自己的像素）"；帧率 1 / 5 / 15 / 30（新增 1 和 30，30 用来看视频；仍是协议 3：旧主机收到 1 或 30 会回 `fps must be 15 or 5`）。
 > 双色档位改为每块两种基色加两级过渡，文字边缘更清楚（线上格式不变，仍是协议 3）。
 
 ---
@@ -41,7 +41,7 @@
 7. A 窗口的标题显示在 B 窗口自己的标题栏上，A 的标题变了（例如切换文档），B 跟着变。
 8. B 窗口标题栏右侧用灰色小字实时显示接收流量（例如 `6.4 KB/s`、`2.3 MB/s`）；在这行字上点右键，
    可以在运行中切换档位（菜单列 duogray / duocolor / color16）、清晰度（省流 1x / 自适应 / 原画）、
-   帧率（1 / 5 / 15 fps），或一键选"最省流"/"最清晰"。
+   帧率（1 / 5 / 15 / 30 fps），或一键选"最省流"/"最清晰"。
 
 ## 2. 结构
 
@@ -106,7 +106,7 @@ swift run -c release rapp-client "rapp://<A的地址>[:端口]/<bundle-id>?token
 ### 4.2 采集
 
 - `SCStream` + `SCContentFilter(desktopIndependentWindow:)`，只采这一个窗口的内容。
-- BGRA 8bit，`showsCursor = false`，最高帧率取客户端选择的 15、5 或 1 fps（`minimumFrameInterval`），`ignoreShadowsSingleWindow = true`。
+- BGRA 8bit，`showsCursor = false`，最高帧率取客户端选择的 30、15、5 或 1 fps（`minimumFrameInterval`），`ignoreShadowsSingleWindow = true`。
 - **只采标题栏以下的部分（内容区）。**
   - 标题栏高度的量法：通过 AX 取目标窗口的关闭按钮（`kAXCloseButtonAttribute`），
     标题栏高度 = 2 × （关闭按钮中心的 y − 窗口顶边的 y），单位是点，取整。
@@ -234,7 +234,7 @@ B 端还原时 `duogray` 按 `gray4`、`duocolor` 按 `color16` 显示。
 - 消息帧：1 字节类型 + 4 字节长度 + 负载。
 - **协议版本 3**（修订 2 起）。`Hello` 里的版本与主机不同时，主机回 `Error`：
   "protocol version mismatch: host 3, client N (update both sides)"，然后断开。
-- 帧率只能是 15、5 或 1；采集密度是 32 位浮点，必须是有限值且在 (0, 8] 之间，否则按消息格式错误处理。
+- 帧率只能是 30、15、5 或 1；采集密度是 32 位浮点，必须是有限值且在 (0, 8] 之间，否则按消息格式错误处理。
 
 | 方向 | 类型 | 消息 | 内容 |
 |---|---|---|---|
@@ -277,6 +277,7 @@ B 端还原时 `duogray` 按 `gray4`、`duocolor` 按 `color16` 显示。
     1 fps
   ✓ 5 fps
     15 fps
+    30 fps（看视频）
   ```
 
   打勾的是客户端当前的选择（档位和帧率的初始值来自地址，清晰度初始为"自适应"）。
