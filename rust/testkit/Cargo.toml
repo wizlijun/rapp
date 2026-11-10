@@ -1,0 +1,29 @@
+[package]
+name = "rapp-testkit"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+# Fake workers implementing just enough of the spec §5 CLI for integration tests.
+# Named fake-* so they can never be mistaken for the real rapp-host / rapp-client;
+# tests symlink them under the real names into a temp RAPP_BIN_DIR.
+[[bin]]
+name = "fake-rapp-host"
+path = "src/bin/fake-rapp-host.rs"
+
+[[bin]]
+name = "fake-rapp-client"
+path = "src/bin/fake-rapp-client.rs"
+
+[dependencies]
+
+[dev-dependencies]
+anyhow.workspace = true
+quinn.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+rapp-net.workspace = true
+rapp-relay.workspace = true
+rapp-service.workspace = true
+rapp-hub.workspace = true
