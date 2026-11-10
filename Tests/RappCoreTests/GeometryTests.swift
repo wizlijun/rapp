@@ -126,12 +126,27 @@ final class GeometryTests: XCTestCase {
     }
 
     func testCaptureDensity() {
-        XCTAssertEqual(captureDensity(zoom: 0.5, backingScale: 2, saver1x: false), 1.0)
-        XCTAssertEqual(captureDensity(zoom: 0.5, backingScale: 2, saver1x: true), 0.5)
-        XCTAssertEqual(captureDensity(zoom: 1, backingScale: 1, saver1x: false), 1.0)
+        XCTAssertEqual(captureDensity(zoom: 0.5, backingScale: 2, choice: .adaptive), 1.0)
+        XCTAssertEqual(captureDensity(zoom: 0.5, backingScale: 2, choice: .saver1x), 0.5)
+        XCTAssertEqual(captureDensity(zoom: 1, backingScale: 1, choice: .adaptive), 1.0)
         // Always inside what the protocol accepts, (0, 8].
-        XCTAssertEqual(captureDensity(zoom: 6, backingScale: 2, saver1x: false), 8)
-        XCTAssertGreaterThan(captureDensity(zoom: 0, backingScale: 2, saver1x: false), 0)
+        XCTAssertEqual(captureDensity(zoom: 6, backingScale: 2, choice: .adaptive), 8)
+        XCTAssertGreaterThan(captureDensity(zoom: 0, backingScale: 2, choice: .adaptive), 0)
+    }
+
+    func testOriginalDensityAsksForAsNativePixelsWhateverTheZoom() {
+        // 8 is the protocol maximum; the host caps it at A's own pixels per point.
+        XCTAssertEqual(captureDensity(zoom: 0.25, backingScale: 1, choice: .original), 8)
+        XCTAssertEqual(captureDensity(zoom: 2, backingScale: 2, choice: .original), 8)
+    }
+
+    func testPresets() {
+        XCTAssertEqual(StreamPreset.leastTraffic.mode, .duogray)
+        XCTAssertEqual(StreamPreset.leastTraffic.density, .adaptive)
+        XCTAssertEqual(StreamPreset.leastTraffic.fps, 5)
+        XCTAssertEqual(StreamPreset.sharpest.mode, .color16)
+        XCTAssertEqual(StreamPreset.sharpest.density, .original)
+        XCTAssertEqual(StreamPreset.sharpest.fps, 15)
     }
 
     func testStreamChangeIgnoresTinyDensityDrift() {

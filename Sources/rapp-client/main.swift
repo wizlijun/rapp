@@ -51,7 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         inputBar.onSend = { [weak self] message in self?.connection.send(message) }
         connection.onMessage = { [weak self] message in self?.handle(message) }
         connection.onBytes = { [weak self] count in self?.traffic.add(bytes: count) }
-        traffic.onSelect = { [weak self] _, _, _ in self?.sendStreamIfChanged() }
+        traffic.onSelect = { [weak self] in self?.sendStreamIfChanged() }
         connection.onClosed = { [output] reason in output.finish(ExitCode.runtime, "rapp-client: \(reason)") }
 
         // Command shortcuts: Command-Q always quits this client. With an empty
@@ -203,7 +203,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func currentDensity() -> Float {
-        captureDensity(zoom: zoom, backingScale: window.backingScaleFactor, saver1x: traffic.saver1x)
+        captureDensity(zoom: zoom, backingScale: window.backingScaleFactor, choice: traffic.density)
     }
 
     /// Sends SetStream when mode, frame rate or density differ from the last sent.

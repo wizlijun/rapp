@@ -120,12 +120,38 @@ public func remoteResize(view: CGSize, zoom: CGFloat, remote: CGSize, handle: Re
     }
 }
 
-/// Capture pixels per A point: B's display pixels per A point, or the zoom
-/// alone in 1x saver mode. Kept within what the protocol accepts, (0, 8].
-public func captureDensity(zoom: CGFloat, backingScale: CGFloat, saver1x: Bool) -> Float {
-    let d = Float(zoom * (saver1x ? 1 : backingScale))
+/// How the client picks the capture density.
+public enum DensityChoice: Sendable {
+    /// One capture pixel per B point: half the pixels on a Retina B.
+    case saver1x
+    /// One capture pixel per B display pixel: follows the size shown on B.
+    case adaptive
+    /// A's own pixels, whatever B shows; the host caps the request there.
+    case original
+}
+
+/// Capture pixels per A point for `choice`, kept within what the protocol
+/// accepts, (0, 8]. `.original` asks for the maximum, which the host lowers
+/// to A's own pixels per point.
+public func captureDensity(zoom: CGFloat, backingScale: CGFloat, choice: DensityChoice) -> Float {
+    let d: Float
+    switch choice {
+    case .saver1x: d = Float(zoom)
+    case .adaptive: d = Float(zoom * backingScale)
+    case .original: return 8
+    }
     guard d.isFinite else { return 1 }
     return min(8, max(0.01, d))
+}
+
+/// A one-click combination of mode, density and frame rate.
+public struct StreamPreset: Sendable {
+    public let mode: Mode
+    public let density: DensityChoice
+    public let fps: UInt8
+
+    public static let leastTraffic = StreamPreset(mode: .duogray, density: .adaptive, fps: 5)
+    public static let sharpest = StreamPreset(mode: .color16, density: .original, fps: 15)
 }
 
 /// Whether the client should send `setStream`: the mode or frame rate differs,
