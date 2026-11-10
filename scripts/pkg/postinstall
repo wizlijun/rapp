@@ -1,0 +1,40 @@
+#!/bin/bash
+# Runs as root after rapp.app lands in /Applications. Sets up the LaunchAgent
+# for the console user (same plist the GUI's 启动 writes, §4), starts it,
+# then opens the GUI. Nothing to do when nobody is logged in.
+set -u
+APP=/Applications/rapp.app
+LABEL=com.rapp.service
+USER_NAME=$(stat -f %Su /dev/console)
+if [ -z "$USER_NAME" ] || [ "$USER_NAME" = root ] || [ "$USER_NAME" = loginwindow ]; then
+    exit 0
+fi
+USER_ID=$(id -u "$USER_NAME")
+USER_HOME=$(dscl . -read "/Users/$USER_NAME" NFSHomeDirectory | awk '{print $2}')
+PLIST=$USER_HOME/Library/LaunchAgents/$LABEL.plist
+
+sudo -u "$USER_NAME" mkdir -p "$USER_HOME/Library/LaunchAgents"
+sudo -u "$USER_NAME" tee "$PLIST" >/dev/null <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>$LABEL</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>$APP/Contents/MacOS/rapp-service</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+</dict>
+</plist>
+PLIST
+
+# Reinstall: stop the old agent first so the new binary is what runs.
+launchctl bootout "gui/$USER_ID/$LABEL" 2>/dev/null || true
+launchctl bootstrap "gui/$USER_ID" "$PLIST"
+launchctl asuser "$USER_ID" sudo -u "$USER_NAME" open "$APP"
+exit 0

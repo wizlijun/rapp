@@ -1,5 +1,6 @@
 #!/bin/bash
-# Build dist/rapp.dmg (GUI + service + hub + Swift host/client in one app)
+# Build dist/rapp-<version>.pkg and dist/rapp.dmg (GUI + service + hub + Swift
+# host/client in one app)
 # and dist/rapp-relay-x86_64-linux (static, for the VPS) plus its systemd unit.
 # Needs: Xcode, cargo ($HOME/.cargo/bin), flutter ($HOME/development/flutter/bin).
 set -euo pipefail
@@ -31,6 +32,20 @@ for b in rapp-service rapp-hub rapp-host rapp-client; do
 done
 codesign --force --sign - --preserve-metadata=entitlements "$APP"
 codesign --verify --deep --strict "$APP"
+
+echo "== pkg (installs to /Applications, starts the LaunchAgent, opens the GUI)"
+VERSION=$(sed -n 's/^version: \([0-9.]*\).*/\1/p' gui/pubspec.yaml)
+# Not relocatable: otherwise Installer "upgrades" any other rapp.app it finds
+# (e.g. gui/build/...) instead of writing /Applications/rapp.app.
+# pkgbuild on macOS 27 prints "write: Permission denied" x4 on stderr; harmless.
+pkgbuild --analyze --root "$DIST/stage" "$DIST/component.plist" >/dev/null
+plutil -replace 0.BundleIsRelocatable -bool NO "$DIST/component.plist"
+pkgbuild --root "$DIST/stage" --component-plist "$DIST/component.plist" \
+    --install-location /Applications --scripts scripts/pkg \
+    --identifier com.rapp.pkg --version "$VERSION" "$DIST/component.pkg" >/dev/null
+productbuild --quiet --package "$DIST/component.pkg" "$DIST/rapp-$VERSION.pkg"
+rm "$DIST/component.plist" "$DIST/component.pkg"
+
 ln -s /Applications "$DIST/stage/Applications"
 hdiutil create -quiet -volname rapp -srcfolder "$DIST/stage" -ov -format UDZO "$DIST/rapp.dmg"
 rm -rf "$DIST/stage"
