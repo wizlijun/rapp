@@ -102,6 +102,44 @@ async fn forced_direct_path_uses_public_address() {
 }
 
 #[tokio::test]
+async fn add_host_by_id_at_ip_without_any_relay() {
+    let a = service(None).await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = Hub::start(home.path(), a.bins.path(), None, None);
+    let at = format!("{}@{}", a.id, a_addr(&a.svc));
+
+    let r = hub.call(json!({"cmd":"add_host","id":format!("987654321@{}", a_addr(&a.svc)),"password":PASSWORD,"req":1})).await;
+    assert_eq!(r["event"], "error", "a different ID at that address is refused: {r}");
+    let r = hub.call(json!({"cmd":"add_host","id":at,"password":"wrong","req":2})).await;
+    assert_eq!(r["event"], "error", "{r}");
+    assert!(!home.path().join("hosts.json").exists());
+
+    let r = hub.call(json!({"cmd":"add_host","id":at,"password":PASSWORD,"req":3})).await;
+    assert_eq!(r, json!({"event":"host_added","id":a.id,"name":"test-a","req":3}));
+    let saved: Value = serde_json::from_slice(&std::fs::read(home.path().join("hosts.json")).unwrap()).unwrap();
+    assert_eq!(saved[0]["lan"], json!([a_addr(&a.svc).to_string()]));
+    let r = hub.call(json!({"cmd":"apps","id":a.id})).await;
+    assert_eq!((&r["path"], &r["apps"]), (&json!("lan"), &apps()), "{r}");
+    open_and_close(&mut hub, &a.id, "lan").await;
+    hub.finish().await;
+}
+
+#[tokio::test]
+async fn id_at_ip_host_still_works_when_the_relay_does_not_know_it() {
+    // B has a relay; A never registered there. The relay says "unknown id", B falls back to LAN.
+    let relay = relay(Duration::from_secs(60));
+    let a = service(None).await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = Hub::start(home.path(), a.bins.path(), Some(relay.relay.addr), None);
+    let at = format!("{}@{}", a.id, a_addr(&a.svc));
+    let r = hub.call(json!({"cmd":"add_host","id":at,"password":PASSWORD})).await;
+    assert_eq!(r["event"], "host_added", "{r}");
+    let r = hub.call(json!({"cmd":"apps","id":a.id})).await;
+    assert_eq!(r["path"], "lan", "{r}");
+    hub.finish().await;
+}
+
+#[tokio::test]
 async fn add_host_errors_are_reported_and_nothing_saved() {
     let relay = relay(Duration::from_secs(60));
     let a = service(Some(relay.relay.addr)).await;

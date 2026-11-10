@@ -117,6 +117,17 @@ void main() {
     expect(s.sessions.single.path, 'relay');
   });
 
+  test('without a connected relay the ID is shown as id@ip, one per address', () {
+    final lan = ['123456789@192.168.1.5', '123456789@100.64.0.7'];
+    final off = ServiceStatus.fromJson({'ok': true, 'id': '123456789', 'relay': 'off', 'lan_ids': lan});
+    expect(off.lanIds, lan);
+    expect(off.shownIds, lan);
+    final on = ServiceStatus.fromJson({'ok': true, 'id': '123456789', 'relay': 'connected', 'lan_ids': lan});
+    expect(on.shownIds, ['123456789']);
+    final noNet = ServiceStatus.fromJson({'ok': true, 'id': '123456789', 'relay': 'off', 'lan_ids': []});
+    expect(noNet.shownIds, ['123456789']);
+  });
+
   test('ServiceStatus tolerates a null id and missing optional fields', () {
     final s = ServiceStatus.fromJson({'ok': true, 'id': null, 'relay': 'connecting', 'sessions': []});
     expect(s.id, isNull);

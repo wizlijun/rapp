@@ -1,11 +1,11 @@
 //! `service.json` (0600): relay, key, id, secret, name, password, optional ports (spec §3).
 
 use anyhow::Result;
-use rapp_net::crypto::{random_hex, random_password};
+use rapp_net::crypto::{is_valid_id, random_hex, random_id, random_password};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-pub const DEFAULT_PORT: u16 = 21118;
+pub const DEFAULT_PORT: u16 = rapp_net::addr::DEFAULT_PEER_PORT;
 pub const DEFAULT_IPC_PORT: u16 = 21119;
 
 #[derive(Clone, Default, Serialize, Deserialize)]
@@ -29,11 +29,17 @@ pub struct Config {
 }
 
 impl Config {
-    /// Reads `service.json`, filling in secret / password / name on first start.
+    /// Reads `service.json`, filling in id / secret / password / name on first start.
+    /// The ID is picked here, not by the relay, so it exists before any relay is set;
+    /// the relay accepts a valid ID it has not seen (spec §2.2).
     pub fn load_or_init(home: &Path) -> Result<Config> {
         let path = home.join("service.json");
         let mut cfg: Config = rapp_net::config::read_json(&path)?.unwrap_or_default();
-        let fresh = cfg.secret.is_empty() || cfg.password.is_empty() || cfg.name.is_empty();
+        let has_id = cfg.id.as_deref().is_some_and(is_valid_id);
+        let fresh = !has_id || cfg.secret.is_empty() || cfg.password.is_empty() || cfg.name.is_empty();
+        if !has_id {
+            cfg.id = Some(random_id());
+        }
         if cfg.secret.is_empty() {
             cfg.secret = random_hex(32);
         }
@@ -68,4 +74,27 @@ fn hostname() -> String {
         .map(|s| s.trim().trim_end_matches(".local").to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "rapp".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rapp_net::crypto::is_valid_id;
+
+    #[test]
+    fn first_start_picks_its_own_id_and_keeps_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = Config::load_or_init(dir.path()).unwrap();
+        let id = cfg.id.clone().expect("an ID without any relay");
+        assert!(is_valid_id(&id));
+        assert_eq!(Config::load_or_init(dir.path()).unwrap().id, Some(id));
+    }
+
+    #[test]
+    fn existing_id_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = Config { id: Some("123456789".into()), ..Default::default() };
+        old.save(dir.path()).unwrap();
+        assert_eq!(Config::load_or_init(dir.path()).unwrap().id.as_deref(), Some("123456789"));
+    }
 }

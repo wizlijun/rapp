@@ -33,6 +33,7 @@ class ServiceStatus {
     this.screenRecording = false,
     this.accessibility = false,
     this.sessions = const [],
+    this.lanIds = const [],
   });
 
   final String? id;
@@ -44,6 +45,14 @@ class ServiceStatus {
   final bool accessibility;
   final List<ServiceSession> sessions;
 
+  /// `id@ip[:port]`, one per local IPv4 (§3): what B types when there is no relay.
+  final List<String> lanIds;
+
+  /// The ID as people should type it: the bare ID once the relay is connected,
+  /// otherwise the `id@ip` forms (bare ID if the machine has no address).
+  List<String> get shownIds =>
+      relay == 'connected' || lanIds.isEmpty ? [?id] : lanIds;
+
   factory ServiceStatus.fromJson(Map<String, dynamic> m) {
     final perms = m['permissions'] is Map ? m['permissions'] as Map : const {};
     return ServiceStatus(
@@ -54,6 +63,7 @@ class ServiceStatus {
       relayError: m['relay_error']?.toString(),
       screenRecording: perms['screen_recording'] == true,
       accessibility: perms['accessibility'] == true,
+      lanIds: (m['lan_ids'] as List? ?? const []).map((e) => '$e').toList(),
       sessions: (m['sessions'] as List? ?? const [])
           .whereType<Map>()
           .map((s) => ServiceSession(s['sid'] as Object, '${s['peer'] ?? ''}', '${s['app'] ?? ''}',

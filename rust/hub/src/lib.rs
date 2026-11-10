@@ -122,7 +122,21 @@ impl Hub {
         Ok(Some(match v.get("cmd").and_then(Value::as_str) {
             Some("hosts") => self.hosts_event(),
             Some("add_host") => {
-                let (id, password) = (s("id")?, s("password")?);
+                let (id, addr) = rapp_net::addr::split_host_ref(s("id")?)?;
+                let (id, password) = (id.as_str(), s("password")?);
+                if let Some(addr) = addr {
+                    // `id@ip[:port]`: straight to A with the password, no relay (§2.3).
+                    let auth = Op::Auth { token: None, password: Some(password.into()) };
+                    let (conn, r) = self.dial(&addr, link::LAN_WAIT, &auth).await?;
+                    conn.close(0u32.into(), b"host added");
+                    if r["id"] != id {
+                        bail!("{addr} is ID {}, not {id}", r["id"].as_str().unwrap_or("?"));
+                    }
+                    let name = r["name"].as_str().unwrap_or(id).to_string();
+                    self.hosts.upsert(Host { id: id.into(), name: name.clone(), password: password.into(), lan: vec![addr] })?;
+                    self.forget(id);
+                    return Ok(Some(json!({"event":"host_added","id":id,"name":name})));
+                }
                 let info = match self.relay_connect(id, password).await {
                     Ok(Ok(info)) => info,
                     Ok(Err(msg)) => bail!(msg),

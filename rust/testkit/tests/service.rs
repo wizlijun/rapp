@@ -57,7 +57,8 @@ async fn first_start_generates_secret_and_password() {
     let cfg: Value = serde_json::from_slice(&std::fs::read(home.path().join("service.json")).unwrap()).unwrap();
     assert_eq!(cfg["secret"].as_str().unwrap().len(), 64);
     assert_eq!(cfg["password"].as_str().unwrap().len(), 8);
-    assert_eq!(cfg["id"], Value::Null);
+    // No relay configured, yet the service already has its own ID.
+    assert!(rapp_net::crypto::is_valid_id(cfg["id"].as_str().unwrap()));
     assert!(!cfg["name"].as_str().unwrap().is_empty());
     #[cfg(unix)]
     {
@@ -69,6 +70,17 @@ async fn first_start_generates_secret_and_password() {
     }
     let st = ipc_once(&svc, home.path(), json!({"cmd":"status"})).await;
     assert_eq!(st["relay"], "off");
+    // Without a relay B reaches A by `id@ip`: one per local IPv4, port shown as it is not 21118.
+    let want_tail = format!(":{}", svc.port);
+    let lan_ids = st["lan_ids"].as_array().expect("lan_ids");
+    for l in lan_ids {
+        let l = l.as_str().unwrap();
+        let (id, addr) = rapp_net::addr::split_host_ref(l).unwrap();
+        assert_eq!(id, cfg["id"].as_str().unwrap());
+        assert!(addr.unwrap().ends_with(&want_tail), "{l}");
+    }
+    let ips = rapp_net::addr::local_ipv4s();
+    assert_eq!(lan_ids.len(), ips.len());
 }
 
 #[tokio::test]
@@ -105,7 +117,8 @@ async fn direct_auth_failures_and_lan_password() {
     tokio::time::timeout(WAIT, c.closed()).await.expect("unauthenticated connection closed");
     // Loopback is a private source: password auth is accepted (relay-down fallback).
     let (conn, r) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":PASSWORD})).await;
-    assert_eq!(r, json!({"ok":true}));
+    // The reply names the host, so B can check an `id@ip` it was given.
+    assert_eq!(r, json!({"ok":true,"id":a.id,"name":"test-a"}));
     assert_eq!(req(&conn, json!({"op":"list_apps"})).await["apps"], apps());
 }
 

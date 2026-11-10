@@ -115,7 +115,7 @@ class _LocalSectionState extends State<LocalSection> {
         return SectionCard(title: '本机', children: [
           _row('服务', st == null ? '未运行（${m.error ?? '连接中'}）' : '运行中'),
           if (st != null) ...[
-            _row('ID', st.id ?? '（等待 relay 分配）'),
+            _row('ID', st.shownIds.isEmpty ? '（还没有）' : st.shownIds.join('\n')),
             _row('名称', st.name),
             _row('密码', st.password,
                 trailing: IconButton(

@@ -59,8 +59,10 @@ async fn auth(state: &State, conn: &Connection, private: bool) -> Result<bool> {
         Ok(Op::Auth { token: Some(t), .. }) if state.token_peer(&t).is_some() => ok(json!({})),
         Ok(Op::Auth { token: Some(_), .. }) => err("bad token"),
         Ok(Op::Auth { password: Some(p), .. }) if private => {
-            if ct_eq(&p, &state.cfg.lock().unwrap().password) {
-                ok(json!({}))
+            let cfg = state.cfg.lock().unwrap().clone();
+            if ct_eq(&p, &cfg.password) {
+                // Named so B can check the ID behind an `id@ip` it was given (§2.3).
+                ok(json!({"id": cfg.id, "name": cfg.name}))
             } else {
                 err("bad password")
             }

@@ -104,12 +104,14 @@ A 和 B 可以是同一台机器，地址填 `127.0.0.1`。此时每次点击或
 
 ```
 ./scripts/package-macos.sh   # 生成 dist/rapp-0.2.0.pkg、dist/rapp.dmg、dist/rapp-relay-x86_64-linux（静态）和 dist/rapp-relay.service
-python3 scripts/e2e-local.py <工作目录>   # 本机端到端：relay + service + hub，lan 和 relay 两条路各开一次 Safari
+python3 scripts/e2e-local.py <工作目录>   # 本机端到端：relay + service + hub，lan、relay 和无 relay 的 id@ip 各开一次 Safari
 ```
 
 安装：双击 `rapp-0.2.0.pkg`（或 `sudo installer -pkg rapp-0.2.0.pkg -target /`）。它把 rapp.app 装进 /Applications，给当前登录用户写 `~/Library/LaunchAgents/com.rapp.service.plist`（和 GUI"启动"写的一样，开机自启、崩溃重启），启动服务并打开 GUI。首次运行要给 rapp 屏幕录制和辅助功能权限。包是 ad-hoc 签名，没有公证：从别的机器 AirDrop 或下载过来的，要在 Finder 里右键 → 打开，或到"隐私与安全性"里点"仍要打开"。只有 arm64。
 
 卸载：`scripts/uninstall-macos.sh`（停服务、删 plist 和 /Applications/rapp.app，会要一次 sudo；保留 `~/Library/Application Support/rapp` 里的 ID、密码和主机列表）。
+
+没有 relay 也能用：服务首次启动自己生成 9 位 ID。relay 没连上时，GUI"本机"里的 ID 显示成 `ID@IP`，本机每个 IP 一行（例如 Wi-Fi 一个、Tailscale 一个）。在另一台机器的"添加主机"里填其中一个 `ID@IP` 和密码，就直接连过去，不经过 relay；只接受私有网段（含 Tailscale）的来源。之后配了 relay、ID 不变，已加的主机照样能用。
 
 relay 部署到 VPS 的步骤写在 `scripts/rapp-relay.service` 开头的注释里，只需要开放 UDP 21116。
 

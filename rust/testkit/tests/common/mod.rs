@@ -86,7 +86,11 @@ pub async fn service_with_idle(relay: Option<SocketAddr>, idle: Duration) -> Tes
     let (home, bins) = (tempfile::tempdir().unwrap(), bins());
     service_json(home.path(), relay);
     let svc = start_service(home.path(), bins.path(), idle).await;
-    let id = if relay.is_some() { wait_registered(&svc, home.path()).await } else { String::new() };
+    let id = if relay.is_some() {
+        wait_registered(&svc, home.path()).await
+    } else {
+        ipc_once(&svc, home.path(), json!({"cmd":"status"})).await["id"].as_str().unwrap().to_string()
+    };
     TestService { svc, home, bins, id }
 }
 

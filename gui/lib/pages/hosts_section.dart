@@ -120,7 +120,7 @@ class _HostsSectionState extends State<HostsSection> {
               child: TextField(
                 key: const Key('add-id'),
                 controller: _id,
-                decoration: const InputDecoration(labelText: 'ID', isDense: true),
+                decoration: const InputDecoration(labelText: 'ID 或 ID@IP（不经 relay）', isDense: true),
               ),
             ),
             const SizedBox(width: 8),

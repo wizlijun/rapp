@@ -64,7 +64,7 @@ B: rapp (Flutter GUI) ── stdio ── rapp-hub (Rust)      A: rapp-service (
 → {"op":"register","key":K,"id":"123456789"|null,"secret":"<64hex>","name":"bruce-mac","pw_salt":"<32hex>","pw_hash":"<64hex>","lan":["192.168.1.5:21118"]}
 ← {"ok":true,"id":"123456789"}  |  {"ok":false,"error":"bad relay key"|"id taken"}
 ```
-- `id` 为 null 时由 relay 分配一个新 ID。
+- service 首次启动时自己随机生成 9 位 ID（不管有没有 relay），登记时带上它；relay 接受一个格式合法、还没人用过的 ID。`id` 为 null 时仍由 relay 分配（兼容旧配置）。
 - `id` 已存在、但 `secret` 的哈希对不上：返回 `id taken`。
 - 同一个 ID 再次登记：替换掉旧连接，同时更新密码哈希、局域网地址和名字。改了密码就靠这样重新登记。
 - relay 把这条连接的对端地址记作 A 的公网地址。
@@ -90,10 +90,11 @@ relay 在 A 的长连接上开一条流，发 `{"op":"relayed","token":T}`，然
 ### 2.3 设备之间（A 端监听 `21118/udp`，和它连 relay 用的是同一个端点）
 - **直连**：新建的 QUIC 连接上，第一条流必须是认证请求，二选一：
   - `{"op":"auth","token":T}`，用 relay 发的令牌；
-  - `{"op":"auth","password":"..."}`，仅当连接来自私有网段时才接受。这是 relay 不可用时的退路，由 A 用本机存的密码核对。
+  - `{"op":"auth","password":"..."}`，仅当连接来自私有网段时才接受。这是 relay 不可用时的退路，由 A 用本机存的密码核对。成功时回 `{"ok":true,"id","name"}`，B 据此确认连上的确实是它要的那台主机。
 
   认证失败就回一行错误并关闭连接。认证通过后，这条连接上的后续流都直接是请求。
 - **中继**：每条经 relay 转来的流，开头都是 `{"op":"relayed","token":T}`，A 核对令牌，之后的内容和直连一样。
+- **`id@ip` 地址**：没有 relay 时，主机用 `id@ip`（端口不是 21118 时写成 `id@ip:port`）标识自己，本机每个可用 IPv4 一个（不含回环、链路本地和 198.18.0.0/15——Clash/Surge 一类 TUN 代理的假 IP）。B 拿它加主机时直接连这个地址做密码认证，不经过 relay。
 - 请求有两种：
   - `{"op":"list_apps"}` → `{"ok":true,"apps":[{"app":"com.apple.Safari","name":"Safari"}]}`，回完关流。
   - `{"op":"open","app":"com.apple.Safari"}` → `{"ok":true,"token":"<worker token>"}`，之后这条流双向传原始 v3 字节，直到有一方关闭。
@@ -103,12 +104,12 @@ relay 在 A 的长连接上开一条流，发 `{"op":"relayed","token":T}`，然
 2. 再连 `public`，最多等 2 s，相当于打洞。
 3. 都不通就走 relay：此后每个请求都是一条新的 `relay` 流。
 
-每台主机的 QUIC 连接建立一次后复用，GUI 上会显示当前走的是 `lan`、`direct` 还是 `relay`。调试时可以用环境变量 `RAPP_FORCE_PATH=relay|direct|lan` 强制只走某一条路。relay 连不上时，直接用已存的局域网地址加密码认证（2.3 那条退路）。
+每台主机的 QUIC 连接建立一次后复用，GUI 上会显示当前走的是 `lan`、`direct` 还是 `relay`。调试时可以用环境变量 `RAPP_FORCE_PATH=relay|direct|lan` 强制只走某一条路。relay 连不上，或者 relay 回 `unknown id` / `offline` 时（例如只按 `id@ip` 加的主机），直接用已存的局域网地址加密码认证（2.3 那条退路）。`bad password` 和 `locked` 不触发退路。
 
 ## 3. `rapp-service`（A 端）
 - 配置目录：macOS 是 `~/Library/Application Support/rapp/`，Linux 是 `$XDG_CONFIG_HOME/rapp/`（默认 `~/.config/rapp/`），Windows 是 `%APPDATA%\rapp\`。环境变量 `RAPP_HOME` 可以覆盖，测试时用来隔离。
 - `service.json`（权限 0600）：`{"relay":"vps:21116","key":K,"id":null|"…","secret":"…","name":"<主机名>","password":"…"}`。
-  - 首次启动时生成 secret，再生成一个 8 位的随机字母数字密码。
+  - 首次启动时生成 9 位 ID 和 secret，再生成一个 8 位的随机字母数字密码。
   - 密码明文保存（D8），这样 GUI 能把它显示出来。
 - 启动时：
   1. 执行 `rapp-host check --json`，结果放进 status。
@@ -124,7 +125,7 @@ relay 在 A 的长连接上开一条流，发 `{"op":"relayed","token":T}`，然
   - worker 退出就把它从表里删掉，不自动重启。
 - `list_apps` 转调 `rapp-host list-apps --json`。
 - **本机 IPC**【默认：TCP，取代 Unix socket 和命名管道】：监听 `127.0.0.1:21119`，令牌放在 `ipc.token` 文件里（权限 0600）。每条连接的第一行是 `{"token":"…"}`，之后：
-  - `{"cmd":"status"}` → `{"ok":true,"id","name","password","relay":"connected|connecting|off","relay_error"?,"permissions":{"screen_recording":b,"accessibility":b},"sessions":[{"sid","peer","app","path","since"}]}`
+  - `{"cmd":"status"}` → `{"ok":true,"id","name","password","relay":"connected|connecting|off","relay_error"?,"lan_ids":["id@ip",…],"permissions":{"screen_recording":b,"accessibility":b},"sessions":[{"sid","peer","app","path","since"}]}`
   - `{"cmd":"set_password","password":"…"}` → `{"ok":true}`。服务改写配置，然后重新登记。
   - `{"cmd":"set_relay","relay":"…","key":"…"}` → `{"ok":true}`。服务改写配置，然后重连 relay。
   - `{"cmd":"kick","sid":n}` → `{"ok":true}`
@@ -136,6 +137,7 @@ relay 在 A 的长连接上开一条流，发 `{"op":"relayed","token":T}`，然
 - hub 从 stdin 读 JSON 行命令，往 stdout 写 JSON 行。每条命令可以带一个 `req` 字段，hub 原样回在应答里：
   - `{"cmd":"hosts"}` → `{"event":"hosts","hosts":[{"id","name"}]}`
   - `{"cmd":"add_host","id","password"}` → 先试连一次，`connect` 成功才保存 → `{"event":"host_added","id","name"}`
+    - `id` 也可以写成 `id@ip[:port]`：直接连该地址做密码认证，对端报的 ID 必须和 `id` 一致，成功后保存，`lan` 就是这个地址。全程不需要 relay。
   - `{"cmd":"remove_host","id"}` → `{"event":"hosts",...}`
   - `{"cmd":"apps","id"}` → `{"event":"apps","id","path","apps":[...]}`
   - `{"cmd":"open","id","app"}`：
@@ -149,8 +151,8 @@ relay 在 A 的长连接上开一条流，发 `{"op":"relayed","token":T}`，然
   - 任何一条命令出错都回 `{"event":"error","req"?, "error":"…"}`。
   - stdin 关闭时，hub 关掉所有 client 后退出。
 - GUI 是单窗口，加一个托盘或菜单栏图标。点关闭按钮只隐藏窗口；点"退出"时，如果还有会话，先确认。窗口分三块：
-  1. **本机**：ID、密码（可以改）、relay 地址和 key（可以改）、服务状态，以及启动、停止、重启三个按钮。
-  2. **主机**：主机列表、添加主机（ID 和密码）、删除主机；点开一台主机后列出它的 app，点 app 就打开窗口，另有一个输入框可以按 bundle id 启动别的 app。
+  1. **本机**：ID（relay 未连上时改显示 status 里的 `lan_ids`，每行一个 `id@ip`）、密码（可以改）、relay 地址和 key（可以改）、服务状态，以及启动、停止、重启三个按钮。
+  2. **主机**：主机列表、添加主机（ID 或 `ID@IP`，加密码）、删除主机；点开一台主机后列出它的 app，点 app 就打开窗口，另有一个输入框可以按 bundle id 启动别的 app。
   3. **会话**：每个会话显示主机、app、路径，带一个关闭按钮。
 - `rapp --cm`：小窗口，列出本机 service 当前的会话，每个会话带一个断开按钮。会话全部结束 5 秒后自动退出。
 - 服务控制（GUI 用 Dart 直接调系统命令）：
@@ -213,7 +215,7 @@ relay 在 A 的长连接上开一条流，发 `{"op":"relayed","token":T}`，然
   - `open` 之后字节能双向对接；
   - 令牌失效后重新认证。
 - **Swift**：现有的 91 个测试继续通过，新加参数解析和 JSON 事件格式的测试。
-- **本机端到端**：在 `127.0.0.1` 上起 relay，service 用一个隔离的 `RAPP_HOME`，hub 选路分别打通 `lan` 和 `relay`，打开 Safari 能看到窗口。
+- **本机端到端**：在 `127.0.0.1` 上起 relay，service 用一个隔离的 `RAPP_HOME`，hub 选路分别打通 `lan` 和 `relay`，再用一个没有 relay 的 hub 按 A 报的第一个 `id@ip` 加主机并打开，打开 Safari 能看到窗口。
 - **GUI**：能构建出 macOS 版并启动，三块界面都能用；`--cm` 能断开会话。
 - **未经实机验证**（要你在真实网络上验收）：跨 NAT 打洞、VPS 部署、Windows 和 Linux 上的服务。
 

@@ -101,8 +101,11 @@ impl State {
         let sessions: Vec<Value> = self.sessions.lock().unwrap().1.iter()
             .map(|(sid, s)| json!({"sid":sid,"peer":s.peer,"app":s.app,"path":s.path,"since":s.since}))
             .collect();
+        let id = cfg.id.clone().unwrap_or_default();
+        let lan_ids: Vec<String> =
+            rapp_net::addr::local_ipv4s().into_iter().map(|ip| rapp_net::addr::at_address(&id, ip, self.port)).collect();
         let mut v = json!({
-            "ok": true, "id": cfg.id, "name": cfg.name, "password": cfg.password,
+            "ok": true, "id": cfg.id, "name": cfg.name, "password": cfg.password, "lan_ids": lan_ids,
             "relay": relay, "permissions": self.permissions, "sessions": sessions,
         });
         if let Some(e) = relay_error {

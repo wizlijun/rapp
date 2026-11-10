@@ -15,7 +15,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 const RELAY_WAIT: Duration = Duration::from_secs(2);
-const LAN_WAIT: Duration = Duration::from_millis(500);
+pub const LAN_WAIT: Duration = Duration::from_millis(500);
 const PUBLIC_WAIT: Duration = Duration::from_secs(2);
 const REPLY_WAIT: Duration = Duration::from_secs(20);
 
@@ -106,7 +106,8 @@ impl Hub {
     }
 
     /// Dials `addr` and authenticates; the connection is closed on refusal.
-    async fn dial(&self, addr: &str, wait: Duration, auth: &Op) -> Result<Connection> {
+    /// Returns the auth reply too (password auth names the host: `id`, `name`).
+    pub async fn dial(&self, addr: &str, wait: Duration, auth: &Op) -> Result<(Connection, Value)> {
         let addr: SocketAddr = addr.parse().with_context(|| format!("bad address {addr}"))?;
         let conn = connect(&self.ep, addr, ALPN_PEER, wait).await?;
         let (_, r) = exchange(&conn, &[auth]).await?;
@@ -114,13 +115,13 @@ impl Hub {
             conn.close(0u32.into(), b"auth refused");
             bail!("{addr}: {}", error_of(&r));
         }
-        Ok(conn)
+        Ok((conn, r))
     }
 
     async fn first_lan(&self, lan: &[String], auth: &Op) -> Option<Connection> {
         for a in lan {
             match self.dial(a, LAN_WAIT, auth).await {
-                Ok(c) => return Some(c),
+                Ok((c, _)) => return Some(c),
                 Err(e) => eprintln!("rapp-hub: lan {a}: {e:#}"),
             }
         }
@@ -128,12 +129,19 @@ impl Hub {
     }
 
     async fn establish(&self, host: &Host) -> Result<Link> {
+        let password_auth = Op::Auth { token: None, password: Some(host.password.clone()) };
         let info = match self.relay_connect(&host.id, &host.password).await {
             Ok(Ok(info)) => info,
+            // A host added as `id@ip` may never have registered with this relay (§2.3).
+            Ok(Err(msg)) if (msg == "unknown id" || msg == "offline") && self.allows(Force::Lan) => {
+                return match self.first_lan(&host.lan, &password_auth).await {
+                    Some(conn) => Ok(Link::Direct { conn, path: "lan" }),
+                    None => Err(anyhow!(msg)),
+                };
+            }
             Ok(Err(msg)) => bail!(msg),
             Err(e) if self.allows(Force::Lan) => {
-                let auth = Op::Auth { token: None, password: Some(host.password.clone()) };
-                return match self.first_lan(&host.lan, &auth).await {
+                return match self.first_lan(&host.lan, &password_auth).await {
                     Some(conn) => Ok(Link::Direct { conn, path: "lan" }),
                     None => Err(e.context("relay unreachable and no LAN address answered")),
                 };
@@ -154,7 +162,7 @@ impl Hub {
         if self.allows(Force::Direct) {
             match info["public"].as_str() {
                 Some(p) => match self.dial(p, PUBLIC_WAIT, &auth).await {
-                    Ok(conn) => return Ok(Link::Direct { conn, path: "direct" }),
+                    Ok((conn, _)) => return Ok(Link::Direct { conn, path: "direct" }),
                     Err(e) => eprintln!("rapp-hub: public {p}: {e:#}"),
                 },
                 None => eprintln!("rapp-hub: no public address for {}", host.id),

@@ -3,7 +3,8 @@
 real Swift rapp-host and rapp-client. For each path (lan, relay) it opens an
 app through the hub, waits, takes a screenshot, then kicks the session over
 the service IPC (what the --cm window's 断开 button sends) and waits for the
-hub's `closed` event.
+hub's `closed` event. A third round ("id@ip") uses a hub with no relay at all
+that adds A by the first `id@ip` A's status reports.
 
 usage: scripts/e2e-local.py <work dir> [app id]   (default com.apple.Safari)
 Needs: swift build -c release, and cargo build --release in rust/.
@@ -52,7 +53,9 @@ def read_text(path):
 
 class Hub:
     def __init__(self, home, bins, force):
-        env = dict(os.environ, RAPP_HOME=home, RAPP_FORCE_PATH=force)
+        env = dict(os.environ, RAPP_HOME=home)
+        if force:
+            env["RAPP_FORCE_PATH"] = force
         if bins:
             env["RAPP_BIN_DIR"] = bins
         self.p = subprocess.Popen([os.path.join(SERVICE_DIR, "rapp-hub")], env=env, text=True, bufsize=1,
@@ -128,26 +131,35 @@ def main():
             stderr=open(svc_log, "w")))
         ipc_port = int(wait_for(lambda: (re.search(r"ipc 127\.0\.0\.1:(\d+)", read_text(svc_log)) or [None, None])[1],
                                 10, "service ipc port"))
-        host_id = wait_for(lambda: json.load(open(os.path.join(a_home, "service.json"))).get("id"),
+        # The ID exists before registration (A picks it), so wait for the relay's answer.
+        host_id = wait_for(lambda: (re.search(r"registered as (\d+)", read_text(svc_log)) or [None, None])[1],
                            10, "relay registration")
         token = read_text(os.path.join(a_home, "ipc.token")).strip()
         print(f"relay {relay_addr}; A registered as {host_id}; ipc {ipc_port}")
         with open(os.path.join(b_home, "service.json"), "w") as f:
             json.dump({"relay": relay_addr, "key": KEY}, f)
 
-        for force in ("lan", "relay"):
+        c_home = os.path.join(WORK, "c")  # no service.json: this hub has no relay
+        os.makedirs(c_home, exist_ok=True)
+        at = ipc(ipc_port, token, {"cmd": "status"})["lan_ids"][0]
+        for force in ("lan", "relay", "id@ip"):
             print(f"== path {force} ==")
-            hub = Hub(b_home, bins, force)
-            hub.send(cmd="add_host", id=host_id, password=PASSWORD)
+            if force == "id@ip":
+                hub, want = Hub(c_home, bins, None), "lan"
+                hub.send(cmd="add_host", id=at, password=PASSWORD)
+                print(f"  adding {at} with no relay")
+            else:
+                hub, want = Hub(b_home, bins, force), force
+                hub.send(cmd="add_host", id=host_id, password=PASSWORD)
             hub.wait("host_added")
             hub.send(cmd="apps", id=host_id)
             apps = hub.wait("apps")
             assert any(a["app"] == APP for a in apps["apps"]), f"{APP} not in apps"
             hub.send(cmd="open", id=host_id, app=APP)
             opened = hub.wait("opened")
-            assert opened["path"] == force, f"opened over {opened['path']}, wanted {force}"
+            assert opened["path"] == want, f"opened over {opened['path']}, wanted {want}"
             time.sleep(5)
-            shot = os.path.join(WORK, f"shot-{force}.png")
+            shot = os.path.join(WORK, f"shot-{force.replace('@', '-at-')}.png")
             subprocess.run(["screencapture", "-x", shot])
             status = ipc(ipc_port, token, {"cmd": "status"})
             sessions = [s for s in status["sessions"] if s["app"] == APP]

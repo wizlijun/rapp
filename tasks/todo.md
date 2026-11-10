@@ -42,6 +42,12 @@
 - [x] `rapp-0.2.0.pkg`：pkgbuild + productbuild，不可重定位；postinstall 给控制台用户写 LaunchAgent（与 GUI 的 `launchAgentPlist` 逐字节相同）、`launchctl bootstrap`、打开 GUI；`scripts/uninstall-macos.sh`
 - 结果：用户用 Installer 在本机装上。`launchctl print` 显示 state = running、program 是 /Applications/rapp.app/Contents/MacOS/rapp-service、keepalive | runatload；plist 和 GUI 生成的 `cmp` 相同、属主是用户；服务生成了 service.json 和 ipc.token（都是 600）；GUI 已打开；签名校验通过；盘上没有 `._` 文件。没测：卸载脚本（要 sudo，且会删掉刚装好的）、覆盖重装（postinstall 先 bootout 再 bootstrap）
 
+## 无 relay：自生成 ID 与 `id@ip`
+- [x] service 首次启动自己生成 9 位 ID（relay 接受合法的新 ID）；status 加 `lan_ids`（每个可用 IPv4 一个 `id@ip`，跳过 198.18.0.0/15 代理假 IP）；密码认证成功回 `id`、`name`
+- [x] hub `add_host` 接受 `id@ip[:port]`：直连做密码认证、核对 ID 后保存；relay 回 `unknown id`/`offline` 时退到局域网地址
+- [x] GUI：relay 未连上时 ID 显示为 `lan_ids`，添加主机输入框写明可填 `ID@IP`
+- 结果：cargo test、clippy、flutter analyze/test 全过；e2e 第三轮用没有 relay 的 hub 按 `686712053@10.17.0.235:<port>` 加主机并打开 Safari，路径 lan，踢掉会话后 hub 收到 closed。第一次跑时 A 报的第一个地址是 198.18.0.1（本机 TUN 代理的假 IP），连不上，于是加了过滤
+
 ## 未经实机验证（交给用户验收）
 跨 NAT 打洞、VPS 部署、Windows 和 Linux 上的服务。
 
