@@ -15,7 +15,7 @@ public let defaultPort: UInt16 = 47800
 public let maxMessageLength = 64 * 1024 * 1024
 
 /// Frame rates a client may ask for.
-public let allowedFps: Set<UInt8> = [15, 5]
+public let allowedFps: Set<UInt8> = [15, 5, 1]
 
 /// A capture density (pixels per A point) is finite and in (0, 8].
 public func isValidDensity(_ d: Float) -> Bool { d.isFinite && d > 0 && d <= 8 }
@@ -229,7 +229,7 @@ private struct Reader {
     /// The fps byte and density f32 shared by `hello` and `setStream`.
     mutating func stream() throws -> (UInt8, Float) {
         let fps = try u8()
-        guard allowedFps.contains(fps) else { throw CodecError("fps must be 15 or 5") }
+        guard allowedFps.contains(fps) else { throw CodecError("fps must be 15, 5 or 1") }
         let density = Float(bitPattern: UInt32(try uint(4)))
         guard isValidDensity(density) else { throw CodecError("density must be in (0, 8]") }
         return (fps, density)
@@ -299,7 +299,7 @@ public struct RemoteAddress: Equatable {
         }
         var fps: UInt8 = 15
         if let f = query["fps"] {
-            guard let v = UInt8(f), allowedFps.contains(v) else { throw CodecError("fps must be 15 or 5") }
+            guard let v = UInt8(f), allowedFps.contains(v) else { throw CodecError("fps must be 15, 5 or 1") }
             fps = v
         }
         self.init(host: host, port: port, bundleID: bundleID, token: token, mode: mode, fps: fps)

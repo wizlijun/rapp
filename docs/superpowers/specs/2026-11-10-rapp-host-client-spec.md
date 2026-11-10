@@ -134,7 +134,7 @@ u32  length    负载字节数，小端，最大 64 MiB（67 108 864）
 | 字段 | 合法值 | 不合法时 |
 |---|---|---|
 | `mode` | 0 gray4 · 1 color8 · 2 color16 · 3 duogray · 4 duocolor | `unknown mode` |
-| `fps` | 15 或 5 | `fps must be 15 or 5` |
+| `fps` | 15、5 或 1 | `fps must be 15, 5 or 1` |
 | `density` | 有限数，且 0 < density ≤ 8 | `density must be in (0, 8]` |
 | `isFull` / `down` | 0 或 1 | `bad frame flag` / `bad key state` |
 | `kind` / `button` | 见上表 | `unknown mouse event` / `unknown mouse button` |
@@ -166,7 +166,7 @@ u32  length    负载字节数，小端，最大 64 MiB（67 108 864）
 ### 3.5 地址格式（client 的输入）
 
 ```
-rapp://<host>[:<port>]/<appID>?token=<口令>[&mode=gray4|color8|color16|duogray|duocolor][&fps=15|5]
+rapp://<host>[:<port>]/<appID>?token=<口令>[&mode=gray4|color8|color16|duogray|duocolor][&fps=15|5|1]
 ```
 
 | 部分 | 规则 | 出错提示 |
@@ -177,7 +177,7 @@ rapp://<host>[:<port>]/<appID>?token=<口令>[&mode=gray4|color8|color16|duogray
 | 路径 | 去掉开头的 `/` 后就是 appID；不能为空，不能再含 `/` | `address has no bundle id` |
 | token | 必须有，不能为空 | `address has no token` |
 | mode | 省略为 gray4 | `mode must be gray4, color8, color16, duogray or duocolor` |
-| fps | 省略为 15 | `fps must be 15 or 5` |
+| fps | 省略为 15 | `fps must be 15, 5 or 1` |
 | 其他参数 | 忽略（旧的 `scale` 也被忽略） | — |
 
 ---
@@ -228,7 +228,7 @@ rapp://<host>[:<port>]/<appID>?token=<口令>[&mode=gray4|color8|color16|duogray
 | 3 | duogray | 1 | 同 gray4，但每个 16×16 块最多四种值（两种基色 + 两级过渡） |
 | 4 | duocolor | 2 | 同 color16，但每个 16×16 块最多四种值（两种基色 + 两级过渡） |
 
-客户端菜单里的"最省流"= duogray + 自适应密度 + 5 fps，"最清晰"= color16 + 原画密度 + 15 fps。
+客户端菜单里的"最省流"= duogray + 自适应密度 + 1 fps，"最清晰"= color16 + 原画密度 + 15 fps。
 
 下面所有公式里的除法都是**非负整数除法、向下取整**，`>>` 是右移。
 
@@ -773,7 +773,7 @@ Ready 之前不发 SetStream。
 - 右键或按住 Control 点击，弹出菜单，当前选择打勾：
 
 ```
-最省流（双色·灰度 + 自适应 + 5 fps）    ← 两个预设都是动作，本身从不打勾
+最省流（双色·灰度 + 自适应 + 1 fps）    ← 两个预设都是动作，本身从不打勾
 最清晰（高彩 + 原画 + 15 fps）
 ──────────
 双色·灰度（文本优化）
@@ -784,6 +784,7 @@ Ready 之前不发 SetStream。
 自适应        采集密度 = 缩放 × B 的倍率（按 B 的物理像素，默认）
 原画          采集密度发 8，主机压到 A 自己的像素
 ──────────
+1 fps
 5 fps
 15 fps
 ```

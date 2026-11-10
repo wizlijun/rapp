@@ -143,7 +143,7 @@ final class GeometryTests: XCTestCase {
     func testPresets() {
         XCTAssertEqual(StreamPreset.leastTraffic.mode, .duogray)
         XCTAssertEqual(StreamPreset.leastTraffic.density, .adaptive)
-        XCTAssertEqual(StreamPreset.leastTraffic.fps, 5)
+        XCTAssertEqual(StreamPreset.leastTraffic.fps, 1)
         XCTAssertEqual(StreamPreset.sharpest.mode, .color16)
         XCTAssertEqual(StreamPreset.sharpest.density, .original)
         XCTAssertEqual(StreamPreset.sharpest.fps, 15)

@@ -3,7 +3,7 @@ import Foundation
 import RappCore
 
 let usage = """
-    usage: rapp-client [connect] "rapp://<host>[:port]/[<bundle-id>][?token=<secret>][&mode=gray4|color8|color16|duogray|duocolor][&fps=15|5]" [--token-env <VAR>] [--json]
+    usage: rapp-client [connect] "rapp://<host>[:port]/[<bundle-id>][?token=<secret>][&mode=gray4|color8|color16|duogray|duocolor][&fps=15|5|1]" [--token-env <VAR>] [--json]
            rapp-client version [--json]
     example: rapp-client "rapp://mac-a.local/com.apple.TextEdit?token=abc"
     """

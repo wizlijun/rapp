@@ -17,6 +17,8 @@ final class ProtocolTests: XCTestCase {
         .title("文档 2 — 已编辑"),
         .setStream(mode: .color16, fps: 15, density: 1),
         .setStream(mode: .duocolor, fps: 5, density: 1.25),
+        .setStream(mode: .duogray, fps: 1, density: 2),
+        .hello(token: "t", bundleID: "b", mode: .duogray, fps: 1, density: 1),
         .size(width: 1200, height: 750),
         .frame(FramePayload(mode: .color16, width: 130, height: 70, isFull: true, data: [1, 2, 3, 250])),
     ]
@@ -144,6 +146,10 @@ final class ProtocolTests: XCTestCase {
         let a = try RemoteAddress(url: "rapp://10.0.0.5:5000/com.x.Y?token=t&mode=color16&fps=5")
         XCTAssertEqual(a, RemoteAddress(host: "10.0.0.5", port: 5000, bundleID: "com.x.Y",
                                         token: "t", mode: .color16, fps: 5))
+    }
+
+    func testAddressAcceptsOneFps() throws {
+        XCTAssertEqual(try RemoteAddress(url: "rapp://h/b?token=t&fps=1").fps, 1)
     }
 
     func testAddressTwoToneModesAndIgnoredScale() throws {

@@ -150,7 +150,7 @@ public struct StreamPreset: Sendable {
     public let density: DensityChoice
     public let fps: UInt8
 
-    public static let leastTraffic = StreamPreset(mode: .duogray, density: .adaptive, fps: 5)
+    public static let leastTraffic = StreamPreset(mode: .duogray, density: .adaptive, fps: 1)
     public static let sharpest = StreamPreset(mode: .color16, density: .original, fps: 15)
 }
 

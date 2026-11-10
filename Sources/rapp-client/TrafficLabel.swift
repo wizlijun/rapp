@@ -24,11 +24,12 @@ final class TrafficLabel: NSTextField {
         ("原画", .original),
     ]
     private static let fpsItems: [(String, UInt8)] = [
+        ("1 fps", 1),
         ("5 fps", 5),
         ("15 fps", 15),
     ]
     private static let presetItems: [(String, StreamPreset)] = [
-        ("最省流（双色·灰度 + 自适应 + 5 fps）", .leastTraffic),
+        ("最省流（双色·灰度 + 自适应 + 1 fps）", .leastTraffic),
         ("最清晰（高彩 + 原画 + 15 fps）", .sharpest),
     ]
 

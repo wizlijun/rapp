@@ -26,7 +26,7 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     private let pid: pid_t
     private var configuredSize = CGSize.zero
     private var configuredTitleRow: CGFloat = 0
-    /// Frames per second (15 or 5) and capture pixels per point, as the client asked.
+    /// Frames per second (15, 5 or 1) and capture pixels per point, as the client asked.
     private var configuredFps: Int
     private var configuredDensity: Double
     private var stoppedByUs = false
