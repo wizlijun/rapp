@@ -18,6 +18,9 @@ final class Server {
     private let queue = DispatchQueue(label: "rapp.server")
     private var listener: NWListener?
     private var session: Session?
+    private let sideSlots = SideSlots()
+    private var sides: [ObjectIdentifier: SideConnection] = [:]
+    private var intakes: Set<Intake> = []
 
     init(options: HostServeOptions, output: WorkerOutput) {
         self.options = options
@@ -69,29 +72,137 @@ final class Server {
         }
     }
 
+    /// Every new connection first says what it is (spec §1.2): `hello` opens the
+    /// session, `fetch` and `put` are side connections of the running session.
     private func accept(_ connection: NWConnection) {
-        if session != nil {
-            output.log("rejected a connection: busy")
-            output.emit(.rejected(reason: "busy"))
-            connection.start(queue: queue)
-            connection.send(content: Data(Message.error("busy").encoded()),
-                            completion: .contentProcessed { _ in connection.cancel() })
-            return
-        }
-        let newSession = Session(connection: connection, token: options.token, boundApp: options.app,
-                                 output: output, queue: queue) { [weak self] reason, started in
+        let intake = Intake(connection: connection, queue: queue)
+        intakes.insert(intake)
+        intake.start { [weak self, intake] outcome in
             guard let self else { return }
-            if started {
-                self.output.log("session ended: \(reason)")
-                self.output.emit(.sessionEnded(reason: reason))
-            } else {
-                self.output.log("rejected a connection: \(reason)")
-                self.output.emit(.rejected(reason: reason))
+            self.intakes.remove(intake)
+            switch outcome {
+            case let .rejected(reason, notify):
+                self.reject(connection, reason, notify: notify)
+            case let .first(message, parser):
+                self.route(connection, message, parser)
             }
-            self.session = nil
         }
-        session = newSession
-        newSession.start()
+    }
+
+    private func reject(_ connection: NWConnection, _ reason: String, notify: Bool) {
+        output.log("rejected a connection: \(reason)")
+        output.emit(.rejected(reason: reason))
+        if notify {
+            connection.send(content: Data(Message.error(reason).encoded()),
+                            completion: .contentProcessed { _ in connection.cancel() })
+            queue.asyncAfter(deadline: .now() + 1) { connection.cancel() }
+        } else {
+            connection.cancel()
+        }
+    }
+
+    private func route(_ connection: NWConnection, _ message: Message, _ parser: MessageParser) {
+        switch message {
+        case .hello:
+            if session != nil {
+                reject(connection, "busy", notify: true)
+                return
+            }
+            let newSession = Session(connection: connection, token: options.token, boundApp: options.app,
+                                     output: output, queue: queue) { [weak self] reason, started in
+                guard let self else { return }
+                if started {
+                    self.output.log("session ended: \(reason)")
+                    self.output.emit(.sessionEnded(reason: reason))
+                } else {
+                    self.output.log("rejected a connection: \(reason)")
+                    self.output.emit(.rejected(reason: reason))
+                }
+                self.session = nil
+            }
+            session = newSession
+            newSession.start(first: message, parser: parser)
+        case .fetch, .put:
+            var key: ObjectIdentifier?
+            let side = SideConnection(connection: connection, parser: parser, first: message, token: options.token,
+                                      slots: sideSlots, transfers: session?.transfers, output: output,
+                                      queue: queue) { [weak self] in
+                if let key { self?.sides[key] = nil }
+            }
+            key = ObjectIdentifier(side)
+            sides[ObjectIdentifier(side)] = side
+            side.start()
+        default:
+            reject(connection, "first message must be hello, fetch or put", notify: true)
+        }
+    }
+}
+
+/// Reads a new connection's first message; a connection that says nothing for 5 s is dropped.
+final class Intake: Hashable {
+    enum Outcome {
+        case first(Message, MessageParser)
+        case rejected(String, notify: Bool)
+    }
+
+    private let connection: NWConnection
+    private let queue: DispatchQueue
+    private var parser = MessageParser()
+    private var done = false
+    private var onOutcome: ((Outcome) -> Void)?
+
+    init(connection: NWConnection, queue: DispatchQueue) {
+        self.connection = connection
+        self.queue = queue
+    }
+
+    static func == (a: Intake, b: Intake) -> Bool { a === b }
+    func hash(into hasher: inout Hasher) { hasher.combine(ObjectIdentifier(self)) }
+
+    func start(_ onOutcome: @escaping (Outcome) -> Void) {
+        self.onOutcome = onOutcome
+        connection.start(queue: queue)
+        receive()
+        // A client that connects and says nothing must not hold a connection open.
+        queue.asyncAfter(deadline: .now() + 5) { [weak self] in
+            self?.finish(.rejected("no hello received", notify: true))
+        }
+    }
+
+    private func finish(_ outcome: Outcome) {
+        guard !done else { return }
+        done = true
+        let callback = onOutcome
+        onOutcome = nil
+        callback?(outcome)
+    }
+
+    private func receive() {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, isComplete, error in
+            guard let self, !self.done else { return }
+            if let data, !data.isEmpty {
+                self.parser.append([UInt8](data))
+                do {
+                    if let message = try self.parser.next() {
+                        self.finish(.first(message, self.parser))
+                        return
+                    }
+                } catch let mismatch as ProtocolVersionMismatch {
+                    self.finish(.rejected(mismatch.description, notify: true))
+                    return
+                } catch {
+                    self.finish(.rejected("bad data from client: \(describe(error))", notify: true))
+                    return
+                }
+            }
+            if let error {
+                self.finish(.rejected("connection error: \(error.localizedDescription)", notify: false))
+            } else if isComplete {
+                self.finish(.rejected("client disconnected", notify: false))
+            } else {
+                self.receive()
+            }
+        }
     }
 }
 
@@ -132,6 +243,9 @@ final class Session {
     private var injector: InputInjector?
     private var timer: DispatchSourceTimer?
     private var pollTimer: DispatchSourceTimer?
+    /// Clipboard history and uploads, from the moment capture is ready until the session ends.
+    private(set) var transfers: TransferStore?
+    private(set) var clipWatcher: ClipboardWatcher?
 
     /// The menu bar last sent; picks are checked against it.
     private var menuBar: [MenuItem]?
@@ -162,7 +276,8 @@ final class Session {
         self.onEnd = onEnd
     }
 
-    func start() {
+    /// Takes over a connection whose first message (a `hello`) and any bytes after it are already read.
+    func start(first: Message, parser: MessageParser) {
         connection.stateUpdateHandler = { [weak self] state in
             switch state {
             case let .failed(error): self?.end("connection failed: \(error.localizedDescription)")
@@ -170,13 +285,28 @@ final class Session {
             default: break
             }
         }
-        connection.start(queue: queue)
+        self.parser = parser
+        handle(first)
+        if ended { return }
+        if !drain() { return }
         receive()
-        // A client that connects and says nothing must not block the only slot.
-        queue.asyncAfter(deadline: .now() + 5) { [weak self] in
-            guard let self, !self.greeted else { return }
-            self.fail("no hello received")
+    }
+
+    /// Handles every complete message buffered; false when the session ended.
+    private func drain() -> Bool {
+        do {
+            while let message = try parser.next() {
+                handle(message)
+                if ended { return false }
+            }
+        } catch let mismatch as ProtocolVersionMismatch {
+            fail(mismatch.description)
+            return false
+        } catch {
+            fail("bad data from client: \(describe(error))")
+            return false
         }
+        return true
     }
 
     // MARK: Receiving
@@ -186,18 +316,7 @@ final class Session {
             guard let self, !self.ended else { return }
             if let data, !data.isEmpty {
                 self.parser.append([UInt8](data))
-                do {
-                    while let message = try self.parser.next() {
-                        self.handle(message)
-                        if self.ended { return }
-                    }
-                } catch let mismatch as ProtocolVersionMismatch {
-                    self.fail(mismatch.description)
-                    return
-                } catch {
-                    self.fail("bad data from client: \(describe(error))")
-                    return
-                }
+                if !self.drain() { return }
             }
             if let error {
                 self.end("connection error: \(error.localizedDescription)")
@@ -348,6 +467,7 @@ final class Session {
                     height: UInt16(clamping: Int(display.height.rounded()))))
         tableChanged(table)
         scheduleMenuRead(after: 0)
+        startClipboard(app: app)
 
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + 1, repeating: 1.0)
@@ -364,6 +484,19 @@ final class Session {
         }
         poll.resume()
         pollTimer = poll
+    }
+
+    private func startClipboard(app: NSRunningApplication) {
+        let store = ClipStore(changeCount: NSPasteboard.general.changeCount)
+        let uploads = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads/rapp")
+        transfers = TransferStore(clips: store, uploads: uploads)
+        let watcher = ClipboardWatcher(pid: app.processIdentifier, store: store, queue: queue,
+                                       log: { [output] in output.log($0) }) { [weak self] id, info in
+            guard let self, !self.ended else { return }
+            self.send(.clip(id: id, info))
+        }
+        watcher.start()
+        clipWatcher = watcher
     }
 
     /// Sends the table if it changed, and follows the windows with the
@@ -563,6 +696,9 @@ final class Session {
         timer = nil
         pollTimer?.cancel()
         pollTimer = nil
+        clipWatcher?.stop()
+        clipWatcher = nil
+        transfers = nil
         capture?.stop()
         capture = nil
         injector = nil
