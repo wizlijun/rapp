@@ -109,5 +109,5 @@
 - [x] O3 service：§4.1 事件、worker stderr 转写、`transfer`/`rejected` 转写、IPC `history`、status 带 `log_dir`、launchd.log 清理。验证：service 集成测试
 - [x] O4 hub：§4.4 事件、client stderr 转写、上报 `name`、side 标记。验证：hub 集成测试
 - [x] O5 Swift：`--json` 不写 `[stats]` 文本；host 发 `transfer` 事件。验证：`./scripts/check.sh` 末行 `EXIT=0`
-- [ ] O6 GUI：访问记录、打开日志文件夹；plist 和 postinstall 加 StandardOut/ErrorPath。验证：`flutter analyze`、`flutter test`
+- [x] O6 GUI：访问记录、打开日志文件夹；plist 和 postinstall 加 StandardOut/ErrorPath。验证：`flutter analyze`、`flutter test`
 - [ ] O7 整体审查、修 Critical/Important、打包

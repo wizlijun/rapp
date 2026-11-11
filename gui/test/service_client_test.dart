@@ -16,6 +16,7 @@ class FakeService {
   final _all = <Socket>[];
   int sessions = 0;
   Map<String, dynamic> perms = {'screen_recording': true, 'accessibility': false};
+  List<Map<String, dynamic>> history = [];
 
   int get port => server.port;
 
@@ -53,6 +54,8 @@ class FakeService {
         case 'set_relay':
         case 'kick':
           s.write('{"ok":true}\n');
+        case 'history':
+          s.write('${jsonEncode({'ok': true, 'events': history})}\n');
         case 'permissions':
           s.write('${jsonEncode({'ok': true, 'permissions': perms})}\n');
         default:
@@ -67,6 +70,7 @@ class FakeService {
         'name': 'bruce-mac',
         'password': 'ab12cd34',
         'relay': 'connected',
+        'log_dir': '/Users/u/Library/Logs/rapp',
         'permissions': perms,
         'sessions': [
           for (var i = 0; i < sessions; i++)
@@ -162,6 +166,17 @@ void main() {
       expect(svc.received[1]['password'], 'newpw');
       expect(svc.received[2], {'cmd': 'set_relay', 'relay': 'vps:21116', 'key': 'K'});
       expect(svc.received[3], {'cmd': 'kick', 'sid': 5});
+      await c.close();
+    });
+
+    test('history asks for a limit and returns the events; status carries log_dir', () async {
+      svc.history = [
+        {'ev': 'auth_fail', 'peer': 'p'},
+      ];
+      final c = await ServiceConnection.connect(token: 'tok-1', port: svc.port);
+      expect((await c.status()).logDir, '/Users/u/Library/Logs/rapp');
+      expect(await c.history(limit: 7), svc.history);
+      expect(svc.received.last, {'cmd': 'history', 'limit': 7});
       await c.close();
     });
 

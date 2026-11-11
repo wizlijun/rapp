@@ -20,6 +20,19 @@ void main() {
     });
   });
 
+  group('logDir (same rules as rapp_net::log::log_dir)', () {
+    test('RAPP_LOG_DIR, then RAPP_HOME/logs', () {
+      expect(logDir({'RAPP_LOG_DIR': '/l', 'RAPP_HOME': '/h', 'HOME': '/Users/u'}, 'macos'), '/l');
+      expect(logDir({'RAPP_HOME': '/h', 'HOME': '/Users/u'}, 'macos'), '/h/logs');
+    });
+    test('platform defaults', () {
+      expect(logDir({'HOME': '/Users/u'}, 'macos'), '/Users/u/Library/Logs/rapp');
+      expect(logDir({'HOME': '/home/u', 'XDG_STATE_HOME': '/st'}, 'linux'), '/st/rapp');
+      expect(logDir({'HOME': '/home/u'}, 'linux'), '/home/u/.local/state/rapp');
+      expect(logDir({'LOCALAPPDATA': r'C:\L'}, 'windows'), r'C:\L\rapp\logs');
+    });
+  });
+
   group('binDir / findBinary', () {
     test('RAPP_BIN_DIR wins over executable dir', () {
       expect(binDir({'RAPP_BIN_DIR': '/bins'}, '/A/rapp.app/Contents/MacOS/rapp'), '/bins');

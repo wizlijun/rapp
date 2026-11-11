@@ -68,7 +68,21 @@ void main() {
     });
   });
 
+  group('openFolderCommand', () {
+    test('open on macOS, explorer on Windows, xdg-open elsewhere', () {
+      expect('${openFolderCommand('/l', 'macos')}', 'open /l');
+      expect('${openFolderCommand(r'C:\l', 'windows')}', r'explorer C:\l');
+      expect('${openFolderCommand('/l', 'linux')}', 'xdg-open /l');
+    });
+  });
+
   group('launchAgentPlist', () {
+    test('sends launchd stdout and stderr to the log file when given', () {
+      final p = launchAgentPlist('/x/rapp-service', logPath: '/Users/u/Library/Logs/rapp/launchd.log');
+      expect(p, contains('<key>StandardOutPath</key>\n\t<string>/Users/u/Library/Logs/rapp/launchd.log</string>'));
+      expect(p, contains('<key>StandardErrorPath</key>\n\t<string>/Users/u/Library/Logs/rapp/launchd.log</string>'));
+    });
+
     test('runs rapp-service with RunAtLoad and KeepAlive', () {
       final p = launchAgentPlist('/Applications/rapp.app/Contents/MacOS/rapp-service');
       expect(p, startsWith('<?xml version="1.0" encoding="UTF-8"?>'));
@@ -81,6 +95,7 @@ void main() {
       expect(p, contains('<key>RunAtLoad</key>\n\t<true/>'));
       expect(p, contains('<key>KeepAlive</key>\n\t<true/>'));
       expect(p, isNot(contains('EnvironmentVariables')));
+      expect(p, isNot(contains('StandardOutPath')));
       expect(p.trimRight(), endsWith('</plist>'));
     });
 

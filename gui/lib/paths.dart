@@ -17,6 +17,24 @@ String configDir(Map<String, String> env, String os) {
   }
 }
 
+/// Where the rapp logs go: the same rules as `rapp_net::log::log_dir` (observability spec §3).
+String logDir(Map<String, String> env, String os) {
+  String? v(String k) => (env[k] == null || env[k]!.isEmpty) ? null : env[k];
+  final dir = v('RAPP_LOG_DIR');
+  if (dir != null) return dir;
+  final rappHome = v('RAPP_HOME');
+  if (rappHome != null) return '$rappHome/logs';
+  final home = v('HOME') ?? '.';
+  switch (os) {
+    case 'macos':
+      return '$home/Library/Logs/rapp';
+    case 'windows':
+      return '${v('LOCALAPPDATA') ?? home}\\rapp\\logs';
+    default:
+      return '${v('XDG_STATE_HOME') ?? '$home/.local/state'}/rapp';
+  }
+}
+
 /// `RAPP_BIN_DIR`, else the directory of the running executable
 /// (on macOS `rapp.app/Contents/MacOS`).
 String binDir(Map<String, String> env, String executable) {

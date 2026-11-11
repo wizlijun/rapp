@@ -12,8 +12,11 @@ fi
 USER_ID=$(id -u "$USER_NAME")
 USER_HOME=$(dscl . -read "/Users/$USER_NAME" NFSHomeDirectory | awk '{print $2}')
 PLIST=$USER_HOME/Library/LaunchAgents/$LABEL.plist
+# launchd opens this before the service starts, so the folder must exist (observability spec §3).
+LOGS=$USER_HOME/Library/Logs/rapp
 
 sudo -u "$USER_NAME" mkdir -p "$USER_HOME/Library/LaunchAgents"
+sudo -u "$USER_NAME" mkdir -p -m 700 "$LOGS"
 sudo -u "$USER_NAME" tee "$PLIST" >/dev/null <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -25,6 +28,10 @@ sudo -u "$USER_NAME" tee "$PLIST" >/dev/null <<PLIST
 	<array>
 		<string>$APP/Contents/MacOS/rapp-service</string>
 	</array>
+	<key>StandardOutPath</key>
+	<string>$LOGS/launchd.log</string>
+	<key>StandardErrorPath</key>
+	<string>$LOGS/launchd.log</string>
 	<key>RunAtLoad</key>
 	<true/>
 	<key>KeepAlive</key>

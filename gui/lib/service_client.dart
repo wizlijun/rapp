@@ -34,6 +34,7 @@ class ServiceStatus {
     this.accessibility = false,
     this.sessions = const [],
     this.lanIds = const [],
+    this.logDir,
   });
 
   final String? id;
@@ -47,6 +48,9 @@ class ServiceStatus {
 
   /// `id@ip[:port]`, one per local IPv4 (§3): what B types when there is no relay.
   final List<String> lanIds;
+
+  /// Where the service writes `service.log` (「打开日志文件夹」).
+  final String? logDir;
 
   /// The ID as people should type it: the bare ID once the relay is connected,
   /// otherwise the `id@ip` forms (bare ID if the machine has no address).
@@ -64,6 +68,7 @@ class ServiceStatus {
       screenRecording: perms['screen_recording'] == true,
       accessibility: perms['accessibility'] == true,
       lanIds: (m['lan_ids'] as List? ?? const []).map((e) => '$e').toList(),
+      logDir: m['log_dir']?.toString(),
       sessions: (m['sessions'] as List? ?? const [])
           .whereType<Map>()
           .map((s) => ServiceSession(s['sid'] as Object, '${s['peer'] ?? ''}', '${s['app'] ?? ''}',
@@ -123,6 +128,12 @@ class ServiceConnection {
   Future<void> setRelay(String relay, String key) => request({'cmd': 'set_relay', 'relay': relay, 'key': key});
   Future<void> kick(Object sid) => request({'cmd': 'kick', 'sid': sid});
   Future<void> subscribe() => request({'cmd': 'subscribe'});
+
+  /// 访问记录, newest first (observability spec §6).
+  Future<List<Map<String, dynamic>>> history({int limit = 50}) async {
+    final r = await request({'cmd': 'history', 'limit': limit});
+    return (r['events'] as List? ?? const []).whereType<Map<String, dynamic>>().toList();
+  }
 
   /// Re-checks A's permissions; with [prompt], macOS is asked for what is missing.
   Future<void> permissions({bool prompt = false}) => request({'cmd': 'permissions', 'prompt': prompt});
@@ -272,6 +283,8 @@ class ServiceMonitor extends ChangeNotifier {
     await _need().kick(sid);
     await refresh();
   }
+
+  Future<List<Map<String, dynamic>>> history({int limit = 50}) => _need().history(limit: limit);
 
   Future<void> checkPermissions({bool prompt = false}) async {
     await _need().permissions(prompt: prompt);

@@ -1,7 +1,10 @@
 // The main window: 本机 / 主机 / 会话, with a banner when rapp-hub is missing.
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import 'hub_client.dart';
+import 'pages/access_log_section.dart';
 import 'pages/hosts_section.dart';
 import 'pages/local_section.dart';
 import 'pages/section_card.dart';
@@ -28,7 +31,18 @@ class HomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final h = hub;
-    final local = LocalSection(monitor: monitor, control: control, configDir: configDir);
+    final local = Column(children: [
+      LocalSection(monitor: monitor, control: control, configDir: configDir),
+      ListenableBuilder(
+        listenable: monitor,
+        builder: (context, _) => AccessLogSection(
+          load: monitor.history,
+          logDir: monitor.status?.logDir,
+          openFolder: _openFolder,
+          reload: monitor,
+        ),
+      ),
+    ]);
     final Widget hosts, sessions;
     if (h == null) {
       const off = [Padding(padding: EdgeInsets.all(8), child: Text('rapp-hub 不可用'))];
@@ -55,6 +69,11 @@ class HomePage extends StatelessWidget {
       ]),
     );
   }
+}
+
+Future<void> _openFolder(String dir) async {
+  final c = openFolderCommand(dir, Platform.operatingSystem);
+  await Process.run(c.exe, c.args);
 }
 
 /// Red strip for "rapp-hub not found / exited", plus unsolicited hub errors.

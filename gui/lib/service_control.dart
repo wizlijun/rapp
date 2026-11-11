@@ -2,6 +2,8 @@
 // Command construction and the plist are pure; only [ServiceController] runs anything.
 import 'dart:io';
 
+import 'paths.dart';
+
 enum ServiceAction { start, stop, restart }
 
 const serviceLabel = 'com.rapp.service';
@@ -55,8 +57,16 @@ List<ShellCommand> serviceCommands(
 String _xml(String s) =>
     s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 
-/// LaunchAgent that keeps [serviceExe] running for the logged-in user.
-String launchAgentPlist(String serviceExe, {Map<String, String> environment = const {}}) {
+/// Shows [dir] in the platform's file manager (「打开日志文件夹」).
+ShellCommand openFolderCommand(String dir, String os) => switch (os) {
+      'macos' => ShellCommand('open', [dir]),
+      'windows' => ShellCommand('explorer', [dir]),
+      _ => ShellCommand('xdg-open', [dir]),
+    };
+
+/// LaunchAgent that keeps [serviceExe] running for the logged-in user; with [logPath],
+/// launchd sends the service's stdout and stderr there.
+String launchAgentPlist(String serviceExe, {Map<String, String> environment = const {}, String? logPath}) {
   final b = StringBuffer()
     ..writeln('<?xml version="1.0" encoding="UTF-8"?>')
     ..writeln('<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">')
@@ -78,6 +88,13 @@ String launchAgentPlist(String serviceExe, {Map<String, String> environment = co
         ..writeln('\t\t<string>${_xml(e.value)}</string>');
     }
     b.writeln('\t</dict>');
+  }
+  if (logPath != null) {
+    for (final k in ['StandardOutPath', 'StandardErrorPath']) {
+      b
+        ..writeln('\t<key>$k</key>')
+        ..writeln('\t<string>${_xml(logPath)}</string>');
+    }
   }
   b
     ..writeln('\t<key>RunAtLoad</key>')
@@ -125,8 +142,11 @@ class ServiceController {
   /// The GUI owns the plist (§4); rewrite it when the bundle moved.
   void _writePlist(String home) {
     final rappHome = env['RAPP_HOME'];
+    // launchd opens the log before the service runs, so its folder must already exist.
+    final logs = Directory(logDir({...env, 'HOME': home}, 'macos'))..createSync(recursive: true);
     final content = launchAgentPlist(serviceExe,
-        environment: {if (rappHome != null && rappHome.isNotEmpty) 'RAPP_HOME': rappHome});
+        environment: {if (rappHome != null && rappHome.isNotEmpty) 'RAPP_HOME': rappHome},
+        logPath: '${logs.path}/launchd.log');
     final f = File(launchAgentPlistPath(home));
     if (f.existsSync() && f.readAsStringSync() == content) return;
     f.parent.createSync(recursive: true);
