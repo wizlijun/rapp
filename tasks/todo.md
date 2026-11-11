@@ -111,3 +111,16 @@
 - [x] O5 Swift：`--json` 不写 `[stats]` 文本；host 发 `transfer` 事件。验证：`./scripts/check.sh` 末行 `EXIT=0`
 - [x] O6 GUI：访问记录、打开日志文件夹；plist 和 postinstall 加 StandardOut/ErrorPath。验证：`flutter analyze`、`flutter test`
 - [x] O7 整体审查、修 Critical/Important、打包
+
+## 主界面 S1：外壳与设计语言 + 启动全屏（计划：`docs/superpowers/plans/2026-11-12-rapp-main-window-s1.md`）
+
+- [ ] 1 主题 token、四套主题、gui.json 偏好
+- [ ] 2 状态灯、按钮、两次确认
+- [ ] 3 hub `focus` 命令 + client 提到最前
+- [ ] 4 `HubClient.focus` 与会话分组、上一个/下一个
+- [ ] 5 `MainState`
+- [ ] 6 顶栏、舞台占位、主题背景
+- [ ] 7 左侧面板外框、会话标签、主题下拉、图例
+- [ ] 8 设备标签（本机、远程 app、添加设备）
+- [ ] 9 主窗口组装、启动全屏、替换 HomePage
+- [ ] 10 实机检查、打包、记录
