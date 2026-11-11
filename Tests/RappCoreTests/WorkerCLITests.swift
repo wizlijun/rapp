@@ -150,7 +150,7 @@ final class WorkerCLITests: XCTestCase {
     }
 
     func testCommandOutputs() {
-        XCTAssertEqual(versionJSON(), #"{"protocol":4,"version":"0.2.0"}"#)
+        XCTAssertEqual(versionJSON(), #"{"protocol":5,"version":"0.2.0"}"#)
         XCTAssertEqual(checkJSON(screenRecording: true, accessibility: false),
                        #"{"accessibility":false,"screen_recording":true}"#)
         XCTAssertEqual(appsJSON([SharedApp(app: "com.apple.Safari", name: "Safari")]),

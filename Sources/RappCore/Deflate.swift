@@ -7,7 +7,7 @@ public struct CodecError: Error, Equatable, CustomStringConvertible {
     public var description: String { message }
 }
 
-private let chunkSize = 64 * 1024
+private let zlibBufferSize = 64 * 1024
 
 private func makeStream() -> UnsafeMutablePointer<z_stream> {
     // zlib keeps a back-pointer to the z_stream, so it needs a stable address.
@@ -34,7 +34,7 @@ public final class DeflateStream {
 
     public func compress(_ input: [UInt8]) -> [UInt8] {
         var output = [UInt8]()
-        var buffer = [UInt8](repeating: 0, count: chunkSize)
+        var buffer = [UInt8](repeating: 0, count: zlibBufferSize)
         input.withUnsafeBufferPointer { inPtr in
             strm.pointee.next_in = UnsafeMutablePointer(mutating: inPtr.baseAddress)
             strm.pointee.avail_in = uInt(inPtr.count)
@@ -79,7 +79,7 @@ public final class InflateStream {
     public func decompress(_ input: [UInt8], limit: Int = .max) throws -> [UInt8] {
         var output = [UInt8]()
         var tooLarge = false
-        var buffer = [UInt8](repeating: 0, count: chunkSize)
+        var buffer = [UInt8](repeating: 0, count: zlibBufferSize)
         var failure: Int32 = Z_OK
         input.withUnsafeBufferPointer { inPtr in
             strm.pointee.next_in = UnsafeMutablePointer(mutating: inPtr.baseAddress)

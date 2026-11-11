@@ -1,6 +1,6 @@
 import Foundation
 
-public let protocolVersion: UInt8 = 4
+public let protocolVersion: UInt8 = 5
 
 /// A client's `Hello` carried a different protocol version than this build speaks.
 public struct ProtocolVersionMismatch: Error, CustomStringConvertible {
@@ -99,6 +99,13 @@ public enum Message: Equatable {
     case move(window: UInt32, x: Float, y: Float)                                            // 16, client -> host (canvas)
     case menuBar([MenuItem])                                                                 // 17, host -> client
     case menuPick([UInt16])                                                                  // 18, client -> host
+    case clip(id: UInt32, ClipInfo)                                                          // 19, host -> client
+    case paste(seq: UInt32, PasteSource)                                                     // 20, client -> host
+    case pasted(seq: UInt32, error: String)                                                  // 21, host -> client
+    case fetch(token: String, clip: UInt32, file: UInt16, offset: UInt64)                    // 22, side connection, carries the version
+    case put(token: String, item: UInt32, kind: ClipKind, uti: String, name: String, total: UInt64)  // 23, side connection, carries the version
+    case transferStart(UInt64)                                                               // 24, side connection
+    case chunk([UInt8])                                                                      // 25, side connection, payload is the data
 
     public func encoded() -> [UInt8] {
         var w = Writer()
@@ -158,6 +165,36 @@ public enum Message: Equatable {
             type = 18
             w.u8(UInt8(clamping: path.count))
             for i in path { w.u16(i) }
+        case let .clip(id, info):
+            type = 19
+            w.u32(id); w.clipInfo(info)
+        case let .paste(seq, source):
+            type = 20
+            w.u32(seq)
+            switch source {
+            case let .text(t):
+                precondition(t.utf8.count < inlinePasteLimit, "paste text too long")
+                w.u8(0); w.string(t)
+            case let .item(n):
+                w.u8(1); w.u32(n)
+            }
+        case let .pasted(seq, error):
+            type = 21
+            w.u32(seq); w.string(error)
+        case let .fetch(token, clip, file, offset):
+            type = 22
+            w.u8(protocolVersion); w.string(token); w.u32(clip); w.u16(file); w.u64(offset)
+        case let .put(token, item, kind, uti, name, total):
+            type = 23
+            precondition(kind != .unsupported, "put cannot carry an unsupported clip")
+            w.u8(protocolVersion); w.string(token); w.u32(item); w.u8(kind.rawValue); w.string(uti); w.string(name); w.u64(total)
+        case let .transferStart(n):
+            type = 24
+            w.u64(n)
+        case let .chunk(data):
+            type = 25
+            precondition(data.count <= chunkSize, "chunk too large")
+            w.bytes.append(contentsOf: data)
         }
         precondition(w.bytes.count <= maxMessageLength, "message too large")
         var out: [UInt8] = [type]
@@ -221,6 +258,36 @@ public enum Message: Equatable {
             let n = Int(try r.u8())
             guard (1...maxMenuPickDepth).contains(n) else { throw CodecError("menu path must have 1 to 8 levels") }
             message = .menuPick(try (0..<n).map { _ in try r.u16() })
+        case 19:
+            message = .clip(id: try r.u32(), try r.clipInfo())
+        case 20:
+            let seq = try r.u32()
+            switch try r.u8() {
+            case 0:
+                let t = try r.string()
+                guard t.utf8.count < inlinePasteLimit else { throw CodecError("paste text must be under \(inlinePasteLimit) bytes") }
+                message = .paste(seq: seq, .text(t))
+            case 1:
+                message = .paste(seq: seq, .item(try r.u32()))
+            default:
+                throw CodecError("unknown paste source")
+            }
+        case 21:
+            message = .pasted(seq: try r.u32(), error: try r.string())
+        case 22:
+            try r.version()
+            message = .fetch(token: try r.string(), clip: try r.u32(), file: try r.u16(), offset: try r.u64())
+        case 23:
+            try r.version()
+            let token = try r.string(), item = try r.u32()
+            guard let kind = ClipKind(rawValue: try r.u8()), kind != .unsupported else { throw CodecError("unknown put kind") }
+            message = .put(token: token, item: item, kind: kind, uti: try r.string(), name: try r.string(), total: try r.u64())
+        case 24:
+            message = .transferStart(try r.u64())
+        case 25:
+            let data = r.rest()
+            guard data.count <= chunkSize else { throw CodecError("chunk larger than \(chunkSize) bytes") }
+            message = .chunk(data)
         default:
             throw CodecError("unknown message type \(type)")
         }
@@ -229,7 +296,7 @@ public enum Message: Equatable {
     }
 }
 
-private let knownTypes: Set<UInt8> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 14, 15, 16, 17, 18]
+private let knownTypes: Set<UInt8> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
 
 /// Turns a byte stream into messages. Feed it whatever the socket delivers
 /// with `append`, then call `next()` until it returns nil.
@@ -274,6 +341,24 @@ private struct Writer {
             menuItems(i.children)
         }
     }
+    mutating func clipInfo(_ info: ClipInfo) {
+        switch info {
+        case let .text(t, truncated):
+            let utf8 = Array(t.utf8)
+            precondition(utf8.count <= maxClipText, "clip text too long")
+            u8(ClipKind.text.rawValue); u8(truncated ? 1 : 0); u32(UInt32(utf8.count)); bytes.append(contentsOf: utf8)
+        case let .image(width, height, n):
+            u8(ClipKind.image.rawValue); u16(width); u16(height); u64(n)
+        case let .files(files):
+            precondition(files.count <= maxClipFiles, "too many clip files")
+            u8(ClipKind.files.rawValue); u16(UInt16(files.count))
+            for f in files { string(f.name); u64(f.bytes) }
+        case let .data(uti, n):
+            u8(ClipKind.data.rawValue); string(uti); u64(n)
+        case let .unsupported(why):
+            u8(ClipKind.unsupported.rawValue); string(why)
+        }
+    }
     mutating func string(_ s: String) {
         let utf8 = Array(s.utf8)
         precondition(utf8.count <= 0xFFFF, "string too long")
@@ -305,6 +390,34 @@ private struct Reader {
     }
 
     mutating func u8() throws -> UInt8 { try take(1).first! }
+
+    /// The version byte that opens `fetch` and `put`.
+    mutating func version() throws {
+        let v = try u8()
+        guard v == protocolVersion else { throw ProtocolVersionMismatch(client: v) }
+    }
+
+    mutating func clipInfo() throws -> ClipInfo {
+        guard let kind = ClipKind(rawValue: try u8()) else { throw CodecError("unknown clip kind") }
+        switch kind {
+        case .text:
+            let flag = try u8()
+            guard flag <= 1 else { throw CodecError("bad truncated flag") }
+            let n = Int(try u32())
+            guard n <= maxClipText else { throw CodecError("clip text larger than \(maxClipText) bytes") }
+            return .text(try utf8(Array(try take(n))), truncated: flag == 1)
+        case .image:
+            return .image(width: try u16(), height: try u16(), bytes: try u64())
+        case .files:
+            let n = Int(try u16())
+            guard n <= maxClipFiles else { throw CodecError("more than \(maxClipFiles) clip files") }
+            return .files(try (0..<n).map { _ in ClipFile(name: try string(), bytes: try u64()) })
+        case .data:
+            return .data(uti: try string(), bytes: try u64())
+        case .unsupported:
+            return .unsupported(try string())
+        }
+    }
     mutating func u16() throws -> UInt16 { UInt16(try uint(2)) }
     mutating func u32() throws -> UInt32 { UInt32(try uint(4)) }
     mutating func rect() throws -> CanvasRect { CanvasRect(x: try f32(), y: try f32(), w: try f32(), h: try f32()) }

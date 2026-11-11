@@ -274,7 +274,7 @@ final class Session {
             }
             // Picks usually change the menus (a new window, a toggled check mark).
             scheduleMenuRead(after: 1)
-        case .ready, .error, .frame, .windows, .menuBar:
+        case .ready, .error, .frame, .windows, .menuBar, .clip, .pasted, .paste, .fetch, .put, .transferStart, .chunk:
             fail("unexpected message from client")
         }
     }

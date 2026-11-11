@@ -44,6 +44,21 @@ final class ProtocolTests: XCTestCase {
         .setStream(mode: .color16, fps: 30, density: 2),
         .hello(token: "t", bundleID: "b", mode: .duogray, fps: 1, density: 1),
         .frame(region: CanvasRect(x: 0.5, y: 8, w: 64, h: 64), FramePayload(mode: .color16, width: 130, height: 70, isFull: true, data: [1, 2, 3, 250])),
+        .clip(id: 1, .text("你好😀", truncated: false)),
+        .clip(id: 0xFFFF_FFFF, .text("", truncated: true)),
+        .clip(id: 2, .image(width: 1280, height: 720, bytes: 348_160)),
+        .clip(id: 3, .files([ClipFile(name: "app.log", bytes: 2_411_724), ClipFile(name: "空 文件", bytes: 0)])),
+        .clip(id: 4, .data(uti: "com.adobe.pdf", bytes: 81_920)),
+        .clip(id: 5, .unsupported("文件夹（不支持）")),
+        .paste(seq: 1, .text("贴😀")),
+        .paste(seq: 2, .item(7)),
+        .pasted(seq: 2, error: ""),
+        .pasted(seq: 3, error: "target not frontmost"),
+        .fetch(token: "t", clip: 9, file: 99, offset: 1 << 40),
+        .put(token: "t", item: 3, kind: .files, uti: "public.data", name: "app.log", total: 5),
+        .transferStart(0),
+        .chunk([]),
+        .chunk([UInt8](repeating: 7, count: chunkSize)),
     ]
 
     func testOldClientGetsVersionError() {
@@ -53,7 +68,7 @@ final class ProtocolTests: XCTestCase {
         p.append([1, UInt8(payload.count), 0, 0, 0] + payload)
         XCTAssertThrowsError(try p.next()) { error in
             XCTAssertEqual((error as? ProtocolVersionMismatch)?.client, 2)
-            XCTAssertEqual("\(error)", "protocol version mismatch: host 4, client 2 (update both sides)")
+            XCTAssertEqual("\(error)", "protocol version mismatch: host 5, client 2 (update both sides)")
         }
     }
 
@@ -267,6 +282,48 @@ final class ProtocolTests: XCTestCase {
         assertRejects(frame(7, [9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]), "unknown mouse kind")
         assertRejects(frame(8, [1, 0, 0, 0, 0, 0, 0xC0, 0x7F, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), "NaN coordinate")
         assertRejects(frame(16, [1, 0, 0, 0, 0, 0, 0x80, 0x7F, 0, 0, 0, 0]), "infinite move")
+    }
+
+    func testHelloOfVersion4IsAMismatch() {
+        // version 4, token "a", bundle "b", gray4, fps 15, density 1.0
+        let payload: [UInt8] = [4, 1, 0, 0x61, 1, 0, 0x62, 0, 15, 0, 0, 0x80, 0x3F]
+        var p = MessageParser()
+        p.append(frame(1, payload))
+        XCTAssertThrowsError(try p.next()) { error in
+            XCTAssertEqual((error as? ProtocolVersionMismatch)?.client, 4)
+        }
+    }
+
+    func testFetchAndPutCarryTheVersion() {
+        let fetch = Message.fetch(token: "t", clip: 1, file: 0, offset: 0).encoded()
+        let put = Message.put(token: "t", item: 1, kind: .text, uti: "u", name: "n", total: 1).encoded()
+        XCTAssertEqual(fetch[5], 5)
+        XCTAssertEqual(put[5], 5)
+        for var bytes in [fetch, put] {
+            bytes[5] = 4
+            var p = MessageParser()
+            p.append(bytes)
+            XCTAssertThrowsError(try p.next()) { error in
+                XCTAssertEqual((error as? ProtocolVersionMismatch)?.client, 4)
+            }
+        }
+    }
+
+    func testBadV5PayloadsAreRejected() {
+        func u32(_ v: Int) -> [UInt8] { [UInt8(v & 0xFF), UInt8(v >> 8 & 0xFF), UInt8(v >> 16 & 0xFF), UInt8(v >> 24 & 0xFF)] }
+        func u16(_ v: Int) -> [UInt8] { [UInt8(v & 0xFF), UInt8(v >> 8 & 0xFF)] }
+        let zero8 = [UInt8](repeating: 0, count: 8)
+        let id = u32(1)
+        assertRejects(frame(19, id + [5, 0, 0]), "clip kind 5")
+        assertRejects(frame(19, id + [0, 0] + u32(maxClipText + 1) + [UInt8](repeating: 0x61, count: maxClipText + 1)), "clip text too long")
+        assertRejects(frame(19, id + [0, 0] + u32(10) + [0x61]), "clip text shorter than its length")
+        assertRejects(frame(19, id + [2] + u16(maxClipFiles + 1) + (0...maxClipFiles).flatMap { _ in u16(0) + zero8 }), "101 files")
+        assertRejects(frame(19, id + [0, 2] + u32(0)), "truncated flag 2")
+        assertRejects(frame(23, [5] + u16(1) + [0x74] + u32(1) + [4] + u16(0) + u16(0) + zero8), "put kind unsupported")
+        assertRejects(frame(20, id + [2] + u16(0)), "paste source 2")
+        assertRejects(frame(20, id + [0] + u16(inlinePasteLimit) + [UInt8](repeating: 0x61, count: inlinePasteLimit)), "paste text 60000 bytes")
+        assertRejects(frame(25, [UInt8](repeating: 0, count: chunkSize + 1)), "chunk too large")
+        assertRejects(frame(21, id + u16(0) + [0]), "pasted trailing byte")
     }
 
     func testConstantTimeEquals() {
