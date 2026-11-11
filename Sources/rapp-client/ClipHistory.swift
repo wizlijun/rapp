@@ -26,9 +26,12 @@ final class ClipHistory {
     }
 
     func add(id: UInt32, _ info: ClipInfo) {
-        if entries.first?.id == id { return }   // the host saw the same text again
-        entries.insert((id, info), at: 0)
-        if entries.count > Self.limit { entries.removeLast(entries.count - Self.limit) }
+        // The host re-sends its newest clip when the same text is copied again: no new entry, but
+        // B's clipboard and the 复制 feedback still follow.
+        if entries.first?.id != id {
+            entries.insert((id, info), at: 0)
+            if entries.count > Self.limit { entries.removeLast(entries.count - Self.limit) }
+        }
         if case let .text(text, _) = info, pasteboard.string != text { pasteboard.write(text: text) }
         onClip?()
     }
