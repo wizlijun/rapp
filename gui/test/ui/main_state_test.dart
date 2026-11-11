@@ -65,7 +65,9 @@ void main() {
       if (m['cmd'] == 'open') t.emit({...opened(1, '111', 'com.apple.Safari'), 'req': m['req']});
     };
     await s.openOrSwitch('111', 'com.apple.Safari', 'Safari');
+    s.togglePanel();
     await s.openOrSwitch('111', 'com.apple.Safari', 'Safari');
+    expect(s.panel, isNull);
     expect(t.sent.last, {'cmd': 'focus', 'sid': 1});
     expect(s.hint, '已切到 Safari');
     expect(opens(), 1);
@@ -78,22 +80,24 @@ void main() {
     await s.openOrSwitch('111', 'a', 'A');
     expect(s.sessionCount, 0);
     expect(s.current, isNull);
+    expect(s.currentKey, isNull);
     expect(s.hint, contains('offline'));
   });
 
   test('closing the current session moves to the next one', () async {
     t.emit(opened(1, '111', 'a'));
     t.emit(opened(2, '111', 'b'));
+    t.emit(opened(3, '111', 'c'));
     await pump();
-    s.select('111/a');
-    t.emit({'event': 'closed', 'sid': 1});
-    await pump();
-    expect(s.currentKey, '111/b');
-    expect(s.hint, '已结束 a');
+    s.select('111/b');
     t.emit({'event': 'closed', 'sid': 2});
     await pump();
-    expect(s.current, isNull);
+    expect(s.currentKey, '111/c');
     expect(s.hint, '已结束 b');
+    t.emit({'event': 'closed', 'sid': 3});
+    t.emit({'event': 'closed', 'sid': 1});
+    await pump();
+    expect(s.current, isNull);
   });
 
   test('select closes the panel', () async {
@@ -107,17 +111,25 @@ void main() {
   });
 
   test('hub death disables actions', () async {
+    t.emit(opened(1, '111', 'a'));
+    await pump();
+    s.select('111/a');
     await t.die();
     await pump();
     expect(s.hubUsable, isFalse);
     expect(s.hubProblem, 'rapp-hub 已退出 — 重启 rapp 以恢复');
+    final hint = s.hint;
     final before = t.sent.length;
-    await s.openOrSwitch('111', 'a', 'A');
+    await s.openOrSwitch('111', 'x', 'X');
     s.endCurrent();
     s.focusCurrent();
     await s.probe('111');
     await s.removeDevice('111');
     expect(t.sent.length, before);
+    expect(s.hint, hint);
+    expect(s.currentKey, isNull);
+    expect(s.sessionCount, 0);
+    expect(s.probes, isEmpty);
   });
 
   test('probe marks online/offline', () async {
@@ -162,6 +174,25 @@ void main() {
     s2.setTheme(RappTheme.avatar);
     expect(s2.prefs.theme, RappTheme.avatar);
     expect(s2.hint, startsWith('偏好没有保存：'));
+  });
+
+  test('app names survive a failed re-probe', () async {
+    t.onSend = (m) {
+      if (m['cmd'] == 'open') t.emit({...opened(1, '111', 'com.apple.Safari'), 'req': m['req']});
+      if (m['cmd'] == 'apps') t.emit({'event': 'error', 'req': m['req'], 'error': 'x'});
+    };
+    await s.openOrSwitch('111', 'com.apple.Safari', 'Safari');
+    await s.probe('111');
+    expect(s.current!.appName, 'Safari');
+  });
+
+  test('completing after dispose does not throw', () async {
+    s.probe('111');
+    final req = t.sent.last['req'];
+    s.dispose();
+    t.emit({'event': 'apps', 'req': req, 'id': '111', 'apps': []});
+    await pump();
+    await pump();
   });
 
   test('null hub reports its problem', () {

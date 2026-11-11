@@ -47,6 +47,14 @@ class MainState extends ChangeNotifier {
   final Map<String, SessionEntry> _pending = {};
   late List<SessionEntry> _entries;
   String? _lastError;
+  final Map<String, String> _appNames = {};
+  bool _disposed = false;
+
+  @override
+  void notifyListeners() {
+    if (_disposed) return;
+    super.notifyListeners();
+  }
 
   // ---- hub state ----
   bool get hubUsable => hub != null && hub!.alive;
@@ -107,10 +115,7 @@ class MainState extends ChangeNotifier {
   }
 
   String appName(String id, String app) {
-    for (final a in probes[id]?.apps?.apps ?? const <HubApp>[]) {
-      if (a.app == app) return a.name;
-    }
-    return app;
+    return _appNames['$id/$app'] ?? app;
   }
 
   List<SessionEntry> _mapEntries() {
@@ -171,12 +176,14 @@ class MainState extends ChangeNotifier {
       if (e.key == key && e.sid != null) {
         hub!.focus(e.sid!);
         currentKey = key;
+        panel = null;
         hint = '已切到 $appName';
         notifyListeners();
         return;
       }
     }
     if (_pending.containsKey(key)) return;
+    _appNames[key] = appName;
     _pending[key] = SessionEntry(
       sid: null,
       id: id,
@@ -223,13 +230,17 @@ class MainState extends ChangeNotifier {
   // ---- devices ----
   Future<void> probe(String id) async {
     if (!hubUsable) return;
-    probes[id] = DeviceProbe(Lamp.connecting, lampWord(Lamp.connecting));
+    probes[id] = DeviceProbe(Lamp.connecting, lampWord(Lamp.connecting),
+        apps: probes[id]?.apps);
     notifyListeners();
     try {
       final apps = await hub!.apps(id);
+      for (final a in apps.apps) {
+        _appNames['$id/${a.app}'] = a.name;
+      }
       probes[id] = DeviceProbe(Lamp.active, '在线', apps: apps);
     } catch (e) {
-      probes[id] = DeviceProbe(Lamp.offline, '离线', error: '$e');
+      probes[id] = DeviceProbe(Lamp.offline, '离线', apps: probes[id]?.apps, error: '$e');
     }
     _entries = _mapEntries();
     notifyListeners();
@@ -284,6 +295,7 @@ class MainState extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     hub?.removeListener(_onHub);
     super.dispose();
   }
