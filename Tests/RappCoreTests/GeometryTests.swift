@@ -67,6 +67,60 @@ final class GeometryTests: XCTestCase {
                                       windowFrame: CGRect(x: 100, y: 50, width: 800, height: 60)), 0)                        // > half height
     }
 
+    // Frames from the axprobe of real windows (macOS 27, standard title row 32).
+    private func child(_ role: String, _ subrole: String? = nil, y: CGFloat, h: CGFloat, in w: CGRect) -> TitleRowChild {
+        TitleRowChild(role: role, subrole: subrole, frame: CGRect(x: w.minX, y: w.minY + y, width: 50, height: h))
+    }
+    private func lights(_ y: CGFloat, in w: CGRect) -> [TitleRowChild] {
+        ["AXCloseButton", "AXMinimizeButton", "AXZoomButton"].map { child("AXButton", $0, y: y, h: 16, in: w) }
+    }
+
+    func testClassicTitleBarIsCropped() {  // Digital Color Meter
+        let w = CGRect(x: 773, y: 429, width: 408, height: 217)
+        let kids = lights(8, in: w) + [child("AXStaticText", y: 8, h: 16, in: w), child("AXPopUpButton", y: 43, h: 22, in: w)]
+        XCTAssertEqual(systemTitleRowHeight(closeButtonFrame: CGRect(x: 781, y: 437, width: 16, height: 16), windowFrame: w,
+                                            children: kids), 32)
+    }
+
+    func testContentUnderTheTitleRowIsNotCropped() {  // System Information: sidebar split view from the top edge
+        let w = CGRect(x: 11, y: 30, width: 910, height: 602)
+        let kids = lights(8, in: w) + [child("AXSplitGroup", y: 0, h: 602, in: w)]
+        XCTAssertEqual(systemTitleRowHeight(closeButtonFrame: CGRect(x: 19, y: 38, width: 16, height: 16), windowFrame: w,
+                                            children: kids), 0)
+    }
+
+    func testUnifiedToolbarIsNotCropped() {  // Font Book: traffic lights centred in a 52-point toolbar
+        let w = CGRect(x: 460, y: 198, width: 1000, height: 650)
+        let kids = lights(18, in: w) + [child("AXToolbar", y: 0, h: 52, in: w), child("AXStaticText", y: 0, h: 52, in: w)]
+        XCTAssertEqual(systemTitleRowHeight(closeButtonFrame: CGRect(x: 478, y: 216, width: 16, height: 16), windowFrame: w,
+                                            children: kids), 0)
+    }
+
+    func testCustomTitleBarAtStandardHeightIsNotCropped() {  // Electron "hidden" style: web content from the top edge
+        let w = CGRect(x: 0, y: 0, width: 800, height: 600)
+        let kids = lights(8, in: w) + [child("AXGroup", y: 0, h: 600, in: w)]
+        XCTAssertEqual(systemTitleRowHeight(closeButtonFrame: CGRect(x: 8, y: 8, width: 16, height: 16), windowFrame: w,
+                                            children: kids), 0)
+    }
+
+    func testRowOutsidePlainTitleHeightsIsNotCropped() {
+        let w = CGRect(x: 0, y: 0, width: 800, height: 600)
+        let content = [child("AXScrollArea", y: 60, h: 540, in: w)]
+        XCTAssertEqual(systemTitleRowHeight(closeButtonFrame: CGRect(x: 8, y: 12, width: 16, height: 16), windowFrame: w,
+                                            children: content), 0)  // a 40-point row is a toolbar, not a title bar
+        XCTAssertEqual(systemTitleRowHeight(closeButtonFrame: CGRect(x: 8, y: 3, width: 16, height: 16), windowFrame: w,
+                                            children: lights(3, in: w) + [child("AXScrollArea", y: 22, h: 578, in: w)]), 22)  // old macOS
+        XCTAssertEqual(systemTitleRowHeight(closeButtonFrame: CGRect(x: 8, y: 6, width: 16, height: 16), windowFrame: w,
+                                            children: lights(6, in: w) + [child("AXScrollArea", y: 28, h: 572, in: w)]), 28)  // older-SDK app
+        XCTAssertEqual(systemTitleRowHeight(closeButtonFrame: nil, windowFrame: w, children: content), 0)
+    }
+
+    func testWindowWithoutContentElementsIsNotCropped() {  // nothing to judge by
+        let w = CGRect(x: 0, y: 0, width: 800, height: 600)
+        XCTAssertEqual(systemTitleRowHeight(closeButtonFrame: CGRect(x: 8, y: 8, width: 16, height: 16), windowFrame: w,
+                                            children: lights(8, in: w)), 0)
+    }
+
     func testContentRectAndItsPoints() {
         XCTAssertEqual(contentRect(windowFrame: win, titleRow: 32), CGRect(x: 100, y: 82, width: 800, height: 568))
         XCTAssertEqual(globalPoint(x: 0, y: 0, windowFrame: contentRect(windowFrame: win, titleRow: 32)), CGPoint(x: 100, y: 82))

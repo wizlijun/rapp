@@ -83,14 +83,19 @@ enum WindowResizer {
         return AXUIElementPerformAction(button as! AXUIElement, kAXPressAction as CFString) == .success
     }
 
-    /// Height of the window's title row in points (0 in full screen, or when
-    /// it cannot be measured). See `titleRowHeight(closeButtonFrame:windowFrame:)`.
+    /// Height of the system title bar to crop, in points: 0 in full screen, when it cannot be
+    /// measured, or when the window draws its own title area. See `systemTitleRowHeight`.
     static func titleRowHeight(pid: pid_t, frame windowFrame: CGRect) -> CGFloat {
         guard let target = element(pid: pid, frame: windowFrame) else { return 0 }
         if let isFull = attribute(target, "AXFullScreen") as? Bool, isFull { return 0 }
         guard let button = attribute(target, kAXCloseButtonAttribute),
               CFGetTypeID(button) == AXUIElementGetTypeID() else { return 0 }
-        return RappCore.titleRowHeight(closeButtonFrame: frame(of: button as! AXUIElement), windowFrame: windowFrame)
+        let children = (attribute(target, kAXChildrenAttribute) as? [AXUIElement] ?? []).compactMap { child in
+            frame(of: child).map { TitleRowChild(role: attribute(child, kAXRoleAttribute) as? String ?? "",
+                                                 subrole: attribute(child, kAXSubroleAttribute) as? String, frame: $0) }
+        }
+        return systemTitleRowHeight(closeButtonFrame: frame(of: button as! AXUIElement), windowFrame: windowFrame,
+                                    children: children)
     }
 
     /// The window's title as the app reports it, or nil.

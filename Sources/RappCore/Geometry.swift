@@ -56,6 +56,35 @@ public func titleRowHeight(closeButtonFrame: CGRect?, windowFrame: CGRect) -> CG
     return row
 }
 
+/// One direct Accessibility child of a window: enough to tell what sits in its title row.
+public struct TitleRowChild: Equatable {
+    public var role: String
+    public var subrole: String?
+    public var frame: CGRect
+    public init(role: String, subrole: String?, frame: CGRect) { self.role = role; self.subrole = subrole; self.frame = frame }
+}
+
+/// The title row to crop, only when it is the system's plain title bar: 20–34 points tall (22, 28 or 32
+/// depending on the macOS the app was built for) and holding nothing but the window buttons, the title
+/// and a document icon, with the window's content below it. Toolbars, and windows whose own content
+/// reaches under the buttons (Electron, Chrome, sidebars), give 0; so does a window with no content
+/// elements to judge by.
+public func systemTitleRowHeight(closeButtonFrame: CGRect?, windowFrame: CGRect, children: [TitleRowChild]) -> CGFloat {
+    let row = titleRowHeight(closeButtonFrame: closeButtonFrame, windowFrame: windowFrame)
+    guard (20...34).contains(row) else { return 0 }
+    let windowButtons: Set<String> = ["AXCloseButton", "AXMinimizeButton", "AXZoomButton", "AXFullScreenButton"]
+    let rowBottom = windowFrame.minY + row - 1
+    var hasContent = false
+    for child in children where child.frame.height > 0 {
+        if child.role == "AXButton", let subrole = child.subrole, windowButtons.contains(subrole) { continue }
+        let insideRow = child.frame.maxY <= rowBottom + 1
+        if (child.role == "AXStaticText" || child.role == "AXImage"), insideRow { continue }
+        if child.frame.minY < rowBottom { return 0 }
+        hasContent = true
+    }
+    return hasContent ? row : 0
+}
+
 /// The part of the window below its title row.
 public func contentRect(windowFrame: CGRect, titleRow: CGFloat) -> CGRect {
     CGRect(x: windowFrame.minX, y: windowFrame.minY + titleRow,
