@@ -157,7 +157,12 @@ impl Hub {
             Some("apps") => {
                 let id = s("id")?;
                 let (_, r, path) = self.request(&self.host(id)?, &Op::ListApps).await?;
-                json!({"event":"apps","id":id,"path":path,"apps":r["apps"]})
+                let mut ev = json!({"event":"apps","id":id,"path":path,"apps":r["apps"]});
+                // Only newer macOS hosts report what they are missing.
+                if r["permissions"].is_object() {
+                    ev["permissions"] = r["permissions"].clone();
+                }
+                ev
             }
             Some("open") => {
                 self.open(s("id")?, s("app")?, req).await?;

@@ -56,7 +56,8 @@ async fn add_host_hosts_apps_open_close_remove() {
 
     assert_eq!(hub.call(json!({"cmd":"hosts"})).await, json!({"event":"hosts","hosts":[{"id":a.id,"name":"test-a"}]}));
     let r = hub.call(json!({"cmd":"apps","id":a.id,"req":"x"})).await;
-    assert_eq!(r, json!({"event":"apps","id":a.id,"path":"lan","apps":apps(),"req":"x"}));
+    let perms = json!({"screen_recording":true,"accessibility":true});
+    assert_eq!(r, json!({"event":"apps","id":a.id,"path":"lan","apps":apps(),"permissions":perms,"req":"x"}));
 
     open_and_close(&mut hub, &a.id, "lan").await;
     // A's side of the session ends too.
