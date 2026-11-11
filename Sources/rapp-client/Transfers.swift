@@ -79,6 +79,8 @@ final class TransferQueue {
         /// Failed connection attempts since the last progress.
         var attempt = 0
         var handle: FileHandle?
+        /// An in-memory download's bytes; kept here so appending never copies them.
+        var buffer: [UInt8] = []
 
         init(label: String, work: Work, finish: @escaping (Result<DownloadResult?, TransferFailure>) -> Void) {
             self.label = label
@@ -99,7 +101,6 @@ final class TransferQueue {
         var total: UInt64
         let toDisk: Bool
         var received: UInt64 = 0
-        var buffer: [UInt8] = []
         var part: URL?
         var finalName = ""
     }
@@ -207,8 +208,8 @@ final class TransferQueue {
                 return complete(job, .failure(TransferFailure(reason: "无法写入 \(Self.downloadsDirectory().path)")))
             }
         } else {
-            d.received = resumeOffset(partSize: UInt64(d.buffer.count), total: d.total)
-            if d.received == 0 { d.buffer = [] }
+            d.received = resumeOffset(partSize: UInt64(job.buffer.count), total: d.total)
+            if d.received == 0 { job.buffer = [] }
         }
         job.work = .download(d)
         progress(job, done: d.received, total: d.total)
@@ -236,7 +237,7 @@ final class TransferQueue {
             // The file on A is not the one announced: start over with what A says now.
             d.total = total
             d.received = 0
-            d.buffer = []
+            job.buffer = []
             try? job.handle?.truncate(atOffset: 0)
             job.work = .download(d)
             connection?.cancel()
@@ -255,7 +256,7 @@ final class TransferQueue {
                 return complete(job, .failure(TransferFailure(reason: "无法写入 \(Self.downloadsDirectory().path)")))
             }
         } else {
-            d.buffer.append(contentsOf: bytes)
+            job.buffer.append(contentsOf: bytes)
         }
         d.received += UInt64(bytes.count)
         job.work = .download(d)
@@ -266,7 +267,7 @@ final class TransferQueue {
 
     private func finishDownload(_ job: Job) {
         guard case let .download(d) = job.work else { return }
-        guard d.toDisk, let part = d.part else { return complete(job, .success(.bytes(d.buffer))) }
+        guard d.toDisk, let part = d.part else { return complete(job, .success(.bytes(job.buffer))) }
         job.close()
         let directory = Self.downloadsDirectory()
         let final = uniqueName(d.finalName, existing: Self.existingNames(in: directory, except: part.lastPathComponent))

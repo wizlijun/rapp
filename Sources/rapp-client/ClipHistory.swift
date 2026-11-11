@@ -93,27 +93,27 @@ final class ClipHistory {
         }
     }
 
-    /// Downloads every file to disk, then calls `use` with the URLs in the clip's order.
+    /// Downloads the files to disk one after another, then calls `use` with the URLs in the clip's order.
+    /// A failure ends the chain: the remaining files are not fetched.
     private func fetchFiles(_ id: UInt32, _ files: [ClipFile], then use: @escaping ([URL]) -> Void) {
-        var urls = [URL?](repeating: nil, count: files.count)
-        var remaining = files.count
-        var failed = false
-        for (index, file) in files.enumerated() {
-            transfers.download(clip: id, file: UInt16(index), name: file.name, total: file.bytes, toDisk: true) { [log] result in
-                guard !failed else { return }
+        var urls: [URL] = []
+        func next() {
+            guard urls.count < files.count else { return use(urls) }
+            let index = urls.count
+            transfers.download(clip: id, file: UInt16(index), name: files[index].name, total: files[index].bytes,
+                               toDisk: true) { [log] result in
                 switch result {
                 case let .success(.file(url)):
-                    urls[index] = url
-                    remaining -= 1
-                    if remaining == 0 { use(urls.compactMap { $0 }) }
+                    urls.append(url)
+                    next()
                 case .success:
-                    failed = true
+                    break
                 case let .failure(failure):
-                    failed = true
                     log("clip \(id) download failed: \(failure.reason)")
                 }
             }
         }
+        next()
     }
 }
 
