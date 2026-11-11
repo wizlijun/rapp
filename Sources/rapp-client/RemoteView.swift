@@ -2,32 +2,46 @@ import AppKit
 import QuartzCore
 import RappCore
 
-/// Shows the remote window's picture, scaled to fit, and reports mouse and
-/// scroll input on it as messages.
+/// Shows one A window's content, scaled to fit at its aspect ratio, and
+/// reports mouse and scroll input on it as messages.
 final class RemoteView: NSView {
     /// Called with a `.mouse` or `.scroll` message.
     var onMouse: ((Message) -> Void)?
 
-    /// Pixel size of the picture currently shown.
-    private(set) var imageSize = CGSize.zero
     /// The A window this view shows, and its content size in A points:
     /// mouse and scroll positions are sent in those points.
     var windowID: UInt32 = 0
-    var remoteSize = CGSize.zero
+    var remoteSize = CGSize.zero {
+        didSet { if remoteSize != oldValue { layoutPicture() } }
+    }
     /// Height of the window's A title row: positions are sent from the
     /// window's top-left (spec §2.3), and the picture starts below the row.
     var titleBar: Float = 0
 
+    /// Whether pointer moves with no button down are sent. Menus need them to
+    /// highlight items and open submenus; windows do not, and moving A's
+    /// pointer for every hover is not worth it.
+    var sendsHover = false {
+        didSet { updateTrackingAreas() }
+    }
+
     private var pressed = Set<MouseButton>()
+    private var hoverArea: NSTrackingArea?
+    /// The picture, drawn over `visible` of the content (fractions, top-left origin).
+    private let picture = CALayer()
+    private var visible = CGRect(x: 0, y: 0, width: 1, height: 1)
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         // Layer-hosting: the layer is ours, so AppKit never replaces its contents.
         let hosted = CALayer()
         hosted.backgroundColor = NSColor.black.cgColor
-        hosted.contentsGravity = .resizeAspect
+        hosted.isGeometryFlipped = true      // top-left origin, like the view
         layer = hosted
         wantsLayer = true
+        picture.contentsGravity = .resize
+        picture.actions = ["contents": NSNull(), "bounds": NSNull(), "position": NSNull()]
+        hosted.addSublayer(picture)
     }
 
     required init?(coder: NSCoder) {
@@ -35,25 +49,32 @@ final class RemoteView: NSView {
     }
 
     override var isFlipped: Bool { true }
+
+    override func layout() {
+        super.layout()
+        layoutPicture()
+    }
     override var acceptsFirstResponder: Bool { false }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    /// `bgra` is B, G, R, X bytes, `width * 4` per row; only `crop` (pixels,
-    /// top-left origin) of it is shown.
-    func show(bgra: [UInt8], width: Int, height: Int, crop: CGRect) {
-        guard width > 0, height > 0, bgra.count >= width * height * 4,
-              let provider = CGDataProvider(data: Data(bgra) as CFData),
-              let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
-              let image = CGImage(
-                width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
-                space: colorSpace,
-                bitmapInfo: CGBitmapInfo(rawValue: CGBitmapInfo.byteOrder32Little.rawValue
-                                            | CGImageAlphaInfo.noneSkipFirst.rawValue),
-                provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent),
-              let image = image.cropping(to: crop)
-        else { return }
-        imageSize = CGSize(width: image.width, height: image.height)
-        layer?.contents = image
+    /// Where the whole content is drawn: fitted at A's aspect ratio.
+    private var fitRect: CGRect { aspectFitRect(imageSize: remoteSize, in: bounds.size) }
+
+    /// Shows `image`, the part `visible` of the window's content (see `visiblePart`).
+    func show(_ image: CGImage, visible part: CGRect) {
+        visible = part
+        picture.contents = image
+        layoutPicture()
+    }
+
+    private func layoutPicture() {
+        let fit = fitRect
+        let frame = CGRect(x: fit.minX + visible.minX * fit.width, y: fit.minY + visible.minY * fit.height,
+                           width: visible.width * fit.width, height: visible.height * fit.height)
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        picture.frame = frame
+        CATransaction.commit()
     }
 
     // MARK: Mouse
@@ -64,11 +85,11 @@ final class RemoteView: NSView {
     private func position(of event: NSEvent, clamped: Bool) -> (x: Float, y: Float)? {
         let point = convert(event.locationInWindow, from: nil)
         let normalized: (x: Float, y: Float)
-        if let inside = normalizedPoint(point, imageSize: imageSize, viewSize: bounds.size) {
+        if let inside = normalizedPoint(point, imageSize: remoteSize, viewSize: bounds.size) {
             normalized = inside
         } else {
             guard clamped else { return nil }
-            let rect = aspectFitRect(imageSize: imageSize, in: bounds.size)
+            let rect = fitRect
             guard rect.width > 0, rect.height > 0 else { return nil }
             normalized = (Float(min(max((point.x - rect.minX) / rect.width, 0), 1)),
                           Float(min(max((point.y - rect.minY) / rect.height, 0), 1)))
@@ -85,8 +106,8 @@ final class RemoteView: NSView {
             onMouse?(.mouse(kind: .down, button: button, window: windowID, x: p.x, y: p.y,
                             clickCount: UInt8(clamping: event.clickCount)))
         case .move:
-            // Hover is not sent by the single-window client.
-            return
+            guard sendsHover, pressed.isEmpty, let p = position(of: event, clamped: false) else { return }
+            onMouse?(.mouse(kind: .move, button: .left, window: windowID, x: p.x, y: p.y, clickCount: 0))
         case .drag, .up:
             // Once a press was sent, its drags and release always follow,
             // even when the pointer has left the picture.
@@ -97,6 +118,17 @@ final class RemoteView: NSView {
         }
     }
 
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        hoverArea = nil
+        guard sendsHover else { return }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeAlways, .inVisibleRect], owner: self)
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override func mouseMoved(with event: NSEvent) { mouse(.move, .left, event) }
     override func mouseDown(with event: NSEvent) { mouse(.down, .left, event) }
     override func mouseDragged(with event: NSEvent) { mouse(.drag, .left, event) }
     override func mouseUp(with event: NSEvent) { mouse(.up, .left, event) }

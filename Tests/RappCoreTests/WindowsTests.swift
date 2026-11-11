@@ -147,6 +147,17 @@ final class WindowsTests: XCTestCase {
         XCTAssertNil(cropRect(window: w, region: CanvasRect(x: 0, y: 0, w: 0, h: 40), pixelWidth: 80, pixelHeight: 80))
     }
 
+    func testVisiblePartIsTheContentInsideTheRegion() {
+        // Content 100,78 400x272; region stops at x 400 and y 214.
+        let w = WindowInfo(id: 1, parent: 0, kind: .normal, resizable: true, focused: false,
+                           rect: CanvasRect(x: 100, y: 50, w: 400, h: 300), titleBar: 28, title: "")
+        let part = visiblePart(window: w, region: CanvasRect(x: 0, y: 0, w: 400, h: 214))
+        XCTAssertEqual(part, CGRect(x: 0, y: 0, width: 0.75, height: 0.5))
+        let whole = visiblePart(window: w, region: CanvasRect(x: 0, y: 0, w: 800, h: 600))
+        XCTAssertEqual(whole, CGRect(x: 0, y: 0, width: 1, height: 1))
+        XCTAssertNil(visiblePart(window: w, region: CanvasRect(x: 0, y: 0, w: 50, h: 50)))
+    }
+
     // MARK: WindowPlacement (spec §1.3, §4.2)
 
     func testPlacementRoundTrip() {
@@ -183,6 +194,21 @@ final class WindowsTests: XCTestCase {
         XCTAssertEqual(q.zoom, 2)
         XCTAssertEqual(q.toB(kept).x, p.toB(kept).x, accuracy: 0.001)
         XCTAssertEqual(q.toB(kept).y, p.toB(kept).y, accuracy: 0.001)
+    }
+
+    func testContentTopLeftSkipsTheATitleRow() {
+        let p = WindowPlacement(origin: CGPoint(x: 10, y: 20), zoom: 2)
+        let w = WindowInfo(id: 1, parent: 0, kind: .normal, resizable: true, focused: true,
+                           rect: CanvasRect(x: 100, y: 50, w: 400, h: 300), titleBar: 28, title: "")
+        XCTAssertEqual(p.contentTopLeftInB(w), CGPoint(x: 210, y: 176))
+    }
+
+    func testWindowOriginFromBContentUndoesContentTopLeft() {
+        let p = WindowPlacement(origin: CGPoint(x: 10, y: 20), zoom: 2)
+        // B content moved 40 right, 10 down from where (100, 50) with a 28-point row would be.
+        let origin = p.windowOrigin(contentTopLeftInB: CGPoint(x: 250, y: 186), titleBar: 28)
+        XCTAssertEqual(origin.x, 120, accuracy: 0.001)
+        XCTAssertEqual(origin.y, 55, accuracy: 0.001)
     }
 
     // MARK: menuItem(at:in:) (spec §3.5)

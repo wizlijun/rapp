@@ -93,6 +93,10 @@ case let .serve(options):
 
     let application = NSApplication.shared
     application.setActivationPolicy(.accessory)
+    // Every AX call in this process gives up after 1 s instead of the
+    // default 6: an app whose main thread is busy (TextEdit tearing down its
+    // Save panel) must not stall the 10-times-a-second window poll.
+    AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 1)
 
     let server = Server(options: options, output: output)
     do {

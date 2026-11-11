@@ -159,6 +159,8 @@ public enum WorkerEvent: Equatable {
     case rejected(reason: String)
     case stats(kbps: Double, fps: Int, width: Int, height: Int)
     case ready(width: Int, height: Int, title: String)
+    /// The client's window table changed; `count` windows in it (multi-window spec §4.6).
+    case windows(count: Int)
     case exit(code: Int32, reason: String)
 
     public var jsonLine: String {
@@ -177,6 +179,8 @@ public enum WorkerEvent: Equatable {
             return RappCore.jsonLine(["event": "stats", "kbps": rounded, "fps": fps, "width": width, "height": height])
         case let .ready(width, height, title):
             return RappCore.jsonLine(["event": "ready", "width": width, "height": height, "title": title])
+        case let .windows(count):
+            return RappCore.jsonLine(["event": "windows", "count": count])
         case let .exit(code, reason):
             return RappCore.jsonLine(["event": "exit", "code": Int(code), "reason": reason])
         }

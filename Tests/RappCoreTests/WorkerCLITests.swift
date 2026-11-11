@@ -134,6 +134,7 @@ final class WorkerCLITests: XCTestCase {
                        #"{"event":"stats","fps":15,"height":600,"kbps":12.3,"width":800}"#)
         XCTAssertEqual(WorkerEvent.ready(width: 800, height: 600, title: "Apple / “你好”").jsonLine,
                        #"{"event":"ready","height":600,"title":"Apple / “你好”","width":800}"#)
+        XCTAssertEqual(WorkerEvent.windows(count: 3).jsonLine, #"{"count":3,"event":"windows"}"#)
         XCTAssertEqual(WorkerEvent.exit(code: 3, reason: "say \"hi\"\n").jsonLine,
                        #"{"code":3,"event":"exit","reason":"say \"hi\"\n"}"#)
     }

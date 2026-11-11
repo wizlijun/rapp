@@ -8,65 +8,54 @@ let usage = """
     example: rapp-client "rapp://mac-a.local/com.apple.TextEdit?token=abc"
     """
 
-let inputBarHeight: CGFloat = 28
-
-final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate {
     private let address: RemoteAddress
     private let output: WorkerOutput
     private let connection: Connection
     private let decoder: FrameDecoder
-    private let remoteView = RemoteView(frame: .zero)
-    private let inputBar = InputBar(frame: .zero)
-    private let traffic: TrafficLabel
-    private var window: NSWindow!
+    private let streamMenu: StreamMenu
+    private let meter: TrafficMeter
+    private var coordinator: WindowCoordinator!
     private var keyMonitor: Any?
-    private var applyingRemoteSize = false
-
-    // Client zoom (spec §7). `remoteSize` is A's content size in points;
-    // `zoom` is picture points per A point.
     private var ready = false
-    private var remoteSize = CGSize.zero
-    /// The A window shown (interim single-window client).
-    private var shownWindow: WindowInfo?
-    private var zoom: CGFloat = 1
-    /// The handle of the live resize in progress, decided when it starts.
-    private var liveHandle: ResizeHandle?
-    /// What the next debounced `Resize` asks for, and at which zoom.
-    private var pendingResize: (handle: ResizeHandle, zoom: CGFloat)?
     /// The stream settings last sent in Hello or SetStream.
     private var sentStream: (mode: Mode, fps: UInt8, density: Float)?
+
+    private static let zoomLevels: [CGFloat] = [0.5, 0.75, 1, 1.25, 1.5, 2]
 
     init(address: RemoteAddress, output: WorkerOutput) {
         self.address = address
         self.output = output
         connection = Connection(address: address)
         decoder = FrameDecoder(mode: address.mode)
-        traffic = TrafficLabel(mode: address.mode, fps: address.fps)
+        streamMenu = StreamMenu(mode: address.mode, fps: address.fps)
+        meter = TrafficMeter(streamMenu: streamMenu)
         super.init()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        coordinator = WindowCoordinator(meter: meter, connectingTo: address.host)
+        coordinator.send = { [weak self] message in self?.connection.send(message) }
+        coordinator.onStreamMayChange = { [weak self] in self?.sendStreamIfChanged() }
         buildMenu()
-        buildWindow()
 
-        remoteView.onMouse = { [weak self] message in self?.connection.send(message) }
-        inputBar.onSend = { [weak self] message in self?.connection.send(message) }
         connection.onMessage = { [weak self] message in self?.handle(message) }
-        connection.onBytes = { [weak self] count in self?.traffic.add(bytes: count) }
-        traffic.onSelect = { [weak self] in self?.sendStreamIfChanged() }
+        connection.onBytes = { [weak self] count in self?.meter.add(bytes: count) }
+        streamMenu.onSelect = { [weak self] in self?.sendStreamIfChanged() }
         connection.onClosed = { [output] reason in output.finish(ExitCode.runtime, "rapp-client: \(reason)") }
 
         // Command shortcuts: Command-Q always quits this client. With an empty
-        // input bar the others go to the remote app; otherwise they edit the bar.
+        // (or no) input bar the others go to the remote app; otherwise they edit the bar.
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, event.modifierFlags.contains(.command) else { return event }
             if event.charactersIgnoringModifiers?.lowercased() == "q" {
                 NSApp.terminate(nil)
                 return nil
             }
-            guard self.inputBar.isEmpty else { return event }
-            let modifiers = event.modifierFlags.intersection([.shift, .control, .option, .command])
-            self.inputBar.sendKey(event.keyCode, modifiers: UInt64(modifiers.rawValue))
+            if let bar = self.coordinator.keyInputBar, !bar.isEmpty { return event }
+            let modifiers = UInt64(event.modifierFlags.intersection([.shift, .control, .option, .command]).rawValue)
+            self.connection.send(.key(keyCode: event.keyCode, modifiers: modifiers, down: true))
+            self.connection.send(.key(keyCode: event.keyCode, modifiers: modifiers, down: false))
             return nil
         }
 
@@ -77,77 +66,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.activate()
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
-
-    /// The window was closed or Command-Q pressed.
+    /// The placeholder was closed or Command-Q pressed.
     func applicationWillTerminate(_ notification: Notification) {
         output.finish(ExitCode.ok, "quit")
     }
 
-    private func buildWindow() {
-        let content = NSRect(x: 0, y: 0, width: 800, height: 600 + inputBarHeight)
-        window = NSWindow(contentRect: content, styleMask: [.titled, .closable, .miniaturizable, .resizable],
-                          backing: .buffered, defer: false)
-        window.title = "Connecting to \(address.host)…"
-        window.contentMinSize = NSSize(width: 200, height: 150 + inputBarHeight)
-        window.isReleasedWhenClosed = false
-        window.delegate = self
-
-        let container = NSView(frame: content)
-        inputBar.frame = NSRect(x: 0, y: 0, width: content.width, height: inputBarHeight)
-        inputBar.autoresizingMask = [.width, .maxYMargin]
-        remoteView.frame = NSRect(x: 0, y: inputBarHeight, width: content.width, height: content.height - inputBarHeight)
-        remoteView.autoresizingMask = [.width, .height]
-        container.addSubview(remoteView)
-        container.addSubview(inputBar)
-        window.contentView = container
-        addTrafficLabel()
-
-        window.center()
-        window.makeKeyAndOrderFront(nil)
-        window.makeFirstResponder(inputBar)
-    }
-
-    /// Puts the traffic label at the right end of the title bar, 8 points in.
-    private func addTrafficLabel() {
-        // Wide enough for "999.9 KB/s" at 11 points plus the margin, no wider:
-        // the centred title gives way to it in narrow windows.
-        let holder = NSView(frame: NSRect(x: 0, y: 0, width: 80, height: 28))
-        traffic.translatesAutoresizingMaskIntoConstraints = false
-        holder.addSubview(traffic)
-        NSLayoutConstraint.activate([
-            traffic.trailingAnchor.constraint(equalTo: holder.trailingAnchor, constant: -8),
-            traffic.leadingAnchor.constraint(greaterThanOrEqualTo: holder.leadingAnchor),
-            traffic.centerYAnchor.constraint(equalTo: holder.centerYAnchor),
-        ])
-        let accessory = NSTitlebarAccessoryViewController()
-        accessory.layoutAttribute = .trailing
-        accessory.view = holder
-        window.addTitlebarAccessoryViewController(accessory)
-    }
-
-    /// A minimal menu so that Quit and the usual editing shortcuts work in the input bar.
+    /// The app menu (spec §4.5): quit, zoom and the stream menu, plus hidden
+    /// editing items whose shortcuts still work in the input bars.
     private func buildMenu() {
         let main = NSMenu()
         let appItem = NSMenuItem()
         let appMenu = NSMenu()
+        appMenu.delegate = streamMenu
         appMenu.addItem(withTitle: "Quit rapp-client", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(.separator())
+
+        let zoomItem = NSMenuItem(title: "缩放", action: nil, keyEquivalent: "")
+        let zoomMenu = NSMenu()
+        for (index, level) in Self.zoomLevels.enumerated() {
+            let item = NSMenuItem(title: "\(Int(level * 100))%", action: #selector(pickZoom(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = index
+            item.state = level == 1 ? .on : .off
+            zoomMenu.addItem(item)
+        }
+        zoomItem.submenu = zoomMenu
+        appMenu.addItem(zoomItem)
+        appMenu.addItem(.separator())
+        streamMenu.addItems(to: appMenu)
+
+        let edits: [(String, Selector, String, NSEvent.ModifierFlags)] = [
+            ("Undo", Selector(("undo:")), "z", [.command]),
+            ("Redo", Selector(("redo:")), "z", [.command, .shift]),
+            ("Cut", #selector(NSText.cut(_:)), "x", [.command]),
+            ("Copy", #selector(NSText.copy(_:)), "c", [.command]),
+            ("Paste", #selector(NSText.paste(_:)), "v", [.command]),
+            ("Select All", #selector(NSText.selectAll(_:)), "a", [.command]),
+        ]
+        for (title, action, key, modifiers) in edits {
+            let item = appMenu.addItem(withTitle: title, action: action, keyEquivalent: key)
+            item.keyEquivalentModifierMask = modifiers
+            item.isHidden = true
+            item.allowsKeyEquivalentWhenHidden = true
+        }
         appItem.submenu = appMenu
         main.addItem(appItem)
-
-        let editItem = NSMenuItem()
-        let editMenu = NSMenu(title: "Edit")
-        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
-        let redo = editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
-        redo.keyEquivalentModifierMask = [.command, .shift]
-        editMenu.addItem(.separator())
-        editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        editMenu.addItem(withTitle: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
-        editItem.submenu = editMenu
-        main.addItem(editItem)
         NSApp.mainMenu = main
+    }
+
+    @objc private func pickZoom(_ sender: NSMenuItem) {
+        for item in sender.menu?.items ?? [] { item.state = item === sender ? .on : .off }
+        coordinator.setZoom(Self.zoomLevels[sender.tag])
     }
 
     // MARK: Messages from the host
@@ -155,37 +124,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func handle(_ message: Message) {
         switch message {
         case let .ready(appName, width, height):
-            window.title = appName
+            coordinator.ready(appName: appName)
             output.emit(.ready(width: Int(width), height: Int(height), title: appName))
-            traffic.start()
+            meter.start()
             ready = true
+            sendStreamIfChanged()
         case let .windows(table):
-            // Interim single-window client: shows the frontmost decorated
-            // window, cropped out of the app's picture (multi-window spec §4.4).
-            guard let first = table.first(where: { $0.kind.isDecorated }) ?? table.first else { break }
-            window.title = first.title.isEmpty ? window.title : first.title
-            shownWindow = first
-            remoteView.windowID = first.id
-            remoteView.titleBar = first.titleBar
-            let size = CGSize(width: CGFloat(first.rect.w), height: CGFloat(first.rect.h - first.titleBar))
-            guard size != remoteSize else { break }
-            let firstTable = remoteSize == .zero
-            remoteSize = size
-            remoteView.remoteSize = size
-            if firstTable {
-                // Open at the remote window's size so the picture starts 1:1.
-                applyingRemoteSize = true
-                window.setContentSize(NSSize(width: size.width, height: size.height + inputBarHeight))
-                applyingRemoteSize = false
-                // 1 unless the screen kept the window smaller than A's.
-                zoom = fittedZoom() ?? 1
-                sendStreamIfChanged()
-            } else if !window.inLiveResize, let fitted = fittedZoom() {
-                // A may not take the size asked for: the picture letterboxes in
-                // the window as it is, and the zoom follows what is shown.
-                zoom = fitted
-                sendStreamIfChanged()
-            }
+            coordinator.apply(table)
+            output.emit(.windows(count: table.count))
+            sendStreamIfChanged()
         case let .frame(region, payload):
             do {
                 try decoder.decode(payload)
@@ -195,10 +142,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let bgra = Quantizer.expand(samples: decoder.samples, width: decoder.width, height: decoder.height,
                                         mode: decoder.mode)
             // Cropped by the region the frame itself carries, not the table's (spec §4.4).
-            guard let shownWindow,
-                  let crop = cropRect(window: shownWindow, region: region,
-                                      pixelWidth: decoder.width, pixelHeight: decoder.height) else { break }
-            remoteView.show(bgra: bgra, width: decoder.width, height: decoder.height, crop: crop)
+            guard let image = makeImage(bgra: bgra, width: decoder.width, height: decoder.height) else { break }
+            coordinator.show(image, region: region)
         case let .error(reason):
             output.finish(exitCode(forHostError: reason), "rapp-client: host says: \(reason)")
         default:
@@ -206,85 +151,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    // MARK: Zoom and window size (spec §7)
-
-    private var pictureArea: CGSize { remoteView.bounds.size }
-
-    /// Picture points per A point as shown now, or nil before A's size is known.
-    private func fittedZoom() -> CGFloat? {
-        guard remoteSize.width > 0, remoteSize.height > 0 else { return nil }
-        let shown = aspectFitRect(imageSize: remoteSize, in: pictureArea)
-        return shown.width > 0 ? shown.width / remoteSize.width : nil
+    /// `bgra` is B, G, R, X bytes, `width * 4` per row.
+    private func makeImage(bgra: [UInt8], width: Int, height: Int) -> CGImage? {
+        guard width > 0, height > 0, bgra.count >= width * height * 4,
+              let provider = CGDataProvider(data: Data(bgra) as CFData),
+              let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
+        return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
+                       space: colorSpace,
+                       bitmapInfo: CGBitmapInfo(rawValue: CGBitmapInfo.byteOrder32Little.rawValue
+                                                    | CGImageAlphaInfo.noneSkipFirst.rawValue),
+                       provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
     }
 
+    // MARK: Stream settings
+
     private func currentDensity() -> Float {
-        captureDensity(zoom: zoom, backingScale: window.backingScaleFactor, choice: traffic.density)
+        captureDensity(zoom: coordinator?.zoom ?? 1, backingScale: coordinator?.backingScale ?? NSScreen.main?.backingScaleFactor ?? 2,
+                       choice: streamMenu.density)
     }
 
     /// Sends SetStream when mode, frame rate or density differ from the last sent.
     private func sendStreamIfChanged() {
         guard ready else { return }
-        let next = (mode: traffic.mode, fps: traffic.fps, density: currentDensity())
+        let next = (mode: streamMenu.mode, fps: streamMenu.fps, density: currentDensity())
         guard streamChanged(from: sentStream, to: next) else { return }
         sentStream = next
         connection.send(.setStream(mode: next.mode, fps: next.fps, density: next.density))
-    }
-
-    func windowWillStartLiveResize(_ notification: Notification) {
-        liveHandle = resizeHandle(mouse: NSEvent.mouseLocation, windowFrame: window.frame,
-                                  buttonsDown: NSEvent.pressedMouseButtons & 1 != 0)
-        // A drag supersedes a resize still waiting to be sent.
-        NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(sendResize), object: nil)
-        pendingResize = nil
-    }
-
-    func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
-        // A corner drag keeps the picture area at A's aspect ratio.
-        guard liveHandle == .corner, remoteSize.width > 0, remoteSize.height > 0 else { return frameSize }
-        let content = sender.contentRect(forFrameRect: NSRect(origin: .zero, size: frameSize)).size
-        let proposed = CGSize(width: content.width, height: content.height - inputBarHeight)
-        let locked = lockedAspectSize(proposed: proposed, current: pictureArea, aspect: remoteSize)
-        let lockedContent = NSRect(x: 0, y: 0, width: locked.width, height: locked.height + inputBarHeight)
-        return sender.frameRect(forContentRect: lockedContent).size
-    }
-
-    func windowDidEndLiveResize(_ notification: Notification) {
-        let handle = liveHandle ?? .both
-        liveHandle = nil
-        if handle == .corner {
-            // B only: A keeps its size, the capture density follows the picture.
-            if let fitted = fittedZoom() { zoom = fitted }
-            sendStreamIfChanged()
-        } else {
-            scheduleResize(handle)
-        }
-    }
-
-    func windowDidResize(_ notification: Notification) {
-        // Zoom button and full screen are not live resizes: both sides follow.
-        // During a drag nothing is sent until the mouse is released.
-        if !applyingRemoteSize && !window.inLiveResize { scheduleResize(.both) }
-    }
-
-    func windowDidChangeBackingProperties(_ notification: Notification) {
-        // Moved to a screen with another pixel density.
-        sendStreamIfChanged()
-    }
-
-    /// Sends a Resize for `handle` once no further resize has happened for 0.3 seconds.
-    private func scheduleResize(_ handle: ResizeHandle) {
-        guard ready else { return }
-        NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(sendResize), object: nil)
-        pendingResize = (handle, zoom)
-        perform(#selector(sendResize), with: nil, afterDelay: 0.3)
-    }
-
-    @objc private func sendResize() {
-        guard let pending = pendingResize else { return }
-        pendingResize = nil
-        let size = remoteResize(view: pictureArea, zoom: pending.zoom, remote: remoteSize, handle: pending.handle)
-        guard size != remoteSize else { return }
-        connection.send(.resize(window: remoteView.windowID, width: UInt16(clamping: Int(size.width)), height: UInt16(clamping: Int(size.height))))
     }
 }
 

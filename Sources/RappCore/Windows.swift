@@ -109,6 +109,21 @@ public func cropRect(window: WindowInfo, region: CanvasRect, pixelWidth: Int, pi
     return CGRect(x: CGFloat(x0), y: CGFloat(y0), width: CGFloat(x1 - x0), height: CGFloat(y1 - y0))
 }
 
+/// Which part of a window's content (below its A title row) a frame covering
+/// `region` shows, as fractions of the content's width and height from its
+/// top-left. The B window draws the crop there, so a window hanging off A's
+/// display is not stretched. Nil if none of the content is in the region.
+public func visiblePart(window: WindowInfo, region: CanvasRect) -> CGRect? {
+    let r = window.rect
+    let top = r.y + window.titleBar, height = r.h - window.titleBar
+    guard r.w > 0, height > 0 else { return nil }
+    let minX = max(r.x, region.x), minY = max(top, region.y)
+    let maxX = min(r.x + r.w, region.x + region.w), maxY = min(top + height, region.y + region.h)
+    guard maxX > minX, maxY > minY else { return nil }
+    return CGRect(x: CGFloat((minX - r.x) / r.w), y: CGFloat((minY - top) / height),
+                  width: CGFloat((maxX - minX) / r.w), height: CGFloat((maxY - minY) / height))
+}
+
 /// Canvas <-> B mapping: B point = origin + zoom x canvas point (spec §4.2).
 /// B coordinates here have a top-left origin; the client flips them.
 public struct WindowPlacement: Equatable {
@@ -139,6 +154,18 @@ public struct WindowPlacement: Equatable {
     public func popupOrigin(popup: CanvasRect, parentContent: CanvasRect, parentContentInB: CGPoint) -> CGPoint {
         CGPoint(x: parentContentInB.x + zoom * CGFloat(popup.x - parentContent.x),
                 y: parentContentInB.y + zoom * CGFloat(popup.y - parentContent.y))
+    }
+
+    /// Where a decorated window's content (below its A title row) starts in B.
+    public func contentTopLeftInB(_ window: WindowInfo) -> CGPoint {
+        toB(CGPoint(x: CGFloat(window.rect.x), y: CGFloat(window.rect.y + window.titleBar)))
+    }
+
+    /// The A window top-left (canvas) that puts its content at `contentTopLeftInB`
+    /// in B: what a `move` sends after the user moved the B window (spec §4.3).
+    public func windowOrigin(contentTopLeftInB b: CGPoint, titleBar: Float) -> CGPoint {
+        let c = toCanvas(b)
+        return CGPoint(x: c.x, y: c.y - CGFloat(titleBar))
     }
 
     /// The same mapping at a new zoom, with `canvas` staying where it is in B.

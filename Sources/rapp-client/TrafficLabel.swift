@@ -1,42 +1,11 @@
 import AppKit
 import RappCore
 
-/// Live received traffic, shown at the right of the title bar. Right-click or
-/// Control-click it for two presets and the sample mode, capture density and frame rate.
+/// Live received traffic, shown at the right of a title bar. Right-click or
+/// Control-click it for the stream menu. Every B window has one; a
+/// `TrafficMeter` keeps them all showing the same rate.
 final class TrafficLabel: NSTextField {
-    /// Called whenever the choice changes.
-    var onSelect: (() -> Void)?
-
-    private(set) var mode: Mode
-    private(set) var fps: UInt8
-    private(set) var density = DensityChoice.adaptive
-    private var bytesThisSecond = 0
-    private var timer: Timer?
-
-    private static let modeItems: [(String, Mode)] = [
-        ("双色·灰度（文本优化）", .duogray),
-        ("双色·彩色", .duocolor),
-        ("高彩（图像优化）", .color16),
-    ]
-    private static let densityItems: [(String, DensityChoice)] = [
-        ("省流 1x", .saver1x),
-        ("自适应", .adaptive),
-        ("原画", .original),
-    ]
-    private static let fpsItems: [(String, UInt8)] = [
-        ("1 fps", 1),
-        ("5 fps", 5),
-        ("15 fps", 15),
-        ("30 fps（看视频）", 30),
-    ]
-    private static let presetItems: [(String, StreamPreset)] = [
-        ("最省流（双色·灰度 + 自适应 + 1 fps）", .leastTraffic),
-        ("最清晰（高彩 + 原画 + 15 fps）", .sharpest),
-    ]
-
-    init(mode: Mode, fps: UInt8) {
-        self.mode = mode
-        self.fps = fps
+    init(menu streamMenu: NSMenu) {
         super.init(frame: .zero)
         isEditable = false
         isSelectable = false
@@ -50,32 +19,11 @@ final class TrafficLabel: NSTextField {
         maximumNumberOfLines = 1
         lineBreakMode = .byClipping
         stringValue = formatRate(bytes: 0)
-        isHidden = true
-        menu = buildMenu()
+        menu = streamMenu
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("not used") }
-
-    deinit { timer?.invalidate() }
-
-    func add(bytes: Int) {
-        bytesThisSecond += bytes
-    }
-
-    /// Shows the label and refreshes it once a second with the bytes received
-    /// in that second.
-    func start() {
-        guard timer == nil else { return }
-        isHidden = false
-        bytesThisSecond = 0
-        stringValue = formatRate(bytes: 0)
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            self.stringValue = formatRate(bytes: self.bytesThisSecond)
-            self.bytesThisSecond = 0
-        }
-    }
 
     // A click here must open the menu, not start dragging the window.
     override var mouseDownCanMoveWindow: Bool { false }
@@ -88,70 +36,61 @@ final class TrafficLabel: NSTextField {
         }
     }
 
-    // MARK: Menu
+    /// Puts the label at the right end of `window`'s title bar, 8 points in.
+    func attach(to window: NSWindow) {
+        // Wide enough for "999.9 KB/s" at 11 points plus the margin, no wider:
+        // the centred title gives way to it in narrow windows.
+        let holder = NSView(frame: NSRect(x: 0, y: 0, width: 80, height: 28))
+        translatesAutoresizingMaskIntoConstraints = false
+        holder.addSubview(self)
+        NSLayoutConstraint.activate([
+            trailingAnchor.constraint(equalTo: holder.trailingAnchor, constant: -8),
+            leadingAnchor.constraint(greaterThanOrEqualTo: holder.leadingAnchor),
+            centerYAnchor.constraint(equalTo: holder.centerYAnchor),
+        ])
+        let accessory = NSTitlebarAccessoryViewController()
+        accessory.layoutAttribute = .trailing
+        accessory.view = holder
+        window.addTitlebarAccessoryViewController(accessory)
+    }
+}
 
-    private func buildMenu() -> NSMenu {
-        let menu = NSMenu()
-        for (index, item) in Self.presetItems.enumerated() {
-            menu.addItem(makeItem(item.0, tag: index, action: #selector(pickPreset(_:))))
+/// Counts received bytes and, once a second after `start()`, shows the rate
+/// on every label made by `makeLabel()` that is still alive.
+final class TrafficMeter {
+    private let streamMenu: StreamMenu
+    private var labels = NSHashTable<TrafficLabel>.weakObjects()
+    private var bytesThisSecond = 0
+    private var shown = formatRate(bytes: 0)
+    private var timer: Timer?
+
+    init(streamMenu: StreamMenu) {
+        self.streamMenu = streamMenu
+    }
+
+    deinit { timer?.invalidate() }
+
+    func makeLabel() -> TrafficLabel {
+        let label = TrafficLabel(menu: streamMenu.makeMenu())
+        label.stringValue = shown
+        label.isHidden = timer == nil
+        labels.add(label)
+        return label
+    }
+
+    func add(bytes: Int) {
+        bytesThisSecond += bytes
+    }
+
+    func start() {
+        guard timer == nil else { return }
+        bytesThisSecond = 0
+        for label in labels.allObjects { label.isHidden = false }
+        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            self.shown = formatRate(bytes: self.bytesThisSecond)
+            self.bytesThisSecond = 0
+            for label in self.labels.allObjects { label.stringValue = self.shown }
         }
-        menu.addItem(.separator())
-        for (index, item) in Self.modeItems.enumerated() {
-            menu.addItem(makeItem(item.0, tag: index, action: #selector(pickMode(_:))))
-        }
-        menu.addItem(.separator())
-        for (index, item) in Self.densityItems.enumerated() {
-            menu.addItem(makeItem(item.0, tag: index, action: #selector(pickDensity(_:))))
-        }
-        menu.addItem(.separator())
-        for (index, item) in Self.fpsItems.enumerated() {
-            menu.addItem(makeItem(item.0, tag: index, action: #selector(pickFps(_:))))
-        }
-        updateChecks(menu)
-        return menu
-    }
-
-    private func makeItem(_ title: String, tag: Int, action: Selector) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
-        item.target = self
-        item.tag = tag
-        return item
-    }
-
-    private func updateChecks(_ menu: NSMenu) {
-        for item in menu.items where !item.isSeparatorItem {
-            switch item.action {
-            case #selector(pickMode(_:)): item.state = Self.modeItems[item.tag].1 == mode ? .on : .off
-            case #selector(pickDensity(_:)): item.state = Self.densityItems[item.tag].1 == density ? .on : .off
-            case #selector(pickFps(_:)): item.state = Self.fpsItems[item.tag].1 == fps ? .on : .off
-            default: item.state = .off      // presets are actions, never checked themselves
-            }
-        }
-    }
-
-    @objc private func pickMode(_ sender: NSMenuItem) {
-        select(mode: Self.modeItems[sender.tag].1, fps: fps, density: density)
-    }
-
-    @objc private func pickDensity(_ sender: NSMenuItem) {
-        select(mode: mode, fps: fps, density: Self.densityItems[sender.tag].1)
-    }
-
-    @objc private func pickFps(_ sender: NSMenuItem) {
-        select(mode: mode, fps: Self.fpsItems[sender.tag].1, density: density)
-    }
-
-    @objc private func pickPreset(_ sender: NSMenuItem) {
-        let preset = Self.presetItems[sender.tag].1
-        select(mode: preset.mode, fps: preset.fps, density: preset.density)
-    }
-
-    private func select(mode newMode: Mode, fps newFps: UInt8, density newDensity: DensityChoice) {
-        guard newMode != mode || newFps != fps || newDensity != density else { return }
-        mode = newMode
-        fps = newFps
-        density = newDensity
-        if let menu { updateChecks(menu) }
-        onSelect?()
     }
 }
