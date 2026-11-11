@@ -205,6 +205,12 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         for window in windows.values { window.composerBar.setStatus(text) }
     }
 
+    /// Hub `focus`: bring every window forward, the last focused one as key.
+    func raiseAll() {
+        for window in windows.values { window.orderFront(nil) }
+        lastFocused.flatMap { windows[$0] }?.makeKeyAndOrderFront(nil)
+    }
+
     /// Option-click on a history entry: into the key window's composer, else the last focused one's.
     func insert(_ payload: InsertPayload, info: ClipInfo) {
         let window = (NSApp.keyWindow as? RemoteWindow) ?? lastFocused.flatMap { windows[$0] }

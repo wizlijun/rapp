@@ -320,3 +320,32 @@ async fn hub_log_records_a_failed_route_before_the_fallback() {
     let last = route.last().unwrap();
     assert_eq!((&last["path"], &last["result"]), (&json!("lan"), &json!("ok")), "{route:?}");
 }
+
+async fn wait_for_file(path: &std::path::Path) {
+    for _ in 0..150 {
+        if path.exists() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("{} never appeared", path.display());
+}
+
+#[tokio::test]
+async fn focus_reaches_the_client_and_unknown_sid_errors() {
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = hub_with_host(&a, &relay, home.path(), None).await;
+    let r = hub.call(json!({"cmd":"open","id":a.id,"app":"com.example.echo","req":"o"})).await;
+    assert_eq!(r["event"], "opened", "{r}");
+    let sid = r["sid"].clone();
+    hub.send(json!({"cmd":"focus","sid":sid})).await;
+    let f = a.bins.path().join("client.focus");
+    wait_for_file(&f).await;
+    assert_eq!(std::fs::read_to_string(&f).unwrap(), "focus\n");
+    let e = hub.call(json!({"cmd":"focus","sid":999,"req":"f"})).await;
+    assert_eq!(e, json!({"event":"error","error":"unknown sid","req":"f"}));
+    hub.send(json!({"cmd":"close","sid":sid})).await;
+    assert_eq!(hub.next().await, json!({"event":"closed","sid":sid,"reason":"echo ok"}));
+}

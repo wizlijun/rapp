@@ -71,6 +71,14 @@ fn main() {
     for l in std::io::stdin().lock().lines() {
         match l {
             Ok(l) if l.contains("\"quit\"") => break,
+            Ok(l) if l.contains("\"focus\"") => {
+                if let Some(dir) = std::env::args().next().and_then(|a| std::path::Path::new(&a).parent().map(|d| d.to_path_buf())) {
+                    use std::io::Write as _;
+                    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("client.focus")) {
+                        let _ = f.write_all(b"focus\n");
+                    }
+                }
+            }
             Ok(_) => {}
             Err(_) => break,
         }

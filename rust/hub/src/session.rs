@@ -12,7 +12,7 @@ use std::process::Stdio;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::{Child, Command};
 use tokio::task::JoinSet;
@@ -54,7 +54,19 @@ impl Hub {
         };
         tcp.set_nodelay(true)?;
 
-        self.sessions.lock().unwrap().insert(sid, stdin);
+        // One task owns the client's stdin. Closing = dropping the sender: it drains what is
+        // queued, then ends and drops stdin, so the client sees EOF.
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        if let Some(mut stdin) = stdin {
+            tokio::spawn(async move {
+                while let Some(l) = rx.recv().await {
+                    if stdin.write_all(l.as_bytes()).await.is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+        self.sessions.lock().unwrap().insert(sid, Some(tx));
         let mut opened = json!({"sid":sid,"id":id,"app":app,"path":path});
         if let Some(name) = self.hosts.get(id).map(|h| h.name).filter(|n| !n.is_empty()) {
             opened["host_name"] = name.into();
@@ -138,18 +150,29 @@ impl Hub {
     /// Closes the client's stdin; `closed` follows when it exits.
     pub fn close(&self, sid: u64) -> Result<()> {
         match self.sessions.lock().unwrap().get_mut(&sid) {
-            Some(stdin) => {
-                stdin.take();
+            Some(tx) => {
+                tx.take();
                 Ok(())
             }
             None => bail!("unknown sid"),
         }
     }
 
+    /// Asks the client to raise its windows (`{"cmd":"focus"}` on its stdin).
+    pub fn focus(&self, sid: u64) -> Result<()> {
+        match self.sessions.lock().unwrap().get(&sid) {
+            Some(Some(tx)) => {
+                let _ = tx.send("{\"cmd\":\"focus\"}\n".into());
+                Ok(())
+            }
+            _ => bail!("unknown sid"),
+        }
+    }
+
     /// stdin EOF: close every client, wait up to 5 s, then kill the rest.
     pub async fn close_all(&self) {
-        for stdin in self.sessions.lock().unwrap().values_mut() {
-            stdin.take();
+        for tx in self.sessions.lock().unwrap().values_mut() {
+            tx.take();
         }
         if !self.wait_sessions_done(Duration::from_secs(5)).await {
             let _ = self.kill.send(true);

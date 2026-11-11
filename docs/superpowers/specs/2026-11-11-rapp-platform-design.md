@@ -148,6 +148,7 @@ relay 在 A 的长连接上开一条流，发 `{"op":"relayed","token":T}`，然
 
     成功回 `{"event":"opened","sid","id","app","path"}`；会话结束时回 `{"event":"closed","sid","reason"}`。
   - `{"cmd":"close","sid"}`：关掉 client 的 stdin。
+  - `{"cmd":"focus","sid"}`：让该会话的 rapp-client 把窗口提到最前（hub 给它的 stdin 写 `{"cmd":"focus"}`）。无回复；sid 不存在或已在关闭回 `unknown sid`。
   - 任何一条命令出错都回 `{"event":"error","req"?, "error":"…"}`。
   - stdin 关闭时，hub 关掉所有 client 后退出。
 - GUI 是单窗口，加一个托盘或菜单栏图标。点关闭按钮只隐藏窗口；点"退出"时，如果还有会话，先确认。窗口分三块：

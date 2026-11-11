@@ -23,6 +23,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var ready = false
     /// The window count last logged.
     private var loggedWindows: Int?
+
+    func raiseWindows() {
+        NSApp.activate()
+        coordinator?.raiseAll()
+    }
     /// The stream settings last sent in Hello or SetStream.
     private var sentStream: (mode: Mode, fps: UInt8, density: Float)?
 
@@ -245,6 +250,8 @@ case let .connect(address, json):
         output.readCommands(onCommand: { command in
             if command == "quit" {
                 DispatchQueue.main.async { output.finish(ExitCode.ok, "quit") }
+            } else if command == "focus" {
+                DispatchQueue.main.async { delegate.raiseWindows() }
             } else {
                 output.error("unknown command \(command)")
             }

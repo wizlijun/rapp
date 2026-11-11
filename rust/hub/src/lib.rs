@@ -17,7 +17,6 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
-use tokio::process::ChildStdin;
 
 pub struct Opts {
     pub home: PathBuf,
@@ -40,8 +39,8 @@ pub(crate) struct Hub {
     links: Mutex<HashMap<String, Link>>,
     hosts: Hosts,
     out: tokio::sync::Mutex<Out>,
-    /// sid → client stdin (None once closed).
-    sessions: Mutex<HashMap<u64, Option<ChildStdin>>>,
+    /// sid → writer of the client's stdin (None once closed).
+    sessions: Mutex<HashMap<u64, Option<tokio::sync::mpsc::UnboundedSender<String>>>>,
     next_sid: AtomicU64,
     kill: tokio::sync::watch::Sender<bool>,
     log: Log,
@@ -189,6 +188,10 @@ impl Hub {
             }
             Some("close") => {
                 self.close(v.get("sid").and_then(Value::as_u64).context("missing sid")?)?;
+                return Ok(None);
+            }
+            Some("focus") => {
+                self.focus(v.get("sid").and_then(Value::as_u64).context("missing sid")?)?;
                 return Ok(None);
             }
             _ => bail!("unknown cmd"),
