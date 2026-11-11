@@ -115,7 +115,8 @@ final class Sender {
         transfers.upload(item: item, kind: kind, uti: uti, name: name, data: data, label: label) { [weak self] result in
             switch result {
             case .success: self?.paste(.item(item))
-            case let .failure(failure): self?.finish(failure: "上传失败：\(failure.reason)")
+            // The queue has already shown why in the strip.
+            case .failure: self?.finish(failure: "")
             }
         }
     }
@@ -127,7 +128,7 @@ final class Sender {
         send(.paste(seq: seq, source))
     }
 
-    /// Ends the round: all done (`failure` nil), or the message to show. What was pasted is
+    /// Ends the round: all done (`failure` nil), or the message to show ("" keeps what the strip says). What was pasted is
     /// removed from the editor, unless the user has changed that part meanwhile.
     private func finish(failure: String?) {
         guard let r = round else { return }
@@ -137,15 +138,18 @@ final class Sender {
         bar.setSending(false)
         let composer = bar.composer
         let length = failure == nil ? r.pieces.reduce(0) { $0 + pieceLength($1) } : r.pastedEnd
-        var lines = failure.map { [$0] } ?? []
+        var note: String?
         if length > 0 {
             if composerPrefixMatches(r.pieces, composer.pieces(), length: length) {
                 composer.removeUpTo(length)
             } else {
-                lines.append("（发送中改过内容，未清除）")
+                note = "（发送中改过内容，未清除）"
             }
         }
-        bar.setStatus(lines.isEmpty ? nil : lines.joined(separator: " "))
+        // Self-clearing, unlike the queue's strip, which 取消 would not end.
+        let shown = failure.flatMap { $0.isEmpty ? bar.statusText : $0 }
+        let text = [shown, note].compactMap { $0 }
+        if !text.isEmpty && (failure != "" || note != nil) { bar.showLocalStatus(text.joined(separator: " ")) }
     }
 
     private func pieceLength(_ piece: ComposerPiece) -> Int {

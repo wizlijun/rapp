@@ -89,8 +89,11 @@ final class ComposerBar: NSView {
         updateHeight()
     }
 
+    /// The strip's text now; nil when hidden.
+    var statusText: String? { statusShown ? statusLabel.stringValue : nil }
+
     /// A message of the composer's own, shown for a few seconds.
-    private func showLocalStatus(_ text: String?) {
+    func showLocalStatus(_ text: String?) {
         setStatus(text)
         guard text != nil else { return }
         let generation = statusGeneration
