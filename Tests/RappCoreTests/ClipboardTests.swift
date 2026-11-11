@@ -1,0 +1,86 @@
+import XCTest
+@testable import RappCore
+
+final class ClipboardTests: XCTestCase {
+    func testClipKindOrder() {
+        XCTAssertEqual(clipKind(types: ["public.utf8-plain-text", "public.file-url"]), .files)
+        XCTAssertEqual(clipKind(types: ["public.utf8-plain-text", "public.tiff"]), .image)
+        XCTAssertEqual(clipKind(types: ["public.rtf", "public.utf8-plain-text"]), .text)
+        XCTAssertEqual(clipKind(types: ["com.adobe.pdf", "com.apple.flat-rtfd"]), .data(uti: "com.adobe.pdf"))
+        XCTAssertEqual(clipKind(types: []), .none)
+    }
+    func testClipTextCutsOnCharacterBoundary() {
+        let s = String(repeating: "a", count: maxClipText - 2) + "😀😀"     // 第一个 emoji 跨过 1 MB
+        let (t, cut) = clipText(s)
+        XCTAssertTrue(cut); XCTAssertEqual(t.utf8.count, maxClipText - 2)
+        XCTAssertEqual(clipText("短").text, "短"); XCTAssertFalse(clipText("短").truncated)
+    }
+    func testPasteDecisionThresholds() {
+        let t = "public.utf8-plain-text"
+        XCTAssertEqual(pasteDecision(types: [t], text: String(repeating: "字", count: 799)), .inlineText(String(repeating: "字", count: 799)))
+        XCTAssertEqual(pasteDecision(types: [t], text: String(repeating: "字", count: 800)), .textChunk(String(repeating: "字", count: 800)))
+        let nine = Array(repeating: "x", count: 9).joined(separator: "\n"), ten = nine + "\nx"
+        XCTAssertEqual(pasteDecision(types: [t], text: nine), .inlineText(nine))
+        XCTAssertEqual(pasteDecision(types: [t], text: ten), .textChunk(ten))
+        XCTAssertEqual(pasteDecision(types: ["public.file-url", t], text: "x"), .files)
+        XCTAssertEqual(pasteDecision(types: ["public.png", t], text: "x"), .image)
+        XCTAssertEqual(pasteDecision(types: ["com.adobe.pdf"], text: nil), .data(uti: "com.adobe.pdf"))
+        XCTAssertEqual(pasteDecision(types: [], text: nil), .nothing)
+    }
+    func testComposerItemsSplitsTrimsAndDropsEmpty() {
+        // " 看下\n" [#0] "  " [#1] "和日志 "  → text("看下") end 4、chunk(0) end 5、chunk(1) end 8、text("和日志") end 12
+        XCTAssertEqual(composerItems([.text(" 看下\n"), .chunk(0), .text("  "), .chunk(1), .text("和日志 ")]), [
+            ComposerItem(content: .text("看下"), end: 4), ComposerItem(content: .chunk(0), end: 5),
+            ComposerItem(content: .chunk(1), end: 8), ComposerItem(content: .text("和日志"), end: 12),
+        ])
+        XCTAssertEqual(composerItems([.text("a"), .text("b")]), [ComposerItem(content: .text("ab"), end: 2)])
+        XCTAssertEqual(composerItems([.text(" \n ")]), [])
+    }
+    func testNeedsUploadCountsBytes() {
+        XCTAssertFalse(needsUpload(String(repeating: "字", count: 19_999)))   // 59997 字节
+        XCTAssertTrue(needsUpload(String(repeating: "字", count: 20_000)))    // 60000 字节
+    }
+    func testSafeFileNameKeepsOnlyTheLastComponent() {
+        XCTAssertEqual(safeFileName("../../.ssh/authorized_keys"), "authorized_keys")
+        XCTAssertEqual(safeFileName(".hidden"), "hidden")
+        XCTAssertEqual(safeFileName("a:b.txt"), "ab.txt")
+        XCTAssertEqual(safeFileName(""), "file"); XCTAssertEqual(safeFileName("..."), "file"); XCTAssertEqual(safeFileName("dir/"), "dir")
+    }
+    func testUniqueNameNumbersBeforeTheExtension() {
+        XCTAssertEqual(uniqueName("app.log", existing: []), "app.log")
+        XCTAssertEqual(uniqueName("app.log", existing: ["app.log", "app (2).log"]), "app (3).log")
+        XCTAssertEqual(uniqueName("README", existing: ["README"]), "README (2)")
+    }
+    func testResumeOffsetRestartsWhenPartIsLarger() {
+        XCTAssertEqual(resumeOffset(partSize: 10, total: 100), 10)
+        XCTAssertEqual(resumeOffset(partSize: 100, total: 100), 100)
+        XCTAssertEqual(resumeOffset(partSize: 101, total: 100), 0)
+    }
+    func testFormatSize() {
+        XCTAssertEqual(formatSize(500), "500 B"); XCTAssertEqual(formatSize(81_920), "80 KB")
+        XCTAssertEqual(formatSize(348_160), "340 KB"); XCTAssertEqual(formatSize(2_411_724), "2.3 MB")
+        XCTAssertEqual(formatSize(12_582_912), "12 MB")
+    }
+    func testHistoryTitles() {
+        XCTAssertEqual(historyTitle(.text("帮我看下这个报错\n第二行", truncated: false)), "文字 · 帮我看下这个报错 第二行")
+        XCTAssertEqual(historyTitle(.text(String(repeating: "长", count: 31), truncated: false)), "文字 · " + String(repeating: "长", count: 30) + "…")
+        XCTAssertEqual(historyTitle(.image(width: 1280, height: 720, bytes: 348_160)), "图片 1280×720 · 340 KB")
+        XCTAssertEqual(historyTitle(.files([ClipFile(name: "app.log", bytes: 2_411_724)])), "文件 app.log · 2.3 MB")
+        XCTAssertEqual(historyTitle(.files(Array(repeating: ClipFile(name: "a", bytes: 4_194_304), count: 3))), "3 个文件 · 12 MB")
+        XCTAssertEqual(historyTitle(.data(uti: "com.adobe.pdf", bytes: 81_920)), "数据 com.adobe.pdf · 80 KB")
+        XCTAssertEqual(historyTitle(.unsupported("文件夹（不支持）")), "文件夹（不支持）")
+    }
+    func testChipLabels() {
+        XCTAssertEqual(chipLabel(.text(n: 1, lines: 243)), "[贴入文字 #1 +243 行]")
+        XCTAssertEqual(chipLabel(.image(n: 2, width: 1280, height: 720)), "[图片 #2 1280×720]")
+        XCTAssertEqual(chipLabel(.data(n: 1, uti: "com.adobe.pdf", bytes: 81_920)), "[数据 #1 com.adobe.pdf 80 KB]")
+        XCTAssertEqual(chipLabel(.file(name: "app.log", bytes: 2_411_724)), "[文件 app.log 2.3 MB]")
+    }
+    func testPasteSessionSavesOnceAndRestoresTwoSecondsAfterTheLast() {
+        var p = PasteSession()
+        XCTAssertTrue(p.pasteStarted(now: 0)); p.pasteFinished(now: 0.2)
+        XCTAssertFalse(p.pasteStarted(now: 1.0)); p.pasteFinished(now: 1.2)
+        XCTAssertFalse(p.restoreDue(now: 3.1)); XCTAssertTrue(p.restoreDue(now: 3.25))
+        p.restored(); XCTAssertFalse(p.restoreDue(now: 9)); XCTAssertTrue(p.pasteStarted(now: 10))
+    }
+}
