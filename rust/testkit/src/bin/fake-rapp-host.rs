@@ -1,7 +1,8 @@
 //! Test double for `rapp-host` (spec §5), just enough for rapp-service:
 //! `check --json`, `list-apps --json`, `serve --app X --bind B --port P --token-env VAR --json`.
 //! A "session" is a TCP connection whose first line must be the token; after `ok\n`
-//! every byte is echoed back.
+//! every byte is echoed back. Permissions come from a `perms` file next to argv[0]
+//! (`{"screen_recording":…,"accessibility":…}`); without one both are granted.
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
@@ -23,11 +24,26 @@ fn exit(code: i32, reason: &str) -> ! {
 
 /// Appends to `host.log` next to argv[0] (tests give each case its own bin dir).
 fn log(line: &str) {
-    let argv0 = std::path::PathBuf::from(std::env::args().next().unwrap_or_default());
-    let path = argv0.parent().unwrap_or(std::path::Path::new(".")).join("host.log");
+    let path = bin_dir().join("host.log");
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
         let _ = writeln!(f, "{line}");
     }
+}
+
+fn bin_dir() -> std::path::PathBuf {
+    let argv0 = std::path::PathBuf::from(std::env::args().next().unwrap_or_default());
+    argv0.parent().unwrap_or(std::path::Path::new(".")).to_path_buf()
+}
+
+/// `(screen_recording, accessibility)` from the `perms` file.
+fn perms() -> (bool, bool) {
+    let v = std::fs::read_to_string(bin_dir().join("perms")).unwrap_or_default().replace(' ', "");
+    (!v.contains(r#""screen_recording":false"#), !v.contains(r#""accessibility":false"#))
+}
+
+fn perms_json() -> String {
+    let (s, a) = perms();
+    format!(r#"{{"screen_recording":{s},"accessibility":{a}}}"#)
 }
 
 fn flag(args: &[String], name: &str) -> Option<String> {
@@ -38,11 +54,15 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("check") => {
-            emit(r#"{"screen_recording":true,"accessibility":true}"#);
+            log(&format!("check{}", if args.iter().any(|a| a == "--prompt") { " --prompt" } else { "" }));
+            emit(&perms_json());
             exit(0, "ok")
         }
         Some("list-apps") => {
-            emit(r#"{"apps":[{"app":"com.example.echo","name":"Echo"},{"app":"com.apple.Safari","name":"Safari"}]}"#);
+            emit(&format!(
+                r#"{{"apps":[{{"app":"com.example.echo","name":"Echo"}},{{"app":"com.apple.Safari","name":"Safari"}}],"permissions":{}}}"#,
+                perms_json()
+            ));
             exit(0, "ok")
         }
         Some("serve") => serve(&args[1..]),
@@ -59,6 +79,12 @@ fn serve(args: &[String]) -> ! {
     let bind = flag(args, "--bind").unwrap_or_else(|| "0.0.0.0".into());
     let port: u16 = flag(args, "--port").and_then(|p| p.parse().ok()).unwrap_or(0);
     let app = flag(args, "--app").unwrap_or_default();
+    let (screen, ax) = perms();
+    let missing: Vec<&str> =
+        [(!screen).then_some("Screen Recording"), (!ax).then_some("Accessibility")].into_iter().flatten().collect();
+    if !missing.is_empty() {
+        exit(3, &format!("missing permission: {}\\nAllow rapp (or the terminal running rapp-host) under System Settings > Privacy & Security, then connect again.", missing.join(", ")))
+    }
     let listener = TcpListener::bind((bind.as_str(), port)).unwrap_or_else(|_| exit(1, "bind failed"));
     log(&format!("start {app}"));
     emit(&format!(r#"{{"event":"listening","port":{}}}"#, listener.local_addr().unwrap().port()));

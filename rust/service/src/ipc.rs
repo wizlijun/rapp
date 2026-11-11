@@ -40,7 +40,13 @@ async fn conn(state: &Arc<State>, tcp: TcpStream, token: &str) -> Result<()> {
                     rx.mark_unchanged();
                     feed = Some(rx);
                 }
-                write_json(&mut w, &handle(state, &cmd)).await?;
+                let reply = if cmd["cmd"] == "permissions" {
+                    let perms = crate::workers::refresh_permissions(state, cmd["prompt"] == true).await;
+                    ok(json!({"permissions": perms}))
+                } else {
+                    handle(state, &cmd)
+                };
+                write_json(&mut w, &reply).await?;
             }
             changed = async { feed.as_mut().expect("guarded").changed().await }, if feed.is_some() => {
                 if changed.is_err() { return Ok(()) }

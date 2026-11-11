@@ -47,7 +47,7 @@ impl Service {
         rapp_net::config::write_private(&opts.home.join("ipc.token"), ipc_token.as_bytes())?;
 
         let (relay_tx, relay_rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut state = State {
+        let state = State {
             home: opts.home,
             bin_dir: opts.bin_dir,
             gui: opts.gui,
@@ -57,13 +57,14 @@ impl Service {
             tokens: Mutex::default(),
             sessions: Mutex::default(),
             relay: Mutex::new(("off", None)),
-            permissions: serde_json::Value::Null,
+            permissions: Mutex::new(serde_json::Value::Null),
             workers: workers::Workers::new(opts.worker_idle),
             changed: tokio::sync::watch::channel(0).0,
             relay_cmd: relay_tx,
             cm: Mutex::new(None),
         };
-        state.permissions = workers::check(&state).await;
+        let checked = workers::check(&state, false).await;
+        state.set_permissions(checked);
         let state = Arc::new(state);
         let tasks = vec![
             tokio::spawn(peer::accept_loop(state.clone(), endpoint)),

@@ -61,9 +61,15 @@ async fn run_json(state: &State, args: &[&str]) -> Result<Value> {
         .ok_or_else(|| anyhow!("rapp-host {} gave no result", args[0]))
 }
 
-pub async fn check(state: &State) -> Value {
-    match run_json(state, &["check"]).await {
-        Ok(v) => json!({"screen_recording": v["screen_recording"] == true, "accessibility": v["accessibility"] == true}),
+fn permissions(v: &Value) -> Value {
+    json!({"screen_recording": v["screen_recording"] == true, "accessibility": v["accessibility"] == true})
+}
+
+/// `rapp-host check`; with `prompt`, macOS is asked for what is missing, so rapp shows up in System Settings.
+pub async fn check(state: &State, prompt: bool) -> Value {
+    let args: &[&str] = if prompt { &["check", "--prompt"] } else { &["check"] };
+    match run_json(state, args).await {
+        Ok(v) => permissions(&v),
         Err(e) => {
             eprintln!("rapp-service: {e:#}");
             json!({"screen_recording": false, "accessibility": false})
@@ -71,8 +77,21 @@ pub async fn check(state: &State) -> Value {
     }
 }
 
-pub async fn list_apps(state: &State) -> Result<Value> {
-    Ok(run_json(state, &["list-apps"]).await?["apps"].clone())
+/// Checks again and stores the result.
+pub async fn refresh_permissions(state: &State, prompt: bool) -> Value {
+    let v = check(state, prompt).await;
+    state.set_permissions(v.clone());
+    v
+}
+
+/// The shareable apps, plus A's permissions when the host reports them (it stores those too).
+pub async fn list_apps(state: &State) -> Result<(Value, Option<Value>)> {
+    let v = run_json(state, &["list-apps"]).await?;
+    let perms = v.get("permissions").filter(|p| p.is_object()).map(permissions);
+    if let Some(p) = &perms {
+        state.set_permissions(p.clone());
+    }
+    Ok((v["apps"].clone(), perms))
 }
 
 /// Port and token of the worker for `app`, starting one if needed; counts a session.

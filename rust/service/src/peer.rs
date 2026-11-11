@@ -87,7 +87,8 @@ pub async fn serve_request(state: &Arc<State>, mut s: BiStream, peer: String, pa
     match serde_json::from_value(read_json(&mut s).await?) {
         Ok(Op::ListApps) => {
             let r = match workers::list_apps(state).await {
-                Ok(apps) => ok(json!({"apps": apps})),
+                Ok((apps, Some(perms))) => ok(json!({"apps": apps, "permissions": perms})),
+                Ok((apps, None)) => ok(json!({"apps": apps})),
                 Err(e) => err(&e.to_string()),
             };
             reply_and_finish(&mut s, r).await
@@ -100,7 +101,13 @@ pub async fn serve_request(state: &Arc<State>, mut s: BiStream, peer: String, pa
 async fn open(state: &Arc<State>, mut s: BiStream, app: &str, peer: String, path: &'static str) -> Result<()> {
     let (port, token) = match workers::start_session(state, app).await {
         Ok(w) => w,
-        Err(e) => return reply_and_finish(&mut s, err(&e.to_string())).await,
+        Err(e) => {
+            let e = format!("{e:#}");
+            if e.contains("missing permission") {
+                workers::refresh_permissions(state, false).await;
+            }
+            return reply_and_finish(&mut s, err(&e)).await;
+        }
     };
     let result = splice_session(state, &mut s, app, port, &token, peer, path).await;
     workers::end_session(state, app);

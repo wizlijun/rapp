@@ -15,6 +15,15 @@ fn apps() -> Value {
     serde_json::from_str(APPS).unwrap()
 }
 
+fn perms(screen_recording: bool, accessibility: bool) -> Value {
+    json!({"screen_recording": screen_recording, "accessibility": accessibility})
+}
+
+/// What the fake `rapp-host` reports from now on.
+fn set_perms(bins: &std::path::Path, v: &Value) {
+    std::fs::write(bins.join("perms"), v.to_string()).unwrap();
+}
+
 /// Sends the worker token over an `open` stream and checks bytes go both ways.
 async fn echo_through(s: &mut rapp_net::quic::BiStream, worker_token: &str) {
     let mut r = BufReader::new(s);
@@ -98,7 +107,7 @@ async fn token_direct_connect_and_list_apps() {
 
     let (conn, auth) = direct(&ep, public, json!({"op":"auth","token":r["token"]})).await;
     assert_eq!(auth, json!({"ok":true}));
-    assert_eq!(req(&conn, json!({"op":"list_apps"})).await, json!({"ok":true,"apps":apps()}));
+    assert_eq!(req(&conn, json!({"op":"list_apps"})).await, json!({"ok":true,"apps":apps(),"permissions":perms(true, true)}));
     // The connection stays usable for more requests.
     assert_eq!(req(&conn, json!({"op":"list_apps"})).await["ok"], true);
     assert_eq!(req(&conn, json!({"op":"nope"})).await["ok"], false);
@@ -270,4 +279,47 @@ async fn set_password_and_set_relay_via_ipc() {
     let cfg: Value = serde_json::from_slice(&std::fs::read(a.home.path().join("service.json")).unwrap()).unwrap();
     assert_eq!(cfg["key"], "wrong");
     assert_eq!(cfg["password"], "new-pass");
+}
+
+#[tokio::test]
+async fn permissions_command_checks_and_prompts() {
+    let a = service(None).await;
+    set_perms(a.bins.path(), &perms(false, true));
+    let mut sub = Ipc::open(&a.svc, a.home.path()).await;
+    sub.call(json!({"cmd":"subscribe"})).await;
+
+    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
+    let r = ipc.call(json!({"cmd":"permissions"})).await;
+    assert_eq!(r, json!({"ok":true,"permissions":perms(false, true)}));
+    assert_eq!(sub.next().await, json!({"event":"changed"}));
+    assert_eq!(ipc.call(json!({"cmd":"status"})).await["permissions"], perms(false, true));
+    assert!(!host_log(a.bins.path()).contains("check --prompt"));
+
+    let r = ipc.call(json!({"cmd":"permissions","prompt":true})).await;
+    assert_eq!(r["permissions"], perms(false, true));
+    assert!(host_log(a.bins.path()).contains("check --prompt"));
+}
+
+#[tokio::test]
+async fn list_apps_reports_and_stores_permissions() {
+    let a = service(None).await;
+    set_perms(a.bins.path(), &perms(true, false));
+    let ep = b_endpoint();
+    let (conn, _) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":PASSWORD})).await;
+    let r = req(&conn, json!({"op":"list_apps"})).await;
+    assert_eq!(r, json!({"ok":true,"apps":apps(),"permissions":perms(true, false)}));
+    assert_eq!(ipc_once(&a.svc, a.home.path(), json!({"cmd":"status"})).await["permissions"], perms(true, false));
+}
+
+#[tokio::test]
+async fn open_without_permission_says_so_and_rechecks() {
+    let a = service(None).await;
+    set_perms(a.bins.path(), &perms(false, false));
+    let ep = b_endpoint();
+    let (conn, _) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":PASSWORD})).await;
+    let r = req(&conn, json!({"op":"open","app":"com.example.echo"})).await;
+    assert_eq!(r["ok"], false);
+    let e = r["error"].as_str().unwrap();
+    assert!(e.contains("missing permission: Screen Recording, Accessibility"), "{e}");
+    assert_eq!(ipc_once(&a.svc, a.home.path(), json!({"cmd":"status"})).await["permissions"], perms(false, false));
 }

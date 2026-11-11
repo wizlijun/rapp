@@ -39,7 +39,8 @@ pub struct State {
     pub sessions: Mutex<(u64, BTreeMap<u64, Session>)>,
     /// ("off" | "connecting" | "connected", last error)
     pub relay: Mutex<(&'static str, Option<String>)>,
-    pub permissions: Value,
+    /// `{"screen_recording","accessibility"}` as last checked.
+    pub permissions: Mutex<Value>,
     pub workers: Workers,
     pub changed: watch::Sender<u64>,
     pub relay_cmd: mpsc::UnboundedSender<RelayCmd>,
@@ -49,6 +50,14 @@ pub struct State {
 impl State {
     pub fn notify(&self) {
         self.changed.send_modify(|n| *n += 1);
+    }
+
+    /// Stores a fresh permission check; subscribers hear about it only if it changed.
+    pub fn set_permissions(&self, v: Value) {
+        let changed = std::mem::replace(&mut *self.permissions.lock().unwrap(), v.clone()) != v;
+        if changed {
+            self.notify();
+        }
     }
 
     pub fn set_relay_status(&self, status: &'static str, error: Option<String>) {
@@ -106,7 +115,7 @@ impl State {
             rapp_net::addr::local_ipv4s().into_iter().map(|ip| rapp_net::addr::at_address(&id, ip, self.port)).collect();
         let mut v = json!({
             "ok": true, "id": cfg.id, "name": cfg.name, "password": cfg.password, "lan_ids": lan_ids,
-            "relay": relay, "permissions": self.permissions, "sessions": sessions,
+            "relay": relay, "permissions": self.permissions.lock().unwrap().clone(), "sessions": sessions,
         });
         if let Some(e) = relay_error {
             v["relay_error"] = json!(e);
