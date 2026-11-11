@@ -54,10 +54,10 @@ final class RemoteWindow: NSWindow {
         let content = contentRect(forFrameRect: frame)
         let grown = NSRect(x: content.minX, y: content.maxY - (content.height + delta),
                            width: content.width, height: content.height + delta)
-        composerBar.frame.size.height = height
         setFrame(frameRect(forContentRect: grown), display: true)
         remoteView.frame = NSRect(x: 0, y: height, width: grown.width, height: grown.height - height)
         composerBar.frame = NSRect(x: 0, y: 0, width: grown.width, height: height)
+        composerBar.needsLayout = true
     }
 
     /// The content (picture + composer bar) size for A's content at `zoom`.

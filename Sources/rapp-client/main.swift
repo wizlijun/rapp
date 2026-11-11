@@ -62,6 +62,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Command-V always goes to the composer when it has the keyboard focus.
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, event.modifierFlags.contains(.command) else { return event }
+            // A sheet (the 📎 file panel) has its own shortcuts.
+            if NSApp.keyWindow?.sheetParent != nil { return event }
             if event.charactersIgnoringModifiers?.lowercased() == "q" {
                 NSApp.terminate(nil)
                 return nil

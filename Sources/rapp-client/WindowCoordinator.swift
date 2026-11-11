@@ -209,6 +209,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         send(.key(keyCode: 8, modifiers: command, down: false))
         copyGeneration += 1
         let generation = copyGeneration
+        if copyBar !== bar { copyBar?.showCopyFeedback(nil) }
         copyBar = bar
         copyPending = true
         bar.showCopyFeedback("已复制")

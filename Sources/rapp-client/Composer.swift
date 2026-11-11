@@ -156,11 +156,13 @@ final class Composer: NSTextView {
         guard let storage = textStorage else { return }
         replace(NSRange(location: 0, length: min(max(end, 0), storage.length)), with: "")
         pruneChips()
+        undoManager?.removeAllActions()
     }
 
     private func clear() {
         replace(NSRange(location: 0, length: textStorage?.length ?? 0), with: "")
         pruneChips()
+        undoManager?.removeAllActions()
     }
 
     private func replace(_ range: NSRange, with string: String) {
@@ -239,7 +241,7 @@ final class Composer: NSTextView {
     }
 
     private func insertPlainOrChunk(_ text: String) {
-        switch pasteDecision(types: [typeUTF8Text], text: text) {
+        switch pasteDecision(types: [typeUTF8Text], text: text.replacingOccurrences(of: "\u{FFFC}", with: "")) {
         case let .inlineText(text): insertText(text, replacementRange: selectedRange())
         case let .textChunk(text): insertTextChunk(text)
         default: break
@@ -249,7 +251,9 @@ final class Composer: NSTextView {
     // MARK: Paste and drop
 
     override func paste(_ sender: Any?) {
-        switch pasteDecision(types: pasteboard.types, text: pasteboard.string) {
+        // A copied block is a bare object-replacement character in text; never insert one.
+        let text = pasteboard.string?.replacingOccurrences(of: "\u{FFFC}", with: "")
+        switch pasteDecision(types: pasteboard.types, text: text) {
         case .files:
             insertFiles(pasteboard.fileURLs())
         case .image:
@@ -285,7 +289,8 @@ final class Composer: NSTextView {
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         let urls = fileURLs(sender)
-        guard !urls.isEmpty else { return super.performDragOperation(sender) }
+        // Dragging a selection around inside the editor could leave a bare block character.
+        guard !urls.isEmpty else { return (sender.draggingSource as? Composer) === self ? false : super.performDragOperation(sender) }
         insertFiles(urls)
         return true
     }
