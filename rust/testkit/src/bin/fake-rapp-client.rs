@@ -1,6 +1,6 @@
 //! Test double for `rapp-client` (spec §5):
 //! `[connect] "rapp://h:p/?…" --token-env VAR --json`.
-//! Connects, sends the token line, expects `ok`, sends `ping`, expects the echo,
+//! Connects (stderr: `fake-rapp-client: connected`), sends the token line, expects `ok`, sends `ping`, expects the echo,
 //! opens a side connection (token, `ok`, `side` echo), writes the port to `client.port`
 //! beside itself, prints `ready`, then waits for stdin EOF / quit (exit reason `echo ok`) or the
 //! socket closing (exit reason `connection closed`).
@@ -30,6 +30,7 @@ fn main() {
     let (Some(token), Some(addr)) = (token, addr) else { exit(2, "usage") };
 
     let mut s = TcpStream::connect(addr).unwrap_or_else(|_| exit(1, "connect failed"));
+    eprintln!("fake-rapp-client: connected");
     let mut r = BufReader::new(s.try_clone().unwrap());
     let mut line = String::new();
     s.write_all(format!("{token}\n").as_bytes()).unwrap();

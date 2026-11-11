@@ -4,13 +4,14 @@
 use crate::hosts::Host;
 use crate::Hub;
 use anyhow::{bail, Context, Result};
+use rapp_net::log::{pipe_lines, Lvl};
 use rapp_net::msg::Op;
 use rapp_net::quic::{splice, BiStream};
 use serde_json::{json, Value};
 use std::process::Stdio;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::{Child, Command};
@@ -27,15 +28,21 @@ impl Hub {
 
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let port = listener.local_addr()?.port();
+        // Taken before the client starts so its stderr lines carry it (a failed start leaves a gap).
+        let sid = self.next_sid.fetch_add(1, Ordering::Relaxed) + 1;
         let mut child = Command::new(&client)
             .arg(format!("rapp://127.0.0.1:{port}/?mode=color16"))
             .args(["--token-env", "RAPP_TOKEN", "--json"])
             .env("RAPP_TOKEN", token)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .kill_on_drop(true)
             .spawn()
             .with_context(|| format!("start {}", client.display()))?;
+        if let Some(stderr) = child.stderr.take() {
+            pipe_lines(self.log.clone(), stderr, json!({"src":"client","sid":sid}));
+        }
         // Taken first: `Child::wait` closes stdin, which would end the client.
         let stdin = child.stdin.take();
         let tcp = tokio::select! {
@@ -47,15 +54,31 @@ impl Hub {
         };
         tcp.set_nodelay(true)?;
 
-        let sid = self.next_sid.fetch_add(1, Ordering::Relaxed) + 1;
         self.sessions.lock().unwrap().insert(sid, stdin);
+        let mut opened = json!({"sid":sid,"id":id,"app":app,"path":path});
+        if let Some(name) = self.hosts.get(id).map(|h| h.name).filter(|n| !n.is_empty()) {
+            opened["host_name"] = name.into();
+        }
+        self.log.event(Lvl::Info, "opened", opened);
         self.emit(json!({"event":"opened","sid":sid,"id":id,"app":app,"path":path}), req).await;
-        tokio::spawn(self.clone().run(sid, child, tcp, stream, listener, host, app.to_string()));
+        tokio::spawn(self.clone().run(sid, child, tcp, stream, listener, host, app.to_string(), Instant::now()));
         Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn run(self: Arc<Self>, sid: u64, mut child: Child, mut tcp: TcpStream, mut stream: BiStream, listener: TcpListener, host: Host, app: String) {
+    async fn run(
+        self: Arc<Self>,
+        sid: u64,
+        mut child: Child,
+        mut tcp: TcpStream,
+        mut stream: BiStream,
+        listener: TcpListener,
+        host: Host,
+        app: String,
+        since: Instant,
+    ) {
+        let id = host.id.clone();
+        let app_name = app.clone();
         let stdout = child.stdout.take();
         let reason = tokio::spawn(async move {
             let mut lines = BufReader::new(stdout?).lines();
@@ -85,7 +108,7 @@ impl Hub {
                         Ok((mut stream, _, _)) => {
                             let _ = splice(&mut tcp, &mut stream).await;
                         }
-                        Err(e) => eprintln!("side connection: {e:#}"),
+                        Err(e) => hub.log.msg(Lvl::Warn, format_args!("side connection: {e:#}")),
                     }
                 });
             }
@@ -106,6 +129,8 @@ impl Hub {
         side.abort();
         let _ = side.await;
         let reason = reason.await.ok().flatten().unwrap_or_else(|| exit_text(status));
+        let secs = since.elapsed().as_secs();
+        self.log.event(Lvl::Info, "closed", json!({"sid":sid,"id":id,"app":app_name,"secs":secs,"reason":reason}));
         self.emit(json!({"event":"closed","sid":sid,"reason":reason}), &None).await;
         self.sessions.lock().unwrap().remove(&sid);
     }

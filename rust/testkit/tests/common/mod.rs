@@ -108,20 +108,30 @@ pub async fn wait_registered(svc: &Service, home: &Path) -> String {
     }
 }
 
+/// Every line of `<home>/logs/<file>` so far.
+pub fn read_log(home: &Path, file: &str) -> Vec<Value> {
+    let text = std::fs::read_to_string(home.join("logs").join(file)).unwrap_or_default();
+    text.lines().map(|l| serde_json::from_str(l).unwrap()).collect()
+}
+
 /// Every line of the service's `service.log` so far.
 pub fn log_events(home: &Path) -> Vec<Value> {
-    let text = std::fs::read_to_string(home.join("logs").join("service.log")).unwrap_or_default();
-    text.lines().map(|l| serde_json::from_str(l).unwrap()).collect()
+    read_log(home, "service.log")
 }
 
 /// Waits for an `ev` line in `service.log` that `pred` accepts.
 pub async fn wait_log(home: &Path, ev: &str, pred: impl Fn(&Value) -> bool) -> Value {
+    wait_log_in(home, "service.log", ev, pred).await
+}
+
+/// Waits for an `ev` line in `<home>/logs/<file>` that `pred` accepts.
+pub async fn wait_log_in(home: &Path, file: &str, ev: &str, pred: impl Fn(&Value) -> bool) -> Value {
     let deadline = tokio::time::Instant::now() + WAIT;
     loop {
-        if let Some(v) = log_events(home).into_iter().find(|v| v["ev"] == ev && pred(v)) {
+        if let Some(v) = read_log(home, file).into_iter().find(|v| v["ev"] == ev && pred(v)) {
             return v;
         }
-        assert!(tokio::time::Instant::now() < deadline, "no {ev} in service.log: {:?}", log_events(home));
+        assert!(tokio::time::Instant::now() < deadline, "no {ev} in {file}: {:?}", read_log(home, file));
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 }
@@ -228,6 +238,7 @@ impl Hub {
             home: home.to_path_buf(),
             bin_dir: Some(bins.to_path_buf()),
             force_path: force.map(str::to_string),
+            log: rapp_net::log::Log::file(&home.join("logs"), "hub.log"),
         };
         let task = tokio::spawn(rapp_hub::run(opts, cmd_r, out_w));
         Hub { w: cmd_w, lines: BufReader::new(out_r).lines(), task, home: home.to_path_buf() }

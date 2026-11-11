@@ -9,6 +9,7 @@ use anyhow::{bail, Context, Result};
 use hosts::{Host, Hosts};
 use link::{Force, Link};
 use quinn::{Connection, Endpoint};
+use rapp_net::log::{Log, Lvl};
 use rapp_net::msg::Op;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -23,6 +24,8 @@ pub struct Opts {
     pub bin_dir: Option<PathBuf>,
     /// `RAPP_FORCE_PATH`: relay | direct | lan.
     pub force_path: Option<String>,
+    /// `hub.log` (spec §4.4); `Log::none()` writes nothing.
+    pub log: Log,
 }
 
 type Out = Box<dyn AsyncWrite + Unpin + Send>;
@@ -41,6 +44,9 @@ pub(crate) struct Hub {
     sessions: Mutex<HashMap<u64, Option<ChildStdin>>>,
     next_sid: AtomicU64,
     kill: tokio::sync::watch::Sender<bool>,
+    log: Log,
+    /// B's self-declared name in `auth` / `connect` (spec §2): this machine's hostname.
+    name: String,
 }
 
 /// Relay settings from `<home>/service.json`; None when unset or empty.
@@ -55,10 +61,16 @@ where
     R: AsyncRead + Unpin + Send + 'static,
     W: AsyncWrite + Unpin + Send + 'static,
 {
+    let relay = relay_settings(&opts.home)?;
+    let mut start = json!({"version": env!("CARGO_PKG_VERSION")});
+    if let Some((addr, _)) = &relay {
+        start["relay"] = addr.as_str().into(); // the address only, never the key
+    }
+    opts.log.event(Lvl::Info, "hub_start", start);
     let hub = Arc::new(Hub {
         force: Force::parse(opts.force_path.as_deref())?,
         ep: rapp_net::quic::client_endpoint(([0, 0, 0, 0], 0).into())?,
-        relay: relay_settings(&opts.home)?,
+        relay,
         relay_conn: Default::default(),
         links: Default::default(),
         hosts: Hosts::load(&opts.home)?,
@@ -67,6 +79,8 @@ where
         next_sid: AtomicU64::new(0),
         kill: tokio::sync::watch::channel(false).0,
         bin_dir: opts.bin_dir,
+        log: opts.log,
+        name: rapp_net::config::hostname(),
     });
     let mut lines = BufReader::new(input).lines();
     while let Some(line) = lines.next_line().await? {
@@ -91,6 +105,11 @@ impl Hub {
         let mut out = self.out.lock().await;
         let _ = out.write_all(format!("{v}\n").as_bytes()).await;
         let _ = out.flush().await;
+    }
+
+    /// The name B introduces itself with.
+    fn me(&self) -> Option<String> {
+        Some(self.name.clone())
     }
 
     fn host(&self, id: &str) -> Result<Host> {
@@ -126,7 +145,7 @@ impl Hub {
                 let (id, password) = (id.as_str(), s("password")?);
                 if let Some(addr) = addr {
                     // `id@ip[:port]`: straight to A with the password, no relay (§2.3).
-                    let auth = Op::Auth { token: None, password: Some(password.into()), name: None };
+                    let auth = Op::Auth { token: None, password: Some(password.into()), name: self.me() };
                     let (conn, r) = self.dial(&addr, link::LAN_WAIT, &auth).await?;
                     conn.close(0u32.into(), b"host added");
                     if r["id"] != id {

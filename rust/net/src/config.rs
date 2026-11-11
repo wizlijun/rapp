@@ -54,6 +54,18 @@ pub fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     write_private(path, &b)
 }
 
+/// This machine's name (`hostname`, without `.local`); "rapp" when unknown.
+/// A's default device name and the name B introduces itself with.
+pub fn hostname() -> String {
+    std::process::Command::new("hostname")
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().trim_end_matches(".local").to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "rapp".into())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

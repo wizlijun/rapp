@@ -256,3 +256,67 @@ async fn open_unknown_app_worker_failure_is_an_error() {
     assert_eq!(hub.call(json!({"cmd":"apps","id":"000"})).await["error"], "unknown host");
     hub.finish().await;
 }
+
+#[tokio::test]
+async fn hub_log_records_route_session_and_client_stderr_without_secrets() {
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = hub_with_host(&a, &relay, home.path(), None).await;
+    let r = hub.call(json!({"cmd":"open","id":a.id,"app":"com.example.echo"})).await;
+    assert_eq!(r["event"], "opened", "{r}");
+    let sid = r["sid"].clone();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    hub.send(json!({"cmd":"close","sid":sid})).await;
+    assert_eq!(hub.next().await["event"], "closed");
+    hub.finish().await;
+
+    let log = |ev: &str| read_log(home.path(), "hub.log").into_iter().filter(|v| v["ev"] == ev).collect::<Vec<_>>();
+    let start = &log("hub_start")[0];
+    assert_eq!((&start["lvl"], &start["relay"]), (&json!("info"), &json!(relay.relay.addr.to_string())), "{start}");
+    assert!(start["version"].is_string(), "{start}");
+    let route = log("route");
+    assert!(route.iter().any(|v| v["id"] == a.id.as_str() && v["path"] == "lan" && v["result"] == "ok"), "{route:?}");
+    let opened = &log("opened")[0];
+    assert_eq!(
+        (&opened["sid"], &opened["id"], &opened["host_name"], &opened["app"], &opened["path"]),
+        (&sid, &json!(a.id), &json!("test-a"), &json!("com.example.echo"), &json!("lan")),
+        "{opened}"
+    );
+    let client = log("log");
+    assert!(
+        client.iter().any(|v| v["src"] == "client" && v["sid"] == sid && v["msg"] == "fake-rapp-client: connected"),
+        "{client:?}"
+    );
+    let closed = &log("closed")[0];
+    assert_eq!((&closed["sid"], &closed["id"], &closed["app"], &closed["reason"]), (&sid, &json!(a.id), &json!("com.example.echo"), &json!("echo ok")), "{closed}");
+    assert!(closed["secs"].is_u64(), "{closed}");
+
+    // B introduces itself by hostname: A's service log shows it (spec §2).
+    let me = rapp_net::config::hostname();
+    let started = wait_log(a.home.path(), "session_start", |v| v["app"] == "com.example.echo").await;
+    assert_eq!(started["name"], me.as_str(), "{started}");
+
+    let text = std::fs::read_to_string(home.path().join("logs").join("hub.log")).unwrap();
+    for secret in [PASSWORD, KEY] {
+        assert!(!text.contains(secret), "{secret:?} in hub.log:\n{text}");
+    }
+}
+
+#[tokio::test]
+async fn hub_log_records_a_failed_route_before_the_fallback() {
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    hub_with_host(&a, &relay, home.path(), None).await.finish().await;
+    relay.relay.stop();
+
+    let mut hub = Hub::start(home.path(), a.bins.path(), None, None);
+    assert_eq!(hub.call(json!({"cmd":"apps","id":a.id})).await["path"], "lan");
+    hub.finish().await;
+    let route: Vec<Value> = read_log(home.path(), "hub.log").into_iter().filter(|v| v["ev"] == "route").collect();
+    let failed = route.iter().find(|v| v["path"] == "relay" && v["result"] != "ok").expect("a failed relay route");
+    assert_eq!(failed["lvl"], "warn", "{failed}");
+    let last = route.last().unwrap();
+    assert_eq!((&last["path"], &last["result"]), (&json!("lan"), &json!("ok")), "{route:?}");
+}

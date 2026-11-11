@@ -8,9 +8,10 @@ use crate::Hub;
 use anyhow::{anyhow, bail, Context, Result};
 use quinn::Connection;
 use rapp_net::line::{read_json, write_json};
+use rapp_net::log::Lvl;
 use rapp_net::msg::Op;
 use rapp_net::quic::{bi, connect, resolve, BiStream, ALPN_PEER, ALPN_RELAY};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::net::SocketAddr;
 use std::time::Duration;
 
@@ -91,7 +92,7 @@ impl Hub {
     pub async fn relay_connect(&self, id: &str, password: &str) -> Result<Result<Value, String>> {
         let conn = self.relay_conn().await?;
         let key = self.relay.as_ref().map(|r| r.1.clone()).unwrap_or_default();
-        let op = Op::Connect { key, id: id.into(), password: password.into(), name: None };
+        let op = Op::Connect { key, id: id.into(), password: password.into(), name: self.me() };
         let (_, r) = self.relay_exchange(&conn, &[&op]).await?;
         Ok(if r["ok"] == true { Ok(r) } else { Err(error_of(&r)) })
     }
@@ -118,30 +119,50 @@ impl Hub {
         Ok((conn, r))
     }
 
-    async fn first_lan(&self, lan: &[String], auth: &Op) -> Option<Connection> {
+    /// One `route` line per path attempt (spec §4.4): `result` is "ok" or why it failed.
+    fn route(&self, id: &str, path: &str, addr: Option<&str>, result: Result<(), String>) {
+        let mut v = json!({"id": id, "path": path});
+        if let Some(a) = addr {
+            v["addr"] = a.into();
+        }
+        let lvl = if result.is_ok() { Lvl::Info } else { Lvl::Warn };
+        v["result"] = result.err().unwrap_or_else(|| "ok".into()).into();
+        self.log.event(lvl, "route", v);
+    }
+
+    async fn first_lan(&self, id: &str, lan: &[String], auth: &Op) -> Option<Connection> {
         for a in lan {
             match self.dial(a, LAN_WAIT, auth).await {
-                Ok((c, _)) => return Some(c),
-                Err(e) => eprintln!("rapp-hub: lan {a}: {e:#}"),
+                Ok((c, _)) => {
+                    self.route(id, "lan", Some(a), Ok(()));
+                    return Some(c);
+                }
+                Err(e) => self.route(id, "lan", Some(a), Err(format!("{e:#}"))),
             }
         }
         None
     }
 
     async fn establish(&self, host: &Host) -> Result<Link> {
-        let password_auth = Op::Auth { token: None, password: Some(host.password.clone()), name: None };
-        let info = match self.relay_connect(&host.id, &host.password).await {
+        let password_auth = Op::Auth { token: None, password: Some(host.password.clone()), name: self.me() };
+        let connected = self.relay_connect(&host.id, &host.password).await;
+        match &connected {
+            Ok(Ok(_)) => {}
+            Ok(Err(msg)) => self.route(&host.id, "relay", None, Err(msg.clone())),
+            Err(e) => self.route(&host.id, "relay", None, Err(format!("unreachable: {e:#}"))),
+        }
+        let info = match connected {
             Ok(Ok(info)) => info,
             // A host added as `id@ip` may never have registered with this relay (§2.3).
             Ok(Err(msg)) if (msg == "unknown id" || msg == "offline") && self.allows(Force::Lan) => {
-                return match self.first_lan(&host.lan, &password_auth).await {
+                return match self.first_lan(&host.id, &host.lan, &password_auth).await {
                     Some(conn) => Ok(Link::Direct { conn, path: "lan" }),
                     None => Err(anyhow!(msg)),
                 };
             }
             Ok(Err(msg)) => bail!(msg),
             Err(e) if self.allows(Force::Lan) => {
-                return match self.first_lan(&host.lan, &password_auth).await {
+                return match self.first_lan(&host.id, &host.lan, &password_auth).await {
                     Some(conn) => Ok(Link::Direct { conn, path: "lan" }),
                     None => Err(e.context("relay unreachable and no LAN address answered")),
                 };
@@ -153,22 +174,26 @@ impl Hub {
         self.hosts.upsert(Host { name, lan: lan.clone(), ..host.clone() })?;
 
         let token = info["token"].as_str().context("relay sent no token")?.to_string();
-        let auth = Op::Auth { token: Some(token.clone()), password: None, name: None };
+        let auth = Op::Auth { token: Some(token.clone()), password: None, name: self.me() };
         if self.allows(Force::Lan) {
-            if let Some(conn) = self.first_lan(&lan, &auth).await {
+            if let Some(conn) = self.first_lan(&host.id, &lan, &auth).await {
                 return Ok(Link::Direct { conn, path: "lan" });
             }
         }
         if self.allows(Force::Direct) {
             match info["public"].as_str() {
                 Some(p) => match self.dial(p, PUBLIC_WAIT, &auth).await {
-                    Ok((conn, _)) => return Ok(Link::Direct { conn, path: "direct" }),
-                    Err(e) => eprintln!("rapp-hub: public {p}: {e:#}"),
+                    Ok((conn, _)) => {
+                        self.route(&host.id, "direct", Some(p), Ok(()));
+                        return Ok(Link::Direct { conn, path: "direct" });
+                    }
+                    Err(e) => self.route(&host.id, "direct", Some(p), Err(format!("{e:#}"))),
                 },
-                None => eprintln!("rapp-hub: no public address for {}", host.id),
+                None => self.route(&host.id, "direct", None, Err("no public address".into())),
             }
         }
         if self.allows(Force::Relay) {
+            self.route(&host.id, "relay", None, Ok(()));
             return Ok(Link::Relay { token });
         }
         bail!("no path to {}", host.id)
@@ -197,7 +222,7 @@ impl Hub {
         if let Some(link) = cached {
             match self.send_on(&link, op).await {
                 Ok((_, r)) if r["error"] == "bad token" => {}
-                Err(e) => eprintln!("rapp-hub: {} via {}: {e:#}; reconnecting", host.id, link.path()),
+                Err(e) => self.log.msg(Lvl::Warn, format_args!("{} via {}: {e:#}; reconnecting", host.id, link.path())),
                 Ok(x) => return finish(x, link.path()),
             }
             self.forget(&host.id);

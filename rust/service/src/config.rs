@@ -47,7 +47,7 @@ impl Config {
             cfg.password = random_password();
         }
         if cfg.name.is_empty() {
-            cfg.name = hostname();
+            cfg.name = rapp_net::config::hostname();
         }
         if fresh {
             cfg.save(home)?;
@@ -64,16 +64,6 @@ impl Config {
         let relay = self.relay.clone().filter(|r| !r.is_empty())?;
         Some((relay, self.key.clone().unwrap_or_default()))
     }
-}
-
-fn hostname() -> String {
-    std::process::Command::new("hostname")
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .map(|s| s.trim().trim_end_matches(".local").to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "rapp".into())
 }
 
 #[cfg(test)]
