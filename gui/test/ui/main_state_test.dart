@@ -111,6 +111,36 @@ void main() {
     expect(s.current, isNull);
   });
 
+  test('a session ended by the user says 已结束', () async {
+    t.emit(opened(1, '111', 'a'));
+    await pump();
+    t.emit({'event': 'closed', 'sid': 1, 'reason': 'stdin closed'});
+    await pump();
+    expect(s.hint, '已结束 a');
+    t.emit(opened(2, '111', 'b'));
+    await pump();
+    t.emit({'event': 'closed', 'sid': 2, 'reason': 'quit'});
+    await pump();
+    expect(s.hint, '已结束 b');
+  });
+
+  test('a session that ends on its own says 意外结束 and why', () async {
+    t.emit(opened(1, '111', 'a'));
+    await pump();
+    t.emit({'event': 'closed', 'sid': 1, 'reason': 'rapp-client: connection closed'});
+    await pump();
+    expect(s.hint, 'a 意外结束：connection closed');
+  });
+
+  test('hub messages in the hint are in Chinese', () async {
+    t.emit({'event': 'error', 'error': 'unknown sid'});
+    await pump();
+    expect(s.hint, '这个会话已经结束了');
+    await t.die();
+    await pump();
+    expect(s.hint, 'rapp-hub 已退出');
+  });
+
   test('select closes the panel', () async {
     t.emit(opened(1, '111', 'a'));
     await pump();

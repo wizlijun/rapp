@@ -157,7 +157,7 @@ class MainState extends ChangeNotifier {
           final next = stepKey(oldGroups, e.key, 1);
           currentKey = (next != null && next != e.key && newKeys.contains(next)) ? next : null;
         }
-        hint = '已结束 ${e.appName}';
+        hint = endedHint(e.appName, h.closeReasons.remove(e.sid));
       }
     } else if (currentKey != null && !newKeys.contains(currentKey)) {
       currentKey = null;
@@ -165,7 +165,7 @@ class MainState extends ChangeNotifier {
 
     if (h.lastError != _lastError) {
       _lastError = h.lastError;
-      if (_lastError != null) hint = _lastError!;
+      if (_lastError != null) hint = hubWord(_lastError!);
     }
     notifyListeners();
   }
@@ -206,7 +206,7 @@ class MainState extends ChangeNotifier {
     } catch (e) {
       _pending.remove(key);
       final missing = missingFromError('$e');
-      hint = missing == null ? '$e' : remoteHint(deviceName(id), missing);
+      hint = missing == null ? hubWord('$e') : remoteHint(deviceName(id), missing);
       _entries = _mapEntries();
       // Back to what was current before, if it is still open.
       if (currentKey == key) {
@@ -258,7 +258,7 @@ class MainState extends ChangeNotifier {
     try {
       await hub!.refreshHosts();
     } catch (e) {
-      hint = '$e';
+      hint = hubWord('$e');
     }
     _entries = _mapEntries();
     notifyListeners();
@@ -284,7 +284,7 @@ class MainState extends ChangeNotifier {
       probes.remove(id);
       if (deviceTab == id) deviceTab = null;
     } catch (e) {
-      hint = '$e';
+      hint = hubWord('$e');
     }
     _entries = _mapEntries();
     notifyListeners();
@@ -319,4 +319,21 @@ class MainState extends ChangeNotifier {
     hub?.removeListener(_onHub);
     super.dispose();
   }
+}
+
+/// Hub messages the user can meet in the hint, in plain words.
+const hubWords = {
+  'rapp-hub exited': 'rapp-hub 已退出',
+  'unknown sid': '这个会话已经结束了',
+};
+
+String hubWord(String message) => hubWords[message] ?? message;
+
+/// "stdin closed" (ended from rapp) and "quit" (its window was closed) are
+/// the user's own doing; any other client exit reason is unexpected.
+String endedHint(String appName, String? reason) {
+  if (reason == null || reason == 'stdin closed' || reason == 'quit') return '已结束 $appName';
+  const prefix = 'rapp-client: ';
+  final why = reason.startsWith(prefix) ? reason.substring(prefix.length) : reason;
+  return '$appName 意外结束：$why';
 }

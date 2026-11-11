@@ -113,6 +113,9 @@ class HubClient extends ChangeNotifier {
   /// Last error not tied to a request (or the hub dying).
   String? lastError;
 
+  /// The client's exit reason per closed session; the reader removes it.
+  final closeReasons = <Object, String>{};
+
   List<HubSession> get sessions => List.unmodifiable(_sessions.values);
 
   Future<List<HubHost>> refreshHosts() async {
@@ -198,6 +201,7 @@ class HubClient extends ChangeNotifier {
         if (m['sid'] != null) _sessions[m['sid'] as Object] = _session(m);
       case 'closed':
         _sessions.remove(m['sid']);
+        if (m['sid'] != null && m['reason'] != null) closeReasons[m['sid'] as Object] = '${m['reason']}';
     }
 
     final p = _take(m, event);

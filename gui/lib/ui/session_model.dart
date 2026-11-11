@@ -29,8 +29,8 @@ class SessionEntry {
 enum Grouping { device, app }
 
 String groupingLabel(Grouping g) => switch (g) {
-      Grouping.device => '设备',
-      Grouping.app => 'App',
+      Grouping.device => '按设备',
+      Grouping.app => '按 App',
     };
 
 class SessionGroup {

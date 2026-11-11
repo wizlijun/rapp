@@ -130,7 +130,7 @@ class _LocalSectionState extends State<LocalSection> {
     final cfg = _serviceJson();
     final relay = TextEditingController(text: '${cfg['relay'] ?? ''}');
     final key = TextEditingController(text: '${cfg['key'] ?? ''}');
-    final ok = await _dialog('Relay 设置', [
+    final ok = await _dialog('中继设置', [
       TextField(controller: relay, autofocus: true, decoration: const InputDecoration(labelText: '地址，例如 vps:21116')),
       TextField(controller: key, decoration: const InputDecoration(labelText: 'Key')),
     ]);
@@ -189,9 +189,9 @@ class _LocalSectionState extends State<LocalSection> {
             _row('密码', st.password,
                 trailing: IconButton(
                     tooltip: '修改密码', icon: const Icon(Icons.edit, size: 18), onPressed: () => _editPassword(st.password))),
-            _row('Relay', '${relayLabels[st.relay] ?? st.relay}${st.relayError == null ? '' : '（${st.relayError}）'}',
+            _row('中继', '${relayLabels[st.relay] ?? st.relay}${st.relayError == null ? '' : '（${st.relayError}）'}',
                 trailing:
-                    IconButton(tooltip: '修改 relay', icon: const Icon(Icons.edit, size: 18), onPressed: _editRelay)),
+                    IconButton(tooltip: '修改中继', icon: const Icon(Icons.edit, size: 18), onPressed: _editRelay)),
             if (Platform.isMacOS)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 2),

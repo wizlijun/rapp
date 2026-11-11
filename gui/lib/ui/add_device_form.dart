@@ -61,7 +61,7 @@ class _AddDeviceFormState extends State<AddDeviceForm> {
         TextField(
           key: const Key('add-id'),
           controller: _id,
-          decoration: const InputDecoration(labelText: 'ID 或 ID@IP（不经 relay）', isDense: true),
+          decoration: const InputDecoration(labelText: '对方的 ID（同一局域网可写 ID@IP）', isDense: true),
         ),
         const SizedBox(height: 8),
         TextField(
