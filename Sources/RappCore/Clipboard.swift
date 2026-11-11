@@ -111,7 +111,7 @@ public func composerItems(_ pieces: [ComposerPiece]) -> [ComposerItem] {
 
 public func needsUpload(_ text: String) -> Bool { text.utf8.count >= inlinePasteLimit }
 
-public func lineCount(_ text: String) -> Int { text.reduce(1) { $1 == "\n" ? $0 + 1 : $0 } }
+public func lineCount(_ text: String) -> Int { text.utf8.reduce(1) { $1 == 0x0A ? $0 + 1 : $0 } }
 
 /// Keeps only the last path component, without ':' or leading dots; falls back to "file".
 public func safeFileName(_ raw: String) -> String {
@@ -148,8 +148,15 @@ public func formatSize(_ bytes: UInt64) -> String {
 public func historyTitle(_ info: ClipInfo) -> String {
     switch info {
     case .text(let s, _):
-        let flat = String(s.map { $0 == "\n" || $0 == "\r" || $0 == "\t" ? " " : $0 })
-        return "文字 · " + String(flat.prefix(30)) + (flat.count > 30 ? "…" : "")
+        var flat = String.UnicodeScalarView()
+        var prevCR = false
+        for u in s.unicodeScalars {
+            defer { prevCR = u == "\r" }
+            if u == "\n" && prevCR { continue }
+            flat.append(u == "\n" || u == "\r" || u == "\t" ? " " : u)
+        }
+        let flatStr = String(flat)
+        return "文字 · " + String(flatStr.prefix(30)) + (flatStr.count > 30 ? "…" : "")
     case .image(let w, let h, let bytes):
         return "图片 \(w)×\(h) · \(formatSize(bytes))"
     case .files(let files):

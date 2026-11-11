@@ -83,4 +83,11 @@ final class ClipboardTests: XCTestCase {
         XCTAssertFalse(p.restoreDue(now: 3.1)); XCTAssertTrue(p.restoreDue(now: 3.25))
         p.restored(); XCTAssertFalse(p.restoreDue(now: 9)); XCTAssertTrue(p.pasteStarted(now: 10))
     }
+
+    func testCRLFLinesAndTitle() {
+        XCTAssertEqual(lineCount("a\r\nb\r\nc"), 3)
+        let ten = Array(repeating: "x", count: 10).joined(separator: "\r\n")
+        XCTAssertEqual(pasteDecision(types: ["public.utf8-plain-text"], text: ten), .textChunk(ten))
+        XCTAssertEqual(historyTitle(.text("a\r\nb", truncated: false)), "文字 · a b")
+    }
 }
