@@ -284,6 +284,7 @@ ThemeData themeDataFor(RappTheme theme) {
     elevatedButtonTheme: ElevatedButtonThemeData(style: button),
     outlinedButtonTheme: OutlinedButtonThemeData(style: button),
     textButtonTheme: TextButtonThemeData(style: button),
+    iconButtonTheme: IconButtonThemeData(style: button),
     extensions: [t],
   );
 }

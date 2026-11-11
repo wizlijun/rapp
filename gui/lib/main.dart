@@ -6,11 +6,15 @@ import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'cm_page.dart';
-import 'home_page.dart';
 import 'hub_client.dart';
 import 'paths.dart';
 import 'service_client.dart';
 import 'service_control.dart';
+import 'ui/fullscreen.dart';
+import 'ui/main_state.dart';
+import 'ui/main_window.dart';
+import 'ui/prefs.dart';
+import 'ui/tokens.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -44,7 +48,10 @@ Future<void> main(List<String> args) async {
   final serviceExe = findBinary('rapp-service', bin, os);
   final control = serviceExe == null ? null : ServiceController(serviceExe: serviceExe, env: env);
 
-  await _showWindow(const Size(980, 680), 'rapp');
+  final prefs = UiPrefs.load(cfg);
+  final state = MainState(hub: hub, hubError: hubError, configDir: cfg, prefs: prefs);
+  await _showWindow(const Size(1194, 834), 'rapp');
+  if (prefs.startFullscreen) await WindowManagerFullscreen().setFullScreen(true);
   await windowManager.setPreventClose(true);
   final shell = _Shell(hub);
   windowManager.addListener(shell);
@@ -53,7 +60,14 @@ Future<void> main(List<String> args) async {
 
   runApp(_App(
     navigatorKey: shell.navigatorKey,
-    home: HomePage(hub: hub, hubError: hubError, monitor: monitor, control: control, configDir: cfg),
+    state: state,
+    home: MainWindow(
+      state: state,
+      monitor: monitor,
+      control: control,
+      configDir: cfg,
+      fullscreen: WindowManagerFullscreen(),
+    ),
   ));
 }
 
@@ -66,19 +80,35 @@ Future<void> _showWindow(Size size, String title) => windowManager.waitUntilRead
     );
 
 class _App extends StatelessWidget {
-  const _App({required this.home, this.navigatorKey});
+  const _App({required this.home, this.navigatorKey, this.state});
   final Widget home;
+  final MainState? state;
   final GlobalKey<NavigatorState>? navigatorKey;
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
+  Widget build(BuildContext context) {
+    final st = state;
+    if (st == null) {
+      return MaterialApp(
+        title: 'rapp',
+        debugShowCheckedModeBanner: false,
+        theme: themeDataFor(RappTheme.matrix),
+        themeMode: ThemeMode.dark,
+        home: home,
+      );
+    }
+    return ListenableBuilder(
+      listenable: st,
+      builder: (context, _) => MaterialApp(
         title: 'rapp',
         navigatorKey: navigatorKey,
         debugShowCheckedModeBanner: false,
-        theme: ThemeData(colorSchemeSeed: Colors.indigo, useMaterial3: true),
-        darkTheme: ThemeData(colorSchemeSeed: Colors.indigo, brightness: Brightness.dark, useMaterial3: true),
+        theme: themeDataFor(st.prefs.theme),
+        themeMode: ThemeMode.dark,
         home: home,
-      );
+      ),
+    );
+  }
 }
 
 class _QuitOnClose with WindowListener {

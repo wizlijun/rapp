@@ -1,0 +1,174 @@
+// The main window: top bar, stage, and a side panel that overlays the stage.
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
+import '../pages/access_log_section.dart';
+import '../pages/local_section.dart';
+import '../service_client.dart';
+import '../service_control.dart';
+import 'backdrop.dart';
+import 'devices_tab.dart';
+import 'fullscreen.dart';
+import 'main_state.dart';
+import 'side_panel.dart';
+import 'stage.dart';
+import 'tokens.dart';
+import 'top_bar.dart';
+
+Future<void> _openFolder(String dir) async {
+  final c = openFolderCommand(dir, Platform.operatingSystem);
+  await Process.run(c.exe, c.args);
+}
+
+class MainWindow extends StatefulWidget {
+  const MainWindow({
+    super.key,
+    required this.state,
+    required this.monitor,
+    required this.control,
+    required this.configDir,
+    required this.fullscreen,
+  });
+
+  final MainState state;
+  final ServiceMonitor monitor;
+  final ServiceController? control;
+  final String configDir;
+  final FullscreenControl fullscreen;
+
+  @override
+  State<MainWindow> createState() => _MainWindowState();
+}
+
+class _MainWindowState extends State<MainWindow> {
+  bool _full = false;
+
+  MainState get state => widget.state;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.fullscreen.isFullScreen().then((v) {
+      if (mounted) setState(() => _full = v);
+    });
+  }
+
+  Future<void> _setFull(bool on) async {
+    await widget.fullscreen.setFullScreen(on);
+    if (mounted) setState(() => _full = on);
+  }
+
+  void _toggleFull() => _setFull(!_full);
+
+  void _esc() {
+    if (state.panel != null) {
+      state.closePanel();
+    } else if (_full) {
+      _setFull(false);
+    }
+  }
+
+  Widget _local() => Column(children: [
+        LocalSection(monitor: widget.monitor, control: widget.control, configDir: widget.configDir),
+        ListenableBuilder(
+          listenable: widget.monitor,
+          builder: (context, _) => AccessLogSection(
+            load: widget.monitor.history,
+            logDir: widget.monitor.status?.logDir,
+            openFolder: _openFolder,
+            reload: widget.monitor,
+          ),
+        ),
+      ]);
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RappTokens.of(context);
+    final mac = Platform.isMacOS;
+    final prefixOf = mac
+        ? (LogicalKeyboardKey k) => SingleActivator(k, meta: true)
+        : (LogicalKeyboardKey k) => SingleActivator(k, control: true);
+    return CallbackShortcuts(
+      bindings: {
+        mac
+            ? const SingleActivator(LogicalKeyboardKey.keyF, control: true, meta: true)
+            : const SingleActivator(LogicalKeyboardKey.f11): _toggleFull,
+        const SingleActivator(LogicalKeyboardKey.escape): _esc,
+        prefixOf(LogicalKeyboardKey.bracketLeft): () => state.step(-1),
+        prefixOf(LogicalKeyboardKey.bracketRight): () => state.step(1),
+      },
+      child: Focus(
+        autofocus: true,
+        child: Scaffold(
+          backgroundColor: t.bg,
+          body: Backdrop(
+            theme: state.prefs.theme,
+            child: Column(children: [
+              TopBar(state: state, fullscreen: _full, onToggleFullscreen: _toggleFull),
+              _NarrowHint(state: state),
+              Expanded(
+                child: ListenableBuilder(
+                  listenable: state,
+                  builder: (context, _) {
+                    final open = state.panel != null;
+                    return Stack(children: [
+                      Positioned.fill(child: Stage(state: state)),
+                      if (open)
+                        Positioned.fill(
+                          child: GestureDetector(
+                            key: const Key('scrim'),
+                            behavior: HitTestBehavior.opaque,
+                            onTap: state.closePanel,
+                            child: ColoredBox(color: t.bg.withValues(alpha: .6)),
+                          ),
+                        ),
+                      if (open)
+                        Positioned(
+                          left: 0,
+                          top: 0,
+                          bottom: 0,
+                          child: SidePanel(
+                            state: state,
+                            devicesTab: DevicesTab(state: state, local: _local()),
+                          ),
+                        ),
+                    ]);
+                  },
+                ),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Below 480px the top bar hides the hint; show it here instead.
+class _NarrowHint extends StatelessWidget {
+  const _NarrowHint({required this.state});
+  final MainState state;
+
+  @override
+  Widget build(BuildContext context) {
+    if (MediaQuery.sizeOf(context).width >= 480) return const SizedBox.shrink();
+    final t = RappTokens.of(context);
+    return ListenableBuilder(
+      listenable: state,
+      builder: (context, _) => state.hint.isEmpty
+          ? const SizedBox.shrink()
+          : Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              child: Text(
+                state.hint,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: t.muted),
+              ),
+            ),
+    );
+  }
+}
