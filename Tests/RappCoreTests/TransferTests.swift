@@ -136,6 +136,33 @@ final class TransferTests: XCTestCase {
         _ = try sink.write([2])
         XCTAssertEqual(s.received(1), .data(uti: "com.x", [1, 2]))
     }
+    func testFailedFinishIsNotCompleteAndRetryWritesAtHave() throws {
+        let s = store()
+        let sink = try s.put(item: 1, kind: .files, uti: "", name: "a.bin", total: 6)
+        XCTAssertFalse(try sink.write([1, 2, 3]))
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: uploads.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: uploads.path) }
+        assertThrows("write failed") { _ = try sink.write([4, 5, 6]) }
+        XCTAssertEqual(sink.have, 3)
+        XCTAssertEqual(try s.put(item: 1, kind: .files, uti: "", name: "a.bin", total: 6).have, 3)
+        XCTAssertNil(s.received(1))
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: uploads.path)
+        XCTAssertTrue(try sink.write([4, 5, 6]))
+        guard case .file(let url)? = s.received(1) else { return XCTFail("not received") }
+        XCTAssertEqual([UInt8](try Data(contentsOf: url)), [1, 2, 3, 4, 5, 6])
+    }
+    func testSecondItemWithSameNameDoesNotShareInterruptedPart() throws {
+        let s = store()
+        let a = try s.put(item: 1, kind: .files, uti: "", name: "app.log", total: 4)
+        _ = try a.write([1, 1])
+        let b = try s.put(item: 2, kind: .files, uti: "", name: "app.log", total: 2)
+        XCTAssertTrue(try b.write([2, 2]))
+        XCTAssertTrue(try a.write([1, 1]))
+        XCTAssertEqual(s.received(2), .file(uploads.appendingPathComponent("app (2).log")))
+        XCTAssertEqual([UInt8](try Data(contentsOf: uploads.appendingPathComponent("app (2).log"))), [2, 2])
+        XCTAssertEqual(s.received(1), .file(uploads.appendingPathComponent("app.log")))
+        XCTAssertEqual([UInt8](try Data(contentsOf: uploads.appendingPathComponent("app.log"))), [1, 1, 1, 1])
+    }
     func testSideSlotsLimitFour() {
         let s = SideSlots()
         for _ in 0..<4 { XCTAssertTrue(s.take()) }

@@ -111,7 +111,9 @@ public final class PutSink {
             guard FileManager.default.createFile(atPath: part.path, contents: nil),
                   let h = try? FileHandle(forWritingTo: part) else { throw TransferError("write failed") }
             partURL = part; handle = h
-            if total == 0 { try finish() }
+            if total == 0 {
+                do { try finish() } catch { discard(); throw error }
+            }
         }
     }
     deinit { try? handle?.close() }
@@ -120,8 +122,14 @@ public final class PutSink {
         do { try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true) }
         catch { throw TransferError("write failed") }
     }
-    static func existing(_ dir: URL) -> Set<String> {
-        Set((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [])
+    /// Names in `dir`; a "<name>.rapp-part" also reserves "<name>". `excluding` is one part file's own name.
+    static func existing(_ dir: URL, excluding own: String? = nil) -> Set<String> {
+        var names = Set<String>()
+        for n in (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? [] where n != own {
+            names.insert(n)
+            if n.hasSuffix(".rapp-part") { names.insert(String(n.dropLast(".rapp-part".count))) }
+        }
+        return names
     }
 
     var isComplete: Bool { have == total }
@@ -139,24 +147,28 @@ public final class PutSink {
 
     /// Appends bytes; true once everything has arrived (a file is then renamed to its final name).
     public func write(_ bytes: [UInt8]) throws -> Bool {
-        guard have + UInt64(bytes.count) <= total else { throw TransferError("too large") }
+        let newHave = have + UInt64(bytes.count)
+        guard newHave <= total else { throw TransferError("too large") }
         if memory {
             buffer += bytes
         } else if let handle {
-            do { try handle.write(contentsOf: Data(bytes)) }
-            catch { throw Self.writeError(error) }
+            do {
+                try handle.seek(toOffset: have)   // the file position is `have`, whatever a failed write left behind
+                try handle.write(contentsOf: Data(bytes))
+                if newHave == total { try handle.truncate(atOffset: total) }
+            } catch { throw Self.writeError(error) }
+            if newHave == total { try finish() }   // not complete until renamed; a retry rewrites this chunk
         }
-        have += UInt64(bytes.count)
-        if have == total, !memory { try finish() }
+        have = newHave
         return have == total
     }
 
     private func finish() throws {
         guard let partURL else { return }
-        try? handle?.close(); handle = nil
-        let final = uploads.appendingPathComponent(uniqueName(safeName, existing: Self.existing(uploads)))
+        let final = uploads.appendingPathComponent(uniqueName(safeName, existing: Self.existing(uploads, excluding: partURL.lastPathComponent)))
         do { try FileManager.default.moveItem(at: partURL, to: final) }
         catch { throw TransferError("write failed") }
+        try? handle?.close(); handle = nil
         finalURL = final
     }
 
