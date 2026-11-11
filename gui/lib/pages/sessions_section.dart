@@ -2,9 +2,8 @@
 import 'package:flutter/material.dart';
 
 import '../hub_client.dart';
+import '../ui/session_model.dart';
 import 'section_card.dart';
-
-const pathLabels = {'lan': '局域网', 'direct': '直连', 'relay': '中继'};
 
 class SessionsSection extends StatelessWidget {
   const SessionsSection({super.key, required this.hub});

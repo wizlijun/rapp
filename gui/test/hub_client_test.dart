@@ -29,6 +29,11 @@ void main() {
       hub = HubClient(t);
     });
 
+    test('focus sends the sid', () {
+      hub.focus(3);
+      expect(t.sent.last, {'cmd': 'focus', 'sid': 3});
+    });
+
     test('hosts request carries req and resolves with the hosts event', () async {
       final f = hub.refreshHosts();
       expect(t.sent.single['cmd'], 'hosts');

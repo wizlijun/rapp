@@ -1,0 +1,65 @@
+// Session list model: entries, grouping, prev/next stepping.
+import 'lamp.dart';
+
+const pathLabels = {'lan': '局域网', 'direct': '直连', 'relay': '中继'};
+
+class SessionEntry {
+  const SessionEntry({
+    required this.sid,
+    required this.id,
+    required this.app,
+    required this.appName,
+    required this.device,
+    required this.path,
+    required this.lamp,
+  });
+
+  /// null while the open request is still in flight (lamp = connecting).
+  final Object? sid;
+  final String id;
+  final String app;
+  final String appName;
+  final String device;
+  final String path;
+  final Lamp lamp;
+
+  String get key => '$id/$app';
+}
+
+enum Grouping { device, app }
+
+String groupingLabel(Grouping g) => switch (g) {
+      Grouping.device => '设备',
+      Grouping.app => 'App',
+    };
+
+class SessionGroup {
+  const SessionGroup(this.title, this.entries);
+  final String title;
+  final List<SessionEntry> entries;
+}
+
+List<SessionGroup> groupSessions(List<SessionEntry> all, Grouping g) {
+  String titleOf(SessionEntry e) => g == Grouping.device ? e.device : e.appName;
+  // Stable sort via original-index tiebreak.
+  final indexed = [for (var i = 0; i < all.length; i++) (i, all[i])];
+  indexed.sort((a, b) {
+    var c = a.$2.device.compareTo(b.$2.device);
+    if (c == 0) c = a.$2.appName.compareTo(b.$2.appName);
+    return c != 0 ? c : a.$1.compareTo(b.$1);
+  });
+  final byTitle = <String, List<SessionEntry>>{};
+  for (final (_, e) in indexed) {
+    byTitle.putIfAbsent(titleOf(e), () => []).add(e);
+  }
+  final titles = byTitle.keys.toList()..sort();
+  return [for (final t in titles) SessionGroup(t, byTitle[t]!)];
+}
+
+String? stepKey(List<SessionGroup> groups, String? current, int delta) {
+  final keys = [for (final g in groups) for (final e in g.entries) e.key];
+  if (keys.isEmpty) return null;
+  final i = current == null ? -1 : keys.indexOf(current);
+  if (i < 0) return keys.first;
+  return keys[((i + delta) % keys.length + keys.length) % keys.length];
+}

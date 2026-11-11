@@ -147,6 +147,7 @@ class HubClient extends ChangeNotifier {
   }
 
   void close(Object sid) => _send({'cmd': 'close', 'sid': sid});
+  void focus(Object sid) => _send({'cmd': 'focus', 'sid': sid});
 
   Future<void> shutdown() async {
     await _t.close();
