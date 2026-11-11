@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let streamMenu: StreamMenu
     private let meter: TrafficMeter
     private var coordinator: WindowCoordinator!
+    private var mirroredMenu: MirroredMenu!
     private var keyMonitor: Any?
     private var ready = false
     /// The stream settings last sent in Hello or SetStream.
@@ -72,7 +73,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// The app menu (spec §4.5): quit, zoom and the stream menu, plus hidden
-    /// editing items whose shortcuts still work in the input bars.
+    /// editing items whose shortcuts still work in the input bars. The remote
+    /// app's menus follow it once the host sends them.
     private func buildMenu() {
         let main = NSMenu()
         let appItem = NSMenuItem()
@@ -112,6 +114,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appItem.submenu = appMenu
         main.addItem(appItem)
         NSApp.mainMenu = main
+        mirroredMenu = MirroredMenu(mainMenu: main)
+        mirroredMenu.send = { [weak self] message in self?.connection.send(message) }
     }
 
     @objc private func pickZoom(_ sender: NSMenuItem) {
@@ -144,6 +148,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Cropped by the region the frame itself carries, not the table's (spec §4.4).
             guard let image = makeImage(bgra: bgra, width: decoder.width, height: decoder.height) else { break }
             coordinator.show(image, region: region)
+        case let .menuBar(items):
+            mirroredMenu.update(items)
         case let .error(reason):
             output.finish(exitCode(forHostError: reason), "rapp-client: host says: \(reason)")
         default:

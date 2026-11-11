@@ -105,6 +105,8 @@ final class Session {
     private let output: WorkerOutput
     private let queue: DispatchQueue
     private let trackerQueue = DispatchQueue(label: "rapp.windows")
+    /// Menu-bar reads and presses (spec §3.5), so a large menu never delays the window poll.
+    private let menuQueue = DispatchQueue(label: "rapp.menus")
     /// Called once with the reason, and whether the session had started (a valid Hello).
     private let onEnd: (String, Bool) -> Void
 
@@ -130,6 +132,11 @@ final class Session {
     private var injector: InputInjector?
     private var timer: DispatchSourceTimer?
     private var pollTimer: DispatchSourceTimer?
+
+    /// The menu bar last sent; picks are checked against it.
+    private var menuBar: [MenuItem]?
+    private var pendingMenuRead: DispatchWorkItem?
+    private var focusedWindow: UInt32?
 
     /// The window table last sent; input and window commands are checked against it.
     private var table: [WindowInfo] = []
@@ -244,9 +251,16 @@ final class Session {
             if !WindowResizer.move(pid: app.processIdentifier, frame: window.globalFrame(display: display), to: origin) {
                 output.log("could not move a window (the app may not allow it)")
             }
-        case .menuPick:
-            // The menu bar is not mirrored yet.
-            break
+        case let .menuPick(path):
+            // A pick of an item B shows but A no longer has is dropped, like a stale window id.
+            guard let app, let menuBar, let item = menuItem(at: path, in: menuBar),
+                  item.enabled, !item.separator, item.children.isEmpty else { return }
+            let pid = app.processIdentifier
+            menuQueue.async { [output] in
+                if !MenuBarReader.press(pid: pid, path: path) { output.log("could not press a menu item") }
+            }
+            // Picks usually change the menus (a new window, a toggled check mark).
+            scheduleMenuRead(after: 1)
         case .ready, .error, .frame, .windows, .menuBar:
             fail("unexpected message from client")
         }
@@ -320,6 +334,7 @@ final class Session {
                     width: UInt16(clamping: Int(display.width.rounded())),
                     height: UInt16(clamping: Int(display.height.rounded()))))
         tableChanged(table)
+        scheduleMenuRead(after: 0)
 
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + 1, repeating: 1.0)
@@ -348,6 +363,12 @@ final class Session {
             }
             table = next
             send(.windows(next))
+            let focused = next.first(where: \.focused)?.id
+            if focused != focusedWindow {
+                focusedWindow = focused
+                // Apps change their menus with the focused window (spec §3.5).
+                scheduleMenuRead(after: 0.5)
+            }
         }
         if let newRegion = captureRegion(windows: next, display: display.size), newRegion != region {
             region = newRegion
@@ -502,9 +523,29 @@ final class Session {
         queue.asyncAfter(deadline: .now() + 1) { [weak self] in self?.end(reason) }
     }
 
+    /// Reads the menu bar `delay` seconds from now, replacing a read not yet
+    /// started, and sends it if it differs from the last one sent.
+    private func scheduleMenuRead(after delay: Double) {
+        guard let app else { return }
+        pendingMenuRead?.cancel()
+        let pid = app.processIdentifier
+        let read = DispatchWorkItem { [weak self] in
+            let items = MenuBarReader.read(pid: pid)
+            self?.queue.async {
+                guard let self, !self.ended, items != self.menuBar else { return }
+                self.menuBar = items
+                self.send(.menuBar(items))
+            }
+        }
+        pendingMenuRead = read
+        menuQueue.asyncAfter(deadline: .now() + delay, execute: read)
+    }
+
     func end(_ reason: String) {
         guard !ended else { return }
         ended = true
+        pendingMenuRead?.cancel()
+        pendingMenuRead = nil
         timer?.cancel()
         timer = nil
         pollTimer?.cancel()
