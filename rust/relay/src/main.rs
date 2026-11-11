@@ -1,4 +1,5 @@
 use anyhow::{bail, Context, Result};
+use rapp_net::log::Log;
 use rapp_relay::{Opts, Relay, DEFAULT_LISTEN, TOKEN_TTL};
 
 const USAGE: &str = "usage: rapp-relay --key <relay key> [--listen 0.0.0.0:21116] [--db relay.json]";
@@ -20,6 +21,7 @@ fn parse(args: &[String]) -> Result<Opts> {
         listen: listen.parse().with_context(|| format!("bad --listen {listen}"))?,
         db: db.into(),
         token_ttl: TOKEN_TTL,
+        log: Log::stderr(),
     })
 }
 
@@ -34,8 +36,7 @@ async fn main() {
         }
     };
     match Relay::start(opts) {
-        Ok(relay) => {
-            eprintln!("rapp-relay: listening on udp {}", relay.addr);
+        Ok(_relay) => {
             let _ = tokio::signal::ctrl_c().await;
         }
         Err(e) => {

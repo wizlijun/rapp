@@ -46,6 +46,7 @@ pub fn relay(ttl: Duration) -> TestRelay {
         key: KEY.into(),
         db: dir.path().join("relay.json"),
         token_ttl: ttl,
+        log: rapp_net::log::Log::none(),
     })
     .unwrap();
     TestRelay { relay, _dir: dir }

@@ -21,7 +21,8 @@ impl Limiter {
         Some(left.as_millis().div_ceil(1000) as u64)
     }
 
-    pub fn fail(&mut self, key: &str, now: Instant) {
+    /// Counts a failure; returns the lock length when this failure (re)locks the key.
+    pub fn fail(&mut self, key: &str, now: Instant) -> Option<u64> {
         if self.keys.len() >= MAX_KEYS {
             self.keys.retain(|_, (_, until)| until.is_some_and(|u| u > now));
         }
@@ -30,7 +31,9 @@ impl Limiter {
         if e.0 >= FREE_FAILURES {
             let secs = 1u64.checked_shl(e.0 - FREE_FAILURES).unwrap_or(u64::MAX).min(MAX_LOCK_SECS);
             e.1 = Some(now + Duration::from_secs(secs));
+            return Some(secs);
         }
+        None
     }
 
     pub fn reset(&mut self, key: &str) {

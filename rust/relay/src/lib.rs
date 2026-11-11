@@ -6,6 +6,8 @@ mod limit;
 mod server;
 
 use anyhow::Result;
+use rapp_net::log::{Lvl, Log};
+use serde_json::json;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -19,6 +21,8 @@ pub struct Opts {
     pub key: String,
     pub db: PathBuf,
     pub token_ttl: Duration,
+    /// Events of observability spec §4.2 (`Log::stderr()` in production: journald).
+    pub log: Log,
 }
 
 pub struct Relay {
@@ -33,6 +37,7 @@ impl Relay {
         let endpoint = rapp_net::quic::server_endpoint(opts.listen, rapp_net::quic::ALPN_RELAY)?;
         let addr = endpoint.local_addr()?;
         let state = Arc::new(server::State::load(opts)?);
+        state.log.event(Lvl::Info, "relay_start", json!({"listen": addr.to_string(), "devices": state.devices()}));
         let task = tokio::spawn(server::accept_loop(endpoint.clone(), state));
         Ok(Relay { addr, endpoint, task })
     }

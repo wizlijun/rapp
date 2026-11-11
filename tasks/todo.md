@@ -105,7 +105,7 @@
 执行方式：我自己按顺序做，每步先写测试、看到失败再实现，每步单独提交；最后派一个新的审查者看整个改动。
 
 - [x] O1 `rapp_net::log`（格式、轮转、重复合并、read_recent、目录）；`splice_metered` + `Meter` 计字节（splice 会被 kick 取消，返回值拿不到）；msg 加可选 `name`、`side`。验证：`cargo test -p rapp-net`
-- [ ] O2 relay：§4.2 事件，`Opts.log`。验证：relay 集成测试含"日志里没有密码和 key"
+- [x] O2 relay：§4.2 事件，`Opts.log`。验证：relay 集成测试含"日志里没有密码和 key"
 - [ ] O3 service：§4.1 事件、worker stderr 转写、`transfer`/`rejected` 转写、IPC `history`、status 带 `log_dir`、launchd.log 清理。验证：service 集成测试
 - [ ] O4 hub：§4.4 事件、client stderr 转写、上报 `name`、side 标记。验证：hub 集成测试
 - [ ] O5 Swift：`--json` 不写 `[stats]` 文本；host 发 `transfer` 事件。验证：`./scripts/check.sh` 末行 `EXIT=0`

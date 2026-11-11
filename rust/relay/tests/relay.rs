@@ -3,6 +3,7 @@
 use quinn::Connection;
 use rapp_net::crypto::{pw_hash, random_hex};
 use rapp_net::line::{read_json, write_json};
+use rapp_net::log::Log;
 use rapp_net::quic::{bi, client_endpoint, connect, ALPN_RELAY};
 use rapp_relay::{Opts, Relay};
 use serde_json::{json, Value};
@@ -13,13 +14,26 @@ use tokio::sync::mpsc;
 const KEY: &str = "relay-key";
 
 fn start(db: &Path, ttl: Duration) -> Relay {
-    Relay::start(Opts {
-        listen: "127.0.0.1:0".parse().unwrap(),
-        key: KEY.into(),
-        db: db.to_path_buf(),
-        token_ttl: ttl,
-    })
-    .unwrap()
+    start_logged(db, ttl, Log::none())
+}
+
+fn start_logged(db: &Path, ttl: Duration, log: Log) -> Relay {
+    Relay::start(Opts { listen: "127.0.0.1:0".parse().unwrap(), key: KEY.into(), db: db.to_path_buf(), token_ttl: ttl, log })
+        .unwrap()
+}
+
+fn events(log: &Path) -> Vec<Value> {
+    std::fs::read_to_string(log).unwrap_or_default().lines().map(|l| serde_json::from_str(l).unwrap()).collect()
+}
+
+async fn wait_for_event(log: &Path, ev: &str) -> Value {
+    for _ in 0..100 {
+        if let Some(e) = events(log).into_iter().find(|e| e["ev"] == ev) {
+            return e;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("no {ev} event in {}", std::fs::read_to_string(log).unwrap_or_default());
 }
 
 async fn dial(relay: &Relay) -> Connection {
@@ -272,4 +286,62 @@ async fn unknown_op_and_garbage() {
     let c = dial(&relay).await;
     assert_eq!(req(&c, json!({"op":"list_apps"})).await["ok"], false);
     assert_eq!(req(&c, json!({"hello":1})).await["ok"], false);
+}
+
+#[tokio::test]
+async fn logs_register_connect_lockout_and_relayed_without_secrets() {
+    let dir = tempfile::tempdir().unwrap();
+    let log_path = dir.path().join("relay.log");
+    let relay =
+        start_logged(&dir.path().join("relay.json"), Duration::from_secs(60), Log::file(dir.path(), "relay.log"));
+    let secret = random_hex(32);
+    let a = dial(&relay).await;
+    let r = req(&a, register_msg(None, &secret, "pw-secret-1")).await;
+    let id = r["id"].as_str().unwrap().to_string();
+    let mut seen = serve_a(a.clone());
+    let (b_addr, b) = dial_from(&relay).await;
+
+    // A relayed stream, closed by both ends.
+    let ok = req(&b, json!({"op":"connect","key":KEY,"id":id,"password":"pw-secret-1","name":"mbp"})).await;
+    let token = ok["token"].as_str().unwrap().to_string();
+    let _incoming = seen.recv().await.unwrap();
+    let mut s = bi(b.open_bi().await.unwrap());
+    write_json(&mut s, &json!({"op":"relay","key":KEY,"token":token})).await.unwrap();
+    write_json(&mut s, &json!({"op":"list_apps"})).await.unwrap();
+    read_json(&mut s).await.unwrap();
+    s.writer_mut().finish().unwrap();
+    let relayed = wait_for_event(&log_path, "relayed").await;
+    assert_eq!((relayed["to"].as_str(), relayed["from"].as_str()), (Some(id.as_str()), Some(b_addr.as_str())));
+    assert!(relayed["up"].as_u64().unwrap() > 0 && relayed["down"].as_u64().unwrap() > 0, "{relayed}");
+
+    // Five bad passwords lock the id.
+    for _ in 0..5 {
+        req(&b, json!({"op":"connect","key":KEY,"id":id,"password":"wrong-pw-xyz","name":"mbp"})).await;
+    }
+    req(&b, connect_msg(&id, "pw-secret-1")).await;
+    let _ = req(&dial(&relay).await, json!({"op":"register","key":"not-the-key","id":id,"secret":"s2",
+        "name":"x","pw_salt":"a","pw_hash":"b","lan":[]}))
+    .await;
+    relay.stop();
+    drop(relay);
+
+    let evs = events(&log_path);
+    let find = |ev: &str, result: &str| evs.iter().find(|e| e["ev"] == ev && e["result"] == result).cloned();
+    assert_eq!(evs[0]["ev"], "relay_start", "{evs:?}");
+    assert_eq!(evs[0]["devices"], 0);
+    assert_eq!(find("register", "new").unwrap()["id"], id.as_str());
+    let c = find("connect", "ok").unwrap();
+    assert_eq!((c["from"].as_str(), c["name"].as_str(), c["to"].as_str()), (Some(b_addr.as_str()), Some("mbp"), Some(id.as_str())));
+    let bad = find("connect", "bad password").unwrap();
+    assert_eq!((bad["lvl"].as_str(), bad["name"].as_str()), (Some("warn"), Some("mbp")));
+    let lock = evs.iter().find(|e| e["ev"] == "lockout").unwrap();
+    assert_eq!(lock["lvl"], "warn");
+    assert!(lock["key"] == format!("id:{id}").as_str() || lock["key"].as_str().unwrap().starts_with("ip:"), "{lock}");
+    assert!(find("connect", "locked").is_some(), "{evs:?}");
+    assert_eq!(find("register", "bad key").unwrap()["lvl"], "warn");
+
+    let text = std::fs::read_to_string(&log_path).unwrap();
+    for secret in ["pw-secret-1", "wrong-pw-xyz", KEY, "not-the-key", secret.as_str(), token.as_str()] {
+        assert!(!text.contains(secret), "log leaks {secret}: {text}");
+    }
 }
