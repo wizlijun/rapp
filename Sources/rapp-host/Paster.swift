@@ -22,6 +22,8 @@ final class Paster {
     private var saved = false
 
     // Main queue.
+    private var cancelled = false
+    private var lastPasteSent: TimeInterval?
     private var snapshot: [[(NSPasteboard.PasteboardType, Data)]]?
 
     init(app: NSRunningApplication, queue: DispatchQueue, transfers: @escaping () -> TransferStore?,
@@ -52,7 +54,17 @@ final class Paster {
         if saved {
             saved = false
             session.restored()
-            DispatchQueue.main.async { self.restoreOnMain(noteWrite: false) }
+        }
+        // Same main-queue block: stop in-flight pastes, then restore (FIFO keeps this after any queued write).
+        DispatchQueue.main.async {
+            self.cancelled = true
+            // The target reads the pasteboard shortly after ⌘V; let it, before restoring.
+            let wait = self.lastPasteSent.map { $0 + 0.15 - ProcessInfo.processInfo.systemUptime } ?? 0
+            if wait > 0 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + wait) { self.restoreOnMain(noteWrite: false) }
+            } else {
+                self.restoreOnMain(noteWrite: false)
+            }
         }
     }
 
@@ -99,6 +111,7 @@ final class Paster {
     // MARK: Main queue
 
     private func write(_ item: ReceivedItem, save: Bool, seq: UInt32) {
+        guard !cancelled else { return }
         let pb = NSPasteboard.general
         if save { snapshot = takeSnapshot(pb) }
         pb.clearContents()
@@ -114,6 +127,7 @@ final class Paster {
     }
 
     private func waitFrontmost(tries: Int, seq: UInt32) {
+        guard !cancelled else { return }
         if NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier {
             sendPaste()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
@@ -127,6 +141,8 @@ final class Paster {
     }
 
     private func sendPaste() {
+        guard !cancelled else { return }
+        lastPasteSent = now()
         let source = CGEventSource(stateID: .hidSystemState)
         for down in [true, false] {
             guard let event = CGEvent(keyboardEventSource: source, virtualKey: 9, keyDown: down) else { continue }
