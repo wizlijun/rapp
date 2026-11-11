@@ -10,3 +10,4 @@
 - 用 System Events / AX 操作窗口时，只按 PID 定位自己启动的进程（`first process whose unix id is …`），不按进程名。用户自己可能正开着同名的 rapp-client：有一次按名字找，挪了用户正在用的 "Grok Bot" 窗口。
 - 用窗口列表（CGWindowList）判断"这个点最上层是谁"不可靠：macOS 27 的 Dock 一直挂着一个铺满屏幕、layer 20、alpha 1 的透明窗口，结果 B 上的每次点击都报 "covered by Dock" 被丢掉。碰到 Dock 的窗口要再用 AX 命中测试（AXUIElementCopyElementAtPosition）确认那个点是不是真的 Dock 栏。系统升级后先看一眼 host 日志里有没有成片的 "click dropped"。
 - 在本机回环（host 和 client 在同一台 Mac）做实测时，用户若同时在用电脑，焦点和窗口遮挡都会变。开始前先请用户别动键盘鼠标，每次合成点击前都查最上层窗口。
+- rust/ 下没有 rustfmt.toml，现有代码也不是 rustfmt 的产物（宽度约 120，任何配置下 `--check` 都不干净）。不要跑 `cargo fmt --all`：一跑就把整个 workspace 改了 1000+ 行。只格式化新文件：`rustfmt --edition 2021 --config max_width=120,use_small_heuristics=Max <新文件>`。

@@ -91,7 +91,7 @@ impl Hub {
     pub async fn relay_connect(&self, id: &str, password: &str) -> Result<Result<Value, String>> {
         let conn = self.relay_conn().await?;
         let key = self.relay.as_ref().map(|r| r.1.clone()).unwrap_or_default();
-        let op = Op::Connect { key, id: id.into(), password: password.into() };
+        let op = Op::Connect { key, id: id.into(), password: password.into(), name: None };
         let (_, r) = self.relay_exchange(&conn, &[&op]).await?;
         Ok(if r["ok"] == true { Ok(r) } else { Err(error_of(&r)) })
     }
@@ -129,7 +129,7 @@ impl Hub {
     }
 
     async fn establish(&self, host: &Host) -> Result<Link> {
-        let password_auth = Op::Auth { token: None, password: Some(host.password.clone()) };
+        let password_auth = Op::Auth { token: None, password: Some(host.password.clone()), name: None };
         let info = match self.relay_connect(&host.id, &host.password).await {
             Ok(Ok(info)) => info,
             // A host added as `id@ip` may never have registered with this relay (§2.3).
@@ -153,7 +153,7 @@ impl Hub {
         self.hosts.upsert(Host { name, lan: lan.clone(), ..host.clone() })?;
 
         let token = info["token"].as_str().context("relay sent no token")?.to_string();
-        let auth = Op::Auth { token: Some(token.clone()), password: None };
+        let auth = Op::Auth { token: Some(token.clone()), password: None, name: None };
         if self.allows(Force::Lan) {
             if let Some(conn) = self.first_lan(&lan, &auth).await {
                 return Ok(Link::Direct { conn, path: "lan" });

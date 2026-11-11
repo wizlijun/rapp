@@ -130,7 +130,7 @@ async fn serve(state: &Arc<State>, conn: &Connection, key: &str, cmds: &mut Unbo
 /// A stream the relay opened: `incoming` (a B is about to connect) or `relayed`.
 async fn from_relay(state: &Arc<State>, mut s: rapp_net::quic::BiStream) -> Result<()> {
     match serde_json::from_value(read_json(&mut s).await?) {
-        Ok(Op::Incoming { token, peer }) => {
+        Ok(Op::Incoming { token, peer, .. }) => {
             state.add_token(token, peer.clone());
             write_json(&mut s, &ok(json!({}))).await?;
             s.writer_mut().finish()?;

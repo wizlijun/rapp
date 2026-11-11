@@ -22,7 +22,7 @@ impl Hub {
     pub async fn open(self: &Arc<Self>, id: &str, app: &str, req: &Option<Value>) -> Result<()> {
         let client = rapp_net::bins::find("rapp-client", self.bin_dir.as_deref()).context("rapp-client not found")?;
         let host = self.host(id)?;
-        let (stream, reply, path) = self.request(&host, &Op::Open { app: app.into() }).await?;
+        let (stream, reply, path) = self.request(&host, &Op::Open { app: app.into(), side: false }).await?;
         let token = reply["token"].as_str().context("no worker token")?;
 
         let listener = TcpListener::bind("127.0.0.1:0").await?;
@@ -81,7 +81,7 @@ impl Hub {
                 let _ = tcp.set_nodelay(true);
                 let (hub, host, app) = (hub.clone(), host.clone(), app.clone());
                 conns.spawn(async move {
-                    match hub.request(&host, &Op::Open { app }).await {
+                    match hub.request(&host, &Op::Open { app, side: true }).await {
                         Ok((mut stream, _, _)) => {
                             let _ = splice(&mut tcp, &mut stream).await;
                         }

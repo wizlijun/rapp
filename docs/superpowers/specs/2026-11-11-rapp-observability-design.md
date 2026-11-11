@@ -122,13 +122,27 @@
 ## 5 共用模块 `rapp_net::log`
 
 ```rust
-pub fn init_file(dir: &Path, name: &str) -> io::Result<()>;   // service、hub 调用
-pub fn init_stderr();                 // relay 调用；不 init 时的默认去处也是 stderr
-pub fn event(lvl: Lvl, ev: &str, fields: serde_json::Value);  // fields 必须是 object
-pub fn msg(lvl: Lvl, text: impl Display);                     // 等于 event(lvl, "log", {"msg":…})
+#[derive(Clone)] pub struct Log;      // Arc<Mutex<…>>；各组件通过自己的 Opts.log 拿到，不用全局单例
+impl Log {
+    pub fn none() -> Log;             // 测试默认：什么都不写
+    pub fn stderr() -> Log;           // relay 用（journald 收集）
+    pub fn file(dir: &Path, name: &str) -> Log;   // service、hub 用；首次写时才创建目录和文件
+    pub fn event(&self, lvl: Lvl, ev: &str, fields: serde_json::Value);  // fields 必须是 object
+    pub fn msg(&self, lvl: Lvl, text: impl Display);                     // 等于 event(lvl, "log", {"msg":…})
+    pub fn flush(&self);              // 补写挂起的 repeat 计数；Writer 被 drop 时也会补写
+}
 pub fn log_dir() -> PathBuf;          // 按 §3 的规则
-pub fn read_recent(dir: &Path, name: &str, filter: impl Fn(&Value) -> bool, limit: usize) -> Vec<Value>;
+pub fn read_recent(dir: &Path, name: &str, keep: impl Fn(&Value) -> bool, limit: usize) -> Vec<Value>;
+pub fn pipe_lines(log: Log, r: impl AsyncRead, fields: Value) -> JoinHandle<()>;  // 子进程 stderr 转写
+
+// rapp_net::quic
+pub struct Meter;                     // get() -> (a_to_b, b_to_a)；splice 被取消或出错后仍可读
+pub async fn splice_metered(a, b, meter: &Meter) -> io::Result<()>;
 ```
+
+- 用实例而不是全局：集成测试把 relay、service、hub 放在同一个进程里跑，全局单例会把三者的日志混在一起。
+- `Op::Open` 多一个可选的 `side: bool`（默认 false，false 时不上线）：hub 给文件传输的侧连接打上它，service 记 `request` 时带上，「访问记录」不显示这些行。
+- `Op::Auth`、`Op::Connect`、`Op::Incoming` 多一个可选的 `name`（自称），旧版本不发也能解析。
 
 - 时间格式化自己写，用 days-from-civil 算法，大约 20 行，不引入 chrono。
 - 轮转判断：每次写之前，用一个已知字节计数和 5 MB 比较。
@@ -175,6 +189,6 @@ pub fn read_recent(dir: &Path, name: &str, filter: impl Fn(&Value) -> bool, limi
 
 ## 9 未验证的假设
 
-- `rapp_net::quic::splice` 能比较容易地改成返回双向的字节数。如果不行，就在 service 一侧用包装过的流来计数。
+- ~~`splice` 改成返回字节数~~：不可行——kick 会取消 splice 的 future，出错时 `copy_bidirectional` 也不给计数。已改为包装流计数的 `Meter`（见 §5）。
 - launchd 对 `StandardErrorPath` 用的是 append 方式打开，所以 service 清空 `launchd.log` 之后，后面的写入还能接上。
 - `~/Library/Logs/rapp/` 由 service 自己创建，不需要额外授权。

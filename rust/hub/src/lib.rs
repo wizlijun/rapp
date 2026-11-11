@@ -126,7 +126,7 @@ impl Hub {
                 let (id, password) = (id.as_str(), s("password")?);
                 if let Some(addr) = addr {
                     // `id@ip[:port]`: straight to A with the password, no relay (§2.3).
-                    let auth = Op::Auth { token: None, password: Some(password.into()) };
+                    let auth = Op::Auth { token: None, password: Some(password.into()), name: None };
                     let (conn, r) = self.dial(&addr, link::LAN_WAIT, &auth).await?;
                     conn.close(0u32.into(), b"host added");
                     if r["id"] != id {

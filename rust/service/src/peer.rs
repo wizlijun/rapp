@@ -93,7 +93,7 @@ pub async fn serve_request(state: &Arc<State>, mut s: BiStream, peer: String, pa
             };
             reply_and_finish(&mut s, r).await
         }
-        Ok(Op::Open { app }) => open(state, s, &app, peer, path).await,
+        Ok(Op::Open { app, .. }) => open(state, s, &app, peer, path).await,
         _ => reply_and_finish(&mut s, err("unknown op")).await,
     }
 }

@@ -5,5 +5,6 @@ pub mod bins;
 pub mod config;
 pub mod crypto;
 pub mod line;
+pub mod log;
 pub mod msg;
 pub mod quic;

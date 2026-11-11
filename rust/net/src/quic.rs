@@ -9,9 +9,12 @@ use rustls::crypto::CryptoProvider;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName, UnixTime};
 use rustls::{DigitallySignedStruct, SignatureScheme};
 use std::net::SocketAddr;
+use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::task::{Context as TaskContext, Poll};
 use std::time::Duration;
-use tokio::io::{AsyncRead, AsyncWrite, Join};
+use tokio::io::{AsyncRead, AsyncWrite, Join, ReadBuf};
 
 pub const ALPN_RELAY: &[u8] = b"rapp-relay/1";
 pub const ALPN_PEER: &[u8] = b"rapp/1";
@@ -30,7 +33,61 @@ where
     A: AsyncRead + AsyncWrite + Unpin + ?Sized,
     B: AsyncRead + AsyncWrite + Unpin + ?Sized,
 {
-    tokio::io::copy_bidirectional_with_sizes(a, b, 64 * 1024, 64 * 1024).await.map(|_| ())
+    splice_metered(a, b, &Meter::default()).await
+}
+
+/// Bytes a splice has moved so far, readable even after it was cancelled or failed.
+#[derive(Clone, Default, Debug)]
+pub struct Meter(Arc<(AtomicU64, AtomicU64)>);
+
+impl Meter {
+    /// `(a_to_b, b_to_a)`.
+    pub fn get(&self) -> (u64, u64) {
+        (self.0 .0.load(Ordering::Relaxed), self.0 .1.load(Ordering::Relaxed))
+    }
+}
+
+/// `splice`, counting into `meter` as bytes are read from `a` and written to `a`.
+pub async fn splice_metered<A, B>(a: &mut A, b: &mut B, meter: &Meter) -> std::io::Result<()>
+where
+    A: AsyncRead + AsyncWrite + Unpin + ?Sized,
+    B: AsyncRead + AsyncWrite + Unpin + ?Sized,
+{
+    let mut a = Counted { inner: a, meter };
+    tokio::io::copy_bidirectional_with_sizes(&mut a, b, 64 * 1024, 64 * 1024).await.map(|_| ())
+}
+
+/// `a` with its reads counted as a→b and its writes as b→a.
+struct Counted<'a, S: ?Sized> {
+    inner: &'a mut S,
+    meter: &'a Meter,
+}
+
+impl<S: AsyncRead + Unpin + ?Sized> AsyncRead for Counted<'_, S> {
+    fn poll_read(self: Pin<&mut Self>, cx: &mut TaskContext<'_>, buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
+        let this = self.get_mut();
+        let before = buf.filled().len();
+        let r = Pin::new(&mut *this.inner).poll_read(cx, buf);
+        this.meter.0 .0.fetch_add((buf.filled().len() - before) as u64, Ordering::Relaxed);
+        r
+    }
+}
+
+impl<S: AsyncWrite + Unpin + ?Sized> AsyncWrite for Counted<'_, S> {
+    fn poll_write(self: Pin<&mut Self>, cx: &mut TaskContext<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
+        let this = self.get_mut();
+        let r = Pin::new(&mut *this.inner).poll_write(cx, buf);
+        if let Poll::Ready(Ok(n)) = r {
+            this.meter.0 .1.fetch_add(n as u64, Ordering::Relaxed);
+        }
+        r
+    }
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut *self.get_mut().inner).poll_flush(cx)
+    }
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut *self.get_mut().inner).poll_shutdown(cx)
+    }
 }
 
 fn provider() -> Arc<CryptoProvider> {
@@ -143,6 +200,42 @@ mod tests {
     use super::*;
     use crate::line::{read_json, write_json};
     use serde_json::json;
+
+    #[tokio::test]
+    async fn splice_metered_counts_both_ways() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let (mut a, mut a_far) = tokio::io::duplex(1024);
+        let (mut b, mut b_far) = tokio::io::duplex(1024);
+        let meter = Meter::default();
+        let m = meter.clone();
+        let task = tokio::spawn(async move { splice_metered(&mut a, &mut b, &m).await });
+        a_far.write_all(&[1; 300]).await.unwrap();
+        a_far.shutdown().await.unwrap();
+        b_far.write_all(&[2; 50]).await.unwrap();
+        b_far.shutdown().await.unwrap();
+        let (mut got_b, mut got_a) = (Vec::new(), Vec::new());
+        b_far.read_to_end(&mut got_b).await.unwrap();
+        a_far.read_to_end(&mut got_a).await.unwrap();
+        task.await.unwrap().unwrap();
+        assert_eq!((got_b.len(), got_a.len()), (300, 50));
+        assert_eq!(meter.get(), (300, 50));
+    }
+
+    #[tokio::test]
+    async fn meter_keeps_counts_when_the_splice_is_cancelled() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let (mut a, mut a_far) = tokio::io::duplex(1024);
+        let (mut b, mut b_far) = tokio::io::duplex(1024);
+        let meter = Meter::default();
+        let m = meter.clone();
+        let task = tokio::spawn(async move { splice_metered(&mut a, &mut b, &m).await });
+        a_far.write_all(&[1; 10]).await.unwrap();
+        let mut buf = [0; 10];
+        b_far.read_exact(&mut buf).await.unwrap();
+        task.abort();
+        let _ = task.await;
+        assert_eq!(meter.get(), (10, 0));
+    }
 
     #[tokio::test]
     async fn roundtrip_over_self_signed_quic() {
