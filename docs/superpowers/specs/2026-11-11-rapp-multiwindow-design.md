@@ -159,13 +159,14 @@ B 上挪窗口而 A 不跟，B 不会把窗口拽回去：B 只在 A 那边的�
 - 父窗口（纯函数，§5）：弹出窗口的父窗口，是和它重叠面积最大的有框窗口；都不重叠就取最前面的有框窗口；一个有框窗口都没有就是 0。
 - 和上次发的不一样才发 `windows`。
 - 区域 = 表里所有窗口的并集（纯函数，§5）。区域变了：`updateConfiguration`（`sourceRect` 用屏内坐标，像素宽高 = 区域 × min(density, 屏的像素密度)），编码器重置。表空了区域保持不变。
-- 每帧的区域取它被抓下来时的配置。具体做法由 Task 1 的探查决定：优先用帧附带的 `SCStreamFrameInfo.screenRect`；不可靠就给每次配置编号，`updateConfiguration` 返回以后到的帧算新区域。
+- 每帧的区域取帧附带的 `SCStreamFrameInfo.screenRect`（点、全局坐标，减去屏原点即画布坐标）。探查确认改 `sourceRect` 后第一帧起就跟着变（附录）。没有这个附件的帧丢掉。
+- 丢掉录屏指示器：macOS 27 在被录的窗口左上角（+6, +6）加一个 66×20 的小窗口（归属目标 app，AX 是 AXWindow/AXDialog、标题 "Window"）。规则（纯函数，§5）：一个窗口完全落在另一个有框窗口的标题行里（标题行高度量不到时按 28 点），就不进表。
 
 ### 3.3 分类（纯函数，以 Task 1 探查结果为准）
 
 | 窗口层级 | AX | 种类 |
 |---|---|---|
-| normal（0） | role AXSheet | sheet |
+| normal（0） | role AXSheet（是有框窗口的子元素，`AXSheets` 属性是空的） | sheet |
 | normal | role AXPopover | popover |
 | normal | subrole AXDialog、AXSystemDialog | dialog |
 | normal | subrole AXFloatingWindow、AXSystemFloatingWindow | floating |
@@ -196,7 +197,7 @@ B 上挪窗口而 A 不跟，B 不会把窗口拽回去：B 只在 A 那边的�
 
 ### 3.6 存取面板
 
-沙盒 app（如 TextEdit）的打开/存储面板可能由 `com.apple.appkit.xpc.openAndSavePanelService` 进程画。Task 1 确认归属；如果是它，目标 app 在前台时，把它的窗口也算进过滤器和窗口表（按 sheet 或 dialog 分类，父窗口同 §3.2）。
+探查结果：TextEdit 的打开面板、存储 sheet 在 CGWindowList 里都归目标 app 的 pid，只按 app 过滤的流里画面完整（附录）。所以不单独处理面板服务进程。别的 app 若出现面板画面缺失，再加。
 
 ### 3.7 不再做的
 
@@ -255,6 +256,7 @@ v3 的"窗口关了就结束会话"、`title`、`size` 消息。
 |---|---|
 | `classifyWindow(level:role:subrole:) -> WindowKind` | §3.3 |
 | `assignParents([WindowInfo]) -> [WindowInfo]` | §3.2 父窗口 |
+| `dropTitleBarAccessories([WindowInfo]) -> [WindowInfo]` | §3.2 丢掉录屏指示器 |
 | `captureRegion(windows:display:) -> CGRect?` | §1.1 并集、裁到屏内、取整到 8 点 |
 | `cropRect(window:region:pixelSize:) -> CGRect?` | §4.4 |
 | `WindowPlacement`（原点、缩放；画布↔B 互换；弹出窗口相对父窗口） | §4.2 |
@@ -282,4 +284,20 @@ v3 的"窗口关了就结束会话"、`title`、`size` 消息。
 
 ## 附录：Task 1 探查结果
 
-（实现时填）
+2026-11-11，本机 macOS 27（Darwin 27.0），1920×1080 点、像素密度 2，TextEdit 新建空文档（没打字，最后不存关掉）。流用 `SCContentFilter(display:including:[TextEdit])`。
+
+| 弹出 | CGWindowList 层级 | alpha | 归属 | AX | 流里看得到 |
+|---|---|---|---|---|---|
+| 启动时的打开面板 | 0 | 1 | TextEdit | AXWindow/AXStandardWindow，标题 Open | 是 |
+| 文档窗口 | 0 | 1 | TextEdit | AXWindow/AXStandardWindow | 是 |
+| 右键菜单（AXShowMenu） | 101（popUpMenu） | 1 | TextEdit | 无 AX 窗口 | 是 |
+| 格式菜单（菜单栏） | 101 | 1 | TextEdit | 无 AX 窗口 | 是 |
+| 弹出按钮的列表 | 101 | 1 | TextEdit | 无 AX 窗口 | 是 |
+| 字体面板 | 3（floating） | 1 | TextEdit | AXWindow/AXFloatingWindow | 是 |
+| 存储 sheet | 0 | 1 | TextEdit | 文档窗口的子元素 AXSheet，`AXSheets` 为空 | 是 |
+| 关于窗口 | 0 | 1 | TextEdit | AXWindow/AXDialog | 是 |
+| 录屏指示器（只在被抓时出现） | 同父窗口 | 1 | TextEdit | AXWindow/AXDialog，标题 Window，66×20，在父窗口 +6,+6 | 是（紫色小胶囊，压在标题行上） |
+
+- `screenRect` 附件：配置改成 sourceRect (213,77,603,505) 后，此后每帧 screenRect = 同一矩形（全局点坐标）；再改成 (253,101,…) 后每帧跟着变。`contentRect` 总是 (0,0,w,h)，`scaleFactor` 2。→ 帧区域用 screenRect（§3.2）。
+- 读 TextEdit 整个菜单栏（跳过苹果菜单，每项一次 CopyMultiple）：287 项，201 毫秒。Safari 当时没开，没量。
+- 没测到：提示条（指针要停的弹出按钮上面压着指示器，顶层检查不过，按规则没移指针）；popover（TextEdit 没有）。这两种按 §3.3 的表分类，Task 4/5 手动验证时再看。

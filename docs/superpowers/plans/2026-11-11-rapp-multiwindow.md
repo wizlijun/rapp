@@ -33,9 +33,9 @@
 
 **Files:** scratchpad 里的 `probe.swift`；Modify: spec 附录、必要时 §3.2/§3.3。
 
-- [ ] 写脚本：TextEdit 新建空文档；按 spec §6 依次用 AX 打开右键菜单、格式菜单、存储面板、字体面板、关于窗口，指针停工具栏等提示条；每步列出新窗口的层级、alpha、owner、AX role/subrole；同时跑一条 `display+including:[app]` 的流，每步存一张 PNG；改一次 `sourceRect` 后看 `screenRect`/`contentRect` 附件；计时读 Safari 菜单栏。点击前查顶层窗口。
-- [ ] 运行，看 PNG 确认每种弹出都在画面里。
-- [ ] 结果写进 spec 附录；与 §3.3 不符处改表；决定帧区域来源（screenRect 或配置编号）。
+- [x] 写脚本：TextEdit 新建空文档；按 spec §6 依次用 AX 打开右键菜单、格式菜单、存储面板、字体面板、关于窗口，指针停工具栏等提示条；每步列出新窗口的层级、alpha、owner、AX role/subrole；同时跑一条 `display+including:[app]` 的流，每步存一张 PNG；改一次 `sourceRect` 后看 `screenRect`/`contentRect` 附件；计时读 Safari 菜单栏。点击前查顶层窗口。
+- [x] 运行，看 PNG 确认每种弹出都在画面里。
+- [x] 结果写进 spec 附录；与 §3.3 不符处改表；决定帧区域来源（screenRect 或配置编号）。
 - [ ] Commit `docs: multi-window probe results`
 
 ### Task 2: 协议 v4 + 单窗口版 host/client
@@ -68,6 +68,7 @@
 - `cropRect(window: WindowInfo, region: CanvasRect, pixelWidth: Int, pixelHeight: Int) -> CGRect?`（去标题行 → ∩ 区域 → 减原点 → × 像素密度，取整到整像素；无交集 nil）
 - `struct WindowPlacement { origin: CGPoint; zoom: CGFloat }`：`toB(_ canvas: CGPoint) -> CGPoint`、`toCanvas(_ b: CGPoint) -> CGPoint`、`static func centering(content: CGRect, on screen: CGRect, zoom:) -> WindowPlacement`、`popupOrigin(popup: CanvasRect, parentContent: CanvasRect, parentContentInB: CGPoint) -> CGPoint`、`rezoomed(to: CGFloat, keeping canvas: CGPoint) -> WindowPlacement`（B 坐标用左上原点，翻转在 client 里做）
 - `menuItem(at path: [UInt16], in items: [MenuItem]) -> MenuItem?`
+- `dropTitleBarAccessories(_ windows: [WindowInfo]) -> [WindowInfo]`（完全落在某个有框窗口顶部 titleBar 高度内的窗口去掉；titleBar 为 0 时按 28 点）
 
 - [ ] 测试先行，每个函数至少：正常、边界（区域刚好在 8 的倍数、窗口一半在屏外、tooltip 不和任何窗口重叠、两个有框窗口与菜单重叠面积相同）、空输入；`WindowPlacement` 往返误差 < 0.001。
 - [ ] 红 → 实现 → 绿。
