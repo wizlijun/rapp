@@ -73,6 +73,7 @@ pub async fn start_service(home: &Path, bins: &Path, idle: Duration) -> Service 
         bin_dir: Some(bins.to_path_buf()),
         gui: None,
         worker_idle: idle,
+        log_dir: home.join("logs"),
     })
     .await
     .unwrap()
@@ -103,6 +104,24 @@ pub async fn wait_registered(svc: &Service, home: &Path) -> String {
             return st["id"].as_str().unwrap().to_string();
         }
         assert!(tokio::time::Instant::now() < deadline, "service never registered: {st}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+/// Every line of the service's `service.log` so far.
+pub fn log_events(home: &Path) -> Vec<Value> {
+    let text = std::fs::read_to_string(home.join("logs").join("service.log")).unwrap_or_default();
+    text.lines().map(|l| serde_json::from_str(l).unwrap()).collect()
+}
+
+/// Waits for an `ev` line in `service.log` that `pred` accepts.
+pub async fn wait_log(home: &Path, ev: &str, pred: impl Fn(&Value) -> bool) -> Value {
+    let deadline = tokio::time::Instant::now() + WAIT;
+    loop {
+        if let Some(v) = log_events(home).into_iter().find(|v| v["ev"] == ev && pred(v)) {
+            return v;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "no {ev} in service.log: {:?}", log_events(home));
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 }

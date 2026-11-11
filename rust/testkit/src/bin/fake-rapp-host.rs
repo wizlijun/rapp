@@ -1,7 +1,8 @@
 //! Test double for `rapp-host` (spec §5), just enough for rapp-service:
 //! `check --json`, `list-apps --json`, `serve --app X --bind B --port P --token-env VAR --json`.
 //! A "session" is a TCP connection whose first line must be the token; after `ok\n`
-//! every byte is echoed back. Permissions come from a `perms` file next to argv[0]
+//! every byte is echoed back. For the service's logs, `serve` writes one stderr line and each
+//! session one `transfer` event. Permissions come from a `perms` file next to argv[0]
 //! (`{"screen_recording":…,"accessibility":…}`); without one both are granted, and
 //! `broken` makes `check` fail with no output.
 
@@ -92,6 +93,7 @@ fn serve(args: &[String]) -> ! {
     let listener = TcpListener::bind((bind.as_str(), port)).unwrap_or_else(|_| exit(1, "bind failed"));
     log(&format!("start {app}"));
     emit(&format!(r#"{{"event":"listening","port":{}}}"#, listener.local_addr().unwrap().port()));
+    eprintln!("fake-rapp-host: serving {app}");
     std::thread::spawn(move || {
         for s in listener.incoming().flatten() {
             let token = token.clone();
@@ -118,6 +120,7 @@ fn session(mut s: TcpStream, token: &str) {
         return;
     }
     emit(r#"{"event":"session","state":"started","client":"127.0.0.1","mode":"color16","fps":15}"#);
+    emit(r#"{"event":"transfer","dir":"b_to_a","kind":"files","bytes":5,"name":"a.txt"}"#);
     let _ = s.write_all(b"ok\n");
     let _ = std::io::copy(&mut r, &mut s);
     emit(r#"{"event":"session","state":"ended","reason":"closed"}"#);

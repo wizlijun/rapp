@@ -2,6 +2,7 @@
 
 use crate::config::Config;
 use crate::workers::Workers;
+use rapp_net::log::{Log, Lvl};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
@@ -19,10 +20,38 @@ pub enum RelayCmd {
     Reconnect,
 }
 
-pub struct Session {
-    pub peer: String,
-    pub app: String,
+/// Who is on the other end of a request: B's address, its self-declared name, and the path.
+#[derive(Clone, Debug)]
+pub struct Peer {
+    pub addr: String,
+    /// "自称" (observability spec §4.1): whatever B sent, never checked.
+    pub name: Option<String>,
+    /// "lan" | "direct" | "relay"
     pub path: &'static str,
+}
+
+impl Peer {
+    /// `{"peer","name"?,"path"}` plus `more` (an object), for log events.
+    pub fn fields(&self, more: Value) -> Value {
+        let mut v = json!({"peer": self.addr, "path": self.path});
+        if let Some(n) = &self.name {
+            v["name"] = json!(n);
+        }
+        if let Value::Object(m) = more {
+            v.as_object_mut().expect("object").extend(m);
+        }
+        v
+    }
+}
+
+/// A relay token's (B's public address, B's self-declared name, expiry).
+pub type Token = (String, Option<String>, Instant);
+
+pub struct Session {
+    pub peer: Peer,
+    pub app: String,
+    /// A file-transfer side connection, not a viewing session.
+    pub side: bool,
     pub since: u64,
     pub kick: Arc<Notify>,
 }
@@ -34,8 +63,7 @@ pub struct State {
     pub endpoint: quinn::Endpoint,
     pub port: u16,
     pub cfg: Mutex<Config>,
-    /// relay token → (B's public address, expiry)
-    pub tokens: Mutex<HashMap<String, (String, Instant)>>,
+    pub tokens: Mutex<HashMap<String, Token>>,
     pub sessions: Mutex<(u64, BTreeMap<u64, Session>)>,
     /// ("off" | "connecting" | "connected", last error)
     pub relay: Mutex<(&'static str, Option<String>)>,
@@ -45,6 +73,8 @@ pub struct State {
     pub changed: watch::Sender<u64>,
     pub relay_cmd: mpsc::UnboundedSender<RelayCmd>,
     pub cm: Mutex<Option<std::process::Child>>,
+    pub log: Log,
+    pub log_dir: PathBuf,
 }
 
 impl State {
@@ -56,6 +86,8 @@ impl State {
     pub fn set_permissions(&self, v: Value) {
         let changed = std::mem::replace(&mut *self.permissions.lock().unwrap(), v.clone()) != v;
         if changed {
+            let all = v["screen_recording"] == true && v["accessibility"] == true;
+            self.log.event(if all { Lvl::Info } else { Lvl::Warn }, "permissions", v);
             self.notify();
         }
     }
@@ -63,32 +95,38 @@ impl State {
     pub fn set_relay_status(&self, status: &'static str, error: Option<String>) {
         let mut r = self.relay.lock().unwrap();
         if r.0 != status || r.1 != error {
+            let mut fields = json!({"state": status});
+            if let Some(e) = &error {
+                fields["error"] = json!(e);
+            }
             *r = (status, error);
             drop(r);
+            let lvl = if fields.get("error").is_some() { Lvl::Warn } else { Lvl::Info };
+            self.log.event(lvl, "relay", fields);
             self.notify();
         }
     }
 
-    pub fn add_token(&self, token: String, peer: String) {
+    pub fn add_token(&self, token: String, peer: String, name: Option<String>) {
         let now = Instant::now();
         let mut t = self.tokens.lock().unwrap();
-        t.retain(|_, (_, exp)| *exp > now);
-        t.insert(token, (peer, now + TOKEN_TTL));
+        t.retain(|_, (_, _, exp)| *exp > now);
+        t.insert(token, (peer, name, now + TOKEN_TTL));
     }
 
-    /// B's address for a valid token.
-    pub fn token_peer(&self, token: &str) -> Option<String> {
+    /// B's address and self-declared name for a valid token.
+    pub fn token_peer(&self, token: &str) -> Option<(String, Option<String>)> {
         let t = self.tokens.lock().unwrap();
-        t.get(token).filter(|(_, exp)| *exp > Instant::now()).map(|(p, _)| p.clone())
+        t.get(token).filter(|(_, _, exp)| *exp > Instant::now()).map(|(p, n, _)| (p.clone(), n.clone()))
     }
 
-    pub fn add_session(&self, peer: String, app: &str, path: &'static str) -> (u64, Arc<Notify>) {
+    pub fn add_session(&self, peer: &Peer, app: &str, side: bool) -> (u64, Arc<Notify>) {
         let kick = Arc::new(Notify::new());
         let since = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
         let mut s = self.sessions.lock().unwrap();
         s.0 += 1;
         let sid = s.0;
-        s.1.insert(sid, Session { peer, app: app.to_string(), path, since, kick: kick.clone() });
+        s.1.insert(sid, Session { peer: peer.clone(), app: app.to_string(), side, since, kick: kick.clone() });
         drop(s);
         self.notify();
         (sid, kick)
@@ -101,14 +139,25 @@ impl State {
 
     pub fn kick(&self, sid: u64) -> bool {
         let s = self.sessions.lock().unwrap();
-        s.1.get(&sid).map(|s| s.kick.notify_one()).is_some()
+        let found = s.1.get(&sid).map(|s| s.kick.notify_one()).is_some();
+        drop(s);
+        if found {
+            self.log.event(Lvl::Info, "kick", json!({"sid": sid}));
+        }
+        found
+    }
+
+    /// The newest viewing session (not a side connection) on `app`.
+    pub fn session_for(&self, app: &str) -> Option<u64> {
+        let s = self.sessions.lock().unwrap();
+        s.1.iter().rev().find(|(_, s)| s.app == app && !s.side).map(|(sid, _)| *sid)
     }
 
     pub fn status(&self) -> Value {
         let cfg = self.cfg.lock().unwrap().clone();
         let (relay, relay_error) = self.relay.lock().unwrap().clone();
         let sessions: Vec<Value> = self.sessions.lock().unwrap().1.iter()
-            .map(|(sid, s)| json!({"sid":sid,"peer":s.peer,"app":s.app,"path":s.path,"since":s.since}))
+            .map(|(sid, s)| json!({"sid":sid,"peer":s.peer.addr,"app":s.app,"path":s.peer.path,"since":s.since}))
             .collect();
         let id = cfg.id.clone().unwrap_or_default();
         let lan_ids: Vec<String> =
@@ -116,6 +165,7 @@ impl State {
         let mut v = json!({
             "ok": true, "id": cfg.id, "name": cfg.name, "password": cfg.password, "lan_ids": lan_ids,
             "relay": relay, "permissions": self.permissions.lock().unwrap().clone(), "sessions": sessions,
+            "log_dir": self.log_dir,
         });
         if let Some(e) = relay_error {
             v["relay_error"] = json!(e);

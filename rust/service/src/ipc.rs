@@ -5,6 +5,7 @@ use crate::state::{RelayCmd, State};
 use anyhow::Result;
 use rapp_net::crypto::ct_eq;
 use rapp_net::line::{err, ok, write_json};
+use rapp_net::log::{read_recent, Lvl};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -15,7 +16,7 @@ pub async fn serve(state: Arc<State>, listener: TcpListener, token: String) {
         let (state, token) = (state.clone(), token.clone());
         tokio::spawn(async move {
             if let Err(e) = conn(&state, tcp, &token).await {
-                eprintln!("rapp-service: ipc: {e:#}");
+                state.log.msg(Lvl::Warn, format!("ipc: {e:#}"));
             }
         });
     }
@@ -73,8 +74,25 @@ fn handle(state: &State, cmd: &Value) -> Value {
             Some(sid) if state.kick(sid) => ok(json!({})),
             _ => err("unknown sid"),
         },
+        "history" => {
+            let limit = cmd["limit"].as_u64().unwrap_or(HISTORY_DEFAULT).min(HISTORY_MAX) as usize;
+            ok(json!({"events": read_recent(&state.log_dir, crate::LOG_FILE, in_history, limit)}))
+        }
         _ => err("unknown cmd"),
     }
+}
+
+const HISTORY_DEFAULT: u64 = 50;
+const HISTORY_MAX: u64 = 500;
+
+/// 访问记录 (spec §6): sessions, failed auths and refused requests; never side connections.
+fn in_history(v: &Value) -> bool {
+    let shown = match v["ev"].as_str() {
+        Some("session_start" | "session_end" | "auth_fail") => true,
+        Some("request") => v["result"] != "ok",
+        _ => false,
+    };
+    shown && v["side"] != true
 }
 
 fn update(state: &State, f: impl FnOnce(&mut crate::config::Config), then: RelayCmd) -> Value {

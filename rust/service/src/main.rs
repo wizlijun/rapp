@@ -1,5 +1,6 @@
 //! `rapp-service` — no arguments. Config dir: `RAPP_HOME` or the platform default.
-//! Env: `RAPP_BIN_DIR` (where rapp-host lives), `RAPP_GUI` (the `rapp` GUI for `--cm`).
+//! Env: `RAPP_BIN_DIR` (where rapp-host lives), `RAPP_GUI` (the `rapp` GUI for `--cm`),
+//! `RAPP_LOG_DIR` (where `service.log` goes; see `rapp_net::log::log_dir`).
 
 use rapp_service::{Opts, Service, WORKER_IDLE};
 
@@ -11,19 +12,15 @@ async fn main() {
     }
     let home = rapp_net::config::home();
     let opts = Opts {
-        home: home.clone(),
+        home,
         bin_dir: rapp_net::bins::bin_dir_from_env(),
         gui: std::env::var_os("RAPP_GUI").map(Into::into),
         worker_idle: WORKER_IDLE,
+        log_dir: rapp_net::log::log_dir(),
     };
     match Service::start(opts).await {
         Ok(svc) => {
-            eprintln!(
-                "rapp-service: config {}, udp port {}, ipc 127.0.0.1:{}",
-                home.display(),
-                svc.port,
-                svc.ipc_port
-            );
+            // Ports and id are in service.log (`service_start`).
             let _ = tokio::signal::ctrl_c().await;
             svc.stop();
         }

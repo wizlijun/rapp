@@ -21,7 +21,7 @@ pub fn ensure_running(state: &State) {
             .arg("--cm")
             .stdin(Stdio::null())
             .spawn()
-            .map_err(|e| eprintln!("rapp-service: start {} --cm: {e}", p.display()))
+            .map_err(|e| state.log.msg(rapp_net::log::Lvl::Warn, format!("start {} --cm: {e}", p.display())))
             .ok()
     });
 }

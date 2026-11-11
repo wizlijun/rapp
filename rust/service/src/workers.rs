@@ -4,6 +4,7 @@
 use crate::state::State;
 use anyhow::{anyhow, bail, Context, Result};
 use rapp_net::crypto::random_hex;
+use rapp_net::log::{pipe_lines, Lvl};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -72,7 +73,7 @@ pub async fn check(state: &State, prompt: bool) -> Option<Value> {
     match run_json(state, args).await {
         Ok(v) => Some(permissions(&v)),
         Err(e) => {
-            eprintln!("rapp-service: {e:#}");
+            state.log.msg(Lvl::Warn, format!("{e:#}"));
             None
         }
     }
@@ -142,10 +143,13 @@ async fn spawn(state: &Arc<State>, app: &str, gen: u64) -> Result<(u16, String, 
         .env("RAPP_TOKEN", &token)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
         .context("start rapp-host")?;
     let stdin = child.stdin.take().expect("piped stdin");
+    let stderr = child.stderr.take().expect("piped stderr");
+    pipe_lines(state.log.clone(), stderr, json!({"src": "host", "app": app}));
     let mut lines = BufReader::new(child.stdout.take().expect("piped stdout")).lines();
     let port = tokio::time::timeout(START_WAIT, async {
         while let Some(l) = lines.next_line().await? {
@@ -163,12 +167,40 @@ async fn spawn(state: &Arc<State>, app: &str, gen: u64) -> Result<(u16, String, 
 
     let (state, app) = (state.clone(), app.to_string());
     tokio::spawn(async move {
-        while let Ok(Some(_)) = lines.next_line().await {}
-        let _ = child.wait().await;
+        let mut said = None;
+        while let Ok(Some(l)) = lines.next_line().await {
+            let v: Value = serde_json::from_str(&l).unwrap_or_default();
+            match v["event"].as_str() {
+                Some("exit") => said = Some(v),
+                Some(ev @ ("transfer" | "rejected")) => transcribe(&state, &app, ev, &v),
+                _ => {}
+            }
+        }
+        let status = child.wait().await.ok().and_then(|s| s.code());
+        let code = said.as_ref().and_then(|v| v["code"].as_i64()).or(status.map(i64::from));
+        let reason = said.as_ref().and_then(|v| v["reason"].as_str()).unwrap_or("exited").to_string();
+        let lvl = if code == Some(0) { Lvl::Info } else { Lvl::Warn };
+        state.log.event(lvl, "worker_exit", json!({"app": app, "code": code, "reason": reason}));
         let mut map = state.workers.map.lock().unwrap();
         if map.get(&app).is_some_and(|w| w.gen == gen) {
             map.remove(&app);
         }
     });
     Ok((port, token, stdin))
+}
+
+/// A worker's `transfer` / `rejected` stdout event as a log line, tagged with the app's current session.
+/// Only the named fields are copied, so nothing the host adds later can carry content into the log.
+fn transcribe(state: &State, app: &str, ev: &str, v: &Value) {
+    let mut fields = json!({"app": app});
+    for k in ["dir", "kind", "bytes", "name", "reason"] {
+        if let Some(x) = v.get(k) {
+            fields[k] = x.clone();
+        }
+    }
+    if let Some(sid) = state.session_for(app) {
+        fields["sid"] = json!(sid);
+    }
+    let lvl = if ev == "rejected" { Lvl::Warn } else { Lvl::Info };
+    state.log.event(lvl, ev, fields);
 }

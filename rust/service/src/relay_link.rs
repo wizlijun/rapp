@@ -2,11 +2,12 @@
 //! 1 s … 60 s backoff, answer `incoming` (and punch), serve `relayed` streams.
 
 use crate::peer::serve_request;
-use crate::state::{RelayCmd, State};
+use crate::state::{Peer, RelayCmd, State};
 use anyhow::{anyhow, Result};
 use quinn::Connection;
 use rapp_net::crypto::{pw_hash, random_hex};
 use rapp_net::line::{check, err, ok, read_json, write_json};
+use rapp_net::log::Lvl;
 use rapp_net::msg::Op;
 use rapp_net::quic::{bi, connect, resolve, ALPN_PEER, ALPN_RELAY};
 use serde_json::json;
@@ -96,7 +97,7 @@ async fn register(state: &Arc<State>, conn: &Connection, key: &str) -> Result<()
         drop(cfg);
         state.notify();
     }
-    eprintln!("rapp-service: registered as {id}");
+    state.log.msg(Lvl::Info, format!("registered as {id}"));
     Ok(())
 }
 
@@ -108,7 +109,7 @@ async fn serve(state: &Arc<State>, conn: &Connection, key: &str, cmds: &mut Unbo
                     let state = state.clone();
                     tokio::spawn(async move {
                         if let Err(e) = from_relay(&state, bi(pair)).await {
-                            eprintln!("rapp-service: relay stream: {e:#}");
+                            state.log.msg(Lvl::Warn, format!("relay stream: {e:#}"));
                         }
                     });
                 }
@@ -130,15 +131,15 @@ async fn serve(state: &Arc<State>, conn: &Connection, key: &str, cmds: &mut Unbo
 /// A stream the relay opened: `incoming` (a B is about to connect) or `relayed`.
 async fn from_relay(state: &Arc<State>, mut s: rapp_net::quic::BiStream) -> Result<()> {
     match serde_json::from_value(read_json(&mut s).await?) {
-        Ok(Op::Incoming { token, peer, .. }) => {
-            state.add_token(token, peer.clone());
+        Ok(Op::Incoming { token, peer, name }) => {
+            state.add_token(token, peer.clone(), name);
             write_json(&mut s, &ok(json!({}))).await?;
             s.writer_mut().finish()?;
             punch(state, &peer);
             Ok(())
         }
         Ok(Op::Relayed { token }) => match state.token_peer(&token) {
-            Some(peer) => serve_request(state, s, peer, "relay").await,
+            Some((addr, name)) => serve_request(state, s, Peer { addr, name, path: "relay" }).await,
             None => {
                 write_json(&mut s, &err("bad token")).await?;
                 s.writer_mut().finish()?;

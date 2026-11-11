@@ -334,3 +334,135 @@ async fn open_without_permission_says_so_and_rechecks() {
     assert!(e.contains("missing permission: Screen Recording, Accessibility"), "{e}");
     assert_eq!(ipc_once(&a.svc, a.home.path(), json!({"cmd":"status"})).await["permissions"], perms(false, false));
 }
+
+// ---- observability (spec §4.1, §6) ----
+
+/// Opens `app` on an authenticated direct connection and pushes bytes through it.
+async fn open_echo(conn: &quinn::Connection) -> (rapp_net::quic::BiStream, String) {
+    let mut s = bi(conn.open_bi().await.unwrap());
+    write_json(&mut s, &json!({"op":"open","app":"com.example.echo"})).await.unwrap();
+    let r = read_json(&mut s).await.unwrap();
+    assert_eq!(r["ok"], true, "{r}");
+    let wt = r["token"].as_str().unwrap().to_string();
+    echo_through(&mut s, &wt).await;
+    (s, wt)
+}
+
+#[tokio::test]
+async fn logs_who_connected_what_they_opened_and_how_it_ended() {
+    let a = service(None).await;
+    let home = a.home.path();
+    let ep = b_endpoint();
+    let (_c, r) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":"wrong-pw","name":"mbp"})).await;
+    assert_eq!(r["ok"], false);
+    let fail = wait_log(home, "auth_fail", |_| true).await;
+    assert_eq!(fail["lvl"], "warn");
+    assert_eq!(fail["reason"], "bad password");
+    assert_eq!(fail["name"], "mbp");
+    assert_eq!(fail["path"], "lan");
+    assert!(fail["peer"].as_str().unwrap().starts_with("127.0.0.1:"), "{fail}");
+
+    let (conn, _) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":PASSWORD,"name":"mbp"})).await;
+    let (s, wt) = open_echo(&conn).await;
+    let req = wait_log(home, "request", |v| v["op"] == "open").await;
+    assert_eq!((&req["app"], &req["result"], &req["name"]), (&json!("com.example.echo"), &json!("ok"), &json!("mbp")));
+    let start = wait_log(home, "session_start", |_| true).await;
+    let sid = start["sid"].clone();
+    assert_eq!((&start["app"], &start["path"], &start["name"]), (&json!("com.example.echo"), &json!("lan"), &json!("mbp")));
+    // The worker's stderr text and its transfer event, tagged with the session.
+    let host_line = wait_log(home, "log", |v| v["src"] == "host").await;
+    assert_eq!(host_line["app"], "com.example.echo");
+    assert!(host_line["msg"].as_str().unwrap().contains("serving"), "{host_line}");
+    let t = wait_log(home, "transfer", |_| true).await;
+    assert_eq!((&t["sid"], &t["kind"], &t["bytes"], &t["name"]), (&sid, &json!("files"), &json!(5), &json!("a.txt")));
+
+    assert_eq!(ipc_once(&a.svc, home, json!({"cmd":"kick","sid":sid})).await["ok"], true);
+    wait_log(home, "kick", |v| v["sid"] == sid).await;
+    let end = wait_log(home, "session_end", |_| true).await;
+    assert_eq!(end["sid"], sid);
+    assert_eq!(end["reason"], "kicked");
+    assert_eq!(end["name"], "mbp");
+    // B sent its worker token plus "hello bytes\n"; the worker sent "ok\n" plus the echo.
+    assert!(end["up"].as_u64().unwrap() > 0 && end["down"].as_u64().unwrap() > 0, "{end}");
+    assert!(end["secs"].is_u64(), "{end}");
+    drop(s);
+
+    // A refused open is in 访问记录; a successful one is not (its session lines are).
+    set_perms(a.bins.path(), &perms(false, true));
+    assert!(req_open_fails(&conn).await);
+    wait_log(home, "request", |v| v["result"] != "ok").await;
+
+    let h = ipc_once(&a.svc, home, json!({"cmd":"history","limit":10})).await;
+    assert_eq!(h["ok"], true, "{h}");
+    let evs: Vec<&str> = h["events"].as_array().unwrap().iter().map(|e| e["ev"].as_str().unwrap()).collect();
+    assert_eq!(evs, ["request", "session_end", "session_start", "auth_fail"], "{h}");
+    let h = ipc_once(&a.svc, home, json!({"cmd":"history","limit":2})).await;
+    assert_eq!(h["events"].as_array().unwrap().len(), 2);
+
+    let st = ipc_once(&a.svc, home, json!({"cmd":"status"})).await;
+    assert_eq!(st["log_dir"], home.join("logs").to_str().unwrap());
+
+    // Never a secret in the log (spec §0).
+    let ipc_token = std::fs::read_to_string(home.join("ipc.token")).unwrap();
+    let text = std::fs::read_to_string(home.join("logs").join("service.log")).unwrap();
+    for secret in [PASSWORD, "wrong-pw", wt.as_str(), ipc_token.trim(), KEY] {
+        assert!(!text.contains(secret), "{secret:?} in service.log:\n{text}");
+    }
+}
+
+/// Opens an app with no worker yet, so the (fake) host's permission check decides.
+async fn req_open_fails(conn: &quinn::Connection) -> bool {
+    req(conn, json!({"op":"open","app":"com.apple.Safari"})).await["ok"] == false
+}
+
+#[tokio::test]
+async fn relayed_session_logs_the_name_the_relay_passed_on() {
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let ep = b_endpoint();
+    let rc = dial(&ep, relay.relay.addr, rapp_net::quic::ALPN_RELAY).await;
+    let r = req(&rc, json!({"op":"connect","key":KEY,"id":a.id,"password":PASSWORD,"name":"phone"})).await;
+    let token = r["token"].as_str().unwrap().to_string();
+    let mut s = bi(rc.open_bi().await.unwrap());
+    write_json(&mut s, &json!({"op":"relay","key":KEY,"token":token})).await.unwrap();
+    write_json(&mut s, &json!({"op":"open","app":"com.example.echo"})).await.unwrap();
+    let wt = read_json(&mut s).await.unwrap()["token"].as_str().unwrap().to_string();
+    echo_through(&mut s, &wt).await;
+    let start = wait_log(a.home.path(), "session_start", |_| true).await;
+    assert_eq!((&start["path"], &start["name"]), (&json!("relay"), &json!("phone")));
+    let st = wait_log(a.home.path(), "relay", |v| v["state"] == "connected").await;
+    assert_eq!(st["lvl"], "info");
+    let text = std::fs::read_to_string(a.home.path().join("logs").join("service.log")).unwrap();
+    for secret in [PASSWORD, token.as_str(), wt.as_str(), KEY] {
+        assert!(!text.contains(secret), "{secret:?} in service.log:\n{text}");
+    }
+}
+
+#[tokio::test]
+async fn logs_start_and_worker_exit() {
+    let a = service_with_idle(None, Duration::from_millis(200)).await;
+    let start = wait_log(a.home.path(), "service_start", |_| true).await;
+    assert_eq!(start["port"], a.svc.port);
+    assert_eq!(start["id"], a.id.as_str());
+    let ep = b_endpoint();
+    let (conn, _) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":PASSWORD})).await;
+    let (mut s, _) = open_echo(&conn).await;
+    s.writer_mut().finish().unwrap();
+    drop(s);
+    let end = wait_log(a.home.path(), "session_end", |_| true).await;
+    assert_eq!(end["reason"], "closed");
+    assert!(end.get("name").is_none(), "{end}");
+    let exit = wait_log(a.home.path(), "worker_exit", |_| true).await;
+    assert_eq!((&exit["app"], &exit["code"], &exit["reason"]), (&json!("com.example.echo"), &json!(0), &json!("stdin closed")));
+}
+
+#[tokio::test]
+async fn oversized_launchd_log_is_emptied_at_start() {
+    let (home, bins) = (tempfile::tempdir().unwrap(), bins());
+    service_json(home.path(), None);
+    let logs = home.path().join("logs");
+    std::fs::create_dir_all(&logs).unwrap();
+    std::fs::write(logs.join("launchd.log"), vec![b'x'; 5 * 1024 * 1024 + 1]).unwrap();
+    let _svc = start_service(home.path(), bins.path(), Duration::from_secs(60)).await;
+    assert_eq!(std::fs::metadata(logs.join("launchd.log")).unwrap().len(), 0);
+}
