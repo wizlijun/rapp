@@ -24,6 +24,8 @@ final class Paster {
     // Main queue.
     private var cancelled = false
     private var lastPasteSent: TimeInterval?
+    /// Main queue: pasteboard changeCount after the last write this Paster made.
+    private var lastOwnChange = Int.min
     private var snapshot: [[(NSPasteboard.PasteboardType, Data)]]?
 
     init(app: NSRunningApplication, queue: DispatchQueue, transfers: @escaping () -> TransferStore?,
@@ -121,6 +123,7 @@ final class Paster {
         case let .data(uti, bytes): pb.setData(Data(bytes), forType: NSPasteboard.PasteboardType(uti))
         case let .file(url): pb.writeObjects([url as NSURL])
         }
+        lastOwnChange = pb.changeCount
         noteOwnWrite(pb.changeCount)
         app.activate()
         waitFrontmost(tries: 10, seq: seq)
@@ -174,6 +177,8 @@ final class Paster {
         guard let items = snapshot else { return }
         snapshot = nil
         let pb = NSPasteboard.general
+        // Something else (a copy on A) wrote since our paste: leave it alone.
+        guard shouldRestore(lastOwnChange: lastOwnChange, current: pb.changeCount) else { return }
         pb.clearContents()
         let objects: [NSPasteboardItem] = items.map { entries in
             let item = NSPasteboardItem()
@@ -181,6 +186,7 @@ final class Paster {
             return item
         }
         if !objects.isEmpty { pb.writeObjects(objects) }
+        lastOwnChange = pb.changeCount
         if noteWrite { noteOwnWrite(pb.changeCount) }
     }
 }

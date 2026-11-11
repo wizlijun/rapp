@@ -19,6 +19,7 @@ public struct StoredClip: Equatable {
 public final class ClipStore {
     public static let capacity = 50
     private var lastChange: Int
+    private var wasFrontmost = false
     private var nextID: UInt32 = 1
     private var clips: [StoredClip] = []
 
@@ -28,13 +29,18 @@ public final class ClipStore {
     public func changed(changeCount: Int, targetFrontmost: Bool) -> Bool {
         let isNew = changeCount != lastChange
         lastChange = changeCount
-        return isNew && targetFrontmost
+        // Frontmost at the previous tick too: a copy made elsewhere just before we came to front is not ours.
+        let stayed = wasFrontmost && targetFrontmost
+        wasFrontmost = targetFrontmost
+        return isNew && stayed
     }
 
     public func noteOwnWrite(changeCount: Int) { lastChange = changeCount }
 
     @discardableResult
     public func add(_ info: ClipInfo, payload: ClipPayload) -> StoredClip {
+        // Same text again (e.g. B echoing it back through a shared pasteboard) is not a new entry.
+        if case .text = info, let last = clips.last, last.info == info { return last }
         let clip = StoredClip(id: nextID, info: info, payload: payload)
         nextID += 1
         clips.append(clip)

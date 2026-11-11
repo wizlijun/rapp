@@ -72,7 +72,8 @@ final class ClipboardWatcher {
 
     private func read(changeCount: Int) {
         let pb = NSPasteboard.general
-        guard let (info, payload) = capture(pb), pb.changeCount == changeCount else { return }
+        guard !isConcealedClip(types: (pb.types ?? []).map(\.rawValue)),
+              let (info, payload) = capture(pb), pb.changeCount == changeCount else { return }
         queue.async { [self] in
             guard !stopped else { return }
             let clip = store.add(info, payload: payload)

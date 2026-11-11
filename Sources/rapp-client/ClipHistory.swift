@@ -26,9 +26,10 @@ final class ClipHistory {
     }
 
     func add(id: UInt32, _ info: ClipInfo) {
+        if entries.first?.id == id { return }   // the host saw the same text again
         entries.insert((id, info), at: 0)
         if entries.count > Self.limit { entries.removeLast(entries.count - Self.limit) }
-        if case let .text(text, _) = info { pasteboard.write(text: text) }
+        if case let .text(text, _) = info, pasteboard.string != text { pasteboard.write(text: text) }
         onClip?()
     }
 

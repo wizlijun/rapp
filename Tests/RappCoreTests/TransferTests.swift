@@ -38,6 +38,21 @@ final class TransferTests: XCTestCase {
         XCTAssertFalse(s.changed(changeCount: 11, targetFrontmost: true))
         XCTAssertTrue(s.changed(changeCount: 12, targetFrontmost: true))
     }
+    func testChangeRightAfterActivationIsNotRecorded() {
+        let s = ClipStore(changeCount: 10)
+        XCTAssertFalse(s.changed(changeCount: 10, targetFrontmost: false))
+        XCTAssertFalse(s.changed(changeCount: 11, targetFrontmost: true))   // copied elsewhere, then we came to front
+        XCTAssertTrue(s.changed(changeCount: 12, targetFrontmost: true))
+    }
+    func testConsecutiveDuplicateTextIsNotAddedTwice() {
+        let s = ClipStore(changeCount: 0)
+        let a = s.add(.text("x", truncated: false), payload: .inline)
+        let b = s.add(.text("x", truncated: false), payload: .inline)
+        XCTAssertEqual(a.id, b.id)
+        XCTAssertNil(s.clip(2))
+        s.add(.text("y", truncated: false), payload: .inline)
+        XCTAssertEqual(s.add(.text("x", truncated: false), payload: .inline).id, 3)
+    }
     func testOwnWritesAreNotRecorded() {
         let s = ClipStore(changeCount: 1); s.noteOwnWrite(changeCount: 2)
         XCTAssertFalse(s.changed(changeCount: 2, targetFrontmost: true))
