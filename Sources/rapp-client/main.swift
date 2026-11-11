@@ -15,6 +15,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let decoder: FrameDecoder
     private let streamMenu: StreamMenu
     private let meter: TrafficMeter
+    private let transfers: TransferQueue
+    private let history: ClipHistory
     private var coordinator: WindowCoordinator!
     private var mirroredMenu: MirroredMenu!
     private var keyMonitor: Any?
@@ -33,7 +35,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         decoder = FrameDecoder(mode: address.mode)
         streamMenu = StreamMenu(mode: address.mode, fps: address.fps)
         meter = TrafficMeter(streamMenu: streamMenu)
+        transfers = TransferQueue(address: address)
+        history = ClipHistory(pasteboard: LocalPasteboard(), transfers: transfers, log: { output.log($0) })
         super.init()
+        transfers.log = { output.log($0) }
+        // Task 8 shows this in the transfer bar; for now it only goes to the log.
+        transfers.onStatus = { status in if let status { output.log(status) } }
+        streamMenu.makeHistoryItem = { [history] in history.makeMenuItem() }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -161,6 +169,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             coordinator.show(image, region: region)
         case let .menuBar(items):
             mirroredMenu.update(items)
+        case let .clip(id, info):
+            history.add(id: id, info)
         case let .error(reason):
             output.finish(exitCode(forHostError: reason), "rapp-client: host says: \(reason)")
         default:

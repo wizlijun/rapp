@@ -7,6 +7,8 @@ import RappCore
 final class StreamMenu: NSObject, NSMenuDelegate {
     /// Called whenever the choice changes.
     var onSelect: (() -> Void)?
+    /// Makes the "A 的剪贴板" item that ends every menu; a menu cannot share an item with another.
+    var makeHistoryItem: (() -> NSMenuItem)?
 
     private(set) var mode: Mode
     private(set) var fps: UInt8
@@ -64,6 +66,10 @@ final class StreamMenu: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
         for (index, item) in Self.fpsItems.enumerated() {
             menu.addItem(makeItem(item.0, tag: index, action: #selector(pickFps(_:))))
+        }
+        if let historyItem = makeHistoryItem?() {
+            menu.addItem(.separator())
+            menu.addItem(historyItem)
         }
     }
 
