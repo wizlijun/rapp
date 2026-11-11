@@ -35,7 +35,8 @@ public struct HostServeOptions: Equatable {
 public enum HostCommand: Equatable {
     case serve(HostServeOptions)
     case listApps(json: Bool)
-    case check(json: Bool)
+    /// `prompt`: ask macOS for what is missing, so the system lists this app.
+    case check(json: Bool, prompt: Bool)
     case version(json: Bool)
 }
 
@@ -48,13 +49,16 @@ public enum ClientCommand: Equatable {
 private struct Arguments {
     var values = [String: String]()
     var json = false
+    var flags = Set<String>()
     var positional = [String]()
 
-    init(_ args: [String], valued: Set<String>) throws {
+    init(_ args: [String], valued: Set<String>, bare: Set<String> = []) throws {
         var rest = args[...]
         while let arg = rest.popFirst() {
             if arg == "--json" {
                 json = true
+            } else if bare.contains(arg) {
+                flags.insert(arg)
             } else if valued.contains(arg) {
                 guard let value = rest.popFirst() else { throw CodecError("\(arg) needs a value") }
                 values[arg] = value
@@ -94,11 +98,12 @@ public func parseHostArguments(_ args: [String], environment: [String: String]) 
     let subcommand = args.first ?? ""
     switch subcommand {
     case "list-apps", "check", "version":
-        let parsed = try Arguments(Array(args.dropFirst()), valued: [])
+        let parsed = try Arguments(Array(args.dropFirst()), valued: [],
+                                   bare: subcommand == "check" ? ["--prompt"] : [])
         try parsed.noPositional()
         switch subcommand {
         case "list-apps": return .listApps(json: parsed.json)
-        case "check": return .check(json: parsed.json)
+        case "check": return .check(json: parsed.json, prompt: parsed.flags.contains("--prompt"))
         default: return .version(json: parsed.json)
         }
     case "serve":
@@ -238,8 +243,13 @@ public func shareableApps(windows: [ListedWindow], regularApps: [Int32: SharedAp
     }
 }
 
-public func appsJSON(_ apps: [SharedApp]) -> String {
-    jsonLine(["apps": apps.map { ["app": $0.app, "name": $0.name] }])
+/// With the permissions when given, so B sees what A is missing before opening an app.
+public func appsJSON(_ apps: [SharedApp], screenRecording: Bool? = nil, accessibility: Bool? = nil) -> String {
+    var object: [String: Any] = ["apps": apps.map { ["app": $0.app, "name": $0.name] }]
+    if let screenRecording, let accessibility {
+        object["permissions"] = ["screen_recording": screenRecording, "accessibility": accessibility]
+    }
+    return jsonLine(object)
 }
 
 /// `bundleID<TAB>name`, one app per line.

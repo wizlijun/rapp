@@ -56,7 +56,10 @@ final class WorkerCLITests: XCTestCase {
     func testHostSubcommands() throws {
         XCTAssertEqual(try host("version"), .version(json: false))
         XCTAssertEqual(try host("version", "--json"), .version(json: true))
-        XCTAssertEqual(try host("check", "--json"), .check(json: true))
+        XCTAssertEqual(try host("check", "--json"), .check(json: true, prompt: false))
+        XCTAssertEqual(try host("check", "--prompt", "--json"), .check(json: true, prompt: true))
+        XCTAssertEqual(try host("check", "--prompt"), .check(json: false, prompt: true))
+        XCTAssertThrowsError(try host("version", "--prompt"))
         XCTAssertEqual(try host("list-apps"), .listApps(json: false))
         XCTAssertThrowsError(try host("check", "--token", "x"))
         XCTAssertThrowsError(try host("list-apps", "extra"))
@@ -153,6 +156,8 @@ final class WorkerCLITests: XCTestCase {
         XCTAssertEqual(appsJSON([SharedApp(app: "com.apple.Safari", name: "Safari")]),
                        #"{"apps":[{"app":"com.apple.Safari","name":"Safari"}]}"#)
         XCTAssertEqual(appsJSON([]), #"{"apps":[]}"#)
+        XCTAssertEqual(appsJSON([], screenRecording: false, accessibility: true),
+                       #"{"apps":[],"permissions":{"accessibility":true,"screen_recording":false}}"#)
     }
 
     func testStdinCommands() {

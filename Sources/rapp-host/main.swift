@@ -8,7 +8,7 @@ let usage = """
     usage: rapp-host --token <secret> [--port \(defaultPort)]
            rapp-host serve --app <bundle-id> (--token <secret> | --token-env <VAR>) [--port \(defaultPort)] [--bind <address>] [--json]
            rapp-host list-apps [--json]
-           rapp-host check [--json]
+           rapp-host check [--prompt] [--json]
            rapp-host version [--json]
     """
 
@@ -65,15 +65,16 @@ case let .listApps(json):
     let output = WorkerOutput(json: json)
     let apps = listApps()
     if json {
-        output.result(appsJSON(apps))
+        let granted = permissions(prompt: false)
+        output.result(appsJSON(apps, screenRecording: granted.screenRecording, accessibility: granted.accessibility))
     } else if !apps.isEmpty {
         FileHandle.standardOutput.write(Data(appsText(apps).utf8))
     }
     output.finish(ExitCode.ok, "done")
 
-case let .check(json):
+case let .check(json, prompt):
     let output = WorkerOutput(json: json)
-    let granted = permissions(prompt: false)
+    let granted = permissions(prompt: prompt)
     output.result(checkJSON(screenRecording: granted.screenRecording, accessibility: granted.accessibility))
     let missing = missingPermissions(granted)
     if missing.isEmpty { output.finish(ExitCode.ok, "done") }
@@ -87,7 +88,7 @@ case let .serve(options):
     if !missing.isEmpty {
         output.finish(legacy ? ExitCode.usage : ExitCode.permission, """
             missing permission: \(missing.joined(separator: ", "))
-            Allow your terminal app under System Settings > Privacy & Security, restart the terminal, then run this again.
+            Allow rapp (or the terminal running rapp-host) under System Settings > Privacy & Security, then connect again.
             """)
     }
 
