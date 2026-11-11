@@ -24,7 +24,13 @@ class TopBar extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, box) {
         final wide = box.maxWidth >= 480;
-      final gap = box.maxWidth >= 300 ? 6.0 : 0.0;
+        final gap = box.maxWidth >= 300 ? 6.0 : 0.0;
+        // The session block is a fixed-max, non-flex child so the hint's
+        // Expanded takes all the slack and the fullscreen button stays at the
+        // right edge. (A loose Flexible would leave its unused share of the
+        // slack at the end of the row.)
+        final sessionMax =
+            (box.maxWidth - 4 * 48 - 6 * gap).clamp(0.0, 260.0).toDouble();
         return ListenableBuilder(
           listenable: state,
           builder: (context, _) {
@@ -49,9 +55,8 @@ class TopBar extends StatelessWidget {
                     multi ? () => state.step(-1) : null,
                   ),
                   SizedBox(width: gap),
-                  Flexible(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 260),
+                  ConstrainedBox(
+                      constraints: BoxConstraints(maxWidth: sessionMax),
                       child: cur == null
                           ? Text(
                               '没有选中的会话',
@@ -98,7 +103,6 @@ class TopBar extends StatelessWidget {
                                 ],
                               ),
                             ),
-                    ),
                   ),
                   SizedBox(width: gap),
                   _icon(

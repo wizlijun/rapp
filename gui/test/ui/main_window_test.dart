@@ -289,4 +289,16 @@ void main() {
     await settle(tester);
     expect(fs.calls, isEmpty);
   });
+
+  testWidgets('fullscreen button stays at the right edge whatever the hint', (tester) async {
+    await pump(tester);
+    double right() => tester.getTopRight(find.byKey(const Key('fullscreen-button'))).dx;
+    final empty = right();
+    expect(empty, greaterThan(1194 - 60));
+    openError = 'offline';
+    await s.openOrSwitch('111', 'com.apple.Safari', 'Safari');
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(s.hint, isNotEmpty);
+    expect(right(), empty);
+  });
 }
