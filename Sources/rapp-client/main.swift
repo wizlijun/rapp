@@ -43,7 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        coordinator = WindowCoordinator(meter: meter, connectingTo: address.host)
+        coordinator = WindowCoordinator(meter: meter, transfers: transfers, connectingTo: address.host)
         coordinator.send = { [weak self] message in self?.connection.send(message) }
         coordinator.onStreamMayChange = { [weak self] in self?.sendStreamIfChanged() }
         coordinator.onCancelTransfer = { [transfers] in transfers.cancel() }
@@ -181,6 +181,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             mirroredMenu.update(items)
         case let .clip(id, info):
             history.add(id: id, info)
+        case let .pasted(seq, error):
+            coordinator.pasted(seq: seq, error: error)
         case let .error(reason):
             output.finish(exitCode(forHostError: reason), "rapp-client: host says: \(reason)")
         default:

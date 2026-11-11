@@ -109,6 +109,39 @@ public func composerItems(_ pieces: [ComposerPiece]) -> [ComposerItem] {
     return items
 }
 
+/// The first `length` UTF-16 units of the content (a chunk is 1), adjacent text runs merged.
+private func composerPrefix(_ pieces: [ComposerPiece], _ length: Int) -> [ComposerPiece] {
+    var result: [ComposerPiece] = []
+    var left = length
+    for piece in pieces where left > 0 {
+        switch piece {
+        case let .text(s):
+            let part = String(decoding: Array(s.utf16.prefix(left)), as: UTF16.self)
+            left -= min(left, s.utf16.count)
+            if case let .text(before)? = result.last { result[result.count - 1] = .text(before + part) } else { result.append(.text(part)) }
+        case .chunk:
+            result.append(piece)
+            left -= 1
+        }
+    }
+    return result
+}
+
+/// True when both contents agree over their first `length` units (is the part being removed still what was sent?).
+public func composerPrefixMatches(_ a: [ComposerPiece], _ b: [ComposerPiece], length: Int) -> Bool {
+    composerPrefix(a, length) == composerPrefix(b, length)
+}
+
+/// A's `pasted` error as shown to the user; unknown ones as they are.
+public func pasteErrorMessage(_ error: String) -> String {
+    switch error {
+    case "target not frontmost": return "A 上的目标窗口不在最前"
+    case "not uploaded": return "A 还没收齐这一项"
+    case "not supported": return "A 不支持粘贴"
+    default: return error
+    }
+}
+
 public func needsUpload(_ text: String) -> Bool { text.utf8.count >= inlinePasteLimit }
 
 public func lineCount(_ text: String) -> Int { text.utf8.reduce(1) { $1 == 0x0A ? $0 + 1 : $0 } }

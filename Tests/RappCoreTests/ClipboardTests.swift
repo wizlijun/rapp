@@ -36,6 +36,24 @@ final class ClipboardTests: XCTestCase {
         XCTAssertEqual(composerItems([.text("a"), .text("b")]), [ComposerItem(content: .text("ab"), end: 2)])
         XCTAssertEqual(composerItems([.text(" \n ")]), [])
     }
+    func testComposerPrefixMatchesComparesTheFirstLengthUnits() {
+        let sent: [ComposerPiece] = [.text("ab"), .chunk(3), .text("cd")]
+        // Typing after the end, or merging adjacent runs, keeps the prefix.
+        XCTAssertTrue(composerPrefixMatches(sent, [.text("a"), .text("b"), .chunk(3), .text("cdef")], length: 5))
+        // Changes after the prefix do not matter.
+        XCTAssertTrue(composerPrefixMatches(sent, [.text("ab"), .chunk(3), .text("xx")], length: 3))
+        // A changed character, another chip, or a shorter editor does.
+        XCTAssertFalse(composerPrefixMatches(sent, [.text("aB"), .chunk(3), .text("cd")], length: 3))
+        XCTAssertFalse(composerPrefixMatches(sent, [.text("ab"), .chunk(4), .text("cd")], length: 3))
+        XCTAssertFalse(composerPrefixMatches(sent, [.text("ab")], length: 3))
+        XCTAssertTrue(composerPrefixMatches(sent, [], length: 0))
+    }
+    func testPasteErrorMessageMapsKnownErrors() {
+        XCTAssertEqual(pasteErrorMessage("target not frontmost"), "A 上的目标窗口不在最前")
+        XCTAssertEqual(pasteErrorMessage("not uploaded"), "A 还没收齐这一项")
+        XCTAssertEqual(pasteErrorMessage("not supported"), "A 不支持粘贴")
+        XCTAssertEqual(pasteErrorMessage("boom"), "boom")
+    }
     func testNeedsUploadCountsBytes() {
         XCTAssertFalse(needsUpload(String(repeating: "字", count: 19_999)))   // 59997 字节
         XCTAssertTrue(needsUpload(String(repeating: "字", count: 20_000)))    // 60000 字节

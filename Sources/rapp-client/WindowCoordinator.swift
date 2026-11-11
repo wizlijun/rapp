@@ -15,6 +15,9 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
     var onCancelTransfer: () -> Void = {}
 
     private let meter: TrafficMeter
+    private let transfers: TransferQueue
+    private let counters = SendCounters()
+    private var senders: [UInt32: Sender] = [:]
     private var table: [WindowInfo] = []
     private var windows: [UInt32: RemoteWindow] = [:]
     private var popups: [UInt32: PopupPanel] = [:]
@@ -36,8 +39,9 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
     private var copyPending = false
     private var copyGeneration = 0
 
-    init(meter: TrafficMeter, connectingTo host: String) {
+    init(meter: TrafficMeter, transfers: TransferQueue, connectingTo host: String) {
         self.meter = meter
+        self.transfers = transfers
         placeholder = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 140),
                                styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
         super.init()
@@ -87,6 +91,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
             window.delegate = nil
             window.close()
             windows[id] = nil
+            senders[id] = nil
         }
         for (id, panel) in popups where !ids.contains(id) {
             panel.parent?.removeChildWindow(panel)
@@ -154,6 +159,10 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
             window.setBarHeight(height)
             self.placing = false
         }
+        let sender = Sender(bar: bar, transfers: transfers, counters: counters, send: { [weak self] in self?.send($0) })
+        senders[window.info.id] = sender
+        bar.onSendButton = { [weak sender] in sender?.start() }
+        bar.composer.onSubmit = { [weak sender] in sender?.start() }
         bar.onCancel = { [weak self] in self?.onCancelTransfer() }
         bar.onCopy = { [weak self, weak bar] in bar.map { self?.copy(from: $0) } }
         bar.onAttach = { [weak window] in window.map(Self.chooseFiles) }
@@ -222,6 +231,11 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
                 if self?.copyGeneration == generation { bar?.showCopyFeedback(nil) }
             }
         }
+    }
+
+    /// A's answer to a `paste`, for the window whose send it belongs to.
+    func pasted(seq: UInt32, error: String) {
+        for sender in senders.values where sender.pasted(seq: seq, error: error) { return }
     }
 
     /// A clip came from A; it answers a pending 复制 (and is ignored otherwise).
