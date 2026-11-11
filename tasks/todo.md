@@ -69,3 +69,12 @@
 - M1 到 M3 按规格定死的接口分给三个子代理并行做，合并时没有冲突，接口这一步省了很多返工。
 - M4 卡在一个和代码无关的问题上：一直开着的旧 rapp-host 让新进程抓屏被 replayd 断开。先单独跑 `serve`、再跑旧写法，把范围缩到"新进程"，再看系统日志才找到原因。已记进 lessons.md。
 - 没做的：GUI"启停"按钮本身（pkg 已验证装好并启动 LaunchAgent）、卸载脚本和覆盖重装、`--cm` 窗口上的按钮、跨 NAT 打洞、VPS 上的 relay、Windows 和 Linux 的服务，都留给用户实机验收。
+
+# 权限引导（规格：`docs/superpowers/specs/2026-11-11-rapp-permission-guide-design.md`）
+执行方式：我自己按顺序做（后一步要用前一步的字段），每步先写测试、看到失败再实现，每步单独提交；最后派一个新的审查者看整个改动。
+
+- [ ] P1 rapp-host：`check --prompt`、`list-apps` 带 permissions、`serve` 的提示文案（§1）。验证：`./scripts/check.sh` 末行 `EXIT=0`；实机跑 `rapp-host check --prompt --json`、`list-apps --json`
+- [ ] P2 service + 假 rapp-host：`State.permissions` 加锁并在变化时通知、IPC `permissions`、list_apps 带 permissions、open 缺权限后重新 check（§2）。验证：`cargo test`、`cargo clippy` 没有警告
+- [ ] P3 hub：apps 事件转发 permissions（§3）。验证同 P2
+- [ ] P4 GUI：`permissions.dart`、`PermissionsPanel`、本机区块和轮询、首次引导、主机区块提示（§4）。验证：`flutter analyze` 没有问题，`flutter test` 通过
+- [ ] P5 打包 arm64 pkg/dmg，实机验证 §5 最后一条；整体审查后修 Critical/Important
