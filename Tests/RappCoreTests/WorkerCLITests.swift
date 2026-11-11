@@ -146,7 +146,7 @@ final class WorkerCLITests: XCTestCase {
     }
 
     func testCommandOutputs() {
-        XCTAssertEqual(versionJSON(), #"{"protocol":3,"version":"0.2.0"}"#)
+        XCTAssertEqual(versionJSON(), #"{"protocol":4,"version":"0.2.0"}"#)
         XCTAssertEqual(checkJSON(screenRecording: true, accessibility: false),
                        #"{"accessibility":false,"screen_recording":true}"#)
         XCTAssertEqual(appsJSON([SharedApp(app: "com.apple.Safari", name: "Safari")]),
@@ -173,14 +173,14 @@ final class WorkerCLITests: XCTestCase {
             4: SharedApp(app: "com.tiny", name: "Tiny"),
         ]
         let windows = [
-            WindowInfo(pid: 2, layer: 0, width: 600, height: 400),
-            WindowInfo(pid: 1, layer: 0, width: 800, height: 600),
-            WindowInfo(pid: 1, layer: 0, width: 300, height: 300),   // second Safari window: listed once
-            WindowInfo(pid: 3, layer: 25, width: 300, height: 300),  // not a normal window
-            WindowInfo(pid: 4, layer: 0, width: 49, height: 300),    // too small
-            WindowInfo(pid: 4, layer: 0, width: 300, height: 49),
-            WindowInfo(pid: 9, layer: 0, width: 300, height: 300),   // not a regular app
-            WindowInfo(pid: 3, layer: 0, width: 50, height: 50),
+            ListedWindow(pid: 2, layer: 0, width: 600, height: 400),
+            ListedWindow(pid: 1, layer: 0, width: 800, height: 600),
+            ListedWindow(pid: 1, layer: 0, width: 300, height: 300),   // second Safari window: listed once
+            ListedWindow(pid: 3, layer: 25, width: 300, height: 300),  // not a normal window
+            ListedWindow(pid: 4, layer: 0, width: 49, height: 300),    // too small
+            ListedWindow(pid: 4, layer: 0, width: 300, height: 49),
+            ListedWindow(pid: 9, layer: 0, width: 300, height: 300),   // not a regular app
+            ListedWindow(pid: 3, layer: 0, width: 50, height: 50),
         ]
         XCTAssertEqual(shareableApps(windows: windows, regularApps: apps).map(\.name), ["Calculator", "Safari", "TextEdit"])
         XCTAssertEqual(appsText(shareableApps(windows: windows, regularApps: apps)),

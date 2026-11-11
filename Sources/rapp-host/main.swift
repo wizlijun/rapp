@@ -40,12 +40,12 @@ func missingPermissions(_ p: (screenRecording: Bool, accessibility: Bool)) -> [S
 func listApps() -> [SharedApp] {
     let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
         as? [[String: Any]] ?? []
-    let windows = list.compactMap { info -> WindowInfo? in
+    let windows = list.compactMap { info -> ListedWindow? in
         guard let pid = info[kCGWindowOwnerPID as String] as? Int32,
               let layer = info[kCGWindowLayer as String] as? Int,
               let bounds = info[kCGWindowBounds as String] as? [String: Any],
               let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary) else { return nil }
-        return WindowInfo(pid: pid, layer: layer, width: rect.width, height: rect.height)
+        return ListedWindow(pid: pid, layer: layer, width: rect.width, height: rect.height)
     }
     var apps = [Int32: SharedApp]()
     for app in NSWorkspace.shared.runningApplications where app.activationPolicy == .regular {

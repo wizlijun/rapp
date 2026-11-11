@@ -7,20 +7,29 @@ import RappCore
 /// the price is that the Mac's real pointer and focus are used.
 final class InputInjector {
     private let app: NSRunningApplication
+    /// The one window input is for; input naming another window is dropped.
+    private let windowID: UInt32
     /// The whole window (to find it through Accessibility) and its content
-    /// area below the title row (what the client's 0...1 coordinates refer to).
+    /// area below the title row (what the client's point coordinates start from).
     private let frameProvider: () -> (window: CGRect, content: CGRect)?
     private let source = CGEventSource(stateID: .hidSystemState)
 
-    init(app: NSRunningApplication, frameProvider: @escaping () -> (window: CGRect, content: CGRect)?) {
+    init(app: NSRunningApplication, windowID: UInt32,
+         frameProvider: @escaping () -> (window: CGRect, content: CGRect)?) {
         self.app = app
+        self.windowID = windowID
         self.frameProvider = frameProvider
     }
 
     /// Handles text, key, mouse and scroll messages; ignores everything else.
     func handle(_ message: Message) {
         switch message {
-        case .text, .key, .mouse, .scroll: break
+        case .text, .key: break
+        case let .mouse(kind, _, window, _, _, _):
+            // Hover is not injected by the single-window host.
+            guard window == windowID, kind != .move else { return }
+        case let .scroll(window, _, _, _, _):
+            guard window == windowID else { return }
         default: return
         }
         // Without the window there is nowhere to send input.
@@ -33,8 +42,8 @@ final class InputInjector {
         }
 
         switch message {
-        case let .mouse(kind, button, x, y, clickCount):
-            let point = globalPoint(x: x, y: y, windowFrame: frame)
+        case let .mouse(kind, button, _, x, y, clickCount):
+            let point = globalPoint(points: x, y, content: frame)
             let type: CGEventType
             switch (kind, button) {
             case (.down, .left): type = .leftMouseDown
@@ -43,6 +52,7 @@ final class InputInjector {
             case (.down, .right): type = .rightMouseDown
             case (.up, .right): type = .rightMouseUp
             case (.drag, .right): type = .rightMouseDragged
+            case (.move, _): return
             }
             let cgButton: CGMouseButton = button == .left ? .left : .right
             if kind == .down {
@@ -55,8 +65,8 @@ final class InputInjector {
             event.setIntegerValueField(.mouseEventClickState, value: Int64(max(1, clickCount)))
             event.post(tap: .cghidEventTap)
 
-        case let .scroll(x, y, dx, dy):
-            let point = globalPoint(x: x, y: y, windowFrame: frame)
+        case let .scroll(_, x, y, dx, dy):
+            let point = globalPoint(points: x, y, content: frame)
             CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: point,
                     mouseButton: .left)?.post(tap: .cghidEventTap)
             let clamp: (Float) -> Int32 = { Int32(max(-10_000, min(10_000, $0.rounded()))) }
@@ -85,4 +95,11 @@ final class InputInjector {
             break
         }
     }
+}
+
+/// A point given in A points from the content's top-left, as a global point
+/// kept inside the content.
+private func globalPoint(points x: Float, _ y: Float, content: CGRect) -> CGPoint {
+    guard content.width > 0, content.height > 0 else { return content.origin }
+    return globalPoint(x: x / Float(content.width), y: y / Float(content.height), windowFrame: content)
 }

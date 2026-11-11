@@ -10,6 +10,10 @@ final class RemoteView: NSView {
 
     /// Pixel size of the picture currently shown.
     private(set) var imageSize = CGSize.zero
+    /// The A window this view shows, and its content size in A points:
+    /// mouse and scroll positions are sent in those points.
+    var windowID: UInt32 = 0
+    var remoteSize = CGSize.zero
 
     private var pressed = Set<MouseButton>()
 
@@ -49,16 +53,22 @@ final class RemoteView: NSView {
 
     // MARK: Mouse
 
-    /// Position inside the picture as 0...1. Outside the picture this is nil,
-    /// unless `clamped`, which pins it to the nearest edge.
+    /// Position inside the picture in A points from the window's content
+    /// top-left. Outside the picture this is nil, unless `clamped`, which pins
+    /// it to the nearest edge.
     private func position(of event: NSEvent, clamped: Bool) -> (x: Float, y: Float)? {
         let point = convert(event.locationInWindow, from: nil)
-        if let inside = normalizedPoint(point, imageSize: imageSize, viewSize: bounds.size) { return inside }
-        guard clamped else { return nil }
-        let rect = aspectFitRect(imageSize: imageSize, in: bounds.size)
-        guard rect.width > 0, rect.height > 0 else { return nil }
-        return (Float(min(max((point.x - rect.minX) / rect.width, 0), 1)),
-                Float(min(max((point.y - rect.minY) / rect.height, 0), 1)))
+        let normalized: (x: Float, y: Float)
+        if let inside = normalizedPoint(point, imageSize: imageSize, viewSize: bounds.size) {
+            normalized = inside
+        } else {
+            guard clamped else { return nil }
+            let rect = aspectFitRect(imageSize: imageSize, in: bounds.size)
+            guard rect.width > 0, rect.height > 0 else { return nil }
+            normalized = (Float(min(max((point.x - rect.minX) / rect.width, 0), 1)),
+                          Float(min(max((point.y - rect.minY) / rect.height, 0), 1)))
+        }
+        return (normalized.x * Float(remoteSize.width), normalized.y * Float(remoteSize.height))
     }
 
     private func mouse(_ kind: MouseKind, _ button: MouseButton, _ event: NSEvent) {
@@ -67,13 +77,18 @@ final class RemoteView: NSView {
             // A press on the empty border around the picture is not sent.
             guard let p = position(of: event, clamped: false) else { return }
             pressed.insert(button)
-            onMouse?(.mouse(kind: .down, button: button, x: p.x, y: p.y, clickCount: UInt8(clamping: event.clickCount)))
+            onMouse?(.mouse(kind: .down, button: button, window: windowID, x: p.x, y: p.y,
+                            clickCount: UInt8(clamping: event.clickCount)))
+        case .move:
+            // Hover is not sent by the single-window client.
+            return
         case .drag, .up:
             // Once a press was sent, its drags and release always follow,
             // even when the pointer has left the picture.
             guard pressed.contains(button), let p = position(of: event, clamped: true) else { return }
             if kind == .up { pressed.remove(button) }
-            onMouse?(.mouse(kind: kind, button: button, x: p.x, y: p.y, clickCount: UInt8(clamping: event.clickCount)))
+            onMouse?(.mouse(kind: kind, button: button, window: windowID, x: p.x, y: p.y,
+                            clickCount: UInt8(clamping: event.clickCount)))
         }
     }
 
@@ -92,6 +107,6 @@ final class RemoteView: NSView {
             dy *= 10
         }
         guard dx != 0 || dy != 0 else { return }
-        onMouse?(.scroll(x: p.x, y: p.y, dx: Float(dx), dy: Float(dy)))
+        onMouse?(.scroll(window: windowID, x: p.x, y: p.y, dx: Float(dx), dy: Float(dy)))
     }
 }

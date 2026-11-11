@@ -1,6 +1,6 @@
 import Foundation
 
-public let protocolVersion: UInt8 = 3
+public let protocolVersion: UInt8 = 4
 
 /// A client's `Hello` carried a different protocol version than this build speaks.
 public struct ProtocolVersionMismatch: Error, CustomStringConvertible {
@@ -20,27 +20,85 @@ public let allowedFps: Set<UInt8> = [30, 15, 5, 1]
 /// A capture density (pixels per A point) is finite and in (0, 8].
 public func isValidDensity(_ d: Float) -> Bool { d.isFinite && d > 0 && d <= 8 }
 
-public enum MouseKind: UInt8 { case down = 0, up = 1, drag = 2 }
+public enum MouseKind: UInt8 { case down = 0, up = 1, drag = 2, move = 3 }
 public enum MouseButton: UInt8 { case left = 0, right = 1 }
+
+/// A rectangle on the canvas: points, origin at the top-left of A's display, y down.
+public struct CanvasRect: Equatable {
+    public var x, y, w, h: Float
+    public init(x: Float, y: Float, w: Float, h: Float) { self.x = x; self.y = y; self.w = w; self.h = h }
+}
+
+public enum WindowKind: UInt8 {
+    case normal = 0, dialog, floating, sheet, popover, menu, tooltip
+    /// Normal, dialog and floating windows get a B window with a title bar;
+    /// the rest are borderless popups attached to a parent.
+    public var isDecorated: Bool { self == .normal || self == .dialog || self == .floating }
+}
+
+/// One item of the window table (spec §2.2).
+public struct WindowInfo: Equatable {
+    public var id: UInt32
+    public var parent: UInt32
+    public var kind: WindowKind
+    public var resizable: Bool
+    public var focused: Bool
+    public var rect: CanvasRect
+    public var titleBar: Float
+    public var title: String
+    public init(id: UInt32, parent: UInt32, kind: WindowKind, resizable: Bool, focused: Bool,
+                rect: CanvasRect, titleBar: Float, title: String) {
+        self.id = id; self.parent = parent; self.kind = kind; self.resizable = resizable; self.focused = focused
+        self.rect = rect; self.titleBar = titleBar; self.title = title
+    }
+}
+
+/// One item of the mirrored menu bar (spec §2.3). `modifiers`: bit0 shift,
+/// bit1 control, bit2 option, bit3 command.
+public struct MenuItem: Equatable {
+    public var title: String
+    public var enabled: Bool
+    public var checked: Bool
+    public var separator: Bool
+    public var key: String
+    public var modifiers: UInt8
+    public var children: [MenuItem]
+    public init(title: String, enabled: Bool = true, checked: Bool = false, separator: Bool = false,
+                key: String = "", modifiers: UInt8 = 0, children: [MenuItem] = []) {
+        self.title = title; self.enabled = enabled; self.checked = checked; self.separator = separator
+        self.key = key; self.modifiers = modifiers; self.children = children
+    }
+}
+
+public let maxWindows = 256
+public let maxMenuDepth = 6
+public let maxMenuItems = 5000
+public let maxMenuPickDepth = 8
+public let maxTitleCharacters = 200
 
 /// Everything that travels over the connection. On the wire each message is
 /// a 1-byte type, a 4-byte little-endian payload length, then the payload.
 /// Strings are a u16 length followed by UTF-8, except `text`, whose payload
-/// is the UTF-8 text itself. Mouse and scroll positions are 0...1 inside the
-/// remote window.
+/// is the UTF-8 text itself. Coordinates are points: mouse and scroll are
+/// relative to the top-left of the given A window, everything else is on the
+/// canvas (A's display). Types 10 and 12 (v3 title and size) are gone.
 public enum Message: Equatable {
     case hello(token: String, bundleID: String, mode: Mode, fps: UInt8, density: Float)      // 1, client -> host
-    case ready(title: String, width: UInt16, height: UInt16)                                 // 2, host -> client (points)
+    case ready(appName: String, width: UInt16, height: UInt16)                               // 2, host -> client (canvas points)
     case error(String)                                                                       // 3, host -> client
-    case frame(FramePayload)                                                                 // 4, host -> client
+    case frame(region: CanvasRect, FramePayload)                                             // 4, host -> client
     case text(String)                                                                        // 5, client -> host
     case key(keyCode: UInt16, modifiers: UInt64, down: Bool)                                 // 6, macOS virtual key code + CGEventFlags
-    case mouse(kind: MouseKind, button: MouseButton, x: Float, y: Float, clickCount: UInt8)  // 7
-    case scroll(x: Float, y: Float, dx: Float, dy: Float)                                    // 8
-    case resize(width: UInt16, height: UInt16)                                               // 9, client -> host (points)
-    case title(String)                                                                       // 10, host -> client
+    case mouse(kind: MouseKind, button: MouseButton, window: UInt32, x: Float, y: Float, clickCount: UInt8)  // 7
+    case scroll(window: UInt32, x: Float, y: Float, dx: Float, dy: Float)                    // 8
+    case resize(window: UInt32, width: UInt16, height: UInt16)                               // 9, client -> host (content points)
     case setStream(mode: Mode, fps: UInt8, density: Float)                                   // 11, client -> host
-    case size(width: UInt16, height: UInt16)                                                 // 12, host -> client (points)
+    case windows([WindowInfo])                                                               // 13, host -> client, front to back
+    case focus(UInt32)                                                                       // 14, client -> host
+    case close(UInt32)                                                                       // 15, client -> host
+    case move(window: UInt32, x: Float, y: Float)                                            // 16, client -> host (canvas)
+    case menuBar([MenuItem])                                                                 // 17, host -> client
+    case menuPick([UInt16])                                                                  // 18, client -> host
 
     public func encoded() -> [UInt8] {
         var w = Writer()
@@ -49,39 +107,57 @@ public enum Message: Equatable {
         case let .hello(token, bundleID, mode, fps, density):
             type = 1
             w.u8(protocolVersion); w.string(token); w.string(bundleID); w.u8(mode.rawValue); w.u8(fps); w.f32(density)
-        case let .ready(title, width, height):
+        case let .ready(appName, width, height):
             type = 2
-            w.string(title); w.u16(width); w.u16(height)
+            w.string(appName); w.u16(width); w.u16(height)
         case let .error(text):
             type = 3
             w.string(text)
-        case let .frame(f):
+        case let .frame(region, f):
             type = 4
-            w.u8(f.mode.rawValue); w.u16(f.width); w.u16(f.height); w.u8(f.isFull ? 1 : 0); w.bytes.append(contentsOf: f.data)
+            w.u8(f.mode.rawValue); w.rect(region); w.u16(f.width); w.u16(f.height); w.u8(f.isFull ? 1 : 0); w.bytes.append(contentsOf: f.data)
         case let .text(text):
             type = 5
             w.bytes.append(contentsOf: Array(text.utf8))
         case let .key(keyCode, modifiers, down):
             type = 6
             w.u16(keyCode); w.u64(modifiers); w.u8(down ? 1 : 0)
-        case let .mouse(kind, button, x, y, clickCount):
+        case let .mouse(kind, button, window, x, y, clickCount):
             type = 7
-            w.u8(kind.rawValue); w.u8(button.rawValue); w.f32(x); w.f32(y); w.u8(clickCount)
-        case let .scroll(x, y, dx, dy):
+            w.u8(kind.rawValue); w.u8(button.rawValue); w.u32(window); w.f32(x); w.f32(y); w.u8(clickCount)
+        case let .scroll(window, x, y, dx, dy):
             type = 8
-            w.f32(x); w.f32(y); w.f32(dx); w.f32(dy)
-        case let .resize(width, height):
+            w.u32(window); w.f32(x); w.f32(y); w.f32(dx); w.f32(dy)
+        case let .resize(window, width, height):
             type = 9
-            w.u16(width); w.u16(height)
-        case let .title(text):
-            type = 10
-            w.string(text)
+            w.u32(window); w.u16(width); w.u16(height)
         case let .setStream(mode, fps, density):
             type = 11
             w.u8(mode.rawValue); w.u8(fps); w.f32(density)
-        case let .size(width, height):
-            type = 12
-            w.u16(width); w.u16(height)
+        case let .windows(items):
+            type = 13
+            w.u16(UInt16(clamping: items.count))
+            for i in items {
+                w.u32(i.id); w.u32(i.parent); w.u8(i.kind.rawValue)
+                w.u8((i.resizable ? 1 : 0) | (i.focused ? 2 : 0))
+                w.rect(i.rect); w.f32(i.titleBar); w.string(i.title)
+            }
+        case let .focus(id):
+            type = 14
+            w.u32(id)
+        case let .close(id):
+            type = 15
+            w.u32(id)
+        case let .move(window, x, y):
+            type = 16
+            w.u32(window); w.f32(x); w.f32(y)
+        case let .menuBar(items):
+            type = 17
+            w.menuItems(items)
+        case let .menuPick(path):
+            type = 18
+            w.u8(UInt8(clamping: path.count))
+            for i in path { w.u16(i) }
         }
         precondition(w.bytes.count <= maxMessageLength, "message too large")
         var out: [UInt8] = [type]
@@ -103,14 +179,15 @@ public enum Message: Equatable {
             let (fps, density) = try r.stream()
             message = .hello(token: token, bundleID: bundleID, mode: mode, fps: fps, density: density)
         case 2:
-            message = .ready(title: try r.string(), width: try r.u16(), height: try r.u16())
+            message = .ready(appName: try r.string(), width: try r.u16(), height: try r.u16())
         case 3:
             message = .error(try r.string())
         case 4:
             guard let mode = Mode(rawValue: try r.u8()) else { throw CodecError("unknown mode") }
+            let region = try r.rect()
             let width = try r.u16(), height = try r.u16(), full = try r.u8()
             guard full <= 1 else { throw CodecError("bad frame flag") }
-            message = .frame(FramePayload(mode: mode, width: width, height: height, isFull: full == 1, data: r.rest()))
+            message = .frame(region: region, FramePayload(mode: mode, width: width, height: height, isFull: full == 1, data: r.rest()))
         case 5:
             message = .text(try r.utf8(r.rest()))
         case 6:
@@ -120,19 +197,30 @@ public enum Message: Equatable {
         case 7:
             guard let kind = MouseKind(rawValue: try r.u8()) else { throw CodecError("unknown mouse event") }
             guard let button = MouseButton(rawValue: try r.u8()) else { throw CodecError("unknown mouse button") }
-            message = .mouse(kind: kind, button: button, x: try r.f32(), y: try r.f32(), clickCount: try r.u8())
+            message = .mouse(kind: kind, button: button, window: try r.u32(), x: try r.f32(), y: try r.f32(), clickCount: try r.u8())
         case 8:
-            message = .scroll(x: try r.f32(), y: try r.f32(), dx: try r.f32(), dy: try r.f32())
+            message = .scroll(window: try r.u32(), x: try r.f32(), y: try r.f32(), dx: try r.f32(), dy: try r.f32())
         case 9:
-            message = .resize(width: try r.u16(), height: try r.u16())
-        case 10:
-            message = .title(try r.string())
+            message = .resize(window: try r.u32(), width: try r.u16(), height: try r.u16())
         case 11:
             guard let mode = Mode(rawValue: try r.u8()) else { throw CodecError("unknown mode") }
             let (fps, density) = try r.stream()
             message = .setStream(mode: mode, fps: fps, density: density)
-        case 12:
-            message = .size(width: try r.u16(), height: try r.u16())
+        case 13:
+            message = .windows(try r.windows())
+        case 14:
+            message = .focus(try r.u32())
+        case 15:
+            message = .close(try r.u32())
+        case 16:
+            message = .move(window: try r.u32(), x: try r.f32(), y: try r.f32())
+        case 17:
+            var budget = maxMenuItems
+            message = .menuBar(try r.menuItems(depth: 1, budget: &budget))
+        case 18:
+            let n = Int(try r.u8())
+            guard (1...maxMenuPickDepth).contains(n) else { throw CodecError("menu path must have 1 to 8 levels") }
+            message = .menuPick(try (0..<n).map { _ in try r.u16() })
         default:
             throw CodecError("unknown message type \(type)")
         }
@@ -141,7 +229,7 @@ public enum Message: Equatable {
     }
 }
 
-private let knownTypes: ClosedRange<UInt8> = 1...12
+private let knownTypes: Set<UInt8> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 14, 15, 16, 17, 18]
 
 /// Turns a byte stream into messages. Feed it whatever the socket delivers
 /// with `append`, then call `next()` until it returns nil.
@@ -176,6 +264,16 @@ private struct Writer {
     mutating func u32(_ v: UInt32) { for i in 0..<4 { bytes.append(UInt8(v >> (8 * UInt32(i)) & 0xFF)) } }
     mutating func u64(_ v: UInt64) { for i in 0..<8 { bytes.append(UInt8(v >> (8 * UInt64(i)) & 0xFF)) } }
     mutating func f32(_ v: Float) { u32(v.bitPattern) }
+    mutating func rect(_ r: CanvasRect) { f32(r.x); f32(r.y); f32(r.w); f32(r.h) }
+    mutating func menuItems(_ items: [MenuItem]) {
+        u16(UInt16(clamping: items.count))
+        for i in items {
+            string(i.title)
+            u8((i.enabled ? 1 : 0) | (i.checked ? 2 : 0) | (i.separator ? 4 : 0))
+            string(i.key); u8(i.modifiers)
+            menuItems(i.children)
+        }
+    }
     mutating func string(_ s: String) {
         let utf8 = Array(s.utf8)
         precondition(utf8.count <= 0xFFFF, "string too long")
@@ -208,6 +306,51 @@ private struct Reader {
 
     mutating func u8() throws -> UInt8 { try take(1).first! }
     mutating func u16() throws -> UInt16 { UInt16(try uint(2)) }
+    mutating func u32() throws -> UInt32 { UInt32(try uint(4)) }
+    mutating func rect() throws -> CanvasRect { CanvasRect(x: try f32(), y: try f32(), w: try f32(), h: try f32()) }
+
+    mutating func windows() throws -> [WindowInfo] {
+        let n = Int(try u16())
+        guard n <= maxWindows else { throw CodecError("more than \(maxWindows) windows") }
+        var items = [WindowInfo]()
+        for _ in 0..<n {
+            let id = try u32(), parent = try u32()
+            guard id != 0 else { throw CodecError("window id 0") }
+            guard let kind = WindowKind(rawValue: try u8()) else { throw CodecError("unknown window kind") }
+            let flags = try u8()
+            guard flags & ~3 == 0 else { throw CodecError("unknown window flags") }
+            let rect = try rect(), titleBar = try f32(), title = try string()
+            guard rect.w > 0, rect.h > 0 else { throw CodecError("window size must be positive") }
+            guard titleBar >= 0, titleBar < rect.h else { throw CodecError("title bar must be in [0, height)") }
+            guard title.count <= maxTitleCharacters else { throw CodecError("window title too long") }
+            items.append(WindowInfo(id: id, parent: parent, kind: kind, resizable: flags & 1 != 0, focused: flags & 2 != 0,
+                                    rect: rect, titleBar: titleBar, title: title))
+        }
+        let ids = Set(items.map(\.id))
+        guard ids.count == items.count else { throw CodecError("duplicate window id") }
+        guard items.allSatisfy({ $0.parent == 0 || ($0.parent != $0.id && ids.contains($0.parent)) }) else {
+            throw CodecError("window parent not in table")
+        }
+        return items
+    }
+
+    mutating func menuItems(depth: Int, budget: inout Int) throws -> [MenuItem] {
+        let n = Int(try u16())
+        guard n == 0 || depth <= maxMenuDepth else { throw CodecError("menu deeper than \(maxMenuDepth) levels") }
+        budget -= n
+        guard budget >= 0 else { throw CodecError("more than \(maxMenuItems) menu items") }
+        var items = [MenuItem]()
+        for _ in 0..<n {
+            let title = try string(), flags = try u8()
+            guard flags & ~7 == 0 else { throw CodecError("unknown menu flags") }
+            let key = try string(), modifiers = try u8()
+            guard modifiers & ~15 == 0 else { throw CodecError("unknown menu modifiers") }
+            let children = try menuItems(depth: depth + 1, budget: &budget)
+            items.append(MenuItem(title: title, enabled: flags & 1 != 0, checked: flags & 2 != 0, separator: flags & 4 != 0,
+                                  key: key, modifiers: modifiers, children: children))
+        }
+        return items
+    }
     mutating func u64() throws -> UInt64 { try uint(8) }
     mutating func f32() throws -> Float {
         let v = Float(bitPattern: UInt32(try uint(4)))

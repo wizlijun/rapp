@@ -134,6 +134,9 @@ final class Session {
     private var lastWidth = 0
     private var lastHeight = 0
     private var lastTitle = ""
+    /// The window's content size in A points: the canvas, the frame region
+    /// and the one window of the table (spec §2.6).
+    private var contentSize = CGSize.zero
 
     init(connection: NWConnection, token: String, boundApp: String?, output: WorkerOutput, queue: DispatchQueue,
          onEnd: @escaping (String, Bool) -> Void) {
@@ -213,11 +216,16 @@ final class Session {
             startCapture(bundleID: app)
         case .text, .key, .mouse, .scroll:
             injector?.handle(message)
-        case let .resize(width, height):
+        case let .resize(window, width, height):
+            // A window that is no longer in the table is dropped, not an error.
+            guard window == capture?.window.windowID else { return }
             resizeWindow(width: Int(width), height: Int(height))
         case let .setStream(mode, fps, density):
             setStream(mode, fps: Int(fps), density: density)
-        case .ready, .error, .frame, .title, .size:
+        case .focus, .close, .move, .menuPick:
+            // A single-window host may ignore these (spec §2.6).
+            break
+        case .ready, .error, .frame, .windows, .menuBar:
             fail("unexpected message from client")
         }
     }
@@ -263,14 +271,16 @@ final class Session {
         // A SetStream that arrived while the window was being found is applied now.
         let (fps, density) = (self.fps, Double(self.density))
         Task { await capture.setStream(fps: fps, density: density) }
-        injector = InputInjector(app: app, frameProvider: { [weak capture] in
+        injector = InputInjector(app: app, windowID: capture.window.windowID, frameProvider: { [weak capture] in
             guard let capture, let window = capture.currentFrame else { return nil }
             return (window, contentRect(windowFrame: window, titleRow: capture.titleRow))
         })
         lastTitle = currentTitle(capture, app: app) ?? windowTitle(capture.window.title, appName: app.localizedName)
-        send(.ready(title: lastTitle,
-                    width: UInt16(clamping: Int(content.width.rounded())),
-                    height: UInt16(clamping: Int(content.height.rounded()))))
+        contentSize = CGSize(width: content.width.rounded(), height: content.height.rounded())
+        send(.ready(appName: windowTitle("", appName: app.localizedName),
+                    width: UInt16(clamping: Int(contentSize.width)),
+                    height: UInt16(clamping: Int(contentSize.height))))
+        sendWindowTable()
 
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + 1, repeating: 1.0)
@@ -324,7 +334,8 @@ final class Session {
 
     private func encodeAndSend(samples: [UInt8], width: Int, height: Int) {
         guard let payload = encoder?.encode(samples: samples, width: width, height: height) else { return }
-        let bytes = Message.frame(payload).encoded()
+        let region = CanvasRect(x: 0, y: 0, w: Float(contentSize.width), h: Float(contentSize.height))
+        let bytes = Message.frame(region: region, payload).encoded()
         bytesThisSecond += bytes.count
         framesThisSecond += 1
         lastWidth = width
@@ -359,8 +370,17 @@ final class Session {
         refreshSize(of: capture)
         if let app, let title = currentTitle(capture, app: app), title != lastTitle {
             lastTitle = title
-            send(.title(title))
+            sendWindowTable()
         }
+    }
+
+    /// The one-item window table of a single-window host (spec §2.6).
+    private func sendWindowTable() {
+        guard let capture, contentSize.width > 0, contentSize.height > 0 else { return }
+        let rect = CanvasRect(x: 0, y: 0, w: Float(contentSize.width), h: Float(contentSize.height))
+        send(.windows([WindowInfo(id: capture.window.windowID, parent: 0, kind: .normal, resizable: true,
+                                  focused: app?.isActive ?? false, rect: rect, titleBar: 0,
+                                  title: String(lastTitle.prefix(maxTitleCharacters)))]))
     }
 
     /// The window's title as Accessibility reports it now, by the client rule
@@ -379,8 +399,8 @@ final class Session {
                     self.encoder?.reset()
                     // Tell the client A's real content size: the app may not have taken the requested one.
                     if let content = capture.contentFrame {
-                        self.send(.size(width: UInt16(clamping: Int(content.width.rounded())),
-                                        height: UInt16(clamping: Int(content.height.rounded()))))
+                        self.contentSize = CGSize(width: content.width.rounded(), height: content.height.rounded())
+                        self.sendWindowTable()
                     }
                 }
             }

@@ -208,7 +208,7 @@ public struct SharedApp: Equatable {
     }
 }
 
-public struct WindowInfo {
+public struct ListedWindow {
     public var pid: Int32
     public var layer: Int
     public var width: Double
@@ -223,7 +223,7 @@ public struct WindowInfo {
 
 /// Regular apps owning at least one on-screen window of layer 0 and at least
 /// 50×50 points, each once, sorted by name.
-public func shareableApps(windows: [WindowInfo], regularApps: [Int32: SharedApp]) -> [SharedApp] {
+public func shareableApps(windows: [ListedWindow], regularApps: [Int32: SharedApp]) -> [SharedApp] {
     var byID = [String: SharedApp]()
     for w in windows where w.layer == 0 && w.width >= 50 && w.height >= 50 {
         if let app = regularApps[w.pid] { byID[app.app] = app }

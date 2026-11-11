@@ -152,9 +152,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func handle(_ message: Message) {
         switch message {
-        case let .ready(title, width, height):
-            window.title = title
-            output.emit(.ready(width: Int(width), height: Int(height), title: title))
+        case let .ready(appName, width, height):
+            window.title = appName
+            output.emit(.ready(width: Int(width), height: Int(height), title: appName))
             traffic.start()
             // Open at the remote window's size so the picture starts 1:1.
             applyingRemoteSize = true
@@ -162,18 +162,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             applyingRemoteSize = false
             ready = true
             remoteSize = CGSize(width: CGFloat(width), height: CGFloat(height))
+            remoteView.remoteSize = remoteSize
             // 1 unless the screen kept the window smaller than A's.
             zoom = fittedZoom() ?? 1
             sendStreamIfChanged()
-        case let .size(width, height):
-            remoteSize = CGSize(width: CGFloat(width), height: CGFloat(height))
+        case let .windows(table):
+            // Single-window client (spec §2.6): the first item is the window.
+            guard let first = table.first else { break }
+            window.title = first.title
+            remoteView.windowID = first.id
+            let size = CGSize(width: CGFloat(first.rect.w), height: CGFloat(first.rect.h - first.titleBar))
+            guard size != remoteSize else { break }
+            remoteSize = size
+            remoteView.remoteSize = size
             // A may not take the size asked for: the picture letterboxes in
             // the window as it is, and the zoom follows what is shown.
             if !window.inLiveResize, let fitted = fittedZoom() {
                 zoom = fitted
                 sendStreamIfChanged()
             }
-        case let .frame(payload):
+        case let .frame(_, payload):
             do {
                 try decoder.decode(payload)
             } catch {
@@ -182,8 +190,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let bgra = Quantizer.expand(samples: decoder.samples, width: decoder.width, height: decoder.height,
                                         mode: decoder.mode)
             remoteView.show(bgra: bgra, width: decoder.width, height: decoder.height)
-        case let .title(title):
-            window.title = title
         case let .error(reason):
             output.finish(exitCode(forHostError: reason), "rapp-client: host says: \(reason)")
         default:
@@ -269,7 +275,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         pendingResize = nil
         let size = remoteResize(view: pictureArea, zoom: pending.zoom, remote: remoteSize, handle: pending.handle)
         guard size != remoteSize else { return }
-        connection.send(.resize(width: UInt16(clamping: Int(size.width)), height: UInt16(clamping: Int(size.height))))
+        connection.send(.resize(window: remoteView.windowID, width: UInt16(clamping: Int(size.width)), height: UInt16(clamping: Int(size.height))))
     }
 }
 
