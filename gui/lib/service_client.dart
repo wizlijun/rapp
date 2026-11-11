@@ -124,6 +124,9 @@ class ServiceConnection {
   Future<void> kick(Object sid) => request({'cmd': 'kick', 'sid': sid});
   Future<void> subscribe() => request({'cmd': 'subscribe'});
 
+  /// Re-checks A's permissions; with [prompt], macOS is asked for what is missing.
+  Future<void> permissions({bool prompt = false}) => request({'cmd': 'permissions', 'prompt': prompt});
+
   void _onLine(String line) {
     Map<String, dynamic> m;
     try {
@@ -267,6 +270,11 @@ class ServiceMonitor extends ChangeNotifier {
 
   Future<void> kick(Object sid) async {
     await _need().kick(sid);
+    await refresh();
+  }
+
+  Future<void> checkPermissions({bool prompt = false}) async {
+    await _need().permissions(prompt: prompt);
     await refresh();
   }
 

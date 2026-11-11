@@ -1,29 +1,113 @@
 // 本机: this machine's ID/password/relay as the service sees them, plus service control.
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../permissions.dart';
 import '../service_client.dart';
 import '../service_control.dart';
+import 'permissions_panel.dart';
 import 'section_card.dart';
 
 const relayLabels = {'connected': '已连接', 'connecting': '连接中', 'off': '未连接'};
 
 class LocalSection extends StatefulWidget {
-  const LocalSection({super.key, required this.monitor, required this.control, required this.configDir});
+  const LocalSection({
+    super.key,
+    required this.monitor,
+    required this.control,
+    required this.configDir,
+    this.openSettings = openSettingsPane,
+  });
   final ServiceMonitor monitor;
   final ServiceController? control;
   final String configDir;
+  final Future<void> Function(Permission) openSettings;
 
   @override
   State<LocalSection> createState() => _LocalSectionState();
 }
 
+/// The service's permission map, as the panel and hint helpers take it.
+Map<String, dynamic> permissionsOf(ServiceStatus st) =>
+    {'screen_recording': st.screenRecording, 'accessibility': st.accessibility};
+
 class _LocalSectionState extends State<LocalSection> {
   bool _busy = false;
+  Timer? _poll;
+  bool _guideDecided = false;
 
   ServiceMonitor get m => widget.monitor;
+
+  bool get _missing {
+    final st = m.status;
+    return st != null && missingPermissions(permissionsOf(st)).isNotEmpty;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    if (!Platform.isMacOS) return;
+    // While something is missing, look again every 3 s so a grant shows up as ✓ by itself.
+    _poll = Timer.periodic(const Duration(seconds: 3), (_) {
+      if (_missing) m.checkPermissions().catchError((_) {});
+    });
+    m.addListener(_maybeGuide);
+    _maybeGuide();
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    m.removeListener(_maybeGuide);
+    super.dispose();
+  }
+
+  /// The first time ever the service reports something missing, walk the user through it once.
+  void _maybeGuide() {
+    if (_guideDecided || m.status == null) return;
+    _guideDecided = true;
+    if (_missing && claimPermissionGuide(widget.configDir)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _showGuide();
+      });
+    }
+  }
+
+  Future<void> _showGuide() => showDialog<void>(
+        context: context,
+        builder: (ctx) => ListenableBuilder(
+          listenable: m,
+          builder: (ctx, _) {
+            final st = m.status;
+            return AlertDialog(
+              title: const Text('让另一台电脑使用这台电脑上的 app'),
+              content: SizedBox(
+                width: 420,
+                child: st == null
+                    ? const Text('服务未运行')
+                    : PermissionsPanel(permissions: permissionsOf(st), onOpenSettings: _openSettings),
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('稍后')),
+                FilledButton(onPressed: _missing ? null : () => Navigator.pop(ctx), child: const Text('完成')),
+              ],
+            );
+          },
+        ),
+      );
+
+  /// Asks macOS through the service first, so rapp is already in the list, then opens the pane.
+  Future<void> _openSettings(Permission p) async {
+    try {
+      await m.checkPermissions(prompt: true);
+    } catch (_) {
+      // The pane still lets the user add rapp by hand.
+    }
+    await widget.openSettings(p);
+  }
 
   void _say(String text) {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
@@ -123,8 +207,20 @@ class _LocalSectionState extends State<LocalSection> {
             _row('Relay', '${relayLabels[st.relay] ?? st.relay}${st.relayError == null ? '' : '（${st.relayError}）'}',
                 trailing:
                     IconButton(tooltip: '修改 relay', icon: const Icon(Icons.edit, size: 18), onPressed: _editRelay)),
-            _row('权限',
-                '屏幕录制 ${st.screenRecording ? '✓' : '✗'}   辅助功能 ${st.accessibility ? '✓' : '✗'}'),
+            if (Platform.isMacOS)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const SizedBox(
+                      width: 72,
+                      child: Padding(
+                          padding: EdgeInsets.only(top: 4), child: Text('权限', style: TextStyle(color: Colors.grey)))),
+                  Expanded(child: PermissionsPanel(permissions: permissionsOf(st), onOpenSettings: _openSettings)),
+                ]),
+              )
+            else
+              _row('权限',
+                  '屏幕录制 ${st.screenRecording ? '✓' : '✗'}   辅助功能 ${st.accessibility ? '✓' : '✗'}'),
             _row('会话', '${st.sessions.length} 个被访问中'),
           ],
           const SizedBox(height: 8),

@@ -5,6 +5,10 @@ import 'package:rapp/pages/hosts_section.dart';
 
 import 'fakes.dart';
 
+/// What the scripted A reports with its app list, and how an open fails (null: it works).
+Map<String, dynamic>? appsPermissions;
+String? openError;
+
 /// Answers like a well-behaved rapp-hub with one saved host.
 void scriptHub(FakeTransport t) {
   final hosts = <Map<String, dynamic>>[
@@ -34,8 +38,10 @@ void scriptHub(FakeTransport t) {
           'apps': [
             {'app': 'com.apple.Safari', 'name': 'Safari'},
           ],
+          'permissions': ?appsPermissions,
         });
       case 'open':
+        if (openError != null) return t.emit({'event': 'error', 'req': req, 'error': openError});
         t.emit({'event': 'opened', 'req': req, 'sid': 1, 'id': cmd['id'], 'app': cmd['app'], 'path': 'lan'});
     }
   };
@@ -51,6 +57,8 @@ void main() {
   }
 
   setUp(() {
+    appsPermissions = null;
+    openError = null;
     t = FakeTransport();
     scriptHub(t);
     hub = HubClient(t);
@@ -111,5 +119,32 @@ void main() {
     await tester.tap(find.byKey(const Key('open-bundle')));
     await tester.pumpAndSettle();
     expect(t.sent.last, containsPair('app', 'com.apple.TextEdit'));
+  });
+
+  testWidgets('warns before opening when A is missing permissions', (tester) async {
+    appsPermissions = {'screen_recording': false, 'accessibility': true};
+    await pumpSection(tester);
+    await tester.tap(find.text('mac-a'));
+    await tester.pumpAndSettle();
+    expect(find.text('「mac-a」缺少 屏幕录制 权限。请在那台电脑上打开 rapp，在 本机 › 权限 里点「打开系统设置」。'), findsOneWidget);
+  });
+
+  testWidgets('no warning when A has every permission', (tester) async {
+    appsPermissions = {'screen_recording': true, 'accessibility': true};
+    await pumpSection(tester);
+    await tester.tap(find.text('mac-a'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('缺少'), findsNothing);
+  });
+
+  testWidgets('an open that fails for permissions explains it in Chinese', (tester) async {
+    openError = 'rapp-host exited: missing permission: Accessibility\nAllow rapp under System Settings.';
+    await pumpSection(tester);
+    await tester.tap(find.text('mac-a'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Safari'));
+    await tester.pumpAndSettle();
+    expect(find.text('「mac-a」缺少 辅助功能 权限。请在那台电脑上打开 rapp，在 本机 › 权限 里点「打开系统设置」。'), findsOneWidget);
+    expect(find.textContaining('missing permission'), findsNothing);
   });
 }

@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 
 import '../hub_client.dart';
+import '../permissions.dart';
 import 'section_card.dart';
 
 class HostsSection extends StatefulWidget {
@@ -49,9 +50,17 @@ class _HostsSectionState extends State<HostsSection> {
     try {
       await f();
     } catch (e) {
-      _error = '$e';
+      final missing = missingFromError('$e');
+      _error = missing == null ? '$e' : remoteHint(_hostName(_selected), missing);
     }
     if (mounted) setState(() => _busy = false);
+  }
+
+  String _hostName(String? id) {
+    for (final h in hub.hosts) {
+      if (h.id == id) return h.name.isEmpty ? h.id : h.name;
+    }
+    return id ?? '';
   }
 
   Future<void> _add() async {
@@ -149,11 +158,17 @@ class _HostsSectionState extends State<HostsSection> {
 
   List<Widget> _appsPanel(BuildContext context) {
     final a = _apps;
+    final missing = missingPermissions(a?.permissions);
     return [
       const Divider(height: 24),
       Text(a == null ? 'App（$_selected）' : 'App（$_selected · ${a.path}）',
           style: Theme.of(context).textTheme.titleSmall),
       if (_loadingApps) const Padding(padding: EdgeInsets.all(8), child: LinearProgressIndicator()),
+      if (missing.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.all(8),
+          child: Text(remoteHint(_hostName(_selected), missing), style: const TextStyle(color: Colors.orange)),
+        ),
       if (a != null && a.apps.isEmpty) const Padding(padding: EdgeInsets.all(8), child: Text('对方没有可共享的窗口')),
       if (a != null)
         for (final app in a.apps)

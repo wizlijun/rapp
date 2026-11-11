@@ -15,6 +15,7 @@ class FakeService {
   final _subscribers = <Socket>[];
   final _all = <Socket>[];
   int sessions = 0;
+  Map<String, dynamic> perms = {'screen_recording': true, 'accessibility': false};
 
   int get port => server.port;
 
@@ -52,6 +53,8 @@ class FakeService {
         case 'set_relay':
         case 'kick':
           s.write('{"ok":true}\n');
+        case 'permissions':
+          s.write('${jsonEncode({'ok': true, 'permissions': perms})}\n');
         default:
           s.write('{"ok":false,"error":"unknown cmd"}\n');
       }
@@ -64,7 +67,7 @@ class FakeService {
         'name': 'bruce-mac',
         'password': 'ab12cd34',
         'relay': 'connected',
-        'permissions': {'screen_recording': true, 'accessibility': false},
+        'permissions': perms,
         'sessions': [
           for (var i = 0; i < sessions; i++)
             {'sid': i + 1, 'peer': '10.0.0.$i:5000', 'app': 'com.apple.Safari', 'path': 'lan', 'since': 1700000000},
@@ -178,6 +181,25 @@ void main() {
   });
 
   group('ServiceMonitor', () {
+    test('checkPermissions asks the service and refreshes the status', () async {
+      final svc = FakeService('tok-3');
+      await svc.start();
+      final m = ServiceMonitor(readToken: () async => 'tok-3', port: svc.port, retry: const Duration(milliseconds: 50));
+      m.start();
+      await until(() => m.status != null);
+      expect(m.status!.accessibility, isFalse);
+
+      svc.perms = {'screen_recording': true, 'accessibility': true};
+      await m.checkPermissions(prompt: true);
+      expect(svc.received.where((r) => r['cmd'] == 'permissions').single, {'cmd': 'permissions', 'prompt': true});
+      expect(m.status!.accessibility, isTrue);
+      await m.checkPermissions();
+      expect(svc.received.where((r) => r['cmd'] == 'permissions').last, {'cmd': 'permissions', 'prompt': false});
+
+      await svc.stop();
+      m.dispose();
+    });
+
     test('subscribe → changed triggers a fresh status', () async {
       final svc = FakeService('tok-2');
       await svc.start();

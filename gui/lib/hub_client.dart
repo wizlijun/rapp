@@ -73,10 +73,13 @@ class HubApp {
 }
 
 class AppList {
-  const AppList(this.id, this.path, this.apps);
+  const AppList(this.id, this.path, this.apps, {this.permissions});
   final String id;
   final String path;
   final List<HubApp> apps;
+
+  /// A's `{"screen_recording","accessibility"}`; null when A does not report them.
+  final Map<String, dynamic>? permissions;
 }
 
 class HubSession {
@@ -133,7 +136,9 @@ class HubClient extends ChangeNotifier {
         .whereType<Map>()
         .map((a) => HubApp('${a['app']}', '${a['name'] ?? a['app']}'))
         .toList();
-    return AppList('${m['id'] ?? id}', '${m['path'] ?? ''}', list);
+    final perms = m['permissions'];
+    return AppList('${m['id'] ?? id}', '${m['path'] ?? ''}', list,
+        permissions: perms is Map ? Map<String, dynamic>.from(perms) : null);
   }
 
   Future<HubSession> open(String id, String app) async {
