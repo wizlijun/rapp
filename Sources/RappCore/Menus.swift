@@ -43,3 +43,25 @@ public func limitMenu(_ items: [MenuItem], maxDepth: Int = maxMenuDepth, maxItem
     }
     return limit(items, depth: 1)
 }
+
+/// The titles along `path`, top level first; nil if the path is empty or leaves the tree.
+/// The host presses a pick only if A's live titles still match these.
+public func menuTitles(at path: [UInt16], in items: [MenuItem]) -> [String]? {
+    guard let first = path.first, Int(first) < items.count else { return nil }
+    let item = items[Int(first)]
+    if path.count == 1 { return [item.title] }
+    return menuTitles(at: Array(path.dropFirst()), in: item.children).map { [item.title] + $0 }
+}
+
+extension Message {
+    /// Input after which the app's menus may have changed (a selection made,
+    /// text typed), so the host reads them again once input pauses.
+    public var mayChangeMenus: Bool {
+        switch self {
+        case .text: return true
+        case let .key(_, _, down): return !down
+        case let .mouse(kind, _, _, _, _, _): return kind == .up
+        default: return false
+        }
+    }
+}

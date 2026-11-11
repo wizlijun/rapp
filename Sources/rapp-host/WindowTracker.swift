@@ -12,6 +12,9 @@ final class WindowTracker {
         var title = ""
         var titleBar: Float = 0
         var size = CGSize.zero
+        /// Classifications made so far; it is classified again while not final.
+        var attempts = 1
+        var final = true
     }
 
     private let pid: pid_t
@@ -53,13 +56,19 @@ final class WindowTracker {
             seen.insert(id)
 
             var info: Known
-            if let cached = known[id] {
+            if let cached = known[id], cached.final {
                 info = cached
             } else {
-                // Menus and tooltips have no Accessibility window (Task 1 probe).
+                // Menus and tooltips have no Accessibility window (Task 1 probe). A new
+                // window's may not exist yet: until it does, the level decides, for a few polls.
                 let ax = level < popUpLevel ? WindowResizer.describe(pid: pid, frame: frame) : nil
-                info = Known(kind: classifyWindow(level: level, role: ax?.role, subrole: ax?.subrole),
-                             resizable: ax?.resizable ?? false)
+                let attempts = (known[id]?.attempts ?? 0) + 1
+                info = known[id] ?? Known(kind: .normal, resizable: false)
+                info.kind = classifyWindow(level: level, role: ax?.role, subrole: ax?.subrole)
+                info.resizable = ax?.resizable ?? false
+                info.attempts = attempts
+                info.final = classificationIsFinal(foundAccessibility: ax != nil, belowPopUp: level < popUpLevel,
+                                                   attempts: attempts)
             }
             if info.kind.isDecorated, refresh || known[id] == nil || info.size != frame.size {
                 info.title = windowTitle(WindowResizer.title(pid: pid, frame: frame), appName: appName)

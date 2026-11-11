@@ -25,8 +25,8 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
     private var applyingFocus = false
     private var lastFocused: UInt32?
     private var lastOrder: [UInt32] = []
-    private var pendingMoves: [UInt32: DispatchWorkItem] = [:]
-    private var pendingResizes: [UInt32: DispatchWorkItem] = [:]
+    private var pendingMoves = PendingActions<UInt32>()
+    private var pendingResizes = PendingActions<UInt32>()
 
     init(meter: TrafficMeter, connectingTo host: String) {
         self.meter = meter
@@ -34,6 +34,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
                                styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
         super.init()
         placeholder.isReleasedWhenClosed = false
+        placeholder.delegate = self
         placeholder.title = "rapp"
         placeholderText.stringValue = "Connecting to \(host)…"
         placeholderText.alignment = .center
@@ -73,6 +74,8 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         // Show the placeholder before closing the last window, so the client never has none.
         if decorated.isEmpty { placeholder.orderFront(nil) }
 
+        pendingMoves.keep(only: ids)
+        pendingResizes.keep(only: ids)
         for (id, window) in windows where !ids.contains(id) {
             window.delegate = nil
             window.close()
@@ -179,17 +182,19 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
     private func placePopup(_ panel: PopupPanel) {
         guard let placement else { return }
         let info = panel.info
-        let origin: CGPoint
+        let frame: CGRect
         if let parent = windows[info.parent] {
             let parentContent = CanvasRect(x: parent.info.rect.x, y: parent.info.rect.y + parent.info.titleBar,
                                            w: parent.info.rect.w, h: parent.info.rect.h - parent.info.titleBar)
-            origin = placement.popupOrigin(popup: info.rect, parentContent: parentContent,
-                                           parentContentInB: contentTopLeft(parent))
+            // The picture, not the window: after A refuses a resize it is aspect-fitted at another scale.
+            let content = contentTopLeft(parent), fit = parent.pictureFit
+            frame = popupFrame(popup: info.rect, parentContent: parentContent,
+                               parentPicture: fit.offsetBy(dx: content.x, dy: content.y))
         } else {
-            origin = placement.toB(CGPoint(x: CGFloat(info.rect.x), y: CGFloat(info.rect.y)))
+            frame = CGRect(origin: placement.toB(CGPoint(x: CGFloat(info.rect.x), y: CGFloat(info.rect.y))),
+                           size: CGSize(width: CGFloat(info.rect.w) * zoom, height: CGFloat(info.rect.h) * zoom))
         }
-        let size = CGSize(width: CGFloat(info.rect.w) * zoom, height: CGFloat(info.rect.h) * zoom)
-        setFrame(panel, appKitRect(topLeft: origin, size: size))
+        setFrame(panel, appKitRect(topLeft: frame.origin, size: frame.size))
     }
 
     private func setFrame(_ window: NSWindow, _ frame: NSRect) {
@@ -231,18 +236,26 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
 
     func windowDidMove(_ notification: Notification) {
         guard !placing, let window = notification.object as? RemoteWindow else { return }
-        schedule(&pendingMoves, window, after: 0.1) { [weak self] in self?.sendMove(window) }
+        let id = window.info.id
+        pendingMoves.schedule(id, after: 0.1) { [weak self, weak window] in
+            guard let self, let window else { return }
+            self.runWhenMouseUp(window) { [weak self, weak window] in window.map { self?.sendMove($0) } }
+        }
     }
 
     func windowDidResize(_ notification: Notification) {
         // During a drag nothing is sent until the mouse is released.
         guard !placing, let window = notification.object as? RemoteWindow, !window.inLiveResize else { return }
-        schedule(&pendingResizes, window, after: 0.3) { [weak self] in self?.sendResize(window) }
+        let id = window.info.id
+        pendingResizes.schedule(id, after: 0.3) { [weak self, weak window] in
+            guard let self, let window else { return }
+            self.runWhenMouseUp(window) { [weak self, weak window] in window.map { self?.sendResize($0) } }
+        }
     }
 
     func windowDidEndLiveResize(_ notification: Notification) {
         guard let window = notification.object as? RemoteWindow else { return }
-        pendingResizes[window.info.id]?.cancel()
+        pendingResizes.cancel(window.info.id)
         sendResize(window)
     }
 
@@ -268,22 +281,14 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         onStreamMayChange()
     }
 
-    /// Runs `action` once `window` has had no new request for `delay` seconds.
-    private func schedule(_ pending: inout [UInt32: DispatchWorkItem], _ window: RemoteWindow, after delay: TimeInterval,
-                          _ action: @escaping () -> Void) {
-        let id = window.info.id
-        pending[id]?.cancel()
-        let item = DispatchWorkItem { [weak self] in self?.runWhenMouseUp(window, action) }
-        pending[id] = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: item)
-    }
-
     /// Runs `action` now, or once the left button is up if the user is still
     /// dragging; never for a window already closed.
     private func runWhenMouseUp(_ window: RemoteWindow, _ action: @escaping () -> Void) {
         guard window.delegate === self else { return }
         guard NSEvent.pressedMouseButtons & 1 != 0 else { return action() }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in self?.runWhenMouseUp(window, action) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self, weak window] in
+            window.map { self?.runWhenMouseUp($0, action) }
+        }
     }
 
     private func sendMove(_ window: RemoteWindow) {

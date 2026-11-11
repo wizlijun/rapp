@@ -58,4 +58,27 @@ final class MenusTests: XCTestCase {
         XCTAssertEqual(decoded[0].children.count, 3000)
         XCTAssertEqual(decoded[1].children.count, maxMenuItems - 2 - 3000)
     }
+
+    // MARK: menuTitles(at:in:) (a pick is pressed only if A's titles still match)
+
+    func testMenuTitlesAlongPath() {
+        let tree = [MenuItem(title: "File", children: [MenuItem(title: "New"), MenuItem(title: "Open")])]
+        XCTAssertEqual(menuTitles(at: [0, 1], in: tree), ["File", "Open"])
+        XCTAssertEqual(menuTitles(at: [0], in: tree), ["File"])
+        XCTAssertNil(menuTitles(at: [0, 2], in: tree))
+        XCTAssertNil(menuTitles(at: [], in: tree))
+    }
+
+    // MARK: mayChangeMenus (menus are read again after input that ends)
+
+    func testMenusAreReadAgainAfterInputThatEnds() {
+        XCTAssertTrue(Message.key(keyCode: 0, modifiers: 0, down: false).mayChangeMenus)
+        XCTAssertTrue(Message.text("a").mayChangeMenus)
+        XCTAssertTrue(Message.mouse(kind: .up, button: .left, window: 1, x: 0, y: 0, clickCount: 1).mayChangeMenus)
+        XCTAssertFalse(Message.key(keyCode: 0, modifiers: 0, down: true).mayChangeMenus)
+        XCTAssertFalse(Message.mouse(kind: .down, button: .left, window: 1, x: 0, y: 0, clickCount: 1).mayChangeMenus)
+        XCTAssertFalse(Message.mouse(kind: .move, button: .left, window: 1, x: 0, y: 0, clickCount: 0).mayChangeMenus)
+        XCTAssertFalse(Message.scroll(window: 1, x: 0, y: 0, dx: 0, dy: 1).mayChangeMenus)
+        XCTAssertFalse(Message.focus(1).mayChangeMenus)
+    }
 }

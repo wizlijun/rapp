@@ -15,12 +15,17 @@ enum MenuBarReader {
         return limitMenu(items(topLevel(pid: pid), depth: 1, budget: &budget))
     }
 
-    /// Presses the item at `path`; false when the path leads nowhere or the press fails.
-    static func press(pid: pid_t, path: [UInt16]) -> Bool {
+    /// Presses the item at `path` if the live titles along it are `titles`;
+    /// false when the path leads nowhere, an item moved, or the press fails.
+    static func press(pid: pid_t, path: [UInt16], titles: [String]) -> Bool {
+        guard titles.count == path.count else { return false }
         var level = topLevel(pid: pid)
         for (step, index) in path.enumerated() {
             guard Int(index) < level.count else { return false }
             let element = level[Int(index)]
+            var title: CFTypeRef?
+            AXUIElementCopyAttributeValue(element, kAXTitleAttribute as CFString, &title)
+            guard (title as? String ?? "") == titles[step] else { return false }
             if step == path.count - 1 {
                 return AXUIElementPerformAction(element, kAXPressAction as CFString) == .success
             }

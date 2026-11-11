@@ -179,12 +179,49 @@ final class WindowsTests: XCTestCase {
         XCTAssertEqual(p.zoom, 2)
     }
 
-    func testPopupOriginFollowsParentInB() {
-        let p = WindowPlacement(origin: .zero, zoom: 1.5)
-        let origin = p.popupOrigin(popup: CanvasRect(x: 130, y: 90, w: 50, h: 80),
-                                   parentContent: CanvasRect(x: 100, y: 50, w: 400, h: 300),
-                                   parentContentInB: CGPoint(x: 700, y: 20))
-        XCTAssertEqual(origin, CGPoint(x: 745, y: 80))
+    func testPopupFrameFollowsParentPicture() {
+        // Parent content 400x300 drawn 600x450 at (700, 20) in B: scale 1.5.
+        let frame = popupFrame(popup: CanvasRect(x: 130, y: 90, w: 50, h: 80),
+                               parentContent: CanvasRect(x: 100, y: 50, w: 400, h: 300),
+                               parentPicture: CGRect(x: 700, y: 20, width: 600, height: 450))
+        XCTAssertEqual(frame, CGRect(x: 745, y: 80, width: 75, height: 120))
+    }
+
+    func testPopupFrameUsesThePictureScaleNotZoom() {
+        // A refused a resize, so the parent's picture is aspect-fitted at half size.
+        let frame = popupFrame(popup: CanvasRect(x: 30, y: 40, w: 20, h: 10),
+                               parentContent: CanvasRect(x: 10, y: 20, w: 100, h: 50),
+                               parentPicture: CGRect(x: 200, y: 300, width: 50, height: 25))
+        XCTAssertEqual(frame, CGRect(x: 210, y: 310, width: 10, height: 5))
+    }
+
+    // MARK: clampedWindowOrigin (a move must leave the title row on A's display)
+
+    func testClampedWindowOriginKeepsTheTitleRowOnTheCanvas() {
+        let canvas = CGSize(width: 1000, height: 800), size = CGSize(width: 400, height: 300)
+        XCTAssertEqual(clampedWindowOrigin(CGPoint(x: -500, y: 900), size: size, titleBar: 28, canvas: canvas),
+                       CGPoint(x: -360, y: 772))
+        XCTAssertEqual(clampedWindowOrigin(CGPoint(x: 2000, y: -50), size: size, titleBar: 28, canvas: canvas),
+                       CGPoint(x: 960, y: 0))
+        XCTAssertEqual(clampedWindowOrigin(CGPoint(x: 100, y: 100), size: size, titleBar: 28, canvas: canvas),
+                       CGPoint(x: 100, y: 100))
+    }
+
+    func testClampedWindowOriginWithoutTitleRowKeeps20Points() {
+        let origin = clampedWindowOrigin(CGPoint(x: 0, y: 5000), size: CGSize(width: 30, height: 30), titleBar: 0,
+                                         canvas: CGSize(width: 1000, height: 800))
+        XCTAssertEqual(origin, CGPoint(x: 0, y: 780))
+    }
+
+    // MARK: classificationIsFinal (a window without its AX window yet is classified again)
+
+    func testClassificationWithoutAccessibilityIsRetried() {
+        XCTAssertFalse(classificationIsFinal(foundAccessibility: false, belowPopUp: true, attempts: 1))
+        XCTAssertFalse(classificationIsFinal(foundAccessibility: false, belowPopUp: true, attempts: classificationAttempts - 1))
+        XCTAssertTrue(classificationIsFinal(foundAccessibility: false, belowPopUp: true, attempts: classificationAttempts))
+        XCTAssertTrue(classificationIsFinal(foundAccessibility: true, belowPopUp: true, attempts: 1))
+        // Menus and tooltips never have one, so nothing is gained by asking again.
+        XCTAssertTrue(classificationIsFinal(foundAccessibility: false, belowPopUp: false, attempts: 1))
     }
 
     func testRezoomKeepsCanvasPoint() {

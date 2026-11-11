@@ -149,13 +149,6 @@ public struct WindowPlacement: Equatable {
                         zoom: zoom)
     }
 
-    /// Where a popup's top-left goes in B: attached to its parent's content
-    /// wherever that is in B, not by the global mapping (spec §1.3).
-    public func popupOrigin(popup: CanvasRect, parentContent: CanvasRect, parentContentInB: CGPoint) -> CGPoint {
-        CGPoint(x: parentContentInB.x + zoom * CGFloat(popup.x - parentContent.x),
-                y: parentContentInB.y + zoom * CGFloat(popup.y - parentContent.y))
-    }
-
     /// Where a decorated window's content (below its A title row) starts in B.
     public func contentTopLeftInB(_ window: WindowInfo) -> CGPoint {
         toB(CGPoint(x: CGFloat(window.rect.x), y: CGFloat(window.rect.y + window.titleBar)))
@@ -173,6 +166,38 @@ public struct WindowPlacement: Equatable {
         let b = toB(canvas)
         return WindowPlacement(origin: CGPoint(x: b.x - newZoom * canvas.x, y: b.y - newZoom * canvas.y), zoom: newZoom)
     }
+}
+
+/// Where a popup goes in B (top-left origin): attached to its parent's
+/// picture wherever that is in B, at the picture's scale (spec §1.3). The
+/// picture's scale is the zoom unless A refused a resize and the picture is
+/// aspect-fitted smaller.
+public func popupFrame(popup: CanvasRect, parentContent: CanvasRect, parentPicture: CGRect) -> CGRect {
+    let scale = parentContent.w > 0 ? parentPicture.width / CGFloat(parentContent.w) : 1
+    return CGRect(x: parentPicture.minX + scale * CGFloat(popup.x - parentContent.x),
+                  y: parentPicture.minY + scale * CGFloat(popup.y - parentContent.y),
+                  width: scale * CGFloat(popup.w), height: scale * CGFloat(popup.h))
+}
+
+/// A move target (canvas, window top-left) pulled back so the window's
+/// title row stays on A's display: a window moved off it would leave the
+/// window table and could not be moved back from B. At least 40 points of
+/// width and the title row (20 points if it has none) stay on the canvas.
+public func clampedWindowOrigin(_ origin: CGPoint, size: CGSize, titleBar: CGFloat, canvas: CGSize) -> CGPoint {
+    let keep = min(size.width, 40), grab = titleBar > 0 ? titleBar : 20
+    return CGPoint(x: min(max(origin.x, keep - size.width), canvas.width - keep),
+                   y: min(max(origin.y, 0), max(canvas.height - grab, 0)))
+}
+
+/// How many polls a new window below menu level may go without an
+/// Accessibility window before its level-only classification is kept.
+public let classificationAttempts = 10
+
+/// Whether a window's classification can be kept: it was made with the
+/// window's Accessibility element, or the window is a menu or tooltip (which
+/// never has one), or the element did not show up in `classificationAttempts` polls.
+public func classificationIsFinal(foundAccessibility: Bool, belowPopUp: Bool, attempts: Int) -> Bool {
+    foundAccessibility || !belowPopUp || attempts >= classificationAttempts
 }
 
 /// The menu item a menuPick path names, or nil if the path is empty or leaves the tree.

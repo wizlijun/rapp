@@ -230,6 +230,8 @@ final class Session {
             startCapture(bundleID: app)
         case .text, .key, .mouse, .scroll:
             injector?.handle(message, table: table)
+            // Enabled items and check marks follow what the input did (a selection, an edit).
+            if message.mayChangeMenus, menuBar != nil { scheduleMenuRead(after: 0.5) }
         case let .setStream(mode, fps, density):
             setStream(mode, fps: Int(fps), density: density)
         // Window commands naming a window no longer in the table are dropped,
@@ -247,17 +249,28 @@ final class Session {
             _ = WindowResizer.close(pid: app.processIdentifier, frame: window.globalFrame(display: display))
         case let .move(id, x, y):
             guard let app, let window = decoratedWindow(id) else { return }
-            let origin = CGPoint(x: display.minX + CGFloat(x), y: display.minY + CGFloat(y))
+            // Never off A's display: the window would leave the table and B could not move it back.
+            let canvas = clampedWindowOrigin(CGPoint(x: CGFloat(x), y: CGFloat(y)),
+                                             size: CGSize(width: CGFloat(window.rect.w), height: CGFloat(window.rect.h)),
+                                             titleBar: CGFloat(window.titleBar), canvas: display.size)
+            let origin = CGPoint(x: display.minX + canvas.x, y: display.minY + canvas.y)
             if !WindowResizer.move(pid: app.processIdentifier, frame: window.globalFrame(display: display), to: origin) {
                 output.log("could not move a window (the app may not allow it)")
             }
         case let .menuPick(path):
             // A pick of an item B shows but A no longer has is dropped, like a stale window id.
             guard let app, let menuBar, let item = menuItem(at: path, in: menuBar),
-                  item.enabled, !item.separator, item.children.isEmpty else { return }
+                  item.enabled, !item.separator, item.children.isEmpty,
+                  let titles = menuTitles(at: path, in: menuBar) else {
+                output.log("dropped a pick of a menu item A no longer has")
+                return
+            }
             let pid = app.processIdentifier
             menuQueue.async { [output] in
-                if !MenuBarReader.press(pid: pid, path: path) { output.log("could not press a menu item") }
+                // Pressed only if A's titles along the path are still what B showed.
+                if !MenuBarReader.press(pid: pid, path: path, titles: titles) {
+                    output.log("could not press a menu item (A's menus changed or the press failed)")
+                }
             }
             // Picks usually change the menus (a new window, a toggled check mark).
             scheduleMenuRead(after: 1)

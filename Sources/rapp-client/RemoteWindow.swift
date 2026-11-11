@@ -54,4 +54,8 @@ final class RemoteWindow: NSWindow {
         let content = contentRect(forFrameRect: frame)
         return CGSize(width: content.width, height: content.height - inputBarHeight)
     }
+
+    /// Where A's content is drawn inside the picture area (top-left origin),
+    /// aspect-fitted as `RemoteView` draws it.
+    var pictureFit: CGRect { aspectFitRect(imageSize: remoteView.remoteSize, in: pictureSize) }
 }
