@@ -371,9 +371,10 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        // The B window closes when A's does, i.e. when the table drops it.
-        guard let window = sender as? RemoteWindow else { return true }
-        send(.close(window.info.id))
+        // B's close button ends the session (like Command-Q); A's windows stay as they are.
+        // B windows still close on their own when A's do, i.e. when the table drops them.
+        guard sender is RemoteWindow else { return true }
+        NSApp.terminate(nil)
         return false
     }
 
