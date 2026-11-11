@@ -1,6 +1,7 @@
 //! `open` / `close` (spec §4): an `open` stream to A, a local TCP listener, and a
 //! `rapp-client` spliced to it. `closed` carries the client's exit reason.
 
+use crate::hosts::Host;
 use crate::Hub;
 use anyhow::{bail, Context, Result};
 use rapp_net::msg::Op;
@@ -13,6 +14,7 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::{Child, Command};
+use tokio::task::JoinSet;
 
 const ACCEPT_WAIT: Duration = Duration::from_secs(10);
 
@@ -48,11 +50,12 @@ impl Hub {
         let sid = self.next_sid.fetch_add(1, Ordering::Relaxed) + 1;
         self.sessions.lock().unwrap().insert(sid, stdin);
         self.emit(json!({"event":"opened","sid":sid,"id":id,"app":app,"path":path}), req).await;
-        tokio::spawn(self.clone().run(sid, child, tcp, stream));
+        tokio::spawn(self.clone().run(sid, child, tcp, stream, listener, host, app.to_string()));
         Ok(())
     }
 
-    async fn run(self: Arc<Self>, sid: u64, mut child: Child, mut tcp: TcpStream, mut stream: BiStream) {
+    #[allow(clippy::too_many_arguments)]
+    async fn run(self: Arc<Self>, sid: u64, mut child: Child, mut tcp: TcpStream, mut stream: BiStream, listener: TcpListener, host: Host, app: String) {
         let stdout = child.stdout.take();
         let reason = tokio::spawn(async move {
             let mut lines = BufReader::new(stdout?).lines();
@@ -69,6 +72,24 @@ impl Hub {
         let pipe = tokio::spawn(async move {
             let _ = splice(&mut tcp, &mut stream).await;
         });
+        // Side connections (file transfers): each gets its own `open` and splice.
+        let hub = self.clone();
+        let side = tokio::spawn(async move {
+            let mut conns = JoinSet::new();
+            loop {
+                let Ok((mut tcp, _)) = listener.accept().await else { break };
+                let _ = tcp.set_nodelay(true);
+                let (hub, host, app) = (hub.clone(), host.clone(), app.clone());
+                conns.spawn(async move {
+                    match hub.request(&host, &Op::Open { app }).await {
+                        Ok((mut stream, _, _)) => {
+                            let _ = splice(&mut tcp, &mut stream).await;
+                        }
+                        Err(e) => eprintln!("side connection: {e:#}"),
+                    }
+                });
+            }
+        });
         let mut kill = self.kill.subscribe();
         let killed = async move {
             let _ = kill.wait_for(|k| *k).await;
@@ -81,6 +102,9 @@ impl Hub {
             }
         };
         pipe.abort();
+        // Aborting the accept task drops the listener and its JoinSet (aborting the splices).
+        side.abort();
+        let _ = side.await;
         let reason = reason.await.ok().flatten().unwrap_or_else(|| exit_text(status));
         self.emit(json!({"event":"closed","sid":sid,"reason":reason}), &None).await;
         self.sessions.lock().unwrap().remove(&sid);

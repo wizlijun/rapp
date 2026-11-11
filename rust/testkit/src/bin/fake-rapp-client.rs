@@ -1,7 +1,8 @@
 //! Test double for `rapp-client` (spec §5):
 //! `[connect] "rapp://h:p/?…" --token-env VAR --json`.
 //! Connects, sends the token line, expects `ok`, sends `ping`, expects the echo,
-//! prints `ready`, then waits for stdin EOF / quit (exit reason `echo ok`) or the
+//! opens a side connection (token, `ok`, `side` echo), writes the port to `client.port`
+//! beside itself, prints `ready`, then waits for stdin EOF / quit (exit reason `echo ok`) or the
 //! socket closing (exit reason `connection closed`).
 
 use std::io::{BufRead, BufReader, Write};
@@ -39,6 +40,22 @@ fn main() {
     s.write_all(b"ping\n").unwrap();
     if r.read_line(&mut line).is_err() || line != "ping\n" {
         exit(1, "echo failed")
+    }
+    // A side connection to the same address: its own token line, then an echo.
+    let mut side = TcpStream::connect(addr).unwrap_or_else(|_| exit(1, "side failed"));
+    let mut side_r = BufReader::new(side.try_clone().unwrap());
+    line.clear();
+    side.write_all(format!("{token}\n").as_bytes()).unwrap();
+    if side_r.read_line(&mut line).is_err() || line != "ok\n" {
+        exit(1, "side failed")
+    }
+    line.clear();
+    side.write_all(b"side\n").unwrap();
+    if side_r.read_line(&mut line).is_err() || line != "side\n" {
+        exit(1, "side failed")
+    }
+    if let Some(dir) = std::env::args().next().and_then(|a| std::path::Path::new(&a).parent().map(|d| d.to_path_buf())) {
+        let _ = std::fs::write(dir.join("client.port"), addr.rsplit(':').next().unwrap_or(""));
     }
     {
         let _g = OUT.lock().unwrap();

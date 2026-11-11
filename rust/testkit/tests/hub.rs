@@ -80,6 +80,18 @@ async fn add_host_hosts_apps_open_close_remove() {
 }
 
 #[tokio::test]
+async fn side_connection_gets_its_own_open_and_listener_closes_with_session() {
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = hub_with_host(&a, &relay, home.path(), None).await;
+    open_and_close(&mut hub, &a.id, "lan").await;
+    let port: u16 = std::fs::read_to_string(a.bins.path().join("client.port")).unwrap().trim().parse().unwrap();
+    assert!(std::net::TcpStream::connect(("127.0.0.1", port)).is_err(), "listener should be closed with the session");
+    assert_eq!(hub.finish().await, Vec::<Value>::new());
+}
+
+#[tokio::test]
 async fn forced_relay_path_end_to_end() {
     let relay = relay(Duration::from_secs(60));
     let a = service(Some(relay.relay.addr)).await;
