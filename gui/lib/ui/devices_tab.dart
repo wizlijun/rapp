@@ -30,6 +30,7 @@ class DevicesTab extends StatefulWidget {
 
 class _DevicesTabState extends State<DevicesTab> {
   final _bundle = TextEditingController();
+  final _requested = <String>{};
 
   MainState get state => widget.state;
 
@@ -38,7 +39,7 @@ class _DevicesTabState extends State<DevicesTab> {
     super.initState();
     // After the first frame: probing notifies listeners, which must not
     // happen while the tree is being built.
-    WidgetsBinding.instance.addPostFrameCallback((_) => state.probeAll());
+    WidgetsBinding.instance.addPostFrameCallback((_) => state.refreshDevices());
   }
 
   @override
@@ -49,7 +50,9 @@ class _DevicesTabState extends State<DevicesTab> {
 
   void _select(String? id) {
     state.selectDevice(id);
-    if (id != null && !state.probes.containsKey(id)) state.probe(id);
+    if (id == null) return;
+    final p = state.probes[id];
+    if (p == null || p.lamp != Lamp.connecting) state.probe(id);
   }
 
   @override
@@ -60,6 +63,19 @@ class _DevicesTabState extends State<DevicesTab> {
         final hosts = state.hub?.hosts ?? const [];
         final sel = state.deviceTab;
         final known = sel != null && hosts.any((h) => h.id == sel);
+        // Hosts that arrived after the first probe pass get probed once.
+        final fresh = [
+          for (final h in hosts)
+            if (!state.probes.containsKey(h.id) && _requested.add(h.id)) h.id,
+        ];
+        if (fresh.isNotEmpty) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            for (final id in fresh) {
+              if (!state.probes.containsKey(id)) state.probe(id);
+            }
+          });
+        }
+        // Three fixed slots: the form's State must survive tab switches.
         return ListView(
           padding: const EdgeInsets.all(10),
           children: [
@@ -80,9 +96,14 @@ class _DevicesTabState extends State<DevicesTab> {
                 ],
               ),
             ),
-            const SizedBox(height: 10),
-            if (!known) widget.local else ..._remote(context, sel),
-            const SizedBox(height: 16),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SizedBox(height: 10),
+                if (!known) widget.local else ..._remote(context, sel),
+                const SizedBox(height: 16),
+              ],
+            ),
             if (state.hub != null)
               AddDeviceForm(
                 hub: state.hub!,

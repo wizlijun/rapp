@@ -19,6 +19,7 @@ void main() {
   Map<String, dynamic>? appsPermissions;
   String? openError;
   bool offline = false;
+  bool holdApps = false;
 
   Future<void> flush() => Future<void>.delayed(Duration.zero);
 
@@ -26,17 +27,18 @@ void main() {
     appsPermissions = null;
     openError = null;
     offline = false;
+    holdApps = false;
     tmp = Directory.systemTemp.createTempSync('devices_tab_test');
     t = FakeTransport();
     hub = HubClient(t);
     final hosts = <Map<String, dynamic>>[
       {'id': '111', 'name': 'mini'},
     ];
-    t.emit({'event': 'hosts', 'hosts': hosts});
-    await flush();
     t.onSend = (cmd) {
       final req = cmd['req'];
       switch (cmd['cmd']) {
+        case 'hosts':
+          t.emit({'event': 'hosts', 'req': req, 'hosts': hosts});
         case 'add_host':
           if (cmd['password'] == 'bad') {
             t.emit({'event': 'error', 'req': req, 'error': 'bad password'});
@@ -48,6 +50,7 @@ void main() {
           hosts.removeWhere((h) => h['id'] == cmd['id']);
           t.emit({'event': 'hosts', 'req': req, 'hosts': hosts});
         case 'apps':
+          if (holdApps) return;
           if (offline && cmd['id'] == '111') {
             return t.emit({'event': 'error', 'req': req, 'error': 'connect timed out'});
           }
@@ -74,14 +77,26 @@ void main() {
     tmp.deleteSync(recursive: true);
   });
 
-  Future<void> pumpTab(WidgetTester tester) async {
+  Future<void> pumpTab(WidgetTester tester, {bool settle = true}) async {
     s.togglePanel(PanelTab.devices);
+    // MainState's constructor already asked for the hosts, in setUp's real zone.
+    await tester.runAsync(() async {
+      for (var i = 0; i < 3; i++) {
+        await flush();
+      }
+    });
     await tester.pumpWidget(wrap(SizedBox(
       width: 420,
       height: 900,
       child: DevicesTab(state: s, local: const Text('local-body')),
     )));
-    await tester.pumpAndSettle();
+    if (settle) {
+      await tester.pumpAndSettle();
+    } else {
+      for (var i = 0; i < 3; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+    }
   }
 
   Future<void> selectMini(WidgetTester tester) async {
@@ -89,11 +104,58 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  testWidgets('lists saved devices from the hub on start', (tester) async {
+    await pumpTab(tester);
+    expect(t.sent.where((m) => m['cmd'] == 'hosts'), isNotEmpty);
+    expect(find.byKey(const Key('device-111')), findsOneWidget);
+    expect(find.textContaining('mini'), findsWidgets);
+  });
+
+  testWidgets('typed add form text survives switching device chips', (tester) async {
+    await pumpTab(tester);
+    await tester.enterText(find.byKey(const Key('add-id')), '999');
+    await tester.tap(find.byKey(const Key('device-111')));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(find.byKey(const Key('add-id'))).controller!.text, '999');
+    await tester.tap(find.byKey(const Key('device-local')));
+    await tester.pumpAndSettle();
+    expect(tester.widget<TextField>(find.byKey(const Key('add-id'))).controller!.text, '999');
+  });
+
+  testWidgets('tapping an offline or the selected chip re-probes', (tester) async {
+    offline = true;
+    await pumpTab(tester);
+    int n() => t.sent.where((m) => m['cmd'] == 'apps').length;
+    final before = n();
+    await selectMini(tester); // offline: retry
+    expect(n(), before + 1);
+    offline = false;
+    await selectMini(tester); // selected: retry
+    expect(n(), before + 2);
+    expect(s.probes['111']!.lamp, Lamp.active);
+  });
+
+  testWidgets('no second apps while one is pending', (tester) async {
+    holdApps = true;
+    s.dispose();
+    s = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs()); // asks again, now held
+    await pumpTab(tester, settle: false);
+    int n() => t.sent.where((m) => m['cmd'] == 'apps').length;
+    final first = n();
+    expect(first, 2); // setUp's state + the new one
+    await tester.tap(find.byKey(const Key('device-local')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('device-111')));
+    await tester.pump();
+    s.probeAll();
+    expect(n(), first);
+  });
+
   testWidgets('shows 本机 first and probes every device on start', (tester) async {
     await pumpTab(tester);
     expect(find.text('local-body'), findsOneWidget);
     expect(find.byKey(const Key('device-local')), findsOneWidget);
-    expect(t.sent.where((m) => m['cmd'] == 'apps').length, 1);
+    expect(t.sent.where((m) => m['cmd'] == 'apps'), isNotEmpty);
     expect(s.probes['111']!.lamp, Lamp.active);
   });
 
@@ -258,7 +320,11 @@ void main() {
     final b = find.descendant(of: find.byKey(const Key('open-com.apple.Safari')), matching: find.byType(OutlinedButton));
     expect(tester.widget<OutlinedButton>(b).onPressed, isNull);
     await tester.ensureVisible(find.byKey(const Key('add-button')));
+    final add = tester.widget<FilledButton>(
+        find.descendant(of: find.byKey(const Key('add-button')), matching: find.byType(FilledButton)));
+    expect(add.onPressed, isNull);
     await tester.tap(find.byKey(const Key('add-button')), warnIfMissed: false);
     await tester.pump();
+    expect(t.sent.where((m) => m['cmd'] == 'add_host'), isEmpty);
   });
 }

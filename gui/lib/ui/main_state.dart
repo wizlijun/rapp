@@ -30,6 +30,7 @@ class MainState extends ChangeNotifier {
     hub?.addListener(_onHub);
     _lastError = hub?.lastError;
     _entries = _mapEntries();
+    refreshDevices();
   }
 
   final HubClient? hub;
@@ -246,8 +247,22 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Loads the saved devices from the hub, then probes each one.
+  Future<void> refreshDevices() async {
+    if (!hubUsable) return;
+    try {
+      await hub!.refreshHosts();
+    } catch (e) {
+      hint = '$e';
+    }
+    _entries = _mapEntries();
+    notifyListeners();
+    probeAll();
+  }
+
   void probeAll() {
     for (final h in hub?.hosts ?? const <HubHost>[]) {
+      if (probes[h.id]?.lamp == Lamp.connecting) continue;
       probe(h.id);
     }
   }

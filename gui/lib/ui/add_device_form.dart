@@ -42,9 +42,10 @@ class _AddDeviceFormState extends State<AddDeviceForm> {
     });
     try {
       final host = await widget.hub.addHost(id, _pw.text);
+      if (!mounted) return;
       _id.clear();
       _pw.clear();
-      if (mounted) widget.onAdded(host.id);
+      widget.onAdded(host.id);
     } catch (e) {
       _error = '$e';
     }
