@@ -73,8 +73,11 @@
 # 权限引导（规格：`docs/superpowers/specs/2026-11-11-rapp-permission-guide-design.md`）
 执行方式：我自己按顺序做（后一步要用前一步的字段），每步先写测试、看到失败再实现，每步单独提交；最后派一个新的审查者看整个改动。
 
-- [ ] P1 rapp-host：`check --prompt`、`list-apps` 带 permissions、`serve` 的提示文案（§1）。验证：`./scripts/check.sh` 末行 `EXIT=0`；实机跑 `rapp-host check --prompt --json`、`list-apps --json`
-- [ ] P2 service + 假 rapp-host：`State.permissions` 加锁并在变化时通知、IPC `permissions`、list_apps 带 permissions、open 缺权限后重新 check（§2）。验证：`cargo test`、`cargo clippy` 没有警告
-- [ ] P3 hub：apps 事件转发 permissions（§3）。验证同 P2
-- [ ] P4 GUI：`permissions.dart`、`PermissionsPanel`、本机区块和轮询、首次引导、主机区块提示（§4）。验证：`flutter analyze` 没有问题，`flutter test` 通过
-- [ ] P5 打包 arm64 pkg/dmg，实机验证 §5 最后一条；整体审查后修 Critical/Important
+- [x] P1 (8fe5497) rapp-host：`check --prompt`、`list-apps` 带 permissions、`serve` 的提示文案（§1）。验证：`./scripts/check.sh` 末行 `EXIT=0`；实机跑 `rapp-host check --prompt --json`、`list-apps --json`
+- [x] P2 (e591962) service + 假 rapp-host：`State.permissions` 加锁并在变化时通知、IPC `permissions`、list_apps 带 permissions、open 缺权限后重新 check（§2）。验证：`cargo test`、`cargo clippy` 没有警告
+- [x] P3 (4881806) hub：apps 事件转发 permissions（§3）。验证同 P2
+- [x] P4 (1fc03d3) GUI：`permissions.dart`、`PermissionsPanel`、本机区块和轮询、首次引导、主机区块提示（§4）。验证：`flutter analyze` 没有问题，`flutter test` 通过
+- [x] P5 打包 arm64 pkg/dmg，实机验证 §5 最后一条；整体审查后修 Critical/Important
+  - 审查：0 Critical，2 Important 已修（引导对话框里没有「重启」按钮；check 慢/失败会拖住设置页并把权限记成全缺）。测试：`failed_check_keeps_last_known_permissions`、`guide: …重启服务…`、`promptThenOpen …` 先红后绿
+  - 实机：屏幕录制深链打开 "Screen & System Audio Recording"；辅助功能深链打开的页面标题是 "Device Control and Data Access"（macOS 27 改了分组？待人眼确认）
+  - 留着的 Minor：轮询没有"正在查"保护；`_guard` 用当前选中的主机名；橙色/红色提示重复且授权后不刷新；一次 --prompt 弹所有缺失项；`open` 失败的异常没接；标记文件在对话框显示前写入；LocalSection 没有组件测试

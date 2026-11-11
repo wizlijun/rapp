@@ -63,7 +63,7 @@ impl Service {
             relay_cmd: relay_tx,
             cm: Mutex::new(None),
         };
-        let checked = workers::check(&state, false).await;
+        let checked = workers::check(&state, false).await.unwrap_or(serde_json::json!({"screen_recording": false, "accessibility": false}));
         state.set_permissions(checked);
         let state = Arc::new(state);
         let tasks = vec![

@@ -82,32 +82,17 @@ class _LocalSectionState extends State<LocalSection> {
           listenable: m,
           builder: (ctx, _) {
             final st = m.status;
-            return AlertDialog(
-              title: const Text('让另一台电脑使用这台电脑上的 app'),
-              content: SizedBox(
-                width: 420,
-                child: st == null
-                    ? const Text('服务未运行')
-                    : PermissionsPanel(permissions: permissionsOf(st), onOpenSettings: _openSettings),
-              ),
-              actions: [
-                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('稍后')),
-                FilledButton(onPressed: _missing ? null : () => Navigator.pop(ctx), child: const Text('完成')),
-              ],
+            return PermissionGuideDialog(
+              permissions: st == null ? null : permissionsOf(st),
+              onOpenSettings: _openSettings,
+              onRestart: widget.control == null ? null : () => _control(ServiceAction.restart),
             );
           },
         ),
       );
 
-  /// Asks macOS through the service first, so rapp is already in the list, then opens the pane.
-  Future<void> _openSettings(Permission p) async {
-    try {
-      await m.checkPermissions(prompt: true);
-    } catch (_) {
-      // The pane still lets the user add rapp by hand.
-    }
-    await widget.openSettings(p);
-  }
+  Future<void> _openSettings(Permission p) =>
+      promptThenOpen(() => m.checkPermissions(prompt: true), () => widget.openSettings(p));
 
   void _say(String text) {
     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));

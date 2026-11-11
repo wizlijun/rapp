@@ -20,7 +20,7 @@
 ## 2 rapp-service（Rust）
 
 - `State.permissions` 改成 `Mutex<Value>`。`set_permissions(v)` 只在值变化时 `notify()`，订阅者会收到 `changed`。
-- 新 IPC 命令 `{"cmd":"permissions","prompt":<bool>}`：运行 `rapp-host check [--prompt] --json`，存下结果，回复 `{"ok":true,"permissions":{…}}`。
+- 新 IPC 命令 `{"cmd":"permissions","prompt":<bool>}`：运行 `rapp-host check [--prompt] --json`，存下结果，回复 `{"ok":true,"permissions":{…}}`。check 本身失败（超时、没有输出）时保留上次的结果，不当成"全部缺失"。
 - `list_apps`：从 `list-apps` 的结果里取 `permissions`，有就存下，并放进给 B 的回复：`{"ok":true,"apps":[…],"permissions":{…}}`。
 - `open` 失败，并且错误里有 `missing permission` 时：重新 check 一次并存下。
 - service 自己不开定时器。轮询由 GUI 在显示缺权限的时候做（§4）。
@@ -37,10 +37,10 @@
   - 用途文案：屏幕录制是"把这台电脑上 app 窗口的画面传给另一台电脑"；辅助功能是"让另一台电脑的鼠标键盘操作这里的 app，并移动窗口、使用菜单"。
   - `remoteHint(host, missing)`："「host」缺少 屏幕录制、辅助功能 权限。请在那台电脑上打开 rapp，在 本机 › 权限 里点「打开系统设置」。"
   - 深链：屏幕录制是 `x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture`，辅助功能是 `…?Privacy_Accessibility`。
-- `PermissionsPanel` 组件：每项一行，写名称、用途，右边是 ✓ 或「打开系统设置」按钮。按钮先发 IPC `permissions` + `prompt:true`，再用 `open <深链>` 打开设置页（只在 macOS 上）。底部一行小字："授权后这里会自动变成 ✓；如果一直不变，点下面的「重启」。"
+- `PermissionsPanel` 组件：每项一行，写名称、用途，右边是 ✓ 或「打开系统设置」按钮。按钮先发 IPC `permissions` + `prompt:true`，最多等 2 秒，再用 `open <深链>` 打开设置页（只在 macOS 上）。底部一行小字："授权后这里会自动变成 ✓；如果一直不变，点「重启」。"（引导对话框里写「重启服务」，对应对话框自己的按钮。）
 - 本机 › 权限：用 `PermissionsPanel` 代替原来的 ✓/✗ 文本。
 - 轮询：本机区块显示着、并且有缺失项时，每 3 秒发一次 IPC `permissions`（`prompt:false`）；全部 ✓ 后停止。
-- 首次引导：只在 macOS 上。第一次拿到 status 且有缺失项、并且 `<configDir>/permission-guide-shown` 不存在时，弹一个对话框，内容是 `PermissionsPanel`，按钮是「稍后」和「完成」（全部 ✓ 才能点「完成」）。弹出时写入这个标记文件，以后不再自动弹出。
+- 首次引导：只在 macOS 上。第一次拿到 status 且有缺失项、并且 `<configDir>/permission-guide-shown` 不存在时，弹一个对话框，内容是 `PermissionsPanel`，按钮是「稍后」、「重启服务」（有缺失项时）和「完成」（全部 ✓ 才能点「完成」）。弹出时写入这个标记文件，以后不再自动弹出。
 - 主机 › app 列表：A 报告了缺失项时，列表上方显示一行橙色 `remoteHint`。
 - 打开 app 失败：如果 `missingFromError` 能解析，就显示 `remoteHint`，不显示原始英文错误。
 

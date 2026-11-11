@@ -2,7 +2,8 @@
 //! `check --json`, `list-apps --json`, `serve --app X --bind B --port P --token-env VAR --json`.
 //! A "session" is a TCP connection whose first line must be the token; after `ok\n`
 //! every byte is echoed back. Permissions come from a `perms` file next to argv[0]
-//! (`{"screen_recording":…,"accessibility":…}`); without one both are granted.
+//! (`{"screen_recording":…,"accessibility":…}`); without one both are granted, and
+//! `broken` makes `check` fail with no output.
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
@@ -55,6 +56,9 @@ fn main() {
     match args.first().map(String::as_str) {
         Some("check") => {
             log(&format!("check{}", if args.iter().any(|a| a == "--prompt") { " --prompt" } else { "" }));
+            if std::fs::read_to_string(bin_dir().join("perms")).is_ok_and(|v| v.trim() == "broken") {
+                std::process::exit(1);
+            }
             emit(&perms_json());
             exit(0, "ok")
         }

@@ -66,22 +66,24 @@ fn permissions(v: &Value) -> Value {
 }
 
 /// `rapp-host check`; with `prompt`, macOS is asked for what is missing, so rapp shows up in System Settings.
-pub async fn check(state: &State, prompt: bool) -> Value {
+/// None when the check itself failed (that says nothing about the permissions).
+pub async fn check(state: &State, prompt: bool) -> Option<Value> {
     let args: &[&str] = if prompt { &["check", "--prompt"] } else { &["check"] };
     match run_json(state, args).await {
-        Ok(v) => permissions(&v),
+        Ok(v) => Some(permissions(&v)),
         Err(e) => {
             eprintln!("rapp-service: {e:#}");
-            json!({"screen_recording": false, "accessibility": false})
+            None
         }
     }
 }
 
-/// Checks again and stores the result.
+/// Checks again and stores the result; a failed check keeps the last known one.
 pub async fn refresh_permissions(state: &State, prompt: bool) -> Value {
-    let v = check(state, prompt).await;
-    state.set_permissions(v.clone());
-    v
+    if let Some(v) = check(state, prompt).await {
+        state.set_permissions(v);
+    }
+    state.permissions.lock().unwrap().clone()
 }
 
 /// The shareable apps, plus A's permissions when the host reports them (it stores those too).

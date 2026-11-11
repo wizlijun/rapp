@@ -301,6 +301,17 @@ async fn permissions_command_checks_and_prompts() {
 }
 
 #[tokio::test]
+async fn failed_check_keeps_last_known_permissions() {
+    let a = service(None).await;
+    set_perms(a.bins.path(), &perms(true, false));
+    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
+    assert_eq!(ipc.call(json!({"cmd":"permissions"})).await["permissions"], perms(true, false));
+    std::fs::write(a.bins.path().join("perms"), "broken").unwrap();
+    assert_eq!(ipc.call(json!({"cmd":"permissions"})).await["permissions"], perms(true, false));
+    assert_eq!(ipc.call(json!({"cmd":"status"})).await["permissions"], perms(true, false));
+}
+
+#[tokio::test]
 async fn list_apps_reports_and_stores_permissions() {
     let a = service(None).await;
     set_perms(a.bins.path(), &perms(true, false));
