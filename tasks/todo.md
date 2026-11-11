@@ -86,3 +86,17 @@
 
 - [x] B 上挪窗口不再发 move；A 挪窗口 B 不动，A 改大小 B 内容区左上角不动。验证：`./scripts/check.sh` 末行 `EXIT=0`；实机（按 PID 找自己开的 Calculator）B 挪了 200 点，A 的 Calculator 没动
 - [x] 应用菜单和流量标签右键菜单加「把 A 上的这个窗口移到左上角」，堆叠摆放（`moveToTopLeftMessages`，空位 (0,0)、(28,28)…）。验证：单元测试 RED→GREEN；实机 Calculator 落到 (0,30)
+
+## 剪贴板与编辑器（协议 v5）（规格：`docs/superpowers/specs/2026-11-11-rapp-clipboard-composer-design.md`）
+
+- [x] 1 (ce8b289) 协议 v5 消息 19–25（clip、传输）
+- [x] 2 (1cfec04, fix df01058) core：剪贴板种类、编辑器拆分、命名、续传、标题
+- [x] 3 (56057d2, fix 99dc22c) core：ClipStore 与可续传的 TransferStore
+- [x] 4 (2ef31a3, fix d2fec60) host：旁路连接 fetch/put、每会话剪贴板历史
+- [x] 5 (4fb0bfd, fix e65f7dd) host：粘贴到目标 app 并恢复剪贴板
+- [x] 6 (5dcb458) hub：旁路连接用自己的 open 转发
+- [x] 7 (70d2ab8, fix 96fe896) client：旁路传输、每连接剪贴板历史
+- [x] 8 (a40f350, fix 4fbd759) client：多行编辑器、块、附件、复制按钮
+- [x] 9 (8fb6e98, fix f5e47f5) client：发送器逐条发到 A
+- [ ] 10 实机验收（TextEdit：发送、复制、1 GB 文件续传、非目标 app 不进历史）
+- [ ] 10 打包 arm64 pkg/dmg（不替换已装的 /Applications/rapp.app）
