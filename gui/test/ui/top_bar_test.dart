@@ -98,4 +98,61 @@ void main() {
     expect(txt.maxLines, 1);
     expect(txt.overflow, TextOverflow.ellipsis);
   });
+
+  Future<void> longSession(WidgetTester tester) async {
+    t.emit({
+      'event': 'hosts',
+      'hosts': [
+        {'id': '111', 'name': 'a-very-long-device-name-that-keeps-going'},
+      ],
+    });
+    await tester.runAsync(flush);
+    final longApp = 'An Extremely Long Application Name ' * 3;
+    t.emit({'event': 'opened', 'sid': 1, 'id': '111', 'app': longApp, 'path': 'lan'});
+    await tester.runAsync(flush);
+    s.select('111/$longApp');
+  }
+
+  for (final w in [360.0, 240.0]) {
+    testWidgets('top bar fits ${w.toInt()}px with long names', (tester) async {
+      await tester.pumpWidget(wrap(SizedBox(
+        width: w,
+        child: TopBar(state: s, fullscreen: false, onToggleFullscreen: () {}),
+      )));
+      await longSession(tester);
+      s.hint = 'some hint';
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('hint still shown at 800px with a session', (tester) async {
+    s.hint = 'hello hint';
+    await tester.pumpWidget(wrap(bar()));
+    await open(tester, 1, 'Safari');
+    s.select('111/Safari');
+    await tester.pump();
+    expect(find.text('hello hint'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('session block announces the lamp state', (tester) async {
+    final h = tester.ensureSemantics();
+    await tester.pumpWidget(wrap(bar()));
+    await open(tester, 1, 'Safari');
+    s.select('111/Safari');
+    await tester.pump();
+    expect(find.bySemanticsLabel('Safari，活动，mini · 局域网'), findsOneWidget);
+    h.dispose();
+  });
+
+  testWidgets('unknown path falls back to the device name only', (tester) async {
+    await tester.pumpWidget(wrap(bar()));
+    t.emit({'event': 'opened', 'sid': 1, 'id': '111', 'app': 'Safari', 'path': 'weird'});
+    await tester.runAsync(flush);
+    s.select('111/Safari');
+    await tester.pump();
+    expect(find.text('mini'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }

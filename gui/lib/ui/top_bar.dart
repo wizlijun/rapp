@@ -21,78 +21,114 @@ class TopBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
-    return ListenableBuilder(
-      listenable: state,
-      builder: (context, _) {
-        final cur = state.current;
-        final multi = state.sessionCount >= 2;
-        final small = Theme.of(context).textTheme.bodySmall;
-        return Container(
-          height: 56,
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          decoration: BoxDecoration(
-            color: t.bg,
-            border: Border(bottom: BorderSide(color: t.line)),
-          ),
-          child: Row(
-            children: [
-              _icon('panel-button', Icons.menu, '面板', state.togglePanel),
-              const SizedBox(width: 6),
-              _icon('prev', Icons.chevron_left, '上一个',
-                  multi ? () => state.step(-1) : null),
-              const SizedBox(width: 6),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 260),
-                child: cur == null
-                    ? Text('没有选中的会话',
+    return LayoutBuilder(
+      builder: (context, box) {
+        final wide = box.maxWidth >= 480;
+      final gap = box.maxWidth >= 300 ? 6.0 : 0.0;
+        return ListenableBuilder(
+          listenable: state,
+          builder: (context, _) {
+            final cur = state.current;
+            final multi = state.sessionCount >= 2;
+            final small = Theme.of(context).textTheme.bodySmall;
+            return Container(
+              height: 56,
+              padding: EdgeInsets.symmetric(horizontal: gap),
+              decoration: BoxDecoration(
+                color: t.bg,
+                border: Border(bottom: BorderSide(color: t.line)),
+              ),
+              child: Row(
+                children: [
+                  _icon('panel-button', Icons.menu, '面板', state.togglePanel),
+                  SizedBox(width: gap),
+                  _icon(
+                    'prev',
+                    Icons.chevron_left,
+                    '上一个',
+                    multi ? () => state.step(-1) : null,
+                  ),
+                  SizedBox(width: gap),
+                  Flexible(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 260),
+                      child: cur == null
+                          ? Text(
+                              '没有选中的会话',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(color: t.muted),
+                            )
+                          : Semantics(
+                              container: true,
+                              excludeSemantics: true,
+                              label:
+                                  '${cur.appName}，${lampWord(cur.lamp)}，${_sub(cur)}',
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  StatusLamp(cur.lamp),
+                                  const SizedBox(width: 8),
+                                  Flexible(
+                                    child: Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          cur.appName,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                        Text(
+                                          _sub(cur),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: small?.copyWith(
+                                            color: t.muted,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                    ),
+                  ),
+                  SizedBox(width: gap),
+                  _icon(
+                    'next',
+                    Icons.chevron_right,
+                    '下一个',
+                    multi ? () => state.step(1) : null,
+                  ),
+                  SizedBox(width: gap),
+                  if (wide)
+                    Expanded(
+                      child: Text(
+                        state.hint,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: t.muted))
-                    : Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          StatusLamp(cur.lamp),
-                          const SizedBox(width: 8),
-                          Flexible(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(cur.appName,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.w600)),
-                                Text(_sub(cur),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: small?.copyWith(color: t.muted)),
-                              ],
-                            ),
-                          ),
-                        ],
+                        style: TextStyle(color: t.muted),
                       ),
+                    )
+                  else
+                    const Spacer(),
+                  _icon(
+                    'fullscreen-button',
+                    fullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
+                    fullscreen ? '退出全屏' : '进入全屏',
+                    onToggleFullscreen,
+                  ),
+                ],
               ),
-              const SizedBox(width: 6),
-              _icon('next', Icons.chevron_right, '下一个',
-                  multi ? () => state.step(1) : null),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  state.hint,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: t.muted),
-                ),
-              ),
-              _icon(
-                'fullscreen-button',
-                fullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
-                fullscreen ? '退出全屏' : '进入全屏',
-                onToggleFullscreen,
-              ),
-            ],
-          ),
+            );
+          },
         );
       },
     );
@@ -101,7 +137,9 @@ class TopBar extends StatelessWidget {
   String _sub(SessionEntry e) {
     final p = pathLabels[e.path];
     if (e.lamp == Lamp.connecting || p == null) {
-      return e.lamp == Lamp.connecting ? '${e.device} · ${lampWord(e.lamp)}' : e.device;
+      return e.lamp == Lamp.connecting
+          ? '${e.device} · ${lampWord(e.lamp)}'
+          : e.device;
     }
     return '${e.device} · $p';
   }
