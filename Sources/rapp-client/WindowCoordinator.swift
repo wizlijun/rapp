@@ -2,9 +2,10 @@ import AppKit
 import RappCore
 
 /// Keeps one B window per A window (spec §4.1–§4.4): applies each window
-/// table, places the windows by the canvas <-> B mapping, hands every window
+/// table, places new windows by the canvas <-> B mapping, hands every window
 /// its part of each frame, and turns what the user does to the B windows
-/// (move, resize, focus, close) into messages for A.
+/// (resize, focus, close) into messages for A. Moving a B window never moves
+/// A's: once shown, a B window stays where the user puts it.
 final class WindowCoordinator: NSObject, NSWindowDelegate {
     /// Sends a message to the host.
     var send: (Message) -> Void = { _ in }
@@ -25,7 +26,6 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
     private var applyingFocus = false
     private var lastFocused: UInt32?
     private var lastOrder: [UInt32] = []
-    private var pendingMoves = PendingActions<UInt32>()
     private var pendingResizes = PendingActions<UInt32>()
 
     init(meter: TrafficMeter, connectingTo host: String) {
@@ -74,7 +74,6 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         // Show the placeholder before closing the last window, so the client never has none.
         if decorated.isEmpty { placeholder.orderFront(nil) }
 
-        pendingMoves.keep(only: ids)
         pendingResizes.keep(only: ids)
         for (id, window) in windows where !ids.contains(id) {
             window.delegate = nil
@@ -89,13 +88,18 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
 
         for info in decorated {
             if let window = windows[info.id] {
-                let moved = window.info.rect != info.rect || window.info.titleBar != info.titleBar
+                let resized = window.info.rect.w != info.rect.w || window.info.rect.h != info.rect.h
+                    || window.info.titleBar != info.titleBar
                 window.update(info)
-                // Only when A's rectangle changed (spec §4.2), and never
-                // under a resize the user is still doing.
-                if moved, !window.inLiveResize, !window.isMiniaturized { place(window) }
+                // A's size only (spec §4.2): B keeps the window where it is, and
+                // never changes it under a resize the user is still doing.
+                if resized, !window.inLiveResize, !window.isMiniaturized { resizeInPlace(window) }
             } else {
-                let window = RemoteWindow(info: info, label: meter.makeLabel())
+                let label = meter.makeLabel()
+                let id = info.id
+                label.menu?.insertItem(.separator(), at: 0)
+                label.menu?.insertItem(ActionItem(Self.moveToTopLeftTitle) { [weak self] in self?.moveToTopLeft(id) }, at: 0)
+                let window = RemoteWindow(info: info, label: label)
                 window.delegate = self
                 window.remoteView.onMouse = { [weak self] in self?.send($0) }
                 window.inputBar.onSend = { [weak self] in self?.send($0) }
@@ -171,9 +175,16 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         topLeft(window.contentRect(forFrameRect: window.frame)).origin
     }
 
+    /// Where a new window first shows: by the mapping, so B starts out laid out like A.
     private func place(_ window: RemoteWindow) {
         guard let placement else { return }
         let content = appKitRect(topLeft: placement.contentTopLeftInB(window.info), size: window.contentSize(zoom: zoom))
+        setFrame(window, window.frameRect(forContentRect: content))
+    }
+
+    /// A new size (A's, or the zoom's) with the content's top-left kept where it is in B.
+    private func resizeInPlace(_ window: RemoteWindow) {
+        let content = appKitRect(topLeft: contentTopLeft(window), size: window.contentSize(zoom: zoom))
         setFrame(window, window.frameRect(forContentRect: content))
     }
 
@@ -204,7 +215,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         placing = false
     }
 
-    /// Changes the zoom, keeping the focused window's content top-left where it is (spec §4.2).
+    /// Changes the zoom, keeping every window's content top-left where it is (spec §4.2).
     func setZoom(_ newZoom: CGFloat) {
         guard newZoom != zoom else { return }
         if let placement {
@@ -214,7 +225,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
             self.placement = placement.rezoomed(to: newZoom, keeping: kept)
         }
         zoom = newZoom
-        for window in windows.values where !window.isMiniaturized { place(window) }
+        for window in windows.values where !window.isMiniaturized { resizeInPlace(window) }
         for panel in popups.values { placePopup(panel) }
         onStreamMayChange()
     }
@@ -234,13 +245,16 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
 
     // MARK: What the user does to B windows (spec §4.3)
 
-    func windowDidMove(_ notification: Notification) {
-        guard !placing, let window = notification.object as? RemoteWindow else { return }
-        let id = window.info.id
-        pendingMoves.schedule(id, after: 0.1) { [weak self, weak window] in
-            guard let self, let window else { return }
-            self.runWhenMouseUp(window) { [weak self, weak window] in window.map { self?.sendMove($0) } }
-        }
+    static let moveToTopLeftTitle = "把 A 上的这个窗口移到左上角"
+
+    /// The key B window, or the one A last focused.
+    var currentWindowID: UInt32? { (NSApp.keyWindow as? RemoteWindow)?.info.id ?? lastFocused }
+
+    /// Moves A's window to the top-left of A's screen, stacked down-right of
+    /// windows already there, and raises it; the B window stays put.
+    func moveToTopLeft(_ id: UInt32) {
+        guard windows[id] != nil else { return }
+        moveToTopLeftMessages(window: id, table: table).forEach(send)
     }
 
     func windowDidResize(_ notification: Notification) {
@@ -291,14 +305,6 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         }
     }
 
-    private func sendMove(_ window: RemoteWindow) {
-        guard let placement, window.delegate === self else { return }
-        let b = contentTopLeft(window)
-        guard distance(b, placement.contentTopLeftInB(window.info)) > 0.5 else { return }
-        let origin = placement.windowOrigin(contentTopLeftInB: b, titleBar: window.info.titleBar)
-        send(.move(window: window.info.id, x: Float(origin.x), y: Float(origin.y)))
-    }
-
     private func sendResize(_ window: RemoteWindow) {
         guard window.delegate === self else { return }
         let picture = window.pictureSize
@@ -306,9 +312,5 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         if width != window.remoteView.remoteSize.width || height != window.remoteView.remoteSize.height {
             send(.resize(window: window.info.id, width: UInt16(clamping: Int(width)), height: UInt16(clamping: Int(height))))
         }
-        // A drag on the top or left edge also moves the content's top-left.
-        sendMove(window)
     }
-
-    private func distance(_ a: CGPoint, _ b: CGPoint) -> CGFloat { max(abs(a.x - b.x), abs(a.y - b.y)) }
 }

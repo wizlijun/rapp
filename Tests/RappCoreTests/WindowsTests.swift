@@ -263,4 +263,26 @@ final class WindowsTests: XCTestCase {
         XCTAssertNil(menuItem(at: [], in: tree))
         XCTAssertNil(menuItem(at: [0], in: []))
     }
+
+    // MARK: Move to A's top-left (B's window menu)
+
+    func testMoveToTopLeftMovesThenRaises() {
+        XCTAssertEqual(moveToTopLeftMessages(window: 7, table: [win(7, .normal, 500, 400, 300, 200)]),
+                       [.move(window: 7, x: 0, y: 0), .focus(7)])
+    }
+
+    func testMoveToTopLeftStacksBelowRightOfWindowsAlreadyThere() {
+        // Window 1 sits in the first slot (macOS pushed it below a 30-point menu bar), 2 in the second.
+        let table = [win(1, .normal, 0, 30, 300, 200), win(2, .normal, 28, 30, 300, 200),
+                     win(7, .normal, 500, 400, 300, 200)]
+        XCTAssertEqual(moveToTopLeftMessages(window: 7, table: table), [.move(window: 7, x: 56, y: 56), .focus(7)])
+    }
+
+    func testMoveToTopLeftIgnoresItselfPopupsAndWindowsElsewhere() {
+        let table = [win(7, .normal, 0, 30, 300, 200),            // itself, already there
+                     win(8, .menu, 0, 30, 100, 100),              // a popup is not a stacked window
+                     win(9, .normal, 0, 400, 300, 200),           // same x, far below the top
+                     win(10, .normal, 300, 30, 300, 200)]         // at the top, far to the right
+        XCTAssertEqual(moveToTopLeftMessages(window: 7, table: table), [.move(window: 7, x: 0, y: 0), .focus(7)])
+    }
 }

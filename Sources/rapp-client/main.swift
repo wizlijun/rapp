@@ -74,7 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         output.finish(ExitCode.ok, "quit")
     }
 
-    /// The app menu (spec §4.5): quit, zoom and the stream menu, plus hidden
+    /// The app menu (spec §4.5): quit, zoom, moving A's window to its top-left and the stream menu, plus hidden
     /// editing items whose shortcuts still work in the input bars. The remote
     /// app's menus follow it once the host sends them.
     private func buildMenu() {
@@ -96,6 +96,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         zoomItem.submenu = zoomMenu
         appMenu.addItem(zoomItem)
+        appMenu.addItem(ActionItem(WindowCoordinator.moveToTopLeftTitle) { [weak self] in
+            guard let coordinator = self?.coordinator, let id = coordinator.currentWindowID else { return }
+            coordinator.moveToTopLeft(id)
+        })
         appMenu.addItem(.separator())
         streamMenu.addItems(to: appMenu)
 

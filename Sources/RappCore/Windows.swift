@@ -189,6 +189,26 @@ public func clampedWindowOrigin(_ origin: CGPoint, size: CGSize, titleBar: CGFlo
                    y: min(max(origin.y, 0), max(canvas.height - grab, 0)))
 }
 
+/// Step between stacked top-left slots: about a title bar, so every stacked title stays visible.
+public let stackStep: Float = 28
+
+/// What B's 「把 A 上的这个窗口移到左上角」 sends: a move to the first free
+/// slot of the top-left stack (0,0), (28,28), (56,56)…, then a focus so the
+/// window comes out from under whatever covers it. A slot is taken when
+/// another decorated window of `table` already sits on it. macOS keeps
+/// windows below the menu bar (one asked for y 0 lands near y 30), so tops
+/// above `menuBarAllowance` count as that line. A clamps the move onto the display.
+public func moveToTopLeftMessages(window: UInt32, table: [WindowInfo]) -> [Message] {
+    let menuBarAllowance: Float = 40, near = stackStep / 2
+    let top = { (y: Float) in max(y, menuBarAllowance) }
+    let others = table.filter { $0.id != window && $0.kind.isDecorated }
+    var slot: Float = 0
+    while others.contains(where: { abs($0.rect.x - slot) < near && abs(top($0.rect.y) - top(slot)) < near }) {
+        slot += stackStep
+    }
+    return [.move(window: window, x: slot, y: slot), .focus(window)]
+}
+
 /// How many polls a new window below menu level may go without an
 /// Accessibility window before its level-only classification is kept.
 public let classificationAttempts = 10

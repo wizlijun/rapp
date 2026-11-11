@@ -81,3 +81,8 @@
   - 审查：0 Critical，2 Important 已修（引导对话框里没有「重启」按钮；check 慢/失败会拖住设置页并把权限记成全缺）。测试：`failed_check_keeps_last_known_permissions`、`guide: …重启服务…`、`promptThenOpen …` 先红后绿
   - 实机：屏幕录制深链打开 "Screen & System Audio Recording"；辅助功能深链打开的页面标题是 "Device Control and Data Access"（macOS 27 改了分组？待人眼确认）
   - 留着的 Minor：轮询没有"正在查"保护；`_guard` 用当前选中的主机名；橙色/红色提示重复且授权后不刷新；一次 --prompt 弹所有缺失项；`open` 失败的异常没接；标记文件在对话框显示前写入；LocalSection 没有组件测试
+
+## B 挪窗口与 A 解耦、「移到左上角」（多窗口 spec §4.2、§4.3、§4.5 修订 2026-11-11）
+
+- [x] B 上挪窗口不再发 move；A 挪窗口 B 不动，A 改大小 B 内容区左上角不动。验证：`./scripts/check.sh` 末行 `EXIT=0`；实机（按 PID 找自己开的 Calculator）B 挪了 200 点，A 的 Calculator 没动
+- [x] 应用菜单和流量标签右键菜单加「把 A 上的这个窗口移到左上角」，堆叠摆放（`moveToTopLeftMessages`，空位 (0,0)、(28,28)…）。验证：单元测试 RED→GREEN；实机 Calculator 落到 (0,30)
