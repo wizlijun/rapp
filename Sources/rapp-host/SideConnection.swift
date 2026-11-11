@@ -82,6 +82,7 @@ final class SideConnection {
             if let chunk = try source?.next() {
                 send(.chunk(chunk)) { [weak self] in self?.sendNextChunk() }
             } else {
+                if let source { output.emit(source.transfer) }
                 close()
             }
         } catch let error as TransferError {
@@ -109,6 +110,7 @@ final class SideConnection {
     /// The upload is complete: an empty chunk tells B, then the connection closes.
     private func finish() {
         finishing = true
+        if let sink { output.emit(sink.transfer) }
         send(.chunk([])) { [weak self] in self?.close() }
     }
 

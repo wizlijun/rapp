@@ -59,15 +59,19 @@ public struct TransferError: Error, Equatable {
 /// Reads one clip file (or in-memory item) in chunks of at most `chunkSize`.
 public final class FetchSource {
     public let total: UInt64
+    /// What to report once the last chunk has gone out.
+    public let transfer: WorkerEvent
     private var bytes: [UInt8]?
     private var handle: FileHandle?
     private var position: UInt64
 
-    init(bytes: [UInt8], offset: UInt64) {
+    init(bytes: [UInt8], offset: UInt64, kind: ClipKind) {
         self.bytes = bytes; total = UInt64(bytes.count); position = offset
+        transfer = .transfer(dir: .aToB, kind: kind, bytes: total, name: nil)
     }
-    init(handle: FileHandle, total: UInt64, offset: UInt64) throws {
+    init(handle: FileHandle, total: UInt64, offset: UInt64, name: String) throws {
         self.handle = handle; self.total = total; position = offset
+        transfer = .transfer(dir: .aToB, kind: .files, bytes: total, name: name)
         try handle.seek(toOffset: offset)
     }
     deinit { try? handle?.close() }
@@ -104,6 +108,12 @@ public final class PutSink {
     private let uploads: URL
     private let safeName: String
     private(set) var finalURL: URL?
+
+    /// What to report once the item is complete: files by the name saved in the uploads folder.
+    public var transfer: WorkerEvent {
+        let saved = kind == .files ? (finalURL?.lastPathComponent ?? safeName) : nil
+        return .transfer(dir: .bToA, kind: kind, bytes: total, name: saved)
+    }
 
     init(kind: ClipKind, uti: String, name: String, total: UInt64, uploads: URL) throws {
         self.kind = kind; self.uti = uti; self.name = name; self.total = total; self.uploads = uploads
@@ -207,8 +217,9 @@ public final class TransferStore {
         switch (stored.info, stored.payload) {
         case (.image, .bytes(let b)), (.data, .bytes(let b)):
             guard file == 0, offset <= UInt64(b.count) else { throw TransferError("unknown clip") }
-            return FetchSource(bytes: b, offset: offset)
-        case (.files, .files(let refs)):
+            let kind: ClipKind = if case .image = stored.info { .image } else { .data }
+            return FetchSource(bytes: b, offset: offset, kind: kind)
+        case (.files(let files), .files(let refs)):
             guard Int(file) < refs.count else { throw TransferError("unknown clip") }
             let ref = refs[Int(file)]
             guard let attrs = try? FileManager.default.attributesOfItem(atPath: ref.url.path),
@@ -216,7 +227,8 @@ public final class TransferStore {
                   (attrs[.modificationDate] as? Date) == ref.modified else { throw TransferError("file changed") }
             guard offset <= ref.size else { throw TransferError("unknown clip") }
             guard let h = try? FileHandle(forReadingFrom: ref.url) else { throw TransferError("file changed") }
-            return try FetchSource(handle: h, total: ref.size, offset: offset)
+            let name = Int(file) < files.count ? files[Int(file)].name : ref.url.lastPathComponent
+            return try FetchSource(handle: h, total: ref.size, offset: offset, name: name)
         default:
             throw TransferError("unknown clip")
         }

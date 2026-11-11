@@ -249,6 +249,8 @@ final class Session {
     private(set) var transfers: TransferStore?
     private(set) var clipWatcher: ClipboardWatcher?
     private var paster: Paster?
+    /// UTF-8 sizes of inline text pastes not yet answered, by seq (an uploaded item was reported by its put).
+    private var inlinePastes: [UInt32: Int] = [:]
 
     /// The menu bar last sent; picks are checked against it.
     private var menuBar: [MenuItem]?
@@ -397,6 +399,7 @@ final class Session {
             // Picks usually change the menus (a new window, a toggled check mark).
             scheduleMenuRead(after: 1)
         case let .paste(seq, source):
+            if case let .text(text) = source { inlinePastes[seq] = text.utf8.count }
             paster?.paste(seq: seq, source)
 
         case .ready, .error, .frame, .windows, .menuBar, .clip, .pasted, .fetch, .put, .transferStart, .chunk:
@@ -500,6 +503,10 @@ final class Session {
                                        log: { [output] in output.log($0) }) { [weak self] id, info in
             guard let self, !self.ended else { return }
             self.send(.clip(id: id, info))
+            // Text goes inline; other kinds are reported when B fetches them.
+            if case let .text(text, _) = info {
+                self.output.emit(.transfer(dir: .aToB, kind: .text, bytes: UInt64(text.utf8.count), name: nil))
+            }
         }
         watcher.start()
         clipWatcher = watcher
@@ -507,6 +514,9 @@ final class Session {
                         watcher: { [weak self] in self?.clipWatcher }, log: { [output] in output.log($0) }) { [weak self] seq, error in
             guard let self, !self.ended else { return }
             self.send(.pasted(seq: seq, error: error))
+            if let bytes = self.inlinePastes.removeValue(forKey: seq), error.isEmpty {
+                self.output.emit(.transfer(dir: .bToA, kind: .text, bytes: UInt64(bytes), name: nil))
+            }
         }
     }
 

@@ -157,6 +157,9 @@ public func jsonLine(_ object: [String: Any]) -> String {
     return String(decoding: data, as: UTF8.self)
 }
 
+/// Which way a clipboard item or file went.
+public enum TransferDirection: String, Sendable { case aToB = "a_to_b", bToA = "b_to_a" }
+
 public enum WorkerEvent: Equatable {
     case listening(port: UInt16)
     case sessionStarted(client: String, mode: Mode, fps: Int)
@@ -166,6 +169,8 @@ public enum WorkerEvent: Equatable {
     case ready(width: Int, height: Int, title: String)
     /// The client's window table changed; `count` windows in it (multi-window spec §4.6).
     case windows(count: Int)
+    /// One clipboard item or file finished crossing (observability spec §4.3). `name` only for files.
+    case transfer(dir: TransferDirection, kind: ClipKind, bytes: UInt64, name: String?)
     case exit(code: Int32, reason: String)
 
     public var jsonLine: String {
@@ -186,6 +191,10 @@ public enum WorkerEvent: Equatable {
             return RappCore.jsonLine(["event": "ready", "width": width, "height": height, "title": title])
         case let .windows(count):
             return RappCore.jsonLine(["event": "windows", "count": count])
+        case let .transfer(dir, kind, bytes, name):
+            var object: [String: Any] = ["event": "transfer", "dir": dir.rawValue, "kind": "\(kind)", "bytes": bytes]
+            if let name { object["name"] = name }
+            return RappCore.jsonLine(object)
         case let .exit(code, reason):
             return RappCore.jsonLine(["event": "exit", "code": Int(code), "reason": reason])
         }

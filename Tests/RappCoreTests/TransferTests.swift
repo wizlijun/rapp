@@ -68,6 +68,7 @@ final class TransferTests: XCTestCase {
         let s = store(); let (id, _) = try fileClip(s, data)
         let first = try s.fetch(clip: id, file: 0, offset: 0)
         XCTAssertEqual(first.total, 600 * 1024)
+        XCTAssertEqual(first.transfer, .transfer(dir: .aToB, kind: .files, bytes: 600 * 1024, name: "src.bin"))
         let c1 = try XCTUnwrap(first.next())
         XCTAssertLessThanOrEqual(c1.count, chunkSize)
         let rest = try s.fetch(clip: id, file: 0, offset: UInt64(c1.count))
@@ -78,7 +79,9 @@ final class TransferTests: XCTestCase {
     func testFetchOfImageFromMemory() throws {
         let s = store(); let data = bytes(1000)
         let c = s.clips.add(.image(width: 1, height: 1, bytes: 1000), payload: .bytes(data))
-        XCTAssertEqual(try drain(try s.fetch(clip: c.id, file: 0, offset: 0)).flatMap { $0 }, data)
+        let source = try s.fetch(clip: c.id, file: 0, offset: 0)
+        XCTAssertEqual(source.transfer, .transfer(dir: .aToB, kind: .image, bytes: 1000, name: nil))
+        XCTAssertEqual(try drain(source).flatMap { $0 }, data)
         assertThrows("unknown clip") { _ = try s.fetch(clip: c.id, file: 1, offset: 0) }
     }
     func testFetchOfUnknownClipFails() {
@@ -112,6 +115,7 @@ final class TransferTests: XCTestCase {
     func testPutOfCompleteItemReportsHaveEqualsTotal() throws {
         let s = store()
         let sink = try s.put(item: 1, kind: .files, uti: "", name: "a.txt", total: 3)
+        XCTAssertEqual(sink.transfer, .transfer(dir: .bToA, kind: .files, bytes: 3, name: "a.txt"))
         XCTAssertTrue(try sink.write([1, 2, 3]))
         let again = try s.put(item: 1, kind: .files, uti: "", name: "a.txt", total: 3)
         XCTAssertEqual(again.have, again.total)
@@ -130,11 +134,13 @@ final class TransferTests: XCTestCase {
         let sink = try s.put(item: 1, kind: .files, uti: "", name: "../app.log", total: 2)
         XCTAssertTrue(try sink.write([1, 2]))
         XCTAssertEqual(s.received(1), .file(uploads.appendingPathComponent("app (2).log")))
+        XCTAssertEqual(sink.transfer, .transfer(dir: .bToA, kind: .files, bytes: 2, name: "app (2).log"))
     }
     func testPutTextInMemoryAndLimit() throws {
         let s = store(limit: 10)
         assertThrows("too large") { _ = try s.put(item: 1, kind: .text, uti: "", name: "", total: 11) }
         let sink = try s.put(item: 2, kind: .text, uti: "", name: "", total: 6)
+        XCTAssertEqual(sink.transfer, .transfer(dir: .bToA, kind: .text, bytes: 6, name: nil))
         XCTAssertTrue(try sink.write(Array("你好".utf8)))
         XCTAssertEqual(s.received(2), .text("你好"))
     }

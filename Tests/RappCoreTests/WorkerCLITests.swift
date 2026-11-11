@@ -142,6 +142,17 @@ final class WorkerCLITests: XCTestCase {
                        #"{"code":3,"event":"exit","reason":"say \"hi\"\n"}"#)
     }
 
+    func testTransferEventLine() {
+        XCTAssertEqual(WorkerEvent.transfer(dir: .aToB, kind: .files, bytes: 5, name: "a.txt").jsonLine,
+                       #"{"bytes":5,"dir":"a_to_b","event":"transfer","kind":"files","name":"a.txt"}"#)
+        XCTAssertEqual(WorkerEvent.transfer(dir: .bToA, kind: .image, bytes: 1000, name: nil).jsonLine,
+                       #"{"bytes":1000,"dir":"b_to_a","event":"transfer","kind":"image"}"#)
+        XCTAssertEqual(WorkerEvent.transfer(dir: .bToA, kind: .data, bytes: 0, name: nil).jsonLine,
+                       #"{"bytes":0,"dir":"b_to_a","event":"transfer","kind":"data"}"#)
+        XCTAssertEqual(WorkerEvent.transfer(dir: .aToB, kind: .text, bytes: 7, name: nil).jsonLine,
+                       #"{"bytes":7,"dir":"a_to_b","event":"transfer","kind":"text"}"#)
+    }
+
     func testStatsKbpsIsRoundedToOneDecimal() {
         XCTAssertEqual(WorkerEvent.stats(kbps: 0, fps: 0, width: 0, height: 0).jsonLine,
                        #"{"event":"stats","fps":0,"height":0,"kbps":0,"width":0}"#)
