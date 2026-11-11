@@ -114,21 +114,26 @@ final class InputInjector {
         return false
     }
 
-    /// The owner of the frontmost on-screen window containing `point` (global
-    /// points), skipping invisible ones and the screen-saver/cursor levels.
+    /// The owner of the frontmost on-screen window containing `point` (global points); see `topWindowOwner`.
     private func topOwner(at point: CGPoint) -> (pid: pid_t, name: String) {
         let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
             as? [[String: Any]] ?? []
-        for entry in list {
-            guard (entry[kCGWindowAlpha as String] as? Double ?? 1) > 0,
-                  (entry[kCGWindowLayer as String] as? Int ?? 0) < 1000,
-                  let bounds = entry[kCGWindowBounds as String] as? [String: Any],
-                  let frame = CGRect(dictionaryRepresentation: bounds as CFDictionary),
-                  frame.contains(point) else { continue }
+        let windows = list.compactMap { entry -> ScreenWindow? in
+            guard let bounds = entry[kCGWindowBounds as String] as? [String: Any],
+                  let frame = CGRect(dictionaryRepresentation: bounds as CFDictionary) else { return nil }
             let pid = (entry[kCGWindowOwnerPID as String] as? Int).map(pid_t.init) ?? 0
-            return (pid, entry[kCGWindowOwnerName as String] as? String ?? "pid \(pid)")
+            return ScreenWindow(pid: pid, name: entry[kCGWindowOwnerName as String] as? String ?? "pid \(pid)",
+                                layer: entry[kCGWindowLayer as String] as? Int ?? 0,
+                                alpha: entry[kCGWindowAlpha as String] as? Double ?? 1, frame: frame)
         }
-        return (0, "nothing")
+        let dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first?.processIdentifier
+        return topWindowOwner(at: point, windows: windows, dockPID: dock) {
+            var element: AXUIElement?
+            guard AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(point.x), Float(point.y),
+                                                   &element) == .success, let element else { return nil }
+            var pid: pid_t = 0
+            return AXUIElementGetPid(element, &pid) == .success ? pid : nil
+        }
     }
 
     private func activateIfNeeded() {

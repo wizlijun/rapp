@@ -8,3 +8,5 @@
 - 省流（双色）档的目标是"看清文字"，不是"字节最少"。按亮度均值二分会把抗锯齿边缘一刀切掉，低密度下文字断笔、字周围出灰块；基色要取两端最暗、最亮的像素，边缘保留过渡级。改动画质的算法时，要把新旧输出渲染成图片亲眼对比，不能只看码率。
 - 抓屏报 "application connection being interrupted"（replayd 的 XPC 4097），先查有没有一直开着的旧 rapp-host。这次是一个连续跑了约 18 分钟、30 fps 的旧进程，replayd 把新进程的抓屏请求记到它头上，新进程一开流就被断开；停掉旧进程就好了。两个新进程同时抓不同窗口、甚至同一个窗口都正常，所以不是“同一身份只能一个进程”的限制。
 - 用 System Events / AX 操作窗口时，只按 PID 定位自己启动的进程（`first process whose unix id is …`），不按进程名。用户自己可能正开着同名的 rapp-client：有一次按名字找，挪了用户正在用的 "Grok Bot" 窗口。
+- 用窗口列表（CGWindowList）判断"这个点最上层是谁"不可靠：macOS 27 的 Dock 一直挂着一个铺满屏幕、layer 20、alpha 1 的透明窗口，结果 B 上的每次点击都报 "covered by Dock" 被丢掉。碰到 Dock 的窗口要再用 AX 命中测试（AXUIElementCopyElementAtPosition）确认那个点是不是真的 Dock 栏。系统升级后先看一眼 host 日志里有没有成片的 "click dropped"。
+- 在本机回环（host 和 client 在同一台 Mac）做实测时，用户若同时在用电脑，焦点和窗口遮挡都会变。开始前先请用户别动键盘鼠标，每次合成点击前都查最上层窗口。
