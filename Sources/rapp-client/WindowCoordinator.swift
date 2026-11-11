@@ -11,6 +11,8 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
     var send: (Message) -> Void = { _ in }
     /// Zoom or the backing scale may have changed: the capture density may need updating.
     var onStreamMayChange: () -> Void = {}
+    /// The bar's 取消 was pressed: stop the current transfer.
+    var onCancelTransfer: () -> Void = {}
 
     private let meter: TrafficMeter
     private var table: [WindowInfo] = []
@@ -27,6 +29,12 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
     private var lastFocused: UInt32?
     private var lastOrder: [UInt32] = []
     private var pendingResizes = PendingActions<UInt32>()
+    /// The transfer strip's text, shown in every window.
+    private var transferStatus: String?
+    /// The 复制 button of the window last clicked, and whether A's clip is still awaited.
+    private weak var copyBar: ComposerBar?
+    private var copyPending = false
+    private var copyGeneration = 0
 
     init(meter: TrafficMeter, connectingTo host: String) {
         self.meter = meter
@@ -53,8 +61,8 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         placeholderText.stringValue = "没有打开的窗口，可以用菜单栏新建"
     }
 
-    /// The input bar of the key window, nil when the key window has none.
-    var keyInputBar: InputBar? { (NSApp.keyWindow as? RemoteWindow)?.inputBar }
+    /// The composer of the key window, nil when the key window has none.
+    var keyComposer: Composer? { (NSApp.keyWindow as? RemoteWindow)?.composerBar.composer }
 
     /// The pixel density of the screen the client mostly shows on.
     var backingScale: CGFloat {
@@ -102,7 +110,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
                 let window = RemoteWindow(info: info, label: label)
                 window.delegate = self
                 window.remoteView.onMouse = { [weak self] in self?.send($0) }
-                window.inputBar.onSend = { [weak self] in self?.send($0) }
+                wire(window)
                 windows[info.id] = window
                 place(window)
                 window.orderFront(nil)
@@ -135,6 +143,34 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         if !decorated.isEmpty { placeholder.orderOut(nil) }
     }
 
+    /// Connects a new window's composer bar to the client.
+    private func wire(_ window: RemoteWindow) {
+        let bar = window.composerBar
+        bar.composer.onSend = { [weak self] in self?.send($0) }
+        bar.onHeightChange = { [weak self, weak window] height in
+            guard let self, let window else { return }
+            // The window's own change, not the user's: nothing goes back to A.
+            self.placing = true
+            window.setBarHeight(height)
+            self.placing = false
+        }
+        bar.onCancel = { [weak self] in self?.onCancelTransfer() }
+        bar.onCopy = { [weak self, weak bar] in bar.map { self?.copy(from: $0) } }
+        bar.onAttach = { [weak window] in window.map(Self.chooseFiles) }
+        bar.setStatus(transferStatus)
+    }
+
+    /// 📎: the file panel, files only, several at once.
+    private static func chooseFiles(for window: RemoteWindow) {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.beginSheetModal(for: window) { [weak window] response in
+            if response == .OK { window?.composerBar.composer.insertFiles(panel.urls) }
+        }
+    }
+
     private func makePopup(_ info: WindowInfo) -> PopupPanel {
         let panel = PopupPanel(info: info)
         panel.remoteView.onMouse = { [weak self] in self?.send($0) }
@@ -150,6 +186,46 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
             guard let a = windows[above], let b = windows[below], !b.isMiniaturized else { continue }
             b.order(.below, relativeTo: a.windowNumber)
         }
+    }
+
+    // MARK: Transfers and the clipboard (spec §4.1–§4.5)
+
+    /// Shows the transfer queue's status in every window's bar; nil hides it.
+    func setTransferStatus(_ text: String?) {
+        transferStatus = text
+        for window in windows.values { window.composerBar.setStatus(text) }
+    }
+
+    /// Option-click on a history entry: into the key window's composer, else the last focused one's.
+    func insert(_ payload: InsertPayload, info: ClipInfo) {
+        let window = (NSApp.keyWindow as? RemoteWindow) ?? lastFocused.flatMap { windows[$0] }
+        window?.composerBar.composer.insert(payload, info: info)
+    }
+
+    /// 复制: ⌘C to A, then "已复制" for 2 s, or "A 上没有复制到东西" if no clip came in that time; 2 s later it is restored.
+    private func copy(from bar: ComposerBar) {
+        let command = UInt64(NSEvent.ModifierFlags.command.rawValue)
+        send(.key(keyCode: 8, modifiers: command, down: true))
+        send(.key(keyCode: 8, modifiers: command, down: false))
+        copyGeneration += 1
+        let generation = copyGeneration
+        copyBar = bar
+        copyPending = true
+        bar.showCopyFeedback("已复制")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            guard let self, self.copyGeneration == generation, let bar = self.copyBar else { return }
+            guard self.copyPending else { return bar.showCopyFeedback(nil) }
+            self.copyPending = false
+            bar.showCopyFeedback("A 上没有复制到东西")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self, weak bar] in
+                if self?.copyGeneration == generation { bar?.showCopyFeedback(nil) }
+            }
+        }
+    }
+
+    /// A clip came from A; it answers a pending 复制 (and is ignored otherwise).
+    func clipArrived() {
+        copyPending = false
     }
 
     // MARK: Placement (spec §4.2)

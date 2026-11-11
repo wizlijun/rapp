@@ -39,8 +39,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         history = ClipHistory(pasteboard: LocalPasteboard(), transfers: transfers, log: { output.log($0) })
         super.init()
         transfers.log = { output.log($0) }
-        // Task 8 shows this in the transfer bar; for now it only goes to the log.
-        transfers.onStatus = { status in if let status { output.log(status) } }
         streamMenu.makeHistoryItem = { [history] in history.makeMenuItem() }
     }
 
@@ -48,6 +46,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         coordinator = WindowCoordinator(meter: meter, connectingTo: address.host)
         coordinator.send = { [weak self] message in self?.connection.send(message) }
         coordinator.onStreamMayChange = { [weak self] in self?.sendStreamIfChanged() }
+        coordinator.onCancelTransfer = { [transfers] in transfers.cancel() }
+        transfers.onStatus = { [weak self] status in self?.coordinator.setTransferStatus(status) }
+        history.onClip = { [weak self] in self?.coordinator.clipArrived() }
+        history.onInsert = { [weak self] info, payload in self?.coordinator.insert(payload, info: info) }
         buildMenu()
 
         connection.onMessage = { [weak self] message in self?.handle(message) }
@@ -56,14 +58,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         connection.onClosed = { [output] reason in output.finish(ExitCode.runtime, "rapp-client: \(reason)") }
 
         // Command shortcuts: Command-Q always quits this client. With an empty
-        // (or no) input bar the others go to the remote app; otherwise they edit the bar.
+        // (or no) composer the others go to the remote app; otherwise they edit it.
+        // Command-V always goes to the composer when it has the keyboard focus.
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, event.modifierFlags.contains(.command) else { return event }
             if event.charactersIgnoringModifiers?.lowercased() == "q" {
                 NSApp.terminate(nil)
                 return nil
             }
-            if let bar = self.coordinator.keyInputBar, !bar.isEmpty { return event }
+            if let composer = self.coordinator.keyComposer {
+                let plain = event.modifierFlags.intersection([.shift, .control, .option, .command]) == .command
+                if plain, event.charactersIgnoringModifiers?.lowercased() == "v",
+                   composer.window?.firstResponder === composer { return event }
+                if !composer.isEmpty { return event }
+            }
             let modifiers = UInt64(event.modifierFlags.intersection([.shift, .control, .option, .command]).rawValue)
             self.connection.send(.key(keyCode: event.keyCode, modifiers: modifiers, down: true))
             self.connection.send(.key(keyCode: event.keyCode, modifiers: modifiers, down: false))
@@ -83,7 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// The app menu (spec §4.5): quit, zoom, moving A's window to its top-left and the stream menu, plus hidden
-    /// editing items whose shortcuts still work in the input bars. The remote
+    /// editing items whose shortcuts still work in the composers. The remote
     /// app's menus follow it once the host sends them.
     private func buildMenu() {
         let main = NSMenu()
