@@ -255,6 +255,28 @@ void main() {
     expect(s.sessionCount, 1);
   });
 
+  testWidgets('armed remove button does not carry over to another device', (tester) async {
+    await pumpTab(tester);
+    t.emit({
+      'event': 'hosts',
+      'hosts': [
+        {'id': '111', 'name': 'mini'},
+        {'id': '222', 'name': 'studio'},
+      ],
+    });
+    await tester.pumpAndSettle();
+    await selectMini(tester);
+    await tester.tap(find.byKey(const Key('remove-device')));
+    await tester.pump();
+    expect(find.text('再点一次确认'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('device-222')));
+    await tester.pumpAndSettle();
+    expect(find.text('再点一次确认'), findsNothing);
+    await tester.tap(find.byKey(const Key('remove-device')));
+    await tester.pumpAndSettle();
+    expect(t.sent.where((m) => m['cmd'] == 'remove_host'), isEmpty);
+  });
+
   testWidgets('offline device shows 离线 and the error', (tester) async {
     offline = true;
     await pumpTab(tester);

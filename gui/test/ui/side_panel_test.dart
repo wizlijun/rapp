@@ -146,6 +146,16 @@ void main() {
     }
   });
 
+  testWidgets('legend lamps stand still so nothing blinks when nothing is waiting', (tester) async {
+    await tester.pumpWidget(wrap(panel()));
+    final moving = find.descendant(
+      of: find.byKey(const Key('legend')),
+      matching: find.byWidgetPredicate((w) => w.runtimeType.toString() == '_Motion'),
+    );
+    expect(find.byKey(const Key('legend')), findsOneWidget);
+    expect(moving, findsNothing);
+  });
+
   testWidgets('totals show counts, literal traffic dash, muted zero', (tester) async {
     await tester.pumpWidget(wrap(panel()));
     expect(find.text('在线设备'), findsOneWidget);

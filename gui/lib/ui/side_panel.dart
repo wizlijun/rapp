@@ -144,23 +144,29 @@ class _Footer extends StatelessWidget {
             onChanged: state.setStartFullscreen,
           ),
           const SizedBox(height: 6),
-          Wrap(
-            spacing: 12,
-            runSpacing: 6,
-            children: [
-              for (final l in Lamp.values)
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    StatusLamp(l),
-                    const SizedBox(width: 4),
-                    Text(
-                      lampWord(l),
-                      style: TextStyle(color: t.muted, fontSize: 12),
-                    ),
-                  ],
-                ),
-            ],
+          // The legend explains shapes; motion is kept for things that need
+          // you (design language §1), so its lamps stand still.
+          MediaQuery(
+            data: MediaQuery.of(context).copyWith(disableAnimations: true),
+            child: Wrap(
+              key: const Key('legend'),
+              spacing: 12,
+              runSpacing: 6,
+              children: [
+                for (final l in Lamp.values)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      StatusLamp(l),
+                      const SizedBox(width: 4),
+                      Text(
+                        lampWord(l),
+                        style: TextStyle(color: t.muted, fontSize: 12),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
           ),
           const SizedBox(height: 10),
           Wrap(

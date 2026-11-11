@@ -195,6 +195,7 @@ class MainState extends ChangeNotifier {
       lamp: Lamp.connecting,
     );
     _entries = _mapEntries();
+    final before = currentKey;
     currentKey = key;
     panel = null;
     notifyListeners();
@@ -206,7 +207,11 @@ class MainState extends ChangeNotifier {
       _pending.remove(key);
       final missing = missingFromError('$e');
       hint = missing == null ? '$e' : remoteHint(deviceName(id), missing);
-      if (currentKey == key) currentKey = null;
+      _entries = _mapEntries();
+      // Back to what was current before, if it is still open.
+      if (currentKey == key) {
+        currentKey = _entries.any((e) => e.key == before) ? before : null;
+      }
     }
     _entries = _mapEntries();
     notifyListeners();

@@ -77,6 +77,28 @@ void main() {
     expect(t.sent.where((m) => m['cmd'] == 'close').single, {'cmd': 'close', 'sid': 1});
   });
 
+  testWidgets('armed end button does not carry over to the next session', (tester) async {
+    await tester.pumpWidget(wrap(stage()));
+    await tester.runAsync(() async {
+      t.emit({'event': 'opened', 'sid': 2, 'id': '111', 'app': 'Notes', 'path': 'lan'});
+      await flush();
+    });
+    await openActive(tester);
+    await tester.tap(find.byKey(const Key('end-button')));
+    await tester.pump();
+    expect(find.text('再点一次确认'), findsOneWidget);
+    await tester.runAsync(() async {
+      t.emit({'event': 'closed', 'sid': 1, 'reason': 'app quit'});
+      await flush();
+    });
+    await tester.pump();
+    expect(s.current?.appName, 'Notes');
+    expect(find.text('再点一次确认'), findsNothing);
+    await tester.tap(find.byKey(const Key('end-button')));
+    await tester.pump();
+    expect(t.sent.where((m) => m['cmd'] == 'close'), isEmpty);
+  });
+
   testWidgets('stage shows connecting while open is pending', (tester) async {
     await tester.pumpWidget(wrap(stage()));
     s.openOrSwitch('111', 'Safari', 'Safari');

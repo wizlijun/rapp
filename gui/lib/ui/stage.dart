@@ -72,10 +72,15 @@ class Stage extends StatelessWidget {
                         label: '切到窗口',
                         onPressed: state.focusCurrent,
                       ),
-                      ConfirmButton(
-                        key: const Key('end-button'),
-                        label: '结束会话',
-                        onConfirmed: state.endCurrent,
+                      // Keyed per session: an armed confirm never carries
+                      // over to the session that becomes current next.
+                      KeyedSubtree(
+                        key: ValueKey('end:${cur.key}'),
+                        child: ConfirmButton(
+                          key: const Key('end-button'),
+                          label: '结束会话',
+                          onConfirmed: state.endCurrent,
+                        ),
                       ),
                     ],
                   ),

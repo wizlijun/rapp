@@ -163,10 +163,14 @@ class _DevicesTabState extends State<DevicesTab> {
               Text(p.word, style: TextStyle(color: t.muted)),
             ]),
           if (pathWord.isNotEmpty) Text(pathWord, style: TextStyle(color: t.muted)),
-          ConfirmButton(
-            key: const Key('remove-device'),
-            label: '删除设备',
-            onConfirmed: state.hubUsable ? () => state.removeDevice(id) : null,
+          // Keyed per device: an armed confirm never carries over to another device.
+          KeyedSubtree(
+            key: ValueKey('remove:$id'),
+            child: ConfirmButton(
+              key: const Key('remove-device'),
+              label: '删除设备',
+              onConfirmed: state.hubUsable ? () => state.removeDevice(id) : null,
+            ),
           ),
         ],
       ),

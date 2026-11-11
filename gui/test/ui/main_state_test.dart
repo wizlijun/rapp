@@ -84,6 +84,17 @@ void main() {
     expect(s.hint, contains('offline'));
   });
 
+  test('a failed open goes back to the session that was current', () async {
+    t.emit(opened(1, '111', 'com.apple.Safari'));
+    await pump();
+    s.select('111/com.apple.Safari');
+    t.onSend = (m) {
+      if (m['cmd'] == 'open') t.emit({'event': 'error', 'req': m['req'], 'error': 'offline'});
+    };
+    await s.openOrSwitch('222', 'com.apple.Notes', 'Notes');
+    expect(s.currentKey, '111/com.apple.Safari');
+  });
+
   test('closing the current session moves to the next one', () async {
     t.emit(opened(1, '111', 'a'));
     t.emit(opened(2, '111', 'b'));
