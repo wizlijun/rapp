@@ -23,7 +23,7 @@ class HistoryRow {
   final String duration;
   final String result;
 
-  /// Refused (auth_fail, failed request): shown in the warning colour.
+  /// Refused (auth_fail, rejected, failed request): shown in the warning colour.
   final bool warn;
 }
 
@@ -35,6 +35,8 @@ HistoryRow historyRow(Map<String, dynamic> ev) {
     'session_end' => (_endReason(s('reason')), false),
     'auth_fail' => ('拒绝：${s('reason')}', true),
     'request' => ('失败：${s('result')}', true),
+    // The host turned the session away (busy, version mismatch, bad token).
+    'rejected' => ('拒绝：${s('reason')}', true),
     final other => (other, false),
   };
   return HistoryRow(

@@ -110,4 +110,4 @@
 - [x] O4 hub：§4.4 事件、client stderr 转写、上报 `name`、side 标记。验证：hub 集成测试
 - [x] O5 Swift：`--json` 不写 `[stats]` 文本；host 发 `transfer` 事件。验证：`./scripts/check.sh` 末行 `EXIT=0`
 - [x] O6 GUI：访问记录、打开日志文件夹；plist 和 postinstall 加 StandardOut/ErrorPath。验证：`flutter analyze`、`flutter test`
-- [ ] O7 整体审查、修 Critical/Important、打包
+- [x] O7 整体审查、修 Critical/Important、打包

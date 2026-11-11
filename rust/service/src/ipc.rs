@@ -88,7 +88,7 @@ const HISTORY_MAX: u64 = 500;
 /// 访问记录 (spec §6): sessions, failed auths and refused requests; never side connections.
 fn in_history(v: &Value) -> bool {
     let shown = match v["ev"].as_str() {
-        Some("session_start" | "session_end" | "auth_fail") => true,
+        Some("session_start" | "session_end" | "auth_fail" | "rejected") => true,
         Some("request") => v["result"] != "ok",
         _ => false,
     };

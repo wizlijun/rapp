@@ -58,6 +58,13 @@ String _xml(String s) =>
     s.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;');
 
 /// Shows [dir] in the platform's file manager (「打开日志文件夹」).
+/// Creates [path] if needed and makes it owner-only (observability spec §3: logs are 0700).
+String ensurePrivateDir(String path) {
+  Directory(path).createSync(recursive: true);
+  if (!Platform.isWindows) Process.runSync('chmod', ['700', path]);
+  return path;
+}
+
 ShellCommand openFolderCommand(String dir, String os) => switch (os) {
       'macos' => ShellCommand('open', [dir]),
       'windows' => ShellCommand('explorer', [dir]),
@@ -143,7 +150,7 @@ class ServiceController {
   void _writePlist(String home) {
     final rappHome = env['RAPP_HOME'];
     // launchd opens the log before the service runs, so its folder must already exist.
-    final logs = Directory(logDir({...env, 'HOME': home}, 'macos'))..createSync(recursive: true);
+    final logs = Directory(ensurePrivateDir(logDir({...env, 'HOME': home}, 'macos')));
     final content = launchAgentPlist(serviceExe,
         environment: {if (rappHome != null && rappHome.isNotEmpty) 'RAPP_HOME': rappHome},
         logPath: '${logs.path}/launchd.log');

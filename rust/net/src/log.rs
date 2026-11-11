@@ -170,12 +170,29 @@ fn open_private(path: &Path) -> Option<std::fs::File> {
         #[cfg(unix)]
         std::os::unix::fs::DirBuilderExt::mode(&mut b, 0o700);
         b.create(dir).ok()?;
+        // An existing folder (e.g. made by a GUI at 0755) is tightened too.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+        }
     }
     let mut opts = std::fs::OpenOptions::new();
     opts.create(true).append(true);
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
     opts.open(path).ok()
+}
+
+/// Longest self-declared name or id written to a log, in chars.
+pub const NAME_MAX: usize = 64;
+
+/// A peer-supplied name made safe to log and show: no control or bidi
+/// characters (they could hide the GUI's "（自称）" marker), trimmed, capped.
+pub fn clean_name(s: &str) -> String {
+    let bidi = |c: char| matches!(c, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}');
+    let kept: String = s.chars().filter(|&c| !c.is_control() && !bidi(c)).collect();
+    kept.trim().chars().take(NAME_MAX).collect()
 }
 
 /// UTC, RFC 3339 with milliseconds: `2026-11-11T14:04:05.123Z`.
@@ -288,6 +305,28 @@ mod tests {
 
     fn lines(path: &Path) -> Vec<Value> {
         std::fs::read_to_string(path).unwrap_or_default().lines().map(|l| serde_json::from_str(l).unwrap()).collect()
+    }
+
+    #[test]
+    fn clean_name_drops_control_and_bidi_chars_trims_and_caps() {
+        assert_eq!(clean_name("  MacBook-M4  "), "MacBook-M4");
+        assert_eq!(clean_name("\u{202e}ev\nil\u{2066}\u{200f}\t"), "evil");
+        assert_eq!(clean_name(&"微".repeat(100)).chars().count(), NAME_MAX);
+        assert_eq!(clean_name("\u{0}"), "");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_existing_open_log_dir_is_made_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("logs");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let log = Log::file(&dir, "x.log");
+        log.event(Lvl::Info, "e", json!({}));
+        log.flush();
+        assert_eq!(std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700);
     }
 
     #[test]

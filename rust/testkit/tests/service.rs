@@ -466,3 +466,79 @@ async fn oversized_launchd_log_is_emptied_at_start() {
     let _svc = start_service(home.path(), bins.path(), Duration::from_secs(60)).await;
     assert_eq!(std::fs::metadata(logs.join("launchd.log")).unwrap().len(), 0);
 }
+
+// ---- review fixes (O7) ----
+
+#[tokio::test]
+async fn a_host_refusal_is_in_history_as_rejected() {
+    let a = service(None).await;
+    let home = a.home.path();
+    let ep = b_endpoint();
+    let (conn, _) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":PASSWORD})).await;
+    let mut s = bi(conn.open_bi().await.unwrap());
+    write_json(&mut s, &json!({"op":"open","app":"com.example.echo"})).await.unwrap();
+    assert_eq!(read_json(&mut s).await.unwrap()["ok"], true);
+    // The worker refuses B's hello (here: the wrong worker token).
+    s.write_all(b"not-the-token\n").await.unwrap();
+    let start = wait_log(home, "session_start", |_| true).await;
+    wait_log(home, "rejected", |_| true).await;
+    let h = ipc_once(&a.svc, home, json!({"cmd":"history","limit":10})).await;
+    let rej = h["events"].as_array().unwrap().iter().find(|e| e["ev"] == "rejected").cloned();
+    let rej = rej.unwrap_or_else(|| panic!("no rejected in {h}"));
+    assert_eq!((&rej["sid"], &rej["reason"]), (&start["sid"], &json!("bad token")));
+}
+
+#[tokio::test]
+async fn a_self_declared_name_is_cleaned_and_capped() {
+    let a = service(None).await;
+    let ep = b_endpoint();
+    let dirty = format!("\u{202e}mb\np{}", "a".repeat(1000));
+    let (_c, r) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":"wrong","name":dirty})).await;
+    assert_eq!(r["ok"], false);
+    let fail = wait_log(a.home.path(), "auth_fail", |_| true).await;
+    assert_eq!(fail["name"], format!("mbp{}", "a".repeat(61)));
+}
+
+#[tokio::test]
+async fn a_malformed_auth_line_is_logged_as_an_attempt() {
+    let a = service(None).await;
+    let ep = b_endpoint();
+    let conn = dial(&ep, a_addr(&a.svc), rapp_net::quic::ALPN_PEER).await;
+    let mut s = bi(conn.open_bi().await.unwrap());
+    s.write_all(b"not json\n").await.unwrap();
+    let fail = wait_log(a.home.path(), "auth_fail", |_| true).await;
+    assert_eq!(fail["reason"], "bad request");
+}
+
+#[tokio::test]
+async fn stopping_the_service_ends_open_sessions_in_the_log() {
+    let a = service(None).await;
+    let home = a.home.path();
+    let ep = b_endpoint();
+    let (conn, _) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":PASSWORD,"name":"mbp"})).await;
+    let (_s, _) = open_echo(&conn).await;
+    let start = wait_log(home, "session_start", |_| true).await;
+    a.svc.stop();
+    let end = wait_log(home, "session_end", |_| true).await;
+    assert_eq!((&end["sid"], &end["reason"], &end["name"]), (&start["sid"], &json!("service stopped"), &json!("mbp")));
+    wait_log(home, "service_stop", |_| true).await;
+    // The aborted splice does not write a second end line.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(log_events(home).iter().filter(|e| e["ev"] == "session_end").count(), 1);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn launchd_log_is_made_private_at_start() {
+    use std::os::unix::fs::PermissionsExt;
+    let home = tempfile::tempdir().unwrap();
+    let logs = home.path().join("logs");
+    std::fs::create_dir(&logs).unwrap();
+    let launchd = logs.join("launchd.log");
+    std::fs::write(&launchd, "old panic\n").unwrap();
+    std::fs::set_permissions(&launchd, std::fs::Permissions::from_mode(0o644)).unwrap();
+    let bins = bins();
+    service_json(home.path(), None);
+    let _svc = start_service(home.path(), bins.path(), Duration::from_secs(60)).await;
+    assert_eq!(std::fs::metadata(&launchd).unwrap().permissions().mode() & 0o777, 0o600);
+}

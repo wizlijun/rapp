@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/service_control.dart';
 
@@ -104,5 +106,19 @@ void main() {
       expect(p, contains('<string>/tmp/a&amp;b&lt;c&gt;/rapp-service</string>'));
       expect(p, contains('<key>EnvironmentVariables</key>\n\t<dict>\n\t\t<key>RAPP_HOME</key>\n\t\t<string>/tmp/h</string>\n\t</dict>'));
     });
+  });
+
+  test('ensurePrivateDir creates the folder, and tightens an existing one, to 0700', () {
+    if (Platform.isWindows) return;
+    final tmp = Directory.systemTemp.createTempSync('rapp-logs');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    final fresh = '${tmp.path}/a/logs';
+    ensurePrivateDir(fresh);
+    String mode(String p) => (FileStat.statSync(p).mode & 0x1ff).toRadixString(8);
+    expect(mode(fresh), '700');
+    final open = Directory('${tmp.path}/open')..createSync();
+    Process.runSync('chmod', ['755', open.path]);
+    ensurePrivateDir(open.path);
+    expect(mode(open.path), '700');
   });
 }

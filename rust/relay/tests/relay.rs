@@ -322,10 +322,16 @@ async fn logs_register_connect_lockout_and_relayed_without_secrets() {
     let _ = req(&dial(&relay).await, json!({"op":"register","key":"not-the-key","id":id,"secret":"s2",
         "name":"x","pw_salt":"a","pw_hash":"b","lan":[]}))
     .await;
+    // A self-declared name or id is cleaned and capped before it is logged.
+    let dirty = format!("\u{202e}mb\np{}", "a".repeat(1000));
+    req(&b, json!({"op":"connect","key":"not-the-key","id":dirty,"password":"x","name":dirty})).await;
     relay.stop();
     drop(relay);
 
     let evs = events(&log_path);
+    let clean = format!("mbp{}", "a".repeat(61));
+    let dirty_line = find_bad_key_connect(&evs);
+    assert_eq!((dirty_line["name"].as_str(), dirty_line["to"].as_str()), (Some(clean.as_str()), Some(clean.as_str())));
     let find = |ev: &str, result: &str| evs.iter().find(|e| e["ev"] == ev && e["result"] == result).cloned();
     assert_eq!(evs[0]["ev"], "relay_start", "{evs:?}");
     assert_eq!(evs[0]["devices"], 0);
@@ -344,4 +350,8 @@ async fn logs_register_connect_lockout_and_relayed_without_secrets() {
     for secret in ["pw-secret-1", "wrong-pw-xyz", KEY, "not-the-key", secret.as_str(), token.as_str()] {
         assert!(!text.contains(secret), "log leaks {secret}: {text}");
     }
+}
+
+fn find_bad_key_connect(evs: &[Value]) -> Value {
+    evs.iter().find(|e| e["ev"] == "connect" && e["result"] == "bad key").cloned().expect("bad-key connect logged")
 }

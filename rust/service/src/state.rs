@@ -32,6 +32,15 @@ pub struct Peer {
 
 impl Peer {
     /// `{"peer","name"?,"path"}` plus `more` (an object), for log events.
+    /// `session_start` / `session_end` fields (observability spec §4.1).
+    pub fn session_fields(&self, app: &str, side: bool, sid: u64) -> Value {
+        let mut more = json!({"app": app, "sid": sid});
+        if side {
+            more["side"] = json!(true);
+        }
+        self.fields(more)
+    }
+
     pub fn fields(&self, more: Value) -> Value {
         let mut v = json!({"peer": self.addr, "path": self.path});
         if let Some(n) = &self.name {
@@ -132,9 +141,18 @@ impl State {
         (sid, kick)
     }
 
-    pub fn end_session(&self, sid: u64) {
-        self.sessions.lock().unwrap().1.remove(&sid);
+    /// False when the session was already ended (by `end_all` at stop).
+    pub fn end_session(&self, sid: u64) -> bool {
+        let found = self.sessions.lock().unwrap().1.remove(&sid).is_some();
         self.notify();
+        found
+    }
+
+    /// Takes every open session (service stopping).
+    pub fn end_all(&self) -> BTreeMap<u64, Session> {
+        let all = std::mem::take(&mut self.sessions.lock().unwrap().1);
+        self.notify();
+        all
     }
 
     pub fn kick(&self, sid: u64) -> bool {

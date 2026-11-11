@@ -21,7 +21,7 @@ async fn main() {
     match Service::start(opts).await {
         Ok(svc) => {
             // Ports and id are in service.log (`service_start`).
-            let _ = tokio::signal::ctrl_c().await;
+            stopped().await;
             svc.stop();
         }
         Err(e) => {
@@ -29,4 +29,20 @@ async fn main() {
             std::process::exit(1);
         }
     }
+}
+
+/// ^C, or SIGTERM (launchd/systemd stopping the service).
+async fn stopped() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        if let Ok(mut term) = signal(SignalKind::terminate()) {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = term.recv() => {}
+            }
+            return;
+        }
+    }
+    let _ = tokio::signal::ctrl_c().await;
 }

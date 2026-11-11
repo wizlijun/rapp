@@ -8,7 +8,7 @@ use quinn::{Connection, Endpoint};
 use rapp_net::addr::is_private;
 use rapp_net::crypto::ct_eq;
 use rapp_net::line::{err, ok, read_json, write_json};
-use rapp_net::log::Lvl;
+use rapp_net::log::{clean_name, Lvl};
 use rapp_net::msg::Op;
 use rapp_net::quic::{bi, splice_metered, BiStream, Meter};
 use serde_json::{json, Value};
@@ -61,16 +61,19 @@ async fn serve_conn(state: Arc<State>, conn: Connection) {
 }
 
 /// The first stream must be `{"op":"auth",...}`. None when it passed, else the reason;
-/// `peer.name` picks up the name B declared (or the one it gave the relay).
+/// `peer.name` picks up the name B declared (or the one it gave the relay), cleaned.
+/// Err only when B never opened a stream (a dropped probe).
 async fn auth(state: &State, conn: &Connection, private: bool, peer: &mut Peer) -> Result<Option<String>> {
     let mut s = bi(conn.accept_bi().await?);
-    let reply = match serde_json::from_value(read_json(&mut s).await?) {
-        Ok(Op::Auth { token, password, name }) => {
-            peer.name = name;
+    let declared = |n: Option<String>| n.map(|n| clean_name(&n)).filter(|n| !n.is_empty());
+    let reply = match read_json(&mut s).await.map(serde_json::from_value) {
+        Err(_) => err("bad request"),
+        Ok(Ok(Op::Auth { token, password, name })) => {
+            peer.name = declared(name);
             match (token, password) {
                 (Some(t), _) => match state.token_peer(&t) {
                     Some((_, relay_name)) => {
-                        peer.name = peer.name.take().or(relay_name);
+                        peer.name = peer.name.take().or(declared(relay_name));
                         ok(json!({}))
                     }
                     None => err("bad token"),
@@ -90,8 +93,8 @@ async fn auth(state: &State, conn: &Connection, private: bool, peer: &mut Peer) 
         }
         _ => err("auth required"),
     };
-    write_json(&mut s, &reply).await?;
-    s.writer_mut().finish()?;
+    // The attempt is recorded even when B is already gone.
+    let _ = reply_and_finish(&mut s, reply.clone()).await;
     Ok(reply["error"].as_str().map(str::to_string))
 }
 
@@ -176,9 +179,7 @@ async fn splice_session(
     log_request(state, peer, open_fields(app, side), &reply);
     // Registered before B hears `ok`, so worker events B triggers find their sid.
     let (sid, kick) = state.add_session(peer, app, side);
-    let mut fields = peer.fields(open_fields(app, side));
-    fields.as_object_mut().expect("object").remove("op");
-    fields["sid"] = json!(sid);
+    let mut fields = peer.session_fields(app, side, sid);
     state.log.event(Lvl::Info, "session_start", fields.clone());
     let (meter, began) = (Meter::default(), Instant::now());
     let reason = match write_json(s, &reply).await {
@@ -194,7 +195,9 @@ async fn splice_session(
             }
         }
     };
-    state.end_session(sid);
+    if !state.end_session(sid) {
+        return Ok(()); // the stopping service already wrote its end line
+    }
     // The meter counts on B's stream: read from B = up (B→A), written to B = down.
     let (up, down) = meter.get();
     fields["secs"] = json!(began.elapsed().as_secs());

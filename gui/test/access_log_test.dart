@@ -63,6 +63,12 @@ void main() {
       expect(list.app, '（列出应用）');
     });
 
+    test('a host refusal (busy, version, token) is a warning, not a session', () {
+      final r = historyRow({'ts': ts, 'ev': 'rejected', 'sid': 4, 'reason': 'busy'});
+      expect(r.result, '拒绝：busy');
+      expect(r.warn, isTrue);
+    });
+
     test('a bad timestamp or missing fields do not throw', () {
       final r = historyRow({'ev': 'session_start'});
       expect(r.time, '');

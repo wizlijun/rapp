@@ -41,11 +41,14 @@ pub struct Service {
     pub ipc_port: u16,
     state: Arc<State>,
     tasks: Vec<JoinHandle<()>>,
+    stopped: std::sync::atomic::AtomicBool,
 }
 
 impl Service {
     pub async fn start(opts: Opts) -> Result<Service> {
-        empty_if_over(&opts.log_dir.join("launchd.log"), LAUNCHD_LOG_MAX);
+        let launchd = opts.log_dir.join("launchd.log");
+        empty_if_over(&launchd, LAUNCHD_LOG_MAX);
+        make_private(&launchd);
         let log = Log::file(&opts.log_dir, LOG_FILE);
         let cfg = Config::load_or_init(&opts.home)?;
         let (port, ipc_port) = (cfg.port.unwrap_or(DEFAULT_PORT), cfg.ipc_port.unwrap_or(DEFAULT_IPC_PORT));
@@ -86,10 +89,22 @@ impl Service {
             tokio::spawn(relay_link::run(state.clone(), relay_rx)),
             tokio::spawn(ipc::serve(state.clone(), listener, ipc_token)),
         ];
-        Ok(Service { port, ipc_port, state, tasks })
+        Ok(Service { port, ipc_port, state, tasks, stopped: Default::default() })
     }
 
+    /// Ends open sessions in the log first, so a stop (SIGTERM, ^C) leaves no session unclosed.
     pub fn stop(&self) {
+        if self.stopped.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        for (sid, s) in self.state.end_all() {
+            let mut f = s.peer.session_fields(&s.app, s.side, sid);
+            (f["secs"], f["reason"]) = (json!(now.saturating_sub(s.since)), json!("service stopped"));
+            self.state.log.event(Lvl::Info, "session_end", f);
+        }
+        self.state.log.event(Lvl::Info, "service_stop", json!({}));
+        self.state.log.flush();
         for t in &self.tasks {
             t.abort();
         }
@@ -103,6 +118,19 @@ fn empty_if_over(path: &std::path::Path, max: u64) {
     if std::fs::metadata(path).is_ok_and(|m| m.len() > max) {
         let _ = std::fs::OpenOptions::new().write(true).open(path).and_then(|f| f.set_len(0));
     }
+}
+
+/// launchd creates its log 0644; it can hold panic text, so keep it owner-only.
+fn make_private(path: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if path.exists() {
+            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = path;
 }
 
 impl Drop for Service {

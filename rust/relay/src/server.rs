@@ -7,7 +7,7 @@ use anyhow::{anyhow, Result};
 use quinn::{Connection, Endpoint};
 use rapp_net::crypto::{ct_eq, is_valid_id, pw_hash, random_hex, random_id, sha256_hex};
 use rapp_net::line::{check, err, ok, read_json, write_json};
-use rapp_net::log::{Lvl, Log};
+use rapp_net::log::{clean_name, Lvl, Log};
 use rapp_net::msg::Op;
 use rapp_net::quic::{bi, splice_metered, BiStream, Meter};
 use serde_json::{json, Value};
@@ -101,6 +101,7 @@ async fn serve_stream(state: &State, conn: &Connection, s: &mut BiStream) -> Res
     };
     match op {
         Op::Register { key, ref id, .. } if !ct_eq(&key, &state.key) => {
+            let id = id.as_deref().map(clean_name);
             state.log.event(Lvl::Warn, "register", json!({"id": id, "ip": ip_of(conn), "result": "bad key"}));
             reply(s, err("bad relay key")).await
         }
@@ -113,6 +114,7 @@ async fn serve_stream(state: &State, conn: &Connection, s: &mut BiStream) -> Res
             reply(s, err("bad relay key")).await
         }
         Op::Register { id, secret, name, pw_salt, pw_hash, lan, .. } => {
+            let name = clean_name(&name);
             let (r, result) =
                 register(state, conn, id, Device { secret_hash: sha256_hex(secret.as_bytes()), pw_salt, pw_hash, name }, lan);
             let id = r["id"].as_str().map(str::to_string);
@@ -120,6 +122,7 @@ async fn serve_stream(state: &State, conn: &Connection, s: &mut BiStream) -> Res
             reply(s, r).await
         }
         Op::Connect { id, password, name, .. } => {
+            let name = name.as_deref().map(clean_name);
             let r = connect(state, conn.remote_address(), &id, &password, name.as_deref()).await;
             log_connect(state, conn, name.as_deref(), Some(&id), &result_of(&r));
             reply(s, r).await
@@ -141,6 +144,7 @@ fn ip_of(conn: &Connection) -> String {
 
 /// One `connect` event (spec §4.2); `from` is B's address as the relay sees it.
 fn log_connect(state: &State, conn: &Connection, name: Option<&str>, to: Option<&str>, result: &str) {
+    let (name, to) = (name.map(clean_name), to.map(clean_name));
     let fields = json!({"from": conn.remote_address().to_string(), "name": name, "to": to, "result": result});
     state.log.event(lvl_of(result), "connect", fields);
 }
