@@ -248,6 +248,7 @@ final class Session {
     /// Clipboard history and uploads, from the moment capture is ready until the session ends.
     private(set) var transfers: TransferStore?
     private(set) var clipWatcher: ClipboardWatcher?
+    private var paster: Paster?
 
     /// The menu bar last sent; picks are checked against it.
     private var menuBar: [MenuItem]?
@@ -395,7 +396,10 @@ final class Session {
             }
             // Picks usually change the menus (a new window, a toggled check mark).
             scheduleMenuRead(after: 1)
-        case .ready, .error, .frame, .windows, .menuBar, .clip, .pasted, .paste, .fetch, .put, .transferStart, .chunk:
+        case let .paste(seq, source):
+            paster?.paste(seq: seq, source)
+
+        case .ready, .error, .frame, .windows, .menuBar, .clip, .pasted, .fetch, .put, .transferStart, .chunk:
             fail("unexpected message from client")
         }
     }
@@ -499,6 +503,11 @@ final class Session {
         }
         watcher.start()
         clipWatcher = watcher
+        paster = Paster(app: app, queue: queue, transfers: { [weak self] in self?.transfers },
+                        watcher: { [weak self] in self?.clipWatcher }, log: { [output] in output.log($0) }) { [weak self] seq, error in
+            guard let self, !self.ended else { return }
+            self.send(.pasted(seq: seq, error: error))
+        }
     }
 
     /// Sends the table if it changed, and follows the windows with the
@@ -698,6 +707,8 @@ final class Session {
         timer = nil
         pollTimer?.cancel()
         pollTimer = nil
+        paster?.end()
+        paster = nil
         clipWatcher?.stop()
         clipWatcher = nil
         transfers = nil
