@@ -119,6 +119,8 @@ final class Server {
                     self.output.emit(.rejected(reason: reason))
                 }
                 self.session = nil
+                // Side connections belong to the session: drop them so their slots and the store are freed.
+                for side in Array(self.sides.values) { side.abort() }
             }
             session = newSession
             newSession.start(first: message, parser: parser)

@@ -148,9 +148,11 @@ def main():
 
         main_sock = connect(port)
         main_sock.sendall(hello())
-        end = time.time() + 30
+        ready_deadline = time.time() + 30
         while True:
-            t, _ = read_msg(main_sock, timeout=max(1, end - time.time()))
+            if time.time() > ready_deadline:
+                raise TimeoutError("no ready within 30 s")
+            t, _ = read_msg(main_sock, timeout=max(1, ready_deadline - time.time()))
             if t == 2:
                 break
             if t == 3:
@@ -225,6 +227,7 @@ def main():
         expect_error(s, "bad token")
         s.close()
         ok("bad token")
+        main_sock.shutdown(socket.SHUT_RDWR)
         main_sock.close()
         main_sock = None
         deadline = time.time() + 10
@@ -240,6 +243,33 @@ def main():
             time.sleep(0.2)
         ok("no session")
 
+        # 5b. ending a session closes its side connections and frees their slots
+        main_sock = connect(port)
+        main_sock.sendall(hello())
+        end = time.time() + 30
+        while read_msg(main_sock, timeout=max(1, end - time.time()))[0] != 2:
+            pass
+        threading.Thread(target=_drain, args=(main_sock,), daemon=True).start()
+        idle = [open_put(port, item) for item in range(10, 14)]
+        main_sock.shutdown(socket.SHUT_RDWR)
+        main_sock.close()
+        main_sock = None
+        for h in idle:
+            h.settimeout(5)
+            expect_eof(h)
+            h.close()
+        main_sock = connect(port)
+        main_sock.sendall(hello())
+        end = time.time() + 30
+        while read_msg(main_sock, timeout=max(1, end - time.time()))[0] != 2:
+            pass
+        threading.Thread(target=_drain, args=(main_sock,), daemon=True).start()
+        s = connect(port)
+        s.sendall(put(20, 1024 * KB))
+        expect_start(s, 0)
+        s.close()
+        ok("session end frees side slots")
+
         # 6. old protocol
         s = connect(port)
         s.sendall(hello(4))
@@ -249,6 +279,8 @@ def main():
         print("PASS")
     except BaseException as e:
         print(f"FAIL: {type(e).__name__}: {e}")
+        if calc_pid is None:
+            print("note: rapp-host may have launched Calculator; you can quit it yourself if it is still open")
         errlog.flush()
         try:
             print("--- host log tail ---")
@@ -268,6 +300,10 @@ def main():
                 host.wait(5)
             except subprocess.TimeoutExpired:
                 host.terminate()
+                try:
+                    host.wait(5)
+                except subprocess.TimeoutExpired:
+                    host.kill()
         # Only the Calculator this run started, by PID.
         if calc_pid:
             try:

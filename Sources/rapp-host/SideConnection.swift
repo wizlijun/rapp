@@ -158,6 +158,9 @@ final class SideConnection {
 
     private func close() { end() }
 
+    /// The session is over: close without a word, releasing the slot and the store.
+    func abort() { end() }
+
     private func end() {
         guard !ended else { return }
         ended = true
