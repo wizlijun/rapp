@@ -114,13 +114,18 @@
 
 ## 主界面 S1：外壳与设计语言 + 启动全屏（计划：`docs/superpowers/plans/2026-11-12-rapp-main-window-s1.md`）
 
-- [ ] 1 主题 token、四套主题、gui.json 偏好
-- [ ] 2 状态灯、按钮、两次确认
-- [ ] 3 hub `focus` 命令 + client 提到最前
-- [ ] 4 `HubClient.focus` 与会话分组、上一个/下一个
-- [ ] 5 `MainState`
-- [ ] 6 顶栏、舞台占位、主题背景
-- [ ] 7 左侧面板外框、会话标签、主题下拉、图例
-- [ ] 8 设备标签（本机、远程 app、添加设备）
-- [ ] 9 主窗口组装、启动全屏、替换 HomePage
-- [ ] 10 实机检查、打包、记录
+- [x] 1 主题 token、四套主题、gui.json 偏好
+- [x] 2 状态灯、按钮、两次确认
+- [x] 3 hub `focus` 命令 + client 提到最前
+- [x] 4 `HubClient.focus` 与会话分组、上一个/下一个
+- [x] 5 `MainState`
+- [x] 6 顶栏、舞台占位、主题背景
+- [x] 7 左侧面板外框、会话标签、主题下拉、图例
+- [x] 8 设备标签（本机、远程 app、添加设备）
+- [x] 9 主窗口组装、启动全屏、替换 HomePage
+- [x] 10 实机检查、打包、记录
+- 验证：`flutter analyze` 无问题、`flutter test` 187 个全过；`cargo test --workspace` 90 个、clippy 无警告；`./scripts/check.sh` EXIT=0；每个任务一个实现子代理 + 一个新的评审子代理
+- 实机（只用自己起的 service、GUI、Calculator，按 PID 收尾）：启动即全屏（1920×1080）；主题切到 WESTWORLD 后 gui.json 保存、重启保持；设备标签显示在线 · 局域网和 app 列表；打开 Calculator 后舞台占位出现、提示「已打开 Calculator @ …」；「切到窗口」把 rapp-client 窗口提到最前；「结束会话」点一次变「再点一次确认」，3 秒内再点才结束（hub 记 `closed`）；⌃⌘F 进全屏、Esc 先关面板再退全屏
+- 实机发现并修好：顶栏全屏按钮会随提示长短左右漂移（0c44535，加了测试）
+- 提交：de6e07e..0c44535；打包 `dist/rapp-0.2.0.pkg`、`dist/rapp.dmg`（未替换已装的 rapp.app）
+- 未实机验证：360px 窄窗口（只有 widget 测试）；四套主题里 IRON MAN、AVATAR 的实机外观

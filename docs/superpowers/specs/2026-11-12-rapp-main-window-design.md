@@ -1,6 +1,6 @@
 # rapp 主界面设计规格
 
-日期：2026-11-12。状态：结构和交互已用可点原型与用户逐轮确认；本文待用户审阅，审阅通过后再按子项目写实现计划。
+日期：2026-11-12。状态：结构和交互已用可点原型与用户逐轮确认；本文待用户审阅，审阅通过后再按子项目写实现计划。S1 已实现（计划 `docs/superpowers/plans/2026-11-12-rapp-main-window-s1.md`）。
 
 配套文档：`2026-11-12-rapp-design-language.md`（状态灯、颜色、主题、触控尺寸等设计语言）。
 原型：Artifact「rapp 总管主界面」 https://claude.ai/artifact/PjqK1m3remVLyerH22JNBC （私有；里面的数据全是示例）。
