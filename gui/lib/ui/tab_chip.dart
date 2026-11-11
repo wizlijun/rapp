@@ -10,11 +10,15 @@ class TabChip extends StatelessWidget {
     required this.label,
     required this.selected,
     required this.onTap,
+    this.leading,
   });
 
   final String label;
   final bool selected;
   final VoidCallback onTap;
+
+  /// Optional decorative widget (a status lamp) before the label.
+  final Widget? leading;
 
   @override
   Widget build(BuildContext context) {
@@ -41,14 +45,22 @@ class TabChip extends StatelessWidget {
                     borderRadius: radius,
                     border: Border.all(color: t.line),
                   ),
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: t.text,
-                fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-              ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (leading != null) ...[leading!, const SizedBox(width: 8)],
+                Flexible(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: t.text,
+                      fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
