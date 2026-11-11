@@ -1,4 +1,5 @@
 // The main window: top bar, stage, and a side panel that overlays the stage.
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -44,15 +45,25 @@ class MainWindow extends StatefulWidget {
 
 class _MainWindowState extends State<MainWindow> {
   bool _full = false;
+  StreamSubscription<bool>? _sub;
 
   MainState get state => widget.state;
 
   @override
   void initState() {
     super.initState();
+    _sub = widget.fullscreen.changes.listen((v) {
+      if (mounted) setState(() => _full = v);
+    });
     widget.fullscreen.isFullScreen().then((v) {
       if (mounted) setState(() => _full = v);
     });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
   }
 
   Future<void> _setFull(bool on) async {

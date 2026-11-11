@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -17,10 +18,23 @@ import 'helpers.dart';
 
 class FakeFullscreen implements FullscreenControl {
   bool on = false;
+  final calls = <bool>[];
+  final _changes = StreamController<bool>.broadcast();
+  @override
+  Stream<bool> get changes => _changes.stream;
   @override
   Future<bool> isFullScreen() async => on;
   @override
-  Future<void> setFullScreen(bool v) async => on = v;
+  Future<void> setFullScreen(bool v) async {
+    calls.add(v);
+    on = v;
+  }
+
+  /// The OS changed fullscreen on its own (green button etc.).
+  void osSet(bool v) {
+    on = v;
+    _changes.add(v);
+  }
 }
 
 void main() {
@@ -118,6 +132,9 @@ void main() {
 
   testWidgets('every tappable control is at least 48 tall', (tester) async {
     await pump(tester);
+    t.emit({'event': 'opened', 'sid': 7, 'id': '111', 'app': 'com.apple.Safari', 'path': 'lan'});
+    await settle(tester);
+    expect(s.sessionCount, 1);
     for (final tab in [PanelTab.devices, PanelTab.sessions]) {
       s.togglePanel(tab);
       if (s.panel != tab) s.togglePanel(tab);
@@ -137,6 +154,7 @@ void main() {
         }
       }
       expect(tester.getSize(find.byKey(const Key('start-fullscreen'))).height, greaterThanOrEqualTo(48));
+      if (tab == PanelTab.sessions) expect(find.byKey(const Key('session-111/com.apple.Safari')), findsOneWidget);
     }
   });
 
@@ -196,5 +214,79 @@ void main() {
     await tester.runAsync(() => s.openOrSwitch('111', 'com.apple.Safari', 'Safari'));
     await tester.pump(const Duration(milliseconds: 100));
     expect(find.text(s.hint), findsOneWidget);
+  });
+
+  testWidgets('Esc in window mode closes the panel and leaves fullscreen alone', (tester) async {
+    await pump(tester);
+    s.togglePanel();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settle(tester);
+    expect(s.panel, isNull);
+    expect(fs.calls, isEmpty);
+  });
+
+  testWidgets('Esc with no panel in window mode does nothing', (tester) async {
+    await pump(tester);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settle(tester);
+    expect(fs.calls, isEmpty);
+    expect(s.panel, isNull);
+  });
+
+  testWidgets('fullscreen shortcut toggles the fake', (tester) async {
+    await pump(tester);
+    Future<void> chord() async {
+      if (Platform.isMacOS) {
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      } else {
+        await tester.sendKeyEvent(LogicalKeyboardKey.f11);
+      }
+      await settle(tester);
+    }
+
+    await chord();
+    expect(fs.on, isTrue);
+    await chord();
+    expect(fs.on, isFalse);
+  });
+
+  testWidgets('bracket shortcuts step between sessions', (tester) async {
+    await pump(tester);
+    t.emit({'event': 'opened', 'sid': 1, 'id': '111', 'app': 'A', 'path': 'lan'});
+    t.emit({'event': 'opened', 'sid': 2, 'id': '111', 'app': 'B', 'path': 'lan'});
+    await settle(tester);
+    s.select('111/A');
+    await tester.pump();
+    final mod = Platform.isMacOS ? LogicalKeyboardKey.metaLeft : LogicalKeyboardKey.controlLeft;
+    Future<void> press(LogicalKeyboardKey k) async {
+      await tester.sendKeyDownEvent(mod);
+      await tester.sendKeyEvent(k);
+      await tester.sendKeyUpEvent(mod);
+      await tester.pump();
+    }
+
+    await press(LogicalKeyboardKey.bracketRight);
+    expect(s.currentKey, '111/B');
+    await press(LogicalKeyboardKey.bracketLeft);
+    expect(s.currentKey, '111/A');
+  });
+
+  testWidgets('fullscreen state follows the OS', (tester) async {
+    await pump(tester);
+    await tester.tap(find.byKey(const Key('fullscreen-button')));
+    await settle(tester);
+    expect(find.byTooltip('退出全屏'), findsOneWidget);
+    fs.osSet(false);
+    await settle(tester);
+    expect(find.byTooltip('进入全屏'), findsOneWidget);
+    fs.calls.clear();
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settle(tester);
+    expect(fs.calls, isEmpty);
   });
 }
