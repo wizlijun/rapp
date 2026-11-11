@@ -26,6 +26,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     // `zoom` is picture points per A point.
     private var ready = false
     private var remoteSize = CGSize.zero
+    /// The A window shown (interim single-window client).
+    private var shownWindow: WindowInfo?
     private var zoom: CGFloat = 1
     /// The handle of the live resize in progress, decided when it starts.
     private var liveHandle: ResizeHandle?
@@ -156,32 +158,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             window.title = appName
             output.emit(.ready(width: Int(width), height: Int(height), title: appName))
             traffic.start()
-            // Open at the remote window's size so the picture starts 1:1.
-            applyingRemoteSize = true
-            window.setContentSize(NSSize(width: CGFloat(width), height: CGFloat(height) + inputBarHeight))
-            applyingRemoteSize = false
             ready = true
-            remoteSize = CGSize(width: CGFloat(width), height: CGFloat(height))
-            remoteView.remoteSize = remoteSize
-            // 1 unless the screen kept the window smaller than A's.
-            zoom = fittedZoom() ?? 1
-            sendStreamIfChanged()
         case let .windows(table):
-            // Single-window client (spec §2.6): the first item is the window.
-            guard let first = table.first else { break }
-            window.title = first.title
+            // Interim single-window client: shows the frontmost decorated
+            // window, cropped out of the app's picture (multi-window spec §4.4).
+            guard let first = table.first(where: { $0.kind.isDecorated }) ?? table.first else { break }
+            window.title = first.title.isEmpty ? window.title : first.title
+            shownWindow = first
             remoteView.windowID = first.id
+            remoteView.titleBar = first.titleBar
             let size = CGSize(width: CGFloat(first.rect.w), height: CGFloat(first.rect.h - first.titleBar))
             guard size != remoteSize else { break }
+            let firstTable = remoteSize == .zero
             remoteSize = size
             remoteView.remoteSize = size
-            // A may not take the size asked for: the picture letterboxes in
-            // the window as it is, and the zoom follows what is shown.
-            if !window.inLiveResize, let fitted = fittedZoom() {
+            if firstTable {
+                // Open at the remote window's size so the picture starts 1:1.
+                applyingRemoteSize = true
+                window.setContentSize(NSSize(width: size.width, height: size.height + inputBarHeight))
+                applyingRemoteSize = false
+                // 1 unless the screen kept the window smaller than A's.
+                zoom = fittedZoom() ?? 1
+                sendStreamIfChanged()
+            } else if !window.inLiveResize, let fitted = fittedZoom() {
+                // A may not take the size asked for: the picture letterboxes in
+                // the window as it is, and the zoom follows what is shown.
                 zoom = fitted
                 sendStreamIfChanged()
             }
-        case let .frame(_, payload):
+        case let .frame(region, payload):
             do {
                 try decoder.decode(payload)
             } catch {
@@ -189,7 +194,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             let bgra = Quantizer.expand(samples: decoder.samples, width: decoder.width, height: decoder.height,
                                         mode: decoder.mode)
-            remoteView.show(bgra: bgra, width: decoder.width, height: decoder.height)
+            // Cropped by the region the frame itself carries, not the table's (spec §4.4).
+            guard let shownWindow,
+                  let crop = cropRect(window: shownWindow, region: region,
+                                      pixelWidth: decoder.width, pixelHeight: decoder.height) else { break }
+            remoteView.show(bgra: bgra, width: decoder.width, height: decoder.height, crop: crop)
         case let .error(reason):
             output.finish(exitCode(forHostError: reason), "rapp-client: host says: \(reason)")
         default:

@@ -13,19 +13,29 @@ struct HostError: Error, CustomStringConvertible {
     init(_ description: String) { self.description = description }
 }
 
-/// Captures the pixels of one window with ScreenCaptureKit.
-final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
+/// What `WindowCapture.find` located: the app, its largest window, and the
+/// display (canvas) that holds the window's center.
+struct FoundApp {
+    let app: NSRunningApplication
+    let scApp: SCRunningApplication
     let window: SCWindow
+    let display: SCDisplay
+}
 
-    private let onFrame: (CVPixelBuffer) -> Void
+/// Captures every window of one app on one display with ScreenCaptureKit
+/// (multi-window spec §3.1). Only the capture region of the display is
+/// streamed; each frame says which region it shows.
+final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
+    /// The canvas display in global points (top-left origin).
+    let displayFrame: CGRect
+
+    private let onFrame: (CVPixelBuffer, CanvasRect) -> Void
     private let onStopped: (String) -> Void
     private let filter: SCContentFilter
     private let sampleQueue = DispatchQueue(label: "rapp.capture")
     private let lock = NSLock()
     private var stream: SCStream?
-    private let pid: pid_t
-    private var configuredSize = CGSize.zero
-    private var configuredTitleRow: CGFloat = 0
+    private var configuredRegion: CanvasRect
     /// Frames per second (30, 15, 5 or 1) and capture pixels per point, as the client asked.
     private var configuredFps: Int
     private var configuredDensity: Double
@@ -38,7 +48,7 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     /// is not running; if it runs but shows no window (closed windows are often
     /// only hidden), asks it once to reopen. Gives up after 10 seconds in all,
     /// including any ScreenCaptureKit call that never returns.
-    static func find(bundleID: String) async throws -> (window: SCWindow, app: NSRunningApplication) {
+    static func find(bundleID: String) async throws -> FoundApp {
         var running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first
         if running == nil {
             guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
@@ -64,8 +74,12 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
                 $0.owningApplication?.processID == app.processIdentifier
                     && $0.windowLayer == 0 && $0.frame.width >= 50 && $0.frame.height >= 50
             }
-            if let best = candidates.max(by: { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }) {
-                return (best, app)
+            if let best = candidates.max(by: { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }),
+               let scApp = best.owningApplication {
+                let center = CGPoint(x: best.frame.midX, y: best.frame.midY)
+                guard let display = content.displays.first(where: { $0.frame.contains(center) }) ?? content.displays.first
+                else { throw HostError("macOS reports no display") }
+                return FoundApp(app: app, scApp: scApp, window: best, display: display)
             }
             if !askedToReopen, let url = app.bundleURL {
                 askedToReopen = true
@@ -79,69 +93,36 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         throw HostError("\(bundleID) has no window on screen (open one, and make sure it is not minimized)")
     }
 
-    init(window: SCWindow, fps: Int, density: Double,
-         onFrame: @escaping (CVPixelBuffer) -> Void, onStopped: @escaping (String) -> Void) {
-        self.window = window
+    init(found: FoundApp, region: CanvasRect, fps: Int, density: Double,
+         onFrame: @escaping (CVPixelBuffer, CanvasRect) -> Void, onStopped: @escaping (String) -> Void) {
+        self.displayFrame = found.display.frame
+        self.configuredRegion = region
         self.configuredFps = fps
         self.configuredDensity = density
-        self.pid = window.owningApplication?.processID ?? 0
         self.onFrame = onFrame
         self.onStopped = onStopped
-        self.filter = SCContentFilter(desktopIndependentWindow: window)
+        self.filter = SCContentFilter(display: found.display, including: [found.scApp], exceptingWindows: [])
         super.init()
-        // Measured now so the content area is known before capture starts.
-        if let frame = currentFrame {
-            configuredSize = frame.size
-            configuredTitleRow = measureTitleRow(frame)
-        }
     }
 
-    /// The window's current frame in global screen coordinates (origin at the
-    /// top-left of the main display), or nil once the window is gone.
-    var currentFrame: CGRect? {
-        guard let list = CGWindowListCopyWindowInfo([.optionIncludingWindow], window.windowID) as? [[String: Any]],
-              let bounds = list.first?[kCGWindowBounds as String] as? [String: Any],
-              let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary) else { return nil }
-        return rect
-    }
-
-    /// Height of the title row being cut off, in points.
-    var titleRow: CGFloat { lock.withLock { configuredTitleRow } }
-
-    /// The captured part of the window (below the title row), global coordinates.
-    var contentFrame: CGRect? {
-        guard let frame = currentFrame else { return nil }
-        return contentRect(windowFrame: frame, titleRow: titleRow)
-    }
-
-    private func measureTitleRow(_ frame: CGRect) -> CGFloat {
-        pid == 0 ? 0 : WindowResizer.titleRowHeight(pid: pid, currentFrame: frame)
-    }
-
-    private func makeConfiguration(windowSize size: CGSize, titleRow: CGFloat, fps: Int, density: Double) -> SCStreamConfiguration {
+    private func makeConfiguration(region: CanvasRect, fps: Int, density: Double) -> SCStreamConfiguration {
         let config = SCStreamConfiguration()
-        let content = CGSize(width: size.width, height: max(1, size.height - titleRow))
-        config.sourceRect = CGRect(x: 0, y: titleRow, width: size.width, height: content.height)
-        // Never ask for more pixels than the window really has.
+        config.sourceRect = CGRect(x: CGFloat(region.x), y: CGFloat(region.y),
+                                   width: CGFloat(region.w), height: CGFloat(region.h))
+        // Never ask for more pixels than the display really has.
         let factor = min(CGFloat(density), CGFloat(filter.pointPixelScale))
-        config.width = max(1, Int((content.width * factor).rounded()))
-        config.height = max(1, Int((content.height * factor).rounded()))
+        config.width = max(1, Int((CGFloat(region.w) * factor).rounded()))
+        config.height = max(1, Int((CGFloat(region.h) * factor).rounded()))
         config.pixelFormat = kCVPixelFormatType_32BGRA
         config.showsCursor = false
         config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(fps))
         config.queueDepth = 3
-        config.scalesToFit = true
-        config.ignoreShadowsSingleWindow = true
         return config
     }
 
     func start() async throws {
-        guard currentFrame != nil else { throw HostError("the window was closed") }
-        // Uses the size and title row measured in init, which Ready announced;
-        // any change since is picked up by the next refreshIfNeeded().
-        let (size, row, fps, density) = lock.withLock { (configuredSize, configuredTitleRow, configuredFps, configuredDensity) }
-        let stream = SCStream(filter: filter,
-                              configuration: makeConfiguration(windowSize: size, titleRow: row, fps: fps, density: density),
+        let (region, fps, density) = lock.withLock { (configuredRegion, configuredFps, configuredDensity) }
+        let stream = SCStream(filter: filter, configuration: makeConfiguration(region: region, fps: fps, density: density),
                               delegate: self)
         try stream.addStreamOutput(self, type: .screen, sampleHandlerQueue: sampleQueue)
         try await stream.startCapture()
@@ -165,23 +146,14 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         active?.stopCapture { _ in }
     }
 
-    /// Re-targets the stream when the window's size or title row has changed.
-    /// Returns true if it did.
-    func refreshIfNeeded() async -> Bool {
-        guard let frame = currentFrame else { return false }
-        let row = measureTitleRow(frame)
+    /// Captures `region` (canvas points) from now on. Safe to call before `start()`.
+    func setRegion(_ region: CanvasRect) async {
         let changed: Bool = lock.withLock {
-            guard stream != nil,
-                  abs(frame.width - configuredSize.width) >= 0.5 || abs(frame.height - configuredSize.height) >= 0.5
-                    || row != configuredTitleRow
-            else { return false }
-            configuredSize = frame.size
-            configuredTitleRow = row
+            guard region != configuredRegion else { return false }
+            configuredRegion = region
             return true
         }
-        guard changed else { return false }
-        await updates.request()
-        return true
+        if changed { await updates.request() }
     }
 
     /// Switches the frame rate and the capture pixels per point (never more
@@ -198,11 +170,11 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
 
     /// Run only through `updates`, so never twice at once.
     private func applyConfiguration() async {
-        let current: (SCStream, CGSize, CGFloat, Int, Double)? = lock.withLock {
-            stream.map { ($0, configuredSize, configuredTitleRow, configuredFps, configuredDensity) }
+        let current: (SCStream, CanvasRect, Int, Double)? = lock.withLock {
+            stream.map { ($0, configuredRegion, configuredFps, configuredDensity) }
         }
-        guard let (active, size, row, fps, density) = current else { return }
-        try? await active.updateConfiguration(makeConfiguration(windowSize: size, titleRow: row, fps: fps, density: density))
+        guard let (active, region, fps, density) = current else { return }
+        try? await active.updateConfiguration(makeConfiguration(region: region, fps: fps, density: density))
     }
 
     // MARK: SCStreamOutput
@@ -211,10 +183,18 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         guard type == .screen, sampleBuffer.isValid,
               let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false)
                 as? [[SCStreamFrameInfo: Any]],
-              let rawStatus = attachments.first?[.status] as? Int,
+              let info = attachments.first,
+              let rawStatus = info[.status] as? Int,
               SCFrameStatus(rawValue: rawStatus) == .complete,
               let pixelBuffer = sampleBuffer.imageBuffer else { return }
-        onFrame(pixelBuffer)
+        // The region this frame shows, in global points (Task 1 probe); a
+        // frame without it cannot be placed, so it is dropped (spec §3.2).
+        guard let raw = info[.screenRect], CFGetTypeID(raw as CFTypeRef) == CFDictionaryGetTypeID(),
+              let screen = CGRect(dictionaryRepresentation: raw as! CFDictionary),
+              screen.width > 0, screen.height > 0 else { return }
+        let region = CanvasRect(x: Float(screen.minX - displayFrame.minX), y: Float(screen.minY - displayFrame.minY),
+                                w: Float(screen.width), h: Float(screen.height))
+        onFrame(pixelBuffer, region)
     }
 
     // MARK: SCStreamDelegate

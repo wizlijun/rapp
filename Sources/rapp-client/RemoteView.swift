@@ -14,6 +14,9 @@ final class RemoteView: NSView {
     /// mouse and scroll positions are sent in those points.
     var windowID: UInt32 = 0
     var remoteSize = CGSize.zero
+    /// Height of the window's A title row: positions are sent from the
+    /// window's top-left (spec §2.3), and the picture starts below the row.
+    var titleBar: Float = 0
 
     private var pressed = Set<MouseButton>()
 
@@ -35,8 +38,9 @@ final class RemoteView: NSView {
     override var acceptsFirstResponder: Bool { false }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    /// `bgra` is B, G, R, X bytes, `width * 4` per row.
-    func show(bgra: [UInt8], width: Int, height: Int) {
+    /// `bgra` is B, G, R, X bytes, `width * 4` per row; only `crop` (pixels,
+    /// top-left origin) of it is shown.
+    func show(bgra: [UInt8], width: Int, height: Int, crop: CGRect) {
         guard width > 0, height > 0, bgra.count >= width * height * 4,
               let provider = CGDataProvider(data: Data(bgra) as CFData),
               let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
@@ -45,16 +49,17 @@ final class RemoteView: NSView {
                 space: colorSpace,
                 bitmapInfo: CGBitmapInfo(rawValue: CGBitmapInfo.byteOrder32Little.rawValue
                                             | CGImageAlphaInfo.noneSkipFirst.rawValue),
-                provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+                provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent),
+              let image = image.cropping(to: crop)
         else { return }
-        imageSize = CGSize(width: width, height: height)
+        imageSize = CGSize(width: image.width, height: image.height)
         layer?.contents = image
     }
 
     // MARK: Mouse
 
-    /// Position inside the picture in A points from the window's content
-    /// top-left. Outside the picture this is nil, unless `clamped`, which pins
+    /// Position inside the picture in A points from the window's top-left
+    /// (title row included). Outside the picture this is nil, unless `clamped`, which pins
     /// it to the nearest edge.
     private func position(of event: NSEvent, clamped: Bool) -> (x: Float, y: Float)? {
         let point = convert(event.locationInWindow, from: nil)
@@ -68,7 +73,7 @@ final class RemoteView: NSView {
             normalized = (Float(min(max((point.x - rect.minX) / rect.width, 0), 1)),
                           Float(min(max((point.y - rect.minY) / rect.height, 0), 1)))
         }
-        return (normalized.x * Float(remoteSize.width), normalized.y * Float(remoteSize.height))
+        return (normalized.x * Float(remoteSize.width), normalized.y * Float(remoteSize.height) + titleBar)
     }
 
     private func mouse(_ kind: MouseKind, _ button: MouseButton, _ event: NSEvent) {

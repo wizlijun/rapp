@@ -96,13 +96,15 @@ final class Server {
 }
 
 /// One connected client. All state is touched only on `queue`, except the
-/// pixel conversion, which runs on the capture queue.
+/// pixel conversion, which runs on the capture queue, and window polling,
+/// which runs on `trackerQueue`.
 final class Session {
     private let connection: NWConnection
     private let token: String
     private let boundApp: String?
     private let output: WorkerOutput
     private let queue: DispatchQueue
+    private let trackerQueue = DispatchQueue(label: "rapp.windows")
     /// Called once with the reason, and whether the session had started (a valid Hello).
     private let onEnd: (String, Bool) -> Void
 
@@ -110,13 +112,14 @@ final class Session {
     private var greeted = false
     private var started = false
     private var ended = false
-    /// Guards `sampleMode`, `latestBuffer` and `latestSeq`, which the capture
+    /// Guards `sampleMode`, `latest` and `latestSeq`, which the capture
     /// queue reads; everything else in a session lives on `queue`.
     private let sampleLock = NSLock()
     private var sampleMode = Mode.gray4
-    /// The newest captured picture, kept so a mode switch can redraw at once:
-    /// ScreenCaptureKit sends nothing new while the window is still.
-    private var latestBuffer: CVPixelBuffer?
+    /// The newest captured picture and the region it shows, kept so a mode
+    /// switch can redraw at once: ScreenCaptureKit sends nothing new while
+    /// the windows are still.
+    private var latest: (buffer: CVPixelBuffer, region: CanvasRect)?
     private var latestSeq = 0
     private var newestSubmittedSeq = 0
     private var fps = 15
@@ -126,17 +129,21 @@ final class Session {
     private var app: NSRunningApplication?
     private var injector: InputInjector?
     private var timer: DispatchSourceTimer?
+    private var pollTimer: DispatchSourceTimer?
+
+    /// The window table last sent; input and window commands are checked against it.
+    private var table: [WindowInfo] = []
+    /// The capture region last asked for (canvas points).
+    private var region: CanvasRect?
+    /// The canvas display in global points.
+    private var display = CGRect.zero
 
     private var sendInFlight = false
-    private var pending: (samples: [UInt8], width: Int, height: Int)?
+    private var pending: (samples: [UInt8], width: Int, height: Int, region: CanvasRect)?
     private var bytesThisSecond = 0
     private var framesThisSecond = 0
     private var lastWidth = 0
     private var lastHeight = 0
-    private var lastTitle = ""
-    /// The window's content size in A points: the canvas, the frame region
-    /// and the one window of the table (spec §2.6).
-    private var contentSize = CGSize.zero
 
     init(connection: NWConnection, token: String, boundApp: String?, output: WorkerOutput, queue: DispatchQueue,
          onEnd: @escaping (String, Bool) -> Void) {
@@ -215,19 +222,38 @@ final class Session {
             output.emit(.sessionStarted(client: clientDescription, mode: mode, fps: Int(fps)))
             startCapture(bundleID: app)
         case .text, .key, .mouse, .scroll:
-            injector?.handle(message)
-        case let .resize(window, width, height):
-            // A window that is no longer in the table is dropped, not an error.
-            guard window == capture?.window.windowID else { return }
-            resizeWindow(width: Int(width), height: Int(height))
+            injector?.handle(message, table: table)
         case let .setStream(mode, fps, density):
             setStream(mode, fps: Int(fps), density: density)
-        case .focus, .close, .move, .menuPick:
-            // A single-window host may ignore these (spec §2.6).
+        // Window commands naming a window no longer in the table are dropped,
+        // not errors: B may not have seen the newest table yet (spec §2.4).
+        case let .resize(id, width, height):
+            guard let window = decoratedWindow(id), window.resizable else { return }
+            resize(window, content: CGSize(width: Int(width), height: Int(height)))
+        case let .focus(id):
+            guard let app, let window = table.first(where: { $0.id == id }) else { return }
+            app.activate()
+            WindowResizer.bringToFront(pid: app.processIdentifier,
+                                       frame: window.kind.isDecorated ? window.globalFrame(display: display) : nil)
+        case let .close(id):
+            guard let app, let window = decoratedWindow(id) else { return }
+            _ = WindowResizer.close(pid: app.processIdentifier, frame: window.globalFrame(display: display))
+        case let .move(id, x, y):
+            guard let app, let window = decoratedWindow(id) else { return }
+            let origin = CGPoint(x: display.minX + CGFloat(x), y: display.minY + CGFloat(y))
+            if !WindowResizer.move(pid: app.processIdentifier, frame: window.globalFrame(display: display), to: origin) {
+                output.log("could not move a window (the app may not allow it)")
+            }
+        case .menuPick:
+            // The menu bar is not mirrored yet.
             break
         case .ready, .error, .frame, .windows, .menuBar:
             fail("unexpected message from client")
         }
+    }
+
+    private func decoratedWindow(_ id: UInt32) -> WindowInfo? {
+        table.first { $0.id == id && $0.kind.isDecorated }
     }
 
     /// The client's address as `ip:port`.
@@ -240,19 +266,34 @@ final class Session {
 
     private func startCapture(bundleID: String) {
         let (fps, density) = (self.fps, Double(self.density))
+        let trackerQueue = self.trackerQueue
         Task { [weak self] in
             do {
                 let found = try await WindowCapture.find(bundleID: bundleID)
+                let display = found.display.frame
+                let tracker = WindowTracker(pid: found.app.processIdentifier, appName: found.app.localizedName,
+                                            display: display)
+                let table = trackerQueue.sync { tracker.poll() }
+                // Before the first poll lists it, the found window alone is the region.
+                let start = CanvasRect(x: Float(found.window.frame.minX - display.minX),
+                                       y: Float(found.window.frame.minY - display.minY),
+                                       w: Float(found.window.frame.width), h: Float(found.window.frame.height))
+                let region = captureRegion(windows: table, display: display.size)
+                    ?? captureRegion(windows: [WindowInfo(id: 1, parent: 0, kind: .normal, resizable: false, focused: false,
+                                                          rect: start, titleBar: 0, title: "")],
+                                     display: display.size)
+                    ?? CanvasRect(x: 0, y: 0, w: Float(display.width), h: Float(display.height))
                 guard let self else { return }
                 let capture = WindowCapture(
-                    window: found.window, fps: fps, density: density,
-                    onFrame: { [weak self] pixelBuffer in self?.frameArrived(pixelBuffer) },
+                    found: found, region: region, fps: fps, density: density,
+                    onFrame: { [weak self] pixelBuffer, frameRegion in self?.frameArrived(pixelBuffer, region: frameRegion) },
                     onStopped: { [weak self] reason in
                         self?.queue.async { self?.fail("capture stopped: \(reason)") }
                     })
-                guard let content = capture.contentFrame else { throw HostError("the window was closed") }
-                // Announce the window before the first frame can be sent.
-                self.queue.async { self.captureReady(capture, app: found.app, content: content) }
+                // Announce the canvas and the windows before the first frame can be sent.
+                self.queue.async {
+                    self.captureReady(capture, app: found.app, tracker: tracker, table: table, region: region)
+                }
                 try await capture.start()
             } catch {
                 guard let self else { return }
@@ -261,47 +302,75 @@ final class Session {
         }
     }
 
-    private func captureReady(_ capture: WindowCapture, app: NSRunningApplication, content: CGRect) {
+    private func captureReady(_ capture: WindowCapture, app: NSRunningApplication, tracker: WindowTracker,
+                              table: [WindowInfo], region: CanvasRect) {
         guard !ended else {
             capture.stop()
             return
         }
         self.capture = capture
         self.app = app
+        self.display = capture.displayFrame
+        self.region = region
         // A SetStream that arrived while the window was being found is applied now.
         let (fps, density) = (self.fps, Double(self.density))
         Task { await capture.setStream(fps: fps, density: density) }
-        injector = InputInjector(app: app, windowID: capture.window.windowID, frameProvider: { [weak capture] in
-            guard let capture, let window = capture.currentFrame else { return nil }
-            return (window, contentRect(windowFrame: window, titleRow: capture.titleRow))
-        })
-        lastTitle = currentTitle(capture, app: app) ?? windowTitle(capture.window.title, appName: app.localizedName)
-        contentSize = CGSize(width: content.width.rounded(), height: content.height.rounded())
+        injector = InputInjector(app: app, display: display, log: { [output] in output.log($0) })
         send(.ready(appName: windowTitle("", appName: app.localizedName),
-                    width: UInt16(clamping: Int(contentSize.width)),
-                    height: UInt16(clamping: Int(contentSize.height))))
-        sendWindowTable()
+                    width: UInt16(clamping: Int(display.width.rounded())),
+                    height: UInt16(clamping: Int(display.height.rounded()))))
+        tableChanged(table)
 
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + 1, repeating: 1.0)
         timer.setEventHandler { [weak self] in self?.tick() }
         timer.resume()
         self.timer = timer
+
+        // Windows are looked up 10 times a second (spec §3.2), off the session queue.
+        let poll = DispatchSource.makeTimerSource(queue: trackerQueue)
+        poll.schedule(deadline: .now() + 0.1, repeating: 0.1)
+        poll.setEventHandler { [weak self] in
+            let next = tracker.poll()
+            self?.queue.async { self?.tableChanged(next) }
+        }
+        poll.resume()
+        pollTimer = poll
+    }
+
+    /// Sends the table if it changed, and follows the windows with the
+    /// capture region. An empty table keeps the region (spec §3.2).
+    private func tableChanged(_ next: [WindowInfo]) {
+        guard !ended, let capture else { return }
+        if next != table {
+            if next.map(\.id) != table.map(\.id) || next.map(\.kind) != table.map(\.kind) {
+                output.log("windows: " + (next.isEmpty ? "none" : next.map { "\($0.kind) \($0.id)" }.joined(separator: ", ")))
+            }
+            table = next
+            send(.windows(next))
+        }
+        if let newRegion = captureRegion(windows: next, display: display.size), newRegion != region {
+            region = newRegion
+            // No encoder reset: each frame carries its own region and B keeps
+            // the decoded picture, so a diff against the previous frame stays
+            // correct; a new pixel size already makes the encoder send a full frame.
+            Task { await capture.setRegion(newRegion) }
+        }
     }
 
     /// Runs on the capture queue.
-    private func frameArrived(_ pixelBuffer: CVPixelBuffer) {
+    private func frameArrived(_ pixelBuffer: CVPixelBuffer, region: CanvasRect) {
         let (mode, seq): (Mode, Int) = sampleLock.withLock {
             latestSeq += 1
-            latestBuffer = pixelBuffer
+            latest = (pixelBuffer, region)
             return (sampleMode, latestSeq)
         }
-        quantizeAndSubmit(pixelBuffer, mode: mode, seq: seq)
+        quantizeAndSubmit(pixelBuffer, region: region, mode: mode, seq: seq)
     }
 
     /// Quantizes on the calling (non-session) queue, then hands the samples,
     /// tagged with the mode and capture sequence number they came from, to `queue`.
-    private func quantizeAndSubmit(_ pixelBuffer: CVPixelBuffer, mode: Mode, seq: Int) {
+    private func quantizeAndSubmit(_ pixelBuffer: CVPixelBuffer, region: CanvasRect, mode: Mode, seq: Int) {
         CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
         guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else { return }
@@ -311,7 +380,9 @@ final class Session {
               ((width + tileSize - 1) / tileSize) * ((height + tileSize - 1) / tileSize) <= 0xFFFF else { return }
         let samples = Quantizer.quantize(bgra: UnsafeRawBufferPointer(start: base, count: bytesPerRow * height),
                                          width: width, height: height, bytesPerRow: bytesPerRow, mode: mode)
-        queue.async { [weak self] in self?.submit(samples: samples, width: width, height: height, mode: mode, seq: seq) }
+        queue.async { [weak self] in
+            self?.submit(samples: samples, width: width, height: height, region: region, mode: mode, seq: seq)
+        }
     }
 
     /// While a frame is still being sent, newer frames replace each other and
@@ -321,20 +392,19 @@ final class Session {
     /// Samples quantized for a mode that has since been switched away from are
     /// dropped (the encoder would reject their size), and so are samples older
     /// than ones already submitted (a redraw racing a newer frame).
-    private func submit(samples: [UInt8], width: Int, height: Int, mode: Mode, seq: Int) {
+    private func submit(samples: [UInt8], width: Int, height: Int, region: CanvasRect, mode: Mode, seq: Int) {
         guard !ended, capture != nil else { return }
         guard mode == sampleLock.withLock({ sampleMode }), seq >= newestSubmittedSeq else { return }
         newestSubmittedSeq = seq
         if sendInFlight {
-            pending = (samples, width, height)
+            pending = (samples, width, height, region)
         } else {
-            encodeAndSend(samples: samples, width: width, height: height)
+            encodeAndSend(samples: samples, width: width, height: height, region: region)
         }
     }
 
-    private func encodeAndSend(samples: [UInt8], width: Int, height: Int) {
+    private func encodeAndSend(samples: [UInt8], width: Int, height: Int, region: CanvasRect) {
         guard let payload = encoder?.encode(samples: samples, width: width, height: height) else { return }
-        let region = CanvasRect(x: 0, y: 0, w: Float(contentSize.width), h: Float(contentSize.height))
         let bytes = Message.frame(region: region, payload).encoded()
         bytesThisSecond += bytes.count
         framesThisSecond += 1
@@ -348,13 +418,13 @@ final class Session {
                 self.end("send failed: \(error.localizedDescription)")
             } else if let next = self.pending {
                 self.pending = nil
-                self.encodeAndSend(samples: next.samples, width: next.width, height: next.height)
+                self.encodeAndSend(samples: next.samples, width: next.width, height: next.height, region: next.region)
             }
         })
     }
 
     private func tick() {
-        guard !ended, let capture else { return }
+        guard !ended, capture != nil else { return }
         let kbps = Double(bytesThisSecond) * 8 / 1000
         if output.json {
             output.emit(.stats(kbps: kbps, fps: framesThisSecond, width: lastWidth, height: lastHeight))
@@ -363,47 +433,9 @@ final class Session {
         }
         bytesThisSecond = 0
         framesThisSecond = 0
-        if capture.currentFrame == nil {
-            fail("the window was closed")
-            return
-        }
-        refreshSize(of: capture)
-        if let app, let title = currentTitle(capture, app: app), title != lastTitle {
-            lastTitle = title
-            sendWindowTable()
-        }
-    }
-
-    /// The one-item window table of a single-window host (spec §2.6).
-    private func sendWindowTable() {
-        guard let capture, contentSize.width > 0, contentSize.height > 0 else { return }
-        let rect = CanvasRect(x: 0, y: 0, w: Float(contentSize.width), h: Float(contentSize.height))
-        send(.windows([WindowInfo(id: capture.window.windowID, parent: 0, kind: .normal, resizable: true,
-                                  focused: app?.isActive ?? false, rect: rect, titleBar: 0,
-                                  title: String(lastTitle.prefix(maxTitleCharacters)))]))
-    }
-
-    /// The window's title as Accessibility reports it now, by the client rule
-    /// (app name when empty, at most 200 characters); nil if the window is gone.
-    private func currentTitle(_ capture: WindowCapture, app: NSRunningApplication) -> String? {
-        guard let frame = capture.currentFrame else { return nil }
-        let raw = WindowResizer.title(pid: app.processIdentifier, currentFrame: frame) ?? capture.window.title
-        return windowTitle(raw, appName: app.localizedName)
-    }
-
-    private func refreshSize(of capture: WindowCapture) {
-        Task { [weak self] in
-            if await capture.refreshIfNeeded() {
-                self?.queue.async {
-                    guard let self, !self.ended else { return }
-                    self.encoder?.reset()
-                    // Tell the client A's real content size: the app may not have taken the requested one.
-                    if let content = capture.contentFrame {
-                        self.contentSize = CGSize(width: content.width.rounded(), height: content.height.rounded())
-                        self.sendWindowTable()
-                    }
-                }
-            }
+        // Closing every window does not end the session; quitting the app does (spec §2.5).
+        if let app, app.isTerminated {
+            fail("\(windowTitle("", appName: app.localizedName)) quit")
         }
     }
 
@@ -429,38 +461,28 @@ final class Session {
         guard newMode != oldMode else { return }
         // A new encoder starts with a full frame, which also restarts both
         // ends' compression streams. Old-mode samples still queued are dropped.
-        let buffer: (CVPixelBuffer, Int)? = sampleLock.withLock {
+        let redraw: (CVPixelBuffer, CanvasRect, Int)? = sampleLock.withLock {
             sampleMode = newMode
-            return latestBuffer.map { ($0, latestSeq) }
+            return latest.map { ($0.buffer, $0.region, latestSeq) }
         }
         encoder = FrameEncoder(mode: newMode)
         pending = nil
-        if let (pixelBuffer, seq) = buffer {
+        if let (pixelBuffer, region, seq) = redraw {
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                self?.quantizeAndSubmit(pixelBuffer, mode: newMode, seq: seq)
+                self?.quantizeAndSubmit(pixelBuffer, region: region, mode: newMode, seq: seq)
             }
         }
     }
 
     // MARK: Remote resize
 
-    private func resizeWindow(width: Int, height: Int) {
-        guard let capture, let app, let frame = capture.currentFrame else { return }
-        // The display holding the window's top-left corner, in the same
-        // top-left-origin coordinates as the window frame.
-        var display = CGMainDisplayID()
-        var count: UInt32 = 0
-        var found = [CGDirectDisplayID](repeating: 0, count: 1)
-        if CGGetDisplaysWithPoint(frame.origin, 1, &found, &count) == .success, count > 0 { display = found[0] }
-        let size = windowSize(forContent: CGSize(width: width, height: height), titleRow: capture.titleRow,
-                              origin: frame.origin, screen: CGDisplayBounds(display))
-        guard WindowResizer.resize(pid: app.processIdentifier, currentFrame: frame, to: size) else {
-            output.log("could not resize the window (the app may not allow it)")
-            return
-        }
-        queue.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-            guard let self, !self.ended else { return }
-            self.refreshSize(of: capture)
+    /// Content size + title row, kept on the display and at least 100 x 100 (spec §3.4).
+    private func resize(_ window: WindowInfo, content: CGSize) {
+        guard let app else { return }
+        let frame = window.globalFrame(display: display)
+        let size = windowSize(forContent: content, titleRow: CGFloat(window.titleBar), origin: frame.origin, screen: display)
+        if !WindowResizer.resize(pid: app.processIdentifier, frame: frame, to: size) {
+            output.log("could not resize a window (the app may not allow it)")
         }
     }
 
@@ -485,6 +507,8 @@ final class Session {
         ended = true
         timer?.cancel()
         timer = nil
+        pollTimer?.cancel()
+        pollTimer = nil
         capture?.stop()
         capture = nil
         injector = nil
