@@ -3,7 +3,8 @@
 real Swift rapp-host and rapp-client. For each path (lan, relay) it opens an
 app through the hub, waits, takes a screenshot, then kicks the session over
 the service IPC (what the --cm window's 断开 button sends) and waits for the
-hub's `closed` event. A third round ("id@ip") uses a hub with no relay at all
+hub's `closed` event. Each round also checks the client logged at least one
+window from the host's window table (protocol v4). A third round ("id@ip") uses a hub with no relay at all
 that adds A by the first `id@ip` A's status reports.
 
 usage: scripts/e2e-local.py <work dir> [app id]   (default com.apple.Safari)
@@ -58,9 +59,9 @@ class Hub:
             env["RAPP_FORCE_PATH"] = force
         if bins:
             env["RAPP_BIN_DIR"] = bins
+        self.log = os.path.join(WORK, f"hub-{force}.log")
         self.p = subprocess.Popen([os.path.join(SERVICE_DIR, "rapp-hub")], env=env, text=True, bufsize=1,
-                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                  stderr=open(os.path.join(WORK, f"hub-{force}.log"), "w"))
+                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=open(self.log, "w"))
         self.req = 0
 
     def send(self, **cmd):
@@ -159,6 +160,10 @@ def main():
             opened = hub.wait("opened")
             assert opened["path"] == want, f"opened over {opened['path']}, wanted {want}"
             time.sleep(5)
+            # The client logs "windows: N" to stderr, which the hub writes to its log.
+            counts = [int(n) for n in re.findall(r"^windows: (\d+)$", read_text(hub.log), re.M)]
+            assert counts and counts[-1] >= 1, f"client saw no window (log windows lines: {counts})"
+            print(f"  client windows: {counts[-1]}")
             shot = os.path.join(WORK, f"shot-{force.replace('@', '-at-')}.png")
             subprocess.run(["screencapture", "-x", shot])
             status = ipc(ipc_port, token, {"cmd": "status"})

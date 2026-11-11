@@ -19,6 +19,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var mirroredMenu: MirroredMenu!
     private var keyMonitor: Any?
     private var ready = false
+    /// The window count last logged.
+    private var loggedWindows: Int?
     /// The stream settings last sent in Hello or SetStream.
     private var sentStream: (mode: Mode, fps: UInt8, density: Float)?
 
@@ -136,6 +138,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case let .windows(table):
             coordinator.apply(table)
             output.emit(.windows(count: table.count))
+            // Logged (stderr with --json) so a hub's log shows it too; the hub does not forward events.
+            if table.count != loggedWindows {
+                loggedWindows = table.count
+                output.log("windows: \(table.count)")
+            }
             sendStreamIfChanged()
         case let .frame(region, payload):
             do {

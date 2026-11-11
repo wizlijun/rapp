@@ -50,12 +50,19 @@
 - [x] GUI：relay 未连上时 ID 显示为 `lan_ids`，添加主机输入框写明可填 `ID@IP`
 - 结果：cargo test、clippy、flutter analyze/test 全过；e2e 第三轮用没有 relay 的 hub 按 `686712053@10.17.0.235:<port>` 加主机并打开 Safari，路径 lan，踢掉会话后 hub 收到 closed。第一次跑时 A 报的第一个地址是 198.18.0.1（本机 TUN 代理的假 IP），连不上，于是加了过滤
 
+## 多窗口（RAIL 式，协议 v4，只做 macOS）
+规格：`docs/superpowers/specs/2026-11-11-rapp-multiwindow-design.md`；计划：`docs/superpowers/plans/2026-11-11-rapp-multiwindow.md`；分支 `multiwindow`。
+- [x] Task 1 探查（结果在规格附录）；Task 2 协议 v4；Task 3 纯函数（父窗口、摆放）；Task 4 host 窗口表、按窗口注入、focus/close/move/resize；Task 5 client 每个 A 窗口一个 B 窗口；Task 6 菜单栏镜像；Task 7 e2e 和文档
+- 结果：`swift test` 160 个全过。e2e 三轮（lan、relay、id@ip，目标 Calculator）都过，每轮 client 都报 `windows: 1`（client 在 `--json` 时把窗口数写 stderr，hub 日志里能看到；hub 本身不转发事件）。
+  实机（TextEdit，空文档、不打字、最后不存关掉）：右键菜单、格式菜单、字体面板、存储 sheet 在 B 上各是独立窗口且位置对；B 上挪窗口 0.5 秒内 A 跟着挪；B 菜单栏和 A 一致（灰掉、快捷键文字），B 上选"File ▸ New"在 A 上开出第二个窗口，B 上也多一个。
+- 没测：Windows、Omarchy 端（仍是 v3，和新 Mac 端连不上）；多块屏；A 上全屏窗口；打开时才填内容的子菜单（Open Recent、Share）在 B 上可能是空的；只有打开面板时按"新建"，2.5 秒内没出新窗口（原因没查）；Safari 读整个菜单栏的耗时只在探查时量过。
+
 ## 未经实机验证（交给用户验收）
 跨 NAT 打洞、VPS 部署、Windows 和 Linux 上的服务。
 
 ## 未来规划
-- **多窗口 / 弹出窗口**（照 RDP RemoteApp 的 RAIL 窗口协议）：菜单、右键菜单、popover、sheet、对话框、多个文档窗口。下一个子项目，正在出 spec
-- **按区域选编码**（参考 Xpra）：静止的文字区用无损或低色深，正在变的区域用视频编码；在多窗口之后单独出 spec
+- **多窗口 / 弹出窗口**：macOS 已做（见上）；Windows、Omarchy 端升到 v4 待做
+- **按区域选编码**（参考 Xpra）：静止的文字区用无损或低色深，正在变的区域用视频编码；下一个，单独出 spec
 - **硬件编码**（参考 Sunshine）：A 端用 VideoToolbox 编 H.264/HEVC，作为"看视频"档；B 端用 VideoToolbox 解码。30 fps 全屏动画时比瓦片编码省流量也省 CPU。暂不排期
 
 ## 回顾
