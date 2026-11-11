@@ -71,7 +71,7 @@ void main() {
     await tester.pumpWidget(wrap(panel()));
     await open(tester, 1, 'Safari');
     expect(find.text('mini'), findsOneWidget); // group title
-    await tester.tap(find.text('App'));
+    await tester.tap(find.byKey(const Key('group-app')));
     await tester.pump();
     expect(s.grouping, Grouping.app);
     expect(find.text('Safari'), findsWidgets);
@@ -180,7 +180,9 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     s.togglePanel(PanelTab.devices);
-    await tester.pumpWidget(wrap(panel()));
+    await tester.pumpWidget(wrap(Stack(children: [
+      Positioned(left: 0, top: 0, bottom: 0, child: panel()),
+    ])));
     expect(tester.getSize(find.byType(SidePanel)).width, lessThanOrEqualTo(400));
   });
 

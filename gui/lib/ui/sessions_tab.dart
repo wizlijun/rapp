@@ -29,6 +29,7 @@ class SessionsTab extends StatelessWidget {
                     if (g != Grouping.values.first) const SizedBox(width: 6),
                     Expanded(
                       child: TabChip(
+                        key: Key('group-${g.name}'),
                         label: groupingLabel(g),
                         selected: state.grouping == g,
                         onTap: () => state.setGrouping(g),
