@@ -14,23 +14,27 @@ class RappButton extends StatefulWidget {
     required this.label,
     this.onPressed,
     this.semanticLabel,
+    this.focusNode,
   }) : _kind = _Kind.primary;
   const RappButton.secondary({
     super.key,
     required this.label,
     this.onPressed,
     this.semanticLabel,
+    this.focusNode,
   }) : _kind = _Kind.secondary;
   const RappButton.accent({
     super.key,
     required this.label,
     this.onPressed,
     this.semanticLabel,
+    this.focusNode,
   }) : _kind = _Kind.accent;
 
   final String label;
   final VoidCallback? onPressed;
   final String? semanticLabel;
+  final FocusNode? focusNode;
   final _Kind _kind;
 
   @override
@@ -55,6 +59,7 @@ class _RappButtonState extends State<RappButton> {
     final Widget button = switch (widget._kind) {
       _Kind.primary => FilledButton(
         onPressed: widget.onPressed,
+        focusNode: widget.focusNode,
         style: FilledButton.styleFrom(
           backgroundColor: t.text,
           foregroundColor: t.bg,
@@ -65,6 +70,7 @@ class _RappButtonState extends State<RappButton> {
       ),
       _Kind.accent => FilledButton(
         onPressed: widget.onPressed,
+        focusNode: widget.focusNode,
         style: FilledButton.styleFrom(
           backgroundColor: t.accent,
           foregroundColor: t.accentInk,
@@ -75,6 +81,7 @@ class _RappButtonState extends State<RappButton> {
       ),
       _Kind.secondary => OutlinedButton(
         onPressed: widget.onPressed,
+        focusNode: widget.focusNode,
         style: OutlinedButton.styleFrom(
           backgroundColor: t.raise.first,
           foregroundColor: t.text,
@@ -85,7 +92,8 @@ class _RappButtonState extends State<RappButton> {
         child: child,
       ),
     };
-    final reduced = MediaQuery.disableAnimationsOf(context);
+    final reduced =
+        MediaQuery.disableAnimationsOf(context) || widget.onPressed == null;
     return Listener(
       onPointerDown: (_) => _set(true),
       onPointerUp: (_) => _set(false),
@@ -130,14 +138,24 @@ class ConfirmButton extends StatefulWidget {
 class _ConfirmButtonState extends State<ConfirmButton> {
   bool _armed = false;
   Timer? _timer;
+  final FocusNode _focus = FocusNode(debugLabel: 'ConfirmButton');
 
   @override
   void dispose() {
     _timer?.cancel();
+    _focus.dispose();
     super.dispose();
   }
 
   void _tap() {
+    // The weak and armed buttons are different widgets; carry keyboard focus
+    // across the swap so Enter/Space can confirm.
+    final hadFocus = _focus.hasFocus;
+    if (hadFocus) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _focus.requestFocus();
+      });
+    }
     if (_armed) {
       _timer?.cancel();
       setState(() => _armed = false);
@@ -157,11 +175,13 @@ class _ConfirmButtonState extends State<ConfirmButton> {
       return RappButton.accent(
         label: widget.confirmLabel,
         onPressed: enabled ? _tap : null,
+        focusNode: _focus,
       );
     }
     final t = RappTokens.of(context);
     return TextButton(
       onPressed: enabled ? _tap : null,
+      focusNode: _focus,
       style: TextButton.styleFrom(
         foregroundColor: t.muted,
         minimumSize: const Size(48, 48),

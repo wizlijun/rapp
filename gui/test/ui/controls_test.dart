@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/ui/controls.dart';
 
@@ -86,6 +87,29 @@ void main() {
         disableAnimations: true,
       ),
     );
+    final g = await t.startGesture(t.getCenter(find.text('a')));
+    await t.pump(const Duration(milliseconds: 100));
+    expect(t.widget<AnimatedScale>(find.byType(AnimatedScale)).scale, 1);
+    await g.up();
+  });
+  testWidgets('keyboard: Enter arms, Enter again confirms', (t) async {
+    var n = 0;
+    await t.pumpWidget(
+      wrap(ConfirmButton(label: '结束会话', onConfirmed: () => n++)),
+    );
+    await t.sendKeyEvent(LogicalKeyboardKey.tab);
+    await t.pump();
+    await t.sendKeyEvent(LogicalKeyboardKey.enter);
+    await t.pump();
+    await t.pump();
+    expect(find.text('再点一次确认'), findsOneWidget);
+    await t.sendKeyEvent(LogicalKeyboardKey.enter);
+    await t.pump();
+    expect(n, 1);
+    await t.pump(const Duration(seconds: 3));
+  });
+  testWidgets('disabled button does not scale on press', (t) async {
+    await t.pumpWidget(wrap(const RappButton.primary(label: 'a')));
     final g = await t.startGesture(t.getCenter(find.text('a')));
     await t.pump(const Duration(milliseconds: 100));
     expect(t.widget<AnimatedScale>(find.byType(AnimatedScale)).scale, 1);
