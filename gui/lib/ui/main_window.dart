@@ -14,6 +14,7 @@ import 'backdrop.dart';
 import 'devices_tab.dart';
 import 'fullscreen.dart';
 import 'main_state.dart';
+import 'overview.dart';
 import 'side_panel.dart';
 import 'stage.dart';
 import 'tokens.dart';
@@ -153,7 +154,7 @@ class _MainWindowState extends State<MainWindow> {
                   builder: (context, _) {
                     final open = state.panel != null;
                     return Stack(children: [
-                      Positioned.fill(child: Stage(state: state)),
+                      Positioned.fill(child: state.overview ? Overview(state: state) : Stage(state: state)),
                       if (open)
                         Positioned.fill(
                           child: _Blur(

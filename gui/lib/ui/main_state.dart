@@ -424,6 +424,9 @@ class MainState extends ChangeNotifier {
 
   int get sessionCount => _entries.length;
 
+  /// The session rows in order (what the panel and the overview show).
+  List<SessionEntry> get entries => List.unmodifiable(_entries);
+
   SessionEntry? get current {
     for (final e in _entries) {
       if (e.key == currentKey) return e;
