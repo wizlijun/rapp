@@ -621,7 +621,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-hub"
-version = "0.3.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "quinn",
@@ -635,7 +635,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-net"
-version = "0.3.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "if-addrs",
@@ -652,7 +652,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-relay"
-version = "0.3.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "quinn",
@@ -666,7 +666,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-service"
-version = "0.3.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "quinn",
@@ -681,7 +681,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-testkit"
-version = "0.3.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "quinn",
@@ -697,7 +697,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-update"
-version = "0.3.0"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "rapp-net",
