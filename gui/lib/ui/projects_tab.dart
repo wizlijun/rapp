@@ -143,12 +143,16 @@ class _ProjectCardState extends State<_ProjectCard> {
               RappButton.primary(
                 key: Key('open-all-${p.id}'),
                 label: '全部打开',
-                onPressed: null,
+                onPressed: s.hubUsable && p.members.isNotEmpty
+                    ? () => s.openAll(p.id)
+                    : null,
               ),
               ConfirmButton(
                 key: Key('end-all-${p.id}'),
                 label: '全部结束',
-                onConfirmed: null,
+                onConfirmed: p.members.any((m) => s.entryFor(m.key) != null)
+                    ? () => s.endAll(p.id)
+                    : null,
               ),
               ConfirmButton(
                 key: Key('delete-project-${p.id}'),

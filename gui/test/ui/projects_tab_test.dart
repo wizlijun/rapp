@@ -3,10 +3,12 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/hub_client.dart';
+import 'package:rapp/ui/controls.dart';
 import 'package:rapp/ui/lamp.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/projects_tab.dart';
+import 'package:rapp/ui/tokens.dart';
 import 'package:rapp/ui/workspace_store.dart';
 
 import '../fakes.dart';
@@ -218,7 +220,7 @@ void main() {
             ),
           )
           .onPressed,
-      isNull,
+      isNotNull,
     );
   });
 
@@ -295,6 +297,79 @@ void main() {
     await tester.pump();
     expect(s.panel, isNull);
     expect(t.sent.last['cmd'], 'focus');
+  });
+
+  ButtonStyleButton openAll(WidgetTester tester, String id) =>
+      tester.widget<ButtonStyleButton>(
+        find.descendant(
+          of: find.byKey(Key('open-all-$id')),
+          matching: find.byType(FilledButton),
+        ),
+      );
+
+  ButtonStyleButton endAll(WidgetTester tester, String id) =>
+      tester.widget<ButtonStyleButton>(
+        find.descendant(
+          of: find.byKey(Key('end-all-$id')),
+          matching: find.byType(TextButton),
+        ),
+      );
+
+  testWidgets('全部打开 is primary and disabled without members', (
+    tester,
+  ) async {
+    await tester.runAsync(boot);
+    await pump(tester);
+    final id = await oneProject(tester);
+    final button = openAll(tester, id);
+    expect(button.onPressed, isNull);
+    // Primary: filled with the text colour (controls.dart RappButton.primary).
+    final tokens = RappTokens.of(tester.element(find.byKey(Key('open-all-$id'))));
+    expect(button.style!.backgroundColor!.resolve({}), tokens.text);
+    expect(tester.widget<RappButton>(find.byKey(Key('open-all-$id'))).label, '全部打开');
+    s.addMember(id, safari);
+    await tester.pump();
+    expect(openAll(tester, id).onPressed, isNotNull);
+  });
+
+  testWidgets('全部结束 needs two taps and is disabled with no sessions', (
+    tester,
+  ) async {
+    await tester.runAsync(boot);
+    await pump(tester);
+    final id = await oneProject(tester, members: [safari]);
+    expect(endAll(tester, id).onPressed, isNull);
+    t.emit({
+      'event': 'opened',
+      'sid': 1,
+      'id': '111',
+      'app': 'com.apple.Safari',
+      'path': 'lan',
+    });
+    await tester.runAsync(flush);
+    await tester.pump();
+    expect(endAll(tester, id).onPressed, isNotNull);
+    await tester.tap(find.byKey(Key('end-all-$id')));
+    await tester.pump();
+    expect(find.text('再点一次确认'), findsOneWidget);
+    expect(t.sent.where((m) => m['cmd'] == 'close'), isEmpty);
+    await tester.tap(find.text('再点一次确认'));
+    await tester.pump();
+    expect(t.sent.where((m) => m['cmd'] == 'close').map((m) => m['sid']), [1]);
+    expect(s.hint, '写周报：结束 1 个会话');
+  });
+
+  testWidgets('全部打开 closes the panel', (tester) async {
+    await tester.runAsync(boot);
+    await pump(tester);
+    expect(s.panel, PanelTab.projects);
+    final id = await oneProject(tester, members: [safari]);
+    await tester.tap(find.byKey(Key('open-all-$id')));
+    await tester.pump();
+    expect(s.panel, isNull);
+    expect(s.currentKey, '111/com.apple.Safari');
+    expect(t.sent.where((m) => m['cmd'] == 'open'), hasLength(1));
+    await tester.runAsync(flush);
   });
 
   testWidgets('the new-project field is at least 48 tall', (tester) async {

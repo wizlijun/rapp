@@ -14,6 +14,7 @@ import '../permissions.dart';
 import 'lamp.dart';
 import 'lifecycle.dart';
 import 'prefs.dart';
+import 'projects.dart';
 import 'session_model.dart';
 import 'tokens.dart';
 import 'workspace_store.dart';
@@ -88,6 +89,8 @@ class MainState extends ChangeNotifier {
   final Map<Object, _Waiting> _waiting = {};
   // Sids closed on the hub without ever being shown; their hub `closed` is ignored.
   final Set<Object> _quiet = {};
+  // Keys ended by 「全部结束」 whose end comes later: their 「已结束」 would hide the summary (K13).
+  final Set<String> _batchEnded = {};
 
   bool get embeds => port != null;
 
@@ -479,6 +482,7 @@ class MainState extends ChangeNotifier {
         }
         final hubReason = h.closeReasons.remove(e.sid);
         if (_quiet.remove(e.sid)) continue;
+        if (_batchEnded.remove(e.key)) continue; // 全部结束 already said so (K13)
         hint = endedHint(e.appName, hubReason);
       }
     } else if (currentKey != null && !newKeys.contains(currentKey)) {
@@ -538,7 +542,8 @@ class MainState extends ChangeNotifier {
       _waiting.remove(e.sid)?.timer.cancel();
       final name = r.appName;
       _endRecord(r);
-      hint = endedHint(name, e.reason);
+      // 全部结束 already said so (K13).
+      if (!_batchEnded.remove(r.key)) hint = endedHint(name, e.reason);
       notifyListeners();
       return;
     }
@@ -621,7 +626,8 @@ class MainState extends ChangeNotifier {
   }
 
   /// Opens (or reopens, [reconnect]) the hub session of [r] and starts the runner on it.
-  Future<void> _connect(SessionRecord r, {bool reconnect = false}) async {
+  /// [quiet]: no 「已打开」 hint at the end (failures still say why).
+  Future<void> _connect(SessionRecord r, {bool reconnect = false, bool quiet = false}) async {
     final HubSession s;
     try {
       s = await hub!.open(r.id, r.app, embed: true, reconnect: reconnect);
@@ -675,7 +681,7 @@ class MainState extends ChangeNotifier {
     }
     if (r.sid != s.sid || r.phase != Phase.live || r.ending) return;
     _sentFps[s.sid] = (c.mode, c.fps, c.density);
-    if (!reconnect) hint = '已打开 ${r.appName} @ ${deviceName(r.id)}';
+    if (!reconnect && !quiet) hint = '已打开 ${r.appName} @ ${deviceName(r.id)}';
     notifyListeners();
   }
 
@@ -706,10 +712,15 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> openOrSwitch(String id, String app, String appName) async {
+  Future<void> openOrSwitch(String id, String app, String appName) => _open(id, app, appName);
+
+  /// Opens [app] on [id], or switches to it if it is open. [select]: it becomes current and the
+  /// panel closes; [quiet]: no 「已打开」 hint (failures still say why).
+  Future<void> _open(String id, String app, String appName, {bool select = true, bool quiet = false}) async {
     if (!hubUsable) return;
     final key = '$id/$app';
-    if (embeds) return _openEmbedded(id, app, appName);
+    _batchEnded.remove(key);
+    if (embeds) return _openEmbedded(id, app, appName, select: select, quiet: quiet);
     for (final e in _entries) {
       if (e.key == key && e.sid != null) {
         final rs = remote[e.sid];
@@ -718,8 +729,10 @@ class MainState extends ChangeNotifier {
         } else {
           hub!.focus(e.sid!);
         }
-        currentKey = key;
-        panel = null;
+        if (select) {
+          currentKey = key;
+          panel = null;
+        }
         hint = '已切到 $appName';
         notifyListeners();
         return;
@@ -738,38 +751,43 @@ class MainState extends ChangeNotifier {
     );
     _entries = _mapEntries();
     final before = currentKey;
-    currentKey = key;
-    panel = null;
+    if (select) {
+      currentKey = key;
+      panel = null;
+    }
     notifyListeners();
     try {
       await hub!.open(id, app);
       _pending.remove(key);
-      hint = '已打开 $appName @ ${deviceName(id)}';
+      if (!quiet) hint = '已打开 $appName @ ${deviceName(id)}';
     } catch (e) {
       _pending.remove(key);
       final missing = missingFromError('$e');
       hint = missing == null ? hubWord('$e') : remoteHint(deviceName(id), missing);
       _entries = _mapEntries();
-      // Back to what was current before, if it is still open.
+      // Back to what was current before, if it is still open. Not selected by this open (全部打开
+      // stopped on it): nothing to go back to that is known.
       if (currentKey == key) {
-        currentKey = _entries.any((e) => e.key == before) ? before : null;
+        currentKey = select && _entries.any((e) => e.key == before) ? before : null;
       }
     }
     _entries = _mapEntries();
     notifyListeners();
   }
 
-  Future<void> _openEmbedded(String id, String app, String appName) async {
+  Future<void> _openEmbedded(String id, String app, String appName, {bool select = true, bool quiet = false}) async {
     final key = '$id/$app';
     _appNames[key] = appName;
     final r = _records[key];
-    currentKey = key;
-    panel = null;
+    if (select) {
+      currentKey = key;
+      panel = null;
+    }
     if (r == null) {
       final fresh = SessionRecord(id, app, appName, '');
       _records[key] = fresh;
       notifyListeners();
-      await _connect(fresh);
+      await _connect(fresh, quiet: quiet);
     } else if (r.phase == Phase.disconnected) {
       await reconnect(key);
     } else {
@@ -795,46 +813,53 @@ class MainState extends ChangeNotifier {
   }
 
   void endCurrent() {
-    if (embeds) {
-      _endCurrentEmbedded();
-      return;
-    }
-    if (!hubUsable) return;
-    final c = current;
-    if (c?.sid == null) return;
+    if (currentKey != null) endSession(currentKey!);
+  }
+
+  /// Ends the session [key]; false when there is nothing it can end (no session, or an S1 one
+  /// still opening). [quiet]: no 「正在结束」/「已结束」 hint.
+  bool endSession(String key, {bool quiet = false}) {
+    if (embeds) return _endEmbedded(key, quiet: quiet);
+    if (!hubUsable) return false;
+    final c = entryFor(key);
+    if (c?.sid == null) return false;
     if (remote.containsKey(c!.sid)) {
       port!.close(c.sid!);
     } else {
       hub!.close(c.sid!);
     }
-    hint = '正在结束 ${c.appName}';
+    if (!quiet) hint = '正在结束 ${c.appName}';
     notifyListeners();
+    return true;
   }
 
-  void _endCurrentEmbedded() {
-    final r = currentRecord;
-    if (r == null) return;
+  bool _endEmbedded(String key, {bool quiet = false}) {
+    final r = _records[key];
+    if (r == null) return false;
+    final String said;
     switch (r.phase) {
       case Phase.live:
         // The runner closes the session and answers with `ClosedEvent`; a start still in flight
         // that then fails ends the record instead of disconnecting it (M-6).
         r.ending = true;
         port!.close(r.sid!);
-        hint = '正在结束 ${r.appName}';
+        said = '正在结束 ${r.appName}';
       case Phase.disconnected:
         // Nothing is running on the link; its last picture goes with the record.
         final sid = r.sid;
         if (sid != null) port!.close(sid);
         _endRecord(r);
-        hint = '已结束 ${r.appName}';
+        said = '已结束 ${r.appName}';
       case Phase.connecting:
         // Connecting (first open or reconnect): the record and any old picture go now; the new
         // session is closed quietly when it opens, and a failed open is not news (R14).
         r.ending = true;
         _endRecord(r);
-        hint = '已结束 ${r.appName}';
+        said = '已结束 ${r.appName}';
     }
+    if (!quiet) hint = said;
     notifyListeners();
+    return true;
   }
 
   // ---- devices ----
@@ -1027,6 +1052,45 @@ class MainState extends ChangeNotifier {
     if (e == null) return deviceOffline(m.app.device) ? '未打开，设备离线' : lampWord(Lamp.notOpened);
     if (e.lamp == Lamp.disconnected) return '已断开：${e.reason ?? ''}';
     return lampWord(e.lamp);
+  }
+
+  /// 「全部打开」: every member that is not open (or is disconnected) opens at once, members on an
+  /// offline device are skipped, and it stops on the first member not skipped (K11). One hint.
+  void openAll(String projectId) {
+    final p = _project(projectId);
+    if (!hubUsable || p == null) return;
+    final plan = planOpenAll(p, lampOf: (k) => entryFor(k)?.lamp, offline: deviceOffline);
+    for (final m in plan.open) {
+      // Not awaited: each open has its record or pending entry before its first await, so a
+      // second 「全部打开」 right after sees them connecting.
+      unawaited(_open(m.app.device, m.app.bundle, m.app.name, select: false, quiet: true));
+    }
+    hint = openAllHint(p, plan, deviceName);
+    if (plan.first != null) {
+      currentKey = plan.first;
+      panel = null;
+    }
+    notifyListeners();
+  }
+
+  /// 「全部结束」: ends every member's session, including ones shared with another project; one
+  /// hint with the count (K12, K13). The panel stays.
+  void endAll(String projectId) {
+    final p = _project(projectId);
+    if (p == null) return;
+    var ended = 0, shared = 0;
+    for (final m in p.members) {
+      final key = m.key;
+      if (entryFor(key) == null) continue;
+      // Ends later (the runner's `ClosedEvent`, the hub's `closed`): that end says nothing.
+      final later = !embeds || _records[key]?.phase == Phase.live;
+      if (!endSession(key, quiet: true)) continue;
+      ended++;
+      if (later) _batchEnded.add(key);
+      if (projectsOf(key).length > 1) shared++;
+    }
+    hint = endAllHint(p.name, ended, shared);
+    notifyListeners();
   }
 
   /// Apps of online devices (device order), then favourites not already listed; minus the project's members.

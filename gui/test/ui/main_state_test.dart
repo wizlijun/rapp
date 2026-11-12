@@ -249,6 +249,92 @@ void main() {
     expect(s2.hubUsable, isFalse);
   });
 
+  group('project batch, S1 path', () {
+    Project project(List<AppRef> apps) {
+      final p = s.createProject('写周报')!;
+      for (final a in apps) {
+        s.addMember(p.id, a);
+      }
+      return p;
+    }
+
+    const safari = AppRef('111', 'com.apple.Safari', 'Safari');
+    const notes = AppRef('111', 'com.apple.Notes', 'Notes');
+
+    test('open all on the S1 path opens pending entries once', () async {
+      final p = project([safari, notes]);
+      s.openAll(p.id);
+      await pump();
+      expect(opens(), 2);
+      expect(s.entryFor(safari.key)!.lamp, Lamp.connecting);
+      expect(s.entryFor(notes.key)!.lamp, Lamp.connecting);
+      expect(s.currentKey, safari.key);
+      expect(s.hint, '写周报：打开 2 个');
+      s.openAll(p.id);
+      await pump();
+      expect(opens(), 2);
+      expect(s.hint, '写周报：已经全部打开');
+      // The opens land quietly: no 「已打开」 over the summary.
+      for (final m in t.sent.where((m) => m['cmd'] == 'open').toList()) {
+        t.emit({...opened(m['app'] == safari.bundle ? 1 : 2, '111', m['app'] as String), 'req': m['req']});
+      }
+      await pump();
+      expect(s.entryFor(safari.key)!.lamp, Lamp.active);
+      expect(s.hint, '写周报：已经全部打开');
+    });
+
+    test('open all on the S1 path: a failed stop goes to no session', () async {
+      t.onSend = (m) {
+        if (m['cmd'] == 'open') t.emit({'event': 'error', 'error': 'offline', 'req': m['req']});
+      };
+      final p = project([safari]);
+      s.openAll(p.id);
+      expect(s.currentKey, safari.key);
+      await pump();
+      expect(s.currentKey, isNull);
+      expect(s.hint, contains('offline'));
+    });
+
+    test('end all on the S1 path closes by sid and stays quiet', () async {
+      t.emit(opened(1, '111', safari.bundle));
+      t.emit(opened(2, '111', notes.bundle));
+      await pump();
+      final p = project([safari, notes]);
+      s.endAll(p.id);
+      expect(t.sent.where((m) => m['cmd'] == 'close').map((m) => m['sid']), [1, 2]);
+      expect(s.hint, '写周报：结束 2 个会话');
+      t.emit({'event': 'closed', 'sid': 1});
+      t.emit({'event': 'closed', 'sid': 2});
+      await pump();
+      expect(s.hint, '写周报：结束 2 个会话');
+      expect(s.sessionCount, 0);
+    });
+
+    test('end all skips an S1 entry still opening', () async {
+      final p = project([safari]);
+      s.openOrSwitch(safari.device, safari.bundle, safari.name);
+      await pump();
+      expect(s.entryFor(safari.key)!.lamp, Lamp.connecting);
+      s.endAll(p.id);
+      expect(t.sent.where((m) => m['cmd'] == 'close'), isEmpty);
+      expect(s.hint, '写周报：没有要结束的会话');
+    });
+
+    test('endCurrent still hints as before', () async {
+      t.onSend = (m) {
+        if (m['cmd'] == 'open') t.emit({...opened(1, '111', safari.bundle), 'req': m['req']});
+      };
+      await s.openOrSwitch(safari.device, safari.bundle, safari.name);
+      s.select(safari.key);
+      s.endCurrent();
+      expect(s.hint, '正在结束 Safari');
+      expect(t.sent.last, {'cmd': 'close', 'sid': 1});
+      t.emit({'event': 'closed', 'sid': 1, 'reason': 'stdin closed'});
+      await pump();
+      expect(s.hint, '已结束 Safari');
+    });
+  });
+
   group('workspace', () {
     MainState restart() => MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs());
 
@@ -1167,6 +1253,184 @@ void main() {
         expect(port.calls.where((c) => c.$1 == 'start'), isEmpty);
         expect(st.remote, isEmpty);
       }, withPort: false);
+    });
+
+    // ---- 全部打开 / 全部结束 (S5 K11–K13) ----
+    void devices(FakeAsync a, FakeTransport t) {
+      t.emit({
+        'event': 'hosts',
+        'hosts': [
+          {'id': '111', 'name': 'mini'},
+          {'id': '222', 'name': 'studio'},
+        ],
+      });
+      a.flushMicrotasks();
+    }
+
+    Project project(MainState st, String name, List<String> keys) {
+      final p = st.createProject(name)!;
+      for (final k in keys) {
+        final [d, b] = k.split('/');
+        st.addMember(p.id, AppRef(d, b, b.toUpperCase()));
+      }
+      return p;
+    }
+
+    List<Map<String, dynamic>> openCmds(FakeTransport t) => [for (final m in t.sent) if (m['cmd'] == 'open') m];
+
+    test('open all mixes open, reconnect, skip and stop', () {
+      env((a, t, port, st, hints) {
+        devices(a, t);
+        st.probes['222'] = DeviceProbe(Lamp.offline, '离线');
+        final p = project(st, '写周报', ['111/a', '111/aa', '222/aaa', '111/aaaa']);
+        st.openOrSwitch('111', 'a', 'A');
+        a.flushMicrotasks();
+        st.openOrSwitch('111', 'aa', 'AA');
+        a.flushMicrotasks();
+        port.emit(const DisconnectedEvent(2, 'connection closed'));
+        st.togglePanel(PanelTab.projects);
+        final before = openCmds(t).length;
+        hints.clear();
+        st.openAll(p.id);
+        a.flushMicrotasks();
+        final sent = openCmds(t).skip(before).toList();
+        expect(sent.map((m) => m['app']), ['aa', 'aaaa']);
+        expect(sent[0]['reconnect'], true);
+        expect(sent[1].containsKey('reconnect'), false);
+        expect(st.recordFor('111/aaaa')!.phase, Phase.live);
+        expect(st.entryFor('222/aaa'), isNull);
+        expect(st.currentKey, '111/a');
+        expect(st.panel, isNull);
+        expect(hints.last, '写周报：打开 2 个；studio 离线，跳过 1 个');
+        expect(hints.where((h) => h.startsWith('已打开')), isEmpty);
+        // The skipped device is only in the hint, not something waiting for the person.
+        expect(st.needs.where((n) => n.kind == NeedKind.device), isEmpty);
+      }, sessions: 0);
+    });
+
+    test('open all twice sends each open once', () {
+      env((a, t, port, st, hints) {
+        devices(a, t);
+        t.onSend = null; // the hub never answers: both stay connecting
+        final p = project(st, '写周报', ['111/a', '111/aa']);
+        st.openAll(p.id);
+        a.flushMicrotasks();
+        st.openAll(p.id);
+        a.flushMicrotasks();
+        expect(openCmds(t), hasLength(2));
+        expect(st.hint, '写周报：已经全部打开');
+        expect(st.currentKey, '111/a');
+      }, sessions: 0);
+    });
+
+    test('open all stops on the first member even when its open fails', () {
+      env((a, t, port, st, hints) {
+        devices(a, t);
+        final answer = t.onSend!;
+        t.onSend = (m) {
+          if (m['cmd'] == 'open' && m['app'] == 'a') {
+            t.emit({'event': 'error', 'error': 'unreachable', 'req': m['req']});
+          } else {
+            answer(m);
+          }
+        };
+        final p = project(st, '写周报', ['111/a', '111/aa']);
+        st.openAll(p.id);
+        a.flushMicrotasks();
+        expect(st.currentKey, '111/a');
+        expect(st.entryFor('111/a')!.lamp, Lamp.disconnected);
+        expect(st.recordFor('111/aa')!.phase, Phase.live);
+        expect(hints.first, '写周报：打开 2 个');
+        expect(st.hint, startsWith('A 已断开：'));
+      }, sessions: 0);
+    });
+
+    test('a disconnected member shows its reason', () {
+      env((a, t, port, st, hints) {
+        final m = Member(const AppRef('111', 'a', 'Calculator'));
+        port.emit(const DisconnectedEvent(1, 'the host closed the connection'));
+        expect(st.memberLamp(m), Lamp.disconnected);
+        expect(st.memberStatus(m), '已断开：网络断了');
+      });
+    });
+
+    test('end all hint survives late closed events', () {
+      env((a, t, port, st, hints) {
+        final p = project(st, '写周报', ['111/a', '111/aa']);
+        st.endAll(p.id);
+        expect(port.calls.where((c) => c.$1 == 'close').map((c) => c.$2['sid']), [1, 2]);
+        expect(hints.last, '写周报：结束 2 个会话');
+        expect(hints.where((h) => h.startsWith('正在结束')), isEmpty);
+        port.emit(const ClosedEvent(1, 'stdin closed'));
+        port.emit(const ClosedEvent(2, 'stdin closed'));
+        a.flushMicrotasks();
+        expect(st.hint, '写周报：结束 2 个会话');
+        expect(st.entryFor('111/a'), isNull);
+        expect(st.entryFor('111/aa'), isNull);
+      }, sessions: 2);
+    });
+
+    test('end all counts sessions shared with another project', () {
+      env((a, t, port, st, hints) {
+        final pa = project(st, 'A', ['111/a', '111/aa']);
+        final pb = project(st, 'B', ['111/a']);
+        st.endAll(pa.id);
+        expect(st.hint, 'A：结束 2 个会话，其中 1 个也属于别的项目');
+        port.emit(const ClosedEvent(1, 'stdin closed'));
+        port.emit(const ClosedEvent(2, 'stdin closed'));
+        a.flushMicrotasks();
+        expect(st.entryFor(pb.members.single.key), isNull);
+        expect(st.memberLamp(pb.members.single), Lamp.notOpened);
+        expect(st.hint, 'A：结束 2 个会话，其中 1 个也属于别的项目');
+      }, sessions: 2);
+    });
+
+    test('end all ends connecting and disconnected members at once', () {
+      env((a, t, port, st, hints) {
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        final answer = t.onSend!;
+        final held = <Map<String, dynamic>>[];
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            held.add(m);
+          } else {
+            answer(m);
+          }
+        };
+        st.openOrSwitch('111', 'aa', 'Notes');
+        a.flushMicrotasks();
+        expect(st.entryFor('111/aa')!.lamp, Lamp.connecting);
+        final p = project(st, '写周报', ['111/a', '111/aa']);
+        st.endAll(p.id);
+        expect(st.entryFor('111/a'), isNull);
+        expect(st.entryFor('111/aa'), isNull);
+        expect(closes(port, 1), hasLength(1));
+        expect(st.hint, '写周报：结束 2 个会话');
+        answer(held.single);
+        a.flushMicrotasks();
+        expect(t.sent.last, {'cmd': 'close', 'sid': 2});
+        expect(port.calls.where((c) => c.$1 == 'start' && c.$2['sid'] == 2), isEmpty);
+        expect(st.entryFor('111/aa'), isNull);
+        expect(st.hint, '写周报：结束 2 个会话');
+      });
+    });
+
+    test('reopening after end all hints normally', () {
+      env((a, t, port, st, hints) {
+        final p = project(st, '写周报', ['111/a']);
+        st.endAll(p.id);
+        port.emit(const ClosedEvent(1, 'stdin closed'));
+        a.flushMicrotasks();
+        expect(st.hint, '写周报：结束 1 个会话');
+        st.openOrSwitch('111', 'a', 'Calculator');
+        a.flushMicrotasks();
+        expect(st.hint, '已打开 Calculator @ 111');
+        st.endCurrent();
+        expect(st.hint, '正在结束 Calculator');
+        port.emit(const ClosedEvent(1, 'stdin closed'));
+        a.flushMicrotasks();
+        expect(st.hint, '已结束 Calculator');
+      });
     });
   });
 
