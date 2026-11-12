@@ -191,6 +191,53 @@ void main() {
     expect(fs.on, isFalse);
   });
 
+  testWidgets('ctrl+cmd+O toggles overview', (tester) async {
+    await pump(tester);
+    final mods = Platform.isMacOS
+        ? [LogicalKeyboardKey.controlLeft, LogicalKeyboardKey.metaLeft]
+        : [LogicalKeyboardKey.controlLeft];
+    Future<void> chord({int repeats = 0}) async {
+      for (final m in mods) {
+        await tester.sendKeyDownEvent(m);
+      }
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.keyO);
+      for (var i = 0; i < repeats; i++) {
+        await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyO);
+      }
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.keyO);
+      for (final m in mods.reversed) {
+        await tester.sendKeyUpEvent(m);
+      }
+      await tester.pump();
+    }
+
+    expect(s.overview, false);
+    await chord(repeats: 3);
+    expect(s.overview, true);
+    await chord();
+    expect(s.overview, false);
+  });
+
+  testWidgets('esc leaves overview after corners and panel', (tester) async {
+    await pump(tester);
+    await tester.tap(find.byKey(const Key('fullscreen-button')));
+    await settle(tester);
+    s.togglePanel();
+    s.toggleOverview();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settle(tester);
+    expect(s.panel, isNull);
+    expect(s.overview, true);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settle(tester);
+    expect(s.overview, false);
+    expect(fs.on, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settle(tester);
+    expect(fs.on, isFalse);
+  });
+
   testWidgets('escape closes the corner, then the panel, then fullscreen', (tester) async {
     await pump(tester);
     await tester.tap(find.byKey(const Key('fullscreen-button')));

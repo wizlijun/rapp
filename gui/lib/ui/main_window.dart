@@ -83,6 +83,8 @@ class _MainWindowState extends State<MainWindow> {
       state.closeCorner();
     } else if (state.panel != null) {
       state.closePanel();
+    } else if (state.overview) {
+      state.toggleOverview();
     } else if (_full) {
       _setFull(false);
     }
@@ -122,6 +124,13 @@ class _MainWindowState extends State<MainWindow> {
         const SingleActivator(LogicalKeyboardKey.escape): _esc,
         prefixOf(LogicalKeyboardKey.bracketLeft): () => state.step(-1),
         prefixOf(LogicalKeyboardKey.bracketRight): () => state.step(1),
+        // ⌃⌘O: overview; a held chord toggles once.
+        if (mac)
+          const SingleActivator(LogicalKeyboardKey.keyO, control: true, meta: true, includeRepeats: false):
+              state.toggleOverview
+        else
+          const SingleActivator(LogicalKeyboardKey.keyO, control: true, includeRepeats: false):
+              state.toggleOverview,
         // Picture focused or not, ⌃⌘ chords are rapp's, so ⌃⌘D arrives here too.
         // A held chord toggles once, not back and forth with the key repeat.
         if (mac)

@@ -33,8 +33,10 @@ class TopBar extends StatelessWidget {
         // Expanded takes all the slack and the fullscreen button stays at the
         // right edge. (A loose Flexible would leave its unused share of the
         // slack at the end of the row.)
-        final sessionMax =
-            (box.maxWidth - 5 * 48 - 7 * gap).clamp(0.0, 260.0).toDouble();
+        final showOverview = box.maxWidth >= 300;
+        final sessionMax = (box.maxWidth - (showOverview ? 6 : 5) * 48 - (showOverview ? 8 : 7) * gap)
+            .clamp(0.0, 260.0)
+            .toDouble();
         return ListenableBuilder(
           listenable: state,
           builder: (context, _) {
@@ -55,6 +57,10 @@ class TopBar extends StatelessWidget {
                 children: [
                   _icon('panel-button', Icons.menu, '面板', state.togglePanel),
                   SizedBox(width: gap),
+                  if (showOverview) ...[
+                    _overviewButton(t),
+                    SizedBox(width: gap),
+                  ],
                   _icon(
                     'prev',
                     Icons.chevron_left,
@@ -203,6 +209,17 @@ class TopBar extends StatelessWidget {
           : e.device;
     }
     return '${e.device} · $p';
+  }
+
+  Widget _overviewButton(RappTokens t) {
+    final on = state.overview;
+    return Semantics(
+      selected: on ? true : null,
+      child: Container(
+        decoration: on ? t.raiseBox(border: t.text) : null,
+        child: _icon('overview-button', Icons.grid_view, '全景', state.toggleOverview),
+      ),
+    );
   }
 
   Widget _icon(String key, IconData icon, String tip, VoidCallback? onTap) {

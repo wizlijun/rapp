@@ -776,6 +776,124 @@ void main() {
       });
     });
 
+    group('overview', () {
+      test('overview drops the current session to 1 fps', () {
+        env((a, t, port, st, hints) {
+          st.remote[2]!.setChoice(const StreamChoice('color16', 'adaptive', 30));
+          expect(sets(port, 2).last['fps'], 30);
+          final n1 = sets(port, 1).length;
+          st.toggleOverview();
+          expect(st.overview, true);
+          expect(sets(port, 2).last['fps'], 1);
+          expect(sets(port, 2).last['mode'], 'color16');
+          expect(sets(port, 1).length, n1);
+        }, sessions: 2);
+      });
+
+      test('a detached session keeps its rate in overview', () {
+        env((a, t, port, st, hints) {
+          port.emit(const DetachedEvent(2, true));
+          final n = sets(port, 2).length;
+          st.toggleOverview();
+          expect(sets(port, 2).length, n);
+          expect(sets(port, 2).isEmpty ? 15 : sets(port, 2).last['fps'], 15);
+        }, sessions: 2);
+      });
+
+      test('leaving overview restores the current rate', () {
+        env((a, t, port, st, hints) {
+          st.remote[2]!.setChoice(const StreamChoice('color16', 'adaptive', 30));
+          st.toggleOverview();
+          expect(sets(port, 2).last['fps'], 1);
+          st.toggleOverview();
+          expect(st.overview, false);
+          expect(sets(port, 2).last['fps'], 30);
+          final n = sets(port, 2).length;
+          st.togglePanel();
+          expect(sets(port, 2).length, n);
+        }, sessions: 2);
+      });
+
+      test('entering overview blurs the picture', () {
+        env((a, t, port, st, hints) {
+          port.emit(WindowsEvent(2, [rw(7)]));
+          st.focusPicture(2);
+          expect(st.pictureFocused, 2);
+          st.toggleOverview();
+          expect(st.pictureFocused, isNull);
+          final pf = port.calls.where((c) => c.$1 == 'picture_focus').last;
+          expect(pf.$2['sid'], isNull);
+          st.focusPicture(2);
+          expect(st.pictureFocused, isNull);
+        }, sessions: 2);
+      });
+
+      test('select leaves overview', () {
+        env((a, t, port, st, hints) {
+          st.toggleOverview();
+          st.select('111/a');
+          expect(st.overview, false);
+          expect(st.currentKey, '111/a');
+        }, sessions: 2);
+      });
+
+      test('opening with select leaves overview', () {
+        env((a, t, port, st, hints) {
+          st.toggleOverview();
+          st.openOrSwitch('111', 'a', 'Calculator');
+          a.flushMicrotasks();
+          expect(st.overview, false);
+          expect(st.currentKey, '111/a');
+          st.toggleOverview();
+          st.openOrSwitch('111', 'aaa', 'Third');
+          a.flushMicrotasks();
+          expect(st.overview, false);
+          expect(st.currentKey, '111/aaa');
+        }, sessions: 2);
+      });
+
+      test('step stays in overview', () {
+        env((a, t, port, st, hints) {
+          st.toggleOverview();
+          final before = st.currentKey;
+          st.step(1);
+          expect(st.overview, true);
+          expect(st.currentKey, isNot(before));
+        }, sessions: 2);
+      });
+
+      test('panels and corners keep overview', () {
+        env((a, t, port, st, hints) {
+          st.toggleOverview();
+          st.togglePanel();
+          expect(st.overview, true);
+          st.showPanel(PanelTab.devices);
+          expect(st.overview, true);
+          st.toggleCorner(Corner.needs);
+          expect(st.overview, true);
+          st.showDevice('111');
+          expect(st.overview, true);
+        }, sessions: 2);
+      });
+
+      test('showCorner opens and stays', () {
+        env((a, t, port, st, hints) {
+          st.showCorner(Corner.needs);
+          expect(st.corner, Corner.needs);
+          st.showCorner(Corner.needs);
+          expect(st.corner, Corner.needs);
+        });
+      });
+
+      test('windowsOf counts the session\'s tabs', () {
+        env((a, t, port, st, hints) {
+          port.emit(WindowsEvent(1, [rw(3), rw(7)]));
+          expect(st.windowsOf('111/a'), 2);
+          expect(st.windowsOf('111/nope'), 0);
+        });
+      });
+    });
+
     test('reconnect opens again with reconnect and keeps choice and window', () {
       env((a, t, port, st, hints) {
         st.remote[1]!.setChoice(const StreamChoice('duogray', 'saver1x', 5));
@@ -1307,6 +1425,18 @@ void main() {
         expect(hints.where((h) => h.startsWith('已打开')), isEmpty);
         // The skipped device is only in the hint, not something waiting for the person.
         expect(st.needs.where((n) => n.kind == NeedKind.device), isEmpty);
+      }, sessions: 0);
+    });
+
+    test('openAll leaves overview', () {
+      env((a, t, port, st, hints) {
+        devices(a, t);
+        final p = project(st, '写周报', ['111/a', '111/aa']);
+        st.toggleOverview();
+        st.openAll(p.id);
+        a.flushMicrotasks();
+        expect(st.overview, false);
+        expect(st.currentKey, '111/a');
       }, sessions: 0);
     });
 

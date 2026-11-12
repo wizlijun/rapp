@@ -127,8 +127,39 @@ void main() {
       s.hint = 'some hint';
       await tester.pump();
       expect(tester.takeException(), isNull);
+      s.toggleOverview();
+      await tester.pump();
+      expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets('overview button only from 300px', (tester) async {
+    for (final (w, shown) in [(240.0, false), (360.0, true)]) {
+      await tester.pumpWidget(wrap(SizedBox(
+        width: w,
+        child: TopBar(state: s, fullscreen: false, onToggleFullscreen: () {}),
+      )));
+      expect(find.byKey(const Key('overview-button')), shown ? findsOneWidget : findsNothing, reason: '$w');
+    }
+  });
+
+  testWidgets('overview button toggles and shows pressed in overview', (tester) async {
+    final h = tester.ensureSemantics();
+    await tester.pumpWidget(wrap(bar()));
+    bool selected() => tester
+        .widgetList<Semantics>(find.ancestor(of: find.byKey(const Key('overview-button')), matching: find.byType(Semantics)))
+        .any((w) => w.properties.selected == true);
+    expect(s.overview, false);
+    await tester.tap(find.byKey(const Key('overview-button')));
+    await tester.pump();
+    expect(s.overview, true);
+    expect(selected(), true);
+    await tester.tap(find.byKey(const Key('overview-button')));
+    await tester.pump();
+    expect(s.overview, false);
+    expect(selected(), false);
+    h.dispose();
+  });
 
   testWidgets('hint still shown at 800px with a session', (tester) async {
     s.hint = 'hello hint';
@@ -252,6 +283,9 @@ void main() {
       await tester.runAsync(flush);
       await tester.pump();
       expect(tester.widget<Text>(find.byKey(const Key('needs-count'))).data, '10');
+      expect(tester.takeException(), isNull);
+      s.toggleOverview();
+      await tester.pump();
       expect(tester.takeException(), isNull);
     });
   }

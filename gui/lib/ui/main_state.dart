@@ -191,13 +191,30 @@ class MainState extends ChangeNotifier {
     super.notifyListeners();
   }
 
+  // ---- overview ----
+  /// The stage shows the overview wall instead of the current session's picture.
+  bool overview = false;
+
+  void toggleOverview() {
+    overview = !overview;
+    if (overview) _blur();
+    notifyListeners();
+  }
+
+  /// How many windows (tabs) [key]'s session has; 0 for an unknown or unstarted one.
+  int windowsOf(String key) {
+    final r = _records[key];
+    final rs = r == null ? null : _stageRemote(r);
+    return rs?.tabs.tabs.length ?? 0;
+  }
+
   // ---- picture focus (R15, R24) ----
   /// The session whose picture has keyboard focus: its keys go to A (the runner routes them).
   Object? pictureFocused;
 
   /// A press on [sid]'s picture: keys go to A from now on.
   void focusPicture(Object sid) {
-    if (pictureFocused == sid || !_liveSid(sid)) return;
+    if (overview || pictureFocused == sid || !_liveSid(sid)) return;
     pictureFocused = sid;
     port?.pictureFocus(sid);
     notifyListeners();
@@ -267,7 +284,8 @@ class MainState extends ChangeNotifier {
     final p = port;
     if (p == null) return;
     _sentFps.removeWhere((sid, _) => !remote.containsKey(sid));
-    final onStage = currentRecord;
+    // In overview no picture is on stage: every session runs at its off-stage rate (C4).
+    final onStage = overview ? null : currentRecord;
     for (final rs in remote.values) {
       final last = _sentFps[rs.sid];
       if (last == null) continue; // not started yet: its start carries the rate
@@ -340,6 +358,12 @@ class MainState extends ChangeNotifier {
   }
 
   // ---- corners and needs ----
+  void showCorner(Corner c) {
+    if (corner == c) return;
+    corner = c;
+    notifyListeners();
+  }
+
   void toggleCorner(Corner c) {
     corner = corner == c ? null : c;
     notifyListeners();
@@ -415,6 +439,7 @@ class MainState extends ChangeNotifier {
   void select(String key) {
     currentKey = key;
     panel = null;
+    overview = false;
     notifyListeners();
   }
 
@@ -786,6 +811,7 @@ class MainState extends ChangeNotifier {
         if (select) {
           currentKey = key;
           panel = null;
+          overview = false;
         }
         hint = '已切到 $appName';
         notifyListeners();
@@ -808,6 +834,7 @@ class MainState extends ChangeNotifier {
     if (select) {
       currentKey = key;
       panel = null;
+      overview = false;
     }
     notifyListeners();
     try {
@@ -836,6 +863,7 @@ class MainState extends ChangeNotifier {
     if (select) {
       currentKey = key;
       panel = null;
+      overview = false;
     }
     if (r == null) {
       final fresh = SessionRecord(id, app, appName, '');
@@ -1123,6 +1151,7 @@ class MainState extends ChangeNotifier {
     if (plan.first != null) {
       currentKey = plan.first;
       panel = null;
+      overview = false;
     }
     notifyListeners();
   }
