@@ -1,0 +1,16 @@
+[package]
+name = "rapp-client-gtk"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "rapp-client"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+serde_json.workspace = true
+rapp-client-core = { path = "../client-core" }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gtk = { package = "gtk4", version = "0.10", features = ["v4_12"] }

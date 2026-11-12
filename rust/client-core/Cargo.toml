@@ -1,0 +1,10 @@
+[package]
+name = "rapp-client-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+flate2 = "1"
+url = "2"
+percent-encoding = "2"

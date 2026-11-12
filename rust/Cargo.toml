@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["net", "relay", "service", "hub", "testkit"]
+members = ["net", "relay", "service", "hub", "testkit", "client-core", "client-gtk"]
 
 [workspace.package]
 version = "0.3.0"
