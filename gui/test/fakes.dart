@@ -50,6 +50,13 @@ class FakeSessionPort extends SessionPort {
   /// What `composer_paste` and `composer_attach` answer (a runner `PasteResult` map).
   Map<String, Object?>? pasteReply;
 
+  /// What `fetch_clip` answers; null means `{copy: <next number>}`. [fetchError] is thrown instead.
+  Map<String, Object?>? fetchReply;
+  Object? fetchError;
+  bool copyLocalReply = true;
+  bool revealReply = true;
+  int _nextCopy = 1;
+
   @override
   Stream<SessionEvent> get events => _events.stream;
 
@@ -62,6 +69,12 @@ class FakeSessionPort extends SessionPort {
     if (method == 'init') return {'doubleClickMs': doubleClickMs};
     if (method == 'start' && startError != null) throw startError!;
     if (method == 'composer_paste' || method == 'composer_attach') return pasteReply;
+    if (method == 'fetch_clip') {
+      if (fetchError != null) throw fetchError!;
+      return fetchReply ?? {'copy': _nextCopy++};
+    }
+    if (method == 'copy_local') return copyLocalReply;
+    if (method == 'reveal') return revealReply;
     return null;
   }
 }

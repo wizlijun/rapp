@@ -973,7 +973,7 @@ void main() {
 
     test('hub-first disconnect also clears the transfer line and sending state', () {
       env((a, t, port, st, hints) {
-        port.emit(const TransferEvent(1, '下载 x 45%'));
+        port.emit(const TransferStatusEvent(1, '下载 x 45%'));
         port.emit(const ComposerStateEvent(1, sending: true));
         t.emit({'event': 'closed', 'sid': 1, 'reason': 'connection closed'});
         a.flushMicrotasks();

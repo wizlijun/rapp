@@ -185,7 +185,7 @@ void main() {
     });
 
     testWidgets('an upload shows its status with a cancel', (tester) async {
-      rs.apply(const TransferEvent(1, '上传 1/2 · a.txt'));
+      rs.apply(const TransferStatusEvent(1, '上传 1/2 · a.txt'));
       await tester.pumpWidget(wrap(bar()));
       expect(find.text('上传 1/2 · a.txt'), findsOneWidget);
       await tester.tap(find.text('取消'));

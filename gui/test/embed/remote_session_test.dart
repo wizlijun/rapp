@@ -20,7 +20,7 @@ RemoteWindow win(int id, WindowKind kind) => RemoteWindow(
 void main() {
   test('disconnected clears the transfer line and the sending state', () {
     final r = RemoteSession(1, 'x');
-    r.apply(const TransferEvent(1, '下载 x 45%'));
+    r.apply(const TransferStatusEvent(1, '下载 x 45%'));
     r.apply(const ComposerStateEvent(1, sending: true));
     expect(r.transferStatus, '下载 x 45%');
     expect(r.composer.sending, true);
@@ -154,5 +154,12 @@ void main() {
     r2.preferWindow(9);
     r2.apply(WindowsEvent(1, [win(3, WindowKind.normal), win(7, WindowKind.normal)]));
     expect(r2.currentWindow, 3);
+  });
+
+  test('transfer progress does not touch the status line', () {
+    final r = RemoteSession(1, 'x');
+    r.apply(const TransferStatusEvent(1, '上传 1/1 0%'));
+    r.apply(const TransferProgressEvent(1, 3, true, 'a', 1, 2, TransferState.running, null, null));
+    expect(r.transferStatus, '上传 1/1 0%');
   });
 }

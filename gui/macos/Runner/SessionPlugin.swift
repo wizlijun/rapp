@@ -42,6 +42,13 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     }
   }
 
+  /// Copies of A's clips; they outlive the session they came from.
+  private let copies = ClipCopies()
+  /// Where downloads go: `RAPP_DOWNLOADS` when set and non-empty, else the session's default.
+  private let downloads: URL? = {
+    guard let p = ProcessInfo.processInfo.environment["RAPP_DOWNLOADS"], !p.isEmpty else { return nil }
+    return URL(fileURLWithPath: p, isDirectory: true)
+  }()
   private let channel: FlutterMethodChannel
   private let registry: FlutterTextureRegistry
   private weak var view: NSView?
@@ -133,8 +140,28 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     case let .cancelTransfer(sid, id):
       if let id { live[sid]?.session.cancelTransfer(id: id) } else { live[sid]?.session.cancelTransfers() }
       result(nil)
-    case .fetchClip, .copyLocal, .dropCopy, .reveal:
-      result(FlutterMethodNotImplemented)  // wired in a later S6 task
+    case let .fetchClip(sid, clip):
+      guard let entry = live[sid] else {
+        result(["error": "A 已断开"])
+        return
+      }
+      // The reply comes back on main (the session hops it), where `copies` lives.
+      entry.session.fetchCopy(clip) { [copies] r in
+        result(clipCopyReply(r.map { copies.add($0) }))
+      }
+    case let .copyLocal(copy):
+      result(copies.write(copy, to: LocalPasteboard()))
+    case let .dropCopy(copy):
+      copies.drop(copy)
+      result(nil)
+    case let .reveal(path):
+      let url = URL(fileURLWithPath: path)
+      if FileManager.default.fileExists(atPath: path) {
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+        result(true)
+      } else {
+        result(false)
+      }
     case let .composerPaste(sid):
       // ⌘V on B: the user's own clipboard, read on main by the composer.
       result(pasteResultPayload(live[sid]?.session.composer.paste() ?? .nothing))
@@ -337,7 +364,7 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     let queue = DispatchQueue(label: "rapp.session.\(sid)")
     let session = EmbeddedSession(address: address, choice: density, backingScale: backingScale,
                                   link: Connection(address: address, queue: queue),
-                                  pasteboard: LocalPasteboard(), queue: queue)
+                                  pasteboard: LocalPasteboard(), queue: queue, downloads: downloads)
     session.onEvent = { [weak self] event in
       DispatchQueue.main.async { self?.deliver(event, sid: sid) }
     }

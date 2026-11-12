@@ -58,11 +58,16 @@ class RemoteWindow {
 
 /// One entry of A's clipboard history.
 class ClipRow {
-  const ClipRow(this.id, this.title, this.pickable);
+  const ClipRow(this.id, this.title, this.pickable, [ClipKind? kind])
+      : kind = kind ?? (pickable ? ClipKind.text : ClipKind.unsupported);
   final int id;
   final String title;
   final bool pickable;
+  final ClipKind kind;
 }
+
+/// What a clipboard entry holds.
+enum ClipKind { text, image, files, data, unsupported }
 
 /// One item of A's mirrored menu bar; `shortcut` is ready-made text like "⇧⌘S".
 class MenuEntry {
@@ -180,9 +185,25 @@ class ComposerInsertEvent extends SessionEvent {
 }
 
 /// File transfer status text; null when idle.
-class TransferEvent extends SessionEvent {
-  const TransferEvent(super.sid, this.status);
+class TransferStatusEvent extends SessionEvent {
+  const TransferStatusEvent(super.sid, this.status);
   final String? status;
+}
+
+enum TransferState { running, done, failed, cancelled }
+
+/// One numbered transfer's progress; `down` is A to B.
+class TransferProgressEvent extends SessionEvent {
+  const TransferProgressEvent(
+      super.sid, this.id, this.down, this.name, this.done, this.total, this.state, this.path, this.error);
+  final int id;
+  final bool down;
+  final String name;
+  final int done;
+  final int total;
+  final TransferState state;
+  final String? path;
+  final String? error;
 }
 
 /// The session moved into its own windows, or back; `current` is the window to show on return.
@@ -277,7 +298,10 @@ SessionEvent? parseSessionEvent(String method, Object? args) {
       case 'clipboard':
         return ClipsEvent(sid, _list(m['clips']).map((c) {
           final cm = _map(c);
-          return ClipRow(_as<int>(cm['id']), _as<String>(cm['title']), _as<bool>(cm['pickable']));
+          final pickable = _as<bool>(cm['pickable']);
+          final k = cm['kind'];
+          final kind = ClipKind.values.where((v) => v.name == k).firstOrNull;
+          return ClipRow(_as<int>(cm['id']), _as<String>(cm['title']), pickable, kind);
         }).toList());
       case 'menu':
         return MenuEvent(sid, _list(m['items']).map(_menuEntry).toList());
@@ -291,8 +315,15 @@ SessionEvent? parseSessionEvent(String method, Object? args) {
       case 'composer_insert':
         if (m['text'] == null && m['blocks'] == null && m['status'] == null) return null;
         return ComposerInsertEvent(sid, _paste(m));
+      case 'transfer_status':
+        return TransferStatusEvent(sid, _as<String?>(m['status']));
       case 'transfer':
-        return TransferEvent(sid, _as<String?>(m['status']));
+        final dir = _as<String>(m['dir']);
+        if (dir != 'down' && dir != 'up') return null;
+        final state = TransferState.values.where((v) => v.name == m['state']).firstOrNull;
+        if (state == null) return null;
+        return TransferProgressEvent(sid, _as<int>(m['id']), dir == 'down', _as<String>(m['name']),
+            _as<int>(m['done']), _as<int>(m['total']), state, _as<String?>(m['path']), _as<String?>(m['error']));
       case 'detached':
         return DetachedEvent(sid, _as<bool>(m['detached']), current: _as<int?>(m['current']));
       case 'closed':
@@ -385,7 +416,44 @@ abstract class SessionPort {
 
   void composerDropBlock(Object sid, int block) => _send('composer_drop_block', {'sid': sid, 'block': block});
 
-  void cancelTransfer(Object sid) => _send('cancel_transfer', {'sid': sid});
+  /// One transfer (`id`), or all of the session's when null.
+  void cancelTransfer(Object sid, {int? id}) =>
+      _send('cancel_transfer', {'sid': sid, 'id': ?id});
+
+  /// Fetches A's clip `clip` into a copy held by the runner; the copy's number, or why not.
+  Future<({int? copy, String? error})> fetchClip(Object sid, int clip) async {
+    const down = (copy: null, error: '没有连上 runner');
+    try {
+      final r = await invoke('fetch_clip', {'sid': sid, 'clip': clip});
+      if (r is! Map) return down;
+      final copy = r['copy'];
+      if (copy is int) return (copy: copy, error: null);
+      final error = r['error'];
+      return error is String ? (copy: null, error: error) : down;
+    } on PlatformException {
+      return down;
+    } on MissingPluginException {
+      return down;
+    }
+  }
+
+  /// Puts the copy on this Mac's clipboard; false if it is gone.
+  Future<bool> copyLocal(int copy) => _boolCall('copy_local', {'copy': copy});
+
+  void dropCopy(int copy) => _send('drop_copy', {'copy': copy});
+
+  /// Shows the file in Finder; false if it is gone.
+  Future<bool> reveal(String path) => _boolCall('reveal', {'path': path});
+
+  Future<bool> _boolCall(String method, Map<String, Object?> args) async {
+    try {
+      return await invoke(method, args) == true;
+    } on PlatformException {
+      return false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
 
   void detach(Object sid) => _send('detach', {'sid': sid});
 
