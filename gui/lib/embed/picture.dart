@@ -62,7 +62,12 @@ class _PictureState extends State<Picture> {
         : e.buttons & kSecondaryButton != 0
             ? kSecondaryButton
             : 0;
-    if (bit == 0 || _button != null || !_usable || !_pic.contains(e.localPosition)) return;
+    if (!_usable || !_pic.contains(e.localPosition)) {
+      // The letterbox is outside the picture: like the top bar, a press there takes focus away.
+      widget.state.blurPicture();
+      return;
+    }
+    if (bit == 0 || _button != null) return;
     widget.state.focusPicture(_sid);
     _button = bit == kPrimaryButton ? 'left' : 'right';
     _count = _clicks.down(e.localPosition, e.timeStamp, bit);

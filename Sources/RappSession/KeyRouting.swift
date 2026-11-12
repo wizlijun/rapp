@@ -15,20 +15,45 @@ public func routeKey(keyCode: UInt16, flags: NSEvent.ModifierFlags, pictureFocus
     return pictureFocused ? .remote : .local
 }
 
-/// For a modifier key's `flagsChanged` event: whether the key is now down (its modifier bit is
-/// still set). Nil for key codes that are not modifier keys (54–63).
+/// For a modifier key's `flagsChanged` event: whether the key is now down. Left and right keys
+/// are told apart by the device-dependent bits in `rawValue` (IOKit's NX_DEVICE*KEYMASK), so
+/// releasing one of two held shifts reads as a release; fn and caps lock use their own bit. If
+/// an event carries no device bits for the pair, the device-independent bit decides. Nil for key
+/// codes that are not modifier keys (54–63).
 public func modifierKeyIsDown(keyCode: UInt16, flags: NSEvent.ModifierFlags) -> Bool? {
     let bit: NSEvent.ModifierFlags
+    let device: (mine: UInt, pair: UInt)?
     switch keyCode {
-    case 54, 55: bit = .command
-    case 56, 60: bit = .shift
-    case 57: bit = .capsLock
-    case 58, 61: bit = .option
-    case 59, 62: bit = .control
-    case 63: bit = .function
+    case 55: (bit, device) = (.command, (0x8, 0x8 | 0x10))
+    case 54: (bit, device) = (.command, (0x10, 0x8 | 0x10))
+    case 56: (bit, device) = (.shift, (0x2, 0x2 | 0x4))
+    case 60: (bit, device) = (.shift, (0x4, 0x2 | 0x4))
+    case 58: (bit, device) = (.option, (0x20, 0x20 | 0x40))
+    case 61: (bit, device) = (.option, (0x40, 0x20 | 0x40))
+    case 59: (bit, device) = (.control, (0x1, 0x1 | 0x2000))
+    case 62: (bit, device) = (.control, (0x2000, 0x1 | 0x2000))
+    case 57: (bit, device) = (.capsLock, nil)
+    case 63: (bit, device) = (.function, nil)
     default: return nil
     }
-    return flags.contains(bit)
+    guard flags.contains(bit) else { return false }
+    guard let device, flags.rawValue & device.pair != 0 else { return true }
+    return flags.rawValue & device.mine != 0
+}
+
+/// Caps lock's `flagsChanged` reports the lock toggling, not a key held: it is never tracked.
+private let capsLockKey: UInt16 = 57
+
+/// What to do with one key event: where it goes, and the keys A holds that must be released
+/// first (sent to A before the event goes on).
+public struct KeyDecision: Equatable {
+    public var route: KeyRoute
+    public var release: [UInt16]
+
+    public init(_ route: KeyRoute, release: [UInt16] = []) {
+        self.route = route
+        self.release = release
+    }
 }
 
 /// The keys A has been sent a press for and not yet a release, so none stays stuck on A when
@@ -38,7 +63,10 @@ public struct KeyTracker {
 
     public init() {}
 
-    public mutating func down(_ code: UInt16) { held.insert(code) }
+    public mutating func down(_ code: UInt16) {
+        guard code != capsLockKey else { return }
+        held.insert(code)
+    }
 
     public mutating func up(_ code: UInt16) { held.remove(code) }
 
@@ -51,16 +79,20 @@ public struct KeyTracker {
     }
 
     /// Routes one press or release and keeps track of what A holds. A release goes to A exactly
-    /// when A got the press, so both A and rapp always see matched pairs.
+    /// when A got the press, so both A and rapp always see matched pairs. A press that stays
+    /// local while the picture has focus is a reserved chord (⌃⌘…, ⌘Q): whatever A holds (the
+    /// chord's first modifiers) is released on A first, so nothing stays held there.
     public mutating func route(keyCode: UInt16, down isDown: Bool, flags: NSEvent.ModifierFlags,
-                               pictureFocused: Bool) -> KeyRoute {
+                               pictureFocused: Bool) -> KeyDecision {
+        let to = routeKey(keyCode: keyCode, flags: flags, pictureFocused: pictureFocused)
+        if keyCode == capsLockKey { return KeyDecision(to) }
         if !isDown {
-            guard held.contains(keyCode) else { return .local }
+            guard held.contains(keyCode) else { return KeyDecision(.local) }
             up(keyCode)
-            return .remote
+            return KeyDecision(.remote)
         }
-        guard routeKey(keyCode: keyCode, flags: flags, pictureFocused: pictureFocused) == .remote else { return .local }
+        guard to == .remote else { return KeyDecision(.local, release: pictureFocused ? releaseAll() : []) }
         down(keyCode)
-        return .remote
+        return KeyDecision(.remote)
     }
 }

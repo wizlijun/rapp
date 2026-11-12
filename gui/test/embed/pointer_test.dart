@@ -24,7 +24,9 @@ void main() {
   });
 
   test('wheel is flipped, trackpad pan passes through', () {
-    expect(wheelToRemote(const Offset(0, 40)), const Offset(0, -40));
+    // A notch is 40 pt in Flutter and 10 in rapp-client's scroll messages.
+    expect(wheelToRemote(const Offset(0, 40)), const Offset(0, -10));
+    expect(wheelToRemote(const Offset(-8, 0)), const Offset(2, 0));
     expect(panToRemote(const Offset(0, 12)), const Offset(0, 12));
   });
 

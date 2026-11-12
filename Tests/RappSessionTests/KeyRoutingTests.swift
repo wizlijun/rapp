@@ -52,33 +52,92 @@ final class KeyRoutingTests: XCTestCase {
 }
 
 final class KeyTrackerRouteTests: XCTestCase {
+    private func flags(_ f: NSEvent.ModifierFlags, device: UInt) -> NSEvent.ModifierFlags {
+        NSEvent.ModifierFlags(rawValue: f.rawValue | device)
+    }
+
     func testPressesWhileFocusedGoToAAndTheirReleasesFollow() {
         var k = KeyTracker()
-        XCTAssertEqual(k.route(keyCode: 0, down: true, flags: [], pictureFocused: true), .remote)
-        XCTAssertEqual(k.route(keyCode: 0, down: false, flags: [], pictureFocused: true), .remote)
+        XCTAssertEqual(k.route(keyCode: 0, down: true, flags: [], pictureFocused: true), KeyDecision(.remote))
+        XCTAssertEqual(k.route(keyCode: 0, down: false, flags: [], pictureFocused: true), KeyDecision(.remote))
         XCTAssertEqual(k.releaseAll(), [])
     }
 
     func testAReleaseAHasNoPressForStaysLocal() {
         // Pressed before the picture had focus: Flutter saw the press, so it gets the release.
         var k = KeyTracker()
-        XCTAssertEqual(k.route(keyCode: 55, down: false, flags: [], pictureFocused: true), .local)
+        XCTAssertEqual(k.route(keyCode: 55, down: false, flags: [], pictureFocused: true), KeyDecision(.local))
     }
 
-    func testAReleaseGoesToAEvenOnceTheChordIsRapps() {
+    func testCommandQReleasesTheCommandAHolds() {
         var k = KeyTracker()
-        XCTAssertEqual(k.route(keyCode: 59, down: true, flags: [.control], pictureFocused: true), .remote)   // ⌃ to A
-        XCTAssertEqual(k.route(keyCode: 55, down: true, flags: [.control, .command], pictureFocused: true), .local)
-        XCTAssertEqual(k.route(keyCode: 3, down: true, flags: [.control, .command], pictureFocused: true), .local)
-        XCTAssertEqual(k.route(keyCode: 3, down: false, flags: [.control, .command], pictureFocused: true), .local)
-        XCTAssertEqual(k.route(keyCode: 55, down: false, flags: [.control], pictureFocused: true), .local)
-        XCTAssertEqual(k.route(keyCode: 59, down: false, flags: [], pictureFocused: true), .remote)
+        XCTAssertEqual(k.route(keyCode: 55, down: true, flags: [.command], pictureFocused: true), KeyDecision(.remote))
+        XCTAssertEqual(k.route(keyCode: 12, down: true, flags: [.command], pictureFocused: true),
+                       KeyDecision(.local, release: [55]))
+        XCTAssertEqual(k.route(keyCode: 12, down: true, flags: [.command], pictureFocused: true), KeyDecision(.local))
+        XCTAssertFalse(k.isDown(55))
+    }
+
+    func testAReservedChordReleasesWhatAHoldsThenStaysLocal() {
+        var k = KeyTracker()
+        XCTAssertEqual(k.route(keyCode: 59, down: true, flags: [.control], pictureFocused: true), KeyDecision(.remote))   // ⌃ to A
+        XCTAssertEqual(k.route(keyCode: 55, down: true, flags: [.control, .command], pictureFocused: true),
+                       KeyDecision(.local, release: [59]))
+        XCTAssertEqual(k.route(keyCode: 3, down: true, flags: [.control, .command], pictureFocused: true), KeyDecision(.local))
+        XCTAssertEqual(k.route(keyCode: 3, down: false, flags: [.control, .command], pictureFocused: true), KeyDecision(.local))
+        XCTAssertEqual(k.route(keyCode: 55, down: false, flags: [.control], pictureFocused: true), KeyDecision(.local))
+        // A already had its release; this one is Flutter's.
+        XCTAssertEqual(k.route(keyCode: 59, down: false, flags: [], pictureFocused: true), KeyDecision(.local))
         XCTAssertEqual(k.releaseAll(), [])
     }
 
     func testUnfocusedPressesStayLocal() {
         var k = KeyTracker()
-        XCTAssertEqual(k.route(keyCode: 0, down: true, flags: [], pictureFocused: false), .local)
+        XCTAssertEqual(k.route(keyCode: 0, down: true, flags: [], pictureFocused: false), KeyDecision(.local))
+        XCTAssertEqual(k.releaseAll(), [])
+    }
+
+    func testLeftAndRightModifiersAreToldApart() {
+        var k = KeyTracker()
+        let both = flags(.shift, device: 0x2 | 0x4)
+        XCTAssertEqual(modifierKeyIsDown(keyCode: 56, flags: flags(.shift, device: 0x2)), true)
+        XCTAssertEqual(k.route(keyCode: 56, down: modifierKeyIsDown(keyCode: 56, flags: flags(.shift, device: 0x2))!,
+                               flags: flags(.shift, device: 0x2), pictureFocused: true), KeyDecision(.remote))
+        XCTAssertEqual(modifierKeyIsDown(keyCode: 60, flags: both), true)
+        XCTAssertEqual(k.route(keyCode: 60, down: true, flags: both, pictureFocused: true), KeyDecision(.remote))
+        // Right shift up: the shift bit stays (left still held), the right device bit goes.
+        let leftOnly = flags(.shift, device: 0x2)
+        XCTAssertEqual(modifierKeyIsDown(keyCode: 60, flags: leftOnly), false)
+        XCTAssertEqual(k.route(keyCode: 60, down: false, flags: leftOnly, pictureFocused: true), KeyDecision(.remote))
+        XCTAssertTrue(k.isDown(56))
+        XCTAssertFalse(k.isDown(60))
+    }
+
+    func testDeviceBitsForEveryPair() {
+        XCTAssertEqual(modifierKeyIsDown(keyCode: 59, flags: flags(.control, device: 0x2000)), false)  // only right ctrl
+        XCTAssertEqual(modifierKeyIsDown(keyCode: 62, flags: flags(.control, device: 0x2000)), true)
+        XCTAssertEqual(modifierKeyIsDown(keyCode: 59, flags: flags(.control, device: 0x1)), true)
+        XCTAssertEqual(modifierKeyIsDown(keyCode: 55, flags: flags(.command, device: 0x10)), false)    // only right cmd
+        XCTAssertEqual(modifierKeyIsDown(keyCode: 54, flags: flags(.command, device: 0x10)), true)
+        XCTAssertEqual(modifierKeyIsDown(keyCode: 55, flags: flags(.command, device: 0x8)), true)
+        XCTAssertEqual(modifierKeyIsDown(keyCode: 58, flags: flags(.option, device: 0x40)), false)     // only right option
+        XCTAssertEqual(modifierKeyIsDown(keyCode: 61, flags: flags(.option, device: 0x40)), true)
+        XCTAssertEqual(modifierKeyIsDown(keyCode: 58, flags: flags(.option, device: 0x20)), true)
+        XCTAssertEqual(modifierKeyIsDown(keyCode: 60, flags: flags(.shift, device: 0x4)), true)
+        XCTAssertEqual(modifierKeyIsDown(keyCode: 56, flags: flags(.shift, device: 0x4)), false)
+        XCTAssertEqual(modifierKeyIsDown(keyCode: 63, flags: [.function]), true)                       // fn: no device bit
+        XCTAssertEqual(modifierKeyIsDown(keyCode: 63, flags: []), false)
+    }
+
+    func testCapsLockIsNeverHeld() {
+        var k = KeyTracker()
+        k.down(57)
+        XCTAssertFalse(k.isDown(57))
+        XCTAssertEqual(k.route(keyCode: 57, down: true, flags: [.capsLock], pictureFocused: true), KeyDecision(.remote))
+        XCTAssertEqual(k.releaseAll(), [])
+        // Its toggle-off still goes to A while focused, and stays local without focus.
+        XCTAssertEqual(k.route(keyCode: 57, down: false, flags: [], pictureFocused: true), KeyDecision(.remote))
+        XCTAssertEqual(k.route(keyCode: 57, down: true, flags: [.capsLock], pictureFocused: false), KeyDecision(.local))
         XCTAssertEqual(k.releaseAll(), [])
     }
 }

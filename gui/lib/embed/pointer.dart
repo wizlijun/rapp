@@ -32,8 +32,12 @@ class ClickCounter {
   }
 }
 
-/// A mouse wheel's scroll delta for A: Flutter's points the other way from AppKit's.
-Offset wheelToRemote(Offset scrollDelta) => -scrollDelta;
+/// Flutter's notched scrollDelta is lines × 40 pt; rapp-client sends A lines × 10.
+const wheelScale = 4.0;
+
+/// A mouse wheel's scroll delta for A: Flutter's points the other way from AppKit's and is
+/// [wheelScale] times rapp-client's.
+Offset wheelToRemote(Offset scrollDelta) => -scrollDelta / wheelScale;
 
 /// A trackpad pan's delta for A: already the way AppKit's scrolling deltas go.
 Offset panToRemote(Offset localPanDelta) => localPanDelta;

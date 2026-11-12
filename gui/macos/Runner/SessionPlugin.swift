@@ -48,6 +48,7 @@ final class SessionPlugin: NSObject, FlutterPlugin {
   private var keys = KeyTracker()
   private var keyMonitor: Any?
   private var resignObserver: NSObjectProtocol?
+  private var terminateObserver: NSObjectProtocol?
 
   static func register(with registrar: FlutterPluginRegistrar) {
     let channel = FlutterMethodChannel(name: "rapp/session", binaryMessenger: registrar.messenger)
@@ -65,6 +66,7 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     timer?.invalidate()
     if let scaleObserver { NotificationCenter.default.removeObserver(scaleObserver) }
     if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
+    if let terminateObserver { NotificationCenter.default.removeObserver(terminateObserver) }
     if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
   }
 
@@ -146,6 +148,12 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       guard let self, let main = self.view?.window, note.object as? NSWindow === main else { return }
       self.releaseKeys()
     }
+    // Quitting (⌘Q included): A gets the releases before the connections go.
+    terminateObserver = NotificationCenter.default.addObserver(
+      forName: NSApplication.willTerminateNotification, object: nil, queue: .main
+    ) { [weak self] _ in
+      self?.releaseKeys()
+    }
     scaleObserver = NotificationCenter.default.addObserver(
       forName: NSWindow.didChangeBackingPropertiesNotification, object: nil, queue: .main
     ) { [weak self] _ in
@@ -173,9 +181,12 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       return event
     }
     let target = focusedSid.flatMap { live[$0] }
-    let route = keys.route(keyCode: event.keyCode, down: down, flags: event.modifierFlags,
-                           pictureFocused: target != nil)
-    guard route == .remote, let target else { return event }
+    let decision = keys.route(keyCode: event.keyCode, down: down, flags: event.modifierFlags,
+                              pictureFocused: target != nil)
+    for code in decision.release {
+      target?.session.send(.key(keyCode: code, modifiers: 0, down: false))
+    }
+    guard decision.route == .remote, let target else { return event }
     target.session.send(.key(keyCode: event.keyCode, modifiers: UInt64(event.modifierFlags.rawValue), down: down))
     return nil
   }

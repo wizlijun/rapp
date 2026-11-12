@@ -313,6 +313,22 @@ void main() {
       expect(m[2]['x'], 400.0);
     });
 
+    testWidgets('a press in the letterbox blurs the picture and sends nothing', (tester) async {
+      await tester.pumpWidget(wrap(embedded()));
+      await showWindow(tester, rw(7, 400, 228)); // fit (0,100) 800x400
+      final o = tester.getTopLeft(find.byKey(const Key('stage')));
+      await tester.tapAt(o + const Offset(400, 300));
+      await tester.pump();
+      expect(es.pictureFocused, 1);
+      port.calls.clear();
+      await tester.tapAt(o + const Offset(400, 50));
+      await tester.pump();
+      expect(es.pictureFocused, isNull);
+      expect(port.calls.single.$1, 'picture_focus');
+      expect(port.calls.single.$2, equals({'sid': null}));
+      expect(border, findsNothing);
+    });
+
     testWidgets('a picture with no area sends nothing', (tester) async {
       await tester.pumpWidget(wrap(embedded()));
       await showWindow(tester, rw(7, 0, 28));
@@ -362,7 +378,7 @@ void main() {
       await tester.pump();
       final s = port.calls.where((c) => c.$1 == 'scroll').map((c) => c.$2).toList();
       expect(s.length, 2);
-      expect(s[0], equals({'sid': 1, 'window': 7, 'x': 100.0, 'y': 78.0, 'dx': 0.0, 'dy': -40.0}));
+      expect(s[0], equals({'sid': 1, 'window': 7, 'x': 100.0, 'y': 78.0, 'dx': 0.0, 'dy': -10.0}));
       expect(s[1]['dy'], 12.0);
       expect(mouse(), isEmpty);
     });
