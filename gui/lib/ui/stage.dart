@@ -1,6 +1,8 @@
 // The stage: where the remote window will sit. S1 shows a placeholder.
 import 'package:flutter/material.dart';
 
+import '../embed/picture.dart';
+import '../embed/session_port.dart';
 import 'controls.dart';
 import 'lamp.dart';
 import 'main_state.dart';
@@ -21,6 +23,14 @@ class Stage extends StatelessWidget {
         final problem = state.hubProblem;
         final cur = state.current;
         Widget body;
+        var picture = false;
+        final rs = state.currentRemote;
+        RemoteWindow? win;
+        if (rs != null && rs.ready) {
+          for (final w in rs.windows) {
+            if (w.id == rs.currentWindow && w.texture != null) win = w;
+          }
+        }
         if (problem != null) {
           body = Text(problem, textAlign: TextAlign.center);
         } else if (cur == null) {
@@ -33,7 +43,10 @@ class Stage extends StatelessWidget {
               RappButton.secondary(label: '打开面板', onPressed: state.togglePanel),
             ],
           );
-        } else if (cur.lamp == Lamp.connecting) {
+        } else if (rs != null && !rs.detached && win != null) {
+          picture = true;
+          body = Picture(session: rs, window: win, hole: state.pictureHole);
+        } else if (cur.lamp == Lamp.connecting || (rs != null && !rs.detached)) {
           body = Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -89,15 +102,19 @@ class Stage extends StatelessWidget {
             ),
           );
         }
-        return Container(
-          key: const Key('stage'),
-          alignment: Alignment.center,
-          padding: const EdgeInsets.all(16),
-          child: DefaultTextStyle.merge(
-            style: TextStyle(color: t.text),
-            child: body,
-          ),
-        );
+        return LayoutBuilder(builder: (context, c) {
+          // The stage's size drives A's window size (R12); overlays never change it.
+          state.stageSize(c.biggest);
+          return Container(
+            key: const Key('stage'),
+            alignment: Alignment.center,
+            padding: picture ? EdgeInsets.zero : const EdgeInsets.all(16),
+            child: DefaultTextStyle.merge(
+              style: TextStyle(color: t.text),
+              child: body,
+            ),
+          );
+        });
       },
     );
   }

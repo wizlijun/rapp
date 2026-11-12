@@ -2,7 +2,11 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
+import 'package:rapp/service_client.dart';
+import 'package:rapp/ui/fullscreen.dart';
+import 'package:rapp/ui/main_window.dart';
 import 'package:rapp/ui/backdrop.dart';
 import 'package:rapp/ui/lamp.dart';
 import 'package:rapp/ui/main_state.dart';
@@ -140,4 +144,134 @@ void main() {
       }
     });
   }
+
+  group('embedded', () {
+    late FakeSessionPort port;
+    late MainState es;
+
+    RemoteWindow rw(int id, double w, double h, {int? texture = 42}) => RemoteWindow(
+          id: id,
+          parent: 0,
+          kind: WindowKind.normal,
+          title: 'w$id',
+          rect: Rect.fromLTWH(0, 0, w, h),
+          titleBar: 28,
+          resizable: true,
+          focused: true,
+          texture: texture,
+          visible: const Rect.fromLTWH(0, 0, 1, 1),
+        );
+
+    Future<void> openEmbedded(WidgetTester tester) async {
+      await tester.runAsync(() async {
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            t.emit({
+              'event': 'opened', 'sid': 1, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+              'port': 5001, 'token': 'tk', 'req': m['req'],
+            });
+          }
+        };
+        es.openOrSwitch('111', 'Safari', 'Safari');
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      await tester.pump();
+    }
+
+    setUp(() {
+      port = FakeSessionPort();
+      es = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: port);
+    });
+    tearDown(() => es.dispose());
+
+    Widget embedded({RappTheme theme = RappTheme.matrix}) => SizedBox(
+          width: 800,
+          height: 600,
+          child: Backdrop(theme: theme, hole: es.pictureHole, child: Stage(state: es)),
+        );
+
+    testWidgets('stage shows connecting, then the texture', (tester) async {
+      await tester.pumpWidget(wrap(embedded()));
+      await openEmbedded(tester);
+      expect(find.text('正在连接'), findsOneWidget);
+      port.emit(const ReadyEvent(1, 'Safari'));
+      await tester.pump();
+      expect(find.text('正在连接'), findsOneWidget);
+      port.emit(WindowsEvent(1, [rw(5, 400, 328)]));
+      await tester.pump();
+      expect(find.text('正在连接'), findsNothing);
+      expect(tester.widget<Texture>(find.byType(Texture)).textureId, 42);
+    });
+
+    testWidgets('stage size goes to A once the window settles', (tester) async {
+      await tester.pumpWidget(wrap(embedded()));
+      await openEmbedded(tester);
+      port.emit(const ReadyEvent(1, 'Safari'));
+      port.emit(WindowsEvent(1, [rw(5, 400, 328)]));
+      await tester.pump();
+      final r = port.calls.where((c) => c.$1 == 'resize').toList();
+      expect(r.length, 1);
+      expect(r.single.$2, equals({'sid': 1, 'window': 5, 'w': 800, 'h': 600}));
+    });
+
+    testWidgets('IRON MAN grid leaves the picture uncovered', (tester) async {
+      await tester.pumpWidget(wrap(embedded(theme: RappTheme.ironMan), theme: RappTheme.ironMan));
+      await openEmbedded(tester);
+      port.emit(const ReadyEvent(1, 'Safari'));
+      port.emit(WindowsEvent(1, [rw(5, 400, 328)]));
+      await tester.pump();
+      await tester.pump();
+      Rect? hole() => tester
+          .widgetList<CustomPaint>(find.byType(CustomPaint))
+          .map((c) => c.painter)
+          .whereType<HoloGrid>()
+          .single
+          .hole;
+      final origin = tester.getTopLeft(find.byType(Backdrop));
+      expect(hole(), tester.getRect(find.byType(Texture)).shift(-origin));
+      expect(es.pictureHole.value, isNotNull);
+      port.emit(const ClosedEvent(1, 'quit'));
+      await tester.pump();
+      await tester.pump();
+      expect(es.pictureHole.value, isNull);
+      expect(hole(), isNull);
+    });
+
+    testWidgets('overlays never resize', (tester) async {
+      tester.view.physicalSize = const Size(1194, 834);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final monitor = ServiceMonitor(readToken: () async => null);
+      await tester.pumpWidget(wrap(MainWindow(
+        state: es,
+        monitor: monitor,
+        control: null,
+        configDir: tmp.path,
+        fullscreen: _NoFullscreen(),
+      )));
+      await openEmbedded(tester);
+      final size = tester.getSize(find.byKey(const Key('stage')));
+      port.emit(const ReadyEvent(1, 'Safari'));
+      port.emit(WindowsEvent(1, [rw(5, size.width, size.height + 28)]));
+      await tester.pump();
+      port.calls.removeWhere((c) => c.$1 == 'resize');
+      await tester.tap(find.byTooltip('面板')); // left panel opens...
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.tap(find.byTooltip('面板')); // ...and closes
+      // Task 10 adds Key('traffic'): tap it here too, for the stream menu.
+      await tester.pump(const Duration(seconds: 1));
+      expect(port.calls.where((c) => c.$1 == 'resize'), isEmpty);
+    });
+  });
+}
+
+class _NoFullscreen implements FullscreenControl {
+  @override
+  Stream<bool> get changes => const Stream.empty();
+  @override
+  Future<bool> isFullScreen() async => false;
+  @override
+  Future<void> setFullScreen(bool on) async {}
 }

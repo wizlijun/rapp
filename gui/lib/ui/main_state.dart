@@ -1,6 +1,7 @@
 // The single source of UI state for the main window.
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' show Rect, Size;
 
 import 'package:flutter/foundation.dart';
 
@@ -75,7 +76,43 @@ class MainState extends ChangeNotifier {
   @override
   void notifyListeners() {
     if (_disposed) return;
+    _syncPolicy();
     super.notifyListeners();
+  }
+
+  // ---- stage size (Ruling P2) ----
+  Size? _lastStage;
+  RemoteSession? _syncedRs;
+
+  /// The picture's rect in global coordinates; the IRON MAN grid leaves it out (R25).
+  final ValueNotifier<Rect?> pictureHole = ValueNotifier(null);
+
+  /// The stage is [s] big now. Remembered, and given to the current session's resize policy.
+  void stageSize(Size s) {
+    _lastStage = s;
+    currentRemote?.policy.stage(s);
+  }
+
+  RemoteWindow? _windowOf(RemoteSession rs) {
+    for (final w in rs.windows) {
+      if (w.id == rs.currentWindow) return w;
+    }
+    return null;
+  }
+
+  /// A session that became current gets the stage size; its policy always knows the current window.
+  void _syncPolicy() {
+    final rs = currentRemote;
+    if (rs == null) {
+      _syncedRs = null;
+      return;
+    }
+    if (!identical(rs, _syncedRs)) {
+      _syncedRs = rs;
+      final s = _lastStage;
+      if (s != null) rs.policy.stage(s);
+    }
+    rs.policy.current(_windowOf(rs));
   }
 
   // ---- hub state ----
@@ -220,6 +257,7 @@ class MainState extends ChangeNotifier {
     if (rs == null || rs.endReason != null) return;
     if (e is! ClosedEvent) {
       rs.apply(e);
+      notifyListeners();
       return;
     }
     final w = _waiting.remove(e.sid);
@@ -313,7 +351,7 @@ class MainState extends ChangeNotifier {
 
   /// Starts the runner session for an opened embedded hub session; the error hint on failure.
   Future<String?> _startEmbedded(HubSession s, String appName) async {
-    final rs = RemoteSession(s.sid, appName);
+    final rs = RemoteSession(s.sid, appName, onResize: (w, a, b) => port!.resize(s.sid, w, a, b));
     remote[s.sid] = rs;
     try {
       final p = s.port, tk = s.token;

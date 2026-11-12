@@ -2,21 +2,25 @@
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import 'tokens.dart';
 
 class Backdrop extends StatelessWidget {
-  const Backdrop({super.key, required this.theme, required this.child});
+  const Backdrop({super.key, required this.theme, required this.child, this.hole});
   final RappTheme theme;
   final Widget child;
+
+  /// The remote picture's rect in global coordinates; IRON MAN's grid leaves it uncovered (R25).
+  final ValueListenable<Rect?>? hole;
 
   @override
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
     final Widget? layer = switch (theme) {
       RappTheme.matrix => CustomPaint(painter: _Scanlines(t.line, t.bg)),
-      RappTheme.ironMan => CustomPaint(painter: _HoloGrid(t.on)),
+      RappTheme.ironMan => _grid(context, t.on),
       RappTheme.avatar => _Blobs(t.on),
       RappTheme.westworld => null,
     };
@@ -28,6 +32,28 @@ class Backdrop extends StatelessWidget {
     return Stack(
       fit: StackFit.passthrough,
       children: over ? [child, fill] : [fill, child],
+    );
+  }
+}
+
+extension on Backdrop {
+  Widget _grid(BuildContext context, Color on) {
+    final h = hole;
+    if (h == null) return CustomPaint(painter: HoloGrid(on));
+    return ValueListenableBuilder<Rect?>(
+      valueListenable: h,
+      builder: (context, global, _) {
+        Rect? local;
+        final box = context.findRenderObject();
+        if (global != null) {
+          if (box is RenderBox && box.attached && box.hasSize) {
+            local = global.shift(-box.localToGlobal(Offset.zero));
+          } else {
+            local = global;
+          }
+        }
+        return CustomPaint(painter: HoloGrid(on, hole: local));
+      },
     );
   }
 }
@@ -70,13 +96,24 @@ class _Scanlines extends CustomPainter {
 
 /// Prototype `holo`: 1px lines every 32px at 5% of the holo blue, plus a
 /// faint blue light from the top centre (ellipse, 16% fading out by 60%).
-class _HoloGrid extends CustomPainter {
-  _HoloGrid(this.on);
+class HoloGrid extends CustomPainter {
+  HoloGrid(this.on, {this.hole});
   final Color on;
+
+  /// Left unpainted, in this painter's own coordinates.
+  final Rect? hole;
 
   @override
   void paint(Canvas canvas, Size size) {
-    canvas.clipRect(Offset.zero & size);
+    final h = hole;
+    if (h == null) {
+      canvas.clipRect(Offset.zero & size);
+    } else {
+      canvas.clipPath(Path()
+        ..fillType = PathFillType.evenOdd
+        ..addRect(Offset.zero & size)
+        ..addRect(h));
+    }
     final p = Paint()
       ..color = on.withValues(alpha: .05)
       ..strokeWidth = 1;
@@ -106,7 +143,7 @@ class _HoloGrid extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_HoloGrid o) => o.on != on;
+  bool shouldRepaint(HoloGrid o) => o.on != on || o.hole != hole;
 }
 
 class _Blobs extends StatelessWidget {

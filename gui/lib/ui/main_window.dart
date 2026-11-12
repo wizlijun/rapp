@@ -116,6 +116,7 @@ class _MainWindowState extends State<MainWindow> {
           backgroundColor: t.bg,
           body: Backdrop(
             theme: state.prefs.theme,
+            hole: state.pictureHole,
             child: Column(children: [
               TopBar(state: state, fullscreen: _full, onToggleFullscreen: _toggleFull),
               _NarrowHint(state: state),

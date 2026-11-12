@@ -1,10 +1,16 @@
 // One embedded session as the GUI sees it: the state the runner's events build up.
 import 'package:flutter/foundation.dart';
 
+import 'resize_policy.dart';
 import 'session_port.dart';
 
 class RemoteSession extends ChangeNotifier {
-  RemoteSession(this.sid, this.appName);
+  /// [onResize] is where the session's resize policy sends: window, width, height.
+  RemoteSession(this.sid, this.appName, {void Function(int window, int w, int h)? onResize})
+      : policy = ResizePolicy(onResize ?? (_, _, _) {});
+
+  /// Decides when the stage size becomes A's window size.
+  final ResizePolicy policy;
 
   final Object sid;
   String appName;
@@ -51,5 +57,11 @@ class RemoteSession extends ChangeNotifier {
         return;
     }
     notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    policy.dispose();
+    super.dispose();
   }
 }
