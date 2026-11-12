@@ -22,6 +22,7 @@ class StreamMenuAnchor extends StatefulWidget {
     required this.status,
     required this.disconnected,
     this.reconnecting = false,
+    this.reconnectWord = '重连',
     required this.onDisconnect,
     required this.onReconnect,
     required this.onEnd,
@@ -70,6 +71,9 @@ class StreamMenuAnchor extends StatefulWidget {
   /// A reconnect is under way: the same reduced menu, but 「重连」 gives way to the status.
   final bool reconnecting;
 
+  /// The reconnect item's word: 「拿回来」 for a taken-over session (R13), else 「重连」.
+  final String reconnectWord;
+
   /// 「断开」 and 「重连」; null greys them (no hub to ask).
   final VoidCallback? onDisconnect;
   final VoidCallback? onReconnect;
@@ -98,6 +102,7 @@ class _StreamMenuAnchorState extends State<StreamMenuAnchor> {
         status: widget.status,
         disconnected: widget.disconnected,
         reconnecting: widget.reconnecting,
+        reconnectWord: widget.reconnectWord,
         onDisconnect: widget.onDisconnect,
         onReconnect: widget.onReconnect,
         onClose: widget.onClose,
@@ -134,6 +139,7 @@ class StreamMenu extends StatefulWidget {
     required this.status,
     required this.disconnected,
     this.reconnecting = false,
+    this.reconnectWord = '重连',
     required this.onDisconnect,
     required this.onReconnect,
     required this.onClose,
@@ -159,6 +165,7 @@ class StreamMenu extends StatefulWidget {
   final String status;
   final bool disconnected;
   final bool reconnecting;
+  final String reconnectWord;
   final VoidCallback? onDisconnect;
   final VoidCallback? onReconnect;
   final VoidCallback onClose;
@@ -204,7 +211,7 @@ class _StreamMenuState extends State<StreamMenu> {
               _head(t, '会话'),
               _Item('路径 ${pathLabels[widget.path] ?? widget.path} · ${widget.status}', enabled: false),
               if (widget.disconnected)
-                _Item('重连', enabled: widget.onReconnect != null, onTap: () => _then(widget.onReconnect!))
+                _Item(widget.reconnectWord, enabled: widget.onReconnect != null, onTap: () => _then(widget.onReconnect!))
               else if (!widget.reconnecting) ...[
                 _Item('断开', enabled: widget.onDisconnect != null, onTap: () => _then(widget.onDisconnect!)),
                 _Item(

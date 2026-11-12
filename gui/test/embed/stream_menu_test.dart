@@ -27,7 +27,7 @@ void main() {
       port.calls.any((c) => c.$1 == name && const DeepCollectionEquality().equals(c.$2, args));
 
   Future<void> open(WidgetTester tester,
-      {VoidCallback? onDetach, bool disconnected = false, bool reconnecting = false, bool hub = true, String status = '活动',
+      {VoidCallback? onDetach, bool disconnected = false, bool reconnecting = false, bool hub = true, String status = '活动', String reconnectWord = '重连',
       List<int> seed = const [], Object seedSid = 1, int? other, int grey = -1}) async {
     shellOpen = false;
     ended = 0;
@@ -57,6 +57,7 @@ void main() {
         status: status,
         disconnected: disconnected,
         reconnecting: reconnecting,
+        reconnectWord: reconnectWord,
         onDisconnect: hub ? () => disconnects++ : null,
         onReconnect: hub ? () => reconnects++ : null,
         onEnd: () => ended++,
@@ -94,6 +95,14 @@ void main() {
     await tester.pump();
     expect(reconnects, 1);
     expect(find.text('重连'), findsNothing); // closed
+  });
+
+  testWidgets('a taken-over session offers 拿回来 instead of 重连 (R13)', (tester) async {
+    await open(tester, disconnected: true, reconnectWord: '拿回来');
+    expect(find.text('重连'), findsNothing);
+    await tester.tap(find.text('拿回来'));
+    await tester.pump();
+    expect(reconnects, 1);
   });
 
   testWidgets('a reconnecting session gets the reduced menu without 重连', (tester) async {

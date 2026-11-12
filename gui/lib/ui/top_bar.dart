@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../embed/stream_menu.dart';
 import 'lamp.dart';
+import 'lifecycle.dart';
 import 'tab_chip.dart';
 import 'main_state.dart';
 import 'needs_you.dart';
@@ -190,6 +191,7 @@ class TopBar extends StatelessWidget {
                       status: lampWord(cur.lamp),
                       disconnected: state.currentDisconnected,
                       reconnecting: state.currentReconnecting,
+                      reconnectWord: reconnectLabel(state.currentRecord?.reason),
                       onDisconnect: state.hubUsable ? state.disconnectCurrent : null,
                       onReconnect: state.hubUsable ? state.reconnectCurrent : null,
                       onEnd: state.endCurrent,
