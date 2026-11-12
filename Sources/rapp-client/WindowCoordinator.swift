@@ -19,7 +19,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
     private let transfers: TransferQueue
     private let counters = SendCounters()
     private var senders: [UInt32: Sender] = [:]
-    private var table: [WindowInfo] = []
+    private(set) var table: [WindowInfo] = []
     private var windows: [UInt32: RemoteWindow] = [:]
     private var popups: [UInt32: PopupPanel] = [:]
     private let placeholder: NSWindow
@@ -330,14 +330,12 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
 
     // MARK: Frames (spec §4.4)
 
-    /// Gives every window its part of `image`, a frame covering `region`.
-    func show(_ image: CGImage, region: CanvasRect) {
-        for info in table {
-            guard let view = windows[info.id]?.remoteView ?? popups[info.id]?.remoteView,
-                  let crop = cropRect(window: info, region: region, pixelWidth: image.width, pixelHeight: image.height),
-                  let visible = visiblePart(window: info, region: region),
-                  let part = image.cropping(to: crop) else { continue }
-            view.show(part, visible: visible)
+    /// Gives each window in `updated` its latest buffer from `surfaces`.
+    func show(_ surfaces: WindowSurfaces, updated: [UInt32]) {
+        for id in updated {
+            guard let view = windows[id]?.remoteView ?? popups[id]?.remoteView,
+                  let buffer = surfaces.latest(id), let visible = surfaces.visible(id) else { continue }
+            view.show(buffer, visible: visible)
         }
     }
 

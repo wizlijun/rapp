@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let output: WorkerOutput
     private let connection: Connection
     private let decoder: FrameDecoder
+    private let surfaces = WindowSurfaces()
     private let streamMenu: StreamMenu
     private let meter: TrafficMeter
     private let transfers: TransferQueue
@@ -178,14 +179,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case let .frame(region, payload):
             do {
                 try decoder.decode(payload)
+                // Cropped by the region the frame itself carries, not the table's (spec §4.4).
+                let updated = try surfaces.draw(table: coordinator.table, decoder: decoder, region: region)
+                coordinator.show(surfaces, updated: updated)
             } catch {
                 output.finish(ExitCode.runtime, "rapp-client: cannot decode frame: \(error)")
+                return
             }
-            let bgra = Quantizer.expand(samples: decoder.samples, width: decoder.width, height: decoder.height,
-                                        mode: decoder.mode)
-            // Cropped by the region the frame itself carries, not the table's (spec §4.4).
-            guard let image = makeImage(bgra: bgra, width: decoder.width, height: decoder.height) else { break }
-            coordinator.show(image, region: region)
         case let .menuBar(items):
             mirroredMenu.update(items)
         case let .clip(id, info):
@@ -197,18 +197,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         default:
             break
         }
-    }
-
-    /// `bgra` is B, G, R, X bytes, `width * 4` per row.
-    private func makeImage(bgra: [UInt8], width: Int, height: Int) -> CGImage? {
-        guard width > 0, height > 0, bgra.count >= width * height * 4,
-              let provider = CGDataProvider(data: Data(bgra) as CFData),
-              let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
-        return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
-                       space: colorSpace,
-                       bitmapInfo: CGBitmapInfo(rawValue: CGBitmapInfo.byteOrder32Little.rawValue
-                                                    | CGImageAlphaInfo.noneSkipFirst.rawValue),
-                       provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
     }
 
     // MARK: Stream settings

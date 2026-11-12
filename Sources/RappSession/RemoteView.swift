@@ -1,4 +1,5 @@
 import AppKit
+import CoreVideo
 import QuartzCore
 import RappCore
 
@@ -60,10 +61,10 @@ public final class RemoteView: NSView {
     /// Where the whole content is drawn: fitted at A's aspect ratio.
     private var fitRect: CGRect { aspectFitRect(imageSize: remoteSize, in: bounds.size) }
 
-    /// Shows `image`, the part `visible` of the window's content (see `visiblePart`).
-    public func show(_ image: CGImage, visible part: CGRect) {
+    /// Shows `buffer`, the part `visible` of the window's content (see `visiblePart`).
+    public func show(_ buffer: CVPixelBuffer, visible part: CGRect) {
         visible = part
-        picture.contents = image
+        picture.contents = CVPixelBufferGetIOSurface(buffer)?.takeUnretainedValue()
         layoutPicture()
     }
 

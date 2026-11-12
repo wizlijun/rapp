@@ -11,7 +11,7 @@ private func q(_ r: UInt8, _ g: UInt8, _ b: UInt8, _ mode: Mode) -> [UInt8] {
 
 /// Expands one sample to [B, G, R, A].
 private func e(_ s: [UInt8], _ mode: Mode) -> [UInt8] {
-    Quantizer.expand(samples: s, width: 1, height: 1, mode: mode)
+    try! Quantizer.expand(samples: s, width: 1, height: 1, mode: mode)
 }
 
 /// Builds a BGRA image from rows of (R, G, B, A) pixels.
@@ -252,10 +252,47 @@ final class QuantizeTests: XCTestCase {
 
     func testDuoExpandMatchesBaseModes() {
         let g: [UInt8] = [0, 7, 15]
-        XCTAssertEqual(Quantizer.expand(samples: g, width: 3, height: 1, mode: .duogray),
-                       Quantizer.expand(samples: g, width: 3, height: 1, mode: .gray4))
+        XCTAssertEqual(try Quantizer.expand(samples: g, width: 3, height: 1, mode: .duogray),
+                       try Quantizer.expand(samples: g, width: 3, height: 1, mode: .gray4))
         let c: [UInt8] = [0x00, 0xF8, 0x1F, 0x00]
-        XCTAssertEqual(Quantizer.expand(samples: c, width: 2, height: 1, mode: .duocolor),
-                       Quantizer.expand(samples: c, width: 2, height: 1, mode: .color16))
+        XCTAssertEqual(try Quantizer.expand(samples: c, width: 2, height: 1, mode: .duocolor),
+                       try Quantizer.expand(samples: c, width: 2, height: 1, mode: .color16))
+    }
+
+    func testExpandShortSamplesThrows() {
+        XCTAssertThrowsError(try Quantizer.expand(samples: [0], width: 4, height: 4, mode: .color16)) {
+            XCTAssertEqual($0 as? ExpandError, .shortSamples)
+        }
+    }
+
+    func testExpandRectIntoStridedBuffer() throws {
+        // 4x2 color16: pixel i has sample value (i + 1) in the low byte of green.
+        var samples = [UInt8]()
+        for i in 0..<8 { let s = UInt16(i + 1) << 5; samples += [UInt8(s & 0xFF), UInt8(s >> 8)] }
+        var dst = [UInt8](repeating: 7, count: 32)
+        try dst.withUnsafeMutableBytes {
+            try Quantizer.expand(samples: samples, width: 4, height: 2, mode: .color16,
+                                 rect: (x: 1, y: 0, w: 2, h: 2), into: $0.baseAddress!, bytesPerRow: 16)
+        }
+        let whole = try Quantizer.expand(samples: samples, width: 4, height: 2, mode: .color16)
+        XCTAssertEqual(Array(dst[0..<8]), Array(whole[4..<12]))
+        XCTAssertEqual(Array(dst[8..<16]), [UInt8](repeating: 7, count: 8))
+        XCTAssertEqual(Array(dst[16..<24]), Array(whole[20..<28]))
+        XCTAssertEqual(Array(dst[24..<32]), [UInt8](repeating: 7, count: 8))
+    }
+
+    func testExpandRectOutsideThrows() {
+        var dst = [UInt8](repeating: 0, count: 64)
+        let samples = [UInt8](repeating: 0, count: 16)
+        for rect in [(x: 3, y: 0, w: 2, h: 1), (x: 0, y: 0, w: 0, h: 1), (x: -1, y: 0, w: 1, h: 1)] {
+            var caught: ExpandError?
+            dst.withUnsafeMutableBytes { buf in
+                do {
+                    try Quantizer.expand(samples: samples, width: 4, height: 2, mode: .color16, rect: rect,
+                                         into: buf.baseAddress!, bytesPerRow: 16)
+                } catch { caught = error as? ExpandError }
+            }
+            XCTAssertEqual(caught, .badRect)
+        }
     }
 }

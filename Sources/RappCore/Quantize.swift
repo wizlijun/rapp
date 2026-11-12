@@ -207,13 +207,33 @@ public enum Quantizer {
     }
 
     /// Turns samples back into a displayable BGRA image (alpha 255, `width * 4` bytes per row).
-    public static func expand(samples: [UInt8], width: Int, height: Int, mode: Mode) -> [UInt8] {
-        let count = width * height
-        precondition(samples.count >= count * mode.bytesPerSample, "sample buffer too small")
-        var out = [UInt8](repeating: 255, count: count * 4)
-        out.withUnsafeMutableBufferPointer { dst in
-            samples.withUnsafeBufferPointer { src in
-                for p in 0..<count {
+    /// Throws `.shortSamples` when `samples` holds fewer than `width * height` samples.
+    public static func expand(samples: [UInt8], width: Int, height: Int, mode: Mode) throws -> [UInt8] {
+        guard width > 0, height > 0 else { return [] }
+        var out = [UInt8](repeating: 255, count: width * height * 4)
+        try out.withUnsafeMutableBytes {
+            try expand(samples: samples, width: width, height: height, mode: mode,
+                       rect: (x: 0, y: 0, w: width, h: height), into: $0.baseAddress!, bytesPerRow: width * 4)
+        }
+        return out
+    }
+
+    /// Expands only `rect` of a `width` x `height` sample canvas into `dst` as BGRA (alpha 255),
+    /// the rect's top-left at `dst`, `bytesPerRow` bytes per row. Throws `.shortSamples` when
+    /// `samples` is too short and `.badRect` when `rect` is empty or leaves the canvas.
+    public static func expand(samples: [UInt8], width: Int, height: Int, mode: Mode,
+                              rect: (x: Int, y: Int, w: Int, h: Int),
+                              into dst: UnsafeMutableRawPointer, bytesPerRow: Int) throws {
+        guard width > 0, height > 0, width <= Int.max / height / 2,
+              samples.count >= width * height * mode.bytesPerSample else { throw ExpandError.shortSamples }
+        guard rect.w > 0, rect.h > 0, rect.x >= 0, rect.y >= 0,
+              rect.x <= width - rect.w, rect.y <= height - rect.h, bytesPerRow >= rect.w * 4 else { throw ExpandError.badRect }
+        let bps = mode.bytesPerSample
+        samples.withUnsafeBufferPointer { src in
+            for row in 0..<rect.h {
+                let out = (dst + row * bytesPerRow).assumingMemoryBound(to: UInt8.self)
+                var p = (rect.y + row) * width + rect.x
+                for x in 0..<rect.w {
                     let r: Int, g: Int, b: Int
                     switch mode {
                     case .gray4, .duogray:
@@ -228,16 +248,23 @@ public enum Quantizer {
                             r = (s / 36) * 51; g = (s / 6 % 6) * 51; b = (s % 6) * 51
                         }
                     case .color16, .duocolor:
-                        let s = Int(src[p * 2]) | Int(src[p * 2 + 1]) << 8
+                        let s = Int(src[p * bps]) | Int(src[p * bps + 1]) << 8
                         let r5 = s >> 11, g6 = (s >> 5) & 0x3F, b5 = s & 0x1F
                         r = (r5 << 3) | (r5 >> 2); g = (g6 << 2) | (g6 >> 4); b = (b5 << 3) | (b5 >> 2)
                     }
-                    dst[p * 4] = UInt8(b)
-                    dst[p * 4 + 1] = UInt8(g)
-                    dst[p * 4 + 2] = UInt8(r)
+                    out[x * 4] = UInt8(b)
+                    out[x * 4 + 1] = UInt8(g)
+                    out[x * 4 + 2] = UInt8(r)
+                    out[x * 4 + 3] = 255
+                    p += 1
                 }
             }
         }
-        return out
     }
+}
+
+/// Why samples could not be expanded; the data came from the remote side.
+public enum ExpandError: Error, Equatable {
+    case shortSamples
+    case badRect
 }
