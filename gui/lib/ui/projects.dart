@@ -1,5 +1,6 @@
 // 全部打开 / 全部结束 for a project (S5 K11, K12): the plan and the hint words. Pure Dart.
 import 'lamp.dart';
+import 'session_model.dart';
 import 'workspace_store.dart';
 
 /// What 「全部打开」 does with a project's members.
@@ -53,4 +54,16 @@ String openAllHint(Project p, OpenPlan plan, String Function(String id) deviceNa
 String endAllHint(String name, int ended, int shared) {
   if (ended == 0) return '$name：没有要结束的会话';
   return '$name：结束 $ended 个会话${shared > 0 ? '，其中 $shared 个也属于别的项目' : ''}';
+}
+
+/// The top bar's second line for a session that is in a project (K16); null when it is in none.
+String? projectSubtitle(SessionEntry e, List<Project> projects) {
+  final mine = [for (final p in projects) if (p.members.any((m) => m.key == e.key)) p];
+  if (mine.isEmpty) return null;
+  String task = '';
+  for (final p in mine) {
+    task = p.members.firstWhere((m) => m.key == e.key).task;
+    if (task.isNotEmpty) break;
+  }
+  return '${e.device} · ${mine.first.name}${mine.length > 1 ? '等' : ''}${task.isEmpty ? '' : ' · $task'}';
 }

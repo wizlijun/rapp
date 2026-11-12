@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/ui/lamp.dart';
 import 'package:rapp/ui/projects.dart';
+import 'package:rapp/ui/session_model.dart';
 import 'package:rapp/ui/workspace_store.dart';
 
 void main() {
@@ -13,6 +14,30 @@ void main() {
   ]);
   final lamps = {'111/a': Lamp.active, '111/b': Lamp.disconnected};
   String names(String id) => id == '222' ? 'studio' : 'mini';
+
+  group('project subtitle', () {
+    SessionEntry en(String key) {
+      final i = key.indexOf('/');
+      return SessionEntry(
+          sid: 1, id: key.substring(0, i), app: key.substring(i + 1), appName: 'X',
+          device: 'mini', path: 'lan', lamp: Lamp.active);
+    }
+
+    const a = AppRef('111', 'a', 'A');
+    test('not in a project is null', () {
+      expect(projectSubtitle(en('111/a'), [Project('p', '写周报')]), isNull);
+    });
+    test('one project, no task', () {
+      expect(projectSubtitle(en('111/a'), [Project('p', '写周报', [Member(a)])]), 'mini · 写周报');
+    });
+    test('several projects add 等 and the first non-empty task', () {
+      final p1 = Project('p', '写周报', [Member(a)]);
+      final p2 = Project('q', '发版', [Member(a, '跑测试')]);
+      expect(projectSubtitle(en('111/a'), [p1, p2]), 'mini · 写周报等 · 跑测试');
+      final p3 = Project('p', '写周报', [Member(a, '整理 PR')]);
+      expect(projectSubtitle(en('111/a'), [p3, p2]), 'mini · 写周报等 · 整理 PR');
+    });
+  });
 
   test('plan: open, reconnect, skip and stop', () {
     final plan = planOpenAll(p, lampOf: (k) => lamps[k], offline: (d) => d == '222');

@@ -313,6 +313,23 @@ void main() {
     expect(tester.getSize(find.byType(SidePanel)).width, 330);
   });
 
+  testWidgets('a session in two projects shows in both groups', (tester) async {
+    const safari = AppRef('111', 'com.apple.Safari', 'Safari');
+    s.addMember(s.createProject('写周报')!.id, safari);
+    s.addMember(s.createProject('发版')!.id, safari);
+    s.togglePanel();
+    await tester.pumpWidget(wrap(panel()));
+    await open(tester, 1, 'com.apple.Safari');
+    await tester.tap(find.byKey(const Key('group-project')));
+    await tester.pump();
+    final rows = find.byKey(const Key('session-111/com.apple.Safari'));
+    expect(rows, findsNWidgets(2));
+    await tester.tap(rows.last);
+    await tester.pump();
+    expect(s.currentKey, '111/com.apple.Safari');
+    expect(s.panel, isNull);
+  });
+
   testWidgets('no overflow on a 400x500 window', (tester) async {
     tester.view.physicalSize = const Size(400, 500);
     tester.view.devicePixelRatio = 1;
@@ -322,6 +339,9 @@ void main() {
     await tester.pumpWidget(wrap(panel()));
     await open(tester, 1, 'Safari');
     await open(tester, 2, 'Mail');
+    await tester.tap(find.byKey(const Key('group-project')));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
     expect(tester.takeException(), isNull);
     s.togglePanel(PanelTab.devices);
     await tester.pump();

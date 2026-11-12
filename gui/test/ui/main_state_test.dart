@@ -11,6 +11,7 @@ import 'package:rapp/ui/lamp.dart';
 import 'package:rapp/ui/lifecycle.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
+import 'package:rapp/ui/session_model.dart';
 import 'package:rapp/ui/tokens.dart';
 import 'package:rapp/ui/workspace_store.dart';
 
@@ -1759,6 +1760,29 @@ void main() {
       await s.removeDevice('222');
       expect(a.members, hasLength(1));
       expect(s.deviceOffline('222'), isTrue);
+    });
+
+    test('step walks project groups without sticking', () async {
+      for (final (i, b) in ['com.a', 'com.b', 'com.c'].indexed) {
+        t.emit(opened(i + 1, '111', b));
+        await pump();
+      }
+      s.addMember(s.createProject('P1')!.id, const AppRef('111', 'com.b', 'b'));
+      final p2 = s.createProject('P2')!;
+      s.addMember(p2.id, const AppRef('111', 'com.a', 'a'));
+      s.addMember(p2.id, const AppRef('111', 'com.b', 'b'));
+      s.setGrouping(Grouping.project);
+      s.select('111/com.b');
+      final seen = <String?>[s.currentKey];
+      for (var i = 0; i < 4; i++) {
+        s.step(1);
+        seen.add(s.currentKey);
+      }
+      expect(seen.take(4).toSet(), hasLength(3));
+      expect(seen[3], seen[0]);
+      for (var i = 1; i < seen.length; i++) {
+        expect(seen[i], isNot(seen[i - 1]));
+      }
     });
   });
 

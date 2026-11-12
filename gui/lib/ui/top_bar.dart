@@ -6,6 +6,7 @@ import 'lamp.dart';
 import 'tab_chip.dart';
 import 'main_state.dart';
 import 'needs_you.dart';
+import 'projects.dart';
 import 'session_model.dart';
 import 'tokens.dart';
 
@@ -188,6 +189,8 @@ class TopBar extends StatelessWidget {
   }
 
   String _sub(SessionEntry e) {
+    final inProject = projectSubtitle(e, state.projects);
+    if (inProject != null) return inProject;
     final p = pathLabels[e.path];
     if (e.lamp == Lamp.connecting || p == null) {
       return e.lamp == Lamp.connecting

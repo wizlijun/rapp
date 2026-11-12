@@ -9,6 +9,7 @@ import 'package:rapp/ui/tab_chip.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/top_bar.dart';
+import 'package:rapp/ui/workspace_store.dart';
 
 import '../fakes.dart';
 import 'helpers.dart';
@@ -157,6 +158,18 @@ void main() {
     await tester.pump();
     expect(find.text('mini'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('second line shows device, project and task', (tester) async {
+    final p = s.createProject('写周报')!;
+    s.addMember(p.id, const AppRef('111', 'com.apple.Safari', 'Safari'));
+    s.setTask(p.id, '111/com.apple.Safari', '整理 PR');
+    await tester.pumpWidget(wrap(bar()));
+    await open(tester, 1, 'com.apple.Safari');
+    s.select('111/com.apple.Safari');
+    await tester.pump();
+    expect(find.text('mini · 写周报 · 整理 PR'), findsOneWidget);
+    expect(find.bySemanticsLabel('com.apple.Safari，活动，mini · 写周报 · 整理 PR'), findsOneWidget);
   });
 
   group('window tabs', () {

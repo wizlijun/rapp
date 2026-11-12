@@ -376,7 +376,7 @@ class MainState extends ChangeNotifier {
   }
 
   // ---- sessions ----
-  List<SessionGroup> get groups => groupSessions(_entries, grouping);
+  List<SessionGroup> get groups => groupSessions(_entries, grouping, projects: projects);
 
   int get sessionCount => _entries.length;
 
