@@ -72,6 +72,9 @@ class MainState extends ChangeNotifier {
   SessionRecord? get currentRecord => currentKey == null ? null : _records[currentKey];
   bool get currentDisconnected => currentRecord?.phase == Phase.disconnected;
 
+  /// The current record is reconnecting: its stage still shows the old session's last frame.
+  bool get currentReconnecting => currentRecord?.lastSid != null && !currentDisconnected;
+
   /// What the stage shows of [r]: the last picture while it reconnects, else its own session.
   RemoteSession? _stageRemote(SessionRecord r) {
     final sid = r.lastSid ?? r.sid;
@@ -98,12 +101,8 @@ class MainState extends ChangeNotifier {
   }
 
   /// Whether the runner or the hub may hear of [sid] (R12).
-  /// A sid no record knows is let through (nothing to judge it by); a known one must be a live link.
-  bool _liveSid(Object sid) {
-    final r = _recordOfSid(sid);
-    if (r != null) return r.phase == Phase.live;
-    return _recordOfLastSid(sid) == null;
-  }
+  /// Fails closed: a sid no record claims, or one it only keeps for its last frame, is not heard.
+  bool _liveSid(Object sid) => _recordOfSid(sid)?.phase == Phase.live;
 
   bool _hubHas(Object sid) => hub != null && hub!.sessions.any((s) => s.sid == sid);
 
@@ -242,14 +241,14 @@ class MainState extends ChangeNotifier {
   /// `DetachedEvent`. The same sid and hub session throughout: nothing is reopened.
   void detach() {
     final rs = currentRemote;
-    if (rs == null || rs.detached || rs.tabs.tabs.isEmpty || currentRecord?.phase != Phase.live) return;
+    if (rs == null || rs.detached || rs.tabs.tabs.isEmpty || !_liveSid(rs.sid)) return;
     port?.detach(rs.sid);
   }
 
   /// Puts the current session back on the stage.
   void attach() {
     final rs = currentRemote;
-    if (rs == null || currentRecord?.phase != Phase.live) return;
+    if (rs == null || !_liveSid(rs.sid)) return;
     port?.attach(rs.sid);
   }
 
@@ -263,7 +262,7 @@ class MainState extends ChangeNotifier {
   /// Whether [toggleDetach] does anything now (the menu greys its item otherwise).
   bool get canToggleDetach {
     final rs = currentRemote;
-    return rs != null && currentRecord?.phase == Phase.live && (rs.detached || rs.tabs.tabs.isNotEmpty);
+    return rs != null && _liveSid(rs.sid) && (rs.detached || rs.tabs.tabs.isNotEmpty);
   }
 
   // ---- hub state ----

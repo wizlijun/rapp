@@ -1,6 +1,7 @@
 // The stage of a session whose link is down: its last frame under stripes, with 「重连」 (S3, R25).
 // Shows only; it takes no pointer or keyboard input, and never resizes the stage.
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 import '../embed/geometry.dart';
 import '../embed/remote_session.dart';
@@ -9,13 +10,14 @@ import 'controls.dart';
 import 'lamp.dart';
 import 'tokens.dart';
 
-class DisconnectedStage extends StatelessWidget {
+class DisconnectedStage extends StatefulWidget {
   const DisconnectedStage({
     super.key,
     required this.session,
     required this.reason,
     required this.connecting,
     this.onReconnect,
+    this.hole,
   });
 
   /// The session whose last frame stays under the stripes; null if it never showed one.
@@ -30,8 +32,19 @@ class DisconnectedStage extends StatelessWidget {
   /// Null greys the button (no hub to reconnect through).
   final VoidCallback? onReconnect;
 
+  /// Receives the last frame's global rect, so the IRON MAN grid leaves it alone (R25), like Picture's.
+  final ValueNotifier<Rect?>? hole;
+
+  @override
+  State<DisconnectedStage> createState() => _DisconnectedStageState();
+}
+
+class _DisconnectedStageState extends State<DisconnectedStage> {
+  final _tex = GlobalKey();
+  Rect? _mine;
+
   RemoteWindow? get _window {
-    final rs = session;
+    final rs = widget.session;
     if (rs == null) return null;
     for (final w in rs.windows) {
       if (w.id == rs.currentWindow && w.texture != null) return w;
@@ -39,11 +52,34 @@ class DisconnectedStage extends StatelessWidget {
     return null;
   }
 
+  void _report() {
+    final h = widget.hole;
+    if (h == null || !mounted) return;
+    final box = _tex.currentContext?.findRenderObject();
+    if (box is! RenderBox || !box.attached || !box.hasSize) return;
+    final r = box.localToGlobal(Offset.zero) & box.size;
+    if (r == _mine && h.value == r) return;
+    _mine = r;
+    h.value = r;
+  }
+
+  @override
+  void dispose() {
+    final h = widget.hole, mine = _mine;
+    if (h != null && mine != null) {
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        if (h.value == mine) h.value = null;
+      });
+    }
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
     final win = _window;
     final stripes = rowBackdrop(Lamp.disconnected, t);
+    SchedulerBinding.instance.addPostFrameCallback((_) => _report());
     return ColoredBox(
       color: t.bg,
       child: Stack(
@@ -54,12 +90,12 @@ class DisconnectedStage extends StatelessWidget {
               final fit = fitRect(contentSize(win), c.biggest);
               final pic = pictureRect(fit, win.visible);
               return Stack(children: [
-                Positioned.fromRect(rect: pic, child: Texture(textureId: win.texture!)),
+                Positioned.fromRect(rect: pic, child: Texture(key: _tex, textureId: win.texture!)),
               ]);
             }),
           if (stripes != null) DecoratedBox(decoration: stripes),
           Center(
-            child: connecting
+            child: widget.connecting
                 ? Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -71,9 +107,10 @@ class DisconnectedStage extends StatelessWidget {
                 : Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      RappButton.accent(key: const Key('reconnect-button'), label: '重连', onPressed: onReconnect),
+                      RappButton.accent(
+                          key: const Key('reconnect-button'), label: '重连', onPressed: widget.onReconnect),
                       const SizedBox(height: 12),
-                      Text(reason, key: const Key('disconnect-reason'), style: TextStyle(color: t.text)),
+                      Text(widget.reason, key: const Key('disconnect-reason'), style: TextStyle(color: t.text)),
                     ],
                   ),
           ),

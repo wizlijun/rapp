@@ -20,7 +20,8 @@ void main() {
   bool called(String name, Map<String, Object?> args) =>
       port.calls.any((c) => c.$1 == name && const DeepCollectionEquality().equals(c.$2, args));
 
-  Future<void> open(WidgetTester tester, {VoidCallback? onDetach, bool disconnected = false}) async {
+  Future<void> open(WidgetTester tester,
+      {VoidCallback? onDetach, bool disconnected = false, bool reconnecting = false, bool hub = true, String status = '活动'}) async {
     ended = 0;
     disconnects = 0;
     reconnects = 0;
@@ -35,10 +36,11 @@ void main() {
         port: port,
         session: rs,
         path: 'lan',
-        status: '活动',
+        status: status,
         disconnected: disconnected,
-        onDisconnect: () => disconnects++,
-        onReconnect: () => reconnects++,
+        reconnecting: reconnecting,
+        onDisconnect: hub ? () => disconnects++ : null,
+        onReconnect: hub ? () => reconnects++ : null,
         onEnd: () => ended++,
         onToggleDetach: onDetach,
       ),
@@ -69,6 +71,32 @@ void main() {
     await tester.pump();
     expect(reconnects, 1);
     expect(find.text('重连'), findsNothing); // closed
+  });
+
+  testWidgets('a reconnecting session gets the reduced menu without 重连', (tester) async {
+    await open(tester, reconnecting: true, status: '连接中');
+    expect(find.text('路径 局域网 · 连接中'), findsOneWidget);
+    expect(find.text('结束会话'), findsOneWidget);
+    for (final gone in ['重连', '断开', '分离成独立窗口', '放左上角', '预设', 'A 的剪贴板']) {
+      expect(find.text(gone), findsNothing, reason: gone);
+    }
+  });
+
+  testWidgets('断开 and 重连 are greyed without a hub', (tester) async {
+    await open(tester, hub: false);
+    await tester.ensureVisible(find.text('断开'));
+    await tester.tap(find.text('断开'));
+    await tester.pump();
+    expect(disconnects, 0);
+    expect(find.text('路径 局域网 · 活动'), findsOneWidget); // still open: nothing was picked
+  });
+
+  testWidgets('重连 is greyed without a hub', (tester) async {
+    await open(tester, disconnected: true, hub: false);
+    await tester.tap(find.text('重连'));
+    await tester.pump();
+    expect(reconnects, 0);
+    expect(find.text('路径 局域网 · 活动'), findsOneWidget);
   });
 
   const preset = '最省流（双色·灰度 + 自适应 + 1 fps）';

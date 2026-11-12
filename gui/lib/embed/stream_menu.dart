@@ -19,6 +19,7 @@ class StreamMenuAnchor extends StatefulWidget {
     required this.path,
     required this.status,
     required this.disconnected,
+    this.reconnecting = false,
     required this.onDisconnect,
     required this.onReconnect,
     required this.onEnd,
@@ -37,9 +38,12 @@ class StreamMenuAnchor extends StatefulWidget {
   /// The link is down: the menu keeps only the session group (R21).
   final bool disconnected;
 
-  /// 「断开」 and 「重连」.
-  final VoidCallback onDisconnect;
-  final VoidCallback onReconnect;
+  /// A reconnect is under way: the same reduced menu, but 「重连」 gives way to the status.
+  final bool reconnecting;
+
+  /// 「断开」 and 「重连」; null greys them (no hub to ask).
+  final VoidCallback? onDisconnect;
+  final VoidCallback? onReconnect;
 
   /// 「结束会话」 was confirmed.
   final VoidCallback onEnd;
@@ -100,6 +104,7 @@ class _StreamMenuAnchorState extends State<StreamMenuAnchor> {
                     path: widget.path,
                     status: widget.status,
                     disconnected: widget.disconnected,
+                    reconnecting: widget.reconnecting,
                     onDisconnect: widget.onDisconnect,
                     onReconnect: widget.onReconnect,
                     onClose: _close,
@@ -135,6 +140,7 @@ class StreamMenu extends StatefulWidget {
     required this.path,
     required this.status,
     required this.disconnected,
+    this.reconnecting = false,
     required this.onDisconnect,
     required this.onReconnect,
     required this.onClose,
@@ -147,8 +153,9 @@ class StreamMenu extends StatefulWidget {
   final String path;
   final String status;
   final bool disconnected;
-  final VoidCallback onDisconnect;
-  final VoidCallback onReconnect;
+  final bool reconnecting;
+  final VoidCallback? onDisconnect;
+  final VoidCallback? onReconnect;
   final VoidCallback onClose;
   final VoidCallback onEnd;
   final VoidCallback? onToggleDetach;
@@ -184,19 +191,20 @@ class _StreamMenuState extends State<StreamMenu> {
         final clips = _s.clips;
         final shown = _allClips ? clips : clips.take(2).toList();
         final window = _s.currentWindow;
+        final reduced = widget.disconnected || widget.reconnecting; // only the session group (R21)
         return SingleChildScrollView(
           padding: const EdgeInsets.symmetric(vertical: 6),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (!widget.disconnected) ..._streamGroups(t, c, clips, shown),
+              if (!reduced) ..._streamGroups(t, c, clips, shown),
               _head(t, '会话'),
               _Item('路径 ${pathLabels[widget.path] ?? widget.path} · ${widget.status}', enabled: false),
               if (widget.disconnected)
-                _Item('重连', onTap: () => _then(widget.onReconnect))
-              else ...[
-                _Item('断开', onTap: () => _then(widget.onDisconnect)),
+                _Item('重连', enabled: widget.onReconnect != null, onTap: () => _then(widget.onReconnect!))
+              else if (!widget.reconnecting) ...[
+                _Item('断开', enabled: widget.onDisconnect != null, onTap: () => _then(widget.onDisconnect!)),
                 _Item(
                   _s.detached ? '放回主窗口' : '分离成独立窗口',
                   enabled: widget.onToggleDetach != null,
@@ -215,7 +223,7 @@ class _StreamMenuState extends State<StreamMenu> {
                   child: ConfirmButton(label: '结束会话', onConfirmed: () => _then(widget.onEnd)),
                 ),
               ),
-              if (!widget.disconnected && _s.menu.isNotEmpty) ...[
+              if (!reduced && _s.menu.isNotEmpty) ...[
                 _head(t, 'A 的菜单'),
                 ..._entries(t, _s.menu, const [], 0),
               ],

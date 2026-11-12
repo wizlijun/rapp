@@ -351,6 +351,36 @@ void main() {
       expect(find.byKey(const Key('reconnect-button')), findsNothing);
     });
 
+    testWidgets('reconnect opened but not swapped keeps stripes and takes no input', (tester) async {
+      await shown(tester);
+      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      await tester.pump();
+      await tester.runAsync(() async {
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            t.emit({
+              'event': 'opened', 'sid': 11, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+              'port': 5011, 'token': 'tk', 'req': m['req'],
+            });
+          }
+        };
+        await tester.tap(find.byKey(const Key('reconnect-button')));
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      await tester.pump();
+      expect(es.currentRecord!.lastSid, 1);
+      expect(find.byType(DisconnectedStage), findsOneWidget);
+      expect(find.text('正在连接'), findsOneWidget);
+      expect(tex42, findsOneWidget);
+      port.calls.clear();
+      await tester.tapAt(tester.getCenter(find.byKey(const Key('stage'))));
+      await tester.pump();
+      es.toggleDetach();
+      expect(port.calls.where((c) => c.$1 == 'mouse' || c.$1 == 'detach' || c.$1 == 'picture_focus'), isEmpty);
+    });
+
     testWidgets('reconnect is off when the hub is gone', (tester) async {
       await shown(tester);
       port.emit(const DisconnectedEvent(1, 'connection closed'));

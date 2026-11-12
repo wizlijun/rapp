@@ -841,6 +841,29 @@ void main() {
       });
     });
 
+    test('reconnect opened but not swapped sends nothing to the old sid (R12)', () {
+      env((a, t, port, st, hints) {
+        port.emit(const ReadyEvent(1, 'Calculator'));
+        port.emit(WindowsEvent(1, [rw(3), rw(7)]));
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        st.reconnectCurrent();
+        a.flushMicrotasks(); // the hub answers `opened` (sid 11); no textured window yet
+        expect(st.currentRecord!.phase, Phase.live);
+        expect(st.currentRecord!.lastSid, 1);
+        expect(st.canToggleDetach, false);
+        quietAfter(a, t, port, st);
+      });
+    });
+
+    test('a sid no record claims is not heard (fails closed)', () {
+      env((a, t, port, st, hints) {
+        final calls = port.calls.length;
+        st.focusPicture(999);
+        expect(port.calls.length, calls);
+        expect(st.pictureFocused, isNull);
+      });
+    });
+
     test('total traffic sums live sessions only', () {
       env((a, t, port, st, hints) {
         port.emit(const TrafficEvent(1, 3000, 1));

@@ -173,6 +173,16 @@ void main() {
     expect(one.style!.color, tokensFor(RappTheme.matrix).text);
   });
 
+  testWidgets('non-embedded rows get no status text (R22)', (tester) async {
+    await tester.pumpWidget(wrap(panel()));
+    t.onSend = (_) {}; // the open never answers: a pending row, lamp connecting
+    s.openOrSwitch('111', 'Safari', 'Safari');
+    await tester.runAsync(flush);
+    await tester.pump();
+    expect(find.byKey(const Key('session-111/Safari')), findsOneWidget);
+    expect(find.byKey(const Key('session-status-111/Safari')), findsNothing);
+  });
+
   group('embedded rows', () {
     late FakeSessionPort port;
     late MainState es;
@@ -226,6 +236,8 @@ void main() {
       expect(find.text('已断开：A 端关闭了 app'), findsOneWidget);
       expect(text(tester, 'session-status-111/c'), '');
       expect(find.bySemanticsLabel(RegExp('已断开：A 端关闭了 app')), findsOneWidget);
+      // The state word is said once (M-4).
+      expect(find.bySemanticsLabel(RegExp(r'^B，空闲(，局域网)?$')), findsOneWidget);
     });
 
     testWidgets('total traffic sums live sessions', (tester) async {

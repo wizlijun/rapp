@@ -48,15 +48,16 @@ class Stage extends StatelessWidget {
               RappButton.secondary(label: '打开面板', onPressed: state.togglePanel),
             ],
           );
-        } else if (rec != null &&
-            (rec.phase == Phase.disconnected || (rec.phase == Phase.connecting && rec.lastSid != null))) {
-          // Dead or reconnecting: the last frame under stripes. Never input, never a resize (R25).
+        } else if (rec != null && (rec.phase == Phase.disconnected || rec.lastSid != null)) {
+          // Dead, or reconnecting until the new picture swaps in (R10): the old frame under stripes.
+          // Never input, never a resize (R25).
           full = true;
           body = DisconnectedStage(
             session: rs,
             reason: disconnectWord(rec.reason),
-            connecting: rec.phase == Phase.connecting,
+            connecting: rec.phase != Phase.disconnected,
             onReconnect: state.hubUsable ? state.reconnectCurrent : null,
+            hole: state.pictureHole,
           );
         } else if (rs != null && !rs.detached && win != null) {
           picture = true;

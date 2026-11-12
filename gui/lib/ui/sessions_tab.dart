@@ -73,6 +73,7 @@ class SessionsTab extends StatelessWidget {
                                 entry: e,
                                 selected: e.key == state.currentKey,
                                 byDevice: state.grouping == Grouping.device,
+                                embedded: state.embeds,
                                 onTap: () => state.select(e.key),
                               ),
                             ),
@@ -92,11 +93,15 @@ class _SessionRow extends StatelessWidget {
     required this.entry,
     required this.selected,
     required this.byDevice,
+    required this.embedded,
     required this.onTap,
   });
   final SessionEntry entry;
   final bool selected;
   final bool byDevice;
+
+  /// Only embedded sessions have traffic data; other rows are unchanged (R22).
+  final bool embedded;
   final VoidCallback onTap;
 
   String get _second {
@@ -108,7 +113,7 @@ class _SessionRow extends StatelessWidget {
   /// The status text at the row's right (R22): the rate when active, 「空闲」, 「连接中」; empty
   /// when disconnected (its reason takes the second line) or when there is no data.
   String get _status {
-    if (entry.reason != null) return '';
+    if (!embedded || entry.reason != null) return '';
     return switch (entry.lamp) {
       Lamp.active => entry.bytesPerSecond == null ? '' : formatRate(entry.bytesPerSecond!),
       Lamp.idle => '空闲',
@@ -127,7 +132,8 @@ class _SessionRow extends StatelessWidget {
     final status = _status;
     final label = [
       entry.appName,
-      lampWord(entry.lamp),
+      // The state word is said once: 「空闲」 and 「连接中」 are both lamp and status.
+      if (status != lampWord(entry.lamp)) lampWord(entry.lamp),
       if (status.isNotEmpty) status,
       if (second.isNotEmpty) second,
     ].join('，');
@@ -196,7 +202,7 @@ class _SessionRow extends StatelessWidget {
                             ],
                           ),
                         ),
-                        if (entry.reason != null || status.isNotEmpty)
+                        if (embedded && (entry.reason != null || status.isNotEmpty))
                           Padding(
                             padding: const EdgeInsets.only(left: 8),
                             child: Text(
