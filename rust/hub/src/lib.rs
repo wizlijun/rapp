@@ -85,7 +85,7 @@ where
         hosts: Hosts::load(&opts.home)?,
         out: tokio::sync::Mutex::new(Box::new(output)),
         sessions: Default::default(),
-        next_sid: AtomicU64::new(0),
+        next_sid: AtomicU64::new(sid_seed()),
         close_why: Default::default(),
         probe_halt: Default::default(),
         lan_only: Default::default(),
@@ -235,5 +235,32 @@ impl Hub {
             }
             _ => bail!("unknown cmd"),
         }))
+    }
+}
+
+/// Where this hub's sids start: the wall clock in ms. Sids only need to be unique per GUI launch,
+/// and the GUI keeps old sids across 「重启服务」; starting from the clock keeps a restarted hub
+/// from reusing them.
+fn sid_seed() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod sid_tests {
+    use super::sid_seed;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// Sids continue from the wall clock in ms, so a restarted hub never hands out a sid the
+    /// GUI still holds from before the restart.
+    #[test]
+    fn sid_seed_is_wall_clock_millis() {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() as u64;
+        let seed = sid_seed();
+        assert!(seed + 1000 >= now && seed <= now + 1000, "seed {seed} vs now {now}");
+        // Stays exact as a JSON number / Dart int.
+        assert!(seed < (1u64 << 53));
     }
 }
