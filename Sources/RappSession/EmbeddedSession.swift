@@ -21,6 +21,8 @@ public final class EmbeddedSession {
     private let queueKey = DispatchSpecificKey<Void>()
 
     private var table = [WindowInfo]()
+    /// The `visible` of each window as last sent in a `.windows` event.
+    private var emittedVisible = [UInt32: CGRect]()
     private var mode: Mode
     private var fps: UInt8
     private var choice: DensityChoice
@@ -97,13 +99,16 @@ public final class EmbeddedSession {
         case let .windows(newTable):
             table = newTable
             _ = surfaces.keep(only: Set(newTable.map(\.id)))
-            onEvent?(.windows(sessionWindows()))
+            emitWindows()
             sendStreamIfChanged()
         case let .frame(region, payload):
             do {
                 try decoder.decode(payload)
                 let ids = try surfaces.draw(table: table, decoder: decoder, region: region)
                 onEvent?(.surfaces(ids))
+                if table.contains(where: { info in surfaces.visible(info.id).map { $0 != emittedVisible[info.id] } ?? false }) {
+                    emitWindows()
+                }
             } catch {
                 close(reason: "cannot decode frame: \(error)")
             }
@@ -121,6 +126,12 @@ public final class EmbeddedSession {
         default:
             break
         }
+    }
+
+    private func emitWindows() {
+        let windows = sessionWindows()
+        emittedVisible = Dictionary(windows.map { ($0.info.id, $0.visible) }, uniquingKeysWith: { $1 })
+        onEvent?(.windows(windows))
     }
 
     private func sessionWindows() -> [SessionWindow] {

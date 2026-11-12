@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import XCTest
 import RappCore
@@ -72,7 +73,7 @@ final class EmbeddedSessionTests: XCTestCase {
         XCTAssertFalse(link2.cancelled)
     }
 
-    func testFrameLargerThanDecoderThrowsNotCrash() throws {
+    func testInconsistentFrameClosesNotCrashes() throws {
         let link = FakeLink()
         var events = [SessionEvent]()
         let (_, q) = make(link) { events.append($0) }
@@ -90,7 +91,8 @@ final class EmbeddedSessionTests: XCTestCase {
         odd.isFull = false
         odd.width = 128; odd.height = 64
         q.sync { link.feed(.frame(region: region, odd)) }
-        guard case .closed? = events.last else { return XCTFail("expected closed, got \(events)") }
+        guard case let .closed(reason)? = events.last else { return XCTFail("expected closed, got \(events)") }
+        XCTAssertTrue(reason.hasPrefix("cannot decode frame: "))
         XCTAssertTrue(link.cancelled)
     }
 
@@ -152,5 +154,24 @@ final class EmbeddedSessionTests: XCTestCase {
         XCTAssertEqual(events.last, .menu([MenuItem(title: "File")]))
         XCTAssertEqual(events[1], .clips([ClipRow(id: 2, title: "odd", pickable: false),
                                           ClipRow(id: 1, title: "文字 · hello", pickable: true)]))
+    }
+
+    func testWindowsReemittedWhenVisibleChanges() throws {
+        let link = FakeLink()
+        var events = [SessionEvent]()
+        let (_, q) = make(link) { events.append($0) }
+        // The frame covers only the left half of the 64-wide window.
+        let half = CanvasRect(x: 0, y: 0, w: 32, h: 32)
+        let enc = FrameEncoder(mode: .color16)
+        let frame = try XCTUnwrap(enc.encode(samples: [UInt8](repeating: 0x55, count: 32 * 32 * 2), width: 32, height: 32))
+        q.sync {
+            link.feed(.windows([w]))
+            link.feed(.frame(region: half, frame))
+        }
+        let visible = CGRect(x: 0, y: 0, width: 0.5, height: 1)
+        XCTAssertEqual(events.suffix(2), [.surfaces([7]), .windows([SessionWindow(info: w, visible: visible)])])
+        let count = events.count
+        q.sync { link.feed(.frame(region: half, frame)) }
+        XCTAssertEqual(Array(events.dropFirst(count)), [.surfaces([7])])
     }
 }
