@@ -10,5 +10,10 @@ fi
 cargo build --manifest-path rust/Cargo.toml --release --locked -p rapp-client-core -p rapp-client-gtk -p rapp-hub -p rapp-service -p rapp-relay
 (cd gui && "$flutter_bin" build linux --release)
 bundle=gui/build/linux/x64/release/bundle
-cp rust/target/release/{rapp-client,rapp-session,rapp-hub,rapp-service} "$bundle/"
+# Replace workers atomically: an app/session may still be running this bundle.
+for binary in rapp-client rapp-session rapp-hub rapp-service; do
+  staged=$(mktemp "$bundle/.$binary.XXXXXX")
+  install -m755 "rust/target/release/$binary" "$staged"
+  mv -f "$staged" "$bundle/$binary"
+done
 printf 'Built %s/%s/rapp and rapp-client\n' "$PWD" "$bundle"

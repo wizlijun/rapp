@@ -99,9 +99,9 @@ Omarchy 的 Rust/GTK 客户端已支持 v4/v5（见下文）；Windows/Omarchy �
 
 ## Omarchy / Linux 客户端
 
-在 [GitHub Release](https://github.com/wizlijun/rapp/releases/tag/v0.4.0) 下载
-`rapp-omarchy-0.4.0-1-x86_64.pkg.tar.zst`，运行 `sudo pacman -U ./rapp-omarchy-0.4.0-1-x86_64.pkg.tar.zst`，
-然后从应用启动器打开 rapp。也提供 `rapp-0.4.0-omarchy-x86_64.tar.gz` 便携包，解压后运行 `./rapp`。
+在 [GitHub Release](https://github.com/wizlijun/rapp/releases/tag/v0.4.1) 下载
+`rapp-omarchy-0.4.1-1-x86_64.pkg.tar.zst`，运行 `sudo pacman -U ./rapp-omarchy-0.4.1-1-x86_64.pkg.tar.zst`，
+然后从应用启动器打开 rapp。也提供 `rapp-0.4.1-omarchy-x86_64.tar.gz` 便携包，解压后运行 `./rapp`。
 安装包面向 Omarchy / Arch x86_64；便携包的依赖与用法见包内 `README-LINUX.txt`。
 发布包可从干净的源码提交运行 `./scripts/package-linux.sh` 重建，包内记录确切源码提交。
 
@@ -109,14 +109,15 @@ Omarchy 的 Rust/GTK 客户端已支持 v4/v5（见下文）；Windows/Omarchy �
 Rust 网络后台继续复用；`rust/client-core` 实现可跨平台复用的协议和解码，
 `rust/client-gtk` 负责 Linux 显示和输入。Linux **被控端**仍未实现。
 
-0.4.0 的 Linux 管理界面已支持**内嵌远程画面**：从设备列表打开 app 后，画面直接显示在主窗口舞台中。
+0.4.1 的 Linux 管理界面已支持**内嵌远程画面**：从设备列表打开 app 后，画面直接显示在主窗口舞台中。
 `rapp-session` 无窗口进程复用 Rust 解码器，通过有背压的二进制管道将 BGRA 画面交给 Flutter；
 支持窗口标签、弹窗、点击/拖动/滚动、键盘、画质/帧率/密度、远程菜单和文字输入区。
 点击画面后键盘发给 Mac（Ctrl 映射为 ⌘，Super 留给 Linux，F11 控制本地全屏）；
 中文可在“输入”区通过本地输入法组句后发送。退出会话或管理界面会关闭解码进程与连接。
 目前内嵌会话的“分离/放回”和图片/文件附件尚未实现，分离按钮禁用，附件操作会说明限制。
-当前 0.4.1 源码还接入断线保留最后画面、重连换帧和空闲状态；上方下载链接仍为已发布的 0.4.0。
-像素更新独立重绘，待显示帧只保留最新一帧，避免积压；断线停止 worker，结束会话时释放保留画面。
+支持断线保留最后画面、重连换帧和空闲状态。
+像素更新独立重绘；worker 独立输出线程和 Flutter 都只保留最新待显示帧，避免慢速显示导致旧帧排队。
+断线停止 worker，结束会话时释放保留画面。
 独立 GTK `rapp-client` 仍可单独使用；下面的应用画布和独立客户端菜单说明适用于它。
 
 构建依赖：Rust、GTK4 ≥ 4.12、pkgconf。连同 Flutter 管理界面打包还需要 Flutter
