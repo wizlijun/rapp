@@ -18,7 +18,7 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::oneshot;
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
@@ -30,6 +30,8 @@ const BAD_URL: &str = "更新地址不对";
 const NOTHING_TO_INSTALL: &str = "没有可装的新版本";
 const NO_PREVIOUS: &str = "没有上一版";
 const BUSY: &str = "正在忙，请稍后再试";
+/// The reply to a B that opens a session while the new version goes in.
+pub const UPGRADING: &str = "A 正在升级，请稍后再连";
 /// How often a manual install looks again for nobody using rapp (K20).
 const MANUAL_POLL: Duration = Duration::from_millis(500);
 
@@ -57,6 +59,9 @@ pub struct UpdState {
     manifest: Option<Manifest>,
     /// A marker for this very version was found at start: remove it once healthy.
     applied: bool,
+    /// Remote sessions between B's `open` and their end (K17, fix round 1): a session that is
+    /// still starting rapp-host is not in the session table yet but is about to be.
+    opening: usize,
 }
 
 impl Default for UpdState {
@@ -77,6 +82,7 @@ impl Default for UpdState {
             dr_current: None,
             manifest: None,
             applied: false,
+            opening: 0,
         }
     }
 }
@@ -410,7 +416,30 @@ async fn report_progress(state: Arc<State>, part: PathBuf, size: u64) {
 
 fn sessions_in_use(state: &State) -> Option<String> {
     let n = state.sessions.lock().unwrap().1.len();
-    (n > 0).then(|| format!("有 {n} 个远程会话在用这台电脑"))
+    if n > 0 {
+        return Some(format!("有 {n} 个远程会话在用这台电脑"));
+    }
+    (state.update.lock().unwrap().opening > 0).then(|| "有远程会话正在连进来".to_string())
+}
+
+/// Held by `peer::open` for the whole session, from before rapp-host starts.
+pub struct Opening(Arc<State>);
+
+impl Drop for Opening {
+    fn drop(&mut self) {
+        let mut u = self.0.update.lock().unwrap();
+        u.opening = u.opening.saturating_sub(1);
+    }
+}
+
+/// A session may open unless the new version is going in (then A restarts in a moment).
+pub fn begin_open(state: &Arc<State>) -> Result<Opening, &'static str> {
+    let mut u = state.update.lock().unwrap();
+    if u.state == "installing" {
+        return Err(UPGRADING);
+    }
+    u.opening += 1;
+    Ok(Opening(state.clone()))
 }
 
 /// One `pid ppid comm` line of ps; `comm` may contain spaces.
@@ -445,20 +474,42 @@ pub async fn in_use(state: &State) -> Option<String> {
 
 /// Every `idle_poll`: a ready version installs itself when allowed and nobody is using rapp.
 async fn try_auto(state: &Arc<State>, o: &UpdateOpts) {
-    let auto = state.cfg.lock().unwrap().auto_update();
-    {
-        let u = state.update.lock().unwrap();
-        if !auto || !o.launchd || u.state != "ready" || u.busy || u.needs_confirm || u.needs_admin {
-            return;
-        }
-    }
-    if in_use(state).await.is_some() {
+    if !auto_allowed(state, o, "ready") || in_use(state).await.is_some() {
         return;
     }
     let Some(busy) = Busy::begin(state) else { return };
-    if state.update.lock().unwrap().state == "ready" {
+    if auto_allowed(state, o, "ready") {
         put_in_place(state, busy, Mode::Auto).await;
     }
+}
+
+/// The version in `latest` is still the one on offer (not dismissed, not superseded).
+fn still_offered(state: &State) -> bool {
+    let (current, latest) = {
+        let u = state.update.lock().unwrap();
+        (u.current.clone(), u.latest.clone())
+    };
+    let Some(current) = current else { return false };
+    latest.is_some() && up::offer(&up::load_cache(&cache_file(state)), &current) == latest
+}
+
+/// Everything an auto install needs except "nobody is using rapp" (U-4c). Checked again after
+/// every await. A ready version that was dismissed meanwhile goes back to idle.
+fn auto_allowed(state: &State, o: &UpdateOpts, want: &str) -> bool {
+    if !still_offered(state) {
+        modify(state, |u| {
+            if u.state == "ready" {
+                u.state = "idle";
+                (u.ready_app, u.needs_confirm) = (None, false);
+            }
+        });
+        return false;
+    }
+    if !o.launchd || !state.cfg.lock().unwrap().auto_update() {
+        return false;
+    }
+    let u = state.update.lock().unwrap();
+    u.state == want && !u.needs_confirm && !u.needs_admin
 }
 
 /// U-3e: a leftover from a twice-failed install may be the only copy of a version, and
@@ -523,7 +574,48 @@ async fn put_in_place(state: &Arc<State>, busy: Busy, mode: Mode) {
         }
     };
     let from = state.update.lock().unwrap().current.clone().unwrap_or_default();
-    modify(state, |u| u.state = "installing");
+    // The last gate (fix round 1): from here on B's opens are refused, then everything is checked
+    // once more after the last await, right before the swap.
+    let before = {
+        let mut u = state.update.lock().unwrap();
+        let before = u.state;
+        if u.opening == 0 {
+            u.state = "installing";
+        }
+        before
+    };
+    state.notify();
+    let why = if state.update.lock().unwrap().state == "installing" {
+        in_use(state).await
+    } else {
+        Some("有远程会话正在连进来".to_string())
+    };
+    if leftover(state) {
+        if gui {
+            reopen_gui(state, &o).await;
+        }
+        return;
+    }
+    let wanted = match mode {
+        Mode::Auto => auto_allowed(state, &o, "installing"),
+        Mode::Manual => still_offered(state),
+        Mode::Rollback => true,
+    };
+    if why.is_some() || !wanted {
+        let gone = !still_offered(state);
+        modify(state, |u| {
+            u.state = before;
+            if before == "ready" && gone {
+                (u.state, u.ready_app, u.needs_confirm) = ("idle", None, false);
+            }
+        });
+        match (gui, why) {
+            (true, Some(why)) => failed(Stage::Install, &why).await,
+            (true, None) => reopen_gui(state, &o).await,
+            _ => {}
+        }
+        return;
+    }
     let (bundle, pd) = (o.bundle.clone(), prev_dir.clone());
     match blocking(state, move |r| up::install(r, &src, &bundle, &pd)).await {
         Ok(()) => {
@@ -562,8 +654,9 @@ async fn put_in_place(state: &Arc<State>, busy: Busy, mode: Mode) {
 
 /// K20: after the GUI's connection closes (at most `gui_wait`), look for nobody using rapp for
 /// at most `gui_wait` more. Still in use: open the GUI again and fail.
-async fn wait_for_nobody(state: &Arc<State>, o: &UpdateOpts, closed: oneshot::Receiver<()>) -> bool {
-    let _ = tokio::time::timeout(o.gui_wait, closed).await;
+async fn wait_for_nobody(state: &Arc<State>, o: &UpdateOpts, mut closed: watch::Receiver<()>) -> bool {
+    // Nothing is ever sent: `changed` returns once the connection's sender is dropped.
+    let _ = tokio::time::timeout(o.gui_wait, closed.changed()).await;
     let deadline = Instant::now() + o.gui_wait;
     loop {
         if in_use(state).await.is_none() {
@@ -581,7 +674,7 @@ async fn wait_for_nobody(state: &Arc<State>, o: &UpdateOpts, closed: oneshot::Re
 }
 
 /// `update_apply` (K20). On ok the GUI quits; the install runs once its connection closes.
-pub async fn apply(state: &Arc<State>, confirm: bool, closed: oneshot::Receiver<()>) -> Value {
+pub async fn apply(state: &Arc<State>, confirm: bool, closed: watch::Receiver<()>) -> Value {
     let Some(o) = state.update_opts.clone() else { return err(NOTHING_TO_INSTALL) };
     {
         let u = state.update.lock().unwrap();
@@ -616,7 +709,7 @@ pub async fn apply(state: &Arc<State>, confirm: bool, closed: oneshot::Receiver<
 }
 
 /// `update_rollback` (K13): swap with `previous/rapp.app`, the same way as a manual install.
-pub async fn rollback(state: &Arc<State>, closed: oneshot::Receiver<()>) -> Value {
+pub async fn rollback(state: &Arc<State>, closed: watch::Receiver<()>) -> Value {
     let Some(o) = state.update_opts.clone() else { return err(NO_PREVIOUS) };
     if !o.launchd {
         return page_err(NOT_LAUNCHD, state.update.lock().unwrap().page.clone());

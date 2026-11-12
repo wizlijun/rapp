@@ -52,13 +52,23 @@ struct Knobs {
     /// The zip arrives in two halves with this pause between them.
     split: Option<Duration>,
     launchd: bool,
+    /// How long a manual install waits for the GUI's connection to close.
+    gui_wait: Duration,
     /// Extra `service.json` fields.
     cfg: Value,
 }
 
 impl Default for Knobs {
     fn default() -> Self {
-        Knobs { version: "0.5.0", new_dr: DR, curl_code: 0, split: None, launchd: true, cfg: json!({}) }
+        Knobs {
+            version: "0.5.0",
+            new_dr: DR,
+            curl_code: 0,
+            split: None,
+            launchd: true,
+            gui_wait: Duration::from_millis(300),
+            cfg: json!({}),
+        }
     }
 }
 
@@ -74,6 +84,7 @@ struct Env {
     /// Non-zero: the fake ps fails with this exit code.
     ps_code: Arc<AtomicI32>,
     launchd: bool,
+    gui_wait: Duration,
     svc: Option<Service>,
 }
 
@@ -97,7 +108,19 @@ impl Env {
         let ps_extra: Arc<Mutex<Vec<String>>> = Arc::default();
         let ps_code = Arc::new(AtomicI32::new(0));
         let runner = Arc::new(fake(&k, &bundle, &cache, &home, tmp.path(), ps_extra.clone(), ps_code.clone()));
-        Env { _tmp: tmp, home, bins: bins(), bundle, cache, runner, ps_extra, ps_code, launchd: k.launchd, svc: None }
+        Env {
+            _tmp: tmp,
+            home,
+            bins: bins(),
+            bundle,
+            cache,
+            runner,
+            ps_extra,
+            ps_code,
+            launchd: k.launchd,
+            gui_wait: k.gui_wait,
+            svc: None,
+        }
     }
 
     async fn start(&mut self) {
@@ -109,7 +132,7 @@ impl Env {
             tick: Duration::from_millis(50),
             idle_poll: POLL,
             healthy_after: Duration::from_millis(200),
-            gui_wait: Duration::from_millis(300),
+            gui_wait: self.gui_wait,
         };
         let runner: Arc<dyn Runner> = self.runner.clone();
         self.svc = Some(start_service_with(&self.home, self.bins.path(), runner, Some(opts)).await);
@@ -623,4 +646,101 @@ async fn set_update_persists() {
     assert_eq!((&u["auto_update"], &u["check_updates"]), (&json!(false), &json!(false)), "{u}");
     assert_eq!(e.call(json!({"cmd":"set_update","check_updates":true})).await["ok"], true);
     assert_eq!(e.update().await["check_updates"], true);
+}
+
+/// Fix round 1, Important 1: a B session whose rapp-host is still starting is not in the
+/// session table yet, but it is about to be: no install may cut it off.
+#[tokio::test]
+async fn opening_session_blocks_auto_install() {
+    let mut e = Env::new(Knobs { cfg: json!({"check_updates": false}), ..Default::default() });
+    e.ps_extra.lock().unwrap().push(e.gui_line());
+    e.start().await;
+    e.call(json!({"cmd":"update_check"})).await;
+    e.wait_state("ready").await;
+
+    std::fs::write(e.bins.path().join("serve_delay"), "1500").unwrap();
+    let addr = a_addr(e.svc());
+    let opening = tokio::spawn(async move {
+        let ep = b_endpoint();
+        let (conn, r) = direct(&ep, addr, json!({"op":"auth","password":PASSWORD,"name":"mbp"})).await;
+        assert_eq!(r["ok"], true, "{r}");
+        let s = open_echo(&conn).await;
+        (ep, conn, s)
+    });
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while !host_log(e.bins.path()).contains("delay com.example.echo") {
+        assert!(tokio::time::Instant::now() < deadline, "rapp-host never started");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    // The GUI goes; the only thing left is the session that is still opening.
+    e.ps_extra.lock().unwrap().clear();
+    e.no_restart_for(POLL * 6).await;
+    assert!(!opening.is_finished(), "the session must still be opening during the check");
+    assert_eq!(marker_of(&e.bundle), "current");
+
+    let (_ep, conn, mut s) = opening.await.unwrap();
+    e.no_restart_for(POLL * 3).await;
+    s.writer_mut().finish().unwrap();
+    drop(s);
+    conn.close(0u32.into(), b"done");
+    e.wait_restart().await;
+    assert_eq!(marker_of(&e.bundle), "new");
+}
+
+/// Fix round 1, Important 1 (c): once the new version is going in, B's open is refused.
+#[tokio::test]
+async fn open_while_installing_is_refused() {
+    let mut e = Env::new(Knobs::default());
+    e.start().await;
+    e.wait_restart().await;
+    // In the real service the process exits now; here it stays, still `installing`.
+    assert_eq!(e.update().await["state"], "installing");
+    let ep = b_endpoint();
+    let (conn, r) = direct(&ep, a_addr(e.svc()), json!({"op":"auth","password":PASSWORD,"name":"mbp"})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    let mut s = bi(conn.open_bi().await.unwrap());
+    write_json(&mut s, &json!({"op":"open","app":"com.example.echo"})).await.unwrap();
+    let r = read_json(&mut s).await.unwrap();
+    assert_eq!(r, json!({"ok": false, "error": "A 正在升级，请稍后再连"}));
+    assert!(!host_log(e.bins.path()).contains("start com.example.echo"), "no rapp-host for it");
+}
+
+/// Fix round 1, Important 2: a refused apply must not use up the connection's close signal,
+/// so the next apply on the same connection still waits for the GUI to go.
+#[tokio::test]
+async fn second_apply_on_one_connection_waits_for_close() {
+    let mut e = Env::new(Knobs { new_dr: OTHER_DR, gui_wait: Duration::from_secs(5), ..Default::default() });
+    e.start().await;
+    e.wait_state("ready").await;
+    let mut gui = Ipc::open(e.svc(), &e.home).await;
+    assert_eq!(gui.call(json!({"cmd":"update_apply"})).await, json!({"ok": false, "error": "需要确认"}));
+    let r = gui.call(json!({"cmd":"update_apply","confirm_signature_change":true})).await;
+    assert_eq!(r, json!({"ok": true}));
+    // The connection is still open: nothing goes in yet, although nobody else uses rapp.
+    e.no_restart_for(Duration::from_millis(500)).await;
+    assert_eq!(marker_of(&e.bundle), "current");
+    drop(gui);
+    e.wait_restart().await;
+    assert_eq!(marker_of(&e.bundle), "new");
+}
+
+/// U-4c: a dismiss that lands while a check holds the pipeline leaves `ready` in memory but the
+/// version dismissed in the cache. Simulated deterministically by writing the cache directly:
+/// the version must not install, and the state goes back to idle.
+#[tokio::test]
+async fn dismissed_in_cache_never_installs() {
+    let mut e = Env::new(Knobs { cfg: json!({"check_updates": false}), ..Default::default() });
+    e.ps_extra.lock().unwrap().push(e.gui_line());
+    e.start().await;
+    e.call(json!({"cmd":"update_check"})).await;
+    e.wait_state("ready").await;
+
+    let p = e.home.join("update.json");
+    let mut c: Value = serde_json::from_slice(&std::fs::read(&p).unwrap()).unwrap();
+    c["dismissed_version"] = json!("0.5.0");
+    rapp_net::config::write_json(&p, &c).unwrap();
+    e.ps_extra.lock().unwrap().clear();
+    e.no_restart_for(POLL * 6).await;
+    assert_eq!(marker_of(&e.bundle), "current");
+    assert_eq!(e.update().await["state"], "idle");
 }

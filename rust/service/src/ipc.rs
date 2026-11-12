@@ -32,11 +32,9 @@ async fn conn(state: &Arc<State>, tcp: TcpStream, token: &str) -> Result<()> {
         return write_json(&mut w, &err("bad token")).await;
     }
     let mut feed: Option<tokio::sync::watch::Receiver<u64>> = None;
-    // Dropped when this function returns: an `update_apply` waiting on the receiver sees the
-    // connection close (K21). A second apply on the same connection gets one that is already closed.
-    let (_closed, closed) = tokio::sync::oneshot::channel::<()>();
-    let mut closed = Some(closed);
-    let mut take_closed = move || closed.take().unwrap_or_else(|| tokio::sync::oneshot::channel().1);
+    // Dropped when this function returns: every `update_apply`/`update_rollback` on this
+    // connection gets its own receiver and sees the connection close (K21).
+    let (_closed, closed) = tokio::sync::watch::channel(());
     loop {
         tokio::select! {
             line = lines.next_line() => {
@@ -57,8 +55,10 @@ async fn conn(state: &Arc<State>, tcp: TcpStream, token: &str) -> Result<()> {
                         tokio::spawn(async move { update::check_now(&state).await });
                         ok(json!({}))
                     }
-                    "update_apply" => update::apply(state, cmd["confirm_signature_change"] == true, take_closed()).await,
-                    "update_rollback" => update::rollback(state, take_closed()).await,
+                    "update_apply" => {
+                        update::apply(state, cmd["confirm_signature_change"] == true, closed.clone()).await
+                    }
+                    "update_rollback" => update::rollback(state, closed.clone()).await,
                     _ => handle(state, &cmd),
                 };
                 write_json(&mut w, &reply).await?;
