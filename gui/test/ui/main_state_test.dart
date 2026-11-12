@@ -1415,6 +1415,61 @@ void main() {
       });
     });
 
+    // S5-5b: an end the user asked for is finished by the link going away, not turned into 已断开.
+    test('an ended session whose link drops first is gone and opens again normally', () {
+      env((a, t, port, st, hints) {
+        expect(st.endSession('111/a'), isTrue);
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        expect(st.entryFor('111/a'), isNull);
+        expect(st.needCount, 0);
+        expect(st.hint, '已结束 Calculator');
+        port.emit(const ClosedEvent(1, 'stdin closed')); // late: nothing left to end
+        st.openOrSwitch('111', 'a', 'Calculator');
+        a.flushMicrotasks();
+        expect(st.recordFor('111/a')!.phase, Phase.live);
+        port.emit(const TrafficEvent(1, 5000, 2));
+        expect(st.entryFor('111/a')!.lamp, Lamp.active);
+      });
+    });
+
+    test('an ended session whose hub session closes first is gone after 1 s and opens again', () {
+      env((a, t, port, st, hints) {
+        expect(st.endSession('111/a'), isTrue);
+        t.emit({'event': 'closed', 'sid': 1, 'reason': 'connection closed'});
+        a.flushMicrotasks();
+        a.elapse(const Duration(seconds: 1));
+        expect(st.entryFor('111/a'), isNull);
+        expect(st.needCount, 0);
+        expect(st.hint, '已结束 Calculator');
+        st.openOrSwitch('111', 'a', 'Calculator');
+        a.flushMicrotasks();
+        expect(st.recordFor('111/a')!.phase, Phase.live);
+        port.emit(const TrafficEvent(1, 5000, 2));
+        expect(st.entryFor('111/a')!.lamp, Lamp.active);
+      });
+    });
+
+    test('end all then a link drop keeps the summary and forgets the batch', () {
+      env((a, t, port, st, hints) {
+        final p = project(st, '写周报', ['111/a', '111/aa']);
+        st.endAll(p.id);
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        t.emit({'event': 'closed', 'sid': 2, 'reason': 'connection closed'});
+        a.flushMicrotasks();
+        a.elapse(const Duration(seconds: 1));
+        expect(st.entryFor('111/a'), isNull);
+        expect(st.entryFor('111/aa'), isNull);
+        expect(st.hint, '写周报：结束 2 个会话');
+        // Nothing stale in the batch: a later end of the same key says so again.
+        st.reconnect('111/a'); // no record: does nothing
+        st.openOrSwitch('111', 'a', 'Calculator');
+        a.flushMicrotasks();
+        st.endCurrent();
+        port.emit(const ClosedEvent(1, 'stdin closed'));
+        expect(st.hint, '已结束 Calculator');
+      }, sessions: 2);
+    });
+
     test('reopening after end all hints normally', () {
       env((a, t, port, st, hints) {
         final p = project(st, '写周报', ['111/a']);

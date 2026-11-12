@@ -507,7 +507,7 @@ class MainState extends ChangeNotifier {
       _waiting[sid] = _Waiting(r.appName, Timer(const Duration(seconds: 1), () {
         _waiting.remove(sid);
         if (r.sid != sid || r.phase != Phase.live) return;
-        _disconnect(r, hubReason ?? 'rapp-hub exited');
+        r.ending ? _finishEnding(r) : _disconnect(r, hubReason ?? 'rapp-hub exited');
         notifyListeners();
       }));
     }
@@ -541,15 +541,15 @@ class MainState extends ChangeNotifier {
       if (r.phase == Phase.disconnected) return; // ended by us already, or by nobody's business
       _waiting.remove(e.sid)?.timer.cancel();
       final name = r.appName;
+      final batch = _batchEnded.contains(r.key); // 全部结束 already said so (K13)
       _endRecord(r);
-      // 全部结束 already said so (K13).
-      if (!_batchEnded.remove(r.key)) hint = endedHint(name, e.reason);
+      if (!batch) hint = endedHint(name, e.reason);
       notifyListeners();
       return;
     }
     rs.apply(e);
     if (e is DisconnectedEvent && r.phase != Phase.disconnected) {
-      _disconnect(r, e.reason);
+      r.ending ? _finishEnding(r) : _disconnect(r, e.reason);
     } else if (e is DetachedEvent) {
       // The hub logs one line per move (R10); keys typed on the stage no longer go to it.
       if (_reachable(r)) hub!.note(e.sid, e.detached ? 'detach' : 'attach', rs.tabs.tabs.length);
@@ -575,6 +575,7 @@ class MainState extends ChangeNotifier {
       r.sid = r.lastSid;
       r.lastSid = null;
     }
+    _batchEnded.remove(r.key);
     final sid = r.sid;
     final rs = sid == null ? null : remote[sid];
     r.phase = Phase.disconnected;
@@ -594,8 +595,17 @@ class MainState extends ChangeNotifier {
     if (hint) this.hint = hintText ?? '${r.appName} 已断开：${disconnectWord(r.reason)}';
   }
 
+  /// [r] was being ended and its link went away before the runner's `ClosedEvent`: that finishes
+  /// the end; it never turns 已断开 (S5-5b). Callers notify.
+  void _finishEnding(SessionRecord r) {
+    final batch = _batchEnded.contains(r.key); // 全部结束 already said so (K13)
+    _endRecord(r);
+    if (!batch) hint = '已结束 ${r.appName}';
+  }
+
   /// Takes [r] off the list and steps to the next session if it was current. Callers set the hint.
   void _endRecord(SessionRecord r) {
+    _batchEnded.remove(r.key);
     final oldGroups = groups;
     final old = r.lastSid;
     if (old != null) port?.close(old); // reconnected but not swapped yet: the old session is still open
