@@ -153,7 +153,16 @@
   - 只有单测、不做实机：坏帧只结束一个会话（Task 3、6）；滚轮幅度 /4 和触控板（Task 8，Calculator 没有可滚内容）；⌘V/编辑›粘贴、输入区发送、输入法回车（会碰系统剪贴板或输入法设置）；多显示器缩放（只有一块屏）。
   - 已知：hub 退出后，嵌入的会话和独立窗口不会被 GUI 关掉（S2 之前就如此）。
   - 实机检查的脚本在 scratchpad `s2live/`；`tclick.sh` 改用按 PID 判断的 `topatp`（用户机上同时有多个名叫 rapp 的进程）。
-- [ ] S3 生命周期（规格：`docs/superpowers/specs/2026-11-12-rapp-s3-lifecycle-design.md`）
+- [x] S3 生命周期（规格：`docs/superpowers/specs/2026-11-12-rapp-s3-lifecycle-design.md`；计划：`docs/superpowers/plans/2026-11-12-rapp-s3-lifecycle.md`）——代码完成、自动测试全绿；**实机检查待做**
+  - 自动验证（2026-11-12）：`cargo test --workspace` 117 过、clippy 0 警告、`./scripts/check.sh` EXIT=0（`swift test` 237 过）、`flutter analyze` 干净、`flutter test` 395 过。最终审查的 I-1、I-2、I-3、M-6 已修并复审通过。
+  - relay 这次有改动（在线探测不再刷访问记录），要重新部署到 VPS 才生效——需用户同意 SSH。
+  - §5 逐条（单测已覆盖，待实机）：
+    - [ ] 打开 app：连接中 → 活动；A 画面不动 10 秒变空闲，动一下回到活动
+    - [ ] 串流菜单「断开」：条目留着、最后一帧 + 斜条纹 + 「重连」；需要你 +1；「重连」后设置和窗口不变
+    - [ ] A 上关掉被串流的 app（自己拉起的 Calculator，按 PID）：已断开，原因「A 端关闭了 app」
+    - [ ] 停掉自己起的 host：会话已断开；30 秒内设备变离线、需要你出现「离线」一件，恢复后自己消失
+    - [ ] 顶栏流量随画面跳动；总流量 = 各活动会话之和
+    - [ ] 「结束会话」点两次：条目消失、需要你相应减少
 - [ ] S5 项目与常用（规格：`docs/superpowers/specs/2026-11-12-rapp-s5-projects-favorites-design.md`）
 - [ ] S6 全局资源（规格：`docs/superpowers/specs/2026-11-12-rapp-s6-global-resources-design.md`）
 - [ ] S4 全景（规格：`docs/superpowers/specs/2026-11-12-rapp-s4-overview-design.md`）

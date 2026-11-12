@@ -2,6 +2,8 @@
 
 日期：2026-11-12。状态：**已确认（按默认）**。用户说「s1通过，继续完成后续全部」，S3 在主界面规格里已有行为定义，本文补全细节；§6 的假设按默认执行，用户验收时可改。
 
+S3 已实现（计划 `docs/superpowers/plans/2026-11-12-rapp-s3-lifecycle.md`），实机检查待做。
+
 上位文档：`2026-11-12-rapp-main-window-design.md`（下称"主界面规格"）§3.1、§3.2、§3.6、§4、§7 的 S3 一行。
 依赖：S1（外壳）、S2（嵌入舞台，`docs/superpowers/specs/2026-11-12-rapp-s2-embedded-stage-design.md`）。S3 建在 S2 之上。
 
