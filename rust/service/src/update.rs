@@ -199,6 +199,7 @@ pub async fn on_start(state: &Arc<State>) {
     let bundle = o.bundle.clone();
     let (current, dr) = blocking(state, move |r| (up::bundle_version(r, &bundle), up::designated(r, &bundle))).await;
     let latest = up::load_cache(&cache_file(state)).latest_version;
+    note_signature(state, dr.as_deref());
     modify(state, |u| {
         u.state = if current.is_some() { "idle" } else { "off" };
         u.current = current.clone();
@@ -223,6 +224,26 @@ pub async fn on_start(state: &Arc<State>) {
         up::clear_marker(&state.home);
         let now = current.as_deref().unwrap_or("未知");
         fail(state, Stage::Restart, &format!("重启后是 {now}，不是 {}", m.to));
+    }
+}
+
+/// I-3: the designated requirement this service last ran under lives in `last-dr` (just the string).
+/// When it is missing or differs and a permission reads ✗, the permissions were most likely lost to a
+/// signing change (the ad-hoc to stable migration arrives by pkg, with no marker): say so (K23/K30).
+fn note_signature(state: &State, dr: Option<&str>) {
+    let Some(dr) = dr else { return };
+    let file = state.home.join("last-dr");
+    let known = std::fs::read_to_string(&file).ok();
+    if known.as_deref().map(str::trim) == Some(dr) {
+        return;
+    }
+    let perms = state.permissions.lock().unwrap().clone();
+    if perms["screen_recording"] != true || perms["accessibility"] != true {
+        *state.perms_lost.lock().unwrap() = true;
+        state.notify();
+    }
+    if let Err(e) = std::fs::write(&file, dr) {
+        state.log.event(Lvl::Warn, "update_note", json!({"reason": format!("last-dr: {e}")}));
     }
 }
 
@@ -733,6 +754,11 @@ pub async fn rollback(state: &Arc<State>, closed: watch::Receiver<()>) -> Value 
     let state = state.clone();
     tokio::spawn(async move {
         if wait_for_nobody(&state, &o, closed).await {
+            // I-2: the older service must not fetch and install the version it is leaving.
+            let from = state.update.lock().unwrap().current.clone();
+            if let Some(v) = from {
+                dismiss(&state, &v);
+            }
             put_in_place(&state, busy, Mode::Rollback).await;
         }
     });

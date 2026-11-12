@@ -44,6 +44,8 @@ fn s(p: &Path) -> String {
 }
 
 struct Knobs {
+    /// The version the running bundle reports (a bundle holding the `prev` marker reports 0.4.0).
+    current: &'static str,
     /// The version in the manifest.
     version: &'static str,
     /// The downloaded app's designated requirement.
@@ -61,6 +63,7 @@ struct Knobs {
 impl Default for Knobs {
     fn default() -> Self {
         Knobs {
+            current: "0.4.1",
             version: "0.5.0",
             new_dr: DR,
             curl_code: 0,
@@ -214,6 +217,7 @@ fn fake(
     let (curl_code, split) = (k.curl_code, k.split);
     let (cache_p, cache_c) = (cache.to_path_buf(), cache.to_path_buf());
     let prev = home.join("previous");
+    let current = k.current;
     let new_dr = k.new_dr.to_string();
     let bundle = s(bundle);
     FakeRunner::new()
@@ -222,7 +226,8 @@ fn fake(
             if let Ok(rest) = p.strip_prefix(&cache_p) {
                 return Out::ok(format!("{}\n", rest.iter().next().unwrap().to_string_lossy()));
             }
-            Out::ok(if p.starts_with(&prev) { "0.4.0\n" } else { "0.4.1\n" })
+            let rolled_back = std::fs::read_to_string(p.with_file_name("marker")).is_ok_and(|m| m == "prev");
+            Out::ok(if p.starts_with(&prev) || rolled_back { "0.4.0\n".into() } else { format!("{current}\n") })
         })
         .on(CODESIGN, move |a| {
             if a[0] == "--verify" {
@@ -366,11 +371,37 @@ async fn permissions_lost_after_update_set_and_cleared() {
 }
 
 #[tokio::test]
-async fn no_marker_means_not_lost() {
+async fn no_marker_and_same_signature_means_not_lost() {
     let mut e = Env::new(Knobs { cfg: json!({"check_updates": false}), ..Default::default() });
     write_perms(&e, both(false));
+    std::fs::write(e.home.join("last-dr"), DR).unwrap();
     e.start().await;
     assert_eq!(e.call(json!({"cmd":"status"})).await["permissions_lost_after_update"], false);
+}
+
+/// Final review I-3: the pkg upgrade from 0.4.1 leaves no marker, but the signature changed.
+#[tokio::test]
+async fn changed_signature_with_missing_permission_means_lost() {
+    for (known, perms, lost) in [
+        (Some(OTHER_DR), both(false), true),
+        (None, json!({"screen_recording": true, "accessibility": false}), true),
+        (Some(OTHER_DR), both(true), false),
+        (None, both(true), false),
+    ] {
+        let mut e = Env::new(Knobs { cfg: json!({"check_updates": false}), ..Default::default() });
+        write_perms(&e, perms.clone());
+        if let Some(k) = known {
+            std::fs::write(e.home.join("last-dr"), k).unwrap();
+        }
+        e.start().await;
+        let st = e.call(json!({"cmd":"status"})).await;
+        assert_eq!(st["permissions_lost_after_update"], lost, "{known:?} {perms}");
+        // The current signature is recorded either way; a second start is quiet.
+        assert_eq!(std::fs::read_to_string(e.home.join("last-dr")).unwrap(), DR);
+        e.start().await;
+        let again = e.call(json!({"cmd":"status"})).await["permissions_lost_after_update"].clone();
+        assert_eq!(again, false, "{known:?} {perms}");
+    }
 }
 
 #[tokio::test]
@@ -665,6 +696,34 @@ async fn rollback_swaps_and_restarts() {
     assert_eq!(marker_of(&e.previous()), "current");
     let m = e.applied();
     assert_eq!((&m["from"], &m["to"], &m["mode"]), (&json!("0.4.1"), &json!("0.4.0"), &json!("rollback")), "{m}");
+}
+
+/// Final review I-2: after 回到上一版 the restarted older service must not fetch and install the
+/// version it was rolled back from, even with checks and auto-update on.
+#[tokio::test]
+async fn rollback_is_not_undone_by_the_next_check() {
+    let mut e = Env::new(Knobs { current: "0.5.0", cfg: json!({"check_updates": true}), ..Default::default() });
+    make_app(&e.previous(), "prev");
+    e.start().await;
+    let mut gui = Ipc::open(e.svc(), &e.home).await;
+    assert_eq!(gui.call(json!({"cmd":"update_rollback"})).await, json!({"ok": true}));
+    drop(gui);
+    e.wait_restart().await;
+    assert_eq!(marker_of(&e.bundle), "prev");
+
+    // The older service starts: current 0.4.0, the manifest still says 0.5.0.
+    e.start().await;
+    let before = e.calls_of(DITTO).len();
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(600);
+    while tokio::time::Instant::now() < deadline {
+        let u = e.update().await;
+        assert!(!matches!(u["state"].as_str(), Some("downloading" | "ready" | "installing")), "{u}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    let u = e.update().await;
+    assert_eq!((&u["current"], &u["latest"], &u["dismissed"]), (&json!("0.4.0"), &json!("0.5.0"), &json!(true)), "{u}");
+    assert_eq!(e.calls_of(DITTO).len(), before, "{:?}", e.calls_of(DITTO));
+    e.no_restart_for(Duration::from_millis(100)).await;
 }
 
 #[tokio::test]
