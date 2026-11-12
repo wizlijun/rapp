@@ -219,7 +219,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: "关闭")
         if alert.runModal() == .alertFirstButtonReturn {
             let process = Process()
-            process.executableURL = Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
+            // This binary's own path: inside rapp.app, Bundle.main.executableURL is the GUI's, not ours.
+            let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+            process.executableURL = URL(fileURLWithPath: CommandLine.arguments[0], relativeTo: cwd).standardizedFileURL
             process.arguments = Array(CommandLine.arguments.dropFirst())
             process.environment = ProcessInfo.processInfo.environment
             do {
