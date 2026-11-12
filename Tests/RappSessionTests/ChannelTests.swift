@@ -44,6 +44,13 @@ final class ChannelTests: XCTestCase {
         XCTAssertThrowsError(try channelCommand("start", [3, 5000]))
     }
 
+    func testPictureFocusTakesASidOrNull() throws {
+        XCTAssertEqual(try channelCommand("picture_focus", ["sid": 3]), .pictureFocus(sid: 3))
+        XCTAssertEqual(try channelCommand("picture_focus", ["sid": NSNull()]), .pictureFocus(sid: nil))
+        XCTAssertThrowsError(try channelCommand("picture_focus", [:]))
+        XCTAssertThrowsError(try channelCommand("picture_focus", ["sid": "3"]))
+    }
+
     func testUnknownMethodIsNotImplemented() {
         XCTAssertThrowsError(try channelCommand("clip_pick", ["sid": 1, "clip": 5, "insert": true])) { error in
             XCTAssertEqual(error as? ChannelError, .unknown("clip_pick"))

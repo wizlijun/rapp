@@ -158,4 +158,25 @@ void main() {
     expect((got.single as TrafficEvent).bytes, 10);
     await sub.cancel();
   });
+
+  test('fire-and-forget calls swallow runner errors; start still throws', () async {
+    const channel = MethodChannel('rapp/session');
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    final calls = <String>[];
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call.method);
+      throw PlatformException(code: 'gone', message: 'no session');
+    });
+    addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+    final port = ChannelSessionPort();
+    port.mouse(1, 7, 'down', 'left', 1, 2, 1);
+    port.scroll(1, 7, 1, 2, 0, -3);
+    port.pictureFocus(1);
+    port.resize(1, 7, 800, 600);
+    // An unhandled error from any of these would fail the test.
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    expect(calls, ['mouse', 'scroll', 'picture_focus', 'resize']);
+    await expectLater(port.start(const StartArgs(1, 5000, 'tk', 'color16', 15, 'adaptive')),
+        throwsA(isA<PlatformException>()));
+  });
 }

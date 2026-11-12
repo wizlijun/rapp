@@ -255,25 +255,38 @@ void main() {
     expect(fs.on, isFalse);
   });
 
-  testWidgets('bracket shortcuts step between sessions', (tester) async {
+  testWidgets('ctrl-cmd brackets step sessions; cmd brackets no longer do', (tester) async {
     await pump(tester);
     t.emit({'event': 'opened', 'sid': 1, 'id': '111', 'app': 'A', 'path': 'lan'});
     t.emit({'event': 'opened', 'sid': 2, 'id': '111', 'app': 'B', 'path': 'lan'});
     await settle(tester);
     s.select('111/A');
     await tester.pump();
-    final mod = Platform.isMacOS ? LogicalKeyboardKey.metaLeft : LogicalKeyboardKey.controlLeft;
-    Future<void> press(LogicalKeyboardKey k) async {
-      await tester.sendKeyDownEvent(mod);
+    Future<void> press(List<LogicalKeyboardKey> mods, LogicalKeyboardKey k) async {
+      for (final m in mods) {
+        await tester.sendKeyDownEvent(m);
+      }
       await tester.sendKeyEvent(k);
-      await tester.sendKeyUpEvent(mod);
+      for (final m in mods.reversed) {
+        await tester.sendKeyUpEvent(m);
+      }
       await tester.pump();
     }
 
-    await press(LogicalKeyboardKey.bracketRight);
+    final chord = Platform.isMacOS
+        ? [LogicalKeyboardKey.controlLeft, LogicalKeyboardKey.metaLeft]
+        : [LogicalKeyboardKey.controlLeft];
+    await press(chord, LogicalKeyboardKey.bracketRight);
     expect(s.currentKey, '111/B');
-    await press(LogicalKeyboardKey.bracketLeft);
+    await press(chord, LogicalKeyboardKey.bracketLeft);
     expect(s.currentKey, '111/A');
+    if (Platform.isMacOS) {
+      // ⌘[ and ⌘] belong to A now.
+      await press([LogicalKeyboardKey.metaLeft], LogicalKeyboardKey.bracketRight);
+      expect(s.currentKey, '111/A');
+      await press([LogicalKeyboardKey.metaLeft], LogicalKeyboardKey.bracketLeft);
+      expect(s.currentKey, '111/A');
+    }
   });
 
   testWidgets('fullscreen state follows the OS', (tester) async {

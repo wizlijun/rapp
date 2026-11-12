@@ -51,16 +51,18 @@ Future<void> main(List<String> args) async {
 
   final prefs = UiPrefs.load(cfg);
   SessionPort? port;
+  var doubleClick = const Duration(milliseconds: 500);
   if (Platform.isMacOS) {
     try {
       final p = ChannelSessionPort();
-      await p.init();
+      doubleClick = Duration(milliseconds: await p.init());
       port = p;
     } catch (e) {
       stderr.writeln('rapp: embedded sessions unavailable: $e');
     }
   }
-  final state = MainState(hub: hub, hubError: hubError, configDir: cfg, prefs: prefs, port: port);
+  final state =
+      MainState(hub: hub, hubError: hubError, configDir: cfg, prefs: prefs, port: port, doubleClick: doubleClick);
   await _showWindow(const Size(1194, 834), 'rapp');
   if (prefs.startFullscreen) await WindowManagerFullscreen().setFullScreen(true);
   await windowManager.setPreventClose(true);

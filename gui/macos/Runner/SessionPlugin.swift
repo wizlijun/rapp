@@ -42,6 +42,12 @@ final class SessionPlugin: NSObject, FlutterPlugin {
   private var ready = false
   private var timer: Timer?
   private var scaleObserver: NSObjectProtocol?
+  /// The session whose picture has keyboard focus (Dart's `picture_focus`).
+  private var focusedSid: Int64?
+  /// What A has been sent presses for: released when focus leaves (R15).
+  private var keys = KeyTracker()
+  private var keyMonitor: Any?
+  private var resignObserver: NSObjectProtocol?
 
   static func register(with registrar: FlutterPluginRegistrar) {
     let channel = FlutterMethodChannel(name: "rapp/session", binaryMessenger: registrar.messenger)
@@ -58,6 +64,8 @@ final class SessionPlugin: NSObject, FlutterPlugin {
   deinit {
     timer?.invalidate()
     if let scaleObserver { NotificationCenter.default.removeObserver(scaleObserver) }
+    if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
+    if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
   }
 
   private var backingScale: CGFloat {
@@ -109,6 +117,12 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     case .cancelTransfer:
       // Nothing to cancel until the composer's transfers land (Task 11).
       result(nil)
+    case let .pictureFocus(sid):
+      if sid != focusedSid {
+        releaseKeys()
+        focusedSid = sid
+      }
+      result(nil)
     }
   }
 
@@ -122,6 +136,16 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     }
     RunLoop.main.add(timer, forMode: .common)
     self.timer = timer
+    keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { [weak self] event in
+      guard let self else { return event }
+      return self.route(event)
+    }
+    resignObserver = NotificationCenter.default.addObserver(
+      forName: NSWindow.didResignKeyNotification, object: nil, queue: .main
+    ) { [weak self] note in
+      guard let self, let main = self.view?.window, note.object as? NSWindow === main else { return }
+      self.releaseKeys()
+    }
     scaleObserver = NotificationCenter.default.addObserver(
       forName: NSWindow.didChangeBackingPropertiesNotification, object: nil, queue: .main
     ) { [weak self] _ in
@@ -130,6 +154,38 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       for entry in self.live.values {
         entry.queue.async { entry.session.backingScale = scale }
       }
+    }
+  }
+
+  /// On main, for every key event of the app: a key for A is sent to the focused session and
+  /// swallowed (nil); everything else goes on to Flutter unchanged. `routeKey` decides.
+  private func route(_ event: NSEvent) -> NSEvent? {
+    // Only the main window's keys (detached windows route their own, Task 12).
+    if let main = view?.window, event.window !== main { return event }
+    let down: Bool
+    switch event.type {
+    case .keyDown: down = true
+    case .keyUp: down = false
+    case .flagsChanged:
+      guard let d = modifierKeyIsDown(keyCode: event.keyCode, flags: event.modifierFlags) else { return event }
+      down = d
+    default:
+      return event
+    }
+    let target = focusedSid.flatMap { live[$0] }
+    let route = keys.route(keyCode: event.keyCode, down: down, flags: event.modifierFlags,
+                           pictureFocused: target != nil)
+    guard route == .remote, let target else { return event }
+    target.session.send(.key(keyCode: event.keyCode, modifiers: UInt64(event.modifierFlags.rawValue), down: down))
+    return nil
+  }
+
+  /// A release for every key A still holds, to the focused session (nothing stays stuck on A).
+  private func releaseKeys() {
+    let held = keys.releaseAll()
+    guard let sid = focusedSid, let entry = live[sid] else { return }
+    for code in held {
+      entry.session.send(.key(keyCode: code, modifiers: 0, down: false))
     }
   }
 
@@ -168,6 +224,10 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       entry.textures.values.forEach { registry.unregisterTexture($0.id) }
       entry.textures = [:]
       live[sid] = nil
+      if focusedSid == sid {
+        _ = keys.releaseAll()
+        focusedSid = nil
+      }
     default:
       break
     }

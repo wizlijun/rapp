@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/session_port.dart';
@@ -13,6 +14,7 @@ import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/stage.dart';
 import 'package:rapp/ui/tokens.dart';
+import 'package:rapp/ui/top_bar.dart';
 
 import '../fakes.dart';
 import 'helpers.dart';
@@ -237,6 +239,132 @@ void main() {
       await tester.pump();
       expect(es.pictureHole.value, isNull);
       expect(hole(), isNull);
+    });
+
+    Future<void> showWindow(WidgetTester tester, RemoteWindow w) async {
+      await openEmbedded(tester);
+      port.emit(const ReadyEvent(1, 'Safari'));
+      port.emit(WindowsEvent(1, [w]));
+      await tester.pump();
+      await tester.pump();
+    }
+
+    List<Map<String, Object?>> mouse() => port.calls.where((c) => c.$1 == 'mouse').map((c) => c.$2).toList();
+    final border = find.byKey(const Key('picture-focus'));
+
+    testWidgets('picture focus follows taps', (tester) async {
+      tester.view.physicalSize = const Size(1194, 834);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(wrap(MainWindow(
+        state: es,
+        monitor: ServiceMonitor(readToken: () async => null),
+        control: null,
+        configDir: tmp.path,
+        fullscreen: _NoFullscreen(),
+      )));
+      final size = tester.getSize(find.byKey(const Key('stage')));
+      await showWindow(tester, rw(7, size.width, size.height + 28));
+      final pictureCenter = tester.getCenter(find.byType(Texture));
+      await tester.tapAt(pictureCenter);
+      await tester.pump();
+      expect(port.calls.where((c) => c.$1 == 'picture_focus').map((c) => c.$2), contains(equals({'sid': 1})));
+      expect(es.pictureFocused, 1);
+      expect(border, findsOneWidget);
+      final topBarPoint = tester.getCenter(find.byType(TopBar));
+      await tester.tapAt(topBarPoint);
+      await tester.pump();
+      expect(port.calls.last.$1, 'picture_focus');
+      expect(port.calls.last.$2, equals({'sid': null}));
+      expect(es.pictureFocused, isNull);
+      expect(border, findsNothing);
+    });
+
+    testWidgets('a session that stops being current loses picture focus', (tester) async {
+      await tester.pumpWidget(wrap(embedded()));
+      await showWindow(tester, rw(7, 400, 328));
+      await tester.tapAt(tester.getCenter(find.byType(Texture)));
+      await tester.pump();
+      expect(es.pictureFocused, 1);
+      port.calls.clear();
+      es.select('111/Other');
+      await tester.pump();
+      expect(es.pictureFocused, isNull);
+      expect(port.calls.where((c) => c.$1 == 'picture_focus').single.$2, equals({'sid': null}));
+    });
+
+    testWidgets('down outside the picture is not sent; drag is clamped', (tester) async {
+      await tester.pumpWidget(wrap(embedded()));
+      // Content 400x200 on an 800x600 stage: fit is (0,100) 800x400, bands above and below.
+      await showWindow(tester, rw(7, 400, 228));
+      final o = tester.getTopLeft(find.byKey(const Key('stage')));
+      await tester.tapAt(o + const Offset(400, 50));
+      await tester.pump();
+      expect(mouse(), isEmpty);
+      expect(es.pictureFocused, isNull);
+      final g = await tester.startGesture(o + const Offset(400, 300), kind: PointerDeviceKind.mouse);
+      await g.moveTo(o + const Offset(850, 300));
+      await g.up();
+      await tester.pump();
+      final m = mouse();
+      expect(m.map((c) => c['kind']), ['down', 'drag', 'up']);
+      expect(m[1]['x'], 400.0);
+      expect(m[1]['y'], 28 + 100.0);
+      expect(m[2]['x'], 400.0);
+    });
+
+    testWidgets('a picture with no area sends nothing', (tester) async {
+      await tester.pumpWidget(wrap(embedded()));
+      await showWindow(tester, rw(7, 0, 28));
+      await tester.tapAt(tester.getCenter(find.byKey(const Key('stage'))));
+      await tester.pump();
+      expect(mouse(), isEmpty);
+    });
+
+    testWidgets('right button sends right', (tester) async {
+      await tester.pumpWidget(wrap(embedded()));
+      await showWindow(tester, rw(7, 400, 328));
+      final g = await tester.startGesture(tester.getCenter(find.byType(Texture)),
+          kind: PointerDeviceKind.mouse, buttons: kSecondaryButton);
+      await g.up();
+      await tester.pump();
+      expect(mouse().map((c) => (c['kind'], c['button'])), [('down', 'right'), ('up', 'right')]);
+    });
+
+    testWidgets('mouse down sends A points and click count', (tester) async {
+      await tester.pumpWidget(wrap(embedded()));
+      // Content 400x300 on 800x600: twice as big, no bands.
+      await showWindow(tester, rw(7, 400, 328));
+      final o = tester.getTopLeft(find.byKey(const Key('stage')));
+      final g = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await g.down(o + const Offset(200, 100), timeStamp: Duration.zero);
+      await g.up(timeStamp: const Duration(milliseconds: 50));
+      await g.down(o + const Offset(201, 100), timeStamp: const Duration(milliseconds: 200));
+      await g.up(timeStamp: const Duration(milliseconds: 250));
+      await g.down(o + const Offset(201, 100), timeStamp: const Duration(seconds: 2));
+      await g.up(timeStamp: const Duration(milliseconds: 2050));
+      await tester.pump();
+      final downs = mouse().where((c) => c['kind'] == 'down').toList();
+      expect(downs[0], equals({'sid': 1, 'kind': 'down', 'button': 'left', 'window': 7, 'x': 100.0, 'y': 78.0, 'clicks': 1}));
+      expect(downs.map((c) => c['clicks']), [1, 2, 1]);
+      expect(mouse().where((c) => c['kind'] == 'up').map((c) => c['clicks']), [1, 2, 1]);
+    });
+
+    testWidgets('wheel and trackpad scroll reach A', (tester) async {
+      await tester.pumpWidget(wrap(embedded()));
+      await showWindow(tester, rw(7, 400, 328));
+      final o = tester.getTopLeft(find.byKey(const Key('stage')));
+      await tester.sendEventToBinding(PointerScrollEvent(position: o + const Offset(200, 100), scrollDelta: const Offset(0, 40)));
+      final pad = TestPointer(9, PointerDeviceKind.trackpad);
+      await tester.sendEventToBinding(pad.panZoomStart(o + const Offset(200, 100)));
+      await tester.sendEventToBinding(pad.panZoomUpdate(o + const Offset(200, 100), pan: const Offset(0, 12)));
+      await tester.sendEventToBinding(pad.panZoomEnd());
+      await tester.pump();
+      final s = port.calls.where((c) => c.$1 == 'scroll').map((c) => c.$2).toList();
+      expect(s.length, 2);
+      expect(s[0], equals({'sid': 1, 'window': 7, 'x': 100.0, 'y': 78.0, 'dx': 0.0, 'dy': -40.0}));
+      expect(s[1]['dy'], 12.0);
+      expect(mouse(), isEmpty);
     });
 
     testWidgets('overlays never resize', (tester) async {

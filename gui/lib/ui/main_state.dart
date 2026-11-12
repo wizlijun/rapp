@@ -31,6 +31,7 @@ class MainState extends ChangeNotifier {
     required this.configDir,
     required this.prefs,
     this.port,
+    this.doubleClick = const Duration(milliseconds: 500),
   }) {
     _portSub = port?.events.listen(_onPortEvent);
     hub?.addListener(_onHub);
@@ -44,6 +45,9 @@ class MainState extends ChangeNotifier {
   final String configDir;
   final UiPrefs prefs;
   final SessionPort? port;
+
+  /// The double-click interval the runner reported (`init`), for counting clicks (R14).
+  final Duration doubleClick;
   StreamSubscription<SessionEvent>? _portSub;
 
   /// Embedded sessions by hub sid.
@@ -76,8 +80,34 @@ class MainState extends ChangeNotifier {
   @override
   void notifyListeners() {
     if (_disposed) return;
+    // Focus never stays on a session that is no longer current.
+    if (pictureFocused != null && current?.sid != pictureFocused) _blur();
     _syncPolicy();
     super.notifyListeners();
+  }
+
+  // ---- picture focus (R15, R24) ----
+  /// The session whose picture has keyboard focus: its keys go to A (the runner routes them).
+  Object? pictureFocused;
+
+  /// A press on [sid]'s picture: keys go to A from now on.
+  void focusPicture(Object sid) {
+    if (pictureFocused == sid) return;
+    pictureFocused = sid;
+    port?.pictureFocus(sid);
+    notifyListeners();
+  }
+
+  /// A press outside the picture (top bar, overlays): keys stay with rapp.
+  void blurPicture() {
+    if (_blur()) notifyListeners();
+  }
+
+  bool _blur() {
+    if (pictureFocused == null) return false;
+    pictureFocused = null;
+    port?.pictureFocus(null);
+    return true;
   }
 
   // ---- stage size (Ruling P2) ----

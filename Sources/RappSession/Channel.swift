@@ -25,16 +25,24 @@ public enum ChannelCommand: Equatable {
     case selectWindow(sid: Int64, window: UInt32)
     case setStream(sid: Int64, mode: Mode, fps: UInt8, density: DensityChoice)
     case cancelTransfer(sid: Int64)
+    /// The session whose picture has keyboard focus; nil for none.
+    case pictureFocus(sid: Int64?)
 }
 
 /// Parses one Dart call. Missing fields, wrong types and out-of-range values throw
 /// `ChannelError.bad(method)`; sizes and click counts clamp to what the protocol carries.
 public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelCommand {
     if method == "init" { return .initialize }
-    let known: Set<String> = ["start", "close", "mouse", "scroll", "key", "resize", "select_window", "set_stream", "cancel_transfer"]
+    let known: Set<String> = ["start", "close", "mouse", "scroll", "key", "resize", "select_window", "set_stream",
+                              "cancel_transfer", "picture_focus"]
     guard known.contains(method) else { throw ChannelError.unknown(method) }
     guard let map = args as? [String: Any] else { throw ChannelError.bad(method) }
     let a = Args(method: method, map: map)
+    if method == "picture_focus" {
+        // `sid` is required but may be null (Dart's null arrives as NSNull).
+        guard let raw = map["sid"] else { throw ChannelError.bad(method) }
+        return .pictureFocus(sid: raw is NSNull ? nil : try a.int("sid"))
+    }
     let sid = try a.int("sid")
     switch method {
     case "start":
