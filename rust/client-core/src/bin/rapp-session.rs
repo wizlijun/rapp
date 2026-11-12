@@ -1,33 +1,26 @@
 //! Headless Linux session worker. stdin: JSON commands. stdout: length-prefixed
 //! events (0 = JSON, 1 = BGRA frame with width/height and canvas rect). No GUI toolkit.
-//! Pipe backpressure bounds decoded frames; EOF closes the remote socket.
+//! Latest-frame output bounds display latency; EOF closes the remote socket.
+mod session_output;
 use anyhow::{bail, ensure, Context, Result};
 use rapp_client_core::{
     codec::Decoder,
     protocol::{self as p, Incoming, Menu},
 };
 use serde_json::{json, Value};
+use session_output::Output;
 use std::{
     io::{BufRead, Read, Write},
     net::{Shutdown, TcpStream},
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex,
+        Arc,
     },
     time::Duration,
 };
 
-type Output = Arc<Mutex<std::io::Stdout>>;
-fn output(out: &Output, kind: u8, bytes: &[u8]) -> Result<()> {
-    let mut w = out.lock().unwrap();
-    w.write_all(&((bytes.len() + 1) as u32).to_le_bytes())?;
-    w.write_all(&[kind])?;
-    w.write_all(bytes)?;
-    w.flush()?;
-    Ok(())
-}
 fn event(out: &Output, value: Value) -> Result<()> {
-    output(out, 0, &serde_json::to_vec(&value)?)
+    out.event(serde_json::to_vec(&value)?)
 }
 fn menus(items: &[Menu]) -> Vec<Value> {
     items
@@ -214,14 +207,9 @@ fn run(out: &Output) -> Result<()> {
                 for f in [region.x, region.y, region.w, region.h] {
                     frame.extend(f.to_le_bytes());
                 }
-                // Write the header and reusable pixels directly, without copying
-                // a full canvas into a second framing allocation.
-                let mut w = out.lock().unwrap();
-                w.write_all(&((25 + pixels.len()) as u32).to_le_bytes())?;
-                w.write_all(&[1])?;
-                w.write_all(&frame)?;
-                w.write_all(&pixels)?;
-                w.flush()?;
+                // Decoding continues while stdout is slow. Only expanded, complete
+                // canvases may be replaced; compressed deltas must all be applied.
+                out.frame(frame.try_into().unwrap(), &mut pixels)?;
                 frames.fetch_add(1, Ordering::Relaxed);
             }
             Incoming::Windows(windows) => {
@@ -249,12 +237,14 @@ fn run(out: &Output) -> Result<()> {
     }
 }
 fn main() {
-    let out = Arc::new(Mutex::new(std::io::stdout()));
+    let (out, writer) = Output::spawn(std::io::stdout());
     let reason = match run(&out) {
         Ok(()) => "closed".into(),
         Err(e) => format!("{e:#}"),
     };
     let _ = event(&out, json!({"event":"disconnected","reason":reason}));
+    out.finish();
+    let _ = writer.join();
 }
 
 #[cfg(test)]

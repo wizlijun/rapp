@@ -13,7 +13,8 @@ import 'package:flutter/widgets.dart';
 import 'session_port.dart';
 
 /// A bounded, streaming packet reader. Pausing here backpressures the worker's
-/// stdout and remote socket instead of accumulating decoded frames in Dart.
+/// stdout instead of accumulating decoded frames in Dart. The worker keeps
+/// decoding the remote stream and replaces its pending complete canvas.
 Stream<Uint8List> sessionPackets(Stream<List<int>> stream) async* {
   final iterator = StreamIterator(stream);
   List<int> chunk = const [];

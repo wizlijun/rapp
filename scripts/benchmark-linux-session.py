@@ -39,11 +39,15 @@ for binary in sys.argv[1:]:
     header = exact(wire, 5)
     exact(wire, struct.unpack_from('<I', header, 1)[0])
     peer.sendall(packet(2, struct.pack('<H', 5)+b'Bench'+struct.pack('<HH', WIDTH, HEIGHT)))
+    # One frame in flight: measure delivered throughput, not frames deliberately
+    # replaced by the worker's latest-frame mailbox.
+    credit = threading.Semaphore(1)
     def feed():
         z = zlib.compressobj()
         tiles = ((WIDTH+63)//64)*((HEIGHT+63)//64)
         body = struct.pack('<H', tiles)+b''.join(struct.pack('<HBH', i, 0, 0xf800) for i in range(tiles))
         for i in range(FRAMES):
+            credit.acquire()
             payload = z.compress(body if i == 0 else b'\0\0')+z.flush(zlib.Z_SYNC_FLUSH)
             peer.sendall(packet(4, struct.pack('<BffffHHB', 2, 0., 0., float(WIDTH), float(HEIGHT), WIDTH, HEIGHT, i == 0)+payload))
     start = time.monotonic()
@@ -56,6 +60,7 @@ for binary in sys.argv[1:]:
         if payload[0] == 1:
             assert len(payload) == 25+WIDTH*HEIGHT*4
             seen += 1
+            credit.release()
     elapsed = time.monotonic()-start
     print(json.dumps(dict(binary=binary, frames=seen, seconds=round(elapsed,3), throughput_fps=round(seen/elapsed,1))), flush=True)
     t.join()
