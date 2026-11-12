@@ -220,4 +220,72 @@ final class EmbeddedSessionTests: XCTestCase {
         q.sync { link.feed(.frame(region: half, frame)) }
         XCTAssertEqual(Array(events.dropFirst(count)), [.surfaces([7])])
     }
+
+    /// Spins the main queue (the composer's home) until `done` holds on the session queue.
+    private func settle(_ q: DispatchQueue, until done: () -> Bool) {
+        for _ in 0..<100 {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+            if q.sync(execute: done) { return }
+        }
+    }
+
+    private func composerEvents(_ events: [SessionEvent]) -> [ComposerEvent] {
+        events.compactMap { if case let .composer(e) = $0 { return e } else { return nil } }
+    }
+
+    func testComposerSendGoesOutOnTheQueueAndPastedHopsToMain() {
+        let link = FakeLink()
+        var events = [SessionEvent]()
+        let (s, q) = make(link) { events.append($0) }
+        s.composer.send([.text("hi")])  // main, as the runner calls it
+        q.sync {}
+        XCTAssertEqual(link.sent.last, .paste(seq: 1, .text("hi")))
+        q.sync { link.feed(.pasted(seq: 1, error: "")) }
+        settle(q) { composerEvents(events).count == 3 }
+        q.sync {
+            XCTAssertEqual(composerEvents(events), [.sending(true), .sending(false), .done(sent: 1, failure: nil)])
+        }
+    }
+
+    func testClipInsertGoesToTheComposer() {
+        let link = FakeLink()
+        var events = [SessionEvent]()
+        let (s, q) = make(link) { events.append($0) }
+        q.sync { link.feed(.clip(id: 5, .text("hello", truncated: false))) }
+        s.pickClip(5, insert: true)
+        settle(q) { !composerEvents(events).isEmpty }
+        q.sync { XCTAssertEqual(composerEvents(events), [.insert(.text("hello"))]) }
+    }
+
+    func testUploadStatusIsForwardedAndCancelEndsTheRound() {
+        let link = FakeLink()
+        var events = [SessionEvent]()
+        let (s, q) = make(link) { events.append($0) }
+        // Too long to go inline: uploaded first (to a port nothing listens on).
+        s.composer.send([.text(String(repeating: "a", count: inlinePasteLimit))])
+        settle(q) { events.contains(.transfer("上传 1/1 0%")) }
+        s.cancelTransfers()
+        settle(q) { events.contains(.transfer(nil)) && composerEvents(events).count == 3 }
+        q.sync {
+            // The round starts (sending) before the upload reports.
+            XCTAssertEqual(events.first, .composer(.sending(true)))
+            XCTAssertTrue(events.contains(.transfer("上传 1/1 0%")))
+            XCTAssertTrue(events.contains(.transfer(nil)))
+            XCTAssertEqual(composerEvents(events), [.sending(true), .sending(false), .done(sent: 0, failure: "")])
+            XCTAssertFalse(link.sent.contains { if case .paste = $0 { return true } else { return false } })
+        }
+    }
+
+    func testNoComposerEventsAfterClose() {
+        let link = FakeLink()
+        var events = [SessionEvent]()
+        let (s, q) = make(link) { events.append($0) }
+        s.close()
+        s.composer.send([.text("hi")])
+        settle(q) { false }
+        q.sync {
+            XCTAssertEqual(events, [.closed(reason: "quit")])
+            XCTAssertFalse(link.sent.contains(.paste(seq: 1, .text("hi"))))
+        }
+    }
 }

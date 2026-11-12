@@ -98,6 +98,9 @@ void main() {
     }) as ComposerInsertEvent;
     expect(blocks.insert.blocks.single.n, 1);
     expect(blocks.insert.blocks.single.label, '[图片 #1 10×20]');
+    final status = parseSessionEvent('composer_insert', {'sid': 1, 'status': '不支持文件夹：dir'}) as ComposerInsertEvent;
+    expect(status.insert.status, '不支持文件夹：dir');
+    expect(parseSessionEvent('composer_insert', {'sid': 1}), isNull);
 
     expect((parseSessionEvent('transfer', {'sid': 1, 'status': '1/2'}) as TransferEvent).status, '1/2');
     expect((parseSessionEvent('transfer', {'sid': 1, 'status': null}) as TransferEvent).status, isNull);

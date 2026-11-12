@@ -265,7 +265,7 @@ class _AppRow extends StatelessWidget {
       key: Key('app-$app'),
       height: 68,
       child: CustomPaint(
-        foregroundPainter: dashed ? _DashedBorder(t.line, t.r) : null,
+        foregroundPainter: dashed ? DashedOutline(t.line, t.r) : null,
         child: Container(
           decoration: dashed
               ? t.panelBox(border: Colors.transparent)
@@ -313,31 +313,4 @@ class _AppRow extends StatelessWidget {
       ),
     );
   }
-}
-
-class _DashedBorder extends CustomPainter {
-  _DashedBorder(this.color, this.radius);
-  final Color color;
-  final double radius;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final path = Path()
-      ..addRRect(RRect.fromRectAndRadius(
-        (Offset.zero & size).deflate(.5),
-        Radius.circular(radius),
-      ));
-    final p = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1;
-    for (final m in path.computeMetrics()) {
-      for (var d = 0.0; d < m.length; d += 8) {
-        canvas.drawPath(m.extractPath(d, (d + 4).clamp(0, m.length)), p);
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(_DashedBorder o) => o.color != color || o.radius != radius;
 }

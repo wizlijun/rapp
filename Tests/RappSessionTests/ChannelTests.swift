@@ -64,6 +64,42 @@ final class ChannelTests: XCTestCase {
         XCTAssertEqual(try channelCommand("move_top_left", ["sid": 1, "window": 7]), .moveTopLeft(sid: 1, window: 7))
     }
 
+    func testComposerCommandsParse() throws {
+        XCTAssertEqual(try channelCommand("composer_paste", ["sid": 1]), .composerPaste(sid: 1))
+        XCTAssertEqual(try channelCommand("composer_attach", ["sid": 1]), .composerAttach(sid: 1))
+        XCTAssertEqual(try channelCommand("composer_send", ["sid": 1, "pieces": [["block": 3], ["text": "x"]]]),
+                       .composerSend(sid: 1, pieces: [.chunk(3), .text("x")]))
+        XCTAssertEqual(try channelCommand("composer_send", ["sid": 1, "pieces": []]), .composerSend(sid: 1, pieces: []))
+        XCTAssertEqual(try channelCommand("composer_drop_block", ["sid": 1, "block": 2]), .composerDropBlock(sid: 1, block: 2))
+        XCTAssertThrowsError(try channelCommand("composer_send", ["sid": 1]))
+        XCTAssertThrowsError(try channelCommand("composer_send", ["sid": 1, "pieces": [["block": -1]]]))
+        XCTAssertThrowsError(try channelCommand("composer_send", ["sid": 1, "pieces": [["text": 3]]]))
+        XCTAssertThrowsError(try channelCommand("composer_send", ["sid": 1, "pieces": [["block": 1, "text": "x"]]]))
+        XCTAssertThrowsError(try channelCommand("composer_send", ["sid": 1, "pieces": ["x"]]))
+        XCTAssertThrowsError(try channelCommand("composer_drop_block", ["sid": 1, "block": 1.5]))
+        XCTAssertThrowsError(try channelCommand("composer_drop_block", ["sid": 1]))
+    }
+
+    func testComposerPayloads() throws {
+        XCTAssertEqual(pasteResultPayload(.text("hi")) as? [String: String], ["text": "hi"])
+        XCTAssertEqual(pasteResultPayload(.status("no")) as? [String: String], ["status": "no"])
+        XCTAssertTrue(pasteResultPayload(.nothing).isEmpty)
+        let blocks = try XCTUnwrap(pasteResultPayload(.blocks([BlockChip(n: 2, label: "[图片 #1 10×20]")]))["blocks"] as? [[String: Any]])
+        XCTAssertEqual(blocks.first?["n"] as? Int, 2)
+        XCTAssertEqual(blocks.first?["label"] as? String, "[图片 #1 10×20]")
+
+        let done = try XCTUnwrap(eventPayload(.composer(.done(sent: 2, failure: nil)), sid: 3, textures: [:]))
+        XCTAssertEqual(done.method, "composer")
+        let d = try XCTUnwrap(done.args["done"] as? [String: Any])
+        XCTAssertEqual(d["sent"] as? Int, 2); XCTAssertTrue(d["failure"] is NSNull)
+        let failed = try XCTUnwrap(eventPayload(.composer(.done(sent: 0, failure: "x")), sid: 3, textures: [:]))
+        XCTAssertEqual((failed.args["done"] as? [String: Any])?["failure"] as? String, "x")
+        let insert = try XCTUnwrap(eventPayload(.composer(.insert(.text("hi"))), sid: 3, textures: [:]))
+        XCTAssertEqual(insert.method, "composer_insert")
+        XCTAssertEqual(insert.args["text"] as? String, "hi"); XCTAssertEqual(insert.args["sid"] as? Int64, 3)
+        XCTAssertNil(eventPayload(.composer(.insert(.nothing)), sid: 3, textures: [:]))
+    }
+
     func testPictureFocusTakesASidOrNull() throws {
         XCTAssertEqual(try channelCommand("picture_focus", ["sid": 3]), .pictureFocus(sid: 3))
         XCTAssertEqual(try channelCommand("picture_focus", ["sid": NSNull()]), .pictureFocus(sid: nil))

@@ -277,7 +277,7 @@ SessionEvent? parseSessionEvent(String method, Object? args) {
             sending: sending,
             done: done == null ? null : ComposerDone(_as<int>(done['sent']), _as<String?>(done['failure'])));
       case 'composer_insert':
-        if (m['text'] == null && m['blocks'] == null) return null;
+        if (m['text'] == null && m['blocks'] == null && m['status'] == null) return null;
         return ComposerInsertEvent(sid, _paste(m));
       case 'transfer':
         return TransferEvent(sid, _as<String?>(m['status']));

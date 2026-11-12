@@ -52,7 +52,9 @@ public final class Sender {
         for item in items {
             switch item.content {
             case let .chunk(chip):
-                payloads[chip] = sink.payload(chip)
+                let payload = sink.payload(chip)
+                payloads[chip] = payload
+                if case let .text(text)? = payload, !needsUpload(text) { break }
                 uploads += 1
             case let .text(text):
                 if needsUpload(text) { uploads += 1 }
@@ -88,6 +90,8 @@ public final class Sender {
             upload(item: counters.nextItem(), kind: .text, uti: typeUTF8Text, name: "", data: .bytes(Array(text.utf8)))
         case let .chunk(chip):
             guard let payload = r.payloads[chip] else { return finish(failure: "找不到这一块的内容") }
+            // A text block short enough for a `paste` goes inline, like typed text.
+            if case let .text(text) = payload, !needsUpload(text) { return paste(.text(text)) }
             // The number goes on the block first, so a resend after a failure continues this upload.
             let item = sink.uploadedItem(chip) ?? counters.nextItem()
             sink.setUploadedItem(item, for: chip)

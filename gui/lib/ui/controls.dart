@@ -191,3 +191,31 @@ class _ConfirmButtonState extends State<ConfirmButton> {
     );
   }
 }
+
+/// A rounded 1 px dashed outline: the add-device card and the composer's blocks.
+class DashedOutline extends CustomPainter {
+  DashedOutline(this.color, this.radius);
+  final Color color;
+  final double radius;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final path = Path()
+      ..addRRect(RRect.fromRectAndRadius(
+        (Offset.zero & size).deflate(.5),
+        Radius.circular(radius),
+      ));
+    final p = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+    for (final m in path.computeMetrics()) {
+      for (var d = 0.0; d < m.length; d += 8) {
+        canvas.drawPath(m.extractPath(d, (d + 4).clamp(0, m.length)), p);
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(DashedOutline o) => o.color != color || o.radius != radius;
+}

@@ -33,6 +33,14 @@ public enum ChannelCommand: Equatable {
     case menuPick(sid: Int64, path: [UInt16])
     /// Move A's window to the top-left stack slot and raise it.
     case moveTopLeft(sid: Int64, window: UInt32)
+    /// ⌘V in the composer: read B's clipboard; answered with a `pasteResultPayload`.
+    case composerPaste(sid: Int64)
+    /// 「附件」: pick files; answered with a `pasteResultPayload`.
+    case composerAttach(sid: Int64)
+    /// Send the editor's pieces (`{"text": s}` or `{"block": n}`, in order).
+    case composerSend(sid: Int64, pieces: [ComposerPiece])
+    /// A chip was removed from the editor.
+    case composerDropBlock(sid: Int64, block: Int)
 }
 
 /// Parses one Dart call. Missing fields, wrong types and out-of-range values throw
@@ -40,7 +48,8 @@ public enum ChannelCommand: Equatable {
 public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelCommand {
     if method == "init" { return .initialize }
     let known: Set<String> = ["start", "close", "mouse", "scroll", "key", "resize", "select_window", "set_stream",
-                              "cancel_transfer", "picture_focus", "clip_pick", "menu_pick", "move_top_left"]
+                              "cancel_transfer", "picture_focus", "clip_pick", "menu_pick", "move_top_left",
+                              "composer_paste", "composer_attach", "composer_send", "composer_drop_block"]
     guard known.contains(method) else { throw ChannelError.unknown(method) }
     guard let map = args as? [String: Any] else { throw ChannelError.bad(method) }
     let a = Args(method: method, map: map)
@@ -86,6 +95,14 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
         return .menuPick(sid: sid, path: try a.path())
     case "move_top_left":
         return .moveTopLeft(sid: sid, window: try a.window())
+    case "composer_paste":
+        return .composerPaste(sid: sid)
+    case "composer_attach":
+        return .composerAttach(sid: sid)
+    case "composer_send":
+        return .composerSend(sid: sid, pieces: try a.pieces())
+    case "composer_drop_block":
+        return .composerDropBlock(sid: sid, block: try a.block("block"))
     default:
         return .cancelTransfer(sid: sid)
     }
@@ -135,6 +152,25 @@ private struct Args {
             guard let n = item as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(), !CFNumberIsFloatType(n),
                   let i = UInt16(exactly: n.int64Value) else { throw bad }
             return i
+        }
+    }
+
+    /// A block number: a positive integer.
+    func block(_ key: String) throws -> Int {
+        guard let n = Int(exactly: try int(key)), n > 0 else { throw bad }
+        return n
+    }
+
+    /// The composer's pieces: each a map with exactly one of `text` (a string) or `block` (a block number).
+    func pieces() throws -> [ComposerPiece] {
+        guard let raw = map["pieces"] as? [Any] else { throw bad }
+        return try raw.map { item in
+            guard let m = item as? [String: Any], m.count == 1 else { throw bad }
+            if let text = m["text"] {
+                guard let text = text as? String else { throw bad }
+                return .text(text)
+            }
+            return .chunk(try Args(method: method, map: m).block("block"))
         }
     }
 
@@ -220,8 +256,25 @@ public func eventPayload(_ e: SessionEvent, sid: Int64, textures: [UInt32: Int64
         return payload("transfer", ["status": status.map { $0 as Any } ?? NSNull()])
     case let .composer(.sending(sending)):
         return payload("composer", ["sending": sending])
+    case let .composer(.done(sent, failure)):
+        return payload("composer", ["done": ["sent": sent, "failure": failure.map { $0 as Any } ?? NSNull()]])
+    case .composer(.insert(.nothing)):
+        return nil
+    case let .composer(.insert(result)):
+        return payload("composer_insert", pasteResultPayload(result))
     case let .closed(reason):
         return payload("closed", ["reason": reason])
+    }
+}
+
+/// A paste, attach or insert result as Dart's `PasteResult` reads it: `text`, `blocks` (`[{n, label}]`)
+/// or `status`; empty for nothing.
+public func pasteResultPayload(_ r: PasteResult) -> [String: Any] {
+    switch r {
+    case let .text(text): return ["text": text]
+    case let .blocks(chips): return ["blocks": chips.map { ["n": $0.n, "label": $0.label] as [String: Any] }]
+    case let .status(status): return ["status": status]
+    case .nothing: return [:]
     }
 }
 

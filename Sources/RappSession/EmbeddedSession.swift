@@ -3,8 +3,9 @@ import Foundation
 import RappCore
 
 /// All of one embedded session's non-UI logic: the connection's messages become pictures in
-/// `surfaces` and events for the runner. Everything runs on `queue`; bad data from the remote
-/// ends this session only.
+/// `surfaces` and events for the runner. Everything runs on `queue` except the composer and the
+/// transfer queue, which live on the main queue (values hop between the two, never shared state);
+/// bad data from the remote ends this session only.
 public final class EmbeddedSession {
     public let surfaces = WindowSurfaces()
     /// Called on `queue`.
@@ -13,12 +14,24 @@ public final class EmbeddedSession {
         didSet { if backingScale != oldValue { run { self.sendStreamIfChanged() } } }
     }
 
-    /// Where a clip taken "into the composer" goes (Task 11). Called on the main queue.
+    /// Where a clip taken "into the composer" goes; the composer's `insert` unless replaced. Called on
+    /// the main queue; set it on main.
     public var onInsert: ((ClipInfo, InsertPayload) -> Void)?
+
+    /// This session's composer. **Main queue only**, like the transfer queue it sends through: the runner
+    /// calls it from the channel handler; `pasted` from A hops here with its value. Its messages to A go
+    /// through `send` (onto the session queue); its events come back as `.composer` on the session queue.
+    public private(set) lazy var composer = EmbeddedComposer(
+        pasteboard: pasteboard, transfers: transfers, counters: counters,
+        send: { [weak self] in self?.send($0) },
+        emit: { [weak self] in self?.post(.composer($0)) })
 
     private let address: RemoteAddress
     private let pasteboard: LocalPasteboard
+    /// Main queue only.
     private let transfers: TransferQueue
+    /// Item and paste numbers for this session's connection; main queue only (the composer's).
+    private let counters = SendCounters()
     private let link: MessageLink
     private let queue: DispatchQueue
     private let history: ClipHistory
@@ -50,6 +63,9 @@ public final class EmbeddedSession {
         self.history = ClipHistory(pasteboard: pasteboard, log: { _ in })
         queue.setSpecific(key: queueKey, value: ())
         link.density = captureDensity(zoom: 1, backingScale: backingScale, choice: choice)
+        // The transfer queue reports on main; the runner hears it on the session queue, like every event.
+        transfers.onStatus = { [weak self] in self?.post(.transfer($0)) }
+        onInsert = { [weak self] info, payload in self?.composer.insert(info, payload) }
     }
 
     public func start() {
@@ -103,6 +119,12 @@ public final class EmbeddedSession {
         }
     }
 
+    /// Main queue (the runner's `cancel_transfer`): stops the running upload or download, drops the queued
+    /// ones. A send round waiting on an upload ends with `.done(sent:failure: "")`.
+    public func cancelTransfers() {
+        transfers.cancel()
+    }
+
     /// Once a second from the runner: reports the bytes received since the last call.
     public func tickTraffic() {
         run {
@@ -122,6 +144,14 @@ public final class EmbeddedSession {
             DispatchQueue.main.async { [transfers = self.transfers] in transfers.cancel() }
             _ = self.surfaces.keep(only: [])
             self.onEvent?(.closed(reason: reason))
+        }
+    }
+
+    /// From main: delivers `e` on the session queue, unless the session has closed by then.
+    private func post(_ e: SessionEvent) {
+        run { [weak self] in
+            guard let self, !self.closed else { return }
+            self.onEvent?(e)
         }
     }
 
@@ -161,6 +191,9 @@ public final class EmbeddedSession {
                 if case .unsupported = entry.info { pickable = false }
                 return ClipRow(id: entry.id, title: historyTitle(entry.info), pickable: pickable)
             }))
+        case let .pasted(seq, error):
+            // The composer lives on main: hand it the values, not this queue's state.
+            DispatchQueue.main.async { [weak self] in _ = self?.composer.pasted(seq: seq, error: error) }
         case let .error(reason):
             close(reason: "host says: \(reason)")
         default:

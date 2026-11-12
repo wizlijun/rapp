@@ -116,8 +116,19 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     case let .setStream(sid, mode, fps, density):
       live[sid]?.session.setStream(mode: mode, fps: fps, choice: density)
       result(nil)
-    case .cancelTransfer:
-      // Nothing to cancel until the composer's transfers land (Task 11).
+    case let .cancelTransfer(sid):
+      live[sid]?.session.cancelTransfers()
+      result(nil)
+    case let .composerPaste(sid):
+      // ⌘V on B: the user's own clipboard, read on main by the composer.
+      result(pasteResultPayload(live[sid]?.session.composer.paste() ?? .nothing))
+    case let .composerAttach(sid):
+      attach(sid: sid, result: result)
+    case let .composerSend(sid, pieces):
+      live[sid]?.session.composer.send(pieces)
+      result(nil)
+    case let .composerDropBlock(sid, block):
+      live[sid]?.session.composer.drop(block)
       result(nil)
     case let .clipPick(sid, clip, insert):
       live[sid]?.session.pickClip(clip, insert: insert)
@@ -134,6 +145,26 @@ final class SessionPlugin: NSObject, FlutterPlugin {
         focusedSid = sid
       }
       result(nil)
+    }
+  }
+
+  /// On main: 「附件」's file picker; the picked files go to the composer's (tested) `attach`.
+  /// The session may have ended while the panel was up.
+  private func attach(sid: Int64, result: @escaping FlutterResult) {
+    guard live[sid] != nil else {
+      result([String: Any]())
+      return
+    }
+    let panel = NSOpenPanel()
+    panel.canChooseFiles = true
+    panel.canChooseDirectories = true
+    panel.allowsMultipleSelection = true
+    panel.begin { [weak self] response in
+      guard response == .OK, let composer = self?.live[sid]?.session.composer else {
+        result([String: Any]())
+        return
+      }
+      result(pasteResultPayload(composer.attach(panel.urls)))
     }
   }
 

@@ -1,6 +1,7 @@
 // One embedded session as the GUI sees it: the state the runner's events build up.
 import 'package:flutter/foundation.dart';
 
+import 'composer_model.dart';
 import 'resize_policy.dart';
 import 'session_port.dart';
 import 'stream_choice.dart';
@@ -8,8 +9,17 @@ import 'window_tabs.dart';
 
 class RemoteSession extends ChangeNotifier {
   /// [onResize] is where the session's resize policy sends: window, width, height.
-  RemoteSession(this.sid, this.appName, {void Function(int window, int w, int h)? onResize, this.onSelect, this.onStream})
-      : policy = ResizePolicy(onResize ?? (_, _, _) {});
+  /// [onDropBlock] is where a block that left the composer goes (the runner forgets it).
+  RemoteSession(this.sid, this.appName,
+      {void Function(int window, int w, int h)? onResize, this.onSelect, this.onStream, void Function(int n)? onDropBlock})
+      : policy = ResizePolicy(onResize ?? (_, _, _) {}),
+        composer = ComposerModel(onDrop: onDropBlock);
+
+  /// The composer's draft and whether it is open; kept per session (R18).
+  final ComposerModel composer;
+
+  /// The upload strip's text (`上传 1/2 · a.txt`); null when nothing is uploading.
+  String? transferStatus;
 
   /// Decides when the stage size becomes A's window size.
   final ResizePolicy policy;
@@ -58,6 +68,17 @@ class RemoteSession extends ChangeNotifier {
         bytesPerSecond = e.bytes;
       case ClipsEvent():
         clips = e.clips;
+        composer.clipArrived();
+      case ComposerStateEvent():
+        if (e.sending != null) composer.setSending(e.sending!);
+        final d = e.done;
+        if (d != null) composer.done(d.sent, d.failure);
+      case ComposerInsertEvent():
+        // A clip's 「插入」: into the draft, which opens to show it.
+        composer.apply(e.insert);
+        composer.open = true;
+      case TransferEvent():
+        transferStatus = e.status;
       case MenuEvent():
         menu = e.items;
       case DetachedEvent():
@@ -65,8 +86,6 @@ class RemoteSession extends ChangeNotifier {
         if (e.current != null) tabs.select(e.current!);
       case ClosedEvent():
         endReason = e.reason;
-      default:
-        return;
     }
     notifyListeners();
   }
@@ -85,6 +104,7 @@ class RemoteSession extends ChangeNotifier {
   @override
   void dispose() {
     policy.dispose();
+    composer.dispose();
     super.dispose();
   }
 }

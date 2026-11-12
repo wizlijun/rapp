@@ -1,6 +1,7 @@
 // The stage: where the remote window will sit. S1 shows a placeholder.
 import 'package:flutter/material.dart';
 
+import '../embed/composer_bar.dart';
 import '../embed/picture.dart';
 import '../embed/session_port.dart';
 import 'controls.dart';
@@ -105,7 +106,7 @@ class Stage extends StatelessWidget {
         return LayoutBuilder(builder: (context, c) {
           // The stage's size drives A's window size (R12); overlays never change it.
           state.stageSize(c.biggest);
-          return Container(
+          final stage = Container(
             key: const Key('stage'),
             alignment: Alignment.center,
             padding: picture ? EdgeInsets.zero : const EdgeInsets.all(16),
@@ -113,6 +114,15 @@ class Stage extends StatelessWidget {
               style: TextStyle(color: t.text),
               child: body,
             ),
+          );
+          final port = state.port;
+          if (!picture || rs == null || port == null) return stage;
+          // The composer floats over the picture's bottom edge; opening it never resizes A.
+          return Stack(
+            children: [
+              stage,
+              ...composerLayer(state: state, session: rs, port: port),
+            ],
           );
         });
       },

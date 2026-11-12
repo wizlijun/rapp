@@ -22,9 +22,27 @@ public struct ClipRow: Equatable {
     }
 }
 
-/// What the composer is doing (filled in by the composer task).
+/// A composer block the runner holds (pasted image, long text, file…), as the GUI shows it.
+public struct BlockChip: Equatable {
+    public let n: Int
+    public let label: String
+    public init(n: Int, label: String) { self.n = n; self.label = label }
+}
+
+/// What a paste, attach or clipboard insert produced: text for the editor, new blocks, a line to show, or nothing.
+public enum PasteResult: Equatable {
+    case text(String), blocks([BlockChip]), status(String), nothing
+}
+
+/// What the composer tells the GUI.
 public enum ComposerEvent: Equatable {
+    /// A send round started or ended.
     case sending(Bool)
+    /// The round ended: `sent` leading pieces went into A; `failure` is nil when all went, else the line to
+    /// show ("" = the transfer status already says why).
+    case done(sent: Int, failure: String?)
+    /// Something for the editor that the GUI did not ask for (a clip's 「插入」).
+    case insert(PasteResult)
 }
 
 /// What an `EmbeddedSession` tells its runner. Delivered on the session's queue.

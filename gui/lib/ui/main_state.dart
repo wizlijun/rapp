@@ -389,7 +389,8 @@ class MainState extends ChangeNotifier {
   Future<String?> _startEmbedded(HubSession s, String appName) async {
     final rs = RemoteSession(s.sid, appName, onResize: (w, a, b) => port!.resize(s.sid, w, a, b),
         onSelect: (w) => port!.selectWindow(s.sid, w),
-        onStream: (c) => port!.setStream(s.sid, c.mode, c.fps, c.density));
+        onStream: (c) => port!.setStream(s.sid, c.mode, c.fps, c.density),
+        onDropBlock: (n) => port!.composerDropBlock(s.sid, n));
     remote[s.sid] = rs;
     try {
       final p = s.port, tk = s.token;

@@ -47,6 +47,9 @@ class FakeSessionPort extends SessionPort {
   Object? startError;
   int doubleClickMs = 500;
 
+  /// What `composer_paste` and `composer_attach` answer (a runner `PasteResult` map).
+  Map<String, Object?>? pasteReply;
+
   @override
   Stream<SessionEvent> get events => _events.stream;
 
@@ -58,6 +61,7 @@ class FakeSessionPort extends SessionPort {
     calls.add((method, args));
     if (method == 'init') return {'doubleClickMs': doubleClickMs};
     if (method == 'start' && startError != null) throw startError!;
+    if (method == 'composer_paste' || method == 'composer_attach') return pasteReply;
     return null;
   }
 }
