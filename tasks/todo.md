@@ -171,7 +171,7 @@
     - [ ] 待实机：成员所在 host 离线 → 「全部打开」提示「<设备> 离线，跳过 1 个」
     - [ ] 待实机：退出再开，常用、项目、任务都在
     - [ ] 待实机：workspace.json 写坏 → 提示「项目和常用没有读到，已从空白开始」，留 workspace.json.bad
-    - [ ] 打包：package-macos.sh 现在会用钥匙串证书签名，和在线升级 Task 8 一起等用户同意
+    - [x] 打包：随 v0.5.0 发布（963e9cf，Apple Development 签名，arm64）
 - [x] S6 全局资源（规格：`docs/superpowers/specs/2026-11-12-rapp-s6-global-resources-design.md`）
   - 代码 + 测试完成（计划 Task 1–6 + 终审修复，提交到 8b843f6；flutter 572、swift 通过、cargo 208、check.sh EXIT=0）；hub 的 sid 改从毫秒时钟起，重启服务后不再重号。以下实机条目待用户安排时间
     - [ ] 待实机：两个会话各在 A 上复制测试文字 → 资源标签两条，来源对、最新在上
@@ -180,7 +180,7 @@
     - [ ] 待实机：大文件下到一半「取消」→ 下载目录留 `.rapp-part`
     - [ ] 待实机：流菜单第 5 组只显示当前会话最新两条；「全部剪贴板」打开资源标签、流菜单收起
     - [ ] 待实机：按 PID 停掉一个会话的 host → 它的条目变灰「A 已断开，复制不到」
-    - [ ] 打包：和 S5、在线升级 Task 8 一起等用户同意
+    - [x] 打包：随 v0.5.0 发布（963e9cf，Apple Development 签名，arm64）
 - [x] S4 全景（规格：`docs/superpowers/specs/2026-11-12-rapp-s4-overview-design.md`）
   - 代码 + 测试完成（计划 Task 1–4 + 终审修复，提交到 1f308e1；flutter 637、check.sh EXIT=0）；顶栏按实际显示的按钮算宽度，嵌入模式 300–600 px 不再溢出。以下实机条目待用户安排时间
   - [ ] 待实机：两个会话一个断开 → 全景计数「活动 1、已断开 1」，墙上两块状态各自对
@@ -189,7 +189,7 @@
   - [ ] 待实机：两种模式顶栏一致；全景里面板、需要你、串流菜单都正常
   - [ ] 待实机：帧率——窗口模式照选的 fps，进全景 3 秒后 ≤ 1 fps，回来恢复（看 host.log [stats]）
   - [ ] 待实机：灰度截图里七种状态凭形状仍能分清
-  - [ ] 打包（package-macos.sh 用钥匙串签名，需用户同意）
+  - [x] 打包：随 v0.5.0 发布（963e9cf，Apple Development 签名，arm64）
 
 ## 插入的严重问题（2026-11-12，用户报告）
 - [ ] P1 A 锁屏后 B 无法输入：B 提交时报「A 上的目标窗口不在最前」（`Paster.waitFrontmost` → `target not frontmost`），点击被丢弃（`InputInjector.clearToClick` → `click dropped: covered by …`）。原因：锁屏时登录窗口盖在所有窗口上、目标 app 激活不了，按 HID 投递的键鼠都到不了 app。README 写明 rapp 不做远程登录/解锁。待做：
