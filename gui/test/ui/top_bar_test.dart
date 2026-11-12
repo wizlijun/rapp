@@ -222,6 +222,27 @@ void main() {
     });
   });
 
+  for (final w in [240.0, 360.0]) {
+    testWidgets('top bar fits ${w.toInt()}px with a two-digit needs count', (tester) async {
+      await tester.pumpWidget(wrap(SizedBox(
+        width: w,
+        child: TopBar(state: s, fullscreen: false, onToggleFullscreen: () {}),
+      )));
+      t.emit({
+        'event': 'hosts',
+        'hosts': [for (var i = 0; i < 10; i++) {'id': 'd$i', 'name': 'device $i'}],
+      });
+      for (var i = 0; i < 10; i++) {
+        t.emit({'event': 'presence', 'id': 'd$i', 'online': true});
+        t.emit({'event': 'presence', 'id': 'd$i', 'online': false});
+      }
+      await tester.runAsync(flush);
+      await tester.pump();
+      expect(tester.widget<Text>(find.byKey(const Key('needs-count'))).data, '10');
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   group('needs-you', () {
     late FakeSessionPort port;
     late MainState es;
@@ -304,7 +325,7 @@ void main() {
       await tester.tap(find.byKey(const Key('needs-you')));
       await tester.pump();
       expect(find.text('没有需要你处理的事'), findsOneWidget);
-      await tester.tap(find.byKey(const Key('needs-scrim')), warnIfMissed: false);
+      await tester.tapAt(const Offset(10, 500));
       await tester.pump();
       expect(find.byKey(const Key('needs-scrim')), findsNothing);
       for (final app in ['a1', 'a2', 'a3', 'a4']) {
@@ -365,11 +386,43 @@ void main() {
       await tester.tap(find.byKey(const Key('traffic')));
       await tester.pump();
       expect(find.byKey(const Key('stream-menu-scrim')), findsOneWidget);
-      await tester.tap(find.byKey(const Key('needs-you')), warnIfMissed: false);
+      await tester.tap(find.byKey(const Key('needs-you')));
       await tester.pump();
       expect(find.byKey(const Key('stream-menu-scrim')), findsNothing);
       expect(find.byKey(const Key('needs-scrim')), findsOneWidget);
       expect(es.corner, Corner.needs);
+    });
+
+    testWidgets('a tap outside closes the open corner, the top bar included', (tester) async {
+      await tester.pumpWidget(wrap(ebar()));
+      await openApp(tester, 'Safari');
+      es.toggleCorner(Corner.needs);
+      await tester.pump();
+      expect(find.byKey(const Key('needs-scrim')), findsOneWidget);
+      // The tap still reaches the button: the panel opens and the popover goes.
+      await tester.tap(find.byKey(const Key('panel-button')));
+      await tester.pump();
+      expect(es.corner, isNull);
+      expect(es.panel, isNotNull);
+      expect(find.byKey(const Key('needs-scrim')), findsNothing);
+
+      await tester.tap(find.byKey(const Key('traffic')));
+      await tester.pump();
+      expect(es.corner, Corner.stream);
+      await tester.tap(find.byKey(const Key('fullscreen-button')));
+      await tester.pump();
+      expect(es.corner, isNull);
+      expect(find.byKey(const Key('stream-menu-scrim')), findsNothing);
+
+      // Below the bar too, and a tap inside the popover keeps it.
+      es.toggleCorner(Corner.needs);
+      await tester.pump();
+      await tester.tap(find.text('没有需要你处理的事'));
+      await tester.pump();
+      expect(es.corner, Corner.needs);
+      await tester.tapAt(const Offset(10, 500));
+      await tester.pump();
+      expect(es.corner, isNull);
     });
   });
 }

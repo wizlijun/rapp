@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 
 import '../ui/controls.dart';
+import '../ui/corner_popover.dart';
 import '../ui/session_model.dart';
 import '../ui/tokens.dart';
 import 'remote_session.dart';
@@ -64,76 +65,33 @@ class StreamMenuAnchor extends StatefulWidget {
 }
 
 class _StreamMenuAnchorState extends State<StreamMenuAnchor> {
-  final _portal = OverlayPortalController();
-  final _link = LayerLink();
-
-  // The portal is shown for good (not while building: its controller refuses); what it draws
-  // follows [StreamMenuAnchor.open], in the same frame as the change.
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _portal.show();
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
-    final t = RappTokens.of(context);
-    return CompositedTransformTarget(
-      link: _link,
-      child: OverlayPortal(
-        controller: _portal,
-        overlayChildBuilder: (context) => !widget.open
-            ? const SizedBox.shrink()
-            : Stack(
-          children: [
-            Positioned.fill(
-              top: topBarHeight,
-              child: GestureDetector(
-                key: const Key('stream-menu-scrim'),
-                behavior: HitTestBehavior.opaque,
-                onTap: widget.onClose,
-              ),
-            ),
-            CompositedTransformFollower(
-              link: _link,
-              targetAnchor: Alignment.bottomRight,
-              followerAnchor: Alignment.topRight,
-              offset: const Offset(0, 4),
-              child: Material(
-                type: MaterialType.transparency,
-                child: Container(
-                  width: 340,
-                  constraints: BoxConstraints(maxHeight: (MediaQuery.sizeOf(context).height - 80).clamp(200, 900)),
-                  decoration: t.panelBox(),
-                  child: StreamMenu(
-                    port: widget.port,
-                    session: widget.session,
-                    path: widget.path,
-                    status: widget.status,
-                    disconnected: widget.disconnected,
-                    reconnecting: widget.reconnecting,
-                    onDisconnect: widget.onDisconnect,
-                    onReconnect: widget.onReconnect,
-                    onClose: widget.onClose,
-                    onEnd: widget.onEnd,
-                    onToggleDetach: widget.onToggleDetach,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-        child: ListenableBuilder(
-          listenable: widget.session,
-          builder: (context, _) => TrafficLabel(
-            key: const Key('traffic'),
-            bytesPerSecond: widget.session.bytesPerSecond,
-            open: widget.open,
-            onTap: widget.onToggle,
-            onSecondaryTap: widget.onToggle,
-          ),
+    return CornerPopover(
+      open: widget.open,
+      onClose: widget.onClose,
+      scrimKey: const Key('stream-menu-scrim'),
+      popover: StreamMenu(
+        port: widget.port,
+        session: widget.session,
+        path: widget.path,
+        status: widget.status,
+        disconnected: widget.disconnected,
+        reconnecting: widget.reconnecting,
+        onDisconnect: widget.onDisconnect,
+        onReconnect: widget.onReconnect,
+        onClose: widget.onClose,
+        onEnd: widget.onEnd,
+        onToggleDetach: widget.onToggleDetach,
+      ),
+      child: ListenableBuilder(
+        listenable: widget.session,
+        builder: (context, _) => TrafficLabel(
+          key: const Key('traffic'),
+          bytesPerSecond: widget.session.bytesPerSecond,
+          open: widget.open,
+          onTap: widget.onToggle,
+          onSecondaryTap: widget.onToggle,
         ),
       ),
     );

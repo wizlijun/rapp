@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 
 import 'controls.dart';
+import 'corner_popover.dart';
 import 'lamp.dart';
 import 'main_state.dart';
 import 'tokens.dart';
@@ -18,61 +19,19 @@ class NeedsYouAnchor extends StatefulWidget {
 }
 
 class _NeedsYouAnchorState extends State<NeedsYouAnchor> {
-  final _portal = OverlayPortalController();
-  final _link = LayerLink();
-
   MainState get _s => widget.state;
-
-  // The portal is shown for good (its controller refuses to change while building); what it
-  // draws follows `state.corner`.
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _portal.show();
-    });
-  }
 
   @override
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
-    return CompositedTransformTarget(
-      link: _link,
-      child: ListenableBuilder(
-        listenable: _s,
-        builder: (context, child) => OverlayPortal(
-        controller: _portal,
-        overlayChildBuilder: (context) => _s.corner != Corner.needs
-            ? const SizedBox.shrink()
-            : Stack(
-          children: [
-            Positioned.fill(
-              top: topBarHeight,
-              child: GestureDetector(
-                key: const Key('needs-scrim'),
-                behavior: HitTestBehavior.opaque,
-                onTap: _s.closeCorner,
-              ),
-            ),
-            CompositedTransformFollower(
-              link: _link,
-              targetAnchor: Alignment.bottomRight,
-              followerAnchor: Alignment.topRight,
-              offset: const Offset(0, 4),
-              child: Material(
-                type: MaterialType.transparency,
-                child: Container(
-                  width: 340,
-                  constraints: BoxConstraints(maxHeight: (MediaQuery.sizeOf(context).height - 80).clamp(200, 900)),
-                  decoration: t.panelBox(),
-                  child: _NeedsList(state: _s),
-                ),
-              ),
-            ),
-          ],
-        ),
+    return ListenableBuilder(
+      listenable: _s,
+      builder: (context, _) => CornerPopover(
+        open: _s.corner == Corner.needs,
+        onClose: _s.closeCorner,
+        scrimKey: const Key('needs-scrim'),
+        popover: _NeedsList(state: _s),
         child: _button(t),
-      ),
       ),
     );
   }
@@ -99,15 +58,16 @@ class _NeedsYouAnchorState extends State<NeedsYouAnchor> {
           onTap: () => _s.toggleCorner(Corner.needs),
           borderRadius: radius,
           child: Container(
-            constraints: const BoxConstraints(minHeight: 48, minWidth: 48),
+            width: 48, // fixed: the bar reserves exactly this; a long count scales down instead of growing
+            constraints: const BoxConstraints(minHeight: 48),
             decoration: BoxDecoration(borderRadius: radius, border: Border.all(color: border)),
             child: ClipRRect(
               borderRadius: radius,
               child: DecoratedBox(
                 decoration: back ?? const BoxDecoration(),
                 child: Container(
-                  constraints: const BoxConstraints(minHeight: 46, minWidth: 46),
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  constraints: const BoxConstraints(minHeight: 46),
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
                   alignment: Alignment.center,
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -115,15 +75,20 @@ class _NeedsYouAnchorState extends State<NeedsYouAnchor> {
                       StatusLamp(lamp),
                       if (n > 0) ...[
                         const SizedBox(width: 6),
-                        Text(
-                          '$n',
-                          key: const Key('needs-count'),
-                          style: TextStyle(
-                            fontFamily: t.mono,
-                            fontFamilyFallback: t.monoFallback,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: t.text,
+                        Flexible(
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              '$n',
+                              key: const Key('needs-count'),
+                              style: TextStyle(
+                                fontFamily: t.mono,
+                                fontFamilyFallback: t.monoFallback,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: t.text,
+                              ),
+                            ),
                           ),
                         ),
                       ],
@@ -146,39 +111,34 @@ class _NeedsList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
-    return ListenableBuilder(
-      listenable: state,
-      builder: (context, _) {
-        final needs = state.needs;
-        if (needs.isEmpty) {
-          return Container(
-            constraints: const BoxConstraints(minHeight: 48),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(children: [
-              const StatusLamp(Lamp.active),
-              const SizedBox(width: 8),
-              Expanded(child: Text('没有需要你处理的事', style: TextStyle(color: t.muted))),
-            ]),
-          );
-        }
-        return SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              for (final n in needs.take(3)) _row(t, n),
-              if (needs.length > 3)
-                Container(
-                  constraints: const BoxConstraints(minHeight: 48),
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  alignment: Alignment.centerLeft,
-                  child: Text('还有 ${needs.length - 3} 件', style: TextStyle(color: t.muted)),
-                ),
-            ],
-          ),
-        );
-      },
+    final needs = state.needs;
+    if (needs.isEmpty) {
+      return Container(
+        constraints: const BoxConstraints(minHeight: 48),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(children: [
+          const StatusLamp(Lamp.active),
+          const SizedBox(width: 8),
+          Expanded(child: Text('没有需要你处理的事', style: TextStyle(color: t.muted))),
+        ]),
+      );
+    }
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          for (final n in needs.take(3)) _row(t, n),
+          if (needs.length > 3)
+            Container(
+              constraints: const BoxConstraints(minHeight: 48),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              alignment: Alignment.centerLeft,
+              child: Text('还有 ${needs.length - 3} 件', style: TextStyle(color: t.muted)),
+            ),
+        ],
+      ),
     );
   }
 
