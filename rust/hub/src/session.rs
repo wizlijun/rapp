@@ -2,7 +2,7 @@
 //! `rapp-client` spliced to it. `closed` carries the client's exit reason.
 
 use crate::hosts::Host;
-use crate::Hub;
+use crate::{Hub, HubSession};
 use anyhow::{bail, Context, Result};
 use rapp_net::log::{pipe_lines, Lvl};
 use rapp_net::msg::Op;
@@ -23,6 +23,19 @@ impl Hub {
     pub async fn open(self: &Arc<Self>, id: &str, app: &str, embed: bool, reconnect: bool, req: &Option<Value>) -> Result<()> {
         if embed {
             return self.open_embedded(id, app, reconnect, req).await;
+        }
+        if !reconnect {
+            if let Some(ev) = self.reuse(id, app) {
+                self.log.event(Lvl::Info, "opened", {
+                    let mut o = json!({"sid":ev["sid"],"id":id,"app":app,"path":ev["path"],"reused":true});
+                    if let Some(name) = self.hosts.get(id).map(|h| h.name).filter(|n| !n.is_empty()) {
+                        o["host_name"] = name.into();
+                    }
+                    o
+                });
+                self.emit(ev, req).await;
+                return Ok(());
+            }
         }
         let client = rapp_net::bins::find("rapp-client", self.bin_dir.as_deref()).context("rapp-client not found")?;
         let host = self.host(id)?;
@@ -69,11 +82,21 @@ impl Hub {
                 }
             });
         }
-        self.sessions.lock().unwrap().insert(sid, Some(tx));
+        let hs = HubSession { tx: Some(tx), id: id.into(), app: app.into(), path: path.into(), embed: false };
+        self.sessions.lock().unwrap().insert(sid, hs);
         self.log_opened(sid, id, app, path, false);
         self.emit(json!({"event":"opened","sid":sid,"id":id,"app":app,"path":path}), req).await;
         tokio::spawn(self.clone().run(sid, child, tcp, stream, listener, host, app.to_string(), Instant::now()));
         Ok(())
+    }
+
+    /// An open standalone session of the same device+app: raises its window and returns the
+    /// `opened` event for it (R12: embedded sessions are reused by the GUI, never here).
+    fn reuse(&self, id: &str, app: &str) -> Option<Value> {
+        let sessions = self.sessions.lock().unwrap();
+        let (sid, s) = sessions.iter().filter(|(_, s)| !s.embed && s.id == id && s.app == app && s.tx.is_some()).min_by_key(|(k, _)| **k)?;
+        let _ = s.tx.as_ref()?.send("{\"cmd\":\"focus\"}\n".into());
+        Some(json!({"event":"opened","sid":sid,"id":id,"app":app,"path":s.path,"reused":true}))
     }
 
     fn log_opened(&self, sid: u64, id: &str, app: &str, path: &str, reconnect: bool) {
@@ -99,7 +122,8 @@ impl Hub {
         // Closing = dropping the sender; the session sees `recv()` return None.
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         // Registered and logged before the event goes out, so a fast `close` or `note` finds it.
-        self.sessions.lock().unwrap().insert(sid, Some(tx));
+        let hs = HubSession { tx: Some(tx), id: id.into(), app: app.into(), path: path.into(), embed: true };
+        self.sessions.lock().unwrap().insert(sid, hs);
         self.log_opened(sid, id, app, path, reconnect);
         self.emit(json!({"event":"opened","sid":sid,"id":id,"app":app,"path":path,"port":port,"token":token}), req).await;
         tokio::spawn(self.clone().run_embedded(sid, listener, stream, host, app.to_string(), Instant::now(), rx));
@@ -257,11 +281,11 @@ impl Hub {
     /// embedded session reports (S1 `rapp-client` sessions ignore it).
     pub fn close(&self, sid: u64, why: Option<&str>) -> Result<()> {
         match self.sessions.lock().unwrap().get_mut(&sid) {
-            Some(tx) => {
+            Some(s) => {
                 if let Some(w) = why {
                     self.close_why.lock().unwrap().insert(sid, w.into());
                 }
-                tx.take();
+                s.tx.take();
                 Ok(())
             }
             None => bail!("unknown sid"),
@@ -271,7 +295,7 @@ impl Hub {
     /// Asks the client to raise its windows (`{"cmd":"focus"}` on its stdin).
     pub fn focus(&self, sid: u64) -> Result<()> {
         match self.sessions.lock().unwrap().get(&sid) {
-            Some(Some(tx)) => {
+            Some(HubSession { tx: Some(tx), .. }) => {
                 let _ = tx.send("{\"cmd\":\"focus\"}\n".into());
                 Ok(())
             }
@@ -281,8 +305,8 @@ impl Hub {
 
     /// stdin EOF: close every client, wait up to 5 s, then kill the rest.
     pub async fn close_all(&self) {
-        for tx in self.sessions.lock().unwrap().values_mut() {
-            tx.take();
+        for s in self.sessions.lock().unwrap().values_mut() {
+            s.tx.take();
         }
         if !self.wait_sessions_done(Duration::from_secs(5)).await {
             let _ = self.kill.send(true);

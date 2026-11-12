@@ -350,6 +350,60 @@ async fn focus_reaches_the_client_and_unknown_sid_errors() {
     assert_eq!(hub.next().await, json!({"event":"closed","sid":sid,"reason":"echo ok"}));
 }
 
+#[tokio::test]
+async fn second_open_of_the_same_app_reuses_the_session() {
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = hub_with_host(&a, &relay, home.path(), None).await;
+    let r1 = hub.call(json!({"cmd":"open","id":a.id,"app":"com.example.echo","req":"o1"})).await;
+    assert_eq!(r1["event"], "opened", "{r1}");
+    let r2 = hub.call(json!({"cmd":"open","id":a.id,"app":"com.example.echo","req":"o2"})).await;
+    assert_eq!(
+        (r2["event"].clone(), r2["sid"].clone(), r2["reused"].clone(), r2["req"].clone(), r2["path"].clone()),
+        (json!("opened"), r1["sid"].clone(), json!(true), json!("o2"), r1["path"].clone())
+    );
+    wait_for_file(&a.bins.path().join("client.focus")).await;
+    // A saw one open only.
+    let starts = log_events(a.home.path()).into_iter().filter(|v| v["ev"] == "session_start" && v["app"] == "com.example.echo" && v.get("side").is_none()).count();
+    assert_eq!(starts, 1);
+    let opened: Vec<Value> = read_log(home.path(), "hub.log").into_iter().filter(|v| v["ev"] == "opened").collect();
+    assert_eq!(opened.len(), 2);
+    assert_eq!(opened[1]["reused"], true);
+    hub.send(json!({"cmd":"close","sid":r1["sid"]})).await;
+    assert_eq!(hub.next().await, json!({"event":"closed","sid":r1["sid"],"reason":"echo ok"}));
+}
+
+#[tokio::test]
+async fn embedded_opens_are_not_reused_by_the_hub() {
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = hub_with_host(&a, &relay, home.path(), None).await;
+    let (s1, _, t1) = embed_open(&mut hub, &a).await;
+    let (s2, _, t2) = embed_open(&mut hub, &a).await;
+    assert_ne!(s1, s2);
+    // A standalone open does not reuse an embedded session either.
+    let r = hub.call(json!({"cmd":"open","id":a.id,"app":"com.example.echo","req":"o"})).await;
+    assert_ne!(r["sid"], s1);
+    assert_ne!(r["sid"], s2);
+    assert!(r.get("reused").is_none(), "{r}");
+    let text = std::fs::read_to_string(home.path().join("logs").join("hub.log")).unwrap();
+    assert!(!text.contains(&t1) && !text.contains(&t2), "token in hub.log");
+}
+
+#[tokio::test]
+async fn reconnect_open_is_never_reused() {
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = hub_with_host(&a, &relay, home.path(), None).await;
+    let r1 = hub.call(json!({"cmd":"open","id":a.id,"app":"com.example.echo","req":"o1"})).await;
+    let r2 = hub.call(json!({"cmd":"open","id":a.id,"app":"com.example.echo","reconnect":true,"req":"o2"})).await;
+    assert_ne!(r1["sid"], r2["sid"]);
+    assert!(r2.get("reused").is_none(), "{r2}");
+}
+
 /// Plays the GUI side of an embedded session: token line, `ok`, then an echoed `word`.
 async fn gui_connect(port: u64, token: &str, word: &str) -> tokio::net::TcpStream {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};

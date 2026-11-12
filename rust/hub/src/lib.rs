@@ -30,6 +30,15 @@ pub struct Opts {
     pub presence_every: Option<std::time::Duration>,
 }
 
+/// One open session. `tx` is the writer of the client's stdin (None once closed).
+pub(crate) struct HubSession {
+    tx: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+    id: String,
+    app: String,
+    path: String,
+    embed: bool,
+}
+
 type Out = Box<dyn AsyncWrite + Unpin + Send>;
 
 pub(crate) struct Hub {
@@ -43,7 +52,7 @@ pub(crate) struct Hub {
     hosts: Hosts,
     out: tokio::sync::Mutex<Out>,
     /// sid → writer of the client's stdin (None once closed).
-    sessions: Mutex<HashMap<u64, Option<tokio::sync::mpsc::UnboundedSender<String>>>>,
+    sessions: Mutex<HashMap<u64, HubSession>>,
     next_sid: AtomicU64,
     /// sid → reason set by `close` with `reason`, read when the session ends.
     close_why: Mutex<HashMap<u64, String>>,
