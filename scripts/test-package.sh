@@ -60,6 +60,14 @@ check "postinstall chowns before bootstrap" test -n "$CH" -a -n "$BS" -a "${CH:-
 
 check "package script has the adhoc gate" grep -q 'RAPP_ALLOW_ADHOC' scripts/package-macos.sh
 check "package script sets identifiers" grep -q -- '-i com.rapp.service' scripts/package-macos.sh
+# The literal above can match a comment; also require the executable signing loop.
+signs_with_ids() {
+    local code
+    code=$(grep -v '^[[:space:]]*#' "$1")
+    printf '%s\n' "$code" | grep -q 'for pair in \$EXPECTED_IDS' &&
+        printf '%s\n' "$code" | grep -q -- '"\${SIGN\[@\]}" -i "\${pair#\*:}"'
+}
+check "signing loop passes -i from EXPECTED_IDS" signs_with_ids scripts/package-macos.sh
 check "scripts parse" bash -c 'bash -n scripts/package-macos.sh && bash -n scripts/pkg/postinstall && bash -n scripts/lib/sign-check.sh'
 
 echo "ALL OK"
