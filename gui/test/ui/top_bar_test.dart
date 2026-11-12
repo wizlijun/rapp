@@ -118,7 +118,7 @@ void main() {
     s.select('111/$longApp');
   }
 
-  for (final w in [360.0, 240.0]) {
+  for (final w in [360.0, 335.0, 320.0, 300.0, 240.0]) {
     testWidgets('top bar fits ${w.toInt()}px with long names', (tester) async {
       await tester.pumpWidget(wrap(SizedBox(
         width: w,
@@ -310,7 +310,7 @@ void main() {
       s = es = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: port);
     });
 
-    for (final w in [600.0, 597.0, 545.0, 360.0]) {
+    for (final w in [600.0, 597.0, 545.0, 480.0, 478.0, 400.0, 392.0, 340.0, 336.0, 360.0, 320.0, 300.0]) {
       testWidgets('top bar fits at $w with the stream menu', (tester) async {
         await tester.pumpWidget(wrap(Align(
           alignment: Alignment.topLeft,

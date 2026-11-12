@@ -40,18 +40,23 @@ class TopBar extends StatelessWidget {
             // (full label when wide, bars only when narrow), so the thresholds that
             // keep the fixed content inside the bar move up with it.
             final embedded = state.port != null && rs != null && cur != null;
-            final gap = box.maxWidth >= (embedded ? 392 : 300) ? 6.0 : 0.0;
+            // The fixed row: panel, prev, next, fullscreen, the needs anchor when there is a hub,
+            // the overview button when shown, the stream anchor in embedded mode; and the gaps
+            // (both paddings plus one after panel, overview, prev, session and next). Gaps and the
+            // overview button appear only when they fit, so the row never overflows.
+            final streamW = embedded ? (wide ? _streamAnchorWidth : 48.0) : 0.0;
+            final icons = 4 + (state.hub != null ? 1 : 0);
+            double fixed(double gap, bool overview) =>
+                (icons + (overview ? 1 : 0)) * 48 + streamW + (overview ? 7 : 6) * gap;
+            // K11: never below 300.
+            final showOverview = box.maxWidth >= 300 && box.maxWidth >= fixed(0, true);
+            // Room for the gaps plus the session block's lamp (13) and its gap (8).
+            final gap = box.maxWidth >= fixed(6, showOverview) + 21 ? 6.0 : 0.0;
             // The session block is a fixed-max, non-flex child so the hint's
             // Expanded takes all the slack and the fullscreen button stays at the
             // right edge. (A loose Flexible would leave its unused share of the
             // slack at the end of the row.)
-            final showOverview = box.maxWidth >= (embedded ? 336 : 300);
-            // The stream anchor (traffic label) is fixed-width and only present
-            // in embedded mode with a current session; reserve it.
-            final streamW = embedded ? (wide ? _streamAnchorWidth : 48.0) : 0.0;
-            final sessionMax = (box.maxWidth - (showOverview ? 6 : 5) * 48 - (showOverview ? 8 : 7) * gap - streamW)
-                .clamp(0.0, 260.0)
-                .toDouble();
+            final sessionMax = (box.maxWidth - fixed(gap, showOverview)).clamp(0.0, 260.0).toDouble();
             // A detached session's windows are its tabs now; the bar shows none.
             final tabs = rs == null || rs.detached ? null : rs.tabs;
             final multi = state.sessionCount >= 2;
@@ -95,8 +100,11 @@ class TopBar extends StatelessWidget {
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  StatusLamp(cur.lamp),
-                                  const SizedBox(width: 8),
+                                  // Too narrow for the lamp (13) and its gap: the name alone.
+                                  if (sessionMax >= 21) ...[
+                                    StatusLamp(cur.lamp),
+                                    const SizedBox(width: 8),
+                                  ],
                                   Flexible(
                                     child: Column(
                                       mainAxisAlignment:
@@ -226,8 +234,10 @@ class TopBar extends StatelessWidget {
     final on = state.overview;
     return Semantics(
       selected: on ? true : null,
-      child: Container(
-        decoration: on ? t.raiseBox(border: t.text) : null,
+      // DecoratedBox, not Container: the border adds no padding (the row reserves exactly 48)
+      // and the subtree stays the same when toggled, so keyboard focus survives.
+      child: DecoratedBox(
+        decoration: on ? t.raiseBox(border: t.text) : const BoxDecoration(),
         child: _icon('overview-button', Icons.grid_view, '全景', state.toggleOverview),
       ),
     );
