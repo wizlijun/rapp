@@ -10,7 +10,9 @@ import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/session_model.dart';
 import 'package:rapp/ui/side_panel.dart';
+import 'package:rapp/ui/projects_tab.dart';
 import 'package:rapp/ui/sessions_tab.dart';
+import 'package:rapp/ui/workspace_store.dart';
 import 'package:rapp/ui/tokens.dart';
 
 import '../fakes.dart';
@@ -268,9 +270,25 @@ void main() {
     expect(s.panel, PanelTab.devices);
     expect(find.text('devices-body'), findsOneWidget);
     expect(find.byTooltip('收起面板'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('tab-projects')));
+    await tester.pump();
+    expect(s.panel, PanelTab.projects);
     await tester.tap(find.byKey(const Key('panel-close')));
     await tester.pump();
     expect(s.panel, isNull);
+  });
+
+  testWidgets('projects tab is 720 wide on a big window', (tester) async {
+    tester.view.physicalSize = const Size(1194, 834);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    s.togglePanel(PanelTab.projects);
+    await tester.pumpWidget(wrap(Stack(children: [
+      Positioned(left: 0, top: 0, bottom: 0, child: panel()),
+    ])));
+    expect(tester.getSize(find.byType(SidePanel)).width, 720);
+    expect(find.byType(ProjectsTab), findsOneWidget);
   });
 
   testWidgets('panel is clamped to the window width', (tester) async {
@@ -306,6 +324,11 @@ void main() {
     await open(tester, 2, 'Mail');
     expect(tester.takeException(), isNull);
     s.togglePanel(PanelTab.devices);
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    final p = s.createProject('写周报')!;
+    s.addMember(p.id, const AppRef('111', 'Safari', 'Safari'));
+    s.togglePanel(PanelTab.projects);
     await tester.pump();
     expect(tester.takeException(), isNull);
   });

@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../embed/traffic_label.dart' show formatRate;
 import 'lamp.dart';
 import 'main_state.dart';
+import 'projects_tab.dart';
 import 'sessions_tab.dart';
 import 'tab_chip.dart';
 import 'tokens.dart';
@@ -24,7 +25,8 @@ class SidePanel extends StatelessWidget {
       listenable: state,
       builder: (context, _) {
         final devices = state.panel == PanelTab.devices;
-        final width = math.min(devices ? 720.0 : 330.0, mq.width);
+        final projects = state.panel == PanelTab.projects;
+        final width = math.min(devices || projects ? 720.0 : 330.0, mq.width);
         return Container(
           width: width,
           decoration: BoxDecoration(
@@ -44,23 +46,39 @@ class SidePanel extends StatelessWidget {
                     padding: const EdgeInsets.fromLTRB(10, 10, 10, 0),
                     child: Row(
                       children: [
-                        SizedBox(
-                          width: 96,
-                          child: TabChip(
-                            key: const Key('tab-sessions'),
-                            label: '会话',
-                            selected: !devices,
-                            onTap: () => _tab(PanelTab.sessions),
+                        Flexible(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 96),
+                            child: TabChip(
+                              key: const Key('tab-sessions'),
+                              label: '会话',
+                              selected: !devices && !projects,
+                              onTap: () => _tab(PanelTab.sessions),
+                            ),
                           ),
                         ),
                         const SizedBox(width: 6),
-                        SizedBox(
-                          width: 96,
-                          child: TabChip(
-                            key: const Key('tab-devices'),
-                            label: '设备',
-                            selected: devices,
-                            onTap: () => _tab(PanelTab.devices),
+                        Flexible(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 96),
+                            child: TabChip(
+                              key: const Key('tab-devices'),
+                              label: '设备',
+                              selected: devices,
+                              onTap: () => _tab(PanelTab.devices),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 96),
+                            child: TabChip(
+                              key: const Key('tab-projects'),
+                              label: '项目',
+                              selected: projects,
+                              onTap: () => _tab(PanelTab.projects),
+                            ),
                           ),
                         ),
                         const Spacer(),
@@ -78,7 +96,11 @@ class SidePanel extends StatelessWidget {
                     ),
                   ),
                   Expanded(
-                    child: devices ? devicesTab : SessionsTab(state: state),
+                    child: devices
+                        ? devicesTab
+                        : projects
+                        ? ProjectsTab(state: state)
+                        : SessionsTab(state: state),
                   ),
                   ConstrainedBox(
                     constraints: BoxConstraints(maxHeight: box.maxHeight * .6),
@@ -107,7 +129,9 @@ class _Footer extends StatelessWidget {
     final t = RappTokens.of(context);
     return Container(
       padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(border: Border(top: BorderSide(color: t.line))),
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: t.line)),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -174,15 +198,24 @@ class _Footer extends StatelessWidget {
             spacing: 16,
             runSpacing: 6,
             children: [
-              _Total('在线设备', '${state.onlineDevices}',
-                  const Key('total-online'), state.onlineDevices == 0),
-              _Total('会话', '${state.sessionCount}',
-                  const Key('total-sessions'), state.sessionCount == 0),
               _Total(
-                  '总流量',
-                  state.embeds ? formatRate(state.totalBytesPerSecond) : '—',
-                  const Key('total-traffic'),
-                  state.embeds && state.totalBytesPerSecond == 0),
+                '在线设备',
+                '${state.onlineDevices}',
+                const Key('total-online'),
+                state.onlineDevices == 0,
+              ),
+              _Total(
+                '会话',
+                '${state.sessionCount}',
+                const Key('total-sessions'),
+                state.sessionCount == 0,
+              ),
+              _Total(
+                '总流量',
+                state.embeds ? formatRate(state.totalBytesPerSecond) : '—',
+                const Key('total-traffic'),
+                state.embeds && state.totalBytesPerSecond == 0,
+              ),
             ],
           ),
         ],

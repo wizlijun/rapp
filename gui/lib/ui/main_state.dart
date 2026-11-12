@@ -20,7 +20,7 @@ import 'workspace_store.dart';
 
 export 'lifecycle.dart' show hubWord, hubWords;
 
-enum PanelTab { sessions, devices }
+enum PanelTab { sessions, devices, projects }
 
 /// The two top-bar corners; at most one is open.
 enum Corner { stream, needs }
