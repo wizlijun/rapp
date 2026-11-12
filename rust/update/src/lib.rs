@@ -4,6 +4,18 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+pub mod apply;
+pub mod fake;
+pub mod fetch;
+pub mod runner;
+
+pub use apply::{
+    bundle_version, clear_marker, designated, install, read_marker, verify, verify_local, write_marker, InstallError,
+    Marker, Verified, MARKER,
+};
+pub use fetch::{download, fetch_manifest, free_bytes, part_path, sha256_file, zip_path, Failure, Stage};
+pub use runner::{Out, Runner, SystemRunner};
+
 pub const BUNDLE_ID: &str = "com.rapp.rapp";
 pub const DEFAULT_URL: &str = "https://github.com/wizlijun/rapp-releases/releases/latest/download/latest.json";
 pub const PLATFORM: &str = "macos-arm64";
@@ -25,6 +37,11 @@ pub fn parse_version(s: &str) -> Option<(u64, u64, u64)> {
         return None;
     }
     Some(v)
+}
+
+/// `x.y.z` rebuilt from the parsed numbers (`v0.05.0` → `0.5.0`): the only form used in file names.
+pub fn canonical_version(s: &str) -> Option<String> {
+    parse_version(s).map(|(a, b, c)| format!("{a}.{b}.{c}"))
 }
 
 /// True only when both parse and `latest > current`.
@@ -200,6 +217,13 @@ mod tests {
             assert!(!is_newer(v, "0.4.1"), "{v}");
         }
         assert!(!is_newer("0.5.0", "dev"));
+    }
+
+    #[test]
+    fn canonical_version_strips_prefix_and_zeros() {
+        assert_eq!(canonical_version("v0.05.0").as_deref(), Some("0.5.0"));
+        assert_eq!(canonical_version("0.5.0").as_deref(), Some("0.5.0"));
+        assert_eq!(canonical_version("../0.5.0"), None);
     }
 
     #[test]
