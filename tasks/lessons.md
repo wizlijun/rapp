@@ -11,3 +11,7 @@
 - 用窗口列表（CGWindowList）判断"这个点最上层是谁"不可靠：macOS 27 的 Dock 一直挂着一个铺满屏幕、layer 20、alpha 1 的透明窗口，结果 B 上的每次点击都报 "covered by Dock" 被丢掉。碰到 Dock 的窗口要再用 AX 命中测试（AXUIElementCopyElementAtPosition）确认那个点是不是真的 Dock 栏。系统升级后先看一眼 host 日志里有没有成片的 "click dropped"。
 - 在本机回环（host 和 client 在同一台 Mac）做实测时，用户若同时在用电脑，焦点和窗口遮挡都会变。开始前先请用户别动键盘鼠标，每次合成点击前都查最上层窗口。
 - rust/ 下没有 rustfmt.toml，现有代码也不是 rustfmt 的产物（宽度约 120，任何配置下 `--check` 都不干净）。不要跑 `cargo fmt --all`：一跑就把整个 workspace 改了 1000+ 行。只格式化新文件：`rustfmt --edition 2021 --config max_width=120,use_small_heuristics=Max <新文件>`。
+- 用户可能同时在仓库里改文件（这次是设计语言、README、新规格）。提交只按文件名 `git add <路径>`，不要 `git add -u/-A/.`；也不要 `git stash`、`checkout`、`restore`、`reset` 去拿基线——会把用户没提交的改动卷走或暂时弄没。要基线就用 `git worktree add` 到临时目录。
+- `topat` 按窗口所属 app 的名字判断"是不是 rapp"不够：用户机上常同时开着自己的 rapp GUI、rapp-client 和连接管理窗口，都叫 rapp。合成点击前要按 PID 判断（`s2live/topatp`）。
+- 实机检查要用户把电脑让出来一段时间。用户在用的时候测试 GUI 会被抢焦点、甚至被用户 ⌘Q 关掉；这时停下、记"待实机"，不要反复把自己的窗口提到前面。
+- Flutter 里祖先已经 `Focus(autofocus: true)` 时，子控件的 `autofocus` 不起作用；要在下一帧 `requestFocus()`。
