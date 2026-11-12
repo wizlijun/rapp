@@ -50,6 +50,8 @@ void main() {
     final port = LinuxSessionPort(worker, framePresented: () async {});
     final events = StreamIterator(port.events);
     Socket? peer;
+    var metadataEvents = 0;
+    final observer = port.events.listen((e) { if (e is WindowsEvent) metadataEvents++; });
     final received = <int>[];
     final disconnected = Completer<void>();
     try {
@@ -69,8 +71,14 @@ void main() {
       expect(e.windows.single.visible, const ui.Rect.fromLTWH(0, 0, 1, 1));
       var pixels = await e.windows.single.image!.toByteData(format: ui.ImageByteFormat.rawRgba);
       expect(pixels!.buffer.asUint8List().take(4), [255, 0, 0, 255]);
+      final changed = Completer<void>();
+      final frames = e.windows.single.frames!;
+      void listener() { if (!changed.isCompleted) changed.complete(); }
+      frames.addListener(listener);
       peer.add(frame(false)); await peer.flush();
-      e = await nextWhere(events, (e) => e is WindowsEvent && e.windows.any((w) => w.image != null)) as WindowsEvent;
+      await changed.future.timeout(const Duration(seconds: 5));
+      frames.removeListener(listener);
+      expect(metadataEvents, 2, reason: 'pixel-only updates must not rebuild the app');
       pixels = await e.windows.single.image!.toByteData(format: ui.ImageByteFormat.rawRgba);
       expect(pixels!.buffer.asUint8List().take(4), [0, 255, 0, 255]);
       port.key(7, 0, 1 << 20);
@@ -94,7 +102,32 @@ void main() {
       expect((await nextWhere(events, (e) => e is ClosedEvent) as ClosedEvent).reason, 'closed');
       await disconnected.future.timeout(const Duration(seconds: 5));
     } finally {
+      await observer.cancel();
       port.dispose(); await events.cancel(); peer?.destroy(); await server.close();
+    }
+  }, skip: !Platform.isLinux || !File(worker).existsSync() ? 'Build rapp-session first on Linux' : false);
+
+  test('stalled renderer does not delay remote errors or disconnect', () async {
+    final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final gate = Completer<void>();
+    final port = LinuxSessionPort(worker, framePresented: () => gate.future);
+    final events = StreamIterator(port.events);
+    Socket? peer;
+    try {
+      await port.init(); final accepted = server.first;
+      await port.start(StartArgs(11, server.port, 'fixture-token', 'color16', 15, 'adaptive'));
+      peer = await accepted; peer.listen((_) {});
+      peer.add(packet(2, [...string('Fixture'), ...u16(4), ...u16(4)]));
+      peer.add(packet(13, [...u16(1), ...u32(1), ...u32(0), 0, 2,
+          ...f32(0), ...f32(0), ...f32(4), ...f32(4), ...f32(1), ...string('Window')]));
+      peer.add(frame(true));
+      await nextWhere(events, (e) => e is WindowsEvent && e.windows.any((w) => w.image != null));
+      peer.add(frame(false)); // this frame waits, the error must not
+      peer.add(packet(3, string('fixture stopped')));
+      final end = await nextWhere(events, (e) => e is ClosedEvent) as ClosedEvent;
+      expect(end.reason, 'fixture stopped');
+    } finally {
+      port.dispose(); gate.complete(); await events.cancel(); peer?.destroy(); await server.close();
     }
   }, skip: !Platform.isLinux || !File(worker).existsSync() ? 'Build rapp-session first on Linux' : false);
 

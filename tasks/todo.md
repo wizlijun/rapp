@@ -178,3 +178,11 @@
 - [x] 构建脚本将 rapp-session 放进 bundle；独立 GTK client 保留。
 - 验证：Flutter 318 项通过、1 项跳过，analyze 干净；client-core 16 项 + worker 2 项测试通过，clippy 无警告。新测试覆盖真实 worker 到 Flutter 的完整/增量帧、BGRA 色彩、裁剪、输入/中文、EOF、坏帧隔离、舞台图像和键盘焦点。真实 Mac 连接的远程 app 已在 Linux 主窗口舞台显示。
 - 限制：内嵌会话的无重连分离/放回尚未实现（按钮禁用）；图片/文件附件暂不支持（显示明确提示）。
+
+## Linux 内嵌性能修复（2026-11-12）
+- 像素更新改为独立 ValueNotifier + RepaintBoundary，不再每帧派发 WindowsEvent 并重建整个 MainState/界面；窗口几何变化仍正常更新。
+- 帧处理改为单个正在绘制帧 + 最新待显示帧；等待绘制不再阻塞协议事件，旧的待显示帧被替换，不积累显示延迟。
+- Rust 重用 BGRA 分配并将帧头与像素分段写入，移除额外整帧打包复制。兼容独立 GTK client 的原解码 API。
+- 验证：319 Flutter 测试通过、1 项跳过；analyze、clippy 通过；Rust 17 core + 2 worker 测试通过。回归覆盖像素更新不触发窗口元数据事件、绘制暂停时错误仍及时处理、增量解码复用缓冲地址。
+- 对比脚本 `scripts/benchmark-linux-session.py`（这是 worker 解码/传输吞吐，不是端到端交互 FPS）：1080p 120 帧两轮旧版 46.3/42.9 fps，新版 63.2/64.1 fps；无并行构建的 4K 60 帧旧版 18.9 fps，新版 23.5 fps。4K 稳定 30 fps 尚未达到；BGRA 跨进程传输和 GPU 图像上传仍是后续优化方向。
+- 新版已本地编译；未替换 GitHub Release 的已发布附件。

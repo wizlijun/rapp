@@ -277,6 +277,27 @@ class _Session {
   final void Function(SessionEvent) emit;
   List<RemoteWindow> windows = [];
   final _pictures = <int, RemoteWindow>{};
+  Uint8List? _pendingFrame;
+  bool _rendering = false;
+
+  void queueFrame(Uint8List bytes) {
+    // Latest-frame mailbox: decoding/display must never block control events.
+    _pendingFrame = bytes;
+    if (!_rendering) unawaited(drainFrames());
+  }
+
+  Future<void> drainFrames() async {
+    _rendering = true;
+    try {
+      while (!closed && _pendingFrame != null) {
+        final bytes = _pendingFrame!;
+        _pendingFrame = null;
+        await frame(bytes);
+        await Future.any([framePresented(), _closed.future]);
+      }
+    } catch (e) { close('画面解码失败：$e'); }
+    finally { _rendering = false; }
+  }
   final clips = <int, String?>{};
   final held = <int>{};
   int? selected;
@@ -299,10 +320,7 @@ class _Session {
       await for (final packet in sessionPackets(process.stdout)) {
         if (closed) break;
         if (packet[0] == 1) {
-          await frame(Uint8List.sublistView(packet, 1));
-          // One presented frame at a time, including when the app is hidden:
-          // do not queue GPU images or retirement callbacks without a renderer.
-          await Future.any([framePresented(), _closed.future]);
+          queueFrame(Uint8List.sublistView(packet, 1));
         } else if (packet[0] == 0) {
           final m =
               jsonDecode(utf8.decode(packet.sublist(1)))
@@ -402,6 +420,7 @@ class _Session {
       codec = await descriptor.instantiateCodec();
       image = (await codec.getNextFrame()).image;
       if (closed) return;
+      var geometryChanged = false;
       for (final w in windows) {
         final content = ui.Rect.fromLTRB(
           w.rect.left,
@@ -413,7 +432,8 @@ class _Session {
         if (crop.isEmpty) {
           // Do not retain an entire old canvas for a window outside this frame.
           // Selecting it raises the remote window and supplies a fresh picture.
-          _retire(_pictures.remove(w.id)?.image);
+          final old = _pictures.remove(w.id);
+          if (old != null) { _retire(old.image); geometryChanged = true; }
           continue;
         }
         final source = ui.Rect.fromLTWH(
@@ -428,7 +448,11 @@ class _Session {
           crop.width / content.width,
           crop.height / content.height,
         );
-        _retire(_pictures[w.id]?.image);
+        final old = _pictures[w.id];
+        final frames = old?.frames ?? ValueNotifier<WindowFrame?>(null);
+        _retire(frames.value?.image);
+        frames.value = WindowFrame(image.clone(), source);
+        if (old == null || old.visible != visible) geometryChanged = true;
         _pictures[w.id] = RemoteWindow(
           id: w.id,
           parent: w.parent,
@@ -440,11 +464,10 @@ class _Session {
           focused: w.focused,
           texture: null,
           visible: visible,
-          image: image.clone(),
-          source: source,
+          frames: frames,
         );
       }
-      publish();
+      if (geometryChanged) publish();
     } finally {
       image?.dispose();
       codec?.dispose();
@@ -456,6 +479,7 @@ class _Session {
   void close(String reason) {
     if (closed) return;
     closed = true;
+    _pendingFrame = null;
     _closed.complete();
     unawaited(process.stdin.close().catchError((Object _) {}));
     // EOF wakes the worker even if the host stopped producing frames.
@@ -485,6 +509,7 @@ RemoteWindow _withPicture(RemoteWindow w, RemoteWindow? p) => RemoteWindow(
   visible: p?.visible ?? const ui.Rect.fromLTWH(0, 0, 1, 1),
   image: p?.image,
   source: p?.source,
+  frames: p?.frames,
 );
 
 /// Physical USB HID positions -> Mac key codes, independent of the local layout.

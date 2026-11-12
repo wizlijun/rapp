@@ -30,6 +30,21 @@ impl Decoder {
         full: bool,
         compressed: &[u8],
     ) -> Result<Vec<u8>> {
+        let mut pixels = Vec::new();
+        self.decode_into(mode, w, h, full, compressed, &mut pixels)?;
+        Ok(pixels)
+    }
+    /// Reuse the expanded pixel allocation between frames (headless renderer).
+    #[allow(clippy::too_many_arguments)]
+    pub fn decode_into(
+        &mut self,
+        mode: u8,
+        w: usize,
+        h: usize,
+        full: bool,
+        compressed: &[u8],
+        pixels: &mut Vec<u8>,
+    ) -> Result<()> {
         ensure!(
             mode <= 4 && w > 0 && h > 0 && w <= 65535 && h <= 65535 && w * h <= 8192 * 8192,
             "invalid frame size/mode"
@@ -150,7 +165,11 @@ impl Decoder {
             }
         }
         r.end()?;
-        Ok(self.samples.iter().flat_map(|v| bgra(mode, *v)).collect())
+        pixels.resize(self.samples.len() * 4, 0);
+        for (pixel, sample) in pixels.as_chunks_mut::<4>().0.iter_mut().zip(&self.samples) {
+            pixel.copy_from_slice(&bgra(mode, *sample));
+        }
+        Ok(())
     }
     #[allow(clippy::too_many_arguments)]
     fn palette(

@@ -182,6 +182,7 @@ fn run(out: &Output) -> Result<()> {
         }
     });
     let mut decoder = Decoder::default();
+    let mut pixels = Vec::new();
     let mut ready = false;
     socket.set_read_timeout(Some(Duration::from_secs(15)))?;
     loop {
@@ -204,15 +205,21 @@ fn run(out: &Output) -> Result<()> {
                 full,
                 data,
             } => {
-                let pixels = decoder.decode(mode, width, height, full, &data)?;
-                let mut frame = Vec::with_capacity(24 + pixels.len());
+                decoder.decode_into(mode, width, height, full, &data, &mut pixels)?;
+                let mut frame = Vec::with_capacity(24);
                 frame.extend((width as u32).to_le_bytes());
                 frame.extend((height as u32).to_le_bytes());
                 for f in [region.x, region.y, region.w, region.h] {
                     frame.extend(f.to_le_bytes());
                 }
-                frame.extend(pixels);
-                output(out, 1, &frame)?;
+                // Write the header and reusable pixels directly, without copying
+                // a full canvas into a second framing allocation.
+                let mut w = out.lock().unwrap();
+                w.write_all(&((25 + pixels.len()) as u32).to_le_bytes())?;
+                w.write_all(&[1])?;
+                w.write_all(&frame)?;
+                w.write_all(&pixels)?;
+                w.flush()?;
             }
             Incoming::Windows(windows) => {
                 let kinds = [

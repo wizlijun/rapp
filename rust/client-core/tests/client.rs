@@ -343,3 +343,18 @@ fn moving_remote_window_uses_unoccupied_mac_stack_slot() {
     b.rect.y = 40.;
     assert_eq!(top_left_slot(&[a, b], 3), 56.);
 }
+
+#[test]
+fn expanded_buffer_is_reused_for_delta_frames() {
+    let mut decoder = Decoder::default();
+    let mut pixels = Vec::new();
+    let mut z = Compress::new(Compression::default(), true);
+    let full = compress(&mut z, &[1, 0, 0, 0, 0, 0, 248]);
+    decoder.decode_into(2, 4, 4, true, &full, &mut pixels).unwrap();
+    let pointer = pixels.as_ptr();
+    assert_eq!(&pixels[..4], &[0, 0, 255, 255]);
+    let delta = compress(&mut z, &[1, 0, 0, 0, 0, 224, 7]);
+    decoder.decode_into(2, 4, 4, false, &delta, &mut pixels).unwrap();
+    assert_eq!(pixels.as_ptr(), pointer);
+    assert_eq!(&pixels[..4], &[0, 255, 0, 255]);
+}

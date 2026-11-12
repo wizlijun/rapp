@@ -250,12 +250,19 @@ class _PictureState extends State<Picture> {
   }
 }
 
-Widget _surface(RemoteWindow window, {Key? key}) => window.image != null
-    ? CustomPaint(
-        key: key,
-        painter: _FramePainter(window.image!, window.source!),
-      )
-    : Texture(key: key, textureId: window.texture!);
+Widget _surface(RemoteWindow window, {Key? key}) {
+  final frames = window.frames;
+  if (frames != null) {
+    return RepaintBoundary(key: key, child: ValueListenableBuilder<WindowFrame?>(
+      valueListenable: frames,
+      builder: (_, frame, _) => frame == null ? const SizedBox.shrink() :
+          CustomPaint(painter: _FramePainter(frame.image, frame.source)),
+    ));
+  }
+  return window.image != null
+      ? CustomPaint(key: key, painter: _FramePainter(window.image!, window.source!))
+      : Texture(key: key, textureId: window.texture!);
+}
 
 class _FramePainter extends CustomPainter {
   _FramePainter(this.image, this.source);

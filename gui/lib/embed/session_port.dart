@@ -33,9 +33,12 @@ class RemoteWindow {
     required this.focused,
     required this.texture,
     required this.visible,
-    this.image,
-    this.source,
-  });
+    ui.Image? image,
+    Rect? source,
+    this.frames,
+  // Keep public named arguments while the backing fields remain private.
+  // ignore: prefer_initializing_formals
+  }) : _image = image, _source = source;
 
   final int id;
 
@@ -54,14 +57,24 @@ class RemoteWindow {
   final int? texture;
 
   /// Linux frames share a decoded canvas image, cropped to this window.
-  final ui.Image? image;
-  final Rect? source;
+  final ui.Image? _image;
+  final Rect? _source;
+  final ValueNotifier<WindowFrame?>? frames;
+  ui.Image? get image => frames?.value?.image ?? _image;
+  Rect? get source => frames?.value?.source ?? _source;
   bool get hasPicture => texture != null || image != null;
 
   /// The part of the window's content the texture shows, 0–1 from the top-left.
   final Rect visible;
 
   bool get decorated => kind.decorated;
+}
+
+/// Pixel updates are separate from window/session metadata and never rebuild the shell.
+class WindowFrame {
+  const WindowFrame(this.image, this.source);
+  final ui.Image image;
+  final Rect source;
 }
 
 /// One entry of A's clipboard history.
