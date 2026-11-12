@@ -213,6 +213,12 @@ pub async fn on_start(state: &Arc<State>) {
             reopen_gui(state, &o).await;
         }
         state.update.lock().unwrap().applied = true;
+        // K23: both were granted before the swap and the first check after it says otherwise.
+        let granted = |v: &Value| v["screen_recording"] == true && v["accessibility"] == true;
+        if granted(&m.perms_before) && !granted(&state.permissions.lock().unwrap()) {
+            *state.perms_lost.lock().unwrap() = true;
+            state.notify();
+        }
     } else {
         up::clear_marker(&state.home);
         let now = current.as_deref().unwrap_or("未知");
@@ -626,7 +632,7 @@ async fn put_in_place(state: &Arc<State>, busy: Busy, mode: Mode) {
                 at: up::now_secs(),
                 gui_was_open: gui,
                 mode: mode.as_str().into(),
-                perms_before: Value::Null,
+                perms_before: state.permissions.lock().unwrap().clone(),
             };
             if let Err(e) = up::write_marker(&state.home, &m) {
                 state.log.msg(Lvl::Warn, format!("update: write marker: {e}"));

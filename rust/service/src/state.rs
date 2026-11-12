@@ -78,6 +78,8 @@ pub struct State {
     pub relay: Mutex<(&'static str, Option<String>)>,
     /// `{"screen_recording","accessibility"}` as last checked.
     pub permissions: Mutex<Value>,
+    /// An update was installed while both permissions were granted, and now one is missing (K23).
+    pub perms_lost: Mutex<bool>,
     pub workers: Workers,
     pub changed: watch::Sender<u64>,
     pub relay_cmd: mpsc::UnboundedSender<RelayCmd>,
@@ -101,9 +103,12 @@ impl State {
     /// Stores a fresh permission check; subscribers hear about it only if it changed.
     pub fn set_permissions(&self, v: Value) {
         let changed = std::mem::replace(&mut *self.permissions.lock().unwrap(), v.clone()) != v;
-        if changed {
-            let all = v["screen_recording"] == true && v["accessibility"] == true;
-            self.log.event(if all { Lvl::Info } else { Lvl::Warn }, "permissions", v);
+        let all = v["screen_recording"] == true && v["accessibility"] == true;
+        let cleared = all && std::mem::replace(&mut *self.perms_lost.lock().unwrap(), false);
+        if changed || cleared {
+            if changed {
+                self.log.event(if all { Lvl::Info } else { Lvl::Warn }, "permissions", v);
+            }
             self.notify();
         }
     }
@@ -189,7 +194,8 @@ impl State {
             rapp_net::addr::local_ipv4s().into_iter().map(|ip| rapp_net::addr::at_address(&id, ip, self.port)).collect();
         let mut v = json!({
             "ok": true, "id": cfg.id, "name": cfg.name, "password": cfg.password, "lan_ids": lan_ids,
-            "relay": relay, "permissions": self.permissions.lock().unwrap().clone(), "sessions": sessions,
+            "relay": relay, "permissions": self.permissions.lock().unwrap().clone(),
+            "permissions_lost_after_update": *self.perms_lost.lock().unwrap(), "sessions": sessions,
             "log_dir": self.log_dir, "update": crate::update::status_json(self),
         });
         if let Some(e) = relay_error {

@@ -50,6 +50,11 @@ async fn conn(state: &Arc<State>, tcp: TcpStream, token: &str) -> Result<()> {
                         let perms = crate::workers::refresh_permissions(state, cmd["prompt"] == true).await;
                         ok(json!({"permissions": perms}))
                     }
+                    "permissions_reset" => {
+                        let mut r = crate::workers::reset_permissions(state).await;
+                        r["ok"] = json!(true);
+                        r
+                    }
                     "update_check" => {
                         let state = state.clone();
                         tokio::spawn(async move { update::check_now(&state).await });

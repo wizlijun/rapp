@@ -339,6 +339,51 @@ async fn idle_installs_writes_marker_and_requests_restart() {
     assert!(e.calls_of(OPEN).is_empty());
 }
 
+fn write_perms(e: &Env, v: Value) {
+    std::fs::write(e.bins.path().join("perms"), v.to_string()).unwrap();
+}
+
+fn both(v: bool) -> Value {
+    json!({"screen_recording": v, "accessibility": v})
+}
+
+#[tokio::test]
+async fn permissions_lost_after_update_set_and_cleared() {
+    let mut e = Env::new(Knobs { cfg: json!({"check_updates": false}), ..Default::default() });
+    write_perms(&e, both(false));
+    let marker = json!({"from":"0.4.0","to":"0.4.1","at":1,"gui_was_open":false,"mode":"auto","perms_before":both(true)});
+    std::fs::write(e.home.join("update-applied.json"), marker.to_string()).unwrap();
+    e.start().await;
+    assert_eq!(e.call(json!({"cmd":"status"})).await["permissions_lost_after_update"], true);
+
+    let mut sub = Ipc::open(e.svc(), &e.home).await;
+    sub.call(json!({"cmd":"subscribe"})).await;
+    write_perms(&e, both(true));
+    let r = e.call(json!({"cmd":"permissions"})).await;
+    assert_eq!(r["permissions"], both(true));
+    assert_eq!(sub.next().await, json!({"event":"changed"}));
+    assert_eq!(e.call(json!({"cmd":"status"})).await["permissions_lost_after_update"], false);
+}
+
+#[tokio::test]
+async fn no_marker_means_not_lost() {
+    let mut e = Env::new(Knobs { cfg: json!({"check_updates": false}), ..Default::default() });
+    write_perms(&e, both(false));
+    e.start().await;
+    assert_eq!(e.call(json!({"cmd":"status"})).await["permissions_lost_after_update"], false);
+}
+
+#[tokio::test]
+async fn install_records_perms_before() {
+    let mut e = Env::new(Knobs::default());
+    write_perms(&e, json!({"screen_recording": true, "accessibility": false}));
+    e.start().await;
+    let before = e.call(json!({"cmd":"status"})).await["permissions"].clone();
+    e.wait_restart().await;
+    assert_eq!(before, json!({"screen_recording": true, "accessibility": false}));
+    assert_eq!(e.applied()["perms_before"], before);
+}
+
 #[tokio::test]
 async fn sessions_block_auto_install() {
     let mut e = Env::new(Knobs { cfg: json!({"check_updates": false}), ..Default::default() });

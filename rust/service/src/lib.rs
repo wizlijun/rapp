@@ -112,6 +112,7 @@ impl Service {
             sessions: Mutex::default(),
             relay: Mutex::new(("off", None)),
             permissions: Mutex::new(serde_json::Value::Null),
+            perms_lost: Mutex::new(false),
             workers: workers::Workers::new(opts.worker_idle),
             changed: tokio::sync::watch::channel(0).0,
             relay_cmd: relay_tx,

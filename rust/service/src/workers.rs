@@ -87,6 +87,26 @@ pub async fn refresh_permissions(state: &State, prompt: bool) -> Value {
     state.permissions.lock().unwrap().clone()
 }
 
+/// Resets rapp's own TCC records (never another app's: only `BUNDLE_ID`), then checks again with a
+/// prompt so rapp shows up in System Settings. A `_reset` is true only if tccutil exited 0 and the
+/// permission really reads as missing afterwards.
+pub async fn reset_permissions(state: &State) -> Value {
+    let mut ran = [false; 2];
+    for (i, service) in ["ScreenCapture", "Accessibility"].into_iter().enumerate() {
+        let args = ["reset", service, rapp_update::BUNDLE_ID].map(String::from);
+        let runner = state.runner.clone();
+        let out = tokio::task::spawn_blocking(move || runner.run(rapp_update::runner::TCCUTIL, &args)).await;
+        ran[i] = matches!(out, Ok(Ok(o)) if o.code == 0);
+    }
+    state.log.event(Lvl::Info, "permissions_reset", json!({}));
+    let perms = refresh_permissions(state, true).await;
+    json!({
+        "screen_recording_reset": ran[0] && perms["screen_recording"] != true,
+        "accessibility_reset": ran[1] && perms["accessibility"] != true,
+        "permissions": perms,
+    })
+}
+
 /// The shareable apps, plus A's permissions when the host reports them (it stores those too).
 pub async fn list_apps(state: &State) -> Result<(Value, Option<Value>)> {
     let v = run_json(state, &["list-apps"]).await?;
