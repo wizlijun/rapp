@@ -156,8 +156,8 @@ class MainState extends ChangeNotifier {
   }
 
   // ---- off-stage frame rate (R6) ----
-  /// The fps last sent per started session, so nothing is sent twice.
-  final Map<Object, int> _sentFps = {};
+  /// The (mode, fps, density) last sent per started session, so nothing is sent twice.
+  final Map<Object, (String, int, String)> _sentFps = {};
 
   /// Sends each started session's effective rate when it differs from the last one sent: the
   /// chosen rate on the stage or detached, 1 fps otherwise. `session.choice` is never changed.
@@ -171,8 +171,9 @@ class MainState extends ChangeNotifier {
       if (last == null) continue; // not started yet: its start carries the rate
       final c = rs.choice;
       final fps = effectiveFps(c, onStage: identical(rs, onStage), detached: rs.detached);
-      if (fps == last) continue;
-      _sentFps[rs.sid] = fps;
+      final now = (c.mode, fps, c.density);
+      if (now == last) continue;
+      _sentFps[rs.sid] = now;
       p.setStream(rs.sid, c.mode, fps, c.density);
     }
   }
@@ -456,7 +457,7 @@ class MainState extends ChangeNotifier {
       final p = s.port, tk = s.token;
       if (p == null || tk == null) throw 'rapp-hub 没有给出嵌入端口';
       await port!.start(StartArgs(s.sid, p, tk, 'color16', 15, 'adaptive'));
-      _sentFps[s.sid] = 15;
+      _sentFps[s.sid] = ('color16', 15, 'adaptive');
       _applyFps();
       return null;
     } catch (e) {

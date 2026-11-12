@@ -356,6 +356,28 @@ void main() {
       }, sessions: 2);
     });
 
+    test('a mode change at the same fps is sent', () {
+      env((a, t, port, st, hints) {
+        st.remote[1]!.setChoice(const StreamChoice('duogray', 'adaptive', 15));
+        expect(sets(port, 1).last['mode'], 'duogray');
+        expect(sets(port, 1).last['fps'], 15);
+        st.remote[1]!.setChoice(const StreamChoice('duogray', 'original', 15));
+        expect(sets(port, 1).last['density'], 'original');
+      });
+    });
+
+    test('an off-stage choice change sends mode at 1 fps; returning sends the chosen rate', () {
+      env((a, t, port, st, hints) {
+        st.remote[1]!.setChoice(const StreamChoice('duogray', 'original', 30));
+        expect(sets(port, 1).last['mode'], 'duogray');
+        expect(sets(port, 1).last['density'], 'original');
+        expect(sets(port, 1).last['fps'], 1);
+        st.select('111/a');
+        expect(sets(port, 1).last['fps'], 30);
+        expect(sets(port, 1).last['mode'], 'duogray');
+      }, sessions: 2);
+    });
+
     test('start failure closes the hub session and hints', () {
       fakeAsync((a) {
         final t = FakeTransport();
