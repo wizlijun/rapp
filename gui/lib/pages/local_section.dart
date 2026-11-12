@@ -10,8 +10,23 @@ import '../service_client.dart';
 import '../service_control.dart';
 import 'permissions_panel.dart';
 import 'section_card.dart';
+import 'update_section.dart';
 
 const relayLabels = {'connected': '已连接', 'connecting': '连接中', 'off': '未连接'};
+
+/// How 立即升级 / 仍然安装 / 回到上一版 leave the app (K28): the service installs once rapp is gone.
+class UpdateHooks {
+  const UpdateHooks({required this.confirmQuit, required this.quitNow});
+
+  /// Asks first when remote windows are open; true to go on.
+  final Future<bool> Function() confirmQuit;
+  final Future<void> Function() quitNow;
+}
+
+/// Opens the release page (「打开安装包」); macOS only.
+Future<void> openInstallerPage(String page) async {
+  if (Platform.isMacOS) await Process.run('open', [page]);
+}
 
 class LocalSection extends StatefulWidget {
   const LocalSection({
@@ -20,11 +35,17 @@ class LocalSection extends StatefulWidget {
     required this.control,
     required this.configDir,
     this.openSettings = openSettingsPane,
+    this.hooks,
+    this.openPage = openInstallerPage,
   });
   final ServiceMonitor monitor;
   final ServiceController? control;
   final String configDir;
   final Future<void> Function(Permission) openSettings;
+
+  /// Null (tests): the update buttons only send the command.
+  final UpdateHooks? hooks;
+  final Future<void> Function(String page) openPage;
 
   @override
   State<LocalSection> createState() => _LocalSectionState();
@@ -38,6 +59,12 @@ class _LocalSectionState extends State<LocalSection> {
   bool _busy = false;
   Timer? _poll;
   bool _guideDecided = false;
+
+  /// The guide after an update that lost the permissions, once per run (K30).
+  bool _lostGuided = false;
+
+  /// The last reset left accessibility's old record in place (K29).
+  final _resetFailed = ValueNotifier(false);
 
   ServiceMonitor get m => widget.monitor;
 
@@ -54,42 +81,78 @@ class _LocalSectionState extends State<LocalSection> {
     _poll = Timer.periodic(const Duration(seconds: 3), (_) {
       if (_missing) m.checkPermissions().catchError((_) {});
     });
-    m.addListener(_maybeGuide);
-    _maybeGuide();
+    m.addListener(_onStatus);
+    _onStatus();
   }
 
   @override
   void dispose() {
     _poll?.cancel();
-    m.removeListener(_maybeGuide);
+    m.removeListener(_onStatus);
+    _resetFailed.dispose();
     super.dispose();
   }
 
+  void _onStatus() {
+    // Accessibility reads ✗ once its old record is gone: the manual steps have done their job.
+    if (_resetFailed.value && m.status?.accessibility == false) _resetFailed.value = false;
+    _maybeGuide();
+  }
+
   /// The first time ever the service reports something missing, walk the user through it once.
+  /// After an update that lost the permissions, once more this run, marker or not (K30).
   void _maybeGuide() {
-    if (_guideDecided || m.status == null) return;
+    final st = m.status;
+    if (st == null) return;
+    if (st.permissionsLostAfterUpdate && !_lostGuided) {
+      _lostGuided = _guideDecided = true;
+      return _guideNextFrame();
+    }
+    if (_guideDecided) return;
     _guideDecided = true;
     if (_missing && claimPermissionGuide(widget.configDir)) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _showGuide();
-      });
+      _lostGuided = true;
+      _guideNextFrame();
     }
   }
+
+  void _guideNextFrame() => WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _showGuide();
+      });
 
   Future<void> _showGuide() => showDialog<void>(
         context: context,
         builder: (ctx) => ListenableBuilder(
-          listenable: m,
+          listenable: Listenable.merge([m, _resetFailed]),
           builder: (ctx, _) {
             final st = m.status;
             return PermissionGuideDialog(
               permissions: st == null ? null : permissionsOf(st),
               onOpenSettings: _openSettings,
               onRestart: widget.control == null ? null : () => _control(ServiceAction.restart),
+              onReset: _resetPermissions,
+              accessibilityResetFailed: _resetFailed.value,
             );
           },
         ),
       );
+
+  Future<void> _resetPermissions() async {
+    try {
+      final r = await m.permissionsReset();
+      _resetFailed.value = r['accessibility_reset'] == false;
+    } catch (e) {
+      _say('失败：$e');
+    }
+  }
+
+  /// The service installs once this app's connection closes, so ok means quit now (K28).
+  Future<void> _thenQuit(Future<Object?> Function() send) async {
+    final h = widget.hooks;
+    if (h != null && !await h.confirmQuit()) return;
+    await send();
+    await h?.quitNow();
+  }
 
   Future<void> _openSettings(Permission p) =>
       promptThenOpen(() => m.checkPermissions(prompt: true), () => widget.openSettings(p));
@@ -170,8 +233,9 @@ class _LocalSectionState extends State<LocalSection> {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: m,
+      listenable: Listenable.merge([m, _resetFailed]),
       builder: (context, _) {
+        final update = m.status?.update;
         final st = m.status;
         final buttons = Wrap(spacing: 8, children: [
           for (final (a, label) in [
@@ -200,12 +264,32 @@ class _LocalSectionState extends State<LocalSection> {
                       width: 72,
                       child: Padding(
                           padding: EdgeInsets.only(top: 4), child: Text('权限', style: TextStyle(color: Colors.grey)))),
-                  Expanded(child: PermissionsPanel(permissions: permissionsOf(st), onOpenSettings: _openSettings)),
+                  Expanded(
+                    child: PermissionsPanel(
+                      permissions: permissionsOf(st),
+                      onOpenSettings: _openSettings,
+                      onReset: _resetPermissions,
+                      accessibilityResetFailed: _resetFailed.value,
+                    ),
+                  ),
                 ]),
               )
             else
               _row('权限',
                   '屏幕录制 ${st.screenRecording ? '✓' : '✗'}   辅助功能 ${st.accessibility ? '✓' : '✗'}'),
+            if (update != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: UpdateSection(
+                  info: update,
+                  onCheck: m.updateCheck,
+                  onApply: (confirm) => _thenQuit(() => m.updateApply(confirm: confirm)),
+                  onDismiss: m.updateDismiss,
+                  onRollback: () => _thenQuit(m.updateRollback),
+                  onSetAuto: (on) => m.setUpdate(autoUpdate: on),
+                  onOpenPage: (page) => widget.openPage(page).catchError((_) {}),
+                ),
+              ),
             _row('会话', '${st.sessions.length} 个被访问中'),
           ],
           const SizedBox(height: 8),

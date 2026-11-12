@@ -8,6 +8,7 @@ import 'package:window_manager/window_manager.dart';
 import 'cm_page.dart';
 import 'embed/session_port.dart';
 import 'hub_client.dart';
+import 'pages/local_section.dart';
 import 'paths.dart';
 import 'service_client.dart';
 import 'service_control.dart';
@@ -80,6 +81,14 @@ Future<void> main(List<String> args) async {
       control: control,
       configDir: cfg,
       fullscreen: WindowManagerFullscreen(),
+      hooks: UpdateHooks(
+        confirmQuit: () => shell._confirmQuit(
+          title: '升级 rapp？',
+          body: '还有 ${shell.openWindows} 个远程窗口，升级时会断开。',
+          ok: '升级',
+        ),
+        quitNow: shell._quitNow,
+      ),
     ),
   ));
 }
@@ -173,25 +182,39 @@ class _Shell with WindowListener, TrayListener {
     await windowManager.focus();
   }
 
+  int get openWindows => hub?.sessions.length ?? 0;
+
   Future<void> _quit() async {
-    final open = hub?.sessions.length ?? 0;
-    if (open > 0) {
-      await _show();
-      final ctx = navigatorKey.currentContext;
-      if (ctx == null || !ctx.mounted) return;
-      final ok = await showDialog<bool>(
-        context: ctx,
-        builder: (c) => AlertDialog(
-          title: const Text('退出 rapp？'),
-          content: Text('还有 $open 个远程窗口，退出后都会断开。'),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('取消')),
-            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('退出')),
-          ],
-        ),
-      );
-      if (ok != true) return;
+    if (await _confirmQuit(
+      title: '退出 rapp？',
+      body: '还有 $openWindows 个远程窗口，退出后都会断开。',
+      ok: '退出',
+    )) {
+      await _quitNow();
     }
+  }
+
+  /// True straight away when no remote window is open; otherwise asks.
+  Future<bool> _confirmQuit({required String title, required String body, required String ok}) async {
+    if (openWindows == 0) return true;
+    await _show();
+    final ctx = navigatorKey.currentContext;
+    if (ctx == null || !ctx.mounted) return false;
+    final yes = await showDialog<bool>(
+      context: ctx,
+      builder: (c) => AlertDialog(
+        title: Text(title),
+        content: Text(body),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('取消')),
+          FilledButton(onPressed: () => Navigator.pop(c, true), child: Text(ok)),
+        ],
+      ),
+    );
+    return yes == true;
+  }
+
+  Future<void> _quitNow() async {
     await hub?.shutdown(); // hub closes its clients on stdin EOF
     await trayManager.destroy();
     exit(0);

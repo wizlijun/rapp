@@ -18,11 +18,14 @@ TextStyle _mono(RappTokens t, {double size = 12, Color? color}) => TextStyle(
     );
 
 class DevicesTab extends StatefulWidget {
-  const DevicesTab({super.key, required this.state, required this.local});
+  const DevicesTab({super.key, required this.state, required this.local, this.localBadge = false});
   final MainState state;
 
   /// The 本机 content, assembled by the caller.
   final Widget local;
+
+  /// A new version is on its way in: a still, muted dot on 本机 (K27).
+  final bool localBadge;
 
   @override
   State<DevicesTab> createState() => _DevicesTabState();
@@ -83,11 +86,21 @@ class _DevicesTabState extends State<DevicesTab> {
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
-                  TabChip(
-                    key: const Key('device-local'),
-                    label: '本机',
+                  // The dot is hidden from screen readers; the name says it instead.
+                  Semantics(
+                    container: true,
+                    button: true,
                     selected: !known,
+                    label: widget.localBadge ? '本机，有新版本' : '本机',
+                    excludeSemantics: true,
                     onTap: () => _select(null),
+                    child: TabChip(
+                      key: const Key('device-local'),
+                      label: '本机',
+                      selected: !known,
+                      leading: widget.localBadge ? const _UpdateDot() : null,
+                      onTap: () => _select(null),
+                    ),
                   ),
                   for (final h in hosts) ...[
                     const SizedBox(width: 6),
@@ -235,6 +248,21 @@ class _DevicesTabState extends State<DevicesTab> {
     if (b.isEmpty) return;
     state.openOrSwitch(id, b, b);
   }
+}
+
+/// 8 px, `--muted`, never moves: an update waits at the edge (design language §0 check 2).
+class _UpdateDot extends StatelessWidget {
+  const _UpdateDot();
+
+  @override
+  Widget build(BuildContext context) => ExcludeSemantics(
+        child: Container(
+          key: const Key('update-dot'),
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(color: RappTokens.of(context).muted, shape: BoxShape.circle),
+        ),
+      );
 }
 
 class _AppRow extends StatelessWidget {

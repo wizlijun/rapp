@@ -9,6 +9,7 @@ import '../pages/access_log_section.dart';
 import '../pages/local_section.dart';
 import '../service_client.dart';
 import '../service_control.dart';
+import '../update.dart';
 import 'backdrop.dart';
 import 'devices_tab.dart';
 import 'fullscreen.dart';
@@ -31,6 +32,7 @@ class MainWindow extends StatefulWidget {
     required this.control,
     required this.configDir,
     required this.fullscreen,
+    this.hooks,
   });
 
   final MainState state;
@@ -38,6 +40,9 @@ class MainWindow extends StatefulWidget {
   final ServiceController? control;
   final String configDir;
   final FullscreenControl fullscreen;
+
+  /// How the update buttons quit rapp (K28).
+  final UpdateHooks? hooks;
 
   @override
   State<MainWindow> createState() => _MainWindowState();
@@ -84,7 +89,12 @@ class _MainWindowState extends State<MainWindow> {
   }
 
   Widget _local() => Column(children: [
-        LocalSection(monitor: widget.monitor, control: widget.control, configDir: widget.configDir),
+        LocalSection(
+          monitor: widget.monitor,
+          control: widget.control,
+          configDir: widget.configDir,
+          hooks: widget.hooks,
+        ),
         ListenableBuilder(
           listenable: widget.monitor,
           builder: (context, _) => AccessLogSection(
@@ -156,7 +166,15 @@ class _MainWindowState extends State<MainWindow> {
                             state: state,
                             child: SidePanel(
                               state: state,
-                              devicesTab: DevicesTab(state: state, local: _local()),
+                              // The shell never pops anything up for an update: just the dot (K27).
+                              devicesTab: ListenableBuilder(
+                                listenable: widget.monitor,
+                                builder: (context, _) => DevicesTab(
+                                  state: state,
+                                  local: _local(),
+                                  localBadge: updateBadge(widget.monitor.status?.update),
+                                ),
+                              ),
                             ),
                           ),
                         ),

@@ -18,6 +18,13 @@ class FakeService {
   Map<String, dynamic> perms = {'screen_recording': true, 'accessibility': false};
   List<Map<String, dynamic>> history = [];
 
+  /// The status's `update` object and `permissions_lost_after_update` (absent when null).
+  Map<String, dynamic>? update;
+  bool? lostAfterUpdate;
+
+  /// Replies to the update and reset commands, by `cmd`; `{"ok":true}` when not set.
+  final replies = <String, Map<String, dynamic>>{};
+
   int get port => server.port;
 
   Future<void> start() async {
@@ -58,6 +65,13 @@ class FakeService {
           s.write('${jsonEncode({'ok': true, 'events': history})}\n');
         case 'permissions':
           s.write('${jsonEncode({'ok': true, 'permissions': perms})}\n');
+        case 'update_check' ||
+              'update_apply' ||
+              'update_dismiss' ||
+              'update_rollback' ||
+              'set_update' ||
+              'permissions_reset':
+          s.write('${jsonEncode(replies[m['cmd']] ?? {'ok': true})}\n');
         default:
           s.write('{"ok":false,"error":"unknown cmd"}\n');
       }
@@ -72,6 +86,8 @@ class FakeService {
         'relay': 'connected',
         'log_dir': '/Users/u/Library/Logs/rapp',
         'permissions': perms,
+        'update': ?update,
+        'permissions_lost_after_update': ?lostAfterUpdate,
         'sessions': [
           for (var i = 0; i < sessions; i++)
             {'sid': i + 1, 'peer': '10.0.0.$i:5000', 'app': 'com.apple.Safari', 'path': 'lan', 'since': 1700000000},
@@ -186,6 +202,64 @@ void main() {
       await c.close();
     });
 
+    test('status parses update and lost flag', () async {
+      svc.update = {'current': '0.4.1', 'state': 'ready', 'latest': '0.5.0', 'needs_confirm': true, 'can_rollback': true};
+      svc.lostAfterUpdate = true;
+      final c = await ServiceConnection.connect(token: 'tok-1', port: svc.port);
+      final st = await c.status();
+      expect(st.permissionsLostAfterUpdate, isTrue);
+      expect(st.update!.current, '0.4.1');
+      expect(st.update!.state, 'ready');
+      expect(st.update!.latest, '0.5.0');
+      expect(st.update!.needsConfirm, isTrue);
+      expect(st.update!.canRollback, isTrue);
+      await c.close();
+    });
+
+    test('an older status without update has update == null', () async {
+      final c = await ServiceConnection.connect(token: 'tok-1', port: svc.port);
+      final st = await c.status();
+      expect(st.update, isNull);
+      expect(st.permissionsLostAfterUpdate, isFalse);
+      await c.close();
+    });
+
+    test('update commands send the right json', () async {
+      svc.replies['permissions_reset'] = {'ok': true, 'screen_recording_reset': true, 'accessibility_reset': false};
+      final c = await ServiceConnection.connect(token: 'tok-1', port: svc.port);
+      await c.updateCheck();
+      await c.updateApply();
+      await c.updateApply(confirm: true);
+      await c.updateDismiss('0.5.0');
+      await c.updateRollback();
+      await c.setUpdate(autoUpdate: false);
+      await c.setUpdate(checkUpdates: true);
+      final reset = await c.permissionsReset();
+      expect(svc.received, [
+        {'cmd': 'update_check'},
+        {'cmd': 'update_apply', 'confirm_signature_change': false},
+        {'cmd': 'update_apply', 'confirm_signature_change': true},
+        {'cmd': 'update_dismiss', 'version': '0.5.0'},
+        {'cmd': 'update_rollback'},
+        {'cmd': 'set_update', 'auto_update': false},
+        {'cmd': 'set_update', 'check_updates': true},
+        {'cmd': 'permissions_reset'},
+      ]);
+      expect(reset['accessibility_reset'], isFalse);
+      await c.close();
+    });
+
+    test('an update error keeps its page', () async {
+      svc.replies['update_apply'] = {'ok': false, 'error': '这次需要管理员密码', 'page': 'https://example.invalid/tag'};
+      final c = await ServiceConnection.connect(token: 'tok-1', port: svc.port);
+      await expectLater(
+          c.updateApply(),
+          throwsA(isA<ServiceException>()
+              .having((e) => e.message, 'message', '这次需要管理员密码')
+              .having((e) => e.page, 'page', 'https://example.invalid/tag')));
+      await c.close();
+    });
+
     test('ok:false replies throw ServiceException with the error text', () async {
       final c = await ServiceConnection.connect(token: 'tok-1', port: svc.port);
       await expectLater(
@@ -211,6 +285,26 @@ void main() {
       await m.checkPermissions();
       expect(svc.received.where((r) => r['cmd'] == 'permissions').last, {'cmd': 'permissions', 'prompt': false});
 
+      await svc.stop();
+      m.dispose();
+    });
+
+    test('update wrappers ask the service and refresh the status', () async {
+      final svc = FakeService('tok-4');
+      await svc.start();
+      final m = ServiceMonitor(readToken: () async => 'tok-4', port: svc.port, retry: const Duration(milliseconds: 50));
+      m.start();
+      await until(() => m.status != null);
+      svc.update = {'current': '0.4.1', 'state': 'idle', 'auto_update': false};
+      await m.setUpdate(autoUpdate: false);
+      expect(m.status!.update!.autoUpdate, isFalse);
+      await m.updateCheck();
+      await m.updateApply(confirm: true);
+      await m.updateDismiss('0.5.0');
+      await m.updateRollback();
+      await m.permissionsReset();
+      expect(svc.received.map((r) => r['cmd']).where((c) => c != 'status' && c != 'subscribe'),
+          ['set_update', 'update_check', 'update_apply', 'update_dismiss', 'update_rollback', 'permissions_reset']);
       await svc.stop();
       m.dispose();
     });
