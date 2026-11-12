@@ -262,6 +262,8 @@ final class Session {
     private var inputTimer: DispatchSourceTimer?
     private(set) var started = false
     private var ended = false
+    /// `fail()` was called: the session is on its way out and its input must not reach anyone (no yield).
+    private var failing = false
     /// Guards `sampleMode`, `latest` and `latestSeq`, which the capture
     /// queue reads; everything else in a session lives on `queue`.
     private let sampleLock = NSLock()
@@ -373,7 +375,7 @@ final class Session {
         // Every command from B passes one gate; only input can be held back (R7).
         switch message {
         case .text, .key, .mouse, .scroll, .paste, .focus, .menuPick, .setStream, .resize, .move, .close:
-            guard admit(message) else { return }
+            guard started, !failing, admit(message) else { return }
         default:
             break
         }
@@ -767,6 +769,7 @@ final class Session {
 
     /// Tells the client why, then ends the session.
     func fail(_ reason: String) {
+        failing = true
         guard !ended else { return }
         connection.send(content: Data(Message.error(reason).encoded()),
                         completion: .contentProcessed { [weak self] _ in self?.end(reason) })
