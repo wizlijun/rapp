@@ -15,13 +15,14 @@ import 'lamp.dart';
 import 'lifecycle.dart';
 import 'prefs.dart';
 import 'projects.dart';
+import 'resources_state.dart';
 import 'session_model.dart';
 import 'tokens.dart';
 import 'workspace_store.dart';
 
 export 'lifecycle.dart' show hubWord, hubWords;
 
-enum PanelTab { sessions, devices, projects }
+enum PanelTab { sessions, devices, projects, resources }
 
 /// The two top-bar corners; at most one is open.
 enum Corner { stream, needs }
@@ -54,7 +55,9 @@ class MainState extends ChangeNotifier {
     required this.prefs,
     this.port,
     this.doubleClick = const Duration(milliseconds: 500),
-  }) {
+    DateTime Function()? clock,
+  }) : resources = ResourcesState(clock: clock) {
+    resources.addListener(notifyListeners);
     _portSub = port?.events.listen(_onPortEvent);
     hub?.addListener(_onHub);
     _lastError = hub?.lastError;
@@ -70,6 +73,9 @@ class MainState extends ChangeNotifier {
   final String configDir;
   final UiPrefs prefs;
   final SessionPort? port;
+
+  /// Clipboard entries and transfers of every session.
+  final ResourcesState resources;
 
   /// Favourites and projects, loaded from `workspace.json` in [configDir].
   late final Workspace workspace;
@@ -313,6 +319,13 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Opens the panel on [tab]; already on it, it stays.
+  void showPanel(PanelTab tab) {
+    if (panel == tab) return;
+    panel = tab;
+    notifyListeners();
+  }
+
   void closePanel() {
     if (panel == null) return;
     panel = null;
@@ -548,8 +561,18 @@ class MainState extends ChangeNotifier {
       return;
     }
     rs.apply(e);
+    if (e is ClipsEvent) {
+      resources.addClips(r.key, e.sid, _sourceOf(r), e.clips);
+    } else if (e is TransferProgressEvent) {
+      resources.transfer(r.key, _sourceOf(r), e);
+    }
     if (e is DisconnectedEvent && r.phase != Phase.disconnected) {
-      r.ending ? _finishEnding(r) : _disconnect(r, e.reason);
+      if (r.ending) {
+        _finishEnding(r);
+      } else {
+        resources.linkDown(e.sid);
+        _disconnect(r, e.reason);
+      }
     } else if (e is DetachedEvent) {
       // The hub logs one line per move (R10); keys typed on the stage no longer go to it.
       if (_reachable(r)) hub!.note(e.sid, e.detached ? 'detach' : 'attach', rs.tabs.tabs.length);
@@ -559,6 +582,8 @@ class MainState extends ChangeNotifier {
     }
     notifyListeners();
   }
+
+  String _sourceOf(SessionRecord r) => '${r.appName} @ ${deviceName(r.id)}';
 
   /// The link of [r] ended with [raw] (the runner's or the hub's words): the record stays, with its
   /// last frame, until the user reconnects or ends it. Callers notify.
@@ -615,6 +640,7 @@ class MainState extends ChangeNotifier {
       _sentFps.remove(sid);
       _waiting.remove(sid)?.timer.cancel();
     }
+    resources.sessionEnded(r.key, {r.sid, old}.whereType<Object>().toSet());
     _records.remove(r.key);
     _entries = _mapEntries();
     if (currentKey == r.key) {
@@ -1138,9 +1164,78 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ---- global resources ----
+
+  /// Why [e] cannot be copied to this Mac now (the word on the grey button), or null if it can.
+  String? copyBlockedWord(ClipEntry e) {
+    if (e.copy != null) return null;
+    if (e.kind == ClipKind.unsupported) return '不支持';
+    final r = _records[e.key];
+    if (e.ended || r == null || (r.phase == Phase.disconnected && r.sid == e.sid)) return 'A 已断开，复制不到';
+    if (r.phase != Phase.live || r.sid != e.sid) return '重连前的，复制不到';
+    return null;
+  }
+
+  bool canCopy(ClipEntry e) => copyBlockedWord(e) == null;
+
+  bool canPin(ClipEntry e) => !e.pinning && !e.pinned && (e.copy != null || canCopy(e));
+
+  Future<void> copyLocal(ClipEntry e) async {
+    final p = port;
+    if (p == null) return;
+    final copy = e.copy;
+    if (copy != null) {
+      if (!await p.copyLocal(copy)) hint = '本机副本不在了';
+      notifyListeners();
+    } else if (canCopy(e)) {
+      p.clipPick(e.sid, e.clip, false);
+    }
+  }
+
+  Future<void> togglePin(ClipEntry e) async {
+    final p = port;
+    if (p == null) return;
+    if (e.pinned) {
+      final copy = resources.unpin(e.seq, sessionEnded: e.ended);
+      if (copy != null) p.dropCopy(copy);
+      return;
+    }
+    if (!canPin(e)) return;
+    resources.beginPin(e.seq);
+    final r = await p.fetchClip(e.sid, e.clip);
+    if (_disposed) return;
+    if (resources.entry(e.seq) == null) {
+      final copy = r.copy;
+      if (copy != null) p.dropCopy(copy); // the entry went while we waited
+      return;
+    }
+    final copy = r.copy;
+    if (copy != null) {
+      resources.pinned(e.seq, copy);
+    } else {
+      resources.pinFailed(e.seq);
+      hint = '固定没成功：${r.error}';
+      notifyListeners();
+    }
+  }
+
+  void cancelTransfer(TransferRow t) => port?.cancelTransfer(t.sid, id: t.id);
+
+  Future<void> reveal(TransferRow t) async {
+    final path = t.path;
+    final p = port;
+    if (p == null || path == null) return;
+    if (!await p.reveal(path)) {
+      hint = '文件不在了：${t.name}';
+      notifyListeners();
+    }
+  }
+
   @override
   void dispose() {
     _disposed = true;
+    resources.removeListener(notifyListeners);
+    resources.dispose();
     hub?.removeListener(_onHub);
     _portSub?.cancel();
     for (final w in _waiting.values) {

@@ -1786,6 +1786,246 @@ void main() {
     });
   });
 
+  group('resources', () {
+    final t0 = DateTime(2026, 11, 12, 9, 30);
+
+    void env(void Function(FakeAsync a, FakeTransport t, FakeSessionPort port, MainState st) body,
+        {FakeSessionPort? usePort}) {
+      fakeAsync((a) {
+        final t = FakeTransport();
+        final port = usePort ?? FakeSessionPort();
+        t.emit({
+          'event': 'hosts',
+          'hosts': [
+            {'id': '111', 'name': 'mini'},
+            {'id': '222', 'name': 'air'},
+          ],
+        });
+        a.flushMicrotasks();
+        final st = MainState(hub: HubClient(t), configDir: tmp.path, prefs: UiPrefs(), port: port, clock: () => t0);
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            final n = (m['id'] == '111' ? 1 : 2) + (m['reconnect'] == true ? 10 : 0);
+            t.emit({
+              'event': 'opened', 'sid': n, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+              if (m['embed'] == true) ...{'port': 5000 + n, 'token': 'tk'},
+              'req': m['req'],
+            });
+          }
+        };
+        st.openOrSwitch('111', 'calc', 'Calculator');
+        a.flushMicrotasks();
+        body(a, t, port, st);
+        st.dispose();
+      });
+    }
+
+    void openNotes(FakeAsync a, MainState st) {
+      st.openOrSwitch('222', 'notes', 'Notes');
+      a.flushMicrotasks();
+    }
+
+    void end(MainState st, FakeSessionPort port, Object sid) {
+      st.endCurrent();
+      port.emit(ClosedEvent(sid, 'rapp-client: quit'));
+    }
+
+    List<(String, Map<String, Object?>)> callsOf(FakeSessionPort p, String m) => p.calls.where((c) => c.$1 == m).toList();
+
+    TransferProgressEvent prog(Object sid, int id, TransferState state, {String? path}) =>
+        TransferProgressEvent(sid, id, true, 'a.log', 10, 100, state, path, null);
+
+    test('clips from two sessions land in one list with sources', () {
+      env((a, t, port, st) {
+        openNotes(a, st);
+        port.emit(const ClipsEvent(1, [ClipRow(1, 'one', true)]));
+        port.emit(const ClipsEvent(2, [ClipRow(1, 'two', true)]));
+        final c = st.resources.clips;
+        expect(c.map((e) => e.title), ['two', 'one']);
+        expect(c.map((e) => e.source), ['Notes @ air', 'Calculator @ mini']);
+      });
+    });
+
+    test('copyLocal of a live unpinned entry picks the clip', () {
+      env((a, t, port, st) {
+        port.emit(const ClipsEvent(1, [ClipRow(7, 'one', true)]));
+        final e = st.resources.clips.single;
+        expect(st.canCopy(e), true);
+        expect(st.copyBlockedWord(e), isNull);
+        st.copyLocal(e);
+        expect(callsOf(port, 'clip_pick').single.$2, {'sid': 1, 'clip': 7, 'insert': false});
+      });
+    });
+
+    test('an unsupported entry is grey with 不支持', () {
+      env((a, t, port, st) {
+        port.emit(const ClipsEvent(1, [ClipRow(7, 'dir', false)]));
+        final e = st.resources.clips.single;
+        expect(st.copyBlockedWord(e), '不支持');
+        expect(st.canCopy(e), false);
+        expect(st.canPin(e), false);
+      });
+    });
+
+    test('pinning waits for the copy then marks pinned', () {
+      final gated = _GatedFetchPort();
+      env((a, t, port, st) {
+        port.emit(const ClipsEvent(1, [ClipRow(7, 'one', true)]));
+        final e = st.resources.clips.single;
+        st.togglePin(e);
+        a.flushMicrotasks();
+        expect(e.pinning, true);
+        expect(e.pinned, false);
+        expect(st.canPin(e), false);
+        gated.gate.complete({'copy': 5});
+        a.flushMicrotasks();
+        expect(e.pinned, true);
+        expect(e.pinning, false);
+        expect(e.copy, 5);
+      }, usePort: gated);
+    });
+
+    test('a failed pin hints and stays unpinned', () {
+      env((a, t, port, st) {
+        port.emit(const ClipsEvent(1, [ClipRow(7, 'one', true)]));
+        final e = st.resources.clips.single;
+        port.fetchReply = {'error': 'unknown clip'};
+        st.togglePin(e);
+        a.flushMicrotasks();
+        expect(e.pinned, false);
+        expect(e.pinning, false);
+        expect(st.hint, '固定没成功：unknown clip');
+      });
+    });
+
+    test('ending a session keeps pinned entries and drops the rest', () {
+      env((a, t, port, st) {
+        port.emit(const ClipsEvent(1, [ClipRow(2, 'b', true), ClipRow(1, 'a', true)]));
+        final pinned = st.resources.clips.firstWhere((e) => e.title == 'a');
+        st.togglePin(pinned);
+        a.flushMicrotasks();
+        port.emit(prog(1, 5, TransferState.running));
+        expect(st.resources.running, hasLength(1));
+        end(st, port, 1);
+        a.flushMicrotasks();
+        expect(st.resources.clips.map((e) => e.title), ['a']);
+        expect(st.resources.running, isEmpty);
+        expect(st.resources.ended.single.state, TransferState.cancelled);
+        port.calls.clear();
+        st.copyLocal(pinned);
+        a.flushMicrotasks();
+        expect(callsOf(port, 'copy_local').single.$2, {'copy': 1});
+        expect(callsOf(port, 'clip_pick'), isEmpty);
+      });
+    });
+
+    test('late transfer events after an end are ignored', () {
+      env((a, t, port, st) {
+        port.emit(prog(1, 5, TransferState.running));
+        const sid = 1;
+        end(st, port, 1);
+        a.flushMicrotasks();
+        port.emit(prog(sid, 5, TransferState.running));
+        expect(st.resources.running, isEmpty);
+      });
+    });
+
+    test('a disconnected session greys its entries', () {
+      env((a, t, port, st) {
+        port.emit(const ClipsEvent(1, [ClipRow(7, 'one', true)]));
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        final e = st.resources.clips.single;
+        expect(st.copyBlockedWord(e), 'A 已断开，复制不到');
+        expect(st.canPin(e), false);
+        port.calls.clear();
+        st.copyLocal(e);
+        a.flushMicrotasks();
+        expect(port.calls, isEmpty);
+      });
+    });
+
+    test('entries from before a reconnect stay grey and never pick', () {
+      env((a, t, port, st) {
+        port.emit(const ClipsEvent(1, [ClipRow(7, 'old', true)]));
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        st.reconnect('111/calc');
+        a.flushMicrotasks();
+        port.emit(const ClipsEvent(11, [ClipRow(1, 'new', true)]));
+        final old = st.resources.clips.firstWhere((e) => e.title == 'old');
+        final fresh = st.resources.clips.firstWhere((e) => e.title == 'new');
+        expect(st.copyBlockedWord(old), '重连前的，复制不到');
+        port.calls.clear();
+        st.copyLocal(old);
+        expect(callsOf(port, 'clip_pick'), isEmpty);
+        expect(st.copyBlockedWord(fresh), isNull);
+        st.copyLocal(fresh);
+        expect(callsOf(port, 'clip_pick').single.$2, {'sid': 11, 'clip': 1, 'insert': false});
+      });
+    });
+
+    test('unpinning after the session ended removes it and drops the copy', () {
+      env((a, t, port, st) {
+        port.emit(const ClipsEvent(1, [ClipRow(7, 'one', true)]));
+        final e = st.resources.clips.single;
+        st.togglePin(e);
+        a.flushMicrotasks();
+        end(st, port, 1);
+        a.flushMicrotasks();
+        expect(e.ended, true);
+        port.calls.clear();
+        st.togglePin(e);
+        a.flushMicrotasks();
+        expect(st.resources.clips, isEmpty);
+        expect(callsOf(port, 'drop_copy').single.$2, {'copy': 1});
+      });
+    });
+
+    test('the pin reply after the entry was removed drops the copy', () {
+      final gated = _GatedFetchPort();
+      env((a, t, port, st) {
+        port.emit(const ClipsEvent(1, [ClipRow(7, 'one', true)]));
+        final e = st.resources.clips.single;
+        st.togglePin(e);
+        a.flushMicrotasks();
+        end(st, port, 1);
+        a.flushMicrotasks();
+        expect(st.resources.clips, isEmpty);
+        final before = st.hint;
+        gated.gate.complete({'copy': 9});
+        a.flushMicrotasks();
+        expect(callsOf(port, 'drop_copy').single.$2, {'copy': 9});
+        expect(st.hint, before);
+      }, usePort: gated);
+    });
+
+    test('reveal of a missing file hints', () {
+      env((a, t, port, st) {
+        port.revealReply = false;
+        port.emit(prog(1, 5, TransferState.done, path: '/tmp/x/a.log'));
+        final row = st.resources.ended.single;
+        st.reveal(row);
+        a.flushMicrotasks();
+        expect(st.hint, '文件不在了：a.log');
+      });
+    });
+
+    test('cancelTransfer sends the id', () {
+      env((a, t, port, st) {
+        port.emit(prog(1, 5, TransferState.running));
+        st.cancelTransfer(st.resources.running.single);
+        expect(callsOf(port, 'cancel_transfer').single.$2, {'sid': 1, 'id': 5});
+      });
+    });
+
+    test('showPanel does not close an open tab', () {
+      env((a, t, port, st) {
+        st.showPanel(PanelTab.resources);
+        st.showPanel(PanelTab.resources);
+        expect(st.panel, PanelTab.resources);
+      });
+    });
+  });
+
   group('endedHint', () {
     test('maps runner and hub reasons', () {
       expect(endedHint('X', 'rapp-client: quit'), '已结束 X');
@@ -1813,5 +2053,19 @@ class _SlowStartPort extends FakeSessionPort {
     final c = Completer<Object?>();
     _starts.add(c);
     return c.future;
+  }
+}
+
+/// A port whose `fetch_clip` waits for the test to answer.
+class _GatedFetchPort extends FakeSessionPort {
+  // Made on the first fetch, inside the test's fake zone, so the test's microtask flush reaches it.
+  late final Completer<Map<String, Object?>> gate;
+
+  @override
+  Future<Object?> invoke(String method, Map<String, Object?> args) {
+    if (method != 'fetch_clip') return super.invoke(method, args);
+    calls.add((method, args));
+    gate = Completer<Map<String, Object?>>();
+    return gate.future;
   }
 }
