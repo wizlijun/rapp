@@ -803,6 +803,44 @@ void main() {
       });
     });
 
+    void quietAfter(FakeAsync a, FakeTransport t, FakeSessionPort port, MainState st) {
+      final sent = t.sent.length, calls = port.calls.length;
+      st.focusPicture(1);
+      st.stageSize(const Size(800, 600));
+      st.selectWindow(7);
+      st.detach();
+      st.toggleDetach();
+      a.elapse(const Duration(seconds: 1));
+      final extra = port.calls.skip(calls).map((c) => c.$1).toList();
+      expect(extra, isEmpty);
+      expect(t.sent.length, sent);
+    }
+
+    test('a disconnected record sends nothing to the runner or the hub (R12)', () {
+      env((a, t, port, st, hints) {
+        port.emit(const ReadyEvent(1, 'Calculator'));
+        port.emit(WindowsEvent(1, [rw(3), rw(7)]));
+        port.emit(const TrafficEvent(1, 100, 1));
+        st.stageSize(const Size(500, 400));
+        a.elapse(const Duration(seconds: 1));
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        quietAfter(a, t, port, st);
+      });
+    });
+
+    test('a reconnecting record sends nothing to the runner or the hub (R12)', () {
+      env((a, t, port, st, hints) {
+        port.emit(const ReadyEvent(1, 'Calculator'));
+        port.emit(WindowsEvent(1, [rw(3), rw(7)]));
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        t.onSend = (_) {}; // the reopen never answers: the record stays connecting
+        st.reconnectCurrent();
+        a.flushMicrotasks();
+        expect(st.currentRecord!.phase, Phase.connecting);
+        quietAfter(a, t, port, st);
+      });
+    });
+
     test('total traffic sums live sessions only', () {
       env((a, t, port, st, hints) {
         port.emit(const TrafficEvent(1, 3000, 1));

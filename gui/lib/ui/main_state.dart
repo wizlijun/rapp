@@ -97,6 +97,9 @@ class MainState extends ChangeNotifier {
     return null;
   }
 
+  /// Whether [sid] is the live session of a record: only then do the runner or the hub hear of it (R12).
+  bool _liveSid(Object sid) => _recordOfSid(sid)?.phase == Phase.live;
+
   bool _hubHas(Object sid) => hub != null && hub!.sessions.any((s) => s.sid == sid);
 
   /// Whether [r] is live and the hub still has its session: the only case that talks to either.
@@ -144,7 +147,7 @@ class MainState extends ChangeNotifier {
 
   /// A press on [sid]'s picture: keys go to A from now on.
   void focusPicture(Object sid) {
-    if (pictureFocused == sid) return;
+    if (pictureFocused == sid || !_liveSid(sid)) return;
     pictureFocused = sid;
     port?.pictureFocus(sid);
     notifyListeners();
@@ -234,14 +237,14 @@ class MainState extends ChangeNotifier {
   /// `DetachedEvent`. The same sid and hub session throughout: nothing is reopened.
   void detach() {
     final rs = currentRemote;
-    if (rs == null || rs.detached || rs.tabs.tabs.isEmpty) return;
+    if (rs == null || rs.detached || rs.tabs.tabs.isEmpty || currentRecord?.phase != Phase.live) return;
     port?.detach(rs.sid);
   }
 
   /// Puts the current session back on the stage.
   void attach() {
     final rs = currentRemote;
-    if (rs == null) return;
+    if (rs == null || currentRecord?.phase != Phase.live) return;
     port?.attach(rs.sid);
   }
 
@@ -255,7 +258,7 @@ class MainState extends ChangeNotifier {
   /// Whether [toggleDetach] does anything now (the menu greys its item otherwise).
   bool get canToggleDetach {
     final rs = currentRemote;
-    return rs != null && (rs.detached || rs.tabs.tabs.isNotEmpty);
+    return rs != null && currentRecord?.phase == Phase.live && (rs.detached || rs.tabs.tabs.isNotEmpty);
   }
 
   // ---- hub state ----
@@ -543,8 +546,12 @@ class MainState extends ChangeNotifier {
     }
     r.sid = s.sid;
     r.path = s.path;
-    final rs = RemoteSession(s.sid, r.appName, onResize: (w, a, b) => port!.resize(s.sid, w, a, b),
-        onSelect: (w) => port!.selectWindow(s.sid, w),
+    final rs = RemoteSession(s.sid, r.appName, onResize: (w, a, b) {
+          if (_liveSid(s.sid)) port!.resize(s.sid, w, a, b);
+        },
+        onSelect: (w) {
+          if (_liveSid(s.sid)) port!.selectWindow(s.sid, w);
+        },
         onStream: (_) => _applyFps(),
         onDropBlock: (n) => port!.composerDropBlock(s.sid, n));
     rs.choice = r.choice;
