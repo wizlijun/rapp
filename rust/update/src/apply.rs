@@ -87,8 +87,12 @@ pub enum InstallError {
 }
 
 /// Rename; across volumes (EXDEV) copy with ditto and delete the source. If the source can't be
-/// fully deleted, the copy is put back over it and removed, so `from` stays whole.
+/// fully deleted, the copy is put back over it and removed, so `from` stays whole. Never writes
+/// into an existing `to` (a ditto there would merge two versions).
 fn move_dir(r: &dyn Runner, from: &Path, to: &Path) -> io::Result<()> {
+    if std::fs::symlink_metadata(to).is_ok() {
+        return Err(io::Error::from(io::ErrorKind::AlreadyExists));
+    }
     match r.rename(from, to) {
         Err(e) if e.raw_os_error() == Some(18) => {
             let o = r.run(DITTO, &[s(from), s(to)])?;
@@ -110,8 +114,10 @@ fn move_dir(r: &dyn Runner, from: &Path, to: &Path) -> io::Result<()> {
 
 /// Swaps `new_app` into `bundle`, keeping the replaced app as `<previous_dir>/rapp.app` (K12).
 /// Rolling back is the same call with `new_app = <previous_dir>/rapp.app` (K13).
-/// Any failure leaves `bundle` as it was and no `.rapp-new.app` behind; `new_app` is moved back
-/// where it came from when possible.
+///
+/// Failure paths never delete anything that may be the only whole copy of a version: putting a
+/// complete app back at `bundle` comes first, then the old previous and the staged app go back
+/// where they were; whatever can't go back is left in place and named in the reason.
 pub fn install(r: &dyn Runner, new_app: &Path, bundle: &Path, previous_dir: &Path) -> Result<(), InstallError> {
     let failed = |m: &str| InstallError::Failed(m.to_string());
     let admin_or = |e: &io::Error, m: &str| {
@@ -123,41 +129,59 @@ pub fn install(r: &dyn Runner, new_app: &Path, bundle: &Path, previous_dir: &Pat
     };
     let staging = bundle.parent().ok_or_else(|| failed("安装位置不对"))?.join(".rapp-new.app");
     let prev = previous_dir.join("rapp.app");
+    // The old previous waits here until the swap has succeeded.
+    let aside = previous_dir.join(".rapp-old.app");
 
-    // ① stage the new app next to the bundle, on the same volume.
+    // ① stage the new app next to the bundle, on the same volume. move_dir cleans up after itself.
     remove_dir(&staging).map_err(|e| admin_or(&e, "清不掉上次留下的 .rapp-new.app"))?;
-    if let Err(e) = move_dir(r, new_app, &staging) {
-        let _ = remove_dir(&staging);
-        return Err(admin_or(&e, "搬不动新版"));
-    }
-    let unstage = || {
+    move_dir(r, new_app, &staging).map_err(|e| admin_or(&e, "搬不动新版"))?;
+
+    // Puts the old previous and the staged app back; `e` decides NeedsAdmin only when nothing is left over.
+    let undo = |m: &str, e: Option<&io::Error>| {
+        let mut left = Vec::new();
+        if aside.exists() && (prev.exists() || std::fs::rename(&aside, &prev).is_err()) {
+            left.push("原来的上一版留在 previous/.rapp-old.app");
+        }
         if move_dir(r, &staging, new_app).is_err() {
-            let _ = remove_dir(&staging);
+            left.push("要装的那一版留在 .rapp-new.app");
+        }
+        match e {
+            _ if !left.is_empty() => InstallError::Failed(format!("{m}；{}", left.join("；"))),
+            Some(e) => admin_or(e, m),
+            None => failed(m),
         }
     };
 
-    // ② keep only one previous version.
-    if remove_dir(&prev).and_then(|_| std::fs::create_dir_all(previous_dir)).is_err() {
-        unstage();
-        return Err(failed("清不掉 previous 里的旧版"));
+    // ② keep only one previous version: set the old one aside (deleted only after ④).
+    let cleared = remove_dir(&aside).and_then(|_| std::fs::create_dir_all(previous_dir)).and_then(|_| {
+        match std::fs::rename(&prev, &aside) {
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
+            res => res,
+        }
+    });
+    if cleared.is_err() {
+        return Err(undo("清不掉 previous 里的旧版", None));
     }
 
-    // ③ move the current app aside.
+    // ③ move the current app aside. If move_dir left a copy at `prev`, `bundle` may be incomplete.
     if let Err(e) = move_dir(r, bundle, &prev) {
-        unstage();
-        return Err(admin_or(&e, "搬不动当前版"));
+        if prev.exists() {
+            return Err(undo("当前版没搬完整，完整的一份在 previous 里", None));
+        }
+        return Err(undo("搬不动当前版", Some(&e)));
     }
 
-    // ④ the atomic swap; on failure put ③ back.
+    // ④ the atomic swap; on failure put the current app back at `bundle` first.
     if r.rename(&staging, bundle).is_err() {
         let restored = move_dir(r, &prev, bundle).is_ok();
-        unstage();
-        return Err(failed(if restored {
+        let m = if restored {
             "换上新版失败，已还原"
         } else {
             "换上新版失败，当前版留在 previous 里"
-        }));
+        };
+        return Err(undo(m, None));
     }
+    let _ = remove_dir(&aside);
     Ok(())
 }
 
@@ -230,6 +254,10 @@ mod tests {
 
         fn staging(&self) -> PathBuf {
             self.bundle.parent().unwrap().join(".rapp-new.app")
+        }
+
+        fn aside(&self) -> PathBuf {
+            self.previous.join(".rapp-old.app")
         }
     }
 
@@ -354,6 +382,7 @@ mod tests {
         assert_eq!(marker_of(&e.previous.join("rapp.app")), "current");
         assert!(!e.staging().exists());
         assert!(!e.new_app.exists());
+        assert!(!e.aside().exists());
     }
 
     #[test]
@@ -363,6 +392,86 @@ mod tests {
         let err = install(&r, &e.new_app, &e.bundle, &e.previous).unwrap_err();
         assert!(matches!(err, InstallError::Failed(_)), "{err:?}");
         assert_eq!(marker_of(&e.bundle), "current");
+        assert!(!e.staging().exists());
+        assert!(!e.previous.join("rapp.app").exists());
+        assert_eq!(marker_of(&e.new_app), "new");
+    }
+
+    #[test]
+    fn fourth_step_failure_puts_old_previous_back() {
+        let e = Env::new();
+        make_app(&e.previous.join("rapp.app"), "old0");
+        let r = FakeRunner::new().rename_fails(3, io::Error::other("boom"));
+        assert_eq!(
+            install(&r, &e.new_app, &e.bundle, &e.previous),
+            Err(InstallError::Failed("换上新版失败，已还原".into()))
+        );
+        assert_eq!(marker_of(&e.bundle), "current");
+        assert_eq!(marker_of(&e.previous.join("rapp.app")), "old0");
+        assert_eq!(marker_of(&e.new_app), "new");
+        assert!(!e.staging().exists());
+        assert!(!e.aside().exists());
+    }
+
+    #[test]
+    fn double_rename_failure_on_install_loses_no_version() {
+        let e = Env::new();
+        let prev = e.previous.join("rapp.app");
+        make_app(&prev, "old0");
+        let r = FakeRunner::new().rename_fails(3, io::Error::other("④")).rename_fails(4, io::Error::other("restore"));
+        let err = install(&r, &e.new_app, &e.bundle, &e.previous).unwrap_err();
+        let InstallError::Failed(reason) = err else { panic!("{err:?}") };
+        assert!(reason.contains(".rapp-old.app"), "{reason}");
+        assert!(!reason.contains("http"), "{reason}");
+        assert!(!e.bundle.exists(), "no restore rename succeeded");
+        assert_eq!(marker_of(&prev), "current");
+        assert_eq!(marker_of(&e.aside()), "old0");
+        assert_eq!(marker_of(&e.new_app), "new");
+        assert!(!e.staging().exists());
+    }
+
+    #[test]
+    fn double_rename_failure_on_rollback_loses_no_version() {
+        let e = Env::new();
+        let prev = e.previous.join("rapp.app");
+        make_app(&prev, "old");
+        let r = FakeRunner::new().rename_fails(3, io::Error::other("④")).rename_fails(4, io::Error::other("restore"));
+        let err = install(&r, &prev, &e.bundle, &e.previous).unwrap_err();
+        let InstallError::Failed(reason) = err else { panic!("{err:?}") };
+        assert!(reason.contains(".rapp-new.app"), "{reason}");
+        assert!(!e.bundle.exists(), "no restore rename succeeded");
+        assert_eq!(marker_of(&prev), "current");
+        assert_eq!(marker_of(&e.staging()), "old", "the only copy of the old version is kept");
+    }
+
+    #[test]
+    fn rollback_unstage_never_merges_into_occupied_previous() {
+        let e = Env::new();
+        let prev = e.previous.join("rapp.app");
+        make_app(&prev, "old");
+        let r = FakeRunner::new()
+            .rename_fails(3, io::Error::other("④"))
+            .rename_fails(4, io::Error::other("restore"))
+            .rename_fails(5, io::Error::from_raw_os_error(18))
+            .on(DITTO, |a| {
+                copy_dir(Path::new(&a[0]), Path::new(&a[1]));
+                Out::ok("")
+            });
+        assert!(install(&r, &prev, &e.bundle, &e.previous).is_err());
+        assert_eq!(marker_of(&prev), "current");
+        assert_eq!(marker_of(&e.staging()), "old");
+        assert!(!r.calls().iter().any(|(p, _)| p == DITTO), "{:?}", r.calls());
+    }
+
+    #[test]
+    fn rollback_fourth_step_failure_restores_both() {
+        let e = Env::new();
+        let prev = e.previous.join("rapp.app");
+        make_app(&prev, "old");
+        let r = FakeRunner::new().rename_fails(3, io::Error::other("④"));
+        assert!(install(&r, &prev, &e.bundle, &e.previous).is_err());
+        assert_eq!(marker_of(&e.bundle), "current");
+        assert_eq!(marker_of(&prev), "old");
         assert!(!e.staging().exists());
     }
 
