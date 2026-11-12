@@ -123,6 +123,8 @@ class RemoteSession extends ChangeNotifier {
           // The runner names a window it had, but its table may not have reached us yet.
           _isTab(c) ? tabs.select(c) : _pendingCurrent = c;
         }
+      case InputBlockedEvent():
+        break; // MainState's hint.
       case ClosedEvent():
         endReason = e.reason;
     }

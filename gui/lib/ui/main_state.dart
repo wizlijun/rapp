@@ -32,7 +32,8 @@ enum NeedKind { session, device }
 /// One thing waiting for the person: a disconnected session ([target] its record key) or a
 /// device that dropped ([target] its id). Newer [seq] first.
 class NeedItem {
-  const NeedItem(this.kind, this.target, this.text, this.seq);
+  const NeedItem(this.kind, this.target, this.text, this.seq, {this.reconnectWord = '重连'});
+  final String reconnectWord;
   final NeedKind kind;
   final String target;
   final String text;
@@ -396,7 +397,8 @@ class MainState extends ChangeNotifier {
     final out = <NeedItem>[
       for (final r in _records.values)
         if (r.phase == Phase.disconnected)
-          NeedItem(NeedKind.session, r.key, '${r.appName} @ ${deviceName(r.id)} 已断开：${disconnectWord(r.reason)}', r.seq),
+          NeedItem(NeedKind.session, r.key, '${r.appName} @ ${deviceName(r.id)} 已断开：${disconnectWord(r.reason)}', r.seq,
+              reconnectWord: reconnectLabel(r.reason)),
       for (final h in hub?.hosts ?? const <HubHost>[])
         if (_seenOnline.contains(h.id) && _offlineSince.containsKey(h.id))
           NeedItem(NeedKind.device, h.id, '${deviceName(h.id)} 离线', _offlineSince[h.id]!),
@@ -487,6 +489,7 @@ class MainState extends ChangeNotifier {
       lamp: recordLamp(r, rs),
       bytesPerSecond: r.phase == Phase.live ? rs?.bytesPerSecond : null,
       reason: r.phase == Phase.disconnected ? disconnectWord(r.reason) : null,
+      takenOver: r.phase == Phase.disconnected && takenOver(r.reason),
     );
   }
 
@@ -606,6 +609,10 @@ class MainState extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    if (e is InputBlockedEvent) {
+      if (r.key == currentKey) _showBlocked(e.by);
+      return;
+    }
     rs.apply(e);
     final start = _starts[e.sid];
     if (start != null && e is ClipsEvent) {
@@ -626,6 +633,21 @@ class MainState extends ChangeNotifier {
     } else if (e is WindowsEvent) {
       _swapIfReady(r);
     }
+    notifyListeners();
+  }
+
+  Timer? _blockedTimer;
+
+  /// 「A 正在被 X 操作」 for [blockedHintFor], only while it is still the hint.
+  void _showBlocked(String by) {
+    final text = inputBlockedHint(by);
+    hint = text;
+    _blockedTimer?.cancel();
+    _blockedTimer = Timer(blockedHintFor, () {
+      if (_disposed || hint != text) return;
+      hint = '';
+      notifyListeners();
+    });
     notifyListeners();
   }
 
@@ -1312,6 +1334,7 @@ class MainState extends ChangeNotifier {
     resources.dispose();
     hub?.removeListener(_onHub);
     _portSub?.cancel();
+    _blockedTimer?.cancel();
     for (final w in _waiting.values) {
       w.timer.cancel();
     }
@@ -1328,6 +1351,12 @@ class _Waiting {
   final Timer timer;
 }
 
+/// How long the blocked-input hint stays (R14).
+const blockedHintFor = Duration(seconds: 1);
+
+/// 「A 正在被 X 操作」 (same words as the host's notice); an unnamed device is 「另一台设备」.
+String inputBlockedHint(String by) => by.isEmpty ? 'A 正在被另一台设备操作' : 'A 正在被 $by 操作';
+
 /// One start of a hub session in this launch; equal only to itself.
 class _Start {
   _Start(this.sid);
@@ -1339,6 +1368,7 @@ class _Start {
 String endedHint(String appName, String? reason) {
   const prefix = 'rapp-client: ';
   final why = reason != null && reason.startsWith(prefix) ? reason.substring(prefix.length) : reason;
+  if (takenOver(why)) return '$appName：${disconnectWord(why)}';
   if (why == null || why == 'stdin closed' || why == 'quit') return '已结束 $appName';
   if (why.startsWith('host says: ') && why.endsWith(' quit')) return '$appName 已结束：A 端关闭了 app';
   if (why == 'connection closed') return '$appName 意外结束：连接断了';

@@ -294,6 +294,21 @@ void main() {
 
     final tex42 = find.byWidgetPredicate((w) => w is Texture && w.textureId == 42);
 
+    testWidgets('a taken over session offers 拿回来', (tester) async {
+      await shown(tester);
+      port.emit(const DisconnectedEvent(1, 'host says: taken over by M'));
+      await tester.pump();
+      expect(tester.widget<RappButton>(find.byKey(const Key('reconnect-button'))).label, '拿回来');
+      expect(tester.widget<Text>(find.byKey(const Key('disconnect-reason'))).data, '这个窗口在 M 上打开了');
+      await tester.runAsync(() async {
+        await tester.tap(find.byKey(const Key('reconnect-button')));
+        await flush();
+      });
+      await tester.pump();
+      expect(t.sent.last['cmd'], 'open');
+      expect(t.sent.last['reconnect'], true);
+    });
+
     testWidgets('disconnected shows the last frame, stripes and reconnect', (tester) async {
       await shown(tester);
       port.emit(const DisconnectedEvent(1, 'connection closed'));

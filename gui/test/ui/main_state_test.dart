@@ -576,6 +576,51 @@ void main() {
       });
     });
 
+    test('input blocked shows for a second on the current session only', () {
+      env((a, t, port, st, hints) {
+        port.emit(const InputBlockedEvent(1, 'Mac mini'));
+        expect(st.hint, 'A 正在被 Mac mini 操作');
+        a.elapse(const Duration(milliseconds: 999));
+        expect(st.hint, 'A 正在被 Mac mini 操作');
+        a.elapse(const Duration(milliseconds: 1));
+        expect(st.hint, isNot('A 正在被 Mac mini 操作'));
+        port.emit(const InputBlockedEvent(1, ''));
+        expect(st.hint, 'A 正在被另一台设备操作');
+      });
+      env((a, t, port, st, hints) {
+        // sid 2 is Notes; Calculator (sid 10) is not on the stage once Notes is current.
+        expect(st.currentKey, '111/aa');
+        final before = st.hint;
+        port.emit(const InputBlockedEvent(10, 'Mac mini'));
+        expect(st.hint, before);
+      }, sessions: 2);
+    });
+
+    test('a taken over session stays disconnected, counts in needs, does not reconnect by itself', () {
+      env((a, t, port, st, hints) {
+        port.emit(const DisconnectedEvent(1, 'host says: taken over by M'));
+        expect(st.current!.lamp, Lamp.disconnected);
+        expect(st.current!.takenOver, true);
+        expect(st.needCount, 1);
+        expect(st.needs.single.reconnectWord, '拿回来');
+        final opens = t.sent.where((m) => m['cmd'] == 'open').length;
+        final hint = st.hint;
+        a.elapse(const Duration(seconds: 10));
+        expect(t.sent.where((m) => m['cmd'] == 'open').length, opens);
+        expect(st.hint, hint);
+        expect(st.current!.lamp, Lamp.disconnected);
+      });
+    });
+
+    test('opening an embedded app that is open switches to it without a second open', () {
+      env((a, t, port, st, hints) {
+        st.openOrSwitch('111', 'a', 'Calculator');
+        a.flushMicrotasks();
+        expect(t.sent.where((m) => m['cmd'] == 'open').length, 1);
+        expect(st.hint, '已切到 Calculator');
+      });
+    });
+
     test('link drop keeps the entry disconnected with a reason', () {
       env((a, t, port, st, hints) {
         port.emit(const DisconnectedEvent(1, 'the host closed the connection'));

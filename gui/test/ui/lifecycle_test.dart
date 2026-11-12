@@ -3,6 +3,7 @@ import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/ui/lamp.dart';
 import 'package:rapp/ui/lifecycle.dart';
+import 'package:rapp/ui/main_state.dart' show endedHint;
 
 void main() {
   test('disconnect words', () {
@@ -22,6 +23,15 @@ void main() {
     expect(disconnectWord('cannot decode frame: bad tile'), 'cannot decode frame: bad tile');
     expect(disconnectWord('host says: window gone'), 'window gone');
     expect(disconnectWord(null), '');
+  });
+  test('taken over words and label', () {
+    expect(disconnectWord('host says: taken over by Mac mini'), '这个窗口在 Mac mini 上打开了');
+    expect(disconnectWord('host says: taken over'), '这个窗口在另一台设备上打开了');
+    expect(disconnectWord('rapp-client: host says: taken over by M'), '这个窗口在 M 上打开了');
+    expect(reconnectLabel('host says: taken over by M'), '拿回来');
+    expect(reconnectLabel('connection closed'), '重连');
+    expect(endedHint('Safari', 'rapp-client: host says: taken over by M'), 'Safari：这个窗口在 M 上打开了');
+    expect(endedHint('Safari', 'host says: taken over'), 'Safari：这个窗口在另一台设备上打开了');
   });
   test('record lamps', () {
     final r = SessionRecord('111', 'a', 'Calculator', 'lan');

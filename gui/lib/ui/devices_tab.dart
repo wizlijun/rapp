@@ -289,7 +289,7 @@ class _AppRow extends StatelessWidget {
     final lamp = session?.lamp ?? Lamp.notOpened;
     final word = lampWord(lamp);
     final connecting = lamp == Lamp.connecting;
-    final verb = openVerb(session?.lamp);
+    final verb = openVerb(session?.lamp, takenOver: session?.takenOver ?? false);
     final favLabel = favorite ? '取消常用' : '设为常用';
     final backdrop = rowBackdrop(lamp, t);
     final dashed = lamp == Lamp.notOpened;

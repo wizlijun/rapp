@@ -63,6 +63,18 @@ void main() {
       expect(list.app, '（列出应用）');
     });
 
+    test('takeover and blocked input rows', () {
+      final base = {'ts': ts, 'peer': 'p', 'path': 'lan', 'app': 'x', 'sid': 3};
+      final named = historyRow({...base, 'ev': 'session_end', 'reason': 'taken over', 'by': 'b-two'});
+      expect(named.result, '被 b-two 接管');
+      expect(named.warn, isFalse);
+      expect(historyRow({...base, 'ev': 'session_end', 'reason': 'taken over'}).result, '被另一台设备接管');
+      final blocked = historyRow({'ts': ts, 'ev': 'input_blocked', 'app': 'x', 'sid': 3, 'by': 'b-two'});
+      expect(blocked.result, '输入被挡：b-two 正在操作');
+      expect(blocked.warn, isFalse);
+      expect(historyRow({'ts': ts, 'ev': 'input_blocked', 'app': 'x', 'sid': 3}).result, '输入被挡：另一台设备 正在操作');
+    });
+
     test('a host refusal (busy, version, token) is a warning, not a session', () {
       final r = historyRow({'ts': ts, 'ev': 'rejected', 'sid': 4, 'reason': 'busy'});
       expect(r.result, '拒绝：busy');

@@ -55,6 +55,7 @@ class Stage extends StatelessWidget {
           body = DisconnectedStage(
             session: rs,
             reason: disconnectWord(rec.reason),
+            reconnectWord: reconnectLabel(rec.reason),
             connecting: rec.phase != Phase.disconnected,
             onReconnect: state.hubUsable ? state.reconnectCurrent : null,
             onEnd: state.endCurrent,

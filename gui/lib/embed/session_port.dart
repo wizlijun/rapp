@@ -220,6 +220,12 @@ class DetachedEvent extends SessionEvent {
 }
 
 /// The runner ended the session (its textures are already gone).
+/// Input was refused because another device runs the session; [by] is '' for an unnamed one.
+class InputBlockedEvent extends SessionEvent {
+  const InputBlockedEvent(super.sid, this.by);
+  final String by;
+}
+
 class ClosedEvent extends SessionEvent {
   const ClosedEvent(super.sid, this.reason);
   final String reason;
@@ -333,6 +339,8 @@ SessionEvent? parseSessionEvent(String method, Object? args) {
             kind: ClipKind.values.where((v) => v.name == m['kind']).firstOrNull);
       case 'detached':
         return DetachedEvent(sid, _as<bool>(m['detached']), current: _as<int?>(m['current']));
+      case 'input_blocked':
+        return InputBlockedEvent(sid, _as<String?>(m['by']) ?? '');
       case 'closed':
         return ClosedEvent(sid, _as<String>(m['reason']));
     }

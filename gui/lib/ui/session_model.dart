@@ -15,7 +15,11 @@ class SessionEntry {
     required this.lamp,
     this.bytesPerSecond,
     this.reason,
+    this.takenOver = false,
   });
+
+  /// Disconnected because another device took it over: the button says 「拿回来」.
+  final bool takenOver;
 
   /// null while the open request is still in flight (lamp = connecting).
   final Object? sid;
@@ -36,9 +40,9 @@ class SessionEntry {
 }
 
 /// The open button's word for a row in [lamp]'s state (K10).
-String openVerb(Lamp? lamp) => switch (lamp) {
+String openVerb(Lamp? lamp, {bool takenOver = false}) => switch (lamp) {
       null || Lamp.notOpened => '打开',
-      Lamp.disconnected => '重连',
+      Lamp.disconnected => takenOver ? '拿回来' : '重连',
       _ => '切到',
     };
 

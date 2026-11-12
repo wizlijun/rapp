@@ -26,6 +26,9 @@ void main() {
     expect(w.title, 'Calc');
     expect(w.resizable, isTrue);
     expect(w.focused, isFalse);
+    final b = parseSessionEvent('input_blocked', {'sid': 3, 'by': 'Mac mini'}) as InputBlockedEvent;
+    expect((b.sid, b.by), (3, 'Mac mini'));
+    expect((parseSessionEvent('input_blocked', {'sid': 3}) as InputBlockedEvent).by, '');
     expect(parseSessionEvent('windows', {'sid': 1, 'windows': 'x'}), isNull);
     expect(parseSessionEvent('windows', {'sid': 1, 'windows': [win(kind: 'blob')]}), isNull);
     expect(parseSessionEvent('windows', {'sid': 1, 'windows': [win(texture: 'x')]}), isNull);

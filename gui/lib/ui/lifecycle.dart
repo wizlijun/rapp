@@ -38,9 +38,28 @@ class SessionRecord {
   String get key => '$id/$app';
 }
 
+const _takenOver = 'host says: taken over';
+const _takenOverBy = 'host says: taken over by ';
+
+String _stripClient(String raw) => raw.startsWith('rapp-client: ') ? raw.substring('rapp-client: '.length) : raw;
+
+/// The host says another device took the session over (optional `rapp-client: ` prefix).
+bool takenOver(String? raw) => raw != null && _stripClient(raw).startsWith(_takenOver);
+
+/// 「拿回来」 for a taken-over session, else 「重连」.
+String reconnectLabel(String? raw) => takenOver(raw) ? '拿回来' : '重连';
+
+/// 「这个窗口在 X 上打开了」, X the name after `taken over by `; unnamed: 「这个窗口在另一台设备上打开了」.
+String _takenWords(String raw) {
+  final r = _stripClient(raw);
+  final name = r.startsWith(_takenOverBy) ? r.substring(_takenOverBy.length).trim() : '';
+  return name.isEmpty ? '这个窗口在另一台设备上打开了' : '这个窗口在 $name 上打开了';
+}
+
 /// Plain words for why a session ended (R8); matched in order.
 String disconnectWord(String? raw) {
   if (raw == null || raw.isEmpty) return hubWord('');
+  if (takenOver(raw)) return _takenWords(raw);
   if (raw == 'user') return '你断开了';
   if (raw.startsWith('host says: ') && raw.endsWith('quit')) return 'A 端关闭了 app';
   if (raw.contains('bad password')) return '密码不对';

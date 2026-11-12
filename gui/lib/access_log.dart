@@ -32,7 +32,8 @@ HistoryRow historyRow(Map<String, dynamic> ev) {
   final peer = s('peer'), name = s('name');
   final (result, warn) = switch (s('ev')) {
     'session_start' => ('开始', false),
-    'session_end' => (_endReason(s('reason')), false),
+    'session_end' => (s('reason') == 'taken over' ? (s('by').isEmpty ? '被另一台设备接管' : '被 ${s('by')} 接管') : _endReason(s('reason')), false),
+    'input_blocked' => ('输入被挡：${s('by').isEmpty ? '另一台设备' : s('by')} 正在操作', false),
     'auth_fail' => ('拒绝：${s('reason')}', true),
     'request' => ('失败：${s('result')}', true),
     // The host turned the session away (busy, version mismatch, bad token).

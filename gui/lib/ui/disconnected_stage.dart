@@ -15,6 +15,7 @@ class DisconnectedStage extends StatefulWidget {
     super.key,
     required this.session,
     required this.reason,
+    this.reconnectWord = '重连',
     required this.connecting,
     this.onReconnect,
     this.onEnd,
@@ -27,6 +28,9 @@ class DisconnectedStage extends StatefulWidget {
 
   /// Why it disconnected, in words.
   final String reason;
+
+  /// The button's word: 「拿回来」 after a takeover.
+  final String reconnectWord;
 
   /// A reconnect is under way: the button gives way to 「正在连接」.
   final bool connecting;
@@ -116,7 +120,7 @@ class _DisconnectedStageState extends State<DisconnectedStage> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           RappButton.accent(
-                              key: const Key('reconnect-button'), label: '重连', onPressed: widget.onReconnect),
+                              key: const Key('reconnect-button'), label: widget.reconnectWord, onPressed: widget.onReconnect),
                           const SizedBox(width: 8),
                           KeyedSubtree(
                             key: ValueKey(('end', widget.sessionKey)),

@@ -153,7 +153,7 @@ class _NeedsList extends StatelessWidget {
         if (session)
           RappButton.accent(
             key: Key('need-reconnect-${n.target}'),
-            label: '重连',
+            label: n.reconnectWord,
             onPressed: state.hubUsable
                 ? () {
                     state.reconnect(n.target);

@@ -224,7 +224,7 @@ class _MemberRow extends StatelessWidget {
     final lamp = entry?.lamp ?? Lamp.notOpened;
     final status = s.memberStatus(m);
     final title = '${m.app.name} @ ${s.deviceName(m.app.device)}';
-    final verb = openVerb(entry?.lamp);
+    final verb = openVerb(entry?.lamp, takenOver: entry?.takenOver ?? false);
     final dashed = entry == null;
     final backdrop = rowBackdrop(lamp, t);
     return SizedBox(
