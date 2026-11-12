@@ -428,7 +428,9 @@ class MainState extends ChangeNotifier {
     final r = _recordOfSid(e.sid);
     if (r == null) {
       // The old sid of a reconnect: only its end matters, and only to forget it.
-      if (e is ClosedEvent && _recordOfLastSid(e.sid) != null) {
+      final holder = e is ClosedEvent ? _recordOfLastSid(e.sid) : null;
+      if (holder != null) {
+        holder.lastSid = null; // the runner closed it itself: nothing left to close or restore
         remote.remove(e.sid)?.dispose();
         notifyListeners();
       }
@@ -480,6 +482,7 @@ class MainState extends ChangeNotifier {
       r.choice = rs.choice;
       r.window = rs.currentWindow;
       rs.bytesPerSecond = 0;
+      rs.linkDown(); // the runner may have said nothing (hub-first): same cleanup as its word
     }
     if (sid != null) {
       _sentFps.remove(sid);
@@ -492,7 +495,9 @@ class MainState extends ChangeNotifier {
   /// Takes [r] off the list and steps to the next session if it was current. Callers set the hint.
   void _endRecord(SessionRecord r) {
     final oldGroups = groups;
-    for (final sid in [r.sid, r.lastSid]) {
+    final old = r.lastSid;
+    if (old != null) port?.close(old); // reconnected but not swapped yet: the old session is still open
+    for (final sid in [r.sid, old]) {
       if (sid == null) continue;
       remote.remove(sid)?.dispose();
       _sentFps.remove(sid);
@@ -552,6 +557,7 @@ class MainState extends ChangeNotifier {
       if (p == null || tk == null) throw 'rapp-hub 没有给出嵌入端口';
       await port!.start(StartArgs(s.sid, p, tk, c.mode, c.fps, c.density));
     } catch (e) {
+      if (r.sid != s.sid) return; // it was dropped while starting: that already settled the record
       remote.remove(s.sid)?.dispose();
       _quiet.add(s.sid);
       hub!.close(s.sid);
@@ -560,6 +566,7 @@ class MainState extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    if (r.sid != s.sid || r.phase != Phase.live) return;
     _sentFps[s.sid] = (c.mode, c.fps, c.density);
     if (!reconnect) hint = '已打开 ${r.appName} @ ${deviceName(r.id)}';
     notifyListeners();
@@ -671,7 +678,7 @@ class MainState extends ChangeNotifier {
     if (embeds) {
       // The runner's own windows: raised with or without the hub.
       final rs = currentRemote;
-      if (rs != null && rs.detached) port!.raiseDetached(rs.sid);
+      if (rs != null && rs.detached && !currentDisconnected) port!.raiseDetached(rs.sid);
       return;
     }
     final c = current;
@@ -715,7 +722,6 @@ class MainState extends ChangeNotifier {
         // Reconnecting: the old picture goes now, the new session is closed when it opens (R14).
         final old = r.lastSid;
         if (old == null) return;
-        port!.close(old);
         r.ending = true;
         _endRecord(r);
         hint = '已结束 ${r.appName}';

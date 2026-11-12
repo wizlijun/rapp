@@ -95,9 +95,8 @@ class RemoteSession extends ChangeNotifier {
           quietSeconds++;
         }
       case DisconnectedEvent():
-        // The link is gone: no transfer or send round is running any more.
-        transferStatus = null;
-        composer.done(0, null);
+        linkDown();
+        return;
       case ClipsEvent():
         clips = e.clips;
         composer.clipArrived();
@@ -125,6 +124,13 @@ class RemoteSession extends ChangeNotifier {
       case ClosedEvent():
         endReason = e.reason;
     }
+    notifyListeners();
+  }
+
+  /// The link is gone: no transfer or send round is running any more.
+  void linkDown() {
+    transferStatus = null;
+    composer.done(0, null);
     notifyListeners();
   }
 

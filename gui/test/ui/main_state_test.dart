@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' show Rect, Size;
 
@@ -663,6 +664,109 @@ void main() {
       });
     });
 
+    test('ending a reconnected session before the swap closes both sids once', () {
+      env((a, t, port, st, hints) {
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        st.reconnect('111/a');
+        a.flushMicrotasks();
+        st.endCurrent();
+        port.emit(const ClosedEvent(11, 'quit'));
+        expect(st.sessionCount, 0);
+        expect(closes(port, 1).length, 1);
+        expect(closes(port, 11).length, 1);
+        expect(st.remote, isEmpty);
+      });
+    });
+
+    test('old sid closed during reconnect is forgotten: no second close at the swap', () {
+      env((a, t, port, st, hints) {
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        st.reconnect('111/a');
+        a.flushMicrotasks();
+        port.emit(const ClosedEvent(1, 'quit'));
+        expect(st.recordFor('111/a')!.lastSid, isNull);
+        port.emit(WindowsEvent(11, [rw(3)]));
+        expect(closes(port, 1), isEmpty);
+        expect(st.currentRemote!.sid, 11);
+      });
+    });
+
+    test('new sid disconnecting before the swap closes it and brings the old frame back', () {
+      env((a, t, port, st, hints) {
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        st.reconnect('111/a');
+        a.flushMicrotasks();
+        port.emit(const DisconnectedEvent(11, 'connection closed'));
+        expect(closes(port, 11).length, 1);
+        expect(st.current!.lamp, Lamp.disconnected);
+        expect(st.currentRemote!.sid, 1);
+        expect(st.remote.containsKey(11), false);
+        expect(hints, isEmpty);
+      });
+    });
+
+    test('a disconnect during start is not overwritten when start then fails', () {
+      fakeAsync((a) {
+        final t = FakeTransport();
+        final port = _SlowStartPort();
+        final st = MainState(hub: HubClient(t), configDir: tmp.path, prefs: UiPrefs(), port: port);
+        final hints = <String>[];
+        st.addListener(() => hints.add(st.hint));
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            final sid = m['reconnect'] == true ? 11 : 1;
+            t.emit(embedOpened(sid, m['req']));
+          }
+        };
+        st.openOrSwitch('111', 'a', 'Calculator');
+        a.flushMicrotasks();
+        port.release(null); // first start ok
+        a.flushMicrotasks();
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        st.reconnect('111/a');
+        a.flushMicrotasks();
+        port.emit(const DisconnectedEvent(11, 'connection closed'));
+        hints.clear();
+        port.release('boom');
+        a.flushMicrotasks();
+        expect(st.currentRemote!.sid, 1);
+        expect(st.remote.containsKey(1), true);
+        expect(st.recordFor('111/a')!.sid, 1);
+        expect(hints.where((h) => h.isNotEmpty), isEmpty);
+      });
+    });
+
+    test('a disconnect during the first start leaves no 已打开 hint', () {
+      fakeAsync((a) {
+        final t = FakeTransport();
+        final port = _SlowStartPort();
+        final st = MainState(hub: HubClient(t), configDir: tmp.path, prefs: UiPrefs(), port: port);
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') t.emit(embedOpened(1, m['req']));
+        };
+        st.openOrSwitch('111', 'a', 'Calculator');
+        a.flushMicrotasks();
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        port.release(null);
+        a.flushMicrotasks();
+        expect(st.hint, isNot(startsWith('已打开')));
+        expect(st.current!.lamp, Lamp.disconnected);
+      });
+    });
+
+    test('hub-first disconnect also clears the transfer line and sending state', () {
+      env((a, t, port, st, hints) {
+        port.emit(const TransferEvent(1, '下载 x 45%'));
+        port.emit(const ComposerStateEvent(1, sending: true));
+        t.emit({'event': 'closed', 'sid': 1, 'reason': 'connection closed'});
+        a.flushMicrotasks();
+        a.elapse(const Duration(seconds: 1));
+        expect(st.current!.lamp, Lamp.disconnected);
+        expect(st.remote[1]!.transferStatus, isNull);
+        expect(st.remote[1]!.composer.sending, false);
+      });
+    });
+
     test('a dead sid never reaches the hub or the runner', () {
       env((a, t, port, st, hints) {
         port.emit(const DisconnectedEvent(1, 'connection closed'));
@@ -803,8 +907,10 @@ void main() {
         expect(st.hubUsable, isFalse);
         // The record stays, disconnected; nothing is sent to the hub.
         expect(st.currentDisconnected, true);
+        final calls = port.calls.length;
         st.focusCurrent();
         expect(t.sent.length, sent);
+        expect(port.calls.skip(calls).where((c) => c.$1 == 'raise_detached'), isEmpty);
       });
     });
 
@@ -882,4 +988,23 @@ void main() {
       expect(endedHint('X', 'rapp-client: boom'), 'X 意外结束：boom');
     });
   });
+}
+
+/// A port whose `start` waits for the test to release it (null: ok, else the error thrown).
+class _SlowStartPort extends FakeSessionPort {
+  final _starts = <Completer<Object?>>[];
+
+  void release(Object? error) {
+    final c = _starts.removeAt(0);
+    error == null ? c.complete(null) : c.completeError(error);
+  }
+
+  @override
+  Future<Object?> invoke(String method, Map<String, Object?> args) {
+    if (method != 'start') return super.invoke(method, args);
+    calls.add((method, args));
+    final c = Completer<Object?>();
+    _starts.add(c);
+    return c.future;
+  }
 }
