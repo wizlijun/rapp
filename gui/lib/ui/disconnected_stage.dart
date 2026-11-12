@@ -1,4 +1,4 @@
-// The stage of a session whose link is down: its last frame under stripes, with 「重连」 (S3, R25).
+// The stage of a session whose link is down: its last frame under stripes, with 「重连」 and 「结束会话」 (S3, R25).
 // Shows only; it takes no pointer or keyboard input, and never resizes the stage.
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -17,6 +17,8 @@ class DisconnectedStage extends StatefulWidget {
     required this.reason,
     required this.connecting,
     this.onReconnect,
+    this.onEnd,
+    this.sessionKey,
     this.hole,
   });
 
@@ -31,6 +33,12 @@ class DisconnectedStage extends StatefulWidget {
 
   /// Null greys the button (no hub to reconnect through).
   final VoidCallback? onReconnect;
+
+  /// 「结束会话」 (two taps), next to 「重连」: ends the record even if it never went live (R9).
+  final VoidCallback? onEnd;
+
+  /// Keys the end button per session: an armed confirm never carries over to the next one.
+  final Object? sessionKey;
 
   /// Receives the last frame's global rect, so the IRON MAN grid leaves it alone (R25), like Picture's.
   final PictureHole? hole;
@@ -104,8 +112,19 @@ class _DisconnectedStageState extends State<DisconnectedStage> {
                 : Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      RappButton.accent(
-                          key: const Key('reconnect-button'), label: '重连', onPressed: widget.onReconnect),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          RappButton.accent(
+                              key: const Key('reconnect-button'), label: '重连', onPressed: widget.onReconnect),
+                          const SizedBox(width: 8),
+                          KeyedSubtree(
+                            key: ValueKey(('end', widget.sessionKey)),
+                            child: ConfirmButton(
+                                key: const Key('disconnected-end-button'), label: '结束会话', onConfirmed: widget.onEnd),
+                          ),
+                        ],
+                      ),
                       const SizedBox(height: 12),
                       Text(widget.reason, key: const Key('disconnect-reason'), style: TextStyle(color: t.text)),
                     ],

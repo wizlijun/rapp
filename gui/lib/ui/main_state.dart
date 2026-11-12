@@ -656,11 +656,17 @@ class MainState extends ChangeNotifier {
       _quiet.add(s.sid);
       hub!.close(s.sid);
       r.sid = null;
+      if (r.ending || _records[r.key] != r) {
+        // Ended while starting (M-6): the record goes, it never comes back as disconnected.
+        if (_records[r.key] == r) _endRecord(r);
+        notifyListeners();
+        return;
+      }
       _disconnect(r, '$e', hint: true);
       notifyListeners();
       return;
     }
-    if (r.sid != s.sid || r.phase != Phase.live) return;
+    if (r.sid != s.sid || r.phase != Phase.live || r.ending) return;
     _sentFps[s.sid] = (c.mode, c.fps, c.density);
     if (!reconnect) hint = '已打开 ${r.appName} @ ${deviceName(r.id)}';
     notifyListeners();
@@ -803,7 +809,9 @@ class MainState extends ChangeNotifier {
     if (r == null) return;
     switch (r.phase) {
       case Phase.live:
-        // The runner closes the session and answers with `ClosedEvent`.
+        // The runner closes the session and answers with `ClosedEvent`; a start still in flight
+        // that then fails ends the record instead of disconnecting it (M-6).
+        r.ending = true;
         port!.close(r.sid!);
         hint = '正在结束 ${r.appName}';
       case Phase.disconnected:
@@ -813,9 +821,8 @@ class MainState extends ChangeNotifier {
         _endRecord(r);
         hint = '已结束 ${r.appName}';
       case Phase.connecting:
-        // Reconnecting: the old picture goes now, the new session is closed when it opens (R14).
-        final old = r.lastSid;
-        if (old == null) return;
+        // Connecting (first open or reconnect): the record and any old picture go now; the new
+        // session is closed quietly when it opens, and a failed open is not news (R14).
         r.ending = true;
         _endRecord(r);
         hint = '已结束 ${r.appName}';

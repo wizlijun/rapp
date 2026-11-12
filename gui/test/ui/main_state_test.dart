@@ -558,6 +558,74 @@ void main() {
       });
     });
 
+    test('a never-live disconnected record can be ended: row and need go', () {
+      fakeAsync((a) {
+        final t = FakeTransport();
+        final port = FakeSessionPort();
+        final st = MainState(hub: HubClient(t), configDir: tmp.path, prefs: UiPrefs(), port: port);
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') t.emit({'event': 'error', 'error': 'offline', 'req': m['req']});
+        };
+        st.openOrSwitch('111', 'a', 'Calculator');
+        a.flushMicrotasks();
+        expect(st.needCount, 1);
+        st.endCurrent();
+        expect(st.sessionCount, 0);
+        expect(st.recordFor('111/a'), isNull);
+        expect(st.needCount, 0);
+        expect(st.hint, '已结束 Calculator');
+      });
+    });
+
+    test('ending a first connect (no old frame) takes the record; a late answer brings nothing back', () {
+      for (final answer in ['error', 'opened']) {
+        fakeAsync((a) {
+          final t = FakeTransport();
+          final port = FakeSessionPort();
+          final st = MainState(hub: HubClient(t), configDir: tmp.path, prefs: UiPrefs(), port: port);
+          t.onSend = (_) {}; // the open never answers until we say so
+          st.openOrSwitch('111', 'a', 'Calculator');
+          a.flushMicrotasks();
+          final req = t.sent.last['req'];
+          expect(st.recordFor('111/a')!.phase, Phase.connecting);
+          st.endCurrent();
+          expect(st.sessionCount, 0, reason: answer);
+          expect(st.hint, '已结束 Calculator');
+          t.emit(answer == 'error' ? {'event': 'error', 'error': 'offline', 'req': req} : embedOpened(1, req));
+          a.flushMicrotasks();
+          a.elapse(const Duration(seconds: 2));
+          expect(st.sessionCount, 0, reason: answer);
+          expect(st.needCount, 0, reason: answer);
+          expect(port.calls.where((c) => c.$1 == 'start'), isEmpty, reason: answer);
+          if (answer == 'opened') expect(t.sent.last, {'cmd': 'close', 'sid': 1});
+          expect(st.hint, '已结束 Calculator', reason: answer);
+        });
+      }
+    });
+
+    test('ended while the first start is in flight, a start failure does not bring it back (M-6)', () {
+      fakeAsync((a) {
+        final t = FakeTransport();
+        final port = _SlowStartPort();
+        final st = MainState(hub: HubClient(t), configDir: tmp.path, prefs: UiPrefs(), port: port);
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') t.emit(embedOpened(1, m['req']));
+        };
+        st.openOrSwitch('111', 'a', 'Calculator');
+        a.flushMicrotasks();
+        st.endCurrent();
+        port.release('boom');
+        a.flushMicrotasks();
+        a.elapse(const Duration(seconds: 2));
+        expect(st.sessionCount, 0);
+        expect(st.recordFor('111/a'), isNull);
+        expect(st.needCount, 0);
+        expect(st.remote.containsKey(1), false);
+        expect(t.sent.where((m) => m['cmd'] == 'close' && m['sid'] == 1), isNotEmpty);
+        expect(st.hint, isNot(contains('已断开')));
+      });
+    });
+
     test('reconnect opens again with reconnect and keeps choice and window', () {
       env((a, t, port, st, hints) {
         st.remote[1]!.setChoice(const StreamChoice('duogray', 'saver1x', 5));

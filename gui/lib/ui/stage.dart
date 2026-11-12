@@ -57,6 +57,8 @@ class Stage extends StatelessWidget {
             reason: disconnectWord(rec.reason),
             connecting: rec.phase != Phase.disconnected,
             onReconnect: state.hubUsable ? state.reconnectCurrent : null,
+            onEnd: state.endCurrent,
+            sessionKey: rec.key,
             hole: state.pictureHole,
           );
         } else if (rs != null && !rs.detached && win != null) {
