@@ -408,6 +408,68 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
       expect(port.calls.where((c) => c.$1 == 'resize'), isEmpty);
     });
+
+    RemoteWindow popup(int id, WindowKind kind, {int parent = 0, int texture = 43}) => RemoteWindow(
+          id: id,
+          parent: parent,
+          kind: kind,
+          title: '',
+          rect: const Rect.fromLTWH(50, 78, 40, 20),
+          titleBar: 0,
+          resizable: false,
+          focused: false,
+          texture: texture,
+          visible: const Rect.fromLTWH(0, 0, 1, 1),
+        );
+
+    Future<void> showWindows(WidgetTester tester, List<RemoteWindow> ws) async {
+      await openEmbedded(tester);
+      port.emit(const ReadyEvent(1, 'Safari'));
+      port.emit(WindowsEvent(1, ws));
+      await tester.pump();
+      await tester.pump();
+    }
+
+    // Main content 400x300 at scale 2 on the 800x600 stage: the popup lands at (100,100) 80x40.
+    testWidgets('popup over a missing parent draws over the current window', (tester) async {
+      await tester.pumpWidget(wrap(embedded()));
+      await showWindows(tester, [popup(9, WindowKind.sheet, parent: 99), rw(5, 400, 328)]);
+      final o = tester.getTopLeft(find.byKey(const Key('stage')));
+      final tex = find.byType(Texture);
+      expect(tex, findsNWidgets(2));
+      final pop = tester.widgetList<Texture>(tex).toList().indexWhere((x) => x.textureId == 43);
+      expect(tester.getRect(tex.at(pop)), const Rect.fromLTWH(100, 100, 80, 40).shift(o));
+      // Drawn after (over) the main texture.
+      expect(tester.widgetList<Texture>(tex).last.textureId, 43);
+      // A press on it goes to the popup's window, in its own coordinates.
+      await tester.tapAt(o + const Offset(120, 120));
+      await tester.pump();
+      final m = mouse().first;
+      expect(m['window'], 9);
+      expect(m['x'], 10.0);
+      expect(m['y'], 10.0);
+    });
+
+    testWidgets('a popup of another window is not drawn', (tester) async {
+      await tester.pumpWidget(wrap(embedded()));
+      await showWindows(tester, [rw(5, 400, 328), rw(6, 400, 328), popup(9, WindowKind.sheet, parent: 6)]);
+      expect(find.byType(Texture), findsOneWidget);
+    });
+
+    testWidgets('hover over a menu popup sends move, over a normal window not', (tester) async {
+      await tester.pumpWidget(wrap(embedded()));
+      await showWindows(tester, [popup(9, WindowKind.menu, parent: 5), rw(5, 400, 328)]);
+      final o = tester.getTopLeft(find.byKey(const Key('stage')));
+      final mouseGesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouseGesture.addPointer(location: o + const Offset(500, 500));
+      await tester.pump();
+      expect(mouse(), isEmpty);
+      await mouseGesture.moveTo(o + const Offset(120, 120));
+      await tester.pump();
+      expect(mouse().single['kind'], 'move');
+      expect(mouse().single['window'], 9);
+      expect(mouse().single['x'], 10.0);
+    });
   });
 }
 

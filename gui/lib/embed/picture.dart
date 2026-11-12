@@ -10,6 +10,7 @@ import 'geometry.dart';
 import 'pointer.dart';
 import 'remote_session.dart';
 import 'session_port.dart';
+import 'window_tabs.dart';
 
 class Picture extends StatefulWidget {
   const Picture({super.key, required this.state, required this.session, required this.window, this.hole});
@@ -24,6 +25,15 @@ class Picture extends StatefulWidget {
 
   @override
   State<Picture> createState() => _PictureState();
+}
+
+/// Where a pointer event goes: the main window or one popup, with that window's own fit.
+class _Target {
+  const _Target(this.win, this.fit, this.pic);
+  final RemoteWindow win;
+  final Rect fit;
+  final Rect pic;
+  bool get usable => fit.width > 0 && fit.height > 0;
 }
 
 class _PictureState extends State<Picture> {
@@ -42,18 +52,30 @@ class _PictureState extends State<Picture> {
   RemoteWindow get _win => widget.window;
   Object get _sid => widget.session.sid;
 
-  /// Nothing goes to A while the content has no area (`toRemote` divides by it).
-  bool get _usable => _fit.width > 0 && _fit.height > 0;
+  /// From the last layout: the popups over the window, topmost first.
+  List<_Target> _popups = const [];
 
-  void _mouse(String kind, String button, Offset local) {
-    final p = toRemote(local, _fit, _win);
-    widget.state.port?.mouse(_sid, _win.id, kind, button, p.dx, p.dy, _count);
+  /// The popup under [local], else the main window.
+  _Target _at(Offset local) {
+    for (final p in _popups) {
+      if (p.usable && p.pic.contains(local)) return p;
+    }
+    return _Target(_win, _fit, _pic);
+  }
+
+  /// The window the held button went down on.
+  _Target? _held;
+
+  void _mouse(String kind, String button, Offset local, _Target t) {
+    final p = toRemote(local, t.fit, t.win);
+    widget.state.port?.mouse(_sid, t.win.id, kind, button, p.dx, p.dy, _count);
   }
 
   void _scroll(Offset local, Offset delta) {
-    if (!_usable || !_pic.contains(local)) return;
-    final p = toRemote(local, _fit, _win);
-    widget.state.port?.scroll(_sid, _win.id, p.dx, p.dy, delta.dx, delta.dy);
+    final t = _at(local);
+    if (!t.usable || !t.pic.contains(local)) return;
+    final p = toRemote(local, t.fit, t.win);
+    widget.state.port?.scroll(_sid, t.win.id, p.dx, p.dy, delta.dx, delta.dy);
   }
 
   void _down(PointerDownEvent e) {
@@ -62,7 +84,8 @@ class _PictureState extends State<Picture> {
         : e.buttons & kSecondaryButton != 0
             ? kSecondaryButton
             : 0;
-    if (!_usable || !_pic.contains(e.localPosition)) {
+    final t = _at(e.localPosition);
+    if (!t.usable || !t.pic.contains(e.localPosition)) {
       // The letterbox is outside the picture: like the top bar, a press there takes focus away.
       widget.state.blurPicture();
       return;
@@ -70,27 +93,30 @@ class _PictureState extends State<Picture> {
     if (bit == 0 || _button != null) return;
     widget.state.focusPicture(_sid);
     _button = bit == kPrimaryButton ? 'left' : 'right';
+    _held = t;
     _count = _clicks.down(e.localPosition, e.timeStamp, bit);
-    _mouse('down', _button!, e.localPosition);
+    _mouse('down', _button!, e.localPosition, t);
   }
 
   void _move(PointerMoveEvent e) {
-    final b = _button;
-    if (b == null || !_usable) return;
-    _mouse('drag', b, clampTo(e.localPosition, _fit));
+    final b = _button, t = _held;
+    if (b == null || t == null || !t.usable) return;
+    _mouse('drag', b, clampTo(e.localPosition, t.fit), t);
   }
 
   void _up(PointerEvent e) {
-    final b = _button;
-    if (b == null) return;
+    final b = _button, t = _held;
+    if (b == null || t == null) return;
     _button = null;
-    if (_usable) _mouse('up', b, clampTo(e.localPosition, _fit));
+    _held = null;
+    if (t.usable) _mouse('up', b, clampTo(e.localPosition, t.fit), t);
   }
 
   void _hover(PointerHoverEvent e) {
-    // Only menus track the pointer without a press (Task 9 layers them over the window).
-    if (_win.kind != WindowKind.menu || !_usable || !_pic.contains(e.localPosition)) return;
-    _mouse('move', 'left', e.localPosition);
+    // Only menus track the pointer without a press.
+    final t = _at(e.localPosition);
+    if (t.win.kind != WindowKind.menu || !t.usable || !t.pic.contains(e.localPosition)) return;
+    _mouse('move', 'left', e.localPosition, t);
   }
 
   void _signal(PointerSignalEvent e) {
@@ -133,6 +159,18 @@ class _PictureState extends State<Picture> {
       final pic = pictureRect(fit, win.visible);
       _fit = fit;
       _pic = pic;
+      final popups = <_Target>[];
+      if (fit.width > 0 && fit.height > 0) {
+        for (final p in popupsFor(widget.session.windows, win.id)) {
+          final frame = popupRect(p, win, fit);
+          if (frame.width <= 0 || frame.height <= 0 || p.rect.width <= 0) continue;
+          // The popup's own content: below its title bar, if it has one.
+          final k = frame.width / p.rect.width;
+          final content = Rect.fromLTRB(frame.left, frame.top + p.titleBar * k, frame.right, frame.bottom);
+          popups.add(_Target(p, content, pictureRect(content, p.visible)));
+        }
+      }
+      _popups = popups;
       return Listener(
         behavior: HitTestBehavior.opaque,
         onPointerDown: _down,
@@ -155,6 +193,9 @@ class _PictureState extends State<Picture> {
                   child: DecoratedBox(decoration: BoxDecoration(border: Border.all(color: t.on))),
                 ),
               ),
+            // Behind first, so the first of the table ends up on top.
+            for (final p in _popups.reversed)
+              Positioned.fromRect(rect: p.pic, child: Texture(textureId: p.win.texture!)),
           ]),
         ),
       );

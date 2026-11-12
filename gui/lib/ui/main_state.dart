@@ -123,6 +123,12 @@ class MainState extends ChangeNotifier {
     currentRemote?.policy.stage(s);
   }
 
+  /// A tab was picked on the current session.
+  void selectWindow(int id) {
+    currentRemote?.selectWindow(id);
+    notifyListeners();
+  }
+
   RemoteWindow? _windowOf(RemoteSession rs) {
     for (final w in rs.windows) {
       if (w.id == rs.currentWindow) return w;
@@ -381,7 +387,8 @@ class MainState extends ChangeNotifier {
 
   /// Starts the runner session for an opened embedded hub session; the error hint on failure.
   Future<String?> _startEmbedded(HubSession s, String appName) async {
-    final rs = RemoteSession(s.sid, appName, onResize: (w, a, b) => port!.resize(s.sid, w, a, b));
+    final rs = RemoteSession(s.sid, appName, onResize: (w, a, b) => port!.resize(s.sid, w, a, b),
+        onSelect: (w) => port!.selectWindow(s.sid, w));
     remote[s.sid] = rs;
     try {
       final p = s.port, tk = s.token;

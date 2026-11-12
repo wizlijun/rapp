@@ -2,7 +2,9 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
+import 'package:rapp/ui/tab_chip.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/top_bar.dart';
@@ -154,5 +156,68 @@ void main() {
     await tester.pump();
     expect(find.text('mini'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  group('window tabs', () {
+    RemoteWindow rw(int id, String title) => RemoteWindow(
+          id: id,
+          parent: 0,
+          kind: WindowKind.normal,
+          title: title,
+          rect: const Rect.fromLTWH(0, 0, 400, 328),
+          titleBar: 28,
+          resizable: true,
+          focused: false,
+          texture: id,
+          visible: const Rect.fromLTWH(0, 0, 1, 1),
+        );
+
+    testWidgets('tabs appear at two windows and switch on tap', (tester) async {
+      final port = FakeSessionPort();
+      final es = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: port);
+      addTearDown(es.dispose);
+      await tester.pumpWidget(wrap(SizedBox(
+        width: 800,
+        child: TopBar(state: es, fullscreen: false, onToggleFullscreen: () {}),
+      )));
+      await tester.runAsync(() async {
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            t.emit({
+              'event': 'opened', 'sid': 1, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+              'port': 5001, 'token': 'tk', 'req': m['req'],
+            });
+          }
+        };
+        es.openOrSwitch('111', 'Safari', 'Safari');
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      await tester.pump();
+      es.stageSize(const Size(800, 600));
+      port.emit(const ReadyEvent(1, 'Safari'));
+      port.emit(WindowsEvent(1, [rw(1, 'One')]));
+      await tester.pump();
+      expect(find.byType(TabChip), findsNothing);
+      port.emit(WindowsEvent(1, [rw(1, 'One'), rw(2, 'Two')]));
+      await tester.pump();
+      expect(find.byType(TabChip), findsNWidgets(2));
+      // A new window becomes current, so the other tab is the one to pick.
+      expect(es.currentRemote!.currentWindow, 2);
+      port.calls.clear();
+      await tester.tap(find.widgetWithText(TabChip, 'One'));
+      await tester.pump();
+      expect(
+        port.calls.any((c) => c.$1 == 'select_window' && c.$2['sid'] == 1 && c.$2['window'] == 1),
+        isTrue,
+      );
+      final r = port.calls.where((c) => c.$1 == 'resize').toList();
+      expect(r.length, 1);
+      expect(r.single.$2['window'], 1);
+      expect(es.currentRemote!.currentWindow, 1);
+      expect(tester.widget<TabChip>(find.widgetWithText(TabChip, 'One')).selected, isTrue);
+      expect(tester.widget<TabChip>(find.widgetWithText(TabChip, 'Two')).selected, isFalse);
+    });
   });
 }

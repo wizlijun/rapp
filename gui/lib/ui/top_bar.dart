@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 
 import 'lamp.dart';
+import 'tab_chip.dart';
 import 'main_state.dart';
 import 'session_model.dart';
 import 'tokens.dart';
@@ -35,6 +36,7 @@ class TopBar extends StatelessWidget {
           listenable: state,
           builder: (context, _) {
             final cur = state.current;
+            final tabs = state.currentRemote?.tabs;
             final multi = state.sessionCount >= 2;
             final small = Theme.of(context).textTheme.bodySmall;
             return Container(
@@ -112,6 +114,31 @@ class TopBar extends StatelessWidget {
                     multi ? () => state.step(1) : null,
                   ),
                   SizedBox(width: gap),
+                  if (tabs != null && tabs.tabs.length >= 2)
+                    Flexible(
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            for (final w in tabs.tabs)
+                              Padding(
+                                padding: EdgeInsets.only(right: gap),
+                                child: ConstrainedBox(
+                                  constraints: const BoxConstraints(maxWidth: 200),
+                                  child: IntrinsicWidth(
+                                    child: TabChip(
+                                    label: w.title.isEmpty ? cur!.appName : w.title,
+                                    selected: w.id == tabs.current,
+                                    onTap: () => state.selectWindow(w.id),
+                                  ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
                   if (wide)
                     Expanded(
                       child: Text(

@@ -42,4 +42,32 @@ void main() {
   test('contentSize drops the title bar', () {
     expect(contentSize(w(200, 128)), const Size(200, 100));
   });
+
+  test('popupRect scales from the parent picture', () {
+    final parent = RemoteWindow(
+      id: 1,
+      parent: 0,
+      kind: WindowKind.normal,
+      title: 't',
+      rect: const Rect.fromLTWH(0, 0, 200, 128),
+      titleBar: 28,
+      resizable: true,
+      focused: true,
+      texture: 1,
+      visible: const Rect.fromLTWH(0, 0, 1, 1),
+    );
+    final popup = RemoteWindow(
+      id: 5,
+      parent: 1,
+      kind: WindowKind.menu,
+      title: '',
+      rect: const Rect.fromLTWH(50, 48, 20, 10),
+      titleBar: 0,
+      resizable: false,
+      focused: false,
+      texture: 5,
+      visible: const Rect.fromLTWH(0, 0, 1, 1),
+    );
+    expect(popupRect(popup, parent, const Rect.fromLTWH(0, 0, 400, 200)), const Rect.fromLTWH(100, 40, 40, 20));
+  });
 }

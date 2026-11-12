@@ -27,3 +27,16 @@ Offset toRemote(Offset local, Rect fit, RemoteWindow w) => Offset(
 
 /// The window's content size: no title bar.
 Size contentSize(RemoteWindow w) => Size(w.rect.width, w.rect.height - w.titleBar);
+
+/// Where a popup goes on the stage: attached to [parent]'s picture at its scale, with the parent's
+/// content top-left as origin (the Dart `popupFrame`). [parentPicture] is the parent content's rect.
+Rect popupRect(RemoteWindow popup, RemoteWindow parent, Rect parentPicture) {
+  final c = contentSize(parent);
+  final scale = c.width > 0 ? parentPicture.width / c.width : 1.0;
+  return Rect.fromLTWH(
+    parentPicture.left + scale * (popup.rect.left - parent.rect.left),
+    parentPicture.top + scale * (popup.rect.top - (parent.rect.top + parent.titleBar)),
+    scale * popup.rect.width,
+    scale * popup.rect.height,
+  );
+}

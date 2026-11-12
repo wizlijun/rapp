@@ -3,20 +3,27 @@ import 'package:flutter/foundation.dart';
 
 import 'resize_policy.dart';
 import 'session_port.dart';
+import 'window_tabs.dart';
 
 class RemoteSession extends ChangeNotifier {
   /// [onResize] is where the session's resize policy sends: window, width, height.
-  RemoteSession(this.sid, this.appName, {void Function(int window, int w, int h)? onResize})
+  RemoteSession(this.sid, this.appName, {void Function(int window, int w, int h)? onResize, this.onSelect})
       : policy = ResizePolicy(onResize ?? (_, _, _) {});
 
   /// Decides when the stage size becomes A's window size.
   final ResizePolicy policy;
 
+  /// Where a tab pick goes (A raises that window).
+  final void Function(int window)? onSelect;
+
+  /// The decorated windows and which one is current.
+  final WindowTabs tabs = WindowTabs();
+
   final Object sid;
   String appName;
   bool ready = false;
   List<RemoteWindow> windows = const [];
-  int? currentWindow;
+  int? get currentWindow => tabs.current;
   bool detached = false;
   int bytesPerSecond = 0;
   List<ClipRow> clips = const [];
@@ -32,16 +39,7 @@ class RemoteSession extends ChangeNotifier {
         appName = e.appName;
       case WindowsEvent():
         windows = e.windows;
-        final keep = currentWindow != null && windows.any((w) => w.id == currentWindow && w.decorated);
-        if (!keep) {
-          currentWindow = null;
-          for (final w in windows) {
-            if (w.decorated) {
-              currentWindow = w.id;
-              break;
-            }
-          }
-        }
+        tabs.update(windows);
       case TrafficEvent():
         bytesPerSecond = e.bytes;
       case ClipsEvent():
@@ -50,11 +48,22 @@ class RemoteSession extends ChangeNotifier {
         menu = e.items;
       case DetachedEvent():
         detached = e.detached;
-        if (e.current != null) currentWindow = e.current;
+        if (e.current != null) tabs.select(e.current!);
       case ClosedEvent():
         endReason = e.reason;
       default:
         return;
+    }
+    notifyListeners();
+  }
+
+  /// The user picked tab [id]: A raises it, and the stage size is judged for it at once.
+  void selectWindow(int id) {
+    if (!tabs.tabs.any((w) => w.id == id)) return;
+    tabs.select(id);
+    onSelect?.call(id);
+    for (final w in windows) {
+      if (w.id == id) policy.current(w);
     }
     notifyListeners();
   }
