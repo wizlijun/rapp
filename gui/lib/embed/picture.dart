@@ -77,12 +77,14 @@ class _PictureState extends State<Picture> {
     return _Target(_win, _fit, _pic);
   }
 
-  /// The window the held button went down on.
+  /// The window the held button went down on, and where it was last sent.
   _Target? _held;
+  Offset _heldAt = Offset.zero;
 
-  void _mouse(String kind, String button, Offset local, _Target t) {
+  void _mouse(String kind, String button, Offset local, _Target t, {Object? sid}) {
+    if (kind == 'down' || kind == 'drag') _heldAt = local;
     final p = toRemote(local, t.fit, t.win);
-    widget.state.port?.mouse(_sid, t.win.id, kind, button, p.dx, p.dy, _count);
+    widget.state.port?.mouse(sid ?? _sid, t.win.id, kind, button, p.dx, p.dy, _count);
   }
 
   void _scroll(Offset local, Offset delta) {
@@ -224,6 +226,14 @@ class _PictureState extends State<Picture> {
     super.didUpdateWidget(old);
     // A held-back press belongs to the window it landed on; never send it to another.
     if (old.window.id != widget.window.id || old.session.sid != widget.session.sid) _dropPending();
+    // A held button belongs to its session: release it there now, or A keeps it down.
+    final b = _button, t = _held;
+    if (old.session.sid != widget.session.sid && b != null && t != null) {
+      _button = null;
+      _buttonPointer = null;
+      _held = null;
+      if (t.usable) _mouse('up', b, _heldAt, t, sid: old.session.sid);
+    }
   }
 
   @override

@@ -673,6 +673,52 @@ void main() {
       expect(mouse(), isEmpty);
     });
 
+    testWidgets('a held press is released on its own session when the stage switches session', (tester) async {
+      await tester.pumpWidget(wrap(embedded()));
+      await showWindow(tester, rw(7, 400, 328));
+      final o = tester.getTopLeft(find.byKey(const Key('stage')));
+      final g = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await g.down(o + const Offset(200, 100));
+      await g.moveBy(const Offset(20, 0));
+      await tester.runAsync(() async {
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            t.emit({
+              'event': 'opened', 'sid': 2, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+              'port': 5002, 'token': 'tk', 'req': m['req'],
+            });
+          }
+        };
+        es.openOrSwitch('111', 'Notes', 'Notes');
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      port.emit(const ReadyEvent(2, 'Notes'));
+      port.emit(WindowsEvent(2, [rw(7, 400, 328)]));
+      await tester.pump();
+      await tester.pump();
+      final ups = mouse().where((c) => c['kind'] == 'up').toList();
+      expect(ups.map((c) => (c['sid'], c['window'], c['button'])), [(1, 7, 'left')]);
+      expect(ups.single['x'] as double, closeTo(110, 1e-9)); // where the drag was last sent
+      expect(ups.single['y'] as double, closeTo(78, 1e-9));
+      await g.up();
+      await tester.pump();
+      expect(mouse().where((c) => c['sid'] == 2), isEmpty);
+    });
+
+    testWidgets('a held press is released when the picture goes away', (tester) async {
+      await tester.pumpWidget(wrap(embedded()));
+      await showWindow(tester, rw(7, 400, 328));
+      final o = tester.getTopLeft(find.byKey(const Key('stage')));
+      final g = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await g.down(o + const Offset(200, 100));
+      await tester.pumpWidget(const SizedBox());
+      await g.up();
+      await tester.pump();
+      expect(mouse().map((c) => (c['sid'], c['kind'], c['window'])), [(1, 'down', 7), (1, 'up', 7)]);
+    });
+
     group('touch (P3)', () {
       Future<Offset> setup(WidgetTester tester) async {
         await tester.pumpWidget(wrap(embedded()));
