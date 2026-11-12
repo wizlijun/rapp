@@ -110,7 +110,9 @@ case let .serve(options):
             switch command {
             case .kick: server.kick()
             case .quit: server.stop("quit")
-            case .peer, .yield, .focus: break  // Task 3 wires peer and yield
+            case let .peer(port, name): server.peer(port: port, name: name)
+            case let .yield(by): server.yieldTo(by)
+            case .focus: break  // a rapp-client command; the host has no window of its own
             }
         }, onEOF: { server.stop("stdin closed") })
     }

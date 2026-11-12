@@ -11,7 +11,7 @@ private func describe(_ error: Error) -> String {
     return error.localizedDescription
 }
 
-/// Listens for one client at a time.
+/// Runs one session at a time; a second valid hello takes it over.
 final class Server {
     private let options: HostServeOptions
     private let output: WorkerOutput
@@ -21,6 +21,8 @@ final class Server {
     private let sideSlots = SideSlots()
     private var sides: [ObjectIdentifier: SideConnection] = [:]
     private var intakes: Set<Intake> = []
+    /// Device names from rapp-service, by the peer port of its connection to this worker (R2).
+    private var peerNames = PeerNames()
 
     init(options: HostServeOptions, output: WorkerOutput) {
         self.options = options
@@ -72,6 +74,16 @@ final class Server {
         }
     }
 
+    /// rapp-service names the device behind its connection from local port `port` (stdin `peer`).
+    func peer(port: UInt16, name: String) {
+        queue.async { self.peerNames.set(name, for: port) }
+    }
+
+    /// Another device just operated A (stdin `yield`): this session's input waits (R7, R8).
+    func yieldTo(_ by: String) {
+        queue.async { self.session?.yielded(to: by) }
+    }
+
     /// Every new connection first says what it is (spec §1.2): `hello` opens the
     /// session, `fetch` and `put` are side connections of the running session.
     private func accept(_ connection: NWConnection) {
@@ -103,13 +115,22 @@ final class Server {
 
     private func route(_ connection: NWConnection, _ message: Message, _ parser: MessageParser) {
         switch message {
-        case .hello:
-            if session != nil {
-                reject(connection, "busy", notify: true)
-                return
+        case let .hello(token, bundleID, _, _, _, _):
+            let name: String?
+            if case let .hostPort(_, port) = connection.endpoint { name = peerNames[port.rawValue] } else { name = nil }
+            if let old = session {
+                // Only a hello that would itself be accepted takes over; any other leaves the running session alone (R4).
+                if case let .failure(error) = checkHello(token: token, bundleID: bundleID, expected: options.token,
+                                                         bound: options.app) {
+                    reject(connection, "\(error)", notify: true)
+                    return
+                }
+                // Ends now, on this queue: its onEnd clears `session` and its side connections before the new one
+                // exists. One whose own hello failed is already ending with that reason; its onEnd leaves the new one be.
+                if old.started { old.takeOver(by: name) }
             }
             let newSession = Session(connection: connection, token: options.token, boundApp: options.app,
-                                     output: output, queue: queue) { [weak self] reason, started in
+                                     peerName: name, output: output, queue: queue) { [weak self] ended, reason, started in
                 guard let self else { return }
                 if started {
                     self.output.log("session ended: \(reason)")
@@ -118,6 +139,8 @@ final class Server {
                     self.output.log("rejected a connection: \(reason)")
                     self.output.emit(.rejected(reason: reason))
                 }
+                // A session that is no longer the current one must not clear its successor or cut its side links.
+                guard self.session === ended else { return }
                 self.session = nil
                 // Side connections belong to the session: drop them so their slots and the store are freed.
                 for side in Array(self.sides.values) { side.abort() }
@@ -215,19 +238,29 @@ final class Session {
     private let connection: NWConnection
     private let token: String
     private let boundApp: String?
+    /// The device name rapp-service announced for this connection, if any.
+    private let peerName: String?
     private let output: WorkerOutput
     private let queue: DispatchQueue
     private let trackerQueue = DispatchQueue(label: "rapp.windows")
     /// Menu-bar reads and presses (spec §3.5), so a large menu never delays the window poll.
     private let menuQueue = DispatchQueue(label: "rapp.menus")
-    /// Called once with the reason, and whether the session had started (a valid Hello).
-    private let onEnd: (String, Bool) -> Void
+    /// Called once with this session, the reason, and whether the session had started (a valid Hello).
+    private let onEnd: (Session, String, Bool) -> Void
     /// Held from a valid hello to `end`, so A doesn't idle-lock under B (todo P1).
     private lazy var awake = PowerHold.stayAwake { [output] in output.log($0) }
 
     private var parser = MessageParser()
     private var greeted = false
-    private var started = false
+    /// The protocol version the client's hello carried; message 26 only goes to clients that understand it.
+    private var helloVersion: UInt8 = 0
+    /// Holds input back while another device operates A, and paces the `input` reports (R7, R8).
+    private var yield = InputYield()
+    /// The device that last made this session wait.
+    private var yieldedBy = ""
+    /// Sends the trailing `input` report the pacing held back.
+    private var inputTimer: DispatchSourceTimer?
+    private(set) var started = false
     private var ended = false
     /// Guards `sampleMode`, `latest` and `latestSeq`, which the capture
     /// queue reads; everything else in a session lives on `queue`.
@@ -273,11 +306,12 @@ final class Session {
     private var lastWidth = 0
     private var lastHeight = 0
 
-    init(connection: NWConnection, token: String, boundApp: String?, output: WorkerOutput, queue: DispatchQueue,
-         onEnd: @escaping (String, Bool) -> Void) {
+    init(connection: NWConnection, token: String, boundApp: String?, peerName: String?, output: WorkerOutput,
+         queue: DispatchQueue, onEnd: @escaping (Session, String, Bool) -> Void) {
         self.connection = connection
         self.token = token
         self.boundApp = boundApp
+        self.peerName = peerName
         self.output = output
         self.queue = queue
         self.onEnd = onEnd
@@ -336,8 +370,15 @@ final class Session {
     }
 
     private func handle(_ message: Message) {
+        // Every command from B passes one gate; only input can be held back (R7).
         switch message {
-        case let .hello(clientToken, bundleID, mode, fps, density, _):
+        case .text, .key, .mouse, .scroll, .paste, .focus, .menuPick, .setStream, .resize, .move, .close:
+            guard admit(message) else { return }
+        default:
+            break
+        }
+        switch message {
+        case let .hello(clientToken, bundleID, mode, fps, density, version):
             guard !greeted else { fail("unexpected hello"); return }
             greeted = true
             let app: String
@@ -349,9 +390,11 @@ final class Session {
             self.fps = Int(fps)
             self.density = density
             encoder = FrameEncoder(mode: mode)
+            helloVersion = version
             started = true
             awake.begin()
-            output.log("client connected: \(app), \(streamDescription(mode))")
+            startInputTimer()
+            output.log("client connected: \(app), \(streamDescription(mode))" + (peerName.map { ", from \($0)" } ?? ""))
             output.emit(.sessionStarted(client: clientDescription, mode: mode, fps: Int(fps)))
             startCapture(bundleID: app)
         case .text, .key, .mouse, .scroll:
@@ -407,6 +450,44 @@ final class Session {
         case .ready, .error, .frame, .windows, .menuBar, .clip, .pasted, .fetch, .put, .transferStart, .chunk, .inputBlocked:
             fail("unexpected message from client")
         }
+    }
+
+    // MARK: Yielding to other devices
+
+    /// Whether `message` goes ahead; reports this session's input and tells B when its input waits.
+    private func admit(_ message: Message) -> Bool {
+        switch yield.admit(message, at: ProcessInfo.processInfo.systemUptime) {
+        case let .pass(report):
+            if report { output.emit(.input) }
+            return true
+        case let .drop(notify):
+            if let by = notify {
+                output.emit(.inputBlocked(by: by))
+                // A v5 client would drop the connection on an unknown message type (R6).
+                if clientUnderstandsInputBlocked(helloVersion) { send(.inputBlocked(by: by)) }
+            }
+            // B waits for every paste's answer before sending the next piece.
+            if case let .paste(seq, _) = message { send(.pasted(seq: seq, error: inputBlockedNotice(by: yieldedBy))) }
+            return false
+        }
+    }
+
+    /// Another device operated A just now.
+    func yielded(to by: String) {
+        guard !ended else { return }
+        yieldedBy = by
+        yield.yielded(to: by, at: ProcessInfo.processInfo.systemUptime)
+    }
+
+    private func startInputTimer() {
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + inputReportEvery, repeating: inputReportEvery)
+        timer.setEventHandler { [weak self] in
+            guard let self, !self.ended else { return }
+            if self.yield.tick(at: ProcessInfo.processInfo.systemUptime) { self.output.emit(.input) }
+        }
+        timer.resume()
+        inputTimer = timer
     }
 
     private func decoratedWindow(_ id: UInt32) -> WindowInfo? {
@@ -710,9 +791,18 @@ final class Session {
         menuQueue.asyncAfter(deadline: .now() + delay, execute: read)
     }
 
-    func end(_ reason: String) {
+    /// Another client's valid hello replaced this one: tell B who, then end as usual (R3, R5).
+    func takeOver(by name: String?) {
+        let reason = takenOverError(by: name)
+        end(reason, farewell: .error(reason))
+    }
+
+    /// With `farewell`, the connection closes once it is sent, or after 1 s.
+    func end(_ reason: String, farewell: Message? = nil) {
         guard !ended else { return }
         ended = true
+        inputTimer?.cancel()
+        inputTimer = nil
         pendingMenuRead?.cancel()
         pendingMenuRead = nil
         timer?.cancel()
@@ -730,7 +820,13 @@ final class Session {
         injector = nil
         awake.end()
         pending = nil
-        connection.cancel()
-        onEnd(reason, started)
+        if let farewell {
+            let connection = self.connection
+            connection.send(content: Data(farewell.encoded()), completion: .contentProcessed { _ in connection.cancel() })
+            queue.asyncAfter(deadline: .now() + 1) { connection.cancel() }
+        } else {
+            connection.cancel()
+        }
+        onEnd(self, reason, started)
     }
 }
