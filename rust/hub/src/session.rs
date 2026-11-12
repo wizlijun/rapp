@@ -116,21 +116,40 @@ impl Hub {
     ) {
         let id = host.id.clone();
         let app_name = app.clone();
-        let reason = match tokio::time::timeout(ACCEPT_WAIT, listener.accept()).await {
-            Ok(Ok((mut tcp, _))) => {
+        let mut kill = self.kill.subscribe();
+        let killed = async move {
+            let _ = kill.wait_for(|k| *k).await;
+        };
+        tokio::pin!(killed);
+        // `close`, `close_all` and kill count before the GUI connects too.
+        let accepted = tokio::select! {
+            r = tokio::time::timeout(ACCEPT_WAIT, listener.accept()) => match r {
+                Ok(Ok((tcp, _))) => Some(tcp),
+                _ => None,
+            },
+            _ = async { while rx.recv().await.is_some() {} } => {
+                self.finish_session(sid, &id, &app_name, since, "quit".into()).await;
+                return;
+            }
+            _ = &mut killed => {
+                self.finish_session(sid, &id, &app_name, since, "quit".into()).await;
+                return;
+            }
+        };
+        let reason = match accepted {
+            Some(mut tcp) => {
                 let _ = tcp.set_nodelay(true);
                 let side = self.accept_sides(listener, host, app);
-                let mut kill = self.kill.subscribe();
                 let reason = tokio::select! {
                     _ = async { let _ = splice(&mut tcp, &mut stream).await; } => "connection closed",
                     _ = async { while rx.recv().await.is_some() {} } => "quit",
-                    _ = async { let _ = kill.wait_for(|k| *k).await; } => "quit",
+                    _ = &mut killed => "quit",
                 };
                 side.abort();
                 let _ = side.await;
                 reason
             }
-            _ => "GUI did not connect",
+            None => "GUI did not connect",
         };
         self.finish_session(sid, &id, &app_name, since, reason.to_string()).await;
     }

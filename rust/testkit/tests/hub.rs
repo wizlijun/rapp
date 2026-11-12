@@ -459,3 +459,36 @@ async fn note_logs_detach_and_attach() {
     assert_eq!((&d[0]["windows"], &d[0]["sid"]), (&json!(2), &sid), "{:?}", d[0]);
     assert_eq!(at[0]["sid"], sid);
 }
+
+#[tokio::test]
+async fn embed_close_before_connect_ends_with_quit() {
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = hub_with_host(&a, &relay, home.path(), None).await;
+    let (sid, _, _) = embed_open(&mut hub, &a).await;
+    hub.send(json!({"cmd":"close","sid":sid})).await;
+    let ev = tokio::time::timeout(Duration::from_secs(3), hub.next()).await.expect("closed well before ACCEPT_WAIT");
+    assert_eq!(ev, json!({"event":"closed","sid":sid,"reason":"quit"}));
+    hub.finish().await;
+}
+
+#[tokio::test]
+async fn embed_wrong_token_closes_the_session() {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = hub_with_host(&a, &relay, home.path(), None).await;
+    let (sid, port, _) = embed_open(&mut hub, &a).await;
+    let mut tcp = tokio::net::TcpStream::connect(("127.0.0.1", port as u16)).await.unwrap();
+    tcp.write_all(b"wrong-token\n").await.unwrap();
+    // A rejects it ("bad token") and hangs up; like the real GUI, hang up once told.
+    let mut line = String::new();
+    tokio::io::BufReader::new(&mut tcp).read_line(&mut line).await.unwrap();
+    assert_eq!(line, "bad token\n");
+    drop(tcp);
+    let ev = tokio::time::timeout(Duration::from_secs(5), hub.next()).await.expect("closed in time");
+    assert_eq!(ev, json!({"event":"closed","sid":sid,"reason":"connection closed"}));
+    hub.finish().await;
+}
