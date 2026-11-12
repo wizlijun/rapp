@@ -1,7 +1,7 @@
 //! `rapp-host` workers (spec §3): one per app, started on demand, stdin closed after
 //! `idle` without sessions, forgotten when they exit (never restarted).
 
-use crate::state::State;
+use crate::state::{Peer, State};
 use anyhow::{anyhow, bail, Context, Result};
 use rapp_net::crypto::random_hex;
 use rapp_net::log::{pipe_lines, Lvl};
@@ -11,18 +11,22 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{ChildStdin, Command};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::process::Command;
+use tokio::sync::mpsc::UnboundedSender;
 
 const START_WAIT: Duration = Duration::from_secs(15);
 const RUN_WAIT: Duration = Duration::from_secs(15);
+/// At most one `input_blocked` access-log line per session in this time (R11).
+const BLOCKED_EVERY: Duration = Duration::from_secs(60);
 
 struct Worker {
     gen: u64,
     port: u16,
     token: String,
-    /// Dropping it closes the worker's stdin, which makes it exit.
-    stdin: Option<ChildStdin>,
+    /// Lines for the worker's stdin (one task owns it). Dropping it closes stdin once what is
+    /// queued is written, which makes the worker exit.
+    stdin: Option<UnboundedSender<String>>,
     sessions: usize,
     idle_since: Option<Instant>,
 }
@@ -43,6 +47,25 @@ impl Workers {
     pub fn close_all(&self) {
         for w in self.map.lock().unwrap().values_mut() {
             w.stdin = None;
+        }
+    }
+}
+
+/// Writes one line to `app`'s worker stdin. False when there is no worker or its stdin is closed.
+pub fn tell(state: &State, app: &str, line: String) -> bool {
+    let map = state.workers.map.lock().unwrap();
+    map.get(app).and_then(|w| w.stdin.as_ref()).is_some_and(|tx| tx.send(line + "\n").is_ok())
+}
+
+/// `app`'s session had input: every other app with a live session yields to its device (R1),
+/// unless both sessions are the same device (R9: both named, same name).
+fn tell_others(state: &State, app: &str) {
+    let from = state.live_session(app).and_then(|(_, p)| p.name);
+    let line = json!({"cmd": "yield", "by": from.as_deref().unwrap_or("")}).to_string();
+    let same = |p: &Peer| from.is_some() && p.name == from;
+    for (other, peer) in state.live_sessions() {
+        if other != app && !same(&peer) {
+            tell(state, &other, line.clone());
         }
     }
 }
@@ -156,7 +179,7 @@ pub fn end_session(state: &Arc<State>, app: &str) {
     }
 }
 
-async fn spawn(state: &Arc<State>, app: &str, gen: u64) -> Result<(u16, String, ChildStdin)> {
+async fn spawn(state: &Arc<State>, app: &str, gen: u64) -> Result<(u16, String, UnboundedSender<String>)> {
     let token = random_hex(16);
     let mut child = Command::new(host_bin(state)?)
         .args(["serve", "--app", app, "--bind", "127.0.0.1", "--port", "0", "--token-env", "RAPP_TOKEN", "--json"])
@@ -167,7 +190,7 @@ async fn spawn(state: &Arc<State>, app: &str, gen: u64) -> Result<(u16, String, 
         .kill_on_drop(true)
         .spawn()
         .context("start rapp-host")?;
-    let stdin = child.stdin.take().expect("piped stdin");
+    let mut stdin = child.stdin.take().expect("piped stdin");
     let stderr = child.stderr.take().expect("piped stderr");
     pipe_lines(state.log.clone(), stderr, json!({"src": "host", "app": app}));
     let mut lines = BufReader::new(child.stdout.take().expect("piped stdout")).lines();
@@ -185,14 +208,28 @@ async fn spawn(state: &Arc<State>, app: &str, gen: u64) -> Result<(u16, String, 
     .await
     .map_err(|_| anyhow!("rapp-host did not start"))??;
 
+    // One task owns the worker's stdin (R16): when every sender is gone it drains what is
+    // queued, then drops stdin, so the worker sees EOF.
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    tokio::spawn(async move {
+        while let Some(l) = rx.recv().await {
+            if stdin.write_all(l.as_bytes()).await.is_err() {
+                break;
+            }
+        }
+    });
+
     let (state, app) = (state.clone(), app.to_string());
     tokio::spawn(async move {
         let mut said = None;
+        let mut blocked_logged: HashMap<u64, Instant> = HashMap::new();
         while let Ok(Some(l)) = lines.next_line().await {
             let v: Value = serde_json::from_str(&l).unwrap_or_default();
             match v["event"].as_str() {
                 Some("exit") => said = Some(v),
                 Some(ev @ ("transfer" | "rejected")) => transcribe(&state, &app, ev, &v),
+                Some("input") => tell_others(&state, &app),
+                Some("input_blocked") => log_blocked(&state, &app, &v, &mut blocked_logged),
                 _ => {}
             }
         }
@@ -206,7 +243,21 @@ async fn spawn(state: &Arc<State>, app: &str, gen: u64) -> Result<(u16, String, 
             map.remove(&app);
         }
     });
-    Ok((port, token, stdin))
+    Ok((port, token, tx))
+}
+
+/// `input_blocked {app, sid, by}` for the app's live session, at most once a minute per session
+/// (R11). Nothing else from the event is copied.
+fn log_blocked(state: &State, app: &str, v: &Value, logged: &mut HashMap<u64, Instant>) {
+    let Some((sid, _)) = state.live_session(app) else { return };
+    let now = Instant::now();
+    logged.retain(|_, t| now.duration_since(*t) < BLOCKED_EVERY);
+    if logged.contains_key(&sid) {
+        return;
+    }
+    logged.insert(sid, now);
+    let by = v["by"].as_str().map(rapp_net::log::clean_name).unwrap_or_default();
+    state.log.event(Lvl::Info, "input_blocked", json!({"app": app, "sid": sid, "by": by}));
 }
 
 /// A worker's `transfer` / `rejected` stdout event as a log line, tagged with the app's current session.

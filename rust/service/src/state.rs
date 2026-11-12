@@ -179,8 +179,25 @@ impl State {
 
     /// The newest viewing session (not a side connection) on `app`.
     pub fn session_for(&self, app: &str) -> Option<u64> {
+        self.live_session(app).map(|(sid, _)| sid)
+    }
+
+    /// The newest viewing session (not a side connection) on `app`, with its peer.
+    pub fn live_session(&self, app: &str) -> Option<(u64, Peer)> {
         let s = self.sessions.lock().unwrap();
-        s.1.iter().rev().find(|(_, s)| s.app == app && !s.side).map(|(sid, _)| *sid)
+        s.1.iter().rev().find(|(_, s)| s.app == app && !s.side).map(|(sid, s)| (*sid, s.peer.clone()))
+    }
+
+    /// A viewing session on `app` started after `sid` (the newest one), if any.
+    pub fn newer_session(&self, app: &str, sid: u64) -> Option<Peer> {
+        let s = self.sessions.lock().unwrap();
+        s.1.range(sid + 1..).rev().find(|(_, s)| s.app == app && !s.side).map(|(_, s)| s.peer.clone())
+    }
+
+    /// Every app with a viewing session, with the peer of its newest one.
+    pub fn live_sessions(&self) -> BTreeMap<String, Peer> {
+        let s = self.sessions.lock().unwrap();
+        s.1.values().filter(|s| !s.side).map(|s| (s.app.clone(), s.peer.clone())).collect()
     }
 
     pub fn status(&self) -> Value {

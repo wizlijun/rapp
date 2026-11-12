@@ -626,3 +626,130 @@ async fn launchd_log_is_made_private_at_start() {
     let _svc = start_service(home.path(), bins.path(), Duration::from_secs(60)).await;
     assert_eq!(std::fs::metadata(&launchd).unwrap().permissions().mode() & 0o777, 0o600);
 }
+
+// ---- several B devices (multi-client plan, Task 4) ----
+
+/// A direct LAN connection that calls itself `name`.
+async fn b_named(ep: &quinn::Endpoint, a: &TestService, name: &str) -> quinn::Connection {
+    let (conn, r) = direct(ep, a_addr(&a.svc), json!({"op":"auth","password":PASSWORD,"name":name})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    conn
+}
+
+/// Opens `app` and pushes the worker token plus a line through it.
+async fn open_app(conn: &quinn::Connection, app: &str) -> rapp_net::quic::BiStream {
+    let mut s = bi(conn.open_bi().await.unwrap());
+    write_json(&mut s, &json!({"op":"open","app":app})).await.unwrap();
+    let r = read_json(&mut s).await.unwrap();
+    assert_eq!(r["ok"], true, "{r}");
+    echo_through(&mut s, r["token"].as_str().unwrap()).await;
+    s
+}
+
+/// Sends one line to the (fake) worker and reads its echo.
+async fn say(s: &mut rapp_net::quic::BiStream, line: &str) {
+    let sent = format!("{line}\n");
+    s.write_all(sent.as_bytes()).await.unwrap();
+    let mut back = vec![0; sent.len()];
+    tokio::time::timeout(WAIT, s.read_exact(&mut back)).await.expect("echo").unwrap();
+    assert_eq!(back, sent.as_bytes());
+}
+
+/// The worker stdin lines the fake host logged for `app`, parsed.
+fn stdin_lines(bins: &std::path::Path, app: &str) -> Vec<Value> {
+    let prefix = format!("stdin {app} ");
+    host_log(bins).lines().filter_map(|l| l.strip_prefix(&prefix)).map(|l| serde_json::from_str(l).unwrap()).collect()
+}
+
+async fn wait_until(what: &str, f: impl Fn() -> bool) {
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while !f() {
+        assert!(tokio::time::Instant::now() < deadline, "timed out waiting for {what}");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+#[tokio::test]
+async fn takeover_logs_the_old_session_as_taken_over_by_the_new_device() {
+    let a = service(None).await;
+    let home = a.home.path();
+    let ep = b_endpoint();
+    let (one, two) = (b_named(&ep, &a, "b-one").await, b_named(&ep, &a, "b-two").await);
+    let mut s1 = open_app(&one, "com.example.echo").await;
+    let first_sid = wait_log(home, "session_start", |v| v["name"] == "b-one").await["sid"].clone();
+    let _s2 = open_app(&two, "com.example.echo").await;
+    let second_sid = wait_log(home, "session_start", |v| v["name"] == "b-two").await["sid"].clone();
+    // The worker heard each device's name before that device got its `ok`.
+    let peers = stdin_lines(a.bins.path(), "com.example.echo");
+    let names: Vec<&Value> = peers.iter().filter(|v| v["cmd"] == "peer").map(|v| &v["name"]).collect();
+    assert_eq!(names, [&json!("b-one"), &json!("b-two")], "{peers:?}");
+    assert!(peers.iter().all(|v| v["port"].as_u64().is_some_and(|p| p > 0)), "{peers:?}");
+
+    // The worker closed the old connection; old B sees EOF and closes its side, as a real B does.
+    let mut rest = Vec::new();
+    tokio::time::timeout(WAIT, s1.read_to_end(&mut rest)).await.expect("old session ended").unwrap();
+    s1.writer_mut().finish().unwrap();
+    let end = wait_log(home, "session_end", |v| v["sid"] == first_sid).await;
+    assert_eq!((&end["reason"], &end["by"], &end["name"]), (&json!("taken over"), &json!("b-two"), &json!("b-one")));
+    let start = wait_log(home, "session_start", |v| v["sid"] == second_sid).await;
+    assert_eq!(start["name"], "b-two");
+    let h = ipc_once(&a.svc, home, json!({"cmd":"history","limit":10})).await;
+    let evs = h["events"].as_array().unwrap();
+    assert!(evs.iter().any(|e| e["ev"] == "session_end" && e["sid"] == first_sid && e["reason"] == "taken over"), "{h}");
+}
+
+#[tokio::test]
+async fn input_on_one_app_tells_other_apps_to_yield() {
+    let a = service(None).await;
+    let ep = b_endpoint();
+    let (one, two) = (b_named(&ep, &a, "b-one").await, b_named(&ep, &a, "b-two").await);
+    let mut echo = open_app(&one, "com.example.echo").await;
+    let _safari = open_app(&two, "com.apple.Safari").await;
+    let want = json!({"cmd":"yield","by":"b-one"});
+    let yields = || stdin_lines(a.bins.path(), "com.apple.Safari").into_iter().filter(|v| *v == want).count();
+    say(&mut echo, "input").await;
+    wait_until("first yield", || yields() == 1).await;
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    say(&mut echo, "input").await;
+    wait_until("second yield", || yields() == 2).await;
+    // Whole line as serde_json writes it.
+    let line = format!("stdin com.apple.Safari {want}");
+    assert_eq!(host_log(a.bins.path()).lines().filter(|l| *l == line).count(), 2);
+    assert!(stdin_lines(a.bins.path(), "com.example.echo").iter().all(|v| v["cmd"] != "yield"));
+}
+
+#[tokio::test]
+async fn same_device_does_not_yield_to_itself() {
+    let a = service(None).await;
+    let ep = b_endpoint();
+    let one = b_named(&ep, &a, "b-one").await;
+    let mut echo = open_app(&one, "com.example.echo").await;
+    let _safari = open_app(&one, "com.apple.Safari").await;
+    say(&mut echo, "input").await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let log = host_log(a.bins.path());
+    assert!(log.contains("stdin com.apple.Safari"), "{log}");
+    assert!(!log.contains(r#""cmd":"yield""#), "{log}");
+}
+
+#[tokio::test]
+async fn input_blocked_is_logged_once_a_minute_without_content() {
+    let a = service(None).await;
+    let home = a.home.path();
+    let ep = b_endpoint();
+    let one = b_named(&ep, &a, "b-one").await;
+    let mut s = open_app(&one, "com.example.echo").await;
+    let sid = wait_log(home, "session_start", |_| true).await["sid"].clone();
+    say(&mut s, "blocked b-two").await;
+    say(&mut s, "blocked b-two").await;
+    let v = wait_log(home, "input_blocked", |_| true).await;
+    let mut keys: Vec<&str> =
+        v.as_object().unwrap().keys().map(String::as_str).filter(|k| !["ts", "lvl", "ev"].contains(k)).collect();
+    keys.sort();
+    assert_eq!(keys, ["app", "by", "sid"], "{v}");
+    assert_eq!((&v["app"], &v["sid"], &v["by"]), (&json!("com.example.echo"), &sid, &json!("b-two")));
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(log_events(home).iter().filter(|e| e["ev"] == "input_blocked").count(), 1);
+    let h = ipc_once(&a.svc, home, json!({"cmd":"history","limit":10})).await;
+    assert!(h["events"].as_array().unwrap().iter().any(|e| e["ev"] == "input_blocked"), "{h}");
+}

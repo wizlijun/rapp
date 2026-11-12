@@ -107,10 +107,10 @@ fn handle(state: &State, cmd: &Value) -> Value {
 const HISTORY_DEFAULT: u64 = 50;
 const HISTORY_MAX: u64 = 500;
 
-/// 访问记录 (spec §6): sessions, failed auths and refused requests; never side connections.
+/// 访问记录 (spec §6): sessions, failed auths, refused requests and blocked input; never side connections.
 fn in_history(v: &Value) -> bool {
     let shown = match v["ev"].as_str() {
-        Some("session_start" | "session_end" | "auth_fail" | "rejected") => true,
+        Some("session_start" | "session_end" | "auth_fail" | "rejected" | "input_blocked") => true,
         Some("request") => v["result"] != "ok",
         _ => false,
     };

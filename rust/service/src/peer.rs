@@ -186,6 +186,11 @@ async fn splice_session(
         }
     };
     tcp.set_nodelay(true)?;
+    // The worker learns who this is (by our end's port) before B can say hello (R2).
+    if let (false, Some(name)) = (side, &peer.name) {
+        let port = tcp.local_addr()?.port();
+        workers::tell(state, app, json!({"cmd": "peer", "port": port, "name": name}).to_string());
+    }
     let reply = ok(json!({"token": token}));
     log_request(state, peer, open_fields(app, side), &reply);
     // Registered before B hears `ok`, so worker events B triggers find their sid.
@@ -206,6 +211,12 @@ async fn splice_session(
             }
         }
     };
+    // R10: a viewing session that just closed while a newer one runs on the same app was taken over.
+    let newer = if side || reason != "closed" { None } else { state.newer_session(app, sid) };
+    let (reason, by) = match newer {
+        Some(newer) => ("taken over".to_string(), newer.name),
+        None => (reason, None),
+    };
     if !state.end_session(sid) {
         return Ok(()); // the stopping service already wrote its end line
     }
@@ -213,6 +224,9 @@ async fn splice_session(
     let (up, down) = meter.get();
     fields["secs"] = json!(began.elapsed().as_secs());
     (fields["up"], fields["down"], fields["reason"]) = (json!(up), json!(down), json!(reason));
+    if let Some(by) = by {
+        fields["by"] = json!(by);
+    }
     state.log.event(Lvl::Info, "session_end", fields);
     Ok(())
 }
