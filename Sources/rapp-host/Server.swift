@@ -222,6 +222,8 @@ final class Session {
     private let menuQueue = DispatchQueue(label: "rapp.menus")
     /// Called once with the reason, and whether the session had started (a valid Hello).
     private let onEnd: (String, Bool) -> Void
+    /// Held from a valid hello to `end`, so A doesn't idle-lock under B (todo P1).
+    private lazy var awake = PowerHold.stayAwake { [output] in output.log($0) }
 
     private var parser = MessageParser()
     private var greeted = false
@@ -349,6 +351,7 @@ final class Session {
             self.density = density
             encoder = FrameEncoder(mode: mode)
             started = true
+            awake.begin()
             output.log("client connected: \(app), \(streamDescription(mode))")
             output.emit(.sessionStarted(client: clientDescription, mode: mode, fps: Int(fps)))
             startCapture(bundleID: app)
@@ -726,6 +729,7 @@ final class Session {
         capture = nil
         injector?.releaseAll()
         injector = nil
+        awake.end()
         pending = nil
         connection.cancel()
         onEnd(reason, started)
