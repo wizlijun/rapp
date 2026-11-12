@@ -12,6 +12,8 @@ class SessionEntry {
     required this.device,
     required this.path,
     required this.lamp,
+    this.bytesPerSecond,
+    this.reason,
   });
 
   /// null while the open request is still in flight (lamp = connecting).
@@ -22,6 +24,12 @@ class SessionEntry {
   final String device;
   final String path;
   final Lamp lamp;
+
+  /// Bytes received in the last second; only on a live embedded session.
+  final int? bytesPerSecond;
+
+  /// Why it disconnected, in words; only on a disconnected embedded session.
+  final String? reason;
 
   String get key => '$id/$app';
 }

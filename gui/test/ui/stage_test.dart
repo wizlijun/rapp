@@ -246,6 +246,7 @@ void main() {
       await openEmbedded(tester, app: 'Calculator');
       port.emit(const ReadyEvent(1, 'Calculator'));
       port.emit(WindowsEvent(1, [rw(5, 400, 328)]));
+      port.emit(const TrafficEvent(1, 100, 1)); // a frame came: the lamp is no longer 连接中
       await tester.pump();
       expect(find.byType(Texture), findsOneWidget);
       port.emit(const DetachedEvent(1, true));

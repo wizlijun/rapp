@@ -7,6 +7,7 @@ import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/embed/stream_choice.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/ui/lamp.dart';
+import 'package:rapp/ui/lifecycle.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/tokens.dart';
@@ -262,9 +263,10 @@ void main() {
             hints.add(last);
           }
         });
+        var reconnects = 0;
         t.onSend = (m) {
           if (m['cmd'] == 'open') {
-            final n = (m['app'] as String).length;
+            final n = (m['app'] as String).length + (m['reconnect'] == true ? 10 * ++reconnects : 0);
             t.emit({
               'event': 'opened', 'sid': n, 'id': m['id'], 'app': m['app'], 'path': 'lan',
               if (m['embed'] == true) ...{'port': 5000 + n, 'token': 'tk'},
@@ -378,25 +380,6 @@ void main() {
       }, sessions: 2);
     });
 
-    test('start failure closes the hub session and hints', () {
-      fakeAsync((a) {
-        final t = FakeTransport();
-        final hub = HubClient(t);
-        final port = FakeSessionPort()..startError = 'boom';
-        final st = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: port);
-        t.onSend = (m) {
-          if (m['cmd'] == 'open') {
-            t.emit({'event': 'opened', 'sid': 1, 'id': '111', 'app': 'a', 'path': 'lan', 'port': 5000, 'token': 'tk', 'req': m['req']});
-          }
-        };
-        st.openOrSwitch('111', 'a', 'Calculator');
-        a.flushMicrotasks();
-        expect(t.sent.last, {'cmd': 'close', 'sid': 1});
-        expect(st.hint, 'boom');
-        expect(st.remote.containsKey(1), false);
-      });
-    });
-
     test('end current closes through the port, not the hub', () {
       env((a, t, port, st, hints) {
         st.endCurrent();
@@ -404,72 +387,6 @@ void main() {
         expect(c.$1, 'close');
         expect(c.$2, {'sid': 1});
         expect(t.sent.where((m) => m['cmd'] == 'close'), isEmpty);
-      });
-    });
-
-    test('runner closed first', () {
-      env((a, t, port, st, hints) {
-        port.emit(const ClosedEvent(1, 'host says: Calculator quit'));
-        expect(st.sessionCount, 0);
-        expect(st.hint, 'Calculator 已结束：A 端关闭了 app');
-        t.emit({'event': 'closed', 'sid': 1, 'reason': 'connection closed'});
-        a.flushMicrotasks();
-        expect(st.hint, 'Calculator 已结束：A 端关闭了 app');
-        expect(hints.length, 1);
-        a.elapse(const Duration(seconds: 2));
-        expect(hints.length, 1);
-      });
-    });
-
-    test('hub closed first', () {
-      env((a, t, port, st, hints) {
-        t.emit({'event': 'closed', 'sid': 1, 'reason': 'connection closed'});
-        a.flushMicrotasks();
-        expect(st.sessionCount, 0);
-        expect(hints.length, 0);
-        a.elapse(const Duration(milliseconds: 200));
-        port.emit(const ClosedEvent(1, 'quit'));
-        expect(st.hint, '已结束 Calculator');
-        expect(hints.length, 1);
-        a.elapse(const Duration(seconds: 2));
-        expect(hints.length, 1);
-        expect(port.calls.where((c) => c.$1 == 'close'), isEmpty);
-      });
-    });
-
-    test('hub closed and runner silent: hub reason after 1 s and port closed', () {
-      env((a, t, port, st, hints) {
-        t.emit({'event': 'closed', 'sid': 1, 'reason': 'connection closed'});
-        a.flushMicrotasks();
-        a.elapse(const Duration(milliseconds: 900));
-        expect(hints.length, 0);
-        a.elapse(const Duration(milliseconds: 200));
-        expect(st.hint, 'Calculator 意外结束：连接断了');
-        expect(port.calls.any((c) => c.$1 == 'close' && c.$2['sid'] == 1), true);
-      });
-    });
-
-    test('decode error ends one session, keeps the other', () {
-      env((a, t, port, st, hints) {
-        st.select('111/a');
-        port.emit(const ClosedEvent(1, 'cannot decode frame: bad tile'));
-        expect(st.currentKey, '111/aa');
-        expect(st.remote.containsKey(2), true);
-        expect(st.sessionCount, 1);
-        expect(st.hint, 'Calculator 意外结束：cannot decode frame: bad tile');
-      }, sessions: 2);
-    });
-
-    test('switching to an open embedded session does not focus through the hub', () {
-      env((a, t, port, st, hints) {
-        port.emit(const DetachedEvent(1, true));
-        st.openOrSwitch('111', 'a', 'Calculator');
-        a.flushMicrotasks();
-        expect(t.sent.where((m) => m['cmd'] == 'focus'), isEmpty);
-        final c = port.calls.last;
-        expect(c.$1, 'raise_detached');
-        expect(c.$2, {'sid': 1});
-        expect(st.currentKey, '111/a');
       });
     });
 
@@ -485,6 +402,341 @@ void main() {
           texture: id,
           visible: const Rect.fromLTWH(0, 0, 1, 1),
         );
+
+    Map<String, dynamic> embedOpened(int sid, Object? req, {String app = 'a'}) =>
+        {...opened(sid, '111', app), 'port': 5000 + sid, 'token': 'tk', 'req': req};
+
+    Iterable<(String, Map<String, Object?>)> closes(FakeSessionPort port, int sid) =>
+        port.calls.where((c) => c.$1 == 'close' && c.$2['sid'] == sid);
+
+    test('first frame makes the lamp active, ten quiet seconds make it idle', () {
+      env((a, t, port, st, hints) {
+        port.emit(const TrafficEvent(1, 900, 0));
+        expect(st.current!.lamp, Lamp.connecting);
+        port.emit(const TrafficEvent(1, 5000, 2));
+        expect(st.current!.lamp, Lamp.active);
+        expect(st.current!.bytesPerSecond, 5000);
+        for (var i = 0; i < 10; i++) {
+          port.emit(const TrafficEvent(1, 0, 0));
+        }
+        expect(st.current!.lamp, Lamp.idle);
+        port.emit(const TrafficEvent(1, 10, 1));
+        expect(st.current!.lamp, Lamp.active);
+      });
+    });
+
+    test('link drop keeps the entry disconnected with a reason', () {
+      env((a, t, port, st, hints) {
+        port.emit(const DisconnectedEvent(1, 'the host closed the connection'));
+        expect(st.sessionCount, 1);
+        expect(st.current!.lamp, Lamp.disconnected);
+        expect(st.current!.reason, '网络断了');
+        expect(st.current!.bytesPerSecond, isNull);
+        expect(st.currentKey, '111/a');
+        expect(hints, isEmpty);
+        expect(port.calls.where((c) => c.$1 == 'close'), isEmpty);
+        expect(st.remote.containsKey(1), true);
+      });
+    });
+
+    test('A quitting the app reads A 端关闭了 app', () {
+      env((a, t, port, st, hints) {
+        port.emit(const DisconnectedEvent(1, 'host says: Calculator quit'));
+        expect(st.current!.reason, 'A 端关闭了 app');
+      });
+    });
+
+    test('disconnect sends close with reason user and reads 你断开了', () {
+      env((a, t, port, st, hints) {
+        st.disconnectCurrent();
+        expect(t.sent.last, {'cmd': 'close', 'sid': 1, 'reason': 'user'});
+        t.emit({'event': 'closed', 'sid': 1, 'reason': 'user'});
+        a.flushMicrotasks();
+        a.elapse(const Duration(milliseconds: 200));
+        port.emit(const DisconnectedEvent(1, 'the host closed the connection'));
+        expect(st.current!.reason, '你断开了');
+        expect(port.calls.where((c) => c.$1 == 'close'), isEmpty);
+        a.elapse(const Duration(seconds: 2));
+        expect(st.current!.reason, '你断开了');
+      });
+    });
+
+    test('hub closed first, runner silent: disconnected after 1 s with the hub reason', () {
+      env((a, t, port, st, hints) {
+        t.emit({'event': 'closed', 'sid': 1, 'reason': 'connection closed'});
+        a.flushMicrotasks();
+        a.elapse(const Duration(milliseconds: 999));
+        expect(st.current!.lamp, isNot(Lamp.disconnected));
+        a.elapse(const Duration(milliseconds: 1));
+        expect(st.current!.lamp, Lamp.disconnected);
+        expect(st.current!.reason, '网络断了');
+        expect(port.calls.where((c) => c.$1 == 'close'), isEmpty);
+        expect(hints, isEmpty);
+      });
+    });
+
+    test('hub closed first, then the runner ends it', () {
+      env((a, t, port, st, hints) {
+        t.emit({'event': 'closed', 'sid': 1, 'reason': 'connection closed'});
+        a.flushMicrotasks();
+        expect(st.sessionCount, 1);
+        a.elapse(const Duration(milliseconds: 200));
+        port.emit(const ClosedEvent(1, 'quit'));
+        expect(st.sessionCount, 0);
+        expect(st.hint, '已结束 Calculator');
+        a.elapse(const Duration(seconds: 2));
+        expect(hints.length, 1);
+      });
+    });
+
+    test('runner closed first', () {
+      env((a, t, port, st, hints) {
+        port.emit(const ClosedEvent(1, 'quit'));
+        expect(st.sessionCount, 0);
+        expect(st.hint, '已结束 Calculator');
+        t.emit({'event': 'closed', 'sid': 1, 'reason': 'connection closed'});
+        a.flushMicrotasks();
+        expect(hints.length, 1);
+        a.elapse(const Duration(seconds: 2));
+        expect(hints.length, 1);
+      });
+    });
+
+    test('decode error disconnects one session, keeps the other', () {
+      env((a, t, port, st, hints) {
+        st.select('111/a');
+        port.emit(const DisconnectedEvent(1, 'cannot decode frame: bad tile'));
+        expect(st.recordFor('111/a')!.phase, Phase.disconnected);
+        expect(st.current!.reason, 'cannot decode frame: bad tile');
+        expect(st.currentKey, '111/a');
+        expect(st.remote.containsKey(2), true);
+        expect(st.sessionCount, 2);
+        expect(hints, isEmpty);
+      }, sessions: 2);
+    });
+
+    test('start failure closes the hub session quietly and stays disconnected', () {
+      fakeAsync((a) {
+        final t = FakeTransport();
+        final hub = HubClient(t);
+        final port = FakeSessionPort()..startError = 'boom';
+        final st = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: port);
+        final hints = <String>[];
+        st.addListener(() => hints.add(st.hint));
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') t.emit(embedOpened(1, m['req']));
+        };
+        st.openOrSwitch('111', 'a', 'Calculator');
+        a.flushMicrotasks();
+        expect(t.sent.where((m) => m['cmd'] == 'close' && m['sid'] == 1 && !m.containsKey('reason')), isNotEmpty);
+        expect(st.recordFor('111/a')!.phase, Phase.disconnected);
+        expect(st.current!.reason, 'boom');
+        expect(hints.where((h) => h.isNotEmpty).toList(), ['Calculator 已断开：boom']);
+        expect(st.remote.containsKey(1), false);
+      });
+    });
+
+    test('first open failure stays as a disconnected entry', () {
+      fakeAsync((a) {
+        final t = FakeTransport();
+        final hub = HubClient(t);
+        final port = FakeSessionPort();
+        final st = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: port);
+        final hints = <String>[];
+        st.addListener(() => hints.add(st.hint));
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') t.emit({'event': 'error', 'error': 'bad password', 'req': m['req']});
+        };
+        st.openOrSwitch('111', 'a', 'Calculator');
+        a.flushMicrotasks();
+        expect(st.sessionCount, 1);
+        expect(st.current!.lamp, Lamp.disconnected);
+        expect(st.current!.reason, '密码不对');
+        expect(st.currentKey, '111/a');
+        expect(hints.where((h) => h.isNotEmpty).toList(), ['Calculator 已断开：密码不对']);
+      });
+    });
+
+    test('reconnect opens again with reconnect and keeps choice and window', () {
+      env((a, t, port, st, hints) {
+        st.remote[1]!.setChoice(const StreamChoice('duogray', 'saver1x', 5));
+        port.emit(WindowsEvent(1, [rw(3), rw(7)]));
+        st.selectWindow(7);
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        st.reconnect('111/a');
+        a.flushMicrotasks();
+        final open = t.sent.where((m) => m['cmd'] == 'open').last;
+        expect(open['embed'], true);
+        expect(open['reconnect'], true);
+        expect(port.calls.last.$1, 'start');
+        expect(port.calls.last.$2,
+            equals({'sid': 11, 'port': 5011, 'token': 'tk', 'mode': 'duogray', 'fps': 5, 'density': 'saver1x'}));
+        expect(st.currentKey, '111/a');
+        expect(st.sessionCount, 1);
+        expect(closes(port, 1), isEmpty);
+        port.emit(WindowsEvent(11, [rw(3), rw(7)]));
+        expect(st.remote[11]!.currentWindow, 7);
+        expect(closes(port, 1), isNotEmpty);
+        expect(st.current!.lamp, Lamp.connecting);
+        port.emit(const TrafficEvent(11, 100, 1));
+        expect(st.current!.lamp, Lamp.active);
+        expect(st.currentRemote!.sid, 11);
+      });
+    });
+
+    test('reconnect failure goes back to disconnected with the old frame', () {
+      env((a, t, port, st, hints) {
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') t.emit({'event': 'error', 'error': 'offline', 'req': m['req']});
+        };
+        st.reconnect('111/a');
+        a.flushMicrotasks();
+        expect(st.current!.lamp, Lamp.disconnected);
+        expect(st.current!.reason, '对方离线');
+        expect(st.currentRemote!.sid, 1);
+        expect(closes(port, 1), isEmpty);
+        expect(hints, ['Calculator 已断开：对方离线']);
+      });
+    });
+
+    test('opening a disconnected app reconnects it', () {
+      env((a, t, port, st, hints) {
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        st.openOrSwitch('111', 'a', 'Calculator');
+        a.flushMicrotasks();
+        expect(t.sent.where((m) => m['cmd'] == 'open').last['reconnect'], true);
+        expect(st.currentKey, '111/a');
+      });
+    });
+
+    test('end a disconnected session removes it at once', () {
+      env((a, t, port, st, hints) {
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        st.endCurrent();
+        expect(port.calls.last.$1, 'close');
+        expect(port.calls.last.$2, equals({'sid': 1}));
+        expect(st.sessionCount, 0);
+        expect(hints, ['已结束 Calculator']);
+        port.emit(const ClosedEvent(1, 'quit'));
+        expect(hints, ['已结束 Calculator']);
+      });
+    });
+
+    test('end during reconnect closes the new sid quietly', () {
+      env((a, t, port, st, hints) {
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        t.onSend = (m) {};
+        st.reconnect('111/a');
+        a.flushMicrotasks();
+        final req = t.sent.last['req'];
+        st.endCurrent();
+        expect(st.sessionCount, 0);
+        expect(closes(port, 1), isNotEmpty);
+        expect(hints, ['已结束 Calculator']);
+        t.emit(embedOpened(11, req));
+        a.flushMicrotasks();
+        expect(t.sent.last, {'cmd': 'close', 'sid': 11});
+        expect(port.calls.where((c) => c.$1 == 'start' && c.$2['sid'] == 11), isEmpty);
+        expect(hints, ['已结束 Calculator']);
+        t.emit({'event': 'closed', 'sid': 11, 'reason': 'x'});
+        a.flushMicrotasks();
+        a.elapse(const Duration(seconds: 2));
+        expect(hints, ['已结束 Calculator']);
+        expect(st.sessionCount, 0);
+      });
+    });
+
+    test('old sid closed after reconnect is ignored', () {
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(1, [rw(3)]));
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        st.reconnect('111/a');
+        a.flushMicrotasks();
+        port.emit(WindowsEvent(11, [rw(3)]));
+        port.emit(const TrafficEvent(11, 100, 1));
+        hints.clear();
+        port.emit(const ClosedEvent(1, 'quit'));
+        expect(st.sessionCount, 1);
+        expect(st.current!.lamp, Lamp.active);
+        expect(hints, isEmpty);
+      });
+    });
+
+    test('a dead sid never reaches the hub or the runner', () {
+      env((a, t, port, st, hints) {
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        final sent = t.sent.length, calls = port.calls.length;
+        port.emit(const DetachedEvent(1, false));
+        expect(t.sent.where((m) => m['cmd'] == 'note'), isEmpty);
+        st.select('111/a');
+        st.select('111/aa');
+        expect(t.sent.length, sent);
+        expect(port.calls.skip(calls).where((c) => c.$1 == 'set_stream' && c.$2['sid'] == 1), isEmpty);
+        expect(hints, isEmpty);
+      }, sessions: 2);
+    });
+
+    test('attach after the hub dropped the session sends no note', () {
+      env((a, t, port, st, hints) {
+        t.emit({'event': 'closed', 'sid': 1, 'reason': 'connection closed'});
+        a.flushMicrotasks();
+        port.emit(const DetachedEvent(1, false));
+        expect(t.sent.where((m) => m['cmd'] == 'note'), isEmpty);
+      });
+    });
+
+    test('detached session disconnecting comes back to the stage', () {
+      env((a, t, port, st, hints) {
+        port.emit(const DetachedEvent(1, true));
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        port.emit(const DetachedEvent(1, false));
+        expect(st.remote[1]!.detached, false);
+        expect(st.recordFor('111/a')!.phase, Phase.disconnected);
+        final notes = t.sent.where((m) => m['cmd'] == 'note').toList();
+        expect(notes.length, 1);
+        expect(notes.single['what'], 'detach');
+      });
+    });
+
+    test('total traffic sums live sessions only', () {
+      env((a, t, port, st, hints) {
+        port.emit(const TrafficEvent(1, 3000, 1));
+        port.emit(const TrafficEvent(2, 2000, 1));
+        expect(st.totalBytesPerSecond, 5000);
+        port.emit(const DisconnectedEvent(2, 'connection closed'));
+        expect(st.totalBytesPerSecond, 3000);
+        expect(st.disconnectedCount, 1);
+      }, sessions: 2);
+    });
+
+    test('hub exiting disconnects embedded sessions', () {
+      env((a, t, port, st, hints) {
+        t.die();
+        a.flushMicrotasks();
+        a.elapse(const Duration(seconds: 1));
+        expect(st.current!.lamp, Lamp.disconnected);
+        expect(st.current!.reason, disconnectWord('rapp-hub exited'));
+        final sent = t.sent.length, calls = port.calls.length;
+        st.reconnect('111/a');
+        a.flushMicrotasks();
+        expect(t.sent.length, sent);
+        expect(port.calls.length, calls);
+      });
+    });
+
+    test('switching to an open embedded session does not focus through the hub', () {
+      env((a, t, port, st, hints) {
+        port.emit(const DetachedEvent(1, true));
+        st.openOrSwitch('111', 'a', 'Calculator');
+        a.flushMicrotasks();
+        expect(t.sent.where((m) => m['cmd'] == 'focus'), isEmpty);
+        final c = port.calls.last;
+        expect(c.$1, 'raise_detached');
+        expect(c.$2, {'sid': 1});
+        expect(st.currentKey, '111/a');
+      });
+    });
 
     // Records compare their maps by identity: match the call by its parts.
     void lastCall(FakeSessionPort port, String method, Map<String, Object?> args) {
@@ -547,11 +799,11 @@ void main() {
         // raise (the stage shows the hub's problem), and nothing is sent anywhere.
         t.die();
         a.flushMicrotasks();
+        a.elapse(const Duration(seconds: 1));
         expect(st.hubUsable, isFalse);
-        expect(st.current, isNull);
-        final calls = port.calls.length;
+        // The record stays, disconnected; nothing is sent to the hub.
+        expect(st.currentDisconnected, true);
         st.focusCurrent();
-        expect(port.calls.length, calls);
         expect(t.sent.length, sent);
       });
     });
