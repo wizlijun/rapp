@@ -302,6 +302,60 @@ void main() {
       });
     });
 
+    List<Map<String, Object?>> sets(FakeSessionPort port, int sid) =>
+        [for (final c in port.calls) if (c.$1 == 'set_stream' && c.$2['sid'] == sid) c.$2];
+
+    test('switching away drops to 1 fps and back restores the chosen rate', () {
+      env((a, t, port, st, hints) {
+        st.select('111/a');
+        st.remote[1]!.setChoice(const StreamChoice('color16', 'adaptive', 30));
+        expect(sets(port, 1).last['fps'], 30);
+        st.select('111/aa');
+        expect(sets(port, 1).last['fps'], 1);
+        expect(sets(port, 1).last['mode'], 'color16');
+        expect(sets(port, 1).last['density'], 'adaptive');
+        st.select('111/a');
+        expect(sets(port, 1).last['fps'], 30);
+        expect(st.remote[1]!.choice.fps, 30);
+      }, sessions: 2);
+    });
+
+    test('ten sessions: only the current one streams above 1 fps', () {
+      env((a, t, port, st, hints) {
+        for (var i = 1; i <= 10; i++) {
+          final last = sets(port, i).isEmpty ? 15 : sets(port, i).last['fps'];
+          expect(last, i == 10 ? 15 : 1, reason: 'session $i');
+        }
+      }, sessions: 10);
+    });
+
+    test('a detached session keeps its rate when another is current', () {
+      env((a, t, port, st, hints) {
+        // Session 2 is current, so 1 is at 1 fps until it is detached.
+        expect(sets(port, 1).last['fps'], 1);
+        port.emit(const DetachedEvent(1, true));
+        expect(sets(port, 1).last['fps'], 15);
+        final n = sets(port, 1).length;
+        st.select('111/a');
+        st.select('111/aa');
+        expect(sets(port, 1).length, n);
+        port.emit(const DetachedEvent(1, false));
+        expect(sets(port, 1).last['fps'], 1);
+      }, sessions: 2);
+    });
+
+    test('no duplicate set_stream when nothing changed', () {
+      env((a, t, port, st, hints) {
+        final n = sets(port, 1).length;
+        expect(n, 1);
+        st.select('111/aa');
+        st.togglePanel();
+        st.select('111/aa');
+        expect(sets(port, 1).length, n);
+        expect(sets(port, 2), isEmpty);
+      }, sessions: 2);
+    });
+
     test('start failure closes the hub session and hints', () {
       fakeAsync((a) {
         final t = FakeTransport();

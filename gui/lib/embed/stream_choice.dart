@@ -28,3 +28,8 @@ const presetSharpest = StreamChoice('color16', 'original', 15);
 
 /// A new session starts like today's hub-spawned client.
 const startChoice = StreamChoice('color16', 'adaptive', 15);
+
+/// The rate a session really streams at: its chosen one while it is on the stage or detached
+/// (on screen, R6), 1 fps otherwise.
+int effectiveFps(StreamChoice c, {required bool onStage, required bool detached}) =>
+    (onStage || detached) ? c.fps : 1;

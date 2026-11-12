@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 
 import '../embed/remote_session.dart';
 import '../embed/session_port.dart';
+import '../embed/stream_choice.dart';
 import '../hub_client.dart';
 import '../permissions.dart';
 import 'lamp.dart';
@@ -83,6 +84,8 @@ class MainState extends ChangeNotifier {
     // Focus never stays on a session that is no longer current.
     if (pictureFocused != null && current?.sid != pictureFocused) _blur();
     _syncPolicy();
+    // Every change of the current session or of detach state ends in a notify.
+    _applyFps();
     super.notifyListeners();
   }
 
@@ -150,6 +153,28 @@ class MainState extends ChangeNotifier {
     }
     // Detached, the stage is not A's window: nothing is judged until it is back (then at once).
     rs.policy.current(rs.detached ? null : _windowOf(rs));
+  }
+
+  // ---- off-stage frame rate (R6) ----
+  /// The fps last sent per started session, so nothing is sent twice.
+  final Map<Object, int> _sentFps = {};
+
+  /// Sends each started session's effective rate when it differs from the last one sent: the
+  /// chosen rate on the stage or detached, 1 fps otherwise. `session.choice` is never changed.
+  void _applyFps() {
+    final p = port;
+    if (p == null) return;
+    _sentFps.removeWhere((sid, _) => !remote.containsKey(sid));
+    final onStage = currentRemote;
+    for (final rs in remote.values) {
+      final last = _sentFps[rs.sid];
+      if (last == null) continue; // not started yet: its start carries the rate
+      final c = rs.choice;
+      final fps = effectiveFps(c, onStage: identical(rs, onStage), detached: rs.detached);
+      if (fps == last) continue;
+      _sentFps[rs.sid] = fps;
+      p.setStream(rs.sid, c.mode, fps, c.density);
+    }
   }
 
   // ---- detach (R20, R21) ----
@@ -424,13 +449,15 @@ class MainState extends ChangeNotifier {
   Future<String?> _startEmbedded(HubSession s, String appName) async {
     final rs = RemoteSession(s.sid, appName, onResize: (w, a, b) => port!.resize(s.sid, w, a, b),
         onSelect: (w) => port!.selectWindow(s.sid, w),
-        onStream: (c) => port!.setStream(s.sid, c.mode, c.fps, c.density),
+        onStream: (_) => _applyFps(),
         onDropBlock: (n) => port!.composerDropBlock(s.sid, n));
     remote[s.sid] = rs;
     try {
       final p = s.port, tk = s.token;
       if (p == null || tk == null) throw 'rapp-hub 没有给出嵌入端口';
       await port!.start(StartArgs(s.sid, p, tk, 'color16', 15, 'adaptive'));
+      _sentFps[s.sid] = 15;
+      _applyFps();
       return null;
     } catch (e) {
       remote.remove(s.sid)?.dispose();
