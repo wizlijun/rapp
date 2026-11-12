@@ -172,6 +172,10 @@ class TopBar extends StatelessWidget {
                       open: state.corner == Corner.stream,
                       onToggle: () => state.toggleCorner(Corner.stream),
                       onClose: state.closeCorner,
+                      clips: state.resources.clipsOf(cur.key),
+                      canCopy: state.canCopy,
+                      onCopy: state.copyLocal,
+                      onAllClips: () => state.showPanel(PanelTab.resources),
                     ),
                   _icon(
                     'fullscreen-button',

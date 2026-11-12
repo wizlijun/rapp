@@ -6,6 +6,7 @@ import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/embed/stream_choice.dart';
 import 'package:rapp/embed/stream_menu.dart';
+import 'package:rapp/ui/resources_state.dart';
 
 import '../fakes.dart';
 import '../ui/helpers.dart';
@@ -17,16 +18,28 @@ void main() {
   var shellOpen = false;
   int? detachCalls;
   var disconnects = 0, reconnects = 0;
+  late ResourcesState res;
+  final copied = <int>[];
+  var allClips = 0;
+  var greyClip = -1;
 
   bool called(String name, Map<String, Object?> args) =>
       port.calls.any((c) => c.$1 == name && const DeepCollectionEquality().equals(c.$2, args));
 
   Future<void> open(WidgetTester tester,
-      {VoidCallback? onDetach, bool disconnected = false, bool reconnecting = false, bool hub = true, String status = '活动'}) async {
+      {VoidCallback? onDetach, bool disconnected = false, bool reconnecting = false, bool hub = true, String status = '活动',
+      List<int> seed = const [], Object seedSid = 1, int? other, int grey = -1}) async {
     shellOpen = false;
     ended = 0;
     disconnects = 0;
     reconnects = 0;
+    copied.clear();
+    allClips = 0;
+    greyClip = grey;
+    res = ResourcesState(clock: () => DateTime(2026, 11, 12, 9, 5));
+    addTearDown(res.dispose);
+    if (seed.isNotEmpty) res.addClips('k', seedSid, 'Calc @ mini', [for (final i in seed.reversed) ClipRow(i, 'clip $i', true)]);
+    if (other != null) res.addClips('other', 2, 'Notes @ mini', [ClipRow(other, 'clip $other', true)]);
     port = FakeSessionPort();
     rs = RemoteSession(1, 'Calc', onStream: (c) => port.setStream(1, c.mode, c.fps, c.density));
     tester.view.physicalSize = const Size(800, 1600);
@@ -48,6 +61,10 @@ void main() {
         onReconnect: hub ? () => reconnects++ : null,
         onEnd: () => ended++,
         onToggleDetach: onDetach,
+        clips: res.clipsOf('k'),
+        canCopy: (e) => e.clip != greyClip,
+        onCopy: (e) => copied.add(e.clip),
+        onAllClips: () => allClips++,
       )),
     )));
     await tester.tap(find.byKey(const Key('traffic')));
@@ -124,39 +141,58 @@ void main() {
     expect(called('set_stream', {'sid': 1, 'mode': 'color16', 'fps': 15, 'density': 'original'}), isTrue);
   });
 
-  testWidgets('clipboard group shows two, expands to all, insert is a button', (tester) async {
+  testWidgets('group five shows the session\'s two newest from the global list', (tester) async {
+    await open(tester, seed: [1, 2, 3], other: 9);
+    expect(find.text('clip 3'), findsOneWidget);
+    expect(find.text('clip 2'), findsOneWidget);
+    expect(find.text('clip 1'), findsNothing);
+    expect(find.text('clip 9'), findsNothing);
+    expect(find.text('（空）'), findsNothing);
+  });
+
+  testWidgets('empty group says so and has no all-clips item', (tester) async {
     await open(tester);
     expect(find.text('（空）'), findsOneWidget);
-    rs.apply(ClipsEvent(1, [for (var i = 1; i <= 5; i++) ClipRow(i, 'clip $i', i != 4)]));
+    expect(find.text('全部剪贴板'), findsNothing);
+  });
+
+  testWidgets('tapping an entry copies and closes; insert picks on the live session', (tester) async {
+    await open(tester, seed: [1, 2]);
+    await tester.tap(find.text('clip 2'));
     await tester.pump();
-    expect(find.text('（空）'), findsNothing);
-    expect(find.text('clip 1'), findsOneWidget);
-    expect(find.text('clip 2'), findsOneWidget);
-    expect(find.text('clip 3'), findsNothing);
-    await tester.ensureVisible(find.text('全部剪贴板'));
-    await tester.tap(find.text('全部剪贴板'));
-    await tester.pump();
-    expect(find.textContaining('clip '), findsNWidgets(5));
-    // The unpickable one has no insert button and does nothing.
-    expect(find.text('插入'), findsNWidgets(4));
-    await tester.ensureVisible(find.text('clip 4'));
-    await tester.tap(find.text('clip 4'));
-    await tester.pump();
-    expect(port.calls.where((c) => c.$1 == 'clip_pick'), isEmpty);
-    await tester.ensureVisible(find.text('clip 5'));
-    await tester.tap(find.text('插入').last);
-    await tester.pump();
-    expect(called('clip_pick', {'sid': 1, 'clip': 5, 'insert': true}), isTrue);
+    expect(copied, [2]);
     expect(find.text('全部剪贴板'), findsNothing); // closed
     await tester.tap(find.byKey(const Key('traffic')));
     await tester.pump();
+    expect(find.text('插入'), findsNWidgets(2));
+    await tester.tap(find.text('插入').first);
+    await tester.pump();
+    expect(called('clip_pick', {'sid': 1, 'clip': 2, 'insert': true}), isTrue);
+    expect(copied, [2]);
+  });
+
+  testWidgets('an entry of an older session has no insert button', (tester) async {
+    await open(tester, seed: [1], seedSid: 7);
+    expect(find.text('clip 1'), findsOneWidget);
+    expect(find.text('插入'), findsNothing);
+  });
+
+  testWidgets('all clips opens the resources tab and closes the menu', (tester) async {
+    await open(tester, seed: [1]);
     await tester.ensureVisible(find.text('全部剪贴板'));
     await tester.tap(find.text('全部剪贴板'));
     await tester.pump();
-    await tester.ensureVisible(find.text('clip 3'));
-    await tester.tap(find.text('clip 3'));
+    expect(allClips, 1);
+    expect(find.text('全部剪贴板'), findsNothing);
+  });
+
+  testWidgets('a grey entry is not tappable and has no insert', (tester) async {
+    await open(tester, seed: [1, 2], grey: 2);
+    expect(find.text('插入'), findsOneWidget);
+    await tester.tap(find.text('clip 2'));
     await tester.pump();
-    expect(called('clip_pick', {'sid': 1, 'clip': 3, 'insert': false}), isTrue);
+    expect(copied, isEmpty);
+    expect(find.text('clip 2'), findsOneWidget); // menu stays
   });
 
   testWidgets('end session needs two taps', (tester) async {

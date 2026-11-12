@@ -8,6 +8,7 @@ import '../embed/traffic_label.dart' show formatRate;
 import 'lamp.dart';
 import 'main_state.dart';
 import 'projects_tab.dart';
+import 'resources_tab.dart';
 import 'sessions_tab.dart';
 import 'tab_chip.dart';
 import 'tokens.dart';
@@ -26,7 +27,8 @@ class SidePanel extends StatelessWidget {
       builder: (context, _) {
         final devices = state.panel == PanelTab.devices;
         final projects = state.panel == PanelTab.projects;
-        final width = math.min(devices || projects ? 720.0 : 330.0, mq.width);
+        final resources = state.panel == PanelTab.resources;
+        final width = math.min(devices || projects || resources ? 720.0 : 330.0, mq.width);
         return Container(
           width: width,
           decoration: BoxDecoration(
@@ -52,7 +54,7 @@ class SidePanel extends StatelessWidget {
                             child: TabChip(
                               key: const Key('tab-sessions'),
                               label: '会话',
-                              selected: !devices && !projects,
+                              selected: !devices && !projects && !resources,
                               onTap: () => _tab(PanelTab.sessions),
                             ),
                           ),
@@ -81,6 +83,18 @@ class SidePanel extends StatelessWidget {
                             ),
                           ),
                         ),
+                        const SizedBox(width: 6),
+                        Flexible(
+                          child: ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 96),
+                            child: TabChip(
+                              key: const Key('tab-resources'),
+                              label: '资源',
+                              selected: resources,
+                              onTap: () => _tab(PanelTab.resources),
+                            ),
+                          ),
+                        ),
                         const Spacer(),
                         IconButton(
                           key: const Key('panel-close'),
@@ -100,6 +114,8 @@ class SidePanel extends StatelessWidget {
                         ? devicesTab
                         : projects
                         ? ProjectsTab(state: state)
+                        : resources
+                        ? ResourcesTab(state: state)
                         : SessionsTab(state: state),
                   ),
                   ConstrainedBox(

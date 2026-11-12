@@ -11,6 +11,7 @@ import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/session_model.dart';
 import 'package:rapp/ui/side_panel.dart';
 import 'package:rapp/ui/projects_tab.dart';
+import 'package:rapp/ui/resources_tab.dart';
 import 'package:rapp/ui/sessions_tab.dart';
 import 'package:rapp/ui/workspace_store.dart';
 import 'package:rapp/ui/tokens.dart';
@@ -289,6 +290,23 @@ void main() {
     ])));
     expect(tester.getSize(find.byType(SidePanel)).width, 720);
     expect(find.byType(ProjectsTab), findsOneWidget);
+  });
+
+  testWidgets('resources tab is the fourth tab and 720 wide', (tester) async {
+    tester.view.physicalSize = const Size(1194, 834);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    s.togglePanel();
+    await tester.pumpWidget(wrap(Stack(children: [
+      Positioned(left: 0, top: 0, bottom: 0, child: panel()),
+    ])));
+    expect(tester.getSize(find.byType(SidePanel)).width, 330);
+    await tester.tap(find.byKey(const Key('tab-resources')));
+    await tester.pump();
+    expect(s.panel, PanelTab.resources);
+    expect(tester.getSize(find.byType(SidePanel)).width, 720);
+    expect(find.byType(ResourcesTab), findsOneWidget);
   });
 
   testWidgets('panel is clamped to the window width', (tester) async {

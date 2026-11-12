@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../ui/controls.dart';
 import '../ui/corner_popover.dart';
+import '../ui/resources_state.dart';
 import '../ui/session_model.dart';
 import '../ui/tokens.dart';
 import 'remote_session.dart';
@@ -28,10 +29,22 @@ class StreamMenuAnchor extends StatefulWidget {
     required this.open,
     required this.onToggle,
     required this.onClose,
+    required this.clips,
+    required this.canCopy,
+    required this.onCopy,
+    required this.onAllClips,
   });
 
   final SessionPort port;
   final RemoteSession session;
+
+  /// This record's clipboard entries from the global list, newest first; the menu shows two (K16).
+  final List<ClipEntry> clips;
+  final bool Function(ClipEntry) canCopy;
+  final void Function(ClipEntry) onCopy;
+
+  /// 「全部剪贴板」: open the resources tab.
+  final VoidCallback onAllClips;
 
   /// Whether the menu is open; the owner decides (the corners are exclusive), the anchor shows it.
   final bool open;
@@ -83,6 +96,10 @@ class _StreamMenuAnchorState extends State<StreamMenuAnchor> {
         onClose: widget.onClose,
         onEnd: widget.onEnd,
         onToggleDetach: widget.onToggleDetach,
+        clips: widget.clips,
+        canCopy: widget.canCopy,
+        onCopy: widget.onCopy,
+        onAllClips: widget.onAllClips,
       ),
       child: ListenableBuilder(
         listenable: widget.session,
@@ -113,8 +130,16 @@ class StreamMenu extends StatefulWidget {
     required this.onClose,
     required this.onEnd,
     this.onToggleDetach,
+    required this.clips,
+    required this.canCopy,
+    required this.onCopy,
+    required this.onAllClips,
   });
 
+  final List<ClipEntry> clips;
+  final bool Function(ClipEntry) canCopy;
+  final void Function(ClipEntry) onCopy;
+  final VoidCallback onAllClips;
   final SessionPort port;
   final RemoteSession session;
   final String path;
@@ -132,7 +157,6 @@ class StreamMenu extends StatefulWidget {
 }
 
 class _StreamMenuState extends State<StreamMenu> {
-  bool _allClips = false;
   final _expanded = <String>{};
 
   RemoteSession get _s => widget.session;
@@ -155,8 +179,6 @@ class _StreamMenuState extends State<StreamMenu> {
       listenable: _s,
       builder: (context, _) {
         final c = _s.choice;
-        final clips = _s.clips;
-        final shown = _allClips ? clips : clips.take(2).toList();
         final window = _s.currentWindow;
         final reduced = widget.disconnected || widget.reconnecting; // only the session group (R21)
         return SingleChildScrollView(
@@ -165,7 +187,7 @@ class _StreamMenuState extends State<StreamMenu> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (!reduced) ..._streamGroups(t, c, clips, shown),
+              if (!reduced) ..._streamGroups(t, c),
               _head(t, '会话'),
               _Item('路径 ${pathLabels[widget.path] ?? widget.path} · ${widget.status}', enabled: false),
               if (widget.disconnected)
@@ -202,7 +224,7 @@ class _StreamMenuState extends State<StreamMenu> {
   }
 
   /// Groups 1 to 5: presets, mode, density, rate and A's clipboard. Not on a dead session (R21).
-  List<Widget> _streamGroups(RappTokens t, StreamChoice c, List<ClipRow> clips, List<ClipRow> shown) {
+  List<Widget> _streamGroups(RappTokens t, StreamChoice c) {
     return [
               _head(t, '预设'),
               _Item('最省流（双色·灰度 + 自适应 + 1 fps）', checked: c == presetLeast, onTap: () => _choose(presetLeast)),
@@ -217,17 +239,17 @@ class _StreamMenuState extends State<StreamMenu> {
               for (final (label, f) in const [('1 fps', 1), ('5 fps', 5), ('15 fps', 15), ('30 fps（看视频）', 30)])
                 _Item(label, checked: c.fps == f, onTap: () => _choose(c.copyWith(fps: f))),
               _head(t, 'A 的剪贴板'),
-              if (clips.isEmpty) _Item('（空）', enabled: false),
-              for (final r in shown)
+              if (widget.clips.isEmpty) _Item('（空）', enabled: false),
+              for (final e in widget.clips.take(2))
                 _Item(
-                  r.title,
-                  enabled: r.pickable,
-                  onTap: () => _then(() => widget.port.clipPick(_sid, r.id, false)),
-                  trailing: r.pickable
-                      ? _InsertButton(onTap: () => _then(() => widget.port.clipPick(_sid, r.id, true)))
+                  e.title,
+                  enabled: widget.canCopy(e),
+                  onTap: () => _then(() => widget.onCopy(e)),
+                  trailing: widget.canCopy(e) && e.sid == _sid
+                      ? _InsertButton(onTap: () => _then(() => widget.port.clipPick(_sid, e.clip, true)))
                       : null,
                 ),
-              if (clips.length > 2 && !_allClips) _Item('全部剪贴板', onTap: () => setState(() => _allClips = true)),
+              if (widget.clips.isNotEmpty) _Item('全部剪贴板', onTap: () => _then(widget.onAllClips)),
     ];
   }
 
