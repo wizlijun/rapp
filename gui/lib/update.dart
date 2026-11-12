@@ -86,7 +86,20 @@ enum UpdateAction { check, apply, applyAnyway, dismiss, openPage }
     );
   }
   if (u.state == 'idle' && u.latest == null) return (line: cur, actions: check);
+  if (u.state == 'idle' && _newer(u.latest, u.current)) return (line: '$cur · 有新版本 $v', actions: check);
   return (line: '$cur · 已是最新', actions: check);
+}
+
+/// True when dotted version [a] is above [b]; an unreadable part counts as 0.
+bool _newer(String? a, String b) {
+  if (a == null) return false;
+  List<int> p(String s) => [for (final x in s.split('.')) int.tryParse(x) ?? 0];
+  final x = p(a), y = p(b);
+  for (var i = 0; i < x.length || i < y.length; i++) {
+    final d = (i < x.length ? x[i] : 0) - (i < y.length ? y[i] : 0);
+    if (d != 0) return d > 0;
+  }
+  return false;
 }
 
 /// The quiet dot on the 本机 chip: a version is on its way in and was not dismissed (K27).

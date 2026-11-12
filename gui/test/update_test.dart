@@ -82,6 +82,14 @@ void main() {
     }
   });
 
+  test('idle with a newer cached version is not 已是最新', () {
+    final v = updateView(info('idle', latest: '0.5.0'));
+    expect(v.line, '当前 0.4.1 · 有新版本 0.5.0');
+    expect(v.actions, [UpdateAction.check]);
+    expect(updateView(info('idle', latest: '0.4.0')).line, '当前 0.4.1 · 已是最新');
+    expect(updateView(info('idle', latest: '0.10.0')).line, contains('有新版本'));
+  });
+
   test('badge only while an update is pending', () {
     for (final s in ['downloading', 'ready', 'installing']) {
       expect(updateBadge(info(s)), isTrue, reason: s);

@@ -94,8 +94,8 @@ class _LocalSectionState extends State<LocalSection> {
   }
 
   void _onStatus() {
-    // Accessibility reads ✗ once its old record is gone: the manual steps have done their job.
-    if (_resetFailed.value && m.status?.accessibility == false) _resetFailed.value = false;
+    // The manual steps stay while accessibility still reads ✗; they have done their job once it reads ✓.
+    if (_resetFailed.value && m.status?.accessibility == true) _resetFailed.value = false;
     _maybeGuide();
   }
 

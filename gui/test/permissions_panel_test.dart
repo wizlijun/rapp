@@ -221,6 +221,33 @@ void main() {
       expect(opened, [Permission.accessibility]);
     });
 
+    testWidgets('manual steps stay while accessibility stays unchecked', (tester) async {
+      svc = FakeService('tok')
+        ..perms = {'screen_recording': true, 'accessibility': false}
+        ..replies['permissions_reset'] = {
+          'ok': true,
+          'screen_recording_reset': true,
+          'accessibility_reset': false,
+          'permissions': {'screen_recording': true, 'accessibility': false},
+        };
+      await pump(tester);
+      await tester.tap(find.text(resetLabel));
+      await tester.pump();
+      await tester.tap(find.text('再点一次确认'));
+      await tester.pump();
+      await settle(tester, () => svc.received.any((r) => r['cmd'] == 'permissions_reset'));
+      expect(find.text(manualSteps), findsOneWidget);
+      // A status poll while accessibility still reads ✗ must not drop the hint.
+      await tester.runAsync(() => m.checkPermissions());
+      await tester.pump(const Duration(seconds: 4));
+      expect(find.text(manualSteps), findsOneWidget);
+      // Once it reads ✓ the hint goes.
+      svc.perms = {'screen_recording': true, 'accessibility': true};
+      await tester.runAsync(() => m.checkPermissions());
+      await tester.pump(const Duration(seconds: 4));
+      expect(find.text(manualSteps), findsNothing);
+    });
+
     testWidgets('a working reset shows no manual steps', (tester) async {
       svc = FakeService('tok')
         ..perms = {'screen_recording': false, 'accessibility': true}
