@@ -41,6 +41,12 @@ public enum ChannelCommand: Equatable {
     case composerSend(sid: Int64, pieces: [ComposerPiece])
     /// A chip was removed from the editor.
     case composerDropBlock(sid: Int64, block: Int)
+    /// Move the session from the stage into native windows (answered by a `detached` call).
+    case detach(sid: Int64)
+    /// Put a detached session back on the stage (answered by a `detached` call).
+    case attach(sid: Int64)
+    /// Bring a detached session's windows to the front, the last key one as key.
+    case raiseDetached(sid: Int64)
 }
 
 /// Parses one Dart call. Missing fields, wrong types and out-of-range values throw
@@ -49,7 +55,8 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
     if method == "init" { return .initialize }
     let known: Set<String> = ["start", "close", "mouse", "scroll", "key", "resize", "select_window", "set_stream",
                               "cancel_transfer", "picture_focus", "clip_pick", "menu_pick", "move_top_left",
-                              "composer_paste", "composer_attach", "composer_send", "composer_drop_block"]
+                              "composer_paste", "composer_attach", "composer_send", "composer_drop_block",
+                              "detach", "attach", "raise_detached"]
     guard known.contains(method) else { throw ChannelError.unknown(method) }
     guard let map = args as? [String: Any] else { throw ChannelError.bad(method) }
     let a = Args(method: method, map: map)
@@ -103,6 +110,12 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
         return .composerSend(sid: sid, pieces: try a.pieces())
     case "composer_drop_block":
         return .composerDropBlock(sid: sid, block: try a.block("block"))
+    case "detach":
+        return .detach(sid: sid)
+    case "attach":
+        return .attach(sid: sid)
+    case "raise_detached":
+        return .raiseDetached(sid: sid)
     default:
         return .cancelTransfer(sid: sid)
     }

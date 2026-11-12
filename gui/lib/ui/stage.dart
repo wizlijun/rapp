@@ -1,4 +1,4 @@
-// The stage: where the remote window will sit. S1 shows a placeholder.
+// The stage: where the remote window sits; a placeholder while it is elsewhere (S1, detached).
 import 'package:flutter/material.dart';
 
 import '../embed/composer_bar.dart';
@@ -86,6 +86,12 @@ class Stage extends StatelessWidget {
                         label: '切到窗口',
                         onPressed: state.focusCurrent,
                       ),
+                      if (rs != null && rs.detached)
+                        RappButton.secondary(
+                          key: const Key('attach-button'),
+                          label: '放回主窗口',
+                          onPressed: state.attach,
+                        ),
                       // Keyed per session: an armed confirm never carries
                       // over to the session that becomes current next.
                       KeyedSubtree(
@@ -116,7 +122,8 @@ class Stage extends StatelessWidget {
             ),
           );
           final port = state.port;
-          if (!picture || rs == null || port == null) return stage;
+          // A detached session keeps its 「输入」 here: the placeholder stands for its windows.
+          if (!(picture || (rs != null && rs.detached)) || rs == null || port == null) return stage;
           // The composer floats over the picture's bottom edge; opening it never resizes A.
           return Stack(
             children: [

@@ -21,7 +21,12 @@ final class SurfaceTexture: NSObject, FlutterTexture {
 
 /// The `rapp/session` channel: glue between Dart and the embedded sessions in `RappSession`.
 /// Parsing and encoding are `channelCommand` / `eventPayload`; this only owns the sessions,
-/// their textures and the main-thread hops.
+/// their textures, their detached windows and the main-thread hops.
+///
+/// Threading, per entry point: `handle` (Flutter's platform thread, which is main on macOS),
+/// `deliver` (hopped onto main from each session's queue), the key monitor and every observer
+/// (main). So all of this object's state is main-only; a session is only reached through its
+/// queue-safe `send`/`close`/`setStream`…, or on its queue (`backingScale`).
 final class SessionPlugin: NSObject, FlutterPlugin {
   private final class Live {
     let session: EmbeddedSession
@@ -29,6 +34,8 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     let queue: DispatchQueue
     /// Window id → its registered texture.
     var textures = [UInt32: (id: Int64, texture: SurfaceTexture)]()
+    /// A's latest window table, for a detach.
+    var windows = [SessionWindow]()
     init(session: EmbeddedSession, queue: DispatchQueue) {
       self.session = session
       self.queue = queue
@@ -44,8 +51,13 @@ final class SessionPlugin: NSObject, FlutterPlugin {
   private var scaleObserver: NSObjectProtocol?
   /// The session whose picture has keyboard focus (Dart's `picture_focus`).
   private var focusedSid: Int64?
-  /// What A has been sent presses for: released when focus leaves (R15).
+  /// What A has been sent presses for: released when focus leaves (R15). One tracker for the
+  /// stage and the detached windows, so a release always goes where its press went.
   private var keys = KeyTracker()
+  /// The session `keys` holds presses for (the one they were sent to), if any.
+  private var keysHolder: Int64?
+  /// Sessions shown in their own windows instead of on the stage (R20).
+  private var detached = [Int64: DetachedSession]()
   private var keyMonitor: Any?
   private var resignObserver: NSObjectProtocol?
   private var terminateObserver: NSObjectProtocol?
@@ -147,7 +159,43 @@ final class SessionPlugin: NSObject, FlutterPlugin {
         focusedSid = sid
       }
       result(nil)
+    case let .detach(sid):
+      detachSession(sid)
+      result(nil)
+    case let .attach(sid):
+      attachSession(sid)
+      result(nil)
+    case let .raiseDetached(sid):
+      detached[sid]?.raise()
+      result(nil)
     }
+  }
+
+  /// On main: the session's windows leave the stage for their own (R20). Nothing to show (no
+  /// decorated window), an unknown or an already detached session: nothing happens.
+  private func detachSession(_ sid: Int64) {
+    guard detached[sid] == nil, let entry = live[sid],
+          entry.windows.contains(where: { $0.info.kind.isDecorated }) else { return }
+    // Keys typed on the stage were the stage's: A gets their releases before the windows move.
+    if keysHolder == sid { releaseKeys() }
+    detached[sid] = DetachedSession(session: entry.session, windows: entry.windows, beside: view?.window,
+                                    onAttach: { [weak self] in self?.attachSession(sid) })
+    let payload = detachedPayload(sid: sid, detached: true, current: nil)
+    channel.invokeMethod(payload.method, arguments: payload.args)
+  }
+
+  /// On main: back on the stage (Dart's `attach`, ⌃⌘D in one of its windows, or no window left,
+  /// R7); the last key window becomes the current tab (R21).
+  private func attachSession(_ sid: Int64) {
+    guard let session = detached.removeValue(forKey: sid) else { return }
+    let wasKey = session.owns(NSApp.keyWindow)
+    let current = session.lastKey
+    if keysHolder == sid { releaseKeys() }
+    session.close()
+    // Focus stays within rapp: only when one of these windows had it does the main window take it.
+    if wasKey { view?.window?.makeKeyAndOrderFront(nil) }
+    let payload = detachedPayload(sid: sid, detached: false, current: current)
+    channel.invokeMethod(payload.method, arguments: payload.args)
   }
 
   /// On main: 「附件」's file picker; the picked files go to the composer's (tested) `attach`.
@@ -191,10 +239,12 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       guard let self else { return event }
       return self.route(event)
     }
+    // Key focus leaving the main window or a detached one: A gets the releases (R15).
     resignObserver = NotificationCenter.default.addObserver(
       forName: NSWindow.didResignKeyNotification, object: nil, queue: .main
     ) { [weak self] note in
-      guard let self, let main = self.view?.window, note.object as? NSWindow === main else { return }
+      guard let self, let window = note.object as? NSWindow else { return }
+      guard window === self.view?.window || self.detached.values.contains(where: { $0.owns(window) }) else { return }
       self.releaseKeys()
     }
     // Quitting (⌘Q included): A gets the releases before the connections go.
@@ -214,11 +264,11 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     }
   }
 
-  /// On main, for every key event of the app: a key for A is sent to the focused session and
-  /// swallowed (nil); everything else goes on to Flutter unchanged. `routeKey` decides.
+  /// On main, for every key event of the app: a key for A is sent to its session and swallowed
+  /// (nil); everything else goes on unchanged. Which session is the event's window's: the main
+  /// window's is the one whose picture has focus (`routeKey`), a detached window's is its own
+  /// (`routeDetachedKey`), any other window's (panels, sheets) or none is rapp's (finding v).
   private func route(_ event: NSEvent) -> NSEvent? {
-    // Only the main window's keys (detached windows route their own, Task 12).
-    if let main = view?.window, event.window !== main { return event }
     let down: Bool
     switch event.type {
     case .keyDown: down = true
@@ -229,21 +279,50 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     default:
       return event
     }
-    let target = focusedSid.flatMap { live[$0] }
-    let decision = keys.route(keyCode: event.keyCode, down: down, flags: event.modifierFlags,
-                              pictureFocused: target != nil)
+    var owners = [ObjectIdentifier: Int64]()
+    for (sid, session) in detached {
+      for window in session.allWindows { owners[ObjectIdentifier(window)] = sid }
+    }
+    let to = keyWindowRoute(window: event.window.map(ObjectIdentifier.init),
+                            main: view?.window.map(ObjectIdentifier.init), detached: owners)
+    let targetSid: Int64?
+    let decision: KeyDecision
+    var attach = false
+    switch to {
+    case .local:
+      return event
+    case .main:
+      targetSid = focusedSid.flatMap { live[$0] != nil && detached[$0] == nil ? $0 : nil }
+      if targetSid != keysHolder { releaseKeys() }
+      decision = keys.route(keyCode: event.keyCode, down: down, flags: event.modifierFlags,
+                            pictureFocused: targetSid != nil)
+    case let .detached(sid):
+      targetSid = sid
+      if targetSid != keysHolder { releaseKeys() }
+      decision = keys.routeDetached(keyCode: event.keyCode, down: down, flags: event.modifierFlags)
+      attach = down && event.type == .keyDown
+        && routeDetachedKey(keyCode: event.keyCode, flags: event.modifierFlags) == .attach
+    }
+    let target = targetSid.flatMap { live[$0] }
     for code in decision.release {
       target?.session.send(.key(keyCode: code, modifiers: 0, down: false))
     }
-    guard decision.route == .remote, let target else { return event }
+    if attach, let sid = targetSid {
+      // ⌃⌘D in a detached window: back on the stage, once this event is done with its window.
+      DispatchQueue.main.async { [weak self] in self?.attachSession(sid) }
+      return nil
+    }
+    guard decision.route == .remote, let target, let sid = targetSid else { return event }
+    keysHolder = sid
     target.session.send(.key(keyCode: event.keyCode, modifiers: UInt64(event.modifierFlags.rawValue), down: down))
     return nil
   }
 
-  /// A release for every key A still holds, to the focused session (nothing stays stuck on A).
+  /// A release for every key A still holds, to the session that got the presses (nothing stays stuck on A).
   private func releaseKeys() {
     let held = keys.releaseAll()
-    guard let sid = focusedSid, let entry = live[sid] else { return }
+    defer { keysHolder = nil }
+    guard let sid = keysHolder, let entry = live[sid] else { return }
     for code in held {
       entry.session.send(.key(keyCode: code, modifiers: 0, down: false))
     }
@@ -270,6 +349,7 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       for id in ids {
         if let t = entry.textures[id] { registry.textureFrameAvailable(t.id) }
       }
+      detached[sid]?.surfacesUpdated(ids)
     case let .windows(windows):
       let change = textureChanges(have: Set(entry.textures.keys), windows: windows)
       for id in change.unregister {
@@ -279,16 +359,22 @@ final class SessionPlugin: NSObject, FlutterPlugin {
         let texture = SurfaceTexture(surfaces: entry.session.surfaces, window: id)
         entry.textures[id] = (registry.register(texture), texture)
       }
+      entry.windows = windows
+      // The textures stay registered while detached: attaching shows the picture at once.
+      detached[sid]?.update(windows)
     case .closed:
       // Every texture goes before Dart hears the session ended.
       entry.textures.values.forEach { registry.unregisterTexture($0.id) }
       entry.textures = [:]
       live[sid] = nil
       panels.removeValue(forKey: sid)?.cancel(nil)
-      if focusedSid == sid {
+      // Its windows go with it (the close button, 「结束会话」, A quitting): no attach is sent.
+      detached.removeValue(forKey: sid)?.close()
+      if keysHolder == sid {
         _ = keys.releaseAll()
-        focusedSid = nil
+        keysHolder = nil
       }
+      if focusedSid == sid { focusedSid = nil }
     default:
       break
     }

@@ -52,4 +52,52 @@ void main() {
     r.apply(const ClosedEvent(1, 'quit'));
     expect(r.endReason, 'quit');
   });
+
+  group('attach with a current window (x)', () {
+    test('a known id becomes current at once', () {
+      final r = RemoteSession(1, 'x');
+      r.apply(WindowsEvent(1, [win(5, WindowKind.normal), win(8, WindowKind.normal)]));
+      r.apply(const DetachedEvent(1, true));
+      r.apply(const DetachedEvent(1, false, current: 8));
+      expect(r.detached, false);
+      expect(r.tabs.current, 8);
+    });
+
+    test('an id that is not a tab yet waits for the table that brings it', () {
+      final r = RemoteSession(1, 'x');
+      r.apply(WindowsEvent(1, [win(5, WindowKind.normal)]));
+      r.apply(const DetachedEvent(1, true));
+      r.apply(const DetachedEvent(1, false, current: 8));
+      expect(r.tabs.current, 5);
+      // 9 and 8 are both new: without the wait the first new one (9) would win.
+      r.apply(WindowsEvent(1, [win(9, WindowKind.normal), win(8, WindowKind.normal)]));
+      expect(r.tabs.current, 8);
+      // Used once: a later new window becomes current as usual.
+      r.apply(WindowsEvent(1, [win(9, WindowKind.normal), win(8, WindowKind.normal), win(10, WindowKind.normal)]));
+      expect(r.tabs.current, 10);
+    });
+
+    test('a popup id never becomes current; a tab pick drops the wait', () {
+      final r = RemoteSession(1, 'x');
+      r.apply(WindowsEvent(1, [win(5, WindowKind.normal), win(6, WindowKind.normal)]));
+      r.apply(const DetachedEvent(1, false, current: 8));
+      r.apply(WindowsEvent(1, [win(5, WindowKind.normal), win(6, WindowKind.normal), win(8, WindowKind.menu)]));
+      expect(r.tabs.current, 5);
+      r.selectWindow(6);
+      r.apply(WindowsEvent(1, [
+        win(5, WindowKind.normal), win(6, WindowKind.normal), win(9, WindowKind.normal), win(8, WindowKind.normal),
+      ]));
+      expect(r.tabs.current, 9); // the first new one, by the ordinary rule: the wait is gone
+    });
+
+    test('detaching again forgets an earlier wait', () {
+      final r = RemoteSession(1, 'x');
+      r.apply(WindowsEvent(1, [win(5, WindowKind.normal)]));
+      r.apply(const DetachedEvent(1, false, current: 8));
+      r.apply(const DetachedEvent(1, true));
+      r.apply(const DetachedEvent(1, false));
+      r.apply(WindowsEvent(1, [win(9, WindowKind.normal), win(8, WindowKind.normal)]));
+      expect(r.tabs.current, 9);
+    });
+  });
 }

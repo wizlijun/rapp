@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/service_client.dart';
 import 'package:rapp/ui/fullscreen.dart';
@@ -288,6 +289,65 @@ void main() {
       expect(s.currentKey, '111/A');
     }
   });
+
+  testWidgets('ctrl-cmd-D toggles both ways', (tester) async {
+    final port = FakeSessionPort();
+    s.dispose();
+    s = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: port);
+    final base = t.onSend!;
+    t.onSend = (cmd) {
+      if (cmd['cmd'] != 'open') return base(cmd);
+      t.emit({
+        'event': 'opened', 'req': cmd['req'], 'sid': 1, 'id': cmd['id'], 'app': cmd['app'], 'path': 'lan',
+        'port': 5001, 'token': 'tk',
+      });
+    };
+    await pump(tester);
+    await tester.runAsync(() async {
+      s.openOrSwitch('111', 'com.apple.calculator', 'Calculator');
+      for (var i = 0; i < 4; i++) {
+        await flush();
+      }
+    });
+    port.emit(const ReadyEvent(1, 'Calculator'));
+    port.emit(WindowsEvent(1, [
+      RemoteWindow(
+        id: 7, parent: 0, kind: WindowKind.normal, title: 'w7', rect: const Rect.fromLTWH(0, 0, 400, 328),
+        titleBar: 28, resizable: true, focused: false, texture: 7, visible: const Rect.fromLTWH(0, 0, 1, 1),
+      ),
+    ]));
+    await tester.pump();
+    Future<void> chord() async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pump();
+    }
+
+    // Records compare their maps by identity: match the call by its parts.
+    void last(String method) {
+      expect(port.calls.last.$1, method);
+      expect(port.calls.last.$2, equals({'sid': 1}));
+    }
+
+    await chord();
+    last('detach');
+    port.emit(const DetachedEvent(1, true));
+    await tester.pump();
+    await chord();
+    last('attach');
+    port.emit(const DetachedEvent(1, false));
+    await tester.pump();
+    // The stream menu's 会话 group offers the same toggle.
+    await tester.tap(find.byKey(const Key('traffic')));
+    await tester.pump();
+    await tester.ensureVisible(find.text('分离成独立窗口'));
+    await tester.tap(find.text('分离成独立窗口'));
+    await tester.pump();
+    last('detach');
+  }, skip: !Platform.isMacOS);
 
   testWidgets('fullscreen state follows the OS', (tester) async {
     await pump(tester);

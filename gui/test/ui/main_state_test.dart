@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' show Rect, Size;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fake_async/fake_async.dart';
@@ -393,6 +394,122 @@ void main() {
         expect(c.$1, 'raise_detached');
         expect(c.$2, {'sid': 1});
         expect(st.currentKey, '111/a');
+      });
+    });
+
+    RemoteWindow rw(int id, {WindowKind kind = WindowKind.normal, double w = 400, double h = 328}) => RemoteWindow(
+          id: id,
+          parent: 0,
+          kind: kind,
+          title: 'w$id',
+          rect: Rect.fromLTWH(0, 0, w, h),
+          titleBar: 28,
+          resizable: true,
+          focused: false,
+          texture: id,
+          visible: const Rect.fromLTWH(0, 0, 1, 1),
+        );
+
+    // Records compare their maps by identity: match the call by its parts.
+    void lastCall(FakeSessionPort port, String method, Map<String, Object?> args) {
+      expect(port.calls.last.$1, method);
+      expect(port.calls.last.$2, equals(args));
+    }
+
+    test('detach and attach keep the sid and send no open', () {
+      env((a, t, port, st, hints) {
+        port.emit(const ReadyEvent(1, 'Calculator'));
+        port.emit(WindowsEvent(1, [rw(7), rw(9, kind: WindowKind.menu)]));
+        st.toggleDetach();
+        lastCall(port, 'detach', {'sid': 1});
+        expect(st.currentRemote!.detached, false); // only the runner's word moves it
+        port.emit(const DetachedEvent(1, true));
+        expect(st.currentRemote!.detached, true);
+        expect(t.sent.last, {'cmd': 'note', 'sid': 1, 'what': 'detach', 'windows': 1});
+        st.toggleDetach();
+        lastCall(port, 'attach', {'sid': 1});
+        port.emit(const DetachedEvent(1, false, current: 7));
+        expect(t.sent.last, {'cmd': 'note', 'sid': 1, 'what': 'attach', 'windows': 1});
+        expect(t.sent.where((m) => m['cmd'] == 'open').length, 1);
+        expect(port.calls.where((c) => c.$1 == 'start').length, 1);
+        expect(st.currentRemote!.sid, 1);
+        expect(st.currentRemote!.detached, false);
+        expect(st.currentRemote!.tabs.current, 7);
+      });
+    });
+
+    test('detach and attach act on the current session only', () {
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(1, [rw(7)]));
+        port.emit(WindowsEvent(2, [rw(8)]));
+        st.select('111/a');
+        st.detach();
+        lastCall(port, 'detach', {'sid': 1});
+        st.attach();
+        lastCall(port, 'attach', {'sid': 1});
+        st.select('111/aa');
+        st.toggleDetach();
+        lastCall(port, 'detach', {'sid': 2});
+        // Nothing to move yet (no window table): no detach goes out.
+        port.emit(const WindowsEvent(2, []));
+        final n = port.calls.length;
+        st.detach();
+        expect(port.calls.length, n);
+      }, sessions: 2);
+    });
+
+    test('closing the detached window ends the session', () {
+      env((a, t, port, st, hints) {
+        port.emit(const ReadyEvent(1, 'Calculator'));
+        port.emit(WindowsEvent(1, [rw(7)]));
+        port.emit(const DetachedEvent(1, true));
+        port.emit(const ClosedEvent(1, 'quit'));
+        expect(st.sessionCount, 0);
+        expect(st.hint, '已结束 Calculator');
+      });
+    });
+
+    test('detaching takes keyboard focus off the picture', () {
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(1, [rw(7)]));
+        st.focusPicture(1);
+        port.emit(const DetachedEvent(1, true));
+        expect(st.pictureFocused, isNull);
+        lastCall(port, 'picture_focus', {'sid': null});
+      });
+    });
+
+    test('a detached session is not resized from the stage; attach judges once', () {
+      env((a, t, port, st, hints) {
+        List<Map<String, Object?>> resizes() => port.calls.where((c) => c.$1 == 'resize').map((c) => c.$2).toList();
+        st.stageSize(const Size(800, 600));
+        port.emit(const ReadyEvent(1, 'Calculator'));
+        port.emit(WindowsEvent(1, [rw(7)]));
+        expect(resizes().length, 1);
+        port.emit(const DetachedEvent(1, true));
+        st.stageSize(const Size(900, 600));
+        a.elapse(const Duration(seconds: 1));
+        // The user resized the detached window: A's size follows it, not the stage.
+        port.emit(WindowsEvent(1, [rw(7, w: 500, h: 428)]));
+        st.selectWindow(7);
+        a.elapse(const Duration(seconds: 1));
+        expect(resizes().length, 1);
+        port.emit(const DetachedEvent(1, false, current: 7));
+        expect(resizes().length, 2);
+        expect(resizes().last, {'sid': 1, 'window': 7, 'w': 900, 'h': 600});
+        a.elapse(const Duration(seconds: 1));
+        expect(resizes().length, 2);
+      });
+    });
+
+    test('attach with no window left goes back to waiting on the stage (R7)', () {
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(1, [rw(7)]));
+        port.emit(const DetachedEvent(1, true));
+        port.emit(WindowsEvent(1, [rw(9, kind: WindowKind.menu)]));
+        port.emit(const DetachedEvent(1, false));
+        expect(st.currentRemote!.detached, false);
+        expect(t.sent.last, {'cmd': 'note', 'sid': 1, 'what': 'attach', 'windows': 0});
       });
     });
 

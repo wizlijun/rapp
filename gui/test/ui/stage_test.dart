@@ -164,7 +164,7 @@ void main() {
           visible: const Rect.fromLTWH(0, 0, 1, 1),
         );
 
-    Future<void> openEmbedded(WidgetTester tester) async {
+    Future<void> openEmbedded(WidgetTester tester, {String app = 'Safari'}) async {
       await tester.runAsync(() async {
         t.onSend = (m) {
           if (m['cmd'] == 'open') {
@@ -174,7 +174,7 @@ void main() {
             });
           }
         };
-        es.openOrSwitch('111', 'Safari', 'Safari');
+        es.openOrSwitch('111', app, app);
         for (var i = 0; i < 4; i++) {
           await flush();
         }
@@ -239,6 +239,45 @@ void main() {
       await tester.pump();
       expect(es.pictureHole.value, isNull);
       expect(hole(), isNull);
+    });
+
+    testWidgets('detached placeholder shows the words and buttons', (tester) async {
+      await tester.pumpWidget(wrap(embedded()));
+      await openEmbedded(tester, app: 'Calculator');
+      port.emit(const ReadyEvent(1, 'Calculator'));
+      port.emit(WindowsEvent(1, [rw(5, 400, 328)]));
+      await tester.pump();
+      expect(find.byType(Texture), findsOneWidget);
+      port.emit(const DetachedEvent(1, true));
+      await tester.pump();
+      expect(find.byType(Texture), findsNothing);
+      expect(es.pictureHole.value, isNull);
+      expect(find.text('Calculator 在单独的窗口里 · mini · 局域网'), findsOneWidget);
+      expect(find.text('输入'), findsOneWidget);
+      // Records compare their maps by identity: match the call by its parts.
+      void last(String method) {
+        expect(port.calls.last.$1, method);
+        expect(port.calls.last.$2, equals({'sid': 1}));
+      }
+
+      await tester.tap(find.text('切到窗口'));
+      await tester.pump();
+      last('raise_detached');
+      expect(t.sent.where((m) => m['cmd'] == 'focus'), isEmpty);
+      await tester.tap(find.text('放回主窗口'));
+      await tester.pump();
+      last('attach');
+      await tester.tap(find.text('结束会话'));
+      await tester.pump();
+      expect(port.calls.where((c) => c.$1 == 'close'), isEmpty);
+      await tester.tap(find.text('再点一次确认'));
+      await tester.pump();
+      last('close');
+      // The runner's answer to 放回: the picture is back.
+      port.emit(const DetachedEvent(1, false, current: 5));
+      await tester.pump();
+      expect(find.byType(Texture), findsOneWidget);
+      expect(find.text('放回主窗口'), findsNothing);
     });
 
     Future<void> showWindow(WidgetTester tester, RemoteWindow w) async {

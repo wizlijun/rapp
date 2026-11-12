@@ -140,6 +140,21 @@ void main() {
     expect(find.text(preset), findsNothing);
   });
 
+  testWidgets('stream menu offers detach or attach by state', (tester) async {
+    var n = 0;
+    await open(tester, onDetach: () => n++);
+    await tester.ensureVisible(find.text('分离成独立窗口'));
+    expect(find.text('放回主窗口'), findsNothing);
+    rs.apply(const DetachedEvent(1, true));
+    await tester.pump();
+    expect(find.text('分离成独立窗口'), findsNothing);
+    await tester.ensureVisible(find.text('放回主窗口'));
+    await tester.tap(find.text('放回主窗口'));
+    await tester.pump();
+    expect(n, 1);
+    expect(find.text(preset), findsNothing);
+  });
+
   testWidgets('A menu drills down and picks by path', (tester) async {
     await open(tester);
     rs.apply(const MenuEvent(1, [

@@ -148,7 +148,37 @@ class MainState extends ChangeNotifier {
       final s = _lastStage;
       if (s != null) rs.policy.stage(s);
     }
-    rs.policy.current(_windowOf(rs));
+    // Detached, the stage is not A's window: nothing is judged until it is back (then at once).
+    rs.policy.current(rs.detached ? null : _windowOf(rs));
+  }
+
+  // ---- detach (R20, R21) ----
+  /// Moves the current session from the stage into native windows; the runner answers with a
+  /// `DetachedEvent`. The same sid and hub session throughout: nothing is reopened.
+  void detach() {
+    final rs = currentRemote;
+    if (rs == null || rs.detached || rs.tabs.tabs.isEmpty) return;
+    port?.detach(rs.sid);
+  }
+
+  /// Puts the current session back on the stage.
+  void attach() {
+    final rs = currentRemote;
+    if (rs == null) return;
+    port?.attach(rs.sid);
+  }
+
+  /// ⌃⌘D and the stream menu's 「分离成独立窗口」/「放回主窗口」.
+  void toggleDetach() {
+    final rs = currentRemote;
+    if (rs == null) return;
+    rs.detached ? attach() : detach();
+  }
+
+  /// Whether [toggleDetach] does anything now (the menu greys its item otherwise).
+  bool get canToggleDetach {
+    final rs = currentRemote;
+    return rs != null && (rs.detached || rs.tabs.tabs.isNotEmpty);
   }
 
   // ---- hub state ----
@@ -293,6 +323,11 @@ class MainState extends ChangeNotifier {
     if (rs == null || rs.endReason != null) return;
     if (e is! ClosedEvent) {
       rs.apply(e);
+      if (e is DetachedEvent) {
+        // The hub logs one line per move (R10); keys typed on the stage no longer go to it.
+        hub?.note(e.sid, e.detached ? 'detach' : 'attach', rs.tabs.tabs.length);
+        if (e.detached && pictureFocused == e.sid) _blur();
+      }
       notifyListeners();
       return;
     }
@@ -405,11 +440,17 @@ class MainState extends ChangeNotifier {
     }
   }
 
+  /// 「切到窗口」: raises the session's own windows (a detached embedded session's, or S1's client).
   void focusCurrent() {
     if (!hubUsable) return;
     final c = current;
     if (c?.sid == null) return;
-    hub!.focus(c!.sid!);
+    final rs = remote[c!.sid];
+    if (rs != null) {
+      if (rs.detached) port?.raiseDetached(c.sid!);
+      return;
+    }
+    hub!.focus(c.sid!);
   }
 
   void endCurrent() {

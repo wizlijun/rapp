@@ -29,6 +29,7 @@
 		33CC11132044BFA00003C045 /* MainFlutterWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 33CC11122044BFA00003C045 /* MainFlutterWindow.swift */; };
 		78A318202AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage in Frameworks */ = {isa = PBXBuildFile; productRef = 78A3181F2AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage */; };
 		A5E5510000000000000000A2 /* SessionPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5E5510000000000000000A1 /* SessionPlugin.swift */; };
+		A5E5510000000000000000B2 /* DetachedWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5E5510000000000000000B1 /* DetachedWindow.swift */; };
 		A5E5510000000000000000A5 /* RappSession in Frameworks */ = {isa = PBXBuildFile; productRef = A5E5510000000000000000A4 /* RappSession */; };
 /* End PBXBuildFile section */
 
@@ -83,6 +84,7 @@
 		7AFA3C8E1D35360C0083082E /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 		9740EEB21CF90195004384FC /* Debug.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		A5E5510000000000000000A1 /* SessionPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionPlugin.swift; sourceTree = "<group>"; };
+		A5E5510000000000000000B1 /* DetachedWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetachedWindow.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -173,6 +175,7 @@
 				33CC10F02044A3C60003C045 /* AppDelegate.swift */,
 				33CC11122044BFA00003C045 /* MainFlutterWindow.swift */,
 				A5E5510000000000000000A1 /* SessionPlugin.swift */,
+				A5E5510000000000000000B1 /* DetachedWindow.swift */,
 				33E51913231747F40026EE4D /* DebugProfile.entitlements */,
 				33E51914231749380026EE4D /* Release.entitlements */,
 				33CC11242044D66E0003C045 /* Resources */,
@@ -363,6 +366,7 @@
 			files = (
 				33CC11132044BFA00003C045 /* MainFlutterWindow.swift in Sources */,
 				A5E5510000000000000000A2 /* SessionPlugin.swift in Sources */,
+				A5E5510000000000000000B2 /* DetachedWindow.swift in Sources */,
 				33CC10F12044A3C60003C045 /* AppDelegate.swift in Sources */,
 				335BBD1B22A9A15E00E9071D /* GeneratedPluginRegistrant.swift in Sources */,
 			);

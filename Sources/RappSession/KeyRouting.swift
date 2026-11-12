@@ -84,14 +84,20 @@ public struct KeyTracker {
     /// chord's first modifiers) is released on A first, so nothing stays held there.
     public mutating func route(keyCode: UInt16, down isDown: Bool, flags: NSEvent.ModifierFlags,
                                pictureFocused: Bool) -> KeyDecision {
-        let to = routeKey(keyCode: keyCode, flags: flags, pictureFocused: pictureFocused)
+        route(keyCode: keyCode, down: isDown, to: routeKey(keyCode: keyCode, flags: flags, pictureFocused: pictureFocused),
+              focused: pictureFocused)
+    }
+
+    /// The pairing rule for a press or release that `to` routes; `focused`: A's window has the keys
+    /// (a local press then releases what A holds).
+    mutating func route(keyCode: UInt16, down isDown: Bool, to: KeyRoute, focused: Bool) -> KeyDecision {
         if keyCode == capsLockKey { return KeyDecision(to) }
         if !isDown {
             guard held.contains(keyCode) else { return KeyDecision(.local) }
             up(keyCode)
             return KeyDecision(.remote)
         }
-        guard to == .remote else { return KeyDecision(.local, release: pictureFocused ? releaseAll() : []) }
+        guard to == .remote else { return KeyDecision(.local, release: focused ? releaseAll() : []) }
         down(keyCode)
         return KeyDecision(.remote)
     }

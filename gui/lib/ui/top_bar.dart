@@ -37,7 +37,9 @@ class TopBar extends StatelessWidget {
           listenable: state,
           builder: (context, _) {
             final cur = state.current;
-            final tabs = state.currentRemote?.tabs;
+            final rs = state.currentRemote;
+            // A detached session's windows are its tabs now; the bar shows none.
+            final tabs = rs == null || rs.detached ? null : rs.tabs;
             final multi = state.sessionCount >= 2;
             final small = Theme.of(context).textTheme.bodySmall;
             return Container(
@@ -158,6 +160,7 @@ class TopBar extends StatelessWidget {
                       session: state.currentRemote!,
                       path: cur.path,
                       onEnd: state.endCurrent,
+                      onToggleDetach: state.canToggleDetach ? state.toggleDetach : null,
                     ),
                   _icon(
                     'fullscreen-button',

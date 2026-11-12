@@ -56,6 +56,12 @@ class RemoteSession extends ChangeNotifier {
   /// Set once the runner reported the session closed.
   String? endReason;
 
+  /// The window an attach named as current (R21) before it was a tab here: selected when a
+  /// window table brings it, dropped by a tab pick or the next detach.
+  int? _pendingCurrent;
+
+  bool _isTab(int id) => tabs.tabs.any((w) => w.id == id);
+
   void apply(SessionEvent e) {
     switch (e) {
       case ReadyEvent():
@@ -64,6 +70,11 @@ class RemoteSession extends ChangeNotifier {
       case WindowsEvent():
         windows = e.windows;
         tabs.update(windows);
+        final p = _pendingCurrent;
+        if (p != null && _isTab(p)) {
+          _pendingCurrent = null;
+          tabs.select(p);
+        }
       case TrafficEvent():
         bytesPerSecond = e.bytes;
       case ClipsEvent():
@@ -84,20 +95,29 @@ class RemoteSession extends ChangeNotifier {
         menu = e.items;
       case DetachedEvent():
         detached = e.detached;
-        if (e.current != null) tabs.select(e.current!);
+        final c = e.current;
+        _pendingCurrent = null;
+        if (!detached && c != null) {
+          // The runner names a window it had, but its table may not have reached us yet.
+          _isTab(c) ? tabs.select(c) : _pendingCurrent = c;
+        }
       case ClosedEvent():
         endReason = e.reason;
     }
     notifyListeners();
   }
 
-  /// The user picked tab [id]: A raises it, and the stage size is judged for it at once.
+  /// The user picked tab [id]: A raises it, and the stage size is judged for it at once (not while
+  /// detached: then the session is not on the stage).
   void selectWindow(int id) {
-    if (!tabs.tabs.any((w) => w.id == id)) return;
+    if (!_isTab(id)) return;
+    _pendingCurrent = null;
     tabs.select(id);
     onSelect?.call(id);
-    for (final w in windows) {
-      if (w.id == id) policy.current(w);
+    if (!detached) {
+      for (final w in windows) {
+        if (w.id == id) policy.current(w);
+      }
     }
     notifyListeners();
   }
