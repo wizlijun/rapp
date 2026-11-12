@@ -63,6 +63,13 @@ final class ClipboardTests: XCTestCase {
         XCTAssertEqual(pasteErrorMessage("not uploaded"), "A 还没收齐这一项")
         XCTAssertEqual(pasteErrorMessage("not supported"), "A 不支持粘贴")
         XCTAssertEqual(pasteErrorMessage("boom"), "boom")
+        XCTAssertEqual(pasteErrorMessage("screen locked"), "A 已锁屏，需要在 A 上解锁")
+    }
+    func testScreenLockedReadsTheSessionFlag() {
+        XCTAssertTrue(screenLocked(["CGSSessionScreenIsLocked": true]))
+        XCTAssertFalse(screenLocked(["CGSSessionScreenIsLocked": false]))
+        XCTAssertFalse(screenLocked(["kCGSSessionOnConsoleKey": true]))
+        XCTAssertFalse(screenLocked(nil))
     }
     func testNeedsUploadCountsBytes() {
         XCTAssertFalse(needsUpload(String(repeating: "字", count: 19_999)))   // 59997 字节

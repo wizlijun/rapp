@@ -136,10 +136,17 @@ public func composerPrefixMatches(_ a: [ComposerPiece], _ b: [ComposerPiece], le
 public func pasteErrorMessage(_ error: String) -> String {
     switch error {
     case "target not frontmost": return "A 上的目标窗口不在最前"
+    case "screen locked": return "A 已锁屏，需要在 A 上解锁"
     case "not uploaded": return "A 还没收齐这一项"
     case "not supported": return "A 不支持粘贴"
     default: return error
     }
+}
+
+/// Whether A's console session is behind the lock screen, from `CGSessionCopyCurrentDictionary()`.
+/// While it is, the login window covers every app and no paste or click can reach the target.
+public func screenLocked(_ session: [String: Any]?) -> Bool {
+    session?["CGSSessionScreenIsLocked"] as? Bool ?? false
 }
 
 public func needsUpload(_ text: String) -> Bool { text.utf8.count >= inlinePasteLimit }

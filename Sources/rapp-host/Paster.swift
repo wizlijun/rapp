@@ -139,7 +139,9 @@ final class Paster {
         } else if tries > 0 {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { self.waitFrontmost(tries: tries - 1, seq: seq) }
         } else {
-            queue.async { self.finish(seq: seq, error: "target not frontmost") }
+            let error = screenLocked(CGSessionCopyCurrentDictionary() as? [String: Any])
+                ? "screen locked" : "target not frontmost"
+            queue.async { self.finish(seq: seq, error: error) }
         }
     }
 
