@@ -284,7 +284,7 @@ class _EndedRow extends StatelessWidget {
           ),
           const SizedBox(height: 2),
           Text('${x.source}${at == null ? '' : ' · ${hhmm(at)}'}', style: TextStyle(color: t.muted, fontSize: 12)),
-          if (done && !x.down && x.path == null)
+          if (done && !x.down && x.kind == ClipKind.files) // K10: only a file lands in a folder on A
             Padding(
               padding: const EdgeInsets.only(top: 2),
               child: Text('A：~/Downloads/rapp/${x.name}', style: TextStyle(color: t.muted, fontSize: 12)),

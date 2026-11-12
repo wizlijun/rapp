@@ -195,7 +195,7 @@ final class ChannelTests: XCTestCase {
     }
 
     func testTransferProgressPayloadAndCopyReply() throws {
-        let p = TransferProgress(id: 3, dir: .down, name: "a.bin", done: 5, total: 10, state: .done,
+        let p = TransferProgress(id: 3, dir: .down, name: "a.bin", kind: nil, done: 5, total: 10, state: .done,
                                  path: "/tmp/a.bin", error: nil)
         let e = try XCTUnwrap(eventPayload(.transferProgress(p), sid: 2, textures: [:]))
         XCTAssertEqual(e.method, "transfer")
@@ -203,9 +203,11 @@ final class ChannelTests: XCTestCase {
         XCTAssertEqual(e.args["name"] as? String, "a.bin"); XCTAssertEqual(e.args["done"] as? Int, 5)
         XCTAssertEqual(e.args["total"] as? Int, 10); XCTAssertEqual(e.args["state"] as? String, "done")
         XCTAssertEqual(e.args["path"] as? String, "/tmp/a.bin"); XCTAssertNil(e.args["error"])
-        let f = TransferProgress(id: 4, dir: .up, name: "b", done: 0, total: 1, state: .failed, path: nil, error: "x")
+        let f = TransferProgress(id: 4, dir: .up, name: "b.txt", kind: .files, done: 0, total: 1, state: .failed, path: nil,
+                                 error: "x")
         let g = try XCTUnwrap(eventPayload(.transferProgress(f), sid: 2, textures: [:]))
         XCTAssertNil(g.args["path"]); XCTAssertEqual(g.args["error"] as? String, "x")
+        XCTAssertNil(e.args["kind"]); XCTAssertEqual(g.args["kind"] as? String, "files")
         XCTAssertEqual(clipCopyReply(.success(3)) as NSDictionary, ["copy": 3] as NSDictionary)
         XCTAssertEqual(clipCopyReply(.failure(TransferFailure(reason: "r"))) as NSDictionary, ["error": "r"] as NSDictionary)
     }

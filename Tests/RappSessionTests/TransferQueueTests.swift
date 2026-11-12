@@ -51,6 +51,7 @@ final class TransferQueueTests: XCTestCase {
         XCTAssertEqual(a.first?.done, 0)
         XCTAssertEqual(a.first?.dir, .down)
         XCTAssertEqual(a.first?.name, "a.bin")
+        XCTAssertNil(a.first?.kind)
         XCTAssertEqual(a.map(\.done), a.map(\.done).sorted())
         for (x, y) in zip(a, a.dropFirst()) where x.state == .running && y.state == .running {
             XCTAssertNotEqual(x.done * 100 / x.total, y.done * 100 / y.total)
@@ -113,6 +114,21 @@ final class TransferQueueTests: XCTestCase {
         XCTAssertEqual(last(1), .cancelled)
         XCTAssertEqual(last(2), .cancelled)
         XCTAssertEqual(statuses.last ?? "x", nil)
+    }
+
+    func testUploadProgressCarriesTheFileNameNotTheStripLabel() throws {
+        try start(pauseAfter: 0)
+        let file = queue.upload(item: 1, kind: .files, uti: "public.data", name: "report.pdf", data: .bytes([1, 2, 3]),
+                                label: "2/3 · report.pdf") { _ in }
+        let image = queue.upload(item: 2, kind: .image, uti: "public.png", name: "", data: .bytes([4]), label: "3/3") { _ in }
+        queue.cancel()
+        XCTAssertEqual(events(file).first?.dir, .up)
+        XCTAssertEqual(events(file).map(\.name), Array(repeating: "report.pdf", count: events(file).count))
+        XCTAssertEqual(events(image).map(\.name), Array(repeating: "", count: events(image).count))
+        XCTAssertEqual(events(image).last?.state, .cancelled)
+        XCTAssertEqual(events(file).last?.kind, .files)
+        XCTAssertEqual(events(image).last?.kind, .image)
+        XCTAssertNil(events.first { $0.dir == .up && $0.kind == nil })
     }
 
     func testHostErrorIsFailedWithReason() throws {

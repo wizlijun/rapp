@@ -26,12 +26,18 @@ class ClipEntry {
 }
 
 class TransferRow {
-  TransferRow(this.sid, this.id, this.key, this.down, this.name, this.source, this.done, this.total, this.state);
+  TransferRow(this.sid, this.id, this.key, this.down, this.name, this.source, this.done, this.total, this.state,
+      {this.kind});
   final Object sid;
   final int id;
   final String key;
   final bool down;
+
+  /// The file name, or the kind's word for an upload that is not a file.
   final String name;
+
+  /// Only on uploads: what was sent.
+  final ClipKind? kind;
   final String source;
   int done, total;
   TransferState state;
@@ -134,7 +140,9 @@ class ResourcesState extends ChangeNotifier {
       if (r.sid == e.sid && r.id == e.id) row = r;
     }
     if (row == null) {
-      row = TransferRow(e.sid, e.id, key, e.down, e.name, source, e.done, e.total, e.state);
+      final kind = e.kind;
+      final name = e.name.isEmpty && kind != null ? kindWord(kind) : e.name;
+      row = TransferRow(e.sid, e.id, key, e.down, name, source, e.done, e.total, e.state, kind: kind);
       _running.add(row);
     }
     row

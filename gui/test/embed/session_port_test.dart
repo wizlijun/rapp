@@ -211,9 +211,10 @@ void main() {
     expect((e.id, e.down, e.name, e.done, e.total, e.state, e.path, e.error),
         (3, true, 'a.log', 10, 20, TransferState.done, '/x/a.log', null));
     final up = parseSessionEvent('transfer', {
-      'sid': 1, 'id': 4, 'dir': 'up', 'name': 'b', 'done': 0, 'total': 1, 'state': 'failed', 'error': 'boom'
+      'sid': 1, 'id': 4, 'dir': 'up', 'name': 'b', 'kind': 'files', 'done': 0, 'total': 1, 'state': 'failed', 'error': 'boom'
     }) as TransferProgressEvent;
-    expect((up.down, up.state, up.error), (false, TransferState.failed, 'boom'));
+    expect((up.down, up.state, up.error, up.kind), (false, TransferState.failed, 'boom', ClipKind.files));
+    expect(e.kind, isNull);
     expect(
         parseSessionEvent('transfer',
             {'sid': 1, 'id': 3, 'dir': 'down', 'name': 'a', 'done': 1, 'total': 2, 'state': 'weird'}),

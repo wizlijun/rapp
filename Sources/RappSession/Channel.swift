@@ -293,6 +293,7 @@ public func eventPayload(_ e: SessionEvent, sid: Int64, textures: [UInt32: Int64
     case let .transferProgress(p):
         var fields: [String: Any] = ["id": Int(p.id), "dir": p.dir.rawValue, "name": p.name, "done": Int(p.done),
                                      "total": Int(p.total), "state": p.state.rawValue]
+        if let kind = p.kind { fields["kind"] = "\(kind)" }
         if let path = p.path { fields["path"] = path }
         if let error = p.error { fields["error"] = error }
         return payload("transfer", fields)

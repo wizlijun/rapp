@@ -195,15 +195,21 @@ enum TransferState { running, done, failed, cancelled }
 /// One numbered transfer's progress; `down` is A to B.
 class TransferProgressEvent extends SessionEvent {
   const TransferProgressEvent(
-      super.sid, this.id, this.down, this.name, this.done, this.total, this.state, this.path, this.error);
+      super.sid, this.id, this.down, this.name, this.done, this.total, this.state, this.path, this.error,
+      {this.kind});
   final int id;
   final bool down;
+
+  /// The file name; empty for an upload that is not a file.
   final String name;
   final int done;
   final int total;
   final TransferState state;
   final String? path;
   final String? error;
+
+  /// Only on uploads: what is sent. Only [ClipKind.files] lands in A's ~/Downloads/rapp.
+  final ClipKind? kind;
 }
 
 /// The session moved into its own windows, or back; `current` is the window to show on return.
@@ -323,7 +329,8 @@ SessionEvent? parseSessionEvent(String method, Object? args) {
         final state = TransferState.values.where((v) => v.name == m['state']).firstOrNull;
         if (state == null) return null;
         return TransferProgressEvent(sid, _as<int>(m['id']), dir == 'down', _as<String>(m['name']),
-            _as<int>(m['done']), _as<int>(m['total']), state, _as<String?>(m['path']), _as<String?>(m['error']));
+            _as<int>(m['done']), _as<int>(m['total']), state, _as<String?>(m['path']), _as<String?>(m['error']),
+            kind: ClipKind.values.where((v) => v.name == m['kind']).firstOrNull);
       case 'detached':
         return DetachedEvent(sid, _as<bool>(m['detached']), current: _as<int?>(m['current']));
       case 'closed':

@@ -14,7 +14,10 @@ public enum TransferState: String { case running, done, failed, cancelled }
 public struct TransferProgress: Equatable {
     public let id: UInt32
     public let dir: TransferDirection
+    /// A download's file name; an upload's file name, empty when it is not a file.
     public let name: String
+    /// Only on uploads: what is sent (only `.files` lands in A's downloads folder).
+    public let kind: ClipKind?
     public let done: UInt64
     public let total: UInt64
     public let state: TransferState
@@ -79,7 +82,8 @@ public final class TransferQueue {
         case let .file(url):
             guard let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? UInt64 else {
                 let id = takeID()
-                emit(TransferProgress(id: id, dir: .up, name: label, done: 0, total: 0, state: .failed, path: nil, error: "无法读取文件"))
+                emit(TransferProgress(id: id, dir: .up, name: name, kind: kind, done: 0, total: 0, state: .failed,
+                                      path: nil, error: "无法读取文件"))
                 done(.failure(TransferFailure(reason: "无法读取文件")))
                 return id
             }
@@ -300,13 +304,15 @@ public final class TransferQueue {
     }
 
     private func send(_ job: Job, done: UInt64, total: UInt64, state: TransferState, path: String? = nil, error: String? = nil) {
-        var dir = TransferDirection.down
-        var name = job.label
+        // Not `job.label`: that is the strip's "2/3 · name" (Sender).
         switch job.work {
-        case let .download(d): name = d.name
-        case .upload: dir = .up
+        case let .download(d):
+            emit(TransferProgress(id: job.id, dir: .down, name: d.name, kind: nil, done: done, total: total, state: state,
+                                  path: path, error: error))
+        case let .upload(u):
+            emit(TransferProgress(id: job.id, dir: .up, name: u.name, kind: u.kind, done: done, total: total, state: state,
+                                  path: path, error: error))
         }
-        emit(TransferProgress(id: job.id, dir: dir, name: name, done: done, total: total, state: state, path: path, error: error))
     }
 
     private func setStatus(_ text: String?) {

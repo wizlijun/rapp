@@ -159,7 +159,7 @@ void main() {
   testWidgets('ended rows reveal downloads and show upload paths as text', (tester) async {
     await boot(tester);
     port.emit(const TransferProgressEvent(1, 3, true, 'a.log', 20, 20, TransferState.done, '/tmp/rapp-x/a.log', null));
-    port.emit(const TransferProgressEvent(1, 4, false, 'b.txt', 5, 5, TransferState.done, null, null));
+    port.emit(const TransferProgressEvent(1, 4, false, 'b.txt', 5, 5, TransferState.done, null, null, kind: ClipKind.files));
     port.emit(const TransferProgressEvent(1, 5, true, 'c.bin', 1, 5, TransferState.failed, null, 'x'));
     await show(tester);
     await settle(tester);
@@ -171,6 +171,24 @@ void main() {
     expect(find.byKey(const Key('reveal-1-4')), findsNothing);
     expect(find.byKey(const Key('reveal-1-5')), findsNothing);
     expect(find.text('没传完'), findsOneWidget);
+  });
+
+  testWidgets('upload rows name the file, and only a file upload says where it went on A', (tester) async {
+    await boot(tester);
+    // As the runner sends them (Transfers.swift): the file name, or empty with the kind.
+    TransferProgressEvent up(int id, String name, String kind) => parseSessionEvent('transfer', {
+          'sid': 1, 'id': id, 'dir': 'up', 'name': name, 'kind': kind, 'done': 5, 'total': 5, 'state': 'done',
+        }) as TransferProgressEvent;
+    port.emit(up(4, 'report.pdf', 'files'));
+    port.emit(up(5, '', 'image'));
+    port.emit(up(6, '', 'text'));
+    await show(tester);
+    await settle(tester);
+    expect(find.text('report.pdf'), findsOneWidget);
+    expect(find.text('A：~/Downloads/rapp/report.pdf'), findsOneWidget);
+    expect(find.textContaining('A：'), findsOneWidget);
+    expect(find.text('图片'), findsOneWidget);
+    expect(find.text('文字'), findsOneWidget);
   });
 
   testWidgets('empty sections say so', (tester) async {
