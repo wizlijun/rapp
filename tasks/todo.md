@@ -163,7 +163,15 @@
     - [ ] 停掉自己起的 host：会话已断开；30 秒内设备变离线、需要你出现「离线」一件，恢复后自己消失
     - [ ] 顶栏流量随画面跳动；总流量 = 各活动会话之和
     - [ ] 「结束会话」点两次：条目消失、需要你相应减少
-- [ ] S5 项目与常用（规格：`docs/superpowers/specs/2026-11-12-rapp-s5-projects-favorites-design.md`）
+- [x] S5 项目与常用（规格：`docs/superpowers/specs/2026-11-12-rapp-s5-projects-favorites-design.md`）
+  - 代码 + 测试完成（计划 Task 1–6，提交到 ee61e67；flutter 519、cargo 207、check.sh EXIT=0）；以下实机条目待用户安排时间（Ruling S5-0）
+    - [ ] 待实机：设为常用 → 底部「常用」组；点一下打开、嵌入；结束后回到「常用」
+    - [ ] 待实机：建项目加两个成员，「全部打开」停在第一个；「全部结束」点两次都结束，提示「结束 2 个会话」
+    - [ ] 待实机：一个会话在两个项目里 → 「按项目」时两组各一次；顶栏上一个/下一个不卡；顶栏第二行「<设备> · <项目> · <任务>」
+    - [ ] 待实机：成员所在 host 离线 → 「全部打开」提示「<设备> 离线，跳过 1 个」
+    - [ ] 待实机：退出再开，常用、项目、任务都在
+    - [ ] 待实机：workspace.json 写坏 → 提示「项目和常用没有读到，已从空白开始」，留 workspace.json.bad
+    - [ ] 打包：package-macos.sh 现在会用钥匙串证书签名，和在线升级 Task 8 一起等用户同意
 - [ ] S6 全局资源（规格：`docs/superpowers/specs/2026-11-12-rapp-s6-global-resources-design.md`）
 - [ ] S4 全景（规格：`docs/superpowers/specs/2026-11-12-rapp-s4-overview-design.md`）
 
