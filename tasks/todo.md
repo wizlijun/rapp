@@ -197,4 +197,4 @@
   - [x] 会话在时不让 A 因闲置熄屏、屏保或锁屏（电源断言 + 每 30 秒声明用户活动；仅 macOS host）
   - 摸底：锁屏时按 PID 投递（`postToPid`）或 AX 写入能否送达 app——要锁 A 的屏做实机测试，需用户安排时间
 - [ ] P2 多个客户端同时连一个 host：要先设计（现在是独占模式），再实现
-- [ ] P3 触摸屏双指上滑/下滑（用户 2026-11-12）：B 是触摸屏（平板、触屏电脑）时，在远程画面上双指上下滑动 = A 上对应位置滚动。待查：B 各端（Flutter 嵌入、rapp-client、Omarchy、Windows）现在怎么处理触摸滚动；排在自动升级和 S5 之后，先写进对应 spec 再做
+- [x] P3 触摸屏双指上滑/下滑（用户 2026-11-12）：spec `docs/superpowers/specs/2026-11-13-rapp-touch-scroll-design.md`；只改 Flutter 嵌入画面（b8b7361，flutter 644 过）。待实机：需要一台触摸屏 B
