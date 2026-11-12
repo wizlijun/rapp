@@ -7,6 +7,23 @@ public enum UploadData { case bytes([UInt8]), file(URL) }
 /// A's `error` text, or "连接断开" / "已取消".
 public struct TransferFailure: Error { public let reason: String }
 
+public enum TransferDirection: String { case down, up }
+public enum TransferState: String { case running, done, failed, cancelled }
+
+/// One transfer's state, sent through `TransferQueue.onProgress`.
+public struct TransferProgress: Equatable {
+    public let id: UInt32
+    public let dir: TransferDirection
+    public let name: String
+    public let done: UInt64
+    public let total: UInt64
+    public let state: TransferState
+    /// Only on a `done` download that went to disk.
+    public let path: String?
+    /// Only on `failed`: A's error text, "连接断开" or "无法写入 …".
+    public let error: String?
+}
+
 /// Runs downloads and uploads one at a time, each on its own side connection
 /// (spec §2.4, §4.1, §4.2). One per client process; everything on the main queue.
 public final class TransferQueue {
@@ -14,9 +31,14 @@ public final class TransferQueue {
     public var onBytes: ((Int) -> Void)?
     /// "下载 app.log 45%", "上传 2/3 · app.log 45%", an error text; nil = idle.
     public var onStatus: ((String?) -> Void)?
+    /// Main queue: a transfer started, moved by a whole percent, or ended.
+    public var onProgress: ((TransferProgress) -> Void)?
     public var log: ((String) -> Void)?
 
     private let address: RemoteAddress
+    /// Where disk downloads go.
+    private let downloads: URL
+    private var nextID: UInt32 = 1
     private var queue: [Job] = []
     private var running: Job?
     private var connection: SideConnection?
@@ -29,34 +51,65 @@ public final class TransferQueue {
     private static let partSuffix = ".rapp-part"
     private static let errorShownFor: TimeInterval = 5
 
-    public init(address: RemoteAddress) {
+    /// `downloads`: nil means `~/Downloads/rapp`.
+    public init(address: RemoteAddress, downloads: URL? = nil) {
         self.address = address
+        self.downloads = downloads
+            ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0].appendingPathComponent("rapp")
     }
 
     // MARK: Public
 
+    @discardableResult
     public func download(clip: UInt32, file: UInt16, name: String, total: UInt64, toDisk: Bool,
-                  done: @escaping (Result<DownloadResult, TransferFailure>) -> Void) {
-        let job = Job(label: name, work: .download(Download(clip: clip, file: file, name: name, total: total, toDisk: toDisk)),
+                  done: @escaping (Result<DownloadResult, TransferFailure>) -> Void) -> UInt32 {
+        let job = Job(id: takeID(), label: name, work: .download(Download(clip: clip, file: file, name: name, total: total, toDisk: toDisk)),
                       finish: { done($0.map { $0 ?? .bytes([]) }) })
         enqueue(job)
+        return job.id
     }
 
+    @discardableResult
     public func upload(item: UInt32, kind: ClipKind, uti: String, name: String, data: UploadData, label: String,
-                done: @escaping (Result<Void, TransferFailure>) -> Void) {
+                done: @escaping (Result<Void, TransferFailure>) -> Void) -> UInt32 {
         let total: UInt64
         switch data {
         case let .bytes(bytes):
             total = UInt64(bytes.count)
         case let .file(url):
             guard let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? UInt64 else {
-                return done(.failure(TransferFailure(reason: "无法读取文件")))
+                let id = takeID()
+                emit(TransferProgress(id: id, dir: .up, name: label, done: 0, total: 0, state: .failed, path: nil, error: "无法读取文件"))
+                done(.failure(TransferFailure(reason: "无法读取文件")))
+                return id
             }
             total = size
         }
-        let job = Job(label: label, work: .upload(Upload(item: item, kind: kind, uti: uti, name: name, data: data, total: total)),
+        let job = Job(id: takeID(), label: label, work: .upload(Upload(item: item, kind: kind, uti: uti, name: name, data: data, total: total)),
                       finish: { result in done(result.map { _ in () }) })
         enqueue(job)
+        return job.id
+    }
+
+    /// Stops one transfer: the running one disconnects (its `.rapp-part` stays) and the next starts;
+    /// a queued one is dropped. An unknown id does nothing.
+    public func cancel(id: UInt32) {
+        guard let job = queue.first(where: { $0.id == id }) else { return }
+        if running === job {
+            generation += 1
+            connection?.cancel()
+            connection = nil
+            job.close()
+            queue.removeFirst()
+            running = nil
+            if queue.isEmpty { setStatus(nil) }
+        } else {
+            queue.removeAll { $0 === job }
+        }
+        let failure = TransferFailure(reason: "已取消")
+        emitEnd(job, .failure(failure))
+        job.finish(.failure(failure))
+        pump()
     }
 
     /// Stops the current transfer and drops the queued ones; what was received or sent stays.
@@ -69,14 +122,20 @@ public final class TransferQueue {
         running = nil
         for job in all { job.close() }
         setStatus(nil)
-        for job in all { job.finish(.failure(TransferFailure(reason: "已取消"))) }
+        for job in all {
+            emitEnd(job, .failure(TransferFailure(reason: "已取消")))
+            job.finish(.failure(TransferFailure(reason: "已取消")))
+        }
     }
 
     // MARK: Queue
 
     private final class Job {
+        let id: UInt32
         let label: String
         var work: Work
+        /// The last whole percent sent through `onProgress`.
+        var lastPercent: Int?
         let finish: (Result<DownloadResult?, TransferFailure>) -> Void
         /// Failed connection attempts since the last progress.
         var attempt = 0
@@ -84,7 +143,8 @@ public final class TransferQueue {
         /// An in-memory download's bytes; kept here so appending never copies them.
         var buffer: [UInt8] = []
 
-        init(label: String, work: Work, finish: @escaping (Result<DownloadResult?, TransferFailure>) -> Void) {
+        init(id: UInt32, label: String, work: Work, finish: @escaping (Result<DownloadResult?, TransferFailure>) -> Void) {
+            self.id = id
             self.label = label
             self.work = work
             self.finish = finish
@@ -113,8 +173,14 @@ public final class TransferQueue {
         var sent: UInt64 = 0
     }
 
+    private func takeID() -> UInt32 {
+        defer { nextID += 1 }
+        return nextID
+    }
+
     private func enqueue(_ job: Job) {
         queue.append(job)
+        emitRunning(job, done: 0, total: totalBytes(job))
         pump()
     }
 
@@ -139,6 +205,7 @@ public final class TransferQueue {
         job.close()
         queue.removeFirst()
         running = nil
+        emitEnd(job, result)
         switch result {
         case .success:
             if queue.isEmpty { setStatus(nil) }
@@ -190,6 +257,56 @@ public final class TransferQueue {
     private func progress(_ job: Job, done: UInt64, total: UInt64) {
         let percent = total == 0 ? 100 : min(100, Int(done * 100 / total))
         setStatus("\(statusPrefix(job)) \(percent)%")
+        emitRunning(job, done: done, total: total)
+    }
+
+    // MARK: Progress events
+
+    private func totalBytes(_ job: Job) -> UInt64 {
+        switch job.work {
+        case let .download(d): return d.total
+        case let .upload(u): return u.total
+        }
+    }
+
+    private func emit(_ event: TransferProgress) { onProgress?(event) }
+
+    private func emitRunning(_ job: Job, done: UInt64, total: UInt64) {
+        let percent = total == 0 ? 100 : min(100, Int(done * 100 / total))
+        guard percent != job.lastPercent else { return }
+        job.lastPercent = percent
+        send(job, done: done, total: total, state: .running)
+    }
+
+    private func emitEnd(_ job: Job, _ result: Result<DownloadResult?, TransferFailure>) {
+        let total = totalBytes(job)
+        switch result {
+        case let .success(value):
+            var path: String?
+            if case let .file(url)? = value { path = url.path }
+            send(job, done: total, total: total, state: .done, path: path)
+        case let .failure(failure):
+            var received: UInt64 = 0
+            switch job.work {
+            case let .download(d): received = d.received
+            case let .upload(u): received = u.sent
+            }
+            if failure.reason == "已取消" {
+                send(job, done: received, total: total, state: .cancelled)
+            } else {
+                send(job, done: received, total: total, state: .failed, error: failure.reason)
+            }
+        }
+    }
+
+    private func send(_ job: Job, done: UInt64, total: UInt64, state: TransferState, path: String? = nil, error: String? = nil) {
+        var dir = TransferDirection.down
+        var name = job.label
+        switch job.work {
+        case let .download(d): name = d.name
+        case .upload: dir = .up
+        }
+        emit(TransferProgress(id: job.id, dir: dir, name: name, done: done, total: total, state: state, path: path, error: error))
     }
 
     private func setStatus(_ text: String?) {
@@ -207,7 +324,7 @@ public final class TransferQueue {
                 try prepareDiskFile(job, &d)
             } catch {
                 job.work = .download(d)
-                return complete(job, .failure(TransferFailure(reason: "无法写入 \(Self.downloadsDirectory().path)")))
+                return complete(job, .failure(TransferFailure(reason: "无法写入 \(downloads.path)")))
             }
         } else {
             d.received = resumeOffset(partSize: UInt64(job.buffer.count), total: d.total)
@@ -256,7 +373,7 @@ public final class TransferQueue {
             do {
                 try job.handle?.write(contentsOf: bytes)
             } catch {
-                return complete(job, .failure(TransferFailure(reason: "无法写入 \(Self.downloadsDirectory().path)")))
+                return complete(job, .failure(TransferFailure(reason: "无法写入 \(downloads.path)")))
             }
         } else {
             job.buffer.append(contentsOf: bytes)
@@ -272,7 +389,7 @@ public final class TransferQueue {
         guard case let .download(d) = job.work else { return }
         guard d.toDisk, let part = d.part else { return complete(job, .success(.bytes(job.buffer))) }
         job.close()
-        let directory = Self.downloadsDirectory()
+        let directory = downloads
         let final = uniqueName(d.finalName, existing: Self.existingNames(in: directory, except: part.lastPathComponent))
         let url = directory.appendingPathComponent(final)
         do {
@@ -287,7 +404,7 @@ public final class TransferQueue {
     /// Names the file on first use, then opens its `.rapp-part` at the resume point.
     private func prepareDiskFile(_ job: Job, _ d: inout Download) throws {
         let fm = FileManager.default
-        let directory = Self.downloadsDirectory()
+        let directory = downloads
         try fm.createDirectory(at: directory, withIntermediateDirectories: true)
         let key = "\(d.clip)/\(d.file)"
         if diskNames[key] == nil {
@@ -304,10 +421,6 @@ public final class TransferQueue {
         try handle.truncate(atOffset: d.received)
         try handle.seek(toOffset: d.received)
         job.handle = handle
-    }
-
-    private static func downloadsDirectory() -> URL {
-        FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0].appendingPathComponent("rapp")
     }
 
     /// File names in `directory`, a `.rapp-part` counting as the name without it.
