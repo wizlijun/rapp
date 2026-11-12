@@ -48,7 +48,7 @@
 |---|---|---|---|---|
 | A1 | 没有 root 时 `tccutil reset Accessibility com.rapp.rapp` 能生效 | K22：重置后重新 check。原来是 ✓、tccutil 退出 0、check 变成 ✗，才算重置成功；否则回 `accessibility_reset:false`，GUI 改成说明加深链 | 按钮对辅助功能只起说明作用，屏幕录制照常重置 | Task 8 第 5 步 |
 | A2 | Apple Development 证书、不开 hardened runtime，跨两次构建授权一直有效 | Task 1 的签名顺序和 cdhash 检查；Task 3 比对指定要求 | 换 §2.2 备选 B（Developer ID），打包脚本已支持；用重置按钮重新授权一次 | Task 8 第 3、4 步（装两个连续版本） |
-| A3 | `/Applications/…` 改名到 `~/Library/…` 在同一个卷上 | K12：`rename` 失败且 `raw_os_error()==Some(18)`（EXDEV）时走 `ditto` 复制再删除 | 只是慢一点 | 单测假 EXDEV；Task 8 看日志 `update_applied` 前没有 `ditto` 调用（`RUST_LOG` 不需要，看 `previous/` 的 inode 即可） |
+| A3 | `/Applications/…` 改名到 `~/Library/…` 在同一个卷上 | K12：`rename` 失败且 `raw_os_error()==Some(18)`（EXDEV）时走 `ditto` 复制再删除 | 只是慢一点 | 单测假 EXDEV；Task 8 用 `stat -f %d` 比较两个目录的卷号 |
 | A4 | 退出后 launchd 拉起新路径时会触发 10 秒节流 | 不特殊处理；`healthy_after` 从新进程启动时算起 | 只是晚 10 秒 | Task 8 第 3 步记下从 `update_applied` 前最后一条日志到新 `service_start` 的间隔 |
 | A5 | 新 rapp-host 沿用 rapp.app 的授权 | 不特殊处理（登记的是 rapp.app，K3 保证 host 的标识固定） | 用 `permissions_lost_after_update` 的引导兜底（Task 5） | Task 8 第 3 步：升级后 本机 › 权限 两项 ✓，B 能打开 app |
 
