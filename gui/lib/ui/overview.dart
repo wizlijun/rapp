@@ -8,6 +8,7 @@ import 'lamp.dart';
 import 'main_state.dart';
 import 'overview_model.dart';
 import 'session_model.dart';
+import 'workspace_store.dart';
 import 'tokens.dart';
 
 const _gap = 12.0;
@@ -45,8 +46,7 @@ class Overview extends StatelessWidget {
               itemBuilder: (_, i) => _Column(state: state, col: cols[i]),
             ),
           ),
-          // The projects and resources layer (Task 4).
-          const SizedBox(height: 88),
+          _ThirdLayer(state: state),
         ]);
       },
     );
@@ -352,6 +352,151 @@ class _Block extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+const _projectCellWidth = 200.0;
+const _resourcesWidth = 300.0;
+
+/// Projects (scrolling) on the left, the resources cell pinned to the right (K13).
+class _ThirdLayer extends StatelessWidget {
+  const _ThirdLayer({required this.state});
+  final MainState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final projects = state.projects;
+    return SizedBox(
+      height: 88 + 2 * _gap,
+      child: Row(children: [
+        Expanded(
+          child: projects.isEmpty
+              ? Padding(
+                  padding: const EdgeInsets.all(_gap),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: _Cell(
+                      cellKey: 'ov-no-projects',
+                      width: _projectCellWidth,
+                      label: '还没有项目',
+                      onTap: () => state.showPanel(PanelTab.projects),
+                      child: Center(
+                        child: Text('还没有项目', style: TextStyle(color: RappTokens.of(context).muted)),
+                      ),
+                    ),
+                  ),
+                )
+              : ListView.separated(
+                  key: const Key('ov-projects'),
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.all(_gap),
+                  itemCount: projects.length,
+                  separatorBuilder: (_, _) => const SizedBox(width: _gap),
+                  itemBuilder: (_, i) => _ProjectCell(state: state, project: projects[i]),
+                ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(0, _gap, _gap, _gap),
+          child: _ResourcesCell(state: state),
+        ),
+      ]),
+    );
+  }
+}
+
+/// A framed, tappable third-layer cell.
+class _Cell extends StatelessWidget {
+  const _Cell({
+    required this.cellKey,
+    required this.width,
+    required this.label,
+    required this.onTap,
+    required this.child,
+  });
+  final String cellKey;
+  final double width;
+  final String label;
+  final VoidCallback onTap;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RappTokens.of(context);
+    return SizedBox(
+      key: Key(cellKey),
+      width: width,
+      height: 88,
+      child: Semantics(
+        button: true,
+        label: label,
+        excludeSemantics: true,
+        onTap: onTap,
+        child: Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(t.r),
+            child: Container(
+              decoration: t.panelBox(border: t.line),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              child: child,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProjectCell extends StatelessWidget {
+  const _ProjectCell({required this.state, required this.project});
+  final MainState state;
+  final Project project;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RappTokens.of(context);
+    return _Cell(
+      cellKey: 'ov-project-${project.id}',
+      width: _projectCellWidth,
+      label: project.name,
+      onTap: () => state.showProject(project.id),
+      child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(
+          project.name,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(color: t.text, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 6),
+        Wrap(spacing: 6, runSpacing: 4, children: [
+          for (final m in project.members) StatusLamp(state.memberLamp(m)),
+        ]),
+      ]),
+    );
+  }
+}
+
+class _ResourcesCell extends StatelessWidget {
+  const _ResourcesCell({required this.state});
+  final MainState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RappTokens.of(context);
+    final clips = clipSummary(state.resources.clips);
+    final transfers = transferSummary(state.resources.running);
+    return _Cell(
+      cellKey: 'ov-resources',
+      width: _resourcesWidth,
+      label: '$clips，$transfers',
+      onTap: () => state.showPanel(PanelTab.resources),
+      child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(clips, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.text)),
+        const SizedBox(height: 4),
+        Text(transfers, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.muted)),
+      ]),
     );
   }
 }

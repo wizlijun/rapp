@@ -380,4 +380,20 @@ void main() {
       greaterThanOrEqualTo(48),
     );
   });
+
+  testWidgets('focusProject scrolls the card into view and clears', (tester) async {
+    await tester.runAsync(boot);
+    await pump(tester);
+    final ids = [for (var i = 0; i < 12; i++) s.createProject('项目$i')!.id];
+    await tester.pump();
+    final last = Key('project-${ids.last}');
+    expect(tester.getTopLeft(find.byKey(last)).dy, greaterThan(800));
+    s.showProject(ids.last);
+    await tester.pump();
+    await tester.pump();
+    await tester.pumpAndSettle();
+    final top = tester.getTopLeft(find.byKey(last)).dy;
+    expect(top, inInclusiveRange(0, 800));
+    expect(s.focusProject, isNull);
+  });
 }

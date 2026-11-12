@@ -852,6 +852,16 @@ void main() {
         }, sessions: 2);
       });
 
+      test('showProject opens the projects tab and keeps overview', () {
+        env((a, t, port, st, hints) {
+          st.toggleOverview();
+          st.showProject('p1');
+          expect(st.panel, PanelTab.projects);
+          expect(st.focusProject, 'p1');
+          expect(st.overview, true);
+        }, sessions: 1);
+      });
+
       test('step stays in overview', () {
         env((a, t, port, st, hints) {
           st.toggleOverview();

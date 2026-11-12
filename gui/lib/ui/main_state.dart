@@ -351,6 +351,16 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// The project the projects tab should scroll to; the tab clears it once it has.
+  String? focusProject;
+
+  /// Opens the projects tab on [id] (from the overview).
+  void showProject(String id) {
+    panel = PanelTab.projects;
+    focusProject = id;
+    notifyListeners();
+  }
+
   void closePanel() {
     if (panel == null) return;
     panel = null;

@@ -6,6 +6,11 @@ import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/embed/traffic_label.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/ui/lamp.dart';
+import 'package:rapp/ui/workspace_store.dart';
+import 'package:rapp/ui/main_window.dart';
+import 'package:rapp/ui/fullscreen.dart';
+import 'package:rapp/service_client.dart';
+import 'dart:async';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/overview.dart';
 import 'package:rapp/ui/prefs.dart';
@@ -303,4 +308,110 @@ void main() {
       expect(MediaQuery.disableAnimationsOf(e), isTrue);
     }
   });
+
+  // ---- third layer: projects and resources ----
+  Rect rectOf(WidgetTester tester, String key) => tester.getRect(find.byKey(Key(key)));
+
+  testWidgets('a project cell shows its name and one lamp per member', (tester) async {
+    await boot(tester, apps: ['m1/a']);
+    final p = s.createProject('写周报')!;
+    s.addMember(p.id, const AppRef('m1', 'a', 'a'));
+    s.addMember(p.id, const AppRef('m1', 'b', 'b'));
+    s.addMember(p.id, const AppRef('m1', 'c', 'c'));
+    frame(1, bytes: 1000);
+    await show(tester);
+    final cell = 'ov-project-${p.id}';
+    expect(inside(cell, find.text('写周报')), findsOneWidget);
+    final lamps = inside(cell, find.byType(StatusLamp));
+    expect(lamps, findsNWidgets(3));
+    expect(tester.widget<StatusLamp>(lamps.first).kind, s.entryFor('m1/a')!.lamp);
+    expect(tester.widget<StatusLamp>(lamps.at(1)).kind, Lamp.notOpened);
+  });
+
+  testWidgets('no projects: one cell that opens the projects tab', (tester) async {
+    await boot(tester);
+    await show(tester);
+    expect(inside('ov-no-projects', find.text('还没有项目')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('ov-no-projects')));
+    expect(s.panel, PanelTab.projects);
+  });
+
+  testWidgets('the resources cell sums clips and transfers and opens the resources tab', (tester) async {
+    await boot(tester, apps: ['m1/a']);
+    port.emit(const ClipsEvent(1, [ClipRow(3, 's4-secret-title', true), ClipRow(2, 'x2', true), ClipRow(1, 'x1', true)]));
+    await tester.runAsync(flush);
+    await s.togglePin(s.resources.clips.first);
+    port.emit(const TransferProgressEvent(1, 7, true, 'a.log', 42, 100, TransferState.running, null, null));
+    await show(tester);
+    expect(inside('ov-resources', find.text('剪贴板 3 条，固定 1 条')), findsOneWidget);
+    expect(inside('ov-resources', find.text('下载 a.log 42%')), findsOneWidget);
+    expect(inside('ov-resources', find.textContaining('s4-secret-title')), findsNothing);
+    expect(find.textContaining('s4-secret-title'), findsNothing);
+    await tester.tap(find.byKey(const Key('ov-resources')));
+    expect(s.panel, PanelTab.resources);
+  });
+
+  testWidgets('the resources cell stays at the right edge', (tester) async {
+    await boot(tester);
+    for (var i = 0; i < 12; i++) {
+      s.createProject('项目$i');
+    }
+    await show(tester);
+    final right = rectOf(tester, 'overview').right - 12;
+    expect(rectOf(tester, 'ov-resources').right, right);
+    final first = s.projects.first.id;
+    final before = rectOf(tester, 'ov-project-$first').left;
+    await tester.drag(find.byKey(Key('ov-project-$first')), const Offset(-100, 0));
+    await tester.pump();
+    expect(rectOf(tester, 'ov-project-$first').left, lessThan(before));
+    expect(rectOf(tester, 'ov-resources').right, right);
+  });
+
+  testWidgets('third-row cells are at least 48 tall', (tester) async {
+    await boot(tester);
+    s.createProject('p');
+    await show(tester);
+    for (final k in ['ov-project-${s.projects.single.id}', 'ov-resources']) {
+      expect(tester.getSize(find.byKey(Key(k))).height, greaterThanOrEqualTo(48), reason: k);
+    }
+    s.projects.clear();
+  });
+
+  testWidgets('tapping a project opens the projects tab on it', (tester) async {
+    await boot(tester);
+    final ids = [for (var i = 0; i < 12; i++) s.createProject('项目$i')!.id];
+    s.toggleOverview();
+    final fs = _Fs();
+    await tester.pumpWidget(wrap(
+      MainWindow(
+        state: s,
+        monitor: ServiceMonitor(readToken: () async => null),
+        control: null,
+        configDir: tmp.path,
+        fullscreen: fs,
+      ),
+      disableAnimations: true,
+    ));
+    await tester.pump(const Duration(milliseconds: 100));
+    final cell = find.byKey(Key('ov-project-${ids.last}'));
+    await tester.scrollUntilVisible(cell, 200, scrollable: find.descendant(of: find.byKey(const Key('ov-projects')), matching: find.byType(Scrollable)));
+    await tester.pump();
+    await tester.tap(cell);
+    await tester.pump();
+    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(s.panel, PanelTab.projects);
+    final top = tester.getTopLeft(find.byKey(Key('project-${ids.last}'))).dy;
+    expect(top, inInclusiveRange(56, 834));
+    expect(s.focusProject, isNull);
+  });
+}
+
+class _Fs implements FullscreenControl {
+  @override
+  Stream<bool> get changes => const Stream.empty();
+  @override
+  Future<bool> isFullScreen() async => false;
+  @override
+  Future<void> setFullScreen(bool v) async {}
 }

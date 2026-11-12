@@ -10,9 +10,28 @@ import 'session_model.dart';
 import 'tokens.dart';
 import 'workspace_store.dart';
 
-class ProjectsTab extends StatelessWidget {
+class ProjectsTab extends StatefulWidget {
   const ProjectsTab({super.key, required this.state});
   final MainState state;
+
+  @override
+  State<ProjectsTab> createState() => _ProjectsTabState();
+}
+
+class _ProjectsTabState extends State<ProjectsTab> {
+  final _cards = <String, GlobalKey>{};
+
+  MainState get state => widget.state;
+
+  void _focus() {
+    final id = state.focusProject;
+    if (id == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final ctx = _cards[id]?.currentContext;
+      if (ctx != null && ctx.mounted) Scrollable.ensureVisible(ctx, alignment: 0);
+      if (state.focusProject == id) state.focusProject = null;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -21,9 +40,10 @@ class ProjectsTab extends StatelessWidget {
       builder: (context, _) {
         final t = RappTokens.of(context);
         final projects = state.projects;
-        return ListView(
+        _focus();
+        return SingleChildScrollView(
           padding: const EdgeInsets.all(10),
-          children: [
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             _NewProject(state: state),
             const SizedBox(height: 10),
             if (projects.isEmpty)
@@ -35,14 +55,17 @@ class ProjectsTab extends StatelessWidget {
                 ),
               ),
             for (final p in projects) ...[
-              _ProjectCard(
-                key: Key('project-${p.id}'),
-                state: state,
-                project: p,
+              KeyedSubtree(
+                key: _cards.putIfAbsent(p.id, GlobalKey.new),
+                child: _ProjectCard(
+                  key: Key('project-${p.id}'),
+                  state: state,
+                  project: p,
+                ),
               ),
               const SizedBox(height: 10),
             ],
-          ],
+          ]),
         );
       },
     );
