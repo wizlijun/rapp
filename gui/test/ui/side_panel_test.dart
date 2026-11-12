@@ -338,4 +338,64 @@ void main() {
     await tester.pumpWidget(wrap(SizedBox(width: 330, height: 400, child: SessionsTab(state: s))));
     expect(find.byType(SessionsTab), findsOneWidget);
   });
+
+  testWidgets('idle favorites list last with a not-opened lamp', (tester) async {
+    s.toggleFavorite('111', 'com.apple.Notes', 'Notes');
+    s.togglePanel();
+    await tester.pumpWidget(wrap(panel()));
+    await open(tester, 1, 'com.apple.Safari');
+    expect(find.byKey(const Key('group-favorites')), findsOneWidget);
+    final row = find.byKey(const Key('favorite-111/com.apple.Notes'));
+    expect(row, findsOneWidget);
+    expect(tester.getTopLeft(row).dy, greaterThan(tester.getTopLeft(find.byKey(const Key('session-111/com.apple.Safari'))).dy));
+    final lamp = tester.widget<StatusLamp>(find.descendant(of: row, matching: find.byType(StatusLamp)));
+    expect(lamp.kind, Lamp.notOpened);
+    expect(tester.getSize(row).height, 60);
+    expect(find.descendant(of: row, matching: find.text('mini')), findsOneWidget);
+  });
+
+  testWidgets('favorites show under the empty state', (tester) async {
+    s.toggleFavorite('111', 'com.apple.Notes', 'Notes');
+    s.togglePanel();
+    await tester.pumpWidget(wrap(panel()));
+    final empty = find.text('没有打开的会话。到「设备」里打开一个 app。');
+    final row = find.byKey(const Key('favorite-111/com.apple.Notes'));
+    expect(empty, findsOneWidget);
+    expect(row, findsOneWidget);
+    expect(tester.getTopLeft(row).dy, greaterThan(tester.getTopLeft(empty).dy));
+  });
+
+  testWidgets('tapping a favorite opens it and closes the panel', (tester) async {
+    s.toggleFavorite('111', 'com.apple.Notes', 'Notes');
+    s.togglePanel();
+    await tester.pumpWidget(wrap(panel()));
+    await tester.tap(find.byKey(const Key('favorite-111/com.apple.Notes')));
+    await tester.runAsync(flush);
+    await tester.pump();
+    expect(t.sent.last, containsPair('cmd', 'open'));
+    expect(t.sent.last, containsPair('id', '111'));
+    expect(t.sent.last, containsPair('app', 'com.apple.Notes'));
+    expect(s.panel, isNull);
+  });
+
+  testWidgets('an open favorite leaves the 常用 group and comes back when it ends', (tester) async {
+    s.toggleFavorite('111', 'com.apple.Notes', 'Notes');
+    s.togglePanel();
+    await tester.pumpWidget(wrap(panel()));
+    await open(tester, 1, 'com.apple.Notes');
+    expect(find.byKey(const Key('favorite-111/com.apple.Notes')), findsNothing);
+    t.emit({'event': 'closed', 'sid': 1});
+    await tester.runAsync(flush);
+    await tester.pump();
+    expect(find.byKey(const Key('favorite-111/com.apple.Notes')), findsOneWidget);
+  });
+
+  testWidgets('step skips favorites', (tester) async {
+    s.toggleFavorite('111', 'com.apple.Notes', 'Notes');
+    s.togglePanel();
+    await tester.pumpWidget(wrap(panel()));
+    await open(tester, 1, 'com.apple.Safari');
+    s.step(1);
+    expect(s.currentKey, '111/com.apple.Safari');
+  });
 }

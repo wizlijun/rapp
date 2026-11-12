@@ -349,4 +349,38 @@ void main() {
     await tester.pump();
     expect(t.sent.where((m) => m['cmd'] == 'add_host'), isEmpty);
   });
+
+  testWidgets('设为常用 toggles and the label follows', (tester) async {
+    await pumpTab(tester);
+    await selectMini(tester);
+    const app = 'com.apple.Safari';
+    final fav = find.byKey(const Key('fav-$app'));
+    expect(find.descendant(of: fav, matching: find.text('设为常用')), findsOneWidget);
+    await tester.tap(fav);
+    await tester.pumpAndSettle();
+    expect(s.isFavorite('111', app), isTrue);
+    expect(find.descendant(of: fav, matching: find.text('取消常用')), findsOneWidget);
+    await tester.tap(fav);
+    await tester.pumpAndSettle();
+    expect(s.isFavorite('111', app), isFalse);
+    expect(find.descendant(of: fav, matching: find.text('设为常用')), findsOneWidget);
+  });
+
+  testWidgets('设为常用 works without the hub', (tester) async {
+    await pumpTab(tester);
+    await selectMini(tester);
+    await t.die();
+    await tester.runAsync(flush);
+    await tester.pumpAndSettle();
+    expect(s.hubUsable, isFalse);
+    await tester.tap(find.byKey(const Key('fav-com.apple.Safari')));
+    await tester.pumpAndSettle();
+    expect(s.isFavorite('111', 'com.apple.Safari'), isTrue);
+  });
+
+  testWidgets('fav button is at least 48 tall', (tester) async {
+    await pumpTab(tester);
+    await selectMini(tester);
+    expect(tester.getSize(find.byKey(const Key('fav-com.apple.Safari'))).height, greaterThanOrEqualTo(48));
+  });
 }

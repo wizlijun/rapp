@@ -34,6 +34,13 @@ class SessionEntry {
   String get key => '$id/$app';
 }
 
+/// The open button's word for a row in [lamp]'s state (K10).
+String openVerb(Lamp? lamp) => switch (lamp) {
+      null || Lamp.notOpened => '打开',
+      Lamp.disconnected => '重连',
+      _ => '切到',
+    };
+
 enum Grouping { device, app }
 
 String groupingLabel(Grouping g) => switch (g) {

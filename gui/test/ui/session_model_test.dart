@@ -25,4 +25,12 @@ void main() {
     expect(stepKey(g, null, 1), 'a/bundle.X');
     expect(stepKey(const [], null, 1), isNull);
   });
+  test('open verbs by lamp', () {
+    expect(openVerb(null), '打开');
+    expect(openVerb(Lamp.notOpened), '打开');
+    expect(openVerb(Lamp.disconnected), '重连');
+    expect(openVerb(Lamp.active), '切到');
+    expect(openVerb(Lamp.idle), '切到');
+    expect(openVerb(Lamp.connecting), '切到');
+  });
 }

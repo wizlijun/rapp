@@ -200,6 +200,8 @@ class _DevicesTabState extends State<DevicesTab> {
               name: a.name,
               session: _session(id, a.app),
               enabled: state.hubUsable,
+              favorite: state.isFavorite(id, a.app),
+              onFavorite: () => state.toggleFavorite(id, a.app, a.name),
               onOpen: () => state.openOrSwitch(id, a.app, a.name),
             ),
           ),
@@ -242,11 +244,15 @@ class _AppRow extends StatelessWidget {
     required this.name,
     required this.session,
     required this.enabled,
+    required this.favorite,
+    required this.onFavorite,
     required this.onOpen,
   });
   final String id, app, name;
   final SessionEntry? session;
   final bool enabled;
+  final bool favorite;
+  final VoidCallback onFavorite;
   final VoidCallback onOpen;
 
   @override
@@ -255,8 +261,8 @@ class _AppRow extends StatelessWidget {
     final lamp = session?.lamp ?? Lamp.notOpened;
     final word = lampWord(lamp);
     final connecting = lamp == Lamp.connecting;
-    final switchTo = session != null && !connecting;
-    final verb = switchTo ? '切到' : '打开';
+    final verb = openVerb(session?.lamp);
+    final favLabel = favorite ? '取消常用' : '设为常用';
     final backdrop = rowBackdrop(lamp, t);
     final dashed = lamp == Lamp.notOpened;
     final border = rowBorder(lamp, t);
@@ -297,6 +303,13 @@ class _AppRow extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 8),
+                      RappButton.secondary(
+                        key: Key('fav-$app'),
+                        label: favLabel,
+                        semanticLabel: '$favLabel $name',
+                        onPressed: onFavorite,
+                      ),
+                      const SizedBox(width: 6),
                       RappButton.secondary(
                         key: Key('open-$app'),
                         label: verb,

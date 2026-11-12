@@ -2,10 +2,12 @@
 import 'package:flutter/material.dart';
 
 import '../embed/traffic_label.dart' show formatRate;
+import 'controls.dart' show DashedOutline;
 import 'lamp.dart';
 import 'main_state.dart';
 import 'session_model.dart';
 import 'tab_chip.dart';
+import 'workspace_store.dart';
 import 'tokens.dart';
 
 class SessionsTab extends StatelessWidget {
@@ -19,6 +21,7 @@ class SessionsTab extends StatelessWidget {
       listenable: state,
       builder: (context, _) {
         final groups = state.groups;
+        final idle = state.idleFavorites;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -41,49 +44,132 @@ class SessionsTab extends StatelessWidget {
               ),
             ),
             Expanded(
-              child: groups.isEmpty
-                  ? Padding(
-                      padding: const EdgeInsets.all(12),
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(10, 4, 10, 10),
+                children: [
+                  if (groups.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.all(2),
                       child: Text(
                         '没有打开的会话。到「设备」里打开一个 app。',
                         style: TextStyle(color: t.muted),
                       ),
-                    )
-                  : ListView(
-                      padding: const EdgeInsets.fromLTRB(10, 4, 10, 10),
-                      children: [
-                        for (final g in groups) ...[
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(2, 10, 2, 6),
-                            child: Text(
-                              g.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: t.muted,
-                                letterSpacing: 11 * t.labelSpacing,
-                              ),
-                            ),
-                          ),
-                          for (final e in g.entries)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 6),
-                              child: _SessionRow(
-                                entry: e,
-                                selected: e.key == state.currentKey,
-                                byDevice: state.grouping == Grouping.device,
-                                embedded: state.embeds,
-                                onTap: () => state.select(e.key),
-                              ),
-                            ),
-                        ],
-                      ],
                     ),
+                  for (final g in groups) ...[
+                    _GroupTitle(g.title),
+                    for (final e in g.entries)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: _SessionRow(
+                          entry: e,
+                          selected: e.key == state.currentKey,
+                          byDevice: state.grouping == Grouping.device,
+                          embedded: state.embeds,
+                          onTap: () => state.select(e.key),
+                        ),
+                      ),
+                  ],
+                  if (idle.isNotEmpty) ...[
+                    const _GroupTitle('常用', key: Key('group-favorites')),
+                    for (final f in idle)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: _FavoriteRow(
+                          favorite: f,
+                          deviceName: state.deviceName(f.device),
+                          onTap: state.hubUsable ? () => state.openOrSwitch(f.device, f.bundle, f.name) : null,
+                        ),
+                      ),
+                  ],
+                ],
+              ),
             ),
           ],
         );
       },
+    );
+  }
+}
+
+class _GroupTitle extends StatelessWidget {
+  const _GroupTitle(this.title, {super.key});
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RappTokens.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(2, 10, 2, 6),
+      child: Text(
+        title,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(fontSize: 11, color: t.muted, letterSpacing: 11 * t.labelSpacing),
+      ),
+    );
+  }
+}
+
+/// A favourite with no session: 60px, dashed outline, not-opened lamp (K9).
+class _FavoriteRow extends StatelessWidget {
+  const _FavoriteRow({required this.favorite, required this.deviceName, required this.onTap});
+  final AppRef favorite;
+  final String deviceName;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RappTokens.of(context);
+    final small = Theme.of(context).textTheme.bodySmall;
+    return SizedBox(
+      key: Key('favorite-${favorite.key}'),
+      height: 60,
+      child: Semantics(
+        button: true,
+        label: '${favorite.name} @ $deviceName，${lampWord(Lamp.notOpened)}',
+        excludeSemantics: true,
+        onTap: onTap,
+        child: Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(t.r),
+            child: CustomPaint(
+              foregroundPainter: DashedOutline(t.line, t.r),
+              child: Container(
+                decoration: t.panelBox(border: Colors.transparent),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Row(
+                  children: [
+                    const ExcludeSemantics(child: StatusLamp(Lamp.notOpened)),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            favorite.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: t.text, fontWeight: FontWeight.w600),
+                          ),
+                          Text(
+                            deviceName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: small?.copyWith(color: t.muted),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
