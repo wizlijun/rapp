@@ -98,10 +98,11 @@ class _PictureState extends State<Picture> {
   }
 
   void _touchDown(PointerDownEvent e) {
+    if (_touchScroll) return; // T5: not counted, its moves and lift are ignored
     _touches[e.pointer] = e.localPosition;
-    if (_touchScroll) return; // T5
-    if (_pending != null) {
-      // T1: a second finger while the first is held back — scroll; that press never happened.
+    if (_pending != null || (_button == null && _touches.length > 1)) {
+      // T1: a second finger while the first is held back (or rests in the letterbox, or stayed
+      // after a press it was ignored for) — scroll; a held-back press never happened.
       _dropPending();
       _touchScroll = true;
       if (_at(_centre).pic.contains(_centre)) widget.state.focusPicture(_sid); // T7
@@ -177,8 +178,13 @@ class _PictureState extends State<Picture> {
         if (_touches.isEmpty) _touchScroll = false; // T4
         return;
       }
-      if (_pending?.pointer == e.pointer) {
+    }
+    var at = e.localPosition;
+    if (e.kind == PointerDeviceKind.touch) {
+      final p = _pending;
+      if (p?.pointer == e.pointer) {
         if (e is PointerCancelEvent) return _dropPending(); // T6
+        at = p!.localPosition; // a tap: up where it landed, the jitter never reached A
         _flush();
       }
     }
@@ -187,7 +193,7 @@ class _PictureState extends State<Picture> {
     _button = null;
     _buttonPointer = null;
     _held = null;
-    if (t.usable) _mouse('up', b, clampTo(e.localPosition, t.fit), t);
+    if (t.usable) _mouse('up', b, clampTo(at, t.fit), t);
   }
 
   void _hover(PointerHoverEvent e) {
@@ -214,8 +220,15 @@ class _PictureState extends State<Picture> {
   }
 
   @override
+  void didUpdateWidget(Picture old) {
+    super.didUpdateWidget(old);
+    // A held-back press belongs to the window it landed on; never send it to another.
+    if (old.window.id != widget.window.id || old.session.sid != widget.session.sid) _dropPending();
+  }
+
+  @override
   void dispose() {
-    _pendingTimer?.cancel();
+    _dropPending();
     final h = widget.hole;
     if (h != null) {
       // Not while the tree is being torn down; and only what this picture itself reported.

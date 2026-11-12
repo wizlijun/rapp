@@ -768,6 +768,75 @@ void main() {
         expect(mouse(), isEmpty);
       });
 
+      testWidgets('a swipe whose first finger lands in the letterbox still scrolls (review I1)', (tester) async {
+        await tester.pumpWidget(wrap(embedded()));
+        await showWindow(tester, rw(7, 400, 228)); // fit (0,100) 800x400: letterbox above y=100
+        final o = tester.getTopLeft(find.byKey(const Key('stage')));
+        final f1 = await tester.createGesture(kind: PointerDeviceKind.touch, pointer: 11);
+        final f2 = await tester.createGesture(kind: PointerDeviceKind.touch, pointer: 12);
+        await f1.down(o + const Offset(200, 95));
+        await f2.down(o + const Offset(240, 110));
+        await f1.moveBy(const Offset(0, 20));
+        await f2.moveBy(const Offset(0, 20));
+        await f1.up();
+        await f2.up();
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(scrolls(), isNotEmpty);
+        expect(mouse(), isEmpty);
+      });
+
+      testWidgets('a held-back press is dropped when the window changes (review I2)', (tester) async {
+        final o = await setup(tester);
+        final g = await tester.createGesture(kind: PointerDeviceKind.touch, pointer: 11);
+        await g.down(o + const Offset(200, 100));
+        port.emit(WindowsEvent(1, [rw(8, 400, 328)]));
+        await tester.pump(); // the picture now shows window 8; the press is still held back
+        await tester.pump(const Duration(milliseconds: 200));
+        await g.up();
+        await tester.pump();
+        expect(mouse(), isEmpty);
+      });
+
+      testWidgets('a held-back press is dropped when the picture goes away (review M1)', (tester) async {
+        final o = await setup(tester);
+        final g = await tester.createGesture(kind: PointerDeviceKind.touch, pointer: 11);
+        await g.down(o + const Offset(200, 100));
+        await tester.pumpWidget(const SizedBox());
+        await g.up();
+        await tester.pump();
+        expect(mouse(), isEmpty);
+      });
+
+      testWidgets('a third finger while scrolling is ignored (T5)', (tester) async {
+        final o = await setup(tester);
+        final f1 = await tester.createGesture(kind: PointerDeviceKind.touch, pointer: 11);
+        final f2 = await tester.createGesture(kind: PointerDeviceKind.touch, pointer: 12);
+        final f3 = await tester.createGesture(kind: PointerDeviceKind.touch, pointer: 13);
+        await f1.down(o + const Offset(200, 100));
+        await f2.down(o + const Offset(240, 100));
+        await f3.down(o + const Offset(400, 300));
+        await f3.moveBy(const Offset(0, -30));
+        expect(scrolls(), isEmpty);
+        await f1.moveBy(const Offset(0, -20));
+        expect(scrolls().single['dy'], -10.0);
+        expect(scrolls().single['x'] as double, closeTo(110, 1e-9));
+        await f1.up();
+        await f2.up();
+        await f3.up();
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(mouse(), isEmpty);
+      });
+
+      testWidgets('a tap with a little jitter releases where it landed (review M3)', (tester) async {
+        final o = await setup(tester);
+        final g = await tester.createGesture(kind: PointerDeviceKind.touch, pointer: 11);
+        await g.down(o + const Offset(200, 100));
+        await g.moveBy(const Offset(6, 0));
+        await g.up();
+        await tester.pump();
+        expect(mouse().map((c) => (c['kind'], c['x'])), [('down', 100.0), ('up', 100.0)]);
+      });
+
       testWidgets('a mouse press is not held back', (tester) async {
         final o = await setup(tester);
         final g = await tester.createGesture(kind: PointerDeviceKind.mouse);
