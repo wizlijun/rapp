@@ -18,6 +18,8 @@ pub const MAX_CHILD_LINE: usize = 4096;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Lvl {
+    /// Below the access record: written only by a log made `with_debug(true)`.
+    Debug,
     Info,
     Warn,
     Error,
@@ -26,6 +28,7 @@ pub enum Lvl {
 impl Lvl {
     pub fn as_str(self) -> &'static str {
         match self {
+            Lvl::Debug => "debug",
             Lvl::Info => "info",
             Lvl::Warn => "warn",
             Lvl::Error => "error",
@@ -51,6 +54,8 @@ struct Writer {
     last: Option<String>,
     repeat: u64,
     repeat_since: Instant,
+    /// Whether `Lvl::Debug` events are written (off by default).
+    debug: bool,
 }
 
 impl Log {
@@ -62,7 +67,13 @@ impl Log {
             last: None,
             repeat: 0,
             repeat_since: Instant::now(),
+            debug: false,
         })))
+    }
+    /// Writes `Lvl::Debug` events too (they are dropped otherwise). Applies to every clone.
+    pub fn with_debug(self, on: bool) -> Log {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).debug = on;
+        self
     }
     pub fn none() -> Log {
         Self::with(Sink::None)
@@ -80,6 +91,9 @@ impl Log {
 
     /// One event; `fields` must be an object (anything else is ignored).
     pub fn event(&self, lvl: Lvl, ev: &str, fields: Value) {
+        if lvl == Lvl::Debug && !self.0.lock().unwrap_or_else(|e| e.into_inner()).debug {
+            return;
+        }
         let mut body = match fields {
             Value::Object(m) => m,
             _ => Map::new(),
@@ -390,6 +404,18 @@ mod tests {
         Log::file_with_limit(dir.path(), "t.log", 300).msg(Lvl::Info, "after restart");
         assert!(dir.path().join("t.log.1").exists());
         assert_eq!(lines(&dir.path().join("t.log"))[0]["msg"], "after restart");
+    }
+
+    #[test]
+    fn debug_lines_are_written_only_when_asked_for() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = Log::file(dir.path(), "t.log");
+        log.event(Lvl::Debug, "probe", json!({"n": 1}));
+        log.event(Lvl::Info, "real", json!({}));
+        assert_eq!(lines(&dir.path().join("t.log")).iter().map(|v| v["ev"].clone()).collect::<Vec<_>>(), [json!("real")]);
+        let log = Log::file(dir.path(), "d.log").with_debug(true);
+        log.event(Lvl::Debug, "probe", json!({"n": 1}));
+        assert_eq!(lines(&dir.path().join("d.log"))[0]["lvl"], "debug");
     }
 
     #[test]

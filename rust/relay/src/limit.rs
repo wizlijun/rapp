@@ -1,5 +1,6 @@
 //! Failure rate limiting (spec §2.2): after 5 consecutive failures, the n-th failure
 //! locks the key for `min(2^(n-5), 300)` seconds. A success clears the key. Memory only.
+//! Also `Seldom`, which thins out a repeated log line per key.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -41,9 +42,61 @@ impl Limiter {
     }
 }
 
+/// Lets one event per key through per `every`: a presence probe that finds its host offline
+/// every 30 s leaves one Warn line per 10 minutes, not twenty. Memory only, bounded.
+pub struct Seldom {
+    every: Duration,
+    last: HashMap<String, Instant>,
+}
+
+impl Seldom {
+    pub fn new(every: Duration) -> Seldom {
+        Seldom { every, last: HashMap::new() }
+    }
+
+    /// True when `key` was not let through within `every` (it is let through now).
+    pub fn first(&mut self, key: &str, now: Instant) -> bool {
+        let fresh = |t: &Instant| now.saturating_duration_since(*t) < self.every;
+        if self.last.get(key).is_some_and(fresh) {
+            return false;
+        }
+        if self.last.len() >= MAX_KEYS {
+            self.last.retain(|_, t| fresh(t));
+            if self.last.len() >= MAX_KEYS {
+                self.last.clear();
+            }
+        }
+        self.last.insert(key.to_string(), now);
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn seldom_lets_one_through_per_key_per_window() {
+        let mut s = Seldom::new(Duration::from_secs(600));
+        let t = Instant::now();
+        assert!(s.first("1.2.3.4|111", t));
+        assert!(!s.first("1.2.3.4|111", t + Duration::from_secs(30)));
+        assert!(!s.first("1.2.3.4|111", t + Duration::from_secs(599)));
+        assert!(s.first("1.2.3.4|222", t + Duration::from_secs(30)), "another id is its own pair");
+        assert!(s.first("5.6.7.8|111", t + Duration::from_secs(30)), "another source is its own pair");
+        assert!(s.first("1.2.3.4|111", t + Duration::from_secs(600)), "after 10 minutes, once more");
+        assert!(!s.first("1.2.3.4|111", t + Duration::from_secs(630)));
+    }
+
+    #[test]
+    fn seldom_stays_bounded() {
+        let mut s = Seldom::new(Duration::from_secs(600));
+        let t = Instant::now();
+        for i in 0..MAX_KEYS + 10 {
+            assert!(s.first(&format!("k{i}"), t));
+        }
+        assert!(s.last.len() <= MAX_KEYS);
+    }
 
     #[test]
     fn locks_after_five_failures_with_doubling_capped_at_300() {
