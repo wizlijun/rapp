@@ -393,6 +393,21 @@ async fn embedded_opens_are_not_reused_by_the_hub() {
 }
 
 #[tokio::test]
+async fn open_after_closed_gets_a_new_session() {
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = hub_with_host(&a, &relay, home.path(), None).await;
+    let r1 = hub.call(json!({"cmd":"open","id":a.id,"app":"com.example.echo","req":"o1"})).await;
+    hub.send(json!({"cmd":"close","sid":r1["sid"]})).await;
+    assert_eq!(hub.next().await["event"], "closed");
+    let r2 = hub.call(json!({"cmd":"open","id":a.id,"app":"com.example.echo","req":"o2"})).await;
+    assert_eq!(r2["event"], "opened", "{r2}");
+    assert_ne!(r1["sid"], r2["sid"]);
+    assert!(r2.get("reused").is_none(), "{r2}");
+}
+
+#[tokio::test]
 async fn reconnect_open_is_never_reused() {
     let relay = relay(Duration::from_secs(60));
     let a = service(Some(relay.relay.addr)).await;

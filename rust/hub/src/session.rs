@@ -26,13 +26,7 @@ impl Hub {
         }
         if !reconnect {
             if let Some(ev) = self.reuse(id, app) {
-                self.log.event(Lvl::Info, "opened", {
-                    let mut o = json!({"sid":ev["sid"],"id":id,"app":app,"path":ev["path"],"reused":true});
-                    if let Some(name) = self.hosts.get(id).map(|h| h.name).filter(|n| !n.is_empty()) {
-                        o["host_name"] = name.into();
-                    }
-                    o
-                });
+                self.log_opened(ev["sid"].as_u64().unwrap_or(0), id, app, ev["path"].as_str().unwrap_or(""), false, true);
                 self.emit(ev, req).await;
                 return Ok(());
             }
@@ -84,7 +78,7 @@ impl Hub {
         }
         let hs = HubSession { tx: Some(tx), id: id.into(), app: app.into(), path: path.into(), embed: false };
         self.sessions.lock().unwrap().insert(sid, hs);
-        self.log_opened(sid, id, app, path, false);
+        self.log_opened(sid, id, app, path, false, false);
         self.emit(json!({"event":"opened","sid":sid,"id":id,"app":app,"path":path}), req).await;
         tokio::spawn(self.clone().run(sid, child, tcp, stream, listener, host, app.to_string(), Instant::now()));
         Ok(())
@@ -94,15 +88,22 @@ impl Hub {
     /// `opened` event for it (R12: embedded sessions are reused by the GUI, never here).
     fn reuse(&self, id: &str, app: &str) -> Option<Value> {
         let sessions = self.sessions.lock().unwrap();
-        let (sid, s) = sessions.iter().filter(|(_, s)| !s.embed && s.id == id && s.app == app && s.tx.is_some()).min_by_key(|(k, _)| **k)?;
-        let _ = s.tx.as_ref()?.send("{\"cmd\":\"focus\"}\n".into());
+        let (sid, s) = sessions
+            .iter()
+            .filter(|(_, s)| !s.embed && s.id == id && s.app == app && s.tx.is_some())
+            .min_by_key(|(k, _)| **k)?;
+        // A dead client (receiver gone) is not reusable.
+        s.tx.as_ref()?.send("{\"cmd\":\"focus\"}\n".into()).ok()?;
         Some(json!({"event":"opened","sid":sid,"id":id,"app":app,"path":s.path,"reused":true}))
     }
 
-    fn log_opened(&self, sid: u64, id: &str, app: &str, path: &str, reconnect: bool) {
+    fn log_opened(&self, sid: u64, id: &str, app: &str, path: &str, reconnect: bool, reused: bool) {
         let mut opened = json!({"sid":sid,"id":id,"app":app,"path":path});
         if reconnect {
             opened["reconnect"] = true.into();
+        }
+        if reused {
+            opened["reused"] = true.into();
         }
         if let Some(name) = self.hosts.get(id).map(|h| h.name).filter(|n| !n.is_empty()) {
             opened["host_name"] = name.into();
@@ -124,7 +125,7 @@ impl Hub {
         // Registered and logged before the event goes out, so a fast `close` or `note` finds it.
         let hs = HubSession { tx: Some(tx), id: id.into(), app: app.into(), path: path.into(), embed: true };
         self.sessions.lock().unwrap().insert(sid, hs);
-        self.log_opened(sid, id, app, path, reconnect);
+        self.log_opened(sid, id, app, path, reconnect, false);
         self.emit(json!({"event":"opened","sid":sid,"id":id,"app":app,"path":path,"port":port,"token":token}), req).await;
         tokio::spawn(self.clone().run_embedded(sid, listener, stream, host, app.to_string(), Instant::now(), rx));
         Ok(())
@@ -208,9 +209,10 @@ impl Hub {
     async fn finish_session(&self, sid: u64, id: &str, app: &str, since: Instant, reason: String) {
         let secs = since.elapsed().as_secs();
         self.log.event(Lvl::Info, "closed", json!({"sid":sid,"id":id,"app":app,"secs":secs,"reason":reason}));
-        self.emit(json!({"event":"closed","sid":sid,"reason":reason}), &None).await;
+        // Removed before `closed` goes out, so a reopen right after it never reuses this sid.
         self.sessions.lock().unwrap().remove(&sid);
         self.close_why.lock().unwrap().remove(&sid);
+        self.emit(json!({"event":"closed","sid":sid,"reason":reason}), &None).await;
     }
 
     /// The reason `close` left for `sid` (`"user"`), else `"quit"`.
