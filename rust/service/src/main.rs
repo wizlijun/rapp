@@ -2,7 +2,8 @@
 //! Env: `RAPP_BIN_DIR` (where rapp-host lives), `RAPP_GUI` (the `rapp` GUI for `--cm`),
 //! `RAPP_LOG_DIR` (where `service.log` goes; see `rapp_net::log::log_dir`).
 
-use rapp_service::{Opts, Service, WORKER_IDLE};
+use rapp_service::{Opts, Service, SystemRunner, UpdateOpts, WORKER_IDLE};
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() {
@@ -17,12 +18,22 @@ async fn main() {
         gui: std::env::var_os("RAPP_GUI").map(Into::into),
         worker_idle: WORKER_IDLE,
         log_dir: rapp_net::log::log_dir(),
+        runner: Arc::new(SystemRunner),
+        // Only a service running from a `.app` updates itself.
+        update: std::env::current_exe().ok().and_then(|e| rapp_update::bundle_of(&e)).map(UpdateOpts::system),
     };
     match Service::start(opts).await {
         Ok(svc) => {
             // Ports and id are in service.log (`service_start`).
-            stopped().await;
+            let restart = tokio::select! {
+                _ = stopped() => false,
+                _ = svc.restart_wanted() => true,
+            };
             svc.stop();
+            if restart {
+                // A new version is in place: exit 0 and launchd's KeepAlive starts it.
+                std::process::exit(0);
+            }
         }
         Err(e) => {
             eprintln!("rapp-service: {e:#}");

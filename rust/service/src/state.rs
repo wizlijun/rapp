@@ -84,6 +84,13 @@ pub struct State {
     pub cm: Mutex<Option<std::process::Child>>,
     pub log: Log,
     pub log_dir: PathBuf,
+    /// Every external program the updater runs (a FakeRunner in tests).
+    pub runner: Arc<dyn rapp_update::Runner>,
+    pub update: Mutex<crate::update::UpdState>,
+    /// None: not running from a `.app`, so the updater is off.
+    pub update_opts: Option<crate::UpdateOpts>,
+    /// Set to true once a new version is in place; `main` then stops and exits 0.
+    pub restart: watch::Sender<bool>,
 }
 
 impl State {
@@ -183,7 +190,7 @@ impl State {
         let mut v = json!({
             "ok": true, "id": cfg.id, "name": cfg.name, "password": cfg.password, "lan_ids": lan_ids,
             "relay": relay, "permissions": self.permissions.lock().unwrap().clone(), "sessions": sessions,
-            "log_dir": self.log_dir,
+            "log_dir": self.log_dir, "update": crate::update::status_json(self),
         });
         if let Some(e) = relay_error {
             v["relay_error"] = json!(e);

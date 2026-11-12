@@ -16,6 +16,7 @@ serde.workspace = true
 serde_json.workspace = true
 rand.workspace = true
 rapp-net.workspace = true
+rapp-update.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -26,6 +26,15 @@ pub struct Config {
     pub port: Option<u16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ipc_port: Option<u16>,
+    /// Where `latest.json` is fetched from; `rapp_update::DEFAULT_URL` when unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_url: Option<String>,
+    /// Install by itself when nobody is using rapp (default true).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_update: Option<bool>,
+    /// The scheduled checks (default true); the 检查更新 button works either way.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check_updates: Option<bool>,
 }
 
 impl Config {
@@ -57,6 +66,18 @@ impl Config {
 
     pub fn save(&self, home: &Path) -> Result<()> {
         rapp_net::config::write_json(&home.join("service.json"), self)
+    }
+
+    pub fn update_url(&self) -> String {
+        self.update_url.clone().unwrap_or_else(|| rapp_update::DEFAULT_URL.to_string())
+    }
+
+    pub fn auto_update(&self) -> bool {
+        self.auto_update.unwrap_or(true)
+    }
+
+    pub fn check_updates(&self) -> bool {
+        self.check_updates.unwrap_or(true)
     }
 
     /// `(relay, key)` when a relay is configured.

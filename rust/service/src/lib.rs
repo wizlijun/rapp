@@ -7,6 +7,7 @@ mod ipc;
 mod peer;
 mod relay_link;
 mod state;
+mod update;
 mod workers;
 
 use anyhow::{Context, Result};
@@ -19,6 +20,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::task::JoinHandle;
+
+pub use rapp_update::{Runner, SystemRunner};
 
 pub const WORKER_IDLE: Duration = Duration::from_secs(60);
 /// The service's log in `Opts::log_dir` (observability spec §3).
@@ -33,6 +36,44 @@ pub struct Opts {
     pub worker_idle: Duration,
     /// Where `service.log` goes (`rapp_net::log::log_dir()` in the real service).
     pub log_dir: PathBuf,
+    /// Runs every external program of the updater (`SystemRunner` in the real service).
+    pub runner: Arc<dyn Runner>,
+    /// None turns the updater off (not running from a `.app`).
+    pub update: Option<UpdateOpts>,
+}
+
+/// Where the running app is and the updater's timings (online-update plan Task 4).
+#[derive(Clone, Debug)]
+pub struct UpdateOpts {
+    /// The `.app` this service runs from; it is what gets replaced.
+    pub bundle: PathBuf,
+    /// Started by launchd (parent pid 1): only then does an exit come back as the new version.
+    pub launchd: bool,
+    pub cache_dir: PathBuf,
+    pub first_check: Duration,
+    pub tick: Duration,
+    /// How often a downloaded version tries to install by itself.
+    pub idle_poll: Duration,
+    /// How long a new version must run before its marker and zip are removed.
+    pub healthy_after: Duration,
+    /// How long a manual install waits for the GUI to go, and then for nobody to be using rapp.
+    pub gui_wait: Duration,
+}
+
+impl UpdateOpts {
+    pub fn system(bundle: PathBuf) -> Self {
+        let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
+        UpdateOpts {
+            bundle,
+            launchd: std::os::unix::process::parent_id() == 1,
+            cache_dir: home.join("Library/Caches/rapp/update"),
+            first_check: Duration::from_secs(30),
+            tick: Duration::from_secs(3600),
+            idle_poll: Duration::from_secs(60),
+            healthy_after: Duration::from_secs(30),
+            gui_wait: Duration::from_secs(10),
+        }
+    }
 }
 
 pub struct Service {
@@ -77,6 +118,10 @@ impl Service {
             cm: Mutex::new(None),
             log,
             log_dir: opts.log_dir,
+            runner: opts.runner,
+            update: Mutex::default(),
+            update_opts: opts.update,
+            restart: tokio::sync::watch::channel(false).0,
         };
         let id = state.cfg.lock().unwrap().id.clone();
         let version = env!("CARGO_PKG_VERSION");
@@ -84,12 +129,24 @@ impl Service {
         let checked = workers::check(&state, false).await.unwrap_or(serde_json::json!({"screen_recording": false, "accessibility": false}));
         state.set_permissions(checked);
         let state = Arc::new(state);
+        update::on_start(&state).await;
         let tasks = vec![
             tokio::spawn(peer::accept_loop(state.clone(), endpoint)),
             tokio::spawn(relay_link::run(state.clone(), relay_rx)),
             tokio::spawn(ipc::serve(state.clone(), listener, ipc_token)),
+            update::spawn(state.clone()),
         ];
         Ok(Service { port, ipc_port, state, tasks, stopped: Default::default() })
+    }
+
+    /// Resolves once a new version has been put in place and this service should exit.
+    pub fn restart_wanted(&self) -> impl std::future::Future<Output = ()> + Send + 'static {
+        let mut rx = self.state.restart.subscribe();
+        async move {
+            if rx.wait_for(|r| *r).await.is_err() {
+                std::future::pending::<()>().await;
+            }
+        }
     }
 
     /// Ends open sessions in the log first, so a stop (SIGTERM, ^C) leaves no session unclosed.
