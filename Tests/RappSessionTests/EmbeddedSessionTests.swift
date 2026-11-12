@@ -128,6 +128,23 @@ final class EmbeddedSessionTests: XCTestCase {
         XCTAssertNotNil(s.surfaces.latest(7))
     }
 
+    func testInputBlockedBecomesAnEventAndKeepsTheLink() throws {
+        let link = FakeLink()
+        var events = [SessionEvent]()
+        let (_, q) = make(link) { events.append($0) }
+        q.sync { link.feed(.windows([w])); link.feed(.inputBlocked(by: "Mac mini")) }
+        XCTAssertEqual(events.last, .inputBlocked(by: "Mac mini"))
+        XCTAssertFalse(events.contains { if case .disconnected = $0 { return true }; return false })
+    }
+
+    func testTakenOverDisconnectsWithTheHostText() throws {
+        let link = FakeLink()
+        var events = [SessionEvent]()
+        let (_, q) = make(link) { events.append($0) }
+        q.sync { link.feed(.windows([w])); link.feed(.error("taken over by Mac mini")) }
+        XCTAssertEqual(events.last, .disconnected(reason: "host says: taken over by Mac mini"))
+    }
+
     func testMenuPickAndMoveToTopLeftSendMessages() {
         let link = FakeLink()
         let (s, q) = make(link) { _ in }

@@ -96,6 +96,10 @@ final class ChannelTests: XCTestCase {
         XCTAssertEqual(blocks.first?["n"] as? Int, 2)
         XCTAssertEqual(blocks.first?["label"] as? String, "[图片 #1 10×20]")
 
+        let blocked = eventPayload(.inputBlocked(by: "Mac mini"), sid: 3, textures: [:])
+        XCTAssertEqual(blocked?.method, "input_blocked")
+        XCTAssertEqual(blocked?.args["by"] as? String, "Mac mini")
+        XCTAssertEqual(blocked?.args["sid"] as? Int64, 3)
         let done = try XCTUnwrap(eventPayload(.composer(.done(sent: 2, failure: nil)), sid: 3, textures: [:]))
         XCTAssertEqual(done.method, "composer")
         let d = try XCTUnwrap(done.args["done"] as? [String: Any])

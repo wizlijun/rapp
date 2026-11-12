@@ -58,6 +58,8 @@ public enum SessionEvent: Equatable {
     case transferStatus(String?)
     case transferProgress(TransferProgress)
     case composer(ComposerEvent)
+    /// A refused a key, click or paste because another device is operating it; the link stays up.
+    case inputBlocked(by: String)
     /// The link dropped (or A sent garbage): the last pictures stay; `closed` follows when the GUI ends the session.
     case disconnected(reason: String)
     /// The session ended and its pictures are released.

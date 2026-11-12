@@ -238,8 +238,8 @@ public final class EmbeddedSession {
             DispatchQueue.main.async { [weak self] in _ = self?.composer.pasted(seq: seq, error: error) }
         case let .error(reason):
             disconnect(reason: "host says: \(reason)")
-        case .inputBlocked:
-            break  // Task 6 wires this
+        case let .inputBlocked(by):
+            onEvent?(.inputBlocked(by: by))
         default:
             break
         }

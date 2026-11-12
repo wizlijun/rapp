@@ -37,6 +37,30 @@ final class TrafficLabel: NSTextField {
         }
     }
 
+    private var flashEnd: Date?
+    private var restoreText = ""
+
+    /// Whether a `flash` is still showing (the meter must not overwrite it).
+    var isFlashing: Bool { flashEnd.map { $0 > Date() } ?? false }
+
+    /// Shows `text` for `seconds`, then goes back to the text the label had (kept current by the meter meanwhile).
+    func flash(_ text: String, for seconds: TimeInterval) {
+        if !isFlashing { restoreText = stringValue }
+        stringValue = text
+        let end = Date().addingTimeInterval(seconds)
+        flashEnd = end
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+            guard let self, self.flashEnd == end else { return }
+            self.flashEnd = nil
+            self.stringValue = self.restoreText
+        }
+    }
+
+    /// The rate text to show once a flash is over.
+    func setRate(_ text: String) {
+        if isFlashing { restoreText = text } else { stringValue = text }
+    }
+
     /// Puts the label at the right end of `window`'s title bar, 8 points in.
     func attach(to window: NSWindow) {
         // Wide enough for "999.9 KB/s" at 11 points plus the margin, no wider:
@@ -79,6 +103,11 @@ final class TrafficMeter {
         return label
     }
 
+    /// Shows `text` on every label for `seconds`.
+    func flash(_ text: String, for seconds: TimeInterval) {
+        for label in labels.allObjects { label.flash(text, for: seconds) }
+    }
+
     func add(bytes: Int) {
         bytesThisSecond += bytes
     }
@@ -91,7 +120,7 @@ final class TrafficMeter {
             guard let self else { return }
             self.shown = formatRate(bytes: self.bytesThisSecond)
             self.bytesThisSecond = 0
-            for label in self.labels.allObjects { label.stringValue = self.shown }
+            for label in self.labels.allObjects { label.setRate(self.shown) }
         }
     }
 }

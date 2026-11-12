@@ -194,11 +194,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case let .pasted(seq, error):
             coordinator.pasted(seq: seq, error: error)
         case let .error(reason):
-            output.finish(exitCode(forHostError: reason), "rapp-client: host says: \(reason)")
-        case .inputBlocked:
-            break  // Task 6 wires this
+            if !output.json, let notice = takeoverNotice(reason) {
+                offerTakeBack(notice, reason: reason)
+            } else {
+                output.finish(exitCode(forHostError: reason), "rapp-client: host says: \(reason)")
+            }
+        case let .inputBlocked(by):
+            meter.flash(inputBlockedNotice(by: by), for: 1)
         default:
             break
+        }
+    }
+
+    /// Another device took this window over: tell the user; 「拿回来」 starts this client again and quits.
+    private func offerTakeBack(_ notice: String, reason: String) {
+        let alert = NSAlert()
+        alert.messageText = notice
+        alert.addButton(withTitle: "拿回来")
+        alert.addButton(withTitle: "关闭")
+        if alert.runModal() == .alertFirstButtonReturn {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
+            process.arguments = Array(CommandLine.arguments.dropFirst())
+            process.environment = ProcessInfo.processInfo.environment
+            do {
+                try process.run()
+                output.finish(ExitCode.ok, "rapp-client: \(notice); relaunched")
+            } catch {
+                output.finish(exitCode(forHostError: reason), "rapp-client: cannot relaunch: \(error)")
+            }
+        } else {
+            output.finish(exitCode(forHostError: reason), "rapp-client: host says: \(reason)")
         }
     }
 
