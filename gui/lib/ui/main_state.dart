@@ -16,6 +16,7 @@ import 'lifecycle.dart';
 import 'prefs.dart';
 import 'session_model.dart';
 import 'tokens.dart';
+import 'workspace_store.dart';
 
 export 'lifecycle.dart' show hubWord, hubWords;
 
@@ -56,6 +57,9 @@ class MainState extends ChangeNotifier {
     _portSub = port?.events.listen(_onPortEvent);
     hub?.addListener(_onHub);
     _lastError = hub?.lastError;
+    final loaded = loadWorkspace(configDir);
+    workspace = loaded.workspace;
+    if (loaded.problem != null) hint = loaded.problem!;
     _entries = _mapEntries();
     refreshDevices();
   }
@@ -65,6 +69,9 @@ class MainState extends ChangeNotifier {
   final String configDir;
   final UiPrefs prefs;
   final SessionPort? port;
+
+  /// Favourites and projects, loaded from `workspace.json` in [configDir].
+  late final Workspace workspace;
 
   /// The double-click interval the runner reported (`init`), for counting clicks (R14).
   final Duration doubleClick;
@@ -882,6 +889,10 @@ class MainState extends ChangeNotifier {
       _seenOnline.remove(id);
       _offlineSince.remove(id);
       if (deviceTab == id) deviceTab = null;
+      if (workspace.favorites.any((f) => f.device == id)) {
+        workspace.favorites.removeWhere((f) => f.device == id);
+        _saveWorkspace();
+      }
     } catch (e) {
       hint = hubWord('$e');
     }
@@ -906,8 +917,44 @@ class MainState extends ChangeNotifier {
     try {
       prefs.save(configDir);
     } catch (e) {
-      final reason = e is FileSystemException ? (e.osError?.message ?? e.message) : "$e";
-      hint = '偏好没有保存：$reason';
+      hint = '偏好没有保存：${_fsReason(e)}';
+    }
+    notifyListeners();
+  }
+
+  String _fsReason(Object e) => e is FileSystemException ? (e.osError?.message ?? e.message) : "$e";
+
+  // ---- favourites ----
+  List<AppRef> get favorites => workspace.favorites;
+
+  bool isFavorite(String device, String bundle) => workspace.favorites.any((f) => f.key == '$device/$bundle');
+
+  /// Adds the app to the end of the favourites, or removes it. [name] is kept as shown now.
+  void toggleFavorite(String device, String bundle, String name) {
+    final key = '$device/$bundle';
+    final i = workspace.favorites.indexWhere((f) => f.key == key);
+    if (i >= 0) {
+      workspace.favorites.removeAt(i);
+    } else {
+      workspace.favorites.add(AppRef(device, bundle, oneLine(name)));
+    }
+    _saveWorkspace();
+  }
+
+  /// Favourites with no session (pending or open), in favourite order.
+  List<AppRef> get idleFavorites {
+    final open = {for (final e in _entries) e.key};
+    return [
+      for (final f in workspace.favorites)
+        if (!open.contains(f.key)) f,
+    ];
+  }
+
+  void _saveWorkspace() {
+    try {
+      saveWorkspace(configDir, workspace);
+    } catch (e) {
+      hint = '项目和常用没有保存：${_fsReason(e)}';
     }
     notifyListeners();
   }

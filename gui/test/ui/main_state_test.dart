@@ -248,6 +248,67 @@ void main() {
     expect(s2.hubUsable, isFalse);
   });
 
+  group('workspace', () {
+    MainState restart() => MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs());
+
+    test('a bad workspace file shows the load problem as the hint', () {
+      File('${tmp.path}/workspace.json').writeAsStringSync('{bad');
+      final s2 = restart();
+      expect(s2.hint, '项目和常用没有读到，已从空白开始');
+      expect(s2.favorites, isEmpty);
+    });
+
+    test('toggleFavorite saves and survives a restart', () {
+      s.toggleFavorite('111', 'com.apple.calculator', 'Calculator');
+      expect(s.isFavorite('111', 'com.apple.calculator'), true);
+      expect(restart().favorites.single.name, 'Calculator');
+      s.toggleFavorite('111', 'com.apple.calculator', 'Calculator');
+      expect(s.isFavorite('111', 'com.apple.calculator'), false);
+      expect(restart().favorites, isEmpty);
+      expect(s.hint, '');
+    });
+
+    test('idle favorites leave out open and pending sessions', () async {
+      s.toggleFavorite('111', 'com.apple.Safari', 'Safari');
+      s.toggleFavorite('111', 'com.apple.Notes', 'Notes');
+      s.openOrSwitch('111', 'com.apple.Safari', 'Safari');
+      expect(s.idleFavorites.map((a) => a.bundle), ['com.apple.Notes']);
+      t.emit({...opened(1, '111', 'com.apple.Safari'), 'req': t.sent.last['req']});
+      await pump();
+      expect(s.idleFavorites.map((a) => a.bundle), ['com.apple.Notes']);
+      t.emit({'event': 'closed', 'sid': 1});
+      await pump();
+      expect(s.idleFavorites.map((a) => a.bundle), ['com.apple.Safari', 'com.apple.Notes']);
+    });
+
+    test('removing a device drops only its favorites', () async {
+      t.onSend = (m) {
+        if (m['cmd'] == 'remove_host') {
+          t.emit({
+            'event': 'hosts',
+            'req': m['req'],
+            'hosts': [
+              {'id': '222', 'name': ''},
+            ],
+          });
+        }
+      };
+      s.toggleFavorite('111', 'x', 'X');
+      s.toggleFavorite('222', 'y', 'Y');
+      await s.removeDevice('111');
+      expect(s.favorites.map((a) => a.key), ['222/y']);
+      expect(restart().favorites.map((a) => a.key), ['222/y']);
+    });
+
+    test('an unwritable dir keeps the data in memory and says why', () {
+      Process.runSync('chmod', ['555', tmp.path]);
+      s.toggleFavorite('111', 'x', 'X');
+      expect(s.isFavorite('111', 'x'), true);
+      expect(s.hint, startsWith('项目和常用没有保存：'));
+      expect(File('${tmp.path}/workspace.json').existsSync(), false);
+    });
+  });
+
   group('embedded sessions', () {
     void env(void Function(FakeAsync a, FakeTransport t, FakeSessionPort port, MainState st, List<String> hints) body,
         {int sessions = 1, bool withPort = true}) {
