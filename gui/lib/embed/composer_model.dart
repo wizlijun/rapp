@@ -100,13 +100,39 @@ class ComposerModel extends ChangeNotifier {
         for (final b in gone) {
           onDrop?.call(b.n);
         }
-        if (textSent) text = text.substring(snap.text.length);
+        if (textSent) _dropTextPrefix(snap.text.length);
       } else {
         note = '（发送中改过内容，未清除）';
       }
     }
     final shown = [if (failure != null && failure.isNotEmpty) failure, ?note];
     if (shown.isNotEmpty) _show(shown.join(' '), const Duration(seconds: 5));
+    notifyListeners();
+  }
+
+  /// The first [n] characters went: the rest stays, its cursor and composing range shifted.
+  void _dropTextPrefix(int n) {
+    final v = controller.value;
+    final rest = v.text.substring(n);
+    int shift(int i) => i < 0 ? i : (i - n).clamp(0, rest.length);
+    final sel = v.selection;
+    final c = v.composing;
+    final composing = c.isValid && c.end > n ? TextRange(start: shift(c.start), end: shift(c.end)) : TextRange.empty;
+    controller.value = TextEditingValue(
+      text: rest,
+      selection: sel.isValid
+          ? sel.copyWith(baseOffset: shift(sel.baseOffset), extentOffset: shift(sel.extentOffset))
+          : TextSelection.collapsed(offset: rest.length),
+      composing: composing,
+    );
+  }
+
+  /// Bumped when the field should take the caret (a clip's 「插入」); the bar follows it.
+  int focusTick = 0;
+
+  /// The field should take the caret, even from a focused picture.
+  void wantFocus() {
+    focusTick++;
     notifyListeners();
   }
 

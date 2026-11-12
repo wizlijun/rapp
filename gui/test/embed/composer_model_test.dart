@@ -73,6 +73,26 @@ void main() {
     expect(m.status, '（发送中改过内容，未清除）');
   });
 
+  test('done keeps the cursor and composing range, shifted past what went', () {
+    m.text = 'hi';
+    m.send();
+    m.controller.value = const TextEditingValue(
+        text: 'hi there', selection: TextSelection.collapsed(offset: 5), composing: TextRange(start: 3, end: 8));
+    m.done(1, null);
+    expect(m.text, ' there');
+    expect(m.controller.selection, const TextSelection.collapsed(offset: 3));
+    expect(m.controller.value.composing, const TextRange(start: 1, end: 6));
+
+    // Inside what went: clamped to its end.
+    m.send();
+    m.controller.value = const TextEditingValue(
+        text: ' there!', selection: TextSelection(baseOffset: 2, extentOffset: 7));
+    m.done(1, null);
+    expect(m.text, '!');
+    expect(m.controller.selection, const TextSelection(baseOffset: 0, extentOffset: 1));
+    expect(m.controller.value.composing, TextRange.empty);
+  });
+
   test('a cancelled send (empty failure) shows nothing', () {
     m.text = 'a';
     m.send();

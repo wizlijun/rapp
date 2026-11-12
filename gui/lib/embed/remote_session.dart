@@ -77,6 +77,7 @@ class RemoteSession extends ChangeNotifier {
         // A clip's 「插入」: into the draft, which opens to show it.
         composer.apply(e.insert);
         composer.open = true;
+        composer.wantFocus();
       case TransferEvent():
         transferStatus = e.status;
       case MenuEvent():

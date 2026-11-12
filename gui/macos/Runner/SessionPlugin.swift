@@ -49,6 +49,8 @@ final class SessionPlugin: NSObject, FlutterPlugin {
   private var keyMonitor: Any?
   private var resignObserver: NSObjectProtocol?
   private var terminateObserver: NSObjectProtocol?
+  /// 「附件」's open file picker, one per session.
+  private var panels = [Int64: NSOpenPanel]()
 
   static func register(with registrar: FlutterPluginRegistrar) {
     let channel = FlutterMethodChannel(name: "rapp/session", binaryMessenger: registrar.messenger)
@@ -149,17 +151,24 @@ final class SessionPlugin: NSObject, FlutterPlugin {
   }
 
   /// On main: 「附件」's file picker; the picked files go to the composer's (tested) `attach`.
-  /// The session may have ended while the panel was up.
+  /// One per session: a second 「附件」 brings it to the front; the session's end cancels it.
   private func attach(sid: Int64, result: @escaping FlutterResult) {
+    if let open = panels[sid] {
+      open.makeKeyAndOrderFront(nil)
+      result([String: Any]())
+      return
+    }
     guard live[sid] != nil else {
       result([String: Any]())
       return
     }
     let panel = NSOpenPanel()
+    panels[sid] = panel
     panel.canChooseFiles = true
     panel.canChooseDirectories = true
     panel.allowsMultipleSelection = true
     panel.begin { [weak self] response in
+      if self?.panels[sid] === panel { self?.panels[sid] = nil }
       guard response == .OK, let composer = self?.live[sid]?.session.composer else {
         result([String: Any]())
         return
@@ -275,6 +284,7 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       entry.textures.values.forEach { registry.unregisterTexture($0.id) }
       entry.textures = [:]
       live[sid] = nil
+      panels.removeValue(forKey: sid)?.cancel(nil)
       if focusedSid == sid {
         _ = keys.releaseAll()
         focusedSid = nil

@@ -150,6 +150,26 @@ void main() {
       await tester.pump(const Duration(seconds: 4));
     });
 
+    testWidgets('the keys row and sticky keys are per session', (tester) async {
+      final rs2 = RemoteSession(2, 'Notes');
+      addTearDown(rs2.dispose);
+      rs2.composer.open = true;
+      Widget layer(RemoteSession s) => wrap(SizedBox(
+          width: 900, height: 400, child: Stack(children: composerLayer(state: es, session: s, port: port))));
+      await tester.pumpWidget(layer(rs));
+      await tester.tap(find.text('按键'));
+      await tester.pump();
+      await tester.tap(find.text('⌘'));
+      await tester.pump();
+      await tester.pumpWidget(layer(rs2));
+      expect(find.text('←'), findsNothing);
+      await tester.tap(find.text('按键'));
+      await tester.pump();
+      await tester.tap(find.text('←'));
+      await tester.pump();
+      expect(callsOf('key').single, equals({'sid': 2, 'keyCode': 123, 'modifiers': 0}));
+    });
+
     testWidgets('an upload shows its status with a cancel', (tester) async {
       rs.apply(const TransferEvent(1, '上传 1/2 · a.txt'));
       await tester.pumpWidget(wrap(bar()));
@@ -212,6 +232,83 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
       expect(find.byType(ComposerBar), findsNothing);
       expect(port.calls.where((c) => c.$1 == 'resize'), isEmpty);
+    });
+
+    // Like MainWindow: a focused Focus above everything, and a CallbackShortcuts Esc (fullscreen).
+    var escs = 0;
+    Widget mainLike() => CallbackShortcuts(
+          bindings: {const SingleActivator(LogicalKeyboardKey.escape): () => escs++},
+          child: Focus(autofocus: true, child: SizedBox(width: 800, height: 600, child: Stage(state: es))),
+        );
+    bool fieldFocused(WidgetTester tester) =>
+        tester.widget<TextField>(find.byKey(const Key('composer-field'))).focusNode!.hasFocus;
+
+    Future<void> showPicture(WidgetTester tester) async {
+      escs = 0;
+      await tester.pumpWidget(wrap(mainLike()));
+      await tester.pump();
+      await openEmbedded(tester);
+      port.emit(const ReadyEvent(1, 'Safari'));
+      port.emit(WindowsEvent(1, [rw(5, 800, 628)]));
+      await tester.pump();
+      es.focusPicture(1);
+      await tester.pump();
+    }
+
+    testWidgets('opening the composer takes the caret from the picture', (tester) async {
+      await showPicture(tester);
+      port.calls.clear();
+      await tester.tap(find.byKey(const Key('composer-open')));
+      await tester.pump();
+      await tester.pump();
+      expect(fieldFocused(tester), isTrue);
+      expect(es.pictureFocused, isNull);
+      expect(port.calls.where((c) => c.$1 == 'picture_focus').map((c) => c.$2), [
+        equals({'sid': null}),
+      ]);
+    });
+
+    testWidgets('a clip insert focuses the field, even over a focused picture', (tester) async {
+      await showPicture(tester);
+      port.emit(const ComposerInsertEvent(1, PasteResult(text: 'a')));
+      await tester.pump();
+      await tester.pump();
+      expect(fieldFocused(tester), isTrue);
+      expect(es.pictureFocused, isNull);
+
+      // Already open, the picture pressed meanwhile: the insert brings the caret back.
+      es.focusPicture(1);
+      await tester.pump();
+      port.emit(const ComposerInsertEvent(1, PasteResult(text: 'b')));
+      await tester.pump();
+      await tester.pump();
+      expect(fieldFocused(tester), isTrue);
+      expect(es.pictureFocused, isNull);
+      expect(es.currentRemote!.composer.text, 'ab');
+    });
+
+    testWidgets('Esc and Enter while composing stay with the input method', (tester) async {
+      await showPicture(tester);
+      await tester.tap(find.byKey(const Key('composer-open')));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('composer-field')));
+      await tester.pump();
+      final m = es.currentRemote!.composer;
+      m.controller.value = const TextEditingValue(
+          text: 'ni', selection: TextSelection.collapsed(offset: 2), composing: TextRange(start: 0, end: 2));
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      expect(escs, 0);
+      expect(m.open, isTrue);
+      expect(m.text, 'ni');
+      expect(callsOf('composer_send'), isEmpty);
+      // Not composing: Esc is the composer's (clear, then close), never the window's.
+      m.controller.value = TextEditingValue.empty;
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      expect(m.open, isFalse);
+      expect(escs, 0);
     });
 
     testWidgets('a clip insert opens the composer with it', (tester) async {

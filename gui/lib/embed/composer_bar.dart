@@ -44,6 +44,7 @@ class _ComposerBarState extends State<ComposerBar> {
   final _field = FocusNode(debugLabel: 'composer');
   bool _keys = false;
   int _sticky = 0;
+  late int _focusSeen;
 
   ComposerModel get _m => widget.session.composer;
   Object get _sid => widget.session.sid;
@@ -52,10 +53,18 @@ class _ComposerBarState extends State<ComposerBar> {
   void initState() {
     super.initState();
     _field.addListener(_focusChanged);
+    _focusSeen = _m.focusTick;
+    _m.addListener(_modelChanged);
+    // Opened: the caret goes to the field. Not `autofocus`, which yields to the main window's
+    // already focused Focus.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _takeCaret();
+    });
   }
 
   @override
   void dispose() {
+    _m.removeListener(_modelChanged);
     _field.removeListener(_focusChanged);
     _field.dispose();
     super.dispose();
@@ -65,8 +74,22 @@ class _ComposerBarState extends State<ComposerBar> {
     if (_field.hasFocus) widget.state.blurPicture();
   }
 
+  void _modelChanged() {
+    if (_m.focusTick == _focusSeen) return;
+    _focusSeen = _m.focusTick;
+    _takeCaret();
+  }
+
+  /// The field gets key focus, and the picture loses it (also when the field already had
+  /// Flutter's focus while the picture took the keys).
+  void _takeCaret() {
+    _field.requestFocus();
+    widget.state.blurPicture();
+  }
+
   /// Enter sends, Shift+Enter is a newline, Esc clears then closes, ⌘V asks the runner; while
-  /// the input method is composing, Enter and Esc are its own.
+  /// the input method is composing, Enter and Esc are its own (and never reach the window's
+  /// shortcuts, where Esc leaves fullscreen).
   KeyEventResult _onKey(FocusNode node, KeyEvent e) {
     if (e is! KeyDownEvent && e is! KeyRepeatEvent) return KeyEventResult.ignored;
     final k = e.logicalKey;
@@ -74,7 +97,7 @@ class _ComposerBarState extends State<ComposerBar> {
     final composing = _m.controller.value.composing;
     final imeBusy = composing.isValid && !composing.isCollapsed;
     if (k == LogicalKeyboardKey.enter || k == LogicalKeyboardKey.numpadEnter) {
-      if (imeBusy) return KeyEventResult.ignored;
+      if (imeBusy) return KeyEventResult.skipRemainingHandlers;
       if (hw.isShiftPressed) {
         _m.insertText('\n');
       } else if (e is KeyDownEvent) {
@@ -83,7 +106,7 @@ class _ComposerBarState extends State<ComposerBar> {
       return KeyEventResult.handled;
     }
     if (k == LogicalKeyboardKey.escape) {
-      if (imeBusy) return KeyEventResult.ignored;
+      if (imeBusy) return KeyEventResult.skipRemainingHandlers;
       _m.esc();
       return KeyEventResult.handled;
     }
@@ -189,7 +212,6 @@ class _ComposerBarState extends State<ComposerBar> {
                           key: const Key('composer-field'),
                           controller: _m.controller,
                           focusNode: _field,
-                          autofocus: true,
                           minLines: 1,
                           maxLines: 6,
                           keyboardType: TextInputType.multiline,
@@ -248,7 +270,8 @@ List<Widget> composerLayer({required MainState state, required RemoteSession ses
       child: ListenableBuilder(
         listenable: session.composer,
         builder: (context, _) => session.composer.open
-            ? ComposerBar(state: state, session: session, port: port)
+            // Keyed by session: the keys row and sticky ⌘/⌥ never carry over to another one.
+            ? ComposerBar(key: ValueKey(session.sid), state: state, session: session, port: port)
             : const SizedBox.shrink(),
       ),
     ),
