@@ -691,3 +691,158 @@ async fn lan_stale_password_probe_logs_one_auth_fail_on_a() {
         .sum();
     assert_eq!(fails, 1, "{log:?}");
 }
+
+// ---- S3 fix I-3: a LAN-only (`id@ip`) host the relay does not know ----
+
+/// A relay that writes its log to `<dir>/relay.log`, to count what B asked it.
+fn logged_relay(dir: &std::path::Path) -> rapp_relay::Relay {
+    rapp_relay::Relay::start(rapp_relay::Opts {
+        listen: "127.0.0.1:0".parse().unwrap(),
+        key: KEY.into(),
+        db: dir.join("relay.json"),
+        token_ttl: Duration::from_secs(60),
+        log: rapp_net::log::Log::file(dir, "relay.log"),
+    })
+    .unwrap()
+}
+
+/// `connect` requests the relay got for `id` (identical lines collapse into `repeat`, so add those).
+/// A different line is logged first, so a pending repeat count is written out.
+async fn relay_connects(relay: &rapp_relay::Relay, dir: &std::path::Path, id: &str) -> u64 {
+    let ep = b_endpoint();
+    let c = dial(&ep, relay.addr, rapp_net::quic::ALPN_RELAY).await;
+    let bad = json!({"op":"register","key":"not-the-key","id":null,"secret":"s","name":"x","pw_salt":"a","pw_hash":"b","lan":[]});
+    assert_eq!(req(&c, bad).await["error"], "bad relay key");
+    let text = std::fs::read_to_string(dir.join("relay.log")).unwrap_or_default();
+    let (mut n, mut last_was_connect) = (0, false);
+    for v in text.lines().map(|l| serde_json::from_str::<Value>(l).unwrap()) {
+        match v["ev"].as_str() {
+            Some("connect") if v["to"] == id => (n, last_was_connect) = (n + 1, true),
+            Some("repeat") if last_was_connect => n += v["repeat"].as_u64().unwrap_or(0),
+            _ => last_was_connect = false,
+        }
+    }
+    n
+}
+
+/// A relay-less A whose service can be dropped (freeing its port) and started again on that port.
+struct LanA {
+    home: tempfile::TempDir,
+    bins: tempfile::TempDir,
+    id: String,
+    addr: std::net::SocketAddr,
+    svc: Option<rapp_service::Service>,
+}
+
+impl LanA {
+    async fn start() -> LanA {
+        let a = service(None).await;
+        let addr = a_addr(&a.svc);
+        LanA { home: a.home, bins: a.bins, id: a.id, addr, svc: Some(a.svc) }
+    }
+
+    fn stop(&mut self) {
+        if let Some(svc) = self.svc.take() {
+            svc.stop();
+        }
+    }
+
+    /// Back on the same port, with the same saved id; retries while the old socket lets go.
+    async fn restart(&mut self) {
+        let path = self.home.path().join("service.json");
+        let mut cfg: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        cfg["port"] = json!(self.addr.port());
+        rapp_net::config::write_json(&path, &cfg).unwrap();
+        let deadline = tokio::time::Instant::now() + WAIT;
+        loop {
+            let opts = rapp_service::Opts {
+                home: self.home.path().to_path_buf(),
+                bin_dir: Some(self.bins.path().to_path_buf()),
+                gui: None,
+                worker_idle: Duration::from_secs(60),
+                log_dir: self.home.path().join("logs"),
+            };
+            match rapp_service::Service::start(opts).await {
+                Ok(s) => {
+                    self.svc = Some(s);
+                    return;
+                }
+                Err(e) => assert!(tokio::time::Instant::now() < deadline, "restart on {}: {e:#}", self.addr),
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn lan_only_host_goes_offline_and_comes_back_without_asking_the_relay_again() {
+    let rdir = tempfile::tempdir().unwrap();
+    let relay = logged_relay(rdir.path());
+    let mut a = LanA::start().await; // never registers with the relay
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = Hub::start_with_presence(home.path(), a.bins.path(), Some(relay.addr), Duration::from_millis(200));
+    hub.send(json!({"cmd":"add_host","id":format!("{}@{}", a.id, a.addr),"password":PASSWORD,"req":1})).await;
+    next_presence(&mut hub, &a.id, true).await;
+    // The first establish asked the relay once ("unknown id") and found A over LAN.
+    assert_eq!(relay_connects(&relay, rdir.path(), &a.id).await, 1);
+
+    a.stop();
+    next_presence(&mut hub, &a.id, false).await;
+    for _ in 0..3 {
+        next_presence(&mut hub, &a.id, false).await; // still probing: not halted
+    }
+    a.restart().await;
+    next_presence(&mut hub, &a.id, true).await;
+    assert_eq!(relay_connects(&relay, rdir.path(), &a.id).await, 1, "presence went LAN-only after the relay's unknown id");
+    // Offline ticks wrote no failed route lines.
+    for v in read_log(home.path(), "hub.log") {
+        assert!(v["ev"] != "route" || v["result"] == "ok", "failed route line: {v}");
+    }
+    hub.finish().await;
+}
+
+#[tokio::test]
+async fn lan_only_host_found_off_at_start_is_not_halted() {
+    // The hub starts while the LAN-only A is down: the relay's "unknown id" must not halt presence.
+    let rdir = tempfile::tempdir().unwrap();
+    let relay = logged_relay(rdir.path());
+    let mut a = LanA::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let saved = json!([{"id":a.id,"name":"test-a","password":PASSWORD,"lan":[a.addr.to_string()]}]);
+    rapp_net::config::write_json(&home.path().join("hosts.json"), &saved).unwrap();
+    a.stop();
+    let mut hub = Hub::start_with_presence(home.path(), a.bins.path(), Some(relay.addr), Duration::from_millis(200));
+    next_presence(&mut hub, &a.id, false).await;
+    next_presence(&mut hub, &a.id, false).await;
+    a.restart().await;
+    next_presence(&mut hub, &a.id, true).await;
+    assert_eq!(relay_connects(&relay, rdir.path(), &a.id).await, 1);
+    hub.finish().await;
+}
+
+#[tokio::test]
+async fn lan_only_host_with_a_stale_password_still_halts() {
+    let rdir = tempfile::tempdir().unwrap();
+    let relay = logged_relay(rdir.path());
+    let a = service(None).await;
+    let home = tempfile::tempdir().unwrap();
+    let saved = json!([{"id":a.id,"name":"test-a","password":"stale-pass","lan":[a_addr(&a.svc).to_string()]}]);
+    rapp_net::config::write_json(&home.path().join("hosts.json"), &saved).unwrap();
+    let mut hub = Hub::start_with_presence(home.path(), a.bins.path(), Some(relay.addr), Duration::from_millis(200));
+    next_presence(&mut hub, &a.id, false).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    a.svc.stop();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let log = read_log(a.home.path(), "service.log");
+    let fails: u64 = log
+        .iter()
+        .map(|v| match v["ev"].as_str() {
+            Some("auth_fail") => 1,
+            Some("repeat") => v["repeat"].as_u64().unwrap_or(0),
+            _ => 0,
+        })
+        .sum();
+    assert_eq!(fails, 1, "{log:?}");
+    assert_eq!(relay_connects(&relay, rdir.path(), &a.id).await, 1);
+    hub.finish().await;
+}

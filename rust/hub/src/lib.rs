@@ -49,6 +49,9 @@ pub(crate) struct Hub {
     close_why: Mutex<HashMap<u64, String>>,
     /// Hosts the presence probe stopped trying after an auth-type failure, until the user acts on them.
     probe_halt: Mutex<std::collections::HashSet<String>>,
+    /// Hosts with LAN addresses the relay called "unknown id" this run (`id@ip` hosts that never
+    /// registered there): presence probes them over LAN only, so it never asks the relay again.
+    lan_only: Mutex<std::collections::HashSet<String>>,
     kill: tokio::sync::watch::Sender<bool>,
     log: Log,
     /// B's self-declared name in `auth` / `connect` (spec §2): this machine's hostname.
@@ -85,6 +88,7 @@ where
         next_sid: AtomicU64::new(0),
         close_why: Default::default(),
         probe_halt: Default::default(),
+        lan_only: Default::default(),
         kill: tokio::sync::watch::channel(false).0,
         bin_dir: opts.bin_dir,
         log: opts.log,
@@ -171,7 +175,7 @@ impl Hub {
                     }
                     let name = r["name"].as_str().unwrap_or(id).to_string();
                     self.hosts.upsert(Host { id: id.into(), name: name.clone(), password: password.into(), lan: vec![addr] })?;
-                    self.forget(id);
+                    self.forget_host(id);
                     return Ok(Some(json!({"event":"host_added","id":id,"name":name})));
                 }
                 let info = match self.relay_connect(id, password).await {
@@ -182,13 +186,13 @@ impl Hub {
                 let name = info["name"].as_str().unwrap_or(id).to_string();
                 let lan = info["lan"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
                 self.hosts.upsert(Host { id: id.into(), name: name.clone(), password: password.into(), lan })?;
-                self.forget(id);
+                self.forget_host(id);
                 json!({"event":"host_added","id":id,"name":name})
             }
             Some("remove_host") => {
                 let id = s("id")?;
                 self.hosts.remove(id)?;
-                self.forget(id);
+                self.forget_host(id);
                 self.hosts_event()
             }
             Some("apps") => {

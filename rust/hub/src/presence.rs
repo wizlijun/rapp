@@ -2,6 +2,8 @@
 //! Quiet by design: no `route`/`reconnecting` lines, and hub.log gets one `presence` line only when
 //! a host's state changes. A host whose probe fails on auth (bad password, unknown id, locked) is
 //! left alone, shown offline, until the user acts on it, so probes never feed the relay's limiter.
+//! A host with LAN addresses that the relay calls "unknown id" (`id@ip`) is probed over LAN only
+//! from then on; no answer there is offline, not a halt, so it is seen when it comes back.
 //! A does not log pings either.
 
 use crate::link::{is_auth_failure, QUIET};

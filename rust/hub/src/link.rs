@@ -171,7 +171,25 @@ impl Hub {
 
     async fn establish(&self, host: &Host) -> Result<Link> {
         let password_auth = Op::Auth { token: None, password: Some(host.password.clone()), name: self.me() };
+        let lan_only = self.lan_only.lock().unwrap().contains(&host.id);
+        if quiet() && lan_only && self.allows(Force::Lan) {
+            // A probe of a host the relay does not know: LAN only. No answer is offline, not a halt;
+            // a refused password still halts (in `first_lan`).
+            return match self.first_lan(&host.id, &host.lan, &password_auth).await {
+                Some(conn) => Ok(Link::Direct { conn, path: "lan" }),
+                None => Err(anyhow!("offline: no LAN address answered")),
+            };
+        }
         let connected = self.relay_connect(&host.id, &host.password).await;
+        match &connected {
+            Ok(Ok(_)) => {
+                self.lan_only.lock().unwrap().remove(&host.id);
+            }
+            Ok(Err(msg)) if msg == "unknown id" && !host.lan.is_empty() => {
+                self.lan_only.lock().unwrap().insert(host.id.clone());
+            }
+            _ => {}
+        }
         match &connected {
             Ok(Ok(_)) => {}
             Ok(Err(msg)) => self.route(&host.id, "relay", None, Err(msg.clone())),
@@ -183,6 +201,10 @@ impl Hub {
             Ok(Err(msg)) if (msg == "unknown id" || msg == "offline") && self.allows(Force::Lan) => {
                 return match self.first_lan(&host.id, &host.lan, &password_auth).await {
                     Some(conn) => Ok(Link::Direct { conn, path: "lan" }),
+                    // To a probe, a LAN-only host that did not answer is offline: not an auth failure to halt on.
+                    None if quiet() && msg == "unknown id" && !host.lan.is_empty() => {
+                        Err(anyhow!("offline: no LAN address answered"))
+                    }
                     None => Err(anyhow!(msg)),
                 };
             }
@@ -234,6 +256,12 @@ impl Hub {
                 self.relay_exchange(&self.relay_conn().await?, &[&relay, op]).await
             }
         }
+    }
+
+    /// `forget`, and what this run learned about the host's path: for a host added, re-added or removed.
+    pub fn forget_host(&self, id: &str) {
+        self.lan_only.lock().unwrap().remove(id);
+        self.forget(id);
     }
 
     pub fn forget(&self, id: &str) {
