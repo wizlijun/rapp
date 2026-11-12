@@ -19,6 +19,7 @@ ROOT=$PWD
 export PATH="$HOME/.cargo/bin:$HOME/development/flutter/bin:$PATH"
 DIST=$ROOT/dist
 source "$ROOT/scripts/lib/sign-check.sh"
+source "$ROOT/scripts/lib/release.sh"
 # By SHA-1: names can repeat (an expired and a renewed cert), hashes cannot.
 identity() { security find-identity -v -p basic | sed -n "s/^ *[0-9]*) \([0-9A-F]\{40\}\) \"$1:.*/\1/p" | head -1; }
 read -r KIND SIGN_ID < <(pick_identity "$(security find-identity -v -p basic)" "${RAPP_SIGN_APP+set}" "${RAPP_SIGN_APP-}")
@@ -88,6 +89,16 @@ if [ -n "$SIGN_PKG" ] && [ "$KIND" = devid ] && xcrun notarytool history --keych
 elif [ -n "$SIGN_PKG" ]; then
     echo "!! pkg signed but not notarized (no Developer ID app signature or no notarytool profile \"$NOTARY\")"
 fi
+
+echo "== release outputs (zip, latest.json)"
+ZIP=$DIST/rapp-$VERSION-macos-arm64.zip
+ditto -c -k --keepParent "$APP" "$ZIP"
+RELEASE_BASE=${RAPP_RELEASE_BASE:-https://github.com/wizlijun/rapp-releases/releases/download/v$VERSION}
+write_manifest "$DIST/latest.json" "$VERSION" "$RELEASE_BASE/rapp-$VERSION-macos-arm64.zip" \
+    "$(shasum -a 256 "$ZIP" | cut -d' ' -f1)" "$(stat -f %z "$ZIP")" "${RAPP_RELEASE_NOTES-}" \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+plutil -convert xml1 -o /dev/null "$DIST/latest.json"
+echo "publish: gh release create v$VERSION --repo wizlijun/rapp-releases \"$ZIP\" \"$DIST/latest.json\" \"$PKG\" --title v$VERSION"
 
 ln -s /Applications "$DIST/stage/Applications"
 hdiutil create -quiet -volname rapp -srcfolder "$DIST/stage" -ov -format UDZO "$DIST/rapp.dmg"

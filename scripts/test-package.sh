@@ -5,6 +5,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/lib/sign-check.sh
+source scripts/lib/release.sh
 
 check() {
     local name=$1
@@ -69,5 +70,64 @@ signs_with_ids() {
 }
 check "signing loop passes -i from EXPECTED_IDS" signs_with_ids scripts/package-macos.sh
 check "scripts parse" bash -c 'bash -n scripts/package-macos.sh && bash -n scripts/pkg/postinstall && bash -n scripts/lib/sign-check.sh'
+
+check "release scripts parse" bash -c 'bash -n scripts/lib/release.sh && bash -n scripts/upgrade-relay.sh'
+check "default release base" grep -q 'wizlijun/rapp-releases/releases/download/v\$VERSION' scripts/package-macos.sh
+zip_after_verify() {
+    local z v
+    z=$(grep -n 'ditto -c -k --keepParent' scripts/package-macos.sh | head -1 | cut -d: -f1)
+    v=$(grep -n 'codesign --verify --deep --strict' scripts/package-macos.sh | head -1 | cut -d: -f1)
+    [ -n "$z" ] && [ -n "$v" ] && [ "$z" -gt "$v" ]
+}
+check "zip after verify" zip_after_verify
+
+T=$(mktemp -d)
+trap 'rm -rf "$T"' EXIT
+manifest_ok() {
+    local notes=$'一句"话"\n第二行\t\\ end' f=$T/l.json
+    write_manifest "$f" 0.5.0 https://x/r.zip "$(printf 'a%.0s' $(seq 64))" 123 "$notes" 2026-11-20T08:00:00Z
+    plutil -convert xml1 -o /dev/null "$f" &&
+        [ "$(plutil -extract version raw -o - "$f")" = 0.5.0 ] &&
+        [ "$(plutil -extract assets.macos-arm64.size raw -o - "$f")" = 123 ] &&
+        [ "$(plutil -extract notes raw -o - "$f")" = "$notes" ]
+}
+check "manifest is valid json with escaped notes" manifest_ok
+check "control chars are escaped" eq "$(json_escape $'a\001b')" 'a\u0001b'
+
+# upgrade-relay.sh with a fake curl (writes a script) and a fake systemctl.
+mkdir -p "$T/bin"
+cat >"$T/curl-good" <<'EOS'
+#!/bin/bash
+[ "$1" = -fL ] && [ "$2" = -o ] || exit 2
+printf '#!/bin/sh\n[ "$1" = --version ] && echo "rapp-relay 9.9.9"\n' >"$3"
+EOS
+cat >"$T/curl-bad" <<'EOS'
+#!/bin/bash
+printf '#!/bin/sh\necho oops\n' >"$3"
+EOS
+cat >"$T/systemctl" <<'EOS'
+#!/bin/bash
+echo "$*" >>"$SYSTEMCTL_LOG"
+[ "$1" = is-active ] && echo active
+exit 0
+EOS
+chmod +x "$T/curl-good" "$T/curl-bad" "$T/systemctl"
+upgrade() { # <curl> -> runs with RELAY_BIN=$T/bin/rapp-relay holding "old"
+    echo old >"$T/bin/rapp-relay"
+    : >"$T/log"
+    CURL=$1 SYSTEMCTL=$T/systemctl SYSTEMCTL_LOG=$T/log RELAY_BIN=$T/bin/rapp-relay bash scripts/upgrade-relay.sh https://x/relay >/dev/null 2>&1
+}
+upgrade_happy() {
+    upgrade "$T/curl-good" &&
+        [ "$("$T/bin/rapp-relay" --version)" = "rapp-relay 9.9.9" ] &&
+        [ "$(cat "$T/log")" = $'restart rapp-relay\nis-active rapp-relay' ]
+}
+check "upgrade-relay happy path" upgrade_happy
+upgrade_bad() {
+    ! upgrade "$T/curl-bad" &&
+        [ "$(cat "$T/bin/rapp-relay")" = old ] && [ ! -s "$T/log" ] &&
+        [ "$(ls -A "$T/bin")" = rapp-relay ]
+}
+check "upgrade-relay refuses a bad binary" upgrade_bad
 
 echo "ALL OK"
