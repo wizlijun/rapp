@@ -157,3 +157,10 @@
 - [ ] S5 项目与常用（规格：`docs/superpowers/specs/2026-11-12-rapp-s5-projects-favorites-design.md`）
 - [ ] S6 全局资源（规格：`docs/superpowers/specs/2026-11-12-rapp-s6-global-resources-design.md`）
 - [ ] S4 全景（规格：`docs/superpowers/specs/2026-11-12-rapp-s4-overview-design.md`）
+
+## 插入的严重问题（2026-11-12，用户报告）
+- [ ] P1 A 锁屏后 B 无法输入：B 提交时报「A 上的目标窗口不在最前」（`Paster.waitFrontmost` → `target not frontmost`），点击被丢弃（`InputInjector.clearToClick` → `click dropped: covered by …`）。原因：锁屏时登录窗口盖在所有窗口上、目标 app 激活不了，按 HID 投递的键鼠都到不了 app。README 写明 rapp 不做远程登录/解锁。待做：
+  - 锁屏时 B 明确显示「A 已锁屏」，不再报「不在最前」（host 用 `CGSessionCopyCurrentDictionary` 的 `CGSSessionScreenIsLocked` 判断）
+  - 会话在时不让 A 因闲置自动锁屏（电源断言）——待用户选
+  - 摸底：锁屏时按 PID 投递（`postToPid`）或 AX 写入能否送达 app——要锁 A 的屏做实机测试，需用户安排时间
+- [ ] P2 多个客户端同时连一个 host：要先设计（现在是独占模式），再实现
