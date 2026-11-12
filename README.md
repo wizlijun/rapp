@@ -129,11 +129,11 @@ A 和 B 可以是同一台机器，地址填 `127.0.0.1`。此时每次点击或
 - `Sources/rapp-client`：每个 A 窗口一个 AppKit 窗口（弹出窗口是挂在父窗口上的面板）、镜像菜单栏、输入条。
 
 ```
-./scripts/package-macos.sh   # 生成 dist/rapp-0.2.0.pkg、dist/rapp.dmg、dist/rapp-relay-x86_64-linux（静态）和 dist/rapp-relay.service
+./scripts/package-macos.sh   # 生成 dist/rapp-0.3.0.pkg、dist/rapp.dmg、dist/rapp-relay-x86_64-linux（静态）和 dist/rapp-relay.service
 python3 scripts/e2e-local.py <工作目录>   # 本机端到端：relay + service + hub，lan、relay 和无 relay 的 id@ip 各开一次 Safari
 ```
 
-安装：双击 `rapp-0.2.0.pkg`（或 `sudo installer -pkg rapp-0.2.0.pkg -target /`）。它把 rapp.app 装进 /Applications，给当前登录用户写 `~/Library/LaunchAgents/com.rapp.service.plist`（和 GUI"启动"写的一样，开机自启、崩溃重启），启动服务并打开 GUI。首次运行要给 rapp 屏幕录制和辅助功能权限。包默认是 ad-hoc 签名，没有公证：从别的机器 AirDrop 或下载过来的，要在 Finder 里右键 → 打开，或到"隐私与安全性"里点"仍要打开"。钥匙串里有 "Developer ID Application" / "Developer ID Installer" 证书时，打包脚本自动用它们签 app（hardened runtime + 时间戳）和 pkg；再执行过 `xcrun notarytool store-credentials rapp-notary --apple-id <Apple ID> --team-id <Team ID>`，就会顺带公证并 staple，别的 Mac 双击即可安装。也可以用 `RAPP_SIGN_APP` / `RAPP_SIGN_PKG`（证书 SHA-1）/ `RAPP_NOTARY_PROFILE` 指定。只有 arm64。
+安装：双击 `rapp-0.3.0.pkg`（或 `sudo installer -pkg rapp-0.3.0.pkg -target /`）。它把 rapp.app 装进 /Applications，给当前登录用户写 `~/Library/LaunchAgents/com.rapp.service.plist`（和 GUI"启动"写的一样，开机自启、崩溃重启），启动服务并打开 GUI。首次运行要给 rapp 屏幕录制和辅助功能权限。包默认是 ad-hoc 签名，没有公证：从别的机器 AirDrop 或下载过来的，要在 Finder 里右键 → 打开，或到"隐私与安全性"里点"仍要打开"。钥匙串里有 "Developer ID Application" / "Developer ID Installer" 证书时，打包脚本自动用它们签 app（hardened runtime + 时间戳）和 pkg；再执行过 `xcrun notarytool store-credentials rapp-notary --apple-id <Apple ID> --team-id <Team ID>`，就会顺带公证并 staple，别的 Mac 双击即可安装。也可以用 `RAPP_SIGN_APP` / `RAPP_SIGN_PKG`（证书 SHA-1）/ `RAPP_NOTARY_PROFILE` 指定。只有 arm64。
 
 卸载：`scripts/uninstall-macos.sh`（停服务、删 plist 和 /Applications/rapp.app，会要一次 sudo；保留 `~/Library/Application Support/rapp` 里的 ID、密码和主机列表）。
 

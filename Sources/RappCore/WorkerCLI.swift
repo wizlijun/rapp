@@ -3,7 +3,7 @@ import Foundation
 // The worker command line (platform spec §5): argument parsing, JSON lines on
 // stdout, and the commands read from stdin. Shared by rapp-host and rapp-client.
 
-public let rappVersion = "0.2.0"
+public let rappVersion = "0.3.0"
 
 /// Exit codes of both workers.
 public enum ExitCode {
