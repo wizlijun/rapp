@@ -196,5 +196,5 @@
   - [x] 锁屏时 B 明确显示「A 已锁屏，需要在 A 上解锁」，不再报「不在最前」；host 日志记 `click dropped: A is locked`（host 用 `CGSessionCopyCurrentDictionary` 的 `CGSSessionScreenIsLocked` 判断）
   - [x] 会话在时不让 A 因闲置熄屏、屏保或锁屏（电源断言 + 每 30 秒声明用户活动；仅 macOS host）
   - 摸底：锁屏时按 PID 投递（`postToPid`）或 AX 写入能否送达 app——要锁 A 的屏做实机测试，需用户安排时间
-- [ ] P2 多个客户端同时连一个 host：要先设计（现在是独占模式），再实现
+- [x] P2 多个客户端同时连一个 host：规格 2026-11-12-rapp-multi-client-design.md，计划 2026-11-13-rapp-multi-client.md，代码完成（963e9cf..59dddd7，swift/cargo/flutter 全绿，终审已修）。待实机：`python3 scripts/multi-client-loopback.py .build/release/rapp-host`（会起 Calculator，需用户同意）
 - [x] P3 触摸屏双指上滑/下滑（用户 2026-11-12）：spec `docs/superpowers/specs/2026-11-13-rapp-touch-scroll-design.md`；只改 Flutter 嵌入画面（b8b7361 + 评审修复 d0857d0，flutter 649 过，check.sh EXIT=0）。待实机：需要一台触摸屏 B。留待以后：滚动量没按缩放换算成 A 的点数（和触控板现状一致）；双指滑动时每帧会发两条 scroll。会话切换时按住的鼠标键已修（5f47ebb，切换时立即在原会话松开）
