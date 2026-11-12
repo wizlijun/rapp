@@ -156,7 +156,14 @@ impl Hub {
                     self.route(id, "lan", Some(a), Ok(()));
                     return Some(c);
                 }
-                Err(e) => self.route(id, "lan", Some(a), Err(format!("{e:#}"))),
+                Err(e) => {
+                    self.route(id, "lan", Some(a), Err(format!("{e:#}")));
+                    // A refused the saved password and logged `auth_fail`: a probe must not repeat that.
+                    if quiet() && e.to_string().ends_with(": bad password") {
+                        self.probe_halt.lock().unwrap().insert(id.to_string());
+                        break;
+                    }
+                }
             }
         }
         None

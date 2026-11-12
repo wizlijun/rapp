@@ -666,3 +666,28 @@ async fn no_presence_without_interval() {
     let rest = hub.finish().await;
     assert!(rest.iter().all(|e| e["event"] != "presence"), "{rest:?}");
 }
+
+#[tokio::test]
+async fn lan_stale_password_probe_logs_one_auth_fail_on_a() {
+    let a = service(None).await;
+    let home = tempfile::tempdir().unwrap();
+    let saved = json!([{"id":a.id,"name":"test-a","password":"stale-pass","lan":[a_addr(&a.svc).to_string()]}]);
+    rapp_net::config::write_json(&home.path().join("hosts.json"), &saved).unwrap();
+    // Relay down (none configured): the probe falls back to LAN with the saved password.
+    let mut hub = Hub::start_with_presence(home.path(), a.bins.path(), None, Duration::from_millis(200));
+    next_presence(&mut hub, &a.id, false).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    // Identical consecutive lines collapse into one plus a `repeat` count, so add the counts up.
+    a.svc.stop();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let log = read_log(a.home.path(), "service.log");
+    let fails: u64 = log
+        .iter()
+        .map(|v| match v["ev"].as_str() {
+            Some("auth_fail") => 1,
+            Some("repeat") => v["repeat"].as_u64().unwrap_or(0),
+            _ => 0,
+        })
+        .sum();
+    assert_eq!(fails, 1, "{log:?}");
+}
