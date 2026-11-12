@@ -95,7 +95,9 @@ class RemoteSession extends ChangeNotifier {
           quietSeconds++;
         }
       case DisconnectedEvent():
-        break;
+        // The link is gone: no transfer or send round is running any more.
+        transferStatus = null;
+        composer.done(0, null);
       case ClipsEvent():
         clips = e.clips;
         composer.clipArrived();

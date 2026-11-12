@@ -18,6 +18,17 @@ RemoteWindow win(int id, WindowKind kind) => RemoteWindow(
     );
 
 void main() {
+  test('disconnected clears the transfer line and the sending state', () {
+    final r = RemoteSession(1, 'x');
+    r.apply(const TransferEvent(1, '下载 x 45%'));
+    r.apply(const ComposerStateEvent(1, sending: true));
+    expect(r.transferStatus, '下载 x 45%');
+    expect(r.composer.sending, true);
+    r.apply(const DisconnectedEvent(1, 'connection closed'));
+    expect(r.transferStatus, isNull);
+    expect(r.composer.sending, false);
+  });
+
   test('ready sets appName and ready', () {
     final r = RemoteSession(1, 'x');
     var n = 0;
