@@ -83,11 +83,15 @@ class AppList {
 }
 
 class HubSession {
-  const HubSession(this.sid, this.id, this.app, this.path);
+  const HubSession(this.sid, this.id, this.app, this.path, {this.port, this.token});
   final Object sid;
   final String id;
   final String app;
   final String path;
+
+  /// Embedded sessions only: the local port the GUI connects to, and the one-time token.
+  final int? port;
+  final String? token;
 }
 
 class _Pending {
@@ -144,13 +148,17 @@ class HubClient extends ChangeNotifier {
         permissions: perms is Map ? Map<String, dynamic>.from(perms) : null);
   }
 
-  Future<HubSession> open(String id, String app) async {
-    final m = await _request({'cmd': 'open', 'id': id, 'app': app}, 'opened');
+  Future<HubSession> open(String id, String app, {bool embed = false}) async {
+    final m = await _request({'cmd': 'open', 'id': id, 'app': app, if (embed) 'embed': true}, 'opened');
     return _sessions[m['sid']] ?? _session(m);
   }
 
   void close(Object sid) => _send({'cmd': 'close', 'sid': sid});
   void focus(Object sid) => _send({'cmd': 'focus', 'sid': sid});
+
+  /// Tells the hub the GUI detached or re-attached a window ([what] is `detach` or `attach`); no reply.
+  void note(Object sid, String what, int windows) =>
+      _send({'cmd': 'note', 'sid': sid, 'what': what, 'windows': windows});
 
   Future<void> shutdown() async {
     await _t.close();
@@ -182,7 +190,8 @@ class HubClient extends ChangeNotifier {
   }
 
   HubSession _session(Map<String, dynamic> m) =>
-      HubSession(m['sid'] as Object, '${m['id'] ?? ''}', '${m['app'] ?? ''}', '${m['path'] ?? ''}');
+      HubSession(m['sid'] as Object, '${m['id'] ?? ''}', '${m['app'] ?? ''}', '${m['path'] ?? ''}',
+          port: m['port'] is int ? m['port'] as int : null, token: m['token'] is String ? m['token'] as String : null);
 
   void _onLine(String line) {
     final m = decodeLine(line);

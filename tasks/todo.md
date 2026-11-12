@@ -147,3 +147,26 @@
 - 参照 `origin/feat/clipboard` 的 `StreamMenu`、`TrafficLabel`、`Geometry`：标题栏流量菜单、客户端菜单、两项预设、三组单选、50–200% 缩放和移动 A 到左上角；流菜单仅显示三种常用画质。
 - 密度上下限、1% 相对变化阈值、首次 Hello 的密度与 Mac 一致；持续 zlib 字典和 64×64 瓦片线上格式不变。
 - 增加 v5 最近 20 项文字剪贴板历史、复制/发送按钮，Ctrl+V 在空输入框中也留给本地输入框。大文件、附件和多行块编辑器仍未移植。
+
+## 主界面 S2–S6（分支 `feat/main-window-s2-s6`；S7 先不做，S8 不在范围内）
+顺序：S2 → S3 → S5 → S6 → S4（S4 第三层要用 S5 的项目、S6 的资源，放最后）。各规格 §6 的假设按默认执行，验收时确认。
+- [x] S2 嵌入舞台（规格：`docs/superpowers/specs/2026-11-12-rapp-s2-embedded-stage-design.md`；计划：`docs/superpowers/plans/2026-11-12-rapp-s2-embedded-stage.md`）——代码完成、自动测试全绿；**实机检查待做**
+  - IRON MAN 网格在画面处留洞（R25），有单测。
+  - 自动验证（2026-11-12）：`cargo test --workspace` 97 过、clippy 0 警告、`./scripts/check.sh` EXIT=0（Swift 311 过）、`flutter analyze` 干净、`flutter test` 314 过；`scripts/package-macos.sh` 出包 `dist/rapp-0.3.0.pkg`（未安装）。
+  - 实机检查没做成：检查时用户正在用这台 Mac，并用 ⌘Q 退出了测试 GUI；为了不反复抢焦点，没有重开。§7 逐条（待实机）：
+    - [ ] 打开 app，画面在舞台上、没有独立窗口
+    - [ ] 点、拖、滚、右键、打字到 A；Esc、⌘W 到 A；⌃⌘F 进出全屏（⌘W 后 gui.log 无键盘断言）
+    - [ ] 开合面板、串流菜单、输入区，A 窗口尺寸不变——用 Chess（Calculator 不可改尺寸）；host 只记失败的 resize，要按 `unix id` 读 A 窗口尺寸来判断
+    - [ ] 改主窗口大小，停下后 A 窗口改成舞台尺寸，一次（同上，用 Chess）
+    - [ ] 两个以上窗口出现标签，点标签切窗口（Calculator ⌘T 纸带）
+    - [ ] 分离/放回不重连、画面不黑；独立窗口位置（右→左→错开 24pt）；Calculator 基本↔科学切换时独立窗口跟着变尺寸；⌃⌘D 前后 A 上没有卡住的键
+    - [ ] 关掉独立窗口，会话结束
+    - [ ] 不在舞台上的会话降到 1 fps
+    - [ ] 30 fps 时 GUI CPU 不高于独立 `rapp-client`；两者颜色一致（IOSurface 色彩空间）
+  - 只有单测、不做实机：坏帧只结束一个会话（Task 3、6）；滚轮幅度 /4 和触控板（Task 8，Calculator 没有可滚内容）；⌘V/编辑›粘贴、输入区发送、输入法回车（会碰系统剪贴板或输入法设置）；多显示器缩放（只有一块屏）。
+  - 已知：hub 退出后，嵌入的会话和独立窗口不会被 GUI 关掉（S2 之前就如此）。
+  - 实机检查的脚本在 scratchpad `s2live/`；`tclick.sh` 改用按 PID 判断的 `topatp`（用户机上同时有多个名叫 rapp 的进程）。
+- [ ] S3 生命周期（规格：`docs/superpowers/specs/2026-11-12-rapp-s3-lifecycle-design.md`）
+- [ ] S5 项目与常用（规格：`docs/superpowers/specs/2026-11-12-rapp-s5-projects-favorites-design.md`）
+- [ ] S6 全局资源（规格：`docs/superpowers/specs/2026-11-12-rapp-s6-global-resources-design.md`）
+- [ ] S4 全景（规格：`docs/superpowers/specs/2026-11-12-rapp-s4-overview-design.md`）

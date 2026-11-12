@@ -183,7 +183,8 @@ impl Hub {
                 ev
             }
             Some("open") => {
-                self.open(s("id")?, s("app")?, req).await?;
+                let embed = v.get("embed").and_then(Value::as_bool).unwrap_or(false);
+                self.open(s("id")?, s("app")?, embed, req).await?;
                 return Ok(None);
             }
             Some("close") => {
@@ -192,6 +193,15 @@ impl Hub {
             }
             Some("focus") => {
                 self.focus(v.get("sid").and_then(Value::as_u64).context("missing sid")?)?;
+                return Ok(None);
+            }
+            Some("note") => {
+                let sid = v.get("sid").and_then(Value::as_u64).context("missing sid")?;
+                let what = v.get("what").and_then(Value::as_str).filter(|w| ["detach", "attach"].contains(w));
+                let (Some(what), Some(windows)) = (what, v.get("windows").and_then(Value::as_u64)) else {
+                    bail!("bad note");
+                };
+                self.note(sid, what, windows)?;
                 return Ok(None);
             }
             _ => bail!("unknown cmd"),

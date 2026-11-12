@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/service_client.dart';
 import 'package:rapp/ui/fullscreen.dart';
@@ -255,26 +256,109 @@ void main() {
     expect(fs.on, isFalse);
   });
 
-  testWidgets('bracket shortcuts step between sessions', (tester) async {
+  testWidgets('ctrl-cmd brackets step sessions; cmd brackets no longer do', (tester) async {
     await pump(tester);
     t.emit({'event': 'opened', 'sid': 1, 'id': '111', 'app': 'A', 'path': 'lan'});
     t.emit({'event': 'opened', 'sid': 2, 'id': '111', 'app': 'B', 'path': 'lan'});
     await settle(tester);
     s.select('111/A');
     await tester.pump();
-    final mod = Platform.isMacOS ? LogicalKeyboardKey.metaLeft : LogicalKeyboardKey.controlLeft;
-    Future<void> press(LogicalKeyboardKey k) async {
-      await tester.sendKeyDownEvent(mod);
+    Future<void> press(List<LogicalKeyboardKey> mods, LogicalKeyboardKey k) async {
+      for (final m in mods) {
+        await tester.sendKeyDownEvent(m);
+      }
       await tester.sendKeyEvent(k);
-      await tester.sendKeyUpEvent(mod);
+      for (final m in mods.reversed) {
+        await tester.sendKeyUpEvent(m);
+      }
       await tester.pump();
     }
 
-    await press(LogicalKeyboardKey.bracketRight);
+    final chord = Platform.isMacOS
+        ? [LogicalKeyboardKey.controlLeft, LogicalKeyboardKey.metaLeft]
+        : [LogicalKeyboardKey.controlLeft];
+    await press(chord, LogicalKeyboardKey.bracketRight);
     expect(s.currentKey, '111/B');
-    await press(LogicalKeyboardKey.bracketLeft);
+    await press(chord, LogicalKeyboardKey.bracketLeft);
     expect(s.currentKey, '111/A');
+    if (Platform.isMacOS) {
+      // ⌘[ and ⌘] belong to A now.
+      await press([LogicalKeyboardKey.metaLeft], LogicalKeyboardKey.bracketRight);
+      expect(s.currentKey, '111/A');
+      await press([LogicalKeyboardKey.metaLeft], LogicalKeyboardKey.bracketLeft);
+      expect(s.currentKey, '111/A');
+    }
   });
+
+  testWidgets('ctrl-cmd-D toggles both ways', (tester) async {
+    final port = FakeSessionPort();
+    s.dispose();
+    s = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: port);
+    final base = t.onSend!;
+    t.onSend = (cmd) {
+      if (cmd['cmd'] != 'open') return base(cmd);
+      t.emit({
+        'event': 'opened', 'req': cmd['req'], 'sid': 1, 'id': cmd['id'], 'app': cmd['app'], 'path': 'lan',
+        'port': 5001, 'token': 'tk',
+      });
+    };
+    await pump(tester);
+    await tester.runAsync(() async {
+      s.openOrSwitch('111', 'com.apple.calculator', 'Calculator');
+      for (var i = 0; i < 4; i++) {
+        await flush();
+      }
+    });
+    port.emit(const ReadyEvent(1, 'Calculator'));
+    port.emit(WindowsEvent(1, [
+      RemoteWindow(
+        id: 7, parent: 0, kind: WindowKind.normal, title: 'w7', rect: const Rect.fromLTWH(0, 0, 400, 328),
+        titleBar: 28, resizable: true, focused: false, texture: 7, visible: const Rect.fromLTWH(0, 0, 1, 1),
+      ),
+    ]));
+    await tester.pump();
+    Future<void> chord() async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyD);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pump();
+    }
+
+    // Records compare their maps by identity: match the call by its parts.
+    void last(String method) {
+      expect(port.calls.last.$1, method);
+      expect(port.calls.last.$2, equals({'sid': 1}));
+    }
+
+    // Holding the chord: the key repeats toggle nothing more.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyD);
+    for (var i = 0; i < 3; i++) {
+      await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyD);
+    }
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyD);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
+    last('detach');
+    expect(port.calls.where((c) => c.$1 == 'detach' || c.$1 == 'attach').length, 1);
+    port.emit(const DetachedEvent(1, true));
+    await tester.pump();
+    await chord();
+    last('attach');
+    port.emit(const DetachedEvent(1, false));
+    await tester.pump();
+    // The stream menu's 会话 group offers the same toggle.
+    await tester.tap(find.byKey(const Key('traffic')));
+    await tester.pump();
+    await tester.ensureVisible(find.text('分离成独立窗口'));
+    await tester.tap(find.text('分离成独立窗口'));
+    await tester.pump();
+    last('detach');
+  }, skip: !Platform.isMacOS);
 
   testWidgets('fullscreen state follows the OS', (tester) async {
     await pump(tester);

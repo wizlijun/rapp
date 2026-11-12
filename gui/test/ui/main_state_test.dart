@@ -1,6 +1,10 @@
 import 'dart:io';
+import 'dart:ui' show Rect, Size;
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fake_async/fake_async.dart';
+import 'package:rapp/embed/session_port.dart';
+import 'package:rapp/embed/stream_choice.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/ui/lamp.dart';
 import 'package:rapp/ui/main_state.dart';
@@ -127,9 +131,9 @@ void main() {
   test('a session that ends on its own says 意外结束 and why', () async {
     t.emit(opened(1, '111', 'a'));
     await pump();
-    t.emit({'event': 'closed', 'sid': 1, 'reason': 'rapp-client: connection closed'});
+    t.emit({'event': 'closed', 'sid': 1, 'reason': 'rapp-client: capture failed'});
     await pump();
-    expect(s.hint, 'a 意外结束：connection closed');
+    expect(s.hint, 'a 意外结束：capture failed');
   });
 
   test('hub messages in the hint are in Chinese', () async {
@@ -240,5 +244,390 @@ void main() {
     final s2 = MainState(hub: null, hubError: 'boom', configDir: tmp.path, prefs: UiPrefs());
     expect(s2.hubProblem, 'boom');
     expect(s2.hubUsable, isFalse);
+  });
+
+  group('embedded sessions', () {
+    void env(void Function(FakeAsync a, FakeTransport t, FakeSessionPort port, MainState st, List<String> hints) body,
+        {int sessions = 1, bool withPort = true}) {
+      fakeAsync((a) {
+        final t = FakeTransport();
+        final hub = HubClient(t);
+        final port = FakeSessionPort();
+        final st = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: withPort ? port : null);
+        final hints = <String>[];
+        var last = st.hint;
+        st.addListener(() {
+          if (st.hint != last) {
+            last = st.hint;
+            hints.add(last);
+          }
+        });
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            final n = (m['app'] as String).length;
+            t.emit({
+              'event': 'opened', 'sid': n, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+              if (m['embed'] == true) ...{'port': 5000 + n, 'token': 'tk'},
+              'req': m['req'],
+            });
+          }
+        };
+        a.flushMicrotasks();
+        for (var i = 1; i <= sessions; i++) {
+          st.openOrSwitch('111', 'a' * i, i == 1 ? 'Calculator' : 'Notes');
+          a.flushMicrotasks();
+        }
+        hints.clear();
+        body(a, t, port, st, hints);
+      });
+    }
+
+    test('opening embeds: open carries embed, then start with defaults', () {
+      env((a, t, port, st, hints) {
+        expect(t.sent.where((m) => m['cmd'] == 'open').last['embed'], true);
+        final c = port.calls.last;
+        expect(c.$1, 'start');
+        expect(c.$2, {'sid': 1, 'port': 5001, 'token': 'tk', 'mode': 'color16', 'fps': 15, 'density': 'adaptive'});
+        expect(st.embeds, true);
+        expect(st.remote.containsKey(1), true);
+        expect(st.currentRemote, isNotNull);
+      });
+    });
+
+    test('a stream choice on the session goes to the port as set_stream', () {
+      env((a, t, port, st, hints) {
+        st.currentRemote!.setChoice(const StreamChoice('duogray', 'adaptive', 1));
+        expect(port.calls.last.$1, 'set_stream');
+        expect(port.calls.last.$2, {'sid': 1, 'mode': 'duogray', 'fps': 1, 'density': 'adaptive'});
+      });
+    });
+
+    List<Map<String, Object?>> sets(FakeSessionPort port, int sid) =>
+        [for (final c in port.calls) if (c.$1 == 'set_stream' && c.$2['sid'] == sid) c.$2];
+
+    test('switching away drops to 1 fps and back restores the chosen rate', () {
+      env((a, t, port, st, hints) {
+        st.select('111/a');
+        st.remote[1]!.setChoice(const StreamChoice('color16', 'adaptive', 30));
+        expect(sets(port, 1).last['fps'], 30);
+        st.select('111/aa');
+        expect(sets(port, 1).last['fps'], 1);
+        expect(sets(port, 1).last['mode'], 'color16');
+        expect(sets(port, 1).last['density'], 'adaptive');
+        st.select('111/a');
+        expect(sets(port, 1).last['fps'], 30);
+        expect(st.remote[1]!.choice.fps, 30);
+      }, sessions: 2);
+    });
+
+    test('ten sessions: only the current one streams above 1 fps', () {
+      env((a, t, port, st, hints) {
+        for (var i = 1; i <= 10; i++) {
+          final last = sets(port, i).isEmpty ? 15 : sets(port, i).last['fps'];
+          expect(last, i == 10 ? 15 : 1, reason: 'session $i');
+        }
+      }, sessions: 10);
+    });
+
+    test('a detached session keeps its rate when another is current', () {
+      env((a, t, port, st, hints) {
+        // Session 2 is current, so 1 is at 1 fps until it is detached.
+        expect(sets(port, 1).last['fps'], 1);
+        port.emit(const DetachedEvent(1, true));
+        expect(sets(port, 1).last['fps'], 15);
+        final n = sets(port, 1).length;
+        st.select('111/a');
+        st.select('111/aa');
+        expect(sets(port, 1).length, n);
+        port.emit(const DetachedEvent(1, false));
+        expect(sets(port, 1).last['fps'], 1);
+      }, sessions: 2);
+    });
+
+    test('no duplicate set_stream when nothing changed', () {
+      env((a, t, port, st, hints) {
+        final n = sets(port, 1).length;
+        expect(n, 1);
+        st.select('111/aa');
+        st.togglePanel();
+        st.select('111/aa');
+        expect(sets(port, 1).length, n);
+        expect(sets(port, 2), isEmpty);
+      }, sessions: 2);
+    });
+
+    test('a mode change at the same fps is sent', () {
+      env((a, t, port, st, hints) {
+        st.remote[1]!.setChoice(const StreamChoice('duogray', 'adaptive', 15));
+        expect(sets(port, 1).last['mode'], 'duogray');
+        expect(sets(port, 1).last['fps'], 15);
+        st.remote[1]!.setChoice(const StreamChoice('duogray', 'original', 15));
+        expect(sets(port, 1).last['density'], 'original');
+      });
+    });
+
+    test('an off-stage choice change sends mode at 1 fps; returning sends the chosen rate', () {
+      env((a, t, port, st, hints) {
+        st.remote[1]!.setChoice(const StreamChoice('duogray', 'original', 30));
+        expect(sets(port, 1).last['mode'], 'duogray');
+        expect(sets(port, 1).last['density'], 'original');
+        expect(sets(port, 1).last['fps'], 1);
+        st.select('111/a');
+        expect(sets(port, 1).last['fps'], 30);
+        expect(sets(port, 1).last['mode'], 'duogray');
+      }, sessions: 2);
+    });
+
+    test('start failure closes the hub session and hints', () {
+      fakeAsync((a) {
+        final t = FakeTransport();
+        final hub = HubClient(t);
+        final port = FakeSessionPort()..startError = 'boom';
+        final st = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: port);
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            t.emit({'event': 'opened', 'sid': 1, 'id': '111', 'app': 'a', 'path': 'lan', 'port': 5000, 'token': 'tk', 'req': m['req']});
+          }
+        };
+        st.openOrSwitch('111', 'a', 'Calculator');
+        a.flushMicrotasks();
+        expect(t.sent.last, {'cmd': 'close', 'sid': 1});
+        expect(st.hint, 'boom');
+        expect(st.remote.containsKey(1), false);
+      });
+    });
+
+    test('end current closes through the port, not the hub', () {
+      env((a, t, port, st, hints) {
+        st.endCurrent();
+        final c = port.calls.last;
+        expect(c.$1, 'close');
+        expect(c.$2, {'sid': 1});
+        expect(t.sent.where((m) => m['cmd'] == 'close'), isEmpty);
+      });
+    });
+
+    test('runner closed first', () {
+      env((a, t, port, st, hints) {
+        port.emit(const ClosedEvent(1, 'host says: Calculator quit'));
+        expect(st.sessionCount, 0);
+        expect(st.hint, 'Calculator 已结束：A 端关闭了 app');
+        t.emit({'event': 'closed', 'sid': 1, 'reason': 'connection closed'});
+        a.flushMicrotasks();
+        expect(st.hint, 'Calculator 已结束：A 端关闭了 app');
+        expect(hints.length, 1);
+        a.elapse(const Duration(seconds: 2));
+        expect(hints.length, 1);
+      });
+    });
+
+    test('hub closed first', () {
+      env((a, t, port, st, hints) {
+        t.emit({'event': 'closed', 'sid': 1, 'reason': 'connection closed'});
+        a.flushMicrotasks();
+        expect(st.sessionCount, 0);
+        expect(hints.length, 0);
+        a.elapse(const Duration(milliseconds: 200));
+        port.emit(const ClosedEvent(1, 'quit'));
+        expect(st.hint, '已结束 Calculator');
+        expect(hints.length, 1);
+        a.elapse(const Duration(seconds: 2));
+        expect(hints.length, 1);
+        expect(port.calls.where((c) => c.$1 == 'close'), isEmpty);
+      });
+    });
+
+    test('hub closed and runner silent: hub reason after 1 s and port closed', () {
+      env((a, t, port, st, hints) {
+        t.emit({'event': 'closed', 'sid': 1, 'reason': 'connection closed'});
+        a.flushMicrotasks();
+        a.elapse(const Duration(milliseconds: 900));
+        expect(hints.length, 0);
+        a.elapse(const Duration(milliseconds: 200));
+        expect(st.hint, 'Calculator 意外结束：连接断了');
+        expect(port.calls.any((c) => c.$1 == 'close' && c.$2['sid'] == 1), true);
+      });
+    });
+
+    test('decode error ends one session, keeps the other', () {
+      env((a, t, port, st, hints) {
+        st.select('111/a');
+        port.emit(const ClosedEvent(1, 'cannot decode frame: bad tile'));
+        expect(st.currentKey, '111/aa');
+        expect(st.remote.containsKey(2), true);
+        expect(st.sessionCount, 1);
+        expect(st.hint, 'Calculator 意外结束：cannot decode frame: bad tile');
+      }, sessions: 2);
+    });
+
+    test('switching to an open embedded session does not focus through the hub', () {
+      env((a, t, port, st, hints) {
+        port.emit(const DetachedEvent(1, true));
+        st.openOrSwitch('111', 'a', 'Calculator');
+        a.flushMicrotasks();
+        expect(t.sent.where((m) => m['cmd'] == 'focus'), isEmpty);
+        final c = port.calls.last;
+        expect(c.$1, 'raise_detached');
+        expect(c.$2, {'sid': 1});
+        expect(st.currentKey, '111/a');
+      });
+    });
+
+    RemoteWindow rw(int id, {WindowKind kind = WindowKind.normal, double w = 400, double h = 328}) => RemoteWindow(
+          id: id,
+          parent: 0,
+          kind: kind,
+          title: 'w$id',
+          rect: Rect.fromLTWH(0, 0, w, h),
+          titleBar: 28,
+          resizable: true,
+          focused: false,
+          texture: id,
+          visible: const Rect.fromLTWH(0, 0, 1, 1),
+        );
+
+    // Records compare their maps by identity: match the call by its parts.
+    void lastCall(FakeSessionPort port, String method, Map<String, Object?> args) {
+      expect(port.calls.last.$1, method);
+      expect(port.calls.last.$2, equals(args));
+    }
+
+    test('detach and attach keep the sid and send no open', () {
+      env((a, t, port, st, hints) {
+        port.emit(const ReadyEvent(1, 'Calculator'));
+        port.emit(WindowsEvent(1, [rw(7), rw(9, kind: WindowKind.menu)]));
+        st.toggleDetach();
+        lastCall(port, 'detach', {'sid': 1});
+        expect(st.currentRemote!.detached, false); // only the runner's word moves it
+        port.emit(const DetachedEvent(1, true));
+        expect(st.currentRemote!.detached, true);
+        expect(t.sent.last, {'cmd': 'note', 'sid': 1, 'what': 'detach', 'windows': 1});
+        st.toggleDetach();
+        lastCall(port, 'attach', {'sid': 1});
+        port.emit(const DetachedEvent(1, false, current: 7));
+        expect(t.sent.last, {'cmd': 'note', 'sid': 1, 'what': 'attach', 'windows': 1});
+        expect(t.sent.where((m) => m['cmd'] == 'open').length, 1);
+        expect(port.calls.where((c) => c.$1 == 'start').length, 1);
+        expect(st.currentRemote!.sid, 1);
+        expect(st.currentRemote!.detached, false);
+        expect(st.currentRemote!.tabs.current, 7);
+      });
+    });
+
+    test('detach and attach act on the current session only', () {
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(1, [rw(7)]));
+        port.emit(WindowsEvent(2, [rw(8)]));
+        st.select('111/a');
+        st.detach();
+        lastCall(port, 'detach', {'sid': 1});
+        st.attach();
+        lastCall(port, 'attach', {'sid': 1});
+        st.select('111/aa');
+        st.toggleDetach();
+        lastCall(port, 'detach', {'sid': 2});
+        // Nothing to move yet (no window table): no detach goes out.
+        port.emit(const WindowsEvent(2, []));
+        final n = port.calls.length;
+        st.detach();
+        expect(port.calls.length, n);
+      }, sessions: 2);
+    });
+
+    test('切到窗口 on a detached session goes to the runner, and needs no hub to', () {
+      env((a, t, port, st, hints) {
+        port.emit(const ReadyEvent(1, 'Calculator'));
+        port.emit(WindowsEvent(1, [rw(7)]));
+        port.emit(const DetachedEvent(1, true));
+        final sent = t.sent.length;
+        st.focusCurrent();
+        lastCall(port, 'raise_detached', {'sid': 1});
+        expect(t.sent.length, sent);
+        // The hub going away takes its session list with it: there is no current session left to
+        // raise (the stage shows the hub's problem), and nothing is sent anywhere.
+        t.die();
+        a.flushMicrotasks();
+        expect(st.hubUsable, isFalse);
+        expect(st.current, isNull);
+        final calls = port.calls.length;
+        st.focusCurrent();
+        expect(port.calls.length, calls);
+        expect(t.sent.length, sent);
+      });
+    });
+
+    test('closing the detached window ends the session', () {
+      env((a, t, port, st, hints) {
+        port.emit(const ReadyEvent(1, 'Calculator'));
+        port.emit(WindowsEvent(1, [rw(7)]));
+        port.emit(const DetachedEvent(1, true));
+        port.emit(const ClosedEvent(1, 'quit'));
+        expect(st.sessionCount, 0);
+        expect(st.hint, '已结束 Calculator');
+      });
+    });
+
+    test('detaching takes keyboard focus off the picture', () {
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(1, [rw(7)]));
+        st.focusPicture(1);
+        port.emit(const DetachedEvent(1, true));
+        expect(st.pictureFocused, isNull);
+        lastCall(port, 'picture_focus', {'sid': null});
+      });
+    });
+
+    test('a detached session is not resized from the stage; attach judges once', () {
+      env((a, t, port, st, hints) {
+        List<Map<String, Object?>> resizes() => port.calls.where((c) => c.$1 == 'resize').map((c) => c.$2).toList();
+        st.stageSize(const Size(800, 600));
+        port.emit(const ReadyEvent(1, 'Calculator'));
+        port.emit(WindowsEvent(1, [rw(7)]));
+        expect(resizes().length, 1);
+        port.emit(const DetachedEvent(1, true));
+        st.stageSize(const Size(900, 600));
+        a.elapse(const Duration(seconds: 1));
+        // The user resized the detached window: A's size follows it, not the stage.
+        port.emit(WindowsEvent(1, [rw(7, w: 500, h: 428)]));
+        st.selectWindow(7);
+        a.elapse(const Duration(seconds: 1));
+        expect(resizes().length, 1);
+        port.emit(const DetachedEvent(1, false, current: 7));
+        expect(resizes().length, 2);
+        expect(resizes().last, {'sid': 1, 'window': 7, 'w': 900, 'h': 600});
+        a.elapse(const Duration(seconds: 1));
+        expect(resizes().length, 2);
+      });
+    });
+
+    test('attach with no window left goes back to waiting on the stage (R7)', () {
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(1, [rw(7)]));
+        port.emit(const DetachedEvent(1, true));
+        port.emit(WindowsEvent(1, [rw(9, kind: WindowKind.menu)]));
+        port.emit(const DetachedEvent(1, false));
+        expect(st.currentRemote!.detached, false);
+        expect(t.sent.last, {'cmd': 'note', 'sid': 1, 'what': 'attach', 'windows': 0});
+      });
+    });
+
+    test('without a port the S1 path is unchanged', () {
+      env((a, t, port, st, hints) {
+        expect(st.embeds, false);
+        expect(t.sent.where((m) => m['cmd'] == 'open').last.containsKey('embed'), false);
+        expect(port.calls.where((c) => c.$1 == 'start'), isEmpty);
+        expect(st.remote, isEmpty);
+      }, withPort: false);
+    });
+  });
+
+  group('endedHint', () {
+    test('maps runner and hub reasons', () {
+      expect(endedHint('X', 'rapp-client: quit'), '已结束 X');
+      expect(endedHint('X', 'host says: X quit'), 'X 已结束：A 端关闭了 app');
+      expect(endedHint('X', 'connection closed'), 'X 意外结束：连接断了');
+      expect(endedHint('X', 'GUI did not connect'), 'X 意外结束：本机没有接上会话');
+      expect(endedHint('X', 'rapp-client: boom'), 'X 意外结束：boom');
+    });
   });
 }

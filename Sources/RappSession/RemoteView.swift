@@ -1,27 +1,28 @@
 import AppKit
+import CoreVideo
 import QuartzCore
 import RappCore
 
 /// Shows one A window's content, scaled to fit at its aspect ratio, and
 /// reports mouse and scroll input on it as messages.
-final class RemoteView: NSView {
+public final class RemoteView: NSView {
     /// Called with a `.mouse` or `.scroll` message.
-    var onMouse: ((Message) -> Void)?
+    public var onMouse: ((Message) -> Void)?
 
     /// The A window this view shows, and its content size in A points:
     /// mouse and scroll positions are sent in those points.
-    var windowID: UInt32 = 0
-    var remoteSize = CGSize.zero {
+    public var windowID: UInt32 = 0
+    public var remoteSize = CGSize.zero {
         didSet { if remoteSize != oldValue { layoutPicture() } }
     }
     /// Height of the window's A title row: positions are sent from the
     /// window's top-left (spec §2.3), and the picture starts below the row.
-    var titleBar: Float = 0
+    public var titleBar: Float = 0
 
     /// Whether pointer moves with no button down are sent. Menus need them to
     /// highlight items and open submenus; windows do not, and moving A's
     /// pointer for every hover is not worth it.
-    var sendsHover = false {
+    public var sendsHover = false {
         didSet { updateTrackingAreas() }
     }
 
@@ -29,9 +30,11 @@ final class RemoteView: NSView {
     private var hoverArea: NSTrackingArea?
     /// The picture, drawn over `visible` of the content (fractions, top-left origin).
     private let picture = CALayer()
+    /// Held so the pool cannot recycle the buffer while its surface is on screen.
+    private var shown: CVPixelBuffer?
     private var visible = CGRect(x: 0, y: 0, width: 1, height: 1)
 
-    override init(frame frameRect: NSRect) {
+    override public init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         // Layer-hosting: the layer is ours, so AppKit never replaces its contents.
         let hosted = CALayer()
@@ -44,26 +47,27 @@ final class RemoteView: NSView {
         hosted.addSublayer(picture)
     }
 
-    required init?(coder: NSCoder) {
+    public required init?(coder: NSCoder) {
         fatalError("init(coder:) is not used")
     }
 
-    override var isFlipped: Bool { true }
+    override public var isFlipped: Bool { true }
 
-    override func layout() {
+    override public func layout() {
         super.layout()
         layoutPicture()
     }
-    override var acceptsFirstResponder: Bool { false }
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    override public var acceptsFirstResponder: Bool { false }
+    override public func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     /// Where the whole content is drawn: fitted at A's aspect ratio.
     private var fitRect: CGRect { aspectFitRect(imageSize: remoteSize, in: bounds.size) }
 
-    /// Shows `image`, the part `visible` of the window's content (see `visiblePart`).
-    func show(_ image: CGImage, visible part: CGRect) {
+    /// Shows `buffer`, the part `visible` of the window's content (see `visiblePart`).
+    public func show(_ buffer: CVPixelBuffer, visible part: CGRect) {
         visible = part
-        picture.contents = image
+        shown = buffer
+        picture.contents = CVPixelBufferGetIOSurface(buffer)?.takeUnretainedValue()
         layoutPicture()
     }
 
@@ -118,7 +122,7 @@ final class RemoteView: NSView {
         }
     }
 
-    override func updateTrackingAreas() {
+    override public func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let hoverArea { removeTrackingArea(hoverArea) }
         hoverArea = nil
@@ -128,15 +132,15 @@ final class RemoteView: NSView {
         hoverArea = area
     }
 
-    override func mouseMoved(with event: NSEvent) { mouse(.move, .left, event) }
-    override func mouseDown(with event: NSEvent) { mouse(.down, .left, event) }
-    override func mouseDragged(with event: NSEvent) { mouse(.drag, .left, event) }
-    override func mouseUp(with event: NSEvent) { mouse(.up, .left, event) }
-    override func rightMouseDown(with event: NSEvent) { mouse(.down, .right, event) }
-    override func rightMouseDragged(with event: NSEvent) { mouse(.drag, .right, event) }
-    override func rightMouseUp(with event: NSEvent) { mouse(.up, .right, event) }
+    override public func mouseMoved(with event: NSEvent) { mouse(.move, .left, event) }
+    override public func mouseDown(with event: NSEvent) { mouse(.down, .left, event) }
+    override public func mouseDragged(with event: NSEvent) { mouse(.drag, .left, event) }
+    override public func mouseUp(with event: NSEvent) { mouse(.up, .left, event) }
+    override public func rightMouseDown(with event: NSEvent) { mouse(.down, .right, event) }
+    override public func rightMouseDragged(with event: NSEvent) { mouse(.drag, .right, event) }
+    override public func rightMouseUp(with event: NSEvent) { mouse(.up, .right, event) }
 
-    override func scrollWheel(with event: NSEvent) {
+    override public func scrollWheel(with event: NSEvent) {
         guard let p = position(of: event, clamped: false) else { return }
         var dx = event.scrollingDeltaX, dy = event.scrollingDeltaY
         if !event.hasPreciseScrollingDeltas {

@@ -14,6 +14,9 @@ final class InputInjector {
     /// Buttons whose down was dropped by the top-window check: their drags and
     /// up are dropped too, so the app never sees half a click.
     private var droppedButtons = Set<MouseButton>()
+    /// Keys and buttons posted down and not yet up, released on teardown.
+    private var held = HeldInput()
+    private var lastPoint = CGPoint.zero
 
     init(app: NSRunningApplication, display: CGRect, log: @escaping (String) -> Void) {
         self.app = app
@@ -58,6 +61,7 @@ final class InputInjector {
             guard let event = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(keyCode), keyDown: down) else { return }
             event.flags = CGEventFlags(rawValue: modifiers)
             event.post(tap: .cghidEventTap)
+            if down { held.pressKey(keyCode) } else { held.releaseKey(keyCode) }
 
         default:
             break
@@ -97,6 +101,22 @@ final class InputInjector {
                                   mouseButton: cgButton) else { return }
         event.setIntegerValueField(.mouseEventClickState, value: Int64(max(1, clickCount)))
         event.post(tap: .cghidEventTap)
+        lastPoint = point
+        if kind == .down { held.pressButton(button) } else if kind == .up { held.releaseButton(button) }
+    }
+
+    /// Posts an up for every key and button still held, so a torn-down session
+    /// leaves A with nothing stuck. Safe to call more than once.
+    func releaseAll() {
+        let (keys, buttons) = held.drain()
+        for code in keys {
+            guard let event = CGEvent(keyboardEventSource: source, virtualKey: CGKeyCode(code), keyDown: false) else { continue }
+            event.flags = []
+            event.post(tap: .cghidEventTap)
+        }
+        for button in buttons {
+            post(button == .left ? .leftMouseUp : .rightMouseUp, at: lastPoint, button: button == .left ? .left : .right)
+        }
     }
 
     /// The top-window check before a press (spec §3.4): the window on top at

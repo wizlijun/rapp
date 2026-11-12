@@ -6,6 +6,7 @@ import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'cm_page.dart';
+import 'embed/session_port.dart';
 import 'hub_client.dart';
 import 'paths.dart';
 import 'service_client.dart';
@@ -49,7 +50,19 @@ Future<void> main(List<String> args) async {
   final control = serviceExe == null ? null : ServiceController(serviceExe: serviceExe, env: env);
 
   final prefs = UiPrefs.load(cfg);
-  final state = MainState(hub: hub, hubError: hubError, configDir: cfg, prefs: prefs);
+  SessionPort? port;
+  var doubleClick = const Duration(milliseconds: 500);
+  if (Platform.isMacOS) {
+    try {
+      final p = ChannelSessionPort();
+      doubleClick = Duration(milliseconds: await p.init());
+      port = p;
+    } catch (e) {
+      stderr.writeln('rapp: embedded sessions unavailable: $e');
+    }
+  }
+  final state =
+      MainState(hub: hub, hubError: hubError, configDir: cfg, prefs: prefs, port: port, doubleClick: doubleClick);
   await _showWindow(const Size(1194, 834), 'rapp');
   if (prefs.startFullscreen) await WindowManagerFullscreen().setFullScreen(true);
   await windowManager.setPreventClose(true);

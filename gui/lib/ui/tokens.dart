@@ -125,9 +125,32 @@ const _fontFallback = [
 const _mono = 'JetBrains Mono';
 const _monoFallback = ['SF Mono', 'Menlo', 'Consolas', 'monospace'];
 
-List<BoxShadow> _lampGlow(Color c) => [
-  BoxShadow(color: c.withValues(alpha: .6), blurRadius: 8),
+List<BoxShadow> _lampGlow(Color c, {double alpha = .6, double blur = 8}) => [
+  BoxShadow(color: c.withValues(alpha: alpha), blurRadius: blur),
 ];
+
+/// Text glow goes on every text style, so buttons and dropdowns get it too.
+TextTheme _withShadows(TextTheme tt, List<Shadow> s) {
+  if (s.isEmpty) return tt;
+  TextStyle? g(TextStyle? x) => x?.copyWith(shadows: s);
+  return tt.copyWith(
+    displayLarge: g(tt.displayLarge),
+    displayMedium: g(tt.displayMedium),
+    displaySmall: g(tt.displaySmall),
+    headlineLarge: g(tt.headlineLarge),
+    headlineMedium: g(tt.headlineMedium),
+    headlineSmall: g(tt.headlineSmall),
+    titleLarge: g(tt.titleLarge),
+    titleMedium: g(tt.titleMedium),
+    titleSmall: g(tt.titleSmall),
+    bodyLarge: g(tt.bodyLarge),
+    bodyMedium: g(tt.bodyMedium),
+    bodySmall: g(tt.bodySmall),
+    labelLarge: g(tt.labelLarge),
+    labelMedium: g(tt.labelMedium),
+    labelSmall: g(tt.labelSmall),
+  );
+}
 
 RappTokens tokensFor(RappTheme theme) {
   switch (theme) {
@@ -199,16 +222,17 @@ RappTokens tokensFor(RappTheme theme) {
         accentInk: const Color(0xFF2A0700),
         tint: const Color.fromRGBO(255, 90, 60, .14),
         r: 2,
-        glow: _lampGlow(on),
+        // Prototype `holo`: --glow 0 0 10px .95; text-shadow 0 0 8px .35.
+        glow: _lampGlow(on, alpha: .95, blur: 10),
         textGlow: const [
-          Shadow(color: Color.fromRGBO(127, 224, 255, .5), blurRadius: 6),
+          Shadow(color: Color.fromRGBO(127, 224, 255, .35), blurRadius: 8),
         ],
         font: _font,
         fontFallback: _fontFallback,
         mono: _mono,
         monoFallback: _monoFallback,
         monoBody: false,
-        labelSpacing: 0.12,
+        labelSpacing: 0.2,
       );
     case RappTheme.westworld:
       const on = Color(0xFFFFFFFF);
@@ -264,7 +288,7 @@ ThemeData themeDataFor(RappTheme theme) {
     canvasColor: t.bg,
     fontFamily: family,
     fontFamilyFallback: fallback,
-    textTheme: Typography.material2021().white
+    textTheme: _withShadows(Typography.material2021().white
         .apply(
           fontFamily: family,
           fontFamilyFallback: fallback,
@@ -279,7 +303,7 @@ ThemeData themeDataFor(RappTheme theme) {
             fontFamily: family,
             fontFamilyFallback: fallback,
           ),
-        ),
+        ), t.textGlow),
     filledButtonTheme: FilledButtonThemeData(style: button),
     elevatedButtonTheme: ElevatedButtonThemeData(style: button),
     outlinedButtonTheme: OutlinedButtonThemeData(style: button),

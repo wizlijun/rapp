@@ -1,5 +1,6 @@
 import AppKit
 import RappCore
+import RappSession
 
 /// Live received traffic, shown at the right of a title bar. Right-click or
 /// Control-click it for the stream menu. Every B window has one; a

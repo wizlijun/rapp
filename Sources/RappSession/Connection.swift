@@ -2,20 +2,35 @@ import Foundation
 import Network
 import RappCore
 
-/// The client's side of the connection. Everything runs on the main queue.
-final class Connection {
-    var onMessage: ((Message) -> Void)?
-    var onClosed: ((String) -> Void)?
+/// What a session needs from its connection to A; `Connection` is the real one, tests use fakes.
+public protocol MessageLink: AnyObject {
+    var onMessage: ((Message) -> Void)? { get set }
+    var onClosed: ((String) -> Void)? { get set }
     /// Called with the size of every chunk received, headers included.
-    var onBytes: ((Int) -> Void)?
+    var onBytes: ((Int) -> Void)? { get set }
+    /// Capture pixels per A point announced in the hello; set before `start()`.
+    var density: Float { get set }
+    func start()
+    func send(_ message: Message)
+    /// Closes the link without calling `onClosed`.
+    func cancel()
+}
+
+/// The client's side of the connection. Callbacks run on `queue` (the main queue by default).
+public final class Connection: MessageLink {
+    public var onMessage: ((Message) -> Void)?
+    public var onClosed: ((String) -> Void)?
+    public var onBytes: ((Int) -> Void)?
 
     private let address: RemoteAddress
     private let connection: NWConnection
     private var parser = MessageParser()
     private var closed = false
+    private let queue: DispatchQueue
 
-    init(address: RemoteAddress) {
+    public init(address: RemoteAddress, queue: DispatchQueue = .main) {
         self.address = address
+        self.queue = queue
         let tcp = NWProtocolTCP.Options()
         tcp.noDelay = true
         connection = NWConnection(host: NWEndpoint.Host(address.host),
@@ -24,10 +39,10 @@ final class Connection {
     }
 
     /// Capture pixels per A point announced in the hello; set before `start()`.
-    var density: Float = 2
+    public var density: Float = 2
 
     /// Connects and introduces itself with a hello message.
-    func start() {
+    public func start() {
         connection.stateUpdateHandler = { [weak self] state in
             guard let self else { return }
             switch state {
@@ -45,10 +60,10 @@ final class Connection {
                 break
             }
         }
-        connection.start(queue: .main)
+        connection.start(queue: queue)
     }
 
-    func send(_ message: Message) {
+    public func send(_ message: Message) {
         guard !closed else { return }
         connection.send(content: Data(message.encoded()), completion: .contentProcessed { [weak self] error in
             if let error { self?.close("send failed: \(error.localizedDescription)") }
@@ -79,6 +94,13 @@ final class Connection {
                 self.receive()
             }
         }
+    }
+
+    /// Closes the connection; `onClosed` is not called.
+    public func cancel() {
+        guard !closed else { return }
+        closed = true
+        connection.cancel()
     }
 
     private func close(_ reason: String) {

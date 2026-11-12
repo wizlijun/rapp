@@ -2,19 +2,21 @@ import AppKit
 import RappCore
 import UniformTypeIdentifiers
 
-/// The numbers of items uploaded and pastes sent, one counter each per client process (starting at 1).
-final class SendCounters {
-    private var item: UInt32 = 0
-    private var seq: UInt32 = 0
-
-    func nextItem() -> UInt32 { item += 1; return item }
-    func nextSeq() -> UInt32 { seq += 1; return seq }
+/// What a send round needs from the editor it sends.
+public protocol ComposerSink: AnyObject {
+    func payload(_ chunk: Int) -> ChipPayload?
+    func uploadedItem(_ chunk: Int) -> UInt32?
+    func setUploadedItem(_ item: UInt32, for chunk: Int)
+    func setSending(_ on: Bool)
+    /// The round ended. `sent` is the number of leading `pieces` pasted into A completely; `failure` is nil
+    /// when all went, else the message to show ("" keeps what the transfer strip says).
+    func finished(pieces: [ComposerPiece], sent: Int, failure: String?)
 }
 
 /// Sends one window's composer content to A, item by item (spec §4.2): upload
 /// what needs it, `paste`, wait for `pasted`, then the next. The editor stays
 /// editable meanwhile; the round works on what was there when it began.
-final class Sender {
+public final class Sender {
     private struct Round {
         let pieces: [ComposerPiece]
         let items: [ComposerItem]
@@ -26,7 +28,7 @@ final class Sender {
         var pastedEnd = 0
     }
 
-    private weak var bar: ComposerBar?
+    private weak var sink: ComposerSink?
     private let transfers: TransferQueue
     private let counters: SendCounters
     private let send: (Message) -> Void
@@ -34,37 +36,37 @@ final class Sender {
     /// The `paste` whose `pasted` is awaited.
     private var awaiting: UInt32?
 
-    init(bar: ComposerBar, transfers: TransferQueue, counters: SendCounters, send: @escaping (Message) -> Void) {
-        self.bar = bar
+    public init(sink: ComposerSink, transfers: TransferQueue, counters: SendCounters, send: @escaping (Message) -> Void) {
+        self.sink = sink
         self.transfers = transfers
         self.counters = counters
         self.send = send
     }
 
-    /// Return or the send button; ignored while a send is running.
-    func start() {
-        guard round == nil, let bar else { return }
-        let composer = bar.composer
-        let pieces = composer.pieces()
+    /// Return or the send button, with the editor's content; ignored while a send is running.
+    public func start(pieces: [ComposerPiece]) {
+        guard round == nil, let sink else { return }
         let items = composerItems(pieces)
         var payloads: [Int: ChipPayload] = [:]
         var uploads = 0
         for item in items {
             switch item.content {
             case let .chunk(chip):
-                payloads[chip] = composer.payload(chip)
+                let payload = sink.payload(chip)
+                payloads[chip] = payload
+                if case let .text(text)? = payload, !needsUpload(text) { break }
                 uploads += 1
             case let .text(text):
                 if needsUpload(text) { uploads += 1 }
             }
         }
         round = Round(pieces: pieces, items: items, payloads: payloads, uploads: uploads)
-        bar.setSending(true)
+        sink.setSending(true)
         step()
     }
 
     /// A's answer to a `paste`; false when it is not this sender's.
-    func pasted(seq: UInt32, error: String) -> Bool {
+    public func pasted(seq: UInt32, error: String) -> Bool {
         guard seq == awaiting else { return false }
         awaiting = nil
         if !error.isEmpty { finish(failure: pasteErrorMessage(error)) } else if var r = round {
@@ -79,7 +81,7 @@ final class Sender {
     // MARK: Steps
 
     private func step() {
-        guard let r = round, let bar else { return }
+        guard let r = round, let sink else { return }
         guard r.index < r.items.count else { return finish(failure: nil) }
         switch r.items[r.index].content {
         case let .text(text) where !needsUpload(text):
@@ -88,10 +90,11 @@ final class Sender {
             upload(item: counters.nextItem(), kind: .text, uti: typeUTF8Text, name: "", data: .bytes(Array(text.utf8)))
         case let .chunk(chip):
             guard let payload = r.payloads[chip] else { return finish(failure: "找不到这一块的内容") }
+            // A text block short enough for a `paste` goes inline, like typed text.
+            if case let .text(text) = payload, !needsUpload(text) { return paste(.text(text)) }
             // The number goes on the block first, so a resend after a failure continues this upload.
-            let composer = bar.composer
-            let item = composer.uploadedItem(chip) ?? counters.nextItem()
-            composer.setUploadedItem(chip, item)
+            let item = sink.uploadedItem(chip) ?? counters.nextItem()
+            sink.setUploadedItem(item, for: chip)
             switch payload {
             case let .text(text):
                 upload(item: item, kind: .text, uti: typeUTF8Text, name: "", data: .bytes(Array(text.utf8)))
@@ -128,28 +131,25 @@ final class Sender {
         send(.paste(seq: seq, source))
     }
 
-    /// Ends the round: all done (`failure` nil), or the message to show ("" keeps what the strip says). What was pasted is
-    /// removed from the editor, unless the user has changed that part meanwhile.
+    /// Ends the round: all done (`failure` nil), or the message to show ("" keeps what the strip says).
     private func finish(failure: String?) {
         guard let r = round else { return }
         round = nil
         awaiting = nil
-        guard let bar else { return }
-        bar.setSending(false)
-        let composer = bar.composer
-        let length = failure == nil ? r.pieces.reduce(0) { $0 + pieceLength($1) } : r.pastedEnd
-        var note: String?
-        if length > 0 {
-            if composerPrefixMatches(r.pieces, composer.pieces(), length: length) {
-                composer.removeUpTo(length)
-            } else {
-                note = "（发送中改过内容，未清除）"
+        guard let sink else { return }
+        sink.setSending(false)
+        // Pieces whose end lies within what was pasted.
+        var sent = 0, end = 0
+        if failure == nil {
+            sent = r.pieces.count
+        } else {
+            for piece in r.pieces {
+                end += pieceLength(piece)
+                if end > r.pastedEnd { break }
+                sent += 1
             }
         }
-        // Self-clearing, unlike the queue's strip, which 取消 would not end.
-        let shown = failure.flatMap { $0.isEmpty ? bar.statusText : $0 }
-        let text = [shown, note].compactMap { $0 }
-        if !text.isEmpty && (failure != "" || note != nil) { bar.showLocalStatus(text.joined(separator: " ")) }
+        sink.finished(pieces: r.pieces, sent: sent, failure: failure)
     }
 
     private func pieceLength(_ piece: ComposerPiece) -> Int {

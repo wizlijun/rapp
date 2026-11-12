@@ -29,6 +29,31 @@ void main() {
       hub = HubClient(t);
     });
 
+    test('open with embed sends the flag and keeps port and token', () async {
+      final f = hub.open('a', 'com.x', embed: true);
+      final cmd = t.sent.last;
+      expect(cmd, {'cmd': 'open', 'id': 'a', 'app': 'com.x', 'embed': true, 'req': anything});
+      t.emit({
+        'event': 'opened', 'sid': 1, 'id': 'a', 'app': 'com.x', 'path': 'lan',
+        'port': 5000, 'token': 'tk', 'req': cmd['req'],
+      });
+      final s = await f;
+      expect([s.port, s.token], [5000, 'tk']);
+    });
+
+    test('open without embed sends no embed key', () async {
+      final f = hub.open('a', 'com.x');
+      expect(t.sent.last.containsKey('embed'), isFalse);
+      t.emit({'event': 'opened', 'sid': 1, 'id': 'a', 'app': 'com.x', 'path': 'lan', 'req': t.sent.last['req']});
+      final s = await f;
+      expect([s.port, s.token], [null, null]);
+    });
+
+    test('note sends what and windows', () {
+      hub.note(1, 'detach', 2);
+      expect(t.sent.last, {'cmd': 'note', 'sid': 1, 'what': 'detach', 'windows': 2});
+    });
+
     test('focus sends the sid', () {
       hub.focus(3);
       expect(t.sent.last, {'cmd': 'focus', 'sid': 3});

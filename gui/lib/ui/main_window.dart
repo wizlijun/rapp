@@ -98,8 +98,9 @@ class _MainWindowState extends State<MainWindow> {
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
     final mac = Platform.isMacOS;
+    // On macOS only ⌃⌘ chords are rapp's: ⌘[ ⌘] belong to A while the picture has focus.
     final prefixOf = mac
-        ? (LogicalKeyboardKey k) => SingleActivator(k, meta: true)
+        ? (LogicalKeyboardKey k) => SingleActivator(k, control: true, meta: true)
         : (LogicalKeyboardKey k) => SingleActivator(k, control: true);
     return CallbackShortcuts(
       bindings: {
@@ -109,6 +110,11 @@ class _MainWindowState extends State<MainWindow> {
         const SingleActivator(LogicalKeyboardKey.escape): _esc,
         prefixOf(LogicalKeyboardKey.bracketLeft): () => state.step(-1),
         prefixOf(LogicalKeyboardKey.bracketRight): () => state.step(1),
+        // Picture focused or not, ⌃⌘ chords are rapp's, so ⌃⌘D arrives here too.
+        // A held chord toggles once, not back and forth with the key repeat.
+        if (mac)
+          const SingleActivator(LogicalKeyboardKey.keyD, control: true, meta: true, includeRepeats: false):
+              state.toggleDetach,
       },
       child: Focus(
         autofocus: true,
@@ -116,9 +122,10 @@ class _MainWindowState extends State<MainWindow> {
           backgroundColor: t.bg,
           body: Backdrop(
             theme: state.prefs.theme,
+            hole: state.pictureHole,
             child: Column(children: [
-              TopBar(state: state, fullscreen: _full, onToggleFullscreen: _toggleFull),
-              _NarrowHint(state: state),
+              _Blur(state: state, child: TopBar(state: state, fullscreen: _full, onToggleFullscreen: _toggleFull)),
+              _Blur(state: state, child: _NarrowHint(state: state)),
               Expanded(
                 child: ListenableBuilder(
                   listenable: state,
@@ -128,11 +135,14 @@ class _MainWindowState extends State<MainWindow> {
                       Positioned.fill(child: Stage(state: state)),
                       if (open)
                         Positioned.fill(
-                          child: GestureDetector(
-                            key: const Key('scrim'),
-                            behavior: HitTestBehavior.opaque,
-                            onTap: state.closePanel,
-                            child: ColoredBox(color: t.bg.withValues(alpha: .6)),
+                          child: _Blur(
+                            state: state,
+                            child: GestureDetector(
+                              key: const Key('scrim'),
+                              behavior: HitTestBehavior.opaque,
+                              onTap: state.closePanel,
+                              child: ColoredBox(color: t.bg.withValues(alpha: .6)),
+                            ),
                           ),
                         ),
                       if (open)
@@ -140,9 +150,12 @@ class _MainWindowState extends State<MainWindow> {
                           left: 0,
                           top: 0,
                           bottom: 0,
-                          child: SidePanel(
+                          child: _Blur(
                             state: state,
-                            devicesTab: DevicesTab(state: state, local: _local()),
+                            child: SidePanel(
+                              state: state,
+                              devicesTab: DevicesTab(state: state, local: _local()),
+                            ),
                           ),
                         ),
                     ]);
@@ -155,6 +168,21 @@ class _MainWindowState extends State<MainWindow> {
       ),
     );
   }
+}
+
+/// A press anywhere on [child] takes keyboard focus off the picture (R24); the press still
+/// reaches [child].
+class _Blur extends StatelessWidget {
+  const _Blur({required this.state, required this.child});
+  final MainState state;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: (_) => state.blurPicture(),
+        child: child,
+      );
 }
 
 /// Below 480px the top bar hides the hint; show it here instead.

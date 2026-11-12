@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import RappCore
+import RappSession
 
 let usage = """
     usage: rapp-client [connect] "rapp://<host>[:port]/[<bundle-id>][?token=<secret>][&mode=gray4|color8|color16|duogray|duocolor][&fps=30|15|5|1]" [--token-env <VAR>] [--json]
@@ -13,10 +14,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let output: WorkerOutput
     private let connection: Connection
     private let decoder: FrameDecoder
+    private let surfaces = WindowSurfaces()
     private let streamMenu: StreamMenu
     private let meter: TrafficMeter
     private let transfers: TransferQueue
     private let history: ClipHistory
+    private let historyMenu: ClipHistoryMenu
     private var coordinator: WindowCoordinator!
     private var mirroredMenu: MirroredMenu!
     private var keyMonitor: Any?
@@ -41,10 +44,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         streamMenu = StreamMenu(mode: address.mode, fps: address.fps)
         meter = TrafficMeter(streamMenu: streamMenu)
         transfers = TransferQueue(address: address)
-        history = ClipHistory(pasteboard: LocalPasteboard(), transfers: transfers, log: { output.log($0) })
+        let pasteboard = LocalPasteboard()
+        history = ClipHistory(pasteboard: pasteboard, log: { output.log($0) })
+        historyMenu = ClipHistoryMenu(history: history, transfers: transfers, pasteboard: pasteboard)
         super.init()
         transfers.log = { output.log($0) }
-        streamMenu.makeHistoryItem = { [history] in history.makeMenuItem() }
+        streamMenu.makeHistoryItem = { [historyMenu] in historyMenu.makeMenuItem() }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -54,7 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         coordinator.onCancelTransfer = { [transfers] in transfers.cancel() }
         transfers.onStatus = { [weak self] status in self?.coordinator.setTransferStatus(status) }
         history.onClip = { [weak self] in self?.coordinator.clipArrived() }
-        history.onInsert = { [weak self] info, payload in self?.coordinator.insert(payload, info: info) }
+        historyMenu.onInsert = { [weak self] info, payload in self?.coordinator.insert(payload, info: info) }
         buildMenu()
 
         connection.onMessage = { [weak self] message in self?.handle(message) }
@@ -164,6 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             sendStreamIfChanged()
         case let .windows(table):
             coordinator.apply(table)
+            _ = surfaces.keep(only: Set(table.map(\.id)))
             output.emit(.windows(count: table.count))
             // Logged (stderr with --json) so a hub's log shows it too; the hub does not forward events.
             if table.count != loggedWindows {
@@ -174,14 +180,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case let .frame(region, payload):
             do {
                 try decoder.decode(payload)
+                // Cropped by the region the frame itself carries, not the table's (spec §4.4).
+                let updated = try surfaces.draw(table: coordinator.table, decoder: decoder, region: region)
+                coordinator.show(surfaces, updated: updated)
             } catch {
                 output.finish(ExitCode.runtime, "rapp-client: cannot decode frame: \(error)")
+                return
             }
-            let bgra = Quantizer.expand(samples: decoder.samples, width: decoder.width, height: decoder.height,
-                                        mode: decoder.mode)
-            // Cropped by the region the frame itself carries, not the table's (spec §4.4).
-            guard let image = makeImage(bgra: bgra, width: decoder.width, height: decoder.height) else { break }
-            coordinator.show(image, region: region)
         case let .menuBar(items):
             mirroredMenu.update(items)
         case let .clip(id, info):
@@ -193,18 +198,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         default:
             break
         }
-    }
-
-    /// `bgra` is B, G, R, X bytes, `width * 4` per row.
-    private func makeImage(bgra: [UInt8], width: Int, height: Int) -> CGImage? {
-        guard width > 0, height > 0, bgra.count >= width * height * 4,
-              let provider = CGDataProvider(data: Data(bgra) as CFData),
-              let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else { return nil }
-        return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: width * 4,
-                       space: colorSpace,
-                       bitmapInfo: CGBitmapInfo(rawValue: CGBitmapInfo.byteOrder32Little.rawValue
-                                                    | CGImageAlphaInfo.noneSkipFirst.rawValue),
-                       provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
     }
 
     // MARK: Stream settings

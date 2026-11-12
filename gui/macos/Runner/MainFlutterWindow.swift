@@ -12,6 +12,7 @@ class MainFlutterWindow: NSWindow {
     self.setFrame(windowFrame, display: true)
 
     RegisterGeneratedPlugins(registry: flutterViewController)
+    SessionPlugin.register(with: flutterViewController.registrar(forPlugin: "RappSession"))
 
     super.awakeFromNib()
   }

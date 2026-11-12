@@ -1,10 +1,11 @@
 import AppKit
 import RappCore
+import RappSession
 
 /// The bar under the picture (spec §4.1): the transfer strip (only while there
 /// is something to say), the scrolling editor and the button row. Its height
 /// follows the editor's, one to eight lines.
-final class ComposerBar: NSView {
+final class ComposerBar: NSView, ComposerSink {
     let composer = Composer()
     /// The bar wants this height now; the window makes room for it.
     var onHeightChange: ((CGFloat) -> Void)?
@@ -99,6 +100,36 @@ final class ComposerBar: NSView {
         let generation = statusGeneration
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.localStatusFor) { [weak self] in
             if let self, self.statusGeneration == generation { self.setStatus(nil) }
+        }
+    }
+
+    func setUploadedItem(_ item: UInt32, for chunk: Int) { composer.setUploadedItem(chunk, item) }
+
+    func payload(_ chunk: Int) -> ChipPayload? { composer.payload(chunk) }
+
+    func uploadedItem(_ chunk: Int) -> UInt32? { composer.uploadedItem(chunk) }
+
+    /// A send round ended: what was pasted is removed from the editor, unless the user has changed that part meanwhile.
+    func finished(pieces: [ComposerPiece], sent: Int, failure: String?) {
+        let length = pieces.prefix(sent).reduce(0) { $0 + Self.pieceLength($1) }
+        var note: String?
+        if length > 0 {
+            if composerPrefixMatches(pieces, composer.pieces(), length: length) {
+                composer.removeUpTo(length)
+            } else {
+                note = "（发送中改过内容，未清除）"
+            }
+        }
+        // Self-clearing, unlike the queue's strip, which 取消 would not end.
+        let shown = failure.flatMap { $0.isEmpty ? statusText : $0 }
+        let text = [shown, note].compactMap { $0 }
+        if !text.isEmpty && (failure != "" || note != nil) { showLocalStatus(text.joined(separator: " ")) }
+    }
+
+    private static func pieceLength(_ piece: ComposerPiece) -> Int {
+        switch piece {
+        case let .text(text): return text.utf16.count
+        case .chunk: return 1
         }
     }
 

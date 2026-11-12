@@ -1,18 +1,18 @@
 import Foundation
 import RappCore
 
-enum DownloadResult { case bytes([UInt8]), file(URL) }
-enum UploadData { case bytes([UInt8]), file(URL) }
+public enum DownloadResult { case bytes([UInt8]), file(URL) }
+public enum UploadData { case bytes([UInt8]), file(URL) }
 
 /// A's `error` text, or "连接断开" / "已取消".
-struct TransferFailure: Error { let reason: String }
+public struct TransferFailure: Error { public let reason: String }
 
 /// Runs downloads and uploads one at a time, each on its own side connection
 /// (spec §2.4, §4.1, §4.2). One per client process; everything on the main queue.
-final class TransferQueue {
+public final class TransferQueue {
     /// "下载 app.log 45%", "上传 2/3 · app.log 45%", an error text; nil = idle.
-    var onStatus: ((String?) -> Void)?
-    var log: ((String) -> Void)?
+    public var onStatus: ((String?) -> Void)?
+    public var log: ((String) -> Void)?
 
     private let address: RemoteAddress
     private var queue: [Job] = []
@@ -27,20 +27,20 @@ final class TransferQueue {
     private static let partSuffix = ".rapp-part"
     private static let errorShownFor: TimeInterval = 5
 
-    init(address: RemoteAddress) {
+    public init(address: RemoteAddress) {
         self.address = address
     }
 
     // MARK: Public
 
-    func download(clip: UInt32, file: UInt16, name: String, total: UInt64, toDisk: Bool,
+    public func download(clip: UInt32, file: UInt16, name: String, total: UInt64, toDisk: Bool,
                   done: @escaping (Result<DownloadResult, TransferFailure>) -> Void) {
         let job = Job(label: name, work: .download(Download(clip: clip, file: file, name: name, total: total, toDisk: toDisk)),
                       finish: { done($0.map { $0 ?? .bytes([]) }) })
         enqueue(job)
     }
 
-    func upload(item: UInt32, kind: ClipKind, uti: String, name: String, data: UploadData, label: String,
+    public func upload(item: UInt32, kind: ClipKind, uti: String, name: String, data: UploadData, label: String,
                 done: @escaping (Result<Void, TransferFailure>) -> Void) {
         let total: UInt64
         switch data {
@@ -58,7 +58,7 @@ final class TransferQueue {
     }
 
     /// Stops the current transfer and drops the queued ones; what was received or sent stays.
-    func cancel() {
+    public func cancel() {
         generation += 1
         connection?.cancel()
         connection = nil

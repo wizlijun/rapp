@@ -1,5 +1,6 @@
 import AppKit
 import RappCore
+import RappSession
 
 /// The B window for one decorated A window (spec §4.1): B's title bar, A's
 /// content below it, the composer bar at the bottom and the traffic label at the
