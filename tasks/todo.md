@@ -134,3 +134,11 @@
 - 留给以后的小问题：主题每次状态变化都重建（性能）；<480px 时提示条占舞台高度且不消失；主题质感（发光字、AVATAR 字重、面板模糊）未做；删除设备时正在进行的探测可能把它算回在线数；用包名打开时会话名显示成包名；「切到窗口」不还原最小化的窗口
 - 界面设计层面的建议（等用户定，没改）：添加设备表单藏在远程设备 app 列表下面、会被底栏挡住，建议单独一个「+ 添加设备」；app 名下面显示包名（等宽字）对普通人是噪音；面板打开时舞台上的「打开面板」按钮还看得见；总流量一直是「—」（要等 S3）；设备 ID 用等宽字显示
 
+
+## 主界面 S2–S6（分支 `feat/main-window-s2-s6`；S7 先不做，S8 不在范围内）
+顺序：S2 → S3 → S5 → S6 → S4（S4 第三层要用 S5 的项目、S6 的资源，放最后）。各规格 §6 的假设按默认执行，验收时确认。
+- [ ] S2 嵌入舞台（规格：`docs/superpowers/specs/2026-11-12-rapp-s2-embedded-stage-design.md`）
+- [ ] S3 生命周期（规格：`docs/superpowers/specs/2026-11-12-rapp-s3-lifecycle-design.md`）
+- [ ] S5 项目与常用（规格：`docs/superpowers/specs/2026-11-12-rapp-s5-projects-favorites-design.md`）
+- [ ] S6 全局资源（规格：`docs/superpowers/specs/2026-11-12-rapp-s6-global-resources-design.md`）
+- [ ] S4 全景（规格：`docs/superpowers/specs/2026-11-12-rapp-s4-overview-design.md`）
