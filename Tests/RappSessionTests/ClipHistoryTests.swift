@@ -45,4 +45,14 @@ final class ClipHistoryTests: XCTestCase {
         history.pick(3, insert: true, transfers: transfers, pasteboard: LocalPasteboard(board: other)) { _, p in inserted = p }
         guard case .text("abc")? = inserted else { return XCTFail("expected inserted text") }
     }
+
+    func testLimitIsConfigurable() {
+        let big = ClipHistory(pasteboard: LocalPasteboard(board: board), limit: 50, log: { _ in })
+        for id in 1...60 { big.add(id: UInt32(id), .text("t\(id)", truncated: false)) }
+        XCTAssertEqual(big.limit, 50)
+        XCTAssertEqual(big.entries.count, 50)
+        XCTAssertEqual(big.entries.first?.id, 60)
+        XCTAssertEqual(big.entries.last?.id, 11)
+        XCTAssertEqual(history.limit, 20)
+    }
 }

@@ -130,9 +130,11 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     case let .setStream(sid, mode, fps, density):
       live[sid]?.session.setStream(mode: mode, fps: fps, choice: density)
       result(nil)
-    case let .cancelTransfer(sid):
-      live[sid]?.session.cancelTransfers()
+    case let .cancelTransfer(sid, id):
+      if let id { live[sid]?.session.cancelTransfer(id: id) } else { live[sid]?.session.cancelTransfers() }
       result(nil)
+    case .fetchClip, .copyLocal, .dropCopy, .reveal:
+      result(FlutterMethodNotImplemented)  // wired in a later S6 task
     case let .composerPaste(sid):
       // ⌘V on B: the user's own clipboard, read on main by the composer.
       result(pasteResultPayload(live[sid]?.session.composer.paste() ?? .nothing))

@@ -53,22 +53,23 @@ public final class EmbeddedSession {
     private var released = false
 
     public init(address: RemoteAddress, choice: DensityChoice, backingScale: CGFloat, link: MessageLink,
-                pasteboard: LocalPasteboard, queue: DispatchQueue) {
+                pasteboard: LocalPasteboard, queue: DispatchQueue, downloads: URL? = nil) {
         self.address = address
         self.choice = choice
         self.backingScale = backingScale
         self.link = link
         self.pasteboard = pasteboard
-        self.transfers = TransferQueue(address: address)
+        self.transfers = TransferQueue(address: address, downloads: downloads)
         self.queue = queue
         self.mode = address.mode
         self.fps = address.fps
         self.decoder = FrameDecoder(mode: address.mode)
-        self.history = ClipHistory(pasteboard: pasteboard, log: { _ in })
+        self.history = ClipHistory(pasteboard: pasteboard, limit: 50, log: { _ in })
         queue.setSpecific(key: queueKey, value: ())
         link.density = captureDensity(zoom: 1, backingScale: backingScale, choice: choice)
         // The transfer queue reports on main; the runner hears it on the session queue, like every event.
-        transfers.onStatus = { [weak self] in self?.post(.transfer($0)) }
+        transfers.onStatus = { [weak self] in self?.post(.transferStatus($0)) }
+        transfers.onProgress = { [weak self] in self?.post(.transferProgress($0)) }
         onInsert = { [weak self] info, payload in self?.composer.insert(info, payload) }
     }
 
@@ -123,6 +124,24 @@ public final class EmbeddedSession {
                 }
             }
         }
+    }
+
+    /// Takes a copy of clip `id` for the runner's `ClipCopies`. `done` always runs on the main queue.
+    public func fetchCopy(_ id: UInt32, done: @escaping (Result<ClipCopy, TransferFailure>) -> Void) {
+        run { [self] in
+            let failure: String?
+            let info = history.info(id)
+            if linkDown { failure = "A 已断开" } else if info == nil { failure = "unknown clip" } else { failure = nil }
+            DispatchQueue.main.async { [self] in
+                if let failure { return done(.failure(TransferFailure(reason: failure))) }
+                history.fetch(id, info: info!, transfers: transfers, done: done)
+            }
+        }
+    }
+
+    /// Main queue: stops one transfer (its `.rapp-part` stays).
+    public func cancelTransfer(id: UInt32) {
+        transfers.cancel(id: id)
     }
 
     /// Main queue (the runner's `cancel_transfer`): stops the running upload or download, drops the queued
@@ -212,7 +231,7 @@ public final class EmbeddedSession {
             onEvent?(.clips(history.entries.map { entry in
                 var pickable = true
                 if case .unsupported = entry.info { pickable = false }
-                return ClipRow(id: entry.id, title: historyTitle(entry.info), pickable: pickable)
+                return ClipRow(id: entry.id, title: historyTitle(entry.info), pickable: pickable, kind: clipKind(entry.info))
             }))
         case let .pasted(seq, error):
             // The composer lives on main: hand it the values, not this queue's state.
@@ -240,5 +259,15 @@ public final class EmbeddedSession {
         guard streamChanged(from: sentStream, to: next) else { return }
         sentStream = next
         link.send(.setStream(mode: next.mode, fps: next.fps, density: next.density))
+    }
+}
+
+private func clipKind(_ info: ClipInfo) -> String {
+    switch info {
+    case .text: return "text"
+    case .image: return "image"
+    case .files: return "files"
+    case .data: return "data"
+    case .unsupported: return "unsupported"
     }
 }

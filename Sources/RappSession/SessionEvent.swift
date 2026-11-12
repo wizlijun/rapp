@@ -17,8 +17,10 @@ public struct ClipRow: Equatable {
     public let id: UInt32
     public let title: String
     public let pickable: Bool
-    public init(id: UInt32, title: String, pickable: Bool) {
-        self.id = id; self.title = title; self.pickable = pickable
+    /// `text|image|files|data|unsupported`.
+    public let kind: String
+    public init(id: UInt32, title: String, pickable: Bool, kind: String) {
+        self.id = id; self.title = title; self.pickable = pickable; self.kind = kind
     }
 }
 
@@ -53,7 +55,8 @@ public enum SessionEvent: Equatable {
     case traffic(bytesPerSecond: Int, frames: Int)
     case clips([ClipRow])
     case menu([MenuItem])
-    case transfer(String?)
+    case transferStatus(String?)
+    case transferProgress(TransferProgress)
     case composer(ComposerEvent)
     /// The link dropped (or A sent garbage): the last pictures stay; `closed` follows when the GUI ends the session.
     case disconnected(reason: String)

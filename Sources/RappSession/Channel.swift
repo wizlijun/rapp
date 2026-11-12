@@ -24,7 +24,16 @@ public enum ChannelCommand: Equatable {
     case resize(sid: Int64, Message)
     case selectWindow(sid: Int64, window: UInt32)
     case setStream(sid: Int64, mode: Mode, fps: UInt8, density: DensityChoice)
-    case cancelTransfer(sid: Int64)
+    /// Stop one transfer (`id`) or, without an id, all of them.
+    case cancelTransfer(sid: Int64, id: UInt32?)
+    /// Take a copy of A's clip `clip` onto B (answered with a `clipCopyReply`).
+    case fetchClip(sid: Int64, clip: UInt32)
+    /// Put B's copy `copy` on B's clipboard.
+    case copyLocal(copy: Int)
+    /// Forget B's copy `copy`.
+    case dropCopy(copy: Int)
+    /// Show the file at `path` in Finder.
+    case reveal(path: String)
     /// The session whose picture has keyboard focus; nil for none.
     case pictureFocus(sid: Int64?)
     /// Take A's clipboard entry `clip` onto B's clipboard, or (insert) into the composer.
@@ -56,7 +65,7 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
     let known: Set<String> = ["start", "close", "mouse", "scroll", "key", "resize", "select_window", "set_stream",
                               "cancel_transfer", "picture_focus", "clip_pick", "menu_pick", "move_top_left",
                               "composer_paste", "composer_attach", "composer_send", "composer_drop_block",
-                              "detach", "attach", "raise_detached"]
+                              "detach", "attach", "raise_detached", "fetch_clip", "copy_local", "drop_copy", "reveal"]
     guard known.contains(method) else { throw ChannelError.unknown(method) }
     guard let map = args as? [String: Any] else { throw ChannelError.bad(method) }
     let a = Args(method: method, map: map)
@@ -65,8 +74,17 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
         guard let raw = map["sid"] else { throw ChannelError.bad(method) }
         return .pictureFocus(sid: raw is NSNull ? nil : try a.int("sid"))
     }
+    switch method {
+    case "copy_local": return .copyLocal(copy: try a.block("copy"))
+    case "drop_copy": return .dropCopy(copy: try a.block("copy"))
+    case "reveal": return .reveal(path: try a.string("path"))
+    default: break
+    }
     let sid = try a.int("sid")
     switch method {
+    case "fetch_clip":
+        guard let clip = UInt32(exactly: try a.int("clip")) else { throw ChannelError.bad(method) }
+        return .fetchClip(sid: sid, clip: clip)
     case "start":
         guard let port = UInt16(exactly: try a.int("port")), port != 0 else { throw ChannelError.bad(method) }
         return .start(sid: sid, port: port, token: try a.string("token"), mode: try a.mode(), fps: try a.fps(),
@@ -117,7 +135,12 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
     case "raise_detached":
         return .raiseDetached(sid: sid)
     default:
-        return .cancelTransfer(sid: sid)
+        var id: UInt32?
+        if let raw = map["id"], !(raw is NSNull) {
+            guard let i = UInt32(exactly: try a.int("id")) else { throw ChannelError.bad(method) }
+            id = i
+        }
+        return .cancelTransfer(sid: sid, id: id)
     }
 }
 
@@ -256,7 +279,7 @@ public func eventPayload(_ e: SessionEvent, sid: Int64, textures: [UInt32: Int64
     case let .traffic(bytes, frames):
         return payload("traffic", ["bytes": bytes, "frames": frames])
     case let .clips(rows):
-        return payload("clipboard", ["clips": rows.map { ["id": Int($0.id), "title": $0.title, "pickable": $0.pickable] }])
+        return payload("clipboard", ["clips": rows.map { ["id": Int($0.id), "title": $0.title, "pickable": $0.pickable, "kind": $0.kind] }])
     case let .menu(items):
         func encode(_ items: [MenuItem]) -> [[String: Any]] {
             items.map {
@@ -265,8 +288,14 @@ public func eventPayload(_ e: SessionEvent, sid: Int64, textures: [UInt32: Int64
             }
         }
         return payload("menu", ["items": encode(items)])
-    case let .transfer(status):
-        return payload("transfer", ["status": status.map { $0 as Any } ?? NSNull()])
+    case let .transferStatus(status):
+        return payload("transfer_status", ["status": status.map { $0 as Any } ?? NSNull()])
+    case let .transferProgress(p):
+        var fields: [String: Any] = ["id": Int(p.id), "dir": p.dir.rawValue, "name": p.name, "done": Int(p.done),
+                                     "total": Int(p.total), "state": p.state.rawValue]
+        if let path = p.path { fields["path"] = path }
+        if let error = p.error { fields["error"] = error }
+        return payload("transfer", fields)
     case let .composer(.sending(sending)):
         return payload("composer", ["sending": sending])
     case let .composer(.done(sent, failure)):
@@ -302,4 +331,12 @@ public func textureChanges(have: Set<UInt32>, windows: [SessionWindow]) -> (regi
         register.append(w.info.id)
     }
     return (register, have.subtracting(seen).sorted())
+}
+
+/// What the runner answers Dart's `fetch_clip` with: the new copy's number, or the reason it failed.
+public func clipCopyReply(_ r: Result<Int, TransferFailure>) -> [String: Any] {
+    switch r {
+    case let .success(n): return ["copy": n]
+    case let .failure(f): return ["error": f.reason]
+    }
 }
