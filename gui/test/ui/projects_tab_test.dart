@@ -296,4 +296,13 @@ void main() {
     expect(s.panel, isNull);
     expect(t.sent.last['cmd'], 'focus');
   });
+
+  testWidgets('the new-project field is at least 48 tall', (tester) async {
+    await tester.runAsync(boot);
+    await pump(tester);
+    expect(
+      tester.getSize(find.byKey(const Key('new-project'))).height,
+      greaterThanOrEqualTo(48),
+    );
+  });
 }

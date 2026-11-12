@@ -24,10 +24,20 @@ void main() {
     final commits = <String>[];
     final other = FocusNode();
     addTearDown(other.dispose);
-    await tester.pumpWidget(wrap(Column(mainAxisSize: MainAxisSize.min, children: [
-      InlineEdit(text: 'a', onCommit: commits.add),
-      Focus(focusNode: other, child: const SizedBox(width: 10, height: 10)),
-    ])));
+    await tester.pumpWidget(
+      wrap(
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            InlineEdit(text: 'a', onCommit: commits.add),
+            Focus(
+              focusNode: other,
+              child: const SizedBox(width: 10, height: 10),
+            ),
+          ],
+        ),
+      ),
+    );
     await tester.tap(find.text('a'));
     await tester.pump();
     await tester.enterText(find.byType(TextField), 'c');
@@ -50,18 +60,33 @@ void main() {
   });
 
   testWidgets('empty text shows the placeholder', (tester) async {
-    await tester.pumpWidget(wrap(InlineEdit(text: '', placeholder: '添加', onCommit: (_) {})));
+    await tester.pumpWidget(
+      wrap(InlineEdit(text: '', placeholder: '添加', onCommit: (_) {})),
+    );
     expect(find.text('添加'), findsOneWidget);
   });
 
   testWidgets('is at least 48 tall', (tester) async {
     await tester.pumpWidget(wrap(InlineEdit(text: 'a', onCommit: (_) {})));
-    expect(tester.getSize(find.byType(InlineEdit)).height, greaterThanOrEqualTo(48));
+    expect(
+      tester.getSize(find.byType(InlineEdit)).height,
+      greaterThanOrEqualTo(48),
+    );
   });
 
   testWidgets('outside text change follows when not editing', (tester) async {
     await tester.pumpWidget(wrap(InlineEdit(text: 'a', onCommit: (_) {})));
     await tester.pumpWidget(wrap(InlineEdit(text: 'b', onCommit: (_) {})));
     expect(find.text('b'), findsOneWidget);
+  });
+
+  testWidgets('the editing field is at least 48 tall', (tester) async {
+    await tester.pumpWidget(wrap(InlineEdit(text: 'a', onCommit: (_) {})));
+    await tester.tap(find.text('a'));
+    await tester.pump();
+    expect(
+      tester.getSize(find.byType(TextField)).height,
+      greaterThanOrEqualTo(48),
+    );
   });
 }

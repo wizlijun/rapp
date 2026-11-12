@@ -88,7 +88,13 @@ class _InlineEditState extends State<InlineEdit> {
               style: style,
               maxLines: 1,
               textInputAction: TextInputAction.done,
-              decoration: const InputDecoration(isDense: true),
+              decoration: const InputDecoration(
+                isDense: true,
+                contentPadding: EdgeInsets.symmetric(
+                  vertical: 16,
+                  horizontal: 8,
+                ),
+              ),
               onSubmitted: (_) => _finish(commit: true),
             ),
           ),
