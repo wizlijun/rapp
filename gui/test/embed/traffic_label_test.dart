@@ -18,16 +18,33 @@ void main() {
     expect([0, 1500, 999949, 2500000].map(formatRate), ['0 KB/s', '1.5 KB/s', '999.9 KB/s', '2.5 MB/s']);
   });
 
+  var open = false;
+
   Widget anchor(RemoteSession rs, FakeSessionPort port) => SizedBox(
         width: 400,
         height: 600,
         child: Align(
           alignment: Alignment.topRight,
-          child: StreamMenuAnchor(port: port, session: rs, path: 'lan', onEnd: () {}),
+          child: StatefulBuilder(
+            builder: (context, set) => StreamMenuAnchor(
+              port: port,
+              session: rs,
+              path: 'lan',
+              status: '活动',
+              disconnected: false,
+              onDisconnect: () {},
+              onReconnect: () {},
+              onEnd: () {},
+              open: open,
+              onToggle: () => set(() => open = !open),
+              onClose: () => set(() => open = false),
+            ),
+          ),
         ),
       );
 
   testWidgets('traffic label shows the rate and opens the menu by tap and by right click', (tester) async {
+    open = false;
     final port = FakeSessionPort();
     final rs = RemoteSession(1, 'Calc')..apply(const TrafficEvent(1, 12000));
     await tester.pumpWidget(wrap(anchor(rs, port)));

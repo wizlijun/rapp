@@ -1,21 +1,40 @@
 // The single source of UI state for the main window.
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui' show Rect, Size;
+import 'dart:ui' show Size;
 
 import 'package:flutter/foundation.dart';
 
+import '../embed/geometry.dart' show PictureHole;
 import '../embed/remote_session.dart';
 import '../embed/session_port.dart';
 import '../embed/stream_choice.dart';
 import '../hub_client.dart';
 import '../permissions.dart';
 import 'lamp.dart';
+import 'lifecycle.dart';
 import 'prefs.dart';
 import 'session_model.dart';
 import 'tokens.dart';
 
+export 'lifecycle.dart' show hubWord, hubWords;
+
 enum PanelTab { sessions, devices }
+
+/// The two top-bar corners; at most one is open.
+enum Corner { stream, needs }
+
+enum NeedKind { session, device }
+
+/// One thing waiting for the person: a disconnected session ([target] its record key) or a
+/// device that dropped ([target] its id). Newer [seq] first.
+class NeedItem {
+  const NeedItem(this.kind, this.target, this.text, this.seq);
+  final NeedKind kind;
+  final String target;
+  final String text;
+  final int seq;
+}
 
 class DeviceProbe {
   DeviceProbe(this.lamp, this.word, {this.apps, this.error});
@@ -53,19 +72,73 @@ class MainState extends ChangeNotifier {
 
   /// Embedded sessions by hub sid.
   final Map<Object, RemoteSession> remote = {};
+
+  /// Embedded sessions by `id/app`, in the order they were first opened. A record outlives its
+  /// link: a disconnected one stays here, with its last frame, until the user ends it.
+  final Map<String, SessionRecord> _records = {};
+  int _seq = 0;
   // Hub closed first: waiting up to 1 s for the runner's reason.
   final Map<Object, _Waiting> _waiting = {};
-  // Sids whose end was already reported (or never started); their hub `closed` is ignored.
+  // Sids closed on the hub without ever being shown; their hub `closed` is ignored.
   final Set<Object> _quiet = {};
 
   bool get embeds => port != null;
 
-  RemoteSession? get currentRemote {
-    final sid = current?.sid;
+  SessionRecord? recordFor(String key) => _records[key];
+  SessionRecord? get currentRecord => currentKey == null ? null : _records[currentKey];
+  bool get currentDisconnected => currentRecord?.phase == Phase.disconnected;
+
+  /// The current record is reconnecting: its stage still shows the old session's last frame.
+  bool get currentReconnecting => currentRecord?.lastSid != null && !currentDisconnected;
+
+  /// What the stage shows of [r]: the last picture while it reconnects, else its own session.
+  RemoteSession? _stageRemote(SessionRecord r) {
+    final sid = r.lastSid ?? r.sid;
     return sid == null ? null : remote[sid];
   }
 
+  RemoteSession? get currentRemote {
+    final r = currentRecord;
+    return r == null ? null : _stageRemote(r);
+  }
+
+  SessionRecord? _recordOfSid(Object sid) {
+    for (final r in _records.values) {
+      if (r.sid == sid) return r;
+    }
+    return null;
+  }
+
+  SessionRecord? _recordOfLastSid(Object sid) {
+    for (final r in _records.values) {
+      if (r.lastSid == sid) return r;
+    }
+    return null;
+  }
+
+  /// Whether the runner or the hub may hear of [sid] (R12).
+  /// Fails closed: a sid no record claims, or one it only keeps for its last frame, is not heard.
+  bool _liveSid(Object sid) => _recordOfSid(sid)?.phase == Phase.live;
+
+  bool _hubHas(Object sid) => hub != null && hub!.sessions.any((s) => s.sid == sid);
+
+  /// Whether [r] is live and the hub still has its session: the only case that talks to either.
+  bool _reachable(SessionRecord r) => r.phase == Phase.live && r.sid != null && _hubHas(r.sid!);
+
+  /// Bytes per second over all live embedded sessions (R24).
+  int get totalBytesPerSecond {
+    var n = 0;
+    for (final r in _records.values) {
+      if (r.phase == Phase.live && r.sid != null) n += remote[r.sid]?.bytesPerSecond ?? 0;
+    }
+    return n;
+  }
+
+  int get disconnectedCount => _records.values.where((r) => r.phase == Phase.disconnected).length;
+
   PanelTab? panel;
+  Corner? corner;
+  String? _lastKey;
   Grouping grouping = Grouping.device;
   String? currentKey;
   String hint = '';
@@ -81,6 +154,12 @@ class MainState extends ChangeNotifier {
   @override
   void notifyListeners() {
     if (_disposed) return;
+    // The stream menu belongs to the session it was opened on.
+    if (currentKey != _lastKey) {
+      _lastKey = currentKey;
+      if (corner == Corner.stream) corner = null;
+    }
+    if (embeds) _entries = _mapEntries();
     // Focus never stays on a session that is no longer current.
     if (pictureFocused != null && current?.sid != pictureFocused) _blur();
     _syncPolicy();
@@ -95,7 +174,7 @@ class MainState extends ChangeNotifier {
 
   /// A press on [sid]'s picture: keys go to A from now on.
   void focusPicture(Object sid) {
-    if (pictureFocused == sid) return;
+    if (pictureFocused == sid || !_liveSid(sid)) return;
     pictureFocused = sid;
     port?.pictureFocus(sid);
     notifyListeners();
@@ -118,7 +197,7 @@ class MainState extends ChangeNotifier {
   RemoteSession? _syncedRs;
 
   /// The picture's rect in global coordinates; the IRON MAN grid leaves it out (R25).
-  final ValueNotifier<Rect?> pictureHole = ValueNotifier(null);
+  final PictureHole pictureHole = PictureHole();
 
   /// The stage is [s] big now. Remembered, and given to the current session's resize policy.
   void stageSize(Size s) {
@@ -165,12 +244,14 @@ class MainState extends ChangeNotifier {
     final p = port;
     if (p == null) return;
     _sentFps.removeWhere((sid, _) => !remote.containsKey(sid));
-    final onStage = currentRemote;
+    final onStage = currentRecord;
     for (final rs in remote.values) {
       final last = _sentFps[rs.sid];
       if (last == null) continue; // not started yet: its start carries the rate
+      final r = _recordOfSid(rs.sid);
+      if (r == null || !_reachable(r)) continue; // a dead sid never reaches the runner (R12)
       final c = rs.choice;
-      final fps = effectiveFps(c, onStage: identical(rs, onStage), detached: rs.detached);
+      final fps = effectiveFps(c, onStage: onStage != null && identical(r, onStage), detached: rs.detached);
       final now = (c.mode, fps, c.density);
       if (now == last) continue;
       _sentFps[rs.sid] = now;
@@ -183,14 +264,14 @@ class MainState extends ChangeNotifier {
   /// `DetachedEvent`. The same sid and hub session throughout: nothing is reopened.
   void detach() {
     final rs = currentRemote;
-    if (rs == null || rs.detached || rs.tabs.tabs.isEmpty) return;
+    if (rs == null || rs.detached || rs.tabs.tabs.isEmpty || !_liveSid(rs.sid)) return;
     port?.detach(rs.sid);
   }
 
   /// Puts the current session back on the stage.
   void attach() {
     final rs = currentRemote;
-    if (rs == null) return;
+    if (rs == null || !_liveSid(rs.sid)) return;
     port?.attach(rs.sid);
   }
 
@@ -204,7 +285,7 @@ class MainState extends ChangeNotifier {
   /// Whether [toggleDetach] does anything now (the menu greys its item otherwise).
   bool get canToggleDetach {
     final rs = currentRemote;
-    return port?.supportsDetach == true && rs != null && (rs.detached || rs.tabs.tabs.isNotEmpty);
+    return port?.supportsDetach == true && rs != null && _liveSid(rs.sid) && (rs.detached || rs.tabs.tabs.isNotEmpty);
   }
 
   // ---- hub state ----
@@ -226,6 +307,62 @@ class MainState extends ChangeNotifier {
     if (panel == null) return;
     panel = null;
     notifyListeners();
+  }
+
+  // ---- corners and needs ----
+  void toggleCorner(Corner c) {
+    corner = corner == c ? null : c;
+    notifyListeners();
+  }
+
+  void closeCorner() {
+    if (corner == null) return;
+    corner = null;
+    notifyListeners();
+  }
+
+  /// Devices that were seen online; only these count as dropped when they go offline.
+  final Set<String> _seenOnline = {};
+
+  /// Dropped devices and when (`_seq`) they dropped. A manual probe never touches it (R16).
+  final Map<String, int> _offlineSince = {};
+
+  /// Everything waiting for the person, newest first. Handled things leave on their own.
+  List<NeedItem> get needs {
+    final out = <NeedItem>[
+      for (final r in _records.values)
+        if (r.phase == Phase.disconnected)
+          NeedItem(NeedKind.session, r.key, '${r.appName} @ ${deviceName(r.id)} 已断开：${disconnectWord(r.reason)}', r.seq),
+      for (final h in hub?.hosts ?? const <HubHost>[])
+        if (_seenOnline.contains(h.id) && _offlineSince.containsKey(h.id))
+          NeedItem(NeedKind.device, h.id, '${deviceName(h.id)} 离线', _offlineSince[h.id]!),
+    ];
+    out.sort((a, b) => b.seq.compareTo(a.seq));
+    return out;
+  }
+
+  int get needCount => needs.length;
+
+  /// The result of a probe or a presence event, for the lamp and the needs.
+  void _setOnline(String id, bool online, {AppList? apps, String? error}) {
+    final old = probes[id];
+    if (online) {
+      _seenOnline.add(id);
+      _offlineSince.remove(id);
+      probes[id] = DeviceProbe(Lamp.active, '在线', apps: apps ?? old?.apps);
+    } else {
+      _offlineSince.putIfAbsent(id, () => ++_seq);
+      probes[id] = DeviceProbe(Lamp.offline, '离线', apps: apps ?? old?.apps, error: error ?? old?.error);
+    }
+  }
+
+  /// 「查看」 on a dropped device: the device panel on it, with a fresh probe.
+  void showDevice(String id) {
+    panel = PanelTab.devices;
+    deviceTab = id;
+    corner = null;
+    notifyListeners();
+    probe(id);
   }
 
   // ---- sessions ----
@@ -269,7 +406,24 @@ class MainState extends ChangeNotifier {
     return _appNames['$id/$app'] ?? app;
   }
 
+  SessionEntry _entryOf(SessionRecord r) {
+    final sid = r.sid;
+    final rs = sid == null ? null : remote[sid];
+    return SessionEntry(
+      sid: sid,
+      id: r.id,
+      app: r.app,
+      appName: r.appName,
+      device: deviceName(r.id),
+      path: r.path,
+      lamp: recordLamp(r, rs),
+      bytesPerSecond: r.phase == Phase.live ? rs?.bytesPerSecond : null,
+      reason: r.phase == Phase.disconnected ? disconnectWord(r.reason) : null,
+    );
+  }
+
   List<SessionEntry> _mapEntries() {
+    if (embeds) return [for (final r in _records.values) _entryOf(r)];
     final h = hub;
     final out = <SessionEntry>[];
     final seen = <String>{};
@@ -295,6 +449,14 @@ class MainState extends ChangeNotifier {
   }
 
   void _onHub() {
+    for (final p in hub!.takePresence()) {
+      if (probes[p.id]?.lamp == Lamp.connecting) continue;
+      _setOnline(p.id, p.online);
+    }
+    if (embeds) {
+      _onHubEmbedded();
+      return;
+    }
     final old = _entries;
     final oldGroups = groups;
     _entries = _mapEntries();
@@ -310,31 +472,9 @@ class MainState extends ChangeNotifier {
         }
         final hubReason = h.closeReasons.remove(e.sid);
         if (_quiet.remove(e.sid)) continue;
-        final rs = remote[e.sid];
-        if (rs != null) {
-          // Embedded: the runner's reason wins; wait for it, at most 1 s.
-          final sid = e.sid!;
-          final name = e.appName;
-          _waiting[sid] = _Waiting(name, Timer(const Duration(seconds: 1), () {
-            _waiting.remove(sid);
-            remote.remove(sid)?.dispose();
-            port?.close(sid);
-            hint = endedHint(name, hubReason);
-            notifyListeners();
-          }));
-          continue;
-        }
         hint = endedHint(e.appName, hubReason);
       }
-      // Runner-first sessions: the hub's `closed` is now in, forget them.
-      for (final sid in remote.keys.toList()) {
-        if (remote[sid]!.endReason != null && !h.sessions.any((s) => s.sid == sid)) {
-          h.closeReasons.remove(sid);
-          remote.remove(sid)?.dispose();
-        }
-      }
-    } else {
-      for (final sid in remote.keys.toList()) { port?.close(sid); }
+    } else if (currentKey != null && !newKeys.contains(currentKey)) {
       currentKey = null;
     }
 
@@ -345,45 +485,224 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// The hub's session list changed: a live record whose sid is gone waits up to 1 s for the
+  /// runner's `DisconnectedEvent` (its reason is better), then disconnects with the hub's own.
+  void _onHubEmbedded() {
+    final h = hub!;
+    for (final r in _records.values.toList()) {
+      final sid = r.sid;
+      if (r.phase != Phase.live || sid == null || _hubHas(sid) || _waiting.containsKey(sid)) continue;
+      final hubReason = h.closeReasons.remove(sid);
+      _waiting[sid] = _Waiting(r.appName, Timer(const Duration(seconds: 1), () {
+        _waiting.remove(sid);
+        if (r.sid != sid || r.phase != Phase.live) return;
+        _disconnect(r, hubReason ?? 'rapp-hub exited');
+        notifyListeners();
+      }));
+    }
+    // A sid nobody shows any more (ended, or closed quietly): its `closed` is not news.
+    for (final sid in h.closeReasons.keys.toList()) {
+      if (_recordOfSid(sid) == null) h.closeReasons.remove(sid);
+    }
+    _quiet.removeWhere((sid) => !_hubHas(sid));
+    if (h.lastError != _lastError) {
+      _lastError = h.lastError;
+      if (_lastError != null) hint = hubWord(_lastError!);
+    }
+    notifyListeners();
+  }
+
   void _onPortEvent(SessionEvent e) {
     final rs = remote[e.sid];
-    if (rs == null || rs.endReason != null) return;
-    if (e is! ClosedEvent) {
-      rs.apply(e);
-      if (e is DetachedEvent) {
-        // The hub logs one line per move (R10); keys typed on the stage no longer go to it.
-        hub?.note(e.sid, e.detached ? 'detach' : 'attach', rs.tabs.tabs.length);
-        if (e.detached && pictureFocused == e.sid) _blur();
+    if (rs == null) return;
+    final r = _recordOfSid(e.sid);
+    if (r == null) {
+      // The old sid of a reconnect: only its end matters, and only to forget it.
+      final holder = e is ClosedEvent ? _recordOfLastSid(e.sid) : null;
+      if (holder != null) {
+        holder.lastSid = null; // the runner closed it itself: nothing left to close or restore
+        remote.remove(e.sid)?.dispose();
+        notifyListeners();
       }
-      notifyListeners();
       return;
     }
-    final w = _waiting.remove(e.sid);
-    if (w != null) {
-      // The hub already removed the entry; this is the reason it was waiting for.
-      w.timer.cancel();
-      remote.remove(e.sid)?.dispose();
-      hint = endedHint(w.appName, e.reason);
+    if (e is ClosedEvent) {
+      if (r.phase == Phase.disconnected) return; // ended by us already, or by nobody's business
+      _waiting.remove(e.sid)?.timer.cancel();
+      final name = r.appName;
+      _endRecord(r);
+      hint = endedHint(name, e.reason);
       notifyListeners();
       return;
     }
     rs.apply(e);
-    final oldGroups = groups;
-    final name = rs.appName;
-    final old = current;
-    _entries = _mapEntries();
-    final newKeys = {for (final x in _entries) x.key};
-    if (old != null && old.sid == e.sid && old.key == currentKey) {
-      final next = stepKey(oldGroups, old.key, 1);
-      currentKey = (next != null && next != old.key && newKeys.contains(next)) ? next : null;
+    if (e is DisconnectedEvent && r.phase != Phase.disconnected) {
+      _disconnect(r, e.reason);
+    } else if (e is DetachedEvent) {
+      // The hub logs one line per move (R10); keys typed on the stage no longer go to it.
+      if (_reachable(r)) hub!.note(e.sid, e.detached ? 'detach' : 'attach', rs.tabs.tabs.length);
+      if (e.detached && pictureFocused == e.sid) _blur();
+    } else if (e is WindowsEvent) {
+      _swapIfReady(r);
     }
-    hint = endedHint(name, e.reason);
+    notifyListeners();
+  }
+
+  /// The link of [r] ended with [raw] (the runner's or the hub's words): the record stays, with its
+  /// last frame, until the user reconnects or ends it. Callers notify.
+  void _disconnect(SessionRecord r, String raw, {bool hint = false, String? hintText}) {
+    if (r.lastSid != null) {
+      // A reconnect that never reached the stage: its new sid goes, the old picture stays.
+      final fresh = r.sid;
+      if (fresh != null) {
+        remote.remove(fresh)?.dispose();
+        _sentFps.remove(fresh);
+        _waiting.remove(fresh)?.timer.cancel();
+        port?.close(fresh);
+      }
+      r.sid = r.lastSid;
+      r.lastSid = null;
+    }
+    final sid = r.sid;
+    final rs = sid == null ? null : remote[sid];
+    r.phase = Phase.disconnected;
+    r.reason = r.userDisconnect ? 'user' : raw;
+    r.seq = ++_seq;
+    if (rs != null) {
+      r.choice = rs.choice;
+      r.window = rs.currentWindow;
+      rs.bytesPerSecond = 0;
+      rs.linkDown(); // the runner may have said nothing (hub-first): same cleanup as its word
+    }
+    if (sid != null) {
+      _sentFps.remove(sid);
+      _waiting.remove(sid)?.timer.cancel();
+      if (pictureFocused == sid) _blur();
+    }
+    if (hint) this.hint = hintText ?? '${r.appName} 已断开：${disconnectWord(r.reason)}';
+  }
+
+  /// Takes [r] off the list and steps to the next session if it was current. Callers set the hint.
+  void _endRecord(SessionRecord r) {
+    final oldGroups = groups;
+    final old = r.lastSid;
+    if (old != null) port?.close(old); // reconnected but not swapped yet: the old session is still open
+    for (final sid in [r.sid, old]) {
+      if (sid == null) continue;
+      remote.remove(sid)?.dispose();
+      _sentFps.remove(sid);
+      _waiting.remove(sid)?.timer.cancel();
+    }
+    _records.remove(r.key);
+    _entries = _mapEntries();
+    if (currentKey == r.key) {
+      final next = stepKey(oldGroups, r.key, 1);
+      currentKey = (next != null && next != r.key && _records.containsKey(next)) ? next : null;
+    }
+  }
+
+  /// A reconnect's first window with a picture: the new session takes the stage, the old one goes.
+  void _swapIfReady(SessionRecord r) {
+    final old = r.lastSid;
+    final fresh = r.sid;
+    if (old == null || fresh == null) return;
+    final rs = remote[fresh];
+    if (rs == null || !rs.windows.any((w) => w.hasPicture)) return;
+    port?.close(old);
+    remote.remove(old)?.dispose();
+    r.lastSid = null;
+  }
+
+  /// Opens (or reopens, [reconnect]) the hub session of [r] and starts the runner on it.
+  Future<void> _connect(SessionRecord r, {bool reconnect = false}) async {
+    final HubSession s;
+    try {
+      s = await hub!.open(r.id, r.app, embed: true, reconnect: reconnect);
+    } catch (e) {
+      if (r.ending) return;
+      final missing = missingFromError('$e');
+      _disconnect(r, '$e', hint: true, hintText: missing == null ? null : remoteHint(deviceName(r.id), missing));
+      notifyListeners();
+      return;
+    }
+    if (r.ending) {
+      // Ended while it was connecting (R14): the session that just opened is not wanted.
+      _quiet.add(s.sid);
+      hub!.close(s.sid);
+      return;
+    }
+    r.sid = s.sid;
+    r.path = s.path;
+    final rs = RemoteSession(s.sid, r.appName, onResize: (w, a, b) {
+          if (_liveSid(s.sid)) port!.resize(s.sid, w, a, b);
+        },
+        onSelect: (w) {
+          if (_liveSid(s.sid)) port!.selectWindow(s.sid, w);
+        },
+        onStream: (_) => _applyFps(),
+        onDropBlock: (n) => port!.composerDropBlock(s.sid, n));
+    rs.choice = r.choice;
+    rs.preferWindow(r.window);
+    remote[s.sid] = rs;
+    r.phase = Phase.live;
+    final c = r.choice;
+    try {
+      final p = s.port, tk = s.token;
+      if (p == null || tk == null) throw 'rapp-hub 没有给出嵌入端口';
+      await port!.start(StartArgs(s.sid, p, tk, c.mode, c.fps, c.density));
+    } catch (e) {
+      if (r.sid != s.sid) return; // it was dropped while starting: that already settled the record
+      remote.remove(s.sid)?.dispose();
+      _quiet.add(s.sid);
+      hub!.close(s.sid);
+      r.sid = null;
+      if (r.ending || _records[r.key] != r) {
+        // Ended while starting (M-6): the record goes, it never comes back as disconnected.
+        if (_records[r.key] == r) _endRecord(r);
+        notifyListeners();
+        return;
+      }
+      _disconnect(r, '$e', hint: true);
+      notifyListeners();
+      return;
+    }
+    if (r.sid != s.sid || r.phase != Phase.live || r.ending) return;
+    _sentFps[s.sid] = (c.mode, c.fps, c.density);
+    if (!reconnect) hint = '已打开 ${r.appName} @ ${deviceName(r.id)}';
+    notifyListeners();
+  }
+
+  /// Opens the disconnected session [key] again, in the same place with the same choices.
+  Future<void> reconnect(String key) async {
+    final r = _records[key];
+    if (r == null || r.phase != Phase.disconnected || !hubUsable) return;
+    r.lastSid = r.sid;
+    r.sid = null;
+    r.phase = Phase.connecting;
+    r.userDisconnect = false;
+    r.reason = null;
+    notifyListeners();
+    await _connect(r, reconnect: true);
+  }
+
+  void reconnectCurrent() {
+    final r = currentRecord;
+    if (r != null) reconnect(r.key);
+  }
+
+  /// 「断开连接」: closes the link, keeps the session in the list.
+  void disconnectCurrent() {
+    final r = currentRecord;
+    if (r == null || !_reachable(r)) return;
+    r.userDisconnect = true;
+    hub!.close(r.sid!, reason: 'user');
     notifyListeners();
   }
 
   Future<void> openOrSwitch(String id, String app, String appName) async {
     if (!hubUsable) return;
     final key = '$id/$app';
+    if (embeds) return _openEmbedded(id, app, appName);
     for (final e in _entries) {
       if (e.key == key && e.sid != null) {
         final rs = remote[e.sid];
@@ -416,21 +735,7 @@ class MainState extends ChangeNotifier {
     panel = null;
     notifyListeners();
     try {
-      final opened = await hub!.open(id, app, embed: embeds);
-      if (embeds) {
-        final err = await _startEmbedded(opened, appName);
-        if (err != null) {
-          _pending.remove(key);
-          hint = err;
-          if (currentKey == key) {
-            _entries = _mapEntries();
-            currentKey = _entries.any((e) => e.key == before) ? before : null;
-          }
-          _entries = _mapEntries();
-          notifyListeners();
-          return;
-        }
-      }
+      await hub!.open(id, app);
       _pending.remove(key);
       hint = '已打开 $appName @ ${deviceName(id)}';
     } catch (e) {
@@ -447,43 +752,46 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Starts the runner session for an opened embedded hub session; the error hint on failure.
-  Future<String?> _startEmbedded(HubSession s, String appName) async {
-    final rs = RemoteSession(s.sid, appName, onResize: (w, a, b) => port!.resize(s.sid, w, a, b),
-        onSelect: (w) => port!.selectWindow(s.sid, w),
-        onStream: (_) => _applyFps(),
-        onDropBlock: (n) => port!.composerDropBlock(s.sid, n));
-    remote[s.sid] = rs;
-    try {
-      final p = s.port, tk = s.token;
-      if (p == null || tk == null) throw 'rapp-hub 没有给出嵌入端口';
-      await port!.start(StartArgs(s.sid, p, tk, 'color16', 15, 'adaptive'));
-      _sentFps[s.sid] = ('color16', 15, 'adaptive');
-      _applyFps();
-      return null;
-    } catch (e) {
-      remote.remove(s.sid)?.dispose();
-      _quiet.add(s.sid);
-      hub!.close(s.sid);
-      return hubWord('$e');
+  Future<void> _openEmbedded(String id, String app, String appName) async {
+    final key = '$id/$app';
+    _appNames[key] = appName;
+    final r = _records[key];
+    currentKey = key;
+    panel = null;
+    if (r == null) {
+      final fresh = SessionRecord(id, app, appName, '');
+      _records[key] = fresh;
+      notifyListeners();
+      await _connect(fresh);
+    } else if (r.phase == Phase.disconnected) {
+      await reconnect(key);
+    } else {
+      final rs = _stageRemote(r);
+      if (rs != null && rs.detached) port!.raiseDetached(rs.sid);
+      hint = '已切到 $appName';
+      notifyListeners();
     }
   }
 
   /// 「切到窗口」: raises the session's own windows (a detached embedded session's, or S1's client).
   void focusCurrent() {
-    final c = current;
-    if (c?.sid == null) return;
-    final rs = remote[c!.sid];
-    if (rs != null) {
+    if (embeds) {
       // The runner's own windows: raised with or without the hub.
-      if (rs.detached) port?.raiseDetached(c.sid!);
+      final rs = currentRemote;
+      if (rs != null && rs.detached && !currentDisconnected) port!.raiseDetached(rs.sid);
       return;
     }
+    final c = current;
+    if (c?.sid == null) return;
     if (!hubUsable) return;
-    hub!.focus(c.sid!);
+    hub!.focus(c!.sid!);
   }
 
   void endCurrent() {
+    if (embeds) {
+      _endCurrentEmbedded();
+      return;
+    }
     if (!hubUsable) return;
     final c = current;
     if (c?.sid == null) return;
@@ -493,6 +801,32 @@ class MainState extends ChangeNotifier {
       hub!.close(c.sid!);
     }
     hint = '正在结束 ${c.appName}';
+    notifyListeners();
+  }
+
+  void _endCurrentEmbedded() {
+    final r = currentRecord;
+    if (r == null) return;
+    switch (r.phase) {
+      case Phase.live:
+        // The runner closes the session and answers with `ClosedEvent`; a start still in flight
+        // that then fails ends the record instead of disconnecting it (M-6).
+        r.ending = true;
+        port!.close(r.sid!);
+        hint = '正在结束 ${r.appName}';
+      case Phase.disconnected:
+        // Nothing is running on the link; its last picture goes with the record.
+        final sid = r.sid;
+        if (sid != null) port!.close(sid);
+        _endRecord(r);
+        hint = '已结束 ${r.appName}';
+      case Phase.connecting:
+        // Connecting (first open or reconnect): the record and any old picture go now; the new
+        // session is closed quietly when it opens, and a failed open is not news (R14).
+        r.ending = true;
+        _endRecord(r);
+        hint = '已结束 ${r.appName}';
+    }
     notifyListeners();
   }
 
@@ -507,9 +841,9 @@ class MainState extends ChangeNotifier {
       for (final a in apps.apps) {
         _appNames['$id/${a.app}'] = a.name;
       }
-      probes[id] = DeviceProbe(Lamp.active, '在线', apps: apps);
+      _setOnline(id, true, apps: apps);
     } catch (e) {
-      probes[id] = DeviceProbe(Lamp.offline, '离线', apps: probes[id]?.apps, error: '$e');
+      _setOnline(id, false, error: '$e');
     }
     _entries = _mapEntries();
     notifyListeners();
@@ -545,6 +879,8 @@ class MainState extends ChangeNotifier {
     try {
       await hub!.removeHost(id);
       probes.remove(id);
+      _seenOnline.remove(id);
+      _offlineSince.remove(id);
       if (deviceTab == id) deviceTab = null;
     } catch (e) {
       hint = hubWord('$e');
@@ -596,14 +932,6 @@ class _Waiting {
   final String appName;
   final Timer timer;
 }
-
-/// Hub messages the user can meet in the hint, in plain words.
-const hubWords = {
-  'rapp-hub exited': 'rapp-hub 已退出',
-  'unknown sid': '这个会话已经结束了',
-};
-
-String hubWord(String message) => hubWords[message] ?? message;
 
 /// "stdin closed" (ended from rapp) and "quit" (its window was closed) are
 /// the user's own doing; any other client exit reason is unexpected.

@@ -191,6 +191,28 @@ void main() {
     expect(fs.on, isFalse);
   });
 
+  testWidgets('escape closes the corner, then the panel, then fullscreen', (tester) async {
+    await pump(tester);
+    await tester.tap(find.byKey(const Key('fullscreen-button')));
+    await settle(tester);
+    s.togglePanel();
+    s.toggleCorner(Corner.needs);
+    await tester.pump();
+    expect(find.byKey(const Key('needs-scrim')), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settle(tester);
+    expect(s.corner, isNull);
+    expect(s.panel, isNotNull);
+    expect(fs.on, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settle(tester);
+    expect(s.panel, isNull);
+    expect(fs.on, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settle(tester);
+    expect(fs.on, isFalse);
+  });
+
   testWidgets('tapping the scrim closes the panel', (tester) async {
     await pump(tester);
     s.togglePanel();

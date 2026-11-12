@@ -74,7 +74,9 @@ class _MainWindowState extends State<MainWindow> {
   void _toggleFull() => _setFull(!_full);
 
   void _esc() {
-    if (state.panel != null) {
+    if (state.corner != null) {
+      state.closeCorner();
+    } else if (state.panel != null) {
       state.closePanel();
     } else if (_full) {
       _setFull(false);

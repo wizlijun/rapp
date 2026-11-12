@@ -28,7 +28,7 @@ class Picture extends StatefulWidget {
   final RemoteWindow window;
 
   /// Receives the texture's global rect (R25), so the IRON MAN grid can leave it alone.
-  final ValueNotifier<Rect?>? hole;
+  final PictureHole? hole;
 
   @override
   State<Picture> createState() => _PictureState();
@@ -46,7 +46,6 @@ class _Target {
 class _PictureState extends State<Picture> {
   final _tex = GlobalKey();
   final _focus = FocusNode();
-  Rect? _mine;
   late final _clicks = ClickCounter(widget.state.doubleClick);
 
   /// From the last layout: the window content's rect on the stage, and the texture's part of it.
@@ -147,19 +146,16 @@ class _PictureState extends State<Picture> {
     final box = _tex.currentContext?.findRenderObject();
     if (box is! RenderBox || !box.attached || !box.hasSize) return;
     final r = box.localToGlobal(Offset.zero) & box.size;
-    if (r == _mine && h.value == r) return;
-    _mine = r;
-    h.value = r;
+    if (h.owns(this, r)) return;
+    h.claim(this, r);
   }
 
   @override
   void dispose() {
-    final h = widget.hole, mine = _mine;
-    if (h != null && mine != null) {
-      // Not while the tree is being torn down; and not over a newer picture's rect.
-      SchedulerBinding.instance.addPostFrameCallback((_) {
-        if (h.value == mine) h.value = null;
-      });
+    final h = widget.hole;
+    if (h != null) {
+      // Not while the tree is being torn down; and only what this picture itself reported.
+      SchedulerBinding.instance.addPostFrameCallback((_) => h.release(this));
     }
     _focus.dispose();
     super.dispose();
@@ -222,7 +218,7 @@ class _PictureState extends State<Picture> {
                 children: [
                   Positioned.fromRect(
                     rect: pic,
-                    child: _surface(win, key: _tex),
+                    child: windowSurface(win, key: _tex),
                   ),
                   if (focused)
                     // 1px outside the picture, kept on the stage when the picture fills it.
@@ -239,7 +235,7 @@ class _PictureState extends State<Picture> {
                     ),
                   // Behind first, so the first of the table ends up on top.
                   for (final p in _popups.reversed)
-                    Positioned.fromRect(rect: p.pic, child: _surface(p.win)),
+                    Positioned.fromRect(rect: p.pic, child: windowSurface(p.win)),
                 ],
               ),
             ),
@@ -250,7 +246,8 @@ class _PictureState extends State<Picture> {
   }
 }
 
-Widget _surface(RemoteWindow window, {Key? key}) {
+/// Shared live/retained surface for native textures and Linux image frames.
+Widget windowSurface(RemoteWindow window, {Key? key}) {
   final frames = window.frames;
   if (frames != null) {
     return RepaintBoundary(key: key, child: ValueListenableBuilder<WindowFrame?>(

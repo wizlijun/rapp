@@ -453,11 +453,7 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
                         let _ = ev.send(Event::End(0, "quit".into()));
                         return;
                     }
-                    Some("focus") => {
-                        if ev.send(Event::Focus).is_err() {
-                            return;
-                        }
-                    }
+                    Some("focus") if ev.send(Event::Focus).is_err() => return,
                     _ => (),
                 }
             }

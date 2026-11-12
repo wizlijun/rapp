@@ -229,6 +229,15 @@ pub struct Hub {
 impl Hub {
     /// Starts a hub whose config dir holds a service.json pointing at `relay`.
     pub fn start(home: &Path, bins: &Path, relay: Option<SocketAddr>, force: Option<&str>) -> Hub {
+        Hub::start_with(home, bins, relay, force, None)
+    }
+
+    /// Like `start`, with the presence probe running every `every`.
+    pub fn start_with_presence(home: &Path, bins: &Path, relay: Option<SocketAddr>, every: Duration) -> Hub {
+        Hub::start_with(home, bins, relay, None, Some(every))
+    }
+
+    fn start_with(home: &Path, bins: &Path, relay: Option<SocketAddr>, force: Option<&str>, every: Option<Duration>) -> Hub {
         if !home.join("service.json").exists() {
             service_json(home, relay);
         }
@@ -239,6 +248,7 @@ impl Hub {
             bin_dir: Some(bins.to_path_buf()),
             force_path: force.map(str::to_string),
             log: rapp_net::log::Log::file(&home.join("logs"), "hub.log"),
+            presence_every: every,
         };
         let task = tokio::spawn(rapp_hub::run(opts, cmd_r, out_w));
         Hub { w: cmd_w, lines: BufReader::new(out_r).lines(), task, home: home.to_path_buf() }

@@ -65,8 +65,9 @@ final class EmbeddedSessionTests: XCTestCase {
         bad.data = Array(good.data.prefix(good.data.count / 2))
         q1.sync { link1.feed(.windows([w])); link1.feed(.frame(region: region, bad)) }
         q2.sync { link2.feed(.windows([w])); link2.feed(.frame(region: region, good)) }
-        guard case let .closed(reason)? = events1.last else { return XCTFail("expected closed, got \(events1)") }
+        guard case let .disconnected(reason)? = events1.last else { return XCTFail("expected disconnected, got \(events1)") }
         XCTAssertTrue(reason.hasPrefix("cannot decode frame: "))
+        XCTAssertFalse(events1.contains { if case .closed = $0 { return true } else { return false } })
         XCTAssertTrue(link1.cancelled)
         XCTAssertEqual(events2.last, .surfaces([7]))
         XCTAssertNotNil(s2.surfaces.latest(7))
@@ -91,7 +92,7 @@ final class EmbeddedSessionTests: XCTestCase {
         odd.isFull = false
         odd.width = 128; odd.height = 64
         q.sync { link.feed(.frame(region: region, odd)) }
-        guard case let .closed(reason)? = events.last else { return XCTFail("expected closed, got \(events)") }
+        guard case let .disconnected(reason)? = events.last else { return XCTFail("expected disconnected, got \(events)") }
         XCTAssertTrue(reason.hasPrefix("cannot decode frame: "))
         XCTAssertTrue(link.cancelled)
     }
@@ -109,12 +110,14 @@ final class EmbeddedSessionTests: XCTestCase {
         XCTAssertNil(s.surfaces.latest(7))
     }
 
-    func testHostErrorClosesWithReason() {
+    func testHostErrorClosesWithReason() throws {
         let link = FakeLink()
         var events = [SessionEvent]()
-        let (_, q) = make(link) { events.append($0) }
-        q.sync { link.feed(.error("Calculator quit")) }
-        XCTAssertEqual(events.last, .closed(reason: "host says: Calculator quit"))
+        let (s, q) = make(link) { events.append($0) }
+        let frame = try goodFrame()
+        q.sync { link.feed(.windows([w])); link.feed(.frame(region: region, frame)); link.feed(.error("Calculator quit")) }
+        XCTAssertEqual(events.last, .disconnected(reason: "host says: Calculator quit"))
+        XCTAssertNotNil(s.surfaces.latest(7))
     }
 
     func testMenuPickAndMoveToTopLeftSendMessages() {
@@ -185,7 +188,70 @@ final class EmbeddedSessionTests: XCTestCase {
         q.sync { link.onBytes?(1500); link.onBytes?(500) }
         s.tickTraffic(); s.tickTraffic()
         q.sync {}
-        XCTAssertEqual(events, [.traffic(bytesPerSecond: 2000), .traffic(bytesPerSecond: 0)])
+        XCTAssertEqual(events, [.traffic(bytesPerSecond: 2000, frames: 0), .traffic(bytesPerSecond: 0, frames: 0)])
+    }
+
+    private func closedCount(_ events: [SessionEvent]) -> Int {
+        events.filter { if case .closed = $0 { return true } else { return false } }.count
+    }
+
+    func testLinkDropDisconnectsAndKeepsLastFrame() throws {
+        let link = FakeLink()
+        var events = [SessionEvent]()
+        let (s, q) = make(link) { events.append($0) }
+        let frame = try goodFrame()
+        q.sync { link.feed(.windows([w])); link.feed(.frame(region: region, frame)) }
+        q.sync { link.drop("the host closed the connection") }
+        XCTAssertEqual(events.filter { if case .disconnected = $0 { return true } else { return false } },
+                       [.disconnected(reason: "the host closed the connection")])
+        XCTAssertEqual(events.last, .disconnected(reason: "the host closed the connection"))
+        XCTAssertEqual(closedCount(events), 0)
+        XCTAssertNotNil(s.surfaces.latest(7))
+        s.close()
+        q.sync {}
+        XCTAssertEqual(events.last, .closed(reason: "quit"))
+        XCTAssertEqual(closedCount(events), 1)
+        XCTAssertNil(s.surfaces.latest(7))
+        let n = events.count
+        s.close()
+        q.sync {}
+        XCTAssertEqual(events.count, n)
+    }
+
+    func testTrafficCountsFrames() throws {
+        let link = FakeLink()
+        var events = [SessionEvent]()
+        let (s, q) = make(link) { events.append($0) }
+        let frame = try goodFrame()
+        q.sync {
+            link.feed(.windows([w]))
+            for _ in 0..<3 { link.feed(.frame(region: region, frame)) }
+            link.onBytes?(100)
+        }
+        s.tickTraffic(); s.tickTraffic()
+        q.sync {}
+        XCTAssertEqual(events.suffix(2), [.traffic(bytesPerSecond: 100, frames: 3), .traffic(bytesPerSecond: 0, frames: 0)])
+    }
+
+    func testNoTrafficAfterDisconnect() {
+        let link = FakeLink()
+        var events = [SessionEvent]()
+        let (s, q) = make(link) { events.append($0) }
+        q.sync { link.drop("gone") }
+        s.tickTraffic()
+        q.sync {}
+        XCTAssertEqual(events, [.disconnected(reason: "gone")])
+    }
+
+    func testSideBytesCountAsTraffic() {
+        let link = FakeLink()
+        var events = [SessionEvent]()
+        let (s, q) = make(link) { events.append($0) }
+        s.transfers.onBytes?(4096)  // main thread, as the transfer queue calls it
+        q.sync {}
+        s.tickTraffic()
+        q.sync {}
+        XCTAssertEqual(events, [.traffic(bytesPerSecond: 4096, frames: 0)])
     }
 
     func testClipsAndMenuEvents() {

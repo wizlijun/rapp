@@ -130,7 +130,8 @@ final class InputInjector {
         usleep(50_000)
         let top = topOwner(at: point)
         if top.pid == app.processIdentifier { return true }
-        log("click dropped: covered by \(top.name)")
+        log(screenLocked(CGSessionCopyCurrentDictionary() as? [String: Any])
+            ? "click dropped: A is locked" : "click dropped: covered by \(top.name)")
         return false
     }
 

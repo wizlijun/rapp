@@ -159,10 +159,20 @@ class WindowsEvent extends SessionEvent {
 }
 
 class TrafficEvent extends SessionEvent {
-  const TrafficEvent(super.sid, this.bytes);
+  const TrafficEvent(super.sid, this.bytes, [this.frames = 0]);
 
   /// Bytes received in the last second.
   final int bytes;
+
+  /// Picture frames received in the last second.
+  final int frames;
+}
+
+class DisconnectedEvent extends SessionEvent {
+  const DisconnectedEvent(super.sid, this.reason);
+
+  /// The raw reason the link ended; `''` if none was given.
+  final String reason;
 }
 
 class ClipsEvent extends SessionEvent {
@@ -282,7 +292,9 @@ SessionEvent? parseSessionEvent(String method, Object? args) {
       case 'windows':
         return WindowsEvent(sid, _list(m['windows']).map(_window).toList());
       case 'traffic':
-        return TrafficEvent(sid, _as<int>(m['bytes']));
+        return TrafficEvent(sid, _as<int>(m['bytes']), _as<int?>(m['frames']) ?? 0);
+      case 'disconnected':
+        return DisconnectedEvent(sid, _as<String?>(m['reason']) ?? '');
       case 'clipboard':
         return ClipsEvent(sid, _list(m['clips']).map((c) {
           final cm = _map(c);

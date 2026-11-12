@@ -132,6 +132,20 @@ void main() {
     });
 
     testWidgets('focusing the field takes focus from the picture', (tester) async {
+      await tester.runAsync(() async {
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            t.emit({
+              'event': 'opened', 'sid': 1, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+              'port': 5001, 'token': 'tk', 'req': m['req'],
+            });
+          }
+        };
+        es.openOrSwitch('111', 'Safari', 'Safari');
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
       await tester.pumpWidget(wrap(bar()));
       es.focusPicture(1);
       await tester.tap(find.byType(TextField));

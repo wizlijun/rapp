@@ -5,12 +5,15 @@ import 'package:flutter/services.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/picture.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/service_client.dart';
 import 'package:rapp/ui/fullscreen.dart';
 import 'package:rapp/ui/main_window.dart';
 import 'package:rapp/ui/backdrop.dart';
+import 'package:rapp/ui/controls.dart';
+import 'package:rapp/ui/disconnected_stage.dart';
 import 'package:rapp/ui/lamp.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
@@ -243,6 +246,31 @@ void main() {
       expect(keyboard.keys.map((e) => e.logicalKey), containsAll([LogicalKeyboardKey.escape, LogicalKeyboardKey.keyA]));
       expect(es.pictureFocused, 1);
       expect(port.calls.where((c) => c.$1 == 'mouse').length, 2);
+      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      await tester.pump();
+      await tester.pump();
+      expect(find.byType(DisconnectedStage), findsOneWidget);
+      expect(es.pictureHole.value, isNotNull, reason: 'Linux last-frame surface remains visible');
+      expect(es.pictureFocused, isNull);
+      await tester.runAsync(() async {
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            t.emit({'event': 'opened', 'sid': 11, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+              'port': 5011, 'token': 'tk', 'req': m['req']});
+          }
+        };
+        await tester.tap(find.byKey(const Key('reconnect-button')));
+        for (var i = 0; i < 4; i++) { await flush(); }
+      });
+      await tester.pump();
+      expect(es.currentRecord!.lastSid, 1);
+      port.emit(const ReadyEvent(11, 'Fixture'));
+      port.emit(WindowsEvent(11, es.remote[1]!.windows));
+      await tester.pump();
+      expect(es.currentRecord!.lastSid, isNull);
+      expect(find.byType(DisconnectedStage), findsNothing);
+      expect(find.byType(Picture), findsOneWidget);
+      expect(port.calls.where((c) => c.$1 == 'close' && c.$2['sid'] == 1).length, 1);
       await tester.pumpWidget(const SizedBox());
       image!.dispose();
     });
@@ -318,6 +346,254 @@ void main() {
       await tester.pump();
       expect(find.byType(Texture), findsOneWidget);
       expect(find.text('放回主窗口'), findsNothing);
+    });
+
+    Future<void> shown(WidgetTester tester) async {
+      await tester.pumpWidget(wrap(embedded()));
+      await openEmbedded(tester);
+      port.emit(const ReadyEvent(1, 'Safari'));
+      port.emit(WindowsEvent(1, [rw(5, 400, 328)]));
+      port.emit(const TrafficEvent(1, 100, 1));
+      await tester.pump();
+    }
+
+    final tex42 = find.byWidgetPredicate((w) => w is Texture && w.textureId == 42);
+
+    testWidgets('disconnected shows the last frame, stripes and reconnect', (tester) async {
+      await shown(tester);
+      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      await tester.pump();
+      expect(tex42, findsOneWidget);
+      expect(find.byKey(const Key('reconnect-button')), findsOneWidget);
+      expect(tester.widget<Text>(find.byKey(const Key('disconnect-reason'))).data, '网络断了');
+      await tester.runAsync(() async {
+        await tester.tap(find.byKey(const Key('reconnect-button')));
+        await flush();
+      });
+      await tester.pump();
+      expect(t.sent.last['reconnect'], true);
+    });
+
+    testWidgets('disconnected picture takes no input', (tester) async {
+      await shown(tester);
+      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      await tester.pump();
+      port.calls.clear();
+      await tester.tapAt(tester.getTopLeft(find.byKey(const Key('stage'))) + const Offset(40, 40));
+      await tester.pump();
+      expect(port.calls.where((c) => c.$1 == 'mouse'), isEmpty);
+      expect(port.calls.where((c) => c.$1 == 'picture_focus'), isEmpty);
+      expect(es.pictureFocused, isNull);
+    });
+
+    testWidgets('first-open failure shows reconnect without a frame', (tester) async {
+      await tester.pumpWidget(wrap(embedded()));
+      await tester.runAsync(() async {
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') t.emit({'event': 'error', 'req': m['req'], 'error': 'cannot reach the host'});
+        };
+        es.openOrSwitch('111', 'Safari', 'Safari');
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      await tester.pump();
+      expect(find.byType(Texture), findsNothing);
+      expect(find.byKey(const Key('reconnect-button')), findsOneWidget);
+    });
+
+    testWidgets('a first-open failure is ended from the stage with two taps', (tester) async {
+      await tester.pumpWidget(wrap(embedded()));
+      await tester.runAsync(() async {
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') t.emit({'event': 'error', 'req': m['req'], 'error': 'bad password'});
+        };
+        es.openOrSwitch('111', 'Safari', 'Safari');
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      await tester.pump();
+      expect(es.sessionCount, 1);
+      expect(es.needCount, 1);
+      final end = find.byKey(const Key('disconnected-end-button'));
+      expect(end, findsOneWidget);
+      await tester.tap(end);
+      await tester.pump();
+      expect(es.sessionCount, 1); // armed, not yet
+      await tester.tap(end);
+      await tester.pump();
+      expect(es.sessionCount, 0);
+      expect(es.recordFor('111/Safari'), isNull);
+      expect(es.needCount, 0);
+      expect(find.byType(DisconnectedStage), findsNothing);
+    });
+
+    testWidgets('an armed disconnected end does not carry over to the next session', (tester) async {
+      await tester.pumpWidget(wrap(embedded()));
+      await tester.runAsync(() async {
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') t.emit({'event': 'error', 'req': m['req'], 'error': 'offline'});
+        };
+        es.openOrSwitch('111', 'Safari', 'Safari');
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+        es.openOrSwitch('111', 'Notes', 'Notes');
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      await tester.pump();
+      final end = find.byKey(const Key('disconnected-end-button'));
+      await tester.tap(end);
+      await tester.pump();
+      expect(find.text('再点一次确认'), findsOneWidget);
+      es.select('111/Safari');
+      await tester.pump();
+      expect(find.text('再点一次确认'), findsNothing);
+      await tester.tap(end);
+      await tester.pump();
+      expect(es.sessionCount, 2);
+    });
+
+    testWidgets('a disconnected session with a frame also offers 结束会话; none while reconnecting', (tester) async {
+      await shown(tester);
+      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      await tester.pump();
+      expect(find.byKey(const Key('disconnected-end-button')), findsOneWidget);
+      t.onSend = (_) {}; // the reopen never answers
+      await tester.runAsync(() async {
+        await tester.tap(find.byKey(const Key('reconnect-button')));
+        await flush();
+      });
+      await tester.pump();
+      expect(find.byKey(const Key('disconnected-end-button')), findsNothing);
+    });
+
+    testWidgets('reconnecting keeps the old frame with a connecting lamp', (tester) async {
+      await shown(tester);
+      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      await tester.pump();
+      t.onSend = (_) {}; // the reopen never answers
+      await tester.runAsync(() async {
+        await tester.tap(find.byKey(const Key('reconnect-button')));
+        await flush();
+      });
+      await tester.pump();
+      expect(tex42, findsOneWidget);
+      expect(find.text('正在连接'), findsOneWidget);
+      expect(find.byKey(const Key('reconnect-button')), findsNothing);
+    });
+
+    testWidgets('reconnect opened but not swapped keeps stripes and takes no input', (tester) async {
+      await shown(tester);
+      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      await tester.pump();
+      await tester.runAsync(() async {
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            t.emit({
+              'event': 'opened', 'sid': 11, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+              'port': 5011, 'token': 'tk', 'req': m['req'],
+            });
+          }
+        };
+        await tester.tap(find.byKey(const Key('reconnect-button')));
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      await tester.pump();
+      expect(es.currentRecord!.lastSid, 1);
+      expect(find.byType(DisconnectedStage), findsOneWidget);
+      expect(find.text('正在连接'), findsOneWidget);
+      expect(tex42, findsOneWidget);
+      port.calls.clear();
+      await tester.tapAt(tester.getCenter(find.byKey(const Key('stage'))));
+      await tester.pump();
+      es.toggleDetach();
+      expect(port.calls.where((c) => c.$1 == 'mouse' || c.$1 == 'detach' || c.$1 == 'picture_focus'), isEmpty);
+    });
+
+    testWidgets('swapping the live picture for the disconnected stage keeps the hole', (tester) async {
+      await shown(tester);
+      await tester.pump();
+      expect(es.pictureHole.value, isNotNull);
+      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      await tester.pump();
+      await tester.pump();
+      expect(find.byType(DisconnectedStage), findsOneWidget);
+      expect(es.pictureHole.value, isNotNull);
+    });
+
+    testWidgets('swapping the disconnected stage for the live picture keeps the hole', (tester) async {
+      await shown(tester);
+      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      await tester.pump();
+      es.hint = 'again'; // a rebuild: the disconnected stage reports its rect
+      es.notifyListeners();
+      await tester.pump();
+      await tester.pump();
+      expect(find.byType(DisconnectedStage), findsOneWidget);
+      final before = es.pictureHole.value;
+      expect(before, isNotNull);
+      await tester.runAsync(() async {
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            t.emit({
+              'event': 'opened', 'sid': 11, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+              'port': 5011, 'token': 'tk', 'req': m['req'],
+            });
+          }
+        };
+        await tester.tap(find.byKey(const Key('reconnect-button')));
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      await tester.pump();
+      port.emit(const ReadyEvent(11, 'Safari'));
+      port.emit(WindowsEvent(11, [rw(5, 400, 328)]));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+      expect(find.byType(DisconnectedStage), findsNothing);
+      expect(find.byType(Picture), findsOneWidget);
+      expect(es.pictureHole.value, before); // the same rect, now the picture's own
+    });
+
+    testWidgets('reconnect is off when the hub is gone', (tester) async {
+      await shown(tester);
+      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      await tester.pump();
+      await tester.runAsync(() async {
+        await t.die();
+        await flush();
+      });
+      await tester.pump();
+      // The hub's problem takes the stage; with it gone there is nothing to reconnect to.
+      expect(find.byKey(const Key('reconnect-button')), findsNothing);
+      expect(es.hubUsable, false);
+    });
+
+    testWidgets('reconnect button is greyed without a callback', (tester) async {
+      await tester.pumpWidget(wrap(const SizedBox(
+          width: 400, height: 300, child: DisconnectedStage(session: null, reason: '网络断了', connecting: false))));
+      expect(tester.widget<RappButton>(find.byKey(const Key('reconnect-button'))).onPressed, isNull);
+      expect(find.byType(Texture), findsNothing);
+    });
+
+    testWidgets('a detached session that disconnects has no window to switch to', (tester) async {
+      await shown(tester);
+      port.emit(const DetachedEvent(1, true));
+      await tester.pump();
+      expect(find.text('切到窗口'), findsOneWidget);
+      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      port.emit(const DetachedEvent(1, false));
+      await tester.pump();
+      expect(find.text('切到窗口'), findsNothing);
+      expect(find.byKey(const Key('reconnect-button')), findsOneWidget);
     });
 
     Future<void> showWindow(WidgetTester tester, RemoteWindow w) async {

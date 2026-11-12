@@ -246,9 +246,11 @@ async fn open_unknown_app_worker_failure_is_an_error() {
     let a = service(Some(relay.relay.addr)).await;
     let home = tempfile::tempdir().unwrap();
     let mut hub = hub_with_host(&a, &relay, home.path(), None).await;
-    // No rapp-client in this bin dir: the hub reports it.
-    let empty = tempfile::tempdir().unwrap();
-    let mut hub2 = Hub::start(home.path(), empty.path(), Some(relay.relay.addr), None);
+    // An unlaunchable client wins resolution even when a real Linux client is
+    // installed beside the test binaries or on PATH.
+    let broken = tempfile::tempdir().unwrap();
+    std::fs::write(broken.path().join(format!("rapp-client{}", std::env::consts::EXE_SUFFIX)), "invalid executable").unwrap();
+    let mut hub2 = Hub::start(home.path(), broken.path(), Some(relay.relay.addr), None);
     let r = hub2.call(json!({"cmd":"open","id":a.id,"app":"com.example.echo","req":3})).await;
     assert_eq!(r["event"], "error", "{r}");
     assert_eq!(r["req"], 3);
@@ -490,5 +492,359 @@ async fn embed_wrong_token_closes_the_session() {
     drop(tcp);
     let ev = tokio::time::timeout(Duration::from_secs(5), hub.next()).await.expect("closed in time");
     assert_eq!(ev, json!({"event":"closed","sid":sid,"reason":"connection closed"}));
+    hub.finish().await;
+}
+
+// ---- S3: close reason, reconnect flag, presence ----
+
+#[tokio::test]
+async fn embed_close_with_user_reason() {
+    use tokio::io::AsyncReadExt;
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = hub_with_host(&a, &relay, home.path(), None).await;
+    let (sid, port, token) = embed_open(&mut hub, &a).await;
+    let mut tcp = gui_connect(port, &token, "ping").await;
+    hub.send(json!({"cmd":"close","sid":sid,"reason":"user"})).await;
+    assert_eq!(hub.next().await, json!({"event":"closed","sid":sid,"reason":"user"}));
+    let mut rest = Vec::new();
+    tokio::time::timeout(WAIT, tcp.read_to_end(&mut rest)).await.expect("EOF in time").unwrap();
+    hub.finish().await;
+    let closed = read_log(home.path(), "hub.log").into_iter().find(|v| v["ev"] == "closed").unwrap();
+    assert_eq!(closed["reason"], "user", "{closed}");
+}
+
+#[tokio::test]
+async fn close_with_bad_reason_is_an_error() {
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = hub_with_host(&a, &relay, home.path(), None).await;
+    let (sid, port, token) = embed_open(&mut hub, &a).await;
+    let _tcp = gui_connect(port, &token, "ping").await;
+    let r = hub.call(json!({"cmd":"close","sid":sid,"reason":"nope"})).await;
+    assert_eq!(r["event"], "error", "{r}");
+    assert!(r["error"].as_str().unwrap().contains("bad reason"), "{r}");
+    hub.send(json!({"cmd":"close","sid":sid})).await;
+    assert_eq!(hub.next().await, json!({"event":"closed","sid":sid,"reason":"quit"}));
+    hub.finish().await;
+}
+
+#[tokio::test]
+async fn reconnect_open_is_logged() {
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = hub_with_host(&a, &relay, home.path(), None).await;
+    let (_sid, _, _) = embed_open(&mut hub, &a).await;
+    let r = hub.call(json!({"cmd":"open","id":a.id,"app":"com.example.echo","embed":true,"reconnect":true})).await;
+    assert_eq!(r["event"], "opened", "{r}");
+    assert!(r.get("reconnect").is_none(), "{r}");
+    hub.finish().await;
+    let opened: Vec<Value> = read_log(home.path(), "hub.log").into_iter().filter(|v| v["ev"] == "opened").collect();
+    assert_eq!(opened.len(), 2, "{opened:?}");
+    assert!(opened[0].get("reconnect").is_none(), "{}", opened[0]);
+    assert_eq!(opened[1]["reconnect"], true, "{}", opened[1]);
+}
+
+/// A presence hub with `a` added (presence events that race the reply are skipped).
+async fn presence_hub(a: &TestService, relay: &TestRelay, home: &std::path::Path) -> Hub {
+    let mut hub = Hub::start_with_presence(home, a.bins.path(), Some(relay.relay.addr), Duration::from_millis(200));
+    hub.send(json!({"cmd":"add_host","id":a.id,"password":PASSWORD,"req":1})).await;
+    loop {
+        let r = hub.next().await;
+        if r["event"] == "presence" {
+            continue;
+        }
+        assert_eq!(r["event"], "host_added", "{r}");
+        return hub;
+    }
+}
+
+async fn next_presence(hub: &mut Hub, id: &str, online: bool) {
+    let deadline = tokio::time::Instant::now() + WAIT;
+    loop {
+        let r = tokio::time::timeout_at(deadline, hub.next()).await.expect("presence in time");
+        assert_ne!(r["event"], "error", "{r}");
+        if r == json!({"event":"presence","id":id,"online":online}) {
+            return;
+        }
+    }
+}
+
+#[tokio::test]
+async fn presence_reports_online_then_offline() {
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = presence_hub(&a, &relay, home.path()).await;
+    next_presence(&mut hub, &a.id, true).await;
+    a.svc.stop();
+    next_presence(&mut hub, &a.id, false).await;
+}
+
+#[tokio::test]
+async fn ping_is_answered_and_not_logged() {
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = presence_hub(&a, &relay, home.path()).await;
+    next_presence(&mut hub, &a.id, true).await;
+    next_presence(&mut hub, &a.id, true).await;
+    let text = std::fs::read_to_string(a.home.path().join("logs").join("service.log")).expect("service.log exists");
+    assert!(!text.is_empty(), "service.log is empty");
+    assert!(!text.contains("\"ping\""), "ping in A's log:\n{text}");
+    assert!(!text.contains("list_apps"), "list_apps in A's log:\n{text}");
+    // hub.log: exactly one presence line (the first observation), however many ticks ran.
+    let n = read_log(home.path(), "hub.log").iter().filter(|v| v["ev"] == "presence").count();
+    assert_eq!(n, 1, "{:?}", read_log(home.path(), "hub.log"));
+}
+
+#[tokio::test]
+async fn offline_probe_writes_one_line_per_change_not_per_tick() {
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = presence_hub(&a, &relay, home.path()).await;
+    next_presence(&mut hub, &a.id, true).await;
+    let before = read_log(home.path(), "hub.log").len();
+    a.svc.stop();
+    next_presence(&mut hub, &a.id, false).await;
+    // Several more offline ticks.
+    for _ in 0..3 {
+        next_presence(&mut hub, &a.id, false).await;
+    }
+    let lines = read_log(home.path(), "hub.log");
+    let new: Vec<&Value> = lines.iter().skip(before).collect();
+    assert_eq!(new.len(), 1, "{new:?}");
+    assert_eq!((&new[0]["ev"], &new[0]["id"], &new[0]["online"]), (&json!("presence"), &json!(a.id), &json!(false)));
+    for v in &lines {
+        assert!(v["ev"] != "route" || v["result"] == "ok", "failed route line: {v}");
+        assert!(!v.to_string().contains("reconnecting"), "{v}");
+    }
+}
+
+#[tokio::test]
+async fn stale_password_stops_probing_and_does_not_lock_the_user_out() {
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let saved = json!([{"id":a.id,"name":"test-a","password":"stale-pass","lan":[]}]);
+    rapp_net::config::write_json(&home.path().join("hosts.json"), &saved).unwrap();
+    let mut hub = Hub::start_with_presence(home.path(), a.bins.path(), Some(relay.relay.addr), Duration::from_millis(200));
+    next_presence(&mut hub, &a.id, false).await;
+    // Enough ticks to trip the relay's limiter if the probe kept connecting.
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    let r = hub.call(json!({"cmd":"add_host","id":a.id,"password":PASSWORD,"req":9})).await;
+    assert_eq!(r, json!({"event":"host_added","id":a.id,"name":"test-a","req":9}));
+    next_presence(&mut hub, &a.id, true).await;
+}
+
+#[tokio::test]
+async fn removing_a_host_during_a_probe_keeps_it_removed() {
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let saved = json!([{"id":a.id,"name":"old-name","password":PASSWORD,"lan":[]}]);
+    rapp_net::config::write_json(&home.path().join("hosts.json"), &saved).unwrap();
+    let mut hub = Hub::start_with_presence(home.path(), a.bins.path(), Some(relay.relay.addr), Duration::from_millis(200));
+    // The first probe starts immediately; remove while it is connecting.
+    hub.send(json!({"cmd":"remove_host","id":a.id})).await;
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    let saved: Value = serde_json::from_slice(&std::fs::read(home.path().join("hosts.json")).unwrap()).unwrap();
+    assert_eq!(saved, json!([]));
+    let r = hub.call(json!({"cmd":"hosts"})).await;
+    assert_eq!(r, json!({"event":"hosts","hosts":[]}));
+}
+
+#[tokio::test]
+async fn no_presence_without_interval() {
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let hub = hub_with_host(&a, &relay, home.path(), None).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let rest = hub.finish().await;
+    assert!(rest.iter().all(|e| e["event"] != "presence"), "{rest:?}");
+}
+
+#[tokio::test]
+async fn lan_stale_password_probe_logs_one_auth_fail_on_a() {
+    let a = service(None).await;
+    let home = tempfile::tempdir().unwrap();
+    let saved = json!([{"id":a.id,"name":"test-a","password":"stale-pass","lan":[a_addr(&a.svc).to_string()]}]);
+    rapp_net::config::write_json(&home.path().join("hosts.json"), &saved).unwrap();
+    // Relay down (none configured): the probe falls back to LAN with the saved password.
+    let mut hub = Hub::start_with_presence(home.path(), a.bins.path(), None, Duration::from_millis(200));
+    next_presence(&mut hub, &a.id, false).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    // Identical consecutive lines collapse into one plus a `repeat` count, so add the counts up.
+    a.svc.stop();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let log = read_log(a.home.path(), "service.log");
+    let fails: u64 = log
+        .iter()
+        .map(|v| match v["ev"].as_str() {
+            Some("auth_fail") => 1,
+            Some("repeat") => v["repeat"].as_u64().unwrap_or(0),
+            _ => 0,
+        })
+        .sum();
+    assert_eq!(fails, 1, "{log:?}");
+}
+
+// ---- S3 fix I-3: a LAN-only (`id@ip`) host the relay does not know ----
+
+/// A relay that writes its log to `<dir>/relay.log`, to count what B asked it.
+fn logged_relay(dir: &std::path::Path) -> rapp_relay::Relay {
+    rapp_relay::Relay::start(rapp_relay::Opts {
+        listen: "127.0.0.1:0".parse().unwrap(),
+        key: KEY.into(),
+        db: dir.join("relay.json"),
+        token_ttl: Duration::from_secs(60),
+        log: rapp_net::log::Log::file(dir, "relay.log"),
+    })
+    .unwrap()
+}
+
+/// `connect` requests the relay got for `id` (identical lines collapse into `repeat`, so add those).
+/// A different line is logged first, so a pending repeat count is written out.
+async fn relay_connects(relay: &rapp_relay::Relay, dir: &std::path::Path, id: &str) -> u64 {
+    let ep = b_endpoint();
+    let c = dial(&ep, relay.addr, rapp_net::quic::ALPN_RELAY).await;
+    let bad = json!({"op":"register","key":"not-the-key","id":null,"secret":"s","name":"x","pw_salt":"a","pw_hash":"b","lan":[]});
+    assert_eq!(req(&c, bad).await["error"], "bad relay key");
+    let text = std::fs::read_to_string(dir.join("relay.log")).unwrap_or_default();
+    let (mut n, mut last_was_connect) = (0, false);
+    for v in text.lines().map(|l| serde_json::from_str::<Value>(l).unwrap()) {
+        match v["ev"].as_str() {
+            Some("connect") if v["to"] == id => (n, last_was_connect) = (n + 1, true),
+            Some("repeat") if last_was_connect => n += v["repeat"].as_u64().unwrap_or(0),
+            _ => last_was_connect = false,
+        }
+    }
+    n
+}
+
+/// A relay-less A whose service can be dropped (freeing its port) and started again on that port.
+struct LanA {
+    home: tempfile::TempDir,
+    bins: tempfile::TempDir,
+    id: String,
+    addr: std::net::SocketAddr,
+    svc: Option<rapp_service::Service>,
+}
+
+impl LanA {
+    async fn start() -> LanA {
+        let a = service(None).await;
+        let addr = a_addr(&a.svc);
+        LanA { home: a.home, bins: a.bins, id: a.id, addr, svc: Some(a.svc) }
+    }
+
+    fn stop(&mut self) {
+        if let Some(svc) = self.svc.take() {
+            svc.stop();
+        }
+    }
+
+    /// Back on the same port, with the same saved id; retries while the old socket lets go.
+    async fn restart(&mut self) {
+        let path = self.home.path().join("service.json");
+        let mut cfg: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        cfg["port"] = json!(self.addr.port());
+        rapp_net::config::write_json(&path, &cfg).unwrap();
+        let deadline = tokio::time::Instant::now() + WAIT;
+        loop {
+            let opts = rapp_service::Opts {
+                home: self.home.path().to_path_buf(),
+                bin_dir: Some(self.bins.path().to_path_buf()),
+                gui: None,
+                worker_idle: Duration::from_secs(60),
+                log_dir: self.home.path().join("logs"),
+            };
+            match rapp_service::Service::start(opts).await {
+                Ok(s) => {
+                    self.svc = Some(s);
+                    return;
+                }
+                Err(e) => assert!(tokio::time::Instant::now() < deadline, "restart on {}: {e:#}", self.addr),
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn lan_only_host_goes_offline_and_comes_back_without_asking_the_relay_again() {
+    let rdir = tempfile::tempdir().unwrap();
+    let relay = logged_relay(rdir.path());
+    let mut a = LanA::start().await; // never registers with the relay
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = Hub::start_with_presence(home.path(), a.bins.path(), Some(relay.addr), Duration::from_millis(200));
+    hub.send(json!({"cmd":"add_host","id":format!("{}@{}", a.id, a.addr),"password":PASSWORD,"req":1})).await;
+    next_presence(&mut hub, &a.id, true).await;
+    // The first establish asked the relay once ("unknown id") and found A over LAN.
+    assert_eq!(relay_connects(&relay, rdir.path(), &a.id).await, 1);
+
+    a.stop();
+    next_presence(&mut hub, &a.id, false).await;
+    for _ in 0..3 {
+        next_presence(&mut hub, &a.id, false).await; // still probing: not halted
+    }
+    a.restart().await;
+    next_presence(&mut hub, &a.id, true).await;
+    assert_eq!(relay_connects(&relay, rdir.path(), &a.id).await, 1, "presence went LAN-only after the relay's unknown id");
+    // Offline ticks wrote no failed route lines.
+    for v in read_log(home.path(), "hub.log") {
+        assert!(v["ev"] != "route" || v["result"] == "ok", "failed route line: {v}");
+    }
+    hub.finish().await;
+}
+
+#[tokio::test]
+async fn lan_only_host_found_off_at_start_is_not_halted() {
+    // The hub starts while the LAN-only A is down: the relay's "unknown id" must not halt presence.
+    let rdir = tempfile::tempdir().unwrap();
+    let relay = logged_relay(rdir.path());
+    let mut a = LanA::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let saved = json!([{"id":a.id,"name":"test-a","password":PASSWORD,"lan":[a.addr.to_string()]}]);
+    rapp_net::config::write_json(&home.path().join("hosts.json"), &saved).unwrap();
+    a.stop();
+    let mut hub = Hub::start_with_presence(home.path(), a.bins.path(), Some(relay.addr), Duration::from_millis(200));
+    next_presence(&mut hub, &a.id, false).await;
+    next_presence(&mut hub, &a.id, false).await;
+    a.restart().await;
+    next_presence(&mut hub, &a.id, true).await;
+    assert_eq!(relay_connects(&relay, rdir.path(), &a.id).await, 1);
+    hub.finish().await;
+}
+
+#[tokio::test]
+async fn lan_only_host_with_a_stale_password_still_halts() {
+    let rdir = tempfile::tempdir().unwrap();
+    let relay = logged_relay(rdir.path());
+    let a = service(None).await;
+    let home = tempfile::tempdir().unwrap();
+    let saved = json!([{"id":a.id,"name":"test-a","password":"stale-pass","lan":[a_addr(&a.svc).to_string()]}]);
+    rapp_net::config::write_json(&home.path().join("hosts.json"), &saved).unwrap();
+    let mut hub = Hub::start_with_presence(home.path(), a.bins.path(), Some(relay.addr), Duration::from_millis(200));
+    next_presence(&mut hub, &a.id, false).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    a.svc.stop();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let log = read_log(a.home.path(), "service.log");
+    let fails: u64 = log
+        .iter()
+        .map(|v| match v["ev"].as_str() {
+            Some("auth_fail") => 1,
+            Some("repeat") => v["repeat"].as_u64().unwrap_or(0),
+            _ => 0,
+        })
+        .sum();
+    assert_eq!(fails, 1, "{log:?}");
+    assert_eq!(relay_connects(&relay, rdir.path(), &a.id).await, 1);
     hub.finish().await;
 }

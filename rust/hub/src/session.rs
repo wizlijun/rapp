@@ -20,9 +20,9 @@ use tokio::task::JoinSet;
 const ACCEPT_WAIT: Duration = Duration::from_secs(10);
 
 impl Hub {
-    pub async fn open(self: &Arc<Self>, id: &str, app: &str, embed: bool, req: &Option<Value>) -> Result<()> {
+    pub async fn open(self: &Arc<Self>, id: &str, app: &str, embed: bool, reconnect: bool, req: &Option<Value>) -> Result<()> {
         if embed {
-            return self.open_embedded(id, app, req).await;
+            return self.open_embedded(id, app, reconnect, req).await;
         }
         let client = rapp_net::bins::find("rapp-client", self.bin_dir.as_deref()).context("rapp-client not found")?;
         let host = self.host(id)?;
@@ -70,14 +70,17 @@ impl Hub {
             });
         }
         self.sessions.lock().unwrap().insert(sid, Some(tx));
-        self.log_opened(sid, id, app, path);
+        self.log_opened(sid, id, app, path, false);
         self.emit(json!({"event":"opened","sid":sid,"id":id,"app":app,"path":path}), req).await;
         tokio::spawn(self.clone().run(sid, child, tcp, stream, listener, host, app.to_string(), Instant::now()));
         Ok(())
     }
 
-    fn log_opened(&self, sid: u64, id: &str, app: &str, path: &str) {
+    fn log_opened(&self, sid: u64, id: &str, app: &str, path: &str, reconnect: bool) {
         let mut opened = json!({"sid":sid,"id":id,"app":app,"path":path});
+        if reconnect {
+            opened["reconnect"] = true.into();
+        }
         if let Some(name) = self.hosts.get(id).map(|h| h.name).filter(|n| !n.is_empty()) {
             opened["host_name"] = name.into();
         }
@@ -86,7 +89,7 @@ impl Hub {
 
     /// `open` with `embed`: no `rapp-client`. The GUI connects to the returned port and presents
     /// the returned token (never logged) as its first line, like the client would.
-    async fn open_embedded(self: &Arc<Self>, id: &str, app: &str, req: &Option<Value>) -> Result<()> {
+    async fn open_embedded(self: &Arc<Self>, id: &str, app: &str, reconnect: bool, req: &Option<Value>) -> Result<()> {
         let host = self.host(id)?;
         let (stream, reply, path) = self.request(&host, &Op::Open { app: app.into(), side: false }).await?;
         let token = reply["token"].as_str().context("no worker token")?.to_string();
@@ -97,7 +100,7 @@ impl Hub {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
         // Registered and logged before the event goes out, so a fast `close` or `note` finds it.
         self.sessions.lock().unwrap().insert(sid, Some(tx));
-        self.log_opened(sid, id, app, path);
+        self.log_opened(sid, id, app, path, reconnect);
         self.emit(json!({"event":"opened","sid":sid,"id":id,"app":app,"path":path,"port":port,"token":token}), req).await;
         tokio::spawn(self.clone().run_embedded(sid, listener, stream, host, app.to_string(), Instant::now(), rx));
         Ok(())
@@ -128,11 +131,13 @@ impl Hub {
                 _ => None,
             },
             _ = async { while rx.recv().await.is_some() {} } => {
-                self.finish_session(sid, &id, &app_name, since, "quit".into()).await;
+                let why = self.take_why(sid);
+                self.finish_session(sid, &id, &app_name, since, why).await;
                 return;
             }
             _ = &mut killed => {
-                self.finish_session(sid, &id, &app_name, since, "quit".into()).await;
+                let why = self.take_why(sid);
+                self.finish_session(sid, &id, &app_name, since, why).await;
                 return;
             }
         };
@@ -141,17 +146,17 @@ impl Hub {
                 let _ = tcp.set_nodelay(true);
                 let side = self.accept_sides(listener, host, app);
                 let reason = tokio::select! {
-                    _ = async { let _ = splice(&mut tcp, &mut stream).await; } => "connection closed",
-                    _ = async { while rx.recv().await.is_some() {} } => "quit",
-                    _ = &mut killed => "quit",
+                    _ = async { let _ = splice(&mut tcp, &mut stream).await; } => "connection closed".to_string(),
+                    _ = async { while rx.recv().await.is_some() {} } => self.take_why(sid),
+                    _ = &mut killed => "quit".to_string(),
                 };
                 side.abort();
                 let _ = side.await;
                 reason
             }
-            None => "GUI did not connect",
+            None => "GUI did not connect".to_string(),
         };
-        self.finish_session(sid, &id, &app_name, since, reason.to_string()).await;
+        self.finish_session(sid, &id, &app_name, since, reason).await;
     }
 
     /// Side connections (file transfers): each gets its own `open` and splice. Aborting the task
@@ -181,6 +186,12 @@ impl Hub {
         self.log.event(Lvl::Info, "closed", json!({"sid":sid,"id":id,"app":app,"secs":secs,"reason":reason}));
         self.emit(json!({"event":"closed","sid":sid,"reason":reason}), &None).await;
         self.sessions.lock().unwrap().remove(&sid);
+        self.close_why.lock().unwrap().remove(&sid);
+    }
+
+    /// The reason `close` left for `sid` (`"user"`), else `"quit"`.
+    fn take_why(&self, sid: u64) -> String {
+        self.close_why.lock().unwrap().remove(&sid).unwrap_or_else(|| "quit".into())
     }
 
     /// `note` (embedded sessions): the GUI detached or re-attached a window; logged only.
@@ -242,10 +253,14 @@ impl Hub {
         self.finish_session(sid, &id, &app_name, since, reason).await;
     }
 
-    /// Closes the client's stdin; `closed` follows when it exits.
-    pub fn close(&self, sid: u64) -> Result<()> {
+    /// Closes the client's stdin; `closed` follows when it exits. `why` is the reason an
+    /// embedded session reports (S1 `rapp-client` sessions ignore it).
+    pub fn close(&self, sid: u64, why: Option<&str>) -> Result<()> {
         match self.sessions.lock().unwrap().get_mut(&sid) {
             Some(tx) => {
+                if let Some(w) = why {
+                    self.close_why.lock().unwrap().insert(sid, w.into());
+                }
                 tx.take();
                 Ok(())
             }

@@ -253,8 +253,8 @@ public func eventPayload(_ e: SessionEvent, sid: Int64, textures: [UInt32: Int64
         }])
     case .surfaces:
         return nil
-    case let .traffic(bytes):
-        return payload("traffic", ["bytes": bytes])
+    case let .traffic(bytes, frames):
+        return payload("traffic", ["bytes": bytes, "frames": frames])
     case let .clips(rows):
         return payload("clipboard", ["clips": rows.map { ["id": Int($0.id), "title": $0.title, "pickable": $0.pickable] }])
     case let .menu(items):
@@ -275,6 +275,8 @@ public func eventPayload(_ e: SessionEvent, sid: Int64, textures: [UInt32: Int64
         return nil
     case let .composer(.insert(result)):
         return payload("composer_insert", pasteResultPayload(result))
+    case let .disconnected(reason):
+        return payload("disconnected", ["reason": reason])
     case let .closed(reason):
         return payload("closed", ["reason": reason])
     }

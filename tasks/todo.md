@@ -166,7 +166,16 @@
   - 只有单测、不做实机：坏帧只结束一个会话（Task 3、6）；滚轮幅度 /4 和触控板（Task 8，Calculator 没有可滚内容）；⌘V/编辑›粘贴、输入区发送、输入法回车（会碰系统剪贴板或输入法设置）；多显示器缩放（只有一块屏）。
   - 已知：hub 退出后，嵌入的会话和独立窗口不会被 GUI 关掉（S2 之前就如此）。
   - 实机检查的脚本在 scratchpad `s2live/`；`tclick.sh` 改用按 PID 判断的 `topatp`（用户机上同时有多个名叫 rapp 的进程）。
-- [ ] S3 生命周期（规格：`docs/superpowers/specs/2026-11-12-rapp-s3-lifecycle-design.md`）
+- [x] S3 生命周期（规格：`docs/superpowers/specs/2026-11-12-rapp-s3-lifecycle-design.md`；计划：`docs/superpowers/plans/2026-11-12-rapp-s3-lifecycle.md`）——代码完成、自动测试全绿；**实机检查待做**
+  - 自动验证（2026-11-12）：`cargo test --workspace` 117 过、clippy 0 警告、`./scripts/check.sh` EXIT=0（`swift test` 237 过）、`flutter analyze` 干净、`flutter test` 395 过。最终审查的 I-1、I-2、I-3、M-6 已修并复审通过。
+  - relay 这次有改动（在线探测不再刷访问记录），要重新部署到 VPS 才生效——需用户同意 SSH。
+  - §5 逐条（单测已覆盖，待实机）：
+    - [ ] 打开 app：连接中 → 活动；A 画面不动 10 秒变空闲，动一下回到活动
+    - [ ] 串流菜单「断开」：条目留着、最后一帧 + 斜条纹 + 「重连」；需要你 +1；「重连」后设置和窗口不变
+    - [ ] A 上关掉被串流的 app（自己拉起的 Calculator，按 PID）：已断开，原因「A 端关闭了 app」
+    - [ ] 停掉自己起的 host：会话已断开；30 秒内设备变离线、需要你出现「离线」一件，恢复后自己消失
+    - [ ] 顶栏流量随画面跳动；总流量 = 各活动会话之和
+    - [ ] 「结束会话」点两次：条目消失、需要你相应减少
 - [ ] S5 项目与常用（规格：`docs/superpowers/specs/2026-11-12-rapp-s5-projects-favorites-design.md`）
 - [ ] S6 全局资源（规格：`docs/superpowers/specs/2026-11-12-rapp-s6-global-resources-design.md`）
 - [ ] S4 全景（规格：`docs/superpowers/specs/2026-11-12-rapp-s4-overview-design.md`）
@@ -186,3 +195,18 @@
 - 验证：319 Flutter 测试通过、1 项跳过；analyze、clippy 通过；Rust 17 core + 2 worker 测试通过。回归覆盖像素更新不触发窗口元数据事件、绘制暂停时错误仍及时处理、增量解码复用缓冲地址。
 - 对比脚本 `scripts/benchmark-linux-session.py`（这是 worker 解码/传输吞吐，不是端到端交互 FPS）：1080p 120 帧两轮旧版 46.3/42.9 fps，新版 63.2/64.1 fps；无并行构建的 4K 60 帧旧版 18.9 fps，新版 23.5 fps。4K 稳定 30 fps 尚未达到；BGRA 跨进程传输和 GPU 图像上传仍是后续优化方向。
 - 新版已本地编译；未替换 GitHub Release 的已发布附件。
+## 插入的严重问题（2026-11-12，用户报告）
+- [ ] P1 A 锁屏后 B 无法输入：B 提交时报「A 上的目标窗口不在最前」（`Paster.waitFrontmost` → `target not frontmost`），点击被丢弃（`InputInjector.clearToClick` → `click dropped: covered by …`）。原因：锁屏时登录窗口盖在所有窗口上、目标 app 激活不了，按 HID 投递的键鼠都到不了 app。README 写明 rapp 不做远程登录/解锁。待做：
+  - [x] 锁屏时 B 明确显示「A 已锁屏，需要在 A 上解锁」，不再报「不在最前」；host 日志记 `click dropped: A is locked`（host 用 `CGSessionCopyCurrentDictionary` 的 `CGSSessionScreenIsLocked` 判断）
+  - [x] 会话在时不让 A 因闲置熄屏、屏保或锁屏（电源断言 + 每 30 秒声明用户活动；仅 macOS host）
+  - 摸底：锁屏时按 PID 投递（`postToPid`）或 AX 写入能否送达 app——要锁 A 的屏做实机测试，需用户安排时间
+- [ ] P2 多个客户端同时连一个 host：要先设计（现在是独占模式），再实现
+
+## Linux 合并到 0.4.1（2026-11-12）
+- [x] 合并 `release/0.4.1`，保留已有 GTK client、Flutter 内嵌、构建/Omarchy 打包脚本及性能修复；Rust/Flutter 版本同步 0.4.1。
+- [x] worker 断线与结束会话分离：断线停止连接但保留最后画面；结束时释放画面。Linux 图像可用于断线舞台，重连首次出图切换新会话并释放旧画面。
+- [x] worker 上报每秒帧数，接通 0.4.1 空闲状态；结束正在启动的 worker 会取消启动，避免遗留进程。
+- [x] 绘制等待使用逐帧取消信号，避免长期在同一个 Future 上积累回调；保留最新帧邮箱和独立重绘。
+- [x] 修正 worker 启动失败测试的隔离性，避免误启动已安装或已编译的真实客户端。
+- 验证：Flutter 401 项通过、1 项跳过；Rust workspace 136 项通过；Flutter analyze、workspace Clippy 无问题；Linux release bundle 编译成功。新增/扩展回归覆盖断线保留像素、重连换帧、启动取消、帧数统计和绘制停顿时及时断线。
+- 本轮未在真实 Mac 上重新验证；macOS 原生代码来自上游，未在 Linux 编译。0.4.1 Linux 尚未发布，既有 v0.4.0 Release 附件保持原样。

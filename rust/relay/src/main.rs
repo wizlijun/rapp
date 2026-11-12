@@ -2,10 +2,11 @@ use anyhow::{bail, Context, Result};
 use rapp_net::log::Log;
 use rapp_relay::{Opts, Relay, DEFAULT_LISTEN, TOKEN_TTL};
 
-const USAGE: &str = "usage: rapp-relay --key <relay key> [--listen 0.0.0.0:21116] [--db relay.json]";
+const USAGE: &str = "usage: rapp-relay --key <relay key> [--listen 0.0.0.0:21116] [--db relay.json] [--debug]";
 
 fn parse(args: &[String]) -> Result<Opts> {
     let (mut key, mut listen, mut db) = (None, DEFAULT_LISTEN.to_string(), "relay.json".to_string());
+    let mut debug = false;
     let mut it = args.iter();
     while let Some(a) = it.next() {
         let mut val = || it.next().cloned().with_context(|| format!("{a} needs a value"));
@@ -13,6 +14,8 @@ fn parse(args: &[String]) -> Result<Opts> {
             "--key" => key = Some(val()?),
             "--listen" => listen = val()?,
             "--db" => db = val()?,
+            // Also writes Debug lines: presence-sized relayed streams, repeated offline connects.
+            "--debug" => debug = true,
             _ => bail!("unknown argument {a}"),
         }
     }
@@ -21,7 +24,7 @@ fn parse(args: &[String]) -> Result<Opts> {
         listen: listen.parse().with_context(|| format!("bad --listen {listen}"))?,
         db: db.into(),
         token_ttl: TOKEN_TTL,
-        log: Log::stderr(),
+        log: Log::stderr().with_debug(debug),
     })
 }
 

@@ -5,6 +5,8 @@ import '../embed/composer_bar.dart';
 import '../embed/picture.dart';
 import '../embed/session_port.dart';
 import 'controls.dart';
+import 'disconnected_stage.dart';
+import 'lifecycle.dart';
 import 'lamp.dart';
 import 'main_state.dart';
 import 'session_model.dart';
@@ -25,6 +27,8 @@ class Stage extends StatelessWidget {
         final cur = state.current;
         Widget body;
         var picture = false;
+        var full = false; // the body fills the stage: no padding
+        final rec = state.currentRecord;
         final rs = state.currentRemote;
         RemoteWindow? win;
         if (rs != null && rs.ready) {
@@ -44,10 +48,23 @@ class Stage extends StatelessWidget {
               RappButton.secondary(label: '打开面板', onPressed: state.togglePanel),
             ],
           );
+        } else if (rec != null && (rec.phase == Phase.disconnected || rec.lastSid != null)) {
+          // Dead, or reconnecting until the new picture swaps in (R10): the old frame under stripes.
+          // Never input, never a resize (R25).
+          full = true;
+          body = DisconnectedStage(
+            session: rs,
+            reason: disconnectWord(rec.reason),
+            connecting: rec.phase != Phase.disconnected,
+            onReconnect: state.hubUsable ? state.reconnectCurrent : null,
+            onEnd: state.endCurrent,
+            sessionKey: rec.key,
+            hole: state.pictureHole,
+          );
         } else if (rs != null && !rs.detached && win != null) {
           picture = true;
           body = Picture(state: state, session: rs, window: win, hole: state.pictureHole);
-        } else if (cur.lamp == Lamp.connecting || (rs != null && !rs.detached)) {
+        } else if (!(rs != null && rs.detached) && (cur.lamp == Lamp.connecting || rs != null)) {
           body = Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -81,11 +98,13 @@ class Stage extends StatelessWidget {
                     runSpacing: 8,
                     alignment: WrapAlignment.center,
                     children: [
-                      RappButton.primary(
-                        key: const Key('focus-button'),
-                        label: '切到窗口',
-                        onPressed: state.focusCurrent,
-                      ),
+                      // A disconnected session has no window of its own to switch to.
+                      if (!state.currentDisconnected)
+                        RappButton.primary(
+                          key: const Key('focus-button'),
+                          label: '切到窗口',
+                          onPressed: state.focusCurrent,
+                        ),
                       if (rs != null && rs.detached)
                         RappButton.secondary(
                           key: const Key('attach-button'),
@@ -115,7 +134,7 @@ class Stage extends StatelessWidget {
           final stage = Container(
             key: const Key('stage'),
             alignment: Alignment.center,
-            padding: picture ? EdgeInsets.zero : const EdgeInsets.all(16),
+            padding: picture || full ? EdgeInsets.zero : const EdgeInsets.all(16),
             child: DefaultTextStyle.merge(
               style: TextStyle(color: t.text),
               child: body,
@@ -123,7 +142,7 @@ class Stage extends StatelessWidget {
           );
           final port = state.port;
           // A detached session keeps its 「输入」 here: the placeholder stands for its windows.
-          if (!(picture || (rs != null && rs.detached)) || rs == null || port == null) return stage;
+          if (full || !(picture || (rs != null && rs.detached)) || rs == null || port == null) return stage;
           // The composer floats over the picture's bottom edge; opening it never resizes A.
           return Stack(
             children: [

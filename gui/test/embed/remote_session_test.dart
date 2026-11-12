@@ -18,6 +18,17 @@ RemoteWindow win(int id, WindowKind kind) => RemoteWindow(
     );
 
 void main() {
+  test('disconnected clears the transfer line and the sending state', () {
+    final r = RemoteSession(1, 'x');
+    r.apply(const TransferEvent(1, '下载 x 45%'));
+    r.apply(const ComposerStateEvent(1, sending: true));
+    expect(r.transferStatus, '下载 x 45%');
+    expect(r.composer.sending, true);
+    r.apply(const DisconnectedEvent(1, 'connection closed'));
+    expect(r.transferStatus, isNull);
+    expect(r.composer.sending, false);
+  });
+
   test('ready sets appName and ready', () {
     final r = RemoteSession(1, 'x');
     var n = 0;
@@ -99,5 +110,49 @@ void main() {
       r.apply(WindowsEvent(1, [win(9, WindowKind.normal), win(8, WindowKind.normal)]));
       expect(r.tabs.current, 9);
     });
+  });
+
+  test('ten quiet ticks make a session idle, one frame wakes it', () {
+    final r = RemoteSession(1, 'A');
+    r.apply(const TrafficEvent(1, 900, 1));
+    for (var i = 0; i < 9; i++) {
+      r.apply(const TrafficEvent(1, 0, 0));
+    }
+    expect(r.idle, false);
+    r.apply(const TrafficEvent(1, 0, 0));
+    expect(r.idle, true);
+    r.apply(const TrafficEvent(1, 10, 1));
+    expect(r.idle, false);
+    expect(r.quietSeconds, 0);
+  });
+
+  test('no frame yet is never idle', () {
+    final r = RemoteSession(1, 'A');
+    for (var i = 0; i < 20; i++) {
+      r.apply(const TrafficEvent(1, 0, 0));
+    }
+    expect(r.idle, false);
+    expect(r.sawFrame, false);
+  });
+
+  test('side bytes alone do not keep a session active', () {
+    final r = RemoteSession(1, 'A');
+    r.apply(const TrafficEvent(1, 900, 1));
+    for (var i = 0; i < 10; i++) {
+      r.apply(const TrafficEvent(1, 80000, 0));
+    }
+    expect(r.idle, true);
+    expect(r.bytesPerSecond, 80000);
+  });
+
+  test('preferWindow picks that window when the table brings it', () {
+    final r = RemoteSession(1, 'A');
+    r.preferWindow(7);
+    r.apply(WindowsEvent(1, [win(3, WindowKind.normal), win(7, WindowKind.normal)]));
+    expect(r.currentWindow, 7);
+    final r2 = RemoteSession(1, 'A');
+    r2.preferWindow(9);
+    r2.apply(WindowsEvent(1, [win(3, WindowKind.normal), win(7, WindowKind.normal)]));
+    expect(r2.currentWindow, 3);
   });
 }

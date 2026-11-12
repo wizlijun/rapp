@@ -98,6 +98,9 @@ void main() {
       expect(utf8.decode(messages.last.$2), '你好');
       final resize = messages.firstWhere((m) => m.$1 == 9).$2;
       expect(resize, [...u32(1), ...u16(500), ...u16(300)]);
+      final traffic = await nextWhere(events, (e) => e is TrafficEvent && e.frames > 0) as TrafficEvent;
+      expect(traffic.frames, 2);
+      expect(traffic.bytes, greaterThan(0));
       port.close(7);
       expect((await nextWhere(events, (e) => e is ClosedEvent) as ClosedEvent).reason, 'closed');
       await disconnected.future.timeout(const Duration(seconds: 5));
@@ -121,13 +124,44 @@ void main() {
       peer.add(packet(13, [...u16(1), ...u32(1), ...u32(0), 0, 2,
           ...f32(0), ...f32(0), ...f32(4), ...f32(4), ...f32(1), ...string('Window')]));
       peer.add(frame(true));
-      await nextWhere(events, (e) => e is WindowsEvent && e.windows.any((w) => w.image != null));
+      final picture = await nextWhere(events, (e) => e is WindowsEvent && e.windows.any((w) => w.image != null)) as WindowsEvent;
       peer.add(frame(false)); // this frame waits, the error must not
       peer.add(packet(3, string('fixture stopped')));
-      final end = await nextWhere(events, (e) => e is ClosedEvent) as ClosedEvent;
+      final end = await nextWhere(events, (e) => e is DisconnectedEvent) as DisconnectedEvent;
       expect(end.reason, 'fixture stopped');
+      // Link loss retains the displayed red frame, even with a newer frame queued.
+      final pixels = await picture.windows.single.image!.toByteData(format: ui.ImageByteFormat.rawRgba);
+      expect(pixels!.buffer.asUint8List().take(4), [255, 0, 0, 255]);
+      expect(port.handleKeyEvent(11, const KeyDownEvent(
+        physicalKey: PhysicalKeyboardKey.keyA, logicalKey: LogicalKeyboardKey.keyA,
+        timeStamp: Duration.zero)), false);
+      port.close(11);
+      expect((await nextWhere(events, (e) => e is ClosedEvent)).sid, 11);
     } finally {
       port.dispose(); gate.complete(); await events.cancel(); peer?.destroy(); await server.close();
+    }
+  }, skip: !Platform.isLinux || !File(worker).existsSync() ? 'Build rapp-session first on Linux' : false);
+
+  test('ending while the worker is starting cancels it and allows a new start', () async {
+    final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final port = LinuxSessionPort(worker, framePresented: () async {});
+    final events = StreamIterator(port.events);
+    Socket? peer;
+    try {
+      await port.init();
+      final pending = port.start(StartArgs(12, server.port, 'fixture-token', 'color16', 15, 'adaptive'));
+      port.close(12);
+      await expectLater(pending, throwsStateError);
+      final accepted = server.first;
+      await port.start(StartArgs(12, server.port, 'fixture-token', 'color16', 15, 'adaptive'));
+      peer = await accepted.timeout(const Duration(seconds: 5));
+      peer.listen((_) {});
+      peer.add(packet(2, [...string('Restarted'), ...u16(4), ...u16(4)]));
+      expect((await nextWhere(events, (e) => e is ReadyEvent) as ReadyEvent).appName, 'Restarted');
+      port.close(12);
+      expect((await nextWhere(events, (e) => e is ClosedEvent)).sid, 12);
+    } finally {
+      port.dispose(); await events.cancel(); peer?.destroy(); await server.close();
     }
   }, skip: !Platform.isLinux || !File(worker).existsSync() ? 'Build rapp-session first on Linux' : false);
 
@@ -146,7 +180,7 @@ void main() {
       peer.listen((_) {}); healthy.listen((_) {});
       peer.add(packet(2, [...string('Fixture'), ...u16(4), ...u16(4)]));
       peer.add(packet(4, [2,...f32(0),...f32(0),...f32(4),...f32(4),...u16(4),...u16(4),1,0]));
-      final end = await nextWhere(events, (e) => e is ClosedEvent) as ClosedEvent;
+      final end = await nextWhere(events, (e) => e is DisconnectedEvent) as DisconnectedEvent;
       expect(end.sid, 9); expect(end.reason, contains('zlib'));
       healthy.add(packet(2, [...string('Healthy'), ...u16(4), ...u16(4)]));
       healthy.add(packet(13, [...u16(1), ...u32(1), ...u32(0), 0, 2,

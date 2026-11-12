@@ -3,6 +3,7 @@
 
 mod hosts;
 mod link;
+mod presence;
 mod session;
 
 use anyhow::{bail, Context, Result};
@@ -25,6 +26,8 @@ pub struct Opts {
     pub force_path: Option<String>,
     /// `hub.log` (spec §4.4); `Log::none()` writes nothing.
     pub log: Log,
+    /// Presence probe period; None = no probe (tests).
+    pub presence_every: Option<std::time::Duration>,
 }
 
 type Out = Box<dyn AsyncWrite + Unpin + Send>;
@@ -42,6 +45,13 @@ pub(crate) struct Hub {
     /// sid → writer of the client's stdin (None once closed).
     sessions: Mutex<HashMap<u64, Option<tokio::sync::mpsc::UnboundedSender<String>>>>,
     next_sid: AtomicU64,
+    /// sid → reason set by `close` with `reason`, read when the session ends.
+    close_why: Mutex<HashMap<u64, String>>,
+    /// Hosts the presence probe stopped trying after an auth-type failure, until the user acts on them.
+    probe_halt: Mutex<std::collections::HashSet<String>>,
+    /// Hosts with LAN addresses the relay called "unknown id" this run (`id@ip` hosts that never
+    /// registered there): presence probes them over LAN only, so it never asks the relay again.
+    lan_only: Mutex<std::collections::HashSet<String>>,
     kill: tokio::sync::watch::Sender<bool>,
     log: Log,
     /// B's self-declared name in `auth` / `connect` (spec §2): this machine's hostname.
@@ -76,19 +86,32 @@ where
         out: tokio::sync::Mutex::new(Box::new(output)),
         sessions: Default::default(),
         next_sid: AtomicU64::new(0),
+        close_why: Default::default(),
+        probe_halt: Default::default(),
+        lan_only: Default::default(),
         kill: tokio::sync::watch::channel(false).0,
         bin_dir: opts.bin_dir,
         log: opts.log,
         name: rapp_net::config::hostname(),
     });
+    let probe = opts.presence_every.map(|every| tokio::spawn(presence::run(hub.clone(), every)));
     let mut lines = BufReader::new(input).lines();
-    while let Some(line) = lines.next_line().await? {
-        if line.trim().is_empty() {
-            continue;
+    let read = async {
+        while let Some(line) = lines.next_line().await? {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let hub = hub.clone();
+            tokio::spawn(async move { hub.command(&line).await });
         }
-        let hub = hub.clone();
-        tokio::spawn(async move { hub.command(&line).await });
+        anyhow::Ok(())
     }
+    .await;
+    if let Some(p) = probe {
+        p.abort();
+        let _ = p.await;
+    }
+    read?;
     hub.close_all().await;
     hub.ep.close(0u32.into(), b"hub exit");
     let _ = hub.out.lock().await.shutdown().await;
@@ -152,7 +175,7 @@ impl Hub {
                     }
                     let name = r["name"].as_str().unwrap_or(id).to_string();
                     self.hosts.upsert(Host { id: id.into(), name: name.clone(), password: password.into(), lan: vec![addr] })?;
-                    self.forget(id);
+                    self.forget_host(id);
                     return Ok(Some(json!({"event":"host_added","id":id,"name":name})));
                 }
                 let info = match self.relay_connect(id, password).await {
@@ -163,13 +186,13 @@ impl Hub {
                 let name = info["name"].as_str().unwrap_or(id).to_string();
                 let lan = info["lan"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
                 self.hosts.upsert(Host { id: id.into(), name: name.clone(), password: password.into(), lan })?;
-                self.forget(id);
+                self.forget_host(id);
                 json!({"event":"host_added","id":id,"name":name})
             }
             Some("remove_host") => {
                 let id = s("id")?;
                 self.hosts.remove(id)?;
-                self.forget(id);
+                self.forget_host(id);
                 self.hosts_event()
             }
             Some("apps") => {
@@ -184,11 +207,17 @@ impl Hub {
             }
             Some("open") => {
                 let embed = v.get("embed").and_then(Value::as_bool).unwrap_or(false);
-                self.open(s("id")?, s("app")?, embed, req).await?;
+                let reconnect = v.get("reconnect").and_then(Value::as_bool).unwrap_or(false);
+                self.open(s("id")?, s("app")?, embed, reconnect, req).await?;
                 return Ok(None);
             }
             Some("close") => {
-                self.close(v.get("sid").and_then(Value::as_u64).context("missing sid")?)?;
+                let why = match v.get("reason") {
+                    None | Some(Value::Null) => None,
+                    Some(r) if r == "user" => Some("user"),
+                    Some(_) => bail!("bad reason"),
+                };
+                self.close(v.get("sid").and_then(Value::as_u64).context("missing sid")?, why)?;
                 return Ok(None);
             }
             Some("focus") => {

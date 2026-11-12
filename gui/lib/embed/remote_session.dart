@@ -7,6 +7,9 @@ import 'session_port.dart';
 import 'stream_choice.dart';
 import 'window_tabs.dart';
 
+/// Quiet seconds (no picture frame) after which a session that has shown one is idle.
+const idleAfter = 10;
+
 class RemoteSession extends ChangeNotifier {
   /// [onResize] is where the session's resize policy sends: window, width, height.
   /// [onDropBlock] is where a block that left the composer goes (the runner forgets it).
@@ -50,6 +53,11 @@ class RemoteSession extends ChangeNotifier {
   int? get currentWindow => tabs.current;
   bool detached = false;
   int bytesPerSecond = 0;
+
+  /// Whether a picture frame has arrived yet, and how many seconds have passed since the last.
+  bool sawFrame = false;
+  int quietSeconds = 0;
+  bool get idle => sawFrame && quietSeconds >= idleAfter;
   List<ClipRow> clips = const [];
   List<MenuEntry> menu = const [];
 
@@ -59,6 +67,9 @@ class RemoteSession extends ChangeNotifier {
   /// The window an attach named as current (R21) before it was a tab here: selected when a
   /// window table brings it, dropped by a tab pick or the next detach.
   int? _pendingCurrent;
+
+  /// Prefer window [id] when a window table brings it (like an attach's current window).
+  void preferWindow(int? id) => _pendingCurrent = id;
 
   bool _isTab(int id) => tabs.tabs.any((w) => w.id == id);
 
@@ -77,6 +88,15 @@ class RemoteSession extends ChangeNotifier {
         }
       case TrafficEvent():
         bytesPerSecond = e.bytes;
+        if (e.frames > 0) {
+          sawFrame = true;
+          quietSeconds = 0;
+        } else if (sawFrame) {
+          quietSeconds++;
+        }
+      case DisconnectedEvent():
+        linkDown();
+        return;
       case ClipsEvent():
         clips = e.clips;
         composer.clipArrived();
@@ -104,6 +124,13 @@ class RemoteSession extends ChangeNotifier {
       case ClosedEvent():
         endReason = e.reason;
     }
+    notifyListeners();
+  }
+
+  /// The link is gone: no transfer or send round is running any more.
+  void linkDown() {
+    transferStatus = null;
+    composer.done(0, null);
     notifyListeners();
   }
 

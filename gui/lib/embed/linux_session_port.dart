@@ -56,11 +56,14 @@ Stream<Uint8List> sessionPackets(Stream<List<int>> stream) async* {
 
 class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
   LinuxSessionPort(this.executable, {Future<void> Function()? framePresented})
-      : _framePresented = framePresented ?? (() => SchedulerBinding.instance.endOfFrame);
+    : _framePresented =
+          framePresented ?? (() => SchedulerBinding.instance.endOfFrame);
   final Future<void> Function() _framePresented;
   final String executable;
   final _events = StreamController<SessionEvent>.broadcast();
   final _sessions = <Object, _Session>{};
+  final _starting = <Object>{};
+  final _cancelledStarts = <Object>{};
   Object? _focused;
   bool _disposed = false;
 
@@ -103,6 +106,8 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
     final s = _sessions[sid];
     if (_focused != sid ||
         s == null ||
+        s.disconnected ||
+        s.closed ||
         event.logicalKey == LogicalKeyboardKey.f11) {
       return false;
     }
@@ -134,33 +139,58 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
       return null;
     }
     if (method == 'start') {
-      if (_disposed || sid == null || _sessions.containsKey(sid)) {
+      if (_disposed ||
+          sid == null ||
+          _sessions.containsKey(sid) ||
+          _starting.contains(sid)) {
         throw StateError('Invalid session');
       }
-      final process = await Process.start(executable, const []);
-      if (_disposed) {
-        process.kill();
-        throw StateError('Session port disposed');
+      _starting.add(sid);
+      late final Process process;
+      try {
+        process = await Process.start(executable, const []);
+      } catch (_) {
+        _cancelledStarts.remove(sid);
+        rethrow;
+      } finally {
+        _starting.remove(sid);
+      }
+      final cancelled = _cancelledStarts.remove(sid);
+      if (_disposed || cancelled) {
+        unawaited(process.stdout.drain<void>());
+        unawaited(process.stderr.drain<void>());
+        unawaited(process.stdin.close().catchError((Object _) {}));
+        process.kill(ProcessSignal.sigkill);
+        throw StateError('Session start cancelled');
       }
       final s = _Session(sid, process, _emit, _framePresented);
       _sessions[sid] = s;
       unawaited(process.stderr.drain<void>());
-      unawaited(process.stdin.done.catchError((Object _) { s.close('session worker stopped'); }));
+      unawaited(
+        process.stdin.done.catchError((Object _) {
+          s.disconnect('session worker stopped');
+        }),
+      );
       s.send({'cmd': 'start', ...args, 'density': _density(args['density'])});
       unawaited(
         s.read().whenComplete(() {
-          if (identical(_sessions[sid], s)) _sessions.remove(sid);
+          if (s.closed && identical(_sessions[sid], s)) _sessions.remove(sid);
           if (_focused == sid) _focused = null;
         }),
       );
       return null;
     }
+    if (method == 'close' && _starting.contains(sid)) {
+      _cancelledStarts.add(sid!);
+    }
     final s = _sessions[sid];
     if (s == null) return null;
+    if (method != 'close' && s.disconnected) return null;
     switch (method) {
       case 'close':
         if (_focused == sid) _releaseFocus();
         s.close('closed');
+        _sessions.remove(sid);
       case 'set_stream':
         s.send({'cmd': method, ...args, 'density': _density(args['density'])});
       case 'select_window':
@@ -279,6 +309,7 @@ class _Session {
   final _pictures = <int, RemoteWindow>{};
   Uint8List? _pendingFrame;
   bool _rendering = false;
+  Completer<void>? _renderWait;
 
   void queueFrame(Uint8List bytes) {
     // Latest-frame mailbox: decoding/display must never block control events.
@@ -289,22 +320,35 @@ class _Session {
   Future<void> drainFrames() async {
     _rendering = true;
     try {
-      while (!closed && _pendingFrame != null) {
+      while (!closed && !disconnected && _pendingFrame != null) {
         final bytes = _pendingFrame!;
         _pendingFrame = null;
         await frame(bytes);
-        await Future.any([framePresented(), _closed.future]);
+        if (!closed && !disconnected) {
+          // Use a per-frame stop signal: registering on one long-lived future
+          // would retain a callback for every displayed frame until disconnect.
+          final stop = Completer<void>();
+          _renderWait = stop;
+          await Future.any([framePresented(), stop.future]);
+          _renderWait = null;
+        }
       }
-    } catch (e) { close('画面解码失败：$e'); }
-    finally { _rendering = false; }
+    } catch (e) {
+      disconnect('画面解码失败：$e');
+    } finally {
+      _renderWait = null;
+      _rendering = false;
+    }
   }
+
   final clips = <int, String?>{};
   final held = <int>{};
   int? selected;
   bool closed = false;
+  bool disconnected = false;
 
   void send(Map<String, Object?> args) {
-    if (!closed) process.stdin.writeln(jsonEncode(args));
+    if (!closed && !disconnected) process.stdin.writeln(jsonEncode(args));
   }
 
   void publish() {
@@ -318,7 +362,7 @@ class _Session {
   Future<void> read() async {
     try {
       await for (final packet in sessionPackets(process.stdout)) {
-        if (closed) break;
+        if (closed || disconnected) break;
         if (packet[0] == 1) {
           queueFrame(Uint8List.sublistView(packet, 1));
         } else if (packet[0] == 0) {
@@ -326,8 +370,8 @@ class _Session {
               jsonDecode(utf8.decode(packet.sublist(1)))
                   as Map<String, dynamic>;
           final method = m.remove('event') as String;
-          if (method == 'closed') {
-            close(m['reason'] as String);
+          if (method == 'disconnected' || method == 'closed') {
+            disconnect(m['reason'] as String);
             break;
           }
           if (method == 'clip') {
@@ -380,9 +424,9 @@ class _Session {
           throw const FormatException('Unknown worker packet');
         }
       }
-      close('remote session ended');
+      disconnect('remote session ended');
     } catch (e) {
-      close('连接失败：$e');
+      disconnect('连接失败：$e');
     }
   }
 
@@ -419,7 +463,7 @@ class _Session {
     try {
       codec = await descriptor.instantiateCodec();
       image = (await codec.getNextFrame()).image;
-      if (closed) return;
+      if (closed || disconnected) return;
       var geometryChanged = false;
       for (final w in windows) {
         final content = ui.Rect.fromLTRB(
@@ -433,7 +477,10 @@ class _Session {
           // Do not retain an entire old canvas for a window outside this frame.
           // Selecting it raises the remote window and supplies a fresh picture.
           final old = _pictures.remove(w.id);
-          if (old != null) { _retire(old.image); geometryChanged = true; }
+          if (old != null) {
+            _retire(old.image);
+            geometryChanged = true;
+          }
           continue;
         }
         final source = ui.Rect.fromLTWH(
@@ -476,11 +523,20 @@ class _Session {
     }
   }
 
-  void close(String reason) {
-    if (closed) return;
-    closed = true;
+  // A failed link retains its last images until explicit close (0.4.1 lifecycle).
+  void disconnect(String reason) {
+    if (closed || disconnected) return;
+    disconnected = true;
+    _stopTransport();
+    emit(DisconnectedEvent(sid, reason));
+  }
+
+  void _stopTransport() {
+    if (_closed.isCompleted) return;
+    held.clear();
     _pendingFrame = null;
     _closed.complete();
+    _renderWait?.complete();
     unawaited(process.stdin.close().catchError((Object _) {}));
     // EOF wakes the worker even if the host stopped producing frames.
     final timer = Timer(
@@ -488,6 +544,12 @@ class _Session {
       () => process.kill(ProcessSignal.sigkill),
     );
     unawaited(process.exitCode.then((_) => timer.cancel()));
+  }
+
+  void close(String reason) {
+    if (closed) return;
+    closed = true;
+    _stopTransport();
     for (final p in _pictures.values) {
       _retire(p.image);
     }

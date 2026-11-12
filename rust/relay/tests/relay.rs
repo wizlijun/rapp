@@ -301,16 +301,17 @@ async fn logs_register_connect_lockout_and_relayed_without_secrets() {
     let mut seen = serve_a(a.clone());
     let (b_addr, b) = dial_from(&relay).await;
 
-    // A relayed stream, closed by both ends.
+    // A relayed stream the size of a real session (a probe-sized one is not Info, see below), closed by both ends.
     let ok = req(&b, json!({"op":"connect","key":KEY,"id":id,"password":"pw-secret-1","name":"mbp"})).await;
     let token = ok["token"].as_str().unwrap().to_string();
     let _incoming = seen.recv().await.unwrap();
     let mut s = bi(b.open_bi().await.unwrap());
     write_json(&mut s, &json!({"op":"relay","key":KEY,"token":token})).await.unwrap();
-    write_json(&mut s, &json!({"op":"list_apps"})).await.unwrap();
+    write_json(&mut s, &json!({"op":"list_apps","pad":"x".repeat(9000)})).await.unwrap();
     read_json(&mut s).await.unwrap();
     s.writer_mut().finish().unwrap();
     let relayed = wait_for_event(&log_path, "relayed").await;
+    assert_eq!(relayed["lvl"], "info");
     assert_eq!((relayed["to"].as_str(), relayed["from"].as_str()), (Some(id.as_str()), Some(b_addr.as_str())));
     assert!(relayed["up"].as_u64().unwrap() > 0 && relayed["down"].as_u64().unwrap() > 0, "{relayed}");
 
@@ -354,4 +355,83 @@ async fn logs_register_connect_lockout_and_relayed_without_secrets() {
 
 fn find_bad_key_connect(evs: &[Value]) -> Value {
     evs.iter().find(|e| e["ev"] == "connect" && e["result"] == "bad key").cloned().expect("bad-key connect logged")
+}
+
+/// One relayed request/reply on a fresh stream: `op` plus `pad` bytes of padding (echoed back by A).
+async fn relayed_once(b: &Connection, token: &str, pad: usize) {
+    let mut s = bi(b.open_bi().await.unwrap());
+    write_json(&mut s, &json!({"op":"relay","key":KEY,"token":token})).await.unwrap();
+    write_json(&mut s, &json!({"op":"ping","pad":"x".repeat(pad)})).await.unwrap();
+    read_json(&mut s).await.unwrap();
+    s.writer_mut().finish().unwrap();
+}
+
+#[tokio::test]
+async fn a_presence_sized_relayed_stream_is_debug_a_real_one_stays_info() {
+    for debug in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let log_path = dir.path().join("relay.log");
+        let log = Log::file(dir.path(), "relay.log").with_debug(debug);
+        let relay = start_logged(&dir.path().join("relay.json"), Duration::from_secs(60), log);
+        let (_a, id, mut seen) = online_a(&relay, "pw").await;
+        let b = dial(&relay).await;
+        let token = req(&b, connect_msg(&id, "pw")).await["token"].as_str().unwrap().to_string();
+        let _incoming = seen.recv().await.unwrap();
+        for pad in 0..3 {
+            relayed_once(&b, &token, pad).await; // what a 30 s presence ping costs (pad: no repeat-collapse)
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        relayed_once(&b, &token, 9000).await; // a session that moved real data
+        let info = loop {
+            let found = events(&log_path).into_iter().find(|e| e["ev"] == "relayed" && e["lvl"] == "info");
+            if let Some(e) = found {
+                break e;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        };
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        relay.stop();
+        assert!(info["up"].as_u64().unwrap() + info["down"].as_u64().unwrap() > 8 * 1024, "{info}");
+        let relayed: Vec<Value> = events(&log_path).into_iter().filter(|e| e["ev"] == "relayed").collect();
+        let small: Vec<&Value> = relayed.iter().filter(|e| e["lvl"] != "info").collect();
+        assert_eq!(relayed.len() - small.len(), 1, "one Info line, the real one: {relayed:?}");
+        if debug {
+            assert_eq!(small.len(), 3, "{relayed:?}");
+            assert!(small.iter().all(|e| e["lvl"] == "debug" && e["to"] == id.as_str()), "{relayed:?}");
+        } else {
+            assert!(small.is_empty(), "debug lines are off by default: {relayed:?}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn an_offline_connect_is_logged_once_per_source_and_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let log_path = dir.path().join("relay.log");
+    let relay =
+        start_logged(&dir.path().join("relay.json"), Duration::from_secs(60), Log::file(dir.path(), "relay.log"));
+    let (a1, id1, _s1) = online_a(&relay, "pw").await;
+    let (a2, id2, _s2) = online_a(&relay, "pw").await;
+    a1.close(0u32.into(), b"bye");
+    a2.close(0u32.into(), b"bye");
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let b = dial(&relay).await;
+    for _ in 0..4 {
+        assert_eq!(req(&b, connect_msg(&id1, "pw")).await["error"], "offline");
+    }
+    // Another B connection from the same ip probing the same id: still the same pair.
+    assert_eq!(req(&dial(&relay).await, connect_msg(&id1, "pw")).await["error"], "offline");
+    assert_eq!(req(&b, connect_msg(&id2, "pw")).await["error"], "offline");
+    // Auth failures are never thinned (two connections, so the log's repeat-collapse keeps both lines).
+    assert_eq!(req(&b, connect_msg(&id2, "wrong")).await["error"], "bad password");
+    assert_eq!(req(&dial(&relay).await, connect_msg(&id2, "wrong")).await["error"], "bad password");
+    relay.stop();
+    drop(relay);
+    let evs = events(&log_path);
+    let offline = |id: &str| evs.iter().filter(|e| e["ev"] == "connect" && e["result"] == "offline" && e["to"] == id).count();
+    assert_eq!(offline(&id1), 1, "{evs:?}");
+    assert_eq!(offline(&id2), 1, "{evs:?}");
+    let bad = evs.iter().filter(|e| e["ev"] == "connect" && e["result"] == "bad password").count();
+    assert_eq!(bad, 2, "{evs:?}");
+    assert!(evs.iter().filter(|e| e["result"] == "offline").all(|e| e["lvl"] == "warn"), "{evs:?}");
 }

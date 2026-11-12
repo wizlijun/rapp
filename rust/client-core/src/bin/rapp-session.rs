@@ -169,12 +169,14 @@ fn run(out: &Output) -> Result<()> {
     });
     let bytes = Arc::new(AtomicU64::new(0));
     let rate = bytes.clone();
+    let frames = Arc::new(AtomicU64::new(0));
+    let frame_rate = frames.clone();
     let traffic = out.clone();
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_secs(1));
         if event(
             &traffic,
-            json!({"event":"traffic","bytes":rate.swap(0,Ordering::Relaxed)}),
+            json!({"event":"traffic","bytes":rate.swap(0,Ordering::Relaxed),"frames":frame_rate.swap(0,Ordering::Relaxed)}),
         )
         .is_err()
         {
@@ -220,6 +222,7 @@ fn run(out: &Output) -> Result<()> {
                 w.write_all(&frame)?;
                 w.write_all(&pixels)?;
                 w.flush()?;
+                frames.fetch_add(1, Ordering::Relaxed);
             }
             Incoming::Windows(windows) => {
                 let kinds = [
@@ -251,7 +254,7 @@ fn main() {
         Ok(()) => "closed".into(),
         Err(e) => format!("{e:#}"),
     };
-    let _ = event(&out, json!({"event":"closed","reason":reason}));
+    let _ = event(&out, json!({"event":"disconnected","reason":reason}));
 }
 
 #[cfg(test)]

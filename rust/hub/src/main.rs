@@ -17,6 +17,7 @@ async fn main() {
         bin_dir: rapp_net::bins::bin_dir_from_env(),
         force_path: std::env::var("RAPP_FORCE_PATH").ok(),
         log: log.clone(),
+        presence_every: Some(std::time::Duration::from_secs(30)),
     };
     if let Err(e) = rapp_hub::run(opts, tokio::io::stdin(), tokio::io::stdout()).await {
         log.msg(Lvl::Error, format_args!("{e:#}"));

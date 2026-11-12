@@ -1,7 +1,7 @@
 //! Per-connection and per-stream handling of register / connect / relay.
 
 use crate::db::{self, Db, Device};
-use crate::limit::Limiter;
+use crate::limit::{Limiter, Seldom};
 use crate::Opts;
 use anyhow::{anyhow, Result};
 use quinn::{Connection, Endpoint};
@@ -19,6 +19,16 @@ use std::time::{Duration, Instant};
 
 const INCOMING_WAIT: Duration = Duration::from_secs(2);
 
+/// A relayed stream shorter than this and smaller than `PROBE_BYTES` (both ways together) is a
+/// presence ping or a like-sized control request, not a session: its `relayed` line is Debug, so
+/// a 30 s probe does not fill the access record. A ping costs about 100 bytes and well under a
+/// second; a session sends its first frame (tens of KB) at once and lasts longer than this.
+const PROBE_TIME: Duration = Duration::from_secs(5);
+const PROBE_BYTES: u64 = 8 * 1024;
+
+/// `connect` → `offline` is a Warn line at most this often per (source ip, target id).
+const OFFLINE_LOG_EVERY: Duration = Duration::from_secs(600);
+
 struct Online {
     conn: Connection,
     lan: Vec<String>,
@@ -33,6 +43,8 @@ pub struct State {
     /// token → (device id, expiry)
     tokens: Mutex<HashMap<String, (String, Instant)>>,
     limiter: Mutex<Limiter>,
+    /// (source ip, target id) pairs whose `offline` was logged lately.
+    offline_seen: Mutex<Seldom>,
     pub log: Log,
 }
 
@@ -46,6 +58,7 @@ impl State {
             online: Mutex::default(),
             tokens: Mutex::default(),
             limiter: Mutex::default(),
+            offline_seen: Mutex::new(Seldom::new(OFFLINE_LOG_EVERY)),
             log: opts.log,
         })
     }
@@ -143,10 +156,18 @@ fn ip_of(conn: &Connection) -> String {
 }
 
 /// One `connect` event (spec §4.2); `from` is B's address as the relay sees it.
+/// A repeated `offline` for the same (source ip, target id) within 10 minutes is Debug (I-2).
 fn log_connect(state: &State, conn: &Connection, name: Option<&str>, to: Option<&str>, result: &str) {
     let (name, to) = (name.map(clean_name), to.map(clean_name));
+    let mut lvl = lvl_of(result);
+    if result == "offline" {
+        let pair = format!("{}|{}", ip_of(conn), to.as_deref().unwrap_or(""));
+        if !state.offline_seen.lock().unwrap().first(&pair, Instant::now()) {
+            lvl = Lvl::Debug;
+        }
+    }
     let fields = json!({"from": conn.remote_address().to_string(), "name": name, "to": to, "result": result});
-    state.log.event(lvl_of(result), "connect", fields);
+    state.log.event(lvl, "connect", fields);
 }
 
 /// The reply and the `register` event's result (`new`, `ok`, `replaced`, `id taken`).
@@ -249,7 +270,9 @@ async fn relay(state: &State, conn: &Connection, token: &str, b: &mut BiStream) 
     let (since, meter) = (Instant::now(), Meter::default());
     let r = splice_metered(b, &mut s, &meter).await;
     let (up, down) = meter.get();
-    let fields = json!({"to": id, "from": conn.remote_address().to_string(), "secs": since.elapsed().as_secs(), "up": up, "down": down});
-    state.log.event(Lvl::Info, "relayed", fields);
+    let took = since.elapsed();
+    let probe = took < PROBE_TIME && up.saturating_add(down) < PROBE_BYTES;
+    let fields = json!({"to": id, "from": conn.remote_address().to_string(), "secs": took.as_secs(), "up": up, "down": down});
+    state.log.event(if probe { Lvl::Debug } else { Lvl::Info }, "relayed", fields);
     r.map_err(Into::into)
 }

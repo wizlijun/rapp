@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
+import 'package:rapp/ui/lamp.dart';
 import 'package:rapp/ui/tab_chip.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
@@ -218,6 +219,210 @@ void main() {
       expect(es.currentRemote!.currentWindow, 1);
       expect(tester.widget<TabChip>(find.widgetWithText(TabChip, 'One')).selected, isTrue);
       expect(tester.widget<TabChip>(find.widgetWithText(TabChip, 'Two')).selected, isFalse);
+    });
+  });
+
+  for (final w in [240.0, 360.0]) {
+    testWidgets('top bar fits ${w.toInt()}px with a two-digit needs count', (tester) async {
+      await tester.pumpWidget(wrap(SizedBox(
+        width: w,
+        child: TopBar(state: s, fullscreen: false, onToggleFullscreen: () {}),
+      )));
+      t.emit({
+        'event': 'hosts',
+        'hosts': [for (var i = 0; i < 10; i++) {'id': 'd$i', 'name': 'device $i'}],
+      });
+      for (var i = 0; i < 10; i++) {
+        t.emit({'event': 'presence', 'id': 'd$i', 'online': true});
+        t.emit({'event': 'presence', 'id': 'd$i', 'online': false});
+      }
+      await tester.runAsync(flush);
+      await tester.pump();
+      expect(tester.widget<Text>(find.byKey(const Key('needs-count'))).data, '10');
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  group('needs-you', () {
+    late FakeSessionPort port;
+    late MainState es;
+    var nextSid = 0;
+
+    setUp(() {
+      port = FakeSessionPort();
+      nextSid = 0;
+      t.onSend = (m) {
+        if (m['cmd'] == 'open') {
+          t.emit({
+            'event': 'opened', 'sid': ++nextSid, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+            if (m['embed'] == true) ...{'port': 5000 + nextSid, 'token': 'tk'},
+            'req': m['req'],
+          });
+        }
+      };
+      // One MainState on the hub: a second would take the presence events first.
+      s.dispose();
+      s = es = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: port);
+    });
+
+    Widget ebar() => SizedBox(
+          width: 800,
+          height: 600,
+          child: Align(
+            alignment: Alignment.topCenter,
+            child: TopBar(state: es, fullscreen: false, onToggleFullscreen: () {}),
+          ),
+        );
+
+    Future<void> openApp(WidgetTester tester, String app) async {
+      await tester.runAsync(() async {
+        es.openOrSwitch('111', app, app);
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      await tester.pump();
+    }
+
+    Future<void> dropAll(WidgetTester tester, int n) async {
+      for (var sid = 1; sid <= n; sid++) {
+        port.emit(DisconnectedEvent(sid, 'connection closed'));
+      }
+      await tester.pump();
+    }
+
+    Lamp lampOf(WidgetTester tester) => tester
+        .widget<StatusLamp>(find.descendant(of: find.byKey(const Key('needs-you')), matching: find.byType(StatusLamp)))
+        .kind;
+
+    testWidgets('needs-you shows lamp and count', (tester) async {
+      await tester.pumpWidget(wrap(ebar()));
+      expect(find.byKey(const Key('needs-count')), findsNothing);
+      expect(lampOf(tester), Lamp.active);
+      expect(find.bySemanticsLabel('需要你：没有'), findsOneWidget);
+      await openApp(tester, 'Safari');
+      await dropAll(tester, 1);
+      expect(tester.widget<Text>(find.byKey(const Key('needs-count'))).data, '1');
+      expect(lampOf(tester), Lamp.disconnected);
+      final size = tester.getSize(find.byKey(const Key('needs-you')));
+      expect(size.width, greaterThanOrEqualTo(48));
+      expect(size.height, greaterThanOrEqualTo(48));
+      expect(find.bySemanticsLabel('需要你：1 件'), findsOneWidget);
+    });
+
+    testWidgets('only a dropped device shows the offline lamp', (tester) async {
+      await tester.pumpWidget(wrap(ebar()));
+      t.emit({'event': 'presence', 'id': '111', 'online': true});
+      t.emit({'event': 'presence', 'id': '111', 'online': false});
+      await tester.runAsync(flush);
+      await tester.pump();
+      expect(lampOf(tester), Lamp.offline);
+      expect(tester.widget<Text>(find.byKey(const Key('needs-count'))).data, '1');
+    });
+
+    testWidgets('needs popover lists three and the rest', (tester) async {
+      await tester.pumpWidget(wrap(ebar()));
+      await tester.tap(find.byKey(const Key('needs-you')));
+      await tester.pump();
+      expect(find.text('没有需要你处理的事'), findsOneWidget);
+      await tester.tapAt(const Offset(10, 500));
+      await tester.pump();
+      expect(find.byKey(const Key('needs-scrim')), findsNothing);
+      for (final app in ['a1', 'a2', 'a3', 'a4']) {
+        await openApp(tester, app);
+      }
+      await dropAll(tester, 4);
+      await tester.tap(find.byKey(const Key('needs-you')));
+      await tester.pump();
+      expect(find.textContaining('已断开：网络断了'), findsNWidgets(3));
+      expect(find.text('还有 1 件'), findsOneWidget);
+      expect(find.text('没有需要你处理的事'), findsNothing);
+    });
+
+    testWidgets('reconnect from needs keeps the selection and closes', (tester) async {
+      await tester.pumpWidget(wrap(ebar()));
+      await openApp(tester, 'a');
+      await openApp(tester, 'b');
+      es.select('111/b');
+      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('needs-you')));
+      await tester.pump();
+      await tester.runAsync(() async {
+        await tester.tap(find.byKey(const Key('need-reconnect-111/a')));
+        await flush();
+      });
+      await tester.pump();
+      final open = t.sent.where((m) => m['cmd'] == 'open').last;
+      expect(open['app'], 'a');
+      expect(open['reconnect'], true);
+      expect(es.currentKey, '111/b');
+      expect(es.corner, isNull);
+      expect(find.byKey(const Key('needs-scrim')), findsNothing);
+    });
+
+    testWidgets('show on a device row opens the device panel', (tester) async {
+      await tester.pumpWidget(wrap(ebar()));
+      t.emit({'event': 'presence', 'id': '111', 'online': true});
+      t.emit({'event': 'presence', 'id': '111', 'online': false});
+      await tester.runAsync(flush);
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('needs-you')));
+      await tester.pump();
+      expect(find.text('mini 离线'), findsOneWidget);
+      await tester.runAsync(() async {
+        await tester.tap(find.byKey(const Key('need-show-111')));
+        await flush();
+      });
+      await tester.pump();
+      expect(es.panel, PanelTab.devices);
+      expect(es.deviceTab, '111');
+      expect(es.corner, isNull);
+    });
+
+    testWidgets('opening needs closes the stream menu', (tester) async {
+      await tester.pumpWidget(wrap(ebar()));
+      await openApp(tester, 'Safari');
+      await tester.tap(find.byKey(const Key('traffic')));
+      await tester.pump();
+      expect(find.byKey(const Key('stream-menu-scrim')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('needs-you')));
+      await tester.pump();
+      expect(find.byKey(const Key('stream-menu-scrim')), findsNothing);
+      expect(find.byKey(const Key('needs-scrim')), findsOneWidget);
+      expect(es.corner, Corner.needs);
+    });
+
+    testWidgets('a tap outside closes the open corner, the top bar included', (tester) async {
+      await tester.pumpWidget(wrap(ebar()));
+      await openApp(tester, 'Safari');
+      es.toggleCorner(Corner.needs);
+      await tester.pump();
+      expect(find.byKey(const Key('needs-scrim')), findsOneWidget);
+      // The tap still reaches the button: the panel opens and the popover goes.
+      await tester.tap(find.byKey(const Key('panel-button')));
+      await tester.pump();
+      expect(es.corner, isNull);
+      expect(es.panel, isNotNull);
+      expect(find.byKey(const Key('needs-scrim')), findsNothing);
+
+      await tester.tap(find.byKey(const Key('traffic')));
+      await tester.pump();
+      expect(es.corner, Corner.stream);
+      await tester.tap(find.byKey(const Key('fullscreen-button')));
+      await tester.pump();
+      expect(es.corner, isNull);
+      expect(find.byKey(const Key('stream-menu-scrim')), findsNothing);
+
+      // Below the bar too, and a tap inside the popover keeps it.
+      es.toggleCorner(Corner.needs);
+      await tester.pump();
+      await tester.tap(find.text('没有需要你处理的事'));
+      await tester.pump();
+      expect(es.corner, Corner.needs);
+      await tester.tapAt(const Offset(10, 500));
+      await tester.pump();
+      expect(es.corner, isNull);
     });
   });
 }
