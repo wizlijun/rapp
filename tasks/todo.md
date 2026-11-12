@@ -172,7 +172,15 @@
     - [ ] 待实机：退出再开，常用、项目、任务都在
     - [ ] 待实机：workspace.json 写坏 → 提示「项目和常用没有读到，已从空白开始」，留 workspace.json.bad
     - [ ] 打包：package-macos.sh 现在会用钥匙串证书签名，和在线升级 Task 8 一起等用户同意
-- [ ] S6 全局资源（规格：`docs/superpowers/specs/2026-11-12-rapp-s6-global-resources-design.md`）
+- [x] S6 全局资源（规格：`docs/superpowers/specs/2026-11-12-rapp-s6-global-resources-design.md`）
+  - 代码 + 测试完成（计划 Task 1–6 + 终审修复，提交到 8b843f6；flutter 572、swift 通过、cargo 208、check.sh EXIT=0）；hub 的 sid 改从毫秒时钟起，重启服务后不再重号。以下实机条目待用户安排时间
+    - [ ] 待实机：两个会话各在 A 上复制测试文字 → 资源标签两条，来源对、最新在上
+    - [ ] 待实机：固定一条 → 结束它的会话 → 固定的还在、「复制到本机」可用；同会话未固定的没了
+    - [ ] 待实机：A 上复制测试文件 → 「复制到本机」有进度 → 进传过的 → 「显示位置」选中下载目录里的文件
+    - [ ] 待实机：大文件下到一半「取消」→ 下载目录留 `.rapp-part`
+    - [ ] 待实机：流菜单第 5 组只显示当前会话最新两条；「全部剪贴板」打开资源标签、流菜单收起
+    - [ ] 待实机：按 PID 停掉一个会话的 host → 它的条目变灰「A 已断开，复制不到」
+    - [ ] 打包：和 S5、在线升级 Task 8 一起等用户同意
 - [ ] S4 全景（规格：`docs/superpowers/specs/2026-11-12-rapp-s4-overview-design.md`）
 
 ## 插入的严重问题（2026-11-12，用户报告）
