@@ -14,6 +14,15 @@ final class WorkerCLITests: XCTestCase {
 
     // MARK: rapp-host arguments
 
+    func testTakeoverGateAllowsOnePromptAndStaysPending() {
+        let gate = TakeoverGate()
+        XCTAssertFalse(gate.pending)
+        XCTAssertTrue(gate.begin())
+        XCTAssertTrue(gate.pending)
+        XCTAssertFalse(gate.begin())
+        XCTAssertTrue(gate.pending)
+    }
+
     func testHostLegacyForm() throws {
         XCTAssertEqual(try host("--token", "abc"),
                        .serve(HostServeOptions(app: nil, token: "abc", port: 47800, bind: nil, json: false)))

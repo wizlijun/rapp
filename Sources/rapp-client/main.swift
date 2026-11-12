@@ -24,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var mirroredMenu: MirroredMenu!
     private var keyMonitor: Any?
     private var ready = false
+    private let takeover = TakeoverGate()
     /// The window count last logged.
     private var loggedWindows: Int?
 
@@ -65,7 +66,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         connection.onMessage = { [weak self] message in self?.handle(message) }
         connection.onBytes = { [weak self] count in self?.meter.add(bytes: count) }
         streamMenu.onSelect = { [weak self] in self?.sendStreamIfChanged() }
-        connection.onClosed = { [output] reason in output.finish(ExitCode.runtime, "rapp-client: \(reason)") }
+        connection.onClosed = { [output, takeover] reason in
+            if takeover.pending { return }  // the 拿回来 prompt is up; its answer decides
+            output.finish(ExitCode.runtime, "rapp-client: \(reason)") }
 
         // Command shortcuts: Command-Q always quits this client. With an empty
         // (or no) composer the others go to the remote app; otherwise they edit it.
@@ -160,6 +163,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: Messages from the host
 
     private func handle(_ message: Message) {
+        if takeover.pending { return }
         switch message {
         case let .ready(appName, width, height):
             coordinator.ready(appName: appName)
@@ -208,13 +212,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Another device took this window over: tell the user; 「拿回来」 starts this client again and quits.
     private func offerTakeBack(_ notice: String, reason: String) {
+        guard takeover.begin() else { return }
         let alert = NSAlert()
         alert.messageText = notice
         alert.addButton(withTitle: "拿回来")
         alert.addButton(withTitle: "关闭")
         if alert.runModal() == .alertFirstButtonReturn {
             let process = Process()
-            process.executableURL = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
+            process.executableURL = Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
             process.arguments = Array(CommandLine.arguments.dropFirst())
             process.environment = ProcessInfo.processInfo.environment
             do {

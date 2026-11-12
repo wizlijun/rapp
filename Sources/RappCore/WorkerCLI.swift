@@ -382,3 +382,16 @@ public final class WorkerOutput {
         thread.start()
     }
 }
+
+/// Whether a takeover prompt is up. While it is, the closing socket and later host messages must not end the
+/// client (the user is still choosing), and a second takeover must not stack another prompt.
+public final class TakeoverGate {
+    public private(set) var pending = false
+    public init() {}
+    /// True the first time only: the caller shows the prompt then.
+    public func begin() -> Bool {
+        if pending { return false }
+        pending = true
+        return true
+    }
+}
