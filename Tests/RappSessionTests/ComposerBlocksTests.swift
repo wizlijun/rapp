@@ -8,11 +8,13 @@ final class ComposerBlocksTests: XCTestCase {
         XCTAssertEqual(blocks.add(.text(sixty)), 1)
         XCTAssertEqual(blocks.label(1), "[贴入文字 #1 +60 行]")
         XCTAssertEqual(blocks.add(.image(png: [1], width: 10, height: 20)), 2)
-        XCTAssertEqual(blocks.label(2), "[图片 #2 10×20]")
+        XCTAssertEqual(blocks.label(2), "[图片 #1 10×20]")
         blocks.remove(1)
         XCTAssertNil(blocks.payload(1))
         XCTAssertNil(blocks.label(1))
         XCTAssertNotNil(blocks.payload(2))
+        XCTAssertEqual(blocks.add(.text("b")), 3)
+        XCTAssertEqual(blocks.label(3), "[贴入文字 #2 +1 行]")
     }
 
     func testUploadedItemFollowsTheBlock() {
