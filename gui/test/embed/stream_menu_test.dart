@@ -14,6 +14,7 @@ void main() {
   late FakeSessionPort port;
   late RemoteSession rs;
   var ended = 0;
+  var shellOpen = false;
   int? detachCalls;
   var disconnects = 0, reconnects = 0;
 
@@ -22,6 +23,7 @@ void main() {
 
   Future<void> open(WidgetTester tester,
       {VoidCallback? onDetach, bool disconnected = false, bool reconnecting = false, bool hub = true, String status = '活动'}) async {
+    shellOpen = false;
     ended = 0;
     disconnects = 0;
     reconnects = 0;
@@ -32,7 +34,10 @@ void main() {
     addTearDown(tester.view.reset);
     await tester.pumpWidget(wrap(Align(
       alignment: Alignment.topRight,
-      child: StreamMenuAnchor(
+      child: StatefulBuilder(builder: (context, set) => StreamMenuAnchor(
+        open: shellOpen,
+        onToggle: () => set(() => shellOpen = !shellOpen),
+        onClose: () => set(() => shellOpen = false),
         port: port,
         session: rs,
         path: 'lan',
@@ -43,7 +48,7 @@ void main() {
         onReconnect: hub ? () => reconnects++ : null,
         onEnd: () => ended++,
         onToggleDetach: onDetach,
-      ),
+      )),
     )));
     await tester.tap(find.byKey(const Key('traffic')));
     await tester.pump();

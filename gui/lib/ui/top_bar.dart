@@ -5,6 +5,7 @@ import '../embed/stream_menu.dart';
 import 'lamp.dart';
 import 'tab_chip.dart';
 import 'main_state.dart';
+import 'needs_you.dart';
 import 'session_model.dart';
 import 'tokens.dart';
 
@@ -32,7 +33,7 @@ class TopBar extends StatelessWidget {
         // right edge. (A loose Flexible would leave its unused share of the
         // slack at the end of the row.)
         final sessionMax =
-            (box.maxWidth - 4 * 48 - 6 * gap).clamp(0.0, 260.0).toDouble();
+            (box.maxWidth - 5 * 48 - 7 * gap).clamp(0.0, 260.0).toDouble();
         return ListenableBuilder(
           listenable: state,
           builder: (context, _) {
@@ -43,7 +44,7 @@ class TopBar extends StatelessWidget {
             final multi = state.sessionCount >= 2;
             final small = Theme.of(context).textTheme.bodySmall;
             return Container(
-              height: 56,
+              height: topBarHeight,
               padding: EdgeInsets.symmetric(horizontal: gap),
               decoration: BoxDecoration(
                 color: t.bg,
@@ -153,6 +154,7 @@ class TopBar extends StatelessWidget {
                     )
                   else
                     const Spacer(),
+                  if (state.hub != null) NeedsYouAnchor(state: state),
                   if (state.port != null && state.currentRemote != null && cur != null)
                     StreamMenuAnchor(
                       key: ValueKey(cur.sid),
@@ -166,6 +168,9 @@ class TopBar extends StatelessWidget {
                       onReconnect: state.hubUsable ? state.reconnectCurrent : null,
                       onEnd: state.endCurrent,
                       onToggleDetach: state.canToggleDetach ? state.toggleDetach : null,
+                      open: state.corner == Corner.stream,
+                      onToggle: () => state.toggleCorner(Corner.stream),
+                      onClose: state.closeCorner,
                     ),
                   _icon(
                     'fullscreen-button',

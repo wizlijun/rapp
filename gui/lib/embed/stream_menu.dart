@@ -24,10 +24,18 @@ class StreamMenuAnchor extends StatefulWidget {
     required this.onReconnect,
     required this.onEnd,
     this.onToggleDetach,
+    required this.open,
+    required this.onToggle,
+    required this.onClose,
   });
 
   final SessionPort port;
   final RemoteSession session;
+
+  /// Whether the menu is open; the owner decides (the corners are exclusive), the anchor shows it.
+  final bool open;
+  final VoidCallback onToggle;
+  final VoidCallback onClose;
 
   /// The hub's path word (`lan`, `direct`, `relay`).
   final String path;
@@ -58,17 +66,15 @@ class StreamMenuAnchor extends StatefulWidget {
 class _StreamMenuAnchorState extends State<StreamMenuAnchor> {
   final _portal = OverlayPortalController();
   final _link = LayerLink();
-  bool _open = false;
 
-  void _toggle() {
-    setState(() => _open = !_open);
-    _open ? _portal.show() : _portal.hide();
-  }
-
-  void _close() {
-    if (!_open) return;
-    setState(() => _open = false);
-    _portal.hide();
+  // The portal is shown for good (not while building: its controller refuses); what it draws
+  // follows [StreamMenuAnchor.open], in the same frame as the change.
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _portal.show();
+    });
   }
 
   @override
@@ -78,13 +84,16 @@ class _StreamMenuAnchorState extends State<StreamMenuAnchor> {
       link: _link,
       child: OverlayPortal(
         controller: _portal,
-        overlayChildBuilder: (context) => Stack(
+        overlayChildBuilder: (context) => !widget.open
+            ? const SizedBox.shrink()
+            : Stack(
           children: [
             Positioned.fill(
+              top: topBarHeight,
               child: GestureDetector(
                 key: const Key('stream-menu-scrim'),
                 behavior: HitTestBehavior.opaque,
-                onTap: _close,
+                onTap: widget.onClose,
               ),
             ),
             CompositedTransformFollower(
@@ -107,7 +116,7 @@ class _StreamMenuAnchorState extends State<StreamMenuAnchor> {
                     reconnecting: widget.reconnecting,
                     onDisconnect: widget.onDisconnect,
                     onReconnect: widget.onReconnect,
-                    onClose: _close,
+                    onClose: widget.onClose,
                     onEnd: widget.onEnd,
                     onToggleDetach: widget.onToggleDetach,
                   ),
@@ -121,9 +130,9 @@ class _StreamMenuAnchorState extends State<StreamMenuAnchor> {
           builder: (context, _) => TrafficLabel(
             key: const Key('traffic'),
             bytesPerSecond: widget.session.bytesPerSecond,
-            open: _open,
-            onTap: _toggle,
-            onSecondaryTap: _toggle,
+            open: widget.open,
+            onTap: widget.onToggle,
+            onSecondaryTap: widget.onToggle,
           ),
         ),
       ),

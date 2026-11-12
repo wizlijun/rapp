@@ -1,10 +1,11 @@
 // The single source of UI state for the main window.
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui' show Rect, Size;
+import 'dart:ui' show Size;
 
 import 'package:flutter/foundation.dart';
 
+import '../embed/geometry.dart' show PictureHole;
 import '../embed/remote_session.dart';
 import '../embed/session_port.dart';
 import '../embed/stream_choice.dart';
@@ -19,6 +20,21 @@ import 'tokens.dart';
 export 'lifecycle.dart' show hubWord, hubWords;
 
 enum PanelTab { sessions, devices }
+
+/// The two top-bar corners; at most one is open.
+enum Corner { stream, needs }
+
+enum NeedKind { session, device }
+
+/// One thing waiting for the person: a disconnected session ([target] its record key) or a
+/// device that dropped ([target] its id). Newer [seq] first.
+class NeedItem {
+  const NeedItem(this.kind, this.target, this.text, this.seq);
+  final NeedKind kind;
+  final String target;
+  final String text;
+  final int seq;
+}
 
 class DeviceProbe {
   DeviceProbe(this.lamp, this.word, {this.apps, this.error});
@@ -121,6 +137,8 @@ class MainState extends ChangeNotifier {
   int get disconnectedCount => _records.values.where((r) => r.phase == Phase.disconnected).length;
 
   PanelTab? panel;
+  Corner? corner;
+  String? _lastKey;
   Grouping grouping = Grouping.device;
   String? currentKey;
   String hint = '';
@@ -136,6 +154,11 @@ class MainState extends ChangeNotifier {
   @override
   void notifyListeners() {
     if (_disposed) return;
+    // The stream menu belongs to the session it was opened on.
+    if (currentKey != _lastKey) {
+      _lastKey = currentKey;
+      if (corner == Corner.stream) corner = null;
+    }
     if (embeds) _entries = _mapEntries();
     // Focus never stays on a session that is no longer current.
     if (pictureFocused != null && current?.sid != pictureFocused) _blur();
@@ -174,7 +197,7 @@ class MainState extends ChangeNotifier {
   RemoteSession? _syncedRs;
 
   /// The picture's rect in global coordinates; the IRON MAN grid leaves it out (R25).
-  final ValueNotifier<Rect?> pictureHole = ValueNotifier(null);
+  final PictureHole pictureHole = PictureHole();
 
   /// The stage is [s] big now. Remembered, and given to the current session's resize policy.
   void stageSize(Size s) {
@@ -286,6 +309,62 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ---- corners and needs ----
+  void toggleCorner(Corner c) {
+    corner = corner == c ? null : c;
+    notifyListeners();
+  }
+
+  void closeCorner() {
+    if (corner == null) return;
+    corner = null;
+    notifyListeners();
+  }
+
+  /// Devices that were seen online; only these count as dropped when they go offline.
+  final Set<String> _seenOnline = {};
+
+  /// Dropped devices and when (`_seq`) they dropped. A manual probe never touches it (R16).
+  final Map<String, int> _offlineSince = {};
+
+  /// Everything waiting for the person, newest first. Handled things leave on their own.
+  List<NeedItem> get needs {
+    final out = <NeedItem>[
+      for (final r in _records.values)
+        if (r.phase == Phase.disconnected)
+          NeedItem(NeedKind.session, r.key, '${r.appName} @ ${deviceName(r.id)} 已断开：${disconnectWord(r.reason)}', r.seq),
+      for (final h in hub?.hosts ?? const <HubHost>[])
+        if (_seenOnline.contains(h.id) && _offlineSince.containsKey(h.id))
+          NeedItem(NeedKind.device, h.id, '${deviceName(h.id)} 离线', _offlineSince[h.id]!),
+    ];
+    out.sort((a, b) => b.seq.compareTo(a.seq));
+    return out;
+  }
+
+  int get needCount => needs.length;
+
+  /// The result of a probe or a presence event, for the lamp and the needs.
+  void _setOnline(String id, bool online, {AppList? apps, String? error}) {
+    final old = probes[id];
+    if (online) {
+      _seenOnline.add(id);
+      _offlineSince.remove(id);
+      probes[id] = DeviceProbe(Lamp.active, '在线', apps: apps ?? old?.apps);
+    } else {
+      _offlineSince.putIfAbsent(id, () => ++_seq);
+      probes[id] = DeviceProbe(Lamp.offline, '离线', apps: apps ?? old?.apps, error: error ?? old?.error);
+    }
+  }
+
+  /// 「查看」 on a dropped device: the device panel on it, with a fresh probe.
+  void showDevice(String id) {
+    panel = PanelTab.devices;
+    deviceTab = id;
+    corner = null;
+    notifyListeners();
+    probe(id);
+  }
+
   // ---- sessions ----
   List<SessionGroup> get groups => groupSessions(_entries, grouping);
 
@@ -370,6 +449,10 @@ class MainState extends ChangeNotifier {
   }
 
   void _onHub() {
+    for (final p in hub!.takePresence()) {
+      if (probes[p.id]?.lamp == Lamp.connecting) continue;
+      _setOnline(p.id, p.online);
+    }
     if (embeds) {
       _onHubEmbedded();
       return;
@@ -751,9 +834,9 @@ class MainState extends ChangeNotifier {
       for (final a in apps.apps) {
         _appNames['$id/${a.app}'] = a.name;
       }
-      probes[id] = DeviceProbe(Lamp.active, '在线', apps: apps);
+      _setOnline(id, true, apps: apps);
     } catch (e) {
-      probes[id] = DeviceProbe(Lamp.offline, '离线', apps: probes[id]?.apps, error: '$e');
+      _setOnline(id, false, error: '$e');
     }
     _entries = _mapEntries();
     notifyListeners();
@@ -789,6 +872,8 @@ class MainState extends ChangeNotifier {
     try {
       await hub!.removeHost(id);
       probes.remove(id);
+      _seenOnline.remove(id);
+      _offlineSince.remove(id);
       if (deviceTab == id) deviceTab = null;
     } catch (e) {
       hint = hubWord('$e');

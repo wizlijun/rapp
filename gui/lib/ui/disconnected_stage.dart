@@ -33,7 +33,7 @@ class DisconnectedStage extends StatefulWidget {
   final VoidCallback? onReconnect;
 
   /// Receives the last frame's global rect, so the IRON MAN grid leaves it alone (R25), like Picture's.
-  final ValueNotifier<Rect?>? hole;
+  final PictureHole? hole;
 
   @override
   State<DisconnectedStage> createState() => _DisconnectedStageState();
@@ -41,7 +41,6 @@ class DisconnectedStage extends StatefulWidget {
 
 class _DisconnectedStageState extends State<DisconnectedStage> {
   final _tex = GlobalKey();
-  Rect? _mine;
 
   RemoteWindow? get _window {
     final rs = widget.session;
@@ -58,18 +57,16 @@ class _DisconnectedStageState extends State<DisconnectedStage> {
     final box = _tex.currentContext?.findRenderObject();
     if (box is! RenderBox || !box.attached || !box.hasSize) return;
     final r = box.localToGlobal(Offset.zero) & box.size;
-    if (r == _mine && h.value == r) return;
-    _mine = r;
-    h.value = r;
+    if (h.owns(this, r)) return;
+    h.claim(this, r);
   }
 
   @override
   void dispose() {
-    final h = widget.hole, mine = _mine;
-    if (h != null && mine != null) {
-      SchedulerBinding.instance.addPostFrameCallback((_) {
-        if (h.value == mine) h.value = null;
-      });
+    final h = widget.hole;
+    if (h != null) {
+      // After the frame, so a successor that reports first is not cleared; release is by owner.
+      SchedulerBinding.instance.addPostFrameCallback((_) => h.release(this));
     }
     super.dispose();
   }

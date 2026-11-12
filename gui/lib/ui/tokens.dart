@@ -122,6 +122,10 @@ const _fontFallback = [
   'Noto Sans SC',
   'Microsoft YaHei',
 ];
+/// The top bar's height. The corners' scrims start below it, so a click on the other corner's
+/// button switches corners in one click instead of being eaten by the scrim.
+const topBarHeight = 56.0;
+
 const _mono = 'JetBrains Mono';
 const _monoFallback = ['SF Mono', 'Menlo', 'Consolas', 'monospace'];
 

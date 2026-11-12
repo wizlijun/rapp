@@ -1040,6 +1040,180 @@ void main() {
     });
   });
 
+  group('needs', () {
+    void env(void Function(FakeAsync a, FakeTransport t, FakeSessionPort port, MainState st) body) {
+      fakeAsync((a) {
+        final t = FakeTransport();
+        final hub = HubClient(t);
+        final port = FakeSessionPort();
+        t.emit({
+          'event': 'hosts',
+          'hosts': [
+            {'id': '111', 'name': 'mini'},
+            {'id': '222', 'name': ''},
+          ],
+        });
+        a.flushMicrotasks();
+        final st = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: port);
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            t.emit({
+              'event': 'opened', 'sid': m['reconnect'] == true ? 2 : 1, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+              if (m['embed'] == true) ...{'port': 5001, 'token': 'tk'},
+              'req': m['req'],
+            });
+          }
+        };
+        st.openOrSwitch('111', 'a', 'Calculator');
+        a.flushMicrotasks();
+        body(a, t, port, st);
+        st.dispose();
+      });
+    }
+
+    void presence(FakeAsync a, FakeTransport t, String id, bool online) {
+      t.emit({'event': 'presence', 'id': id, 'online': online});
+      a.flushMicrotasks();
+    }
+
+    test('disconnects and dropped devices count, newest first', () {
+      env((a, t, port, st) {
+        expect(st.needCount, 0);
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        presence(a, t, '111', true);
+        presence(a, t, '111', false);
+        expect(st.needCount, 2);
+        expect(st.needs.first.kind, NeedKind.device);
+        expect(st.needs.first.text, 'mini 离线');
+        expect(st.needs.first.target, '111');
+        expect(st.needs.last.kind, NeedKind.session);
+        expect(st.needs.last.target, '111/a');
+        expect(st.needs.last.text, 'Calculator @ mini 已断开：网络断了');
+      });
+    });
+
+    test('a device never seen online is not counted', () {
+      env((a, t, port, st) {
+        presence(a, t, '222', false);
+        expect(st.needCount, 0);
+        expect(st.probes['222']!.lamp, Lamp.offline);
+      });
+    });
+
+    test('a manual probe does not flicker the needs count', () {
+      env((a, t, port, st) {
+        presence(a, t, '111', true);
+        presence(a, t, '111', false);
+        expect(st.needCount, 1);
+        st.probe('111');
+        a.flushMicrotasks();
+        final req = t.sent.last['req'];
+        expect(t.sent.last['cmd'], 'apps');
+        expect(st.probes['111']!.lamp, Lamp.connecting);
+        expect(st.needCount, 1);
+        t.emit({'event': 'error', 'req': req, 'error': 'unreachable'});
+        a.flushMicrotasks();
+        expect(st.probes['111']!.lamp, Lamp.offline);
+        expect(st.needCount, 1);
+        st.probe('111');
+        a.flushMicrotasks();
+        t.emit({'event': 'apps', 'req': t.sent.last['req'], 'id': '111', 'apps': []});
+        a.flushMicrotasks();
+        expect(st.probes['111']!.lamp, Lamp.active);
+        expect(st.needCount, 0);
+      });
+    });
+
+    test('presence skips a probe in flight', () {
+      env((a, t, port, st) {
+        st.probe('111');
+        a.flushMicrotasks();
+        final req = t.sent.last['req'];
+        presence(a, t, '111', false);
+        expect(st.probes['111']!.lamp, Lamp.connecting);
+        t.emit({'event': 'apps', 'req': req, 'id': '111', 'apps': []});
+        a.flushMicrotasks();
+        expect(st.probes['111']!.lamp, Lamp.active);
+        expect(st.needCount, 0);
+      });
+    });
+
+    test('reconnecting and ending clear the need without a click', () {
+      env((a, t, port, st) {
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        expect(st.needCount, 1);
+        st.reconnect('111/a');
+        a.flushMicrotasks();
+        expect(st.needCount, 0);
+        port.emit(const DisconnectedEvent(2, 'connection closed'));
+        expect(st.needCount, 1);
+        st.endCurrent();
+        expect(st.needCount, 0);
+      });
+    });
+
+    test('a removed device leaves the needs', () {
+      env((a, t, port, st) {
+        presence(a, t, '111', true);
+        presence(a, t, '111', false);
+        expect(st.needCount, 1);
+        t.onSend = (m) {
+          if (m['cmd'] == 'remove_host') t.emit({'event': 'hosts', 'req': m['req'], 'hosts': []});
+        };
+        st.removeDevice('111');
+        a.flushMicrotasks();
+        expect(st.needs.where((n) => n.kind == NeedKind.device), isEmpty);
+      });
+    });
+
+    test('showDevice opens the device panel on it', () {
+      env((a, t, port, st) {
+        st.toggleCorner(Corner.needs);
+        st.showDevice('111');
+        a.flushMicrotasks();
+        expect(st.panel, PanelTab.devices);
+        expect(st.deviceTab, '111');
+        expect(st.corner, isNull);
+        expect(t.sent.last['cmd'], 'apps');
+        expect(t.sent.last['id'], '111');
+      });
+    });
+
+    test('corners are exclusive and the stream corner follows the session', () {
+      env((a, t, port, st) {
+        st.openOrSwitch('111', 'aa', 'Notes');
+        a.flushMicrotasks();
+        st.toggleCorner(Corner.stream);
+        expect(st.corner, Corner.stream);
+        st.toggleCorner(Corner.needs);
+        expect(st.corner, Corner.needs);
+        st.toggleCorner(Corner.needs);
+        expect(st.corner, isNull);
+        st.toggleCorner(Corner.stream);
+        st.select('111/a');
+        expect(st.corner, isNull);
+        st.toggleCorner(Corner.needs);
+        st.select('111/aa');
+        expect(st.corner, Corner.needs);
+        st.closeCorner();
+        expect(st.corner, isNull);
+      });
+    });
+
+    test('disconnects never open a corner or set a hint', () {
+      env((a, t, port, st) {
+        final hint = st.hint;
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        expect(st.corner, isNull);
+        expect(st.hint, hint);
+        presence(a, t, '111', true);
+        presence(a, t, '111', false);
+        expect(st.corner, isNull);
+        expect(st.hint, hint);
+      });
+    });
+  });
+
   group('endedHint', () {
     test('maps runner and hub reasons', () {
       expect(endedHint('X', 'rapp-client: quit'), '已结束 X');

@@ -79,6 +79,16 @@ void main() {
       expect((await f).id, '111');
     });
 
+    test('presence keeps only the latest entry per id, so it cannot grow without a reader', () async {
+      t.emit({'event': 'presence', 'id': '111', 'online': true});
+      t.emit({'event': 'presence', 'id': '222', 'online': false});
+      for (var i = 0; i < 50; i++) {
+        t.emit({'event': 'presence', 'id': '111', 'online': i.isEven});
+      }
+      await Future<void>.delayed(Duration.zero);
+      expect(hub.takePresence(), [(id: '222', online: false), (id: '111', online: false)]);
+    });
+
     test('note sends what and windows', () {
       hub.note(1, 'detach', 2);
       expect(t.sent.last, {'cmd': 'note', 'sid': 1, 'what': 'detach', 'windows': 2});

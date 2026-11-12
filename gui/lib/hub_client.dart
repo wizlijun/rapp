@@ -159,7 +159,7 @@ class HubClient extends ChangeNotifier {
 
   final _presence = <({String id, bool online})>[];
 
-  /// Presence events since the last call, oldest first; takes them and clears the queue.
+  /// The latest presence event of each device since the last call, oldest first; takes them and clears the queue.
   List<({String id, bool online})> takePresence() {
     final out = List<({String id, bool online})>.of(_presence);
     _presence.clear();
@@ -220,7 +220,12 @@ class HubClient extends ChangeNotifier {
       case 'opened':
         if (m['sid'] != null) _sessions[m['sid'] as Object] = _session(m);
       case 'presence':
-        if (m['id'] != null) _presence.add((id: '${m['id']}', online: m['online'] == true));
+        if (m['id'] != null) {
+          // Only the latest word per device matters, and with no reader the queue must not grow.
+          final id = '${m['id']}';
+          _presence.removeWhere((p) => p.id == id);
+          _presence.add((id: id, online: m['online'] == true));
+        }
       case 'closed':
         _sessions.remove(m['sid']);
         if (m['sid'] != null && m['reason'] != null) closeReasons[m['sid'] as Object] = '${m['reason']}';

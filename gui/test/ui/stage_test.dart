@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/picture.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/service_client.dart';
@@ -379,6 +380,53 @@ void main() {
       await tester.pump();
       es.toggleDetach();
       expect(port.calls.where((c) => c.$1 == 'mouse' || c.$1 == 'detach' || c.$1 == 'picture_focus'), isEmpty);
+    });
+
+    testWidgets('swapping the live picture for the disconnected stage keeps the hole', (tester) async {
+      await shown(tester);
+      await tester.pump();
+      expect(es.pictureHole.value, isNotNull);
+      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      await tester.pump();
+      await tester.pump();
+      expect(find.byType(DisconnectedStage), findsOneWidget);
+      expect(es.pictureHole.value, isNotNull);
+    });
+
+    testWidgets('swapping the disconnected stage for the live picture keeps the hole', (tester) async {
+      await shown(tester);
+      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      await tester.pump();
+      es.hint = 'again'; // a rebuild: the disconnected stage reports its rect
+      es.notifyListeners();
+      await tester.pump();
+      await tester.pump();
+      expect(find.byType(DisconnectedStage), findsOneWidget);
+      final before = es.pictureHole.value;
+      expect(before, isNotNull);
+      await tester.runAsync(() async {
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            t.emit({
+              'event': 'opened', 'sid': 11, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+              'port': 5011, 'token': 'tk', 'req': m['req'],
+            });
+          }
+        };
+        await tester.tap(find.byKey(const Key('reconnect-button')));
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      await tester.pump();
+      port.emit(const ReadyEvent(11, 'Safari'));
+      port.emit(WindowsEvent(11, [rw(5, 400, 328)]));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+      expect(find.byType(DisconnectedStage), findsNothing);
+      expect(find.byType(Picture), findsOneWidget);
+      expect(es.pictureHole.value, before); // the same rect, now the picture's own
     });
 
     testWidgets('reconnect is off when the hub is gone', (tester) async {

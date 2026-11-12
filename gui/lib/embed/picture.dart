@@ -21,7 +21,7 @@ class Picture extends StatefulWidget {
   final RemoteWindow window;
 
   /// Receives the texture's global rect (R25), so the IRON MAN grid can leave it alone.
-  final ValueNotifier<Rect?>? hole;
+  final PictureHole? hole;
 
   @override
   State<Picture> createState() => _PictureState();
@@ -38,7 +38,6 @@ class _Target {
 
 class _PictureState extends State<Picture> {
   final _tex = GlobalKey();
-  Rect? _mine;
   late final _clicks = ClickCounter(widget.state.doubleClick);
 
   /// From the last layout: the window content's rect on the stage, and the texture's part of it.
@@ -131,19 +130,16 @@ class _PictureState extends State<Picture> {
     final box = _tex.currentContext?.findRenderObject();
     if (box is! RenderBox || !box.attached || !box.hasSize) return;
     final r = box.localToGlobal(Offset.zero) & box.size;
-    if (r == _mine && h.value == r) return;
-    _mine = r;
-    h.value = r;
+    if (h.owns(this, r)) return;
+    h.claim(this, r);
   }
 
   @override
   void dispose() {
-    final h = widget.hole, mine = _mine;
-    if (h != null && mine != null) {
-      // Not while the tree is being torn down; and not over a newer picture's rect.
-      SchedulerBinding.instance.addPostFrameCallback((_) {
-        if (h.value == mine) h.value = null;
-      });
+    final h = widget.hole;
+    if (h != null) {
+      // Not while the tree is being torn down; and only what this picture itself reported.
+      SchedulerBinding.instance.addPostFrameCallback((_) => h.release(this));
     }
     super.dispose();
   }

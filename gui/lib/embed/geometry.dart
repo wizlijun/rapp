@@ -1,6 +1,8 @@
 // Pure geometry between the stage, the picture and A's window.
 import 'dart:ui';
 
+import 'package:flutter/foundation.dart' show ValueNotifier;
+
 import 'session_port.dart';
 
 /// [content] scaled to fit [box], centred; empty if either has no area.
@@ -39,4 +41,29 @@ Rect popupRect(RemoteWindow popup, RemoteWindow parent, Rect parentPicture) {
     scale * popup.rect.width,
     scale * popup.rect.height,
   );
+}
+
+/// The picture's global rect, for the IRON MAN grid to leave alone (R25). Whoever reports
+/// it owns it: only the owner may clear it, so a widget handing over to its successor (a
+/// reconnect swap) cannot null the rect the successor just reported, equal or not.
+class PictureHole extends ValueNotifier<Rect?> {
+  PictureHole() : super(null);
+
+  Object? _owner;
+
+  /// [owner] reports [rect], also when it equals the current one.
+  void claim(Object owner, Rect rect) {
+    _owner = owner;
+    value = rect;
+  }
+
+  /// True if [owner] reported the current value and nobody has since.
+  bool owns(Object owner, Rect rect) => identical(_owner, owner) && value == rect;
+
+  /// Clears the rect only if [owner] still holds it.
+  void release(Object owner) {
+    if (!identical(_owner, owner)) return;
+    _owner = null;
+    value = null;
+  }
 }
