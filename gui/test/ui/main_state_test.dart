@@ -12,6 +12,7 @@ import 'package:rapp/ui/lifecycle.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/tokens.dart';
+import 'package:rapp/ui/workspace_store.dart';
 
 import '../fakes.dart';
 
@@ -1340,6 +1341,105 @@ void main() {
         expect(st.corner, isNull);
         expect(st.hint, hint);
       });
+    });
+  });
+
+  group('projects', () {
+    const notes = AppRef('111', 'com.apple.Notes', 'Notes');
+    const key = '111/com.apple.Notes';
+
+    test('create, rename and delete a project', () {
+      expect(s.createProject('  '), isNull);
+      expect(s.projects, isEmpty);
+      final p = s.createProject('写\n周报')!;
+      expect(p.name, '写 周报');
+      s.renameProject(p.id, '');
+      expect(s.projects.single.name, '写 周报');
+      s.renameProject(p.id, '周报');
+      expect(s.projects.single.name, '周报');
+      s.deleteProject(p.id);
+      expect(s.projects, isEmpty);
+      expect(s.hint, '');
+    });
+
+    test('members are unique within a project but shared across projects', () {
+      final a = s.createProject('A')!;
+      final b = s.createProject('B')!;
+      expect(s.addMember(a.id, notes), isTrue);
+      expect(s.addMember(a.id, notes), isFalse);
+      expect(s.addMember(b.id, notes), isTrue);
+      expect(s.projectsOf(key).map((p) => p.name), ['A', 'B']);
+      s.removeMember(a.id, key);
+      expect(s.projectsOf(key).map((p) => p.name), ['B']);
+      expect(s.hint, '');
+    });
+
+    test('tasks are one line and can be cleared', () {
+      final a = s.createProject('A')!;
+      s.addMember(a.id, notes);
+      s.setTask(a.id, key, '整理\nPR');
+      expect(a.members.single.task, '整理 PR');
+      s.setTask(a.id, key, '');
+      expect(a.members.single.task, '');
+    });
+
+    test('projects survive a restart', () {
+      final a = s.createProject('A')!;
+      s.addMember(a.id, notes);
+      s.addMember(a.id, const AppRef('222', 'com.apple.Chess', 'Chess'));
+      s.setTask(a.id, key, '整理');
+      final s2 = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs());
+      expect(s2.projects.single.name, 'A');
+      expect(s2.projects.single.members.map((m) => m.key), [key, '222/com.apple.Chess']);
+      expect(s2.projects.single.members.first.task, '整理');
+    });
+
+    test('deleting a project ends no session', () async {
+      t.emit(opened(1, '111', 'com.apple.Notes'));
+      await pump();
+      final a = s.createProject('A')!;
+      s.addMember(a.id, notes);
+      s.deleteProject(a.id);
+      expect(t.sent.where((m) => m['cmd'] == 'close'), isEmpty);
+      expect(s.entryFor(key), isNotNull);
+    });
+
+    test('member lamp and status', () async {
+      final m = Member(notes);
+      final m2 = Member(const AppRef('222', 'com.apple.Chess', 'Chess'));
+      expect(s.memberLamp(m), Lamp.notOpened);
+      expect(s.memberStatus(m), '未打开');
+      s.probes['222'] = DeviceProbe(Lamp.offline, '离线');
+      expect(s.memberStatus(m2), '未打开，设备离线');
+      expect(s.deviceOffline('222'), isTrue);
+      expect(s.deviceOffline('999'), isTrue);
+      t.emit(opened(1, '111', 'com.apple.Notes'));
+      await pump();
+      expect(s.memberLamp(m), Lamp.active);
+      expect(s.memberStatus(m), '活动');
+    });
+
+    test('addable apps list online devices then favorites, minus members', () {
+      s.probes['111'] = DeviceProbe(Lamp.active, '在线',
+          apps: const AppList('111', 'lan', [HubApp('com.apple.Safari', 'Safari'), HubApp('com.apple.Notes', 'Notes')]));
+      s.toggleFavorite('222', 'com.apple.Chess', 'Chess');
+      s.toggleFavorite('111', 'com.apple.Notes', 'Notes');
+      final a = s.createProject('A')!;
+      s.addMember(a.id, const AppRef('111', 'com.apple.Safari', 'Safari'));
+      expect(s.addableApps(a.id).map((x) => x.key), ['111/com.apple.Notes', '222/com.apple.Chess']);
+    });
+
+    test('removing a device keeps project members', () async {
+      final a = s.createProject('A')!;
+      s.addMember(a.id, const AppRef('222', 'com.apple.Chess', 'Chess'));
+      t.onSend = (m) {
+        if (m['cmd'] == 'remove_host') {
+          t.emit({'event': 'hosts', 'req': m['req'], 'hosts': [{'id': '111', 'name': 'mini'}]});
+        }
+      };
+      await s.removeDevice('222');
+      expect(a.members, hasLength(1));
+      expect(s.deviceOffline('222'), isTrue);
     });
   });
 

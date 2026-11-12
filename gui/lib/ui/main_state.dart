@@ -950,6 +950,111 @@ class MainState extends ChangeNotifier {
     ];
   }
 
+  // ---- projects ----
+  List<Project> get projects => workspace.projects;
+
+  Project? _project(String id) {
+    for (final p in workspace.projects) {
+      if (p.id == id) return p;
+    }
+    return null;
+  }
+
+  /// Adds an empty project at the end; null (and nothing changes) when the name is empty.
+  Project? createProject(String name) {
+    final n = oneLine(name);
+    if (n.isEmpty) return null;
+    final p = Project(newProjectId(), n);
+    workspace.projects.add(p);
+    _saveWorkspace();
+    return p;
+  }
+
+  /// An empty name keeps the old one.
+  void renameProject(String id, String name) {
+    final p = _project(id);
+    final n = oneLine(name);
+    if (p == null || n.isEmpty) return;
+    p.name = n;
+    _saveWorkspace();
+  }
+
+  /// Ends no session.
+  void deleteProject(String id) {
+    workspace.projects.removeWhere((p) => p.id == id);
+    _saveWorkspace();
+  }
+
+  /// False when the project already has this app on this device.
+  bool addMember(String projectId, AppRef app) {
+    final p = _project(projectId);
+    if (p == null || p.members.any((m) => m.key == app.key)) return false;
+    p.members.add(Member(AppRef(app.device, app.bundle, oneLine(app.name))));
+    _saveWorkspace();
+    return true;
+  }
+
+  void removeMember(String projectId, String key) {
+    final p = _project(projectId);
+    if (p == null) return;
+    p.members.removeWhere((m) => m.key == key);
+    _saveWorkspace();
+  }
+
+  void setTask(String projectId, String key, String task) {
+    final p = _project(projectId);
+    if (p == null) return;
+    for (final m in p.members) {
+      if (m.key == key) m.task = oneLine(task);
+    }
+    _saveWorkspace();
+  }
+
+  SessionEntry? entryFor(String key) {
+    for (final e in _entries) {
+      if (e.key == key) return e;
+    }
+    return null;
+  }
+
+  /// Not in the hub's device table, or its probe says offline.
+  bool deviceOffline(String id) => !(hub?.hosts.any((h) => h.id == id) ?? false) || probes[id]?.lamp == Lamp.offline;
+
+  Lamp memberLamp(Member m) => entryFor(m.key)?.lamp ?? Lamp.notOpened;
+
+  String memberStatus(Member m) {
+    final e = entryFor(m.key);
+    if (e == null) return deviceOffline(m.app.device) ? '未打开，设备离线' : lampWord(Lamp.notOpened);
+    if (e.lamp == Lamp.disconnected) return '已断开：${e.reason ?? ''}';
+    return lampWord(e.lamp);
+  }
+
+  /// Apps of online devices (device order), then favourites not already listed; minus the project's members.
+  List<AppRef> addableApps(String projectId) {
+    final have = {for (final m in _project(projectId)?.members ?? const <Member>[]) m.key};
+    final out = <AppRef>[];
+    final seen = <String>{};
+    void add(AppRef a) {
+      if (!have.contains(a.key) && seen.add(a.key)) out.add(a);
+    }
+
+    for (final h in hub?.hosts ?? const []) {
+      final p = probes[h.id];
+      if (p?.lamp != Lamp.active) continue;
+      for (final a in p!.apps?.apps ?? const <HubApp>[]) {
+        add(AppRef(h.id, a.app, a.name));
+      }
+    }
+    workspace.favorites.forEach(add);
+    return out;
+  }
+
+  /// Projects that have this app, in project order.
+  List<Project> projectsOf(String key) => [
+        for (final p in workspace.projects)
+          if (p.members.any((m) => m.key == key)) p,
+      ];
+
   void _saveWorkspace() {
     try {
       saveWorkspace(configDir, workspace);
