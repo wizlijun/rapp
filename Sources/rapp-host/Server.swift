@@ -724,6 +724,7 @@ final class Session {
         transfers = nil
         capture?.stop()
         capture = nil
+        injector?.releaseAll()
         injector = nil
         pending = nil
         connection.cancel()
