@@ -492,3 +492,118 @@ async fn embed_wrong_token_closes_the_session() {
     assert_eq!(ev, json!({"event":"closed","sid":sid,"reason":"connection closed"}));
     hub.finish().await;
 }
+
+// ---- S3: close reason, reconnect flag, presence ----
+
+#[tokio::test]
+async fn embed_close_with_user_reason() {
+    use tokio::io::AsyncReadExt;
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = hub_with_host(&a, &relay, home.path(), None).await;
+    let (sid, port, token) = embed_open(&mut hub, &a).await;
+    let mut tcp = gui_connect(port, &token, "ping").await;
+    hub.send(json!({"cmd":"close","sid":sid,"reason":"user"})).await;
+    assert_eq!(hub.next().await, json!({"event":"closed","sid":sid,"reason":"user"}));
+    let mut rest = Vec::new();
+    tokio::time::timeout(WAIT, tcp.read_to_end(&mut rest)).await.expect("EOF in time").unwrap();
+    hub.finish().await;
+    let closed = read_log(home.path(), "hub.log").into_iter().find(|v| v["ev"] == "closed").unwrap();
+    assert_eq!(closed["reason"], "user", "{closed}");
+}
+
+#[tokio::test]
+async fn close_with_bad_reason_is_an_error() {
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = hub_with_host(&a, &relay, home.path(), None).await;
+    let (sid, port, token) = embed_open(&mut hub, &a).await;
+    let _tcp = gui_connect(port, &token, "ping").await;
+    let r = hub.call(json!({"cmd":"close","sid":sid,"reason":"nope"})).await;
+    assert_eq!(r["event"], "error", "{r}");
+    assert!(r["error"].as_str().unwrap().contains("bad reason"), "{r}");
+    hub.send(json!({"cmd":"close","sid":sid})).await;
+    assert_eq!(hub.next().await, json!({"event":"closed","sid":sid,"reason":"quit"}));
+    hub.finish().await;
+}
+
+#[tokio::test]
+async fn reconnect_open_is_logged() {
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = hub_with_host(&a, &relay, home.path(), None).await;
+    let (_sid, _, _) = embed_open(&mut hub, &a).await;
+    let r = hub.call(json!({"cmd":"open","id":a.id,"app":"com.example.echo","embed":true,"reconnect":true})).await;
+    assert_eq!(r["event"], "opened", "{r}");
+    assert!(r.get("reconnect").is_none(), "{r}");
+    hub.finish().await;
+    let opened: Vec<Value> = read_log(home.path(), "hub.log").into_iter().filter(|v| v["ev"] == "opened").collect();
+    assert_eq!(opened.len(), 2, "{opened:?}");
+    assert!(opened[0].get("reconnect").is_none(), "{}", opened[0]);
+    assert_eq!(opened[1]["reconnect"], true, "{}", opened[1]);
+}
+
+/// A presence hub with `a` added (presence events that race the reply are skipped).
+async fn presence_hub(a: &TestService, relay: &TestRelay, home: &std::path::Path) -> Hub {
+    let mut hub = Hub::start_with_presence(home, a.bins.path(), Some(relay.relay.addr), Duration::from_millis(200));
+    hub.send(json!({"cmd":"add_host","id":a.id,"password":PASSWORD,"req":1})).await;
+    loop {
+        let r = hub.next().await;
+        if r["event"] == "presence" {
+            continue;
+        }
+        assert_eq!(r["event"], "host_added", "{r}");
+        return hub;
+    }
+}
+
+async fn next_presence(hub: &mut Hub, id: &str, online: bool) {
+    let deadline = tokio::time::Instant::now() + WAIT;
+    loop {
+        let r = tokio::time::timeout_at(deadline, hub.next()).await.expect("presence in time");
+        assert_ne!(r["event"], "error", "{r}");
+        if r == json!({"event":"presence","id":id,"online":online}) {
+            return;
+        }
+    }
+}
+
+#[tokio::test]
+async fn presence_reports_online_then_offline() {
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = presence_hub(&a, &relay, home.path()).await;
+    next_presence(&mut hub, &a.id, true).await;
+    a.svc.stop();
+    next_presence(&mut hub, &a.id, false).await;
+}
+
+#[tokio::test]
+async fn ping_is_answered_and_not_logged() {
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = presence_hub(&a, &relay, home.path()).await;
+    next_presence(&mut hub, &a.id, true).await;
+    next_presence(&mut hub, &a.id, true).await;
+    let text = std::fs::read_to_string(a.home.path().join("logs").join("service.log")).unwrap_or_default();
+    assert!(!text.contains("\"ping\""), "ping in A's log:\n{text}");
+    assert!(!text.contains("list_apps"), "list_apps in A's log:\n{text}");
+    let hub_log = std::fs::read_to_string(home.path().join("logs").join("hub.log")).unwrap_or_default();
+    assert!(!hub_log.contains("presence"), "presence in hub.log:\n{hub_log}");
+}
+
+#[tokio::test]
+async fn no_presence_without_interval() {
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let hub = hub_with_host(&a, &relay, home.path(), None).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let rest = hub.finish().await;
+    assert!(rest.iter().all(|e| e["event"] != "presence"), "{rest:?}");
+}

@@ -116,6 +116,8 @@ pub async fn serve_request(state: &Arc<State>, mut s: BiStream, peer: Peer) -> R
             log_request(state, &peer, json!({"op": "list_apps"}), &r);
             reply_and_finish(&mut s, r).await
         }
+        // Presence probe: no access-log line (A's 访问记录 must not fill with probes).
+        Ok(Op::Ping) => reply_and_finish(&mut s, ok(json!({}))).await,
         Ok(Op::Open { app, side }) => open(state, s, &app, side, peer).await,
         _ => reply_and_finish(&mut s, err("unknown op")).await,
     }

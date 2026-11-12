@@ -50,6 +50,8 @@ pub enum Op {
         name: Option<String>,
     },
     ListApps,
+    /// Presence probe: answered ok, never logged, starts nothing.
+    Ping,
     Open {
         app: String,
         /// A file-transfer side connection, not a viewing session (kept out of 访问记录).
@@ -68,6 +70,7 @@ mod tests {
         let v = serde_json::to_value(Op::Auth { token: Some("t".into()), password: None, name: None }).unwrap();
         assert_eq!(v, json!({"op":"auth","token":"t"}));
         assert_eq!(serde_json::to_value(Op::ListApps).unwrap(), json!({"op":"list_apps"}));
+        assert_eq!(serde_json::to_value(Op::Ping).unwrap(), json!({"op":"ping"}));
         let op: Op = serde_json::from_value(json!({"op":"register","key":"k","id":null,"secret":"s",
             "name":"n","pw_salt":"a","pw_hash":"b","lan":["1.2.3.4:1"]}))
         .unwrap();

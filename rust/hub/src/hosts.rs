@@ -31,6 +31,10 @@ impl Hosts {
         self.list.lock().unwrap().iter().find(|h| h.id == id).cloned()
     }
 
+    pub fn all(&self) -> Vec<Host> {
+        self.list.lock().unwrap().clone()
+    }
+
     /// `[{"id","name"}]`
     pub fn summary(&self) -> Value {
         let list = self.list.lock().unwrap();

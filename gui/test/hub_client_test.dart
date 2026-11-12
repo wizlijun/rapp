@@ -49,6 +49,36 @@ void main() {
       expect([s.port, s.token], [null, null]);
     });
 
+    test('close carries reason user', () {
+      hub.close(3, reason: 'user');
+      expect(t.sent.last, {'cmd': 'close', 'sid': 3, 'reason': 'user'});
+      hub.close(4);
+      expect(t.sent.last, {'cmd': 'close', 'sid': 4});
+    });
+
+    test('open marks reconnect', () async {
+      final f = hub.open('111', 'a', embed: true, reconnect: true);
+      expect(t.sent.last['reconnect'], isTrue);
+      t.emit({'event': 'opened', 'sid': 1, 'id': '111', 'app': 'a', 'path': 'lan', 'req': t.sent.last['req']});
+      await f;
+      final g = hub.open('111', 'a', embed: true);
+      expect(t.sent.last.containsKey('reconnect'), isFalse);
+      t.emit({'event': 'opened', 'sid': 2, 'id': '111', 'app': 'a', 'path': 'lan', 'req': t.sent.last['req']});
+      await g;
+    });
+
+    test('presence is queued and drained', () async {
+      final f = hub.apps('111');
+      final req = t.sent.last['req'];
+      t.emit({'event': 'presence', 'id': '111', 'online': true});
+      t.emit({'event': 'presence', 'id': '222', 'online': false});
+      await Future<void>.delayed(Duration.zero);
+      expect(hub.takePresence(), [(id: '111', online: true), (id: '222', online: false)]);
+      expect(hub.takePresence(), isEmpty);
+      t.emit({'event': 'apps', 'id': '111', 'path': 'lan', 'apps': [], 'req': req});
+      expect((await f).id, '111');
+    });
+
     test('note sends what and windows', () {
       hub.note(1, 'detach', 2);
       expect(t.sent.last, {'cmd': 'note', 'sid': 1, 'what': 'detach', 'windows': 2});

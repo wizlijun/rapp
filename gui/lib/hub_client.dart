@@ -148,12 +148,23 @@ class HubClient extends ChangeNotifier {
         permissions: perms is Map ? Map<String, dynamic>.from(perms) : null);
   }
 
-  Future<HubSession> open(String id, String app, {bool embed = false}) async {
-    final m = await _request({'cmd': 'open', 'id': id, 'app': app, if (embed) 'embed': true}, 'opened');
+  Future<HubSession> open(String id, String app, {bool embed = false, bool reconnect = false}) async {
+    final m = await _request(
+        {'cmd': 'open', 'id': id, 'app': app, if (embed) 'embed': true, if (reconnect) 'reconnect': true}, 'opened');
     return _sessions[m['sid']] ?? _session(m);
   }
 
-  void close(Object sid) => _send({'cmd': 'close', 'sid': sid});
+  /// [reason] is `user` when the person closed it (the hub only accepts that value).
+  void close(Object sid, {String? reason}) => _send({'cmd': 'close', 'sid': sid, 'reason': ?reason});
+
+  final _presence = <({String id, bool online})>[];
+
+  /// Presence events since the last call, oldest first; takes them and clears the queue.
+  List<({String id, bool online})> takePresence() {
+    final out = List<({String id, bool online})>.of(_presence);
+    _presence.clear();
+    return out;
+  }
   void focus(Object sid) => _send({'cmd': 'focus', 'sid': sid});
 
   /// Tells the hub the GUI detached or re-attached a window ([what] is `detach` or `attach`); no reply.
@@ -208,6 +219,8 @@ class HubClient extends ChangeNotifier {
         hosts = [...hosts.where((h) => h.id != id), HubHost(id, '${m['name'] ?? ''}')];
       case 'opened':
         if (m['sid'] != null) _sessions[m['sid'] as Object] = _session(m);
+      case 'presence':
+        if (m['id'] != null) _presence.add((id: '${m['id']}', online: m['online'] == true));
       case 'closed':
         _sessions.remove(m['sid']);
         if (m['sid'] != null && m['reason'] != null) closeReasons[m['sid'] as Object] = '${m['reason']}';

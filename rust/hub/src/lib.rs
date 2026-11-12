@@ -3,6 +3,7 @@
 
 mod hosts;
 mod link;
+mod presence;
 mod session;
 
 use anyhow::{bail, Context, Result};
@@ -25,6 +26,8 @@ pub struct Opts {
     pub force_path: Option<String>,
     /// `hub.log` (spec §4.4); `Log::none()` writes nothing.
     pub log: Log,
+    /// Presence probe period; None = no probe (tests).
+    pub presence_every: Option<std::time::Duration>,
 }
 
 type Out = Box<dyn AsyncWrite + Unpin + Send>;
@@ -42,6 +45,8 @@ pub(crate) struct Hub {
     /// sid → writer of the client's stdin (None once closed).
     sessions: Mutex<HashMap<u64, Option<tokio::sync::mpsc::UnboundedSender<String>>>>,
     next_sid: AtomicU64,
+    /// sid → reason set by `close` with `reason`, read when the session ends.
+    close_why: Mutex<HashMap<u64, String>>,
     kill: tokio::sync::watch::Sender<bool>,
     log: Log,
     /// B's self-declared name in `auth` / `connect` (spec §2): this machine's hostname.
@@ -76,11 +81,13 @@ where
         out: tokio::sync::Mutex::new(Box::new(output)),
         sessions: Default::default(),
         next_sid: AtomicU64::new(0),
+        close_why: Default::default(),
         kill: tokio::sync::watch::channel(false).0,
         bin_dir: opts.bin_dir,
         log: opts.log,
         name: rapp_net::config::hostname(),
     });
+    let probe = opts.presence_every.map(|every| tokio::spawn(presence::run(hub.clone(), every)));
     let mut lines = BufReader::new(input).lines();
     while let Some(line) = lines.next_line().await? {
         if line.trim().is_empty() {
@@ -88,6 +95,9 @@ where
         }
         let hub = hub.clone();
         tokio::spawn(async move { hub.command(&line).await });
+    }
+    if let Some(p) = probe {
+        p.abort();
     }
     hub.close_all().await;
     hub.ep.close(0u32.into(), b"hub exit");
@@ -184,11 +194,17 @@ impl Hub {
             }
             Some("open") => {
                 let embed = v.get("embed").and_then(Value::as_bool).unwrap_or(false);
-                self.open(s("id")?, s("app")?, embed, req).await?;
+                let reconnect = v.get("reconnect").and_then(Value::as_bool).unwrap_or(false);
+                self.open(s("id")?, s("app")?, embed, reconnect, req).await?;
                 return Ok(None);
             }
             Some("close") => {
-                self.close(v.get("sid").and_then(Value::as_u64).context("missing sid")?)?;
+                let why = match v.get("reason") {
+                    None | Some(Value::Null) => None,
+                    Some(r) if r == "user" => Some("user"),
+                    Some(_) => bail!("bad reason"),
+                };
+                self.close(v.get("sid").and_then(Value::as_u64).context("missing sid")?, why)?;
                 return Ok(None);
             }
             Some("focus") => {
