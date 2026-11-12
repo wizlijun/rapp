@@ -1,4 +1,5 @@
 // Per-theme decorative backdrops. Never intercept pointer events.
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -15,17 +16,18 @@ class Backdrop extends StatelessWidget {
     final t = RappTokens.of(context);
     final Widget? layer = switch (theme) {
       RappTheme.matrix => CustomPaint(painter: _Scanlines(t.line, t.bg)),
-      RappTheme.ironMan => CustomPaint(painter: _Grid(t.line)),
+      RappTheme.ironMan => CustomPaint(painter: _HoloGrid(t.on)),
       RappTheme.avatar => _Blobs(t.on),
       RappTheme.westworld => null,
     };
+    if (layer == null) return child;
+    final fill = Positioned.fill(child: IgnorePointer(child: layer));
+    // IRON MAN: "全屏叠" — the grid lies over everything, top bar and panels
+    // included (prototype `holo` ::after, z-index 9). Others stay behind.
+    final over = theme == RappTheme.ironMan;
     return Stack(
       fit: StackFit.passthrough,
-      children: [
-        if (layer != null)
-          Positioned.fill(child: IgnorePointer(child: layer)),
-        child,
-      ],
+      children: over ? [child, fill] : [fill, child],
     );
   }
 }
@@ -66,25 +68,45 @@ class _Scanlines extends CustomPainter {
   bool shouldRepaint(_Scanlines o) => o.line != line || o.bg != bg;
 }
 
-class _Grid extends CustomPainter {
-  _Grid(this.line);
-  final Color line;
+/// Prototype `holo`: 1px lines every 32px at 5% of the holo blue, plus a
+/// faint blue light from the top centre (ellipse, 16% fading out by 60%).
+class _HoloGrid extends CustomPainter {
+  _HoloGrid(this.on);
+  final Color on;
 
   @override
   void paint(Canvas canvas, Size size) {
+    canvas.clipRect(Offset.zero & size);
     final p = Paint()
-      ..color = line.withValues(alpha: .18)
+      ..color = on.withValues(alpha: .05)
       ..strokeWidth = 1;
     for (var x = 0.0; x < size.width; x += 32) {
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), p);
+      canvas.drawLine(Offset(x + .5, 0), Offset(x + .5, size.height), p);
     }
     for (var y = 0.0; y < size.height; y += 32) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), p);
+      canvas.drawLine(Offset(0, y + .5), Offset(size.width, y + .5), p);
     }
+    // CSS "ellipse at 50% 0%" sizes to the farthest corner: radii w/2·√2, h·√2.
+    const light = Color.fromRGBO(60, 150, 255, .16);
+    canvas.save();
+    canvas.translate(size.width / 2, 0);
+    canvas.scale(size.width / 2 * math.sqrt2, size.height * math.sqrt2);
+    canvas.drawCircle(
+      Offset.zero,
+      1,
+      Paint()
+        ..shader = ui.Gradient.radial(
+          Offset.zero,
+          1,
+          [light, light.withValues(alpha: 0)],
+          [0, .6],
+        ),
+    );
+    canvas.restore();
   }
 
   @override
-  bool shouldRepaint(_Grid o) => o.line != line;
+  bool shouldRepaint(_HoloGrid o) => o.on != on;
 }
 
 class _Blobs extends StatelessWidget {

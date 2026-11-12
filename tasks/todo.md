@@ -138,6 +138,7 @@
 ## 主界面 S2–S6（分支 `feat/main-window-s2-s6`；S7 先不做，S8 不在范围内）
 顺序：S2 → S3 → S5 → S6 → S4（S4 第三层要用 S5 的项目、S6 的资源，放最后）。各规格 §6 的假设按默认执行，验收时确认。
 - [ ] S2 嵌入舞台（规格：`docs/superpowers/specs/2026-11-12-rapp-s2-embedded-stage-design.md`）
+  - 注意：IRON MAN 的网格现在盖在所有内容上面（设计语言"全屏叠"）；S2 嵌入远程画面后，画面区域要排除在网格之外，不能盖住 A 的内容。
 - [ ] S3 生命周期（规格：`docs/superpowers/specs/2026-11-12-rapp-s3-lifecycle-design.md`）
 - [ ] S5 项目与常用（规格：`docs/superpowers/specs/2026-11-12-rapp-s5-projects-favorites-design.md`）
 - [ ] S6 全局资源（规格：`docs/superpowers/specs/2026-11-12-rapp-s6-global-resources-design.md`）

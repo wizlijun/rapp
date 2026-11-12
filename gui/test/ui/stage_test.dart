@@ -127,6 +127,13 @@ void main() {
         theme: th,
       ));
       expect(find.text('hi'), findsOneWidget);
+      if (th == RappTheme.ironMan) {
+        // 设计语言"全屏叠"：网格盖在内容（顶栏、面板）上面，不在下面。
+        final stack = tester.widget<Stack>(
+            find.descendant(of: find.byType(Backdrop), matching: find.byType(Stack)).first);
+        expect(stack.children.last, isA<Positioned>());
+        expect((stack.children.last as Positioned).child, isA<IgnorePointer>());
+      }
       if (th != RappTheme.westworld) {
         expect(find.descendant(of: find.byType(Backdrop), matching: find.byType(IgnorePointer)),
             findsWidgets);

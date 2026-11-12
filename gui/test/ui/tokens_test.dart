@@ -52,9 +52,35 @@ void main() {
       );
       expect(
         t.labelSpacing,
-        (th == RappTheme.ironMan || th == RappTheme.westworld) ? 0.12 : 0.06,
+        switch (th) {
+          RappTheme.ironMan => 0.2,
+          RappTheme.westworld => 0.12,
+          _ => 0.06,
+        },
         reason: '$th',
       );
+    }
+  });
+  test('IRON MAN glow values follow the prototype (holo)', () {
+    final i = tokensFor(RappTheme.ironMan);
+    expect(i.textGlow, const [
+      Shadow(color: Color.fromRGBO(127, 224, 255, .35), blurRadius: 8),
+    ]);
+    expect(i.glow, const [
+      BoxShadow(color: Color.fromRGBO(127, 224, 255, .95), blurRadius: 10),
+    ]);
+  });
+  test('themeDataFor puts the text glow on every text style', () {
+    for (final th in RappTheme.values) {
+      final d = themeDataFor(th);
+      final glow = tokensFor(th).textGlow;
+      final tt = d.textTheme;
+      for (final s in [
+        tt.bodyMedium, tt.bodySmall, tt.bodyLarge, tt.labelLarge,
+        tt.labelMedium, tt.titleMedium, tt.titleLarge,
+      ]) {
+        expect(s!.shadows ?? const <Shadow>[], glow, reason: '$th');
+      }
     }
   });
   test('dropdown order and labels', () {
