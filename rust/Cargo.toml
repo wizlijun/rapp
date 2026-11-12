@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["net", "relay", "service", "hub", "testkit"]
+members = ["net", "relay", "service", "hub", "testkit", "update"]
 
 [workspace.package]
 version = "0.3.0"
@@ -22,6 +22,7 @@ rapp-net = { path = "net" }
 rapp-relay = { path = "relay" }
 rapp-service = { path = "service" }
 rapp-hub = { path = "hub" }
+rapp-update = { path = "update" }
 
 [profile.release]
 lto = "thin"

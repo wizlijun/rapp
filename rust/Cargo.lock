@@ -694,6 +694,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rapp-update"
+version = "0.3.0"
+dependencies = [
+ "anyhow",
+ "rapp-net",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
 name = "rcgen"
 version = "0.14.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
