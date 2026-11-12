@@ -20,6 +20,22 @@ pub const LAN_WAIT: Duration = Duration::from_millis(500);
 const PUBLIC_WAIT: Duration = Duration::from_secs(2);
 const REPLY_WAIT: Duration = Duration::from_secs(20);
 
+tokio::task_local! {
+    /// Set around presence probes: they must leave hub.log alone (no `route`, no `reconnecting`).
+    pub static QUIET: bool;
+}
+
+fn quiet() -> bool {
+    QUIET.try_with(|q| *q).unwrap_or(false)
+}
+
+/// An error that retrying with the same saved password will not fix, and that feeds the relay's
+/// failure limiter: a probe must stop on these until the user acts on the host.
+pub fn is_auth_failure(e: &anyhow::Error) -> bool {
+    let s = e.to_string();
+    s == "bad password" || s == "unknown id" || s.starts_with("locked")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Force {
     Lan,
@@ -125,6 +141,9 @@ impl Hub {
         if let Some(a) = addr {
             v["addr"] = a.into();
         }
+        if quiet() {
+            return;
+        }
         let lvl = if result.is_ok() { Lvl::Info } else { Lvl::Warn };
         v["result"] = result.err().unwrap_or_else(|| "ok".into()).into();
         self.log.event(lvl, "route", v);
@@ -171,7 +190,7 @@ impl Hub {
         };
         let lan = addrs(&info["lan"]);
         let name = info["name"].as_str().unwrap_or(&host.name).to_string();
-        self.hosts.upsert(Host { name, lan: lan.clone(), ..host.clone() })?;
+        self.hosts.refresh(Host { name, lan: lan.clone(), ..host.clone() })?;
 
         let token = info["token"].as_str().context("relay sent no token")?.to_string();
         let auth = Op::Auth { token: Some(token.clone()), password: None, name: self.me() };
@@ -211,6 +230,7 @@ impl Hub {
     }
 
     pub fn forget(&self, id: &str) {
+        self.probe_halt.lock().unwrap().remove(id);
         if let Some(Link::Direct { conn, .. }) = self.links.lock().unwrap().remove(id) {
             conn.close(0u32.into(), b"forgotten");
         }
@@ -218,17 +238,28 @@ impl Hub {
 
     /// Sends `op` to `host` and returns the open stream, the ok reply and the path used.
     pub async fn request(&self, host: &Host, op: &Op) -> Result<(BiStream, Value, &'static str)> {
+        if !quiet() {
+            // The user is acting on this host: presence may try it again.
+            self.probe_halt.lock().unwrap().remove(&host.id);
+        }
         let cached = self.links.lock().unwrap().get(&host.id).cloned();
         if let Some(link) = cached {
             match self.send_on(&link, op).await {
                 Ok((_, r)) if r["error"] == "bad token" => {}
+                Err(e) if quiet() => drop(e),
                 Err(e) => self.log.msg(Lvl::Warn, format_args!("{} via {}: {e:#}; reconnecting", host.id, link.path())),
                 Ok(x) => return finish(x, link.path()),
             }
             self.forget(&host.id);
         }
         let link = self.establish(host).await?;
-        self.links.lock().unwrap().insert(host.id.clone(), link.clone());
+        {
+            // A host removed while this was in flight must not come back through the cache.
+            let mut links = self.links.lock().unwrap();
+            if self.hosts.get(&host.id).is_some() {
+                links.insert(host.id.clone(), link.clone());
+            }
+        }
         match self.send_on(&link, op).await {
             Ok(x) => finish(x, link.path()),
             Err(e) => {

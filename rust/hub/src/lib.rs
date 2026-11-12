@@ -47,6 +47,8 @@ pub(crate) struct Hub {
     next_sid: AtomicU64,
     /// sid → reason set by `close` with `reason`, read when the session ends.
     close_why: Mutex<HashMap<u64, String>>,
+    /// Hosts the presence probe stopped trying after an auth-type failure, until the user acts on them.
+    probe_halt: Mutex<std::collections::HashSet<String>>,
     kill: tokio::sync::watch::Sender<bool>,
     log: Log,
     /// B's self-declared name in `auth` / `connect` (spec §2): this machine's hostname.
@@ -82,6 +84,7 @@ where
         sessions: Default::default(),
         next_sid: AtomicU64::new(0),
         close_why: Default::default(),
+        probe_halt: Default::default(),
         kill: tokio::sync::watch::channel(false).0,
         bin_dir: opts.bin_dir,
         log: opts.log,
@@ -89,16 +92,22 @@ where
     });
     let probe = opts.presence_every.map(|every| tokio::spawn(presence::run(hub.clone(), every)));
     let mut lines = BufReader::new(input).lines();
-    while let Some(line) = lines.next_line().await? {
-        if line.trim().is_empty() {
-            continue;
+    let read = async {
+        while let Some(line) = lines.next_line().await? {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let hub = hub.clone();
+            tokio::spawn(async move { hub.command(&line).await });
         }
-        let hub = hub.clone();
-        tokio::spawn(async move { hub.command(&line).await });
+        anyhow::Ok(())
     }
+    .await;
     if let Some(p) = probe {
         p.abort();
+        let _ = p.await;
     }
+    read?;
     hub.close_all().await;
     hub.ep.close(0u32.into(), b"hub exit");
     let _ = hub.out.lock().await.shutdown().await;

@@ -590,11 +590,70 @@ async fn ping_is_answered_and_not_logged() {
     let mut hub = presence_hub(&a, &relay, home.path()).await;
     next_presence(&mut hub, &a.id, true).await;
     next_presence(&mut hub, &a.id, true).await;
-    let text = std::fs::read_to_string(a.home.path().join("logs").join("service.log")).unwrap_or_default();
+    let text = std::fs::read_to_string(a.home.path().join("logs").join("service.log")).expect("service.log exists");
+    assert!(!text.is_empty(), "service.log is empty");
     assert!(!text.contains("\"ping\""), "ping in A's log:\n{text}");
     assert!(!text.contains("list_apps"), "list_apps in A's log:\n{text}");
-    let hub_log = std::fs::read_to_string(home.path().join("logs").join("hub.log")).unwrap_or_default();
-    assert!(!hub_log.contains("presence"), "presence in hub.log:\n{hub_log}");
+    // hub.log: exactly one presence line (the first observation), however many ticks ran.
+    let n = read_log(home.path(), "hub.log").iter().filter(|v| v["ev"] == "presence").count();
+    assert_eq!(n, 1, "{:?}", read_log(home.path(), "hub.log"));
+}
+
+#[tokio::test]
+async fn offline_probe_writes_one_line_per_change_not_per_tick() {
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = presence_hub(&a, &relay, home.path()).await;
+    next_presence(&mut hub, &a.id, true).await;
+    let before = read_log(home.path(), "hub.log").len();
+    a.svc.stop();
+    next_presence(&mut hub, &a.id, false).await;
+    // Several more offline ticks.
+    for _ in 0..3 {
+        next_presence(&mut hub, &a.id, false).await;
+    }
+    let lines = read_log(home.path(), "hub.log");
+    let new: Vec<&Value> = lines.iter().skip(before).collect();
+    assert_eq!(new.len(), 1, "{new:?}");
+    assert_eq!((&new[0]["ev"], &new[0]["id"], &new[0]["online"]), (&json!("presence"), &json!(a.id), &json!(false)));
+    for v in &lines {
+        assert!(v["ev"] != "route" || v["result"] == "ok", "failed route line: {v}");
+        assert!(!v.to_string().contains("reconnecting"), "{v}");
+    }
+}
+
+#[tokio::test]
+async fn stale_password_stops_probing_and_does_not_lock_the_user_out() {
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let saved = json!([{"id":a.id,"name":"test-a","password":"stale-pass","lan":[]}]);
+    rapp_net::config::write_json(&home.path().join("hosts.json"), &saved).unwrap();
+    let mut hub = Hub::start_with_presence(home.path(), a.bins.path(), Some(relay.relay.addr), Duration::from_millis(200));
+    next_presence(&mut hub, &a.id, false).await;
+    // Enough ticks to trip the relay's limiter if the probe kept connecting.
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    let r = hub.call(json!({"cmd":"add_host","id":a.id,"password":PASSWORD,"req":9})).await;
+    assert_eq!(r, json!({"event":"host_added","id":a.id,"name":"test-a","req":9}));
+    next_presence(&mut hub, &a.id, true).await;
+}
+
+#[tokio::test]
+async fn removing_a_host_during_a_probe_keeps_it_removed() {
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let saved = json!([{"id":a.id,"name":"old-name","password":PASSWORD,"lan":[]}]);
+    rapp_net::config::write_json(&home.path().join("hosts.json"), &saved).unwrap();
+    let mut hub = Hub::start_with_presence(home.path(), a.bins.path(), Some(relay.relay.addr), Duration::from_millis(200));
+    // The first probe starts immediately; remove while it is connecting.
+    hub.send(json!({"cmd":"remove_host","id":a.id})).await;
+    tokio::time::sleep(Duration::from_millis(1000)).await;
+    let saved: Value = serde_json::from_slice(&std::fs::read(home.path().join("hosts.json")).unwrap()).unwrap();
+    assert_eq!(saved, json!([]));
+    let r = hub.call(json!({"cmd":"hosts"})).await;
+    assert_eq!(r, json!({"event":"hosts","hosts":[]}));
 }
 
 #[tokio::test]
