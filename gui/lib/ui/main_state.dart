@@ -570,7 +570,6 @@ class MainState extends ChangeNotifier {
       if (r.ending) {
         _finishEnding(r);
       } else {
-        resources.linkDown(e.sid);
         _disconnect(r, e.reason);
       }
     } else if (e is DetachedEvent) {
@@ -592,6 +591,7 @@ class MainState extends ChangeNotifier {
       // A reconnect that never reached the stage: its new sid goes, the old picture stays.
       final fresh = r.sid;
       if (fresh != null) {
+        resources.linkDown(fresh);
         remote.remove(fresh)?.dispose();
         _sentFps.remove(fresh);
         _waiting.remove(fresh)?.timer.cancel();
@@ -602,6 +602,7 @@ class MainState extends ChangeNotifier {
     }
     _batchEnded.remove(r.key);
     final sid = r.sid;
+    if (sid != null) resources.linkDown(sid);
     final rs = sid == null ? null : remote[sid];
     r.phase = Phase.disconnected;
     r.reason = r.userDisconnect ? 'user' : raw;
@@ -1185,7 +1186,9 @@ class MainState extends ChangeNotifier {
     if (p == null) return;
     final copy = e.copy;
     if (copy != null) {
-      if (!await p.copyLocal(copy)) hint = '本机副本不在了';
+      final ok = await p.copyLocal(copy);
+      if (_disposed || ok) return;
+      hint = '本机副本不在了';
       notifyListeners();
     } else if (canCopy(e)) {
       p.clipPick(e.sid, e.clip, false);
@@ -1225,10 +1228,10 @@ class MainState extends ChangeNotifier {
     final path = t.path;
     final p = port;
     if (p == null || path == null) return;
-    if (!await p.reveal(path)) {
-      hint = '文件不在了：${t.name}';
-      notifyListeners();
-    }
+    final ok = await p.reveal(path);
+    if (_disposed || ok) return;
+    hint = '文件不在了：${t.name}';
+    notifyListeners();
   }
 
   @override

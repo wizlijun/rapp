@@ -11,6 +11,7 @@ import 'package:rapp/ui/lamp.dart';
 import 'package:rapp/ui/lifecycle.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
+import 'package:rapp/ui/resources_state.dart';
 import 'package:rapp/ui/session_model.dart';
 import 'package:rapp/ui/tokens.dart';
 import 'package:rapp/ui/workspace_store.dart';
@@ -2014,6 +2015,47 @@ void main() {
         port.emit(prog(1, 5, TransferState.running));
         st.cancelTransfer(st.resources.running.single);
         expect(callsOf(port, 'cancel_transfer').single.$2, {'sid': 1, 'id': 5});
+      });
+    });
+
+    test('the hub exiting fails running transfers with 没传完', () {
+      env((a, t, port, st) {
+        port.emit(prog(1, 5, TransferState.running));
+        t.die();
+        a.flushMicrotasks();
+        a.elapse(const Duration(seconds: 1));
+        expect(st.resources.running, isEmpty);
+        expect(st.resources.ended.single.state, TransferState.failed);
+        expect(st.resources.ended.single.error, '没传完');
+      });
+    });
+
+    test('after a failed reconnect the old entries say 已断开 again', () {
+      env((a, t, port, st) {
+        port.emit(const ClipsEvent(1, [ClipRow(7, 'old', true)]));
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') t.emit({'event': 'error', 'error': 'offline', 'req': m['req']});
+        };
+        st.reconnect('111/calc');
+        a.flushMicrotasks();
+        expect(st.copyBlockedWord(st.resources.clips.single), 'A 已断开，复制不到');
+      });
+    });
+
+    test('copyLocal and reveal answering after dispose do nothing', () {
+      fakeAsync((a) {
+        final port = FakeSessionPort()
+          ..copyLocalReply = false
+          ..revealReply = false;
+        final st = MainState(hub: null, configDir: tmp.path, prefs: UiPrefs(), port: port);
+        final row = TransferRow(1, 5, 'k', true, 'a.log', 's', 1, 1, TransferState.done)..path = '/tmp/x/a.log';
+        st.copyLocal(ClipEntry(1, 'k', 1, 1, ClipKind.text, 't', 's', DateTime(2026))..copy = 3);
+        st.reveal(row);
+        final before = st.hint;
+        st.dispose();
+        a.flushMicrotasks();
+        expect(st.hint, before);
       });
     });
 
