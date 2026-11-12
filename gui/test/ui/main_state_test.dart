@@ -1,6 +1,8 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fake_async/fake_async.dart';
+import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/ui/lamp.dart';
 import 'package:rapp/ui/main_state.dart';
@@ -127,9 +129,9 @@ void main() {
   test('a session that ends on its own says 意外结束 and why', () async {
     t.emit(opened(1, '111', 'a'));
     await pump();
-    t.emit({'event': 'closed', 'sid': 1, 'reason': 'rapp-client: connection closed'});
+    t.emit({'event': 'closed', 'sid': 1, 'reason': 'rapp-client: capture failed'});
     await pump();
-    expect(s.hint, 'a 意外结束：connection closed');
+    expect(s.hint, 'a 意外结束：capture failed');
   });
 
   test('hub messages in the hint are in Chinese', () async {
@@ -240,5 +242,168 @@ void main() {
     final s2 = MainState(hub: null, hubError: 'boom', configDir: tmp.path, prefs: UiPrefs());
     expect(s2.hubProblem, 'boom');
     expect(s2.hubUsable, isFalse);
+  });
+
+  group('embedded sessions', () {
+    void env(void Function(FakeAsync a, FakeTransport t, FakeSessionPort port, MainState st, List<String> hints) body,
+        {int sessions = 1, bool withPort = true}) {
+      fakeAsync((a) {
+        final t = FakeTransport();
+        final hub = HubClient(t);
+        final port = FakeSessionPort();
+        final st = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: withPort ? port : null);
+        final hints = <String>[];
+        var last = st.hint;
+        st.addListener(() {
+          if (st.hint != last) {
+            last = st.hint;
+            hints.add(last);
+          }
+        });
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            final n = (m['app'] as String).length;
+            t.emit({
+              'event': 'opened', 'sid': n, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+              if (m['embed'] == true) ...{'port': 5000 + n, 'token': 'tk'},
+              'req': m['req'],
+            });
+          }
+        };
+        a.flushMicrotasks();
+        for (var i = 1; i <= sessions; i++) {
+          st.openOrSwitch('111', 'a' * i, i == 1 ? 'Calculator' : 'Notes');
+          a.flushMicrotasks();
+        }
+        hints.clear();
+        body(a, t, port, st, hints);
+      });
+    }
+
+    test('opening embeds: open carries embed, then start with defaults', () {
+      env((a, t, port, st, hints) {
+        expect(t.sent.where((m) => m['cmd'] == 'open').last['embed'], true);
+        final c = port.calls.last;
+        expect(c.$1, 'start');
+        expect(c.$2, {'sid': 1, 'port': 5001, 'token': 'tk', 'mode': 'color16', 'fps': 15, 'density': 'adaptive'});
+        expect(st.embeds, true);
+        expect(st.remote.containsKey(1), true);
+        expect(st.currentRemote, isNotNull);
+      });
+    });
+
+    test('start failure closes the hub session and hints', () {
+      fakeAsync((a) {
+        final t = FakeTransport();
+        final hub = HubClient(t);
+        final port = FakeSessionPort()..startError = 'boom';
+        final st = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: port);
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            t.emit({'event': 'opened', 'sid': 1, 'id': '111', 'app': 'a', 'path': 'lan', 'port': 5000, 'token': 'tk', 'req': m['req']});
+          }
+        };
+        st.openOrSwitch('111', 'a', 'Calculator');
+        a.flushMicrotasks();
+        expect(t.sent.last, {'cmd': 'close', 'sid': 1});
+        expect(st.hint, 'boom');
+        expect(st.remote.containsKey(1), false);
+      });
+    });
+
+    test('end current closes through the port, not the hub', () {
+      env((a, t, port, st, hints) {
+        st.endCurrent();
+        final c = port.calls.last;
+        expect(c.$1, 'close');
+        expect(c.$2, {'sid': 1});
+        expect(t.sent.where((m) => m['cmd'] == 'close'), isEmpty);
+      });
+    });
+
+    test('runner closed first', () {
+      env((a, t, port, st, hints) {
+        port.emit(const ClosedEvent(1, 'host says: Calculator quit'));
+        expect(st.sessionCount, 0);
+        expect(st.hint, 'Calculator 已结束：A 端关闭了 app');
+        t.emit({'event': 'closed', 'sid': 1, 'reason': 'connection closed'});
+        a.flushMicrotasks();
+        expect(st.hint, 'Calculator 已结束：A 端关闭了 app');
+        expect(hints.length, 1);
+        a.elapse(const Duration(seconds: 2));
+        expect(hints.length, 1);
+      });
+    });
+
+    test('hub closed first', () {
+      env((a, t, port, st, hints) {
+        t.emit({'event': 'closed', 'sid': 1, 'reason': 'connection closed'});
+        a.flushMicrotasks();
+        expect(st.sessionCount, 0);
+        expect(hints.length, 0);
+        a.elapse(const Duration(milliseconds: 200));
+        port.emit(const ClosedEvent(1, 'quit'));
+        expect(st.hint, '已结束 Calculator');
+        expect(hints.length, 1);
+        a.elapse(const Duration(seconds: 2));
+        expect(hints.length, 1);
+        expect(port.calls.where((c) => c.$1 == 'close'), isEmpty);
+      });
+    });
+
+    test('hub closed and runner silent: hub reason after 1 s and port closed', () {
+      env((a, t, port, st, hints) {
+        t.emit({'event': 'closed', 'sid': 1, 'reason': 'connection closed'});
+        a.flushMicrotasks();
+        a.elapse(const Duration(milliseconds: 900));
+        expect(hints.length, 0);
+        a.elapse(const Duration(milliseconds: 200));
+        expect(st.hint, 'Calculator 意外结束：连接断了');
+        expect(port.calls.any((c) => c.$1 == 'close' && c.$2['sid'] == 1), true);
+      });
+    });
+
+    test('decode error ends one session, keeps the other', () {
+      env((a, t, port, st, hints) {
+        st.select('111/a');
+        port.emit(const ClosedEvent(1, 'cannot decode frame: bad tile'));
+        expect(st.currentKey, '111/aa');
+        expect(st.remote.containsKey(2), true);
+        expect(st.sessionCount, 1);
+        expect(st.hint, 'Calculator 意外结束：cannot decode frame: bad tile');
+      }, sessions: 2);
+    });
+
+    test('switching to an open embedded session does not focus through the hub', () {
+      env((a, t, port, st, hints) {
+        port.emit(const DetachedEvent(1, true));
+        st.openOrSwitch('111', 'a', 'Calculator');
+        a.flushMicrotasks();
+        expect(t.sent.where((m) => m['cmd'] == 'focus'), isEmpty);
+        final c = port.calls.last;
+        expect(c.$1, 'raise_detached');
+        expect(c.$2, {'sid': 1});
+        expect(st.currentKey, '111/a');
+      });
+    });
+
+    test('without a port the S1 path is unchanged', () {
+      env((a, t, port, st, hints) {
+        expect(st.embeds, false);
+        expect(t.sent.where((m) => m['cmd'] == 'open').last.containsKey('embed'), false);
+        expect(port.calls.where((c) => c.$1 == 'start'), isEmpty);
+        expect(st.remote, isEmpty);
+      }, withPort: false);
+    });
+  });
+
+  group('endedHint', () {
+    test('maps runner and hub reasons', () {
+      expect(endedHint('X', 'rapp-client: quit'), '已结束 X');
+      expect(endedHint('X', 'host says: X quit'), 'X 已结束：A 端关闭了 app');
+      expect(endedHint('X', 'connection closed'), 'X 意外结束：连接断了');
+      expect(endedHint('X', 'GUI did not connect'), 'X 意外结束：本机没有接上会话');
+      expect(endedHint('X', 'rapp-client: boom'), 'X 意外结束：boom');
+    });
   });
 }

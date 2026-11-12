@@ -1,8 +1,11 @@
 // The single source of UI state for the main window.
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import '../embed/remote_session.dart';
+import '../embed/session_port.dart';
 import '../hub_client.dart';
 import '../permissions.dart';
 import 'lamp.dart';
@@ -26,7 +29,9 @@ class MainState extends ChangeNotifier {
     this.hubError,
     required this.configDir,
     required this.prefs,
+    this.port,
   }) {
+    _portSub = port?.events.listen(_onPortEvent);
     hub?.addListener(_onHub);
     _lastError = hub?.lastError;
     _entries = _mapEntries();
@@ -37,6 +42,22 @@ class MainState extends ChangeNotifier {
   final String? hubError;
   final String configDir;
   final UiPrefs prefs;
+  final SessionPort? port;
+  StreamSubscription<SessionEvent>? _portSub;
+
+  /// Embedded sessions by hub sid.
+  final Map<Object, RemoteSession> remote = {};
+  // Hub closed first: waiting up to 1 s for the runner's reason.
+  final Map<Object, _Waiting> _waiting = {};
+  // Sids whose end was already reported (or never started); their hub `closed` is ignored.
+  final Set<Object> _quiet = {};
+
+  bool get embeds => port != null;
+
+  RemoteSession? get currentRemote {
+    final sid = current?.sid;
+    return sid == null ? null : remote[sid];
+  }
 
   PanelTab? panel;
   Grouping grouping = Grouping.device;
@@ -125,6 +146,7 @@ class MainState extends ChangeNotifier {
     final seen = <String>{};
     if (h != null) {
       for (final s in h.sessions) {
+        if (remote[s.sid]?.endReason != null || _quiet.contains(s.sid)) continue;
         final e = SessionEntry(
           sid: s.sid,
           id: s.id,
@@ -157,7 +179,30 @@ class MainState extends ChangeNotifier {
           final next = stepKey(oldGroups, e.key, 1);
           currentKey = (next != null && next != e.key && newKeys.contains(next)) ? next : null;
         }
-        hint = endedHint(e.appName, h.closeReasons.remove(e.sid));
+        final hubReason = h.closeReasons.remove(e.sid);
+        if (_quiet.remove(e.sid)) continue;
+        final rs = remote[e.sid];
+        if (rs != null) {
+          // Embedded: the runner's reason wins; wait for it, at most 1 s.
+          final sid = e.sid!;
+          final name = e.appName;
+          _waiting[sid] = _Waiting(name, Timer(const Duration(seconds: 1), () {
+            _waiting.remove(sid);
+            remote.remove(sid)?.dispose();
+            port?.close(sid);
+            hint = endedHint(name, hubReason);
+            notifyListeners();
+          }));
+          continue;
+        }
+        hint = endedHint(e.appName, hubReason);
+      }
+      // Runner-first sessions: the hub's `closed` is now in, forget them.
+      for (final sid in remote.keys.toList()) {
+        if (remote[sid]!.endReason != null && !h.sessions.any((s) => s.sid == sid)) {
+          h.closeReasons.remove(sid);
+          remote.remove(sid)?.dispose();
+        }
       }
     } else if (currentKey != null && !newKeys.contains(currentKey)) {
       currentKey = null;
@@ -170,12 +215,47 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
+  void _onPortEvent(SessionEvent e) {
+    final rs = remote[e.sid];
+    if (rs == null || rs.endReason != null) return;
+    if (e is! ClosedEvent) {
+      rs.apply(e);
+      return;
+    }
+    final w = _waiting.remove(e.sid);
+    if (w != null) {
+      // The hub already removed the entry; this is the reason it was waiting for.
+      w.timer.cancel();
+      remote.remove(e.sid)?.dispose();
+      hint = endedHint(w.appName, e.reason);
+      notifyListeners();
+      return;
+    }
+    rs.apply(e);
+    final oldGroups = groups;
+    final name = rs.appName;
+    final old = current;
+    _entries = _mapEntries();
+    final newKeys = {for (final x in _entries) x.key};
+    if (old != null && old.sid == e.sid && old.key == currentKey) {
+      final next = stepKey(oldGroups, old.key, 1);
+      currentKey = (next != null && next != old.key && newKeys.contains(next)) ? next : null;
+    }
+    hint = endedHint(name, e.reason);
+    notifyListeners();
+  }
+
   Future<void> openOrSwitch(String id, String app, String appName) async {
     if (!hubUsable) return;
     final key = '$id/$app';
     for (final e in _entries) {
       if (e.key == key && e.sid != null) {
-        hub!.focus(e.sid!);
+        final rs = remote[e.sid];
+        if (rs != null) {
+          if (rs.detached) port?.raiseDetached(e.sid!);
+        } else {
+          hub!.focus(e.sid!);
+        }
         currentKey = key;
         panel = null;
         hint = '已切到 $appName';
@@ -200,7 +280,21 @@ class MainState extends ChangeNotifier {
     panel = null;
     notifyListeners();
     try {
-      await hub!.open(id, app);
+      final opened = await hub!.open(id, app, embed: embeds);
+      if (embeds) {
+        final err = await _startEmbedded(opened, appName);
+        if (err != null) {
+          _pending.remove(key);
+          hint = err;
+          if (currentKey == key) {
+            _entries = _mapEntries();
+            currentKey = _entries.any((e) => e.key == before) ? before : null;
+          }
+          _entries = _mapEntries();
+          notifyListeners();
+          return;
+        }
+      }
       _pending.remove(key);
       hint = '已打开 $appName @ ${deviceName(id)}';
     } catch (e) {
@@ -217,6 +311,23 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Starts the runner session for an opened embedded hub session; the error hint on failure.
+  Future<String?> _startEmbedded(HubSession s, String appName) async {
+    final rs = RemoteSession(s.sid, appName);
+    remote[s.sid] = rs;
+    try {
+      final p = s.port, tk = s.token;
+      if (p == null || tk == null) throw 'rapp-hub 没有给出嵌入端口';
+      await port!.start(StartArgs(s.sid, p, tk, 'color16', 15, 'adaptive'));
+      return null;
+    } catch (e) {
+      remote.remove(s.sid)?.dispose();
+      _quiet.add(s.sid);
+      hub!.close(s.sid);
+      return hubWord('$e');
+    }
+  }
+
   void focusCurrent() {
     if (!hubUsable) return;
     final c = current;
@@ -228,7 +339,11 @@ class MainState extends ChangeNotifier {
     if (!hubUsable) return;
     final c = current;
     if (c?.sid == null) return;
-    hub!.close(c!.sid!);
+    if (remote.containsKey(c!.sid)) {
+      port!.close(c.sid!);
+    } else {
+      hub!.close(c.sid!);
+    }
     hint = '正在结束 ${c.appName}';
     notifyListeners();
   }
@@ -317,8 +432,21 @@ class MainState extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     hub?.removeListener(_onHub);
+    _portSub?.cancel();
+    for (final w in _waiting.values) {
+      w.timer.cancel();
+    }
+    for (final r in remote.values) {
+      r.dispose();
+    }
     super.dispose();
   }
+}
+
+class _Waiting {
+  _Waiting(this.appName, this.timer);
+  final String appName;
+  final Timer timer;
 }
 
 /// Hub messages the user can meet in the hint, in plain words.
@@ -332,8 +460,11 @@ String hubWord(String message) => hubWords[message] ?? message;
 /// "stdin closed" (ended from rapp) and "quit" (its window was closed) are
 /// the user's own doing; any other client exit reason is unexpected.
 String endedHint(String appName, String? reason) {
-  if (reason == null || reason == 'stdin closed' || reason == 'quit') return '已结束 $appName';
   const prefix = 'rapp-client: ';
-  final why = reason.startsWith(prefix) ? reason.substring(prefix.length) : reason;
+  final why = reason != null && reason.startsWith(prefix) ? reason.substring(prefix.length) : reason;
+  if (why == null || why == 'stdin closed' || why == 'quit') return '已结束 $appName';
+  if (why.startsWith('host says: ') && why.endsWith(' quit')) return '$appName 已结束：A 端关闭了 app';
+  if (why == 'connection closed') return '$appName 意外结束：连接断了';
+  if (why == 'GUI did not connect') return '$appName 意外结束：本机没有接上会话';
   return '$appName 意外结束：$why';
 }
