@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=rapp
+Comment=Remote Mac applications on your Linux desktop
+Comment[zh_CN]=在 Linux 桌面使用远程 Mac 应用
+Exec=/opt/rapp/rapp
+Icon=rapp
+Terminal=false
+Categories=Network;RemoteAccess;
+StartupWMClass=com.rapp.rapp

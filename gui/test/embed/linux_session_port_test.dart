@@ -1,0 +1,129 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/linux_session_port.dart';
+import 'package:rapp/embed/session_port.dart';
+
+Uint8List u32(int n) => (ByteData(4)..setUint32(0, n, Endian.little)).buffer.asUint8List();
+Uint8List u16(int n) => (ByteData(2)..setUint16(0, n, Endian.little)).buffer.asUint8List();
+Uint8List f32(double n) => (ByteData(4)..setFloat32(0, n, Endian.little)).buffer.asUint8List();
+List<int> string(String s) => [...u16(utf8.encode(s).length), ...utf8.encode(s)];
+List<int> packet(int type, List<int> bytes) => [type, ...u32(bytes.length), ...bytes];
+const full = [120,156,98,100,0,129,31,0,0,0,0,255,255];
+const delta = [98,4,145,15,216,1,0,0,0,255,255];
+List<int> frame(bool first) => packet(4, [2, ...f32(0), ...f32(0), ...f32(4), ...f32(4),
+    ...u16(4), ...u16(4), first ? 1 : 0, ...(first ? full : delta)]);
+
+Future<SessionEvent> nextWhere(StreamIterator<SessionEvent> it, bool Function(SessionEvent) match) async {
+  while (await it.moveNext().timeout(const Duration(seconds: 8))) {
+    if (match(it.current)) return it.current;
+  }
+  throw StateError('event stream ended');
+}
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  test('worker packet framing handles fragmentation, multiple packets and rejects truncation', () async {
+    final bytes = [ ...u32(3), 0, 5, 7, ...u32(2), 1, 8 ];
+    expect(await sessionPackets(Stream.fromIterable(bytes.map((b) => [b]))).toList(), [[0,5,7],[1,8]]);
+    await expectLater(sessionPackets(Stream.value([...u32(8), 0, 1])).toList(), throwsFormatException);
+    await expectLater(sessionPackets(Stream.value(u32(0xffffffff))).toList(), throwsFormatException);
+  });
+
+  test('physical keyboard mapping includes Command, arrows and punctuation', () {
+    expect(linuxMacKeyCode(PhysicalKeyboardKey.keyA), 0);
+    expect(linuxMacKeyCode(PhysicalKeyboardKey.keyZ), 6);
+    expect(linuxMacKeyCode(PhysicalKeyboardKey.controlLeft), 55);
+    expect(linuxMacKeyCode(PhysicalKeyboardKey.arrowLeft), 123);
+    expect(linuxMacKeyCode(PhysicalKeyboardKey.bracketLeft), 33);
+    expect(linuxMacKeyCode(PhysicalKeyboardKey.metaLeft), isNull);
+  });
+
+  final worker = File('../rust/target/release/rapp-session').absolute.path;
+  test('real Linux worker decodes full/delta, crops titlebar, sends input and closes on EOF', () async {
+    final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final port = LinuxSessionPort(worker, framePresented: () async {});
+    final events = StreamIterator(port.events);
+    Socket? peer;
+    final received = <int>[];
+    final disconnected = Completer<void>();
+    try {
+      await port.init();
+      final accepted = server.first;
+      await port.start(StartArgs(7, server.port, 'fixture-token', 'color16', 15, 'adaptive'));
+      peer = await accepted.timeout(const Duration(seconds: 5));
+      peer.listen(received.addAll, onDone: disconnected.complete);
+      peer.add(packet(2, [...string('Fixture'), ...u16(4), ...u16(4)]));
+      peer.add(packet(13, [...u16(1), ...u32(1), ...u32(0), 0, 2,
+          ...f32(0), ...f32(0), ...f32(4), ...f32(4), ...f32(1), ...string('Window')]));
+      peer.add(frame(true));
+      await peer.flush();
+      expect((await nextWhere(events, (e) => e is ReadyEvent) as ReadyEvent).appName, 'Fixture');
+      var e = await nextWhere(events, (e) => e is WindowsEvent && e.windows.any((w) => w.image != null)) as WindowsEvent;
+      expect(e.windows.single.source, const ui.Rect.fromLTWH(0, 1, 4, 3));
+      expect(e.windows.single.visible, const ui.Rect.fromLTWH(0, 0, 1, 1));
+      var pixels = await e.windows.single.image!.toByteData(format: ui.ImageByteFormat.rawRgba);
+      expect(pixels!.buffer.asUint8List().take(4), [255, 0, 0, 255]);
+      peer.add(frame(false)); await peer.flush();
+      e = await nextWhere(events, (e) => e is WindowsEvent && e.windows.any((w) => w.image != null)) as WindowsEvent;
+      pixels = await e.windows.single.image!.toByteData(format: ui.ImageByteFormat.rawRgba);
+      expect(pixels!.buffer.asUint8List().take(4), [0, 255, 0, 255]);
+      port.key(7, 0, 1 << 20);
+      port.mouse(7, 1, 'down', 'left', 2, 3, 1);
+      port.mouse(7, 1, 'up', 'left', 2, 3, 1);
+      port.resize(7, 1, 500, 300);
+      port.setStream(7, 'duogray', 5, 'original');
+      port.composerSend(7, [{'text': '你好'}]);
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      final messages = <(int, List<int>)>[];
+      for (var i = 0; i + 5 <= received.length;) {
+        final n = ByteData.sublistView(Uint8List.fromList(received), i + 1, i + 5).getUint32(0, Endian.little);
+        if (i + 5 + n > received.length) break;
+        messages.add((received[i], received.sublist(i+5, i+5+n))); i += 5+n;
+      }
+      expect(messages.map((m) => m.$1), containsAllInOrder([1,6,6,7,7,9,11,14,5]));
+      expect(utf8.decode(messages.last.$2), '你好');
+      final resize = messages.firstWhere((m) => m.$1 == 9).$2;
+      expect(resize, [...u32(1), ...u16(500), ...u16(300)]);
+      port.close(7);
+      expect((await nextWhere(events, (e) => e is ClosedEvent) as ClosedEvent).reason, 'closed');
+      await disconnected.future.timeout(const Duration(seconds: 5));
+    } finally {
+      port.dispose(); await events.cancel(); peer?.destroy(); await server.close();
+    }
+  }, skip: !Platform.isLinux || !File(worker).existsSync() ? 'Build rapp-session first on Linux' : false);
+
+  test('malformed frame closes only the affected session', () async {
+    final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final second = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final port = LinuxSessionPort(worker, framePresented: () async {});
+    final events = StreamIterator(port.events);
+    Socket? peer, healthy;
+    try {
+      await port.init();
+      final accepted = server.first, acceptedSecond = second.first;
+      await port.start(StartArgs(9, server.port, 'fixture-token', 'color16', 15, 'adaptive'));
+      await port.start(StartArgs(10, second.port, 'fixture-token', 'color16', 15, 'adaptive'));
+      peer = await accepted; healthy = await acceptedSecond;
+      peer.listen((_) {}); healthy.listen((_) {});
+      peer.add(packet(2, [...string('Fixture'), ...u16(4), ...u16(4)]));
+      peer.add(packet(4, [2,...f32(0),...f32(0),...f32(4),...f32(4),...u16(4),...u16(4),1,0]));
+      final end = await nextWhere(events, (e) => e is ClosedEvent) as ClosedEvent;
+      expect(end.sid, 9); expect(end.reason, contains('zlib'));
+      healthy.add(packet(2, [...string('Healthy'), ...u16(4), ...u16(4)]));
+      healthy.add(packet(13, [...u16(1), ...u32(1), ...u32(0), 0, 2,
+          ...f32(0), ...f32(0), ...f32(4), ...f32(4), ...f32(1), ...string('Window')]));
+      healthy.add(frame(true));
+      final event = await nextWhere(events, (e) => e is WindowsEvent && e.windows.any((w) => w.image != null));
+      expect(event.sid, 10);
+    } finally {
+      port.dispose(); await events.cancel(); peer?.destroy(); healthy?.destroy();
+      await server.close(); await second.close();
+    }
+  }, skip: !Platform.isLinux || !File(worker).existsSync() ? 'Build rapp-session first on Linux' : false);
+}

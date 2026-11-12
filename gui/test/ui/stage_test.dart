@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'dart:ui' as ui;
+import 'package:flutter/services.dart';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -18,6 +20,12 @@ import 'package:rapp/ui/top_bar.dart';
 
 import '../fakes.dart';
 import 'helpers.dart';
+
+class _KeyboardPort extends FakeSessionPort {
+  final keys = <KeyEvent>[];
+  @override
+  bool handleKeyEvent(Object sid, KeyEvent event) { keys.add(event); return true; }
+}
 
 void main() {
   late FakeTransport t;
@@ -205,6 +213,38 @@ void main() {
       await tester.pump();
       expect(find.text('正在连接'), findsNothing);
       expect(tester.widget<Texture>(find.byType(Texture)).textureId, 42);
+    });
+
+    testWidgets('Linux image renders in the stage and picture owns keyboard focus', (tester) async {
+      es.dispose();
+      final keyboard = _KeyboardPort();
+      port = keyboard;
+      es = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: port);
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      canvas.drawColor(Colors.red, BlendMode.src);
+      final picture = recorder.endRecording();
+      final image = await tester.runAsync(() => picture.toImage(4, 4));
+      picture.dispose();
+      await tester.pumpWidget(wrap(embedded()));
+      await openEmbedded(tester);
+      port.emit(const ReadyEvent(1, 'Fixture'));
+      port.emit(WindowsEvent(1, [RemoteWindow(id: 1, parent: 0, kind: WindowKind.normal,
+          title: 'Window', rect: const Rect.fromLTWH(0,0,400,300), titleBar: 0,
+          resizable: false, focused: true, texture: null, visible: const Rect.fromLTWH(0,0,1,1),
+          image: image, source: const Rect.fromLTWH(0,0,4,4))]));
+      await tester.pump();
+      expect(find.text('正在连接'), findsNothing);
+      expect(find.byType(Texture), findsNothing);
+      await tester.tapAt(const Offset(400, 300));
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+      expect(keyboard.keys.map((e) => e.logicalKey), containsAll([LogicalKeyboardKey.escape, LogicalKeyboardKey.keyA]));
+      expect(es.pictureFocused, 1);
+      expect(port.calls.where((c) => c.$1 == 'mouse').length, 2);
+      await tester.pumpWidget(const SizedBox());
+      image!.dispose();
     });
 
     testWidgets('stage size goes to A once the window settles', (tester) async {

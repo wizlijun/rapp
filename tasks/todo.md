@@ -170,3 +170,11 @@
 - [ ] S5 项目与常用（规格：`docs/superpowers/specs/2026-11-12-rapp-s5-projects-favorites-design.md`）
 - [ ] S6 全局资源（规格：`docs/superpowers/specs/2026-11-12-rapp-s6-global-resources-design.md`）
 - [ ] S4 全景（规格：`docs/superpowers/specs/2026-11-12-rapp-s4-overview-design.md`）
+
+## Linux 0.4.0 内嵌舞台（2026-11-12）
+- [x] `rapp-session` 无窗口进程复用 client-core 协议、持续 zlib/瓦片解码；JSON 输入、带长度的 BGRA/事件输出，EOF 断开 socket。
+- [x] `LinuxSessionPort` 接通 hub 的 embed 模式、窗口/弹窗裁剪、舞台绘制、键鼠/菜单/流设置/文字输入/文字剪贴板历史；逐帧背压限制图像积压。
+- [x] 画面获得键盘焦点后将 Ctrl 映射为 Mac Command；F11/Super 保留给本地，失焦释放按键。hub 退出关闭嵌入会话。
+- [x] 构建脚本将 rapp-session 放进 bundle；独立 GTK client 保留。
+- 验证：Flutter 318 项通过、1 项跳过，analyze 干净；client-core 16 项 + worker 2 项测试通过，clippy 无警告。新测试覆盖真实 worker 到 Flutter 的完整/增量帧、BGRA 色彩、裁剪、输入/中文、EOF、坏帧隔离、舞台图像和键盘焦点。真实 Mac 连接的远程 app 已在 Linux 主窗口舞台显示。
+- 限制：内嵌会话的无重连分离/放回尚未实现（按钮禁用）；图片/文件附件暂不支持（显示明确提示）。

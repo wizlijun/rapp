@@ -29,7 +29,7 @@ class Stage extends StatelessWidget {
         RemoteWindow? win;
         if (rs != null && rs.ready) {
           for (final w in rs.windows) {
-            if (w.id == rs.currentWindow && w.texture != null) win = w;
+            if (w.id == rs.currentWindow && w.hasPicture) win = w;
           }
         }
         if (problem != null) {

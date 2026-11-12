@@ -12,11 +12,17 @@ import subprocess
 import sys
 import threading
 import time
+import tomllib
 import zlib
 
 INPUT = "--input" in sys.argv
 paths = [a for a in sys.argv[1:] if a != "--input"]
 BINARY = Path(paths[0] if paths else "rust/target/release/rapp-client").resolve()
+
+version = json.loads(subprocess.check_output([str(BINARY), "version", "--json"], text=True))
+workspace = tomllib.loads((Path(__file__).resolve().parents[1] / "rust/Cargo.toml").read_text())
+assert version == {"version": workspace["workspace"]["package"]["version"], "protocol": 5}, version
+print("PASS client version matches workspace")
 
 def string(s):
     b = s.encode()
@@ -153,6 +159,14 @@ def keyboard(s):
     window=xdo("search", "--pid", s.p.pid, "--name", "rapp protocol fixture").splitlines()[-1]
     xdo("windowactivate", "--sync", window)
     assert xdo("getactivewindow")==window
+    xdo("windowminimize", window)
+    time.sleep(0.2)
+    s.p.stdin.write('{"cmd":"focus"}\n')
+    s.p.stdin.flush()
+    deadline = time.monotonic() + 5
+    while xdo("getactivewindow") != window:
+        assert time.monotonic() < deadline, "hub focus did not restore client window"
+        time.sleep(0.05)
     xdo("key", "ctrl+a")
     xdo("type", "--clearmodifiers","test-input")
     assert xdo("getactivewindow")==window

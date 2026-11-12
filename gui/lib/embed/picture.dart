@@ -1,6 +1,7 @@
 // The remote window's picture on the stage: the runner's texture, letterboxed. Presses, drags,
 // wheels and trackpad scrolls on it go to A; a press gives it keyboard focus.
 import 'package:flutter/gestures.dart';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
@@ -13,7 +14,13 @@ import 'session_port.dart';
 import 'window_tabs.dart';
 
 class Picture extends StatefulWidget {
-  const Picture({super.key, required this.state, required this.session, required this.window, this.hole});
+  const Picture({
+    super.key,
+    required this.state,
+    required this.session,
+    required this.window,
+    this.hole,
+  });
 
   /// Where focus and input go: `state.port`, `state.focusPicture`.
   final MainState state;
@@ -38,6 +45,7 @@ class _Target {
 
 class _PictureState extends State<Picture> {
   final _tex = GlobalKey();
+  final _focus = FocusNode();
   Rect? _mine;
   late final _clicks = ClickCounter(widget.state.doubleClick);
 
@@ -82,8 +90,8 @@ class _PictureState extends State<Picture> {
     final bit = e.buttons & kPrimaryButton != 0
         ? kPrimaryButton
         : e.buttons & kSecondaryButton != 0
-            ? kSecondaryButton
-            : 0;
+        ? kSecondaryButton
+        : 0;
     final t = _at(e.localPosition);
     if (!t.usable || !t.pic.contains(e.localPosition)) {
       // The letterbox is outside the picture: like the top bar, a press there takes focus away.
@@ -91,6 +99,7 @@ class _PictureState extends State<Picture> {
       return;
     }
     if (bit == 0 || _button != null) return;
+    _focus.requestFocus();
     widget.state.focusPicture(_sid);
     _button = bit == kPrimaryButton ? 'left' : 'right';
     _held = t;
@@ -115,15 +124,22 @@ class _PictureState extends State<Picture> {
   void _hover(PointerHoverEvent e) {
     // Only menus track the pointer without a press.
     final t = _at(e.localPosition);
-    if (t.win.kind != WindowKind.menu || !t.usable || !t.pic.contains(e.localPosition)) return;
+    if (t.win.kind != WindowKind.menu ||
+        !t.usable ||
+        !t.pic.contains(e.localPosition)) {
+      return;
+    }
     _mouse('move', 'left', e.localPosition, t);
   }
 
   void _signal(PointerSignalEvent e) {
-    if (e is PointerScrollEvent) _scroll(e.localPosition, wheelToRemote(e.scrollDelta));
+    if (e is PointerScrollEvent) {
+      _scroll(e.localPosition, wheelToRemote(e.scrollDelta));
+    }
   }
 
-  void _pan(PointerPanZoomUpdateEvent e) => _scroll(e.localPosition, panToRemote(e.localPanDelta));
+  void _pan(PointerPanZoomUpdateEvent e) =>
+      _scroll(e.localPosition, panToRemote(e.localPanDelta));
 
   void _report() {
     final h = widget.hole;
@@ -145,6 +161,7 @@ class _PictureState extends State<Picture> {
         if (h.value == mine) h.value = null;
       });
     }
+    _focus.dispose();
     super.dispose();
   }
 
@@ -154,51 +171,104 @@ class _PictureState extends State<Picture> {
     final win = widget.window;
     SchedulerBinding.instance.addPostFrameCallback((_) => _report());
     final focused = widget.state.pictureFocused == _sid;
-    return LayoutBuilder(builder: (context, c) {
-      final fit = fitRect(contentSize(win), c.biggest);
-      final pic = pictureRect(fit, win.visible);
-      _fit = fit;
-      _pic = pic;
-      final popups = <_Target>[];
-      if (fit.width > 0 && fit.height > 0) {
-        for (final p in popupsFor(widget.session.windows, win.id)) {
-          final frame = popupRect(p, win, fit);
-          if (frame.width <= 0 || frame.height <= 0 || p.rect.width <= 0) continue;
-          // The popup's own content: below its title bar, if it has one.
-          final k = frame.width / p.rect.width;
-          final content = Rect.fromLTRB(frame.left, frame.top + p.titleBar * k, frame.right, frame.bottom);
-          popups.add(_Target(p, content, pictureRect(content, p.visible)));
+    return LayoutBuilder(
+      builder: (context, c) {
+        final fit = fitRect(contentSize(win), c.biggest);
+        final pic = pictureRect(fit, win.visible);
+        _fit = fit;
+        _pic = pic;
+        final popups = <_Target>[];
+        if (fit.width > 0 && fit.height > 0) {
+          for (final p in popupsFor(widget.session.windows, win.id)) {
+            final frame = popupRect(p, win, fit);
+            if (frame.width <= 0 || frame.height <= 0 || p.rect.width <= 0) {
+              continue;
+            }
+            // The popup's own content: below its title bar, if it has one.
+            final k = frame.width / p.rect.width;
+            final content = Rect.fromLTRB(
+              frame.left,
+              frame.top + p.titleBar * k,
+              frame.right,
+              frame.bottom,
+            );
+            popups.add(_Target(p, content, pictureRect(content, p.visible)));
+          }
         }
-      }
-      _popups = popups;
-      return Listener(
-        behavior: HitTestBehavior.opaque,
-        onPointerDown: _down,
-        onPointerMove: _move,
-        onPointerUp: _up,
-        onPointerCancel: _up,
-        onPointerHover: _hover,
-        onPointerSignal: _signal,
-        onPointerPanZoomUpdate: _pan,
-        child: ColoredBox(
-          color: t.bg,
-          child: Stack(children: [
-            Positioned.fromRect(rect: pic, child: Texture(key: _tex, textureId: win.texture!)),
-            if (focused)
-              // 1px outside the picture, kept on the stage when the picture fills it.
-              Positioned.fromRect(
-                rect: pic.inflate(1).intersect(Offset.zero & c.biggest),
-                child: IgnorePointer(
-                  key: const Key('picture-focus'),
-                  child: DecoratedBox(decoration: BoxDecoration(border: Border.all(color: t.on))),
-                ),
+        _popups = popups;
+        return Focus(
+          focusNode: _focus,
+          onKeyEvent: (_, event) =>
+              widget.state.port?.handleKeyEvent(_sid, event) == true
+              ? KeyEventResult.handled
+              : KeyEventResult.ignored,
+          onFocusChange: (hasFocus) {
+            if (!hasFocus && widget.state.pictureFocused == _sid) {
+              widget.state.blurPicture();
+            }
+          },
+          child: Listener(
+            behavior: HitTestBehavior.opaque,
+            onPointerDown: _down,
+            onPointerMove: _move,
+            onPointerUp: _up,
+            onPointerCancel: _up,
+            onPointerHover: _hover,
+            onPointerSignal: _signal,
+            onPointerPanZoomUpdate: _pan,
+            child: ColoredBox(
+              color: t.bg,
+              child: Stack(
+                children: [
+                  Positioned.fromRect(
+                    rect: pic,
+                    child: _surface(win, key: _tex),
+                  ),
+                  if (focused)
+                    // 1px outside the picture, kept on the stage when the picture fills it.
+                    Positioned.fromRect(
+                      rect: pic.inflate(1).intersect(Offset.zero & c.biggest),
+                      child: IgnorePointer(
+                        key: const Key('picture-focus'),
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            border: Border.all(color: t.on),
+                          ),
+                        ),
+                      ),
+                    ),
+                  // Behind first, so the first of the table ends up on top.
+                  for (final p in _popups.reversed)
+                    Positioned.fromRect(rect: p.pic, child: _surface(p.win)),
+                ],
               ),
-            // Behind first, so the first of the table ends up on top.
-            for (final p in _popups.reversed)
-              Positioned.fromRect(rect: p.pic, child: Texture(textureId: p.win.texture!)),
-          ]),
-        ),
-      );
-    });
+            ),
+          ),
+        );
+      },
+    );
   }
+}
+
+Widget _surface(RemoteWindow window, {Key? key}) => window.image != null
+    ? CustomPaint(
+        key: key,
+        painter: _FramePainter(window.image!, window.source!),
+      )
+    : Texture(key: key, textureId: window.texture!);
+
+class _FramePainter extends CustomPainter {
+  _FramePainter(this.image, this.source);
+  final ui.Image image;
+  final Rect source;
+  @override
+  void paint(Canvas canvas, Size size) => canvas.drawImageRect(
+    image,
+    source,
+    Offset.zero & size,
+    Paint()..filterQuality = FilterQuality.low,
+  );
+  @override
+  bool shouldRepaint(_FramePainter old) =>
+      image != old.image || source != old.source;
 }

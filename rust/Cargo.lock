@@ -1196,17 +1196,18 @@ dependencies = [
 
 [[package]]
 name = "rapp-client-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "flate2",
  "percent-encoding",
+ "serde_json",
  "url",
 ]
 
 [[package]]
 name = "rapp-client-gtk"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "gtk4",

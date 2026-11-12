@@ -1,6 +1,7 @@
 // The Dart side of the `rapp/session` method channel (macOS only): calls into the runner's
 // SessionPlugin, and the events it sends back. Arguments are maps; `sid` is the hub's sid.
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -32,6 +33,8 @@ class RemoteWindow {
     required this.focused,
     required this.texture,
     required this.visible,
+    this.image,
+    this.source,
   });
 
   final int id;
@@ -49,6 +52,11 @@ class RemoteWindow {
 
   /// The Flutter texture showing this window; null if the runner has none for it.
   final int? texture;
+
+  /// Linux frames share a decoded canvas image, cropped to this window.
+  final ui.Image? image;
+  final Rect? source;
+  bool get hasPicture => texture != null || image != null;
 
   /// The part of the window's content the texture shows, 0–1 from the top-left.
   final Rect visible;
@@ -295,6 +303,9 @@ SessionEvent? parseSessionEvent(String method, Object? args) {
 /// The runner's embedded sessions. Every method is one channel call with the same name in
 /// snake case; [invoke] carries it (the real channel, or a fake that records it).
 abstract class SessionPort {
+  bool get supportsDetach => true;
+  bool handleKeyEvent(Object sid, KeyEvent event) => false;
+  void dispose() {}
   Stream<SessionEvent> get events;
 
   @protected

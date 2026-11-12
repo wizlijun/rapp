@@ -24,6 +24,7 @@ use std::{
 };
 
 enum Event {
+    Focus,
     Message(Incoming),
     Image(Vec<u8>, usize, usize, Rect),
     End(i32, String),
@@ -183,9 +184,9 @@ pub fn run() -> i32 {
             return 2;
         }
         if json_mode {
-            println!("{}", json!({"version":"0.2.0","protocol":p::VERSION}));
+            println!("{}", json!({"version":env!("CARGO_PKG_VERSION"),"protocol":p::VERSION}));
         } else {
-            println!("rapp-client 0.2.0 (Linux GTK, protocol {})", p::VERSION);
+            println!("rapp-client {} (Linux GTK, protocol {})", env!("CARGO_PKG_VERSION"), p::VERSION);
         }
         return 0;
     }
@@ -443,17 +444,21 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
         let ev = events.clone();
         std::thread::spawn(move || {
             for line in std::io::stdin().lock().lines() {
-                match line {
-                    Ok(l)
-                        if serde_json::from_str::<serde_json::Value>(&l)
-                            .ok()
-                            .is_some_and(|v| v["cmd"] == "quit") =>
-                    {
+                let Ok(line) = line else { break };
+                let Ok(command) = serde_json::from_str::<serde_json::Value>(&line) else {
+                    continue;
+                };
+                match command["cmd"].as_str() {
+                    Some("quit") => {
                         let _ = ev.send(Event::End(0, "quit".into()));
                         return;
                     }
-                    Ok(_) => (),
-                    Err(_) => break,
+                    Some("focus") => {
+                        if ev.send(Event::Focus).is_err() {
+                            return;
+                        }
+                    }
+                    _ => (),
                 }
             }
             let _ = ev.send(Event::End(0, "stdin closed".into()));
@@ -477,6 +482,10 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
                 break;
             };
             match event {
+                Event::Focus => {
+                    window.unminimize();
+                    window.present();
+                }
                 Event::End(code, reason) => {
                     status.set(code);
                     finish(&app, &state, json_mode, code, &reason);

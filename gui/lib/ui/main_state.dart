@@ -204,7 +204,7 @@ class MainState extends ChangeNotifier {
   /// Whether [toggleDetach] does anything now (the menu greys its item otherwise).
   bool get canToggleDetach {
     final rs = currentRemote;
-    return rs != null && (rs.detached || rs.tabs.tabs.isNotEmpty);
+    return port?.supportsDetach == true && rs != null && (rs.detached || rs.tabs.tabs.isNotEmpty);
   }
 
   // ---- hub state ----
@@ -333,7 +333,8 @@ class MainState extends ChangeNotifier {
           remote.remove(sid)?.dispose();
         }
       }
-    } else if (currentKey != null && !newKeys.contains(currentKey)) {
+    } else {
+      for (final sid in remote.keys.toList()) { port?.close(sid); }
       currentKey = null;
     }
 

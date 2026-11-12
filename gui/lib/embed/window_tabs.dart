@@ -63,6 +63,6 @@ List<RemoteWindow> popupsFor(List<RemoteWindow> all, int current) {
 
   return [
     for (final w in all)
-      if (!w.decorated && w.texture != null && rootOf(w) == current) w,
+      if (!w.decorated && w.hasPicture && rootOf(w) == current) w,
   ];
 }
