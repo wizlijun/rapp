@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/session_port.dart';
+import 'package:rapp/embed/stream_menu.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/ui/lamp.dart';
 import 'package:rapp/ui/tab_chip.dart';
@@ -289,6 +290,51 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  group('embedded width', () {
+    late FakeSessionPort port;
+    late MainState es;
+
+    setUp(() {
+      port = FakeSessionPort();
+      t.onSend = (m) {
+        if (m['cmd'] == 'open') {
+          t.emit({
+            'event': 'opened', 'sid': 1, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+            if (m['embed'] == true) ...{'port': 5001, 'token': 'tk'},
+            'req': m['req'],
+          });
+        }
+      };
+      s.dispose();
+      s = es = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: port);
+    });
+
+    for (final w in [600.0, 597.0, 545.0, 360.0]) {
+      testWidgets('top bar fits at $w with the stream menu', (tester) async {
+        await tester.pumpWidget(wrap(Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: w,
+            child: TopBar(state: es, fullscreen: false, onToggleFullscreen: () {}),
+          ),
+        )));
+        await tester.runAsync(() async {
+          es.openOrSwitch('111', 'Safari', 'Safari');
+          for (var i = 0; i < 4; i++) {
+            await flush();
+          }
+        });
+        await tester.pump();
+        expect(find.byType(StreamMenuAnchor), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        final full = tester.getRect(find.byKey(const Key('fullscreen-button')));
+        final barRect = tester.getRect(find.byType(TopBar));
+        expect(full.right, lessThanOrEqualTo(barRect.right + 0.01));
+        expect(full.left, greaterThanOrEqualTo(barRect.left));
+      });
+    }
+  });
 
   group('needs-you', () {
     late FakeSessionPort port;

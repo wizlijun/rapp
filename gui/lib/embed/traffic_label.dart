@@ -57,8 +57,11 @@ class TrafficLabel extends StatelessWidget {
     required this.open,
     required this.onTap,
     this.onSecondaryTap,
+    this.compact = false,
   });
 
+  /// Bars only, without the rate text.
+  final bool compact;
   final int bytesPerSecond;
 
   /// The stream menu is open: the selected style.
@@ -97,7 +100,8 @@ class TrafficLabel extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 LevelBars(bytesPerSecond),
-                const SizedBox(width: 8),
+                if (!compact) const SizedBox(width: 8),
+                if (!compact)
                 Text(
                   rate,
                   maxLines: 1,

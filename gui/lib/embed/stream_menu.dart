@@ -34,8 +34,11 @@ class StreamMenuAnchor extends StatefulWidget {
     required this.canInsert,
     required this.onCopy,
     required this.onAllClips,
+    this.compact = false,
   });
 
+  /// Bars only, no rate text (narrow top bar).
+  final bool compact;
   final SessionPort port;
   final RemoteSession session;
 
@@ -112,6 +115,7 @@ class _StreamMenuAnchorState extends State<StreamMenuAnchor> {
           key: const Key('traffic'),
           bytesPerSecond: widget.session.bytesPerSecond,
           open: widget.open,
+          compact: widget.compact,
           onTap: widget.onToggle,
           onSecondaryTap: widget.onToggle,
         ),

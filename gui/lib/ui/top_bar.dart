@@ -18,6 +18,9 @@ class TopBar extends StatelessWidget {
     required this.onToggleFullscreen,
   });
 
+  /// Width the stream menu anchor (five bars + `0.0 KB/s`) takes in the row.
+  static const _streamAnchorWidth = 127.0;
+
   final MainState state;
   final bool fullscreen;
   final VoidCallback onToggleFullscreen;
@@ -28,20 +31,27 @@ class TopBar extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, box) {
         final wide = box.maxWidth >= 480;
-        final gap = box.maxWidth >= 300 ? 6.0 : 0.0;
-        // The session block is a fixed-max, non-flex child so the hint's
-        // Expanded takes all the slack and the fullscreen button stays at the
-        // right edge. (A loose Flexible would leave its unused share of the
-        // slack at the end of the row.)
-        final showOverview = box.maxWidth >= 300;
-        final sessionMax = (box.maxWidth - (showOverview ? 6 : 5) * 48 - (showOverview ? 8 : 7) * gap)
-            .clamp(0.0, 260.0)
-            .toDouble();
         return ListenableBuilder(
           listenable: state,
           builder: (context, _) {
             final cur = state.current;
             final rs = state.currentRemote;
+            // Embedded mode with a current session adds the stream anchor to the row
+            // (full label when wide, bars only when narrow), so the thresholds that
+            // keep the fixed content inside the bar move up with it.
+            final embedded = state.port != null && rs != null && cur != null;
+            final gap = box.maxWidth >= (embedded ? 392 : 300) ? 6.0 : 0.0;
+            // The session block is a fixed-max, non-flex child so the hint's
+            // Expanded takes all the slack and the fullscreen button stays at the
+            // right edge. (A loose Flexible would leave its unused share of the
+            // slack at the end of the row.)
+            final showOverview = box.maxWidth >= (embedded ? 336 : 300);
+            // The stream anchor (traffic label) is fixed-width and only present
+            // in embedded mode with a current session; reserve it.
+            final streamW = embedded ? (wide ? _streamAnchorWidth : 48.0) : 0.0;
+            final sessionMax = (box.maxWidth - (showOverview ? 6 : 5) * 48 - (showOverview ? 8 : 7) * gap - streamW)
+                .clamp(0.0, 260.0)
+                .toDouble();
             // A detached session's windows are its tabs now; the bar shows none.
             final tabs = rs == null || rs.detached ? null : rs.tabs;
             final multi = state.sessionCount >= 2;
@@ -165,6 +175,7 @@ class TopBar extends StatelessWidget {
                   if (state.port != null && state.currentRemote != null && cur != null)
                     StreamMenuAnchor(
                       key: ValueKey(cur.sid),
+                      compact: !wide,
                       port: state.port!,
                       session: state.currentRemote!,
                       path: cur.path,

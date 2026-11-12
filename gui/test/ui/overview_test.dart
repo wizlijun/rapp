@@ -251,6 +251,20 @@ void main() {
     expect(inside('count-online', find.text('1/2')), findsOneWidget);
   });
 
+  testWidgets('device online cell shows the offline lamp at 0 online, active otherwise', (tester) async {
+    offline = {'m1'};
+    await boot(tester);
+    await show(tester);
+    expect(inside('count-online', find.text('0/1')), findsOneWidget);
+    expect(tester.widget<StatusLamp>(inside('count-online', find.byType(StatusLamp))).kind, Lamp.offline);
+    s.dispose();
+    offline = {};
+    await boot(tester);
+    await show(tester);
+    expect(inside('count-online', find.text('1/1')), findsOneWidget);
+    expect(tester.widget<StatusLamp>(inside('count-online', find.byType(StatusLamp))).kind, Lamp.active);
+  });
+
   testWidgets('traffic cell uses formatRate and — without embedding', (tester) async {
     await boot(tester, apps: ['m1/a']);
     frame(1, bytes: 48000);

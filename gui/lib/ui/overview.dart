@@ -95,7 +95,7 @@ class _CountsRow extends StatelessWidget {
             const SizedBox(width: _gap),
             _CountCell(
               cellKey: 'count-online',
-              lamp: Lamp.active,
+              lamp: c.online == 0 ? Lamp.offline : Lamp.active,
               value: '${c.online}/${c.devices}',
               muted: c.online == 0,
               label: '设备在线',
