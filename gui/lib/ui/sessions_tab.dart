@@ -1,6 +1,7 @@
 // Sessions tab of the side panel: grouping switch and 60px session rows.
 import 'package:flutter/material.dart';
 
+import '../embed/traffic_label.dart' show formatRate;
 import 'lamp.dart';
 import 'main_state.dart';
 import 'session_model.dart';
@@ -104,15 +105,30 @@ class _SessionRow extends StatelessWidget {
     return path.isEmpty ? entry.device : '${entry.device} · $path';
   }
 
+  /// The status text at the row's right (R22): the rate when active, 「空闲」, 「连接中」; empty
+  /// when disconnected (its reason takes the second line) or when there is no data.
+  String get _status {
+    if (entry.reason != null) return '';
+    return switch (entry.lamp) {
+      Lamp.active => entry.bytesPerSecond == null ? '' : formatRate(entry.bytesPerSecond!),
+      Lamp.idle => '空闲',
+      Lamp.connecting => '连接中',
+      _ => '',
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
     final backdrop = rowBackdrop(entry.lamp, t);
     final border = rowBorder(entry.lamp, t, selected: selected);
-    final second = _second;
+    final reason = entry.reason == null ? null : '已断开：${entry.reason}';
+    final second = reason ?? _second;
+    final status = _status;
     final label = [
       entry.appName,
       lampWord(entry.lamp),
+      if (status.isNotEmpty) status,
       if (second.isNotEmpty) second,
     ].join('，');
     final small = Theme.of(context).textTheme.bodySmall;
@@ -180,6 +196,21 @@ class _SessionRow extends StatelessWidget {
                             ],
                           ),
                         ),
+                        if (entry.reason != null || status.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 8),
+                            child: Text(
+                              status,
+                              key: Key('session-status-${entry.key}'),
+                              maxLines: 1,
+                              style: TextStyle(
+                                fontFamily: t.mono,
+                                fontFamilyFallback: t.monoFallback,
+                                fontSize: 12,
+                                color: t.muted,
+                              ),
+                            ),
+                          ),
                       ],
                     ),
                   ),

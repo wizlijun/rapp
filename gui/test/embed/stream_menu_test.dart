@@ -15,12 +15,15 @@ void main() {
   late RemoteSession rs;
   var ended = 0;
   int? detachCalls;
+  var disconnects = 0, reconnects = 0;
 
   bool called(String name, Map<String, Object?> args) =>
       port.calls.any((c) => c.$1 == name && const DeepCollectionEquality().equals(c.$2, args));
 
-  Future<void> open(WidgetTester tester, {VoidCallback? onDetach}) async {
+  Future<void> open(WidgetTester tester, {VoidCallback? onDetach, bool disconnected = false}) async {
     ended = 0;
+    disconnects = 0;
+    reconnects = 0;
     port = FakeSessionPort();
     rs = RemoteSession(1, 'Calc', onStream: (c) => port.setStream(1, c.mode, c.fps, c.density));
     tester.view.physicalSize = const Size(800, 1600);
@@ -28,11 +31,45 @@ void main() {
     addTearDown(tester.view.reset);
     await tester.pumpWidget(wrap(Align(
       alignment: Alignment.topRight,
-      child: StreamMenuAnchor(port: port, session: rs, path: 'lan', onEnd: () => ended++, onToggleDetach: onDetach),
+      child: StreamMenuAnchor(
+        port: port,
+        session: rs,
+        path: 'lan',
+        status: '活动',
+        disconnected: disconnected,
+        onDisconnect: () => disconnects++,
+        onReconnect: () => reconnects++,
+        onEnd: () => ended++,
+        onToggleDetach: onDetach,
+      ),
     )));
     await tester.tap(find.byKey(const Key('traffic')));
     await tester.pump();
   }
+
+  testWidgets('session group shows status and disconnect', (tester) async {
+    await open(tester);
+    expect(find.text('路径 局域网 · 活动'), findsOneWidget);
+    await tester.ensureVisible(find.text('断开'));
+    await tester.tap(find.text('断开'));
+    await tester.pump();
+    expect(disconnects, 1);
+    expect(find.text('路径 局域网 · 活动'), findsNothing); // closed
+  });
+
+  testWidgets('disconnected menu keeps only the session group with reconnect', (tester) async {
+    await open(tester, disconnected: true);
+    expect(find.text('重连'), findsOneWidget);
+    expect(find.text('结束会话'), findsOneWidget);
+    expect(find.text('路径 局域网 · 活动'), findsOneWidget);
+    for (final gone in ['断开', '高彩（图像优化）', '分离成独立窗口', '放左上角', '预设', 'A 的剪贴板']) {
+      expect(find.text(gone), findsNothing, reason: gone);
+    }
+    await tester.tap(find.text('重连'));
+    await tester.pump();
+    expect(reconnects, 1);
+    expect(find.text('重连'), findsNothing); // closed
+  });
 
   const preset = '最省流（双色·灰度 + 自适应 + 1 fps）';
 

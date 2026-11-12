@@ -17,6 +17,10 @@ class StreamMenuAnchor extends StatefulWidget {
     required this.port,
     required this.session,
     required this.path,
+    required this.status,
+    required this.disconnected,
+    required this.onDisconnect,
+    required this.onReconnect,
     required this.onEnd,
     this.onToggleDetach,
   });
@@ -26,6 +30,16 @@ class StreamMenuAnchor extends StatefulWidget {
 
   /// The hub's path word (`lan`, `direct`, `relay`).
   final String path;
+
+  /// The session's state word (`lampWord`), shown beside the path.
+  final String status;
+
+  /// The link is down: the menu keeps only the session group (R21).
+  final bool disconnected;
+
+  /// 「断开」 and 「重连」.
+  final VoidCallback onDisconnect;
+  final VoidCallback onReconnect;
 
   /// 「结束会话」 was confirmed.
   final VoidCallback onEnd;
@@ -84,6 +98,10 @@ class _StreamMenuAnchorState extends State<StreamMenuAnchor> {
                     port: widget.port,
                     session: widget.session,
                     path: widget.path,
+                    status: widget.status,
+                    disconnected: widget.disconnected,
+                    onDisconnect: widget.onDisconnect,
+                    onReconnect: widget.onReconnect,
                     onClose: _close,
                     onEnd: widget.onEnd,
                     onToggleDetach: widget.onToggleDetach,
@@ -115,6 +133,10 @@ class StreamMenu extends StatefulWidget {
     required this.port,
     required this.session,
     required this.path,
+    required this.status,
+    required this.disconnected,
+    required this.onDisconnect,
+    required this.onReconnect,
     required this.onClose,
     required this.onEnd,
     this.onToggleDetach,
@@ -123,6 +145,10 @@ class StreamMenu extends StatefulWidget {
   final SessionPort port;
   final RemoteSession session;
   final String path;
+  final String status;
+  final bool disconnected;
+  final VoidCallback onDisconnect;
+  final VoidCallback onReconnect;
   final VoidCallback onClose;
   final VoidCallback onEnd;
   final VoidCallback? onToggleDetach;
@@ -164,6 +190,45 @@ class _StreamMenuState extends State<StreamMenu> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (!widget.disconnected) ..._streamGroups(t, c, clips, shown),
+              _head(t, '会话'),
+              _Item('路径 ${pathLabels[widget.path] ?? widget.path} · ${widget.status}', enabled: false),
+              if (widget.disconnected)
+                _Item('重连', onTap: () => _then(widget.onReconnect))
+              else ...[
+                _Item('断开', onTap: () => _then(widget.onDisconnect)),
+                _Item(
+                  _s.detached ? '放回主窗口' : '分离成独立窗口',
+                  enabled: widget.onToggleDetach != null,
+                  onTap: () => _then(widget.onToggleDetach!),
+                ),
+                _Item(
+                  '放左上角',
+                  enabled: window != null,
+                  onTap: () => _then(() => widget.port.moveTopLeft(_sid, window!)),
+                ),
+              ],
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: ConfirmButton(label: '结束会话', onConfirmed: () => _then(widget.onEnd)),
+                ),
+              ),
+              if (!widget.disconnected && _s.menu.isNotEmpty) ...[
+                _head(t, 'A 的菜单'),
+                ..._entries(t, _s.menu, const [], 0),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// Groups 1 to 5: presets, mode, density, rate and A's clipboard. Not on a dead session (R21).
+  List<Widget> _streamGroups(RappTokens t, StreamChoice c, List<ClipRow> clips, List<ClipRow> shown) {
+    return [
               _head(t, '预设'),
               _Item('最省流（双色·灰度 + 自适应 + 1 fps）', checked: c == presetLeast, onTap: () => _choose(presetLeast)),
               _Item('最清晰（高彩 + 原画 + 15 fps）', checked: c == presetSharpest, onTap: () => _choose(presetSharpest)),
@@ -188,34 +253,7 @@ class _StreamMenuState extends State<StreamMenu> {
                       : null,
                 ),
               if (clips.length > 2 && !_allClips) _Item('全部剪贴板', onTap: () => setState(() => _allClips = true)),
-              _head(t, '会话'),
-              _Item('路径 ${pathLabels[widget.path] ?? widget.path}', enabled: false),
-              _Item(
-                _s.detached ? '放回主窗口' : '分离成独立窗口',
-                enabled: widget.onToggleDetach != null,
-                onTap: () => _then(widget.onToggleDetach!),
-              ),
-              _Item(
-                '放左上角',
-                enabled: window != null,
-                onTap: () => _then(() => widget.port.moveTopLeft(_sid, window!)),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: ConfirmButton(label: '结束会话', onConfirmed: () => _then(widget.onEnd)),
-                ),
-              ),
-              if (_s.menu.isNotEmpty) ...[
-                _head(t, 'A 的菜单'),
-                ..._entries(t, _s.menu, const [], 0),
-              ],
-            ],
-          ),
-        );
-      },
-    );
+    ];
   }
 
   Widget _head(RappTokens t, String text) => Padding(

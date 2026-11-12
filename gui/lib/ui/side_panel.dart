@@ -4,6 +4,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../embed/traffic_label.dart' show formatRate;
 import 'lamp.dart';
 import 'main_state.dart';
 import 'sessions_tab.dart';
@@ -177,7 +178,11 @@ class _Footer extends StatelessWidget {
                   const Key('total-online'), state.onlineDevices == 0),
               _Total('会话', '${state.sessionCount}',
                   const Key('total-sessions'), state.sessionCount == 0),
-              _Total('总流量', '—', const Key('total-traffic'), false),
+              _Total(
+                  '总流量',
+                  state.embeds ? formatRate(state.totalBytesPerSecond) : '—',
+                  const Key('total-traffic'),
+                  state.embeds && state.totalBytesPerSecond == 0),
             ],
           ),
         ],

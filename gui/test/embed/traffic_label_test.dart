@@ -23,7 +23,7 @@ void main() {
         height: 600,
         child: Align(
           alignment: Alignment.topRight,
-          child: StreamMenuAnchor(port: port, session: rs, path: 'lan', onEnd: () {}),
+          child: StreamMenuAnchor(port: port, session: rs, path: 'lan', status: '活动', disconnected: false, onDisconnect: () {}, onReconnect: () {}, onEnd: () {}),
         ),
       );
 

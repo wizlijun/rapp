@@ -97,8 +97,13 @@ class MainState extends ChangeNotifier {
     return null;
   }
 
-  /// Whether [sid] is the live session of a record: only then do the runner or the hub hear of it (R12).
-  bool _liveSid(Object sid) => _recordOfSid(sid)?.phase == Phase.live;
+  /// Whether the runner or the hub may hear of [sid] (R12).
+  /// A sid no record knows is let through (nothing to judge it by); a known one must be a live link.
+  bool _liveSid(Object sid) {
+    final r = _recordOfSid(sid);
+    if (r != null) return r.phase == Phase.live;
+    return _recordOfLastSid(sid) == null;
+  }
 
   bool _hubHas(Object sid) => hub != null && hub!.sessions.any((s) => s.sid == sid);
 

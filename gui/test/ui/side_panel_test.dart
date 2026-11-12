@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/session_port.dart';
+import 'package:rapp/embed/traffic_label.dart' show formatRate;
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/ui/lamp.dart';
 import 'package:rapp/ui/main_state.dart';
@@ -169,6 +171,81 @@ void main() {
     final one = tester.widget<Text>(find.byKey(const Key('total-sessions')));
     expect(one.data, '1');
     expect(one.style!.color, tokensFor(RappTheme.matrix).text);
+  });
+
+  group('embedded rows', () {
+    late FakeSessionPort port;
+    late MainState es;
+
+    setUp(() {
+      port = FakeSessionPort();
+      es = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: port);
+      var n = 0;
+      t.onSend = (m) {
+        if (m['cmd'] == 'open') {
+          final sid = ++n;
+          t.emit({
+            'event': 'opened', 'sid': sid, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+            'port': 5000 + sid, 'token': 'tk', 'req': m['req'],
+          });
+        }
+      };
+    });
+    tearDown(() => es.dispose());
+
+    Future<void> openThree(WidgetTester tester) async {
+      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.runAsync(() async {
+        for (final a in ['a', 'b', 'c']) {
+          es.openOrSwitch('111', a, a.toUpperCase());
+          for (var i = 0; i < 4; i++) {
+            await flush();
+          }
+        }
+      });
+      await tester.pump();
+    }
+
+    String? text(WidgetTester tester, String key) => tester.widget<Text>(find.byKey(Key(key))).data;
+
+    testWidgets('session rows show rate, idle and reason', (tester) async {
+      await tester.pumpWidget(wrap(SidePanel(state: es, devicesTab: const Text('d'))));
+      await openThree(tester);
+      port.emit(const TrafficEvent(1, 48000, 1));
+      port.emit(const TrafficEvent(2, 0, 1));
+      for (var i = 0; i < 10; i++) {
+        port.emit(const TrafficEvent(2, 0, 0));
+      }
+      port.emit(const TrafficEvent(3, 100, 1));
+      port.emit(const DisconnectedEvent(3, 'host says: Calculator quit'));
+      await tester.pump();
+      expect(text(tester, 'session-status-111/a'), '48.0 KB/s');
+      expect(text(tester, 'session-status-111/b'), '空闲');
+      expect(find.text('已断开：A 端关闭了 app'), findsOneWidget);
+      expect(text(tester, 'session-status-111/c'), '');
+      expect(find.bySemanticsLabel(RegExp('已断开：A 端关闭了 app')), findsOneWidget);
+    });
+
+    testWidgets('total traffic sums live sessions', (tester) async {
+      await tester.pumpWidget(wrap(SidePanel(state: es, devicesTab: const Text('d'))));
+      await openThree(tester);
+      port.emit(const TrafficEvent(1, 3000, 1));
+      port.emit(const TrafficEvent(2, 2000, 1));
+      port.emit(const TrafficEvent(3, 9000, 1));
+      port.emit(const DisconnectedEvent(3, 'connection closed'));
+      await tester.pump();
+      expect(text(tester, 'total-traffic'), formatRate(5000));
+      expect(text(tester, 'total-traffic'), '5.0 KB/s');
+      for (final sid in [1, 2]) {
+        port.emit(DisconnectedEvent(sid, 'connection closed'));
+      }
+      await tester.pump();
+      final z = tester.widget<Text>(find.byKey(const Key('total-traffic')));
+      expect(z.data, '0 KB/s');
+      expect(z.style!.color, tokensFor(RappTheme.matrix).muted);
+    });
   });
 
   testWidgets('tabs switch panel and close button closes', (tester) async {
