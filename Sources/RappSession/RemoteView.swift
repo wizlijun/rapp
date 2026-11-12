@@ -30,6 +30,8 @@ public final class RemoteView: NSView {
     private var hoverArea: NSTrackingArea?
     /// The picture, drawn over `visible` of the content (fractions, top-left origin).
     private let picture = CALayer()
+    /// Held so the pool cannot recycle the buffer while its surface is on screen.
+    private var shown: CVPixelBuffer?
     private var visible = CGRect(x: 0, y: 0, width: 1, height: 1)
 
     override public init(frame frameRect: NSRect) {
@@ -64,6 +66,7 @@ public final class RemoteView: NSView {
     /// Shows `buffer`, the part `visible` of the window's content (see `visiblePart`).
     public func show(_ buffer: CVPixelBuffer, visible part: CGRect) {
         visible = part
+        shown = buffer
         picture.contents = CVPixelBufferGetIOSurface(buffer)?.takeUnretainedValue()
         layoutPicture()
     }

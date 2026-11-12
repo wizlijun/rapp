@@ -169,6 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             sendStreamIfChanged()
         case let .windows(table):
             coordinator.apply(table)
+            _ = surfaces.keep(only: Set(table.map(\.id)))
             output.emit(.windows(count: table.count))
             // Logged (stderr with --json) so a hub's log shows it too; the hub does not forward events.
             if table.count != loggedWindows {

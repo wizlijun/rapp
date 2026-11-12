@@ -38,11 +38,17 @@ public final class WindowSurfaces {
                 throw SurfaceError.noBuffer
             }
             CVPixelBufferLockBaseAddress(buffer, [])
-            defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
-            guard let base = CVPixelBufferGetBaseAddress(buffer) else { throw SurfaceError.noBuffer }
-            try Quantizer.expand(samples: decoder.samples, width: decoder.width, height: decoder.height, mode: decoder.mode,
-                                 rect: (x: Int(crop.minX), y: Int(crop.minY), w: w, h: h),
-                                 into: base, bytesPerRow: CVPixelBufferGetBytesPerRow(buffer))
+            do {
+                guard let base = CVPixelBufferGetBaseAddress(buffer) else { throw SurfaceError.noBuffer }
+                try Quantizer.expand(samples: decoder.samples, width: decoder.width, height: decoder.height, mode: decoder.mode,
+                                     rect: (x: Int(crop.minX), y: Int(crop.minY), w: w, h: h),
+                                     into: base, bytesPerRow: CVPixelBufferGetBytesPerRow(buffer))
+            } catch {
+                CVPixelBufferUnlockBaseAddress(buffer, [])
+                throw error
+            }
+            // Unlocked before it is published: readers never see a CPU-locked buffer.
+            CVPixelBufferUnlockBaseAddress(buffer, [])
             lock.lock()
             slots[info.id]?.latest = buffer
             slots[info.id]?.visible = visible
