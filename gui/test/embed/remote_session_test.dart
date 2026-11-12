@@ -159,7 +159,9 @@ void main() {
   test('transfer progress does not touch the status line', () {
     final r = RemoteSession(1, 'x');
     r.apply(const TransferStatusEvent(1, '上传 1/1 0%'));
-    r.apply(const TransferProgressEvent(1, 3, true, 'a', 1, 2, TransferState.running, null, null));
-    expect(r.transferStatus, '上传 1/1 0%');
+    for (final state in TransferState.values) {
+      r.apply(TransferProgressEvent(1, 3, true, 'a', 1, 2, state, null, 'boom'));
+      expect(r.transferStatus, '上传 1/1 0%', reason: '$state');
+    }
   });
 }

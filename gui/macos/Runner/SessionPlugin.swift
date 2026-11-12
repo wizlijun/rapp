@@ -155,12 +155,14 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       copies.drop(copy)
       result(nil)
     case let .reveal(path):
-      let url = URL(fileURLWithPath: path)
-      if FileManager.default.fileExists(atPath: path) {
+      // Only what rapp itself downloaded: inside the downloads dir in use.
+      let root = downloads
+        ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0].appendingPathComponent("rapp")
+      if let url = revealableURL(path, within: [root]) {
         NSWorkspace.shared.activateFileViewerSelecting([url])
         result(true)
       } else {
-        result(false)
+        result(false)  // missing, or not in rapp's downloads dir
       }
     case let .composerPaste(sid):
       // ⌘V on B: the user's own clipboard, read on main by the composer.
