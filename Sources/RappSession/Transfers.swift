@@ -10,6 +10,8 @@ public struct TransferFailure: Error { public let reason: String }
 /// Runs downloads and uploads one at a time, each on its own side connection
 /// (spec §2.4, §4.1, §4.2). One per client process; everything on the main queue.
 public final class TransferQueue {
+    /// Main queue: called with the size of each downloaded chunk (side-connection traffic).
+    public var onBytes: ((Int) -> Void)?
     /// "下载 app.log 45%", "上传 2/3 · app.log 45%", an error text; nil = idle.
     public var onStatus: ((String?) -> Void)?
     public var log: ((String) -> Void)?
@@ -249,6 +251,7 @@ public final class TransferQueue {
 
     private func downloadChunk(_ job: Job, _ bytes: [UInt8]) {
         guard case var .download(d) = job.work, !bytes.isEmpty else { return }
+        onBytes?(bytes.count)
         if d.toDisk {
             do {
                 try job.handle?.write(contentsOf: bytes)

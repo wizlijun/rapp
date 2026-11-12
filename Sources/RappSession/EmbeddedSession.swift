@@ -29,7 +29,7 @@ public final class EmbeddedSession {
     private let address: RemoteAddress
     private let pasteboard: LocalPasteboard
     /// Main queue only.
-    private let transfers: TransferQueue
+    let transfers: TransferQueue
     /// Item and paste numbers for this session's connection; main queue only (the composer's).
     private let counters = SendCounters()
     private let link: MessageLink
@@ -46,7 +46,11 @@ public final class EmbeddedSession {
     private var choice: DensityChoice
     private var sentStream: (mode: Mode, fps: UInt8, density: Float)?
     private var bytes = 0
-    private var closed = false
+    private var frames = 0
+    /// The link is gone (dropped, bad data, or closed); the last pictures may still be shown.
+    private var linkDown = false
+    /// The pictures are released and `.closed` was reported.
+    private var released = false
 
     public init(address: RemoteAddress, choice: DensityChoice, backingScale: CGFloat, link: MessageLink,
                 pasteboard: LocalPasteboard, queue: DispatchQueue) {
@@ -71,14 +75,16 @@ public final class EmbeddedSession {
     public func start() {
         run { [self] in
             self.link.onMessage = { [weak self] in self?.handle($0) }
-            self.link.onClosed = { [weak self] in self?.close(reason: $0) }
+            self.link.onClosed = { [weak self] in self?.disconnect(reason: $0) }
             self.link.onBytes = { [weak self] in self?.bytes += $0 }
             self.link.start()
         }
+        // The transfer queue reports on main; the counter lives on the session queue.
+        transfers.onBytes = { [weak self] n in self?.run { self?.bytes += n } }
     }
 
     public func send(_ m: Message) {
-        run { if !self.closed { self.link.send(m) } }
+        run { if !self.linkDown { self.link.send(m) } }
     }
 
     public func setStream(mode: Mode, fps: UInt8, choice: DensityChoice) {
@@ -96,7 +102,7 @@ public final class EmbeddedSession {
     /// 「放左上角」: moves A's window `window` to the first free top-left slot and raises it.
     public func moveToTopLeft(window: UInt32) {
         run {
-            guard !self.closed, self.table.contains(where: { $0.id == window }) else { return }
+            guard !self.linkDown, self.table.contains(where: { $0.id == window }) else { return }
             moveToTopLeftMessages(window: window, table: self.table).forEach { self.link.send($0) }
         }
     }
@@ -105,7 +111,7 @@ public final class EmbeddedSession {
     /// anything fetched goes through the transfer queue, which lives on the main queue.
     public func pickClip(_ id: UInt32, insert: Bool) {
         run { [self] in
-            guard !closed, let info = history.info(id) else { return }
+            guard !linkDown, let info = history.info(id) else { return }
             let hand: (ClipInfo, InsertPayload) -> Void = { [weak self] info, payload in
                 DispatchQueue.main.async { self?.onInsert?(info, payload) }
             }
@@ -128,20 +134,36 @@ public final class EmbeddedSession {
     /// Once a second from the runner: reports the bytes received since the last call.
     public func tickTraffic() {
         run {
-            let n = self.bytes
+            guard !self.linkDown else { return }
+            let n = self.bytes, f = self.frames
             self.bytes = 0
-            if !self.closed { self.onEvent?(.traffic(bytesPerSecond: n)) }
+            self.frames = 0
+            self.onEvent?(.traffic(bytesPerSecond: n, frames: f))
         }
     }
 
-    /// Ends the session; only the first call does anything.
+    /// The link is gone but the session stays (last pictures kept); only the first call does anything.
+    private func disconnect(reason: String) {
+        run {
+            guard !self.linkDown else { return }
+            self.linkDown = true
+            self.link.cancel()
+            DispatchQueue.main.async { [transfers = self.transfers] in transfers.cancel() }
+            self.onEvent?(.disconnected(reason: reason))
+        }
+    }
+
+    /// Ends the session and releases its pictures; only the first call does anything.
     public func close(reason: String = "quit") {
         run {
-            guard !self.closed else { return }
-            self.closed = true
-            self.link.cancel()
-            // The transfer queue lives on the main queue.
-            DispatchQueue.main.async { [transfers = self.transfers] in transfers.cancel() }
+            guard !self.released else { return }
+            self.released = true
+            if !self.linkDown {
+                self.linkDown = true
+                self.link.cancel()
+                // The transfer queue lives on the main queue.
+                DispatchQueue.main.async { [transfers = self.transfers] in transfers.cancel() }
+            }
             _ = self.surfaces.keep(only: [])
             self.onEvent?(.closed(reason: reason))
         }
@@ -150,7 +172,7 @@ public final class EmbeddedSession {
     /// From main: delivers `e` on the session queue, unless the session has closed by then.
     private func post(_ e: SessionEvent) {
         run { [weak self] in
-            guard let self, !self.closed else { return }
+            guard let self, !self.linkDown else { return }
             self.onEvent?(e)
         }
     }
@@ -161,7 +183,7 @@ public final class EmbeddedSession {
     }
 
     private func handle(_ message: Message) {
-        guard !closed else { return }
+        guard !linkDown else { return }
         switch message {
         case let .ready(appName, _, _):
             onEvent?(.ready(appName: appName))
@@ -175,12 +197,13 @@ public final class EmbeddedSession {
             do {
                 try decoder.decode(payload)
                 let ids = try surfaces.draw(table: table, decoder: decoder, region: region)
+                frames += 1
                 onEvent?(.surfaces(ids))
                 if table.contains(where: { info in surfaces.visible(info.id).map { $0 != emittedVisible[info.id] } ?? false }) {
                     emitWindows()
                 }
             } catch {
-                close(reason: "cannot decode frame: \(error)")
+                disconnect(reason: "cannot decode frame: \(error)")
             }
         case let .menuBar(items):
             onEvent?(.menu(items))
@@ -195,7 +218,7 @@ public final class EmbeddedSession {
             // The composer lives on main: hand it the values, not this queue's state.
             DispatchQueue.main.async { [weak self] in _ = self?.composer.pasted(seq: seq, error: error) }
         case let .error(reason):
-            close(reason: "host says: \(reason)")
+            disconnect(reason: "host says: \(reason)")
         default:
             break
         }
@@ -212,7 +235,7 @@ public final class EmbeddedSession {
     }
 
     private func sendStreamIfChanged() {
-        guard !closed else { return }
+        guard !linkDown else { return }
         let next = (mode: mode, fps: fps, density: captureDensity(zoom: 1, backingScale: backingScale, choice: choice))
         guard streamChanged(from: sentStream, to: next) else { return }
         sentStream = next

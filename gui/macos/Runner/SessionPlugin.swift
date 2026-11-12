@@ -364,6 +364,14 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       entry.windows = windows
       // The textures stay registered while detached: attaching shows the picture at once.
       detached[sid]?.update(windows)
+    case .disconnected:
+      // The link is down but the last pictures stay; Dart decides when the session ends.
+      panels.removeValue(forKey: sid)?.cancel(nil)
+      if keysHolder == sid {
+        _ = keys.releaseAll()
+        keysHolder = nil
+      }
+      if focusedSid == sid { focusedSid = nil }
     case .closed:
       // Every texture goes before Dart hears the session ended.
       entry.textures.values.forEach { registry.unregisterTexture($0.id) }
@@ -383,5 +391,7 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     if let payload = eventPayload(event, sid: sid, textures: entry.textures.mapValues(\.id)) {
       channel.invokeMethod(payload.method, arguments: payload.args)
     }
+    // A detached session that loses its link goes back to the main window (after Dart heard `disconnected`).
+    if case .disconnected = event, detached[sid] != nil { attachSession(sid) }
   }
 }

@@ -50,10 +50,13 @@ public enum SessionEvent: Equatable {
     case ready(appName: String)
     case windows([SessionWindow])
     case surfaces([UInt32])
-    case traffic(bytesPerSecond: Int)
+    case traffic(bytesPerSecond: Int, frames: Int)
     case clips([ClipRow])
     case menu([MenuItem])
     case transfer(String?)
     case composer(ComposerEvent)
+    /// The link dropped (or A sent garbage): the last pictures stay; `closed` follows when the GUI ends the session.
+    case disconnected(reason: String)
+    /// The session ended and its pictures are released.
     case closed(reason: String)
 }

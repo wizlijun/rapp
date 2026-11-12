@@ -145,12 +145,22 @@ final class ChannelTests: XCTestCase {
         XCTAssertTrue(windows[0]["texture"] is NSNull)
     }
 
+    func testTrafficPayloadCarriesFrames() throws {
+        let t2 = try XCTUnwrap(eventPayload(.traffic(bytesPerSecond: 10, frames: 2), sid: 2, textures: [:]))
+        XCTAssertEqual(t2.method, "traffic"); XCTAssertEqual(t2.args["bytes"] as? Int, 10); XCTAssertEqual(t2.args["frames"] as? Int, 2)
+    }
+
+    func testDisconnectedPayload() throws {
+        let dis = try XCTUnwrap(eventPayload(.disconnected(reason: "x"), sid: 3, textures: [:]))
+        XCTAssertEqual(dis.method, "disconnected"); XCTAssertEqual(dis.args["reason"] as? String, "x")
+    }
+
     func testOtherPayloads() throws {
         XCTAssertNil(eventPayload(.surfaces([1, 2]), sid: 1, textures: [:]))
         let ready = try XCTUnwrap(eventPayload(.ready(appName: "Calc"), sid: 2, textures: [:]))
         XCTAssertEqual(ready.method, "ready"); XCTAssertEqual(ready.args["appName"] as? String, "Calc")
         XCTAssertEqual(ready.args["sid"] as? Int64, 2)
-        let traffic = try XCTUnwrap(eventPayload(.traffic(bytesPerSecond: 2048), sid: 2, textures: [:]))
+        let traffic = try XCTUnwrap(eventPayload(.traffic(bytesPerSecond: 2048, frames: 0), sid: 2, textures: [:]))
         XCTAssertEqual(traffic.method, "traffic"); XCTAssertEqual(traffic.args["bytes"] as? Int, 2048)
         let clips = try XCTUnwrap(eventPayload(.clips([ClipRow(id: 5, title: "hi", pickable: false)]), sid: 2, textures: [:]))
         XCTAssertEqual(clips.method, "clipboard")
