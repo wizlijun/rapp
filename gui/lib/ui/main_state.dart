@@ -442,14 +442,15 @@ class MainState extends ChangeNotifier {
 
   /// 「切到窗口」: raises the session's own windows (a detached embedded session's, or S1's client).
   void focusCurrent() {
-    if (!hubUsable) return;
     final c = current;
     if (c?.sid == null) return;
     final rs = remote[c!.sid];
     if (rs != null) {
+      // The runner's own windows: raised with or without the hub.
       if (rs.detached) port?.raiseDetached(c.sid!);
       return;
     }
+    if (!hubUsable) return;
     hub!.focus(c.sid!);
   }
 

@@ -31,12 +31,29 @@ final class DetachTests: XCTestCase {
         let f = detachedFrames(contents: [CGSize(width: 3000, height: 2000), CGSize(width: 600, height: 400)],
                                screen: screen, beside: main)
         XCTAssertEqual(f[0], screen)
-        // The second one cascades 24 right and 24 down from where it would go alone.
-        XCTAssertEqual(f[1], CGRect(x: 900 + 24, y: 1000 - 24 - 400, width: 600, height: 400))
+        // The first one decides the side (here: neither, so main's top-left +(24, -24)); the second
+        // cascades 24 right and 24 down from that anchor.
+        XCTAssertEqual(f[1], CGRect(x: 124 + 24, y: 976 - 24 - 400, width: 600, height: 400))
         // Cascading never leaves the screen.
         let crowded = detachedFrames(contents: Array(repeating: CGSize(width: 1000, height: 1100), count: 4),
                                      screen: screen, beside: main)
         for r in crowded { XCTAssertTrue(screen.contains(r), "\(r)") }
+    }
+
+    func testDetachedFramesCascadeFromOneAnchorWhateverTheSizes() {
+        // Right of main, decided by the first window; a wider second one cascades from there and is
+        // pulled back onto the screen, instead of choosing a side of its own.
+        let main = CGRect(x: 100, y: 200, width: 800, height: 800)
+        let f = detachedFrames(contents: [CGSize(width: 600, height: 400), CGSize(width: 1200, height: 300)],
+                               screen: screen, beside: main)
+        XCTAssertEqual(f[0], CGRect(x: 900, y: 600, width: 600, height: 400))
+        XCTAssertEqual(f[1], CGRect(x: 800, y: 1000 - 24 - 300, width: 1200, height: 300))
+        // Left of main: a small second window stays on the left too.
+        let right = CGRect(x: 1300, y: 200, width: 700, height: 800)
+        let g = detachedFrames(contents: [CGSize(width: 600, height: 400), CGSize(width: 200, height: 100)],
+                               screen: screen, beside: right)
+        XCTAssertEqual(g[0], CGRect(x: 700, y: 600, width: 600, height: 400))
+        XCTAssertEqual(g[1], CGRect(x: 724, y: 1000 - 24 - 100, width: 200, height: 100))
     }
 
     func testDetachedFramesOnAnOffsetScreen() {
@@ -57,6 +74,22 @@ final class DetachTests: XCTestCase {
                        .resize(window: 5, width: 500, height: 251))
         XCTAssertNil(detachedResize(info(5), content: CGSize(width: 400, height: 300)))
         XCTAssertNil(detachedResize(info(5, resizable: false), content: CGSize(width: 500, height: 250)))
+    }
+
+    func testDetachedFollowSize() {
+        // A non-resizable window has no handle: it takes A's new content size (title row excluded).
+        let basic = info(5, w: 230, h: 328, resizable: false), scientific = info(5, w: 560, h: 328, resizable: false)
+        XCTAssertEqual(detachedFollowSize(old: basic, new: scientific), CGSize(width: 560, height: 300))
+        XCTAssertNil(detachedFollowSize(old: basic, new: basic))
+        // The title row alone changing is a content change too.
+        var taller = basic
+        taller.titleBar = 0
+        XCTAssertEqual(detachedFollowSize(old: basic, new: taller), CGSize(width: 230, height: 328))
+        // A resizable one keeps the size the user gave it (A's answer shows letterboxed).
+        XCTAssertNil(detachedFollowSize(old: info(5), new: info(5, w: 800, h: 600)))
+        // Becoming non-resizable with another size: follow it.
+        XCTAssertEqual(detachedFollowSize(old: info(5), new: info(5, w: 300, h: 228, resizable: false)),
+                       CGSize(width: 300, height: 200))
     }
 
     func testPopupOwner() {

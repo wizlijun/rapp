@@ -458,6 +458,28 @@ void main() {
       }, sessions: 2);
     });
 
+    test('切到窗口 on a detached session goes to the runner, and needs no hub to', () {
+      env((a, t, port, st, hints) {
+        port.emit(const ReadyEvent(1, 'Calculator'));
+        port.emit(WindowsEvent(1, [rw(7)]));
+        port.emit(const DetachedEvent(1, true));
+        final sent = t.sent.length;
+        st.focusCurrent();
+        lastCall(port, 'raise_detached', {'sid': 1});
+        expect(t.sent.length, sent);
+        // The hub going away takes its session list with it: there is no current session left to
+        // raise (the stage shows the hub's problem), and nothing is sent anywhere.
+        t.die();
+        a.flushMicrotasks();
+        expect(st.hubUsable, isFalse);
+        expect(st.current, isNull);
+        final calls = port.calls.length;
+        st.focusCurrent();
+        expect(port.calls.length, calls);
+        expect(t.sent.length, sent);
+      });
+    });
+
     test('closing the detached window ends the session', () {
       env((a, t, port, st, hints) {
         port.emit(const ReadyEvent(1, 'Calculator'));

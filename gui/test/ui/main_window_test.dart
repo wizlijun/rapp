@@ -332,8 +332,19 @@ void main() {
       expect(port.calls.last.$2, equals({'sid': 1}));
     }
 
-    await chord();
+    // Holding the chord: the key repeats toggle nothing more.
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyD);
+    for (var i = 0; i < 3; i++) {
+      await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyD);
+    }
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyD);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump();
     last('detach');
+    expect(port.calls.where((c) => c.$1 == 'detach' || c.$1 == 'attach').length, 1);
     port.emit(const DetachedEvent(1, true));
     await tester.pump();
     await chord();

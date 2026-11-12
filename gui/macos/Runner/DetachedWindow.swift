@@ -108,9 +108,11 @@ final class DetachedSession: NSObject, NSWindowDelegate {
     var fresh = [DetachedWindow]()
     for info in decorated {
       if let window = windows[info.id] {
-        // A's size changes show letterboxed in the window the user sized; the window never
-        // follows A on its own, so a resize is never answered with another one.
+        // A resizable window keeps the size the user gave it (A's answer shows letterboxed); a
+        // non-resizable one has no handle, so it takes A's new size (`detachedFollowSize`).
+        let follow = detachedFollowSize(old: window.info, new: info)
         window.update(info)
+        if let follow, !window.inLiveResize, !window.isMiniaturized { resize(window, content: follow) }
       } else {
         let window = DetachedWindow(info: info)
         window.delegate = self
@@ -216,6 +218,21 @@ final class DetachedSession: NSObject, NSWindowDelegate {
     let f = popupFrame(popup: info.rect, parentContent: parentContent,
                        parentPicture: owner.pictureFit.offsetBy(dx: contentTopLeft.x, dy: contentTopLeft.y))
     setFrame(panel, NSRect(x: f.minX, y: primaryHeight - f.minY - f.height, width: f.width, height: f.height))
+  }
+
+  /// A's new content size with the content's top-left kept where it is, then pulled back onto
+  /// the window's screen. rapp's own change: nothing goes back to A for it.
+  private func resize(_ window: DetachedWindow, content size: CGSize) {
+    let content = window.contentRect(forFrameRect: window.frame)
+    var frame = window.frameRect(forContentRect: NSRect(x: content.minX, y: content.maxY - size.height,
+                                                        width: size.width, height: size.height))
+    if let visible = (window.screen ?? NSScreen.main)?.visibleFrame {
+      frame.size = CGSize(width: min(frame.width, visible.width), height: min(frame.height, visible.height))
+      frame.origin = CGPoint(x: min(max(frame.minX, visible.minX), visible.maxX - frame.width),
+                             y: min(max(frame.minY, visible.minY), visible.maxY - frame.height))
+    }
+    setFrame(window, frame)
+    replacePopups(over: window)
   }
 
   private func setFrame(_ window: NSWindow, _ frame: NSRect) {

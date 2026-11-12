@@ -111,7 +111,10 @@ class _MainWindowState extends State<MainWindow> {
         prefixOf(LogicalKeyboardKey.bracketLeft): () => state.step(-1),
         prefixOf(LogicalKeyboardKey.bracketRight): () => state.step(1),
         // Picture focused or not, ⌃⌘ chords are rapp's, so ⌃⌘D arrives here too.
-        if (mac) const SingleActivator(LogicalKeyboardKey.keyD, control: true, meta: true): state.toggleDetach,
+        // A held chord toggles once, not back and forth with the key repeat.
+        if (mac)
+          const SingleActivator(LogicalKeyboardKey.keyD, control: true, meta: true, includeRepeats: false):
+              state.toggleDetach,
       },
       child: Focus(
         autofocus: true,

@@ -303,6 +303,8 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       attach = down && event.type == .keyDown
         && routeDetachedKey(keyCode: event.keyCode, flags: event.modifierFlags) == .attach
     }
+    // A held ⌃⌘D repeats: swallowed, and only its first press toggles.
+    if attach, event.isARepeat { return nil }
     let target = targetSid.flatMap { live[$0] }
     for code in decision.release {
       target?.session.send(.key(keyCode: code, modifiers: 0, down: false))

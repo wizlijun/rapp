@@ -10,29 +10,42 @@ import RappCore
 private let detachStep: CGFloat = 24
 
 /// The frames for windows of sizes `contents` (AppKit coordinates, y up), beside the main window
-/// `main` on `screen` (its visible frame). Each size is first clamped into `screen`. A window goes
-/// right of `main`, top-aligned with it; if it does not fit there, left of `main`; if not there
-/// either, at main's top-left moved by (24, -24). Window `i` is further offset by (24i, -24i), and
-/// the result is pulled back onto `screen`.
+/// `main` on `screen` (its visible frame). Each size is first clamped into `screen`. The first
+/// window decides where they all go: right of `main`, top-aligned with it; if it does not fit
+/// there, left of `main`; if not there either, at main's top-left moved by (24, -24). That is the
+/// anchor (window 0's top-left); window `i` goes at the anchor moved by (24i, -24i), and each is
+/// pulled back onto `screen`.
 public func detachedFrames(contents: [CGSize], screen: CGRect, beside main: CGRect) -> [CGRect] {
-    contents.enumerated().map { i, content in
-        let w = min(max(content.width, 0), screen.width), h = min(max(content.height, 0), screen.height)
-        var x: CGFloat
-        var top = main.maxY
-        if main.maxX + w <= screen.maxX {
-            x = main.maxX
-        } else if main.minX - w >= screen.minX {
-            x = main.minX - w
-        } else {
-            x = main.minX + detachStep
-            top -= detachStep
-        }
-        x += detachStep * CGFloat(i)
-        top -= detachStep * CGFloat(i)
-        let clampedX = min(max(x, screen.minX), screen.maxX - w)
-        let clampedY = min(max(top - h, screen.minY), screen.maxY - h)
-        return CGRect(x: clampedX, y: clampedY, width: w, height: h)
+    let sizes = contents.map {
+        CGSize(width: min(max($0.width, 0), screen.width), height: min(max($0.height, 0), screen.height))
     }
+    guard let first = sizes.first else { return [] }
+    let anchorX: CGFloat, anchorTop: CGFloat
+    if main.maxX + first.width <= screen.maxX {
+        (anchorX, anchorTop) = (main.maxX, main.maxY)
+    } else if main.minX - first.width >= screen.minX {
+        (anchorX, anchorTop) = (main.minX - first.width, main.maxY)
+    } else {
+        (anchorX, anchorTop) = (main.minX + detachStep, main.maxY - detachStep)
+    }
+    return sizes.enumerated().map { i, size in
+        let x = anchorX + detachStep * CGFloat(i), top = anchorTop - detachStep * CGFloat(i)
+        return CGRect(x: min(max(x, screen.minX), screen.maxX - size.width),
+                      y: min(max(top - size.height, screen.minY), screen.maxY - size.height),
+                      width: size.width, height: size.height)
+    }
+}
+
+/// The content size a detached window must take when A's window changes from `old` to `new`: a
+/// non-resizable window has no handle, so it follows A's content size (title row excluded; e.g.
+/// Calculator going Basic → Scientific). A resizable one keeps the size the user gave it (nil): A's
+/// answer shows letterboxed, and no resize is ever answered with another.
+public func detachedFollowSize(old: WindowInfo, new: WindowInfo) -> CGSize? {
+    guard !new.resizable else { return nil }
+    let content = { (i: WindowInfo) in CGSize(width: CGFloat(i.rect.w), height: CGFloat(i.rect.h - i.titleBar)) }
+    let size = content(new)
+    guard size != content(old), size.width > 0, size.height > 0 else { return nil }
+    return size
 }
 
 /// The `.resize` a detached window's new content size (B points) sends to A, by R12: only for a
