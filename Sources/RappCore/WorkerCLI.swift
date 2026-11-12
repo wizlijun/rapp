@@ -149,6 +149,36 @@ public func resolveHelloApp(requested: String, bound: String?) -> Result<String,
     return requested.isEmpty || requested == bound ? .success(bound) : .failure(CodecError("this host shares \(bound)"))
 }
 
+/// Checks a Hello's token (constant time), then resolves the app it asks for.
+public func checkHello(token: String, bundleID: String, expected: String, bound: String?) -> Result<String, CodecError> {
+    guard constantTimeEquals(token, expected) else { return .failure(CodecError("bad token")) }
+    return resolveHelloApp(requested: bundleID, bound: bound)
+}
+
+/// The `Error` reason sent to a client whose session another client took over.
+public func takenOverError(by name: String?) -> String {
+    guard let name, !name.isEmpty else { return "taken over" }
+    return "taken over by \(name)"
+}
+
+/// The notice shown to the user for a takeover reason (with or without the `host says: ` prefix); nil for other reasons.
+public func takeoverNotice(_ reason: String) -> String? {
+    let prefix = "host says: "
+    let text = reason.hasPrefix(prefix) ? String(reason.dropFirst(prefix.count)) : reason
+    if text == "taken over" { return "这个窗口在另一台设备上打开了" }
+    let by = "taken over by "
+    if text.hasPrefix(by) {
+        let name = text.dropFirst(by.count)
+        return name.isEmpty ? "这个窗口在另一台设备上打开了" : "这个窗口在 \(name) 上打开了"
+    }
+    return nil
+}
+
+/// The notice shown to a client whose input is blocked because another client is operating A.
+public func inputBlockedNotice(by: String) -> String {
+    by.isEmpty ? "A 正在被另一台设备操作" : "A 正在被 \(by) 操作"
+}
+
 // MARK: JSON lines
 
 /// One JSON object on one line, keys sorted.
@@ -171,6 +201,10 @@ public enum WorkerEvent: Equatable {
     case windows(count: Int)
     /// One clipboard item or file finished crossing (observability spec §4.3). `name` only for files.
     case transfer(dir: TransferDirection, kind: ClipKind, bytes: UInt64, name: String?)
+    /// This client's own input reached the host.
+    case input
+    /// This client's input was blocked because `by` is operating A.
+    case inputBlocked(by: String)
     case exit(code: Int32, reason: String)
 
     public var jsonLine: String {
@@ -195,6 +229,10 @@ public enum WorkerEvent: Equatable {
             var object: [String: Any] = ["event": "transfer", "dir": dir.rawValue, "kind": "\(kind)", "bytes": bytes]
             if let name { object["name"] = name }
             return RappCore.jsonLine(object)
+        case .input:
+            return RappCore.jsonLine(["event": "input"])
+        case let .inputBlocked(by):
+            return RappCore.jsonLine(["event": "input_blocked", "by": by])
         case let .exit(code, reason):
             return RappCore.jsonLine(["event": "exit", "code": Int(code), "reason": reason])
         }
@@ -209,10 +247,30 @@ public func checkJSON(screenRecording: Bool, accessibility: Bool) -> String {
     jsonLine(["screen_recording": screenRecording, "accessibility": accessibility])
 }
 
-/// The `cmd` of one stdin line, or nil if the line is not a JSON object with a string `cmd`.
-public func parseWorkerCommand(_ line: String) -> String? {
-    guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any] else { return nil }
-    return object["cmd"] as? String
+/// A command read from a worker's stdin.
+public enum WorkerCommand: Equatable {
+    case kick, quit, focus
+    case peer(port: UInt16, name: String)
+    case yield(by: String)
+}
+
+/// The command on one stdin line; nil if the line is not a JSON object with a known `cmd` and its fields.
+public func parseWorkerCommand(_ line: String) -> WorkerCommand? {
+    guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+          let cmd = object["cmd"] as? String else { return nil }
+    switch cmd {
+    case "kick": return .kick
+    case "quit": return .quit
+    case "focus": return .focus
+    case "peer":
+        guard let port = object["port"] as? Int, let port = UInt16(exactly: port),
+              let name = object["name"] as? String else { return nil }
+        return .peer(port: port, name: name)
+    case "yield":
+        guard let by = object["by"] as? String else { return nil }
+        return .yield(by: by)
+    default: return nil
+    }
 }
 
 // MARK: list-apps
@@ -308,9 +366,9 @@ public final class WorkerOutput {
     }
 
     /// Reads JSON-line commands from stdin on a background thread, calling
-    /// `onCommand` with each `cmd` (lines without one are logged and skipped)
+    /// `onCommand` with each command (unknown or malformed lines are logged and skipped)
     /// and `onEOF` once stdin closes.
-    public func readCommands(onCommand: @escaping (String) -> Void, onEOF: @escaping () -> Void) {
+    public func readCommands(onCommand: @escaping (WorkerCommand) -> Void, onEOF: @escaping () -> Void) {
         let thread = Thread { [self] in
             while let line = readLine() {
                 if let command = parseWorkerCommand(line) {

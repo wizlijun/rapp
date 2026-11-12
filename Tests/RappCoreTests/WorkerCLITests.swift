@@ -124,6 +124,28 @@ final class WorkerCLITests: XCTestCase {
                        .failure(CodecError("this host shares com.apple.Safari")))
     }
 
+    func testCheckHelloRejectsBadTokenAndWrongApp() {
+        XCTAssertThrowsError(try checkHello(token: "x", bundleID: "", expected: "t", bound: "a").get()) { XCTAssertEqual("\($0)", "bad token") }
+        XCTAssertEqual(try checkHello(token: "t", bundleID: "", expected: "t", bound: "a").get(), "a")
+        XCTAssertThrowsError(try checkHello(token: "t", bundleID: "b", expected: "t", bound: "a").get()) { XCTAssertEqual("\($0)", "this host shares a") }
+    }
+
+    func testTakeoverWords() {
+        XCTAssertEqual(takenOverError(by: "Mac mini"), "taken over by Mac mini")
+        XCTAssertEqual(takenOverError(by: nil), "taken over")
+        XCTAssertEqual(takenOverError(by: ""), "taken over")
+        XCTAssertEqual(takeoverNotice("host says: taken over by Mac mini"), "这个窗口在 Mac mini 上打开了")
+        XCTAssertEqual(takeoverNotice("taken over"), "这个窗口在另一台设备上打开了")
+        XCTAssertNil(takeoverNotice("host says: Calculator quit"))
+        XCTAssertEqual(inputBlockedNotice(by: "Mac mini"), "A 正在被 Mac mini 操作")
+        XCTAssertEqual(inputBlockedNotice(by: ""), "A 正在被另一台设备操作")
+    }
+
+    func testInputEvents() {
+        XCTAssertEqual(WorkerEvent.input.jsonLine, #"{"event":"input"}"#)
+        XCTAssertEqual(WorkerEvent.inputBlocked(by: "M").jsonLine, #"{"by":"M","event":"input_blocked"}"#)
+    }
+
     // MARK: JSON output
 
     func testEventLines() {
@@ -161,7 +183,7 @@ final class WorkerCLITests: XCTestCase {
     }
 
     func testCommandOutputs() {
-        XCTAssertEqual(versionJSON(), #"{"protocol":5,"version":"0.3.0"}"#)
+        XCTAssertEqual(versionJSON(), #"{"protocol":6,"version":"0.3.0"}"#)
         XCTAssertEqual(checkJSON(screenRecording: true, accessibility: false),
                        #"{"accessibility":false,"screen_recording":true}"#)
         XCTAssertEqual(appsJSON([SharedApp(app: "com.apple.Safari", name: "Safari")]),
@@ -172,8 +194,14 @@ final class WorkerCLITests: XCTestCase {
     }
 
     func testStdinCommands() {
-        XCTAssertEqual(parseWorkerCommand(#"{"cmd":"quit"}"#), "quit")
-        XCTAssertEqual(parseWorkerCommand(#"  {"cmd":"kick","extra":1}  "#), "kick")
+        XCTAssertEqual(parseWorkerCommand(#"{"cmd":"quit"}"#), .quit)
+        XCTAssertEqual(parseWorkerCommand(#"  {"cmd":"kick","extra":1}  "#), .kick)
+        XCTAssertEqual(parseWorkerCommand(#"{"cmd":"focus"}"#), .focus)
+        XCTAssertEqual(parseWorkerCommand(#"{"cmd":"peer","port":50123,"name":"Mac mini"}"#), .peer(port: 50123, name: "Mac mini"))
+        XCTAssertNil(parseWorkerCommand(#"{"cmd":"peer","port":70000,"name":"x"}"#))
+        XCTAssertEqual(parseWorkerCommand(#"{"cmd":"yield","by":"Mac mini"}"#), .yield(by: "Mac mini"))
+        XCTAssertNil(parseWorkerCommand(#"{"cmd":"yield"}"#))
+        XCTAssertNil(parseWorkerCommand(#"{"cmd":"dance"}"#))
         XCTAssertNil(parseWorkerCommand(""))
         XCTAssertNil(parseWorkerCommand("quit"))
         XCTAssertNil(parseWorkerCommand(#"{"cmd":3}"#))

@@ -108,9 +108,9 @@ case let .serve(options):
     if options.json {
         output.readCommands(onCommand: { command in
             switch command {
-            case "kick": server.kick()
-            case "quit": server.stop("quit")
-            default: output.error("unknown command \(command)")
+            case .kick: server.kick()
+            case .quit: server.stop("quit")
+            case .peer, .yield, .focus: break  // Task 3 wires peer and yield
             }
         }, onEOF: { server.stop("stdin closed") })
     }

@@ -195,6 +195,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             coordinator.pasted(seq: seq, error: error)
         case let .error(reason):
             output.finish(exitCode(forHostError: reason), "rapp-client: host says: \(reason)")
+        case .inputBlocked:
+            break  // Task 6 wires this
         default:
             break
         }
@@ -241,12 +243,10 @@ case let .connect(address, json):
     application.setActivationPolicy(.regular)
     if json {
         output.readCommands(onCommand: { command in
-            if command == "quit" {
-                DispatchQueue.main.async { output.finish(ExitCode.ok, "quit") }
-            } else if command == "focus" {
-                DispatchQueue.main.async { delegate.raiseWindows() }
-            } else {
-                output.error("unknown command \(command)")
+            switch command {
+            case .quit: DispatchQueue.main.async { output.finish(ExitCode.ok, "quit") }
+            case .focus: DispatchQueue.main.async { delegate.raiseWindows() }
+            case .kick, .peer, .yield: break
             }
         }, onEOF: { DispatchQueue.main.async { output.finish(ExitCode.ok, "stdin closed") } })
     }

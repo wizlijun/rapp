@@ -337,12 +337,11 @@ final class Session {
 
     private func handle(_ message: Message) {
         switch message {
-        case let .hello(clientToken, bundleID, mode, fps, density):
+        case let .hello(clientToken, bundleID, mode, fps, density, _):
             guard !greeted else { fail("unexpected hello"); return }
             greeted = true
-            guard constantTimeEquals(clientToken, token) else { fail("bad token"); return }
             let app: String
-            switch resolveHelloApp(requested: bundleID, bound: boundApp) {
+            switch checkHello(token: clientToken, bundleID: bundleID, expected: token, bound: boundApp) {
             case let .success(resolved): app = resolved
             case let .failure(error): fail(error.description); return
             }
@@ -405,7 +404,7 @@ final class Session {
             if case let .text(text) = source { inlinePastes[seq] = text.utf8.count }
             paster?.paste(seq: seq, source)
 
-        case .ready, .error, .frame, .windows, .menuBar, .clip, .pasted, .fetch, .put, .transferStart, .chunk:
+        case .ready, .error, .frame, .windows, .menuBar, .clip, .pasted, .fetch, .put, .transferStart, .chunk, .inputBlocked:
             fail("unexpected message from client")
         }
     }

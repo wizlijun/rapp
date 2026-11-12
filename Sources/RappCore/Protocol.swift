@@ -1,6 +1,11 @@
 import Foundation
 
-public let protocolVersion: UInt8 = 5
+public let protocolVersion: UInt8 = 6
+/// The oldest client version this host still serves (v5 clients just never get `inputBlocked`).
+public let oldestClientVersion: UInt8 = 5
+
+/// Whether a client that said hello with `version` understands `inputBlocked` (type 26).
+public func clientUnderstandsInputBlocked(_ version: UInt8) -> Bool { version >= 6 }
 
 /// A client's `Hello` carried a different protocol version than this build speaks.
 public struct ProtocolVersionMismatch: Error, CustomStringConvertible {
@@ -83,7 +88,7 @@ public let maxTitleCharacters = 200
 /// relative to the top-left of the given A window, everything else is on the
 /// canvas (A's display). Types 10 and 12 (v3 title and size) are gone.
 public enum Message: Equatable {
-    case hello(token: String, bundleID: String, mode: Mode, fps: UInt8, density: Float)      // 1, client -> host
+    case hello(token: String, bundleID: String, mode: Mode, fps: UInt8, density: Float, version: UInt8 = protocolVersion)  // 1, client -> host
     case ready(appName: String, width: UInt16, height: UInt16)                               // 2, host -> client (canvas points)
     case error(String)                                                                       // 3, host -> client
     case frame(region: CanvasRect, FramePayload)                                             // 4, host -> client
@@ -106,14 +111,15 @@ public enum Message: Equatable {
     case put(token: String, item: UInt32, kind: ClipKind, uti: String, name: String, total: UInt64)  // 23, side connection, carries the version
     case transferStart(UInt64)                                                               // 24, side connection
     case chunk([UInt8])                                                                      // 25, side connection, payload is the data
+    case inputBlocked(by: String)                                                            // 26, host -> client
 
     public func encoded() -> [UInt8] {
         var w = Writer()
         let type: UInt8
         switch self {
-        case let .hello(token, bundleID, mode, fps, density):
+        case let .hello(token, bundleID, mode, fps, density, version):
             type = 1
-            w.u8(protocolVersion); w.string(token); w.string(bundleID); w.u8(mode.rawValue); w.u8(fps); w.f32(density)
+            w.u8(version); w.string(token); w.string(bundleID); w.u8(mode.rawValue); w.u8(fps); w.f32(density)
         case let .ready(appName, width, height):
             type = 2
             w.string(appName); w.u16(width); w.u16(height)
@@ -195,6 +201,9 @@ public enum Message: Equatable {
             type = 25
             precondition(data.count <= chunkSize, "chunk too large")
             w.bytes.append(contentsOf: data)
+        case let .inputBlocked(by):
+            type = 26
+            w.string(by)
         }
         precondition(w.bytes.count <= maxMessageLength, "message too large")
         var out: [UInt8] = [type]
@@ -210,11 +219,11 @@ public enum Message: Equatable {
         switch type {
         case 1:
             let version = try r.u8()
-            guard version == protocolVersion else { throw ProtocolVersionMismatch(client: version) }
+            guard (oldestClientVersion...protocolVersion).contains(version) else { throw ProtocolVersionMismatch(client: version) }
             let token = try r.string(), bundleID = try r.string()
             guard let mode = Mode(rawValue: try r.u8()) else { throw CodecError("unknown mode") }
             let (fps, density) = try r.stream()
-            message = .hello(token: token, bundleID: bundleID, mode: mode, fps: fps, density: density)
+            message = .hello(token: token, bundleID: bundleID, mode: mode, fps: fps, density: density, version: version)
         case 2:
             message = .ready(appName: try r.string(), width: try r.u16(), height: try r.u16())
         case 3:
@@ -288,6 +297,8 @@ public enum Message: Equatable {
             let data = r.rest()
             guard data.count <= chunkSize else { throw CodecError("chunk larger than \(chunkSize) bytes") }
             message = .chunk(data)
+        case 26:
+            message = .inputBlocked(by: try r.string())
         default:
             throw CodecError("unknown message type \(type)")
         }
@@ -296,7 +307,7 @@ public enum Message: Equatable {
     }
 }
 
-private let knownTypes: Set<UInt8> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25]
+private let knownTypes: Set<UInt8> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]
 
 /// Turns a byte stream into messages. Feed it whatever the socket delivers
 /// with `append`, then call `next()` until it returns nil.
@@ -394,7 +405,7 @@ private struct Reader {
     /// The version byte that opens `fetch` and `put`.
     mutating func version() throws {
         let v = try u8()
-        guard v == protocolVersion else { throw ProtocolVersionMismatch(client: v) }
+        guard (oldestClientVersion...protocolVersion).contains(v) else { throw ProtocolVersionMismatch(client: v) }
     }
 
     mutating func clipInfo() throws -> ClipInfo {
