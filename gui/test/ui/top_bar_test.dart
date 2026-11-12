@@ -393,6 +393,28 @@ void main() {
       expect(es.corner, isNull);
     });
 
+    testWidgets('a pinned clip of an ended session offers no 插入 when its sid comes back (S6-4b)', (tester) async {
+      await tester.pumpWidget(wrap(ebar()));
+      await openApp(tester, 'Safari');
+      port.emit(const ClipsEvent(1, [ClipRow(7, 'old', true)]));
+      await tester.runAsync(() async {
+        await es.togglePin(es.resources.clips.single);
+        es.endCurrent();
+        port.emit(const ClosedEvent(1, 'rapp-client: quit'));
+        await flush();
+      });
+      nextSid = 0; // 重启服务: the hub numbers from 1 again
+      await openApp(tester, 'Safari');
+      expect(es.currentRemote!.sid, 1);
+      await tester.tap(find.byKey(const Key('traffic')));
+      await tester.pump();
+      expect(find.text('old'), findsOneWidget);
+      expect(find.text('插入'), findsNothing);
+      port.emit(const ClipsEvent(1, [ClipRow(7, 'new', true)]));
+      await tester.pump();
+      expect(find.text('插入'), findsOneWidget);
+    });
+
     testWidgets('opening needs closes the stream menu', (tester) async {
       await tester.pumpWidget(wrap(ebar()));
       await openApp(tester, 'Safari');

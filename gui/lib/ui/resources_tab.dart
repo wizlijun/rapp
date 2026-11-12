@@ -42,10 +42,10 @@ class ResourcesTab extends StatelessWidget {
                 children: [
                   const _Sub('进行中'),
                   if (running.isEmpty) const _Empty('没有进行中的传输'),
-                  for (final x in running) _RunningRow(key: Key('run-${x.sid}-${x.id}'), state: state, row: x),
+                  for (final x in running) _RunningRow(key: Key('run-${x.seq}'), state: state, row: x),
                   const _Sub('传过的'),
                   if (ended.isEmpty) const _Empty('这次启动还没有传过文件'),
-                  for (final x in ended) _EndedRow(key: Key('ended-${x.sid}-${x.id}'), state: state, row: x),
+                  for (final x in ended) _EndedRow(key: Key('ended-${x.seq}'), state: state, row: x),
                 ],
               ),
             ),
@@ -241,7 +241,7 @@ class _RunningRow extends StatelessWidget {
             children: [
               Expanded(child: Text(x.source, style: TextStyle(color: t.muted, fontSize: 12))),
               RappButton.secondary(
-                key: Key('cancel-${x.sid}-${x.id}'),
+                key: Key('cancel-${x.seq}'),
                 label: '取消',
                 onPressed: () => state.cancelTransfer(x),
               ),
@@ -295,7 +295,7 @@ class _EndedRow extends StatelessWidget {
               child: Align(
                 alignment: Alignment.centerRight,
                 child: RappButton.secondary(
-                  key: Key('reveal-${x.sid}-${x.id}'),
+                  key: Key('reveal-${x.seq}'),
                   label: '显示位置',
                   onPressed: () => state.reveal(x),
                 ),

@@ -97,6 +97,13 @@ class MainState extends ChangeNotifier {
   final Set<Object> _quiet = {};
   // Keys ended by 「全部结束」 whose end comes later: their 「已结束」 would hide the summary (K13).
   final Set<String> _batchEnded = {};
+  // The current start of each hub sid. The hub counts sids from 1 again after a restart, so global
+  // resources tell sessions apart by start, never by sid (S6-4b): port events are translated here
+  // on the way in, and port calls get the hub sid back ([_hubSid]).
+  final Map<Object, _Start> _starts = {};
+
+  Object? _startOf(Object? sid) => sid == null ? null : _starts[sid];
+  static Object _hubSid(Object start) => start is _Start ? start.sid : start;
 
   bool get embeds => port != null;
 
@@ -546,6 +553,7 @@ class MainState extends ChangeNotifier {
       if (holder != null) {
         holder.lastSid = null; // the runner closed it itself: nothing left to close or restore
         remote.remove(e.sid)?.dispose();
+        _starts.remove(e.sid);
         notifyListeners();
       }
       return;
@@ -561,10 +569,11 @@ class MainState extends ChangeNotifier {
       return;
     }
     rs.apply(e);
-    if (e is ClipsEvent) {
-      resources.addClips(r.key, e.sid, _sourceOf(r), e.clips);
-    } else if (e is TransferProgressEvent) {
-      resources.transfer(r.key, _sourceOf(r), e);
+    final start = _starts[e.sid];
+    if (start != null && e is ClipsEvent) {
+      resources.addClips(r.key, start, _sourceOf(r), e.clips);
+    } else if (start != null && e is TransferProgressEvent) {
+      resources.transfer(r.key, start, _sourceOf(r), e);
     }
     if (e is DisconnectedEvent && r.phase != Phase.disconnected) {
       if (r.ending) {
@@ -591,7 +600,8 @@ class MainState extends ChangeNotifier {
       // A reconnect that never reached the stage: its new sid goes, the old picture stays.
       final fresh = r.sid;
       if (fresh != null) {
-        resources.linkDown(fresh);
+        final start = _starts.remove(fresh);
+        if (start != null) resources.linkDown(start);
         remote.remove(fresh)?.dispose();
         _sentFps.remove(fresh);
         _waiting.remove(fresh)?.timer.cancel();
@@ -602,7 +612,8 @@ class MainState extends ChangeNotifier {
     }
     _batchEnded.remove(r.key);
     final sid = r.sid;
-    if (sid != null) resources.linkDown(sid);
+    final start = _startOf(sid);
+    if (start != null) resources.linkDown(start);
     final rs = sid == null ? null : remote[sid];
     r.phase = Phase.disconnected;
     r.reason = r.userDisconnect ? 'user' : raw;
@@ -641,7 +652,10 @@ class MainState extends ChangeNotifier {
       _sentFps.remove(sid);
       _waiting.remove(sid)?.timer.cancel();
     }
-    resources.sessionEnded(r.key, {r.sid, old}.whereType<Object>().toSet());
+    resources.sessionEnded(r.key, {
+      for (final sid in [r.sid, old])
+        if (sid != null) ?_starts.remove(sid),
+    });
     _records.remove(r.key);
     _entries = _mapEntries();
     if (currentKey == r.key) {
@@ -659,6 +673,7 @@ class MainState extends ChangeNotifier {
     if (rs == null || !rs.windows.any((w) => w.texture != null)) return;
     port?.close(old);
     remote.remove(old)?.dispose();
+    _starts.remove(old);
     r.lastSid = null;
   }
 
@@ -682,6 +697,7 @@ class MainState extends ChangeNotifier {
       return;
     }
     r.sid = s.sid;
+    _starts[s.sid] = _Start(s.sid);
     r.path = s.path;
     final rs = RemoteSession(s.sid, r.appName, onResize: (w, a, b) {
           if (_liveSid(s.sid)) port!.resize(s.sid, w, a, b);
@@ -703,6 +719,7 @@ class MainState extends ChangeNotifier {
     } catch (e) {
       if (r.sid != s.sid) return; // it was dropped while starting: that already settled the record
       remote.remove(s.sid)?.dispose();
+      _starts.remove(s.sid);
       _quiet.add(s.sid);
       hub!.close(s.sid);
       r.sid = null;
@@ -1172,12 +1189,21 @@ class MainState extends ChangeNotifier {
     if (e.copy != null) return null;
     if (e.kind == ClipKind.unsupported) return '不支持';
     final r = _records[e.key];
-    if (e.ended || r == null || (r.phase == Phase.disconnected && r.sid == e.sid)) return 'A 已断开，复制不到';
-    if (r.phase != Phase.live || r.sid != e.sid) return '重连前的，复制不到';
+    final now = _startOf(r?.sid);
+    if (e.ended || r == null || (r.phase == Phase.disconnected && now == e.sid)) return 'A 已断开，复制不到';
+    if (r.phase != Phase.live || now != e.sid) return '重连前的，复制不到';
     return null;
   }
 
   bool canCopy(ClipEntry e) => copyBlockedWord(e) == null;
+
+  /// Whether 「插入」 may pick [e] into its session's composer: only an entry of the start that is
+  /// live now. A pinned entry of an ended start has a copy here, but its clip number on A is gone
+  /// (or, after a hub restart, names another clip of a new session with the same sid: C4).
+  bool canInsert(ClipEntry e) {
+    final r = _records[e.key];
+    return !e.ended && e.kind != ClipKind.unsupported && r != null && r.phase == Phase.live && _startOf(r.sid) == e.sid;
+  }
 
   bool canPin(ClipEntry e) => !e.pinning && !e.pinned && (e.copy != null || canCopy(e));
 
@@ -1191,7 +1217,7 @@ class MainState extends ChangeNotifier {
       hint = '本机副本不在了';
       notifyListeners();
     } else if (canCopy(e)) {
-      p.clipPick(e.sid, e.clip, false);
+      p.clipPick(_hubSid(e.sid), e.clip, false);
     }
   }
 
@@ -1205,7 +1231,7 @@ class MainState extends ChangeNotifier {
     }
     if (!canPin(e)) return;
     resources.beginPin(e.seq);
-    final r = await p.fetchClip(e.sid, e.clip);
+    final r = await p.fetchClip(_hubSid(e.sid), e.clip);
     if (_disposed) return;
     if (resources.entry(e.seq) == null) {
       final copy = r.copy;
@@ -1222,7 +1248,10 @@ class MainState extends ChangeNotifier {
     }
   }
 
-  void cancelTransfer(TransferRow t) => port?.cancelTransfer(t.sid, id: t.id);
+  void cancelTransfer(TransferRow t) {
+    final sid = _hubSid(t.sid);
+    if (_starts[sid] == t.sid) port?.cancelTransfer(sid, id: t.id); // never a new start's same id
+  }
 
   Future<void> reveal(TransferRow t) async {
     final path = t.path;
@@ -1255,6 +1284,12 @@ class _Waiting {
   _Waiting(this.appName, this.timer);
   final String appName;
   final Timer timer;
+}
+
+/// One start of a hub session in this launch; equal only to itself.
+class _Start {
+  _Start(this.sid);
+  final Object sid;
 }
 
 /// "stdin closed" (ended from rapp) and "quit" (its window was closed) are

@@ -31,6 +31,7 @@ class StreamMenuAnchor extends StatefulWidget {
     required this.onClose,
     required this.clips,
     required this.canCopy,
+    required this.canInsert,
     required this.onCopy,
     required this.onAllClips,
   });
@@ -41,6 +42,9 @@ class StreamMenuAnchor extends StatefulWidget {
   /// This record's clipboard entries from the global list, newest first; the menu shows two (K16).
   final List<ClipEntry> clips;
   final bool Function(ClipEntry) canCopy;
+
+  /// Whether 「插入」 may pick the entry into this session's composer (an entry of this very start).
+  final bool Function(ClipEntry) canInsert;
   final void Function(ClipEntry) onCopy;
 
   /// 「全部剪贴板」: open the resources tab.
@@ -98,6 +102,7 @@ class _StreamMenuAnchorState extends State<StreamMenuAnchor> {
         onToggleDetach: widget.onToggleDetach,
         clips: widget.clips,
         canCopy: widget.canCopy,
+        canInsert: widget.canInsert,
         onCopy: widget.onCopy,
         onAllClips: widget.onAllClips,
       ),
@@ -132,12 +137,16 @@ class StreamMenu extends StatefulWidget {
     this.onToggleDetach,
     required this.clips,
     required this.canCopy,
+    required this.canInsert,
     required this.onCopy,
     required this.onAllClips,
   });
 
   final List<ClipEntry> clips;
   final bool Function(ClipEntry) canCopy;
+
+  /// Whether 「插入」 may pick the entry into this session's composer (an entry of this very start).
+  final bool Function(ClipEntry) canInsert;
   final void Function(ClipEntry) onCopy;
   final VoidCallback onAllClips;
   final SessionPort port;
@@ -245,7 +254,7 @@ class _StreamMenuState extends State<StreamMenu> {
                   e.title,
                   enabled: widget.canCopy(e),
                   onTap: () => _then(() => widget.onCopy(e)),
-                  trailing: widget.canCopy(e) && e.sid == _sid
+                  trailing: widget.canInsert(e)
                       ? _InsertButton(onTap: () => _then(() => widget.port.clipPick(_sid, e.clip, true)))
                       : null,
                 ),

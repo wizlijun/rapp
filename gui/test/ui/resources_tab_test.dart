@@ -151,7 +151,7 @@ void main() {
     expect(find.text('↓ 从 A'), findsOneWidget);
     expect(find.text('50%'), findsOneWidget);
     expect(find.text('a.log'), findsOneWidget);
-    await tester.tap(find.byKey(const Key('cancel-1-3')));
+    await tester.tap(find.byKey(const Key('cancel-1')));
     await settle(tester);
     expect(called('cancel_transfer', {'sid': 1, 'id': 3}), isTrue);
   });
@@ -163,13 +163,13 @@ void main() {
     port.emit(const TransferProgressEvent(1, 5, true, 'c.bin', 1, 5, TransferState.failed, null, 'x'));
     await show(tester);
     await settle(tester);
-    await tester.tap(find.byKey(const Key('reveal-1-3')));
+    await tester.tap(find.byKey(const Key('reveal-1')));
     await settle(tester);
     expect(called('reveal', {'path': '/tmp/rapp-x/a.log'}), isTrue);
     expect(find.text('A：~/Downloads/rapp/b.txt'), findsOneWidget);
-    expect(find.byKey(const Key('ended-1-4')), findsOneWidget);
-    expect(find.byKey(const Key('reveal-1-4')), findsNothing);
-    expect(find.byKey(const Key('reveal-1-5')), findsNothing);
+    expect(find.byKey(const Key('ended-2')), findsOneWidget);
+    expect(find.byKey(const Key('reveal-2')), findsNothing);
+    expect(find.byKey(const Key('reveal-3')), findsNothing);
     expect(find.text('没传完'), findsOneWidget);
   });
 
@@ -189,6 +189,23 @@ void main() {
     expect(find.textContaining('A：'), findsOneWidget);
     expect(find.text('图片'), findsOneWidget);
     expect(find.text('文字'), findsOneWidget);
+  });
+
+  testWidgets('the same sid and id after a hub restart make two rows, not a key clash', (tester) async {
+    await boot(tester);
+    port.emit(const TransferProgressEvent(1, 3, true, 'a.log', 20, 20, TransferState.done, '/tmp/rapp-x/a.log', null));
+    s.endCurrent();
+    port.emit(const ClosedEvent(1, 'rapp-client: quit'));
+    s.openOrSwitch('111', 'calc', 'Calculator'); // the restarted hub hands out sid 1 again
+    await tester.runAsync(flush);
+    port.emit(const TransferProgressEvent(1, 3, true, 'b.log', 20, 20, TransferState.done, '/tmp/rapp-x/b.log', null));
+    await show(tester);
+    await settle(tester);
+    expect(find.byKey(const Key('ended-1')), findsOneWidget);
+    expect(find.byKey(const Key('ended-2')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('reveal-2')));
+    await settle(tester);
+    expect(called('reveal', {'path': '/tmp/rapp-x/b.log'}), isTrue);
   });
 
   testWidgets('empty sections say so', (tester) async {

@@ -174,6 +174,7 @@ class TopBar extends StatelessWidget {
                       onClose: state.closeCorner,
                       clips: state.resources.clipsOf(cur.key),
                       canCopy: state.canCopy,
+                      canInsert: state.canInsert,
                       onCopy: state.copyLocal,
                       onAllClips: () => state.showPanel(PanelTab.resources),
                     ),

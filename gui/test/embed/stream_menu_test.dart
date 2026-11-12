@@ -63,6 +63,7 @@ void main() {
         onToggleDetach: onDetach,
         clips: res.clipsOf('k'),
         canCopy: (e) => e.clip != greyClip,
+        canInsert: (e) => e.clip != greyClip && e.sid == rs.sid,
         onCopy: (e) => copied.add(e.clip),
         onAllClips: () => allClips++,
       )),

@@ -1,5 +1,7 @@
 // Global resources: the clipboard entries of every session (newest first, 100 unpinned at most)
 // and the transfers of this launch (running, and the last 50 ended). Pure Dart, no I/O.
+// `sid` is whatever the caller tells sessions apart by; MainState passes one object per session
+// start, because the hub's own sids come back after a restart (S6-4b).
 import 'package:flutter/foundation.dart';
 
 import '../embed/session_port.dart';
@@ -26,8 +28,11 @@ class ClipEntry {
 }
 
 class TransferRow {
-  TransferRow(this.sid, this.id, this.key, this.down, this.name, this.source, this.done, this.total, this.state,
-      {this.kind});
+  TransferRow(this.seq, this.sid, this.id, this.key, this.down, this.name, this.source, this.done, this.total,
+      this.state, {this.kind});
+
+  /// Local, increasing; the UI keys rows by it (a `(sid, id)` pair can come back after a restart).
+  final int seq;
   final Object sid;
   final int id;
   final String key;
@@ -56,6 +61,7 @@ class ResourcesState extends ChangeNotifier {
   final List<TransferRow> _ended = []; // newest first
   final Set<(Object, int)> _finished = {};
   int _nextSeq = 1;
+  int _nextRow = 1;
 
   List<ClipEntry> get clips => List.unmodifiable(_clips);
   List<ClipEntry> clipsOf(String key) => _clips.where((e) => e.key == key).toList();
@@ -132,17 +138,17 @@ class ResourcesState extends ChangeNotifier {
     return copy;
   }
 
-  void transfer(String key, String source, TransferProgressEvent e) {
-    final id = (e.sid, e.id);
-    if (_finished.contains(id)) return;
+  /// [e]'s own sid is ignored: [sid] says which session it is.
+  void transfer(String key, Object sid, String source, TransferProgressEvent e) {
+    if (_finished.contains((sid, e.id))) return;
     TransferRow? row;
     for (final r in _running) {
-      if (r.sid == e.sid && r.id == e.id) row = r;
+      if (r.sid == sid && r.id == e.id) row = r;
     }
     if (row == null) {
       final kind = e.kind;
       final name = e.name.isEmpty && kind != null ? kindWord(kind) : e.name;
-      row = TransferRow(e.sid, e.id, key, e.down, name, source, e.done, e.total, e.state, kind: kind);
+      row = TransferRow(_nextRow++, sid, e.id, key, e.down, name, source, e.done, e.total, e.state, kind: kind);
       _running.add(row);
     }
     row

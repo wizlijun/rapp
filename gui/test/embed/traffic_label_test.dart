@@ -37,6 +37,7 @@ void main() {
               onEnd: () {},
               clips: const [],
               canCopy: (_) => true,
+              canInsert: (_) => true,
               onCopy: (_) {},
               onAllClips: () {},
               open: open,

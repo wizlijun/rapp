@@ -1931,6 +1931,53 @@ void main() {
       });
     });
 
+    test('a hub restart that hands out the same sid again starts the resources afresh (S6-4b)', () {
+      env((a, t, port, st) {
+        port.emit(const ClipsEvent(1, [ClipRow(7, 'old', true)]));
+        final old = st.resources.clips.single;
+        st.togglePin(old);
+        a.flushMicrotasks();
+        port.emit(prog(1, 5, TransferState.done));
+        end(st, port, 1);
+        a.flushMicrotasks();
+        // 重启服务: the hub counts from 1 again, so the same app gets sid 1 once more.
+        st.openOrSwitch('111', 'calc', 'Calculator');
+        a.flushMicrotasks();
+        expect(st.currentRemote!.sid, 1);
+        port.emit(prog(1, 5, TransferState.running));
+        expect(st.resources.running, hasLength(1));
+        port.emit(prog(1, 5, TransferState.done));
+        expect(st.resources.ended, hasLength(2));
+        port.emit(const ClipsEvent(1, [ClipRow(7, 'new', true)]));
+        final fresh = st.resources.clips.firstWhere((e) => e.title == 'new');
+        expect(old.ended, true);
+        expect(st.canInsert(old), false);
+        expect(st.canInsert(fresh), true);
+        port.calls.clear();
+        st.copyLocal(old);
+        a.flushMicrotasks();
+        expect(callsOf(port, 'copy_local').single.$2, {'copy': 1});
+        expect(callsOf(port, 'clip_pick'), isEmpty);
+        st.copyLocal(fresh);
+        expect(callsOf(port, 'clip_pick').single.$2, {'sid': 1, 'clip': 7, 'insert': false});
+        st.cancelTransfer(st.resources.ended.first);
+        expect(callsOf(port, 'cancel_transfer').single.$2, {'sid': 1, 'id': 5});
+      });
+    });
+
+    test('a disconnect, then a reconnect, keeps the words and offers no 插入', () {
+      env((a, t, port, st) {
+        port.emit(const ClipsEvent(1, [ClipRow(7, 'one', true)]));
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        final e = st.resources.clips.single;
+        expect(st.copyBlockedWord(e), 'A 已断开，复制不到');
+        st.reconnect('111/calc');
+        a.flushMicrotasks();
+        expect(st.copyBlockedWord(e), '重连前的，复制不到');
+        expect(st.canInsert(e), false);
+      });
+    });
+
     test('a disconnected session greys its entries', () {
       env((a, t, port, st) {
         port.emit(const ClipsEvent(1, [ClipRow(7, 'one', true)]));
@@ -2049,7 +2096,7 @@ void main() {
           ..copyLocalReply = false
           ..revealReply = false;
         final st = MainState(hub: null, configDir: tmp.path, prefs: UiPrefs(), port: port);
-        final row = TransferRow(1, 5, 'k', true, 'a.log', 's', 1, 1, TransferState.done)..path = '/tmp/x/a.log';
+        final row = TransferRow(1, 1, 5, 'k', true, 'a.log', 's', 1, 1, TransferState.done)..path = '/tmp/x/a.log';
         st.copyLocal(ClipEntry(1, 'k', 1, 1, ClipKind.text, 't', 's', DateTime(2026))..copy = 3);
         st.reveal(row);
         final before = st.hint;

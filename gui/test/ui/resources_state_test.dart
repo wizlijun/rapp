@@ -100,14 +100,14 @@ void main() {
 
   test('transfer rows move from running to ended', () {
     final s = make();
-    s.transfer('k', 'A', ev(1, 1, TransferState.running));
+    s.transfer('k', 1, 'A', ev(1, 1, TransferState.running));
     expect(s.running.length, 1);
     expect(s.ended, isEmpty);
-    s.transfer('k', 'A', ev(1, 1, TransferState.done, done: 20, path: '/x/f1'));
+    s.transfer('k', 1, 'A', ev(1, 1, TransferState.done, done: 20, path: '/x/f1'));
     expect(s.running, isEmpty);
     expect(s.ended.single.path, '/x/f1');
     expect(s.ended.single.endedAt, isNotNull);
-    s.transfer('k', 'A', ev(1, 1, TransferState.running));
+    s.transfer('k', 1, 'A', ev(1, 1, TransferState.running));
     expect(s.running, isEmpty);
     expect(s.ended.length, 1);
   });
@@ -115,7 +115,7 @@ void main() {
   test('ended keeps fifty', () {
     final s = make();
     for (var i = 1; i <= 51; i++) {
-      s.transfer('k', 'A', ev(1, i, TransferState.done, done: 20));
+      s.transfer('k', 1, 'A', ev(1, i, TransferState.done, done: 20));
     }
     expect(s.ended.length, 50);
     expect(s.ended.first.id, 51);
@@ -128,7 +128,7 @@ void main() {
     final pinnedSeq = s.clips[1].seq;
     s.beginPin(pinnedSeq);
     s.pinned(pinnedSeq, 3);
-    s.transfer('k', 'A', ev(1, 3, TransferState.running));
+    s.transfer('k', 1, 'A', ev(1, 3, TransferState.running));
     final r = s.sessionEnded('k', {1});
     expect(r, [(1, 3)]);
     expect(s.clips.length, 1);
@@ -136,7 +136,7 @@ void main() {
     expect(s.clips.single.ended, isTrue);
     expect(s.running, isEmpty);
     expect(s.ended.single.state, TransferState.cancelled);
-    s.transfer('k', 'A', ev(1, 3, TransferState.running));
+    s.transfer('k', 1, 'A', ev(1, 3, TransferState.running));
     expect(s.running, isEmpty);
     // _seen cleared: the same clip number from a new session with the same sid is new again
     s.addClips('k', 1, 'A', [row(2)]);
@@ -145,8 +145,8 @@ void main() {
 
   test('linkDown fails the running rows of that sid only', () {
     final s = make();
-    s.transfer('k', 'A', ev(1, 1, TransferState.running));
-    s.transfer('k', 'B', ev(2, 1, TransferState.running));
+    s.transfer('k', 1, 'A', ev(1, 1, TransferState.running));
+    s.transfer('k', 2, 'B', ev(2, 1, TransferState.running));
     s.linkDown(1);
     expect(s.running.single.sid, 2);
     expect(s.ended.single.sid, 1);
