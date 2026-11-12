@@ -85,4 +85,23 @@ final class InputYieldTests: XCTestCase {
         y.yielded(to: "x", at: 0.2)
         XCTAssertEqual(y.admit(k(5, true), at: 0.3), .drop(notify: "x"))
     }
+    func testUpOfABlockedKeyPressIsDroppedThenFreshPressPasses() {
+        var y = InputYield()
+        y.yielded(to: "x", at: 0)
+        XCTAssertEqual(y.admit(k(7, true), at: 0.1), .drop(notify: "x"))
+        XCTAssertEqual(y.admit(k(7, false), at: 1.5), .drop(notify: nil))
+        XCTAssertEqual(y.admit(k(7, true), at: 1.6), .pass(report: true))
+    }
+    func testRepeatDownOfAHeldKeyPassesWhileBlocked() {
+        var y = InputYield()
+        _ = y.admit(k(7, true), at: 0)
+        y.yielded(to: "x", at: 0.1)
+        XCTAssertEqual(y.admit(k(7, true), at: 0.5), .pass(report: true))
+    }
+    func testDragWithNoRecordedDownFollowsBlockState() {
+        var y = InputYield()
+        XCTAssertEqual(y.admit(m(.drag), at: 0), .pass(report: false))
+        y.yielded(to: "x", at: 1)
+        XCTAssertEqual(y.admit(m(.drag), at: 1.1), .drop(notify: "x"))
+    }
 }
