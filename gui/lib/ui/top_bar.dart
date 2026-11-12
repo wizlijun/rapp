@@ -1,6 +1,7 @@
 // Top bar: panel button, prev/next, current session, hint, fullscreen.
 import 'package:flutter/material.dart';
 
+import '../embed/stream_menu.dart';
 import 'lamp.dart';
 import 'tab_chip.dart';
 import 'main_state.dart';
@@ -150,6 +151,14 @@ class TopBar extends StatelessWidget {
                     )
                   else
                     const Spacer(),
+                  if (state.port != null && state.currentRemote != null && cur != null)
+                    StreamMenuAnchor(
+                      key: ValueKey(cur.sid),
+                      port: state.port!,
+                      session: state.currentRemote!,
+                      path: cur.path,
+                      onEnd: state.endCurrent,
+                    ),
                   _icon(
                     'fullscreen-button',
                     fullscreen ? Icons.fullscreen_exit : Icons.fullscreen,

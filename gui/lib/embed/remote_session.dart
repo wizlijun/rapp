@@ -3,11 +3,12 @@ import 'package:flutter/foundation.dart';
 
 import 'resize_policy.dart';
 import 'session_port.dart';
+import 'stream_choice.dart';
 import 'window_tabs.dart';
 
 class RemoteSession extends ChangeNotifier {
   /// [onResize] is where the session's resize policy sends: window, width, height.
-  RemoteSession(this.sid, this.appName, {void Function(int window, int w, int h)? onResize, this.onSelect})
+  RemoteSession(this.sid, this.appName, {void Function(int window, int w, int h)? onResize, this.onSelect, this.onStream})
       : policy = ResizePolicy(onResize ?? (_, _, _) {});
 
   /// Decides when the stage size becomes A's window size.
@@ -15,6 +16,19 @@ class RemoteSession extends ChangeNotifier {
 
   /// Where a tab pick goes (A raises that window).
   final void Function(int window)? onSelect;
+
+  /// Where a new stream choice goes (the runner's `set_stream`).
+  final void Function(StreamChoice choice)? onStream;
+
+  /// What the user chose for this session's stream; kept per session (R18), not saved.
+  StreamChoice choice = startChoice;
+
+  /// The user picked [c] in the stream menu.
+  void setChoice(StreamChoice c) {
+    choice = c;
+    onStream?.call(c);
+    notifyListeners();
+  }
 
   /// The decorated windows and which one is current.
   final WindowTabs tabs = WindowTabs();

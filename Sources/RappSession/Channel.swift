@@ -27,6 +27,12 @@ public enum ChannelCommand: Equatable {
     case cancelTransfer(sid: Int64)
     /// The session whose picture has keyboard focus; nil for none.
     case pictureFocus(sid: Int64?)
+    /// Take A's clipboard entry `clip` onto B's clipboard, or (insert) into the composer.
+    case clipPick(sid: Int64, clip: UInt32, insert: Bool)
+    /// Press the A menu item at `path` (indices into the last menu, separators counted).
+    case menuPick(sid: Int64, path: [UInt16])
+    /// Move A's window to the top-left stack slot and raise it.
+    case moveTopLeft(sid: Int64, window: UInt32)
 }
 
 /// Parses one Dart call. Missing fields, wrong types and out-of-range values throw
@@ -34,7 +40,7 @@ public enum ChannelCommand: Equatable {
 public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelCommand {
     if method == "init" { return .initialize }
     let known: Set<String> = ["start", "close", "mouse", "scroll", "key", "resize", "select_window", "set_stream",
-                              "cancel_transfer", "picture_focus"]
+                              "cancel_transfer", "picture_focus", "clip_pick", "menu_pick", "move_top_left"]
     guard known.contains(method) else { throw ChannelError.unknown(method) }
     guard let map = args as? [String: Any] else { throw ChannelError.bad(method) }
     let a = Args(method: method, map: map)
@@ -73,6 +79,13 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
         return .selectWindow(sid: sid, window: try a.window())
     case "set_stream":
         return .setStream(sid: sid, mode: try a.mode(), fps: try a.fps(), density: try a.density())
+    case "clip_pick":
+        guard let clip = UInt32(exactly: try a.int("clip")) else { throw ChannelError.bad(method) }
+        return .clipPick(sid: sid, clip: clip, insert: try a.bool("insert"))
+    case "menu_pick":
+        return .menuPick(sid: sid, path: try a.path())
+    case "move_top_left":
+        return .moveTopLeft(sid: sid, window: try a.window())
     default:
         return .cancelTransfer(sid: sid)
     }
@@ -108,6 +121,21 @@ private struct Args {
     func string(_ key: String) throws -> String {
         guard let s = map[key] as? String else { throw bad }
         return s
+    }
+
+    func bool(_ key: String) throws -> Bool {
+        guard let n = map[key] as? NSNumber, CFGetTypeID(n) == CFBooleanGetTypeID() else { throw bad }
+        return n.boolValue
+    }
+
+    /// A non-empty list of u16 menu indices.
+    func path() throws -> [UInt16] {
+        guard let raw = map["path"] as? [Any], !raw.isEmpty else { throw bad }
+        return try raw.map { item in
+            guard let n = item as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(), !CFNumberIsFloatType(n),
+                  let i = UInt16(exactly: n.int64Value) else { throw bad }
+            return i
+        }
     }
 
     func window() throws -> UInt32 {

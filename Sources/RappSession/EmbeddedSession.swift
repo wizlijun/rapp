@@ -13,7 +13,12 @@ public final class EmbeddedSession {
         didSet { if backingScale != oldValue { run { self.sendStreamIfChanged() } } }
     }
 
+    /// Where a clip taken "into the composer" goes (Task 11). Called on the main queue.
+    public var onInsert: ((ClipInfo, InsertPayload) -> Void)?
+
     private let address: RemoteAddress
+    private let pasteboard: LocalPasteboard
+    private lazy var transfers = TransferQueue(address: address)
     private let link: MessageLink
     private let queue: DispatchQueue
     private let history: ClipHistory
@@ -36,6 +41,7 @@ public final class EmbeddedSession {
         self.choice = choice
         self.backingScale = backingScale
         self.link = link
+        self.pasteboard = pasteboard
         self.queue = queue
         self.mode = address.mode
         self.fps = address.fps
@@ -62,6 +68,37 @@ public final class EmbeddedSession {
         run {
             self.mode = mode; self.fps = fps; self.choice = choice
             self.sendStreamIfChanged()
+        }
+    }
+
+    /// Presses the A menu item at `path`.
+    public func menuPick(_ path: [UInt16]) {
+        send(.menuPick(path))
+    }
+
+    /// 「放左上角」: moves A's window `window` to the first free top-left slot and raises it.
+    public func moveToTopLeft(window: UInt32) {
+        run {
+            guard !self.closed, self.table.contains(where: { $0.id == window }) else { return }
+            moveToTopLeftMessages(window: window, table: self.table).forEach { self.link.send($0) }
+        }
+    }
+
+    /// Takes clip `id` onto B's clipboard, or (insert) hands it to `onInsert`. Text is immediate;
+    /// anything fetched goes through the transfer queue, which lives on the main queue.
+    public func pickClip(_ id: UInt32, insert: Bool) {
+        run { [self] in
+            guard !closed, let info = history.info(id) else { return }
+            let hand: (ClipInfo, InsertPayload) -> Void = { [weak self] info, payload in
+                DispatchQueue.main.async { self?.onInsert?(info, payload) }
+            }
+            if case .text = info {
+                history.pick(id, insert: insert, transfers: transfers, pasteboard: pasteboard, onInsert: hand)
+            } else {
+                DispatchQueue.main.async { [self] in
+                    history.pick(id, insert: insert, transfers: transfers, pasteboard: pasteboard, onInsert: hand)
+                }
+            }
         }
     }
 

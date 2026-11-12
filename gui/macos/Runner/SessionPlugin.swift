@@ -119,6 +119,15 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     case .cancelTransfer:
       // Nothing to cancel until the composer's transfers land (Task 11).
       result(nil)
+    case let .clipPick(sid, clip, insert):
+      live[sid]?.session.pickClip(clip, insert: insert)
+      result(nil)
+    case let .menuPick(sid, path):
+      live[sid]?.session.menuPick(path)
+      result(nil)
+    case let .moveTopLeft(sid, window):
+      live[sid]?.session.moveToTopLeft(window: window)
+      result(nil)
     case let .pictureFocus(sid):
       if sid != focusedSid {
         releaseKeys()

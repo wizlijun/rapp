@@ -44,6 +44,24 @@ final class ChannelTests: XCTestCase {
         XCTAssertThrowsError(try channelCommand("start", [3, 5000]))
     }
 
+    func testClipPickParses() throws {
+        XCTAssertEqual(try channelCommand("clip_pick", ["sid": 1, "clip": 5, "insert": true]),
+                       .clipPick(sid: 1, clip: 5, insert: true))
+        XCTAssertEqual(try channelCommand("clip_pick", ["sid": 1, "clip": 5, "insert": false]),
+                       .clipPick(sid: 1, clip: 5, insert: false))
+        XCTAssertThrowsError(try channelCommand("clip_pick", ["sid": 1, "clip": 5]))
+        XCTAssertThrowsError(try channelCommand("clip_pick", ["sid": 1, "clip": -1, "insert": true]))
+        XCTAssertThrowsError(try channelCommand("clip_pick", ["sid": 1, "clip": 5, "insert": 1]))
+    }
+
+    func testMenuPickAndMoveTopLeftParse() throws {
+        XCTAssertEqual(try channelCommand("menu_pick", ["sid": 1, "path": [0, 2]]), .menuPick(sid: 1, path: [0, 2]))
+        XCTAssertThrowsError(try channelCommand("menu_pick", ["sid": 1, "path": []]))
+        XCTAssertThrowsError(try channelCommand("menu_pick", ["sid": 1, "path": [0, -1]]))
+        XCTAssertThrowsError(try channelCommand("menu_pick", ["sid": 1, "path": "0"]))
+        XCTAssertEqual(try channelCommand("move_top_left", ["sid": 1, "window": 7]), .moveTopLeft(sid: 1, window: 7))
+    }
+
     func testPictureFocusTakesASidOrNull() throws {
         XCTAssertEqual(try channelCommand("picture_focus", ["sid": 3]), .pictureFocus(sid: 3))
         XCTAssertEqual(try channelCommand("picture_focus", ["sid": NSNull()]), .pictureFocus(sid: nil))
@@ -52,8 +70,8 @@ final class ChannelTests: XCTestCase {
     }
 
     func testUnknownMethodIsNotImplemented() {
-        XCTAssertThrowsError(try channelCommand("clip_pick", ["sid": 1, "clip": 5, "insert": true])) { error in
-            XCTAssertEqual(error as? ChannelError, .unknown("clip_pick"))
+        XCTAssertThrowsError(try channelCommand("detach_everything", ["sid": 1])) { error in
+            XCTAssertEqual(error as? ChannelError, .unknown("detach_everything"))
         }
         XCTAssertThrowsError(try channelCommand("start", [:])) { error in
             XCTAssertEqual(error as? ChannelError, .bad("start"))

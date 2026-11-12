@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fake_async/fake_async.dart';
 import 'package:rapp/embed/session_port.dart';
+import 'package:rapp/embed/stream_choice.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/ui/lamp.dart';
 import 'package:rapp/ui/main_state.dart';
@@ -289,6 +290,14 @@ void main() {
         expect(st.embeds, true);
         expect(st.remote.containsKey(1), true);
         expect(st.currentRemote, isNotNull);
+      });
+    });
+
+    test('a stream choice on the session goes to the port as set_stream', () {
+      env((a, t, port, st, hints) {
+        st.currentRemote!.setChoice(const StreamChoice('duogray', 'adaptive', 1));
+        expect(port.calls.last.$1, 'set_stream');
+        expect(port.calls.last.$2, {'sid': 1, 'mode': 'duogray', 'fps': 1, 'density': 'adaptive'});
       });
     });
 

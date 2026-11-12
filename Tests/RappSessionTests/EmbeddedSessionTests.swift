@@ -117,6 +117,37 @@ final class EmbeddedSessionTests: XCTestCase {
         XCTAssertEqual(events.last, .closed(reason: "host says: Calculator quit"))
     }
 
+    func testMenuPickAndMoveToTopLeftSendMessages() {
+        let link = FakeLink()
+        let (s, q) = make(link) { _ in }
+        q.sync { link.feed(.windows([w])) }
+        s.menuPick([0, 2])
+        s.moveToTopLeft(window: 7)
+        q.sync {}
+        XCTAssertTrue(link.sent.contains(.menuPick([0, 2])))
+        XCTAssertEqual(Array(link.sent.suffix(2)), moveToTopLeftMessages(window: 7, table: [w]))
+        // A window that is not in the table is left alone.
+        let before = link.sent.count
+        s.moveToTopLeft(window: 99)
+        q.sync {}
+        XCTAssertEqual(link.sent.count, before)
+    }
+
+    func testPickClipTextGoesToBsClipboardOrComposer() {
+        let link = FakeLink()
+        let (s, q) = make(link) { _ in }
+        var inserted = [String]()
+        s.onInsert = { _, payload in if case let .text(t) = payload { inserted.append(t) } }
+        q.sync { link.feed(.clip(id: 5, .text("hello", truncated: false))); link.feed(.clip(id: 6, .text("later", truncated: false))) }
+        s.pickClip(5, insert: true)
+        q.sync {}
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))  // the hand-over hops to main
+        XCTAssertEqual(inserted, ["hello"])
+        s.pickClip(99, insert: false)  // unknown id: nothing happens
+        q.sync {}
+        XCTAssertEqual(inserted, ["hello"])
+    }
+
     func testSetStreamDedupes() {
         let link = FakeLink()
         let (s, q) = make(link) { _ in }
