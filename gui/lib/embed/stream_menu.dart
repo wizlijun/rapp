@@ -229,6 +229,9 @@ class _StreamMenuState extends State<StreamMenu> {
     for (var i = 0; i < list.length; i++) {
       final e = list[i];
       final path = [...prefix, i];
+      // Like the client's menu bar: top level has no separators or untitled items, and only
+      // titles that open. Indices still count what is skipped.
+      if (depth == 0 && (e.separator || e.title.isEmpty)) continue;
       if (e.separator) {
         out.add(Divider(height: 9, indent: 16.0 + depth * 16, endIndent: 16, color: t.line));
         continue;
@@ -236,6 +239,10 @@ class _StreamMenuState extends State<StreamMenu> {
       final key = path.join('/');
       final open = _expanded.contains(key);
       final hasKids = e.children.isNotEmpty;
+      if (depth == 0 && !hasKids) {
+        out.add(_Item(e.title, enabled: false));
+        continue;
+      }
       out.add(_Item(
         e.title,
         indent: depth * 16.0,

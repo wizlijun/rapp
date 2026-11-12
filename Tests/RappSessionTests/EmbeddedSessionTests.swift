@@ -148,6 +148,21 @@ final class EmbeddedSessionTests: XCTestCase {
         XCTAssertEqual(inserted, ["hello"])
     }
 
+    func testPickClipWithCapturedInfoSurvivesRollover() {
+        let board = NSPasteboard(name: .init("rapp.test.\(UUID().uuidString)"))
+        boards.append(board)
+        let pb = LocalPasteboard(board: board)
+        let history = ClipHistory(pasteboard: pb, log: { _ in })
+        let info = ClipInfo.text("old", truncated: false)
+        history.add(id: 1, info)
+        for i in 2...(UInt32(ClipHistory.limit) + 5) { history.add(id: i, .text("n\(i)", truncated: false)) }
+        XCTAssertNil(history.info(1))
+        var inserted = [String]()
+        history.pick(1, info: info, insert: true, transfers: TransferQueue(address: RemoteAddress(host: "127.0.0.1", port: 1, bundleID: "x", token: "t", mode: .color16)),
+                     pasteboard: pb) { _, p in if case let .text(t) = p { inserted.append(t) } }
+        XCTAssertEqual(inserted, ["old"])
+    }
+
     func testSetStreamDedupes() {
         let link = FakeLink()
         let (s, q) = make(link) { _ in }

@@ -130,7 +130,7 @@ private struct Args {
 
     /// A non-empty list of u16 menu indices.
     func path() throws -> [UInt16] {
-        guard let raw = map["path"] as? [Any], !raw.isEmpty else { throw bad }
+        guard let raw = map["path"] as? [Any], (1...maxMenuDepth).contains(raw.count) else { throw bad }
         return try raw.map { item in
             guard let n = item as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(), !CFNumberIsFloatType(n),
                   let i = UInt16(exactly: n.int64Value) else { throw bad }

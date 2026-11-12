@@ -42,6 +42,12 @@ public final class ClipHistory {
     public func pick(_ id: UInt32, insert: Bool, transfers: TransferQueue, pasteboard: LocalPasteboard,
                      onInsert: @escaping (ClipInfo, InsertPayload) -> Void) {
         guard let info = info(id) else { return }
+        pick(id, info: info, insert: insert, transfers: transfers, pasteboard: pasteboard, onInsert: onInsert)
+    }
+
+    /// Same, for an `info` the caller already read: never touches `entries`, so it may run on another queue.
+    public func pick(_ id: UInt32, info: ClipInfo, insert: Bool, transfers: TransferQueue, pasteboard: LocalPasteboard,
+                     onInsert: @escaping (ClipInfo, InsertPayload) -> Void) {
         switch info {
         case let .text(text, _):
             if insert { onInsert(info, .text(text)) } else { pasteboard.write(text: text) }

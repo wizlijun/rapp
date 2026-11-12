@@ -160,4 +160,27 @@ void main() {
     expect(called('menu_pick', {'sid': 1, 'path': [0, 2]}), isTrue);
     expect(find.text(preset), findsNothing);
   });
+
+  testWidgets('top level of A menu skips separators and untitled, never picks a leaf; indices count them', (tester) async {
+    await open(tester);
+    rs.apply(const MenuEvent(1, [
+      MenuEntry(title: '', separator: true),
+      MenuEntry(title: '空标题', children: []),
+      MenuEntry(title: '编辑', children: [MenuEntry(title: '复制')]),
+      MenuEntry(title: '', children: [MenuEntry(title: 'x')]),
+    ]));
+    await tester.pump();
+    await tester.ensureVisible(find.text('空标题'));
+    await tester.tap(find.text('空标题'), warnIfMissed: false);
+    await tester.pump();
+    expect(port.calls.where((c) => c.$1 == 'menu_pick'), isEmpty);
+    expect(find.text('x'), findsNothing);
+    await tester.ensureVisible(find.text('编辑'));
+    await tester.tap(find.text('编辑'));
+    await tester.pump();
+    await tester.ensureVisible(find.text('复制'));
+    await tester.tap(find.text('复制'));
+    await tester.pump();
+    expect(called('menu_pick', {'sid': 1, 'path': [2, 0]}), isTrue);
+  });
 }

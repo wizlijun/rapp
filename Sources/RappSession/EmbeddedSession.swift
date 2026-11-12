@@ -18,7 +18,7 @@ public final class EmbeddedSession {
 
     private let address: RemoteAddress
     private let pasteboard: LocalPasteboard
-    private lazy var transfers = TransferQueue(address: address)
+    private let transfers: TransferQueue
     private let link: MessageLink
     private let queue: DispatchQueue
     private let history: ClipHistory
@@ -42,6 +42,7 @@ public final class EmbeddedSession {
         self.backingScale = backingScale
         self.link = link
         self.pasteboard = pasteboard
+        self.transfers = TransferQueue(address: address)
         self.queue = queue
         self.mode = address.mode
         self.fps = address.fps
@@ -93,10 +94,10 @@ public final class EmbeddedSession {
                 DispatchQueue.main.async { self?.onInsert?(info, payload) }
             }
             if case .text = info {
-                history.pick(id, insert: insert, transfers: transfers, pasteboard: pasteboard, onInsert: hand)
+                history.pick(id, info: info, insert: insert, transfers: transfers, pasteboard: pasteboard, onInsert: hand)
             } else {
                 DispatchQueue.main.async { [self] in
-                    history.pick(id, insert: insert, transfers: transfers, pasteboard: pasteboard, onInsert: hand)
+                    history.pick(id, info: info, insert: insert, transfers: transfers, pasteboard: pasteboard, onInsert: hand)
                 }
             }
         }
@@ -117,6 +118,8 @@ public final class EmbeddedSession {
             guard !self.closed else { return }
             self.closed = true
             self.link.cancel()
+            // The transfer queue lives on the main queue.
+            DispatchQueue.main.async { [transfers = self.transfers] in transfers.cancel() }
             _ = self.surfaces.keep(only: [])
             self.onEvent?(.closed(reason: reason))
         }

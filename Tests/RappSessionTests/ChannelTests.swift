@@ -59,6 +59,8 @@ final class ChannelTests: XCTestCase {
         XCTAssertThrowsError(try channelCommand("menu_pick", ["sid": 1, "path": []]))
         XCTAssertThrowsError(try channelCommand("menu_pick", ["sid": 1, "path": [0, -1]]))
         XCTAssertThrowsError(try channelCommand("menu_pick", ["sid": 1, "path": "0"]))
+        XCTAssertThrowsError(try channelCommand("menu_pick", ["sid": 1, "path": Array(repeating: 0, count: 9)]))
+        XCTAssertNoThrow(try channelCommand("menu_pick", ["sid": 1, "path": Array(repeating: 0, count: maxMenuDepth)]))
         XCTAssertEqual(try channelCommand("move_top_left", ["sid": 1, "window": 7]), .moveTopLeft(sid: 1, window: 7))
     }
 
