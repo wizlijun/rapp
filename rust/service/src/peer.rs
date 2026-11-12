@@ -17,6 +17,9 @@ use std::time::{Duration, Instant};
 use tokio::net::TcpStream;
 
 const AUTH_WAIT: Duration = Duration::from_secs(10);
+/// How long a session that ended while a newer one runs on its app waits for the worker to say
+/// it was taken over (the worker drops the connection first, then reports).
+const TAKEOVER_WAIT: Duration = Duration::from_secs(1);
 
 pub async fn accept_loop(state: Arc<State>, endpoint: Endpoint) {
     while let Some(incoming) = endpoint.accept().await {
@@ -194,7 +197,7 @@ async fn splice_session(
     let reply = ok(json!({"token": token}));
     log_request(state, peer, open_fields(app, side), &reply);
     // Registered before B hears `ok`, so worker events B triggers find their sid.
-    let (sid, kick) = state.add_session(peer, app, side);
+    let (sid, kick, taken) = state.add_session(peer, app, side);
     let mut fields = peer.session_fields(app, side, sid);
     state.log.event(Lvl::Info, "session_start", fields.clone());
     let (meter, began) = (Meter::default(), Instant::now());
@@ -211,10 +214,8 @@ async fn splice_session(
             }
         }
     };
-    // R10: a viewing session that just closed while a newer one runs on the same app was taken over.
-    let newer = if side || reason != "closed" { None } else { state.newer_session(app, sid) };
-    let (reason, by) = match newer {
-        Some(newer) => ("taken over".to_string(), newer.name),
+    let (reason, by) = match taken_over(state, app, sid, side, &reason, &taken).await {
+        Some(by) => ("taken over".to_string(), by),
         None => (reason, None),
     };
     if !state.end_session(sid) {
@@ -229,4 +230,26 @@ async fn splice_session(
     }
     state.log.event(Lvl::Info, "session_end", fields);
     Ok(())
+}
+
+/// Whether a viewing session that just ended was taken over, and by whom. The worker's own
+/// `taken over` report decides, however the splice ended; a kick wins. Fallback (R10): it closed
+/// cleanly while a newer session runs on the same app → taken over by that one.
+async fn taken_over(
+    state: &State,
+    app: &str,
+    sid: u64,
+    side: bool,
+    reason: &str,
+    taken: &tokio::sync::Notify,
+) -> Option<Option<String>> {
+    if side || reason == "kicked" {
+        return None;
+    }
+    if let Some(by) = state.taken_over(sid) {
+        return Some(by);
+    }
+    let newer = state.newer_session(app, sid)?;
+    let _ = tokio::time::timeout(TAKEOVER_WAIT, taken.notified()).await;
+    state.taken_over(sid).or_else(|| (reason == "closed").then_some(newer.name))
 }

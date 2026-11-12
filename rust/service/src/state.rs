@@ -63,6 +63,10 @@ pub struct Session {
     pub side: bool,
     pub since: u64,
     pub kick: Arc<Notify>,
+    /// Set when the worker said this session was taken over: by whom, if it said.
+    pub taken: Option<Option<String>>,
+    /// Woken when `taken` is set.
+    pub taken_notify: Arc<Notify>,
 }
 
 pub struct State {
@@ -141,16 +145,42 @@ impl State {
         t.get(token).filter(|(_, _, exp)| *exp > Instant::now()).map(|(p, n, _)| (p.clone(), n.clone()))
     }
 
-    pub fn add_session(&self, peer: &Peer, app: &str, side: bool) -> (u64, Arc<Notify>) {
-        let kick = Arc::new(Notify::new());
+    /// The new session's sid, its kick, and what wakes it when it is marked taken over.
+    pub fn add_session(&self, peer: &Peer, app: &str, side: bool) -> (u64, Arc<Notify>, Arc<Notify>) {
+        let (kick, taken_notify) = (Arc::new(Notify::new()), Arc::new(Notify::new()));
         let since = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
         let mut s = self.sessions.lock().unwrap();
         s.0 += 1;
         let sid = s.0;
-        s.1.insert(sid, Session { peer: peer.clone(), app: app.to_string(), side, since, kick: kick.clone() });
+        let session = Session {
+            peer: peer.clone(),
+            app: app.to_string(),
+            side,
+            since,
+            kick: kick.clone(),
+            taken: None,
+            taken_notify: taken_notify.clone(),
+        };
+        s.1.insert(sid, session);
         drop(s);
         self.notify();
-        (sid, kick)
+        (sid, kick, taken_notify)
+    }
+
+    /// The worker for `app` ended a session as taken over: marks the newest viewing session on
+    /// `app` that is not the newest one (that is the one that took over) and not marked yet.
+    pub fn mark_taken_over(&self, app: &str, by: Option<String>) {
+        let mut s = self.sessions.lock().unwrap();
+        let older = s.1.values_mut().rev().filter(|s| s.app == app && !s.side).skip(1).find(|s| s.taken.is_none());
+        if let Some(old) = older {
+            old.taken = Some(by);
+            old.taken_notify.notify_one();
+        }
+    }
+
+    /// Whether the worker said `sid` was taken over, and by whom.
+    pub fn taken_over(&self, sid: u64) -> Option<Option<String>> {
+        self.sessions.lock().unwrap().1.get(&sid).and_then(|s| s.taken.clone())
     }
 
     /// False when the session was already ended (by `end_all` at stop).

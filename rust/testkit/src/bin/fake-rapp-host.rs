@@ -7,7 +7,8 @@
 //! `broken` makes `check` fail with no output. A `serve_delay` file (ms) slows `serve`'s start.
 //! Every stdin line goes to `host.log` as `stdin <app> <line>`. A valid session whose port a
 //! `{"cmd":"peer",...}` line announced closes the previous such session's TCP (a takeover); the
-//! others (side connections, unnamed B) neither take over nor get taken over. Inside a session
+//! others (side connections, unnamed B) neither take over nor get taken over. Like the real host
+//! it then reports the old session `ended` with reason `taken over by <new name>`. Inside a session
 //! the whole line `input` emits `input` and `blocked <name>` emits `input_blocked` (both still echoed).
 
 use std::io::{BufRead, BufReader, Read, Write};
@@ -17,28 +18,30 @@ use std::sync::Mutex;
 static OUT: Mutex<()> = Mutex::new(());
 /// The live session (its number and a handle to close it), and the last number given out.
 static LIVE: Mutex<(u64, Option<(u64, TcpStream)>)> = Mutex::new((0, None));
-/// Ports announced by `peer` lines on stdin.
-static NAMED: Mutex<Vec<u16>> = Mutex::new(Vec::new());
+/// (port, name) announced by `peer` lines on stdin.
+static NAMED: Mutex<Vec<(u16, String)>> = Mutex::new(Vec::new());
 
-/// The `port` of a `{"cmd":"peer","port":P,...}` line.
-fn peer_port(line: &str) -> Option<u16> {
+/// The port and name of a `{"cmd":"peer","name":N,"port":P}` line.
+fn peer_line(line: &str) -> Option<(u16, String)> {
     if !line.contains(r#""cmd":"peer""#) {
         return None;
     }
     let rest = &line[line.find(r#""port":"#)? + 7..];
-    rest[..rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len())].parse().ok()
+    let port = rest[..rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len())].parse().ok()?;
+    let rest = &line[line.find(r#""name":""#)? + 8..];
+    Some((port, rest[..rest.find('"')?].to_string()))
 }
 
-/// Whether the service announced `port` (it does so before B can say hello; a short wait covers
-/// the stdin line arriving a moment after the hello).
-fn named(port: u16) -> bool {
+/// The name the service announced for `port` (it does so before B can say hello; a short wait
+/// covers the stdin line arriving a moment after the hello).
+fn named(port: u16) -> Option<String> {
     for _ in 0..20 {
-        if NAMED.lock().unwrap().contains(&port) {
-            return true;
+        if let Some((_, n)) = NAMED.lock().unwrap().iter().find(|(p, _)| *p == port) {
+            return Some(n.clone());
         }
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
-    false
+    None
 }
 
 fn emit(line: &str) {
@@ -137,7 +140,7 @@ fn serve(args: &[String]) -> ! {
     for line in std::io::stdin().lock().lines() {
         let Ok(l) = line else { break };
         log(&format!("stdin {app} {l}"));
-        if let Some(p) = peer_port(&l) {
+        if let Some(p) = peer_line(&l) {
             NAMED.lock().unwrap().push(p);
         }
         if l.contains("\"quit\"") {
@@ -156,12 +159,13 @@ fn session(mut s: TcpStream, token: &str) {
         let _ = s.write_all(b"bad token\n");
         return;
     }
-    let me = s.peer_addr().is_ok_and(|a| named(a.port())).then(|| {
+    let me = s.peer_addr().ok().and_then(|a| named(a.port())).map(|name| {
         let mut live = LIVE.lock().unwrap();
         live.0 += 1;
         let me = live.0;
         if let Some((_, old)) = live.1.replace((me, s.try_clone().unwrap())) {
             let _ = old.shutdown(Shutdown::Both);
+            emit(&format!(r#"{{"event":"session","reason":"taken over by {name}","state":"ended"}}"#));
         }
         me
     });

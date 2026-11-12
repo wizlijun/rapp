@@ -699,6 +699,24 @@ async fn takeover_logs_the_old_session_as_taken_over_by_the_new_device() {
 }
 
 #[tokio::test]
+async fn takeover_is_recorded_even_when_old_b_resets_its_stream() {
+    let a = service(None).await;
+    let home = a.home.path();
+    let ep = b_endpoint();
+    let (one, two) = (b_named(&ep, &a, "b-one").await, b_named(&ep, &a, "b-two").await);
+    let mut s1 = open_app(&one, "com.example.echo").await;
+    let first_sid = wait_log(home, "session_start", |v| v["name"] == "b-one").await["sid"].clone();
+    let _s2 = open_app(&two, "com.example.echo").await;
+    // Old B is still sending when the worker drops it: it resets instead of finishing.
+    s1.writer_mut().reset(0u32.into()).unwrap();
+    s1.reader_mut().stop(0u32.into()).unwrap();
+    let end = wait_log(home, "session_end", |v| v["sid"] == first_sid).await;
+    assert_eq!((&end["reason"], &end["by"]), (&json!("taken over"), &json!("b-two")), "{end}");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(log_events(home).iter().filter(|e| e["ev"] == "session_end").count(), 1);
+}
+
+#[tokio::test]
 async fn input_on_one_app_tells_other_apps_to_yield() {
     let a = service(None).await;
     let ep = b_endpoint();

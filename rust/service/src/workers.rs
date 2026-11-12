@@ -60,7 +60,8 @@ pub fn tell(state: &State, app: &str, line: String) -> bool {
 /// `app`'s session had input: every other app with a live session yields to its device (R1),
 /// unless both sessions are the same device (R9: both named, same name).
 fn tell_others(state: &State, app: &str) {
-    let from = state.live_session(app).and_then(|(_, p)| p.name);
+    let Some((_, source)) = state.live_session(app) else { return };
+    let from = source.name;
     let line = json!({"cmd": "yield", "by": from.as_deref().unwrap_or("")}).to_string();
     let same = |p: &Peer| from.is_some() && p.name == from;
     for (other, peer) in state.live_sessions() {
@@ -230,6 +231,11 @@ async fn spawn(state: &Arc<State>, app: &str, gen: u64) -> Result<(u16, String, 
                 Some(ev @ ("transfer" | "rejected")) => transcribe(&state, &app, ev, &v),
                 Some("input") => tell_others(&state, &app),
                 Some("input_blocked") => log_blocked(&state, &app, &v, &mut blocked_logged),
+                Some("session") if v["state"] == "ended" => {
+                    if let Some(by) = taken_over_by(v["reason"].as_str().unwrap_or("")) {
+                        state.mark_taken_over(&app, by);
+                    }
+                }
                 _ => {}
             }
         }
@@ -244,6 +250,15 @@ async fn spawn(state: &Arc<State>, app: &str, gen: u64) -> Result<(u16, String, 
         }
     });
     Ok((port, token, tx))
+}
+
+/// A worker's session-ended reason `taken over by N` → Some(Some(N)), `taken over` → Some(None).
+fn taken_over_by(reason: &str) -> Option<Option<String>> {
+    if reason == "taken over" {
+        return Some(None);
+    }
+    let name = rapp_net::log::clean_name(reason.strip_prefix("taken over by ")?);
+    Some(Some(name).filter(|n| !n.is_empty()))
 }
 
 /// `input_blocked {app, sid, by}` for the app's live session, at most once a minute per session
