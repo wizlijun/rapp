@@ -20,7 +20,10 @@ use tokio::task::JoinSet;
 const ACCEPT_WAIT: Duration = Duration::from_secs(10);
 
 impl Hub {
-    pub async fn open(self: &Arc<Self>, id: &str, app: &str, req: &Option<Value>) -> Result<()> {
+    pub async fn open(self: &Arc<Self>, id: &str, app: &str, embed: bool, req: &Option<Value>) -> Result<()> {
+        if embed {
+            return self.open_embedded(id, app, req).await;
+        }
         let client = rapp_net::bins::find("rapp-client", self.bin_dir.as_deref()).context("rapp-client not found")?;
         let host = self.host(id)?;
         let (stream, reply, path) = self.request(&host, &Op::Open { app: app.into(), side: false }).await?;
@@ -67,13 +70,106 @@ impl Hub {
             });
         }
         self.sessions.lock().unwrap().insert(sid, Some(tx));
+        self.log_opened(sid, id, app, path);
+        self.emit(json!({"event":"opened","sid":sid,"id":id,"app":app,"path":path}), req).await;
+        tokio::spawn(self.clone().run(sid, child, tcp, stream, listener, host, app.to_string(), Instant::now()));
+        Ok(())
+    }
+
+    fn log_opened(&self, sid: u64, id: &str, app: &str, path: &str) {
         let mut opened = json!({"sid":sid,"id":id,"app":app,"path":path});
         if let Some(name) = self.hosts.get(id).map(|h| h.name).filter(|n| !n.is_empty()) {
             opened["host_name"] = name.into();
         }
         self.log.event(Lvl::Info, "opened", opened);
-        self.emit(json!({"event":"opened","sid":sid,"id":id,"app":app,"path":path}), req).await;
-        tokio::spawn(self.clone().run(sid, child, tcp, stream, listener, host, app.to_string(), Instant::now()));
+    }
+
+    /// `open` with `embed`: no `rapp-client`. The GUI connects to the returned port and presents
+    /// the returned token (never logged) as its first line, like the client would.
+    async fn open_embedded(self: &Arc<Self>, id: &str, app: &str, req: &Option<Value>) -> Result<()> {
+        let host = self.host(id)?;
+        let (stream, reply, path) = self.request(&host, &Op::Open { app: app.into(), side: false }).await?;
+        let token = reply["token"].as_str().context("no worker token")?.to_string();
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let port = listener.local_addr()?.port();
+        let sid = self.next_sid.fetch_add(1, Ordering::Relaxed) + 1;
+        // Closing = dropping the sender; the session sees `recv()` return None.
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        // Registered and logged before the event goes out, so a fast `close` or `note` finds it.
+        self.sessions.lock().unwrap().insert(sid, Some(tx));
+        self.log_opened(sid, id, app, path);
+        self.emit(json!({"event":"opened","sid":sid,"id":id,"app":app,"path":path,"port":port,"token":token}), req).await;
+        tokio::spawn(self.clone().run_embedded(sid, listener, stream, host, app.to_string(), Instant::now(), rx));
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn run_embedded(
+        self: Arc<Self>,
+        sid: u64,
+        listener: TcpListener,
+        mut stream: BiStream,
+        host: Host,
+        app: String,
+        since: Instant,
+        mut rx: tokio::sync::mpsc::UnboundedReceiver<String>,
+    ) {
+        let id = host.id.clone();
+        let app_name = app.clone();
+        let reason = match tokio::time::timeout(ACCEPT_WAIT, listener.accept()).await {
+            Ok(Ok((mut tcp, _))) => {
+                let _ = tcp.set_nodelay(true);
+                let side = self.accept_sides(listener, host, app);
+                let mut kill = self.kill.subscribe();
+                let reason = tokio::select! {
+                    _ = async { let _ = splice(&mut tcp, &mut stream).await; } => "connection closed",
+                    _ = async { while rx.recv().await.is_some() {} } => "quit",
+                    _ = async { let _ = kill.wait_for(|k| *k).await; } => "quit",
+                };
+                side.abort();
+                let _ = side.await;
+                reason
+            }
+            _ => "GUI did not connect",
+        };
+        self.finish_session(sid, &id, &app_name, since, reason.to_string()).await;
+    }
+
+    /// Side connections (file transfers): each gets its own `open` and splice. Aborting the task
+    /// drops the listener and its JoinSet (aborting the splices).
+    fn accept_sides(self: &Arc<Self>, listener: TcpListener, host: Host, app: String) -> tokio::task::JoinHandle<()> {
+        let hub = self.clone();
+        tokio::spawn(async move {
+            let mut conns = JoinSet::new();
+            loop {
+                let Ok((mut tcp, _)) = listener.accept().await else { break };
+                let _ = tcp.set_nodelay(true);
+                let (hub, host, app) = (hub.clone(), host.clone(), app.clone());
+                conns.spawn(async move {
+                    match hub.request(&host, &Op::Open { app, side: true }).await {
+                        Ok((mut stream, _, _)) => {
+                            let _ = splice(&mut tcp, &mut stream).await;
+                        }
+                        Err(e) => hub.log.msg(Lvl::Warn, format_args!("side connection: {e:#}")),
+                    }
+                });
+            }
+        })
+    }
+
+    async fn finish_session(&self, sid: u64, id: &str, app: &str, since: Instant, reason: String) {
+        let secs = since.elapsed().as_secs();
+        self.log.event(Lvl::Info, "closed", json!({"sid":sid,"id":id,"app":app,"secs":secs,"reason":reason}));
+        self.emit(json!({"event":"closed","sid":sid,"reason":reason}), &None).await;
+        self.sessions.lock().unwrap().remove(&sid);
+    }
+
+    /// `note` (embedded sessions): the GUI detached or re-attached a window; logged only.
+    pub fn note(&self, sid: u64, what: &str, windows: u64) -> Result<()> {
+        if !self.sessions.lock().unwrap().contains_key(&sid) {
+            bail!("unknown sid");
+        }
+        self.log.event(Lvl::Info, what, json!({"sid":sid,"windows":windows}));
         Ok(())
     }
 
@@ -107,24 +203,7 @@ impl Hub {
         let pipe = tokio::spawn(async move {
             let _ = splice(&mut tcp, &mut stream).await;
         });
-        // Side connections (file transfers): each gets its own `open` and splice.
-        let hub = self.clone();
-        let side = tokio::spawn(async move {
-            let mut conns = JoinSet::new();
-            loop {
-                let Ok((mut tcp, _)) = listener.accept().await else { break };
-                let _ = tcp.set_nodelay(true);
-                let (hub, host, app) = (hub.clone(), host.clone(), app.clone());
-                conns.spawn(async move {
-                    match hub.request(&host, &Op::Open { app, side: true }).await {
-                        Ok((mut stream, _, _)) => {
-                            let _ = splice(&mut tcp, &mut stream).await;
-                        }
-                        Err(e) => hub.log.msg(Lvl::Warn, format_args!("side connection: {e:#}")),
-                    }
-                });
-            }
-        });
+        let side = self.accept_sides(listener, host, app);
         let mut kill = self.kill.subscribe();
         let killed = async move {
             let _ = kill.wait_for(|k| *k).await;
@@ -141,10 +220,7 @@ impl Hub {
         side.abort();
         let _ = side.await;
         let reason = reason.await.ok().flatten().unwrap_or_else(|| exit_text(status));
-        let secs = since.elapsed().as_secs();
-        self.log.event(Lvl::Info, "closed", json!({"sid":sid,"id":id,"app":app_name,"secs":secs,"reason":reason}));
-        self.emit(json!({"event":"closed","sid":sid,"reason":reason}), &None).await;
-        self.sessions.lock().unwrap().remove(&sid);
+        self.finish_session(sid, &id, &app_name, since, reason).await;
     }
 
     /// Closes the client's stdin; `closed` follows when it exits.

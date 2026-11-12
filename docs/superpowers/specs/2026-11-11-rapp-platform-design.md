@@ -147,8 +147,10 @@ relay 在 A 的长连接上开一条流，发 `{"op":"relayed","token":T}`，然
     4. 接受一个连接后和流对接。
 
     成功回 `{"event":"opened","sid","id","app","path"}`；会话结束时回 `{"event":"closed","sid","reason"}`。
+    - 带 `"embed":true`（嵌入舞台，S2）：不找、不拉起 `rapp-client`；`opened` 多 `port`、`token`（token 不进日志）。GUI 连上 `127.0.0.1:<port>`，首行发 token，之后和流对接；后续连接是侧连接。`closed` 的 `reason`：`"quit"`（hub 收到 `close` 或 stdin 关闭）、`"connection closed"`（本机 TCP 断开）、`"GUI did not connect"`（10 秒内没连上）。
   - `{"cmd":"close","sid"}`：关掉 client 的 stdin。
   - `{"cmd":"focus","sid"}`：让该会话的 rapp-client 把窗口提到最前（hub 给它的 stdin 写 `{"cmd":"focus"}`）。无回复；sid 不存在或已在关闭回 `unknown sid`。
+  - `{"cmd":"note","sid","what":"detach"|"attach","windows":k}`：GUI 把嵌入会话的窗口分离出去或放回，hub 记一行事件 `detach`/`attach`（`{sid, windows}`）。无回复；sid 不存在回 `unknown sid`，`what` 不对或缺 `windows` 回 `bad note`。
   - 任何一条命令出错都回 `{"event":"error","req"?, "error":"…"}`。
   - stdin 关闭时，hub 关掉所有 client 后退出。
 - GUI 是单窗口，加一个托盘或菜单栏图标。点关闭按钮只隐藏窗口；点"退出"时，如果还有会话，先确认。窗口分三块：

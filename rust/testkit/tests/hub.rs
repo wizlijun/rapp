@@ -349,3 +349,113 @@ async fn focus_reaches_the_client_and_unknown_sid_errors() {
     hub.send(json!({"cmd":"close","sid":sid})).await;
     assert_eq!(hub.next().await, json!({"event":"closed","sid":sid,"reason":"echo ok"}));
 }
+
+/// Plays the GUI side of an embedded session: token line, `ok`, then an echoed `word`.
+async fn gui_connect(port: u64, token: &str, word: &str) -> tokio::net::TcpStream {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    let mut tcp = tokio::net::TcpStream::connect(("127.0.0.1", port as u16)).await.unwrap();
+    tcp.write_all(format!("{token}\n").as_bytes()).await.unwrap();
+    let mut line = String::new();
+    let mut r = BufReader::new(&mut tcp);
+    r.read_line(&mut line).await.unwrap();
+    assert_eq!(line, "ok\n");
+    line.clear();
+    r.get_mut().write_all(format!("{word}\n").as_bytes()).await.unwrap();
+    r.read_line(&mut line).await.unwrap();
+    assert_eq!(line, format!("{word}\n"));
+    tcp
+}
+
+async fn embed_open(hub: &mut Hub, a: &TestService) -> (Value, u64, String) {
+    let r = hub.call(json!({"cmd":"open","id":a.id,"app":"com.example.echo","embed":true,"req":"o"})).await;
+    assert_eq!(r["event"], "opened", "{r}");
+    let (port, token) = (r["port"].as_u64().unwrap(), r["token"].as_str().unwrap().to_string());
+    (r["sid"].clone(), port, token)
+}
+
+#[tokio::test]
+async fn embed_open_returns_port_and_token_and_spawns_no_client() {
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = hub_with_host(&a, &relay, home.path(), None).await;
+    let (sid, port, token) = embed_open(&mut hub, &a).await;
+    let tcp = gui_connect(port, &token, "ping").await;
+    assert!(!a.bins.path().join("client.port").exists(), "no rapp-client was started");
+    drop(tcp);
+    assert_eq!(hub.next().await, json!({"event":"closed","sid":sid,"reason":"connection closed"}));
+    hub.finish().await;
+    let text = std::fs::read_to_string(home.path().join("logs").join("hub.log")).unwrap();
+    assert!(!text.contains(&token), "token in hub.log:\n{text}");
+    let opened = read_log(home.path(), "hub.log").into_iter().find(|v| v["ev"] == "opened").unwrap();
+    assert_eq!(opened["sid"], sid, "{opened}");
+}
+
+#[tokio::test]
+async fn embed_close_command_ends_with_quit() {
+    use tokio::io::AsyncReadExt;
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = hub_with_host(&a, &relay, home.path(), None).await;
+    let (sid, port, token) = embed_open(&mut hub, &a).await;
+    let mut tcp = gui_connect(port, &token, "ping").await;
+    hub.send(json!({"cmd":"close","sid":sid})).await;
+    assert_eq!(hub.next().await, json!({"event":"closed","sid":sid,"reason":"quit"}));
+    let mut rest = Vec::new();
+    tokio::time::timeout(WAIT, tcp.read_to_end(&mut rest)).await.expect("EOF in time").unwrap();
+    hub.finish().await;
+}
+
+#[tokio::test]
+async fn embed_side_connection_gets_its_own_open() {
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = hub_with_host(&a, &relay, home.path(), None).await;
+    let (sid, port, token) = embed_open(&mut hub, &a).await;
+    let _main = gui_connect(port, &token, "ping").await;
+    let _side = gui_connect(port, &token, "side").await;
+    hub.send(json!({"cmd":"close","sid":sid})).await;
+    assert_eq!(hub.next().await, json!({"event":"closed","sid":sid,"reason":"quit"}));
+    hub.finish().await;
+}
+
+#[tokio::test]
+async fn embed_without_connect_reports_gui_did_not_connect() {
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = hub_with_host(&a, &relay, home.path(), None).await;
+    let (sid, _, _) = embed_open(&mut hub, &a).await;
+    assert_eq!(hub.next().await, json!({"event":"closed","sid":sid,"reason":"GUI did not connect"}));
+    let closed = read_log(home.path(), "hub.log").into_iter().find(|v| v["ev"] == "closed").unwrap();
+    assert_eq!(closed["reason"], "GUI did not connect", "{closed}");
+    hub.finish().await;
+}
+
+#[tokio::test]
+async fn note_logs_detach_and_attach() {
+    let relay = relay(Duration::from_secs(60));
+    let a = service(Some(relay.relay.addr)).await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = hub_with_host(&a, &relay, home.path(), None).await;
+    let (sid, port, token) = embed_open(&mut hub, &a).await;
+    let _tcp = gui_connect(port, &token, "ping").await;
+    hub.send(json!({"cmd":"note","sid":sid,"what":"detach","windows":2})).await;
+    hub.send(json!({"cmd":"note","sid":sid,"what":"attach","windows":2})).await;
+    let e = hub.call(json!({"cmd":"note","sid":999,"what":"detach","windows":1,"req":"n"})).await;
+    assert_eq!(e, json!({"event":"error","error":"unknown sid","req":"n"}));
+    let e = hub.call(json!({"cmd":"note","sid":sid,"what":"x","windows":1,"req":"m"})).await;
+    assert_eq!(e, json!({"event":"error","error":"bad note","req":"m"}));
+    let e = hub.call(json!({"cmd":"note","sid":sid,"what":"attach"})).await;
+    assert_eq!(e, json!({"event":"error","error":"bad note"}));
+    hub.send(json!({"cmd":"close","sid":sid})).await;
+    assert_eq!(hub.next().await["event"], "closed");
+    hub.finish().await;
+    let log = |ev: &str| read_log(home.path(), "hub.log").into_iter().filter(|v| v["ev"] == ev).collect::<Vec<_>>();
+    let (d, at) = (log("detach"), log("attach"));
+    assert_eq!((d.len(), at.len()), (1, 1), "{d:?} {at:?}");
+    assert_eq!((&d[0]["windows"], &d[0]["sid"]), (&json!(2), &sid), "{:?}", d[0]);
+    assert_eq!(at[0]["sid"], sid);
+}
