@@ -182,4 +182,12 @@ void main() {
     await expectLater(port.start(const StartArgs(1, 5000, 'tk', 'color16', 15, 'adaptive')),
         throwsA(isA<PlatformException>()));
   });
+
+  test('parses traffic frames and disconnected', () {
+    expect((parseSessionEvent('traffic', {'sid': 1, 'bytes': 10, 'frames': 3}) as TrafficEvent).frames, 3);
+    expect((parseSessionEvent('traffic', {'sid': 1, 'bytes': 10}) as TrafficEvent).frames, 0);
+    expect((parseSessionEvent('disconnected', {'sid': 1, 'reason': 'connection closed'}) as DisconnectedEvent).reason,
+        'connection closed');
+    expect((parseSessionEvent('disconnected', {'sid': 1}) as DisconnectedEvent).reason, '');
+  });
 }

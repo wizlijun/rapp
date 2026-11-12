@@ -11,9 +11,12 @@ import '../embed/stream_choice.dart';
 import '../hub_client.dart';
 import '../permissions.dart';
 import 'lamp.dart';
+import 'lifecycle.dart';
 import 'prefs.dart';
 import 'session_model.dart';
 import 'tokens.dart';
+
+export 'lifecycle.dart' show hubWord, hubWords;
 
 enum PanelTab { sessions, devices }
 
@@ -595,14 +598,6 @@ class _Waiting {
   final String appName;
   final Timer timer;
 }
-
-/// Hub messages the user can meet in the hint, in plain words.
-const hubWords = {
-  'rapp-hub exited': 'rapp-hub 已退出',
-  'unknown sid': '这个会话已经结束了',
-};
-
-String hubWord(String message) => hubWords[message] ?? message;
 
 /// "stdin closed" (ended from rapp) and "quit" (its window was closed) are
 /// the user's own doing; any other client exit reason is unexpected.
