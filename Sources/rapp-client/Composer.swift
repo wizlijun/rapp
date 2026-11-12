@@ -1,13 +1,6 @@
 import AppKit
 import RappCore
-
-/// What a block (chip) in the composer stands for.
-enum ChipPayload {
-    case text(String)
-    case image(png: [UInt8], width: Int, height: Int)
-    case data(uti: String, [UInt8])
-    case file(URL, bytes: UInt64)
-}
+import RappSession
 
 /// The inseparable attachment behind one block; it only carries the chip id and draws as a label.
 private final class ChipAttachment: NSTextAttachment {
@@ -73,10 +66,7 @@ final class Composer: NSTextView {
     static let maxLines = 8
 
     private let pasteboard = LocalPasteboard()
-    private var payloads: [Int: ChipPayload] = [:]
-    private var uploaded: [Int: UInt32] = [:]
-    private var nextChip = 0
-    private var textCount = 0, imageCount = 0, dataCount = 0
+    private let blocks = ComposerBlocks()
     private let baseFont = NSFont.systemFont(ofSize: 14)
 
     /// macOS virtual key codes for the keys that pass through an empty editor.
@@ -145,11 +135,11 @@ final class Composer: NSTextView {
         return result
     }
 
-    func payload(_ chip: Int) -> ChipPayload? { payloads[chip] }
+    func payload(_ chip: Int) -> ChipPayload? { blocks.payload(chip) }
 
-    func uploadedItem(_ chip: Int) -> UInt32? { uploaded[chip] }
+    func uploadedItem(_ chip: Int) -> UInt32? { blocks.uploadedItem(chip) }
 
-    func setUploadedItem(_ chip: Int, _ item: UInt32) { uploaded[chip] = item }
+    func setUploadedItem(_ chip: Int, _ item: UInt32) { blocks.setUploadedItem(item, for: chip) }
 
     /// Deletes [0, end) of the content.
     func removeUpTo(_ end: Int) {
@@ -175,17 +165,14 @@ final class Composer: NSTextView {
     private func pruneChips() {
         var present = Set<Int>()
         for case .chunk(let chip) in pieces() { present.insert(chip) }
-        payloads = payloads.filter { present.contains($0.key) }
-        uploaded = uploaded.filter { present.contains($0.key) }
+        blocks.keep(only: present)
     }
 
     // MARK: Inserting
 
-    private func insertChip(_ payload: ChipPayload, label: Chip) {
-        let id = nextChip
-        nextChip += 1
-        payloads[id] = payload
-        let attachment = ChipAttachment(chip: id, label: chipLabel(label), font: baseFont)
+    private func insertChip(_ payload: ChipPayload) {
+        let id = blocks.add(payload)
+        let attachment = ChipAttachment(chip: id, label: blocks.label(id) ?? "", font: baseFont)
         let block = NSMutableAttributedString(attributedString: NSAttributedString(attachment: attachment))
         block.addAttributes(plainAttributes, range: NSRange(location: 0, length: block.length))
         insertText(block, replacementRange: selectedRange())
@@ -193,13 +180,11 @@ final class Composer: NSTextView {
     }
 
     private func insertTextChunk(_ text: String) {
-        textCount += 1
-        insertChip(.text(text), label: .text(n: textCount, lines: lineCount(text)))
+        insertChip(.text(text))
     }
 
     private func insertImage(png: [UInt8], width: Int, height: Int) {
-        imageCount += 1
-        insertChip(.image(png: png, width: width, height: height), label: .image(n: imageCount, width: width, height: height))
+        insertChip(.image(png: png, width: width, height: height))
     }
 
     private func insertData(uti: String, _ bytes: [UInt8]) {
@@ -207,8 +192,7 @@ final class Composer: NSTextView {
             onStatus?("太大了，A 最多收 256 MB")
             return
         }
-        dataCount += 1
-        insertChip(.data(uti: uti, bytes), label: .data(n: dataCount, uti: uti, bytes: UInt64(bytes.count)))
+        insertChip(.data(uti: uti, bytes))
     }
 
     /// One block per file; folders are skipped.
@@ -220,7 +204,7 @@ final class Composer: NSTextView {
                 continue
             }
             let bytes = UInt64(values?.fileSize ?? 0)
-            insertChip(.file(url, bytes: bytes), label: .file(name: url.lastPathComponent, bytes: bytes))
+            insertChip(.file(url, bytes: bytes))
         }
     }
 

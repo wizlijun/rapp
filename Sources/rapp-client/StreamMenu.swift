@@ -1,5 +1,6 @@
 import AppKit
 import RappCore
+import RappSession
 
 /// The stream choice (sample mode, capture density, frame rate) and the menu
 /// that changes it: two presets, then the three groups. One instance serves

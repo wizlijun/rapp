@@ -1,5 +1,6 @@
 import AppKit
 import RappCore
+import RappSession
 
 /// The remote app's menus after this client's own app menu (spec §4.5).
 /// Items carry no key equivalents, so every shortcut still goes to A as keys;

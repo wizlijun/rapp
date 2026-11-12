@@ -4,8 +4,8 @@ import RappCore
 
 /// One `fetch` or `put` connection (spec §2.4): it carries a single transfer.
 /// Everything runs on the main queue. After `cancel()` no callback is made.
-final class SideConnection {
-    enum End {
+public final class SideConnection {
+    public enum End {
         /// A sent `error`; retrying would not help.
         case hostError(String)
         /// The connection broke or closed.
@@ -13,16 +13,16 @@ final class SideConnection {
     }
 
     /// The host's `transferStart`: the total size (fetch) or the bytes it already has (put).
-    var onStart: ((UInt64) -> Void)?
-    var onChunk: (([UInt8]) -> Void)?
-    var onEnd: ((End) -> Void)?
+    public var onStart: ((UInt64) -> Void)?
+    public var onChunk: (([UInt8]) -> Void)?
+    public var onEnd: ((End) -> Void)?
 
     private let connection: NWConnection
     private let first: Message
     private var parser = MessageParser()
     private var closed = false
 
-    init(address: RemoteAddress, first: Message) {
+    public init(address: RemoteAddress, first: Message) {
         self.first = first
         let tcp = NWProtocolTCP.Options()
         tcp.noDelay = true
@@ -32,7 +32,7 @@ final class SideConnection {
     }
 
     /// Connects and sends the `fetch` or `put`.
-    func start() {
+    public func start() {
         connection.stateUpdateHandler = { [weak self] state in
             guard let self else { return }
             switch state {
@@ -49,7 +49,7 @@ final class SideConnection {
     }
 
     /// `then` runs once the message has left, so an upload can pace itself on it.
-    func send(_ message: Message, then next: (() -> Void)? = nil) {
+    public func send(_ message: Message, then next: (() -> Void)? = nil) {
         guard !closed else { return }
         connection.send(content: Data(message.encoded()), completion: .contentProcessed { [weak self] error in
             guard let self, !self.closed else { return }
@@ -58,7 +58,7 @@ final class SideConnection {
     }
 
     /// Stops without a callback.
-    func cancel() {
+    public func cancel() {
         guard !closed else { return }
         closed = true
         connection.cancel()

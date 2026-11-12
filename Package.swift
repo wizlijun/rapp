@@ -15,12 +15,15 @@ var targets: [Target] = [
 // RappCore and its tests build anywhere Swift and zlib are available.
 #if os(macOS)
 products += [
+    .library(name: "RappSession", targets: ["RappSession"]),
     .executable(name: "rapp-host", targets: ["rapp-host"]),
     .executable(name: "rapp-client", targets: ["rapp-client"]),
 ]
 targets += [
     .executableTarget(name: "rapp-host", dependencies: ["RappCore"]),
-    .executableTarget(name: "rapp-client", dependencies: ["RappCore"]),
+    .target(name: "RappSession", dependencies: ["RappCore"]),
+    .testTarget(name: "RappSessionTests", dependencies: ["RappSession"]),
+    .executableTarget(name: "rapp-client", dependencies: ["RappCore", "RappSession"]),
 ]
 #endif
 

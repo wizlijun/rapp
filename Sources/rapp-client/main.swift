@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import RappCore
+import RappSession
 
 let usage = """
     usage: rapp-client [connect] "rapp://<host>[:port]/[<bundle-id>][?token=<secret>][&mode=gray4|color8|color16|duogray|duocolor][&fps=30|15|5|1]" [--token-env <VAR>] [--json]
@@ -17,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let meter: TrafficMeter
     private let transfers: TransferQueue
     private let history: ClipHistory
+    private let historyMenu: ClipHistoryMenu
     private var coordinator: WindowCoordinator!
     private var mirroredMenu: MirroredMenu!
     private var keyMonitor: Any?
@@ -41,10 +43,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         streamMenu = StreamMenu(mode: address.mode, fps: address.fps)
         meter = TrafficMeter(streamMenu: streamMenu)
         transfers = TransferQueue(address: address)
-        history = ClipHistory(pasteboard: LocalPasteboard(), transfers: transfers, log: { output.log($0) })
+        let pasteboard = LocalPasteboard()
+        history = ClipHistory(pasteboard: pasteboard, log: { output.log($0) })
+        historyMenu = ClipHistoryMenu(history: history, transfers: transfers, pasteboard: pasteboard)
         super.init()
         transfers.log = { output.log($0) }
-        streamMenu.makeHistoryItem = { [history] in history.makeMenuItem() }
+        streamMenu.makeHistoryItem = { [historyMenu] in historyMenu.makeMenuItem() }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -54,7 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         coordinator.onCancelTransfer = { [transfers] in transfers.cancel() }
         transfers.onStatus = { [weak self] status in self?.coordinator.setTransferStatus(status) }
         history.onClip = { [weak self] in self?.coordinator.clipArrived() }
-        history.onInsert = { [weak self] info, payload in self?.coordinator.insert(payload, info: info) }
+        historyMenu.onInsert = { [weak self] info, payload in self?.coordinator.insert(payload, info: info) }
         buildMenu()
 
         connection.onMessage = { [weak self] message in self?.handle(message) }

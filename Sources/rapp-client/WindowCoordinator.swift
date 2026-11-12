@@ -1,5 +1,6 @@
 import AppKit
 import RappCore
+import RappSession
 
 /// Keeps one B window per A window (spec §4.1–§4.4): applies each window
 /// table, places new windows by the canvas <-> B mapping, hands every window
@@ -159,10 +160,10 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
             window.setBarHeight(height)
             self.placing = false
         }
-        let sender = Sender(bar: bar, transfers: transfers, counters: counters, send: { [weak self] in self?.send($0) })
+        let sender = Sender(sink: bar, transfers: transfers, counters: counters, send: { [weak self] in self?.send($0) })
         senders[window.info.id] = sender
-        bar.onSendButton = { [weak sender] in sender?.start() }
-        bar.composer.onSubmit = { [weak sender] in sender?.start() }
+        bar.onSendButton = { [weak sender] in sender?.start(pieces: bar.composer.pieces()) }
+        bar.composer.onSubmit = { [weak sender] in sender?.start(pieces: bar.composer.pieces()) }
         bar.onCancel = { [weak self] in self?.onCancelTransfer() }
         bar.onCopy = { [weak self, weak bar] in bar.map { self?.copy(from: $0) } }
         bar.onAttach = { [weak window] in window.map(Self.chooseFiles) }
