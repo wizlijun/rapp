@@ -46,7 +46,7 @@ public final class EmbeddedSession {
     }
 
     public func start() {
-        run {
+        run { [self] in
             self.link.onMessage = { [weak self] in self?.handle($0) }
             self.link.onClosed = { [weak self] in self?.close(reason: $0) }
             self.link.onBytes = { [weak self] in self?.bytes += $0 }

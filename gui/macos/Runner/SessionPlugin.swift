@@ -25,9 +25,14 @@ final class SurfaceTexture: NSObject, FlutterTexture {
 final class SessionPlugin: NSObject, FlutterPlugin {
   private final class Live {
     let session: EmbeddedSession
+    /// The session's own queue: its state (`backingScale` included) is only touched there.
+    let queue: DispatchQueue
     /// Window id → its registered texture.
     var textures = [UInt32: (id: Int64, texture: SurfaceTexture)]()
-    init(session: EmbeddedSession) { self.session = session }
+    init(session: EmbeddedSession, queue: DispatchQueue) {
+      self.session = session
+      self.queue = queue
+    }
   }
 
   private let channel: FlutterMethodChannel
@@ -48,6 +53,11 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     self.channel = channel
     self.registry = registry
     self.view = view
+  }
+
+  deinit {
+    timer?.invalidate()
+    if let scaleObserver { NotificationCenter.default.removeObserver(scaleObserver) }
   }
 
   private var backingScale: CGFloat {
@@ -106,15 +116,20 @@ final class SessionPlugin: NSObject, FlutterPlugin {
   private func begin() {
     guard !ready else { return }
     ready = true
-    timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+    // Common modes, so traffic keeps ticking during window resizes and menu tracking.
+    let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
       self?.live.values.forEach { $0.session.tickTraffic() }
     }
+    RunLoop.main.add(timer, forMode: .common)
+    self.timer = timer
     scaleObserver = NotificationCenter.default.addObserver(
       forName: NSWindow.didChangeBackingPropertiesNotification, object: nil, queue: .main
     ) { [weak self] _ in
       guard let self else { return }
       let scale = self.backingScale
-      self.live.values.forEach { $0.session.backingScale = scale }
+      for entry in self.live.values {
+        entry.queue.async { entry.session.backingScale = scale }
+      }
     }
   }
 
@@ -127,7 +142,7 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     session.onEvent = { [weak self] event in
       DispatchQueue.main.async { self?.deliver(event, sid: sid) }
     }
-    live[sid] = Live(session: session)
+    live[sid] = Live(session: session, queue: queue)
     session.start()
   }
 
