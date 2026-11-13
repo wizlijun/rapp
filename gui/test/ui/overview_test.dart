@@ -114,7 +114,7 @@ void main() {
   testWidgets('two sessions, one disconnected: counts and blocks', (tester) async {
     await boot(tester, apps: ['m1/a', 'm1/b']);
     frame(1, bytes: 48000);
-    port.emit(const DisconnectedEvent(2, 'connection closed'));
+    port.emit(const DisconnectedEvent(2, 'user'));
     await show(tester);
     expect(numberOf(tester, 'count-active').data, '1');
     expect(numberOf(tester, 'count-disconnected').data, '1');
@@ -135,7 +135,7 @@ void main() {
 
   testWidgets('a nonzero disconnected count is accent with backdrop', (tester) async {
     await boot(tester, apps: ['m1/a', 'm1/b']);
-    port.emit(const DisconnectedEvent(2, 'connection closed'));
+    port.emit(const DisconnectedEvent(2, 'user'));
     await show(tester);
     final tk = tokens(tester);
     expect(deco(tester, 'frame-count-disconnected').border!.top.color, tk.accent);
@@ -228,7 +228,7 @@ void main() {
 
   testWidgets('count taps', (tester) async {
     await boot(tester, apps: ['m1/a']);
-    port.emit(const DisconnectedEvent(1, 'connection closed'));
+    port.emit(const DisconnectedEvent(1, 'user'));
     await show(tester);
     await tester.tap(find.byKey(const Key('count-disconnected')));
     await tester.pump();
@@ -307,7 +307,7 @@ void main() {
       {'id': 'm2', 'name': 'air'},
     ];
     await boot(tester, apps: ['m1/a']);
-    port.emit(const DisconnectedEvent(1, 'connection closed'));
+    port.emit(const DisconnectedEvent(1, 'user'));
     await show(tester);
     for (final k in ['block-m1/a', 'open-app-m2', 'count-disconnected', 'count-online']) {
       expect(tester.getSize(find.byKey(Key(k))).height, greaterThanOrEqualTo(48), reason: k);

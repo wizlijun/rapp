@@ -19,6 +19,8 @@ class DisconnectedStage extends StatefulWidget {
     this.reconnectWord = '重连',
     required this.connecting,
     this.onReconnect,
+    this.retrying = false,
+    this.onStop,
     this.onEnd,
     this.sessionKey,
     this.hole,
@@ -38,6 +40,12 @@ class DisconnectedStage extends StatefulWidget {
 
   /// Null greys the button (no hub to reconnect through).
   final VoidCallback? onReconnect;
+
+  /// It reconnects by itself: 「正在重连…」 and 「停止」 take the place of 「重连」.
+  final bool retrying;
+
+  /// 「停止」: gives up the automatic tries.
+  final VoidCallback? onStop;
 
   /// 「结束会话」 (two taps), next to 「重连」: ends the record even if it never went live (R9).
   final VoidCallback? onEnd;
@@ -120,8 +128,11 @@ class _DisconnectedStageState extends State<DisconnectedStage> {
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          RappButton.accent(
-                              key: const Key('reconnect-button'), label: widget.reconnectWord, onPressed: widget.onReconnect),
+                          if (widget.retrying)
+                            RappButton.accent(key: const Key('stop-reconnect-button'), label: '停止', onPressed: widget.onStop)
+                          else
+                            RappButton.accent(
+                                key: const Key('reconnect-button'), label: widget.reconnectWord, onPressed: widget.onReconnect),
                           const SizedBox(width: 8),
                           KeyedSubtree(
                             key: ValueKey(('end', widget.sessionKey)),
@@ -132,6 +143,10 @@ class _DisconnectedStageState extends State<DisconnectedStage> {
                       ),
                       const SizedBox(height: 12),
                       Text(widget.reason, key: const Key('disconnect-reason'), style: TextStyle(color: t.text)),
+                      if (widget.retrying) ...[
+                        const SizedBox(height: 4),
+                        Text('正在重连…', key: const Key('retrying-note'), style: TextStyle(color: t.text)),
+                      ],
                     ],
                   ),
           ),

@@ -1,6 +1,7 @@
 // The single source of UI state for the main window.
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:ui' show Size;
 
 import '../paths.dart';
@@ -626,6 +627,11 @@ class MainState extends ChangeNotifier {
   /// runner's `DisconnectedEvent` (its reason is better), then disconnects with the hub's own.
   void _onHubEmbedded() {
     final h = hub!;
+    if (!h.alive) {
+      for (final r in _records.values) {
+        _stopRetry(r);
+      }
+    }
     for (final r in _records.values.toList()) {
       final sid = r.sid;
       if (r.phase != Phase.live || sid == null || _hubHas(sid) || _waiting.containsKey(sid)) continue;
@@ -721,7 +727,7 @@ class MainState extends ChangeNotifier {
 
   /// The link of [r] ended with [raw] (the runner's or the hub's words): the record stays, with its
   /// last frame, until the user reconnects or ends it. Callers notify.
-  void _disconnect(SessionRecord r, String raw, {bool hint = false, String? hintText}) {
+  void _disconnect(SessionRecord r, String raw, {bool hint = false, String? hintText, bool failedOpen = false}) {
     if (r.lastSid != null) {
       // A reconnect that never reached the stage: its new sid goes, the old picture stays.
       final fresh = r.sid;
@@ -756,7 +762,62 @@ class MainState extends ChangeNotifier {
       _waiting.remove(sid)?.timer.cancel();
       if (pictureFocused == sid) _blur();
     }
-    if (hint) this.hint = hintText ?? '${r.appName} 已断开：${disconnectWord(r.reason)}';
+    final auto = _planRetry(r, failedOpen);
+    if (hint && !auto) this.hint = hintText ?? '${r.appName} 已断开：${disconnectWord(r.reason)}';
+  }
+
+  /// Per-record timers of the automatic reconnect (the record's `retry` says the rest).
+  final Map<String, Timer> _retryTimers = {};
+
+  /// After [r] went down: schedules the next automatic try when it is due. True: it did (no hint).
+  /// A failed manual open never starts automatic tries.
+  bool _planRetry(SessionRecord r, bool failedOpen) {
+    final cur = r.retry;
+    final int attempt;
+    if (cur != null) {
+      if (stopsAutoReconnect(r.reason)) {
+        _stopRetry(r);
+        return false;
+      }
+      attempt = cur.$1 + 1;
+    } else if (!failedOpen && autoReconnects(r.reason)) {
+      attempt = 0;
+    } else {
+      return false;
+    }
+    final wait = Duration(seconds: attempt == 0 ? 1 : math.min(1 << attempt, 15));
+    _retryTimers.remove(r.key)?.cancel();
+    r.retry = (attempt, DateTime.now().add(wait));
+    _retryTimers[r.key] = Timer(wait, () {
+      _retryTimers.remove(r.key);
+      if (_disposed || _records[r.key] != r || r.retry == null) return;
+      if (r.phase != Phase.disconnected || !hubUsable) {
+        r.retry = null;
+        notifyListeners();
+        return;
+      }
+      reconnect(r.key, auto: true);
+    });
+    return true;
+  }
+
+  /// Cancels [r]'s automatic reconnect, if any. Callers notify.
+  void _stopRetry(SessionRecord r) {
+    _retryTimers.remove(r.key)?.cancel();
+    r.retry = null;
+  }
+
+  /// 「停止」 on the disconnected stage.
+  void stopReconnect(String key) {
+    final r = _records[key];
+    if (r == null || r.retry == null) return;
+    _stopRetry(r);
+    notifyListeners();
+  }
+
+  void stopReconnectCurrent() {
+    final k = currentKey;
+    if (k != null) stopReconnect(k);
   }
 
   /// [r] was being ended and its link went away before the runner's `ClosedEvent`: that finishes
@@ -770,6 +831,7 @@ class MainState extends ChangeNotifier {
   /// Takes [r] off the list and steps to the next session if it was current. Callers set the hint.
   void _endRecord(SessionRecord r) {
     _batchEnded.remove(r.key);
+    _stopRetry(r);
     final oldGroups = groups;
     final old = r.lastSid;
     if (old != null) port?.close(old); // reconnected but not swapped yet: the old session is still open
@@ -813,7 +875,8 @@ class MainState extends ChangeNotifier {
     } catch (e) {
       if (r.ending) return;
       final missing = missingFromError('$e');
-      _disconnect(r, '$e', hint: true, hintText: missing == null ? null : remoteHint(deviceName(r.id), missing));
+      _disconnect(r, '$e',
+          hint: true, hintText: missing == null ? null : remoteHint(deviceName(r.id), missing), failedOpen: true);
       notifyListeners();
       return;
     }
@@ -864,11 +927,12 @@ class MainState extends ChangeNotifier {
         notifyListeners();
         return;
       }
-      _disconnect(r, '$e', hint: true);
+      _disconnect(r, '$e', hint: true, failedOpen: true);
       notifyListeners();
       return;
     }
     if (r.sid != s.sid || r.phase != Phase.live || r.ending) return;
+    r.retry = null;
     // start carries no pin: a pinned session's first set_stream says so.
     _sentFps[s.sid] = (c.mode, c.fps, c.density, false);
     if (rs.streamPinned) _applyFps();
@@ -877,9 +941,11 @@ class MainState extends ChangeNotifier {
   }
 
   /// Opens the disconnected session [key] again, in the same place with the same choices.
-  Future<void> reconnect(String key) async {
+  /// [auto]: the automatic retry's own try (it keeps the `retry` state); a manual one cancels it.
+  Future<void> reconnect(String key, {bool auto = false}) async {
     final r = _records[key];
     if (r == null || r.phase != Phase.disconnected || !hubUsable) return;
+    if (!auto) _stopRetry(r);
     r.lastSid = r.sid;
     r.sid = null;
     r.phase = Phase.connecting;
@@ -899,6 +965,7 @@ class MainState extends ChangeNotifier {
     final r = currentRecord;
     if (r == null || !_reachable(r)) return;
     r.userDisconnect = true;
+    _stopRetry(r);
     hub!.close(r.sid!, reason: 'user');
     notifyListeners();
   }
@@ -1522,6 +1589,10 @@ class MainState extends ChangeNotifier {
     profiles.removeListener(_onProfiles);
     _portSub?.cancel();
     _blockedTimer?.cancel();
+    for (final t in _retryTimers.values) {
+      t.cancel();
+    }
+    _retryTimers.clear();
     for (final w in _waiting.values) {
       w.timer.cancel();
     }

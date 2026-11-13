@@ -257,7 +257,7 @@ void main() {
       expect(keyboard.keys.map((e) => e.logicalKey), containsAll([LogicalKeyboardKey.escape, LogicalKeyboardKey.keyA]));
       expect(es.pictureFocused, 1);
       expect(port.calls.where((c) => c.$1 == 'mouse').length, 2);
-      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      port.emit(const DisconnectedEvent(1, 'user'));
       await tester.pump();
       await tester.pump();
       expect(find.byType(DisconnectedStage), findsOneWidget);
@@ -387,11 +387,11 @@ void main() {
 
     testWidgets('disconnected shows the last frame, stripes and reconnect', (tester) async {
       await shown(tester);
-      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      port.emit(const DisconnectedEvent(1, 'user'));
       await tester.pump();
       expect(tex42, findsOneWidget);
       expect(find.byKey(const Key('reconnect-button')), findsOneWidget);
-      expect(tester.widget<Text>(find.byKey(const Key('disconnect-reason'))).data, '网络断了');
+      expect(tester.widget<Text>(find.byKey(const Key('disconnect-reason'))).data, '你断开了');
       await tester.runAsync(() async {
         await tester.tap(find.byKey(const Key('reconnect-button')));
         await flush();
@@ -402,7 +402,7 @@ void main() {
 
     testWidgets('disconnected picture takes no input', (tester) async {
       await shown(tester);
-      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      port.emit(const DisconnectedEvent(1, 'user'));
       await tester.pump();
       port.calls.clear();
       await tester.tapAt(tester.getTopLeft(find.byKey(const Key('stage'))) + const Offset(40, 40));
@@ -485,7 +485,7 @@ void main() {
 
     testWidgets('a disconnected session with a frame also offers 结束会话; none while reconnecting', (tester) async {
       await shown(tester);
-      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      port.emit(const DisconnectedEvent(1, 'user'));
       await tester.pump();
       expect(find.byKey(const Key('disconnected-end-button')), findsOneWidget);
       t.onSend = (_) {}; // the reopen never answers
@@ -499,7 +499,7 @@ void main() {
 
     testWidgets('reconnecting keeps the old frame with a connecting lamp', (tester) async {
       await shown(tester);
-      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      port.emit(const DisconnectedEvent(1, 'user'));
       await tester.pump();
       t.onSend = (_) {}; // the reopen never answers
       await tester.runAsync(() async {
@@ -514,7 +514,7 @@ void main() {
 
     testWidgets('reconnect opened but not swapped keeps stripes and takes no input', (tester) async {
       await shown(tester);
-      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      port.emit(const DisconnectedEvent(1, 'user'));
       await tester.pump();
       await tester.runAsync(() async {
         t.onSend = (m) {
@@ -546,7 +546,7 @@ void main() {
       await shown(tester);
       await tester.pump();
       expect(es.pictureHole.value, isNotNull);
-      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      port.emit(const DisconnectedEvent(1, 'user'));
       await tester.pump();
       await tester.pump();
       expect(find.byType(DisconnectedStage), findsOneWidget);
@@ -555,7 +555,7 @@ void main() {
 
     testWidgets('swapping the disconnected stage for the live picture keeps the hole', (tester) async {
       await shown(tester);
-      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      port.emit(const DisconnectedEvent(1, 'user'));
       await tester.pump();
       es.hint = 'again'; // a rebuild: the disconnected stage reports its rect
       es.notifyListeners();
@@ -591,7 +591,7 @@ void main() {
 
     testWidgets('reconnect is off when the hub is gone', (tester) async {
       await shown(tester);
-      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      port.emit(const DisconnectedEvent(1, 'user'));
       await tester.pump();
       await tester.runAsync(() async {
         await t.die();
@@ -610,12 +610,25 @@ void main() {
       expect(find.byType(Texture), findsNothing);
     });
 
+    testWidgets('a retrying stage says so and offers 停止 instead of 重连', (tester) async {
+      var stopped = false;
+      await tester.pumpWidget(wrap(SizedBox(
+          width: 400,
+          height: 300,
+          child: DisconnectedStage(
+              session: null, reason: '网络断了', connecting: false, retrying: true, onStop: () => stopped = true))));
+      expect(find.text('正在重连…'), findsOneWidget);
+      expect(find.byKey(const Key('reconnect-button')), findsNothing);
+      await tester.tap(find.byKey(const Key('stop-reconnect-button')));
+      expect(stopped, true);
+    });
+
     testWidgets('a detached session that disconnects has no window to switch to', (tester) async {
       await shown(tester);
       port.emit(const DetachedEvent(1, true));
       await tester.pump();
       expect(find.text('切到窗口'), findsOneWidget);
-      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      port.emit(const DisconnectedEvent(1, 'user'));
       port.emit(const DetachedEvent(1, false));
       await tester.pump();
       expect(find.text('切到窗口'), findsNothing);

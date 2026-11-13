@@ -6,6 +6,15 @@ import 'package:rapp/ui/lifecycle.dart';
 import 'package:rapp/ui/main_state.dart' show endedHint;
 
 void main() {
+  test('autoReconnects', () {
+    for (final raw in ['connection closed', 'send failed: x', 'timed out']) {
+      expect(autoReconnects(raw), true, reason: raw);
+    }
+    for (final raw in ['user', 'host says: app quit', 'host says: taken over', 'bad password', 'offline']) {
+      expect(autoReconnects(raw), false, reason: raw);
+    }
+  });
+
   test('disconnect words', () {
     expect(disconnectWord('user'), '你断开了');
     expect(disconnectWord('host says: Calculator quit'), 'A 端关闭了 app');

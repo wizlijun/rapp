@@ -697,6 +697,166 @@ void main() {
       });
     });
 
+    group('automatic reconnect', () {
+      int opens(FakeTransport t) => t.sent.where((m) => m['cmd'] == 'open').length;
+      void failOpens(FakeTransport t) {
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') t.emit({'event': 'error', 'error': 'offline', 'req': m['req']});
+        };
+      }
+
+      test('network drop reconnects after 1s', () {
+        env((a, t, port, st, hints) {
+          final before = opens(t);
+          port.emit(const DisconnectedEvent(1, 'connection closed'));
+          a.elapse(const Duration(milliseconds: 999));
+          expect(opens(t), before);
+          a.elapse(const Duration(milliseconds: 1));
+          a.flushMicrotasks();
+          expect(opens(t), before + 1);
+          expect(t.sent.where((m) => m['cmd'] == 'open').last['reconnect'], true);
+          expect(st.currentRecord!.retry, isNull);
+        });
+      });
+
+      test('backoff 1,2,4,8,15,15', () {
+        env((a, t, port, st, hints) {
+          final times = <int>[];
+          final start = a.getClock(DateTime(2026)).now();
+          failOpens(t);
+          final inner = t.onSend!;
+          t.onSend = (m) {
+            if (m['cmd'] == 'open') times.add(a.getClock(DateTime(2026)).now().difference(start).inSeconds);
+            inner(m);
+          };
+          port.emit(const DisconnectedEvent(1, 'connection closed'));
+          a.elapse(const Duration(seconds: 60));
+          expect(times.take(6).toList(), [1, 3, 7, 15, 30, 45]);
+        });
+      });
+
+      test('no hint on failed auto attempts', () {
+        env((a, t, port, st, hints) {
+          failOpens(t);
+          port.emit(const DisconnectedEvent(1, 'connection closed'));
+          a.elapse(const Duration(seconds: 8));
+          expect(hints, isEmpty);
+          expect(st.currentRecord!.retry, isNotNull);
+        });
+      });
+
+      test('success resets backoff', () {
+        env((a, t, port, st, hints) {
+          final send = t.onSend!;
+          failOpens(t);
+          port.emit(const DisconnectedEvent(1, 'connection closed'));
+          a.elapse(const Duration(seconds: 4)); // tries at 1 s and 3 s failed; next waits 4 s
+          t.onSend = send;
+          a.elapse(const Duration(seconds: 3));
+          a.flushMicrotasks();
+          expect(st.currentRecord!.retry, isNull);
+          expect(st.currentRecord!.phase, Phase.live);
+          final n = opens(t);
+          port.emit(const DisconnectedEvent(11, 'connection closed'));
+          a.elapse(const Duration(milliseconds: 999));
+          expect(opens(t), n);
+          a.elapse(const Duration(milliseconds: 1));
+          expect(opens(t), n + 1);
+        });
+      });
+
+      for (final reason in ['user', 'host says: app quit', 'host says: taken over by X']) {
+        test('"$reason" does not retry', () {
+          env((a, t, port, st, hints) {
+            final n = opens(t);
+            port.emit(DisconnectedEvent(1, reason));
+            a.elapse(const Duration(seconds: 60));
+            expect(opens(t), n);
+            expect(st.currentRecord!.retry, isNull);
+          });
+        });
+      }
+
+      test('bad password stops retrying', () {
+        env((a, t, port, st, hints) {
+          t.onSend = (m) {
+            if (m['cmd'] == 'open') t.emit({'event': 'error', 'error': 'bad password', 'req': m['req']});
+          };
+          final n = opens(t);
+          port.emit(const DisconnectedEvent(1, 'connection closed'));
+          a.elapse(const Duration(seconds: 60));
+          expect(opens(t), n + 1);
+          expect(st.currentRecord!.retry, isNull);
+          expect(st.hint, '${st.currentRecord!.appName} 已断开：密码不对');
+        });
+      });
+
+      test('stop cancels', () {
+        env((a, t, port, st, hints) {
+          failOpens(t);
+          port.emit(const DisconnectedEvent(1, 'connection closed'));
+          a.elapse(const Duration(seconds: 2));
+          expect(st.currentRecord!.retry, isNotNull);
+          st.stopReconnectCurrent();
+          final n = opens(t);
+          a.elapse(const Duration(seconds: 60));
+          expect(opens(t), n);
+          expect(st.currentRecord!.retry, isNull);
+          expect(st.currentRecord!.phase, Phase.disconnected);
+        });
+      });
+
+      test('end session while waiting cancels', () {
+        env((a, t, port, st, hints) {
+          failOpens(t);
+          port.emit(const DisconnectedEvent(1, 'connection closed'));
+          a.elapse(const Duration(seconds: 2));
+          st.endSession('111/a');
+          expect(st.recordFor('111/a'), isNull);
+          final n = opens(t);
+          a.elapse(const Duration(seconds: 60));
+          expect(opens(t), n);
+        });
+      });
+
+      test('manual reconnect while waiting opens once now', () {
+        env((a, t, port, st, hints) {
+          final n = opens(t);
+          port.emit(const DisconnectedEvent(1, 'connection closed'));
+          a.elapse(const Duration(milliseconds: 500));
+          st.reconnect('111/a');
+          a.flushMicrotasks();
+          expect(opens(t), n + 1);
+          a.elapse(const Duration(seconds: 60));
+          expect(opens(t), n + 1);
+        });
+      });
+
+      test('a manual reconnect that fails shows its hint and does not retry', () {
+        env((a, t, port, st, hints) {
+          port.emit(const DisconnectedEvent(1, 'user'));
+          failOpens(t);
+          final n = opens(t);
+          st.reconnect('111/a');
+          a.flushMicrotasks();
+          a.elapse(const Duration(seconds: 60));
+          expect(opens(t), n + 1);
+          expect(hints, ['Calculator 已断开：对方离线']);
+        });
+      });
+
+      test('auto reconnect keeps a pin', () {
+        env((a, t, port, st, hints) {
+          st.currentRemote!.setChoice(const StreamChoice('duogray', 'saver1x', 5), manual: true);
+          port.emit(const DisconnectedEvent(1, 'connection closed'));
+          a.elapse(const Duration(seconds: 1));
+          a.flushMicrotasks();
+          expect(port.calls.last.$1, 'set_stream');
+          expect(port.calls.last.$2['pinned'], true);
+        });
+      });
+    });
+
     test('pin survives reconnect', () {
       env((a, t, port, st, hints) {
         st.currentRemote!.setChoice(const StreamChoice('duogray', 'saver1x', 5), manual: true);
@@ -1482,7 +1642,7 @@ void main() {
         port.emit(const TrafficEvent(1, 100, 1));
         st.stageSize(const Size(500, 400));
         a.elapse(const Duration(seconds: 1));
-        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        port.emit(const DisconnectedEvent(1, 'user'));
         quietAfter(a, t, port, st);
       });
     });

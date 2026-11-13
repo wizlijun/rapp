@@ -38,6 +38,9 @@ class SessionRecord {
   bool pinned = false;
   int? window;
 
+  /// Reconnecting by itself: the failed tries so far, and when the next one is due. Null: not.
+  (int attempt, DateTime at)? retry;
+
   String get key => '$id/$app';
 }
 
@@ -85,6 +88,19 @@ String disconnectWord(String? raw) {
   if (rest.startsWith(client)) rest = rest.substring(client.length);
   if (rest.startsWith(host)) rest = rest.substring(host.length);
   return hubWord(rest);
+}
+
+/// The link dropped for a reason the network explains: worth trying again by itself.
+bool autoReconnects(String? raw) {
+  final w = disconnectWord(raw);
+  return w == '网络断了' || w == '连接超时';
+}
+
+/// A reason that ends automatic tries: the person, the app, the host or the password said no.
+bool stopsAutoReconnect(String? raw) {
+  if (raw != null && raw.contains('bad token')) return true;
+  final w = disconnectWord(raw);
+  return w == '你断开了' || w == 'A 端关闭了 app' || w == '密码不对' || takenOver(raw);
 }
 
 Lamp recordLamp(SessionRecord r, RemoteSession? rs) {

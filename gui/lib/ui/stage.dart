@@ -58,6 +58,8 @@ class Stage extends StatelessWidget {
             reconnectWord: reconnectLabel(rec.reason),
             connecting: rec.phase != Phase.disconnected,
             onReconnect: state.hubUsable ? state.reconnectCurrent : null,
+            retrying: rec.retry != null,
+            onStop: state.stopReconnectCurrent,
             onEnd: state.endCurrent,
             sessionKey: rec.key,
             hole: state.pictureHole,
