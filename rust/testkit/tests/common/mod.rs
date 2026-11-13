@@ -77,6 +77,7 @@ pub async fn start_service(home: &Path, bins: &Path, idle: Duration) -> Service 
         log_dir: home.join("logs"),
         runner: Arc::new(FakeRunner::new()),
         update: None,
+        data: None,
     })
     .await
     .unwrap()
@@ -97,6 +98,7 @@ pub async fn start_service_with(
         log_dir: home.join("logs"),
         runner,
         update,
+        data: None,
     })
     .await
     .unwrap()

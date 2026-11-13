@@ -839,6 +839,7 @@ impl LanA {
                 log_dir: self.home.path().join("logs"),
                 runner: std::sync::Arc::new(rapp_update::fake::FakeRunner::new()),
                 update: None,
+                data: None,
             };
             match rapp_service::Service::start(opts).await {
                 Ok(s) => {

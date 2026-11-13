@@ -2,7 +2,7 @@
 //! Env: `RAPP_BIN_DIR` (where rapp-host lives), `RAPP_GUI` (the `rapp` GUI for `--cm`),
 //! `RAPP_LOG_DIR` (where `service.log` goes; see `rapp_net::log::log_dir`).
 
-use rapp_service::{Opts, Service, SystemRunner, UpdateOpts, WORKER_IDLE};
+use rapp_service::{DataOpts, Opts, Service, SystemRunner, UpdateOpts, WORKER_IDLE};
 use std::sync::Arc;
 
 #[tokio::main]
@@ -17,6 +17,7 @@ async fn main() {
         std::process::exit(1);
     }
     let home = rapp_net::config::local(&root);
+    let data = Some(DataOpts::system(root));
     let opts = Opts {
         home,
         bin_dir: rapp_net::bins::bin_dir_from_env(),
@@ -25,6 +26,7 @@ async fn main() {
         log_dir: rapp_net::log::log_dir(),
         runner: Arc::new(SystemRunner),
         // Only a service running from a `.app` updates itself.
+        data,
         update: std::env::current_exe().ok().and_then(|e| rapp_update::bundle_of(&e)).map(UpdateOpts::system),
     };
     match Service::start(opts).await {
