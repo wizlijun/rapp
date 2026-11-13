@@ -16,6 +16,8 @@ use tokio::time::{Instant, Interval, MissedTickBehavior};
 /// The longest `In` line accepted, newline excluded: room for a 1 MiB paste even when JSON escaping grows it.
 /// Output lines stay within `proto::MAX_LINE`.
 const MAX_IN_LINE: usize = 8 * 1024 * 1024;
+/// The most bytes of a pane's title, window name or command put in the pane list.
+const MAX_NAME: usize = 256;
 /// The exit reason the control client gives when its stream just ended rather than tmux saying `%exit`.
 const CLOSED: &str = "connection closed";
 
@@ -67,9 +69,9 @@ pub fn panes_of(list: &[PaneInfo], session_id: &str) -> Vec<Pane> {
     v.into_iter()
         .map(|p| Pane {
             id: p.pane.clone(),
-            window: p.window.clone(),
-            title: p.title.clone(),
-            command: p.command.clone(),
+            window: cut(&p.window, MAX_NAME).to_string(),
+            title: cut(&p.title, MAX_NAME).to_string(),
+            command: cut(&p.command, MAX_NAME).to_string(),
             cols: p.cols,
             rows: p.rows,
             dead: p.dead,
@@ -77,9 +79,37 @@ pub fn panes_of(list: &[PaneInfo], session_id: &str) -> Vec<Pane> {
         .collect()
 }
 
-/// One line written to `w`, flushed.
+/// `s` cut to at most `max` bytes, at a char boundary.
+fn cut(s: &str, max: usize) -> &str {
+    let mut end = s.len().min(max);
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
+/// A `Panes` message that fits in one line: when the panes do not all fit, the ones at the end are left out.
+fn panes_msg(panes: &[Pane]) -> Out {
+    let mut used = proto::encode(&Out::Panes { panes: Vec::new() }).len();
+    let mut keep = 0;
+    for p in panes {
+        // The pane and the comma before it.
+        used += serde_json::to_string(p).expect("a pane always serializes").len() + 1;
+        if used > proto::MAX_LINE {
+            break;
+        }
+        keep += 1;
+    }
+    Out::Panes { panes: panes[..keep].to_vec() }
+}
+
+/// One line written to `w`, flushed. A message too long for one line is never written: a fixed error goes instead.
 async fn put<W: AsyncWrite + Unpin>(w: &mut W, m: &Out) -> std::io::Result<()> {
-    w.write_all(proto::encode(m).as_bytes()).await?;
+    let mut line = proto::encode(m);
+    if line.len() > proto::MAX_LINE {
+        line = proto::encode(&Out::Error { error: "message too large".into() });
+    }
+    w.write_all(line.as_bytes()).await?;
     w.flush().await
 }
 
@@ -242,7 +272,7 @@ impl<W: AsyncWrite + Unpin> Pump<'_, W> {
     async fn pump<R: AsyncBufRead + Unpin>(&mut self, mut lines: Lines<R>, list: &[PaneInfo]) -> anyhow::Result<()> {
         self.put(&Out::Hello { v: proto::PROTO, backend: "tmux".into() }).await?;
         self.panes = panes_of(list, &self.sid);
-        self.put(&Out::Panes { panes: self.panes.clone() }).await?;
+        self.put(&panes_msg(&self.panes)).await?;
         loop {
             let view = &mut self.view;
             // Both branches are cancel-safe; commands run only in the handling below.
@@ -428,7 +458,7 @@ impl<W: AsyncWrite + Unpin> Pump<'_, W> {
         let panes = panes_of(&list, &self.sid);
         if panes != self.panes {
             self.panes = panes;
-            self.put(&Out::Panes { panes: self.panes.clone() }).await?;
+            self.put(&panes_msg(&self.panes)).await?;
         }
         Ok(true)
     }
@@ -512,6 +542,45 @@ mod tests {
             }
         );
         assert!(panes_of(&list, "$7").is_empty());
+    }
+
+    #[test]
+    fn pane_names_are_cut_at_a_char_boundary() {
+        let mut p = info("$1", 0, 0, "%1");
+        (p.title, p.window, p.command) = ("é".repeat(35000), "w".repeat(300), "c".repeat(257));
+        let v = panes_of(&[p], "$1");
+        assert_eq!((v[0].title.len(), v[0].window.len(), v[0].command.len()), (256, 256, 256));
+        assert!(v[0].title.chars().all(|c| c == 'é'));
+        let mut p = info("$1", 0, 0, "%1");
+        p.title = format!("a{}", "é".repeat(200)); // 401 bytes: the cut falls inside an 'é'
+        assert_eq!(panes_of(&[p], "$1")[0].title.len(), 255);
+    }
+
+    #[test]
+    fn the_pane_list_fits_one_line_dropping_panes_at_the_end() {
+        // Control characters escape to six bytes each: 100 such panes cannot fit in 64 KiB.
+        let list: Vec<PaneInfo> = (0..100)
+            .map(|i| {
+                let mut p = info("$1", 0, i, &format!("%{i}"));
+                (p.title, p.window, p.command) = ("\u{1}".repeat(256), "\u{1}".repeat(256), "\u{1}".repeat(256));
+                p
+            })
+            .collect();
+        let panes = panes_of(&list, "$1");
+        let m = panes_msg(&panes);
+        assert!(proto::encode(&m).len() <= proto::MAX_LINE);
+        let Out::Panes { panes: sent } = m else { panic!() };
+        assert!(!sent.is_empty() && sent.len() < panes.len());
+        assert_eq!(sent[..], panes[..sent.len()]);
+        let small = panes_of(&list[..2], "$1");
+        assert_eq!(panes_msg(&small), Out::Panes { panes: small.clone() });
+    }
+
+    #[tokio::test]
+    async fn no_message_is_written_over_the_line_limit() {
+        let mut w: Vec<u8> = Vec::new();
+        put(&mut w, &Out::Error { error: "x".repeat(70000) }).await.unwrap();
+        assert_eq!(String::from_utf8(w).unwrap(), proto::encode(&Out::Error { error: "message too large".into() }));
     }
 
     fn line(got: Got) -> Vec<u8> {
