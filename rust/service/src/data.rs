@@ -83,7 +83,8 @@ impl DataGit {
     /// One round: make sure there is a repository, commit what changed. Saves `local/sync.json`.
     pub async fn tick(&mut self) -> SyncStatus {
         match self.round().await {
-            Ok(git) => (self.status.git, self.status.error) = (git.into(), None),
+            Ok(Some(git)) => (self.status.git, self.status.error) = (git.into(), None),
+            Ok(None) => {}
             Err(Fail(step, msg)) => {
                 self.log.event(Lvl::Warn, "data_error", json!({"step": step}));
                 (self.status.git, self.status.error) =
@@ -97,12 +98,16 @@ impl DataGit {
     }
 
     /// The step that failed is the error; a fetch/push failure also carries the scrubbed last stderr line.
-    async fn round(&mut self) -> Result<&'static str, Fail> {
+    /// `Ok(None)`: nothing to do this round, keep the previous status.
+    async fn round(&mut self) -> Result<Option<&'static str>, Fail> {
         if self.run(&["--version"]).await.is_none() {
-            return Ok("missing");
+            return Ok(Some("missing"));
         }
         if !self.root.join(".git").exists() {
             self.run(&["init", "-b", "main"]).await.ok_or("init")?;
+        }
+        if self.rebase_in_progress() {
+            return Err(Fail("rebase --abort", Some("git rebase --abort failed".into())));
         }
         let committed = self.commit_changes().await?;
         let remotes = self.run(&["remote"]).await.ok_or("remote")?;
@@ -112,23 +117,31 @@ impl DataGit {
             .find(|r| *r == "origin")
             .or_else(|| remotes.lines().map(str::trim).find(|r| !r.is_empty()))
         else {
-            return Ok("local");
+            return Ok(Some("local"));
         };
         if self.conflict {
-            return Ok("conflict");
+            return Ok(Some("conflict"));
         }
         let due = committed || self.last_pull.is_none_or(|t| t.elapsed() >= self.pull_every);
         if !due {
-            return Ok(if self.status.git == "synced" { "synced" } else { "local" });
+            return Ok(None);
         }
         self.last_pull = Some(Instant::now());
-        self.sync(remote).await
+        let r = self.sync(remote).await;
+        if r.is_err() {
+            self.last_pull = None; // retry next round (R11)
+        }
+        r.map(Some)
+    }
+
+    fn rebase_in_progress(&self) -> bool {
+        ["rebase-merge", "rebase-apply"].iter().any(|d| self.root.join(".git").join(d).exists())
     }
 
     /// Fetch, rebase onto the remote branch, push (R10).
     async fn sync(&mut self, remote: &str) -> Result<&'static str, Fail> {
         let branch = self.run(&["symbolic-ref", "--short", "HEAD"]).await.ok_or("branch")?.trim().to_string();
-        let o = self.exec(&["fetch", remote]).await;
+        let o = self.exec_net(&["fetch", remote]).await;
         self.log_sync("fetch", &o);
         if !o.ok() {
             return Err(Fail::net("fetch", &o));
@@ -141,12 +154,17 @@ impl DataGit {
                 .await;
             self.log_sync("rebase", &o);
             if !o.ok() {
-                self.run(&["rebase", "--abort"]).await;
+                if !self.rebase_in_progress() {
+                    return Err(Fail("rebase", Some("git rebase failed".into())));
+                }
+                if self.run(&["rebase", "--abort"]).await.is_none() {
+                    return Err(Fail("rebase --abort", Some("git rebase --abort failed".into())));
+                }
                 self.conflict = true;
                 return Ok("conflict");
             }
         }
-        let o = self.exec(&["push", remote, &format!("HEAD:refs/heads/{branch}")]).await;
+        let o = self.exec_net(&["push", remote, &format!("HEAD:refs/heads/{branch}")]).await;
         self.log_sync("push", &o);
         if !o.ok() {
             return Err(Fail::net("push", &o));
@@ -192,6 +210,16 @@ impl DataGit {
     }
 
     async fn exec(&self, args: &[&str]) -> Out {
+        self.exec_with(args, None).await
+    }
+
+    /// fetch/push: ssh must never prompt or hang, unless the user set `core.sshCommand`.
+    async fn exec_net(&self, args: &[&str]) -> Out {
+        let configured = self.run(&["config", "--get", "core.sshCommand"]).await.unwrap_or_default();
+        self.exec_with(args, ssh_env(&configured)).await
+    }
+
+    async fn exec_with(&self, args: &[&str], ssh: Option<(&str, &str)>) -> Out {
         let mut cmd = tokio::process::Command::new(&self.git);
         cmd.current_dir(&self.root).args(["-c", "core.hooksPath=/dev/null"]).args(args);
         for (k, _) in std::env::vars_os() {
@@ -199,11 +227,16 @@ impl DataGit {
                 cmd.env_remove(k);
             }
         }
-        cmd.env("GIT_TERMINAL_PROMPT", "0").envs(self.env.iter().map(|(k, v)| (k, v)));
+        cmd.env("GIT_TERMINAL_PROMPT", "0");
+        if let Some((k, v)) = ssh {
+            cmd.env(k, v);
+        }
+        cmd.envs(self.env.iter().map(|(k, v)| (k, v)));
         cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
         match tokio::time::timeout(GIT_TIMEOUT, cmd.output()).await {
             Ok(Ok(out)) => Out {
                 code: out.status.code(),
+                timed_out: false,
                 stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
                 last_err: String::from_utf8_lossy(&out.stderr)
                     .lines()
@@ -212,13 +245,14 @@ impl DataGit {
                     .unwrap_or("")
                     .to_string(),
             },
-            _ => Out { code: None, stdout: String::new(), last_err: String::new() },
+            r => Out { code: None, timed_out: r.is_err(), stdout: String::new(), last_err: String::new() },
         }
     }
 }
 
 struct Out {
     code: Option<i32>,
+    timed_out: bool,
     stdout: String,
     /// Last non-empty stderr line; only ever shown through `scrub`, never logged.
     last_err: String,
@@ -235,7 +269,7 @@ struct Fail(&'static str, Option<String>);
 
 impl Fail {
     fn net(step: &'static str, o: &Out) -> Fail {
-        Fail(step, Some(scrub(&o.last_err)))
+        Fail(step, Some(net_message(step, o)))
     }
 }
 
@@ -243,6 +277,20 @@ impl From<&'static str> for Fail {
     fn from(step: &'static str) -> Fail {
         Fail(step, None)
     }
+}
+
+fn net_message(step: &str, o: &Out) -> String {
+    let line = scrub(&o.last_err);
+    match (line.trim().is_empty(), o.timed_out) {
+        (false, _) => line,
+        (true, true) => format!("git {step} timed out"),
+        (true, false) => format!("git {step} failed"),
+    }
+}
+
+/// The ssh command that keeps fetch/push from hanging, when the user has not chosen their own.
+fn ssh_env(configured: &str) -> Option<(&'static str, &'static str)> {
+    configured.trim().is_empty().then_some(("GIT_SSH_COMMAND", "ssh -o BatchMode=yes -o ConnectTimeout=20"))
 }
 
 /// `scheme://user[:pass]@` becomes `scheme://***@`; one line, at most 200 characters.
@@ -560,6 +608,89 @@ mod tests {
         let logged = std::fs::read_to_string(t.path().join("logs/service.log")).unwrap();
         assert!(!logged.contains("我的密码") && !logged.contains("clipboard/"), "{logged}");
         assert!(logged.contains(r#""ev":"data_sync""#) && logged.contains(r#""step":"rebase""#), "{logged}");
+    }
+
+    #[test]
+    fn net_errors_are_never_empty() {
+        let o = |timed_out| Out { code: None, timed_out, stdout: String::new(), last_err: String::new() };
+        assert_eq!(net_message("fetch", &o(false)), "git fetch failed");
+        assert_eq!(net_message("push", &o(true)), "git push timed out");
+        let mut e = o(false);
+        e.last_err = "fatal: boom".into();
+        assert_eq!(net_message("push", &e), "fatal: boom");
+    }
+
+    #[test]
+    fn ssh_is_batched_unless_the_user_chose() {
+        assert_eq!(ssh_env("").map(|e| e.0), Some("GIT_SSH_COMMAND"));
+        assert!(ssh_env("").unwrap().1.contains("BatchMode=yes"));
+        assert_eq!(ssh_env("ssh -i k\n"), None);
+    }
+
+    #[tokio::test]
+    async fn a_stuck_rebase_blocks_commits() {
+        if !have_git() {
+            return;
+        }
+        let (t, root) = prepared();
+        let mut g = DataGit::new(&opts(&root), "test-a", log(&t));
+        g.tick().await;
+        let before = git(&root, &["rev-list", "--count", "HEAD"]);
+        std::fs::create_dir(root.join(".git/rebase-merge")).unwrap();
+        std::fs::write(root.join("shared/a.json"), "{}").unwrap();
+        let s = g.tick().await;
+        assert_eq!((s.git.as_str(), s.error.as_deref()), ("error", Some("git rebase --abort failed")));
+        assert_eq!(git(&root, &["rev-list", "--count", "HEAD"]), before);
+        assert!(
+            git(&root, &["status", "--porcelain", "--untracked-files=all"]).contains("shared/a.json"),
+            "nothing staged or committed"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_rebase_that_cannot_start_is_an_error_and_retried() {
+        if !have_git() {
+            return;
+        }
+        let (t, root) = prepared();
+        let b = bare(&t);
+        let o = with_remote(&root, b.to_str().unwrap());
+        let mut g = DataGit::new(&o, "test-a", log(&t));
+        assert_eq!(g.tick().await.git, "synced");
+        let other = other_device(&t, &b);
+        std::fs::create_dir_all(other.join("shared/sub")).unwrap();
+        std::fs::write(other.join("shared/sub/x.json"), "theirs").unwrap();
+        tgit(&other, &["add", "shared/sub/x.json"]);
+        tgit(&other, &["commit", "-m", "x"]);
+        tgit(&other, &["push", "origin", "HEAD:refs/heads/main"]);
+        // an empty, read-only directory is not committed, but blocks checking out their file
+        std::fs::create_dir(root.join("shared/sub")).unwrap();
+        std::fs::set_permissions(root.join("shared/sub"), std::os::unix::fs::PermissionsExt::from_mode(0o555)).unwrap();
+        std::fs::write(root.join("shared/a.json"), "{}").unwrap();
+        let s = g.tick().await;
+        assert_eq!((s.git.as_str(), s.error.as_deref()), ("error", Some("git rebase failed")), "{s:?}");
+        assert!(!root.join(".git/rebase-merge").exists() && !root.join(".git/rebase-apply").exists());
+        std::fs::set_permissions(root.join("shared/sub"), std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        assert_eq!(g.tick().await.git, "synced", "retried, not stopped");
+    }
+
+    #[tokio::test]
+    async fn a_failed_fetch_is_retried_next_round_and_a_quiet_round_keeps_status() {
+        if !have_git() {
+            return;
+        }
+        let (t, root) = prepared();
+        let b = bare(&t);
+        let mut o = with_remote(&root, "/nonexistent/remote.git");
+        o.pull_every = Duration::from_secs(3600);
+        let mut g = DataGit::new(&o, "test-a", log(&t));
+        assert_eq!(g.tick().await.git, "error");
+        git(&root, &["remote", "set-url", "origin", b.to_str().unwrap()]);
+        let s = g.tick().await;
+        assert_eq!(s.git, "synced", "retried although pull_every has not passed");
+        let again = g.tick().await;
+        assert_eq!(again, s, "nothing due, status kept");
     }
 
     #[test]
