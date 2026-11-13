@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use rapp_net::log::Log;
 use rapp_relay::{Opts, Relay, DEFAULT_LISTEN, TOKEN_TTL};
 
-const USAGE: &str = "usage: rapp-relay --key <relay key> [--listen 0.0.0.0:21116] [--db relay.json] [--debug]\n       rapp-relay --version";
+const USAGE: &str = "usage: rapp-relay --key <relay key> [--listen 0.0.0.0:22026] [--db relay.json] [--debug]\n       rapp-relay --version";
 
 fn parse(args: &[String]) -> Result<Opts> {
     let (mut key, mut listen, mut db) = (None, DEFAULT_LISTEN.to_string(), "relay.json".to_string());

@@ -60,7 +60,7 @@ async fn registers_and_reports_status() {
 #[tokio::test]
 async fn first_start_generates_secret_and_password() {
     let (home, bins) = (tempfile::tempdir().unwrap(), bins());
-    // Only the ports are preset (never the real 21118/21119); everything else is generated.
+    // Only the ports are preset (never the real 22028/22029); everything else is generated.
     rapp_net::config::write_json(&home.path().join("service.json"), &json!({"port":0,"ipc_port":0})).unwrap();
     let svc = start_service(home.path(), bins.path(), Duration::from_secs(60)).await;
     let cfg: Value = serde_json::from_slice(&std::fs::read(home.path().join("service.json")).unwrap()).unwrap();
@@ -79,7 +79,7 @@ async fn first_start_generates_secret_and_password() {
     }
     let st = ipc_once(&svc, home.path(), json!({"cmd":"status"})).await;
     assert_eq!(st["relay"], "off");
-    // Without a relay B reaches A by `id@ip`: one per local IPv4, port shown as it is not 21118.
+    // Without a relay B reaches A by `id@ip`: one per local IPv4, port shown as it is not 22028.
     let want_tail = format!(":{}", svc.port);
     let lan_ids = st["lan_ids"].as_array().expect("lan_ids");
     for l in lan_ids {

@@ -209,7 +209,7 @@ class _LocalSectionState extends State<LocalSection> {
     final relay = TextEditingController(text: '${cfg['relay'] ?? ''}');
     final key = TextEditingController(text: '${cfg['key'] ?? ''}');
     final ok = await _dialog('中继设置', [
-      TextField(controller: relay, autofocus: true, decoration: const InputDecoration(labelText: '地址，例如 vps:21116')),
+      TextField(controller: relay, autofocus: true, decoration: const InputDecoration(labelText: '地址，例如 vps:22026')),
       TextField(controller: key, decoration: const InputDecoration(labelText: 'Key')),
     ]);
     if (ok == true) await _apply(() => m.setRelay(relay.text.trim(), key.text.trim()));

@@ -35,7 +35,7 @@ void main() {
     t = FakeTransport();
     hub = HubClient(t);
     final hosts = <Map<String, dynamic>>[
-      {'id': '111', 'name': 'mini', 'lan': ['127.0.0.1:21118', '192.168.2.7:21118']},
+      {'id': '111', 'name': 'mini', 'lan': ['127.0.0.1:22028', '192.168.2.7:22028']},
       {'id': '222', 'name': 'far'},
     ];
     t.onSend = (cmd) {
@@ -137,8 +137,8 @@ void main() {
 
   test('screenShareHost picks a reachable host part', () {
     expect(screenShareHost(const ['127.0.0.1:1', '[::1]:2']), isNull);
-    expect(screenShareHost(const ['[fd7a::5]:21118']), 'fd7a::5');
-    expect(screenShareHost(const ['100.64.0.9:21118']), '100.64.0.9');
+    expect(screenShareHost(const ['[fd7a::5]:22028']), 'fd7a::5');
+    expect(screenShareHost(const ['100.64.0.9:22028']), '100.64.0.9');
     expect(screenShareHost(const []), isNull);
   });
 

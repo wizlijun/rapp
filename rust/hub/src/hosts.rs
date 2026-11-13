@@ -124,10 +124,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let hosts = Hosts::load(dir.path()).unwrap();
         hosts.upsert(host("a")).unwrap();
-        hosts.upsert(Host { id: "2".into(), name: "b".into(), password: "secret".into(), lan: vec!["192.168.1.5:21118".into()] }).unwrap();
+        hosts.upsert(Host { id: "2".into(), name: "b".into(), password: "secret".into(), lan: vec!["192.168.1.5:22028".into()] }).unwrap();
         assert_eq!(
             hosts.summary(),
-            json!([{"id": "1", "name": "a"}, {"id": "2", "name": "b", "lan": ["192.168.1.5:21118"]}])
+            json!([{"id": "1", "name": "a"}, {"id": "2", "name": "b", "lan": ["192.168.1.5:22028"]}])
         );
         assert!(!hosts.summary().to_string().contains("secret"));
     }

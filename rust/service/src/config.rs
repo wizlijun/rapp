@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 pub const DEFAULT_PORT: u16 = rapp_net::addr::DEFAULT_PEER_PORT;
-pub const DEFAULT_IPC_PORT: u16 = 21119;
+pub const DEFAULT_IPC_PORT: u16 = 22029;
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Config {

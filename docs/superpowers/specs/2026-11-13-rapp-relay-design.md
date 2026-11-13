@@ -149,7 +149,7 @@ relay 不知道流里是什么。远程会话、文件、以后的数据服务�
 
 | 层 | 在谁和谁之间 | 是什么 | 标识 |
 |---|---|---|---|
-| L1 传输 | 设备 ↔ relay；设备 ↔ 设备（直连时） | QUIC，自带 TLS 1.3。双方都出示证书 | relay 默认 `22026/udp`；设备 `21118/udp` |
+| L1 传输 | 设备 ↔ relay；设备 ↔ 设备（直连时） | QUIC，自带 TLS 1.3。双方都出示证书 | relay 默认 `22026/udp`；设备 `22028/udp` |
 | L2 relay 协议 | 设备 ↔ relay | 每个请求一条流：一行 JSON 请求，一行 JSON 回复（§8） | ALPN `rapp-relay/2` |
 | L3 端到端 | 设备 ↔ 设备 | TLS 1.3，双方互相验证设备密钥。直连时就是 L1 的那次握手；经中继时是在接好的流里面再握一次 | 直连 ALPN `rapp/2`；流内 ALPN `rapp-e2e/1` |
 | L4 设备请求 | 设备 ↔ 设备 | 互信证明、传 key，以及 rapp 的业务请求（列 app、打开 app……）。本文只定前两个（§7） | — |
@@ -319,8 +319,8 @@ key 是唯一的门，所以要能在不需要的时候把门关上。默认都�
 | 请求 | 谁发 | 内容 | 回复 |
 |---|---|---|---|
 | `enroll` | 没入网的设备 | `{"op":"enroll","join":"…"}` | `{"ok":true,"relay":{"version","features":[…]}}`；错误 `bad key`、`closed`、`limit` |
-| `register` | 被控的一侧 | `{"op":"register","id":"123456789","lan":["192.168.1.5:21118"]}` | `{"ok":true,"id":"…"}`；错误 `id taken`、`not enrolled` |
-| `connect` | 操作的一侧 | `{"op":"connect","id":"…"}` | `{"ok":true,"lan":[…],"public":"1.2.3.4:21118"}`；错误 `unknown id`、`offline`、`locked, retry in 12s`、`not enrolled` |
+| `register` | 被控的一侧 | `{"op":"register","id":"123456789","lan":["192.168.1.5:22028"]}` | `{"ok":true,"id":"…"}`；错误 `id taken`、`not enrolled` |
+| `connect` | 操作的一侧 | `{"op":"connect","id":"…"}` | `{"ok":true,"lan":[…],"public":"1.2.3.4:22028"}`；错误 `unknown id`、`offline`、`locked, retry in 12s`、`not enrolled` |
 | `relay` | 操作的一侧 | `{"op":"relay","id":"…"}` | 成功时不回 JSON，直接对接；失败回 `unknown id`、`offline` |
 
 relay 发给设备：
@@ -531,7 +531,7 @@ relay 只能跑在 Linux 主机上：Mac 和 Windows 上的 Docker 跑在虚拟�
 
 | 步 | 做什么 | 做完以后 | 用户要做的 |
 |---|---|---|---|
-| 〇 | 在 VPS 上启动新 relay 的容器，用另一个端口（旧 relay 占着 21116）。运行 `rapp-relay key` 拿到 key。旧 relay 不动 | 两个 relay 同时在跑 | 启动容器；放行新端口；存好 key |
+| 〇 | 在 VPS 上启动新 relay 的容器，用另一个端口（两个 relay 默认都是 22026，不能共用）。运行 `rapp-relay key` 拿到 key。旧 relay 不动 | 两个 relay 同时在跑 | 启动容器；放行新端口；存好 key |
 | 一 | 设备升级到过渡版本：里面有新旧两套连接层。在手边的一台设备上填新的接入点和 key。它每经旧的路连上一台过渡版本的设备，就在端到端加密的连接里把接入点和 key 发过去（对方凭现有的密码确认它是老相识）。拿到 key 的设备接入新 relay，之后互相按 §7 认识 | key 传遍了所有连得上的设备。已经互相认识的设备之间只走新的路 | 升级各设备；在一台设备上填一次。界面上每台主机显示"新"或"旧" |
 | 二 | 所有主机都显示"新"以后，停掉旧 relay | 只剩新 relay。R1–R3 成立 | 停掉旧服务，关掉旧端口 |
 | 三 | 设备升级到去掉旧连接层的版本。密码从界面和配置里消失 | 代码里不再有不校验证书、明文密码、令牌 | 升级各设备 |

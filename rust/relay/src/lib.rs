@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-pub const DEFAULT_LISTEN: &str = "0.0.0.0:21116";
+pub const DEFAULT_LISTEN: &str = "0.0.0.0:22026";
 pub const TOKEN_TTL: Duration = Duration::from_secs(24 * 3600);
 
 pub struct Opts {
