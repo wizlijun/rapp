@@ -144,7 +144,7 @@ class TopBar extends StatelessWidget {
                     multi ? () => state.step(1) : null,
                   ),
                   SizedBox(width: gap),
-                  if (tabs != null && tabs.tabs.length >= 2)
+                  if (tabs != null && (tabs.tabs.length >= 2 || rs!.hidden.isNotEmpty))
                     Flexible(
                       child: SingleChildScrollView(
                         scrollDirection: Axis.horizontal,
@@ -161,8 +161,21 @@ class TopBar extends StatelessWidget {
                                     label: w.title.isEmpty ? cur!.appName : w.title,
                                     selected: w.id == tabs.current,
                                     onTap: () => state.selectWindow(w.id),
+                                    onSecondaryTap: (p) => _tabMenu(context, p, w.id),
                                   ),
                                   ),
+                                ),
+                              ),
+                            if (rs!.hidden.isNotEmpty)
+                              Builder(
+                                builder: (chipCtx) => TabChip(
+                                  key: const Key('hidden-tabs'),
+                                  label: '已隐藏 ${rs.hidden.length} 个',
+                                  selected: rs.hiddenFocused,
+                                  onTap: () {
+                                    final box = chipCtx.findRenderObject() as RenderBox;
+                                    _hiddenMenu(context, box.localToGlobal(Offset(0, box.size.height)));
+                                  },
                                 ),
                               ),
                           ],
@@ -218,6 +231,54 @@ class TopBar extends StatelessWidget {
         );
       },
     );
+  }
+
+  RelativeRect _at(BuildContext context, Offset p) {
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    return RelativeRect.fromLTRB(p.dx, p.dy, overlay.size.width - p.dx, overlay.size.height - p.dy);
+  }
+
+  Future<void> _tabMenu(BuildContext context, Offset p, int window) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final pick = await showMenu<Object?>(
+      context: context,
+      position: _at(context, p),
+      items: [
+        PopupMenuItem<Object?>(value: 'hide', enabled: !state.isMainWindow(window), child: const Text('隐藏这类窗口')),
+        const PopupMenuItem<Object?>(value: 'noComposer', child: Text('这个窗口不要输入区')),
+      ],
+    );
+    if (pick == null) return;
+    final undo = pick == 'hide' ? state.hideLike(window) : state.noComposerLike(window);
+    if (undo == null) return;
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(SnackBar(
+      content: Text(pick == 'hide' ? '已隐藏，可在 app 配置里改' : '已关掉这个窗口的输入区，可在 app 配置里改'),
+      action: SnackBarAction(label: '撤销', onPressed: undo),
+    ));
+  }
+
+  Future<void> _hiddenMenu(BuildContext context, Offset p) async {
+    final rs = state.currentRemote;
+    if (rs == null) return;
+    final app = state.current?.appName ?? '';
+    final pick = await showMenu<(String, int)>(
+      context: context,
+      position: _at(context, p),
+      items: [
+        for (final w in rs.hidden) ...[
+          PopupMenuItem<(String, int)>(enabled: false, child: Text(w.title.isEmpty ? app : w.title)),
+          PopupMenuItem<(String, int)>(value: ('show', w.id), child: const Text('这次显示')),
+          PopupMenuItem<(String, int)>(value: ('unhide', w.id), child: const Text('不再隐藏')),
+        ],
+      ],
+    );
+    if (pick == null) return;
+    if (pick.$1 == 'show') {
+      state.showHiddenOnce(pick.$2);
+    } else {
+      state.unhide(pick.$2);
+    }
   }
 
   String _sub(SessionEntry e) {
