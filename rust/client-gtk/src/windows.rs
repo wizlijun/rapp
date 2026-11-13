@@ -8,6 +8,21 @@ use std::{
     rc::Rc,
     time::Duration,
 };
+// Create parents before children even when the host lists the topmost child first.
+fn parent_order(mut pending: Vec<p::Window>) -> Vec<p::Window> {
+    pending.reverse();
+    let mut ordered = Vec::with_capacity(pending.len());
+    while !pending.is_empty() {
+        let Some(i) = pending
+            .iter()
+            .position(|w| !pending.iter().any(|other| other.id == w.parent))
+        else {
+            break;
+        };
+        ordered.push(pending.remove(i));
+    }
+    ordered
+}
 struct View {
     shell: gtk::Widget,
     area: gtk::DrawingArea,
@@ -41,7 +56,7 @@ impl Windows {
         }
     }
     pub fn sync(&mut self) {
-        let table = self.state.borrow().windows.clone();
+        let table = parent_order(self.state.borrow().windows.clone());
         // Popovers must be unparented before their parent window is destroyed.
         for popup in [true, false] {
             let gone: Vec<_> = self
@@ -533,4 +548,38 @@ fn flags(mods: gdk::ModifierType) -> u64 {
     } else {
         0
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn window(id: u32, parent: u32) -> p::Window {
+        p::Window {
+            id,
+            parent,
+            kind: if parent == 0 { 0 } else { 4 },
+            flags: 0,
+            rect: p::Rect {
+                x: 0.,
+                y: 0.,
+                w: 100.,
+                h: 100.,
+            },
+            title_bar: 0.,
+            title: String::new(),
+        }
+    }
+    #[test]
+    fn topmost_nested_popup_is_created_after_its_ancestors() {
+        let ordered = parent_order(vec![window(4, 3), window(3, 1), window(2, 0), window(1, 0)]);
+        assert_eq!(
+            ordered.iter().map(|w| w.id).collect::<Vec<_>>(),
+            vec![1, 2, 3, 4]
+        );
+    }
+    #[test]
+    fn cyclic_parent_chain_does_not_prevent_independent_windows() {
+        let ordered = parent_order(vec![window(1, 2), window(2, 1), window(3, 0)]);
+        assert_eq!(ordered.iter().map(|w| w.id).collect::<Vec<_>>(), vec![3]);
+    }
 }

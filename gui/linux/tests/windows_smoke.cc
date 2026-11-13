@@ -20,11 +20,21 @@ int main(int argc, char **argv) {
     s.sid = 17;
     gtk_text_buffer_set_text(s.buffer, "中文 draft", -1);
     s.blocks.push_back({1, "image.png"});
-    s.windows[1] = create_window(&s, 1, false, nullptr);
-    s.windows[2] = create_window(&s, 2, false, nullptr);
+    g_autoptr(FlValue) table = fl_value_new_list();
+    for (auto pair : {std::pair<int, int>{4, 3}, {3, 1}, {2, 0}, {1, 0}}) {
+      auto *row = fl_value_new_map();
+      setint(row, "id", pair.first);
+      setint(row, "parent", pair.second);
+      fl_value_append_take(table, row);
+    }
+    for (auto *row : ordered_windows(table)) {
+      int id = integer(get(row, "id")), parent = integer(get(row, "parent"));
+      assert(!parent || s.windows.count(parent));
+      s.windows[id] = create_window(&s, id, parent != 0,
+                                    parent ? s.windows[parent].get() : nullptr);
+    }
+    assert(s.windows.size() == 4);
     auto *parent = s.windows[1].get();
-    s.windows[3] = create_window(&s, 3, true, parent);
-    s.windows[4] = create_window(&s, 4, true, s.windows[3].get());
     s.w = 4;
     s.h = 4;
     s.pixels.assign(4 * 4 * 4, 255);

@@ -36,6 +36,30 @@ void setint(FlValue *m, const char *k, int64_t v) {
 void settext(FlValue *m, const char *k, const std::string &v) {
   put(m, k, fl_value_new_string(v.c_str()));
 }
+// The host sends front-to-back, so a nested popup can precede its parent.
+// Create back-to-front with parents first; ignore cyclic parent chains.
+std::vector<FlValue *> ordered_windows(FlValue *table) {
+  std::vector<FlValue *> pending, ordered;
+  if (!table)
+    return ordered;
+  for (size_t i = fl_value_get_length(table); i > 0; i--)
+    pending.push_back(fl_value_get_list_value(table, i - 1));
+  while (!pending.empty()) {
+    auto next =
+        std::find_if(pending.begin(), pending.end(), [&](FlValue *window) {
+          auto parent = integer(get(window, "parent"));
+          return std::none_of(pending.begin(), pending.end(),
+                              [parent](FlValue *other) {
+                                return integer(get(other, "id")) == parent;
+                              });
+        });
+    if (next == pending.end())
+      break;
+    ordered.push_back(*next);
+    pending.erase(next);
+  }
+  return ordered;
+}
 struct Session;
 struct Window {
   Session *session;
@@ -808,58 +832,56 @@ bool rapp_windows_method(RappWindows *manager, FlMethodCall *call) {
   } else if (method == "windows") {
     auto *table = get(args, "windows");
     std::vector<int> ids;
-    if (table)
-      for (int pass = 0; pass < 2; pass++)
-        for (size_t i = 0; i < fl_value_get_length(table); i++) {
-          auto *m = fl_value_get_list_value(table, i);
-          std::string kind = text(get(m, "kind"));
-          bool popup =
-              kind != "normal" && kind != "dialog" && kind != "floating";
-          if (popup != (pass == 1))
+    const auto ordered = ordered_windows(table);
+    for (int pass = 0; pass < 2; pass++)
+      for (auto *m : ordered) {
+        std::string kind = text(get(m, "kind"));
+        bool popup = kind != "normal" && kind != "dialog" && kind != "floating";
+        if (popup != (pass == 1))
+          continue;
+        int id = integer(get(m, "id")), parent_id = integer(get(m, "parent"));
+        Window *parent = nullptr;
+        if (popup) {
+          auto it = s->windows.find(parent_id);
+          if (it != s->windows.end())
+            parent = it->second.get();
+          if (!parent)
             continue;
-          int id = integer(get(m, "id")), parent_id = integer(get(m, "parent"));
-          Window *parent = nullptr;
-          if (popup) {
-            auto it = s->windows.find(parent_id);
-            if (it != s->windows.end())
-              parent = it->second.get();
-            if (!parent)
-              continue;
-          }
-          ids.push_back(id);
-          auto it = s->windows.find(id);
-          if (it == s->windows.end()) {
-            s->windows[id] = create_window(s, id, popup, parent);
-            it = s->windows.find(id);
-          }
-          auto *w = it->second.get();
-          bool initial = w->w == 1 && w->h == 1;
-          w->parent = parent_id;
-          w->x = number(get(m, "x"));
-          w->y = number(get(m, "y"));
-          w->w = number(get(m, "w"));
-          w->h = number(get(m, "h"));
-          w->bar = number(get(m, "titleBar"));
-          auto *r = get(m, "resizable");
-          w->resizable = r && fl_value_get_bool(r);
-          if (!popup) {
-            gtk_window_set_title(GTK_WINDOW(w->shell), text(get(m, "title")));
-            gtk_window_set_resizable(GTK_WINDOW(w->shell), w->resizable);
-            if (initial)
-              gtk_window_set_default_size(
-                  GTK_WINDOW(w->shell),
-                  std::clamp(static_cast<int>(w->w), 240, 1200),
-                  std::clamp(static_cast<int>(w->h + 130), 240, 900));
-          } else {
-            GdkRectangle rect{static_cast<int>(w->x - parent->x + w->w / 2),
-                              static_cast<int>(w->y - parent->y - parent->bar),
-                              1, 1};
-            gtk_popover_set_pointing_to(GTK_POPOVER(w->shell), &rect);
-            gtk_widget_set_size_request(w->area, w->w, w->h - w->bar);
-          }
-          gtk_widget_show_all(w->shell);
-          gtk_widget_queue_draw(w->area);
         }
+        ids.push_back(id);
+        auto it = s->windows.find(id);
+        if (it == s->windows.end()) {
+          s->windows[id] = create_window(s, id, popup, parent);
+          it = s->windows.find(id);
+        }
+        auto *w = it->second.get();
+        bool initial = w->w == 1 && w->h == 1;
+        w->parent = parent_id;
+        w->x = number(get(m, "x"));
+        w->y = number(get(m, "y"));
+        w->w = number(get(m, "w"));
+        w->h = number(get(m, "h"));
+        w->bar = number(get(m, "titleBar"));
+        auto *r = get(m, "resizable");
+        w->resizable = r && fl_value_get_bool(r);
+        if (!popup) {
+          gtk_window_set_title(GTK_WINDOW(w->shell), text(get(m, "title")));
+          gtk_window_set_resizable(GTK_WINDOW(w->shell), w->resizable);
+          if (initial)
+            gtk_window_set_default_size(
+                GTK_WINDOW(w->shell),
+                std::clamp(static_cast<int>(w->w), 240, 1200),
+                std::clamp(static_cast<int>(w->h + 130), 240, 900));
+        } else {
+          GdkRectangle rect{static_cast<int>(w->x - parent->x + w->w / 2),
+                            static_cast<int>(w->y - parent->y - parent->bar), 1,
+                            1};
+          gtk_popover_set_pointing_to(GTK_POPOVER(w->shell), &rect);
+          gtk_widget_set_size_request(w->area, w->w, w->h - w->bar);
+        }
+        gtk_widget_show_all(w->shell);
+        gtk_widget_queue_draw(w->area);
+      }
     // Destroy popups first; their GTK parent may otherwise destroy them twice.
     for (int pass = 0; pass < 2; pass++)
       for (auto it = s->windows.begin(); it != s->windows.end();) {
