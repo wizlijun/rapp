@@ -3,6 +3,7 @@
 
 use anyhow::Result;
 use rapp_net::config::{device, local, read_json, write_json, write_private};
+use rapp_net::datadir::README_MARKER;
 use rapp_net::log::{timestamp, Log, Lvl};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -15,6 +16,8 @@ use tokio::task::JoinHandle;
 pub const SYNC_FILE: &str = "sync.json";
 /// Longest a single git command may run.
 const GIT_TIMEOUT: Duration = Duration::from_secs(120);
+/// Paths (relative to the root, need not exist) that must be git-ignored before anything is added (D4).
+const SECRETS: [&str; 4] = ["local/service.json", "local/hosts.json", "local/ipc.token", "files/x"];
 
 #[derive(Clone, Debug)]
 pub struct DataOpts {
@@ -103,6 +106,9 @@ impl DataGit {
         if self.run(&["--version"]).await.is_none() {
             return Ok(Some("missing"));
         }
+        if !is_rapp_root(&self.root) {
+            return Err(Fail("readme", Some("这个文件夹不是 rapp 的数据目录".into())));
+        }
         if !self.root.join(".git").exists() {
             self.run(&["init", "-b", "main"]).await.ok_or("init")?;
         }
@@ -177,11 +183,16 @@ impl DataGit {
         self.log.event(Lvl::Info, "data_sync", json!({"ok": o.ok(), "step": step, "code": o.code}));
     }
 
-    async fn commit_changes(&mut self) -> Result<bool, &'static str> {
+    async fn commit_changes(&mut self) -> Result<bool, Fail> {
         let changed = self.run(&["status", "--porcelain", "--untracked-files=all"]).await.ok_or("status")?;
         let files = changed.lines().filter(|l| !l.is_empty()).count();
         if files == 0 {
             return Ok(false);
+        }
+        for path in SECRETS {
+            if self.run(&["check-ignore", "-q", path]).await.is_none() {
+                return Err(Fail("check-ignore", Some("机密文件没被 .gitignore 挡住，已停止自动保存".into())));
+            }
         }
         self.run(&["add", "-A"]).await.ok_or("add")?;
         let (email, message) = (format!("user.email={}", self.email), self.message.clone());
@@ -286,6 +297,12 @@ fn net_message(step: &str, o: &Out) -> String {
         (true, true) => format!("git {step} timed out"),
         (true, false) => format!("git {step} failed"),
     }
+}
+
+/// `README.md` starts with rapp's marker; anything else is someone else's folder and git stays away.
+fn is_rapp_root(root: &Path) -> bool {
+    std::fs::read_to_string(root.join("README.md"))
+        .is_ok_and(|t| t.lines().next().is_some_and(|l| l.trim_end() == README_MARKER))
 }
 
 /// The ssh command that keeps fetch/push from hanging, when the user has not chosen their own.
@@ -418,6 +435,54 @@ mod tests {
         DataGit::new(&opts(&root), "test-a", log(&t)).tick().await;
         let files = git(&root, &["ls-files"]);
         assert_eq!(files.lines().collect::<Vec<_>>(), [".gitignore", "README.md", "agent/README.md", "shared/ok.json"]);
+    }
+
+    #[tokio::test]
+    async fn a_root_that_is_not_rapps_is_never_committed() {
+        if !have_git() {
+            return;
+        }
+        let t = tempfile::tempdir().unwrap();
+        let root = t.path().join("rapp");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("README.md"), "# my project\n").unwrap();
+        std::fs::write(root.join(".gitignore"), "target/\n").unwrap();
+        git(&root, &["init", "-b", "main"]);
+        tgit(&root, &["add", "README.md", ".gitignore"]);
+        tgit(&root, &["commit", "-m", "mine"]);
+        prepare(&root, &t.path().join("no-legacy")).unwrap();
+        std::fs::write(root.join("local/service.json"), "{}").unwrap();
+        std::fs::write(root.join("local/hosts.json"), "[]").unwrap();
+        let s = DataGit::new(&opts(&root), "test-a", log(&t)).tick().await;
+        assert_eq!((s.git.as_str(), s.error.as_deref()), ("error", Some("这个文件夹不是 rapp 的数据目录")));
+        assert_eq!(git(&root, &["log", "--format=%s"]).trim(), "mine");
+        assert!(!git(&root, &["ls-files"]).contains("local/"));
+        let logged = std::fs::read_to_string(t.path().join("logs/service.log")).unwrap_or_default();
+        assert!(!logged.contains("service.json") && !logged.contains("local/"), "{logged}");
+        let bare_dir = t.path().join("plain");
+        prepare(&bare_dir, &t.path().join("no-legacy")).unwrap();
+        std::fs::write(bare_dir.join("README.md"), "# notes\n").unwrap();
+        assert_eq!(DataGit::new(&opts(&bare_dir), "test-a", log(&t)).tick().await.git, "error");
+        assert!(!bare_dir.join(".git").exists(), "no git init in a folder that is not rapp's");
+    }
+
+    #[tokio::test]
+    async fn a_gitignore_that_lets_secrets_through_stops_commits() {
+        if !have_git() {
+            return;
+        }
+        let (t, root) = prepared();
+        std::fs::write(root.join(".gitignore"), "files/\n").unwrap();
+        std::fs::write(root.join("local/service.json"), "{}").unwrap();
+        let s = DataGit::new(&opts(&root), "test-a", log(&t)).tick().await;
+        assert_eq!(
+            (s.git.as_str(), s.error.as_deref()),
+            ("error", Some("机密文件没被 .gitignore 挡住，已停止自动保存"))
+        );
+        assert_eq!(git(&root, &["rev-list", "--all", "--count"]).trim(), "0");
+        assert_eq!(git(&root, &["ls-files"]).trim(), "");
+        let logged = std::fs::read_to_string(t.path().join("logs/service.log")).unwrap_or_default();
+        assert!(!logged.contains("service.json") && !logged.contains("local/"), "{logged}");
     }
 
     #[tokio::test]
