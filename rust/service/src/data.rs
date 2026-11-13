@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 use tokio::task::JoinHandle;
 
 /// This device's sync state, in `local/`; the GUI reads it.
@@ -55,6 +55,10 @@ pub struct DataGit {
     message: String,
     log: Log,
     status: SyncStatus,
+    pull_every: Duration,
+    last_pull: Option<Instant>,
+    /// A rebase hit a conflict; only commit until the next start (R11).
+    conflict: bool,
 }
 
 impl DataGit {
@@ -70,6 +74,9 @@ impl DataGit {
             email,
             log,
             status,
+            pull_every: opts.pull_every,
+            last_pull: None,
+            conflict: false,
         }
     }
 
@@ -77,9 +84,10 @@ impl DataGit {
     pub async fn tick(&mut self) -> SyncStatus {
         match self.round().await {
             Ok(git) => (self.status.git, self.status.error) = (git.into(), None),
-            Err(step) => {
+            Err(Fail(step, msg)) => {
                 self.log.event(Lvl::Warn, "data_error", json!({"step": step}));
-                (self.status.git, self.status.error) = ("error".into(), Some(format!("git {step} failed")));
+                (self.status.git, self.status.error) =
+                    ("error".into(), Some(msg.unwrap_or_else(|| format!("git {step} failed"))));
             }
         }
         if let Err(e) = write_json(&local(&self.root).join(SYNC_FILE), &self.status) {
@@ -88,23 +96,74 @@ impl DataGit {
         self.status.clone()
     }
 
-    /// The step that failed is the error.
-    async fn round(&mut self) -> Result<&'static str, &'static str> {
+    /// The step that failed is the error; a fetch/push failure also carries the scrubbed last stderr line.
+    async fn round(&mut self) -> Result<&'static str, Fail> {
         if self.run(&["--version"]).await.is_none() {
             return Ok("missing");
         }
         if !self.root.join(".git").exists() {
             self.run(&["init", "-b", "main"]).await.ok_or("init")?;
         }
-        self.commit_changes().await?;
-        Ok("local")
+        let committed = self.commit_changes().await?;
+        let remotes = self.run(&["remote"]).await.ok_or("remote")?;
+        let Some(remote) = remotes
+            .lines()
+            .map(str::trim)
+            .find(|r| *r == "origin")
+            .or_else(|| remotes.lines().map(str::trim).find(|r| !r.is_empty()))
+        else {
+            return Ok("local");
+        };
+        if self.conflict {
+            return Ok("conflict");
+        }
+        let due = committed || self.last_pull.is_none_or(|t| t.elapsed() >= self.pull_every);
+        if !due {
+            return Ok(if self.status.git == "synced" { "synced" } else { "local" });
+        }
+        self.last_pull = Some(Instant::now());
+        self.sync(remote).await
     }
 
-    async fn commit_changes(&mut self) -> Result<(), &'static str> {
+    /// Fetch, rebase onto the remote branch, push (R10).
+    async fn sync(&mut self, remote: &str) -> Result<&'static str, Fail> {
+        let branch = self.run(&["symbolic-ref", "--short", "HEAD"]).await.ok_or("branch")?.trim().to_string();
+        let o = self.exec(&["fetch", remote]).await;
+        self.log_sync("fetch", &o);
+        if !o.ok() {
+            return Err(Fail::net("fetch", &o));
+        }
+        let theirs = format!("{remote}/{branch}");
+        if self.run(&["rev-parse", "--verify", "-q", &format!("refs/remotes/{theirs}")]).await.is_some() {
+            let email = format!("user.email={}", self.email);
+            let o = self
+                .exec(&["-c", "user.name=rapp", "-c", &email, "-c", "commit.gpgsign=false", "rebase", &theirs])
+                .await;
+            self.log_sync("rebase", &o);
+            if !o.ok() {
+                self.run(&["rebase", "--abort"]).await;
+                self.conflict = true;
+                return Ok("conflict");
+            }
+        }
+        let o = self.exec(&["push", remote, &format!("HEAD:refs/heads/{branch}")]).await;
+        self.log_sync("push", &o);
+        if !o.ok() {
+            return Err(Fail::net("push", &o));
+        }
+        self.status.last_sync = Some(timestamp(SystemTime::now()));
+        Ok("synced")
+    }
+
+    fn log_sync(&self, step: &str, o: &Out) {
+        self.log.event(Lvl::Info, "data_sync", json!({"ok": o.ok(), "step": step, "code": o.code}));
+    }
+
+    async fn commit_changes(&mut self) -> Result<bool, &'static str> {
         let changed = self.run(&["status", "--porcelain", "--untracked-files=all"]).await.ok_or("status")?;
         let files = changed.lines().filter(|l| !l.is_empty()).count();
         if files == 0 {
-            return Ok(());
+            return Ok(false);
         }
         self.run(&["add", "-A"]).await.ok_or("add")?;
         let (email, message) = (format!("user.email={}", self.email), self.message.clone());
@@ -123,11 +182,16 @@ impl DataGit {
         self.run(&args).await.ok_or("commit")?;
         self.status.last_commit = Some(timestamp(SystemTime::now()));
         self.log.event(Lvl::Info, "data_commit", json!({"files": files}));
-        Ok(())
+        Ok(true)
     }
 
     /// Runs git in the root; its stdout when it exits 0, None otherwise (output is never logged).
     async fn run(&self, args: &[&str]) -> Option<String> {
+        let o = self.exec(args).await;
+        o.ok().then_some(o.stdout)
+    }
+
+    async fn exec(&self, args: &[&str]) -> Out {
         let mut cmd = tokio::process::Command::new(&self.git);
         cmd.current_dir(&self.root).args(["-c", "core.hooksPath=/dev/null"]).args(args);
         for (k, _) in std::env::vars_os() {
@@ -136,10 +200,69 @@ impl DataGit {
             }
         }
         cmd.env("GIT_TERMINAL_PROMPT", "0").envs(self.env.iter().map(|(k, v)| (k, v)));
-        cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
-        let out = tokio::time::timeout(GIT_TIMEOUT, cmd.output()).await.ok()?.ok()?;
-        out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+        cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
+        match tokio::time::timeout(GIT_TIMEOUT, cmd.output()).await {
+            Ok(Ok(out)) => Out {
+                code: out.status.code(),
+                stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+                last_err: String::from_utf8_lossy(&out.stderr)
+                    .lines()
+                    .rev()
+                    .find(|l| !l.trim().is_empty())
+                    .unwrap_or("")
+                    .to_string(),
+            },
+            _ => Out { code: None, stdout: String::new(), last_err: String::new() },
+        }
     }
+}
+
+struct Out {
+    code: Option<i32>,
+    stdout: String,
+    /// Last non-empty stderr line; only ever shown through `scrub`, never logged.
+    last_err: String,
+}
+
+impl Out {
+    fn ok(&self) -> bool {
+        self.code == Some(0)
+    }
+}
+
+/// Why a round failed: the step, and for network steps the scrubbed message for `sync.json`.
+struct Fail(&'static str, Option<String>);
+
+impl Fail {
+    fn net(step: &'static str, o: &Out) -> Fail {
+        Fail(step, Some(scrub(&o.last_err)))
+    }
+}
+
+impl From<&'static str> for Fail {
+    fn from(step: &'static str) -> Fail {
+        Fail(step, None)
+    }
+}
+
+/// `scheme://user[:pass]@` becomes `scheme://***@`; one line, at most 200 characters.
+pub fn scrub(s: &str) -> String {
+    let mut out = String::new();
+    let mut rest = s.lines().next().unwrap_or("");
+    while let Some(i) = rest.find("://") {
+        let (head, tail) = rest.split_at(i + 3);
+        out.push_str(head);
+        let end = tail.find(|c: char| c == '/' || c == '\'' || c == '"' || c.is_whitespace()).unwrap_or(tail.len());
+        match tail[..end].rfind('@') {
+            Some(at) => {
+                out.push_str("***@");
+                rest = &tail[at + 1..];
+            }
+            None => rest = tail,
+        }
+    }
+    out.push_str(rest);
+    out.chars().take(200).collect()
 }
 
 /// `devices/<id>/device.json` (R23); not rewritten when the content is the same.
@@ -315,6 +438,139 @@ mod tests {
         assert_eq!(s.git, "error");
         assert_eq!(s.error.as_deref(), Some("git add failed"));
         assert_eq!(s.last_commit, first.last_commit);
+    }
+
+    fn bare(t: &tempfile::TempDir) -> PathBuf {
+        let b = t.path().join("bare.git");
+        std::fs::create_dir(&b).unwrap();
+        git(&b, &["init", "--bare", "-b", "main"]);
+        b
+    }
+
+    fn id(args: &[&str]) -> Vec<String> {
+        ["-c", "user.name=t", "-c", "user.email=t"].iter().chain(args).map(|s| s.to_string()).collect()
+    }
+
+    fn tgit(dir: &Path, args: &[&str]) -> String {
+        let a = id(args);
+        git(dir, &a.iter().map(|s| s.as_str()).collect::<Vec<_>>())
+    }
+
+    fn other_device(t: &tempfile::TempDir, bare: &Path) -> PathBuf {
+        let d = t.path().join("other");
+        tgit(t.path(), &["clone", bare.to_str().unwrap(), d.to_str().unwrap()]);
+        d
+    }
+
+    /// A's root with a repository whose `origin` is `remote`.
+    fn with_remote(root: &Path, remote: &str) -> DataOpts {
+        git(root, &["init", "-b", "main"]);
+        git(root, &["remote", "add", "origin", remote]);
+        DataOpts { pull_every: Duration::ZERO, ..opts(root) }
+    }
+
+    #[tokio::test]
+    async fn push_and_pull_through_a_bare_repo() {
+        if !have_git() {
+            return;
+        }
+        let (t, root) = prepared();
+        let b = bare(&t);
+        let mut g = DataGit::new(&with_remote(&root, b.to_str().unwrap()), "test-a", log(&t));
+        std::fs::write(root.join("shared/a.json"), "{}").unwrap();
+        assert_eq!(g.tick().await.git, "synced");
+        assert!(git(&b, &["log", "--format=%s"]).contains("自动保存（test-a）"));
+        let o = other_device(&t, &b);
+        std::fs::write(o.join("shared/b.json"), "{}").unwrap();
+        tgit(&o, &["add", "shared/b.json"]);
+        tgit(&o, &["commit", "-m", "b"]);
+        tgit(&o, &["push", "origin", "HEAD:refs/heads/main"]);
+        let s = g.tick().await;
+        assert!(root.join("shared/b.json").exists());
+        assert_eq!((s.git.as_str(), s.last_sync.is_some(), s.error), ("synced", true, None));
+    }
+
+    async fn conflicting(t: &tempfile::TempDir, root: &Path, file: &str) -> (DataGit, DataOpts, PathBuf) {
+        let b = bare(t);
+        let o = with_remote(root, b.to_str().unwrap());
+        let mut g = DataGit::new(&o, "test-a", log(t));
+        std::fs::write(root.join(file), "base").unwrap();
+        assert_eq!(g.tick().await.git, "synced");
+        let other = other_device(t, &b);
+        std::fs::write(other.join(file), "theirs").unwrap();
+        tgit(&other, &["add", file]);
+        tgit(&other, &["commit", "-m", "theirs"]);
+        tgit(&other, &["push", "origin", "HEAD:refs/heads/main"]);
+        std::fs::write(root.join(file), "mine").unwrap();
+        (g, o, b)
+    }
+
+    #[tokio::test]
+    async fn conflict_aborts_the_rebase_and_stops_syncing() {
+        if !have_git() {
+            return;
+        }
+        let (t, root) = prepared();
+        let (mut g, o, b) = conflicting(&t, &root, "shared/workspace.json").await;
+        assert_eq!(g.tick().await.git, "conflict");
+        assert!(!root.join(".git/rebase-merge").exists() && !root.join(".git/rebase-apply").exists());
+        assert_eq!(git(&root, &["log", "-1", "--format=%s"]).trim(), "自动保存（test-a）");
+        assert_eq!(git(&root, &["status", "--porcelain"]).trim(), "");
+        let count = |d: &Path| git(d, &["rev-list", "--count", "HEAD"]).trim().parse::<u32>().unwrap();
+        let (before, main) = (count(&root), git(&b, &["rev-parse", "main"]));
+        std::fs::write(root.join("shared/c.json"), "{}").unwrap();
+        assert_eq!(g.tick().await.git, "conflict");
+        assert_eq!(count(&root), before + 1);
+        assert_eq!(git(&b, &["rev-parse", "main"]), main);
+        let mut again = DataGit::new(&o, "test-a", log(&t));
+        assert_eq!(again.tick().await.git, "conflict");
+    }
+
+    #[tokio::test]
+    async fn a_failed_push_is_an_error_and_keeps_the_commit() {
+        if !have_git() {
+            return;
+        }
+        let (t, root) = prepared();
+        let mut o = with_remote(&root, "https://user:s3cret@127.0.0.1:9/x.git");
+        for (k, v) in [("GIT_CONFIG_COUNT", "1"), ("GIT_CONFIG_KEY_0", "credential.helper"), ("GIT_CONFIG_VALUE_0", "")]
+        {
+            o.git_env.push((k.into(), v.into()));
+        }
+        let mut g = DataGit::new(&o, "test-a", log(&t));
+        std::fs::write(root.join("shared/a.json"), "{}").unwrap();
+        let s = g.tick().await;
+        let e = s.error.clone().unwrap_or_default();
+        assert_eq!(s.git, "error");
+        assert!(!e.is_empty() && !e.contains("s3cret") && !e.contains("user:"), "{e}");
+        assert_eq!(git(&root, &["log", "-1", "--format=%s"]).trim(), "自动保存（test-a）");
+        let saved = std::fs::read_to_string(root.join("local/sync.json")).unwrap();
+        let logged = std::fs::read_to_string(t.path().join("logs/service.log")).unwrap();
+        assert!(!saved.contains("s3cret") && !logged.contains("s3cret"));
+    }
+
+    #[tokio::test]
+    async fn logs_carry_no_file_names() {
+        if !have_git() {
+            return;
+        }
+        let (t, root) = prepared();
+        let (mut g, _, _) = conflicting(&t, &root, "clipboard/20261113-120000-我的密码.md").await;
+        assert_eq!(g.tick().await.git, "conflict");
+        let logged = std::fs::read_to_string(t.path().join("logs/service.log")).unwrap();
+        assert!(!logged.contains("我的密码") && !logged.contains("clipboard/"), "{logged}");
+        assert!(logged.contains(r#""ev":"data_sync""#) && logged.contains(r#""step":"rebase""#), "{logged}");
+    }
+
+    #[test]
+    fn scrub_removes_credentials() {
+        assert_eq!(
+            scrub("fatal: unable to access 'https://u:p@h/x.git/': refused"),
+            "fatal: unable to access 'https://***@h/x.git/': refused"
+        );
+        assert_eq!(scrub("ssh://git@host/x"), "ssh://***@host/x");
+        assert_eq!(scrub("a\nb"), "a");
+        assert_eq!(scrub(&"x".repeat(300)).chars().count(), 200);
     }
 
     #[test]
