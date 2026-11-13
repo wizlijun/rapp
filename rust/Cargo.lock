@@ -1265,6 +1265,8 @@ name = "rapp-relay2"
 version = "0.5.2"
 dependencies = [
  "anyhow",
+ "rapp-net",
+ "rapp-wire",
  "serde",
  "serde_json",
  "tempfile",

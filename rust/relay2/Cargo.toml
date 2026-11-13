@@ -8,6 +8,8 @@ publish.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+rapp-wire.workspace = true
+rapp-net.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
