@@ -101,7 +101,7 @@ async fn relay_bytes_both_ways() {
     assert_eq!(&buf, b"world");
 
     // A TLS handshake right behind the relayed line: no byte of it was eaten.
-    let bs2 = b.relay_to(A_ID).await.unwrap();
+    let bs2 = tokio::time::timeout(WAIT, b.relay_to(A_ID)).await.unwrap().unwrap();
     let accept = async {
         let Pushed::Relayed { stream, .. } = push_skipping_revoked(&a).await else { panic!("expected Relayed") };
         e2e_accept(stream, &ia).await
@@ -162,11 +162,12 @@ async fn unknown_and_offline() {
     let a = dial(&r, &ea, &ia).await;
     a.register(A_ID, &[]).await.unwrap();
     a.close();
-    ea.wait_idle().await;
+    tokio::time::timeout(WAIT, ea.wait_idle()).await.unwrap();
     // The relay notices the close asynchronously.
     let mut last = String::new();
-    for _ in 0..50 {
-        match b.connect_to(A_ID).await {
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(WAIT, b.connect_to(A_ID)).await.unwrap() {
             Err(e) => {
                 last = e.to_string();
                 if last == "offline" {
@@ -185,7 +186,7 @@ async fn relay_to_unknown_id_fails_on_first_read() {
     let r = start().await;
     let ib = Identity::generate().unwrap();
     let b = dial(&r, &endpoint(), &ib).await;
-    let mut s = b.relay_to("987654321").await.unwrap();
+    let mut s = tokio::time::timeout(WAIT, b.relay_to("987654321")).await.unwrap().unwrap();
     let mut buf = [0u8; 1];
     let err = tokio::time::timeout(WAIT, s.read(&mut buf)).await.unwrap().unwrap_err();
     assert_eq!(err.to_string(), "unknown id");
@@ -227,4 +228,30 @@ async fn big_revoked_line_is_read() {
         }
     };
     assert_eq!(got.len(), 300);
+}
+
+#[tokio::test]
+async fn an_unreadable_revoked_push_closes_the_connection() {
+    // A relay that sends a `revoked` push which is not JSON.
+    let sid = Identity::generate().unwrap();
+    let sc = rapp_wire::tls::server_config(&sid, rapp_wire::tls::ALPN_RELAY, 8).unwrap();
+    let srv = quinn::Endpoint::server(sc, "127.0.0.1:0".parse().unwrap()).unwrap();
+    let addr = srv.local_addr().unwrap().to_string();
+    let serve = tokio::spawn(async move {
+        let conn = srv.accept().await.unwrap().await.unwrap();
+        let mut uni = conn.open_uni().await.unwrap();
+        uni.write_all(b"{\"op\":\"revoked\",\"fps\":[\n").await.unwrap();
+        uni.finish().unwrap();
+        let _ = tokio::time::timeout(WAIT, conn.closed()).await;
+    });
+    let key = Key { relay: Some(sid.fp.prefix16()), root: [1u8; 16] };
+    let a = tokio::time::timeout(WAIT, RelayConn::dial(&endpoint(), &addr, &key, &Identity::generate().unwrap()))
+        .await
+        .unwrap()
+        .unwrap();
+    match push(&a).await {
+        Pushed::Closed { code, reason } => assert_eq!((code, reason.as_str()), (0, "bad push")),
+        _ => panic!("expected Closed"),
+    }
+    serve.abort();
 }

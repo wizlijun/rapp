@@ -14,7 +14,7 @@ use rapp_wire::msg::{Push, Req};
 use rapp_wire::tls::{self, BiStream, Expect};
 use rapp_wire::{Fp, Identity, Key};
 use serde_json::Value;
-use tokio::io::{AsyncBufRead, AsyncRead, AsyncWrite, BufReader, ReadBuf};
+use tokio::io::{AsyncBufRead, AsyncRead, AsyncReadExt, AsyncWrite, BufReader, ReadBuf};
 use tokio::sync::{mpsc, Mutex};
 
 use crate::Pipe;
@@ -103,8 +103,17 @@ impl RelayConn {
         Ok(Found { lan: strings("lan"), public })
     }
 
-    /// Opens a byte stream to device `id` through the relay. The relay answers only a failure, with
-    /// one line: it comes out as the error of the first read.
+    /// Opens a byte stream to device `id` through the relay, for TLS only: the initiator must speak
+    /// first (the target is not told of the stream before its first byte).
+    ///
+    /// The relay sends no line on success, only on failure, so a failure (`unknown id`, `offline`,
+    /// `not enrolled`, `limit`, ...) comes as an io error on the first read whose text is exactly
+    /// the relay's.
+    ///
+    /// The relay answers a `relay` request of an unenrolled connection with a reply line at once, so
+    /// enrolling after seeing it would mean reading that line here. Instead this enrolls first when
+    /// the connection is not yet known to be enrolled: an enrolled connection only loses its
+    /// enrollment through revocation, which closes the connection.
     pub async fn relay_to(&self, id: &str) -> Result<Pipe> {
         // A success has no reply to tell "not enrolled" from, so make sure first (a no-op for a
         // device the relay already knows).
@@ -175,7 +184,7 @@ async fn pump(conn: quinn::Connection, tx: mpsc::UnboundedSender<Pushed>) {
                 Err(e) => break e,
             },
             uni = conn.accept_uni() => match uni {
-                Ok(recv) => { tokio::spawn(uni_push(recv, tx.clone())); }
+                Ok(recv) => { tokio::spawn(uni_push(conn.clone(), recv, tx.clone())); }
                 Err(e) => break e,
             },
         }
@@ -190,12 +199,19 @@ async fn pump(conn: quinn::Connection, tx: mpsc::UnboundedSender<Pushed>) {
     let _ = tx.send(Pushed::Closed { code, reason });
 }
 
-async fn uni_push(mut recv: quinn::RecvStream, tx: mpsc::UnboundedSender<Pushed>) {
-    let Ok(Ok(bytes)) = tokio::time::timeout(PUSH_LINE_WAIT, recv.read_to_end(MAX_PUSH)).await else { return };
-    let pushed = match serde_json::from_slice::<Push>(bytes.trim_ascii()) {
-        Ok(Push::Revoked { fps }) => Pushed::Revoked(fps),
-        Ok(Push::GoingAway { after_ms }) => Pushed::GoingAway { after_ms },
-        _ => return,
+/// A `revoked` or `going_away` push that cannot be read is not dropped quietly: a lost revocation
+/// list would leave the device trusting revoked devices. The connection is closed instead; the
+/// caller reconnects and is sent the whole list again when it is admitted.
+async fn uni_push(conn: quinn::Connection, mut recv: quinn::RecvStream, tx: mpsc::UnboundedSender<Pushed>) {
+    let read = tokio::time::timeout(PUSH_LINE_WAIT, recv.read_to_end(MAX_PUSH)).await;
+    let pushed = match read.ok().and_then(|r| r.ok()).map(|b| serde_json::from_slice::<Push>(b.trim_ascii())) {
+        Some(Ok(Push::Revoked { fps })) => Pushed::Revoked(fps),
+        Some(Ok(Push::GoingAway { after_ms })) => Pushed::GoingAway { after_ms },
+        _ => {
+            // Said here: the pump only sees its own close as `LocallyClosed`.
+            let _ = tx.send(Pushed::Closed { code: 0, reason: "bad push".into() });
+            return conn.close(0u32.into(), b"bad push");
+        }
     };
     let _ = tx.send(pushed);
 }
@@ -220,7 +236,7 @@ async fn bi_push(send: quinn::SendStream, mut recv: quinn::RecvStream, tx: mpsc:
 }
 
 /// One line a byte at a time, so the bytes after it stay in the stream.
-async fn read_line_exact(recv: &mut quinn::RecvStream) -> Result<Vec<u8>> {
+async fn read_line_exact<R: AsyncRead + Unpin>(recv: &mut R) -> Result<Vec<u8>> {
     let mut line = Vec::new();
     loop {
         let mut b = [0u8; 1];
@@ -296,5 +312,29 @@ impl AsyncWrite for Relaying {
     }
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         Pin::new(&mut self.io).poll_shutdown(cx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    async fn line_of(len: usize) -> Result<Vec<u8>> {
+        let (mut w, mut r) = tokio::io::duplex(64 * 1024);
+        let write = tokio::spawn(async move {
+            let mut bytes = vec![b' '; len];
+            bytes.push(b'\n');
+            let _ = w.write_all(&bytes).await;
+        });
+        let got = read_line_exact(&mut r).await;
+        write.abort();
+        got
+    }
+
+    #[tokio::test]
+    async fn push_line_of_1_mib_is_read_one_byte_more_is_not() {
+        assert_eq!(line_of(MAX_PUSH).await.unwrap().len(), MAX_PUSH);
+        assert!(line_of(MAX_PUSH + 1).await.is_err());
     }
 }
