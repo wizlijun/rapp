@@ -1,0 +1,12 @@
+# rapp 写的。只有下面放行的进 git（数据目录规格 D2、D3）
+/*
+!/.gitignore
+!/README.md
+!/shared/
+!/devices/
+!/agent/
+!/clipboard/
+files/
+local/
+*.tmp
+*.bad

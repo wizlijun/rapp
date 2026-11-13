@@ -11,7 +11,12 @@ async fn main() {
         eprintln!("usage: rapp-service   (data root: $RAPP_HOME, data-root pointer or ~/rapp)");
         std::process::exit(2);
     }
-    let home = rapp_net::config::home();
+    let root = rapp_net::config::home();
+    if let Err(e) = rapp_net::datadir::prepare(&root, &rapp_net::config::legacy_dir()) {
+        eprintln!("rapp-service: 数据目录 {}: {e:#}", root.display());
+        std::process::exit(1);
+    }
+    let home = rapp_net::config::local(&root);
     let opts = Opts {
         home,
         bin_dir: rapp_net::bins::bin_dir_from_env(),
