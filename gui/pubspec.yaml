@@ -23,3 +23,4 @@ flutter:
   uses-material-design: true
   assets:
     - assets/tray_icon.png
+    - assets/app_profiles.json
