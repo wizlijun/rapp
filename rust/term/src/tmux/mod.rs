@@ -196,7 +196,8 @@ impl Tmux {
         Screen::from_capture(&text, &meta)
     }
 
-    /// A detached session `name` running `command` (each element one argument; empty: the default shell).
+    /// A detached session `name` running `command` (each element one word for the program, passed through the
+    /// shell quoted; empty: the default shell).
     pub async fn new_session(&self, name: &str, command: &[String], cols: u16, rows: u16) -> anyhow::Result<()> {
         let (cols, rows) = clamp_size(cols, rows);
         self.run(&cmd::new_session(name, cols, rows, command)).await.map(|_| ())

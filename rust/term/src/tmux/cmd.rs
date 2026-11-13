@@ -88,11 +88,16 @@ pub fn set_size(cols: u16, rows: u16) -> Vec<String> {
     vec!["refresh-client".into(), "-C".into(), format!("{cols}x{rows}")]
 }
 
-/// A detached session; each element of `command` is its own argument (none: the default shell).
+/// A detached session running `command` (none: the default shell). The words go to tmux as one argument, each in
+/// single quotes, which tmux hands to the shell: as separate arguments tmux would read an argument ending in `;` as
+/// the start of another tmux command, and a first word like `-c` as one of its own options.
 pub fn new_session(name: &str, cols: u16, rows: u16, command: &[String]) -> Vec<String> {
     let mut v: Vec<String> =
         ["new-session", "-d", "-s", name, "-x", &cols.to_string(), "-y", &rows.to_string()].map(String::from).to_vec();
-    v.extend(command.iter().cloned());
+    if !command.is_empty() {
+        v.push("--".into());
+        v.push(command.iter().map(|w| sh_quote(w)).collect::<Vec<_>>().join(" "));
+    }
     v
 }
 
@@ -140,9 +145,16 @@ mod tests {
         assert_eq!(set_size(140, 45), ["refresh-client", "-C", "140x45"]);
         assert_eq!(
             new_session("a b", 118, 38, &["sh".into(), "-c".into(), "echo hi".into()]),
-            ["new-session", "-d", "-s", "a b", "-x", "118", "-y", "38", "sh", "-c", "echo hi"]
+            ["new-session", "-d", "-s", "a b", "-x", "118", "-y", "38", "--", "'sh' '-c' 'echo hi'"]
         );
         assert_eq!(new_session("n", 80, 24, &[]).len(), 8);
+    }
+    #[test]
+    fn a_new_sessions_command_is_one_shell_string_tmux_cannot_split_or_read_as_options() {
+        // tmux takes an argument ending in `;` as a command separator and a leading `-x` as an option of its own.
+        let v = new_session("g", 80, 24, &["-c".into(), "it's".into(), ";".into(), "rename-session".into()]);
+        assert_eq!(v[8..], ["--", r"'-c' 'it'\''s' ';' 'rename-session'"]);
+        assert!(!v.iter().any(|a| a == ";" || a.ends_with(';')));
     }
     #[test]
     fn history_range_counts_up_from_the_screen() {

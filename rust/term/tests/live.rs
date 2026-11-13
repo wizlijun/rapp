@@ -250,6 +250,43 @@ async fn new_session_runs_the_command_at_the_given_size() {
     assert_eq!(s.tmux().capture(&p.pane).await.unwrap().lines[0], "it's up");
 }
 
+#[tokio::test]
+async fn new_session_hands_every_command_word_to_the_program() {
+    // A `;` word must reach the program (tmux would take it as a command separator), and a first word starting
+    // with `-` must be the program (tmux would take it as one of its own options).
+    let Some(s) = common::Server::start() else { return };
+    let dir = tempfile::Builder::new().prefix("rt").tempdir_in("/tmp").unwrap();
+    let out = dir.path().join("args");
+    let probe = dir.path().join("-rapp-probe");
+    std::fs::write(
+        &probe,
+        format!("#!/bin/sh\nfor a; do printf '%s\\n' \"$a\"; done > '{}'\nsleep 60\n", out.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&probe, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    // The fixture (not rapp) sets the server's shell to one that finds the probe: tmux gives a new pane the PATH of
+    // the client that made it, so the server's environment cannot.
+    let shell = dir.path().join("shell");
+    std::fs::write(&shell, format!("#!/bin/sh\nPATH='{}':$PATH exec /bin/sh \"$@\"\n", dir.path().display())).unwrap();
+    std::fs::set_permissions(&shell, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    s.raw(&["set", "-g", "default-shell", shell.to_str().unwrap()]);
+    s.raw(&["new-session", "-d", "-s", "keep"]);
+    let words = ["-rapp-probe", "a b", "it's", ";", "rename-session", "-t", "keep", "RENAMED"];
+    let command: Vec<String> = words.iter().map(|w| w.to_string()).collect();
+    s.tmux().new_session("g", &command, 80, 24).await.unwrap();
+    let mut got = String::new();
+    for _ in 0..50 {
+        got = std::fs::read_to_string(&out).unwrap_or_default();
+        if got.lines().count() == words.len() - 1 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert_eq!(got.lines().collect::<Vec<_>>(), words[1..]);
+    let names: Vec<String> = s.tmux().list().await.unwrap().into_iter().map(|p| p.session).collect();
+    assert!(names.contains(&"keep".to_string()) && !names.contains(&"RENAMED".to_string()), "{names:?}");
+}
+
 // ---- the session pump ----
 
 use rapp_term::proto::{In, Out};
