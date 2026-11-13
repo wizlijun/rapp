@@ -160,7 +160,7 @@
 | 浏览器 | Chrome | `com.google.Chrome` ✓ | 高彩 / 自适应 / 15 | 有图片、有视频，双色会丢信息 |
 | | Safari | `com.apple.Safari` ✓ | 同上 | |
 | | Edge | `com.microsoft.edgemac` | 同上 | 用户 2026-11-13 要求加入 |
-| 文档 | WPS Office | `com.kingsoft.wpsoffice.mac.global` ✓、`com.kingsoft.wpsoffice.mac` | 同上 | 文件在 A 上；以读写文字为主，画面变得慢，5 帧够。这台装的是国际版；国内版是后一个 |
+| 文档 | WPS Office | `com.kingsoft.wpsoffice.mac.global` ✓、`com.kingsoft.wpsoffice.mac` | 双色·彩色 / 自适应 / 5 | 文件在 A 上；以读写文字为主，画面变得慢，5 帧够。这台装的是国际版；国内版是后一个 |
 | | Word、Excel、PowerPoint | `com.microsoft.Word`、`com.microsoft.Excel`、`com.microsoft.Powerpoint` | 同上 | 三个 app 一份配置 |
 | 沟通 | 微信 | `com.tencent.xinWeChat` | 双色·彩色 / 自适应 / 5 | 只能在一台电脑上登录，人不在 A 前就得远程；聊天以文字为主，图片点开看时可以临时切高彩 |
 | | 企业微信 | `com.tencent.WeWorkMac` | 同上 | 用户 2026-11-13 要求加入 |
