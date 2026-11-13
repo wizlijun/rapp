@@ -15,6 +15,10 @@ path = "src/bin/fake-rapp-host.rs"
 name = "fake-rapp-client"
 path = "src/bin/fake-rapp-client.rs"
 
+[[bin]]
+name = "rapp-weaknet"
+path = "src/bin/rapp-weaknet.rs"
+
 [lib]
 name = "rapp_testkit"
 path = "src/lib.rs"
@@ -22,12 +26,12 @@ path = "src/lib.rs"
 [dependencies]
 anyhow.workspace = true
 rand.workspace = true
+tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
 quinn.workspace = true
-tokio.workspace = true
 tempfile.workspace = true
 rapp-net.workspace = true
 rapp-relay.workspace = true
