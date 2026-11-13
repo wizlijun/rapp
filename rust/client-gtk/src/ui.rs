@@ -25,9 +25,16 @@ use std::{
 
 enum Event {
     Focus,
+    PastePrepared(u32, Result<Vec<u8>>),
     Message(Incoming),
     Image(Vec<u8>, usize, usize, Rect),
     End(i32, String),
+}
+struct TextSend {
+    seq: u32,
+    text: String,
+    window: Option<u32>,
+    started: Instant,
 }
 type Shared = Rc<RefCell<State>>;
 struct State {
@@ -35,7 +42,11 @@ struct State {
     region: Rect,
     surface: Option<cairo::ImageSurface>,
     tx: Option<SyncSender<Vec<u8>>>,
+    pending_text: Option<TextSend>,
+    next_seq: u32,
     ready: bool,
+    takeover_pending: bool,
+    address: Option<Address>,
     finished: bool,
     send_failed: Cell<bool>,
     pointer: (f64, f64),
@@ -184,9 +195,16 @@ pub fn run() -> i32 {
             return 2;
         }
         if json_mode {
-            println!("{}", json!({"version":env!("CARGO_PKG_VERSION"),"protocol":p::VERSION}));
+            println!(
+                "{}",
+                json!({"version":env!("CARGO_PKG_VERSION"),"protocol":p::VERSION})
+            );
         } else {
-            println!("rapp-client {} (Linux GTK, protocol {})", env!("CARGO_PKG_VERSION"), p::VERSION);
+            println!(
+                "rapp-client {} (Linux GTK, protocol {})",
+                env!("CARGO_PKG_VERSION"),
+                p::VERSION
+            );
         }
         return 0;
     }
@@ -251,7 +269,11 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
         },
         surface: None,
         tx: None,
+        pending_text: None,
+        next_seq: 1,
         ready: false,
+        takeover_pending: false,
+        address: address.clone(),
         finished: false,
         send_failed: Cell::new(false),
         pointer: (0., 0.),
@@ -384,7 +406,7 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
         finish(&a, &s, json_mode, 0, "quit");
         glib::Propagation::Proceed
     });
-    install_input(&area, &entry, app, &state, json_mode);
+    install_input(&area, &entry, app, &state, json_mode, events.clone());
     let keys = gtk::EventControllerKey::new();
     keys.set_propagation_phase(gtk::PropagationPhase::Capture);
     let a = app.clone();
@@ -411,6 +433,7 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
         match Address::parse(url.text().as_str(), Some(token.text().to_string())) {
             Ok(address) => {
                 let mut s = s.borrow_mut();
+                s.address = Some(address.clone());
                 s.mode = address.mode;
                 s.fps = address.fps;
                 let backing = connection_window
@@ -483,6 +506,15 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
                     window.present();
                 }
                 Event::End(code, reason) => {
+                    if state.borrow().takeover_pending {
+                        continue;
+                    }
+                    if !json_mode {
+                        if let Some(notice) = p::takeover_notice(&reason) {
+                            offer_take_back(&window, &app, &state, &status, notice, reason);
+                            continue;
+                        }
+                    }
                     status.set(code);
                     finish(&app, &state, json_mode, code, &reason);
                     return glib::ControlFlow::Break;
@@ -550,8 +582,49 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
                         info.set_text("已收到远程剪贴板信息；此版本暂不支持图片和文件下载");
                     }
                 }
-                Event::Message(Incoming::Pasted { error }) => {
-                    if !error.is_empty() {
+                Event::Message(Incoming::InputBlocked(by)) => {
+                    info.set_text(&p::input_blocked_notice(&by));
+                    info.set_visible(true);
+                    notice_deadline = Some(Instant::now() + Duration::from_secs(1));
+                    emit(json_mode, json!({"event":"input_blocked","by":by}));
+                }
+                Event::PastePrepared(seq, result) => {
+                    let mut s = state.borrow_mut();
+                    if let Some(pending) = &s.pending_text {
+                        if pending.seq == seq {
+                            match result {
+                                Ok(packet) => {
+                                    if let Some(id) = pending.window {
+                                        s.send(p::id_packet(14, id));
+                                    }
+                                    s.send(packet);
+                                }
+                                Err(error) => {
+                                    s.pending_text = None;
+                                    info.set_text(&format!("发送没成功：{error}"));
+                                    info.set_visible(true);
+                                    notice_deadline = Some(Instant::now() + Duration::from_secs(5));
+                                }
+                            }
+                        }
+                    }
+                }
+                Event::Message(Incoming::Pasted { seq, error }) => {
+                    let pending = {
+                        let mut s = state.borrow_mut();
+                        if s.pending_text.as_ref().is_some_and(|p| p.seq == seq) {
+                            s.pending_text.take()
+                        } else {
+                            None
+                        }
+                    };
+                    let Some(pending) = pending else { continue };
+                    if error.is_empty() {
+                        let current = entry.text();
+                        if let Some(rest) = current.strip_prefix(&pending.text) {
+                            entry.set_text(rest);
+                        }
+                    } else {
                         info.set_visible(true);
                         notice_deadline = Some(Instant::now() + Duration::from_secs(3));
                         info.set_text(&error);
@@ -591,15 +664,26 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
             ));
             last_rate = Instant::now();
         }
-        if notice_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+        if !state.borrow().takeover_pending
+            && notice_deadline.is_some_and(|deadline| Instant::now() >= deadline)
+        {
             notice_deadline = None;
             if !state.borrow().windows.is_empty() {
                 info.set_visible(false);
             }
         }
         let mut s = state.borrow_mut();
+        if s.pending_text
+            .as_ref()
+            .is_some_and(|p| p.started.elapsed() >= Duration::from_secs(30))
+        {
+            s.pending_text = None;
+            info.set_text("未收到 A 的确认，请检查远端内容后再重试");
+            info.set_visible(true);
+            notice_deadline = Some(Instant::now() + Duration::from_secs(5));
+        }
         copy.set_sensitive(s.ready);
-        send.set_sensitive(s.ready && !entry.text().is_empty());
+        send.set_sensitive(s.ready && s.pending_text.is_none() && !entry.text().is_empty());
         let content_width = (s.region.w as f64 * s.zoom).ceil().clamp(1., 65535.) as i32;
         let content_height = (s.region.h as f64 * s.zoom).ceil().clamp(1., 65535.) as i32;
         if area.content_width() != content_width {
@@ -628,6 +712,57 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
         glib::ControlFlow::Continue
     });
 }
+// Standalone CLI clients offer an explicit take-back. Hub-managed clients keep
+// their JSON exit contract: the manager owns reconnecting those sessions.
+fn offer_take_back(
+    window: &gtk::ApplicationWindow,
+    app: &gtk::Application,
+    state: &Shared,
+    status: &Rc<Cell<i32>>,
+    notice: String,
+    reason: String,
+) {
+    {
+        let mut s = state.borrow_mut();
+        s.takeover_pending = true;
+        s.ready = false;
+        s.tx = None;
+        s.pressed = None;
+    }
+    let dialog = gtk::AlertDialog::builder()
+        .modal(true)
+        .message(notice)
+        .buttons(["关闭", "拿回来"])
+        .cancel_button(0)
+        .default_button(1)
+        .build();
+    let app = app.clone();
+    let state = state.clone();
+    let status = status.clone();
+    dialog.choose(Some(window), None::<&gio::Cancellable>, move |response| {
+        let result = if response == Ok(1) {
+            (|| -> Result<()> {
+                let s = state.borrow();
+                let address = s.address.as_ref().context("missing reconnect address")?;
+                std::process::Command::new(std::env::current_exe()?)
+                    .arg(address.connect_url())
+                    .args(["--token-env", "RAPP_RECONNECT_TOKEN"])
+                    .env("RAPP_RECONNECT_TOKEN", &address.token)
+                    .spawn()?;
+                Ok(())
+            })()
+        } else {
+            Err(anyhow::anyhow!(reason.clone()))
+        };
+        let (code, why) = match result {
+            Ok(()) => (0, "reconnecting".into()),
+            Err(e) => (1, e.to_string()),
+        };
+        status.set(code);
+        finish(&app, &state, false, code, &why);
+    });
+}
+
 fn finish(app: &gtk::Application, state: &Shared, json_mode: bool, code: i32, reason: &str) {
     let mut s = state.borrow_mut();
     if s.finished {
@@ -650,6 +785,7 @@ fn install_input(
     app: &gtk::Application,
     state: &Shared,
     json_mode: bool,
+    events: SyncSender<Event>,
 ) {
     let click = gtk::GestureClick::new();
     click.set_button(0);
@@ -740,14 +876,40 @@ fn install_input(
     area.add_controller(scroll);
     let s = state.clone();
     entry.connect_activate(move |e| {
-        let text = e.text();
-        if !text.is_empty() {
-            s.borrow().send(p::packet(5, text.as_bytes().to_vec()));
-            e.set_text("");
-        } else {
-            s.borrow().send(p::key(36, 0, true));
-            s.borrow().send(p::key(36, 0, false));
+        let mut s = s.borrow_mut();
+        if !s.ready || s.pending_text.is_some() {
+            return;
         }
+        let text = e.text().to_string();
+        if text.is_empty() {
+            s.send(p::key(36, 0, true));
+            s.send(p::key(36, 0, false));
+            return;
+        }
+        let Some(address) = s.address.clone() else {
+            return;
+        };
+        if address.version == 4 {
+            s.send(p::packet(5, text.as_bytes().to_vec()));
+            e.set_text("");
+            return;
+        }
+        let seq = s.next_seq;
+        let Some(next) = seq.checked_add(1) else {
+            return;
+        };
+        s.next_seq = next;
+        s.pending_text = Some(TextSend {
+            seq,
+            text: text.clone(),
+            window: s.focused,
+            started: Instant::now(),
+        });
+        let events = events.clone();
+        std::thread::spawn(move || {
+            let result = rapp_client_core::text::prepare_paste(&address, seq, &text);
+            let _ = events.send(Event::PastePrepared(seq, result));
+        });
     });
     // Observe GtkText's own IM context; leave composing keystrokes to the input method.
     let preedit = Rc::new(Cell::new(false));

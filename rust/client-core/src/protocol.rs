@@ -1,7 +1,7 @@
 use anyhow::{bail, ensure, Context, Result};
 use std::{collections::HashSet, io::Read};
 
-pub const VERSION: u8 = 5;
+pub const VERSION: u8 = 6;
 pub const MAX_MESSAGE: usize = 64 * 1024 * 1024;
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Rect {
@@ -48,8 +48,10 @@ pub enum Incoming {
         truncated: bool,
     },
     Pasted {
+        seq: u32,
         error: String,
     },
+    InputBlocked(String),
 }
 #[derive(Clone, Debug)]
 pub struct Address {
@@ -95,7 +97,7 @@ impl Address {
             token.len() <= 65535 && app.len() <= 65535,
             "token or app identifier too long"
         );
-        ensure!([4, 5].contains(&version), "protocol must be 4 or 5");
+        ensure!([4, 5, 6].contains(&version), "protocol must be 4, 5 or 6");
         Ok(Self {
             version,
             host,
@@ -113,6 +115,27 @@ impl Address {
         p.extend([self.mode, self.fps]);
         p.extend(density.to_le_bytes());
         packet(1, p)
+    }
+
+    /// A reconnect address without credentials (the caller passes the token via env).
+    pub fn connect_url(&self) -> String {
+        let mut url = url::Url::parse("rapp://localhost").unwrap();
+        let host = if self.host.contains(':') {
+            format!("[{}]", self.host)
+        } else {
+            self.host.clone()
+        };
+        url.set_host(Some(&host)).unwrap();
+        url.set_port(Some(self.port)).unwrap();
+        url.set_path(&self.app);
+        url.query_pairs_mut()
+            .append_pair("protocol", &self.version.to_string())
+            .append_pair(
+                "mode",
+                ["gray4", "color8", "color16", "duogray", "duocolor"][self.mode as usize],
+            )
+            .append_pair("fps", &self.fps.to_string());
+        url.to_string()
     }
 }
 pub fn mode_number(s: &str) -> Option<u8> {
@@ -250,7 +273,7 @@ pub fn read_message(input: &mut impl Read) -> Result<(Incoming, usize)> {
     let mut h = [0; 5];
     input.read_exact(&mut h).context("host disconnected")?;
     ensure!(
-        [2, 3, 4, 13, 17, 19, 21].contains(&h[0]),
+        [2, 3, 4, 13, 17, 19, 21, 26].contains(&h[0]),
         "unexpected host message type {}",
         h[0]
     );
@@ -368,12 +391,36 @@ pub fn decode(kind: u8, p: &[u8]) -> Result<Incoming> {
                 truncated,
             }
         }
-        21 => {
-            r.u32()?;
-            Incoming::Pasted { error: r.string()? }
-        }
+        21 => Incoming::Pasted {
+            seq: r.u32()?,
+            error: r.string()?,
+        },
+        26 => Incoming::InputBlocked(r.string()?),
         _ => bail!("unknown host message type {kind}"),
     };
     r.end()?;
     Ok(message)
+}
+
+/// Human-facing multi-client notices, matching RappCore.WorkerCLI on macOS.
+pub fn takeover_notice(reason: &str) -> Option<String> {
+    let reason = reason.strip_prefix("host says: ").unwrap_or(reason);
+    let by = if reason == "taken over" {
+        ""
+    } else {
+        reason.strip_prefix("taken over by ")?
+    };
+    Some(if by.is_empty() {
+        "这个窗口在另一台设备上打开了".into()
+    } else {
+        format!("这个窗口在 {by} 上打开了")
+    })
+}
+
+pub fn input_blocked_notice(by: &str) -> String {
+    if by.is_empty() {
+        "A 正在被另一台设备操作".into()
+    } else {
+        format!("A 正在被 {by} 操作")
+    }
 }

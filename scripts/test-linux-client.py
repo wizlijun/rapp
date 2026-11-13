@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the real GTK worker against an independent Python v4/v5 host fixture.
+"""Exercise the real GTK worker against an independent Python v4/v5/v6 host fixture.
 Requires a graphical session (or xvfb-run). No real host credentials are used.
 """
 import json
@@ -21,7 +21,7 @@ BINARY = Path(paths[0] if paths else "rust/target/release/rapp-client").resolve(
 
 version = json.loads(subprocess.check_output([str(BINARY), "version", "--json"], text=True))
 workspace = tomllib.loads((Path(__file__).resolve().parents[1] / "rust/Cargo.toml").read_text())
-assert version == {"version": workspace["workspace"]["package"]["version"], "protocol": 5}, version
+assert version == {"version": workspace["workspace"]["package"]["version"], "protocol": 6}, version
 print("PASS client version matches workspace")
 
 def string(s):
@@ -45,7 +45,7 @@ def recv(s):
     return kind, exact(s, length)
 
 class Session:
-    def __init__(self, version=5):
+    def __init__(self, version=6):
         self.listener = socket.socket()
         self.listener.bind(("127.0.0.1", 0))
         self.listener.listen()
@@ -108,7 +108,7 @@ class Session:
         self.s.close()
         self.listener.close()
 
-def case(name, fn, version=5):
+def case(name, fn, version=6):
     s = Session(version)
     try:
         fn(s)
@@ -145,9 +145,29 @@ def mismatch(s):
 
 case("full frame, delta, menus, adaptive stream, quit", normal)
 case("legacy v4 full/delta session", normal, version=4)
+case("legacy v5 full/delta session", normal, version=5)
 case("hub closes stdin", eof)
 case("corrupt frame exits cleanly", malformed)
 case("protocol mismatch exit code", mismatch)
+
+
+def multi_client(s):
+    s.ready()
+    z = zlib.compressobj()
+    s.frame(z, True, 0xf800)
+    for by in ["", "客厅的 Mac"]:
+        send(s.s, 26, string(by))
+        assert s.event("input_blocked")["by"] == by
+    # Input refusal must neither end the session nor reset the delta dictionary.
+    s.frame(z, False, 0x07e0)
+    s.p.stdin.write('{"cmd":"focus"}\n')
+    s.p.stdin.flush()
+    time.sleep(.1)
+    assert s.p.poll() is None
+    send(s.s, 3, string("taken over by 客厅的 Mac"))
+    assert s.finish(1)["reason"] == "taken over by 客厅的 Mac"
+
+case("v6 input refusal, continued frames, focus and takeover", multi_client)
 
 
 def keyboard(s):
@@ -175,9 +195,24 @@ def keyboard(s):
     while text is None:
         kind,payload=recv(s.s)
         if kind==6:keys.append(struct.unpack("<HQB",payload))
-        if kind==5:text=payload.decode()
+        if kind==20:
+            seq=struct.unpack("<I",payload[:4])[0]
+            assert payload[4]==0
+            text=payload[7:].decode()
     assert keys[:2]==[(0,1<<20,1),(0,1<<20,0)],keys
     assert text=="test-input",text
+    # Refused pastes keep the draft; the next Enter retries with a fresh sequence.
+    send(s.s,26,string("Other Mac"))
+    send(s.s,21,struct.pack("<I",seq)+string("A 正在被 Other Mac 操作"))
+    time.sleep(.2)
+    xdo("key","Return")
+    while True:
+        kind,payload=recv(s.s)
+        if kind==20:break
+    next_seq=struct.unpack("<I",payload[:4])[0]
+    assert next_seq != seq and payload[7:].decode()==text
+    send(s.s,21,struct.pack("<I",next_seq)+string(""))
+    time.sleep(.2)
     geom=dict(line.split("=",1) for line in xdo("getwindowgeometry","--shell",window).splitlines())
     x,y=int(geom["WIDTH"])//2,int(geom["HEIGHT"])//2
     assert xdo("getactivewindow")==window
@@ -212,7 +247,7 @@ if INPUT:
 def stream_menu(s):
     s.ready();s.frame(zlib.compressobj(),True,0x001f)
     def xdo(*args):return subprocess.check_output(["xdotool",*map(str,args)],text=True).strip()
-    time.sleep(0.4)
+    time.sleep(0.8)
     window=xdo("search","--pid",s.p.pid,"--name","rapp protocol fixture").splitlines()[-1]
     xdo("windowactivate","--sync",window)
     geom=dict(line.split("=",1) for line in xdo("getwindowgeometry","--shell",window).splitlines())
@@ -240,3 +275,48 @@ def stream_menu(s):
 
 if INPUT:
     case("traffic context menu presets reach the host",stream_menu)
+
+
+def standalone_takeback():
+    """A direct (non-hub) client waits for the user's take-back action."""
+    import signal
+    listener=socket.socket();listener.bind(("127.0.0.1",0));listener.listen();listener.settimeout(8)
+    env=dict(os.environ,RAPP_FIXTURE_TOKEN="fixture-secret",GTK_A11Y="none",GDK_BACKEND="x11",GDK_SCALE="1")
+    child=subprocess.Popen([str(BINARY),f"rapp://127.0.0.1:{listener.getsockname()[1]}/?mode=color16",
+        "--token-env","RAPP_FIXTURE_TOKEN"],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,start_new_session=True)
+    first=second=None
+    try:
+        first,_=listener.accept();first.settimeout(8)
+        kind,hello=recv(first);assert kind==1 and hello[0]==6
+        send(first,2,string("rapp takeback fixture")+struct.pack("<HH",800,600))
+        time.sleep(.3)
+        send(first,3,string("taken over by 测试设备"))
+        first.close();first=None
+        listener.settimeout(.4)
+        try:
+            second,_=listener.accept()
+            raise AssertionError("must not take back automatically")
+        except TimeoutError:pass
+        def xdo(*args):return subprocess.check_output(["xdotool",*map(str,args)],text=True).strip()
+        deadline=time.monotonic()+5
+        while True:
+            active=xdo("getactivewindow")
+            if xdo("getwindowpid",active)==str(child.pid):break
+            assert time.monotonic()<deadline,"takeback dialog did not become active"
+            time.sleep(.05)
+        xdo("key","Return")  # the explicit default button is 拿回来
+        listener.settimeout(8);second,_=listener.accept();second.settimeout(8)
+        kind,again=recv(second);assert kind==1 and again==hello
+        assert child.wait(timeout=5)==0
+        send(second,3,string("fixture done"))
+        print("PASS standalone takeover waits, take-back reconnects with same credentials")
+    finally:
+        if first:first.close()
+        if second:second.close()
+        listener.close()
+        try:os.killpg(child.pid,signal.SIGTERM)
+        except ProcessLookupError:pass
+        child.wait(timeout=5)
+
+if INPUT:
+    standalone_takeback()

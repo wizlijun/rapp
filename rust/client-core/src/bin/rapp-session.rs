@@ -117,6 +117,18 @@ fn command(v: &Value) -> Result<Vec<u8>> {
             ensure!(text.len() <= 1024 * 1024, "text too long");
             p::packet(5, text.as_bytes().to_vec())
         }
+        "paste" => {
+            let mut b = number(v, "seq")?.to_le_bytes().to_vec();
+            if let Some(text) = v["text"].as_str() {
+                ensure!(text.len() < 60_000, "paste text must be under 60000 bytes");
+                b.push(0);
+                p::string(&mut b, text);
+            } else {
+                b.push(1);
+                b.extend(number(v, "item")?.to_le_bytes());
+            }
+            p::packet(20, b)
+        }
         _ => bail!("unknown command"),
     })
 }
@@ -230,9 +242,10 @@ fn run(out: &Output) -> Result<()> {
                 out,
                 json!({"event":"clip","id":id,"text":text,"truncated":truncated}),
             )?,
-            Incoming::Pasted { error } => {
-                event(out, json!({"event":"paste_result","error":error}))?
+            Incoming::Pasted { seq, error } => {
+                event(out, json!({"event":"paste_result","seq":seq,"error":error}))?
             }
+            Incoming::InputBlocked(by) => event(out, json!({"event":"input_blocked","by":by}))?,
         }
     }
 }
@@ -273,6 +286,30 @@ mod tests {
             p::packet(5, "你好".as_bytes().to_vec())
         );
         assert_eq!(command(&json!({"cmd":"mouse","window":2,"kind":"drag","button":"left","x":1.5,"y":3.,"clicks":1})).unwrap(),p::mouse(2,0,2,1.5,3.,1));
+        assert_eq!(
+            command(&json!({"cmd":"paste","seq":7,"text":"你好"})).unwrap(),
+            p::packet(
+                20,
+                [
+                    7u32.to_le_bytes().to_vec(),
+                    vec![0, 6, 0],
+                    "你好".as_bytes().to_vec()
+                ]
+                .concat()
+            )
+        );
+        assert_eq!(
+            command(&json!({"cmd":"paste","seq":8,"item":9})).unwrap(),
+            p::packet(
+                20,
+                [
+                    8u32.to_le_bytes().to_vec(),
+                    vec![1],
+                    9u32.to_le_bytes().to_vec()
+                ]
+                .concat()
+            )
+        );
     }
     #[test]
     fn malformed_commands_do_not_wrap_integer_fields() {
@@ -282,6 +319,8 @@ mod tests {
             json!({"cmd":"menu_pick","path":[65536]}),
             json!({"cmd":"set_stream","mode":"color16","fps":256,"density":1.}),
             json!({"cmd":"mouse","kind":"invalid"}),
+            json!({"cmd":"paste","seq":4294967296u64,"text":"x"}),
+            json!({"cmd":"paste","seq":1,"text":"x".repeat(60000)}),
         ] {
             assert!(command(&v).is_err());
         }
