@@ -362,13 +362,16 @@ fn dispatch(argv: &[String]) -> Res<()> {
         .enable_all()
         .build()
         .map_err(|_| runtime("could not start the async runtime"))?;
-    rt.block_on(async {
+    let res = rt.block_on(async {
         match sub.as_str() {
             "list" => list(&a).await,
             "watch" => watch(&a).await,
             _ => run(&a).await,
         }
-    })
+    });
+    // Dropping the runtime would wait for tokio's blocking stdin read, which lasts as long as stdin stays open.
+    rt.shutdown_background();
+    res
 }
 
 fn main() {

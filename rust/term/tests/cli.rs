@@ -121,3 +121,41 @@ fn runtime_errors_exit_1_and_do_not_echo_content() {
     assert_eq!(o.code, 1);
     assert!(!o.stderr.contains("SECRET-TEXT"));
 }
+
+#[test]
+fn watch_ends_when_the_session_does_though_stdin_stays_open() {
+    let Some(s) = common::Server::start() else { return };
+    s.raw(&["new-session", "-d", "-s", "w", "-x", "80", "-y", "24", "cat"]);
+    let mut child = Command::new(BIN)
+        .args(["watch", "--socket", &s.socket, "term:tmux:w"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    let mut next = || -> serde_json::Value { serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap() };
+    let pane = loop {
+        let m = next();
+        if m["t"] == "panes" {
+            break m["panes"][0]["id"].as_str().unwrap().to_string();
+        }
+    };
+    writeln!(stdin, "{}", serde_json::json!({"t": "view", "pane": pane, "cols": 80, "rows": 24})).unwrap();
+    while next()["t"] != "screen" {}
+    s.raw(&["kill-session", "-t", "w"]);
+    let end = Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        if let Some(st) = child.try_wait().unwrap() {
+            break st;
+        }
+        if Instant::now() > end {
+            let _ = child.kill();
+            panic!("watch did not end within 5 seconds of the session ending");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(status.code(), Some(0));
+    drop(stdin);
+}
