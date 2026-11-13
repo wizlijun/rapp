@@ -101,11 +101,10 @@ async fn random_bytes_on_request_streams_never_take_the_relay_down() {
     assert_eq!(v["ok"], true, "{v}");
 }
 
-#[tokio::test]
-async fn many_idle_unenrolled_connections_are_shed() {
-    let r = start_relay(|c| c.limits.unenrolled_idle_secs = 1).await;
+/// Dials `n` unenrolled connections at once from 127.0.0.1; returns those that completed the handshake.
+async fn dial_many(r: &TestRelay, n: usize) -> Vec<FakeDevice> {
     let mut set = JoinSet::new();
-    for _ in 0..40 {
+    for _ in 0..n {
         let addr = r.relay.addr;
         let pin = rapp_wire::tls::Expect::Pin(r.relay.fp.prefix16());
         set.spawn(async move {
@@ -119,15 +118,37 @@ async fn many_idle_unenrolled_connections_are_shed() {
             devices.push(d);
         }
     }
-    let alive = |ds: &[FakeDevice]| ds.iter().filter(|d| d.conn.close_reason().is_none()).count();
-    let until = Instant::now() + Duration::from_millis(900);
+    devices
+}
+
+fn alive(ds: &[FakeDevice]) -> usize {
+    ds.iter().filter(|d| d.conn.close_reason().is_none()).count()
+}
+
+#[tokio::test]
+async fn one_address_cannot_hold_more_than_16_connections() {
+    // The default idle timeout (10 s) is far longer than this test: only the cap can thin the count.
+    let r = start_relay(|_| {}).await;
+    let devices = dial_many(&r, 40).await;
+    // A refused connection is closed right after its handshake; give those closes a moment to land.
+    // The idle timeout cannot do any of the closing within this window.
+    let until = Instant::now() + Duration::from_secs(2);
     while alive(&devices) > 16 && Instant::now() < until {
         sleep(Duration::from_millis(20)).await;
     }
     let n = alive(&devices);
+    assert!(n >= 1, "no connection was accepted at all");
     assert!(n <= 16, "{n} connections from one address alive");
+    assert!(40 - n >= 24, "only {} of 40 were refused or closed", 40 - n);
+}
 
-    let until = Instant::now() + Duration::from_secs(4);
+#[tokio::test]
+async fn idle_unenrolled_connections_are_closed_after_the_timeout() {
+    let r = start_relay(|c| c.limits.unenrolled_idle_secs = 1).await;
+    let devices = dial_many(&r, 10).await;
+    assert_eq!(devices.len(), 10, "10 connections are under the cap and must be accepted");
+    assert!(alive(&devices) >= 1);
+    let until = Instant::now() + Duration::from_secs(3);
     while alive(&devices) > 0 && Instant::now() < until {
         sleep(Duration::from_millis(50)).await;
     }
