@@ -12,6 +12,9 @@ import '../embed/session_port.dart';
 import '../embed/stream_choice.dart';
 import '../hub_client.dart';
 import '../permissions.dart';
+import '../embed/app_profile.dart';
+import '../embed/composer_model.dart' show returnKeyCode;
+import 'app_profile_store.dart';
 import 'lamp.dart';
 import 'lifecycle.dart';
 import 'pin_files.dart';
@@ -59,7 +62,10 @@ class MainState extends ChangeNotifier {
     this.port,
     this.doubleClick = const Duration(milliseconds: 500),
     DateTime Function()? clock,
-  }) : resources = ResourcesState(clock: clock) {
+    AppProfileStore? profiles,
+    void Function(String line)? log,
+  })  : resources = ResourcesState(clock: clock),
+        _log = log ?? ((_) {}) {
     resources.addListener(notifyListeners);
     _portSub = port?.events.listen(_onPortEvent);
     hub?.addListener(_onHub);
@@ -67,6 +73,10 @@ class MainState extends ChangeNotifier {
     final loaded = loadWorkspace(data.sharedDir);
     workspace = loaded.workspace;
     if (loaded.problem != null) hint = loaded.problem!;
+    this.profiles = profiles ?? AppProfileStore.load(data.sharedDir, null);
+    final pp = this.profiles.problem;
+    if (pp != null) hint = hint.isEmpty ? pp : '$hint；$pp';
+    this.profiles.addListener(_onProfiles);
     _entries = _mapEntries();
     refreshDevices();
     _restorePins();
@@ -80,6 +90,15 @@ class MainState extends ChangeNotifier {
     final loaded = loadWorkspace(d.sharedDir);
     workspace = loaded.workspace;
     if (loaded.problem != null) hint = loaded.problem!;
+    profiles.removeListener(_onProfiles);
+    profiles = AppProfileStore.loadWith(d.sharedDir, profiles.builtin);
+    final pp = profiles.problem;
+    if (pp != null) hint = hint.isEmpty ? pp : '$hint；$pp';
+    profiles.addListener(_onProfiles);
+    for (final rs in remote.values) {
+      rs.setProfile(profiles.resolve(rs.appId));
+      _syncHidden(rs);
+    }
     _entries = _mapEntries();
     final old = oldRoot.endsWith('/') ? oldRoot : '$oldRoot/';
     for (final e in resources.clips) {
@@ -114,6 +133,12 @@ class MainState extends ChangeNotifier {
   DataDir data;
   final UiPrefs prefs;
   final SessionPort? port;
+
+  /// My app profiles (`apps.json` in `shared/`) and the built-in ones; swapped by [relocate].
+  late AppProfileStore profiles;
+  final void Function(String line) _log;
+  final Map<Object, List<int>> _sentHidden = {};
+  final Map<Object, int> _loggedHidden = {};
 
   /// Clipboard entries and transfers of every session.
   final ResourcesState resources;
@@ -654,6 +679,7 @@ class MainState extends ChangeNotifier {
       return;
     }
     rs.apply(e);
+    if (e is WindowsEvent) _syncHidden(rs);
     final start = _starts[e.sid];
     if (start != null && e is ClipsEvent) {
       resources.addClips(r.key, start, _sourceOf(r), e.clips);
@@ -806,7 +832,14 @@ class MainState extends ChangeNotifier {
           if (_liveSid(s.sid)) port!.selectWindow(s.sid, w);
         },
         onStream: (_) => _applyFps(),
-        onDropBlock: (n) => port!.composerDropBlock(s.sid, n));
+        onDropBlock: (n) => port!.composerDropBlock(s.sid, n),
+        appId: r.app,
+        onReturn: () {
+          if (_liveSid(s.sid)) port!.key(s.sid, returnKeyCode, 0);
+        });
+    final prof = profiles.resolve(r.app);
+    rs.setProfile(prof);
+    if (prof.name != null) _log('rapp: app 配置「${prof.name}」');
     rs.choice = r.choice;
     rs.preferWindow(r.window);
     remote[s.sid] = rs;
@@ -931,6 +964,82 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Sends the hidden window set to the runner when it changed, and logs how many (D9: no titles).
+  void _syncHidden(RemoteSession rs) {
+    final ids = rs.hiddenIds.toList()..sort();
+    final last = _sentHidden[rs.sid] ?? const <int>[];
+    if (!listEquals(ids, last)) {
+      _sentHidden[rs.sid] = ids;
+      if (_liveSid(rs.sid)) port?.setHidden(rs.sid, ids);
+    }
+    final n = rs.hidden.length;
+    if (n != (_loggedHidden[rs.sid] ?? 0)) {
+      _loggedHidden[rs.sid] = n;
+      if (n > 0) _log('rapp: app 配置「${rs.profile.name ?? rs.appName}」：隐藏 $n 个窗口');
+    }
+  }
+
+  void _onProfiles() {
+    for (final rs in remote.values) {
+      rs.setProfile(profiles.resolve(rs.appId));
+      _syncHidden(rs);
+    }
+    if (profiles.problem == appsSaveProblem) hint = appsSaveProblem;
+    notifyListeners();
+  }
+
+  RemoteWindow? _windowById(RemoteSession rs, int window) => rs.windows.where((w) => w.id == window).firstOrNull;
+
+  bool isMainWindow(int window) => currentRemote?.isMain(window) ?? false;
+
+  /// Hides windows like [window] (kind and title) for this app; null for the main window (R8)
+  /// or without a current session. The result undoes it.
+  VoidCallback? hideLike(int window) {
+    final rs = currentRemote;
+    final w = rs == null ? null : _windowById(rs, window);
+    if (rs == null || w == null || rs.isMain(window)) return null;
+    final snap = profiles.snapshot();
+    profiles.addRule(rs.appId, rs.appName, WindowRule(kind: w.kind, title: w.title, action: RuleAction.hide));
+    return () => profiles.restore(snap);
+  }
+
+  /// No composer on windows like [window]; null without a current session.
+  VoidCallback? noComposerLike(int window) {
+    final rs = currentRemote;
+    final w = rs == null ? null : _windowById(rs, window);
+    if (rs == null || w == null) return null;
+    final snap = profiles.snapshot();
+    profiles.addRule(rs.appId, rs.appName,
+        WindowRule(kind: w.kind, title: w.title, child: !rs.isMain(window), action: RuleAction.noComposer));
+    return () => profiles.restore(snap);
+  }
+
+  void showHiddenOnce(int window) {
+    final rs = currentRemote;
+    if (rs == null) return;
+    rs.showOnce(window);
+    _syncHidden(rs);
+    notifyListeners();
+  }
+
+  void unhide(int window) {
+    final rs = currentRemote;
+    final w = rs == null ? null : _windowById(rs, window);
+    if (rs == null || w == null) return;
+    if (profiles.removeHideRule(rs.appId, w, isMain: rs.isMain(window))) {
+      hint = '不再隐藏这类窗口';
+      notifyListeners();
+    }
+  }
+
+  void rememberStream() {
+    final rs = currentRemote;
+    if (rs == null) return;
+    profiles.rememberStream(rs.appId, rs.appName, rs.choice);
+    hint = '已记为 ${profiles.resolve(rs.appId).name ?? rs.appName} 的默认';
+    notifyListeners();
+  }
+
   Future<void> _openEmbedded(String id, String app, String appName, {bool select = true, bool quiet = false}) async {
     final key = '$id/$app';
     _appNames[key] = appName;
@@ -942,6 +1051,7 @@ class MainState extends ChangeNotifier {
     }
     if (r == null) {
       final fresh = SessionRecord(id, app, appName, '');
+      fresh.choice = profiles.resolve(app).stream;
       _records[key] = fresh;
       notifyListeners();
       await _connect(fresh, quiet: quiet);
@@ -1405,6 +1515,7 @@ class MainState extends ChangeNotifier {
     resources.removeListener(notifyListeners);
     resources.dispose();
     hub?.removeListener(_onHub);
+    profiles.removeListener(_onProfiles);
     _portSub?.cancel();
     _blockedTimer?.cancel();
     for (final w in _waiting.values) {

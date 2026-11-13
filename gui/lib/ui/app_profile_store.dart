@@ -61,6 +61,11 @@ class AppProfileStore extends ChangeNotifier {
         builtin = parseProfiles(jsonDecode(builtinJson));
       } catch (_) {}
     }
+    return loadWith(dir, builtin);
+  }
+
+  /// [load] with the built-ins already parsed (a relocated data root rereads only apps.json).
+  static AppProfileStore loadWith(String dir, List<AppProfile> builtin) {
     final f = File('$dir/$appsFile');
     try {
       if (!f.existsSync()) return AppProfileStore(dir, builtin: builtin);

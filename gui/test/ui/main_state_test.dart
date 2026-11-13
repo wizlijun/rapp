@@ -4,7 +4,9 @@ import 'dart:ui' show Rect, Size;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fake_async/fake_async.dart';
+import 'package:rapp/embed/app_profile.dart';
 import 'package:rapp/embed/session_port.dart';
+import 'package:rapp/ui/app_profile_store.dart';
 import 'package:rapp/embed/stream_choice.dart';
 import 'package:rapp/paths.dart';
 import 'package:rapp/hub_client.dart';
@@ -450,12 +452,12 @@ void main() {
 
   group('embedded sessions', () {
     void env(void Function(FakeAsync a, FakeTransport t, FakeSessionPort port, MainState st, List<String> hints) body,
-        {int sessions = 1, bool withPort = true}) {
+        {int sessions = 1, bool withPort = true, AppProfileStore? profiles, void Function(String)? log, String? app}) {
       fakeAsync((a) {
         final t = FakeTransport();
         final hub = HubClient(t);
         final port = FakeSessionPort();
-        final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: withPort ? port : null);
+        final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: withPort ? port : null, profiles: profiles, log: log);
         final hints = <String>[];
         var last = st.hint;
         st.addListener(() {
@@ -476,14 +478,194 @@ void main() {
           }
         };
         a.flushMicrotasks();
-        for (var i = 1; i <= sessions; i++) {
-          st.openOrSwitch('111', 'a' * i, i == 1 ? 'Calculator' : 'Notes');
+        if (app != null) {
+          st.openOrSwitch('111', app, 'App');
           a.flushMicrotasks();
+        } else {
+          for (var i = 1; i <= sessions; i++) {
+            st.openOrSwitch('111', 'a' * i, i == 1 ? 'Calculator' : 'Notes');
+            a.flushMicrotasks();
+          }
         }
         hints.clear();
         body(a, t, port, st, hints);
       });
     }
+
+  group('app profiles', () {
+    String shared() => '${tmp.path}/shared';
+    AppProfileStore store({List<AppProfile> mine = const []}) => AppProfileStore(shared(), mine: [...mine], builtin: [
+          AppProfile(ids: ['com.apple.Terminal'], name: '终端', mode: 'duogray', density: 'adaptive', fps: 15, composer: true),
+        ]);
+
+    RemoteWindow w(int id, {WindowKind kind = WindowKind.normal, String? title}) => RemoteWindow(
+          id: id,
+          parent: 0,
+          kind: kind,
+          title: title ?? 'w$id',
+          rect: const Rect.fromLTWH(0, 0, 400, 300),
+          titleBar: 28,
+          resizable: true,
+          focused: false,
+          texture: id,
+          visible: const Rect.fromLTWH(0, 0, 1, 1),
+        );
+
+    List<(String, Map<String, Object?>)> calls(FakeSessionPort p, String m) => [for (final c in p.calls) if (c.$1 == m) c];
+    const chrome = 'com.google.Chrome';
+    AppProfile chromeWith({List<WindowRule>? windows, AfterSend? afterSend}) =>
+        AppProfile(ids: [chrome], name: 'Chrome', windows: windows, afterSend: afterSend);
+    const hideFloating = WindowRule(kind: WindowKind.floating, action: RuleAction.hide);
+
+    test('a new session starts with the profile stream; reconnect keeps the session choice', () {
+      final sid = 'com.apple.Terminal'.length;
+      env((a, t, port, st, hints) {
+        expect(calls(port, 'start').first.$2, containsPair('mode', 'duogray'));
+        st.currentRemote!.setChoice(const StreamChoice('color16', 'original', 30));
+        port.emit(DisconnectedEvent(sid, 'connection closed'));
+        st.reconnect('111/com.apple.Terminal');
+        a.flushMicrotasks();
+        expect(calls(port, 'start').last.$2, allOf(containsPair('mode', 'color16'), containsPair('fps', 30)));
+      }, app: 'com.apple.Terminal', profiles: store());
+    });
+
+    test('no profile: the generic start choice', () {
+      env((a, t, port, st, hints) {
+        expect(calls(port, 'start').first.$2, allOf(containsPair('mode', 'color16'), containsPair('fps', 15)));
+      }, app: 'com.unknown', profiles: store());
+    });
+
+    test('hideLike hides at once, sends set_hidden, and undo brings it back', () {
+      final sid = chrome.length;
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(sid, [w(1), w(2, kind: WindowKind.floating, title: 'Downloads')]));
+        final undo = st.hideLike(2)!;
+        expect(st.currentRemote!.tabs.tabs.map((e) => e.id), [1]);
+        expect(port.calls.last.$1, 'set_hidden');
+        expect(port.calls.last.$2, {'sid': sid, 'windows': [2]});
+        expect(st.profiles.mine.single.windows!.first,
+            const WindowRule(kind: WindowKind.floating, title: 'Downloads', action: RuleAction.hide));
+        undo();
+        expect(st.currentRemote!.tabs.tabs.map((e) => e.id), [1, 2]);
+        expect(port.calls.last.$1, 'set_hidden');
+        expect(port.calls.last.$2, {'sid': sid, 'windows': <int>[]});
+      }, app: chrome, profiles: store());
+    });
+
+    test('hideLike on the main window does nothing; noComposerLike there writes child: false', () {
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(chrome.length, [w(1), w(2)]));
+        expect(st.hideLike(1), isNull);
+        expect(st.isMainWindow(1), true);
+        st.noComposerLike(1);
+        expect(st.profiles.mine.single.windows!.first.child, isFalse);
+      }, app: chrome, profiles: store());
+    });
+
+    test('a profile change while detached sends set_hidden at once', () {
+      final sid = chrome.length;
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(sid, [w(1), w(2, kind: WindowKind.floating)]));
+        port.emit(DetachedEvent(sid, true));
+        st.profiles.addRule(chrome, 'Chrome', hideFloating);
+        expect(port.calls.last.$1, 'set_hidden');
+        expect(port.calls.last.$2, {'sid': sid, 'windows': [2]});
+      }, app: chrome, profiles: store());
+    });
+
+    test('set_hidden is not sent again for the same set', () {
+      final sid = chrome.length;
+      env((a, t, port, st, hints) {
+        final table = [w(1), w(2, kind: WindowKind.floating)];
+        port.emit(WindowsEvent(sid, table));
+        port.emit(WindowsEvent(sid, table));
+        expect(calls(port, 'set_hidden').length, 1);
+      }, app: chrome, profiles: store(mine: [chromeWith(windows: [hideFloating])]));
+    });
+
+    test('showHiddenOnce and unhide', () {
+      final sid = chrome.length;
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(sid, [w(1), w(2, kind: WindowKind.floating)]));
+        expect(st.currentRemote!.hidden, isNotEmpty);
+        st.showHiddenOnce(2);
+        expect(st.currentRemote!.hidden, isEmpty);
+        st.unhide(2);
+        expect(st.profiles.resolve(chrome).windows, isEmpty);
+        expect(st.hint, '不再隐藏这类窗口');
+      }, app: chrome, profiles: store(mine: [chromeWith(windows: [hideFloating])]));
+    });
+
+    test('afterSend return sends key 36 after a full round only', () {
+      final sid = chrome.length;
+      env((a, t, port, st, hints) {
+        final rs = st.currentRemote!;
+        rs.composer.text = 'ls';
+        rs.composer.send();
+        port.emit(ComposerStateEvent(sid, done: const ComposerDone(1, null)));
+        expect(calls(port, 'key').single.$2, {'sid': sid, 'keyCode': 36, 'modifiers': 0});
+        rs.composer.text = 'x';
+        rs.composer.send();
+        port.emit(ComposerStateEvent(sid, done: const ComposerDone(0, 'A 上贴不进去')));
+        expect(calls(port, 'key').length, 1);
+      }, app: chrome, profiles: store(mine: [chromeWith(afterSend: AfterSend.pressReturn)]));
+    });
+
+    test('rememberStream writes the current choice into my profile', () {
+      env((a, t, port, st, hints) {
+        st.currentRemote!.setChoice(const StreamChoice('duocolor', 'original', 5));
+        st.rememberStream();
+        expect(st.profiles.resolve('com.apple.Terminal').stream, const StreamChoice('duocolor', 'original', 5));
+        expect(st.hint, '已记为 终端 的默认');
+      }, app: 'com.apple.Terminal', profiles: store());
+    });
+
+    test('logs name the profile and the count, never a title or a pattern (D9)', () {
+      final lines = <String>[];
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(chrome.length, [
+          w(1, title: '我的秘密文件.pdf'),
+          w(2, kind: WindowKind.floating, title: '秘密 下载'),
+        ]));
+        expect(lines, ['rapp: app 配置「Chrome」', 'rapp: app 配置「Chrome」：隐藏 1 个窗口']);
+        for (final l in lines) {
+          expect(l, isNot(contains('秘密')));
+          expect(l, isNot(contains('pdf')));
+          expect(l, isNot(contains('*')));
+        }
+      },
+          app: chrome,
+          log: lines.add,
+          profiles: store(mine: [
+            chromeWith(windows: [const WindowRule(kind: WindowKind.floating, title: '*秘密*', action: RuleAction.hide)])
+          ]));
+    });
+
+    test('a broken apps.json at start shows the hint', () {
+      Directory(shared()).createSync(recursive: true);
+      File('${shared()}/apps.json').writeAsStringSync('[');
+      final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs());
+      expect(st.hint, contains(appsLoadProblem));
+    });
+
+    test('relocate reloads apps.json from the new root and keeps the built-ins', () {
+      final other = Directory.systemTemp.createTempSync('main_state_reloc2');
+      addTearDown(() => other.deleteSync(recursive: true));
+      final d = DataDir(other.path);
+      final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), profiles: store());
+      Directory(d.sharedDir).createSync(recursive: true);
+      File('${d.sharedDir}/apps.json').writeAsStringSync(
+          '{"version":1,"apps":[{"ids":["com.x"],"name":"X","stream":{"mode":"duocolor","density":"adaptive","fps":5}}]}');
+      st.relocate(d);
+      expect(st.profiles.dir, d.sharedDir);
+      expect(st.profiles.resolve('com.x').name, 'X');
+      expect(st.profiles.resolve('com.apple.Terminal').name, '终端');
+      var n = 0;
+      st.addListener(() => n++);
+      st.profiles.addRule('com.x', 'X', hideFloating);
+      expect(n, greaterThan(0));
+    });
+  });
 
     test('opening embeds: open carries embed, then start with defaults', () {
       env((a, t, port, st, hints) {
