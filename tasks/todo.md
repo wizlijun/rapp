@@ -228,6 +228,17 @@
 - [x] P2 多个客户端同时连一个 host：规格 2026-11-12-rapp-multi-client-design.md，计划 2026-11-13-rapp-multi-client.md，代码完成（963e9cf..59dddd7，swift/cargo/flutter 全绿，终审已修）。实机已过（2026-11-13，`scripts/multi-client-loopback.py` 6/6 PASS：接管、坏 token、第三台接管、让位、v5 静默挡）
 - [x] P3 触摸屏双指上滑/下滑（用户 2026-11-12）：spec `docs/superpowers/specs/2026-11-13-rapp-touch-scroll-design.md`；只改 Flutter 嵌入画面（b8b7361 + 评审修复 d0857d0，flutter 649 过，check.sh EXIT=0）。待实机：需要一台触摸屏 B。留待以后：滚动量没按缩放换算成 A 的点数（和触控板现状一致）；双指滑动时每帧会发两条 scroll。会话切换时按住的鼠标键已修（5f47ebb，切换时立即在原会话松开）
 
+## 数据目录 ~/rapp（2026-11-13，规格 2026-11-13-rapp-data-dir-design.md，计划 2026-11-13-rapp-data-dir.md）
+- [x] 代码完成（9053477..37b4c43，feat/app-profiles 上）；终审 1 严重 2 重要已修：不是 rapp 的文件夹不动 git、机密没被挡住就停（3aaea7f）；没装开发者工具不再弹窗（9384c0e）；「直接用」带上本机 local/（054d177）；出错后下一轮重新同步（37b4c43）。cargo 279、flutter 738 过
+- 实机（2026-11-13，用户同意，装 dist/rapp-0.5.1.pkg 测试版）：
+  - [x] PASS `~/rapp` 的树和规格 §1 一致；`local/` 0700，service.json/hosts.json 0600；`local/migrated-from` 是旧目录；旧目录文件都在
+  - [x] PASS 设备 id 没变（local/service.json 的 id 和装之前一样）
+  - [x] PASS 第一次自动提交含 `devices/<id>/device.json`；`git ls-files` 里 `local/`、`files/` 下 0 个
+  - [x] PASS service.log 有 `data_commit {files:6}`，没有文件名
+  - [ ] 待用户在 GUI 里：设备/常用/项目/主题和装之前一样；设置页「数据目录」显示 ~/rapp、「只在本机」，「打开数据目录」；固定文字 → 提示一次、`clipboard/` 多一个 .md、重开后「之前固定的」、取消固定文件没了；下载文件进 `files/transfers/`、「显示位置」；「更改位置…」到空文件夹 → 「复制」→ 指针文件；「改回默认」→「直接用」→ 指针没了
+- [ ] 新问题（实机发现，和数据目录无关）：pkg 的 postinstall 先 `launchctl bootout` 紧接着 `bootstrap`，旧服务还没退完 → 「Bootstrap failed: 5: Input/output error」，装完服务没起来（这次手动 bootstrap 起来了）。要改：bootout 后等到服务真的没了再 bootstrap，失败重试几次
+- 暂缓的小问题（终审 M1–M13）：临时文件名可能撞；复制失败留半截；搬家时正在读写的固定条目；固定失败没提示；「直接用」后新目录的固定条目要重开才出来；复制到 .git/index.lock；输入 `~/` 不展开；.gitignore 的 files/ local/ 没锚定；README 里日志位置在 Linux 上不对；`git init -b` 要 git 2.28+；pull 下来的 workspace.json GUI 不重读（后写的赢）
+
 ## 积压小问题清理（2026-11-13，用户「继续自主完成更多可以完成的任务」）
 
 - [x] 把各阶段暂缓的小问题对照现码过了一遍：8 个要修、18 个不修（外观/推测/要实机）、11 个早已修好
