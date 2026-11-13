@@ -6,6 +6,7 @@ import 'dart:io';
 import '../paths.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 import '../permissions.dart';
 import '../service_client.dart';
@@ -18,6 +19,9 @@ import 'update_section.dart';
 import 'linux_update_section.dart';
 
 const relayLabels = {'connected': '已连接', 'connecting': '连接中', 'off': '未连接'};
+
+/// What the 密码 row shows while hidden: a fixed length, so the real length stays private too.
+const passwordMask = '••••••••';
 
 /// How 立即升级 / 仍然安装 / 回到上一版 leave the app (K28): the service installs once rapp is gone.
 class UpdateHooks {
@@ -71,6 +75,7 @@ Map<String, dynamic> permissionsOf(ServiceStatus st) =>
 
 class _LocalSectionState extends State<LocalSection> {
   bool _busy = false;
+  bool _showPassword = false;
   Timer? _poll;
   bool _guideDecided = false;
 
@@ -196,6 +201,32 @@ class _LocalSectionState extends State<LocalSection> {
     }
   }
 
+  Future<void> _copy(String text, String what) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    _say('已复制$what');
+  }
+
+  Widget _icon(String key, String tip, IconData icon, VoidCallback onPressed) => IconButton(
+      key: Key(key), tooltip: tip, icon: Icon(icon, size: 18), visualDensity: VisualDensity.compact, onPressed: onPressed);
+
+  /// One row per ID, each with its own copy button; the label only on the first.
+  List<Widget> _idRows(List<String> ids) {
+    if (ids.isEmpty) return [_row('ID', '（还没有）')];
+    return [
+      for (final (i, id) in ids.indexed)
+        _row(i == 0 ? 'ID' : '', id, trailing: _icon('copy-id-$i', '复制 ID', Icons.copy, () => _copy(id, ' ID'))),
+    ];
+  }
+
+  Widget _passwordRow(String pw) => _row('密码', _showPassword ? pw : passwordMask,
+      selectable: _showPassword,
+      trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+        _icon('password-reveal', _showPassword ? '隐藏密码' : '显示密码',
+            _showPassword ? Icons.visibility_off : Icons.visibility, () => setState(() => _showPassword = !_showPassword)),
+        _icon('copy-password', '复制密码', Icons.copy, () => _copy(pw, '密码')),
+        _icon('edit-password', '修改密码', Icons.edit, () => _editPassword(pw)),
+      ]));
+
   Future<void> _editPassword(String current) async {
     final pw = TextEditingController(text: current);
     final ok = await _dialog('修改密码', [
@@ -236,11 +267,11 @@ class _LocalSectionState extends State<LocalSection> {
         ),
       );
 
-  Widget _row(String label, String value, {Widget? trailing}) => Padding(
+  Widget _row(String label, String value, {Widget? trailing, bool selectable = true}) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 2),
         child: Row(children: [
           SizedBox(width: 72, child: Text(label, style: const TextStyle(color: Colors.grey))),
-          Expanded(child: SelectableText(value)),
+          Expanded(child: selectable ? SelectableText(value) : Text(value)),
           ?trailing,
         ]),
       );
@@ -264,14 +295,11 @@ class _LocalSectionState extends State<LocalSection> {
         SectionCard(title: '本机', children: [
           _row('服务', st == null ? '未运行（${m.error ?? '连接中'}）' : '运行中'),
           if (st != null) ...[
-            _row('ID', st.shownIds.isEmpty ? '（还没有）' : st.shownIds.join('\n')),
+            ..._idRows(st.shownIds),
             _row('名称', st.name),
-            _row('密码', st.password,
-                trailing: IconButton(
-                    tooltip: '修改密码', icon: const Icon(Icons.edit, size: 18), onPressed: () => _editPassword(st.password))),
+            _passwordRow(st.password),
             _row('中继', '${relayLabels[st.relay] ?? st.relay}${st.relayError == null ? '' : '（${st.relayError}）'}',
-                trailing:
-                    IconButton(tooltip: '修改中继', icon: const Icon(Icons.edit, size: 18), onPressed: _editRelay)),
+                trailing: _icon('edit-relay', '修改中继', Icons.edit, _editRelay)),
             if (_platform == TargetPlatform.macOS)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 2),
