@@ -5,7 +5,7 @@
 //! does not answer, or has no saved address, is offline, not a halt, so it is seen when it comes back.
 //! A does not log pings either.
 
-use crate::link::{is_auth_failure, QUIET};
+use crate::link::QUIET;
 use crate::Hub;
 use rapp_net::log::Lvl;
 use rapp_net::msg::Op;
@@ -37,11 +37,6 @@ pub(crate) async fn run(hub: Arc<Hub>, every: Duration) {
             if hub.hosts.get(&host.id).is_none() {
                 last.remove(&host.id);
                 continue; // removed while the probe was in flight
-            }
-            if let Err(e) = &r {
-                if is_auth_failure(e) {
-                    hub.probe_halt.lock().unwrap().insert(host.id.clone());
-                }
             }
             let online = online(&r);
             if last.insert(host.id.clone(), online) != Some(online) {

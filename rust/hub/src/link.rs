@@ -25,13 +25,6 @@ fn quiet() -> bool {
     QUIET.try_with(|q| *q).unwrap_or(false)
 }
 
-/// An error that retrying with the same saved password will not fix, and that A logs as `auth_fail`:
-/// a probe must stop on these until the user acts on the host.
-pub fn is_auth_failure(e: &anyhow::Error) -> bool {
-    let s = e.to_string();
-    s == "bad password" || s.ends_with(": bad password")
-}
-
 /// A cached connection to a host; always over a saved LAN address.
 #[derive(Clone)]
 pub struct Link {
@@ -56,6 +49,18 @@ async fn exchange(conn: &Connection, lines: &[&Op]) -> Result<(BiStream, Value)>
 
 fn error_of(v: &Value) -> String {
     v["error"].as_str().unwrap_or("bad reply").to_string()
+}
+
+/// The addresses to try, in order. Relay-era lists end in `127.0.0.1:<port>`, which on B is B's own
+/// service, so loopback is skipped when a real address is saved; a list of loopback only (an explicit
+/// `id@127.0.0.1`) is used as is.
+fn dial_order(lan: &[String]) -> Vec<&String> {
+    let loopback = |a: &String| a.parse::<SocketAddr>().map(|a| a.ip().is_loopback()).unwrap_or(false);
+    if lan.iter().any(|a| !loopback(a)) {
+        lan.iter().filter(|a| !loopback(a)).collect()
+    } else {
+        lan.iter().collect()
+    }
 }
 
 impl Hub {
@@ -102,11 +107,17 @@ impl Hub {
     }
 
     async fn first_lan(&self, id: &str, lan: &[String], auth: &Op) -> Option<Connection> {
-        for a in lan {
+        for a in dial_order(lan) {
             match self.dial(a, LAN_WAIT, auth).await {
-                Ok((c, _)) => {
+                Ok((c, r)) if r["id"] == id => {
                     self.route(id, "lan", Some(a), Ok(()));
                     return Some(c);
+                }
+                Ok((c, r)) => {
+                    // Someone else's service (e.g. B's own, from a relay-era loopback entry): not this host.
+                    c.close(0u32.into(), b"wrong host");
+                    let why = format!("is ID {}, not {id}", r["id"].as_str().unwrap_or("?"));
+                    self.route(id, "lan", Some(a), Err(why));
                 }
                 Err(e) => {
                     self.route(id, "lan", Some(a), Err(format!("{e:#}")));
@@ -166,5 +177,26 @@ fn finish((s, r): (BiStream, Value), path: &'static str) -> Result<(BiStream, Va
         Ok((s, r, path))
     } else {
         Err(anyhow!(error_of(&r)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::dial_order;
+
+    fn order(l: &[&str]) -> Vec<String> {
+        let l: Vec<String> = l.iter().map(|s| s.to_string()).collect();
+        dial_order(&l).into_iter().cloned().collect()
+    }
+
+    #[test]
+    fn loopback_is_skipped_only_when_a_real_address_exists() {
+        assert_eq!(
+            order(&["192.168.1.5:22028", "10.0.0.2:22028", "127.0.0.1:22028"]),
+            ["192.168.1.5:22028", "10.0.0.2:22028"]
+        );
+        assert_eq!(order(&["[::1]:22028", "192.168.1.5:22028"]), ["192.168.1.5:22028"]);
+        assert_eq!(order(&["127.0.0.1:22028"]), ["127.0.0.1:22028"]);
+        assert_eq!(order(&["127.0.0.1:1", "127.0.0.2:2"]), ["127.0.0.1:1", "127.0.0.2:2"]);
     }
 }

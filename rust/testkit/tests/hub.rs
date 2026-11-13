@@ -28,7 +28,10 @@ async fn hub_with_host(a: &TestService, home: &std::path::Path) -> Hub {
 async fn open_and_close(hub: &mut Hub, id: &str, path: &str) {
     let r = hub.call(json!({"cmd":"open","id":id,"app":"com.example.echo","req":"o"})).await;
     assert_eq!(r["event"], "opened", "{r}");
-    assert_eq!((&r["id"], &r["app"], &r["path"], &r["req"]), (&json!(id), &json!("com.example.echo"), &json!(path), &json!("o")));
+    assert_eq!(
+        (&r["id"], &r["app"], &r["path"], &r["req"]),
+        (&json!(id), &json!("com.example.echo"), &json!(path), &json!("o"))
+    );
     let sid = r["sid"].clone();
     // Give the fake client time to finish its ping/echo before closing its stdin.
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -55,7 +58,11 @@ async fn add_host_hosts_apps_open_close_remove() {
 
     let r = hub.call(json!({"cmd":"hosts"})).await;
     let h = &r["hosts"][0];
-    assert_eq!((r["hosts"].as_array().unwrap().len(), &h["id"], &h["name"]), (1, &json!(a.id), &json!("test-a")), "{r}");
+    assert_eq!(
+        (r["hosts"].as_array().unwrap().len(), &h["id"], &h["name"]),
+        (1, &json!(a.id), &json!("test-a")),
+        "{r}"
+    );
     // A's LAN address reaches the GUI for 屏幕共享; the password never does.
     assert!(!h["lan"].as_array().unwrap().is_empty(), "{r}");
     assert!(h.get("password").is_none(), "{r}");
@@ -101,7 +108,9 @@ async fn add_host_by_id_at_ip() {
     let mut hub = Hub::start(home.path(), a.bins.path());
     let at = format!("{}@{}", a.id, a_addr(&a.svc));
 
-    let r = hub.call(json!({"cmd":"add_host","id":format!("987654321@{}", a_addr(&a.svc)),"password":PASSWORD,"req":1})).await;
+    let r = hub
+        .call(json!({"cmd":"add_host","id":format!("987654321@{}", a_addr(&a.svc)),"password":PASSWORD,"req":1}))
+        .await;
     assert_eq!(r["event"], "error", "a different ID at that address is refused: {r}");
     let r = hub.call(json!({"cmd":"add_host","id":at,"password":"wrong","req":2})).await;
     assert_eq!(r["event"], "error", "{r}");
@@ -152,7 +161,8 @@ async fn open_unknown_app_worker_failure_is_an_error() {
     // An unlaunchable client wins resolution even when a real Linux client is
     // installed beside the test binaries or on PATH.
     let broken = tempfile::tempdir().unwrap();
-    std::fs::write(broken.path().join(format!("rapp-client{}", std::env::consts::EXE_SUFFIX)), "invalid executable").unwrap();
+    std::fs::write(broken.path().join(format!("rapp-client{}", std::env::consts::EXE_SUFFIX)), "invalid executable")
+        .unwrap();
     let mut hub2 = Hub::start(home.path(), broken.path());
     let r = hub2.call(json!({"cmd":"open","id":a.id,"app":"com.example.echo","req":3})).await;
     assert_eq!(r["event"], "error", "{r}");
@@ -193,7 +203,11 @@ async fn hub_log_records_route_session_and_client_stderr_without_secrets() {
         "{client:?}"
     );
     let closed = &log("closed")[0];
-    assert_eq!((&closed["sid"], &closed["id"], &closed["app"], &closed["reason"]), (&sid, &json!(a.id), &json!("com.example.echo"), &json!("echo ok")), "{closed}");
+    assert_eq!(
+        (&closed["sid"], &closed["id"], &closed["app"], &closed["reason"]),
+        (&sid, &json!(a.id), &json!("com.example.echo"), &json!("echo ok")),
+        "{closed}"
+    );
     assert!(closed["secs"].is_u64(), "{closed}");
 
     // B introduces itself by hostname: A's service log shows it (spec §2).
@@ -247,7 +261,10 @@ async fn second_open_of_the_same_app_reuses_the_session() {
     );
     wait_for_file(&a.bins.path().join("client.focus")).await;
     // A saw one open only.
-    let starts = log_events(a.home.path()).into_iter().filter(|v| v["ev"] == "session_start" && v["app"] == "com.example.echo" && v.get("side").is_none()).count();
+    let starts = log_events(a.home.path())
+        .into_iter()
+        .filter(|v| v["ev"] == "session_start" && v["app"] == "com.example.echo" && v.get("side").is_none())
+        .count();
     assert_eq!(starts, 1);
     let opened: Vec<Value> = read_log(home.path(), "hub.log").into_iter().filter(|v| v["ev"] == "opened").collect();
     assert_eq!(opened.len(), 2);
@@ -699,6 +716,45 @@ async fn host_goes_offline_and_comes_back() {
     hub.finish().await;
 }
 
+/// A relay-era `lan` list ends in `127.0.0.1:<port>`; on B that is B's own service, which accepts the
+/// shared password. Its auth reply names another ID, so it is no answer for this host.
+#[tokio::test]
+async fn another_hosts_service_in_the_lan_list_is_not_this_host() {
+    let mut a = LanA::start().await;
+    let b = service().await; // another ID, the same password
+    let home = tempfile::tempdir().unwrap();
+    let saved =
+        json!([{"id":a.id,"name":"test-a","password":PASSWORD,"lan":[a.addr.to_string(), a_addr(&b.svc).to_string()]}]);
+    rapp_net::config::write_json(&home.path().join("hosts.json"), &saved).unwrap();
+    a.stop();
+    let mut hub = Hub::start_with_presence(home.path(), a.bins.path(), Duration::from_millis(200));
+    for _ in 0..4 {
+        next_presence(&mut hub, &a.id, false).await; // offline each tick, never halted
+    }
+    a.restart().await;
+    next_presence(&mut hub, &a.id, true).await;
+    hub.finish().await;
+    b.svc.stop();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    for v in read_log(b.home.path(), "service.log") {
+        assert!(v["ev"] != "auth_fail", "B's own service was dialed with A's password: {v}");
+    }
+}
+
+#[tokio::test]
+async fn a_single_address_answering_with_another_id_does_not_connect() {
+    let a = service().await;
+    let b = service().await;
+    let home = tempfile::tempdir().unwrap();
+    let saved = json!([{"id":a.id,"name":"test-a","password":PASSWORD,"lan":[a_addr(&b.svc).to_string()]}]);
+    rapp_net::config::write_json(&home.path().join("hosts.json"), &saved).unwrap();
+    let mut hub = Hub::start(home.path(), a.bins.path());
+    let r = hub.call(json!({"cmd":"apps","id":a.id,"req":1})).await;
+    assert_eq!(r["event"], "error", "{r}");
+    assert!(r["error"].as_str().unwrap().starts_with("offline"), "{r}");
+    hub.finish().await;
+}
+
 #[tokio::test]
 async fn bare_id_is_refused_and_nothing_saved() {
     let a = service().await;
@@ -746,11 +802,8 @@ async fn presence_reports_a_host_without_addresses_as_offline_quietly() {
 async fn saved_host_without_addresses_says_so() {
     // hosts.json from before: a bare-ID host the relay never gave LAN addresses for.
     let home = tempfile::tempdir().unwrap();
-    std::fs::write(
-        home.path().join("hosts.json"),
-        r#"[{"id":"123456789","name":"old","password":"pw","lan":[]}]"#,
-    )
-    .unwrap();
+    std::fs::write(home.path().join("hosts.json"), r#"[{"id":"123456789","name":"old","password":"pw","lan":[]}]"#)
+        .unwrap();
     let bins = bins();
     let mut hub = Hub::start(home.path(), bins.path());
     let r = hub.call(json!({"cmd":"apps","id":"123456789","req":1})).await;
