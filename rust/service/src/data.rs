@@ -16,6 +16,8 @@ use tokio::task::JoinHandle;
 pub const SYNC_FILE: &str = "sync.json";
 /// Longest a single git command may run.
 const GIT_TIMEOUT: Duration = Duration::from_secs(120);
+/// A missing git is looked for again at most this often (D6).
+const REPROBE: Duration = Duration::from_secs(600);
 /// Paths (relative to the root, need not exist) that must be git-ignored before anything is added (D4).
 const SECRETS: [&str; 4] = ["local/service.json", "local/hosts.json", "local/ipc.token", "files/x"];
 
@@ -27,6 +29,8 @@ pub struct DataOpts {
     pub pull_every: Duration,
     /// Added to every git child's environment, after the cleaning.
     pub git_env: Vec<(String, String)>,
+    /// True when running `git` would only pop up macOS's "install developer tools" dialog.
+    pub no_dev_tools: fn(&Path) -> bool,
 }
 
 impl DataOpts {
@@ -37,6 +41,7 @@ impl DataOpts {
             commit_every: Duration::from_secs(60),
             pull_every: Duration::from_secs(300),
             git_env: Vec::new(),
+            no_dev_tools,
         }
     }
 }
@@ -60,6 +65,9 @@ pub struct DataGit {
     status: SyncStatus,
     pull_every: Duration,
     last_pull: Option<Instant>,
+    no_dev_tools: fn(&Path) -> bool,
+    /// When git was last found missing; it is probed again only after `REPROBE`.
+    missing_at: Option<Instant>,
     /// A rebase hit a conflict; only commit until the next start (R11).
     conflict: bool,
 }
@@ -79,6 +87,8 @@ impl DataGit {
             status,
             pull_every: opts.pull_every,
             last_pull: None,
+            no_dev_tools: opts.no_dev_tools,
+            missing_at: None,
             conflict: false,
         }
     }
@@ -103,9 +113,14 @@ impl DataGit {
     /// The step that failed is the error; a fetch/push failure also carries the scrubbed last stderr line.
     /// `Ok(None)`: nothing to do this round, keep the previous status.
     async fn round(&mut self) -> Result<Option<&'static str>, Fail> {
-        if self.run(&["--version"]).await.is_none() {
+        if self.missing_at.is_some_and(|t| t.elapsed() < REPROBE) {
             return Ok(Some("missing"));
         }
+        if (self.no_dev_tools)(&self.git) || self.run(&["--version"]).await.is_none() {
+            self.missing_at = Some(Instant::now());
+            return Ok(Some("missing"));
+        }
+        self.missing_at = None;
         if !is_rapp_root(&self.root) {
             return Err(Fail("readme", Some("这个文件夹不是 rapp 的数据目录".into())));
         }
@@ -299,6 +314,30 @@ fn net_message(step: &str, o: &Out) -> String {
     }
 }
 
+/// The real probe: on macOS, `git` is `/usr/bin/git` (the xcode-select shim) and `xcode-select -p` fails.
+fn no_dev_tools(git: &Path) -> bool {
+    let quiet = || Stdio::null();
+    cfg!(target_os = "macos")
+        && is_shim(git, &std::env::var_os("PATH").unwrap_or_default())
+        && !std::process::Command::new("/usr/bin/xcode-select")
+            .arg("-p")
+            .stdin(quiet())
+            .stdout(quiet())
+            .stderr(quiet())
+            .status()
+            .is_ok_and(|s| s.success())
+}
+
+/// `git` resolves, through `path` when it is a bare name, to macOS's `/usr/bin/git`.
+fn is_shim(git: &Path, path: &std::ffi::OsStr) -> bool {
+    let resolved = if git.components().count() > 1 {
+        Some(git.to_path_buf())
+    } else {
+        std::env::split_paths(path).map(|d| d.join(git)).find(|p| p.is_file())
+    };
+    resolved.as_deref() == Some(Path::new("/usr/bin/git"))
+}
+
 /// `README.md` starts with rapp's marker; anything else is someone else's folder and git stays away.
 fn is_rapp_root(root: &Path) -> bool {
     std::fs::read_to_string(root.join("README.md"))
@@ -375,6 +414,7 @@ mod tests {
 
     fn opts(root: &Path) -> DataOpts {
         DataOpts {
+            no_dev_tools: |_| false,
             git_env: GIT_ENV.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
             ..DataOpts::system(root.to_path_buf())
         }
@@ -483,6 +523,48 @@ mod tests {
         assert_eq!(git(&root, &["ls-files"]).trim(), "");
         let logged = std::fs::read_to_string(t.path().join("logs/service.log")).unwrap_or_default();
         assert!(!logged.contains("service.json") && !logged.contains("local/"), "{logged}");
+    }
+
+    static PROBES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+    fn counted_shim(_: &Path) -> bool {
+        PROBES.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        true
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn without_dev_tools_git_is_never_run_and_probed_again_after_10_minutes() {
+        use std::os::unix::fs::PermissionsExt;
+        let (t, root) = prepared();
+        let ran = t.path().join("ran");
+        let fake = t.path().join("git");
+        std::fs::write(&fake, format!("#!/bin/sh\necho x >> '{}'\n", ran.display())).unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let o = DataOpts { git: fake, no_dev_tools: counted_shim, ..opts(&root) };
+        let mut g = DataGit::new(&o, "test-a", log(&t));
+        let probes = || PROBES.load(std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(g.tick().await.git, "missing");
+        assert_eq!(g.tick().await.git, "missing");
+        assert_eq!(probes(), 1, "a missing result is cached");
+        g.missing_at = Instant::now().checked_sub(Duration::from_secs(9 * 60));
+        assert_eq!(g.tick().await.git, "missing");
+        assert_eq!(probes(), 1, "not yet 10 minutes");
+        g.missing_at = Instant::now().checked_sub(Duration::from_secs(10 * 60 + 1));
+        assert_eq!(g.tick().await.git, "missing");
+        assert_eq!(probes(), 2, "probed again after 10 minutes");
+        assert!(!ran.exists(), "git was never run");
+        assert!(!root.join(".git").exists());
+    }
+
+    #[test]
+    fn only_usr_bin_git_is_the_shim() {
+        let t = tempfile::tempdir().unwrap();
+        std::fs::write(t.path().join("git"), "").unwrap();
+        assert!(is_shim(Path::new("/usr/bin/git"), "".as_ref()));
+        assert!(!is_shim(Path::new("git"), t.path().as_os_str()));
+        assert!(!is_shim(&t.path().join("git"), "".as_ref()));
+        assert!(!is_shim(Path::new("git"), "".as_ref()));
     }
 
     #[tokio::test]

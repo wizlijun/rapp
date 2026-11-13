@@ -35,7 +35,7 @@
        files/             二进制，不进 git：transfers/（收发的文件）  clipboard/（钉住的图片和文件）
        local/             本机私有，不进 git，0700：service.json  hosts.json  ipc.token  update.json  ……（§3）
      ```
-   - **进 git 的**：`shared/`、`devices/`、`agent/`、`clipboard/`、`README.md`、`.gitignore`。**不进 git 的**：`files/`、`local/`（写在 `.gitignore` 里）。rapp-service 在改动后 60 秒内合成一次提交（`rust/service/src/data.rs:37`）。
+   - **进 git 的**：`shared/`、`devices/`、`agent/`、`clipboard/`、`README.md`、`.gitignore`。**不进 git 的**：`files/`、`local/`（写在 `.gitignore` 里）。rapp-service 在改动后 60 秒内合成一次提交（`rust/service/src/data.rs:41`）。
    - **机密只在 `local/`**。`shared/`、`devices/`、`agent/`、`clipboard/` 里不写口令、key、secret、token；agent 往这些目录写东西时也一样。
    - 路径函数：Rust `local`/`shared`/`device`/`files`（`rust/net/src/config.rs:79-93`），Dart `DataDir`（`gui/lib/paths.dart:60-72`）。
    - 文件先写临时文件再改名；机密文件权限 `0600`。
@@ -136,7 +136,7 @@ agent 规则：**不直接改这个文件**。加、删设备走 GUI 的设备�
 
 ### 2.6 `$ROOT/devices/<id>/device.json`（这台设备是什么）
 
-程序自管，**不要改**，只读。rapp-service 写（`rust/service/src/data.rs:333-343`），内容 `{"id","name","os","version"}`，给别的设备和 agent 看这台是什么。没有口令和地址，没有机密。内容没变就不重写。
+程序自管，**不要改**，只读。rapp-service 写（`rust/service/src/data.rs:372-382`），内容 `{"id","name","os","version"}`，给别的设备和 agent 看这台是什么。没有口令和地址，没有机密。内容没变就不重写。
 
 ### 2.7 `<旧配置目录>/data-root`（数据根目录指针）
 
@@ -159,7 +159,7 @@ agent 规则：**不直接改这个文件**。加、删设备走 GUI 的设备�
 | `$ROOT/local/update-applied.json` | A | 上次升级的记录，用于回滚和授权提示（`rust/update/src/apply.rs:10`） | |
 | `$ROOT/local/previous/` | A | 升级前的旧版，用于回滚（`rust/service/src/update.rs:136`） | |
 | `$ROOT/local/last-dr` | A | 上次运行时的签名要求（一个字符串），升级时对照用（`rust/service/src/update.rs:242`） | |
-| `$ROOT/local/sync.json` | A | rapp-service 写的 git 状态：`git`（`missing`、`local`、`synced`、`conflict`、`error`）、`last_commit`、`last_sync`、`error`（不含远端地址里的口令）；GUI 读（`rust/service/src/data.rs:44-50`） | |
+| `$ROOT/local/sync.json` | A | rapp-service 写的 git 状态：`git`（`missing`、`local`、`synced`、`conflict`、`error`）、`last_commit`、`last_sync`、`error`（不含远端地址里的口令）；GUI 读（`rust/service/src/data.rs:49-55`） | |
 | `$ROOT/local/migrated-from` | A、B | 搬家时写的旧目录路径，只是记录（`rust/net/src/datadir.rs:12`） | |
 | `$ROOT/local/pin-hint-shown` | B | 「钉住会进 git 历史」的提示已经显示过的标记，没有内容（`gui/lib/ui/pin_files.dart:10`）。删掉它，下次钉住时会再提示 | |
 | `~/Library/Caches/rapp/update` | A（macOS） | 升级包下载缓存 | |

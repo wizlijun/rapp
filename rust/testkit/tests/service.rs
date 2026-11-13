@@ -817,6 +817,7 @@ async fn service_with_a_data_dir_commits_its_device_json() {
         data: Some(rapp_service::DataOpts {
             commit_every: Duration::from_millis(200),
             git_env: git_env.clone(),
+            no_dev_tools: |_| false,
             ..rapp_service::DataOpts::system(root.clone())
         }),
     })
