@@ -15,3 +15,5 @@
 - `topat` 按窗口所属 app 的名字判断"是不是 rapp"不够：用户机上常同时开着自己的 rapp GUI、rapp-client 和连接管理窗口，都叫 rapp。合成点击前要按 PID 判断（`s2live/topatp`）。
 - 实机检查要用户把电脑让出来一段时间。用户在用的时候测试 GUI 会被抢焦点、甚至被用户 ⌘Q 关掉；这时停下、记"待实机"，不要反复把自己的窗口提到前面。
 - Flutter 里祖先已经 `Focus(autofocus: true)` 时，子控件的 `autofocus` 不起作用；要在下一帧 `requestFocus()`。
+- rapp.app 里装着多个可执行文件（GUI、rapp-client、rapp-host、rapp-service）。要重启「自己」时不能用 `Bundle.main.executableURL`——那是 bundle 的主程序（GUI）；要用 `CommandLine.arguments[0]` 按当前目录解析成绝对路径。
+- 跨进程的名字（设备名、`taken over by X`）在进入日志和界面前要过 `rapp_net::log::clean_name`（去控制字符和 bidi、截到 64）；新加一条带名字的路径时先查它是否经过这里。
