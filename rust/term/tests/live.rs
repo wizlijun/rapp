@@ -644,13 +644,15 @@ async fn viewing_marks_the_session_seen() {
     let unread = Arc::new(Mutex::new(Unread::new(unix_now() - 100)));
     s.raw(&["new-session", "-d", "-s", "u", "-x", "80", "-y", "24", "echo hi; sleep 60"]);
     tokio::time::sleep(Duration::from_secs(4)).await; // output, then more than 3 quiet seconds
-    let activity = s.tmux().list().await.unwrap()[0].activity;
-    assert!(unread.lock().unwrap().is_unread("u", activity, unix_now()));
+                                                      // Unread state is kept by session id, which a rename does not change.
+    let one = s.tmux().list().await.unwrap()[0].clone();
+    let (sid, activity) = (one.session_id, one.activity);
+    assert!(unread.lock().unwrap().is_unread(&sid, activity, unix_now()));
     let mut p = pump(&s, "u", unread.clone());
     let (pane, _) = greeted(&mut p).await;
     say(&mut p.w, view(&pane, 80, 24)).await;
     assert!(matches!(next_not_panes(&mut p.lines).await, Out::Screen { .. }));
-    assert!(!unread.lock().unwrap().is_unread("u", activity, unix_now()));
+    assert!(!unread.lock().unwrap().is_unread(&sid, activity, unix_now()));
 }
 
 #[tokio::test]

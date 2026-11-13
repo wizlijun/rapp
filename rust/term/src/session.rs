@@ -59,7 +59,6 @@ where
     };
     let mut p = Pump {
         tmux,
-        session,
         sid,
         attached: 0,
         w,
@@ -320,8 +319,7 @@ enum Paste {
 
 struct Pump<'a, W> {
     tmux: &'a Tmux,
-    /// The session's name, which unread state is kept under.
-    session: &'a str,
+    /// The session's id, which unread state is kept under: a rename does not change it.
     sid: String,
     /// How many clients the session had at the last listing, rapp's own included.
     attached: u32,
@@ -672,7 +670,7 @@ impl<W: AsyncWrite + Unpin> Pump<'_, W> {
     async fn put(&mut self, m: &Out) -> anyhow::Result<()> {
         put(&mut self.w, m).await?;
         if matches!(m, Out::Screen { .. }) {
-            self.unread.lock().unwrap_or_else(|e| e.into_inner()).seen(self.session, unix_now());
+            self.unread.lock().unwrap_or_else(|e| e.into_inner()).seen(&self.sid, unix_now());
         }
         Ok(())
     }

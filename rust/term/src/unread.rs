@@ -19,13 +19,13 @@ impl Unread {
     }
 
     /// Record that the session was looked at now.
-    pub fn seen(&mut self, session: &str, now: u64) {
-        self.seen.insert(session.to_string(), now);
+    pub fn seen(&mut self, session_id: &str, now: u64) {
+        self.seen.insert(session_id.to_string(), now);
     }
 
     /// True when output at `activity` came after the last look and the session has been quiet for `QUIET_SECS`.
-    pub fn is_unread(&self, session: &str, activity: u64, now: u64) -> bool {
-        let last_seen = self.seen.get(session).copied().unwrap_or(0);
+    pub fn is_unread(&self, session_id: &str, activity: u64, now: u64) -> bool {
+        let last_seen = self.seen.get(session_id).copied().unwrap_or(0);
         activity > self.started.max(last_seen) && now.saturating_sub(activity) >= QUIET_SECS
     }
 }
