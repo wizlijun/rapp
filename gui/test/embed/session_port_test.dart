@@ -117,7 +117,7 @@ void main() {
     final port = FakeSessionPort();
     port.setHidden(3, [7, 9]);
     await pumpEventQueue();
-    expect(port.calls.last, ('set_hidden', {'sid': 3, 'windows': [7, 9]}));
+    expect(port.calls.last, ('set_hidden', <String, Object?>{'sid': 3, 'windows': [7, 9]}));
   });
 
   test('the fake records the channel arguments and emits events', () async {
