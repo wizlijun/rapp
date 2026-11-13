@@ -12,8 +12,8 @@ use rapp_relay2::server::{Opts, Relay};
 use rapp_wire::line::read_json;
 use rapp_wire::msg::{Push, Req};
 use rapp_wire::tls::{self, BiStream, Expect};
-use rapp_wire::{join_hash, Identity, Key};
-use serde_json::Value;
+use rapp_wire::{join_hash, Fp, Identity, Key};
+use serde_json::{json, Value};
 use tempfile::TempDir;
 use tokio::io::BufReader;
 use tokio::sync::mpsc;
@@ -108,12 +108,83 @@ impl FakeDevice {
 
     /// Dials `addr` from a fresh client endpoint; errors carry the `quinn::ConnectionError`.
     pub async fn dial_to(addr: SocketAddr, id: Identity, expect: Expect) -> Result<FakeDevice> {
+        FakeDevice::dial_with(addr, id, expect, true).await
+    }
+
+    /// `auto_reply`: answer every `Incoming` with `{"ok":true}` (it still goes to `pushes`).
+    async fn dial_with(addr: SocketAddr, id: Identity, expect: Expect, auto_reply: bool) -> Result<FakeDevice> {
         let endpoint = client_endpoint();
         let cc = tls::client_config(&id, tls::ALPN_RELAY, expect)?;
         let conn = tokio::time::timeout(WAIT, endpoint.connect_with(cc, addr, tls::SNI)?).await??;
         let (tx, pushes) = mpsc::unbounded_channel();
-        tokio::spawn(pump(conn.clone(), tx));
+        tokio::spawn(pump(conn.clone(), tx, auto_reply));
         Ok(FakeDevice { id, conn, pushes, _endpoint: endpoint })
+    }
+
+    /// A new identity, connected and enrolled.
+    pub async fn enrolled(r: &TestRelay) -> FakeDevice {
+        FakeDevice::enrolled_as(r, Identity::generate().unwrap()).await
+    }
+
+    /// `id`, connected and enrolled (enrolling again is a no-op for a device the relay knows).
+    pub async fn enrolled_as(r: &TestRelay, id: Identity) -> FakeDevice {
+        let d = FakeDevice::dial_as(r, id).await.expect("dial relay");
+        let v = d.enroll(&r.key).await;
+        assert_eq!(v["ok"], true, "enroll: {v}");
+        d
+    }
+
+    /// Like `enrolled`, but never answers `Incoming`.
+    pub async fn enrolled_silent(r: &TestRelay) -> FakeDevice {
+        let expect = Expect::Pin(r.relay.fp.prefix16());
+        let id = Identity::generate().unwrap();
+        let d = FakeDevice::dial_with(r.relay.addr, id, expect, false).await.expect("dial relay");
+        let v = d.enroll(&r.key).await;
+        assert_eq!(v["ok"], true, "enroll: {v}");
+        d
+    }
+
+    pub async fn register(&self, id: &str, lan: &[&str]) -> Value {
+        self.req(&Req::Register { id: id.into(), lan: lan.iter().map(|s| s.to_string()).collect() }).await
+    }
+
+    pub async fn connect_to(&self, id: &str) -> Value {
+        self.req(&Req::Connect { id: id.into() }).await
+    }
+
+    /// This device's address as the relay sees it.
+    pub fn local_addr(&self) -> SocketAddr {
+        self._endpoint.local_addr().unwrap()
+    }
+
+    /// The next push of any kind, within `WAIT`.
+    pub async fn next_push(&mut self) -> Push {
+        let got = tokio::time::timeout(WAIT, self.pushes.recv()).await.expect("a push within WAIT");
+        got.expect("push channel open").0
+    }
+
+    /// The next `Incoming` as `(peer, fp)`, skipping other pushes.
+    pub async fn next_incoming(&mut self) -> (String, Fp) {
+        loop {
+            if let Push::Incoming { peer, fp } = self.next_push().await {
+                return (peer, fp);
+            }
+        }
+    }
+
+    /// The next `Revoked` list, skipping other pushes.
+    pub async fn next_revoked(&mut self) -> Vec<Fp> {
+        loop {
+            if let Push::Revoked { fps } = self.next_push().await {
+                return fps;
+            }
+        }
+    }
+
+    /// Closes the connection (code 0) and waits until the close has gone out.
+    pub async fn close(self) {
+        self.conn.close(0u32.into(), b"bye");
+        let _ = tokio::time::timeout(WAIT, self._endpoint.wait_idle()).await;
     }
 
     /// Opens a stream, writes `bytes` as they are, finishes, and reads one reply line.
@@ -138,15 +209,22 @@ impl FakeDevice {
 }
 
 /// Hands every stream the relay opens to `tx`: bi streams with their first line read,
-/// uni streams read whole. Ends quietly when the connection does.
-async fn pump(conn: quinn::Connection, tx: mpsc::UnboundedSender<(Push, Option<BiStream>)>) {
+/// uni streams read whole. Ends quietly when the connection does. With `auto_reply`, every
+/// `Incoming` is answered `{"ok":true}` before it is handed on.
+async fn pump(conn: quinn::Connection, tx: mpsc::UnboundedSender<(Push, Option<BiStream>)>, auto_reply: bool) {
     loop {
         tokio::select! {
             bi = conn.accept_bi() => {
-                let Ok((send, mut recv)) = bi else { return };
+                let Ok((mut send, mut recv)) = bi else { return };
                 let tx = tx.clone();
                 tokio::spawn(async move {
                     if let Ok(p) = read_push(&mut recv).await {
+                        if auto_reply && matches!(p, Push::Incoming { .. }) {
+                            let mut line = json!({"ok": true}).to_string().into_bytes();
+                            line.push(b'\n');
+                            let _ = send.write_all(&line).await;
+                            let _ = send.finish();
+                        }
                         let _ = tx.send((p, Some(tls::bi((send, recv)))));
                     }
                 });
