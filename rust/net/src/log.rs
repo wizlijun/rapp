@@ -233,7 +233,7 @@ pub fn timestamp(t: SystemTime) -> String {
     )
 }
 
-/// `RAPP_LOG_DIR`, else `$RAPP_HOME/logs`, else the platform log dir + `rapp` (spec §3).
+/// `RAPP_LOG_DIR`, else `$RAPP_HOME/local/logs`, else the platform log dir + `rapp` (spec §3).
 pub fn log_dir() -> PathBuf {
     log_dir_from(|k| std::env::var_os(k))
 }
@@ -245,7 +245,7 @@ fn log_dir_from(var: impl Fn(&str) -> Option<std::ffi::OsString>) -> PathBuf {
         return d;
     }
     if let Some(h) = env("RAPP_HOME") {
-        return h.join("logs");
+        return h.join("local").join("logs");
     }
     let user = env("HOME").unwrap_or_else(|| PathBuf::from("."));
     if cfg!(target_os = "macos") {
@@ -464,8 +464,8 @@ mod tests {
         };
         let both = env(&[("RAPP_LOG_DIR", "/l"), ("RAPP_HOME", "/h"), ("HOME", "/u")]);
         assert_eq!(log_dir_from(both), PathBuf::from("/l"));
-        assert_eq!(log_dir_from(env(&[("RAPP_HOME", "/h"), ("HOME", "/u")])), PathBuf::from("/h/logs"));
-        assert_eq!(log_dir_from(env(&[("RAPP_LOG_DIR", ""), ("RAPP_HOME", "/h")])), PathBuf::from("/h/logs"));
+        assert_eq!(log_dir_from(env(&[("RAPP_HOME", "/h"), ("HOME", "/u")])), PathBuf::from("/h/local/logs"));
+        assert_eq!(log_dir_from(env(&[("RAPP_LOG_DIR", ""), ("RAPP_HOME", "/h")])), PathBuf::from("/h/local/logs"));
         #[cfg(target_os = "macos")]
         assert_eq!(log_dir_from(env(&[("HOME", "/u")])), PathBuf::from("/u/Library/Logs/rapp"));
     }

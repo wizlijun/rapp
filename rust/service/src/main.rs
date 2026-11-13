@@ -1,4 +1,4 @@
-//! `rapp-service` — no arguments. Config dir: `RAPP_HOME` or the platform default.
+//! `rapp-service` — no arguments. Data root: `$RAPP_HOME`, the `data-root` pointer file, or `~/rapp`.
 //! Env: `RAPP_BIN_DIR` (where rapp-host lives), `RAPP_GUI` (the `rapp` GUI for `--cm`),
 //! `RAPP_LOG_DIR` (where `service.log` goes; see `rapp_net::log::log_dir`).
 
@@ -8,7 +8,7 @@ use std::sync::Arc;
 #[tokio::main]
 async fn main() {
     if std::env::args().len() > 1 {
-        eprintln!("usage: rapp-service   (config: $RAPP_HOME/service.json)");
+        eprintln!("usage: rapp-service   (data root: $RAPP_HOME, data-root pointer or ~/rapp)");
         std::process::exit(2);
     }
     let home = rapp_net::config::home();
