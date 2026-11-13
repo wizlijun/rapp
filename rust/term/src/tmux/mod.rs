@@ -7,7 +7,13 @@ pub mod parse;
 use crate::runner::{classify, RunFail, Runner};
 use crate::screen::Screen;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::AsyncWriteExt;
+
+/// The most text one paste may carry, in bytes.
+pub const MAX_PASTE: usize = 1_048_576;
+
+static PASTE_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// A tmux on some host, optionally on a named socket.
 #[derive(Clone, Debug)]
@@ -60,6 +66,40 @@ impl Tmux {
             return Ok(d.stdout);
         }
         Err(Self::failure(&d))
+    }
+
+    /// Like `run_stdin` for input commands: a failure keeps only its kind, never tmux's own words.
+    async fn run_input(&self, args: &[String], stdin: &[u8]) -> anyhow::Result<()> {
+        let d = self.exec(args, stdin).await?;
+        if d.code == Some(0) {
+            return Ok(());
+        }
+        match classify(d.code, &d.stderr) {
+            RunFail::Other(_) => match d.code {
+                Some(c) => anyhow::bail!("tmux refused the input (exit code {c})"),
+                None => anyhow::bail!("tmux refused the input (terminated by a signal)"),
+            },
+            kind => anyhow::bail!("could not send input: {kind}"),
+        }
+    }
+
+    /// Send keys or typed text, built by `cmd::send_named` / `cmd::send_hex`, once.
+    pub async fn send(&self, args: Vec<String>) -> anyhow::Result<()> {
+        self.run_input(&args, &[]).await
+    }
+
+    /// Paste `text` into `pane` as one bracketed paste through a throwaway buffer; `enter` adds an Enter after it.
+    pub async fn paste(&self, pane: &str, text: &str, enter: bool) -> anyhow::Result<()> {
+        if text.len() > MAX_PASTE {
+            anyhow::bail!("text is too long (1 MiB at most)");
+        }
+        let name = format!("rapp-{}-{}", std::process::id(), PASTE_SEQ.fetch_add(1, Ordering::Relaxed));
+        self.run_input(&cmd::load_buffer(&name), text.as_bytes()).await?;
+        self.run_input(&cmd::paste_buffer(&name, pane), &[]).await?;
+        if enter {
+            self.send(cmd::send_named(pane, &["Enter".to_string()])).await?;
+        }
+        Ok(())
     }
 
     fn failure(d: &Done) -> anyhow::Error {

@@ -154,3 +154,41 @@ async fn control_replies_stay_with_their_commands_when_hooks_run() {
     }
     ctl.detach().await;
 }
+
+#[tokio::test]
+async fn types_cjk_and_named_keys() {
+    let Some(s) = common::Server::start() else { return };
+    s.raw(&["new-session", "-d", "-s", "k", "-x", "80", "-y", "10", "cat"]);
+    let t = s.tmux();
+    let pane = t.list().await.unwrap()[0].pane.clone();
+    t.send(cmd::send_hex(&pane, &rapp_term::keys::utf8_hex("你好 it's"))).await.unwrap();
+    t.send(cmd::send_named(&pane, &["Enter".into()])).await.unwrap();
+    common::settle().await;
+    let sc = t.capture(&pane).await.unwrap();
+    assert_eq!((sc.lines[0].as_str(), sc.lines[1].as_str()), ("你好 it's", "你好 it's"));
+}
+
+#[tokio::test]
+async fn pastes_multiline_text_as_one_bracketed_paste_and_leaves_no_buffer() {
+    let Some(s) = common::Server::start() else { return };
+    s.raw(&["new-session", "-d", "-s", "p", "-x", "80", "-y", "10", "printf '\\033[?2004h'; cat -v"]);
+    common::settle().await;
+    let t = s.tmux();
+    let pane = t.list().await.unwrap()[0].pane.clone();
+    t.paste(&pane, "第一行\n第二行 it's \"q\"", false).await.unwrap();
+    common::settle().await;
+    let sc = t.capture(&pane).await.unwrap();
+    assert!(sc.lines[0].starts_with("^[[200~"));
+    assert!(sc.lines.iter().any(|l| l.contains("^[[201~")));
+    assert!(!s.raw(&["list-buffers"]).contains("rapp-"));
+}
+
+#[tokio::test]
+async fn refuses_a_paste_over_one_mebibyte() {
+    let Some(s) = common::Server::start() else { return };
+    s.raw(&["new-session", "-d", "-s", "p", "cat"]);
+    let t = s.tmux();
+    let pane = t.list().await.unwrap()[0].pane.clone();
+    let e = t.paste(&pane, &"x".repeat(1_048_577), false).await.unwrap_err();
+    assert_eq!(e.to_string(), "text is too long (1 MiB at most)");
+}

@@ -48,6 +48,30 @@ pub fn history(pane: &str, before: u32, lines: u32) -> Vec<String> {
     ["capture-pane", "-e", "-p", "-t", pane, "-S", &start, "-E", &end].map(String::from).to_vec()
 }
 
+/// Send named keys (tmux key names) to `pane`.
+pub fn send_named(pane: &str, names: &[String]) -> Vec<String> {
+    let mut v: Vec<String> = ["send-keys", "-t", pane].map(String::from).to_vec();
+    v.extend(names.iter().cloned());
+    v
+}
+
+/// Send raw bytes, each given as two hex digits, to `pane`.
+pub fn send_hex(pane: &str, hex: &[String]) -> Vec<String> {
+    let mut v: Vec<String> = ["send-keys", "-t", pane, "-H"].map(String::from).to_vec();
+    v.extend(hex.iter().cloned());
+    v
+}
+
+/// Load the named paste buffer from stdin.
+pub fn load_buffer(name: &str) -> Vec<String> {
+    ["load-buffer", "-b", name, "-"].map(String::from).to_vec()
+}
+
+/// Paste the named buffer into `pane` as a bracketed paste and delete the buffer.
+pub fn paste_buffer(name: &str, pane: &str) -> Vec<String> {
+    ["paste-buffer", "-p", "-d", "-b", name, "-t", pane].map(String::from).to_vec()
+}
+
 /// A control-mode client of the session `session_id`.
 pub fn attach(session_id: &str) -> Vec<String> {
     ["-C", "attach-session", "-t", session_id].map(String::from).to_vec()
@@ -83,6 +107,13 @@ mod tests {
         );
         assert_eq!(list_panes()[0], "list-panes");
         assert_eq!(attach("$3"), ["-C", "attach-session", "-t", "$3"]);
+    }
+    #[test]
+    fn input_builders() {
+        assert_eq!(send_named("%1", &["Enter".into()]), ["send-keys", "-t", "%1", "Enter"]);
+        assert_eq!(send_hex("%1", &["61".into()]), ["send-keys", "-t", "%1", "-H", "61"]);
+        assert_eq!(load_buffer("rapp-1-0"), ["load-buffer", "-b", "rapp-1-0", "-"]);
+        assert_eq!(paste_buffer("rapp-1-0", "%1"), ["paste-buffer", "-p", "-d", "-b", "rapp-1-0", "-t", "%1"]);
     }
     #[test]
     fn history_range_counts_up_from_the_screen() {
