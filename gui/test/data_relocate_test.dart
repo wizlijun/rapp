@@ -19,6 +19,12 @@ void main() {
     expect(planRelocation('/t/rapp', '/t/rapp2').error, isNull);
   });
 
+  test('dot-dot paths are resolved before comparing', () {
+    expect(planRelocation('/t/rapp', '/t/x/../rapp').error, '已经是这个位置');
+    expect(planRelocation('/t/rapp', '/t/rapp/sub/../..').error, nested);
+    expect(planRelocation('/t/rapp', '/t/rapp/./sub').error, nested);
+  }, skip: Platform.isWindows);
+
   test('refuses a non-empty folder that is not rapp\'s', () {
     final to = Directory('${tmp.path}/to')..createSync();
     File('${to.path}/x.txt').writeAsStringSync('x');

@@ -8,7 +8,8 @@ import 'ui/main_state.dart';
 enum RelocateKind { copy, adopt }
 
 String _norm(String p) {
-  var s = Directory(p).absolute.path;
+  final win = Platform.isWindows;
+  var s = Uri.file(Directory(p).absolute.path, windows: win).normalizePath().toFilePath(windows: win);
   while (s.length > 1 && (s.endsWith('/') || s.endsWith(Platform.pathSeparator))) {
     s = s.substring(0, s.length - 1);
   }
