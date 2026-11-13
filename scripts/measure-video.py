@@ -7,12 +7,13 @@ Needs: cargo build --release (rust/), cargo build --release -p rapp-testkit, swi
 Keep the test page window visible and frontmost while it runs: the clip's own frame rate falls when it is not.
 Shares TestApp / wait_until with measure-weak.py (one clock, CLOCK_UPTIME_RAW).
 """
-import argparse, bisect, collections, importlib.util, os, queue, shutil, statistics, struct, sys, tempfile, time
+import argparse, importlib.util, os, queue, shutil, statistics, sys, tempfile, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "lib"))
 from rig import Rig
 from bside import BSide, uptime_ns
+from marks import load_marks, first_arrivals, latencies
 
 _spec = importlib.util.spec_from_file_location("measure_weak", os.path.join(HERE, "measure-weak.py"))
 weak = importlib.util.module_from_spec(_spec)
@@ -64,12 +65,7 @@ def measure(args, work):
         app.stop()
         crashes += [f"{n} (rig)" for n in rig.alive()]
         rig.close()
-    data = open(marks, "rb").read()
-    draws = collections.defaultdict(list)
-    for off in range(0, len(data) - len(data) % 10, 10):
-        n, ns = struct.unpack_from("<HQ", data, off)
-        draws[n].append(ns)
-    frames = [(t, m) for t, m in frames if t_start <= t <= t_end]
+    draws = load_marks(marks)
     return dict(frames=frames, draws=draws, traffic=[x for x in traffic if x[0] >= t_start], t_start=t_start,
                 t_end=t_end, crashes=crashes, disconnected=disconnected, unreadable=unreadable,
                 total_frames=total_frames, drawn=sum(len(v) for v in draws.values()))
@@ -77,11 +73,9 @@ def measure(args, work):
 
 def analyse(r):
     out = {}
-    firsts, last = [], None  # distinct frame numbers, first arrival of each
-    for t, m in r["frames"]:
-        if m != last:
-            firsts.append((t, m))
-        last = m
+    # first arrival of each distinct frame, over all frames (so a run that began before t_start is not counted
+    # again), then only those inside the window
+    firsts = [(t, m) for t, m in first_arrivals(r["frames"]) if r["t_start"] <= t <= r["t_end"]]
     secs = int((r["t_end"] - r["t_start"]) // NS)
     per = [0] * secs
     for t, _ in firsts:
@@ -89,14 +83,11 @@ def analyse(r):
         if k < secs:
             per[k] += 1
     out["per_sec"] = per
-    out["gaps"] = [(b[0] - a[0]) / NS for a, b in zip(firsts, firsts[1:])]
-    lat = []
-    for t, m in r["frames"]:
-        times = r["draws"].get(m)
-        i = bisect.bisect_right(times, t) - 1 if times else -1
-        if i >= 0:
-            lat.append((t - times[i]) / NS)
-    out["lat"] = lat
+    # gaps include the edges: t_start -> first distinct frame, last distinct frame -> t_end (no frame at all: the
+    # whole window is one gap)
+    stamps = [r["t_start"]] + [t for t, _ in firsts] + [r["t_end"]]
+    out["gaps"] = [(b - a) / NS for a, b in zip(stamps, stamps[1:])]
+    out["lat"] = [v for t, v in latencies(r["frames"], r["draws"]) if r["t_start"] <= t <= r["t_end"]]
     out["traffic"] = [b * 8 / 1e6 for _, b, _ in r["traffic"]]  # Mbps, one value per second
     return out
 
@@ -130,8 +121,10 @@ def report(args, r, a):
             "", "Rules (fixed in the script):",
             "- **distinct frames per second**: frame numbers read from the screen, counted once at their first arrival, "
             "in whole seconds from the first readable frame (the partial last second is dropped).",
-            "- **gap / stall**: time between first arrivals of consecutive distinct frame numbers; stall = the largest.",
-            "- **screen latency**: the draw time of a frame number in the clip's marks file -> its arrival at B (same clock).",
+            "- **gap / stall**: time between first arrivals of consecutive distinct frame numbers, including the edges "
+            "(start of the window -> first distinct frame, last distinct frame -> end of the window); stall = the largest.",
+            "- **screen latency**: the draw time of a frame number in the clip's marks file -> the first arrival of that "
+            "frame at B (same clock); resends of the same frame are not counted.",
             "- **bitrate**: bytes per second of rapp-session's `traffic` events."]
     return "\n".join(out) + "\n"
 

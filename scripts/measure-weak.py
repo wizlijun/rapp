@@ -11,6 +11,7 @@ import argparse, bisect, collections, os, queue, shutil, signal, statistics, str
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
 from rig import Rig, RigError, ROOT
 from bside import BSide, uptime_ns
+from marks import load_marks, latencies
 
 APP_ID = "dev.rapp.testpage"
 APP_BUNDLE = os.path.join(ROOT, ".build/RappTestPage.app")
@@ -41,7 +42,7 @@ RULES = """Rules (fixed in the script):
   (not "taken over" or "... quit"), reopen after 1, 2, 4, 8, 15, 15... s.
 - **typing**: 200 distinct characters in 10 pastes of 20, 300 s for all ten; an unconfirmed paste is re-sent after reconnect; the editor's file is
   compared with the text as a multiset of characters (missing / extra).
-- **screen latency** (no v7 stats yet): the draw time of a frame number in the clip's marks file -> arrival of that number at B."""
+- **screen latency** (no v7 stats yet): the draw time of a frame number in the clip's marks file -> first arrival of that number at B."""
 
 
 def uptime_s():
@@ -337,19 +338,8 @@ def phase_clip(rig, seconds, res):
         if not app.alive():
             res["crashes"].append("RappTestPage (clip)")
         app.stop()
-    data = open(marks, "rb").read()
-    draws = collections.defaultdict(list)  # mark -> draw times, in order
-    for off in range(0, len(data) - len(data) % 10, 10):
-        n, ns = struct.unpack_from("<HQ", data, off)
-        draws[n].append(ns)
-    lat = []  # (arrival, latency_s)
-    for t, mark in frames:
-        if t < t_start or t > t_end:
-            continue
-        times = draws.get(mark)
-        i = bisect.bisect_right(times, t) - 1 if times else -1
-        if i >= 0:
-            lat.append((t, (t - times[i]) / NS))
+    # first arrival of each frame only (shared helper, scripts/lib/marks.py), then keep those inside the window
+    lat = [(t, v) for t, v in latencies(frames, load_marks(marks)) if t_start <= t <= t_end]
     res["latency"] = [(t - t_start) / NS for t, _ in lat], [v for _, v in lat], (t_end - t_start) / NS
 
 
