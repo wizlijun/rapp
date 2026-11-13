@@ -113,6 +113,13 @@ void main() {
     expect((parseSessionEvent('detached', {'sid': 1, 'detached': true}) as DetachedEvent).current, isNull);
   });
 
+  test('setHidden sends set_hidden with the ids', () async {
+    final port = FakeSessionPort();
+    port.setHidden(3, [7, 9]);
+    await pumpEventQueue();
+    expect(port.calls.last, ('set_hidden', {'sid': 3, 'windows': [7, 9]}));
+  });
+
   test('the fake records the channel arguments and emits events', () async {
     final port = FakeSessionPort();
     expect(await port.init(), 500);

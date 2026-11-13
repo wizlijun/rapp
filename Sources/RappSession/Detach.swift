@@ -74,6 +74,22 @@ public func popupOwner(_ id: UInt32, table: [WindowInfo], fallback: UInt32?) -> 
     return fallback
 }
 
+/// The windows a detached session shows: `windows` without the `hidden` ones and the popups drawn over
+/// them (by `popupOwner`). If that leaves no decorated window where there was one, all of `windows` (R5).
+public func detachedWindows(_ windows: [SessionWindow], hidden: Set<UInt32>) -> [SessionWindow] {
+    guard !hidden.isEmpty else { return windows }
+    let table = windows.map(\.info)
+    let kept = windows.filter { w in
+        if hidden.contains(w.info.id) { return false }
+        if !w.info.kind.isDecorated, let owner = popupOwner(w.info.id, table: table, fallback: nil), hidden.contains(owner) {
+            return false
+        }
+        return true
+    }
+    let had = windows.contains { $0.info.kind.isDecorated }
+    return had && !kept.contains { $0.info.kind.isDecorated } ? windows : kept
+}
+
 /// Whose keys a window's key events are.
 public enum KeyWindowRoute: Equatable {
     /// The main Flutter window: the session whose picture has focus, if any.

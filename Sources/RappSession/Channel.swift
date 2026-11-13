@@ -60,6 +60,8 @@ public enum ChannelCommand: Equatable {
     case attach(sid: Int64)
     /// Bring a detached session's windows to the front, the last key one as key.
     case raiseDetached(sid: Int64)
+    /// The windows the GUI hides for this session (its app profile's rules); detached windows leave them out.
+    case setHidden(sid: Int64, windows: [UInt32])
 }
 
 /// Parses one Dart call. Missing fields, wrong types and out-of-range values throw
@@ -70,7 +72,7 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
                               "cancel_transfer", "picture_focus", "clip_pick", "menu_pick", "move_top_left",
                               "composer_paste", "composer_attach", "composer_send", "composer_drop_block",
                               "detach", "attach", "raise_detached", "fetch_clip", "copy_local", "drop_copy", "reveal",
-                              "pin_save", "pin_load"]
+                              "pin_save", "pin_load", "set_hidden"]
     guard known.contains(method) else { throw ChannelError.unknown(method) }
     guard let map = args as? [String: Any] else { throw ChannelError.bad(method) }
     let a = Args(method: method, map: map)
@@ -143,6 +145,8 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
         return .attach(sid: sid)
     case "raise_detached":
         return .raiseDetached(sid: sid)
+    case "set_hidden":
+        return .setHidden(sid: sid, windows: try a.windows())
     default:
         var id: UInt32?
         if let raw = map["id"], !(raw is NSNull) {
@@ -196,6 +200,16 @@ private struct Args {
         return try raw.map { item in
             guard let n = item as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(), !CFNumberIsFloatType(n),
                   let i = UInt16(exactly: n.int64Value) else { throw bad }
+            return i
+        }
+    }
+
+    /// A list of window ids: non-negative integers that fit a u32 (may be empty).
+    func windows() throws -> [UInt32] {
+        guard let raw = map["windows"] as? [Any] else { throw bad }
+        return try raw.map { item in
+            guard let n = item as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(), !CFNumberIsFloatType(n),
+                  let i = UInt32(exactly: n.int64Value) else { throw bad }
             return i
         }
     }
