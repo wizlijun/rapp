@@ -22,7 +22,7 @@ void main() {
   }
 
   String mode(String p) {
-    return Process.runSync('stat', ['-f', '%Lp', p]).stdout.toString().trim();
+    return (FileStat.statSync(p).mode & 0x1ff).toRadixString(8);
   }
 
   void oldConfig(String d) {
@@ -44,7 +44,15 @@ void main() {
 
   test('fresh root gets the layout', () {
     expect(prepareDataDir(root, legacy), isFalse);
-    for (final d in ['shared', 'devices', 'agent', 'clipboard', 'files/transfers', 'files/clipboard', 'local']) {
+    for (final d in [
+      'shared',
+      'devices',
+      'agent',
+      'clipboard',
+      'files/transfers',
+      'files/clipboard',
+      'local',
+    ]) {
       expect(Directory('$root/$d').existsSync(), isTrue, reason: d);
     }
     expect(read('$root/README.md').startsWith(readmeMarker), isTrue);
@@ -121,10 +129,39 @@ void main() {
     expect(read('$home/shared/apps.json'), 'old apps.json');
   });
 
-  test('no legacy service.json no migration', () {
+  test('client-only migration keeps hosts, projects and pending preferences', () {
     put('$legacy/workspace.json', 'w');
+    put('$legacy/hosts.json', 'h');
+    put('$legacy/gui.json', 'g');
+    expect(prepareDataDir(root, legacy), isTrue);
+    expect(read('$root/shared/workspace.json'), 'w');
+    expect(read('$root/local/hosts.json'), 'h');
+    expect(read('$root/local/gui.json'), 'g');
+    expect(File('$root/local/service.json').existsSync(), isFalse);
+    expect(read('$legacy/hosts.json'), 'h');
+    File('$root/shared/workspace.json').deleteSync();
     expect(prepareDataDir(root, legacy), isFalse);
-    expect(File('$root/shared/workspace.json').existsSync(), isFalse);
+    expect(
+      File('$root/shared/workspace.json').existsSync(),
+      isFalse,
+      reason: 'a completed migration must not resurrect deleted data',
+    );
+    put('$root/local/service.json', '{"id":"123456789"}');
+    expect(prepareDataDir(root, legacy), isFalse);
+    expect(read('$root/devices/123456789/gui.json'), 'g');
+    put('$root/devices/123456789/gui.json', 'edited');
+    prepareDataDir(root, legacy);
+    expect(read('$root/devices/123456789/gui.json'), 'edited');
+  });
+
+  test('a new service identity does not prevent client migration', () {
+    put('$root/local/service.json', '{"id":"987654321"}');
+    put('$legacy/hosts.json', 'h');
+    put('$legacy/gui.json', 'g');
+    expect(prepareDataDir(root, legacy), isTrue);
+    expect(read('$root/local/hosts.json'), 'h');
+    expect(read('$root/devices/987654321/gui.json'), 'g');
+    expect(read('$root/local/service.json'), '{"id":"987654321"}');
   });
 
   test('a failed copy leaves no service.json', () {

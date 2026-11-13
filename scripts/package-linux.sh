@@ -44,16 +44,32 @@ Open rapp from the application launcher or run `rapp`.
 Remove the installed package with `sudo pacman -R rapp-omarchy`.
 
 Portable bundle:
-  sudo pacman -S --needed gtk3 gtk4 libayatana-appindicator
+  sudo pacman -S --needed gtk3 gtk4 libayatana-appindicator xdg-utils
   ./rapp
 Keep the entire directory together (lib/, data/, and the worker executables).
 Requires glibc >= 2.39, GTK4 >= 4.12, and a graphical Wayland or X11 session.
 This build targets current Omarchy/Arch; it is not a generic all-distributions binary.
 
 Remote applications render inside the app. The standalone `./rapp-client` is
-also available. Linux hosting, embedded detach/attach, and image/file attachments
-are not implemented. Local configuration and saved hosts are not included.
+also available with native per-app windows. Embedded sessions can detach and
+reattach without reconnecting. Text, images, files and typed clipboard data can
+be pasted, transferred, cancelled and pinned; files stream to disk with resume.
+Folders cannot be attached. Linux hosting is not implemented.
+Local configuration and saved hosts are not included.
 The package does not automatically start a background service at installation.
+In rapp, open Local / 本机 and click Start / 启动 to install and enable the user
+systemd service. The service records text changes with git (install git to use it).
+Start/restart also refreshes the executable path after moving a portable bundle.
+Stop stops the current process; to turn off login startup, run:
+  systemctl --user disable --now rapp-service.service
+
+Data is in ~/rapp, or RAPP_HOME / the data-root pointer in $XDG_CONFIG_HOME/rapp
+(~/.config/rapp by default). Upgrading copies old configuration without deleting
+it, including saved hosts and projects from client-only installations.
+Pinned text survives restart in clipboard/; binary pins are in files/.
+Downloads use files/transfers/ (override with RAPP_DOWNLOADS). Credentials stay in local/ and are
+excluded from git. The Data directory / 数据目录 section can change the location.
+Linux logs are in $XDG_STATE_HOME/rapp (~/.local/state/rapp by default).
 See BUILD-INFO.json for the exact source revision and build environment.
 ''')
 PY
@@ -68,7 +84,8 @@ pkgrel=1
 pkgdesc='Remote Mac apps embedded in a Linux desktop client (Omarchy/Arch)'
 arch=('x86_64')
 url='https://github.com/wizlijun/rapp'
-depends=('glibc>=2.39' 'gcc-libs' 'gtk3' 'gtk4>=4.12' 'libayatana-appindicator')
+depends=('glibc>=2.39' 'gcc-libs' 'gtk3' 'gtk4>=4.12' 'libayatana-appindicator' 'xdg-utils' 'systemd')
+optdepends=('git: data directory version history and remote synchronization')
 provides=('rapp=$version')
 conflicts=('rapp')
 options=('!strip' '!debug')

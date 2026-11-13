@@ -1,14 +1,16 @@
 //! Native menu structure matching the Mac client; all menu surfaces share one action state.
-use super::{finish, Shared};
+use super::{finish, Event, Shared};
 use gtk::{gio, glib, prelude::*};
 use rapp_client_core::{geometry, protocol as p, stream};
+use serde_json::Value;
+use std::sync::mpsc::SyncSender;
 use std::{
     cell::RefCell,
     rc::Rc,
     time::{Duration, Instant},
 };
 
-type HistoryEntry = (u32, Option<String>, bool);
+type HistoryEntry = (u32, Option<String>, bool, Value);
 
 #[derive(Clone)]
 pub struct Controls {
@@ -218,18 +220,20 @@ impl Controls {
         id: u32,
         text: Option<String>,
         truncated: bool,
-        window: &gtk::ApplicationWindow,
+        info: Value,
+        events: SyncSender<Event>,
     ) {
         let mut history = self.history.borrow_mut();
-        for (id, _, _) in history.iter() {
+        for (id, _, _, _) in history.iter() {
             self.group.remove_action(&format!("clip{id}"));
+            self.group.remove_action(&format!("insert{id}"));
         }
         if history.first().is_none_or(|entry| entry.0 != id) {
-            history.insert(0, (id, text, truncated));
+            history.insert(0, (id, text, truncated, info));
             history.truncate(20);
         }
         self.history_menu.remove_all();
-        for (id, text, truncated) in history.iter() {
+        for (id, text, truncated, info) in history.iter() {
             let name = format!("clip{id}");
             let action = gio::SimpleAction::new(&name, None);
             let label = if let Some(text) = text {
@@ -243,26 +247,41 @@ impl Controls {
                     } else {
                         ""
                     },
-                    if *truncated {
-                        "（内容截断，暂不支持下载）"
-                    } else {
-                        ""
-                    }
+                    if *truncated { "（摘要）" } else { "" }
                 )
             } else {
-                "图片/文件/数据（暂不支持下载）".into()
-            };
-            action.set_enabled(text.is_some() && !truncated);
-            let text = text.clone();
-            let clipboard = gtk::prelude::WidgetExt::display(window).clipboard();
-            action.connect_activate(move |_, _| {
-                if let Some(text) = &text {
-                    clipboard.set_text(text);
+                match info["kind"].as_str() {
+                    Some("image") => format!("图片 {}×{}", info["width"], info["height"]),
+                    Some("files") => {
+                        format!("{} 个文件", info["files"].as_array().map_or(0, |f| f.len()))
+                    }
+                    Some("data") => format!("数据 {}", info["uti"]),
+                    _ => info["label"].as_str().unwrap_or("不支持的内容").into(),
                 }
-            });
-            self.group.add_action(&action);
-            self.history_menu
-                .append(Some(&label), Some(&format!("client.{name}")));
+            };
+            let submenu = gio::Menu::new();
+            for (name, label, insert) in [
+                (name, "复制到本机", false),
+                (format!("insert{id}"), "插入到输入区", true),
+            ] {
+                let action = if insert {
+                    gio::SimpleAction::new(&name, None)
+                } else {
+                    action.clone()
+                };
+                action.set_enabled(info["kind"] != "unsupported");
+                let text = text.clone();
+                let info = info.clone();
+                let id = *id;
+                let events = events.clone();
+                action.connect_activate(move |_, _| {
+                    let _ =
+                        events.try_send(Event::ClipPick(id, info.clone(), text.clone(), insert));
+                });
+                self.group.add_action(&action);
+                submenu.append(Some(label), Some(&format!("client.{name}")));
+            }
+            self.history_menu.append_submenu(Some(&label), &submenu);
         }
     }
 }

@@ -29,7 +29,7 @@ rapp 的所有数据都在这个目录里。
 
 ## 其他
 
-- 日志不在这里，在 `~/Library/Logs/rapp`。
+- 日志：macOS 在 `~/Library/Logs/rapp`；Linux 在 `$XDG_STATE_HOME/rapp`（默认 `~/.local/state/rapp`）。设置 `RAPP_HOME` 时在 `$RAPP_HOME/local/logs`，`RAPP_LOG_DIR` 可单独指定。
 - 这个目录的位置可以在 rapp 设置页的「数据目录」里改。
 ''';
 
@@ -76,7 +76,11 @@ bool prepareDataDir(String root, String legacy) {
     if (!f.existsSync()) f.writeAsStringSync(text);
   }
   final oldService = '$legacy/service.json';
-  if (File('$loc/service.json').existsSync() || !File(oldService).existsSync()) return false;
+  // Client-only Linux installs may never have started rapp-service. Preserve
+  // their saved hosts, projects and preferences even without a service.json.
+  final currentId = _serviceId('$loc/service.json');
+  if (currentId != null) _copyIfMissing('$loc/gui.json', '$root/devices/$currentId/gui.json');
+  if (File('$loc/$migratedFrom').existsSync()) return false;
   final table = <(String, String)>[
     ('hosts.json', '$loc/hosts.json'),
     ('update.json', '$loc/update.json'),
@@ -85,14 +89,14 @@ bool prepareDataDir(String root, String legacy) {
     ('workspace.json', '$root/shared/workspace.json'),
     ('apps.json', '$root/shared/apps.json'),
   ];
-  final id = _serviceId(oldService);
-  if (id != null) table.add(('gui.json', '$root/devices/$id/gui.json'));
+  final id = currentId ?? _serviceId(oldService);
+  table.add(('gui.json', id == null ? '$loc/gui.json' : '$root/devices/$id/gui.json'));
+  table.add(('service.json', '$loc/service.json'));
+  if (!table.any((e) => File('$legacy/${e.$1}').existsSync())) return false;
   for (final (old, nu) in table) {
     _copyIfMissing('$legacy/$old', nu);
   }
   _writePrivate('$loc/$migratedFrom', utf8.encode('$legacy\n'));
-  // Last (R4): its presence means the migration finished.
-  _copyIfMissing(oldService, '$loc/service.json');
   return true;
 }
 
@@ -103,13 +107,14 @@ void copyLocalIfMissing(String from, String to) {
   Directory(dst).createSync(recursive: true);
   _chmod('700', dst);
   if (!Directory(src).existsSync()) return;
-  final rel = Directory(src)
-      .listSync(recursive: true, followLinks: false)
-      .whereType<File>()
-      .map((f) => f.path.substring(src.length + 1))
-      .where((r) => r != 'service.json')
-      .toList()
-    ..sort();
+  final rel =
+      Directory(src)
+          .listSync(recursive: true, followLinks: false)
+          .whereType<File>()
+          .map((f) => f.path.substring(src.length + 1))
+          .where((r) => r != 'service.json')
+          .toList()
+        ..sort();
   for (final r in [...rel, 'service.json']) {
     _copyIfMissing('$src/$r', '$dst/$r');
   }

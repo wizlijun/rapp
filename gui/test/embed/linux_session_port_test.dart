@@ -204,10 +204,10 @@ void main() {
       expect(clips.clips.last.kind, ClipKind.text);
       final copy = await port.fetchClip(21, 1);
       expect(copy.error, isNull); expect(copy.copy, isNotNull);
-      // A full snapshot may contain unsupported/truncated entries, which cannot be pinned.
+      // Like macOS, a truncated text announcement remains available as a text summary.
       peer.add(packet(19, [...u32(26), 0, 1, ...u32(1), 65]));
       await nextWhere(events, (e) => e is ClipsEvent && e.clips.length == 26);
-      expect((await port.fetchClip(21, 26)).error, contains('完整文字'));
+      expect((await port.fetchClip(21, 26)).copy, isNotNull);
       port.close(21);
       await nextWhere(events, (e) => e is ClosedEvent);
       expect(await port.copyLocal(copy.copy!), true);
@@ -221,7 +221,7 @@ void main() {
     }
   }, skip: !Platform.isLinux || !File(worker).existsSync() ? 'Build rapp-session first on Linux' : false);
 
-  test('pin_save writes text copies only; pin_load reads .md back', () async {
+  test('pin_save preserves text; pin_load restores text and image copies', () async {
     final port = LinuxSessionPort('/nonexistent-worker', framePresented: () async {});
     final dir = Directory.systemTemp.createTempSync('rapp-pin-');
     try {
@@ -237,7 +237,7 @@ void main() {
       expect(await port.invoke('copy_local', {'copy': loaded['copy']}), true);
       expect(await port.invoke('pin_load', {'path': '${dir.path}/clipboard/missing.md'}), isNull);
       File('${dir.path}/x.png').writeAsBytesSync([1]);
-      expect(await port.invoke('pin_load', {'path': '${dir.path}/x.png'}), isNull);
+      expect((await port.invoke('pin_load', {'path': '${dir.path}/x.png'}) as Map)['kind'], 'image');
       File('${dir.path}/bad.md').writeAsBytesSync([0xff, 0xfe, 0x00]);
       expect(await port.invoke('pin_load', {'path': '${dir.path}/bad.md'}), isNull);
     } finally {

@@ -1,6 +1,7 @@
 // The composer bar: text, pasted blocks and files typed on B, sent to A through the runner.
 // [按键] [附件] [editor + blocks] [复制] [发送] [收起]; the draft is the session's (R18).
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../ui/controls.dart';
@@ -71,7 +72,10 @@ class _ComposerBarState extends State<ComposerBar> {
   }
 
   void _focusChanged() {
-    if (_field.hasFocus) widget.state.blurPicture();
+    if (_field.hasFocus) {
+      widget.port.dropTarget(_sid);
+      widget.state.blurPicture();
+    }
   }
 
   void _modelChanged() {
@@ -83,6 +87,7 @@ class _ComposerBarState extends State<ComposerBar> {
   /// The field gets key focus, and the picture loses it (also when the field already had
   /// Flutter's focus while the picture took the keys).
   void _takeCaret() {
+    widget.port.dropTarget(_sid);
     _field.requestFocus();
     widget.state.blurPicture();
   }
@@ -110,7 +115,11 @@ class _ComposerBarState extends State<ComposerBar> {
       _m.esc();
       return KeyEventResult.handled;
     }
-    if (k == LogicalKeyboardKey.keyV && hw.isMetaPressed && !hw.isAltPressed && !hw.isControlPressed) {
+    if (k == LogicalKeyboardKey.keyV &&
+        !hw.isAltPressed &&
+        (defaultTargetPlatform == TargetPlatform.linux
+            ? hw.isControlPressed && !hw.isMetaPressed
+            : hw.isMetaPressed && !hw.isControlPressed)) {
       if (e is KeyDownEvent) _paste();
       return KeyEventResult.handled;
     }
@@ -148,24 +157,27 @@ class _ComposerBarState extends State<ComposerBar> {
   }
 
   Widget _chip(BlockChip b, RappTokens t) => Semantics(
-        button: true,
-        label: '移除 ${b.label}',
-        excludeSemantics: true,
-        child: InkWell(
-          onTap: () => _m.removeBlock(b.n),
-          borderRadius: BorderRadius.circular(t.r),
-          child: CustomPaint(
-            foregroundPainter: DashedOutline(t.line, t.r),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(minHeight: 48),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Center(widthFactor: 1, child: Text(b.label, style: TextStyle(color: t.text))),
-              ),
+    button: true,
+    label: '移除 ${b.label}',
+    excludeSemantics: true,
+    child: InkWell(
+      onTap: () => _m.removeBlock(b.n),
+      borderRadius: BorderRadius.circular(t.r),
+      child: CustomPaint(
+        foregroundPainter: DashedOutline(t.line, t.r),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Center(
+              widthFactor: 1,
+              child: Text(b.label, style: TextStyle(color: t.text)),
             ),
           ),
         ),
-      );
+      ),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -189,12 +201,20 @@ class _ComposerBarState extends State<ComposerBar> {
                 if (_keys)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
-                    child: Wrap(spacing: 8, runSpacing: 8, children: [for (final k in composerKeys) _keyButton(k)]),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [for (final k in composerKeys) _keyButton(k)],
+                    ),
                   ),
                 if (_m.blocks.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
-                    child: Wrap(spacing: 8, runSpacing: 8, children: [for (final b in _m.blocks) _chip(b, t)]),
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [for (final b in _m.blocks) _chip(b, t)],
+                    ),
                   ),
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
@@ -236,14 +256,19 @@ class _ComposerBarState extends State<ComposerBar> {
                     padding: const EdgeInsets.only(top: 8),
                     child: Row(
                       children: [
-                        if (status != null) Expanded(child: Text(status, style: TextStyle(color: t.muted))),
+                        if (status != null)
+                          Expanded(
+                            child: Text(status, style: TextStyle(color: t.muted)),
+                          ),
                         if (status == null) const Spacer(),
                         if (transfer != null) ...[
                           gap,
                           Text(transfer, style: TextStyle(color: t.muted)),
                           gap,
                           RappButton.secondary(
-                              label: '取消', onPressed: () => widget.port.cancelTransfer(_sid)),
+                            label: '取消',
+                            onPressed: () => widget.port.cancelTransfer(_sid),
+                          ),
                         ],
                       ],
                     ),
@@ -260,7 +285,11 @@ class _ComposerBarState extends State<ComposerBar> {
 /// The stage's composer layer: the 「输入」 button at the bottom right while closed (with the
 /// upload strip, if any), the bar along the bottom while open. Both float over the picture and
 /// never change the stage's size (R12).
-List<Widget> composerLayer({required MainState state, required RemoteSession session, required SessionPort port}) {
+List<Widget> composerLayer({
+  required MainState state,
+  required RemoteSession session,
+  required SessionPort port,
+}) {
   final both = Listenable.merge([session, session.composer]);
   return [
     Positioned(

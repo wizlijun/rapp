@@ -23,6 +23,31 @@ class ShellCommand {
 
 String launchAgentPlistPath(String home) => '$home/Library/LaunchAgents/$serviceLabel.plist';
 
+String linuxServiceUnitPath(Map<String, String> env) {
+  final config = env['XDG_CONFIG_HOME'];
+  return '${config == null || config.isEmpty ? '${env['HOME']}/.config' : config}/systemd/user/rapp-service.service';
+}
+
+// systemd has its own quoting and %-specifier expansion, independent of a shell.
+String _unitQuote(String s) =>
+    '"${s.replaceAll('\\', r'\\').replaceAll('"', r'\"').replaceAll('%', '%%').replaceAll('\n', r'\n').replaceAll('\r', r'\r')}"';
+
+/// Both installed and portable bundles use the executable the GUI is running beside.
+/// Do not bake the resolved data root into the unit: a restart must reread data-root.
+String linuxServiceUnit(String serviceExe, Map<String, String> env) {
+  final b = StringBuffer('[Unit]\nDescription=rapp data and connection service\n\n[Service]\nType=simple\n')
+    // ':' disables $ expansion. env execs the binary without a shell, allowing
+    // characters systemd rejects in the executable field (e.g. quoted paths).
+    ..writeln('ExecStart=:/usr/bin/env -- ${_unitQuote(serviceExe)}')
+    ..writeln('Restart=on-failure\nRestartSec=2\nUMask=0077');
+  for (final key in ['RAPP_HOME', 'RAPP_BIN_DIR', 'RAPP_LOG_DIR', 'XDG_CONFIG_HOME', 'XDG_STATE_HOME']) {
+    // Empty assignments also clear stale values inherited by the user manager.
+    b.writeln('Environment=${_unitQuote('$key=${env[key] ?? ''}')}');
+  }
+  b.writeln('\n[Install]\nWantedBy=default.target');
+  return b.toString();
+}
+
 List<ShellCommand> serviceCommands(
   ServiceAction action, {
   required String os,
@@ -33,15 +58,31 @@ List<ShellCommand> serviceCommands(
   switch (os) {
     case 'macos':
       return switch (action) {
-        ServiceAction.start => [ShellCommand('launchctl', ['bootstrap', 'gui/$uid', launchAgentPlistPath(home)])],
-        ServiceAction.stop => [ShellCommand('launchctl', ['bootout', 'gui/$uid/$serviceLabel'])],
-        ServiceAction.restart => [ShellCommand('launchctl', ['kickstart', '-k', 'gui/$uid/$serviceLabel'])],
+        ServiceAction.start => [
+          ShellCommand('launchctl', ['bootstrap', 'gui/$uid', launchAgentPlistPath(home)]),
+        ],
+        ServiceAction.stop => [
+          ShellCommand('launchctl', ['bootout', 'gui/$uid/$serviceLabel']),
+        ],
+        ServiceAction.restart => [
+          ShellCommand('launchctl', ['kickstart', '-k', 'gui/$uid/$serviceLabel']),
+        ],
       };
     case 'windows':
       final exeName = serviceExe.split(RegExp(r'[\\/]')).last;
       final stop = ShellCommand('taskkill', ['/IM', exeName, '/F']);
       final start = [
-        ShellCommand('reg', ['add', _winRunKey, '/v', 'rapp-service', '/t', 'REG_SZ', '/d', '"$serviceExe"', '/f']),
+        ShellCommand('reg', [
+          'add',
+          _winRunKey,
+          '/v',
+          'rapp-service',
+          '/t',
+          'REG_SZ',
+          '/d',
+          '"$serviceExe"',
+          '/f',
+        ]),
         ShellCommand(serviceExe, const [], detached: true),
       ];
       return switch (action) {
@@ -50,7 +91,13 @@ List<ShellCommand> serviceCommands(
         ServiceAction.restart => [stop, start.last],
       };
     default:
-      return [ShellCommand('systemctl', ['--user', action.name, 'rapp-service.service'])];
+      return [
+        ShellCommand('systemctl', [
+          '--user',
+          if (action == ServiceAction.start) ...['enable', '--now'] else action.name,
+          'rapp-service.service',
+        ]),
+      ];
   }
 }
 
@@ -66,17 +113,19 @@ String ensurePrivateDir(String path) {
 }
 
 ShellCommand openFolderCommand(String dir, String os) => switch (os) {
-      'macos' => ShellCommand('open', [dir]),
-      'windows' => ShellCommand('explorer', [dir]),
-      _ => ShellCommand('xdg-open', [dir]),
-    };
+  'macos' => ShellCommand('open', [dir]),
+  'windows' => ShellCommand('explorer', [dir]),
+  _ => ShellCommand('xdg-open', [dir]),
+};
 
 /// LaunchAgent that keeps [serviceExe] running for the logged-in user; with [logPath],
 /// launchd sends the service's stdout and stderr there.
 String launchAgentPlist(String serviceExe, {Map<String, String> environment = const {}, String? logPath}) {
   final b = StringBuffer()
     ..writeln('<?xml version="1.0" encoding="UTF-8"?>')
-    ..writeln('<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">')
+    ..writeln(
+      '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+    )
     ..writeln('<plist version="1.0">')
     ..writeln('<dict>')
     ..writeln('\t<key>Label</key>')
@@ -115,35 +164,61 @@ String launchAgentPlist(String serviceExe, {Map<String, String> environment = co
 
 /// Runs the commands for real. Used only by the 启动/停止/重启 buttons.
 class ServiceController {
-  ServiceController({required this.serviceExe, required this.env});
+  ServiceController({
+    required this.serviceExe,
+    required this.env,
+    String? os,
+    Future<ProcessResult> Function(String, List<String>)? runProcess,
+  }) : os = os ?? Platform.operatingSystem,
+       runProcess = runProcess ?? Process.run;
   final String serviceExe;
   final Map<String, String> env;
+  final String os;
+  final Future<ProcessResult> Function(String, List<String>) runProcess;
 
   /// Returns null on success, else a short error text.
   Future<String?> run(ServiceAction action) async {
-    final os = Platform.operatingSystem;
     final home = env['HOME'] ?? env['USERPROFILE'] ?? '';
     var uid = 0;
-    if (os == 'macos') {
-      uid = int.tryParse((await Process.run('id', ['-u'])).stdout.toString().trim()) ?? 0;
-      if (action == ServiceAction.start) _writePlist(home);
-    }
-    for (final c in serviceCommands(action, os: os, uid: uid, home: home, serviceExe: serviceExe)) {
-      try {
-        if (c.detached) {
-          await Process.start(c.exe, c.args, mode: ProcessStartMode.detached);
-          continue;
-        }
-        final r = await Process.run(c.exe, c.args);
-        if (r.exitCode != 0) {
-          final msg = '${r.stderr}'.trim();
-          return '$c → exit ${r.exitCode}${msg.isEmpty ? '' : ': $msg'}';
-        }
-      } on ProcessException catch (e) {
-        return '$c: ${e.message}';
+    try {
+      if (os == 'macos') {
+        uid = int.tryParse((await runProcess('id', ['-u'])).stdout.toString().trim()) ?? 0;
+        if (action == ServiceAction.start) _writePlist(home);
       }
+      final commands = <ShellCommand>[];
+      if (os == 'linux' && action != ServiceAction.stop) {
+        final unit = File(linuxServiceUnitPath(env));
+        final content = linuxServiceUnit(serviceExe, env);
+        if (!unit.existsSync() || unit.readAsStringSync() != content) {
+          unit.parent.createSync(recursive: true);
+          final tmp = File('${unit.path}.tmp');
+          tmp.writeAsStringSync(content, flush: true);
+          tmp.renameSync(unit.path);
+        }
+        commands.add(const ShellCommand('systemctl', ['--user', 'daemon-reload']));
+      }
+      commands.addAll(serviceCommands(action, os: os, uid: uid, home: home, serviceExe: serviceExe));
+      for (final c in commands) {
+        try {
+          if (c.detached) {
+            await Process.start(c.exe, c.args, mode: ProcessStartMode.detached);
+            continue;
+          }
+          final r = await runProcess(c.exe, c.args);
+          if (r.exitCode != 0) {
+            final msg = '${r.stderr}'.trim();
+            return '$c → exit ${r.exitCode}${msg.isEmpty ? '' : ': $msg'}';
+          }
+        } on ProcessException catch (e) {
+          return '$c: ${e.message}';
+        }
+      }
+      return null;
+    } on FileSystemException catch (e) {
+      return '服务配置没写成功：${e.osError?.message ?? e.message}';
+    } on ProcessException catch (e) {
+      return '服务命令没执行成功：${e.message}';
     }
-    return null;
   }
 
   /// The GUI owns the plist (§4); rewrite it when the bundle moved.
@@ -151,9 +226,11 @@ class ServiceController {
     final rappHome = env['RAPP_HOME'];
     // launchd opens the log before the service runs, so its folder must already exist.
     final logs = Directory(ensurePrivateDir(logDir({...env, 'HOME': home}, 'macos')));
-    final content = launchAgentPlist(serviceExe,
-        environment: {if (rappHome != null && rappHome.isNotEmpty) 'RAPP_HOME': rappHome},
-        logPath: '${logs.path}/launchd.log');
+    final content = launchAgentPlist(
+      serviceExe,
+      environment: {if (rappHome != null && rappHome.isNotEmpty) 'RAPP_HOME': rappHome},
+      logPath: '${logs.path}/launchd.log',
+    );
     final f = File(launchAgentPlistPath(home));
     if (f.existsSync() && f.readAsStringSync() == content) return;
     f.parent.createSync(recursive: true);

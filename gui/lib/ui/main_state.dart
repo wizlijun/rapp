@@ -347,7 +347,7 @@ class MainState extends ChangeNotifier {
   void detach() {
     final rs = currentRemote;
     if (rs == null || rs.detached || rs.tabs.tabs.isEmpty || !_liveSid(rs.sid)) return;
-    port?.detach(rs.sid);
+    port?.detach(rs.sid, text: rs.composer.text, blocks: rs.composer.blocks);
   }
 
   /// Puts the current session back on the stage.

@@ -1,4 +1,5 @@
 #include "my_application.h"
+#include "rapp_desktop.h"
 
 #include <flutter_linux/flutter_linux.h>
 #ifdef GDK_WINDOWING_X11
@@ -74,6 +75,7 @@ static void my_application_activate(GApplication* application) {
   gtk_widget_realize(GTK_WIDGET(view));
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
+  rapp_desktop_register(view, window);
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }

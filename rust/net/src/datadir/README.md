@@ -25,5 +25,5 @@ rapp 的所有数据都在这个目录里。
 
 ## 其他
 
-- 日志不在这里，在 `~/Library/Logs/rapp`。
+- 日志：macOS 在 `~/Library/Logs/rapp`；Linux 在 `$XDG_STATE_HOME/rapp`（默认 `~/.local/state/rapp`）。设置 `RAPP_HOME` 时在 `$RAPP_HOME/local/logs`，`RAPP_LOG_DIR` 可单独指定。
 - 这个目录的位置可以在 rapp 设置页的「数据目录」里改。

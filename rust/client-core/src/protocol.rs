@@ -46,6 +46,7 @@ pub enum Incoming {
         id: u32,
         text: Option<String>,
         truncated: bool,
+        info: serde_json::Value,
     },
     Pasted {
         seq: u32,
@@ -354,7 +355,7 @@ pub fn decode(kind: u8, p: &[u8]) -> Result<Incoming> {
             let id = r.u32()?;
             let mut text = None;
             let mut truncated = false;
-            match r.u8()? {
+            let info = match r.u8()? {
                 0 => {
                     let flag = r.u8()?;
                     ensure!(flag <= 1, "invalid clip truncation flag");
@@ -362,33 +363,29 @@ pub fn decode(kind: u8, p: &[u8]) -> Result<Incoming> {
                     let n = r.u32()? as usize;
                     ensure!(n <= 1024 * 1024, "clipboard text too large");
                     text = Some(std::str::from_utf8(r.take(n)?)?.to_owned());
+                    serde_json::json!({"kind":"text"})
                 }
                 1 => {
-                    r.u16()?;
-                    r.u16()?;
-                    r.u64()?;
+                    serde_json::json!({"kind":"image","width":r.u16()?,"height":r.u16()?,"bytes":r.u64()?})
                 }
                 2 => {
                     let n = r.u16()?;
                     ensure!(n <= 100, "too many clipboard files");
+                    let mut files = Vec::new();
                     for _ in 0..n {
-                        r.string()?;
-                        r.u64()?;
+                        files.push(serde_json::json!({"name":r.string()?,"bytes":r.u64()?}));
                     }
+                    serde_json::json!({"kind":"files","files":files})
                 }
-                3 => {
-                    r.string()?;
-                    r.u64()?;
-                }
-                4 => {
-                    r.string()?;
-                }
+                3 => serde_json::json!({"kind":"data","uti":r.string()?,"bytes":r.u64()?}),
+                4 => serde_json::json!({"kind":"unsupported","label":r.string()?}),
                 _ => bail!("invalid clipboard kind"),
-            }
+            };
             Incoming::Clipboard {
                 id,
                 text,
                 truncated,
+                info,
             }
         }
         21 => Incoming::Pasted {

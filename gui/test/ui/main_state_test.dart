@@ -1368,7 +1368,7 @@ void main() {
         port.emit(const ReadyEvent(1, 'Calculator'));
         port.emit(WindowsEvent(1, [rw(7), rw(9, kind: WindowKind.menu)]));
         st.toggleDetach();
-        lastCall(port, 'detach', {'sid': 1});
+        lastCall(port, 'detach', {'sid': 1, 'text': '', 'blocks': []});
         expect(st.currentRemote!.detached, false); // only the runner's word moves it
         port.emit(const DetachedEvent(1, true));
         expect(st.currentRemote!.detached, true);
@@ -1391,12 +1391,12 @@ void main() {
         port.emit(WindowsEvent(2, [rw(8)]));
         st.select('111/a');
         st.detach();
-        lastCall(port, 'detach', {'sid': 1});
+        lastCall(port, 'detach', {'sid': 1, 'text': '', 'blocks': []});
         st.attach();
         lastCall(port, 'attach', {'sid': 1});
         st.select('111/aa');
         st.toggleDetach();
-        lastCall(port, 'detach', {'sid': 2});
+        lastCall(port, 'detach', {'sid': 2, 'text': '', 'blocks': []});
         // Nothing to move yet (no window table): no detach goes out.
         port.emit(const WindowsEvent(2, []));
         final n = port.calls.length;

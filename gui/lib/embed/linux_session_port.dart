@@ -11,7 +11,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import 'session_port.dart';
-import 'linux_text_upload.dart';
+import 'linux_transfer.dart';
+import 'linux_clipboard.dart';
+import '../paths.dart';
 
 /// A bounded, streaming packet reader. Pausing here backpressures the worker's
 /// stdout instead of accumulating decoded frames in Dart. The worker keeps
@@ -57,22 +59,36 @@ Stream<Uint8List> sessionPackets(Stream<List<int>> stream) async* {
 }
 
 class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
-  LinuxSessionPort(this.executable, {Future<void> Function()? framePresented})
-    : _framePresented =
-          framePresented ?? (() => SchedulerBinding.instance.endOfFrame);
+  LinuxSessionPort(
+    this.executable, {
+    Future<void> Function()? framePresented,
+    LinuxDesktop? desktop,
+    String Function()? downloads,
+  }) : desktop = desktop ?? LinuxDesktop(),
+       downloads =
+           downloads ??
+           (() =>
+               Platform.environment['RAPP_DOWNLOADS'] ??
+               '${dataRoot(Platform.environment, Platform.operatingSystem)}/files/transfers'),
+       _framePresented =
+           framePresented ?? (() => SchedulerBinding.instance.endOfFrame);
   final Future<void> Function() _framePresented;
   final String executable;
+  final LinuxDesktop desktop;
+  final String Function() downloads;
   final _events = StreamController<SessionEvent>.broadcast();
   final _sessions = <Object, _Session>{};
   final _starting = <Object>{};
   final _cancelledStarts = <Object>{};
-  final _copies = <int, String>{};
+  final _copies = <int, LinuxCopy>{};
   int _nextCopy = 1;
   Object? _focused;
   bool _disposed = false;
 
+  bool _native = false;
+  Object? _dropSid;
   @override
-  bool get supportsDetach => false;
+  bool get supportsDetach => _native;
   @override
   Stream<SessionEvent> get events => _events.stream;
 
@@ -81,17 +97,125 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
     if (!await File(executable).exists()) {
       throw StateError('rapp-session not found: $executable');
     }
+    try {
+      _native = await desktop.channel.invokeMethod<bool>('init') ?? false;
+      desktop.channel.setMethodCallHandler(_nativeEvent);
+    } on MissingPluginException {
+      _native = false;
+    }
     WidgetsBinding.instance.addObserver(this);
     return 500;
   }
 
   void _emit(SessionEvent e) {
-    if (!_disposed) _events.add(e);
+    if (_disposed) return;
+    final s = _sessions[e.sid];
+    if (_native && s?.detached == true) {
+      if (e is ComposerInsertEvent) {
+        _nativeCall('composer_insert', {
+          'sid': e.sid,
+          'text': e.insert.text,
+          'blocks': [
+            for (final b in e.insert.blocks) {'n': b.n, 'label': b.label},
+          ],
+        });
+      }
+      if (e is ComposerStateEvent && e.done != null) {
+        _nativeCall('composer_done', {
+          'sid': e.sid,
+          'sent': e.done!.sent,
+          'failure': e.done!.failure,
+        });
+      }
+      if (e is ClipsEvent) s!.nativeClips();
+      if (e is TransferStatusEvent) {
+        _nativeCall('status', {'sid': e.sid, 'text': e.status ?? ''});
+      }
+      if (e is DisconnectedEvent) {
+        _nativeCall('status', {
+          'sid': e.sid,
+          'text': '已断开：${e.reason}',
+          'disconnected': true,
+        });
+      }
+    }
+    _events.add(e);
+  }
+
+  void _nativeCall(String method, Map<String, Object?> args) {
+    unawaited(
+      desktop.channel
+          .invokeMethod<void>(method, args)
+          .catchError((Object _) {}),
+    );
+  }
+
+  Future<Object?> _nativeEvent(MethodCall call) async {
+    final args = Map<String, Object?>.from(call.arguments as Map? ?? {});
+    final sid = args['sid'] ?? _dropSid;
+    final s = _sessions[sid];
+    if (s == null || s.closed) return null;
+    args['sid'] = sid;
+    if (call.method == 'set_stream') {
+      _emit(
+        StreamChoiceEvent(
+          s.sid,
+          args['mode'] as String,
+          args['density'] as String,
+          args['fps'] as int,
+        ),
+      );
+      await invoke(call.method, args);
+    } else if (call.method == 'draft') {
+      _emit(ComposerDraftEvent(s.sid, text: args['text'] as String?));
+    } else if (call.method == 'composer_send') {
+      _emit(
+        ComposerDraftEvent(s.sid, text: args['text'] as String?, send: true),
+      );
+      await invoke(call.method, args);
+    } else if (call.method == 'composer_drop_block') {
+      _emit(ComposerDraftEvent(s.sid, drop: args['block'] as int?));
+      await invoke(call.method, args);
+    } else if (call.method == 'drop_files' ||
+        call.method == 'composer_paste' ||
+        call.method == 'composer_attach') {
+      final result = call.method == 'drop_files'
+          ? await s.insert(
+              LinuxCopy(
+                'files',
+                files: List<String>.from(args['files'] as List),
+              ),
+            )
+          : await invoke(call.method, args) as Map<String, Object?>?;
+      if (result != null) {
+        _emit(
+          ComposerInsertEvent(
+            s.sid,
+            PasteResult(
+              text: result['text'] as String?,
+              blocks: [
+                for (final b in result['blocks'] as List? ?? [])
+                  BlockChip(b['n'] as int, b['label'] as String),
+              ],
+              status: result['status'] as String?,
+            ),
+          ),
+        );
+      }
+    } else {
+      await invoke(call.method, args);
+    }
+    return null;
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) _releaseFocus(clear: false);
+  }
+
+  @override
+  void dropTarget(Object? sid) {
+    _dropSid = sid;
   }
 
   void _releaseFocus({bool clear = true}) {
@@ -138,46 +262,44 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
   @visibleForTesting
   int seedCopyForTest(String text) {
     final copy = _nextCopy++;
-    _copies[copy] = text;
+    _copies[copy] = LinuxCopy(
+      'text',
+      text: text,
+      uti: 'public.utf8-plain-text',
+    );
     return copy;
   }
 
   @override
   Future<Object?> invoke(String method, Map<String, Object?> args) async {
     if (method == 'copy_local') {
-      final text = _copies[args['copy']];
-      if (text == null) return false;
-      await Clipboard.setData(ClipboardData(text: text));
-      return true;
+      final copy = _copies[args['copy']];
+      return copy != null && await desktop.writeClipboard(copy);
     }
     if (method == 'pin_save') {
-      // Only text copies are kept on Linux.
-      final text = _copies[args['copy']];
-      final dir = args['text_dir'];
-      final stem = args['stem'];
-      if (text == null || dir is! String || stem is! String) return null;
+      final copy = _copies[args['copy']];
+      if (copy == null) return null;
       try {
-        await Directory(dir).create(recursive: true);
-        var file = File('$dir/$stem.md');
-        for (var k = 2; await file.exists(); k++) {
-          file = File('$dir/$stem-$k.md');
-        }
-        final tmp = File('${file.path}.tmp');
-        await tmp.writeAsString(text);
-        await tmp.rename(file.path);
-        return {'path': file.path};
-      } on FileSystemException {
+        return {
+          'path': await saveLinuxCopy(
+            copy,
+            args['text_dir'] as String,
+            args['file_dir'] as String,
+            args['stem'] as String,
+          ),
+        };
+      } catch (_) {
         return null;
       }
     }
     if (method == 'pin_load') {
-      final path = args['path'];
-      if (path is! String || !path.endsWith('.md')) return null;
       try {
+        final value = await loadLinuxCopy(args['path'] as String);
+        if (value == null) return null;
         final copy = _nextCopy++;
-        _copies[copy] = await File(path).readAsString();
-        return {'copy': copy, 'kind': 'text'};
-      } on FileSystemException {
+        _copies[copy] = value;
+        return {'copy': copy, 'kind': value.kind};
+      } catch (_) {
         return null;
       }
     }
@@ -203,6 +325,7 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
     if (method == 'picture_focus') {
       if (_focused != sid) _releaseFocus();
       _focused = sid;
+      if (sid != null) _dropSid = sid;
       return null;
     }
     if (method == 'start') {
@@ -237,7 +360,14 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
         _framePresented,
         args['port'] as int,
         args['token'] as String,
+        downloads,
+        desktop,
       );
+      s.stream = {
+        'mode': args['mode'],
+        'fps': args['fps'],
+        'density': args['density'],
+      };
       _sessions[sid] = s;
       unawaited(process.stderr.drain<void>());
       unawaited(
@@ -262,24 +392,57 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
       if (s == null || s.closed || s.disconnected) {
         return {'error': 'A 已断开，复制不到'};
       }
-      final text = s.clips[args['clip']];
-      if (!s.clips.containsKey(args['clip'])) return {'error': 'unknown clip'};
-      if (text == null) return {'error': '不是完整文字；Linux 暂不支持图片和文件传输'};
-      final copy = _nextCopy++;
-      _copies[copy] = text;
-      return {'copy': copy};
+      try {
+        final value = await s.fetch(args['clip'] as int);
+        if (_disposed) return {'error': '会话已结束'};
+        final copy = _nextCopy++;
+        _copies[copy] = value;
+        return {'copy': copy};
+      } catch (e) {
+        return {'error': e is StateError ? e.message : '$e'};
+      }
     }
     if (s == null) return null;
-    if (method != 'close' && s.disconnected) return null;
+    if (!['close', 'attach', 'raise_detached'].contains(method) &&
+        s.disconnected) {
+      return null;
+    }
     switch (method) {
+      case 'detach':
+        if (!_native || s.detached) return null;
+        await desktop.channel.invokeMethod<void>('detach', {
+          'sid': sid,
+          'text': args['text'],
+          'blocks': args['blocks'],
+        });
+        s.detached = true;
+        await s.nativeWindows();
+        s.nativeClips();
+        _nativeCall('stream', {'sid': sid, ...s.stream});
+        await s.nativeFrame();
+        _emit(DetachedEvent(s.sid, true));
+      case 'attach':
+        if (!s.detached) return null;
+        await desktop.channel.invokeMethod<void>('attach', {'sid': sid});
+        s.detached = false;
+        _emit(DetachedEvent(s.sid, false, current: s.selected));
+      case 'raise_detached':
+        if (s.detached) _nativeCall('raise', {'sid': sid});
       case 'close':
         if (_focused == sid) _releaseFocus();
         s.close('closed');
         _sessions.remove(sid);
       case 'set_stream':
+        s.stream = {
+          'mode': args['mode'],
+          'fps': args['fps'],
+          'density': args['density'],
+        };
+        if (s.detached) _nativeCall('stream', {'sid': sid, ...s.stream});
         s.send({'cmd': method, ...args, 'density': _density(args['density'])});
       case 'select_window':
         s.selected = args['window'] as int;
+        _dropSid = sid;
         s.send({'cmd': method, ...args});
       case 'mouse':
         if (args['kind'] == 'down') s.selected = args['window'] as int;
@@ -306,24 +469,54 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
         }
         s.send({'cmd': 'move', 'window': id, 'x': slot, 'y': slot});
       case 'composer_paste':
-        return {'text': (await Clipboard.getData(Clipboard.kTextPlain))?.text};
+        try {
+          return await s.insert(await desktop.readClipboard());
+        } catch (e) {
+          return {'status': '粘贴没成功：$e'};
+        }
       case 'composer_attach':
-        return {'status': 'Linux 暂不支持文件附件；可粘贴或输入文字'};
+        try {
+          return await s.insert(
+            LinuxCopy('files', files: await desktop.chooseFiles()),
+          );
+        } catch (e) {
+          return {'status': '添加没成功：$e'};
+        }
+      case 'composer_drop_block':
+        s.blocks.remove(args['block']);
+      case 'cancel_transfer':
+        s.transfers.cancel(args['id'] as int?);
       case 'composer_send':
         unawaited(s.sendPieces(List<Object?>.from(args['pieces'] as List)));
       case 'clip_pick':
-        final text = s.clips[args['clip']];
-        if (text != null) {
+        try {
+          final copy = await s.fetch(args['clip'] as int);
+          if (s.closed) return null;
           if (args['insert'] == true) {
-            _emit(ComposerInsertEvent(s.sid, PasteResult(text: text)));
+            final result = await s.insert(copy);
+            _emit(
+              ComposerInsertEvent(
+                s.sid,
+                PasteResult(
+                  text: result['text'] as String?,
+                  blocks: [
+                    for (final b in (result['blocks'] as List? ?? []))
+                      BlockChip(b['n'] as int, b['label'] as String),
+                  ],
+                  status: result['status'] as String?,
+                ),
+              ),
+            );
           } else {
-            await Clipboard.setData(ClipboardData(text: text));
+            await desktop.writeClipboard(copy);
           }
-        } else {
+        } catch (e) {
           s.showStatus(
-            s.clips.containsKey(args['clip'])
-                ? 'Linux 暂不支持取用图片、文件和截断文字'
-                : '取用没成功：太旧了，A 已不保留',
+            '取用没成功：${e is StateError && e.message == 'unknown clip'
+                ? '太旧了，A 已不保留'
+                : e is StateError
+                ? e.message
+                : e}',
           );
         }
     }
@@ -372,7 +565,96 @@ class _Session {
     this.framePresented,
     this.port,
     this.token,
-  );
+    String Function() downloads,
+    this.desktop,
+  ) {
+    transfers = LinuxTransfers(
+      port,
+      token,
+      downloads: downloads,
+      progress: (p) {
+        emit(
+          TransferProgressEvent(
+            sid,
+            p.id,
+            p.down,
+            p.name,
+            p.done,
+            p.total,
+            TransferState.values.byName(p.state),
+            p.path,
+            p.error,
+            kind: ClipKind.values.byName(p.kind),
+          ),
+        );
+        if (p.state == 'running') {
+          emit(
+            TransferStatusEvent(
+              sid,
+              '${p.down ? '下载' : '上传'} ${p.name} ${p.total == 0 ? 100 : p.done * 100 ~/ p.total}%',
+            ),
+          );
+        } else if (p.state == 'failed') {
+          showStatus('传输没成功：${p.error}');
+        } else {
+          emit(TransferStatusEvent(sid, null));
+        }
+      },
+    );
+  }
+  late final LinuxTransfers transfers;
+  final LinuxDesktop desktop;
+  bool detached = false;
+  Map<String, Object?> stream = {
+    'mode': 'color16',
+    'density': 'adaptive',
+    'fps': 15,
+  };
+  void nativeClips() {
+    if (detached) {
+      unawaited(
+        desktop.channel
+            .invokeMethod<void>('clips', {
+              'sid': sid,
+              'clips': [
+                for (final c in clips.entries.toList().reversed)
+                  {
+                    'id': c.key,
+                    'title': clipTitle(c.value),
+                    'pickable': c.value['kind'] != 'unsupported',
+                  },
+              ],
+            })
+            .catchError((Object _) {}),
+      );
+    }
+  }
+
+  Uint8List? lastNativeFrame;
+  List<dynamic> nativeWindowTable = [];
+  List<dynamic> nativeMenuTable = [];
+  Future<void> nativeWindows() async {
+    if (detached) {
+      await desktop.channel.invokeMethod<void>('windows', {
+        'sid': sid,
+        'windows': nativeWindowTable,
+      });
+      await desktop.channel.invokeMethod<void>('menus', {
+        'sid': sid,
+        'items': nativeMenuTable,
+      });
+    }
+  }
+
+  Future<void> nativeFrame() async {
+    if (detached && lastNativeFrame != null) {
+      await desktop.channel.invokeMethod<void>('frame', {
+        'sid': sid,
+        'bytes': lastNativeFrame,
+      });
+    }
+  }
+
   final int port;
   final String token;
   final Future<void> Function() framePresented;
@@ -404,7 +686,12 @@ class _Session {
           // would retain a callback for every displayed frame until disconnect.
           final stop = Completer<void>();
           _renderWait = stop;
-          await Future.any([framePresented(), stop.future]);
+          await Future.any([
+            detached
+                ? Future<void>.delayed(const Duration(milliseconds: 16))
+                : framePresented(),
+            stop.future,
+          ]);
           _renderWait = null;
         }
       }
@@ -416,7 +703,10 @@ class _Session {
     }
   }
 
-  final clips = <int, String?>{};
+  final clips = <int, Map<String, dynamic>>{};
+  final blocks = <int, LinuxCopy>{};
+  final _fetched = <int, LinuxCopy>{};
+  int _nextItem = 1;
   final held = <int>{};
   int? selected;
   bool closed = false;
@@ -425,7 +715,6 @@ class _Session {
   bool _sending = false;
   int _nextSeq = 1;
   final _pastes = <int, Completer<String>>{};
-  LinuxTextUpload? _upload;
   Timer? _statusTimer;
 
   void showStatus(String message) {
@@ -444,28 +733,38 @@ class _Session {
     emit(ComposerStateEvent(sid, sending: true));
     try {
       for (final piece in pieces) {
-        if (piece is! Map || piece['text'] is! String) {
-          throw StateError('Linux 暂不支持文件和图片发送');
-        }
-        final text = piece['text'] as String;
-        final bytes = utf8.encode(text);
-        if (bytes.length > 1024 * 1024) throw StateError('文字超过 1 MB');
+        if (piece is! Map) throw StateError('无效的输入内容');
+        final copy = piece['text'] is String
+            ? LinuxCopy(
+                'text',
+                text: piece['text'] as String,
+                uti: 'public.utf8-plain-text',
+              )
+            : blocks[piece['block']];
+        if (copy == null) throw StateError('附件已移除');
         if (closed || disconnected) throw StateError('A 已断开，未发送');
-        // Never recycle sequence IDs: a late reply must not finish a later send.
-        if (_nextSeq > 0xffffffff) throw StateError('请重新连接后发送');
+        if (_nextSeq > 0xffffffff || _nextItem > 0xffffffff) {
+          throw StateError('请重新连接后发送');
+        }
         final seq = _nextSeq++;
-        final source = <String, Object?>{'text': text};
-        if (bytes.length >= 60000) {
-          final upload = LinuxTextUpload();
-          _upload = upload;
-          try {
-            await upload.send(port, token, seq, bytes);
-          } finally {
-            _upload = null;
-          }
-          source
-            ..clear()
-            ..['item'] = seq;
+        final source = <String, Object?>{};
+        final bytes = copy.kind == 'text'
+            ? utf8.encode(copy.text!)
+            : copy.bytes;
+        if (copy.kind == 'text' && bytes!.length < 60000) {
+          source['text'] = copy.text;
+        } else {
+          // Blocks keep their item number across cancel/retry so the host resumes.
+          final item = piece['block'] as int? ?? _nextItem++;
+          await transfers.upload(
+            item: item,
+            kind: copy.kind,
+            uti: copy.uti,
+            name: copy.files.isEmpty ? '' : copy.files.single.split('/').last,
+            bytes: bytes,
+            file: copy.files.firstOrNull,
+          );
+          source['item'] = item;
         }
         if (closed || disconnected) throw StateError('A 已断开，未发送');
         final reply = Completer<String>();
@@ -504,6 +803,91 @@ class _Session {
     }
   }
 
+  Future<LinuxCopy> fetch(int id) async {
+    if (_fetched.containsKey(id)) return _fetched[id]!;
+    final info = clips[id];
+    if (info == null) throw StateError('unknown clip');
+    final kind = info['kind'] as String;
+    late final LinuxCopy result;
+    if (kind == 'text') {
+      result = LinuxCopy(
+        'text',
+        text: info['text'] as String,
+        uti: 'public.utf8-plain-text',
+      );
+    } else if (kind == 'files') {
+      final files = <String>[];
+      final announced = info['files'] as List;
+      for (var i = 0; i < announced.length; i++) {
+        files.add(
+          await transfers.download(
+                clip: id,
+                index: i,
+                name: announced[i]['name'] as String,
+                total: announced[i]['bytes'] as int,
+                toDisk: true,
+              )
+              as String,
+        );
+      }
+      result = LinuxCopy('files', files: files, uti: 'public.file-url');
+    } else if (kind == 'image' || kind == 'data') {
+      result = LinuxCopy(
+        kind,
+        uti: kind == 'image' ? 'public.png' : info['uti'] as String,
+        bytes:
+            await transfers.download(
+                  clip: id,
+                  index: 0,
+                  name: kind == 'image' ? '图片' : '数据',
+                  total: info['bytes'] as int,
+                  toDisk: false,
+                )
+                as Uint8List,
+      );
+    } else {
+      throw StateError(info['label'] as String? ?? '不支持这一项');
+    }
+    if (!closed) _fetched[id] = result;
+    return result;
+  }
+
+  Future<Map<String, Object?>> insert(LinuxCopy? copy) async {
+    if (copy == null || closed) return {};
+    if (copy.kind == 'text' &&
+        copy.text!.runes.length < 800 &&
+        '\n'.allMatches(copy.text!).length < 9) {
+      return {'text': copy.text};
+    }
+    final chips = <Map<String, Object>>[];
+    final values = copy.kind == 'files'
+        ? [
+            for (final path in copy.files)
+              LinuxCopy('files', files: [path], uti: 'public.file-url'),
+          ]
+        : [copy];
+    String? status;
+    for (final value in values) {
+      if (value.kind == 'files' &&
+          await FileSystemEntity.type(value.files.single) !=
+              FileSystemEntityType.file) {
+        status = '文件夹不支持，或文件已不存在';
+        continue;
+      }
+      if (closed) break;
+      final n = _nextItem++;
+      blocks[n] = value;
+      final label = switch (value.kind) {
+        'text' => '[贴入文字 #$n +${'\n'.allMatches(value.text!).length + 1} 行]',
+        'files' => '[文件 ${value.files.single.split('/').last}]',
+        'image' => '[图片 #$n]',
+        _ => '[数据 #$n ${value.uti}]',
+      };
+      chips.add({'n': n, 'label': label});
+    }
+    return {'blocks': chips, 'status': ?status};
+  }
+
   void send(Map<String, Object?> args) {
     if (!closed && !disconnected) process.stdin.writeln(jsonEncode(args));
   }
@@ -537,37 +921,57 @@ class _Session {
               reply.complete(m['error'] as String);
             }
           } else if (method == 'clip') {
-            final text = m['truncated'] == false ? m['text'] as String? : null;
-            clips.remove(m['id']);
-            clips[m['id'] as int] = text;
+            final id = m['id'] as int;
+            final info = Map<String, dynamic>.from(
+              m['info'] as Map? ??
+                  {'kind': m['text'] == null ? 'unsupported' : 'text'},
+            );
+            info['text'] = m['text'];
+            info['truncated'] = m['truncated'];
+            if (info['kind'] == 'text') {
+              unawaited(
+                desktop
+                    .writeClipboard(
+                      LinuxCopy('text', text: info['text'] as String),
+                    )
+                    .catchError((Object _) => false),
+              );
+            }
+            clips.remove(id);
+            clips[id] = info;
             while (clips.length > 100) {
-              clips.remove(clips.keys.first);
+              final old = clips.keys.first;
+              clips.remove(old);
+              _fetched.remove(old);
             }
             emit(
               ClipsEvent(
                 sid,
-                clips.entries
-                    .toList()
-                    .reversed
-                    .map(
-                      (c) => ClipRow(
-                        c.key,
-                        c.value == null
-                            ? '图片、文件或过长文字（暂不支持）'
-                            : c.value!
-                                  .replaceAll('\n', ' ')
-                                  .characters
-                                  .take(80)
-                                  .toString(),
-                        c.value != null,
-                      ),
-                    )
-                    .toList(),
+                clips.entries.toList().reversed.map((c) {
+                  final kind = ClipKind.values.byName(
+                    c.value['kind'] as String,
+                  );
+                  return ClipRow(
+                    c.key,
+                    clipTitle(c.value),
+                    kind != ClipKind.unsupported,
+                    kind,
+                  );
+                }).toList(),
               ),
             );
           } else {
+            if (method == 'menu') nativeMenuTable = m['items'] as List;
+            if (detached && method == 'menu') {
+              await desktop.channel.invokeMethod<void>('menus', {
+                'sid': sid,
+                'items': m['items'],
+              });
+            }
             final e = parseSessionEvent(method, {...m, 'sid': sid});
             if (e is WindowsEvent) {
+              nativeWindowTable = m['windows'] as List;
+              await nativeWindows();
               windows = e.windows;
               for (final id in _pictures.keys.toList()) {
                 if (!windows.any((w) => w.id == id)) {
@@ -611,6 +1015,8 @@ class _Session {
         r.isEmpty) {
       throw const FormatException('Invalid decoded frame');
     }
+    lastNativeFrame = bytes;
+    await nativeFrame();
     final buffer = await ui.ImmutableBuffer.fromUint8List(
       Uint8List.sublistView(bytes, 24),
     );
@@ -696,7 +1102,7 @@ class _Session {
   void _stopTransport() {
     if (_closed.isCompleted) return;
     _statusTimer?.cancel();
-    _upload?.cancel();
+    transfers.close();
     for (final reply in _pastes.values) {
       if (!reply.isCompleted) reply.complete('A 已断开，发送未确认；请检查远端内容后再重试');
     }
@@ -721,6 +1127,16 @@ class _Session {
       _retire(p.image);
     }
     _pictures.clear();
+    lastNativeFrame = null;
+    if (detached) {
+      unawaited(
+        desktop.channel
+            .invokeMethod<void>('attach', {'sid': sid})
+            .catchError((Object _) {}),
+      );
+    }
+    blocks.clear();
+    _fetched.clear();
     emit(ClosedEvent(sid, reason));
   }
 }
@@ -846,3 +1262,17 @@ int? linuxMacKeyCode(PhysicalKeyboardKey key) {
   };
   return usage >> 16 == 7 ? keys[usage & 0xffff] : null;
 }
+
+String clipTitle(Map<String, dynamic> info) => switch (info['kind']) {
+  'text' =>
+    (info['text'] as String)
+        .replaceAll('\n', ' ')
+        .characters
+        .take(80)
+        .toString(),
+  'image' => '图片 ${info['width']}×${info['height']} · ${info['bytes']} B',
+  'files' =>
+    '${(info['files'] as List).length} 个文件 · ${(info['files'] as List).firstOrNull?['name'] ?? ''}',
+  'data' => '数据 ${info['uti']} · ${info['bytes']} B',
+  _ => info['label'] as String? ?? '不支持的内容',
+};

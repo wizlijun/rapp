@@ -99,13 +99,13 @@ Omarchy 的 Rust/GTK 客户端已支持 v4/v5/v6（见下文）；Windows/Omarch
 
 ## Omarchy / Linux 客户端
 
-在 [GitHub Release](https://github.com/wizlijun/rapp/releases/tag/v0.5.1) 下载
-`rapp-omarchy-0.5.1-1-x86_64.pkg.tar.zst`，运行 `sudo pacman -U ./rapp-omarchy-0.5.1-1-x86_64.pkg.tar.zst`，
-然后从应用启动器打开 rapp。也提供 `rapp-0.5.1-omarchy-x86_64.tar.gz` 便携包，解压后运行 `./rapp`。
+在 [GitHub Release](https://github.com/wizlijun/rapp/releases/tag/v0.5.2) 下载
+`rapp-omarchy-0.5.2-1-x86_64.pkg.tar.zst`，运行 `sudo pacman -U ./rapp-omarchy-0.5.2-1-x86_64.pkg.tar.zst`，
+然后从应用启动器打开 rapp。也提供 `rapp-0.5.2-omarchy-x86_64.tar.gz` 便携包，解压后运行 `./rapp`。
 安装包面向 Omarchy / Arch x86_64；便携包的依赖与用法见包内 `README-LINUX.txt`。
 发布包可从干净的源码提交运行 `./scripts/package-linux.sh` 重建，包内记录确切源码提交。
 
-现在可以在 Omarchy 上构建 **Rust + GTK4 的 `rapp-client`**，连接 macOS v4/v5 主机（默认 v5；v4 地址加 `protocol=4`）。
+现在可以在 Omarchy 上构建 **Rust + GTK4 的 `rapp-client`**，连接 macOS v4/v5/v6 主机（默认 v6；旧主机地址加 `protocol=4` 或 `protocol=5`）。
 Rust 网络后台继续复用；`rust/client-core` 实现可跨平台复用的协议和解码，
 `rust/client-gtk` 负责 Linux 显示和输入。Linux **被控端**仍未实现。
 
@@ -114,20 +114,34 @@ Rust 网络后台继续复用；`rust/client-core` 实现可跨平台复用的�
 支持窗口标签、弹窗、点击/拖动/滚动、键盘、画质/帧率/密度、远程菜单和文字输入区。
 点击画面后键盘发给 Mac（Ctrl 映射为 ⌘，Super 留给 Linux，F11 控制本地全屏）；
 中文可在“输入”区通过本地输入法组句后发送。退出会话或管理界面会关闭解码进程与连接。
-目前内嵌会话的“分离/放回”和图片/文件附件尚未实现，分离按钮禁用，附件操作会说明限制。
+支持内嵌会话的“分离/放回”：每个远端窗口变成独立 Linux 窗口，弹窗附着在父窗口上；
+沿用原有连接、解码器、草稿和附件，放回时恢复当前窗口。分离窗口也可使用远程菜单、画质设置、剪贴板、附件和取消传输。
 支持断线保留最后画面、重连换帧和空闲状态。
 像素更新独立重绘；worker 独立输出线程和 Flutter 都只保留最新待显示帧，避免慢速显示导致旧帧排队。
 断线停止 worker，结束会话时释放保留画面。
 独立 GTK `rapp-client` 仍可单独使用；下面的应用画布和独立客户端菜单说明适用于它。
 
-当前主线源码已对齐 0.5.1 的多客户端功能：同一设备重复打开复用已有会话，被其他设备接管后保留最后画面并提供“拿回来”，输入暂时被占用时提示设备名称。独立 GTK client 支持 v6 输入占用提示，直接启动时被接管会提供“拿回来”；hub 管理的会话由管理界面重连。
-内嵌输入区等待主机的粘贴确认，拒绝、断线或超时会保留未确认的文字；独立 client 也在确认成功后才清空输入。60 KB 及以上的文字走旁路上传后粘贴（目前最多 1 MB）。
-过期剪贴板条目的取用、固定操作会显示原因。默认连接 0.5.1 主机；独立 client 可用 `?protocol=5` 显式连接旧主机（`protocol=4` 也保留兼容）。
+当前主线源码已对齐 0.5.2 的多客户端功能：同一设备重复打开复用已有会话，被其他设备接管后保留最后画面并提供“拿回来”，输入暂时被占用时提示设备名称。独立 GTK client 支持 v6 输入占用提示，直接启动时被接管会提供“拿回来”；hub 管理的会话由管理界面重连。
+内嵌输入区等待主机的粘贴确认，拒绝、断线或超时会保留未确认的文字；独立 client 也在确认成功后才清空输入。60 KB 及以上的文字走旁路上传后粘贴（内存内容最多 256 MB，文件分块读写）。
+过期剪贴板条目的取用、固定操作会显示原因。默认连接 0.5.2 主机；独立 client 可用 `?protocol=5` 显式连接旧主机（`protocol=4` 也保留兼容）。
 
 同时保留 0.5.0 的客户端功能：Linux 可使用项目与常用、全景模式（离开舞台降至 1 fps）、触屏双指滚动，
-以及跨会话文字剪贴板资源。固定的文字副本在会话结束后仍可复制；图片/文件传输仍暂不支持。
+以及跨会话剪贴板资源。文字、PNG 图片、文件及带类型的数据可取用到本机或插入输入区。
+本地粘贴、文件选择和文件拖放都可添加附件；长文字折叠为块，Shift+Enter 换行、Enter 发送。
+上传等待主机完成确认，下载保留部分文件以便重试；支持取消、自动续传、文件名冲突避让。
+文件落在数据目录的 `files/transfers/`（可用 `RAPP_DOWNLOADS` 覆盖）；文件夹不作为附件上传。
+固定副本可在会话结束后、重启后继续使用，图片/文件保存在数据目录的 `files/` 下。
 Linux 的“本机 → 版本与升级”可独立于后台服务检查 GitHub 发布并打开对应安装包，安装由系统软件包管理器完成。
-安装包和便携包均发布在同一个 v0.5.1 Release 中，包内记录确切源码提交。
+安装包和便携包均发布在同一个 v0.5.2 Release 中，包内记录确切源码提交。
+
+当前源码已接入 **0.5.2 的数据目录能力**：数据默认放在 `~/rapp`，支持 `RAPP_HOME` 和
+「本机 → 数据目录」更改位置；旧配置只复制、不删除。只用过 Linux 客户端、没有 `service.json`
+的安装也会迁移已保存设备、项目和界面偏好。固定的文字保存到 `clipboard/`，重开后可继续复制。
+本机页的「启动」会创建并启用 systemd 用户服务，之后登录自动启动；「重启」会更新便携包的
+程序路径并重读数据目录位置。安装了 Git 时，服务为文字建立版本记录；配置 remote 后进行同步。
+口令等私有数据在 `local/`，二进制在 `files/`，都不进 Git。停用登录自启可运行
+`systemctl --user disable --now rapp-service.service`。Linux 日志默认在 `~/.local/state/rapp`。
+应用配置在 v0.5.2 中只有模型、窗口规则和内置数据，尚未接入 GUI；本轮保持同样的能力范围。
 
 构建依赖：Rust、GTK4 ≥ 4.12、pkgconf。连同 Flutter 管理界面打包还需要 Flutter
 （Dart ≥ 3.12.1）、clang、cmake、ninja、gtk3、libayatana-appindicator。
@@ -144,6 +158,7 @@ cargo build --manifest-path rust/Cargo.toml --release --locked -p rapp-client-gt
 # 单元测试；图形会话内还可运行独立 Python 主机夹具测试
 cargo test --manifest-path rust/Cargo.toml -p rapp-client-core
 python3 scripts/test-linux-client.py
+./scripts/test-linux-desktop.sh # Flutter GTK3 原生窗口、嵌套弹窗、绘制与销毁
 # 额外通过 Xwayland + xdotool 验证真实键鼠输入（会短暂聚焦测试窗口）
 python3 scripts/test-linux-client.py --input
 ```
@@ -152,14 +167,15 @@ python3 scripts/test-linux-client.py --input
 `rapp-client 'rapp://主机:47800/com.apple.TextEdit?mode=color16' --token-env RAPP_TOKEN`。
 地址中的 app 标识和口令属于 host；管理服务的 `ID@IP` / 密码应在管理界面添加主机，不能直接填进这个 TCP 地址。
 
-首版采用**一个应用画布**：多窗口、菜单、弹窗按远端位置一起显示，按窗口表从前到后命中鼠标。
-菜单按 Mac 最新客户端（`origin/feat/clipboard`）对齐：左上角 `rapp-client` 菜单和标题栏流量数字
+独立 GTK 客户端为每个远端普通窗口建立原生 Linux 窗口，裁掉远端标题栏，弹窗跟随父窗口。
+各窗口共享输入草稿和附件，支持原生尺寸调整；“菜单 / 剪贴板”按钮可唤起会话控制窗口。
+菜单与 Mac 客户端对齐：左上角 `rapp-client` 菜单和标题栏流量数字
 的点击/右键菜单共用流设置。两项预设是“最省流（双色·灰度 + 自适应 + 1 fps）”和
 “最清晰（高彩 + 原画 + 15 fps）”；其后依次是三种常用画质、三档采集密度、1/5/15/30 fps。
 预设本身不打勾，三组当前值各自打勾；旧 gray4 / color8 地址仍可使用，但不占用菜单。
 
 客户端菜单提供 50%–200% 的实际点数缩放、适应窗口、把当前 A 窗口移到左上角（避开已有窗口，
-每层错开 28 点）；缩放超过本地视口时使用滚动条。缩放只改变本地画布，不自动改 A 的尺寸。
+每层错开 28 点）；原生窗口支持缩放与远端尺寸同步。
 采集密度与 Mac 相同：省流 = 缩放、自适应 = 缩放 × 本地屏幕倍率、原画请求 8 再由 A 限制到原生像素；
 密度相对变化超过 1% 才重新设置采集。右上角流量静止时显示 `0 KB/s`。
 
@@ -171,8 +187,8 @@ python3 scripts/test-linux-client.py --input
 支持远程菜单、点击/拖动/滚动、本地输入法组句后回车发送，输入框旁有“复制”和“发送”。
 空输入框的 Ctrl 快捷键作为 Mac 的 ⌘ 快捷键发送；Ctrl+V 始终粘贴到本地输入框，回车再发出。
 Ctrl+Q 和本地关闭按钮只断开连接，Super 留给 Hyprland。v5 的“A 的剪贴板”菜单保留最近 20 项记录，
-点击完整文字可重新复制到本地；不支持下载的图片/文件和截断内容明确禁用。远端标题栏和边框仍可通过画面操作。
-尚未把每个远端窗口拆成独立的 Linux 窗口，v5 支持把远端复制的文字同步到本地剪贴板；图片/文件传输和 Linux 主机端尚未实现。
+可复制到本机或插入输入区。文字通知自动同步本地剪贴板；文字摘要按主机提供的摘要取用。
+图片/文件/带类型的数据通过独立连接下载，传输不占用画面连接。Linux 被控端仍未实现。
 与不支持的协议版本连接时会明确报告版本不匹配。
 
 ## A 上的前提
