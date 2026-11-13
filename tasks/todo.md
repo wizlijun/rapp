@@ -198,3 +198,14 @@
   - 摸底：锁屏时按 PID 投递（`postToPid`）或 AX 写入能否送达 app——要锁 A 的屏做实机测试，需用户安排时间
 - [x] P2 多个客户端同时连一个 host：规格 2026-11-12-rapp-multi-client-design.md，计划 2026-11-13-rapp-multi-client.md，代码完成（963e9cf..59dddd7，swift/cargo/flutter 全绿，终审已修）。待实机：`python3 scripts/multi-client-loopback.py .build/release/rapp-host`（会起 Calculator，需用户同意）
 - [x] P3 触摸屏双指上滑/下滑（用户 2026-11-12）：spec `docs/superpowers/specs/2026-11-13-rapp-touch-scroll-design.md`；只改 Flutter 嵌入画面（b8b7361 + 评审修复 d0857d0，flutter 649 过，check.sh EXIT=0）。待实机：需要一台触摸屏 B。留待以后：滚动量没按缩放换算成 A 的点数（和触控板现状一致）；双指滑动时每帧会发两条 scroll。会话切换时按住的鼠标键已修（5f47ebb，切换时立即在原会话松开）
+
+## 积压小问题清理（2026-11-13，用户「继续自主完成更多可以完成的任务」）
+
+- [x] 把各阶段暂缓的小问题对照现码过了一遍：8 个要修、18 个不修（外观/推测/要实机）、11 个早已修好
+- [x] F1 太旧的剪贴板条目：固定时提示「这条太旧了，A 上已不保留」，「复制到本机」也会提示 5 秒、不盖掉之后的传输状态（af00f79、799114b、3068d7b）
+- [x] F2 已下载好的升级，之后一次检查失败不再变成「升级没有完成」（c37e6e1）
+- [x] F3 滚动量按缩放换算成 A 的点数；F4 双指滚动每批只发一条（fb9aedb，规格 T3 已改）
+- [x] F5 剪贴板下载显示「下载 图片 45%」而不是 image（00e0534）
+- [x] F6 升级残留提示写明要删哪个文件（1eaf91b）
+- [x] F7/F8 补测试：没有在用的会话不让位；连续被挡时 1 秒提示重新计时（10390c3、af00f79）
+- 验证：swift 264+、check.sh EXIT=0；cargo test 全过、clippy 0 警告；flutter 660 过。滚动换算待实机手感确认
