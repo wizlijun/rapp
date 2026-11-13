@@ -51,6 +51,10 @@ public final class EmbeddedSession {
     private var linkDown = false
     /// The pictures are released and `.closed` was reported.
     private var released = false
+    /// The transfer status last reported (session queue).
+    private var shownStatus: String?
+    /// How long 「太旧了」 stays up; tests shorten it.
+    var staleClipHintFor: TimeInterval = 5
 
     public init(address: RemoteAddress, choice: DensityChoice, backingScale: CGFloat, link: MessageLink,
                 pasteboard: LocalPasteboard, queue: DispatchQueue, downloads: URL? = nil) {
@@ -68,7 +72,7 @@ public final class EmbeddedSession {
         queue.setSpecific(key: queueKey, value: ())
         link.density = captureDensity(zoom: 1, backingScale: backingScale, choice: choice)
         // The transfer queue reports on main; the runner hears it on the session queue, like every event.
-        transfers.onStatus = { [weak self] in self?.post(.transferStatus($0)) }
+        transfers.onStatus = { [weak self] status in self?.run { self?.showStatus(status) } }
         transfers.onProgress = { [weak self] in self?.post(.transferProgress($0)) }
         onInsert = { [weak self] info, payload in self?.composer.insert(info, payload) }
     }
@@ -112,11 +116,14 @@ public final class EmbeddedSession {
     /// anything fetched goes through the transfer queue, which lives on the main queue.
     public func pickClip(_ id: UInt32, insert: Bool) {
         run { [self] in
-            guard !linkDown else { return onEvent?(.transferStatus("取用没成功：A 已断开")) ?? () }
+            guard !linkDown else { return }  // the session already shows it is disconnected
             guard let info = history.info(id) else {
-                onEvent?(.transferStatus("取用没成功：太旧了，A 已不保留"))
-                DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
-                    self?.run { if self?.linkDown == false { self?.onEvent?(.transferStatus(nil)) } }
+                let text = "取用没成功：太旧了，A 已不保留"
+                showStatus(text)
+                queue.asyncAfter(deadline: .now() + staleClipHintFor) { [weak self] in
+                    // Only if nothing newer (a transfer that started meanwhile) replaced it.
+                    guard let self, !self.linkDown, self.shownStatus == text else { return }
+                    self.showStatus(nil)
                 }
                 return
             }
@@ -193,6 +200,13 @@ public final class EmbeddedSession {
             _ = self.surfaces.keep(only: [])
             self.onEvent?(.closed(reason: reason))
         }
+    }
+
+    /// On the queue: reports `status` (nil clears it), unless the link is gone.
+    private func showStatus(_ status: String?) {
+        guard !linkDown else { return }
+        shownStatus = status
+        onEvent?(.transferStatus(status))
     }
 
     /// From main: delivers `e` on the session queue, unless the session has closed by then.

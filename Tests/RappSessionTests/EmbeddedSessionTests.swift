@@ -178,6 +178,35 @@ final class EmbeddedSessionTests: XCTestCase {
         XCTAssertTrue(statuses.contains("取用没成功：太旧了，A 已不保留"))
     }
 
+    func testStaleClipHintClearsItselfButNotANewerStatus() {
+        let link = FakeLink()
+        var statuses = [String?]()
+        let (s, q) = make(link) { if case let .transferStatus(t) = $0 { statuses.append(t) } }
+        s.staleClipHintFor = 0.05
+        s.pickClip(99, insert: false)
+        q.sync {}
+        Thread.sleep(forTimeInterval: 0.1)
+        q.sync {}
+        XCTAssertEqual(statuses, ["取用没成功：太旧了，A 已不保留", nil])
+
+        statuses = []
+        s.pickClip(98, insert: false)
+        q.sync { s.transfers.onStatus?("下载 a.png 10%") }  // a transfer reports before the hint expires
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        q.sync {}
+        XCTAssertEqual(statuses, ["取用没成功：太旧了，A 已不保留", "下载 a.png 10%"])
+    }
+
+    func testPickClipWhileDisconnectedSaysNothing() {
+        let link = FakeLink()
+        var statuses = [String?]()
+        let (s, q) = make(link) { if case let .transferStatus(t) = $0 { statuses.append(t) } }
+        q.sync { link.drop("gone") }
+        s.pickClip(5, insert: false)
+        q.sync {}
+        XCTAssertEqual(statuses, [])
+    }
+
     func testPickClipWithCapturedInfoSurvivesRollover() {
         let board = NSPasteboard(name: .init("rapp.test.\(UUID().uuidString)"))
         boards.append(board)
