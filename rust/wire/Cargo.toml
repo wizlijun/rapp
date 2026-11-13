@@ -12,8 +12,10 @@ ring.workspace = true
 x509-parser.workspace = true
 data-encoding.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+quinn.workspace = true
+tokio.workspace = true
 rapp-net.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-serde_json.workspace = true

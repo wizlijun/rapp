@@ -1309,6 +1309,7 @@ version = "0.5.2"
 dependencies = [
  "anyhow",
  "data-encoding",
+ "quinn",
  "rapp-net",
  "rcgen",
  "ring",
@@ -1316,6 +1317,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "tokio",
  "x509-parser",
 ]
 
