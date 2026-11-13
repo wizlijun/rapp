@@ -238,7 +238,6 @@ impl Control {
         }
     }
 
-    /// Close the channel; if the process `attach` started has not left within a second, kill it.
     /// Set the size this client shows the session at. Without `force` it does nothing (`false`) while another
     /// client is attached; the count includes this client, so "someone else" is more than one.
     pub async fn fit(&self, tmux: &Tmux, session_id: &str, cols: u16, rows: u16, force: bool) -> anyhow::Result<bool> {
@@ -256,6 +255,14 @@ impl Control {
         Ok(true)
     }
 
+    /// Is the window `pane` is in now `cols` x `rows` (as clamped for `fit`)?
+    pub async fn shows(&self, pane: &str, cols: u16, rows: u16) -> anyhow::Result<bool> {
+        let (cols, rows) = super::clamp_size(cols, rows);
+        let got = self.command(&cmd::window_size(pane)).await?;
+        Ok(got.first().map(String::as_str) == Some(format!("{cols} {rows}").as_str()))
+    }
+
+    /// Close the channel; if the process `attach` started has not left within a second, kill it.
     pub async fn detach(self) {
         self.inner.writer.lock().await.take();
         let child = self.inner.child.lock().unwrap().take();

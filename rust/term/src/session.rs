@@ -54,7 +54,7 @@ where
         put(&mut w, &Out::Error { error: "no such session".into() }).await?;
         return Ok(());
     };
-    let mut p = Pump { tmux, session, sid, w, unread, opts, panes: Vec::new(), view: None };
+    let mut p = Pump { tmux, session, sid, attached: 0, w, unread, opts, panes: Vec::new(), view: None };
     let res = p.pump(Lines::new(r, MAX_IN_LINE), &list).await;
     if let Some(v) = p.view.take() {
         v.ctl.detach().await;
@@ -213,6 +213,18 @@ struct View {
     sender: Sender,
     /// When the last capture started.
     last: Option<Instant>,
+    sized: Held,
+}
+
+/// Whether the control client has a size of its own.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Held {
+    /// None: tmux leaves it out when sizing the window.
+    No,
+    /// Set because nobody else was attached; given up once someone is.
+    Fit,
+    /// Set because the peer asked to take the size over.
+    Forced,
 }
 
 /// Why a viewed session woke the pump.
@@ -226,7 +238,27 @@ impl View {
     fn new(ctl: Control, events: UnboundedReceiver<Event>, pane: &str, poll: Duration) -> View {
         let mut poll = tokio::time::interval_at(Instant::now() + poll, poll);
         poll.set_missed_tick_behavior(MissedTickBehavior::Delay);
-        View { ctl, events, poll, pane: pane.to_string(), sender: Sender::new(pane), last: None }
+        View { ctl, events, poll, pane: pane.to_string(), sender: Sender::new(pane), last: None, sized: Held::No }
+    }
+
+    /// Swap in a freshly attached control client, which has no size yet, and let the old one go. On failure the
+    /// old one stays.
+    async fn reattach(&mut self, tmux: &Tmux, session_id: &str) -> anyhow::Result<()> {
+        let (ctl, events) = Control::attach(tmux, session_id).await?;
+        let old = std::mem::replace(&mut self.ctl, ctl);
+        self.events = events;
+        self.sized = Held::No;
+        old.detach().await;
+        Ok(())
+    }
+
+    /// Take the size over, as a refit asks: under `window-size latest` tmux sizes the window by the client that
+    /// came last, so attach afresh, then set the size. Whether the window took it.
+    async fn refit(&mut self, tmux: &Tmux, session_id: &str, cols: u16, rows: u16) -> anyhow::Result<bool> {
+        self.reattach(tmux, session_id).await?;
+        self.ctl.fit(tmux, session_id, cols, rows, true).await?;
+        self.sized = Held::Forced;
+        self.ctl.shows(&self.pane, cols, rows).await
     }
 
     /// The next thing that needs the pump. Every branch is cancel-safe and none sends a command: a command future
@@ -260,6 +292,8 @@ struct Pump<'a, W> {
     /// The session's name, which unread state is kept under.
     session: &'a str,
     sid: String,
+    /// How many clients the session had at the last listing, rapp's own included.
+    attached: u32,
     w: W,
     unread: Arc<Mutex<Unread>>,
     opts: Opts,
@@ -361,8 +395,10 @@ impl<W: AsyncWrite + Unpin> Pump<'_, W> {
                 Err(_) => self.error("could not read the history").await?,
             },
             In::Refit { cols, rows, .. } => {
-                if let Some(v) = &self.view {
-                    let _ = v.ctl.fit(self.tmux, &self.sid, cols, rows, true).await;
+                if let Some(v) = self.view.as_mut() {
+                    if !v.refit(self.tmux, &self.sid, cols, rows).await.unwrap_or(false) {
+                        self.error("could not resize").await?;
+                    }
                     self.refresh(true).await?;
                 }
             }
@@ -402,7 +438,11 @@ impl<W: AsyncWrite + Unpin> Pump<'_, W> {
             v.sender = Sender::new(pane);
         }
         // A size the session does not take is no reason to stop: the screen goes out at the size it has.
-        let _ = v.ctl.fit(self.tmux, &self.sid, cols, rows, false).await;
+        if let Ok(true) = v.ctl.fit(self.tmux, &self.sid, cols, rows, false).await {
+            if v.sized == Held::No {
+                v.sized = Held::Fit;
+            }
+        }
         self.refresh(true).await
     }
 
@@ -441,9 +481,20 @@ impl<W: AsyncWrite + Unpin> Pump<'_, W> {
                 if !self.relist().await? {
                     return Ok(false);
                 }
+                self.give_up_size().await;
                 self.refresh(false).await?;
                 Ok(true)
             }
+        }
+    }
+
+    /// Someone else has attached since rapp sized the session for its viewer: let them have their own size
+    /// (under `window-size smallest` rapp's would box them in). The client re-attaches without a size; if that
+    /// fails, the next poll tries again.
+    async fn give_up_size(&mut self) {
+        let Some(v) = self.view.as_mut() else { return };
+        if v.sized == Held::Fit && self.attached > 1 {
+            let _ = v.reattach(self.tmux, &self.sid).await;
         }
     }
 
@@ -451,10 +502,11 @@ impl<W: AsyncWrite + Unpin> Pump<'_, W> {
     /// is gone. A failed listing is skipped: a lost connection is reported by the control client.
     async fn relist(&mut self) -> anyhow::Result<bool> {
         let Ok(list) = self.tmux.list().await else { return Ok(true) };
-        if !list.iter().any(|p| p.session_id == self.sid) {
+        let Some(one) = list.iter().find(|p| p.session_id == self.sid) else {
             self.error("session ended").await?;
             return Ok(false);
-        }
+        };
+        self.attached = one.attached;
         let panes = panes_of(&list, &self.sid);
         if panes != self.panes {
             self.panes = panes;

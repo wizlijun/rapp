@@ -226,15 +226,17 @@ async fn leaves_the_size_alone_when_someone_else_is_attached() {
     let Some(s) = common::Server::start() else { return };
     s.raw(&["new-session", "-d", "-s", "z", "-x", "100", "-y", "30"]);
     let p = s.tmux().list().await.unwrap()[0].clone();
-    let (other, _e1) = Control::attach(&s.tmux(), &p.session_id).await.unwrap();
-    other.command(&cmd::set_size(100, 30)).await.unwrap();
+    // A person's terminal, 100x30: the window loses one row to its status line.
+    let _real = s.attach_real("z", 100, 30);
     let (ctl, _e2) = Control::attach(&s.tmux(), &p.session_id).await.unwrap();
     assert!(!ctl.fit(&s.tmux(), &p.session_id, 140, 45, false).await.unwrap());
     let same = s.tmux().list().await.unwrap()[0].clone();
-    assert_eq!((same.cols, same.rows), (100, 30));
+    assert_eq!((same.cols, same.rows), (100, 29));
+    // Forced, from a client attached after the real one (what a refit does): the size really changes.
     assert!(ctl.fit(&s.tmux(), &p.session_id, 140, 45, true).await.unwrap());
+    let forced = s.tmux().list().await.unwrap()[0].clone();
+    assert_eq!((forced.cols, forced.rows), (140, 45));
     ctl.detach().await;
-    other.detach().await;
 }
 
 #[tokio::test]
@@ -565,6 +567,88 @@ async fn only_this_sessions_panes_take_input() {
     assert!(!got.iter().any(|m| matches!(m, Out::Error { .. })), "{got:?}");
     assert!(got.iter().any(|m| matches!(m, Out::Panes { panes } if panes.len() == 2)));
     assert_eq!(s.tmux().capture(&new).await.unwrap().lines[0], "hi");
+}
+
+/// Read and acknowledge screens until one is `cols` x `rows`; an error on the way fails the test.
+async fn screen_at(p: &mut Pump, cols: u16, rows: u16, within: Duration) {
+    let end = tokio::time::Instant::now() + within;
+    loop {
+        let left = end.saturating_duration_since(tokio::time::Instant::now());
+        let l = tokio::time::timeout(left, p.lines.next_line())
+            .await
+            .unwrap_or_else(|_| panic!("no {cols}x{rows} screen in time"))
+            .unwrap()
+            .expect("the pump closed its output");
+        match serde_json::from_str::<Out>(&l).unwrap() {
+            Out::Screen { rev, cols: c, rows: r, .. } => {
+                say(&mut p.w, In::Ack { rev }).await;
+                if (c, r) == (cols, rows) {
+                    return;
+                }
+            }
+            Out::Error { error } => panic!("error: {error}"),
+            _ => {}
+        }
+    }
+}
+
+async fn window_size(s: &common::Server) -> (u16, u16) {
+    let p = s.tmux().list().await.unwrap()[0].clone();
+    (p.cols, p.rows)
+}
+
+#[tokio::test]
+async fn refit_takes_the_size_though_a_real_client_attached_later() {
+    // Under the default `window-size latest`, a client that attached after rapp's wins the size; a refit must
+    // still take.
+    let Some(s) = common::Server::start() else { return };
+    s.raw(&["new-session", "-d", "-s", "r", "-x", "100", "-y", "30", "cat"]);
+    common::settle().await;
+    let mut p = pump(&s, "r", fresh_unread());
+    let (pane, _) = greeted(&mut p).await;
+    say(&mut p.w, view(&pane, 60, 20)).await;
+    screen_at(&mut p, 60, 20, Duration::from_secs(3)).await;
+    let _real = s.attach_real("r", 120, 40);
+    common::settle().await;
+    assert_eq!(window_size(&s).await, (120, 39));
+    say(&mut p.w, In::Refit { pane: pane.clone(), cols: 150, rows: 50 }).await;
+    screen_at(&mut p, 150, 50, Duration::from_secs(3)).await;
+    assert_eq!(window_size(&s).await, (150, 50));
+}
+
+#[tokio::test]
+async fn a_refit_that_cannot_take_says_so() {
+    // Under `window-size smallest` a real 80x24 client keeps the window from growing.
+    let Some(s) = common::Server::start() else { return };
+    s.raw(&["set", "-g", "window-size", "smallest"]);
+    s.raw(&["new-session", "-d", "-s", "n", "-x", "80", "-y", "24", "cat"]);
+    common::settle().await;
+    let _real = s.attach_real("n", 80, 24);
+    let mut p = pump(&s, "n", fresh_unread());
+    let (pane, _) = greeted(&mut p).await;
+    say(&mut p.w, view(&pane, 80, 23)).await;
+    screen_at(&mut p, 80, 23, Duration::from_secs(3)).await;
+    say(&mut p.w, In::Refit { pane: pane.clone(), cols: 150, rows: 50 }).await;
+    let got = drain_for(&mut p.lines, Duration::from_secs(2)).await;
+    assert!(got.contains(&Out::Error { error: "could not resize".into() }), "{got:?}");
+}
+
+#[tokio::test]
+async fn gives_its_size_up_to_a_real_client_that_attaches_later() {
+    // Under `window-size smallest` the size rapp set would box in a person's bigger terminal.
+    let Some(s) = common::Server::start() else { return };
+    s.raw(&["set", "-g", "window-size", "smallest"]);
+    s.raw(&["new-session", "-d", "-s", "g", "-x", "100", "-y", "30", "cat"]);
+    common::settle().await;
+    let mut p = pump(&s, "g", fresh_unread());
+    let (pane, _) = greeted(&mut p).await;
+    say(&mut p.w, view(&pane, 60, 20)).await;
+    screen_at(&mut p, 60, 20, Duration::from_secs(3)).await;
+    assert_eq!(window_size(&s).await, (60, 20));
+    let _real = s.attach_real("g", 120, 40);
+    // The poll (every 2 seconds) sees the other client and lets go; the viewer gets the screen at its new size.
+    screen_at(&mut p, 120, 39, Duration::from_secs(6)).await;
+    assert_eq!(window_size(&s).await, (120, 39));
 }
 
 // ---- ssh ----

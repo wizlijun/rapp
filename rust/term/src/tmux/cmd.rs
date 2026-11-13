@@ -42,6 +42,11 @@ pub fn meta(pane: &str) -> Vec<String> {
     ["display-message", "-p", "-t", pane, f].map(String::from).to_vec()
 }
 
+/// The size of the window `pane` is in: `<width> <height>`.
+pub fn window_size(pane: &str) -> Vec<String> {
+    ["display-message", "-p", "-t", pane, "#{window_width} #{window_height}"].map(String::from).to_vec()
+}
+
 /// How many rows of scrollback `pane` holds.
 pub fn history_size(pane: &str) -> Vec<String> {
     ["display-message", "-p", "-t", pane, "#{history_size}"].map(String::from).to_vec()
@@ -143,6 +148,7 @@ mod tests {
     #[test]
     fn size_and_new_session_builders() {
         assert_eq!(set_size(140, 45), ["refresh-client", "-C", "140x45"]);
+        assert_eq!(window_size("%2"), ["display-message", "-p", "-t", "%2", "#{window_width} #{window_height}"]);
         assert_eq!(
             new_session("a b", 118, 38, &["sh".into(), "-c".into(), "echo hi".into()]),
             ["new-session", "-d", "-s", "a b", "-x", "118", "-y", "38", "--", "'sh' '-c' 'echo hi'"]

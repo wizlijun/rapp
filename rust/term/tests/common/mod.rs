@@ -52,3 +52,43 @@ impl Drop for Server {
 pub async fn settle() {
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 }
+
+/// A real terminal client on a pty (through `script`), as a person's terminal would be; it leaves when dropped.
+pub struct RealClient(std::process::Child);
+
+#[allow(dead_code)]
+impl Server {
+    /// Attach a real client of `session` whose terminal is `cols` x `rows`, and wait until tmux counts it.
+    pub fn attach_real(&self, session: &str, cols: u16, rows: u16) -> RealClient {
+        let count = || self.raw(&["display-message", "-p", "-t", session, "#{session_attached}"]).trim().to_string();
+        let before: u32 = count().parse().unwrap();
+        let inner =
+            format!("stty cols {cols} rows {rows}; exec tmux -L {} -f /dev/null attach -t {session}", self.socket);
+        let mut c = Command::new("script");
+        if cfg!(target_os = "macos") {
+            c.args(["-q", "/dev/null", "sh", "-c", &inner]);
+        } else {
+            c.args(["-q", "-c", &inner, "/dev/null"]);
+        }
+        let child = c
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("script is needed to attach a real client");
+        let client = RealClient(child);
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while count().parse::<u32>().unwrap_or(0) <= before {
+            assert!(std::time::Instant::now() < end, "the real client did not attach within 5 seconds");
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        client
+    }
+}
+
+impl Drop for RealClient {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
