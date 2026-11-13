@@ -152,4 +152,14 @@ void main() {
     expect(s.mine.length, 1);
     expect(told, 1);
   });
+
+  test('a later good save clears the save problem', () {
+    Process.runSync('chmod', ['555', dir.path]);
+    final s = AppProfileStore(dir.path);
+    s.addRule('a', 'A', const WindowRule(action: RuleAction.hide));
+    expect(s.problem, appsSaveProblem);
+    Process.runSync('chmod', ['755', dir.path]);
+    s.addRule('b', 'B', const WindowRule(action: RuleAction.hide));
+    expect(s.problem, isNull);
+  });
 }

@@ -571,9 +571,9 @@ void main() {
     late MainState es;
     late AppProfileStore store;
 
-    Future<void> setup(WidgetTester tester, List<RemoteWindow> windows, {List<WindowRule>? rules}) async {
+    Future<void> setup(WidgetTester tester, List<RemoteWindow> windows, {List<WindowRule>? rules, double width = 1800}) async {
       // Wide enough that three tabs and the 已隐藏 chip all show (the tab row clips at the slack).
-      tester.view.physicalSize = const Size(1800, 800);
+      tester.view.physicalSize = Size(width, 800);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
       port = FakeSessionPort();
@@ -582,7 +582,7 @@ void main() {
       es = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port, profiles: store);
       addTearDown(es.dispose);
       await tester.pumpWidget(wrap(SizedBox(
-        width: 1800,
+        width: width,
         child: TopBar(state: es, fullscreen: false, onToggleFullscreen: () {}),
       )));
       await tester.runAsync(() async {
@@ -662,6 +662,24 @@ void main() {
       await settle(tester);
       expect(store.mine.where((p) => p.windows?.isNotEmpty ?? false), isEmpty);
       expect(find.text('已隐藏 1 个'), findsNothing);
+    });
+
+    testWidgets('已隐藏 N 个 stays on screen with many tabs at a narrow width', (tester) async {
+      final many = [
+        for (var i = 1; i <= 8; i++) rw(i, 'Window number $i'),
+        rw(9, 'w9', kind: WindowKind.floating),
+      ];
+      await setup(tester, many, rules: [hideFloating], width: 800);
+      final chip = find.byKey(const Key('hidden-tabs'));
+      expect(chip, findsOneWidget);
+      final r = tester.getRect(chip);
+      expect(r.left, greaterThanOrEqualTo(0));
+      expect(r.right, lessThanOrEqualTo(800));
+      expect(tester.getRect(find.byType(TopBar)).contains(r.center), isTrue);
+      // Hit-testable: tapping it opens the menu.
+      await tester.tap(chip);
+      await settle(tester);
+      expect(find.text('这次显示'), findsOneWidget);
     });
 
     testWidgets('已隐藏 N 个 is selected while A focuses a hidden window', (tester) async {

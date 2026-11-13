@@ -213,6 +213,17 @@ void main() {
       expect(find.text('草稿'), findsOneWidget);
     });
 
+    testWidgets('the upload strip and cancel stay while composerAllowed is false; only 输入 goes', (tester) async {
+      rs.setProfile(const ResolvedProfile(name: 'X', composer: false));
+      rs.apply(const TransferStatusEvent(1, '上传 1/2 · a.txt'));
+      await tester.pumpWidget(wrap(SizedBox(
+          width: 900, height: 400, child: Stack(children: composerLayer(state: es, session: rs, port: port)))));
+      expect(find.byKey(const Key('composer-open')), findsNothing);
+      expect(find.text('上传 1/2 · a.txt'), findsOneWidget);
+      await tester.tap(find.text('取消'));
+      expect(callsOf('cancel_transfer').single, equals({'sid': 1}));
+    });
+
     testWidgets('an upload shows its status with a cancel', (tester) async {
       rs.apply(const TransferStatusEvent(1, '上传 1/2 · a.txt'));
       await tester.pumpWidget(wrap(bar()));

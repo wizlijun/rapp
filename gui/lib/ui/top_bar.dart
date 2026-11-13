@@ -167,22 +167,23 @@ class TopBar extends StatelessWidget {
                                   ),
                                 ),
                               ),
-                            if (rs!.hidden.isNotEmpty)
-                              Builder(
-                                builder: (chipCtx) => TabChip(
-                                  key: const Key('hidden-tabs'),
-                                  label: '已隐藏 ${rs.hidden.length} 个',
-                                  selected: rs.hiddenFocused,
-                                  onTap: () {
-                                    final box = chipCtx.findRenderObject() as RenderBox;
-                                    _hiddenMenu(context, box.localToGlobal(Offset(0, box.size.height)));
-                                  },
-                                ),
-                              ),
                           ],
                         ),
                       ),
                     ),
+                  // Outside the scroll view: the only way back to hidden windows must never scroll away.
+                  if (tabs != null && rs!.hidden.isNotEmpty)
+                        Builder(
+                          builder: (chipCtx) => TabChip(
+                            key: const Key('hidden-tabs'),
+                            label: '已隐藏 ${rs.hidden.length} 个',
+                            selected: rs.hiddenFocused,
+                            onTap: () {
+                              final box = chipCtx.findRenderObject() as RenderBox;
+                              _hiddenMenu(context, box.localToGlobal(Offset(0, box.size.height)));
+                            },
+                          ),
+                        ),
                   if (wide)
                     Expanded(
                       child: Text(

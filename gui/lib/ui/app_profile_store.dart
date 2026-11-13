@@ -184,6 +184,7 @@ class AppProfileStore extends ChangeNotifier {
   void _commit() {
     try {
       _save();
+      if (problem == appsSaveProblem) problem = null;
     } catch (_) {
       problem = appsSaveProblem;
     }

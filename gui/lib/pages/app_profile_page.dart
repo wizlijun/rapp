@@ -114,7 +114,12 @@ class _AppProfilePageState extends State<AppProfilePage> {
       setState(() => _idsMissing = true);
       return;
     }
-    if (!_untouched) widget.store.put(_draft, replacing: _orig);
+    if (!_untouched) {
+      if (_builtin == null && _orig == null && _draft.name == null && widget.appName.isNotEmpty) {
+        _draft.name = widget.appName;
+      }
+      widget.store.put(_draft, replacing: _orig);
+    }
     Navigator.of(context).pop();
   }
 

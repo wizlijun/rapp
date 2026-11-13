@@ -59,6 +59,16 @@ void main() {
     expect(find.text('保存'), findsNothing);
   });
 
+  testWidgets('a non-built-in app with no profile is saved under its app name', (tester) async {
+    final store = storeWith();
+    await open(tester, store, appId: 'com.apple.finder', appName: 'Finder');
+    await pick(tester, const Key('fps-dd'), '5 fps');
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    expect(store.mine.single.name, 'Finder');
+    expect(store.mine.single.ids, ['com.apple.finder']);
+  });
+
   testWidgets('saving without changes writes nothing', (tester) async {
     final store = storeWith();
     await open(tester, store, appId: _chrome);
