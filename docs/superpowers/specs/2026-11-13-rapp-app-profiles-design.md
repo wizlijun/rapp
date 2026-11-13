@@ -19,7 +19,7 @@
 | D5 | 第一版不做导入、分享和市场。`apps.json` 是普通 JSON，高级用户可以自己改；页面上有「打开配置文件夹」 | YAGNI；文件格式先定下来，以后要分享也不用改格式 |
 | D6 | 隐藏窗口**只在 B 上不显示**：A 上的窗口照常存在，画面照常传。被隐藏的窗口不出标签、不进舞台、不能分离，B 的点击和按键也到不了它 | 不改协议。代价是流量不省（§6 风险 1），第二版可以让 A 不采集它 |
 | D7 | 隐藏的窗口**永远找得回来**：标签栏末尾显示「已隐藏 N 个」，点开可以「这次显示」。如果 app 只剩被隐藏的窗口，就照常显示，舞台不会黑着 | 被隐藏的可能是模态对话框，A 的 app 在等它，B 却看不见；不给出口就会卡住（§6 风险 2） |
-| D8 | 首批内置：终端、Chrome、Claude、ChatGPT、grokbot。内置配置只填画面一类；隐藏规则和输入区规则内置一条都不带，由用户自己加。每条内置配置都标「未实测」，用户在真机上试过才去掉 | 默认值都是猜的（§0.9）；隐藏窗口这类规则猜错了会让人找不到窗口，不能替用户猜 |
+| D8 | 首批内置先做 macOS，名单见 §9（约 20 个，按用途分 7 组）。内置配置只填画面一类；隐藏规则和输入区规则内置一条都不带，由用户自己加。每条内置配置都标「未实测」，用户在真机上试过才去掉 | 默认值都是猜的（§0.9）；隐藏窗口这类规则猜错了会让人找不到窗口，不能替用户猜 |
 | D9 | 日志里不写窗口标题、不写规则内容，只写「命中了哪份配置」（配置名）和「隐藏了几个窗口」 | 窗口标题里可能有文件名、网页标题这类私事；可观测性规格只记事件不记内容 |
 
 ## 1. 用语
@@ -132,3 +132,55 @@
 - 文件：写坏的 `apps.json` → `.bad` + 提示；内置文件坏了 GUI 照常启动；日志里没有窗口标题和通配内容。
 
 实机（要用户安排）：Chrome 里打开「下载」或设置这类子窗口，从标签右键隐藏，「已隐藏 1 个」出现，「这次显示」能找回；某个对话框设成不要输入区，切过去输入区消失、切回来出现。
+
+## 9. 首批适配的 app（先做 macOS）
+
+用户 2026-11-13：「一般情况下，用户经常使用的 app 不会很多，请列出最著名最常用的生产力有关的 app 和 ai app、terminal 等，整理一个第一批适配的 app，先做 macos 的。」
+
+**怎么选的：** 按用途分组，每组只取最常用的几个；用户点过名的（终端、Chrome、Claude、ChatGPT、grokbot）都在里面；这台 Mac 上已经装了的优先。
+
+**标识一栏：** 标 ✓ 的是 2026-11-13 从这台 Mac 上已装 app 的 `Info.plist` 读出来的；没有 ✓ 的按公开资料填，第一次在装了它的机器上打开时要核对，标「待核对」的连公开资料都没把握。
+
+**画面一栏：** 档位 / 密度 / 帧率，取值就是串流菜单里的那几个（帧率只有 1、5、15、30）。全部是猜的，标「未实测」（D8）。发送后一律 `none`、输入区一律开着、窗口规则一条不带。
+
+### 第一批（21 个）
+
+| 组 | app | macOS 标识 | 画面 | 为什么这么配 |
+|---|---|---|---|---|
+| 终端 | 终端 | `com.apple.Terminal` ✓ | 双色·灰度 / 自适应 / 15 | 全是文字，灰度最省；打字要马上看到回显，帧率不能低 |
+| | iTerm2 | `com.googlecode.iterm2` | 同上 | |
+| | Ghostty | `com.mitchellh.ghostty` | 同上 | |
+| | Warp | `dev.warp.Warp-Stable` | 双色·彩色 / 自适应 / 15 | 界面靠颜色分块，灰度会糊在一起 |
+| AI 对话 | ChatGPT | `com.openai.codex` ✓、`com.openai.chat` | 双色·彩色 / 自适应 / 15 | 文字为主、带代码高亮；回答是一个字一个字出来的，要 15 帧才跟得上。这台 Mac 上的 ChatGPT.app 标识是 `com.openai.codex`，旧版是 `com.openai.chat`，两个都写上 |
+| | Claude | `com.anthropic.claudefordesktop` ✓ | 同上 | |
+| | Perplexity | `ai.perplexity.mac` | 同上 | |
+| | Grok | 待核对 | 同上 | 用户点名的 grokbot |
+| 写代码 | Cursor | `com.todesktop.230313mzl4w4u92` | 双色·彩色 / 自适应 / 15 | 代码靠高亮读；它的标识就是这串，不是 `cursor` |
+| | VS Code | `com.microsoft.VSCode` | 同上 | |
+| | Xcode | `com.apple.dt.Xcode` ✓ | 同上 | |
+| 浏览器 | Chrome | `com.google.Chrome` ✓ | 高彩 / 自适应 / 15 | 有图片、有视频，双色会丢信息 |
+| | Safari | `com.apple.Safari` ✓ | 同上 | |
+| | Arc | `company.thebrowser.Browser` | 同上 | |
+| 文档、笔记 | 备忘录 | `com.apple.Notes` ✓ | 双色·彩色 / 自适应 / 5 | 以读写文字为主，画面变得慢 |
+| | Notion | `notion.id` | 同上 | |
+| | Obsidian | `md.obsidian` | 同上 | |
+| | WPS Office | `com.kingsoft.wpsoffice.mac.global` ✓、`com.kingsoft.wpsoffice.mac` | 同上 | 这台装的是国际版；国内版是后一个 |
+| | Word、Excel、PowerPoint | `com.microsoft.Word`、`com.microsoft.Excel`、`com.microsoft.Powerpoint` | 同上 | 三个 app 一份配置 |
+| 沟通 | 微信 | `com.tencent.xinWeChat` | 双色·彩色 / 自适应 / 5 | 聊天以文字为主；图片点开看时可以临时切高彩 |
+| | 飞书 | 待核对 | 同上 | |
+| | Slack | `com.tinyspeck.slackmacgap` | 同上 | |
+
+### 这台 Mac 上常用、也一起带上的（2 个）
+
+| app | macOS 标识 | 画面 | 说明 |
+|---|---|---|---|
+| Paseo | `sh.paseo.desktop` ✓ | 双色·彩色 / 自适应 / 15 | 用户这几天一直开着 |
+| note.md | `net.notemd.app` ✓ | 双色·彩色 / 自适应 / 5 | 用户自己的笔记 app |
+
+### 候补（第一批之后再加）
+
+Edge（`com.microsoft.edgemac`）、Zed（`dev.zed.Zed`）、豆包、Kimi（待核对）、钉钉（`com.alibaba.DingTalkMac`）、企业微信（`com.tencent.WeWorkMac`）、邮件（`com.apple.mail` ✓）、Outlook（`com.microsoft.Outlook`）、腾讯会议（`com.tencent.meeting`，高彩 / 自适应 / 30）、Zoom（`us.zoom.xos`，同上）、Figma（`com.figma.Desktop`，高彩 / 原画 / 15）、预览（`com.apple.Preview` ✓）、日历（`com.apple.iCal` ✓）、提醒事项（`com.apple.reminders` ✓）。
+
+### 以后加 Windows、Omarchy 时
+
+同一份配置的 `ids` 里补上 exe 文件名和窗口 class（D3），不另起一份。例如 Chrome 补 `chrome.exe`、`google-chrome`。
