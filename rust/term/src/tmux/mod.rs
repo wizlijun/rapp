@@ -3,7 +3,7 @@
 pub mod cmd;
 pub mod parse;
 
-use crate::runner::{classify, Runner};
+use crate::runner::{classify, RunFail, Runner};
 use std::process::Stdio;
 use tokio::io::AsyncWriteExt;
 
@@ -73,12 +73,7 @@ impl Tmux {
     }
 
     async fn exec(&self, args: &[String], stdin: &[u8]) -> anyhow::Result<Done> {
-        let mut full: Vec<String> = Vec::new();
-        if let Some(s) = &self.socket {
-            full.extend(["-L".to_string(), s.clone()]);
-        }
-        full.extend(args.iter().cloned());
-        let mut c = self.runner.command(&self.bin, &full);
+        let mut c = self.runner.command(&self.bin, &self.args(args));
         c.stdin(if stdin.is_empty() { Stdio::null() } else { Stdio::piped() })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -100,6 +95,17 @@ impl Tmux {
             stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
             stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
         })
+    }
+
+    /// The full tmux argument list for `rest`: `-u` first (tmux must not fall back to `_` for non-ASCII bytes and
+    /// tabs under a C locale), then the socket, then the command. Every tmux process rapp starts uses this.
+    pub fn args(&self, rest: &[String]) -> Vec<String> {
+        let mut full = vec!["-u".to_string()];
+        if let Some(s) = &self.socket {
+            full.extend(["-L".to_string(), s.clone()]);
+        }
+        full.extend(rest.iter().cloned());
+        full
     }
 
     fn program_name(&self) -> &str {
@@ -126,12 +132,47 @@ impl Tmux {
     pub async fn list(&self) -> anyhow::Result<Vec<PaneInfo>> {
         let d = self.exec(&cmd::list_panes(), &[]).await?;
         if d.code == Some(0) {
-            return Ok(parse::panes(&d.stdout));
+            let v = parse::panes(&d.stdout);
+            if v.is_empty() && !d.stdout.trim().is_empty() {
+                anyhow::bail!("could not read the tmux pane list");
+            }
+            return Ok(v);
         }
-        const EMPTY: [&str; 4] = ["no server running", "No such file or directory", "no current target", "no sessions"];
-        if EMPTY.iter().any(|m| d.stderr.contains(m)) {
+        if is_empty_server(d.code, &d.stderr) {
             return Ok(Vec::new());
         }
         Err(Self::failure(&d))
+    }
+}
+
+/// Does this failed `list-panes` only mean "no server, or no sessions"? tmux exits 1 for it; other exit codes
+/// (ssh 255, a missing program 127) and classified failures are real errors.
+fn is_empty_server(code: Option<i32>, stderr: &str) -> bool {
+    const EMPTY: [&str; 5] =
+        ["no server running", "error connecting to", "No such file or directory", "no current target", "no sessions"];
+    code == Some(1) && matches!(classify(code, stderr), RunFail::Other(_)) && EMPTY.iter().any(|m| stderr.contains(m))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_server_decision() {
+        assert!(is_empty_server(Some(1), "no current target"));
+        assert!(is_empty_server(Some(1), "no server running on /tmp/tmux-501/default"));
+        assert!(is_empty_server(Some(1), "error connecting to /tmp/tmux-501/x (No such file or directory)"));
+        assert!(!is_empty_server(Some(127), "sh: tmux: No such file or directory"));
+        assert!(!is_empty_server(Some(255), "ssh: Could not resolve hostname h: No such file or directory"));
+        assert!(!is_empty_server(Some(255), "Warning: no such file; no current target"));
+        assert!(!is_empty_server(Some(1), "Permission denied (publickey). No such file or directory"));
+        assert!(!is_empty_server(Some(1), "something else"));
+    }
+
+    #[test]
+    fn args_put_u_first() {
+        let t = Tmux { runner: Runner::Local, bin: "tmux".into(), socket: Some("s".into()) };
+        assert_eq!(t.args(&["list-panes".into()]), ["-u", "-L", "s", "list-panes"]);
+        assert_eq!(Tmux::local().args(&["-V".into()]), ["-u", "-V"]);
     }
 }
