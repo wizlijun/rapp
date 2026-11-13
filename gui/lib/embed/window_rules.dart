@@ -44,14 +44,6 @@ RuleAction? actionFor(List<WindowRule> rules, RemoteWindow w, {required bool isM
   int? main,
   Set<int> showOnce = const {},
 }) {
-  final hidden = [
-    for (final w in all)
-      if (!showOnce.contains(w.id) &&
-          actionFor(rules, w, isMain: w.id == main) == RuleAction.hide)
-        w
-  ];
-  final hiddenIds = {for (final w in hidden) w.id};
-
   RemoteWindow? byId(int id) {
     for (final w in all) {
       if (w.id == id) return w;
@@ -67,6 +59,15 @@ RuleAction? actionFor(List<WindowRule> rules, RemoteWindow w, {required bool isM
     }
     return null;
   }
+
+  bool kept(RemoteWindow w) =>
+      showOnce.contains(w.id) || (!w.decorated && showOnce.contains(rootOf(w)));
+
+  final hidden = [
+    for (final w in all)
+      if (!kept(w) && actionFor(rules, w, isMain: w.id == main) == RuleAction.hide) w
+  ];
+  final hiddenIds = {for (final w in hidden) w.id};
 
   final shown = [
     for (final w in all)
