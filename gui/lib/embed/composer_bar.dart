@@ -268,8 +268,8 @@ List<Widget> composerLayer({required MainState state, required RemoteSession ses
       right: 8,
       bottom: 8,
       child: ListenableBuilder(
-        listenable: session.composer,
-        builder: (context, _) => session.composer.open
+        listenable: both,
+        builder: (context, _) => session.composer.open && session.composerAllowed
             // Keyed by session: the keys row and sticky ⌘/⌥ never carry over to another one.
             ? ComposerBar(key: ValueKey(session.sid), state: state, session: session, port: port)
             : const SizedBox.shrink(),
@@ -281,9 +281,11 @@ List<Widget> composerLayer({required MainState state, required RemoteSession ses
       child: ListenableBuilder(
         listenable: both,
         builder: (context, _) {
-          if (session.composer.open) return const SizedBox.shrink();
-          final t = RappTokens.of(context);
           final transfer = session.transferStatus;
+          final button = session.composerAllowed;
+          // An open bar carries its own strip; a disallowed one is hidden, so the strip shows here.
+          if ((session.composer.open && button) || (transfer == null && !button)) return const SizedBox.shrink();
+          final t = RappTokens.of(context);
           return Listener(
             onPointerDown: (_) => state.blurPicture(),
             child: Row(
@@ -301,11 +303,12 @@ List<Widget> composerLayer({required MainState state, required RemoteSession ses
                   RappButton.secondary(label: '取消', onPressed: () => port.cancelTransfer(session.sid)),
                   const SizedBox(width: 8),
                 ],
-                RappButton.secondary(
-                  key: const Key('composer-open'),
-                  label: '输入',
-                  onPressed: () => session.composer.open = true,
-                ),
+                if (button)
+                  RappButton.secondary(
+                    key: const Key('composer-open'),
+                    label: '输入',
+                    onPressed: () => session.composer.open = true,
+                  ),
               ],
             ),
           );

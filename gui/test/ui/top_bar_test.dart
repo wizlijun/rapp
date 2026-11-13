@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:rapp/paths.dart';
+import 'package:flutter/gestures.dart' show kSecondaryButton;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/session_port.dart';
@@ -8,6 +9,8 @@ import 'package:rapp/embed/stream_menu.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/ui/lamp.dart';
 import 'package:rapp/ui/tab_chip.dart';
+import 'package:rapp/embed/app_profile.dart';
+import 'package:rapp/ui/app_profile_store.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/top_bar.dart';
@@ -539,6 +542,150 @@ void main() {
       await tester.tapAt(const Offset(10, 500));
       await tester.pump();
       expect(es.corner, isNull);
+    });
+  });
+
+  group('window tab rules', () {
+    const chrome = 'com.google.Chrome';
+    RemoteWindow rw(int id, String title, {WindowKind kind = WindowKind.normal, bool focused = false}) => RemoteWindow(
+          id: id,
+          parent: 0,
+          kind: kind,
+          title: title,
+          rect: const Rect.fromLTWH(0, 0, 400, 328),
+          titleBar: 28,
+          resizable: true,
+          focused: focused,
+          texture: id,
+          visible: const Rect.fromLTWH(0, 0, 1, 1),
+        );
+    const hideFloating = WindowRule(kind: WindowKind.floating, action: RuleAction.hide);
+
+    // The status lamp animates, so pumpAndSettle would never return.
+    Future<void> settle(WidgetTester tester) async {
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 600));
+    }
+
+    late FakeSessionPort port;
+    late MainState es;
+    late AppProfileStore store;
+
+    Future<void> setup(WidgetTester tester, List<RemoteWindow> windows, {List<WindowRule>? rules, double width = 1800}) async {
+      // Wide enough that three tabs and the 已隐藏 chip all show (the tab row clips at the slack).
+      tester.view.physicalSize = Size(width, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      port = FakeSessionPort();
+      store = AppProfileStore('${tmp.path}/shared',
+          mine: [if (rules != null) AppProfile(ids: [chrome], name: 'Chrome', windows: rules)]);
+      es = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port, profiles: store);
+      addTearDown(es.dispose);
+      await tester.pumpWidget(wrap(SizedBox(
+        width: width,
+        child: TopBar(state: es, fullscreen: false, onToggleFullscreen: () {}),
+      )));
+      await tester.runAsync(() async {
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            t.emit({
+              'event': 'opened', 'sid': 1, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+              'port': 5001, 'token': 'tk', 'req': m['req'],
+            });
+          }
+        };
+        es.openOrSwitch('111', chrome, 'Chrome');
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      await tester.pump();
+      es.stageSize(const Size(800, 600));
+      port.emit(const ReadyEvent(1, 'Chrome'));
+      port.emit(WindowsEvent(1, windows));
+      await tester.pump();
+    }
+
+    final three = [rw(1, 'Main'), rw(2, 'Downloads', kind: WindowKind.floating), rw(3, 'Other')];
+
+    testWidgets('right-click a tab, 隐藏这类窗口: the tab goes, a snackbar offers 撤销', (tester) async {
+      await setup(tester, three);
+      await tester.tap(find.text('Downloads'), buttons: kSecondaryButton);
+      await settle(tester);
+      await tester.tap(find.text('隐藏这类窗口'));
+      await settle(tester);
+      expect(find.text('Downloads'), findsNothing);
+      expect(find.text('已隐藏 1 个'), findsOneWidget);
+      expect(find.text('已隐藏，可在 app 配置里改'), findsOneWidget);
+      await tester.tap(find.text('撤销'));
+      await settle(tester);
+      expect(find.text('Downloads'), findsOneWidget);
+      expect(find.text('已隐藏 1 个'), findsNothing);
+    });
+
+    testWidgets('这个窗口不要输入区 shows its snackbar', (tester) async {
+      await setup(tester, three);
+      await tester.tap(find.text('Other'), buttons: kSecondaryButton);
+      await settle(tester);
+      await tester.tap(find.text('这个窗口不要输入区'));
+      await settle(tester);
+      expect(find.text('已关掉这个窗口的输入区，可在 app 配置里改'), findsOneWidget);
+      expect(store.mine.single.windows!.single.action, RuleAction.noComposer);
+    });
+
+    testWidgets('隐藏这类窗口 is greyed for the main window', (tester) async {
+      await setup(tester, three);
+      await tester.tap(find.text('Main'), buttons: kSecondaryButton);
+      await settle(tester);
+      final item = tester.widget<PopupMenuItem<Object?>>(
+          find.ancestor(of: find.text('隐藏这类窗口'), matching: find.byType(PopupMenuItem<Object?>)));
+      expect(item.enabled, isFalse);
+    });
+
+    testWidgets('已隐藏 N 个 shows with a single tab; 这次显示 and 不再隐藏 work', (tester) async {
+      final two = [rw(1, 'Main'), rw(2, 'w2', kind: WindowKind.floating)];
+      await setup(tester, two, rules: [hideFloating]);
+      expect(find.text('已隐藏 1 个'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('hidden-tabs')));
+      await settle(tester);
+      expect(find.text('w2'), findsOneWidget); // the unclickable name row
+      await tester.tap(find.text('这次显示'));
+      await settle(tester);
+      expect(find.text('w2'), findsOneWidget); // now a tab
+      expect(find.text('已隐藏 1 个'), findsNothing);
+
+      // A fresh table with the rule again: 不再隐藏 removes the rule.
+      await setup(tester, two, rules: [hideFloating]);
+      await tester.tap(find.byKey(const Key('hidden-tabs')));
+      await settle(tester);
+      await tester.tap(find.text('不再隐藏'));
+      await settle(tester);
+      expect(store.mine.where((p) => p.windows?.isNotEmpty ?? false), isEmpty);
+      expect(find.text('已隐藏 1 个'), findsNothing);
+    });
+
+    testWidgets('已隐藏 N 个 stays on screen with many tabs at a narrow width', (tester) async {
+      final many = [
+        for (var i = 1; i <= 8; i++) rw(i, 'Window number $i'),
+        rw(9, 'w9', kind: WindowKind.floating),
+      ];
+      await setup(tester, many, rules: [hideFloating], width: 800);
+      final chip = find.byKey(const Key('hidden-tabs'));
+      expect(chip, findsOneWidget);
+      final r = tester.getRect(chip);
+      expect(r.left, greaterThanOrEqualTo(0));
+      expect(r.right, lessThanOrEqualTo(800));
+      expect(tester.getRect(find.byType(TopBar)).contains(r.center), isTrue);
+      // Hit-testable: tapping it opens the menu.
+      await tester.tap(chip);
+      await settle(tester);
+      expect(find.text('这次显示'), findsOneWidget);
+    });
+
+    testWidgets('已隐藏 N 个 is selected while A focuses a hidden window', (tester) async {
+      await setup(tester, [rw(1, 'Main'), rw(2, 'w2', kind: WindowKind.floating, focused: true)], rules: [hideFloating]);
+      final chip = tester.widget<TabChip>(find.byKey(const Key('hidden-tabs')));
+      expect(chip.selected, isTrue);
     });
   });
 }

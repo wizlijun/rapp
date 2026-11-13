@@ -11,6 +11,7 @@ class TabChip extends StatelessWidget {
     required this.selected,
     required this.onTap,
     this.leading,
+    this.onSecondaryTap,
   });
 
   final String label;
@@ -19,6 +20,9 @@ class TabChip extends StatelessWidget {
 
   /// Optional decorative widget (a status lamp) before the label.
   final Widget? leading;
+
+  /// Right-click (secondary tap up) at a global position.
+  final void Function(Offset globalPosition)? onSecondaryTap;
 
   @override
   Widget build(BuildContext context) {
@@ -34,6 +38,7 @@ class TabChip extends StatelessWidget {
         type: MaterialType.transparency,
         child: InkWell(
           onTap: onTap,
+          onSecondaryTapUp: onSecondaryTap == null ? null : (d) => onSecondaryTap!(d.globalPosition),
           borderRadius: radius,
           child: Container(
             constraints: const BoxConstraints(minHeight: 48, minWidth: 48),

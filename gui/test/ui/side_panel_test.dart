@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:rapp/paths.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/embed/traffic_label.dart' show formatRate;
@@ -462,5 +463,14 @@ void main() {
     await open(tester, 1, 'com.apple.Safari');
     s.step(1);
     expect(s.currentKey, '111/com.apple.Safari');
+  });
+
+  testWidgets('tab titles are not cut off in the narrow sessions panel', (tester) async {
+    await tester.pumpWidget(wrap(panel()));
+    for (final k in ['sessions', 'devices', 'projects', 'resources']) {
+      final text = find.descendant(of: find.byKey(Key('tab-$k')), matching: find.byType(RichText));
+      final p = tester.renderObject<RenderParagraph>(text);
+      expect(p.didExceedMaxLines, isFalse, reason: 'tab-$k is ellipsized');
+    }
   });
 }

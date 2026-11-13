@@ -166,4 +166,29 @@ final class DetachTests: XCTestCase {
         XCTAssertEqual(try channelCommand("raise_detached", ["sid": 4]), .raiseDetached(sid: 4))
         XCTAssertThrowsError(try channelCommand("detach", ["sid": "x"]))
     }
+
+    private func win(_ id: UInt32, parent: UInt32 = 0, kind: WindowKind = .normal) -> SessionWindow {
+        SessionWindow(info: WindowInfo(id: id, parent: parent, kind: kind, resizable: true, focused: false,
+                                       rect: CanvasRect(x: 0, y: 0, w: 400, h: 328), titleBar: 28, title: "w\(id)"),
+                      visible: CGRect(x: 0, y: 0, width: 1, height: 1))
+    }
+
+    func testSetHiddenChannelCommand() throws {
+        XCTAssertEqual(try channelCommand("set_hidden", ["sid": 4, "windows": [7, 9]]), .setHidden(sid: 4, windows: [7, 9]))
+        XCTAssertEqual(try channelCommand("set_hidden", ["sid": 4, "windows": []]), .setHidden(sid: 4, windows: []))
+        XCTAssertThrowsError(try channelCommand("set_hidden", ["sid": 4, "windows": [-1]]))
+        XCTAssertThrowsError(try channelCommand("set_hidden", ["sid": 4, "windows": "7"]))
+        XCTAssertThrowsError(try channelCommand("set_hidden", ["sid": 4]))
+    }
+
+    func testDetachedWindowsDropHiddenAndTheirPopups() {
+        let table = [win(1), win(2, kind: .floating), win(5, parent: 2, kind: .menu), win(6, parent: 1, kind: .sheet), win(7, parent: 99, kind: .popover)]
+        XCTAssertEqual(detachedWindows(table, hidden: [2]).map(\.info.id), [1, 6, 7])
+        XCTAssertEqual(detachedWindows(table, hidden: []).map(\.info.id), [1, 2, 5, 6, 7])
+    }
+
+    func testDetachedWindowsShowAllWhenOnlyHiddenAreLeft() {
+        let table = [win(1), win(5, parent: 1, kind: .menu)]
+        XCTAssertEqual(detachedWindows(table, hidden: [1]).map(\.info.id), [1, 5])
+    }
 }

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../hub_client.dart';
+import '../pages/app_profile_page.dart';
 import '../permissions.dart';
 import 'add_device_form.dart';
 import 'controls.dart';
@@ -250,6 +251,7 @@ class _DevicesTabState extends State<DevicesTab> {
               enabled: state.hubUsable,
               favorite: state.isFavorite(id, a.app),
               onFavorite: () => state.toggleFavorite(id, a.app, a.name),
+              onProfile: () => openAppProfilePage(context, state.profiles, appId: a.app, appName: a.name),
               onOpen: () => state.openOrSwitch(id, a.app, a.name),
             ),
           ),
@@ -309,6 +311,7 @@ class _AppRow extends StatelessWidget {
     required this.enabled,
     required this.favorite,
     required this.onFavorite,
+    required this.onProfile,
     required this.onOpen,
   });
   final String id, app, name;
@@ -316,6 +319,7 @@ class _AppRow extends StatelessWidget {
   final bool enabled;
   final bool favorite;
   final VoidCallback onFavorite;
+  final VoidCallback onProfile;
   final VoidCallback onOpen;
 
   @override
@@ -366,6 +370,14 @@ class _AppRow extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 8),
+                      IconButton(
+                        key: Key('profile-$app'),
+                        icon: const Icon(Icons.more_horiz),
+                        tooltip: 'app 配置',
+                        constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                        onPressed: onProfile,
+                      ),
+                      const SizedBox(width: 6),
                       RappButton.secondary(
                         key: Key('fav-$app'),
                         label: favLabel,

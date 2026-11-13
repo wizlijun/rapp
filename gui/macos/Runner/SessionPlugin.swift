@@ -62,6 +62,8 @@ final class SessionPlugin: NSObject, FlutterPlugin {
   private var keysHolder: Int64?
   /// Sessions shown in their own windows instead of on the stage (R20).
   private var detached = [Int64: DetachedSession]()
+  /// Windows the GUI hides per session (set_hidden); detached windows leave them out.
+  private var hidden = [Int64: Set<UInt32>]()
   private var keyMonitor: Any?
   private var resignObserver: NSObjectProtocol?
   private var terminateObserver: NSObjectProtocol?
@@ -205,17 +207,24 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     case let .raiseDetached(sid):
       detached[sid]?.raise()
       result(nil)
+    case let .setHidden(sid, windows):
+      hidden[sid] = windows.isEmpty ? nil : Set(windows)
+      if let entry = live[sid] {
+        detached[sid]?.update(detachedWindows(entry.windows, hidden: hidden[sid] ?? []))
+      }
+      result(nil)
     }
   }
 
   /// On main: the session's windows leave the stage for their own (R20). Nothing to show (no
   /// decorated window), an unknown or an already detached session: nothing happens.
   private func detachSession(_ sid: Int64) {
-    guard detached[sid] == nil, let entry = live[sid],
-          entry.windows.contains(where: { $0.info.kind.isDecorated }) else { return }
+    guard detached[sid] == nil, let entry = live[sid] else { return }
+    let shown = detachedWindows(entry.windows, hidden: hidden[sid] ?? [])
+    guard shown.contains(where: { $0.info.kind.isDecorated }) else { return }
     // Keys typed on the stage were the stage's: A gets their releases before the windows move.
     if keysHolder == sid { releaseKeys() }
-    detached[sid] = DetachedSession(session: entry.session, windows: entry.windows, beside: view?.window,
+    detached[sid] = DetachedSession(session: entry.session, windows: shown, beside: view?.window,
                                     onAttach: { [weak self] in self?.attachSession(sid) })
     let payload = detachedPayload(sid: sid, detached: true, current: nil)
     channel.invokeMethod(payload.method, arguments: payload.args)
@@ -400,7 +409,7 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       }
       entry.windows = windows
       // The textures stay registered while detached: attaching shows the picture at once.
-      detached[sid]?.update(windows)
+      detached[sid]?.update(detachedWindows(windows, hidden: hidden[sid] ?? []))
     case .disconnected:
       // The link is down but the last pictures stay; Dart decides when the session ends.
       panels.removeValue(forKey: sid)?.cancel(nil)
@@ -414,6 +423,7 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       entry.textures.values.forEach { registry.unregisterTexture($0.id) }
       entry.textures = [:]
       live[sid] = nil
+      hidden[sid] = nil
       panels.removeValue(forKey: sid)?.cancel(nil)
       // Its windows go with it (the close button, 「结束会话」, A quitting): no attach is sent.
       detached.removeValue(forKey: sid)?.close()

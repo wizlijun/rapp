@@ -300,7 +300,7 @@ class _PictureState extends State<Picture> {
         _pic = pic;
         final popups = <_Target>[];
         if (fit.width > 0 && fit.height > 0) {
-          for (final p in popupsFor(widget.session.windows, win.id)) {
+          for (final p in popupsFor(widget.session.shown, win.id)) {
             final frame = popupRect(p, win, fit);
             if (frame.width <= 0 || frame.height <= 0 || p.rect.width <= 0) {
               continue;

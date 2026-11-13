@@ -1,10 +1,12 @@
 // One embedded session as the GUI sees it: the state the runner's events build up.
 import 'package:flutter/foundation.dart';
 
+import 'app_profile.dart';
 import 'composer_model.dart';
 import 'resize_policy.dart';
 import 'session_port.dart';
 import 'stream_choice.dart';
+import 'window_rules.dart';
 import 'window_tabs.dart';
 
 /// Quiet seconds (no picture frame) after which a session that has shown one is idle.
@@ -14,12 +16,88 @@ class RemoteSession extends ChangeNotifier {
   /// [onResize] is where the session's resize policy sends: window, width, height.
   /// [onDropBlock] is where a block that left the composer goes (the runner forgets it).
   RemoteSession(this.sid, this.appName,
-      {void Function(int window, int w, int h)? onResize, this.onSelect, this.onStream, void Function(int n)? onDropBlock})
-      : policy = ResizePolicy(onResize ?? (_, _, _) {}),
-        composer = ComposerModel(onDrop: onDropBlock);
+      {void Function(int window, int w, int h)? onResize,
+      this.onSelect,
+      this.onStream,
+      void Function(int n)? onDropBlock,
+      this.appId = '',
+      this.onReturn})
+      : policy = ResizePolicy(onResize ?? (_, _, _) {}) {
+    composer = ComposerModel(onDrop: onDropBlock, onAllSent: _allSent);
+  }
+
+  /// The app this session runs (the profile's key); empty when unknown.
+  final String appId;
+
+  /// Where the after-send Return goes (the runner presses key [returnKeyCode]).
+  final VoidCallback? onReturn;
 
   /// The composer's draft and whether it is open; kept per session (R18).
-  final ComposerModel composer;
+  late final ComposerModel composer;
+
+  void _allSent() {
+    if (profile.afterSend == AfterSend.pressReturn) onReturn?.call();
+  }
+
+  ResolvedProfile _profile = ResolvedProfile.generic;
+  ResolvedProfile get profile => _profile;
+
+  /// A new profile for this session: windows are filtered again.
+  void setProfile(ResolvedProfile p) {
+    _profile = p;
+    _refilter();
+    notifyListeners();
+  }
+
+  final MainWindowTracker _mainTracker = MainWindowTracker();
+  int? _main;
+  final Set<int> _showOnce = {};
+  List<RemoteWindow> _shown = const [];
+  List<RemoteWindow> _hidden = const [];
+
+  /// What the tabs and popups are built from: [windows] minus what a `hide` rule hid.
+  List<RemoteWindow> get shown => _shown;
+  List<RemoteWindow> get hidden => _hidden;
+
+  /// Ids in [windows] that are not in [shown] (the runner keeps them off a detached stage).
+  Set<int> get hiddenIds {
+    final s = {for (final w in _shown) w.id};
+    return {for (final w in windows) if (!s.contains(w.id)) w.id};
+  }
+
+  bool isMain(int id) => _main == id;
+
+  /// A hidden window has A's focus (keys would go to something not shown).
+  bool get hiddenFocused => _hidden.any((w) => w.focused);
+
+  /// Show hidden window [id] for this session only.
+  void showOnce(int id) {
+    _showOnce.add(id);
+    _refilter();
+    tabs.select(id);
+    notifyListeners();
+  }
+
+  /// The composer is on for the app and the current tab is not a `noComposer` one.
+  bool get composerAllowed {
+    if (!profile.composer) return false;
+    final c = currentWindow;
+    if (c == null) return true;
+    for (final w in _shown) {
+      if (w.id == c) return actionFor(profile.windows, w, isMain: isMain(c)) != RuleAction.noComposer;
+    }
+    return true;
+  }
+
+  void _refilter() {
+    _main = _mainTracker.update(windows);
+    final ids = {for (final w in windows) w.id};
+    _showOnce.retainAll(ids);
+    final r = applyHide(windows, profile.windows, main: _main, showOnce: _showOnce);
+    _shown = r.shown;
+    _hidden = r.hidden;
+    tabs.update(_shown);
+  }
 
   /// The upload strip's text (`上传 1/2 · a.txt`); null when nothing is uploading.
   String? transferStatus;
@@ -80,7 +158,7 @@ class RemoteSession extends ChangeNotifier {
         appName = e.appName;
       case WindowsEvent():
         windows = e.windows;
-        tabs.update(windows);
+        _refilter();
         final p = _pendingCurrent;
         if (p != null && _isTab(p)) {
           _pendingCurrent = null;

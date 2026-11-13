@@ -533,6 +533,8 @@ abstract class SessionPort {
   void attach(Object sid) => _send('attach', {'sid': sid});
 
   void raiseDetached(Object sid) => _send('raise_detached', {'sid': sid});
+
+  void setHidden(Object sid, List<int> windows) => _send('set_hidden', {'sid': sid, 'windows': windows});
 }
 
 /// The real port: the `rapp/session` channel to the macOS runner's SessionPlugin.

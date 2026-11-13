@@ -2,6 +2,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -15,7 +16,9 @@ import 'data_relocate.dart';
 import 'paths.dart';
 import 'service_client.dart';
 import 'service_control.dart';
+import 'ui/app_profile_store.dart';
 import 'ui/fullscreen.dart';
+import 'tray_menu.dart';
 import 'ui/main_state.dart';
 import 'ui/main_window.dart';
 import 'ui/prefs.dart';
@@ -74,13 +77,24 @@ Future<void> main(List<String> args) async {
       stderr.writeln('rapp: embedded sessions unavailable: $e');
     }
   }
-  final state =
-      MainState(hub: hub, hubError: hubError, data: data, prefs: prefs, port: port, doubleClick: doubleClick);
+  String? builtin;
+  try {
+    builtin = await rootBundle.loadString('assets/app_profiles.json');
+  } catch (_) {}
+  final state = MainState(
+      hub: hub,
+      hubError: hubError,
+      data: data,
+      prefs: prefs,
+      port: port,
+      doubleClick: doubleClick,
+      profiles: AppProfileStore.load(data.sharedDir, builtin),
+      log: stderr.writeln);
   mainState = state;
   await _showWindow(const Size(1194, 834), 'rapp');
   if (prefs.startFullscreen) await WindowManagerFullscreen().setFullScreen(true);
   await windowManager.setPreventClose(true);
-  final shell = _Shell(hub, port);
+  final shell = _Shell(hub, port, state);
   windowManager.addListener(shell);
   trayManager.addListener(shell);
   await shell.setupTray();
@@ -160,24 +174,32 @@ class _QuitOnClose with WindowListener {
 
 /// Close hides the window; the tray menu has 显示 / 退出.
 class _Shell with WindowListener, TrayListener {
-  _Shell(this.hub, this.port);
+  _Shell(this.hub, this.port, this.state);
   final SessionPort? port;
   final HubClient? hub;
+  final MainState state;
   final navigatorKey = GlobalKey<NavigatorState>();
+  String? _menuShape;
 
   Future<void> setupTray() async {
     try {
       await trayManager.setIcon('assets/tray_icon.png', isTemplate: true);
       // tray_manager does not implement setToolTip on Linux.
       if (!Platform.isLinux) await trayManager.setToolTip('rapp');
-      await trayManager.setContextMenu(Menu(items: [
-        MenuItem(key: 'show', label: '显示 rapp'),
-        MenuItem.separator(),
-        MenuItem(key: 'quit', label: '退出'),
-      ]));
+      await _updateMenu();
+      state.addListener(_updateMenu);
     } catch (e) {
       stderr.writeln('rapp: tray unavailable: $e');
     }
+  }
+
+  /// The menu lists the open sessions by host; rebuilt only when that list changes.
+  Future<void> _updateMenu() async {
+    final items = trayItems(state.entries);
+    final shape = [for (final i in items) '${i.key}|${i.label}'].join('\n');
+    if (shape == _menuShape) return;
+    _menuShape = shape;
+    await trayManager.setContextMenu(Menu(items: items));
   }
 
   @override
@@ -196,6 +218,12 @@ class _Shell with WindowListener, TrayListener {
         _show();
       case 'quit':
         _quit();
+      default:
+        final key = sessionKeyOf(item.key);
+        if (key != null) {
+          _show();
+          state.select(key);
+        }
     }
   }
 
