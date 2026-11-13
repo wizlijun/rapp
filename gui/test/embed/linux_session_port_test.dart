@@ -165,6 +165,47 @@ void main() {
     }
   }, skip: !Platform.isLinux || !File(worker).existsSync() ? 'Build rapp-session first on Linux' : false);
 
+  test('Linux resource copies survive session end and retain more than 20 text clips', () async {
+    final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final port = LinuxSessionPort(worker, framePresented: () async {});
+    final events = StreamIterator(port.events);
+    Socket? peer;
+    String? clipboard;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') clipboard = (call.arguments as Map)['text'] as String;
+        return null;
+      });
+    try {
+      await port.init(); final accepted = server.first;
+      await port.start(StartArgs(21, server.port, 'fixture-token', 'color16', 15, 'adaptive'));
+      peer = await accepted; peer.listen((_) {});
+      peer.add(packet(2, [...string('Resources'), ...u16(4), ...u16(4)]));
+      for (var i = 1; i <= 25; i++) {
+        final text = utf8.encode('文字 $i');
+        peer.add(packet(19, [...u32(i), 0, 0, ...u32(text.length), ...text]));
+      }
+      final clips = await nextWhere(events, (e) => e is ClipsEvent && e.clips.length == 25) as ClipsEvent;
+      expect(clips.clips.last.kind, ClipKind.text);
+      final copy = await port.fetchClip(21, 1);
+      expect(copy.error, isNull); expect(copy.copy, isNotNull);
+      // A full snapshot may contain unsupported/truncated entries, which cannot be pinned.
+      peer.add(packet(19, [...u32(26), 0, 1, ...u32(1), 65]));
+      await nextWhere(events, (e) => e is ClipsEvent && e.clips.length == 26);
+      expect((await port.fetchClip(21, 26)).error, contains('完整文字'));
+      port.close(21);
+      await nextWhere(events, (e) => e is ClosedEvent);
+      expect(await port.copyLocal(copy.copy!), true);
+      expect(clipboard, '文字 1');
+      expect((await port.fetchClip(21, 1)).error, contains('断开'));
+      port.dropCopy(copy.copy!);
+      expect(await port.copyLocal(copy.copy!), false);
+    } finally {
+      port.dispose(); await events.cancel(); peer?.destroy(); await server.close();
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null);
+    }
+  }, skip: !Platform.isLinux || !File(worker).existsSync() ? 'Build rapp-session first on Linux' : false);
+
   test('malformed frame closes only the affected session', () async {
     final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
     final second = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);

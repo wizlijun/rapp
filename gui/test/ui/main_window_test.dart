@@ -4,12 +4,15 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/composer_bar.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/service_client.dart';
 import 'package:rapp/ui/fullscreen.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/main_window.dart';
+import 'package:rapp/ui/overview.dart';
+import 'package:rapp/ui/stage.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/side_panel.dart';
 import 'package:rapp/ui/top_bar.dart';
@@ -185,6 +188,53 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await settle(tester);
     expect(s.panel, isNull);
+    expect(fs.on, isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settle(tester);
+    expect(fs.on, isFalse);
+  });
+
+  testWidgets('ctrl+cmd+O toggles overview', (tester) async {
+    await pump(tester);
+    final mods = Platform.isMacOS
+        ? [LogicalKeyboardKey.controlLeft, LogicalKeyboardKey.metaLeft]
+        : [LogicalKeyboardKey.controlLeft];
+    Future<void> chord({int repeats = 0}) async {
+      for (final m in mods) {
+        await tester.sendKeyDownEvent(m);
+      }
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.keyO);
+      for (var i = 0; i < repeats; i++) {
+        await tester.sendKeyRepeatEvent(LogicalKeyboardKey.keyO);
+      }
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.keyO);
+      for (final m in mods.reversed) {
+        await tester.sendKeyUpEvent(m);
+      }
+      await tester.pump();
+    }
+
+    expect(s.overview, false);
+    await chord(repeats: 3);
+    expect(s.overview, true);
+    await chord();
+    expect(s.overview, false);
+  });
+
+  testWidgets('esc leaves overview after corners and panel', (tester) async {
+    await pump(tester);
+    await tester.tap(find.byKey(const Key('fullscreen-button')));
+    await settle(tester);
+    s.togglePanel();
+    s.toggleOverview();
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settle(tester);
+    expect(s.panel, isNull);
+    expect(s.overview, true);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settle(tester);
+    expect(s.overview, false);
     expect(fs.on, isTrue);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await settle(tester);
@@ -406,5 +456,81 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
     expect(s.hint, isNotEmpty);
     expect(right(), empty);
+  });
+
+  testWidgets('overview replaces the stage and back', (tester) async {
+    await pump(tester);
+    expect(find.byType(Stage), findsOneWidget);
+    expect(find.byType(Overview), findsNothing);
+    s.toggleOverview();
+    await tester.pump();
+    expect(find.byType(Overview), findsOneWidget);
+    expect(find.byType(Stage), findsNothing);
+    s.toggleOverview();
+    await tester.pump();
+    expect(find.byType(Overview), findsNothing);
+    expect(find.byType(Stage), findsOneWidget);
+  });
+
+  testWidgets('a panel opens over the overview', (tester) async {
+    await pump(tester);
+    s.toggleOverview();
+    await tester.pump();
+    final wall = tester.getSize(find.byKey(const Key('wall')));
+    s.togglePanel();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.byKey(const Key('scrim')), findsOneWidget);
+    expect(find.byType(SidePanel), findsOneWidget);
+    expect(find.byType(Overview), findsOneWidget);
+    expect(tester.getSize(find.byKey(const Key('wall'))), wall);
+  });
+
+  testWidgets('composer draft survives a trip through overview', (tester) async {
+    s.dispose();
+    final port = FakeSessionPort();
+    s = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: port);
+    await pump(tester);
+    await tester.runAsync(() async {
+      t.onSend = (m) {
+        if (m['cmd'] == 'open') {
+          t.emit({
+            'event': 'opened', 'sid': 1, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+            'port': 5001, 'token': 'tk', 'req': m['req'],
+          });
+        }
+      };
+      s.openOrSwitch('111', 'Safari', 'Safari');
+      for (var i = 0; i < 4; i++) {
+        await flush();
+      }
+    });
+    port.emit(const ReadyEvent(1, 'Safari'));
+    port.emit(WindowsEvent(1, [
+      const RemoteWindow(
+        id: 5,
+        parent: 0,
+        kind: WindowKind.normal,
+        title: 'w',
+        rect: Rect.fromLTWH(0, 0, 800, 600),
+        titleBar: 28,
+        resizable: true,
+        focused: true,
+        texture: 42,
+        visible: Rect.fromLTWH(0, 0, 1, 1),
+      ),
+    ]));
+    await tester.pump();
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('composer-open')));
+    await tester.pump(const Duration(milliseconds: 100));
+    s.currentRemote!.composer.text = 'draft text';
+    s.toggleOverview();
+    await tester.pump();
+    expect(find.byType(ComposerBar), findsNothing);
+    s.toggleOverview();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.byType(ComposerBar), findsOneWidget);
+    expect(s.currentRemote!.composer.text, 'draft text');
+    expect(find.text('draft text'), findsOneWidget);
   });
 }

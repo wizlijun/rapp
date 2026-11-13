@@ -21,6 +21,35 @@ String formatRate(int bytes) {
   return '${(kb / 1000).toStringAsFixed(1)} MB/s';
 }
 
+/// The five bars alone: lit = `--on`, dark = `--line`.
+class LevelBars extends StatelessWidget {
+  const LevelBars(this.bytesPerSecond, {super.key});
+
+  final int bytesPerSecond;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RappTokens.of(context);
+    final lit = levelBars(bytesPerSecond);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        for (var i = 0; i < 5; i++)
+          Padding(
+            padding: EdgeInsets.only(right: i < 4 ? 2 : 0),
+            child: Container(
+              key: Key('bar$i'),
+              width: 3,
+              height: 4.0 + 2 * i,
+              color: i < lit ? t.on : t.line,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 class TrafficLabel extends StatelessWidget {
   const TrafficLabel({
     super.key,
@@ -28,8 +57,11 @@ class TrafficLabel extends StatelessWidget {
     required this.open,
     required this.onTap,
     this.onSecondaryTap,
+    this.compact = false,
   });
 
+  /// Bars only, without the rate text.
+  final bool compact;
   final int bytesPerSecond;
 
   /// The stream menu is open: the selected style.
@@ -41,7 +73,6 @@ class TrafficLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
     final rate = formatRate(bytesPerSecond);
-    final lit = levelBars(bytesPerSecond);
     final radius = BorderRadius.circular(t.r);
     return Semantics(
       button: true,
@@ -68,17 +99,9 @@ class TrafficLabel extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                for (var i = 0; i < 5; i++)
-                  Padding(
-                    padding: EdgeInsets.only(right: i < 4 ? 2 : 0),
-                    child: Container(
-                      key: Key('bar$i'),
-                      width: 3,
-                      height: 4.0 + 2 * i,
-                      color: i < lit ? t.on : t.line,
-                    ),
-                  ),
-                const SizedBox(width: 8),
+                LevelBars(bytesPerSecond),
+                if (!compact) const SizedBox(width: 8),
+                if (!compact)
                 Text(
                   rate,
                   maxLines: 1,

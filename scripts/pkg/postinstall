@@ -40,6 +40,9 @@ sudo -u "$USER_NAME" tee "$PLIST" >/dev/null <<PLIST
 </plist>
 PLIST
 
+# The pkg installs as root; the user must own the app so the service can replace it later.
+[ -n "$USER_NAME" ] && chown -R "$USER_NAME":staff "$APP"
+
 # Reinstall: stop the old agent first so the new binary is what runs.
 launchctl bootout "gui/$USER_ID/$LABEL" 2>/dev/null || true
 launchctl bootstrap "gui/$USER_ID" "$PLIST"

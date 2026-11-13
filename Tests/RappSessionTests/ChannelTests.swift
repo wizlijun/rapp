@@ -26,7 +26,15 @@ final class ChannelTests: XCTestCase {
         XCTAssertEqual(try channelCommand("set_stream", ["sid": 1, "mode": "duogray", "fps": 1, "density": "saver1x"]),
                        .setStream(sid: 1, mode: .duogray, fps: 1, density: .saver1x))
         XCTAssertEqual(try channelCommand("close", ["sid": 4]), .close(sid: 4))
-        XCTAssertEqual(try channelCommand("cancel_transfer", ["sid": 4]), .cancelTransfer(sid: 4))
+        XCTAssertEqual(try channelCommand("cancel_transfer", ["sid": 4]), .cancelTransfer(sid: 4, id: nil))
+        XCTAssertEqual(try channelCommand("cancel_transfer", ["sid": 1, "id": 3]), .cancelTransfer(sid: 1, id: 3))
+        XCTAssertEqual(try channelCommand("fetch_clip", ["sid": 1, "clip": 2]), .fetchClip(sid: 1, clip: 2))
+        XCTAssertEqual(try channelCommand("copy_local", ["copy": 4]), .copyLocal(copy: 4))
+        XCTAssertEqual(try channelCommand("drop_copy", ["copy": 4]), .dropCopy(copy: 4))
+        XCTAssertEqual(try channelCommand("reveal", ["path": "/tmp/x"]), .reveal(path: "/tmp/x"))
+        XCTAssertThrowsError(try channelCommand("fetch_clip", ["sid": 1])) { XCTAssertEqual($0 as? ChannelError, .bad("fetch_clip")) }
+        XCTAssertThrowsError(try channelCommand("copy_local", ["copy": "x"]))
+        XCTAssertThrowsError(try channelCommand("reveal", [:]))
         XCTAssertEqual(try channelCommand("init", nil), .initialize)
     }
 
@@ -162,10 +170,10 @@ final class ChannelTests: XCTestCase {
         XCTAssertEqual(ready.args["sid"] as? Int64, 2)
         let traffic = try XCTUnwrap(eventPayload(.traffic(bytesPerSecond: 2048, frames: 0), sid: 2, textures: [:]))
         XCTAssertEqual(traffic.method, "traffic"); XCTAssertEqual(traffic.args["bytes"] as? Int, 2048)
-        let clips = try XCTUnwrap(eventPayload(.clips([ClipRow(id: 5, title: "hi", pickable: false)]), sid: 2, textures: [:]))
+        let clips = try XCTUnwrap(eventPayload(.clips([ClipRow(id: 5, title: "hi", pickable: false, kind: "files")]), sid: 2, textures: [:]))
         XCTAssertEqual(clips.method, "clipboard")
         let row = try XCTUnwrap((clips.args["clips"] as? [[String: Any]])?.first)
-        XCTAssertEqual(row["id"] as? Int, 5); XCTAssertEqual(row["title"] as? String, "hi"); XCTAssertEqual(row["pickable"] as? Bool, false)
+        XCTAssertEqual(row["id"] as? Int, 5); XCTAssertEqual(row["title"] as? String, "hi"); XCTAssertEqual(row["pickable"] as? Bool, false); XCTAssertEqual(row["kind"] as? String, "files")
         let menu = try XCTUnwrap(eventPayload(.menu([MenuItem(title: "File", children: [
             MenuItem(title: "New", key: "n", modifiers: MenuModifier.command), MenuItem(title: "", separator: true),
         ])]), sid: 2, textures: [:]))
@@ -176,14 +184,32 @@ final class ChannelTests: XCTestCase {
         XCTAssertEqual(kids[0]["shortcut"] as? String, shortcutText(key: "n", modifiers: MenuModifier.command))
         XCTAssertEqual(kids[0]["enabled"] as? Bool, true); XCTAssertEqual(kids[0]["checked"] as? Bool, false)
         XCTAssertEqual(kids[1]["separator"] as? Bool, true)
-        let transfer = try XCTUnwrap(eventPayload(.transfer("1/2"), sid: 2, textures: [:]))
-        XCTAssertEqual(transfer.method, "transfer"); XCTAssertEqual(transfer.args["status"] as? String, "1/2")
-        let idle = try XCTUnwrap(eventPayload(.transfer(nil), sid: 2, textures: [:]))
+        let transfer = try XCTUnwrap(eventPayload(.transferStatus("1/2"), sid: 2, textures: [:]))
+        XCTAssertEqual(transfer.method, "transfer_status"); XCTAssertEqual(transfer.args["status"] as? String, "1/2")
+        let idle = try XCTUnwrap(eventPayload(.transferStatus(nil), sid: 2, textures: [:]))
         XCTAssertTrue(idle.args["status"] is NSNull)
         let composer = try XCTUnwrap(eventPayload(.composer(.sending(true)), sid: 2, textures: [:]))
         XCTAssertEqual(composer.method, "composer"); XCTAssertEqual(composer.args["sending"] as? Bool, true)
         let closed = try XCTUnwrap(eventPayload(.closed(reason: "quit"), sid: 2, textures: [:]))
         XCTAssertEqual(closed.method, "closed"); XCTAssertEqual(closed.args["reason"] as? String, "quit")
+    }
+
+    func testTransferProgressPayloadAndCopyReply() throws {
+        let p = TransferProgress(id: 3, dir: .down, name: "a.bin", kind: nil, done: 5, total: 10, state: .done,
+                                 path: "/tmp/a.bin", error: nil)
+        let e = try XCTUnwrap(eventPayload(.transferProgress(p), sid: 2, textures: [:]))
+        XCTAssertEqual(e.method, "transfer")
+        XCTAssertEqual(e.args["id"] as? Int, 3); XCTAssertEqual(e.args["dir"] as? String, "down")
+        XCTAssertEqual(e.args["name"] as? String, "a.bin"); XCTAssertEqual(e.args["done"] as? Int, 5)
+        XCTAssertEqual(e.args["total"] as? Int, 10); XCTAssertEqual(e.args["state"] as? String, "done")
+        XCTAssertEqual(e.args["path"] as? String, "/tmp/a.bin"); XCTAssertNil(e.args["error"])
+        let f = TransferProgress(id: 4, dir: .up, name: "b.txt", kind: .files, done: 0, total: 1, state: .failed, path: nil,
+                                 error: "x")
+        let g = try XCTUnwrap(eventPayload(.transferProgress(f), sid: 2, textures: [:]))
+        XCTAssertNil(g.args["path"]); XCTAssertEqual(g.args["error"] as? String, "x")
+        XCTAssertNil(e.args["kind"]); XCTAssertEqual(g.args["kind"] as? String, "files")
+        XCTAssertEqual(clipCopyReply(.success(3)) as NSDictionary, ["copy": 3] as NSDictionary)
+        XCTAssertEqual(clipCopyReply(.failure(TransferFailure(reason: "r"))) as NSDictionary, ["error": "r"] as NSDictionary)
     }
 
     func testTextureChangesDiffByWindowId() {

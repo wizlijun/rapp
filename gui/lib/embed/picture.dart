@@ -1,5 +1,8 @@
 // The remote window's picture on the stage: the runner's texture, letterboxed. Presses, drags,
-// wheels and trackpad scrolls on it go to A; a press gives it keyboard focus.
+// wheels and trackpad scrolls on it go to A; a press gives it keyboard focus. On a touchscreen a
+// two-finger swipe scrolls A (P3, docs/superpowers/specs/2026-11-13-rapp-touch-scroll-design.md).
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
@@ -52,9 +55,21 @@ class _PictureState extends State<Picture> {
   Rect _fit = Rect.zero;
   Rect _pic = Rect.zero;
 
-  /// The button held since a press on the picture (`left|right`), and that press's click count.
+  /// The button held since a press on the picture (`left|right`), the pointer that pressed it,
+  /// and that press's click count.
   String? _button;
+  int? _buttonPointer;
   int _count = 1;
+
+  /// Touch (P3): where each finger on the picture is now; a first finger's press not yet sent
+  /// (T1); and whether the fingers are scrolling (until all are up, T4).
+  final _touches = <int, Offset>{};
+  PointerDownEvent? _pending;
+  Timer? _pendingTimer;
+  bool _touchScroll = false;
+
+  static const _touchSlop = 8.0;
+  static const _touchHold = Duration(milliseconds: 150);
 
   RemoteWindow get _win => widget.window;
   Object get _sid => widget.session.sid;
@@ -86,6 +101,47 @@ class _PictureState extends State<Picture> {
   }
 
   void _down(PointerDownEvent e) {
+    if (e.kind == PointerDeviceKind.touch) return _touchDown(e);
+    _press(e);
+  }
+
+  void _touchDown(PointerDownEvent e) {
+    if (_touchScroll) return; // T5: not counted, its moves and lift are ignored
+    _touches[e.pointer] = e.localPosition;
+    if (_pending != null || (_button == null && _touches.length > 1)) {
+      // T1: a second finger while the first is held back (or rests in the letterbox, or stayed
+      // after a press it was ignored for) — scroll; a held-back press never happened.
+      _dropPending();
+      _touchScroll = true;
+      if (_at(_centre).pic.contains(_centre)) {
+        _focus.requestFocus();
+        widget.state.focusPicture(_sid); // T7
+      }
+      return;
+    }
+    if (_button != null) return; // T2
+    final t = _at(e.localPosition);
+    if (!t.usable || !t.pic.contains(e.localPosition)) return _press(e); // the letterbox: blurs now
+    _pending = e;
+    _pendingTimer = Timer(_touchHold, _flush);
+  }
+
+  /// Sends the held-back touch press (T1).
+  void _flush() {
+    final e = _pending;
+    _dropPending();
+    if (e != null) _press(e);
+  }
+
+  void _dropPending() {
+    _pendingTimer?.cancel();
+    _pendingTimer = null;
+    _pending = null;
+  }
+
+  Offset get _centre => _touches.values.reduce((a, b) => a + b) / _touches.length.toDouble();
+
+  void _press(PointerDownEvent e) {
     final bit = e.buttons & kPrimaryButton != 0
         ? kPrimaryButton
         : e.buttons & kSecondaryButton != 0
@@ -101,23 +157,55 @@ class _PictureState extends State<Picture> {
     _focus.requestFocus();
     widget.state.focusPicture(_sid);
     _button = bit == kPrimaryButton ? 'left' : 'right';
+    _buttonPointer = e.pointer;
     _held = t;
     _count = _clicks.down(e.localPosition, e.timeStamp, bit);
     _mouse('down', _button!, e.localPosition, t);
   }
 
   void _move(PointerMoveEvent e) {
+    if (e.kind == PointerDeviceKind.touch) {
+      final before = _touches[e.pointer];
+      if (before == null) return;
+      _touches[e.pointer] = e.localPosition;
+      if (_touchScroll) {
+        // T3: the centre moves by this finger's move over the number of fingers.
+        return _scroll(_centre, panToRemote((e.localPosition - before) / _touches.length.toDouble()));
+      }
+      final p = _pending;
+      if (p != null) {
+        if (p.pointer != e.pointer || (e.localPosition - p.localPosition).distance <= _touchSlop) return;
+        _flush();
+      }
+    }
     final b = _button, t = _held;
-    if (b == null || t == null || !t.usable) return;
+    if (b == null || t == null || !t.usable || e.pointer != _buttonPointer) return;
     _mouse('drag', b, clampTo(e.localPosition, t.fit), t);
   }
 
   void _up(PointerEvent e) {
+    if (e.kind == PointerDeviceKind.touch) {
+      _touches.remove(e.pointer);
+      if (_touchScroll) {
+        if (_touches.isEmpty) _touchScroll = false; // T4
+        return;
+      }
+    }
+    var at = e.localPosition;
+    if (e.kind == PointerDeviceKind.touch) {
+      final p = _pending;
+      if (p?.pointer == e.pointer) {
+        if (e is PointerCancelEvent) return _dropPending(); // T6
+        at = p!.localPosition; // a tap: up where it landed, the jitter never reached A
+        _flush();
+      }
+    }
     final b = _button, t = _held;
-    if (b == null || t == null) return;
+    if (b == null || t == null || e.pointer != _buttonPointer) return;
     _button = null;
+    _buttonPointer = null;
     _held = null;
-    if (t.usable) _mouse('up', b, clampTo(e.localPosition, t.fit), t);
+    if (t.usable) _mouse('up', b, clampTo(at, t.fit), t);
   }
 
   void _hover(PointerHoverEvent e) {
@@ -151,7 +239,15 @@ class _PictureState extends State<Picture> {
   }
 
   @override
+  void didUpdateWidget(Picture old) {
+    super.didUpdateWidget(old);
+    // A held-back press belongs to the window it landed on; never send it to another.
+    if (old.window.id != widget.window.id || old.session.sid != widget.session.sid) _dropPending();
+  }
+
+  @override
   void dispose() {
+    _dropPending();
     final h = widget.hole;
     if (h != null) {
       // Not while the tree is being torn down; and only what this picture itself reported.

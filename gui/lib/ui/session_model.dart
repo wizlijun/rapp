@@ -1,5 +1,6 @@
 // Session list model: entries, grouping, prev/next stepping.
 import 'lamp.dart';
+import 'workspace_store.dart';
 
 const pathLabels = {'lan': '局域网', 'direct': '直连', 'relay': '中继'};
 
@@ -34,11 +35,19 @@ class SessionEntry {
   String get key => '$id/$app';
 }
 
-enum Grouping { device, app }
+/// The open button's word for a row in [lamp]'s state (K10).
+String openVerb(Lamp? lamp) => switch (lamp) {
+      null || Lamp.notOpened => '打开',
+      Lamp.disconnected => '重连',
+      _ => '切到',
+    };
+
+enum Grouping { device, app, project }
 
 String groupingLabel(Grouping g) => switch (g) {
       Grouping.device => '按设备',
       Grouping.app => '按 App',
+      Grouping.project => '按项目',
     };
 
 class SessionGroup {
@@ -47,8 +56,10 @@ class SessionGroup {
   final List<SessionEntry> entries;
 }
 
-List<SessionGroup> groupSessions(List<SessionEntry> all, Grouping g) {
-  String titleOf(SessionEntry e) => g == Grouping.device ? e.device : e.appName;
+const otherGroupTitle = '其他';
+
+/// [all] sorted by device, then app name; stable.
+List<SessionEntry> _byDeviceThenApp(List<SessionEntry> all) {
   // Stable sort via original-index tiebreak.
   final indexed = [for (var i = 0; i < all.length; i++) (i, all[i])];
   indexed.sort((a, b) {
@@ -56,8 +67,28 @@ List<SessionGroup> groupSessions(List<SessionEntry> all, Grouping g) {
     if (c == 0) c = a.$2.appName.compareTo(b.$2.appName);
     return c != 0 ? c : a.$1.compareTo(b.$1);
   });
+  return [for (final (_, e) in indexed) e];
+}
+
+/// By project, a session in several projects appears in each (K15); [projects] is in order.
+List<SessionGroup> groupSessions(List<SessionEntry> all, Grouping g, {List<Project> projects = const []}) {
+  if (g == Grouping.project) {
+    final byKey = {for (final e in all) e.key: e};
+    final inProject = <String>{};
+    final groups = <SessionGroup>[];
+    for (final p in projects) {
+      final es = [for (final m in p.members) ?byKey[m.key]];
+      if (es.isEmpty) continue;
+      inProject.addAll(es.map((e) => e.key));
+      groups.add(SessionGroup(p.name, es));
+    }
+    final rest = _byDeviceThenApp([for (final e in all) if (!inProject.contains(e.key)) e]);
+    if (rest.isNotEmpty) groups.add(SessionGroup(otherGroupTitle, rest));
+    return groups;
+  }
+  String titleOf(SessionEntry e) => g == Grouping.device ? e.device : e.appName;
   final byTitle = <String, List<SessionEntry>>{};
-  for (final (_, e) in indexed) {
+  for (final e in _byDeviceThenApp(all)) {
     byTitle.putIfAbsent(titleOf(e), () => []).add(e);
   }
   final titles = byTitle.keys.toList()..sort();
@@ -65,7 +96,7 @@ List<SessionGroup> groupSessions(List<SessionEntry> all, Grouping g) {
 }
 
 String? stepKey(List<SessionGroup> groups, String? current, int delta) {
-  final keys = [for (final g in groups) for (final e in g.entries) e.key];
+  final keys = {for (final g in groups) for (final e in g.entries) e.key}.toList();
   if (keys.isEmpty) return null;
   final i = current == null ? -1 : keys.indexOf(current);
   if (i < 0) return keys.first;

@@ -4,7 +4,7 @@
 //! every byte is echoed back. For the service's logs, `serve` writes one stderr line and each
 //! session one `transfer` event. Permissions come from a `perms` file next to argv[0]
 //! (`{"screen_recording":…,"accessibility":…}`); without one both are granted, and
-//! `broken` makes `check` fail with no output.
+//! `broken` makes `check` fail with no output. A `serve_delay` file (ms) slows `serve`'s start.
 
 use std::io::{BufRead, BufReader, Write};
 use std::net::{TcpListener, TcpStream};
@@ -89,6 +89,11 @@ fn serve(args: &[String]) -> ! {
         [(!screen).then_some("Screen Recording"), (!ax).then_some("Accessibility")].into_iter().flatten().collect();
     if !missing.is_empty() {
         exit(3, &format!("missing permission: {}\\nAllow rapp (or the terminal running rapp-host) under System Settings > Privacy & Security, then connect again.", missing.join(", ")))
+    }
+    // `serve_delay` next to argv[0] (milliseconds): a slow start, so a session stays "opening".
+    if let Ok(ms) = std::fs::read_to_string(bin_dir().join("serve_delay")) {
+        log(&format!("delay {app}"));
+        std::thread::sleep(std::time::Duration::from_millis(ms.trim().parse().unwrap_or(0)));
     }
     let listener = TcpListener::bind((bind.as_str(), port)).unwrap_or_else(|_| exit(1, "bind failed"));
     log(&format!("start {app}"));

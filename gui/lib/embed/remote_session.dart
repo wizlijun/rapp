@@ -109,8 +109,10 @@ class RemoteSession extends ChangeNotifier {
         composer.apply(e.insert);
         composer.open = true;
         composer.wantFocus();
-      case TransferEvent():
+      case TransferStatusEvent():
         transferStatus = e.status;
+      case TransferProgressEvent():
+        break; // MainState's.
       case MenuEvent():
         menu = e.items;
       case DetachedEvent():

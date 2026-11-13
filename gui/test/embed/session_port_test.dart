@@ -102,8 +102,8 @@ void main() {
     expect(status.insert.status, '不支持文件夹：dir');
     expect(parseSessionEvent('composer_insert', {'sid': 1}), isNull);
 
-    expect((parseSessionEvent('transfer', {'sid': 1, 'status': '1/2'}) as TransferEvent).status, '1/2');
-    expect((parseSessionEvent('transfer', {'sid': 1, 'status': null}) as TransferEvent).status, isNull);
+    expect((parseSessionEvent('transfer_status', {'sid': 1, 'status': '1/2'}) as TransferStatusEvent).status, '1/2');
+    expect((parseSessionEvent('transfer_status', {'sid': 1, 'status': null}) as TransferStatusEvent).status, isNull);
     final detached = parseSessionEvent('detached', {'sid': 1, 'detached': false, 'current': 7}) as DetachedEvent;
     expect(detached.detached, isFalse);
     expect(detached.current, 7);
@@ -189,5 +189,75 @@ void main() {
     expect((parseSessionEvent('disconnected', {'sid': 1, 'reason': 'connection closed'}) as DisconnectedEvent).reason,
         'connection closed');
     expect((parseSessionEvent('disconnected', {'sid': 1}) as DisconnectedEvent).reason, '');
+  });
+
+  test('clipboard rows carry kind', () {
+    final e = parseSessionEvent('clipboard', {
+      'sid': 1,
+      'clips': [
+        {'id': 1, 'title': 'a', 'pickable': true, 'kind': 'image'},
+        {'id': 2, 'title': 'b', 'pickable': true},
+        {'id': 3, 'title': 'c', 'pickable': false},
+        {'id': 4, 'title': 'd', 'pickable': true, 'kind': 'weird'},
+      ]
+    }) as ClipsEvent;
+    expect(e.clips.map((c) => c.kind), [ClipKind.image, ClipKind.text, ClipKind.unsupported, ClipKind.text]);
+  });
+
+  test('transfer progress parses', () {
+    final e = parseSessionEvent('transfer', {
+      'sid': 1, 'id': 3, 'dir': 'down', 'name': 'a.log', 'done': 10, 'total': 20, 'state': 'done', 'path': '/x/a.log'
+    }) as TransferProgressEvent;
+    expect((e.id, e.down, e.name, e.done, e.total, e.state, e.path, e.error),
+        (3, true, 'a.log', 10, 20, TransferState.done, '/x/a.log', null));
+    final up = parseSessionEvent('transfer', {
+      'sid': 1, 'id': 4, 'dir': 'up', 'name': 'b', 'kind': 'files', 'done': 0, 'total': 1, 'state': 'failed', 'error': 'boom'
+    }) as TransferProgressEvent;
+    expect((up.down, up.state, up.error, up.kind), (false, TransferState.failed, 'boom', ClipKind.files));
+    expect(e.kind, isNull);
+    expect(
+        parseSessionEvent('transfer',
+            {'sid': 1, 'id': 3, 'dir': 'down', 'name': 'a', 'done': 1, 'total': 2, 'state': 'weird'}),
+        isNull);
+  });
+
+  test('cancelTransfer without id sends no id', () {
+    final port = FakeSessionPort();
+    port.cancelTransfer(1);
+    port.cancelTransfer(1, id: 3);
+    final c = port.calls.where((c) => c.$1 == 'cancel_transfer').map((c) => c.$2).toList();
+    expect(c, [
+      {'sid': 1},
+      {'sid': 1, 'id': 3}
+    ]);
+  });
+
+  test('fetchClip returns copy or error', () async {
+    final port = FakeSessionPort();
+    port.fetchReply = {'copy': 7};
+    expect((await port.fetchClip(1, 2)).copy, 7);
+    port.fetchReply = {'error': 'unknown clip'};
+    expect((await port.fetchClip(1, 2)).error, 'unknown clip');
+    port.fetchReply = {'weird': 1};
+    expect((await port.fetchClip(1, 2)).error, '没有连上 runner');
+    port.fetchError = PlatformException(code: 'x');
+    expect((await port.fetchClip(1, 2)).error, '没有连上 runner');
+    expect(port.calls.first.$1, 'fetch_clip');
+    expect(port.calls.first.$2, {'sid': 1, 'clip': 2});
+  });
+
+  test('copyLocal, dropCopy and reveal', () async {
+    final port = FakeSessionPort();
+    expect(await port.copyLocal(5), true);
+    port.copyLocalReply = false;
+    expect(await port.copyLocal(5), false);
+    port.dropCopy(5);
+    expect(await port.reveal('/x'), true);
+    port.revealReply = false;
+    expect(await port.reveal('/x'), false);
+    await Future<void>.delayed(Duration.zero);
+    expect(port.calls.map((c) => c.$1), ['copy_local', 'copy_local', 'drop_copy', 'reveal', 'reveal']);
+    expect(port.calls[2].$2, {'copy': 5});
+    expect(port.calls[3].$2, {'path': '/x'});
   });
 }

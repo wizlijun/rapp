@@ -763,6 +763,8 @@ impl LanA {
                 gui: None,
                 worker_idle: Duration::from_secs(60),
                 log_dir: self.home.path().join("logs"),
+                runner: std::sync::Arc::new(rapp_update::fake::FakeRunner::new()),
+                update: None,
             };
             match rapp_service::Service::start(opts).await {
                 Ok(s) => {

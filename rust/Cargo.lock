@@ -1196,7 +1196,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-client-core"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "flate2",
@@ -1207,7 +1207,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-client-gtk"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "gtk4",
@@ -1217,7 +1217,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-hub"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "quinn",
@@ -1231,7 +1231,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-net"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "if-addrs",
@@ -1248,7 +1248,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-relay"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "quinn",
@@ -1262,12 +1262,13 @@ dependencies = [
 
 [[package]]
 name = "rapp-service"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "quinn",
  "rand 0.9.5",
  "rapp-net",
+ "rapp-update",
  "serde",
  "serde_json",
  "tempfile",
@@ -1276,7 +1277,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-testkit"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "anyhow",
  "quinn",
@@ -1284,9 +1285,22 @@ dependencies = [
  "rapp-net",
  "rapp-relay",
  "rapp-service",
+ "rapp-update",
  "serde_json",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "rapp-update"
+version = "0.5.0"
+dependencies = [
+ "anyhow",
+ "rapp-net",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
 ]
 
 [[package]]

@@ -142,6 +142,15 @@ fn open_fields(app: &str, side: bool) -> Value {
 }
 
 async fn open(state: &Arc<State>, mut s: BiStream, app: &str, side: bool, peer: Peer) -> Result<()> {
+    // Counts as "in use" for the updater from now until the session ends.
+    let _opening = match crate::update::begin_open(state) {
+        Ok(g) => g,
+        Err(e) => {
+            let r = err(e);
+            log_request(state, &peer, open_fields(app, side), &r);
+            return reply_and_finish(&mut s, r).await;
+        }
+    };
     let (port, token) = match workers::start_session(state, app).await {
         Ok(w) => w,
         Err(e) => {

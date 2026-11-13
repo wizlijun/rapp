@@ -2,6 +2,7 @@
 //! then JSON-line commands. No reply to a good token line; a bad one gets an error and EOF.
 
 use crate::state::{RelayCmd, State};
+use crate::update;
 use anyhow::Result;
 use rapp_net::crypto::ct_eq;
 use rapp_net::line::{err, ok, write_json};
@@ -31,6 +32,9 @@ async fn conn(state: &Arc<State>, tcp: TcpStream, token: &str) -> Result<()> {
         return write_json(&mut w, &err("bad token")).await;
     }
     let mut feed: Option<tokio::sync::watch::Receiver<u64>> = None;
+    // Dropped when this function returns: every `update_apply`/`update_rollback` on this
+    // connection gets its own receiver and sees the connection close (K21).
+    let (_closed, closed) = tokio::sync::watch::channel(());
     loop {
         tokio::select! {
             line = lines.next_line() => {
@@ -41,11 +45,26 @@ async fn conn(state: &Arc<State>, tcp: TcpStream, token: &str) -> Result<()> {
                     rx.mark_unchanged();
                     feed = Some(rx);
                 }
-                let reply = if cmd["cmd"] == "permissions" {
-                    let perms = crate::workers::refresh_permissions(state, cmd["prompt"] == true).await;
-                    ok(json!({"permissions": perms}))
-                } else {
-                    handle(state, &cmd)
+                let reply = match cmd["cmd"].as_str().unwrap_or("") {
+                    "permissions" => {
+                        let perms = crate::workers::refresh_permissions(state, cmd["prompt"] == true).await;
+                        ok(json!({"permissions": perms}))
+                    }
+                    "permissions_reset" => {
+                        let mut r = crate::workers::reset_permissions(state).await;
+                        r["ok"] = json!(true);
+                        r
+                    }
+                    "update_check" => {
+                        let state = state.clone();
+                        tokio::spawn(async move { update::check_now(&state).await });
+                        ok(json!({}))
+                    }
+                    "update_apply" => {
+                        update::apply(state, cmd["confirm_signature_change"] == true, closed.clone()).await
+                    }
+                    "update_rollback" => update::rollback(state, closed.clone()).await,
+                    _ => handle(state, &cmd),
                 };
                 write_json(&mut w, &reply).await?;
             }
@@ -74,6 +93,9 @@ fn handle(state: &State, cmd: &Value) -> Value {
             Some(sid) if state.kick(sid) => ok(json!({})),
             _ => err("unknown sid"),
         },
+        "update_status" => ok(update::status_json(state)),
+        "update_dismiss" => update::dismiss(state, cmd["version"].as_str().unwrap_or("")),
+        "set_update" => update::set(state, cmd["auto_update"].as_bool(), cmd["check_updates"].as_bool()),
         "history" => {
             let limit = cmd["limit"].as_u64().unwrap_or(HISTORY_DEFAULT).min(HISTORY_MAX) as usize;
             ok(json!({"events": read_recent(&state.log_dir, crate::LOG_FILE, in_history, limit)}))

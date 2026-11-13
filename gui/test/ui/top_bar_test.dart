@@ -3,12 +3,14 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/session_port.dart';
+import 'package:rapp/embed/stream_menu.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/ui/lamp.dart';
 import 'package:rapp/ui/tab_chip.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/top_bar.dart';
+import 'package:rapp/ui/workspace_store.dart';
 
 import '../fakes.dart';
 import 'helpers.dart';
@@ -116,7 +118,7 @@ void main() {
     s.select('111/$longApp');
   }
 
-  for (final w in [360.0, 240.0]) {
+  for (final w in [360.0, 335.0, 320.0, 300.0, 240.0]) {
     testWidgets('top bar fits ${w.toInt()}px with long names', (tester) async {
       await tester.pumpWidget(wrap(SizedBox(
         width: w,
@@ -126,8 +128,39 @@ void main() {
       s.hint = 'some hint';
       await tester.pump();
       expect(tester.takeException(), isNull);
+      s.toggleOverview();
+      await tester.pump();
+      expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets('overview button only from 300px', (tester) async {
+    for (final (w, shown) in [(240.0, false), (360.0, true)]) {
+      await tester.pumpWidget(wrap(SizedBox(
+        width: w,
+        child: TopBar(state: s, fullscreen: false, onToggleFullscreen: () {}),
+      )));
+      expect(find.byKey(const Key('overview-button')), shown ? findsOneWidget : findsNothing, reason: '$w');
+    }
+  });
+
+  testWidgets('overview button toggles and shows pressed in overview', (tester) async {
+    final h = tester.ensureSemantics();
+    await tester.pumpWidget(wrap(bar()));
+    bool selected() => tester
+        .widgetList<Semantics>(find.ancestor(of: find.byKey(const Key('overview-button')), matching: find.byType(Semantics)))
+        .any((w) => w.properties.selected == true);
+    expect(s.overview, false);
+    await tester.tap(find.byKey(const Key('overview-button')));
+    await tester.pump();
+    expect(s.overview, true);
+    expect(selected(), true);
+    await tester.tap(find.byKey(const Key('overview-button')));
+    await tester.pump();
+    expect(s.overview, false);
+    expect(selected(), false);
+    h.dispose();
+  });
 
   testWidgets('hint still shown at 800px with a session', (tester) async {
     s.hint = 'hello hint';
@@ -157,6 +190,18 @@ void main() {
     await tester.pump();
     expect(find.text('mini'), findsOneWidget);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('second line shows device, project and task', (tester) async {
+    final p = s.createProject('写周报')!;
+    s.addMember(p.id, const AppRef('111', 'com.apple.Safari', 'Safari'));
+    s.setTask(p.id, '111/com.apple.Safari', '整理 PR');
+    await tester.pumpWidget(wrap(bar()));
+    await open(tester, 1, 'com.apple.Safari');
+    s.select('111/com.apple.Safari');
+    await tester.pump();
+    expect(find.text('mini · 写周报 · 整理 PR'), findsOneWidget);
+    expect(find.bySemanticsLabel('com.apple.Safari，活动，mini · 写周报 · 整理 PR'), findsOneWidget);
   });
 
   group('window tabs', () {
@@ -240,8 +285,56 @@ void main() {
       await tester.pump();
       expect(tester.widget<Text>(find.byKey(const Key('needs-count'))).data, '10');
       expect(tester.takeException(), isNull);
+      s.toggleOverview();
+      await tester.pump();
+      expect(tester.takeException(), isNull);
     });
   }
+
+  group('embedded width', () {
+    late FakeSessionPort port;
+    late MainState es;
+
+    setUp(() {
+      port = FakeSessionPort();
+      t.onSend = (m) {
+        if (m['cmd'] == 'open') {
+          t.emit({
+            'event': 'opened', 'sid': 1, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+            if (m['embed'] == true) ...{'port': 5001, 'token': 'tk'},
+            'req': m['req'],
+          });
+        }
+      };
+      s.dispose();
+      s = es = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: port);
+    });
+
+    for (final w in [600.0, 597.0, 545.0, 480.0, 478.0, 400.0, 392.0, 340.0, 336.0, 360.0, 320.0, 300.0]) {
+      testWidgets('top bar fits at $w with the stream menu', (tester) async {
+        await tester.pumpWidget(wrap(Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: w,
+            child: TopBar(state: es, fullscreen: false, onToggleFullscreen: () {}),
+          ),
+        )));
+        await tester.runAsync(() async {
+          es.openOrSwitch('111', 'Safari', 'Safari');
+          for (var i = 0; i < 4; i++) {
+            await flush();
+          }
+        });
+        await tester.pump();
+        expect(find.byType(StreamMenuAnchor), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        final full = tester.getRect(find.byKey(const Key('fullscreen-button')));
+        final barRect = tester.getRect(find.byType(TopBar));
+        expect(full.right, lessThanOrEqualTo(barRect.right + 0.01));
+        expect(full.left, greaterThanOrEqualTo(barRect.left));
+      });
+    }
+  });
 
   group('needs-you', () {
     late FakeSessionPort port;
@@ -378,6 +471,28 @@ void main() {
       expect(es.panel, PanelTab.devices);
       expect(es.deviceTab, '111');
       expect(es.corner, isNull);
+    });
+
+    testWidgets('a pinned clip of an ended session offers no 插入 when its sid comes back (S6-4b)', (tester) async {
+      await tester.pumpWidget(wrap(ebar()));
+      await openApp(tester, 'Safari');
+      port.emit(const ClipsEvent(1, [ClipRow(7, 'old', true)]));
+      await tester.runAsync(() async {
+        await es.togglePin(es.resources.clips.single);
+        es.endCurrent();
+        port.emit(const ClosedEvent(1, 'rapp-client: quit'));
+        await flush();
+      });
+      nextSid = 0; // 重启服务: the hub numbers from 1 again
+      await openApp(tester, 'Safari');
+      expect(es.currentRemote!.sid, 1);
+      await tester.tap(find.byKey(const Key('traffic')));
+      await tester.pump();
+      expect(find.text('old'), findsOneWidget);
+      expect(find.text('插入'), findsNothing);
+      port.emit(const ClipsEvent(1, [ClipRow(7, 'new', true)]));
+      await tester.pump();
+      expect(find.text('插入'), findsOneWidget);
     });
 
     testWidgets('opening needs closes the stream menu', (tester) async {

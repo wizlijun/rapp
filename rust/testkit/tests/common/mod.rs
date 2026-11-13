@@ -5,10 +5,12 @@ use quinn::{Connection, Endpoint};
 use rapp_net::line::{read_json, write_json};
 use rapp_net::quic::{bi, client_endpoint, connect, ALPN_PEER, ALPN_RELAY};
 use rapp_relay::Relay;
-use rapp_service::Service;
+use rapp_service::{Runner, Service, UpdateOpts};
+use rapp_update::fake::FakeRunner;
 use serde_json::{json, Value};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, DuplexStream, Lines};
@@ -21,10 +23,9 @@ pub const WAIT: Duration = Duration::from_secs(10);
 /// A temp dir with `rapp-host` / `rapp-client` symlinked to the fake workers.
 pub fn bins() -> TempDir {
     let dir = tempfile::tempdir().unwrap();
-    for (name, target) in [
-        ("rapp-host", env!("CARGO_BIN_EXE_fake-rapp-host")),
-        ("rapp-client", env!("CARGO_BIN_EXE_fake-rapp-client")),
-    ] {
+    for (name, target) in
+        [("rapp-host", env!("CARGO_BIN_EXE_fake-rapp-host")), ("rapp-client", env!("CARGO_BIN_EXE_fake-rapp-client"))]
+    {
         std::os::unix::fs::symlink(target, dir.path().join(name)).unwrap();
     }
     dir
@@ -74,6 +75,28 @@ pub async fn start_service(home: &Path, bins: &Path, idle: Duration) -> Service 
         gui: None,
         worker_idle: idle,
         log_dir: home.join("logs"),
+        runner: Arc::new(FakeRunner::new()),
+        update: None,
+    })
+    .await
+    .unwrap()
+}
+
+/// A service with its external programs scripted by `runner` and the updater set up by `update`.
+pub async fn start_service_with(
+    home: &Path,
+    bins: &Path,
+    runner: Arc<dyn Runner>,
+    update: Option<UpdateOpts>,
+) -> Service {
+    Service::start(rapp_service::Opts {
+        home: home.to_path_buf(),
+        bin_dir: Some(bins.to_path_buf()),
+        gui: None,
+        worker_idle: Duration::from_secs(60),
+        log_dir: home.join("logs"),
+        runner,
+        update,
     })
     .await
     .unwrap()
@@ -237,7 +260,13 @@ impl Hub {
         Hub::start_with(home, bins, relay, None, Some(every))
     }
 
-    fn start_with(home: &Path, bins: &Path, relay: Option<SocketAddr>, force: Option<&str>, every: Option<Duration>) -> Hub {
+    fn start_with(
+        home: &Path,
+        bins: &Path,
+        relay: Option<SocketAddr>,
+        force: Option<&str>,
+        every: Option<Duration>,
+    ) -> Hub {
         if !home.join("service.json").exists() {
             service_json(home, relay);
         }

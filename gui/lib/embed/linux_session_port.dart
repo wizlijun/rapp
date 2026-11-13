@@ -65,6 +65,8 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
   final _sessions = <Object, _Session>{};
   final _starting = <Object>{};
   final _cancelledStarts = <Object>{};
+  final _copies = <int, String>{};
+  int _nextCopy = 1;
   Object? _focused;
   bool _disposed = false;
 
@@ -133,6 +135,30 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
 
   @override
   Future<Object?> invoke(String method, Map<String, Object?> args) async {
+    if (method == 'copy_local') {
+      final text = _copies[args['copy']];
+      if (text == null) return false;
+      await Clipboard.setData(ClipboardData(text: text));
+      return true;
+    }
+    if (method == 'drop_copy') {
+      _copies.remove(args['copy']);
+      return null;
+    }
+    if (method == 'reveal') {
+      final path = args['path'];
+      if (path is! String) return false;
+      final file = File(path);
+      if (!await file.exists()) return false;
+      try {
+        return (await Process.run('xdg-open', [
+              file.absolute.parent.path,
+            ])).exitCode ==
+            0;
+      } on ProcessException {
+        return false;
+      }
+    }
     final sid = args['sid'];
     if (method == 'picture_focus') {
       if (_focused != sid) _releaseFocus();
@@ -185,6 +211,16 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
       _cancelledStarts.add(sid!);
     }
     final s = _sessions[sid];
+    if (method == 'fetch_clip') {
+      if (s == null || s.closed || s.disconnected) {
+        return {'error': 'A 已断开，复制不到'};
+      }
+      final text = s.clips[args['clip']];
+      if (text == null) return {'error': '条目已过期或不是完整文字；Linux 暂不支持图片和文件传输'};
+      final copy = _nextCopy++;
+      _copies[copy] = text;
+      return {'copy': copy};
+    }
     if (s == null) return null;
     if (method != 'close' && s.disconnected) return null;
     switch (method) {
@@ -289,6 +325,7 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
       s.close('closed');
     }
     _sessions.clear();
+    _copies.clear();
     unawaited(_events.close());
   }
 }
@@ -379,7 +416,7 @@ class _Session {
             final text = m['truncated'] == false ? m['text'] as String? : null;
             clips.remove(m['id']);
             clips[m['id'] as int] = text;
-            while (clips.length > 20) {
+            while (clips.length > 100) {
               clips.remove(clips.keys.first);
             }
             emit(

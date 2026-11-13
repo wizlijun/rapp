@@ -5,10 +5,17 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../permissions.dart';
+import '../ui/controls.dart';
 
 class PermissionsPanel extends StatelessWidget {
-  const PermissionsPanel(
-      {super.key, required this.permissions, required this.onOpenSettings, this.restartLabel = '重启'});
+  const PermissionsPanel({
+    super.key,
+    required this.permissions,
+    required this.onOpenSettings,
+    this.restartLabel = '重启',
+    this.onReset,
+    this.accessibilityResetFailed = false,
+  });
 
   /// The service's `{"screen_recording","accessibility"}`.
   final Map<String, dynamic> permissions;
@@ -17,12 +24,18 @@ class PermissionsPanel extends StatelessWidget {
   /// The nearby button that restarts rapp-service, named in the footnote.
   final String restartLabel;
 
+  /// Clears rapp's own records (K29); null hides the button.
+  final Future<void> Function()? onReset;
+
+  /// The last reset could not clear accessibility: say how to do it by hand.
+  final bool accessibilityResetFailed;
+
   @override
   Widget build(BuildContext context) {
     final missing = missingPermissions(permissions);
     final grey = TextStyle(color: Theme.of(context).hintColor, fontSize: 12);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-      for (final p in Permission.values)
+      for (final p in Permission.values) ...[
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 4),
           child: Row(children: [
@@ -38,6 +51,27 @@ class PermissionsPanel extends StatelessWidget {
                 : const Icon(Icons.check_circle, color: Colors.green),
           ]),
         ),
+        // Both records go at once, so it takes two taps (spec §3.2).
+        if (onReset != null && missing.contains(p))
+          ConfirmButton(
+            key: ValueKey('reset:${p.name}'),
+            label: '设置里已经打开了还是 ✗？重置授权记录',
+            onConfirmed: () => onReset!(),
+          ),
+      ],
+      if (accessibilityResetFailed)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(children: [
+            const Expanded(child: Text('辅助功能的旧记录要在系统设置里删：选中 rapp，点「−」，再重新添加。')),
+            const SizedBox(width: 8),
+            OutlinedButton(
+              key: const Key('reset-open-accessibility'),
+              onPressed: () => onOpenSettings(Permission.accessibility),
+              child: const Text('打开系统设置'),
+            ),
+          ]),
+        ),
       if (missing.isNotEmpty) Text('授权后这里会自动变成 ✓；如果一直不变，点「$restartLabel」。', style: grey),
     ]);
   }
@@ -45,12 +79,23 @@ class PermissionsPanel extends StatelessWidget {
 
 /// First-run guide on A: the panel, plus 稍后 / 重启服务 / 完成 (完成 only once nothing is missing).
 class PermissionGuideDialog extends StatelessWidget {
-  const PermissionGuideDialog({super.key, required this.permissions, required this.onOpenSettings, this.onRestart});
+  const PermissionGuideDialog({
+    super.key,
+    required this.permissions,
+    required this.onOpenSettings,
+    this.onRestart,
+    this.onReset,
+    this.accessibilityResetFailed = false,
+  });
 
   /// Null while the service is not running.
   final Map<String, dynamic>? permissions;
   final Future<void> Function(Permission) onOpenSettings;
   final Future<void> Function()? onRestart;
+
+  /// Passed to the panel (spec §3.3: after an update the guide offers the reset).
+  final Future<void> Function()? onReset;
+  final bool accessibilityResetFailed;
 
   @override
   Widget build(BuildContext context) {
@@ -62,7 +107,13 @@ class PermissionGuideDialog extends StatelessWidget {
         width: 420,
         child: perms == null
             ? const Text('服务未运行')
-            : PermissionsPanel(permissions: perms, onOpenSettings: onOpenSettings, restartLabel: '重启服务'),
+            : PermissionsPanel(
+                permissions: perms,
+                onOpenSettings: onOpenSettings,
+                restartLabel: '重启服务',
+                onReset: onReset,
+                accessibilityResetFailed: accessibilityResetFailed,
+              ),
       ),
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('稍后')),

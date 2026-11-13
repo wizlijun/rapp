@@ -5,11 +5,16 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import 'update.dart';
+
 const servicePort = 21119;
 
 class ServiceException implements Exception {
-  ServiceException(this.message);
+  ServiceException(this.message, {this.page});
   final String message;
+
+  /// Where to get the installer by hand, when an update command says so (K20).
+  final String? page;
   @override
   String toString() => message;
 }
@@ -35,6 +40,8 @@ class ServiceStatus {
     this.sessions = const [],
     this.lanIds = const [],
     this.logDir,
+    this.update,
+    this.permissionsLostAfterUpdate = false,
   });
 
   final String? id;
@@ -51,6 +58,12 @@ class ServiceStatus {
 
   /// Where the service writes `service.log` (「打开日志文件夹」).
   final String? logDir;
+
+  /// 版本与升级; null from a service older than online updates.
+  final UpdateInfo? update;
+
+  /// Both permissions were granted before the last update and are not now (spec §3.3).
+  final bool permissionsLostAfterUpdate;
 
   /// The ID as people should type it: the bare ID once the relay is connected,
   /// otherwise the `id@ip` forms (bare ID if the machine has no address).
@@ -69,6 +82,8 @@ class ServiceStatus {
       accessibility: perms['accessibility'] == true,
       lanIds: (m['lan_ids'] as List? ?? const []).map((e) => '$e').toList(),
       logDir: m['log_dir']?.toString(),
+      update: UpdateInfo.fromJson(m['update']),
+      permissionsLostAfterUpdate: m['permissions_lost_after_update'] == true,
       sessions: (m['sessions'] as List? ?? const [])
           .whereType<Map>()
           .map((s) => ServiceSession(s['sid'] as Object, '${s['peer'] ?? ''}', '${s['app'] ?? ''}',
@@ -138,6 +153,19 @@ class ServiceConnection {
   /// Re-checks A's permissions; with [prompt], macOS is asked for what is missing.
   Future<void> permissions({bool prompt = false}) => request({'cmd': 'permissions', 'prompt': prompt});
 
+  Future<Map<String, Object?>> updateCheck() => request({'cmd': 'update_check'});
+
+  /// On ok the service installs once this connection closes, so the caller quits next.
+  Future<Map<String, Object?>> updateApply({bool confirm = false}) =>
+      request({'cmd': 'update_apply', 'confirm_signature_change': confirm});
+  Future<Map<String, Object?>> updateDismiss(String v) => request({'cmd': 'update_dismiss', 'version': v});
+  Future<Map<String, Object?>> updateRollback() => request({'cmd': 'update_rollback'});
+  Future<Map<String, Object?>> setUpdate({bool? autoUpdate, bool? checkUpdates}) =>
+      request({'cmd': 'set_update', 'auto_update': ?autoUpdate, 'check_updates': ?checkUpdates});
+
+  /// Clears rapp's own screen recording and accessibility records; the reply says which took.
+  Future<Map<String, Object?>> permissionsReset() => request({'cmd': 'permissions_reset'});
+
   void _onLine(String line) {
     Map<String, dynamic> m;
     try {
@@ -156,7 +184,7 @@ class ServiceConnection {
     if (m['ok'] == true) {
       c.complete(m);
     } else {
-      c.completeError(ServiceException('${m['error'] ?? 'request failed'}'));
+      c.completeError(ServiceException('${m['error'] ?? 'request failed'}', page: m['page']?.toString()));
     }
   }
 
@@ -290,6 +318,20 @@ class ServiceMonitor extends ChangeNotifier {
     await _need().permissions(prompt: prompt);
     await refresh();
   }
+
+  Future<Map<String, Object?>> _then(Future<Map<String, Object?>> Function(ServiceConnection) f) async {
+    final r = await f(_need());
+    await refresh();
+    return r;
+  }
+
+  Future<Map<String, Object?>> updateCheck() => _then((c) => c.updateCheck());
+  Future<Map<String, Object?>> updateApply({bool confirm = false}) => _then((c) => c.updateApply(confirm: confirm));
+  Future<Map<String, Object?>> updateDismiss(String v) => _then((c) => c.updateDismiss(v));
+  Future<Map<String, Object?>> updateRollback() => _then((c) => c.updateRollback());
+  Future<Map<String, Object?>> setUpdate({bool? autoUpdate, bool? checkUpdates}) =>
+      _then((c) => c.setUpdate(autoUpdate: autoUpdate, checkUpdates: checkUpdates));
+  Future<Map<String, Object?>> permissionsReset() => _then((c) => c.permissionsReset());
 
   @override
   void dispose() {

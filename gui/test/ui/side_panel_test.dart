@@ -10,7 +10,10 @@ import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/session_model.dart';
 import 'package:rapp/ui/side_panel.dart';
+import 'package:rapp/ui/projects_tab.dart';
+import 'package:rapp/ui/resources_tab.dart';
 import 'package:rapp/ui/sessions_tab.dart';
+import 'package:rapp/ui/workspace_store.dart';
 import 'package:rapp/ui/tokens.dart';
 
 import '../fakes.dart';
@@ -268,9 +271,42 @@ void main() {
     expect(s.panel, PanelTab.devices);
     expect(find.text('devices-body'), findsOneWidget);
     expect(find.byTooltip('收起面板'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('tab-projects')));
+    await tester.pump();
+    expect(s.panel, PanelTab.projects);
     await tester.tap(find.byKey(const Key('panel-close')));
     await tester.pump();
     expect(s.panel, isNull);
+  });
+
+  testWidgets('projects tab is 720 wide on a big window', (tester) async {
+    tester.view.physicalSize = const Size(1194, 834);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    s.togglePanel(PanelTab.projects);
+    await tester.pumpWidget(wrap(Stack(children: [
+      Positioned(left: 0, top: 0, bottom: 0, child: panel()),
+    ])));
+    expect(tester.getSize(find.byType(SidePanel)).width, 720);
+    expect(find.byType(ProjectsTab), findsOneWidget);
+  });
+
+  testWidgets('resources tab is the fourth tab and 720 wide', (tester) async {
+    tester.view.physicalSize = const Size(1194, 834);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    s.togglePanel();
+    await tester.pumpWidget(wrap(Stack(children: [
+      Positioned(left: 0, top: 0, bottom: 0, child: panel()),
+    ])));
+    expect(tester.getSize(find.byType(SidePanel)).width, 330);
+    await tester.tap(find.byKey(const Key('tab-resources')));
+    await tester.pump();
+    expect(s.panel, PanelTab.resources);
+    expect(tester.getSize(find.byType(SidePanel)).width, 720);
+    expect(find.byType(ResourcesTab), findsOneWidget);
   });
 
   testWidgets('panel is clamped to the window width', (tester) async {
@@ -295,6 +331,23 @@ void main() {
     expect(tester.getSize(find.byType(SidePanel)).width, 330);
   });
 
+  testWidgets('a session in two projects shows in both groups', (tester) async {
+    const safari = AppRef('111', 'com.apple.Safari', 'Safari');
+    s.addMember(s.createProject('写周报')!.id, safari);
+    s.addMember(s.createProject('发版')!.id, safari);
+    s.togglePanel();
+    await tester.pumpWidget(wrap(panel()));
+    await open(tester, 1, 'com.apple.Safari');
+    await tester.tap(find.byKey(const Key('group-project')));
+    await tester.pump();
+    final rows = find.byKey(const Key('session-111/com.apple.Safari'));
+    expect(rows, findsNWidgets(2));
+    await tester.tap(rows.last);
+    await tester.pump();
+    expect(s.currentKey, '111/com.apple.Safari');
+    expect(s.panel, isNull);
+  });
+
   testWidgets('no overflow on a 400x500 window', (tester) async {
     tester.view.physicalSize = const Size(400, 500);
     tester.view.devicePixelRatio = 1;
@@ -304,8 +357,16 @@ void main() {
     await tester.pumpWidget(wrap(panel()));
     await open(tester, 1, 'Safari');
     await open(tester, 2, 'Mail');
+    await tester.tap(find.byKey(const Key('group-project')));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
     expect(tester.takeException(), isNull);
     s.togglePanel(PanelTab.devices);
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    final p = s.createProject('写周报')!;
+    s.addMember(p.id, const AppRef('111', 'Safari', 'Safari'));
+    s.togglePanel(PanelTab.projects);
     await tester.pump();
     expect(tester.takeException(), isNull);
   });
@@ -337,5 +398,65 @@ void main() {
   testWidgets('SessionsTab alone builds', (tester) async {
     await tester.pumpWidget(wrap(SizedBox(width: 330, height: 400, child: SessionsTab(state: s))));
     expect(find.byType(SessionsTab), findsOneWidget);
+  });
+
+  testWidgets('idle favorites list last with a not-opened lamp', (tester) async {
+    s.toggleFavorite('111', 'com.apple.Notes', 'Notes');
+    s.togglePanel();
+    await tester.pumpWidget(wrap(panel()));
+    await open(tester, 1, 'com.apple.Safari');
+    expect(find.byKey(const Key('group-favorites')), findsOneWidget);
+    final row = find.byKey(const Key('favorite-111/com.apple.Notes'));
+    expect(row, findsOneWidget);
+    expect(tester.getTopLeft(row).dy, greaterThan(tester.getTopLeft(find.byKey(const Key('session-111/com.apple.Safari'))).dy));
+    final lamp = tester.widget<StatusLamp>(find.descendant(of: row, matching: find.byType(StatusLamp)));
+    expect(lamp.kind, Lamp.notOpened);
+    expect(tester.getSize(row).height, 60);
+    expect(find.descendant(of: row, matching: find.text('mini')), findsOneWidget);
+  });
+
+  testWidgets('favorites show under the empty state', (tester) async {
+    s.toggleFavorite('111', 'com.apple.Notes', 'Notes');
+    s.togglePanel();
+    await tester.pumpWidget(wrap(panel()));
+    final empty = find.text('没有打开的会话。到「设备」里打开一个 app。');
+    final row = find.byKey(const Key('favorite-111/com.apple.Notes'));
+    expect(empty, findsOneWidget);
+    expect(row, findsOneWidget);
+    expect(tester.getTopLeft(row).dy, greaterThan(tester.getTopLeft(empty).dy));
+  });
+
+  testWidgets('tapping a favorite opens it and closes the panel', (tester) async {
+    s.toggleFavorite('111', 'com.apple.Notes', 'Notes');
+    s.togglePanel();
+    await tester.pumpWidget(wrap(panel()));
+    await tester.tap(find.byKey(const Key('favorite-111/com.apple.Notes')));
+    await tester.runAsync(flush);
+    await tester.pump();
+    expect(t.sent.last, containsPair('cmd', 'open'));
+    expect(t.sent.last, containsPair('id', '111'));
+    expect(t.sent.last, containsPair('app', 'com.apple.Notes'));
+    expect(s.panel, isNull);
+  });
+
+  testWidgets('an open favorite leaves the 常用 group and comes back when it ends', (tester) async {
+    s.toggleFavorite('111', 'com.apple.Notes', 'Notes');
+    s.togglePanel();
+    await tester.pumpWidget(wrap(panel()));
+    await open(tester, 1, 'com.apple.Notes');
+    expect(find.byKey(const Key('favorite-111/com.apple.Notes')), findsNothing);
+    t.emit({'event': 'closed', 'sid': 1});
+    await tester.runAsync(flush);
+    await tester.pump();
+    expect(find.byKey(const Key('favorite-111/com.apple.Notes')), findsOneWidget);
+  });
+
+  testWidgets('step skips favorites', (tester) async {
+    s.toggleFavorite('111', 'com.apple.Notes', 'Notes');
+    s.togglePanel();
+    await tester.pumpWidget(wrap(panel()));
+    await open(tester, 1, 'com.apple.Safari');
+    s.step(1);
+    expect(s.currentKey, '111/com.apple.Safari');
   });
 }

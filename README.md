@@ -120,6 +120,11 @@ Rust 网络后台继续复用；`rust/client-core` 实现可跨平台复用的�
 断线停止 worker，结束会话时释放保留画面。
 独立 GTK `rapp-client` 仍可单独使用；下面的应用画布和独立客户端菜单说明适用于它。
 
+当前主线源码已对齐 0.5.0：Linux 可使用项目与常用、全景模式（离开舞台降至 1 fps）、触屏双指滚动，
+以及跨会话文字剪贴板资源。固定的文字副本在会话结束后仍可复制；图片/文件传输仍暂不支持。
+Linux 的“本机 → 版本与升级”可独立于后台服务检查 GitHub 发布并打开对应安装包，安装由系统软件包管理器完成。
+上面的 0.4.1 链接是已发布版本，0.5.0 Linux 包尚未发布。
+
 构建依赖：Rust、GTK4 ≥ 4.12、pkgconf。连同 Flutter 管理界面打包还需要 Flutter
 （Dart ≥ 3.12.1）、clang、cmake、ninja、gtk3、libayatana-appindicator。
 

@@ -7,6 +7,7 @@ import 'package:rapp/ui/devices_tab.dart';
 import 'package:rapp/ui/lamp.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
+import 'package:rapp/ui/tokens.dart';
 
 import '../fakes.dart';
 import 'helpers.dart';
@@ -77,7 +78,7 @@ void main() {
     tmp.deleteSync(recursive: true);
   });
 
-  Future<void> pumpTab(WidgetTester tester, {bool settle = true}) async {
+  Future<void> pumpTab(WidgetTester tester, {bool settle = true, bool localBadge = false}) async {
     s.togglePanel(PanelTab.devices);
     // MainState's constructor already asked for the hosts, in setUp's real zone.
     await tester.runAsync(() async {
@@ -88,7 +89,7 @@ void main() {
     await tester.pumpWidget(wrap(SizedBox(
       width: 420,
       height: 900,
-      child: DevicesTab(state: s, local: const Text('local-body')),
+      child: DevicesTab(state: s, local: const Text('local-body'), localBadge: localBadge),
     )));
     if (settle) {
       await tester.pumpAndSettle();
@@ -149,6 +150,26 @@ void main() {
     await tester.pump();
     s.probeAll();
     expect(n(), first);
+  });
+
+  testWidgets('local chip shows a quiet dot', (tester) async {
+    await pumpTab(tester, localBadge: true);
+    final chip = find.byKey(const Key('device-local'));
+    final dot = find.descendant(of: chip, matching: find.byKey(const Key('update-dot')));
+    expect(dot, findsOneWidget);
+    final t = RappTokens.of(tester.element(chip));
+    final box = tester.widget<Container>(dot).decoration as BoxDecoration;
+    expect(box.color, t.muted);
+    expect(box.shape, BoxShape.circle);
+    expect(tester.getSize(dot), const Size(8, 8));
+    expect(find.descendant(of: chip, matching: find.byType(FadeTransition)), findsNothing);
+    expect(find.descendant(of: chip, matching: find.byType(AnimatedBuilder)), findsNothing);
+    expect(tester.hasRunningAnimations, isFalse);
+    expect(tester.getSemantics(chip).label, contains('本机，有新版本'));
+
+    await pumpTab(tester);
+    expect(find.byKey(const Key('update-dot')), findsNothing);
+    expect(tester.getSemantics(find.byKey(const Key('device-local'))).label, '本机');
   });
 
   testWidgets('shows 本机 first and probes every device on start', (tester) async {
@@ -348,5 +369,39 @@ void main() {
     await tester.tap(find.byKey(const Key('add-button')), warnIfMissed: false);
     await tester.pump();
     expect(t.sent.where((m) => m['cmd'] == 'add_host'), isEmpty);
+  });
+
+  testWidgets('设为常用 toggles and the label follows', (tester) async {
+    await pumpTab(tester);
+    await selectMini(tester);
+    const app = 'com.apple.Safari';
+    final fav = find.byKey(const Key('fav-$app'));
+    expect(find.descendant(of: fav, matching: find.text('设为常用')), findsOneWidget);
+    await tester.tap(fav);
+    await tester.pumpAndSettle();
+    expect(s.isFavorite('111', app), isTrue);
+    expect(find.descendant(of: fav, matching: find.text('取消常用')), findsOneWidget);
+    await tester.tap(fav);
+    await tester.pumpAndSettle();
+    expect(s.isFavorite('111', app), isFalse);
+    expect(find.descendant(of: fav, matching: find.text('设为常用')), findsOneWidget);
+  });
+
+  testWidgets('设为常用 works without the hub', (tester) async {
+    await pumpTab(tester);
+    await selectMini(tester);
+    await t.die();
+    await tester.runAsync(flush);
+    await tester.pumpAndSettle();
+    expect(s.hubUsable, isFalse);
+    await tester.tap(find.byKey(const Key('fav-com.apple.Safari')));
+    await tester.pumpAndSettle();
+    expect(s.isFavorite('111', 'com.apple.Safari'), isTrue);
+  });
+
+  testWidgets('fav button is at least 48 tall', (tester) async {
+    await pumpTab(tester);
+    await selectMini(tester);
+    expect(tester.getSize(find.byKey(const Key('fav-com.apple.Safari'))).height, greaterThanOrEqualTo(48));
   });
 }

@@ -300,6 +300,90 @@ async fn permissions_command_checks_and_prompts() {
     assert!(host_log(a.bins.path()).contains("check --prompt"));
 }
 
+type Tccutil = Box<dyn Fn(&[String]) -> rapp_update::runner::Out + Send + Sync>;
+
+/// A relay-less service whose runner scripts `/usr/bin/tccutil` with `tccutil` (None: not installed).
+async fn with_tccutil(
+    tccutil: Option<Tccutil>,
+    bins: &std::path::Path,
+) -> (rapp_service::Service, tempfile::TempDir, std::sync::Arc<rapp_update::fake::FakeRunner>) {
+    let home = tempfile::tempdir().unwrap();
+    service_json(home.path(), None);
+    let mut runner = rapp_update::fake::FakeRunner::new();
+    if let Some(f) = tccutil {
+        runner = runner.on(rapp_update::runner::TCCUTIL, f);
+    }
+    let runner = std::sync::Arc::new(runner);
+    let svc = start_service_with(home.path(), bins, runner.clone(), None).await;
+    (svc, home, runner)
+}
+
+fn tccutil_calls(r: &rapp_update::fake::FakeRunner) -> Vec<Vec<String>> {
+    r.calls().into_iter().filter(|(p, _)| p == rapp_update::runner::TCCUTIL).map(|(_, a)| a).collect()
+}
+
+fn strs(v: &[&str]) -> Vec<String> {
+    v.iter().map(|s| s.to_string()).collect()
+}
+
+#[tokio::test]
+async fn permissions_reset_runs_tccutil_for_rapp_only() {
+    let bins = bins();
+    set_perms(bins.path(), &perms(true, true));
+    let b = bins.path().to_path_buf();
+    let (svc, home, runner) = with_tccutil(
+        Some(Box::new(move |_| {
+            set_perms(&b, &perms(false, false));
+            rapp_update::runner::Out::ok("")
+        })),
+        bins.path(),
+    )
+    .await;
+    let r = ipc_once(&svc, home.path(), json!({"cmd":"permissions_reset"})).await;
+    assert_eq!(
+        r,
+        json!({"ok":true,"screen_recording_reset":true,"accessibility_reset":true,"permissions":perms(false, false)})
+    );
+    assert_eq!(
+        tccutil_calls(&runner),
+        vec![strs(&["reset", "ScreenCapture", "com.rapp.rapp"]), strs(&["reset", "Accessibility", "com.rapp.rapp"])]
+    );
+    assert!(host_log(bins.path()).contains("check --prompt"));
+    let ev = wait_log(home.path(), "permissions_reset", |_| true).await;
+    assert_eq!(ev.as_object().unwrap().keys().filter(|k| !["ts", "lvl", "ev"].contains(&k.as_str())).count(), 0, "{ev}");
+}
+
+#[tokio::test]
+async fn accessibility_reset_failure_is_reported() {
+    let bins = bins();
+    set_perms(bins.path(), &perms(true, true));
+    let b = bins.path().to_path_buf();
+    let (svc, home, _) = with_tccutil(
+        Some(Box::new(move |a| {
+            if a[1] == "ScreenCapture" {
+                set_perms(&b, &perms(false, true));
+            }
+            rapp_update::runner::Out::ok("")
+        })),
+        bins.path(),
+    )
+    .await;
+    let r = ipc_once(&svc, home.path(), json!({"cmd":"permissions_reset"})).await;
+    assert_eq!((&r["screen_recording_reset"], &r["accessibility_reset"]), (&json!(true), &json!(false)), "{r}");
+    assert_eq!(r["permissions"], perms(false, true));
+}
+
+#[tokio::test]
+async fn tccutil_missing_reports_false() {
+    let bins = bins();
+    set_perms(bins.path(), &perms(true, true));
+    let (svc, home, _) = with_tccutil(None, bins.path()).await;
+    let r = ipc_once(&svc, home.path(), json!({"cmd":"permissions_reset"})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!((&r["screen_recording_reset"], &r["accessibility_reset"]), (&json!(false), &json!(false)), "{r}");
+    assert!(host_log(bins.path()).contains("check --prompt"));
+}
+
 #[tokio::test]
 async fn failed_check_keeps_last_known_permissions() {
     let a = service(None).await;

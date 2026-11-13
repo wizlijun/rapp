@@ -42,6 +42,13 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     }
   }
 
+  /// Copies of A's clips; they outlive the session they came from.
+  private let copies = ClipCopies()
+  /// Where downloads go: `RAPP_DOWNLOADS` when set and non-empty, else the session's default.
+  private let downloads: URL? = {
+    guard let p = ProcessInfo.processInfo.environment["RAPP_DOWNLOADS"], !p.isEmpty else { return nil }
+    return URL(fileURLWithPath: p, isDirectory: true)
+  }()
   private let channel: FlutterMethodChannel
   private let registry: FlutterTextureRegistry
   private weak var view: NSView?
@@ -130,9 +137,33 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     case let .setStream(sid, mode, fps, density):
       live[sid]?.session.setStream(mode: mode, fps: fps, choice: density)
       result(nil)
-    case let .cancelTransfer(sid):
-      live[sid]?.session.cancelTransfers()
+    case let .cancelTransfer(sid, id):
+      if let id { live[sid]?.session.cancelTransfer(id: id) } else { live[sid]?.session.cancelTransfers() }
       result(nil)
+    case let .fetchClip(sid, clip):
+      guard let entry = live[sid] else {
+        result(["error": "A 已断开"])
+        return
+      }
+      // The reply comes back on main (the session hops it), where `copies` lives.
+      entry.session.fetchCopy(clip) { [copies] r in
+        result(clipCopyReply(r.map { copies.add($0) }))
+      }
+    case let .copyLocal(copy):
+      result(copies.write(copy, to: LocalPasteboard()))
+    case let .dropCopy(copy):
+      copies.drop(copy)
+      result(nil)
+    case let .reveal(path):
+      // Only what rapp itself downloaded: inside the downloads dir in use.
+      let root = downloads
+        ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0].appendingPathComponent("rapp")
+      if let url = revealableURL(path, within: [root]) {
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+        result(true)
+      } else {
+        result(false)  // missing, or not in rapp's downloads dir
+      }
     case let .composerPaste(sid):
       // ⌘V on B: the user's own clipboard, read on main by the composer.
       result(pasteResultPayload(live[sid]?.session.composer.paste() ?? .nothing))
@@ -335,7 +366,7 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     let queue = DispatchQueue(label: "rapp.session.\(sid)")
     let session = EmbeddedSession(address: address, choice: density, backingScale: backingScale,
                                   link: Connection(address: address, queue: queue),
-                                  pasteboard: LocalPasteboard(), queue: queue)
+                                  pasteboard: LocalPasteboard(), queue: queue, downloads: downloads)
     session.onEvent = { [weak self] event in
       DispatchQueue.main.async { self?.deliver(event, sid: sid) }
     }

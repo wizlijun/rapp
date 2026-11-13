@@ -18,11 +18,14 @@ TextStyle _mono(RappTokens t, {double size = 12, Color? color}) => TextStyle(
     );
 
 class DevicesTab extends StatefulWidget {
-  const DevicesTab({super.key, required this.state, required this.local});
+  const DevicesTab({super.key, required this.state, required this.local, this.localBadge = false});
   final MainState state;
 
   /// The 本机 content, assembled by the caller.
   final Widget local;
+
+  /// A new version is on its way in: a still, muted dot on 本机 (K27).
+  final bool localBadge;
 
   @override
   State<DevicesTab> createState() => _DevicesTabState();
@@ -83,11 +86,21 @@ class _DevicesTabState extends State<DevicesTab> {
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
-                  TabChip(
-                    key: const Key('device-local'),
-                    label: '本机',
+                  // The dot is hidden from screen readers; the name says it instead.
+                  Semantics(
+                    container: true,
+                    button: true,
                     selected: !known,
+                    label: widget.localBadge ? '本机，有新版本' : '本机',
+                    excludeSemantics: true,
                     onTap: () => _select(null),
+                    child: TabChip(
+                      key: const Key('device-local'),
+                      label: '本机',
+                      selected: !known,
+                      leading: widget.localBadge ? const _UpdateDot() : null,
+                      onTap: () => _select(null),
+                    ),
                   ),
                   for (final h in hosts) ...[
                     const SizedBox(width: 6),
@@ -200,6 +213,8 @@ class _DevicesTabState extends State<DevicesTab> {
               name: a.name,
               session: _session(id, a.app),
               enabled: state.hubUsable,
+              favorite: state.isFavorite(id, a.app),
+              onFavorite: () => state.toggleFavorite(id, a.app, a.name),
               onOpen: () => state.openOrSwitch(id, a.app, a.name),
             ),
           ),
@@ -235,6 +250,21 @@ class _DevicesTabState extends State<DevicesTab> {
   }
 }
 
+/// 8 px, `--muted`, never moves: an update waits at the edge (design language §0 check 2).
+class _UpdateDot extends StatelessWidget {
+  const _UpdateDot();
+
+  @override
+  Widget build(BuildContext context) => ExcludeSemantics(
+        child: Container(
+          key: const Key('update-dot'),
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(color: RappTokens.of(context).muted, shape: BoxShape.circle),
+        ),
+      );
+}
+
 class _AppRow extends StatelessWidget {
   const _AppRow({
     required this.id,
@@ -242,11 +272,15 @@ class _AppRow extends StatelessWidget {
     required this.name,
     required this.session,
     required this.enabled,
+    required this.favorite,
+    required this.onFavorite,
     required this.onOpen,
   });
   final String id, app, name;
   final SessionEntry? session;
   final bool enabled;
+  final bool favorite;
+  final VoidCallback onFavorite;
   final VoidCallback onOpen;
 
   @override
@@ -255,8 +289,8 @@ class _AppRow extends StatelessWidget {
     final lamp = session?.lamp ?? Lamp.notOpened;
     final word = lampWord(lamp);
     final connecting = lamp == Lamp.connecting;
-    final switchTo = session != null && !connecting;
-    final verb = switchTo ? '切到' : '打开';
+    final verb = openVerb(session?.lamp);
+    final favLabel = favorite ? '取消常用' : '设为常用';
     final backdrop = rowBackdrop(lamp, t);
     final dashed = lamp == Lamp.notOpened;
     final border = rowBorder(lamp, t);
@@ -297,6 +331,13 @@ class _AppRow extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 8),
+                      RappButton.secondary(
+                        key: Key('fav-$app'),
+                        label: favLabel,
+                        semanticLabel: '$favLabel $name',
+                        onPressed: onFavorite,
+                      ),
+                      const SizedBox(width: 6),
                       RappButton.secondary(
                         key: Key('open-$app'),
                         label: verb,

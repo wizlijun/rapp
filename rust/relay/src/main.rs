@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use rapp_net::log::Log;
 use rapp_relay::{Opts, Relay, DEFAULT_LISTEN, TOKEN_TTL};
 
-const USAGE: &str = "usage: rapp-relay --key <relay key> [--listen 0.0.0.0:21116] [--db relay.json] [--debug]";
+const USAGE: &str = "usage: rapp-relay --key <relay key> [--listen 0.0.0.0:21116] [--db relay.json] [--debug]\n       rapp-relay --version";
 
 fn parse(args: &[String]) -> Result<Opts> {
     let (mut key, mut listen, mut db) = (None, DEFAULT_LISTEN.to_string(), "relay.json".to_string());
@@ -31,6 +31,10 @@ fn parse(args: &[String]) -> Result<Opts> {
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("--version") {
+        println!("rapp-relay {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
     let opts = match parse(&args) {
         Ok(o) => o,
         Err(e) => {
