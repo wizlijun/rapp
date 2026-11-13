@@ -9,6 +9,16 @@ final class ChannelTests: XCTestCase {
         XCTAssertEqual(c, .start(sid: 3, port: 5000, token: "t", mode: .color16, fps: 15, density: .adaptive))
     }
 
+    func testSetStreamPinnedParsed() throws {
+        let base: [String: Any] = ["sid": 1, "mode": "duogray", "fps": 1, "density": "saver1x"]
+        XCTAssertEqual(try channelCommand("set_stream", base),
+                       .setStream(sid: 1, mode: .duogray, fps: 1, density: .saver1x, pinned: false))
+        XCTAssertEqual(try channelCommand("set_stream", base.merging(["pinned": true]) { $1 }),
+                       .setStream(sid: 1, mode: .duogray, fps: 1, density: .saver1x, pinned: true))
+        XCTAssertEqual(try channelCommand("set_stream", base.merging(["pinned": false]) { $1 }),
+                       .setStream(sid: 1, mode: .duogray, fps: 1, density: .saver1x, pinned: false))
+    }
+
     func testMouseBecomesAMessage() throws {
         let c = try channelCommand("mouse", ["sid": 1, "window": 7, "kind": "down", "button": "right", "x": 10.5, "y": 20, "clicks": 2])
         XCTAssertEqual(c, .mouse(sid: 1, .mouse(kind: .down, button: .right, window: 7, x: 10.5, y: 20, clickCount: 2)))
