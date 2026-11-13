@@ -1261,6 +1261,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rapp-relay2"
+version = "0.5.2"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "rapp-service"
 version = "0.5.2"
 dependencies = [
