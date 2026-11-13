@@ -223,6 +223,8 @@ void main() {
       expect(await port.invoke('pin_load', {'path': '${dir.path}/clipboard/missing.md'}), isNull);
       File('${dir.path}/x.png').writeAsBytesSync([1]);
       expect(await port.invoke('pin_load', {'path': '${dir.path}/x.png'}), isNull);
+      File('${dir.path}/bad.md').writeAsBytesSync([0xff, 0xfe, 0x00]);
+      expect(await port.invoke('pin_load', {'path': '${dir.path}/bad.md'}), isNull);
     } finally {
       port.dispose();
       dir.deleteSync(recursive: true);
