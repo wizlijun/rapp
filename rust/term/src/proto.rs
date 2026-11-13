@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 pub const PROTO: u32 = 1;
 pub const MAX_LINE: usize = 65536;
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Pane {
     pub id: String,
     pub window: String,
@@ -17,7 +17,7 @@ pub struct Pane {
     pub dead: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "t", rename_all = "snake_case")]
 pub enum Out {
     Hello {
@@ -55,7 +55,7 @@ pub enum Out {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "t", rename_all = "snake_case")]
 pub enum In {
     View { pane: Option<String>, cols: u16, rows: u16 },
