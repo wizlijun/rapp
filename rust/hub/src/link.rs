@@ -63,7 +63,7 @@ impl Hub {
         if host.lan.is_empty() {
             bail!("no address: add the host again as id@ip");
         }
-        let auth = Op::Auth { token: None, password: Some(host.password.clone()), name: self.me() };
+        let auth = Op::Auth { password: Some(host.password.clone()), name: self.me() };
         match self.first_lan(&host.id, &host.lan, &auth).await {
             Some(conn) => Ok(Link { conn }),
             None => Err(anyhow!("offline: no LAN address answered")),

@@ -71,7 +71,7 @@ async fn auth(state: &State, conn: &Connection, private: bool, peer: &mut Peer) 
     let declared = |n: Option<String>| n.map(|n| clean_name(&n)).filter(|n| !n.is_empty());
     let reply = match read_json(&mut s).await.map(serde_json::from_value) {
         Err(_) => err("bad request"),
-        Ok(Ok(Op::Auth { password, name, .. })) => {
+        Ok(Ok(Op::Auth { password, name })) => {
             peer.name = declared(name);
             match password {
                 Some(p) if private => {

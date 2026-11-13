@@ -150,7 +150,7 @@ impl Hub {
                 let (id, addr) = rapp_net::addr::split_host_ref(s("id")?)?;
                 let Some(addr) = addr else { bail!("id@ip required") };
                 let (id, password) = (id.as_str(), s("password")?);
-                let auth = Op::Auth { token: None, password: Some(password.into()), name: self.me() };
+                let auth = Op::Auth { password: Some(password.into()), name: self.me() };
                 let (conn, r) = self.dial(&addr, link::LAN_WAIT, &auth).await?;
                 conn.close(0u32.into(), b"host added");
                 if r["id"] != id {

@@ -1,7 +1,6 @@
 //! Hashing, hex and randomness helpers (spec §2.1).
 
 use rand::{Rng, RngCore};
-use sha2::{Digest, Sha256};
 
 pub fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
@@ -18,18 +17,6 @@ pub fn random_hex(nbytes: usize) -> String {
     let mut b = vec![0u8; nbytes];
     rand::rng().fill_bytes(&mut b);
     hex(&b)
-}
-
-pub fn sha256_hex(data: &[u8]) -> String {
-    hex(&Sha256::digest(data))
-}
-
-/// `hex(SHA-256(salt ‖ password))`; `salt_hex` is the hex form of the 16 salt bytes.
-pub fn pw_hash(salt_hex: &str, password: &str) -> String {
-    let mut h = Sha256::new();
-    h.update(unhex(salt_hex).unwrap_or_default());
-    h.update(password.as_bytes());
-    hex(&h.finalize())
 }
 
 /// Constant-time string comparison (length is not secret).
@@ -64,15 +51,6 @@ mod tests {
         assert_eq!(unhex("0g"), None);
         assert_eq!(unhex("abc"), None);
         assert_eq!(random_hex(16).len(), 32);
-    }
-
-    #[test]
-    fn pw_hash_is_sha256_of_salt_bytes_then_password() {
-        let salt = "000102030405060708090a0b0c0d0e0f";
-        let mut data = unhex(salt).unwrap();
-        data.extend_from_slice(b"secret");
-        assert_eq!(pw_hash(salt, "secret"), sha256_hex(&data));
-        assert_eq!(pw_hash(salt, "secret").len(), 64);
     }
 
     #[test]

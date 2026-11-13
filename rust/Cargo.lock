@@ -1241,21 +1241,6 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
- "sha2",
- "tempfile",
- "tokio",
-]
-
-[[package]]
-name = "rapp-relay"
-version = "0.5.5"
-dependencies = [
- "anyhow",
- "quinn",
- "rand 0.9.5",
- "rapp-net",
- "serde",
- "serde_json",
  "tempfile",
  "tokio",
 ]
@@ -1300,7 +1285,6 @@ dependencies = [
  "quinn",
  "rapp-hub",
  "rapp-net",
- "rapp-relay",
  "rapp-service",
  "rapp-update",
  "serde_json",

@@ -16,7 +16,6 @@ use std::task::{Context as TaskContext, Poll};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite, Join, ReadBuf};
 
-pub const ALPN_RELAY: &[u8] = b"rapp-relay/1";
 pub const ALPN_PEER: &[u8] = b"rapp/1";
 pub const SNI: &str = "rapp";
 
@@ -156,7 +155,7 @@ pub async fn resolve(hostport: &str) -> Result<SocketAddr> {
         .ok_or_else(|| anyhow!("cannot resolve {hostport}"))
 }
 
-/// D8: no certificate verification. The relay's key + ID/password check is the gate.
+/// D8: no certificate verification. The ID/password check is the gate.
 #[derive(Debug)]
 struct AcceptAny(Arc<CryptoProvider>);
 
@@ -260,7 +259,7 @@ mod tests {
 
     #[tokio::test]
     async fn wrong_alpn_is_refused() {
-        let server = server_endpoint("127.0.0.1:0".parse().unwrap(), ALPN_RELAY).unwrap();
+        let server = server_endpoint("127.0.0.1:0".parse().unwrap(), b"other/1").unwrap();
         let addr = server.local_addr().unwrap();
         tokio::spawn(async move {
             while let Some(inc) = server.accept().await {
