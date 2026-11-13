@@ -16,8 +16,14 @@ void main() {
         .map((c) => c.toString())
         .toList();
 
-    test('start bootstraps the LaunchAgent', () {
-      expect(cmd(ServiceAction.start), ['launchctl bootstrap gui/501 $plist']);
+    test('start clears stale registration, waits for teardown, then bootstraps with retries', () {
+      final c = serviceCommands(ServiceAction.start,
+          os: 'macos', uid: 501, home: '/Users/u', serviceExe: '/A/rapp.app/Contents/MacOS/rapp-service');
+      expect(c[0].toString(), 'launchctl bootout gui/501/com.rapp.service');
+      expect(c[1].toString(), 'launchctl print gui/501/com.rapp.service');
+      expect(c[1].check, isFalse, reason: 'label already gone on first start; probe must not fail the run');
+      expect(c[2].toString(), 'launchctl bootstrap gui/501 $plist');
+      expect(c[2].retries, 5, reason: 'launchd teardown race reports exit 5');
     });
     test('stop boots it out by label', () {
       expect(cmd(ServiceAction.stop), ['launchctl bootout gui/501/com.rapp.service']);
