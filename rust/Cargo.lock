@@ -1266,6 +1266,7 @@ version = "0.5.2"
 dependencies = [
  "anyhow",
  "data-encoding",
+ "libc",
  "quinn",
  "rapp-net",
  "rapp-wire",

@@ -7,8 +7,11 @@
 //! revocation list when it comes online and whenever the list changes (§7.4). A `relay` request
 //! turns its stream into one half of a splice to a fresh stream on the target's connection; from
 //! then on the relay only moves (and counts) bytes it never reads into anything (§5.3).
+//!
+//! The relay also serves the local admin socket (`crate::admin`), and stops gracefully: it tells
+//! every device it is going away before it closes (§9.3).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -27,6 +30,7 @@ use rapp_wire::{join_hash, Fp, Identity};
 use serde_json::{json, Value};
 use tokio::io::{AsyncRead, AsyncWrite, BufReader, ReadBuf};
 
+use crate::admin::{self, Control};
 use crate::audit::Audit;
 use crate::config::{Config, Enroll};
 use crate::limits::{source_key, Backoff, Bucket, ConnGuard, Conns, Rate};
@@ -40,8 +44,13 @@ const CLOSE_NORMAL: u32 = 0;
 const CLOSE_REVOKED: u32 = 2;
 const CLOSE_LIMIT: u32 = 3;
 
-/// How long `stop` waits for connections to finish closing.
+/// How long `stop` takes at most, from the first step to the flush.
 const STOP_WAIT: Duration = Duration::from_secs(2);
+
+/// What `going_away` tells devices: reconnect after this long.
+const GOING_AWAY_MS: u64 = 3000;
+/// How long `stop` waits for the `going_away` pushes to be acknowledged, all of them together.
+const GOING_AWAY_WAIT: Duration = Duration::from_millis(500);
 
 /// How long the target of a `connect` has to answer `incoming` before it counts as offline.
 const INCOMING_WAIT: Duration = Duration::from_secs(2);
@@ -61,7 +70,8 @@ pub struct Opts {
     pub data: PathBuf,
     pub config: Config,
     pub log: Log,
-    /// `RAPP_RELAY_ENROLL` was set at startup (Task 11).
+    /// `RAPP_RELAY_ENROLL` was set at startup: the admin `enroll` command says the environment
+    /// will override what it writes to `config.json`.
     pub enroll_from_env: bool,
 }
 
@@ -73,6 +83,7 @@ pub struct Relay {
     shared: Arc<Shared>,
     endpoint: quinn::Endpoint,
     accept: tokio::task::JoinHandle<()>,
+    admin: admin::Server,
 }
 
 /// State every connection task shares.
@@ -138,8 +149,11 @@ impl Peer {
 
 impl Relay {
     pub async fn start(opts: Opts) -> Result<Relay> {
-        let Opts { data, config, log, enroll_from_env: _ } = opts;
+        let Opts { data, config, log, enroll_from_env } = opts;
         let registry: Arc<dyn Registry> = Arc::new(FileRegistry::open(&data)?);
+        // First, so a second relay on this data dir stops here; if a later step fails, dropping
+        // it removes the socket again.
+        let mut admin = admin::Server::bind(&data).await?;
         let identity = Identity::load_or_create(&data, "relay").context("relay identity")?;
         let audit = Audit::open(&data, &config.audit, log.clone())?;
         let sc = tls::server_config(&identity, tls::ALPN_RELAY, config.limits.max_streams)?;
@@ -167,20 +181,37 @@ impl Relay {
             config,
         });
         let accept = tokio::spawn(accept_loop(shared.clone(), endpoint.clone()));
-        Ok(Relay { addr, fp: identity.fp, shared, endpoint, accept })
+        let fp = identity.fp;
+        let relay: Arc<dyn Control> = shared.clone();
+        admin.serve(admin::Ctx { data, fp, listen: addr, enroll_from_env, relay });
+        Ok(Relay { addr, fp, shared, endpoint, accept, admin })
     }
 
-    /// Stops accepting, closes every connection (code 0), records `relay_stop` and flushes.
+    /// `stop_with("stop")`.
     pub async fn stop(self) {
-        // Task 11: push `going_away` to every connection here, before the endpoint closes.
-        self.endpoint.close(CLOSE_NORMAL.into(), b"stop");
-        self.accept.abort();
-        let _ = tokio::time::timeout(STOP_WAIT, self.endpoint.wait_idle()).await;
-        let s = &self.shared;
+        self.stop_with("stop").await
+    }
+
+    /// The graceful stop (§9.3), in at most `STOP_WAIT`: stops serving the admin socket and taking
+    /// new connections, tells every enrolled device `going_away`, closes every connection
+    /// (code 0), then flushes the registry and records `relay_stop` with `reason` as the last
+    /// audit line.
+    pub async fn stop_with(self, reason: &str) {
+        let deadline = tokio::time::Instant::now() + STOP_WAIT;
+        let Relay { shared: s, endpoint, accept, admin, .. } = self;
+        drop(admin);
+        // Refuses new connections; the existing ones stay up for the push.
+        endpoint.set_server_config(None);
+        accept.abort();
+        s.going_away().await;
+        endpoint.close(CLOSE_NORMAL.into(), b"stop");
+        // The connection tasks see the close in here: their `last_seen` and the audit lines of
+        // splices that end with them come before the flush and `relay_stop`.
+        let _ = tokio::time::timeout_at(deadline, endpoint.wait_idle()).await;
         if let Err(e) = s.registry.flush() {
             s.log.event(Lvl::Error, "registry_flush_failed", json!({"error": format!("{e:#}")}));
         }
-        s.audit.event("relay_stop", json!({"version": VERSION, "reason": "stop"}), true);
+        s.audit.event("relay_stop", json!({"version": VERSION, "reason": reason}), true);
         s.audit.flush();
         s.log.flush();
     }
@@ -382,6 +413,36 @@ impl Shared {
                 }
             });
         }
+    }
+
+    /// Pushes `going_away` to every enrolled connection and waits, at most `GOING_AWAY_WAIT` in
+    /// all, until each device has acknowledged it, so a slow one cannot hold up the stop.
+    async fn going_away(&self) {
+        let peers: Vec<Arc<Peer>> = self.online().all.values().cloned().collect();
+        let push = Arc::new(Push::GoingAway { after_ms: GOING_AWAY_MS });
+        let mut pushes = tokio::task::JoinSet::new();
+        for peer in peers {
+            let push = push.clone();
+            pushes.spawn(async move {
+                let send = push_uni(&peer.conn, &push).await?;
+                let _ = send.stopped().await;
+                anyhow::Ok(())
+            });
+        }
+        let all = async { while pushes.join_next().await.is_some() {} };
+        let _ = tokio::time::timeout(GOING_AWAY_WAIT, all).await;
+    }
+
+    /// Frees `id` in the registry and takes it out of `by_id` (the connection stays up), under the
+    /// online lock so a `register` of the ID cannot interleave.
+    fn unbind_id(&self, id: &str) -> Result<Option<Fp>> {
+        let mut on = self.online();
+        let Some(holder) = self.registry.by_id(id) else { return Ok(None) };
+        if !self.registry.unbind(id)? {
+            return Ok(None);
+        }
+        on.by_id.remove(id);
+        Ok(Some(holder.fp))
     }
 
     fn revoke(&self, fp: &Fp) -> Result<bool> {
@@ -648,6 +709,40 @@ impl Shared {
     }
 }
 
+impl Control for Shared {
+    fn registry(&self) -> &dyn Registry {
+        &*self.registry
+    }
+
+    fn audit(&self) -> &Audit {
+        &self.audit
+    }
+
+    fn log(&self) -> &Log {
+        &self.log
+    }
+
+    fn online_fps(&self) -> HashSet<Fp> {
+        self.online().all.values().map(|p| p.fp).collect()
+    }
+
+    fn enroll_open(&self) -> bool {
+        self.enroll_open.load(Ordering::Acquire)
+    }
+
+    fn set_enroll_open(&self, open: bool) {
+        self.enroll_open.store(open, Ordering::Release);
+    }
+
+    fn revoke(&self, fp: &Fp) -> Result<bool> {
+        Shared::revoke(self, fp)
+    }
+
+    fn unbind(&self, id: &str) -> Result<Option<Fp>> {
+        self.unbind_id(id)
+    }
+}
+
 /// Tells `target` that `from` is about to dial it; true once it answers `{"ok":true}` within
 /// `INCOMING_WAIT`.
 async fn introduce(target: &Peer, from: &Peer, max_line: usize) -> bool {
@@ -661,12 +756,13 @@ async fn introduce(target: &Peer, from: &Peer, max_line: usize) -> bool {
     matches!(tokio::time::timeout(INCOMING_WAIT, ask).await, Ok(Ok(v)) if v["ok"] == true)
 }
 
-/// One push on a fresh unidirectional stream.
-async fn push_uni(conn: &quinn::Connection, push: &Push) -> Result<()> {
+/// One push on a fresh unidirectional stream, finished; returned so the caller can wait for it
+/// to be acknowledged.
+async fn push_uni(conn: &quinn::Connection, push: &Push) -> Result<quinn::SendStream> {
     let mut send = conn.open_uni().await?;
     write_json(&mut send, push).await?;
     send.finish()?;
-    Ok(())
+    Ok(send)
 }
 
 /// The `connect_backoff` keys of an initiator.
