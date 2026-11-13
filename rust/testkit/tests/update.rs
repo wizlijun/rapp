@@ -86,6 +86,8 @@ struct Env {
     ps_extra: Arc<Mutex<Vec<String>>>,
     /// Non-zero: the fake ps fails with this exit code.
     ps_code: Arc<AtomicI32>,
+    /// Non-zero: the fake curl fails with this exit code (switchable after start).
+    curl_fail: Arc<AtomicI32>,
     launchd: bool,
     gui_wait: Duration,
     svc: Option<Service>,
@@ -110,7 +112,8 @@ impl Env {
 
         let ps_extra: Arc<Mutex<Vec<String>>> = Arc::default();
         let ps_code = Arc::new(AtomicI32::new(0));
-        let runner = Arc::new(fake(&k, &bundle, &cache, &home, tmp.path(), ps_extra.clone(), ps_code.clone()));
+        let curl_fail = Arc::new(AtomicI32::new(0));
+        let runner = Arc::new(fake(&k, &bundle, &cache, &home, tmp.path(), ps_extra.clone(), ps_code.clone(), curl_fail.clone()));
         Env {
             _tmp: tmp,
             home,
@@ -120,6 +123,7 @@ impl Env {
             runner,
             ps_extra,
             ps_code,
+            curl_fail,
             launchd: k.launchd,
             gui_wait: k.gui_wait,
             svc: None,
@@ -191,6 +195,7 @@ impl Env {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn fake(
     k: &Knobs,
     bundle: &Path,
@@ -199,6 +204,7 @@ fn fake(
     tmp: &Path,
     ps_extra: Arc<Mutex<Vec<String>>>,
     ps_code: Arc<AtomicI32>,
+    curl_fail: Arc<AtomicI32>,
 ) -> FakeRunner {
     // sha and size of the zip the fake curl serves.
     let zip = zip_bytes();
@@ -239,6 +245,10 @@ fn fake(
         .on(CURL, move |a| {
             if curl_code != 0 {
                 return Out::fail(curl_code, "");
+            }
+            let late = curl_fail.load(Ordering::SeqCst);
+            if late != 0 {
+                return Out::fail(late, "");
             }
             let o = arg_after(a, "-o").unwrap();
             if o.ends_with("latest.json.tmp") {
@@ -571,6 +581,22 @@ async fn check_failure_keeps_cache_and_logs() {
     let u = e.wait_state("failed").await;
     assert_eq!(u["error"], "curl 退出码 22");
     assert!(!e.home.join("update.json").exists());
+}
+
+#[tokio::test]
+async fn failed_check_keeps_a_ready_download_ready() {
+    let mut e = Env::new(Knobs { cfg: json!({"auto_update": false}), ..Default::default() });
+    e.start().await;
+    e.wait_state("ready").await;
+    e.curl_fail.store(22, Ordering::SeqCst);
+    assert_eq!(e.call(json!({"cmd":"update_check"})).await["ok"], true);
+    wait_log(&e.home, "update_check", |v| v["result"] == "failed").await;
+    // The next tick would quietly download again after a flip to failed, so count downloads too.
+    tokio::time::sleep(POLL * 4).await;
+    let downloads = log_events(&e.home).iter().filter(|v| v["ev"] == "update_download").count();
+    assert_eq!(downloads, 1, "a failed check re-downloaded the ready version");
+    let u = e.update().await;
+    assert_eq!((&u["state"], &u["error"], &u["latest"]), (&json!("ready"), &Value::Null, &json!("0.5.0")), "{u}");
 }
 
 #[tokio::test]

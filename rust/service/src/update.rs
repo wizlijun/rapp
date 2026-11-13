@@ -165,9 +165,16 @@ fn fail(state: &State, stage: Stage, reason: &str) {
     });
 }
 
-fn check_failed(state: &State, reason: &str) {
+/// A failed check. A verified download still on disk stays `ready` (log only): a transient
+/// network error must not hide 立即升级.
+fn check_failed(state: &State, reason: &str, was_ready: bool) {
     state.log.event(Lvl::Warn, "update_check", json!({"result": "failed", "reason": reason}));
     modify(state, |u| {
+        if was_ready && u.ready_app.as_ref().is_some_and(|p| p.is_dir()) {
+            u.state = "ready";
+            u.error = None;
+            return;
+        }
         u.state = "failed";
         u.error = Some(reason.to_string());
         u.failed_stage = None;
@@ -328,6 +335,7 @@ async fn pipeline(state: &Arc<State>, force: bool) {
         (u.current.clone(), u.manifest.as_ref().and_then(|m| up::canonical_version(&m.version)))
     };
     let Some(current) = current else { return };
+    let was_ready = state.update.lock().unwrap().state == "ready";
     let now = up::now_secs();
     let cache = up::load_cache(&cache_file(state));
     let wanted = up::offer(&cache, &current);
@@ -336,7 +344,7 @@ async fn pipeline(state: &Arc<State>, force: bool) {
     if fetch {
         let url = state.cfg.lock().unwrap().update_url();
         if !url_ok(&url) {
-            return check_failed(state, BAD_URL);
+            return check_failed(state, BAD_URL, was_ready);
         }
         modify(state, |u| {
             u.state = "checking";
@@ -344,7 +352,7 @@ async fn pipeline(state: &Arc<State>, force: bool) {
         });
         let dir = o.cache_dir.clone();
         match blocking(state, move |r| up::fetch_manifest(r, &url, &dir)).await {
-            Err(reason) => return check_failed(state, &reason),
+            Err(reason) => return check_failed(state, &reason, was_ready),
             Ok(m) => {
                 let latest = m.as_ref().and_then(|m| up::canonical_version(&m.version));
                 let p = cache_file(state);
