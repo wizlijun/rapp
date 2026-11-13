@@ -4,6 +4,7 @@ pub mod cmd;
 pub mod parse;
 
 use crate::runner::{classify, RunFail, Runner};
+use crate::screen::Screen;
 use std::process::Stdio;
 use tokio::io::AsyncWriteExt;
 
@@ -142,6 +143,23 @@ impl Tmux {
             return Ok(Vec::new());
         }
         Err(Self::failure(&d))
+    }
+
+    /// The visible screen of `pane`: the capture, then its geometry.
+    pub async fn capture(&self, pane: &str) -> anyhow::Result<Screen> {
+        let text = self.run(&cmd::capture(pane)).await?;
+        let meta = self.run(&cmd::meta(pane)).await?;
+        Screen::from_capture(&text, &meta)
+    }
+
+    /// `lines` rows of scrollback ending `before` rows above the visible screen.
+    pub async fn history(&self, pane: &str, before: u32, lines: u32) -> anyhow::Result<Vec<String>> {
+        let out = self.run(&cmd::history(pane, before, lines)).await?;
+        let mut v: Vec<String> = out.split('\n').map(String::from).collect();
+        if v.last().is_some_and(|l| l.is_empty()) {
+            v.pop();
+        }
+        Ok(v)
     }
 }
 

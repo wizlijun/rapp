@@ -46,3 +46,9 @@ impl Drop for Server {
         let _ = Command::new("tmux").args(["-L", &self.socket, "-f", "/dev/null", "kill-server"]).output();
     }
 }
+
+/// Give a freshly started pane command time to print.
+#[allow(dead_code)]
+pub async fn settle() {
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+}
