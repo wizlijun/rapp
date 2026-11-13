@@ -24,9 +24,9 @@
 ## 1. 组件
 
 ```
-            rapp-relay (VPS, Rust)  UDP 21116  ← 唯一门禁
+            rapp-relay (VPS, Rust)  UDP 22026  ← 唯一门禁
               ▲                    ▲
-B: rapp (Flutter GUI) ── stdio ── rapp-hub (Rust)      A: rapp-service (Rust)  UDP 21118
+B: rapp (Flutter GUI) ── stdio ── rapp-hub (Rust)      A: rapp-service (Rust)  UDP 22028
                                       │  QUIC ═══════════════▶ │
                                       ▼                         ▼
                                 rapp-client × N          rapp-host × N   rapp --cm
@@ -55,13 +55,13 @@ B: rapp (Flutter GUI) ── stdio ── rapp-hub (Rust)      A: rapp-service (
 - 密码哈希 = `hex(SHA-256(salt ‖ password))`，salt 是 16 个随机字节。比对用常量时间比较。
 - ID 是 9 位十进制数字，首位不为 0，由 relay 分配。
 
-### 2.2 relay（`rapp-relay --key <relay key> [--listen 0.0.0.0:21116] [--db relay.json]`）
-- 只开一个端口 `21116/udp`。TCP 备用中继先不做（YAGNI）。
+### 2.2 relay（`rapp-relay --key <relay key> [--listen 0.0.0.0:22026] [--db relay.json]`）
+- 只开一个端口 `22026/udp`。TCP 备用中继先不做（YAGNI）。
 - `relay.json` 保存每个设备的 `{id: {secret_hash, pw_salt, pw_hash, name}}`。内容一变就整个文件重写。
 
 **A 端：登记**。A 和 relay 保持一条长连接，在上面开一条流：
 ```
-→ {"op":"register","key":K,"id":"123456789"|null,"secret":"<64hex>","name":"bruce-mac","pw_salt":"<32hex>","pw_hash":"<64hex>","lan":["192.168.1.5:21118"]}
+→ {"op":"register","key":K,"id":"123456789"|null,"secret":"<64hex>","name":"bruce-mac","pw_salt":"<32hex>","pw_hash":"<64hex>","lan":["192.168.1.5:22028"]}
 ← {"ok":true,"id":"123456789"}  |  {"ok":false,"error":"bad relay key"|"id taken"}
 ```
 - service 首次启动时自己随机生成 9 位 ID（不管有没有 relay），登记时带上它；relay 接受一个格式合法、还没人用过的 ID。`id` 为 null 时仍由 relay 分配（兼容旧配置）。
@@ -72,7 +72,7 @@ B: rapp (Flutter GUI) ── stdio ── rapp-hub (Rust)      A: rapp-service (
 **B 端：发起连接**（B 只在需要时连 relay）：
 ```
 → {"op":"connect","key":K,"id":"123456789","password":"..."}
-← {"ok":true,"token":"<32hex>","name":"...","lan":[...],"public":"1.2.3.4:21118"}
+← {"ok":true,"token":"<32hex>","name":"...","lan":[...],"public":"1.2.3.4:22028"}
    | {"ok":false,"error":"bad relay key"|"unknown id"|"offline"|"bad password"|"locked, retry in 12s"}
 ```
 - 核对通过后，relay 在 A 的长连接上开一条流：`→ {"op":"incoming","token":T,"peer":"<B 公网地址>"}`，A 回 `← {"ok":true}`。relay 最多等 2 秒；等不到就回 B `offline`。
@@ -87,20 +87,20 @@ B: rapp (Flutter GUI) ── stdio ── rapp-hub (Rust)      A: rapp-service (
 ```
 relay 在 A 的长连接上开一条流，发 `{"op":"relayed","token":T}`，然后把两条流双向原样对接，不再回任何 JSON。对接之后，B 写的第一行就是发给 A 的请求（见 2.3）。令牌不存在时，relay 回 B `{"ok":false,"error":"bad token"}`。
 
-### 2.3 设备之间（A 端监听 `21118/udp`，和它连 relay 用的是同一个端点）
+### 2.3 设备之间（A 端监听 `22028/udp`，和它连 relay 用的是同一个端点）
 - **直连**：新建的 QUIC 连接上，第一条流必须是认证请求，二选一：
   - `{"op":"auth","token":T}`，用 relay 发的令牌；
   - `{"op":"auth","password":"..."}`，仅当连接来自私有网段时才接受。这是 relay 不可用时的退路，由 A 用本机存的密码核对。成功时回 `{"ok":true,"id","name"}`，B 据此确认连上的确实是它要的那台主机。
 
   认证失败就回一行错误并关闭连接。认证通过后，这条连接上的后续流都直接是请求。
 - **中继**：每条经 relay 转来的流，开头都是 `{"op":"relayed","token":T}`，A 核对令牌，之后的内容和直连一样。
-- **`id@ip` 地址**：没有 relay 时，主机用 `id@ip`（端口不是 21118 时写成 `id@ip:port`）标识自己，本机每个可用 IPv4 一个（不含回环、链路本地和 198.18.0.0/15——Clash/Surge 一类 TUN 代理的假 IP）。B 拿它加主机时直接连这个地址做密码认证，不经过 relay。
+- **`id@ip` 地址**：没有 relay 时，主机用 `id@ip`（端口不是 22028 时写成 `id@ip:port`）标识自己，本机每个可用 IPv4 一个（不含回环、链路本地和 198.18.0.0/15——Clash/Surge 一类 TUN 代理的假 IP）。B 拿它加主机时直接连这个地址做密码认证，不经过 relay。
 - 请求有两种：
   - `{"op":"list_apps"}` → `{"ok":true,"apps":[{"app":"com.apple.Safari","name":"Safari"}]}`，回完关流。
   - `{"op":"open","app":"com.apple.Safari"}` → `{"ok":true,"token":"<worker token>"}`，之后这条流双向传原始 v3 字节，直到有一方关闭。
 
 ### 2.4 选路（hub）
-1. 依次连 A 的局域网地址，每个最多等 500 ms。localhost 测试时局域网地址包含 `127.0.0.1:21118`。
+1. 依次连 A 的局域网地址，每个最多等 500 ms。localhost 测试时局域网地址包含 `127.0.0.1:22028`。
 2. 再连 `public`，最多等 2 s，相当于打洞。
 3. 都不通就走 relay：此后每个请求都是一条新的 `relay` 流。
 
@@ -108,12 +108,12 @@ relay 在 A 的长连接上开一条流，发 `{"op":"relayed","token":T}`，然
 
 ## 3. `rapp-service`（A 端）
 - 配置目录：macOS 是 `~/Library/Application Support/rapp/`，Linux 是 `$XDG_CONFIG_HOME/rapp/`（默认 `~/.config/rapp/`），Windows 是 `%APPDATA%\rapp\`。环境变量 `RAPP_HOME` 可以覆盖，测试时用来隔离。
-- `service.json`（权限 0600）：`{"relay":"vps:21116","key":K,"id":null|"…","secret":"…","name":"<主机名>","password":"…"}`。
+- `service.json`（权限 0600）：`{"relay":"vps:22026","key":K,"id":null|"…","secret":"…","name":"<主机名>","password":"…"}`。
   - 首次启动时生成 9 位 ID 和 secret，再生成一个 8 位的随机字母数字密码。
   - 密码明文保存（D8），这样 GUI 能把它显示出来。
 - 启动时：
   1. 执行 `rapp-host check --json`，结果放进 status。
-  2. 绑定 `0.0.0.0:21118/udp`。
+  2. 绑定 `0.0.0.0:22028/udp`。
   3. 配了 relay 就去登记，断线后按 1 s、2 s……最长 60 s 退避重连。
   4. 启动本机 IPC。
 - worker 的查找顺序：环境变量 `RAPP_BIN_DIR` → 和服务自身同一目录 → `PATH`。
@@ -124,7 +124,7 @@ relay 在 A 的长连接上开一条流，发 `{"op":"relayed","token":T}`，然
   - worker 闲置 60 秒（没有会话）后，服务关掉它的 stdin。
   - worker 退出就把它从表里删掉，不自动重启。
 - `list_apps` 转调 `rapp-host list-apps --json`。
-- **本机 IPC**【默认：TCP，取代 Unix socket 和命名管道】：监听 `127.0.0.1:21119`，令牌放在 `ipc.token` 文件里（权限 0600）。每条连接的第一行是 `{"token":"…"}`，之后：
+- **本机 IPC**【默认：TCP，取代 Unix socket 和命名管道】：监听 `127.0.0.1:22029`，令牌放在 `ipc.token` 文件里（权限 0600）。每条连接的第一行是 `{"token":"…"}`，之后：
   - `{"cmd":"status"}` → `{"ok":true,"id","name","password","relay":"connected|connecting|off","relay_error"?,"lan_ids":["id@ip",…],"permissions":{"screen_recording":b,"accessibility":b},"sessions":[{"sid","peer","app","path","since"}]}`
   - `{"cmd":"set_password","password":"…"}` → `{"ok":true}`。服务改写配置，然后重新登记。
   - `{"cmd":"set_relay","relay":"…","key":"…"}` → `{"ok":true}`。服务改写配置，然后重连 relay。

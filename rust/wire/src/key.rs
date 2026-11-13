@@ -8,6 +8,11 @@ use ring::rand::{SecureRandom, SystemRandom};
 
 use crate::Fp;
 
+/// Every key is shown with this in front, so it reads as a rapp key. No separator: the whole key
+/// stays letters and digits and selects with one double-click. Parsing accepts it or not; the
+/// body's fixed length (26 or 52) tells the two apart, since `rapp` is itself valid base32.
+pub const PREFIX: &str = "rapp";
+
 /// The shared secret a user types into a device, optionally prefixed by the 16-byte relay
 /// fingerprint prefix it was issued for. No `Debug`/serde on purpose: never log it.
 pub struct Key {
@@ -67,6 +72,7 @@ impl fmt::Display for Key {
             bytes.extend_from_slice(r);
         }
         bytes.extend_from_slice(&self.root);
+        f.write_str(PREFIX)?;
         f.write_str(&data_encoding::BASE32_NOPAD.encode(&bytes).to_ascii_lowercase())
     }
 }
@@ -75,8 +81,14 @@ impl FromStr for Key {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Key> {
+        let s = s.trim();
+        let prefixed = matches!(s.len().checked_sub(PREFIX.len()), Some(26 | 52));
+        let body = match s.get(..PREFIX.len()) {
+            Some(p) if prefixed && p.eq_ignore_ascii_case(PREFIX) => &s[PREFIX.len()..],
+            _ => s,
+        };
         // BASE32_NOPAD rejects bad characters and non-zero trailing bits.
-        let Ok(bytes) = data_encoding::BASE32_NOPAD.decode(s.trim().to_ascii_uppercase().as_bytes()) else {
+        let Ok(bytes) = data_encoding::BASE32_NOPAD.decode(body.to_ascii_uppercase().as_bytes()) else {
             bail!("not a valid key");
         };
         match bytes.len() {
@@ -101,20 +113,24 @@ mod tests {
         let fp = Identity::generate().unwrap().fp;
         let k = Key::new_for_relay(&fp);
         let s = k.to_string();
-        assert_eq!(s.len(), 52);
-        assert!(s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()));
-        let back: Key = format!("  {}\n", s.to_uppercase()).parse().unwrap();
-        assert_eq!(back.root, k.root);
-        assert_eq!(back.relay, Some(fp.prefix16()));
-        assert!(back.matches_relay(&fp));
+        assert_eq!(s.len(), 56);
+        let body = s.strip_prefix("rapp").unwrap();
+        assert!(body.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()));
+        for text in [format!("  {}\n", s.to_uppercase()), body.to_string()] {
+            let back: Key = text.parse().unwrap();
+            assert_eq!(back.root, k.root);
+            assert_eq!(back.relay, Some(fp.prefix16()));
+            assert!(back.matches_relay(&fp));
+        }
         let l = Key::new_local();
-        assert_eq!(l.to_string().len(), 26);
+        assert_eq!(l.to_string().len(), 30);
         assert!(l.to_string().parse::<Key>().unwrap().relay.is_none());
     }
 
     #[test]
     fn bad_text_is_rejected() {
-        for s in ["", "abc", "0189", &"a".repeat(51), &"a".repeat(53)] {
+        let short = format!("rapp{}", "a".repeat(51));
+        for s in ["", "abc", "0189", "rapp", "rapp-", &"a".repeat(51), &"a".repeat(53), &short] {
             assert!(s.parse::<Key>().is_err());
         }
     }
@@ -133,7 +149,7 @@ mod tests {
         assert_eq!(hex(&k.join()), "09b6a00150736777b66e774983ca98d26d59759ffc307ffa547837c72da54e1d");
         assert_eq!(hex(&k.trust()), "4965ba91bcafe05d0443ee3a151f2127db73fce6dffa927eff29e0e5424d11ee");
         assert_eq!(join_hash(&k.join()), "0c52152483a912303ea10b96adcec3a86805677f2ff52fbd47fece6154ab66bf");
-        assert_eq!(k.to_string(), "a4dqobyha4dqobyha4dqobyha4");
+        assert_eq!(k.to_string(), "rappa4dqobyha4dqobyha4dqobyha4");
     }
 
     #[test]

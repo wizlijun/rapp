@@ -1,4 +1,4 @@
-// Local IPC to rapp-service: TCP 127.0.0.1:21119, token line first (spec §3).
+// Local IPC to rapp-service: TCP 127.0.0.1:22029, token line first (spec §3).
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart';
 
 import 'update.dart';
 
-const servicePort = 21119;
+const servicePort = 22029;
 
 class ServiceException implements Exception {
   ServiceException(this.message, {this.page});

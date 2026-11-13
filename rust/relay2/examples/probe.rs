@@ -21,9 +21,8 @@ async fn main() -> Result<()> {
     let [addr, key] = pos[..] else { bail!("usage: probe <host:port> <key> [--wait]") };
     let addr = addr.to_socket_addrs()?.next().with_context(|| format!("no address for {addr}"))?;
     let parsed: Key = key.parse()?;
-    // A relay key is 32 bytes in base32: the first 16 are the relay fingerprint's prefix.
-    let bytes = data_encoding::BASE32_NOPAD.decode(key.trim().to_ascii_uppercase().as_bytes())?;
-    let pin: [u8; 16] = bytes.get(..16).filter(|_| bytes.len() == 32).context("not a relay key")?.try_into()?;
+    // A relay key starts with the relay fingerprint's prefix: pin the relay to it.
+    let pin = parsed.relay.context("not a relay key")?;
 
     let endpoint = quinn::Endpoint::client(if addr.is_ipv4() { "0.0.0.0:0" } else { "[::]:0" }.parse()?)?;
     let cc = tls::client_config(&Identity::generate()?, tls::ALPN_RELAY, Expect::Pin(pin))?;

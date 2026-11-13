@@ -138,7 +138,7 @@ async fn key_can_be_set_once_and_rotated() {
 async fn the_root_never_reaches_the_server_side() {
     let r = start_relay_without_key(|_| {}).await;
     let key = admin::issue_key(r.data.path(), false).await.unwrap().expect("a new key");
-    assert_eq!(key.to_string().len(), 52);
+    assert_eq!(key.to_string().len(), 56);
     assert!(key.matches_relay(&r.relay.fp));
     assert!(admin::issue_key(r.data.path(), false).await.unwrap().is_none(), "the key is shown once");
     let d = FakeDevice::dial(&r).await;
@@ -157,6 +157,7 @@ async fn the_root_never_reaches_the_server_side() {
         b32.encode(&key.root).to_ascii_lowercase(),
         key.to_string(),
         key.to_string().to_ascii_uppercase(),
+        key.to_string()["rapp".len()..].to_string(),
         hex.encode(&key.trust()),
         hex.encode(&key.join()),
     ];
@@ -540,7 +541,8 @@ fn cli_key_prints_once_then_refuses() {
     let key = text(&out.stdout);
     assert!(key.ends_with('\n'));
     let key = key.trim_end().to_string();
-    assert_eq!(key.len(), 52, "{key:?}");
+    assert_eq!(key.len(), 56, "{key:?}");
+    assert!(key.starts_with("rapp"), "{key:?}");
     let parsed: Key = key.parse().unwrap();
     let info: Value = {
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
@@ -557,7 +559,7 @@ fn cli_key_prints_once_then_refuses() {
     let rotated = cli(&dirs.data(), &["rotate-key"]);
     assert!(rotated.status.success(), "{}", text(&rotated.stderr));
     let new_key = text(&rotated.stdout).trim_end().to_string();
-    assert_eq!(new_key.len(), 52);
+    assert_eq!(new_key.len(), 56);
     assert_ne!(new_key, key);
 
     let devices = cli(&dirs.data(), &["devices"]);

@@ -89,7 +89,7 @@ impl Default for Limits {
 impl Default for Config {
     fn default() -> Self {
         Config {
-            listen: "0.0.0.0:21116".parse().unwrap(),
+            listen: "0.0.0.0:22026".parse().unwrap(),
             enroll: Enroll::Open,
             log: LogLevel::Info,
             audit: AuditCfg::default(),
@@ -304,7 +304,7 @@ mod tests {
         let d = tempdir().unwrap();
         let c = load(d.path(), &|_| None).unwrap();
         assert_eq!(c, Config::default());
-        assert_eq!(c.listen.to_string(), "0.0.0.0:21116");
+        assert_eq!(c.listen.to_string(), "0.0.0.0:22026");
         assert_eq!(c.limits.max_streams, 128);
         assert_eq!(c.audit.keep_days, 180);
         let l = &c.limits;

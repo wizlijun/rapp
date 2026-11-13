@@ -127,6 +127,7 @@ async fn nothing_secret_is_written_anywhere() {
             b32.encode(&k.root).to_ascii_lowercase(),
             k.to_string(),
             k.to_string().to_ascii_uppercase(),
+            k.to_string()["rapp".len()..].to_string(),
             hex.encode(&k.trust()),
             hex.encode(&k.join()),
         ]);

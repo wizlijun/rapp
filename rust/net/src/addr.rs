@@ -6,7 +6,7 @@ use anyhow::{bail, Context, Result};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 
 /// A's peer port unless `service.json` says otherwise.
-pub const DEFAULT_PEER_PORT: u16 = 21118;
+pub const DEFAULT_PEER_PORT: u16 = 22028;
 
 /// Loopback, RFC 1918, link-local, CGNAT (Tailscale), IPv6 loopback / ULA / link-local.
 pub fn is_private(ip: IpAddr) -> bool {
@@ -111,7 +111,7 @@ mod tests {
         assert_eq!(at_address("123456789", ip("10.0.0.2"), 4000), "123456789@10.0.0.2:4000");
         let some = |a: &str| Some(a.to_string());
         assert_eq!(split_host_ref("123456789").unwrap(), ("123456789".into(), None));
-        assert_eq!(split_host_ref(" 123456789@192.168.1.5 ").unwrap(), ("123456789".into(), some("192.168.1.5:21118")));
+        assert_eq!(split_host_ref(" 123456789@192.168.1.5 ").unwrap(), ("123456789".into(), some("192.168.1.5:22028")));
         assert_eq!(split_host_ref("123456789@10.0.0.2:4000").unwrap(), ("123456789".into(), some("10.0.0.2:4000")));
         for bad in ["12345", "12345@1.2.3.4", "123456789@", "123456789@host", "123456789@1.2.3.4:x", "123456789@1.2.3.4:0"] {
             assert!(split_host_ref(bad).is_err(), "{bad} should be rejected");
@@ -159,7 +159,7 @@ mod tests {
 
     #[test]
     fn lan_addrs_end_with_loopback() {
-        let v = lan_addrs(21118);
-        assert_eq!(v.last().unwrap(), "127.0.0.1:21118");
+        let v = lan_addrs(22028);
+        assert_eq!(v.last().unwrap(), "127.0.0.1:22028");
     }
 }

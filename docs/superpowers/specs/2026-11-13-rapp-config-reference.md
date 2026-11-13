@@ -70,14 +70,14 @@
 
 | 字段 | 类型 | 没写时 | 取值 | 谁改 | 机密 |
 |---|---|---|---|---|---|
-| `relay` | 字符串 | 不用中继 | 中继地址 `主机:端口`（端口一般 21116） | GUI（IPC `set_relay`） | |
+| `relay` | 字符串 | 不用中继 | 中继地址 `主机:端口`（端口一般 22026） | GUI（IPC `set_relay`） | |
 | `key` | 字符串 | 无 | 和中继的 `--key` 一致 | GUI（IPC `set_relay`） | **机密** |
 | `id` | 字符串 | 随机 9 位数字 | 9 位数字；改了就是另一台设备 | 不改 | |
 | `secret` | 字符串 | 随机 32 位十六进制 | 设备在中继上的身份凭据 | 不改 | **机密** |
 | `name` | 字符串 | 本机主机名 | 给人看的设备名 | 手改 | |
 | `password` | 字符串 | 随机 | 连这台 A 用的口令（明文存放，GUI 要显示，规格 D8） | GUI（IPC `set_password`） | **机密** |
-| `port` | 整数 | 21118（UDP） | 1–65535 | 手改 | |
-| `ipc_port` | 整数 | 21119（TCP，只听 127.0.0.1） | 1–65535；改了 GUI 要能找到它 | 手改 | |
+| `port` | 整数 | 22028（UDP） | 1–65535 | 手改 | |
+| `ipc_port` | 整数 | 22029（TCP，只听 127.0.0.1） | 1–65535；改了 GUI 要能找到它 | 手改 | |
 | `update_url` | 字符串 | 内置的 `latest.json` 地址 | 只收 `https://` | 手改 | |
 | `auto_update` | 布尔 | `true` | 没人用时自己装新版 | GUI（IPC `set_update`） | |
 | `check_updates` | 布尔 | `true` | 定时检查更新 | GUI（IPC `set_update`） | |
@@ -185,7 +185,7 @@ agent 规则：不手改；要换启动参数就改上面两处模板，**两处
 
 | 配置项 | 环境变量 | 默认 | 意思 |
 |---|---|---|---|
-| `listen` | `RAPP_RELAY_LISTEN` | `0.0.0.0:21116` | 监听的地址和端口（UDP） |
+| `listen` | `RAPP_RELAY_LISTEN` | `0.0.0.0:22026` | 监听的地址和端口（UDP） |
 | `enroll` | `RAPP_RELAY_ENROLL` | `open` | `open` 接受新设备入网；`closed` 不接受 |
 | `log` | `RAPP_RELAY_LOG` | `info` | 运行日志的级别：`info` 或 `debug` |
 | `audit.keep_days` | `RAPP_RELAY_AUDIT_KEEP_DAYS` | `180` | 审计日志留多少天 |
@@ -254,7 +254,7 @@ relay 只能跑在 Linux 主机上（Mac 和 Windows 上的 Docker 在虚拟机�
 
 | 东西 | 位置 | 内容 | 机密 |
 |---|---|---|---|
-| systemd 单元 | `/etc/systemd/system/rapp-relay.service`（模板 `scripts/rapp-relay.service`） | 从 `/etc/rapp-relay.env` 读 `RAPP_RELAY_KEY`；运行 `rapp-relay --key ${RAPP_RELAY_KEY} --listen 0.0.0.0:21116 --db /var/lib/rapp-relay/relay.json`；`DynamicUser`；总是重启 | |
+| systemd 单元 | `/etc/systemd/system/rapp-relay.service`（模板 `scripts/rapp-relay.service`） | 从 `/etc/rapp-relay.env` 读 `RAPP_RELAY_KEY`；运行 `rapp-relay --key ${RAPP_RELAY_KEY} --listen 0.0.0.0:22026 --db /var/lib/rapp-relay/relay.json`；`DynamicUser`；总是重启 | |
 | `/etc/rapp-relay.env` | VPS | 一行 `RAPP_RELAY_KEY=…`，和各设备 `service.json` 的 `key` 一致 | **机密** |
 | `relay.json` | `/var/lib/rapp-relay/` | 中继自管：每个设备 id 的 `secret_hash`、`pw_salt`、`pw_hash`、`name`（`rust/relay/src/db.rs`）。不要改 | **机密**（哈希） |
 
@@ -278,14 +278,14 @@ relay 只能跑在 Linux 主机上（Mac 和 Windows 上的 Docker 在虚拟机�
 
 | 程序 | 参数 | 谁来传 |
 |---|---|---|
-| `rapp-relay`（旧 relay，迁移结束后删除） | `--key`（必填，机密）、`--listen`（默认 `0.0.0.0:21116`）、`--db`（默认 `relay.json`）、`--debug`、`--version` | systemd 单元（§5.2） |
+| `rapp-relay`（旧 relay，迁移结束后删除） | `--key`（必填，机密）、`--listen`（默认 `0.0.0.0:22026`）、`--db`（默认 `relay.json`）、`--debug`、`--version` | systemd 单元（§5.2） |
 | `rapp-relay2`（新 relay） | `--data <目录>`（默认 `/data`）；子命令见 §5.1 | Docker / 运维 |
 | `rapp-service`、`rapp-hub` | 不收参数（给了就以退出码 2 退出）；只看 §6 的环境变量 | launchd / GUI |
 | `rapp-host` | `serve --app <标识> --token-env <变量> --port <端口>（默认 47800，0=随机）--bind <地址> --json`；`list-apps`；`check [--prompt]`；`version [--json]` | rapp-service（`Sources/RappCore/WorkerCLI.swift:97`） |
 | `rapp-client`（Swift、GTK） | `[connect] rapp://… [--token-env <变量>] [--json]`；`version [--json]` | rapp-hub |
 | `rapp-session` | 不收参数，从标准输入读 JSON 命令 | GUI |
 
-agent 规则：`rapp-host`、`rapp-client`、`rapp-session` 是由上面的程序拉起的，一般不用手动跑；测试时只用自己起的实例，端口用临时端口，不用 47800、21116–21119。
+agent 规则：`rapp-host`、`rapp-client`、`rapp-session` 是由上面的程序拉起的，一般不用手动跑；测试时只用自己起的实例，端口用临时端口，不用 47800、21116–21119、22026–22029。
 
 ## 8. 打包发布（构建机）
 

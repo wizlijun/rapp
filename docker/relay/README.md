@@ -7,9 +7,9 @@ One Alpine image holding one program, `/usr/local/bin/rapp-relay` (the `rapp-rel
 
 On a Linux host with Docker, this starts the relay and prints its key once it is up:
 
-    docker run -d --name rapp-relay --network host --restart unless-stopped --read-only --cap-drop ALL --security-opt no-new-privileges --log-opt max-size=10m --log-opt max-file=5 -v rapp-relay-data:/data ghcr.io/wizlijun/rapp-relay:0.5.3 && until docker exec rapp-relay rapp-relay check >/dev/null 2>&1; do sleep 1; done && docker exec rapp-relay rapp-relay key
+    docker run -d --name rapp-relay --network host --restart unless-stopped --read-only --cap-drop ALL --security-opt no-new-privileges --log-opt max-size=10m --log-opt max-file=5 -v rapp-relay-data:/data ghcr.io/wizlijun/rapp-relay:0.5.4 && until docker exec rapp-relay rapp-relay check >/dev/null 2>&1; do sleep 1; done && docker exec rapp-relay rapp-relay key
 
-Then open `21116/udp` in the firewall and enter the key on every device. The key is shown only once, so save it.
+Then open `22026/udp` in the firewall and enter the key on every device. The key is shown only once, so save it.
 Your data lives in the `rapp-relay-data` volume. To upgrade, change the tag and run the line again after
 `docker rm -f rapp-relay`. The data stays in the volume, and the last `key` step fails because the key has
 already been made, which is expected.
@@ -21,7 +21,7 @@ On a Linux host (host networking is needed so the relay sees real source address
     cd docker/relay
     docker compose up -d
 
-Open `21116/udp` in the host firewall. The data volume `rapp-relay-data` is mounted at `/data`.
+Open `22026/udp` in the host firewall. The data volume `rapp-relay-data` is mounted at `/data`.
 Show the key once, then enter it on every device:
 
     docker exec rapp-relay rapp-relay key

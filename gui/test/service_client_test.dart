@@ -176,11 +176,11 @@ void main() {
       expect(st.screenRecording, isTrue);
 
       await c.setPassword('newpw');
-      await c.setRelay('vps:21116', 'K');
+      await c.setRelay('vps:22026', 'K');
       await c.kick(5);
       expect(svc.received.map((m) => m['cmd']), ['status', 'set_password', 'set_relay', 'kick']);
       expect(svc.received[1]['password'], 'newpw');
-      expect(svc.received[2], {'cmd': 'set_relay', 'relay': 'vps:21116', 'key': 'K'});
+      expect(svc.received[2], {'cmd': 'set_relay', 'relay': 'vps:22026', 'key': 'K'});
       expect(svc.received[3], {'cmd': 'kick', 'sid': 5});
       await c.close();
     });

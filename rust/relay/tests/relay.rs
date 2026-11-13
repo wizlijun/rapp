@@ -56,7 +56,7 @@ async fn req(conn: &Connection, v: Value) -> Value {
 fn register_msg(id: Option<&str>, secret: &str, password: &str) -> Value {
     let salt = random_hex(16);
     json!({"op":"register","key":KEY,"id":id,"secret":secret,"name":"host-a",
-           "pw_salt":salt,"pw_hash":pw_hash(&salt, password),"lan":["192.168.1.5:21118","127.0.0.1:21118"]})
+           "pw_salt":salt,"pw_hash":pw_hash(&salt, password),"lan":["192.168.1.5:22028","127.0.0.1:22028"]})
 }
 
 /// Plays A: answers `incoming` with ok (reporting it on `seen`), and for `relayed`
@@ -176,7 +176,7 @@ async fn connect_returns_token_and_notifies_a() {
     let token = r["token"].as_str().unwrap();
     assert_eq!(token.len(), 32);
     assert_eq!(r["name"], "host-a");
-    assert_eq!(r["lan"], json!(["192.168.1.5:21118", "127.0.0.1:21118"]));
+    assert_eq!(r["lan"], json!(["192.168.1.5:22028", "127.0.0.1:22028"]));
     assert_eq!(r["public"], a_addr.as_str());
     let incoming = seen.recv().await.unwrap();
     assert_eq!(incoming["op"], "incoming");

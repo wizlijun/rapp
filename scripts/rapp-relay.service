@@ -3,7 +3,7 @@
 #   install -m 755 rapp-relay-x86_64-linux /usr/local/bin/rapp-relay
 #   echo 'RAPP_RELAY_KEY=<your relay key>' > /etc/rapp-relay.env && chmod 600 /etc/rapp-relay.env
 #   cp rapp-relay.service /etc/systemd/system/ && systemctl enable --now rapp-relay
-#   ufw allow 21116/udp      # the only port rapp needs open
+#   ufw allow 22026/udp      # the only port rapp needs open
 [Unit]
 Description=rapp relay
 After=network-online.target
@@ -11,7 +11,7 @@ Wants=network-online.target
 
 [Service]
 EnvironmentFile=/etc/rapp-relay.env
-ExecStart=/usr/local/bin/rapp-relay --key ${RAPP_RELAY_KEY} --listen 0.0.0.0:21116 --db /var/lib/rapp-relay/relay.json
+ExecStart=/usr/local/bin/rapp-relay --key ${RAPP_RELAY_KEY} --listen 0.0.0.0:22026 --db /var/lib/rapp-relay/relay.json
 DynamicUser=yes
 StateDirectory=rapp-relay
 Restart=always

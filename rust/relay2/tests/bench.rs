@@ -270,7 +270,7 @@ async fn idle_memory_with_100_devices() {
     for i in 0..100 {
         let d = r.device().await;
         let id = format!("{}", 100_000_000 + i);
-        assert_eq!(d.register(&id, &["192.168.1.5:21118"]).await["ok"], true);
+        assert_eq!(d.register(&id, &["192.168.1.5:22028"]).await["ok"], true);
         devices.push(d);
     }
     tokio::time::sleep(Duration::from_secs(10)).await;

@@ -10,7 +10,7 @@ use tokio::time::timeout;
 
 const A_ID: &str = "123456789";
 const OTHER_ID: &str = "987654321";
-const LAN: &str = "192.168.1.5:21118";
+const LAN: &str = "192.168.1.5:22028";
 
 fn app_close(e: &quinn::ConnectionError) -> Option<(u64, String)> {
     match e {

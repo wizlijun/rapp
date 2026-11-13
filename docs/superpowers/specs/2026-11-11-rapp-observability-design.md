@@ -205,7 +205,7 @@ pub async fn splice_metered(a, b, meter: &Meter) -> io::Result<()>;
 - **hub 测试**：`opened` 和 `closed` 被写进 `hub.log`。
 - **Swift**：`transfer` 事件的 JSON 格式（RappCore）。
 - **GUI**：history 每一行的格式化（纯函数），包括"自称"和本地时间。
-- 所有测试只用临时目录和临时端口，不碰 `~/Library/Logs/rapp`，也不碰 47800 和 21116–21119 这几个端口。
+- 所有测试只用临时目录和临时端口，不碰 `~/Library/Logs/rapp`，也不碰 47800、21116–21119 和 22026–22029 这几个端口。
 
 ## 8 不做的事
 
