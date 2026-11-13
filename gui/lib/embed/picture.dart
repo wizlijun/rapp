@@ -91,7 +91,26 @@ class _PictureState extends State<Picture> {
     final t = _at(local);
     if (!t.usable || !t.pic.contains(local)) return;
     final p = toRemote(local, t.fit, t.win);
-    widget.state.port?.scroll(_sid, t.win.id, p.dx, p.dy, delta.dx, delta.dy);
+    final d = scrollScaleToRemote(delta, t.fit, contentSize(t.win));
+    widget.state.port?.scroll(_sid, t.win.id, p.dx, p.dy, d.dx, d.dy);
+  }
+
+  // T3: the fingers' moves of one event batch add up to the centre's move, sent once.
+  Offset _scrollAcc = Offset.zero;
+  Offset _scrollAt = Offset.zero;
+  bool _scrollQueued = false;
+
+  void _touchScrollBy(Offset centre, Offset delta) {
+    _scrollAcc += delta;
+    _scrollAt = centre;
+    if (_scrollQueued) return;
+    _scrollQueued = true;
+    scheduleMicrotask(() {
+      _scrollQueued = false;
+      final d = _scrollAcc;
+      _scrollAcc = Offset.zero;
+      if (mounted) _scroll(_scrollAt, panToRemote(d));
+    });
   }
 
   void _down(PointerDownEvent e) {
@@ -160,7 +179,7 @@ class _PictureState extends State<Picture> {
       _touches[e.pointer] = e.localPosition;
       if (_touchScroll) {
         // T3: the centre moves by this finger's move over the number of fingers.
-        return _scroll(_centre, panToRemote((e.localPosition - before) / _touches.length.toDouble()));
+        return _touchScrollBy(_centre, (e.localPosition - before) / _touches.length.toDouble());
       }
       final p = _pending;
       if (p != null) {

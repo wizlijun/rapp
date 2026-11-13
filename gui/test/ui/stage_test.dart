@@ -683,8 +683,8 @@ void main() {
       await tester.pump();
       final s = port.calls.where((c) => c.$1 == 'scroll').map((c) => c.$2).toList();
       expect(s.length, 2);
-      expect(s[0], equals({'sid': 1, 'window': 7, 'x': 100.0, 'y': 78.0, 'dx': 0.0, 'dy': -10.0}));
-      expect(s[1]['dy'], 12.0);
+      expect(s[0], equals({'sid': 1, 'window': 7, 'x': 100.0, 'y': 78.0, 'dx': 0.0, 'dy': -5.0})); // drawn twice as big: A's points are half B's
+      expect(s[1]['dy'], 6.0);
       expect(mouse(), isEmpty);
     });
 
@@ -749,17 +749,20 @@ void main() {
         final f2 = await tester.createGesture(kind: PointerDeviceKind.touch, pointer: 12);
         await f1.down(o + const Offset(200, 100));
         await f2.down(o + const Offset(240, 100));
-        await f1.moveBy(const Offset(0, -20));
-        await f2.moveBy(const Offset(0, -20));
+        // both fingers move in one event batch (one frame): one scroll with the centre's full move
+        final b = tester.binding;
+        b.handlePointerEvent(PointerMoveEvent(pointer: 11, kind: PointerDeviceKind.touch, position: o + const Offset(200, 80)));
+        b.handlePointerEvent(PointerMoveEvent(pointer: 12, kind: PointerDeviceKind.touch, position: o + const Offset(240, 80)));
+        await tester.pump();
         await f1.up();
         await f2.up();
         await tester.pump(const Duration(milliseconds: 300));
         final s = scrolls();
-        expect(s.length, 2);
+        expect(s.length, 1);
+        // the centre moved 20 B points = 10 A points (the picture is drawn twice as big)
         expect(s[0], allOf(containsPair('sid', 1), containsPair('window', 7), containsPair('dx', 0.0), containsPair('dy', -10.0)));
         expect(s[0]['x'] as double, closeTo(110, 1e-9));
-        expect(s[0]['y'] as double, closeTo(73, 1e-9));
-        expect(s.map((m) => m['dy']), [-10.0, -10.0]);
+        expect(s[0]['y'] as double, closeTo(68, 1e-9));
         expect(mouse(), isEmpty);
       });
 
@@ -879,7 +882,8 @@ void main() {
         await f3.moveBy(const Offset(0, -30));
         expect(scrolls(), isEmpty);
         await f1.moveBy(const Offset(0, -20));
-        expect(scrolls().single['dy'], -10.0);
+        await tester.pump();
+        expect(scrolls().single['dy'], -5.0); // the centre moved 10 B points = 5 A points
         expect(scrolls().single['x'] as double, closeTo(110, 1e-9));
         await f1.up();
         await f2.up();

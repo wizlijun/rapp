@@ -42,5 +42,11 @@ Offset wheelToRemote(Offset scrollDelta) => -scrollDelta / wheelScale;
 /// A trackpad pan's delta for A: already the way AppKit's scrolling deltas go.
 Offset panToRemote(Offset localPanDelta) => localPanDelta;
 
+/// A scroll delta in B's displayed points as a delta in A's points: the same scale [toRemote] uses for
+/// positions, [fit] (B's drawn content) over A's [content] size, so scroll speed does not follow the
+/// window size.
+Offset scrollScaleToRemote(Offset delta, Rect fit, Size content) =>
+    Offset(delta.dx * content.width / fit.width, delta.dy * content.height / fit.height);
+
 /// [p] moved inside [r] (a drag that left the picture stays on its edge).
 Offset clampTo(Offset p, Rect r) => Offset(p.dx.clamp(r.left, r.right), p.dy.clamp(r.top, r.bottom));

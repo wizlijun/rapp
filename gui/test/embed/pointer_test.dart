@@ -36,4 +36,12 @@ void main() {
     expect(clampTo(const Offset(-5, 50), r), const Offset(0, 100));
     expect(clampTo(const Offset(10, 120), r), const Offset(10, 120));
   });
+
+  test('scroll deltas are scaled to A points like positions', () {
+    const content = Size(400, 300);
+    // drawn at half size: a B point is two A points
+    expect(scrollScaleToRemote(const Offset(10, -5), const Rect.fromLTWH(0, 0, 200, 150), content), const Offset(20, -10));
+    // drawn at twice the size: halved
+    expect(scrollScaleToRemote(const Offset(10, -5), const Rect.fromLTWH(30, 7, 800, 600), content), const Offset(5, -2.5));
+  });
 }
