@@ -144,7 +144,8 @@ impl Control {
                         None
                     }
                 };
-                let text = tokio::time::timeout(DETACH_WAIT, stderr).await.ok().and_then(|r| r.ok()).unwrap_or_default();
+                let text =
+                    tokio::time::timeout(DETACH_WAIT, stderr).await.ok().and_then(|r| r.ok()).unwrap_or_default();
                 let why = classify(code, &String::from_utf8_lossy(&text)).to_string();
                 Err(if why.is_empty() { e } else { anyhow::anyhow!(why) })
             }
@@ -254,6 +255,8 @@ async fn read<R: AsyncBufRead + Unpin>(mut r: R, shared: Arc<Shared>, events: Un
     let mut buf = Vec::new();
     // Inside a block: the `%begin` line's tail (time, number, flags), which its `%end` / `%error` repeats.
     let mut block: Option<(String, Vec<String>)> = None;
+    // The first block answers the attach itself, whatever its flags.
+    let mut first = true;
     let mut exited = false;
     loop {
         buf.clear();
@@ -268,15 +271,20 @@ async fn read<R: AsyncBufRead + Unpin>(mut r: R, shared: Arc<Shared>, events: Un
         if let Some((tail, lines)) = &mut block {
             // Command output can hold any text, so only the matching end line closes the block.
             let ends = |word: &str| line.strip_prefix(word).and_then(|l| l.strip_prefix(' ')) == Some(tail.as_str());
-            if ends("%end") {
-                shared.reply(Ok(std::mem::take(lines)));
-                block = None;
+            let reply = if ends("%end") {
+                Ok(std::mem::take(lines))
             } else if ends("%error") {
-                shared.reply(Err(std::mem::take(lines).join("\n")));
-                block = None;
+                Err(std::mem::take(lines).join("\n"))
             } else {
                 lines.push(line.into_owned());
+                continue;
+            };
+            // After the first, only blocks flagged as from this client answer a command; blocks tmux runs on
+            // its own (hooks, flags 0) are dropped, or every later reply would land on the wrong command.
+            if std::mem::replace(&mut first, false) || from_client(tail) {
+                shared.reply(reply);
             }
+            block = None;
             continue;
         }
         match parse_line(&line) {
@@ -300,6 +308,11 @@ async fn read<R: AsyncBufRead + Unpin>(mut r: R, shared: Arc<Shared>, events: Un
     if !exited {
         let _ = events.send(Event::Exit(CLOSED.to_string()));
     }
+}
+
+/// Is this block (by its `%begin` tail: time, number, flags) the answer to a command this client sent?
+fn from_client(tail: &str) -> bool {
+    tail.rsplit(' ').next() == Some("1")
 }
 
 /// The first `STDERR_KEEP` bytes of the client's stderr; the rest is read and dropped so the pipe never fills.
@@ -378,6 +391,29 @@ mod tests {
         let ask = tokio::spawn(async move { ctl.command(&["capture-pane".into(), "-p".into()]).await });
         tmux_side.write_all(b"%begin 2 5 1\n%end 9 9 1\n%output %1 x\n%end 2 5 1\n").await.unwrap();
         assert_eq!(ask.await.unwrap().unwrap(), ["%end 9 9 1", "%output %1 x"]);
+    }
+
+    /// Read one command line the client sent, so its waiter is known to be queued.
+    async fn sent(tmux_side: &mut DuplexStream) {
+        let mut b = [0u8; 1];
+        while tokio::io::AsyncReadExt::read(tmux_side, &mut b).await.unwrap() == 1 && b[0] != b'\n' {}
+    }
+
+    #[tokio::test]
+    async fn blocks_tmux_runs_on_its_own_do_not_take_a_reply() {
+        // A hook's block (flags 0) between two replies (flags 1) must not shift replies onto later commands.
+        let (ctl, _ev, mut tmux_side) = accepted().await;
+        let c = ctl.clone();
+        let a = tokio::spawn(async move { c.command(&["display-message".into(), "a".into()]).await });
+        sent(&mut tmux_side).await;
+        tmux_side.write_all(b"%begin 2 5 1\na\n%end 2 5 1\n").await.unwrap();
+        assert_eq!(a.await.unwrap().unwrap(), ["a"]);
+        let c = ctl.clone();
+        let b = tokio::spawn(async move { c.command(&["display-message".into(), "b".into()]).await });
+        sent(&mut tmux_side).await;
+        tmux_side.write_all(b"%begin 3 6 0\nhook\n%end 3 6 0\n%begin 3 7 0\n%error 3 7 0\n").await.unwrap();
+        tmux_side.write_all(b"%begin 4 8 1\nb\n%end 4 8 1\n").await.unwrap();
+        assert_eq!(b.await.unwrap().unwrap(), ["b"]);
     }
 
     #[tokio::test]

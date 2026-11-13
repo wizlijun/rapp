@@ -139,3 +139,18 @@ async fn control_client_does_not_resize_the_window() {
     assert_eq!((after.cols, after.rows), (p.cols, p.rows));
     ctl.detach().await;
 }
+
+#[tokio::test]
+async fn control_replies_stay_with_their_commands_when_hooks_run() {
+    // A hook makes tmux send its own blocks (flags 0) on the channel; they must not take a command's reply.
+    let Some(s) = common::Server::start() else { return };
+    s.raw(&["new-session", "-d", "-s", "c"]);
+    s.raw(&["set-hook", "-g", "after-display-message", "run-shell true"]);
+    let id = s.tmux().list().await.unwrap()[0].session_id.clone();
+    let (ctl, _ev) = Control::attach(&s.tmux(), &id).await.unwrap();
+    for i in 0..20 {
+        let out = ctl.command(&["display-message".into(), "-p".into(), format!("n{i}")]).await.unwrap();
+        assert_eq!(out, [format!("n{i}")]);
+    }
+    ctl.detach().await;
+}
