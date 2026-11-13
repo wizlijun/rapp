@@ -1262,7 +1262,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-relay2"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "anyhow",
  "data-encoding",
@@ -1322,7 +1322,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-wire"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "anyhow",
  "data-encoding",
