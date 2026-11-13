@@ -5,6 +5,7 @@ pub mod e2e;
 pub mod hello;
 pub mod paired;
 pub mod proof;
+pub mod relay;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 

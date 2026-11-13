@@ -1223,6 +1223,7 @@ dependencies = [
  "data-encoding",
  "quinn",
  "rapp-net",
+ "rapp-relay",
  "rapp-wire",
  "ring",
  "rustls",

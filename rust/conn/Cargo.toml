@@ -22,3 +22,4 @@ rapp-net.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+rapp-relay.workspace = true
