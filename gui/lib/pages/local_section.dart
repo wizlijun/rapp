@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart';
 import '../permissions.dart';
 import '../service_client.dart';
 import '../service_control.dart';
+import 'data_section.dart';
 import 'permissions_panel.dart';
 import 'section_card.dart';
 import 'update_section.dart';
@@ -255,7 +256,8 @@ class _LocalSectionState extends State<LocalSection> {
           ])
             OutlinedButton(onPressed: _busy ? null : () => _control(a), child: Text(label)),
         ]);
-        return SectionCard(title: '本机', children: [
+        return Column(children: [
+        SectionCard(title: '本机', children: [
           _row('服务', st == null ? '未运行（${m.error ?? '连接中'}）' : '运行中'),
           if (st != null) ...[
             _row('ID', st.shownIds.isEmpty ? '（还没有）' : st.shownIds.join('\n')),
@@ -309,6 +311,8 @@ class _LocalSectionState extends State<LocalSection> {
           ],
           const SizedBox(height: 8),
           buttons,
+        ]),
+        DataSection(data: widget.data),
         ]);
       },
     );
