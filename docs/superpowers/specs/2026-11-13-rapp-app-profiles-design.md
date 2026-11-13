@@ -181,7 +181,9 @@
 
 ### 候补（第一批之后再加）
 
-Zed（`dev.zed.Zed`）、豆包、Kimi（待核对）、钉钉（`com.alibaba.DingTalkMac`）、邮件（`com.apple.mail` ✓）、Outlook（`com.microsoft.Outlook`）、腾讯会议（`com.tencent.meeting`，高彩 / 自适应 / 30）、Zoom（`us.zoom.xos`，同上）、Figma（`com.figma.Desktop`，高彩 / 原画 / 15）、预览（`com.apple.Preview` ✓）、日历（`com.apple.iCal` ✓）、提醒事项（`com.apple.reminders` ✓）。
+Zed（`dev.zed.Zed`）、豆包、Kimi（待核对）、钉钉（`com.alibaba.DingTalkMac`）、邮件（`com.apple.mail` ✓）、Outlook（`com.microsoft.Outlook`）、Figma（`com.figma.Desktop`，高彩 / 原画 / 15）、预览（`com.apple.Preview` ✓）、日历（`com.apple.iCal` ✓）、提醒事项（`com.apple.reminders` ✓）。
+
+不收：很少远程用的 app，例如 Zoom、腾讯会议这类视频会议（用户 2026-11-13）。
 
 ### 以后加 Windows、Omarchy 时
 
