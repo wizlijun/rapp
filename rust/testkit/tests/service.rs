@@ -751,6 +751,25 @@ async fn same_device_does_not_yield_to_itself() {
 }
 
 #[tokio::test]
+async fn input_on_an_app_without_a_live_session_yields_to_nobody() {
+    let a = service(None).await;
+    let ep = b_endpoint();
+    let (one, two) = (b_named(&ep, &a, "b-one").await, b_named(&ep, &a, "b-two").await);
+    // echo has only a side connection (not a live session); Safari has a live one.
+    let mut echo = bi(one.open_bi().await.unwrap());
+    write_json(&mut echo, &json!({"op":"open","app":"com.example.echo","side":true})).await.unwrap();
+    let r = read_json(&mut echo).await.unwrap();
+    assert_eq!(r["ok"], true, "{r}");
+    echo_through(&mut echo, r["token"].as_str().unwrap()).await;
+    let _safari = open_app(&two, "com.apple.Safari").await;
+    say(&mut echo, "input").await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let log = host_log(a.bins.path());
+    assert!(log.contains("stdin com.apple.Safari"), "{log}");
+    assert!(!log.contains(r#""cmd":"yield""#), "{log}");
+}
+
+#[tokio::test]
 async fn input_blocked_is_logged_once_a_minute_without_content() {
     let a = service(None).await;
     let home = a.home.path();
