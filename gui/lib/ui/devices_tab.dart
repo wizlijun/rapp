@@ -9,6 +9,7 @@ import '../permissions.dart';
 import 'add_device_form.dart';
 import 'controls.dart';
 import 'lamp.dart';
+import 'lifecycle.dart';
 import 'main_state.dart';
 import 'session_model.dart';
 import 'tab_chip.dart';
@@ -226,7 +227,7 @@ class _DevicesTabState extends State<DevicesTab> {
       if (p?.error != null)
         Padding(
           padding: const EdgeInsets.only(top: 6),
-          child: Text(p!.error!, style: TextStyle(color: t.accent)),
+          child: Text(disconnectWord(p!.error), style: TextStyle(color: t.accent)),
         ),
       if (missing.isNotEmpty)
         Padding(

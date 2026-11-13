@@ -1,7 +1,6 @@
 #!/bin/bash
 # Build dist/rapp-<version>.pkg and dist/rapp.dmg (GUI + service + hub + Swift
-# host/client in one app)
-# and dist/rapp-relay-x86_64-linux (static, for the VPS) plus its systemd unit.
+# host/client in one app).
 # Needs: Xcode, cargo ($HOME/.cargo/bin), flutter ($HOME/development/flutter/bin).
 #
 # Signing identity order (scripts/lib/sign-check.sh): RAPP_SIGN_APP (a SHA-1;
@@ -31,8 +30,8 @@ rm -rf "$DIST" && mkdir -p "$DIST"
 echo "== swift (rapp-host, rapp-client)"
 swift build -c release
 
-echo "== rust (rapp-service, rapp-hub, rapp-relay)"
-(cd rust && cargo build --release -p rapp-service -p rapp-hub -p rapp-relay)
+echo "== rust (rapp-service, rapp-hub)"
+(cd rust && cargo build --release -p rapp-service -p rapp-hub)
 
 echo "== flutter (rapp.app)"
 # Universal builds fail in lipo with this Xcode; the GUI ships arm64 only.
@@ -103,20 +102,6 @@ echo "publish: gh release upload v$VERSION --repo wizlijun/rapp \"$ZIP\" \"$DIST
 ln -s /Applications "$DIST/stage/Applications"
 hdiutil create -quiet -volname rapp -srcfolder "$DIST/stage" -ov -format UDZO "$DIST/rapp.dmg"
 rm -rf "$DIST/stage"
-
-echo "== relay for Linux (static musl)"
-# No cross gcc needed: ring's C is built freestanding with Apple clang,
-# archived with rustup's llvm-ar and linked by rust-lld against Rust's musl.
-rustup target add x86_64-unknown-linux-musl >/dev/null
-rustup component add llvm-tools >/dev/null
-LLVM_AR=$(ls "$(rustc --print sysroot)"/lib/rustlib/*/bin/llvm-ar | head -1)
-(cd rust && CC_x86_64_unknown_linux_musl=clang \
-    CFLAGS_x86_64_unknown_linux_musl="-ffreestanding --target=x86_64-unknown-linux-gnu -DRING_CORE_NOSTDLIBINC=1" \
-    AR_x86_64_unknown_linux_musl="$LLVM_AR" \
-    CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=rust-lld \
-    cargo build --release -p rapp-relay --target x86_64-unknown-linux-musl)
-cp rust/target/x86_64-unknown-linux-musl/release/rapp-relay "$DIST/rapp-relay-x86_64-linux"
-cp scripts/rapp-relay.service "$DIST/"
 
 echo "== done"
 ls -lh "$DIST"

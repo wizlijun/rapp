@@ -1,10 +1,9 @@
-//! Shared fixtures: relay, service (with fake rapp-host), raw B client, IPC and hub drivers.
+//! Shared fixtures: service (with fake rapp-host), raw B client, IPC and hub drivers.
 #![allow(dead_code)]
 
 use quinn::{Connection, Endpoint};
 use rapp_net::line::{read_json, write_json};
-use rapp_net::quic::{bi, client_endpoint, connect, ALPN_PEER, ALPN_RELAY};
-use rapp_relay::Relay;
+use rapp_net::quic::{bi, client_endpoint, connect, ALPN_PEER};
 use rapp_service::{Runner, Service, UpdateOpts};
 use rapp_update::fake::FakeRunner;
 use serde_json::{json, Value};
@@ -16,7 +15,6 @@ use tempfile::TempDir;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, DuplexStream, Lines};
 use tokio::net::TcpStream;
 
-pub const KEY: &str = "test-relay-key";
 pub const PASSWORD: &str = "a-pass-1";
 pub const WAIT: Duration = Duration::from_secs(10);
 
@@ -35,24 +33,6 @@ pub fn host_log(bins: &Path) -> String {
     std::fs::read_to_string(bins.join("host.log")).unwrap_or_default()
 }
 
-pub struct TestRelay {
-    pub relay: Relay,
-    _dir: TempDir,
-}
-
-pub fn relay(ttl: Duration) -> TestRelay {
-    let dir = tempfile::tempdir().unwrap();
-    let relay = Relay::start(rapp_relay::Opts {
-        listen: "127.0.0.1:0".parse().unwrap(),
-        key: KEY.into(),
-        db: dir.path().join("relay.json"),
-        token_ttl: ttl,
-        log: rapp_net::log::Log::none(),
-    })
-    .unwrap();
-    TestRelay { relay, _dir: dir }
-}
-
 pub struct TestService {
     pub svc: Service,
     pub home: TempDir,
@@ -60,10 +40,9 @@ pub struct TestService {
     pub id: String,
 }
 
-pub fn service_json(home: &Path, relay: Option<SocketAddr>) {
+pub fn service_json(home: &Path) {
     let cfg = json!({
-        "relay": relay.map(|a| a.to_string()), "key": KEY, "id": null, "secret": "",
-        "name": "test-a", "password": PASSWORD, "port": 0, "ipc_port": 0,
+        "id": null, "name": "test-a", "password": PASSWORD, "port": 0, "ipc_port": 0,
     });
     rapp_net::config::write_json(&home.join("service.json"), &cfg).unwrap();
 }
@@ -104,33 +83,17 @@ pub async fn start_service_with(
     .unwrap()
 }
 
-/// A service registered with `relay` (or relay-less when None); waits until registered.
-pub async fn service(relay: Option<SocketAddr>) -> TestService {
-    service_with_idle(relay, Duration::from_secs(60)).await
+/// A service on a fresh home dir with the fake workers.
+pub async fn service() -> TestService {
+    service_with_idle(Duration::from_secs(60)).await
 }
 
-pub async fn service_with_idle(relay: Option<SocketAddr>, idle: Duration) -> TestService {
+pub async fn service_with_idle(idle: Duration) -> TestService {
     let (home, bins) = (tempfile::tempdir().unwrap(), bins());
-    service_json(home.path(), relay);
+    service_json(home.path());
     let svc = start_service(home.path(), bins.path(), idle).await;
-    let id = if relay.is_some() {
-        wait_registered(&svc, home.path()).await
-    } else {
-        ipc_once(&svc, home.path(), json!({"cmd":"status"})).await["id"].as_str().unwrap().to_string()
-    };
+    let id = ipc_once(&svc, home.path(), json!({"cmd":"status"})).await["id"].as_str().unwrap().to_string();
     TestService { svc, home, bins, id }
-}
-
-pub async fn wait_registered(svc: &Service, home: &Path) -> String {
-    let deadline = tokio::time::Instant::now() + WAIT;
-    loop {
-        let st = ipc_once(svc, home, json!({"cmd":"status"})).await;
-        if st["relay"] == "connected" {
-            return st["id"].as_str().unwrap().to_string();
-        }
-        assert!(tokio::time::Instant::now() < deadline, "service never registered: {st}");
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
 }
 
 /// Every line of `<home>/logs/<file>` so far.
@@ -224,13 +187,6 @@ pub async fn req(conn: &Connection, v: Value) -> Value {
     read_json(&mut s).await.unwrap()
 }
 
-/// B's `connect` through the relay.
-pub async fn relay_connect(ep: &Endpoint, relay: SocketAddr, id: &str, password: &str) -> (Connection, Value) {
-    let conn = dial(ep, relay, ALPN_RELAY).await;
-    let r = req(&conn, json!({"op":"connect","key":KEY,"id":id,"password":password})).await;
-    (conn, r)
-}
-
 /// Direct QUIC connection to A authenticated with `auth`.
 pub async fn direct(ep: &Endpoint, a: SocketAddr, auth: Value) -> (Connection, Value) {
     let conn = dial(ep, a, ALPN_PEER).await;
@@ -252,32 +208,21 @@ pub struct Hub {
 }
 
 impl Hub {
-    /// Starts a hub whose config dir holds a service.json pointing at `relay`.
-    pub fn start(home: &Path, bins: &Path, relay: Option<SocketAddr>, force: Option<&str>) -> Hub {
-        Hub::start_with(home, bins, relay, force, None)
+    pub fn start(home: &Path, bins: &Path) -> Hub {
+        Hub::start_with(home, bins, None)
     }
 
     /// Like `start`, with the presence probe running every `every`.
-    pub fn start_with_presence(home: &Path, bins: &Path, relay: Option<SocketAddr>, every: Duration) -> Hub {
-        Hub::start_with(home, bins, relay, None, Some(every))
+    pub fn start_with_presence(home: &Path, bins: &Path, every: Duration) -> Hub {
+        Hub::start_with(home, bins, Some(every))
     }
 
-    fn start_with(
-        home: &Path,
-        bins: &Path,
-        relay: Option<SocketAddr>,
-        force: Option<&str>,
-        every: Option<Duration>,
-    ) -> Hub {
-        if !home.join("service.json").exists() {
-            service_json(home, relay);
-        }
+    fn start_with(home: &Path, bins: &Path, every: Option<Duration>) -> Hub {
         let (cmd_r, cmd_w) = tokio::io::duplex(1 << 16);
         let (out_r, out_w) = tokio::io::duplex(1 << 16);
         let opts = rapp_hub::Opts {
             home: home.to_path_buf(),
             bin_dir: Some(bins.to_path_buf()),
-            force_path: force.map(str::to_string),
             log: rapp_net::log::Log::file(&home.join("logs"), "hub.log"),
             presence_every: every,
         };

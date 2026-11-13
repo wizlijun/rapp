@@ -4,18 +4,18 @@ version.workspace = true
 edition.workspace = true
 publish.workspace = true
 
-[[bin]]
-name = "rapp-relay"
-path = "src/main.rs"
-
 [dependencies]
 anyhow.workspace = true
-quinn.workspace = true
-tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-rand.workspace = true
+rapp-wire.workspace = true
 rapp-net.workspace = true
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "signal"] }
+quinn.workspace = true
+data-encoding.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+tokio = { workspace = true, features = ["test-util"] }
+rustls.workspace = true
+libc = "0.2"

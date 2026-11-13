@@ -8,9 +8,9 @@ use std::time::{Duration, Instant};
 
 use common::*;
 use rapp_net::log::Log;
-use rapp_relay2::admin;
-use rapp_relay2::config;
-use rapp_relay2::server::{Opts, Relay};
+use rapp_relay::admin;
+use rapp_relay::config;
+use rapp_relay::server::{Opts, Relay};
 use rapp_wire::msg::Push;
 use rapp_wire::{join_hash, Fp, Key};
 use serde_json::{json, Value};
@@ -116,7 +116,7 @@ async fn key_can_be_set_once_and_rotated() {
 
     let evs: Vec<String> = {
         r.relay.audit().flush();
-        let all = rapp_relay2::audit::read(r.data.path(), None, None, None).unwrap();
+        let all = rapp_relay::audit::read(r.data.path(), None, None, None).unwrap();
         all.iter().map(|l| l["ev"].as_str().unwrap().to_string()).filter(|e| e == "key" || e == "rotate_key").collect()
     };
     assert_eq!(evs, ["key", "rotate_key"]);
@@ -245,8 +245,8 @@ async fn revoke_applies_even_when_it_cannot_be_saved() {
     // Saved at the next successful write: revoking again is a no-op, the flush at stop persists it.
     let TestRelay { relay, data, .. } = r;
     relay.stop().await;
-    let reopened = rapp_relay2::store::FileRegistry::open(data.path()).unwrap();
-    assert!(rapp_relay2::store::Registry::get(&reopened, &d.id.fp).unwrap().revoked);
+    let reopened = rapp_relay::store::FileRegistry::open(data.path()).unwrap();
+    assert!(rapp_relay::store::Registry::get(&reopened, &d.id.fp).unwrap().revoked);
 }
 
 #[tokio::test]
@@ -415,7 +415,7 @@ async fn stop_tells_devices_before_closing() {
     }
     let e = timeout(WAIT, d.conn.closed()).await.expect("closed after going_away");
     assert_eq!(app_close_code(&e), Some(0), "{e:?}");
-    let all = rapp_relay2::audit::read(data.path(), None, None, None).unwrap();
+    let all = rapp_relay::audit::read(data.path(), None, None, None).unwrap();
     let last = all.last().unwrap();
     assert_eq!(last["ev"], "relay_stop", "{all:?}");
     assert_eq!(last["reason"], "stop");
@@ -434,7 +434,7 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
 
 // --- The binary, as a process. ---
 
-const BIN: &str = env!("CARGO_BIN_EXE_rapp-relay2");
+const BIN: &str = env!("CARGO_BIN_EXE_rapp-relay");
 
 /// A temp dir holding the data dir (`data/`) and the server's stderr (`stderr.log`).
 struct Dirs {
@@ -650,7 +650,7 @@ fn cli_refuses_to_start_when_data_dir_is_unusable() {
 fn cli_version_and_usage() {
     let out = Command::new(BIN).arg("--version").output().unwrap();
     assert!(out.status.success());
-    assert_eq!(text(&out.stdout), format!("rapp-relay2 {}\n", env!("CARGO_PKG_VERSION")));
+    assert_eq!(text(&out.stdout), format!("rapp-relay {}\n", env!("CARGO_PKG_VERSION")));
     for args in [&["frobnicate"][..], &["--nope"], &["enroll", "maybe"], &["audit", "--since", "7x"], &["revoke"]] {
         let out = Command::new(BIN).args(args).output().unwrap();
         assert_eq!(out.status.code(), Some(2), "{args:?}");

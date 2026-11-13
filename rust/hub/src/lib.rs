@@ -1,5 +1,5 @@
 //! rapp-hub (spec §4): B side. JSON-line commands on stdin, events on stdout.
-//! Relay address and key come from `service.json` in the same config dir.
+//! Hosts are reached only at the addresses saved in `hosts.json` (added as `id@ip`).
 
 mod hosts;
 mod link;
@@ -8,8 +8,8 @@ mod session;
 
 use anyhow::{bail, Context, Result};
 use hosts::{Host, Hosts};
-use link::{Force, Link};
-use quinn::{Connection, Endpoint};
+use link::Link;
+use quinn::Endpoint;
 use rapp_net::log::{Log, Lvl};
 use rapp_net::msg::Op;
 use serde_json::{json, Value};
@@ -22,8 +22,6 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader
 pub struct Opts {
     pub home: PathBuf,
     pub bin_dir: Option<PathBuf>,
-    /// `RAPP_FORCE_PATH`: relay | direct | lan.
-    pub force_path: Option<String>,
     /// `hub.log` (spec §4.4); `Log::none()` writes nothing.
     pub log: Log,
     /// Presence probe period; None = no probe (tests).
@@ -43,11 +41,7 @@ type Out = Box<dyn AsyncWrite + Unpin + Send>;
 
 pub(crate) struct Hub {
     bin_dir: Option<PathBuf>,
-    force: Option<Force>,
     ep: Endpoint,
-    /// (address, key) from service.json.
-    relay: Option<(String, String)>,
-    relay_conn: tokio::sync::Mutex<Option<Connection>>,
     links: Mutex<HashMap<String, Link>>,
     hosts: Hosts,
     out: tokio::sync::Mutex<Out>,
@@ -58,20 +52,10 @@ pub(crate) struct Hub {
     close_why: Mutex<HashMap<u64, String>>,
     /// Hosts the presence probe stopped trying after an auth-type failure, until the user acts on them.
     probe_halt: Mutex<std::collections::HashSet<String>>,
-    /// Hosts with LAN addresses the relay called "unknown id" this run (`id@ip` hosts that never
-    /// registered there): presence probes them over LAN only, so it never asks the relay again.
-    lan_only: Mutex<std::collections::HashSet<String>>,
     kill: tokio::sync::watch::Sender<bool>,
     log: Log,
-    /// B's self-declared name in `auth` / `connect` (spec §2): this machine's hostname.
+    /// B's self-declared name in `auth` (spec §2): this machine's hostname.
     name: String,
-}
-
-/// Relay settings from `<home>/service.json`; None when unset or empty.
-fn relay_settings(home: &std::path::Path) -> Result<Option<(String, String)>> {
-    let cfg: Option<Value> = rapp_net::config::read_json(&home.join("service.json"))?;
-    let get = |k: &str| cfg.as_ref().and_then(|c| c[k].as_str()).filter(|s| !s.is_empty()).map(str::to_string);
-    Ok(get("relay").map(|r| (r, get("key").unwrap_or_default())))
 }
 
 pub async fn run<R, W>(opts: Opts, input: R, output: W) -> Result<()>
@@ -79,17 +63,9 @@ where
     R: AsyncRead + Unpin + Send + 'static,
     W: AsyncWrite + Unpin + Send + 'static,
 {
-    let relay = relay_settings(&opts.home)?;
-    let mut start = json!({"version": env!("CARGO_PKG_VERSION")});
-    if let Some((addr, _)) = &relay {
-        start["relay"] = addr.as_str().into(); // the address only, never the key
-    }
-    opts.log.event(Lvl::Info, "hub_start", start);
+    opts.log.event(Lvl::Info, "hub_start", json!({"version": env!("CARGO_PKG_VERSION")}));
     let hub = Arc::new(Hub {
-        force: Force::parse(opts.force_path.as_deref())?,
         ep: rapp_net::quic::client_endpoint(([0, 0, 0, 0], 0).into())?,
-        relay,
-        relay_conn: Default::default(),
         links: Default::default(),
         hosts: Hosts::load(&opts.home)?,
         out: tokio::sync::Mutex::new(Box::new(output)),
@@ -97,7 +73,6 @@ where
         next_sid: AtomicU64::new(sid_seed()),
         close_why: Default::default(),
         probe_halt: Default::default(),
-        lan_only: Default::default(),
         kill: tokio::sync::watch::channel(false).0,
         bin_dir: opts.bin_dir,
         log: opts.log,
@@ -173,35 +148,23 @@ impl Hub {
             Some("hosts") => self.hosts_event(),
             Some("add_host") => {
                 let (id, addr) = rapp_net::addr::split_host_ref(s("id")?)?;
+                let Some(addr) = addr else { bail!("id@ip required") };
                 let (id, password) = (id.as_str(), s("password")?);
-                if let Some(addr) = addr {
-                    // `id@ip[:port]`: straight to A with the password, no relay (§2.3).
-                    let auth = Op::Auth { token: None, password: Some(password.into()), name: self.me() };
-                    let (conn, r) = self.dial(&addr, link::LAN_WAIT, &auth).await?;
-                    conn.close(0u32.into(), b"host added");
-                    if r["id"] != id {
-                        bail!("{addr} is ID {}, not {id}", r["id"].as_str().unwrap_or("?"));
-                    }
-                    let name = r["name"].as_str().unwrap_or(id).to_string();
-                    self.hosts.upsert(Host { id: id.into(), name: name.clone(), password: password.into(), lan: vec![addr] })?;
-                    self.forget_host(id);
-                    return Ok(Some(json!({"event":"host_added","id":id,"name":name})));
+                let auth = Op::Auth { password: Some(password.into()), name: self.me() };
+                let (conn, r) = self.dial(&addr, link::LAN_WAIT, &auth).await?;
+                conn.close(0u32.into(), b"host added");
+                if r["id"] != id {
+                    bail!("{addr} is ID {}, not {id}", r["id"].as_str().unwrap_or("?"));
                 }
-                let info = match self.relay_connect(id, password).await {
-                    Ok(Ok(info)) => info,
-                    Ok(Err(msg)) => bail!(msg),
-                    Err(e) => return Err(e.context("relay unreachable")),
-                };
-                let name = info["name"].as_str().unwrap_or(id).to_string();
-                let lan = info["lan"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
-                self.hosts.upsert(Host { id: id.into(), name: name.clone(), password: password.into(), lan })?;
-                self.forget_host(id);
+                let name = r["name"].as_str().unwrap_or(id).to_string();
+                self.hosts.upsert(Host { id: id.into(), name: name.clone(), password: password.into(), lan: vec![addr] })?;
+                self.forget(id);
                 json!({"event":"host_added","id":id,"name":name})
             }
             Some("remove_host") => {
                 let id = s("id")?;
                 self.hosts.remove(id)?;
-                self.forget_host(id);
+                self.forget(id);
                 self.hosts_event()
             }
             Some("set_home") => {
