@@ -24,7 +24,8 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 const PAYLOAD: u64 = 512 * 1024 * 1024;
 const CHUNK: usize = 64 * 1024;
-/// Median of this many interleaved old/new runs (per-run CPU noise is about +-7%).
+/// Interleaved old/new runs; the gate compares the fastest of each (interference only adds CPU time,
+/// and per-run CPU is bimodal by about 15% with core placement and thermal state).
 const RUNS: usize = 7;
 const A_ID: &str = "123456789";
 
@@ -250,10 +251,13 @@ async fn relaying_costs_no_more_cpu_than_the_old_relay() {
         old.push(o.cpu_ms);
         new.push(n.cpu_ms);
     }
-    let (old_ms, new_ms) = (median(old), median(new));
-    let ratio = new_ms / old_ms;
-    println!("old_ms={old_ms:.0} new_ms={new_ms:.0} ratio={ratio:.3}");
-    assert!(ratio <= 1.05, "the new relay costs {ratio:.3}x the old one's CPU (limit 1.05)");
+    let min = |v: &[f64]| v.iter().cloned().fold(f64::INFINITY, f64::min);
+    let (old_min, new_min) = (min(&old), min(&new));
+    let (old_med, new_med) = (median(old), median(new));
+    println!("old_med={old_med:.0} new_med={new_med:.0} median_ratio={:.3} (informational)", new_med / old_med);
+    let ratio = new_min / old_min;
+    println!("old_ms={old_min:.0} new_ms={new_min:.0} ratio={ratio:.3} (min/min: the gate)");
+    assert!(ratio <= 1.05, "the new relay's fastest run costs {ratio:.3}x the old one's fastest (limit 1.05)");
 }
 
 #[tokio::test(flavor = "multi_thread")]
