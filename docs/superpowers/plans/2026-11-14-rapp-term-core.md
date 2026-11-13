@@ -824,10 +824,10 @@ fn rev_of(v: &[Out]) -> u64 { match &v[0] { Out::Screen { rev, .. } => *rev, _ =
 
 | # | 探查 | 结论 | 日期 |
 |---|---|---|---|
-| 1 | 取 Claude Code、Codex 的真实界面 | | |
-| 2 | 整段粘贴进 Claude Code、Codex | | |
-| 3 | 从后台服务里用 SSH；远端找不找得到 tmux | | |
-| 4 | 服务起的 tmux 活不活得过服务被停（launchd；systemd 直接起和经 `systemd-run`） | | |
+| 1 | 取 Claude Code、Codex 的真实界面 | 通过（自动检查）。tmux 3.8，120×40：Claude Code 2.1.323、Codex 0.166.0 各答一句带中日文和代码块的话；去掉转义后每行按东亚宽度算最宽 120 / 119 列，没有超过 120；`cursor_y` 分别是 37 / 36，正是输入框（`❯` / `›`）所在行；`cursor_flag`=1，`alternate_on`=1。注意：`capture-pane -e` 会把链接吐成 OSC 8 序列（`ESC ] 8 ;; url ESC \`），算宽度前要一并去掉，客户端渲染要认得它。Codex 首次启动有“有新版本”的提示，按 Esc 跳过，未更新。画面一致性：待用户对照（文件路径 /private/tmp/claude-501/-Users-bruce-git-rapp/6b2ed6ea-3e13-4d0f-8ef7-769d03517790/scratchpad/probe-claude.txt、/private/tmp/claude-501/-Users-bruce-git-rapp/6b2ed6ea-3e13-4d0f-8ef7-769d03517790/scratchpad/probe-codex.txt） | 2026-11-14 |
+| 2 | 整段粘贴进 Claude Code、Codex | 通过。`paste-buffer -p` 后两个 CLI 的输入框里都是完整三行（第一行/第二行/第三行），没有提交；约 5 秒后再取屏，仍没有新一轮回答。之后 Ctrl-C（Claude Code）、Ctrl-C 加 Ctrl-U（Codex）清掉了输入。 | 2026-11-14 |
+| 3 | 从后台服务里用 SSH；远端找不找得到 tmux | 未测（执行时没有可用的主机） | 2026-11-14 |
+| 4 | 服务起的 tmux 活不活得过服务被停（launchd；systemd 直接起和经 `systemd-run`） | macOS（launchd）：LaunchAgent 里 `tmux -L rapp-probe4 new-session -d 'sleep 600'` 后接 `sleep 30`，在它还活着时 `launchctl bootout`，之后 `tmux -L rapp-probe4 ls` 会话仍在（服务的 sh 被收掉，tmux 服务进程的父进程是 1，不受影响）。macOS 上不需要额外手段。Linux：未测（没有 Linux 机器）：systemd 直接起、经 `systemd-run --user --scope` 起，两行均未测。已清理 plist 和 job，并停掉 rapp-probe4 服务。 | 2026-11-14 |
 
 ## 这份计划之后
 
