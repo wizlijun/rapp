@@ -35,9 +35,9 @@ swift run -c release rapp-client "rapp://<A的地址>[:端口]/<bundle-id>?token
 其余像素按亮度落到这两色之间的四级上，所以文字的抗锯齿边缘会保留一两级过渡，不会断笔、也不会在字周围出灰块。
 渐变和照片会变成色块。这是最省流的档位，适合看文字。
 
-协议版本是 5（在 v4 多窗口的基础上加了剪贴板和编辑器，新增消息 19–25，见 `docs/superpowers/specs/2026-11-11-rapp-clipboard-composer-design.md`）。
-Mac 两端都要用这一版：v4 的客户端或主机要先升级，连新的会收到 `protocol version mismatch` 的提示。
-Omarchy 的 Rust/GTK 客户端已支持 v4/v5（见下文）；Windows/Omarchy 主机端不在本仓库当前实现中。
+协议版本是 6：v5 的剪贴板和编辑器使用消息 19–25，v6 新增输入占用通知（26）。见 `docs/superpowers/specs/2026-11-12-rapp-multi-client-design.md`。
+Mac 两端建议一起升级到这一版。0.5.1 使用 v6 协议（主机仍可服务 v5 客户端，但 v5 不显示输入占用提示）；新的客户端连接旧主机可能收到 `protocol version mismatch`，需升级主机。
+Omarchy 的 Rust/GTK 客户端已支持 v4/v5/v6（见下文）；Windows/Omarchy 主机端不在本仓库当前实现中。
 
 一定要带 `-c release`。未优化的构建处理一帧 Retina 画面要 1 秒左右。
 
@@ -99,9 +99,9 @@ Omarchy 的 Rust/GTK 客户端已支持 v4/v5（见下文）；Windows/Omarchy �
 
 ## Omarchy / Linux 客户端
 
-在 [GitHub Release](https://github.com/wizlijun/rapp/releases/tag/v0.5.0) 下载
-`rapp-omarchy-0.5.0-1-x86_64.pkg.tar.zst`，运行 `sudo pacman -U ./rapp-omarchy-0.5.0-1-x86_64.pkg.tar.zst`，
-然后从应用启动器打开 rapp。也提供 `rapp-0.5.0-omarchy-x86_64.tar.gz` 便携包，解压后运行 `./rapp`。
+在 [GitHub Release](https://github.com/wizlijun/rapp/releases/tag/v0.5.1) 下载
+`rapp-omarchy-0.5.1-1-x86_64.pkg.tar.zst`，运行 `sudo pacman -U ./rapp-omarchy-0.5.1-1-x86_64.pkg.tar.zst`，
+然后从应用启动器打开 rapp。也提供 `rapp-0.5.1-omarchy-x86_64.tar.gz` 便携包，解压后运行 `./rapp`。
 安装包面向 Omarchy / Arch x86_64；便携包的依赖与用法见包内 `README-LINUX.txt`。
 发布包可从干净的源码提交运行 `./scripts/package-linux.sh` 重建，包内记录确切源码提交。
 
@@ -120,10 +120,14 @@ Rust 网络后台继续复用；`rust/client-core` 实现可跨平台复用的�
 断线停止 worker，结束会话时释放保留画面。
 独立 GTK `rapp-client` 仍可单独使用；下面的应用画布和独立客户端菜单说明适用于它。
 
-当前主线源码已对齐 0.5.0：Linux 可使用项目与常用、全景模式（离开舞台降至 1 fps）、触屏双指滚动，
+当前主线源码已对齐 0.5.1 的多客户端功能：同一设备重复打开复用已有会话，被其他设备接管后保留最后画面并提供“拿回来”，输入暂时被占用时提示设备名称。独立 GTK client 支持 v6 输入占用提示，直接启动时被接管会提供“拿回来”；hub 管理的会话由管理界面重连。
+内嵌输入区等待主机的粘贴确认，拒绝、断线或超时会保留未确认的文字；独立 client 也在确认成功后才清空输入。60 KB 及以上的文字走旁路上传后粘贴（目前最多 1 MB）。
+过期剪贴板条目的取用、固定操作会显示原因。默认连接 0.5.1 主机；独立 client 可用 `?protocol=5` 显式连接旧主机（`protocol=4` 也保留兼容）。
+
+同时保留 0.5.0 的客户端功能：Linux 可使用项目与常用、全景模式（离开舞台降至 1 fps）、触屏双指滚动，
 以及跨会话文字剪贴板资源。固定的文字副本在会话结束后仍可复制；图片/文件传输仍暂不支持。
 Linux 的“本机 → 版本与升级”可独立于后台服务检查 GitHub 发布并打开对应安装包，安装由系统软件包管理器完成。
-安装包和便携包均发布在同一个 v0.5.0 Release 中，包内记录确切源码提交。
+安装包和便携包均发布在同一个 v0.5.1 Release 中，包内记录确切源码提交。
 
 构建依赖：Rust、GTK4 ≥ 4.12、pkgconf。连同 Flutter 管理界面打包还需要 Flutter
 （Dart ≥ 3.12.1）、clang、cmake、ninja、gtk3、libayatana-appindicator。

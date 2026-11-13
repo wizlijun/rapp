@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import 'session_port.dart';
+import 'linux_text_upload.dart';
 
 /// A bounded, streaming packet reader. Pausing here backpressures the worker's
 /// stdout instead of accumulating decoded frames in Dart. The worker keeps
@@ -190,7 +191,14 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
         process.kill(ProcessSignal.sigkill);
         throw StateError('Session start cancelled');
       }
-      final s = _Session(sid, process, _emit, _framePresented);
+      final s = _Session(
+        sid,
+        process,
+        _emit,
+        _framePresented,
+        args['port'] as int,
+        args['token'] as String,
+      );
       _sessions[sid] = s;
       unawaited(process.stderr.drain<void>());
       unawaited(
@@ -216,7 +224,8 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
         return {'error': 'A 已断开，复制不到'};
       }
       final text = s.clips[args['clip']];
-      if (text == null) return {'error': '条目已过期或不是完整文字；Linux 暂不支持图片和文件传输'};
+      if (!s.clips.containsKey(args['clip'])) return {'error': 'unknown clip'};
+      if (text == null) return {'error': '不是完整文字；Linux 暂不支持图片和文件传输'};
       final copy = _nextCopy++;
       _copies[copy] = text;
       return {'copy': copy};
@@ -262,33 +271,7 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
       case 'composer_attach':
         return {'status': 'Linux 暂不支持文件附件；可粘贴或输入文字'};
       case 'composer_send':
-        final pieces = args['pieces'] as List;
-        var sent = 0;
-        String? failure;
-        _emit(ComposerStateEvent(s.sid, sending: true));
-        for (final piece in pieces) {
-          if (piece is! Map || piece['text'] is! String) {
-            failure = 'Linux 暂不支持文件和图片发送';
-            break;
-          }
-          final text = piece['text'] as String;
-          if (utf8.encode(text).length > 1024 * 1024) {
-            failure = '文字超过 1 MB';
-            break;
-          }
-          if (s.selected != null) {
-            s.send({'cmd': 'select_window', 'window': s.selected});
-          }
-          s.send({'cmd': 'text', 'text': text});
-          sent++;
-        }
-        _emit(
-          ComposerStateEvent(
-            s.sid,
-            sending: false,
-            done: ComposerDone(sent, failure),
-          ),
-        );
+        unawaited(s.sendPieces(List<Object?>.from(args['pieces'] as List)));
       case 'clip_pick':
         final text = s.clips[args['clip']];
         if (text != null) {
@@ -297,6 +280,12 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
           } else {
             await Clipboard.setData(ClipboardData(text: text));
           }
+        } else {
+          s.showStatus(
+            s.clips.containsKey(args['clip'])
+                ? 'Linux 暂不支持取用图片、文件和截断文字'
+                : '取用没成功：太旧了，A 已不保留',
+          );
         }
     }
     return null;
@@ -337,7 +326,16 @@ void _retire(ui.Image? image) {
 }
 
 class _Session {
-  _Session(this.sid, this.process, this.emit, this.framePresented);
+  _Session(
+    this.sid,
+    this.process,
+    this.emit,
+    this.framePresented,
+    this.port,
+    this.token,
+  );
+  final int port;
+  final String token;
   final Future<void> Function() framePresented;
   final _closed = Completer<void>();
   final Object sid;
@@ -385,6 +383,88 @@ class _Session {
   bool closed = false;
   bool disconnected = false;
 
+  bool _sending = false;
+  int _nextSeq = 1;
+  final _pastes = <int, Completer<String>>{};
+  LinuxTextUpload? _upload;
+  Timer? _statusTimer;
+
+  void showStatus(String message) {
+    _statusTimer?.cancel();
+    emit(TransferStatusEvent(sid, message));
+    _statusTimer = Timer(const Duration(seconds: 5), () {
+      if (!closed && !disconnected) emit(TransferStatusEvent(sid, null));
+    });
+  }
+
+  Future<void> sendPieces(List<Object?> pieces) async {
+    if (_sending || closed || disconnected) return;
+    _sending = true;
+    var sent = 0;
+    String? failure;
+    emit(ComposerStateEvent(sid, sending: true));
+    try {
+      for (final piece in pieces) {
+        if (piece is! Map || piece['text'] is! String) {
+          throw StateError('Linux 暂不支持文件和图片发送');
+        }
+        final text = piece['text'] as String;
+        final bytes = utf8.encode(text);
+        if (bytes.length > 1024 * 1024) throw StateError('文字超过 1 MB');
+        if (closed || disconnected) throw StateError('A 已断开，未发送');
+        // Never recycle sequence IDs: a late reply must not finish a later send.
+        if (_nextSeq > 0xffffffff) throw StateError('请重新连接后发送');
+        final seq = _nextSeq++;
+        final source = <String, Object?>{'text': text};
+        if (bytes.length >= 60000) {
+          final upload = LinuxTextUpload();
+          _upload = upload;
+          try {
+            await upload.send(port, token, seq, bytes);
+          } finally {
+            _upload = null;
+          }
+          source
+            ..clear()
+            ..['item'] = seq;
+        }
+        if (closed || disconnected) throw StateError('A 已断开，未发送');
+        final reply = Completer<String>();
+        _pastes[seq] = reply;
+        try {
+          if (selected != null) {
+            send({'cmd': 'select_window', 'window': selected});
+          }
+          send({'cmd': 'paste', 'seq': seq, ...source});
+          final error = await reply.future.timeout(
+            const Duration(seconds: 15),
+            onTimeout: () => '未收到 A 的确认，请检查远端内容后再重试',
+          );
+          if (error.isNotEmpty) {
+            failure = error;
+            break;
+          }
+          sent++;
+        } finally {
+          _pastes.remove(seq);
+        }
+      }
+    } catch (e) {
+      failure = e is StateError ? e.message.toString() : '发送没成功：$e';
+    } finally {
+      _sending = false;
+      if (!closed) {
+        emit(
+          ComposerStateEvent(
+            sid,
+            sending: false,
+            done: ComposerDone(sent, failure),
+          ),
+        );
+      }
+    }
+  }
+
   void send(Map<String, Object?> args) {
     if (!closed && !disconnected) process.stdin.writeln(jsonEncode(args));
   }
@@ -412,7 +492,12 @@ class _Session {
             disconnect(m['reason'] as String);
             break;
           }
-          if (method == 'clip') {
+          if (method == 'paste_result') {
+            final reply = _pastes[m['seq']];
+            if (reply != null && !reply.isCompleted) {
+              reply.complete(m['error'] as String);
+            }
+          } else if (method == 'clip') {
             final text = m['truncated'] == false ? m['text'] as String? : null;
             clips.remove(m['id']);
             clips[m['id'] as int] = text;
@@ -571,6 +656,11 @@ class _Session {
 
   void _stopTransport() {
     if (_closed.isCompleted) return;
+    _statusTimer?.cancel();
+    _upload?.cancel();
+    for (final reply in _pastes.values) {
+      if (!reply.isCompleted) reply.complete('A 已断开，发送未确认；请检查远端内容后再重试');
+    }
     held.clear();
     _pendingFrame = null;
     _closed.complete();

@@ -261,7 +261,7 @@ fn menu_and_window_validation() {
 #[test]
 fn v5_clipboard_bounds_and_legacy_selection() {
     let address = Address::parse("rapp://host/?token=x", None).unwrap();
-    assert_eq!(address.hello(1.)[5], 5);
+    assert_eq!(address.hello(1.)[5], 6);
     let text = "中文 clipboard";
     let mut payload = 1u32.to_le_bytes().to_vec();
     payload.extend([0, 0]);
@@ -275,7 +275,7 @@ fn v5_clipboard_bounds_and_legacy_selection() {
     payload[5] = 0;
     payload[6..10].copy_from_slice(&u32::MAX.to_le_bytes());
     assert!(decode(19, &payload).is_err());
-    assert!(Address::parse("rapp://host/?token=x&protocol=6", None).is_err());
+    assert!(Address::parse("rapp://host/?token=x&protocol=7", None).is_err());
     let image = [1, 0, 0, 0, 1, 32, 0, 32, 0, 100, 0, 0, 0, 0, 0, 0, 0];
     assert!(matches!(
         decode(19, &image).unwrap(),
@@ -350,11 +350,61 @@ fn expanded_buffer_is_reused_for_delta_frames() {
     let mut pixels = Vec::new();
     let mut z = Compress::new(Compression::default(), true);
     let full = compress(&mut z, &[1, 0, 0, 0, 0, 0, 248]);
-    decoder.decode_into(2, 4, 4, true, &full, &mut pixels).unwrap();
+    decoder
+        .decode_into(2, 4, 4, true, &full, &mut pixels)
+        .unwrap();
     let pointer = pixels.as_ptr();
     assert_eq!(&pixels[..4], &[0, 0, 255, 255]);
     let delta = compress(&mut z, &[1, 0, 0, 0, 0, 224, 7]);
-    decoder.decode_into(2, 4, 4, false, &delta, &mut pixels).unwrap();
+    decoder
+        .decode_into(2, 4, 4, false, &delta, &mut pixels)
+        .unwrap();
     assert_eq!(pixels.as_ptr(), pointer);
     assert_eq!(&pixels[..4], &[0, 255, 0, 255]);
+}
+
+#[test]
+fn v6_notifications_and_paste_confirmation_are_strict() {
+    for by in ["", "客厅的 Mac"] {
+        let mut payload = vec![];
+        string(&mut payload, by);
+        let wire = packet(26, payload.clone());
+        assert!(matches!(read_message(&mut &wire[..]).unwrap().0,
+            Incoming::InputBlocked(name) if name == by));
+        payload.push(0);
+        assert!(decode(26, &payload).is_err());
+    }
+    assert!(decode(26, &[1, 0]).is_err());
+    assert!(decode(26, &[1, 0, 255]).is_err());
+    let mut ack = 42u32.to_le_bytes().to_vec();
+    string(&mut ack, "A 正在被 Mac 操作");
+    assert!(
+        matches!(decode(21, &ack).unwrap(), Incoming::Pasted {seq: 42, error} if error.contains("Mac"))
+    );
+    assert_eq!(
+        takeover_notice("host says: taken over by Mac"),
+        Some("这个窗口在 Mac 上打开了".into())
+    );
+    assert_eq!(
+        takeover_notice("taken over"),
+        Some("这个窗口在另一台设备上打开了".into())
+    );
+    assert_eq!(takeover_notice("busy"), None);
+    assert_eq!(input_blocked_notice(""), "A 正在被另一台设备操作");
+}
+
+#[test]
+fn reconnect_address_roundtrips_without_exposing_token() {
+    for host in ["localhost", "127.0.0.1", "[::1]"] {
+        for version in [4, 5, 6] {
+            let original = Address::parse(&format!("rapp://{host}:1234/com.example.%E6%96%87?protocol={version}&mode=duocolor&fps=30"), Some("secret".into())).unwrap();
+            let url = original.connect_url();
+            assert!(!url.contains("secret"));
+            let again = Address::parse(&url, Some(original.token.clone())).unwrap();
+            assert_eq!(again.host, original.host);
+            assert_eq!(again.app, original.app);
+            assert_eq!(again.port, original.port);
+            assert_eq!(again.hello(1.), original.hello(1.));
+        }
+    }
 }

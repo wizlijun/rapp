@@ -59,7 +59,19 @@ void main() {
       final accepted = server.first;
       await port.start(StartArgs(7, server.port, 'fixture-token', 'color16', 15, 'adaptive'));
       peer = await accepted.timeout(const Duration(seconds: 5));
-      peer.listen(received.addAll, onDone: disconnected.complete);
+      var parsed = 0;
+      peer.listen((bytes) {
+        received.addAll(bytes);
+        final all = Uint8List.fromList(received);
+        while (parsed + 5 <= all.length) {
+          final n = ByteData.sublistView(all).getUint32(parsed + 1, Endian.little);
+          if (parsed + 5 + n > all.length) break;
+          if (all[parsed] == 20) {
+            peer!.add(packet(21, [...all.sublist(parsed + 5, parsed + 9), ...string('')]));
+          }
+          parsed += 5 + n;
+        }
+      }, onDone: disconnected.complete);
       peer.add(packet(2, [...string('Fixture'), ...u16(4), ...u16(4)]));
       peer.add(packet(13, [...u16(1), ...u32(1), ...u32(0), 0, 2,
           ...f32(0), ...f32(0), ...f32(4), ...f32(4), ...f32(1), ...string('Window')]));
@@ -94,8 +106,9 @@ void main() {
         if (i + 5 + n > received.length) break;
         messages.add((received[i], received.sublist(i+5, i+5+n))); i += 5+n;
       }
-      expect(messages.map((m) => m.$1), containsAllInOrder([1,6,6,7,7,9,11,14,5]));
-      expect(utf8.decode(messages.last.$2), '你好');
+      expect(messages.map((m) => m.$1), containsAllInOrder([1,6,6,7,7,9,11,14,20]));
+      expect(messages.first.$2.first, 6);
+      expect(utf8.decode(messages.last.$2.sublist(7)), '你好');
       final resize = messages.firstWhere((m) => m.$1 == 9).$2;
       expect(resize, [...u32(1), ...u16(500), ...u16(300)]);
       final traffic = await nextWhere(events, (e) => e is TrafficEvent && e.frames > 0) as TrafficEvent;
@@ -126,9 +139,11 @@ void main() {
       peer.add(frame(true));
       final picture = await nextWhere(events, (e) => e is WindowsEvent && e.windows.any((w) => w.image != null)) as WindowsEvent;
       peer.add(frame(false)); // this frame waits, the error must not
-      peer.add(packet(3, string('fixture stopped')));
+      peer.add(packet(26, string('客厅的 Mac')));
+      expect((await nextWhere(events, (e) => e is InputBlockedEvent) as InputBlockedEvent).by, '客厅的 Mac');
+      peer.add(packet(3, string('taken over by 客厅的 Mac')));
       final end = await nextWhere(events, (e) => e is DisconnectedEvent) as DisconnectedEvent;
-      expect(end.reason, 'fixture stopped');
+      expect(end.reason, 'taken over by 客厅的 Mac');
       // Link loss retains the displayed red frame, even with a newer frame queued.
       final pixels = await picture.windows.single.image!.toByteData(format: ui.ImageByteFormat.rawRgba);
       expect(pixels!.buffer.asUint8List().take(4), [255, 0, 0, 255]);
@@ -205,6 +220,127 @@ void main() {
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null);
     }
   }, skip: !Platform.isLinux || !File(worker).existsSync() ? 'Build rapp-session first on Linux' : false);
+
+  test(
+    'composer waits for matching ack, keeps refused text and settles on disconnect',
+    () async {
+      final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      final port = LinuxSessionPort(worker, framePresented: () async {});
+      final events = StreamIterator(port.events);
+      final replies = <ComposerDone>[];
+      final observer = port.events.listen((e) {
+        if (e is ComposerStateEvent && e.done != null) replies.add(e.done!);
+      });
+      Socket? peer;
+      final commands = <int>[];
+      try {
+        await port.init();
+        final accepted = server.first;
+        await port.start(
+          StartArgs(31, server.port, 'token', 'color16', 15, 'adaptive'),
+        );
+        peer = await accepted;
+        peer.listen(commands.addAll);
+        peer.add(packet(2, [...string('Composer'), ...u16(4), ...u16(4)]));
+        await nextWhere(events, (e) => e is ReadyEvent);
+        port.composerSend(31, [
+          {'text': '第一段'},
+          {'text': '第二段'},
+        ]);
+        await nextWhere(
+          events,
+          (e) => e is ComposerStateEvent && e.sending == true,
+        );
+        // A duplicate send is ignored, and a stale acknowledgement cannot finish this one.
+        port.composerSend(31, [
+          {'text': '重复'},
+        ]);
+        peer.add(packet(21, [...u32(999), ...string('')]));
+        await Future<void>.delayed(const Duration(milliseconds: 40));
+        expect(replies, isEmpty);
+        peer.add(packet(21, [...u32(1), ...string('')]));
+        await Future<void>.delayed(const Duration(milliseconds: 40));
+        peer.add(packet(26, string('Mac')));
+        peer.add(packet(21, [...u32(2), ...string('A 正在被 Mac 操作')]));
+        final done =
+            await nextWhere(
+                  events,
+                  (e) => e is ComposerStateEvent && e.done != null,
+                )
+                as ComposerStateEvent;
+        expect(done.done!.sent, 1);
+        expect(done.done!.failure, 'A 正在被 Mac 操作');
+        port.composerSend(31, [
+          {'text': '第二段'},
+        ]);
+        await nextWhere(
+          events,
+          (e) => e is ComposerStateEvent && e.sending == true,
+        );
+        peer.add(
+          packet(21, [...u32(2), ...string('')]),
+        ); // late ack from previous round
+        await Future<void>.delayed(const Duration(milliseconds: 40));
+        expect(replies.length, 1);
+        peer.add(packet(3, string('taken over')));
+        await nextWhere(events, (e) => e is DisconnectedEvent);
+        final stopped =
+            await nextWhere(
+                  events,
+                  (e) => e is ComposerStateEvent && e.done != null,
+                )
+                as ComposerStateEvent;
+        expect(stopped.done!.sent, 0);
+        expect(stopped.done!.failure, contains('发送未确认'));
+      } finally {
+        await observer.cancel();
+        port.dispose();
+        await events.cancel();
+        peer?.destroy();
+        await server.close();
+      }
+    },
+    skip: !Platform.isLinux || !File(worker).existsSync()
+        ? 'Build rapp-session first on Linux'
+        : false,
+  );
+
+  test(
+    'expired clip pick reports a visible reason instead of doing nothing',
+    () async {
+      final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      final port = LinuxSessionPort(worker, framePresented: () async {});
+      final events = StreamIterator(port.events);
+      Socket? peer;
+      try {
+        await port.init();
+        final accepted = server.first;
+        await port.start(
+          StartArgs(32, server.port, 'token', 'color16', 15, 'adaptive'),
+        );
+        peer = await accepted;
+        peer.listen((_) {});
+        peer.add(packet(2, [...string('Clips'), ...u16(4), ...u16(4)]));
+        await nextWhere(events, (e) => e is ReadyEvent);
+        port.clipPick(32, 999, false);
+        expect(
+          (await nextWhere(events, (e) => e is TransferStatusEvent)
+                  as TransferStatusEvent)
+              .status,
+          '取用没成功：太旧了，A 已不保留',
+        );
+        expect((await port.fetchClip(32, 999)).error, 'unknown clip');
+      } finally {
+        port.dispose();
+        await events.cancel();
+        peer?.destroy();
+        await server.close();
+      }
+    },
+    skip: !Platform.isLinux || !File(worker).existsSync()
+        ? 'Build rapp-session first on Linux'
+        : false,
+  );
 
   test('malformed frame closes only the affected session', () async {
     final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
