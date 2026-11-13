@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:rapp/paths.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -87,7 +88,7 @@ void main() {
           t.emit({'event': 'opened', 'req': req, 'sid': 1, 'id': cmd['id'], 'app': cmd['app'], 'path': 'lan'});
       }
     };
-    s = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs());
+    s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs());
   });
 
   tearDown(() {
@@ -105,7 +106,7 @@ void main() {
       }
     });
     await tester.pumpWidget(wrap(
-      MainWindow(state: s, monitor: monitor, control: null, configDir: tmp.path, fullscreen: fs),
+      MainWindow(state: s, monitor: monitor, control: null, data: DataDir(tmp.path), fullscreen: fs),
       disableAnimations: true,
     ));
     await tester.pump(const Duration(milliseconds: 100));
@@ -365,7 +366,7 @@ void main() {
   testWidgets('ctrl-cmd-D toggles both ways', (tester) async {
     final port = FakeSessionPort();
     s.dispose();
-    s = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: port);
+    s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port);
     final base = t.onSend!;
     t.onSend = (cmd) {
       if (cmd['cmd'] != 'open') return base(cmd);
@@ -488,7 +489,7 @@ void main() {
   testWidgets('composer draft survives a trip through overview', (tester) async {
     s.dispose();
     final port = FakeSessionPort();
-    s = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: port);
+    s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port);
     await pump(tester);
     await tester.runAsync(() async {
       t.onSend = (m) {

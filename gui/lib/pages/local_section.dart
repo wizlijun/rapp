@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import '../paths.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 
@@ -38,7 +39,7 @@ class LocalSection extends StatefulWidget {
     super.key,
     required this.monitor,
     required this.control,
-    required this.configDir,
+    required this.data,
     this.openSettings = openSettingsPane,
     this.hooks,
     this.openPage = openInstallerPage,
@@ -48,7 +49,7 @@ class LocalSection extends StatefulWidget {
   final TargetPlatform? platform;
   final ServiceMonitor monitor;
   final ServiceController? control;
-  final String configDir;
+  final DataDir data;
   final Future<void> Function(Permission) openSettings;
 
   /// Null (tests): the update buttons only send the command.
@@ -119,7 +120,7 @@ class _LocalSectionState extends State<LocalSection> {
     }
     if (_guideDecided) return;
     _guideDecided = true;
-    if (_missing && claimPermissionGuide(widget.configDir)) {
+    if (_missing && claimPermissionGuide(widget.data.localDir)) {
       _lostGuided = true;
       _guideNextFrame();
     }
@@ -182,7 +183,7 @@ class _LocalSectionState extends State<LocalSection> {
   /// relay/key are not in `status`; prefill them from service.json if readable.
   Map<String, dynamic> _serviceJson() {
     try {
-      final f = File('${widget.configDir}${Platform.pathSeparator}service.json');
+      final f = File('${widget.data.localDir}${Platform.pathSeparator}service.json');
       final v = jsonDecode(f.readAsStringSync());
       return v is Map<String, dynamic> ? v : {};
     } catch (_) {

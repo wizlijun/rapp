@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/paths.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/ui/controls.dart';
@@ -35,7 +36,7 @@ void main() {
     await tester.runAsync(flush);
     s = MainState(
       hub: HubClient(t),
-      configDir: tmp.path,
+      data: DataDir(tmp.path),
       prefs: UiPrefs(),
       port: port,
       clock: () => DateTime(2026, 11, 12, 9, 5),

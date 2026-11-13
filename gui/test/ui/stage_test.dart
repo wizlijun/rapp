@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:ui' as ui;
+import 'package:rapp/paths.dart';
 import 'package:flutter/services.dart';
 
 import 'package:flutter/gestures.dart';
@@ -49,7 +50,7 @@ void main() {
       ],
     });
     await flush();
-    s = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs());
+    s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs());
   });
 
   tearDown(() {
@@ -195,7 +196,7 @@ void main() {
 
     setUp(() {
       port = FakeSessionPort();
-      es = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: port);
+      es = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port);
     });
     tearDown(() => es.dispose());
 
@@ -222,7 +223,7 @@ void main() {
       es.dispose();
       final keyboard = _KeyboardPort();
       port = keyboard;
-      es = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: port);
+      es = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port);
       final recorder = ui.PictureRecorder();
       final canvas = Canvas(recorder);
       canvas.drawColor(Colors.red, BlendMode.src);
@@ -640,7 +641,7 @@ void main() {
         state: es,
         monitor: ServiceMonitor(readToken: () async => null),
         control: null,
-        configDir: tmp.path,
+        data: DataDir(tmp.path),
         fullscreen: _NoFullscreen(),
       )));
       final size = tester.getSize(find.byKey(const Key('stage')));
@@ -995,7 +996,7 @@ void main() {
         state: es,
         monitor: monitor,
         control: null,
-        configDir: tmp.path,
+        data: DataDir(tmp.path),
         fullscreen: _NoFullscreen(),
       )));
       await openEmbedded(tester);

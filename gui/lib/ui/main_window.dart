@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import '../paths.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -31,7 +32,7 @@ class MainWindow extends StatefulWidget {
     required this.state,
     required this.monitor,
     required this.control,
-    required this.configDir,
+    required this.data,
     required this.fullscreen,
     this.hooks,
   });
@@ -39,7 +40,7 @@ class MainWindow extends StatefulWidget {
   final MainState state;
   final ServiceMonitor monitor;
   final ServiceController? control;
-  final String configDir;
+  final DataDir data;
   final FullscreenControl fullscreen;
 
   /// How the update buttons quit rapp (K28).
@@ -95,7 +96,7 @@ class _MainWindowState extends State<MainWindow> {
         LocalSection(
           monitor: widget.monitor,
           control: widget.control,
-          configDir: widget.configDir,
+          data: widget.state.data,
           hooks: widget.hooks,
         ),
         ListenableBuilder(

@@ -89,14 +89,6 @@ class DataDir {
   }
 }
 
-/// Deprecated: the old flat config dir (the data root's `local/` replaces it).
-@Deprecated('use dataRoot')
-String configDir(Map<String, String> env, String os) {
-  final override = env['RAPP_HOME'];
-  if (override != null && override.isNotEmpty) return override;
-  return platformConfigDir(env, os);
-}
-
 /// Where the rapp logs go: the same rules as `rapp_net::log::log_dir` (observability spec §3).
 String logDir(Map<String, String> env, String os) {
   String? v(String k) => (env[k] == null || env[k]!.isEmpty) ? null : env[k];

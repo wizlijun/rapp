@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:rapp/paths.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/hub_client.dart';
@@ -71,7 +72,7 @@ void main() {
           t.emit({'event': 'opened', 'req': req, 'sid': 1, 'id': cmd['id'], 'app': cmd['app'], 'path': 'lan'});
       }
     };
-    s = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs());
+    s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs());
   });
 
   tearDown(() {
@@ -167,7 +168,7 @@ void main() {
   testWidgets('no second apps while one is pending', (tester) async {
     holdApps = true;
     s.dispose();
-    s = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs()); // asks again, now held
+    s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs()); // asks again, now held
     await pumpTab(tester, settle: false);
     int n() => t.sent.where((m) => m['cmd'] == 'apps').length;
     final first = n();

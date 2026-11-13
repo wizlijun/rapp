@@ -136,9 +136,9 @@ Future<void> promptThenOpen(Future<void> Function() prompt, Future<void> Functio
   await open();
 }
 
-/// True the first time it is called for [configDir] (it leaves a marker file), false after.
-bool claimPermissionGuide(String configDir) {
-  final f = File('$configDir${Platform.pathSeparator}permission-guide-shown');
+/// True the first time it is called for [localDir] (it leaves a marker file), false after.
+bool claimPermissionGuide(String localDir) {
+  final f = File('$localDir${Platform.pathSeparator}permission-guide-shown');
   if (f.existsSync()) return false;
   try {
     f.createSync(recursive: true);

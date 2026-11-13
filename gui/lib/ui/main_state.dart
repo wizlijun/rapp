@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:ui' show Size;
 
+import '../paths.dart';
 import 'package:flutter/foundation.dart';
 
 import '../embed/geometry.dart' show PictureHole;
@@ -52,7 +53,7 @@ class MainState extends ChangeNotifier {
   MainState({
     required this.hub,
     this.hubError,
-    required this.configDir,
+    required this.data,
     required this.prefs,
     this.port,
     this.doubleClick = const Duration(milliseconds: 500),
@@ -62,7 +63,7 @@ class MainState extends ChangeNotifier {
     _portSub = port?.events.listen(_onPortEvent);
     hub?.addListener(_onHub);
     _lastError = hub?.lastError;
-    final loaded = loadWorkspace(configDir);
+    final loaded = loadWorkspace(data.sharedDir);
     workspace = loaded.workspace;
     if (loaded.problem != null) hint = loaded.problem!;
     _entries = _mapEntries();
@@ -71,14 +72,15 @@ class MainState extends ChangeNotifier {
 
   final HubClient? hub;
   final String? hubError;
-  final String configDir;
+  /// The data root; mutable so a relocation can swap it.
+  DataDir data;
   final UiPrefs prefs;
   final SessionPort? port;
 
   /// Clipboard entries and transfers of every session.
   final ResourcesState resources;
 
-  /// Favourites and projects, loaded from `workspace.json` in [configDir].
+  /// Favourites and projects, loaded from `workspace.json` in `shared/`.
   late final Workspace workspace;
 
   /// The double-click interval the runner reported (`init`), for counting clicks (R14).
@@ -1057,7 +1059,8 @@ class MainState extends ChangeNotifier {
 
   void _save() {
     try {
-      prefs.save(configDir);
+      final dir = data.prefsDir();
+      if (dir != null) prefs.save(dir); // no device id yet: keep defaults, write nothing (R22)
     } catch (e) {
       hint = '偏好没有保存：${_fsReason(e)}';
     }
@@ -1239,7 +1242,7 @@ class MainState extends ChangeNotifier {
 
   void _saveWorkspace() {
     try {
-      saveWorkspace(configDir, workspace);
+      saveWorkspace(data.sharedDir, workspace);
     } catch (e) {
       hint = '项目和常用没有保存：${_fsReason(e)}';
     }

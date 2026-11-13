@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:rapp/paths.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -35,7 +36,7 @@ void main() {
     });
     await flush();
     port = FakeSessionPort();
-    es = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: port);
+    es = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port);
   });
 
   tearDown(() {
