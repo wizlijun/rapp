@@ -4,13 +4,18 @@
 //! Every bidirectional stream a device opens carries one request line and gets one reply line.
 //! A connection whose fingerprint is not enrolled may only `enroll`. Enrolled devices `register`
 //! their ID and `connect` to each other's (§5.1, §8); every enrolled connection gets the
-//! revocation list when it comes online and whenever the list changes (§7.4).
+//! revocation list when it comes online and whenever the list changes (§7.4). A `relay` request
+//! turns its stream into one half of a splice to a fresh stream on the target's connection; from
+//! then on the relay only moves (and counts) bytes it never reads into anything (§5.3).
 
 use std::collections::HashMap;
+use std::io;
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::task::{Context as TaskContext, Poll};
 use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context, Result};
@@ -20,11 +25,11 @@ use rapp_wire::msg::{is_valid_id, Push, Req, MAX_LAN, MAX_LAN_LEN};
 use rapp_wire::tls::{self, BiStream};
 use rapp_wire::{join_hash, Fp, Identity};
 use serde_json::{json, Value};
-use tokio::io::BufReader;
+use tokio::io::{AsyncRead, AsyncWrite, BufReader, ReadBuf};
 
 use crate::audit::Audit;
 use crate::config::{Config, Enroll};
-use crate::limits::{source_key, Backoff, ConnGuard, Conns, Rate};
+use crate::limits::{source_key, Backoff, Bucket, ConnGuard, Conns, Rate};
 use crate::store::{Bind, FileRegistry, Registry};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -43,6 +48,14 @@ const INCOMING_WAIT: Duration = Duration::from_secs(2);
 
 const BAD_REQUEST: &str = "bad request";
 const OFFLINE: &str = "offline";
+
+/// Copy buffer per splice direction.
+const SPLICE_BUF: usize = 64 * 1024;
+
+/// A relayed stream shorter than this and smaller than `PROBE_BYTES` (both directions together)
+/// is an online probe: counted into the hourly `probes` line, not audited on its own (§11.1).
+const PROBE_TIME: Duration = Duration::from_secs(5);
+const PROBE_BYTES: u64 = 8192;
 
 pub struct Opts {
     pub data: PathBuf,
@@ -75,11 +88,16 @@ struct Shared {
     enroll_backoff: Backoff,
     /// Makes the device-cap check and the registry write one step.
     enroll_lock: Mutex<()>,
-    /// `connect` failures (`bad id`, `unknown id`), keyed `fp:<fp>` and `ip:<source>`.
+    /// `connect` and `relay` failures (`bad id`, `unknown id`), keyed `fp:<fp>` and `ip:<source>`.
     connect_backoff: Backoff,
-    /// `connect`s per target ID, all initiators together.
+    /// `connect`s per target ID, all initiators together (not `relay`s: probes run every few seconds).
     connect_rate: Rate,
     online: Mutex<Online>,
+    /// Streams being relayed to each target device, by its fingerprint (`max_relayed_per_device`).
+    /// The sum of the values is the number of live splices.
+    relayed: Arc<Mutex<HashMap<Fp, usize>>>,
+    /// All relayed bytes together (`relay_bps_total`).
+    relay_total: Arc<Bucket>,
 }
 
 /// The live connections. One lock covers both tables, so an admission, a `register` and a
@@ -144,6 +162,8 @@ impl Relay {
             connect_backoff: Backoff::new(l.lock_after, l.lock_max_secs),
             connect_rate: Rate::new(l.connect_per_target_per_min),
             online: Mutex::new(Online::default()),
+            relayed: Arc::default(),
+            relay_total: Arc::new(Bucket::new(l.relay_bps_total)),
             config,
         });
         let accept = tokio::spawn(accept_loop(shared.clone(), endpoint.clone()));
@@ -284,9 +304,15 @@ async fn stream(s: Arc<Shared>, peer: Arc<Peer>, st: BiStream) {
         Ok(Ok(v)) => v,
     };
     let Ok(req) = serde_json::from_value::<Req>(line) else { return reply(st, err(BAD_REQUEST)).await };
-    // Task 10: `Req::Relay` takes over `st` here instead of getting a reply line.
-    let res = s.request(&peer, req).await;
-    reply(st, res).await;
+    match req {
+        // The same reader that read the line: what it buffered after it is the initiator's
+        // TLS handshake.
+        Req::Relay { id } if peer.enrolled() => s.relay(&peer, &id, st).await,
+        req => {
+            let res = s.request(&peer, req).await;
+            reply(st, res).await;
+        }
+    }
 }
 
 impl Shared {
@@ -296,7 +322,7 @@ impl Shared {
             _ if !peer.enrolled() => err("not enrolled"),
             Req::Register { id, lan } => self.register(peer, id, lan),
             Req::Connect { id } => self.connect(peer, &id).await,
-            // Task 10: relay.
+            // Enrolled `relay`s take over their stream in `stream`.
             Req::Relay { .. } => err(BAD_REQUEST),
         }
     }
@@ -456,29 +482,16 @@ impl Shared {
     /// is normal, and `limit` is the target's budget, not the initiator's fault.
     async fn try_connect(&self, peer: &Arc<Peer>, id: &str) -> Result<Value, String> {
         let now = Instant::now();
-        let keys = [format!("fp:{}", peer.fp), format!("ip:{}", source_key(peer.from.ip()))];
-        if !is_valid_id(id) {
-            self.connect_failed(&keys, now);
-            return Err("bad id".into());
-        }
-        if let Some(secs) = keys.iter().filter_map(|k| self.connect_backoff.locked(k, now)).max() {
-            return Err(format!("locked, retry in {secs}s"));
-        }
-        let Some(holder) = self.registry.by_id(id) else {
-            self.connect_failed(&keys, now);
-            return Err("unknown id".into());
-        };
+        let keys = backoff_keys(peer);
+        let holder = self.lookup(&keys, id, now)?;
         // After the lookup, so made-up IDs cannot fill the rate table (the backoff covers those).
         if !self.connect_rate.allow(id, now) {
             self.limit("connect_per_target_per_min", Some(&peer.fp), peer.from);
             return Err("limit".into());
         }
-        let target = {
-            let on = self.online();
-            let r = on.by_id.get(id).filter(|r| r.peer.fp == holder.fp && r.peer.tenant == peer.tenant);
-            r.map(|r| (r.peer.clone(), r.lan.clone()))
+        let Some(Registered { peer: target, lan }) = self.reachable(id, &holder, &peer.tenant) else {
+            return Err(OFFLINE.into());
         };
-        let Some((target, lan)) = target else { return Err(OFFLINE.into()) };
         if !introduce(&target, peer, self.config.limits.max_line).await {
             return Err(OFFLINE.into());
         }
@@ -488,12 +501,88 @@ impl Shared {
         Ok(ok(json!({"lan": lan, "public": target.from.to_string()})))
     }
 
+    /// The first checks `connect` and `relay` share: the initiator's lock (first, so a locked
+    /// client costs nothing more), the ID format, then the registry. The last two are failures.
+    fn lookup(&self, keys: &[String; 2], id: &str, now: Instant) -> Result<Fp, String> {
+        if let Some(secs) = keys.iter().filter_map(|k| self.connect_backoff.locked(k, now)).max() {
+            return Err(format!("locked, retry in {secs}s"));
+        }
+        if !is_valid_id(id) {
+            self.connect_failed(keys, now);
+            return Err("bad id".into());
+        }
+        let Some(holder) = self.registry.by_id(id) else {
+            self.connect_failed(keys, now);
+            return Err("unknown id".into());
+        };
+        Ok(holder.fp)
+    }
+
+    /// The live connection registered as `id`, if it is still `holder`'s and in `tenant`.
+    fn reachable(&self, id: &str, holder: &Fp, tenant: &str) -> Option<Registered> {
+        let on = self.online();
+        let r = on.by_id.get(id).filter(|r| r.peer.fp == *holder && r.peer.tenant == tenant)?;
+        Some(Registered { peer: r.peer.clone(), lan: r.lan.clone() })
+    }
+
+    /// Counts one failure on each key; `lockout` is audited only by the failure that locks a key
+    /// that was not locked, never again while it stays locked.
     fn connect_failed(&self, keys: &[String], now: Instant) {
         for k in keys {
+            let was_locked = self.connect_backoff.locked(k, now).is_some();
             if let Some(secs) = self.connect_backoff.fail(k, now) {
-                self.audit.event("lockout", json!({"key": k, "secs": secs}), true);
+                if !was_locked {
+                    self.audit.event("lockout", json!({"key": k, "secs": secs}), true);
+                }
             }
         }
+    }
+
+    /// `relay`: splices `st` to a fresh stream on the target's connection. Success gets no reply
+    /// line (the target's bytes come next); a failure gets one.
+    async fn relay(&self, peer: &Arc<Peer>, id: &str, st: BufReader<BiStream>) {
+        let (target, slot) = match self.relay_target(peer, id) {
+            Ok(t) => t,
+            Err(e) => return reply(st, err(&e)).await,
+        };
+        let push = Push::Relayed { peer: peer.from.to_string(), fp: peer.fp };
+        let open = async {
+            let (mut send, recv) = target.conn.open_bi().await?;
+            write_json(&mut send, &push).await?;
+            anyhow::Ok(tls::bi((send, recv)))
+        };
+        let Ok(Ok(to)) = tokio::time::timeout(INCOMING_WAIT, open).await else {
+            return reply(st, err(OFFLINE)).await;
+        };
+        let end = SpliceEnd { audit: self.audit.clone(), fp: peer.fp, from: peer.from, to: id.to_string() };
+        let per_stream = self.config.limits.relay_bps_per_stream;
+        let total = self.relay_total.clone();
+        // No request timeout from here on: QUIC's idle timeout ends a splice with a dead side.
+        tokio::spawn(async move {
+            let _slot = slot;
+            let start = Instant::now();
+            let (up, down) = if per_stream == 0 && total.unlimited() {
+                splice(st, to).await
+            } else {
+                splice_metered(st, to, &Bucket::new(per_stream), &total).await
+            };
+            end.record(start.elapsed(), up, down);
+        });
+    }
+
+    /// The checks before a splice (ruling R13: the connect backoff, but no per-target rate and no
+    /// reset on success). Returns the target and its slot under `max_relayed_per_device`.
+    fn relay_target(&self, peer: &Peer, id: &str) -> Result<(Arc<Peer>, RelaySlot), String> {
+        let keys = backoff_keys(peer);
+        let holder = self.lookup(&keys, id, Instant::now())?;
+        let Some(Registered { peer: target, .. }) = self.reachable(id, &holder, &peer.tenant) else {
+            return Err(OFFLINE.into());
+        };
+        let Some(slot) = RelaySlot::take(&self.relayed, target.fp, self.config.limits.max_relayed_per_device) else {
+            self.limit("max_relayed_per_device", Some(&peer.fp), peer.from);
+            return Err("limit".into());
+        };
+        Ok((target, slot))
     }
 
     /// One enrollment attempt; every attempt is audited with its result.
@@ -580,8 +669,171 @@ async fn push_uni(conn: &quinn::Connection, push: &Push) -> Result<()> {
     Ok(())
 }
 
+/// The `connect_backoff` keys of an initiator.
+fn backoff_keys(peer: &Peer) -> [String; 2] {
+    [format!("fp:{}", peer.fp), format!("ip:{}", source_key(peer.from.ip()))]
+}
+
+/// One place under `max_relayed_per_device` for a target; given back on drop, whichever way the
+/// splice ends.
+struct RelaySlot {
+    fp: Fp,
+    counts: Arc<Mutex<HashMap<Fp, usize>>>,
+}
+
+impl RelaySlot {
+    fn take(counts: &Arc<Mutex<HashMap<Fp, usize>>>, fp: Fp, max: usize) -> Option<RelaySlot> {
+        let mut c = counts.lock().unwrap_or_else(|e| e.into_inner());
+        let n = c.entry(fp).or_insert(0);
+        if *n >= max {
+            if *n == 0 {
+                c.remove(&fp);
+            }
+            return None;
+        }
+        *n += 1;
+        Some(RelaySlot { fp, counts: counts.clone() })
+    }
+}
+
+impl Drop for RelaySlot {
+    fn drop(&mut self) {
+        let mut c = self.counts.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(n) = c.get_mut(&self.fp) {
+            *n = n.saturating_sub(1);
+            if *n == 0 {
+                c.remove(&self.fp);
+            }
+        }
+    }
+}
+
+/// What the end of a splice is audited with.
+struct SpliceEnd {
+    audit: Audit,
+    /// The initiator.
+    fp: Fp,
+    from: SocketAddr,
+    /// The target ID.
+    to: String,
+}
+
+impl SpliceEnd {
+    /// `took` is wall time since the splice started; `secs` in the record is that rounded down
+    /// to the millisecond. `up` is initiator → target, `down` the other way.
+    fn record(&self, took: Duration, up: u64, down: u64) {
+        if took < PROBE_TIME && up.saturating_add(down) < PROBE_BYTES {
+            return self.audit.probe(&self.fp, &self.to);
+        }
+        let secs = took.as_millis() as f64 / 1000.0;
+        let (fp, from) = (self.fp.to_string(), self.from.to_string());
+        let fields = json!({"fp": fp, "from": from, "to": self.to, "secs": secs, "up": up, "down": down});
+        self.audit.event("relayed", fields, false);
+    }
+}
+
+/// The unmetered splice: no locks, 64 KiB per direction. When one side finishes, the other's
+/// send half is finished; when either fails (reset, stopped, connection gone), both are reset.
+/// Returns the bytes read from each side, `(initiator → target, target → initiator)`.
+async fn splice(a: BufReader<BiStream>, b: BiStream) -> (u64, u64) {
+    let (mut a, mut b) = (Counted::new(a), Counted::new(b));
+    let res = tokio::io::copy_bidirectional_with_sizes(&mut a, &mut b, SPLICE_BUF, SPLICE_BUF).await;
+    let counts = (a.n, b.n);
+    if res.is_err() {
+        reset_bi(a.inner.into_inner());
+        reset_bi(b.inner);
+    }
+    counts
+}
+
+/// The metered splice: every chunk passes the stream's `own` bucket (shared by both directions)
+/// and the relay-wide `total` one before it is written. Ends like `splice`.
+async fn splice_metered(a: BufReader<BiStream>, b: BiStream, own: &Bucket, total: &Bucket) -> (u64, u64) {
+    let first = a.buffer().to_vec();
+    let (mut a_recv, mut a_send) = a.into_inner().into_inner();
+    let (mut b_recv, mut b_send) = b.into_inner();
+    let (mut up, mut down) = (0, 0);
+    let res = tokio::try_join!(
+        pace(&mut a_recv, &mut b_send, &first, [own, total], &mut up),
+        pace(&mut b_recv, &mut a_send, &[], [own, total], &mut down),
+    );
+    if res.is_err() {
+        reset_bi(tokio::io::join(a_recv, a_send));
+        reset_bi(tokio::io::join(b_recv, b_send));
+    }
+    (up, down)
+}
+
+/// One metered direction: `first` (already read), then everything from `from`, then finish `to`.
+async fn pace(
+    from: &mut quinn::RecvStream,
+    to: &mut quinn::SendStream,
+    first: &[u8],
+    buckets: [&Bucket; 2],
+    n: &mut u64,
+) -> io::Result<()> {
+    let mut buf = vec![0u8; SPLICE_BUF];
+    let mut chunk = first.len();
+    buf[..chunk].copy_from_slice(first);
+    loop {
+        if chunk > 0 {
+            for b in buckets {
+                b.take(chunk).await;
+            }
+            to.write_all(&buf[..chunk]).await?;
+            *n += chunk as u64;
+        }
+        match from.read(&mut buf).await? {
+            Some(k) => chunk = k,
+            None => break,
+        }
+    }
+    to.finish()?;
+    Ok(())
+}
+
+/// Counts the bytes read through it, so a splice that fails still has its sizes.
+struct Counted<T> {
+    inner: T,
+    n: u64,
+}
+
+impl<T> Counted<T> {
+    fn new(inner: T) -> Counted<T> {
+        Counted { inner, n: 0 }
+    }
+}
+
+impl<T: AsyncRead + Unpin> AsyncRead for Counted<T> {
+    fn poll_read(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+        let before = buf.filled().len();
+        let res = Pin::new(&mut self.inner).poll_read(cx, buf);
+        self.n += (buf.filled().len() - before) as u64;
+        res
+    }
+}
+
+impl<T: AsyncWrite + Unpin> AsyncWrite for Counted<T> {
+    fn poll_write(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>, buf: &[u8]) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.inner).poll_write(cx, buf)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
+}
+
 fn reset(st: BufReader<BiStream>) {
-    let (mut recv, mut send) = st.into_inner().into_inner();
+    reset_bi(st.into_inner());
+}
+
+/// Resets the send half and stops the receive half, so the peer sees an error, not a clean end.
+fn reset_bi(st: BiStream) {
+    let (mut recv, mut send) = st.into_inner();
     let _ = send.reset(0u32.into());
     let _ = recv.stop(0u32.into());
 }

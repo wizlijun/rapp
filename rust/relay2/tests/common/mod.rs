@@ -152,6 +152,22 @@ impl FakeDevice {
         self.req(&Req::Connect { id: id.into() }).await
     }
 
+    /// Sends a `relay` request and returns the stream without waiting for anything. On success
+    /// the first bytes on it come from the target; on failure it carries one JSON line.
+    pub async fn relay_to(&self, id: &str) -> Result<BufReader<BiStream>> {
+        self.relay_to_with(id, &[]).await
+    }
+
+    /// Like `relay_to`, with `first` sent in the same write as the request line.
+    pub async fn relay_to_with(&self, id: &str, first: &[u8]) -> Result<BufReader<BiStream>> {
+        let (mut send, recv) = self.conn.open_bi().await?;
+        let mut bytes = serde_json::to_vec(&Req::Relay { id: id.into() })?;
+        bytes.push(b'\n');
+        bytes.extend_from_slice(first);
+        send.write_all(&bytes).await?;
+        Ok(BufReader::new(tls::bi((send, recv))))
+    }
+
     /// This device's address as the relay sees it.
     pub fn local_addr(&self) -> SocketAddr {
         self._endpoint.local_addr().unwrap()
@@ -168,6 +184,17 @@ impl FakeDevice {
         loop {
             if let Push::Incoming { peer, fp } = self.next_push().await {
                 return (peer, fp);
+            }
+        }
+    }
+
+    /// The next `Relayed` as `(peer, fp, stream)`, skipping other pushes. The stream starts right
+    /// after the `Relayed` line: what follows is the initiator's bytes.
+    pub async fn next_relayed(&mut self) -> (String, Fp, BiStream) {
+        loop {
+            let got = tokio::time::timeout(WAIT, self.pushes.recv()).await.expect("a push within WAIT");
+            if let (Push::Relayed { peer, fp }, Some(st)) = got.expect("push channel open") {
+                return (peer, fp, st);
             }
         }
     }
@@ -208,8 +235,8 @@ impl FakeDevice {
     }
 }
 
-/// Hands every stream the relay opens to `tx`: bi streams with their first line read,
-/// uni streams read whole. Ends quietly when the connection does. With `auto_reply`, every
+/// Hands every stream the relay opens to `tx`: bi streams with their first line read (a byte at a
+/// time, so a `Relayed` stream is handed on right after its line), uni streams read whole. Ends quietly when the connection does. With `auto_reply`, every
 /// `Incoming` is answered `{"ok":true}` before it is handed on.
 async fn pump(conn: quinn::Connection, tx: mpsc::UnboundedSender<(Push, Option<BiStream>)>, auto_reply: bool) {
     loop {

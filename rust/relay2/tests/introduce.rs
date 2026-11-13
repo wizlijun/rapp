@@ -232,6 +232,23 @@ async fn hammering_connect_backs_off() {
 }
 
 #[tokio::test]
+async fn a_locked_client_does_not_flood_lockout_lines() {
+    let r = start_relay(|_| {}).await;
+    let b = FakeDevice::enrolled(&r).await;
+    for _ in 0..5 {
+        assert_eq!(b.connect_to(A_ID).await["error"], "unknown id");
+    }
+    let before = audit_lines(&r, "lockout").len();
+    assert_eq!(before, 2);
+    for _ in 0..5 {
+        // Locked comes before the ID format: a locked client cannot make the relay fsync.
+        let v = b.connect_to("12").await;
+        assert!(v["error"].as_str().unwrap().starts_with("locked, retry in "), "{v}");
+    }
+    assert_eq!(audit_lines(&r, "lockout").len(), before);
+}
+
+#[tokio::test]
 async fn polling_an_offline_host_does_not_lock_the_poller_out() {
     let r = start_relay(|_| {}).await;
     let id = Identity::generate().unwrap();
