@@ -4,6 +4,7 @@ import 'package:rapp/paths.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/app_profile.dart';
 import 'package:rapp/embed/composer_bar.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
@@ -183,6 +184,44 @@ void main() {
       await tester.tap(find.text('←'));
       await tester.pump();
       expect(callsOf('key').single, equals({'sid': 2, 'keyCode': 123, 'modifiers': 0}));
+    });
+
+    testWidgets('no 「输入」 button and no bar while composerAllowed is false; both come back', (tester) async {
+      RemoteWindow rw(int id, WindowKind k) => RemoteWindow(
+          id: id,
+          parent: 0,
+          kind: k,
+          title: 'w$id',
+          rect: const Rect.fromLTWH(0, 0, 100, 100),
+          titleBar: 28,
+          resizable: true,
+          focused: false,
+          texture: id,
+          visible: const Rect.fromLTWH(0, 0, 1, 1));
+      rs.setProfile(const ResolvedProfile(
+          name: 'X', windows: [WindowRule(kind: WindowKind.dialog, action: RuleAction.noComposer)]));
+      rs.apply(WindowsEvent(1, [rw(1, WindowKind.normal)]));
+      rs.apply(WindowsEvent(1, [rw(1, WindowKind.normal), rw(2, WindowKind.dialog)]));
+      rs.composer.text = '草稿';
+      await tester.pumpWidget(wrap(SizedBox(
+          width: 900, height: 400, child: Stack(children: composerLayer(state: es, session: rs, port: port)))));
+      expect(find.byKey(const Key('composer-bar')), findsNothing);
+      expect(find.byKey(const Key('composer-open')), findsNothing);
+      rs.selectWindow(1);
+      await tester.pump();
+      expect(find.byKey(const Key('composer-bar')), findsOneWidget);
+      expect(find.text('草稿'), findsOneWidget);
+    });
+
+    testWidgets('the upload strip and cancel stay while composerAllowed is false; only 输入 goes', (tester) async {
+      rs.setProfile(const ResolvedProfile(name: 'X', composer: false));
+      rs.apply(const TransferStatusEvent(1, '上传 1/2 · a.txt'));
+      await tester.pumpWidget(wrap(SizedBox(
+          width: 900, height: 400, child: Stack(children: composerLayer(state: es, session: rs, port: port)))));
+      expect(find.byKey(const Key('composer-open')), findsNothing);
+      expect(find.text('上传 1/2 · a.txt'), findsOneWidget);
+      await tester.tap(find.text('取消'));
+      expect(callsOf('cancel_transfer').single, equals({'sid': 1}));
     });
 
     testWidgets('an upload shows its status with a cancel', (tester) async {

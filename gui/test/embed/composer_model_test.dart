@@ -158,4 +158,34 @@ void main() {
     expect(m.blocks.map((b) => b.n), [2]);
     expect(dropped, [1]);
   });
+
+  test('onAllSent only after every piece went', () {
+    var n = 0;
+    final m = ComposerModel(onAllSent: () => n++);
+    m.text = 'hi';
+    m.apply(const PasteResult(blocks: [BlockChip(1, 'a.png')]));
+    m.send();
+    m.done(1, 'A 上贴不进去');
+    expect(n, 0);
+    m.send();
+    m.done(0, ''); // cancelled before anything went
+    expect(n, 0);
+    m.send();
+    m.done(0, null);
+    expect(n, 0);
+    m.send(); // the block already went in round one: only the text is left
+    m.done(1, null);
+    expect(n, 1);
+    m.done(0, null);
+    expect(n, 1);
+  });
+
+  test('blocks only: one piece, one Return', () {
+    var n = 0;
+    final m = ComposerModel(onAllSent: () => n++);
+    m.apply(const PasteResult(blocks: [BlockChip(1, 'a.png')]));
+    m.send();
+    m.done(1, null);
+    expect(n, 1);
+  });
 }

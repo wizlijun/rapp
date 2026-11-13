@@ -2,6 +2,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -15,6 +16,7 @@ import 'data_relocate.dart';
 import 'paths.dart';
 import 'service_client.dart';
 import 'service_control.dart';
+import 'ui/app_profile_store.dart';
 import 'ui/fullscreen.dart';
 import 'tray_menu.dart';
 import 'ui/main_state.dart';
@@ -75,8 +77,19 @@ Future<void> main(List<String> args) async {
       stderr.writeln('rapp: embedded sessions unavailable: $e');
     }
   }
-  final state =
-      MainState(hub: hub, hubError: hubError, data: data, prefs: prefs, port: port, doubleClick: doubleClick);
+  String? builtin;
+  try {
+    builtin = await rootBundle.loadString('assets/app_profiles.json');
+  } catch (_) {}
+  final state = MainState(
+      hub: hub,
+      hubError: hubError,
+      data: data,
+      prefs: prefs,
+      port: port,
+      doubleClick: doubleClick,
+      profiles: AppProfileStore.load(data.sharedDir, builtin),
+      log: stderr.writeln);
   mainState = state;
   await _showWindow(const Size(1194, 834), 'rapp');
   if (prefs.startFullscreen) await WindowManagerFullscreen().setFullScreen(true);

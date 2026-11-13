@@ -27,6 +27,8 @@ class StreamMenuAnchor extends StatefulWidget {
     required this.onReconnect,
     required this.onEnd,
     this.onToggleDetach,
+    this.onRememberStream,
+    this.onOpenProfile,
     required this.open,
     required this.onToggle,
     required this.onClose,
@@ -84,6 +86,10 @@ class StreamMenuAnchor extends StatefulWidget {
   /// 「分离成独立窗口」/「放回主窗口」 (Task 12); null greys the item.
   final VoidCallback? onToggleDetach;
 
+  /// 「记为这个 app 的默认」 and 「app 配置…」; null greys the item.
+  final VoidCallback? onRememberStream;
+  final VoidCallback? onOpenProfile;
+
   @override
   State<StreamMenuAnchor> createState() => _StreamMenuAnchorState();
 }
@@ -108,6 +114,8 @@ class _StreamMenuAnchorState extends State<StreamMenuAnchor> {
         onClose: widget.onClose,
         onEnd: widget.onEnd,
         onToggleDetach: widget.onToggleDetach,
+        onRememberStream: widget.onRememberStream,
+        onOpenProfile: widget.onOpenProfile,
         clips: widget.clips,
         canCopy: widget.canCopy,
         canInsert: widget.canInsert,
@@ -145,6 +153,8 @@ class StreamMenu extends StatefulWidget {
     required this.onClose,
     required this.onEnd,
     this.onToggleDetach,
+    this.onRememberStream,
+    this.onOpenProfile,
     required this.clips,
     required this.canCopy,
     required this.canInsert,
@@ -171,6 +181,8 @@ class StreamMenu extends StatefulWidget {
   final VoidCallback onClose;
   final VoidCallback onEnd;
   final VoidCallback? onToggleDetach;
+  final VoidCallback? onRememberStream;
+  final VoidCallback? onOpenProfile;
 
   @override
   State<StreamMenu> createState() => _StreamMenuState();
@@ -258,6 +270,8 @@ class _StreamMenuState extends State<StreamMenu> {
               _head(t, '帧率'),
               for (final (label, f) in const [('1 fps', 1), ('5 fps', 5), ('15 fps', 15), ('30 fps（看视频）', 30)])
                 _Item(label, checked: c.fps == f, onTap: () => _choose(c.copyWith(fps: f))),
+              _Item('记为这个 app 的默认', enabled: widget.onRememberStream != null, onTap: () => _then(widget.onRememberStream!)),
+              _Item('app 配置…', enabled: widget.onOpenProfile != null, onTap: () => _then(widget.onOpenProfile!)),
               _head(t, 'A 的剪贴板'),
               if (widget.clips.isEmpty) _Item('（空）', enabled: false),
               for (final e in widget.clips.take(2))

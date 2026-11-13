@@ -21,6 +21,7 @@ void main() {
   late ResourcesState res;
   final copied = <int>[];
   var allClips = 0;
+  var remembered = 0, profileOpened = 0;
   var greyClip = -1;
 
   bool called(String name, Map<String, Object?> args) =>
@@ -35,6 +36,8 @@ void main() {
     reconnects = 0;
     copied.clear();
     allClips = 0;
+    remembered = 0;
+    profileOpened = 0;
     greyClip = grey;
     res = ResourcesState(clock: () => DateTime(2026, 11, 12, 9, 5));
     addTearDown(res.dispose);
@@ -62,6 +65,8 @@ void main() {
         onReconnect: hub ? () => reconnects++ : null,
         onEnd: () => ended++,
         onToggleDetach: onDetach,
+        onRememberStream: () => remembered++,
+        onOpenProfile: () => profileOpened++,
         clips: res.clipsOf('k'),
         canCopy: (e) => e.clip != greyClip,
         canInsert: (e) => e.clip != greyClip && e.sid == rs.sid,
@@ -313,5 +318,26 @@ void main() {
     await tester.tap(find.text('复制'));
     await tester.pump();
     expect(called('menu_pick', {'sid': 1, 'path': [2, 0]}), isTrue);
+  });
+
+  testWidgets('记为这个 app 的默认 and app 配置… call back and close the menu', (tester) async {
+    await open(tester);
+    await tester.ensureVisible(find.text('记为这个 app 的默认'));
+    await tester.tap(find.text('记为这个 app 的默认'));
+    await tester.pump();
+    expect(remembered, 1);
+    expect(shellOpen, isFalse);
+    await tester.tap(find.byKey(const Key('traffic')));
+    await tester.pump();
+    await tester.ensureVisible(find.text('app 配置…'));
+    await tester.tap(find.text('app 配置…'));
+    await tester.pump();
+    expect(profileOpened, 1);
+  });
+
+  testWidgets('a disconnected menu has neither item', (tester) async {
+    await open(tester, disconnected: true);
+    expect(find.text('记为这个 app 的默认'), findsNothing);
+    expect(find.text('app 配置…'), findsNothing);
   });
 }
