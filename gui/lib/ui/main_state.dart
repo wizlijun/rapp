@@ -1307,10 +1307,14 @@ class MainState extends ChangeNotifier {
       resources.pinned(e.seq, copy);
     } else {
       resources.pinFailed(e.seq);
-      hint = '固定没成功：${r.error}';
+      hint = pinFailureHint(r.error);
       notifyListeners();
     }
   }
+
+  /// The hint for a failed pin; the runner's English "unknown clip" never reaches the user.
+  static String pinFailureHint(String? reason) =>
+      reason == 'unknown clip' ? '这条太旧了，A 上已不保留' : '固定没成功：$reason';
 
   void cancelTransfer(TransferRow t) {
     final sid = _hubSid(t.sid);

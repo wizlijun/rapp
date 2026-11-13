@@ -596,6 +596,19 @@ void main() {
       }, sessions: 2);
     });
 
+    test('a second blocked event re-arms the 1 s hint', () {
+      env((a, t, port, st, hints) {
+        const text = 'A 正在被 Mac mini 操作';
+        port.emit(const InputBlockedEvent(1, 'Mac mini'));
+        a.elapse(const Duration(milliseconds: 600));
+        port.emit(const InputBlockedEvent(1, 'Mac mini'));
+        a.elapse(const Duration(milliseconds: 600)); // the first timer would have cleared it at 1000
+        expect(st.hint, text);
+        a.elapse(const Duration(milliseconds: 400));
+        expect(st.hint, isNot(text));
+      });
+    });
+
     test('a taken over session stays disconnected, counts in needs, does not reconnect by itself', () {
       env((a, t, port, st, hints) {
         port.emit(const DisconnectedEvent(1, 'host says: taken over by M'));
@@ -2080,7 +2093,7 @@ void main() {
         a.flushMicrotasks();
         expect(e.pinned, false);
         expect(e.pinning, false);
-        expect(st.hint, '固定没成功：unknown clip');
+        expect(st.hint, '这条太旧了，A 上已不保留');
       });
     });
 
