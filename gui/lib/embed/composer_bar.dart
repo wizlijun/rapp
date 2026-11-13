@@ -268,8 +268,8 @@ List<Widget> composerLayer({required MainState state, required RemoteSession ses
       right: 8,
       bottom: 8,
       child: ListenableBuilder(
-        listenable: session.composer,
-        builder: (context, _) => session.composer.open
+        listenable: both,
+        builder: (context, _) => session.composer.open && session.composerAllowed
             // Keyed by session: the keys row and sticky ⌘/⌥ never carry over to another one.
             ? ComposerBar(key: ValueKey(session.sid), state: state, session: session, port: port)
             : const SizedBox.shrink(),
@@ -281,7 +281,7 @@ List<Widget> composerLayer({required MainState state, required RemoteSession ses
       child: ListenableBuilder(
         listenable: both,
         builder: (context, _) {
-          if (session.composer.open) return const SizedBox.shrink();
+          if (session.composer.open || !session.composerAllowed) return const SizedBox.shrink();
           final t = RappTokens.of(context);
           final transfer = session.transferStatus;
           return Listener(

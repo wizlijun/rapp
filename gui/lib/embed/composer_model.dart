@@ -18,11 +18,16 @@ enum SendOutcome {
   ignored,
 }
 
+/// macOS virtual key code of Return, what the after-send step presses.
+const returnKeyCode = 36;
+
 class ComposerModel extends ChangeNotifier {
   /// [onDrop]: a block left the editor (removed, or sent); the runner forgets what it held.
-  ComposerModel({this.onDrop});
+  /// [onAllSent]: a send round put every piece into A (not partial, failed or cancelled).
+  ComposerModel({this.onDrop, this.onAllSent});
 
   final void Function(int n)? onDrop;
+  final VoidCallback? onAllSent;
 
   /// The editor's text and cursor.
   final TextEditingController controller = TextEditingController();
@@ -87,6 +92,10 @@ class ComposerModel extends ChangeNotifier {
     _snapshot = null;
     sending = false;
     String? note;
+    final allSent = snap != null &&
+        failure == null &&
+        sent > 0 &&
+        sent == snap.blocks.length + (snap.text.isNotEmpty ? 1 : 0);
     if (snap != null && sent > 0) {
       final sentBlocks = snap.blocks.take(sent).toList();
       final textSent = sent > snap.blocks.length && snap.text.isNotEmpty;
@@ -108,6 +117,7 @@ class ComposerModel extends ChangeNotifier {
     final shown = [if (failure != null && failure.isNotEmpty) failure, ?note];
     if (shown.isNotEmpty) _show(shown.join(' '), const Duration(seconds: 5));
     notifyListeners();
+    if (allSent) onAllSent?.call();
   }
 
   /// The first [n] characters went: the rest stays, its cursor and composing range shifted.

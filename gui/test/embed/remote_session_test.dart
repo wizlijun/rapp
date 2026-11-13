@@ -1,8 +1,22 @@
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/app_profile.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
+
+RemoteWindow w(int id, {WindowKind kind = WindowKind.normal, bool focused = false}) => RemoteWindow(
+      id: id,
+      parent: 0,
+      kind: kind,
+      title: 'w$id',
+      rect: const Rect.fromLTWH(0, 0, 100, 100),
+      titleBar: 28,
+      resizable: true,
+      focused: focused,
+      texture: id,
+      visible: const Rect.fromLTWH(0, 0, 1, 1),
+    );
 
 RemoteWindow win(int id, WindowKind kind) => RemoteWindow(
       id: id,
@@ -163,5 +177,70 @@ void main() {
       r.apply(TransferProgressEvent(1, 3, true, 'a', 1, 2, state, null, 'boom'));
       expect(r.transferStatus, '上传 1/1 0%', reason: '$state');
     }
+  });
+
+  const hideFloating = ResolvedProfile(name: 'X', windows: [WindowRule(kind: WindowKind.floating, action: RuleAction.hide)]);
+
+  test('a hide rule keeps the window out of the tabs and counts it', () {
+    final rs = RemoteSession(1, 'X', appId: 'x')..setProfile(hideFloating);
+    rs.apply(WindowsEvent(1, [w(1), w(2, kind: WindowKind.floating)]));
+    expect(rs.tabs.tabs.map((e) => e.id), [1]);
+    expect(rs.hidden.map((e) => e.id), [2]);
+    expect(rs.hiddenIds, {2});
+    expect(rs.windows.length, 2);
+  });
+
+  test('hiding the current tab moves to the most recent shown one', () {
+    final rs = RemoteSession(1, 'X');
+    rs.apply(WindowsEvent(1, [w(1), w(2, kind: WindowKind.floating), w(3)]));
+    rs.selectWindow(3);
+    rs.selectWindow(2);
+    rs.setProfile(hideFloating);
+    expect(rs.currentWindow, 3);
+  });
+
+  test('showOnce brings it back as the current tab; the count drops', () {
+    final rs = RemoteSession(1, 'X')..setProfile(hideFloating);
+    rs.apply(WindowsEvent(1, [w(1), w(2, kind: WindowKind.floating)]));
+    rs.showOnce(2);
+    expect(rs.tabs.tabs.map((e) => e.id), [1, 2]);
+    expect(rs.currentWindow, 2);
+    expect(rs.hidden, isEmpty);
+  });
+
+  test('hiddenFocused when A focuses a hidden window', () {
+    final rs = RemoteSession(1, 'X')..setProfile(hideFloating);
+    rs.apply(WindowsEvent(1, [w(1), w(2, kind: WindowKind.floating, focused: true)]));
+    expect(rs.hiddenFocused, isTrue);
+  });
+
+  test('composer: off for the app, or for a noComposer tab, back on another tab; the draft stays', () {
+    final rs = RemoteSession(1, 'X')
+      ..setProfile(const ResolvedProfile(name: 'X', windows: [WindowRule(kind: WindowKind.dialog, action: RuleAction.noComposer)]));
+    rs.apply(WindowsEvent(1, [w(1)]));
+    rs.apply(WindowsEvent(1, [w(1), w(2, kind: WindowKind.dialog)])); // 2 is new: current
+    rs.composer.text = '草稿';
+    rs.composer.open = true;
+    expect(rs.composerAllowed, isFalse);
+    rs.selectWindow(1);
+    expect(rs.composerAllowed, isTrue);
+    expect(rs.composer.open, isTrue);
+    expect(rs.composer.text, '草稿');
+    rs.setProfile(const ResolvedProfile(name: 'X', composer: false));
+    expect(rs.composerAllowed, isFalse);
+  });
+
+  test('afterSend return calls onReturn after a full round; none does not', () {
+    var n = 0;
+    final rs = RemoteSession(1, 'X', onReturn: () => n++)..setProfile(const ResolvedProfile(name: 'X', afterSend: AfterSend.pressReturn));
+    rs.composer.text = 'go';
+    rs.composer.send();
+    rs.apply(const ComposerStateEvent(1, done: ComposerDone(1, null)));
+    expect(n, 1);
+    rs.setProfile(ResolvedProfile.generic);
+    rs.composer.text = 'go';
+    rs.composer.send();
+    rs.apply(const ComposerStateEvent(1, done: ComposerDone(1, null)));
+    expect(n, 1);
   });
 }
