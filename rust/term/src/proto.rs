@@ -143,12 +143,20 @@ fn row_size(row: &(u16, String)) -> usize {
 /// Make a row fit in `budget` bytes: strip escapes, then cut at a char boundary.
 fn shrink_row(row: (u16, String), budget: usize) -> (u16, String) {
     let (i, text) = row;
-    let text = strip_escapes(&text);
-    if row_size(&(i, text.clone())) <= budget {
-        return (i, text);
+    // What the row costs besides its text's encoding (quotes included).
+    let around = row_size(&(i, String::new())) - 2;
+    (i, shrink_text(&text, budget.saturating_sub(around)))
+}
+
+/// Make `text` encode (as a JSON string, quotes included) in at most `budget` bytes: strip escapes, then cut at
+/// a char boundary.
+pub(crate) fn shrink_text(text: &str, budget: usize) -> String {
+    let text = strip_escapes(text);
+    if serde_json::to_string(&text).expect("a string always serializes").len() <= budget {
+        return text;
     }
     let mut cut = String::new();
-    let mut used = row_size(&(i, String::new()));
+    let mut used = 2;
     for c in text.chars() {
         let n = serde_json::to_string(&c.to_string()).expect("a char always serializes").len() - 2;
         if used + n > budget {
@@ -157,7 +165,7 @@ fn shrink_row(row: (u16, String), budget: usize) -> (u16, String) {
         used += n;
         cut.push(c);
     }
-    (i, cut)
+    cut
 }
 
 /// Split one screen update into messages that each encode to at most `MAX_LINE` bytes.

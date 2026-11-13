@@ -143,7 +143,8 @@ async fn capture(ctl: &Control, pane: &str) -> anyhow::Result<Screen> {
 }
 
 /// A `History` message that fits in one line: when the rows do not all fit, the ones nearest the screen are kept
-/// (the peer asks again from `before` plus what it got).
+/// (the peer asks again from `before` plus what it got). A row too long for a line on its own is shrunk like a
+/// screen row, so there is always at least one.
 fn history_msg(pane: &str, before: u32, mut lines: Vec<String>) -> Out {
     let mut used = proto::encode(&Out::History { pane: pane.to_string(), before, lines: Vec::new() }).len();
     let mut keep = lines.len();
@@ -154,6 +155,14 @@ fn history_msg(pane: &str, before: u32, mut lines: Vec<String>) -> Out {
         }
         used += n;
         keep -= 1;
+    }
+    if keep > 0 && keep == lines.len() {
+        let last = lines.pop().expect("there are rows");
+        return Out::History {
+            pane: pane.to_string(),
+            before,
+            lines: vec![proto::shrink_text(&last, proto::MAX_LINE - used)],
+        };
     }
     lines.drain(..keep);
     Out::History { pane: pane.to_string(), before, lines }
@@ -798,5 +807,15 @@ mod tests {
         assert_eq!(lines[..], rows[rows.len() - lines.len()..]);
         let small = history_msg("%1", 0, vec!["a".into(), "b".into()]);
         assert!(matches!(small, Out::History { lines, .. } if lines == ["a", "b"]));
+    }
+
+    #[test]
+    fn a_single_row_over_the_line_limit_is_stripped_then_cut() {
+        let row = format!("\x1b[31m{}", "é".repeat(40_000));
+        let m = history_msg("%1", 0, vec!["before".into(), row]);
+        assert!(proto::encode(&m).len() <= proto::MAX_LINE);
+        let Out::History { lines, .. } = m else { panic!() };
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].len() > 60_000 && lines[0].chars().all(|c| c == 'é'), "{}", lines[0].len());
     }
 }
