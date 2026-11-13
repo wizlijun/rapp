@@ -14,6 +14,15 @@ final class ClipHistoryTests: XCTestCase {
 
     override func tearDown() { board.releaseGlobally() }
 
+    func testClipTransferNamesAreReadableChinese() {
+        XCTAssertEqual(ClipHistory.transferName(.image(width: 1, height: 1, bytes: 9)), "图片")
+        XCTAssertEqual(ClipHistory.transferName(.data(uti: "public.png", bytes: 9)), "数据")
+        XCTAssertEqual(ClipHistory.transferName(.data(uti: "com.adobe.pdf", bytes: 9)), "数据")
+        XCTAssertEqual(ClipHistory.transferName(.files([ClipFile(name: "a.txt", bytes: 1)])), "a.txt")
+        XCTAssertEqual(ClipHistory.transferName(.files([ClipFile(name: "", bytes: 1)])), "文件")
+        XCTAssertEqual(ClipHistory.transferName(.files([])), "文件")
+    }
+
     func testClipHistoryKeepsNewestTwentyNewestFirst() {
         for id in 1...25 { history.add(id: UInt32(id), .text("t\(id)", truncated: false)) }
         XCTAssertEqual(history.entries.count, 20)

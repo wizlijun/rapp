@@ -58,12 +58,12 @@ public final class ClipHistory {
         case let .text(text, _):
             if insert { onInsert(info, .text(text)) } else { pasteboard.write(text: text) }
         case let .image(_, _, bytes):
-            fetchBytes(id, name: "image", total: bytes, transfers: transfers) { result in
+            fetchBytes(id, name: Self.transferName(info), total: bytes, transfers: transfers) { result in
                 guard case let .success(data) = result else { return }
                 if insert { onInsert(info, .bytes(data)) } else { pasteboard.write(png: data) }
             }
         case let .data(uti, bytes):
-            fetchBytes(id, name: uti, total: bytes, transfers: transfers) { result in
+            fetchBytes(id, name: Self.transferName(info), total: bytes, transfers: transfers) { result in
                 guard case let .success(data) = result else { return }
                 if insert { onInsert(info, .bytes(data)) } else { pasteboard.write(uti: uti, data: data) }
             }
@@ -85,13 +85,22 @@ public final class ClipHistory {
         case let .text(text, _):
             done(.success(.text(text)))
         case let .image(_, _, bytes):
-            fetchBytes(id, name: "image", total: bytes, transfers: transfers) { done($0.map { .image($0) }) }
+            fetchBytes(id, name: Self.transferName(info), total: bytes, transfers: transfers) { done($0.map { .image($0) }) }
         case let .data(uti, bytes):
-            fetchBytes(id, name: uti, total: bytes, transfers: transfers) { done($0.map { .data(uti: uti, $0) }) }
+            fetchBytes(id, name: Self.transferName(info), total: bytes, transfers: transfers) { done($0.map { .data(uti: uti, $0) }) }
         case let .files(files):
             fetchFiles(id, files, transfers: transfers) { done($0.map { .files($0) }) }
         case .unsupported:
             done(.failure(TransferFailure(reason: "不支持")))
+        }
+    }
+
+    /// The name a clip download shows in the strip and the 进行中 list: never a UTI or an English word.
+    static func transferName(_ info: ClipInfo) -> String {
+        switch info {
+        case .image: return "图片"
+        case let .files(files): return files.first.map { $0.name.isEmpty ? "文件" : $0.name } ?? "文件"
+        default: return "数据"
         }
     }
 
