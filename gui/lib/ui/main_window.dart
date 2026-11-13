@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 
 import '../pages/access_log_section.dart';
 import '../data_relocate.dart';
+import '../pages/app_profiles_section.dart';
 import '../pages/local_section.dart';
 import '../service_client.dart';
 import '../service_control.dart';
@@ -102,6 +103,10 @@ class _MainWindowState extends State<MainWindow> {
             relocate: widget.relocator,
             hooks: widget.hooks,
           ),
+        ),
+        ListenableBuilder(
+          listenable: widget.state,
+          builder: (context, _) => AppProfilesSection(store: widget.state.profiles, openFolder: _openFolder),
         ),
         ListenableBuilder(
           listenable: widget.monitor,

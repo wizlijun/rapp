@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 
 import '../embed/stream_menu.dart';
+import '../pages/app_profile_page.dart';
 import 'lamp.dart';
 import 'lifecycle.dart';
 import 'tab_chip.dart';
@@ -209,6 +210,8 @@ class TopBar extends StatelessWidget {
                       onReconnect: state.hubUsable ? state.reconnectCurrent : null,
                       onEnd: state.endCurrent,
                       onToggleDetach: state.canToggleDetach ? state.toggleDetach : null,
+                      onRememberStream: state.rememberStream,
+                      onOpenProfile: () => openAppProfilePage(context, state.profiles, appId: cur.app, appName: cur.appName),
                       open: state.corner == Corner.stream,
                       onToggle: () => state.toggleCorner(Corner.stream),
                       onClose: state.closeCorner,

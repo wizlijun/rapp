@@ -4,6 +4,7 @@ import 'package:rapp/paths.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/hub_client.dart';
+import 'package:rapp/pages/app_profile_page.dart';
 import 'package:rapp/ui/devices_tab.dart';
 import 'package:rapp/ui/lamp.dart';
 import 'package:rapp/ui/main_state.dart';
@@ -432,5 +433,13 @@ void main() {
     await pumpTab(tester);
     await selectMini(tester);
     expect(tester.getSize(find.byKey(const Key('fav-com.apple.Safari'))).height, greaterThanOrEqualTo(48));
+  });
+
+  testWidgets('⋯ on an app row opens its app 配置 page', (tester) async {
+    await pumpTab(tester);
+    await selectMini(tester);
+    await tester.tap(find.byKey(const Key('profile-com.apple.Safari')));
+    await tester.pumpAndSettle();
+    expect(find.byType(AppProfilePage), findsOneWidget);
   });
 }
