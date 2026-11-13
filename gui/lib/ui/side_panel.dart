@@ -48,54 +48,60 @@ class SidePanel extends StatelessWidget {
                     padding: const EdgeInsets.fromLTRB(10, 10, 10, 0),
                     child: Row(
                       children: [
-                        Flexible(
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 96),
-                            child: TabChip(
-                              key: const Key('tab-sessions'),
-                              label: '会话',
-                              selected: !devices && !projects && !resources,
-                              onTap: () => _tab(PanelTab.sessions),
-                            ),
+                        // The tabs share the row; the close button keeps its own 48 px.
+                        Expanded(
+                          child: Row(
+                            children: [
+                                Flexible(
+                                  child: ConstrainedBox(
+                                    constraints: const BoxConstraints(maxWidth: 96),
+                                    child: TabChip(
+                                      key: const Key('tab-sessions'),
+                                      label: '会话',
+                                      selected: !devices && !projects && !resources,
+                                      onTap: () => _tab(PanelTab.sessions),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Flexible(
+                                  child: ConstrainedBox(
+                                    constraints: const BoxConstraints(maxWidth: 96),
+                                    child: TabChip(
+                                      key: const Key('tab-devices'),
+                                      label: '设备',
+                                      selected: devices,
+                                      onTap: () => _tab(PanelTab.devices),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Flexible(
+                                  child: ConstrainedBox(
+                                    constraints: const BoxConstraints(maxWidth: 96),
+                                    child: TabChip(
+                                      key: const Key('tab-projects'),
+                                      label: '项目',
+                                      selected: projects,
+                                      onTap: () => _tab(PanelTab.projects),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Flexible(
+                                  child: ConstrainedBox(
+                                    constraints: const BoxConstraints(maxWidth: 96),
+                                    child: TabChip(
+                                      key: const Key('tab-resources'),
+                                      label: '资源',
+                                      selected: resources,
+                                      onTap: () => _tab(PanelTab.resources),
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
                         ),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 96),
-                            child: TabChip(
-                              key: const Key('tab-devices'),
-                              label: '设备',
-                              selected: devices,
-                              onTap: () => _tab(PanelTab.devices),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 96),
-                            child: TabChip(
-                              key: const Key('tab-projects'),
-                              label: '项目',
-                              selected: projects,
-                              onTap: () => _tab(PanelTab.projects),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 96),
-                            child: TabChip(
-                              key: const Key('tab-resources'),
-                              label: '资源',
-                              selected: resources,
-                              onTap: () => _tab(PanelTab.resources),
-                            ),
-                          ),
-                        ),
-                        const Spacer(),
                         IconButton(
                           key: const Key('panel-close'),
                           tooltip: '收起面板',
