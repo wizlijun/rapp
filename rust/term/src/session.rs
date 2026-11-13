@@ -67,6 +67,7 @@ where
         opts,
         panes: Vec::new(),
         view: None,
+        sender: Sender::new(""),
         pastes: HashMap::new(),
     };
     let res = p.pump(Lines::new(r, MAX_IN_LINE), &list).await;
@@ -224,7 +225,6 @@ struct View {
     events: UnboundedReceiver<Event>,
     poll: Interval,
     pane: String,
-    sender: Sender,
     /// When the last capture started.
     last: Option<Instant>,
     sized: Held,
@@ -252,7 +252,7 @@ impl View {
     fn new(ctl: Control, events: UnboundedReceiver<Event>, pane: &str, poll: Duration) -> View {
         let mut poll = tokio::time::interval_at(Instant::now() + poll, poll);
         poll.set_missed_tick_behavior(MissedTickBehavior::Delay);
-        View { ctl, events, poll, pane: pane.to_string(), sender: Sender::new(pane), last: None, sized: Held::No }
+        View { ctl, events, poll, pane: pane.to_string(), last: None, sized: Held::No }
     }
 
     /// Swap in a freshly attached control client, which has no size yet, and let the old one go. On failure the
@@ -322,6 +322,8 @@ struct Pump<'a, W> {
     /// The pane list last written.
     panes: Vec<Pane>,
     view: Option<View>,
+    /// The screens sent to the peer. It outlives a view, so revisions never repeat while the pump runs.
+    sender: Sender,
     /// Pastes waiting for their last chunk, by pane.
     pastes: HashMap<String, Paste>,
 }
@@ -475,8 +477,8 @@ impl<W: AsyncWrite + Unpin> Pump<'_, W> {
                 }
             }
             In::Ack { rev } => {
-                if let Some(v) = self.view.as_mut() {
-                    let out = v.sender.ack(rev);
+                if self.view.is_some() {
+                    let out = self.sender.ack(rev);
                     self.put_all(out).await?;
                 }
             }
@@ -540,14 +542,17 @@ impl<W: AsyncWrite + Unpin> Pump<'_, W> {
     async fn view_pane(&mut self, pane: &str, cols: u16, rows: u16) -> anyhow::Result<()> {
         if self.view.is_none() {
             match Control::attach(self.tmux, &self.sid).await {
-                Ok((ctl, events)) => self.view = Some(View::new(ctl, events, pane, self.opts.poll)),
+                Ok((ctl, events)) => {
+                    self.view = Some(View::new(ctl, events, pane, self.opts.poll));
+                    self.sender.switch(pane);
+                }
                 Err(_) => return self.error("could not view the session").await,
             }
         }
         let Some(v) = self.view.as_mut() else { return Ok(()) };
         if v.pane != pane {
             v.pane = pane.to_string();
-            v.sender = Sender::new(pane);
+            self.sender.switch(pane);
         }
         // A size the session does not take is no reason to stop: the screen goes out at the size it has.
         if let Ok(true) = v.ctl.fit(self.tmux, &self.sid, cols, rows, false).await {
@@ -636,7 +641,7 @@ impl<W: AsyncWrite + Unpin> Pump<'_, W> {
         }
         v.last = Some(Instant::now());
         let out = match capture(&v.ctl, &v.pane).await {
-            Ok(s) => v.sender.offer(s),
+            Ok(s) => self.sender.offer(s),
             Err(_) if report => vec![Out::Error { error: "could not capture the screen".into() }],
             Err(_) => Vec::new(),
         };

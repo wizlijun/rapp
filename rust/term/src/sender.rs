@@ -19,6 +19,12 @@ impl Sender {
         Sender { pane: pane.to_string(), next_rev: 1, acked: None, in_flight: None, latest: None }
     }
 
+    /// Start over for another pane, its first screen sent whole. Revisions go on counting, so a late ack of the
+    /// old pane's screen cannot release the new one's.
+    pub fn switch(&mut self, pane: &str) {
+        *self = Sender { next_rev: self.next_rev, ..Sender::new(pane) };
+    }
+
     /// Replace the latest screen; sends it only when nothing is in flight.
     pub fn offer(&mut self, s: Frame) -> Vec<Out> {
         self.latest = Some(s);
@@ -128,5 +134,17 @@ mod tests {
         let mut big = scr("a");
         big.cols = 100;
         assert!(matches!(&s.offer(big)[0], Out::Screen { full: true, rev: 2, lines, .. } if lines.len() == 3));
+    }
+
+    #[test]
+    fn revisions_go_on_across_a_pane_switch_so_a_late_ack_matches_nothing() {
+        let mut s = Sender::new("%1");
+        assert_eq!(rev_of(&s.offer(scr("a"))), 1);
+        s.switch("%2");
+        let out = s.offer(scr("b"));
+        assert!(matches!(&out[0], Out::Screen { pane, full: true, rev: 2, .. } if pane == "%2"));
+        assert!(s.ack(1).is_empty()); // the old pane's ack
+        assert!(s.offer(scr("c")).is_empty()); // rev 2 is still in flight
+        assert_eq!(rev_of(&s.ack(2)), 3);
     }
 }
