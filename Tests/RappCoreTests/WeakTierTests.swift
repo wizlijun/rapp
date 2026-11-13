@@ -61,4 +61,12 @@ final class WeakTierTests: XCTestCase {
         XCTAssertNil(t.probe(firstAckDelay: 0.9))
         XCTAssertFalse(t.weak)
     }
+
+    func testProbeEnteredLeavesAfter30sWithoutQueueing() {
+        var t = WeakTier()
+        XCTAssertEqual(t.probe(firstAckDelay: 1.5), true)
+        XCTAssertNil(t.observe(now: 0, queueing: false, onAck: true))
+        XCTAssertNil(t.observe(now: 29.9, queueing: false, onAck: true))
+        XCTAssertEqual(t.observe(now: 30, queueing: false, onAck: true), false)
+    }
 }

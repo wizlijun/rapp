@@ -28,6 +28,8 @@ public struct WeakTier {
             return nil
         }
         queueingSince = nil
+        // Entered via probe: no queueing seen yet, so the 30 s count starts at the first observation.
+        if weak, lastQueueing == nil { lastQueueing = now }
         if weak, onAck, let last = lastQueueing, now - last >= Self.leaveAfter {
             weak = false
             return false
