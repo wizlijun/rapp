@@ -303,22 +303,24 @@ impl Handler {
         }
     }
 
-    /// Writes the state to `config.json` first, so a failed write changes nothing.
+    /// Applies the state first, then saves it to `config.json`: closing enrollment must work even
+    /// when the file cannot be written (a read-only volume, say). A failed save is reported, but
+    /// the running relay keeps the new state.
     fn enroll(&self, state: Enroll) -> Value {
         let _one = self.lock.lock().unwrap_or_else(|e| e.into_inner());
-        if let Err(e) = persist_enroll(&self.ctx.data, state) {
-            return self.failed("enroll", e);
-        }
         let open = state == Enroll::Open;
         self.relay().set_enroll_open(open);
         let ev = if open { "enroll_open" } else { "enroll_close" };
         self.relay().audit().event(ev, json!({}), true);
+        if let Err(e) = persist_enroll(&self.ctx.data, state) {
+            return self.failed("enroll", e.context("applied but not saved"));
+        }
         ok(json!({"env_overrides": self.ctx.enroll_from_env}))
     }
 }
 
 /// A `revoke` target: an ID (9 digits), or a fingerprint or a prefix of one (8 to 64 hex digits,
-/// either case) that matches exactly one device.
+/// either case) that matches exactly one device. Anything else names no device: `not found`.
 fn resolve(reg: &dyn Registry, target: &str) -> Result<Fp, &'static str> {
     let t = target.trim();
     if is_valid_id(t) {
@@ -326,7 +328,7 @@ fn resolve(reg: &dyn Registry, target: &str) -> Result<Fp, &'static str> {
     }
     let prefix = t.to_ascii_lowercase();
     if !(8..=64).contains(&prefix.len()) || !prefix.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(BAD_REQUEST);
+        return Err(NOT_FOUND);
     }
     let mut found = reg.list().into_iter().map(|d| d.fp).filter(|fp| fp.to_string().starts_with(&prefix));
     match (found.next(), found.next()) {

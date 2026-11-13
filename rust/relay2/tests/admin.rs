@@ -213,9 +213,33 @@ async fn revoke_by_id_fp_and_unique_prefix() {
         let v = call(&r, json!({"cmd": "revoke", "target": target})).await;
         assert_eq!(v, json!({"ok": false, "error": "not found"}), "{target}");
     }
-    for target in ["1111111", "", "hello world"] {
-        assert_eq!(call(&r, json!({"cmd": "revoke", "target": target})).await["ok"], false, "{target}");
+    // Not an ID, not a fingerprint, not a long enough hex prefix: nothing it could name.
+    for target in ["1111111", "", "hello world", "12345678x"] {
+        let v = call(&r, json!({"cmd": "revoke", "target": target})).await;
+        assert_eq!(v, json!({"ok": false, "error": "not found"}), "{target}");
     }
+}
+
+#[tokio::test]
+async fn enroll_switch_applies_even_when_it_cannot_be_saved() {
+    let data = tempfile::tempdir().unwrap();
+    std::fs::write(data.path().join("config.json"), r#"{"log":"debug"}"#).unwrap();
+    let r = start_from_file(data, false).await;
+    let dir = r.data.path().to_path_buf();
+    // config.json is replaced through a temp file next to it, so a read-only dir blocks the save.
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let v = call(&r, json!({"cmd": "enroll", "state": "closed"})).await;
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+    assert_eq!(v["ok"], false, "{v}");
+    let error = v["error"].as_str().unwrap();
+    assert!(error.starts_with("applied but not saved: "), "{error}");
+    let d = FakeDevice::dial(&r).await;
+    assert_eq!(d.enroll(&r.key).await, json!({"ok": false, "error": "closed"}));
+    assert_eq!(call(&r, json!({"cmd": "info"})).await["enroll"], "closed");
+    assert_eq!(audit_lines(&r, "enroll_close").len(), 1);
+    let file: Value = serde_json::from_slice(&std::fs::read(dir.join("config.json")).unwrap()).unwrap();
+    assert_eq!(file, json!({"log": "debug"}));
 }
 
 #[tokio::test]
