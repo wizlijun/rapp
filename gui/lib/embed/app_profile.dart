@@ -162,7 +162,7 @@ class AppProfile {
     if (w is List) {
       windows = [
         for (final r in w)
-          if (WindowRule.fromJson(r) case final rule?) rule,
+          ?WindowRule.fromJson(r),
       ];
     }
 
@@ -187,7 +187,7 @@ List<AppProfile> parseProfiles(Object? json) {
   }
   return [
     for (final e in json['apps'] as List)
-      if (AppProfile.fromJson(e) case final p?) p,
+      ?AppProfile.fromJson(e),
   ];
 }
 
