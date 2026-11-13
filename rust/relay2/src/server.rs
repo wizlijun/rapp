@@ -33,6 +33,7 @@ use tokio::io::{AsyncRead, AsyncWrite, BufReader, ReadBuf};
 use crate::admin::{self, Control};
 use crate::audit::Audit;
 use crate::config::{Config, Enroll};
+use crate::metrics::{MetricsServer, Stats};
 use crate::limits::{source_key, Backoff, Bucket, ConnGuard, Conns, Rate};
 use crate::store::{Bind, FileRegistry, Registry};
 
@@ -84,6 +85,8 @@ pub struct Relay {
     endpoint: quinn::Endpoint,
     accept: tokio::task::JoinHandle<()>,
     admin: admin::Server,
+    metrics: Option<MetricsServer>,
+    stats_task: tokio::task::JoinHandle<()>,
 }
 
 /// State every connection task shares.
@@ -109,6 +112,7 @@ struct Shared {
     relayed: Arc<Mutex<HashMap<Fp, usize>>>,
     /// All relayed bytes together (`relay_bps_total`).
     relay_total: Arc<Bucket>,
+    stats: Arc<Stats>,
 }
 
 /// The live connections. One lock covers both tables, so an admission, a `register` and a
@@ -178,13 +182,27 @@ impl Relay {
             online: Mutex::new(Online::default()),
             relayed: Arc::default(),
             relay_total: Arc::new(Bucket::new(l.relay_bps_total)),
+            stats: Arc::default(),
             config,
         });
         let accept = tokio::spawn(accept_loop(shared.clone(), endpoint.clone()));
         let fp = identity.fp;
         let relay: Arc<dyn Control> = shared.clone();
         admin.serve(admin::Ctx { data, fp, listen: addr, enroll_from_env, relay });
-        Ok(Relay { addr, fp, shared, endpoint, accept, admin })
+        let metrics = match shared.config.metrics {
+            Some(m) => {
+                let s = shared.clone();
+                Some(MetricsServer::bind(m, Arc::new(move || s.prometheus())).await?)
+            }
+            None => None,
+        };
+        let stats_task = tokio::spawn(stats_loop(shared.clone()));
+        Ok(Relay { addr, fp, shared, endpoint, accept, admin, metrics, stats_task })
+    }
+
+    /// Where the Prometheus endpoint is listening, if `metrics` is configured.
+    pub fn metrics_addr(&self) -> Option<SocketAddr> {
+        self.metrics.as_ref().map(|m| m.addr)
     }
 
     /// `stop_with("stop")`.
@@ -198,8 +216,10 @@ impl Relay {
     /// audit line.
     pub async fn stop_with(self, reason: &str) {
         let deadline = tokio::time::Instant::now() + STOP_WAIT;
-        let Relay { shared: s, endpoint, accept, admin, .. } = self;
+        let Relay { shared: s, endpoint, accept, admin, metrics, stats_task, .. } = self;
         drop(admin);
+        drop(metrics);
+        stats_task.abort();
         // Refuses new connections; the existing ones stay up for the push.
         endpoint.set_server_config(None);
         accept.abort();
@@ -252,6 +272,7 @@ async fn handshake(s: Arc<Shared>, incoming: quinn::Incoming, slot: Result<ConnG
         Err(e) => Err(e),
     };
     let failed = |error: String, over: Option<&str>| {
+        Stats::add(&s.stats.handshake_failures, 1);
         s.log.event(Lvl::Info, "handshake_failed", json!({"from": from.to_string(), "error": error}));
         if let Some(what) = over {
             s.limit(what, None, from);
@@ -335,6 +356,9 @@ async fn stream(s: Arc<Shared>, peer: Arc<Peer>, st: BiStream) {
         Ok(Ok(v)) => v,
     };
     let Ok(req) = serde_json::from_value::<Req>(line) else { return reply(st, err(BAD_REQUEST)).await };
+    if matches!(req, Req::Enroll { .. } | Req::Connect { .. } | Req::Relay { .. }) && !s.audit_ok(&peer) {
+        return reply(st, err("limit")).await;
+    }
     match req {
         // The same reader that read the line: what it buffered after it is the initiator's
         // TLS handshake.
@@ -566,6 +590,7 @@ impl Shared {
     /// client costs nothing more), the ID format, then the registry. The last two are failures.
     fn lookup(&self, keys: &[String; 2], id: &str, now: Instant) -> Result<Fp, String> {
         if let Some(secs) = keys.iter().filter_map(|k| self.connect_backoff.locked(k, now)).max() {
+            Stats::add(&self.stats.limited, 1);
             return Err(format!("locked, retry in {secs}s"));
         }
         if !is_valid_id(id) {
@@ -615,7 +640,7 @@ impl Shared {
         let Ok(Ok(to)) = tokio::time::timeout(INCOMING_WAIT, open).await else {
             return reply(st, err(OFFLINE)).await;
         };
-        let end = SpliceEnd { audit: self.audit.clone(), fp: peer.fp, from: peer.from, to: id.to_string() };
+        let end = SpliceEnd { audit: self.audit.clone(), stats: self.stats.clone(), fp: peer.fp, from: peer.from, to: id.to_string() };
         let per_stream = self.config.limits.relay_bps_per_stream;
         let total = self.relay_total.clone();
         // No request timeout from here on: QUIC's idle timeout ends a splice with a dead side.
@@ -677,6 +702,7 @@ impl Shared {
         let source = source_key(peer.from.ip()).to_string();
         let now = Instant::now();
         if let Some(secs) = self.enroll_backoff.locked(&source, now) {
+            Stats::add(&self.stats.limited, 1);
             return Err(format!("locked, retry in {secs}s"));
         }
         if !self.enroll_rate.allow(&source, now) {
@@ -702,8 +728,33 @@ impl Shared {
         Ok(())
     }
 
+    /// The `audit.required` gate (§11.1, ruling R16): false, after counting it and trying to audit
+    /// it, when the audit is required and cannot be written.
+    fn audit_ok(&self, peer: &Peer) -> bool {
+        if !self.config.audit.required || self.audit.healthy() {
+            return true;
+        }
+        Stats::add(&self.stats.audit_failures, 1);
+        let (fp, from) = (peer.fp.to_string(), peer.from.to_string());
+        self.audit.event("limit", json!({"what": "audit.required", "fp": fp, "from": from}), false);
+        false
+    }
+
+    /// Sets the two gauges from the live tables.
+    fn prometheus(&self) -> String {
+        self.refresh_gauges();
+        self.stats.prometheus()
+    }
+
+    fn refresh_gauges(&self) {
+        self.stats.online.store(self.online_fps().len() as u64, Ordering::Relaxed);
+        let live: usize = self.relayed.lock().unwrap_or_else(|e| e.into_inner()).values().sum();
+        self.stats.relayed_streams.store(live as u64, Ordering::Relaxed);
+    }
+
     /// Audits one hit on the limit named `what` (the config item).
     fn limit(&self, what: &str, fp: Option<&Fp>, from: SocketAddr) {
+        Stats::add(&self.stats.limited, 1);
         let fp = fp.map(|f| f.to_string());
         self.audit.event("limit", json!({"what": what, "fp": fp, "from": from.to_string()}), false);
     }
@@ -807,6 +858,7 @@ impl Drop for RelaySlot {
 /// What the end of a splice is audited with.
 struct SpliceEnd {
     audit: Audit,
+    stats: Arc<Stats>,
     /// The initiator.
     fp: Fp,
     from: SocketAddr,
@@ -818,6 +870,7 @@ impl SpliceEnd {
     /// `took` is wall time since the splice started; `secs` in the record is that rounded down
     /// to the millisecond. `up` is initiator → target, `down` the other way.
     fn record(&self, took: Duration, up: u64, down: u64) {
+        Stats::add(&self.stats.relayed_bytes, up.saturating_add(down));
         if took < PROBE_TIME && up.saturating_add(down) < PROBE_BYTES {
             return self.audit.probe(&self.fp, &self.to);
         }
@@ -951,6 +1004,23 @@ fn join_matches(join_hex: &str, want: &str) -> bool {
 /// Constant time in the contents (the lengths are not secret: both are hex SHA-256).
 fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// How often the `stats` line is logged.
+const STATS_EVERY: Duration = Duration::from_secs(300);
+
+/// Logs the `stats` line every `STATS_EVERY` (the first one after the first period) and flushes
+/// the registry, so `last_seen` reaches the disk even if the relay is killed.
+async fn stats_loop(s: Arc<Shared>) {
+    let mut tick = tokio::time::interval_at(tokio::time::Instant::now() + STATS_EVERY, STATS_EVERY);
+    loop {
+        tick.tick().await;
+        s.refresh_gauges();
+        s.log.event(Lvl::Info, "stats", s.stats.snapshot());
+        if let Err(e) = s.registry.flush() {
+            s.log.event(Lvl::Error, "registry_flush_failed", json!({"error": format!("{e:#}")}));
+        }
+    }
 }
 
 #[cfg(test)]
