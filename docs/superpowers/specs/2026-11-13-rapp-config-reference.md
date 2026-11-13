@@ -185,7 +185,7 @@ agent 规则：不手改；要换启动参数就改上面两处模板，**两处
 
 | 配置项 | 环境变量 | 默认 | 意思 |
 |---|---|---|---|
-| `listen` | `RAPP_RELAY_LISTEN` | `0.0.0.0:21116` | 监听的地址和端口（UDP） |
+| `listen` | `RAPP_RELAY_LISTEN` | `0.0.0.0:22026` | 监听的地址和端口（UDP） |
 | `enroll` | `RAPP_RELAY_ENROLL` | `open` | `open` 接受新设备入网；`closed` 不接受 |
 | `log` | `RAPP_RELAY_LOG` | `info` | 运行日志的级别：`info` 或 `debug` |
 | `audit.keep_days` | `RAPP_RELAY_AUDIT_KEEP_DAYS` | `180` | 审计日志留多少天 |

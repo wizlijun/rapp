@@ -16,6 +16,6 @@ COPY --from=build /src/rust/target/relay/rapp-relay2 /usr/local/bin/rapp-relay
 RUN mkdir -m 0700 /data && chown 10001:10001 /data
 USER 10001:10001
 VOLUME /data
-EXPOSE 21116/udp
+EXPOSE 22026/udp
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD ["rapp-relay", "check"]
 ENTRYPOINT ["rapp-relay"]

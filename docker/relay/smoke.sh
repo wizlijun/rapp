@@ -88,12 +88,12 @@ else
   fail "2 identity" "uid=$uid, or touch /x succeeded"
 fi
 
-# 3. key: 52 characters once, then refused with exit 1
+# 3. key: 56 characters starting with rapp, once, then refused with exit 1
 KEY=$(docker exec "$C" rapp-relay key 2>/dev/null)
 docker exec "$C" rapp-relay key >/dev/null 2>&1
 second=$?
-if [ "${#KEY}" = 52 ] && [ "$second" = 1 ]; then
-  pass "3 key is 52 chars, second call exits 1"
+if [ "${#KEY}" = 56 ] && [ "${KEY#rapp}" != "$KEY" ] && [ "$second" = 1 ]; then
+  pass "3 key is rapp + 52 chars, second call exits 1"
 else
   fail "3 key" "length ${#KEY}, second exit $second"
 fi
