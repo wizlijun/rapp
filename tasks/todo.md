@@ -255,3 +255,7 @@
 - [x] macOS 权限/升级测试通过显式平台参数在 Linux 上验证，另测 Linux 页不需要本机服务、没有 macOS 误导入口。编译脚本将 workspace 版本注入 Linux GUI。
 - 验证：Flutter 660 项通过、1 项跳过；Rust workspace 228 项通过；Flutter analyze、workspace Clippy 通过；Linux release bundle 构建成功。低延迟回归保持 60 帧解码、只输出 2 帧、追赶 0.271 秒（本机管道夹具）。
 - 既有边界：Linux 被控端、内嵌分离/放回、图片/文件传输仍未实现；Linux 升级走系统安装包，macOS bundle 自动升级与回滚不适用。macOS 原生代码未在 Linux 编译；0.5.0 尚未在真实远程 Mac 上复查，也未发布新的 Linux 附件。
+
+## 0.5.0 Omarchy/Linux 发布（2026-11-13）
+- 用户已启动本机 0.5.0 app，确认可以使用并授权发布安装包。
+- README 下载和安装指引更新至 v0.5.0；从干净提交构建安装包、便携包和 SHA-256 校验文件，保留现有 macOS/relay 附件。
