@@ -1,12 +1,11 @@
 //! Presence probe: every `every`, ask each saved host `Op::Ping` and emit `presence`.
 //! Quiet by design: no `route`/`reconnecting` lines, and hub.log gets one `presence` line only when
-//! a host's state changes. A host whose probe fails on auth (bad password, unknown id, locked) is
-//! left alone, shown offline, until the user acts on it, so probes never feed the relay's limiter.
-//! A host with LAN addresses that the relay calls "unknown id" (`id@ip`) is probed over LAN only
-//! from then on; no answer there is offline, not a halt, so it is seen when it comes back.
+//! a host's state changes. A host whose probe fails on auth (bad password) is left alone, shown
+//! offline, until the user acts on it, so probes never pile up `auth_fail` lines on A. A host that
+//! does not answer, or has no saved address, is offline, not a halt, so it is seen when it comes back.
 //! A does not log pings either.
 
-use crate::link::{is_auth_failure, QUIET};
+use crate::link::QUIET;
 use crate::Hub;
 use rapp_net::log::Lvl;
 use rapp_net::msg::Op;
@@ -38,11 +37,6 @@ pub(crate) async fn run(hub: Arc<Hub>, every: Duration) {
             if hub.hosts.get(&host.id).is_none() {
                 last.remove(&host.id);
                 continue; // removed while the probe was in flight
-            }
-            if let Err(e) = &r {
-                if is_auth_failure(e) {
-                    hub.probe_halt.lock().unwrap().insert(host.id.clone());
-                }
             }
             let online = online(&r);
             if last.insert(host.id.clone(), online) != Some(online) {

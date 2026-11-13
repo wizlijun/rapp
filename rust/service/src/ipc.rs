@@ -1,7 +1,7 @@
 //! Local IPC (spec §3): TCP on 127.0.0.1, first line `{"token":…}` (from `ipc.token`),
 //! then JSON-line commands. No reply to a good token line; a bad one gets an error and EOF.
 
-use crate::state::{RelayCmd, State};
+use crate::state::State;
 use crate::update;
 use anyhow::Result;
 use rapp_net::crypto::ct_eq;
@@ -81,14 +81,9 @@ fn handle(state: &State, cmd: &Value) -> Value {
         "status" => state.status(),
         "subscribe" => ok(json!({})),
         "set_password" => match cmd["password"].as_str().filter(|p| !p.is_empty()) {
-            Some(p) => update(state, |c| c.password = p.to_string(), RelayCmd::Reregister),
+            Some(p) => update(state, |c| c.password = p.to_string()),
             None => err("password required"),
         },
-        "set_relay" => {
-            let relay = cmd["relay"].as_str().map(str::to_string);
-            let key = cmd["key"].as_str().map(str::to_string);
-            update(state, |c| (c.relay, c.key) = (relay, key), RelayCmd::Reconnect)
-        }
         "kick" => match cmd["sid"].as_u64() {
             Some(sid) if state.kick(sid) => ok(json!({})),
             _ => err("unknown sid"),
@@ -117,14 +112,13 @@ fn in_history(v: &Value) -> bool {
     shown && v["side"] != true
 }
 
-fn update(state: &State, f: impl FnOnce(&mut crate::config::Config), then: RelayCmd) -> Value {
+fn update(state: &State, f: impl FnOnce(&mut crate::config::Config)) -> Value {
     let mut cfg = state.cfg.lock().unwrap();
     f(&mut cfg);
     if let Err(e) = cfg.save(&state.home) {
         return err(&format!("save config: {e:#}"));
     }
     drop(cfg);
-    let _ = state.relay_cmd.send(then);
     state.notify();
     ok(json!({}))
 }

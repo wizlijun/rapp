@@ -140,9 +140,9 @@ void main() {
     });
 
     test('error event without req is surfaced as lastError', () async {
-      t.emit({'event': 'error', 'error': 'relay unreachable'});
+      t.emit({'event': 'error', 'error': 'offline'});
       await pumpEventQueue();
-      expect(hub.lastError, 'relay unreachable');
+      expect(hub.lastError, 'offline');
     });
 
     test('remove_host resolves with the refreshed list', () async {
@@ -185,8 +185,8 @@ void main() {
 
     test('a reply without req still resolves the oldest pending request of that kind', () async {
       final f = hub.apps('1');
-      t.emit({'event': 'apps', 'id': '1', 'path': 'relay', 'apps': []});
-      expect((await f).path, 'relay');
+      t.emit({'event': 'apps', 'id': '1', 'path': 'lan', 'apps': []});
+      expect((await f).path, 'lan');
     });
 
     test('open → opened adds a session, closed removes it', () async {

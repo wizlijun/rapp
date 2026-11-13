@@ -1,4 +1,4 @@
-// Add-device form: ID or ID@IP plus password, with the error inline.
+// Add-device form: ID@IP plus password, with the error inline.
 import 'package:flutter/material.dart';
 
 import '../hub_client.dart';
@@ -61,7 +61,7 @@ class _AddDeviceFormState extends State<AddDeviceForm> {
         TextField(
           key: const Key('add-id'),
           controller: _id,
-          decoration: const InputDecoration(labelText: '对方的 ID（同一局域网可写 ID@IP）', isDense: true),
+          decoration: const InputDecoration(labelText: '对方的 ID@IP', isDense: true),
         ),
         const SizedBox(height: 8),
         TextField(

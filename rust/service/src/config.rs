@@ -1,7 +1,7 @@
-//! `service.json` (0600): relay, key, id, secret, name, password, optional ports (spec §3).
+//! `service.json` (0600): id, name, password, optional ports (spec §3).
 
 use anyhow::Result;
-use rapp_net::crypto::{is_valid_id, random_hex, random_id, random_password};
+use rapp_net::crypto::{is_valid_id, random_id, random_password};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -11,13 +11,7 @@ pub const DEFAULT_IPC_PORT: u16 = 22029;
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct Config {
     #[serde(default)]
-    pub relay: Option<String>,
-    #[serde(default)]
-    pub key: Option<String>,
-    #[serde(default)]
     pub id: Option<String>,
-    #[serde(default)]
-    pub secret: String,
     #[serde(default)]
     pub name: String,
     #[serde(default)]
@@ -38,19 +32,15 @@ pub struct Config {
 }
 
 impl Config {
-    /// Reads `service.json`, filling in id / secret / password / name on first start.
-    /// The ID is picked here, not by the relay, so it exists before any relay is set;
-    /// the relay accepts a valid ID it has not seen (spec §2.2).
+    /// Reads `service.json`, filling in id / password / name on first start.
+    /// Old `relay` / `key` / `secret` fields are ignored and drop out on the next save.
     pub fn load_or_init(home: &Path) -> Result<Config> {
         let path = home.join("service.json");
         let mut cfg: Config = rapp_net::config::read_json(&path)?.unwrap_or_default();
         let has_id = cfg.id.as_deref().is_some_and(is_valid_id);
-        let fresh = !has_id || cfg.secret.is_empty() || cfg.password.is_empty() || cfg.name.is_empty();
+        let fresh = !has_id || cfg.password.is_empty() || cfg.name.is_empty();
         if !has_id {
             cfg.id = Some(random_id());
-        }
-        if cfg.secret.is_empty() {
-            cfg.secret = random_hex(32);
         }
         if cfg.password.is_empty() {
             cfg.password = random_password();
@@ -79,12 +69,6 @@ impl Config {
     pub fn check_updates(&self) -> bool {
         self.check_updates.unwrap_or(true)
     }
-
-    /// `(relay, key)` when a relay is configured.
-    pub fn relay(&self) -> Option<(String, String)> {
-        let relay = self.relay.clone().filter(|r| !r.is_empty())?;
-        Some((relay, self.key.clone().unwrap_or_default()))
-    }
 }
 
 #[cfg(test)]
@@ -96,7 +80,7 @@ mod tests {
     fn first_start_picks_its_own_id_and_keeps_it() {
         let dir = tempfile::tempdir().unwrap();
         let cfg = Config::load_or_init(dir.path()).unwrap();
-        let id = cfg.id.clone().expect("an ID without any relay");
+        let id = cfg.id.clone().expect("an ID of its own");
         assert!(is_valid_id(&id));
         assert_eq!(Config::load_or_init(dir.path()).unwrap().id, Some(id));
     }

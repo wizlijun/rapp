@@ -328,12 +328,13 @@ void main() {
     expect(t.sent.where((m) => m['cmd'] == 'remove_host'), isEmpty);
   });
 
-  testWidgets('offline device shows 离线 and the error', (tester) async {
+  testWidgets('offline device shows 离线 and the error in plain words', (tester) async {
     offline = true;
     await pumpTab(tester);
     await selectMini(tester);
     expect(find.text('离线'), findsWidgets);
-    expect(find.textContaining('connect timed out'), findsOneWidget);
+    expect(find.text('连接超时'), findsOneWidget);
+    expect(find.textContaining('connect timed out'), findsNothing);
   });
 
   testWidgets('missing permissions on a remote host show the remote hint', (tester) async {

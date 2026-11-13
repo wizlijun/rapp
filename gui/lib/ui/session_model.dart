@@ -2,7 +2,7 @@
 import 'lamp.dart';
 import 'workspace_store.dart';
 
-const pathLabels = {'lan': '局域网', 'direct': '直连', 'relay': '中继'};
+const pathLabels = {'lan': '局域网', 'direct': '直连'};
 
 class SessionEntry {
   const SessionEntry({

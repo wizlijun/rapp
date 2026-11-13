@@ -63,9 +63,10 @@ String disconnectWord(String? raw) {
   if (raw == 'user') return '你断开了';
   if (raw.startsWith('host says: ') && raw.endsWith('quit')) return 'A 端关闭了 app';
   if (raw.contains('bad password')) return '密码不对';
-  if (raw.contains('offline') || raw.contains('no path to') || raw.contains('relay unreachable and no LAN address answered')) {
+  if (raw.contains('offline') || raw.contains('no path to')) {
     return '对方离线';
   }
+  if (raw.contains('no address')) return '没有地址，请用 ID@IP 重新添加';
   if (raw.contains('timed out') || raw.contains('no reply')) return '连接超时';
   if (raw == 'connection closed' ||
       raw == 'the host closed the connection' ||

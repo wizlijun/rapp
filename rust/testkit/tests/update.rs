@@ -101,7 +101,7 @@ impl Env {
         let bundle = tmp.path().join("Applications/rapp.app");
         make_app(&bundle, "current");
         let cache = tmp.path().join("cache");
-        service_json(&home, None);
+        service_json(&home);
         let path = home.join("service.json");
         let mut cfg: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         cfg["update_url"] = json!(URL);
@@ -320,7 +320,7 @@ async fn session(svc: &Service) -> (quinn::Endpoint, quinn::Connection, rapp_net
 #[tokio::test]
 async fn not_in_bundle_is_off() {
     let (home, bins) = (tempfile::tempdir().unwrap(), bins());
-    service_json(home.path(), None);
+    service_json(home.path());
     let runner = Arc::new(FakeRunner::new());
     let svc = start_service_with(home.path(), bins.path(), runner.clone(), None).await;
     let st = ipc_once(&svc, home.path(), json!({"cmd":"status"})).await;

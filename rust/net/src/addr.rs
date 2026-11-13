@@ -1,5 +1,5 @@
 //! Address helpers: private-source check (LAN password fallback), LAN addresses
-//! and the relay-less `id@ip[:port]` host form (spec §2.3).
+//! and the `id@ip[:port]` host form (spec §2.3).
 
 use crate::crypto::is_valid_id;
 use anyhow::{bail, Context, Result};
@@ -55,13 +55,6 @@ pub fn local_ipv4s() -> Vec<Ipv4Addr> {
             }
         }
     }
-    v
-}
-
-/// What A reports to the relay: every local IPv4 plus loopback, each with `port`.
-pub fn lan_addrs(port: u16) -> Vec<String> {
-    let mut v: Vec<String> = local_ipv4s().iter().map(|ip| format!("{ip}:{port}")).collect();
-    v.push(format!("127.0.0.1:{port}"));
     v
 }
 
@@ -155,11 +148,5 @@ mod tests {
             assert!(!p(s), "{s} should be public");
         }
         assert!(p("::ffff:192.168.1.1"));
-    }
-
-    #[test]
-    fn lan_addrs_end_with_loopback() {
-        let v = lan_addrs(22028);
-        assert_eq!(v.last().unwrap(), "127.0.0.1:22028");
     }
 }
