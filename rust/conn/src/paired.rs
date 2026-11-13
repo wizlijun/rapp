@@ -33,6 +33,11 @@ impl Paired {
         Ok(Paired { path, list: Mutex::new(list) })
     }
 
+    /// No devices, for when the file is unreadable; the next `add` replaces it.
+    pub fn empty(home: &Path) -> Paired {
+        Paired { path: home.join("paired.json"), list: Mutex::new(Vec::new()) }
+    }
+
     pub fn contains(&self, fp: &Fp) -> bool {
         self.list.lock().unwrap().iter().any(|e| e.fp == *fp)
     }

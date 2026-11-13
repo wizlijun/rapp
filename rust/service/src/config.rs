@@ -29,14 +29,22 @@ pub struct Config {
     /// The scheduled checks (default true); the 检查更新 button works either way.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub check_updates: Option<bool>,
+    /// The relay as `host:port`; with `key`, the service keeps a connection to it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relay: Option<String>,
+    /// The key text (`rapp…`); devices holding the same key trust each other.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
 }
 
 impl Config {
     /// Reads `service.json`, filling in id / password / name on first start.
-    /// Old `relay` / `key` / `secret` fields are ignored and drop out on the next save.
+    /// An old `secret` field is ignored and drops out on the next save; empty `relay` / `key` count as unset.
     pub fn load_or_init(home: &Path) -> Result<Config> {
         let path = home.join("service.json");
         let mut cfg: Config = rapp_net::config::read_json(&path)?.unwrap_or_default();
+        cfg.relay = cfg.relay.take().filter(|s| !s.is_empty());
+        cfg.key = cfg.key.take().filter(|s| !s.is_empty());
         let has_id = cfg.id.as_deref().is_some_and(is_valid_id);
         let fresh = !has_id || cfg.password.is_empty() || cfg.name.is_empty();
         if !has_id {

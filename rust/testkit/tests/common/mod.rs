@@ -2,6 +2,7 @@
 #![allow(dead_code)]
 
 use quinn::{Connection, Endpoint};
+use rapp_conn::{quic_facts, read_welcome, send_hello, Me, Pipe, Role};
 use rapp_net::line::{read_json, write_json};
 use rapp_net::quic::{bi, client_endpoint, connect, ALPN_PEER};
 use rapp_service::{Runner, Service, UpdateOpts};
@@ -196,6 +197,45 @@ pub async fn direct(ep: &Endpoint, a: SocketAddr, auth: Value) -> (Connection, V
 
 pub fn a_addr(svc: &Service) -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], svc.port))
+}
+
+// ---- rapp/2 B side ----
+
+/// A `rapp/2` connection to A showing `id`'s certificate.
+pub async fn dial2(a: SocketAddr, id: &rapp_wire::Identity) -> Connection {
+    let ep = b_endpoint();
+    let cfg = rapp_wire::tls::device_client_config(id, rapp_wire::tls::ALPN_DEVICE).unwrap();
+    let connecting = ep.connect_with(cfg, a, "rapp").unwrap();
+    tokio::time::timeout(Duration::from_secs(5), connecting).await.expect("connect in time").unwrap()
+}
+
+/// The hello and one request on a fresh stream, written together as B does; the welcome is
+/// checked through `quic_facts` and `read_welcome`. Returns the pipe positioned at the reply.
+pub async fn hello_and_send(
+    conn: &Connection,
+    id: &rapp_wire::Identity,
+    a_id: &str,
+    key: Option<&rapp_wire::Key>,
+    request: Value,
+) -> anyhow::Result<Pipe> {
+    let facts = quic_facts(conn, &id.fp, Role::Client)?;
+    let mut pipe: Pipe = Box::new(bi(conn.open_bi().await?));
+    send_hello(&mut pipe, &facts, &Me { id: "", name: "test-b", key }).await?;
+    write_json(&mut pipe, &request).await?;
+    tokio::time::timeout(WAIT, read_welcome(&mut pipe, &facts, key, a_id, None)).await??;
+    Ok(pipe)
+}
+
+/// `hello_and_send` and the reply to the request.
+pub async fn req2(
+    conn: &Connection,
+    id: &rapp_wire::Identity,
+    a_id: &str,
+    key: Option<&rapp_wire::Key>,
+    request: Value,
+) -> anyhow::Result<Value> {
+    let mut pipe = hello_and_send(conn, id, a_id, key, request).await?;
+    tokio::time::timeout(WAIT, read_json(&mut pipe)).await?
 }
 
 // ---- hub driver ----
