@@ -208,3 +208,44 @@ async fn an_empty_paste_is_a_no_op_and_with_enter_sends_only_enter() {
     assert_eq!((sc.lines[0].as_str(), sc.lines[1].as_str()), ("ab", "ab"));
     assert!(!s.raw(&["list-buffers"]).contains("rapp-"));
 }
+
+#[tokio::test]
+async fn sizes_the_window_when_nobody_else_is_attached() {
+    let Some(s) = common::Server::start() else { return };
+    s.raw(&["new-session", "-d", "-s", "z", "-x", "100", "-y", "30"]);
+    let p = s.tmux().list().await.unwrap()[0].clone();
+    let (ctl, _e) = Control::attach(&s.tmux(), &p.session_id).await.unwrap();
+    assert!(ctl.fit(&s.tmux(), &p.session_id, 140, 45, false).await.unwrap());
+    let after = s.tmux().list().await.unwrap()[0].clone();
+    assert_eq!((after.cols, after.rows), (140, 45));
+    ctl.detach().await;
+}
+
+#[tokio::test]
+async fn leaves_the_size_alone_when_someone_else_is_attached() {
+    let Some(s) = common::Server::start() else { return };
+    s.raw(&["new-session", "-d", "-s", "z", "-x", "100", "-y", "30"]);
+    let p = s.tmux().list().await.unwrap()[0].clone();
+    let (other, _e1) = Control::attach(&s.tmux(), &p.session_id).await.unwrap();
+    other.command(&cmd::set_size(100, 30)).await.unwrap();
+    let (ctl, _e2) = Control::attach(&s.tmux(), &p.session_id).await.unwrap();
+    assert!(!ctl.fit(&s.tmux(), &p.session_id, 140, 45, false).await.unwrap());
+    let same = s.tmux().list().await.unwrap()[0].clone();
+    assert_eq!((same.cols, same.rows), (100, 30));
+    assert!(ctl.fit(&s.tmux(), &p.session_id, 140, 45, true).await.unwrap());
+    ctl.detach().await;
+    other.detach().await;
+}
+
+#[tokio::test]
+async fn new_session_runs_the_command_at_the_given_size() {
+    let Some(s) = common::Server::start() else { return };
+    s.tmux()
+        .new_session("fix relay", &["sh".into(), "-c".into(), "echo \"it's up\"; sleep 60".into()], 118, 38)
+        .await
+        .unwrap();
+    common::settle().await;
+    let p = s.tmux().list().await.unwrap().into_iter().find(|p| p.session == "fix relay").unwrap();
+    assert_eq!((p.cols, p.rows), (118, 38));
+    assert_eq!(s.tmux().capture(&p.pane).await.unwrap().lines[0], "it's up");
+}

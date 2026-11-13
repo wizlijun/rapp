@@ -77,6 +77,19 @@ pub fn attach(session_id: &str) -> Vec<String> {
     ["-C", "attach-session", "-t", session_id].map(String::from).to_vec()
 }
 
+/// Set this control client's size.
+pub fn set_size(cols: u16, rows: u16) -> Vec<String> {
+    vec!["refresh-client".into(), "-C".into(), format!("{cols}x{rows}")]
+}
+
+/// A detached session; each element of `command` is its own argument (none: the default shell).
+pub fn new_session(name: &str, cols: u16, rows: u16, command: &[String]) -> Vec<String> {
+    let mut v: Vec<String> =
+        ["new-session", "-d", "-s", name, "-x", &cols.to_string(), "-y", &rows.to_string()].map(String::from).to_vec();
+    v.extend(command.iter().cloned());
+    v
+}
+
 /// One command as a line for a control-mode channel: each argument in single quotes.
 pub fn channel_line(args: &[String]) -> anyhow::Result<String> {
     if args.iter().any(|a| a.contains(['\'', '\n', '\r'])) {
@@ -114,6 +127,15 @@ mod tests {
         assert_eq!(send_hex("%1", &["61".into()]), ["send-keys", "-t", "%1", "-H", "61"]);
         assert_eq!(load_buffer("rapp-1-0"), ["load-buffer", "-b", "rapp-1-0", "-"]);
         assert_eq!(paste_buffer("rapp-1-0", "%1"), ["paste-buffer", "-p", "-d", "-b", "rapp-1-0", "-t", "%1"]);
+    }
+    #[test]
+    fn size_and_new_session_builders() {
+        assert_eq!(set_size(140, 45), ["refresh-client", "-C", "140x45"]);
+        assert_eq!(
+            new_session("a b", 118, 38, &["sh".into(), "-c".into(), "echo hi".into()]),
+            ["new-session", "-d", "-s", "a b", "-x", "118", "-y", "38", "sh", "-c", "echo hi"]
+        );
+        assert_eq!(new_session("n", 80, 24, &[]).len(), 8);
     }
     #[test]
     fn history_range_counts_up_from_the_screen() {

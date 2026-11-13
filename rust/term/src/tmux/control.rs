@@ -239,6 +239,23 @@ impl Control {
     }
 
     /// Close the channel; if the process `attach` started has not left within a second, kill it.
+    /// Set the size this client shows the session at. Without `force` it does nothing (`false`) while another
+    /// client is attached; the count includes this client, so "someone else" is more than one.
+    pub async fn fit(&self, tmux: &Tmux, session_id: &str, cols: u16, rows: u16, force: bool) -> anyhow::Result<bool> {
+        if !force {
+            let panes = tmux.list().await?;
+            let Some(p) = panes.iter().find(|p| p.session_id == session_id) else {
+                anyhow::bail!("the session is gone");
+            };
+            if p.attached > 1 {
+                return Ok(false);
+            }
+        }
+        let (cols, rows) = super::clamp_size(cols, rows);
+        self.command(&cmd::set_size(cols, rows)).await?;
+        Ok(true)
+    }
+
     pub async fn detach(self) {
         self.inner.writer.lock().await.take();
         let child = self.inner.child.lock().unwrap().take();

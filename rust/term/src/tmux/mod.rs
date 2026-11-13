@@ -196,6 +196,12 @@ impl Tmux {
         Screen::from_capture(&text, &meta)
     }
 
+    /// A detached session `name` running `command` (each element one argument; empty: the default shell).
+    pub async fn new_session(&self, name: &str, command: &[String], cols: u16, rows: u16) -> anyhow::Result<()> {
+        let (cols, rows) = clamp_size(cols, rows);
+        self.run(&cmd::new_session(name, cols, rows, command)).await.map(|_| ())
+    }
+
     /// `lines` rows of scrollback ending `before` rows above the visible screen.
     pub async fn history(&self, pane: &str, before: u32, lines: u32) -> anyhow::Result<Vec<String>> {
         if lines == 0 {
@@ -214,6 +220,11 @@ impl Tmux {
         }
         Ok(v)
     }
+}
+
+/// Keep a viewer's size within 20-500 columns and 5-200 rows.
+pub fn clamp_size(cols: u16, rows: u16) -> (u16, u16) {
+    (cols.clamp(20, 500), rows.clamp(5, 200))
 }
 
 /// Does this failed `list-panes` only mean "no server, or no sessions"? tmux exits 1 for it; other exit codes
@@ -238,6 +249,13 @@ mod tests {
         assert!(!is_empty_server(Some(255), "Warning: no such file; no current target"));
         assert!(!is_empty_server(Some(1), "Permission denied (publickey). No such file or directory"));
         assert!(!is_empty_server(Some(1), "something else"));
+    }
+
+    #[test]
+    fn clamps_viewer_sizes() {
+        assert_eq!(clamp_size(5, 2), (20, 5));
+        assert_eq!(clamp_size(9000, 9000), (500, 200));
+        assert_eq!(clamp_size(118, 38), (118, 38));
     }
 
     #[test]
