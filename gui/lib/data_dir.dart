@@ -96,6 +96,25 @@ bool prepareDataDir(String root, String legacy) {
   return true;
 }
 
+/// Adopt (D12): copies each file of `from/local/` that `to/local/` lacks. That data is this device's own and
+/// never synced. `service.json` goes last. Never overwrites; [from] is not changed.
+void copyLocalIfMissing(String from, String to) {
+  final src = '$from/local', dst = '$to/local';
+  Directory(dst).createSync(recursive: true);
+  _chmod('700', dst);
+  if (!Directory(src).existsSync()) return;
+  final rel = Directory(src)
+      .listSync(recursive: true, followLinks: false)
+      .whereType<File>()
+      .map((f) => f.path.substring(src.length + 1))
+      .where((r) => r != 'service.json')
+      .toList()
+    ..sort();
+  for (final r in [...rel, 'service.json']) {
+    _copyIfMissing('$src/$r', '$dst/$r');
+  }
+}
+
 /// True when `dir/README.md` starts with [readmeMarker].
 bool isRappDataDir(String dir) {
   try {

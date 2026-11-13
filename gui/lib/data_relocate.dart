@@ -34,7 +34,8 @@ String _norm(String p) {
   return (kind: null, error: '这个文件夹里已经有别的东西，选一个空文件夹');
 }
 
-/// Copies (for [RelocateKind.copy]) and then writes, or for [isDefault] deletes, [pointer].
+/// Copies the root (for [RelocateKind.copy]) or only the missing files of `local/` (adopt), and then writes,
+/// or for [isDefault] deletes, [pointer].
 /// The old root is never changed. Null means success, else a short error.
 Future<String?> applyRelocation({
   required String from,
@@ -52,6 +53,8 @@ Future<String?> applyRelocation({
         final line = r.stderr.toString().split('\n').first.trim();
         return '复制没成功：$line';
       }
+    } else {
+      copyLocalIfMissing(from, to);
     }
     if (isDefault) {
       final f = File(pointer);

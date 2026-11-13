@@ -72,6 +72,39 @@ void main() {
     expect(File(pointer).readAsStringSync(), '$to\n');
   });
 
+  test('adopt brings this device\'s local/ along, copy-if-missing, old root untouched', () async {
+    final from = '${tmp.path}/from';
+    prepareDataDir(from, '${tmp.path}/none');
+    File('$from/local/service.json').writeAsStringSync('{"id":"me"}');
+    File('$from/local/hosts.json').writeAsStringSync('[1]');
+    File('$from/local/ipc.token').writeAsStringSync('tok');
+    final marker = '${tmp.path}/marker';
+    Directory(marker).createSync();
+    File('$marker/README.md').writeAsStringSync('# rapp 数据目录\n');
+    final kept = '${tmp.path}/kept';
+    prepareDataDir(kept, '${tmp.path}/none');
+    File('$kept/local/hosts.json').writeAsStringSync('[2]');
+    final pointer = '${tmp.path}/cfg/data-root';
+    for (final to in [marker, kept]) {
+      expect(planRelocation(from, to).kind, RelocateKind.adopt);
+      expect(await applyRelocation(from: from, to: to, kind: RelocateKind.adopt, pointer: pointer, isDefault: false), isNull);
+      expect(File('$to/local/service.json').readAsStringSync(), '{"id":"me"}');
+      expect(File('$to/local/ipc.token').readAsStringSync(), 'tok');
+      if (!Platform.isWindows) {
+        expect(Directory('$to/local').statSync().mode & 0x1ff, 448);
+        expect(File('$to/local/service.json').statSync().mode & 0x1ff, 384);
+        expect(File('$to/local/ipc.token').statSync().mode & 0x1ff, 384);
+      }
+      expect(File('$to/local/service.json.tmp').existsSync(), isFalse);
+    }
+    expect(File('$marker/local/hosts.json').readAsStringSync(), '[1]');
+    if (!Platform.isWindows) expect(File('$marker/local/hosts.json').statSync().mode & 0x1ff, 384);
+    expect(File('$kept/local/hosts.json').readAsStringSync(), '[2]', reason: 'an existing file is never overwritten');
+    expect(File('$from/local/hosts.json').readAsStringSync(), '[1]');
+    expect(Directory('$from/local').listSync().map((e) => e.path.split('/').last).toSet(),
+        {'service.json', 'hosts.json', 'ipc.token'});
+  });
+
   test('back to default deletes the pointer', () async {
     final pointer = File('${tmp.path}/cfg/data-root')..createSync(recursive: true);
     pointer.writeAsStringSync('/x\n');
