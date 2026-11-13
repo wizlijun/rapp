@@ -21,6 +21,7 @@ FLIP_TIMEOUT = 30.0  # a flip that is not readable after this long counts as fai
 EDITOR_LIMIT = 300.0  # the whole typing phase
 RECOVERY_LIMIT = 120.0  # no readable flip this long after the network is back: needs a human
 NS = 1e9
+CONNECT_ATTEMPTS = 3  # fresh rigs tried before the run is written up as "cannot connect"
 
 # What §4.3 asks for (None = not asked), by profile.
 TARGET_OPEN = {"n1": 8, "n2": 15, "n3": 8, "n4": 5}
@@ -429,6 +430,27 @@ def report(args, res):
     return "\n".join(out) + "\n"
 
 
+def report_no_connect(args, reason):
+    """The rig could not connect B to A (B's hub gave up): every row but the first is n/a."""
+    p = args.profile
+
+    def target(table):
+        return f"<= {table[p]} s" if p in table else "-"
+
+    na = "n/a (could not connect)"
+    rows = [("open to first readable screen",
+             f"无法连接: {reason} ({CONNECT_ATTEMPTS} attempts, each a fresh rig and one hub dial)", target(TARGET_OPEN)),
+            ("page flip, median", na, target(TARGET_FLIP)),
+            ("200 characters typed, identical", na, "identical" if p in TARGET_FLIP else "-"),
+            ("network back to usable", na, target(TARGET_RECOVERY)),
+            ("screen latency over time (median per 5 min)", na, "does not grow"),
+            ("crash / needs a click", "0 crashed; 0 needed a human; 0 auto-reconnect(s)", "0 / 0")]
+    out = [f"# weak-network run: profile {p}, path {args.path}, {args.minutes:g} min, seed {args.seed}", "",
+           "| task | result | target (§4.3) |", "|---|---|---|"]
+    out += [f"| {a} | {b} | {c} |" for a, b, c in rows]
+    return "\n".join(out) + "\n"
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--profile", required=True, choices=["s0", "n1", "n2", "n3", "n4", "lan"])
@@ -445,7 +467,21 @@ def main():
     res = dict(open=None, flips=[], flip_timeouts=0, typing=(200, 0, 0), recovery=[], outages=0, stuck=0,
                reconnects=0, unconfirmed=[], crashes=[], human=[], latency=None)
     work = tempfile.mkdtemp(prefix="rapp-weak-")
-    rig = Rig(args.path, args.profile, args.seed, work)
+    rig, reason = None, None
+    for attempt in range(1, CONNECT_ATTEMPTS + 1):
+        try:
+            rig = Rig(args.path, args.profile, args.seed, os.path.join(work, f"attempt-{attempt}"))
+            break
+        except RigError as e:  # B's hub could not reach A through the profile: that is the result, not a crash
+            reason = str(e)
+            print(f"  connect attempt {attempt} failed: {reason}", file=sys.stderr)
+    if rig is None:
+        text = report_no_connect(args, reason)
+        with open(args.out, "w") as f:
+            f.write(text)
+        print(text)
+        shutil.rmtree(work, ignore_errors=True)
+        return
     try:
         print(f"work dir {work}; proxy port {rig.proxy_port}", file=sys.stderr)
         phase_reading(rig, reading_s, res)
