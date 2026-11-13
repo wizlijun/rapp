@@ -132,7 +132,7 @@ agent 规则：**不直接改这个文件**。加、删设备走 GUI 的设备�
 
 格式和取值见《app 配置设计》§2，怎么写见《app 配置编写规范》。内置的一份在 `gui/assets/app_profiles.json`（随 GUI 发布，只在仓库里改）。没有机密。
 
-（状态：设计已确认，代码在 `feat/app-profiles` 上实施中；实施完成时把代码位置补进这一节。）
+谁读写：GUI，启动时读一次（`AppProfileStore.load`，`gui/lib/ui/app_profile_store.dart:57`），每次改动都写（`同文件:189`，临时文件 + 改名）。读不出来时改名为 `apps.json.bad`，从空白开始，提示「app 配置没有读到，已从空白开始」。GUI 里改它的入口：标签右键、串流菜单、设备页 ⋯、本机页「app 配置」。
 
 ### 2.6 `$ROOT/devices/<id>/device.json`（这台设备是什么）
 
