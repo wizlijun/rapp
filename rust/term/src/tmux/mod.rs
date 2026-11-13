@@ -12,6 +12,8 @@ use tokio::io::AsyncWriteExt;
 
 /// The most text one paste may carry, in bytes.
 pub const MAX_PASTE: usize = 1_048_576;
+/// The most scrollback rows one `history` call reads.
+pub const MAX_HISTORY: u32 = 2000;
 
 static PASTE_SEQ: AtomicU64 = AtomicU64::new(0);
 
@@ -204,7 +206,7 @@ impl Tmux {
         self.run(&cmd::new_session(name, cols, rows, command)).await.map(|_| ())
     }
 
-    /// `lines` rows of scrollback ending `before` rows above the visible screen.
+    /// `lines` rows of scrollback (at most `MAX_HISTORY`) ending `before` rows above the visible screen.
     pub async fn history(&self, pane: &str, before: u32, lines: u32) -> anyhow::Result<Vec<String>> {
         if lines == 0 {
             return Ok(Vec::new());
@@ -214,7 +216,7 @@ impl Tmux {
         if before >= size {
             return Ok(Vec::new());
         }
-        let lines = lines.min(size - before);
+        let lines = lines.min(MAX_HISTORY).min(size - before);
         let out = self.run(&cmd::history(pane, before, lines)).await?;
         let mut v: Vec<String> = out.split('\n').map(String::from).collect();
         if v.last().is_some_and(|l| l.is_empty()) {

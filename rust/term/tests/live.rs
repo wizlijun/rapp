@@ -93,6 +93,22 @@ async fn history_ranges_are_empty_or_clamped() {
 }
 
 #[tokio::test]
+async fn history_gives_at_most_2000_rows_at_a_time() {
+    let Some(s) = common::Server::start() else { return };
+    s.raw(&["set", "-g", "history-limit", "5000"]);
+    s.raw(&["new-session", "-d", "-s", "l", "-x", "80", "-y", "5", "seq 1 3000; sleep 60"]);
+    let pane = s.tmux().list().await.unwrap()[0].pane.clone();
+    let end = std::time::Instant::now() + Duration::from_secs(5);
+    while s.raw(&["display-message", "-p", "-t", &pane, "#{history_size}"]).trim().parse::<u32>().unwrap() < 2996 {
+        assert!(std::time::Instant::now() < end, "the history did not fill");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let h = s.tmux().history(&pane, 0, u32::MAX).await.unwrap();
+    // The 2000 rows nearest the screen: 2996 is the last one above it.
+    assert_eq!((h.len(), h[0].as_str(), h[1999].as_str()), (2000, "997", "2996"));
+}
+
+#[tokio::test]
 async fn control_runs_commands_and_reports_dirty_panes_in_any_window() {
     let Some(s) = common::Server::start() else { return };
     s.raw(&["new-session", "-d", "-s", "c", "-x", "100", "-y", "30"]);
