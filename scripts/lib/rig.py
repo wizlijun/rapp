@@ -102,7 +102,7 @@ class Rig:
     path "direct": proxy sits between B's hub and A's service port; B's hub has no relay and adds
     `id@127.0.0.1:<proxy>`. path "relay": a relay runs, A registers with it directly, and B's
     service.json names the proxy as the relay (proxy -> relay), with the hub forced onto "relay".
-    `down` is the proxy's outage state (the `down` field of its stats lines).
+    `down_at(t)` / `outage_between(a, b)` / `last_back_ns(t)` give the proxy's outage state exactly.
     """
 
     def __init__(self, path, profile, seed, work=None):
@@ -110,7 +110,8 @@ class Rig:
         self.path = path
         self.work = work or tempfile.mkdtemp(prefix="rapp-rig-")
         self.procs = []
-        self.down = False
+        self.outages = []
+        self.proxy_start_ns = 0
         self.stats = {}
         self.events = queue.Queue()
         self.closed = set()
@@ -163,6 +164,12 @@ class Rig:
         first = json.loads(weak.stdout.readline())
         assert first.get("event") == "listening", first
         self.proxy_port = first["port"]
+        # rapp-weaknet's outages are a fixed schedule from its start, so the exact edges are computed here
+        # (its once-a-second stats line would only give them to within 1 s).
+        self.proxy_start_ns = time.clock_gettime_ns(time.CLOCK_UPTIME_RAW)
+        prof = profile if os.path.exists(profile) else os.path.join(ROOT, "rust/testkit/profiles", profile + ".json")
+        with open(prof) as f:
+            self.outages = json.load(f).get("outages", [])
         threading.Thread(target=self._read_stats, args=(weak,), daemon=True).start()
 
         if self.path == "relay":
@@ -185,7 +192,29 @@ class Rig:
                 continue
             if ev.get("event") == "stats":
                 self.stats = ev
-                self.down = bool(ev.get("down"))
+
+    def _windows(self, o, upto_s):
+        """(start, end) in seconds since the proxy started of o's outages that begin before `upto_s`."""
+        k = 0
+        while o["every_s"] > 0 and o["offset_s"] + k * o["every_s"] < upto_s:
+            s = o["offset_s"] + k * o["every_s"]
+            yield s, s + o["for_s"]
+            k += 1
+
+    def down_at(self, t_ns):
+        t = (t_ns - self.proxy_start_ns) / 1e9
+        return any(s <= t < e for o in self.outages for s, e in self._windows(o, t + 1e-9))
+
+    def outage_between(self, a_ns, b_ns):
+        """True if any outage overlaps [a, b]."""
+        a, b = ((x - self.proxy_start_ns) / 1e9 for x in (a_ns, b_ns))
+        return any(s <= b and e > a for o in self.outages for s, e in self._windows(o, b + 1e-9))
+
+    def last_back_ns(self, t_ns):
+        """When the network last came back (end of the latest outage that is over at t_ns)."""
+        t = (t_ns - self.proxy_start_ns) / 1e9
+        ends = [e for o in self.outages for s, e in self._windows(o, t) if e <= t]
+        return self.proxy_start_ns + int(max(ends) * 1e9) if ends else t_ns
 
     def _read_hub(self):
         for line in self.hub.p.stdout:

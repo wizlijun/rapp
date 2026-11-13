@@ -18,6 +18,7 @@ APP_EXE = "RappTestPage.app/Contents/MacOS/RappTestPage"
 PAGE_DOWN = 121
 BACKOFF = (1, 2, 4, 8, 15)  # seconds, then 15 for ever (same policy as the GUI)
 FLIP_TIMEOUT = 30.0  # a flip that is not readable after this long counts as failed
+EDITOR_LIMIT = 300.0  # the whole typing phase
 RECOVERY_LIMIT = 120.0  # no readable flip this long after the network is back: needs a human
 NS = 1e9
 
@@ -29,13 +30,15 @@ TARGET_RECOVERY = {"n1": 5, "n4": 5}
 RULES = """Rules (fixed in the script):
 - **readable**: the frame number read from the screen equals the expected page and no newer frame arrives for 1 s;
   the time is the arrival of that last frame.
-- **flip**: PageDown sent -> readable. Flips started during an outage (proxy stats `down`), or overlapping one, are not counted.
-- **recovery**: after the network is back (`down` true -> false), PageDown every 0.5 s until a flip is readable within 3 s
-  (probes overlap, so a probe counts when the screen shows its page or a later one);
+- **flip**: PageDown sent -> readable. Flips started during an outage, or overlapping one, are not counted.
+- **recovery**: after the network is back, PageDown every 0.5 s; the probe credited is the last one sent at or before the
+  first frame showing a new page, and only if that page is readable within 3 s of its send (else restart from the screen as it is);
   recovery = that PageDown's send time - the time the network came back.
+- **outage edges** are computed from the profile's outage schedule and the proxy's start time (known to within tens of ms),
+  not from its once-a-second stats.
 - **auto-reconnect** (the script's own loop, hub `open` with `reconnect`): when rapp-session reports `disconnected`
   (not "taken over" or "... quit"), reopen after 1, 2, 4, 8, 15, 15... s.
-- **typing**: 200 distinct characters in 10 pastes of 20; an unconfirmed paste is re-sent after reconnect; the editor's file is
+- **typing**: 200 distinct characters in 10 pastes of 20, 300 s for all ten; an unconfirmed paste is re-sent after reconnect; the editor's file is
   compared with the text as a multiset of characters (missing / extra).
 - **screen latency** (no v7 stats yet): the draw time of a frame number in the clip's marks file -> arrival of that number at B."""
 
@@ -180,6 +183,29 @@ def wait_until(pred, seconds):
 # ---------------------------------------------------------------- phases
 
 
+def credit_probe(live, rec, res):
+    """Recovery: credit only the probe whose own PageDown caused the first new page. That is the last probe sent
+    at or before the first frame showing a page beyond `m0`; it counts if its page was readable within 3 s of
+    its send. Otherwise the probes so far are written off and the search restarts from the screen as it is."""
+    first = next(((t, m) for t, m in live.frames[rec["idx"]:] if m > rec["m0"]), None)
+    if first is None:
+        return
+    t_first, _ = first
+    sent = [t for t in rec["probes"] if t <= t_first]
+    if not sent:  # a frame that no probe of ours can have caused (old queued data): move the baseline
+        rec["m0"] = first[1]
+        rec["idx"] = len(live.frames)
+        return
+    t_ready = settled(live, rec["m0"] + 1, t_first, at_least=True)
+    if not t_ready:
+        return
+    if t_ready - sent[-1] <= 3 * NS:
+        res["recovery"].append((sent[-1] - rec["back"]) / NS)
+        rec.clear()
+    else:
+        rec.update(m0=last_mark(live), idx=len(live.frames), probes=[])
+
+
 def phase_reading(rig, seconds, res):
     app = TestApp("--reading")
     live = Live(rig, APP_ID)
@@ -188,53 +214,49 @@ def phase_reading(rig, seconds, res):
         t = wait_until(lambda: settled(live, 0, t0), 120)
         res["open"] = (t - t0) / NS if t else None
         end = time.time() + seconds
-        pending = None  # (t_send, expected, tainted)
-        recovery = None  # dict(back, m0, probes=[(t_send, expected)], next)
-        was_down = rig.down
+        pending = None  # (t_send, expected)
+        recovery = None  # dict(back, m0, idx, probes=[t_send])
+        was_down = rig.down_at(uptime_ns())
         next_flip = 0.0
         while time.time() < end or recovery or pending:
             if time.time() > end + 150 or live.terminal:
                 break
-            now_down = rig.down
-            if now_down and pending:
-                pending = (pending[0], pending[1], True)
+            now = uptime_ns()
+            now_down = rig.down_at(now)
             if now_down and not was_down:
                 recovery = None
                 res["outages"] += 1
             if was_down and not now_down and last_mark(live) is not None:
-                recovery = dict(back=uptime_ns(), m0=last_mark(live), probes=[], next=0.0)
+                recovery = dict(back=rig.last_back_ns(now), m0=last_mark(live), idx=len(live.frames), probes=[], next=0.0)
                 pending = None
             was_down = now_down
             tick = time.time()
             if recovery:
                 if tick >= recovery["next"] and live.frames:
                     recovery["next"] = tick + 0.5
-                    recovery["probes"].append((uptime_ns(), last_mark(live) + 1))
+                    recovery["probes"].append(uptime_ns())
                     live.key(PAGE_DOWN)
-                for t_send, expected in recovery["probes"]:
-                    t_ready = settled(live, expected, t_send, at_least=True)
-                    if t_ready and t_ready - t_send <= 3 * NS:
-                        res["recovery"].append((t_send - recovery["back"]) / NS)
-                        recovery = None
-                        break
-                if recovery and (uptime_ns() - recovery["back"]) / NS > RECOVERY_LIMIT:
+                credit_probe(live, recovery, res)
+                if not recovery:
+                    recovery = None
+                elif (uptime_ns() - recovery["back"]) / NS > RECOVERY_LIMIT:
                     res["stuck"] += 1
                     recovery = None
             elif pending:
-                t_send, expected, tainted = pending
+                t_send, expected = pending
                 t_ready = settled(live, expected, t_send)
                 if t_ready:
-                    if not tainted:
+                    if not rig.outage_between(t_send, t_ready):
                         res["flips"].append((t_ready - t_send) / NS)
                     pending = None
                     next_flip = time.time() + 0.5
                 elif (uptime_ns() - t_send) / NS > FLIP_TIMEOUT:
-                    if not tainted:
+                    if not rig.outage_between(t_send, now):
                         res["flip_timeouts"] += 1
                         print(f"  flip timeout: expected page {expected}, screen reads {last_mark(live)}", file=sys.stderr)
                     pending = None
             elif not now_down and live.connected() and live.frames and time.time() < end and time.time() >= next_flip:
-                pending = (uptime_ns(), last_mark(live) + 1, False)
+                pending = (uptime_ns(), last_mark(live) + 1)
                 live.key(PAGE_DOWN)
             time.sleep(0.05)
     finally:
@@ -276,8 +298,10 @@ def phase_editor(rig, res):
     try:
         wait_until(lambda: live.connected(), 120)
         time.sleep(1)
+        deadline = time.time() + EDITOR_LIMIT  # one deadline for all ten pastes
         for i in range(10):
-            send_segment(live, i + 1, original[i * 20:(i + 1) * 20], time.time() + 240)
+            if not send_segment(live, i + 1, original[i * 20:(i + 1) * 20], deadline):
+                res["unconfirmed"].append(i + 1)
         time.sleep(1)
         got = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
         a, b = collections.Counter(original), collections.Counter(got)
@@ -366,7 +390,9 @@ def report(args, res):
     rows.append(("page flip, median", cell, target(TARGET_FLIP)))
     miss, extra, size = res["typing"]
     rows.append(("200 characters typed, identical",
-                 f"missing {miss}, extra {extra} (editor file has {size})", "identical" if p in TARGET_FLIP else "-"))
+                 f"missing {miss}, extra {extra} (editor file has {size}); "
+                 + (f"{len(res['unconfirmed'])} paste(s) unconfirmed or failed (#{', #'.join(map(str, res['unconfirmed']))})"
+                    if res["unconfirmed"] else "all 10 pastes confirmed"), "identical" if p in TARGET_FLIP else "-"))
     rc = res["recovery"]
     if rc:
         cell = f"median {fmt_s(statistics.median(rc))} (n={len(rc)}, max {fmt_s(max(rc))})"
@@ -417,7 +443,7 @@ def main():
     reading_s = max(20.0, total * 0.3)
     clip_s = max(20.0, total - reading_s - 10)
     res = dict(open=None, flips=[], flip_timeouts=0, typing=(200, 0, 0), recovery=[], outages=0, stuck=0,
-               reconnects=0, crashes=[], human=[], latency=None)
+               reconnects=0, unconfirmed=[], crashes=[], human=[], latency=None)
     work = tempfile.mkdtemp(prefix="rapp-weak-")
     rig = Rig(args.path, args.profile, args.seed, work)
     try:
