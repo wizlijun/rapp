@@ -2,7 +2,7 @@ import AppKit
 import RappCore
 
 // Test windows for the measurement scripts: --clip [--marks PATH], --reading, --editor PATH.
-// Every window is 1280x720 pt, titled, with a flipped content view and the frame mark at its origin.
+// Every window is 1280x720 pt, titled, with a flipped content view; clip and reading draw the frame mark at its origin (editor has none).
 
 let args = CommandLine.arguments
 func argValue(of flag: String) -> String? {
@@ -23,26 +23,20 @@ func drawMark(_ n: UInt16) {
     }
 }
 
-/// Appends 10-byte records (u16 frame LE + u64 uptime ns LE), flushing about once a second.
+/// Appends 10-byte records (u16 frame LE + u64 uptime ns LE). Each record goes straight to the
+/// file with write(2), so nothing is lost when the app is killed.
 final class MarksWriter {
-    private let handle: FileHandle
-    private var buffer = Data()
-    private var lastFlush = uptimeNs()
+    private let fd: Int32
     init?(path: String) {
-        FileManager.default.createFile(atPath: path, contents: nil)
-        guard let h = FileHandle(forWritingAtPath: path) else { return nil }
-        handle = h
+        fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0o644)
+        if fd < 0 { return nil }
     }
     func record(frame: UInt16, at ns: UInt64) {
-        withUnsafeBytes(of: frame.littleEndian) { buffer.append(contentsOf: $0) }
-        withUnsafeBytes(of: ns.littleEndian) { buffer.append(contentsOf: $0) }
-        if ns &- lastFlush >= 1_000_000_000 { flush(now: ns) }
-    }
-    func flush(now: UInt64) {
-        lastFlush = now
-        guard !buffer.isEmpty else { return }
-        try? handle.write(contentsOf: buffer)
-        buffer.removeAll(keepingCapacity: true)
+        var rec = Data(capacity: 10)
+        withUnsafeBytes(of: frame.littleEndian) { rec.append(contentsOf: $0) }
+        withUnsafeBytes(of: ns.littleEndian) { rec.append(contentsOf: $0) }
+        let n = rec.withUnsafeBytes { write(fd, $0.baseAddress, 10) }
+        if n != 10 { FileHandle.standardError.write(Data("marks write failed (errno \(errno))\n".utf8)) }
     }
 }
 
@@ -106,7 +100,7 @@ final class EditorDelegate: NSObject, NSTextViewDelegate {
         let tmp = path + ".tmp"
         do {
             try tv.string.write(toFile: tmp, atomically: false, encoding: .utf8)
-            _ = try FileManager.default.replaceItemAt(URL(fileURLWithPath: path), withItemAt: URL(fileURLWithPath: tmp))
+            if rename(tmp, path) != 0 { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
         } catch { FileHandle.standardError.write(Data("write failed: \(error)\n".utf8)) }
     }
 }
@@ -139,9 +133,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             v.addSubview(scroll)
             window.contentView = v; window.title = "RappTestPage editor"
             window.makeFirstResponder(tv)
+            // Test hook: --type TEXT inserts text as if typed, so the write path can be checked unattended.
+            if let t = argValue(of: "--type") { tv.insertText(t, replacementRange: NSRange(location: 0, length: 0)) }
         } else {
             let v = ClipView(frame: NSRect(origin: .zero, size: size))
-            if let p = argValue(of: "--marks") { v.marks = MarksWriter(path: p) }
+            if let p = argValue(of: "--marks") {
+                guard let w = MarksWriter(path: p) else {
+                    FileHandle.standardError.write(Data("cannot open marks file \(p)\n".utf8))
+                    exit(1)
+                }
+                v.marks = w
+            }
             window.contentView = v; window.title = "RappTestPage clip"
             v.start()
         }
