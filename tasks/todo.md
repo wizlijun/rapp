@@ -135,6 +135,19 @@
 - 界面设计层面的建议（等用户定，没改）：添加设备表单藏在远程设备 app 列表下面、会被底栏挡住，建议单独一个「+ 添加设备」；app 名下面显示包名（等宽字）对普通人是噪音；面板打开时舞台上的「打开面板」按钮还看得见；总流量一直是「—」（要等 S3）；设备 ID 用等宽字显示
 
 
+## Omarchy Rust / GTK 客户端（2026-11-11）
+- [x] `rapp-client-core`：v4/v5 协议、五档像素展开、持续 zlib 字典和瓦片增量解码、数据上限、画布命中、Mac 键码映射。
+- [x] `rapp-client-gtk` 输出 `rapp-client`：应用画布、镜像菜单、键鼠/滚动/输入框、画质/帧率/采集密度、流量、v5 文字剪贴板接收、hub JSON/EOF 生命周期。
+- [x] `scripts/build-linux.sh` 将客户端与 GUI、hub、service 放入同一 bundle；`scripts/test-linux-client.py` 使用独立 Python 编码夹具启动真实 GTK 进程测试。
+- 验证：13 项新 core 测试、已有 61 项 Rust 测试、新 crate clippy；GTK 集成覆盖 v4/v5、完整/增量帧、菜单、退出、协议错误、键鼠；通过局域网连接真实 Mac v5 主机并显示 rapp 窗口。
+- 限制：Linux 用一个画布显示同一 app 的所有窗口，没有逐窗映射为独立原生窗口；尚无文件/图片剪贴板传输、Linux 采集主机。输入法使用 GTK 本地 Entry，中文预编辑仍需实机人工验收。
+
+
+### Linux 菜单与流设置对齐最新 Mac
+- 参照 `origin/feat/clipboard` 的 `StreamMenu`、`TrafficLabel`、`Geometry`：标题栏流量菜单、客户端菜单、两项预设、三组单选、50–200% 缩放和移动 A 到左上角；流菜单仅显示三种常用画质。
+- 密度上下限、1% 相对变化阈值、首次 Hello 的密度与 Mac 一致；持续 zlib 字典和 64×64 瓦片线上格式不变。
+- 增加 v5 最近 20 项文字剪贴板历史、复制/发送按钮，Ctrl+V 在空输入框中也留给本地输入框。大文件、附件和多行块编辑器仍未移植。
+
 ## 主界面 S2–S6（分支 `feat/main-window-s2-s6`；S7 先不做，S8 不在范围内）
 顺序：S2 → S3 → S5 → S6 → S4（S4 第三层要用 S5 的项目、S6 的资源，放最后）。各规格 §6 的假设按默认执行，验收时确认。
 - [x] S2 嵌入舞台（规格：`docs/superpowers/specs/2026-11-12-rapp-s2-embedded-stage-design.md`；计划：`docs/superpowers/plans/2026-11-12-rapp-s2-embedded-stage.md`）——代码完成、自动测试全绿；**实机检查待做**
@@ -191,6 +204,21 @@
   - [ ] 待实机：灰度截图里七种状态凭形状仍能分清
   - [x] 打包：随 v0.5.0 发布（963e9cf，Apple Development 签名，arm64）
 
+## Linux 0.4.0 内嵌舞台（2026-11-12）
+- [x] `rapp-session` 无窗口进程复用 client-core 协议、持续 zlib/瓦片解码；JSON 输入、带长度的 BGRA/事件输出，EOF 断开 socket。
+- [x] `LinuxSessionPort` 接通 hub 的 embed 模式、窗口/弹窗裁剪、舞台绘制、键鼠/菜单/流设置/文字输入/文字剪贴板历史；逐帧背压限制图像积压。
+- [x] 画面获得键盘焦点后将 Ctrl 映射为 Mac Command；F11/Super 保留给本地，失焦释放按键。hub 退出关闭嵌入会话。
+- [x] 构建脚本将 rapp-session 放进 bundle；独立 GTK client 保留。
+- 验证：Flutter 318 项通过、1 项跳过，analyze 干净；client-core 16 项 + worker 2 项测试通过，clippy 无警告。新测试覆盖真实 worker 到 Flutter 的完整/增量帧、BGRA 色彩、裁剪、输入/中文、EOF、坏帧隔离、舞台图像和键盘焦点。真实 Mac 连接的远程 app 已在 Linux 主窗口舞台显示。
+- 限制：内嵌会话的无重连分离/放回尚未实现（按钮禁用）；图片/文件附件暂不支持（显示明确提示）。
+
+## Linux 内嵌性能修复（2026-11-12）
+- 像素更新改为独立 ValueNotifier + RepaintBoundary，不再每帧派发 WindowsEvent 并重建整个 MainState/界面；窗口几何变化仍正常更新。
+- 帧处理改为单个正在绘制帧 + 最新待显示帧；等待绘制不再阻塞协议事件，旧的待显示帧被替换，不积累显示延迟。
+- Rust 重用 BGRA 分配并将帧头与像素分段写入，移除额外整帧打包复制。兼容独立 GTK client 的原解码 API。
+- 验证：319 Flutter 测试通过、1 项跳过；analyze、clippy 通过；Rust 17 core + 2 worker 测试通过。回归覆盖像素更新不触发窗口元数据事件、绘制暂停时错误仍及时处理、增量解码复用缓冲地址。
+- 对比脚本 `scripts/benchmark-linux-session.py`（这是 worker 解码/传输吞吐，不是端到端交互 FPS）：1080p 120 帧两轮旧版 46.3/42.9 fps，新版 63.2/64.1 fps；无并行构建的 4K 60 帧旧版 18.9 fps，新版 23.5 fps。4K 稳定 30 fps 尚未达到；BGRA 跨进程传输和 GPU 图像上传仍是后续优化方向。
+- 新版已本地编译；未替换 GitHub Release 的已发布附件。
 ## 插入的严重问题（2026-11-12，用户报告）
 - [ ] P1 A 锁屏后 B 无法输入：B 提交时报「A 上的目标窗口不在最前」（`Paster.waitFrontmost` → `target not frontmost`），点击被丢弃（`InputInjector.clearToClick` → `click dropped: covered by …`）。原因：锁屏时登录窗口盖在所有窗口上、目标 app 激活不了，按 HID 投递的键鼠都到不了 app。README 写明 rapp 不做远程登录/解锁。待做：
   - [x] 锁屏时 B 明确显示「A 已锁屏，需要在 A 上解锁」，不再报「不在最前」；host 日志记 `click dropped: A is locked`（host 用 `CGSessionCopyCurrentDictionary` 的 `CGSSessionScreenIsLocked` 判断）
@@ -209,3 +237,36 @@
 - [x] F6 升级残留提示写明要删哪个文件（1eaf91b）
 - [x] F7/F8 补测试：没有在用的会话不让位；连续被挡时 1 秒提示重新计时（10390c3、af00f79）
 - 验证：swift 264+、check.sh EXIT=0；cargo test 全过、clippy 0 警告；flutter 660 过。滚动换算待实机手感确认
+
+## Linux 合并到 0.4.1（2026-11-12）
+- [x] 合并 `release/0.4.1`，保留已有 GTK client、Flutter 内嵌、构建/Omarchy 打包脚本及性能修复；Rust/Flutter 版本同步 0.4.1。
+- [x] worker 断线与结束会话分离：断线停止连接但保留最后画面；结束时释放画面。Linux 图像可用于断线舞台，重连首次出图切换新会话并释放旧画面。
+- [x] worker 上报每秒帧数，接通 0.4.1 空闲状态；结束正在启动的 worker 会取消启动，避免遗留进程。
+- [x] 绘制等待使用逐帧取消信号，避免长期在同一个 Future 上积累回调；保留最新帧邮箱和独立重绘。
+- [x] 修正 worker 启动失败测试的隔离性，避免误启动已安装或已编译的真实客户端。
+- 验证：Flutter 401 项通过、1 项跳过；Rust workspace 136 项通过；Flutter analyze、workspace Clippy 无问题；Linux release bundle 编译成功。新增/扩展回归覆盖断线保留像素、重连换帧、启动取消、帧数统计和绘制停顿时及时断线。
+- 本轮未在真实 Mac 上重新验证；macOS 原生代码来自上游，未在 Linux 编译。0.4.1 Linux 尚未发布，既有 v0.4.0 Release 附件保持原样。
+
+## Linux 输入后画面延迟追赶（2026-11-12）
+- 用户报告：远程输入已经执行，画面几秒后才追上。现场采样中 worker 解码 CPU 很低，Flutter 正在持续接收展开的 BGRA 图像。
+- 确认的排队问题：worker 在接收线程同步写整帧 stdout，显示管道一慢就停止读取远端；仅在 Dart 保留最新帧不能消除前面的旧帧队列。
+- 修复：独立输出线程；压缩增量帧仍逐帧解码，只替换等待输出的完整画布（最多一个）；控制事件保持顺序并有界，替换画布排在对应窗口元数据之后，复用像素缓冲。
+- 回归：core/worker 20 项通过、相关 Flutter 46 项通过、Clippy 通过。新慢消费夹具验证跨被跳过画面的增量依赖及最终像素；1080p 60 帧、模拟 64 MiB/s 消费，旧版输出 60 帧、追赶 8.235 秒，新版输出 2 帧、追赶 0.274 秒。这是本机 worker 管道测试，不是实机输入到显示延迟。
+- 更新现有吞吐脚本为单帧在途，避免新丢弃策略使旧脚本一直等待被替换的帧。已原子替换本地 0.4.1 bundle 的 rapp-session；已有连接使用原进程，重连后启用修复。尚待用户实机复查。
+
+## 0.4.1 Omarchy/Linux 发版准备（2026-11-12）
+- 用户已确认输入后画面延迟问题解决，并授权提交代码、发布到现有 v0.4.1 Release。
+- README 安装指引更新到 0.4.1；构建时原子替换 worker，允许本机 app 保持运行，避免覆盖运行中可执行文件导致 ETXTBSY。
+
+## Linux 主线对齐 0.5.0（2026-11-13）
+- [x] 先将已发布的 linux/0.4.1 全部变更合并至本机 main，再合并上游 v0.5.0（963e9cf），保留 Linux GTK client、内嵌会话、打包工具和低延迟输出线程。
+- [x] 接入共享的项目与常用、全景及 1 fps 后台策略、触屏双指滚动；Linux 双指操作后正确获得键盘焦点。
+- [x] S6 文字剪贴板资源：固定副本、结束会话后复制、取消固定释放副本；会话文字历史保留 100 条，与全局未固定条目上限对齐。
+- [x] Linux 本机页独立提供版本与检查更新：严格选取对应 GitHub Linux 安装包，浏览器打开发布页/安装包，由系统软件包管理器安装。后台服务未启动时仍可使用；不显示 macOS 权限和自动安装/回滚控件。
+- [x] macOS 权限/升级测试通过显式平台参数在 Linux 上验证，另测 Linux 页不需要本机服务、没有 macOS 误导入口。编译脚本将 workspace 版本注入 Linux GUI。
+- 验证：Flutter 660 项通过、1 项跳过；Rust workspace 228 项通过；Flutter analyze、workspace Clippy 通过；Linux release bundle 构建成功。低延迟回归保持 60 帧解码、只输出 2 帧、追赶 0.271 秒（本机管道夹具）。
+- 既有边界：Linux 被控端、内嵌分离/放回、图片/文件传输仍未实现；Linux 升级走系统安装包，macOS bundle 自动升级与回滚不适用。macOS 原生代码未在 Linux 编译；0.5.0 尚未在真实远程 Mac 上复查，也未发布新的 Linux 附件。
+
+## 0.5.0 Omarchy/Linux 发布（2026-11-13）
+- 用户已启动本机 0.5.0 app，确认可以使用并授权发布安装包。
+- README 下载和安装指引更新至 v0.5.0；从干净提交构建安装包、便携包和 SHA-256 校验文件，保留现有 macOS/relay 附件。

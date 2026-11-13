@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'dart:ui' as ui;
+import 'package:flutter/services.dart';
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
@@ -21,6 +23,12 @@ import 'package:rapp/ui/top_bar.dart';
 
 import '../fakes.dart';
 import 'helpers.dart';
+
+class _KeyboardPort extends FakeSessionPort {
+  final keys = <KeyEvent>[];
+  @override
+  bool handleKeyEvent(Object sid, KeyEvent event) { keys.add(event); return true; }
+}
 
 void main() {
   late FakeTransport t;
@@ -208,6 +216,73 @@ void main() {
       await tester.pump();
       expect(find.text('正在连接'), findsNothing);
       expect(tester.widget<Texture>(find.byType(Texture)).textureId, 42);
+    });
+
+    testWidgets('Linux image renders in the stage and picture owns keyboard focus', (tester) async {
+      es.dispose();
+      final keyboard = _KeyboardPort();
+      port = keyboard;
+      es = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: port);
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      canvas.drawColor(Colors.red, BlendMode.src);
+      final picture = recorder.endRecording();
+      final image = await tester.runAsync(() => picture.toImage(4, 4));
+      picture.dispose();
+      await tester.pumpWidget(wrap(embedded()));
+      await openEmbedded(tester);
+      port.emit(const ReadyEvent(1, 'Fixture'));
+      port.emit(WindowsEvent(1, [RemoteWindow(id: 1, parent: 0, kind: WindowKind.normal,
+          title: 'Window', rect: const Rect.fromLTWH(0,0,400,300), titleBar: 0,
+          resizable: false, focused: true, texture: null, visible: const Rect.fromLTWH(0,0,1,1),
+          image: image, source: const Rect.fromLTWH(0,0,4,4))]));
+      await tester.pump();
+      expect(find.text('正在连接'), findsNothing);
+      expect(find.byType(Texture), findsNothing);
+      final first = await tester.startGesture(const Offset(320, 300), pointer: 51, kind: PointerDeviceKind.touch);
+      final second = await tester.startGesture(const Offset(380, 300), pointer: 52, kind: PointerDeviceKind.touch);
+      await first.moveBy(const Offset(0, -20));
+      await second.moveBy(const Offset(0, -20));
+      await first.up(); await second.up();
+      await tester.pump();
+      expect(port.calls.where((c) => c.$1 == 'scroll').length, 2);
+      expect(port.calls.where((c) => c.$1 == 'mouse'), isEmpty);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyB);
+      expect(keyboard.keys.map((e) => e.logicalKey), contains(LogicalKeyboardKey.keyB));
+      await tester.tapAt(const Offset(400, 300));
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+      expect(keyboard.keys.map((e) => e.logicalKey), containsAll([LogicalKeyboardKey.escape, LogicalKeyboardKey.keyA]));
+      expect(es.pictureFocused, 1);
+      expect(port.calls.where((c) => c.$1 == 'mouse').length, 2);
+      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      await tester.pump();
+      await tester.pump();
+      expect(find.byType(DisconnectedStage), findsOneWidget);
+      expect(es.pictureHole.value, isNotNull, reason: 'Linux last-frame surface remains visible');
+      expect(es.pictureFocused, isNull);
+      await tester.runAsync(() async {
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            t.emit({'event': 'opened', 'sid': 11, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+              'port': 5011, 'token': 'tk', 'req': m['req']});
+          }
+        };
+        await tester.tap(find.byKey(const Key('reconnect-button')));
+        for (var i = 0; i < 4; i++) { await flush(); }
+      });
+      await tester.pump();
+      expect(es.currentRecord!.lastSid, 1);
+      port.emit(const ReadyEvent(11, 'Fixture'));
+      port.emit(WindowsEvent(11, es.remote[1]!.windows));
+      await tester.pump();
+      expect(es.currentRecord!.lastSid, isNull);
+      expect(find.byType(DisconnectedStage), findsNothing);
+      expect(find.byType(Picture), findsOneWidget);
+      expect(port.calls.where((c) => c.$1 == 'close' && c.$2['sid'] == 1).length, 1);
+      await tester.pumpWidget(const SizedBox());
+      image!.dispose();
     });
 
     testWidgets('stage size goes to A once the window settles', (tester) async {

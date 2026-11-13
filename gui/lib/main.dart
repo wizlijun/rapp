@@ -7,6 +7,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'cm_page.dart';
 import 'embed/session_port.dart';
+import 'embed/linux_session_port.dart';
 import 'hub_client.dart';
 import 'pages/local_section.dart';
 import 'paths.dart';
@@ -53,9 +54,10 @@ Future<void> main(List<String> args) async {
   final prefs = UiPrefs.load(cfg);
   SessionPort? port;
   var doubleClick = const Duration(milliseconds: 500);
-  if (Platform.isMacOS) {
+  if (Platform.isMacOS || Platform.isLinux) {
     try {
-      final p = ChannelSessionPort();
+      final SessionPort p = Platform.isLinux
+          ? LinuxSessionPort('$bin/rapp-session') : ChannelSessionPort();
       doubleClick = Duration(milliseconds: await p.init());
       port = p;
     } catch (e) {
@@ -67,7 +69,7 @@ Future<void> main(List<String> args) async {
   await _showWindow(const Size(1194, 834), 'rapp');
   if (prefs.startFullscreen) await WindowManagerFullscreen().setFullScreen(true);
   await windowManager.setPreventClose(true);
-  final shell = _Shell(hub);
+  final shell = _Shell(hub, port);
   windowManager.addListener(shell);
   trayManager.addListener(shell);
   await shell.setupTray();
@@ -140,14 +142,16 @@ class _QuitOnClose with WindowListener {
 
 /// Close hides the window; the tray menu has 显示 / 退出.
 class _Shell with WindowListener, TrayListener {
-  _Shell(this.hub);
+  _Shell(this.hub, this.port);
+  final SessionPort? port;
   final HubClient? hub;
   final navigatorKey = GlobalKey<NavigatorState>();
 
   Future<void> setupTray() async {
     try {
       await trayManager.setIcon('assets/tray_icon.png', isTemplate: true);
-      await trayManager.setToolTip('rapp');
+      // tray_manager does not implement setToolTip on Linux.
+      if (!Platform.isLinux) await trayManager.setToolTip('rapp');
       await trayManager.setContextMenu(Menu(items: [
         MenuItem(key: 'show', label: '显示 rapp'),
         MenuItem.separator(),
@@ -215,6 +219,7 @@ class _Shell with WindowListener, TrayListener {
   }
 
   Future<void> _quitNow() async {
+    port?.dispose();
     await hub?.shutdown(); // hub closes its clients on stdin EOF
     await trayManager.destroy();
     exit(0);

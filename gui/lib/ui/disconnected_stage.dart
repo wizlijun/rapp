@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 
 import '../embed/geometry.dart';
+import '../embed/picture.dart' show windowSurface;
 import '../embed/remote_session.dart';
 import '../embed/session_port.dart';
 import 'controls.dart';
@@ -58,7 +59,7 @@ class _DisconnectedStageState extends State<DisconnectedStage> {
     final rs = widget.session;
     if (rs == null) return null;
     for (final w in rs.windows) {
-      if (w.id == rs.currentWindow && w.texture != null) return w;
+      if (w.id == rs.currentWindow && w.hasPicture) return w;
     }
     return null;
   }
@@ -99,7 +100,7 @@ class _DisconnectedStageState extends State<DisconnectedStage> {
               final fit = fitRect(contentSize(win), c.biggest);
               final pic = pictureRect(fit, win.visible);
               return Stack(children: [
-                Positioned.fromRect(rect: pic, child: Texture(key: _tex, textureId: win.texture!)),
+                Positioned.fromRect(rect: pic, child: windowSurface(win, key: _tex)),
               ]);
             }),
           if (stripes != null) DecoratedBox(decoration: stripes),

@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 
 import '../permissions.dart';
 import '../service_client.dart';
@@ -11,6 +12,7 @@ import '../service_control.dart';
 import 'permissions_panel.dart';
 import 'section_card.dart';
 import 'update_section.dart';
+import 'linux_update_section.dart';
 
 const relayLabels = {'connected': '已连接', 'connecting': '连接中', 'off': '未连接'};
 
@@ -23,9 +25,12 @@ class UpdateHooks {
   final Future<void> Function() quitNow;
 }
 
-/// Opens the release page (「打开安装包」); macOS only.
+/// Opens a release/installer page with the platform browser.
 Future<void> openInstallerPage(String page) async {
-  if (Platform.isMacOS) await Process.run('open', [page]);
+  final uri = Uri.tryParse(page);
+  if (uri == null || uri.scheme != 'https' || uri.host.isEmpty) throw const FormatException('安装包地址无效');
+  final result = await Process.run(Platform.isMacOS ? 'open' : 'xdg-open', [page]);
+  if (result.exitCode != 0) throw const FileSystemException('无法打开浏览器');
 }
 
 class LocalSection extends StatefulWidget {
@@ -37,7 +42,10 @@ class LocalSection extends StatefulWidget {
     this.openSettings = openSettingsPane,
     this.hooks,
     this.openPage = openInstallerPage,
+    this.platform,
   });
+  /// Platform override for testing both desktop interfaces on either OS.
+  final TargetPlatform? platform;
   final ServiceMonitor monitor;
   final ServiceController? control;
   final String configDir;
@@ -67,6 +75,7 @@ class _LocalSectionState extends State<LocalSection> {
   final _resetFailed = ValueNotifier(false);
 
   ServiceMonitor get m => widget.monitor;
+  TargetPlatform get _platform => widget.platform ?? defaultTargetPlatform;
 
   bool get _missing {
     final st = m.status;
@@ -76,7 +85,7 @@ class _LocalSectionState extends State<LocalSection> {
   @override
   void initState() {
     super.initState();
-    if (!Platform.isMacOS) return;
+    if (_platform != TargetPlatform.macOS) return;
     // While something is missing, look again every 3 s so a grant shows up as ✓ by itself.
     _poll = Timer.periodic(const Duration(seconds: 3), (_) {
       if (_missing) m.checkPermissions().catchError((_) {});
@@ -256,7 +265,7 @@ class _LocalSectionState extends State<LocalSection> {
             _row('中继', '${relayLabels[st.relay] ?? st.relay}${st.relayError == null ? '' : '（${st.relayError}）'}',
                 trailing:
                     IconButton(tooltip: '修改中继', icon: const Icon(Icons.edit, size: 18), onPressed: _editRelay)),
-            if (Platform.isMacOS)
+            if (_platform == TargetPlatform.macOS)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 2),
                 child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -274,10 +283,10 @@ class _LocalSectionState extends State<LocalSection> {
                   ),
                 ]),
               )
-            else
+            else if (_platform != TargetPlatform.linux)
               _row('权限',
                   '屏幕录制 ${st.screenRecording ? '✓' : '✗'}   辅助功能 ${st.accessibility ? '✓' : '✗'}'),
-            if (update != null)
+            if (update != null && _platform != TargetPlatform.linux)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: UpdateSection(
@@ -291,6 +300,11 @@ class _LocalSectionState extends State<LocalSection> {
                 ),
               ),
             _row('会话', '${st.sessions.length} 个被访问中'),
+          ],
+          if (_platform == TargetPlatform.linux) ...[
+            const Text('本机为 Linux 客户端，暂不支持被远程控制。'),
+            Padding(padding: const EdgeInsets.symmetric(vertical: 8),
+              child: LinuxUpdateSection(openPage: widget.openPage)),
           ],
           const SizedBox(height: 8),
           buttons,

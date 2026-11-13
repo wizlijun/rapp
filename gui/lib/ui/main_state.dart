@@ -327,7 +327,7 @@ class MainState extends ChangeNotifier {
   /// Whether [toggleDetach] does anything now (the menu greys its item otherwise).
   bool get canToggleDetach {
     final rs = currentRemote;
-    return rs != null && _liveSid(rs.sid) && (rs.detached || rs.tabs.tabs.isNotEmpty);
+    return port?.supportsDetach == true && rs != null && _liveSid(rs.sid) && (rs.detached || rs.tabs.tabs.isNotEmpty);
   }
 
   // ---- hub state ----
@@ -730,7 +730,7 @@ class MainState extends ChangeNotifier {
     final fresh = r.sid;
     if (old == null || fresh == null) return;
     final rs = remote[fresh];
-    if (rs == null || !rs.windows.any((w) => w.texture != null)) return;
+    if (rs == null || !rs.windows.any((w) => w.hasPicture)) return;
     port?.close(old);
     remote.remove(old)?.dispose();
     _starts.remove(old);

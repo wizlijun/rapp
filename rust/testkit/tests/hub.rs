@@ -246,9 +246,11 @@ async fn open_unknown_app_worker_failure_is_an_error() {
     let a = service(Some(relay.relay.addr)).await;
     let home = tempfile::tempdir().unwrap();
     let mut hub = hub_with_host(&a, &relay, home.path(), None).await;
-    // No rapp-client in this bin dir: the hub reports it.
-    let empty = tempfile::tempdir().unwrap();
-    let mut hub2 = Hub::start(home.path(), empty.path(), Some(relay.relay.addr), None);
+    // An unlaunchable client wins resolution even when a real Linux client is
+    // installed beside the test binaries or on PATH.
+    let broken = tempfile::tempdir().unwrap();
+    std::fs::write(broken.path().join(format!("rapp-client{}", std::env::consts::EXE_SUFFIX)), "invalid executable").unwrap();
+    let mut hub2 = Hub::start(home.path(), broken.path(), Some(relay.relay.addr), None);
     let r = hub2.call(json!({"cmd":"open","id":a.id,"app":"com.example.echo","req":3})).await;
     assert_eq!(r["event"], "error", "{r}");
     assert_eq!(r["req"], 3);

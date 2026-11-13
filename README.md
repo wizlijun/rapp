@@ -36,8 +36,8 @@ swift run -c release rapp-client "rapp://<A的地址>[:端口]/<bundle-id>?token
 渐变和照片会变成色块。这是最省流的档位，适合看文字。
 
 协议版本是 5（在 v4 多窗口的基础上加了剪贴板和编辑器，新增消息 19–25，见 `docs/superpowers/specs/2026-11-11-rapp-clipboard-composer-design.md`）。
-两端都要用这一版：v4 的客户端或主机要先升级，连新的会收到 `protocol version mismatch` 的提示。
-Windows、Omarchy 上的 host/client 还是 v3，升级之前和新的 Mac 端连不上。
+Mac 两端都要用这一版：v4 的客户端或主机要先升级，连新的会收到 `protocol version mismatch` 的提示。
+Omarchy 的 Rust/GTK 客户端已支持 v4/v5（见下文）；Windows/Omarchy 主机端不在本仓库当前实现中。
 
 一定要带 `-c release`。未优化的构建处理一帧 Retina 画面要 1 秒左右。
 
@@ -96,6 +96,80 @@ Windows、Omarchy 上的 host/client 还是 v3，升级之前和新的 Mac 端�
 
   主机打印 `stream -> <档位>, <n> fps, density <采集密度>`。客户端窗口拖到倍率不同的屏幕上时，采集密度自动重算。
 - 主机端每秒打印一行 `[stats] <kbps> kbps <fps> fps <宽>x<高>`，画面静止时是 0。
+
+## Omarchy / Linux 客户端
+
+在 [GitHub Release](https://github.com/wizlijun/rapp/releases/tag/v0.5.0) 下载
+`rapp-omarchy-0.5.0-1-x86_64.pkg.tar.zst`，运行 `sudo pacman -U ./rapp-omarchy-0.5.0-1-x86_64.pkg.tar.zst`，
+然后从应用启动器打开 rapp。也提供 `rapp-0.5.0-omarchy-x86_64.tar.gz` 便携包，解压后运行 `./rapp`。
+安装包面向 Omarchy / Arch x86_64；便携包的依赖与用法见包内 `README-LINUX.txt`。
+发布包可从干净的源码提交运行 `./scripts/package-linux.sh` 重建，包内记录确切源码提交。
+
+现在可以在 Omarchy 上构建 **Rust + GTK4 的 `rapp-client`**，连接 macOS v4/v5 主机（默认 v5；v4 地址加 `protocol=4`）。
+Rust 网络后台继续复用；`rust/client-core` 实现可跨平台复用的协议和解码，
+`rust/client-gtk` 负责 Linux 显示和输入。Linux **被控端**仍未实现。
+
+0.5.0 的 Linux 管理界面已支持**内嵌远程画面**：从设备列表打开 app 后，画面直接显示在主窗口舞台中。
+`rapp-session` 无窗口进程复用 Rust 解码器，通过有背压的二进制管道将 BGRA 画面交给 Flutter；
+支持窗口标签、弹窗、点击/拖动/滚动、键盘、画质/帧率/密度、远程菜单和文字输入区。
+点击画面后键盘发给 Mac（Ctrl 映射为 ⌘，Super 留给 Linux，F11 控制本地全屏）；
+中文可在“输入”区通过本地输入法组句后发送。退出会话或管理界面会关闭解码进程与连接。
+目前内嵌会话的“分离/放回”和图片/文件附件尚未实现，分离按钮禁用，附件操作会说明限制。
+支持断线保留最后画面、重连换帧和空闲状态。
+像素更新独立重绘；worker 独立输出线程和 Flutter 都只保留最新待显示帧，避免慢速显示导致旧帧排队。
+断线停止 worker，结束会话时释放保留画面。
+独立 GTK `rapp-client` 仍可单独使用；下面的应用画布和独立客户端菜单说明适用于它。
+
+当前主线源码已对齐 0.5.0：Linux 可使用项目与常用、全景模式（离开舞台降至 1 fps）、触屏双指滚动，
+以及跨会话文字剪贴板资源。固定的文字副本在会话结束后仍可复制；图片/文件传输仍暂不支持。
+Linux 的“本机 → 版本与升级”可独立于后台服务检查 GitHub 发布并打开对应安装包，安装由系统软件包管理器完成。
+安装包和便携包均发布在同一个 v0.5.0 Release 中，包内记录确切源码提交。
+
+构建依赖：Rust、GTK4 ≥ 4.12、pkgconf。连同 Flutter 管理界面打包还需要 Flutter
+（Dart ≥ 3.12.1）、clang、cmake、ninja、gtk3、libayatana-appindicator。
+
+```bash
+# 只编译远程窗口客户端
+cargo build --manifest-path rust/Cargo.toml --release --locked -p rapp-client-gtk
+./rust/target/release/rapp-client  # 打开地址/口令输入窗口
+
+# 编译管理界面、后台和客户端，放进同一个 bundle
+./scripts/build-linux.sh
+./gui/build/linux/x64/release/bundle/rapp
+
+# 单元测试；图形会话内还可运行独立 Python 主机夹具测试
+cargo test --manifest-path rust/Cargo.toml -p rapp-client-core
+python3 scripts/test-linux-client.py
+# 额外通过 Xwayland + xdotool 验证真实键鼠输入（会短暂聚焦测试窗口）
+python3 scripts/test-linux-client.py --input
+```
+
+管理界面打开应用时会自动调用同目录的 `rapp-session`，把画面显示在舞台中。也可以直接连接 host 的 TCP 端口：
+`rapp-client 'rapp://主机:47800/com.apple.TextEdit?mode=color16' --token-env RAPP_TOKEN`。
+地址中的 app 标识和口令属于 host；管理服务的 `ID@IP` / 密码应在管理界面添加主机，不能直接填进这个 TCP 地址。
+
+首版采用**一个应用画布**：多窗口、菜单、弹窗按远端位置一起显示，按窗口表从前到后命中鼠标。
+菜单按 Mac 最新客户端（`origin/feat/clipboard`）对齐：左上角 `rapp-client` 菜单和标题栏流量数字
+的点击/右键菜单共用流设置。两项预设是“最省流（双色·灰度 + 自适应 + 1 fps）”和
+“最清晰（高彩 + 原画 + 15 fps）”；其后依次是三种常用画质、三档采集密度、1/5/15/30 fps。
+预设本身不打勾，三组当前值各自打勾；旧 gray4 / color8 地址仍可使用，但不占用菜单。
+
+客户端菜单提供 50%–200% 的实际点数缩放、适应窗口、把当前 A 窗口移到左上角（避开已有窗口，
+每层错开 28 点）；缩放超过本地视口时使用滚动条。缩放只改变本地画布，不自动改 A 的尺寸。
+采集密度与 Mac 相同：省流 = 缩放、自适应 = 缩放 × 本地屏幕倍率、原画请求 8 再由 A 限制到原生像素；
+密度相对变化超过 1% 才重新设置采集。右上角流量静止时显示 `0 KB/s`。
+
+流压缩与 Mac 共用现有线上格式：64×64 瓦片增量，按瓦片使用纯色、1/2/4-bit 调色板、16×16
+双色子块或原始样本，再用带持续字典的 zlib `Z_SYNC_FLUSH` 压缩。完整帧重置字典，增量帧延续字典。
+双色档的量化由 Mac 主机完成（两种基色及中间过渡色）；Linux 负责正确解码，设置切换通过 SetStream
+让主机换编码，客户端没有另开一种不兼容的压缩算法。静止画面不发送新帧。
+
+支持远程菜单、点击/拖动/滚动、本地输入法组句后回车发送，输入框旁有“复制”和“发送”。
+空输入框的 Ctrl 快捷键作为 Mac 的 ⌘ 快捷键发送；Ctrl+V 始终粘贴到本地输入框，回车再发出。
+Ctrl+Q 和本地关闭按钮只断开连接，Super 留给 Hyprland。v5 的“A 的剪贴板”菜单保留最近 20 项记录，
+点击完整文字可重新复制到本地；不支持下载的图片/文件和截断内容明确禁用。远端标题栏和边框仍可通过画面操作。
+尚未把每个远端窗口拆成独立的 Linux 窗口，v5 支持把远端复制的文字同步到本地剪贴板；图片/文件传输和 Linux 主机端尚未实现。
+与不支持的协议版本连接时会明确报告版本不匹配。
 
 ## A 上的前提
 
@@ -181,4 +255,4 @@ relay 部署到 VPS 的步骤写在 `scripts/rapp-relay.service` 开头的注释
 ## 原型不做的事
 
 加密和配对、滚动检测、视频类内容的专门编码、音频、剪贴板和拖放、使用 A 端输入法、自动重连、
-Developer ID 签名和公证、macOS 以外的客户端；多窗口这一轮也不做：别的屏上的窗口、调度中心空间、每个窗口单独一条流。
+Developer ID 签名和公证；多窗口这一轮也不做：别的屏上的窗口、调度中心空间、每个窗口单独一条流。

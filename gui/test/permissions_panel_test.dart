@@ -127,7 +127,9 @@ void main() {
       confirm = true;
     });
 
-    tearDown(() => tmp.deleteSync(recursive: true));
+    tearDown(() {
+      tmp.deleteSync(recursive: true);
+    });
 
     File marker() => File('${tmp.path}${Platform.pathSeparator}permission-guide-shown');
 
@@ -148,6 +150,7 @@ void main() {
       });
       await tester.pumpWidget(wrap(SingleChildScrollView(
         child: LocalSection(
+          platform: TargetPlatform.macOS,
           monitor: m,
           control: null,
           configDir: tmp.path,
