@@ -68,16 +68,17 @@ impl Tmux {
         Err(Self::failure(&d))
     }
 
-    /// Like `run_stdin` for input commands: a failure keeps only its kind, never tmux's own words.
+    /// Like `run_stdin` for input commands: a failure keeps only its kind, in fixed words that go on the wire as
+    /// they are (never tmux's own words, nor the program's name).
     async fn run_input(&self, args: &[String], stdin: &[u8]) -> anyhow::Result<()> {
-        let d = self.exec(args, stdin).await?;
+        let Ok(d) = self.exec(args, stdin).await else { anyhow::bail!("could not send input") };
         if d.code == Some(0) {
             return Ok(());
         }
         match classify(d.code, &d.stderr) {
             RunFail::Other(_) => match d.code {
-                Some(c) => anyhow::bail!("tmux refused the input (exit code {c})"),
-                None => anyhow::bail!("tmux refused the input (terminated by a signal)"),
+                Some(c) => anyhow::bail!("the input was refused (exit code {c})"),
+                None => anyhow::bail!("the input was refused (terminated by a signal)"),
             },
             kind => anyhow::bail!("could not send input: {kind}"),
         }

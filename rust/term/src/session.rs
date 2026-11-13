@@ -5,17 +5,20 @@ use crate::proto::{self, In, Out, Pane};
 use crate::screen::Screen;
 use crate::sender::Sender;
 use crate::tmux::control::{Control, Event};
-use crate::tmux::{cmd, PaneInfo, Tmux};
+use crate::tmux::{cmd, PaneInfo, Tmux, MAX_PASTE};
 use crate::unread::Unread;
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::{Instant, Interval, MissedTickBehavior};
 
-/// The longest `In` line accepted, newline excluded: room for a 1 MiB paste even when JSON escaping grows it.
-/// Output lines stay within `proto::MAX_LINE`.
-const MAX_IN_LINE: usize = 8 * 1024 * 1024;
+/// The longest `In` line accepted, newline excluded: input lines are held to `proto::MAX_LINE` like output.
+/// A longer paste comes as several `Text` chunks.
+const MAX_IN_LINE: usize = proto::MAX_LINE - 1;
+/// Why a paste over `MAX_PASTE` in all was not made.
+const TOO_LONG: &str = "text is too long (1 MiB at most)";
 /// The most bytes of a pane's title, window name or command put in the pane list.
 const MAX_NAME: usize = 256;
 /// The exit reason the control client gives when its stream just ended rather than tmux saying `%exit`.
@@ -54,7 +57,18 @@ where
         put(&mut w, &Out::Error { error: "no such session".into() }).await?;
         return Ok(());
     };
-    let mut p = Pump { tmux, session, sid, attached: 0, w, unread, opts, panes: Vec::new(), view: None };
+    let mut p = Pump {
+        tmux,
+        session,
+        sid,
+        attached: 0,
+        w,
+        unread,
+        opts,
+        panes: Vec::new(),
+        view: None,
+        pastes: HashMap::new(),
+    };
     let res = p.pump(Lines::new(r, MAX_IN_LINE), &list).await;
     if let Some(v) = p.view.take() {
         v.ctl.detach().await;
@@ -287,6 +301,14 @@ enum Step {
     Wake(Wake),
 }
 
+/// A paste still coming in chunks.
+enum Paste {
+    /// The chunks so far, joined.
+    Text(String),
+    /// A chunk went wrong: the paste is not made, and its last chunk is answered with this.
+    Failed(&'static str),
+}
+
 struct Pump<'a, W> {
     tmux: &'a Tmux,
     /// The session's name, which unread state is kept under.
@@ -300,6 +322,8 @@ struct Pump<'a, W> {
     /// The pane list last written.
     panes: Vec<Pane>,
     view: Option<View>,
+    /// Pastes waiting for their last chunk, by pane.
+    pastes: HashMap<String, Paste>,
 }
 
 impl<W: AsyncWrite + Unpin> Pump<'_, W> {
@@ -321,10 +345,14 @@ impl<W: AsyncWrite + Unpin> Pump<'_, W> {
             };
             let go_on = match step {
                 Step::Input(Got::Eof) => return Ok(()),
-                Step::Input(Got::TooLong) => self.bad().await?,
+                Step::Input(Got::TooLong) => {
+                    // Which paste it was a chunk of, if any, cannot be told: none still coming is made.
+                    self.fail_pastes();
+                    self.bad().await?
+                }
                 Step::Input(Got::Line(l)) => match serde_json::from_slice::<In>(&l) {
                     Ok(m) => self.handle(m).await?,
-                    Err(_) => self.bad().await?,
+                    Err(_) => self.bad_line(&l).await?,
                 },
                 Step::Wake(w) => self.wake(w).await?,
             };
@@ -339,13 +367,96 @@ impl<W: AsyncWrite + Unpin> Pump<'_, W> {
         Ok(true)
     }
 
+    /// A line that is not a message. A `Text` chunk is answered as part of its paste when its pane can be read;
+    /// anything else gets an error, and then no paste still coming is made.
+    async fn bad_line(&mut self, l: &[u8]) -> anyhow::Result<bool> {
+        let v: Option<serde_json::Value> = serde_json::from_slice(l).ok();
+        let text = v.as_ref().filter(|v| v["t"] == "text");
+        if let Some(pane) = text.and_then(|v| v["pane"].as_str()) {
+            let more = text.and_then(|v| v["more"].as_bool()).unwrap_or(false);
+            self.paste_failed(pane, more, "bad message").await?;
+            return Ok(true);
+        }
+        self.fail_pastes();
+        if text.is_some_and(|v| v["more"].as_bool() != Some(true)) {
+            self.put(&Out::Pasted { ok: false, error: Some("bad message".into()) }).await?;
+            return Ok(true);
+        }
+        self.bad().await
+    }
+
+    /// Every paste still coming fails: a line that may have been one of its chunks was lost.
+    fn fail_pastes(&mut self) {
+        for p in self.pastes.values_mut() {
+            if let Paste::Text(_) = p {
+                *p = Paste::Failed("bad message");
+            }
+        }
+    }
+
+    /// A chunk of `pane`'s paste could not be taken. The last chunk is answered; before it, the paste is marked
+    /// failed (kept only for one of this session's panes, so made-up names hold nothing).
+    async fn paste_failed(&mut self, pane: &str, more: bool, why: &'static str) -> anyhow::Result<()> {
+        if !more {
+            let why = match self.pastes.remove(pane) {
+                Some(Paste::Failed(first)) => first,
+                _ => why,
+            };
+            return self.put(&Out::Pasted { ok: false, error: Some(why.into()) }).await;
+        }
+        match self.pastes.get_mut(pane) {
+            Some(p @ Paste::Text(_)) => *p = Paste::Failed(why),
+            Some(Paste::Failed(_)) => {}
+            None if self.panes.iter().any(|p| p.id == pane) => {
+                self.pastes.insert(pane.to_string(), Paste::Failed(why));
+            }
+            None => {}
+        }
+        Ok(())
+    }
+
+    /// One chunk of a paste into one of this session's panes: joined to the ones before; on the last, the whole
+    /// text is pasted once and answered.
+    async fn paste_chunk(&mut self, pane: &str, data: String, enter: bool, more: bool) -> anyhow::Result<()> {
+        let joined = match self.pastes.remove(pane) {
+            None if data.len() > MAX_PASTE => Paste::Failed(TOO_LONG),
+            None => Paste::Text(data),
+            Some(Paste::Text(t)) if t.len() + data.len() > MAX_PASTE => Paste::Failed(TOO_LONG),
+            Some(Paste::Text(mut t)) => {
+                t.push_str(&data);
+                Paste::Text(t)
+            }
+            Some(failed) => failed,
+        };
+        if more {
+            self.pastes.insert(pane.to_string(), joined);
+            return Ok(());
+        }
+        let m = match joined {
+            // The paste's errors say what went wrong, never what the text was.
+            Paste::Text(t) => match self.tmux.paste(pane, &t, enter).await {
+                Ok(()) => Out::Pasted { ok: true, error: None },
+                Err(e) => Out::Pasted { ok: false, error: Some(e.to_string()) },
+            },
+            Paste::Failed(why) => Out::Pasted { ok: false, error: Some(why.into()) },
+        };
+        self.put(&m).await
+    }
+
     /// Act on one input message; `false` when the pump should stop.
     async fn handle(&mut self, m: In) -> anyhow::Result<bool> {
+        if let In::Text { pane, data, enter, more } = m {
+            // Every paste is answered with `Pasted`, a refused one too, so the peer is never left waiting.
+            return match self.is_own(&pane).await? {
+                Some(true) => self.paste_chunk(&pane, data, enter, more).await.map(|_| true),
+                Some(false) => self.paste_failed(&pane, more, "no such pane").await.map(|_| true),
+                None => Ok(false),
+            };
+        }
         let target = match &m {
             In::View { pane: Some(p), .. }
             | In::Keys { pane: p, .. }
             | In::Type { pane: p, .. }
-            | In::Text { pane: p, .. }
             | In::History { pane: p, .. } => Some(p.clone()),
             _ => None,
         };
@@ -382,14 +493,7 @@ impl<W: AsyncWrite + Unpin> Pump<'_, W> {
                     self.input(cmd::send_hex(&pane, &keys::utf8_hex(&text))).await?;
                 }
             }
-            In::Text { pane, data, enter } => {
-                // The paste's errors say what went wrong, never what the text was.
-                let m = match self.tmux.paste(&pane, &data, enter).await {
-                    Ok(()) => Out::Pasted { ok: true, error: None },
-                    Err(e) => Out::Pasted { ok: false, error: Some(e.to_string()) },
-                };
-                self.put(&m).await?;
-            }
+            In::Text { .. } => {}
             In::History { pane, before, lines } => match self.tmux.history(&pane, before, lines).await {
                 Ok(v) => self.put(&history_msg(&pane, before, v)).await?,
                 Err(_) => self.error("could not read the history").await?,
@@ -410,18 +514,26 @@ impl<W: AsyncWrite + Unpin> Pump<'_, W> {
     /// session's pane, or a name tmux would resolve as a target) is refused with an error. On a miss the list is
     /// read again once, since the pane may have been made after the last listing.
     async fn own_pane(&mut self, pane: &str) -> anyhow::Result<Own> {
+        match self.is_own(pane).await? {
+            Some(true) => Ok(Own::Yes),
+            Some(false) => {
+                self.error("no such pane").await?;
+                Ok(Own::No)
+            }
+            None => Ok(Own::Gone),
+        }
+    }
+
+    /// `own_pane` without saying anything on a miss; `None` when the session is gone (already said).
+    async fn is_own(&mut self, pane: &str) -> anyhow::Result<Option<bool>> {
         let listed = |panes: &[Pane]| panes.iter().any(|p| p.id == pane);
         if listed(&self.panes) {
-            return Ok(Own::Yes);
+            return Ok(Some(true));
         }
         if !self.relist().await? {
-            return Ok(Own::Gone);
+            return Ok(None);
         }
-        if listed(&self.panes) {
-            return Ok(Own::Yes);
-        }
-        self.error("no such pane").await?;
-        Ok(Own::No)
+        Ok(Some(listed(&self.panes)))
     }
 
     /// Start or keep viewing `pane`: attach if not yet, size the session for the viewer, send its screen.

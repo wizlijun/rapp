@@ -428,13 +428,111 @@ async fn text_is_pasted_and_acknowledged() {
     common::settle().await;
     let mut p = pump(&s, "t", fresh_unread());
     let (pane, _) = greeted(&mut p).await;
-    say(&mut p.w, In::Text { pane: pane.clone(), data: "a\nb".into(), enter: false }).await;
+    say(&mut p.w, text(&pane, "a\nb", false, false)).await;
     assert_eq!(next(&mut p.lines).await, Out::Pasted { ok: true, error: None });
-    say(&mut p.w, In::Text { pane: pane.clone(), data: "x".repeat(1_048_577), enter: false }).await;
+    // Over 1 MiB in all, in chunks that each fit a line: one answer, at the last chunk.
+    let chunk = "x".repeat(64_000);
+    for _ in 0..16 {
+        say(&mut p.w, text(&pane, &chunk, false, true)).await;
+    }
+    say(&mut p.w, text(&pane, &chunk, false, false)).await;
     assert_eq!(
         next(&mut p.lines).await,
         Out::Pasted { ok: false, error: Some("text is too long (1 MiB at most)".into()) }
     );
+    assert!(drain_for(&mut p.lines, Duration::from_millis(300)).await.is_empty());
+}
+
+fn text(pane: &str, data: &str, enter: bool, more: bool) -> In {
+    In::Text { pane: pane.to_string(), data: data.to_string(), enter, more }
+}
+
+#[tokio::test]
+async fn a_paste_in_three_chunks_lands_whole_and_in_order() {
+    let Some(s) = common::Server::start() else { return };
+    let dir = tempfile::Builder::new().prefix("rt").tempdir_in("/tmp").unwrap();
+    let out = dir.path().join("out");
+    s.raw(&["new-session", "-d", "-s", "c", "-x", "80", "-y", "24", &format!("cat > '{}'", out.display())]);
+    common::settle().await;
+    let mut p = pump(&s, "c", fresh_unread());
+    let (pane, _) = greeted(&mut p).await;
+    say(&mut p.w, text(&pane, "one\n", true, true)).await; // only the last chunk's enter counts
+    say(&mut p.w, text(&pane, "two\n", false, true)).await;
+    say(&mut p.w, text(&pane, "three", true, false)).await;
+    assert_eq!(next(&mut p.lines).await, Out::Pasted { ok: true, error: None });
+    assert!(drain_for(&mut p.lines, Duration::from_millis(300)).await.is_empty());
+    let end = std::time::Instant::now() + Duration::from_secs(3);
+    let got = loop {
+        let got = std::fs::read_to_string(&out).unwrap_or_default();
+        if got.ends_with("three\n") || std::time::Instant::now() > end {
+            break got;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
+    assert_eq!(got, "one\ntwo\nthree\n");
+}
+
+#[tokio::test]
+async fn an_over_limit_line_is_refused_and_viewing_goes_on() {
+    let Some(s) = common::Server::start() else { return };
+    s.raw(&["new-session", "-d", "-s", "o", "-x", "80", "-y", "24", "cat"]);
+    common::settle().await;
+    let mut p = pump(&s, "o", fresh_unread());
+    let (pane, _) = greeted(&mut p).await;
+    say(&mut p.w, In::Type { pane: pane.clone(), text: "y".repeat(70_000) }).await;
+    assert_eq!(next(&mut p.lines).await, Out::Error { error: "bad message".into() });
+    say(&mut p.w, view(&pane, 80, 24)).await;
+    let Out::Screen { lines, .. } = next_not_panes(&mut p.lines).await else { panic!("expected a screen") };
+    assert!(lines.iter().all(|(_, l)| !l.contains('y')), "the over-limit line was typed");
+}
+
+#[tokio::test]
+async fn every_paste_is_answered_even_when_refused() {
+    let Some(s) = common::Server::start() else { return };
+    s.raw(&["new-session", "-d", "-s", "a", "-x", "80", "-y", "24", "cat"]);
+    s.raw(&["new-session", "-d", "-s", "o", "-x", "80", "-y", "24", "cat"]);
+    common::settle().await;
+    let other = s.tmux().list().await.unwrap().into_iter().find(|p| p.session == "o").unwrap().pane;
+    let mut p = pump(&s, "a", fresh_unread());
+    let (pane, _) = greeted(&mut p).await;
+    let refused = |why: &str| Out::Pasted { ok: false, error: Some(why.into()) };
+    // Another session's pane, in one chunk and in two.
+    say(&mut p.w, text(&other, "x", false, false)).await;
+    assert_eq!(next(&mut p.lines).await, refused("no such pane"));
+    say(&mut p.w, text(&other, "x", false, true)).await;
+    say(&mut p.w, text(&other, "x", false, false)).await;
+    assert_eq!(next(&mut p.lines).await, refused("no such pane"));
+    // A Text line that is not a message: alone, and as the middle chunk of a paste, which is then not made.
+    p.w.write_all(format!("{{\"t\":\"text\",\"pane\":\"{pane}\"}}\n").as_bytes()).await.unwrap();
+    assert_eq!(next(&mut p.lines).await, refused("bad message"));
+    p.w.write_all(b"{\"t\":\"text\",\"data\":7}\n").await.unwrap();
+    assert_eq!(next(&mut p.lines).await, refused("bad message"));
+    say(&mut p.w, text(&pane, "first", false, true)).await;
+    p.w.write_all(format!("{{\"t\":\"text\",\"pane\":\"{pane}\",\"more\":true}}\n").as_bytes()).await.unwrap();
+    say(&mut p.w, text(&pane, "last", true, false)).await;
+    assert_eq!(next(&mut p.lines).await, refused("bad message"));
+    // A line over the limit may have been a chunk of any paste still coming: those are not made either.
+    say(&mut p.w, text(&pane, "first", false, true)).await;
+    p.w.write_all(format!("{}\n", "z".repeat(70_000)).as_bytes()).await.unwrap();
+    assert_eq!(next(&mut p.lines).await, Out::Error { error: "bad message".into() });
+    say(&mut p.w, text(&pane, "last", true, false)).await;
+    assert_eq!(next(&mut p.lines).await, refused("bad message"));
+    assert!(drain_for(&mut p.lines, Duration::from_millis(300)).await.is_empty());
+    common::settle().await;
+    let sc = s.tmux().capture(&pane).await.unwrap();
+    assert_eq!((sc.cy, sc.lines[0].as_str()), (0, ""), "a refused paste reached the pane");
+}
+
+#[tokio::test]
+async fn paste_errors_never_name_tmux() {
+    let Some(s) = common::Server::start() else { return };
+    s.raw(&["new-session", "-d", "-s", "e", "-x", "80", "-y", "24", "cat"]);
+    let t = s.tmux();
+    let e = t.paste("%999", "x", false).await.unwrap_err().to_string();
+    assert!(!e.to_lowercase().contains("tmux"), "{e}");
+    let missing = Tmux { bin: "/nonexistent/tmux".into(), ..s.tmux() };
+    let e = missing.paste("%0", "x", false).await.unwrap_err().to_string();
+    assert!(!e.to_lowercase().contains("tmux"), "{e}");
 }
 
 #[tokio::test]

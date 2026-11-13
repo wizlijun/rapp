@@ -58,13 +58,40 @@ pub enum Out {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "t", rename_all = "snake_case")]
 pub enum In {
-    View { pane: Option<String>, cols: u16, rows: u16 },
-    Ack { rev: u64 },
-    Text { pane: String, data: String, enter: bool },
-    Keys { pane: String, keys: Vec<String> },
-    Type { pane: String, text: String },
-    History { pane: String, before: u32, lines: u32 },
-    Refit { pane: String, cols: u16, rows: u16 },
+    View {
+        pane: Option<String>,
+        cols: u16,
+        rows: u16,
+    },
+    Ack {
+        rev: u64,
+    },
+    /// Part of a paste: `more` on every chunk but the last, which carries the paste's `enter`.
+    Text {
+        pane: String,
+        data: String,
+        enter: bool,
+        #[serde(default)]
+        more: bool,
+    },
+    Keys {
+        pane: String,
+        keys: Vec<String>,
+    },
+    Type {
+        pane: String,
+        text: String,
+    },
+    History {
+        pane: String,
+        before: u32,
+        lines: u32,
+    },
+    Refit {
+        pane: String,
+        cols: u16,
+        rows: u16,
+    },
 }
 
 /// One line of output, newline included.
@@ -189,6 +216,10 @@ mod tests {
         let i: In = serde_json::from_str(r#"{"t":"view","pane":null,"cols":0,"rows":0}"#).unwrap();
         assert!(matches!(i, In::View { pane: None, .. }));
         assert!(serde_json::from_str::<In>(r#"{"t":"set_option"}"#).is_err());
+        let i: In = serde_json::from_str(r#"{"t":"text","pane":"%1","data":"a","enter":true}"#).unwrap();
+        assert!(matches!(i, In::Text { more: false, enter: true, .. })); // one chunk: the whole paste
+        let i: In = serde_json::from_str(r#"{"t":"text","pane":"%1","data":"a","enter":false,"more":true}"#).unwrap();
+        assert!(matches!(i, In::Text { more: true, .. }));
     }
 
     #[test]
