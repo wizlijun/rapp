@@ -479,6 +479,40 @@ abstract class SessionPort {
   /// Puts the copy on this Mac's clipboard; false if it is gone.
   Future<bool> copyLocal(int copy) => _boolCall('copy_local', {'copy': copy});
 
+  /// Writes copy `copy` into the data dir (text under [textDir], everything else under [fileDir]);
+  /// the path written, or null if it could not be.
+  Future<String?> savePin(int copy, {required String textDir, required String fileDir, required String stem}) async {
+    try {
+      final r = await invoke('pin_save', {'copy': copy, 'text_dir': textDir, 'file_dir': fileDir, 'stem': stem});
+      final path = r is Map ? r['path'] : null;
+      return path is String ? path : null;
+    } on PlatformException {
+      return null;
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
+  /// Reads a saved copy at [path] back into a new copy held by the runner; null if it cannot be read.
+  Future<({int copy, ClipKind kind})?> loadPin(String path) async {
+    try {
+      final r = await invoke('pin_load', {'path': path});
+      if (r is! Map) return null;
+      final copy = r['copy'];
+      final kind = const {
+        'text': ClipKind.text,
+        'image': ClipKind.image,
+        'files': ClipKind.files,
+        'data': ClipKind.data,
+      }[r['kind']];
+      return copy is int && kind != null ? (copy: copy, kind: kind) : null;
+    } on PlatformException {
+      return null;
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
   void dropCopy(int copy) => _send('drop_copy', {'copy': copy});
 
   /// Shows the file in Finder; false if it is gone.

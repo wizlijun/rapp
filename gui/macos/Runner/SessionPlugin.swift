@@ -148,6 +148,16 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       }
     case let .copyLocal(copy):
       result(copies.write(copy, to: LocalPasteboard()))
+    case let .pinSave(copy, textDir, fileDir, stem):
+      do {
+        let url = try copies.save(copy, textDir: URL(fileURLWithPath: textDir), fileDir: URL(fileURLWithPath: fileDir),
+                                  stem: stem)
+        result(url.map { ["path": $0.path] } ?? ["error": "副本已不在"])
+      } catch {
+        result(["error": "写不进数据目录"])
+      }
+    case let .pinLoad(path):
+      if let r = copies.load(URL(fileURLWithPath: path)) { result(["copy": r.n, "kind": r.kind]) } else { result(nil) }
     case let .dropCopy(copy):
       copies.drop(copy)
       result(nil)

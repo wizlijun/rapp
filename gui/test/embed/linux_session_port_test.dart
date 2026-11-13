@@ -206,6 +206,29 @@ void main() {
     }
   }, skip: !Platform.isLinux || !File(worker).existsSync() ? 'Build rapp-session first on Linux' : false);
 
+  test('pin_save writes text copies only; pin_load reads .md back', () async {
+    final port = LinuxSessionPort('/nonexistent-worker', framePresented: () async {});
+    final dir = Directory.systemTemp.createTempSync('rapp-pin-');
+    try {
+      final copy = port.seedCopyForTest('# 钉住\n原文');
+      final args = {'copy': copy, 'text_dir': '${dir.path}/clipboard', 'file_dir': '${dir.path}/files', 'stem': 's'};
+      expect(await port.invoke('pin_save', args), {'path': '${dir.path}/clipboard/s.md'});
+      expect(await port.invoke('pin_save', args), {'path': '${dir.path}/clipboard/s-2.md'});
+      expect(File('${dir.path}/clipboard/s.md').readAsStringSync(), '# 钉住\n原文');
+      expect(await port.invoke('pin_save', {...args, 'copy': 999}), isNull);
+      expect(Directory('${dir.path}/files').existsSync(), false);
+      final loaded = await port.invoke('pin_load', {'path': '${dir.path}/clipboard/s.md'}) as Map;
+      expect(loaded['kind'], 'text');
+      expect(await port.invoke('copy_local', {'copy': loaded['copy']}), true);
+      expect(await port.invoke('pin_load', {'path': '${dir.path}/clipboard/missing.md'}), isNull);
+      File('${dir.path}/x.png').writeAsBytesSync([1]);
+      expect(await port.invoke('pin_load', {'path': '${dir.path}/x.png'}), isNull);
+    } finally {
+      port.dispose();
+      dir.deleteSync(recursive: true);
+    }
+  });
+
   test('malformed frame closes only the affected session', () async {
     final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
     final second = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
