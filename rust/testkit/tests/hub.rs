@@ -710,6 +710,39 @@ async fn bare_id_is_refused_and_nothing_saved() {
 }
 
 #[tokio::test]
+async fn host_saved_by_an_old_version_still_connects_over_lan() {
+    // hosts.json as a relay-era hub wrote it: ID, name, password and A's LAN addresses.
+    let a = service(None).await;
+    let home = tempfile::tempdir().unwrap();
+    let saved = json!([{"id":a.id,"name":"test-a","password":PASSWORD,"lan":[a_addr(&a.svc).to_string()]}]);
+    rapp_net::config::write_json(&home.path().join("hosts.json"), &saved).unwrap();
+    let mut hub = Hub::start(home.path(), a.bins.path());
+    let r = hub.call(json!({"cmd":"apps","id":a.id})).await;
+    assert_eq!((&r["path"], &r["apps"]), (&json!("lan"), &apps()), "{r}");
+    hub.finish().await;
+}
+
+#[tokio::test]
+async fn presence_reports_a_host_without_addresses_as_offline_quietly() {
+    let home = tempfile::tempdir().unwrap();
+    let bins = bins();
+    let saved = json!([{"id":"123456789","name":"old","password":"pw","lan":[]}]);
+    rapp_net::config::write_json(&home.path().join("hosts.json"), &saved).unwrap();
+    let mut hub = Hub::start_with_presence(home.path(), bins.path(), Duration::from_millis(200));
+    // Several ticks: it is offline each time, never halted.
+    for _ in 0..4 {
+        next_presence(&mut hub, "123456789", false).await;
+    }
+    let lines = read_log(home.path(), "hub.log");
+    let presence = lines.iter().filter(|v| v["ev"] == "presence").count();
+    assert_eq!(presence, 1, "one line for the first observation, not one per tick: {lines:?}");
+    for v in &lines {
+        assert!(v["ev"] != "route" && v["lvl"] != "warn", "log spam: {v}");
+    }
+    hub.finish().await;
+}
+
+#[tokio::test]
 async fn saved_host_without_addresses_says_so() {
     // hosts.json from before: a bare-ID host the relay never gave LAN addresses for.
     let home = tempfile::tempdir().unwrap();
