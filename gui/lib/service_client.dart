@@ -342,9 +342,9 @@ class ServiceMonitor extends ChangeNotifier {
   }
 }
 
-/// Token reader for the real config dir.
-Future<String?> Function() tokenFileReader(String configDir) => () async {
-      final f = File('$configDir${Platform.pathSeparator}ipc.token');
+/// Token reader; [localDir] is asked on every read, so a moved data root is followed.
+Future<String?> Function() tokenFileReader(String Function() localDir) => () async {
+      final f = File('${localDir()}${Platform.pathSeparator}ipc.token');
       if (!await f.exists()) return null;
       return (await f.readAsString()).trim();
     };

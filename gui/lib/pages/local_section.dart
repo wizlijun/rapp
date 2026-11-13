@@ -3,12 +3,15 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import '../paths.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 
 import '../permissions.dart';
 import '../service_client.dart';
 import '../service_control.dart';
+import '../data_relocate.dart';
+import 'data_section.dart';
 import 'permissions_panel.dart';
 import 'section_card.dart';
 import 'update_section.dart';
@@ -38,7 +41,8 @@ class LocalSection extends StatefulWidget {
     super.key,
     required this.monitor,
     required this.control,
-    required this.configDir,
+    required this.data,
+    this.relocate,
     this.openSettings = openSettingsPane,
     this.hooks,
     this.openPage = openInstallerPage,
@@ -48,7 +52,9 @@ class LocalSection extends StatefulWidget {
   final TargetPlatform? platform;
   final ServiceMonitor monitor;
   final ServiceController? control;
-  final String configDir;
+  /// The current data root; the caller passes `state.data` and rebuilds when it changes.
+  final DataDir data;
+  final DataRelocator? relocate;
   final Future<void> Function(Permission) openSettings;
 
   /// Null (tests): the update buttons only send the command.
@@ -119,7 +125,7 @@ class _LocalSectionState extends State<LocalSection> {
     }
     if (_guideDecided) return;
     _guideDecided = true;
-    if (_missing && claimPermissionGuide(widget.configDir)) {
+    if (_missing && claimPermissionGuide(widget.data.localDir)) {
       _lostGuided = true;
       _guideNextFrame();
     }
@@ -182,7 +188,7 @@ class _LocalSectionState extends State<LocalSection> {
   /// relay/key are not in `status`; prefill them from service.json if readable.
   Map<String, dynamic> _serviceJson() {
     try {
-      final f = File('${widget.configDir}${Platform.pathSeparator}service.json');
+      final f = File('${widget.data.localDir}${Platform.pathSeparator}service.json');
       final v = jsonDecode(f.readAsStringSync());
       return v is Map<String, dynamic> ? v : {};
     } catch (_) {
@@ -254,7 +260,8 @@ class _LocalSectionState extends State<LocalSection> {
           ])
             OutlinedButton(onPressed: _busy ? null : () => _control(a), child: Text(label)),
         ]);
-        return SectionCard(title: '本机', children: [
+        return Column(children: [
+        SectionCard(title: '本机', children: [
           _row('服务', st == null ? '未运行（${m.error ?? '连接中'}）' : '运行中'),
           if (st != null) ...[
             _row('ID', st.shownIds.isEmpty ? '（还没有）' : st.shownIds.join('\n')),
@@ -308,6 +315,8 @@ class _LocalSectionState extends State<LocalSection> {
           ],
           const SizedBox(height: 8),
           buttons,
+        ]),
+        DataSection(data: widget.data, relocate: widget.relocate),
         ]);
       },
     );

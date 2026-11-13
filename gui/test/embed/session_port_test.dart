@@ -263,4 +263,45 @@ void main() {
     expect(port.calls[2].$2, {'copy': 5});
     expect(port.calls[3].$2, {'path': '/x'});
   });
+
+  test('savePin and loadPin map the runner replies', () async {
+    final port = _PinPort();
+    port.reply = {'path': '/x/s.md'};
+    expect(await port.savePin(3, textDir: '/t', fileDir: '/f', stem: 's'), '/x/s.md');
+    expect(port.calls.single.$1, 'pin_save');
+    expect(port.calls.single.$2, {'copy': 3, 'text_dir': '/t', 'file_dir': '/f', 'stem': 's'});
+    port.reply = {'error': 'x'};
+    expect(await port.savePin(3, textDir: '/t', fileDir: '/f', stem: 's'), isNull);
+    port.reply = null;
+    expect(await port.savePin(3, textDir: '/t', fileDir: '/f', stem: 's'), isNull);
+    port.error = PlatformException(code: 'x');
+    expect(await port.savePin(3, textDir: '/t', fileDir: '/f', stem: 's'), isNull);
+    port.error = MissingPluginException();
+    expect(await port.loadPin('/x/s.md'), isNull);
+    port.error = null;
+    port.reply = {'copy': 3, 'kind': 'files'};
+    expect(await port.loadPin('/x/s'), (copy: 3, kind: ClipKind.files));
+    expect(port.calls.last.$1, 'pin_load');
+    expect(port.calls.last.$2, {'path': '/x/s'});
+    port.reply = {'copy': 4, 'kind': 'weird'};
+    expect(await port.loadPin('/x/s'), isNull);
+    port.reply = null;
+    expect(await port.loadPin('/x/s'), isNull);
+  });
+}
+
+class _PinPort extends SessionPort {
+  final calls = <(String, Map<String, Object?>)>[];
+  Object? reply;
+  Object? error;
+
+  @override
+  Stream<SessionEvent> get events => const Stream.empty();
+
+  @override
+  Future<Object?> invoke(String method, Map<String, Object?> args) async {
+    calls.add((method, args));
+    if (error != null) throw error!;
+    return reply;
+  }
 }

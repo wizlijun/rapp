@@ -1,3 +1,4 @@
+import 'package:rapp/paths.dart';
 import 'package:flutter/material.dart';
 import 'package:rapp/pages/local_section.dart';
 import 'package:rapp/service_client.dart';
@@ -35,7 +36,7 @@ void main() {
     final monitor = ServiceMonitor(readToken: () async => 'unused');
     addTearDown(monitor.dispose);
     await tester.pumpWidget(MaterialApp(home: Scaffold(body: SingleChildScrollView(
-      child: LocalSection(platform: TargetPlatform.linux, monitor: monitor, control: null, configDir: '/unused', openPage: (_) async {})))));
+      child: LocalSection(platform: TargetPlatform.linux, monitor: monitor, control: null, data: DataDir('/unused'), openPage: (_) async {})))));
     expect(find.byType(LinuxUpdateSection), findsOneWidget);
     expect(find.text('检查更新'), findsOneWidget);
     expect(find.textContaining('屏幕录制'), findsNothing);

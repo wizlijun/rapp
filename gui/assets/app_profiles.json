@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "apps": [
+    {"name": "终端", "ids": ["com.apple.Terminal"], "stream": {"mode": "duogray", "density": "adaptive", "fps": 15}, "afterSend": "none", "composer": true, "windows": [], "tested": false},
+    {"name": "iTerm2", "ids": ["com.googlecode.iterm2"], "stream": {"mode": "duogray", "density": "adaptive", "fps": 15}, "afterSend": "none", "composer": true, "windows": [], "tested": false},
+    {"name": "Ghostty", "ids": ["com.mitchellh.ghostty"], "stream": {"mode": "duogray", "density": "adaptive", "fps": 15}, "afterSend": "none", "composer": true, "windows": [], "tested": false},
+    {"name": "Warp", "ids": ["dev.warp.Warp-Stable"], "stream": {"mode": "duocolor", "density": "adaptive", "fps": 15}, "afterSend": "none", "composer": true, "windows": [], "tested": false},
+    {"name": "ChatGPT", "ids": ["com.openai.codex", "com.openai.chat"], "stream": {"mode": "duocolor", "density": "adaptive", "fps": 15}, "afterSend": "none", "composer": true, "windows": [], "tested": false},
+    {"name": "Claude", "ids": ["com.anthropic.claudefordesktop"], "stream": {"mode": "duocolor", "density": "adaptive", "fps": 15}, "afterSend": "none", "composer": true, "windows": [], "tested": false},
+    {"name": "Cursor", "ids": ["com.todesktop.230313mzl4w4u92"], "stream": {"mode": "duocolor", "density": "adaptive", "fps": 15}, "afterSend": "none", "composer": true, "windows": [], "tested": false},
+    {"name": "VS Code", "ids": ["com.microsoft.VSCode"], "stream": {"mode": "duocolor", "density": "adaptive", "fps": 15}, "afterSend": "none", "composer": true, "windows": [], "tested": false},
+    {"name": "Xcode", "ids": ["com.apple.dt.Xcode"], "stream": {"mode": "duocolor", "density": "adaptive", "fps": 15}, "afterSend": "none", "composer": true, "windows": [], "tested": false},
+    {"name": "Chrome", "ids": ["com.google.Chrome"], "stream": {"mode": "color16", "density": "adaptive", "fps": 15}, "afterSend": "none", "composer": true, "windows": [], "tested": false},
+    {"name": "Safari", "ids": ["com.apple.Safari"], "stream": {"mode": "color16", "density": "adaptive", "fps": 15}, "afterSend": "none", "composer": true, "windows": [], "tested": false},
+    {"name": "Edge", "ids": ["com.microsoft.edgemac"], "stream": {"mode": "color16", "density": "adaptive", "fps": 15}, "afterSend": "none", "composer": true, "windows": [], "tested": false},
+    {"name": "WPS Office", "ids": ["com.kingsoft.wpsoffice.mac.global", "com.kingsoft.wpsoffice.mac"], "stream": {"mode": "duocolor", "density": "adaptive", "fps": 5}, "afterSend": "none", "composer": true, "windows": [], "tested": false},
+    {"name": "Word、Excel、PowerPoint", "ids": ["com.microsoft.Word", "com.microsoft.Excel", "com.microsoft.Powerpoint"], "stream": {"mode": "duocolor", "density": "adaptive", "fps": 5}, "afterSend": "none", "composer": true, "windows": [], "tested": false},
+    {"name": "微信", "ids": ["com.tencent.xinWeChat"], "stream": {"mode": "duocolor", "density": "adaptive", "fps": 5}, "afterSend": "none", "composer": true, "windows": [], "tested": false},
+    {"name": "企业微信", "ids": ["com.tencent.WeWorkMac"], "stream": {"mode": "duocolor", "density": "adaptive", "fps": 5}, "afterSend": "none", "composer": true, "windows": [], "tested": false},
+    {"name": "Paseo", "ids": ["sh.paseo.desktop"], "stream": {"mode": "duocolor", "density": "adaptive", "fps": 15}, "afterSend": "none", "composer": true, "windows": [], "tested": false},
+    {"name": "note.md", "ids": ["net.notemd.app"], "stream": {"mode": "duocolor", "density": "adaptive", "fps": 5}, "afterSend": "none", "composer": true, "windows": [], "tested": false}
+  ]
+}

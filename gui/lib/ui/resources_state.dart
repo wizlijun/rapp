@@ -5,9 +5,11 @@
 import 'package:flutter/foundation.dart';
 
 import '../embed/session_port.dart';
+import 'pin_files.dart';
 
 const maxUnpinned = 100;
 const maxEnded = 50;
+final Object _restoredSid = Object();
 
 class ClipEntry {
   ClipEntry(this.seq, this.key, this.sid, this.clip, this.kind, this.title, this.source, this.at);
@@ -25,6 +27,9 @@ class ClipEntry {
   bool pinning = false;
   int? copy;
   bool ended = false;
+
+  /// Where the pinned entry is saved in the data dir, if it is.
+  String? path;
 }
 
 class TransferRow {
@@ -95,6 +100,17 @@ class ResourcesState extends ChangeNotifier {
       _clips.removeAt(i);
       n--;
     }
+  }
+
+  /// A pin saved by an earlier launch: oldest, pinned, and ended (its clip number on A is gone).
+  void addRestored(
+      {required String path, required int copy, required ClipKind kind, required String title, required DateTime at}) {
+    _clips.add(ClipEntry(_nextSeq++, '', _restoredSid, 0, kind, title, restoredSource, at)
+      ..pinned = true
+      ..ended = true
+      ..copy = copy
+      ..path = path);
+    notifyListeners();
   }
 
   void beginPin(int seq) {

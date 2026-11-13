@@ -230,9 +230,9 @@ class _PictureState extends State<Picture> {
   }
 
   void _hover(PointerHoverEvent e) {
-    // Only menus track the pointer without a press.
+    // Only menus and popovers (an address-bar list) track the pointer without a press.
     final t = _at(e.localPosition);
-    if (t.win.kind != WindowKind.menu ||
+    if ((t.win.kind != WindowKind.menu && t.win.kind != WindowKind.popover) ||
         !t.usable ||
         !t.pic.contains(e.localPosition)) {
       return;

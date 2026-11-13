@@ -16,28 +16,37 @@ pub struct Host {
 }
 
 pub struct Hosts {
-    path: PathBuf,
-    list: Mutex<Vec<Host>>,
+    /// The file and the list swap together (reload), so one lock.
+    state: Mutex<(PathBuf, Vec<Host>)>,
 }
 
 impl Hosts {
     pub fn load(home: &Path) -> Result<Hosts> {
         let path = home.join("hosts.json");
         let list = rapp_net::config::read_json(&path)?.unwrap_or_default();
-        Ok(Hosts { path, list: Mutex::new(list) })
+        Ok(Hosts { state: Mutex::new((path, list)) })
+    }
+
+    /// Switches to `<dir>/hosts.json` (absent = empty); on error the old file and list stay.
+    pub fn reload(&self, dir: &Path) -> Result<()> {
+        let path = dir.join("hosts.json");
+        let list = rapp_net::config::read_json(&path)?.unwrap_or_default();
+        *self.state.lock().unwrap() = (path, list);
+        Ok(())
     }
 
     pub fn get(&self, id: &str) -> Option<Host> {
-        self.list.lock().unwrap().iter().find(|h| h.id == id).cloned()
+        self.state.lock().unwrap().1.iter().find(|h| h.id == id).cloned()
     }
 
     pub fn all(&self) -> Vec<Host> {
-        self.list.lock().unwrap().clone()
+        self.state.lock().unwrap().1.clone()
     }
 
     /// `[{"id","name"}]`
     pub fn summary(&self) -> Value {
-        let list = self.list.lock().unwrap();
+        let state = self.state.lock().unwrap();
+        let list = &state.1;
         // `lan` (A's LAN addresses, for 屏幕共享) only when known; the password never leaves the hub.
         let row = |h: &Host| {
             let mut v = json!({"id": h.id, "name": h.name});
@@ -51,36 +60,39 @@ impl Hosts {
 
     /// Inserts or replaces by id; saves only when something changed.
     pub fn upsert(&self, host: Host) -> Result<()> {
-        let mut list = self.list.lock().unwrap();
+        let mut state = self.state.lock().unwrap();
+        let (path, list) = &mut *state;
         match list.iter_mut().find(|h| h.id == host.id) {
             Some(h) if *h == host => return Ok(()),
             Some(h) => *h = host,
             None => list.push(host),
         }
-        rapp_net::config::write_json(&self.path, &*list)
+        rapp_net::config::write_json(path, &*list)
     }
 
     /// Like `upsert`, but only for a host that is still saved (a removed host stays removed).
     pub fn refresh(&self, host: Host) -> Result<()> {
-        let mut list = self.list.lock().unwrap();
+        let mut state = self.state.lock().unwrap();
+        let (path, list) = &mut *state;
         match list.iter_mut().find(|h| h.id == host.id) {
             Some(h) if *h == host => Ok(()),
             Some(h) => {
                 *h = host;
-                rapp_net::config::write_json(&self.path, &*list)
+                rapp_net::config::write_json(path, &*list)
             }
             None => Ok(()),
         }
     }
 
     pub fn remove(&self, id: &str) -> Result<()> {
-        let mut list = self.list.lock().unwrap();
+        let mut state = self.state.lock().unwrap();
+        let (path, list) = &mut *state;
         let before = list.len();
         list.retain(|h| h.id != id);
         if list.len() == before {
             return Ok(());
         }
-        rapp_net::config::write_json(&self.path, &*list)
+        rapp_net::config::write_json(path, &*list)
     }
 }
 
@@ -118,5 +130,25 @@ mod tests {
             json!([{"id": "1", "name": "a"}, {"id": "2", "name": "b", "lan": ["192.168.1.5:21118"]}])
         );
         assert!(!hosts.summary().to_string().contains("secret"));
+    }
+
+    #[test]
+    fn reload_switches_the_file() {
+        let (a, b) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let h = |id: &str| Host { id: id.into(), name: id.into(), password: "p".into(), lan: vec![] };
+        rapp_net::config::write_json(&a.path().join("hosts.json"), &[h("x")]).unwrap();
+        rapp_net::config::write_json(&b.path().join("hosts.json"), &[h("y")]).unwrap();
+        let hosts = Hosts::load(a.path()).unwrap();
+        hosts.reload(b.path()).unwrap();
+        assert_eq!(hosts.all(), vec![h("y")]);
+        let a_before = std::fs::read(a.path().join("hosts.json")).unwrap();
+        hosts.upsert(h("z")).unwrap();
+        assert_eq!(std::fs::read(a.path().join("hosts.json")).unwrap(), a_before);
+        let saved: Vec<Host> = rapp_net::config::read_json(&b.path().join("hosts.json")).unwrap().unwrap();
+        assert_eq!(saved, vec![h("y"), h("z")]);
+        let bad = tempfile::tempdir().unwrap();
+        std::fs::write(bad.path().join("hosts.json"), "{not json").unwrap();
+        assert!(hosts.reload(bad.path()).is_err());
+        assert_eq!(hosts.all(), vec![h("y"), h("z")]);
     }
 }

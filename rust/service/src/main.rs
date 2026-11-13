@@ -1,17 +1,23 @@
-//! `rapp-service` — no arguments. Config dir: `RAPP_HOME` or the platform default.
+//! `rapp-service` — no arguments. Data root: `$RAPP_HOME`, the `data-root` pointer file, or `~/rapp`.
 //! Env: `RAPP_BIN_DIR` (where rapp-host lives), `RAPP_GUI` (the `rapp` GUI for `--cm`),
 //! `RAPP_LOG_DIR` (where `service.log` goes; see `rapp_net::log::log_dir`).
 
-use rapp_service::{Opts, Service, SystemRunner, UpdateOpts, WORKER_IDLE};
+use rapp_service::{DataOpts, Opts, Service, SystemRunner, UpdateOpts, WORKER_IDLE};
 use std::sync::Arc;
 
 #[tokio::main]
 async fn main() {
     if std::env::args().len() > 1 {
-        eprintln!("usage: rapp-service   (config: $RAPP_HOME/service.json)");
+        eprintln!("usage: rapp-service   (data root: $RAPP_HOME, data-root pointer or ~/rapp)");
         std::process::exit(2);
     }
-    let home = rapp_net::config::home();
+    let root = rapp_net::config::home();
+    if let Err(e) = rapp_net::datadir::prepare(&root, &rapp_net::config::legacy_dir()) {
+        eprintln!("rapp-service: 数据目录 {}: {e:#}", root.display());
+        std::process::exit(1);
+    }
+    let home = rapp_net::config::local(&root);
+    let data = Some(DataOpts::system(root));
     let opts = Opts {
         home,
         bin_dir: rapp_net::bins::bin_dir_from_env(),
@@ -20,6 +26,7 @@ async fn main() {
         log_dir: rapp_net::log::log_dir(),
         runner: Arc::new(SystemRunner),
         // Only a service running from a `.app` updates itself.
+        data,
         update: std::env::current_exe().ok().and_then(|e| rapp_update::bundle_of(&e)).map(UpdateOpts::system),
     };
     match Service::start(opts).await {

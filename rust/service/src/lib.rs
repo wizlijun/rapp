@@ -3,6 +3,7 @@
 
 mod cm;
 pub mod config;
+mod data;
 mod ipc;
 mod peer;
 mod relay_link;
@@ -21,6 +22,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::task::JoinHandle;
 
+pub use data::{DataOpts, SyncStatus};
 pub use rapp_update::{Runner, SystemRunner};
 
 pub const WORKER_IDLE: Duration = Duration::from_secs(60);
@@ -40,6 +42,8 @@ pub struct Opts {
     pub runner: Arc<dyn Runner>,
     /// None turns the updater off (not running from a `.app`).
     pub update: Option<UpdateOpts>,
+    /// None: no `device.json`, no git (the testkit).
+    pub data: Option<DataOpts>,
 }
 
 /// Where the running app is and the updater's timings (online-update plan Task 4).
@@ -131,12 +135,21 @@ impl Service {
         state.set_permissions(checked);
         let state = Arc::new(state);
         update::on_start(&state).await;
-        let tasks = vec![
+        let mut tasks = vec![
             tokio::spawn(peer::accept_loop(state.clone(), endpoint)),
             tokio::spawn(relay_link::run(state.clone(), relay_rx)),
             tokio::spawn(ipc::serve(state.clone(), listener, ipc_token)),
             update::spawn(state.clone()),
         ];
+        if let Some(data) = opts.data {
+            let name = state.cfg.lock().unwrap().name.clone();
+            if let Some(id) = id.as_deref() {
+                if let Err(e) = data::write_device_json(&data.root, id, &name) {
+                    state.log.event(Lvl::Warn, "data_error", json!({"step": "device.json", "err": format!("{e:#}")}));
+                }
+            }
+            tasks.push(data::spawn(data, name, state.log.clone()));
+        }
         Ok(Service { port, ipc_port, state, tasks, stopped: Default::default() })
     }
 

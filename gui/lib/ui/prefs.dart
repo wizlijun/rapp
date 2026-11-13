@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'tokens.dart';
 
-/// GUI preferences, stored in `<dir>/gui.json`.
+/// GUI preferences, stored in `<dir>/gui.json` (`devices/<id>/` in the data root).
 class UiPrefs {
   UiPrefs({this.theme = RappTheme.matrix, this.startFullscreen = true});
 

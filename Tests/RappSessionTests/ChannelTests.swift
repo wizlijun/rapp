@@ -32,6 +32,10 @@ final class ChannelTests: XCTestCase {
         XCTAssertEqual(try channelCommand("copy_local", ["copy": 4]), .copyLocal(copy: 4))
         XCTAssertEqual(try channelCommand("drop_copy", ["copy": 4]), .dropCopy(copy: 4))
         XCTAssertEqual(try channelCommand("reveal", ["path": "/tmp/x"]), .reveal(path: "/tmp/x"))
+        XCTAssertEqual(try channelCommand("pin_save", ["copy": 2, "text_dir": "/t", "file_dir": "/f", "stem": "s"]),
+                       .pinSave(copy: 2, textDir: "/t", fileDir: "/f", stem: "s"))
+        XCTAssertEqual(try channelCommand("pin_load", ["path": "/t/s.md"]), .pinLoad(path: "/t/s.md"))
+        XCTAssertThrowsError(try channelCommand("pin_save", ["copy": 2]))
         XCTAssertThrowsError(try channelCommand("fetch_clip", ["sid": 1])) { XCTAssertEqual($0 as? ChannelError, .bad("fetch_clip")) }
         XCTAssertThrowsError(try channelCommand("copy_local", ["copy": "x"]))
         XCTAssertThrowsError(try channelCommand("reveal", [:]))

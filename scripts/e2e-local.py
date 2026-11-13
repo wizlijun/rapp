@@ -119,10 +119,11 @@ def main():
             [os.path.join(RUST, "rapp-relay"), "--key", KEY, "--listen", relay_addr,
              "--db", os.path.join(WORK, "relay.json")],
             stderr=open(os.path.join(WORK, "relay.log"), "w")))
-        with open(os.path.join(a_home, "service.json"), "w") as f:
+        os.makedirs(os.path.join(a_home, "local"), exist_ok=True)
+        with open(os.path.join(a_home, "local", "service.json"), "w") as f:
             json.dump({"relay": relay_addr, "key": KEY, "id": None, "secret": "", "name": "e2e-a",
                        "password": PASSWORD, "port": 0, "ipc_port": 0}, f)
-        os.chmod(os.path.join(a_home, "service.json"), 0o600)
+        os.chmod(os.path.join(a_home, "local", "service.json"), 0o600)
         svc_log = os.path.join(WORK, "service.log")
         svc_env = dict(os.environ, RAPP_HOME=a_home, RAPP_GUI="/nonexistent")
         if bins:
@@ -135,9 +136,10 @@ def main():
         # The ID exists before registration (A picks it), so wait for the relay's answer.
         host_id = wait_for(lambda: (re.search(r"registered as (\d+)", read_text(svc_log)) or [None, None])[1],
                            10, "relay registration")
-        token = read_text(os.path.join(a_home, "ipc.token")).strip()
+        token = read_text(os.path.join(a_home, "local", "ipc.token")).strip()
         print(f"relay {relay_addr}; A registered as {host_id}; ipc {ipc_port}")
-        with open(os.path.join(b_home, "service.json"), "w") as f:
+        os.makedirs(os.path.join(b_home, "local"), exist_ok=True)
+        with open(os.path.join(b_home, "local", "service.json"), "w") as f:
             json.dump({"relay": relay_addr, "key": KEY}, f)
 
         c_home = os.path.join(WORK, "c")  # no service.json: this hub has no relay

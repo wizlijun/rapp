@@ -54,6 +54,10 @@ class FakeSessionPort extends SessionPort {
   Map<String, Object?>? fetchReply;
   Object? fetchError;
   bool copyLocalReply = true;
+
+  /// What `pin_save` and `pin_load` answer; null means null.
+  Map<String, Object?>? pinSaveReply;
+  Map<String, Object?>? pinLoadReply;
   bool revealReply = true;
   int _nextCopy = 1;
 
@@ -73,6 +77,8 @@ class FakeSessionPort extends SessionPort {
       if (fetchError != null) throw fetchError!;
       return fetchReply ?? {'copy': _nextCopy++};
     }
+    if (method == 'pin_save') return pinSaveReply;
+    if (method == 'pin_load') return pinLoadReply;
     if (method == 'copy_local') return copyLocalReply;
     if (method == 'reveal') return revealReply;
     return null;

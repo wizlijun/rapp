@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:rapp/paths.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/session_port.dart';
@@ -34,7 +35,7 @@ void main() {
       ],
     });
     await flush();
-    s = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs());
+    s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs());
   });
 
   tearDown(() {
@@ -220,7 +221,7 @@ void main() {
 
     testWidgets('tabs appear at two windows and switch on tap', (tester) async {
       final port = FakeSessionPort();
-      final es = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: port);
+      final es = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port);
       addTearDown(es.dispose);
       await tester.pumpWidget(wrap(SizedBox(
         width: 800,
@@ -307,7 +308,7 @@ void main() {
         }
       };
       s.dispose();
-      s = es = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: port);
+      s = es = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port);
     });
 
     for (final w in [600.0, 597.0, 545.0, 480.0, 478.0, 400.0, 392.0, 340.0, 336.0, 360.0, 320.0, 300.0]) {
@@ -355,7 +356,7 @@ void main() {
       };
       // One MainState on the hub: a second would take the presence events first.
       s.dispose();
-      s = es = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: port);
+      s = es = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port);
     });
 
     Widget ebar() => SizedBox(

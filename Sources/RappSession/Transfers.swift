@@ -54,11 +54,11 @@ public final class TransferQueue {
     private static let partSuffix = ".rapp-part"
     private static let errorShownFor: TimeInterval = 5
 
-    /// `downloads`: nil means `~/Downloads/rapp`.
+    /// `downloads`: nil means `DataPaths.transfers` (<data root>/files/transfers).
     public init(address: RemoteAddress, downloads: URL? = nil) {
         self.address = address
         self.downloads = downloads
-            ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0].appendingPathComponent("rapp")
+            ?? DataPaths.currentTransfers()
     }
 
     // MARK: Public

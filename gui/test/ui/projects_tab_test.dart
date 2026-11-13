@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:rapp/paths.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/hub_client.dart';
@@ -68,7 +69,7 @@ void main() {
           });
       }
     };
-    s = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs());
+    s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs());
     await flush();
     await flush();
     await flush();

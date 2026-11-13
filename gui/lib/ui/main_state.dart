@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:ui' show Size;
 
+import '../paths.dart';
 import 'package:flutter/foundation.dart';
 
 import '../embed/geometry.dart' show PictureHole;
@@ -13,6 +14,7 @@ import '../hub_client.dart';
 import '../permissions.dart';
 import 'lamp.dart';
 import 'lifecycle.dart';
+import 'pin_files.dart';
 import 'prefs.dart';
 import 'projects.dart';
 import 'resources_state.dart';
@@ -52,7 +54,7 @@ class MainState extends ChangeNotifier {
   MainState({
     required this.hub,
     this.hubError,
-    required this.configDir,
+    required this.data,
     required this.prefs,
     this.port,
     this.doubleClick = const Duration(milliseconds: 500),
@@ -62,24 +64,62 @@ class MainState extends ChangeNotifier {
     _portSub = port?.events.listen(_onPortEvent);
     hub?.addListener(_onHub);
     _lastError = hub?.lastError;
-    final loaded = loadWorkspace(configDir);
+    final loaded = loadWorkspace(data.sharedDir);
     workspace = loaded.workspace;
     if (loaded.problem != null) hint = loaded.problem!;
     _entries = _mapEntries();
     refreshDevices();
+    _restorePins();
+  }
+
+  /// Switches to a moved data root: later reads and writes go there and `workspace.json` is reread.
+  /// Pinned entries saved under the old root follow to the new one.
+  void relocate(DataDir d) {
+    final oldRoot = data.root;
+    data = d;
+    final loaded = loadWorkspace(d.sharedDir);
+    workspace = loaded.workspace;
+    if (loaded.problem != null) hint = loaded.problem!;
+    _entries = _mapEntries();
+    final old = oldRoot.endsWith('/') ? oldRoot : '$oldRoot/';
+    for (final e in resources.clips) {
+      final p = e.path;
+      if (p != null && p.startsWith(old)) e.path = '${d.root}/${p.substring(old.length)}';
+    }
+    notifyListeners();
+  }
+
+  /// Loads the pins saved in the data dir back as ended, pinned entries (oldest last).
+  Future<void> _restorePins() async {
+    final p = port;
+    if (p == null) return;
+    final paths = pinnedPaths(data);
+    for (final path in paths.reversed) {
+      final r = await p.loadPin(path);
+      if (_disposed) return;
+      if (r == null) continue;
+      DateTime at;
+      try {
+        at = pinTime(path) ?? File(path).statSync().modified;
+      } catch (_) {
+        at = DateTime.now();
+      }
+      resources.addRestored(path: path, copy: r.copy, kind: r.kind, title: pinTitle(path), at: at);
+    }
   }
 
   final HubClient? hub;
   final String? hubError;
-  final String configDir;
+  /// The data root; mutable so a relocation can swap it.
+  DataDir data;
   final UiPrefs prefs;
   final SessionPort? port;
 
   /// Clipboard entries and transfers of every session.
   final ResourcesState resources;
 
-  /// Favourites and projects, loaded from `workspace.json` in [configDir].
-  late final Workspace workspace;
+  /// Favourites and projects, loaded from `workspace.json` in `shared/`.
+  late Workspace workspace;
 
   /// The double-click interval the runner reported (`init`), for counting clicks (R14).
   final Duration doubleClick;
@@ -1057,7 +1097,8 @@ class MainState extends ChangeNotifier {
 
   void _save() {
     try {
-      prefs.save(configDir);
+      final dir = data.prefsDir();
+      if (dir != null) prefs.save(dir); // no device id yet: keep defaults, write nothing (R22)
     } catch (e) {
       hint = '偏好没有保存：${_fsReason(e)}';
     }
@@ -1239,7 +1280,7 @@ class MainState extends ChangeNotifier {
 
   void _saveWorkspace() {
     try {
-      saveWorkspace(configDir, workspace);
+      saveWorkspace(data.sharedDir, workspace);
     } catch (e) {
       hint = '项目和常用没有保存：${_fsReason(e)}';
     }
@@ -1289,6 +1330,9 @@ class MainState extends ChangeNotifier {
     final p = port;
     if (p == null) return;
     if (e.pinned) {
+      final path = e.path;
+      if (path != null) deletePin(path);
+      e.path = null;
       final copy = resources.unpin(e.seq, sessionEnded: e.ended);
       if (copy != null) p.dropCopy(copy);
       return;
@@ -1305,11 +1349,35 @@ class MainState extends ChangeNotifier {
     final copy = r.copy;
     if (copy != null) {
       resources.pinned(e.seq, copy);
+      final path = await p.savePin(copy,
+          textDir: data.clipboardDir, fileDir: data.filesClipboardDir, stem: pinStem(e.at, e.title, e.kind));
+      if (_disposed) return;
+      if (path != null) {
+        final now = resources.entry(e.seq);
+        if (now == null || !now.pinned) {
+          deletePin(path); // unpinned or gone while the file was being written
+        } else {
+          now.path = path;
+          _hintFirstPin();
+        }
+      }
     } else {
       resources.pinFailed(e.seq);
       hint = pinFailureHint(r.error);
       notifyListeners();
     }
+  }
+
+  void _hintFirstPin() {
+    final marker = File('${data.localDir}/$pinHintMarker');
+    try {
+      if (marker.existsSync()) return;
+      marker.createSync(recursive: true);
+    } catch (_) {
+      return;
+    }
+    hint = pinHint;
+    notifyListeners();
   }
 
   /// The hint for a failed pin; the runner's English "unknown clip" never reaches the user.

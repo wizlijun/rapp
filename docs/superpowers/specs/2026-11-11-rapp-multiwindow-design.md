@@ -161,6 +161,8 @@ B 上挪窗口本来就不发 move（§4.3），B 也不会因为 A 那边挪了
 - 区域 = 表里所有窗口的并集（纯函数，§5）。区域变了：`updateConfiguration`（`sourceRect` 用屏内坐标，像素宽高 = 区域 × min(density, 屏的像素密度)），编码器重置。表空了区域保持不变。
 - 每帧的区域取帧附带的 `SCStreamFrameInfo.screenRect`（点、全局坐标，减去屏原点即画布坐标）。探查确认改 `sourceRect` 后第一帧起就跟着变（附录）。没有这个附件的帧丢掉。
 - 丢掉录屏指示器：macOS 27 在被录的窗口左上角（+6, +6）加一个 66×20 的小窗口（归属目标 app，AX 是 AXWindow/AXDialog、标题 "Window"）。规则（纯函数，§5）：一个窗口完全落在另一个有框窗口的标题行里（标题行高度量不到时按 28 点），就不进表。
+- 小窗口不进表（2026-11-13 用户：「左上角椭圆形的小窗口……所有的应用中都可以隐藏，默认隐藏」）：宽 ≤ 120 且高 ≤ 48 点的窗口一律丢掉、不跟踪，菜单除外。录屏指示器在标题行量得偏小时也靠这条去掉。
+- 表里没有有框窗口时（主窗口 AX 看不到），面积最大的 popover 当 normal，保证有一个标签能看能打字。
 
 ### 3.3 分类（纯函数，以 Task 1 探查结果为准）
 
@@ -170,8 +172,9 @@ B 上挪窗口本来就不发 move（§4.3），B 也不会因为 A 那边挪了
 | normal | role AXPopover | popover |
 | normal | subrole AXDialog、AXSystemDialog | dialog |
 | normal | subrole AXFloatingWindow、AXSystemFloatingWindow | floating |
-| normal | 其他、或 AX 里找不到 | normal |
-| floating、utility | | floating |
+| normal、floating、utility | AX 里找不到，或 role AXWindow 而 subrole 为空 / AXUnknown（无边框：Chrome 地址栏下拉、自绘右键菜单） | popover（原位叠加，没有输入区） |
+| normal | 其他 | normal |
+| floating、utility | 其他 | floating |
 | modalPanel | | dialog |
 | popUpMenu | | menu |
 | 更高（提示条等） | | tooltip |
@@ -182,7 +185,7 @@ B 上挪窗口本来就不发 move（§4.3），B 也不会因为 A 那边挪了
 
 - mouse、scroll：窗口 ID 必须在当前表里。A 上的点 = 屏原点 + 窗口左上角 + (x, y)，限制在屏内。
 - 按下（down）之前做顶层检查：A 上这一点最上面的窗口不是目标 app 的，就先激活 app、AX raise 那个窗口（有框窗口才 raise），等 50 毫秒再查一次；还不是就丢掉这次按下，日志写 `click dropped: covered by <owner>`。拖动、松开、移动、滚动跟着前一个按下走，不查。
-- move（kind 3）：只挪指针，B 每秒最多发 30 次，只在指针位于远程窗口上时发。菜单的悬停高亮、子菜单展开、提示条都靠它。
+- move（kind 3，菜单和 popover 上才发）：只挪指针，B 每秒最多发 30 次，只在指针位于远程窗口上时发。菜单的悬停高亮、子菜单展开、提示条都靠它。
 - text、key：照 v3（app 不在前台先激活）。
 - focus：激活 app，AX raise 这个窗口，设 `AXMain`。
 - close：按 AX 关闭按钮；没有就什么也不做。

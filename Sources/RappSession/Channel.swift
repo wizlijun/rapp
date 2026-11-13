@@ -32,6 +32,10 @@ public enum ChannelCommand: Equatable {
     case copyLocal(copy: Int)
     /// Forget B's copy `copy`.
     case dropCopy(copy: Int)
+    /// Write B's copy `copy` into the data dir (answered with `{"path"}` or `{"error"}`).
+    case pinSave(copy: Int, textDir: String, fileDir: String, stem: String)
+    /// Read a saved copy back as a new copy (answered with `{"copy", "kind"}` or null).
+    case pinLoad(path: String)
     /// Show the file at `path` in Finder.
     case reveal(path: String)
     /// The session whose picture has keyboard focus; nil for none.
@@ -65,7 +69,8 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
     let known: Set<String> = ["start", "close", "mouse", "scroll", "key", "resize", "select_window", "set_stream",
                               "cancel_transfer", "picture_focus", "clip_pick", "menu_pick", "move_top_left",
                               "composer_paste", "composer_attach", "composer_send", "composer_drop_block",
-                              "detach", "attach", "raise_detached", "fetch_clip", "copy_local", "drop_copy", "reveal"]
+                              "detach", "attach", "raise_detached", "fetch_clip", "copy_local", "drop_copy", "reveal",
+                              "pin_save", "pin_load"]
     guard known.contains(method) else { throw ChannelError.unknown(method) }
     guard let map = args as? [String: Any] else { throw ChannelError.bad(method) }
     let a = Args(method: method, map: map)
@@ -77,6 +82,10 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
     switch method {
     case "copy_local": return .copyLocal(copy: try a.block("copy"))
     case "drop_copy": return .dropCopy(copy: try a.block("copy"))
+    case "pin_save":
+        return .pinSave(copy: try a.block("copy"), textDir: try a.string("text_dir"), fileDir: try a.string("file_dir"),
+                        stem: try a.string("stem"))
+    case "pin_load": return .pinLoad(path: try a.string("path"))
     case "reveal": return .reveal(path: try a.string("path"))
     default: break
     }

@@ -10,6 +10,8 @@ import 'embed/session_port.dart';
 import 'embed/linux_session_port.dart';
 import 'hub_client.dart';
 import 'pages/local_section.dart';
+import 'data_dir.dart';
+import 'data_relocate.dart';
 import 'paths.dart';
 import 'service_client.dart';
 import 'service_control.dart';
@@ -24,8 +26,16 @@ Future<void> main(List<String> args) async {
   await windowManager.ensureInitialized();
   final env = Platform.environment;
   final os = Platform.operatingSystem;
-  final cfg = configDir(env, os);
-  final monitor = ServiceMonitor(readToken: tokenFileReader(cfg))..start();
+  final root = dataRoot(env, os);
+  try {
+    prepareDataDir(root, legacyDir(env, os));
+  } catch (e) {
+    stderr.writeln('rapp: 数据目录 $root: $e');
+  }
+  final data = DataDir(root);
+  // The token follows the current root: `state.data` once the window exists, `data` before.
+  MainState? mainState;
+  final monitor = ServiceMonitor(readToken: tokenFileReader(() => (mainState?.data ?? data).localDir))..start();
 
   if (args.contains('--cm')) {
     await _showWindow(const Size(400, 320), 'rapp 连接管理');
@@ -51,7 +61,7 @@ Future<void> main(List<String> args) async {
   final serviceExe = findBinary('rapp-service', bin, os);
   final control = serviceExe == null ? null : ServiceController(serviceExe: serviceExe, env: env);
 
-  final prefs = UiPrefs.load(cfg);
+  final prefs = UiPrefs.load(data.prefsDir() ?? data.localDir);
   SessionPort? port;
   var doubleClick = const Duration(milliseconds: 500);
   if (Platform.isMacOS || Platform.isLinux) {
@@ -65,7 +75,8 @@ Future<void> main(List<String> args) async {
     }
   }
   final state =
-      MainState(hub: hub, hubError: hubError, configDir: cfg, prefs: prefs, port: port, doubleClick: doubleClick);
+      MainState(hub: hub, hubError: hubError, data: data, prefs: prefs, port: port, doubleClick: doubleClick);
+  mainState = state;
   await _showWindow(const Size(1194, 834), 'rapp');
   if (prefs.startFullscreen) await WindowManagerFullscreen().setFullScreen(true);
   await windowManager.setPreventClose(true);
@@ -81,7 +92,14 @@ Future<void> main(List<String> args) async {
       state: state,
       monitor: monitor,
       control: control,
-      configDir: cfg,
+      relocator: DataRelocator(
+        env: env,
+        os: os,
+        restartService: () async =>
+            control == null ? '找不到 rapp-service' : await control.run(ServiceAction.restart),
+        setHubHome: (d) async => await hub?.setHome(d),
+        state: state,
+      ),
       fullscreen: WindowManagerFullscreen(),
       hooks: UpdateHooks(
         confirmQuit: () => shell._confirmQuit(

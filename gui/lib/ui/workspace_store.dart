@@ -1,4 +1,4 @@
-// workspace.json: favourites and projects, kept in the GUI config dir. Pure Dart.
+// workspace.json: favourites and projects, kept in the data root's shared/ dir. Pure Dart.
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';

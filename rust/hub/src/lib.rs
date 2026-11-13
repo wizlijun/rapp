@@ -204,6 +204,10 @@ impl Hub {
                 self.forget_host(id);
                 self.hosts_event()
             }
+            Some("set_home") => {
+                self.hosts.reload(std::path::Path::new(s("dir")?))?;
+                json!({"event":"home_set"})
+            }
             Some("apps") => {
                 let id = s("id")?;
                 let (_, r, path) = self.request(&self.host(id)?, &Op::ListApps).await?;

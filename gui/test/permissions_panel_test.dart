@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:rapp/paths.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/pages/local_section.dart';
@@ -121,6 +122,7 @@ void main() {
 
     setUp(() {
       tmp = Directory.systemTemp.createTempSync('rapp-local');
+      Directory('${tmp.path}/local').createSync();
       opened = [];
       quits = 0;
       confirms = 0;
@@ -131,7 +133,7 @@ void main() {
       tmp.deleteSync(recursive: true);
     });
 
-    File marker() => File('${tmp.path}${Platform.pathSeparator}permission-guide-shown');
+    File marker() => File('${tmp.path}${Platform.pathSeparator}local${Platform.pathSeparator}permission-guide-shown');
 
     /// Starts the fake service and the section; the first-run guide is already marked shown.
     Future<void> pump(WidgetTester tester, {UpdateHooks? hooks, bool useHooks = true}) async {
@@ -153,7 +155,7 @@ void main() {
           platform: TargetPlatform.macOS,
           monitor: m,
           control: null,
-          configDir: tmp.path,
+          data: DataDir(tmp.path),
           openSettings: (p) async => opened.add(p),
           hooks: useHooks
               ? hooks ??

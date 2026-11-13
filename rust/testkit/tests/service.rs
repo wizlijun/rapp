@@ -790,3 +790,53 @@ async fn input_blocked_is_logged_once_a_minute_without_content() {
     let h = ipc_once(&a.svc, home, json!({"cmd":"history","limit":10})).await;
     assert!(h["events"].as_array().unwrap().iter().any(|e| e["ev"] == "input_blocked"), "{h}");
 }
+
+#[tokio::test]
+async fn service_with_a_data_dir_commits_its_device_json() {
+    let git_env = vec![
+        ("GIT_CONFIG_GLOBAL".to_string(), "/dev/null".to_string()),
+        ("GIT_CONFIG_NOSYSTEM".to_string(), "1".to_string()),
+    ];
+    let have_git = std::process::Command::new("git").arg("--version").output().is_ok_and(|o| o.status.success());
+    if !have_git {
+        return;
+    }
+    let (dir, bins) = (tempfile::tempdir().unwrap(), bins());
+    let root = dir.path().join("rapp");
+    rapp_net::datadir::prepare(&root, &dir.path().join("no-legacy")).unwrap();
+    let home = rapp_net::config::local(&root);
+    service_json(&home, None);
+    let svc = rapp_service::Service::start(rapp_service::Opts {
+        home: home.clone(),
+        bin_dir: Some(bins.path().to_path_buf()),
+        gui: None,
+        worker_idle: Duration::from_secs(60),
+        log_dir: dir.path().join("logs"),
+        runner: std::sync::Arc::new(rapp_update::fake::FakeRunner::new()),
+        update: None,
+        data: Some(rapp_service::DataOpts {
+            commit_every: Duration::from_millis(200),
+            git_env: git_env.clone(),
+            no_dev_tools: |_| false,
+            ..rapp_service::DataOpts::system(root.clone())
+        }),
+    })
+    .await
+    .unwrap();
+    let id = ipc_once(&svc, &home, json!({"cmd":"status"})).await["id"].as_str().unwrap().to_string();
+    let path = format!("devices/{id}/device.json");
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git").current_dir(&root).args(args).envs(git_env.clone()).output().unwrap();
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while !git(&["log", "--name-only", "--format="]).contains(&path) {
+        assert!(std::time::Instant::now() < deadline, "device.json never committed");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let shown = git(&["show", &format!("HEAD:{path}")]).to_lowercase();
+    for word in ["password", "secret", "key"] {
+        assert!(!shown.contains(word), "{word} in device.json");
+    }
+    svc.stop();
+}

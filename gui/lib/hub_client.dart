@@ -140,6 +140,9 @@ class HubClient extends ChangeNotifier {
     return hosts;
   }
 
+  /// Points the hub at a moved data dir's `local/` (re-reads hosts.json).
+  Future<void> setHome(String localDir) => _request({'cmd': 'set_home', 'dir': localDir}, 'home_set');
+
   Future<AppList> apps(String id) async {
     final m = await _request({'cmd': 'apps', 'id': id}, 'apps');
     final list = (m['apps'] as List? ?? const [])

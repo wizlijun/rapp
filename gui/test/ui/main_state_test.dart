@@ -6,10 +6,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fake_async/fake_async.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/embed/stream_choice.dart';
+import 'package:rapp/paths.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/ui/lamp.dart';
 import 'package:rapp/ui/lifecycle.dart';
 import 'package:rapp/ui/main_state.dart';
+import 'package:rapp/ui/pin_files.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/resources_state.dart';
 import 'package:rapp/ui/session_model.dart';
@@ -38,7 +40,7 @@ void main() {
       ],
     });
     await pump();
-    s = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs());
+    s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs());
   });
 
   tearDown(() {
@@ -46,10 +48,55 @@ void main() {
     tmp.deleteSync(recursive: true);
   });
 
+  test('relocate reads the workspace of the new root', () {
+    final other = Directory.systemTemp.createTempSync('main_state_reloc');
+    addTearDown(() => other.deleteSync(recursive: true));
+    final d = DataDir(other.path);
+    Directory(d.sharedDir).createSync(recursive: true);
+    saveWorkspace(d.sharedDir, Workspace()..favorites.add(AppRef('111', 'b', 'N')));
+    var n = 0;
+    s.addListener(() => n++);
+    s.relocate(d);
+    expect(s.data.root, other.path);
+    expect(s.favorites.map((f) => f.key), ['111/b']);
+    expect(n, greaterThan(0));
+    File('${d.sharedDir}/workspace.json').writeAsStringSync('nope');
+    s.relocate(d);
+    expect(s.hint, loadProblem);
+    expect(s.favorites, isEmpty);
+  });
+
   int opens() => t.sent.where((m) => m['cmd'] == 'open').length;
 
   Map<String, dynamic> opened(int sid, String id, String app) =>
       {'event': 'opened', 'sid': sid, 'id': id, 'app': app, 'path': 'lan'};
+
+  test('workspace is read from and saved to shared/', () {
+    final root = Directory.systemTemp.createTempSync('rapp-data');
+    addTearDown(() => root.deleteSync(recursive: true));
+    Directory('${root.path}/shared').createSync();
+    File('${root.path}/shared/workspace.json').writeAsStringSync(
+        '{"version":1,"favorites":[{"device":"1","bundle":"b","name":"n"}],"projects":[]}');
+    final s2 = MainState(hub: hub, data: DataDir(root.path), prefs: UiPrefs());
+    expect(s2.workspace.favorites.single.bundle, 'b');
+    s2.toggleFavorite('2', 'c', 'C');
+    final saved = File('${root.path}/shared/workspace.json').readAsStringSync();
+    expect('"bundle"'.allMatches(saved).length, 2);
+    expect(File('${root.path}/workspace.json').existsSync(), false);
+  });
+
+  test('prefs go to devices/<id>/gui.json, and are not written without an id', () {
+    final root = Directory.systemTemp.createTempSync('rapp-data');
+    addTearDown(() => root.deleteSync(recursive: true));
+    final s2 = MainState(hub: hub, data: DataDir(root.path), prefs: UiPrefs());
+    s2.setTheme(RappTheme.avatar);
+    expect(Directory('${root.path}/devices').existsSync() && Directory('${root.path}/devices').listSync().isNotEmpty, false);
+    Directory('${root.path}/local').createSync();
+    File('${root.path}/local/service.json').writeAsStringSync('{"id":"123456789"}');
+    s2.setTheme(RappTheme.westworld);
+    final j = File('${root.path}/devices/123456789/gui.json').readAsStringSync();
+    expect(j, contains(RappTheme.westworld.name));
+  });
 
   test('openOrSwitch sends one open while pending', () async {
     s.openOrSwitch('111', 'com.apple.Safari', 'Safari');
@@ -218,9 +265,11 @@ void main() {
     expect(s.sessionCount, 1);
   });
 
-  test('setTheme survives an unwritable config dir', () async {
-    Process.runSync('chmod', ['500', tmp.path]);
-    final s2 = MainState(hub: hub, configDir: '${tmp.path}/sub/dir', prefs: UiPrefs());
+  test('setTheme survives an unwritable devices dir', () async {
+    Directory('${tmp.path}/local').createSync();
+    File('${tmp.path}/local/service.json').writeAsStringSync('{"id":"dev1"}');
+    File('${tmp.path}/devices').writeAsStringSync('x'); // devices/dev1 cannot be created
+    final s2 = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs());
     s2.setTheme(RappTheme.avatar);
     expect(s2.prefs.theme, RappTheme.avatar);
     expect(s2.hint, startsWith('偏好没有保存：'));
@@ -246,7 +295,7 @@ void main() {
   });
 
   test('null hub reports its problem', () {
-    final s2 = MainState(hub: null, hubError: 'boom', configDir: tmp.path, prefs: UiPrefs());
+    final s2 = MainState(hub: null, hubError: 'boom', data: DataDir(tmp.path), prefs: UiPrefs());
     expect(s2.hubProblem, 'boom');
     expect(s2.hubUsable, isFalse);
   });
@@ -338,10 +387,11 @@ void main() {
   });
 
   group('workspace', () {
-    MainState restart() => MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs());
+    MainState restart() => MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs());
 
     test('a bad workspace file shows the load problem as the hint', () {
-      File('${tmp.path}/workspace.json').writeAsStringSync('{bad');
+      Directory('${tmp.path}/shared').createSync();
+      File('${tmp.path}/shared/workspace.json').writeAsStringSync('{bad');
       final s2 = restart();
       expect(s2.hint, '项目和常用没有读到，已从空白开始');
       expect(s2.favorites, isEmpty);
@@ -394,7 +444,7 @@ void main() {
       s.toggleFavorite('111', 'x', 'X');
       expect(s.isFavorite('111', 'x'), true);
       expect(s.hint, startsWith('项目和常用没有保存：'));
-      expect(File('${tmp.path}/workspace.json').existsSync(), false);
+      expect(File('${tmp.path}/shared/workspace.json').existsSync(), false);
     });
   });
 
@@ -405,7 +455,7 @@ void main() {
         final t = FakeTransport();
         final hub = HubClient(t);
         final port = FakeSessionPort();
-        final st = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: withPort ? port : null);
+        final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: withPort ? port : null);
         final hints = <String>[];
         var last = st.hint;
         st.addListener(() {
@@ -729,7 +779,7 @@ void main() {
         final t = FakeTransport();
         final hub = HubClient(t);
         final port = FakeSessionPort()..startError = 'boom';
-        final st = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: port);
+        final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port);
         final hints = <String>[];
         st.addListener(() => hints.add(st.hint));
         t.onSend = (m) {
@@ -750,7 +800,7 @@ void main() {
         final t = FakeTransport();
         final hub = HubClient(t);
         final port = FakeSessionPort();
-        final st = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: port);
+        final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port);
         final hints = <String>[];
         st.addListener(() => hints.add(st.hint));
         t.onSend = (m) {
@@ -770,7 +820,7 @@ void main() {
       fakeAsync((a) {
         final t = FakeTransport();
         final port = FakeSessionPort();
-        final st = MainState(hub: HubClient(t), configDir: tmp.path, prefs: UiPrefs(), port: port);
+        final st = MainState(hub: HubClient(t), data: DataDir(tmp.path), prefs: UiPrefs(), port: port);
         t.onSend = (m) {
           if (m['cmd'] == 'open') t.emit({'event': 'error', 'error': 'offline', 'req': m['req']});
         };
@@ -790,7 +840,7 @@ void main() {
         fakeAsync((a) {
           final t = FakeTransport();
           final port = FakeSessionPort();
-          final st = MainState(hub: HubClient(t), configDir: tmp.path, prefs: UiPrefs(), port: port);
+          final st = MainState(hub: HubClient(t), data: DataDir(tmp.path), prefs: UiPrefs(), port: port);
           t.onSend = (_) {}; // the open never answers until we say so
           st.openOrSwitch('111', 'a', 'Calculator');
           a.flushMicrotasks();
@@ -815,7 +865,7 @@ void main() {
       fakeAsync((a) {
         final t = FakeTransport();
         final port = _SlowStartPort();
-        final st = MainState(hub: HubClient(t), configDir: tmp.path, prefs: UiPrefs(), port: port);
+        final st = MainState(hub: HubClient(t), data: DataDir(tmp.path), prefs: UiPrefs(), port: port);
         t.onSend = (m) {
           if (m['cmd'] == 'open') t.emit(embedOpened(1, m['req']));
         };
@@ -1113,7 +1163,7 @@ void main() {
       fakeAsync((a) {
         final t = FakeTransport();
         final port = _SlowStartPort();
-        final st = MainState(hub: HubClient(t), configDir: tmp.path, prefs: UiPrefs(), port: port);
+        final st = MainState(hub: HubClient(t), data: DataDir(tmp.path), prefs: UiPrefs(), port: port);
         final hints = <String>[];
         st.addListener(() => hints.add(st.hint));
         t.onSend = (m) {
@@ -1144,7 +1194,7 @@ void main() {
       fakeAsync((a) {
         final t = FakeTransport();
         final port = _SlowStartPort();
-        final st = MainState(hub: HubClient(t), configDir: tmp.path, prefs: UiPrefs(), port: port);
+        final st = MainState(hub: HubClient(t), data: DataDir(tmp.path), prefs: UiPrefs(), port: port);
         t.onSend = (m) {
           if (m['cmd'] == 'open') t.emit(embedOpened(1, m['req']));
         };
@@ -1703,7 +1753,7 @@ void main() {
           ],
         });
         a.flushMicrotasks();
-        final st = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: port);
+        final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port);
         t.onSend = (m) {
           if (m['cmd'] == 'open') {
             t.emit({
@@ -1907,7 +1957,7 @@ void main() {
       s.addMember(a.id, notes);
       s.addMember(a.id, const AppRef('222', 'com.apple.Chess', 'Chess'));
       s.setTask(a.id, key, '整理');
-      final s2 = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs());
+      final s2 = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs());
       expect(s2.projects.single.name, 'A');
       expect(s2.projects.single.members.map((m) => m.key), [key, '222/com.apple.Chess']);
       expect(s2.projects.single.members.first.task, '整理');
@@ -1989,8 +2039,9 @@ void main() {
     final t0 = DateTime(2026, 11, 12, 9, 30);
 
     void env(void Function(FakeAsync a, FakeTransport t, FakeSessionPort port, MainState st) body,
-        {FakeSessionPort? usePort}) {
+        {FakeSessionPort? usePort, void Function()? pre}) {
       fakeAsync((a) {
+        pre?.call();
         final t = FakeTransport();
         final port = usePort ?? FakeSessionPort();
         t.emit({
@@ -2001,7 +2052,7 @@ void main() {
           ],
         });
         a.flushMicrotasks();
-        final st = MainState(hub: HubClient(t), configDir: tmp.path, prefs: UiPrefs(), port: port, clock: () => t0);
+        final st = MainState(hub: HubClient(t), data: DataDir(tmp.path), prefs: UiPrefs(), port: port, clock: () => t0);
         t.onSend = (m) {
           if (m['cmd'] == 'open') {
             final n = (m['id'] == '111' ? 1 : 2) + (m['reconnect'] == true ? 10 : 0);
@@ -2244,6 +2295,90 @@ void main() {
       }, usePort: gated);
     });
 
+    test('pinning saves the copy to the data dir and hints once', () {
+      env((a, t, port, st) {
+        port.emit(const ClipsEvent(1, [ClipRow(7, 'one', true), ClipRow(8, 'two', true)]));
+        port.pinSaveReply = {'path': '${tmp.path}/clipboard/x.md'};
+        st.togglePin(st.resources.clips.last);
+        a.flushMicrotasks();
+        final c = callsOf(port, 'pin_save').single.$2;
+        expect(c['text_dir'], '${tmp.path}/clipboard');
+        expect(c['file_dir'], '${tmp.path}/files/clipboard');
+        expect(c['copy'], 1);
+        expect(st.resources.clips.last.path, '${tmp.path}/clipboard/x.md');
+        expect(st.hint, pinHint);
+        expect(File('${tmp.path}/local/$pinHintMarker').existsSync(), true);
+        st.hint = '';
+        st.togglePin(st.resources.clips.first);
+        a.flushMicrotasks();
+        expect(callsOf(port, 'pin_save').length, 2);
+        expect(st.hint, isNot(pinHint));
+      });
+    });
+
+    test('a pin whose save failed stays pinned in memory without a hint', () {
+      env((a, t, port, st) {
+        port.emit(const ClipsEvent(1, [ClipRow(7, 'one', true)]));
+        st.togglePin(st.resources.clips.single);
+        a.flushMicrotasks();
+        final e = st.resources.clips.single;
+        expect(e.pinned, true);
+        expect(e.path, isNull);
+        expect(st.hint, isNot(pinHint));
+        expect(File('${tmp.path}/local/$pinHintMarker').existsSync(), false);
+      });
+    });
+
+    test('unpinning deletes the file', () {
+      final f = File('${tmp.path}/saved.md')..writeAsStringSync('x');
+      env((a, t, port, st) {
+        port.emit(const ClipsEvent(1, [ClipRow(7, 'one', true)]));
+        port.pinSaveReply = {'path': f.path};
+        final e = st.resources.clips.single;
+        st.togglePin(e);
+        a.flushMicrotasks();
+        expect(f.existsSync(), true);
+        st.togglePin(e);
+        a.flushMicrotasks();
+        expect(f.existsSync(), false);
+      });
+    });
+
+    test('restored pins load at start', () {
+      final f = File('${tmp.path}/clipboard/20261113-090507-a.md');
+      env((a, t, port, st) {
+        a.flushMicrotasks();
+        final e = st.resources.clips.single;
+        expect(e.pinned, true);
+        expect(e.ended, true);
+        expect(e.source, '之前固定的');
+        expect(e.title, 'a');
+        expect(e.copy, 7);
+        expect(e.path, f.path);
+        expect(e.at, DateTime(2026, 11, 13, 9, 5, 7));
+        expect(st.canInsert(e), false);
+        expect(callsOf(port, 'pin_load').single.$2, {'path': f.path});
+      }, usePort: FakeSessionPort()..pinLoadReply = {'copy': 7, 'kind': 'text'}, pre: () {
+        f.parent.createSync(recursive: true);
+        f.writeAsStringSync('x');
+      });
+    });
+
+    test('relocate moves pin paths to the new root', () {
+      env((a, t, port, st) {
+        port.emit(const ClipsEvent(1, [ClipRow(7, 'one', true), ClipRow(8, 'two', true)]));
+        port.pinSaveReply = {'path': '${tmp.path}/clipboard/x.md'};
+        st.togglePin(st.resources.clips.last);
+        a.flushMicrotasks();
+        port.pinSaveReply = {'path': '${tmp.path}2/clipboard/y.md'};
+        st.togglePin(st.resources.clips.first);
+        a.flushMicrotasks();
+        st.relocate(const DataDir('/new/root'));
+        expect(st.resources.clips.last.path, '/new/root/clipboard/x.md');
+        expect(st.resources.clips.first.path, '${tmp.path}2/clipboard/y.md');
+      });
+    });
+
     test('reveal of a missing file hints', () {
       env((a, t, port, st) {
         port.revealReply = false;
@@ -2293,7 +2428,7 @@ void main() {
         final port = FakeSessionPort()
           ..copyLocalReply = false
           ..revealReply = false;
-        final st = MainState(hub: null, configDir: tmp.path, prefs: UiPrefs(), port: port);
+        final st = MainState(hub: null, data: DataDir(tmp.path), prefs: UiPrefs(), port: port);
         final row = TransferRow(1, 1, 5, 'k', true, 'a.log', 's', 1, 1, TransferState.done)..path = '/tmp/x/a.log';
         st.copyLocal(ClipEntry(1, 'k', 1, 1, ClipKind.text, 't', 's', DateTime(2026))..copy = 3);
         st.reveal(row);

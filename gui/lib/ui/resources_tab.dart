@@ -287,7 +287,7 @@ class _EndedRow extends StatelessWidget {
           if (done && !x.down && x.kind == ClipKind.files) // K10: only a file lands in a folder on A
             Padding(
               padding: const EdgeInsets.only(top: 2),
-              child: Text('A：~/Downloads/rapp/${x.name}', style: TextStyle(color: t.muted, fontSize: 12)),
+              child: Text('A：~/rapp/files/transfers/${x.name}', style: TextStyle(color: t.muted, fontSize: 12)),
             ),
           if (done && x.down && x.path != null)
             Padding(

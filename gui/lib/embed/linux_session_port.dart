@@ -133,6 +133,14 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
     return true;
   }
 
+  /// Holds [text] as a copy without a session.
+  @visibleForTesting
+  int seedCopyForTest(String text) {
+    final copy = _nextCopy++;
+    _copies[copy] = text;
+    return copy;
+  }
+
   @override
   Future<Object?> invoke(String method, Map<String, Object?> args) async {
     if (method == 'copy_local') {
@@ -140,6 +148,37 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
       if (text == null) return false;
       await Clipboard.setData(ClipboardData(text: text));
       return true;
+    }
+    if (method == 'pin_save') {
+      // Only text copies are kept on Linux.
+      final text = _copies[args['copy']];
+      final dir = args['text_dir'];
+      final stem = args['stem'];
+      if (text == null || dir is! String || stem is! String) return null;
+      try {
+        await Directory(dir).create(recursive: true);
+        var file = File('$dir/$stem.md');
+        for (var k = 2; await file.exists(); k++) {
+          file = File('$dir/$stem-$k.md');
+        }
+        final tmp = File('${file.path}.tmp');
+        await tmp.writeAsString(text);
+        await tmp.rename(file.path);
+        return {'path': file.path};
+      } on FileSystemException {
+        return null;
+      }
+    }
+    if (method == 'pin_load') {
+      final path = args['path'];
+      if (path is! String || !path.endsWith('.md')) return null;
+      try {
+        final copy = _nextCopy++;
+        _copies[copy] = await File(path).readAsString();
+        return {'copy': copy, 'kind': 'text'};
+      } on FileSystemException {
+        return null;
+      }
     }
     if (method == 'drop_copy') {
       _copies.remove(args['copy']);

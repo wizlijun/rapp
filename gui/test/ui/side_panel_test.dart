@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:rapp/paths.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/session_port.dart';
@@ -29,6 +30,8 @@ void main() {
 
   setUp(() async {
     tmp = Directory.systemTemp.createTempSync('side_panel_test');
+    Directory('${tmp.path}/local').createSync();
+    File('${tmp.path}/local/service.json').writeAsStringSync('{"id":"dev1"}');
     t = FakeTransport();
     hub = HubClient(t);
     t.emit({
@@ -38,7 +41,7 @@ void main() {
       ],
     });
     await flush();
-    s = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs());
+    s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs());
   });
 
   tearDown(() {
@@ -132,7 +135,7 @@ void main() {
     await tester.tap(find.text('IRON MAN').last);
     await tester.pumpAndSettle();
     expect(s.prefs.theme, RappTheme.ironMan);
-    expect(UiPrefs.load(tmp.path).theme, RappTheme.ironMan);
+    expect(UiPrefs.load('${tmp.path}/devices/dev1').theme, RappTheme.ironMan);
   });
 
   testWidgets('start fullscreen switch saves', (tester) async {
@@ -141,7 +144,7 @@ void main() {
     await tester.tap(find.byKey(const Key('start-fullscreen')));
     await tester.pump();
     expect(s.prefs.startFullscreen, false);
-    expect(UiPrefs.load(tmp.path).startFullscreen, false);
+    expect(UiPrefs.load('${tmp.path}/devices/dev1').startFullscreen, false);
   });
 
   testWidgets('legend shows all seven words', (tester) async {
@@ -192,7 +195,7 @@ void main() {
 
     setUp(() {
       port = FakeSessionPort();
-      es = MainState(hub: hub, configDir: tmp.path, prefs: UiPrefs(), port: port);
+      es = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port);
       var n = 0;
       t.onSend = (m) {
         if (m['cmd'] == 'open') {
@@ -385,8 +388,9 @@ void main() {
   });
 
   testWidgets('prefs save failure shows hint, UI still switches', (tester) async {
-    final f = File('${tmp.path}/blocker')..writeAsStringSync('x');
-    final bad = MainState(hub: hub, configDir: '${f.path}/sub', prefs: UiPrefs());
+    // devices/ is a file, so devices/dev1/ cannot be created.
+    File('${tmp.path}/devices').writeAsStringSync('x');
+    final bad = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs());
     addTearDown(bad.dispose);
     await tester.pumpWidget(wrap(SidePanel(state: bad, devicesTab: const SizedBox())));
     await tester.tap(find.byKey(const Key('start-fullscreen')));

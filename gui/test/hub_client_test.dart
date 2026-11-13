@@ -154,6 +154,15 @@ void main() {
       expect(await f, isEmpty);
     });
 
+    test('setHome sends set_home and waits for home_set', () async {
+      final f = hub.setHome('/new/local');
+      final cmd = t.sent.single;
+      expect(cmd['cmd'], 'set_home');
+      expect(cmd['dir'], '/new/local');
+      t.emit({'event': 'home_set', 'req': cmd['req']});
+      await f;
+    });
+
     test('apps resolves with path and app list', () async {
       final f = hub.apps('123456789');
       final cmd = t.sent.single;

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/paths.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/ui/controls.dart';
@@ -35,7 +36,7 @@ void main() {
     await tester.runAsync(flush);
     s = MainState(
       hub: HubClient(t),
-      configDir: tmp.path,
+      data: DataDir(tmp.path),
       prefs: UiPrefs(),
       port: port,
       clock: () => DateTime(2026, 11, 12, 9, 5),
@@ -166,7 +167,7 @@ void main() {
     await tester.tap(find.byKey(const Key('reveal-1')));
     await settle(tester);
     expect(called('reveal', {'path': '/tmp/rapp-x/a.log'}), isTrue);
-    expect(find.text('A：~/Downloads/rapp/b.txt'), findsOneWidget);
+    expect(find.text('A：~/rapp/files/transfers/b.txt'), findsOneWidget);
     expect(find.byKey(const Key('ended-2')), findsOneWidget);
     expect(find.byKey(const Key('reveal-2')), findsNothing);
     expect(find.byKey(const Key('reveal-3')), findsNothing);
@@ -185,7 +186,7 @@ void main() {
     await show(tester);
     await settle(tester);
     expect(find.text('report.pdf'), findsOneWidget);
-    expect(find.text('A：~/Downloads/rapp/report.pdf'), findsOneWidget);
+    expect(find.text('A：~/rapp/files/transfers/report.pdf'), findsOneWidget);
     expect(find.textContaining('A：'), findsOneWidget);
     expect(find.text('图片'), findsOneWidget);
     expect(find.text('文字'), findsOneWidget);

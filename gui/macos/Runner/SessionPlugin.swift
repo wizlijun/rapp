@@ -44,11 +44,8 @@ final class SessionPlugin: NSObject, FlutterPlugin {
 
   /// Copies of A's clips; they outlive the session they came from.
   private let copies = ClipCopies()
-  /// Where downloads go: `RAPP_DOWNLOADS` when set and non-empty, else the session's default.
-  private let downloads: URL? = {
-    guard let p = ProcessInfo.processInfo.environment["RAPP_DOWNLOADS"], !p.isEmpty else { return nil }
-    return URL(fileURLWithPath: p, isDirectory: true)
-  }()
+  /// Where downloads go, worked out at each use so a moved data dir applies to new downloads.
+  private var downloads: URL { DataPaths.currentTransfers() }
   private let channel: FlutterMethodChannel
   private let registry: FlutterTextureRegistry
   private weak var view: NSView?
@@ -151,13 +148,22 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       }
     case let .copyLocal(copy):
       result(copies.write(copy, to: LocalPasteboard()))
+    case let .pinSave(copy, textDir, fileDir, stem):
+      do {
+        let url = try copies.save(copy, textDir: URL(fileURLWithPath: textDir), fileDir: URL(fileURLWithPath: fileDir),
+                                  stem: stem)
+        result(url.map { ["path": $0.path] } ?? ["error": "副本已不在"])
+      } catch {
+        result(["error": "写不进数据目录"])
+      }
+    case let .pinLoad(path):
+      if let r = copies.load(URL(fileURLWithPath: path)) { result(["copy": r.n, "kind": r.kind]) } else { result(nil) }
     case let .dropCopy(copy):
       copies.drop(copy)
       result(nil)
     case let .reveal(path):
       // Only what rapp itself downloaded: inside the downloads dir in use.
       let root = downloads
-        ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0].appendingPathComponent("rapp")
       if let url = revealableURL(path, within: [root]) {
         NSWorkspace.shared.activateFileViewerSelecting([url])
         result(true)

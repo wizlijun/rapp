@@ -20,13 +20,18 @@ final class WindowsTests: XCTestCase {
         XCTAssertEqual(classifyWindow(level: normal, role: "AXWindow", subrole: "AXFloatingWindow"), .floating)
         XCTAssertEqual(classifyWindow(level: normal, role: "AXWindow", subrole: "AXSystemFloatingWindow"), .floating)
         XCTAssertEqual(classifyWindow(level: normal, role: "AXWindow", subrole: "AXStandardWindow"), .normal)
-        XCTAssertEqual(classifyWindow(level: normal, role: nil, subrole: nil), .normal)
+        // Borderless: no standard AX window (Chrome's address-bar list, custom right-click menus).
+        XCTAssertEqual(classifyWindow(level: normal, role: nil, subrole: nil), .popover)
+        XCTAssertEqual(classifyWindow(level: normal, role: "AXWindow", subrole: nil), .popover)
+        XCTAssertEqual(classifyWindow(level: normal, role: "AXWindow", subrole: "AXUnknown"), .popover)
     }
 
     func testClassifyByLevel() {
         func level(_ key: CGWindowLevelKey) -> Int { Int(CGWindowLevelForKey(key)) }
         XCTAssertEqual(classifyWindow(level: level(.floatingWindow), role: "AXWindow", subrole: "AXFloatingWindow"), .floating)
-        XCTAssertEqual(classifyWindow(level: level(.utilityWindow), role: nil, subrole: nil), .floating)
+        XCTAssertEqual(classifyWindow(level: level(.utilityWindow), role: "AXWindow", subrole: "AXStandardWindow"), .floating)
+        XCTAssertEqual(classifyWindow(level: level(.utilityWindow), role: nil, subrole: nil), .popover)
+        XCTAssertEqual(classifyWindow(level: level(.floatingWindow), role: "AXWindow", subrole: "AXUnknown"), .popover)
         XCTAssertEqual(classifyWindow(level: level(.modalPanelWindow), role: nil, subrole: nil), .dialog)
         XCTAssertEqual(classifyWindow(level: level(.popUpMenuWindow), role: nil, subrole: nil), .menu)
         XCTAssertEqual(classifyWindow(level: level(.popUpMenuWindow) + 1, role: nil, subrole: nil), .tooltip)
@@ -99,6 +104,33 @@ final class WindowsTests: XCTestCase {
         let out = dropTitleBarAccessories([win(1, .menu, 100, 100, 400, 300), win(2, .tooltip, 106, 106, 66, 20)])
         XCTAssertEqual(out.map(\.id), [1, 2])
         XCTAssertEqual(dropTitleBarAccessories([]), [])
+    }
+
+    // MARK: dropStrayIndicators / promoteMainWindow (spec §3.2)
+
+    func testDropsSmallWindowsExceptMenus() {
+        // The screen-recording pill macOS 27 adds is 66x20 and reports itself as a dialog.
+        let out = dropStrayIndicators([
+            win(1, .normal, 0, 0, 400, 300),
+            win(2, .dialog, 6, 6, 66, 20),
+            win(3, .popover, 50, 50, 120, 48),
+            win(4, .menu, 60, 60, 100, 30),
+            win(5, .popover, 70, 70, 121, 30),
+            win(6, .tooltip, 80, 80, 40, 49),
+        ])
+        XCTAssertEqual(out.map(\.id), [1, 4, 5, 6])
+    }
+
+    func testPromotesLargestPopoverWhenNothingIsDecorated() {
+        let out = promoteMainWindow([win(1, .popover, 0, 0, 100, 100), win(2, .popover, 0, 0, 300, 200),
+                                     win(3, .menu, 0, 0, 500, 500)])
+        XCTAssertEqual(out.map(\.kind), [.popover, .normal, .menu])
+    }
+
+    func testPromotesNothingWhenADecoratedWindowExists() {
+        let table = [win(1, .popover, 0, 0, 900, 900), win(2, .dialog, 0, 0, 100, 100)]
+        XCTAssertEqual(promoteMainWindow(table), table)
+        XCTAssertEqual(promoteMainWindow([win(1, .menu, 0, 0, 10, 10)]).map(\.kind), [.menu])
     }
 
     // MARK: captureRegion (spec §1.1)

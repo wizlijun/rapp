@@ -839,6 +839,7 @@ impl LanA {
                 log_dir: self.home.path().join("logs"),
                 runner: std::sync::Arc::new(rapp_update::fake::FakeRunner::new()),
                 update: None,
+                data: None,
             };
             match rapp_service::Service::start(opts).await {
                 Ok(s) => {
@@ -922,5 +923,23 @@ async fn lan_only_host_with_a_stale_password_still_halts() {
         .sum();
     assert_eq!(fails, 1, "{log:?}");
     assert_eq!(relay_connects(&relay, rdir.path(), &a.id).await, 1);
+    hub.finish().await;
+}
+
+#[tokio::test]
+async fn set_home_reads_hosts_from_the_new_dir() {
+    let a = service(None).await;
+    let (home1, home2) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    rapp_net::config::write_json(
+        &home2.path().join("hosts.json"),
+        &json!([{"id":"111111111","name":"n","password":"p","lan":[]}]),
+    )
+    .unwrap();
+    let mut hub = Hub::start(home1.path(), a.bins.path(), None, None);
+    let r = hub.call(json!({"cmd":"set_home","dir":home2.path(),"req":1})).await;
+    assert_eq!(r, json!({"event":"home_set","req":1}));
+    let r = hub.call(json!({"cmd":"hosts"})).await;
+    assert_eq!(r["hosts"], json!([{"id":"111111111","name":"n"}]));
+    assert!(!r.to_string().contains("\"p\""));
     hub.finish().await;
 }

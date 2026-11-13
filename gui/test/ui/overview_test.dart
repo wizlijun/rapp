@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:rapp/paths.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/session_port.dart';
@@ -70,7 +71,7 @@ void main() {
     final epoch = DateTime(2026, 11, 13, 12);
     s = MainState(
       hub: HubClient(t),
-      configDir: tmp.path,
+      data: DataDir(tmp.path),
       prefs: UiPrefs(),
       port: embed ? port : null,
       clock: () => epoch,
@@ -401,7 +402,6 @@ void main() {
         state: s,
         monitor: ServiceMonitor(readToken: () async => null),
         control: null,
-        configDir: tmp.path,
         fullscreen: fs,
       ),
       disableAnimations: true,
