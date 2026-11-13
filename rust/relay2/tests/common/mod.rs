@@ -106,6 +106,11 @@ impl FakeDevice {
         FakeDevice::dial_to(r.relay.addr, id, Expect::Pin(r.relay.fp.prefix16())).await
     }
 
+    /// A device dialing a relay that runs elsewhere (another process), pinning its fingerprint.
+    pub async fn dial_remote(addr: SocketAddr, relay_fp: &Fp, id: Identity) -> Result<FakeDevice> {
+        FakeDevice::dial_with(addr, id, Expect::Pin(relay_fp.prefix16()), true).await
+    }
+
     /// Dials `addr` from a fresh client endpoint; errors carry the `quinn::ConnectionError`.
     pub async fn dial_to(addr: SocketAddr, id: Identity, expect: Expect) -> Result<FakeDevice> {
         FakeDevice::dial_with(addr, id, expect, true).await

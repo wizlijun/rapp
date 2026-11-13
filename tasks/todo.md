@@ -287,3 +287,8 @@
 - 时长 600 s，50 台假设备（均来自 127.0.0.1），持续登记、牵线、接流（20 KB 往返）、断开重连；共完成约 234000 条流。
 - 进程常驻内存：第 2 分钟 30240 KiB，结束 31584 KiB，比值 1.044（上限 1.2）。
 - 命令：`cargo test -p rapp-relay2 --release --test soak -- --ignored --nocapture`（`RAPP_SOAK_SECS` 默认 600）。24 小时那次仍由用户执行。
+
+## relay2 bench (2026-11-13)
+- old_ms=7740 new_ms=8090 ratio=1.045（上限 1.05；CPU 毫秒 = 每个 relay 子进程各自 wait4 的 utime+stime，3 次取中位数，512 MiB 单向 64 KiB 一块，新 relay 不限速）。重复运行的比值：1.025、1.006、0.968、0.990、1.072（一次超限）、1.045、0.892；单次噪声约 ±7%，均值约 1.0。
+- rss_mb=11.7（100 台设备入网登记后静置 10 s，上限 50）。
+- 机器：本机 Mac arm64。命令：`cd rust && cargo build --release -p rapp-relay && cargo test -p rapp-relay2 --release --test bench -- --ignored --nocapture --test-threads=1`。
