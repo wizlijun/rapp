@@ -1,6 +1,7 @@
 //! One-shot tmux commands, run locally or over ssh.
 
 pub mod cmd;
+pub mod control;
 pub mod parse;
 
 use crate::runner::{classify, RunFail, Runner};
@@ -109,7 +110,7 @@ impl Tmux {
         full
     }
 
-    fn program_name(&self) -> &str {
+    pub(crate) fn program_name(&self) -> &str {
         match self.runner {
             Runner::Local => &self.bin,
             Runner::Ssh { .. } => "ssh",

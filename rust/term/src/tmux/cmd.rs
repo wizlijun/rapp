@@ -48,6 +48,11 @@ pub fn history(pane: &str, before: u32, lines: u32) -> Vec<String> {
     ["capture-pane", "-e", "-p", "-t", pane, "-S", &start, "-E", &end].map(String::from).to_vec()
 }
 
+/// A control-mode client of the session `session_id`.
+pub fn attach(session_id: &str) -> Vec<String> {
+    ["-C", "attach-session", "-t", session_id].map(String::from).to_vec()
+}
+
 /// One command as a line for a control-mode channel: each argument in single quotes.
 pub fn channel_line(args: &[String]) -> anyhow::Result<String> {
     if args.iter().any(|a| a.contains(['\'', '\n', '\r'])) {
@@ -77,6 +82,7 @@ mod tests {
             ]
         );
         assert_eq!(list_panes()[0], "list-panes");
+        assert_eq!(attach("$3"), ["-C", "attach-session", "-t", "$3"]);
     }
     #[test]
     fn history_range_counts_up_from_the_screen() {

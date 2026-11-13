@@ -1,6 +1,8 @@
 mod common;
 
 use rapp_term::runner::Runner;
+use rapp_term::tmux::cmd;
+use rapp_term::tmux::control::{Control, Event};
 use rapp_term::tmux::Tmux;
 
 #[tokio::test]
@@ -88,4 +90,52 @@ async fn history_ranges_are_empty_or_clamped() {
     assert_eq!(h[0], "1");
     let all = t.history(&pane, 0, 1000).await.unwrap();
     assert_eq!((all.len(), all[0].as_str(), all[35].as_str()), (36, "1", "36"));
+}
+
+#[tokio::test]
+async fn control_runs_commands_and_reports_dirty_panes_in_any_window() {
+    let Some(s) = common::Server::start() else { return };
+    s.raw(&["new-session", "-d", "-s", "c", "-x", "100", "-y", "30"]);
+    s.raw(&["new-window", "-d", "-t", "c"]);
+    let panes = s.tmux().list().await.unwrap();
+    let (ctl, _ev) = Control::attach(&s.tmux(), &panes[0].session_id).await.unwrap();
+    let out = ctl.command(&cmd::meta(&panes[0].pane)).await.unwrap();
+    assert_eq!(out.len(), 1);
+    let e = ctl.command(&cmd::capture("%999")).await.unwrap_err(); // %error on the channel becomes Err
+    assert!(e.to_string().contains("can't find pane"));
+    s.raw(&["send-keys", "-t", &panes[1].pane, "echo hi", "Enter"]); // a pane in the second window
+    let d = tokio::time::timeout(std::time::Duration::from_secs(2), ctl.dirty()).await.unwrap();
+    assert!(d.contains(&panes[1].pane));
+    ctl.detach().await;
+}
+
+#[tokio::test]
+async fn control_reports_exit_when_the_session_is_killed() {
+    // Review Focus 2
+    let Some(s) = common::Server::start() else { return };
+    s.raw(&["new-session", "-d", "-s", "c"]);
+    let id = s.tmux().list().await.unwrap()[0].session_id.clone();
+    let (_ctl, mut ev) = Control::attach(&s.tmux(), &id).await.unwrap();
+    s.raw(&["kill-session", "-t", "c"]);
+    let reason = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            if let Some(Event::Exit(r)) = ev.recv().await {
+                break r;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_ne!(reason, "connection closed"); // tmux's own %exit, not a dropped connection
+}
+
+#[tokio::test]
+async fn control_client_does_not_resize_the_window() {
+    let Some(s) = common::Server::start() else { return };
+    s.raw(&["new-session", "-d", "-s", "c", "-x", "100", "-y", "30"]);
+    let p = s.tmux().list().await.unwrap()[0].clone();
+    let (ctl, _ev) = Control::attach(&s.tmux(), &p.session_id).await.unwrap();
+    let after = s.tmux().list().await.unwrap()[0].clone();
+    assert_eq!((after.cols, after.rows), (p.cols, p.rows));
+    ctl.detach().await;
 }
