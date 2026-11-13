@@ -289,6 +289,6 @@
 - 命令：`cargo test -p rapp-relay2 --release --test soak -- --ignored --nocapture`（`RAPP_SOAK_SECS` 默认 600）。24 小时那次仍由用户执行。
 
 ## relay2 bench (2026-11-13)
-- old_ms=7740 new_ms=8090 ratio=1.045（上限 1.05；CPU 毫秒 = 每个 relay 子进程各自 wait4 的 utime+stime，3 次取中位数，512 MiB 单向 64 KiB 一块，新 relay 不限速）。重复运行的比值：1.025、1.006、0.968、0.990、1.072（一次超限）、1.045、0.892；单次噪声约 ±7%，均值约 1.0。
+- 取 7 次的中位数（R20）。两次完整运行：old_ms=7544 new_ms=7383 ratio=0.979（通过）；old_ms=7523 new_ms=8089 ratio=1.075（超过 1.05，未放宽）。CPU 毫秒 = 每个 relay 子进程各自 wait4 的 utime+stime，512 MiB 单向 64 KiB 一块，新 relay 不限速。更早 3 次中位数的比值：1.025、1.006、0.968、0.990、1.072、1.045、0.892；单次噪声约 ±7%，均值约 1.0。
 - rss_mb=11.7（100 台设备入网登记后静置 10 s，上限 50）。
 - 机器：本机 Mac arm64。命令：`cd rust && cargo build --release -p rapp-relay && cargo test -p rapp-relay2 --release --test bench -- --ignored --nocapture --test-threads=1`。

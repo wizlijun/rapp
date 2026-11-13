@@ -24,7 +24,8 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 const PAYLOAD: u64 = 512 * 1024 * 1024;
 const CHUNK: usize = 64 * 1024;
-const RUNS: usize = 3;
+/// Median of this many interleaved old/new runs (per-run CPU noise is about +-7%).
+const RUNS: usize = 7;
 const A_ID: &str = "123456789";
 
 /// A relay child process. Killed on drop unless `finish` reaped it.
