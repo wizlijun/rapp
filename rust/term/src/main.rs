@@ -146,12 +146,22 @@ fn check_host(a: &Args) -> Res<()> {
     }
 }
 
-/// The ssh control-connection directory: `<temp>/rapp-term-<user>`.
+/// The ssh control-connection directory: `/tmp/rapp-term-<user>` on unix.
 fn ctl_dir() -> PathBuf {
     let user = std::env::var("USER").or_else(|_| std::env::var("LOGNAME")).unwrap_or_default();
+    ctl_dir_for(&user)
+}
+
+fn ctl_dir_for(user: &str) -> PathBuf {
     let user: String = user.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')).collect();
     let user = if user.is_empty() { "user".to_string() } else { user };
-    std::env::temp_dir().join(format!("rapp-term-{user}"))
+    // /tmp, not temp_dir(): macOS's TMPDIR (/var/folders/…/T/, ~49 bytes) plus `/%C` (40) and ssh's temporary
+    // suffix overflow the 104-byte unix socket path, and ssh then silently drops multiplexing.
+    #[cfg(unix)]
+    let base = PathBuf::from("/tmp");
+    #[cfg(not(unix))]
+    let base = std::env::temp_dir();
+    base.join(format!("rapp-term-{user}"))
 }
 
 /// Make `dir` (or keep it) readable by its owner only.
@@ -446,6 +456,16 @@ mod tests {
         assert!(parse_args(&["json"], &s(&["--", "x"])).is_err());
         let a = parse_args(&["--", "name"], &s(&["--name", "n", "--", "sh", "--json"])).ok().unwrap();
         assert_eq!(a.command, Some(s(&["sh", "--json"])));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn control_socket_paths_fit_a_unix_socket_address() {
+        let dir = ctl_dir_for("firstname.lastname01");
+        assert_eq!(dir, Path::new("/tmp/rapp-term-firstname.lastname01"));
+        // `<dir>/%C` (40 hex characters), then ssh's temporary bind suffix (about 17), within sun_path's 104 bytes.
+        let len = dir.as_os_str().len() + 1 + 40 + 17;
+        assert!(len <= 104, "{len}");
     }
 
     #[test]
