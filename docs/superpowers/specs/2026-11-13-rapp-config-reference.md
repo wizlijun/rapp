@@ -119,7 +119,7 @@ agent 规则：**不直接改这个文件**。加、删设备走 GUI 的设备�
 
 ### 2.4 `$ROOT/devices/<id>/gui.json`（界面偏好）
 
-谁读写：GUI（`gui/lib/ui/prefs.dart:14,33`）。每台设备一份，`<id>` 是这台的设备 id（`local/service.json` 的 `id`）；还不知道 id 时放在 `local/`。
+谁读写：GUI（`gui/lib/ui/prefs.dart:14,33`）。每台设备一份，`<id>` 是这台的设备 id（`local/service.json` 的 `id`）；还不知道 id 时不保存改动（`gui/lib/ui/main_state.dart:1101`），启动时从 `local/gui.json` 读（有的话，`gui/lib/main.dart:64`）。
 
 | 字段 | 取值 | 没写时 |
 |---|---|---|
