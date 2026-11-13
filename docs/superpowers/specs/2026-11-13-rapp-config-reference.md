@@ -210,7 +210,7 @@ agent 规则：不手改；要换启动参数就改上面两处模板，**两处
 - 配置里出现不认识的项，或者值不合法：relay 拒绝启动，并说明是哪一项。写错一个字不会被悄悄忽略。
 - 启动时把生效的配置记一行，运行日志和审计日志（`relay_start`）各一份。
 - 命令行参数只有 `--data`（数据目录，默认 `/data`）和子命令：`key`、`rotate-key`、`devices`、`revoke <ID|指纹>`、`unbind <ID>`、`enroll open|closed`、`audit [--since <N>d|<N>h] [--id <ID>] [--event <名字>]`、`check`、`--version`。不带子命令就是运行 relay。
-- `enroll open|closed` 命令只改运行中的开关；重启后以配置为准，环境变量 `RAPP_RELAY_ENROLL` 会盖过它。
+- `enroll open|closed` 命令立刻生效，并且只把 `enroll` 这一项写进 `<数据目录>/config.json`（文件里其余的项不动；没有文件就新建，权限 0600），所以重启后还在。如果 relay 是带着环境变量 `RAPP_RELAY_ENROLL` 启动的，重启后环境变量会盖过它，命令会打印一行警告。写文件失败时，开关已经生效，回复是 `applied but not saved: <原因>`。
 
 **数据卷 `/data`**（规格 §10.2）。文件 0600，目录 0700。备份整个数据卷；最要紧的是 `relay.key` 和 `devices.json`。
 
