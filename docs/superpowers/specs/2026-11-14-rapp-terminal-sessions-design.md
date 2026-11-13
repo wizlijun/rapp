@@ -140,7 +140,7 @@ tmux 后端只通过执行器起进程，所以“本机的 tmux”和“SSH 上
 
 | 组件 | 现在 | 要加的 |
 |---|---|---|
-| `rapp-relay`（新旧都是） | 只搬流 | 不改。终端只是设备之间的又一条流（relay 规格 §5.1、§15） |
+| `rapp-relay` | 只搬流 | 不改。终端只是设备之间的又一条流（relay 规格 §5.1、§15） |
 | `rapp-service`（`rust/service`） | 设备请求只有 `list_apps`、`ping`、`open`（`rust/net/src/msg.rs`）；每个 app 拉起一个 `rapp-host` | 新请求 `list_terms`、`watch_terms`；`open` 的 app 以 `term:` 开头时接到 `rapp-term` worker，不找 `rapp-host`。机器上没有 `rapp-host`（无桌面的 Linux）时 `list_apps` 回空表，不算错 |
 | worker | `rapp-host serve --app … --json` | `rapp-term serve --bind 127.0.0.1 --port 0 --token-env RAPP_TOKEN --json`，守平台规格 §5 的通用约定（JSON 行事件、stdin 关了就退出、退出码）。一台设备一个，不是一个会话一个 |
 | `rapp-hub`（`rust/hub`） | 命令 `apps`、`open`、`close`… | 新命令 `terms`（列一台设备的终端会话）；每台在线设备挂一条 `watch_terms`，把变化作为事件给 GUI。`open` 带 `embed:true` 的那条路原样复用 |
