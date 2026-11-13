@@ -1,6 +1,6 @@
 //! `rapp-hub` — no arguments. JSON-line commands on stdin, events on stdout (spec §4).
-//! Env: `RAPP_HOME` (data root: `$RAPP_HOME`, the `data-root` pointer or `~/rapp`; relay/key read from local/service.json),
-//! `RAPP_BIN_DIR` (where rapp-client lives), `RAPP_FORCE_PATH=relay|direct|lan`,
+//! Env: `RAPP_HOME` (data root: `$RAPP_HOME`, the `data-root` pointer or `~/rapp`),
+//! `RAPP_BIN_DIR` (where rapp-client lives),
 //! `RAPP_LOG_DIR` (where `hub.log` goes; see `rapp_net::log::log_dir`).
 
 use rapp_net::log::{Log, Lvl};
@@ -20,7 +20,6 @@ async fn main() {
     let opts = rapp_hub::Opts {
         home: rapp_net::config::local(&root),
         bin_dir: rapp_net::bins::bin_dir_from_env(),
-        force_path: std::env::var("RAPP_FORCE_PATH").ok(),
         log: log.clone(),
         presence_every: Some(std::time::Duration::from_secs(30)),
     };

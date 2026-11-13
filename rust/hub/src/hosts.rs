@@ -70,20 +70,6 @@ impl Hosts {
         rapp_net::config::write_json(path, &*list)
     }
 
-    /// Like `upsert`, but only for a host that is still saved (a removed host stays removed).
-    pub fn refresh(&self, host: Host) -> Result<()> {
-        let mut state = self.state.lock().unwrap();
-        let (path, list) = &mut *state;
-        match list.iter_mut().find(|h| h.id == host.id) {
-            Some(h) if *h == host => Ok(()),
-            Some(h) => {
-                *h = host;
-                rapp_net::config::write_json(path, &*list)
-            }
-            None => Ok(()),
-        }
-    }
-
     pub fn remove(&self, id: &str) -> Result<()> {
         let mut state = self.state.lock().unwrap();
         let (path, list) = &mut *state;
@@ -102,21 +88,6 @@ mod tests {
 
     fn host(name: &str) -> Host {
         Host { id: "1".into(), name: name.into(), password: "p".into(), lan: vec![] }
-    }
-
-    #[test]
-    fn refresh_updates_a_saved_host_but_never_resurrects_a_removed_one() {
-        let dir = tempfile::tempdir().unwrap();
-        let hosts = Hosts::load(dir.path()).unwrap();
-        hosts.refresh(host("a")).unwrap();
-        assert!(hosts.all().is_empty());
-        hosts.upsert(host("a")).unwrap();
-        hosts.refresh(host("b")).unwrap();
-        assert_eq!(hosts.get("1").unwrap().name, "b");
-        hosts.remove("1").unwrap();
-        hosts.refresh(host("c")).unwrap();
-        assert!(hosts.all().is_empty());
-        assert_eq!(std::fs::read_to_string(dir.path().join("hosts.json")).unwrap().trim(), "[]");
     }
 
     #[test]
