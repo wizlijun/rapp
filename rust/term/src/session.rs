@@ -211,6 +211,15 @@ impl View {
     }
 }
 
+/// Whether a pane named by the peer belongs to the pumped session.
+enum Own {
+    Yes,
+    /// Not one of its panes (already said).
+    No,
+    /// The session itself is gone (already said).
+    Gone,
+}
+
 enum Step {
     Input(Got),
     Wake(Wake),
@@ -268,6 +277,21 @@ impl<W: AsyncWrite + Unpin> Pump<'_, W> {
 
     /// Act on one input message; `false` when the pump should stop.
     async fn handle(&mut self, m: In) -> anyhow::Result<bool> {
+        let target = match &m {
+            In::View { pane: Some(p), .. }
+            | In::Keys { pane: p, .. }
+            | In::Type { pane: p, .. }
+            | In::Text { pane: p, .. }
+            | In::History { pane: p, .. } => Some(p.clone()),
+            _ => None,
+        };
+        if let Some(p) = target {
+            match self.own_pane(&p).await? {
+                Own::Yes => {}
+                Own::No => return Ok(true),
+                Own::Gone => return Ok(false),
+            }
+        }
         match m {
             In::View { pane: Some(pane), cols, rows } => self.view_pane(&pane, cols, rows).await?,
             In::View { pane: None, .. } => {
@@ -314,6 +338,24 @@ impl<W: AsyncWrite + Unpin> Pump<'_, W> {
             }
         }
         Ok(true)
+    }
+
+    /// Is `pane` an id of one of this session's panes? Only those are passed to tmux: anything else (another
+    /// session's pane, or a name tmux would resolve as a target) is refused with an error. On a miss the list is
+    /// read again once, since the pane may have been made after the last listing.
+    async fn own_pane(&mut self, pane: &str) -> anyhow::Result<Own> {
+        let listed = |panes: &[Pane]| panes.iter().any(|p| p.id == pane);
+        if listed(&self.panes) {
+            return Ok(Own::Yes);
+        }
+        if !self.relist().await? {
+            return Ok(Own::Gone);
+        }
+        if listed(&self.panes) {
+            return Ok(Own::Yes);
+        }
+        self.error("no such pane").await?;
+        Ok(Own::No)
     }
 
     /// Start or keep viewing `pane`: attach if not yet, size the session for the viewer, send its screen.

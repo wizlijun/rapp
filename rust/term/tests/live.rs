@@ -499,3 +499,33 @@ async fn viewing_marks_the_session_seen() {
     assert!(matches!(next_not_panes(&mut p.lines).await, Out::Screen { .. }));
     assert!(!unread.lock().unwrap().is_unread("u", activity, unix_now()));
 }
+
+#[tokio::test]
+async fn only_this_sessions_panes_take_input() {
+    let Some(s) = common::Server::start() else { return };
+    s.raw(&["new-session", "-d", "-s", "a", "-x", "80", "-y", "24", "cat"]);
+    s.raw(&["new-session", "-d", "-s", "o", "-x", "80", "-y", "24", "cat"]);
+    common::settle().await;
+    let other = s.tmux().list().await.unwrap().into_iter().find(|p| p.session == "o").unwrap().pane;
+    let mut p = pump(&s, "a", fresh_unread());
+    greeted(&mut p).await;
+    // Another session's pane by id, and by a name tmux would take as a target: neither gets anything.
+    say(&mut p.w, In::Keys { pane: other.clone(), keys: vec!["Enter".into()] }).await;
+    assert_eq!(next(&mut p.lines).await, Out::Error { error: "no such pane".into() });
+    say(&mut p.w, In::Type { pane: "o".into(), text: "x".into() }).await;
+    assert_eq!(next_not_panes(&mut p.lines).await, Out::Error { error: "no such pane".into() });
+    say(&mut p.w, view(&other, 80, 24)).await;
+    assert_eq!(next_not_panes(&mut p.lines).await, Out::Error { error: "no such pane".into() });
+    common::settle().await;
+    let sc = s.tmux().capture(&other).await.unwrap();
+    assert_eq!((sc.cy, sc.lines[0].as_str()), (0, ""));
+    // A pane made in this session after the pump started is found by listing again.
+    s.raw(&["split-window", "-d", "-t", "a", "cat"]);
+    common::settle().await;
+    let new = s.tmux().list().await.unwrap().into_iter().find(|q| q.session == "a" && q.pane_index == 1).unwrap().pane;
+    say(&mut p.w, In::Type { pane: new.clone(), text: "hi".into() }).await;
+    let got = drain_for(&mut p.lines, Duration::from_millis(500)).await;
+    assert!(!got.iter().any(|m| matches!(m, Out::Error { .. })), "{got:?}");
+    assert!(got.iter().any(|m| matches!(m, Out::Panes { panes } if panes.len() == 2)));
+    assert_eq!(s.tmux().capture(&new).await.unwrap().lines[0], "hi");
+}
