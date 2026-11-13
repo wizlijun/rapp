@@ -299,8 +299,7 @@ class _LocalSectionState extends State<LocalSection> {
             _row('名称', st.name),
             _passwordRow(st.password),
             _row('中继', '${relayLabels[st.relay] ?? st.relay}${st.relayError == null ? '' : '（${st.relayError}）'}',
-                trailing:
-                    IconButton(tooltip: '修改中继', icon: const Icon(Icons.edit, size: 18), onPressed: _editRelay)),
+                trailing: _icon('edit-relay', '修改中继', Icons.edit, _editRelay)),
             if (_platform == TargetPlatform.macOS)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 2),
