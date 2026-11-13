@@ -14,9 +14,9 @@ use std::{
     net::{Shutdown, TcpStream},
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc,
+        Arc, Mutex,
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 fn event(out: &Output, value: Value) -> Result<()> {
@@ -42,7 +42,7 @@ fn float(v: &Value, key: &str) -> Result<f32> {
     ensure!(f.is_finite(), "invalid coordinate");
     Ok(f)
 }
-fn command(v: &Value) -> Result<Vec<u8>> {
+fn command(v: &Value, version: u8) -> Result<Vec<u8>> {
     let id = || number(v, "window");
     Ok(match v["cmd"].as_str().context("missing command")? {
         "key" => {
@@ -96,7 +96,9 @@ fn command(v: &Value) -> Result<Vec<u8>> {
                 .context("invalid mode")?;
             let fps = number(v, "fps")?;
             ensure!([1, 5, 15, 30].contains(&fps), "invalid fps");
-            p::stream(mode, fps as u8, float(v, "density")?.clamp(0.1, 8.), None)
+            // The pinned byte exists only in protocol 7; older hosts reject the longer packet.
+            let pinned = (version >= 7).then(|| v["pinned"].as_bool().unwrap_or(false));
+            p::stream(mode, fps as u8, float(v, "density")?.clamp(0.1, 8.), pinned)
         }
         "menu_pick" => {
             let path: Vec<u16> = v["path"]
@@ -141,9 +143,10 @@ fn run(out: &Output) -> Result<()> {
     let port = u16::try_from(number(&start, "port")?)?;
     let address = p::Address::parse(
         &format!(
-            "rapp://127.0.0.1:{port}/?mode={}&fps={}",
+            "rapp://127.0.0.1:{port}/?mode={}&fps={}&protocol={}",
             start["mode"].as_str().unwrap_or("color16"),
-            number(&start, "fps")?
+            number(&start, "fps")?,
+            if start["protocol"].is_null() { p::VERSION as u32 } else { number(&start, "protocol")? }
         ),
         Some(start["token"].as_str().context("missing token")?.into()),
     )?;
@@ -152,7 +155,9 @@ fn run(out: &Output) -> Result<()> {
     socket.set_nodelay(true)?;
     socket.set_write_timeout(Some(Duration::from_secs(5)))?;
     socket.write_all(&address.hello(float(&start, "density")?.clamp(0.1, 8.)))?;
-    let mut writer = socket.try_clone()?;
+    let version = address.version;
+    let writer = Arc::new(Mutex::new(socket.try_clone()?));
+    let stdin_writer = writer.clone();
     drop(input);
     std::thread::spawn(move || {
         let mut input = std::io::stdin().lock();
@@ -163,14 +168,16 @@ fn run(out: &Output) -> Result<()> {
                 _ => break,
             }
             let result = (|| -> Result<()> {
-                writer.write_all(&command(&serde_json::from_str(&line)?)?)?;
+                let packet = command(&serde_json::from_str(&line)?, version)?;
+                // One whole packet per lock: acks from the read loop never interleave with it.
+                stdin_writer.lock().unwrap().write_all(&packet)?;
                 Ok(())
             })();
             if result.is_err() {
                 break;
             }
         }
-        let _ = writer.shutdown(Shutdown::Both);
+        let _ = stdin_writer.lock().unwrap().shutdown(Shutdown::Both);
     });
     let bytes = Arc::new(AtomicU64::new(0));
     let rate = bytes.clone();
@@ -188,12 +195,23 @@ fn run(out: &Output) -> Result<()> {
             break;
         }
     });
+    socket.set_read_timeout(Some(Duration::from_secs(15)))?;
+    read_loop(&mut socket, &writer, version, out, &bytes, &frames)
+}
+fn read_loop(
+    socket: &mut TcpStream,
+    writer: &Mutex<TcpStream>,
+    version: u8,
+    out: &Output,
+    bytes: &AtomicU64,
+    frames: &AtomicU64,
+) -> Result<()> {
     let mut decoder = Decoder::default();
     let mut pixels = Vec::new();
     let mut ready = false;
-    socket.set_read_timeout(Some(Duration::from_secs(15)))?;
     loop {
-        let (message, size) = p::read_message(&mut socket)?;
+        let (message, size) = p::read_message(socket)?;
+        let received = Instant::now();
         bytes.fetch_add(size as u64, Ordering::Relaxed);
         match message {
             Incoming::Error(reason) => bail!("{reason}"),
@@ -223,6 +241,10 @@ fn run(out: &Output) -> Result<()> {
                 // canvases may be replaced; compressed deltas must all be applied.
                 out.frame(frame.try_into().unwrap(), &mut pixels)?;
                 frames.fetch_add(1, Ordering::Relaxed);
+                if version >= 7 {
+                    let ms = u16::try_from(received.elapsed().as_millis()).unwrap_or(u16::MAX);
+                    writer.lock().unwrap().write_all(&p::frame_ack(ms))?;
+                }
             }
             Incoming::Windows(windows) => {
                 let kinds = [
@@ -246,7 +268,7 @@ fn run(out: &Output) -> Result<()> {
                 event(out, json!({"event":"paste_result","seq":seq,"error":error}))?
             }
             Incoming::InputBlocked(by) => event(out, json!({"event":"input_blocked","by":by}))?,
-            Incoming::Weak(_) => {}
+            Incoming::Weak(on) => event(out, json!({"event":"weak","on":on}))?,
         }
     }
 }
@@ -267,7 +289,7 @@ mod tests {
     #[test]
     fn input_packets_match_host_protocol() {
         assert_eq!(
-            command(&json!({"cmd":"resize","window":7,"w":640,"h":480})).unwrap(),
+            command(&json!({"cmd":"resize","window":7,"w":640,"h":480}), 7).unwrap(),
             p::packet(
                 9,
                 [
@@ -279,16 +301,16 @@ mod tests {
             )
         );
         assert_eq!(
-            command(&json!({"cmd":"key","keyCode":0,"modifiers":1048576,"down":false})).unwrap(),
+            command(&json!({"cmd":"key","keyCode":0,"modifiers":1048576,"down":false}), 7).unwrap(),
             p::key(0, 1 << 20, false)
         );
         assert_eq!(
-            command(&json!({"cmd":"text","text":"你好"})).unwrap(),
+            command(&json!({"cmd":"text","text":"你好"}), 7).unwrap(),
             p::packet(5, "你好".as_bytes().to_vec())
         );
-        assert_eq!(command(&json!({"cmd":"mouse","window":2,"kind":"drag","button":"left","x":1.5,"y":3.,"clicks":1})).unwrap(),p::mouse(2,0,2,1.5,3.,1));
+        assert_eq!(command(&json!({"cmd":"mouse","window":2,"kind":"drag","button":"left","x":1.5,"y":3.,"clicks":1}), 7).unwrap(),p::mouse(2,0,2,1.5,3.,1));
         assert_eq!(
-            command(&json!({"cmd":"paste","seq":7,"text":"你好"})).unwrap(),
+            command(&json!({"cmd":"paste","seq":7,"text":"你好"}), 7).unwrap(),
             p::packet(
                 20,
                 [
@@ -300,7 +322,7 @@ mod tests {
             )
         );
         assert_eq!(
-            command(&json!({"cmd":"paste","seq":8,"item":9})).unwrap(),
+            command(&json!({"cmd":"paste","seq":8,"item":9}), 7).unwrap(),
             p::packet(
                 20,
                 [
@@ -323,7 +345,101 @@ mod tests {
             json!({"cmd":"paste","seq":4294967296u64,"text":"x"}),
             json!({"cmd":"paste","seq":1,"text":"x".repeat(60000)}),
         ] {
-            assert!(command(&v).is_err());
+            assert!(command(&v, 7).is_err());
         }
+    }
+    #[test]
+    fn set_stream_pinned() {
+        let v = json!({"cmd":"set_stream","mode":"duogray","fps":1,"density":1.,"pinned":true});
+        assert_eq!(command(&v, 7).unwrap(), p::stream(3, 1, 1., Some(true)));
+        let v = json!({"cmd":"set_stream","mode":"duogray","fps":1,"density":1.});
+        assert_eq!(command(&v, 7).unwrap(), p::stream(3, 1, 1., Some(false)));
+    }
+    #[test]
+    fn set_stream_v6_has_no_pinned_byte() {
+        let v = json!({"cmd":"set_stream","mode":"duogray","fps":1,"density":1.,"pinned":true});
+        assert_eq!(command(&v, 6).unwrap(), p::stream(3, 1, 1., None));
+    }
+    #[derive(Clone, Default)]
+    struct Sink(Arc<std::sync::Mutex<Vec<u8>>>);
+    impl Write for Sink {
+        fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend(b);
+            Ok(b.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    fn tiny_frame(z: &mut flate2::Compress, full: bool, value: u8) -> Vec<u8> {
+        // One 8x8 gray4 tile: count=1, index=0, kind 0 (solid), one sample byte.
+        let body = [1, 0, 0, 0, 0, value];
+        let mut data = Vec::with_capacity(64);
+        z.compress_vec(&body, &mut data, flate2::FlushCompress::Sync).unwrap();
+        let mut b = vec![0];
+        for f in [0f32, 0., 8., 8.] {
+            b.extend(f.to_le_bytes());
+        }
+        b.extend(8u16.to_le_bytes());
+        b.extend(8u16.to_le_bytes());
+        b.push(full as u8);
+        b.extend(data);
+        p::packet(4, b)
+    }
+    fn session_with_host(version: u8) -> (Sink, std::net::TcpStream, std::thread::JoinHandle<Result<()>>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut socket = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (host, _) = listener.accept().unwrap();
+        let writer = Arc::new(Mutex::new(socket.try_clone().unwrap()));
+        let sink = Sink::default();
+        let (out, _writer_thread) = Output::spawn(sink.clone());
+        let thread = std::thread::spawn(move || {
+            let (bytes, frames) = (AtomicU64::new(0), AtomicU64::new(0));
+            socket.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+            read_loop(&mut socket, &writer, version, &out, &bytes, &frames)
+        });
+        (sink, host, thread)
+    }
+    fn ready() -> Vec<u8> {
+        let mut b = Vec::new();
+        p::string(&mut b, "app");
+        b.extend(8u16.to_le_bytes());
+        b.extend(8u16.to_le_bytes());
+        p::packet(2, b)
+    }
+    #[test]
+    fn acks_each_frame_over_loopback() {
+        let (sink, mut host, thread) = session_with_host(7);
+        let mut z = flate2::Compress::new(flate2::Compression::fast(), true);
+        host.write_all(&ready()).unwrap();
+        host.write_all(&tiny_frame(&mut z, true, 1)).unwrap();
+        host.write_all(&tiny_frame(&mut z, false, 2)).unwrap();
+        host.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+        for _ in 0..2 {
+            let mut ack = [0; 7];
+            host.read_exact(&mut ack).unwrap();
+            assert_eq!(ack[..5], [27, 2, 0, 0, 0]);
+        }
+        host.write_all(&p::packet(28, vec![1])).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let needle = br#""event":"weak","on":true"#;
+        while !sink.0.lock().unwrap().windows(needle.len()).any(|w| w == needle) {
+            assert!(std::time::Instant::now() < deadline, "no weak event");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        drop(host);
+        assert!(thread.join().unwrap().is_err());
+    }
+    #[test]
+    fn no_acks_before_v7() {
+        let (_sink, mut host, thread) = session_with_host(6);
+        let mut z = flate2::Compress::new(flate2::Compression::fast(), true);
+        host.write_all(&ready()).unwrap();
+        host.write_all(&tiny_frame(&mut z, true, 1)).unwrap();
+        host.set_read_timeout(Some(Duration::from_millis(500))).unwrap();
+        let mut b = [0; 1];
+        assert!(host.read(&mut b).is_err(), "v6 session must not ack");
+        drop(host);
+        assert!(thread.join().unwrap().is_err());
     }
 }

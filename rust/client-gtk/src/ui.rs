@@ -103,6 +103,7 @@ fn connect(
     initial_density: f32,
 ) -> SyncSender<Vec<u8>> {
     let (tx, rx) = mpsc::sync_channel::<Vec<u8>>(128);
+    let ack_tx = tx.clone();
     std::thread::spawn(move || {
         let result = (|| -> Result<()> {
             let addresses = (address.host.as_str(), address.port)
@@ -167,8 +168,14 @@ fn connect(
                         if !ready {
                             bail!("frame before Ready");
                         }
+                        let received = Instant::now();
                         let pixels = decoder.decode(mode, width, height, full, &data)?;
                         events.send(Event::Image(pixels, width, height, region))?;
+                        if address.version >= 7 {
+                            let ms = u16::try_from(received.elapsed().as_millis()).unwrap_or(u16::MAX);
+                            // Best effort: a full queue drops the ack, which only slows the host's pacing.
+                            let _ = ack_tx.try_send(p::frame_ack(ms));
+                        }
                     }
                     _ => {
                         if !ready {

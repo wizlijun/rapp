@@ -280,7 +280,7 @@ pub fn read_message(input: &mut impl Read) -> Result<(Incoming, usize)> {
     let mut h = [0; 5];
     input.read_exact(&mut h).context("host disconnected")?;
     ensure!(
-        [2, 3, 4, 13, 17, 19, 21, 26].contains(&h[0]),
+        [2, 3, 4, 13, 17, 19, 21, 26, 28].contains(&h[0]),
         "unexpected host message type {}",
         h[0]
     );
