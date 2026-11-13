@@ -8,7 +8,7 @@ public enum DataPaths {
         if let h = env["RAPP_HOME"], !h.isEmpty { return URL(fileURLWithPath: h, isDirectory: true) }
         let pointer = home.appendingPathComponent("Library/Application Support/rapp/data-root")
         if let text = read(pointer) {
-            let line = (text.split(whereSeparator: \.isNewline).first.map(String.init) ?? "")
+            let line = (text.components(separatedBy: .newlines).first ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if line.hasPrefix("/") { return URL(fileURLWithPath: line, isDirectory: true) }
         }
