@@ -112,7 +112,14 @@ public final class EmbeddedSession {
     /// anything fetched goes through the transfer queue, which lives on the main queue.
     public func pickClip(_ id: UInt32, insert: Bool) {
         run { [self] in
-            guard !linkDown, let info = history.info(id) else { return }
+            guard !linkDown else { return onEvent?(.transferStatus("取用没成功：A 已断开")) ?? () }
+            guard let info = history.info(id) else {
+                onEvent?(.transferStatus("取用没成功：太旧了，A 已不保留"))
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+                    self?.run { if self?.linkDown == false { self?.onEvent?(.transferStatus(nil)) } }
+                }
+                return
+            }
             let hand: (ClipInfo, InsertPayload) -> Void = { [weak self] info, payload in
                 DispatchQueue.main.async { self?.onInsert?(info, payload) }
             }

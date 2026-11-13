@@ -163,7 +163,8 @@ final class EmbeddedSessionTests: XCTestCase {
 
     func testPickClipTextGoesToBsClipboardOrComposer() {
         let link = FakeLink()
-        let (s, q) = make(link) { _ in }
+        var statuses = [String]()
+        let (s, q) = make(link) { if case let .transferStatus(t?) = $0 { statuses.append(t) } }
         var inserted = [String]()
         s.onInsert = { _, payload in if case let .text(t) = payload { inserted.append(t) } }
         q.sync { link.feed(.clip(id: 5, .text("hello", truncated: false))); link.feed(.clip(id: 6, .text("later", truncated: false))) }
@@ -171,9 +172,10 @@ final class EmbeddedSessionTests: XCTestCase {
         q.sync {}
         RunLoop.main.run(until: Date().addingTimeInterval(0.1))  // the hand-over hops to main
         XCTAssertEqual(inserted, ["hello"])
-        s.pickClip(99, insert: false)  // unknown id: nothing happens
+        s.pickClip(99, insert: false)  // unknown id: nothing is taken, the status says so
         q.sync {}
         XCTAssertEqual(inserted, ["hello"])
+        XCTAssertTrue(statuses.contains("取用没成功：太旧了，A 已不保留"))
     }
 
     func testPickClipWithCapturedInfoSurvivesRollover() {
