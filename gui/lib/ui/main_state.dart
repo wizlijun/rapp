@@ -812,6 +812,7 @@ class MainState extends ChangeNotifier {
     final r = _records[key];
     if (r == null || r.retry == null) return;
     _stopRetry(r);
+    r.stopped = r.phase != Phase.disconnected; // a try in flight finishes as a plain disconnect
     notifyListeners();
   }
 
@@ -874,6 +875,12 @@ class MainState extends ChangeNotifier {
       s = await hub!.open(r.id, r.app, embed: true, reconnect: reconnect);
     } catch (e) {
       if (r.ending) return;
+      if (r.stopped) {
+        r.stopped = false;
+        _disconnect(r, 'user');
+        notifyListeners();
+        return;
+      }
       final missing = missingFromError('$e');
       _disconnect(r, '$e',
           hint: true, hintText: missing == null ? null : remoteHint(deviceName(r.id), missing), failedOpen: true);
@@ -884,6 +891,15 @@ class MainState extends ChangeNotifier {
       // Ended while it was connecting (R14): the session that just opened is not wanted.
       _quiet.add(s.sid);
       hub!.close(s.sid);
+      return;
+    }
+    if (r.stopped) {
+      // 「停止」 came while it was opening: the new link is closed quietly, the record stays disconnected.
+      r.stopped = false;
+      _quiet.add(s.sid);
+      hub!.close(s.sid);
+      _disconnect(r, 'user');
+      notifyListeners();
       return;
     }
     r.sid = s.sid;
@@ -927,11 +943,21 @@ class MainState extends ChangeNotifier {
         notifyListeners();
         return;
       }
-      _disconnect(r, '$e', hint: true, failedOpen: true);
+      final stopped = r.stopped;
+      r.stopped = false;
+      _disconnect(r, stopped ? 'user' : '$e', hint: !stopped, failedOpen: true);
       notifyListeners();
       return;
     }
     if (r.sid != s.sid || r.phase != Phase.live || r.ending) return;
+    if (r.stopped) {
+      // 「停止」 came while it was starting: close the link as the user's own disconnect.
+      r.stopped = false;
+      r.userDisconnect = true;
+      hub!.close(s.sid, reason: 'user');
+      notifyListeners();
+      return;
+    }
     r.retry = null;
     // start carries no pin: a pinned session's first set_stream says so.
     _sentFps[s.sid] = (c.mode, c.fps, c.density, false);
@@ -946,6 +972,7 @@ class MainState extends ChangeNotifier {
     final r = _records[key];
     if (r == null || r.phase != Phase.disconnected || !hubUsable) return;
     if (!auto) _stopRetry(r);
+    r.stopped = false;
     r.lastSid = r.sid;
     r.sid = null;
     r.phase = Phase.connecting;

@@ -41,6 +41,9 @@ class SessionRecord {
   /// Reconnecting by itself: the failed tries so far, and when the next one is due. Null: not.
   (int attempt, DateTime at)? retry;
 
+  /// 「停止」 was pressed while an automatic try was in flight: its result is not wanted.
+  bool stopped = false;
+
   String get key => '$id/$app';
 }
 

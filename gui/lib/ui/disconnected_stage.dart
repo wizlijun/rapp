@@ -119,7 +119,11 @@ class _DisconnectedStageState extends State<DisconnectedStage> {
                     children: [
                       const StatusLamp(Lamp.connecting),
                       const SizedBox(width: 8),
-                      Text('正在连接', style: TextStyle(color: t.text)),
+                      Text(widget.retrying ? '正在重连…' : '正在连接', style: TextStyle(color: t.text)),
+                      if (widget.retrying) ...[
+                        const SizedBox(width: 8),
+                        RappButton.accent(key: const Key('stop-reconnect-button'), label: '停止', onPressed: widget.onStop),
+                      ],
                     ],
                   )
                 : Column(

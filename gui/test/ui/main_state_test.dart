@@ -845,6 +845,72 @@ void main() {
         });
       });
 
+      test('stop during an in-flight attempt: the open then succeeds, the record stays disconnected', () {
+        env((a, t, port, st, hints) {
+          final send = t.onSend!;
+          Map<String, Object?>? held;
+          t.onSend = (m) {
+            if (m['cmd'] == 'open') {
+              held = m;
+            } else {
+              send(m);
+            }
+          };
+          port.emit(const DisconnectedEvent(1, 'connection closed'));
+          a.elapse(const Duration(seconds: 1));
+          expect(held, isNotNull);
+          expect(st.currentRecord!.phase, Phase.connecting);
+          st.stopReconnectCurrent();
+          expect(st.currentRecord!.retry, isNull);
+          t.emit({'event': 'opened', 'sid': 11, 'id': '111', 'app': 'a', 'path': 'lan', 'port': 5011, 'token': 'tk', 'req': held!['req']});
+          a.flushMicrotasks();
+          expect(st.currentRecord!.phase, Phase.disconnected);
+          expect(t.sent.where((m) => m['cmd'] == 'close' && m['sid'] == 11), isNotEmpty);
+          expect(port.calls.where((c) => c.$1 == 'start'), hasLength(1)); // the first session's only
+          final n = opens(t);
+          a.elapse(const Duration(seconds: 60));
+          expect(opens(t), n);
+          expect(st.currentRecord!.retry, isNull);
+          expect(hints, isEmpty);
+        });
+      });
+
+      test('stop during an in-flight attempt: the open then fails, no hint, no retry', () {
+        env((a, t, port, st, hints) {
+          Map<String, Object?>? held;
+          t.onSend = (m) {
+            if (m['cmd'] == 'open') held = m;
+          };
+          port.emit(const DisconnectedEvent(1, 'connection closed'));
+          a.elapse(const Duration(seconds: 1));
+          st.stopReconnectCurrent();
+          t.emit({'event': 'error', 'error': 'offline', 'req': held!['req']});
+          a.flushMicrotasks();
+          expect(st.currentRecord!.phase, Phase.disconnected);
+          final n = opens(t);
+          a.elapse(const Duration(seconds: 60));
+          expect(opens(t), n);
+          expect(hints, isEmpty);
+        });
+      });
+
+      for (final reason in ['bad token', 'host says: taken over by X']) {
+        test('attempt 1 failing with "$reason" stops retrying', () {
+          env((a, t, port, st, hints) {
+            var tries = 0;
+            t.onSend = (m) {
+              if (m['cmd'] == 'open') {
+                t.emit({'event': 'error', 'error': ++tries == 1 ? 'offline' : reason, 'req': m['req']});
+              }
+            };
+            port.emit(const DisconnectedEvent(1, 'connection closed'));
+            a.elapse(const Duration(seconds: 60));
+            expect(tries, 2);
+            expect(st.currentRecord!.retry, isNull);
+          });
+        });
+      }
+
       test('auto reconnect keeps a pin', () {
         env((a, t, port, st, hints) {
           st.currentRemote!.setChoice(const StreamChoice('duogray', 'saver1x', 5), manual: true);

@@ -623,6 +623,18 @@ void main() {
       expect(stopped, true);
     });
 
+    testWidgets('a retrying stage keeps 停止 while an attempt is in flight', (tester) async {
+      var stopped = false;
+      await tester.pumpWidget(wrap(SizedBox(
+          width: 400,
+          height: 300,
+          child: DisconnectedStage(
+              session: null, reason: '网络断了', connecting: true, retrying: true, onStop: () => stopped = true))));
+      expect(find.text('正在重连…'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('stop-reconnect-button')));
+      expect(stopped, true);
+    });
+
     testWidgets('a detached session that disconnects has no window to switch to', (tester) async {
       await shown(tester);
       port.emit(const DetachedEvent(1, true));
