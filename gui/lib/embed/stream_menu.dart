@@ -61,7 +61,7 @@ class StreamMenuAnchor extends StatefulWidget {
   final VoidCallback onToggle;
   final VoidCallback onClose;
 
-  /// The hub's path word (`lan`, `direct`, `relay`).
+  /// The hub's path word (`lan`, `direct`).
   final String path;
 
   /// The session's state word (`lampWord`), shown beside the path.

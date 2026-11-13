@@ -83,9 +83,22 @@ void main() {
     expect(find.text('已复制 ID'), findsOneWidget);
   });
 
+  testWidgets('the 本机 card has no 中继 row', (tester) async {
+    svc = FakeService('tok');
+    await pump(tester);
+    expect(find.text('中继'), findsNothing);
+    expect(find.byKey(const Key('edit-relay')), findsNothing);
+  });
+
+  testWidgets('a status that still carries relay fields renders', (tester) async {
+    svc = FakeService('tok')..extraStatus = {'relay': 'connected', 'relay_error': 'old'};
+    await pump(tester);
+    expect(find.text('123456789'), findsOneWidget);
+    expect(find.text('中继'), findsNothing);
+  });
+
   testWidgets('every LAN ID has its own copy button', (tester) async {
     svc = FakeService('tok')
-      ..relay = 'off'
       ..lanIds = ['123456789@192.168.1.5', '123456789@10.0.0.7'];
     await pump(tester);
     expect(find.text('123456789@192.168.1.5'), findsOneWidget);

@@ -33,8 +33,6 @@ class ServiceStatus {
     this.id,
     this.name = '',
     this.password = '',
-    this.relay = 'off',
-    this.relayError,
     this.screenRecording = false,
     this.accessibility = false,
     this.sessions = const [],
@@ -47,13 +45,11 @@ class ServiceStatus {
   final String? id;
   final String name;
   final String password;
-  final String relay; // connected | connecting | off
-  final String? relayError;
   final bool screenRecording;
   final bool accessibility;
   final List<ServiceSession> sessions;
 
-  /// `id@ip[:port]`, one per local IPv4 (§3): what B types when there is no relay.
+  /// `id@ip[:port]`, one per local IPv4 (§3): what B types to add this machine.
   final List<String> lanIds;
 
   /// Where the service writes `service.log` (「打开日志文件夹」).
@@ -65,10 +61,8 @@ class ServiceStatus {
   /// Both permissions were granted before the last update and are not now (spec §3.3).
   final bool permissionsLostAfterUpdate;
 
-  /// The ID as people should type it: the bare ID once the relay is connected,
-  /// otherwise the `id@ip` forms (bare ID if the machine has no address).
-  List<String> get shownIds =>
-      relay == 'connected' || lanIds.isEmpty ? [?id] : lanIds;
+  /// The ID as people should type it: the `id@ip` forms (bare ID if the machine has no address).
+  List<String> get shownIds => lanIds.isEmpty ? [?id] : lanIds;
 
   factory ServiceStatus.fromJson(Map<String, dynamic> m) {
     final perms = m['permissions'] is Map ? m['permissions'] as Map : const {};
@@ -76,8 +70,6 @@ class ServiceStatus {
       id: m['id']?.toString(),
       name: '${m['name'] ?? ''}',
       password: '${m['password'] ?? ''}',
-      relay: '${m['relay'] ?? 'off'}',
-      relayError: m['relay_error']?.toString(),
       screenRecording: perms['screen_recording'] == true,
       accessibility: perms['accessibility'] == true,
       lanIds: (m['lan_ids'] as List? ?? const []).map((e) => '$e').toList(),
@@ -140,7 +132,6 @@ class ServiceConnection {
 
   Future<ServiceStatus> status() async => ServiceStatus.fromJson(await request({'cmd': 'status'}));
   Future<void> setPassword(String password) => request({'cmd': 'set_password', 'password': password});
-  Future<void> setRelay(String relay, String key) => request({'cmd': 'set_relay', 'relay': relay, 'key': key});
   Future<void> kick(Object sid) => request({'cmd': 'kick', 'sid': sid});
   Future<void> subscribe() => request({'cmd': 'subscribe'});
 
@@ -299,11 +290,6 @@ class ServiceMonitor extends ChangeNotifier {
 
   Future<void> setPassword(String pw) async {
     await _need().setPassword(pw);
-    await refresh();
-  }
-
-  Future<void> setRelay(String relay, String key) async {
-    await _need().setRelay(relay, key);
     await refresh();
   }
 

@@ -1,6 +1,5 @@
-// 本机: this machine's ID/password/relay as the service sees them, plus service control.
+// 本机: this machine's ID/password as the service sees them, plus service control.
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import '../paths.dart';
@@ -17,8 +16,6 @@ import 'permissions_panel.dart';
 import 'section_card.dart';
 import 'update_section.dart';
 import 'linux_update_section.dart';
-
-const relayLabels = {'connected': '已连接', 'connecting': '连接中', 'off': '未连接'};
 
 /// What the 密码 row shows while hidden: a fixed length, so the real length stays private too.
 const passwordMask = '••••••••';
@@ -190,17 +187,6 @@ class _LocalSectionState extends State<LocalSection> {
     _say(err ?? '已执行：${a.name}');
   }
 
-  /// relay/key are not in `status`; prefill them from service.json if readable.
-  Map<String, dynamic> _serviceJson() {
-    try {
-      final f = File('${widget.data.localDir}${Platform.pathSeparator}service.json');
-      final v = jsonDecode(f.readAsStringSync());
-      return v is Map<String, dynamic> ? v : {};
-    } catch (_) {
-      return {};
-    }
-  }
-
   Future<void> _copy(String text, String what) async {
     await Clipboard.setData(ClipboardData(text: text));
     _say('已复制$what');
@@ -233,17 +219,6 @@ class _LocalSectionState extends State<LocalSection> {
       TextField(controller: pw, autofocus: true, decoration: const InputDecoration(labelText: '新密码')),
     ]);
     if (ok == true && pw.text.isNotEmpty) await _apply(() => m.setPassword(pw.text));
-  }
-
-  Future<void> _editRelay() async {
-    final cfg = _serviceJson();
-    final relay = TextEditingController(text: '${cfg['relay'] ?? ''}');
-    final key = TextEditingController(text: '${cfg['key'] ?? ''}');
-    final ok = await _dialog('中继设置', [
-      TextField(controller: relay, autofocus: true, decoration: const InputDecoration(labelText: '地址，例如 vps:22026')),
-      TextField(controller: key, decoration: const InputDecoration(labelText: 'Key')),
-    ]);
-    if (ok == true) await _apply(() => m.setRelay(relay.text.trim(), key.text.trim()));
   }
 
   Future<void> _apply(Future<void> Function() f) async {
@@ -298,8 +273,6 @@ class _LocalSectionState extends State<LocalSection> {
             ..._idRows(st.shownIds),
             _row('名称', st.name),
             _passwordRow(st.password),
-            _row('中继', '${relayLabels[st.relay] ?? st.relay}${st.relayError == null ? '' : '（${st.relayError}）'}',
-                trailing: _icon('edit-relay', '修改中继', Icons.edit, _editRelay)),
             if (_platform == TargetPlatform.macOS)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 2),

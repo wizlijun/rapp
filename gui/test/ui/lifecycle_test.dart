@@ -12,7 +12,8 @@ void main() {
     expect(disconnectWord('bad password'), '密码不对');
     expect(disconnectWord('offline'), '对方离线');
     expect(disconnectWord('no path to 111'), '对方离线');
-    expect(disconnectWord('relay unreachable and no LAN address answered'), '对方离线');
+    expect(disconnectWord('offline: no LAN address answered'), '对方离线');
+    expect(disconnectWord('no address: add the host again as id@ip'), '没有地址，请用 ID@IP 重新添加');
     expect(disconnectWord('connect 10.0.0.2:22028: timed out'), '连接超时');
     expect(disconnectWord('no reply'), '连接超时');
     expect(disconnectWord('connection closed'), '网络断了');
