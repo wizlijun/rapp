@@ -101,11 +101,13 @@ impl Decoder {
             }
             ensure!(used > 0 || n > 0, "invalid compressed data");
         }
+        // A full frame may be only the first slice of the picture (the rest arrive as later
+        // non-full slices); the tiles it lacks stay zero, as in the Swift FrameDecoder.
         let mut r = Reader::new(&body);
         let count = r.u16()? as usize;
         ensure!(
-            count <= tiles && (!full || count == tiles),
-            "incomplete full frame or excessive tile count"
+            count <= tiles,
+            "excessive tile count"
         );
         let mut seen = vec![false; tiles];
         for _ in 0..count {

@@ -71,6 +71,34 @@ fn full_delta_dictionary_and_mode_reset() {
     assert_eq!(d.decode(3, 1, 1, true, &gray).unwrap(), [255; 4]);
 }
 #[test]
+fn full_frame_sent_as_slices_equals_the_unsliced_frame() {
+    // 64 x 128 gray4 = two tiles: solid 1, solid 2.
+    let whole = Decoder::default()
+        .decode(0, 64, 128, true, &compress(&mut z(), &[2, 0, 0, 0, 0, 1, 1, 0, 0, 2]))
+        .unwrap();
+    let mut d = Decoder::default();
+    let mut z = z();
+    // First slice: full flag, top tile row only; the missing tile is zero until the next slice.
+    let first = d
+        .decode(0, 64, 128, true, &compress(&mut z, &[1, 0, 0, 0, 0, 1]))
+        .unwrap();
+    assert_eq!(&first[..64 * 64 * 4], &whole[..64 * 64 * 4]);
+    assert_eq!(&first[64 * 64 * 4..], &bgra(0, 0).repeat(64 * 64)[..]);
+    // Second slice: a delta carrying the rest, on the same zlib stream.
+    let second = d
+        .decode(0, 64, 128, false, &compress(&mut z, &[1, 0, 1, 0, 0, 2]))
+        .unwrap();
+    assert_eq!(second, whole);
+}
+#[test]
+fn full_frame_with_too_many_tiles_is_rejected() {
+    // One tile in the grid, a body claiming two.
+    let body = [2, 0, 0, 0, 0, 1, 1, 0, 0, 2];
+    assert!(Decoder::default()
+        .decode(0, 64, 64, true, &compress(&mut z(), &body))
+        .is_err());
+}
+#[test]
 fn palette_bits_and_row_padding() {
     for bits in [1, 2, 4] {
         let mut body = vec![1, 0, 0, 0, bits, 2, 0, 15];
@@ -132,7 +160,6 @@ fn every_sample_mode_expands() {
 fn malformed_frames_are_rejected_without_panics() {
     for body in [
         vec![],
-        vec![0, 0],
         vec![1, 0, 1, 0, 0, 0],
         vec![1, 0, 0, 0, 77],
         vec![1, 0, 0, 0, 1, 0],
