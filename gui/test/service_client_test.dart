@@ -15,6 +15,8 @@ class FakeService {
   final _subscribers = <Socket>[];
   final _all = <Socket>[];
   int sessions = 0;
+  String relay = 'connected';
+  List<String> lanIds = [];
   Map<String, dynamic> perms = {'screen_recording': true, 'accessibility': false};
   List<Map<String, dynamic>> history = [];
 
@@ -83,7 +85,8 @@ class FakeService {
         'id': '123456789',
         'name': 'bruce-mac',
         'password': 'ab12cd34',
-        'relay': 'connected',
+        'relay': relay,
+        'lan_ids': lanIds,
         'log_dir': '/Users/u/Library/Logs/rapp',
         'permissions': perms,
         'update': ?update,
