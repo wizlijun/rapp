@@ -69,3 +69,23 @@ async fn history_returns_lines_above_the_screen() {
         &s.tmux().capture(&pane).await.unwrap().lines[0].parse::<u32>().map(|n| (n - 1).to_string()).unwrap()
     );
 }
+
+#[tokio::test]
+async fn history_ranges_are_empty_or_clamped() {
+    let Some(s) = common::Server::start() else { return };
+    s.raw(&["new-session", "-d", "-s", "r", "-x", "80", "-y", "5", "seq 1 40; sleep 60"]);
+    common::settle().await;
+    let pane = s.tmux().list().await.unwrap()[0].pane.clone();
+    let t = s.tmux();
+    assert!(t.history(&pane, 0, 0).await.unwrap().is_empty());
+    assert!(t.history(&pane, 5, 0).await.unwrap().is_empty());
+    let size: u32 = s.raw(&["display-message", "-p", "-t", &pane, "#{history_size}"]).trim().parse().unwrap();
+    assert_eq!(size, 36); // 40 numbers plus the cursor row, minus the 5 visible rows
+    assert!(t.history(&pane, size, 10).await.unwrap().is_empty());
+    assert!(t.history(&pane, size + 100, 10).await.unwrap().is_empty());
+    let h = t.history(&pane, 31, 100).await.unwrap();
+    assert_eq!(h.len(), 5);
+    assert_eq!(h[0], "1");
+    let all = t.history(&pane, 0, 1000).await.unwrap();
+    assert_eq!((all.len(), all[0].as_str(), all[35].as_str()), (36, "1", "36"));
+}

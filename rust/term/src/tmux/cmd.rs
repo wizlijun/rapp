@@ -36,6 +36,11 @@ pub fn meta(pane: &str) -> Vec<String> {
     ["display-message", "-p", "-t", pane, f].map(String::from).to_vec()
 }
 
+/// How many rows of scrollback `pane` holds.
+pub fn history_size(pane: &str) -> Vec<String> {
+    ["display-message", "-p", "-t", pane, "#{history_size}"].map(String::from).to_vec()
+}
+
 /// `lines` rows of scrollback ending `before` rows above the visible screen.
 pub fn history(pane: &str, before: u32, lines: u32) -> Vec<String> {
     let start = format!("-{}", before as u64 + lines as u64);

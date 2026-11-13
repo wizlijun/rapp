@@ -154,6 +154,15 @@ impl Tmux {
 
     /// `lines` rows of scrollback ending `before` rows above the visible screen.
     pub async fn history(&self, pane: &str, before: u32, lines: u32) -> anyhow::Result<Vec<String>> {
+        if lines == 0 {
+            return Ok(Vec::new());
+        }
+        let size = self.run(&cmd::history_size(pane)).await?;
+        let size: u32 = size.trim().parse().map_err(|_| anyhow::anyhow!("could not read the pane history size"))?;
+        if before >= size {
+            return Ok(Vec::new());
+        }
+        let lines = lines.min(size - before);
         let out = self.run(&cmd::history(pane, before, lines)).await?;
         let mut v: Vec<String> = out.split('\n').map(String::from).collect();
         if v.last().is_some_and(|l| l.is_empty()) {
