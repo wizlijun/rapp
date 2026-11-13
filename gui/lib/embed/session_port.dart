@@ -229,7 +229,7 @@ class TransferProgressEvent extends SessionEvent {
   final String? path;
   final String? error;
 
-  /// Only on uploads: what is sent. Only [ClipKind.files] lands in A's ~/Downloads/rapp.
+  /// Only on uploads: what is sent. Only [ClipKind.files] lands in A's <data root>/files/transfers.
   final ClipKind? kind;
 }
 

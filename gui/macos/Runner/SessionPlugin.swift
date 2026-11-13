@@ -44,11 +44,8 @@ final class SessionPlugin: NSObject, FlutterPlugin {
 
   /// Copies of A's clips; they outlive the session they came from.
   private let copies = ClipCopies()
-  /// Where downloads go: `RAPP_DOWNLOADS` when set and non-empty, else the session's default.
-  private let downloads: URL? = {
-    guard let p = ProcessInfo.processInfo.environment["RAPP_DOWNLOADS"], !p.isEmpty else { return nil }
-    return URL(fileURLWithPath: p, isDirectory: true)
-  }()
+  /// Where downloads go, worked out at each use so a moved data dir applies to new downloads.
+  private var downloads: URL { DataPaths.currentTransfers() }
   private let channel: FlutterMethodChannel
   private let registry: FlutterTextureRegistry
   private weak var view: NSView?
@@ -157,7 +154,6 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     case let .reveal(path):
       // Only what rapp itself downloaded: inside the downloads dir in use.
       let root = downloads
-        ?? FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0].appendingPathComponent("rapp")
       if let url = revealableURL(path, within: [root]) {
         NSWorkspace.shared.activateFileViewerSelecting([url])
         result(true)

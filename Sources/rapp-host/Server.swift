@@ -582,7 +582,7 @@ final class Session {
 
     private func startClipboard(app: NSRunningApplication) {
         let store = ClipStore(changeCount: NSPasteboard.general.changeCount)
-        let uploads = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads/rapp")
+        let uploads = DataPaths.currentTransfers()
         transfers = TransferStore(clips: store, uploads: uploads)
         let watcher = ClipboardWatcher(pid: app.processIdentifier, store: store, queue: queue,
                                        log: { [output] in output.log($0) }) { [weak self] id, info in
