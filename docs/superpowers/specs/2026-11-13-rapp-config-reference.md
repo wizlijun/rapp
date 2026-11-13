@@ -225,19 +225,19 @@ agent 规则：不手改；要换启动参数就改上面两处模板，**两处
 
 agent 规则：不改 `relay.key`、`join`、`devices.json`（程序自管；要吊销、解绑用 `revoke`、`unbind` 命令）；`config.json` 可以手改，改前停 relay，改后启动，看运行日志里有没有报哪一项不合法（不合法会拒绝启动）。
 
-**Docker 部署**（规格 §12；镜像尚未构建，见 `tasks/todo.md` 任务 14）。发布物只有一个 Docker 镜像：
+**Docker 部署**（规格 §12；文件在 `docker/relay/`，构建用 `scripts/build-relay-image.sh`）。发布物只有一个 Docker 镜像：
 
 | 项 | 定法 |
 |---|---|
-| 基础镜像 | Alpine Linux，版本固定到具体的小版本和摘要 |
-| 镜像里有什么 | Alpine 的基础层，加 `rapp-relay` 一个程序。不装任何别的包 |
-| 架构 | 同一个镜像标签下带 x86_64 和 arm64 两种 |
+| 基础镜像 | `alpine:3.23.8`，固定到多架构索引摘要 `sha256:469c9ea4…9971eb2`；编译阶段 `rust:1.99.1-alpine3.23` |
+| 镜像里有什么 | Alpine 的基础层，加 `/usr/local/bin/rapp-relay` 一个静态链接的程序（`cargo --profile relay`）。不装任何别的包 |
+| 架构 | 同一个镜像标签下带 x86_64 和 arm64 两种（`--multi`）。本机（arm64）已构建并通过冒烟检查 |
 | 怎么构建 | 多阶段：第一阶段编译，第二阶段只把程序拷进干净的 Alpine |
-| 大小目标 | 镜像压缩后 10 MB 以内（估计，第一次构建后写实际数字） |
-| 运行身份 | 非 root 的固定用户；根文件系统只读；去掉全部特权；禁止提权 |
-| 数据 | 只挂一个卷 `/data` |
+| 大小 | arm64 实测：镜像 5,756,325 字节，`docker save \| gzip` 后 5,742,894 字节（目标 10 MB 以内） |
+| 运行身份 | uid 10001；compose 里根文件系统只读、`cap_drop: [ALL]`、`no-new-privileges` |
+| 数据 | 只挂一个卷 `/data`（镜像里属 10001，权限 0700） |
 | 网络 | 主机网络模式。relay 靠"看到的对端地址"做限速和打洞，别的网络模式可能把地址改写掉。来源地址要在 Linux VPS 上实测（待做） |
-| 健康检查 | 镜像自带，定期跑 `rapp-relay check` |
+| 健康检查 | 镜像自带，每 30 秒跑一次 `rapp-relay check` |
 | 升级 | `docker compose pull && docker compose up -d` |
 | 镜像标签 | 每个版本一个固定标签，另有跟随小版本的标签。compose 示例里写固定标签 |
 | 发布到哪里 | `ghcr.io/wizlijun/rapp-relay` |

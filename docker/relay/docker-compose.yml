@@ -1,0 +1,23 @@
+# The relay on a Linux host. Host networking keeps the source addresses the relay rate-limits on.
+# Open 21116/udp in the firewall. Upgrade: docker compose pull && docker compose up -d
+services:
+  rapp-relay:
+    image: ghcr.io/wizlijun/rapp-relay:0.0.0-dev
+    container_name: rapp-relay
+    network_mode: host
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    user: "10001:10001"
+    volumes:
+      - rapp-relay-data:/data
+    restart: unless-stopped
+    stop_grace_period: 10s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+volumes:
+  rapp-relay-data:

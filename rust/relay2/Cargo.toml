@@ -10,7 +10,7 @@ serde.workspace = true
 serde_json.workspace = true
 rapp-wire.workspace = true
 rapp-net.workspace = true
-tokio.workspace = true
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros", "net", "io-util", "sync", "time", "signal"] }
 quinn.workspace = true
 data-encoding.workspace = true
 

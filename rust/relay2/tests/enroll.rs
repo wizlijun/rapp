@@ -39,6 +39,7 @@ async fn right_key_enrolls_and_is_audited() {
     let v = d.enroll(&r.key).await;
     assert_eq!(v["ok"], true, "{v}");
     assert_eq!(v["relay"], json!({"version": env!("CARGO_PKG_VERSION"), "features": []}));
+    assert_eq!(v["from"], d.local_addr().to_string(), "the reply names the address the relay saw");
 
     let dev = r.relay.registry().get(&d.id.fp).expect("device is in the registry");
     assert_eq!(dev.tenant, "default");

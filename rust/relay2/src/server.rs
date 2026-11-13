@@ -688,7 +688,7 @@ impl Shared {
                 if !peer.enrolled.swap(true, Ordering::AcqRel) {
                     self.go_online(peer);
                 }
-                ok(json!({"relay": {"version": VERSION, "features": []}}))
+                ok(json!({"relay": {"version": VERSION, "features": []}, "from": peer.from.to_string()}))
             }
             Err(e) => err(&e),
         }

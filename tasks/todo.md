@@ -307,11 +307,11 @@
 - [x] 任务 11 管理套接字、子命令、优雅停止：`0fc7551..00993fc`
 - [x] 任务 12 统计行和指标接口：`00993fc..24733dc`
 - [x] 任务 13 密钥扫描、畸形输入、久跑：`24733dc..7dc326d`
-- [ ] 任务 14 Docker 镜像：待做（等 buildx / cargo-audit）
+- [x] 任务 14 Docker 镜像：本提交。第 3 步（`--multi`）在 colima 上 amd64、arm64 都构建成功（amd64 在 QEMU 里编译 6 分半），`docker run --platform linux/amd64 … --version` 输出 `rapp-relay2 0.5.2`；arm64 镜像压缩后 5.7 MB，冒烟检查 8 项全过
 - [x] 任务 15 性能：relay 开销对比旧 relay、空闲内存：`7dc326d..b0a3086`
 - [x] 任务 16 文档（配置规范总览、可观测性规格、本文件）：本提交
 
 ### 未经实机验证
-- 任务 14 第 3 步（镜像在 Docker 里跑起来）：待做
+- 任务 14 第 3 步（多架构构建）：已在 colima 上做完（见上）；未做的是推送到 ghcr.io（`--push`，待用户登录后执行）和在真正的 Linux 主机上用 `network_mode: host` 跑一遍
 - 来源地址实测（`network_mode: host`，另一台机器 `probe` 入网，看审计日志 `enroll` 的 `from` 是不是公网地址）：待用户的 VPS
 - 24 小时久跑（`RAPP_SOAK_SECS=86400 cargo test -p rapp-relay2 --release --test soak -- --ignored --nocapture`）：待用户
