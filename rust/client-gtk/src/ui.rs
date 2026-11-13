@@ -173,8 +173,9 @@ fn connect(
                         events.send(Event::Image(pixels, width, height, region))?;
                         if address.version >= 7 {
                             let ms = u16::try_from(received.elapsed().as_millis()).unwrap_or(u16::MAX);
-                            // Best effort: a full queue drops the ack, which only slows the host's pacing.
-                            let _ = ack_tx.try_send(p::frame_ack(ms));
+                            // Never drop an ack: the host pacer matches them FIFO, so a lost one desyncs it for
+                            // good. Blocking here is back-pressure; it fails only when the writer has ended.
+                            ack_tx.send(p::frame_ack(ms))?;
                         }
                     }
                     _ => {
