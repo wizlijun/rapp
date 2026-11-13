@@ -351,6 +351,10 @@ mod tests {
         a.prune(SystemTime::now());
         let names: Vec<_> = day_files(&d.path().join("audit")).into_iter().map(|f| f.0).collect();
         assert_eq!(names, vec![today()]);
+        // Today's own record survived (a deleted file would be recreated holding only audit_prune).
+        let v = lines(d.path(), &today());
+        assert_eq!((v[0]["ev"].as_str(), v[1]["ev"].as_str()), (Some("x"), Some("audit_prune")));
+        assert_eq!(v[1]["days"].as_array().unwrap().len(), 2);
     }
 
     #[test]
