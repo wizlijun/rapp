@@ -15,13 +15,19 @@ path = "src/bin/fake-rapp-host.rs"
 name = "fake-rapp-client"
 path = "src/bin/fake-rapp-client.rs"
 
+[lib]
+name = "rapp_testkit"
+path = "src/lib.rs"
+
 [dependencies]
+anyhow.workspace = true
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
-anyhow.workspace = true
 quinn.workspace = true
 tokio.workspace = true
-serde_json.workspace = true
 tempfile.workspace = true
 rapp-net.workspace = true
 rapp-relay.workspace = true

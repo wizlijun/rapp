@@ -1,0 +1,1 @@
+{"seed":6,"rate_kbps":[1000,1000],"delay_ms":[50,50],"loss":0.01,"rebind_every_s":120,"queue_ms":1000}

@@ -1,0 +1,1 @@
+{"seed":3,"rate_kbps":[50,2000],"rate_every_s":5,"delay_ms":[100,400],"jitter_ms":50,"loss":0.10,"bursts_per_min":6,"burst_ms":200,"outages":[{"every_s":60,"for_s":15,"offset_s":20},{"every_s":300,"for_s":45,"offset_s":150}],"queue_ms":1000}

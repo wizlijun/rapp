@@ -1298,11 +1298,13 @@ version = "0.5.5"
 dependencies = [
  "anyhow",
  "quinn",
+ "rand 0.9.5",
  "rapp-hub",
  "rapp-net",
  "rapp-relay",
  "rapp-service",
  "rapp-update",
+ "serde",
  "serde_json",
  "tempfile",
  "tokio",
