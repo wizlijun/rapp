@@ -1,24 +1,14 @@
-//! State shared by the relay link, the peer server, the workers and IPC.
+//! State shared by the peer server, the workers and IPC.
 
 use crate::config::Config;
 use crate::workers::Workers;
 use rapp_net::log::{Log, Lvl};
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tokio::sync::{mpsc, watch, Notify};
-
-pub const TOKEN_TTL: Duration = Duration::from_secs(24 * 3600);
-
-/// What the IPC tells the relay link.
-pub enum RelayCmd {
-    /// Password changed: register again on the current connection.
-    Reregister,
-    /// Relay address or key changed: drop the connection and start over.
-    Reconnect,
-}
+use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::{watch, Notify};
 
 /// Who is on the other end of a request: B's address, its self-declared name, and the path.
 #[derive(Clone, Debug)]
@@ -26,7 +16,7 @@ pub struct Peer {
     pub addr: String,
     /// "自称" (observability spec §4.1): whatever B sent, never checked.
     pub name: Option<String>,
-    /// "lan" | "direct" | "relay"
+    /// "lan" | "direct"
     pub path: &'static str,
 }
 
@@ -53,9 +43,6 @@ impl Peer {
     }
 }
 
-/// A relay token's (B's public address, B's self-declared name, expiry).
-pub type Token = (String, Option<String>, Instant);
-
 pub struct Session {
     pub peer: Peer,
     pub app: String,
@@ -76,17 +63,13 @@ pub struct State {
     pub endpoint: quinn::Endpoint,
     pub port: u16,
     pub cfg: Mutex<Config>,
-    pub tokens: Mutex<HashMap<String, Token>>,
     pub sessions: Mutex<(u64, BTreeMap<u64, Session>)>,
-    /// ("off" | "connecting" | "connected", last error)
-    pub relay: Mutex<(&'static str, Option<String>)>,
     /// `{"screen_recording","accessibility"}` as last checked.
     pub permissions: Mutex<Value>,
     /// An update was installed while both permissions were granted, and now one is missing (K23).
     pub perms_lost: Mutex<bool>,
     pub workers: Workers,
     pub changed: watch::Sender<u64>,
-    pub relay_cmd: mpsc::UnboundedSender<RelayCmd>,
     pub cm: Mutex<Option<std::process::Child>>,
     pub log: Log,
     pub log_dir: PathBuf,
@@ -115,34 +98,6 @@ impl State {
             }
             self.notify();
         }
-    }
-
-    pub fn set_relay_status(&self, status: &'static str, error: Option<String>) {
-        let mut r = self.relay.lock().unwrap();
-        if r.0 != status || r.1 != error {
-            let mut fields = json!({"state": status});
-            if let Some(e) = &error {
-                fields["error"] = json!(e);
-            }
-            *r = (status, error);
-            drop(r);
-            let lvl = if fields.get("error").is_some() { Lvl::Warn } else { Lvl::Info };
-            self.log.event(lvl, "relay", fields);
-            self.notify();
-        }
-    }
-
-    pub fn add_token(&self, token: String, peer: String, name: Option<String>) {
-        let now = Instant::now();
-        let mut t = self.tokens.lock().unwrap();
-        t.retain(|_, (_, _, exp)| *exp > now);
-        t.insert(token, (peer, name, now + TOKEN_TTL));
-    }
-
-    /// B's address and self-declared name for a valid token.
-    pub fn token_peer(&self, token: &str) -> Option<(String, Option<String>)> {
-        let t = self.tokens.lock().unwrap();
-        t.get(token).filter(|(_, _, exp)| *exp > Instant::now()).map(|(p, n, _)| (p.clone(), n.clone()))
     }
 
     /// The new session's sid, its kick, and what wakes it when it is marked taken over.
@@ -232,22 +187,17 @@ impl State {
 
     pub fn status(&self) -> Value {
         let cfg = self.cfg.lock().unwrap().clone();
-        let (relay, relay_error) = self.relay.lock().unwrap().clone();
         let sessions: Vec<Value> = self.sessions.lock().unwrap().1.iter()
             .map(|(sid, s)| json!({"sid":sid,"peer":s.peer.addr,"app":s.app,"path":s.peer.path,"since":s.since}))
             .collect();
         let id = cfg.id.clone().unwrap_or_default();
         let lan_ids: Vec<String> =
             rapp_net::addr::local_ipv4s().into_iter().map(|ip| rapp_net::addr::at_address(&id, ip, self.port)).collect();
-        let mut v = json!({
+        json!({
             "ok": true, "id": cfg.id, "name": cfg.name, "password": cfg.password, "lan_ids": lan_ids,
-            "relay": relay, "permissions": self.permissions.lock().unwrap().clone(),
+            "permissions": self.permissions.lock().unwrap().clone(),
             "permissions_lost_after_update": *self.perms_lost.lock().unwrap(), "sessions": sessions,
             "log_dir": self.log_dir, "update": crate::update::status_json(self),
-        });
-        if let Some(e) = relay_error {
-            v["relay_error"] = json!(e);
-        }
-        v
+        })
     }
 }

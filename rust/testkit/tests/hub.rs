@@ -38,7 +38,7 @@ async fn open_and_close(hub: &mut Hub, id: &str, path: &str) {
 
 #[tokio::test]
 async fn add_host_hosts_apps_open_close_remove() {
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let mut hub = hub_with_host(&a, home.path()).await;
 
@@ -85,7 +85,7 @@ async fn add_host_hosts_apps_open_close_remove() {
 
 #[tokio::test]
 async fn side_connection_gets_its_own_open_and_listener_closes_with_session() {
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let mut hub = hub_with_host(&a, home.path()).await;
     open_and_close(&mut hub, &a.id, "lan").await;
@@ -96,7 +96,7 @@ async fn side_connection_gets_its_own_open_and_listener_closes_with_session() {
 
 #[tokio::test]
 async fn add_host_by_id_at_ip() {
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let mut hub = Hub::start(home.path(), a.bins.path());
     let at = format!("{}@{}", a.id, a_addr(&a.svc));
@@ -119,7 +119,7 @@ async fn add_host_by_id_at_ip() {
 
 #[tokio::test]
 async fn add_host_errors_are_reported_and_nothing_saved() {
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let mut hub = Hub::start(home.path(), a.bins.path());
     let r = hub.call(json!({"cmd":"add_host","id":at(&a),"password":"wrong","req":7})).await;
@@ -134,7 +134,7 @@ async fn add_host_errors_are_reported_and_nothing_saved() {
 
 #[tokio::test]
 async fn stdin_eof_closes_open_sessions() {
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let mut hub = hub_with_host(&a, home.path()).await;
     let r = hub.call(json!({"cmd":"open","id":a.id,"app":"com.example.echo"})).await;
@@ -146,7 +146,7 @@ async fn stdin_eof_closes_open_sessions() {
 
 #[tokio::test]
 async fn open_unknown_app_worker_failure_is_an_error() {
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let mut hub = hub_with_host(&a, home.path()).await;
     // An unlaunchable client wins resolution even when a real Linux client is
@@ -164,7 +164,7 @@ async fn open_unknown_app_worker_failure_is_an_error() {
 
 #[tokio::test]
 async fn hub_log_records_route_session_and_client_stderr_without_secrets() {
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let mut hub = hub_with_host(&a, home.path()).await;
     let r = hub.call(json!({"cmd":"open","id":a.id,"app":"com.example.echo"})).await;
@@ -217,7 +217,7 @@ async fn wait_for_file(path: &std::path::Path) {
 
 #[tokio::test]
 async fn focus_reaches_the_client_and_unknown_sid_errors() {
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let mut hub = hub_with_host(&a, home.path()).await;
     let r = hub.call(json!({"cmd":"open","id":a.id,"app":"com.example.echo","req":"o"})).await;
@@ -235,7 +235,7 @@ async fn focus_reaches_the_client_and_unknown_sid_errors() {
 
 #[tokio::test]
 async fn second_open_of_the_same_app_reuses_the_session() {
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let mut hub = hub_with_host(&a, home.path()).await;
     let r1 = hub.call(json!({"cmd":"open","id":a.id,"app":"com.example.echo","req":"o1"})).await;
@@ -258,7 +258,7 @@ async fn second_open_of_the_same_app_reuses_the_session() {
 
 #[tokio::test]
 async fn embedded_opens_are_not_reused_by_the_hub() {
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let mut hub = hub_with_host(&a, home.path()).await;
     let (s1, _, t1) = embed_open(&mut hub, &a).await;
@@ -275,7 +275,7 @@ async fn embedded_opens_are_not_reused_by_the_hub() {
 
 #[tokio::test]
 async fn open_after_closed_gets_a_new_session() {
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let mut hub = hub_with_host(&a, home.path()).await;
     let r1 = hub.call(json!({"cmd":"open","id":a.id,"app":"com.example.echo","req":"o1"})).await;
@@ -289,7 +289,7 @@ async fn open_after_closed_gets_a_new_session() {
 
 #[tokio::test]
 async fn reconnect_open_is_never_reused() {
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let mut hub = hub_with_host(&a, home.path()).await;
     let r1 = hub.call(json!({"cmd":"open","id":a.id,"app":"com.example.echo","req":"o1"})).await;
@@ -323,7 +323,7 @@ async fn embed_open(hub: &mut Hub, a: &TestService) -> (Value, u64, String) {
 
 #[tokio::test]
 async fn embed_open_returns_port_and_token_and_spawns_no_client() {
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let mut hub = hub_with_host(&a, home.path()).await;
     let (sid, port, token) = embed_open(&mut hub, &a).await;
@@ -341,7 +341,7 @@ async fn embed_open_returns_port_and_token_and_spawns_no_client() {
 #[tokio::test]
 async fn embed_close_command_ends_with_quit() {
     use tokio::io::AsyncReadExt;
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let mut hub = hub_with_host(&a, home.path()).await;
     let (sid, port, token) = embed_open(&mut hub, &a).await;
@@ -355,7 +355,7 @@ async fn embed_close_command_ends_with_quit() {
 
 #[tokio::test]
 async fn embed_side_connection_gets_its_own_open() {
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let mut hub = hub_with_host(&a, home.path()).await;
     let (sid, port, token) = embed_open(&mut hub, &a).await;
@@ -368,7 +368,7 @@ async fn embed_side_connection_gets_its_own_open() {
 
 #[tokio::test]
 async fn embed_without_connect_reports_gui_did_not_connect() {
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let mut hub = hub_with_host(&a, home.path()).await;
     let (sid, _, _) = embed_open(&mut hub, &a).await;
@@ -380,7 +380,7 @@ async fn embed_without_connect_reports_gui_did_not_connect() {
 
 #[tokio::test]
 async fn note_logs_detach_and_attach() {
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let mut hub = hub_with_host(&a, home.path()).await;
     let (sid, port, token) = embed_open(&mut hub, &a).await;
@@ -405,7 +405,7 @@ async fn note_logs_detach_and_attach() {
 
 #[tokio::test]
 async fn embed_close_before_connect_ends_with_quit() {
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let mut hub = hub_with_host(&a, home.path()).await;
     let (sid, _, _) = embed_open(&mut hub, &a).await;
@@ -418,7 +418,7 @@ async fn embed_close_before_connect_ends_with_quit() {
 #[tokio::test]
 async fn embed_wrong_token_closes_the_session() {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let mut hub = hub_with_host(&a, home.path()).await;
     let (sid, port, _) = embed_open(&mut hub, &a).await;
@@ -439,7 +439,7 @@ async fn embed_wrong_token_closes_the_session() {
 #[tokio::test]
 async fn embed_close_with_user_reason() {
     use tokio::io::AsyncReadExt;
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let mut hub = hub_with_host(&a, home.path()).await;
     let (sid, port, token) = embed_open(&mut hub, &a).await;
@@ -455,7 +455,7 @@ async fn embed_close_with_user_reason() {
 
 #[tokio::test]
 async fn close_with_bad_reason_is_an_error() {
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let mut hub = hub_with_host(&a, home.path()).await;
     let (sid, port, token) = embed_open(&mut hub, &a).await;
@@ -470,7 +470,7 @@ async fn close_with_bad_reason_is_an_error() {
 
 #[tokio::test]
 async fn reconnect_open_is_logged() {
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let mut hub = hub_with_host(&a, home.path()).await;
     let (_sid, _, _) = embed_open(&mut hub, &a).await;
@@ -511,7 +511,7 @@ async fn next_presence(hub: &mut Hub, id: &str, online: bool) {
 
 #[tokio::test]
 async fn presence_reports_online_then_offline() {
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let mut hub = presence_hub(&a, home.path()).await;
     next_presence(&mut hub, &a.id, true).await;
@@ -521,7 +521,7 @@ async fn presence_reports_online_then_offline() {
 
 #[tokio::test]
 async fn ping_is_answered_and_not_logged() {
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let mut hub = presence_hub(&a, home.path()).await;
     next_presence(&mut hub, &a.id, true).await;
@@ -537,7 +537,7 @@ async fn ping_is_answered_and_not_logged() {
 
 #[tokio::test]
 async fn offline_probe_writes_one_line_per_change_not_per_tick() {
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let mut hub = presence_hub(&a, home.path()).await;
     next_presence(&mut hub, &a.id, true).await;
@@ -560,7 +560,7 @@ async fn offline_probe_writes_one_line_per_change_not_per_tick() {
 
 #[tokio::test]
 async fn stale_password_stops_probing_and_does_not_lock_the_user_out() {
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let saved = json!([{"id":a.id,"name":"test-a","password":"stale-pass","lan":[a_addr(&a.svc).to_string()]}]);
     rapp_net::config::write_json(&home.path().join("hosts.json"), &saved).unwrap();
@@ -575,7 +575,7 @@ async fn stale_password_stops_probing_and_does_not_lock_the_user_out() {
 
 #[tokio::test]
 async fn removing_a_host_during_a_probe_keeps_it_removed() {
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let saved = json!([{"id":a.id,"name":"old-name","password":PASSWORD,"lan":[a_addr(&a.svc).to_string()]}]);
     rapp_net::config::write_json(&home.path().join("hosts.json"), &saved).unwrap();
@@ -591,7 +591,7 @@ async fn removing_a_host_during_a_probe_keeps_it_removed() {
 
 #[tokio::test]
 async fn no_presence_without_interval() {
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let hub = hub_with_host(&a, home.path()).await;
     tokio::time::sleep(Duration::from_millis(500)).await;
@@ -601,7 +601,7 @@ async fn no_presence_without_interval() {
 
 #[tokio::test]
 async fn lan_stale_password_probe_logs_one_auth_fail_on_a() {
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let saved = json!([{"id":a.id,"name":"test-a","password":"stale-pass","lan":[a_addr(&a.svc).to_string()]}]);
     rapp_net::config::write_json(&home.path().join("hosts.json"), &saved).unwrap();
@@ -636,7 +636,7 @@ struct LanA {
 
 impl LanA {
     async fn start() -> LanA {
-        let a = service(None).await;
+        let a = service().await;
         let addr = a_addr(&a.svc);
         LanA { home: a.home, bins: a.bins, id: a.id, addr, svc: Some(a.svc) }
     }
@@ -701,7 +701,7 @@ async fn host_goes_offline_and_comes_back() {
 
 #[tokio::test]
 async fn bare_id_is_refused_and_nothing_saved() {
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let mut hub = Hub::start(home.path(), a.bins.path());
     let r = hub.call(json!({"cmd":"add_host","id":a.id,"password":PASSWORD,"req":1})).await;
@@ -712,7 +712,7 @@ async fn bare_id_is_refused_and_nothing_saved() {
 #[tokio::test]
 async fn host_saved_by_an_old_version_still_connects_over_lan() {
     // hosts.json as a relay-era hub wrote it: ID, name, password and A's LAN addresses.
-    let a = service(None).await;
+    let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let saved = json!([{"id":a.id,"name":"test-a","password":PASSWORD,"lan":[a_addr(&a.svc).to_string()]}]);
     rapp_net::config::write_json(&home.path().join("hosts.json"), &saved).unwrap();
@@ -759,7 +759,7 @@ async fn saved_host_without_addresses_says_so() {
 
 #[tokio::test]
 async fn set_home_reads_hosts_from_the_new_dir() {
-    let a = service(None).await;
+    let a = service().await;
     let (home1, home2) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
     rapp_net::config::write_json(
         &home2.path().join("hosts.json"),

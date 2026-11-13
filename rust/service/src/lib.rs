@@ -1,12 +1,10 @@
-//! rapp-service (spec §3): A side. Registers with the relay, authenticates peers,
-//! lists apps, runs `rapp-host` workers and splices sessions, serves local IPC.
+//! rapp-service (spec §3): A side. Authenticates B, runs `rapp-host` workers, serves local IPC.
 
 mod cm;
 pub mod config;
 mod data;
 mod ipc;
 mod peer;
-mod relay_link;
 mod state;
 mod update;
 mod workers;
@@ -104,7 +102,6 @@ impl Service {
         let ipc_token = rapp_net::crypto::random_hex(16);
         rapp_net::config::write_private(&opts.home.join("ipc.token"), ipc_token.as_bytes())?;
 
-        let (relay_tx, relay_rx) = tokio::sync::mpsc::unbounded_channel();
         let state = State {
             home: opts.home,
             bin_dir: opts.bin_dir,
@@ -112,14 +109,11 @@ impl Service {
             endpoint: endpoint.clone(),
             port,
             cfg: Mutex::new(cfg),
-            tokens: Mutex::default(),
             sessions: Mutex::default(),
-            relay: Mutex::new(("off", None)),
             permissions: Mutex::new(serde_json::Value::Null),
             perms_lost: Mutex::new(false),
             workers: workers::Workers::new(opts.worker_idle),
             changed: tokio::sync::watch::channel(0).0,
-            relay_cmd: relay_tx,
             cm: Mutex::new(None),
             log,
             log_dir: opts.log_dir,
@@ -137,7 +131,6 @@ impl Service {
         update::on_start(&state).await;
         let mut tasks = vec![
             tokio::spawn(peer::accept_loop(state.clone(), endpoint)),
-            tokio::spawn(relay_link::run(state.clone(), relay_rx)),
             tokio::spawn(ipc::serve(state.clone(), listener, ipc_token)),
             update::spawn(state.clone()),
         ];

@@ -1,5 +1,5 @@
 //! Device-to-device side of A (spec §2.3): direct QUIC connections (auth first) and
-//! the request handler shared with relayed streams.
+//! the request handler.
 
 use crate::state::{Peer, State};
 use crate::workers;
@@ -64,24 +64,17 @@ async fn serve_conn(state: Arc<State>, conn: Connection) {
 }
 
 /// The first stream must be `{"op":"auth",...}`. None when it passed, else the reason;
-/// `peer.name` picks up the name B declared (or the one it gave the relay), cleaned.
+/// `peer.name` picks up the name B declared, cleaned.
 /// Err only when B never opened a stream (a dropped probe).
 async fn auth(state: &State, conn: &Connection, private: bool, peer: &mut Peer) -> Result<Option<String>> {
     let mut s = bi(conn.accept_bi().await?);
     let declared = |n: Option<String>| n.map(|n| clean_name(&n)).filter(|n| !n.is_empty());
     let reply = match read_json(&mut s).await.map(serde_json::from_value) {
         Err(_) => err("bad request"),
-        Ok(Ok(Op::Auth { token, password, name })) => {
+        Ok(Ok(Op::Auth { password, name, .. })) => {
             peer.name = declared(name);
-            match (token, password) {
-                (Some(t), _) => match state.token_peer(&t) {
-                    Some((_, relay_name)) => {
-                        peer.name = peer.name.take().or(declared(relay_name));
-                        ok(json!({}))
-                    }
-                    None => err("bad token"),
-                },
-                (None, Some(p)) if private => {
+            match password {
+                Some(p) if private => {
                     let cfg = state.cfg.lock().unwrap().clone();
                     if ct_eq(&p, &cfg.password) {
                         // Named so B can check the ID behind an `id@ip` it was given (§2.3).
@@ -90,8 +83,8 @@ async fn auth(state: &State, conn: &Connection, private: bool, peer: &mut Peer) 
                         err("bad password")
                     }
                 }
-                (None, Some(_)) => err("password auth only from private networks"),
-                (None, None) => err("auth required"),
+                Some(_) => err("password auth only from private networks"),
+                None => err("auth required"),
             }
         }
         _ => err("auth required"),
@@ -107,7 +100,7 @@ async fn reply_and_finish(s: &mut BiStream, v: Value) -> Result<()> {
     Ok(())
 }
 
-/// One request on an authenticated stream (direct or relayed).
+/// One request on an authenticated stream.
 pub async fn serve_request(state: &Arc<State>, mut s: BiStream, peer: Peer) -> Result<()> {
     match serde_json::from_value(read_json(&mut s).await?) {
         Ok(Op::ListApps) => {
