@@ -705,7 +705,7 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
             let density = stream::capture_density(s.zoom, backing, s.density_choice);
             let next = (s.mode, s.fps, density);
             if stream::changed(s.last_stream, next) {
-                s.send(p::stream(next.0, next.1, next.2));
+                s.send(p::stream(next.0, next.1, next.2, None));
                 s.last_stream = Some(next);
             }
         }

@@ -261,7 +261,7 @@ fn menu_and_window_validation() {
 #[test]
 fn v5_clipboard_bounds_and_legacy_selection() {
     let address = Address::parse("rapp://host/?token=x", None).unwrap();
-    assert_eq!(address.hello(1.)[5], 6);
+    assert_eq!(address.hello(1.)[5], 7);
     let text = "中文 clipboard";
     let mut payload = 1u32.to_le_bytes().to_vec();
     payload.extend([0, 0]);
@@ -275,7 +275,6 @@ fn v5_clipboard_bounds_and_legacy_selection() {
     payload[5] = 0;
     payload[6..10].copy_from_slice(&u32::MAX.to_le_bytes());
     assert!(decode(19, &payload).is_err());
-    assert!(Address::parse("rapp://host/?token=x&protocol=7", None).is_err());
     let image = [1, 0, 0, 0, 1, 32, 0, 32, 0, 100, 0, 0, 0, 0, 0, 0, 0];
     assert!(matches!(
         decode(19, &image).unwrap(),
@@ -396,7 +395,7 @@ fn v6_notifications_and_paste_confirmation_are_strict() {
 #[test]
 fn reconnect_address_roundtrips_without_exposing_token() {
     for host in ["localhost", "127.0.0.1", "[::1]"] {
-        for version in [4, 5, 6] {
+        for version in [4, 5, 6, 7] {
             let original = Address::parse(&format!("rapp://{host}:1234/com.example.%E6%96%87?protocol={version}&mode=duocolor&fps=30"), Some("secret".into())).unwrap();
             let url = original.connect_url();
             assert!(!url.contains("secret"));
@@ -407,4 +406,33 @@ fn reconnect_address_roundtrips_without_exposing_token() {
             assert_eq!(again.hello(1.), original.hello(1.));
         }
     }
+}
+
+#[test]
+fn frame_ack_bytes() {
+    assert_eq!(frame_ack(300), packet(27, 300u16.to_le_bytes().to_vec()));
+}
+#[test]
+fn stream_pinned_only_when_asked() {
+    let old = stream(3, 1, 1., None);
+    let mut payload = vec![3, 1];
+    payload.extend(1f32.to_le_bytes());
+    assert_eq!(old, packet(11, payload.clone()));
+    payload.push(1);
+    assert_eq!(stream(3, 1, 1., Some(true)), packet(11, payload.clone()));
+    *payload.last_mut().unwrap() = 0;
+    assert_eq!(stream(3, 1, 1., Some(false)), packet(11, payload));
+}
+#[test]
+fn decodes_weak_strictly() {
+    assert!(matches!(decode(28, &[1]).unwrap(), Incoming::Weak(true)));
+    assert!(matches!(decode(28, &[0]).unwrap(), Incoming::Weak(false)));
+    assert!(decode(28, &[2]).is_err());
+    assert!(decode(28, &[]).is_err());
+    assert!(decode(28, &[1, 0]).is_err());
+}
+#[test]
+fn parses_protocol_7() {
+    assert_eq!(Address::parse("rapp://host/?token=x&protocol=7", None).unwrap().version, 7);
+    assert!(Address::parse("rapp://host/?token=x&protocol=8", None).is_err());
 }

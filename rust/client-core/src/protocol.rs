@@ -1,7 +1,7 @@
 use anyhow::{bail, ensure, Context, Result};
 use std::{collections::HashSet, io::Read};
 
-pub const VERSION: u8 = 6;
+pub const VERSION: u8 = 7;
 pub const MAX_MESSAGE: usize = 64 * 1024 * 1024;
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Rect {
@@ -52,6 +52,7 @@ pub enum Incoming {
         error: String,
     },
     InputBlocked(String),
+    Weak(bool),
 }
 #[derive(Clone, Debug)]
 pub struct Address {
@@ -97,7 +98,7 @@ impl Address {
             token.len() <= 65535 && app.len() <= 65535,
             "token or app identifier too long"
         );
-        ensure!([4, 5, 6].contains(&version), "protocol must be 4, 5 or 6");
+        ensure!([4, 5, 6, 7].contains(&version), "protocol must be 4, 5, 6 or 7");
         Ok(Self {
             version,
             host,
@@ -178,9 +179,15 @@ pub fn scroll(id: u32, x: f32, y: f32, dx: f32, dy: f32) -> Vec<u8> {
     }
     packet(8, p)
 }
-pub fn stream(mode: u8, fps: u8, density: f32) -> Vec<u8> {
+pub fn frame_ack(processing_ms: u16) -> Vec<u8> {
+    packet(27, processing_ms.to_le_bytes().to_vec())
+}
+pub fn stream(mode: u8, fps: u8, density: f32, pinned: Option<bool>) -> Vec<u8> {
     let mut p = vec![mode, fps];
     p.extend(density.to_le_bytes());
+    if let Some(pinned) = pinned {
+        p.push(pinned as u8);
+    }
     packet(11, p)
 }
 pub fn menu_pick(path: &[u16]) -> Vec<u8> {
@@ -396,6 +403,11 @@ pub fn decode(kind: u8, p: &[u8]) -> Result<Incoming> {
             error: r.string()?,
         },
         26 => Incoming::InputBlocked(r.string()?),
+        28 => {
+            let v = r.u8()?;
+            ensure!(v <= 1, "invalid weak flag");
+            Incoming::Weak(v == 1)
+        }
         _ => bail!("unknown host message type {kind}"),
     };
     r.end()?;

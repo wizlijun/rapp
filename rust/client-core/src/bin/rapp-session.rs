@@ -96,7 +96,7 @@ fn command(v: &Value) -> Result<Vec<u8>> {
                 .context("invalid mode")?;
             let fps = number(v, "fps")?;
             ensure!([1, 5, 15, 30].contains(&fps), "invalid fps");
-            p::stream(mode, fps as u8, float(v, "density")?.clamp(0.1, 8.))
+            p::stream(mode, fps as u8, float(v, "density")?.clamp(0.1, 8.), None)
         }
         "menu_pick" => {
             let path: Vec<u16> = v["path"]
@@ -246,6 +246,7 @@ fn run(out: &Output) -> Result<()> {
                 event(out, json!({"event":"paste_result","seq":seq,"error":error}))?
             }
             Incoming::InputBlocked(by) => event(out, json!({"event":"input_blocked","by":by}))?,
+            Incoming::Weak(_) => {}
         }
     }
 }
