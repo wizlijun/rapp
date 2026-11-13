@@ -11,7 +11,10 @@ serde_json.workspace = true
 rapp-wire.workspace = true
 rapp-net.workspace = true
 tokio.workspace = true
+quinn.workspace = true
+data-encoding.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
+rustls.workspace = true

@@ -146,15 +146,20 @@ impl Conns {
         Conns { total, per_ip, counts: Arc::new(Mutex::new(Counts::default())) }
     }
 
-    pub fn admit(&self, ip: IpAddr) -> Option<ConnGuard> {
+    /// A slot for one more connection from `ip`, or the name of the limit that refused it
+    /// (`"max_conns"` or `"max_conns_per_ip"`, the config items).
+    pub fn admit(&self, ip: IpAddr) -> Result<ConnGuard, &'static str> {
         let ip = source_key(ip);
         let mut c = lock(&self.counts);
-        if c.total >= self.total || c.per_ip.get(&ip).copied().unwrap_or(0) >= self.per_ip {
-            return None;
+        if c.total >= self.total {
+            return Err("max_conns");
+        }
+        if c.per_ip.get(&ip).copied().unwrap_or(0) >= self.per_ip {
+            return Err("max_conns_per_ip");
         }
         c.total += 1;
         *c.per_ip.entry(ip).or_insert(0) += 1;
-        Some(ConnGuard { ip, counts: self.counts.clone() })
+        Ok(ConnGuard { ip, counts: self.counts.clone() })
     }
 }
 
@@ -312,12 +317,13 @@ mod tests {
         let c = Conns::new(3, 2);
         let g1 = c.admit(ip("1.2.3.4")).unwrap();
         let _g2 = c.admit(ip("::ffff:1.2.3.4")).unwrap();
-        assert!(c.admit(ip("1.2.3.4")).is_none());
+        assert_eq!(c.admit(ip("1.2.3.4")).err(), Some("max_conns_per_ip"));
         drop(g1);
         let _g3 = c.admit(ip("1.2.3.4")).unwrap();
         let _g4 = c.admit(ip("9.9.9.9")).unwrap();
-        // total is now 3
-        assert!(c.admit(ip("5.6.7.8")).is_none());
+        // total is now 3; the total cap is named even for an address also at its own cap
+        assert_eq!(c.admit(ip("5.6.7.8")).err(), Some("max_conns"));
+        assert_eq!(c.admit(ip("1.2.3.4")).err(), Some("max_conns"));
     }
 
     #[test]
