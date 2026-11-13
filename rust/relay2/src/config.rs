@@ -1,7 +1,9 @@
 //! Layered configuration: defaults <- `<data>/config.json` <- `RAPP_RELAY_*` environment.
 
 use anyhow::{anyhow, bail, Context, Result};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::str::FromStr;
@@ -97,42 +99,48 @@ impl Default for Config {
     }
 }
 
+/// File values are kept as raw JSON and converted one by one so errors can name the item.
 #[derive(Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 struct FileAudit {
-    keep_days: Option<u32>,
-    max_mb: Option<u64>,
-    required: Option<bool>,
+    keep_days: Option<Value>,
+    max_mb: Option<Value>,
+    required: Option<Value>,
 }
 
 #[derive(Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 struct FileLimits {
-    max_conns: Option<usize>,
-    max_conns_per_ip: Option<usize>,
-    max_streams: Option<u32>,
-    max_relayed_per_device: Option<usize>,
-    max_devices: Option<usize>,
-    unenrolled_idle_secs: Option<u64>,
-    enroll_per_ip_per_min: Option<u32>,
-    max_line: Option<usize>,
-    request_timeout_secs: Option<u64>,
-    lock_after: Option<u32>,
-    lock_max_secs: Option<u64>,
-    connect_per_target_per_min: Option<u32>,
-    relay_bps_per_stream: Option<u64>,
-    relay_bps_total: Option<u64>,
+    max_conns: Option<Value>,
+    max_conns_per_ip: Option<Value>,
+    max_streams: Option<Value>,
+    max_relayed_per_device: Option<Value>,
+    max_devices: Option<Value>,
+    unenrolled_idle_secs: Option<Value>,
+    enroll_per_ip_per_min: Option<Value>,
+    max_line: Option<Value>,
+    request_timeout_secs: Option<Value>,
+    lock_after: Option<Value>,
+    lock_max_secs: Option<Value>,
+    connect_per_target_per_min: Option<Value>,
+    relay_bps_per_stream: Option<Value>,
+    relay_bps_total: Option<Value>,
 }
 
 #[derive(Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 struct FileConfig {
-    listen: Option<SocketAddr>,
-    enroll: Option<Enroll>,
-    log: Option<LogLevel>,
-    audit: Option<FileAudit>,
-    metrics: Option<SocketAddr>,
-    limits: Option<FileLimits>,
+    listen: Option<Value>,
+    enroll: Option<Value>,
+    log: Option<Value>,
+    audit: Option<Value>,
+    metrics: Option<Value>,
+    limits: Option<Value>,
+}
+
+/// Convert one raw file value to `T`; the error names the item (e.g. `limits.max_conns`).
+fn conv<T: DeserializeOwned>(v: Option<Value>, item: &str) -> Result<Option<T>> {
+    v.map(|v| serde_json::from_value(v).map_err(|e| anyhow!("config file: {item}: bad value: {e}"))).transpose()
 }
 
 fn set<T>(dst: &mut T, v: Option<T>) {
@@ -184,34 +192,40 @@ pub fn load(data: &Path, env: &dyn Fn(&str) -> Option<String>) -> Result<Config>
         Ok(text) => {
             let f: FileConfig =
                 serde_json::from_str(&text).with_context(|| format!("config file {}", path.display()))?;
-            set(&mut c.listen, f.listen);
-            set(&mut c.enroll, f.enroll);
-            set(&mut c.log, f.log);
-            if let Some(m) = f.metrics {
+            set(&mut c.listen, conv(f.listen, "listen")?);
+            set(&mut c.enroll, conv(f.enroll, "enroll")?);
+            set(&mut c.log, conv(f.log, "log")?);
+            if let Some(m) = conv::<SocketAddr>(f.metrics, "metrics")? {
                 check_loopback(m, "config file: metrics")?;
                 c.metrics = Some(m);
             }
-            if let Some(a) = f.audit {
-                set(&mut c.audit.keep_days, a.keep_days);
-                set(&mut c.audit.max_mb, a.max_mb);
-                set(&mut c.audit.required, a.required);
+            if let Some(a) = conv::<FileAudit>(f.audit, "audit")? {
+                set(&mut c.audit.keep_days, conv(a.keep_days, "audit.keep_days")?);
+                set(&mut c.audit.max_mb, conv(a.max_mb, "audit.max_mb")?);
+                set(&mut c.audit.required, conv(a.required, "audit.required")?);
             }
-            if let Some(l) = f.limits {
-                let d = &mut c.limits;
-                set(&mut d.max_conns, l.max_conns);
-                set(&mut d.max_conns_per_ip, l.max_conns_per_ip);
-                set(&mut d.max_streams, l.max_streams);
-                set(&mut d.max_relayed_per_device, l.max_relayed_per_device);
-                set(&mut d.max_devices, l.max_devices);
-                set(&mut d.unenrolled_idle_secs, l.unenrolled_idle_secs);
-                set(&mut d.enroll_per_ip_per_min, l.enroll_per_ip_per_min);
-                set(&mut d.max_line, l.max_line);
-                set(&mut d.request_timeout_secs, l.request_timeout_secs);
-                set(&mut d.lock_after, l.lock_after);
-                set(&mut d.lock_max_secs, l.lock_max_secs);
-                set(&mut d.connect_per_target_per_min, l.connect_per_target_per_min);
-                set(&mut d.relay_bps_per_stream, l.relay_bps_per_stream);
-                set(&mut d.relay_bps_total, l.relay_bps_total);
+            if let Some(l) = conv::<FileLimits>(f.limits, "limits")? {
+                macro_rules! file_limits {
+                    ($($f:ident),* $(,)?) => {$(
+                        set(&mut c.limits.$f, conv(l.$f, concat!("limits.", stringify!($f)))?);
+                    )*};
+                }
+                file_limits!(
+                    max_conns,
+                    max_conns_per_ip,
+                    max_streams,
+                    max_relayed_per_device,
+                    max_devices,
+                    unenrolled_idle_secs,
+                    enroll_per_ip_per_min,
+                    max_line,
+                    request_timeout_secs,
+                    lock_after,
+                    lock_max_secs,
+                    connect_per_target_per_min,
+                    relay_bps_per_stream,
+                    relay_bps_total,
+                );
             }
         }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -353,9 +367,17 @@ mod tests {
         let d = tempdir().unwrap();
         let err = load(d.path(), &env_of(&[("RAPP_RELAY_ENROLL", "maybe")])).unwrap_err();
         assert!(err.to_string().contains("RAPP_RELAY_ENROLL"), "{err}");
-        std::fs::write(d.path().join("config.json"), r#"{"enroll":"maybe"}"#).unwrap();
-        let err = format!("{:#}", load(d.path(), &|_| None).unwrap_err());
-        assert!(err.contains("maybe"), "{err}");
+        for (body, item) in [
+            (r#"{"enroll":"maybe"}"#, "enroll"),
+            (r#"{"listen":"x"}"#, "listen"),
+            (r#"{"limits":{"max_conns":"x"}}"#, "limits.max_conns"),
+            (r#"{"audit":{"required":"yes"}}"#, "audit.required"),
+            (r#"{"limits":5}"#, "limits"),
+        ] {
+            std::fs::write(d.path().join("config.json"), body).unwrap();
+            let err = format!("{:#}", load(d.path(), &|_| None).unwrap_err());
+            assert!(err.contains(item), "{body}: {err}");
+        }
     }
 
     #[test]
