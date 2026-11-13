@@ -182,11 +182,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             sendStreamIfChanged()
         case let .frame(region, payload):
+            let received = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
             do {
                 try decoder.decode(payload)
                 // Cropped by the region the frame itself carries, not the table's (spec §4.4).
                 let updated = try surfaces.draw(table: coordinator.table, decoder: decoder, region: region)
                 coordinator.show(surfaces, updated: updated)
+                let ms = (clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - received) / 1_000_000
+                connection.send(.frameAck(processingMs: UInt16(min(ms, 65535))))
             } catch {
                 output.finish(ExitCode.runtime, "rapp-client: cannot decode frame: \(error)")
                 return

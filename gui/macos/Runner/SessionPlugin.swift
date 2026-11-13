@@ -133,8 +133,8 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     case let .selectWindow(sid, window):
       live[sid]?.session.send(.focus(window))
       result(nil)
-    case let .setStream(sid, mode, fps, density):
-      live[sid]?.session.setStream(mode: mode, fps: fps, choice: density)
+    case let .setStream(sid, mode, fps, density, pinned):
+      live[sid]?.session.setStream(mode: mode, fps: fps, choice: density, pinned: pinned)
       result(nil)
     case let .cancelTransfer(sid, id):
       if let id { live[sid]?.session.cancelTransfer(id: id) } else { live[sid]?.session.cancelTransfers() }

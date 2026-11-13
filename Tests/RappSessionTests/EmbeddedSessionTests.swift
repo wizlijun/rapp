@@ -82,6 +82,53 @@ final class EmbeddedSessionTests: XCTestCase {
         XCTAssertFalse(link2.cancelled)
     }
 
+    func testAcksEveryDecodedFrame() throws {
+        let link = FakeLink()
+        let (_, q) = make(link) { _ in }
+        let frame = try goodFrame()
+        q.sync {
+            link.feed(.windows([w]))
+            for _ in 0..<3 { link.feed(.frame(region: region, frame)) }
+        }
+        let acks = link.sent.filter { if case .frameAck = $0 { return true } else { return false } }
+        XCTAssertEqual(acks.count, 3)
+    }
+
+    func testBadFrameIsNotAcked() throws {
+        let link = FakeLink()
+        let (_, q) = make(link) { _ in }
+        let good = try goodFrame()
+        var bad = good
+        bad.data = Array(good.data.prefix(good.data.count / 2))
+        q.sync { link.feed(.windows([w])); link.feed(.frame(region: region, bad)) }
+        XCTAssertFalse(link.sent.contains { if case .frameAck = $0 { return true } else { return false } })
+        XCTAssertTrue(link.cancelled)
+    }
+
+    func testWeakNoticeBecomesEvent() {
+        let link = FakeLink()
+        var events = [SessionEvent]()
+        let (_, q) = make(link) { events.append($0) }
+        q.sync { link.feed(.weak(true)); link.feed(.weak(false)) }
+        XCTAssertEqual(events, [.weak(true), .weak(false)])
+        XCTAssertFalse(link.cancelled)
+    }
+
+    func testPinnedReachesTheWire() {
+        let link = FakeLink()
+        let (s, q) = make(link) { _ in }
+        s.setStream(mode: .duogray, fps: 2, choice: .saver1x, pinned: true)
+        q.sync {}
+        guard case let .setStream(mode, fps, _, pinned)? = link.sent.last else { return XCTFail("sent \(link.sent)") }
+        XCTAssertEqual(mode, .duogray); XCTAssertEqual(fps, 2); XCTAssertTrue(pinned)
+        // Same stream, different pinned: sent again; identical: not.
+        let n = link.sent.count
+        s.setStream(mode: .duogray, fps: 2, choice: .saver1x, pinned: true); q.sync {}
+        XCTAssertEqual(link.sent.count, n)
+        s.setStream(mode: .duogray, fps: 2, choice: .saver1x, pinned: false); q.sync {}
+        XCTAssertEqual(link.sent.count, n + 1)
+    }
+
     func testInconsistentFrameClosesNotCrashes() throws {
         let link = FakeLink()
         var events = [SessionEvent]()

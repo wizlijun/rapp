@@ -102,6 +102,11 @@ final class ChannelTests: XCTestCase {
         XCTAssertEqual(blocks.first?["n"] as? Int, 2)
         XCTAssertEqual(blocks.first?["label"] as? String, "[图片 #1 10×20]")
 
+        let weak = eventPayload(.weak(true), sid: 3, textures: [:])
+        XCTAssertEqual(weak?.method, "weak")
+        XCTAssertEqual(weak?.args["on"] as? Bool, true)
+        XCTAssertEqual(weak?.args["sid"] as? Int64, 3)
+
         let blocked = eventPayload(.inputBlocked(by: "Mac mini"), sid: 3, textures: [:])
         XCTAssertEqual(blocked?.method, "input_blocked")
         XCTAssertEqual(blocked?.args["by"] as? String, "Mac mini")

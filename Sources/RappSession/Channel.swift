@@ -336,6 +336,8 @@ public func eventPayload(_ e: SessionEvent, sid: Int64, textures: [UInt32: Int64
         return payload("composer_insert", pasteResultPayload(result))
     case let .inputBlocked(by):
         return payload("input_blocked", ["by": by])
+    case let .weak(on):
+        return payload("weak", ["on": on])
     case let .disconnected(reason):
         return payload("disconnected", ["reason": reason])
     case let .closed(reason):

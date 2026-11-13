@@ -45,6 +45,8 @@ public final class EmbeddedSession {
     private var fps: UInt8
     private var choice: DensityChoice
     private var sentStream: (mode: Mode, fps: UInt8, density: Float)?
+    private var pinned = false
+    private var sentPinned = false
     private var bytes = 0
     private var frames = 0
     /// The link is gone (dropped, bad data, or closed); the last pictures may still be shown.
@@ -92,9 +94,9 @@ public final class EmbeddedSession {
         run { if !self.linkDown { self.link.send(m) } }
     }
 
-    public func setStream(mode: Mode, fps: UInt8, choice: DensityChoice) {
+    public func setStream(mode: Mode, fps: UInt8, choice: DensityChoice, pinned: Bool = false) {
         run {
-            self.mode = mode; self.fps = fps; self.choice = choice
+            self.mode = mode; self.fps = fps; self.choice = choice; self.pinned = pinned
             self.sendStreamIfChanged()
         }
     }
@@ -234,6 +236,7 @@ public final class EmbeddedSession {
             emitWindows()
             sendStreamIfChanged()
         case let .frame(region, payload):
+            let received = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
             do {
                 try decoder.decode(payload)
                 let ids = try surfaces.draw(table: table, decoder: decoder, region: region)
@@ -242,6 +245,8 @@ public final class EmbeddedSession {
                 if table.contains(where: { info in surfaces.visible(info.id).map { $0 != emittedVisible[info.id] } ?? false }) {
                     emitWindows()
                 }
+                let ms = (clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - received) / 1_000_000
+                link.send(.frameAck(processingMs: UInt16(min(ms, 65535))))
             } catch {
                 disconnect(reason: "cannot decode frame: \(error)")
             }
@@ -261,6 +266,8 @@ public final class EmbeddedSession {
             disconnect(reason: "host says: \(reason)")
         case let .inputBlocked(by):
             onEvent?(.inputBlocked(by: by))
+        case let .weak(on):
+            onEvent?(.weak(on))
         default:
             break
         }
@@ -279,9 +286,10 @@ public final class EmbeddedSession {
     private func sendStreamIfChanged() {
         guard !linkDown else { return }
         let next = (mode: mode, fps: fps, density: captureDensity(zoom: 1, backingScale: backingScale, choice: choice))
-        guard streamChanged(from: sentStream, to: next) else { return }
+        guard streamChanged(from: sentStream, to: next) || pinned != sentPinned else { return }
         sentStream = next
-        link.send(.setStream(mode: next.mode, fps: next.fps, density: next.density, pinned: false))
+        sentPinned = pinned
+        link.send(.setStream(mode: next.mode, fps: next.fps, density: next.density, pinned: pinned))
     }
 }
 
