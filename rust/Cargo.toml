@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["wire", "relay", "net", "service", "hub", "testkit", "update", "client-core", "client-gtk"]
+members = ["wire", "conn", "relay", "net", "service", "hub", "testkit", "update", "client-core", "client-gtk"]
 
 [workspace.package]
 version = "0.5.5"
@@ -24,6 +24,7 @@ x509-parser = "0.18"
 data-encoding = "2"
 rapp-wire = { path = "wire" }
 rapp-net = { path = "net" }
+rapp-conn = { path = "conn" }
 rapp-relay = { path = "relay" }
 rapp-service = { path = "service" }
 rapp-hub = { path = "hub" }
