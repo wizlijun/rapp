@@ -13,89 +13,15 @@ With RAPP_E2E_BUNDLE=<path to rapp.app> the service, hub, host and client all
 come from the app's Contents/MacOS and RAPP_BIN_DIR is not set, so the
 "workers sit next to the service" lookup is what gets tested.
 """
-import json, os, re, socket, subprocess, sys, time
+import json, os, re, subprocess, sys, time
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-RUST = os.path.join(ROOT, "rust/target/release")
-SWIFT = os.path.join(ROOT, ".build/release")
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+from rig import Hub, ipc, wait_for, free_udp_port, read_text, RUST, SWIFT, KEY, PASSWORD
+
 WORK = os.path.abspath(sys.argv[1])
 APP = sys.argv[2] if len(sys.argv) > 2 else "com.apple.Safari"
 BUNDLE = os.environ.get("RAPP_E2E_BUNDLE")
 SERVICE_DIR = os.path.join(BUNDLE, "Contents/MacOS") if BUNDLE else RUST
-KEY = "e2e-key"
-PASSWORD = "e2epass1"
-
-
-def free_udp_port():
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    s.bind(("127.0.0.1", 0))
-    port = s.getsockname()[1]
-    s.close()
-    return port
-
-
-def wait_for(pred, seconds, what):
-    end = time.time() + seconds
-    while time.time() < end:
-        v = pred()
-        if v:
-            return v
-        time.sleep(0.1)
-    sys.exit(f"timed out waiting for {what}")
-
-
-def read_text(path):
-    try:
-        with open(path) as f:
-            return f.read()
-    except FileNotFoundError:
-        return ""
-
-
-class Hub:
-    def __init__(self, home, bins, force):
-        env = dict(os.environ, RAPP_HOME=home)
-        if force:
-            env["RAPP_FORCE_PATH"] = force
-        if bins:
-            env["RAPP_BIN_DIR"] = bins
-        self.log = os.path.join(WORK, f"hub-{force}.log")
-        self.p = subprocess.Popen([os.path.join(SERVICE_DIR, "rapp-hub")], env=env, text=True, bufsize=1,
-                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=open(self.log, "w"))
-        self.req = 0
-
-    def send(self, **cmd):
-        self.req += 1
-        cmd["req"] = self.req
-        self.p.stdin.write(json.dumps(cmd) + "\n")
-        return self.req
-
-    def wait(self, event, seconds=20, **match):
-        end = time.time() + seconds
-        while time.time() < end:
-            line = self.p.stdout.readline()
-            if not line:
-                sys.exit(f"hub exited while waiting for {event}")
-            ev = json.loads(line)
-            print("  hub:", line.strip())
-            if ev.get("event") == "error":
-                sys.exit(f"hub error: {ev}")
-            if ev.get("event") == event and all(ev.get(k) == v for k, v in match.items()):
-                return ev
-        sys.exit(f"timed out waiting for hub {event}")
-
-    def stop(self):
-        self.p.stdin.close()
-        self.p.wait(10)
-
-
-def ipc(port, token, cmd):
-    with socket.create_connection(("127.0.0.1", port), timeout=5) as s:
-        f = s.makefile("rw")
-        f.write(json.dumps({"token": token}) + "\n")
-        f.write(json.dumps(cmd) + "\n")
-        f.flush()
-        return json.loads(f.readline())
 
 
 def main():
@@ -124,14 +50,14 @@ def main():
             json.dump({"relay": relay_addr, "key": KEY, "id": None, "secret": "", "name": "e2e-a",
                        "password": PASSWORD, "port": 0, "ipc_port": 0}, f)
         os.chmod(os.path.join(a_home, "local", "service.json"), 0o600)
-        svc_log = os.path.join(WORK, "service.log")
+        svc_log = os.path.join(a_home, "local", "logs", "service.log")
         svc_env = dict(os.environ, RAPP_HOME=a_home, RAPP_GUI="/nonexistent")
         if bins:
             svc_env["RAPP_BIN_DIR"] = bins
         procs.append(subprocess.Popen(
             [os.path.join(SERVICE_DIR, "rapp-service")], env=svc_env,
-            stderr=open(svc_log, "w")))
-        ipc_port = int(wait_for(lambda: (re.search(r"ipc 127\.0\.0\.1:(\d+)", read_text(svc_log)) or [None, None])[1],
+            stderr=open(os.path.join(WORK, "service.err"), "w")))
+        ipc_port = int(wait_for(lambda: (re.search(r'"ipc_port":(\d+)', read_text(svc_log)) or [None, None])[1],
                                 10, "service ipc port"))
         # The ID exists before registration (A picks it), so wait for the relay's answer.
         host_id = wait_for(lambda: (re.search(r"registered as (\d+)", read_text(svc_log)) or [None, None])[1],
@@ -148,11 +74,11 @@ def main():
         for force in ("lan", "relay", "id@ip"):
             print(f"== path {force} ==")
             if force == "id@ip":
-                hub, want = Hub(c_home, bins, None), "lan"
+                hub, want = Hub(c_home, bins, None, WORK, SERVICE_DIR), "lan"
                 hub.send(cmd="add_host", id=at, password=PASSWORD)
                 print(f"  adding {at} with no relay")
             else:
-                hub, want = Hub(b_home, bins, force), force
+                hub, want = Hub(b_home, bins, force, WORK, SERVICE_DIR), force
                 hub.send(cmd="add_host", id=host_id, password=PASSWORD)
             hub.wait("host_added")
             hub.send(cmd="apps", id=host_id)
@@ -162,8 +88,9 @@ def main():
             opened = hub.wait("opened")
             assert opened["path"] == want, f"opened over {opened['path']}, wanted {want}"
             time.sleep(5)
-            # The client logs "windows: N" to stderr, which the hub writes to its log.
-            counts = [int(n) for n in re.findall(r"^windows: (\d+)$", read_text(hub.log), re.M)]
+            # The client logs "windows: N" to stderr, which the hub writes to local/logs/hub.log (tagged with the sid).
+            hub_log = os.path.join(b_home if force != "id@ip" else c_home, "local", "logs", "hub.log")
+            counts = [int(n) for n in re.findall(r'"msg":"windows: (\d+)","sid":%d' % opened["sid"], read_text(hub_log))]
             assert counts and counts[-1] >= 1, f"client saw no window (log windows lines: {counts})"
             print(f"  client windows: {counts[-1]}")
             shot = os.path.join(WORK, f"shot-{force.replace('@', '-at-')}.png")

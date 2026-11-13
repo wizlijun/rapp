@@ -155,6 +155,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 let app = NSApplication.shared
 app.setActivationPolicy(.regular)
+// The host pastes with a synthesized Cmd-V, which a text view only answers through a menu key equivalent.
+let mainMenu = NSMenu()
+let appItem = NSMenuItem(); mainMenu.addItem(appItem)
+appItem.submenu = NSMenu(title: "RappTestPage")
+let editItem = NSMenuItem(); mainMenu.addItem(editItem)
+let editMenu = NSMenu(title: "Edit"); editItem.submenu = editMenu
+editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+app.mainMenu = mainMenu
 let delegate = AppDelegate()
 app.delegate = delegate
 app.run()
