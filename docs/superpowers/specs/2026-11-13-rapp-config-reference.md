@@ -21,19 +21,40 @@
    4. 用 `python3 -m json.tool <文件> >/dev/null` 确认 JSON 能解析；
    5. 权限保持 `0600`（`chmod 600`）；
    6. 再启动那个程序，看日志里没有报错。
-4. **配置目录**（下称 `$HOME_DIR`）：环境变量 `RAPP_HOME` 优先；没有时 macOS 是 `~/Library/Application Support/rapp`，Linux 是 `$XDG_CONFIG_HOME/rapp`（默认 `~/.config/rapp`），Windows 是 `%APPDATA%\rapp`。代码：`rust/net/src/config.rs:8`、`gui/lib/paths.dart:5`。所有文件都是先写临时文件再改名，权限 `0600`。
-5. **试验用临时目录。** 在自己机器上验证配置时，设 `RAPP_HOME=<临时目录>` 和 `RAPP_LOG_DIR=<临时目录>`，不碰用户真实的配置目录。
+4. **数据根目录**（下称 `$ROOT`，规格《数据目录》）：所有 rapp 数据都在这一个目录下。找法按顺序：环境变量 `RAPP_HOME` → 指针文件 `<旧配置目录>/data-root`（一行绝对路径）→ `~/rapp`（Windows `%USERPROFILE%\rapp`）。代码：`rust/net/src/config.rs:23-38`、`gui/lib/paths.dart:50-56`、`Sources/RappCore/DataPaths.swift:3-9`。
+   - **旧配置目录**：macOS `~/Library/Application Support/rapp`，Linux `$XDG_CONFIG_HOME/rapp`（默认 `~/.config/rapp`），Windows `%APPDATA%\rapp`（`rust/net/src/config.rs:50-63`）。现在只用来放 `data-root` 指针，和作搬家的来源（只复制，旧文件原样留着）。
+   - **目录树**：
+
+     ```
+     $ROOT/
+       README.md  .gitignore
+       shared/            所有设备共用（进 git）：apps.json  workspace.json
+       devices/<id>/      每台设备一份，只由这台设备写（进 git）：device.json  gui.json
+       agent/             用户和 agent 的内容（进 git），rapp 不动
+       clipboard/         钉住的文字条目，一条一个 .md（进 git）
+       files/             二进制，不进 git：transfers/（收发的文件）  clipboard/（钉住的图片和文件）
+       local/             本机私有，不进 git，0700：service.json  hosts.json  ipc.token  update.json  ……（§3）
+     ```
+   - **进 git 的**：`shared/`、`devices/`、`agent/`、`clipboard/`、`README.md`、`.gitignore`。**不进 git 的**：`files/`、`local/`（写在 `.gitignore` 里）。rapp-service 在改动后 60 秒内合成一次提交（`rust/service/src/data.rs:34`）。
+   - **机密只在 `local/`**。`shared/`、`devices/`、`agent/`、`clipboard/` 里不写口令、key、secret、token；agent 往这些目录写东西时也一样。
+   - 路径函数：Rust `local`/`shared`/`device`/`files`（`rust/net/src/config.rs:79-93`），Dart `DataDir`（`gui/lib/paths.dart:60-72`）。
+   - 文件先写临时文件再改名；机密文件权限 `0600`。
+5. **试验用临时目录。** 在自己机器上验证配置时，设 `RAPP_HOME=<临时目录>`（它优先于指针，所有数据都落在那里），不碰用户真实的 `~/rapp` 和旧配置目录。设了 `RAPP_HOME` 后日志在 `$RAPP_HOME/local/logs`，不用另设。
 
 ## 1. 一览
 
 | 文件 / 设置 | 在哪一侧 | 谁来改 | 机密 | 细则 |
 |---|---|---|---|---|
-| `service.json` | A（B 上的 hub 也读其中 relay/key） | GUI + 手改（部分字段） | 有 | §2.1 |
-| `hosts.json` | B | GUI（经 hub） | 有 | §2.2 |
-| `workspace.json` | B | GUI，可手改 | 无 | §2.3 |
-| `gui.json` | B | GUI，可手改 | 无 | §2.4 |
-| `apps.json` | B | GUI，可手改 | 无 | §2.5 |
-| 程序自管的状态 | A / B | 程序自管 | 部分有 | §3 |
+| `$ROOT/local/service.json` | A（B 上的 hub 也读其中 relay/key） | GUI + 手改（部分字段） | 有 | §2.1 |
+| `$ROOT/local/hosts.json` | B | GUI（经 hub） | 有 | §2.2 |
+| `$ROOT/shared/workspace.json` | B | GUI，可手改 | 无 | §2.3 |
+| `$ROOT/devices/<id>/gui.json` | B | GUI，可手改 | 无 | §2.4 |
+| `$ROOT/shared/apps.json` | B | GUI，可手改 | 无 | §2.5 |
+| `$ROOT/devices/<id>/device.json` | A / B | 程序自管（rapp-service 写，没有机密） | 无 | §2.6 |
+| `<旧配置目录>/data-root` | A / B | GUI「更改位置…」写，可手改 | 无 | §2.7 |
+| `$ROOT/clipboard/`、`$ROOT/files/clipboard/` | B | GUI 写，可手删 | 无（用户钉住的内容可能含私事） | §2.8 |
+| `$ROOT/agent/` | — | 用户和 agent，rapp 不动 | 不放机密 | §2.9 |
+| 程序自管的状态（`$ROOT/local/` 等） | A / B | 程序自管 | 部分有 | §3 |
 | macOS 开机自启 | A | 安装包 / GUI | 无 | §4 |
 | 中继（VPS） | relay | 运维手改 | 有 | §5 |
 | 环境变量 | 各侧 | 启动方 | 部分有 | §6 |
@@ -42,9 +63,9 @@
 
 ## 2. 用户可以改的配置
 
-### 2.1 `$HOME_DIR/service.json`（A 的主配置）
+### 2.1 `$ROOT/local/service.json`（A 的主配置）
 
-谁读：`rapp-service`，启动时读一次（`rust/service/src/config.rs:44`）；B 上的 `rapp-hub` 读其中的 `relay` 和 `key`（`rust/hub/src/lib.rs:72`）。第一次启动时自动补齐 `id`、`secret`、`password`、`name`。
+谁读：`rapp-service`，启动时读一次（`rust/service/src/config.rs:44`）；B 上的 `rapp-hub` 读其中的 `relay` 和 `key`（`rust/hub/src/lib.rs:72`）。第一次启动时自动补齐 `id`、`secret`、`password`、`name`。机密只在 `local/`，权限 `0600`，不进 git。旧版的 `service.json` 在旧配置目录里，第一次启动时复制过来（旧的留着）。
 
 | 字段 | 类型 | 没写时 | 取值 | 谁改 | 机密 |
 |---|---|---|---|---|---|
@@ -60,9 +81,9 @@
 | `auto_update` | 布尔 | `true` | 没人用时自己装新版 | GUI（IPC `set_update`） | |
 | `check_updates` | 布尔 | `true` | 定时检查更新 | GUI（IPC `set_update`） | |
 
-生效：手改后要重启 `rapp-service`。macOS：`launchctl kickstart -k gui/$(id -u)/com.rapp.service`（这会断开正在连着的会话，先问用户）。
+生效：手改后要重启 `rapp-service`。macOS：`launchctl kickstart -k gui/$(id -u)/com.rapp.service`（这会断开正在连着的会话，先问用户）。agent 改 `shared/` 和自己设备的 `devices/<id>/` 里的文件时，注意 rapp-service 一分钟内会把改动提交进 git。
 
-### 2.2 `$HOME_DIR/hosts.json`（B 存下的 A 列表）
+### 2.2 `$ROOT/local/hosts.json`（B 存下的 A 列表）
 
 谁读写：`rapp-hub`（`rust/hub/src/hosts.rs:24`），GUI 通过 hub 的 `add_host`、`remove_host` 改（`rust/hub/src/lib.rs:174-203`）。
 
@@ -74,9 +95,9 @@
 
 agent 规则：**不直接改这个文件**。加、删设备走 GUI 的设备页或 hub 的 `add_host` / `remove_host`；口令由用户自己填。
 
-### 2.3 `<GUI 配置目录>/workspace.json`（常用和项目）
+### 2.3 `$ROOT/shared/workspace.json`（常用和项目）
 
-谁读写：GUI，启动时读（`gui/lib/ui/workspace_store.dart:107`），每次改动都写（`:125`）。读不出来时改名为 `workspace.json.bad`，从空白开始，提示「项目和常用没有读到，已从空白开始」。
+谁读写：GUI，启动时读（`gui/lib/ui/workspace_store.dart:107`），每次改动都写（`:125`）。在 `shared/` 里，各设备共用，进 git。读不出来时改名为 `workspace.json.bad`，从空白开始，提示「项目和常用没有读到，已从空白开始」。
 
 ```json
 {
@@ -94,11 +115,11 @@ agent 规则：**不直接改这个文件**。加、删设备走 GUI 的设备�
 | `name` | 存下时 app 的显示名 |
 | `task` | 用户自己写的任务名，可以空 |
 
-生效：先退出 GUI 再手改，改完重新打开。没有机密。
+生效：先退出 GUI 再手改，改完重新打开。没有机密。旧位置是旧 GUI 配置目录，会被复制过来。
 
-### 2.4 `<GUI 配置目录>/gui.json`（界面偏好）
+### 2.4 `$ROOT/devices/<id>/gui.json`（界面偏好）
 
-谁读写：GUI（`gui/lib/ui/prefs.dart:14,33`）。
+谁读写：GUI（`gui/lib/ui/prefs.dart:14,33`）。每台设备一份，`<id>` 是这台的设备 id（`local/service.json` 的 `id`）；还不知道 id 时放在 `local/`。
 
 | 字段 | 取值 | 没写时 |
 |---|---|---|
@@ -107,23 +128,43 @@ agent 规则：**不直接改这个文件**。加、删设备走 GUI 的设备�
 
 生效：退出 GUI 再改，重新打开生效。没有机密。
 
-### 2.5 `<GUI 配置目录>/apps.json`（我的 app 配置）
+### 2.5 `$ROOT/shared/apps.json`（我的 app 配置）
 
 格式和取值见《app 配置设计》§2，怎么写见《app 配置编写规范》。内置的一份在 `gui/assets/app_profiles.json`（随 GUI 发布，只在仓库里改）。没有机密。
 
 （状态：设计已确认，代码在 `feat/app-profiles` 上实施中；实施完成时把代码位置补进这一节。）
 
+### 2.6 `$ROOT/devices/<id>/device.json`（这台设备是什么）
+
+程序自管，**不要改**，只读。rapp-service 写（`rust/service/src/data.rs:316-326`），内容 `{"id","name","os","version"}`，给别的设备和 agent 看这台是什么。没有口令和地址，没有机密。内容没变就不重写。
+
+### 2.7 `<旧配置目录>/data-root`（数据根目录指针）
+
+一行绝对路径，指向 `$ROOT`。GUI 设置页「数据目录」的「更改位置…」写它（`gui/lib/data_relocate.dart:37-62`），「改回默认」删它；读它的代码见 §0.4。手改也行：只写一行绝对路径（不是绝对路径就当没有）。`RAPP_HOME` 设了就优先于它。改完要重启 `rapp-service`（先问用户）。它必须在 `$ROOT` 外面，所以放在旧配置目录里。没有机密。
+
+### 2.8 `$ROOT/clipboard/` 和 `$ROOT/files/clipboard/`（钉住的剪贴板）
+
+只有用户在 GUI 里「钉住」的条目才写盘，没钉住的只在内存里。文字：`clipboard/<时间>-<短标题>.md`，一条一个，进 git；图片和文件：`files/clipboard/`，不进 git。GUI 启动时读回来（`gui/lib/ui/pin_files.dart:37`），取消钉住就删这条的文件（`:77`）。agent 手删文件 = 取消钉住，下次 GUI 启动时生效；git 历史里还留着。不要往里写机密，不要把内容或标题抄进日志。
+
+### 2.9 `$ROOT/agent/`（agent 的上下文）
+
+用户和 agent 的目录，进 git，rapp 只建目录和 `agent/README.md`（指向这份文档），里面的内容不动。agent 可以在这里放自己的笔记和上下文，但不放机密。
+
 ## 3. 程序自管的状态（不要改）
 
 | 文件 | 在哪 | 是什么 | 机密 |
 |---|---|---|---|
-| `$HOME_DIR/ipc.token` | A、B | GUI 连本机 service 用的 token，每次启动重新生成（`rust/service/src/lib.rs:100`） | **机密** |
-| `$HOME_DIR/update.json` | A | 最近查到的版本、上次检查时间、用户按过「不装」的版本（`rust/service/src/update.rs:133`）。「不装」走 IPC `update_dismiss` | |
-| `$HOME_DIR/update-applied.json` | A | 上次升级的记录，用于回滚和授权提示（`rust/update/src/apply.rs:10`） | |
-| `$HOME_DIR/previous/` | A | 升级前的旧版，用于回滚 | |
+| `$ROOT/local/ipc.token` | A、B | GUI 连本机 service 用的 token，每次启动重新生成（`rust/service/src/lib.rs:105`） | **机密** |
+| `$ROOT/local/update.json` | A | 最近查到的版本、上次检查时间、用户按过「不装」的版本（`rust/service/src/update.rs:133`）。「不装」走 IPC `update_dismiss` | |
+| `$ROOT/local/update-applied.json` | A | 上次升级的记录，用于回滚和授权提示（`rust/update/src/apply.rs:10`） | |
+| `$ROOT/local/previous/` | A | 升级前的旧版，用于回滚（`rust/service/src/update.rs:136`） | |
+| `$ROOT/local/last-dr` | A | 上次运行时的签名要求（一个字符串），升级时对照用（`rust/service/src/update.rs:242`） | |
+| `$ROOT/local/sync.json` | A | rapp-service 写的 git 状态：`git`（`missing`、`local`、`synced`、`conflict`、`error`）、`last_commit`、`last_sync`、`error`（不含远端地址里的口令）；GUI 读（`rust/service/src/data.rs:41-47`） | |
+| `$ROOT/local/migrated-from` | A、B | 搬家时写的旧目录路径，只是记录（`rust/net/src/datadir.rs:12`） | |
+| `$ROOT/local/pin-hint-shown` | B | 「钉住会进 git 历史」的提示已经显示过的标记，没有内容（`gui/lib/ui/pin_files.dart:10`）。删掉它，下次钉住时会再提示 | |
 | `~/Library/Caches/rapp/update` | A（macOS） | 升级包下载缓存 | |
-| `<GUI 配置目录>/permission-guide-shown` | A | 授权引导已经显示过的标记，没有内容（`gui/lib/pages/permissions_panel.dart:141`）。删掉它，下次启动会再引导一次 | |
-| 日志 `service.log`、`hub.log`、`launchd.log` | A、B | 目录：`RAPP_LOG_DIR`，否则 `$HOME_DIR/logs`，否则 macOS `~/Library/Logs/rapp`、Linux `$XDG_STATE_HOME/rapp`（`rust/net/src/log.rs:236`）。内容规则见可观测性规格：不记口令、token、剪贴板和打字内容 | |
+| `$ROOT/local/permission-guide-shown` | A | 授权引导已经显示过的标记，没有内容（`gui/lib/pages/permissions_panel.dart:140`）。删掉它，下次启动会再引导一次 | |
+| 日志 `service.log`、`hub.log`、`launchd.log` | A、B | 目录：`RAPP_LOG_DIR`，否则设了 `RAPP_HOME` 时 `$RAPP_HOME/local/logs`，否则 macOS `~/Library/Logs/rapp`、Linux `$XDG_STATE_HOME/rapp`（`rust/net/src/log.rs:236`）。日志不跟着指针搬，不进 git。内容规则见可观测性规格：不记口令、token、剪贴板和打字内容 | |
 
 ## 4. macOS 开机自启：`~/Library/LaunchAgents/com.rapp.service.plist`
 
@@ -145,12 +186,12 @@ agent 规则：不手改；要换启动参数就改上面两处模板，**两处
 
 | 变量 | 哪一侧 | 含义 | 没设时 | 机密 |
 |---|---|---|---|---|
-| `RAPP_HOME` | A、B、GUI | 配置目录 | 系统默认（§0.4） | |
+| `RAPP_HOME` | A、B、GUI | 数据根目录 `$ROOT`，优先于指针文件（`rust/net/src/config.rs:30`） | 指针文件，再 `~/rapp`（§0.4） | |
 | `RAPP_LOG_DIR` | A、B、GUI | 日志目录 | 见 §3 日志 | |
 | `RAPP_BIN_DIR` | A、B、GUI | 辅助程序（rapp-host、rapp-client 等）所在目录 | 当前程序所在目录，再找 PATH | |
 | `RAPP_GUI` | A | `--cm` 连接窗口用的 GUI 路径 | 无 | |
 | `RAPP_FORCE_PATH` | B | 强制走 `relay`、`direct` 或 `lan` | 自动选 | |
-| `RAPP_DOWNLOADS` | B（GUI 嵌入会话，`gui/macos/Runner/SessionPlugin.swift:47`） | rapp 收文件的目录 | `~/Downloads/rapp` | |
+| `RAPP_DOWNLOADS` | A、B（A：`rapp-host` 收上传；B：GUI 嵌入会话下载，`gui/macos/Runner/SessionPlugin.swift:47`） | 收发文件的目录（`Sources/RappCore/DataPaths.swift:18-21`） | `$ROOT/files/transfers`（旧版是 `~/Downloads/rapp`，那里的文件不会搬） | |
 | `RAPP_TOKEN` | 内部 | service / hub 传给子进程的会话 token，不要自己设 | — | **机密** |
 | `RAPP_RELAY_KEY` | VPS | 中继密钥，见 §5 | — | **机密** |
 
