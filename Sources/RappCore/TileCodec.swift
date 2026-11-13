@@ -64,9 +64,11 @@ public final class FrameEncoder {
     private var previous = [UInt8]()
     private var previousWidth = 0
     private var previousHeight = 0
-    private var forceFull = true
+    var forceFull = true
+    /// Compressed / raw size of the previous frame, used to estimate slice sizes.
+    private var ratio = 1.0
 
-    /// Number of tiles in the frame most recently returned by `encode`.
+    /// Number of tiles in the frame most recently returned by `encode` or `encodeSlices`.
     public private(set) var lastTileCount = 0
 
     public init(mode: Mode) {
@@ -93,15 +95,45 @@ public final class FrameEncoder {
     /// size change and the frame after `reset()` are full frames (`isFull`),
     /// which also restart the compression stream.
     public func encode(samples: [UInt8], width: Int, height: Int) -> FramePayload? {
+        encodeSlices(samples: samples, width: width, height: height, limit: Int.max).first
+    }
+
+    /// Like `encode`, but cuts the changed tiles into slices by tile rows, top to
+    /// bottom. A slice is closed once its estimated compressed size (raw bytes of
+    /// its tiles times the previous frame's compression ratio) exceeds `limit`
+    /// (`firstLimit` for the first slice); a slice always holds at least one row.
+    /// Only the first slice of a full frame has `isFull`; the rest are deltas that
+    /// must be decoded in order. Returns `[]` when nothing changed. The encoder
+    /// treats the whole frame as sent: after dropping slices the caller must set
+    /// `forceFull`.
+    public func encodeSlices(samples: [UInt8], width: Int, height: Int, limit: Int,
+                             firstLimit: Int? = nil) -> [FramePayload] {
         precondition(width > 0 && height > 0 && width <= 0xFFFF && height <= 0xFFFF, "bad frame size")
         precondition(samples.count == width * height * bps, "sample count does not match frame size")
         let (cols, rows) = tileGrid(width: width, height: height)
         precondition(cols * rows <= maxTiles, "frame too large")
 
         let full = forceFull || width != previousWidth || height != previousHeight
+        let rowBytes = width * bps
+        var groups = [[UInt8]]()
         var body: [UInt8] = [0, 0]
         var count = 0
-        let rowBytes = width * bps
+        var groupRaw = 0
+        var totalCount = 0
+        var totalRaw = 0
+        var currentLimit = firstLimit ?? limit
+
+        func closeGroup() {
+            body[0] = UInt8(count & 0xFF)
+            body[1] = UInt8(count >> 8)
+            groups.append(body)
+            totalCount += count
+            totalRaw += groupRaw
+            body = [0, 0]
+            count = 0
+            groupRaw = 0
+            currentLimit = limit
+        }
 
         samples.withUnsafeBufferPointer { cur in
             previous.withUnsafeBufferPointer { old in
@@ -125,22 +157,32 @@ public final class FrameEncoder {
                         body.append(UInt8(index >> 8))
                         encodeTile(cur, rowBytes: rowBytes, x0: x0, y0: y0, tw: tw, th: th, into: &body)
                         count += 1
+                        groupRaw += tw * th * bps
                     }
+                    // Close the slice at a row boundary once it is estimated over the limit.
+                    if count > 0 && Double(groupRaw) * ratio > Double(currentLimit) { closeGroup() }
                 }
             }
         }
+        if count > 0 { closeGroup() }
 
-        if !full && count == 0 { return nil }
-        body[0] = UInt8(count & 0xFF)
-        body[1] = UInt8(count >> 8)
+        if groups.isEmpty { return [] }
         if full { deflate.reset() }
+        var slices = [FramePayload]()
+        var compressed = 0
+        for (i, group) in groups.enumerated() {
+            let data = deflate.compress(group)
+            compressed += data.count
+            slices.append(FramePayload(mode: mode, width: UInt16(width), height: UInt16(height),
+                                       isFull: full && i == 0, data: data))
+        }
         previous = samples
         previousWidth = width
         previousHeight = height
         forceFull = false
-        lastTileCount = count
-        return FramePayload(mode: mode, width: UInt16(width), height: UInt16(height), isFull: full,
-                            data: deflate.compress(body))
+        lastTileCount = totalCount
+        ratio = min(1, max(0.05, Double(compressed) / Double(totalRaw)))
+        return slices
     }
 
     @inline(__always)

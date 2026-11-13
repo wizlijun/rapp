@@ -269,3 +269,90 @@ final class TileCodecTests: XCTestCase {
         XCTAssertEqual(dec.samples[1], 1)
     }
 }
+
+final class TileSliceTests: XCTestCase {
+    /// Feeds the slice to the decoder and returns the tile rows whose pixels changed.
+    private func decodeAndChangedRows(_ dec: FrameDecoder, _ slice: FramePayload) throws -> [Int] {
+        // A full slice starts from a blank canvas.
+        var before = dec.samples
+        try dec.decode(slice)
+        if slice.isFull { before = [UInt8](repeating: 0, count: dec.samples.count) }
+        let w = dec.width, bps = dec.mode.bytesPerSample
+        var rows = Set<Int>()
+        for (i, v) in dec.samples.enumerated() where before[i] != v {
+            rows.insert(i / (w * bps) / tileSize)
+        }
+        return rows.sorted()
+    }
+
+    func testSmallFrameIsOneSliceSameAsEncode() {
+        let a = FrameEncoder(mode: .gray4), b = FrameEncoder(mode: .gray4)
+        var s = randomSamples(width: 200, height: 150, mode: .gray4, seed: 5)
+        for step in 0..<3 {
+            let one = a.encode(samples: s, width: 200, height: 150)
+            let many = b.encodeSlices(samples: s, width: 200, height: 150, limit: 32768)
+            XCTAssertEqual(many.count, 1)
+            XCTAssertEqual(many.first, one)
+            s[step * 70 + 3] ^= 1
+        }
+        _ = b.encodeSlices(samples: s, width: 200, height: 150, limit: 32768)
+        XCTAssertEqual(b.encodeSlices(samples: s, width: 200, height: 150, limit: 32768), [])
+    }
+
+    func testLargeFrameSlicesTopToBottomAndDecodesIdentically() throws {
+        let w = 1920, h = 1080
+        let s = randomSamples(width: w, height: h, mode: .gray4, seed: 9)
+        let slices = FrameEncoder(mode: .gray4).encodeSlices(samples: s, width: w, height: h, limit: 32768)
+        XCTAssertGreaterThanOrEqual(slices.count, 2)
+        XCTAssertEqual(slices.map(\.isFull), [true] + [Bool](repeating: false, count: slices.count - 1))
+        let dec = FrameDecoder()
+        var last = -1
+        for slice in slices {
+            let rows = try decodeAndChangedRows(dec, slice)
+            XCTAssertGreaterThan(try XCTUnwrap(rows.first), last)
+            last = try XCTUnwrap(rows.last)
+        }
+        XCTAssertEqual(dec.samples, s)
+    }
+
+    func testFirstLimitCapsFirstSlice() {
+        let w = 1920, h = 1080
+        let s = randomSamples(width: w, height: h, mode: .gray4, seed: 11)
+        let slices = FrameEncoder(mode: .gray4).encodeSlices(samples: s, width: w, height: h, limit: 32768,
+                                                              firstLimit: 8192)
+        // One tile row is the soft floor: 30 tiles of at most 64*64 samples, ratio 1.
+        XCTAssertLessThanOrEqual(slices[0].data.count, 8192 + 30 * 64 * 64 / 2)
+        XCTAssertGreaterThanOrEqual(slices.count, 2)
+    }
+
+    func testDeltaSlicesCarryOnlyChangedTiles() throws {
+        let w = 128, h = 64 * 50
+        let a = randomSamples(width: w, height: h, mode: .gray4, seed: 1)
+        let enc = FrameEncoder(mode: .gray4), dec = FrameDecoder()
+        for p in enc.encodeSlices(samples: a, width: w, height: h, limit: 1 << 20) { try dec.decode(p) }
+        var b = a
+        for row in [3, 40] { b[(row * 64 + 5) * w + 7] ^= 1 }
+        let slices = enc.encodeSlices(samples: b, width: w, height: h, limit: 1)
+        XCTAssertEqual(slices.count, 2)
+        XCTAssertEqual(slices.map(\.isFull), [false, false])
+        XCTAssertEqual(enc.lastTileCount, 2)
+        XCTAssertEqual(try decodeAndChangedRows(dec, slices[0]), [3])
+        XCTAssertEqual(try decodeAndChangedRows(dec, slices[1]), [40])
+        XCTAssertEqual(dec.samples, b)
+    }
+
+    func testForceFullAfterDroppedSlicesRestoresPicture() throws {
+        let w = 1920, h = 1080
+        let one = randomSamples(width: w, height: h, mode: .gray4, seed: 2)
+        let two = randomSamples(width: w, height: h, mode: .gray4, seed: 3)
+        let enc = FrameEncoder(mode: .gray4), dec = FrameDecoder()
+        let first = enc.encodeSlices(samples: one, width: w, height: h, limit: 400_000)
+        XCTAssertGreaterThanOrEqual(first.count, 3)
+        try dec.decode(first[0])
+        enc.forceFull = true
+        let second = enc.encodeSlices(samples: two, width: w, height: h, limit: 400_000)
+        XCTAssertTrue(second[0].isFull)
+        for p in second { try dec.decode(p) }
+        XCTAssertEqual(dec.samples, two)
+    }
+}
