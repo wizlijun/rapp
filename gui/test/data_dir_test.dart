@@ -53,6 +53,19 @@ void main() {
     expect(mode('$root/local'), '700');
   });
 
+  test('gui.json is not copied when the old id is not a plain id', () {
+    for (final id in ['"../x"', '""', '7', 'null']) {
+      final t = Directory.systemTemp.createTempSync('rapp_dd_id');
+      final r = '${t.path}/root', l = '${t.path}/legacy';
+      put('$l/service.json', '{"id":$id}');
+      put('$l/gui.json', 'old gui');
+      expect(prepareDataDir(r, l), isTrue, reason: id);
+      expect(Directory('$r/devices').listSync(), isEmpty, reason: id);
+      expect(File('${t.path}/x/gui.json').existsSync(), isFalse, reason: id);
+      t.deleteSync(recursive: true);
+    }
+  });
+
   test('existing texts are kept', () {
     put('$root/README.md', 'mine');
     put('$root/agent/README.md', 'mine too');
