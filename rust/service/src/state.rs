@@ -16,7 +16,7 @@ pub struct Peer {
     pub addr: String,
     /// "自称" (observability spec §4.1): whatever B sent, never checked.
     pub name: Option<String>,
-    /// "lan" | "direct"
+    /// "lan" | "direct"; "direct" now only shows on `auth_fail` lines (public sources cannot authenticate).
     pub path: &'static str,
 }
 

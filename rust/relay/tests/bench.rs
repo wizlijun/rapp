@@ -83,7 +83,7 @@ impl Drop for Proc {
     }
 }
 
-struct Relay2 {
+struct BenchRelay {
     proc: Proc,
     _data: tempfile::TempDir,
     addr: SocketAddr,
@@ -92,7 +92,7 @@ struct Relay2 {
 }
 
 /// Starts `rapp-relay` on a fresh data dir with a key installed, like the `key` subcommand does.
-async fn start_relay(env: &[(&str, &str)]) -> Relay2 {
+async fn start_relay(env: &[(&str, &str)]) -> BenchRelay {
     let data = tempfile::tempdir().unwrap();
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_rapp-relay"));
     cmd.arg("--data").arg(data.path()).env("RAPP_RELAY_LISTEN", "127.0.0.1:0");
@@ -104,10 +104,10 @@ async fn start_relay(env: &[(&str, &str)]) -> Relay2 {
     let fp: Fp = info["fp"].as_str().unwrap().parse().unwrap();
     let addr: SocketAddr = info["listen"].as_str().unwrap().parse().unwrap();
     let key = admin::issue_key(data.path(), false).await.unwrap().expect("a new key");
-    Relay2 { proc, _data: data, addr, fp, key }
+    BenchRelay { proc, _data: data, addr, fp, key }
 }
 
-impl Relay2 {
+impl BenchRelay {
     async fn device(&self) -> FakeDevice {
         let d = FakeDevice::dial_remote(self.addr, &self.fp, Identity::generate().unwrap()).await.unwrap();
         let v = d.enroll(&self.key).await;
