@@ -1,5 +1,5 @@
 [package]
-name = "rapp-relay2"
+name = "rapp-relay"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true

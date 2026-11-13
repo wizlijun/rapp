@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use common::*;
-use rapp_relay2::admin;
+use rapp_relay::admin;
 use rapp_wire::Key;
 use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -162,7 +162,7 @@ async fn every_audit_event_appears() {
     let (r, _) = life().await;
     let TestRelay { relay, data, .. } = r;
     relay.stop().await;
-    let lines = rapp_relay2::audit::read(data.path(), None, None, None).unwrap();
+    let lines = rapp_relay::audit::read(data.path(), None, None, None).unwrap();
     let seen: BTreeSet<String> = lines.iter().map(|l| l["ev"].as_str().unwrap().to_string()).collect();
     let want = [
         "relay_start",

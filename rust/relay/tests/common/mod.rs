@@ -7,8 +7,8 @@ use std::time::Duration;
 
 use anyhow::{bail, Result};
 use rapp_net::log::Log;
-use rapp_relay2::config::Config;
-use rapp_relay2::server::{Opts, Relay};
+use rapp_relay::config::Config;
+use rapp_relay::server::{Opts, Relay};
 use rapp_wire::line::read_json;
 use rapp_wire::msg::{Push, Req};
 use rapp_wire::tls::{self, BiStream, Expect};
@@ -73,7 +73,7 @@ impl TestRelay {
 /// Audit records of event `ev`, after flushing what is pending.
 pub fn audit_lines(r: &TestRelay, ev: &str) -> Vec<Value> {
     r.relay.audit().flush();
-    rapp_relay2::audit::read(r.data.path(), None, None, Some(ev)).unwrap()
+    rapp_relay::audit::read(r.data.path(), None, None, Some(ev)).unwrap()
 }
 
 /// Another handle on the same key pair (Identity is not Clone).

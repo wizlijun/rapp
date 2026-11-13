@@ -1246,7 +1246,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rapp-relay2"
+name = "rapp-relay"
 version = "0.5.5"
 dependencies = [
  "anyhow",

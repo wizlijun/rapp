@@ -1,5 +1,5 @@
 //! Idle memory of the relay with 100 registered devices (spec §9.4). The test is `#[ignore]`d: it
-//! sleeps 10 s. Run with `cargo test -p rapp-relay2 --release --test bench -- --ignored --nocapture`.
+//! sleeps 10 s. Run with `cargo test -p rapp-relay --release --test bench -- --ignored --nocapture`.
 //!
 //! The relay runs as a child process and is measured by its own `wait4` rusage, so the fake devices'
 //! QUIC work (in this process) does not count against it.
@@ -12,7 +12,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use common::FakeDevice;
-use rapp_relay2::admin;
+use rapp_relay::admin;
 use rapp_wire::{Fp, Identity};
 use serde_json::{json, Value};
 
@@ -91,10 +91,10 @@ struct Relay2 {
     key: rapp_wire::Key,
 }
 
-/// Starts `rapp-relay2` on a fresh data dir with a key installed, like the `key` subcommand does.
+/// Starts `rapp-relay` on a fresh data dir with a key installed, like the `key` subcommand does.
 async fn start_relay(env: &[(&str, &str)]) -> Relay2 {
     let data = tempfile::tempdir().unwrap();
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_rapp-relay2"));
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_rapp-relay"));
     cmd.arg("--data").arg(data.path()).env("RAPP_RELAY_LISTEN", "127.0.0.1:0");
     for (k, v) in env {
         cmd.env(k, v);

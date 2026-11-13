@@ -1,4 +1,4 @@
-//! `rapp-relay2`: runs the relay, or talks to the running one over its admin socket (spec §6.5,
+//! `rapp-relay`: runs the relay, or talks to the running one over its admin socket (spec §6.5,
 //! §10.1). The only option is `--data <dir>` (default `/data`).
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -8,16 +8,16 @@ use std::time::{Duration, SystemTime};
 
 use anyhow::{bail, Context, Result};
 use rapp_net::log::Log;
-use rapp_relay2::config::{self, LogLevel};
-use rapp_relay2::server::{Opts, Relay};
-use rapp_relay2::{admin, audit};
+use rapp_relay::config::{self, LogLevel};
+use rapp_relay::server::{Opts, Relay};
+use rapp_relay::{admin, audit};
 use rapp_wire::tls::{self, Expect};
 use rapp_wire::{Fp, Identity};
 use serde_json::{json, Value};
 use tokio::signal::unix::{signal, SignalKind};
 
 const USAGE: &str = "\
-usage: rapp-relay2 [--data <dir>] [command]
+usage: rapp-relay [--data <dir>] [command]
   (no command)                 run the relay
   key                          make the key and show it once
   rotate-key                   replace the key and show the new one once
@@ -54,13 +54,13 @@ fn main() -> ExitCode {
     let (data, cmd) = match parse(std::env::args().skip(1).collect()) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("rapp-relay2: {e}\n{USAGE}");
+            eprintln!("rapp-relay: {e}\n{USAGE}");
             return ExitCode::from(2);
         }
     };
     match cmd {
         Cmd::Version => {
-            println!("rapp-relay2 {}", env!("CARGO_PKG_VERSION"));
+            println!("rapp-relay {}", env!("CARGO_PKG_VERSION"));
             return ExitCode::SUCCESS;
         }
         Cmd::Help => {
@@ -72,7 +72,7 @@ fn main() -> ExitCode {
     let rt = match tokio::runtime::Runtime::new() {
         Ok(rt) => rt,
         Err(e) => {
-            eprintln!("rapp-relay2: {e}");
+            eprintln!("rapp-relay: {e}");
             return ExitCode::from(1);
         }
     };
@@ -163,7 +163,7 @@ async fn run(data: &Path, cmd: Cmd) -> u8 {
         Err(e) => {
             match e.downcast_ref::<admin::NotRunning>() {
                 Some(nr) => eprintln!("{nr}"),
-                None => eprintln!("rapp-relay2: {e:#}"),
+                None => eprintln!("rapp-relay: {e:#}"),
             }
             1
         }
@@ -173,20 +173,20 @@ async fn run(data: &Path, cmd: Cmd) -> u8 {
 /// Runs the relay until SIGTERM or SIGINT. 2: the configuration or the data dir is unusable.
 async fn serve(data: &Path) -> u8 {
     if let Err(e) = usable_dir(data) {
-        eprintln!("rapp-relay2: {e:#}");
+        eprintln!("rapp-relay: {e:#}");
         return 2;
     }
     let config = match config::load(data, &|k| std::env::var(k).ok()) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("rapp-relay2: {e:#}");
+            eprintln!("rapp-relay: {e:#}");
             return 2;
         }
     };
     let (mut term, mut int) = match (signal(SignalKind::terminate()), signal(SignalKind::interrupt())) {
         (Ok(t), Ok(i)) => (t, i),
         (Err(e), _) | (_, Err(e)) => {
-            eprintln!("rapp-relay2: signals: {e}");
+            eprintln!("rapp-relay: signals: {e}");
             return 1;
         }
     };
@@ -196,7 +196,7 @@ async fn serve(data: &Path) -> u8 {
     let relay = match Relay::start(opts).await {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("rapp-relay2: {e:#}");
+            eprintln!("rapp-relay: {e:#}");
             return 1;
         }
     };

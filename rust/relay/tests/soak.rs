@@ -1,5 +1,5 @@
 //! A long run with many devices: memory must not grow. Not part of the normal run:
-//! `RAPP_SOAK_SECS=600 cargo test -p rapp-relay2 --release --test soak -- --ignored --nocapture`
+//! `RAPP_SOAK_SECS=600 cargo test -p rapp-relay --release --test soak -- --ignored --nocapture`
 mod common;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};

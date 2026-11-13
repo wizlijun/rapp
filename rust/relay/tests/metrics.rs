@@ -4,7 +4,7 @@ mod common;
 use std::os::unix::fs::PermissionsExt;
 
 use common::*;
-use rapp_relay2::metrics::Stats;
+use rapp_relay::metrics::Stats;
 use rapp_wire::line::read_json;
 use serde_json::json;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -17,7 +17,7 @@ async fn scrape(addr: std::net::SocketAddr) -> String {
     out
 }
 
-fn metrics_on(c: &mut rapp_relay2::config::Config) {
+fn metrics_on(c: &mut rapp_relay::config::Config) {
     c.metrics = Some("127.0.0.1:0".parse().unwrap());
 }
 

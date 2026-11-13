@@ -121,7 +121,7 @@ async fn unenrolled_connection_is_dropped_after_idle() {
 
 #[tokio::test]
 async fn closed_enrollment_refuses_even_the_right_key() {
-    let r = start_relay(|c| c.enroll = rapp_relay2::config::Enroll::Closed).await;
+    let r = start_relay(|c| c.enroll = rapp_relay::config::Enroll::Closed).await;
     let d = FakeDevice::dial(&r).await;
     assert_eq!(d.enroll(&r.key).await, json!({"ok": false, "error": "closed"}));
     assert!(r.relay.registry().get(&d.id.fp).is_none());
