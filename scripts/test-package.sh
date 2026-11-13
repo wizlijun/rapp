@@ -69,6 +69,8 @@ signs_with_ids() {
         printf '%s\n' "$code" | grep -q -- '"\${SIGN\[@\]}" -i "\${pair#\*:}"'
 }
 check "signing loop passes -i from EXPECTED_IDS" signs_with_ids scripts/package-macos.sh
+check "postinstall waits for the old agent to leave" grep -q 'while launchctl print "gui/$USER_ID/$LABEL"' scripts/pkg/postinstall
+check "postinstall retries bootstrap" grep -q 'for _ in 1 2 3 4 5; do launchctl bootstrap' scripts/pkg/postinstall
 check "scripts parse" bash -c 'bash -n scripts/package-macos.sh && bash -n scripts/pkg/postinstall && bash -n scripts/lib/sign-check.sh'
 
 check "release scripts parse" bash -c 'bash -n scripts/lib/release.sh && bash -n scripts/upgrade-relay.sh'

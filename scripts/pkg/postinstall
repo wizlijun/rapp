@@ -44,7 +44,11 @@ PLIST
 [ -n "$USER_NAME" ] && chown -R "$USER_NAME":staff "$APP"
 
 # Reinstall: stop the old agent first so the new binary is what runs.
+# bootout returns before the old service has exited; bootstrapping then fails with
+# "Bootstrap failed: 5: Input/output error". Wait for it to leave (≤10 s), then retry.
 launchctl bootout "gui/$USER_ID/$LABEL" 2>/dev/null || true
-launchctl bootstrap "gui/$USER_ID" "$PLIST"
+n=0
+while launchctl print "gui/$USER_ID/$LABEL" >/dev/null 2>&1 && [ $n -lt 20 ]; do sleep 0.5; n=$((n + 1)); done
+for _ in 1 2 3 4 5; do launchctl bootstrap "gui/$USER_ID" "$PLIST" && break; sleep 1; done
 launchctl asuser "$USER_ID" sudo -u "$USER_NAME" open "$APP"
 exit 0

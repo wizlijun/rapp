@@ -236,7 +236,7 @@
   - [x] PASS 第一次自动提交含 `devices/<id>/device.json`；`git ls-files` 里 `local/`、`files/` 下 0 个
   - [x] PASS service.log 有 `data_commit {files:6}`，没有文件名
   - [ ] 待用户在 GUI 里：设备/常用/项目/主题和装之前一样；设置页「数据目录」显示 ~/rapp、「只在本机」，「打开数据目录」；固定文字 → 提示一次、`clipboard/` 多一个 .md、重开后「之前固定的」、取消固定文件没了；下载文件进 `files/transfers/`、「显示位置」；「更改位置…」到空文件夹 → 「复制」→ 指针文件；「改回默认」→「直接用」→ 指针没了
-- [ ] 新问题（实机发现，和数据目录无关）：pkg 的 postinstall 先 `launchctl bootout` 紧接着 `bootstrap`，旧服务还没退完 → 「Bootstrap failed: 5: Input/output error」，装完服务没起来（这次手动 bootstrap 起来了）。要改：bootout 后等到服务真的没了再 bootstrap，失败重试几次
+- [x] 新问题（实机发现，和数据目录无关）：pkg 的 postinstall 先 `launchctl bootout` 紧接着 `bootstrap`，旧服务还没退完 → 「Bootstrap failed: 5: Input/output error」，装完服务没起来（这次手动 bootstrap 起来了）。要改：bootout 后等到服务真的没了再 bootstrap，失败重试几次。已改（0.5.2）：bootout 后最多等 10 秒到旧服务没了，bootstrap 失败重试 5 次；待实机：你装 0.5.2 时看服务是否自己起来
 - 暂缓的小问题（终审 M1–M13）：临时文件名可能撞；复制失败留半截；搬家时正在读写的固定条目；固定失败没提示；「直接用」后新目录的固定条目要重开才出来；复制到 .git/index.lock；输入 `~/` 不展开；.gitignore 的 files/ local/ 没锚定；README 里日志位置在 Linux 上不对；`git init -b` 要 git 2.28+；pull 下来的 workspace.json GUI 不重读（后写的赢）
 
 ## 积压小问题清理（2026-11-13，用户「继续自主完成更多可以完成的任务」）
