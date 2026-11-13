@@ -22,7 +22,14 @@ impl Identity {
     /// Reads `<dir>/<stem>.key` and `<stem>.crt`; creates both (0600) unless both exist.
     pub fn load_or_create(dir: &Path, stem: &str) -> Result<Identity> {
         let (key_path, crt_path) = (dir.join(format!("{stem}.key")), dir.join(format!("{stem}.crt")));
-        if let (Ok(key), Ok(crt)) = (std::fs::read(&key_path), std::fs::read(&crt_path)) {
+        // Only a missing file means "create". Any other error (EACCES, EIO...) must not
+        // silently replace an existing identity: that would change the fingerprint.
+        let read = |p: &Path| match std::fs::read(p) {
+            Ok(b) => Ok(Some(b)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e).with_context(|| format!("read {}", p.display())),
+        };
+        if let (Some(key), Some(crt)) = (read(&key_path)?, read(&crt_path)?) {
             return Identity::from_parts(crt, key).with_context(|| format!("load {}", crt_path.display()));
         }
         let id = Identity::generate()?;
@@ -62,6 +69,24 @@ mod tests {
         let b = Identity::load_or_create(d.path(), "device").unwrap();
         assert_ne!(a.fp, b.fp);
         assert_eq!(Identity::load_or_create(d.path(), "device").unwrap().fp, b.fp);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_key_is_an_error_not_a_regeneration() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = tempfile::tempdir().unwrap();
+        let a = Identity::load_or_create(d.path(), "relay").unwrap();
+        let key = d.path().join("relay.key");
+        std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let r = Identity::load_or_create(d.path(), "relay");
+        let readable_anyway = std::fs::read(&key).is_ok(); // running as root
+        std::fs::set_permissions(&key, std::fs::Permissions::from_mode(0o600)).unwrap();
+        if !readable_anyway {
+            let msg = format!("{:#}", r.err().expect("must fail"));
+            assert!(msg.contains(&key.display().to_string()), "{msg}");
+        }
+        assert_eq!(Identity::load_or_create(d.path(), "relay").unwrap().fp, a.fp);
     }
 
     #[test]
