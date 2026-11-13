@@ -33,7 +33,8 @@ void main() {
     t = FakeTransport();
     hub = HubClient(t);
     final hosts = <Map<String, dynamic>>[
-      {'id': '111', 'name': 'mini'},
+      {'id': '111', 'name': 'mini', 'lan': ['127.0.0.1:21118', '192.168.2.7:21118']},
+      {'id': '222', 'name': 'far'},
     ];
     t.onSend = (cmd) {
       final req = cmd['req'];
@@ -78,7 +79,8 @@ void main() {
     tmp.deleteSync(recursive: true);
   });
 
-  Future<void> pumpTab(WidgetTester tester, {bool settle = true, bool localBadge = false}) async {
+  Future<void> pumpTab(WidgetTester tester,
+      {bool settle = true, bool localBadge = false, Future<void> Function(String host)? screenShare}) async {
     s.togglePanel(PanelTab.devices);
     // MainState's constructor already asked for the hosts, in setUp's real zone.
     await tester.runAsync(() async {
@@ -89,7 +91,7 @@ void main() {
     await tester.pumpWidget(wrap(SizedBox(
       width: 420,
       height: 900,
-      child: DevicesTab(state: s, local: const Text('local-body'), localBadge: localBadge),
+      child: DevicesTab(state: s, local: const Text('local-body'), localBadge: localBadge, screenShare: screenShare),
     )));
     if (settle) {
       await tester.pumpAndSettle();
@@ -110,6 +112,32 @@ void main() {
     expect(t.sent.where((m) => m['cmd'] == 'hosts'), isNotEmpty);
     expect(find.byKey(const Key('device-111')), findsOneWidget);
     expect(find.textContaining('mini'), findsWidgets);
+  });
+
+  testWidgets('屏幕共享 opens A by its first non-loopback LAN address', (tester) async {
+    final opened = <String>[];
+    await pumpTab(tester, screenShare: (h) async => opened.add(h));
+    await selectMini(tester);
+    await tester.tap(find.byKey(const Key('screen-share')));
+    await tester.pumpAndSettle();
+    expect(opened, ['192.168.2.7']);
+  });
+
+  testWidgets('no 屏幕共享 without a known LAN address or without an opener', (tester) async {
+    await pumpTab(tester, screenShare: (_) async {});
+    await tester.tap(find.byKey(const Key('device-222')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('screen-share')), findsNothing);
+    await pumpTab(tester);
+    await selectMini(tester);
+    expect(find.byKey(const Key('screen-share')), findsNothing);
+  });
+
+  test('screenShareHost picks a reachable host part', () {
+    expect(screenShareHost(const ['127.0.0.1:1', '[::1]:2']), isNull);
+    expect(screenShareHost(const ['[fd7a::5]:21118']), 'fd7a::5');
+    expect(screenShareHost(const ['100.64.0.9:21118']), '100.64.0.9');
+    expect(screenShareHost(const []), isNull);
   });
 
   testWidgets('typed add form text survives switching device chips', (tester) async {
@@ -143,7 +171,7 @@ void main() {
     await pumpTab(tester, settle: false);
     int n() => t.sent.where((m) => m['cmd'] == 'apps').length;
     final first = n();
-    expect(first, 2); // setUp's state + the new one
+    expect(first, 4); // setUp's state + the new one, for each of the two devices
     await tester.tap(find.byKey(const Key('device-local')));
     await tester.pump();
     await tester.tap(find.byKey(const Key('device-111')));

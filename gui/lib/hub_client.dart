@@ -61,9 +61,12 @@ class HubException implements Exception {
 }
 
 class HubHost {
-  const HubHost(this.id, this.name);
+  const HubHost(this.id, this.name, {this.lan = const []});
   final String id;
   final String name;
+
+  /// A's LAN addresses ("ip:port") as last heard, for 屏幕共享; empty when unknown.
+  final List<String> lan;
 }
 
 class HubApp {
@@ -212,7 +215,8 @@ class HubClient extends ChangeNotifier {
       case 'hosts':
         hosts = (m['hosts'] as List? ?? const [])
             .whereType<Map>()
-            .map((h) => HubHost('${h['id']}', '${h['name'] ?? ''}'))
+            .map((h) => HubHost('${h['id']}', '${h['name'] ?? ''}',
+                lan: [for (final a in (h['lan'] as List? ?? const [])) '$a']))
             .toList();
       case 'host_added':
         final id = '${m['id']}';

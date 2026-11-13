@@ -183,6 +183,9 @@ class _MainWindowState extends State<MainWindow> {
                                   state: state,
                                   local: _local(),
                                   localBadge: updateBadge(widget.monitor.status?.update),
+                                  screenShare: Platform.isMacOS
+                                      ? (h) async => Process.run('open', ['vnc://${h.contains(':') ? '[$h]' : h}'])
+                                      : null,
                                 ),
                               ),
                             ),

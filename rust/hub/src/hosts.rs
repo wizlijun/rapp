@@ -38,7 +38,15 @@ impl Hosts {
     /// `[{"id","name"}]`
     pub fn summary(&self) -> Value {
         let list = self.list.lock().unwrap();
-        Value::Array(list.iter().map(|h| json!({"id": h.id, "name": h.name})).collect())
+        // `lan` (A's LAN addresses, for 屏幕共享) only when known; the password never leaves the hub.
+        let row = |h: &Host| {
+            let mut v = json!({"id": h.id, "name": h.name});
+            if !h.lan.is_empty() {
+                v["lan"] = json!(h.lan);
+            }
+            v
+        };
+        Value::Array(list.iter().map(row).collect())
     }
 
     /// Inserts or replaces by id; saves only when something changed.
@@ -97,5 +105,18 @@ mod tests {
         hosts.refresh(host("c")).unwrap();
         assert!(hosts.all().is_empty());
         assert_eq!(std::fs::read_to_string(dir.path().join("hosts.json")).unwrap().trim(), "[]");
+    }
+
+    #[test]
+    fn summary_carries_lan_addresses_only_when_known_and_never_the_password() {
+        let dir = tempfile::tempdir().unwrap();
+        let hosts = Hosts::load(dir.path()).unwrap();
+        hosts.upsert(host("a")).unwrap();
+        hosts.upsert(Host { id: "2".into(), name: "b".into(), password: "secret".into(), lan: vec!["192.168.1.5:21118".into()] }).unwrap();
+        assert_eq!(
+            hosts.summary(),
+            json!([{"id": "1", "name": "a"}, {"id": "2", "name": "b", "lan": ["192.168.1.5:21118"]}])
+        );
+        assert!(!hosts.summary().to_string().contains("secret"));
     }
 }

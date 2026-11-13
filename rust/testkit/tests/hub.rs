@@ -54,7 +54,12 @@ async fn add_host_hosts_apps_open_close_remove() {
         assert_eq!(mode & 0o777, 0o600);
     }
 
-    assert_eq!(hub.call(json!({"cmd":"hosts"})).await, json!({"event":"hosts","hosts":[{"id":a.id,"name":"test-a"}]}));
+    let r = hub.call(json!({"cmd":"hosts"})).await;
+    let h = &r["hosts"][0];
+    assert_eq!((r["hosts"].as_array().unwrap().len(), &h["id"], &h["name"]), (1, &json!(a.id), &json!("test-a")), "{r}");
+    // A's LAN addresses (from the relay) reach the GUI for 屏幕共享; the password never does.
+    assert!(!h["lan"].as_array().unwrap().is_empty(), "{r}");
+    assert!(h.get("password").is_none(), "{r}");
     let r = hub.call(json!({"cmd":"apps","id":a.id,"req":"x"})).await;
     let perms = json!({"screen_recording":true,"accessibility":true});
     assert_eq!(r, json!({"event":"apps","id":a.id,"path":"lan","apps":apps(),"permissions":perms,"req":"x"}));
