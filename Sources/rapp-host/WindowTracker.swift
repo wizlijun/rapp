@@ -91,7 +91,12 @@ final class WindowTracker {
                 titleBar: info.kind.isDecorated ? info.titleBar : 0, title: info.title))
         }
         known = known.filter { seen.contains($0.key) }
-        return Array(assignParents(dropTitleBarAccessories(table)).prefix(maxWindows))
+        let shown = promoteMainWindow(dropTitleBarAccessories(dropStrayIndicators(table))).map { w -> WindowInfo in
+            var w = w
+            if w.kind.isDecorated && w.title.isEmpty { w.title = windowTitle(nil, appName: appName) } // promoted
+            return w
+        }
+        return Array(assignParents(shown).prefix(maxWindows))
     }
 }
 

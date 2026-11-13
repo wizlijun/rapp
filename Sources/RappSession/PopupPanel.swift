@@ -31,6 +31,6 @@ public final class PopupPanel: NSPanel {
         remoteView.titleBar = 0
         remoteView.remoteSize = CGSize(width: CGFloat(new.rect.w), height: CGFloat(new.rect.h))
         // Menus highlight items and open submenus under the pointer.
-        remoteView.sendsHover = new.kind == .menu
+        remoteView.sendsHover = new.kind == .menu || new.kind == .popover
     }
 }

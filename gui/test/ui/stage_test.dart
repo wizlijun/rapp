@@ -1073,6 +1073,19 @@ void main() {
       expect(mouse().single['window'], 9);
       expect(mouse().single['x'], 10.0);
     });
+
+    testWidgets('hover over a popover (address-bar list) sends move', (tester) async {
+      await tester.pumpWidget(wrap(embedded()));
+      await showWindows(tester, [popup(9, WindowKind.popover, parent: 5), rw(5, 400, 328)]);
+      final o = tester.getTopLeft(find.byKey(const Key('stage')));
+      final mouseGesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouseGesture.addPointer(location: o + const Offset(500, 500));
+      await tester.pump();
+      await mouseGesture.moveTo(o + const Offset(120, 120));
+      await tester.pump();
+      expect(mouse().single['kind'], 'move');
+      expect(mouse().single['window'], 9);
+    });
   });
 }
 

@@ -4,14 +4,19 @@ import Foundation
 // Window-table logic shared by the host and the client (multi-window spec §5).
 // Canvas coordinates are A points with the origin at the display's top-left.
 
-/// The kind of an A window, from its window level and, at the normal level,
-/// its Accessibility role and subrole (spec §3.3).
+/// The kind of an A window, from its window level and, at the normal and
+/// floating levels, its Accessibility role and subrole (spec §3.3). A
+/// borderless window there (no Accessibility window, or one with no known
+/// subrole: Chrome's address-bar list, custom right-click menus) is a popover,
+/// drawn in place over its parent with no input bar.
 public func classifyWindow(level: Int, role: String?, subrole: String?) -> WindowKind {
     func key(_ k: CGWindowLevelKey) -> Int { Int(CGWindowLevelForKey(k)) }
     let normal = key(.normalWindow), modal = key(.modalPanelWindow), popUp = key(.popUpMenuWindow)
     if level > popUp { return .tooltip }
     if level == popUp { return .menu }
     if level == modal { return .dialog }
+    let borderless = role == nil || (role == "AXWindow" && (subrole == nil || subrole == "AXUnknown"))
+    if borderless { return .popover }
     if level > normal { return .floating }
     switch (role, subrole) {
     case ("AXSheet", _): return .sheet
@@ -20,6 +25,26 @@ public func classifyWindow(level: Int, role: String?, subrole: String?) -> Windo
     case (_, "AXFloatingWindow"), (_, "AXSystemFloatingWindow"): return .floating
     default: return .normal
     }
+}
+
+/// Removes windows too small to be anything but an indicator, such as the
+/// 66x20 screen-recording pill macOS 27 puts on captured windows (it reports
+/// itself as a dialog): at most 120 x 48 points. Menus stay (spec §3.2).
+public func dropStrayIndicators(_ windows: [WindowInfo]) -> [WindowInfo] {
+    windows.filter { $0.kind == .menu || $0.rect.w > 120 || $0.rect.h > 48 }
+}
+
+/// With no decorated window left (an app whose main window Accessibility
+/// cannot see), the largest popover becomes the normal window, so there is
+/// still a tab to show and type into (spec §3.2).
+public func promoteMainWindow(_ windows: [WindowInfo]) -> [WindowInfo] {
+    guard !windows.contains(where: { $0.kind.isDecorated }),
+          let main = windows.indices.filter({ windows[$0].kind == .popover })
+              .max(by: { windows[$0].rect.w * windows[$0].rect.h < windows[$1].rect.w * windows[$1].rect.h })
+    else { return windows }
+    var out = windows
+    out[main].kind = .normal
+    return out
 }
 
 private func overlapArea(_ a: CanvasRect, _ b: CanvasRect) -> Float {
