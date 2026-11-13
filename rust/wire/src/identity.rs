@@ -7,8 +7,40 @@ use rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 use crate::Fp;
 
 const LOCK_POLL: Duration = Duration::from_millis(50);
-const LOCK_WAIT: Duration = Duration::from_secs(2);
+/// A lock older than this was left by a crash and may be taken over.
 const LOCK_STALE: Duration = Duration::from_secs(10);
+/// A waiter polls until the holder finishes or the lock goes stale (10 s), plus a margin for the
+/// takeover; only then does it give up.
+const LOCK_WAIT: Duration = Duration::from_secs(12);
+
+fn lock_age(lock: &Path) -> Option<Duration> {
+    std::fs::metadata(lock).and_then(|m| m.modified()).ok()?.elapsed().ok()
+}
+
+/// Removes a crash-left lock. The lock is renamed to a unique name first, so of several waiters
+/// exactly one gets it (the others see NotFound) and nobody can delete a lock someone else has
+/// just created in its place. True when this caller removed a stale lock.
+fn take_over_stale(lock: &Path) -> bool {
+    if !lock.exists() || !lock_age(lock).is_some_and(|age| age > LOCK_STALE) {
+        return false;
+    }
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let mut name = lock.as_os_str().to_owned();
+    name.push(format!(".stale.{}.{nanos}", std::process::id()));
+    let taken = std::path::PathBuf::from(name);
+    if std::fs::rename(lock, &taken).is_err() {
+        return false;
+    }
+    // Between the check and the rename another waiter may have replaced the lock; if what we
+    // hold is fresh, put it back (hard_link fails rather than overwrite a newer lock).
+    if !lock_age(&taken).is_some_and(|age| age > LOCK_STALE) {
+        let _ = std::fs::hard_link(&taken, lock);
+        let _ = std::fs::remove_file(&taken);
+        return false;
+    }
+    let _ = std::fs::remove_file(&taken);
+    true
+}
 
 /// A device's self-signed P-256 certificate and key. Peers pin `fp`, not a CA.
 pub struct Identity {
@@ -60,14 +92,7 @@ impl Identity {
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
                 Err(e) => return Err(e).with_context(|| format!("create {}", lock.display())),
             }
-            // A lock this old was left by a crash.
-            let stale = std::fs::metadata(&lock)
-                .and_then(|m| m.modified())
-                .ok()
-                .and_then(|t| t.elapsed().ok())
-                .is_some_and(|age| age > LOCK_STALE);
-            if stale {
-                let _ = std::fs::remove_file(&lock);
+            if take_over_stale(&lock) {
                 continue;
             }
             std::thread::sleep(LOCK_POLL);
@@ -146,6 +171,47 @@ mod tests {
         let after = Identity::load_or_create(d.path(), "device").unwrap().fp;
         assert!(fps.iter().all(|f| *f == after));
         assert!(!d.path().join("device.lock").exists());
+    }
+
+    fn old_lock(path: &Path) {
+        let f = std::fs::File::create(path).unwrap();
+        f.set_modified(std::time::SystemTime::now() - Duration::from_secs(60)).unwrap();
+    }
+
+    #[test]
+    fn stale_lock_is_taken_over() {
+        let d = tempfile::tempdir().unwrap();
+        old_lock(&d.path().join("device.lock"));
+        let a = Identity::load_or_create(d.path(), "device").unwrap();
+        assert_eq!(Identity::load_or_create(d.path(), "device").unwrap().fp, a.fp);
+        assert!(!d.path().join("device.lock").exists());
+    }
+
+    #[test]
+    fn fresh_lock_is_not_taken_over() {
+        let d = tempfile::tempdir().unwrap();
+        let lock = d.path().join("device.lock");
+        std::fs::File::create(&lock).unwrap();
+        assert!(!take_over_stale(&lock));
+        assert!(lock.exists());
+    }
+
+    #[test]
+    fn stale_takeover_has_one_winner() {
+        let d = tempfile::tempdir().unwrap();
+        let lock = d.path().join("device.lock");
+        old_lock(&lock);
+        let wins: usize = (0..8)
+            .map(|_| {
+                let l = lock.clone();
+                std::thread::spawn(move || take_over_stale(&l))
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|h| h.join().unwrap() as usize)
+            .sum();
+        assert_eq!(wins, 1);
+        assert_eq!(std::fs::read_dir(d.path()).unwrap().count(), 0);
     }
 
     #[test]
