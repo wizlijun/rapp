@@ -140,9 +140,10 @@ fn check_host(a: &Args) -> Res<()> {
     if a.ssh.is_none() {
         return Err(usage("--host goes with --ssh"));
     }
+    // The id must read back with the same host: `a:b` parses, but as host `a` and a name starting `b:`.
     match TermId::parse(&term_id(Some(h), "-").to_string()) {
-        Ok(_) => Ok(()),
-        Err(_) => Err(usage("invalid --host name")),
+        Ok(t) if t.host.as_deref() == Some(h.as_str()) => Ok(()),
+        _ => Err(usage("invalid --host name")),
     }
 }
 
@@ -466,6 +467,19 @@ mod tests {
         // `<dir>/%C` (40 hex characters), then ssh's temporary bind suffix (about 17), within sun_path's 104 bytes.
         let len = dir.as_os_str().len() + 1 + 40 + 17;
         assert!(len <= 104, "{len}");
+    }
+
+    #[test]
+    fn hosts_must_read_back_the_same_from_an_id() {
+        let host = |h: &str| Args { ssh: Some("d".into()), host: Some(h.into()), ..Args::default() };
+        for good in ["gpu1", "gpu1.lab", "my_host-2"] {
+            assert!(check_host(&host(good)).is_ok(), "{good}");
+        }
+        for bad in ["a:b", "", "a b", "a@b", "a/b"] {
+            assert!(matches!(check_host(&host(bad)), Err(Fail::Usage(_))), "{bad}");
+        }
+        let no_ssh = Args { host: Some("gpu1".into()), ..Args::default() };
+        assert!(matches!(check_host(&no_ssh), Err(Fail::Usage(_))));
     }
 
     #[test]
