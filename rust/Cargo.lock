@@ -1304,6 +1304,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "rapp-wire"
+version = "0.5.2"
+dependencies = [
+ "anyhow",
+ "data-encoding",
+ "rapp-net",
+ "rcgen",
+ "ring",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "x509-parser",
+]
+
+[[package]]
 name = "rcgen"
 version = "0.14.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
