@@ -837,4 +837,5 @@ async fn service_with_a_data_dir_commits_its_device_json() {
     for word in ["password", "secret", "key"] {
         assert!(!shown.contains(word), "{word} in device.json");
     }
+    svc.stop();
 }

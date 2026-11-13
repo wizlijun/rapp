@@ -108,7 +108,18 @@ impl DataGit {
         }
         self.run(&["add", "-A"]).await.ok_or("add")?;
         let (email, message) = (format!("user.email={}", self.email), self.message.clone());
-        let args = ["-c", "user.name=rapp", "-c", &email, "-c", "commit.gpgsign=false", "commit", "-m", &message];
+        let args = [
+            "-c",
+            "user.name=rapp",
+            "-c",
+            &email,
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "--no-verify",
+            "-m",
+            &message,
+        ];
         self.run(&args).await.ok_or("commit")?;
         self.status.last_commit = Some(timestamp(SystemTime::now()));
         self.log.event(Lvl::Info, "data_commit", json!({"files": files}));
@@ -118,7 +129,7 @@ impl DataGit {
     /// Runs git in the root; its stdout when it exits 0, None otherwise (output is never logged).
     async fn run(&self, args: &[&str]) -> Option<String> {
         let mut cmd = tokio::process::Command::new(&self.git);
-        cmd.current_dir(&self.root).args(args);
+        cmd.current_dir(&self.root).args(["-c", "core.hooksPath=/dev/null"]).args(args);
         for (k, _) in std::env::vars_os() {
             if k.to_string_lossy().starts_with("GIT_") {
                 cmd.env_remove(k);
@@ -148,6 +159,7 @@ pub fn spawn(opts: DataOpts, name: String, log: Log) -> JoinHandle<()> {
     tokio::spawn(async move {
         let mut g = DataGit::new(&opts, &name, log);
         let mut every = tokio::time::interval(opts.commit_every);
+        every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             every.tick().await;
             g.tick().await;
@@ -264,6 +276,45 @@ mod tests {
         g.tick().await;
         let after: u32 = git(&root, &["rev-list", "--count", "HEAD"]).trim().parse().unwrap();
         assert_eq!(after, before + 1);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn commit_ignores_hooks() {
+        use std::os::unix::fs::PermissionsExt;
+        if !have_git() {
+            return;
+        }
+        let (t, root) = prepared();
+        let mut g = DataGit::new(&opts(&root), "test-a", log(&t));
+        g.tick().await;
+        let before: u32 = git(&root, &["rev-list", "--count", "HEAD"]).trim().parse().unwrap();
+        let hooks = t.path().join("hooks");
+        std::fs::create_dir(&hooks).unwrap();
+        std::fs::write(hooks.join("pre-commit"), "#!/bin/sh\nexit 1\n").unwrap();
+        std::fs::set_permissions(hooks.join("pre-commit"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        git(&root, &["config", "core.hooksPath", hooks.to_str().unwrap()]);
+        std::fs::write(root.join("shared/a.json"), "{}").unwrap();
+        g.tick().await;
+        let after: u32 = git(&root, &["rev-list", "--count", "HEAD"]).trim().parse().unwrap();
+        assert_eq!(after, before + 1);
+    }
+
+    #[tokio::test]
+    async fn a_failing_git_step_is_an_error_and_keeps_last_commit() {
+        if !have_git() {
+            return;
+        }
+        let (t, root) = prepared();
+        let mut g = DataGit::new(&opts(&root), "test-a", log(&t));
+        let first = g.tick().await;
+        assert!(first.last_commit.is_some());
+        std::fs::write(root.join(".git/index.lock"), "").unwrap();
+        std::fs::write(root.join("shared/a.json"), "{}").unwrap();
+        let s = g.tick().await;
+        assert_eq!(s.git, "error");
+        assert_eq!(s.error.as_deref(), Some("git add failed"));
+        assert_eq!(s.last_commit, first.last_commit);
     }
 
     #[test]

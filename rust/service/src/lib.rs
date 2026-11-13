@@ -143,8 +143,10 @@ impl Service {
         ];
         if let Some(data) = opts.data {
             let name = state.cfg.lock().unwrap().name.clone();
-            if let Err(e) = data::write_device_json(&data.root, id.as_deref().unwrap_or_default(), &name) {
-                state.log.event(Lvl::Warn, "data_error", json!({"step": "device.json", "err": format!("{e:#}")}));
+            if let Some(id) = id.as_deref() {
+                if let Err(e) = data::write_device_json(&data.root, id, &name) {
+                    state.log.event(Lvl::Warn, "data_error", json!({"step": "device.json", "err": format!("{e:#}")}));
+                }
             }
             tasks.push(data::spawn(data, name, state.log.clone()));
         }
