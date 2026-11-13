@@ -40,6 +40,20 @@ fn s(p: &Path) -> String {
     p.display().to_string()
 }
 
+/// HTTP status from curl's `-f` message ("returned error: 404"), never the URL.
+/// curl 8.7 reports this as exit 56, older ones as 22.
+fn http_status(stderr: &str) -> Option<u16> {
+    let rest = stderr.split("returned error: ").nth(1)?;
+    rest.split(|c: char| !c.is_ascii_digit()).next()?.parse().ok()
+}
+
+fn curl_reason(o: &crate::runner::Out) -> String {
+    match http_status(&o.stderr) {
+        Some(n) => format!("升级源返回 HTTP {n}"),
+        None => format!("curl 退出码 {}", o.code),
+    }
+}
+
 /// `Ok(None)`: the manifest has no asset for this platform. Errors never carry the URL.
 pub fn fetch_manifest(r: &dyn Runner, url: &str, cache_dir: &Path) -> Result<Option<Manifest>, String> {
     std::fs::create_dir_all(cache_dir).map_err(|_| "建不了缓存目录".to_string())?;
@@ -53,7 +67,8 @@ pub fn fetch_manifest(r: &dyn Runner, url: &str, cache_dir: &Path) -> Result<Opt
     let out = r.run(CURL, &args).map_err(|_| "无法运行 curl".to_string());
     let bytes = match out {
         Ok(o) if o.code == 0 => std::fs::read(&tmp).map_err(|_| "读不到 manifest".to_string()),
-        Ok(o) => Err(format!("curl 退出码 {}", o.code)),
+        Ok(o) if http_status(&o.stderr) == Some(404) => Err("最新的 Release 里没有 latest.json（404）".to_string()),
+        Ok(o) => Err(curl_reason(&o)),
         Err(e) => Err(e),
     };
     let _ = std::fs::remove_file(&tmp);
@@ -151,7 +166,7 @@ pub fn download(r: &dyn Runner, dir: &Path, m: &Manifest) -> Result<(PathBuf, u6
             if o.code == 33 {
                 let _ = std::fs::remove_file(&part);
             }
-            return Err(fail(d, format!("curl 退出码 {}", o.code)));
+            return Err(fail(d, curl_reason(&o)));
         }
     }
     let after = len_of(&part);
@@ -180,7 +195,7 @@ mod tests {
     use std::sync::Arc;
 
     const SAMPLE: &str = r#"{"version":"0.5.0","published_at":"2026-11-20T08:00:00Z","notes":"一句话说明，GUI 原样显示",
-      "assets":{"macos-arm64":{"url":"https://github.com/wizlijun/rapp-releases/releases/download/v0.5.0/rapp-0.5.0-macos-arm64.zip",
+      "assets":{"macos-arm64":{"url":"https://github.com/wizlijun/rapp/releases/download/v0.5.0/rapp-0.5.0-macos-arm64.zip",
       "sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","size":31457280}}}"#;
     const DF_PLENTY: &str =
         "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/disk3s5 1000000 50 900000 1% /\n";
@@ -248,8 +263,35 @@ mod tests {
         let r = FakeRunner::new()
             .on(CURL, |_| Out::fail(22, "The requested URL returned error: 404 https://x/latest.json?token=1"));
         let e = fetch_manifest(&r, "https://x/latest.json?token=1", d.path()).unwrap_err();
-        assert_eq!(e, "curl 退出码 22");
+        assert_eq!(e, "最新的 Release 里没有 latest.json（404）");
         assert!(!e.contains("http"));
+    }
+
+    #[test]
+    fn curl_56_with_http_404_reads_as_missing_manifest() {
+        let d = tempfile::tempdir().unwrap();
+        let r = FakeRunner::new().on(CURL, |_| Out::fail(56, "curl: (56) The requested URL returned error: 404"));
+        let e = fetch_manifest(&r, "https://x/latest.json", d.path()).unwrap_err();
+        assert_eq!(e, "最新的 Release 里没有 latest.json（404）");
+    }
+
+    #[test]
+    fn other_http_error_names_the_status_only() {
+        let d = tempfile::tempdir().unwrap();
+        let r = FakeRunner::new().on(CURL, |_| Out::fail(56, "curl: (56) The requested URL returned error: 503 https://x/"));
+        let e = fetch_manifest(&r, "https://x/latest.json", d.path()).unwrap_err();
+        assert_eq!(e, "升级源返回 HTTP 503");
+    }
+
+    #[test]
+    fn download_http_404_names_the_status_only() {
+        let d = tempfile::tempdir().unwrap();
+        let body = data();
+        let r = FakeRunner::new()
+            .on(DF, |_| Out::ok(DF_PLENTY))
+            .on(CURL, |_| Out::fail(56, "curl: (56) The requested URL returned error: 404 https://x/a.zip"));
+        let f = download(&r, d.path(), &manifest("0.5.0", "https://x/a.zip", &body)).unwrap_err();
+        assert_eq!(f.reason, "升级源返回 HTTP 404");
     }
 
     #[test]

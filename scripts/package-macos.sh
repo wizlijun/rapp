@@ -93,12 +93,12 @@ fi
 echo "== release outputs (zip, latest.json)"
 ZIP=$DIST/rapp-$VERSION-macos-arm64.zip
 ditto -c -k --keepParent "$APP" "$ZIP"
-RELEASE_BASE=${RAPP_RELEASE_BASE:-https://github.com/wizlijun/rapp-releases/releases/download/v$VERSION}
+RELEASE_BASE=${RAPP_RELEASE_BASE:-https://github.com/wizlijun/rapp/releases/download/v$VERSION}
 write_manifest "$DIST/latest.json" "$VERSION" "$RELEASE_BASE/rapp-$VERSION-macos-arm64.zip" \
     "$(shasum -a 256 "$ZIP" | cut -d' ' -f1)" "$(stat -f %z "$ZIP")" "${RAPP_RELEASE_NOTES-}" \
     "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 plutil -convert xml1 -o /dev/null "$DIST/latest.json"
-echo "publish: gh release create v$VERSION --repo wizlijun/rapp-releases \"$ZIP\" \"$DIST/latest.json\" \"$PKG\" --title v$VERSION"
+echo "publish: gh release upload v$VERSION --repo wizlijun/rapp \"$ZIP\" \"$DIST/latest.json\" \"$PKG\"  (or gh release create v$VERSION … if the release does not exist yet)"
 
 ln -s /Applications "$DIST/stage/Applications"
 hdiutil create -quiet -volname rapp -srcfolder "$DIST/stage" -ov -format UDZO "$DIST/rapp.dmg"

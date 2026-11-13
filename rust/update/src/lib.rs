@@ -17,7 +17,7 @@ pub use fetch::{download, fetch_manifest, free_bytes, part_path, sha256_file, zi
 pub use runner::{Out, Runner, SystemRunner};
 
 pub const BUNDLE_ID: &str = "com.rapp.rapp";
-pub const DEFAULT_URL: &str = "https://github.com/wizlijun/rapp-releases/releases/latest/download/latest.json";
+pub const DEFAULT_URL: &str = "https://github.com/wizlijun/rapp/releases/latest/download/latest.json";
 pub const PLATFORM: &str = "macos-arm64";
 pub const CHECK_EVERY_SECS: u64 = 20 * 3600;
 
@@ -197,7 +197,7 @@ mod tests {
     fn manifest(extra: &str) -> String {
         format!(
             r#"{{"version":"0.5.0","published_at":"2026-11-20T08:00:00Z","notes":"一句话说明，GUI 原样显示","extra":1,
-            "assets":{{"macos-arm64":{{"url":"https://github.com/wizlijun/rapp-releases/releases/download/v0.5.0/rapp-0.5.0-macos-arm64.zip",
+            "assets":{{"macos-arm64":{{"url":"https://github.com/wizlijun/rapp/releases/download/v0.5.0/rapp-0.5.0-macos-arm64.zip",
             "sha256":"{SHA}","size":31457280{extra}}}}}}}"#
         )
     }
@@ -341,9 +341,9 @@ mod tests {
     fn release_page_from_github_asset() {
         assert_eq!(
             release_page(
-                "https://github.com/wizlijun/rapp-releases/releases/download/v0.5.0/rapp-0.5.0-macos-arm64.zip"
+                "https://github.com/wizlijun/rapp/releases/download/v0.5.0/rapp-0.5.0-macos-arm64.zip"
             ),
-            "https://github.com/wizlijun/rapp-releases/releases/tag/v0.5.0"
+            "https://github.com/wizlijun/rapp/releases/tag/v0.5.0"
         );
         assert_eq!(release_page("https://vps.example/rapp/x.zip"), "https://vps.example/rapp/x.zip");
     }

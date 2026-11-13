@@ -2,6 +2,8 @@
 
 > 日期：2026-11-12。来源：用户要求（高优先级）：「参考 codex 官方代码的升级包机制，生成一个轻量级的在线升级模块……服务端升级后要重启，还需要优化权限部分。目前需要删掉之前的安全设置再重新设置很麻烦。」
 > 状态：已确认（用户 2026-11-12：「请全部按推荐」）。§2 三条均按推荐：2.1 公开仓库 `wizlijun/rapp-releases`；2.2 Apple Development: bruce lee (M753G3H4R8)；2.3 自动下载、没人在用时自动安装。
+>
+> 修订（2026-11-13，用户：「请不要额外开仓库，把版本更新的信息放在 rapp 的仓库中。使用对应分发中的下载连接。」）：不建 `rapp-releases`。`latest.json`、升级 zip 和 pkg 都传到 `wizlijun/rapp`（已公开）对应版本的 Release；检查地址是 `https://github.com/wizlijun/rapp/releases/latest/download/latest.json`，zip 用同一个 Release 的下载链接。下文的 `rapp-releases` 都按此读。注意：GitHub 的「latest」是最新的正式 Release，所以每个正式 Release 都要带 `latest.json`，否则 Mac 上会看到「最新的 Release 里没有 latest.json（404）」。
 
 ## 0 现状（实测）
 

@@ -72,7 +72,7 @@ check "signing loop passes -i from EXPECTED_IDS" signs_with_ids scripts/package-
 check "scripts parse" bash -c 'bash -n scripts/package-macos.sh && bash -n scripts/pkg/postinstall && bash -n scripts/lib/sign-check.sh'
 
 check "release scripts parse" bash -c 'bash -n scripts/lib/release.sh && bash -n scripts/upgrade-relay.sh'
-check "default release base" grep -q 'wizlijun/rapp-releases/releases/download/v\$VERSION' scripts/package-macos.sh
+check "default release base" grep -q 'wizlijun/rapp/releases/download/v\$VERSION' scripts/package-macos.sh
 zip_after_verify() {
     local z v
     z=$(grep -n 'ditto -c -k --keepParent' scripts/package-macos.sh | head -1 | cut -d: -f1)
