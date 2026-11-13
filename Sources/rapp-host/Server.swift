@@ -276,7 +276,11 @@ final class Session {
     private var newestSubmittedSeq = 0
     private var fps = 15
     private var density: Float = 2
-    private var encoder: FrameEncoder?
+    /// Acks, slicing and the weak tier; session queue only. Created by the hello.
+    private var paced: PacedSender?
+    /// What B asked for last. While weak the actual mode/density differ (fps never does).
+    private var requestedMode = Mode.gray4
+    private var requestedDensity: Float = 2
     private var capture: WindowCapture?
     private var app: NSRunningApplication?
     private var injector: InputInjector?
@@ -301,8 +305,6 @@ final class Session {
     /// The canvas display in global points.
     private var display = CGRect.zero
 
-    private var sendInFlight = false
-    private var pending: (samples: [UInt8], width: Int, height: Int, region: CanvasRect)?
     private var bytesThisSecond = 0
     private var framesThisSecond = 0
     private var lastWidth = 0
@@ -391,8 +393,10 @@ final class Session {
             sampleLock.withLock { sampleMode = mode }
             self.fps = Int(fps)
             self.density = density
-            encoder = FrameEncoder(mode: mode)
+            requestedMode = mode
+            requestedDensity = density
             helloVersion = version
+            makePacedSender(mode: mode, fps: Int(fps))
             started = true
             awake.begin()
             startInputTimer()
@@ -403,8 +407,13 @@ final class Session {
             injector?.handle(message, table: table)
             // Enabled items and check marks follow what the input did (a selection, an edit).
             if message.mayChangeMenus, menuBar != nil { scheduleMenuRead(after: 0.5) }
-        case let .setStream(mode, fps, density, _):
-            setStream(mode, fps: Int(fps), density: density)
+        case let .setStream(mode, fps, density, pinned):
+            requestedMode = mode
+            requestedDensity = density
+            // A manual pick leaves weak at once (that restores the requested values).
+            if clientSendsFrameAcks(helloVersion) { paced?.setPinned(pinned) }
+            if paced?.weak != true { setStream(mode, fps: Int(fps), density: density) }
+            else { setStream(Self.weakMode, fps: Int(fps), density: min(density, 1.0)) }
         // Window commands naming a window no longer in the table are dropped,
         // not errors: B may not have seen the newest table yet (spec §2.4).
         case let .resize(id, width, height):
@@ -449,8 +458,8 @@ final class Session {
             if case let .text(text) = source { inlinePastes[seq] = text.utf8.count }
             paster?.paste(seq: seq, source)
 
-        case .frameAck:
-            break  // Pacing on acks arrives with the host scheduler.
+        case let .frameAck(processingMs):
+            if clientSendsFrameAcks(helloVersion) { paced?.ack(processingMs: processingMs) }
         case .ready, .error, .frame, .windows, .menuBar, .clip, .pasted, .fetch, .put, .transferStart, .chunk, .inputBlocked, .weak:
             fail("unexpected message from client")
         }
@@ -635,17 +644,19 @@ final class Session {
 
     /// Runs on the capture queue.
     private func frameArrived(_ pixelBuffer: CVPixelBuffer, region: CanvasRect) {
+        let captured = uptimeSeconds()
         let (mode, seq): (Mode, Int) = sampleLock.withLock {
             latestSeq += 1
             latest = (pixelBuffer, region)
             return (sampleMode, latestSeq)
         }
-        quantizeAndSubmit(pixelBuffer, region: region, mode: mode, seq: seq)
+        quantizeAndSubmit(pixelBuffer, region: region, mode: mode, seq: seq, captured: captured)
     }
 
     /// Quantizes on the calling (non-session) queue, then hands the samples,
     /// tagged with the mode and capture sequence number they came from, to `queue`.
-    private func quantizeAndSubmit(_ pixelBuffer: CVPixelBuffer, region: CanvasRect, mode: Mode, seq: Int) {
+    private func quantizeAndSubmit(_ pixelBuffer: CVPixelBuffer, region: CanvasRect, mode: Mode, seq: Int,
+                                   captured: TimeInterval) {
         CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
         guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else { return }
@@ -656,55 +667,74 @@ final class Session {
         let samples = Quantizer.quantize(bgra: UnsafeRawBufferPointer(start: base, count: bytesPerRow * height),
                                          width: width, height: height, bytesPerRow: bytesPerRow, mode: mode)
         queue.async { [weak self] in
-            self?.submit(samples: samples, width: width, height: height, region: region, mode: mode, seq: seq)
+            self?.submit(samples: samples, width: width, height: height, region: region, mode: mode, seq: seq,
+                         captured: captured)
         }
     }
 
-    /// While a frame is still being sent, newer frames replace each other and
-    /// only the latest is encoded once the send finishes. The encoder compares
-    /// against the last frame it actually produced, so skipped frames cost nothing.
+    /// The paced sender keeps only the newest offered frame while earlier ones are in flight.
+    /// The encoder compares against the last frame it actually produced, so skipped frames cost nothing.
     ///
     /// Samples quantized for a mode that has since been switched away from are
     /// dropped (the encoder would reject their size), and so are samples older
     /// than ones already submitted (a redraw racing a newer frame).
-    private func submit(samples: [UInt8], width: Int, height: Int, region: CanvasRect, mode: Mode, seq: Int) {
+    private func submit(samples: [UInt8], width: Int, height: Int, region: CanvasRect, mode: Mode, seq: Int,
+                        captured: TimeInterval) {
         guard !ended, capture != nil else { return }
         guard mode == sampleLock.withLock({ sampleMode }), seq >= newestSubmittedSeq else { return }
         newestSubmittedSeq = seq
-        if sendInFlight {
-            pending = (samples, width, height, region)
-        } else {
-            encodeAndSend(samples: samples, width: width, height: height, region: region)
-        }
-    }
-
-    private func encodeAndSend(samples: [UInt8], width: Int, height: Int, region: CanvasRect) {
-        guard let payload = encoder?.encode(samples: samples, width: width, height: height) else { return }
-        let bytes = Message.frame(region: region, payload).encoded()
-        bytesThisSecond += bytes.count
-        framesThisSecond += 1
         lastWidth = width
         lastHeight = height
-        sendInFlight = true
-        connection.send(content: Data(bytes), completion: .contentProcessed { [weak self] error in
+        paced?.offer(samples: samples, width: width, height: height, region: region, captured: captured)
+    }
+
+    private func makePacedSender(mode: Mode, fps: Int) {
+        let paced = PacedSender(mode: mode, fps: fps, acks: clientSendsFrameAcks(helloVersion), now: uptimeSeconds) {
+            [weak self] region, payload, done in
             guard let self, !self.ended else { return }
-            self.sendInFlight = false
-            if let error {
-                self.end("send failed: \(error.localizedDescription)")
-            } else if let next = self.pending {
-                self.pending = nil
-                self.encodeAndSend(samples: next.samples, width: next.width, height: next.height, region: next.region)
-            }
-        })
+            let bytes = Message.frame(region: region, payload).encoded()
+            self.bytesThisSecond += bytes.count
+            self.framesThisSecond += 1
+            self.connection.send(content: Data(bytes), completion: .contentProcessed { [weak self] error in
+                guard let self, !self.ended else { return }
+                if let error {
+                    self.end("send failed: \(error.localizedDescription)")
+                } else {
+                    done()
+                }
+            })
+        }
+        paced.onWeakChange = { [weak self] weak in self?.weakChanged(weak) }
+        self.paced = paced
+    }
+
+    /// The tier B is shown while the network is weak: duogray, density at most 1.0, same fps.
+    private static let weakMode = Mode.duogray
+
+    private func weakChanged(_ weak: Bool) {
+        guard !ended else { return }
+        output.log(weak ? "weak network: duogray, density <= 1.0" : "network recovered: back to the requested stream")
+        if weak {
+            setStream(Self.weakMode, fps: fps, density: min(requestedDensity, 1.0))
+        } else {
+            setStream(requestedMode, fps: fps, density: requestedDensity)
+        }
+        if clientSendsFrameAcks(helloVersion) { send(.weak(weak)) }
     }
 
     private func tick() {
         guard !ended, capture != nil else { return }
+        paced?.tick()
         let kbps = Double(bytesThisSecond) * 8 / 1000
+        let p = paced?.takeStats()
         if output.json {
-            output.emit(.stats(kbps: kbps, fps: framesThisSecond, width: lastWidth, height: lastHeight))
+            output.emit(.stats(kbps: kbps, fps: framesThisSecond, width: lastWidth, height: lastHeight,
+                               rttMs: p?.rttMs, baseRttMs: p?.baseRttMs, latencyMs: p?.latencyMs, weak: p?.weak ?? false))
         } else {
-            output.log(String(format: "[stats] %.1f kbps %d fps %dx%d", kbps, framesThisSecond, lastWidth, lastHeight))
+            func n(_ v: Int?) -> String { v.map(String.init) ?? "-" }
+            output.log(String(format: "[stats] %.1f kbps %d fps %dx%d rtt %@ base %@ latency %@ inflight %d/%d%@",
+                              kbps, framesThisSecond, lastWidth, lastHeight, n(p?.rttMs), n(p?.baseRttMs), n(p?.latencyMs),
+                              p?.inFlight ?? 0, p?.cap ?? 0, p?.weak == true ? " weak" : ""))
         }
         bytesThisSecond = 0
         framesThisSecond = 0
@@ -726,6 +756,7 @@ final class Session {
         if newFps != fps || newDensity != density {
             fps = newFps
             density = newDensity
+            paced?.setFps(newFps)
             if let capture {
                 // No encoder reset: a density change that alters the picture's
                 // pixel size already makes the encoder send a full frame.
@@ -740,11 +771,11 @@ final class Session {
             sampleMode = newMode
             return latest.map { ($0.buffer, $0.region, latestSeq) }
         }
-        encoder = FrameEncoder(mode: newMode)
-        pending = nil
+        paced?.setMode(newMode)
         if let (pixelBuffer, region, seq) = redraw {
+            let captured = uptimeSeconds()
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                self?.quantizeAndSubmit(pixelBuffer, region: region, mode: newMode, seq: seq)
+                self?.quantizeAndSubmit(pixelBuffer, region: region, mode: newMode, seq: seq, captured: captured)
             }
         }
     }
@@ -824,7 +855,7 @@ final class Session {
         injector?.releaseAll()
         injector = nil
         awake.end()
-        pending = nil
+        paced = nil
         if let farewell {
             let connection = self.connection
             connection.send(content: Data(farewell.encoded()), completion: .contentProcessed { _ in connection.cancel() })
@@ -834,4 +865,9 @@ final class Session {
         }
         onEnd(self, reason, started)
     }
+}
+
+/// CLOCK_UPTIME_RAW in seconds: the clock PacedSender's `now` and `captured` share.
+private func uptimeSeconds() -> TimeInterval {
+    Double(clock_gettime_nsec_np(CLOCK_UPTIME_RAW)) / 1e9
 }

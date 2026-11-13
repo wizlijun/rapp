@@ -195,7 +195,7 @@ public enum WorkerEvent: Equatable {
     case sessionStarted(client: String, mode: Mode, fps: Int)
     case sessionEnded(reason: String)
     case rejected(reason: String)
-    case stats(kbps: Double, fps: Int, width: Int, height: Int)
+    case stats(kbps: Double, fps: Int, width: Int, height: Int, rttMs: Int?, baseRttMs: Int?, latencyMs: Int?, weak: Bool)
     case ready(width: Int, height: Int, title: String)
     /// The client's window table changed; `count` windows in it (multi-window spec §4.6).
     case windows(count: Int)
@@ -217,10 +217,15 @@ public enum WorkerEvent: Equatable {
             return RappCore.jsonLine(["event": "session", "state": "ended", "reason": reason])
         case let .rejected(reason):
             return RappCore.jsonLine(["event": "rejected", "reason": reason])
-        case let .stats(kbps, fps, width, height):
+        case let .stats(kbps, fps, width, height, rttMs, baseRttMs, latencyMs, weak):
             // A decimal, so it prints as 12.3 rather than 12.300000000000001.
             let rounded = NSDecimalNumber(string: String(format: "%.1f", kbps))
-            return RappCore.jsonLine(["event": "stats", "kbps": rounded, "fps": fps, "width": width, "height": height])
+            var object: [String: Any] = ["event": "stats", "kbps": rounded, "fps": fps, "width": width, "height": height,
+                                         "weak": weak]
+            if let rttMs { object["rttMs"] = rttMs }
+            if let baseRttMs { object["baseRttMs"] = baseRttMs }
+            if let latencyMs { object["latencyMs"] = latencyMs }
+            return RappCore.jsonLine(object)
         case let .ready(width, height, title):
             return RappCore.jsonLine(["event": "ready", "width": width, "height": height, "title": title])
         case let .windows(count):
