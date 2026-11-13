@@ -56,7 +56,8 @@
 | `$ROOT/agent/` | — | 用户和 agent，rapp 不动 | 不放机密 | §2.9 |
 | 程序自管的状态（`$ROOT/local/` 等） | A / B | 程序自管 | 部分有 | §3 |
 | macOS 开机自启 | A | 安装包 / GUI | 无 | §4 |
-| 中继（VPS） | relay | 运维手改 | 有 | §5 |
+| 新 relay（Docker） | relay | 运维手改 `config.json` 或环境变量 | 有（数据卷里的密钥） | §5.1 |
+| 旧 relay（VPS，迁移结束后删除） | relay | 运维手改 | 有 | §5.2 |
 | 环境变量 | 各侧 | 启动方 | 部分有 | §6 |
 | 命令行参数 | 各程序 | 启动方 | 部分有 | §7 |
 | 打包发布 | 构建机 | 发布脚本 | 有（签名身份） | §8 |
@@ -174,6 +175,81 @@ agent 规则：不手改；要换启动参数就改上面两处模板，**两处
 
 ## 5. 中继（VPS）
 
+### 5.1 新 relay（`rapp-relay2`，Docker 镜像）
+
+规格：《rapp relay 设计》（`2026-11-13-rapp-relay-design.md`）§10、§12。代码：`rust/relay2/src/config.rs`。什么都不配也能跑：启动容器、挂上数据卷、放行端口即可。没有任何机密通过配置传给 relay（key 由 relay 自己生成，用 `key` 命令显示一次）。
+
+**配置项。** 来源三个，后面盖过前面：默认值 → 数据卷里的 `config.json`（可以没有）→ 环境变量。改了要重启才生效。文件里嵌套写（`{"audit":{"keep_days":7},"limits":{"max_conns":100}}`），环境变量是扁平的。
+
+| 配置项 | 环境变量 | 默认 | 意思 |
+|---|---|---|---|
+| `listen` | `RAPP_RELAY_LISTEN` | `0.0.0.0:21116` | 监听的地址和端口（UDP） |
+| `enroll` | `RAPP_RELAY_ENROLL` | `open` | `open` 接受新设备入网；`closed` 不接受 |
+| `log` | `RAPP_RELAY_LOG` | `info` | 运行日志的级别：`info` 或 `debug` |
+| `audit.keep_days` | `RAPP_RELAY_AUDIT_KEEP_DAYS` | `180` | 审计日志留多少天 |
+| `audit.max_mb` | `RAPP_RELAY_AUDIT_MAX_MB` | `256` | 审计日志总共最多占多少 MB |
+| `audit.required` | `RAPP_RELAY_AUDIT_REQUIRED` | `false` | 审计写不进去时，是否拒绝新的入网和牵线（环境变量取 `true`/`false`/`1`/`0`） |
+| `metrics` | `RAPP_RELAY_METRICS` | 关 | 指标接口的地址，如 `127.0.0.1:9116`。只收本机回环地址，别的地址拒绝启动 |
+| `limits.max_conns` | `RAPP_RELAY_LIMIT_MAX_CONNS` | `4096` | 总连接数 |
+| `limits.max_conns_per_ip` | `RAPP_RELAY_LIMIT_MAX_CONNS_PER_IP` | `16` | 每个来源地址的连接数 |
+| `limits.max_streams` | `RAPP_RELAY_LIMIT_MAX_STREAMS` | `128` | 每条连接的并发流 |
+| `limits.max_relayed_per_device` | `RAPP_RELAY_LIMIT_MAX_RELAYED_PER_DEVICE` | `32` | 每台设备同时被中继的流 |
+| `limits.max_devices` | `RAPP_RELAY_LIMIT_MAX_DEVICES` | `1024` | 入网设备数 |
+| `limits.unenrolled_idle_secs` | `RAPP_RELAY_LIMIT_UNENROLLED_IDLE_SECS` | `10` | 没入网的连接多少秒没动静就断 |
+| `limits.enroll_per_ip_per_min` | `RAPP_RELAY_LIMIT_ENROLL_PER_IP_PER_MIN` | `10` | 没入网的连接，每个来源地址每分钟几次 |
+| `limits.max_line` | `RAPP_RELAY_LIMIT_MAX_LINE` | `8192` | 一行请求最长多少字节（规格 §9.2 的 8 KiB） |
+| `limits.request_timeout_secs` | `RAPP_RELAY_LIMIT_REQUEST_TIMEOUT_SECS` | `10` | 请求行多少秒内要收完，超时重置这条流 |
+| `limits.lock_after` | `RAPP_RELAY_LIMIT_LOCK_AFTER` | `5` | 入网失败、`connect` 失败连续几次以后开始退避 |
+| `limits.lock_max_secs` | `RAPP_RELAY_LIMIT_LOCK_MAX_SECS` | `300` | 退避最长等多少秒（第 n 次失败等 `min(2^(n-lock_after), lock_max_secs)` 秒） |
+| `limits.connect_per_target_per_min` | `RAPP_RELAY_LIMIT_CONNECT_PER_TARGET_PER_MIN` | `60` | 每个目标 ID 每分钟最多被请求牵线几次，超了回 `limit`，不锁 |
+| `limits.relay_bps_per_stream` | `RAPP_RELAY_LIMIT_RELAY_BPS_PER_STREAM` | `0` | 每条中继流的带宽上限，字节/秒；`0` 不限 |
+| `limits.relay_bps_total` | `RAPP_RELAY_LIMIT_RELAY_BPS_TOTAL` | `0` | 中继总带宽上限，字节/秒；`0` 不限 |
+
+规则：
+
+- 配置里出现不认识的项，或者值不合法：relay 拒绝启动，并说明是哪一项。写错一个字不会被悄悄忽略。
+- 启动时把生效的配置记一行，运行日志和审计日志（`relay_start`）各一份。
+- 命令行参数只有 `--data`（数据目录，默认 `/data`）和子命令：`key`、`rotate-key`、`devices`、`revoke <ID|指纹>`、`unbind <ID>`、`enroll open|closed`、`audit [--since <N>d|<N>h] [--id <ID>] [--event <名字>]`、`check`、`--version`。不带子命令就是运行 relay。
+- `enroll open|closed` 命令只改运行中的开关；重启后以配置为准，环境变量 `RAPP_RELAY_ENROLL` 会盖过它。
+
+**数据卷 `/data`**（规格 §10.2）。文件 0600，目录 0700。备份整个数据卷；最要紧的是 `relay.key` 和 `devices.json`。
+
+| 文件 | 是什么 | 丢了会怎样 | 机密 |
+|---|---|---|---|
+| `relay.key`、`relay.crt` | relay 自己的密钥和证书 | 所有设备上的 key 都对不上了，要换 key | **机密**（`relay.key`） |
+| `join` | 入网口令的哈希 | 没法入网新设备，换 key 即可；已入网的不受影响 | **机密**（哈希） |
+| `devices.json` | 登记簿：指纹、ID、租户、入网时间、是否吊销 | 设备要重新入网；ID 的归属丢失 | |
+| `config.json` | 配置（可以没有） | 回到默认值 | |
+| `audit/` | 审计日志，`YYYY-MM-DD.jsonl`，一天一个 | 审计记录没了，不影响运行 | |
+| `admin.sock` | 管理命令用的套接字 | 重启后重建 | |
+
+agent 规则：不改 `relay.key`、`join`、`devices.json`（程序自管；要吊销、解绑用 `revoke`、`unbind` 命令）；`config.json` 可以手改，改前停 relay，改后启动，看运行日志里有没有报哪一项不合法（不合法会拒绝启动）。
+
+**Docker 部署**（规格 §12；镜像尚未构建，见 `tasks/todo.md` 任务 14）。发布物只有一个 Docker 镜像：
+
+| 项 | 定法 |
+|---|---|
+| 基础镜像 | Alpine Linux，版本固定到具体的小版本和摘要 |
+| 镜像里有什么 | Alpine 的基础层，加 `rapp-relay` 一个程序。不装任何别的包 |
+| 架构 | 同一个镜像标签下带 x86_64 和 arm64 两种 |
+| 怎么构建 | 多阶段：第一阶段编译，第二阶段只把程序拷进干净的 Alpine |
+| 大小目标 | 镜像压缩后 10 MB 以内（估计，第一次构建后写实际数字） |
+| 运行身份 | 非 root 的固定用户；根文件系统只读；去掉全部特权；禁止提权 |
+| 数据 | 只挂一个卷 `/data` |
+| 网络 | 主机网络模式。relay 靠"看到的对端地址"做限速和打洞，别的网络模式可能把地址改写掉。来源地址要在 Linux VPS 上实测（待做） |
+| 健康检查 | 镜像自带，定期跑 `rapp-relay check` |
+| 升级 | `docker compose pull && docker compose up -d` |
+| 镜像标签 | 每个版本一个固定标签，另有跟随小版本的标签。compose 示例里写固定标签 |
+| 发布到哪里 | `ghcr.io/wizlijun/rapp-relay` |
+
+relay 只能跑在 Linux 主机上（Mac 和 Windows 上的 Docker 在虚拟机里，看不到真实来源地址）。开发和测试时可以直接运行编译出来的程序，那不是发布物。
+
+**日志和审计**：运行日志写标准错误，由 Docker 收集（`relay_start`、`stats` 等事件，见可观测性规格 §4.2）；审计日志写 `/data/audit/`，同时带标记写一份到标准错误，事件表见规格 §11.1。
+
+### 5.2 旧 relay，迁移结束后删除
+
+两个 relay 并行到设备迁移完（规格 §13.2）；下面这些在那之后一起删。
+
 | 东西 | 位置 | 内容 | 机密 |
 |---|---|---|---|
 | systemd 单元 | `/etc/systemd/system/rapp-relay.service`（模板 `scripts/rapp-relay.service`） | 从 `/etc/rapp-relay.env` 读 `RAPP_RELAY_KEY`；运行 `rapp-relay --key ${RAPP_RELAY_KEY} --listen 0.0.0.0:21116 --db /var/lib/rapp-relay/relay.json`；`DynamicUser`；总是重启 | |
@@ -193,13 +269,15 @@ agent 规则：不手改；要换启动参数就改上面两处模板，**两处
 | `RAPP_FORCE_PATH` | B | 强制走 `relay`、`direct` 或 `lan` | 自动选 | |
 | `RAPP_DOWNLOADS` | A、B（A：`rapp-host` 收上传；B：GUI 嵌入会话下载，`gui/macos/Runner/SessionPlugin.swift:47`） | 收发文件的目录（`Sources/RappCore/DataPaths.swift:18-21`） | `$ROOT/files/transfers`（旧版是 `~/Downloads/rapp`，那里的文件不会搬） | |
 | `RAPP_TOKEN` | 内部 | service / hub 传给子进程的会话 token，不要自己设 | — | **机密** |
-| `RAPP_RELAY_KEY` | VPS | 中继密钥，见 §5 | — | **机密** |
+| `RAPP_RELAY_KEY` | VPS（旧 relay，迁移结束后删除） | 中继密钥，见 §5.2 | — | **机密** |
+| `RAPP_RELAY_*` | 新 relay | 配置项的环境变量形式，全表见 §5.1 | 见 §5.1 | 无（没有机密经环境变量传入） |
 
 ## 7. 命令行参数
 
 | 程序 | 参数 | 谁来传 |
 |---|---|---|
-| `rapp-relay` | `--key`（必填，机密）、`--listen`（默认 `0.0.0.0:21116`）、`--db`（默认 `relay.json`）、`--debug`、`--version` | systemd 单元（§5） |
+| `rapp-relay`（旧 relay，迁移结束后删除） | `--key`（必填，机密）、`--listen`（默认 `0.0.0.0:21116`）、`--db`（默认 `relay.json`）、`--debug`、`--version` | systemd 单元（§5.2） |
+| `rapp-relay2`（新 relay） | `--data <目录>`（默认 `/data`）；子命令见 §5.1 | Docker / 运维 |
 | `rapp-service`、`rapp-hub` | 不收参数（给了就以退出码 2 退出）；只看 §6 的环境变量 | launchd / GUI |
 | `rapp-host` | `serve --app <标识> --token-env <变量> --port <端口>（默认 47800，0=随机）--bind <地址> --json`；`list-apps`；`check [--prompt]`；`version [--json]` | rapp-service（`Sources/RappCore/WorkerCLI.swift:97`） |
 | `rapp-client`（Swift、GTK） | `[connect] rapp://… [--token-env <变量>] [--json]`；`version [--json]` | rapp-hub |

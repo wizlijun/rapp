@@ -292,3 +292,26 @@
 - 取 7 次交错运行里最快的一次比（R21，干扰只会加时间；每次运行的 CPU 随核位置/温度呈双峰，相差约 15%）。两次完整运行：old_ms=7142 new_ms=7133 ratio=0.999；old_ms=7290 new_ms=7196 ratio=0.987（均通过，上限 1.05）。中位数比 0.992、0.934（仅供参考）。上一版按 7 次中位数：0.979 通过、1.075 失败。CPU 毫秒 = 每个 relay 子进程各自 wait4 的 utime+stime，512 MiB 单向 64 KiB 一块，新 relay 不限速。更早 3 次中位数的比值：1.025、1.006、0.968、0.990、1.072、1.045、0.892；单次噪声约 ±7%，均值约 1.0。
 - rss_mb=11.7（100 台设备入网登记后静置 10 s，上限 50）。
 - 机器：本机 Mac arm64。命令：`cd rust && cargo build --release -p rapp-relay && cargo test -p rapp-relay2 --release --test bench -- --ignored --nocapture --test-threads=1`。
+
+## 新 relay 服务（`rust/relay2`，规格 `docs/superpowers/specs/2026-11-13-rapp-relay-design.md`；提交范围 `39c1330..HEAD`）
+- [x] 任务 1 设备身份和指纹（`rapp-wire`）：`39c1330..bf6e114`
+- [x] 任务 2 key 格式和推导：`bf6e114..bea0503`
+- [x] 任务 3 双向 TLS、行协议、relay 消息：`bea0503..1ca73e4`
+- [x] 任务 4 分层配置：`1ca73e4..1642934`
+- [x] 任务 5 设备登记簿：`1642934..497810f`
+- [x] 任务 6 审计日志：`497810f..c423aec`
+- [x] 任务 7 上限和限速：`c423aec..3d3cfdd`
+- [x] 任务 8 传输、准入、入网：`3d3cfdd..88eda20`
+- [x] 任务 9 登记、牵线、吊销名单：`88eda20..78caa8d`
+- [x] 任务 10 中继流和计量：`78caa8d..0fc7551`
+- [x] 任务 11 管理套接字、子命令、优雅停止：`0fc7551..00993fc`
+- [x] 任务 12 统计行和指标接口：`00993fc..24733dc`
+- [x] 任务 13 密钥扫描、畸形输入、久跑：`24733dc..7dc326d`
+- [ ] 任务 14 Docker 镜像：待做（等 buildx / cargo-audit）
+- [x] 任务 15 性能：relay 开销对比旧 relay、空闲内存：`7dc326d..b0a3086`
+- [x] 任务 16 文档（配置规范总览、可观测性规格、本文件）：本提交
+
+### 未经实机验证
+- 任务 14 第 3 步（镜像在 Docker 里跑起来）：待做
+- 来源地址实测（`network_mode: host`，另一台机器 `probe` 入网，看审计日志 `enroll` 的 `from` 是不是公网地址）：待用户的 VPS
+- 24 小时久跑（`RAPP_SOAK_SECS=86400 cargo test -p rapp-relay2 --release --test soak -- --ignored --nocapture`）：待用户

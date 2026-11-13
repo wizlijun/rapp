@@ -12,7 +12,7 @@
 - 沿用平台规格的"不引日志框架"。Rust 用 `rapp-net` 里一个约 150 行的小模块，Swift 不改日志方式。
 - 日志只是信息，不加验证、确认或告警（D8，门禁仍然只有 relay）。
 - 不写高频日志。每秒一条的东西（stats）不进日志，会话结束时记一行汇总；连续重复的行合并成一行计数。
-- **绝不记**：密码、令牌、secret、relay key，剪贴板和粘贴的内容，键入的文字。
+- **绝不记**：密码、令牌、secret、relay key、入网口令、任何私钥，剪贴板和粘贴的内容，键入的文字。
 - 兼容：协议只加可选字段，旧版收到会忽略。
 
 ## 1 现状（2026-11-11 盘点）
@@ -118,6 +118,33 @@
 | `opened` | info | `sid, id, host_name?, app, path` |
 | `closed` | info | `sid, id, app, secs, reason` |
 | `log` | 任意 | `msg, src?, sid?`：原来的 `eprintln!`，以及 rapp-client 的 stderr 行（加上 `src:"client"` 和 `sid`） |
+
+### 4.2.1 新 relay（`rapp-relay2`，Docker）
+
+规格：《rapp relay 设计》§11。新 relay 有两种日志，用处不同：
+
+- **运行日志**：写标准错误，由 Docker 收集，格式同本文 §2。给排查问题的人看，设备用指纹的前 8 位（`fp`）标识。
+
+  | ev | lvl | 字段 / 时机 |
+  |---|---|---|
+  | `relay_start` | info | 启动，带版本和生效的配置（审计日志的镜像，见下） |
+  | `listening` | info | `addr, fp`：实际监听的地址和 relay 的指纹 |
+  | `stats` | info | 每 5 分钟一行：`online`（在线设备数）、`relayed_streams`（正在中继的流数）、`relayed_bytes`、`handshake_failures`、`limited`、`audit_failures` |
+  | `handshake_failed` | info | `from, error`：握手被拒（比如没出示证书） |
+  | `revoked_refused` | info | `fp, from`：已吊销的设备被拒绝 |
+  | `enroll_failed`、`register_failed` | error | `fp, error`：入网或登记在服务端出错 |
+  | `registry_flush_failed` | error | 登记簿写盘失败 |
+  | `audit_write_failed` | error | 审计写不进去（比如磁盘满）；`audit.required` 为 `false` 时继续服务 |
+  | `admin_failed` | error | 管理命令失败 |
+  | `conn_open`、`conn_closed`、`push_failed` | debug | 只在 `log` 设成 `debug` 时记 |
+
+  审计事件也会带标记镜像一份到运行日志（标准错误），所以 `relay_start` 在两处各出现一次。
+- **审计日志**：`/data/audit/YYYY-MM-DD.jsonl`，一天一个，默认留 180 天、总量不超过 256 MB。记每一次和准入、身份、连接有关的动作，成功和失败都记，带完整指纹。**事件表在规格 §11.1，这里不抄。**
+- **指标**（可选，默认关）：`metrics` 配了本机地址才提供 Prometheus 格式的数字：`rapp_relay_online_devices`、`rapp_relay_relayed_streams`、`rapp_relay_relayed_bytes_total`、`rapp_relay_handshake_failures_total`、`rapp_relay_limited_total`、`rapp_relay_audit_failures_total`。
+- **绝不记**：key、入网口令、任何私钥、流里的任何内容（和本文 §0 一致；审计日志只记 `key`、`rotate_key` 这类命令发生了，不记 key 本身）。
+- 在线探测不逐条记：经中继的探测流（5 秒以内、8 KiB 以内）按"发起方和目标"每小时合并成一行；真正的会话每条都记 `relayed`。
+
+旧 relay（上面 §4.2）在迁移结束后删除，这一小节随之成为 relay 的唯一说明。
 
 ## 5 共用模块 `rapp_net::log`
 
