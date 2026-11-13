@@ -11,6 +11,7 @@ import 'package:rapp/hub_client.dart';
 import 'package:rapp/ui/lamp.dart';
 import 'package:rapp/ui/lifecycle.dart';
 import 'package:rapp/ui/main_state.dart';
+import 'package:rapp/ui/pin_files.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/resources_state.dart';
 import 'package:rapp/ui/session_model.dart';
@@ -2038,8 +2039,9 @@ void main() {
     final t0 = DateTime(2026, 11, 12, 9, 30);
 
     void env(void Function(FakeAsync a, FakeTransport t, FakeSessionPort port, MainState st) body,
-        {FakeSessionPort? usePort}) {
+        {FakeSessionPort? usePort, void Function()? pre}) {
       fakeAsync((a) {
+        pre?.call();
         final t = FakeTransport();
         final port = usePort ?? FakeSessionPort();
         t.emit({
@@ -2291,6 +2293,90 @@ void main() {
         expect(callsOf(port, 'drop_copy').single.$2, {'copy': 9});
         expect(st.hint, before);
       }, usePort: gated);
+    });
+
+    test('pinning saves the copy to the data dir and hints once', () {
+      env((a, t, port, st) {
+        port.emit(const ClipsEvent(1, [ClipRow(7, 'one', true), ClipRow(8, 'two', true)]));
+        port.pinSaveReply = {'path': '${tmp.path}/clipboard/x.md'};
+        st.togglePin(st.resources.clips.last);
+        a.flushMicrotasks();
+        final c = callsOf(port, 'pin_save').single.$2;
+        expect(c['text_dir'], '${tmp.path}/clipboard');
+        expect(c['file_dir'], '${tmp.path}/files/clipboard');
+        expect(c['copy'], 1);
+        expect(st.resources.clips.last.path, '${tmp.path}/clipboard/x.md');
+        expect(st.hint, pinHint);
+        expect(File('${tmp.path}/local/$pinHintMarker').existsSync(), true);
+        st.hint = '';
+        st.togglePin(st.resources.clips.first);
+        a.flushMicrotasks();
+        expect(callsOf(port, 'pin_save').length, 2);
+        expect(st.hint, isNot(pinHint));
+      });
+    });
+
+    test('a pin whose save failed stays pinned in memory without a hint', () {
+      env((a, t, port, st) {
+        port.emit(const ClipsEvent(1, [ClipRow(7, 'one', true)]));
+        st.togglePin(st.resources.clips.single);
+        a.flushMicrotasks();
+        final e = st.resources.clips.single;
+        expect(e.pinned, true);
+        expect(e.path, isNull);
+        expect(st.hint, isNot(pinHint));
+        expect(File('${tmp.path}/local/$pinHintMarker').existsSync(), false);
+      });
+    });
+
+    test('unpinning deletes the file', () {
+      final f = File('${tmp.path}/saved.md')..writeAsStringSync('x');
+      env((a, t, port, st) {
+        port.emit(const ClipsEvent(1, [ClipRow(7, 'one', true)]));
+        port.pinSaveReply = {'path': f.path};
+        final e = st.resources.clips.single;
+        st.togglePin(e);
+        a.flushMicrotasks();
+        expect(f.existsSync(), true);
+        st.togglePin(e);
+        a.flushMicrotasks();
+        expect(f.existsSync(), false);
+      });
+    });
+
+    test('restored pins load at start', () {
+      final f = File('${tmp.path}/clipboard/20261113-090507-a.md');
+      env((a, t, port, st) {
+        a.flushMicrotasks();
+        final e = st.resources.clips.single;
+        expect(e.pinned, true);
+        expect(e.ended, true);
+        expect(e.source, '之前固定的');
+        expect(e.title, 'a');
+        expect(e.copy, 7);
+        expect(e.path, f.path);
+        expect(e.at, DateTime(2026, 11, 13, 9, 5, 7));
+        expect(st.canInsert(e), false);
+        expect(callsOf(port, 'pin_load').single.$2, {'path': f.path});
+      }, usePort: FakeSessionPort()..pinLoadReply = {'copy': 7, 'kind': 'text'}, pre: () {
+        f.parent.createSync(recursive: true);
+        f.writeAsStringSync('x');
+      });
+    });
+
+    test('relocate moves pin paths to the new root', () {
+      env((a, t, port, st) {
+        port.emit(const ClipsEvent(1, [ClipRow(7, 'one', true), ClipRow(8, 'two', true)]));
+        port.pinSaveReply = {'path': '${tmp.path}/clipboard/x.md'};
+        st.togglePin(st.resources.clips.last);
+        a.flushMicrotasks();
+        port.pinSaveReply = {'path': '${tmp.path}2/clipboard/y.md'};
+        st.togglePin(st.resources.clips.first);
+        a.flushMicrotasks();
+        st.relocate(const DataDir('/new/root'));
+        expect(st.resources.clips.last.path, '/new/root/clipboard/x.md');
+        expect(st.resources.clips.first.path, '${tmp.path}2/clipboard/y.md');
+      });
     });
 
     test('reveal of a missing file hints', () {

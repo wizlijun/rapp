@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/session_port.dart';
+import 'package:rapp/ui/pin_files.dart';
 import 'package:rapp/ui/resources_state.dart';
 
 ResourcesState make() => ResourcesState(clock: () => DateTime(2026, 11, 12, 9, 5));
@@ -165,5 +166,28 @@ void main() {
     expect(kindWord(ClipKind.files), '文件');
     expect(kindWord(ClipKind.data), '数据');
     expect(kindWord(ClipKind.unsupported), '其他');
+  });
+
+  test('restored entries are pinned, ended, oldest, and never evicted', () {
+    final s = make();
+    s.addClips('k', 1, 'A', [row(1)]);
+    s.addRestored(path: '/r/a.md', copy: 7, kind: ClipKind.text, title: 'a', at: DateTime(2026, 11, 1));
+    s.addRestored(path: '/r/b.md', copy: 8, kind: ClipKind.image, title: 'b', at: DateTime(2026, 11, 2));
+    expect(s.clips.map((e) => e.title), ['t1', 'a', 'b']);
+    final e = s.clips[1];
+    expect(e.pinned, true);
+    expect(e.ended, true);
+    expect(e.copy, 7);
+    expect(e.path, '/r/a.md');
+    expect(e.source, restoredSource);
+    expect(e.key, '');
+    expect(e.at, DateTime(2026, 11, 1));
+    for (var i = 2; i < 2 + maxUnpinned + 5; i++) {
+      s.addClips('k', 1, 'A', [row(i)]);
+    }
+    expect(s.clips.where((e) => e.path != null).length, 2);
+    expect(s.clips.where((e) => !e.pinned).length, maxUnpinned);
+    expect(s.unpin(e.seq, sessionEnded: e.ended), 7);
+    expect(s.entry(e.seq), isNull);
   });
 }
