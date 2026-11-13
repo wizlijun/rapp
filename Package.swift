@@ -18,12 +18,14 @@ products += [
     .library(name: "RappSession", targets: ["RappSession"]),
     .executable(name: "rapp-host", targets: ["rapp-host"]),
     .executable(name: "rapp-client", targets: ["rapp-client"]),
+    .executable(name: "rapp-testpage", targets: ["rapp-testpage"]),
 ]
 targets += [
     .executableTarget(name: "rapp-host", dependencies: ["RappCore"]),
     .target(name: "RappSession", dependencies: ["RappCore"]),
     .testTarget(name: "RappSessionTests", dependencies: ["RappSession"]),
     .executableTarget(name: "rapp-client", dependencies: ["RappCore", "RappSession"]),
+    .executableTarget(name: "rapp-testpage", dependencies: ["RappCore"]),
 ]
 #endif
 
