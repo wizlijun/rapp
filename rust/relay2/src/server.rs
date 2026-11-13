@@ -33,9 +33,9 @@ use tokio::io::{AsyncRead, AsyncWrite, BufReader, ReadBuf};
 use crate::admin::{self, Control};
 use crate::audit::Audit;
 use crate::config::{Config, Enroll};
-use crate::metrics::{MetricsServer, Stats};
 use crate::limits::{source_key, Backoff, Bucket, ConnGuard, Conns, Rate};
-use crate::store::{Bind, FileRegistry, Registry};
+use crate::metrics::{MetricsServer, Stats};
+use crate::store::{Bind, FileRegistry, Registry, Revoked};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const TENANT: &str = "default";
@@ -246,8 +246,9 @@ impl Relay {
 
     /// Revokes `fp` in the registry; if that changed anything, closes its connections (code 2),
     /// sends the new list to every other enrolled connection and records `revoke`.
-    /// False when `fp` was unknown or already revoked.
-    pub async fn revoke(&self, fp: &Fp) -> Result<bool> {
+    /// `changed` is false when `fp` was unknown or already revoked. A failed save does not stop the
+    /// revocation: it is applied, audited with `saved: false`, and reported in `save_error`.
+    pub async fn revoke(&self, fp: &Fp) -> Revoked {
         self.shared.revoke(fp)
     }
 }
@@ -356,8 +357,12 @@ async fn stream(s: Arc<Shared>, peer: Arc<Peer>, st: BiStream) {
         Ok(Ok(v)) => v,
     };
     let Ok(req) = serde_json::from_value::<Req>(line) else { return reply(st, err(BAD_REQUEST)).await };
+    // A failed `enroll` on a connection that is not enrolled ends the connection (after the reply is
+    // delivered): one audit line per handshake, so an outsider cannot fill the audit by retrying.
+    let unenrolled_enroll = matches!(req, Req::Enroll { .. }) && !peer.enrolled();
     if matches!(req, Req::Enroll { .. } | Req::Connect { .. } | Req::Relay { .. }) && !s.audit_ok(&peer) {
-        return reply(st, err("limit")).await;
+        let v = err("limit");
+        return if unenrolled_enroll { reply_and_close(st, v, &peer.conn).await } else { reply(st, v).await };
     }
     match req {
         // The same reader that read the line: what it buffered after it is the initiator's
@@ -365,6 +370,9 @@ async fn stream(s: Arc<Shared>, peer: Arc<Peer>, st: BiStream) {
         Req::Relay { id } if peer.enrolled() => s.relay(&peer, &id, st).await,
         req => {
             let res = s.request(&peer, req).await;
+            if unenrolled_enroll && !peer.enrolled() {
+                return reply_and_close(st, res, &peer.conn).await;
+            }
             reply(st, res).await;
         }
     }
@@ -469,9 +477,10 @@ impl Shared {
         Ok(Some(holder.fp))
     }
 
-    fn revoke(&self, fp: &Fp) -> Result<bool> {
-        if !self.registry.revoke(fp)? {
-            return Ok(false);
+    fn revoke(&self, fp: &Fp) -> Revoked {
+        let done = self.registry.revoke(fp);
+        if !done.changed {
+            return done;
         }
         let (gone, rest): (Vec<_>, Vec<_>) = {
             let mut on = self.online();
@@ -484,8 +493,13 @@ impl Shared {
             p.conn.close(CLOSE_REVOKED.into(), b"revoked");
         }
         self.push_revoked(rest);
-        self.audit.event("revoke", json!({"fp": fp.to_string()}), true);
-        Ok(true)
+        let mut rec = json!({"fp": fp.to_string()});
+        if let Some(e) = &done.save_error {
+            rec["saved"] = false.into();
+            rec["error"] = e.clone().into();
+        }
+        self.audit.event("revoke", rec, true);
+        done
     }
 
     /// `register`: claims `id` for this device and makes this connection the one it reaches.
@@ -629,7 +643,10 @@ impl Shared {
     async fn relay(&self, peer: &Arc<Peer>, id: &str, st: BufReader<BiStream>) {
         let (target, slot) = match self.relay_target(peer, id) {
             Ok(t) => t,
-            Err(e) => return reply(st, err(&e)).await,
+            Err(e) => {
+                self.relay_failed(peer, id, &e);
+                return reply(st, err(&e)).await;
+            }
         };
         let push = Push::Relayed { peer: peer.from.to_string(), fp: peer.fp };
         let open = async {
@@ -638,22 +655,36 @@ impl Shared {
             anyhow::Ok(tls::bi((send, recv)))
         };
         let Ok(Ok(to)) = tokio::time::timeout(INCOMING_WAIT, open).await else {
+            self.relay_failed(peer, id, OFFLINE);
             return reply(st, err(OFFLINE)).await;
         };
-        let end = SpliceEnd { audit: self.audit.clone(), stats: self.stats.clone(), fp: peer.fp, from: peer.from, to: id.to_string() };
+        let end = SpliceEnd {
+            audit: self.audit.clone(),
+            stats: self.stats.clone(),
+            fp: peer.fp,
+            from: peer.from,
+            to: id.to_string(),
+        };
         let per_stream = self.config.limits.relay_bps_per_stream;
         let total = self.relay_total.clone();
         // No request timeout from here on: QUIC's idle timeout ends a splice with a dead side.
         tokio::spawn(async move {
-            let _slot = slot;
             let start = Instant::now();
             let (up, down) = if per_stream == 0 && total.unlimited() {
                 splice(st, to).await
             } else {
                 splice_metered(st, to, &Bucket::new(per_stream), &total).await
             };
+            // Free the target's slot first: whoever sees the audit line may retry at once.
+            drop(slot);
             end.record(start.elapsed(), up, down);
         });
+    }
+
+    /// A `relay` that never became a splice: a `relayed` line with the `result` and no byte counts.
+    fn relay_failed(&self, peer: &Peer, id: &str, result: &str) {
+        let (fp, from) = (peer.fp.to_string(), peer.from.to_string());
+        self.audit.event("relayed", json!({"fp": fp, "from": from, "to": id, "result": result}), false);
     }
 
     /// The checks before a splice (ruling R13: the connect backoff, but no per-target rate and no
@@ -678,10 +709,12 @@ impl Shared {
             Ok(()) => "ok",
             Err(e) => e.as_str(),
         };
+        // `locked` and `limit` attempts come from anyone with a certificate: no fsync for them.
+        let urgent = !(result.starts_with("locked") || result == "limit");
         self.audit.event(
             "enroll",
             json!({"fp": peer.fp.to_string(), "from": peer.from.to_string(), "result": result}),
-            true,
+            urgent,
         );
         match res {
             Ok(()) => {
@@ -722,7 +755,7 @@ impl Shared {
         }
         if let Err(e) = self.registry.enroll(peer.fp, TENANT) {
             self.log.event(Lvl::Error, "enroll_failed", json!({"fp": peer.fp.short(), "error": format!("{e:#}")}));
-            return Err(BAD_REQUEST.into());
+            return Err("unavailable".into());
         }
         self.enroll_backoff.reset(&source);
         Ok(())
@@ -785,7 +818,7 @@ impl Control for Shared {
         self.enroll_open.store(open, Ordering::Release);
     }
 
-    fn revoke(&self, fp: &Fp) -> Result<bool> {
+    fn revoke(&self, fp: &Fp) -> Revoked {
         Shared::revoke(self, fp)
     }
 
@@ -922,20 +955,20 @@ async fn pace(
     n: &mut u64,
 ) -> io::Result<()> {
     let mut buf = vec![0u8; SPLICE_BUF];
-    let mut chunk = first.len();
-    buf[..chunk].copy_from_slice(first);
-    loop {
-        if chunk > 0 {
-            for b in buckets {
-                b.take(chunk).await;
-            }
-            to.write_all(&buf[..chunk]).await?;
-            *n += chunk as u64;
+    // `first` goes out as it is, so its size never has to fit `buf`.
+    if !first.is_empty() {
+        for b in buckets {
+            b.take(first.len()).await;
         }
-        match from.read(&mut buf).await? {
-            Some(k) => chunk = k,
-            None => break,
+        to.write_all(first).await?;
+        *n += first.len() as u64;
+    }
+    while let Some(k) = from.read(&mut buf).await? {
+        for b in buckets {
+            b.take(k).await;
         }
+        to.write_all(&buf[..k]).await?;
+        *n += k as u64;
     }
     to.finish()?;
     Ok(())
@@ -992,6 +1025,16 @@ async fn reply(st: BufReader<BiStream>, v: Value) {
     if write_json(&mut send, &v).await.is_ok() {
         let _ = send.finish();
     }
+}
+
+/// Replies, waits (briefly) until the peer has the whole reply, then closes the connection with
+/// `CLOSE_LIMIT`: closing at once would drop the reply.
+async fn reply_and_close(st: BufReader<BiStream>, v: Value, conn: &quinn::Connection) {
+    let (_recv, mut send) = st.into_inner().into_inner();
+    if write_json(&mut send, &v).await.is_ok() && send.finish().is_ok() {
+        let _ = tokio::time::timeout(Duration::from_secs(1), send.stopped()).await;
+    }
+    conn.close(CLOSE_LIMIT.into(), b"enroll failed");
 }
 
 /// `join_hex` (64 hex digits) hashes to `want`; anything that does not decode is a wrong key.

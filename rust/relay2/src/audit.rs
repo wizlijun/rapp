@@ -76,11 +76,18 @@ impl Audit {
             .with_context(|| format!("create {}", dir.display()))?;
         let inner = Inner { buf: Vec::new(), probes: BTreeMap::new(), healthy: true, hour: hour_of(SystemTime::now()) };
         let a = Audit(Arc::new(Shared { dir, cfg: cfg.clone(), mirror, inner: Mutex::new(inner) }));
+        a.prune(SystemTime::now());
         let weak: Weak<Shared> = Arc::downgrade(&a.0);
+        let mut day = day_of(SystemTime::now());
         std::thread::Builder::new().name("audit-flush".into()).spawn(move || loop {
             std::thread::sleep(TICK);
             let Some(s) = weak.upgrade() else { return };
             let a = Audit(s);
+            let today = day_of(SystemTime::now());
+            if today != day {
+                day = today;
+                a.prune(SystemTime::now());
+            }
             let h = hour_of(SystemTime::now());
             let rolled = std::mem::replace(&mut a.lock().hour, h) != h;
             if rolled {
@@ -339,6 +346,20 @@ mod tests {
         let v = lines(d.path(), &today()).pop().unwrap();
         assert_eq!(v["ev"], "audit_prune");
         assert_eq!(v["days"], json!(["2020-01-01", "2020-01-02", "2020-01-03"]));
+    }
+
+    #[test]
+    fn open_prunes_old_days_without_a_direct_call() {
+        let d = tempfile::tempdir().unwrap();
+        fs::create_dir_all(d.path().join("audit")).unwrap();
+        old_file(d.path(), "2020-01-01", 10);
+        old_file(d.path(), "2020-01-02", 10);
+        let a = Audit::open(d.path(), &AuditCfg { keep_days: 1, ..cfg() }, Log::none()).unwrap();
+        assert!(!d.path().join("audit/2020-01-01.jsonl").exists());
+        assert!(!d.path().join("audit/2020-01-02.jsonl").exists());
+        let v = lines(d.path(), &today()).pop().unwrap();
+        assert_eq!(v["ev"], "audit_prune");
+        drop(a);
     }
 
     #[test]

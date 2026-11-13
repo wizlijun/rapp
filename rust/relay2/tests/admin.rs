@@ -221,6 +221,34 @@ async fn revoke_by_id_fp_and_unique_prefix() {
 }
 
 #[tokio::test]
+async fn revoke_applies_even_when_it_cannot_be_saved() {
+    let r = start_relay(|_| {}).await;
+    let d = FakeDevice::enrolled(&r).await;
+    let dir = r.data.path().to_path_buf();
+    // devices.json is replaced through a temp file next to it, so a read-only dir blocks the save.
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+    let writable_anyway = std::fs::write(dir.join("probe"), b"x").is_ok(); // running as root
+    let v = call(&r, json!({"cmd": "revoke", "target": d.id.fp.to_string()})).await;
+    let code = app_close_code(&closed(&d).await);
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let _ = std::fs::remove_file(dir.join("probe"));
+    if writable_anyway {
+        return;
+    }
+    assert_eq!(v["ok"], false, "{v}");
+    assert!(v["error"].as_str().unwrap().starts_with("applied but not saved: "), "{v}");
+    assert_eq!(code, Some(2));
+    assert!(r.relay.registry().get(&d.id.fp).unwrap().revoked);
+    let lines = audit_lines(&r, "revoke");
+    assert_eq!((lines.len(), lines[0]["saved"].as_bool()), (1, Some(false)));
+    // Saved at the next successful write: revoking again is a no-op, the flush at stop persists it.
+    let TestRelay { relay, data, .. } = r;
+    relay.stop().await;
+    let reopened = rapp_relay2::store::FileRegistry::open(data.path()).unwrap();
+    assert!(rapp_relay2::store::Registry::get(&reopened, &d.id.fp).unwrap().revoked);
+}
+
+#[tokio::test]
 async fn enroll_switch_applies_even_when_it_cannot_be_saved() {
     let data = tempfile::tempdir().unwrap();
     std::fs::write(data.path().join("config.json"), r#"{"log":"debug"}"#).unwrap();
@@ -265,6 +293,9 @@ async fn enroll_switch_takes_effect_and_persists() {
     assert_eq!(d.enroll(&r.key).await, json!({"ok": false, "error": "closed"}));
 
     assert_eq!(call(&r, json!({"cmd": "enroll", "state": "open"})).await["ok"], true);
+    // The refused enroll ended that connection.
+    assert!(app_close_code(&closed(&d).await).is_some());
+    let d = FakeDevice::dial(&r).await;
     assert_eq!(d.enroll(&r.key).await["ok"], true);
     assert_eq!(audit_lines(&r, "enroll_open").len(), 1);
     assert_eq!(call(&r, json!({"cmd": "enroll", "state": "maybe"})).await["error"], "bad request");

@@ -58,13 +58,14 @@ async fn right_key_enrolls_and_is_audited() {
 #[tokio::test]
 async fn wrong_key_is_refused_audited_and_backs_off() {
     let r = start_relay(|_| {}).await;
-    let d = FakeDevice::dial(&r).await;
     let wrong = Key::new_for_relay(&r.relay.fp);
+    // Every failed enroll ends its connection, so each attempt dials again.
     for _ in 0..5 {
-        let v = d.enroll(&wrong).await;
+        let v = FakeDevice::dial(&r).await.enroll(&wrong).await;
         assert_eq!(v, json!({"ok": false, "error": "bad key"}));
     }
     // Locked now: even the right key is refused, and not by checking it.
+    let d = FakeDevice::dial(&r).await;
     let v = d.enroll(&r.key).await;
     let e = v["error"].as_str().unwrap();
     assert!(e.starts_with("locked, retry in ") && e.ends_with('s'), "{v}");
@@ -81,7 +82,7 @@ async fn wrong_key_is_refused_audited_and_backs_off() {
 
     // A garbled key is a wrong key too.
     tokio::time::sleep(Duration::from_millis(1100)).await;
-    let v = d.req(&Req::Enroll { join: "not hex".into() }).await;
+    let v = FakeDevice::dial(&r).await.req(&Req::Enroll { join: "not hex".into() }).await;
     assert_eq!(v["error"], "bad key");
 }
 
@@ -195,6 +196,20 @@ async fn device_cap_and_per_ip_rate_are_enforced() {
     assert_eq!(audit_lines(&r, "enroll")[2]["result"], "limit");
 }
 
+#[tokio::test]
+async fn a_failed_enroll_ends_the_connection() {
+    let r = start_relay(|_| {}).await;
+    let wrong = Key::new_for_relay(&r.relay.fp);
+    let d = FakeDevice::dial(&r).await;
+    assert_eq!(d.enroll(&wrong).await, json!({"ok": false, "error": "bad key"}));
+    // The reply arrived, then the connection closed: no second enroll on it.
+    let code = tokio::time::timeout(WAIT, d.conn.closed()).await.expect("closed after a failed enroll");
+    let closed_with_3 = matches!(&code, quinn::ConnectionError::ApplicationClosed(c) if c.error_code.into_inner() == 3);
+    assert!(closed_with_3, "{code:?}");
+    // A fresh connection still enrolls; failures do not block it.
+    assert_eq!(FakeDevice::dial(&r).await.enroll(&r.key).await["ok"], true);
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn a_failed_registry_write_does_not_enroll() {
@@ -206,13 +221,15 @@ async fn a_failed_registry_write_does_not_enroll() {
     std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o500)).unwrap();
     let writable_anyway = std::fs::write(dir.join("probe"), b"x").is_ok(); // running as root
     let v = d.enroll(&r.key).await;
-    let after = d.req(&register()).await;
+    // The failed enroll also ends the connection.
+    let closed = tokio::time::timeout(WAIT, d.conn.closed()).await.is_ok();
     std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).unwrap();
     if writable_anyway {
         return;
     }
     assert_eq!(v["ok"], false, "{v}");
-    assert_eq!(after["error"], "not enrolled");
+    assert_eq!(v["error"], "unavailable", "a registry write failure is retryable, not a bad request");
+    assert!(closed);
     assert!(r.relay.registry().get(&id.fp).is_none());
     assert_ne!(audit_lines(&r, "enroll")[0]["result"], "ok");
 
@@ -407,7 +424,7 @@ async fn revoked_device_is_closed_with_code_2() {
     let id = Identity::generate().unwrap();
     let d = FakeDevice::dial_as(&r, same_identity(&id)).await.unwrap();
     assert_eq!(d.enroll(&r.key).await["ok"], true);
-    assert!(r.relay.registry().revoke(&id.fp).unwrap());
+    assert!(r.relay.registry().revoke(&id.fp).changed);
     drop(d);
     let e = match FakeDevice::dial_as(&r, same_identity(&id)).await {
         Ok(d) => timeout(WAIT, d.conn.closed()).await.expect("revoked device stays connected"),

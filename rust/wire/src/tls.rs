@@ -31,7 +31,8 @@ pub enum Expect {
 /// connection can make the relay buffer.
 pub const SERVER_STREAM_WINDOW: u32 = 1024 * 1024;
 /// Per-connection receive window on the relay: bounded memory per connection, while still
-/// about 40 MB/s per connection at 100 ms RTT (4 MiB / 0.1 s) for relayed streams.
+/// about 40 MB/s per connection at 100 ms RTT (4 MiB / 0.1 s) for relayed streams. One stream
+/// is bound by `SERVER_STREAM_WINDOW` instead: about 10 MB/s at 100 ms (1 MiB / 0.1 s).
 pub const SERVER_CONN_WINDOW: u32 = 4 * 1024 * 1024;
 
 pub type BiStream = tokio::io::Join<quinn::RecvStream, quinn::SendStream>;

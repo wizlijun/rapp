@@ -164,6 +164,11 @@ async fn relay_to_offline_or_unknown_answers_in_json() {
     assert_eq!(reply(&mut st).await, json!({"ok": false, "error": "offline"}));
     let mut st = b.relay_to("12").await.unwrap();
     assert_eq!(reply(&mut st).await, json!({"ok": false, "error": "bad id"}));
+    // Failed attempts are audited as `relayed` with the result and no byte counts.
+    let lines = audit_lines(&r, "relayed");
+    let results: Vec<_> = lines.iter().map(|l| l["result"].as_str().unwrap()).collect();
+    assert_eq!(results, ["unknown id", "offline", "bad id"]);
+    assert!(lines.iter().all(|l| l["up"].is_null() && l["fp"] == b.id.fp.to_string()));
 }
 
 #[tokio::test]

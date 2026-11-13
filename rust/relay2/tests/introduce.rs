@@ -160,7 +160,7 @@ async fn revoked_list_is_pushed_on_admission() {
     let r = start_relay(|_| {}).await;
     let x = Identity::generate().unwrap().fp;
     r.relay.registry().enroll(x, "default").unwrap();
-    assert!(r.relay.registry().revoke(&x).unwrap());
+    assert!(r.relay.registry().revoke(&x).changed);
 
     let id = Identity::generate().unwrap();
     FakeDevice::enrolled_as(&r, same_identity(&id)).await.close().await;
@@ -177,7 +177,7 @@ async fn a_device_that_never_registers_still_gets_list_changes() {
     assert_eq!(b.next_revoked().await, vec![]);
 
     let x = FakeDevice::enrolled(&r).await;
-    assert!(r.relay.revoke(&x.id.fp).await.unwrap());
+    assert!(r.relay.revoke(&x.id.fp).await.changed);
     assert_eq!(b.next_revoked().await, vec![x.id.fp]);
 }
 
@@ -190,7 +190,7 @@ async fn a_revoked_device_is_cut_off_and_cannot_come_back() {
     let mut b = FakeDevice::enrolled(&r).await;
     assert_eq!(b.next_revoked().await, vec![]);
 
-    assert!(r.relay.revoke(&id.fp).await.unwrap());
+    assert!(r.relay.revoke(&id.fp).await.changed);
     let e = closed(&a).await;
     assert_eq!(app_close(&e), Some((2, "revoked".into())), "{e:?}");
     assert_eq!(b.next_revoked().await, vec![id.fp]);
@@ -202,7 +202,7 @@ async fn a_revoked_device_is_cut_off_and_cannot_come_back() {
     assert_eq!(app_close(&e).map(|c| c.0), Some(2), "{e:?}");
     assert_eq!(b.connect_to(A_ID).await["error"], "unknown id");
     // A second revoke changes nothing.
-    assert!(!r.relay.revoke(&id.fp).await.unwrap());
+    assert!(!r.relay.revoke(&id.fp).await.changed);
 
     let lines = audit_lines(&r, "revoke");
     assert_eq!(lines.len(), 1, "{lines:?}");

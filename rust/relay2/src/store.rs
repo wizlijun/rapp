@@ -39,13 +39,24 @@ pub trait Registry: Send + Sync {
     fn enroll(&self, fp: Fp, tenant: &str) -> Result<()>;
     fn bind_id(&self, fp: &Fp, id: &str) -> Result<Bind>;
     fn unbind(&self, id: &str) -> Result<bool>;
-    fn revoke(&self, fp: &Fp) -> Result<bool>;
+    /// Revokes `fp`. Unlike the other mutations this one is applied in memory even when the write
+    /// fails (a revocation must not depend on the disk); see [`Revoked`].
+    fn revoke(&self, fp: &Fp) -> Revoked;
     fn revoked(&self) -> Vec<Fp>;
     fn join_hash(&self) -> Option<String>;
     fn set_join_hash(&self, hash: &str) -> Result<()>;
     /// Memory only; `flush` persists it.
     fn seen(&self, fp: &Fp, at: &str);
     fn flush(&self) -> Result<()>;
+}
+
+/// The outcome of `Registry::revoke`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Revoked {
+    /// False when `fp` was unknown or already revoked.
+    pub changed: bool,
+    /// Why the change could not be saved; it is in effect in memory anyway.
+    pub save_error: Option<String>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -174,15 +185,22 @@ impl Registry for FileRegistry {
             Ok((true, true))
         })
     }
-    fn revoke(&self, fp: &Fp) -> Result<bool> {
-        self.change(|t| match t.get_mut(fp) {
+    fn revoke(&self, fp: &Fp) -> Revoked {
+        let mut g = self.lock();
+        let mut next = g.table.clone();
+        match next.get_mut(fp) {
             Some(d) if !d.revoked => {
                 d.revoked = true;
                 d.id = None;
-                Ok((true, true))
             }
-            _ => Ok((false, false)),
-        })
+            _ => return Revoked { changed: false, save_error: None },
+        }
+        let disk = Disk { version: 1, devices: next.values().cloned().collect() };
+        let save_error = write_json(&self.devices_path, &disk).err().map(|e| format!("{e:#}"));
+        g.table = next;
+        // Unsaved: the next `flush` (shutdown) tries again.
+        g.dirty = save_error.is_some();
+        Revoked { changed: true, save_error }
     }
     fn revoked(&self) -> Vec<Fp> {
         self.lock().table.values().filter(|d| d.revoked).map(|d| d.fp).collect()
@@ -237,7 +255,7 @@ mod tests {
         let r = open(&d);
         assert_eq!(r.by_id("123456789").unwrap().fp, fp(1));
         assert_eq!(r.count(), 1);
-        assert!(r.revoke(&fp(1)).unwrap());
+        assert!(r.revoke(&fp(1)).changed);
         assert_eq!(r.revoked(), vec![fp(1)]);
         assert_eq!(r.count(), 0);
         drop(r);
@@ -245,8 +263,8 @@ mod tests {
         assert_eq!(r.revoked(), vec![fp(1)]);
         assert!(r.by_id("123456789").is_none());
         assert!(r.enroll(fp(1), "t").is_err());
-        assert!(!r.revoke(&fp(1)).unwrap());
-        assert!(!r.revoke(&fp(9)).unwrap());
+        assert!(!r.revoke(&fp(1)).changed);
+        assert!(!r.revoke(&fp(9)).changed);
     }
 
     #[test]
@@ -332,6 +350,10 @@ mod tests {
             assert!(r.get(&fp(2)).is_none());
             assert!(r.bind_id(&fp(1), "123456789").is_err());
             assert!(r.get(&fp(1)).unwrap().id.is_none());
+            // Revoke is the exception: in effect in memory, with the write error reported.
+            let v = r.revoke(&fp(1));
+            assert!(v.changed && v.save_error.is_some());
+            assert!(r.get(&fp(1)).unwrap().revoked);
         }
         std::fs::set_permissions(&data, std::fs::Permissions::from_mode(0o700)).unwrap();
         let _ = std::fs::remove_file(data.join("probe"));

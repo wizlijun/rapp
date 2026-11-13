@@ -188,14 +188,14 @@ agent 规则：不手改；要换启动参数就改上面两处模板，**两处
 | `log` | `RAPP_RELAY_LOG` | `info` | 运行日志的级别：`info` 或 `debug` |
 | `audit.keep_days` | `RAPP_RELAY_AUDIT_KEEP_DAYS` | `180` | 审计日志留多少天 |
 | `audit.max_mb` | `RAPP_RELAY_AUDIT_MAX_MB` | `256` | 审计日志总共最多占多少 MB |
-| `audit.required` | `RAPP_RELAY_AUDIT_REQUIRED` | `false` | 审计写不进去时，是否拒绝新的入网和牵线（环境变量取 `true`/`false`/`1`/`0`） |
+| `audit.required` | `RAPP_RELAY_AUDIT_REQUIRED` | `false` | 审计写不进去时，是否拒绝新的入网、牵线和中继（环境变量取 `true`/`false`/`1`/`0`） |
 | `metrics` | `RAPP_RELAY_METRICS` | 关 | 指标接口的地址，如 `127.0.0.1:9116`。只收本机回环地址，别的地址拒绝启动 |
 | `limits.max_conns` | `RAPP_RELAY_LIMIT_MAX_CONNS` | `4096` | 总连接数 |
 | `limits.max_conns_per_ip` | `RAPP_RELAY_LIMIT_MAX_CONNS_PER_IP` | `16` | 每个来源地址的连接数 |
 | `limits.max_streams` | `RAPP_RELAY_LIMIT_MAX_STREAMS` | `128` | 每条连接的并发流 |
 | `limits.max_relayed_per_device` | `RAPP_RELAY_LIMIT_MAX_RELAYED_PER_DEVICE` | `32` | 每台设备同时被中继的流 |
 | `limits.max_devices` | `RAPP_RELAY_LIMIT_MAX_DEVICES` | `1024` | 入网设备数 |
-| `limits.unenrolled_idle_secs` | `RAPP_RELAY_LIMIT_UNENROLLED_IDLE_SECS` | `10` | 没入网的连接多少秒没动静就断 |
+| `limits.unenrolled_idle_secs` | `RAPP_RELAY_LIMIT_UNENROLLED_IDLE_SECS` | `10` | 没入网的连接，连上以后多少秒内没入网就断；入网失败（口令错、锁定、限速等）也立刻断开这条连接，要重试得重新连 |
 | `limits.enroll_per_ip_per_min` | `RAPP_RELAY_LIMIT_ENROLL_PER_IP_PER_MIN` | `10` | 没入网的连接，每个来源地址每分钟几次 |
 | `limits.max_line` | `RAPP_RELAY_LIMIT_MAX_LINE` | `8192` | 一行请求最长多少字节（规格 §9.2 的 8 KiB） |
 | `limits.request_timeout_secs` | `RAPP_RELAY_LIMIT_REQUEST_TIMEOUT_SECS` | `10` | 请求行多少秒内要收完，超时重置这条流 |
@@ -207,10 +207,10 @@ agent 规则：不手改；要换启动参数就改上面两处模板，**两处
 
 规则：
 
-- 配置里出现不认识的项，或者值不合法：relay 拒绝启动，并说明是哪一项。写错一个字不会被悄悄忽略。
+- 配置里出现不认识的项，或者值不合法：relay 拒绝启动，并说明是哪一项。写错一个字不会被悄悄忽略。除 `lock_after`、`lock_max_secs`、`relay_bps_per_stream`、`relay_bps_total`（`0` 表示不限或不退避）以外，数字限额都不能小于 `1`。
 - 启动时把生效的配置记一行，运行日志和审计日志（`relay_start`）各一份。
 - 命令行参数只有 `--data`（数据目录，默认 `/data`）和子命令：`key`、`rotate-key`、`devices`、`revoke <ID|指纹>`、`unbind <ID>`、`enroll open|closed`、`audit [--since <N>d|<N>h] [--id <ID>] [--event <名字>]`、`check`、`--version`。不带子命令就是运行 relay。
-- `enroll open|closed` 命令立刻生效，并且只把 `enroll` 这一项写进 `<数据目录>/config.json`（文件里其余的项不动；没有文件就新建，权限 0600），所以重启后还在。如果 relay 是带着环境变量 `RAPP_RELAY_ENROLL` 启动的，重启后环境变量会盖过它，命令会打印一行警告。写文件失败时，开关已经生效，回复是 `applied but not saved: <原因>`。
+- `enroll open|closed` 命令立刻生效，并且只把 `enroll` 这一项写进 `<数据目录>/config.json`（文件里其余的项不动；没有文件就新建，权限 0600），所以重启后还在。如果 relay 是带着环境变量 `RAPP_RELAY_ENROLL` 启动的，重启后环境变量会盖过它，命令会打印一行警告。写文件失败时，开关已经生效，回复是 `applied but not saved: <原因>`。`revoke` 也一样：登记簿写不进去（比如磁盘满）时，吊销照样生效、设备被断开，回复是 `applied but not saved: <原因>`，审计里那行 `revoke` 带 `saved: false`，relay 停止时会再写一次。
 
 **数据卷 `/data`**（规格 §10.2）。文件 0600，目录 0700。备份整个数据卷；最要紧的是 `relay.key` 和 `devices.json`。
 

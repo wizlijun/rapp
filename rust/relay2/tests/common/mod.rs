@@ -241,8 +241,8 @@ impl FakeDevice {
 }
 
 /// Hands every stream the relay opens to `tx`: bi streams with their first line read (a byte at a
-/// time, so a `Relayed` stream is handed on right after its line), uni streams read whole. Ends quietly when the connection does. With `auto_reply`, every
-/// `Incoming` is answered `{"ok":true}` before it is handed on.
+/// time, so a `Relayed` stream is handed on right after its line), uni streams read whole. Ends
+/// quietly when the connection does. With `auto_reply`, every `Incoming` is answered `{"ok":true}` before it is handed on.
 async fn pump(conn: quinn::Connection, tx: mpsc::UnboundedSender<(Push, Option<BiStream>)>, auto_reply: bool) {
     loop {
         tokio::select! {

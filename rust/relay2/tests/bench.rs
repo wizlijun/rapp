@@ -1,6 +1,7 @@
 //! Relay cost against the old relay, and idle memory (spec §9.4). Both tests are `#[ignore]`d: they
 //! move 512 MiB several times. Run with
-//! `cargo build --release -p rapp-relay && cargo test -p rapp-relay2 --release --test bench -- --ignored --nocapture --test-threads=1`.
+//! `cargo build --release -p rapp-relay && cargo test -p rapp-relay2 --release --test bench -- --ignored
+//! --nocapture --test-threads=1`.
 //!
 //! Each relay runs as a child process and is measured by its own `wait4` rusage, so the fake devices'
 //! QUIC work (in this process) does not dilute the ratio and one child's peak memory does not leak

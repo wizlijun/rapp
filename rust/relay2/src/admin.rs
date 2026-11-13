@@ -7,6 +7,7 @@
 
 use std::collections::HashSet;
 use std::fmt;
+use std::io;
 use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -25,7 +26,7 @@ use tokio::net::{UnixListener, UnixStream};
 
 use crate::audit::Audit;
 use crate::config::Enroll;
-use crate::store::Registry;
+use crate::store::{Registry, Revoked};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -63,7 +64,15 @@ impl std::error::Error for NotRunning {}
 /// `NotRunning` error.
 pub async fn call(data: &Path, req: Value) -> Result<Value> {
     let path = socket_path(data);
-    let st = UnixStream::connect(&path).await.map_err(|_| NotRunning(path.clone()))?;
+    // Only "no such socket" and "nobody listening" mean not running; a permission error (the wrong
+    // uid under `docker exec -u`) must not read as "down".
+    let st = match UnixStream::connect(&path).await {
+        Ok(st) => st,
+        Err(e) if matches!(e.kind(), io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused) => {
+            return Err(NotRunning(path).into())
+        }
+        Err(e) => return Err(e).with_context(|| format!("connect {}", path.display())),
+    };
     let exchange = async {
         let (r, mut w) = st.into_split();
         write_json(&mut w, &req).await?;
@@ -102,8 +111,8 @@ pub(crate) trait Control: Send + Sync {
     fn online_fps(&self) -> HashSet<Fp>;
     fn enroll_open(&self) -> bool;
     fn set_enroll_open(&self, open: bool);
-    /// Revokes and cuts off `fp` (audited there); false when nothing changed.
-    fn revoke(&self, fp: &Fp) -> Result<bool>;
+    /// Revokes and cuts off `fp` (audited there); `changed` is false when nothing changed.
+    fn revoke(&self, fp: &Fp) -> Revoked;
     /// Frees `id` in the registry and in the live table; the device it belonged to, if any.
     fn unbind(&self, id: &str) -> Result<Option<Fp>>;
 }
@@ -283,9 +292,10 @@ impl Handler {
             Err(e) => return err(e),
         };
         // Already revoked (false) is fine: the device is out either way.
-        match self.relay().revoke(&fp) {
-            Ok(_) => ok(json!({"fp": fp.to_string()})),
-            Err(e) => self.failed("revoke", e),
+        // A failed save does not undo it: the device is out now, and the reply says it is not saved.
+        match self.relay().revoke(&fp).save_error {
+            None => ok(json!({"fp": fp.to_string()})),
+            Some(e) => self.failed("revoke", anyhow::anyhow!(e).context("applied but not saved")),
         }
     }
 

@@ -128,14 +128,15 @@ fn parse_audit(flags: &[&str]) -> Result<Cmd> {
 /// `7d` / `12h`: that long before `now`.
 fn parse_since(s: &str, now: SystemTime) -> Result<SystemTime> {
     let bad = || anyhow::anyhow!("--since: bad value {s:?}, expected <N>d or <N>h");
-    let (n, unit) = s.split_at(s.len().saturating_sub(1));
+    let (n, mult) = if let Some(n) = s.strip_suffix('d') {
+        (n, 86_400)
+    } else if let Some(n) = s.strip_suffix('h') {
+        (n, 3_600)
+    } else {
+        return Err(bad());
+    };
     let n: u64 = n.parse().map_err(|_| bad())?;
-    let secs = match unit {
-        "d" => n.checked_mul(86_400),
-        "h" => n.checked_mul(3_600),
-        _ => None,
-    }
-    .ok_or_else(bad)?;
+    let secs = n.checked_mul(mult).ok_or_else(bad)?;
     Ok(now.checked_sub(Duration::from_secs(secs)).unwrap_or(SystemTime::UNIX_EPOCH))
 }
 
@@ -276,4 +277,20 @@ async fn check(data: &Path) -> Result<()> {
     endpoint.wait_idle().await;
     println!("ok");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_since_takes_days_and_hours_and_never_panics() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(10 * 86_400);
+        assert_eq!(parse_since("7d", now).unwrap(), now - Duration::from_secs(7 * 86_400));
+        assert_eq!(parse_since("12h", now).unwrap(), now - Duration::from_secs(12 * 3_600));
+        // A multibyte suffix is a bad value, not a panic in the middle of a character.
+        for bad in ["7天", "天", "", "d", "7", "7x", "-1d", "99999999999999999999d"] {
+            assert!(parse_since(bad, now).is_err(), "{bad:?}");
+        }
+    }
 }

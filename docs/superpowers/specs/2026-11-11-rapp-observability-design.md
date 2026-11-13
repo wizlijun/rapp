@@ -136,7 +136,7 @@
   | `registry_flush_failed` | error | 登记簿写盘失败 |
   | `audit_write_failed` | error | 审计写不进去（比如磁盘满）；`audit.required` 为 `false` 时继续服务 |
   | `admin_failed` | error | 管理命令失败 |
-  | `conn_open`、`conn_closed`、`push_failed` | debug | 只在 `log` 设成 `debug` 时记 |
+  | `conn_open`、`conn_closed`、`push_failed` | debug | 只在 `log` 设成 `debug` 时记；`conn_open` 带 `fp, from, enrolled`，`conn_closed` 带 `fp, from`，`push_failed` 带 `fp, error` |
 
   审计事件也会带标记镜像一份到运行日志（标准错误），所以 `relay_start` 在两处各出现一次。
 - **审计日志**：`/data/audit/YYYY-MM-DD.jsonl`，一天一个，默认留 180 天、总量不超过 256 MB。记每一次和准入、身份、连接有关的动作，成功和失败都记，带完整指纹。**事件表在规格 §11.1，这里不抄。**

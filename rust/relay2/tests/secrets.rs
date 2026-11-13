@@ -94,12 +94,12 @@ async fn life() -> (TestRelay, Vec<Key>) {
     wait_audit(&r, "probes").await;
 
     // A wrong key until locked (last: the lock covers this address).
-    let bad = FakeDevice::dial(&r).await;
+    // (A failed enroll ends its connection, so each attempt dials again.)
     let wrong = Key::new_for_relay(&r.relay.fp);
     for _ in 0..5 {
-        assert_eq!(bad.enroll(&wrong).await["ok"], false);
+        assert_eq!(FakeDevice::dial(&r).await.enroll(&wrong).await["ok"], false);
     }
-    assert_eq!(bad.enroll(&key1).await["ok"], false, "locked");
+    assert_eq!(FakeDevice::dial(&r).await.enroll(&key1).await["ok"], false, "locked");
 
     // Enrollment closed and open again, unbind, revoke, a new key.
     assert_eq!(call(&r, json!({"cmd": "enroll", "state": "closed"})).await["ok"], true);
@@ -134,7 +134,10 @@ async fn nothing_secret_is_written_anywhere() {
     }
     let mut files = Vec::new();
     walk(data.path(), &mut files);
-    assert!(files.iter().any(|f| f.ends_with("relay.log")), "{files:?}");
+    let log = files.iter().find(|f| f.ends_with("relay.log")).unwrap_or_else(|| panic!("no relay.log in {files:?}"));
+    // Positive control: the scan reads real output, so a vacuous pass would show here.
+    let log_text = std::fs::read_to_string(log).unwrap();
+    assert!(log_text.contains("relay_start"), "relay.log has no relay_start event");
     let key_file = files.iter().find(|f| f.file_name().unwrap() == "relay.key").expect("relay.key exists").clone();
     let key_bytes = std::fs::read(&key_file).unwrap();
     assert!(key_bytes.len() > 16);

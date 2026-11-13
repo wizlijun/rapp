@@ -1,6 +1,6 @@
 //! Layered configuration: defaults <- `<data>/config.json` <- `RAPP_RELAY_*` environment.
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{anyhow, bail, ensure, Context, Result};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -266,7 +266,28 @@ pub fn load(data: &Path, env: &dyn Fn(&str) -> Option<String>) -> Result<Config>
         relay_bps_per_stream,
         relay_bps_total,
     );
+    check_positive(&c.limits)?;
     Ok(c)
+}
+
+/// Refuses a limit of 0 where 0 would silently refuse everything (0 means "off" only for
+/// `lock_after`, `lock_max_secs` and the two `relay_bps_*`).
+fn check_positive(l: &Limits) -> Result<()> {
+    let items: [(&str, u64); 9] = [
+        ("max_conns", l.max_conns as u64),
+        ("max_conns_per_ip", l.max_conns_per_ip as u64),
+        ("max_streams", l.max_streams.into()),
+        ("max_relayed_per_device", l.max_relayed_per_device as u64),
+        ("unenrolled_idle_secs", l.unenrolled_idle_secs),
+        ("enroll_per_ip_per_min", l.enroll_per_ip_per_min.into()),
+        ("max_line", l.max_line as u64),
+        ("request_timeout_secs", l.request_timeout_secs),
+        ("connect_per_target_per_min", l.connect_per_target_per_min.into()),
+    ];
+    for (name, v) in items {
+        ensure!(v >= 1, "limits.{name}: must be at least 1");
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -306,6 +327,34 @@ mod tests {
         assert_eq!(c.listen.port(), 2);
         assert_eq!(c.audit.keep_days, 7);
         assert_eq!(c.audit.max_mb, 256);
+    }
+
+    #[test]
+    fn zero_limits_that_would_refuse_everything_are_rejected() {
+        let d = tempdir().unwrap();
+        for item in [
+            "max_conns",
+            "max_conns_per_ip",
+            "max_streams",
+            "max_relayed_per_device",
+            "unenrolled_idle_secs",
+            "enroll_per_ip_per_min",
+            "max_line",
+            "request_timeout_secs",
+            "connect_per_target_per_min",
+        ] {
+            let var = format!("RAPP_RELAY_LIMIT_{}", item.to_uppercase());
+            let err = load(d.path(), &env_of(&[(var.as_str(), "0")])).unwrap_err();
+            assert!(err.to_string().contains(&format!("limits.{item}")), "{item}: {err}");
+        }
+        // 0 is meaningful ("off") for these.
+        let env = env_of(&[
+            ("RAPP_RELAY_LIMIT_LOCK_AFTER", "0"),
+            ("RAPP_RELAY_LIMIT_LOCK_MAX_SECS", "0"),
+            ("RAPP_RELAY_LIMIT_RELAY_BPS_TOTAL", "0"),
+            ("RAPP_RELAY_LIMIT_RELAY_BPS_PER_STREAM", "0"),
+        ]);
+        assert!(load(d.path(), &env).is_ok());
     }
 
     #[test]
