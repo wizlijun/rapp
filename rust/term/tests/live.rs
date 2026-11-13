@@ -192,3 +192,19 @@ async fn refuses_a_paste_over_one_mebibyte() {
     let e = t.paste(&pane, &"x".repeat(1_048_577), false).await.unwrap_err();
     assert_eq!(e.to_string(), "text is too long (1 MiB at most)");
 }
+
+#[tokio::test]
+async fn an_empty_paste_is_a_no_op_and_with_enter_sends_only_enter() {
+    let Some(s) = common::Server::start() else { return };
+    s.raw(&["new-session", "-d", "-s", "e", "-x", "80", "-y", "10", "cat"]);
+    common::settle().await;
+    let t = s.tmux();
+    let pane = t.list().await.unwrap()[0].pane.clone();
+    t.send(cmd::send_hex(&pane, &rapp_term::keys::utf8_hex("ab"))).await.unwrap();
+    t.paste(&pane, "", false).await.unwrap();
+    t.paste(&pane, "", true).await.unwrap();
+    common::settle().await;
+    let sc = t.capture(&pane).await.unwrap();
+    assert_eq!((sc.lines[0].as_str(), sc.lines[1].as_str()), ("ab", "ab"));
+    assert!(!s.raw(&["list-buffers"]).contains("rapp-"));
+}

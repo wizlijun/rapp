@@ -93,9 +93,12 @@ impl Tmux {
         if text.len() > MAX_PASTE {
             anyhow::bail!("text is too long (1 MiB at most)");
         }
-        let name = format!("rapp-{}-{}", std::process::id(), PASTE_SEQ.fetch_add(1, Ordering::Relaxed));
-        self.run_input(&cmd::load_buffer(&name), text.as_bytes()).await?;
-        self.run_input(&cmd::paste_buffer(&name, pane), &[]).await?;
+        // Empty text makes no buffer (load-buffer reads nothing), so there is nothing to paste.
+        if !text.is_empty() {
+            let name = format!("rapp-{}-{}", std::process::id(), PASTE_SEQ.fetch_add(1, Ordering::Relaxed));
+            self.run_input(&cmd::load_buffer(&name), text.as_bytes()).await?;
+            self.run_input(&cmd::paste_buffer(&name, pane), &[]).await?;
+        }
         if enter {
             self.send(cmd::send_named(pane, &["Enter".to_string()])).await?;
         }
