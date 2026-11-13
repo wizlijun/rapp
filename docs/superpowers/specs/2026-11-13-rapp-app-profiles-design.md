@@ -57,6 +57,7 @@
 | `afterSend` | `none`：只贴，不按回车（现在的做法）；`return`：输入区发完最后一块后补一个回车 | `none` |
 | `composer` | `false`：这个 app 的所有窗口都不显示「输入」按钮和输入区 | `true` |
 | `windows[]` | 窗口规则，按顺序比，**第一条对上的生效** | 空 |
+| `tested` | `false`：界面上标「未实测」（内置配置都写 `false`，D8）。编写规则见《app 配置编写规范》（`2026-11-13-rapp-app-profile-authoring.md`） | `true` |
 
 窗口规则：
 
