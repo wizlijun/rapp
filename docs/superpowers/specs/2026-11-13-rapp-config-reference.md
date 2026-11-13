@@ -136,7 +136,7 @@ agent 规则：**不直接改这个文件**。加、删设备走 GUI 的设备�
 
 ### 2.6 `$ROOT/devices/<id>/device.json`（这台设备是什么）
 
-程序自管，**不要改**，只读。rapp-service 写（`rust/service/src/data.rs:372-382`），内容 `{"id","name","os","version"}`，给别的设备和 agent 看这台是什么。没有口令和地址，没有机密。内容没变就不重写。
+程序自管，**不要改**，只读。rapp-service 写（`rust/service/src/data.rs:373-383`），内容 `{"id","name","os","version"}`，给别的设备和 agent 看这台是什么。没有口令和地址，没有机密。内容没变就不重写。
 
 ### 2.7 `<旧配置目录>/data-root`（数据根目录指针）
 

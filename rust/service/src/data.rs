@@ -100,6 +100,7 @@ impl DataGit {
             Ok(None) => {}
             Err(Fail(step, msg)) => {
                 self.log.event(Lvl::Warn, "data_error", json!({"step": step}));
+                self.last_pull = None; // the next round syncs again and rewrites the status
                 (self.status.git, self.status.error) =
                     ("error".into(), Some(msg.unwrap_or_else(|| format!("git {step} failed"))));
             }
@@ -128,7 +129,7 @@ impl DataGit {
             self.run(&["init", "-b", "main"]).await.ok_or("init")?;
         }
         if self.rebase_in_progress() {
-            return Err(Fail("rebase --abort", Some("git rebase --abort failed".into())));
+            return Err(Fail("rebase in progress", Some("有一个没做完的 rebase，等它结束".into())));
         }
         let committed = self.commit_changes().await?;
         let remotes = self.run(&["remote"]).await.ok_or("remote")?;
@@ -786,7 +787,7 @@ mod tests {
         std::fs::create_dir(root.join(".git/rebase-merge")).unwrap();
         std::fs::write(root.join("shared/a.json"), "{}").unwrap();
         let s = g.tick().await;
-        assert_eq!((s.git.as_str(), s.error.as_deref()), ("error", Some("git rebase --abort failed")));
+        assert_eq!((s.git.as_str(), s.error.as_deref()), ("error", Some("有一个没做完的 rebase，等它结束")));
         assert_eq!(git(&root, &["rev-list", "--count", "HEAD"]), before);
         assert!(
             git(&root, &["status", "--porcelain", "--untracked-files=all"]).contains("shared/a.json"),
@@ -838,6 +839,24 @@ mod tests {
         assert_eq!(s.git, "synced", "retried although pull_every has not passed");
         let again = g.tick().await;
         assert_eq!(again, s, "nothing due, status kept");
+    }
+
+    #[tokio::test]
+    async fn after_an_error_a_quiet_round_syncs_again() {
+        if !have_git() {
+            return;
+        }
+        let (t, root) = prepared();
+        let b = bare(&t);
+        let mut o = with_remote(&root, b.to_str().unwrap());
+        o.pull_every = Duration::from_secs(3600);
+        let mut g = DataGit::new(&o, "test-a", log(&t));
+        assert_eq!(g.tick().await.git, "synced");
+        std::fs::create_dir(root.join(".git/rebase-merge")).unwrap();
+        assert_eq!(g.tick().await.git, "error");
+        std::fs::remove_dir(root.join(".git/rebase-merge")).unwrap();
+        let s = g.tick().await;
+        assert_eq!((s.git.as_str(), s.error), ("synced", None), "nothing to commit, but the error is not kept");
     }
 
     #[test]
