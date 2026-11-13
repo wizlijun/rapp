@@ -22,7 +22,7 @@ use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
-const LEFTOVER: &str = "上次升级没收拾干净，需要手动处理";
+const LEFTOVER: &str = "上次升级没收拾干净：请手动删除 rapp.app 同目录的 .rapp-new.app，或 previous/.rapp-old.app";
 const STILL_OPEN: &str = "rapp 还开着";
 const NOT_LAUNCHD: &str = "服务不是由系统启动的，请从 release 页面手动装 pkg";
 const NEEDS_ADMIN: &str = "这次需要管理员密码";

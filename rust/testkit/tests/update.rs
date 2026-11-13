@@ -593,9 +593,9 @@ async fn leftovers_from_a_failed_install_block_every_install() {
     make_app(&e.previous(), "prev");
     e.start().await;
     let u = e.wait_state("failed").await;
-    assert_eq!(u["error"], "上次升级没收拾干净，需要手动处理", "{u}");
+    assert_eq!(u["error"], "上次升级没收拾干净：请手动删除 rapp.app 同目录的 .rapp-new.app，或 previous/.rapp-old.app", "{u}");
     let f = wait_log(&e.home, "update_failed", |_| true).await;
-    assert_eq!((&f["stage"], &f["reason"]), (&json!("install"), &json!("上次升级没收拾干净，需要手动处理")));
+    assert_eq!((&f["stage"], &f["reason"]), (&json!("install"), &json!("上次升级没收拾干净：请手动删除 rapp.app 同目录的 .rapp-new.app，或 previous/.rapp-old.app")));
     let r = e.call(json!({"cmd":"update_rollback"})).await;
     assert_eq!(r["ok"], false, "{r}");
     e.no_restart_for(POLL * 4).await;
@@ -613,7 +613,7 @@ async fn old_previous_left_aside_blocks_rollback() {
     make_app(&aside, "older");
     e.start().await;
     let r = e.call(json!({"cmd":"update_rollback"})).await;
-    assert_eq!(r, json!({"ok": false, "error": "上次升级没收拾干净，需要手动处理"}));
+    assert_eq!(r, json!({"ok": false, "error": "上次升级没收拾干净：请手动删除 rapp.app 同目录的 .rapp-new.app，或 previous/.rapp-old.app"}));
     e.no_restart_for(POLL * 4).await;
     assert_eq!((marker_of(&e.bundle), marker_of(&aside)), ("current".into(), "older".into()));
 }
