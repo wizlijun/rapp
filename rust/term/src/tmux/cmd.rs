@@ -25,6 +25,12 @@ pub fn list_panes() -> Vec<String> {
     ["list-panes", "-a", "-F", PANE_FORMAT].map(String::from).to_vec()
 }
 
+/// Which window is current in its session: `<window_active> <window_id>` for every pane; `parse::current_windows`
+/// reads it.
+pub fn window_flags() -> Vec<String> {
+    ["list-panes", "-a", "-F", "#{window_active} #{window_id}"].map(String::from).to_vec()
+}
+
 /// The visible screen of `pane`, with colour escapes.
 pub fn capture(pane: &str) -> Vec<String> {
     ["capture-pane", "-e", "-p", "-t", pane].map(String::from).to_vec()
@@ -119,6 +125,7 @@ mod tests {
             ]
         );
         assert_eq!(list_panes()[0], "list-panes");
+        assert_eq!(window_flags(), ["list-panes", "-a", "-F", "#{window_active} #{window_id}"]);
         assert_eq!(attach("$3"), ["-C", "attach-session", "-t", "$3"]);
     }
     #[test]

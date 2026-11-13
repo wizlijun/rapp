@@ -1,6 +1,7 @@
 //! Pure parsers for tmux output.
 
 use super::PaneInfo;
+use std::collections::HashSet;
 
 /// `tmux 3.4` -> (3, 4); also `3.2a` and `next-3.5`.
 pub fn version(s: &str) -> Option<(u32, u32)> {
@@ -14,6 +15,11 @@ pub fn version(s: &str) -> Option<(u32, u32)> {
 /// Rows produced by `cmd::list_panes`; rows that do not parse are skipped.
 pub fn panes(s: &str) -> Vec<PaneInfo> {
     s.lines().filter_map(pane).collect()
+}
+
+/// Ids of the windows that rows produced by `cmd::window_flags` mark current in their session.
+pub fn current_windows(s: &str) -> HashSet<String> {
+    s.lines().filter_map(|l| l.strip_prefix("1 ")).map(str::to_string).collect()
 }
 
 fn pane(line: &str) -> Option<PaneInfo> {
@@ -60,5 +66,10 @@ mod tests {
             ("$3", "我的 \"work\"", "%12")
         );
         assert_eq!((v[0].attached, v[0].activity, v[0].cols, v[0].rows, v[0].dead), (2, 1794592454, 212, 58, false));
+    }
+    #[test]
+    fn reads_current_windows() {
+        let v = current_windows("1 @2\n0 @3\n1 @2\n0 @4\n1 @5\n");
+        assert_eq!(v, ["@2", "@5"].map(String::from).into_iter().collect());
     }
 }
