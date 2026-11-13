@@ -58,11 +58,15 @@ class TrafficLabel extends StatelessWidget {
     required this.onTap,
     this.onSecondaryTap,
     this.compact = false,
+    this.weak = false,
   });
 
   /// Bars only, without the rate text.
   final bool compact;
   final int bytesPerSecond;
+
+  /// A is in the weak-network tier.
+  final bool weak;
 
   /// The stream menu is open: the selected style.
   final bool open;
@@ -77,7 +81,7 @@ class TrafficLabel extends StatelessWidget {
     return Semantics(
       button: true,
       selected: open,
-      label: '流量 $rate，打开串流菜单',
+      label: weak ? '流量 $rate，弱网，打开串流菜单' : '流量 $rate，打开串流菜单',
       excludeSemantics: true,
       onTap: onTap,
       child: Material(
@@ -103,7 +107,7 @@ class TrafficLabel extends StatelessWidget {
                 if (!compact) const SizedBox(width: 8),
                 if (!compact)
                 Text(
-                  rate,
+                  weak ? '$rate · 弱网' : rate,
                   maxLines: 1,
                   style: TextStyle(
                     fontFamily: t.mono,

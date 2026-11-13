@@ -341,8 +341,8 @@ class MainState extends ChangeNotifier {
   }
 
   // ---- off-stage frame rate (R6) ----
-  /// The (mode, fps, density) last sent per started session, so nothing is sent twice.
-  final Map<Object, (String, int, String)> _sentFps = {};
+  /// The (mode, fps, density, pinned) last sent per started session, so nothing is sent twice.
+  final Map<Object, (String, int, String, bool)> _sentFps = {};
 
   /// Sends each started session's effective rate when it differs from the last one sent: the
   /// chosen rate on the stage or detached, 1 fps otherwise. `session.choice` is never changed.
@@ -359,10 +359,10 @@ class MainState extends ChangeNotifier {
       if (r == null || !_reachable(r)) continue; // a dead sid never reaches the runner (R12)
       final c = rs.choice;
       final fps = effectiveFps(c, onStage: onStage != null && identical(r, onStage), detached: rs.detached);
-      final now = (c.mode, fps, c.density);
+      final now = (c.mode, fps, c.density, rs.streamPinned);
       if (now == last) continue;
       _sentFps[rs.sid] = now;
-      p.setStream(rs.sid, c.mode, fps, c.density);
+      p.setStream(rs.sid, c.mode, fps, c.density, pinned: rs.streamPinned);
     }
   }
 
@@ -746,6 +746,7 @@ class MainState extends ChangeNotifier {
     r.seq = ++_seq;
     if (rs != null) {
       r.choice = rs.choice;
+      r.pinned = rs.streamPinned;
       r.window = rs.currentWindow;
       rs.bytesPerSecond = 0;
       rs.linkDown(); // the runner may have said nothing (hub-first): same cleanup as its word
@@ -841,6 +842,7 @@ class MainState extends ChangeNotifier {
     rs.setProfile(prof);
     if (prof.name != null) _log('rapp: app 配置「${prof.name}」');
     rs.choice = r.choice;
+    rs.streamPinned = r.pinned;
     rs.preferWindow(r.window);
     remote[s.sid] = rs;
     r.phase = Phase.live;
@@ -867,7 +869,9 @@ class MainState extends ChangeNotifier {
       return;
     }
     if (r.sid != s.sid || r.phase != Phase.live || r.ending) return;
-    _sentFps[s.sid] = (c.mode, c.fps, c.density);
+    // start carries no pin: a pinned session's first set_stream says so.
+    _sentFps[s.sid] = (c.mode, c.fps, c.density, false);
+    if (rs.streamPinned) _applyFps();
     if (!reconnect && !quiet) hint = '已打开 ${r.appName} @ ${deviceName(r.id)}';
     notifyListeners();
   }

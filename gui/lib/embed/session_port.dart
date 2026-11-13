@@ -163,6 +163,12 @@ class WindowsEvent extends SessionEvent {
   final List<RemoteWindow> windows;
 }
 
+/// A says the stream entered or left the weak-network tier.
+class WeakEvent extends SessionEvent {
+  const WeakEvent(super.sid, this.on);
+  final bool on;
+}
+
 class TrafficEvent extends SessionEvent {
   const TrafficEvent(super.sid, this.bytes, [this.frames = 0]);
 
@@ -326,6 +332,8 @@ SessionEvent? parseSessionEvent(String method, Object? args) {
         return WindowsEvent(sid, _list(m['windows']).map(_window).toList());
       case 'traffic':
         return TrafficEvent(sid, _as<int>(m['bytes']), _as<int?>(m['frames']) ?? 0);
+      case 'weak':
+        return WeakEvent(sid, _as<bool?>(m['on']) ?? false);
       case 'disconnected':
         return DisconnectedEvent(sid, _as<String?>(m['reason']) ?? '');
       case 'clipboard':
@@ -422,8 +430,8 @@ abstract class SessionPort {
 
   void selectWindow(Object sid, int window) => _send('select_window', {'sid': sid, 'window': window});
 
-  void setStream(Object sid, String mode, int fps, String density) =>
-      _send('set_stream', {'sid': sid, 'mode': mode, 'fps': fps, 'density': density});
+  void setStream(Object sid, String mode, int fps, String density, {bool pinned = false}) =>
+      _send('set_stream', {'sid': sid, 'mode': mode, 'fps': fps, 'density': density, if (pinned) 'pinned': true});
 
   void moveTopLeft(Object sid, int window) => _send('move_top_left', {'sid': sid, 'window': window});
 

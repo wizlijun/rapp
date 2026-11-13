@@ -157,10 +157,13 @@ void main() {
     expect(await port.init(), 350);
     port.resize(1, 7, 800, 600);
     port.setStream(1, 'duogray', 1, 'adaptive');
+    port.setStream(1, 'duogray', 1, 'adaptive', pinned: true);
     final pasted = await port.composerPaste(1);
     expect(pasted.blocks.single.n, 2);
-    expect(calls.map((c) => c.method), ['init', 'resize', 'set_stream', 'composer_paste']);
+    expect(calls.map((c) => c.method), ['init', 'resize', 'set_stream', 'set_stream', 'composer_paste']);
     expect(calls[1].arguments, {'sid': 1, 'window': 7, 'w': 800, 'h': 600});
+    expect(calls[2].arguments, {'sid': 1, 'mode': 'duogray', 'fps': 1, 'density': 'adaptive'});
+    expect(calls[3].arguments, {'sid': 1, 'mode': 'duogray', 'fps': 1, 'density': 'adaptive', 'pinned': true});
 
     final got = <SessionEvent>[];
     final sub = port.events.listen(got.add);

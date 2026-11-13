@@ -33,6 +33,9 @@ class SessionRecord {
   /// Ended while reconnecting (R14).
   bool ending = false;
   StreamChoice choice = startChoice;
+
+  /// The user picked the stream by hand: it stays pinned across reconnects.
+  bool pinned = false;
   int? window;
 
   String get key => '$id/$app';

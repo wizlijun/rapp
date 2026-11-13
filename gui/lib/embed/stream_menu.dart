@@ -127,6 +127,7 @@ class _StreamMenuAnchorState extends State<StreamMenuAnchor> {
         builder: (context, _) => TrafficLabel(
           key: const Key('traffic'),
           bytesPerSecond: widget.session.bytesPerSecond,
+          weak: widget.session.weak,
           open: widget.open,
           compact: widget.compact,
           onTap: widget.onToggle,
@@ -195,7 +196,7 @@ class _StreamMenuState extends State<StreamMenu> {
   Object get _sid => _s.sid;
 
   void _choose(StreamChoice c) {
-    _s.setChoice(c);
+    _s.setChoice(c, manual: true);
     widget.onClose();
   }
 

@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/app_profile.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
+import 'package:rapp/embed/stream_choice.dart';
 
 RemoteWindow w(int id, {WindowKind kind = WindowKind.normal, bool focused = false}) => RemoteWindow(
       id: id,
@@ -32,6 +33,26 @@ RemoteWindow win(int id, WindowKind kind) => RemoteWindow(
     );
 
 void main() {
+  test('weak event sets RemoteSession.weak', () {
+    final rs = RemoteSession(1, 'Calc');
+    var n = 0;
+    rs.addListener(() => n++);
+    expect(rs.weak, false);
+    rs.apply(parseSessionEvent('weak', {'sid': 1, 'on': true})!);
+    expect(rs.weak, true);
+    expect(n, 1);
+    rs.apply(parseSessionEvent('weak', {'sid': 1, 'on': false})!);
+    expect(rs.weak, false);
+  });
+
+  test('setChoice pins only when manual', () {
+    final rs = RemoteSession(1, 'Calc');
+    rs.setChoice(presetLeast);
+    expect(rs.streamPinned, false);
+    rs.setChoice(presetLeast, manual: true);
+    expect(rs.streamPinned, true);
+  });
+
   test('disconnected clears the transfer line and the sending state', () {
     final r = RemoteSession(1, 'x');
     r.apply(const TransferStatusEvent(1, '下载 x 45%'));

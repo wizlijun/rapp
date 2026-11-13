@@ -48,6 +48,20 @@ void main() {
         ),
       );
 
+  testWidgets('traffic label shows 弱网', (tester) async {
+    open = false;
+    final port = FakeSessionPort();
+    final rs = RemoteSession(1, 'Calc')
+      ..apply(const TrafficEvent(1, 12000))
+      ..apply(const WeakEvent(1, true));
+    await tester.pumpWidget(wrap(anchor(rs, port)));
+    expect(find.textContaining('弱网'), findsOneWidget);
+    expect(find.bySemanticsLabel('流量 12.0 KB/s，弱网，打开串流菜单'), findsOneWidget);
+    rs.apply(const WeakEvent(1, false));
+    await tester.pump();
+    expect(find.textContaining('弱网'), findsNothing);
+  });
+
   testWidgets('traffic label shows the rate and opens the menu by tap and by right click', (tester) async {
     open = false;
     final port = FakeSessionPort();

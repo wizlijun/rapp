@@ -114,9 +114,16 @@ class RemoteSession extends ChangeNotifier {
   /// What the user chose for this session's stream; kept per session (R18), not saved.
   StreamChoice choice = startChoice;
 
-  /// The user picked [c] in the stream menu.
-  void setChoice(StreamChoice c) {
+  /// The user picked a stream choice by hand: A never changes it on its own (kept for the session's life).
+  bool streamPinned = false;
+
+  /// A is in the weak-network tier.
+  bool weak = false;
+
+  /// [c] is the new choice; [manual] when the user picked it in the stream menu.
+  void setChoice(StreamChoice c, {bool manual = false}) {
     choice = c;
+    if (manual) streamPinned = true;
     onStream?.call(c);
     notifyListeners();
   }
@@ -164,6 +171,8 @@ class RemoteSession extends ChangeNotifier {
           _pendingCurrent = null;
           tabs.select(p);
         }
+      case WeakEvent():
+        weak = e.on;
       case TrafficEvent():
         bytesPerSecond = e.bytes;
         if (e.frames > 0) {

@@ -687,6 +687,29 @@ void main() {
       });
     });
 
+    test('manual pick pins and reaches the port; a plain choice does not', () {
+      env((a, t, port, st, hints) {
+        st.currentRemote!.setChoice(const StreamChoice('duogray', 'adaptive', 1));
+        expect(port.calls.last.$2['pinned'], isNot(true));
+        st.currentRemote!.setChoice(const StreamChoice('color16', 'adaptive', 5), manual: true);
+        expect(port.calls.last.$1, 'set_stream');
+        expect(port.calls.last.$2['pinned'], true);
+      });
+    });
+
+    test('pin survives reconnect', () {
+      env((a, t, port, st, hints) {
+        st.currentRemote!.setChoice(const StreamChoice('duogray', 'saver1x', 5), manual: true);
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        st.reconnect('111/a');
+        a.flushMicrotasks();
+        expect(port.calls.last.$1, 'set_stream');
+        expect(port.calls.last.$2, containsPair('sid', 11));
+        expect(port.calls.last.$2['pinned'], true);
+        expect(st.remote[11]!.streamPinned, true);
+      });
+    });
+
     List<Map<String, Object?>> sets(FakeSessionPort port, int sid) =>
         [for (final c in port.calls) if (c.$1 == 'set_stream' && c.$2['sid'] == sid) c.$2];
 
