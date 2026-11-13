@@ -403,7 +403,7 @@ final class Session {
             injector?.handle(message, table: table)
             // Enabled items and check marks follow what the input did (a selection, an edit).
             if message.mayChangeMenus, menuBar != nil { scheduleMenuRead(after: 0.5) }
-        case let .setStream(mode, fps, density):
+        case let .setStream(mode, fps, density, _):
             setStream(mode, fps: Int(fps), density: density)
         // Window commands naming a window no longer in the table are dropped,
         // not errors: B may not have seen the newest table yet (spec §2.4).
@@ -449,7 +449,9 @@ final class Session {
             if case let .text(text) = source { inlinePastes[seq] = text.utf8.count }
             paster?.paste(seq: seq, source)
 
-        case .ready, .error, .frame, .windows, .menuBar, .clip, .pasted, .fetch, .put, .transferStart, .chunk, .inputBlocked:
+        case .frameAck:
+            break  // Pacing on acks arrives with the host scheduler.
+        case .ready, .error, .frame, .windows, .menuBar, .clip, .pasted, .fetch, .put, .transferStart, .chunk, .inputBlocked, .weak:
             fail("unexpected message from client")
         }
     }

@@ -67,7 +67,7 @@ final class InputYieldTests: XCTestCase {
         var y = InputYield()
         y.yielded(to: "x", at: 0)
         for msg: Message in [.resize(window: 1, width: 10, height: 10), .move(window: 1, x: 0, y: 0), .close(1),
-                             .setStream(mode: .gray4, fps: 5, density: 1)] {
+                             .setStream(mode: .gray4, fps: 5, density: 1, pinned: false)] {
             XCTAssertEqual(y.admit(msg, at: 0.1), .pass(report: false))
         }
     }

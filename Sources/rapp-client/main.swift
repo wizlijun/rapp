@@ -248,7 +248,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let next = (mode: streamMenu.mode, fps: streamMenu.fps, density: currentDensity())
         guard streamChanged(from: sentStream, to: next) else { return }
         sentStream = next
-        connection.send(.setStream(mode: next.mode, fps: next.fps, density: next.density))
+        connection.send(.setStream(mode: next.mode, fps: next.fps, density: next.density, pinned: false))
     }
 }
 

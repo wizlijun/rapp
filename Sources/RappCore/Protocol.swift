@@ -1,8 +1,11 @@
 import Foundation
 
-public let protocolVersion: UInt8 = 6
+public let protocolVersion: UInt8 = 7
 /// The oldest client version this host still serves (v5 clients just never get `inputBlocked`).
 public let oldestClientVersion: UInt8 = 5
+
+/// Clients at v7 or later acknowledge every frame; the host paces on those acks.
+public func clientSendsFrameAcks(_ v: UInt8) -> Bool { v >= 7 }
 
 /// Whether a client that said hello with `version` understands `inputBlocked` (type 26).
 public func clientUnderstandsInputBlocked(_ version: UInt8) -> Bool { version >= 6 }
@@ -97,7 +100,7 @@ public enum Message: Equatable {
     case mouse(kind: MouseKind, button: MouseButton, window: UInt32, x: Float, y: Float, clickCount: UInt8)  // 7
     case scroll(window: UInt32, x: Float, y: Float, dx: Float, dy: Float)                    // 8
     case resize(window: UInt32, width: UInt16, height: UInt16)                               // 9, client -> host (content points)
-    case setStream(mode: Mode, fps: UInt8, density: Float)                                   // 11, client -> host
+    case setStream(mode: Mode, fps: UInt8, density: Float, pinned: Bool)                     // 11, client -> host; v6 omits the trailing pinned byte
     case windows([WindowInfo])                                                               // 13, host -> client, front to back
     case focus(UInt32)                                                                       // 14, client -> host
     case close(UInt32)                                                                       // 15, client -> host
@@ -112,6 +115,8 @@ public enum Message: Equatable {
     case transferStart(UInt64)                                                               // 24, side connection
     case chunk([UInt8])                                                                      // 25, side connection, payload is the data
     case inputBlocked(by: String)                                                            // 26, host -> client
+    case frameAck(processingMs: UInt16)                                                      // 27, client -> host (v7)
+    case weak(Bool)                                                                          // 28, host -> client (v7)
 
     public func encoded() -> [UInt8] {
         var w = Writer()
@@ -144,9 +149,9 @@ public enum Message: Equatable {
         case let .resize(window, width, height):
             type = 9
             w.u32(window); w.u16(width); w.u16(height)
-        case let .setStream(mode, fps, density):
+        case let .setStream(mode, fps, density, pinned):
             type = 11
-            w.u8(mode.rawValue); w.u8(fps); w.f32(density)
+            w.u8(mode.rawValue); w.u8(fps); w.f32(density); w.u8(pinned ? 1 : 0)
         case let .windows(items):
             type = 13
             w.u16(UInt16(clamping: items.count))
@@ -204,6 +209,12 @@ public enum Message: Equatable {
         case let .inputBlocked(by):
             type = 26
             w.string(by)
+        case let .frameAck(processingMs):
+            type = 27
+            w.u16(processingMs)
+        case let .weak(on):
+            type = 28
+            w.u8(on ? 1 : 0)
         }
         precondition(w.bytes.count <= maxMessageLength, "message too large")
         var out: [UInt8] = [type]
@@ -251,7 +262,13 @@ public enum Message: Equatable {
         case 11:
             guard let mode = Mode(rawValue: try r.u8()) else { throw CodecError("unknown mode") }
             let (fps, density) = try r.stream()
-            message = .setStream(mode: mode, fps: fps, density: density)
+            var pinned = false
+            if !r.isAtEnd {
+                let flag = try r.u8()
+                guard flag <= 1 else { throw CodecError("bad pinned flag") }
+                pinned = flag == 1
+            }
+            message = .setStream(mode: mode, fps: fps, density: density, pinned: pinned)
         case 13:
             message = .windows(try r.windows())
         case 14:
@@ -299,6 +316,12 @@ public enum Message: Equatable {
             message = .chunk(data)
         case 26:
             message = .inputBlocked(by: try r.string())
+        case 27:
+            message = .frameAck(processingMs: try r.u16())
+        case 28:
+            let flag = try r.u8()
+            guard flag <= 1 else { throw CodecError("bad weak flag") }
+            message = .weak(flag == 1)
         default:
             throw CodecError("unknown message type \(type)")
         }
@@ -307,7 +330,7 @@ public enum Message: Equatable {
     }
 }
 
-private let knownTypes: Set<UInt8> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26]
+private let knownTypes: Set<UInt8> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28]
 
 /// Turns a byte stream into messages. Feed it whatever the socket delivers
 /// with `append`, then call `next()` until it returns nil.

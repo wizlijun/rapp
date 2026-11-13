@@ -23,7 +23,7 @@ public enum ChannelCommand: Equatable {
     case key(sid: Int64, keyCode: UInt16, modifiers: UInt64)
     case resize(sid: Int64, Message)
     case selectWindow(sid: Int64, window: UInt32)
-    case setStream(sid: Int64, mode: Mode, fps: UInt8, density: DensityChoice)
+    case setStream(sid: Int64, mode: Mode, fps: UInt8, density: DensityChoice, pinned: Bool)
     /// Stop one transfer (`id`) or, without an id, all of them.
     case cancelTransfer(sid: Int64, id: UInt32?)
     /// Take a copy of A's clip `clip` onto B (answered with a `clipCopyReply`).
@@ -123,7 +123,8 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
     case "select_window":
         return .selectWindow(sid: sid, window: try a.window())
     case "set_stream":
-        return .setStream(sid: sid, mode: try a.mode(), fps: try a.fps(), density: try a.density())
+        return .setStream(sid: sid, mode: try a.mode(), fps: try a.fps(), density: try a.density(),
+                          pinned: try a.optionalBool("pinned"))
     case "clip_pick":
         guard let clip = UInt32(exactly: try a.int("clip")) else { throw ChannelError.bad(method) }
         return .clipPick(sid: sid, clip: clip, insert: try a.bool("insert"))
@@ -192,6 +193,11 @@ private struct Args {
     func bool(_ key: String) throws -> Bool {
         guard let n = map[key] as? NSNumber, CFGetTypeID(n) == CFBooleanGetTypeID() else { throw bad }
         return n.boolValue
+    }
+
+    /// A boolean that may be absent (false); present but not a boolean is an error.
+    func optionalBool(_ key: String) throws -> Bool {
+        map[key] == nil ? false : try bool(key)
     }
 
     /// A non-empty list of u16 menu indices.

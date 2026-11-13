@@ -38,10 +38,10 @@ final class ProtocolTests: XCTestCase {
         ]),
         .menuPick([0]),
         .menuPick([1, 0, 0, 2, 3, 4, 5, 65535]),
-        .setStream(mode: .color16, fps: 15, density: 1),
-        .setStream(mode: .duocolor, fps: 5, density: 1.25),
-        .setStream(mode: .duogray, fps: 1, density: 2),
-        .setStream(mode: .color16, fps: 30, density: 2),
+        .setStream(mode: .color16, fps: 15, density: 1, pinned: false),
+        .setStream(mode: .duocolor, fps: 5, density: 1.25, pinned: false),
+        .setStream(mode: .duogray, fps: 1, density: 2, pinned: false),
+        .setStream(mode: .color16, fps: 30, density: 2, pinned: false),
         .hello(token: "t", bundleID: "b", mode: .duogray, fps: 1, density: 1),
         .frame(region: CanvasRect(x: 0.5, y: 8, w: 64, h: 64), FramePayload(mode: .color16, width: 130, height: 70, isFull: true, data: [1, 2, 3, 250])),
         .clip(id: 1, .text("你好😀", truncated: false)),
@@ -59,6 +59,11 @@ final class ProtocolTests: XCTestCase {
         .transferStart(0),
         .chunk([]),
         .inputBlocked(by: "Mac mini"),
+        .frameAck(processingMs: 0),
+        .frameAck(processingMs: 65535),
+        .weak(true),
+        .weak(false),
+        .setStream(mode: .duogray, fps: 1, density: 2, pinned: true),
         .hello(token: "t", bundleID: "b", mode: .gray4, fps: 15, density: 1, version: 5),
         .chunk([UInt8](repeating: 7, count: chunkSize)),
     ]
@@ -69,20 +74,23 @@ final class ProtocolTests: XCTestCase {
         return try p.next()
     }
 
-    func testHostAcceptsV5AndV6Hellos() throws {
-        for v: UInt8 in [5, 6] {
+    func testHostAcceptsHelloV5ToV7() throws {
+        for v: UInt8 in [5, 6, 7] {
             let m = Message.hello(token: "t", bundleID: "b", mode: .gray4, fps: 15, density: 1, version: v)
             XCTAssertEqual(try decodeOne(m.encoded()), m)
         }
+        var future = Message.hello(token: "t", bundleID: "b", mode: .gray4, fps: 15, density: 1).encoded()
+        future[5] = 8
+        XCTAssertThrowsError(try decodeOne(future)) { XCTAssertEqual(($0 as? ProtocolVersionMismatch)?.client, 8) }
         var old = Message.hello(token: "t", bundleID: "b", mode: .gray4, fps: 15, density: 1).encoded()
         old[5] = 4
         XCTAssertThrowsError(try decodeOne(old)) {
-            XCTAssertEqual("\($0)", "protocol version mismatch: host 6, client 4 (update both sides)")
+            XCTAssertEqual("\($0)", "protocol version mismatch: host 7, client 4 (update both sides)")
         }
     }
 
-    func testFetchAndPutAcceptV5AndV6() throws {
-        for v: UInt8 in [5, 6] {
+    func testFetchAndPutAcceptV5ToV7() throws {
+        for v: UInt8 in [5, 6, 7] {
             var f = Message.fetch(token: "t", clip: 1, file: 2, offset: 3).encoded()
             f[5] = v
             XCTAssertEqual(try decodeOne(f), .fetch(token: "t", clip: 1, file: 2, offset: 3))
@@ -90,7 +98,7 @@ final class ProtocolTests: XCTestCase {
             q[5] = v
             XCTAssertEqual(try decodeOne(q), .put(token: "t", item: 1, kind: .files, uti: "u", name: "n", total: 5))
         }
-        for v: UInt8 in [4, 7] {
+        for v: UInt8 in [4, 8] {
             var f = Message.fetch(token: "t", clip: 1, file: 2, offset: 3).encoded()
             f[5] = v
             XCTAssertThrowsError(try decodeOne(f))
@@ -117,7 +125,7 @@ final class ProtocolTests: XCTestCase {
         p.append([1, UInt8(payload.count), 0, 0, 0] + payload)
         XCTAssertThrowsError(try p.next()) { error in
             XCTAssertEqual((error as? ProtocolVersionMismatch)?.client, 2)
-            XCTAssertEqual("\(error)", "protocol version mismatch: host 6, client 2 (update both sides)")
+            XCTAssertEqual("\(error)", "protocol version mismatch: host 7, client 2 (update both sides)")
         }
     }
 
@@ -142,6 +150,38 @@ final class ProtocolTests: XCTestCase {
         return [11, 6, 0, 0, 0, mode, fps, UInt8(d & 0xFF), UInt8(d >> 8 & 0xFF), UInt8(d >> 16 & 0xFF), UInt8(d >> 24)]
     }
 
+    func testV6SetStreamWithoutPinnedDecodesUnpinned() throws {
+        var bytes = setStream(mode: 3, fps: 5, density: 1.25)
+        let withPinned = bytes + [1]
+        XCTAssertEqual(try decodeOne(bytes), .setStream(mode: .duogray, fps: 5, density: 1.25, pinned: false))
+        bytes = withPinned
+        bytes[1] = 7
+        XCTAssertEqual(try decodeOne(bytes), .setStream(mode: .duogray, fps: 5, density: 1.25, pinned: true))
+    }
+
+    func testSetStreamWithTwoTrailingBytesIsRejected() {
+        var bytes = setStream(density: 1) + [0, 0]
+        bytes[1] = 8
+        assertRejects(bytes, "two trailing bytes")
+        var bad = setStream(density: 1) + [2]
+        bad[1] = 7
+        assertRejects(bad, "pinned flag above 1")
+    }
+
+    func testFrameAckAndWeakWireFormat() throws {
+        XCTAssertEqual(Message.frameAck(processingMs: 0x0102).encoded(), [27, 2, 0, 0, 0, 0x02, 0x01])
+        XCTAssertEqual(Message.weak(true).encoded(), [28, 1, 0, 0, 0, 1])
+        assertRejects(frame(27, [1]), "short ack")
+        assertRejects(frame(27, [1, 0, 0]), "long ack")
+        assertRejects(frame(28, [2]), "weak flag above 1")
+        assertRejects(frame(28, []), "empty weak")
+    }
+
+    func testAckCapability() {
+        XCTAssertFalse(clientSendsFrameAcks(6))
+        XCTAssertTrue(clientSendsFrameAcks(7))
+    }
+
     func testSetStreamRejectsBadFpsAndDensity() {
         for bytes in [setStream(fps: 3, density: 1), setStream(fps: 0, density: 1), setStream(density: 0),
                       setStream(density: -1), setStream(density: 9), setStream(density: .nan),
@@ -152,7 +192,7 @@ final class ProtocolTests: XCTestCase {
         }
         var p = MessageParser()
         p.append(setStream(fps: 5, density: 8))
-        XCTAssertEqual(try p.next(), .setStream(mode: .gray4, fps: 5, density: 8))
+        XCTAssertEqual(try p.next(), .setStream(mode: .gray4, fps: 5, density: 8, pinned: false))
     }
 
     func testHelloRejectsBadFpsAndDensity() {
@@ -346,8 +386,8 @@ final class ProtocolTests: XCTestCase {
     func testFetchAndPutCarryTheVersion() {
         let fetch = Message.fetch(token: "t", clip: 1, file: 0, offset: 0).encoded()
         let put = Message.put(token: "t", item: 1, kind: .text, uti: "u", name: "n", total: 1).encoded()
-        XCTAssertEqual(fetch[5], 6)
-        XCTAssertEqual(put[5], 6)
+        XCTAssertEqual(fetch[5], 7)
+        XCTAssertEqual(put[5], 7)
         for var bytes in [fetch, put] {
             bytes[5] = 4
             var p = MessageParser()

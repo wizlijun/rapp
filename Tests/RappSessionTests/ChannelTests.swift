@@ -24,7 +24,9 @@ final class ChannelTests: XCTestCase {
                        .resize(sid: 1, .resize(window: 7, width: 800, height: 65535)))
         XCTAssertEqual(try channelCommand("select_window", ["sid": 1, "window": 2]), .selectWindow(sid: 1, window: 2))
         XCTAssertEqual(try channelCommand("set_stream", ["sid": 1, "mode": "duogray", "fps": 1, "density": "saver1x"]),
-                       .setStream(sid: 1, mode: .duogray, fps: 1, density: .saver1x))
+                       .setStream(sid: 1, mode: .duogray, fps: 1, density: .saver1x, pinned: false))
+        XCTAssertEqual(try channelCommand("set_stream", ["sid": 1, "mode": "duogray", "fps": 1, "density": "saver1x", "pinned": true]),
+                       .setStream(sid: 1, mode: .duogray, fps: 1, density: .saver1x, pinned: true))
         XCTAssertEqual(try channelCommand("close", ["sid": 4]), .close(sid: 4))
         XCTAssertEqual(try channelCommand("cancel_transfer", ["sid": 4]), .cancelTransfer(sid: 4, id: nil))
         XCTAssertEqual(try channelCommand("cancel_transfer", ["sid": 1, "id": 3]), .cancelTransfer(sid: 1, id: 3))

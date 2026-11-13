@@ -281,7 +281,7 @@ public final class EmbeddedSession {
         let next = (mode: mode, fps: fps, density: captureDensity(zoom: 1, backingScale: backingScale, choice: choice))
         guard streamChanged(from: sentStream, to: next) else { return }
         sentStream = next
-        link.send(.setStream(mode: next.mode, fps: next.fps, density: next.density))
+        link.send(.setStream(mode: next.mode, fps: next.fps, density: next.density, pinned: false))
     }
 }
 

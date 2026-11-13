@@ -233,7 +233,7 @@ final class EmbeddedSessionTests: XCTestCase {
         s.setStream(mode: .color16, fps: 1, choice: .adaptive)
         q.sync {}
         XCTAssertEqual(streams().count, 2)
-        guard case let .setStream(_, fps, _)? = streams().last else { return XCTFail() }
+        guard case let .setStream(_, fps, _, _)? = streams().last else { return XCTFail() }
         XCTAssertEqual(fps, 1)
     }
 
