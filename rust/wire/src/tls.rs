@@ -27,6 +27,13 @@ pub enum Expect {
     Any,
 }
 
+/// Per-stream receive window on the relay: bounds what one stream of an unenrolled
+/// connection can make the relay buffer.
+pub const SERVER_STREAM_WINDOW: u32 = 1024 * 1024;
+/// Per-connection receive window on the relay: bounded memory per connection, while still
+/// about 40 MB/s per connection at 100 ms RTT (4 MiB / 0.1 s) for relayed streams.
+pub const SERVER_CONN_WINDOW: u32 = 4 * 1024 * 1024;
+
 pub type BiStream = tokio::io::Join<quinn::RecvStream, quinn::SendStream>;
 
 pub fn bi((send, recv): (quinn::SendStream, quinn::RecvStream)) -> BiStream {
@@ -34,6 +41,7 @@ pub fn bi((send, recv): (quinn::SendStream, quinn::RecvStream)) -> BiStream {
 }
 
 /// TLS 1.3 only; the client must show a certificate and prove it holds its key.
+/// Devices never open unidirectional streams toward the relay, so none are allowed.
 pub fn server_config(id: &Identity, alpn: &[u8], max_streams: u32) -> Result<quinn::ServerConfig> {
     let p = provider();
     let verifier = ClientVerifier { algs: p.signature_verification_algorithms };
@@ -43,7 +51,12 @@ pub fn server_config(id: &Identity, alpn: &[u8], max_streams: u32) -> Result<qui
         .with_single_cert(vec![id.cert.clone()], PrivateKeyDer::Pkcs8(id.key.clone_key()))?;
     tls.alpn_protocols = vec![alpn.to_vec()];
     let mut sc = quinn::ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(tls)?));
-    sc.transport_config(transport(Some(max_streams)));
+    let mut t = transport();
+    t.max_concurrent_bidi_streams(max_streams.into())
+        .max_concurrent_uni_streams(0u32.into())
+        .stream_receive_window(SERVER_STREAM_WINDOW.into())
+        .receive_window(SERVER_CONN_WINDOW.into());
+    sc.transport_config(Arc::new(t));
     Ok(sc)
 }
 
@@ -58,7 +71,7 @@ pub fn client_config(id: &Identity, alpn: &[u8], expect: Expect) -> Result<quinn
         .with_client_auth_cert(vec![id.cert.clone()], PrivateKeyDer::Pkcs8(id.key.clone_key()))?;
     tls.alpn_protocols = vec![alpn.to_vec()];
     let mut cc = quinn::ClientConfig::new(Arc::new(QuicClientConfig::try_from(tls)?));
-    cc.transport_config(transport(None));
+    cc.transport_config(Arc::new(transport()));
     Ok(cc)
 }
 
@@ -75,14 +88,12 @@ fn provider() -> Arc<CryptoProvider> {
     Arc::new(rustls::crypto::ring::default_provider())
 }
 
-fn transport(max_streams: Option<u32>) -> Arc<quinn::TransportConfig> {
+/// Keep-alive 10 s, idle 30 s: both sides.
+fn transport() -> quinn::TransportConfig {
     let mut t = quinn::TransportConfig::default();
     t.keep_alive_interval(Some(Duration::from_secs(10)));
     t.max_idle_timeout(Some(Duration::from_secs(30).try_into().expect("idle timeout fits")));
-    if let Some(n) = max_streams {
-        t.max_concurrent_bidi_streams(n.into());
-    }
-    Arc::new(t)
+    t
 }
 
 fn parse_fp(cert: &CertificateDer<'_>) -> Result<Fp, rustls::Error> {
@@ -306,18 +317,53 @@ mod tests {
         assert!(refused(c).await);
     }
 
-    #[tokio::test]
-    async fn server_refuses_a_certificate_signed_for_with_another_key() {
-        let srv = server(&Identity::generate().unwrap());
-        let (victim, thief) = (Identity::generate().unwrap(), Identity::generate().unwrap());
+    /// `victim`'s certificate, but signatures made with `thief`'s key.
+    fn stolen_cert(victim: &Identity, thief: &Identity) -> Arc<rustls::sign::CertifiedKey> {
         let wrong_key = rustls::crypto::ring::default_provider()
             .key_provider
             .load_private_key(PrivateKeyDer::Pkcs8(thief.key.clone_key()))
             .unwrap();
-        let ck = Arc::new(rustls::sign::CertifiedKey::new(vec![victim.cert.clone()], wrong_key));
-        let (c, s) = handshake(&srv, hand_built_client(Some(ck))).await;
+        Arc::new(rustls::sign::CertifiedKey::new(vec![victim.cert.clone()], wrong_key))
+    }
+
+    #[tokio::test]
+    async fn server_refuses_a_certificate_signed_for_with_another_key() {
+        let srv = server(&Identity::generate().unwrap());
+        let (victim, thief) = (Identity::generate().unwrap(), Identity::generate().unwrap());
+        let (c, s) = handshake(&srv, hand_built_client(Some(stolen_cert(&victim, &thief)))).await;
         assert!(s.is_err());
         assert!(refused(c).await);
+    }
+
+    #[tokio::test]
+    async fn client_refuses_a_server_that_shows_a_certificate_without_its_key() {
+        let (victim, thief, cid) =
+            (Identity::generate().unwrap(), Identity::generate().unwrap(), Identity::generate().unwrap());
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let verifier = ClientVerifier { algs: provider.signature_verification_algorithms };
+        let mut tls = rustls::ServerConfig::builder_with_provider(provider)
+            .with_protocol_versions(&[&rustls::version::TLS13])
+            .unwrap()
+            .with_client_cert_verifier(Arc::new(verifier))
+            .with_cert_resolver(Arc::new(rustls::sign::SingleCertAndKey::from(stolen_cert(&victim, &thief))));
+        tls.alpn_protocols = vec![ALPN_RELAY.to_vec()];
+        let sc = quinn::ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(tls).unwrap()));
+        let srv = quinn::Endpoint::server(sc, local()).unwrap();
+        let cc = client_config(&cid, ALPN_RELAY, Expect::Pin(victim.fp.prefix16())).unwrap();
+        let (c, s) = handshake(&srv, cc).await;
+        assert!(c.is_err());
+        assert!(s.is_err());
+    }
+
+    #[tokio::test]
+    async fn server_allows_no_uni_streams() {
+        let (sid, cid) = (Identity::generate().unwrap(), Identity::generate().unwrap());
+        let srv = server(&sid);
+        let (c, _s) = handshake(&srv, client_config(&cid, ALPN_RELAY, Expect::Any).unwrap()).await;
+        let c = c.unwrap();
+        assert!(tokio::time::timeout(Duration::from_millis(200), c.open_uni()).await.is_err());
+        // Bidi streams are still allowed.
+        assert!(tokio::time::timeout(Duration::from_secs(5), c.open_bi()).await.is_ok());
     }
 
     #[tokio::test]

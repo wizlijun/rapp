@@ -43,8 +43,9 @@ pub enum Push {
     GoingAway { after_ms: u64 },
 }
 
-/// At most this many `lan` entries in `register`, each at most 64 bytes.
+/// At most this many `lan` entries in `register`, each at most `MAX_LAN_LEN` bytes.
 pub const MAX_LAN: usize = 16;
+pub const MAX_LAN_LEN: usize = 64;
 
 /// Nine digits, the first not `0`.
 pub fn is_valid_id(id: &str) -> bool {

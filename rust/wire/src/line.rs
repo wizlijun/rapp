@@ -11,6 +11,8 @@ use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
 pub const MAX_LINE: usize = 8192;
 
 /// Reads one line (more than `max` bytes before the newline, EOF before it, or bad JSON: error).
+/// Not cancel-safe: if the future is dropped (e.g. a timeout), part of a line may already be
+/// consumed, so the stream must be reset, not read again.
 pub async fn read_json<R: AsyncBufRead + Unpin>(r: &mut R, max: usize) -> Result<Value> {
     let mut line = Vec::new();
     loop {
@@ -42,13 +44,14 @@ pub async fn write_json<W: AsyncWrite + Unpin, T: Serialize>(w: &mut W, v: &T) -
     Ok(())
 }
 
-/// `{"ok":true, ...extra}` (`extra` is an object; anything else adds nothing).
+/// `{"ok":true, ...extra}` (`extra` is an object; anything else adds nothing; `ok` always wins).
 pub fn ok(extra: Value) -> Value {
-    let mut v = json!({"ok": true});
-    if let (Some(m), Value::Object(e)) = (v.as_object_mut(), extra) {
-        m.extend(e);
-    }
-    v
+    let mut m = match extra {
+        Value::Object(e) => e,
+        _ => serde_json::Map::new(),
+    };
+    m.insert("ok".into(), Value::Bool(true));
+    Value::Object(m)
 }
 
 pub fn err(msg: &str) -> Value {
@@ -117,5 +120,6 @@ mod tests {
         assert_eq!(read_json(&mut r, MAX_LINE).await.unwrap(), json!({"ok":true,"id":"123456789"}));
         assert_eq!(read_json(&mut r, MAX_LINE).await.unwrap(), json!({"ok":false,"error":"offline"}));
         assert_eq!(ok(json!({})), json!({"ok":true}));
+        assert_eq!(ok(json!({"ok":false})), json!({"ok":true}));
     }
 }
