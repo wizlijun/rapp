@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>rapp 终端会话</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:inherit}a:hover{color:inherit}
+.rp{--mono:'JetBrains Mono',ui-monospace,Menlo,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',monospace;--font:Inter,'PingFang SC','Hiragino Sans GB','Noto Sans SC','Microsoft YaHei',sans-serif}
+.rp[data-theme="phosphor"]{--bg:#020A04;--panel:#041208;--raise:#07200F;--line:#176A33;--text:#7DFF9E;--muted:#3FBF68;--on:#B6FFC8;--accent:#F2FFF5;--accent-ink:#02240C;--tint:rgba(125,255,158,.17);--r:0px;--glow:0 0 10px rgba(125,255,158,.95);--font:'JetBrains Mono',ui-monospace,Menlo,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',monospace;text-shadow:0 0 6px rgba(125,255,158,.4)}
+.rp[data-theme="phosphor"]::after{content:"";position:absolute;inset:0;pointer-events:none;z-index:9;background:repeating-linear-gradient(0deg,rgba(0,0,0,.3) 0 1px,rgba(0,0,0,0) 1px 3px),radial-gradient(ellipse at center,rgba(0,0,0,0) 55%,rgba(0,0,0,.45) 100%)}
+.rp[data-theme="graphite"]{--bg:#0C1418;--panel:rgba(255,255,255,.03);--raise:rgba(140,220,255,.12);--line:rgba(150,225,255,.45);--text:#E9FAFF;--muted:#93C9DD;--on:#6FE3FF;--accent:#FF9A3D;--accent-ink:#2A1400;--tint:rgba(255,154,61,.13);--r:4px;--glow:0 0 8px rgba(111,227,255,.9)}
+.rp[data-theme="holo"]{--bg:#030A12;--panel:rgba(90,190,255,.06);--raise:rgba(110,205,255,.14);--line:rgba(120,210,255,.38);--text:#D9F3FF;--muted:#7FBBDD;--on:#7FE0FF;--accent:#FF5A3C;--accent-ink:#2A0700;--tint:rgba(255,90,60,.14);--r:2px;--glow:0 0 10px rgba(127,224,255,.95);text-shadow:0 0 8px rgba(127,224,255,.35)}
+.rp[data-theme="holo"]::after{content:"";position:absolute;inset:0;pointer-events:none;z-index:9;background:linear-gradient(rgba(127,224,255,.05) 1px,rgba(0,0,0,0) 1px) 0 0/100% 32px,linear-gradient(90deg,rgba(127,224,255,.05) 1px,rgba(0,0,0,0) 1px) 0 0/32px 100%}
+.rp[data-theme="bone"]{--bg:#070707;--panel:#0E0E0E;--raise:#1A1A1A;--line:#3A3A3A;--text:#F4F4F2;--muted:#A3A3A0;--on:#FFFFFF;--accent:#FF3B30;--accent-ink:#1A0000;--tint:rgba(255,59,48,.14);--r:2px;--glow:0 0 6px rgba(255,255,255,.6)}
+@media (hover:hover){.rp button:hover{outline:1px solid var(--muted)}}
+.rp button,.rp select,.rp input{min-height:48px;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+.rp button{user-select:none;-webkit-user-select:none;transition:transform .08s}
+.rp button:active{transform:scale(.97);filter:brightness(1.3)}
+.rp button:focus-visible,.rp input:focus-visible,.rp textarea:focus-visible,.rp select:focus-visible{outline:2px solid var(--text);outline-offset:2px}
+.rp ::selection{background:var(--text);color:var(--bg);text-shadow:none}
+@keyframes rp-blink{0%,49%{opacity:1}50%,100%{opacity:.2}}
+@media (prefers-reduced-motion:reduce){.rp *{animation:none!important}}
+</style>
+</helmet>
+<div class="rp" data-theme="{{ theme }}" style="position: relative; display: flex; flex-direction: column; height: 100vh; min-height: 640px; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 15px; line-height: 1.4">
+
+<header style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 8px; border-bottom: 1px solid var(--line)">
+<button type="button" onClick="{{ togglePanel }}" aria-expanded="{{ panelOpen }}" aria-label="打开设备面板" style="{{ panelBtnStyle }}">
+<svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"></path></svg>
+</button>
+<button type="button" onClick="{{ toggleWall }}" aria-pressed="{{ wallOpen }}" style="{{ wallBtnStyle }}">
+<svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"></path></svg>
+<span>全景</span>
+</button>
+<div style="min-width: 0; max-width: 320px; display: flex; align-items: center; gap: 10px; padding: 0 8px">
+<span aria-hidden="true" style="{{ headLamp }}"></span>
+<div style="min-width: 0">
+<h1 style="margin: 0; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{ headTitle }}</h1>
+<div style="color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{ headSub }}</div>
+</div>
+</div>
+<sc-for list="{{ tabs }}" as="w" hint-placeholder-count="2">
+<button type="button" onClick="{{ w.pick }}" aria-pressed="{{ w.on }}" style="{{ w.style }}">{{ w.title }}</button>
+</sc-for>
+<div aria-live="polite" style="flex: 1 1 80px; min-width: 0; text-align: right; font-family: var(--mono); color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{ notice }}</div>
+<button type="button" onClick="{{ toggleAttn }}" aria-expanded="{{ attnOpen }}" style="{{ attnStyle }}">
+<span aria-hidden="true" style="{{ attnLamp }}"></span>
+<span>需要你</span>
+<span style="font-family: var(--mono)">{{ attnCount }}</span>
+</button>
+<sc-if value="{{ hasCur }}" hint-placeholder-val="{{ false }}">
+<button type="button" onClick="{{ toggleMenu }}" aria-haspopup="true" aria-expanded="{{ menuOpen }}" aria-label="终端会话菜单" style="{{ chipStyle }}">
+<span aria-hidden="true" style="display: inline-flex; align-items: flex-end; gap: 2px; height: 12px"><sc-for list="{{ bars }}" as="b" hint-placeholder-count="5"><span style="{{ b.style }}"></span></sc-for></span>
+<span style="font-family: var(--mono); font-size: 13px">{{ rate }}</span>
+<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9l7 7 7-7"></path></svg>
+</button>
+</sc-if>
+</header>
+
+<div style="flex: 1; min-height: 0; position: relative; display: flex">
+
+<sc-if value="{{ showEmpty }}" hint-placeholder-val="{{ true }}">
+<div style="flex: 1; display: flex; align-items: center; justify-content: center; border: 1px dashed var(--line); margin: 10px">
+<div style="text-align: center; padding: 16px">
+<div style="font-size: 16px">还没有选终端会话</div>
+<div style="color: var(--muted); font-size: 13px; margin-top: 6px">在设备面板的“终端”一组里点一个，或者从全景里点一块</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ hasCur }}" hint-placeholder-val="{{ false }}">
+<div style="flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; position: relative">
+<sc-if value="{{ sizeBar }}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 4px 12px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 13px">
+<span style="flex: 1 1 260px">{{ sizeText }}</span>
+<button type="button" onClick="{{ refit }}" style="padding: 0 14px; border: 1px solid var(--line); border-radius: var(--r); background: transparent; color: var(--text); font: inherit; cursor: pointer">按我的屏幕重排</button>
+</div>
+</sc-if>
+<div onCopy="{{ onCopy }}" aria-label="终端画面，可以拖选文字复制" style="flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column-reverse; padding: 12px 14px 72px; cursor: text">
+<div style="{{ gridStyle }}">
+<sc-for list="{{ lines }}" as="l" hint-placeholder-count="14">
+<div style="{{ l.style }}">{{ l.t }}</div>
+</sc-for>
+</div>
+</div>
+<sc-if value="{{ keysOpen }}" hint-placeholder-val="{{ true }}">
+<div style="position: absolute; right: 10px; bottom: 10px; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; z-index: 2">
+<sc-for list="{{ keys }}" as="k" hint-placeholder-count="6">
+<button type="button" onClick="{{ k.send }}" aria-label="{{ k.label }}" style="min-width: 52px; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--r); background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 13px; cursor: pointer">{{ k.cap }}</button>
+</sc-for>
+<button type="button" onClick="{{ openComposer }}" style="padding: 0 18px; border: 1px solid var(--text); border-radius: var(--r); background: var(--text); color: var(--bg); font: inherit; font-weight: 600; cursor: pointer; text-shadow: none">输入</button>
+</div>
+</sc-if>
+<sc-if value="{{ composerOpen }}" hint-placeholder-val="{{ false }}">
+<div style="position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; background: var(--bg); border-top: 1px solid var(--text); padding: 10px; display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end">
+<label style="flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted)">用本机输入法写完一段，整段作为一次粘贴发过去
+<textarea rows="3" value="{{ draft }}" onChange="{{ setDraft }}" placeholder="可以换行；发过去仍然是一段" style="width: 100%; box-sizing: border-box; padding: 12px; border: 1px solid var(--line); border-radius: var(--r); font: inherit; background: var(--panel); color: var(--text); resize: vertical"></textarea>
+</label>
+<button type="button" onClick="{{ sendDraft }}" style="padding: 0 22px; border: 1px solid var(--text); border-radius: var(--r); background: var(--text); color: var(--bg); font: inherit; font-weight: 600; cursor: pointer; text-shadow: none">发送</button>
+<button type="button" onClick="{{ closeComposer }}" style="padding: 0 16px; border: 1px solid var(--line); border-radius: var(--r); background: transparent; color: var(--text); font: inherit; cursor: pointer">收起</button>
+</div>
+<div style="color: var(--muted); font-size: 12px">{{ afterSendText }}</div>
+</div>
+</sc-if>
+</div>
+</sc-if>
+
+<sc-if value="{{ wallOpen }}" hint-placeholder-val="{{ false }}">
+<section aria-label="全景" style="position: absolute; inset: 0; z-index: 4; background: var(--bg); overflow: auto; box-sizing: border-box; padding: 10px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px">
+<sc-for list="{{ stats }}" as="st" hint-placeholder-count="4">
+<div style="{{ st.style }}">
+<div style="font-family: var(--mono); font-size: 30px; font-weight: 600; line-height: 1.1">{{ st.n }}</div>
+<div style="font-size: 12px; color: var(--muted)">{{ st.name }}</div>
+</div>
+</sc-for>
+</div>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px">
+<sc-for list="{{ tiles }}" as="t" hint-placeholder-count="4">
+<button type="button" onClick="{{ t.open }}" style="{{ t.style }}">
+<span style="display: flex; align-items: center; gap: 10px; width: 100%"><span aria-hidden="true" style="{{ t.lamp }}"></span><span style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{ t.title }}</span><span style="margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap">{{ t.state }}</span></span>
+<span style="display: block; width: 100%; box-sizing: border-box; height: 96px; overflow: hidden; border: 1px solid var(--line); padding: 6px 8px; font-family: var(--mono); font-size: 11px; line-height: 1.4; color: var(--muted); white-space: pre; text-align: left">{{ t.tail }}</span>
+</button>
+</sc-for>
+</div>
+<div style="color: var(--muted); font-size: 12px">终端会话的缩略图就是最后几行文字，几乎不花流量。app 会话的缩略图照主界面规格，这里没有画。</div>
+</section>
+</sc-if>
+
+<sc-if value="{{ panelOpen }}" hint-placeholder-val="{{ true }}">
+<aside aria-label="设备面板" style="position: absolute; left: 0; top: 0; bottom: 0; z-index: 5; width: 720px; max-width: 100%; box-sizing: border-box; background: var(--bg); border-right: 1px solid var(--text); box-shadow: 12px 0 30px rgba(0,0,0,.5); overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px">
+<span aria-hidden="true" style="{{ lampOn }}"></span>
+<h2 style="margin: 0; font-size: 17px; font-weight: 600">bruce-mac</h2>
+<span style="color: var(--muted); font-size: 13px">在线 · 局域网 · macOS</span>
+<button type="button" onClick="{{ toggleTerms }}" aria-pressed="{{ termsOn }}" style="{{ termsBtnStyle }}">{{ termsBtnText }}</button>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">
+<span style="width: 44px; color: var(--muted); font-size: 11px; letter-spacing: .06em">APP</span>
+<span style="padding: 4px 10px; border: 1px solid var(--line); border-radius: var(--r); font-size: 13px">Claude</span>
+<span style="padding: 4px 10px; border: 1px solid var(--line); border-radius: var(--r); font-size: 13px">Safari</span>
+<span style="padding: 4px 10px; border: 1px solid var(--line); border-radius: var(--r); font-size: 13px">Terminal</span>
+<span style="color: var(--muted); font-size: 12px">（app 列表照主界面规格，这里从略）</span>
+</div>
+<sc-if value="{{ termsOff }}" hint-placeholder-val="{{ false }}">
+<div style="border: 1px dashed var(--line); padding: 14px; color: var(--muted); font-size: 13px">这台设备关掉了终端会话。别的设备看不到它的终端，也不会启动终端服务。</div>
+</sc-if>
+<sc-if value="{{ termsOn }}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="color: var(--muted); font-size: 11px; letter-spacing: .06em">终端</div>
+<sc-for list="{{ rows }}" as="r" hint-placeholder-count="4">
+<button type="button" onClick="{{ r.open }}" style="{{ r.style }}">
+<span aria-hidden="true" style="{{ r.lamp }}"></span>
+<span style="flex: 1 1 150px; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{ r.title }}</span>
+<span style="width: 70px; font-family: var(--mono); font-size: 13px">{{ r.cmd }}</span>
+<span style="width: 84px; color: var(--muted); font-size: 13px">{{ r.panes }}</span>
+<span style="flex: 1 1 130px; color: var(--muted); font-size: 13px">{{ r.state }}</span>
+<span style="font-weight: 600">{{ r.act }}</span>
+</button>
+</sc-for>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="color: var(--muted); font-size: 11px; letter-spacing: .06em">SSH 主机（由这台设备代管，主机上不装 rapp）</div>
+<sc-for list="{{ hostRows }}" as="h" hint-placeholder-count="2">
+<div style="{{ h.style }}">
+<span aria-hidden="true" style="{{ h.lamp }}"></span>
+<span style="width: 70px; font-weight: 600">{{ h.name }}</span>
+<span style="width: 150px; font-family: var(--mono); font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{ h.dest }}</span>
+<span style="flex: 1 1 200px; font-size: 13px">{{ h.note }}</span>
+</div>
+</sc-for>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px">
+<button type="button" onClick="{{ showNew }}" aria-expanded="{{ formNew }}" style="padding: 0 16px; border: 1px solid var(--line); border-radius: var(--r); background: var(--raise); color: var(--text); font: inherit; cursor: pointer">新开终端…</button>
+<button type="button" onClick="{{ showSsh }}" aria-expanded="{{ formSsh }}" style="padding: 0 16px; border: 1px solid var(--line); border-radius: var(--r); background: var(--raise); color: var(--text); font: inherit; cursor: pointer">添加 SSH 主机…</button>
+</div>
+<sc-if value="{{ formNew }}" hint-placeholder-val="{{ false }}">
+<div style="border: 1px solid var(--text); border-radius: var(--r); padding: 12px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px">
+<label style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted)">名字
+<input type="text" value="{{ nName }}" onChange="{{ setNName }}" style="padding: 0 10px; border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); color: var(--text); font: inherit">
+</label>
+<label style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted)">命令
+<input type="text" value="{{ nCmd }}" onChange="{{ setNCmd }}" style="padding: 0 10px; border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); color: var(--text); font-family: var(--mono); font-size: 14px">
+</label>
+<label style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted)">开在哪里
+<select value="{{ nHost }}" onChange="{{ setNHost }}" style="padding: 0 10px; border: 1px solid var(--line); border-radius: var(--r); background: var(--raise); color: var(--text); font: inherit; cursor: pointer">
+<option value="">这台设备（bruce-mac）</option>
+<option value="gpu1">gpu1（经 SSH）</option>
+</select>
+</label>
+</div>
+<div style="color: var(--muted); font-size: 12px">会开成一个 tmux 会话，尺寸按这块屏幕来。关掉 rapp 或重启它的服务，里面的程序照常跑。这台机器上没有 tmux 时不会新开，会提示先装一个。</div>
+<div><button type="button" onClick="{{ createNew }}" style="padding: 0 22px; border: 1px solid var(--text); border-radius: var(--r); background: var(--text); color: var(--bg); font: inherit; font-weight: 600; cursor: pointer; text-shadow: none">新开并打开</button></div>
+</div>
+</sc-if>
+<sc-if value="{{ formSsh }}" hint-placeholder-val="{{ false }}">
+<div style="border: 1px solid var(--text); border-radius: var(--r); padding: 12px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px">
+<label style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted)">名字
+<input type="text" value="{{ sName }}" onChange="{{ setSName }}" placeholder="gpu2" style="padding: 0 10px; border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); color: var(--text); font: inherit">
+</label>
+<label style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted)">目标（平时 ssh 后面写的那个）
+<input type="text" value="{{ sDest }}" onChange="{{ setSDest }}" placeholder="me@gpu2.lab" style="padding: 0 10px; border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); color: var(--text); font-family: var(--mono); font-size: 14px">
+</label>
+<label style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted)">tmux 的路径（找不到时才填）
+<input type="text" value="{{ sTmux }}" onChange="{{ setSTmux }}" placeholder="/opt/homebrew/bin/tmux" style="padding: 0 10px; border: 1px solid var(--line); border-radius: var(--r); background: var(--panel); color: var(--text); font-family: var(--mono); font-size: 14px">
+</label>
+</div>
+<div style="color: var(--muted); font-size: 12px">密钥、跳板、端口都照这台设备上的 ~/.ssh/config。rapp 不保存密码和密钥，也不会替你输密码或确认主机指纹：那样的主机会显示“连不上”和原因。</div>
+<div><button type="button" onClick="{{ addSsh }}" style="padding: 0 22px; border: 1px solid var(--text); border-radius: var(--r); background: var(--text); color: var(--bg); font: inherit; font-weight: 600; cursor: pointer; text-shadow: none">添加</button></div>
+</div>
+</sc-if>
+</sc-if>
+<div style="margin-top: auto; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; color: var(--muted); font-size: 12px; border-top: 1px solid var(--line); padding-top: 10px">
+<span style="display: inline-flex; align-items: center; gap: 6px"><span aria-hidden="true" style="{{ lampOn }}"></span>有输出</span>
+<span style="display: inline-flex; align-items: center; gap: 6px"><span aria-hidden="true" style="{{ lampIdle }}"></span>没动静</span>
+<span style="display: inline-flex; align-items: center; gap: 6px"><span aria-hidden="true" style="{{ lampNeed }}"></span>未读：有过输出，现在停下了</span>
+<span style="display: inline-flex; align-items: center; gap: 6px"><span aria-hidden="true" style="{{ lampLost }}"></span>连不上</span>
+</div>
+</aside>
+</sc-if>
+
+<sc-if value="{{ menuOpen }}" hint-placeholder-val="{{ false }}">
+<div role="dialog" aria-label="终端会话菜单" style="position: absolute; right: 8px; top: 8px; z-index: 6; width: 340px; max-width: calc(100% - 16px); box-sizing: border-box; background: var(--bg); border: 1px solid var(--text); border-radius: var(--r); box-shadow: 0 12px 30px rgba(0,0,0,.6); padding: 12px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="color: var(--muted); font-size: 11px; letter-spacing: .06em">字号</div>
+<div style="display: flex; gap: 6px">
+<button type="button" onClick="{{ setFit }}" aria-pressed="{{ fontFit }}" style="{{ fitStyle }}">适应宽度</button>
+<button type="button" onClick="{{ setRaw }}" aria-pressed="{{ fontRaw }}" style="{{ rawStyle }}">原样</button>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="color: var(--muted); font-size: 11px; letter-spacing: .06em">尺寸</div>
+<div style="font-size: 13px">{{ menuSize }}</div>
+<sc-if value="{{ sizeBar }}" hint-placeholder-val="{{ false }}">
+<button type="button" onClick="{{ refit }}" style="padding: 0 14px; border: 1px solid var(--line); border-radius: var(--r); background: transparent; color: var(--text); font: inherit; cursor: pointer">按我的屏幕重排</button>
+</sc-if>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="color: var(--muted); font-size: 11px; letter-spacing: .06em">会话</div>
+<div style="font-size: 13px">{{ menuPath }}</div>
+<button type="button" onClick="{{ endSession }}" style="{{ endStyle }}">{{ endText }}</button>
+<div style="color: var(--muted); font-size: 12px">结束会话只是不再看它。远端的程序继续跑，以后还能再打开。</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{ attnOpen }}" hint-placeholder-val="{{ false }}">
+<div role="dialog" aria-label="需要你" style="position: absolute; right: 8px; top: 8px; z-index: 6; width: 380px; max-width: calc(100% - 16px); box-sizing: border-box; background: var(--bg); border: 1px solid var(--text); border-radius: var(--r); box-shadow: 0 12px 30px rgba(0,0,0,.6); padding: 12px; display: flex; flex-direction: column; gap: 8px">
+<sc-for list="{{ attn }}" as="a" hint-placeholder-count="2">
+<div style="display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--accent); border-radius: var(--r); background: var(--tint)">
+<span aria-hidden="true" style="{{ a.lamp }}"></span>
+<span style="flex: 1; min-width: 0; font-size: 14px">{{ a.text }}</span>
+<button type="button" onClick="{{ a.open }}" style="padding: 0 16px; border: 1px solid var(--accent); border-radius: var(--r); background: var(--accent); color: var(--accent-ink); font: inherit; font-weight: 600; cursor: pointer; text-shadow: none">查看</button>
+</div>
+</sc-for>
+<div style="color: var(--muted); font-size: 13px">{{ attnNote }}</div>
+</div>
+</sc-if>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["graphite","holo","phosphor","bone"],"default":"phosphor"},"unreadInCount":{"editor":"boolean","default":true},"$preview":{"width":1194,"height":834}}'>
+class Component extends DCLogic {
+  state = {
+    panel: true, wall: false, cur: '', pane: 0, pop: '', composer: false, draft: '', notice: '从设备面板的“终端”一组开始',
+    confirm: false, termsOn: true, form: '', nName: 'fix-relay', nCmd: 'claude', nHost: '', sName: '', sDest: '', sTmux: '',
+    refit: {}, seen: {}, step: {}, sent: {}, raw: false, n: 1,
+    sessions: [
+      { id: 'work', name: 'work', host: '', cmd: 'claude', tabs: ['1 claude', '2 logs'], others: 1, size: '212×58', unread: true, live: true, quiet: '停下了，没看过' },
+      { id: 'build', name: 'build', host: '', cmd: 'cargo', tabs: ['1 cargo'], others: 0, size: '118×38', unread: false, live: false, quiet: '12 分钟没动静' },
+      { id: 'train', name: 'train', host: 'gpu1', cmd: 'python', tabs: ['1 python'], others: 0, size: '118×38', unread: true, live: false, quiet: '停下了，没看过' },
+      { id: 'eval', name: 'eval', host: 'gpu1', cmd: 'claude', tabs: ['1 claude'], others: 0, size: '118×38', unread: false, live: true, quiet: '刚刚有输出' }
+    ],
+    hosts: [
+      { name: 'gpu1', dest: 'me@gpu1.lab', ok: true },
+      { name: 'db1', dest: 'ops@db1', ok: false, note: '连不上：主机指纹还没确认过。先在这台设备上手动 ssh 一次' }
+    ]
+  };
+
+  screen(s, pane) {
+    const step = this.state.step[s.id] || '';
+    const sent = (this.state.sent[s.id] || []).reduce((a, t) => a.concat(t.split('\n').map((x, i) => (i ? '  ' : '> ') + x), ['']), []);
+    if (s.fresh) return ['$ ' + s.cmd, '', '~' + s.cmd + ' 已启动，等你的第一句话。', ''].concat(sent, ['> ']);
+    if (s.id === 'work' && pane === 1) return [
+      '~18:02:11 relay  connect id=686712053 path=lan', '~18:02:11 peer   open app=term:tmux:work', '~18:02:40 relay  going_away after_ms=3000',
+      '18:02:43 relay  reconnect in 1s', '18:02:44 relay  reconnect in 2s', '18:02:46 relay  connected', '$ tail -f service.log'
+    ];
+    if (s.id === 'work') {
+      const head = [
+        '~$ claude', '~', '~> relay 断开以后重连太慢，看一下 relay_link.rs', '~',
+        '~● 现在的间隔从 1 秒起每次翻倍，最长 60 秒。弱网下断几秒就要等很久。', '~',
+        '> 改成 1 秒起翻倍，15 秒封顶；用户自己断开的不重连', '',
+        '● 我先看一下现在的实现。', '',
+        '● Read(rust/service/src/relay_link.rs)', '~  ⎿ 读了 212 行', '',
+        '● Update(rust/service/src/relay_link.rs)', '~  ⎿ 12 additions, 3 removals', ''
+      ];
+      if (step === 'yes') return head.concat(['● 改好了，正在跑测试。', '', '~  cargo test -p rapp-service relay_link   （Esc 打断）', ''], sent);
+      if (step === 'esc') return head.concat(['~  ⎿ 已打断。这次修改没有写入。', ''], sent, ['> ']);
+      return head.concat(['  要应用这次修改吗？', '!❯ 1. 应用', '  2. 应用，这次会话里不再问', '  3. 不应用，告诉它该怎么改（Esc）', ''], sent);
+    }
+    if (s.id === 'build') return [
+      '~$ cargo build --release -p rapp-relay', '~   Compiling quinn v0.11.6', '~   Compiling rapp-wire v0.5.5', '~   Compiling rapp-relay v0.5.5',
+      '    Finished `release` profile [optimized] target(s) in 3m 12s', '$ '
+    ].concat(sent);
+    if (s.id === 'train') return [
+      '~$ python train.py --config base.yaml', '~epoch 10/40  loss 0.447  lr 3.0e-4  41 it/s', '~epoch 11/40  loss 0.431  lr 3.0e-4  41 it/s', '~epoch 12/40  loss 0.412  lr 3.0e-4  40 it/s',
+      'Traceback (most recent call last):', '  File "train.py", line 188, in <module>', '    loss.backward()', '!torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2.50 GiB', '$ '
+    ].concat(sent);
+    return ['~$ claude', '~', '~> 把评测集跑一遍，结果写进 results/', '', '● 正在跑评测，第 412 / 1000 条。', '', '~  python eval.py --split test   （Esc 打断）', ''].concat(sent);
+  }
+
+  renderVals() {
+    const st = this.state, self = this;
+    const theme = this.props.theme ?? 'phosphor';
+    const count = this.props.unreadInCount ?? true;
+    const set = (o) => () => self.setState(o);
+    const lampBase = 'display:inline-block;flex:none;box-sizing:border-box;';
+    const lamp = (k) => lampBase + (k === 'on' ? 'width:10px;height:10px;border-radius:50%;background:var(--on);box-shadow:var(--glow)'
+      : k === 'need' ? 'width:9px;height:9px;margin:0 1px;background:var(--accent);transform:rotate(45deg);animation:rp-blink 1s steps(1) infinite'
+      : k === 'lost' ? 'width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:11px solid var(--accent)'
+      : 'width:10px;height:10px;border-radius:50%;border:2px solid var(--muted)');
+    const tab = (on) => 'padding:0 14px;border-radius:var(--r);font:inherit;cursor:pointer;color:var(--text);' + (on ? 'border:1px solid var(--text);background:var(--raise);font-weight:600' : 'border:1px solid var(--line);background:transparent');
+    const S = st.sessions;
+    const unread = (s) => s.unread && !st.seen[s.id];
+    const kind = (s) => unread(s) ? 'need' : s.live ? 'on' : 'idle';
+    const label = (s) => s.name + (s.host ? ' @' + s.host : '');
+    const stateText = (s) => unread(s) ? '未读：' + s.quiet : st.seen[s.id] && s.unread ? '看过了' : s.quiet;
+    const open = (s) => () => self.setState({ cur: s.id, pane: 0, panel: false, wall: false, pop: '', composer: false, confirm: false, form: '', seen: Object.assign({}, st.seen, { [s.id]: true }), notice: '已打开 ' + label(s) + (unread(s) ? '；看过了，灯自己变回去' : '') });
+    const cur = S.find((s) => s.id === st.cur);
+    const scaled = cur && cur.others > 0 && !st.refit[cur.id];
+    const step = cur ? (st.step[cur.id] || '') : '';
+    const key = (cap, name) => ({ cap: cap, label: '发送 ' + name, send: () => {
+      const next = { notice: '已发送 ' + name + ' 到 ' + label(cur) };
+      if (cur.id === 'work' && st.pane === 0 && !step) {
+        if (cap === '⏎') { next.step = Object.assign({}, st.step, { work: 'yes' }); next.notice = '已发送回车：选了“应用”'; }
+        if (cap === 'Esc' || cap === '⌃C') { next.step = Object.assign({}, st.step, { work: 'esc' }); next.notice = '已发送 ' + name + '：打断了'; }
+      } else if (cur.id === 'work' && st.pane === 0 && step === 'yes' && (cap === 'Esc' || cap === '⌃C')) { next.step = Object.assign({}, st.step, { work: 'esc' }); next.notice = '已发送 ' + name + '：打断了正在跑的测试'; }
+      self.setState(next);
+    } });
+    const lines = cur ? this.screen(cur, st.pane).map((t) => {
+      const dim = t.charAt(0) === '~', hot = t.charAt(0) === '!';
+      return { t: (dim || hot ? t.slice(1) : t) || ' ', style: 'white-space:pre;min-height:1.4em;' + (dim ? 'color:var(--muted)' : hot ? 'font-weight:600;color:var(--on)' : '') };
+    }) : [];
+    const unreadList = S.filter(unread);
+    const attnN = count ? unreadList.length : 0;
+    const rate = cur ? (cur.live && step !== 'esc' ? '0.3 KB/s' : '0 KB/s') : '';
+    const lit = cur && cur.live && step !== 'esc' ? 1 : 0;
+    const row = (s) => 'display:flex;flex-wrap:wrap;align-items:center;gap:12px;width:100%;box-sizing:border-box;min-height:60px;padding:8px 12px;border-radius:var(--r);color:var(--text);font:inherit;text-align:left;cursor:pointer;'
+      + (unread(s) ? 'border:1px solid var(--accent);background:var(--tint)' : s.id === st.cur ? 'border:1px solid var(--text);background:var(--panel);box-shadow:inset 0 0 0 1px var(--text)' : 'border:1px solid var(--line);background:var(--panel)');
+    const hostRows = st.hosts.map((h) => ({
+      name: h.name, dest: h.dest, lamp: lamp(h.ok ? 'on' : 'lost'),
+      note: h.ok ? '已连接 · ' + S.filter((s) => s.host === h.name).length + ' 个会话' : h.note,
+      style: 'display:flex;flex-wrap:wrap;align-items:center;gap:12px;min-height:48px;padding:6px 12px;border-radius:var(--r);' + (h.ok ? 'border:1px solid var(--line);background:var(--panel)' : 'border:1px solid var(--accent);background:repeating-linear-gradient(135deg,var(--tint) 0 8px,transparent 8px 16px)')
+    }));
+    const statBox = (n, name, hot) => ({ n: n, name: name, style: 'padding:10px 12px;border-radius:var(--r);' + (hot && n ? 'border:1px solid var(--accent);background:var(--tint)' : 'border:1px solid var(--line);background:var(--panel);' + (n ? '' : 'color:var(--muted)')) });
+    return {
+      theme: theme,
+      panelOpen: st.panel, wallOpen: st.wall, menuOpen: st.pop === 'menu', attnOpen: st.pop === 'attn',
+      hasCur: !!cur, showEmpty: !cur, composerOpen: !!cur && st.composer, keysOpen: !!cur && !st.composer,
+      togglePanel: set({ panel: !st.panel, pop: '' }), toggleWall: set({ wall: !st.wall, panel: false, pop: '' }),
+      toggleMenu: set({ pop: st.pop === 'menu' ? '' : 'menu', confirm: false }), toggleAttn: set({ pop: st.pop === 'attn' ? '' : 'attn' }),
+      panelBtnStyle: 'width:48px;padding:0;display:inline-flex;align-items:center;justify-content:center;' + tab(st.panel),
+      wallBtnStyle: 'display:inline-flex;align-items:center;gap:8px;' + tab(st.wall),
+      headLamp: cur ? lamp(kind(cur)) : lamp('idle'),
+      headTitle: cur ? cur.cmd + ' · ' + cur.name : '终端会话',
+      headSub: cur ? (cur.host ? 'bruce-mac → SSH ' + cur.host : 'bruce-mac') + ' · tmux' : '还没有选会话',
+      tabs: cur && cur.tabs.length > 1 ? cur.tabs.map((t, i) => ({ title: t, on: i === st.pane, style: tab(i === st.pane), pick: set({ pane: i, notice: '切到面板 ' + t }) })) : [],
+      notice: st.notice,
+      attnCount: attnN, attnLamp: lamp(attnN ? 'need' : 'on'),
+      attnStyle: 'display:inline-flex;align-items:center;gap:8px;padding:0 12px;border-radius:var(--r);font:inherit;cursor:pointer;color:var(--text);' + (attnN ? 'border:1px solid var(--accent);background:var(--tint)' : st.pop === 'attn' ? 'border:1px solid var(--text);background:var(--raise)' : 'border:1px solid var(--line);background:transparent'),
+      chipStyle: 'display:inline-flex;align-items:center;gap:8px;' + tab(st.pop === 'menu'),
+      bars: [4, 6, 8, 10, 12].map((h, i) => ({ style: 'display:inline-block;width:3px;height:' + h + 'px;background:' + (i < lit ? 'var(--on)' : 'var(--line)') })),
+      rate: rate,
+      sizeBar: !!scaled,
+      sizeText: cur ? '另有 ' + cur.others + ' 个终端也接着这个会话。为了不改它看到的尺寸，这里按 ' + cur.size + ' 原样缩小显示。' : '',
+      refit: () => self.setState({ refit: Object.assign({}, st.refit, { [cur.id]: true }), pop: '', notice: '已按这块屏幕重排为 118×38；另一个终端看到的尺寸也跟着变了' }),
+      gridStyle: 'font-family:var(--mono);line-height:1.4;font-size:' + (scaled && !st.raw ? '9.5px' : '14px'),
+      lines: lines,
+      onCopy: () => self.setState({ notice: '已复制到本机剪贴板' }),
+      keys: cur ? [key('Esc', 'Esc'), key('⌃C', 'Ctrl-C'), key('Tab', 'Tab'), key('↑', '上'), key('↓', '下'), key('⏎', '回车')] : [],
+      openComposer: set({ composer: true, pop: '' }), closeComposer: set({ composer: false }),
+      draft: st.draft, setDraft: (e) => self.setState({ draft: e.target.value }),
+      sendDraft: () => {
+        if (!st.draft.trim()) { self.setState({ notice: '输入区是空的' }); return; }
+        const list = (st.sent[cur.id] || []).concat([st.draft]);
+        self.setState({ sent: Object.assign({}, st.sent, { [cur.id]: list }), draft: '', composer: false, notice: '已作为一段粘贴到 ' + label(cur) + (cur.cmd === 'claude' ? '，并补了回车' : '，没有补回车') });
+      },
+      afterSendText: cur ? (cur.cmd === 'claude' ? '发完补一个回车：开（来自 claude 的 app 配置）。对方确认收到以后才清空这里。' : '发完补一个回车：关（' + cur.cmd + ' 没有 app 配置，用默认）。对方确认收到以后才清空这里。') : '',
+      stats: [statBox(S.filter((s) => s.live).length, '有输出'), statBox(S.filter((s) => !s.live && !unread(s)).length, '没动静'), statBox(unreadList.length, '未读', true), statBox(st.hosts.filter((h) => !h.ok).length, 'SSH 主机连不上', true)],
+      tiles: S.map((s) => ({ title: s.cmd + ' · ' + label(s), state: stateText(s), lamp: lamp(kind(s)), open: open(s),
+        tail: this.screen(s, 0).filter((t) => t).slice(-5).map((t) => t.charAt(0) === '~' || t.charAt(0) === '!' ? t.slice(1) : t).join('\n'),
+        style: 'display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:10px;border-radius:var(--r);color:var(--text);font:inherit;cursor:pointer;min-width:0;' + (unread(s) ? 'border:1px solid var(--accent);background:var(--tint)' : 'border:1px solid var(--line);background:var(--panel)') })),
+      lampOn: lamp('on'), lampIdle: lamp('idle'), lampNeed: lamp('need'), lampLost: lamp('lost'),
+      termsOn: st.termsOn, termsOff: !st.termsOn,
+      toggleTerms: set({ termsOn: !st.termsOn, form: '', notice: st.termsOn ? '已关掉这台设备的终端会话' : '已允许终端会话' }),
+      termsBtnText: st.termsOn ? '允许终端会话：开' : '允许终端会话：关',
+      termsBtnStyle: 'margin-left:auto;padding:0 14px;' + tab(st.termsOn),
+      rows: S.map((s) => ({ title: label(s), cmd: s.cmd, panes: s.tabs.length + ' 个面板', state: stateText(s), lamp: lamp(kind(s)), style: row(s), open: open(s), act: s.id === st.cur ? '切到' : '打开' })),
+      hostRows: hostRows,
+      formNew: st.form === 'new', formSsh: st.form === 'ssh',
+      showNew: set({ form: st.form === 'new' ? '' : 'new' }), showSsh: set({ form: st.form === 'ssh' ? '' : 'ssh' }),
+      nName: st.nName, nCmd: st.nCmd, nHost: st.nHost, sName: st.sName, sDest: st.sDest, sTmux: st.sTmux,
+      setNName: (e) => self.setState({ nName: e.target.value }), setNCmd: (e) => self.setState({ nCmd: e.target.value }), setNHost: (e) => self.setState({ nHost: e.target.value }),
+      setSName: (e) => self.setState({ sName: e.target.value }), setSDest: (e) => self.setState({ sDest: e.target.value }), setSTmux: (e) => self.setState({ sTmux: e.target.value }),
+      createNew: () => {
+        const name = st.nName.trim() || 'term-' + st.n, cmd = st.nCmd.trim() || 'bash', id = 'new' + st.n;
+        const s = { id: id, name: name, host: st.nHost, cmd: cmd, tabs: ['1 ' + cmd], others: 0, size: '118×38', unread: false, live: true, quiet: '刚刚新开', fresh: true };
+        self.setState({ sessions: S.concat([s]), n: st.n + 1, cur: id, pane: 0, panel: false, form: '', nName: '', notice: '已新开 ' + label(s) + '，是一个 tmux 会话' });
+      },
+      addSsh: () => {
+        const name = st.sName.trim(), dest = st.sDest.trim();
+        if (!name || !dest) { self.setState({ notice: '名字和目标都要填' }); return; }
+        self.setState({ hosts: st.hosts.concat([{ name: name, dest: dest, ok: true }]), form: '', sName: '', sDest: '', sTmux: '', notice: '已添加 ' + name + '，用的是这台设备的 SSH 配置' });
+      },
+      fontFit: !st.raw, fontRaw: st.raw, fitStyle: 'flex:1;' + tab(!st.raw), rawStyle: 'flex:1;' + tab(st.raw),
+      setFit: set({ raw: false }), setRaw: set({ raw: true }),
+      menuSize: cur ? (scaled ? cur.size + '，由另一个终端决定' : (cur.others ? '118×38，已按这块屏幕重排' : '118×38，按这块屏幕（没有别的终端接着）')) : '',
+      menuPath: cur ? (cur.host ? '经 bruce-mac 的 SSH 到 ' + cur.host : 'bruce-mac · 局域网') + ' · ' + (cur.live ? '活动' : '空闲') : '',
+      endText: st.confirm ? '再点一次确认' : '结束会话',
+      endStyle: 'padding:0 14px;border-radius:var(--r);font:inherit;cursor:pointer;' + (st.confirm ? 'border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);font-weight:600;text-shadow:none' : 'border:1px solid var(--line);background:transparent;color:var(--muted)'),
+      endSession: () => {
+        if (!st.confirm) { self.setState({ confirm: true }); setTimeout(() => { if (self.state.confirm) self.setState({ confirm: false }); }, 3000); return; }
+        self.setState({ cur: '', pop: '', confirm: false, composer: false, notice: '已结束会话。' + label(cur) + ' 里的程序还在跑' });
+      },
+      attn: count ? unreadList.map((s) => ({ lamp: lamp('need'), text: s.cmd + ' · ' + label(s) + ' 停下了，还没看过', open: open(s) })) : [],
+      attnNote: !count ? '这个走法里未读只亮灯，不算进这个数字。' : unreadList.length ? '未读的终端会话算在这个数字里。看过以后自己消失。' : '没有需要你处理的事。'
+    };
+  }
+}
+</script>
+</body>
+</html>
