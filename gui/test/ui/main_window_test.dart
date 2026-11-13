@@ -106,7 +106,7 @@ void main() {
       }
     });
     await tester.pumpWidget(wrap(
-      MainWindow(state: s, monitor: monitor, control: null, data: DataDir(tmp.path), fullscreen: fs),
+      MainWindow(state: s, monitor: monitor, control: null, fullscreen: fs),
       disableAnimations: true,
     ));
     await tester.pump(const Duration(milliseconds: 100));

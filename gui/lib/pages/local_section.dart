@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart';
 import '../permissions.dart';
 import '../service_client.dart';
 import '../service_control.dart';
+import '../data_relocate.dart';
 import 'data_section.dart';
 import 'permissions_panel.dart';
 import 'section_card.dart';
@@ -41,6 +42,7 @@ class LocalSection extends StatefulWidget {
     required this.monitor,
     required this.control,
     required this.data,
+    this.relocate,
     this.openSettings = openSettingsPane,
     this.hooks,
     this.openPage = openInstallerPage,
@@ -50,7 +52,9 @@ class LocalSection extends StatefulWidget {
   final TargetPlatform? platform;
   final ServiceMonitor monitor;
   final ServiceController? control;
+  /// The current data root; the caller passes `state.data` and rebuilds when it changes.
   final DataDir data;
+  final DataRelocator? relocate;
   final Future<void> Function(Permission) openSettings;
 
   /// Null (tests): the update buttons only send the command.
@@ -312,7 +316,7 @@ class _LocalSectionState extends State<LocalSection> {
           const SizedBox(height: 8),
           buttons,
         ]),
-        DataSection(data: widget.data),
+        DataSection(data: widget.data, relocate: widget.relocate),
         ]);
       },
     );

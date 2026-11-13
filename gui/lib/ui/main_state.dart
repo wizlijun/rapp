@@ -70,6 +70,17 @@ class MainState extends ChangeNotifier {
     refreshDevices();
   }
 
+  /// Switches to a moved data root: later reads and writes go there and `workspace.json` is reread.
+  /// (Pinned clipboard entries under the old root follow in Task 12.)
+  void relocate(DataDir d) {
+    data = d;
+    final loaded = loadWorkspace(d.sharedDir);
+    workspace = loaded.workspace;
+    if (loaded.problem != null) hint = loaded.problem!;
+    _entries = _mapEntries();
+    notifyListeners();
+  }
+
   final HubClient? hub;
   final String? hubError;
   /// The data root; mutable so a relocation can swap it.
@@ -81,7 +92,7 @@ class MainState extends ChangeNotifier {
   final ResourcesState resources;
 
   /// Favourites and projects, loaded from `workspace.json` in `shared/`.
-  late final Workspace workspace;
+  late Workspace workspace;
 
   /// The double-click interval the runner reported (`init`), for counting clicks (R14).
   final Duration doubleClick;

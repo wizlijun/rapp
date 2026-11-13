@@ -47,6 +47,24 @@ void main() {
     tmp.deleteSync(recursive: true);
   });
 
+  test('relocate reads the workspace of the new root', () {
+    final other = Directory.systemTemp.createTempSync('main_state_reloc');
+    addTearDown(() => other.deleteSync(recursive: true));
+    final d = DataDir(other.path);
+    Directory(d.sharedDir).createSync(recursive: true);
+    saveWorkspace(d.sharedDir, Workspace()..favorites.add(AppRef('111', 'b', 'N')));
+    var n = 0;
+    s.addListener(() => n++);
+    s.relocate(d);
+    expect(s.data.root, other.path);
+    expect(s.favorites.map((f) => f.key), ['111/b']);
+    expect(n, greaterThan(0));
+    File('${d.sharedDir}/workspace.json').writeAsStringSync('nope');
+    s.relocate(d);
+    expect(s.hint, loadProblem);
+    expect(s.favorites, isEmpty);
+  });
+
   int opens() => t.sent.where((m) => m['cmd'] == 'open').length;
 
   Map<String, dynamic> opened(int sid, String id, String app) =>

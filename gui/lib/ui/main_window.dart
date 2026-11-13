@@ -2,11 +2,11 @@
 import 'dart:async';
 import 'dart:io';
 
-import '../paths.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../pages/access_log_section.dart';
+import '../data_relocate.dart';
 import '../pages/local_section.dart';
 import '../service_client.dart';
 import '../service_control.dart';
@@ -32,7 +32,7 @@ class MainWindow extends StatefulWidget {
     required this.state,
     required this.monitor,
     required this.control,
-    required this.data,
+    this.relocator,
     required this.fullscreen,
     this.hooks,
   });
@@ -40,7 +40,7 @@ class MainWindow extends StatefulWidget {
   final MainState state;
   final ServiceMonitor monitor;
   final ServiceController? control;
-  final DataDir data;
+  final DataRelocator? relocator;
   final FullscreenControl fullscreen;
 
   /// How the update buttons quit rapp (K28).
@@ -93,11 +93,15 @@ class _MainWindowState extends State<MainWindow> {
   }
 
   Widget _local() => Column(children: [
-        LocalSection(
-          monitor: widget.monitor,
-          control: widget.control,
-          data: widget.state.data,
-          hooks: widget.hooks,
+        ListenableBuilder(
+          listenable: widget.state,
+          builder: (context, _) => LocalSection(
+            monitor: widget.monitor,
+            control: widget.control,
+            data: widget.state.data,
+            relocate: widget.relocator,
+            hooks: widget.hooks,
+          ),
         ),
         ListenableBuilder(
           listenable: widget.monitor,

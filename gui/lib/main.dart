@@ -11,6 +11,7 @@ import 'embed/linux_session_port.dart';
 import 'hub_client.dart';
 import 'pages/local_section.dart';
 import 'data_dir.dart';
+import 'data_relocate.dart';
 import 'paths.dart';
 import 'service_client.dart';
 import 'service_control.dart';
@@ -32,7 +33,9 @@ Future<void> main(List<String> args) async {
     stderr.writeln('rapp: 数据目录 $root: $e');
   }
   final data = DataDir(root);
-  final monitor = ServiceMonitor(readToken: tokenFileReader(() => data.localDir))..start();
+  // The token follows the current root: `state.data` once the window exists, `data` before.
+  MainState? mainState;
+  final monitor = ServiceMonitor(readToken: tokenFileReader(() => (mainState?.data ?? data).localDir))..start();
 
   if (args.contains('--cm')) {
     await _showWindow(const Size(400, 320), 'rapp 连接管理');
@@ -73,6 +76,7 @@ Future<void> main(List<String> args) async {
   }
   final state =
       MainState(hub: hub, hubError: hubError, data: data, prefs: prefs, port: port, doubleClick: doubleClick);
+  mainState = state;
   await _showWindow(const Size(1194, 834), 'rapp');
   if (prefs.startFullscreen) await WindowManagerFullscreen().setFullScreen(true);
   await windowManager.setPreventClose(true);
@@ -88,7 +92,14 @@ Future<void> main(List<String> args) async {
       state: state,
       monitor: monitor,
       control: control,
-      data: data,
+      relocator: DataRelocator(
+        env: env,
+        os: os,
+        restartService: () async =>
+            control == null ? '找不到 rapp-service' : await control.run(ServiceAction.restart),
+        setHubHome: (d) async => await hub?.setHome(d),
+        state: state,
+      ),
       fullscreen: WindowManagerFullscreen(),
       hooks: UpdateHooks(
         confirmQuit: () => shell._confirmQuit(

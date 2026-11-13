@@ -641,7 +641,6 @@ void main() {
         state: es,
         monitor: ServiceMonitor(readToken: () async => null),
         control: null,
-        data: DataDir(tmp.path),
         fullscreen: _NoFullscreen(),
       )));
       final size = tester.getSize(find.byKey(const Key('stage')));
@@ -996,7 +995,6 @@ void main() {
         state: es,
         monitor: monitor,
         control: null,
-        data: DataDir(tmp.path),
         fullscreen: _NoFullscreen(),
       )));
       await openEmbedded(tester);

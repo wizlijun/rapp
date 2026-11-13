@@ -402,7 +402,6 @@ void main() {
         state: s,
         monitor: ServiceMonitor(readToken: () async => null),
         control: null,
-        data: DataDir(tmp.path),
         fullscreen: fs,
       ),
       disableAnimations: true,
