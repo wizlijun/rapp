@@ -9,6 +9,8 @@ static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 pub struct Server {
     pub socket: String,
+    /// The socket file, which `kill-server` leaves behind.
+    path: String,
 }
 
 #[allow(dead_code)]
@@ -23,9 +25,10 @@ impl Server {
             return None;
         }
         let socket = format!("rapp-term-test-{}-{}", std::process::id(), COUNTER.fetch_add(1, Ordering::SeqCst));
-        let s = Server { socket };
+        let mut s = Server { socket, path: String::new() };
         s.raw(&["new-session", "-d", "-s", "boot"]);
         s.raw(&["set", "-g", "exit-empty", "off"]);
+        s.path = s.raw(&["display-message", "-p", "-t", "boot", "#{socket_path}"]).trim().to_string();
         s.raw(&["kill-session", "-t", "boot"]);
         Some(s)
     }
@@ -44,6 +47,9 @@ impl Server {
 impl Drop for Server {
     fn drop(&mut self) {
         let _ = Command::new("tmux").args(["-L", &self.socket, "-f", "/dev/null", "kill-server"]).output();
+        if !self.path.is_empty() {
+            let _ = std::fs::remove_file(&self.path);
+        }
     }
 }
 

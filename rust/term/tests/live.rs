@@ -783,6 +783,7 @@ async fn gives_its_size_up_to_a_real_client_that_attaches_later() {
 /// when this is dropped, even if the test failed.
 struct RemoteFixture {
     runner: Runner,
+    bin: String,
     socket: String,
     sessions: Vec<String>,
 }
@@ -792,7 +793,7 @@ impl RemoteFixture {
     fn raw(&self, args: &[&str]) -> std::process::Output {
         let mut full: Vec<String> = ["-L", &self.socket, "-f", "/dev/null"].map(String::from).to_vec();
         full.extend(args.iter().map(|a| a.to_string()));
-        let argv = self.runner.argv("tmux", &full);
+        let argv = self.runner.argv(&self.bin, &full);
         std::process::Command::new(&argv[0]).args(&argv[1..]).output().unwrap()
     }
 }
@@ -812,19 +813,22 @@ async fn ssh_runner_lists_and_captures() {
         eprintln!("skipped: set RAPP_TERM_TEST_SSH=<destination> to run the ssh test");
         return;
     };
+    // Non-interactive ssh has a short PATH: a Mac's Homebrew tmux needs its full path here.
+    let bin = std::env::var("RAPP_TERM_TEST_SSH_TMUX").unwrap_or_else(|_| "tmux".into());
     // A short control directory: ssh's control socket path must fit a unix socket address.
     let ctl = tempfile::Builder::new().prefix("rt").tempdir_in("/tmp").unwrap();
     let runner = Runner::ssh(&dest, ctl.path()).unwrap();
     let pid = std::process::id();
     let socket = format!("rapp-term-test-{pid}-ssh");
     let (boot, name) = (format!("boot-{pid}"), format!("rapp ssh {pid}"));
-    let mut fx = RemoteFixture { runner: runner.clone(), socket: socket.clone(), sessions: vec![boot.clone()] };
+    let mut fx =
+        RemoteFixture { runner: runner.clone(), bin: bin.clone(), socket: socket.clone(), sessions: vec![boot.clone()] };
     // Start the private server without any config, as the local test servers are.
     let o = fx.raw(&["new-session", "-d", "-s", &boot]);
     assert!(o.status.success(), "could not start tmux on {dest}: {}", String::from_utf8_lossy(&o.stderr).trim());
     fx.sessions.push(name.clone());
 
-    let t = Tmux { runner, bin: "tmux".into(), socket: Some(socket) };
+    let t = Tmux { runner, bin, socket: Some(socket) };
     t.check().await.unwrap();
     t.new_session(&name, &["sh".into(), "-c".into(), "echo rapp-ssh-ok; sleep 60".into()], 90, 20).await.unwrap();
     common::settle().await;
