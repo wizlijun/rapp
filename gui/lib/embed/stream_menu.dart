@@ -4,6 +4,8 @@
 // - 远程 (🖥): the remote app's mirrored menus, nothing else;
 // - 流量优化 (the traffic label): stream presets and settings.
 // A bar too narrow for three buttons keeps the traffic label alone, with all three parts in it.
+// A terminal session (its port is a TermSessionPort) has 「按我的屏幕重排」 for traffic and only the
+// session group besides.
 import 'package:flutter/material.dart';
 
 import '../hub_client.dart';
@@ -11,6 +13,7 @@ import '../ui/controls.dart';
 import '../ui/corner_popover.dart';
 import '../ui/resources_state.dart';
 import '../ui/session_model.dart';
+import '../term/term_session_port.dart';
 import '../ui/tokens.dart';
 import 'remote_session.dart';
 import 'session_port.dart';
@@ -371,6 +374,8 @@ class _StreamMenuState extends State<StreamMenu> {
         final reduced = widget.disconnected || widget.reconnecting; // only the session group (R21)
         final parts = widget.parts;
         final all = parts.length == allMenuParts.length;
+        final port = widget.port;
+        final term = port is TermSessionPort;
         return SingleChildScrollView(
           padding: const EdgeInsets.symmetric(vertical: 6),
           child: Column(
@@ -378,13 +383,18 @@ class _StreamMenuState extends State<StreamMenu> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               if (parts.contains(MenuPart.stream)) ...[
-                if (!reduced) ..._streamGroups(t, c) else if (!all) const _Item('连接断开时不能调', enabled: false),
+                if (!reduced && term)
+                  _Item('按我的屏幕重排', key: const Key('term-refit'), onTap: () => _then(() => port.refit(_sid)))
+                else if (!reduced)
+                  ..._streamGroups(t, c)
+                else if (!all)
+                  const _Item('连接断开时不能调', enabled: false),
               ],
               if (parts.contains(MenuPart.session)) ...[
-                ..._sessionGroup(t, window, reduced),
-                if (!reduced) ..._localGroups(t),
+                ..._sessionGroup(t, window, reduced, term),
+                if (!reduced && !term) ..._localGroups(t),
               ],
-              if (parts.contains(MenuPart.remote)) ...[
+              if (parts.contains(MenuPart.remote) && !term) ...[
                 if (all) ...[
                   if (!reduced && _s.menu.isNotEmpty) ...[
                     _head(t, '远程菜单'),
@@ -406,8 +416,8 @@ class _StreamMenuState extends State<StreamMenu> {
     );
   }
 
-  /// 会话: the path and state, disconnect or reconnect, detach, top-left, end.
-  List<Widget> _sessionGroup(RappTokens t, int? window, bool reduced) => [
+  /// 会话: the path and state, disconnect or reconnect, detach, top-left (not for a [term]), end.
+  List<Widget> _sessionGroup(RappTokens t, int? window, bool reduced, bool term) => [
         _head(t, '会话'),
         _Item(_pathRow(), enabled: false),
         if (widget.forcedRelay != null && !widget.reconnecting)
@@ -424,16 +434,18 @@ class _StreamMenuState extends State<StreamMenu> {
           _Item(widget.reconnectWord, enabled: widget.onReconnect != null, onTap: () => _then(widget.onReconnect!))
         else if (!widget.reconnecting) ...[
           _Item('断开', enabled: widget.onDisconnect != null, onTap: () => _then(widget.onDisconnect!)),
-          _Item(
-            _s.detached ? '放回主窗口' : '分离成独立窗口',
-            enabled: widget.onToggleDetach != null,
-            onTap: () => _then(widget.onToggleDetach!),
-          ),
-          _Item(
-            '放左上角',
-            enabled: window != null,
-            onTap: () => _then(() => widget.port.moveTopLeft(_sid, window!)),
-          ),
+          if (!term) ...[
+            _Item(
+              _s.detached ? '放回主窗口' : '分离成独立窗口',
+              enabled: widget.onToggleDetach != null,
+              onTap: () => _then(widget.onToggleDetach!),
+            ),
+            _Item(
+              '放左上角',
+              enabled: window != null,
+              onTap: () => _then(() => widget.port.moveTopLeft(_sid, window!)),
+            ),
+          ],
         ],
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -577,7 +589,7 @@ class _InsertButton extends StatelessWidget {
 
 /// One row: a tick column, the label, an optional trailing widget. Greyed when disabled (no action).
 class _Item extends StatelessWidget {
-  const _Item(this.label, {this.checked = false, this.enabled = true, this.onTap, this.trailing, this.indent = 0});
+  const _Item(this.label, {super.key, this.checked = false, this.enabled = true, this.onTap, this.trailing, this.indent = 0});
   final String label;
   final bool checked;
   final bool enabled;

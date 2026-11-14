@@ -16,6 +16,7 @@ import 'data_relocate.dart';
 import 'paths.dart';
 import 'service_client.dart';
 import 'service_control.dart';
+import 'term/term_session_port.dart';
 import 'ui/app_profile_store.dart';
 import 'ui/fullscreen.dart';
 import 'tray_menu.dart';
@@ -87,6 +88,8 @@ Future<void> main(List<String> args) async {
       data: data,
       prefs: prefs,
       port: port,
+      // Terminals only beside embedded app sessions (Windows has neither yet).
+      termPort: port == null ? null : TermSessionPort(),
       doubleClick: doubleClick,
       profiles: AppProfileStore.load(data.sharedDir, builtin),
       log: stderr.writeln);
@@ -266,6 +269,7 @@ class _Shell with WindowListener, TrayListener {
 
   Future<void> _quitNow() async {
     port?.dispose();
+    state.termPort?.dispose();
     await hub?.shutdown(); // hub closes its clients on stdin EOF
     await trayManager.destroy();
     exit(0);

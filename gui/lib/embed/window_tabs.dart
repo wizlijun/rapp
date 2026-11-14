@@ -2,6 +2,12 @@
 import 'session_port.dart';
 
 class WindowTabs {
+  /// [followNew]: a window that appears becomes current (app sessions). Without it (terminals) the
+  /// current tab stays, and a first table or a lost current one goes to the window A has focused.
+  WindowTabs({this.followNew = true});
+
+  final bool followNew;
+
   List<RemoteWindow> _tabs = const [];
   int? _current;
 
@@ -18,19 +24,22 @@ class WindowTabs {
     _mru.add(id);
   }
 
-  /// A new window table: a new decorated window becomes current (the first of several); when the
-  /// current one is gone the most recently used one still there takes over.
+  /// A new window table: a new decorated window becomes current (the first of several, only with
+  /// [followNew]); when there is no current one, or it is gone, the focused one ([followNew] off),
+  /// else the most recently used one still there, else the first takes over.
   void update(List<RemoteWindow> all) {
     final before = {for (final w in _tabs) w.id};
     _tabs = [for (final w in all) if (w.decorated) w];
     final ids = {for (final w in _tabs) w.id};
     _mru.removeWhere((id) => !ids.contains(id));
     final fresh = _tabs.where((w) => !before.contains(w.id));
-    if (fresh.isNotEmpty) {
+    if (followNew && fresh.isNotEmpty) {
       _current = fresh.first.id;
       _touch(_current!);
     } else if (_current == null || !ids.contains(_current)) {
-      _current = _mru.isNotEmpty ? _mru.last : (_tabs.isEmpty ? null : _tabs.first.id);
+      final focused = followNew ? null : _tabs.where((w) => w.focused).firstOrNull?.id;
+      _current = focused ?? (_mru.isNotEmpty ? _mru.last : (_tabs.isEmpty ? null : _tabs.first.id));
+      if (!followNew && _current != null) _touch(_current!);
     }
   }
 

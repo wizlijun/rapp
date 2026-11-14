@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/embed/window_tabs.dart';
 
-RemoteWindow w(int id, {WindowKind kind = WindowKind.normal, int parent = 0}) => RemoteWindow(
+RemoteWindow w(int id, {WindowKind kind = WindowKind.normal, int parent = 0, bool focused = false}) => RemoteWindow(
       id: id,
       parent: parent,
       kind: kind,
@@ -12,7 +12,7 @@ RemoteWindow w(int id, {WindowKind kind = WindowKind.normal, int parent = 0}) =>
       rect: const Rect.fromLTWH(0, 0, 100, 100),
       titleBar: 28,
       resizable: true,
-      focused: false,
+      focused: focused,
       texture: id,
       visible: const Rect.fromLTWH(0, 0, 1, 1),
     );
@@ -49,6 +49,22 @@ void main() {
     expect(tabs.current, 2);
     tabs.update([w(1), w(2)]);
     expect(tabs.current, 1);
+  });
+
+  test('without followNew a new window does not take over, the focused one starts', () {
+    tabs = WindowTabs(followNew: false);
+    tabs.update([w(1), w(2, focused: true), w(3)]);
+    expect(tabs.current, 2);
+    tabs.update([w(1), w(2), w(3), w(4)]);
+    expect(tabs.current, 2);
+    tabs.select(3);
+    tabs.update([w(1), w(2), w(4, focused: true)]);
+    // The current one went: the focused one takes over, before the most recently used.
+    expect(tabs.current, 4);
+    tabs.update([w(1), w(2)]);
+    expect(tabs.current, 2);
+    tabs.update([w(5)]);
+    expect(tabs.current, 5);
   });
 
   test('popupsFor keeps popups of the current window, or of a missing parent', () {

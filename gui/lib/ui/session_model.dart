@@ -20,7 +20,11 @@ class SessionEntry {
     this.bytesPerSecond,
     this.reason,
     this.takenOver = false,
+    this.paneTitle,
   });
+
+  /// A terminal session's current pane title (tmux's `pane_title`); null for an app session.
+  final String? paneTitle;
 
   /// Disconnected because another device took it over: the button says 「拿回来」.
   final bool takenOver;

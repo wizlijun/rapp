@@ -1,9 +1,12 @@
 // The stage: where the remote window sits; a placeholder while it is elsewhere (S1, detached).
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 import '../embed/composer_bar.dart';
 import '../embed/picture.dart';
 import '../embed/session_port.dart';
+import '../hub_client.dart';
+import '../term/term_stage.dart';
 import 'controls.dart';
 import 'disconnected_stage.dart';
 import 'lifecycle.dart';
@@ -64,6 +67,18 @@ class Stage extends StatelessWidget {
             onEnd: state.endCurrent,
             sessionKey: rec.key,
           );
+        } else if (rs != null && state.termPort?.owns(rs.sid) == true && rec?.phase == Phase.live && rec?.lastSid == null) {
+          // A terminal: no composer over it yet (G2); its box lines need whole device pixels.
+          full = true;
+          body = _PixelSnap(child: TermStage(
+              state: state,
+              session: rs,
+              port: state.termPort!,
+              attached: [
+                for (final r in state.hub?.termLists[rec?.id]?.terms ?? const <TermRow>[])
+                  if (r.id == rec?.app) r.attached
+              ].firstOrNull,
+            ));
         } else if (rs != null && !rs.detached && win != null) {
           picture = true;
           body = Picture(state: state, session: rs, window: win);
@@ -158,6 +173,50 @@ class Stage extends StatelessWidget {
       },
     );
   }
+}
+
+/// Paints [child] moved by under a device pixel, so its top-left lands on one: whatever it snaps in
+/// its own coordinates is then snapped on the screen too, wherever the layout put it.
+class _PixelSnap extends SingleChildRenderObjectWidget {
+  const _PixelSnap({required super.child});
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderPixelSnap(MediaQuery.devicePixelRatioOf(context));
+
+  @override
+  void updateRenderObject(BuildContext context, _RenderPixelSnap r) => r.dpr = MediaQuery.devicePixelRatioOf(context);
+}
+
+class _RenderPixelSnap extends RenderProxyBox {
+  _RenderPixelSnap(this._dpr);
+
+  double _dpr;
+  set dpr(double v) {
+    if (v == _dpr) return;
+    _dpr = v;
+    markNeedsPaint();
+  }
+
+  Offset _shift = Offset.zero;
+
+  @override
+  void paint(PaintingContext context, Offset offset) {
+    final g = localToGlobal(Offset.zero);
+    double snap(double v) => (v * _dpr).roundToDouble() / _dpr;
+    _shift = Offset(snap(g.dx), snap(g.dy)) - g;
+    super.paint(context, offset + _shift);
+  }
+
+  @override
+  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) => result.addWithPaintOffset(
+        offset: _shift,
+        position: position,
+        hitTest: (result, p) => super.hitTestChildren(result, position: p),
+      );
+
+  @override
+  void applyPaintTransform(RenderBox child, Matrix4 transform) => transform.translateByDouble(_shift.dx, _shift.dy, 0, 1);
 }
 
 class _DashedBorder extends CustomPainter {

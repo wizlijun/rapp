@@ -17,6 +17,7 @@ const idleAfter = 10;
 class RemoteSession extends ChangeNotifier {
   /// [onResize] is where the session's resize policy sends: window, width, height.
   /// [onDropBlock] is where a block that left the composer goes (the runner forgets it).
+  /// [followNewTabs]: a window that appears becomes the current tab (off for terminals).
   RemoteSession(this.sid, this.appName,
       {void Function(int window, int w, int h)? onResize,
       this.onSelect,
@@ -25,8 +26,10 @@ class RemoteSession extends ChangeNotifier {
       this.appId = '',
       this.onReturn,
       this.onSelectInput,
-      this.onClick})
-      : policy = ResizePolicy(onResize ?? (_, _, _) {}) {
+      this.onClick,
+      bool followNewTabs = true})
+      : policy = ResizePolicy(onResize ?? (_, _, _) {}),
+        tabs = WindowTabs(followNew: followNewTabs) {
     composer = ComposerModel(onDrop: onDropBlock, onAllSent: _allSent);
   }
 
@@ -196,7 +199,7 @@ class RemoteSession extends ChangeNotifier {
   }
 
   /// The decorated windows and which one is current.
-  final WindowTabs tabs = WindowTabs();
+  final WindowTabs tabs;
 
   final Object sid;
   String appName;

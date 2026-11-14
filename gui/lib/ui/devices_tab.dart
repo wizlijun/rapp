@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import '../hub_client.dart';
 import '../pages/app_profile_page.dart';
 import '../permissions.dart';
+import '../term/term_id.dart';
 import 'add_device_form.dart';
 import 'controls.dart';
 import 'lamp.dart';
@@ -61,6 +62,8 @@ class DevicesTab extends StatefulWidget {
 class _DevicesTabState extends State<DevicesTab> {
   final _bundle = TextEditingController();
   final _requested = <String>{};
+  // Per device: a failed SSH host remove, with the terminal list it was shown on; a new list clears it.
+  final _removeErrors = <String, ({String text, TermList? list})>{};
 
   MainState get state => widget.state;
 
@@ -271,6 +274,7 @@ class _DevicesTabState extends State<DevicesTab> {
               onOpen: () => state.openOrSwitch(id, a.app, a.name),
             ),
           ),
+      ..._termGroup(context, id),
       const SizedBox(height: 8),
       Row(
         children: [
@@ -295,6 +299,89 @@ class _DevicesTabState extends State<DevicesTab> {
       ),
     ];
   }
+
+  List<Widget> _termGroup(BuildContext context, String id) {
+    final t = RappTokens.of(context);
+    final list = state.hub?.termLists[id];
+    final failed = _removeErrors[id];
+    if (failed != null && !identical(failed.list, list)) _removeErrors.remove(id);
+    final removeError = _removeErrors[id]?.text;
+    if (list == null || list.off) return const [];
+    if (list.error != null) {
+      return [Padding(padding: const EdgeInsets.only(top: 8), child: Text('终端：${list.error}', style: TextStyle(color: t.accent)))];
+    }
+    return [
+      Padding(
+        padding: const EdgeInsets.only(top: 8, bottom: 6),
+        child: Text('终端', style: TextStyle(color: t.text, fontWeight: FontWeight.w600)),
+      ),
+      if (list.terms.isEmpty)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Text('这台设备的 tmux 里现在没有会话。', style: TextStyle(color: t.muted)),
+        ),
+      for (final r in list.terms)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: _TermRow(
+            row: r,
+            session: _session(id, r.id),
+            enabled: state.hubUsable && state.embeds,
+            onOpen: () => state.openOrSwitch(id, r.id, termDisplayName(r.name, r.host)),
+          ),
+        ),
+      for (final h in list.hosts)
+        if (h.host != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${h.host} · ${h.target ?? ''}${h.error == null ? '' : '　连不上：${h.error}'}',
+                    style: TextStyle(color: h.error == null ? t.muted : t.accent),
+                  ),
+                ),
+                RappButton.secondary(
+                  key: Key('remove-host-${h.host}'),
+                  label: '移除',
+                  onPressed: state.hubUsable ? () => _removeHost(id, h.host!) : null,
+                ),
+              ],
+            ),
+          ),
+      if (removeError != null)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Text(removeError, key: const Key('remove-host-error'), style: TextStyle(color: t.accent)),
+        ),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: RappButton.secondary(
+          key: const Key('add-ssh-host'),
+          label: '添加 SSH 主机…',
+          onPressed: state.hubUsable ? () => _addHost(context, id) : null,
+        ),
+      ),
+    ];
+  }
+
+  Future<void> _removeHost(String id, String name) async {
+    final hub = state.hub!;
+    try {
+      await hub.removeTermTarget(id, name);
+      if (mounted) setState(() => _removeErrors.remove(id));
+      await hub.terms(id);
+    } catch (e) {
+      // A failed request's error goes to its future only (not `lastError`), so it is shown here, as the hub said it.
+      if (mounted) setState(() => _removeErrors[id] = (text: '移除失败：$e', list: hub.termLists[id]));
+    }
+  }
+
+  Future<void> _addHost(BuildContext context, String id) => showDialog<void>(
+        context: context,
+        builder: (_) => _AddHostDialog(hub: state.hub!, id: id),
+      );
 
   void _openBundle(String id) {
     final b = _bundle.text.trim();
@@ -415,6 +502,151 @@ class _AppRow extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// The status line of a terminal row (the plan's rules).
+String termStatus(TermRow r, int nowSecs) {
+  if (r.dead) return '已退出';
+  if (r.unread) return '未读';
+  final idle = nowSecs - r.activity;
+  if (idle < 10) return '刚刚有输出';
+  if (idle < 60) return '不到 1 分钟没动静';
+  if (idle < 3600) return '${idle ~/ 60} 分钟没动静';
+  return '${idle ~/ 3600} 小时没动静';
+}
+
+Lamp termLamp(TermRow r, int nowSecs) {
+  if (r.dead) return Lamp.disconnected;
+  if (r.unread) return Lamp.waiting;
+  if (nowSecs - r.activity < 10) return Lamp.active;
+  return Lamp.idle;
+}
+
+class _TermRow extends StatelessWidget {
+  const _TermRow({required this.row, required this.session, required this.enabled, required this.onOpen});
+  final TermRow row;
+  final SessionEntry? session;
+  final bool enabled;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RappTokens.of(context);
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final name = termDisplayName(row.name, row.host);
+    final status = termStatus(row, now);
+    final verb = openVerb(session?.lamp, takenOver: session?.takenOver ?? false);
+    return Container(
+      key: Key('term-${row.id}'),
+      constraints: const BoxConstraints(minHeight: 68),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: t.panelBox(border: t.line),
+      child: Row(
+        children: [
+          StatusLamp(termLamp(row, now)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.text, fontWeight: FontWeight.w600)),
+                Text('${row.command} · ${row.panes} 个面板', maxLines: 1, overflow: TextOverflow.ellipsis, style: _mono(t)),
+                Text(status, style: TextStyle(color: t.muted)),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          RappButton.secondary(
+            key: Key('open-${row.id}'),
+            label: verb,
+            semanticLabel: '$verb $name，$status',
+            onPressed: enabled ? onOpen : null,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AddHostDialog extends StatefulWidget {
+  const _AddHostDialog({required this.hub, required this.id});
+  final HubClient hub;
+  final String id;
+
+  @override
+  State<_AddHostDialog> createState() => _AddHostDialogState();
+}
+
+class _AddHostDialogState extends State<_AddHostDialog> {
+  final _name = TextEditingController(), _target = TextEditingController(), _tmux = TextEditingController();
+  String? _error;
+  bool _busy = false;
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _target.dispose();
+    _tmux.dispose();
+    super.dispose();
+  }
+
+  Future<void> _add() async {
+    final name = _name.text.trim(), target = _target.text.trim(), tmux = _tmux.text.trim();
+    if (name.isEmpty || target.isEmpty || _busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await widget.hub.addTermTarget(widget.id, name, target, tmux: tmux.isEmpty ? null : tmux);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _error = '$e';
+        });
+      }
+      return;
+    }
+    if (mounted) Navigator.of(context).pop();
+    try {
+      await widget.hub.terms(widget.id);
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RappTokens.of(context);
+    return AlertDialog(
+      title: const Text('添加 SSH 主机…'),
+      content: SizedBox(
+        width: 360,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(key: const Key('ssh-name'), controller: _name, decoration: const InputDecoration(labelText: '名字')),
+            TextField(
+                key: const Key('ssh-target'),
+                controller: _target,
+                decoration: const InputDecoration(labelText: '目标（如 me@gpu1）')),
+            TextField(
+                key: const Key('ssh-tmux'),
+                controller: _tmux,
+                decoration: const InputDecoration(labelText: 'tmux 的路径（可不填）')),
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(_error!, key: const Key('ssh-error'), style: TextStyle(color: t.accent)),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        RappButton.secondary(key: const Key('ssh-cancel'), label: '取消', onPressed: () => Navigator.of(context).pop()),
+        RappButton.secondary(key: const Key('ssh-add'), label: '添加', onPressed: _busy ? null : _add),
+      ],
     );
   }
 }
