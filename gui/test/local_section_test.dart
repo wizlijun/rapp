@@ -178,10 +178,26 @@ void main() {
     testWidgets('shows the warning, the explanation and the button', (tester) async {
       svc = FakeService('tok')..extraStatus = changed;
       await pump(tester);
-      expect(find.text('安全变更：中继换了 key'), findsOneWidget);
+      expect(find.text('⚠ 安全变更：中继换了 key'), findsOneWidget);
       expect(find.text('这台设备已经和中继断开。请向管理中继的人要新 key，再输入。'), findsOneWidget);
       expect(find.byKey(const Key('enter-new-key')), findsOneWidget);
+      expect(tester.widget(find.byKey(const Key('enter-new-key'))), isA<FilledButton>());
       expect(find.text('输入新 key'), findsOneWidget);
+    });
+
+    testWidgets('a malformed new key is refused in plain words', (tester) async {
+      svc = FakeService('tok')
+        ..extraStatus = changed
+        ..replies['set_relay'] = {'ok': false, 'error': 'bad key'};
+      await pump(tester);
+      await tester.tap(find.byKey(const Key('enter-new-key')));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'not-a-key');
+      await tester.tap(find.text('保存'));
+      await tester.runAsync(() => until(() => svc.received.any((c) => c['cmd'] == 'set_relay')));
+      await tester.pumpAndSettle();
+      expect(find.widgetWithText(AlertDialog, 'key 不对'), findsOneWidget);
+      expect(find.textContaining('失败：'), findsNothing);
     });
 
     testWidgets('saving calls set_relay with the old address and the trimmed key; a wrong one reads 新 key 不对',
@@ -205,7 +221,7 @@ void main() {
 
       await tester.pump();
       expect(find.text('出错：新 key 不对'), findsOneWidget);
-      expect(find.text('安全变更：中继换了 key'), findsNothing);
+      expect(find.text('⚠ 安全变更：中继换了 key'), findsNothing);
       expect(find.byKey(const Key('enter-new-key')), findsOneWidget);
     });
 
@@ -220,7 +236,7 @@ void main() {
     testWidgets('no relay: no prompt and no button', (tester) async {
       svc = FakeService('tok');
       await pump(tester);
-      expect(find.text('安全变更：中继换了 key'), findsNothing);
+      expect(find.text('⚠ 安全变更：中继换了 key'), findsNothing);
       expect(find.byKey(const Key('enter-new-key')), findsNothing);
     });
   });

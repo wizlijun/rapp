@@ -276,7 +276,7 @@ class _LocalSectionState extends State<LocalSection> {
     if (!changed && !bad) return _row('状态', _relayState(st));
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       if (changed)
-        _row('状态', '安全变更：中继换了 key', color: Theme.of(context).colorScheme.error)
+        _row('状态', '⚠ 安全变更：中继换了 key', color: Theme.of(context).colorScheme.error)
       else
         _row('状态', bad && _newKeySaved ? '出错：新 key 不对' : _relayState(st)),
       if (changed)
@@ -288,7 +288,7 @@ class _LocalSectionState extends State<LocalSection> {
         padding: const EdgeInsets.only(left: 72),
         child: Align(
             alignment: Alignment.centerLeft,
-            child: OutlinedButton(
+            child: FilledButton(
                 key: const Key('enter-new-key'), onPressed: () => _enterNewKey(st), child: const Text('输入新 key'))),
       ),
     ]);
@@ -330,7 +330,7 @@ class _LocalSectionState extends State<LocalSection> {
                 }
                 if (ctx.mounted) Navigator.pop(ctx);
               } catch (e) {
-                error.value = '失败：$e';
+                error.value = disconnectWord('$e');
               }
             },
             child: const Text('保存'),
