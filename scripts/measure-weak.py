@@ -439,7 +439,8 @@ def report_no_connect(args, reason):
             ("network back to usable", na, target(TARGET_RECOVERY)),
             ("screen latency over time (median per 5 min)", na, "does not grow"),
             ("crash / needs a click", "0 crashed; 0 needed a human; 0 auto-reconnect(s)", "0 / 0")]
-    out = [f"# weak-network run: profile {p}, path {args.path}, {args.minutes:g} min, seed {args.seed}", "",
+    out = [f"# weak-network run: profile {p}, path {args.path}, {args.minutes:g} min, seed {args.seed}"
+           + (f", outage {args.outage}" if args.outage else ""), "",
            "| task | result | target (§4.3) |", "|---|---|---|"]
     out += [f"| {a} | {b} | {c} |" for a, b, c in rows]
     return "\n".join(out) + "\n"
