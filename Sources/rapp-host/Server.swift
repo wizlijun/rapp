@@ -281,6 +281,7 @@ final class Session {
     /// What B asked for last. While weak the actual mode/density differ (fps never does).
     private var requestedMode = Mode.gray4
     private var requestedDensity: Float = 2
+    private var requestedFps = 15
     private var capture: WindowCapture?
     private var app: NSRunningApplication?
     private var injector: InputInjector?
@@ -395,6 +396,7 @@ final class Session {
             self.density = density
             requestedMode = mode
             requestedDensity = density
+            requestedFps = Int(fps)
             helloVersion = version
             makePacedSender(mode: mode, fps: Int(fps))
             started = true
@@ -410,6 +412,7 @@ final class Session {
         case let .setStream(mode, fps, density, pinned):
             requestedMode = mode
             requestedDensity = density
+            requestedFps = Int(fps)  // before setPinned: its weakChanged(false) must not use the old fps
             // A manual pick leaves weak at once (that restores the requested values).
             if clientSendsFrameAcks(helloVersion) { paced?.setPinned(pinned) }
             if paced?.weak != true { setStream(mode, fps: Int(fps), density: density) }
@@ -715,9 +718,9 @@ final class Session {
         guard !ended else { return }
         output.log(weak ? "weak network: duogray, density <= 1.0" : "network recovered: back to the requested stream")
         if weak {
-            setStream(Self.weakMode, fps: fps, density: min(requestedDensity, 1.0))
+            setStream(Self.weakMode, fps: requestedFps, density: min(requestedDensity, 1.0))
         } else {
-            setStream(requestedMode, fps: fps, density: requestedDensity)
+            setStream(requestedMode, fps: requestedFps, density: requestedDensity)
         }
         if clientSendsFrameAcks(helloVersion) { send(.weak(weak)) }
     }
