@@ -231,9 +231,9 @@ relay 在 A 的长连接上开一条流，发 `{"op":"relayed","token":T}`，然
 ## 6. 打包（本轮只做 macOS）
 `scripts/package-macos.sh` 依次做这几步：
 1. 构建 Swift release 版；
-2. 构建 `cargo build --release`，包括 service、hub、relay；
+2. 构建 `cargo build --release`，包括 service、hub、term、relay；
 3. 构建 `flutter build macos --release`；
-4. 把 `rapp-service`、`rapp-hub`、`rapp-host`、`rapp-client` 复制进 `rapp.app/Contents/MacOS/`；
+4. 把 `rapp-service`、`rapp-hub`、`rapp-term`、`rapp-host`、`rapp-client` 复制进 `rapp.app/Contents/MacOS/`；
 5. 用 ad-hoc 签名；
 6. 生成 `dist/rapp.dmg`。
 
