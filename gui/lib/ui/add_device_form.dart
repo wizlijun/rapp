@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../hub_client.dart';
 import 'controls.dart';
+import 'lifecycle.dart' show disconnectWord;
 import 'tokens.dart';
 
 class AddDeviceForm extends StatefulWidget {
@@ -51,7 +52,7 @@ class _AddDeviceFormState extends State<AddDeviceForm> {
       _pw.clear();
       widget.onAdded(host.id);
     } catch (e) {
-      _error = '$e';
+      _error = disconnectWord('$e');
     }
     if (mounted) setState(() => _busy = false);
   }

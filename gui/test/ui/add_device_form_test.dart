@@ -45,4 +45,14 @@ void main() {
     expect(add['password'], '');
     expect(added, ['222']);
   });
+
+  testWidgets('an add error is shown in words', (tester) async {
+    t.onSend = (cmd) => t.emit({'event': 'error', 'req': cmd['req'], 'error': 'unknown id'});
+    await pump(tester, relaySet: true);
+    await tester.enterText(find.byKey(const Key('add-id')), '999');
+    await tester.tap(find.byKey(const Key('add-button')));
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pump();
+    expect(find.text('没有这个 ID'), findsOneWidget);
+  });
 }

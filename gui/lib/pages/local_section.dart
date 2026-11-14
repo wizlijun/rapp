@@ -268,7 +268,18 @@ class _LocalSectionState extends State<LocalSection> {
 
   Future<void> _editRelay(ServiceStatus st) async {
     final addr = TextEditingController(text: st.relayAddr ?? '');
-    final key = TextEditingController(text: _shownKey ?? '');
+    // Prefill with the saved key (still hidden on screen) so saving an address change keeps it.
+    var current = _shownKey ?? '';
+    if (current.isEmpty && st.hasKey) {
+      try {
+        current = await m.showKey();
+      } catch (e) {
+        _say('失败：$e');
+        return;
+      }
+    }
+    if (!mounted) return;
+    final key = TextEditingController(text: current);
     final error = ValueNotifier<String?>(null);
     await showDialog<void>(
       context: context,
@@ -281,7 +292,7 @@ class _LocalSectionState extends State<LocalSection> {
               obscureText: true,
               enableSuggestions: false,
               autocorrect: false,
-              decoration: InputDecoration(labelText: 'key', hintText: st.hasKey ? '留空则清除' : null)),
+              decoration: const InputDecoration(labelText: 'key')),
           ValueListenableBuilder<String?>(
             valueListenable: error,
             builder: (_, e, _) =>

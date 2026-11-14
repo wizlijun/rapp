@@ -131,6 +131,20 @@ void main() {
         {'cmd': 'set_relay', 'relay': 'vps:22026', 'key': 'K1'});
   });
 
+  testWidgets('editing only the address keeps the key', (tester) async {
+    svc = FakeService('tok')..extraStatus = {'relay_addr': 'vps:22026', 'relay': 'connected', 'has_key': true};
+    await pump(tester);
+    await tester.tap(find.byKey(const Key('edit-relay')));
+    await tester.runAsync(() => until(() => svc.received.any((c) => c['cmd'] == 'show_key')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, '接入点'), 'vps2:22026');
+    await tester.tap(find.text('保存'));
+    await tester.runAsync(() => until(() => svc.received.any((c) => c['cmd'] == 'set_relay')));
+    await tester.pumpAndSettle();
+    expect(svc.received.lastWhere((c) => c['cmd'] == 'set_relay'),
+        {'cmd': 'set_relay', 'relay': 'vps2:22026', 'key': 'KEY-TEXT-123'});
+  });
+
   testWidgets('bad key error is shown', (tester) async {
     svc = FakeService('tok')..replies['set_relay'] = {'ok': false, 'error': 'bad key'};
     await pump(tester);
