@@ -242,11 +242,14 @@ pub async fn req2(
 
 // ---- hub driver ----
 
+/// The hub on stdin/stdout. `path` events (one per link the hub caches) come at any time, so `next`
+/// sets them aside; `wait_path` and `take_paths` read them.
 pub struct Hub {
     w: DuplexStream,
     lines: Lines<BufReader<DuplexStream>>,
     pub task: tokio::task::JoinHandle<anyhow::Result<()>>,
     pub home: PathBuf,
+    paths: Vec<Value>,
 }
 
 impl Hub {
@@ -269,14 +272,15 @@ impl Hub {
             presence_every: every,
         };
         let task = tokio::spawn(rapp_hub::run(opts, cmd_r, out_w));
-        Hub { w: cmd_w, lines: BufReader::new(out_r).lines(), task, home: home.to_path_buf() }
+        Hub { w: cmd_w, lines: BufReader::new(out_r).lines(), task, home: home.to_path_buf(), paths: Vec::new() }
     }
 
     pub async fn send(&mut self, v: Value) {
         self.w.write_all(format!("{v}\n").as_bytes()).await.unwrap();
     }
 
-    pub async fn next(&mut self) -> Value {
+    /// The next event line, whatever it is.
+    async fn next_any(&mut self) -> Value {
         let line = tokio::time::timeout(Duration::from_secs(15), self.lines.next_line())
             .await
             .expect("hub event in time")
@@ -285,18 +289,56 @@ impl Hub {
         serde_json::from_str(&line).unwrap()
     }
 
+    /// The next event that is not a `path` event (those are kept for `wait_path` / `take_paths`).
+    pub async fn next(&mut self) -> Value {
+        loop {
+            let v = self.next_any().await;
+            if v["event"] != "path" {
+                return v;
+            }
+            self.paths.push(v);
+        }
+    }
+
+    /// Waits (within `WAIT`) for the `path` event `id` → `path`, dropping the `path` events before it
+    /// and any other event read meanwhile (none may be an error).
+    pub async fn wait_path(&mut self, id: &str, path: &str) {
+        let want = json!({"event":"path","id":id,"path":path});
+        if let Some(i) = self.paths.iter().position(|p| *p == want) {
+            self.paths.drain(..=i);
+            return;
+        }
+        self.paths.clear();
+        let deadline = tokio::time::Instant::now() + WAIT;
+        loop {
+            let v = tokio::time::timeout_at(deadline, self.next_any()).await.expect("path event in time");
+            assert_ne!(v["event"], "error", "{v}");
+            if v == want {
+                return;
+            }
+        }
+    }
+
+    /// The `path` events set aside so far, oldest first; clears them.
+    pub fn take_paths(&mut self) -> Vec<Value> {
+        std::mem::take(&mut self.paths)
+    }
+
     pub async fn call(&mut self, v: Value) -> Value {
         self.send(v).await;
         self.next().await
     }
 
-    /// Closes stdin and waits for the hub to exit; returns remaining events.
+    /// Closes stdin and waits for the hub to exit; returns remaining events (`path` events left out).
     pub async fn finish(mut self) -> Vec<Value> {
         self.w.shutdown().await.unwrap();
         drop(self.w);
         let mut rest = Vec::new();
         while let Ok(Some(l)) = tokio::time::timeout(Duration::from_secs(10), self.lines.next_line()).await.unwrap() {
-            rest.push(serde_json::from_str(&l).unwrap());
+            let v: Value = serde_json::from_str(&l).unwrap();
+            if v["event"] != "path" {
+                rest.push(v);
+            }
         }
         self.task.await.unwrap().unwrap();
         rest
@@ -425,4 +467,32 @@ pub async fn service_on_relay_lan(addr: &str, key: &rapp_wire::Key, lan: Option<
     .unwrap();
     let id = ipc_once(&svc, home.path(), json!({"cmd":"status"})).await["id"].as_str().unwrap().to_string();
     TestService { svc, home, bins, id }
+}
+
+/// A hub home whose `service.json` names the relay and the key.
+pub fn hub_relay(home: &Path, addr: &str, key: &rapp_wire::Key) {
+    rapp_net::config::write_json(&home.join("service.json"), &json!({"relay": addr, "key": key.to_string()})).unwrap();
+}
+
+/// A service on `rig` (registering `lan`; None: its own addresses), once it is connected there.
+pub async fn a_on_relay(rig: &RelayRig, lan: Option<Vec<String>>) -> TestService {
+    let a = service_on_relay_lan(&rig.addr, &rig.key, lan).await;
+    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
+    wait_status(&mut ipc, |s| s["relay"] == "connected").await;
+    a
+}
+
+/// The hub's `hosts.json` as saved.
+pub fn saved_hosts(home: &Path) -> Value {
+    serde_json::from_slice(&std::fs::read(home.join("hosts.json")).unwrap()).unwrap()
+}
+
+/// The next hub event that is not a presence line (nor a `path` event).
+pub async fn reply(hub: &mut Hub) -> Value {
+    loop {
+        let r = hub.next().await;
+        if r["event"] != "presence" {
+            return r;
+        }
+    }
 }

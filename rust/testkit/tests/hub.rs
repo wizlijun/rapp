@@ -520,7 +520,9 @@ async fn next_presence(hub: &mut Hub, id: &str, online: bool) {
     loop {
         let r = tokio::time::timeout_at(deadline, hub.next()).await.expect("presence in time");
         assert_ne!(r["event"], "error", "{r}");
-        if r == json!({"event":"presence","id":id,"online":online}) {
+        if (&r["event"], &r["id"], &r["online"]) == (&json!("presence"), &json!(id), &json!(online)) {
+            // Offline says why; online says nothing more.
+            assert_eq!(r["error"].as_str().is_some_and(|e| !e.is_empty()), !online, "{r}");
             return;
         }
     }
@@ -844,10 +846,6 @@ async fn a_fp(a: &TestService) -> String {
     ipc_once(&a.svc, a.home.path(), json!({"cmd":"status"})).await["fp"].as_str().unwrap().to_string()
 }
 
-fn saved_hosts(home: &std::path::Path) -> Value {
-    serde_json::from_slice(&std::fs::read(home.join("hosts.json")).unwrap()).unwrap()
-}
-
 fn old_host(a: &TestService) -> Value {
     json!([{"id":a.id,"name":"test-a","password":PASSWORD,"lan":[a_addr(&a.svc).to_string()]}])
 }
@@ -1014,18 +1012,6 @@ async fn refusing_host_halts_quiet_probes() {
 }
 
 // ---- reaching a host by bare ID through the relay (relay device plan 2a, Task 7) ----
-
-/// A hub home whose `service.json` names the relay and the key.
-fn hub_relay(home: &std::path::Path, addr: &str, key: &rapp_wire::Key) {
-    rapp_net::config::write_json(&home.join("service.json"), &json!({"relay": addr, "key": key.to_string()})).unwrap();
-}
-
-async fn a_on_relay(rig: &RelayRig, lan: Option<Vec<String>>) -> TestService {
-    let a = service_on_relay_lan(&rig.addr, &rig.key, lan).await;
-    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
-    wait_status(&mut ipc, |s| s["relay"] == "connected").await;
-    a
-}
 
 #[tokio::test]
 async fn bare_id_over_relay() {
@@ -1215,16 +1201,6 @@ async fn dead_relay_does_not_delay_lan() {
 }
 
 // ---- final review fixes (relay device plan 2a) ----
-
-/// The next event that is not a presence line.
-async fn reply(hub: &mut Hub) -> Value {
-    loop {
-        let r = hub.next().await;
-        if r["event"] != "presence" {
-            return r;
-        }
-    }
-}
 
 /// How many `connect` lookups the relay answered with `result`.
 fn relay_connects(rig: &RelayRig, result: &str) -> usize {

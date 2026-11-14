@@ -2,8 +2,9 @@
 //! `rapp/2` (the saved LAN addresses tried together, 500 ms each, first to answer wins); a host that
 //! never showed a fingerprint may fall back to `rapp/1` and its password. A host with a stored
 //! fingerprint never falls back. When no address answers and B has a relay and key, the host is reached
-//! through the relay: one relayed stream per request. One connection per host is cached; a lost
-//! connection triggers one fresh connect.
+//! through the relay: one relayed stream per request. A host forced onto the relay (`route`) is reached
+//! through the relay only, never on its LAN. One connection per host is cached, and each one cached is
+//! announced with a `path` event; a lost connection triggers one fresh connect.
 
 use crate::hosts::Host;
 use crate::Hub;
@@ -165,6 +166,11 @@ fn is_refusal(e: &anyhow::Error) -> bool {
     matches!(e.to_string().as_str(), "not trusted" | "host key mismatch")
 }
 
+/// The relay itself did not answer (as opposed to the relay answering for the host).
+fn is_relay_unreachable(e: &anyhow::Error) -> bool {
+    e.to_string().starts_with("relay unreachable: ")
+}
+
 /// The relay has no device with this ID (it counts that against the asker).
 fn is_unknown_id(e: &anyhow::Error) -> bool {
     e.to_string() == "unknown id"
@@ -277,7 +283,34 @@ impl Hub {
         tokio::time::timeout(RELAY_WAIT, ask).await.unwrap_or_else(|_| Err(anyhow!("relay unreachable: timed out")))
     }
 
+    /// A host forced onto the relay: the relay or an error, never the LAN.
+    async fn establish_forced(&self, host: &Host) -> Result<Link> {
+        let relay = tokio::time::timeout(RELAY_WAIT, self.relay())
+            .await
+            .unwrap_or_else(|_| Err(anyhow!("relay unreachable: timed out")));
+        let relay = match relay {
+            Ok(Some((relay, _))) => relay,
+            Ok(None) => bail!("relay not set: add the host as id@ip"),
+            // The dial says `relay unreachable: ...` itself; other failures (a wrong relay identity) get it.
+            Err(e) if is_relay_unreachable(&e) => return Err(e),
+            Err(e) => bail!("relay unreachable: {e:#}"),
+        };
+        match self.relay_connect(&relay, &host.id).await {
+            Ok(_) => {
+                self.route(&host.id, "relay", None, Ok(()));
+                Ok(Link::Relay)
+            }
+            Err(e) => {
+                self.route(&host.id, "relay", None, Err(format!("{e:#}")));
+                Err(e)
+            }
+        }
+    }
+
     async fn establish(&self, host: &Host) -> Result<Link> {
+        if host.forced_relay() {
+            return self.establish_forced(host).await;
+        }
         // Read on every connect: the user may have set a key since the last one.
         let key = rapp_conn::settings::load(&self.at_home().0).key.map(Arc::new);
         // The relay lookup (its `connect` also tells A somebody is coming, and may name more addresses)
@@ -439,6 +472,7 @@ impl Hub {
                         password: password.unwrap_or("").into(),
                         lan: vec![addr],
                         fp: Some(accepted.fp),
+                        route: None,
                     };
                     return self.save_host(host);
                 }
@@ -457,7 +491,7 @@ impl Hub {
             bail!("{addr} is ID {}, not {id}", r["id"].as_str().unwrap_or("?"));
         }
         let name = r["name"].as_str().unwrap_or(&id).to_string();
-        self.save_host(Host { id, name, password: password.into(), lan: vec![addr], fp: None })
+        self.save_host(Host { id, name, password: password.into(), lan: vec![addr], fp: None, route: None })
     }
 
     /// `add_host` by bare ID: found through the relay, reached on the addresses it reports or else
@@ -466,7 +500,14 @@ impl Hub {
         let Some((relay, key)) = self.relay().await? else { bail!("relay not set: add the host as id@ip") };
         let found = self.relay_connect(&relay, &id).await?;
         let known = self.hosts.get(&id).and_then(|h| h.fp);
-        let mut host = Host { id: id.clone(), name: String::new(), password: String::new(), lan: found.lan, fp: known };
+        let mut host = Host {
+            id: id.clone(),
+            name: String::new(),
+            password: String::new(),
+            lan: found.lan,
+            fp: known,
+            route: None,
+        };
         let accepted = match self.first_v2(&host, &dial_order(&host.lan), Some(key.clone())).await? {
             Some((link, accepted)) => {
                 link.close(b"host added");
@@ -577,6 +618,29 @@ impl Hub {
         None
     }
 
+    /// Caches `link` as the way to `id` and announces it with a `path` event. A host removed meanwhile
+    /// gets neither: the link is dropped from here (not closed; a caller may still be using it).
+    pub(crate) async fn cache_link(&self, id: &str, link: Link) {
+        let path = link.path();
+        {
+            let mut links = self.links.lock().unwrap();
+            if self.hosts.get(id).is_none() {
+                return;
+            }
+            links.insert(id.to_string(), link);
+        }
+        self.emit(json!({"event":"path","id":id,"path":path}), &None).await;
+    }
+
+    /// Takes the link to `id` out of the cache without closing it: sessions on it keep running (quinn
+    /// closes the connection when its last stream ends), and the next request connects anew.
+    pub(crate) fn uncache(&self, id: &str) {
+        self.links.lock().unwrap().remove(id);
+    }
+
+    /// Tries `id`'s LAN at once (filled in by the LAN upgrade).
+    pub(crate) fn upgrade_now(&self, _id: &str) {}
+
     pub fn forget(&self, id: &str) {
         self.probe_halt.lock().unwrap().remove(id);
         if let Some(link) = self.links.lock().unwrap().remove(id) {
@@ -612,9 +676,21 @@ impl Hub {
             // The user is acting on this host: presence may try it again.
             self.probe_halt.lock().unwrap().remove(&host.id);
         }
-        let cached = self.links.lock().unwrap().get(&host.id).cloned();
+        let cached = {
+            let mut links = self.links.lock().unwrap();
+            if host.forced_relay() && links.get(&host.id).is_some_and(|l| !matches!(l, Link::Relay)) {
+                // Cached before the host was forced: uncached, not closed (sessions on it keep it).
+                links.remove(&host.id);
+            }
+            links.get(&host.id).cloned()
+        };
         if let Some(link) = cached {
             match self.send_on(host, &link, op).await {
+                // The relay was just dialed and did not answer: a forced host has no other way to go.
+                Err(e) if host.forced_relay() && is_relay_unreachable(&e) => {
+                    self.forget(&host.id);
+                    return Err(e);
+                }
                 Err(e) if quiet() => drop(e),
                 Err(e) => self.log.msg(Lvl::Warn, format_args!("{} via {}: {e:#}; reconnecting", host.id, link.path())),
                 Ok(x) => return finish(x, link.path()),
@@ -622,13 +698,8 @@ impl Hub {
             self.forget(&host.id);
         }
         let link = self.establish(host).await?;
-        {
-            // A host removed while this was in flight must not come back through the cache.
-            let mut links = self.links.lock().unwrap();
-            if self.hosts.get(&host.id).is_some() {
-                links.insert(host.id.clone(), link.clone());
-            }
-        }
+        // A host removed while this was in flight does not come back through the cache.
+        self.cache_link(&host.id, link.clone()).await;
         if quiet() && matches!(link, Link::Relay) {
             // A probe asks the relay (`probe`), it does not open a stream through it.
             return Err(Relayed.into());
@@ -667,7 +738,7 @@ mod tests {
 
     fn host(password: &str, lan: &[&str]) -> Host {
         let lan = lan.iter().map(|a| a.to_string()).collect();
-        Host { id: "100000001".into(), name: "n".into(), password: password.into(), lan, fp: None }
+        Host { id: "100000001".into(), name: "n".into(), password: password.into(), lan, fp: None, route: None }
     }
 
     #[test]

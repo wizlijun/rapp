@@ -202,6 +202,31 @@ impl Hub {
                 self.forget(id);
                 self.hosts_event()
             }
+            Some("set_route") => {
+                let route = match s("route")? {
+                    "relay" => Some("relay".to_string()),
+                    "auto" => None,
+                    _ => bail!("bad route"),
+                };
+                let id = s("id")?;
+                self.host(id)?;
+                self.hosts.set_route(id, route.clone())?;
+                self.log.msg(Lvl::Info, format_args!("{id}: route {}", route.as_deref().unwrap_or("auto")));
+                if route.is_some() {
+                    // Requests leave the old link now; this one builds the relay link (and its `path` event).
+                    self.uncache(id);
+                    let (hub, id) = (self.clone(), id.to_string());
+                    tokio::spawn(async move {
+                        let Some(host) = hub.hosts.get(&id) else { return };
+                        if let Err(e) = hub.request(&host, &Op::Ping).await {
+                            hub.log.msg(Lvl::Warn, format_args!("{id} via relay: {e:#}"));
+                        }
+                    });
+                } else {
+                    self.upgrade_now(id);
+                }
+                self.hosts_event()
+            }
             Some("set_home") => {
                 self.set_home(std::path::Path::new(s("dir")?)).await?;
                 json!({"event":"home_set"})
