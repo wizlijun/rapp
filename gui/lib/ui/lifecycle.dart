@@ -63,6 +63,13 @@ String disconnectWord(String? raw) {
   if (raw == 'user') return '你断开了';
   if (raw.startsWith('host says: ') && raw.endsWith('quit')) return 'A 端关闭了 app';
   if (raw.contains('bad password')) return '密码不对';
+  if (raw.contains('relay not set')) return '没设中继，请用 ID@IP 添加';
+  if (raw.contains('relay unreachable')) return '中继连不上';
+  if (raw.contains('relay identity mismatch')) return '中继的身份对不上，检查接入点和 key';
+  if (raw.contains('bad key')) return 'key 不对';
+  if (raw.contains('host key mismatch')) return '对方的设备密钥变了';
+  if (raw.contains('not trusted')) return '对方不认这台设备（key 不同？）';
+  if (raw.contains('unknown id')) return '没有这个 ID';
   if (raw.contains('offline') || raw.contains('no path to')) {
     return '对方离线';
   }
