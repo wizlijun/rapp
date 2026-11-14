@@ -6,6 +6,8 @@ import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/embed/stream_choice.dart';
 
+import '../fakes.dart';
+
 RemoteWindow w(int id, {WindowKind kind = WindowKind.normal, bool focused = false}) => RemoteWindow(
       id: id,
       parent: 0,
@@ -240,27 +242,31 @@ void main() {
       ..setProfile(const ResolvedProfile(name: 'X', windows: [WindowRule(kind: WindowKind.dialog, action: RuleAction.noComposer)]));
     rs.apply(WindowsEvent(1, [w(1)]));
     rs.apply(WindowsEvent(1, [w(1), w(2, kind: WindowKind.dialog)])); // 2 is new: current
-    rs.composer.text = '草稿';
+    final ed = FakeEditor();
+    rs.composer.attach(ed);
+    ed.value = '草稿';
     rs.composer.open = true;
     expect(rs.composerAllowed, isFalse);
     rs.selectWindow(1);
     expect(rs.composerAllowed, isTrue);
     expect(rs.composer.open, isTrue);
-    expect(rs.composer.text, '草稿');
+    expect(ed.value, '草稿');
     rs.setProfile(const ResolvedProfile(name: 'X', composer: false));
     expect(rs.composerAllowed, isFalse);
   });
 
-  test('afterSend return calls onReturn after a full round; none does not', () {
+  test('afterSend return calls onReturn after a full round; none does not', () async {
     var n = 0;
     final rs = RemoteSession(1, 'X', onReturn: () => n++)..setProfile(const ResolvedProfile(name: 'X', afterSend: AfterSend.pressReturn));
-    rs.composer.text = 'go';
-    rs.composer.send();
+    final ed = FakeEditor();
+    rs.composer.attach(ed);
+    ed.value = 'go';
+    await rs.composer.submit();
     rs.apply(const ComposerStateEvent(1, done: ComposerDone(1, null)));
     expect(n, 1);
     rs.setProfile(ResolvedProfile.generic);
-    rs.composer.text = 'go';
-    rs.composer.send();
+    ed.value = 'go';
+    await rs.composer.submit();
     rs.apply(const ComposerStateEvent(1, done: ComposerDone(1, null)));
     expect(n, 1);
   });

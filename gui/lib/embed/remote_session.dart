@@ -46,12 +46,7 @@ class RemoteSession extends ChangeNotifier {
   final void Function(int window, Offset at)? onClick;
 
   void _allSent() {
-    if (profile.afterSend == AfterSend.pressReturn) {
-      onReturn?.call();
-      composer.note('已发送并按了回车');
-    } else {
-      composer.note('已发送；空着再按 Enter 就给远端发回车');
-    }
+    if (profile.afterSend == AfterSend.pressReturn) onReturn?.call();
   }
 
   /// A's input source as its host last said (null: an older host that never says).

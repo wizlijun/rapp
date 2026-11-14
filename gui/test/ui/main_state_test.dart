@@ -720,12 +720,16 @@ void main() {
       final sid = chrome.length;
       env((a, t, port, st, hints) {
         final rs = st.currentRemote!;
-        rs.composer.text = 'ls';
-        rs.composer.send();
+        final ed = FakeEditor();
+        rs.composer.attach(ed);
+        ed.value = 'ls';
+        rs.composer.submit();
+        a.flushMicrotasks();
         port.emit(ComposerStateEvent(sid, done: const ComposerDone(1, null)));
         expect(calls(port, 'key').single.$2, {'sid': sid, 'keyCode': 36, 'modifiers': 0});
-        rs.composer.text = 'x';
-        rs.composer.send();
+        ed.value = 'x';
+        rs.composer.submit();
+        a.flushMicrotasks();
         port.emit(ComposerStateEvent(sid, done: const ComposerDone(0, 'A 上贴不进去')));
         expect(calls(port, 'key').length, 1);
       }, app: chrome, profiles: store(mine: [chromeWith(afterSend: AfterSend.pressReturn)]));

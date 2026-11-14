@@ -3,19 +3,42 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/widgets.dart';
 
+import 'composer_editor.dart';
 import 'session_port.dart';
 
-enum SendOutcome {
-  /// Nothing to send: keys go to A directly (the status says so).
-  empty,
+sealed class Submit {}
 
-  /// A snapshot was taken; the caller sends `pieces()` to the runner.
-  sent,
+/// Sending, or an empty Enter within 1 s of a send (W15).
+class SubmitNothing extends Submit {}
 
-  /// A send is still running.
-  ignored,
+/// Empty: a Return for A.
+class SubmitReturn extends Submit {}
+
+class SubmitPieces extends Submit {
+  SubmitPieces(this.pieces);
+  final List<Map<String, Object>> pieces;
+}
+
+/// One send: the blocks and text that were taken out of the editor.
+class Outgoing {
+  Outgoing(this.blocks, this.text);
+  final List<BlockChip> blocks;
+  final String text;
+
+  /// Pieces that went (blocks first, then text).
+  int sent = 0;
+
+  /// Null while in flight.
+  String? failure;
+
+  List<Map<String, Object>> pieces() => [
+        for (final b in blocks) {'block': b.n},
+        if (text.isNotEmpty) {'text': text},
+      ];
+
+  /// [pieces] minus the first [sent].
+  List<Map<String, Object>> remaining() => pieces().skip(sent).toList();
 }
 
 /// macOS virtual key code of Return, what the after-send step presses.
@@ -25,18 +48,21 @@ const returnKeyCode = 36;
 const escKeyCode = 53;
 
 class ComposerModel extends ChangeNotifier {
-  /// [onDrop]: a block left the editor (removed, or sent); the runner forgets what it held.
+  /// [onDrop]: a block left the composer (removed, or sent); the runner forgets what it held.
   /// [onAllSent]: a send round put every piece into A (not partial, failed or cancelled).
-  ComposerModel({this.onDrop, this.onAllSent});
+  ComposerModel({this.onDrop, this.onAllSent, DateTime Function()? clock}) : _clock = clock ?? DateTime.now;
 
   final void Function(int n)? onDrop;
   final VoidCallback? onAllSent;
+  final DateTime Function() _clock;
 
-  /// The editor's text and cursor.
-  final TextEditingController controller = TextEditingController();
+  /// The text while no editor is attached; the last copy otherwise.
+  String draft = '';
+  ComposerEditor? _editor;
+  Timer? _idleTimer;
 
-  String get text => controller.text;
-  set text(String v) => controller.value = TextEditingValue(text: v, selection: TextSelection.collapsed(offset: v.length));
+  /// Set by the panel from the editor's onFocus.
+  bool editorFocused = false;
 
   /// The chips, in the order they were added.
   final List<BlockChip> blocks = [];
@@ -49,113 +75,169 @@ class ComposerModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// A send round is running (from `send()` until `done`).
+  /// A send round is running (from `submit()` until `done`).
   bool sending = false;
 
   /// A short line under the editor; clears by itself.
   String? status;
 
-  ({List<int> blocks, String text})? _snapshot;
+  Outgoing? _inFlight;
+  Outgoing? get inFlight => _inFlight;
+  final List<Outgoing> _failed = [];
+  List<Outgoing> get failed => List.unmodifiable(_failed);
+
   Timer? _statusTimer;
   bool _copyPending = false;
   bool _disposed = false;
+  bool _taking = false;
+  DateTime? _lastSend;
 
-  /// What goes to A, in order: the blocks as added, then the text if any (R3).
-  List<Map<String, Object>> pieces() => [
-        for (final b in blocks) {'block': b.n},
-        if (text.isNotEmpty) {'text': text},
-      ];
+  /// The editor takes over; it starts with [draft].
+  void attach(ComposerEditor e) {
+    _editor = e;
+    e.setText(draft);
+  }
 
-  /// The user pressed send (or Enter).
-  SendOutcome send() {
-    if (sending) return SendOutcome.ignored;
-    if (blocks.isEmpty && text.isEmpty) {
-      _show('已给远端发回车', const Duration(seconds: 3));
-      notifyListeners();
-      return SendOutcome.empty;
+  /// The editor goes away: its text is copied into [draft].
+  Future<void> detach(ComposerEditor e) async {
+    if (!identical(_editor, e)) return;
+    _editor = null;
+    _idleTimer?.cancel();
+    draft = await e.read();
+  }
+
+  /// Replaces the text: into the editor if attached, else the draft.
+  void setDraft(String s) {
+    draft = s;
+    _editor?.setText(s);
+  }
+
+  /// The editor's text changed: 1 s after the last change it is copied into [draft].
+  void editorChanged() {
+    _idleTimer?.cancel();
+    _idleTimer = Timer(const Duration(seconds: 1), () async {
+      final e = _editor;
+      if (e == null || _disposed) return;
+      final t = await e.read();
+      if (identical(_editor, e) && !_disposed) draft = t;
+    });
+  }
+
+  /// Text at the caret, or at the end of the draft without an editor.
+  void insert(String s) {
+    final e = _editor;
+    if (e != null) {
+      e.insert(s);
+    } else {
+      draft += s;
     }
-    _snapshot = (blocks: [for (final b in blocks) b.n], text: text);
+  }
+
+  /// Bumped when the panel should unfocus the editor (W8).
+  int releaseTick = 0;
+  void releaseFocus() {
+    releaseTick++;
+    notifyListeners();
+  }
+
+  /// Closes the panel; the text stays (W6).
+  void collapse() => open = false;
+
+  /// The user pressed send (or Enter): takes the blocks and the text out of the composer.
+  Future<Submit> submit() async {
+    if (sending || _taking) return SubmitNothing();
+    _taking = true;
+    final String text;
+    try {
+      final e = _editor;
+      if (e != null) {
+        text = await e.take();
+      } else {
+        text = draft;
+      }
+      draft = '';
+    } finally {
+      _taking = false;
+    }
+    final now = _clock();
+    if (blocks.isEmpty && text.isEmpty) {
+      final last = _lastSend;
+      if (last != null && now.difference(last) < const Duration(seconds: 1)) return SubmitNothing();
+      return SubmitReturn();
+    }
+    _lastSend = now;
+    final o = Outgoing(List.of(blocks), text);
+    blocks.clear();
+    _inFlight = o;
     sending = true;
     notifyListeners();
-    return SendOutcome.sent;
+    return SubmitPieces(o.pieces());
   }
 
   /// The runner's `sending`; a stop before `done` is held until `done` comes.
   void setSending(bool on) {
-    if (!on && _snapshot != null) return;
+    if (!on && _inFlight != null) return;
     if (sending == on) return;
     sending = on;
     notifyListeners();
   }
 
-  /// A send round ended: the first [sent] pieces went. They leave the editor unless the user
-  /// changed that part meanwhile; [failure] (empty: cancelled, the strip said why) is shown.
+  /// A send round ended: the first [sent] pieces of it went. What did not go stays as a failed
+  /// item; [failure] (empty: cancelled) says why, null with something left means the link dropped.
   void done(int sent, String? failure) {
-    final snap = _snapshot;
-    _snapshot = null;
+    final o = _inFlight;
+    _inFlight = null;
     sending = false;
-    String? note;
-    final allSent = snap != null &&
-        failure == null &&
-        sent > 0 &&
-        sent == snap.blocks.length + (snap.text.isNotEmpty ? 1 : 0);
-    if (snap != null && sent > 0) {
-      final sentBlocks = snap.blocks.take(sent).toList();
-      final textSent = sent > snap.blocks.length && snap.text.isNotEmpty;
-      final current = [for (final b in blocks) b.n];
-      final blocksSame =
-          current.length >= sentBlocks.length && listEquals(current.sublist(0, sentBlocks.length), sentBlocks);
-      final textSame = !textSent || text.startsWith(snap.text);
-      if (blocksSame && textSame) {
-        final gone = blocks.sublist(0, sentBlocks.length);
-        blocks.removeRange(0, sentBlocks.length);
-        for (final b in gone) {
-          onDrop?.call(b.n);
-        }
-        if (textSent) _dropTextPrefix(snap.text.length);
-      } else {
-        note = '（发送中改过内容，未清除）';
-      }
+    _lastSend = _clock();
+    if (o == null) {
+      notifyListeners();
+      return;
     }
-    final shown = [if (failure != null && failure.isNotEmpty) failure, ?note];
-    if (shown.isNotEmpty) _show(shown.join(' '), const Duration(seconds: 5));
+    final total = o.pieces().length;
+    final before = o.sent;
+    final after = (before + (sent < 0 ? 0 : sent)).clamp(0, total);
+    o.sent = after;
+    final dropTo = after < o.blocks.length ? after : o.blocks.length;
+    for (var i = before; i < dropTo; i++) {
+      onDrop?.call(o.blocks[i].n);
+    }
+    final all = after >= total;
+    if (!all) {
+      o.failure = (failure != null && failure.isNotEmpty)
+          ? failure
+          : failure == ''
+              ? '已取消'
+              : '没有发出去';
+      _failed.add(o);
+    }
     notifyListeners();
-    if (allSent) onAllSent?.call();
+    if (all && failure == null) onAllSent?.call();
   }
 
-  /// The first [n] characters went: the rest stays, its cursor and composing range shifted.
-  void _dropTextPrefix(int n) {
-    final v = controller.value;
-    final rest = v.text.substring(n);
-    int shift(int i) => i < 0 ? i : (i - n).clamp(0, rest.length);
-    final sel = v.selection;
-    final c = v.composing;
-    final composing = c.isValid && c.end > n ? TextRange(start: shift(c.start), end: shift(c.end)) : TextRange.empty;
-    controller.value = TextEditingValue(
-      text: rest,
-      selection: sel.isValid
-          ? sel.copyWith(baseOffset: shift(sel.baseOffset), extentOffset: shift(sel.extentOffset))
-          : TextSelection.collapsed(offset: rest.length),
-      composing: composing,
-    );
+  /// Sends what is left of [o] again: the pieces for the runner, or null while sending.
+  List<Map<String, Object>>? retry(Outgoing o) {
+    if (sending || !_failed.remove(o)) return null;
+    o.failure = null;
+    _inFlight = o;
+    sending = true;
+    notifyListeners();
+    return o.remaining();
   }
 
-  /// Bumped when the field should take the caret (a clip's 「插入」); the bar follows it.
+  /// [o] goes back into the composer: unsent blocks in front, unsent text at the caret.
+  void putBack(Outgoing o) {
+    if (!_failed.remove(o)) return;
+    blocks.insertAll(0, o.blocks.skip(o.sent));
+    if (o.sent <= o.blocks.length && o.text.isNotEmpty) insert(o.text);
+    notifyListeners();
+  }
+
+  /// Bumped when the field should take the caret (a clip's 「插入」); the panel follows it.
   int focusTick = 0;
 
   /// The field should take the caret, even from a focused picture.
   void wantFocus() {
     focusTick++;
-    notifyListeners();
-  }
-
-  /// Esc in the editor: clears the text; with none, the composer closes (R16).
-  void esc() {
-    if (text.isNotEmpty) {
-      text = '';
-    } else {
-      _open = false;
-    }
     notifyListeners();
   }
 
@@ -186,23 +268,11 @@ class ComposerModel extends ChangeNotifier {
   void apply(PasteResult r) {
     if (_disposed) return;
     final t = r.text;
-    if (t != null && t.isNotEmpty) insertText(t);
+    if (t != null && t.isNotEmpty) insert(t);
     blocks.addAll(r.blocks);
     final s = r.status;
     if (s != null) _show(s, const Duration(seconds: 5));
     notifyListeners();
-  }
-
-  /// [s] replaces the selection (or goes at the end without one); the cursor lands after it.
-  void insertText(String s) {
-    final v = controller.value;
-    final sel = v.selection;
-    final start = sel.isValid ? sel.start : v.text.length;
-    final end = sel.isValid ? sel.end : v.text.length;
-    controller.value = TextEditingValue(
-      text: v.text.replaceRange(start, end, s),
-      selection: TextSelection.collapsed(offset: start + s.length),
-    );
   }
 
   /// The user tapped chip [n] away.
@@ -234,7 +304,7 @@ class ComposerModel extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _statusTimer?.cancel();
-    controller.dispose();
+    _idleTimer?.cancel();
     super.dispose();
   }
 }

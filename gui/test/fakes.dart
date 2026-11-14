@@ -1,8 +1,52 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/widgets.dart';
+import 'package:rapp/embed/composer_editor.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
+
+/// In-memory [ComposerEditor]: the text is [value]; [inserted] logs every `insert`.
+class FakeEditor implements ComposerEditor {
+  String value = '';
+  final inserted = <String>[];
+  bool focused = false;
+
+  @override
+  EditorHandlers? handlers;
+
+  @override
+  Widget view(BuildContext context, {required EditorStyle style, required String hint, required double maxHeight}) =>
+      const SizedBox();
+
+  @override
+  void focus() => focused = true;
+
+  @override
+  void unfocus() => focused = false;
+
+  @override
+  void setText(String text) => value = text;
+
+  @override
+  void insert(String text) {
+    inserted.add(text);
+    value += text;
+  }
+
+  @override
+  Future<String> read() async => value;
+
+  @override
+  Future<String> take() async {
+    final v = value;
+    value = '';
+    return v;
+  }
+
+  @override
+  void dispose() {}
+}
 
 /// In-memory stand-in for the rapp-hub process.
 class FakeTransport implements HubTransport {
