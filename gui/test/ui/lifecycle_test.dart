@@ -30,6 +30,8 @@ void main() {
     expect(disconnectWord('relay unreachable: connection refused'), '中继连不上');
     expect(disconnectWord('relay identity mismatch'), '中继的身份对不上，检查接入点和 key');
     expect(disconnectWord('bad key'), 'key 不对');
+    expect(disconnectWord('key changed'), '中继换了 key，请到 本机 → 输入新 key');
+    expect(disconnectWord('relay: key changed'), '中继换了 key，请到 本机 → 输入新 key');
     expect(disconnectWord('not trusted'), '对方不认这台设备（key 不同？）');
     expect(disconnectWord('host key mismatch'), '对方的设备密钥变了');
     expect(disconnectWord('unknown id'), '没有这个 ID');

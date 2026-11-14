@@ -81,6 +81,7 @@ class _LocalSectionState extends State<LocalSection> {
 
   /// The key text, fetched on 显示 and dropped on 隐藏 or once the service reports a different key state.
   String? _shownKey;
+  bool _newKeySaved = false; // the saved key came from 输入新 key; until the relay connects, a bad key means that one
   Timer? _poll;
   bool _guideDecided = false;
 
@@ -267,7 +268,82 @@ class _LocalSectionState extends State<LocalSection> {
   Widget _relayRow(ServiceStatus st) => _row('中继', st.relayAddr == null ? _relayState(st) : '${st.relayAddr}',
       trailing: _icon('edit-relay', '修改中继', Icons.edit, () => _editRelay(st)));
 
-  Widget? _stateRow(ServiceStatus st) => st.relayAddr == null ? null : _row('状态', _relayState(st));
+  Widget? _stateRow(ServiceStatus st) {
+    if (st.relayAddr == null) return null;
+    if (st.relay == 'connected') _newKeySaved = false;
+    final changed = st.relayError == 'key changed';
+    final bad = st.relayError == 'bad key';
+    if (!changed && !bad) return _row('状态', _relayState(st));
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      if (changed)
+        _row('状态', '安全变更：中继换了 key', color: Theme.of(context).colorScheme.error)
+      else
+        _row('状态', bad && _newKeySaved ? '出错：新 key 不对' : _relayState(st)),
+      if (changed)
+        Padding(
+          padding: const EdgeInsets.only(left: 72, top: 2),
+          child: const Text('这台设备已经和中继断开。请向管理中继的人要新 key，再输入。'),
+        ),
+      Padding(
+        padding: const EdgeInsets.only(left: 72),
+        child: Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton(
+                key: const Key('enter-new-key'), onPressed: () => _enterNewKey(st), child: const Text('输入新 key'))),
+      ),
+    ]);
+  }
+
+  Future<void> _enterNewKey(ServiceStatus st) async {
+    final key = TextEditingController();
+    final error = ValueNotifier<String?>(null);
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('输入新 key'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(
+              controller: key,
+              autofocus: true,
+              obscureText: true,
+              enableSuggestions: false,
+              autocorrect: false,
+              decoration: const InputDecoration(labelText: 'key')),
+          ValueListenableBuilder<String?>(
+            valueListenable: error,
+            builder: (_, e, _) => e == null
+                ? const SizedBox.shrink()
+                : Padding(padding: const EdgeInsets.only(top: 8), child: Text(e, style: const TextStyle(color: Colors.red))),
+          ),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          FilledButton(
+            onPressed: () async {
+              try {
+                await m.setRelay(st.relayAddr ?? '', key.text.trim());
+                if (mounted) {
+                  setState(() {
+                    _shownKey = null;
+                    _newKeySaved = true;
+                  });
+                }
+                if (ctx.mounted) Navigator.pop(ctx);
+              } catch (e) {
+                error.value = '失败：$e';
+              }
+            },
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    // The dialog is still fading out here; dispose once its fields are gone.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      key.dispose();
+      error.dispose();
+    });
+  }
 
   Widget _keyRow(ServiceStatus st) {
     final key = _shownKey;
@@ -331,7 +407,12 @@ class _LocalSectionState extends State<LocalSection> {
             onPressed: () async {
               try {
                 await m.setRelay(addr.text.trim(), key.text.trim());
-                if (mounted) setState(() => _shownKey = null);
+                if (mounted) {
+                  setState(() {
+                    _shownKey = null;
+                    _newKeySaved = false;
+                  });
+                }
                 if (ctx.mounted) Navigator.pop(ctx);
               } catch (e) {
                 error.value = disconnectWord('$e');
@@ -368,11 +449,14 @@ class _LocalSectionState extends State<LocalSection> {
         ),
       );
 
-  Widget _row(String label, String value, {Widget? trailing, bool selectable = true}) => Padding(
+  Widget _row(String label, String value, {Widget? trailing, bool selectable = true, Color? color}) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 2),
         child: Row(children: [
           SizedBox(width: 72, child: Text(label, style: const TextStyle(color: Colors.grey))),
-          Expanded(child: selectable ? SelectableText(value) : Text(value)),
+          Expanded(
+              child: selectable
+                  ? SelectableText(value, style: color == null ? null : TextStyle(color: color))
+                  : Text(value, style: color == null ? null : TextStyle(color: color))),
           ?trailing,
         ]),
       );
