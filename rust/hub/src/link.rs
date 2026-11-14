@@ -125,6 +125,11 @@ impl Dialer {
     }
 }
 
+/// A definite answer of the host (or of the stored fingerprint) that retrying cannot change.
+fn is_refusal(e: &anyhow::Error) -> bool {
+    matches!(e.to_string().as_str(), "not trusted" | "host key mismatch")
+}
+
 /// `lan` for a private address, `direct` for a public one.
 fn direct_path(addr: &SocketAddr) -> &'static str {
     if is_private(addr.ip()) {
@@ -203,8 +208,9 @@ impl Hub {
                         self.route(&host.id, direct_path(&sock), Some(&addr), Err(format!("{e:#}")));
                     }
                     if !unreachable {
-                        // A probe must not keep knocking on a host that refuses this device.
-                        if quiet() {
+                        // A probe must not keep knocking on a host that refuses this device; a slow or
+                        // restarting host (no reply, reset) is not a refusal and keeps being probed.
+                        if quiet() && is_refusal(&e) {
                             self.probe_halt.lock().unwrap().insert(host.id.clone());
                         }
                         refused.get_or_insert(e);
@@ -389,7 +395,17 @@ fn finish((s, r): (Pipe, Value), path: &'static str) -> Result<(Pipe, Value, &'s
 
 #[cfg(test)]
 mod tests {
-    use super::dial_order;
+    use super::{dial_order, is_refusal};
+    use anyhow::anyhow;
+
+    #[test]
+    fn only_definite_refusals_halt_probes() {
+        assert!(is_refusal(&anyhow!("not trusted")));
+        assert!(is_refusal(&anyhow!("host key mismatch")));
+        for transient in ["no reply", "stream closed", "stream closed mid-line", "connection lost", "unknown op"] {
+            assert!(!is_refusal(&anyhow!(transient)), "{transient}");
+        }
+    }
 
     fn order(l: &[&str]) -> Vec<String> {
         let l: Vec<String> = l.iter().map(|s| s.to_string()).collect();

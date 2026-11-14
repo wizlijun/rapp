@@ -996,3 +996,19 @@ async fn same_identity_as_service() {
     assert_eq!(paired[0]["fp"], json!(a_fp(&a).await));
     hub.finish().await;
 }
+
+#[tokio::test]
+async fn refusing_host_halts_quiet_probes() {
+    // A knows no key and has not paired this hub: it refuses the hello, and the probe must not repeat it.
+    let a = service().await;
+    let home = tempfile::tempdir().unwrap();
+    hub_key(home.path(), &rapp_wire::Key::new_local());
+    rapp_net::config::write_json(&home.path().join("hosts.json"), &host_with_fp(&a, &"ab".repeat(32))).unwrap();
+    let mut hub = Hub::start_with_presence(home.path(), a.bins.path(), Duration::from_millis(100));
+    next_presence(&mut hub, &a.id, false).await;
+    wait_log(a.home.path(), "trust", |v| v["result"] == "refused").await;
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    let refused = log_events(a.home.path()).iter().filter(|v| v["ev"] == "trust" && v["result"] == "refused").count();
+    assert_eq!(refused, 1, "probes kept knocking");
+    hub.finish().await;
+}
