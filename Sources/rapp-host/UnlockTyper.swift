@@ -16,27 +16,30 @@ enum UnlockTyper {
             event.flags = []
             event.post(tap: .cghidEventTap)
         }
-        mouse(.mouseMoved)
-        mouse(.leftMouseDown)
-        mouse(.leftMouseUp)
-        // The lock screen fades the password field in after the click.
-        usleep(1_000_000)
-        for chunk in chunkUTF16(password) {
-            for down in [true, false] {
-                guard let event = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: down) else { continue }
-                event.flags = []
-                chunk.withUnsafeBufferPointer {
-                    event.keyboardSetUnicodeString(stringLength: $0.count, unicodeString: $0.baseAddress)
+        typeUnlockPassword(password,
+            isLocked: { screenLocked(CGSessionCopyCurrentDictionary() as? [String: Any]) },
+            wake: {
+                mouse(.mouseMoved)
+                mouse(.leftMouseDown)
+                mouse(.leftMouseUp)
+            },
+            wait: { usleep($0) },
+            typeChunk: { chunk in
+                for down in [true, false] {
+                    guard let event = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: down) else { continue }
+                    event.flags = []
+                    chunk.withUnsafeBufferPointer {
+                        event.keyboardSetUnicodeString(stringLength: $0.count, unicodeString: $0.baseAddress)
+                    }
+                    event.post(tap: .cghidEventTap)
                 }
-                event.post(tap: .cghidEventTap)
-            }
-            usleep(5_000)
-        }
-        usleep(50_000)
-        for down in [true, false] {
-            guard let event = CGEvent(keyboardEventSource: source, virtualKey: 36, keyDown: down) else { continue }
-            event.flags = []
-            event.post(tap: .cghidEventTap)
-        }
+            },
+            pressReturn: {
+                for down in [true, false] {
+                    guard let event = CGEvent(keyboardEventSource: source, virtualKey: 36, keyDown: down) else { continue }
+                    event.flags = []
+                    event.post(tap: .cghidEventTap)
+                }
+            })
     }
 }
