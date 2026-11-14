@@ -1,5 +1,7 @@
 // The overview (全景): status counts, the device wall, and (Task 4) the project/resource layer.
 // It takes the stage's place; the top bar and overlays stay as they are.
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../embed/traffic_label.dart';
@@ -15,6 +17,12 @@ const _gap = 12.0;
 const _colWidth = 220.0;
 const _cellWidth = 150.0;
 const _blockHeight = 56.0;
+
+/// Height of the counts row and of the project/resource row.
+const _bandHeight = 88 + 2 * _gap;
+
+/// The corner illustration's largest side, in logical pixels.
+const overviewArtMaxSide = 440.0;
 
 class Overview extends StatelessWidget {
   const Overview({super.key, required this.state});
@@ -34,22 +42,64 @@ class Overview extends StatelessWidget {
           entries: entries,
           name: state.deviceName,
         );
-        return Column(key: const Key('overview'), crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          _CountsRow(state: state, counts: counts),
-          Expanded(
-            child: ListView.separated(
-              key: const Key('wall'),
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: _gap),
-              itemCount: cols.length,
-              separatorBuilder: (_, _) => const SizedBox(width: _gap),
-              itemBuilder: (_, i) => _Column(state: state, col: cols[i]),
+        return Stack(children: [
+          const Positioned.fill(child: OverviewArt()),
+          Column(key: const Key('overview'), crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            _CountsRow(state: state, counts: counts),
+            Expanded(
+              child: ListView.separated(
+                key: const Key('wall'),
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: _gap),
+                itemCount: cols.length,
+                separatorBuilder: (_, _) => const SizedBox(width: _gap),
+                itemBuilder: (_, i) => _Column(state: state, col: cols[i]),
+              ),
             ),
-          ),
-          _ThirdLayer(state: state),
+            _ThirdLayer(state: state),
+          ]),
         ]);
       },
     );
+  }
+}
+
+/// The theme's illustration ([RappTokens.overviewArt]), behind the device wall's bottom-right corner,
+/// just above the project/resource row. Decoration only: it takes no pointer events, is hidden from
+/// screen readers, and a missing or unreadable file paints nothing.
+class OverviewArt extends StatelessWidget {
+  const OverviewArt({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final asset = RappTokens.of(context).overviewArtAsset;
+    if (asset == null) return const SizedBox.shrink();
+    return LayoutBuilder(builder: (context, c) {
+      // Between the counts row and the project/resource row; at most 45% of the width.
+      final side = math.min(overviewArtMaxSide, math.min(c.maxWidth * .45, c.maxHeight - 2 * _bandHeight));
+      if (side < 48) return const SizedBox.shrink();
+      final px = (side * MediaQuery.devicePixelRatioOf(context)).round();
+      return Stack(children: [
+        Positioned(
+          right: _gap,
+          bottom: _bandHeight,
+          width: side,
+          height: side,
+          child: IgnorePointer(
+            child: ExcludeSemantics(
+              child: Image.asset(
+                asset,
+                key: const Key('overview-art'),
+                fit: BoxFit.contain,
+                cacheWidth: px,
+                filterQuality: FilterQuality.medium,
+                errorBuilder: (_, _, _) => const SizedBox.shrink(),
+              ),
+            ),
+          ),
+        ),
+      ]);
+    });
   }
 }
 
