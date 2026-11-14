@@ -98,6 +98,14 @@ relay 在 A 的长连接上开一条流，发 `{"op":"relayed","token":T}`，然
 - 请求有两种：
   - `{"op":"list_apps"}` → `{"ok":true,"apps":[{"app":"com.apple.Safari","name":"Safari"}]}`，回完关流。
   - `{"op":"open","app":"com.apple.Safari"}` → `{"ok":true,"token":"<worker token>"}`，之后这条流双向传原始 v3 字节，直到有一方关闭。
+  - 终端会话（细则见终端会话规格）：
+    - `{"op":"list_terms"}` → `{"ok":true,"terms":[TermRow…],"hosts":[{"host":null},{"host":"gpu1","target":"me@gpu1","tmux":"…"?,"error":"…"?}]}`，回完关流。`TermRow` = `{"id","host","name","command","panes","attached","activity","dead","unread"}`；`hosts` 第一项永远是本机（`host` 为 null），之后按 `term.json` 的顺序。
+    - `{"op":"watch_terms"}` → 先回一行和 `list_terms` 一样的回复，之后每次列表变了再发一行；列表每 2 秒问一次，只在变了时发；对方关流才停。
+    - `{"op":"new_term","host":null|"gpu1","name":"x"?,"command":["claude"],"cols":120,"rows":40}` → `{"ok":true,"id":"term:tmux:x"}`。`host` 是 `term.json` 里的目标名，没有或为 null 是本机。
+    - `{"op":"add_term_target","name":"gpu1","target":"me@gpu1","tmux":"/opt/homebrew/bin/tmux"?}` → `{"ok":true,"targets":[{"name","target","tmux"?}…]}`（加完以后的全部目标）。名字已有回 `name is taken`，已满 32 个回 `too many targets`。
+    - `{"op":"remove_term_target","name":"gpu1"}` → `{"ok":true,"targets":[…]}`；没有这个名字回 `unknown target`。
+    - 不限制谁能加、删目标。「允许终端会话」关着时，上面五个请求和 `open term:…` 一律回 `{"ok":false,"error":"terminal sessions are off"}`；`term.json` 坏了回 `term.json is invalid`。
+  - `open` 的 `app` 以 `term:` 开头时，A 走 `rapp-term`（不是 `rapp-host`）：回 `{"ok":true,"token":"<rapp-term 的口令>"}`，之后这条流双向传的是终端规格 §7 的 JSON 行，第一行是 worker 口令（B 写）。
 
 ### 2.4 选路（hub）
 1. 依次连 A 的局域网地址，每个最多等 500 ms。localhost 测试时局域网地址包含 `127.0.0.1:22028`。
@@ -195,6 +203,30 @@ relay 在 A 的长连接上开一条流，发 `{"op":"relayed","token":T}`，然
   - stdin 命令：`{"cmd":"quit"}`；stdin 关闭等同于 quit。
   - 用户关窗或按 ⌘Q：退出码 0。
 - `rapp-client version [--json]`。
+
+**`rapp-term`**（tmux 终端会话；一台设备一个 `serve`，由 service 拉起）
+- `rapp-term serve --token-env <VAR> --config <term.json 路径> [--bind 127.0.0.1] [--port 0] [--json]`
+  - `--bind` 没写时 `127.0.0.1`，`--port` 没写时 0（系统挑一个）。`--token-env` 指的变量没设或为空，算参数错误，退出 2。service 拉起它的命令行固定为 `rapp-term serve --bind 127.0.0.1 --port 0 --token-env RAPP_TOKEN --config <state.home>/term.json --json`。
+  - 事件：
+    - `{"event":"listening","port":N}`
+    - `{"event":"ended","sid":N,"term":"term:tmux:work","inputs":N}`：一个带 `sid` 的 view 结束了，`inputs` 是这次输入的次数。
+    - 最后一行 `{"event":"exit","code":N,"reason":"…"}`（`--json`）；stdin 关闭正常退出，退出码 0。
+  - 每次用时现读 `--config`；`allow` 为 false 时不接请求。
+  - **worker 的连接**：service 连这个端口，先写一行请求，再写一行口令（worker 的 `RAPP_TOKEN`），都以 `\n` 结尾。worker 读这两行合计最多等 30 秒，一行（含换行符）不超过 65536 字节。
+
+    | 请求行 | 谁写口令行 | worker 回 |
+    |---|---|---|
+    | `{"op":"list"}` | service | 一行 `TermList`，然后关 |
+    | `{"op":"watch"}` | service | 马上一行 `TermList`，之后每次变了再一行；对方关了才停 |
+    | `{"op":"new","host":null\|"gpu1","name":"x"?,"command":["claude"],"cols":120,"rows":40}` | service | `{"ok":true,"id":"term:tmux:x"}` 或 `{"error":"…"}`，然后关 |
+    | `{"op":"view","term":"term:tmux:work","sid":7}` | 主控台（经 hub、service 原样转过来的第一行） | 终端规格 §7 的线协议（`Hello` 起头）；开泵前的错误是一条 `{"t":"error","error":"…"}` |
+
+    `TermList` = `{"terms":[TermRow…],"hosts":[{"host":null},{"host":"gpu1","target":"me@gpu1","tmux":"…"?,"error":"…"?}]}`。口令不对回 `{"error":"bad token"}` 后关；请求行不是这几种回 `{"error":"bad request"}`；`term.json` 读不出回 `{"error":"term.json is invalid"}`；`allow` 为 false 回 `{"error":"terminal sessions are off"}`。
+- `rapp-term list [--json] [--ssh <destination> --host <name>] [--tmux <path>]`：列出 tmux 会话。`--json` 输出 `{"sessions":[TermRow…]}`；不带时每行 `id<TAB>command<TAB>panes`。`--host` 只能和 `--ssh` 一起用，名字要是 term 标识能带的。
+- `rapp-term watch <term id> [--ssh <destination>] [--tmux <path>] [--json]`：在终端里直接看一个会话，stdin/stdout 走终端规格 §7 的线协议。id 带主机名时必须给 `--ssh`；没有这个会话退出 1。
+- `rapp-term run [--name <name>] [--size <cols>x<rows>] [--ssh <destination> --host <name>] [--tmux <path>] [--json] -- <command...>`：新开一个 tmux 会话跑 `<command>`，输出新会话的 id（`--json` 时 `{"id":"term:tmux:x"}`）。`--size` 没写时 80x24，`--name` 没写时取命令名；同名会话已存在退出 1。
+- `rapp-term version [--json]`：输出 `{"version":"…","proto":N}`；不带 `--json` 时 `rapp-term <版本> (protocol N)`。
+- 退出码：0 正常、1 运行时错误（tmux 不可用、会话不在或建不成）、2 参数错误。出错信息在 stderr 一行，不含命令、屏幕和输入内容。
 
 ## 6. 打包（本轮只做 macOS）
 `scripts/package-macos.sh` 依次做这几步：

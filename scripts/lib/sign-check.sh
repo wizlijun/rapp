@@ -2,7 +2,7 @@
 # Tested by scripts/test-package.sh with recorded security/codesign output.
 
 # Sub-programs and the code-signing identifiers they must end up with.
-EXPECTED_IDS="rapp-service:com.rapp.service rapp-hub:com.rapp.hub rapp-host:com.rapp.host rapp-client:com.rapp.client"
+EXPECTED_IDS="rapp-service:com.rapp.service rapp-hub:com.rapp.hub rapp-term:com.rapp.term rapp-host:com.rapp.host rapp-client:com.rapp.client"
 
 # pick_identity <find-identity text> [set|unset] [RAPP_SIGN_APP value]
 # Prints "<kind> <sha>", kind = devid|dev|custom|adhoc (sha is "-" for adhoc).

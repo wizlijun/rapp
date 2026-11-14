@@ -53,7 +53,7 @@ check "stable dr is not cdhash" not is_cdhash_dr "$DR_STABLE"
 
 CS_OUT=$'Executable=/x/rapp.app/Contents/MacOS/rapp-host\nIdentifier=com.rapp.host\nFormat=Mach-O thin (arm64)'
 check "identifier parsed" eq "$(identifier_of "$CS_OUT")" "com.rapp.host"
-check "expected ids" eq "$EXPECTED_IDS" "rapp-service:com.rapp.service rapp-hub:com.rapp.hub rapp-host:com.rapp.host rapp-client:com.rapp.client"
+check "expected ids" eq "$EXPECTED_IDS" "rapp-service:com.rapp.service rapp-hub:com.rapp.hub rapp-term:com.rapp.term rapp-host:com.rapp.host rapp-client:com.rapp.client"
 
 CH=$(grep -n 'chown -R "$USER_NAME":staff "$APP"' scripts/pkg/postinstall | head -1 | cut -d: -f1 || true)
 BS=$(grep -n 'launchctl bootstrap' scripts/pkg/postinstall | head -1 | cut -d: -f1 || true)
