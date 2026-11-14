@@ -115,6 +115,10 @@ Omarchy 的 Rust/GTK 客户端已支持 v9（见下文）；Windows/Omarchy 主�
 安装包面向 Omarchy / Arch x86_64；便携包的依赖与用法见包内 `README-LINUX.txt`。
 发布包可从干净的源码提交运行 `./scripts/package-linux.sh` 重建，包内记录确切源码提交。
 
+> **注意：** v0.5.1 的 Linux 安装包和便携包**连不上 v9 主机**（macOS 主机 0.8.0 及以后）。
+> 新的 Linux 包发布之前，请在 Omarchy / Arch x86_64 上从干净的源码提交运行 `./scripts/package-linux.sh`
+> 自己重建，再按上面的方法安装或解压。
+
 现在可以在 Omarchy 上构建 **Rust + GTK4 的 `rapp-client`**，连接 macOS v9 主机（只支持 v9，没有 `protocol=` 选项；主机和客户端要一起升级）。
 Rust 网络后台继续复用；`rust/client-core` 实现可跨平台复用的协议和解码，
 `rust/client-gtk` 负责 Linux 显示和输入。Linux **被控端**仍未实现。
@@ -137,7 +141,7 @@ Rust 网络后台继续复用；`rust/client-core` 实现可跨平台复用的�
 同时保留 0.5.0 的客户端功能：Linux 可使用项目与常用、全景模式（离开舞台降至 1 fps）、触屏双指滚动，
 以及跨会话文字剪贴板资源。固定的文字副本在会话结束后仍可复制；图片/文件传输仍暂不支持。
 Linux 的“本机 → 版本与升级”可独立于后台服务检查 GitHub 发布并打开对应安装包，安装由系统软件包管理器完成。
-安装包和便携包均发布在同一个 v0.5.1 Release 中，包内记录确切源码提交。
+安装包和便携包均发布在同一个 v0.5.1 Release 中，包内记录确切源码提交；它们连不上 v9 主机，见上面的重建说明。
 
 构建依赖：Rust、GTK4 ≥ 4.12、pkgconf。连同 Flutter 管理界面打包还需要 Flutter
 （Dart ≥ 3.12.1）、clang、cmake、ninja、gtk3、libayatana-appindicator。
