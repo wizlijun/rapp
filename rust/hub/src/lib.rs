@@ -10,6 +10,7 @@ mod presence;
 mod session;
 mod terms;
 mod upgrade;
+mod watch;
 
 use anyhow::{bail, Context, Result};
 use hosts::{Host, Hosts};
@@ -88,6 +89,8 @@ pub(crate) struct Hub {
     terms: terms::Watches,
     /// The network monitor's level and last event (`netmon`).
     net: netmon::NetState,
+    /// Offline hosts a session waits for (`watch`).
+    watches: watch::Watches,
 }
 
 pub async fn run<R, W>(opts: Opts, input: R, output: W) -> Result<()>
@@ -118,6 +121,7 @@ where
         name: rapp_net::config::hostname(),
         terms: Default::default(),
         net: Default::default(),
+        watches: Default::default(),
     });
     let probe = opts.presence_every.map(|every| tokio::spawn(presence::run(hub.clone(), every)));
     let upgrade = tokio::spawn(upgrade::run(hub.clone()));
@@ -310,6 +314,11 @@ impl Hub {
                 return Ok(None);
             }
             Some("net") => self.net_event(),
+            Some("watch") => {
+                let on = v.get("on").and_then(Value::as_bool).context("missing on")?;
+                watch::set(self, s("id")?, on);
+                return Ok(None);
+            }
             Some("net_suspect") => {
                 self.net_suspect();
                 return Ok(None);

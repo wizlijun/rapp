@@ -706,6 +706,47 @@ async fn host_goes_offline_and_comes_back() {
     hub.finish().await;
 }
 
+/// A session waits for an offline host (`watch`): the hub asks every 5 s and says `presence online`
+/// as soon as the host answers; nothing is said while it is still away.
+#[tokio::test]
+async fn a_watched_host_is_reported_when_it_is_back() {
+    let mut a = LanA::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = Hub::start(home.path(), a.bins.path());
+    let r = hub.call(json!({"cmd":"add_host","id":format!("{}@{}", a.id, a.addr),"password":PASSWORD})).await;
+    assert_eq!(r["event"], "host_added", "{r}");
+    a.stop();
+    hub.send(json!({"cmd":"watch","id":a.id,"on":true})).await;
+    // Two asks go by while it is away: no event.
+    assert!(tokio::time::timeout(Duration::from_secs(11), hub.next()).await.is_err(), "an event while away");
+    a.restart().await;
+    let t = std::time::Instant::now();
+    let r = tokio::time::timeout(Duration::from_secs(10), hub.next()).await.expect("presence within 10 s");
+    assert_eq!(r, json!({"event":"presence","id":a.id,"online":true}));
+    eprintln!("seen after {:?}", t.elapsed());
+    hub.finish().await;
+}
+
+/// The presence round leaves a watched host to its watch, and takes it back when the watch stops.
+#[tokio::test]
+async fn presence_skips_a_watched_host() {
+    let mut a = LanA::start().await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = Hub::start_with_presence(home.path(), a.bins.path(), Duration::from_millis(200));
+    hub.send(json!({"cmd":"add_host","id":format!("{}@{}", a.id, a.addr),"password":PASSWORD,"req":1})).await;
+    next_presence(&mut hub, &a.id, true).await;
+    a.stop();
+    next_presence(&mut hub, &a.id, false).await;
+    hub.send(json!({"cmd":"watch","id":a.id,"on":true})).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    // Drain what the round said before the watch, then expect silence.
+    while tokio::time::timeout(Duration::from_millis(300), hub.next()).await.is_ok() {}
+    assert!(tokio::time::timeout(Duration::from_secs(2), hub.next()).await.is_err(), "the round asked a watched host");
+    hub.send(json!({"cmd":"watch","id":a.id,"on":false})).await;
+    next_presence(&mut hub, &a.id, false).await;
+    hub.finish().await;
+}
+
 /// A relay-era `lan` list ends in `127.0.0.1:<port>`; on B that is B's own service, which accepts the
 /// shared password. Its auth reply names another ID, so it is no answer for this host.
 #[tokio::test]

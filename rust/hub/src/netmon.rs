@@ -60,7 +60,6 @@ impl Hub {
     }
 
     /// The level of the link to the relay; None when no relay is set or nothing is known yet.
-    #[allow(dead_code)] // read by the host watch (Task 4)
     pub(crate) fn net_level(&self) -> Option<Level> {
         *self.net.level.lock().unwrap()
     }

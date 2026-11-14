@@ -36,7 +36,8 @@ pub(crate) async fn run(hub: Arc<Hub>, every: Duration) {
         let hosts = hub.hosts.all();
         terms::stop_gone(&hub, &hosts);
         for host in hosts {
-            if hub.probe_halt.lock().unwrap().contains(&host.id) {
+            // A host a session waits for is asked by its watch, on its own cadence.
+            if hub.probe_halt.lock().unwrap().contains(&host.id) || hub.watches.has(&host.id) {
                 continue;
             }
             let r = QUIET.scope(true, hub.probe(&host)).await;
