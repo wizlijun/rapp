@@ -16,8 +16,16 @@ void main() {
         .map((c) => c.toString())
         .toList();
 
-    test('start bootstraps the LaunchAgent', () {
-      expect(cmd(ServiceAction.start), ['launchctl bootstrap gui/501 $plist']);
+    test('start clears a stale registration, then bootstraps with retries', () {
+      final c = serviceCommands(ServiceAction.start,
+          os: 'macos', uid: 501, home: '/Users/u', serviceExe: '/A/rapp.app/Contents/MacOS/rapp-service');
+      expect(c.map((c) => c.toString()), [
+        'launchctl bootout gui/501/com.rapp.service',
+        'launchctl bootstrap gui/501 $plist',
+      ]);
+      expect(c[0].check, isFalse, reason: 'not loaded on a normal start: bootout exits 3');
+      expect(c[1].check, isTrue);
+      expect(c[1].retries, 5, reason: 'launchd teardown race reports exit 5');
     });
     test('stop boots it out by label', () {
       expect(cmd(ServiceAction.stop), ['launchctl bootout gui/501/com.rapp.service']);

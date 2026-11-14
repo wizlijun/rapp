@@ -39,6 +39,7 @@ class RappTokens extends ThemeExtension<RappTokens> {
     required this.monoFallback,
     required this.monoBody,
     required this.labelSpacing,
+    this.overviewArt,
   });
 
   final Color bg, line, text, muted, on, accent, accentInk, tint;
@@ -63,6 +64,13 @@ class RappTokens extends ThemeExtension<RappTokens> {
   /// Letter spacing (em) for small headings.
   final double labelSpacing;
 
+  /// File name of the overview's bottom-right illustration, under [themeAssetDir].
+  /// Null: the theme has none.
+  final String? overviewArt;
+
+  /// The asset key of [overviewArt], or null.
+  String? get overviewArtAsset => overviewArt == null ? null : '$themeAssetDir/$overviewArt';
+
   static RappTokens of(BuildContext context) =>
       Theme.of(context).extension<RappTokens>()!;
 
@@ -85,7 +93,7 @@ class RappTokens extends ThemeExtension<RappTokens> {
   BoxDecoration raiseBox({Color? border}) => _box(raise, border);
 
   @override
-  RappTokens copyWith({Color? bg, Color? text}) => RappTokens(
+  RappTokens copyWith({Color? bg, Color? text, String? overviewArt}) => RappTokens(
     bg: bg ?? this.bg,
     panel: panel,
     raise: raise,
@@ -105,6 +113,7 @@ class RappTokens extends ThemeExtension<RappTokens> {
     monoFallback: monoFallback,
     monoBody: monoBody,
     labelSpacing: labelSpacing,
+    overviewArt: overviewArt ?? this.overviewArt,
   );
 
   // Themes are switched discretely, not animated.
@@ -112,6 +121,9 @@ class RappTokens extends ThemeExtension<RappTokens> {
   RappTokens lerp(ThemeExtension<RappTokens>? other, double t) =>
       t < 0.5 || other is! RappTokens ? this : other;
 }
+
+/// Where theme images live (listed in pubspec.yaml).
+const themeAssetDir = 'assets/themes';
 
 const _font = 'Inter';
 const _fontFallback = [
@@ -180,6 +192,7 @@ RappTokens tokensFor(RappTheme theme) {
         monoFallback: _monoFallback,
         monoBody: true,
         labelSpacing: 0.06,
+        overviewArt: 'overview_matrix.png',
       );
     case RappTheme.avatar:
       const on = Color(0xFF6FE3FF);
@@ -209,6 +222,7 @@ RappTokens tokensFor(RappTheme theme) {
         monoFallback: _monoFallback,
         monoBody: false,
         labelSpacing: 0.06,
+        overviewArt: 'overview_avatar.png',
       );
     case RappTheme.westworld:
       const on = Color(0xFFFFFFFF);
@@ -232,6 +246,7 @@ RappTokens tokensFor(RappTheme theme) {
         monoFallback: _monoFallback,
         monoBody: false,
         labelSpacing: 0.12,
+        overviewArt: 'overview_westworld.png',
       );
   }
 }

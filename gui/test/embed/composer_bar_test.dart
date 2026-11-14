@@ -140,6 +140,36 @@ void main() {
       });
     });
 
+    testWidgets('a tap while the input method composes cannot move the caret', (tester) async {
+      await tester.pumpWidget(wrap(bar()));
+      await tester.tap(find.byType(TextField));
+      await tester.pump();
+      final c = rs.composer.controller;
+      final start = tester.getTopLeft(find.byType(EditableText)) + const Offset(1, 5);
+
+      // fcitx5's preedit, arriving the way the platform delivers it.
+      tester.testTextInput.updateEditingValue(const TextEditingValue(
+          text: 'bu dui',
+          selection: TextSelection.collapsed(offset: 6),
+          composing: TextRange(start: 0, end: 6)));
+      await tester.pump();
+
+      // A tap at the start of the text would re-anchor the preedit and double every letter.
+      await tester.tapAt(start);
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(c.value.selection, const TextSelection.collapsed(offset: 6));
+      expect(c.value.composing, const TextRange(start: 0, end: 6));
+      expect(c.value.text, 'bu dui');
+
+      // Composition over: taps place the caret again.
+      tester.testTextInput.updateEditingValue(const TextEditingValue(
+          text: '不对', selection: TextSelection.collapsed(offset: 2)));
+      await tester.pump();
+      await tester.tapAt(start);
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(c.value.selection, const TextSelection.collapsed(offset: 0));
+    });
+
     testWidgets('keys row sends codes with sticky command', (tester) async {
       await tester.pumpWidget(wrap(bar()));
       await tester.tap(find.text('按键'));

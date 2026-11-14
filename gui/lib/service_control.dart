@@ -10,12 +10,18 @@ const serviceLabel = 'com.rapp.service';
 const _winRunKey = r'HKCU\Software\Microsoft\Windows\CurrentVersion\Run';
 
 class ShellCommand {
-  const ShellCommand(this.exe, this.args, {this.detached = false});
+  const ShellCommand(this.exe, this.args, {this.detached = false, this.check = true, this.retries = 1});
   final String exe;
   final List<String> args;
 
   /// Launch and forget (Windows service start) instead of waiting for exit.
   final bool detached;
+
+  /// Ignore the exit code (bootout of an agent that is not loaded exits 3).
+  final bool check;
+
+  /// Run again with a 1 s pause after a nonzero exit (launchd teardown race).
+  final int retries;
 
   @override
   String toString() => [exe, ...args].join(' ');
@@ -32,8 +38,15 @@ List<ShellCommand> serviceCommands(
 }) {
   switch (os) {
     case 'macos':
+      // bootstrap right after bootout fails with "Bootstrap failed: 5: Input/output error"
+      // while launchd is still tearing the old agent down (same race the pkg postinstall hit).
+      // 先 bootout 清掉可能残留的旧注册（没加载时 exit 3，不算失败），再 bootstrap；
+      // launchd 拆卸慢时 bootstrap 会报 5，隔 1 秒重试最多 5 次。
       return switch (action) {
-        ServiceAction.start => [ShellCommand('launchctl', ['bootstrap', 'gui/$uid', launchAgentPlistPath(home)])],
+        ServiceAction.start => [
+          ShellCommand('launchctl', ['bootout', 'gui/$uid/$serviceLabel'], check: false),
+          ShellCommand('launchctl', ['bootstrap', 'gui/$uid', launchAgentPlistPath(home)], retries: 5),
+        ],
         ServiceAction.stop => [ShellCommand('launchctl', ['bootout', 'gui/$uid/$serviceLabel'])],
         ServiceAction.restart => [ShellCommand('launchctl', ['kickstart', '-k', 'gui/$uid/$serviceLabel'])],
       };
@@ -134,8 +147,12 @@ class ServiceController {
           await Process.start(c.exe, c.args, mode: ProcessStartMode.detached);
           continue;
         }
-        final r = await Process.run(c.exe, c.args);
-        if (r.exitCode != 0) {
+        var r = await Process.run(c.exe, c.args);
+        for (var n = 1; r.exitCode != 0 && n < c.retries; n++) {
+          await Future<void>.delayed(const Duration(seconds: 1));
+          r = await Process.run(c.exe, c.args);
+        }
+        if (r.exitCode != 0 && c.check) {
           final msg = '${r.stderr}'.trim();
           return '$c → exit ${r.exitCode}${msg.isEmpty ? '' : ': $msg'}';
         }

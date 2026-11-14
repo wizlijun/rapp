@@ -1,0 +1,16 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cloudflare/workers-sdk/main/packages/wrangler/config-schema.json",
+  "name": "rapphub-site",
+  "account_id": "9aec351745dbb8adf336b98a0f473761",
+  "compatibility_date": "2026-11-14",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "404-page"
+  },
+  "routes": [
+    { "pattern": "rapphub.com", "custom_domain": true },
+    { "pattern": "www.rapphub.com", "custom_domain": true }
+  ],
+  "workers_dev": false,
+  "preview_urls": false
+}
