@@ -25,6 +25,7 @@ void main() {
   bool holdApps = false;
   String? addTargetError;
   var termsOff = false;
+  String? removeTargetError;
   var termHosts = <Map<String, dynamic>>[{'host': null}];
 
   Future<void> flush() => Future<void>.delayed(Duration.zero);
@@ -36,6 +37,7 @@ void main() {
     holdApps = false;
     addTargetError = null;
     termsOff = false;
+    removeTargetError = null;
     termHosts = [{'host': null}];
     tmp = Directory.systemTemp.createTempSync('devices_tab_test');
     t = FakeTransport();
@@ -82,6 +84,7 @@ void main() {
           termHosts.add({'host': cmd['name'], 'target': cmd['target']});
           t.emit({'event': 'term_targets', 'req': req, 'id': cmd['id'], 'targets': []});
         case 'remove_term_target':
+          if (removeTargetError != null) return t.emit({'event': 'error', 'req': req, 'error': removeTargetError});
           termHosts.removeWhere((h) => h['host'] == cmd['name']);
           t.emit({'event': 'term_targets', 'req': req, 'id': cmd['id'], 'targets': []});
         case 'set_route':
@@ -667,5 +670,21 @@ void main() {
     expect((rm['id'], rm['name']), ('111', 'gpu1'));
     expect(t.sent.last['cmd'], 'terms');
     expect(find.byKey(const Key('remove-host-gpu1')), findsNothing);
+  });
+
+  testWidgets('a failed remove of an SSH host says so with the hub words and keeps the host', (tester) async {
+    removeTargetError = 'no such host: gpu1';
+    termHosts = [
+      {'host': null},
+      {'host': 'gpu1', 'target': 'me@gpu1'},
+    ];
+    await pumpTab(tester);
+    await selectMini(tester);
+    await emitTerms(tester, []);
+    await tester.ensureVisible(find.byKey(const Key('remove-host-gpu1')));
+    await tester.tap(find.byKey(const Key('remove-host-gpu1')));
+    await tester.pumpAndSettle();
+    expect(find.text('移除失败：no such host: gpu1'), findsOneWidget);
+    expect(find.byKey(const Key('remove-host-gpu1')), findsOneWidget);
   });
 }

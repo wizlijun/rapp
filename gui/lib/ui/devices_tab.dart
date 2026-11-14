@@ -62,6 +62,7 @@ class DevicesTab extends StatefulWidget {
 class _DevicesTabState extends State<DevicesTab> {
   final _bundle = TextEditingController();
   final _requested = <String>{};
+  String? _removeError;
 
   MainState get state => widget.state;
 
@@ -343,6 +344,11 @@ class _DevicesTabState extends State<DevicesTab> {
               ],
             ),
           ),
+      if (_removeError != null)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Text(_removeError!, key: const Key('remove-host-error'), style: TextStyle(color: t.accent)),
+        ),
       Align(
         alignment: Alignment.centerLeft,
         child: RappButton.secondary(
@@ -358,9 +364,11 @@ class _DevicesTabState extends State<DevicesTab> {
     final hub = state.hub!;
     try {
       await hub.removeTermTarget(id, name);
+      if (mounted) setState(() => _removeError = null);
       await hub.terms(id);
-    } catch (_) {
-      // The list stays as it was; the hub's word for it is in lastError.
+    } catch (e) {
+      // A failed request's error goes to its future only (not `lastError`), so it is shown here, as the hub said it.
+      if (mounted) setState(() => _removeError = '移除失败：$e');
     }
   }
 
