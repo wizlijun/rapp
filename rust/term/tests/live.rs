@@ -270,6 +270,19 @@ async fn types_cjk_and_named_keys() {
 }
 
 #[tokio::test]
+async fn alt_and_shift_keys_reach_the_pane() {
+    let Some(s) = common::Server::start() else { return };
+    s.raw(&["new-session", "-d", "-s", "k", "-x", "80", "-y", "10", "cat -v"]);
+    let t = s.tmux();
+    let pane = t.list().await.unwrap()[0].pane.clone();
+    let keys: Vec<String> = ["Alt-x", "Shift-Up"].iter().map(|k| rapp_term::keys::tmux_name(k).unwrap()).collect();
+    t.send(cmd::send_named(&pane, &keys)).await.unwrap();
+    common::settle().await;
+    let sc = t.capture(&pane).await.unwrap();
+    assert_eq!(sc.lines[0].as_str(), "^[x^[[1;2A");
+}
+
+#[tokio::test]
 async fn pastes_multiline_text_as_one_bracketed_paste_and_leaves_no_buffer() {
     let Some(s) = common::Server::start() else { return };
     s.raw(&["new-session", "-d", "-s", "p", "-x", "80", "-y", "10", "printf '\\033[?2004h'; cat -v"]);
