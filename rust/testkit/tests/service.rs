@@ -200,17 +200,28 @@ async fn set_password_via_ipc() {
 
 #[tokio::test]
 async fn old_service_json_with_relay_fields_still_loads() {
+    // A 0.5.5 service.json: relay1's address and operator key, and a secret that 0.6 no longer uses.
     let (home, bins) = (tempfile::tempdir().unwrap(), bins());
+    let old_key = "k3y-from-0.5.5";
     std::fs::write(
         home.path().join("service.json"),
-        r#"{"relay":"vps:22026","key":"k","id":"123456789","secret":"s","name":"old-a","password":"pw12","port":0,"ipc_port":0}"#,
+        json!({"relay":"203.0.113.7:21116","key":old_key,"id":"123456789","secret":"ab".repeat(32),
+               "name":"old-a","password":"pw12","port":0,"ipc_port":0})
+        .to_string(),
     )
     .unwrap();
     let svc = start_service(home.path(), bins.path(), Duration::from_secs(60)).await;
     let st = ipc_once(&svc, home.path(), json!({"cmd":"status"})).await;
     assert_eq!((&st["id"], &st["name"], &st["password"]), (&json!("123456789"), &json!("old-a"), &json!("pw12")));
-    // The relay address is kept; a key that does not parse counts as none.
-    assert_eq!((&st["relay_addr"], &st["has_key"], &st["relay"]), (&json!("vps:22026"), &json!(false), &json!("off")));
+    // relay1's key is not a 0.6 key: it goes, and the relay with it.
+    assert_eq!((&st["relay_addr"], &st["has_key"], &st["relay"]), (&Value::Null, &json!(false), &json!("off")));
+    assert_eq!(ipc_once(&svc, home.path(), json!({"cmd":"show_key"})).await, json!({"ok":true,"key":null}));
+    let cfg = service_json_value(home.path());
+    assert!(cfg.get("relay").is_none() && cfg.get("key").is_none() && cfg.get("secret").is_none(), "{cfg}");
+    let ev = wait_log(home.path(), "relay_legacy_dropped", |_| true).await;
+    assert!(!ev.to_string().contains("203.0.113.7"), "{ev}");
+    let log = std::fs::read_to_string(home.path().join("logs/service.log")).unwrap();
+    assert!(!log.contains(old_key), "the log has the old key");
 }
 
 #[tokio::test]

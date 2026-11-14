@@ -99,6 +99,9 @@ impl Service {
         make_private(&launchd);
         let log = Log::file(&opts.log_dir, LOG_FILE);
         let cfg = Config::load_or_init(&opts.home)?;
+        if cfg.legacy_dropped {
+            log.event(Lvl::Info, "relay_legacy_dropped", json!({}));
+        }
         let (port, ipc_port) = (cfg.port.unwrap_or(DEFAULT_PORT), cfg.ipc_port.unwrap_or(DEFAULT_IPC_PORT));
         let identity = Identity::load_or_create(&opts.home, "device")?;
         let paired = rapp_conn::Paired::load(&opts.home).unwrap_or_else(|e| {
