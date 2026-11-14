@@ -165,6 +165,30 @@ void main() {
     expect(h.search('').length, 3);
   });
 
+  test('removing rewrites the day file without that line only', () async {
+    final f = day('dev1', '2026-11-14', [
+      rec('01A', '2026-11-14T10:00:00+09:00', 'one 一'),
+      rec('01B', '2026-11-14T11:00:00+09:00', 'two'),
+      rec('01C', '2026-11-14T12:00:00+09:00', 'three'),
+    ]);
+    final lines = const LineSplitter().convert(utf8.decode(f.readAsBytesSync()));
+    final h = history();
+    await h.refresh();
+    h.add(rec('01B', '2026-11-14T11:00:00+09:00', 'two')); // came through add too
+    final two = h.forSession('h1/com.apple.Terminal').firstWhere((e) => e.id == '01B');
+    await h.remove(two);
+    expect(f.readAsBytesSync(), utf8.encode('${lines[0]}\n${lines[2]}\n'));
+    expect(h.search('').map((e) => e.id), ['01C', '01A']);
+    expect(File('${f.path}.tmp').existsSync(), isFalse);
+    await h.refresh(); // the new length and time make it read again: still gone
+    expect(h.search('').map((e) => e.id), ['01C', '01A']);
+    // Another device's record is left alone.
+    day('dev2', '2026-11-14', [rec('02A', '2026-11-14T10:00:00+09:00', 'theirs', from: 'dev2')]);
+    await h.refresh();
+    await h.remove(h.search('theirs').single);
+    expect(h.search('theirs'), hasLength(1));
+  });
+
   test('a missing devices dir is an empty history', () async {
     final h = history();
     await h.refresh();

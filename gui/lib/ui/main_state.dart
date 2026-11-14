@@ -108,6 +108,9 @@ class MainState extends ChangeNotifier {
   late final InputHistory history;
   StreamSubscription<Map<String, Object?>>? _writtenSub;
 
+  /// The record key (`host/app`) of [rs]'s session, null when no record claims it.
+  String? historyKeyOf(RemoteSession rs) => (_recordOfSid(rs.sid) ?? _recordOfLastSid(rs.sid))?.key;
+
   /// What ↑ brings back in [rs]'s writing panel, newest first (R2); empty for a session no
   /// record claims.
   List<InputEntry> recallOf(RemoteSession rs) {

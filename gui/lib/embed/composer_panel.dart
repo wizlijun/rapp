@@ -407,6 +407,8 @@ class _ComposerPanelState extends State<ComposerPanel> {
                       session: _s,
                       port: widget.port,
                       onAttach: _attach,
+                      history: widget.state.history,
+                      historyKey: widget.state.historyKeyOf(_s),
                       onPress: widget.state.blurPicture,
                     ),
                     const SizedBox(width: 4),

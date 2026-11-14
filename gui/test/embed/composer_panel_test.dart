@@ -10,6 +10,7 @@ import 'package:rapp/embed/composer_panel.dart';
 import 'package:rapp/embed/picture.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
+import 'package:rapp/history/history_list.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/ui/controls.dart';
 import 'package:rapp/ui/main_state.dart';
@@ -903,6 +904,35 @@ void main() {
       await tester.tapAt(spot);
       await tester.pump();
       expect(port.calls.where((c) => c.$1 == 'mouse'), isNotEmpty);
+    });
+
+    testWidgets('the ＋ menu opens the history and 放进输入框 closes it', (tester) async {
+      await showPicture(tester);
+      es.history.add({
+        'id': '01A',
+        'ts': '2026-11-15T09:00:00+09:00',
+        'kind': 'sent',
+        'from': {'id': 'dev1', 'name': 'x'},
+        'host': {'id': '111', 'name': 'mini'},
+        'app': {'id': 'Safari', 'name': 'Safari'},
+        'session': '111/Safari',
+        'text': '回头再看这段',
+      });
+      await tester.tap(find.byKey(const Key('composer-open')));
+      await tester.pump();
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('composer-plus')));
+      await tester.pump();
+      await tester.tap(find.text('输入历史'));
+      await tester.pump();
+      expect(find.byKey(const Key('composer-plus-menu')), findsNothing);
+      expect(find.byType(InputHistoryList), findsOneWidget);
+      expect(find.byKey(const Key('history-01A')), findsOneWidget); // this session's, by default
+      await tester.tap(find.byKey(const Key('put-01A')));
+      await tester.pumpAndSettle();
+      expect(find.byType(InputHistoryList), findsNothing);
+      expect(es.currentRemote!.composer.open, isTrue);
+      expect(text(tester), contains('回头再看这段'));
     });
 
     testWidgets('Esc with the plus menu open closes the panel and the menu', (tester) async {

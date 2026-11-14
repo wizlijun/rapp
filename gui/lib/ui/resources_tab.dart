@@ -3,7 +3,9 @@
 // corner, never on the stage.
 import 'package:flutter/material.dart';
 
+import '../embed/composer_plus.dart';
 import '../embed/session_port.dart';
+import '../history/history_list.dart';
 import 'controls.dart';
 import 'lamp.dart';
 import 'main_state.dart';
@@ -23,6 +25,8 @@ class ResourcesTab extends StatelessWidget {
         final clips = r.clips;
         final running = r.running;
         final ended = r.ended;
+        final key = state.currentRecord?.key;
+        final remote = state.currentRemote;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -46,6 +50,20 @@ class ResourcesTab extends StatelessWidget {
                   const _Sub('传过的'),
                   if (ended.isEmpty) const _Empty('这次启动还没有传过文件'),
                   for (final x in ended) _EndedRow(key: Key('ended-${x.seq}'), state: state, row: x),
+                ],
+              ),
+            ),
+            Divider(height: 1, color: RappTokens.of(context).line),
+            Expanded(
+              child: _Half(
+                title: '输入历史',
+                children: [
+                  InputHistoryList(
+                    history: state.history,
+                    session: key,
+                    host: key?.split('/').first,
+                    onPut: remote == null ? null : (text) => putIntoComposer(remote, text),
+                  ),
                 ],
               ),
             ),

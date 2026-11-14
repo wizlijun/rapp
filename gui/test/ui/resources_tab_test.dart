@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/paths.dart';
 import 'package:rapp/embed/session_port.dart';
+import 'package:rapp/history/history_list.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/ui/controls.dart';
 import 'package:rapp/ui/main_state.dart';
@@ -86,6 +87,28 @@ void main() {
     expect(find.text('Calculator @ mini · 09:05'), findsNWidgets(2));
     expect(find.text('文字'), findsOneWidget);
     expect(find.text('图片'), findsOneWidget);
+  });
+
+  testWidgets('the resources tab shows the history after files', (tester) async {
+    await boot(tester);
+    s.history.add({
+      'id': '01A',
+      'ts': '2026-11-12T09:00:00+09:00',
+      'kind': 'sent',
+      'from': {'id': 'dev1', 'name': 'x'},
+      'host': {'id': '111', 'name': 'mini'},
+      'app': {'id': 'calc', 'name': 'Calculator'},
+      'session': '111/calc',
+      'text': '算一下',
+    });
+    await show(tester);
+    await settle(tester);
+    expect(find.text('输入历史'), findsOneWidget);
+    expect(find.byKey(const Key('history-01A')), findsOneWidget);
+    double y(String s) => tester.getTopLeft(find.text(s)).dy;
+    expect(y('剪贴板'), lessThan(y('文件')));
+    expect(y('文件'), lessThan(y('输入历史')));
+    expect(find.byType(InputHistoryList), findsOneWidget);
   });
 
   testWidgets('kind tags use the design language borders', (tester) async {
