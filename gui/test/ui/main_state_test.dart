@@ -3791,10 +3791,16 @@ void main() {
         );
 
     // A MainState with its own hub and port; an open answers sid = the app's length (+10 per
-    // reconnect). It has opened com.a on 111 when this returns.
-    Future<(MainState, FakeSessionPort)> start({UiPrefs? prefs, AppProfileStore? profiles}) async {
+    // reconnect). It has opened com.a on 111 when this returns (unless [live] is false).
+    // [reopen]: a reconnect's open waits for it to call `answer`.
+    Future<(MainState, FakeSessionPort)> start(
+        {UiPrefs? prefs,
+        AppProfileStore? profiles,
+        void Function(void Function() answer)? reopen,
+        Object? startError,
+        bool live = true}) async {
       final t = FakeTransport();
-      final port = FakeSessionPort();
+      final port = FakeSessionPort()..startError = startError;
       final h = HubClient(t);
       t.emit({
         'event': 'hosts',
@@ -3808,10 +3814,16 @@ void main() {
       t.onSend = (m) {
         if (m['cmd'] != 'open') return;
         final n = (m['app'] as String).length + (m['reconnect'] == true ? 10 * ++reconnects : 0);
-        t.emit({...opened(n, '111', m['app'] as String), 'port': 5000 + n, 'token': 'tk', 'req': m['req']});
+        void answer() =>
+            t.emit({...opened(n, '111', m['app'] as String), 'port': 5000 + n, 'token': 'tk', 'req': m['req']});
+        if (m['reconnect'] == true && reopen != null) {
+          reopen(answer);
+        } else {
+          answer();
+        }
       };
       await st.openOrSwitch('111', 'com.a', 'A');
-      await until(() => st.currentRemote != null);
+      if (live) await until(() => st.currentRemote != null);
       return (st, port);
     }
 
@@ -3846,9 +3858,9 @@ void main() {
       expect(st2.currentRemote!.composer.draft, '断在半路');
     });
 
-    test('a reconnect does not restore the draft twice', () async {
+    test('a reconnect does not restore the draft twice and keeps the unwritten record', () async {
       await drafts().save(DraftFile(key: key, text: '草稿'));
-      File(d.inputsDir('dev1')).writeAsStringSync('in the way'); // the failed round below stays pending
+      File(d.inputsDir('dev1')).writeAsStringSync('in the way'); // the failed round's record waits
       final (st, port) = await start();
       port.emit(WindowsEvent(sid, [win(3)]));
       final old = st.currentRemote!;
@@ -3857,7 +3869,9 @@ void main() {
       old.composer.setDraft('还在写');
       port.emit(DisconnectedEvent(sid, 'boom'));
       await settle();
-      expect(drafts().load(key)!.pending, ['草稿']);
+      var f = drafts().load(key)!;
+      expect(f.pending, isEmpty);
+      expect([for (final r in f.records) (r['text'], r['result'])], [('草稿', 'failed')]);
       await st.reconnect(key);
       await pump();
       port.emit(WindowsEvent(sid + 10, [win(3)]));
@@ -3866,6 +3880,83 @@ void main() {
       expect(fresh.sid, sid + 10);
       expect(fresh.composer.draft, '还在写');
       expect(fresh.composer.failed.map((o) => o.text), ['草稿']);
+      f = drafts().load(key)!;
+      expect(f.text, '还在写');
+      expect(f.pending, isEmpty);
+      expect(f.records.map((r) => r['text']), ['草稿'], reason: 'the swap drops nothing');
+      // Writable again: the end writes the kept record, then the draft.
+      File(d.inputsDir('dev1')).deleteSync();
+      st.endCurrent();
+      port.emit(ClosedEvent(sid + 10, 'rapp-client: quit'));
+      await until(() => lines().length == 2);
+      expect([for (final r in lines()) (r['kind'], r['text'])], [('sent', '草稿'), ('draft', '还在写')]);
+      await until(() => drafts().load(key) == null);
+      expect(drafts().load(key), isNull);
+    });
+
+    test('a row still in flight at the swap follows to the new session, pending once', () async {
+      final (st, port) = await start();
+      port.emit(WindowsEvent(sid, [win(3)]));
+      final old = st.currentRemote!;
+      port.emit(DisconnectedEvent(sid, 'boom'));
+      await settle();
+      // Stands in for a move's send, whose done never comes: the swap is the same `_dropOld`.
+      old.composer.setDraft('在路上');
+      await old.composer.submit();
+      await until(() => drafts().load(key)?.pending.isNotEmpty ?? false);
+      await st.reconnect(key);
+      await pump();
+      port.emit(WindowsEvent(sid + 10, [win(3)]));
+      await settle();
+      final fresh = st.currentRemote!;
+      expect(fresh.sid, sid + 10);
+      expect(fresh.composer.retry(fresh.composer.failed.single), isNotNull);
+      await settle();
+      expect(drafts().load(key)!.pending, ['在路上'], reason: 'once');
+      fresh.composer.done(1, null);
+      await until(() => lines().length == 1 && drafts().load(key) == null);
+      expect(lines().single['text'], '在路上');
+      expect(lines().single['result'], 'sent');
+    });
+
+    test("the old session's close before the reopen answers drops nothing", () async {
+      File(d.inputsDir('dev1')).writeAsStringSync('in the way');
+      void Function()? answer;
+      final (st, port) = await start(reopen: (a) => answer = a);
+      port.emit(WindowsEvent(sid, [win(3)]));
+      final old = st.currentRemote!;
+      old.composer.setDraft('断在路上');
+      await old.composer.submit();
+      port.emit(DisconnectedEvent(sid, 'boom'));
+      await settle();
+      final reconnected = st.reconnect(key); // waits for the open's answer
+      await pump();
+      expect(answer, isNotNull);
+      port.emit(ClosedEvent(sid, 'gone')); // no fresh session to take the old one's rows
+      await settle();
+      expect(st.remote.containsKey(sid), false);
+      expect(drafts().load(key)!.records.map((r) => r['text']), ['断在路上']);
+      File(d.inputsDir('dev1')).deleteSync();
+      answer!();
+      await reconnected;
+      await until(() => st.currentRemote?.sid == sid + 10);
+      await until(() => lines().length == 1);
+      expect(lines().single['text'], '断在路上');
+      expect(lines().single['result'], 'failed');
+      expect(st.currentRemote!.composer.draft, '', reason: 'a finished round is no draft');
+    });
+
+    test('ending a session that never went live turns its draft into a draft record', () async {
+      await drafts().save(DraftFile(key: key, text: '上次的'));
+      final (st, _) = await start(startError: 'boom', live: false);
+      await until(() => st.recordFor(key)?.phase == Phase.disconnected);
+      expect(st.remote, isEmpty);
+      st.endCurrent();
+      await until(() => lines().length == 1);
+      expect(lines().single['kind'], 'draft');
+      expect(lines().single['text'], '上次的');
+      await until(() => drafts().load(key) == null);
+      expect(drafts().load(key), isNull);
     });
 
     test('ending a session turns its draft into a draft record; disconnecting does not', () async {

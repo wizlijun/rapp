@@ -5,24 +5,53 @@ import 'dart:io';
 import '../data_dir.dart';
 
 class DraftFile {
-  DraftFile({required this.key, this.text = '', List<String>? pending, Map<String, Object?>? meta})
+  DraftFile({required this.key, this.text = '', List<String>? pending, List<Map<String, Object?>>? records, Map<String, Object?>? meta})
       : pending = pending ?? [],
+        records = records ?? [],
         meta = meta ?? {};
   String key;
   String text;
+
+  /// Sent text whose round has not finished (a crash mid-send brings it back).
   List<String> pending;
+
+  /// Built records of finished rounds whose write failed: appended later, never text again.
+  List<Map<String, Object?>> records;
   Map<String, Object?> meta;
 
-  Map<String, Object?> toJson() => {'v': 1, 'key': key, 'text': text, 'pending': pending, 'meta': meta};
+  /// `pending` holds both: a string, or `{text, record}` for a built record (older files have
+  /// only strings).
+  Map<String, Object?> toJson() => {
+        'v': 1,
+        'key': key,
+        'text': text,
+        'pending': [
+          ...pending,
+          for (final r in records) {'text': r['text'] is String ? r['text'] : '', 'record': r},
+        ],
+        'meta': meta,
+      };
 
   static DraftFile? fromJson(Object? j) {
     if (j is! Map || j['v'] != 1 || j['key'] is! String) return null;
     final text = j['text'], pending = j['pending'], meta = j['meta'];
-    if (text is! String || pending is! List || pending.any((e) => e is! String)) return null;
+    if (text is! String || pending is! List) return null;
+    final ps = <String>[];
+    final rs = <Map<String, Object?>>[];
+    for (final e in pending) {
+      if (e is String) {
+        ps.add(e);
+      } else if (e is Map && e['record'] is Map) {
+        rs.add((e['record'] as Map).cast<String, Object?>());
+      } else {
+        return null;
+      }
+    }
     return DraftFile(
       key: j['key'] as String,
       text: text,
-      pending: pending.cast<String>().toList(),
+      pending: ps,
+      records: rs,
       meta: meta is Map ? meta.cast<String, Object?>() : {},
     );
   }
@@ -58,7 +87,7 @@ class DraftStore {
 
   /// Writes [d]; an empty draft with nothing pending deletes the file instead.
   Future<void> save(DraftFile d) {
-    if (d.text.isEmpty && d.pending.isEmpty) return delete(d.key);
+    if (d.text.isEmpty && d.pending.isEmpty && d.records.isEmpty) return delete(d.key);
     final path = pathFor(d.key);
     final data = utf8.encode(jsonEncode(d.toJson()));
     return _serial(d.key, () async => writePrivate(path, data));

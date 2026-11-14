@@ -23,6 +23,27 @@ void main() {
     expect(Directory('${tmp.path}/drafts').listSync().where((e) => e.path.endsWith('.tmp')), isEmpty);
   });
 
+  test('pending holds strings and built records; an old file of strings still reads', () async {
+    final rec = {'v': 1, 'kind': 'sent', 'text': '发了', 'result': 'sent'};
+    final d = DraftFile(key: 'k', pending: ['半路'], records: [rec]);
+    expect(d.toJson()['v'], 1);
+    expect(d.toJson()['pending'], [
+      '半路',
+      {'text': '发了', 'record': rec},
+    ]);
+    await store.save(d);
+    final got = store.load('k')!;
+    expect(got.pending, ['半路']);
+    expect(got.records, [rec]);
+    final old = DraftFile.fromJson({'v': 1, 'key': 'k', 'text': 't', 'pending': ['a'], 'meta': {}})!;
+    expect(old.pending, ['a']);
+    expect(old.records, isEmpty);
+    expect(DraftFile.fromJson({'v': 1, 'key': 'k', 'text': 't', 'pending': [1]}), isNull);
+    expect(DraftFile.fromJson({'v': 1, 'key': 'k', 'text': 't', 'pending': [{'text': 'x'}]}), isNull);
+    await store.save(DraftFile(key: 'k', records: [rec]));
+    expect(File(store.pathFor('k')).existsSync(), isTrue, reason: 'a record alone keeps the file');
+  });
+
   test('a key with / and : makes one flat file name', () async {
     await store.save(DraftFile(key: 'h1/term:tmux:dev', text: 'x'));
     final p = store.pathFor('h1/term:tmux:dev');

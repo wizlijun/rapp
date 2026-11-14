@@ -1046,7 +1046,8 @@ class MainState extends ChangeNotifier {
     if (old != null) portOf(old)?.close(old); // reconnected but not swapped yet: the old session is still open
     // Before a swap the old session is the one on show, the one written in.
     final shown = remote[old] ?? remote[r.sid];
-    if (shown != null) unawaited(recorder.sessionEnded(shown, _metaOf(r, shown)));
+    unawaited(recorder.sessionEnded(shown, _metaOf(r, shown),
+        record: shown?.recordsInput ?? profiles.resolve(r.app).recordInput));
     for (final sid in [r.sid, old]) {
       if (sid == null) continue;
       remote.remove(sid)?.dispose();
@@ -1071,8 +1072,8 @@ class MainState extends ChangeNotifier {
     final gone = remote.remove(old);
     if (gone == null) return;
     final to = fresh == null ? null : remote[fresh];
-    to?.composer.adoptFrom(gone.composer);
-    recorder.detach(gone);
+    final moved = to?.composer.adoptFrom(gone.composer);
+    recorder.detach(gone, to: to, moved: moved);
     gone.dispose();
   }
 
@@ -1244,9 +1245,9 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// What an input record says of [r]'s session [rs] now.
-  SessionMeta _metaOf(SessionRecord r, RemoteSession rs) {
-    final w = rs.currentWindow;
+  /// What an input record says of [r]'s session [rs] now (no window without one).
+  SessionMeta _metaOf(SessionRecord r, RemoteSession? rs) {
+    final w = rs?.currentWindow;
     return SessionMeta(
       key: r.key,
       hostId: r.id,
@@ -1255,7 +1256,7 @@ class MainState extends ChangeNotifier {
       appName: r.appName,
       run: r.run,
       windowId: w,
-      windowTitle: w == null ? null : rs.windows.where((x) => x.id == w).firstOrNull?.title,
+      windowTitle: w == null ? null : rs!.windows.where((x) => x.id == w).firstOrNull?.title,
       projects: [for (final p in projectsOf(r.key)) p.name],
     );
   }

@@ -234,7 +234,10 @@ void main() {
     addTearDown(fresh.dispose);
     var notified = 0;
     fresh.addListener(() => notified++);
-    fresh.adoptFrom(m);
+    final olds = [...m.failed, m.inFlight!];
+    final made = fresh.adoptFrom(m);
+    expect(made.keys, [olds[0], olds[2]], reason: 'the rows with text, in order');
+    expect(made.values, fresh.failed);
     await Future<void>.delayed(Duration.zero); // the old editor's read
     expect(fresh.draft, 'abc');
     expect([for (final o in fresh.failed) o.text], ['x', 'y']);
@@ -364,6 +367,22 @@ void main() {
     expect(allSent, 0);
     m.retry(m.failed.single);
     m.done(1, null);
+    expect(allSent, 1);
+  });
+
+  test('a round where all went but something was said keeps that, and is no failed row', () async {
+    final seen = <String?>[];
+    m.onFinished = (o, {required all}) => seen.add(o.failure);
+    ed.value = 'hi';
+    await m.submit();
+    m.done(1, '回车没按上');
+    expect(m.failed, isEmpty);
+    expect(seen, ['回车没按上']);
+    expect(allSent, 0);
+    ed.value = 'ok';
+    await m.submit();
+    m.done(1, null);
+    expect(seen, ['回车没按上', null]);
     expect(allSent, 1);
   });
 

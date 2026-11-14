@@ -245,6 +245,8 @@ class ComposerModel extends ChangeNotifier {
     if (!all) {
       o.failure = (failure != null && failure.isNotEmpty) ? failure : '没有发出去';
       _failed.add(o);
+    } else if (failure != null) {
+      o.failure = failure; // all went, but the round said something: no after-send step
     }
     notifyListeners();
     onFinished?.call(o, all: all);
@@ -267,13 +269,14 @@ class ComposerModel extends ChangeNotifier {
   /// A reconnect's swap: [old] was this window's session before. Its draft and the text of its
   /// failed rows and of its in-flight row come over, all as failed rows (the in-flight one never
   /// got its `done`). Blocks stay behind (the old runner held them); a row without text does not
-  /// come. With [old]'s editor still attached, its text is read for the draft.
-  void adoptFrom(ComposerModel old) {
-    final rows = [...old._failed, ?old._inFlight];
-    _failed.insertAll(0, [
-      for (final o in rows)
-        if (o.text.isNotEmpty) Outgoing(const [], o.text)..failure = o.failure ?? '没有发出去',
-    ]);
+  /// come. With [old]'s editor still attached, its text is read for the draft. Returns each of
+  /// [old]'s rows that came over with the row made for it, in order.
+  Map<Outgoing, Outgoing> adoptFrom(ComposerModel old) {
+    final made = <Outgoing, Outgoing>{
+      for (final o in [...old._failed, ?old._inFlight])
+        if (o.text.isNotEmpty) o: Outgoing(const [], o.text)..failure = o.failure ?? '没有发出去',
+    };
+    _failed.insertAll(0, made.values);
     if (draft.isEmpty) draft = old.draft;
     final e = old._editor;
     if (e != null) {
@@ -284,6 +287,7 @@ class ComposerModel extends ChangeNotifier {
       }, onError: (Object _) {});
     }
     notifyListeners();
+    return made;
   }
 
   /// [o] goes back into the composer: unsent blocks in front, unsent text at the caret.

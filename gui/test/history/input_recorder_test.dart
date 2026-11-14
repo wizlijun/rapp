@@ -151,6 +151,13 @@ void main() {
     expect(l[1]['result'], 'failed');
     expect(l[1].containsKey('sentPieces'), false);
     expect(l[1]['after'], 'none');
+    // Everything went but the round said something: no Return was pressed.
+    await send(rs, '都发了');
+    rs.composer.done(1, '回车没按上');
+    await send(rs, '都发了也按了');
+    rs.composer.done(1, null);
+    await until(() => lines().length == 4);
+    expect([for (final r in lines().skip(2)) (r['result'], r['after'])], [('sent', 'none'), ('sent', 'return')]);
   });
 
   test('the draft file outlives the send until its record is written', () async {
@@ -274,15 +281,20 @@ void main() {
     await settle();
     expect(port.calls.where((c) => c.$1 == 'composer_send').length, 2);
     expect(notes, said, reason: 'said once');
-    expect(drafts().load('h1/com.a')!.pending, ['一', '二']);
+    final f = drafts().load('h1/com.a')!;
+    expect(f.pending, isEmpty, reason: 'a finished round is no unsent text');
+    expect([for (final r in f.records) (r['text'], r['result'])], [('一', 'sent'), ('二', 'sent')]);
     expect(logs.where((l) => l.startsWith('rapp: 输入记录 写入失败')), isNotEmpty);
-    // A write that goes resets it: the next failure is said again.
+    // A write that goes resets it (the next failure is said again) and takes the kept ones along.
     File(data.inputsDir('dev1')).deleteSync();
     await send(rs, '三');
     rs.composer.done(1, null);
-    await until(() => lines().length == 1);
+    await until(() => lines().length == 3);
     await settle();
-    expect(drafts().load('h1/com.a')!.pending, ['一', '二']);
+    expect(lines().map((r) => r['text']), ['三', '一', '二']);
+    expect(lines()[1]['from'], {'id': 'dev1', 'name': 'bruce-tablet'});
+    expect(drafts().load('h1/com.a'), isNull);
+    expect(logs, contains('rapp: 输入记录 补写 2 条'));
     Directory(data.inputsDir('dev1')).deleteSync(recursive: true);
     File(data.inputsDir('dev1')).writeAsStringSync('in the way');
     rs.composer.status = null;
@@ -292,7 +304,7 @@ void main() {
     expect(notes, greaterThan(said));
   });
 
-  test('a retry after a failed write keeps one copy pending', () async {
+  test('a failed round whose write failed waits as a record; its retry is pending once', () async {
     File(data.inputsDir('dev1')).writeAsStringSync('in the way');
     final rec = recorder();
     final rs = session(1, 'com.a');
@@ -302,7 +314,9 @@ void main() {
     await settle();
     expect(rs.composer.retry(o), isNotNull);
     await settle();
-    expect(drafts().load('h1/com.a')!.pending, ['重试的']);
+    final f = drafts().load('h1/com.a')!;
+    expect(f.pending, ['重试的']);
+    expect([for (final r in f.records) (r['text'], r['result'])], [('重试的', 'failed')]);
   });
 
   test('without a device id the reason says so', () async {
@@ -319,7 +333,144 @@ void main() {
     rs.composer.done(1, null);
     await settle();
     expect(seen, contains('输入记录没写进去：还不知道这台设备的 id'));
-    expect(drafts().load('h1/com.a')!.pending, ['一']);
+    final f = drafts().load('h1/com.a')!;
+    expect(f.pending, isEmpty);
+    expect(f.records.single['text'], '一');
+    expect(f.records.single['from'], isNull);
+    // Once the id is there, the kept record goes with it.
+    File('${data.localDir}/service.json').writeAsStringSync('{"id":"dev1"}');
+    await send(rs, '二');
+    rs.composer.done(1, null);
+    await until(() => lines().length == 2);
+    expect(lines().map((r) => r['text']), ['二', '一']);
+    expect(lines()[1]['from'], {'id': 'dev1', 'name': 'bruce-tablet'});
+  });
+
+  test('window and projects are the ones at hand-off, also on a retry', () async {
+    final rec = recorder();
+    final rs = session(1, 'com.a');
+    var w = 7;
+    rec.attach(rs, () => meta('h1', 'com.a')..windowId = w, restore: true);
+    await send(rs, '交出去');
+    w = 8; // the tab changed before done
+    rs.composer.done(1, null);
+    await until(() => lines().length == 1);
+    expect(lines().single['window'], {'id': 7, 'title': title});
+    final o = (await send(rs, '再试'))!;
+    rs.composer.done(0, 'x');
+    w = 9;
+    rs.composer.retry(o);
+    w = 10;
+    rs.composer.done(1, null);
+    await until(() => lines().length == 3);
+    expect([for (final r in lines()) (r['window'] as Map)['id']], [7, 8, 9]);
+  });
+
+  test('a swap mid-send: the piece follows its adopted row, a retry is pending once', () async {
+    final rec = recorder();
+    final old = session(1, 'com.a'), fresh = session(11, 'com.a');
+    rec.attach(old, () => meta('h1', 'com.a'), restore: true);
+    rec.attach(fresh, () => meta('h1', 'com.a'), restore: false);
+    await send(old, '在路上'); // a move: no done comes for the old session
+    final moved = fresh.composer.adoptFrom(old.composer);
+    rec.detach(old, to: fresh, moved: moved);
+    await settle();
+    expect(drafts().load('h1/com.a')!.pending, ['在路上']);
+    final row = fresh.composer.failed.single;
+    expect(fresh.composer.retry(row), isNotNull);
+    await settle();
+    expect(drafts().load('h1/com.a')!.pending, ['在路上'], reason: 'once');
+    fresh.composer.done(1, null);
+    await until(() => lines().length == 1 && drafts().load('h1/com.a') == null);
+    expect(lines().single['text'], '在路上');
+    expect(lines().single['result'], 'sent');
+  });
+
+  test('a session that goes with nobody to take over keeps its piece for the next open', () async {
+    final rec = recorder();
+    final old = session(1, 'com.a');
+    rec.attach(old, () => meta('h1', 'com.a'), restore: true);
+    await send(old, '在路上');
+    rec.detach(old);
+    await settle();
+    expect(drafts().load('h1/com.a')!.pending, ['在路上']);
+    final next = session(21, 'com.a');
+    rec.attach(next, () => meta('h1', 'com.a'), restore: true);
+    expect(next.composer.draft, '在路上');
+  });
+
+  test('a failed write then a swap: the record waits in the file and goes with the next write', () async {
+    File(data.inputsDir('dev1')).writeAsStringSync('in the way');
+    final rec = recorder();
+    final old = session(1, 'com.a'), fresh = session(11, 'com.a');
+    rec.attach(old, () => meta('h1', 'com.a'), restore: true);
+    rec.attach(fresh, () => meta('h1', 'com.a'), restore: false);
+    await send(old, '断了');
+    old.linkDown();
+    await settle();
+    rec.detach(old, to: fresh, moved: fresh.composer.adoptFrom(old.composer));
+    await settle();
+    final f = drafts().load('h1/com.a')!;
+    expect(f.pending, isEmpty);
+    expect([for (final r in f.records) (r['text'], r['result'])], [('断了', 'failed')]);
+    File(data.inputsDir('dev1')).deleteSync();
+    await send(fresh, '下一段');
+    fresh.composer.done(1, null);
+    await until(() => lines().length == 2);
+    expect(lines().map((r) => (r['text'], r['result'])), [('下一段', 'sent'), ('断了', 'failed')]);
+  });
+
+  test('a failed write then the end: a sent record, and no draft record of that text', () async {
+    File(data.inputsDir('dev1')).writeAsStringSync('in the way');
+    final rec = recorder();
+    final rs = session(1, 'com.a');
+    rec.attach(rs, () => meta('h1', 'com.a'), restore: true);
+    await send(rs, '发出去了');
+    rs.composer.done(1, null);
+    rs.composer.setDraft('没写完');
+    await settle();
+    File(data.inputsDir('dev1')).deleteSync();
+    await rec.sessionEnded(rs, meta('h1', 'com.a'));
+    expect([for (final r in lines()) (r['kind'], r['text'])], [('sent', '发出去了'), ('draft', '没写完')]);
+    await settle();
+    expect(drafts().load('h1/com.a'), isNull);
+  });
+
+  test('a failed write then a crash: the reopen does not bring the sent text back, it appends it', () async {
+    File(data.inputsDir('dev1')).writeAsStringSync('in the way');
+    final rs = session(1, 'com.a');
+    recorder().attach(rs, () => meta('h1', 'com.a'), restore: true);
+    await send(rs, '发出去了');
+    rs.composer.done(1, null);
+    await settle();
+    expect(drafts().load('h1/com.a')!.records, hasLength(1));
+    // Killed; the next start can write.
+    File(data.inputsDir('dev1')).deleteSync();
+    final again = session(2, 'com.a');
+    recorder().attach(again, () => meta('h1', 'com.a'), restore: true);
+    expect(again.composer.draft, '');
+    await until(() => lines().length == 1 && drafts().load('h1/com.a') == null);
+    expect(lines().single['text'], '发出去了');
+    expect(lines().single['result'], 'sent');
+    expect(drafts().load('h1/com.a'), isNull);
+  });
+
+  test('ending a session that never went live turns its file into a draft record', () async {
+    await drafts().save(DraftFile(
+        key: 'h1/com.a', text: '上次的', pending: ['半路的'], meta: {...meta('h1', 'com.a').toJson(), 'record': true}));
+    final rec = recorder();
+    await rec.sessionEnded(null, meta('h1', 'com.a'), record: true);
+    final r = lines().single;
+    expect(r['kind'], 'draft');
+    expect(r['text'], '半路的\n上次的');
+    await settle();
+    expect(drafts().load('h1/com.a'), isNull);
+    // An app that does not record keeps its file.
+    await drafts().save(DraftFile(key: 'h1/com.b', text: '不记'));
+    await rec.sessionEnded(null, meta('h1', 'com.b'), record: false);
+    await settle();
+    expect(drafts().load('h1/com.b')!.text, '不记');
+    expect(lines(), hasLength(1));
   });
 
   test('the log never carries the text', () async {

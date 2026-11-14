@@ -66,14 +66,16 @@ class SessionMeta {
   }
 }
 
-/// A sent piece whose record is not written yet: its text stays in the draft file until then.
+/// A sent piece whose round has not finished: its text stays in the draft file until then, and a
+/// crash meanwhile brings it back.
 class _Piece {
   _Piece(this.text, this.owner, this.rs);
   final String text;
 
-  /// The send it is; null for one read back from a file.
-  final Outgoing? owner;
-  final RemoteSession? rs;
+  /// The send it is (an adopted row after a swap); null for one read back from a file, or whose
+  /// session went with no other to take it.
+  Outgoing? owner;
+  RemoteSession? rs;
 
   /// Its record is being written: a draft record made meanwhile leaves it out.
   bool finishing = false;
@@ -85,7 +87,16 @@ class _Draft {
   final String key;
   String text = '';
   final pieces = <_Piece>[];
+
+  /// Records of finished rounds whose write failed, oldest first: appended by a later write.
+  final stored = <Map<String, Object?>>[];
   Map<String, Object?> meta = {};
+
+  /// Rounds whose record is being written.
+  final busy = <Future<void>>{};
+
+  /// The last append of [stored] (one at a time).
+  Future<bool> flushing = Future.value(true);
 }
 
 class InputRecorder {
@@ -108,6 +119,9 @@ class InputRecorder {
   final Map<String, _Draft> _drafts = {};
   final Map<RemoteSession, ({String key, SessionMeta Function() meta})> _attached = {};
 
+  /// What each send's record says of its session: taken when it was handed off.
+  final _handed = Expando<SessionMeta>();
+
   /// A failure was said and no write has gone since.
   bool _failSaid = false;
 
@@ -115,15 +129,17 @@ class InputRecorder {
   Stream<Map<String, Object?>> get written => _written.stream;
 
   /// Follows [rs]'s composer from now on. [restore]: a new open (no older session hands its
-  /// text over), so the draft file's pieces and text go back into the composer.
+  /// text over), so the unfinished pieces and the text go back into the composer; records left
+  /// unwritten are appended, never put back.
   void attach(RemoteSession rs, SessionMeta Function() meta, {required bool restore}) {
     final m = meta();
     final d = _drafts[m.key] ??= _load(m.key);
     _attached[rs] = (key: m.key, meta: meta);
     final c = rs.composer;
-    if (restore && (d.pieces.isNotEmpty || d.text.isNotEmpty)) {
-      final t = [for (final p in d.pieces) p.text, d.text].where((s) => s.isNotEmpty).join('\n');
-      d.pieces.clear();
+    final back = [for (final p in d.pieces) if (p.owner == null && !p.finishing) p];
+    if (restore && (back.isNotEmpty || d.text.isNotEmpty)) {
+      final t = _join([for (final p in back) p.text], d.text);
+      d.pieces.removeWhere(back.contains);
       d.text = t;
       c.setDraft(t);
       _save(d, rs);
@@ -133,48 +149,80 @@ class InputRecorder {
       _save(d, rs);
     };
     c.onSubmitted = (o) {
-      // A retry after a failed write is still pending: its text is there once already.
-      if (o.text.isEmpty || d.pieces.any((p) => identical(p.owner, o))) return;
+      _handed[o] = meta();
+      if (o.text.isEmpty) return;
+      // An adopted row's retry: its text is pending once already.
+      final p = d.pieces.where((p) => identical(p.owner, o)).firstOrNull;
+      if (p != null) {
+        p.rs = rs;
+        return;
+      }
       d.pieces.add(_Piece(o.text, o, rs));
       _save(d, rs);
     };
-    c.onFinished = (o, {required all}) => _finished(d, rs, o, all);
+    c.onFinished = (o, {required all}) {
+      final f = _finished(d, rs, o, all);
+      d.busy.add(f);
+      unawaited(f.whenComplete(() => d.busy.remove(f)));
+    };
+    if (d.stored.isNotEmpty && enabled() && rs.recordsInput) unawaited(_flush(d));
   }
 
-  /// [rs] went for good while its session goes on in another (a reconnect's swap): its hooks are
-  /// off, and the pieces whose text came over as failed rows are no longer pending here.
-  void detach(RemoteSession rs) {
+  /// [rs] went for good. [to] goes on with its session (a reconnect's or a move's swap) and
+  /// [moved] is what its `adoptFrom` made of [rs]'s rows: an unfinished piece follows its row
+  /// there, so a retry of that row finds it. Without one it stays pending with no session, and
+  /// the next open brings it back.
+  void detach(RemoteSession rs, {RemoteSession? to, Map<Outgoing, Outgoing>? moved}) {
     final a = _attached.remove(rs);
     if (a == null) return;
-    final c = rs.composer;
     _unhook(rs);
     final d = _drafts[a.key];
     if (d == null) return;
-    final n = d.pieces.length;
-    d.pieces.removeWhere((p) =>
-        identical(p.rs, rs) && !p.finishing && (identical(p.owner, c.inFlight) || c.failed.contains(p.owner)));
-    if (d.pieces.length != n) _save(d, null);
+    var dropped = false;
+    for (final p in [...d.pieces]) {
+      if (!identical(p.rs, rs) || p.finishing) continue;
+      if (_wentBack(p)) {
+        dropped = d.pieces.remove(p);
+        continue;
+      }
+      final o = moved?[p.owner];
+      final follows = to != null && o != null && _attached.containsKey(to);
+      p.owner = follows ? o : null;
+      p.rs = follows ? to : null;
+    }
+    if (dropped) _save(d, null);
   }
 
-  /// The session ended: with the record on, what is left unsent becomes one `draft` record and
-  /// the file goes; with it off, the file stays for the next open.
-  Future<void> sessionEnded(RemoteSession rs, SessionMeta meta) async {
-    final d = _drafts.remove(meta.key);
+  /// The session ended ([rs]: null when it never went live): with the record on, the records left
+  /// unwritten go, what is left unsent becomes one `draft` record and the file goes; with it off,
+  /// the file stays for the next open. [record]: the app's switch, else [rs]'s.
+  Future<void> sessionEnded(RemoteSession? rs, SessionMeta meta, {bool? record}) async {
+    final d = _drafts.remove(meta.key) ?? _load(meta.key);
     for (final s in [for (final e in _attached.entries) if (e.value.key == meta.key) e.key]) {
       _attached.remove(s);
       _unhook(s);
     }
-    if (d == null || !(enabled() && rs.recordsInput)) return;
-    final text = _join([for (final p in d.pieces) if (!p.finishing) p.text], rs.composer.draft);
+    final on = enabled() && (record ?? rs?.recordsInput ?? d.meta['record'] != false);
+    if (rs != null) d.text = rs.composer.draft;
+    await Future.wait([...d.busy]);
+    if (!on || !await _flush(d)) {
+      await _persist(d);
+      return;
+    }
+    final text = _join([for (final p in d.pieces) if (!p.finishing && !_wentBack(p)) p.text], d.text);
     if (text.isNotEmpty) {
       final at = _clock();
-      if (!await _write(null, (from) => _draftRecord(from, meta, text, at), at)) return;
+      if (!await _write(null, _draftRecord(meta, text, at), at)) {
+        await _persist(d);
+        return;
+      }
     }
     await _delete(meta.key);
   }
 
   /// Drafts last touched more than [age] ago (a session never ended, an app quit) become `draft`
-  /// records; apps that do not record, and everything while the record is off, are left alone.
+  /// records, after the records they kept; apps that do not record, and everything while the
+  /// record is off, are left alone.
   Future<void> sweep({Duration age = const Duration(days: 7)}) async {
     if (!enabled()) return;
     final List<(DraftFile, DateTime)> all;
@@ -188,10 +236,17 @@ class InputRecorder {
     var n = 0;
     for (final (f, modified) in all) {
       if (now.difference(modified) <= age || f.meta['record'] == false || _drafts.containsKey(f.key)) continue;
+      final left = [...f.records];
+      while (left.isNotEmpty && await _write(null, left.first, _atOf(left.first))) {
+        left.removeAt(0);
+      }
       final text = _join(f.pending, f.text);
-      if (text.isNotEmpty) {
-        final m = SessionMeta.fromJson(f.key, f.meta);
-        if (!await _write(null, (from) => _draftRecord(from, m, text, now), now)) break;
+      final m = SessionMeta.fromJson(f.key, f.meta);
+      if (left.isNotEmpty || (text.isNotEmpty && !await _write(null, _draftRecord(m, text, now), now))) {
+        if (left.length != f.records.length && !_drafts.containsKey(f.key)) {
+          await _store.save(f..records = left).catchError((Object e) => _log('rapp: 输入记录 草稿没存上：${_reason(e)}'));
+        }
+        break;
       }
       if (_drafts.containsKey(f.key)) continue; // opened meanwhile: its file is live again
       await _delete(f.key);
@@ -206,6 +261,7 @@ class InputRecorder {
     if (f != null) {
       d.text = f.text;
       d.pieces.addAll([for (final t in f.pending) _Piece(t, null, null)]);
+      d.stored.addAll(f.records);
       d.meta = f.meta;
     }
     return d;
@@ -218,14 +274,29 @@ class InputRecorder {
       ..onFinished = null;
   }
 
+  /// [p]'s row went back into the editor (`putBack`): its text is in the draft now.
+  static bool _wentBack(_Piece p) {
+    final o = p.owner, rs = p.rs;
+    if (o == null || rs == null || p.finishing) return false;
+    return !identical(rs.composer.inFlight, o) && !rs.composer.failed.contains(o);
+  }
+
   /// Writes [d] (with [rs]'s session as it is now), unless its session has ended.
   void _save(_Draft d, RemoteSession? rs) {
     if (!identical(_drafts[d.key], d)) return;
     final a = rs == null ? null : _attached[rs];
     if (rs != null && a != null) d.meta = {...a.meta().toJson(), 'record': rs.recordsInput};
-    final f = DraftFile(key: d.key, text: d.text, pending: [for (final p in d.pieces) p.text], meta: d.meta);
-    _store.save(f).catchError((Object e) => _log('rapp: 输入记录 草稿没存上：${_reason(e)}'));
+    unawaited(_persist(d));
   }
+
+  Future<void> _persist(_Draft d) => _store
+      .save(DraftFile(
+          key: d.key,
+          text: d.text,
+          pending: [for (final p in d.pieces) p.text],
+          records: [...d.stored],
+          meta: d.meta))
+      .catchError((Object e) => _log('rapp: 输入记录 草稿没存上：${_reason(e)}'));
 
   Future<void> _delete(String key) =>
       _store.delete(key).catchError((Object e) => _log('rapp: 输入记录 草稿没删掉：${_reason(e)}'));
@@ -233,35 +304,62 @@ class InputRecorder {
   Future<void> _finished(_Draft d, RemoteSession rs, Outgoing o, bool all) async {
     final p = d.pieces.where((p) => identical(p.owner, o)).firstOrNull;
     final a = _attached[rs];
+    var changed = false;
     if (a != null && enabled() && rs.recordsInput) {
-      final m = a.meta();
       final at = o.at ?? _clock();
+      final rec = _sentRecord(_handed[o] ?? a.meta(), o, all, rs.profile.afterSend, at);
       p?.finishing = true;
-      final ok = await _write(rs, (from) => _sentRecord(from, m, o, all, rs.profile.afterSend, at), at);
+      final ok = await _write(rs, rec, at);
       p?.finishing = false;
-      if (!ok) return; // stays pending: the next open brings it back
+      if (!ok) {
+        d.stored.add(rec); // the round is over: it waits as a record, never as unsent text
+        changed = true;
+      }
     }
-    if (p != null && d.pieces.remove(p)) _save(d, rs);
+    if (p != null && d.pieces.remove(p)) changed = true;
+    if (changed) _save(d, rs);
+  }
+
+  /// Appends [d]'s unwritten records, oldest first, after any append of them already running;
+  /// true when none is left.
+  Future<bool> _flush(_Draft d) {
+    final run = d.flushing.then((_) async {
+      var n = 0;
+      while (d.stored.isNotEmpty) {
+        final r = d.stored.first;
+        final why = await _append(r, _atOf(r));
+        if (why != null) {
+          _log('rapp: 输入记录 补写失败：$why');
+          break;
+        }
+        d.stored.remove(r);
+        n++;
+      }
+      if (n > 0) {
+        _log('rapp: 输入记录 补写 $n 条');
+        _save(d, null);
+      }
+      return d.stored.isEmpty;
+    });
+    d.flushing = run.catchError((Object _) => false);
+    return run;
+  }
+
+  /// After a write that went: the records other sessions keep waiting go too.
+  Future<void> _flushAll() async {
+    if (!enabled()) return;
+    for (final d in [..._drafts.values]) {
+      if (d.stored.isNotEmpty && d.meta['record'] != false) await _flush(d);
+    }
   }
 
   /// Appends one record; false (said once on [rs]'s composer) when it did not go.
-  Future<bool> _write(RemoteSession? rs, Map<String, Object?> Function(Map<String, Object?> from) build, DateTime at) async {
-    final dd = data();
-    final id = dd.deviceId();
-    String why;
-    if (id == null) {
-      why = '还不知道这台设备的 id';
-    } else {
-      final rec = build({'id': id, 'name': _deviceName(dd, id)});
-      try {
-        _inputsDir = dd.inputsDir(id);
-        await _input.append(rec, at);
-        _failSaid = false;
-        _written.add(rec);
-        return true;
-      } catch (e) {
-        why = _reason(e);
-      }
+  Future<bool> _write(RemoteSession? rs, Map<String, Object?> rec, DateTime at) async {
+    final why = await _append(rec, at);
+    if (why == null) {
+      _failSaid = false;
+      unawaited(_flushAll());
+      return true;
     }
     _log('rapp: 输入记录 写入失败：$why');
     if (rs != null && !_failSaid && _attached.containsKey(rs)) {
@@ -275,6 +373,29 @@ class InputRecorder {
     return false;
   }
 
+  /// Appends [rec] (its `from` filled in when it was built without a device id); null when it
+  /// went, else why not.
+  Future<String?> _append(Map<String, Object?> rec, DateTime at) async {
+    final dd = data();
+    final id = dd.deviceId();
+    if (id == null) return '还不知道这台设备的 id';
+    rec['from'] ??= {'id': id, 'name': _deviceName(dd, id)};
+    try {
+      _inputsDir = dd.inputsDir(id);
+      await _input.append(rec, at);
+    } catch (e) {
+      return _reason(e);
+    }
+    _written.add(rec);
+    return null;
+  }
+
+  /// A built record's own time (its day file), read back from `ts`.
+  DateTime _atOf(Map<String, Object?> rec) {
+    final ts = rec['ts'];
+    return (ts is String ? DateTime.tryParse(ts) : null) ?? _clock();
+  }
+
   /// `name` in this device's `device.json` (the service writes it), else the id.
   String _deviceName(DataDir dd, String id) {
     try {
@@ -285,12 +406,13 @@ class InputRecorder {
     return id;
   }
 
-  Map<String, Object?> _common(String kind, Map<String, Object?> from, SessionMeta m, String text, DateTime at) => {
+  /// `from` stays null until the record is written (the device id may come later).
+  Map<String, Object?> _common(String kind, SessionMeta m, String text, DateTime at) => {
         'v': 1,
         'id': newRecordId(at),
         'ts': isoWithOffset(at),
         'kind': kind,
-        'from': from,
+        'from': null,
         'host': {'id': m.hostId, 'name': m.hostName},
         'app': {'id': m.appId, 'name': m.appName},
         'session': m.key,
@@ -300,11 +422,10 @@ class InputRecorder {
         'text': text,
       };
 
-  Map<String, Object?> _sentRecord(
-      Map<String, Object?> from, SessionMeta m, Outgoing o, bool all, AfterSend after, DateTime at) {
+  Map<String, Object?> _sentRecord(SessionMeta m, Outgoing o, bool all, AfterSend after, DateTime at) {
     final total = o.pieces().length;
     return {
-      ..._common('sent', from, m, o.text, at),
+      ..._common('sent', m, o.text, at),
       'blocks': [
         for (final b in o.blocks)
           {
@@ -317,13 +438,14 @@ class InputRecorder {
       ],
       'result': o.sent >= total ? 'sent' : (o.sent > 0 ? 'partial' : 'failed'),
       if (o.sent > 0 && o.sent < total) 'sentPieces': o.sent,
-      'after': all && after == AfterSend.pressReturn ? 'return' : 'none',
+      // Return was pressed only when every piece went and nothing was said.
+      'after': all && o.failure == null && after == AfterSend.pressReturn ? 'return' : 'none',
       'source': 'typed',
     };
   }
 
-  Map<String, Object?> _draftRecord(Map<String, Object?> from, SessionMeta m, String text, DateTime at) =>
-      {..._common('draft', from, m, text, at), 'blocks': const <Object>[], 'source': 'typed'};
+  Map<String, Object?> _draftRecord(SessionMeta m, String text, DateTime at) =>
+      {..._common('draft', m, text, at), 'blocks': const <Object>[], 'source': 'typed'};
 
   static String _join(List<String> pending, String text) =>
       [...pending, text].where((s) => s.isNotEmpty).join('\n');
