@@ -1,6 +1,8 @@
 # rapp 桌面会话 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **当前进度（2026-11-14）**：Task 1–7 已完成；Task 8 的文档和自动验证已完成，真机锁屏待用户配合。用户已选择 macOS Keychain，替代原定 XOR 文件；其他平台只手动输入。详见交接文档。
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** A third session kind "桌面": B sees and drives a whole screen of A (one session per screen), sees when A is locked, and can type A's system password to unlock it.
 
@@ -17,7 +19,7 @@
 - Protocol v10, exact match on both sides (`protocolVersion = 10` in Swift, `VERSION: u8 = 10` in Rust). New types: 31 `screenLocked(Bool)` host → client, payload `u8` 0/1; 32 `unlock(password: String)` client → host, payload `string` (u16 length + UTF-8), at most 1024 bytes.
 - Ids: `desktop:` is the app-list / favorite entry and the **main screen** session; `desktop:<CGDirectDisplayID>` (decimal) is any other screen's session. Never put `desktop:<id>` into favorites.
 - Copy (verbatim): app name `桌面`; lock banner `A 已锁屏，鼠标和键盘操作不会生效。请先解锁。`; button `输入系统密码`; dialog checkboxes `记住密码`, `连上时自动输入`; wrong password hint `密码可能不对`; new screen hint `A 多了一块屏`; access log `输入了系统密码`.
-- The host never stores or logs the password. B stores it only in `local/` (0600), never in `shared/`.
+- The host never stores or logs the password. B stores it only in the local macOS Keychain (non-synchronizing); other platforms do not remember passwords. Nothing is written to `local/` or `shared/`.
 - All user-facing text in Chinese.
 - Flutter is `~/development/flutter/bin/flutter`; revert `gui/pubspec.lock` after tests.
 
@@ -54,11 +56,11 @@
 - `public func desktopTable(width: Double, height: Double, title: String) -> [WindowInfo]`: one item, id 1, parent 0, `.normal`, not resizable, focused, rect 0,0,w,h, titleBar 0.
 - `appsJSON(_:screenRecording:accessibility:displays:)`: with a non-empty `displays` the `apps` array starts with `{"app":"desktop:","name":"桌面","displays":[{"id","name","main","width","height"}]}`.
 
-- [ ] Step 1: tests — round trip of 31 (true/false) and 32 (`"pässwörd"`); 31 with byte 2 throws; 32 with 1025 bytes throws; `protocolVersion == 10`; `desktopTarget` cases (`"desktop:"`, `"desktop:69733382"`, `"desktop:x"` → nil, `"com.apple.Safari"` → nil); `orderedDisplays` puts main first then left-to-right; `desktopTable(…)` values; `appsJSON` with/without displays.
-- [ ] Step 2: `swift test --filter 'ProtocolTests|DesktopTests|WorkerCLITests'` fails.
-- [ ] Step 3: implement; bump `protocolVersion` to 10 and fix every exhaustive switch the compiler names (rapp-host Server's "unexpected message" list gets `.screenLocked`; rapp-client ignores `.screenLocked`).
-- [ ] Step 4: `swift build && swift test` passes.
-- [ ] Step 5: commit `feat(core): protocol v10 screenLocked/unlock, desktop ids`.
+- [x] Step 1: tests — round trip of 31 (true/false) and 32 (`"pässwörd"`); 31 with byte 2 throws; 32 with 1025 bytes throws; `protocolVersion == 10`; `desktopTarget` cases (`"desktop:"`, `"desktop:69733382"`, `"desktop:x"` → nil, `"com.apple.Safari"` → nil); `orderedDisplays` puts main first then left-to-right; `desktopTable(…)` values; `appsJSON` with/without displays.
+- [x] Step 2: `swift test --filter 'ProtocolTests|DesktopTests|WorkerCLITests'` fails.
+- [x] Step 3: implement; bump `protocolVersion` to 10 and fix every exhaustive switch the compiler names (rapp-host Server's "unexpected message" list gets `.screenLocked`; rapp-client ignores `.screenLocked`).
+- [x] Step 4: `swift build && swift test` passes.
+- [x] Step 5: commit `feat(core): protocol v10 screenLocked/unlock, desktop ids`.
 
 ### Task 2: rapp-host — input fix, desktop serve, lock watch, unlock
 
@@ -77,10 +79,10 @@
 - Session: `desktop` branch in the hello path — no tracker/menus; `resize/move/close/focus/menuPick` ignored; clipboard only for the main display; table from `desktopTable` with `desktopTitle(computer: Host.current().localizedName ?? "", number:)`. All sessions: `screenLocked` sent at ready and whenever `screenLocked()` changes (checked in the 1 s tick). `.unlock(pw)`: passes the input gate; if not locked → log `unlock dropped: A is not locked`, send `.screenLocked(false)`; else type on a utility queue and emit `.unlock`.
 - `list-apps --json` adds displays (via `NSScreen.screens` / `CGDisplayBounds`, name = `NSScreen.localizedName`).
 
-- [ ] Step 1: tests in RappCore — `WorkerEvent.unlock` encodes as `{"event":"unlock"}`; `parseHostArguments(["serve","--app","desktop:", …])` keeps the app string. (The host's AppKit/CGEvent code has no unit-test seam; it is covered by the smoke step and Task 8.)
-- [ ] Step 2: implement; `swift build` clean.
-- [ ] Step 3: manual smoke on this Mac: `rapp-host list-apps --json` shows the desktop entry; `swift test` passes.
-- [ ] Step 4: commit `feat(host): desktop sessions, lock state, unlock typing`.
+- [x] Step 1: tests in RappCore — `WorkerEvent.unlock` encodes as `{"event":"unlock"}`; `parseHostArguments(["serve","--app","desktop:", …])` keeps the app string. (The host's AppKit/CGEvent code has no unit-test seam; it is covered by the smoke step and Task 8.)
+- [x] Step 2: implement; `swift build` clean.
+- [x] Step 3: manual smoke on this Mac: `rapp-host list-apps --json` shows the desktop entry; `swift test` passes.
+- [x] Step 4: commit `feat(host): desktop sessions, lock state, unlock typing`.
 
 ### Task 3: Rust — client-core v10, rapp-session, client-gtk, service log
 
@@ -92,9 +94,9 @@
 - client-gtk: shows the lock banner text in its info label while locked.
 - service: worker event `unlock` → access-log line `unlock {app, sid}` (no other fields); `ipc.rs` history filter includes `unlock`.
 
-- [ ] Step 1: tests — 31 parse strict (2 → error), `unlock("ab") == [32,4,0,0,0,2,0,b'a',b'b']`; rapp-session command parse incl. too long; service transcribe test if one exists for `transfer`.
-- [ ] Step 2: `cargo test -p rapp-client-core -p rapp-service` (names per Cargo.toml) passes; `cargo build` for client-gtk where available (skip on macOS if it does not build there; say so).
-- [ ] Step 3: commit `feat(rust): protocol v10 screen_locked/unlock`.
+- [x] Step 1: tests — 31 parse strict (2 → error), `unlock("ab") == [32,4,0,0,0,2,0,b'a',b'b']`; rapp-session command parse incl. too long; service transcribe test if one exists for `transfer`.
+- [x] Step 2: `cargo test -p rapp-client-core -p rapp-service` (names per Cargo.toml) passes; `cargo build` for client-gtk where available (skip on macOS if it does not build there; say so).
+- [x] Step 3: commit `feat(rust): protocol v10 screen_locked/unlock`.
 
 ### Task 4: Swift client side — RappSession and macOS runner
 
@@ -106,9 +108,9 @@
 - SessionPlugin: `unlock` sends `.unlock(password:)`; `set_banner` sets `DetachedSession.banner`.
 - `DetachedSession.banner: String?` — a label strip over the top of every window of that session.
 
-- [ ] Step 1: tests — channel parse of both commands (missing/oversize fields rejected), event payload for `screenLocked(true)`, EmbeddedSession forwards host 31.
-- [ ] Step 2: `swift test` passes; `flutter build macos --debug` compiles the runner.
-- [ ] Step 3: commit `feat(session): screen_locked event, unlock and set_banner commands`.
+- [x] Step 1: tests — channel parse of both commands (missing/oversize fields rejected), event payload for `screenLocked(true)`, EmbeddedSession forwards host 31.
+- [x] Step 2: `swift test` passes; `flutter build macos --debug` compiles the runner.
+- [x] Step 3: commit `feat(session): screen_locked event, unlock and set_banner commands`.
 
 ### Task 5: GUI plumbing — apps, events, screen-share removal, access log
 
@@ -122,9 +124,9 @@
 - Device row: the screen-share button and `screenShare` callback are gone; the `desktop:` app shows as `桌面` with the favourite star like any app.
 - Access log: app `desktop:` → `桌面`, `desktop:<id>` → `桌面（其他屏）`; ev `unlock` → `输入了系统密码`.
 
-- [ ] Step 1: tests — hub apps parse with displays; port event parse; access log rows; devices tab has no `screen-share` key and shows `桌面`.
-- [ ] Step 2: `flutter test` passes.
-- [ ] Step 3: commit `feat(gui): desktop app entry, screen_locked plumbing; drop screen sharing button`.
+- [x] Step 1: tests — hub apps parse with displays; port event parse; access log rows; devices tab has no `screen-share` key and shows `桌面`.
+- [x] Step 2: `flutter test` passes.
+- [x] Step 3: commit `feat(gui): desktop app entry, screen_locked plumbing; drop screen sharing button`.
 
 ### Task 6: GUI — desktop sessions on the stage and in child windows
 
@@ -138,26 +140,35 @@
 - `MainState.desktopScreens(String device) -> List<RemoteDisplay>`, `openScreen(String device, String displayId)` for the Linux switcher; stage shows `屏幕 1 / 屏幕 2…` buttons when `!port.supportsDetach` and the current record is a desktop one with >1 displays.
 - Lock banner: current record's `screenLocked == true` → stage banner; desktop: banner text + `输入系统密码`; app session: `A 已锁屏，操作不会生效。` + `打开桌面`. Every hidden screen record gets `port.setBanner(sid, …)` on lock change.
 
-- [ ] Step 1: tests (fake hub/port from `gui/test/fakes.dart`) — secondary screen opened and detached; hidden from entries; entry name with count; ending main ends secondaries; window close of a secondary ends only it with no hint; display vanishes → ended; new display → hint once; banner text for desktop vs app.
-- [ ] Step 2: `flutter test` passes.
-- [ ] Step 3: commit `feat(gui): desktop sessions, child windows, lock banner`.
+- [x] Step 1: tests (fake hub/port from `gui/test/fakes.dart`) — secondary screen opened and detached; hidden from entries; entry name with count; ending main ends secondaries; window close of a secondary ends only it with no hint; display vanishes → ended; new display → hint once; banner text for desktop vs app.
+- [x] Step 2: `flutter test` passes.
+- [x] Step 3: commit `feat(gui): desktop sessions, child windows, lock banner`.
 
 ### Task 7: GUI — system password dialog, remember, auto-input
 
-**Files:** Create `gui/lib/ui/unlock.dart` (store + dialog); modify `main_state.dart`, `stage.dart`; tests `gui/test/ui/unlock_test.dart`, `main_state_test.dart`
+**Files:** Create `gui/lib/ui/unlock.dart` (store + dialog), `Sources/RappSession/UnlockStore.swift`, `gui/macos/Runner/UnlockPlugin.swift`; modify `main_state.dart`, `stage.dart` and runner registration; tests `gui/test/ui/unlock_test.dart`, `gui/test/ui/desktop_test.dart`, `Tests/RappSessionTests/UnlockStoreTests.swift`.
 
 **Interfaces:**
-- `class UnlockStore { UnlockStore(String localDir); ({String password, bool auto})? read(String device); void save(String device, String password, {required bool auto}); void forget(String device); }` — file `local/unlock.json`, mode 0600, password stored as base64 of bytes XORed with a fixed key (obfuscation only).
-- `MainState.unlock(String device, String password, {required bool remember, required bool auto})`: sends via the `desktop:` record's live sid (else the current record's), logs nothing, schedules a 5 s check → still locked → hint `密码可能不对`. Not locked when asked → hint `A 没有锁屏，没有输入密码`.
-- Auto-input: the first `ScreenLockedEvent(true)` of a fresh sid of a `desktop:` record, with a stored password and `auto`, sends it once; a lock later in the same sid does not.
+- `UnlockStore` provides async `read/save/forget` via the `rapp/unlock` platform channel. macOS stores the password and `auto` together in a local Keychain item, keyed by device ID (`com.rapp.rapp.system-password`, `kSecAttrSynchronizable = false`). Other platforms expose manual input only. This replaces the original XOR/file design by the user’s explicit choice on 2026-11-14.
+- `MainState.unlock(String device, String password, {required bool remember, required bool auto})`: sends only via that device’s `desktop:` record’s live sid, logs nothing, schedules a 5 s check → still locked → hint `密码可能不对`. Not locked when asked → hint `A 没有锁屏，没有输入密码`.
+- Auto-input: only when the first `ScreenLockedEvent` of a fresh main desktop connection is `true`, with a stored password and `auto`. An initial `false` consumes this opportunity too. A later lock never auto-unlocks. Pending Keychain reads are bound to the same connection and lock generation; disconnect/end/unlock cancels them.
 
-- [ ] Step 1: tests — store round trip, file mode 600, not plain text; auto-input only on first event of a sid; 5 s wrong-password hint (fake clock/timer); dialog widgets present with the exact copy.
-- [ ] Step 2: `flutter test` passes.
-- [ ] Step 3: commit `feat(gui): system password dialog with remember and auto input`.
+- [x] Step 1: tests — native Keychain queries, bridge round trip and unsupported platforms; auto-input only on the first locked state, async cancellation, 5 s wrong-password hint; dialog input, choices, forget and cancellation. Synthetic local Keychain save/read/update/forget smoke also passed.
+- [x] Step 2: `flutter test` passes.
+- [x] Step 3: commit `feat(gui): system password dialog with remember and auto input`.
 
 ### Task 8: README, full build, real-machine test
 
-- [ ] README: the "A 不能锁屏" line becomes `锁屏后可以在「桌面」里输入系统密码解锁；睡眠、关机、开机后的登录窗口仍然不行。` and the session kinds list gains 桌面.
-- [ ] `swift test`, `cargo test`, `flutter test` all pass; `flutter build macos` builds.
-- [ ] Ask the user to run the lock test on a real A (spec §6 step 1): lock A, open 桌面, check picture, banner, password typing, input after unlock. Record the result in the spec; adjust banner copy if the locked picture is black.
-- [ ] Commit `docs: desktop sessions in README`.
+- [x] README: the "A 不能锁屏" line becomes `锁屏后可以在「桌面」里输入系统密码解锁；睡眠、关机、开机后的登录窗口仍然不行。` and the session kinds list gains 桌面.
+- [x] `swift test`, `cargo test`, `flutter test` all pass; `flutter build macos` builds.
+- [ ] Real A/B lock test (user explicitly deferred on 2026-11-14; code/build complete): run the lock test on a real A (spec §6 step 1): lock A, open 桌面, check picture, banner, password typing, input after unlock. Record the result in the spec; adjust banner copy if the locked picture is black.
+- [x] Commit `docs: desktop sessions in README`.
+
+
+### Follow-up fixes and validation notes
+
+- `b05f017`: host rechecks lock state before waking, before each password chunk, and before Return. Four pure sequence tests cover unlock during the wait and during typing.
+- Desktop stream choices/pinning now propagate to sibling screens and newly opened screens; secondary display IDs cannot be favorited.
+- GUI desktop coverage is in `gui/test/ui/desktop_test.dart` (state + widget tests), alongside the existing `main_state_test.dart` and `stage_test.dart` regression suites.
+- Run Rust tests with `TERM=xterm-256color`; with `TERM=dumb`, four existing tmux real-client tests cannot attach. The 37-test live suite and then the full workspace pass with the correct terminal setting.
+- No branch push or installation was performed. Linux-native GTK rendering and real A/B lock-screen behavior are not validated on this Mac.
