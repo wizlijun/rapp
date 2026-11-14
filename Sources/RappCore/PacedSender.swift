@@ -14,10 +14,15 @@ public final class PacedSender {
         public var inFlight: Int
         public var cap: Int
         public var weak: Bool
+        /// Full frames encoded since the previous call.
+        public var fullFrames: Int
+        /// The slowest encode since the previous call, in ms (nil when none ran).
+        public var encodeMsMax: Int?
     }
 
     private struct Offer {
         var samples: [UInt8]
+        var raw: [UInt8]?
         var width: Int
         var height: Int
         var region: CanvasRect
@@ -46,6 +51,13 @@ public final class PacedSender {
     private var firstSentAt: TimeInterval?
     private var firstAckSeen = false
     private var latencyMs: Int?
+    private var fullFrames = 0
+    private var encodeMsMax: Int?
+    /// When the canvas first stopped being exact since it was last exact; settle waits 0.3 s from here.
+    private var divergedAt: TimeInterval?
+    private var lastRegion = CanvasRect(x: 0, y: 0, w: 0, h: 0)
+    private var lastCaptured: TimeInterval = 0
+    private static let settleDelay = 0.3
 
     public var onWeakChange: ((Bool) -> Void)?
     public var weak: Bool { tier.weak }
@@ -58,8 +70,10 @@ public final class PacedSender {
         self.pacer = SendPacer(fps: fps)
     }
 
-    public func offer(samples: [UInt8], width: Int, height: Int, region: CanvasRect, captured: TimeInterval) {
-        latest = Offer(samples: samples, width: width, height: height, region: region, captured: captured)
+    /// `raw` is the frame's tightly packed BGRA, only for two-tone modes (nil otherwise).
+    public func offer(samples: [UInt8], raw: [UInt8]?, width: Int, height: Int, region: CanvasRect,
+                      captured: TimeInterval) {
+        latest = Offer(samples: samples, raw: raw, width: width, height: height, region: region, captured: captured)
         pump()
     }
 
@@ -81,6 +95,18 @@ public final class PacedSender {
         encoder = FrameEncoder(mode: mode)
         queue = []
         latest = nil
+        divergedAt = nil
+    }
+
+    /// Call every 100 ms: once the canvas has differed from the exact quantization for 300 ms and
+    /// nothing is queued or held, sends the correcting slices.
+    public func settleIfIdle() {
+        guard encoder.needsSettle, queue.isEmpty, latest == nil, let at = divergedAt,
+              now() - at >= Self.settleDelay else { return }
+        let slices = encoder.encodeSettle(limit: Self.sliceLimit)
+        divergedAt = nil
+        queue = slices.map { Slice(region: lastRegion, payload: $0, captured: lastCaptured) }
+        pump()
     }
 
     public func setFps(_ fps: Int) { pacer.fps = fps }
@@ -102,10 +128,11 @@ public final class PacedSender {
     /// previous call (nil when no ack arrived); it is cleared by this call.
     public func takeStats() -> Stats {
         let t = now()
-        defer { latencyMs = nil }
+        defer { latencyMs = nil; fullFrames = 0; encodeMsMax = nil }
         return Stats(rttMs: pacer.lastRtt.map { Int(($0 * 1000).rounded()) },
                      baseRttMs: pacer.baseRtt(now: t).map { Int(($0 * 1000).rounded()) },
-                     latencyMs: latencyMs, inFlight: pacer.inFlight, cap: pacer.cap(now: t), weak: tier.weak)
+                     latencyMs: latencyMs, inFlight: pacer.inFlight, cap: pacer.cap(now: t), weak: tier.weak,
+                     fullFrames: fullFrames, encodeMsMax: encodeMsMax)
     }
 
     private func report(_ change: Bool?) {
@@ -122,8 +149,19 @@ public final class PacedSender {
                 latest = nil
                 let first = sessionFirstFrame ? Self.firstSliceLimit : nil
                 sessionFirstFrame = false
-                let slices = encoder.encodeSlices(samples: o.samples, width: o.width, height: o.height,
-                                                  limit: Self.sliceLimit, firstLimit: first)
+                let started = now()
+                let slices = encoder.encodeSlices(samples: o.samples, raw: o.raw, width: o.width, height: o.height,
+                                                  region: o.region, limit: Self.sliceLimit, firstLimit: first)
+                let ms = Int(((now() - started) * 1000).rounded())
+                encodeMsMax = max(encodeMsMax ?? 0, ms)
+                if slices.first?.isFull == true { fullFrames += 1 }
+                lastRegion = o.region
+                lastCaptured = o.captured
+                if !encoder.needsSettle {
+                    divergedAt = nil
+                } else if divergedAt == nil {
+                    divergedAt = now()
+                }
                 queue = slices.map { Slice(region: o.region, payload: $0, captured: o.captured) }
                 continue
             }

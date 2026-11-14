@@ -166,7 +166,7 @@ final class WorkerCLITests: XCTestCase {
         XCTAssertEqual(WorkerEvent.rejected(reason: "busy").jsonLine, #"{"event":"rejected","reason":"busy"}"#)
         XCTAssertEqual(WorkerEvent.stats(kbps: 12.34, fps: 15, width: 800, height: 600,
                                          rttMs: nil, baseRttMs: nil, latencyMs: nil, weak: false).jsonLine,
-                       #"{"event":"stats","fps":15,"height":600,"kbps":12.3,"weak":false,"width":800}"#)
+                       #"{"event":"stats","fps":15,"fulls":0,"height":600,"kbps":12.3,"weak":false,"width":800}"#)
         XCTAssertEqual(WorkerEvent.ready(width: 800, height: 600, title: "Apple / “你好”").jsonLine,
                        #"{"event":"ready","height":600,"title":"Apple / “你好”","width":800}"#)
         XCTAssertEqual(WorkerEvent.windows(count: 3).jsonLine, #"{"count":3,"event":"windows"}"#)
@@ -188,21 +188,27 @@ final class WorkerCLITests: XCTestCase {
     func testStatsKbpsIsRoundedToOneDecimal() {
         XCTAssertEqual(WorkerEvent.stats(kbps: 0, fps: 0, width: 0, height: 0,
                                          rttMs: nil, baseRttMs: nil, latencyMs: nil, weak: false).jsonLine,
-                       #"{"event":"stats","fps":0,"height":0,"kbps":0,"weak":false,"width":0}"#)
+                       #"{"event":"stats","fps":0,"fulls":0,"height":0,"kbps":0,"weak":false,"width":0}"#)
         XCTAssertEqual(WorkerEvent.stats(kbps: 1234.567, fps: 5, width: 1, height: 2,
                                          rttMs: nil, baseRttMs: nil, latencyMs: nil, weak: false).jsonLine,
-                       #"{"event":"stats","fps":5,"height":2,"kbps":1234.6,"weak":false,"width":1}"#)
+                       #"{"event":"stats","fps":5,"fulls":0,"height":2,"kbps":1234.6,"weak":false,"width":1}"#)
     }
 
     func testStatsJsonCarriesPacingFields() {
         XCTAssertEqual(WorkerEvent.stats(kbps: 1, fps: 2, width: 3, height: 4,
                                          rttMs: 120, baseRttMs: 80, latencyMs: 300, weak: true).jsonLine,
-                       #"{"baseRttMs":80,"event":"stats","fps":2,"height":4,"kbps":1,"latencyMs":300,"rttMs":120,"weak":true,"width":3}"#)
+                       #"{"baseRttMs":80,"event":"stats","fps":2,"fulls":0,"height":4,"kbps":1,"latencyMs":300,"rttMs":120,"weak":true,"width":3}"#)
         let partial = WorkerEvent.stats(kbps: 1, fps: 2, width: 3, height: 4,
                                         rttMs: nil, baseRttMs: 80, latencyMs: nil, weak: false).jsonLine
         XCTAssertFalse(partial.contains("rttMs"))
         XCTAssertFalse(partial.contains("latencyMs"))
         XCTAssertTrue(partial.contains(#""baseRttMs":80"#))
+    }
+
+    func testStatsJsonCarriesFullsAndEncodeTime() {
+        XCTAssertEqual(WorkerEvent.stats(kbps: 1, fps: 2, width: 3, height: 4, rttMs: nil, baseRttMs: nil,
+                                         latencyMs: nil, weak: false, fulls: 2, encMs: 9).jsonLine,
+                       #"{"encMs":9,"event":"stats","fps":2,"fulls":2,"height":4,"kbps":1,"weak":false,"width":3}"#)
     }
 
     func testCommandOutputs() {

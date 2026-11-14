@@ -284,6 +284,7 @@ final class Session {
     private var app: NSRunningApplication?
     private var injector: InputInjector?
     private var timer: DispatchSourceTimer?
+    private var settleTimer: DispatchSourceTimer?
     private var pollTimer: DispatchSourceTimer?
     /// Clipboard history and uploads, from the moment capture is ready until the session ends.
     private(set) var transfers: TransferStore?
@@ -586,6 +587,16 @@ final class Session {
         timer.resume()
         self.timer = timer
 
+        // A canvas left inexact by raw-pixel matches is corrected after 300 ms of calm; checked 10 times a second.
+        let settle = DispatchSource.makeTimerSource(queue: queue)
+        settle.schedule(deadline: .now() + 0.1, repeating: 0.1)
+        settle.setEventHandler { [weak self] in
+            guard let self, !self.ended else { return }
+            self.paced?.settleIfIdle()
+        }
+        settle.resume()
+        self.settleTimer = settle
+
         // Windows are looked up 10 times a second (spec §3.2), off the session queue.
         let poll = DispatchSource.makeTimerSource(queue: trackerQueue)
         poll.schedule(deadline: .now() + 0.1, repeating: 0.1)
@@ -643,7 +654,7 @@ final class Session {
             region = newRegion
             // No encoder reset: each frame carries its own region and B keeps
             // the decoded picture, so a diff against the previous frame stays
-            // correct; a new pixel size already makes the encoder send a full frame.
+            // correct; a new pixel size moves the canvas, and only a density change sends a full frame.
             Task { await capture.setRegion(newRegion) }
         }
     }
@@ -672,8 +683,19 @@ final class Session {
               ((width + tileSize - 1) / tileSize) * ((height + tileSize - 1) / tileSize) <= 0xFFFF else { return }
         let samples = Quantizer.quantize(bgra: UnsafeRawBufferPointer(start: base, count: bytesPerRow * height),
                                          width: width, height: height, bytesPerRow: bytesPerRow, mode: mode)
+        // Two-tone modes also get the raw pixels (the buffer is reused by capture, so copy the rows out tightly).
+        var raw: [UInt8]?
+        if mode == .duogray || mode == .duocolor {
+            let rowBytes = width * 4
+            raw = [UInt8](unsafeUninitializedCapacity: rowBytes * height) { buf, count in
+                for y in 0..<height {
+                    memcpy(buf.baseAddress! + y * rowBytes, base + y * bytesPerRow, rowBytes)
+                }
+                count = rowBytes * height
+            }
+        }
         queue.async { [weak self] in
-            self?.submit(samples: samples, width: width, height: height, region: region, mode: mode, seq: seq,
+            self?.submit(samples: samples, raw: raw, width: width, height: height, region: region, mode: mode, seq: seq,
                          captured: captured)
         }
     }
@@ -684,14 +706,14 @@ final class Session {
     /// Samples quantized for a mode that has since been switched away from are
     /// dropped (the encoder would reject their size), and so are samples older
     /// than ones already submitted (a redraw racing a newer frame).
-    private func submit(samples: [UInt8], width: Int, height: Int, region: CanvasRect, mode: Mode, seq: Int,
+    private func submit(samples: [UInt8], raw: [UInt8]?, width: Int, height: Int, region: CanvasRect, mode: Mode, seq: Int,
                         captured: TimeInterval) {
         guard !ended, capture != nil else { return }
         guard mode == sampleLock.withLock({ sampleMode }), seq >= newestSubmittedSeq else { return }
         newestSubmittedSeq = seq
         lastWidth = width
         lastHeight = height
-        paced?.offer(samples: samples, width: width, height: height, region: region, captured: captured)
+        paced?.offer(samples: samples, raw: raw, width: width, height: height, region: region, captured: captured)
     }
 
     private func makePacedSender(mode: Mode, fps: Int) {
@@ -731,12 +753,13 @@ final class Session {
         let p = paced?.takeStats()
         if output.json {
             output.emit(.stats(kbps: kbps, fps: framesThisSecond, width: lastWidth, height: lastHeight,
-                               rttMs: p?.rttMs, baseRttMs: p?.baseRttMs, latencyMs: p?.latencyMs, weak: p?.weak ?? false))
+                               rttMs: p?.rttMs, baseRttMs: p?.baseRttMs, latencyMs: p?.latencyMs, weak: p?.weak ?? false,
+                               fulls: p?.fullFrames ?? 0, encMs: p?.encodeMsMax))
         } else {
             func n(_ v: Int?) -> String { v.map(String.init) ?? "-" }
-            output.log(String(format: "[stats] %.1f kbps %d fps %dx%d rtt %@ base %@ latency %@ inflight %d/%d%@",
+            output.log(String(format: "[stats] %.1f kbps %d fps %dx%d rtt %@ base %@ latency %@ inflight %d/%d fulls %d encMs %@%@",
                               kbps, framesThisSecond, lastWidth, lastHeight, n(p?.rttMs), n(p?.baseRttMs), n(p?.latencyMs),
-                              p?.inFlight ?? 0, p?.cap ?? 0, p?.weak == true ? " weak" : ""))
+                              p?.inFlight ?? 0, p?.cap ?? 0, p?.fullFrames ?? 0, n(p?.encodeMsMax), p?.weak == true ? " weak" : ""))
         }
         bytesThisSecond = 0
         framesThisSecond = 0
@@ -799,8 +822,8 @@ final class Session {
             density = newDensity
             paced?.setFps(newFps)
             if let capture {
-                // No encoder reset: a density change that alters the picture's
-                // pixel size already makes the encoder send a full frame.
+                // No encoder reset: the encoder sends a full frame itself when the
+                // density (pixels per point) changes by more than 1 %.
                 Task { await capture.setStream(fps: newFps, density: Double(newDensity)) }
             }
         }
@@ -884,6 +907,8 @@ final class Session {
         pendingMenuRead = nil
         timer?.cancel()
         timer = nil
+        settleTimer?.cancel()
+        settleTimer = nil
         pollTimer?.cancel()
         pollTimer = nil
         paster?.end()
