@@ -552,6 +552,42 @@ void main() {
       }, app: chrome, profiles: store());
     });
 
+    test('closing a tab closes its window; closing a sheet presses Esc', () {
+      final sid = chrome.length;
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(sid, [w(1), w(2, kind: WindowKind.floating), w(3, kind: WindowKind.sheet)]));
+        st.closeWindow(2);
+        expect(calls(port, 'close_window').single.$2, {'sid': sid, 'window': 2});
+        st.closeWindow(3);
+        expect(calls(port, 'key').single.$2, {'sid': sid, 'keyCode': 53, 'modifiers': 0});
+        st.closeWindow(99); // not in the table
+        expect(calls(port, 'close_window').length + calls(port, 'key').length, 2);
+      }, app: chrome, profiles: store());
+    });
+
+    test('marking the input box saves a point in the profile; the session clicks it before sending', () {
+      final sid = chrome.length;
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(sid, [w(1)]));
+        st.markInputAt(const Offset(100, 250), const Size(400, 272)); // not marking: ignored
+        expect(st.currentRemote!.profile.input, isNull);
+        st.markInput();
+        expect(st.markingInput, sid);
+        st.markInputAt(const Offset(100, 250), const Size(400, 272));
+        expect(st.markingInput, isNull);
+        final p = st.currentRemote!.profile.input!;
+        expect((p.x, p.dy, p.fromBottom), (0.25, 22.0, true));
+        expect(st.hint, '已标记输入区：发送前会先点它');
+        port.calls.clear();
+        st.currentRemote!.prepareInput();
+        expect([for (final c in port.calls) c.$1], ['mouse', 'mouse']);
+        expect(port.calls.first.$2, containsPair('x', 100.0));
+        expect(port.calls.first.$2, containsPair('y', 28 + 250.0));
+        st.clearInputMark();
+        expect(st.currentRemote!.profile.input, isNull);
+      }, app: chrome, profiles: store());
+    });
+
     test('hideLike on the main window does nothing; noComposerLike there writes child: false', () {
       env((a, t, port, st, hints) {
         port.emit(WindowsEvent(chrome.length, [w(1), w(2)]));
@@ -811,13 +847,13 @@ void main() {
     test('input blocked shows for a second on the current session only', () {
       env((a, t, port, st, hints) {
         port.emit(const InputBlockedEvent(1, 'Mac mini'));
-        expect(st.hint, 'A 正在被 Mac mini 操作');
+        expect(st.hint, '远端正在被 Mac mini 操作');
         a.elapse(const Duration(milliseconds: 999));
-        expect(st.hint, 'A 正在被 Mac mini 操作');
+        expect(st.hint, '远端正在被 Mac mini 操作');
         a.elapse(const Duration(milliseconds: 1));
-        expect(st.hint, isNot('A 正在被 Mac mini 操作'));
+        expect(st.hint, isNot('远端正在被 Mac mini 操作'));
         port.emit(const InputBlockedEvent(1, ''));
-        expect(st.hint, 'A 正在被另一台设备操作');
+        expect(st.hint, '远端正在被另一台设备操作');
       });
       env((a, t, port, st, hints) {
         // sid 2 is Notes; Calculator (sid 10) is not on the stage once Notes is current.
@@ -830,7 +866,7 @@ void main() {
 
     test('a second blocked event re-arms the 1 s hint', () {
       env((a, t, port, st, hints) {
-        const text = 'A 正在被 Mac mini 操作';
+        const text = '远端正在被 Mac mini 操作';
         port.emit(const InputBlockedEvent(1, 'Mac mini'));
         a.elapse(const Duration(milliseconds: 600));
         port.emit(const InputBlockedEvent(1, 'Mac mini'));
@@ -880,10 +916,10 @@ void main() {
       });
     });
 
-    test('A quitting the app reads A 端关闭了 app', () {
+    test('the host quitting the app reads 远端关闭了 app', () {
       env((a, t, port, st, hints) {
         port.emit(const DisconnectedEvent(1, 'host says: Calculator quit'));
-        expect(st.current!.reason, 'A 端关闭了 app');
+        expect(st.current!.reason, '远端关闭了 app');
       });
     });
 
@@ -2326,7 +2362,7 @@ void main() {
         a.flushMicrotasks();
         expect(e.pinned, false);
         expect(e.pinning, false);
-        expect(st.hint, '这条太旧了，A 上已不保留');
+        expect(st.hint, '这条太旧了，远端已不保留');
       });
     });
 
@@ -2401,7 +2437,7 @@ void main() {
         port.emit(const ClipsEvent(1, [ClipRow(7, 'one', true)]));
         port.emit(const DisconnectedEvent(1, 'connection closed'));
         final e = st.resources.clips.single;
-        expect(st.copyBlockedWord(e), 'A 已断开，复制不到');
+        expect(st.copyBlockedWord(e), '远端已断开，复制不到');
         st.reconnect('111/calc');
         a.flushMicrotasks();
         expect(st.copyBlockedWord(e), '重连前的，复制不到');
@@ -2414,7 +2450,7 @@ void main() {
         port.emit(const ClipsEvent(1, [ClipRow(7, 'one', true)]));
         port.emit(const DisconnectedEvent(1, 'connection closed'));
         final e = st.resources.clips.single;
-        expect(st.copyBlockedWord(e), 'A 已断开，复制不到');
+        expect(st.copyBlockedWord(e), '远端已断开，复制不到');
         expect(st.canPin(e), false);
         port.calls.clear();
         st.copyLocal(e);
@@ -2601,7 +2637,7 @@ void main() {
         };
         st.reconnect('111/calc');
         a.flushMicrotasks();
-        expect(st.copyBlockedWord(st.resources.clips.single), 'A 已断开，复制不到');
+        expect(st.copyBlockedWord(st.resources.clips.single), '远端已断开，复制不到');
       });
     });
 
@@ -2633,7 +2669,7 @@ void main() {
   group('endedHint', () {
     test('maps runner and hub reasons', () {
       expect(endedHint('X', 'rapp-client: quit'), '已结束 X');
-      expect(endedHint('X', 'host says: X quit'), 'X 已结束：A 端关闭了 app');
+      expect(endedHint('X', 'host says: X quit'), 'X 已结束：远端关闭了 app');
       expect(endedHint('X', 'connection closed'), 'X 意外结束：连接断了');
       expect(endedHint('X', 'GUI did not connect'), 'X 意外结束：本机没有接上会话');
       expect(endedHint('X', 'rapp-client: boom'), 'X 意外结束：boom');

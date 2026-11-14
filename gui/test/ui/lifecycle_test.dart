@@ -8,7 +8,7 @@ import 'package:rapp/ui/main_state.dart' show endedHint;
 void main() {
   test('disconnect words', () {
     expect(disconnectWord('user'), '你断开了');
-    expect(disconnectWord('host says: Calculator quit'), 'A 端关闭了 app');
+    expect(disconnectWord('host says: Calculator quit'), '远端关闭了 app');
     expect(disconnectWord('bad password'), '密码不对');
     expect(disconnectWord('offline'), '对方离线');
     expect(disconnectWord('no path to 111'), '对方离线');

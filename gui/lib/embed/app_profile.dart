@@ -1,3 +1,5 @@
+import 'dart:ui' show Offset, Size;
+
 import '../ui/workspace_store.dart' show oneLine;
 import 'session_port.dart';
 import 'stream_choice.dart';
@@ -21,6 +23,52 @@ AfterSend? afterSendFromJson(Object? v) => switch (v) {
 String afterSendToJson(AfterSend a) => a == AfterSend.none ? 'none' : 'return';
 
 enum RuleAction { hide, noComposer }
+
+/// Where the app's text box sits in its main window: a click there before a send puts A's focus
+/// in it. [x] is a share of the content width; [dy] is content points down from the top, or up
+/// from the bottom when [fromBottom] (a chat box stays put when the window grows).
+class InputPoint {
+  const InputPoint(this.x, this.dy, {this.fromBottom = false});
+
+  final double x;
+  final double dy;
+  final bool fromBottom;
+
+  /// The point [p] marked in a content area of [size]: measured from the nearer edge.
+  factory InputPoint.at(Offset p, Size size) {
+    final x = size.width > 0 ? (p.dx / size.width).clamp(0.0, 1.0) : 0.5;
+    final y = p.dy.clamp(0.0, size.height);
+    return y > size.height / 2
+        ? InputPoint(x, size.height - y, fromBottom: true)
+        : InputPoint(x, y);
+  }
+
+  /// Where the point is in a content area of [size].
+  Offset inContent(Size size) => Offset(
+        x * size.width,
+        (fromBottom ? size.height - dy : dy).clamp(0.0, size.height),
+      );
+
+  Map<String, Object?> toJson() => {'x': x, fromBottom ? 'bottom' : 'top': dy};
+
+  /// Null unless [j] has `x` in 0–1 and exactly one of `top`/`bottom`, not negative.
+  static InputPoint? fromJson(Object? j) {
+    if (j is! Map) return null;
+    final x = j['x'], top = j['top'], bottom = j['bottom'];
+    if (x is! num || x < 0 || x > 1) return null;
+    if ((top == null) == (bottom == null)) return null;
+    final dy = top ?? bottom;
+    if (dy is! num || dy < 0 || !dy.isFinite) return null;
+    return InputPoint(x.toDouble(), dy.toDouble(), fromBottom: bottom != null);
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is InputPoint && other.x == x && other.dy == dy && other.fromBottom == fromBottom;
+
+  @override
+  int get hashCode => Object.hash(x, dy, fromBottom);
+}
 
 /// One window rule: matches a window by kind and title glob; the first matching rule wins.
 class WindowRule {
@@ -82,6 +130,7 @@ class AppProfile {
     this.fps,
     this.afterSend,
     this.composer,
+    this.input,
     this.windows,
     this.tested,
   });
@@ -93,6 +142,7 @@ class AppProfile {
   int? fps;
   AfterSend? afterSend;
   bool? composer;
+  InputPoint? input;
   List<WindowRule>? windows;
   bool? tested;
 
@@ -111,6 +161,7 @@ class AppProfile {
         fps: fps,
         afterSend: afterSend,
         composer: composer,
+        input: input,
         windows: windows == null ? null : [...windows!],
         tested: tested,
       );
@@ -126,6 +177,7 @@ class AppProfile {
           },
         if (afterSend != null) 'afterSend': afterSendToJson(afterSend!),
         if (composer != null) 'composer': composer,
+        if (input != null) 'input': input!.toJson(),
         if (windows != null) 'windows': [for (final w in windows!) w.toJson()],
         if (tested != null) 'tested': tested,
       };
@@ -174,6 +226,7 @@ class AppProfile {
       fps: fps,
       afterSend: afterSendFromJson(j['afterSend']),
       composer: j['composer'] is bool ? j['composer'] as bool : null,
+      input: InputPoint.fromJson(j['input']),
       windows: windows,
       tested: j['tested'] is bool ? j['tested'] as bool : null,
     );
@@ -203,6 +256,7 @@ class ResolvedProfile {
     this.stream = startChoice,
     this.afterSend = AfterSend.none,
     this.composer = true,
+    this.input,
     this.windows = const [],
     this.tested = true,
   });
@@ -213,6 +267,9 @@ class ResolvedProfile {
   final StreamChoice stream;
   final AfterSend afterSend;
   final bool composer;
+
+  /// The marked text box; null when none is marked.
+  final InputPoint? input;
   final List<WindowRule> windows;
   final bool tested;
 }
@@ -254,6 +311,7 @@ ResolvedProfile resolveProfile(String appId, {required List<AppProfile> mine, re
         pick((p) => p.fps) ?? startChoice.fps),
     afterSend: pick((p) => p.afterSend) ?? AfterSend.none,
     composer: pick((p) => p.composer) ?? true,
+    input: pick((p) => p.input),
     windows: pick((p) => p.windows) ?? const [],
     tested: pick((p) => p.tested) ?? true,
   );

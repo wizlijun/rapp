@@ -125,7 +125,7 @@ void main() {
 
     port.emit(const DisconnectedEvent(1, 'link lost'));
     await settle(tester);
-    expect(inside('copy-1', find.text('A 已断开，复制不到')), findsOneWidget);
+    expect(inside('copy-1', find.text('远端已断开，复制不到')), findsOneWidget);
     final before = port.calls.length;
     await tester.tap(find.byKey(const Key('copy-1')), warnIfMissed: false);
     await settle(tester);
@@ -149,7 +149,7 @@ void main() {
     port.emit(const TransferProgressEvent(1, 3, true, 'a.log', 10, 20, TransferState.running, null, null));
     await show(tester);
     await settle(tester);
-    expect(find.text('↓ 从 A'), findsOneWidget);
+    expect(find.text('↓ 从远端'), findsOneWidget);
     expect(find.text('50%'), findsOneWidget);
     expect(find.text('a.log'), findsOneWidget);
     await tester.tap(find.byKey(const Key('cancel-1')));

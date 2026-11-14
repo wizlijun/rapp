@@ -21,6 +21,9 @@ enum SendOutcome {
 /// macOS virtual key code of Return, what the after-send step presses.
 const returnKeyCode = 36;
 
+/// macOS virtual key code of Esc.
+const escKeyCode = 53;
+
 class ComposerModel extends ChangeNotifier {
   /// [onDrop]: a block left the editor (removed, or sent); the runner forgets what it held.
   /// [onAllSent]: a send round put every piece into A (not partial, failed or cancelled).
@@ -67,7 +70,7 @@ class ComposerModel extends ChangeNotifier {
   SendOutcome send() {
     if (sending) return SendOutcome.ignored;
     if (blocks.isEmpty && text.isEmpty) {
-      _show('按键直接发给 A', const Duration(seconds: 5));
+      _show('已给远端发回车', const Duration(seconds: 3));
       notifyListeners();
       return SendOutcome.empty;
     }
@@ -164,7 +167,7 @@ class ComposerModel extends ChangeNotifier {
     _statusTimer = Timer(const Duration(seconds: 2), () {
       if (!_copyPending) return;
       _copyPending = false;
-      _show('A 上没有复制到东西', const Duration(seconds: 2));
+      _show('远端没有复制到东西', const Duration(seconds: 2));
       notifyListeners();
     });
     notifyListeners();
@@ -208,6 +211,12 @@ class ComposerModel extends ChangeNotifier {
     if (i < 0) return;
     blocks.removeAt(i);
     onDrop?.call(n);
+    notifyListeners();
+  }
+
+  /// A short line under the editor for a few seconds.
+  void note(String s) {
+    _show(s, const Duration(seconds: 4));
     notifyListeners();
   }
 

@@ -31,9 +31,9 @@ void main() {
     ]);
   });
 
-  test('empty send hints', () {
+  test('an empty send is a Return', () {
     expect(m.send(), SendOutcome.empty);
-    expect(m.status, '按键直接发给 A');
+    expect(m.status, '已给远端发回车');
     expect(m.sending, isFalse);
   });
 
@@ -101,12 +101,12 @@ void main() {
     expect(m.text, 'a');
   });
 
-  test('status clears after 5 s', () {
+  test('status clears after 3 s', () {
     fakeAsync((a) {
       m.send();
-      expect(m.status, '按键直接发给 A');
-      a.elapse(const Duration(milliseconds: 4900));
-      expect(m.status, '按键直接发给 A');
+      expect(m.status, '已给远端发回车');
+      a.elapse(const Duration(milliseconds: 2900));
+      expect(m.status, '已给远端发回车');
       a.elapse(const Duration(milliseconds: 200));
       expect(m.status, isNull);
     });
@@ -127,7 +127,7 @@ void main() {
       m.copyPressed();
       expect(m.status, '已复制');
       a.elapse(const Duration(seconds: 2));
-      expect(m.status, 'A 上没有复制到东西');
+      expect(m.status, '远端没有复制到东西');
       a.elapse(const Duration(seconds: 2));
       expect(m.status, isNull);
     });
