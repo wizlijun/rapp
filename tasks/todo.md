@@ -62,8 +62,8 @@
 
 ## 未来规划
 - **多窗口 / 弹出窗口**：macOS 已做（见上）；Windows、Omarchy 端升到 v4 待做
-- **按区域选编码**（参考 Xpra）：静止的文字区用无损或低色深，正在变的区域用视频编码；下一个，单独出 spec
-- **硬件编码**（参考 Sunshine）：A 端用 VideoToolbox 编 H.264/HEVC，作为"看视频"档；B 端用 VideoToolbox 解码。30 fps 全屏动画时比瓦片编码省流量也省 CPU。暂不排期
+- **按区域选编码**（参考 Xpra）：静止的文字区用无损或低色深，正在变的区域用视频编码；见 `docs/superpowers/specs/2026-11-14-rapp-smooth-streaming-design.md`（第二步）
+- **硬件编码**（参考 Sunshine）：A 端用 VideoToolbox 编 H.264/HEVC，作为"看视频"档；B 端用 VideoToolbox 解码。30 fps 全屏动画时比瓦片编码省流量也省 CPU。见 `docs/superpowers/specs/2026-11-14-rapp-smooth-streaming-design.md`（第二步）；暂不排期
 
 ## 回顾
 - M1 到 M3 按规格定死的接口分给三个子代理并行做，合并时没有冲突，接口这一步省了很多返工。
