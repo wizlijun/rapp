@@ -2,12 +2,11 @@
 // `devices/*/inputs/*.jsonl`, merged by `id`, newest first.
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 
-import '../data_dir.dart';
 import '../paths.dart';
+import 'input_log.dart';
 
 /// One record as read back.
 class InputEntry {
@@ -237,47 +236,15 @@ class InputHistory extends ChangeNotifier {
   Future<void> _remove(InputEntry e) async {
     final dd = data();
     final me = dd.deviceId();
-    final path = '${dd.inputsDir(me ?? '')}/${e.day}.jsonl';
-    final f = File(path);
-    if (me != null && await f.exists()) {
-      final bytes = await f.readAsBytes();
-      final out = BytesBuilder(copy: false);
-      var from = 0, dropped = false;
-      while (from < bytes.length) {
-        var to = bytes.indexOf(0x0A, from);
-        to = to < 0 ? bytes.length : to + 1;
-        final line = bytes.sublist(from, to);
-        from = to;
-        if (_idOf(line) == e.id) {
-          dropped = true;
-        } else {
-          out.add(line);
-        }
-      }
-      if (dropped) {
-        writePrivate(path, out.takeBytes());
-        final st = await f.stat();
-        final old = _files[path];
-        if (old != null) {
-          _files[path] = _Read(st.size, st.modified, [
-            for (final x in old.entries)
-              if (x.id != e.id) x,
-          ]);
-        }
-      }
+    if (me != null) {
+      // Queued behind the appends already asked for (the recorder's), so the line is there to drop.
+      await InputLog.dropLine('${dd.inputsDir(me)}/${e.day}.jsonl', e.id);
     }
     _added.remove(e.id);
     _changed();
+    await _scan(); // the file changed: read it again
   }
 
-  static String? _idOf(List<int> line) {
-    try {
-      final v = jsonDecode(utf8.decode(line, allowMalformed: true));
-      return v is Map && v['id'] is String ? v['id'] as String : null;
-    } catch (_) {
-      return null;
-    }
-  }
 
   @override
   void dispose() {

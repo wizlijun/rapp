@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/history/input_history.dart';
+import 'package:rapp/history/input_log.dart';
 import 'package:rapp/paths.dart';
 
 /// A record as the recorder writes it (input_recorder.dart `_common`).
@@ -187,6 +188,28 @@ void main() {
     await h.refresh();
     await h.remove(h.search('theirs').single);
     expect(h.search('theirs'), hasLength(1));
+  });
+
+  test('a removal runs behind the appends already asked for on that file', () async {
+    final f = day('dev1', '2026-11-14', [
+      rec('01A', '2026-11-14T10:00:00', 'one'),
+      rec('01B', '2026-11-14T11:00:00', 'two'),
+    ]);
+    final log = InputLog(() => data.inputsDir('dev1'));
+    final h = history();
+    await h.refresh();
+    final two = h.search('two').single;
+    final at = DateTime(2026, 11, 14, 12);
+    final c = rec('01C', '2026-11-14T12:00:00', 'three');
+    final d = rec('01D', '2026-11-14T12:01:00', 'four');
+    final appends = [log.append(c, at), log.append(d, at)];
+    h.add(d);
+    final removals = [h.remove(two), h.remove(h.search('four').single)]; // 01D's append may not have landed
+    await Future.wait([...appends, ...removals]);
+    final ids = f.readAsLinesSync().map((l) => (jsonDecode(l) as Map)['id']).toList();
+    expect(ids, ['01A', '01C']);
+    await h.refresh();
+    expect(h.search('').map((e) => e.id), ['01C', '01A']);
   });
 
   test('a missing devices dir is an empty history', () async {
