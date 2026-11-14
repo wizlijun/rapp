@@ -6,6 +6,7 @@
 //! A does not log pings either.
 
 use crate::link::QUIET;
+use crate::terms;
 use crate::Hub;
 use rapp_net::log::Lvl;
 use rapp_net::msg::Op;
@@ -29,7 +30,9 @@ pub(crate) async fn run(hub: Arc<Hub>, every: Duration) {
     let mut last: HashMap<String, bool> = HashMap::new();
     loop {
         tick.tick().await;
-        for host in hub.hosts.all() {
+        let hosts = hub.hosts.all();
+        terms::stop_gone(&hub, &hosts);
+        for host in hosts {
             if hub.probe_halt.lock().unwrap().contains(&host.id) {
                 continue;
             }
@@ -39,6 +42,11 @@ pub(crate) async fn run(hub: Arc<Hub>, every: Duration) {
                 continue; // removed while the probe was in flight
             }
             let online = online(&r);
+            if online {
+                terms::ensure_watch(&hub, &host);
+            } else {
+                terms::stop_watch(&hub, &host.id);
+            }
             if last.insert(host.id.clone(), online) != Some(online) {
                 hub.log.event(Lvl::Info, "presence", json!({"id":host.id,"online":online}));
             }

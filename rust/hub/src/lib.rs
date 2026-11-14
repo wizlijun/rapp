@@ -5,6 +5,7 @@ mod hosts;
 mod link;
 mod presence;
 mod session;
+mod terms;
 
 use anyhow::{bail, Context, Result};
 use hosts::{Host, Hosts};
@@ -56,6 +57,8 @@ pub(crate) struct Hub {
     log: Log,
     /// B's self-declared name in `auth` (spec §2): this machine's hostname.
     name: String,
+    /// One terminal-session watch per online host.
+    terms: terms::Watches,
 }
 
 pub async fn run<R, W>(opts: Opts, input: R, output: W) -> Result<()>
@@ -77,6 +80,7 @@ where
         bin_dir: opts.bin_dir,
         log: opts.log,
         name: rapp_net::config::hostname(),
+        terms: Default::default(),
     });
     let probe = opts.presence_every.map(|every| tokio::spawn(presence::run(hub.clone(), every)));
     let mut lines = BufReader::new(input).lines();
@@ -184,7 +188,11 @@ impl Hub {
             Some("open") => {
                 let embed = v.get("embed").and_then(Value::as_bool).unwrap_or(false);
                 let reconnect = v.get("reconnect").and_then(Value::as_bool).unwrap_or(false);
-                self.open(s("id")?, s("app")?, embed, reconnect, req).await?;
+                let app = s("app")?;
+                if rapp_term::id::is_term(app) && !embed {
+                    bail!("terminal sessions open embedded only");
+                }
+                self.open(s("id")?, app, embed, reconnect, req).await?;
                 return Ok(None);
             }
             Some("close") => {
@@ -208,6 +216,9 @@ impl Hub {
                 };
                 self.note(sid, what, windows)?;
                 return Ok(None);
+            }
+            Some(c @ ("terms" | "add_term_target" | "remove_term_target" | "new_term")) => {
+                terms::command(self, c, v).await?
             }
             _ => bail!("unknown cmd"),
         }))

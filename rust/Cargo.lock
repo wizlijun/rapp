@@ -1223,6 +1223,7 @@ dependencies = [
  "quinn",
  "rand 0.9.5",
  "rapp-net",
+ "rapp-term",
  "serde",
  "serde_json",
  "tempfile",
