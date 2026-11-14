@@ -496,3 +496,24 @@ pub async fn reply(hub: &mut Hub) -> Value {
         }
     }
 }
+
+/// Waits (within `WAIT`) for `presence` of `id` with `online`: offline says why, online says nothing more.
+pub async fn next_presence(hub: &mut Hub, id: &str, online: bool) {
+    let deadline = tokio::time::Instant::now() + WAIT;
+    loop {
+        let r = tokio::time::timeout_at(deadline, hub.next()).await.expect("presence in time");
+        assert_ne!(r["event"], "error", "{r}");
+        if (&r["event"], &r["id"], &r["online"]) == (&json!("presence"), &json!(id), &json!(online)) {
+            // Offline says why; online says nothing more.
+            assert_eq!(r["error"].as_str().is_some_and(|e| !e.is_empty()), !online, "{r}");
+            return;
+        }
+    }
+}
+
+/// How many `connect` lookups the relay answered with `result`.
+pub fn relay_connects(rig: &RelayRig, result: &str) -> usize {
+    rig.relay.as_ref().expect("relay running").audit().flush();
+    let lines = rapp_relay::audit::read(rig.data.path(), None, None, None).unwrap_or_default();
+    lines.iter().filter(|v| v["ev"] == "connect" && v["result"] == result).count()
+}

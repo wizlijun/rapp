@@ -515,19 +515,6 @@ async fn presence_hub(a: &TestService, home: &std::path::Path) -> Hub {
     }
 }
 
-async fn next_presence(hub: &mut Hub, id: &str, online: bool) {
-    let deadline = tokio::time::Instant::now() + WAIT;
-    loop {
-        let r = tokio::time::timeout_at(deadline, hub.next()).await.expect("presence in time");
-        assert_ne!(r["event"], "error", "{r}");
-        if (&r["event"], &r["id"], &r["online"]) == (&json!("presence"), &json!(id), &json!(online)) {
-            // Offline says why; online says nothing more.
-            assert_eq!(r["error"].as_str().is_some_and(|e| !e.is_empty()), !online, "{r}");
-            return;
-        }
-    }
-}
-
 #[tokio::test]
 async fn presence_reports_online_then_offline() {
     let a = service().await;
@@ -1201,13 +1188,6 @@ async fn dead_relay_does_not_delay_lan() {
 }
 
 // ---- final review fixes (relay device plan 2a) ----
-
-/// How many `connect` lookups the relay answered with `result`.
-fn relay_connects(rig: &RelayRig, result: &str) -> usize {
-    rig.relay.as_ref().expect("relay running").audit().flush();
-    let lines = rapp_relay::audit::read(rig.data.path(), None, None, None).unwrap_or_default();
-    lines.iter().filter(|v| v["ev"] == "connect" && v["result"] == result).count()
-}
 
 /// The relay counts every `unknown id` against the device that asked and locks it out after five.
 /// Offline hosts that only ever had LAN addresses (0.5.5 hosts) must not cost a lookup on each

@@ -285,6 +285,11 @@ impl Hub {
 
     /// A host forced onto the relay: the relay or an error, never the LAN.
     async fn establish_forced(&self, host: &Host) -> Result<Link> {
+        // The relay counts `unknown id` against B: a probe does not ask again about a host it said it
+        // does not know (as `asks_relay`); the user acting on the host asks, and its answer is stored.
+        if quiet() && self.relay_seen.lock().unwrap().get(&host.id) == Some(&false) {
+            bail!("unknown id");
+        }
         let relay = tokio::time::timeout(RELAY_WAIT, self.relay())
             .await
             .unwrap_or_else(|_| Err(anyhow!("relay unreachable: timed out")));

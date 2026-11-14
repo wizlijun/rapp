@@ -143,3 +143,27 @@ async fn presence_says_why_offline() {
     }
     hub.finish().await;
 }
+
+/// The relay counts every `unknown id` against B and locks it out after five: a forced host the relay
+/// does not know costs one lookup per run, not one per probe; the user acting on it asks again.
+#[tokio::test]
+async fn probes_of_a_forced_unknown_host_ask_the_relay_once() {
+    let rig = RelayRig::start().await;
+    let a = a_on_relay(&rig, None).await;
+    let home = tempfile::tempdir().unwrap();
+    hub_relay(home.path(), &rig.addr, &rig.key);
+    let saved = json!([{"id":"100000009","name":"gone","password":"pw","lan":[],"route":"relay"}]);
+    rapp_net::config::write_json(&home.path().join("hosts.json"), &saved).unwrap();
+    let mut hub = Hub::start_with_presence(home.path(), a.bins.path(), Duration::from_millis(100));
+    for _ in 0..6 {
+        next_presence(&mut hub, "100000009", false).await;
+    }
+    assert_eq!(relay_connects(&rig, "unknown id"), 1, "lookups the relay counted as failures");
+    hub.send(json!({"cmd":"apps","id":"100000009","req":2})).await;
+    assert_eq!(reply(&mut hub).await, json!({"event":"error","error":"unknown id","req":2}));
+    assert_eq!(relay_connects(&rig, "unknown id"), 2);
+    // A known host is still reached: the hub was not locked out.
+    hub.send(json!({"cmd":"add_host","id":a.id,"req":3})).await;
+    assert_eq!(reply(&mut hub).await["event"], "host_added");
+    hub.finish().await;
+}
