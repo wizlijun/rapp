@@ -314,3 +314,14 @@
 - 任务 14 第 3 步（多架构构建）：已在 colima 上做完（见上）；未做的是推送到 ghcr.io（`--push`，待用户登录后执行）和在真正的 Linux 主机上用 `network_mode: host` 跑一遍
 - 来源地址实测（`network_mode: host`，另一台机器 `probe` 入网，看审计日志 `enroll` 的 `from` 是不是公网地址）：待用户的 VPS
 - 24 小时久跑（`RAPP_SOAK_SECS=86400 cargo test -p rapp-relay2 --release --test soak -- --ignored --nocapture`）：待用户
+
+## 写作面板（规格 `docs/superpowers/specs/2026-11-14-rapp-composer-writing-panel-design.md`，W1–W16）
+- [x] S1：Flutter 编辑器（`ComposerEditor` 缝、`FlutterEditor`）、写作面板（720 宽、一行 48、字号 15、行高 22，往上长到舞台一半）、「＋」浮层（300 宽）和提示行、打开时画面上移 64 而 A 的尺寸不变、各平台 Ctrl+Enter（macOS ⌃↩ 留在本机，Linux 不发给 A，概览里不响应）
+- [ ] S0、S2（macOS 原生编辑器）、S3（Linux 探查）未做
+- 待实机（不在这个计划里验收）：
+  - 真实 app 上画面上移 64 碍不碍事（规格评审 U1）
+  - 中文输入法下打字；组字时点击
+  - MATRIX 主题下，app 的 InputDecorationTheme 会不会给收起的输入框加底色或悬停效果
+  - 打开的「＋」浮层（约 290 px）可能盖住提示行
+  - 输入区打开时，ClipRect 会把 A 窗口最上面 64 px 藏起来
+  - 输入法提示的点按区域只有约 28 px 高
