@@ -239,12 +239,18 @@ async fn key(data: &Path, rotate: bool) -> Result<()> {
 /// A header, then one tab-separated line per device.
 async fn devices(data: &Path) -> Result<()> {
     let v = request(data, json!({"cmd": "devices"})).await?;
-    println!("ID\t指纹\t入网时间\t最近在线\t吊销");
+    println!("ID\t指纹\t入网时间\t最近在线\t状态");
     for d in v["devices"].as_array().map(Vec::as_slice).unwrap_or_default() {
         let text = |k: &str| d[k].as_str().unwrap_or("-").to_string();
         let seen = if d["online"] == true { "online".to_string() } else { text("last_seen") };
-        let revoked = if d["revoked"] == true { "revoked" } else { "" };
-        println!("{}\t{}\t{}\t{seen}\t{revoked}", text("id"), text("fp"), text("enrolled_at"));
+        let state = if d["revoked"] == true {
+            "revoked"
+        } else if d["stale"] == true {
+            "stale"
+        } else {
+            ""
+        };
+        println!("{}\t{}\t{}\t{seen}\t{state}", text("id"), text("fp"), text("enrolled_at"));
     }
     Ok(())
 }

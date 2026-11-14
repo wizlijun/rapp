@@ -14,7 +14,7 @@ const A_ID: &str = "123456789";
 
 struct Rig {
     relay: Relay,
-    _data: TempDir,
+    data: TempDir,
     key: Key,
     addr: String,
 }
@@ -32,7 +32,7 @@ async fn start() -> Rig {
     let key = Key::new_for_relay(&relay.fp);
     relay.registry().set_join_hash(&join_hash(&key.join())).unwrap();
     let addr = relay.addr.to_string();
-    Rig { relay, _data: data, key, addr }
+    Rig { relay, data, key, addr }
 }
 
 fn endpoint() -> quinn::Endpoint {
@@ -190,6 +190,24 @@ async fn relay_to_unknown_id_fails_on_first_read() {
     let mut buf = [0u8; 1];
     let err = tokio::time::timeout(WAIT, s.read(&mut buf)).await.unwrap().unwrap_err();
     assert_eq!(err.to_string(), "unknown id");
+}
+
+#[tokio::test]
+async fn rotate_key_closes_every_device_with_code_4() {
+    let r = start().await;
+    let ep = endpoint();
+    let a = dial(&r, &ep, &Identity::generate().unwrap()).await;
+    let b = dial(&r, &ep, &Identity::generate().unwrap()).await;
+    a.register(A_ID, &[]).await.unwrap();
+    b.register("987654321", &[]).await.unwrap();
+    let rotated = tokio::time::timeout(WAIT, rapp_relay::admin::issue_key(r.data.path(), true)).await.unwrap();
+    assert!(rotated.unwrap().is_some());
+    for c in [&a, &b] {
+        match push_skipping_revoked(c).await {
+            Pushed::Closed { code, reason } => assert_eq!((code, reason.as_str()), (4, "key changed")),
+            _ => panic!("expected the connection to be closed"),
+        }
+    }
 }
 
 #[tokio::test]

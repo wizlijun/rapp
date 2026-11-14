@@ -115,6 +115,8 @@ pub(crate) trait Control: Send + Sync {
     fn revoke(&self, fp: &Fp) -> Revoked;
     /// Frees `id` in the registry and in the live table; the device it belonged to, if any.
     fn unbind(&self, id: &str) -> Result<Option<Fp>>;
+    /// Closes every enrolled connection (code 4, `key changed`) and takes it out of the live tables.
+    fn key_changed(&self);
 }
 
 pub(crate) struct Ctx {
@@ -257,11 +259,24 @@ impl Handler {
         if !rotate && reg.join_hash().is_some() {
             return err("key exists");
         }
+        // Rotating: every device has to enter the new key. Marked first, so a failed save leaves
+        // the old key in place and every device as it was.
+        let stale = match rotate.then(|| reg.mark_all_stale()).transpose() {
+            Ok(n) => n,
+            Err(e) => return self.failed("set_join", e),
+        };
         if let Err(e) = reg.set_join_hash(hash) {
             return self.failed("set_join", e);
         }
-        let ev = if rotate { "rotate_key" } else { "key" };
-        self.relay().audit().event(ev, json!({"hash": &hash[..8]}), true);
+        match stale {
+            Some(n) => {
+                self.relay().key_changed();
+                self.relay().audit().event("rotate_key", json!({"hash": &hash[..8], "stale": n}), true);
+            }
+            None => {
+                self.relay().audit().event("key", json!({"hash": &hash[..8]}), true);
+            }
+        }
         ok(json!({}))
     }
 
@@ -279,6 +294,7 @@ impl Handler {
                     "enrolled_at": d.enrolled_at,
                     "last_seen": d.last_seen,
                     "revoked": d.revoked,
+                    "stale": d.stale,
                     "online": online.contains(&d.fp),
                 })
             })
