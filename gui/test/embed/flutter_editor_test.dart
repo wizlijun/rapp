@@ -74,6 +74,30 @@ void main() {
     expect(log.enter, 1);
   });
 
+  testWidgets('Ctrl+Enter is neither a send nor a newline', (tester) async {
+    var shortcut = 0;
+    await tester.pumpWidget(_host(ed, around: (v) => CallbackShortcuts(
+          bindings: {
+            const SingleActivator(LogicalKeyboardKey.enter, control: true): () => shortcut++,
+            const SingleActivator(LogicalKeyboardKey.numpadEnter, control: true): () => shortcut++,
+          },
+          child: v,
+        )));
+    ed.focus();
+    await tester.pump();
+    tester.testTextInput.updateEditingValue(const TextEditingValue(text: 'a', selection: TextSelection.collapsed(offset: 1)));
+    await tester.pump();
+    for (final k in [LogicalKeyboardKey.enter, LogicalKeyboardKey.numpadEnter]) {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(k);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    }
+    await tester.pump();
+    expect(log.enter, 0);
+    expect(await ed.read(), 'a');
+    expect(shortcut, 2); // the event was not the editor's: it reached the shortcut above
+  });
+
   testWidgets('Esc reports and never reaches a CallbackShortcuts Esc above', (tester) async {
     var outer = 0;
     await tester.pumpWidget(_host(ed,

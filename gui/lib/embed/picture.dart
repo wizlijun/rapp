@@ -316,6 +316,18 @@ class _PictureState extends State<Picture> {
     final t = RappTokens.of(context);
     final win = widget.window;
     final focused = widget.state.pictureFocused == _sid;
+    if (focused && !_focus.hasFocus) {
+      // The keys went to A without a press (Ctrl+Enter from the editor): Flutter's focus follows,
+      // unless the writing panel's editor still holds the caret.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted &&
+            widget.state.pictureFocused == _sid &&
+            !_focus.hasFocus &&
+            !widget.session.composer.editorFocused) {
+          _focus.requestFocus();
+        }
+      });
+    }
     return LayoutBuilder(
       builder: (context, c) {
         final fit = fitRect(contentSize(win), c.biggest);

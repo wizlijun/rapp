@@ -1995,6 +1995,64 @@ void main() {
       });
     });
 
+    test('composerKey: closed → open with the caret; picture → caret; editor → picture, panel stays', () {
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(1, [rw(7)]));
+        final c = st.currentRemote!.composer;
+        expect(c.open, false);
+        final focus0 = c.focusTick;
+        st.composerKey();
+        expect(c.open, true);
+        expect(c.focusTick, focus0 + 1);
+
+        // Open, the caret not in the editor (the picture has the keys): the caret comes back.
+        st.focusPicture(1);
+        c.editorFocused = false;
+        st.composerKey();
+        expect(c.focusTick, focus0 + 2);
+        expect(c.open, true);
+
+        // The caret in the editor: it goes to the picture, the panel stays.
+        c.editorFocused = true;
+        st.pictureFocused = null;
+        final release0 = c.releaseTick;
+        st.composerKey();
+        expect(c.releaseTick, release0 + 1);
+        expect(st.pictureFocused, 1);
+        expect(c.open, true);
+        lastCall(port, 'picture_focus', {'sid': 1});
+      });
+    });
+
+    test('composerKey from the editor on a detached stage only lets go of the editor', () {
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(1, [rw(7)]));
+        port.emit(const DetachedEvent(1, true));
+        final c = st.currentRemote!.composer;
+        c.open = true;
+        c.editorFocused = true;
+        final release0 = c.releaseTick;
+        st.composerKey();
+        expect(c.releaseTick, release0 + 1);
+        expect(st.pictureFocused, isNull);
+      });
+    });
+
+    test('composerKey does nothing without a session or when composerAllowed is false', () {
+      env((a, t, port, st, hints) {
+        st.composerKey(); // no session: no throw
+      }, sessions: 0);
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(1, [rw(7)]));
+        final rs = st.currentRemote!;
+        rs.setProfile(const ResolvedProfile(composer: false));
+        expect(rs.composerAllowed, false);
+        st.composerKey();
+        expect(rs.composer.open, false);
+        expect(rs.composer.focusTick, 0);
+      });
+    });
+
     test('detaching takes keyboard focus off the picture', () {
       env((a, t, port, st, hints) {
         port.emit(WindowsEvent(1, [rw(7)]));

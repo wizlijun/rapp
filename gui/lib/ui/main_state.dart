@@ -281,6 +281,23 @@ class MainState extends ChangeNotifier {
     return rs?.tabs.tabs.length ?? 0;
   }
 
+  /// Ctrl+Enter: the panel opens with the caret; from the picture the caret comes back to the
+  /// editor; from the editor the keys go to the picture (the panel stays).
+  void composerKey() {
+    final rs = currentRemote;
+    if (rs == null || !rs.composerAllowed) return;
+    final c = rs.composer;
+    if (!c.open) {
+      c.open = true;
+      c.wantFocus();
+    } else if (!c.editorFocused) {
+      c.wantFocus();
+    } else {
+      c.releaseFocus();
+      if (!rs.detached) focusPicture(rs.sid);
+    }
+  }
+
   // ---- picture focus (R15, R24) ----
   /// The session whose picture has keyboard focus: its keys go to A (the runner routes them).
   Object? pictureFocused;

@@ -44,6 +44,52 @@ void main() {
     expect(linuxMacKeyCode(PhysicalKeyboardKey.metaLeft), isNull);
   });
 
+  testWidgets("Ctrl+Enter is rapp's: not sent to A", (tester) async {
+    final port = LinuxSessionPort('unused', framePresented: () async {});
+    final proc = await tester.runAsync(() => Process.start('cat', const []));
+    port.seedSessionForTest(3, proc!);
+    KeyDownEvent down(PhysicalKeyboardKey p, LogicalKeyboardKey l) =>
+        KeyDownEvent(physicalKey: p, logicalKey: l, timeStamp: Duration.zero);
+    final enter = down(PhysicalKeyboardKey.enter, LogicalKeyboardKey.enter);
+    final numpad = down(PhysicalKeyboardKey.numpadEnter, LogicalKeyboardKey.numpadEnter);
+    final j = down(PhysicalKeyboardKey.keyJ, LogicalKeyboardKey.keyJ);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    expect(port.handleKeyEvent(3, enter), false);
+    expect(port.handleKeyEvent(3, numpad), false);
+    expect(port.handleKeyEvent(3, j), true); // Ctrl+J still goes
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    expect(port.handleKeyEvent(3, enter), true); // Shift+Enter goes
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    expect(port.handleKeyEvent(3, enter), true); // so does plain Enter
+
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    expect(port.handleKeyEvent(3, enter), true); // Ctrl+Shift+Enter is not rapp's
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+
+    // Let go of what A holds, so the port has nothing left to release on dispose.
+    expect(port.handleKeyEvent(3, const KeyUpEvent(
+        physicalKey: PhysicalKeyboardKey.keyJ, logicalKey: LogicalKeyboardKey.keyJ, timeStamp: Duration.zero)), true);
+    expect(port.handleKeyEvent(3, const KeyUpEvent(
+        physicalKey: PhysicalKeyboardKey.enter, logicalKey: LogicalKeyboardKey.enter, timeStamp: Duration.zero)), true);
+    final sent = await tester.runAsync(() async {
+      await proc.stdin.close();
+      return utf8.decode(await proc.stdout.expand((b) => b).toList());
+    });
+    final keys = [
+      for (final l in sent!.trim().split('\n'))
+        if ((jsonDecode(l) as Map)['down'] == true) (jsonDecode(l) as Map)['keyCode'],
+    ];
+    expect(keys, [38, 36, 36, 36]); // J, Shift+Enter, Enter, Ctrl+Shift+Enter; no Ctrl+Enter
+    port.dispose();
+    // The close's kill timer is cancelled once the (already ended) worker's exit is seen.
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+  }, skip: Platform.isWindows);
+
   final worker = File('../rust/target/release/rapp-session').absolute.path;
   test('real Linux worker decodes full/delta, crops titlebar, sends input and closes on EOF', () async {
     final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);

@@ -6,12 +6,13 @@ public enum KeyRoute: Equatable {
     case remote
 }
 
-/// While the picture has focus every key goes to A except ⌃⌘ chords (rapp's own shortcuts) and
-/// plain ⌘Q (quit rapp); without focus every key stays with rapp.
+/// While the picture has focus every key goes to A except ⌃⌘ chords (rapp's own shortcuts),
+/// ⌃↩ (the writing panel's) and plain ⌘Q (quit rapp); without focus every key stays with rapp.
 public func routeKey(keyCode: UInt16, flags: NSEvent.ModifierFlags, pictureFocused: Bool) -> KeyRoute {
     let mods = flags.intersection([.command, .control, .option, .shift])
     if mods.contains([.control, .command]) { return .local }
     if mods == [.command] && keyCode == 12 { return .local }
+    if mods == [.control] && (keyCode == 36 || keyCode == 76) { return .local }
     return pictureFocused ? .remote : .local
 }
 

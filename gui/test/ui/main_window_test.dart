@@ -493,6 +493,65 @@ void main() {
     expect(tester.getSize(find.byKey(const Key('wall'))), wall);
   });
 
+  testWidgets('Ctrl+Enter opens the panel and moves the caret back and forth', (tester) async {
+    s.dispose();
+    final port = FakeSessionPort();
+    s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port);
+    await pump(tester);
+    await tester.runAsync(() async {
+      t.onSend = (m) {
+        if (m['cmd'] == 'open') {
+          t.emit({
+            'event': 'opened', 'sid': 1, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+            'port': 5001, 'token': 'tk', 'req': m['req'],
+          });
+        }
+      };
+      s.openOrSwitch('111', 'Safari', 'Safari');
+      for (var i = 0; i < 4; i++) {
+        await flush();
+      }
+    });
+    port.emit(const ReadyEvent(1, 'Safari'));
+    port.emit(WindowsEvent(1, [
+      const RemoteWindow(
+        id: 5, parent: 0, kind: WindowKind.normal, title: 'w', rect: Rect.fromLTWH(0, 0, 800, 600),
+        titleBar: 28, resizable: true, focused: true, texture: 42, visible: Rect.fromLTWH(0, 0, 1, 1),
+      ),
+    ]));
+    await tester.pump();
+    await tester.pump();
+
+    Future<void> ctrlEnter() async {
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    bool editorHasFocus() => tester.widget<TextField>(find.byKey(const Key('composer-field'))).focusNode!.hasFocus;
+
+    // 1: closed -> the panel appears with the caret in it.
+    await ctrlEnter();
+    expect(find.byType(ComposerPanel), findsOneWidget);
+    expect(editorHasFocus(), true);
+
+    // 2: editor -> picture.
+    await ctrlEnter();
+    expect(editorHasFocus(), false);
+    expect(s.pictureFocused, 1);
+    expect(find.byKey(const Key('picture-focus')), findsOneWidget);
+    expect(find.byType(ComposerPanel), findsOneWidget);
+    expect(port.calls.where((c) => c.$1 == 'picture_focus').last.$2, {'sid': 1});
+
+    // 3: picture -> editor again; nothing typed, nothing sent.
+    await ctrlEnter();
+    expect(editorHasFocus(), true);
+    expect(s.pictureFocused, isNull);
+    expect(tester.widget<TextField>(find.byKey(const Key('composer-field'))).controller!.text, '');
+    expect(port.calls.where((c) => c.$1 == 'composer_send'), isEmpty);
+  });
+
   testWidgets('composer draft survives a trip through overview', (tester) async {
     s.dispose();
     final port = FakeSessionPort();

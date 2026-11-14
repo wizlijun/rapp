@@ -49,6 +49,14 @@ final class KeyRoutingTests: XCTestCase {
         XCTAssertNil(modifierKeyIsDown(keyCode: 0, flags: [.shift]))                 // not a modifier key
         XCTAssertNil(modifierKeyIsDown(keyCode: 64, flags: []))
     }
+
+    func testControlReturnStaysLocal() {
+        XCTAssertEqual(routeKey(keyCode: 36, flags: [.control], pictureFocused: true), .local)
+        XCTAssertEqual(routeKey(keyCode: 76, flags: [.control], pictureFocused: true), .local)
+        XCTAssertEqual(routeKey(keyCode: 36, flags: [], pictureFocused: true), .remote)        // plain Return goes to A
+        XCTAssertEqual(routeKey(keyCode: 36, flags: [.command], pictureFocused: true), .remote) // ⌘↩ goes to A
+        XCTAssertEqual(routeKey(keyCode: 36, flags: [.control, .shift], pictureFocused: true), .remote)
+    }
 }
 
 final class KeyTrackerRouteTests: XCTestCase {

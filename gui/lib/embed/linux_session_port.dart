@@ -118,6 +118,13 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
     final keyboard = HardwareKeyboard.instance;
     // Super belongs to the Linux desktop. Ctrl maps to the remote Mac's Command.
     if (keyboard.isMetaPressed) return false;
+    // Ctrl+Enter is rapp's (the writing panel), whatever the remote Command would have done.
+    if ((event.logicalKey == LogicalKeyboardKey.enter || event.logicalKey == LogicalKeyboardKey.numpadEnter) &&
+        keyboard.isControlPressed &&
+        !keyboard.isShiftPressed &&
+        !keyboard.isAltPressed) {
+      return false;
+    }
     final code = linuxMacKeyCode(event.physicalKey);
     if (code == null) return false;
     final down = event is! KeyUpEvent;
@@ -132,6 +139,13 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
         (keyboard.isAltPressed ? 1 << 19 : 0);
     s.send({'cmd': 'key', 'keyCode': code, 'modifiers': mods, 'down': down});
     return true;
+  }
+
+  /// A focused session over [process] without the worker handshake.
+  @visibleForTesting
+  void seedSessionForTest(Object sid, Process process) {
+    _sessions[sid] = _Session(sid, process, _emit, _framePresented, 0, '');
+    _focused = sid;
   }
 
   /// Holds [text] as a copy without a session.

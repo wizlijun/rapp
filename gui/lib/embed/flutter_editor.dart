@@ -54,6 +54,10 @@ class FlutterEditor implements ComposerEditor {
     final k = e.logicalKey;
     final hw = HardwareKeyboard.instance;
     if (k == LogicalKeyboardKey.enter || k == LogicalKeyboardKey.numpadEnter) {
+      // Ctrl+Enter is the window's (it moves the caret to the picture): neither a send nor a newline.
+      if (!_composing && hw.isControlPressed && !hw.isShiftPressed && !hw.isAltPressed && !hw.isMetaPressed) {
+        return KeyEventResult.ignored;
+      }
       if (_composing) return KeyEventResult.skipRemainingHandlers;
       if (hw.isShiftPressed) {
         _insertNow('\n');

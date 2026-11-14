@@ -142,6 +142,10 @@ class _MainWindowState extends State<MainWindow> {
             ? const SingleActivator(LogicalKeyboardKey.keyF, control: true, meta: true)
             : const SingleActivator(LogicalKeyboardKey.f11): _toggleFull,
         const SingleActivator(LogicalKeyboardKey.escape): _esc,
+        // Ctrl+Enter, on every platform: the writing panel's caret (macOS keeps ⌃↩ from A too).
+        const SingleActivator(LogicalKeyboardKey.enter, control: true, includeRepeats: false): state.composerKey,
+        const SingleActivator(LogicalKeyboardKey.numpadEnter, control: true, includeRepeats: false):
+            state.composerKey,
         prefixOf(LogicalKeyboardKey.bracketLeft): () => state.step(-1),
         prefixOf(LogicalKeyboardKey.bracketRight): () => state.step(1),
         // ⌃⌘O: overview; a held chord toggles once.
