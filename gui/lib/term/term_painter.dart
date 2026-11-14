@@ -217,7 +217,7 @@ class TermPainter extends CustomPainter {
       final paint = Paint()..color = palette.fg.withValues(alpha: 0.3);
       final b0 = math.min(s.anchor.x, s.head.x), b1 = math.max(s.anchor.x, s.head.x);
       for (var y = math.max(s.anchor.y, topY); y <= s.head.y && y < m.rows; y++) {
-        if (!visible(y)) continue;
+        if (_top(y) >= gridH) break;
         final c0 = s.block ? b0 : (y == s.anchor.y ? s.anchor.x : 0);
         final c1 = s.block ? b1 : (y == s.head.y ? s.head.x : m.cols - 1);
         final top = snap(_top(y));

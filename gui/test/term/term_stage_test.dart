@@ -145,6 +145,14 @@ void main() {
     expect(model.offset, 0);
   });
 
+  Future<void> ctrlShiftC(WidgetTester t) async {
+    await t.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await t.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await t.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await t.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await t.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+  }
+
   testWidgets('drag selects, the chip counts characters, ⌘C copies one joined line', (t) async {
     final copied = <String>[];
     t.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
@@ -161,17 +169,16 @@ void main() {
     await t.pump();
     expect(find.text('选中了 14 个字 · 复制到本机'), findsOneWidget);
 
-    final mac = defaultTargetPlatform == TargetPlatform.macOS;
-    if (mac) {
+    if (defaultTargetPlatform == TargetPlatform.macOS) {
+      // Ctrl+Shift+C is the other platforms' copy, not macOS's.
+      await ctrlShiftC(t);
+      await t.pump();
+      expect(copied, isEmpty);
       await t.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
       await t.sendKeyEvent(LogicalKeyboardKey.keyC);
       await t.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
     } else {
-      await t.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
-      await t.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
-      await t.sendKeyEvent(LogicalKeyboardKey.keyC);
-      await t.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
-      await t.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await ctrlShiftC(t);
     }
     await t.pump();
     expect(copied, ['abcdefghijklmn']);
@@ -187,7 +194,7 @@ void main() {
     await t.pump();
     expect(find.byKey(const Key('term-copy')), findsNothing);
     await t.pump(const Duration(seconds: 2));
-  });
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS)..values.add(TargetPlatform.linux));
 
   testWidgets('double click selects a word, triple click the wrapped line', (t) async {
     model.apply(scr(['ab cd/ef gh', 'ij'], cols: 11, wrapped: {0}));
@@ -249,6 +256,43 @@ void main() {
     model.apply(scr(['a', 'B', 'c', 'd'], rev: 2));
     await t.pump();
     expect(cache.recorded, 5);
+  });
+
+  testWidgets('a rebuild with an equal theme keeps the recorded rows', (t) async {
+    model.apply(scr(['a', 'b', 'c', 'd']));
+    await show(t);
+    final cache = painter(t).cache;
+    expect(cache.recorded, 4);
+    final tokens0 = RappTokens.of(t.element(find.byType(TermStage)));
+    // The app rebuilds its MaterialApp with fresh, equal tokens on every MainState change; the theme
+    // animation hands them on after half its time.
+    await show(t);
+    await t.pump(const Duration(milliseconds: 300));
+    await t.pump();
+    expect(identical(RappTokens.of(t.element(find.byType(TermStage))), tokens0), isFalse);
+    expect(cache.recorded, 4);
+    // A different theme is drawn again.
+    state.prefs.theme = RappTheme.westworld;
+    await t.pumpWidget(wrap(
+      SizedBox(width: 800, height: 480, child: TermStage(state: state, session: session, port: port)),
+      theme: RappTheme.westworld,
+    ));
+    await t.pump(const Duration(milliseconds: 300));
+    await t.pump();
+    expect(cache.recorded, greaterThanOrEqualTo(8));
+  });
+
+  testWidgets('links are looked for only in the rows in view', (t) async {
+    model.apply(scr([for (var i = 0; i < 10; i++) i == 5 ? 'see https://example.com/x' : 'row $i'],
+        hist: 100, limit: 2000));
+    await show(t);
+    expect([for (final l in painter(t).links) (l.y, l.url)], [(5, 'https://example.com/x')]);
+    await wheel(t, -50 * ch);
+    expect(model.offset, 50);
+    expect(painter(t).links, isEmpty);
+    await wheel(t, 46 * ch);
+    expect(model.offset, 4);
+    expect([for (final l in painter(t).links) l.y], [5]);
   });
 
   testWidgets('a pane larger than the stage is scaled down with the note', (t) async {

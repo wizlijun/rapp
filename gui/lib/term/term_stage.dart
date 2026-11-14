@@ -78,7 +78,10 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
   int _ver = 0;
 
   RappTokens? _tokens;
-  Object? _theme;
+
+  /// What the palette and the metrics were made from: the app rebuilds its theme (fresh, equal tokens) on
+  /// every MainState change, so they are compared by value, not identity.
+  Object? _lookKey;
   late TermPalette _palette;
   late TermMetrics _metrics;
   double _dpr = 1;
@@ -481,9 +484,10 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
   void _look(BuildContext context) {
     final t = RappTokens.of(context);
     final theme = widget.state.prefs.theme;
-    if (!identical(t, _tokens) || theme != _theme) {
-      _tokens = t;
-      _theme = theme;
+    _tokens = t;
+    final key = (theme, t.text, t.bg, t.mono, t.monoFallback.join('\u0000'));
+    if (key != _lookKey) {
+      _lookKey = key;
       _palette = termPaletteFor(theme, t);
       _metrics = TermMetrics.measure(termTextStyle(t));
       _ver++;
@@ -517,7 +521,9 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
 
       if (m != null && _linksVer != _ver) {
         _linksVer = _ver;
-        _links = shown ? linksIn((-m.offset).floor(), m.rows - 1, m.lineAt, m.wrappedAt) : const [];
+        // Only the rows in view: the top one and m.rows more (the last one partly shown).
+        final top = (-m.offset).floor();
+        _links = shown ? linksIn(top, math.min(m.rows - 1, top + m.rows), m.lineAt, m.wrappedAt) : const [];
       }
       final s = _sel;
       if (!identical(s, _countedSel)) {
