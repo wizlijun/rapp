@@ -29,6 +29,8 @@ class StreamMenuAnchor extends StatefulWidget {
     this.onToggleDetach,
     this.onRememberStream,
     this.onOpenProfile,
+    this.forcedRelay,
+    this.onToggleRoute,
     required this.open,
     required this.onToggle,
     required this.onClose,
@@ -90,6 +92,12 @@ class StreamMenuAnchor extends StatefulWidget {
   final VoidCallback? onRememberStream;
   final VoidCallback? onOpenProfile;
 
+  /// Whether this session's host is forced onto the relay; null hides 「改走中继」/「恢复自动选路」 (no relay set).
+  final bool? forcedRelay;
+
+  /// Flips [forcedRelay]; null greys the item (no hub to ask).
+  final VoidCallback? onToggleRoute;
+
   @override
   State<StreamMenuAnchor> createState() => _StreamMenuAnchorState();
 }
@@ -116,6 +124,8 @@ class _StreamMenuAnchorState extends State<StreamMenuAnchor> {
         onToggleDetach: widget.onToggleDetach,
         onRememberStream: widget.onRememberStream,
         onOpenProfile: widget.onOpenProfile,
+        forcedRelay: widget.forcedRelay,
+        onToggleRoute: widget.onToggleRoute,
         clips: widget.clips,
         canCopy: widget.canCopy,
         canInsert: widget.canInsert,
@@ -155,6 +165,8 @@ class StreamMenu extends StatefulWidget {
     this.onToggleDetach,
     this.onRememberStream,
     this.onOpenProfile,
+    this.forcedRelay,
+    this.onToggleRoute,
     required this.clips,
     required this.canCopy,
     required this.canInsert,
@@ -183,6 +195,8 @@ class StreamMenu extends StatefulWidget {
   final VoidCallback? onToggleDetach;
   final VoidCallback? onRememberStream;
   final VoidCallback? onOpenProfile;
+  final bool? forcedRelay;
+  final VoidCallback? onToggleRoute;
 
   @override
   State<StreamMenu> createState() => _StreamMenuState();
@@ -204,6 +218,11 @@ class _StreamMenuState extends State<StreamMenu> {
     widget.onClose();
   }
 
+  String _pathWord() {
+    final w = routeWord(widget.path, forced: widget.forcedRelay == true);
+    return w.isEmpty ? widget.path : w;
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
@@ -221,7 +240,17 @@ class _StreamMenuState extends State<StreamMenu> {
             children: [
               if (!reduced) ..._streamGroups(t, c),
               _head(t, '会话'),
-              _Item('路径 ${pathLabels[widget.path] ?? widget.path} · ${widget.status}', enabled: false),
+              _Item('路径 ${_pathWord()} · ${widget.status}', enabled: false),
+              if (widget.forcedRelay != null && !widget.reconnecting)
+                _Item(
+                  widget.forcedRelay! ? '恢复自动选路' : '改走中继',
+                  enabled: widget.onToggleRoute != null,
+                  // Close first: the switch may reopen this very session.
+                  onTap: () {
+                    widget.onClose();
+                    widget.onToggleRoute!();
+                  },
+                ),
               if (widget.disconnected)
                 _Item(widget.reconnectWord, enabled: widget.onReconnect != null, onTap: () => _then(widget.onReconnect!))
               else if (!widget.reconnecting) ...[

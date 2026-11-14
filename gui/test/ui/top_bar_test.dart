@@ -499,6 +499,24 @@ void main() {
       expect(find.text('插入'), findsOneWidget);
     });
 
+    testWidgets('the stream menu forces the current host onto the relay, only with a relay set', (tester) async {
+      await tester.pumpWidget(wrap(ebar()));
+      await openApp(tester, 'Safari');
+      await tester.tap(find.byKey(const Key('traffic')));
+      await tester.pump();
+      expect(find.text('改走中继'), findsNothing);
+      es.closeCorner();
+      es.setRelaySet(true);
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('traffic')));
+      await tester.pump();
+      await tester.ensureVisible(find.text('改走中继'));
+      await tester.tap(find.text('改走中继'));
+      await tester.pump();
+      expect(es.corner, isNull);
+      expect(t.sent.last, {'cmd': 'set_route', 'id': '111', 'route': 'relay', 'req': anything});
+    });
+
     testWidgets('opening needs closes the stream menu', (tester) async {
       await tester.pumpWidget(wrap(ebar()));
       await openApp(tester, 'Safari');

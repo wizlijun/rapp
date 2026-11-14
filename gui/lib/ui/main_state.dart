@@ -587,8 +587,10 @@ class MainState extends ChangeNotifier {
   void _onHub() {
     for (final p in hub!.takePresence()) {
       if (probes[p.id]?.lamp == Lamp.connecting) continue;
-      _setOnline(p.id, p.online);
+      _setOnline(p.id, p.online, error: p.error);
     }
+    // The labels read `hub.hostPaths`; this notify redraws them. Moving sessions is not done here.
+    hub!.takePaths();
     if (embeds) {
       _onHubEmbedded();
       return;
@@ -1193,6 +1195,32 @@ class MainState extends ChangeNotifier {
   }
 
   int get onlineDevices => probes.values.where((p) => p.lamp == Lamp.active).length;
+
+  /// This machine has a relay set (from the service status): hosts go by bare ID and may be forced onto it.
+  bool get relaySet => _relaySet;
+  bool _relaySet = false;
+
+  void setRelaySet(bool v) {
+    if (v == _relaySet) return;
+    _relaySet = v;
+    notifyListeners();
+  }
+
+  /// The path of [id]'s link: the hub's latest word, else what the last probe said.
+  String? pathOf(String id) => hub?.hostPaths[id] ?? probes[id]?.apps?.path;
+
+  bool forcedRelay(String id) => hub?.hosts.any((h) => h.id == id && h.forcedRelay) ?? false;
+
+  /// Forces [id] onto the relay, or back to automatic. A failure goes to the hint.
+  Future<void> setRoute(String id, bool forced) async {
+    if (!hubUsable) return;
+    try {
+      await hub!.setRoute(id, forced ? 'relay' : 'auto');
+    } catch (e) {
+      hint = disconnectWord('$e');
+    }
+    notifyListeners();
+  }
 
   // ---- prefs ----
   void setTheme(RappTheme t) {

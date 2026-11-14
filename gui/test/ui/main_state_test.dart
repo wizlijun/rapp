@@ -302,6 +302,77 @@ void main() {
     expect(s2.hubUsable, isFalse);
   });
 
+  group('route', () {
+    test('setRelaySet notifies only on a change', () {
+      var n = 0;
+      s.addListener(() => n++);
+      expect(s.relaySet, isFalse);
+      s.setRelaySet(false);
+      expect(n, 0);
+      s.setRelaySet(true);
+      expect([s.relaySet, n], [true, 1]);
+      s.setRelaySet(true);
+      expect(n, 1);
+    });
+
+    test('pathOf prefers the hub\'s path event over the probe', () async {
+      t.onSend = (m) {
+        if (m['cmd'] == 'apps') t.emit({'event': 'apps', 'req': m['req'], 'id': m['id'], 'path': 'relay', 'apps': []});
+      };
+      expect(s.pathOf('111'), isNull);
+      await s.probe('111');
+      expect(s.pathOf('111'), 'relay');
+      var n = 0;
+      s.addListener(() => n++);
+      t.emit({'event': 'path', 'id': '111', 'path': 'lan'});
+      await pump();
+      expect(s.pathOf('111'), 'lan');
+      expect(n, greaterThan(0));
+      expect(hub.takePaths(), isEmpty, reason: 'MainState drains the queue');
+    });
+
+    test('forcedRelay follows the hosts list; setRoute sends relay or auto', () async {
+      t.onSend = (m) {
+        if (m['cmd'] == 'set_route') {
+          t.emit({
+            'event': 'hosts',
+            'req': m['req'],
+            'hosts': [
+              {'id': '111', 'name': 'mini', if (m['route'] == 'relay') 'route': 'relay'},
+              {'id': '222', 'name': ''},
+            ],
+          });
+        }
+      };
+      expect(s.forcedRelay('111'), isFalse);
+      await s.setRoute('111', true);
+      expect(t.sent.last, {'cmd': 'set_route', 'id': '111', 'route': 'relay', 'req': anything});
+      expect(s.forcedRelay('111'), isTrue);
+      expect(s.forcedRelay('222'), isFalse);
+      await s.setRoute('111', false);
+      expect(t.sent.last['route'], 'auto');
+      expect(s.forcedRelay('111'), isFalse);
+    });
+
+    test('a failed setRoute puts the reason in the hint', () async {
+      t.onSend = (m) {
+        if (m['cmd'] == 'set_route') t.emit({'event': 'error', 'req': m['req'], 'error': 'relay unreachable: timed out'});
+      };
+      await s.setRoute('111', true);
+      expect(s.hint, '中继连不上');
+    });
+
+    test('an offline presence keeps its error on the probe', () async {
+      t.emit({'event': 'presence', 'id': '111', 'online': false, 'error': 'relay unreachable: timed out'});
+      await pump();
+      expect(s.probes['111']!.lamp, Lamp.offline);
+      expect(s.probes['111']!.error, 'relay unreachable: timed out');
+      t.emit({'event': 'presence', 'id': '111', 'online': true});
+      await pump();
+      expect(s.probes['111']!.error, isNull);
+    });
+  });
+
   group('project batch, S1 path', () {
     Project project(List<AppRef> apps) {
       final p = s.createProject('写周报')!;

@@ -66,10 +66,19 @@ class _MainWindowState extends State<MainWindow> {
     widget.fullscreen.isFullScreen().then((v) {
       if (mounted) setState(() => _full = v);
     });
+    widget.monitor.addListener(_onMonitor);
+    // After the first frame: a change notifies MainState's listeners, never during a build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _onMonitor();
+    });
   }
+
+  /// Whether a relay is set lives in the service status; MainState keeps a copy for the device rows and the menu.
+  void _onMonitor() => state.setRelaySet(widget.monitor.status?.relaySet ?? false);
 
   @override
   void dispose() {
+    widget.monitor.removeListener(_onMonitor);
     _sub?.cancel();
     super.dispose();
   }
@@ -193,7 +202,6 @@ class _MainWindowState extends State<MainWindow> {
                                   state: state,
                                   local: _local(),
                                   localBadge: updateBadge(widget.monitor.status?.update),
-                                  relaySet: widget.monitor.status?.relaySet ?? false,
                                   screenShare: Platform.isMacOS
                                       ? (h) async => Process.run('open', ['vnc://${h.contains(':') ? '[$h]' : h}'])
                                       : null,

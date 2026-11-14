@@ -213,6 +213,8 @@ class TopBar extends StatelessWidget {
                       onToggleDetach: state.canToggleDetach ? state.toggleDetach : null,
                       onRememberStream: state.rememberStream,
                       onOpenProfile: () => openAppProfilePage(context, state.profiles, appId: cur.app, appName: cur.appName),
+                      forcedRelay: state.relaySet ? state.forcedRelay(cur.id) : null,
+                      onToggleRoute: state.hubUsable ? () => state.setRoute(cur.id, !state.forcedRelay(cur.id)) : null,
                       open: state.corner == Corner.stream,
                       onToggle: () => state.toggleCorner(Corner.stream),
                       onClose: state.closeCorner,
@@ -288,8 +290,8 @@ class TopBar extends StatelessWidget {
   String _sub(SessionEntry e) {
     final inProject = projectSubtitle(e, state.projects);
     if (inProject != null) return inProject;
-    final p = pathLabels[e.path];
-    if (e.lamp == Lamp.connecting || p == null) {
+    final p = routeWord(e.path, forced: state.forcedRelay(e.id));
+    if (e.lamp == Lamp.connecting || p.isEmpty) {
       return e.lamp == Lamp.connecting
           ? '${e.device} · ${lampWord(e.lamp)}'
           : e.device;

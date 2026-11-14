@@ -121,6 +121,12 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
   }
 
+  testWidgets('the service status tells MainState whether a relay is set', (tester) async {
+    monitor.status = ServiceStatus.fromJson({'relay_addr': 'vps:22026', 'has_key': true});
+    await pump(tester);
+    expect(s.relaySet, isTrue);
+  });
+
   testWidgets('opening and closing the panel never changes the stage size', (tester) async {
     await pump(tester);
     final base = tester.getSize(find.byKey(const Key('stage')));

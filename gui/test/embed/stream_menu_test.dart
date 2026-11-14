@@ -23,14 +23,16 @@ void main() {
   var allClips = 0;
   var remembered = 0, profileOpened = 0;
   var greyClip = -1;
+  var routeToggles = 0;
 
   bool called(String name, Map<String, Object?> args) =>
       port.calls.any((c) => c.$1 == name && const DeepCollectionEquality().equals(c.$2, args));
 
   Future<void> open(WidgetTester tester,
       {VoidCallback? onDetach, bool disconnected = false, bool reconnecting = false, bool hub = true, String status = '活动', String reconnectWord = '重连',
-      List<int> seed = const [], Object seedSid = 1, int? other, int grey = -1}) async {
+      List<int> seed = const [], Object seedSid = 1, int? other, int grey = -1, bool? forcedRelay, bool route = true, String path = 'lan'}) async {
     shellOpen = false;
+    routeToggles = 0;
     ended = 0;
     disconnects = 0;
     reconnects = 0;
@@ -56,7 +58,7 @@ void main() {
         onClose: () => set(() => shellOpen = false),
         port: port,
         session: rs,
-        path: 'lan',
+        path: path,
         status: status,
         disconnected: disconnected,
         reconnecting: reconnecting,
@@ -67,6 +69,8 @@ void main() {
         onToggleDetach: onDetach,
         onRememberStream: () => remembered++,
         onOpenProfile: () => profileOpened++,
+        forcedRelay: forcedRelay,
+        onToggleRoute: route ? () => routeToggles++ : null,
         clips: res.clipsOf('k'),
         canCopy: (e) => e.clip != greyClip,
         canInsert: (e) => e.clip != greyClip && e.sid == rs.sid,
@@ -86,6 +90,52 @@ void main() {
     await tester.pump();
     expect(disconnects, 1);
     expect(find.text('路径 局域网 · 活动'), findsNothing); // closed
+  });
+
+  testWidgets('the route item says 改走中继 or 恢复自动选路, and is absent without a relay', (tester) async {
+    await open(tester);
+    expect(find.text('改走中继'), findsNothing);
+    expect(find.text('恢复自动选路'), findsNothing);
+    await open(tester, forcedRelay: false);
+    expect(find.text('改走中继'), findsOneWidget);
+    expect(find.text('恢复自动选路'), findsNothing);
+    await open(tester, forcedRelay: true);
+    expect(find.text('恢复自动选路'), findsOneWidget);
+    expect(find.text('改走中继'), findsNothing);
+  });
+
+  testWidgets('a forced relay path reads 中继（强制）', (tester) async {
+    await open(tester, forcedRelay: true);
+    expect(find.text('路径 局域网 · 活动'), findsOneWidget); // forced, but this session is still on the LAN
+    await open(tester, forcedRelay: true, path: 'relay');
+    expect(find.text('路径 中继（强制） · 活动'), findsOneWidget);
+    await open(tester, forcedRelay: false, path: 'relay');
+    expect(find.text('路径 中继 · 活动'), findsOneWidget);
+  });
+
+  testWidgets('the route item calls back once and closes the menu', (tester) async {
+    await open(tester, forcedRelay: false);
+    await tester.ensureVisible(find.text('改走中继'));
+    await tester.tap(find.text('改走中继'));
+    await tester.pump();
+    expect(routeToggles, 1);
+    expect(find.text('改走中继'), findsNothing); // closed
+  });
+
+  testWidgets('the route item is greyed without a callback', (tester) async {
+    await open(tester, forcedRelay: true, route: false);
+    await tester.ensureVisible(find.text('恢复自动选路'));
+    await tester.tap(find.text('恢复自动选路'));
+    await tester.pump();
+    expect(routeToggles, 0);
+    expect(find.text('恢复自动选路'), findsOneWidget); // still open
+  });
+
+  testWidgets('no route item while reconnecting; a disconnected session keeps it', (tester) async {
+    await open(tester, reconnecting: true, status: '连接中', forcedRelay: false);
+    expect(find.text('改走中继'), findsNothing);
+    await open(tester, disconnected: true, forcedRelay: false);
+    expect(find.text('改走中继'), findsOneWidget);
   });
 
   testWidgets('disconnected menu keeps only the session group with reconnect', (tester) async {
