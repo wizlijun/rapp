@@ -858,7 +858,7 @@ Roger 的用处还是补充 23 说的那个：当口吻里的一个词，不当�
 | rapps.ai | 已被注册（2026-03-12 注册，到期 2031 年） |
 | rapps.co | 有 NS，已被注册 |
 | rapps.dev、rapps.run | 注册局没有记录，没有 NS，应该可注册 |
-| rapps.io、rapps.sh | 没有记录也没有 NS；这两个后缀的查询结果不可靠，多半可注册 |
+| rapps.io、rapps.sh | 没有记录也没有 NS；这两个后缀的查询结果不可靠，多半可注册。**更正（补充 30）：rapps.io 已被注册** |
 
 判断（我的分析，待用户定）：
 
@@ -931,4 +931,181 @@ Roger 的用处还是补充 23 说的那个：当口吻里的一个词，不当�
 - 名字的出处改讲"敲门"：rapp 是 rap 加 app。这比补充 23 里给 r 找一个词（Ready）更自然；Ready 可以留作副的解释。
 - 口吻里可以用 Roger 和少量说唱的词。
 - 域名不受影响：仍然是 rapphq.com。"敲门"是名字的故事，"总部"是它是什么。
+
+## 补充 28：换几种取法（2026-11-14 15:50 JST 前后查询）
+
+用户的话（反馈文档 U115）："你是个互联网域名创意总监，你再给我一些建议"。
+
+前面几轮都是"rapp 加一个词"。这一轮换取法。到这里为止的条件：带 rapp；七个字母以内；常用词；不读成远程桌面；最好是 .com；故事能放大到主机、大屏、个人数据。
+
+### 取法一：打招呼
+
+| 域名 | 查询结果 | 说明 |
+|---|---|---|
+| **heyrapp.com** | 应该可注册 | 七个字母。"Hey" 是有人叫你，也是你叫它，两个方向都通。将来做语音输入、做大屏时，"Hey Rapp" 可以直接当唤醒词 |
+| hirapp.com、yorapp.com、gorapp.com、onrapp.com | 已被注册 | |
+
+弱点：会让人以为是语音助手或聊天工具；hey 开头的产品名这几年很多。重名搜了一次，没有搜到叫 heyrapp 的产品。
+
+### 取法二：把 rapp 藏在一句话里
+
+以 r 结尾的词加 app，中间正好是 rapp。读出来是一句自然的话，写出来里面有产品名。
+
+| 域名 | 读作 | 查询结果 |
+|---|---|---|
+| **yourapp.dev** | your app，你的 app；拆开是 you 加 rapp | 应该可注册。yourapp.center、yourapp.run、yourapps.dev 也是 |
+| yourapp.com | | 在域名贩子手里（NS 是 namefind），价格没有查到 |
+| yourapp.app、yourapp.one | | 已被注册 |
+| urapp.dev、urapp.app | ur app，更短的写法；u 加 rapp | 应该可注册。urapp.com 在交易平台上出售 |
+| doorapp.dev、towerapp.dev | door app（门，接上"敲门"）；tower app（塔，接上 Tower.md） | 应该可注册 |
+| radarapp、hangarapp、masterapp、towerapp、doorapp、amberapp、rosterapp、steerapp、nearapp、overapp、keeperapp、gearapp、peerapp、everapp、anchorapp、answerapp、clusterapp、emberapp、musterapp 的 .com | 雷达、机库、主控、塔、门、琥珀灯、花名册、掌舵、近、完毕、看管者、装备、对等、一直、锚、应答、集群、余烬、集合 | 全部已被注册 |
+
+"your app"正好是前半句心智，也带"是你自己的"这层意思。弱点有三个：.com 拿不到；词太普通，搜不出来、占不住；yourapp 在技术文档里常被当作占位用的假名字（"把 yourapp 换成你的应用名"），看到的人可能以为是个示例。
+
+### 取法三：敲门
+
+| 域名 | 查询结果 | 说明 |
+|---|---|---|
+| **rapprap.com** | 应该可注册 | 七个字母。rap rap，敲两下 |
+| rapptap.com | 应该可注册 | 你点它，它敲你 |
+| rappknock.com | 应该可注册 | 直白，但长 |
+
+弱点：rapprap 看起来像打错了字；我搜了一次，出来的全是说唱 app，也就是别人会把它读成音乐。更适合当一个活动页或者彩蛋的地址，不适合当主域名。
+
+### 取法四：用后缀拼词
+
+| 域名 | 查询结果 | 说明 |
+|---|---|---|
+| rapp.ing | **已被注册** | 拼出来正好是 rapping，可惜被人拿走了 |
+| rapp.at、rapp.me、rapp.in | 有 NS，已被注册 | rap at (the door)、rap me |
+| rapp.day、rapp.boo、rapp.fyi、rapp.wtf | 应该可注册 | rapp.fyi 适合放文档 |
+| rapp.to、rapp.is、rapp.so | 没有 NS；这几个后缀的查询结果不可靠 | 不确定 |
+| 之前查过仍然可用的 | rapp.center、rapp.run、rapp.works、rapp.tools、rapp.place | |
+
+### 取法五：之前的两个短名字
+
+rapphq.com（总部，六个字母）、rappx.com（五个字母）。见补充 25。
+
+### 建议（我的分析，待用户定）
+
+不必只押一个。域名很便宜，可以按用途配一组：
+
+| 用途 | 域名 | 理由 |
+|---|---|---|
+| 主域名，二选一 | **rapphq.com** 或 **heyrapp.com** | rapphq 稳，故事大，硬件和数据都装得下；heyrapp 更有人味，接得上语音和大屏的唤醒词 |
+| 文档 | rapp.fyi | 短，意思就是"供参考" |
+| 给开发者看的入口 | yourapp.dev | 一句话就是定位 |
+| 彩蛋或活动页 | rapprap.com | 敲两下 |
+
+如果只注册一个：还是 rapphq.com。heyrapp.com 是这一轮里最新鲜的一个，值得和它放在一起比。
+
+## 补充 29：照 git 和 GitHub、docker 和 Docker Hub 的取法（2026-11-14 16:00 JST 前后查询）
+
+用户的话（反馈文档 U116）："git - github docker dockerhub 类似这样"。
+
+这是两层的取法：工具叫一个名字，围着工具的那个服务叫"名字加 hub"。照这个取法，工具仍然叫 **rapp**，服务叫 **RappHub**。
+
+| 域名 | 查询结果 |
+|---|---|
+| **rapphub.com** | 注册局没有记录，没有 NS，应该可注册 |
+| rapphub.dev、rapphub.net、rapphub.org、rapphub.ai | 同上，应该可注册 |
+| rapphub.io | 没有记录也没有 NS；这个后缀的查询结果不可靠，多半可注册 |
+| rapphub.app | 第一次查询被重定向，隔了两秒重查：注册局没有记录，应该可注册 |
+| rapp-hub.com | 应该可注册 |
+
+重名：补充 17 里搜过一次，没有搜到叫 rapphub 的产品。
+
+### 这个取法为什么合适（我的分析）
+
+- **它把开源和商业分开了，而且人人都懂。** git 是工具，GitHub 是公司和服务；docker 是工具，Docker Hub 是它的仓库。rapp 已经定了整体以 GPL-3.0 开源（U82）；将来收钱的部分正好是"hub"这一层。
+- **hub 这个词对 rapp 是字面意思。** relay 就是所有设备都连上去的那个中心点。relay 规格里为 SaaS 留的位置（租户、账号签发 key、多节点）就是 RappHub 要做的事。
+- **hub 里有东西可放**，不是空名字：
+  - 托管的 relay：不想自己架 VPS 的人，拿一个接入点和 key 就能用。
+  - 设备和 key 的管理：吊销、换 key、看审计。
+  - 可以分享的东西：按 app 的配置（现在已有内置和"我的配置"两层）、主题、资源预览的规范。这一块最像 Docker Hub。
+- **它装得下将来的硬件和数据**：摆在家里的那台主机本来就叫"hub"（智能家居的中枢就是这么叫的）。
+
+### 之前我给它降过级，理由要重看
+
+补充 20 里我说 rapphub 会被读成 rap hub（说唱的聚集地），并且可能被当成"放 rapp 的市场"。
+
+- 第二条现在不是问题了：按这个取法，"放 rapp 相关东西的地方"正是它的本意。
+- 第一条还在，但轻了：对开发者来说，"某某 Hub"先被读成 GitHub 那一类，而不是音乐。一个 p 的 raphub.com 是别人的（补充 18），打错字的人会走到那里去。
+
+### 还要处理的一件事
+
+代码里操作端的引擎现在就叫 hub（`rapp-hub`、`rust/hub`）。服务叫 RappHub 以后，两个 hub 会混。到时候要给其中一个改名；现在只记下来，不动。
+
+### 建议（我的分析，待用户定）
+
+| 层 | 名字 | 域名 |
+|---|---|---|
+| 工具（开源，装在自己机器上） | rapp | 文档和下载可以放在 rapp.fyi 或 rapp.run，也可以先都放在 rapphub.com 下面 |
+| 服务（托管的 relay、设备管理、分享） | RappHub | **rapphub.com**，同时拿下 rapphub.dev |
+
+这一条比 rapphq.com 更好：rapphq 只是一个名字，rapphub 同时说清了商业模式，而且读的人不用解释就懂。建议把首选改成 rapphub.com。
+
+## 补充 30：rapp.io（2026-11-14 16:10 JST 前后查询）
+
+用户的话（反馈文档 U117）："rapp.io 呢"。
+
+| 域名 | 查询结果 |
+|---|---|
+| rapp.io | **已被注册**：2018-08-16 注册，到期 2027-08-16，今年 8 月刚续过费，注册商 Namecheap。没有网站，但设了邮件转发，也就是有人在用它收邮件。没有看到明码标价的出售页 |
+| rapp.ai | 已被注册（2017 年起，到期 2028 年） |
+| rapp.co、rapp.dev、rapp.sh | 都有 NS，已被注册 |
+
+判断（我的分析，待用户定）：拿不到。四个字母加 .io 的域名基本都早被注册了；这一个持有人还在续费、在用。要买只能自己去联系持有人。即使买得到，按补充 29 的两层取法，rapphub.com 已经够用，不必为它花大价钱。
+
+### 更正：之前 .io 的查询方法不可靠
+
+这次发现，之前用的通用查询入口对 .io 会答"没有记录"，而 rapp.io 其实已被注册。.io 要到它自己的注册局去查。我用注册局的入口把之前写过"多半可注册"的 .io 重查了一遍：
+
+| 域名 | 重查结果 |
+|---|---|
+| rapphub.io、rappilot.io、rapphq.io、rapdesk.io、raphub.io、rogerapp.io、rappc.io | 注册局没有记录，应该可注册 |
+| **rapps.io** | **已被注册**（2015-03-08 起，到期 2027-03-08）。补充 26 里写的"多半可注册"是错的 |
+| rappad.io | 这次查询超时，没有结果 |
+
+补充 7、11、12、13、19、21、24、25 里别的 .io 没有逐个重查；用到时要按注册局的入口再查一次。.co、.sh 等后缀同理，之前标的"查询结果不可靠"仍然成立。
+
+## 补充 31：再问 raphub（2026-11-14 16:15 JST）
+
+用户的话（反馈文档 U118）："raphub 呢"。这次是在"工具加 hub"的取法（补充 29）下再问。域名的状态见补充 18，今天中午查过：raphub.com、raphub.org 已被注册；raphub.net、.dev、.app、.ai 应该可注册；raphub.io 按注册局的入口重查过（补充 30），应该可注册。
+
+判断（我的分析，待用户定）：按"工具加 hub"的取法，它反而更不合适。
+
+- 这个取法的前提是 hub 前面那一段就是工具的名字：git 对 GitHub，docker 对 Docker Hub。工具叫 rapp，所以是 rapphub。写成 raphub，对应的工具就成了 rap。
+- .com 拿不到（2011 年起就是别人的），而这个取法最需要 .com。
+- 读出来是说唱的聚集地，搜出来也是。
+
+少一个 p 只省一个字母。rapphub.com 是空的，名字和工具对得上。如果担心别人少打一个 p，可以把 raphub.net 或 raphub.dev 一起注册了指过来；raphub.com 那一个是别人的，没办法。
+
+## 决定（2026-11-14 16:15 JST）
+
+用户的话（反馈文档 U119）："好。就 rapphub.com 提供服务。"
+
+- **服务的域名定为 rapphub.com。** 工具仍然叫 rapp，服务叫 RappHub（补充 29 的两层取法）。
+- 定下来的这一刻又查了一次：rapphub.com、rapphub.dev 注册局都没有记录，没有 NS。
+- **域名还没有注册。** 注册和付款要用户自己做；在注册之前，它随时可能被别人拿走。
+
+建议一起做的（我的提议，用户没有说）：
+
+- 同时注册 rapphub.dev。
+- 为了防少打一个 p，可以注册 raphub.net 或 raphub.dev 指过来（raphub.com 是别人的）。
+- 代码里操作端的引擎现在叫 hub（`rapp-hub`、`rust/hub`），以后要和服务的名字区分开。只记在这里，现在不动。
+
+本文前面各节的"建议"和"首选"都以这一节为准。
+
+## 补充 32：rapp.dev（2026-11-14 16:55 JST 前后查询）
+
+用户的话（反馈文档 U120）："rapp.dev 有吗"。这一条是在域名定为 rapphub.com 之后问的。
+
+| 域名 | 查询结果 |
+|---|---|
+| rapp.dev | **已被注册**：2019-02-28 注册，到期 2027-02-28，上次变更是 2026-10-06，注册商 united-domains（一家德国注册商）。有邮件记录，网站打不开。没有看到出售页 |
+
+判断（我的分析）：拿不到。.dev 在 2019 年 2 月底才对外开放，这个域名在开放的头几天就被注册了，一直续到现在。要买只能自己去联系持有人。
+
+对已定的方案没有影响：服务在 rapphub.com；rapphub.dev 是空的。工具自己的文档和下载页如果想要一个带 rapp 的短地址，还空着的有 rapp.fyi、rapp.run、rapp.tools、rapp.works、rapp.center。
 
