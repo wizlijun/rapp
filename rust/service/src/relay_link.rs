@@ -16,7 +16,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::task::JoinHandle;
 
 const BACKOFF_START: Duration = Duration::from_secs(1);
-const BACKOFF_MAX: Duration = Duration::from_secs(30);
+const BACKOFF_MAX: Duration = Duration::from_secs(60);
 /// How long a relayed stream has to finish the TLS handshake and the hello.
 const HELLO_WAIT: Duration = Duration::from_secs(10);
 const REPLY_WAIT: Duration = Duration::from_secs(5);
@@ -85,7 +85,7 @@ async fn run(state: Arc<State>, lan: Option<Vec<String>>) {
                     backoff = BACKOFF_START;
                 }
                 let wait = backoff.mul_f64(1.0 + rand::rng().random_range(0.0..=0.2));
-                backoff = (backoff * 2).min(BACKOFF_MAX);
+                backoff = grow(backoff);
                 last_err = Some(err);
                 wait
             }
@@ -178,5 +178,26 @@ async fn serve_relayed(state: Arc<State>, stream: Pipe, from: String) {
     };
     if let Err(e) = serve_request(&state, pipe, peer.clone()).await {
         state.log.msg(Lvl::Warn, format!("{}: {e:#}", peer.addr));
+    }
+}
+
+/// The next wait after a failed attempt: doubled, at most [`BACKOFF_MAX`] (spec §9.3).
+fn grow(backoff: Duration) -> Duration {
+    (backoff * 2).min(BACKOFF_MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backoff_doubles_up_to_a_minute() {
+        let mut b = BACKOFF_START;
+        let mut seen = vec![b.as_secs()];
+        for _ in 0..7 {
+            b = grow(b);
+            seen.push(b.as_secs());
+        }
+        assert_eq!(seen, [1, 2, 4, 8, 16, 32, 60, 60]);
     }
 }
