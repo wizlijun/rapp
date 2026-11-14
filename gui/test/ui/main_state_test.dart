@@ -2038,6 +2038,18 @@ void main() {
       });
     });
 
+    test('composerKey does nothing in the overview', () {
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(1, [rw(7)]));
+        final c = st.currentRemote!.composer;
+        st.toggleOverview();
+        expect(st.overview, true);
+        st.composerKey();
+        expect(c.open, false);
+        expect(c.focusTick, 0);
+      });
+    });
+
     test('composerKey does nothing without a session or when composerAllowed is false', () {
       env((a, t, port, st, hints) {
         st.composerKey(); // no session: no throw

@@ -318,7 +318,8 @@ class _PictureState extends State<Picture> {
     final focused = widget.state.pictureFocused == _sid;
     if (focused && !_focus.hasFocus) {
       // The keys went to A without a press (Ctrl+Enter from the editor): Flutter's focus follows,
-      // unless the writing panel's editor still holds the caret.
+      // unless the writing panel's editor still holds the caret (this assumes the editor's unfocus
+      // has landed: composerKey's releaseFocus unfocuses in a microtask, before this post-frame callback).
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted &&
             widget.state.pictureFocused == _sid &&

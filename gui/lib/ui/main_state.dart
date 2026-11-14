@@ -285,7 +285,7 @@ class MainState extends ChangeNotifier {
   /// editor; from the editor the keys go to the picture (the panel stays).
   void composerKey() {
     final rs = currentRemote;
-    if (rs == null || !rs.composerAllowed) return;
+    if (overview || rs == null || !rs.composerAllowed) return; // no panel in the overview to take the caret
     final c = rs.composer;
     if (!c.open) {
       c.open = true;

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/composer_panel.dart';
+import 'package:rapp/embed/picture.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/service_client.dart';
@@ -529,6 +530,10 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
     }
 
+    bool pictureHasFlutterFocus() => tester
+        .widget<Focus>(find.descendant(of: find.byType(Picture), matching: find.byType(Focus)).first)
+        .focusNode!
+        .hasFocus;
     bool editorHasFocus() => tester.widget<TextField>(find.byKey(const Key('composer-field'))).focusNode!.hasFocus;
 
     // 1: closed -> the panel appears with the caret in it.
@@ -540,6 +545,7 @@ void main() {
     await ctrlEnter();
     expect(editorHasFocus(), false);
     expect(s.pictureFocused, 1);
+    expect(pictureHasFlutterFocus(), true);
     expect(find.byKey(const Key('picture-focus')), findsOneWidget);
     expect(find.byType(ComposerPanel), findsOneWidget);
     expect(port.calls.where((c) => c.$1 == 'picture_focus').last.$2, {'sid': 1});
@@ -550,6 +556,14 @@ void main() {
     expect(s.pictureFocused, isNull);
     expect(tester.widget<TextField>(find.byKey(const Key('composer-field'))).controller!.text, '');
     expect(port.calls.where((c) => c.$1 == 'composer_send'), isEmpty);
+    expect(pictureHasFlutterFocus(), false);
+
+    // The guard: keys to the picture while the editor still holds the caret leave Flutter's focus alone.
+    s.focusPicture(1);
+    await tester.pump();
+    await tester.pump();
+    expect(editorHasFocus(), true);
+    expect(pictureHasFlutterFocus(), false);
   });
 
   testWidgets('composer draft survives a trip through overview', (tester) async {
