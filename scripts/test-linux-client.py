@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the real GTK worker against an independent Python v9 host fixture.
+"""Exercise the real GTK worker against an independent Python v10 host fixture.
 Requires a graphical session (or xvfb-run). No real host credentials are used.
 """
 import json
@@ -15,13 +15,15 @@ import time
 import tomllib
 import zlib
 
+PROTOCOL = 10
+
 INPUT = "--input" in sys.argv
 paths = [a for a in sys.argv[1:] if a != "--input"]
 BINARY = Path(paths[0] if paths else "rust/target/release/rapp-client").resolve()
 
 version = json.loads(subprocess.check_output([str(BINARY), "version", "--json"], text=True))
 workspace = tomllib.loads((Path(__file__).resolve().parents[1] / "rust/Cargo.toml").read_text())
-assert version == {"version": workspace["workspace"]["package"]["version"], "protocol": 10}, version
+assert version == {"version": workspace["workspace"]["package"]["version"], "protocol": PROTOCOL}, version
 print("PASS client version matches workspace")
 
 def string(s):
@@ -64,7 +66,7 @@ class Session:
         self.s, _ = self.listener.accept()
         self.s.settimeout(8)
         kind, hello = recv(self.s)
-        assert kind == 1 and hello[0] == 9
+        assert kind == 1 and hello[0] == PROTOCOL
         assert hello[1:17] == string("fixture-secret")
         self.hello=hello
 
@@ -256,7 +258,8 @@ def stream_menu(s):
     while True:
         kind,payload=recv(s.s)
         if kind==11 and payload[:2]==bytes([3,1]):break
-    assert struct.unpack("<f",payload[2:])[0]>0
+    assert struct.unpack("<f",payload[2:6])[0]>0
+    assert payload[6:]==b"\x00",payload  # a pick is the ceiling; automatic saving stays on
     z=zlib.compressobj();s.frame(z,True,15,mode=3);s.frame(z,False,5,mode=3)
     time.sleep(.3)
     xdo("mousemove","--window",window,int(geom["WIDTH"])-250,40)
@@ -266,7 +269,7 @@ def stream_menu(s):
     while True:
         kind,payload=recv(s.s)
         if kind==11 and payload[:2]==bytes([2,15]):break
-    assert struct.unpack("<f",payload[2:])[0]==8.,payload
+    assert struct.unpack("<f",payload[2:6])[0]==8. and payload[6:]==b"\x00",payload
     s.frame(zlib.compressobj(),True,0xf800)
     time.sleep(.2)
     s.p.stdin.close();s.finish(0)
@@ -285,7 +288,7 @@ def standalone_takeback():
     first=second=None
     try:
         first,_=listener.accept();first.settimeout(8)
-        kind,hello=recv(first);assert kind==1 and hello[0]==6
+        kind,hello=recv(first);assert kind==1 and hello[0]==PROTOCOL
         send(first,2,string("rapp takeback fixture")+struct.pack("<HH",800,600))
         time.sleep(.3)
         send(first,3,string("taken over by 测试设备"))
