@@ -333,6 +333,8 @@ testWidgets('send and plus stay at the bottom right when tall (W13)', ...); // �
 // composing stay with the input method；opening the composer does not resize A（「收起」改成按 Esc）
 ```
 
+`main_window_test.dart` 加一条 `testWidgets('in fullscreen the panel is there; Esc in it collapses the panel and stays fullscreen', ...)`：`fs` 设成全屏，打开面板，编辑区里按 Esc → 面板消失，`fs` 没收到 `setFullScreen(false)`；再按 Esc（焦点已不在编辑区）→ 退出全屏。分离窗口里没有面板（规格 §2，用户 2026-11-14 定）。
+
 `main_window_test.dart:534-541`：`composer.text = 'draft text'` 改成 `composer.draft = 'draft text'`，断言读编辑区（`tester.widget<TextField>(...).controller!.text`）。
 
 - [ ] **Step 2: 跑测试，确认失败**
