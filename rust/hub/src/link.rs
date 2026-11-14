@@ -482,6 +482,8 @@ impl Hub {
         let key = rapp_conn::settings::load(&self.at_home().0).key.map(Arc::new);
         let saved = self.hosts.get(&id);
         let known = saved.as_ref().and_then(|h| h.fp);
+        // Added again, a host forced onto the relay stays forced.
+        let route = saved.as_ref().and_then(|h| h.route.clone());
         let password = password.filter(|p| !p.is_empty());
         let mut refused = None;
         if key.is_some() {
@@ -499,7 +501,7 @@ impl Hub {
                         password: password.unwrap_or("").into(),
                         lan: vec![addr],
                         fp: Some(accepted.fp),
-                        route: None,
+                        route,
                     };
                     return self.save_host(host);
                 }
@@ -518,7 +520,7 @@ impl Hub {
             bail!("{addr} is ID {}, not {id}", r["id"].as_str().unwrap_or("?"));
         }
         let name = r["name"].as_str().unwrap_or(&id).to_string();
-        self.save_host(Host { id, name, password: password.into(), lan: vec![addr], fp: None, route: None })
+        self.save_host(Host { id, name, password: password.into(), lan: vec![addr], fp: None, route })
     }
 
     /// `add_host` by bare ID: found through the relay, reached on the addresses it reports or else
@@ -526,14 +528,15 @@ impl Hub {
     async fn add_by_id(&self, id: String) -> Result<Value> {
         let Some((relay, key)) = self.relay().await? else { bail!("relay not set: add the host as id@ip") };
         let found = self.relay_connect(&relay, &id).await?;
-        let known = self.hosts.get(&id).and_then(|h| h.fp);
+        let saved = self.hosts.get(&id);
         let mut host = Host {
             id: id.clone(),
             name: String::new(),
             password: String::new(),
             lan: found.lan,
-            fp: known,
-            route: None,
+            fp: saved.as_ref().and_then(|h| h.fp),
+            // Added again, a host forced onto the relay stays forced.
+            route: saved.and_then(|h| h.route),
         };
         let accepted = match self.first_v2(&host, &dial_order(&host.lan), Some(key.clone())).await? {
             Some((link, accepted)) => {

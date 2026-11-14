@@ -218,6 +218,8 @@ impl Hub {
                 let id = s("id")?;
                 self.hosts.remove(id)?;
                 self.forget(id);
+                // Its LAN tries go too, even one held after a failed move (`forget` keeps those).
+                self.schedule.lock().unwrap().remove(id);
                 self.hosts_event()
             }
             Some("set_route") => {

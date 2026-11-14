@@ -180,6 +180,14 @@ fn quick() -> rapp_hub::UpgradeTimes {
 /// A on the relay registering only `gate` as its LAN address (the gate forwards to A); a hub on the
 /// same relay with `quick` upgrades, and A added by bare ID while the gate is as `open` says.
 async fn behind_gate(open: bool) -> (RelayRig, TestService, LanGate, tempfile::TempDir, Hub) {
+    behind_gate_with(open, quick()).await
+}
+
+/// `behind_gate` with upgrades on `times`.
+async fn behind_gate_with(
+    open: bool,
+    times: rapp_hub::UpgradeTimes,
+) -> (RelayRig, TestService, LanGate, tempfile::TempDir, Hub) {
     let rig = RelayRig::start().await;
     let gate = LanGate::start().await;
     let a = a_on_relay(&rig, Some(vec![gate.addr()])).await;
@@ -189,7 +197,7 @@ async fn behind_gate(open: bool) -> (RelayRig, TestService, LanGate, tempfile::T
     }
     let home = tempfile::tempdir().unwrap();
     hub_relay(home.path(), &rig.addr, &rig.key);
-    let mut hub = Hub::start_with_upgrade(home.path(), a.bins.path(), quick());
+    let mut hub = Hub::start_with_upgrade(home.path(), a.bins.path(), times);
     hub.send(json!({"cmd":"add_host","id":a.id})).await;
     let r = reply(&mut hub).await;
     assert_eq!(r["event"], "host_added", "{r}");
@@ -250,15 +258,47 @@ async fn another_device_on_the_lan_address_is_not_taken() {
     hub.finish().await;
 }
 
+/// The order the GUI goes by: the LAN link is cached and announced, a session's move onto it fails,
+/// `route_failed`. Nothing is said for `hold`; then `path lan` comes again, so the sessions left on
+/// the relay get another go.
 #[tokio::test]
-async fn route_failed_holds_the_host() {
+async fn a_failed_move_is_tried_again_after_its_hold() {
     let (_rig, a, gate, _home, mut hub) = behind_gate(false).await;
     apps_via(&mut hub, &a, "relay").await;
-    hub.send(json!({"cmd":"route_failed","id":a.id})).await;
     gate.open();
+    hub.wait_path(&a.id, "lan").await;
+    let held = tokio::time::Instant::now();
+    hub.send(json!({"cmd":"route_failed","id":a.id})).await;
     let paths = paths_within(&mut hub, &a.id, WINDOW).await;
+    assert!(paths.is_empty(), "told again while held: {paths:?}");
+    hub.wait_path(&a.id, "lan").await;
+    assert!(held.elapsed() >= quick().hold, "told again after {:?}", held.elapsed());
+    apps_via(&mut hub, &a, "lan").await;
+    hub.finish().await;
+}
+
+/// The hold outlives the link: the LAN link dies during the hold (re-adding the host forgets it, as a
+/// failed request does), the next request goes over the relay, and the LAN is back at once; still
+/// nothing moves to the LAN before the hold is over.
+#[tokio::test]
+async fn a_link_that_dies_while_held_stays_held() {
+    let times = rapp_hub::UpgradeTimes { hold: Duration::from_secs(5), ..quick() };
+    let (_rig, a, gate, _home, mut hub) = behind_gate_with(false, times).await;
+    apps_via(&mut hub, &a, "relay").await;
+    gate.open();
+    hub.wait_path(&a.id, "lan").await;
+    let held = tokio::time::Instant::now();
+    hub.send(json!({"cmd":"route_failed","id":a.id})).await;
+    gate.close();
+    assert_eq!(hub.call(json!({"cmd":"add_host","id":a.id})).await["event"], "host_added");
+    apps_via(&mut hub, &a, "relay").await;
+    gate.open();
+    let left = times.hold.saturating_sub(held.elapsed() + Duration::from_millis(300));
+    assert!(left >= Duration::from_secs(1), "too slow to tell: {left:?} of the hold left");
+    let paths = paths_within(&mut hub, &a.id, left).await;
     assert!(paths.iter().all(|p| p["path"] != "lan"), "moved while held: {paths:?}");
     hub.wait_path(&a.id, "lan").await;
+    assert!(held.elapsed() >= times.hold, "moved after {:?}", held.elapsed());
     hub.finish().await;
 }
 
@@ -302,15 +342,70 @@ async fn a_removed_host_is_not_moved() {
     hub.finish().await;
 }
 
+/// The new home holds the same host (same ID and fingerprint): the move planned in the old home
+/// does not carry over to it.
 #[tokio::test]
 async fn set_home_drops_pending_moves() {
-    let (_rig, a, gate, _home, mut hub) = behind_gate(false).await;
+    let (rig, a, gate, home, mut hub) = behind_gate(false).await;
     apps_via(&mut hub, &a, "relay").await;
     let other = tempfile::tempdir().unwrap();
+    hub_relay(other.path(), &rig.addr, &rig.key);
+    let same = saved_hosts(home.path());
+    assert_eq!(same[0]["id"], a.id.as_str());
+    assert!(same[0]["fp"].is_string(), "{same}");
+    rapp_net::config::write_json(&other.path().join("hosts.json"), &same).unwrap();
     let r = hub.call(json!({"cmd":"set_home","dir":other.path()})).await;
     assert_eq!(r["event"], "home_set", "{r}");
     gate.open();
     let paths = paths_within(&mut hub, &a.id, WINDOW).await;
     assert!(paths.is_empty(), "{paths:?}");
+    // The host itself is there: asked, it connects as the new device does, LAN first.
+    apps_via(&mut hub, &a, "lan").await;
+    hub.finish().await;
+}
+
+// ---- re-adding, and old password hosts ----
+
+/// Re-adding a forced host, by ID or by `id@ip`, keeps it forced.
+#[tokio::test]
+async fn re_adding_a_forced_host_keeps_its_route() {
+    let (_rig, a, home, mut hub) = on_relay(None).await;
+    force(&mut hub, &a).await;
+    let refs = [a.id.clone(), format!("{}@{}", a.id, a_addr(&a.svc))];
+    for host_ref in refs {
+        hub.send(json!({"cmd":"add_host","id":host_ref})).await;
+        let r = reply(&mut hub).await;
+        assert_eq!(r["event"], "host_added", "{host_ref}: {r}");
+        assert_eq!(saved_hosts(home.path())[0]["route"], "relay", "{host_ref}");
+        let r = hub.call(json!({"cmd":"hosts"})).await;
+        assert_eq!(r["hosts"][0]["route"], "relay", "{host_ref}: {r}");
+        let r = hub.call(json!({"cmd":"apps","id":a.id})).await;
+        assert_eq!((&r["event"], &r["path"]), (&json!("apps"), &json!("relay")), "{host_ref}: {r}");
+    }
+    hub.finish().await;
+}
+
+/// An old password host, never seen with a key (no fingerprint), forced onto the relay: it is reached
+/// through the relay (the password is not used there) and its fingerprint is saved then.
+#[tokio::test]
+async fn a_forced_password_host_without_a_fingerprint_goes_over_the_relay() {
+    let rig = RelayRig::start().await;
+    let a = a_on_relay(&rig, None).await;
+    let home = tempfile::tempdir().unwrap();
+    hub_relay(home.path(), &rig.addr, &rig.key);
+    let saved = json!([{"id":a.id,"name":"a","password":PASSWORD,"lan":[],"route":"relay"}]);
+    rapp_net::config::write_json(&home.path().join("hosts.json"), &saved).unwrap();
+    let mut hub = Hub::start(home.path(), a.bins.path());
+    let r = hub.call(json!({"cmd":"apps","id":a.id})).await;
+    assert_eq!((&r["event"], &r["path"]), (&json!("apps"), &json!("relay")), "{r}");
+    // The relay writes a stream down when it ends.
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while rig.streams() == 0 {
+        assert!(tokio::time::Instant::now() < deadline, "nothing went through the relay");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let now = saved_hosts(home.path());
+    assert!(now[0]["fp"].is_string(), "fingerprint not saved: {now}");
+    assert_eq!((&now[0]["route"], &now[0]["password"]), (&json!("relay"), &json!(PASSWORD)), "{now}");
     hub.finish().await;
 }

@@ -1,14 +1,17 @@
 //! Moving relay and direct links to the LAN (relay connect UX spec §3). A host whose cached link is on
 //! the relay or direct is tried on its LAN `first` after the link is cached, then every `every`, and at
 //! once when this machine's addresses change; `route_failed` (a session did not reopen on the LAN)
-//! holds it off for `hold`. Only an unforced host with a stored fingerprint is tried, only on private
-//! addresses, and the LAN link replaces the cached one only when nothing changed meanwhile. The old
-//! link is not closed: sessions on it run until the GUI reopens them.
+//! holds it off for `hold`, link failures or not. A host whose hold ends with its link on the LAN
+//! already is announced again (`path lan`): the sessions left on the old route get another go. Only
+//! an unforced host with a stored fingerprint is tried, only on private addresses, and the LAN link
+//! replaces the cached one only when nothing changed meanwhile. The old link is not closed: sessions
+//! on it run until the GUI reopens them.
 
 use crate::hosts::Host;
 use crate::link::Link;
 use crate::Hub;
 use rapp_net::log::Lvl;
+use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -36,6 +39,8 @@ impl Default for UpgradeTimes {
 struct Entry {
     at: Instant,
     hold: Option<Instant>,
+    /// Put here or held by `failed_move`.
+    failed: bool,
 }
 
 /// When each host is next tried. Plain data; the caller gives the time.
@@ -56,7 +61,7 @@ impl Schedule {
             return;
         }
         let at = now + self.times.first;
-        self.hosts.entry(id.to_string()).and_modify(|e| e.at = at).or_insert(Entry { at, hold: None });
+        self.hosts.entry(id.to_string()).and_modify(|e| e.at = at).or_insert(Entry { at, hold: None, failed: false });
     }
 
     /// A try found no LAN.
@@ -66,15 +71,17 @@ impl Schedule {
         }
     }
 
-    /// A move did not take (`route_failed`): no tries for `hold`.
+    /// A move did not take (`route_failed`): no tries for `hold`. The GUI says so once the LAN link
+    /// is cached, which takes the host out of the schedule; it comes back here to be due after `hold`.
     pub(crate) fn failed_move(&mut self, id: &str, now: Instant) {
         let hold = Some(now + self.times.hold);
-        self.hosts.entry(id.to_string()).and_modify(|e| e.hold = hold).or_insert(Entry { at: now, hold });
+        let e = self.hosts.entry(id.to_string()).or_insert(Entry { at: now, hold, failed: true });
+        (e.hold, e.failed) = (hold, true);
     }
 
     /// Due now, hold or not (`set_route auto`).
     pub(crate) fn now_for(&mut self, id: &str, now: Instant) {
-        self.hosts.insert(id.to_string(), Entry { at: now, hold: None });
+        self.hosts.insert(id.to_string(), Entry { at: now, hold: None, failed: false });
     }
 
     /// This machine's addresses changed: every host is due (those held stay held).
@@ -84,8 +91,22 @@ impl Schedule {
         }
     }
 
+    /// The link to `id` failed. A held host stays, hold and all: a flaky LAN is what the hold is for
+    /// (one whose hold is over goes at its next due try).
     pub(crate) fn forget(&mut self, id: &str) {
+        if self.hosts.get(id).is_some_and(|e| e.hold.is_none()) {
+            self.hosts.remove(id);
+        }
+    }
+
+    /// `id` is no longer saved: gone, hold and all.
+    pub(crate) fn remove(&mut self, id: &str) {
         self.hosts.remove(id);
+    }
+
+    /// A due host that no try can move leaves; true when a failed move had put or held it here.
+    pub(crate) fn settle(&mut self, id: &str) -> bool {
+        self.hosts.remove(id).is_some_and(|e| e.failed)
     }
 
     pub(crate) fn clear(&mut self) {
@@ -135,8 +156,13 @@ pub(crate) async fn run(hub: Arc<Hub>) {
 async fn try_one(hub: &Hub, id: &str) {
     let host = hub.hosts.get(id);
     let cached = hub.links.lock().unwrap().get(id).cloned();
-    if !worth_trying(host.as_ref(), cached.as_ref().map(Link::path)) {
-        hub.schedule.lock().unwrap().forget(id);
+    let path = cached.as_ref().map(Link::path);
+    if !worth_trying(host.as_ref(), path) {
+        let failed = hub.schedule.lock().unwrap().settle(id);
+        if failed && path == Some("lan") && host.is_some_and(|h| !h.forced_relay()) {
+            // A move onto this LAN link failed, and its hold is over: the GUI tries the sessions again.
+            hub.emit(json!({"event":"path","id":id,"path":"lan"}), &None).await;
+        }
         return;
     }
     let (Some(host), Some(old)) = (host, cached) else { return };
@@ -149,7 +175,11 @@ async fn try_one(hub: &Hub, id: &str) {
                 link.close(b"not needed");
             }
         }
-        Ok(None) | Err(_) => hub.schedule.lock().unwrap().tried(id, Instant::now()),
+        Ok(None) => hub.schedule.lock().unwrap().tried(id, Instant::now()),
+        Err(e) => {
+            hub.log.msg(Lvl::Debug, format_args!("{id}: no LAN: {e:#}"));
+            hub.schedule.lock().unwrap().tried(id, Instant::now());
+        }
     }
 }
 
@@ -242,6 +272,43 @@ mod tests {
         assert!(s.due(t0 + 2 * S).is_empty());
         // A try that ends after its host was dropped does not bring it back.
         s.tried("b", t0 + 3 * S);
+        assert!(s.due(t0 + 3600 * S).is_empty());
+    }
+
+    #[test]
+    fn a_link_failure_keeps_the_hold() {
+        let (mut s, t0) = (schedule(), Instant::now());
+        s.linked("a", "relay", t0);
+        s.failed_move("a", t0);
+        // The link died, and the next request went over the relay again.
+        s.forget("a");
+        s.linked("a", "relay", t0 + S);
+        assert!(s.due(t0 + 3 * S).is_empty());
+        assert!(s.due(t0 + 299 * S).is_empty());
+        assert_eq!(s.due(t0 + 300 * S), ["a"]);
+        // Also with no new link at all.
+        s.failed_move("a", t0);
+        s.forget("a");
+        assert!(s.due(t0 + 299 * S).is_empty());
+        assert_eq!(s.due(t0 + 300 * S), ["a"]);
+    }
+
+    #[test]
+    fn remove_drops_a_held_host() {
+        let (mut s, t0) = (schedule(), Instant::now());
+        s.failed_move("a", t0);
+        s.remove("a");
+        assert!(s.due(t0 + 3600 * S).is_empty());
+    }
+
+    #[test]
+    fn a_due_host_says_whether_a_move_failed() {
+        let (mut s, t0) = (schedule(), Instant::now());
+        s.failed_move("a", t0);
+        s.linked("b", "relay", t0);
+        assert!(s.settle("a"), "held after a failed move");
+        assert!(!s.settle("b"));
+        assert!(!s.settle("a"), "settled: gone");
         assert!(s.due(t0 + 3600 * S).is_empty());
     }
 
