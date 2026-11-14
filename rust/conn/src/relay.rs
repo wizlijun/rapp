@@ -6,7 +6,7 @@ use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::task::{ready, Context, Poll};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
 use rapp_wire::line::read_json;
@@ -14,7 +14,7 @@ use rapp_wire::msg::{Push, Req};
 use rapp_wire::tls::{self, BiStream, Expect};
 use rapp_wire::{Fp, Identity, Key};
 use serde_json::Value;
-use tokio::io::{AsyncBufRead, AsyncRead, AsyncReadExt, AsyncWrite, BufReader, ReadBuf};
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, BufReader, ReadBuf};
 use tokio::sync::{mpsc, Mutex};
 
 use crate::Pipe;
@@ -99,6 +99,15 @@ pub enum Pushed {
         code: u32,
         reason: String,
     },
+}
+
+/// Counters of the connection to the relay (see `RelayConn::stats`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LinkStats {
+    pub rtt: Duration,
+    pub rx_datagrams: u64,
+    pub lost: u64,
+    pub sent: u64,
 }
 
 /// A connection to the relay. Cloning shares it.
@@ -192,6 +201,44 @@ impl RelayConn {
 
     pub fn close(&self) {
         self.conn.close(0u32.into(), b"bye");
+    }
+
+    /// Enrolls this connection unless it already is: a connection kept open must, or the relay's
+    /// idle deadline for unenrolled connections closes it.
+    pub async fn ensure_enrolled(&self) -> Result<()> {
+        if self.enrolled.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        self.enroll().await
+    }
+
+    /// One round trip to the relay: a `{"op":"ping"}` line on a fresh stream. Relay 0.7.0 does
+    /// not know the op and answers `bad request` (not audited, not rate-limited, not counted by
+    /// `connect_backoff`); any reply line within `wait` means the relay is there.
+    pub async fn probe(&self, wait: Duration) -> Result<Duration> {
+        let start = Instant::now();
+        let once = async {
+            let (mut send, recv) = self.conn.open_bi().await?;
+            send.write_all(b"{\"op\":\"ping\"}\n").await?;
+            let _ = send.finish();
+            let mut line = Vec::new();
+            let mut r = BufReader::new(recv).take(MAX_REPLY as u64);
+            r.read_until(b'\n', &mut line).await?;
+            if line.is_empty() {
+                bail!("no reply");
+            }
+            anyhow::Ok(())
+        };
+        match tokio::time::timeout(wait, once).await {
+            Err(_) => bail!("timed out"),
+            Ok(r) => r.map(|()| start.elapsed()),
+        }
+    }
+
+    /// The QUIC connection's own counters: no packet is sent to read them.
+    pub fn stats(&self) -> LinkStats {
+        let s = self.conn.stats();
+        LinkStats { rtt: self.conn.rtt(), rx_datagrams: s.udp_rx.datagrams, lost: s.path.lost_packets, sent: s.path.sent_packets }
     }
 
     /// The connection has ended (by either side); a closed one is dialed anew, not reused.

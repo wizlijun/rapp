@@ -3,6 +3,7 @@
 
 pub mod e2e;
 pub mod hello;
+pub mod netq;
 pub mod paired;
 pub mod proof;
 pub mod relay;
