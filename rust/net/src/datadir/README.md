@@ -6,7 +6,7 @@ rapp 的所有数据都在这个目录里。
 
 - `shared/`：所有设备共用，放 app 配置 `apps.json` 和项目、常用 `workspace.json`。进 git。
 - `devices/<设备id>/`：每台设备一份，只由这台设备写，放 `device.json`（这台是什么）和 `gui.json`（界面偏好）。进 git。
-  `inputs/` 里是写作面板发出去的话，一天一个 `YYYY-MM-DD.jsonl`，一行一条记录（规格 §4），只在末尾加行。里面是你的原话，可能有私事，和钉住的剪贴板同样对待。
+  `inputs/` 里是写作面板发出去的话，一天一个 `YYYY-MM-DD.jsonl`，一行一条记录（格式见规格《输入记录》）：`v, id, ts, kind, from, host, app, session, run, window, projects, text, blocks, result, after, source`，只在末尾加行。里面是你的原话，可能有私事，和钉住的剪贴板同样对待。
 - `agent/`：agent 的上下文。rapp 只建目录和 `agent/README.md`，里面的内容归你和 agent。进 git。
 - `clipboard/`：钉住的文字条目，一条一个 `<时间>-<短标题>.md`。进 git。
 - `files/`：二进制，不进 git。`files/transfers/` 是收发的文件，`files/clipboard/` 是钉住的图片和文件。
