@@ -111,7 +111,8 @@ def main():
         procs.append(subprocess.Popen(
             [os.path.join(SERVICE_DIR, "rapp-service")], env=svc_env,
             stderr=open(svc_log, "w")))
-        ipc_port = int(wait_for(lambda: (re.search(r"ipc 127\.0\.0\.1:(\d+)", read_text(svc_log)) or [None, None])[1],
+        events = os.path.join(a_home, "local", "logs", "service.log")
+        ipc_port = int(wait_for(lambda: (re.search(r'"ev":"service_start".*?"ipc_port":(\d+)', read_text(events)) or [None, None])[1],
                                 10, "service ipc port"))
         token = read_text(os.path.join(a_home, "local", "ipc.token")).strip()
 
@@ -130,8 +131,9 @@ def main():
         opened = hub.wait("opened")
         assert opened["path"] == "lan", f"opened over {opened['path']}, wanted lan"
         time.sleep(5)
-        # The client logs "windows: N" to stderr, which the hub writes to its log.
-        counts = [int(n) for n in re.findall(r"^windows: (\d+)$", read_text(hub.log), re.M)]
+        # The client logs "windows: N" to stderr; the hub records it as a log event.
+        hub_events = read_text(os.path.join(c_home, "local", "logs", "hub.log"))
+        counts = [int(n) for n in re.findall(r'"msg":"windows: (\d+)"', hub_events)]
         assert counts and counts[-1] >= 1, f"client saw no window (log windows lines: {counts})"
         print(f"  client windows: {counts[-1]}")
         shot = os.path.join(WORK, "shot.png")
