@@ -14,6 +14,9 @@ import '../hub_client.dart';
 import '../permissions.dart';
 import '../embed/app_profile.dart';
 import '../embed/composer_model.dart' show escKeyCode, returnKeyCode;
+import '../term/term_id.dart';
+import '../term/term_session_port.dart';
+import '../term/term_wire.dart' show TermPane;
 import 'app_profile_store.dart';
 import 'lamp.dart';
 import 'lifecycle.dart';
@@ -53,6 +56,9 @@ class DeviceProbe {
   String? error;
 }
 
+/// Why a terminal session cannot open on a GUI without a terminal port.
+const noTermPortWord = '这台主控台还不能看终端会话';
+
 class MainState extends ChangeNotifier {
   MainState({
     required this.hub,
@@ -60,6 +66,7 @@ class MainState extends ChangeNotifier {
     required this.data,
     required this.prefs,
     this.port,
+    this.termPort,
     this.doubleClick = const Duration(milliseconds: 500),
     DateTime Function()? clock,
     AppProfileStore? profiles,
@@ -68,6 +75,7 @@ class MainState extends ChangeNotifier {
         _log = log ?? ((_) {}) {
     resources.addListener(notifyListeners);
     _portSub = port?.events.listen(_onPortEvent);
+    _termSub = termPort?.events.listen(_onPortEvent);
     hub?.addListener(_onHub);
     _lastError = hub?.lastError;
     final loaded = loadWorkspace(data.sharedDir);
@@ -134,6 +142,19 @@ class MainState extends ChangeNotifier {
   final UiPrefs prefs;
   final SessionPort? port;
 
+  /// Terminal sessions' port; null where the GUI has no native port (no terminals there).
+  final TermSessionPort? termPort;
+
+  /// Where calls for session [sid] go: the terminal port for its own sessions, else the native one.
+  SessionPort? portOf(Object sid) => termPort?.owns(sid) == true ? termPort : port;
+
+  /// [rs]'s current pane, when it is a terminal session.
+  TermPane? termPaneOf(RemoteSession rs) {
+    final tp = termPort, w = rs.currentWindow;
+    if (tp == null || w == null || !tp.owns(rs.sid)) return null;
+    return tp.pane(rs.sid, w);
+  }
+
   /// My app profiles (`apps.json` in `shared/`) and the built-in ones; swapped by [relocate].
   late AppProfileStore profiles;
   final void Function(String line) _log;
@@ -148,7 +169,7 @@ class MainState extends ChangeNotifier {
 
   /// The double-click interval the runner reported (`init`), for counting clicks (R14).
   final Duration doubleClick;
-  StreamSubscription<SessionEvent>? _portSub;
+  StreamSubscription<SessionEvent>? _portSub, _termSub;
 
   /// Embedded sessions by hub sid.
   final Map<Object, RemoteSession> remote = {};
@@ -289,7 +310,7 @@ class MainState extends ChangeNotifier {
   void focusPicture(Object sid) {
     if (overview || pictureFocused == sid || !_liveSid(sid)) return;
     pictureFocused = sid;
-    port?.pictureFocus(sid);
+    portOf(sid)?.pictureFocus(sid);
     notifyListeners();
   }
 
@@ -366,7 +387,7 @@ class MainState extends ChangeNotifier {
       final now = (c.mode, fps, c.density, rs.streamPinned);
       if (now == last) continue;
       _sentFps[rs.sid] = now;
-      p.setStream(rs.sid, c.mode, fps, c.density, pinned: rs.streamPinned);
+      portOf(rs.sid)!.setStream(rs.sid, c.mode, fps, c.density, pinned: rs.streamPinned);
     }
   }
 
@@ -376,14 +397,14 @@ class MainState extends ChangeNotifier {
   void detach() {
     final rs = currentRemote;
     if (rs == null || rs.detached || rs.tabs.tabs.isEmpty || !_liveSid(rs.sid)) return;
-    port?.detach(rs.sid);
+    portOf(rs.sid)?.detach(rs.sid);
   }
 
   /// Puts the current session back on the stage.
   void attach() {
     final rs = currentRemote;
     if (rs == null || !_liveSid(rs.sid)) return;
-    port?.attach(rs.sid);
+    portOf(rs.sid)?.attach(rs.sid);
   }
 
   /// ⌃⌘D and the stream menu's 「分离成独立窗口」/「放回主窗口」.
@@ -396,7 +417,7 @@ class MainState extends ChangeNotifier {
   /// Whether [toggleDetach] does anything now (the menu greys its item otherwise).
   bool get canToggleDetach {
     final rs = currentRemote;
-    return port?.supportsDetach == true && rs != null && _liveSid(rs.sid) && (rs.detached || rs.tabs.tabs.isNotEmpty);
+    return rs != null && portOf(rs.sid)?.supportsDetach == true && _liveSid(rs.sid) && (rs.detached || rs.tabs.tabs.isNotEmpty);
   }
 
   // ---- hub state ----
@@ -559,6 +580,7 @@ class MainState extends ChangeNotifier {
       bytesPerSecond: r.phase == Phase.live ? rs?.bytesPerSecond : null,
       reason: r.phase == Phase.disconnected ? disconnectWord(r.reason) : null,
       takenOver: r.phase == Phase.disconnected && takenOver(r.reason),
+      paneTitle: rs == null ? null : termPaneOf(rs)?.title,
     );
   }
 
@@ -780,7 +802,7 @@ class MainState extends ChangeNotifier {
         remote.remove(fresh)?.dispose();
         _sentFps.remove(fresh);
         _waiting.remove(fresh)?.timer.cancel();
-        port?.close(fresh);
+        portOf(fresh)?.close(fresh);
       }
       r.sid = r.lastSid;
       r.lastSid = null;
@@ -879,7 +901,7 @@ class MainState extends ChangeNotifier {
     _stopRetry(r);
     final oldGroups = groups;
     final old = r.lastSid;
-    if (old != null) port?.close(old); // reconnected but not swapped yet: the old session is still open
+    if (old != null) portOf(old)?.close(old); // reconnected but not swapped yet: the old session is still open
     for (final sid in [r.sid, old]) {
       if (sid == null) continue;
       remote.remove(sid)?.dispose();
@@ -904,9 +926,11 @@ class MainState extends ChangeNotifier {
     final fresh = r.sid;
     if (old == null || fresh == null) return;
     final rs = remote[fresh];
-    if (rs == null || !rs.windows.any((w) => w.hasPicture)) return;
+    // A terminal has no picture: its first window table is what it shows.
+    final shows = termPort?.owns(fresh) == true ? rs?.windows.isNotEmpty : rs?.windows.any((w) => w.hasPicture);
+    if (rs == null || shows != true) return;
     final detached = remote[old]?.detached ?? false;
-    port?.close(old);
+    portOf(old)?.close(old);
     remote.remove(old)?.dispose();
     final start = _starts.remove(old);
     if (start != null) resources.linkDown(start); // what it was still sending ends 没传完
@@ -915,10 +939,10 @@ class MainState extends ChangeNotifier {
       if (pictureFocused == old) {
         // A move: the keys typed into the old picture go on into the new one.
         pictureFocused = fresh;
-        port?.pictureFocus(fresh);
+        portOf(fresh)?.pictureFocus(fresh);
       }
       // A move keeps the session where the user put it: off the stage stays off.
-      if (detached && port?.supportsDetach == true) port!.detach(fresh);
+      if (detached && portOf(fresh)?.supportsDetach == true) portOf(fresh)!.detach(fresh);
     }
     _rerouteEnd(r, true);
   }
@@ -931,6 +955,13 @@ class MainState extends ChangeNotifier {
   Future<void> _connect(SessionRecord r, {bool reconnect = false, bool quiet = false, bool reroute = false}) async {
     final x = reroute ? _reroutes[r] : null;
     final old = r.sid;
+    final term = isTermApp(r.app);
+    if (term && termPort == null) {
+      // No terminal port here: nothing is opened, the record fails like a failed open.
+      _disconnect(r, noTermPortWord, hint: true, failedOpen: true);
+      notifyListeners();
+      return;
+    }
     final HubSession s;
     try {
       s = await hub!.open(r.id, r.app, embed: true, reconnect: reconnect);
@@ -980,25 +1011,26 @@ class MainState extends ChangeNotifier {
     r.sid = s.sid;
     _starts[s.sid] = _Start(s.sid);
     final rs = RemoteSession(s.sid, r.appName, onResize: (w, a, b) {
-          if (_liveSid(s.sid)) port!.resize(s.sid, w, a, b);
+          if (_liveSid(s.sid)) portOf(s.sid)!.resize(s.sid, w, a, b);
         },
         onSelect: (w) {
-          if (_liveSid(s.sid)) port!.selectWindow(s.sid, w);
+          if (_liveSid(s.sid)) portOf(s.sid)!.selectWindow(s.sid, w);
         },
         onStream: (_) => _applyFps(),
-        onDropBlock: (n) => port!.composerDropBlock(s.sid, n),
+        onDropBlock: (n) => portOf(s.sid)!.composerDropBlock(s.sid, n),
         appId: r.app,
         onReturn: () {
-          if (_liveSid(s.sid)) port!.key(s.sid, returnKeyCode, 0);
+          if (_liveSid(s.sid)) portOf(s.sid)!.key(s.sid, returnKeyCode, 0);
         },
         onSelectInput: (id) {
-          if (_liveSid(s.sid)) port!.selectInput(s.sid, id);
+          if (_liveSid(s.sid)) portOf(s.sid)!.selectInput(s.sid, id);
         },
         onClick: (w, at) {
           if (!_liveSid(s.sid)) return;
-          port!.mouse(s.sid, w, 'down', 'left', at.dx, at.dy, 1);
-          port!.mouse(s.sid, w, 'up', 'left', at.dx, at.dy, 1);
-        });
+          portOf(s.sid)!.mouse(s.sid, w, 'down', 'left', at.dx, at.dy, 1);
+          portOf(s.sid)!.mouse(s.sid, w, 'up', 'left', at.dx, at.dy, 1);
+        },
+        followNewTabs: !term);
     final prof = profiles.resolve(r.app);
     rs.setProfile(prof);
     if (prof.name != null) _log('rapp: app 配置「${prof.name}」');
@@ -1011,7 +1043,7 @@ class MainState extends ChangeNotifier {
     try {
       final p = s.port, tk = s.token;
       if (p == null || tk == null) throw 'rapp-hub 没有给出嵌入端口';
-      await port!.start(StartArgs(s.sid, p, tk, c.mode, c.fps, c.density));
+      await (term ? termPort! : port!).start(StartArgs(s.sid, p, tk, c.mode, c.fps, c.density));
     } catch (e) {
       if (r.sid != s.sid) return; // it was dropped while starting: that already settled the record
       if (x != null && _reroutes[r] == x && !r.ending && _records[r.key] == r) {
@@ -1085,7 +1117,9 @@ class MainState extends ChangeNotifier {
   final Set<String> _moving = {};
 
   /// [r] is still the user's live session: not ended, disconnected or gone.
+  /// A terminal never moves: its reopen would wait for a picture it never shows ([_swapIfReady]).
   bool _movable(SessionRecord r) =>
+      !isTermApp(r.app) &&
       _records[r.key] == r && r.phase == Phase.live && !r.ending && !r.userDisconnect && r.sid != null;
 
   /// Reopens the live embedded session [key] over the hub's current link (`reconnect: true`). Its
@@ -1131,7 +1165,7 @@ class MainState extends ChangeNotifier {
       _waiting.remove(fresh)?.timer.cancel();
       _quiet.add(fresh);
       if (_hubHas(fresh)) hub!.close(fresh);
-      port?.close(fresh);
+      portOf(fresh)?.close(fresh);
       r.sid = old;
       r.lastSid = null;
     }
@@ -1208,7 +1242,7 @@ class MainState extends ChangeNotifier {
       if (e.key == key && e.sid != null) {
         final rs = remote[e.sid];
         if (rs != null) {
-          if (rs.detached) port?.raiseDetached(e.sid!);
+          if (rs.detached) portOf(e.sid!)?.raiseDetached(e.sid!);
         } else {
           hub!.focus(e.sid!);
         }
@@ -1266,7 +1300,7 @@ class MainState extends ChangeNotifier {
     final last = _sentHidden[rs.sid] ?? const <int>[];
     if (!listEquals(ids, last)) {
       _sentHidden[rs.sid] = ids;
-      if (_liveSid(rs.sid)) port?.setHidden(rs.sid, ids);
+      if (_liveSid(rs.sid)) portOf(rs.sid)?.setHidden(rs.sid, ids);
     }
     final n = rs.hidden.length;
     if (n != (_loggedHidden[rs.sid] ?? 0)) {
@@ -1295,9 +1329,9 @@ class MainState extends ChangeNotifier {
     final w = rs == null ? null : _windowById(rs, window);
     if (rs == null || w == null || !_liveSid(rs.sid)) return;
     if (w.decorated) {
-      port!.closeWindow(rs.sid, window);
+      portOf(rs.sid)!.closeWindow(rs.sid, window);
     } else {
-      port!.key(rs.sid, escKeyCode, 0);
+      portOf(rs.sid)!.key(rs.sid, escKeyCode, 0);
     }
   }
 
@@ -1406,7 +1440,8 @@ class MainState extends ChangeNotifier {
       await reconnect(key);
     } else {
       final rs = _stageRemote(r);
-      if (rs != null && rs.detached) port!.raiseDetached(rs.sid);
+      // A terminal is never detached: it has no windows of its own to raise.
+      if (rs != null && rs.detached && !isTermApp(r.app)) portOf(rs.sid)!.raiseDetached(rs.sid);
       hint = '已切到 $appName';
       notifyListeners();
     }
@@ -1417,7 +1452,7 @@ class MainState extends ChangeNotifier {
     if (embeds) {
       // The runner's own windows: raised with or without the hub.
       final rs = currentRemote;
-      if (rs != null && rs.detached && !currentDisconnected) port!.raiseDetached(rs.sid);
+      if (rs != null && rs.detached && !currentDisconnected) portOf(rs.sid)!.raiseDetached(rs.sid);
       return;
     }
     final c = current;
@@ -1438,7 +1473,7 @@ class MainState extends ChangeNotifier {
     final c = entryFor(key);
     if (c?.sid == null) return false;
     if (remote.containsKey(c!.sid)) {
-      port!.close(c.sid!);
+      portOf(c.sid!)!.close(c.sid!);
     } else {
       hub!.close(c.sid!);
     }
@@ -1458,12 +1493,12 @@ class MainState extends ChangeNotifier {
         // new session's end takes the old one with it (`_endRecord`), nothing goes back.
         _rerouteEnd(r, false);
         r.ending = true;
-        port!.close(r.sid!);
+        portOf(r.sid!)!.close(r.sid!);
         said = '正在结束 ${r.appName}';
       case Phase.disconnected:
         // Nothing is running on the link; its last picture goes with the record.
         final sid = r.sid;
-        if (sid != null) port!.close(sid);
+        if (sid != null) portOf(sid)!.close(sid);
         _endRecord(r);
         said = '已结束 ${r.appName}';
       case Phase.connecting:
@@ -1807,7 +1842,8 @@ class MainState extends ChangeNotifier {
       hint = '本机副本不在了';
       notifyListeners();
     } else if (canCopy(e)) {
-      p.clipPick(_hubSid(e.sid), e.clip, false);
+      final sid = _hubSid(e.sid);
+      portOf(sid)!.clipPick(sid, e.clip, false);
     }
   }
 
@@ -1824,7 +1860,8 @@ class MainState extends ChangeNotifier {
     }
     if (!canPin(e)) return;
     resources.beginPin(e.seq);
-    final r = await p.fetchClip(_hubSid(e.sid), e.clip);
+    final sid = _hubSid(e.sid);
+    final r = await portOf(sid)!.fetchClip(sid, e.clip);
     if (_disposed) return;
     if (resources.entry(e.seq) == null) {
       final copy = r.copy;
@@ -1871,7 +1908,7 @@ class MainState extends ChangeNotifier {
 
   void cancelTransfer(TransferRow t) {
     final sid = _hubSid(t.sid);
-    if (_starts[sid] == t.sid) port?.cancelTransfer(sid, id: t.id); // never a new start's same id
+    if (_starts[sid] == t.sid) portOf(sid)?.cancelTransfer(sid, id: t.id); // never a new start's same id
   }
 
   Future<void> reveal(TransferRow t) async {
@@ -1892,6 +1929,7 @@ class MainState extends ChangeNotifier {
     hub?.removeListener(_onHub);
     profiles.removeListener(_onProfiles);
     _portSub?.cancel();
+    _termSub?.cancel();
     _blockedTimer?.cancel();
     for (final t in _retryTimers.values) {
       t.cancel();

@@ -98,7 +98,10 @@ class TermSessionPort extends SessionPort {
     final old = _terms[sid];
     if (old != null) _stop(old);
     // The model stays across a reconnect: the picture rests on the last screen until a new one comes.
-    final t = _Term(sid, old?.model ?? TermModel())..panes = old?.panes ?? const [];
+    // So does the view: the stage stays as it was and asks nothing new, so the link-up below sends it.
+    final t = _Term(sid, old?.model ?? TermModel())
+      ..panes = old?.panes ?? const []
+      ..view = old?.view;
     _terms[sid] = t;
     final TermLink link;
     try {

@@ -104,6 +104,15 @@ void main() {
     expect(w.got.last, jsonEncode({'t': 'refit', 'pane': '%3', 'cols': 100, 'rows': 24}));
   });
 
+  test('a new start of the same session sends the last view without being asked again', () async {
+    await begin(await Worker.start());
+    port.view(1, 3, 80, 24);
+    await pumpUntil(() => w.got.where((l) => l.contains('"view"')).length == 1);
+    await port.start(StartArgs(1, w.srv.port, 'tk', 'x', 0, 'x'));
+    await pumpUntil(() => w.got.where((l) => l.contains('"view"')).length == 2);
+    expect(w.got.last, jsonEncode({'t': 'view', 'pane': '%3', 'cols': 80, 'rows': 24}));
+  });
+
   test('a line split in the middle of a Chinese character is put back together', () async {
     final bytes = utf8.encode(line(screenJson('%3', rev: 1, text: '中文')));
     final cut = bytes.indexOf(utf8.encode('中')[0]) + 1;

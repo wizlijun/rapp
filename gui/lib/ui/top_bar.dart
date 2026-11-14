@@ -42,6 +42,11 @@ class TopBar extends StatelessWidget {
             // (full label when wide, bars only when narrow), so the thresholds that
             // keep the fixed content inside the bar move up with it.
             final embedded = state.port != null && rs != null && cur != null;
+            // A terminal: its tabs are panes (no ×, no rules), and it has no remote menu.
+            final term = rs != null && state.termPort?.owns(rs.sid) == true;
+            final pane = rs == null ? null : state.termPaneOf(rs);
+            final title = cur == null ? '' : (pane == null ? cur.appName : '${pane.command} · ${cur.appName}');
+            final sub = cur == null ? '' : _sub(cur, pane?.title);
             // The fixed row: panel, prev, next, fullscreen, the needs anchor when there is a hub,
             // the overview button when shown, the stream anchor in embedded mode; and the gaps
             // (both paddings plus one after panel, overview, prev, session and next). Gaps and the
@@ -52,9 +57,10 @@ class TopBar extends StatelessWidget {
             final trafficW = embedded ? (wide ? _streamAnchorWidth : 48.0) : 0.0;
             // Their words only in a roomy bar (the tabs and the hint need the room more).
             final words = box.maxWidth >= 1000;
-            final splitW = embedded ? 2 * (words ? menuButtonWidth : 48.0) : 0.0;
+            final splitW = embedded ? (term ? 1 : 2) * (words ? menuButtonWidth : 48.0) : 0.0;
+            final hidden = rs != null && !rs.detached && !term && rs.hidden.isNotEmpty;
             // Room for the gaps, a session block and the 已隐藏 chip besides (none of them shrink).
-            final chip = rs != null && !rs.detached && rs.hidden.isNotEmpty ? 130.0 : 0.0;
+            final chip = hidden ? 130.0 : 0.0;
             final split = embedded && box.maxWidth >= (icons + 1) * 48 + trafficW + splitW + 42 + 160 + chip;
             final streamW = trafficW + (split ? splitW : 0.0);
             double fixed(double gap, bool overview) =>
@@ -107,7 +113,7 @@ class TopBar extends StatelessWidget {
                               container: true,
                               excludeSemantics: true,
                               label:
-                                  '${cur.appName}，${lampWord(cur.lamp)}，${_sub(cur)}',
+                                  '$title，${lampWord(cur.lamp)}，$sub',
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
@@ -124,7 +130,7 @@ class TopBar extends StatelessWidget {
                                           CrossAxisAlignment.start,
                                       children: [
                                         Text(
-                                          cur.appName,
+                                          title,
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                           style: const TextStyle(
@@ -132,7 +138,7 @@ class TopBar extends StatelessWidget {
                                           ),
                                         ),
                                         Text(
-                                          _sub(cur),
+                                          sub,
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                           style: small?.copyWith(
@@ -154,7 +160,7 @@ class TopBar extends StatelessWidget {
                     multi ? () => state.step(1) : null,
                   ),
                   SizedBox(width: gap),
-                  if (tabs != null && (tabs.tabs.length >= 2 || rs!.hidden.isNotEmpty))
+                  if (tabs != null && (tabs.tabs.length >= 2 || hidden))
                     Flexible(
                       child: SingleChildScrollView(
                         scrollDirection: Axis.horizontal,
@@ -171,8 +177,8 @@ class TopBar extends StatelessWidget {
                                     label: w.title.isEmpty ? cur!.appName : w.title,
                                     selected: w.id == tabs.current,
                                     onTap: () => state.selectWindow(w.id),
-                                    onSecondaryTap: (p) => _tabMenu(context, p, w.id),
-                                    onClose: state.isMainWindow(w.id) ? null : () => state.closeWindow(w.id),
+                                    onSecondaryTap: term ? null : (p) => _tabMenu(context, p, w.id),
+                                    onClose: term || state.isMainWindow(w.id) ? null : () => state.closeWindow(w.id),
                                   ),
                                   ),
                                 ),
@@ -182,7 +188,7 @@ class TopBar extends StatelessWidget {
                       ),
                     ),
                   // Outside the scroll view: the only way back to hidden windows must never scroll away.
-                  if (tabs != null && rs!.hidden.isNotEmpty)
+                  if (tabs != null && hidden)
                         Builder(
                           builder: (chipCtx) => TabChip(
                             key: const Key('hidden-tabs'),
@@ -209,7 +215,7 @@ class TopBar extends StatelessWidget {
                   if (embedded) ...[
                     if (split) ...[
                       _menu(context, cur, {MenuPart.session}, Corner.session, !words),
-                      _menu(context, cur, {MenuPart.remote}, Corner.remote, !words),
+                      if (!term) _menu(context, cur, {MenuPart.remote}, Corner.remote, !words),
                     ],
                     _menu(context, cur, split ? {MenuPart.stream} : allMenuParts, Corner.stream, !wide),
                   ],
@@ -234,7 +240,7 @@ class TopBar extends StatelessWidget {
       key: ValueKey((cur.sid, corner)),
       parts: parts,
       compact: compact,
-      port: state.port!,
+      port: state.portOf(state.currentRemote!.sid)!,
       session: state.currentRemote!,
       path: cur.path,
       status: lampWord(cur.lamp),
@@ -310,7 +316,13 @@ class TopBar extends StatelessWidget {
     }
   }
 
-  String _sub(SessionEntry e) {
+  /// The session's second line, and a terminal's [pane] title after it.
+  String _sub(SessionEntry e, String? pane) {
+    final s = _routeSub(e);
+    return pane == null || pane.isEmpty ? s : '$s · $pane';
+  }
+
+  String _routeSub(SessionEntry e) {
     final inProject = projectSubtitle(e, state.projects);
     if (inProject != null) return inProject;
     final p = routeWord(e.path, forced: state.forcedRelay(e.id));
