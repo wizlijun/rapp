@@ -1,14 +1,16 @@
 //! Reaching a host. A host with a stored fingerprint, or any host when B has a key, is reached over
 //! `rapp/2` (the saved LAN addresses tried together, 500 ms each, first to answer wins); a host that
 //! never showed a fingerprint may fall back to `rapp/1` and its password. A host with a stored
-//! fingerprint never falls back. One connection per host is cached; a lost connection triggers one
-//! fresh connect.
+//! fingerprint never falls back. When no address answers and B has a relay and key, the host is reached
+//! through the relay: one relayed stream per request. One connection per host is cached; a lost
+//! connection triggers one fresh connect.
 
 use crate::hosts::Host;
 use crate::Hub;
 use anyhow::{anyhow, bail, Context, Result};
 use quinn::{Connection, Endpoint};
-use rapp_conn::{quic_facts, read_welcome, send_hello, Accepted, Me, Pipe, Role};
+use rapp_conn::relay::RelayConn;
+use rapp_conn::{e2e_connect, quic_facts, read_welcome, send_hello, Accepted, Me, Pipe, Role};
 use rapp_net::addr::{is_private, split_host_ref};
 use rapp_net::line::{read_json, write_json};
 use rapp_net::log::Lvl;
@@ -33,18 +35,47 @@ fn quiet() -> bool {
     QUIET.try_with(|q| *q).unwrap_or(false)
 }
 
-/// A cached connection to a host, and the path it came by.
+/// How a host is reached: over a QUIC connection of ours, or by a stream through the relay per request.
 #[derive(Clone)]
-pub struct Link {
-    conn: Connection,
-    path: &'static str,
+pub enum Link {
+    Quic { conn: Connection, path: &'static str },
+    Relay,
 }
 
 impl Link {
     pub fn path(&self) -> &'static str {
-        self.path
+        match self {
+            Link::Quic { path, .. } => path,
+            Link::Relay => "relay",
+        }
+    }
+
+    fn close(&self, why: &'static [u8]) {
+        if let Link::Quic { conn, .. } = self {
+            conn.close(0u32.into(), why);
+        }
     }
 }
+
+/// The connection to the relay and the settings it was dialed with: a change of either redials.
+pub struct RelayCache {
+    addr: String,
+    key_text: String,
+    pub(crate) conn: RelayConn,
+    key: Arc<Key>,
+}
+
+/// A probe found the host through the relay: online, with nothing more to ask.
+#[derive(Debug)]
+struct Relayed;
+
+impl std::fmt::Display for Relayed {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("reachable through the relay")
+    }
+}
+
+impl std::error::Error for Relayed {}
 
 /// One request/reply on a new stream; the stream stays open for `open`.
 async fn exchange(conn: &Connection, lines: &[&Op]) -> Result<(Pipe, Value)> {
@@ -156,30 +187,93 @@ impl Hub {
         Dialer { ep: self.ep.clone(), identity: self.identity.clone(), name: self.name.clone(), key }
     }
 
+    /// The connection to the relay for the settings as they are now, dialed when there is none, it has
+    /// ended or the settings changed. None: no relay or no key set.
+    pub(crate) async fn relay(&self) -> Result<Option<(RelayConn, Arc<Key>)>> {
+        let settings = rapp_conn::settings::load(&self.home);
+        let (Some(addr), Some(key)) = (settings.relay, settings.key) else { return Ok(None) };
+        let key_text = key.to_string();
+        let mut cache = self.relay.lock().await;
+        if let Some(c) = cache.as_ref() {
+            if c.addr == addr && c.key_text == key_text && !c.conn.is_closed() {
+                return Ok(Some((c.conn.clone(), c.key.clone())));
+            }
+            c.conn.close();
+            *cache = None;
+        }
+        let conn = RelayConn::dial(&self.ep, &addr, &key, &self.identity).await?;
+        let key = Arc::new(key);
+        *cache = Some(RelayCache { addr, key_text, conn: conn.clone(), key: key.clone() });
+        Ok(Some((conn, key)))
+    }
+
     async fn establish(&self, host: &Host) -> Result<Link> {
+        // Read on every connect: the user may have set a key since the last one.
+        let key = rapp_conn::settings::load(&self.home).key.map(Arc::new);
+        // The relay first: its `connect` also tells A somebody is coming, and may know more addresses.
+        let mut relay_err = None;
+        let mut found = None;
+        if key.is_some() {
+            let looked_up = match self.relay().await {
+                Ok(Some((relay, _))) => Some(relay.connect_to(&host.id).await),
+                Ok(None) => None,
+                Err(e) => Some(Err(e)),
+            };
+            match looked_up {
+                Some(Ok(f)) => found = Some(f),
+                Some(Err(e)) => relay_err = Some(e),
+                None => {}
+            }
+        }
+        let mut lan = host.lan.clone();
+        for a in found.iter().flat_map(|f| &f.lan) {
+            if !lan.contains(a) {
+                lan.push(a.clone());
+            }
+        }
+        if key.is_some() || host.fp.is_some() {
+            // Seen with a key before, or nothing to fall back on: the answer stands.
+            let settled = host.fp.is_some() || host.password.is_empty();
+            match self.first_v2(host, &dial_order(&lan), key).await {
+                Ok(Some((link, _))) => return Ok(link),
+                Err(e) if settled => return Err(e),
+                Err(_) => {}
+                Ok(None) if found.is_some() => {
+                    self.route(&host.id, "relay", None, Ok(()));
+                    return Ok(Link::Relay);
+                }
+                Ok(None) if settled => {
+                    if let Some(e) = relay_err {
+                        self.route(&host.id, "relay", None, Err(format!("{e:#}")));
+                        return Err(e);
+                    }
+                    bail!(if lan.is_empty() {
+                        "no address: add the host again as id@ip"
+                    } else {
+                        "offline: no LAN address answered"
+                    });
+                }
+                Ok(None) => {}
+            }
+        }
         if host.lan.is_empty() {
             bail!("no address: add the host again as id@ip");
         }
-        // Read on every connect: the user may have set a key since the last one.
-        let key = rapp_conn::settings::load(&self.home).key.map(Arc::new);
-        if key.is_some() || host.fp.is_some() {
-            match self.first_v2(host, &dial_order(&host.lan), key).await {
-                Ok(link) => return Ok(link),
-                // Seen with a key before, or nothing to fall back on: the answer stands.
-                Err(e) if host.fp.is_some() || host.password.is_empty() => return Err(e),
-                Err(_) => {}
-            }
-        }
         let auth = Op::Auth { password: Some(host.password.clone()), name: self.me() };
         match self.first_lan(&host.id, &host.lan, &auth).await {
-            Some(conn) => Ok(Link { conn, path: "lan" }),
+            Some(conn) => Ok(Link::Quic { conn, path: "lan" }),
             None => Err(anyhow!("offline: no LAN address answered")),
         }
     }
 
     /// Tries every address over `rapp/2` at once (500 ms each) and keeps the first that is welcomed.
-    /// A host that answered and refused is reported in preference to "nobody answered".
-    async fn first_v2(&self, host: &Host, addrs: &[&String], key: Option<Arc<Key>>) -> Result<Link> {
+    /// A host that answered and refused is an error; `None` means nobody answered.
+    async fn first_v2(
+        &self,
+        host: &Host,
+        addrs: &[&String],
+        key: Option<Arc<Key>>,
+    ) -> Result<Option<(Link, Accepted)>> {
         let dialer = self.dialer(key);
         let mut attempts = tokio::task::JoinSet::new();
         for a in addrs {
@@ -200,7 +294,7 @@ impl Hub {
                     let path = direct_path(&sock);
                     self.route(&host.id, path, Some(&addr), Ok(()));
                     self.remember_fp(host, &accepted);
-                    return Ok(Link { conn, path });
+                    return Ok(Some((Link::Quic { conn, path }, accepted)));
                 }
                 Err(e) => {
                     let unreachable = e.downcast_ref::<Unreachable>().is_some();
@@ -218,7 +312,7 @@ impl Hub {
                 }
             }
         }
-        Err(refused.unwrap_or_else(|| anyhow!("offline: no LAN address answered")))
+        refused.map_or(Ok(None), Err)
     }
 
     /// Saves the fingerprint a host showed, logging a change (hex only, never key material).
@@ -242,8 +336,7 @@ impl Hub {
     /// that only the password gets into is saved the old way.
     pub(crate) async fn add_host(&self, host_ref: &str, password: Option<&str>) -> Result<Value> {
         let (id, addr) = split_host_ref(host_ref)?;
-        // Through the relay comes with Task 7: until then a bare ID has no way to be reached.
-        let Some(addr) = addr else { bail!("relay not set: add the host as id@ip") };
+        let Some(addr) = addr else { return self.add_by_id(id).await };
         let sock: SocketAddr = addr.parse().with_context(|| format!("bad address {addr}"))?;
         let key = rapp_conn::settings::load(&self.home).key.map(Arc::new);
         let known = self.hosts.get(&id).and_then(|h| h.fp);
@@ -281,6 +374,51 @@ impl Hub {
         self.save_host(Host { id, name, password: password.into(), lan: vec![addr], fp: None })
     }
 
+    /// `add_host` by bare ID: found through the relay, reached on the addresses it reports or else
+    /// through the relay itself. Saved with those addresses, the fingerprint it showed and no password.
+    async fn add_by_id(&self, id: String) -> Result<Value> {
+        let Some((relay, key)) = self.relay().await? else { bail!("relay not set: add the host as id@ip") };
+        let found = relay.connect_to(&id).await?;
+        let known = self.hosts.get(&id).and_then(|h| h.fp);
+        let mut host = Host { id: id.clone(), name: String::new(), password: String::new(), lan: found.lan, fp: known };
+        let accepted = match self.first_v2(&host, &dial_order(&host.lan), Some(key.clone())).await? {
+            Some((link, accepted)) => {
+                link.close(b"host added");
+                accepted
+            }
+            None => {
+                let (_, r, accepted) = self.relay_hello(&relay, &key, &host, &Op::Ping).await?;
+                if r["ok"] != true {
+                    bail!(error_of(&r));
+                }
+                accepted
+            }
+        };
+        host.name = Some(accepted.name).filter(|n| !n.is_empty()).unwrap_or(id);
+        host.fp = Some(accepted.fp);
+        self.save_host(host)
+    }
+
+    /// One relayed stream to `host`: end-to-end TLS, hello and `op` in one flight, then A's welcome.
+    /// Returns the stream positioned after the reply to `op`, which is read too.
+    async fn relay_hello(&self, relay: &RelayConn, key: &Key, host: &Host, op: &Op) -> Result<(Pipe, Value, Accepted)> {
+        let known = self.hosts.get(&host.id).map_or(host.fp, |h| h.fp);
+        let stream = relay.relay_to(&host.id).await?;
+        // The relay's refusal (`offline`, `unknown id`, ...) comes back as the failure of this first read.
+        let tls = tokio::time::timeout(REPLY_WAIT, e2e_connect(stream, &self.identity));
+        let (mut pipe, facts) = tls.await.map_err(|_| anyhow!("no reply"))?.map_err(relay_failure)?;
+        send_hello(&mut pipe, &facts, &Me { id: "", name: &self.name, key: Some(key) }).await?;
+        write_json(&mut pipe, op).await?;
+        let wait = async {
+            let accepted = read_welcome(&mut pipe, &facts, Some(key), &host.id, known.as_ref()).await?;
+            let r = read_json(&mut pipe).await?;
+            anyhow::Ok((r, accepted))
+        };
+        let (r, accepted) = tokio::time::timeout(REPLY_WAIT, wait).await.map_err(|_| anyhow!("no reply"))??;
+        self.remember_fp(host, &accepted);
+        Ok((pipe, r, accepted))
+    }
+
     fn save_host(&self, host: Host) -> Result<Value> {
         let ev = json!({"event":"host_added","id":host.id,"name":host.name});
         self.hosts.upsert(host.clone())?;
@@ -288,8 +426,15 @@ impl Hub {
         Ok(ev)
     }
 
-    async fn send_on(&self, link: &Link, op: &Op) -> Result<(Pipe, Value)> {
-        exchange(&link.conn, &[op]).await
+    async fn send_on(&self, host: &Host, link: &Link, op: &Op) -> Result<(Pipe, Value)> {
+        match link {
+            Link::Quic { conn, .. } => exchange(conn, &[op]).await,
+            Link::Relay => {
+                let Some((relay, key)) = self.relay().await? else { bail!("relay not set: add the host as id@ip") };
+                let (pipe, r, _) = self.relay_hello(&relay, &key, host, op).await?;
+                Ok((pipe, r))
+            }
+        }
     }
 
     /// Dials `addr` over `rapp/1` and authenticates; the connection is closed on refusal.
@@ -348,7 +493,29 @@ impl Hub {
     pub fn forget(&self, id: &str) {
         self.probe_halt.lock().unwrap().remove(id);
         if let Some(link) = self.links.lock().unwrap().remove(id) {
-            link.conn.close(0u32.into(), b"forgotten");
+            link.close(b"forgotten");
+        }
+    }
+
+    /// Whether `host` is there, for presence. A host reached through the relay is looked up with the
+    /// relay's `connect` (ok means online); no stream is opened through the relay.
+    pub async fn probe(&self, host: &Host) -> Result<()> {
+        let cached = self.links.lock().unwrap().get(&host.id).cloned();
+        if matches!(cached, Some(Link::Relay)) {
+            let looked_up = match self.relay().await {
+                Ok(Some((relay, _))) => relay.connect_to(&host.id).await.map(drop),
+                Ok(None) => Err(anyhow!("relay not set: add the host as id@ip")),
+                Err(e) => Err(e),
+            };
+            if looked_up.is_err() {
+                // Offline now; the next probe finds the way again (LAN may be back).
+                self.forget(&host.id);
+            }
+            return looked_up;
+        }
+        match self.request(host, &Op::Ping).await {
+            Err(e) if e.downcast_ref::<Relayed>().is_some() => Ok(()),
+            r => r.map(drop),
         }
     }
 
@@ -360,7 +527,7 @@ impl Hub {
         }
         let cached = self.links.lock().unwrap().get(&host.id).cloned();
         if let Some(link) = cached {
-            match self.send_on(&link, op).await {
+            match self.send_on(host, &link, op).await {
                 Err(e) if quiet() => drop(e),
                 Err(e) => self.log.msg(Lvl::Warn, format_args!("{} via {}: {e:#}; reconnecting", host.id, link.path())),
                 Ok(x) => return finish(x, link.path()),
@@ -375,13 +542,25 @@ impl Hub {
                 links.insert(host.id.clone(), link.clone());
             }
         }
-        match self.send_on(&link, op).await {
+        if quiet() && matches!(link, Link::Relay) {
+            // A probe asks the relay (`probe`), it does not open a stream through it.
+            return Err(Relayed.into());
+        }
+        match self.send_on(host, &link, op).await {
             Ok(x) => finish(x, link.path()),
             Err(e) => {
                 self.forget(&host.id);
                 Err(e)
             }
         }
+    }
+}
+
+/// What the relay said, from the io error `e2e_connect` fails with when the relay refused the stream.
+fn relay_failure(e: anyhow::Error) -> anyhow::Error {
+    match e.chain().find_map(|c| c.downcast_ref::<std::io::Error>()) {
+        Some(io) => anyhow!(io.to_string()),
+        None => e,
     }
 }
 

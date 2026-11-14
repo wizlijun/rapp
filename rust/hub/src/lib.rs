@@ -1,5 +1,6 @@
 //! rapp-hub (spec §4): B side. JSON-line commands on stdin, events on stdout.
-//! Hosts are reached only at the addresses saved in `hosts.json` (added as `id@ip`).
+//! Hosts are reached at the addresses saved in `hosts.json` (added as `id@ip`, or by bare ID through
+//! the relay), and through the relay when no address answers.
 
 mod hosts;
 mod link;
@@ -47,6 +48,8 @@ pub(crate) struct Hub {
     bin_dir: Option<PathBuf>,
     ep: Endpoint,
     links: Mutex<HashMap<String, Link>>,
+    /// The connection to the relay, kept while the settings it was dialed with stand.
+    relay: tokio::sync::Mutex<Option<link::RelayCache>>,
     hosts: Hosts,
     out: tokio::sync::Mutex<Out>,
     /// sid → writer of the client's stdin (None once closed).
@@ -74,6 +77,7 @@ where
         identity,
         ep: rapp_net::quic::client_endpoint(([0, 0, 0, 0], 0).into())?,
         links: Default::default(),
+        relay: Default::default(),
         hosts: Hosts::load(&opts.home)?,
         out: tokio::sync::Mutex::new(Box::new(output)),
         sessions: Default::default(),
@@ -104,6 +108,9 @@ where
     }
     read?;
     hub.close_all().await;
+    if let Some(c) = hub.relay.lock().await.take() {
+        c.conn.close();
+    }
     hub.ep.close(0u32.into(), b"hub exit");
     let _ = hub.out.lock().await.shutdown().await;
     Ok(())

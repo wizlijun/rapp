@@ -3,12 +3,12 @@
 //! a host's state changes. A host whose probe fails on auth (bad password) is left alone, shown
 //! offline, until the user acts on it, so probes never pile up `auth_fail` lines on A. A host that
 //! does not answer, or has no saved address, is offline, not a halt, so it is seen when it comes back.
-//! A does not log pings either.
+//! A does not log pings either. A host reached through the relay is probed with the relay's `connect`
+//! (online iff it answers ok), never with a relayed stream.
 
 use crate::link::QUIET;
 use crate::Hub;
 use rapp_net::log::Lvl;
-use rapp_net::msg::Op;
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -33,7 +33,7 @@ pub(crate) async fn run(hub: Arc<Hub>, every: Duration) {
             if hub.probe_halt.lock().unwrap().contains(&host.id) {
                 continue;
             }
-            let r = QUIET.scope(true, hub.request(&host, &Op::Ping)).await;
+            let r = QUIET.scope(true, hub.probe(&host)).await;
             if hub.hosts.get(&host.id).is_none() {
                 last.remove(&host.id);
                 continue; // removed while the probe was in flight

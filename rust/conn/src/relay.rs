@@ -139,6 +139,11 @@ impl RelayConn {
         self.conn.close(0u32.into(), b"bye");
     }
 
+    /// The connection has ended (by either side); a closed one is dialed anew, not reused.
+    pub fn is_closed(&self) -> bool {
+        self.conn.close_reason().is_some()
+    }
+
     async fn enroll(&self) -> Result<()> {
         self.request(&Req::Enroll { join: self.join.clone() }).await?;
         self.enrolled.store(true, Ordering::Release);

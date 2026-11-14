@@ -335,6 +335,21 @@ impl RelayRig {
         rapp_relay::server::Relay::start(opts).await.expect("relay starts")
     }
 
+    /// Streams the relay was asked to relay so far (audited ones, failures, and the short ones it only counts).
+    pub fn streams(&self) -> u64 {
+        let relay = self.relay.as_ref().expect("relay running");
+        relay.audit().flush();
+        let lines = rapp_relay::audit::read(self.data.path(), None, None, None).unwrap_or_default();
+        lines
+            .iter()
+            .map(|v| match v["ev"].as_str() {
+                Some("relayed") => 1,
+                Some("probes") => v["n"].as_u64().unwrap_or(0),
+                _ => 0,
+            })
+            .sum()
+    }
+
     pub async fn stop(&mut self) {
         if let Some(r) = self.relay.take() {
             r.stop().await;
@@ -384,6 +399,11 @@ pub async fn wait_status(ipc: &mut Ipc, pred: impl Fn(&Value) -> bool) -> Value 
 
 /// A service whose `service.json` already names `relay` and `key`; its LAN address is a dummy.
 pub async fn service_on_relay(addr: &str, key: &rapp_wire::Key) -> TestService {
+    service_on_relay_lan(addr, key, Some(vec!["127.0.0.1:1".into()])).await
+}
+
+/// Like `service_on_relay`, registering `lan` (None: the service's own addresses).
+pub async fn service_on_relay_lan(addr: &str, key: &rapp_wire::Key, lan: Option<Vec<String>>) -> TestService {
     let (home, bins) = (tempfile::tempdir().unwrap(), bins());
     let cfg = json!({
         "id": null, "name": "test-a", "password": PASSWORD, "port": 0, "ipc_port": 0,
@@ -399,7 +419,7 @@ pub async fn service_on_relay(addr: &str, key: &rapp_wire::Key) -> TestService {
         runner: Arc::new(FakeRunner::new()),
         update: None,
         data: None,
-        advertise_lan: Some(vec!["127.0.0.1:1".into()]),
+        advertise_lan: lan,
     })
     .await
     .unwrap();
