@@ -323,6 +323,45 @@ async fn turning_terminals_off_ends_terminal_sessions_only() {
 }
 
 #[tokio::test]
+async fn a_view_the_worker_closes_ends_without_b_closing() {
+    let idle = std::time::Duration::from_millis(300);
+    let a = service_with_idle(idle).await;
+    let home = a.home.path();
+    let (_ep, conn) = b(&a).await;
+    let mut term = open_term(&conn, "term:tmux:work").await;
+    echo(&mut term, "x").await;
+    let sid = wait_log(home, "session_start", |_| true).await["sid"].clone();
+
+    // B never closes its side: the worker closing the view is the end of the session.
+    let mut ipc = Ipc::open(&a.svc, home).await;
+    assert_eq!(ipc.call(json!({"cmd":"set_term","allow":false})).await, json!({"ok":true}));
+    ended(&mut term).await;
+    let end = wait_log(home, "session_end", |v| v["sid"] == sid).await;
+    assert_eq!(end["reason"], "closed", "{end}");
+    assert!(end["up"].as_u64().unwrap() > 0 && end["down"].as_u64().unwrap() > 0, "{end}");
+    wait_log(home, "worker_exit", |v| v["app"] == "term:").await;
+
+    // The old view counts for nothing on the next worker: B closing it late does not make that one idle.
+    assert_eq!(ipc.call(json!({"cmd":"set_term","allow":true})).await, json!({"ok":true}));
+    let mut s = watch(&conn).await;
+    assert_eq!(next(&mut s).await["ok"], true);
+    let argv = argv_lines(a.bins.path());
+    let _ = term.shutdown().await; // the service may have stopped reading it already
+    drop(term);
+    tokio::time::sleep(idle * 3).await;
+    assert_eq!(req(&conn, add("gpu1", "me@gpu1")).await["ok"], true);
+    loop {
+        let v = next(&mut s).await;
+        assert_eq!(v["ok"], true, "{v}");
+        if v["terms"].as_array().unwrap().iter().any(|t| t["id"] == "term:tmux@gpu1:main") {
+            break;
+        }
+    }
+    assert_eq!(argv_lines(a.bins.path()), argv);
+    assert_eq!(log_events(home).iter().filter(|v| v["ev"] == "worker_exit" && v["app"] == "term:").count(), 1);
+}
+
+#[tokio::test]
 async fn ipc_term_refuses_a_broken_file() {
     let a = service().await;
     let path = a.home.path().join("term.json");

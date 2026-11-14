@@ -154,12 +154,17 @@ pub async fn list_apps(state: &State) -> Result<(Value, Option<Value>)> {
 
 /// Port and token of the worker for `app`, starting one if needed; counts a session.
 pub async fn start_session(state: &Arc<State>, app: &str) -> Result<(u16, String)> {
+    start_counted(state, app).await.map(|(port, token, _)| (port, token))
+}
+
+/// `start_session`, plus the generation of the worker the session is counted on, for `end_counted`.
+pub async fn start_counted(state: &Arc<State>, app: &str) -> Result<(u16, String, u64)> {
     let w = &state.workers;
     let _guard = w.spawn_lock.lock().await;
     if let Some(wk) = w.map.lock().unwrap().get_mut(app).filter(|wk| wk.stdin.is_some()) {
         wk.sessions += 1;
         wk.idle_since = None;
-        return Ok((wk.port, wk.token.clone()));
+        return Ok((wk.port, wk.token.clone(), wk.gen));
     }
     let gen = {
         let mut g = w.next_gen.lock().unwrap();
@@ -169,12 +174,22 @@ pub async fn start_session(state: &Arc<State>, app: &str) -> Result<(u16, String
     let (port, token, stdin) = spawn(state, app, gen).await?;
     let worker = Worker { gen, port, token: token.clone(), stdin: Some(stdin), sessions: 1, idle_since: None };
     w.map.lock().unwrap().insert(app.to_string(), worker);
-    Ok((port, token))
+    Ok((port, token, gen))
 }
 
 pub fn end_session(state: &Arc<State>, app: &str) {
+    end(state, app, None)
+}
+
+/// Ends a session `start_counted` counted on worker `gen`; nothing when that worker is gone (a later one keeps
+/// its own count).
+pub fn end_counted(state: &Arc<State>, app: &str, gen: u64) {
+    end(state, app, Some(gen))
+}
+
+fn end(state: &Arc<State>, app: &str, gen: Option<u64>) {
     let mut map = state.workers.map.lock().unwrap();
-    let Some(wk) = map.get_mut(app) else { return };
+    let Some(wk) = map.get_mut(app).filter(|wk| gen.is_none_or(|g| wk.gen == g)) else { return };
     wk.sessions = wk.sessions.saturating_sub(1);
     if wk.sessions == 0 {
         wk.idle_since = Some(Instant::now());

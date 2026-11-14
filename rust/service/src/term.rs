@@ -15,10 +15,13 @@ use rapp_net::quic::{splice_metered, Meter};
 use rapp_term::config::{check_target, Target, TermConfig, INVALID, MAX_TARGETS, OFF};
 use serde_json::{json, Value};
 use std::path::PathBuf;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::task::{self, Poll};
 use std::time::{Duration, Instant};
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader, Lines};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader, Lines, ReadBuf};
 use tokio::net::TcpStream;
+use tokio::sync::Notify;
 
 /// How long the worker has to give its (first) answer.
 const ASK_WAIT: Duration = Duration::from_secs(30);
@@ -136,18 +139,19 @@ async fn first(port: u16, token: &str, req: &Value) -> Result<(WorkerConn, Value
 
 /// One session counted on the worker (`workers::start_session` succeeded), ended when this is dropped: however
 /// the request ends, even when its future is dropped, the worker is not kept from stopping as idle.
-struct Counted<'a>(&'a Arc<State>);
+/// Only that worker's count goes down: one started after it (the switch turned off and on) keeps its own.
+struct Counted<'a>(&'a Arc<State>, u64);
 
 impl Drop for Counted<'_> {
     fn drop(&mut self) {
-        workers::end_session(self.0, TERM);
+        workers::end_counted(self.0, TERM, self.1);
     }
 }
 
 /// Port and token of the worker, with its session counted until the `Counted` is dropped.
 async fn start(state: &Arc<State>) -> Result<(u16, String, Counted<'_>)> {
-    let (port, token) = workers::start_session(state, TERM).await?;
-    Ok((port, token, Counted(state)))
+    let (port, token, gen) = workers::start_counted(state, TERM).await?;
+    Ok((port, token, Counted(state, gen)))
 }
 
 /// A one-line request (`list`, `new`) to the worker.
@@ -250,17 +254,23 @@ pub async fn open<S: AsyncRead + AsyncWrite + Unpin + Send>(
     log_request(state, &peer, what, &reply);
     let mut fields = peer.session_fields(app, false, sid);
     state.log.event(Lvl::Info, "session_start", fields.clone());
-    let (meter, began) = (Meter::default(), Instant::now());
+    let (meter, began, closed) = (Meter::default(), Instant::now(), Notify::new());
     let reason = match write_json(s, &reply).await {
         Err(e) => format!("{e:#}"),
         Ok(()) => {
             crate::cm::ensure_running(state);
+            let mut worker = WorkerSide { tcp: &mut tcp, closed: &closed };
             tokio::select! {
-                r = splice_metered(s, &mut tcp, &meter) => match r {
+                r = splice_metered(s, &mut worker, &meter) => match r {
                     Ok(()) => "closed".to_string(),
                     Err(e) => format!("{e:#}"),
                 },
                 _ = kick.notified() => "kicked".to_string(),
+                // The worker closing the view ends the session: B's side is not waited for.
+                _ = closed.notified() => {
+                    let _ = s.shutdown().await; // B may be gone already
+                    "closed".to_string()
+                }
             }
         }
     };
@@ -279,6 +289,37 @@ async fn refuse<S: AsyncWrite + Unpin>(state: &State, s: &mut S, peer: &Peer, wh
     let r = err(e);
     log_request(state, peer, what, &r);
     finish(s, &r).await
+}
+
+/// The worker's end of a view; `closed` is woken when a read finds it closed. All the view sent before that has
+/// been handed on to B by then (the splice writes out what it read before it reads again).
+struct WorkerSide<'a> {
+    tcp: &'a mut TcpStream,
+    closed: &'a Notify,
+}
+
+impl AsyncRead for WorkerSide<'_> {
+    fn poll_read(self: Pin<&mut Self>, cx: &mut task::Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
+        let this = self.get_mut();
+        let (room, before) = (buf.remaining() > 0, buf.filled().len());
+        let r = Pin::new(&mut *this.tcp).poll_read(cx, buf);
+        if room && matches!(r, Poll::Ready(Ok(()))) && buf.filled().len() == before {
+            this.closed.notify_one();
+        }
+        r
+    }
+}
+
+impl AsyncWrite for WorkerSide<'_> {
+    fn poll_write(self: Pin<&mut Self>, cx: &mut task::Context<'_>, b: &[u8]) -> Poll<std::io::Result<usize>> {
+        Pin::new(&mut *self.get_mut().tcp).poll_write(cx, b)
+    }
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut *self.get_mut().tcp).poll_flush(cx)
+    }
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut *self.get_mut().tcp).poll_shutdown(cx)
+    }
 }
 
 /// The worker's `ended` for a view: `term_inputs {sid, term, inputs}`, those fields only (never what was typed).
