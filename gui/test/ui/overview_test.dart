@@ -125,6 +125,24 @@ void main() {
     expect(inside('block-m1/b', find.text('已断开：$reason')), findsOneWidget);
   });
 
+  testWidgets('favourites with no session are listed under 常用 and open on a tap', (tester) async {
+    await boot(tester, apps: ['m1/a']);
+    s.toggleFavorite('m1', 'a', 'a'); // open already: not listed again
+    s.toggleFavorite('m1', 'com.apple.Notes', 'Notes');
+    await show(tester);
+    expect(find.text('常用'), findsOneWidget);
+    expect(find.byKey(const Key('ov-favorite-m1/a')), findsNothing);
+    expect(find.byKey(const Key('ov-favorite-m1/com.apple.Notes')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('ov-favorite-m1/com.apple.Notes')));
+    await tester.runAsync(() async {
+      for (var i = 0; i < 4; i++) {
+        await flush();
+      }
+    });
+    await tester.pump();
+    expect(s.entries.map((e) => e.app), contains('com.apple.Notes'));
+  });
+
   testWidgets('zero counts are muted', (tester) async {
     await boot(tester, apps: ['m1/a']);
     frame(1, bytes: 1000);

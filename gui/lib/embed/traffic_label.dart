@@ -77,7 +77,7 @@ class TrafficLabel extends StatelessWidget {
     return Semantics(
       button: true,
       selected: open,
-      label: '流量 $rate，打开串流菜单',
+      label: '流量 $rate，打开流量优化菜单',
       excludeSemantics: true,
       onTap: onTap,
       child: Material(

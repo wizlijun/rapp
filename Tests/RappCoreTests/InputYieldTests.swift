@@ -71,10 +71,11 @@ final class InputYieldTests: XCTestCase {
             XCTAssertEqual(y.admit(msg, at: 0.1), .pass(report: false))
         }
     }
-    func testPasteMenuPickFocusAndScrollAreInput() {
+    func testPasteMenuPickFocusScrollAndSelectInputAreInput() {
         var y = InputYield()
         y.yielded(to: "x", at: 0)
-        for msg: Message in [.paste(seq: 1, .text("a")), .menuPick([0]), .focus(1), .scroll(window: 1, x: 0, y: 0, dx: 0, dy: 1)] {
+        for msg: Message in [.paste(seq: 1, .text("a")), .menuPick([0]), .focus(1), .scroll(window: 1, x: 0, y: 0, dx: 0, dy: 1),
+                             .selectInput(id: "")] {
             if case .drop = y.admit(msg, at: 0.1) {} else { XCTFail("\(msg)") }
         }
     }

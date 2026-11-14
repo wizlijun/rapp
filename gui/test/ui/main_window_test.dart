@@ -424,8 +424,9 @@ void main() {
     last('attach');
     port.emit(const DetachedEvent(1, false));
     await tester.pump();
-    // The stream menu's 会话 group offers the same toggle.
-    await tester.tap(find.byKey(const Key('traffic')));
+    // The 本机 menu's 会话 group offers the same toggle (the 流量 one when the bar is narrow).
+    final local = find.byKey(const Key('session-menu'));
+    await tester.tap(local.evaluate().isNotEmpty ? local : find.byKey(const Key('traffic')));
     await tester.pump();
     await tester.ensureVisible(find.text('分离成独立窗口'));
     await tester.tap(find.text('分离成独立窗口'));

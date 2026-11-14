@@ -54,7 +54,7 @@ void main() {
     final rs = RemoteSession(1, 'Calc')..apply(const TrafficEvent(1, 12000));
     await tester.pumpWidget(wrap(anchor(rs, port)));
     expect(find.text('12.0 KB/s'), findsOneWidget);
-    expect(find.bySemanticsLabel('流量 12.0 KB/s，打开串流菜单'), findsOneWidget);
+    expect(find.bySemanticsLabel('流量 12.0 KB/s，打开流量优化菜单'), findsOneWidget);
     expect(find.text('最省流（双色·灰度 + 自适应 + 1 fps）'), findsNothing);
     await tester.tap(find.byKey(const Key('traffic')));
     await tester.pump();

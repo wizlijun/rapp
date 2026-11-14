@@ -59,6 +59,10 @@ final class ProtocolTests: XCTestCase {
         .transferStart(0),
         .chunk([]),
         .inputBlocked(by: "Mac mini"),
+        .inputSource(id: "com.apple.inputmethod.SCIM.ITABC", name: "简体拼音", ascii: false),
+        .inputSource(id: "com.apple.keylayout.ABC", name: "ABC", ascii: true),
+        .selectInput(id: ""),
+        .selectInput(id: "com.apple.keylayout.US"),
         .hello(token: "t", bundleID: "b", mode: .gray4, fps: 15, density: 1, version: 5),
         .chunk([UInt8](repeating: 7, count: chunkSize)),
     ]
@@ -69,20 +73,20 @@ final class ProtocolTests: XCTestCase {
         return try p.next()
     }
 
-    func testHostAcceptsV5AndV6Hellos() throws {
-        for v: UInt8 in [5, 6] {
+    func testHostAcceptsV5ToV8Hellos() throws {
+        for v: UInt8 in [5, 6, 7, 8] {
             let m = Message.hello(token: "t", bundleID: "b", mode: .gray4, fps: 15, density: 1, version: v)
             XCTAssertEqual(try decodeOne(m.encoded()), m)
         }
         var old = Message.hello(token: "t", bundleID: "b", mode: .gray4, fps: 15, density: 1).encoded()
         old[5] = 4
         XCTAssertThrowsError(try decodeOne(old)) {
-            XCTAssertEqual("\($0)", "protocol version mismatch: host 6, client 4 (update both sides)")
+            XCTAssertEqual("\($0)", "protocol version mismatch: host 8, client 4 (update both sides)")
         }
     }
 
-    func testFetchAndPutAcceptV5AndV6() throws {
-        for v: UInt8 in [5, 6] {
+    func testFetchAndPutAcceptV5ToV8() throws {
+        for v: UInt8 in [5, 6, 7, 8] {
             var f = Message.fetch(token: "t", clip: 1, file: 2, offset: 3).encoded()
             f[5] = v
             XCTAssertEqual(try decodeOne(f), .fetch(token: "t", clip: 1, file: 2, offset: 3))
@@ -90,7 +94,7 @@ final class ProtocolTests: XCTestCase {
             q[5] = v
             XCTAssertEqual(try decodeOne(q), .put(token: "t", item: 1, kind: .files, uti: "u", name: "n", total: 5))
         }
-        for v: UInt8 in [4, 7] {
+        for v: UInt8 in [4, 9] {
             var f = Message.fetch(token: "t", clip: 1, file: 2, offset: 3).encoded()
             f[5] = v
             XCTAssertThrowsError(try decodeOne(f))
@@ -110,6 +114,20 @@ final class ProtocolTests: XCTestCase {
         XCTAssertTrue(clientUnderstandsInputBlocked(6))
     }
 
+    func testInputSourceWireFormat() throws {
+        XCTAssertEqual(Message.inputSource(id: "a", name: "B", ascii: true).encoded(), [29, 7, 0, 0, 0, 1, 0, 0x61, 1, 0, 0x42, 1])
+        XCTAssertEqual(Message.selectInput(id: "").encoded(), [30, 2, 0, 0, 0, 0, 0])
+        XCTAssertThrowsError(try decodeOne([29, 7, 0, 0, 0, 1, 0, 0x61, 1, 0, 0x42, 2])) {
+            XCTAssertEqual("\($0)", "bad ascii flag")
+        }
+        XCTAssertThrowsError(try decodeOne([30, 3, 0, 0, 0, 0, 0, 9]))
+    }
+
+    func testInputSourceOnlyForV8() {
+        XCTAssertFalse(clientUnderstandsInputSource(7))
+        XCTAssertTrue(clientUnderstandsInputSource(8))
+    }
+
     func testOldClientGetsVersionError() {
         // A protocol-2 hello: version 2, token "a", bundle "b", gray4, scale 2 (strings are u16 LE length + UTF-8).
         var p = MessageParser()
@@ -117,7 +135,7 @@ final class ProtocolTests: XCTestCase {
         p.append([1, UInt8(payload.count), 0, 0, 0] + payload)
         XCTAssertThrowsError(try p.next()) { error in
             XCTAssertEqual((error as? ProtocolVersionMismatch)?.client, 2)
-            XCTAssertEqual("\(error)", "protocol version mismatch: host 6, client 2 (update both sides)")
+            XCTAssertEqual("\(error)", "protocol version mismatch: host 8, client 2 (update both sides)")
         }
     }
 
@@ -346,8 +364,8 @@ final class ProtocolTests: XCTestCase {
     func testFetchAndPutCarryTheVersion() {
         let fetch = Message.fetch(token: "t", clip: 1, file: 0, offset: 0).encoded()
         let put = Message.put(token: "t", item: 1, kind: .text, uti: "u", name: "n", total: 1).encoded()
-        XCTAssertEqual(fetch[5], 6)
-        XCTAssertEqual(put[5], 6)
+        XCTAssertEqual(fetch[5], 8)
+        XCTAssertEqual(put[5], 8)
         for var bytes in [fetch, put] {
             bytes[5] = 4
             var p = MessageParser()

@@ -31,7 +31,7 @@ const NOTHING_TO_INSTALL: &str = "没有可装的新版本";
 const NO_PREVIOUS: &str = "没有上一版";
 const BUSY: &str = "正在忙，请稍后再试";
 /// The reply to a B that opens a session while the new version goes in.
-pub const UPGRADING: &str = "A 正在升级，请稍后再连";
+pub const UPGRADING: &str = "远端正在升级，请稍后再连";
 /// How often a manual install looks again for nobody using rapp (K20).
 const MANUAL_POLL: Duration = Duration::from_millis(500);
 

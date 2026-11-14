@@ -227,7 +227,7 @@ class _RunningRow extends StatelessWidget {
             children: [
               const StatusLamp(Lamp.connecting),
               const SizedBox(width: 8),
-              Text(x.down ? '↓ 从 A' : '↑ 到 A', style: TextStyle(color: t.muted)),
+              Text(x.down ? '↓ 从远端' : '↑ 到远端', style: TextStyle(color: t.muted)),
               const SizedBox(width: 8),
               Expanded(child: Text(x.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: _mono(t))),
               const SizedBox(width: 8),

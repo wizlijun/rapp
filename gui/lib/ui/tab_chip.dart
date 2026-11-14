@@ -12,6 +12,7 @@ class TabChip extends StatelessWidget {
     required this.onTap,
     this.leading,
     this.onSecondaryTap,
+    this.onClose,
   });
 
   final String label;
@@ -23,6 +24,9 @@ class TabChip extends StatelessWidget {
 
   /// Right-click (secondary tap up) at a global position.
   final void Function(Offset globalPosition)? onSecondaryTap;
+
+  /// A × after the label (closes what the tab stands for); none when null.
+  final VoidCallback? onClose;
 
   @override
   Widget build(BuildContext context) {
@@ -43,7 +47,7 @@ class TabChip extends StatelessWidget {
           child: Container(
             constraints: const BoxConstraints(minHeight: 48, minWidth: 48),
             alignment: Alignment.center,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            padding: EdgeInsets.only(left: 12, right: onClose == null ? 12 : 2),
             decoration: selected
                 ? t.raiseBox(border: t.text)
                 : BoxDecoration(
@@ -65,6 +69,23 @@ class TabChip extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (onClose != null)
+                  Semantics(
+                    button: true,
+                    label: '关闭 $label',
+                    excludeSemantics: true,
+                    onTap: onClose,
+                    child: InkResponse(
+                      key: const Key('tab-close'),
+                      onTap: onClose,
+                      radius: 16,
+                      child: SizedBox(
+                        width: 32,
+                        height: 40,
+                        child: Icon(Icons.close, size: 16, color: t.text),
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),

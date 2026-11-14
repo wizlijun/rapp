@@ -119,7 +119,7 @@ public final class EmbeddedComposer: ComposerSink {
 
     // MARK: Blocks
 
-    private static let tooBig = "太大了，A 最多收 256 MB"
+    private static let tooBig = "太大了，远端最多收 256 MB"
 
     private func add(_ payload: ChipPayload) -> BlockChip {
         let n = blocks.add(payload)

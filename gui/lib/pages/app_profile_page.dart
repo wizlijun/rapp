@@ -101,6 +101,7 @@ class _AppProfilePageState extends State<AppProfilePage> {
       _draft.fps == null &&
       _draft.afterSend == null &&
       _draft.composer == null &&
+      _draft.input == null &&
       _draft.windows == null &&
       _draft.tested == null &&
       _sameIds(_draft.ids, _defaultIds);
@@ -336,6 +337,21 @@ class _AppProfilePageState extends State<AppProfilePage> {
           Row(children: [
             Text('显示「输入」', style: TextStyle(color: d.composer == null ? t.muted : t.text)),
             Switch(key: const Key('composer-switch'), value: composer, onChanged: (v) => _set(() => d.composer = v)),
+          ]),
+          Row(children: [
+            Expanded(
+              child: Text(
+                d.input == null
+                    ? '输入框位置：没标记（会话的「本机」菜单里「标记输入区」）'
+                    : '输入框位置：左起 ${(d.input!.x * 100).round()}%，距${d.input!.fromBottom ? '底' : '顶'} '
+                        '${d.input!.dy.round()} 点；发送前先点它',
+                key: const Key('input-point'),
+                style: TextStyle(color: d.input == null ? t.muted : t.text),
+              ),
+            ),
+            if (d.input != null)
+              RappButton.secondary(
+                  key: const Key('input-point-clear'), label: '清除', onPressed: () => _set(() => d.input = null)),
           ]),
           _label(t, '窗口规则'),
           for (var i = 0; i < rules.length; i++) _ruleRow(t, i, rules[i], d.windows == null),

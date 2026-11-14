@@ -217,7 +217,7 @@ public func clampedWindowOrigin(_ origin: CGPoint, size: CGSize, titleBar: CGFlo
 /// Step between stacked top-left slots: about a title bar, so every stacked title stays visible.
 public let stackStep: Float = 28
 
-/// What B's 「把 A 上的这个窗口移到左上角」 sends: a move to the first free
+/// What B's 「把远端的这个窗口移到左上角」 sends: a move to the first free
 /// slot of the top-left stack (0,0), (28,28), (56,56)…, then a focus so the
 /// window comes out from under whatever covers it. A slot is taken when
 /// another decorated window of `table` already sits on it. macOS keeps

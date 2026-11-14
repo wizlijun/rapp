@@ -98,6 +98,8 @@ void main() {
       port.mouse(7, 1, 'up', 'left', 2, 3, 1);
       port.resize(7, 1, 500, 300);
       port.setStream(7, 'duogray', 5, 'original');
+      port.closeWindow(7, 1);
+      port.selectInput(7, '');
       port.composerSend(7, [{'text': '你好'}]);
       await Future<void>.delayed(const Duration(milliseconds: 150));
       final messages = <(int, List<int>)>[];
@@ -106,8 +108,10 @@ void main() {
         if (i + 5 + n > received.length) break;
         messages.add((received[i], received.sublist(i+5, i+5+n))); i += 5+n;
       }
-      expect(messages.map((m) => m.$1), containsAllInOrder([1,6,6,7,7,9,11,14,20]));
-      expect(messages.first.$2.first, 6);
+      expect(messages.map((m) => m.$1), containsAllInOrder([1,6,6,7,7,9,11,15,30,14,20]));
+      expect(messages.first.$2.first, 8);
+      expect(messages.firstWhere((m) => m.$1 == 15).$2, u32(1));
+      expect(messages.firstWhere((m) => m.$1 == 30).$2, string(''));
       expect(utf8.decode(messages.last.$2.sublist(7)), '你好');
       final resize = messages.firstWhere((m) => m.$1 == 9).$2;
       expect(resize, [...u32(1), ...u16(500), ...u16(300)]);
@@ -286,7 +290,7 @@ void main() {
         peer.add(packet(21, [...u32(1), ...string('')]));
         await Future<void>.delayed(const Duration(milliseconds: 40));
         peer.add(packet(26, string('Mac')));
-        peer.add(packet(21, [...u32(2), ...string('A 正在被 Mac 操作')]));
+        peer.add(packet(21, [...u32(2), ...string('远端正在被 Mac 操作')]));
         final done =
             await nextWhere(
                   events,
@@ -294,7 +298,7 @@ void main() {
                 )
                 as ComposerStateEvent;
         expect(done.done!.sent, 1);
-        expect(done.done!.failure, 'A 正在被 Mac 操作');
+        expect(done.done!.failure, '远端正在被 Mac 操作');
         port.composerSend(31, [
           {'text': '第二段'},
         ]);
@@ -352,7 +356,7 @@ void main() {
           (await nextWhere(events, (e) => e is TransferStatusEvent)
                   as TransferStatusEvent)
               .status,
-          '取用没成功：太旧了，A 已不保留',
+          '取用没成功：太旧了，远端已不保留',
         );
         expect((await port.fetchClip(32, 999)).error, 'unknown clip');
       } finally {

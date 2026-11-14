@@ -240,9 +240,9 @@ void main() {
       await tester.pump();
       expect(text(tester, 'session-status-111/a'), '48.0 KB/s');
       expect(text(tester, 'session-status-111/b'), '空闲');
-      expect(find.text('已断开：A 端关闭了 app'), findsOneWidget);
+      expect(find.text('已断开：远端关闭了 app'), findsOneWidget);
       expect(text(tester, 'session-status-111/c'), '');
-      expect(find.bySemanticsLabel(RegExp('已断开：A 端关闭了 app')), findsOneWidget);
+      expect(find.bySemanticsLabel(RegExp('已断开：远端关闭了 app')), findsOneWidget);
       // The state word is said once (M-4).
       expect(find.bySemanticsLabel(RegExp(r'^B，空闲(，局域网)?$')), findsOneWidget);
     });
