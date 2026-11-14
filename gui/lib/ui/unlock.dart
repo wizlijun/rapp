@@ -41,8 +41,9 @@ class UnlockStore {
     required bool auto,
   }) async {
     if (!supported) throw UnsupportedError('此平台暂不支持记住密码');
-    if (utf8.encode(password).length > 1024)
+    if (utf8.encode(password).length > 1024) {
       throw const FormatException('密码过长');
+    }
     await _channel.invokeMethod<void>('save', {
       'device': device,
       'password': password,
@@ -51,8 +52,9 @@ class UnlockStore {
   }
 
   Future<void> forget(String device) async {
-    if (supported)
+    if (supported) {
       await _channel.invokeMethod<void>('forget', {'device': device});
+    }
   }
 }
 

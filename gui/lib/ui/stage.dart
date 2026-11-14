@@ -186,6 +186,7 @@ class Stage extends StatelessWidget {
                             child: Row(children: [
                               Expanded(child: Text(banner.text, style: const TextStyle(color: Colors.black87))),
                               TextButton(
+                                style: TextButton.styleFrom(foregroundColor: Colors.black87),
                                 onPressed: isDesktopApp(rec!.app)
                                     ? () => _requestUnlock(context, rec.id)
                                     : () => state.openOrSwitch(rec.id, 'desktop:', '桌面'),
