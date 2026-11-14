@@ -136,7 +136,7 @@ fn a_file_round_trips_and_unknown_fields_are_ignored() {
 fn bad_files_and_targets_are_refused() {
     // 每一种都 load 失败（或 check_target 失败），且错误里不含文件原文：
     // "{not json"；名字重复；name ""、"a:b"、"a b"、65 字节；target ""、"-oProxyCommand=x"、"a b"、"a\tb"、256 字节；
-    // tmux ""、"-x"、带 '\n'、1025 字节；33 个目标
+    // tmux ""、"-x"、带 '\n'、1025 字节；33 个目标（错误是 "too many targets"）
 }
 
 #[test]
@@ -453,8 +453,8 @@ git commit -m "feat(net): device requests for terminal sessions; testkit gets a 
 // term.log 恰好一行 argv，且等于 "argv serve --bind 127.0.0.1 --port 0 --token-env RAPP_TOKEN --config <home>/term.json --json"
 
 #[tokio::test] async fn with_terminals_off_nothing_starts()
-// home/term.json 写 {"allow":false} → list_terms、watch_terms、new_term、add_term_target、remove_term_target、open term:tmux:work
-// 都回 error "terminal sessions are off"；term.log 不存在；list_apps 照常 ok
+// home/term.json 写 {"allow":false} → list_terms、watch_terms、new_term、add_term_target、remove_term_target
+// 都回 error "terminal sessions are off"；term.log 不存在；list_apps 照常 ok（open term:… 的同一检查在任务 7）
 
 #[tokio::test] async fn a_broken_term_json_is_reported_and_left_alone()
 // 写 "{not json" → list_terms 和 add_term_target 都回 "term.json is invalid"；文件字节不变
@@ -528,7 +528,7 @@ git commit -m "feat(service): list, watch and start terminal sessions; SSH targe
 #[tokio::test] async fn turning_terminals_off_ends_terminal_sessions_only()
 // 开一个 term 会话和一个 app 会话（fake-rapp-host）；IPC set_term {allow:false} →
 // term 会话的流读到 EOF，service.log 有 worker_exit app "term:"；app 会话照样回显；
-// list_terms → "terminal sessions are off"；term.json 里 allow false、权限 0600；IPC term → allow false；
+// list_terms 和 open term:tmux:work 都回 "terminal sessions are off"，term.log 里 argv 行没有变多；term.json 里 allow false、权限 0600；IPC term → allow false；
 // set_term {allow:true} → list_terms 又能用
 
 #[tokio::test] async fn ipc_term_refuses_a_broken_file()
