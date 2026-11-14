@@ -648,6 +648,7 @@ fn scroll_copy_fixture_matches_swift() {
     let int = |b: &[u8]| b.iter().rev().fold(0u64, |a, x| a << 8 | *x as u64);
     let mut d = Decoder::default();
     let mut canvases = 0;
+    let mut counted = false;
     while !rest.is_empty() {
         match take(&mut rest, 1)[0] {
             1 => {
@@ -665,8 +666,13 @@ fn scroll_copy_fixture_matches_swift() {
                 assert!(d.samples_le() == take(&mut rest, n), "canvas #{canvases} differs");
                 canvases += 1;
             }
+            3 => {
+                assert_eq!(int(take(&mut rest, 4)) as usize, canvases, "canvas count record");
+                assert!(rest.is_empty(), "data after the count record");
+                counted = true;
+            }
             tag => panic!("bad record tag {tag}"),
         }
     }
-    assert!(canvases > 45);
+    assert!(counted && canvases > 15);
 }
