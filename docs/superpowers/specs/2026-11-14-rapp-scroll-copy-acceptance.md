@@ -33,7 +33,7 @@
 ## 二、真机验收（待真机验收）
 
 准备：两边都 `swift build -c release`，按 README 起主机和客户端；基线用 `main` 上的 0.7.1（同一台 Mac、同一窗口、同一内容）。
-主机每秒统计看 `service.log` 的 `[stats]` 行（kbps、`fulls`、`encMs`）。
+主机每秒统计看 `service.log` 的 `[stats]` 行（kbps、`fulls`、`encMs` 是本秒最慢一帧的编码耗时）。
 
 | 项 | 步骤 | 通过条件 | 结果 |
 |---|---|---|---|
