@@ -185,8 +185,8 @@ async fn cc_table() {
         "VERDICT RULE: BBR >= 1.2x cubic throughput on n3, >= 1.0x on s0 and n2, ping p95 <= 1.2x cubic on all three."
     );
     println!(
-        "{:8} {:8} {:>10} {:>6} {:>7} {:>9} {:>9}  {}",
-        "profile", "cc", "kbit/s", "pings", "failed", "p50 ms", "p95 ms", "conn at end / bulk write error"
+        "{:8} {:8} {:>10} {:>6} {:>7} {:>9} {:>9}  conn at end / bulk write error",
+        "profile", "cc", "kbit/s", "pings", "failed", "p50 ms", "p95 ms"
     );
     let mut res = std::collections::HashMap::new();
     for profile in ["s0", "n2", "n3"] {
