@@ -3,7 +3,7 @@ resolver = "2"
 members = ["wire", "conn", "relay", "net", "service", "hub", "testkit", "update", "term", "client-core", "client-gtk"]
 
 [workspace.package]
-version = "0.6.0"
+version = "0.7.0"
 edition = "2021"
 publish = false
 

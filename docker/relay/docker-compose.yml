@@ -2,7 +2,7 @@
 # Open 22026/udp in the firewall. Upgrade: docker compose pull && docker compose up -d
 services:
   rapp-relay:
-    image: ghcr.io/wizlijun/rapp-relay:0.6.0
+    image: ghcr.io/wizlijun/rapp-relay:0.7.0
     container_name: rapp-relay
     network_mode: host
     read_only: true

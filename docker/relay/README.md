@@ -7,7 +7,7 @@ One Alpine image holding one program, `/usr/local/bin/rapp-relay` (the `rapp-rel
 
 On a Linux host with Docker, this starts the relay and prints its key once it is up:
 
-    docker run -d --name rapp-relay --network host --restart unless-stopped --read-only --cap-drop ALL --security-opt no-new-privileges --log-opt max-size=10m --log-opt max-file=5 -v rapp-relay-data:/data ghcr.io/wizlijun/rapp-relay:0.6.0 && until docker exec rapp-relay rapp-relay check >/dev/null 2>&1; do sleep 1; done && docker exec rapp-relay rapp-relay key
+    docker run -d --name rapp-relay --network host --restart unless-stopped --read-only --cap-drop ALL --security-opt no-new-privileges --log-opt max-size=10m --log-opt max-file=5 -v rapp-relay-data:/data ghcr.io/wizlijun/rapp-relay:0.7.0 && until docker exec rapp-relay rapp-relay check >/dev/null 2>&1; do sleep 1; done && docker exec rapp-relay rapp-relay key
 
 Then open `22026/udp` in the firewall and enter the key on every device. The key is shown only once, so save it.
 Your data lives in the `rapp-relay-data` volume. To upgrade, change the tag and run the line again after
@@ -44,9 +44,9 @@ VPS, and check that the output matches. Never paste a key into a chat, a ticket 
 写给管理中继的人，也写给替他操作的 agent：命令在 VPS 上照抄执行，再核对输出是否和这里写的一样。key 不要贴到聊天、
 工单或日志里；下文一律写成 `rapp…`。
 
-Before you start: the relay must run an image newer than 0.6.0. With 0.6.0, `rotate-key` changes the key but
+Before you start: the relay must run image 0.7.0 or newer. With older images, `rotate-key` changes the key but
 devices stay connected. Check with
-开始之前：中继要运行比 0.6.0 新的镜像。0.6.0 的 `rotate-key` 只换 key，设备照样连着。检查：
+开始之前：中继要运行 0.7.0 或更新的镜像。更早的镜像 `rotate-key` 只换 key，设备照样连着。检查：
 
     docker exec rapp-relay rapp-relay --help | grep -A1 rotate-key
 
