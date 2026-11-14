@@ -105,13 +105,55 @@ final class EmbeddedSessionTests: XCTestCase {
         XCTAssertTrue(link.cancelled)
     }
 
-    func testWeakNoticeBecomesEvent() {
+    func testWeakAndSavingNoticesBecomeLevels() {
         let link = FakeLink()
         var events = [SessionEvent]()
         let (_, q) = make(link) { events.append($0) }
-        q.sync { link.feed(.weak(true)); link.feed(.weak(false)) }
-        XCTAssertEqual(events, [.weak(true), .weak(false)])
+        q.sync { link.feed(.weak(true)); link.feed(.weak(false)); link.feed(.saving(1)); link.feed(.saving(2)) }
+        XCTAssertEqual(events, [.saving(level: 2), .saving(level: 0), .saving(level: 1), .saving(level: 2)])
         XCTAssertFalse(link.cancelled)
+    }
+
+    func testPingsMeasureThePathAndSilenceIsStalled() {
+        let link = FakeLink()
+        var events = [SessionEvent]()
+        let (s, q) = make(link) { events.append($0) }
+        var t: TimeInterval = 100
+        s.now = { t }
+        func pings() -> [UInt32] { link.sent.compactMap { if case let .ping(n) = $0 { return n } else { return nil } } }
+        // Not before A is ready: a pong must not overtake `ready`, and starting the app takes time.
+        s.tickTraffic(); q.sync {}
+        XCTAssertEqual(pings(), [])
+        q.sync { link.feed(.ready(appName: "Calc", width: 64, height: 32)) }
+        s.tickTraffic(); q.sync {}
+        XCTAssertEqual(pings(), [1])
+        t = 100.25
+        q.sync { link.feed(.pong(1)) }
+        XCTAssertEqual(events.last, .rtt(ms: 250))
+        // Idle: the next ping 10 s later; nothing from A for two of them is stalled.
+        t = 105; s.tickTraffic(); q.sync {}
+        XCTAssertEqual(pings(), [1])
+        // (Each tick runs on the queue, which reads `t` then: sync after each.)
+        for at in [110.0, 112, 114] { t = at; s.tickTraffic(); q.sync {} }
+        // 110: ping 2; 112: it missed, so ping 3 at once; 114: that missed too, stalled.
+        XCTAssertEqual(pings(), [1, 2, 3, 4])
+        XCTAssertEqual(events.last, .stalled(true))
+        // Anything from A ends it; a late pong of an older ping is no round trip.
+        q.sync { link.feed(.pong(2)) }
+        XCTAssertEqual(events.last, .stalled(false))
+        XCTAssertFalse(events.contains(where: { if case .rtt(ms: let ms) = $0 { return ms != 250 } else { return false } }))
+    }
+
+    func testInputMakesPingsFaster() {
+        let link = FakeLink()
+        let (s, q) = make(link) { _ in }
+        var t: TimeInterval = 0
+        s.now = { t }
+        q.sync { link.feed(.ready(appName: "Calc", width: 64, height: 32)) }
+        s.tickTraffic(); q.sync { link.feed(.pong(1)) }
+        s.send(.key(keyCode: 0, modifiers: 0, down: true))
+        t = 2; s.tickTraffic(); q.sync {}
+        XCTAssertEqual(link.sent.compactMap { m -> UInt32? in if case let .ping(n) = m { return n } else { return nil } }, [1, 2])
     }
 
     func testPinnedReachesTheWire() {

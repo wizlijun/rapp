@@ -63,6 +63,9 @@ final class ProtocolTests: XCTestCase {
         .frameAck(processingMs: 65535),
         .weak(true),
         .weak(false),
+        .ping(7),
+        .pong(0xFFFF_FFFF),
+        .saving(2),
         .setStream(mode: .duogray, fps: 1, density: 2, pinned: true),
         .inputSource(id: "com.apple.inputmethod.SCIM.ITABC", name: "简体拼音", ascii: false),
         .inputSource(id: "com.apple.keylayout.ABC", name: "ABC", ascii: true),
@@ -78,23 +81,23 @@ final class ProtocolTests: XCTestCase {
         return try p.next()
     }
 
-    func testHostAcceptsV5ToV8Hellos() throws {
-        for v: UInt8 in [5, 6, 7, 8] {
+    func testHostAcceptsV5ToV9Hellos() throws {
+        for v: UInt8 in [5, 6, 7, 8, 9] {
             let m = Message.hello(token: "t", bundleID: "b", mode: .gray4, fps: 15, density: 1, version: v)
             XCTAssertEqual(try decodeOne(m.encoded()), m)
         }
         var future = Message.hello(token: "t", bundleID: "b", mode: .gray4, fps: 15, density: 1).encoded()
-        future[5] = 9
-        XCTAssertThrowsError(try decodeOne(future)) { XCTAssertEqual(($0 as? ProtocolVersionMismatch)?.client, 9) }
+        future[5] = 10
+        XCTAssertThrowsError(try decodeOne(future)) { XCTAssertEqual(($0 as? ProtocolVersionMismatch)?.client, 10) }
         var old = Message.hello(token: "t", bundleID: "b", mode: .gray4, fps: 15, density: 1).encoded()
         old[5] = 4
         XCTAssertThrowsError(try decodeOne(old)) {
-            XCTAssertEqual("\($0)", "protocol version mismatch: host 8, client 4 (update both sides)")
+            XCTAssertEqual("\($0)", "protocol version mismatch: host 9, client 4 (update both sides)")
         }
     }
 
-    func testFetchAndPutAcceptV5ToV8() throws {
-        for v: UInt8 in [5, 6, 7, 8] {
+    func testFetchAndPutAcceptV5ToV9() throws {
+        for v: UInt8 in [5, 6, 7, 8, 9] {
             var f = Message.fetch(token: "t", clip: 1, file: 2, offset: 3).encoded()
             f[5] = v
             XCTAssertEqual(try decodeOne(f), .fetch(token: "t", clip: 1, file: 2, offset: 3))
@@ -102,7 +105,7 @@ final class ProtocolTests: XCTestCase {
             q[5] = v
             XCTAssertEqual(try decodeOne(q), .put(token: "t", item: 1, kind: .files, uti: "u", name: "n", total: 5))
         }
-        for v: UInt8 in [4, 9] {
+        for v: UInt8 in [4, 10] {
             var f = Message.fetch(token: "t", clip: 1, file: 2, offset: 3).encoded()
             f[5] = v
             XCTAssertThrowsError(try decodeOne(f))
@@ -131,6 +134,16 @@ final class ProtocolTests: XCTestCase {
         XCTAssertThrowsError(try decodeOne([30, 3, 0, 0, 0, 0, 0, 9]))
     }
 
+    func testPingPongSavingWireFormat() throws {
+        XCTAssertEqual(Message.ping(1).encoded(), [31, 4, 0, 0, 0, 1, 0, 0, 0])
+        XCTAssertEqual(Message.pong(2).encoded(), [32, 4, 0, 0, 0, 2, 0, 0, 0])
+        XCTAssertEqual(Message.saving(1).encoded(), [33, 1, 0, 0, 0, 1])
+        XCTAssertThrowsError(try decodeOne([33, 1, 0, 0, 0, 3]))
+        XCTAssertThrowsError(try decodeOne([31, 5, 0, 0, 0, 1, 0, 0, 0, 0]))
+        XCTAssertFalse(clientUnderstandsSaving(8))
+        XCTAssertTrue(clientUnderstandsSaving(9))
+    }
+
     func testInputSourceOnlyForV8() {
         XCTAssertFalse(clientUnderstandsInputSource(7))
         XCTAssertTrue(clientUnderstandsInputSource(8))
@@ -143,7 +156,7 @@ final class ProtocolTests: XCTestCase {
         p.append([1, UInt8(payload.count), 0, 0, 0] + payload)
         XCTAssertThrowsError(try p.next()) { error in
             XCTAssertEqual((error as? ProtocolVersionMismatch)?.client, 2)
-            XCTAssertEqual("\(error)", "protocol version mismatch: host 8, client 2 (update both sides)")
+            XCTAssertEqual("\(error)", "protocol version mismatch: host 9, client 2 (update both sides)")
         }
     }
 
@@ -405,8 +418,8 @@ final class ProtocolTests: XCTestCase {
     func testFetchAndPutCarryTheVersion() {
         let fetch = Message.fetch(token: "t", clip: 1, file: 0, offset: 0).encoded()
         let put = Message.put(token: "t", item: 1, kind: .text, uti: "u", name: "n", total: 1).encoded()
-        XCTAssertEqual(fetch[5], 8)
-        XCTAssertEqual(put[5], 8)
+        XCTAssertEqual(fetch[5], 9)
+        XCTAssertEqual(put[5], 9)
         for var bytes in [fetch, put] {
             bytes[5] = 4
             var p = MessageParser()

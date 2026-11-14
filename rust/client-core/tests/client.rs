@@ -288,7 +288,7 @@ fn menu_and_window_validation() {
 #[test]
 fn v5_clipboard_bounds_and_legacy_selection() {
     let address = Address::parse("rapp://host/?token=x", None).unwrap();
-    assert_eq!(address.hello(1.)[5], 8);
+    assert_eq!(address.hello(1.)[5], 9);
     let text = "中文 clipboard";
     let mut payload = 1u32.to_le_bytes().to_vec();
     payload.extend([0, 0]);
@@ -482,7 +482,19 @@ fn decodes_weak_strictly() {
     assert!(decode(28, &[1, 0]).is_err());
 }
 #[test]
-fn parses_protocol_7() {
+fn parses_protocol_7_to_9() {
     assert_eq!(Address::parse("rapp://host/?token=x&protocol=7", None).unwrap().version, 7);
-    assert!(Address::parse("rapp://host/?token=x&protocol=9", None).is_err());
+    assert_eq!(Address::parse("rapp://host/?token=x&protocol=9", None).unwrap().version, 9);
+    assert_eq!(Address::parse("rapp://host/?token=x", None).unwrap().version, 9);
+    assert!(Address::parse("rapp://host/?token=x&protocol=10", None).is_err());
+}
+#[test]
+fn ping_pong_saving_match_swift_wire_layout() {
+    assert_eq!(ping(1), vec![31, 4, 0, 0, 0, 1, 0, 0, 0]);
+    assert!(matches!(decode(32, &[2, 0, 0, 0]).unwrap(), Incoming::Pong(2)));
+    assert!(matches!(decode(33, &[1]).unwrap(), Incoming::Saving(1)));
+    assert!(matches!(decode(33, &[2]).unwrap(), Incoming::Saving(2)));
+    assert!(decode(33, &[3]).is_err());
+    assert!(decode(32, &[2, 0, 0]).is_err());
+    assert!(decode(32, &[2, 0, 0, 0, 0]).is_err());
 }

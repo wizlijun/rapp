@@ -6,17 +6,17 @@ final class PacedSenderTests: XCTestCase {
 
     private var t = 0.0
     private var sent: [Sent] = []
-    private var weakChanges: [Bool] = []
+    private var levelChanges: [Int] = []
     private let rect = CanvasRect(x: 0, y: 0, w: 1, h: 1)
 
     private func make(mode: Mode = .gray4, fps: Int = 30, acks: Bool = true) -> PacedSender {
         t = 0
         sent = []
-        weakChanges = []
+        levelChanges = []
         let s = PacedSender(mode: mode, fps: fps, acks: acks, now: { [unowned self] in self.t }) { [unowned self] r, p, d in
             self.sent.append(Sent(region: r, payload: p, done: d))
         }
-        s.onWeakChange = { [unowned self] in self.weakChanges.append($0) }
+        s.onLevelChange = { [unowned self] in self.levelChanges.append($0) }
         return s
     }
 
@@ -105,7 +105,7 @@ final class PacedSenderTests: XCTestCase {
         offerSmall(s, 1)
         t += 1.2
         s.ack(processingMs: 0)
-        XCTAssertEqual(weakChanges, [true])
+        XCTAssertEqual(levelChanges, [2])
         XCTAssertTrue(s.weak)
     }
 
@@ -120,11 +120,11 @@ final class PacedSenderTests: XCTestCase {
         for _ in 0..<3 {
             t += 1
             s.tick()
-            XCTAssertTrue(weakChanges.isEmpty)
+            XCTAssertTrue(levelChanges.isEmpty)
         }
         t += 1
         s.tick()
-        XCTAssertEqual(weakChanges, [true])
+        XCTAssertEqual(levelChanges, [1])
     }
 
     func testIdleAfterOneSlowAckDoesNotEnterWeak() {
@@ -140,7 +140,7 @@ final class PacedSenderTests: XCTestCase {
             t += 1
             s.tick()
         }
-        XCTAssertTrue(weakChanges.isEmpty)
+        XCTAssertTrue(levelChanges.isEmpty)
         XCTAssertFalse(s.weak)
     }
 
@@ -149,16 +149,35 @@ final class PacedSenderTests: XCTestCase {
         offerSmall(s, 1)
         t += 1.2
         s.ack(processingMs: 0)
-        XCTAssertEqual(weakChanges, [true])
+        XCTAssertEqual(levelChanges, [2])
         s.setPinned(true)
-        XCTAssertEqual(weakChanges, [true, false])
+        XCTAssertEqual(levelChanges, [2, 0])
         XCTAssertFalse(s.weak)
         offerSmall(s, 2)
         for _ in 0..<10 {
             t += 1
             s.tick()
         }
-        XCTAssertEqual(weakChanges, [true, false])
+        XCTAssertEqual(levelChanges, [2, 0])
+    }
+
+    func testNewStepsReportALevelThatIsGone() {
+        let s = make()
+        offerSmall(s, 1)
+        s.ack(processingMs: 0)
+        t = 0.3
+        offerSmall(s, 2)
+        s.ack(processingMs: 0)
+        offerSmall(s, 3)
+        for _ in 0..<4 {
+            t += 1
+            s.tick()
+        }
+        XCTAssertEqual(levelChanges, [1])
+        XCTAssertEqual(s.level, 1)
+        s.setSteps([2])
+        XCTAssertEqual(levelChanges, [1, 0])
+        XCTAssertFalse(s.weak)
     }
 
     func testV6PathUsesCompletionNotAcks() {
@@ -181,7 +200,7 @@ final class PacedSenderTests: XCTestCase {
         t += 10
         s.tick()
         XCTAssertFalse(s.weak)
-        XCTAssertTrue(weakChanges.isEmpty)
+        XCTAssertTrue(levelChanges.isEmpty)
     }
 
     func testStatsReportRttLatencyAndCap() {

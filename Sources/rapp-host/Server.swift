@@ -276,9 +276,9 @@ final class Session {
     private var newestSubmittedSeq = 0
     private var fps = 15
     private var density: Float = 2
-    /// Acks, slicing and the weak tier; session queue only. Created by the hello.
+    /// Acks, slicing and the saving level; session queue only. Created by the hello.
     private var paced: PacedSender?
-    /// What B asked for last. While weak the actual mode/density differ (fps never does).
+    /// What B asked for last: the ceiling. While saving, the actual stream is below it (`SaveLadder`).
     private var requestedMode = Mode.gray4
     private var requestedDensity: Float = 2
     private var requestedFps = 15
@@ -402,6 +402,7 @@ final class Session {
             requestedFps = Int(fps)
             helloVersion = version
             makePacedSender(mode: mode, fps: Int(fps))
+            paced?.setSteps(SaveLadder.steps(ceiling: ceiling, legacy: legacySaving))
             started = true
             awake.begin()
             startInputTimer()
@@ -415,11 +416,14 @@ final class Session {
         case let .setStream(mode, fps, density, pinned):
             requestedMode = mode
             requestedDensity = density
-            requestedFps = Int(fps)  // before setPinned: its weakChanged(false) must not use the old fps
-            // A manual pick leaves weak at once (that restores the requested values).
+            requestedFps = Int(fps)  // before setPinned/setSteps: their levelChanged must use the new ceiling
+            // Pinned (v7, v8: a manual pick; v9: automatic saving off) goes back to the ceiling at once.
             if clientSendsFrameAcks(helloVersion) { paced?.setPinned(pinned) }
-            if paced?.weak != true { setStream(mode, fps: Int(fps), density: density) }
-            else { setStream(Self.weakMode, fps: Int(fps), density: min(density, 1.0)) }
+            paced?.setSteps(SaveLadder.steps(ceiling: ceiling, legacy: legacySaving))
+            applyLevel(paced?.level ?? 0)
+        case let .ping(seq):
+            // Answered at once: B measures the whole path with it (spec §6.1).
+            send(.pong(seq))
         // Window commands naming a window no longer in the table are dropped,
         // not errors: B may not have seen the newest table yet (spec §2.4).
         case let .resize(id, width, height):
@@ -469,7 +473,7 @@ final class Session {
         case let .frameAck(processingMs):
             if clientSendsFrameAcks(helloVersion) { paced?.ack(processingMs: processingMs) }
         case .ready, .error, .frame, .windows, .menuBar, .clip, .pasted, .fetch, .put, .transferStart, .chunk, .inputBlocked, .weak,
-             .inputSource:
+             .inputSource, .pong, .saving:
             fail("unexpected message from client")
         }
     }
@@ -714,22 +718,26 @@ final class Session {
                 }
             })
         }
-        paced.onWeakChange = { [weak self] weak in self?.weakChanged(weak) }
+        paced.onLevelChange = { [weak self] level in self?.levelChanged(level) }
         self.paced = paced
     }
 
-    /// The tier B is shown while the network is weak: duogray, density at most 1.0, same fps.
-    private static let weakMode = Mode.duogray
+    /// What B asked for: the stream at saving level 0.
+    private var ceiling: StreamSpec { StreamSpec(mode: requestedMode, fps: requestedFps, density: requestedDensity) }
+    /// A v7 or v8 B knows only on/off (`weak`): the one step to the floor, its frame rate kept.
+    private var legacySaving: Bool { !clientUnderstandsSaving(helloVersion) }
 
-    private func weakChanged(_ weak: Bool) {
+    private func applyLevel(_ level: Int) {
+        let s = SaveLadder.stream(level: level, ceiling: ceiling, legacy: legacySaving)
+        setStream(s.mode, fps: s.fps, density: s.density)
+    }
+
+    private func levelChanged(_ level: Int) {
         guard !ended else { return }
-        output.log(weak ? "weak network: duogray, density <= 1.0" : "network recovered: back to the requested stream")
-        if weak {
-            setStream(Self.weakMode, fps: requestedFps, density: min(requestedDensity, 1.0))
-        } else {
-            setStream(requestedMode, fps: requestedFps, density: requestedDensity)
-        }
-        if clientSendsFrameAcks(helloVersion) { send(.weak(weak)) }
+        output.log(level == 0 ? "network recovered: back to the requested stream" : "slow network: saving level \(level)")
+        applyLevel(level)
+        if clientUnderstandsSaving(helloVersion) { send(.saving(UInt8(level))) }
+        else if clientSendsFrameAcks(helloVersion) { send(.weak(level > 0)) }
     }
 
     private func tick() {

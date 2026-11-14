@@ -1,6 +1,6 @@
 import Foundation
 
-/// Sends encoded frames under the in-flight cap and drives the weak-network tier.
+/// Sends encoded frames under the in-flight cap and drives the traffic-saving level (`WeakTier`).
 ///
 /// Not thread safe: call everything (including `transmit` completions) on one queue.
 ///
@@ -16,6 +16,7 @@ public final class PacedSender {
         public var inFlight: Int
         public var cap: Int
         public var weak: Bool
+        public var level: Int
     }
 
     private struct Offer {
@@ -51,8 +52,10 @@ public final class PacedSender {
     private var firstAckSeen = false
     private var latencyMs: Int?
 
-    public var onWeakChange: ((Bool) -> Void)?
+    /// The saving level changed (0 = the ceiling).
+    public var onLevelChange: ((Int) -> Void)?
     public var weak: Bool { tier.weak }
+    public var level: Int { tier.level }
 
     public init(mode: Mode, fps: Int, acks: Bool, now: @escaping () -> TimeInterval,
                 transmit: @escaping (_ region: CanvasRect, _ payload: FramePayload, _ done: @escaping () -> Void) -> Void) {
@@ -91,10 +94,16 @@ public final class PacedSender {
 
     public func setFps(_ fps: Int) { pacer.fps = fps }
 
+    /// Automatic saving off (true): back to level 0 at once, and it stays there.
     public func setPinned(_ pinned: Bool) {
-        let was = tier.weak
+        let was = tier.level
         tier.pinned = pinned
-        if was && !tier.weak { onWeakChange?(false) }
+        if was != tier.level { onLevelChange?(tier.level) }
+    }
+
+    /// The levels that save something under the current ceiling (`SaveLadder.steps`).
+    public func setSteps(_ steps: [Int]) {
+        report(tier.setSteps(steps))
     }
 
     /// Call once a second: finds an outage (no acks arriving) that no ack can report.
@@ -112,11 +121,11 @@ public final class PacedSender {
         defer { latencyMs = nil }
         return Stats(rttMs: pacer.lastRtt.map { Int(($0 * 1000).rounded()) },
                      baseRttMs: pacer.baseRtt(now: t).map { Int(($0 * 1000).rounded()) },
-                     latencyMs: latencyMs, inFlight: pacer.inFlight, cap: pacer.cap(now: t), weak: tier.weak)
+                     latencyMs: latencyMs, inFlight: pacer.inFlight, cap: pacer.cap(now: t), weak: tier.weak, level: tier.level)
     }
 
-    private func report(_ change: Bool?) {
-        if let c = change { onWeakChange?(c) }
+    private func report(_ change: Int?) {
+        if let c = change { onLevelChange?(c) }
     }
 
     private func pump() {

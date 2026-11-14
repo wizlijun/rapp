@@ -1,7 +1,7 @@
 use anyhow::{bail, ensure, Context, Result};
 use std::{collections::HashSet, io::Read};
 
-pub const VERSION: u8 = 8;
+pub const VERSION: u8 = 9;
 pub const MAX_MESSAGE: usize = 64 * 1024 * 1024;
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Rect {
@@ -52,7 +52,12 @@ pub enum Incoming {
         error: String,
     },
     InputBlocked(String),
+    /// v7, v8 hosts: saving on or off.
     Weak(bool),
+    /// The answer to `ping` (v9).
+    Pong(u32),
+    /// A's traffic-saving level, 0 to 2 (v9).
+    Saving(u8),
     /// A's selected input source (v8); `ascii`: a plain keyboard layout, not an input method.
     InputSource {
         id: String,
@@ -105,8 +110,8 @@ impl Address {
             "token or app identifier too long"
         );
         ensure!(
-            [4, 5, 6, 7, 8].contains(&version),
-            "protocol must be 4, 5, 6, 7 or 8"
+            (4..=9).contains(&version),
+            "protocol must be 4 to 9"
         );
         Ok(Self {
             version,
@@ -193,6 +198,10 @@ pub fn scroll(id: u32, x: f32, y: f32, dx: f32, dy: f32) -> Vec<u8> {
         p.extend(f.to_le_bytes());
     }
     packet(8, p)
+}
+/// Measures the whole path to A (v9): A answers `pong` with the same number.
+pub fn ping(seq: u32) -> Vec<u8> {
+    id_packet(31, seq)
 }
 pub fn frame_ack(processing_ms: u16) -> Vec<u8> {
     packet(27, processing_ms.to_le_bytes().to_vec())
@@ -295,7 +304,7 @@ pub fn read_message(input: &mut impl Read) -> Result<(Incoming, usize)> {
     let mut h = [0; 5];
     input.read_exact(&mut h).context("host disconnected")?;
     ensure!(
-        [2, 3, 4, 13, 17, 19, 21, 26, 28, 29].contains(&h[0]),
+        [2, 3, 4, 13, 17, 19, 21, 26, 28, 29, 32, 33].contains(&h[0]),
         "unexpected host message type {}",
         h[0]
     );
@@ -433,6 +442,12 @@ pub fn decode(kind: u8, p: &[u8]) -> Result<Incoming> {
                 name,
                 ascii: ascii == 1,
             }
+        }
+        32 => Incoming::Pong(r.u32()?),
+        33 => {
+            let v = r.u8()?;
+            ensure!(v <= 2, "invalid saving level");
+            Incoming::Saving(v)
         }
         _ => bail!("unknown host message type {kind}"),
     };

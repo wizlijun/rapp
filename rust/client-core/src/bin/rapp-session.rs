@@ -5,6 +5,7 @@ mod session_output;
 use anyhow::{bail, ensure, Context, Result};
 use rapp_client_core::{
     codec::Decoder,
+    probe::PathProbe,
     protocol::{self as p, Incoming, Menu},
 };
 use serde_json::{json, Value};
@@ -161,10 +162,13 @@ fn run(out: &Output) -> Result<()> {
     socket.set_nodelay(true)?;
     socket.set_write_timeout(Some(Duration::from_secs(5)))?;
     socket.write_all(&address.hello(float(&start, "density")?.clamp(0.1, 8.)))?;
-    // Optional start-JSON field "protocol" (4-8, default 8): the version announced in the hello; < 7 means no acks.
+    // Optional start-JSON field "protocol" (4-9, default 9): the version announced in the hello; < 7 means
+    // no acks, < 9 no pings.
     let version = address.version;
     let writer = Arc::new(Mutex::new(socket.try_clone()?));
     let stdin_writer = writer.clone();
+    let probe = Probe::new(version);
+    let stdin_probe = probe.clone();
     drop(input);
     std::thread::spawn(move || {
         let mut input = std::io::stdin().lock();
@@ -175,9 +179,13 @@ fn run(out: &Output) -> Result<()> {
                 _ => break,
             }
             let result = (|| -> Result<()> {
-                let packet = command(&serde_json::from_str(&line)?, version)?;
+                let v: Value = serde_json::from_str(&line)?;
+                let packet = command(&v, version)?;
                 // One whole packet per lock: acks from the read loop never interleave with it.
                 stdin_writer.lock().unwrap().write_all(&packet)?;
+                if is_input(&v) {
+                    stdin_probe.input();
+                }
                 Ok(())
             })();
             if result.is_err() {
@@ -191,6 +199,7 @@ fn run(out: &Output) -> Result<()> {
     let frames = Arc::new(AtomicU64::new(0));
     let frame_rate = frames.clone();
     let traffic = out.clone();
+    let (tick_probe, tick_writer) = (probe.clone(), writer.clone());
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_secs(1));
         if event(
@@ -198,12 +207,68 @@ fn run(out: &Output) -> Result<()> {
             json!({"event":"traffic","bytes":rate.swap(0,Ordering::Relaxed),"frames":frame_rate.swap(0,Ordering::Relaxed)}),
         )
         .is_err()
+            || tick_probe.tick(&tick_writer, &traffic).is_err()
         {
             break;
         }
     });
     socket.set_read_timeout(Some(Duration::from_secs(15)))?;
-    read_loop(&mut socket, &writer, version, out, &bytes, &frames)
+    read_loop(&mut socket, &writer, version, out, &bytes, &frames, &probe)
+}
+/// Commands that are the user operating A: pings come faster for a while after them.
+fn is_input(v: &Value) -> bool {
+    matches!(v["cmd"].as_str(), Some("key" | "mouse" | "scroll" | "text" | "paste" | "menu_pick"))
+}
+/// The whole-path probe (v9 hosts), shared by the read loop, the 1 s tick and stdin. Pings start
+/// once A said Ready: a pong must not come before it, and starting the app takes time.
+#[derive(Clone)]
+struct Probe(Arc<Mutex<(Option<PathProbe>, bool)>>, Instant);
+impl Probe {
+    fn new(version: u8) -> Self {
+        Probe(Arc::new(Mutex::new(((version >= 9).then(PathProbe::default), false))), Instant::now())
+    }
+    fn now(&self) -> f64 {
+        self.1.elapsed().as_secs_f64()
+    }
+    fn ready(&self) {
+        self.0.lock().unwrap().1 = true;
+    }
+    fn input(&self) {
+        let now = self.now();
+        if let (Some(p), _) = &mut *self.0.lock().unwrap() {
+            p.input(now);
+        }
+    }
+    fn tick(&self, writer: &Mutex<TcpStream>, out: &Output) -> Result<()> {
+        let now = self.now();
+        let (ping, stalled) = match &mut *self.0.lock().unwrap() {
+            (Some(p), true) => p.tick(now),
+            _ => return Ok(()),
+        };
+        if let Some(seq) = ping {
+            // A failed write ends the session through the read loop; the tick goes on.
+            let _ = writer.lock().unwrap().write_all(&p::ping(seq));
+        }
+        if let Some(on) = stalled {
+            event(out, json!({"event":"stalled","on":on}))?;
+        }
+        Ok(())
+    }
+    /// Something arrived from A; for a pong, its round trip in ms when it answers the newest ping.
+    fn received(&self, out: &Output, pong: Option<u32>) -> Result<()> {
+        let now = self.now();
+        let (back, rtt) = match &mut *self.0.lock().unwrap() {
+            (Some(p), _) => (p.received(now), pong.and_then(|seq| p.pong(seq, now))),
+            _ => return Ok(()),
+        };
+        if let Some(on) = back {
+            event(out, json!({"event":"stalled","on":on}))?;
+        }
+        if let Some(ms) = rtt {
+            event(out, json!({"event":"rtt","ms":ms}))?;
+        }
+        Ok(())
+    }
 }
 fn read_loop(
     socket: &mut TcpStream,
@@ -212,6 +277,7 @@ fn read_loop(
     out: &Output,
     bytes: &AtomicU64,
     frames: &AtomicU64,
+    probe: &Probe,
 ) -> Result<()> {
     let mut decoder = Decoder::default();
     let mut pixels = Vec::new();
@@ -220,12 +286,15 @@ fn read_loop(
         let (message, size) = p::read_message(socket)?;
         let received = Instant::now();
         bytes.fetch_add(size as u64, Ordering::Relaxed);
+        let pong = if let Incoming::Pong(seq) = message { Some(seq) } else { None };
+        probe.received(out, pong)?;
         match message {
             Incoming::Error(reason) => bail!("{reason}"),
             Incoming::Ready(name, _, _) => {
                 ensure!(!ready, "duplicate Ready");
                 ready = true;
                 socket.set_read_timeout(None)?;
+                probe.ready();
                 event(out, json!({"event":"ready","appName":name}))?;
             }
             _ if !ready => bail!("message before Ready"),
@@ -275,7 +344,9 @@ fn read_loop(
                 event(out, json!({"event":"paste_result","seq":seq,"error":error}))?
             }
             Incoming::InputBlocked(by) => event(out, json!({"event":"input_blocked","by":by}))?,
-            Incoming::Weak(on) => event(out, json!({"event":"weak","on":on}))?,
+            Incoming::Weak(on) => event(out, json!({"event":"weak","on":on,"level":if on { 2 } else { 0 }}))?,
+            Incoming::Saving(level) => event(out, json!({"event":"weak","on":level > 0,"level":level}))?,
+            Incoming::Pong(_) => {}
             Incoming::InputSource { id, name, ascii } => event(
                 out,
                 json!({"event":"input_source","id":id,"name":name,"ascii":ascii}),
@@ -428,7 +499,7 @@ mod tests {
         let thread = std::thread::spawn(move || {
             let (bytes, frames) = (AtomicU64::new(0), AtomicU64::new(0));
             socket.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
-            read_loop(&mut socket, &writer, version, &out, &bytes, &frames)
+            read_loop(&mut socket, &writer, version, &out, &bytes, &frames, &Probe::new(version))
         });
         (sink, host, thread)
     }
@@ -453,14 +524,53 @@ mod tests {
             assert_eq!(ack[..5], [27, 2, 0, 0, 0]);
         }
         host.write_all(&p::packet(28, vec![1])).unwrap();
-        let deadline = std::time::Instant::now() + Duration::from_secs(10);
-        let needle = br#""event":"weak","on":true"#;
-        while !sink.0.lock().unwrap().windows(needle.len()).any(|w| w == needle) {
-            assert!(std::time::Instant::now() < deadline, "no weak event");
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        wait_for(&sink, br#""event":"weak","level":2,"on":true"#);
         drop(host);
         assert!(thread.join().unwrap().is_err());
+    }
+    fn wait_for(sink: &Sink, needle: &[u8]) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !sink.0.lock().unwrap().windows(needle.len()).any(|w| w == needle) {
+            assert!(std::time::Instant::now() < deadline, "no {}", String::from_utf8_lossy(needle));
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+    #[test]
+    fn saving_levels_become_weak_events() {
+        let (sink, mut host, thread) = session_with_host(9);
+        host.write_all(&ready()).unwrap();
+        host.write_all(&p::packet(33, vec![1])).unwrap();
+        wait_for(&sink, br#""event":"weak","level":1,"on":true"#);
+        host.write_all(&p::packet(33, vec![0])).unwrap();
+        wait_for(&sink, br#""event":"weak","level":0,"on":false"#);
+        drop(host);
+        assert!(thread.join().unwrap().is_err());
+    }
+    #[test]
+    fn probe_pings_after_ready_and_reports_the_round_trip() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let b = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut a, _) = listener.accept().unwrap();
+        let writer = Mutex::new(b);
+        let sink = Sink::default();
+        let (out, _w) = Output::spawn(sink.clone());
+        let probe = Probe::new(9);
+        probe.tick(&writer, &out).unwrap();
+        probe.ready();
+        probe.tick(&writer, &out).unwrap();
+        a.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let mut ping = [0; 9];
+        a.read_exact(&mut ping).unwrap();
+        // The first tick (before Ready) sent nothing: this is ping 1.
+        assert_eq!(ping, [31, 4, 0, 0, 0, 1, 0, 0, 0]);
+        probe.received(&out, Some(1)).unwrap();
+        wait_for(&sink, br#""event":"rtt","ms":"#);
+        // A v8 host gets no pings.
+        let old = Probe::new(8);
+        old.ready();
+        old.tick(&writer, &out).unwrap();
+        a.set_read_timeout(Some(Duration::from_millis(300))).unwrap();
+        assert!(a.read(&mut ping).is_err());
     }
     #[test]
     fn no_acks_before_v7() {

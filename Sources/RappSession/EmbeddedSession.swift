@@ -49,6 +49,12 @@ public final class EmbeddedSession {
     private var sentPinned = false
     private var bytes = 0
     private var frames = 0
+    /// Pings A to measure the whole path (spec 2026-11-14-rapp-network-status §3.3).
+    private var probe = PathProbe()
+    /// A said `ready`: pings start then (a pong must not come first, and starting the app takes time).
+    private var heardReady = false
+    /// Seconds for the probe; tests may replace it.
+    var now: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
     /// The link is gone (dropped, bad data, or closed); the last pictures may still be shown.
     private var linkDown = false
     /// The pictures are released and `.closed` was reported.
@@ -91,7 +97,11 @@ public final class EmbeddedSession {
     }
 
     public func send(_ m: Message) {
-        run { if !self.linkDown { self.link.send(m) } }
+        run {
+            guard !self.linkDown else { return }
+            if m.isUserInput { self.probe.input(now: self.now()) }
+            self.link.send(m)
+        }
     }
 
     public func setStream(mode: Mode, fps: UInt8, choice: DensityChoice, pinned: Bool = false) {
@@ -174,6 +184,10 @@ public final class EmbeddedSession {
             self.bytes = 0
             self.frames = 0
             self.onEvent?(.traffic(bytesPerSecond: n, frames: f))
+            guard self.heardReady else { return }
+            let (ping, stalled) = self.probe.tick(now: self.now())
+            if let ping { self.link.send(.ping(ping)) }
+            if let stalled { self.onEvent?(.stalled(stalled)) }
         }
     }
 
@@ -226,8 +240,11 @@ public final class EmbeddedSession {
 
     private func handle(_ message: Message) {
         guard !linkDown else { return }
+        let t = now()
+        if let back = probe.received(now: t) { onEvent?(.stalled(back)) }
         switch message {
         case let .ready(appName, _, _):
+            heardReady = true
             onEvent?(.ready(appName: appName))
             sendStreamIfChanged()
         case let .windows(newTable):
@@ -267,7 +284,11 @@ public final class EmbeddedSession {
         case let .inputBlocked(by):
             onEvent?(.inputBlocked(by: by))
         case let .weak(on):
-            onEvent?(.weak(on))
+            onEvent?(.saving(level: on ? 2 : 0))
+        case let .saving(level):
+            onEvent?(.saving(level: Int(level)))
+        case let .pong(seq):
+            if let ms = probe.pong(seq: seq, now: t) { onEvent?(.rtt(ms: ms)) }
         case let .inputSource(id, name, ascii):
             onEvent?(.inputSource(id: id, name: name, ascii: ascii))
         default:

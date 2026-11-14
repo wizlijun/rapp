@@ -1,7 +1,8 @@
 import Foundation
 
-/// v8 = v7 (frame acks, weak tier, pinned setStream) + remote input source.
-public let protocolVersion: UInt8 = 8
+/// v9 = v8 (frame acks, weak tier, input source) + session ping/pong and the saving ladder: a v9
+/// client's setStream values are its ceiling and its pinned byte means "automatic saving off".
+public let protocolVersion: UInt8 = 9
 /// The oldest client version this host still serves (older clients just never get the newer host messages).
 public let oldestClientVersion: UInt8 = 5
 
@@ -13,6 +14,10 @@ public func clientUnderstandsInputBlocked(_ version: UInt8) -> Bool { version >=
 
 /// Whether a client that said hello with `version` understands `inputSource` (type 29).
 public func clientUnderstandsInputSource(_ version: UInt8) -> Bool { version >= 8 }
+
+/// Whether a client that said hello with `version` understands `pong` and `saving` (types 32, 33),
+/// and sends its stream choice as a ceiling.
+public func clientUnderstandsSaving(_ version: UInt8) -> Bool { version >= 9 }
 
 /// A client's `Hello` carried a different protocol version than this build speaks.
 public struct ProtocolVersionMismatch: Error, CustomStringConvertible {
@@ -125,6 +130,11 @@ public enum Message: Equatable {
     case inputSource(id: String, name: String, ascii: Bool)                                  // 29, host -> client (v8)
     /// Select an enabled input source on A; "" selects the current ASCII-capable layout.
     case selectInput(id: String)                                                             // 30, client -> host (v8)
+    /// Measures the whole path: A answers with `pong` at once, past the input gate.
+    case ping(UInt32)                                                                        // 31, client -> host (v9)
+    case pong(UInt32)                                                                        // 32, host -> client (v9)
+    /// The saving level A streams at: 0 = B's ceiling, 1 = at most 5 fps, 2 = the weak floor.
+    case saving(UInt8)                                                                       // 33, host -> client (v9)
 
     public func encoded() -> [UInt8] {
         var w = Writer()
@@ -229,6 +239,15 @@ public enum Message: Equatable {
         case let .selectInput(id):
             type = 30
             w.string(id)
+        case let .ping(seq):
+            type = 31
+            w.u32(seq)
+        case let .pong(seq):
+            type = 32
+            w.u32(seq)
+        case let .saving(level):
+            type = 33
+            w.u8(level)
         }
         precondition(w.bytes.count <= maxMessageLength, "message too large")
         var out: [UInt8] = [type]
@@ -342,6 +361,14 @@ public enum Message: Equatable {
             message = .inputSource(id: id, name: name, ascii: ascii == 1)
         case 30:
             message = .selectInput(id: try r.string())
+        case 31:
+            message = .ping(try r.u32())
+        case 32:
+            message = .pong(try r.u32())
+        case 33:
+            let level = try r.u8()
+            guard level <= 2 else { throw CodecError("bad saving level") }
+            message = .saving(level)
         default:
             throw CodecError("unknown message type \(type)")
         }
@@ -350,7 +377,7 @@ public enum Message: Equatable {
     }
 }
 
-private let knownTypes: Set<UInt8> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
+private let knownTypes: Set<UInt8> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33]
 
 /// Turns a byte stream into messages. Feed it whatever the socket delivers
 /// with `append`, then call `next()` until it returns nil.
