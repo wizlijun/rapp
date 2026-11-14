@@ -404,6 +404,7 @@ fn view(pane: &str, cols: u16, rows: u16) -> In {
 async fn view_type_ack_roundtrip() {
     let Some(s) = common::Server::start() else { return };
     s.raw(&["new-session", "-d", "-s", "v", "-x", "80", "-y", "24", "cat"]);
+    s.wait_command("v", "cat");
     common::settle().await;
     let mut p = pump(&s, "v", fresh_unread());
     let (pane, panes) = greeted(&mut p).await;

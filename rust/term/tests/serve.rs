@@ -240,6 +240,7 @@ async fn an_unknown_request_is_a_bad_request() {
 async fn list_shows_the_sessions_and_the_local_host() {
     let Some(s) = Server::start() else { return };
     s.raw(&["new-session", "-d", "-s", "a b", "-x", "80", "-y", "24", "cat"]);
+    s.wait_command("a b", "cat");
     let w = Worker::start(&s, None).await;
     let v = w.ask(json!({"op": "list"})).await;
     assert_eq!(v.len(), 1, "{v:?}");
