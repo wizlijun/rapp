@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/app_profile.dart';
 import 'package:rapp/embed/composer_panel.dart';
+import 'package:rapp/embed/picture.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
@@ -460,18 +461,6 @@ void main() {
         expect(rs.composer.draft, '草稿');
       });
 
-      testWidgets('a tap outside closes the menu without reaching A', (tester) async {
-        big(tester);
-        await tester.pumpWidget(layer());
-        await tester.pump();
-        await openMenu(tester);
-        expect(menu, findsOneWidget);
-        await tester.tapAt(tester.getTopLeft(find.byKey(const Key('host'))) + const Offset(20, 20));
-        await tester.pump();
-        expect(menu, findsNothing);
-        expect(port.calls, isEmpty);
-      });
-
       testWidgets('the sticky keys and the menu never carry over to another session', (tester) async {
         big(tester);
         final rs2 = RemoteSession(2, 'Notes');
@@ -673,6 +662,39 @@ void main() {
       await tester.tap(find.byKey(const Key('composer-open')));
       await tester.pump();
       expect(text(tester), 'keep');
+    });
+
+    testWidgets('a tap outside the plus menu closes it without reaching A; the next tap does', (tester) async {
+      await showPicture(tester);
+      await tester.tap(find.byKey(const Key('composer-open')));
+      await tester.pump();
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('composer-plus')));
+      await tester.pump();
+      final menu = find.byKey(const Key('composer-plus-menu'));
+      expect(menu, findsOneWidget);
+      port.calls.clear();
+      final spot = tester.getTopLeft(find.byType(Picture)) + const Offset(100, 100);
+      await tester.tapAt(spot);
+      await tester.pump();
+      expect(menu, findsNothing);
+      expect(port.calls.where((c) => c.$1 == 'mouse'), isEmpty);
+      await tester.tapAt(spot);
+      await tester.pump();
+      expect(port.calls.where((c) => c.$1 == 'mouse'), isNotEmpty);
+    });
+
+    testWidgets('Esc with the plus menu open closes the panel and the menu', (tester) async {
+      await showPicture(tester);
+      await tester.tap(find.byKey(const Key('composer-open')));
+      await tester.pump();
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('composer-plus')));
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      expect(find.byKey(const Key('composer-plus-menu')), findsNothing);
+      expect(find.byKey(const Key('composer-panel')), findsNothing);
     });
 
     testWidgets('drafts stay with their session across a switch', (tester) async {

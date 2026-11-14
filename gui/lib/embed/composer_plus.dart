@@ -118,7 +118,7 @@ class _ComposerPlusState extends State<ComposerPlus> {
         ),
     ];
     // The overlay gives tight constraints; the Align lets the follower be the menu's size.
-    return Align(
+    final menu = Align(
       alignment: Alignment.topLeft,
       child: CompositedTransformFollower(
         link: _link,
@@ -164,6 +164,15 @@ class _ComposerPlusState extends State<ComposerPlus> {
           ),
         ),
       ),
+    );
+    // A tap outside is the menu's: a barrier under it takes the tap, so it never reaches A.
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: _close),
+        ),
+        menu,
+      ],
     );
   }
 
