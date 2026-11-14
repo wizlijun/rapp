@@ -100,7 +100,11 @@ impl Tmux {
         if !text.is_empty() {
             let name = format!("rapp-{}-{}", std::process::id(), PASTE_SEQ.fetch_add(1, Ordering::Relaxed));
             self.run_input(&cmd::load_buffer(&name), text.as_bytes()).await?;
-            self.run_input(&cmd::paste_buffer(&name, pane), &[]).await?;
+            if let Err(e) = self.run_input(&cmd::paste_buffer(&name, pane), &[]).await {
+                // The paste did not happen, so its buffer is still there: rapp made it, rapp removes it.
+                let _ = self.run_input(&cmd::delete_buffer(&name), &[]).await;
+                return Err(e);
+            }
         }
         if enter {
             self.send(cmd::send_named(pane, &["Enter".to_string()])).await?;

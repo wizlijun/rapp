@@ -540,6 +540,16 @@ async fn every_paste_is_answered_even_when_refused() {
 }
 
 #[tokio::test]
+async fn a_paste_that_fails_leaves_no_buffer() {
+    let Some(s) = common::Server::start() else { return };
+    s.raw(&["new-session", "-d", "-s", "e", "-x", "80", "-y", "24", "cat"]);
+    let t = s.tmux();
+    // The buffer loads, then the paste finds no such pane.
+    t.paste("%999", "x", false).await.unwrap_err();
+    assert!(!s.raw(&["list-buffers"]).contains("rapp-"));
+}
+
+#[tokio::test]
 async fn paste_errors_never_name_tmux() {
     let Some(s) = common::Server::start() else { return };
     s.raw(&["new-session", "-d", "-s", "e", "-x", "80", "-y", "24", "cat"]);

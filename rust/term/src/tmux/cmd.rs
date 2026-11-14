@@ -10,6 +10,7 @@ pub const VERBS: &[&str] = &[
     "send-keys",
     "load-buffer",
     "paste-buffer",
+    "delete-buffer",
     "new-session",
     "refresh-client",
     "attach-session",
@@ -83,6 +84,11 @@ pub fn paste_buffer(name: &str, pane: &str) -> Vec<String> {
     ["paste-buffer", "-p", "-d", "-b", name, "-t", pane].map(String::from).to_vec()
 }
 
+/// Delete the named paste buffer: one rapp loaded and could not paste.
+pub fn delete_buffer(name: &str) -> Vec<String> {
+    ["delete-buffer", "-b", name].map(String::from).to_vec()
+}
+
 /// A control-mode client of the session `session_id`.
 pub fn attach(session_id: &str) -> Vec<String> {
     ["-C", "attach-session", "-t", session_id].map(String::from).to_vec()
@@ -129,6 +135,7 @@ mod tests {
                 "send-keys",
                 "load-buffer",
                 "paste-buffer",
+                "delete-buffer",
                 "new-session",
                 "refresh-client",
                 "attach-session"
@@ -144,6 +151,7 @@ mod tests {
         assert_eq!(send_hex("%1", &["61".into()]), ["send-keys", "-t", "%1", "-H", "61"]);
         assert_eq!(load_buffer("rapp-1-0"), ["load-buffer", "-b", "rapp-1-0", "-"]);
         assert_eq!(paste_buffer("rapp-1-0", "%1"), ["paste-buffer", "-p", "-d", "-b", "rapp-1-0", "-t", "%1"]);
+        assert_eq!(delete_buffer("rapp-1-0"), ["delete-buffer", "-b", "rapp-1-0"]);
     }
     #[test]
     fn size_and_new_session_builders() {
