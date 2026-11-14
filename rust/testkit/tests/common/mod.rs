@@ -391,8 +391,13 @@ pub struct RelayRig {
 
 impl RelayRig {
     pub async fn start() -> RelayRig {
+        Self::start_enroll(rapp_relay::config::Enroll::Open).await
+    }
+
+    /// A relay whose enrollment is `enroll` (`Closed`: new devices are answered `closed`).
+    pub async fn start_enroll(enroll: rapp_relay::config::Enroll) -> RelayRig {
         let data = tempfile::tempdir().unwrap();
-        let relay = Self::boot(data.path(), "127.0.0.1:0".parse().unwrap()).await;
+        let relay = Self::boot_with(data.path(), "127.0.0.1:0".parse().unwrap(), enroll).await;
         let key = rapp_wire::Key::new_for_relay(&relay.fp);
         relay.registry().set_join_hash(&rapp_wire::join_hash(&key.join())).unwrap();
         let addr = relay.addr.to_string();
@@ -400,7 +405,11 @@ impl RelayRig {
     }
 
     async fn boot(data: &Path, listen: SocketAddr) -> rapp_relay::server::Relay {
-        let config = rapp_relay::config::Config { listen, ..Default::default() };
+        Self::boot_with(data, listen, rapp_relay::config::Enroll::Open).await
+    }
+
+    async fn boot_with(data: &Path, listen: SocketAddr, enroll: rapp_relay::config::Enroll) -> rapp_relay::server::Relay {
+        let config = rapp_relay::config::Config { listen, enroll, ..Default::default() };
         let opts = rapp_relay::server::Opts {
             data: data.to_path_buf(),
             config,

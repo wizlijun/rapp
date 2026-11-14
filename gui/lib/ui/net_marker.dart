@@ -145,6 +145,8 @@ class NetLinePainter extends CustomPainter {
       ..strokeJoin = StrokeJoin.round;
     Offset at(Offset p) => Offset(p.dx * size.width, p.dy * size.height);
     final pts = line.points.map(at).toList();
+    // The ✕ clears a gap in the line: in a layer of its own, or the clear would erase the bar.
+    if (line.crossed) canvas.saveLayer(Offset.zero & size, Paint());
     if (line.dashed) {
       for (var i = 0; i + 1 < pts.length; i++) {
         _dash(canvas, pts[i], pts[i + 1], paint);
@@ -166,6 +168,7 @@ class NetLinePainter extends CustomPainter {
       canvas.drawRect(Rect.fromCircle(center: c, radius: r + 1.5), Paint()..blendMode = BlendMode.clear);
       canvas.drawLine(c + Offset(-r, -r), c + Offset(r, r), cross);
       canvas.drawLine(c + Offset(-r, r), c + Offset(r, -r), cross);
+      canvas.restore();
     }
   }
 

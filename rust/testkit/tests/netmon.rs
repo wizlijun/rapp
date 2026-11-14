@@ -85,3 +85,24 @@ async fn a_refused_key_is_not_dialed_again() {
     assert!(lockouts.is_empty(), "{lockouts:?}");
     hub.finish().await;
 }
+
+/// An enroll the relay turns down for another reason than the key (enrollment closed, a limit,
+/// a lockout) must not be retried every second: the monitor waits a minute.
+#[tokio::test]
+async fn a_closed_enrollment_is_not_hammered() {
+    let rig = RelayRig::start_enroll(rapp_relay::config::Enroll::Closed).await;
+    let home = tempfile::tempdir().unwrap();
+    hub_relay(home.path(), &rig.addr, &rig.key);
+    let bins = bins();
+    let mut hub = Hub::start(home.path(), bins.path());
+    hub.wait_net(Duration::from_secs(10), level("down")).await;
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    let relay = rig.relay.as_ref().unwrap();
+    relay.audit().flush();
+    let enrolls = rapp_relay::audit::read(rig.data.path(), None, None, Some("enroll")).unwrap();
+    assert!(!enrolls.is_empty(), "the relay must have been asked once");
+    assert!(enrolls.iter().all(|e| e["result"] == "closed"), "{enrolls:?}");
+    // One from the monitor; the hub's 30 s presence round may add one.
+    assert!(enrolls.len() <= 2, "{} enrolls in ~12 s: {enrolls:?}", enrolls.len());
+    hub.finish().await;
+}

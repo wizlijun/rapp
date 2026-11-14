@@ -18,7 +18,8 @@ use tokio::task::JoinHandle;
 
 /// One watch task per host, with a number telling it from a later one for the same host.
 #[derive(Default)]
-pub(crate) struct Watches(Mutex<(u64, HashMap<String, (u64, JoinHandle<()>)>)>);
+pub(crate) struct Watches(Mutex<(u64, Tasks)>);
+type Tasks = HashMap<String, (u64, JoinHandle<()>)>;
 
 impl Watches {
     pub(crate) fn has(&self, id: &str) -> bool {

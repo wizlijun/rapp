@@ -42,6 +42,9 @@ const BACKOFF_MAX: Duration = Duration::from_secs(10);
 /// A dial waits up to 10 s itself; still not through after this long is down.
 const DIAL_SLOW: Duration = Duration::from_secs(2);
 const ENROLL_WAIT: Duration = Duration::from_secs(5);
+/// The relay turned the enroll down (enrollment closed, a limit, a lockout): the next dial waits
+/// this long, so a device the relay will not take does not knock every second.
+const ENROLL_REFUSED_WAIT: Duration = Duration::from_secs(60);
 
 /// What the monitor shares with the rest of the hub.
 #[derive(Default)]
@@ -208,17 +211,30 @@ impl Monitor {
     }
 
     /// A new connection (ours, or one a request dialed): enrolled at once, or the relay's idle
-    /// deadline for unenrolled connections closes it; measured at once.
+    /// deadline for unenrolled connections closes it; measured at once. The backoff starts over
+    /// only once the relay took the enroll: a connection it turns away must not reset it.
     async fn adopt(&mut self, hub: &Arc<Hub>, c: RelayConn, now: Instant) {
         self.conn = Some(c.clone());
         self.stall.reset();
-        self.backoff = BACKOFF_FIRST;
-        self.next_dial = now;
         self.wake(now);
         match tokio::time::timeout(ENROLL_WAIT, c.ensure_enrolled()).await {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => hub.log.msg(Lvl::Warn, format_args!("relay enroll: {e:#}")),
-            Err(_) => hub.log.msg(Lvl::Warn, format_args!("relay enroll: timed out")),
+            Ok(Ok(())) => {
+                self.backoff = BACKOFF_FIRST;
+                self.next_dial = now;
+            }
+            Ok(Err(e)) => {
+                hub.log.msg(Lvl::Warn, format_args!("relay enroll: {e:#}"));
+                if rapp_conn::relay::relay_said_no(&e) {
+                    self.meter.down();
+                    self.next_dial = now + ENROLL_REFUSED_WAIT;
+                } else {
+                    self.failed(now);
+                }
+            }
+            Err(_) => {
+                hub.log.msg(Lvl::Warn, format_args!("relay enroll: timed out"));
+                self.failed(now);
+            }
         }
     }
 

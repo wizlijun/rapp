@@ -320,8 +320,26 @@ impl RelayConn {
         if v["ok"] == true {
             return Ok(v);
         }
-        bail!("{}", v["error"].as_str().unwrap_or("bad reply"))
+        Err(RelaySaid(v["error"].as_str().unwrap_or("bad reply").to_owned()).into())
     }
+}
+
+/// The relay answered a request with `{"ok":false,"error":..}` (as opposed to the connection
+/// failing): its text is the error's text.
+#[derive(Debug)]
+pub struct RelaySaid(pub String);
+
+impl std::fmt::Display for RelaySaid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for RelaySaid {}
+
+/// The relay itself turned the request down (not a broken connection).
+pub fn relay_said_no(e: &anyhow::Error) -> bool {
+    e.chain().any(|c| c.downcast_ref::<RelaySaid>().is_some())
 }
 
 /// Hands every stream the relay opens on to the channel, each on its own task; ends with `Closed`.

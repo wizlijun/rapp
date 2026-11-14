@@ -1,3 +1,5 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/hub_client.dart';
@@ -73,4 +75,35 @@ void main() {
     }
     expect(find.text('断开'), findsOneWidget);
   });
+
+  test('the gap under the cross is cleared inside its own layer, never through the bar', () {
+    for (final l in NetLevel.values) {
+      final c = _RecordingCanvas();
+      NetLinePainter(netLine(l), const Color(0xff00ff00)).paint(c, const Size(24, 14));
+      expect(c.clearOutsideLayer, isFalse, reason: '$l');
+      expect(c.depth, 0, reason: '$l: every saveLayer restored');
+    }
+  });
+}
+
+class _RecordingCanvas implements Canvas {
+  int depth = 0;
+  bool clearOutsideLayer = false;
+
+  void _check(Paint p) {
+    if (p.blendMode == ui.BlendMode.clear && depth == 0) clearOutsideLayer = true;
+  }
+
+  @override
+  void saveLayer(Rect? bounds, Paint paint) => depth++;
+  @override
+  void restore() => depth--;
+  @override
+  void drawRect(Rect rect, Paint paint) => _check(paint);
+  @override
+  void drawLine(Offset p1, Offset p2, Paint paint) => _check(paint);
+  @override
+  void drawPath(Path path, Paint paint) => _check(paint);
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
 }
