@@ -318,6 +318,7 @@
 ## 写作面板（规格 `docs/superpowers/specs/2026-11-14-rapp-composer-writing-panel-design.md`，W1–W16）
 - [x] S1：Flutter 编辑器（`ComposerEditor` 缝、`FlutterEditor`）、写作面板（720 宽、一行 48、字号 15、行高 22，往上长到舞台一半）、「＋」浮层（300 宽）和提示行、打开时画面上移 64 而 A 的尺寸不变、各平台 Ctrl+Enter（macOS ⌃↩ 留在本机，Linux 不发给 A，概览里不响应）
 - [ ] S0、S2（macOS 原生编辑器）、S3（Linux 探查）未做
+- S2 计划必须包含（S1 最终评审留下的）：attach 排在没做完的 detach 后面（或每个会话一个编辑区）；空闲拷贝带代号，过时的结果丢掉；画面取焦点的守卫要跟着 `editorFocused` 变化重试（原生焦点是异步的）；`read`/`take` 出错时怎么办；`FlutterEditor.read()` 组字时没排在待写入的 `setText`/`insert` 后面，不合 FIFO 约定；`adoptFrom` 读旧编辑区时如果它在组字，新面板已经接上，会用旧草稿；三种编辑区（Fake、Flutter、原生）共用一套编辑区约定测试（规格 A4）；`onArrow`、隐藏、位置（H2/A3）
 - 待实机（不在这个计划里验收）：
   - 真实 app 上画面上移 64 碍不碍事（规格评审 U1）
   - 中文输入法下打字；组字时点击
