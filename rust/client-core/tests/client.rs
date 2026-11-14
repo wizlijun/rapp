@@ -21,7 +21,7 @@ fn hello_matches_swift_wire_layout() {
         None,
     )
     .unwrap();
-    let mut expected = vec![9, 3, 0, b'a', b'b', b'c', 15, 0];
+    let mut expected = vec![10, 3, 0, b'a', b'b', b'c', 15, 0];
     expected.extend(b"com.example.App");
     expected.extend([2, 5, 0, 0, 128, 63]);
     assert_eq!(a.hello(1.), packet(1, expected));
@@ -294,7 +294,7 @@ fn menu_and_window_validation() {
 #[test]
 fn v5_clipboard_bounds_and_legacy_selection() {
     let address = Address::parse("rapp://host/?token=x", None).unwrap();
-    assert_eq!(address.hello(1.)[5], 9);
+    assert_eq!(address.hello(1.)[5], 10);
     let text = "中文 clipboard";
     let mut payload = 1u32.to_le_bytes().to_vec();
     payload.extend([0, 0]);
@@ -483,9 +483,28 @@ fn decodes_weak_strictly() {
     assert!(decode(28, &[1, 0]).is_err());
 }
 #[test]
-fn hello_announces_version_9() {
+fn decodes_screen_locked_strictly() {
+    assert!(matches!(decode(31, &[1]).unwrap(), Incoming::ScreenLocked(true)));
+    assert!(matches!(decode(31, &[0]).unwrap(), Incoming::ScreenLocked(false)));
+    assert!(decode(31, &[2]).is_err());
+    assert!(decode(31, &[]).is_err());
+    assert!(decode(31, &[1, 0]).is_err());
+}
+#[test]
+fn unlock_wire_format() {
+    assert_eq!(unlock("ab"), vec![32, 4, 0, 0, 0, 2, 0, b'a', b'b']);
+}
+#[test]
+fn hello_announces_version_10() {
     let a = Address::parse("rapp://host/?token=x", None).unwrap();
-    assert_eq!(a.hello(1.)[5], 9);
+    assert_eq!(a.hello(1.)[5], 10);
+}
+#[test]
+fn desktop_addresses_parse() {
+    let a = Address::parse("rapp://host/desktop:?token=x", None).unwrap();
+    assert_eq!(a.app, "desktop:");
+    let a = Address::parse("rapp://host/desktop:69733382?token=x", None).unwrap();
+    assert_eq!(a.app, "desktop:69733382");
 }
 
 mod v9 {

@@ -110,7 +110,7 @@ const HISTORY_MAX: u64 = 500;
 /// connections, nor the hub's background `watch_terms` (polled like `ping`, not a user action).
 fn in_history(v: &Value) -> bool {
     let shown = match v["ev"].as_str() {
-        Some("session_start" | "session_end" | "term_inputs" | "auth_fail" | "rejected" | "input_blocked") => true,
+        Some("session_start" | "session_end" | "term_inputs" | "auth_fail" | "rejected" | "input_blocked" | "unlock") => true,
         Some("request") => v["result"] != "ok" && v["op"] != "watch_terms",
         _ => false,
     };

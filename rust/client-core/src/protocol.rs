@@ -1,7 +1,9 @@
 use anyhow::{bail, ensure, Context, Result};
 use std::{collections::HashSet, io::Read};
 
-pub const VERSION: u8 = 9;
+pub const VERSION: u8 = 10;
+/// The longest unlock password a client may send (bytes, v10).
+pub const UNLOCK_PASSWORD_LIMIT: usize = 1024;
 pub const MAX_MESSAGE: usize = 64 * 1024 * 1024;
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Rect {
@@ -61,6 +63,8 @@ pub enum Incoming {
         name: String,
         ascii: bool,
     },
+    /// A's screen is locked (v10): input reaches only the lock screen.
+    ScreenLocked(bool),
 }
 #[derive(Clone, Debug)]
 pub struct Address {
@@ -161,6 +165,12 @@ pub fn id_packet(kind: u8, id: u32) -> Vec<u8> {
     packet(kind, id.to_le_bytes().to_vec())
 }
 /// Select A's input source `id`; "" selects A's ASCII-capable layout (v8 hosts).
+/// Types `password` at A's lock screen (v10); at most `UNLOCK_PASSWORD_LIMIT` bytes.
+pub fn unlock(password: &str) -> Vec<u8> {
+    let mut p = vec![];
+    string(&mut p, password);
+    packet(32, p)
+}
 pub fn select_input(id: &str) -> Vec<u8> {
     let mut p = vec![];
     string(&mut p, id);
@@ -435,6 +445,11 @@ pub fn decode(kind: u8, p: &[u8]) -> Result<Incoming> {
                 name,
                 ascii: ascii == 1,
             }
+        }
+        31 => {
+            let v = r.u8()?;
+            ensure!(v <= 1, "invalid locked flag");
+            Incoming::ScreenLocked(v == 1)
         }
         _ => bail!("unknown host message type {kind}"),
     };
