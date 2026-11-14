@@ -61,6 +61,12 @@ pub enum Out {
         pane: String,
         before: u32,
         lines: Vec<String>,
+        /// Indexes into `lines` of rows whose next row continues them.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        wrapped: Vec<u32>,
+        /// How many rows of scrollback the pane held when this was read.
+        #[serde(default)]
+        hist: u32,
     },
     Pasted {
         ok: bool,

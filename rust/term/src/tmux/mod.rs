@@ -12,6 +12,15 @@ use tokio::io::AsyncWriteExt;
 
 /// The most text one paste may carry, in bytes.
 pub const MAX_PASTE: usize = 1_048_576;
+/// A slice of scrollback: `wrapped` holds indexes into `lines` (k: row k+1 continues row k); `size` is how many rows
+/// of scrollback the pane held when it was read.
+#[derive(Debug, Default, PartialEq)]
+pub struct HistoryRows {
+    pub lines: Vec<String>,
+    pub wrapped: Vec<u32>,
+    pub size: u32,
+}
+
 /// The most scrollback rows one `history` call reads.
 pub const MAX_HISTORY: u32 = 2000;
 
@@ -229,15 +238,16 @@ impl Tmux {
         self.run(&args).await.map(|_| ())
     }
 
-    /// `lines` rows of scrollback (at most `MAX_HISTORY`) ending `before` rows above the visible screen.
-    pub async fn history(&self, pane: &str, before: u32, lines: u32) -> anyhow::Result<Vec<String>> {
+    /// `lines` rows of scrollback (at most `MAX_HISTORY`) ending `before` rows above the visible screen, which of
+    /// them continue on the next row, and how many rows of scrollback the pane held.
+    pub async fn history(&self, pane: &str, before: u32, lines: u32) -> anyhow::Result<HistoryRows> {
         if lines == 0 {
-            return Ok(Vec::new());
+            return Ok(HistoryRows::default());
         }
         let size = self.run(&cmd::history_size(pane)).await?;
         let size: u32 = size.trim().parse().map_err(|_| anyhow::anyhow!("could not read the pane history size"))?;
         if before >= size {
-            return Ok(Vec::new());
+            return Ok(HistoryRows { size, ..HistoryRows::default() });
         }
         let lines = lines.min(MAX_HISTORY).min(size - before);
         let out = self.run(&cmd::history(pane, before, lines)).await?;
@@ -245,7 +255,11 @@ impl Tmux {
         if v.last().is_some_and(|l| l.is_empty()) {
             v.pop();
         }
-        Ok(v)
+        let joined = self.run(&cmd::history_joined(pane, before, lines)).await?;
+        let joined: Vec<String> = joined.lines().map(String::from).collect();
+        let plain: Vec<String> = v.iter().map(|l| strip_escapes(l)).collect();
+        let wrapped = wrapped_rows(&plain, &joined).into_iter().map(u32::from).collect();
+        Ok(HistoryRows { lines: v, wrapped, size })
     }
 }
 

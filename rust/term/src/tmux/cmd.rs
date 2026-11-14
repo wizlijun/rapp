@@ -67,6 +67,13 @@ pub fn history(pane: &str, before: u32, lines: u32) -> Vec<String> {
     ["capture-pane", "-e", "-p", "-t", pane, "-S", &start, "-E", &end].map(String::from).to_vec()
 }
 
+/// The same rows as `history`, with wrapped rows joined and no escapes: what `wrapped_rows` compares against.
+pub fn history_joined(pane: &str, before: u32, lines: u32) -> Vec<String> {
+    let start = format!("-{}", before as u64 + lines as u64);
+    let end = format!("-{}", before as u64 + 1);
+    ["capture-pane", "-p", "-J", "-t", pane, "-S", &start, "-E", &end].map(String::from).to_vec()
+}
+
 /// Send named keys (tmux key names) to `pane`.
 pub fn send_named(pane: &str, names: &[String]) -> Vec<String> {
     let mut v: Vec<String> = ["send-keys", "-t", pane].map(String::from).to_vec();
@@ -183,6 +190,8 @@ mod tests {
     fn history_range_counts_up_from_the_screen() {
         assert_eq!(history("%1", 0, 10)[5..], ["-S", "-10", "-E", "-1"].map(String::from)[..]);
         assert_eq!(history("%1", 20, 10)[5..], ["-S", "-30", "-E", "-21"].map(String::from)[..]);
+        let joined = ["capture-pane", "-p", "-J", "-t", "%1", "-S", "-30", "-E", "-21"].map(String::from);
+        assert_eq!(history_joined("%1", 20, 10), joined);
     }
     #[test]
     fn channel_line_quotes_and_refuses_what_it_cannot_quote() {

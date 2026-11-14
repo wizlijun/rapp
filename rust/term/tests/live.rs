@@ -116,12 +116,44 @@ async fn history_returns_lines_above_the_screen() {
     s.raw(&["new-session", "-d", "-s", "h", "-x", "80", "-y", "5", "seq 1 40; sleep 60"]);
     common::settle().await;
     let pane = s.tmux().list().await.unwrap()[0].pane.clone();
-    let h = s.tmux().history(&pane, 0, 10).await.unwrap();
+    let h = s.tmux().history(&pane, 0, 10).await.unwrap().lines;
     assert_eq!(h.len(), 10);
     assert_eq!(
         h.last().unwrap(),
         &s.tmux().capture(&pane).await.unwrap().lines[0].parse::<u32>().map(|n| (n - 1).to_string()).unwrap()
     );
+}
+
+#[tokio::test]
+async fn history_marks_wrapped_rows() {
+    let Some(s) = common::Server::start() else { return };
+    let cmd = format!("printf '{}\\n'; seq 1 20; sleep 60", "x".repeat(200));
+    s.raw(&["new-session", "-d", "-s", "hw", "-x", "80", "-y", "5", &cmd]);
+    common::settle().await;
+    let pane = s.tmux().list().await.unwrap()[0].pane.clone();
+    let h = s.tmux().history(&pane, 0, 200).await.unwrap();
+    assert!(h.size > 0);
+    let at = h.lines.iter().position(|l| l.starts_with('x')).unwrap() as u32;
+    assert_eq!(h.lines[at as usize + 2].chars().filter(|&c| c == 'x').count(), 40);
+    assert_eq!(h.wrapped, vec![at, at + 1]);
+    let past = s.tmux().history(&pane, h.size, 200).await.unwrap();
+    assert_eq!((past.lines.len(), past.wrapped.len(), past.size), (0, 0, h.size));
+}
+
+#[tokio::test]
+async fn served_history_carries_wrapped_rows_and_the_history_size() {
+    let Some(s) = common::Server::start() else { return };
+    let cmd = format!("printf '{}\\n'; seq 1 20; sleep 60", "x".repeat(200));
+    s.raw(&["new-session", "-d", "-s", "sh", "-x", "80", "-y", "5", &cmd]);
+    common::settle().await;
+    let mut p = pump(&s, "sh", fresh_unread());
+    let (pane, _) = greeted(&mut p).await;
+    say(&mut p.w, In::History { pane: pane.clone(), before: 0, lines: 200 }).await;
+    let Out::History { lines, wrapped, hist, .. } = next_not_panes(&mut p.lines).await else {
+        panic!("expected history")
+    };
+    let at = lines.iter().position(|l| l.starts_with('x')).unwrap() as u32;
+    assert_eq!((wrapped, hist > 0), (vec![at, at + 1], true));
 }
 
 #[tokio::test]
@@ -131,16 +163,17 @@ async fn history_ranges_are_empty_or_clamped() {
     common::settle().await;
     let pane = s.tmux().list().await.unwrap()[0].pane.clone();
     let t = s.tmux();
-    assert!(t.history(&pane, 0, 0).await.unwrap().is_empty());
-    assert!(t.history(&pane, 5, 0).await.unwrap().is_empty());
+    assert!(t.history(&pane, 0, 0).await.unwrap().lines.is_empty());
+    assert!(t.history(&pane, 5, 0).await.unwrap().lines.is_empty());
     let size: u32 = s.raw(&["display-message", "-p", "-t", &pane, "#{history_size}"]).trim().parse().unwrap();
     assert_eq!(size, 36); // 40 numbers plus the cursor row, minus the 5 visible rows
-    assert!(t.history(&pane, size, 10).await.unwrap().is_empty());
-    assert!(t.history(&pane, size + 100, 10).await.unwrap().is_empty());
-    let h = t.history(&pane, 31, 100).await.unwrap();
+    let past = t.history(&pane, size, 10).await.unwrap();
+    assert_eq!((past.lines.len(), past.size), (0, size));
+    assert!(t.history(&pane, size + 100, 10).await.unwrap().lines.is_empty());
+    let h = t.history(&pane, 31, 100).await.unwrap().lines;
     assert_eq!(h.len(), 5);
     assert_eq!(h[0], "1");
-    let all = t.history(&pane, 0, 1000).await.unwrap();
+    let all = t.history(&pane, 0, 1000).await.unwrap().lines;
     assert_eq!((all.len(), all[0].as_str(), all[35].as_str()), (36, "1", "36"));
 }
 
@@ -155,7 +188,7 @@ async fn history_gives_at_most_2000_rows_at_a_time() {
         assert!(std::time::Instant::now() < end, "the history did not fill");
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    let h = s.tmux().history(&pane, 0, u32::MAX).await.unwrap();
+    let h = s.tmux().history(&pane, 0, u32::MAX).await.unwrap().lines;
     // The 2000 rows nearest the screen: 2996 is the last one above it.
     assert_eq!((h.len(), h[0].as_str(), h[1999].as_str()), (2000, "997", "2996"));
 }
