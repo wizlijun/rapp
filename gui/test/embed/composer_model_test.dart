@@ -59,11 +59,11 @@ void main() {
     m.apply(const PasteResult(blocks: [BlockChip(2, '[图片 #2 1×1]')]));
     m.text = 'again';
     m.send();
-    m.done(1, 'A 上的目标窗口不在最前');
+    m.done(1, '远端的目标窗口不在最前');
     expect(m.blocks, isEmpty);
     expect(m.text, 'again');
     expect(dropped, [1, 2]);
-    expect(m.status, 'A 上的目标窗口不在最前');
+    expect(m.status, '远端的目标窗口不在最前');
 
     // Changed while sending: nothing is cleared.
     m.send();

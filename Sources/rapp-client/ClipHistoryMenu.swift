@@ -2,7 +2,7 @@ import AppKit
 import RappCore
 import RappSession
 
-/// The "A 的剪贴板" menu over a `ClipHistory`: click puts an entry on B's clipboard,
+/// The "远程剪贴板" menu over a `ClipHistory`: click puts an entry on B's clipboard,
 /// Option-click hands it to `onInsert`.
 final class ClipHistoryMenu {
     /// Option-click: the entry's content is on B; the composer inserts it.
@@ -18,9 +18,9 @@ final class ClipHistoryMenu {
         self.pasteboard = pasteboard
     }
 
-    /// A fresh "A 的剪贴板" item; its submenu is rebuilt from the latest entries each time it opens.
+    /// A fresh "远程剪贴板" item; its submenu is rebuilt from the latest entries each time it opens.
     func makeMenuItem() -> NSMenuItem {
-        let item = NSMenuItem(title: "A 的剪贴板", action: nil, keyEquivalent: "")
+        let item = NSMenuItem(title: "远程剪贴板", action: nil, keyEquivalent: "")
         let menu = HistoryMenu { [weak self] in self?.menuItems() ?? [] }
         item.submenu = menu
         return item
@@ -50,7 +50,7 @@ private final class HistoryMenu: NSMenu, NSMenuDelegate {
 
     init(makeItems: @escaping () -> [NSMenuItem]) {
         self.makeItems = makeItems
-        super.init(title: "A 的剪贴板")
+        super.init(title: "远程剪贴板")
         delegate = self
     }
 

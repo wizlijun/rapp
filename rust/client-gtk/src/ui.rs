@@ -678,7 +678,7 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
             .is_some_and(|p| p.started.elapsed() >= Duration::from_secs(30))
         {
             s.pending_text = None;
-            info.set_text("未收到 A 的确认，请检查远端内容后再重试");
+            info.set_text("未收到远端的确认，请检查远端内容后再重试");
             info.set_visible(true);
             notice_deadline = Some(Instant::now() + Duration::from_secs(5));
         }

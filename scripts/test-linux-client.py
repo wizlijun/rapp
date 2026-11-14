@@ -203,7 +203,7 @@ def keyboard(s):
     assert text=="test-input",text
     # Refused pastes keep the draft; the next Enter retries with a fresh sequence.
     send(s.s,26,string("Other Mac"))
-    send(s.s,21,struct.pack("<I",seq)+string("A 正在被 Other Mac 操作"))
+    send(s.s,21,struct.pack("<I",seq)+string("远端正在被 Other Mac 操作"))
     time.sleep(.2)
     xdo("key","Return")
     while True:

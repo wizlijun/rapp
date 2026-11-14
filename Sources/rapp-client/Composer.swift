@@ -189,7 +189,7 @@ final class Composer: NSTextView {
 
     private func insertData(uti: String, _ bytes: [UInt8]) {
         guard UInt64(bytes.count) <= Self.maxBytes else {
-            onStatus?("太大了，A 最多收 256 MB")
+            onStatus?("太大了，远端最多收 256 MB")
             return
         }
         insertChip(.data(uti: uti, bytes))

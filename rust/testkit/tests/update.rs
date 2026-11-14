@@ -831,7 +831,7 @@ async fn open_while_installing_is_refused() {
     let mut s = bi(conn.open_bi().await.unwrap());
     write_json(&mut s, &json!({"op":"open","app":"com.example.echo"})).await.unwrap();
     let r = read_json(&mut s).await.unwrap();
-    assert_eq!(r, json!({"ok": false, "error": "A 正在升级，请稍后再连"}));
+    assert_eq!(r, json!({"ok": false, "error": "远端正在升级，请稍后再连"}));
     assert!(!host_log(e.bins.path()).contains("start com.example.echo"), "no rapp-host for it");
 }
 

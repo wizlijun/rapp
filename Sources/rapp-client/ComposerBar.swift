@@ -138,7 +138,7 @@ final class ComposerBar: NSView, ComposerSink {
         sendButton.isEnabled = !busy
     }
 
-    /// The copy button's text for a moment ("已复制", "A 上没有复制到东西"); nil restores it.
+    /// The copy button's text for a moment ("已复制", "远端没有复制到东西"); nil restores it.
     func showCopyFeedback(_ text: String?) {
         copyButton.title = text ?? Self.copyTitle
     }

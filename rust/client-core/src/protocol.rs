@@ -445,8 +445,8 @@ pub fn takeover_notice(reason: &str) -> Option<String> {
 
 pub fn input_blocked_notice(by: &str) -> String {
     if by.is_empty() {
-        "A 正在被另一台设备操作".into()
+        "远端正在被另一台设备操作".into()
     } else {
-        format!("A 正在被 {by} 操作")
+        format!("远端正在被 {by} 操作")
     }
 }

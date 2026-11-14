@@ -148,7 +148,7 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       result(nil)
     case let .fetchClip(sid, clip):
       guard let entry = live[sid] else {
-        result(["error": "A 已断开"])
+        result(["error": "远端已断开"])
         return
       }
       // The reply comes back on main (the session hops it), where `copies` lives.

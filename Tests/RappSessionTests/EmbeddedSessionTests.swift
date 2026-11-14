@@ -187,7 +187,7 @@ final class EmbeddedSessionTests: XCTestCase {
         s.pickClip(99, insert: false)  // unknown id: nothing is taken, the status says so
         q.sync {}
         XCTAssertEqual(inserted, ["hello"])
-        XCTAssertTrue(statuses.contains("取用没成功：太旧了，A 已不保留"))
+        XCTAssertTrue(statuses.contains("取用没成功：太旧了，远端已不保留"))
     }
 
     func testStaleClipHintClearsItselfButNotANewerStatus() {
@@ -199,14 +199,14 @@ final class EmbeddedSessionTests: XCTestCase {
         q.sync {}
         Thread.sleep(forTimeInterval: 0.1)
         q.sync {}
-        XCTAssertEqual(statuses, ["取用没成功：太旧了，A 已不保留", nil])
+        XCTAssertEqual(statuses, ["取用没成功：太旧了，远端已不保留", nil])
 
         statuses = []
         s.pickClip(98, insert: false)
         q.sync { s.transfers.onStatus?("下载 a.png 10%") }  // a transfer reports before the hint expires
         RunLoop.main.run(until: Date().addingTimeInterval(0.1))
         q.sync {}
-        XCTAssertEqual(statuses, ["取用没成功：太旧了，A 已不保留", "下载 a.png 10%"])
+        XCTAssertEqual(statuses, ["取用没成功：太旧了，远端已不保留", "下载 a.png 10%"])
     }
 
     func testPickClipWhileDisconnectedSaysNothing() {
@@ -379,7 +379,7 @@ final class EmbeddedSessionTests: XCTestCase {
         q.sync { link.feed(.clip(id: 1, .text("x", truncated: false))); link.drop("x") }
         q.sync {}
         guard case let .failure(g)? = fetch(s, 1) else { return XCTFail("expected failure") }
-        XCTAssertEqual(g.reason, "A 已断开")
+        XCTAssertEqual(g.reason, "远端已断开")
     }
 
     func testTransferProgressAndStatusAreBothForwarded() throws {

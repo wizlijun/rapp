@@ -377,7 +377,7 @@ fn v6_notifications_and_paste_confirmation_are_strict() {
     assert!(decode(26, &[1, 0]).is_err());
     assert!(decode(26, &[1, 0, 255]).is_err());
     let mut ack = 42u32.to_le_bytes().to_vec();
-    string(&mut ack, "A 正在被 Mac 操作");
+    string(&mut ack, "远端正在被 Mac 操作");
     assert!(
         matches!(decode(21, &ack).unwrap(), Incoming::Pasted {seq: 42, error} if error.contains("Mac"))
     );
@@ -390,7 +390,7 @@ fn v6_notifications_and_paste_confirmation_are_strict() {
         Some("这个窗口在另一台设备上打开了".into())
     );
     assert_eq!(takeover_notice("busy"), None);
-    assert_eq!(input_blocked_notice(""), "A 正在被另一台设备操作");
+    assert_eq!(input_blocked_notice(""), "远端正在被另一台设备操作");
 }
 
 #[test]

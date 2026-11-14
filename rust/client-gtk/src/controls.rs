@@ -180,7 +180,7 @@ impl Controls {
         let history_menu = gio::Menu::new();
         history_menu.append(Some("（空）"), None);
         let history_section = gio::Menu::new();
-        history_section.append_submenu(Some("A 的剪贴板"), &history_menu);
+        history_section.append_submenu(Some("远程剪贴板"), &history_menu);
         stream_menu.append_section(None, &history_section);
         let app_menu = gio::Menu::new();
         let session = gio::Menu::new();
@@ -196,7 +196,7 @@ impl Controls {
         zoom.append_section(None, &fit_section);
         view.append_submenu(Some("缩放"), &zoom);
         view.append(
-            Some("把 A 上的这个窗口移到左上角"),
+            Some("把远端的这个窗口移到左上角"),
             Some("client.move-top-left"),
         );
         app_menu.append_section(None, &view);

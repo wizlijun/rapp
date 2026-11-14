@@ -290,7 +290,7 @@ void main() {
         peer.add(packet(21, [...u32(1), ...string('')]));
         await Future<void>.delayed(const Duration(milliseconds: 40));
         peer.add(packet(26, string('Mac')));
-        peer.add(packet(21, [...u32(2), ...string('A 正在被 Mac 操作')]));
+        peer.add(packet(21, [...u32(2), ...string('远端正在被 Mac 操作')]));
         final done =
             await nextWhere(
                   events,
@@ -298,7 +298,7 @@ void main() {
                 )
                 as ComposerStateEvent;
         expect(done.done!.sent, 1);
-        expect(done.done!.failure, 'A 正在被 Mac 操作');
+        expect(done.done!.failure, '远端正在被 Mac 操作');
         port.composerSend(31, [
           {'text': '第二段'},
         ]);

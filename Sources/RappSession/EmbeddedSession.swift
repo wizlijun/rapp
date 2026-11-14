@@ -118,7 +118,7 @@ public final class EmbeddedSession {
         run { [self] in
             guard !linkDown else { return }  // the session already shows it is disconnected
             guard let info = history.info(id) else {
-                let text = "取用没成功：太旧了，A 已不保留"
+                let text = "取用没成功：太旧了，远端已不保留"
                 showStatus(text)
                 queue.asyncAfter(deadline: .now() + staleClipHintFor) { [weak self] in
                     // Only if nothing newer (a transfer that started meanwhile) replaced it.
@@ -145,7 +145,7 @@ public final class EmbeddedSession {
         run { [self] in
             let failure: String?
             let info = history.info(id)
-            if linkDown { failure = "A 已断开" } else if info == nil { failure = "unknown clip" } else { failure = nil }
+            if linkDown { failure = "远端已断开" } else if info == nil { failure = "unknown clip" } else { failure = nil }
             DispatchQueue.main.async { [self] in
                 if let failure { return done(.failure(TransferFailure(reason: failure))) }
                 history.fetch(id, info: info!, transfers: transfers, done: done)
