@@ -4,7 +4,7 @@
 
 **Goal:** 把舞台底部横贯的输入条换成 720 宽、一行起步、往上长的写作面板，控件收进「＋」，画面打开时上移一行，并在编辑区和面板之间立起 `ComposerEditor` 接口（S1 只有 `FlutterEditor` 一种实现）。
 
-**Architecture:** 只动 GUI（Dart）。文字只有一个主人：编辑区（`ComposerEditor`）。`ComposerModel` 不再持有 `TextEditingController`，只在四个时刻向编辑区要一份全文存进 `draft`：发送（整段取走）、切会话、停笔 1 秒、收起。Enter、Esc、空 Enter、1 秒内的空 Enter 这些规则都在 `ComposerModel.submit` 和 `ComposerPanel` 里，编辑区只上报"发生了什么"。画面上移用 `Transform.translate` 包住舞台内容，舞台尺寸不变，所以 A 不会收到改尺寸。
+**Architecture:** 几乎只动 GUI（Dart）；唯一的原生改动是 macOS 按键分流让 ⌃↩ 留在 rapp（Task 6）。文字只有一个主人：编辑区（`ComposerEditor`）。`ComposerModel` 不再持有 `TextEditingController`，只在四个时刻向编辑区要一份全文存进 `draft`：发送（整段取走）、切会话、停笔 1 秒、收起。Enter、Esc、空 Enter、1 秒内的空 Enter 这些规则都在 `ComposerModel.submit` 和 `ComposerPanel` 里，编辑区只上报"发生了什么"。画面上移用 `Transform.translate` 包住舞台内容，舞台尺寸不变，所以 A 不会收到改尺寸。
 
 **Tech Stack:** Flutter / Dart（`gui/`），`flutter_test`。
 
@@ -25,7 +25,7 @@
 - W5 Enter 发送；Shift+Enter 换行；组字时 Enter、Esc 归输入法；空着按 Enter 给远端发回车。
 - W6 Esc 只收起，不清空。
 - W7 发送后框留着、缩回一行、焦点留在编辑区。
-- W8 快捷键 macOS `⌃⌘I`，其他平台 `Ctrl+I`。
+- W8 快捷键所有平台都是 `Ctrl+Enter`（macOS 上是 ⌃↩），Return 和小键盘 Enter 都算。
 - W9 按键顺序：Esc、Tab、⌘、⌥、删除、←、↓、↑、→、回车；⌘ ⌥ 粘住；点按键不关浮层。
 - W11 去掉「已发送…」「已给远端发回车」这类每次都出现的提示。
 - W13 「＋」和发送固定在框的右下角，点按区域 48 高。
@@ -55,7 +55,7 @@
 | Create `gui/lib/embed/composer_plus.dart` | 「＋」按钮和它的浮层 |
 | Modify `gui/lib/embed/remote_session.dart:48-55` | `_allSent` 去掉提示 |
 | Modify `gui/lib/ui/stage.dart:139-160` | 画面上移 |
-| Modify `gui/lib/ui/main_window.dart:139-160`、`gui/lib/ui/main_state.dart`、`gui/lib/embed/picture.dart`、`gui/lib/embed/linux_session_port.dart:109-135` | W8 快捷键 |
+| Modify `Sources/RappSession/KeyRouting.swift`、`gui/lib/ui/main_window.dart:139-160`、`gui/lib/ui/main_state.dart`、`gui/lib/embed/picture.dart`、`gui/lib/embed/linux_session_port.dart:109-135` | W8 快捷键 Ctrl+Enter |
 | Tests | `test/embed/composer_model_test.dart`（改写）、`test/embed/flutter_editor_test.dart`（新）、`test/embed/composer_panel_test.dart`（由 `composer_bar_test.dart` 改名改写）、`test/ui/stage_test.dart`、`test/ui/main_window_test.dart`、`test/ui/main_state_test.dart`、`test/embed/remote_session_test.dart`、`test/embed/linux_session_port_test.dart` |
 
 ---
@@ -468,20 +468,35 @@ git commit -m "feat(gui): the picture moves up one line while the writing panel 
 
 ---
 
-### Task 6: 快捷键 ⌃⌘I / Ctrl+I（W8）
+### Task 6: 快捷键 Ctrl+Enter（W8）
+
+所有平台都是 Ctrl+Enter（macOS 上是 ⌃↩），用户 2026-11-14 定。代价用户知道：macOS 上远端收不到 ⌃↩，Linux 上远端收不到 ⌘↩（Linux 的 Ctrl 对应远端的 ⌘）。Return（36）和小键盘 Enter（76）都算。
 
 **Files:**
+- Modify: `Sources/RappSession/KeyRouting.swift`（⌃↩ 留在 rapp）
 - Modify: `gui/lib/ui/main_state.dart`（加 `composerKey`）
 - Modify: `gui/lib/ui/main_window.dart:139-160`（绑定）
+- Modify: `gui/lib/embed/flutter_editor.dart`（Ctrl+Enter 不当发送、不换行，往上交）
 - Modify: `gui/lib/embed/picture.dart`（跟着 `state.pictureFocused` 取焦点）
-- Modify: `gui/lib/embed/linux_session_port.dart:109-135`（Ctrl+I 不发给 A）
-- Test: `gui/test/ui/main_window_test.dart`、`gui/test/ui/main_state_test.dart`、`gui/test/embed/linux_session_port_test.dart`
+- Modify: `gui/lib/embed/linux_session_port.dart:109-135`（Ctrl+Enter 不发给 A）
+- Test: `Tests/RappSessionTests/KeyRoutingTests.swift`、`gui/test/ui/main_window_test.dart`、`gui/test/ui/main_state_test.dart`、`gui/test/embed/flutter_editor_test.dart`、`gui/test/embed/linux_session_port_test.dart`
 
 **Interfaces:**
 - Consumes: `composer.open`、`composer.wantFocus()`、`composer.editorFocused`、`composer.releaseFocus()`（Task 1）
 - Produces: `void MainState.composerKey()`
 
 - [ ] **Step 1: 写失败的测试**
+
+```swift
+// KeyRoutingTests
+func testControlReturnStaysLocal() {
+    XCTAssertEqual(routeKey(keyCode: 36, flags: [.control], pictureFocused: true), .local)
+    XCTAssertEqual(routeKey(keyCode: 76, flags: [.control], pictureFocused: true), .local)
+    XCTAssertEqual(routeKey(keyCode: 36, flags: [], pictureFocused: true), .remote)        // plain Return goes to A
+    XCTAssertEqual(routeKey(keyCode: 36, flags: [.command], pictureFocused: true), .remote) // ⌘↩ goes to A
+    XCTAssertEqual(routeKey(keyCode: 36, flags: [.control, .shift], pictureFocused: true), .remote)
+}
+```
 
 ```dart
 // main_state_test
@@ -491,35 +506,40 @@ test('composerKey: closed → open with the caret; picture → caret; editor →
   // 3) editorFocused true，画面在舞台上 → releaseTick +1，pictureFocused == sid，open 仍是 true
 test('composerKey does nothing without a session or when composerAllowed is false', ...);
 // main_window_test
-testWidgets('⌃⌘I (macOS) / Ctrl+I opens the panel and moves the caret back and forth', ...);
-  // 按键组合按 Platform.isMacOS 选；三次按下依次：面板出现且编辑区有焦点 → 焦点到画面（Picture 的 Focus 有焦点，
-  // port 收到 picture_focus {'sid':1}）→ 编辑区又有焦点
+testWidgets('Ctrl+Enter opens the panel and moves the caret back and forth', ...);
+  // sendKeyDownEvent(controlLeft) + enter，三次依次：面板出现且编辑区有焦点 → 焦点到画面（Picture 的 Focus 有焦点，
+  // port 收到 picture_focus {'sid':1}）→ 编辑区又有焦点；编辑区里没有多出换行，也没有 composer_send
+// flutter_editor_test
+testWidgets('Ctrl+Enter is neither a send nor a newline', ...);  // onEnter 0 次，read() 不变，事件没被编辑区处理
 // linux_session_port_test
-test('Ctrl+I is rapp\'s: not sent to A', ...);  // 画面有焦点时 handleKeyEvent(Ctrl+I) == false，没有 key 消息；Ctrl+J 照旧发
+test('Ctrl+Enter is rapp\'s: not sent to A', ...);  // 画面有焦点时 handleKeyEvent(Ctrl+Enter) == false，没有 key 消息；
+                                                   // Ctrl+J、Shift+Enter、Enter 照旧发
 ```
 
 - [ ] **Step 2: 跑测试，确认失败**
 
-Run: `cd gui && ~/development/flutter/bin/flutter test test/ui/main_state_test.dart test/ui/main_window_test.dart test/embed/linux_session_port_test.dart`
+Run: `swift test --filter KeyRoutingTests`，再 `cd gui && ~/development/flutter/bin/flutter test test/ui/main_state_test.dart test/ui/main_window_test.dart test/embed/flutter_editor_test.dart test/embed/linux_session_port_test.dart`
 Expected: FAIL
 
 - [ ] **Step 3: 实现**
 
+- `KeyRouting.swift` 的 `routeKey`：`mods == [.control] && (keyCode == 36 || keyCode == 76)` 时 `.local`；文档注释里的保留组合加上 ⌃↩。`KeyTracker` 照旧会先把 A 上按着的 ⌃ 放开。
 - `MainState.composerKey()`：`final rs = currentRemote;` 为空或 `!rs.composerAllowed` 返回；三种情况照测试。第三种只在画面在舞台上（`!rs.detached`）时执行，否则只 `releaseFocus()`。
-- `main_window.dart`：`mac ? SingleActivator(keyI, control: true, meta: true, includeRepeats: false) : SingleActivator(keyI, control: true, includeRepeats: false)` → `state.composerKey`。macOS 上 ⌃⌘ 组合本来就留在 rapp（`Sources/RappSession/KeyRouting.swift:13`），不用改原生代码。
+- `main_window.dart`：`SingleActivator(LogicalKeyboardKey.enter, control: true, includeRepeats: false)` 和 `numpadEnter` 同样一条 → `state.composerKey`，所有平台一样。
+- `flutter_editor.dart`：按键处理里 Ctrl（不带其他修饰键）+ Enter 返回 `KeyEventResult.ignored`，排在 Enter 和 Shift+Enter 的判断之前，让它交给上面的快捷键。
 - `picture.dart`：`build` 里当 `state.pictureFocused == _sid && !_focus.hasFocus` 时，下一帧 `_focus.requestFocus()`。
-- `linux_session_port.dart` 的 `handleKeyEvent`：Ctrl 按着、没有 Shift/Alt、`physicalKey == PhysicalKeyboardKey.keyI` 时返回 `false`（规格 §10 提到 Ctrl+I 在终端里等于 Tab；这样做之后 A 上收不到 ⌘I，和 ⌃⌘ 组合在 macOS 上的处理一致）。
+- `linux_session_port.dart` 的 `handleKeyEvent`：只按着 Ctrl、`logicalKey` 是 `enter` 或 `numpadEnter` 时返回 `false`。
 
 - [ ] **Step 4: 跑测试，确认通过**
 
-Run: `cd gui && ~/development/flutter/bin/flutter test`
+Run: `swift test --filter KeyRoutingTests`，再 `cd gui && ~/development/flutter/bin/flutter test`
 Expected: 全部 PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add gui/lib/ui/main_state.dart gui/lib/ui/main_window.dart gui/lib/embed/picture.dart gui/lib/embed/linux_session_port.dart gui/test/ui/main_state_test.dart gui/test/ui/main_window_test.dart gui/test/embed/linux_session_port_test.dart
-git commit -m "feat(gui): ⌃⌘I / Ctrl+I opens the writing panel and moves the caret between it and the picture"
+git add Sources/RappSession/KeyRouting.swift Tests/RappSessionTests/KeyRoutingTests.swift gui/lib/ui/main_state.dart gui/lib/ui/main_window.dart gui/lib/embed/flutter_editor.dart gui/lib/embed/picture.dart gui/lib/embed/linux_session_port.dart gui/test/ui/main_state_test.dart gui/test/ui/main_window_test.dart gui/test/embed/flutter_editor_test.dart gui/test/embed/linux_session_port_test.dart
+git commit -m "feat: Ctrl+Enter opens the writing panel and moves the caret between it and the picture"
 ```
 
 ---
