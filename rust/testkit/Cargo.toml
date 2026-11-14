@@ -15,7 +15,12 @@ path = "src/bin/fake-rapp-host.rs"
 name = "fake-rapp-client"
 path = "src/bin/fake-rapp-client.rs"
 
+[[bin]]
+name = "fake-rapp-term"
+path = "src/bin/fake-rapp-term.rs"
+
 [dependencies]
+serde_json.workspace = true
 
 [dev-dependencies]
 anyhow.workspace = true
