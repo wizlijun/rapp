@@ -1,7 +1,7 @@
 // The stage: where the remote window sits; a placeholder while it is elsewhere (S1, detached).
 import 'package:flutter/material.dart';
 
-import '../embed/composer_bar.dart';
+import '../embed/composer_panel.dart';
 import '../embed/picture.dart';
 import '../embed/session_port.dart';
 import 'controls.dart';

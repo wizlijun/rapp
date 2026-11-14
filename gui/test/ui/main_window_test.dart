@@ -5,7 +5,7 @@ import 'package:rapp/paths.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rapp/embed/composer_bar.dart';
+import 'package:rapp/embed/composer_panel.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/service_client.dart';
@@ -531,14 +531,73 @@ void main() {
     await tester.pump();
     await tester.tap(find.byKey(const Key('composer-open')));
     await tester.pump(const Duration(milliseconds: 100));
-    s.currentRemote!.composer.text = 'draft text';
+    // Typed into the editor: the trip's collapse of the panel copies it into the draft.
+    await tester.enterText(find.byKey(const Key('composer-field')), 'draft text');
     s.toggleOverview();
     await tester.pump();
-    expect(find.byType(ComposerBar), findsNothing);
+    expect(find.byType(ComposerPanel), findsNothing);
+    expect(s.currentRemote!.composer.draft, 'draft text');
     s.toggleOverview();
     await tester.pump(const Duration(milliseconds: 100));
-    expect(find.byType(ComposerBar), findsOneWidget);
-    expect(s.currentRemote!.composer.text, 'draft text');
-    expect(find.text('draft text'), findsOneWidget);
+    expect(find.byType(ComposerPanel), findsOneWidget);
+    expect(tester.widget<TextField>(find.byKey(const Key('composer-field'))).controller!.text, 'draft text');
+  });
+
+  testWidgets('in fullscreen the panel is there; Esc in it collapses the panel and stays fullscreen', (tester) async {
+    s.dispose();
+    final port = FakeSessionPort();
+    s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port);
+    await pump(tester);
+    await tester.tap(find.byKey(const Key('fullscreen-button')));
+    await tester.pump();
+    expect(fs.on, isTrue);
+    await tester.runAsync(() async {
+      t.onSend = (m) {
+        if (m['cmd'] == 'open') {
+          t.emit({
+            'event': 'opened', 'sid': 1, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+            'port': 5001, 'token': 'tk', 'req': m['req'],
+          });
+        }
+      };
+      s.openOrSwitch('111', 'Safari', 'Safari');
+      for (var i = 0; i < 4; i++) {
+        await flush();
+      }
+    });
+    port.emit(const ReadyEvent(1, 'Safari'));
+    port.emit(WindowsEvent(1, [
+      const RemoteWindow(
+        id: 5,
+        parent: 0,
+        kind: WindowKind.normal,
+        title: 'w',
+        rect: Rect.fromLTWH(0, 0, 800, 600),
+        titleBar: 28,
+        resizable: true,
+        focused: true,
+        texture: 42,
+        visible: Rect.fromLTWH(0, 0, 1, 1),
+      ),
+    ]));
+    await tester.pump();
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('composer-open')));
+    await tester.pump();
+    await tester.pump();
+    expect(find.byType(ComposerPanel), findsOneWidget);
+    expect(tester.widget<TextField>(find.byKey(const Key('composer-field'))).focusNode!.hasFocus, isTrue);
+    fs.calls.clear();
+    // Esc in the editor is the panel's: it collapses, fullscreen stays.
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(find.byType(ComposerPanel), findsNothing);
+    expect(fs.calls, isEmpty);
+    expect(fs.on, isTrue);
+    // The focus is no longer in the editor: the next Esc is the window's.
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(fs.calls, [false]);
+    expect(fs.on, isFalse);
   });
 }

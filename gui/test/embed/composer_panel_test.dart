@@ -1,0 +1,550 @@
+import 'dart:io';
+
+import 'package:rapp/paths.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/app_profile.dart';
+import 'package:rapp/embed/composer_panel.dart';
+import 'package:rapp/embed/remote_session.dart';
+import 'package:rapp/embed/session_port.dart';
+import 'package:rapp/hub_client.dart';
+import 'package:rapp/ui/main_state.dart';
+import 'package:rapp/ui/prefs.dart';
+import 'package:rapp/ui/stage.dart';
+
+import '../fakes.dart';
+import '../ui/helpers.dart';
+
+void main() {
+  late FakeTransport t;
+  late HubClient hub;
+  late FakeSessionPort port;
+  late MainState es;
+  late Directory tmp;
+
+  Future<void> flush() => Future<void>.delayed(Duration.zero);
+
+  setUp(() async {
+    tmp = Directory.systemTemp.createTempSync('composer_panel_test');
+    t = FakeTransport();
+    hub = HubClient(t);
+    t.emit({
+      'event': 'hosts',
+      'hosts': [
+        {'id': '111', 'name': 'mini'},
+      ],
+    });
+    await flush();
+    port = FakeSessionPort();
+    es = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port);
+  });
+
+  tearDown(() {
+    es.dispose();
+    tmp.deleteSync(recursive: true);
+  });
+
+  List<Map<String, Object?>> callsOf(String method) =>
+      port.calls.where((c) => c.$1 == method).map((c) => c.$2).toList();
+
+  final fieldFinder = find.byKey(const Key('composer-field'));
+  TextField field(WidgetTester tester) => tester.widget<TextField>(fieldFinder);
+  String text(WidgetTester tester) => field(tester).controller!.text;
+  bool fieldFocused(WidgetTester tester) => field(tester).focusNode!.hasFocus;
+
+  test('panelWidth is 720, or the stage less 16 below 736', () {
+    expect(panelWidth(1200), 720);
+    expect(panelWidth(736), 720);
+    expect(panelWidth(700), 684);
+  });
+
+  group('panel', () {
+    late RemoteSession rs;
+
+    setUp(() {
+      rs = RemoteSession(1, 'Safari',
+          onDropBlock: (n) => port.composerDropBlock(1, n),
+          onReturn: () => port.key(1, 36, 0),
+          onSelectInput: (id) => port.selectInput(1, id));
+      rs.composer.open = true;
+    });
+    tearDown(() => rs.dispose());
+
+    Widget panel() =>
+        SizedBox(width: 720, child: ComposerPanel(state: es, session: rs, port: port, maxHeight: 300));
+
+    // A 1000×700 stage with the composer layer on it.
+    Widget layer({RemoteSession? s}) => wrap(SizedBox(
+        key: const Key('host'),
+        width: 1000,
+        height: 700,
+        child: Stack(children: composerLayer(state: es, session: s ?? rs, port: port))));
+
+    void big(WidgetTester tester) {
+      tester.view.physicalSize = const Size(1200, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+    }
+
+    Rect rect(WidgetTester tester, String key) => tester.getRect(find.byKey(Key(key)));
+
+    testWidgets('open: one line, 720 wide, centred, 8 above the stage bottom', (tester) async {
+      big(tester);
+      await tester.pumpWidget(layer());
+      await tester.pump();
+      final host = rect(tester, 'host');
+      final p = rect(tester, 'composer-panel');
+      expect(p.size, const Size(720, 48 + 2)); // one 48 line inside a 1 px border
+      expect(p.center.dx - host.left, 500);
+      expect(p.bottom - host.top, 692);
+      // W2: 15 on 22, no MATRIX glow in the editor.
+      final style = field(tester).style!;
+      expect(style.fontSize, 15);
+      expect(style.height, 22 / 15);
+      expect(style.shadows, isEmpty);
+    });
+
+    testWidgets('long text grows upward to half the stage, bottom and width fixed', (tester) async {
+      big(tester);
+      await tester.pumpWidget(layer());
+      await tester.pump();
+      final before = rect(tester, 'composer-panel');
+      rs.composer.setDraft(List.generate(40, (i) => 'line $i').join('\n'));
+      await tester.pump(); // W16: one frame, no animation
+      final after = rect(tester, 'composer-panel');
+      expect(after.height, greaterThan(before.height));
+      expect(after.height, lessThanOrEqualTo(350));
+      expect(after.bottom, before.bottom);
+      expect(after.left, before.left);
+      expect(after.width, before.width);
+    });
+
+    testWidgets('Enter sends and the box stays, one line, caret inside (W7)', (tester) async {
+      big(tester);
+      await tester.pumpWidget(layer());
+      await tester.pump();
+      await tester.enterText(fieldFinder, 'a');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      final sent = callsOf('composer_send');
+      expect(sent.single['sid'], 1);
+      expect(sent.single['pieces'], [
+        {'text': 'a'},
+      ]);
+      expect(text(tester), isEmpty);
+      expect(rect(tester, 'composer-box').height, 50);
+      expect(fieldFocused(tester), isTrue);
+      expect(find.text('发送中'), findsOneWidget);
+      rs.apply(const ComposerStateEvent(1, done: ComposerDone(1, null)));
+      await tester.pump();
+      expect(find.text('发送中'), findsNothing);
+      expect(find.byKey(const Key('composer-panel')), findsOneWidget);
+    });
+
+    testWidgets('the send button sends, and waits while a send runs', (tester) async {
+      await tester.pumpWidget(wrap(panel()));
+      await tester.pump();
+      expect(find.bySemanticsLabel('发送'), findsOneWidget);
+      await tester.enterText(fieldFinder, 'x');
+      await tester.tap(find.byKey(const Key('composer-send')));
+      await tester.pump();
+      expect(callsOf('composer_send').single['pieces'], [
+        {'text': 'x'},
+      ]);
+      await tester.enterText(fieldFinder, 'y');
+      await tester.tap(find.byKey(const Key('composer-send')));
+      await tester.pump();
+      expect(callsOf('composer_send').length, 1);
+      expect(text(tester), 'y');
+    });
+
+    testWidgets('a send switches A to English first; an empty Enter presses Return', (tester) async {
+      rs.apply(const InputSourceEvent(1, 'im', '拼音', false));
+      await tester.pumpWidget(wrap(panel()));
+      await tester.pump();
+      expect(fieldFocused(tester), isTrue);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      expect(callsOf('key'), [
+        {'sid': 1, 'keyCode': 36, 'modifiers': 0},
+      ]);
+      expect(callsOf('composer_send'), isEmpty);
+      expect(find.text('已给远端发回车'), findsNothing); // W11
+
+      port.calls.clear();
+      await tester.enterText(fieldFinder, 'hi');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      expect([for (final c in port.calls) c.$1].where((m) => m == 'select_input' || m == 'composer_send'),
+          ['select_input', 'composer_send']);
+      rs.apply(const ComposerStateEvent(1, done: ComposerDone(1, null)));
+      await tester.pump();
+      expect(text(tester), isEmpty);
+      expect(find.textContaining('已发送'), findsNothing); // W11
+    });
+
+    testWidgets('an empty Enter right after a send does nothing (W15)', (tester) async {
+      await tester.pumpWidget(wrap(panel()));
+      await tester.pump();
+      await tester.enterText(fieldFinder, 'a');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      rs.apply(const ComposerStateEvent(1, done: ComposerDone(1, null)));
+      await tester.pump();
+      port.calls.clear();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      expect(callsOf('key'), isEmpty);
+      expect(callsOf('composer_send'), isEmpty);
+    });
+
+    testWidgets('a failed send offers retry and put back', (tester) async {
+      await tester.pumpWidget(wrap(panel()));
+      await tester.pump();
+      await tester.enterText(fieldFinder, 'hello');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      rs.apply(const ComposerStateEvent(1, done: ComposerDone(0, 'A 上贴不进去')));
+      await tester.pump();
+      expect(find.text('A 上贴不进去'), findsOneWidget);
+      expect(text(tester), isEmpty);
+      await tester.tap(find.text('放回输入框'));
+      await tester.pump();
+      expect(text(tester), 'hello');
+      expect(find.text('A 上贴不进去'), findsNothing);
+
+      // The block went, the text did not: 重试 sends what is left.
+      rs.composer.apply(const PasteResult(blocks: [BlockChip(1, '[图片 #1 10×20]')]));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('composer-send')));
+      await tester.pump();
+      expect(callsOf('composer_send').last['pieces'], [
+        {'block': 1},
+        {'text': 'hello'},
+      ]);
+      rs.apply(const ComposerStateEvent(1, done: ComposerDone(1, 'boom')));
+      await tester.pump();
+      expect(find.text('boom'), findsOneWidget);
+      await tester.tap(find.text('重试'));
+      await tester.pump();
+      final sent = callsOf('composer_send');
+      expect(sent.length, 3);
+      expect(sent.last['pieces'], [
+        {'text': 'hello'},
+      ]);
+      expect(find.text('boom'), findsNothing);
+      expect(find.text('发送中'), findsOneWidget);
+    });
+
+    testWidgets('tapping a block removes it; blocks sit above the text inside the box', (tester) async {
+      rs.composer.apply(const PasteResult(blocks: [BlockChip(1, '[图片 #1 10×20]'), BlockChip(2, '[文件 a 1 B]')]));
+      await tester.pumpWidget(wrap(panel()));
+      await tester.pump();
+      final box = rect(tester, 'composer-box');
+      final chip = tester.getRect(find.text('[图片 #1 10×20]'));
+      final f = tester.getRect(fieldFinder);
+      expect(box.contains(chip.topLeft) && box.contains(chip.bottomRight), isTrue);
+      expect(chip.bottom, lessThanOrEqualTo(f.top));
+      await tester.tap(find.text('[图片 #1 10×20]'));
+      await tester.pump();
+      expect(find.text('[图片 #1 10×20]'), findsNothing);
+      expect(find.text('[文件 a 1 B]'), findsOneWidget);
+      expect(callsOf('composer_drop_block'), [
+        equals({'sid': 1, 'block': 1}),
+      ]);
+    });
+
+    testWidgets('the hint is 写给 <app>', (tester) async {
+      await tester.pumpWidget(wrap(panel()));
+      expect(find.text('写给 Safari'), findsOneWidget);
+    });
+
+    testWidgets('send and plus stay at the bottom right when tall (W13)', (tester) async {
+      big(tester);
+      rs.composer.setDraft(List.generate(10, (i) => 'line $i').join('\n'));
+      await tester.pumpWidget(layer());
+      await tester.pump();
+      final box = rect(tester, 'composer-box');
+      final send = rect(tester, 'composer-send');
+      final plus = rect(tester, 'composer-plus');
+      expect(box.height, greaterThan(100));
+      expect(send.size, const Size(48, 48));
+      expect(plus.size, const Size(48, 48));
+      expect(send.bottom, box.bottom - 1); // inside the 1 px border
+      expect(plus.bottom, box.bottom - 1);
+      expect(send.right, box.right - 1);
+      expect(plus.right, lessThanOrEqualTo(send.left));
+    });
+
+    testWidgets('⌘V pastes what the runner answers at the cursor', (tester) async {
+      port.pasteReply = {'text': 'hello'};
+      await tester.pumpWidget(wrap(panel()));
+      await tester.pump();
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pump();
+      await tester.pump();
+      expect(callsOf('composer_paste'), [
+        equals({'sid': 1}),
+      ]);
+      expect(text(tester), 'hello');
+    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
+    testWidgets('focusing the field takes focus from the picture', (tester) async {
+      await tester.runAsync(() async {
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            t.emit({
+              'event': 'opened', 'sid': 1, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+              'port': 5001, 'token': 'tk', 'req': m['req'],
+            });
+          }
+        };
+        es.openOrSwitch('111', 'Safari', 'Safari');
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      await tester.pumpWidget(wrap(panel()));
+      await tester.pump();
+      es.focusPicture(1);
+      await tester.tap(fieldFinder);
+      await tester.pump();
+      expect(es.pictureFocused, isNull);
+      expect(port.calls.last.$1, 'picture_focus');
+      expect(port.calls.last.$2, equals({'sid': null}));
+    });
+
+    testWidgets('no 「输入」 button and no panel while composerAllowed is false; both come back', (tester) async {
+      RemoteWindow rw(int id, WindowKind k) => RemoteWindow(
+          id: id,
+          parent: 0,
+          kind: k,
+          title: 'w$id',
+          rect: const Rect.fromLTWH(0, 0, 100, 100),
+          titleBar: 28,
+          resizable: true,
+          focused: false,
+          texture: id,
+          visible: const Rect.fromLTWH(0, 0, 1, 1));
+      rs.setProfile(const ResolvedProfile(
+          name: 'X', windows: [WindowRule(kind: WindowKind.dialog, action: RuleAction.noComposer)]));
+      rs.apply(WindowsEvent(1, [rw(1, WindowKind.normal)]));
+      rs.apply(WindowsEvent(1, [rw(1, WindowKind.normal), rw(2, WindowKind.dialog)]));
+      rs.composer.setDraft('草稿');
+      await tester.pumpWidget(wrap(SizedBox(
+          width: 900, height: 400, child: Stack(children: composerLayer(state: es, session: rs, port: port)))));
+      expect(find.byKey(const Key('composer-panel')), findsNothing);
+      expect(find.byKey(const Key('composer-open')), findsNothing);
+      rs.selectWindow(1);
+      await tester.pump();
+      expect(find.byKey(const Key('composer-panel')), findsOneWidget);
+      expect(text(tester), '草稿');
+    });
+
+    testWidgets('the upload strip and cancel stay while composerAllowed is false; only 输入 goes', (tester) async {
+      rs.setProfile(const ResolvedProfile(name: 'X', composer: false));
+      rs.apply(const TransferStatusEvent(1, '上传 1/2 · a.txt'));
+      await tester.pumpWidget(wrap(SizedBox(
+          width: 900, height: 400, child: Stack(children: composerLayer(state: es, session: rs, port: port)))));
+      expect(find.byKey(const Key('composer-open')), findsNothing);
+      expect(find.text('上传 1/2 · a.txt'), findsOneWidget);
+      await tester.tap(find.text('取消'));
+      expect(callsOf('cancel_transfer').single, equals({'sid': 1}));
+    });
+  });
+
+  group('stage', () {
+    RemoteWindow rw(int id, double w, double h) => RemoteWindow(
+          id: id,
+          parent: 0,
+          kind: WindowKind.normal,
+          title: 'w$id',
+          rect: Rect.fromLTWH(0, 0, w, h),
+          titleBar: 28,
+          resizable: true,
+          focused: true,
+          texture: 42,
+          visible: const Rect.fromLTWH(0, 0, 1, 1),
+        );
+
+    Future<void> openEmbedded(WidgetTester tester, {int sid = 1, String app = 'Safari'}) async {
+      await tester.runAsync(() async {
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            t.emit({
+              'event': 'opened', 'sid': sid, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+              'port': 5000 + sid, 'token': 'tk', 'req': m['req'],
+            });
+          }
+        };
+        es.openOrSwitch('111', app, app);
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      await tester.pump();
+    }
+
+    testWidgets('opening the composer does not resize A', (tester) async {
+      await tester.pumpWidget(wrap(SizedBox(width: 800, height: 600, child: Stage(state: es))));
+      await openEmbedded(tester);
+      port.emit(const ReadyEvent(1, 'Safari'));
+      port.emit(WindowsEvent(1, [rw(5, 800, 628)]));
+      await tester.pump();
+      await tester.pump();
+      final before = tester.getSize(find.byKey(const Key('stage')));
+      port.calls.removeWhere((c) => c.$1 == 'resize');
+      expect(find.byType(ComposerPanel), findsNothing);
+      await tester.tap(find.byKey(const Key('composer-open')));
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.byType(ComposerPanel), findsOneWidget);
+      expect(tester.getSize(find.byKey(const Key('stage'))), before);
+      expect(port.calls.where((c) => c.$1 == 'resize'), isEmpty);
+      // R18: the draft and open state are the session's.
+      expect(es.currentRemote!.composer.open, isTrue);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.byType(ComposerPanel), findsNothing);
+      expect(port.calls.where((c) => c.$1 == 'resize'), isEmpty);
+    });
+
+    // Like MainWindow: a focused Focus above everything, and a CallbackShortcuts Esc (fullscreen).
+    var escs = 0;
+    Widget mainLike() => CallbackShortcuts(
+          bindings: {const SingleActivator(LogicalKeyboardKey.escape): () => escs++},
+          child: Focus(autofocus: true, child: SizedBox(width: 800, height: 600, child: Stage(state: es))),
+        );
+
+    Future<void> showPicture(WidgetTester tester) async {
+      escs = 0;
+      await tester.pumpWidget(wrap(mainLike()));
+      await tester.pump();
+      await openEmbedded(tester);
+      port.emit(const ReadyEvent(1, 'Safari'));
+      port.emit(WindowsEvent(1, [rw(5, 800, 628)]));
+      await tester.pump();
+      es.focusPicture(1);
+      await tester.pump();
+    }
+
+    testWidgets('opening the composer takes the caret from the picture', (tester) async {
+      await showPicture(tester);
+      port.calls.clear();
+      await tester.tap(find.byKey(const Key('composer-open')));
+      await tester.pump();
+      await tester.pump();
+      expect(fieldFocused(tester), isTrue);
+      expect(es.pictureFocused, isNull);
+      expect(port.calls.where((c) => c.$1 == 'picture_focus').map((c) => c.$2), [
+        equals({'sid': null}),
+      ]);
+    });
+
+    testWidgets('Esc collapses and keeps the text (W6); the window Esc never sees it', (tester) async {
+      await showPicture(tester);
+      await tester.tap(find.byKey(const Key('composer-open')));
+      await tester.pump();
+      await tester.pump();
+      await tester.enterText(fieldFinder, 'keep');
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      expect(find.byKey(const Key('composer-panel')), findsNothing);
+      expect(escs, 0);
+      // Collapse is a copy point: the draft has the text without waiting for the idle copy.
+      expect(es.currentRemote!.composer.draft, 'keep');
+      await tester.tap(find.byKey(const Key('composer-open')));
+      await tester.pump();
+      expect(text(tester), 'keep');
+    });
+
+    testWidgets('drafts stay with their session across a switch', (tester) async {
+      await tester.pumpWidget(wrap(SizedBox(width: 800, height: 600, child: Stage(state: es))));
+      await openEmbedded(tester);
+      port.emit(const ReadyEvent(1, 'Safari'));
+      port.emit(WindowsEvent(1, [rw(5, 800, 628)]));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('composer-open')));
+      await tester.pump();
+      await tester.enterText(fieldFinder, 'one');
+      final one = es.currentRemote!;
+
+      await openEmbedded(tester, sid: 2, app: 'Notes');
+      port.emit(const ReadyEvent(2, 'Notes'));
+      port.emit(WindowsEvent(2, [rw(6, 800, 628)]));
+      await tester.pump();
+      final two = es.currentRemote!;
+      expect(two.sid, 2);
+      expect(one.composer.draft, 'one'); // copied at the switch, not 1 s later
+      await tester.tap(find.byKey(const Key('composer-open')));
+      await tester.pump();
+      expect(text(tester), isEmpty);
+      await tester.enterText(fieldFinder, 'two');
+
+      es.select('111/Safari');
+      await tester.pump();
+      expect(es.currentRemote, same(one));
+      expect(text(tester), 'one');
+      expect(two.composer.draft, 'two');
+    });
+
+    testWidgets('a clip insert focuses the field, even over a focused picture', (tester) async {
+      await showPicture(tester);
+      port.emit(const ComposerInsertEvent(1, PasteResult(text: 'a')));
+      await tester.pump();
+      await tester.pump();
+      expect(fieldFocused(tester), isTrue);
+      expect(es.pictureFocused, isNull);
+
+      // Already open, the picture pressed meanwhile: the insert brings the caret back.
+      es.focusPicture(1);
+      await tester.pump();
+      port.emit(const ComposerInsertEvent(1, PasteResult(text: 'b')));
+      await tester.pump();
+      await tester.pump();
+      expect(fieldFocused(tester), isTrue);
+      expect(es.pictureFocused, isNull);
+      expect(text(tester), 'ab');
+    });
+
+    testWidgets('Esc and Enter while composing stay with the input method', (tester) async {
+      await showPicture(tester);
+      await tester.tap(find.byKey(const Key('composer-open')));
+      await tester.pump();
+      await tester.tap(fieldFinder);
+      await tester.pump();
+      final m = es.currentRemote!.composer;
+      field(tester).controller!.value = const TextEditingValue(
+          text: 'ni', selection: TextSelection.collapsed(offset: 2), composing: TextRange(start: 0, end: 2));
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      expect(escs, 0);
+      expect(m.open, isTrue);
+      expect(text(tester), 'ni');
+      expect(callsOf('composer_send'), isEmpty);
+      // Not composing: Esc is the panel's (collapse, the text stays), never the window's.
+      field(tester).controller!.value =
+          const TextEditingValue(text: 'ni', selection: TextSelection.collapsed(offset: 2));
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pump();
+      expect(m.open, isFalse);
+      expect(escs, 0);
+      expect(m.draft, 'ni');
+    });
+
+    testWidgets('a clip insert opens the composer with it', (tester) async {
+      await tester.pumpWidget(wrap(SizedBox(width: 800, height: 600, child: Stage(state: es))));
+      await openEmbedded(tester);
+      port.emit(const ReadyEvent(1, 'Safari'));
+      port.emit(WindowsEvent(1, [rw(5, 800, 628)]));
+      await tester.pump();
+      port.emit(const ComposerInsertEvent(1, PasteResult(text: 'from A')));
+      await tester.pump();
+      expect(find.byType(ComposerPanel), findsOneWidget);
+      expect(text(tester), 'from A');
+    });
+  });
+}

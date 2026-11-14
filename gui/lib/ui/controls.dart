@@ -15,6 +15,7 @@ class RappButton extends StatefulWidget {
     this.onPressed,
     this.semanticLabel,
     this.focusNode,
+    this.icon,
   }) : _kind = _Kind.primary;
   const RappButton.secondary({
     super.key,
@@ -22,6 +23,7 @@ class RappButton extends StatefulWidget {
     this.onPressed,
     this.semanticLabel,
     this.focusNode,
+    this.icon,
   }) : _kind = _Kind.secondary;
   const RappButton.accent({
     super.key,
@@ -29,12 +31,16 @@ class RappButton extends StatefulWidget {
     this.onPressed,
     this.semanticLabel,
     this.focusNode,
+    this.icon,
   }) : _kind = _Kind.accent;
 
   final String label;
   final VoidCallback? onPressed;
   final String? semanticLabel;
   final FocusNode? focusNode;
+
+  /// Shown instead of [label]: a square 48×48 button (give it a [semanticLabel]).
+  final IconData? icon;
   final _Kind _kind;
 
   @override
@@ -55,7 +61,9 @@ class _RappButtonState extends State<RappButton> {
       borderRadius: BorderRadius.circular(t.r),
     );
     const min = Size(48, 48);
-    final child = Text(widget.label);
+    final icon = widget.icon;
+    final child = icon == null ? Text(widget.label) : Icon(icon);
+    final pad = icon == null ? null : EdgeInsets.zero;
     final Widget button = switch (widget._kind) {
       _Kind.primary => FilledButton(
         onPressed: widget.onPressed,
@@ -64,6 +72,7 @@ class _RappButtonState extends State<RappButton> {
           backgroundColor: t.text,
           foregroundColor: t.bg,
           minimumSize: min,
+          padding: pad,
           shape: shape,
         ),
         child: child,
@@ -75,6 +84,7 @@ class _RappButtonState extends State<RappButton> {
           backgroundColor: t.accent,
           foregroundColor: t.accentInk,
           minimumSize: min,
+          padding: pad,
           shape: shape,
         ),
         child: child,
@@ -87,6 +97,7 @@ class _RappButtonState extends State<RappButton> {
           foregroundColor: t.text,
           side: BorderSide(color: t.line),
           minimumSize: min,
+          padding: pad,
           shape: shape,
         ),
         child: child,
