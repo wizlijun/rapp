@@ -17,11 +17,11 @@ fn z() -> Compress {
 #[test]
 fn hello_matches_swift_wire_layout() {
     let a = Address::parse(
-        "rapp://localhost:1234/com.example.App?token=abc&mode=color16&fps=5&protocol=4",
+        "rapp://localhost:1234/com.example.App?token=abc&mode=color16&fps=5",
         None,
     )
     .unwrap();
-    let mut expected = vec![4, 3, 0, b'a', b'b', b'c', 15, 0];
+    let mut expected = vec![9, 3, 0, b'a', b'b', b'c', 15, 0];
     expected.extend(b"com.example.App");
     expected.extend([2, 5, 0, 0, 128, 63]);
     assert_eq!(a.hello(1.), packet(1, expected));
@@ -288,7 +288,7 @@ fn menu_and_window_validation() {
 #[test]
 fn v5_clipboard_bounds_and_legacy_selection() {
     let address = Address::parse("rapp://host/?token=x", None).unwrap();
-    assert_eq!(address.hello(1.)[5], 8);
+    assert_eq!(address.hello(1.)[5], 9);
     let text = "中文 clipboard";
     let mut payload = 1u32.to_le_bytes().to_vec();
     payload.extend([0, 0]);
@@ -439,22 +439,19 @@ fn v8_input_source_is_strict_and_select_matches_host() {
     assert!(decode(29, &[1, 0, b'a', 1, 0, b'B']).is_err());
     assert_eq!(select_input(""), vec![30, 2, 0, 0, 0, 0, 0]);
     assert_eq!(select_input("a"), vec![30, 3, 0, 0, 0, 1, 0, b'a']);
-    assert!(Address::parse("rapp://host/?token=x&protocol=8", None).is_ok());
 }
 
 #[test]
 fn reconnect_address_roundtrips_without_exposing_token() {
     for host in ["localhost", "127.0.0.1", "[::1]"] {
-        for version in [4, 5, 6, 7, 8] {
-            let original = Address::parse(&format!("rapp://{host}:1234/com.example.%E6%96%87?protocol={version}&mode=duocolor&fps=30"), Some("secret".into())).unwrap();
-            let url = original.connect_url();
-            assert!(!url.contains("secret"));
-            let again = Address::parse(&url, Some(original.token.clone())).unwrap();
-            assert_eq!(again.host, original.host);
-            assert_eq!(again.app, original.app);
-            assert_eq!(again.port, original.port);
-            assert_eq!(again.hello(1.), original.hello(1.));
-        }
+        let original = Address::parse(&format!("rapp://{host}:1234/com.example.%E6%96%87?mode=duocolor&fps=30"), Some("secret".into())).unwrap();
+        let url = original.connect_url();
+        assert!(!url.contains("secret"));
+        let again = Address::parse(&url, Some(original.token.clone())).unwrap();
+        assert_eq!(again.host, original.host);
+        assert_eq!(again.app, original.app);
+        assert_eq!(again.port, original.port);
+        assert_eq!(again.hello(1.), original.hello(1.));
     }
 }
 
@@ -482,7 +479,7 @@ fn decodes_weak_strictly() {
     assert!(decode(28, &[1, 0]).is_err());
 }
 #[test]
-fn parses_protocol_7() {
-    assert_eq!(Address::parse("rapp://host/?token=x&protocol=7", None).unwrap().version, 7);
-    assert!(Address::parse("rapp://host/?token=x&protocol=9", None).is_err());
+fn hello_announces_version_9() {
+    let a = Address::parse("rapp://host/?token=x", None).unwrap();
+    assert_eq!(a.hello(1.)[5], 9);
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the real GTK worker against an independent Python v4/v5/v6 host fixture.
+"""Exercise the real GTK worker against an independent Python v9 host fixture.
 Requires a graphical session (or xvfb-run). No real host credentials are used.
 """
 import json
@@ -21,7 +21,7 @@ BINARY = Path(paths[0] if paths else "rust/target/release/rapp-client").resolve(
 
 version = json.loads(subprocess.check_output([str(BINARY), "version", "--json"], text=True))
 workspace = tomllib.loads((Path(__file__).resolve().parents[1] / "rust/Cargo.toml").read_text())
-assert version == {"version": workspace["workspace"]["package"]["version"], "protocol": 8}, version
+assert version == {"version": workspace["workspace"]["package"]["version"], "protocol": 9}, version
 print("PASS client version matches workspace")
 
 def string(s):
@@ -45,7 +45,7 @@ def recv(s):
     return kind, exact(s, length)
 
 class Session:
-    def __init__(self, version=6):
+    def __init__(self):
         self.listener = socket.socket()
         self.listener.bind(("127.0.0.1", 0))
         self.listener.listen()
@@ -56,7 +56,7 @@ class Session:
             env["GTK_IM_MODULE"] = "simple"
             env["GDK_SCALE"] = "1"
             env["GDK_DPI_SCALE"] = "1"
-        self.p = subprocess.Popen([str(BINARY), f"rapp://127.0.0.1:{self.listener.getsockname()[1]}/?mode=color16&protocol={version}", "--token-env", "RAPP_FIXTURE_TOKEN", "--json"], env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.p = subprocess.Popen([str(BINARY), f"rapp://127.0.0.1:{self.listener.getsockname()[1]}/?mode=color16", "--token-env", "RAPP_FIXTURE_TOKEN", "--json"], env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         self.events = queue.Queue()
         self.err = []
         threading.Thread(target=lambda: [self.events.put(json.loads(l)) for l in self.p.stdout], daemon=True).start()
@@ -64,7 +64,7 @@ class Session:
         self.s, _ = self.listener.accept()
         self.s.settimeout(8)
         kind, hello = recv(self.s)
-        assert kind == 1 and hello[0] == version
+        assert kind == 1 and hello[0] == 9
         assert hello[1:17] == string("fixture-secret")
         self.hello=hello
 
@@ -108,8 +108,8 @@ class Session:
         self.s.close()
         self.listener.close()
 
-def case(name, fn, version=6):
-    s = Session(version)
+def case(name, fn):
+    s = Session()
     try:
         fn(s)
         print(f"PASS {name}")
@@ -140,12 +140,10 @@ def malformed(s):
     assert "zlib" in s.finish(1)["reason"]
 
 def mismatch(s):
-    send(s.s, 3, string("protocol version mismatch: host 6, client 5 (update both sides)"))
+    send(s.s, 3, string("protocol version mismatch: host 9, client 8 (update both sides)"))
     assert "version mismatch" in s.finish(5)["reason"]
 
 case("full frame, delta, menus, adaptive stream, quit", normal)
-case("legacy v4 full/delta session", normal, version=4)
-case("legacy v5 full/delta session", normal, version=5)
 case("hub closes stdin", eof)
 case("corrupt frame exits cleanly", malformed)
 case("protocol mismatch exit code", mismatch)

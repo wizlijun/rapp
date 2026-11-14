@@ -252,8 +252,6 @@ final class Session {
 
     private var parser = MessageParser()
     private var greeted = false
-    /// The protocol version the client's hello carried; message 26 only goes to clients that understand it.
-    private var helloVersion: UInt8 = 0
     /// Holds input back while another device operates A, and paces the `input` reports (R7, R8).
     private var yield = InputYield()
     /// The device that last made this session wait.
@@ -290,7 +288,7 @@ final class Session {
     /// Clipboard history and uploads, from the moment capture is ready until the session ends.
     private(set) var transfers: TransferStore?
     private(set) var clipWatcher: ClipboardWatcher?
-    /// Set only for a v8+ client, once Ready is sent.
+    /// Set once Ready is sent.
     private var inputWatcher: InputSourceWatcher?
     private var sentInputSource: InputSourceState?
     private var paster: Paster?
@@ -386,7 +384,7 @@ final class Session {
             break
         }
         switch message {
-        case let .hello(clientToken, bundleID, mode, fps, density, version):
+        case let .hello(clientToken, bundleID, mode, fps, density, _):
             guard !greeted else { fail("unexpected hello"); return }
             greeted = true
             let app: String
@@ -400,7 +398,6 @@ final class Session {
             requestedMode = mode
             requestedDensity = density
             requestedFps = Int(fps)
-            helloVersion = version
             makePacedSender(mode: mode, fps: Int(fps))
             started = true
             awake.begin()
@@ -417,7 +414,7 @@ final class Session {
             requestedDensity = density
             requestedFps = Int(fps)  // before setPinned: its weakChanged(false) must not use the old fps
             // A manual pick leaves weak at once (that restores the requested values).
-            if clientSendsFrameAcks(helloVersion) { paced?.setPinned(pinned) }
+            paced?.setPinned(pinned)
             if paced?.weak != true { setStream(mode, fps: Int(fps), density: density) }
             else { setStream(Self.weakMode, fps: Int(fps), density: min(density, 1.0)) }
         // Window commands naming a window no longer in the table are dropped,
@@ -467,7 +464,7 @@ final class Session {
             selectInput(id)
 
         case let .frameAck(processingMs):
-            if clientSendsFrameAcks(helloVersion) { paced?.ack(processingMs: processingMs) }
+            paced?.ack(processingMs: processingMs)
         case .ready, .error, .frame, .windows, .menuBar, .clip, .pasted, .fetch, .put, .transferStart, .chunk, .inputBlocked, .weak,
              .inputSource:
             fail("unexpected message from client")
@@ -485,8 +482,7 @@ final class Session {
         case let .drop(notify):
             if let by = notify {
                 output.emit(.inputBlocked(by: by))
-                // A v5 client would drop the connection on an unknown message type (R6).
-                if clientUnderstandsInputBlocked(helloVersion) { send(.inputBlocked(by: by)) }
+                send(.inputBlocked(by: by))
             }
             // B waits for every paste's answer before sending the next piece.
             if case let .paste(seq, _) = message { send(.pasted(seq: seq, error: inputBlockedNotice(by: yieldedBy))) }
@@ -699,19 +695,15 @@ final class Session {
     }
 
     private func makePacedSender(mode: Mode, fps: Int) {
-        let paced = PacedSender(mode: mode, fps: fps, acks: clientSendsFrameAcks(helloVersion), now: uptimeSeconds) {
-            [weak self] region, payload, done in
+        let paced = PacedSender(mode: mode, fps: fps, now: uptimeSeconds) {
+            [weak self] region, payload in
             guard let self, !self.ended else { return }
             let bytes = Message.frame(region: region, payload).encoded()
             self.bytesThisSecond += bytes.count
             self.framesThisSecond += 1
             self.connection.send(content: Data(bytes), completion: .contentProcessed { [weak self] error in
                 guard let self, !self.ended else { return }
-                if let error {
-                    self.end("send failed: \(error.localizedDescription)")
-                } else {
-                    done()
-                }
+                if let error { self.end("send failed: \(error.localizedDescription)") }
             })
         }
         paced.onWeakChange = { [weak self] weak in self?.weakChanged(weak) }
@@ -729,7 +721,7 @@ final class Session {
         } else {
             setStream(requestedMode, fps: requestedFps, density: requestedDensity)
         }
-        if clientSendsFrameAcks(helloVersion) { send(.weak(weak)) }
+        send(.weak(weak))
     }
 
     private func tick() {
@@ -758,9 +750,8 @@ final class Session {
 
     // MARK: Input source (v8)
 
-    /// Tells a v8+ client A's input source now and on every change.
+    /// Tells the client A's input source now and on every change.
     private func startInputSource() {
-        guard clientUnderstandsInputSource(helloVersion) else { return }
         let watcher = InputSourceWatcher(queue: queue) { [weak self] in self?.sendInputSource() }
         watcher.start()
         inputWatcher = watcher

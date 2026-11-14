@@ -42,7 +42,7 @@ fn float(v: &Value, key: &str) -> Result<f32> {
     ensure!(f.is_finite(), "invalid coordinate");
     Ok(f)
 }
-fn command(v: &Value, version: u8) -> Result<Vec<u8>> {
+fn command(v: &Value) -> Result<Vec<u8>> {
     let id = || number(v, "window");
     Ok(match v["cmd"].as_str().context("missing command")? {
         "key" => {
@@ -102,9 +102,8 @@ fn command(v: &Value, version: u8) -> Result<Vec<u8>> {
                 .context("invalid mode")?;
             let fps = number(v, "fps")?;
             ensure!([1, 5, 15, 30].contains(&fps), "invalid fps");
-            // The pinned byte exists only in protocol 7; older hosts reject the longer packet.
-            let pinned = (version >= 7).then(|| v["pinned"].as_bool().unwrap_or(false));
-            p::stream(mode, fps as u8, float(v, "density")?.clamp(0.1, 8.), pinned)
+            let pinned = v["pinned"].as_bool().unwrap_or(false);
+            p::stream(mode, fps as u8, float(v, "density")?.clamp(0.1, 8.), Some(pinned))
         }
         "menu_pick" => {
             let path: Vec<u16> = v["path"]
@@ -149,10 +148,9 @@ fn run(out: &Output) -> Result<()> {
     let port = u16::try_from(number(&start, "port")?)?;
     let address = p::Address::parse(
         &format!(
-            "rapp://127.0.0.1:{port}/?mode={}&fps={}&protocol={}",
+            "rapp://127.0.0.1:{port}/?mode={}&fps={}",
             start["mode"].as_str().unwrap_or("color16"),
-            number(&start, "fps")?,
-            if start["protocol"].is_null() { p::VERSION as u32 } else { number(&start, "protocol")? }
+            number(&start, "fps")?
         ),
         Some(start["token"].as_str().context("missing token")?.into()),
     )?;
@@ -161,8 +159,6 @@ fn run(out: &Output) -> Result<()> {
     socket.set_nodelay(true)?;
     socket.set_write_timeout(Some(Duration::from_secs(5)))?;
     socket.write_all(&address.hello(float(&start, "density")?.clamp(0.1, 8.)))?;
-    // Optional start-JSON field "protocol" (4-8, default 8): the version announced in the hello; < 7 means no acks.
-    let version = address.version;
     let writer = Arc::new(Mutex::new(socket.try_clone()?));
     let stdin_writer = writer.clone();
     drop(input);
@@ -175,7 +171,7 @@ fn run(out: &Output) -> Result<()> {
                 _ => break,
             }
             let result = (|| -> Result<()> {
-                let packet = command(&serde_json::from_str(&line)?, version)?;
+                let packet = command(&serde_json::from_str(&line)?)?;
                 // One whole packet per lock: acks from the read loop never interleave with it.
                 stdin_writer.lock().unwrap().write_all(&packet)?;
                 Ok(())
@@ -203,12 +199,11 @@ fn run(out: &Output) -> Result<()> {
         }
     });
     socket.set_read_timeout(Some(Duration::from_secs(15)))?;
-    read_loop(&mut socket, &writer, version, out, &bytes, &frames)
+    read_loop(&mut socket, &writer, out, &bytes, &frames)
 }
 fn read_loop(
     socket: &mut TcpStream,
     writer: &Mutex<TcpStream>,
-    version: u8,
     out: &Output,
     bytes: &AtomicU64,
     frames: &AtomicU64,
@@ -248,10 +243,8 @@ fn read_loop(
                 // canvases may be replaced; compressed deltas must all be applied.
                 out.frame(frame.try_into().unwrap(), &mut pixels)?;
                 frames.fetch_add(1, Ordering::Relaxed);
-                if version >= 7 {
-                    let ms = u16::try_from(received.elapsed().as_millis()).unwrap_or(u16::MAX);
-                    writer.lock().unwrap().write_all(&p::frame_ack(ms))?;
-                }
+                let ms = u16::try_from(received.elapsed().as_millis()).unwrap_or(u16::MAX);
+                writer.lock().unwrap().write_all(&p::frame_ack(ms))?;
             }
             Incoming::Windows(windows) => {
                 let kinds = [
@@ -300,7 +293,7 @@ mod tests {
     #[test]
     fn input_packets_match_host_protocol() {
         assert_eq!(
-            command(&json!({"cmd":"resize","window":7,"w":640,"h":480}), 7).unwrap(),
+            command(&json!({"cmd":"resize","window":7,"w":640,"h":480})).unwrap(),
             p::packet(
                 9,
                 [
@@ -312,16 +305,16 @@ mod tests {
             )
         );
         assert_eq!(
-            command(&json!({"cmd":"key","keyCode":0,"modifiers":1048576,"down":false}), 7).unwrap(),
+            command(&json!({"cmd":"key","keyCode":0,"modifiers":1048576,"down":false})).unwrap(),
             p::key(0, 1 << 20, false)
         );
         assert_eq!(
-            command(&json!({"cmd":"text","text":"你好"}), 7).unwrap(),
+            command(&json!({"cmd":"text","text":"你好"})).unwrap(),
             p::packet(5, "你好".as_bytes().to_vec())
         );
-        assert_eq!(command(&json!({"cmd":"mouse","window":2,"kind":"drag","button":"left","x":1.5,"y":3.,"clicks":1}), 7).unwrap(),p::mouse(2,0,2,1.5,3.,1));
+        assert_eq!(command(&json!({"cmd":"mouse","window":2,"kind":"drag","button":"left","x":1.5,"y":3.,"clicks":1})).unwrap(),p::mouse(2,0,2,1.5,3.,1));
         assert_eq!(
-            command(&json!({"cmd":"paste","seq":7,"text":"你好"}), 7).unwrap(),
+            command(&json!({"cmd":"paste","seq":7,"text":"你好"})).unwrap(),
             p::packet(
                 20,
                 [
@@ -333,15 +326,15 @@ mod tests {
             )
         );
         assert_eq!(
-            command(&json!({"cmd":"close_window","window":7}), 7).unwrap(),
+            command(&json!({"cmd":"close_window","window":7})).unwrap(),
             p::packet(15, 7u32.to_le_bytes().to_vec())
         );
         assert_eq!(
-            command(&json!({"cmd":"select_input","id":""}), 8).unwrap(),
+            command(&json!({"cmd":"select_input","id":""})).unwrap(),
             vec![30, 2, 0, 0, 0, 0, 0]
         );
         assert_eq!(
-            command(&json!({"cmd":"select_input","id":"com.apple.keylayout.ABC"}), 8).unwrap(),
+            command(&json!({"cmd":"select_input","id":"com.apple.keylayout.ABC"})).unwrap(),
             [
                 vec![30, 25, 0, 0, 0, 23, 0],
                 b"com.apple.keylayout.ABC".to_vec()
@@ -349,7 +342,7 @@ mod tests {
             .concat()
         );
         assert_eq!(
-            command(&json!({"cmd":"paste","seq":8,"item":9}), 7).unwrap(),
+            command(&json!({"cmd":"paste","seq":8,"item":9})).unwrap(),
             p::packet(
                 20,
                 [
@@ -377,20 +370,15 @@ mod tests {
             json!({"cmd":"select_input","id":3}),
             json!({"cmd":"select_input","id":"x".repeat(1025)}),
         ] {
-            assert!(command(&v, 7).is_err());
+            assert!(command(&v).is_err());
         }
     }
     #[test]
     fn set_stream_pinned() {
         let v = json!({"cmd":"set_stream","mode":"duogray","fps":1,"density":1.,"pinned":true});
-        assert_eq!(command(&v, 7).unwrap(), p::stream(3, 1, 1., Some(true)));
+        assert_eq!(command(&v).unwrap(), p::stream(3, 1, 1., Some(true)));
         let v = json!({"cmd":"set_stream","mode":"duogray","fps":1,"density":1.});
-        assert_eq!(command(&v, 7).unwrap(), p::stream(3, 1, 1., Some(false)));
-    }
-    #[test]
-    fn set_stream_v6_has_no_pinned_byte() {
-        let v = json!({"cmd":"set_stream","mode":"duogray","fps":1,"density":1.,"pinned":true});
-        assert_eq!(command(&v, 6).unwrap(), p::stream(3, 1, 1., None));
+        assert_eq!(command(&v).unwrap(), p::stream(3, 1, 1., Some(false)));
     }
     #[derive(Clone, Default)]
     struct Sink(Arc<std::sync::Mutex<Vec<u8>>>);
@@ -418,7 +406,7 @@ mod tests {
         b.extend(data);
         p::packet(4, b)
     }
-    fn session_with_host(version: u8) -> (Sink, std::net::TcpStream, std::thread::JoinHandle<Result<()>>) {
+    fn session_with_host() -> (Sink, std::net::TcpStream, std::thread::JoinHandle<Result<()>>) {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let mut socket = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
         let (host, _) = listener.accept().unwrap();
@@ -428,7 +416,7 @@ mod tests {
         let thread = std::thread::spawn(move || {
             let (bytes, frames) = (AtomicU64::new(0), AtomicU64::new(0));
             socket.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
-            read_loop(&mut socket, &writer, version, &out, &bytes, &frames)
+            read_loop(&mut socket, &writer, &out, &bytes, &frames)
         });
         (sink, host, thread)
     }
@@ -441,7 +429,7 @@ mod tests {
     }
     #[test]
     fn acks_each_frame_over_loopback() {
-        let (sink, mut host, thread) = session_with_host(7);
+        let (sink, mut host, thread) = session_with_host();
         let mut z = flate2::Compress::new(flate2::Compression::fast(), true);
         host.write_all(&ready()).unwrap();
         host.write_all(&tiny_frame(&mut z, true, 1)).unwrap();
@@ -459,18 +447,6 @@ mod tests {
             assert!(std::time::Instant::now() < deadline, "no weak event");
             std::thread::sleep(Duration::from_millis(10));
         }
-        drop(host);
-        assert!(thread.join().unwrap().is_err());
-    }
-    #[test]
-    fn no_acks_before_v7() {
-        let (_sink, mut host, thread) = session_with_host(6);
-        let mut z = flate2::Compress::new(flate2::Compression::fast(), true);
-        host.write_all(&ready()).unwrap();
-        host.write_all(&tiny_frame(&mut z, true, 1)).unwrap();
-        host.set_read_timeout(Some(Duration::from_millis(500))).unwrap();
-        let mut b = [0; 1];
-        assert!(host.read(&mut b).is_err(), "v6 session must not ack");
         drop(host);
         assert!(thread.join().unwrap().is_err());
     }

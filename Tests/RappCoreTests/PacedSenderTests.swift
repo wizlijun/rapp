@@ -2,19 +2,19 @@ import XCTest
 @testable import RappCore
 
 final class PacedSenderTests: XCTestCase {
-    private struct Sent { let region: CanvasRect; let payload: FramePayload; let done: () -> Void }
+    private struct Sent { let region: CanvasRect; let payload: FramePayload }
 
     private var t = 0.0
     private var sent: [Sent] = []
     private var weakChanges: [Bool] = []
     private let rect = CanvasRect(x: 0, y: 0, w: 1, h: 1)
 
-    private func make(mode: Mode = .gray4, fps: Int = 30, acks: Bool = true) -> PacedSender {
+    private func make(mode: Mode = .gray4, fps: Int = 30) -> PacedSender {
         t = 0
         sent = []
         weakChanges = []
-        let s = PacedSender(mode: mode, fps: fps, acks: acks, now: { [unowned self] in self.t }) { [unowned self] r, p, d in
-            self.sent.append(Sent(region: r, payload: p, done: d))
+        let s = PacedSender(mode: mode, fps: fps, now: { [unowned self] in self.t }) { [unowned self] r, p in
+            self.sent.append(Sent(region: r, payload: p))
         }
         s.onWeakChange = { [unowned self] in self.weakChanges.append($0) }
         return s
@@ -159,29 +159,6 @@ final class PacedSenderTests: XCTestCase {
             s.tick()
         }
         XCTAssertEqual(weakChanges, [true, false])
-    }
-
-    func testV6PathUsesCompletionNotAcks() {
-        let s = make(acks: false)
-        offerSmall(s, 1)
-        offerSmall(s, 2)
-        XCTAssertEqual(sent.count, 1)
-        s.ack(processingMs: 0)
-        XCTAssertEqual(sent.count, 1)
-        sent[0].done()
-        XCTAssertEqual(sent.count, 2)
-        // A large frame is not sliced.
-        let w = 1920, h = 1080
-        s.offer(samples: randomSamples(width: w, height: h, mode: .gray4, seed: 9), width: w, height: h,
-                region: rect, captured: t)
-        sent[1].done()
-        XCTAssertEqual(sent.count, 3)
-        sent[2].done()
-        XCTAssertEqual(sent.count, 3)
-        t += 10
-        s.tick()
-        XCTAssertFalse(s.weak)
-        XCTAssertTrue(weakChanges.isEmpty)
     }
 
     func testStatsReportRttLatencyAndCap() {

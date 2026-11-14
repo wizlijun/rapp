@@ -38,7 +38,7 @@ fn upload(address: &Address, item: u32, bytes: &[u8]) -> Result<()> {
     let mut socket = socket.context("无法连接上传端口")?;
     socket.set_read_timeout(Some(Duration::from_secs(15)))?;
     socket.set_write_timeout(Some(Duration::from_secs(15)))?;
-    let mut put = vec![address.version];
+    let mut put = vec![p::VERSION];
     p::string(&mut put, &address.token);
     put.extend(item.to_le_bytes());
     put.push(0);

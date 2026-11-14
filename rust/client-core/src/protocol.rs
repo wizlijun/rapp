@@ -1,7 +1,7 @@
 use anyhow::{bail, ensure, Context, Result};
 use std::{collections::HashSet, io::Read};
 
-pub const VERSION: u8 = 8;
+pub const VERSION: u8 = 9;
 pub const MAX_MESSAGE: usize = 64 * 1024 * 1024;
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Rect {
@@ -62,7 +62,6 @@ pub enum Incoming {
 }
 #[derive(Clone, Debug)]
 pub struct Address {
-    pub version: u8,
     pub host: String,
     pub port: u16,
     pub app: String,
@@ -88,13 +87,11 @@ impl Address {
         let mut token = fallback.unwrap_or_default();
         let mut mode = 0;
         let mut fps = 15;
-        let mut version = VERSION;
         for (k, v) in u.query_pairs() {
             match k.as_ref() {
                 "token" if !v.is_empty() => token = v.into_owned(),
                 "mode" => mode = mode_number(&v).context("unknown color mode")?,
                 "fps" => fps = v.parse().context("invalid fps")?,
-                "protocol" => version = v.parse().context("invalid protocol")?,
                 _ => (),
             }
         }
@@ -104,12 +101,7 @@ impl Address {
             token.len() <= 65535 && app.len() <= 65535,
             "token or app identifier too long"
         );
-        ensure!(
-            [4, 5, 6, 7, 8].contains(&version),
-            "protocol must be 4, 5, 6, 7 or 8"
-        );
         Ok(Self {
-            version,
             host,
             port,
             app,
@@ -119,7 +111,7 @@ impl Address {
         })
     }
     pub fn hello(&self, density: f32) -> Vec<u8> {
-        let mut p = vec![self.version];
+        let mut p = vec![VERSION];
         string(&mut p, &self.token);
         string(&mut p, &self.app);
         p.extend([self.mode, self.fps]);
@@ -139,7 +131,6 @@ impl Address {
         url.set_port(Some(self.port)).unwrap();
         url.set_path(&self.app);
         url.query_pairs_mut()
-            .append_pair("protocol", &self.version.to_string())
             .append_pair(
                 "mode",
                 ["gray4", "color8", "color16", "duogray", "duocolor"][self.mode as usize],

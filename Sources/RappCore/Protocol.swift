@@ -1,18 +1,8 @@
 import Foundation
 
-/// v8 = v7 (frame acks, weak tier, pinned setStream) + remote input source.
-public let protocolVersion: UInt8 = 8
-/// The oldest client version this host still serves (older clients just never get the newer host messages).
-public let oldestClientVersion: UInt8 = 5
-
-/// Clients at v7 or later acknowledge every frame; the host paces on those acks.
-public func clientSendsFrameAcks(_ v: UInt8) -> Bool { v >= 7 }
-
-/// Whether a client that said hello with `version` understands `inputBlocked` (type 26).
-public func clientUnderstandsInputBlocked(_ version: UInt8) -> Bool { version >= 6 }
-
-/// Whether a client that said hello with `version` understands `inputSource` (type 29).
-public func clientUnderstandsInputSource(_ version: UInt8) -> Bool { version >= 8 }
+/// Protocol v9. The host and client must both speak exactly this version; frame messages carry
+/// per-tile flags (see TileCodec for the frame format).
+public let protocolVersion: UInt8 = 9
 
 /// A client's `Hello` carried a different protocol version than this build speaks.
 public struct ProtocolVersionMismatch: Error, CustomStringConvertible {
@@ -244,7 +234,7 @@ public enum Message: Equatable {
         switch type {
         case 1:
             let version = try r.u8()
-            guard (oldestClientVersion...protocolVersion).contains(version) else { throw ProtocolVersionMismatch(client: version) }
+            guard version == protocolVersion else { throw ProtocolVersionMismatch(client: version) }
             let token = try r.string(), bundleID = try r.string()
             guard let mode = Mode(rawValue: try r.u8()) else { throw CodecError("unknown mode") }
             let (fps, density) = try r.stream()
@@ -448,7 +438,7 @@ private struct Reader {
     /// The version byte that opens `fetch` and `put`.
     mutating func version() throws {
         let v = try u8()
-        guard (oldestClientVersion...protocolVersion).contains(v) else { throw ProtocolVersionMismatch(client: v) }
+        guard v == protocolVersion else { throw ProtocolVersionMismatch(client: v) }
     }
 
     mutating func clipInfo() throws -> ClipInfo {

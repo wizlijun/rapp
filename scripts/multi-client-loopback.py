@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Host-side check of multi-client takeover, input yielding and v5 clients (protocol v6).
+"""Host-side check of multi-client takeover, input yielding (protocol v9).
 
 usage: scripts/multi-client-loopback.py <path to rapp-host>
 
@@ -27,7 +27,7 @@ def s16(text):
     return struct.pack("<H", len(b)) + b
 
 
-def hello(version=6, token=TOKEN):
+def hello(version=9, token=TOKEN):
     return msg(HELLO, bytes([version]) + s16(token) + s16(APP) + bytes([0, 15]) + struct.pack("<f", 1.0))
 
 
@@ -187,7 +187,7 @@ def main():
         host = Host(host_bin, errlog)
         port = host.port
 
-        def open_client(n, version=6, name=None, token=TOKEN):
+        def open_client(n, version=9, name=None, token=TOKEN):
             s = connect(port)
             socks[n] = s
             if name:
@@ -202,9 +202,9 @@ def main():
             read_until(c1, READY, 30)
             pids = calculator_pids()
             state["calc"] = pids[0] if len(pids) == 1 else None
-            return "v6 hello got ready"
+            return "v9 hello got ready"
 
-        if not step("1 hello v6 -> ready", s1):
+        if not step("1 hello v9 -> ready", s1):
             raise SystemExit(1)
         calc_pid = state.get("calc")
 
@@ -254,23 +254,6 @@ def main():
             return "conn 4 got inputBlocked('x'); input_blocked event seen; the move was dropped"
 
         step("5 yield blocks input and tells the client", s5)
-
-        def s6():
-            c5 = open_client(5, version=5)
-            read_until(c5, READY, 30)
-            expect_closed(socks[4])
-            time.sleep(1.2)  # let the first block expire
-            m = host.mark()
-            host.command({"cmd": "yield", "by": "x"})
-            time.sleep(0.2)
-            c5.sendall(mouse_move())  # expected to be dropped
-            host.wait_event(lambda e: e.get("event") == "input_blocked" and e.get("by") == "x", 5, m)
-            seen, closed = watch(c5, 2)
-            assert INPUT_BLOCKED not in seen, "a v5 client was sent message 26"
-            assert not closed, "the v5 client was disconnected"
-            return "v5 client ready; blocked on the host side, got no 26, stayed connected"
-
-        step("6 v5 client is blocked silently", s6)
     except SystemExit:
         raise
     except BaseException as e:

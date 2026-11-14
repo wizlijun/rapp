@@ -171,12 +171,10 @@ fn connect(
                         let received = Instant::now();
                         let pixels = decoder.decode(mode, width, height, full, &data)?;
                         events.send(Event::Image(pixels, width, height, region))?;
-                        if address.version >= 7 {
-                            let ms = u16::try_from(received.elapsed().as_millis()).unwrap_or(u16::MAX);
-                            // Never drop an ack: the host pacer matches them FIFO, so a lost one desyncs it for
-                            // good. Blocking here is back-pressure; it fails only when the writer has ended.
-                            ack_tx.send(p::frame_ack(ms))?;
-                        }
+                        let ms = u16::try_from(received.elapsed().as_millis()).unwrap_or(u16::MAX);
+                        // Never drop an ack: the host pacer matches them FIFO, so a lost one desyncs it for
+                        // good. Blocking here is back-pressure; it fails only when the writer has ended.
+                        ack_tx.send(p::frame_ack(ms))?;
                     }
                     _ => {
                         if !ready {
@@ -897,11 +895,6 @@ fn install_input(
         let Some(address) = s.address.clone() else {
             return;
         };
-        if address.version == 4 {
-            s.send(p::packet(5, text.as_bytes().to_vec()));
-            e.set_text("");
-            return;
-        }
         let seq = s.next_seq;
         let Some(next) = seq.checked_add(1) else {
             return;
