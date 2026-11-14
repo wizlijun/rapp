@@ -272,6 +272,8 @@ public final class EmbeddedSession {
             onEvent?(.weak(on))
         case let .inputSource(id, name, ascii):
             onEvent?(.inputSource(id: id, name: name, ascii: ascii))
+        case let .screenLocked(locked):
+            onEvent?(.screenLocked(locked))
         default:
             break
         }

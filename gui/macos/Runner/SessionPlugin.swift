@@ -64,6 +64,8 @@ final class SessionPlugin: NSObject, FlutterPlugin {
   private var detached = [Int64: DetachedSession]()
   /// Windows the GUI hides per session (set_hidden); detached windows leave them out.
   private var hidden = [Int64: Set<UInt32>]()
+  /// The banner each session's detached windows show (Dart's `set_banner`), kept for a later detach.
+  private var banners = [Int64: String]()
   private var keyMonitor: Any?
   private var resignObserver: NSObjectProtocol?
   private var terminateObserver: NSObjectProtocol?
@@ -214,6 +216,13 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     case let .raiseDetached(sid):
       detached[sid]?.raise()
       result(nil)
+    case let .unlock(sid, password):
+      live[sid]?.session.send(.unlock(password: password))
+      result(nil)
+    case let .setBanner(sid, text):
+      banners[sid] = text.isEmpty ? nil : text
+      detached[sid]?.banner = banners[sid]
+      result(nil)
     case let .setHidden(sid, windows):
       hidden[sid] = windows.isEmpty ? nil : Set(windows)
       if let entry = live[sid] {
@@ -231,8 +240,10 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     guard shown.contains(where: { $0.info.kind.isDecorated }) else { return }
     // Keys typed on the stage were the stage's: A gets their releases before the windows move.
     if keysHolder == sid { releaseKeys() }
-    detached[sid] = DetachedSession(session: entry.session, windows: shown, beside: view?.window,
-                                    onAttach: { [weak self] in self?.attachSession(sid) })
+    let session = DetachedSession(session: entry.session, windows: shown, beside: view?.window,
+                                  onAttach: { [weak self] in self?.attachSession(sid) })
+    session.banner = banners[sid]
+    detached[sid] = session
     let payload = detachedPayload(sid: sid, detached: true, current: nil)
     channel.invokeMethod(payload.method, arguments: payload.args)
   }
@@ -431,6 +442,7 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       entry.textures = [:]
       live[sid] = nil
       hidden[sid] = nil
+      banners[sid] = nil
       panels.removeValue(forKey: sid)?.cancel(nil)
       // Its windows go with it (the close button, 「结束会话」, A quitting): no attach is sent.
       detached.removeValue(forKey: sid)?.close()
