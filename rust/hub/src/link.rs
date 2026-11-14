@@ -9,7 +9,7 @@ use crate::hosts::Host;
 use crate::Hub;
 use anyhow::{anyhow, bail, Context, Result};
 use quinn::{Connection, Endpoint};
-use rapp_conn::relay::RelayConn;
+use rapp_conn::relay::{Found, RelayConn};
 use rapp_conn::{e2e_connect, quic_facts, read_welcome, send_hello, Accepted, Me, Pipe, Role};
 use rapp_net::addr::{is_private, split_host_ref};
 use rapp_net::line::{read_json, write_json};
@@ -25,6 +25,8 @@ use std::time::Duration;
 
 pub const LAN_WAIT: Duration = Duration::from_millis(500);
 const REPLY_WAIT: Duration = Duration::from_secs(20);
+/// The relay lookup of a connect: a hung relay must not hang the connect.
+const RELAY_WAIT: Duration = Duration::from_secs(5);
 
 tokio::task_local! {
     /// Set around presence probes: they must leave hub.log alone (no `route`, no `reconnecting`).
@@ -207,34 +209,61 @@ impl Hub {
         Ok(Some((conn, key)))
     }
 
+    /// Asks the relay where `id` is (`connect`), within `RELAY_WAIT`. `None`: no relay set, or no key.
+    async fn lookup(&self, id: &str, wanted: bool) -> Result<Option<Found>> {
+        if !wanted {
+            return Ok(None);
+        }
+        let ask = async {
+            match self.relay().await? {
+                Some((relay, _)) => relay.connect_to(id).await.map(Some),
+                None => Ok(None),
+            }
+        };
+        tokio::time::timeout(RELAY_WAIT, ask).await.unwrap_or_else(|_| Err(anyhow!("relay unreachable: timed out")))
+    }
+
     async fn establish(&self, host: &Host) -> Result<Link> {
         // Read on every connect: the user may have set a key since the last one.
         let key = rapp_conn::settings::load(&self.home).key.map(Arc::new);
-        // The relay first: its `connect` also tells A somebody is coming, and may know more addresses.
-        let mut relay_err = None;
+        // The relay lookup (its `connect` also tells A somebody is coming, and may name more addresses)
+        // runs alongside the race over the saved addresses; a relay that is down never delays a LAN win.
+        let lookup = self.lookup(&host.id, key.is_some());
+        tokio::pin!(lookup);
+        let mut looked_up = None;
         let mut found = None;
-        if key.is_some() {
-            let looked_up = match self.relay().await {
-                Ok(Some((relay, _))) => Some(relay.connect_to(&host.id).await),
-                Ok(None) => None,
-                Err(e) => Some(Err(e)),
-            };
-            match looked_up {
-                Some(Ok(f)) => found = Some(f),
-                Some(Err(e)) => relay_err = Some(e),
-                None => {}
-            }
-        }
-        let mut lan = host.lan.clone();
-        for a in found.iter().flat_map(|f| &f.lan) {
-            if !lan.contains(a) {
-                lan.push(a.clone());
-            }
-        }
+        let mut relay_err = None;
         if key.is_some() || host.fp.is_some() {
             // Seen with a key before, or nothing to fall back on: the answer stands.
             let settled = host.fp.is_some() || host.password.is_empty();
-            match self.first_v2(host, &dial_order(&lan), key).await {
+            let order = dial_order(&host.lan);
+            let stored = self.first_v2(host, &order, key.clone());
+            tokio::pin!(stored);
+            let mut raced = None;
+            while raced.is_none() {
+                tokio::select! {
+                    r = &mut stored => raced = Some(r),
+                    l = &mut lookup, if looked_up.is_none() => looked_up = Some(l),
+                }
+            }
+            let mut raced = raced.expect("race finished");
+            if matches!(raced, Ok(None)) {
+                let l = match looked_up.take() {
+                    Some(l) => l,
+                    None => lookup.await,
+                };
+                match l {
+                    Ok(f) => found = f,
+                    Err(e) => relay_err = Some(e),
+                }
+                // Addresses only the relay knew.
+                let extra: Vec<String> =
+                    found.iter().flat_map(|f| &f.lan).filter(|a| !host.lan.contains(a)).cloned().collect();
+                if !extra.is_empty() {
+                    raced = self.first_v2(host, &dial_order(&extra), key).await;
+                }
+            }
+            match raced {
                 Ok(Some((link, _))) => return Ok(link),
                 Err(e) if settled => return Err(e),
                 Err(_) => {}
@@ -247,7 +276,7 @@ impl Hub {
                         self.route(&host.id, "relay", None, Err(format!("{e:#}")));
                         return Err(e);
                     }
-                    bail!(if lan.is_empty() {
+                    bail!(if host.lan.is_empty() {
                         "no address: add the host again as id@ip"
                     } else {
                         "offline: no LAN address answered"

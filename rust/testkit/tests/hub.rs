@@ -1191,3 +1191,25 @@ async fn changed_relay_settings_redial() {
     assert_eq!(hub.call(json!({"cmd":"apps","id":a.id})).await["path"], "relay");
     hub.finish().await;
 }
+
+#[tokio::test]
+async fn dead_relay_does_not_delay_lan() {
+    // The relay address answers nothing (its dial would wait out the 10 s timeout); A is on its LAN.
+    let a = service().await;
+    let mut key = rapp_wire::Key::new_local();
+    key.relay = Some([7u8; 16]);
+    a_key(&a, &key).await;
+    let home = tempfile::tempdir().unwrap();
+    hub_key(home.path(), &key);
+    let mut hub = Hub::start(home.path(), a.bins.path());
+    assert_eq!(hub.call(json!({"cmd":"add_host","id":at(&a)})).await["event"], "host_added");
+    hub.finish().await;
+    let hole = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    hub_relay(home.path(), &hole.local_addr().unwrap().to_string(), &key);
+    let mut hub = Hub::start(home.path(), a.bins.path());
+    let start = std::time::Instant::now();
+    let r = hub.call(json!({"cmd":"apps","id":a.id})).await;
+    assert_eq!((&r["path"], &r["apps"]), (&json!("lan"), &apps()), "{r}");
+    assert!(start.elapsed() < Duration::from_secs(2), "LAN waited for the relay: {:?}", start.elapsed());
+    hub.finish().await;
+}
