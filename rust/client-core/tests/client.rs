@@ -466,15 +466,13 @@ fn frame_ack_bytes() {
     assert_eq!(frame_ack(300), packet(27, 300u16.to_le_bytes().to_vec()));
 }
 #[test]
-fn stream_pinned_only_when_asked() {
-    let old = stream(3, 1, 1., None);
+fn stream_always_carries_pinned() {
     let mut payload = vec![3, 1];
     payload.extend(1f32.to_le_bytes());
-    assert_eq!(old, packet(11, payload.clone()));
     payload.push(1);
-    assert_eq!(stream(3, 1, 1., Some(true)), packet(11, payload.clone()));
+    assert_eq!(stream(3, 1, 1., true), packet(11, payload.clone()));
     *payload.last_mut().unwrap() = 0;
-    assert_eq!(stream(3, 1, 1., Some(false)), packet(11, payload));
+    assert_eq!(stream(3, 1, 1., false), packet(11, payload));
 }
 #[test]
 fn decodes_weak_strictly() {

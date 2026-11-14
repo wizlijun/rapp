@@ -190,12 +190,12 @@ pub fn scroll(id: u32, x: f32, y: f32, dx: f32, dy: f32) -> Vec<u8> {
 pub fn frame_ack(processing_ms: u16) -> Vec<u8> {
     packet(27, processing_ms.to_le_bytes().to_vec())
 }
-pub fn stream(mode: u8, fps: u8, density: f32, pinned: Option<bool>) -> Vec<u8> {
+/// Stream settings (type 11). `pinned`: the user picked them, so the host must
+/// not switch to the weak-network tier on its own.
+pub fn stream(mode: u8, fps: u8, density: f32, pinned: bool) -> Vec<u8> {
     let mut p = vec![mode, fps];
     p.extend(density.to_le_bytes());
-    if let Some(pinned) = pinned {
-        p.push(pinned as u8);
-    }
+    p.push(pinned as u8);
     packet(11, p)
 }
 pub fn menu_pick(path: &[u16]) -> Vec<u8> {

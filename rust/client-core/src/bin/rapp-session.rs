@@ -103,7 +103,7 @@ fn command(v: &Value) -> Result<Vec<u8>> {
             let fps = number(v, "fps")?;
             ensure!([1, 5, 15, 30].contains(&fps), "invalid fps");
             let pinned = v["pinned"].as_bool().unwrap_or(false);
-            p::stream(mode, fps as u8, float(v, "density")?.clamp(0.1, 8.), Some(pinned))
+            p::stream(mode, fps as u8, float(v, "density")?.clamp(0.1, 8.), pinned)
         }
         "menu_pick" => {
             let path: Vec<u16> = v["path"]
@@ -380,9 +380,9 @@ mod tests {
     #[test]
     fn set_stream_pinned() {
         let v = json!({"cmd":"set_stream","mode":"duogray","fps":1,"density":1.,"pinned":true});
-        assert_eq!(command(&v).unwrap(), p::stream(3, 1, 1., Some(true)));
+        assert_eq!(command(&v).unwrap(), p::stream(3, 1, 1., true));
         let v = json!({"cmd":"set_stream","mode":"duogray","fps":1,"density":1.});
-        assert_eq!(command(&v).unwrap(), p::stream(3, 1, 1., Some(false)));
+        assert_eq!(command(&v).unwrap(), p::stream(3, 1, 1., false));
     }
     #[derive(Clone, Default)]
     struct Sink(Arc<std::sync::Mutex<Vec<u8>>>);

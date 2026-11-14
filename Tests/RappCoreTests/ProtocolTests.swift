@@ -148,28 +148,31 @@ final class ProtocolTests: XCTestCase {
         assertRejects(frame(12, [1, 0, 2, 0]), "v3 size")
     }
 
-    /// A SetStream payload: mode, fps, density (f32 LE).
-    private func setStream(mode: UInt8 = 0, fps: UInt8 = 15, density: Float) -> [UInt8] {
+    /// A SetStream frame: mode, fps, density (f32 LE), pinned.
+    private func setStream(mode: UInt8 = 0, fps: UInt8 = 15, density: Float, pinned: UInt8 = 0) -> [UInt8] {
         let d = density.bitPattern
-        return [11, 6, 0, 0, 0, mode, fps, UInt8(d & 0xFF), UInt8(d >> 8 & 0xFF), UInt8(d >> 16 & 0xFF), UInt8(d >> 24)]
+        return [11, 7, 0, 0, 0, mode, fps, UInt8(d & 0xFF), UInt8(d >> 8 & 0xFF), UInt8(d >> 16 & 0xFF), UInt8(d >> 24),
+                pinned]
     }
 
-    func testV6SetStreamWithoutPinnedDecodesUnpinned() throws {
-        var bytes = setStream(mode: 3, fps: 5, density: 1.25)
-        let withPinned = bytes + [1]
-        XCTAssertEqual(try decodeOne(bytes), .setStream(mode: .duogray, fps: 5, density: 1.25, pinned: false))
-        bytes = withPinned
-        bytes[1] = 7
-        XCTAssertEqual(try decodeOne(bytes), .setStream(mode: .duogray, fps: 5, density: 1.25, pinned: true))
+    func testSetStreamCarriesPinned() throws {
+        XCTAssertEqual(try decodeOne(setStream(mode: 3, fps: 5, density: 1.25, pinned: 1)),
+                       .setStream(mode: .duogray, fps: 5, density: 1.25, pinned: true))
+        XCTAssertEqual(try decodeOne(setStream(mode: 3, fps: 5, density: 1.25, pinned: 0)),
+                       .setStream(mode: .duogray, fps: 5, density: 1.25, pinned: false))
+    }
+
+    func testSetStreamWithoutPinnedIsRejected() {
+        var short = Array(setStream(density: 1).dropLast())
+        short[1] = 6
+        assertRejects(short, "v6 form without the pinned byte")
     }
 
     func testSetStreamWithTwoTrailingBytesIsRejected() {
-        var bytes = setStream(density: 1) + [0, 0]
+        var bytes = setStream(density: 1) + [0]
         bytes[1] = 8
         assertRejects(bytes, "two trailing bytes")
-        var bad = setStream(density: 1) + [2]
-        bad[1] = 7
-        assertRejects(bad, "pinned flag above 1")
+        assertRejects(setStream(density: 1, pinned: 2), "pinned flag above 1")
     }
 
     func testFrameAckAndWeakWireFormat() throws {

@@ -94,7 +94,7 @@ public enum Message: Equatable {
     case mouse(kind: MouseKind, button: MouseButton, window: UInt32, x: Float, y: Float, clickCount: UInt8)  // 7
     case scroll(window: UInt32, x: Float, y: Float, dx: Float, dy: Float)                    // 8
     case resize(window: UInt32, width: UInt16, height: UInt16)                               // 9, client -> host (content points)
-    case setStream(mode: Mode, fps: UInt8, density: Float, pinned: Bool)                     // 11, client -> host; v6 omits the trailing pinned byte
+    case setStream(mode: Mode, fps: UInt8, density: Float, pinned: Bool)                     // 11, client -> host; ends with the pinned byte (0 or 1)
     case windows([WindowInfo])                                                               // 13, host -> client, front to back
     case focus(UInt32)                                                                       // 14, client -> host
     case close(UInt32)                                                                       // 15, client -> host
@@ -272,13 +272,9 @@ public enum Message: Equatable {
         case 11:
             guard let mode = Mode(rawValue: try r.u8()) else { throw CodecError("unknown mode") }
             let (fps, density) = try r.stream()
-            var pinned = false
-            if !r.isAtEnd {
-                let flag = try r.u8()
-                guard flag <= 1 else { throw CodecError("bad pinned flag") }
-                pinned = flag == 1
-            }
-            message = .setStream(mode: mode, fps: fps, density: density, pinned: pinned)
+            let flag = try r.u8()
+            guard flag <= 1 else { throw CodecError("bad pinned flag") }
+            message = .setStream(mode: mode, fps: fps, density: density, pinned: flag == 1)
         case 13:
             message = .windows(try r.windows())
         case 14:
