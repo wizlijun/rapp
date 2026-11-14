@@ -17,6 +17,14 @@ void main() {
     expect(cellWidth(0x1F600), 2);
     expect(cellWidth(0x0301), 0);
   });
+  test('emoji take two cells, symbols and box drawing one', () {
+    for (final r in [0x1F680, 0x2705, 0x231A, 0x1FA70]) {
+      expect(cellWidth(r), 2, reason: r.toRadixString(16));
+    }
+    expect(cellWidth(0x2713), 1);
+    expect(cellWidth(0x2500), 1);
+    expect(parseRow('\u{1F680}a').columns, 3);
+  });
   test('a combining mark joins the cell before it', () {
     expect(parseRow('éx').cells.map((c) => c.ch).toList(), ['é', 'x']);
   });
