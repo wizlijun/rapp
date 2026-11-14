@@ -180,7 +180,7 @@ class _ComposerBarState extends State<ComposerBar> {
           final status = _m.status, transfer = widget.session.transferStatus;
           return Container(
             key: const Key('composer-bar'),
-            decoration: t.panelBox(),
+            decoration: t.stageBox(),
             padding: const EdgeInsets.all(8),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -286,30 +286,35 @@ List<Widget> composerLayer({required MainState state, required RemoteSession ses
           // An open bar carries its own strip; a disallowed one is hidden, so the strip shows here.
           if ((session.composer.open && button) || (transfer == null && !button)) return const SizedBox.shrink();
           final t = RappTokens.of(context);
+          // One floating layer (design language §8): the button's own `raise` fill is
+          // translucent, so the opaque box behind it carries the contrast.
           return Listener(
             onPointerDown: (_) => state.blurPicture(),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (transfer != null) ...[
-                  DecoratedBox(
-                    decoration: t.panelBox(),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      child: Text(transfer, style: TextStyle(color: t.muted)),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  RappButton.secondary(label: '取消', onPressed: () => port.cancelTransfer(session.sid)),
-                  const SizedBox(width: 8),
-                ],
-                if (button)
-                  RappButton.secondary(
-                    key: const Key('composer-open'),
-                    label: '输入',
-                    onPressed: () => session.composer.open = true,
-                  ),
-              ],
+            child: DecoratedBox(
+              decoration: t.stageBox(),
+              child: Padding(
+                padding: const EdgeInsets.all(4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (transfer != null) ...[
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                        child: Text(transfer, style: TextStyle(color: t.muted)),
+                      ),
+                      const SizedBox(width: 8),
+                      RappButton.secondary(label: '取消', onPressed: () => port.cancelTransfer(session.sid)),
+                      const SizedBox(width: 8),
+                    ],
+                    if (button)
+                      RappButton.secondary(
+                        key: const Key('composer-open'),
+                        label: '输入',
+                        onPressed: () => session.composer.open = true,
+                      ),
+                  ],
+                ),
+              ),
             ),
           );
         },

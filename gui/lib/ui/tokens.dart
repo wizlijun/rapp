@@ -86,6 +86,15 @@ class RappTokens extends ThemeExtension<RappTokens> {
   BoxDecoration panelBox({Color? border}) => _box(panel, border);
   BoxDecoration raiseBox({Color? border}) => _box(raise, border);
 
+  /// A layer floating over the stage's picture: opaque `bg`, `text` border, dark shadow
+  /// (design language §8). `panelBox` is glass on AVATAR and IRON MAN and washes out there.
+  BoxDecoration stageBox() => BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(r),
+        border: Border.all(color: text),
+        boxShadow: const [BoxShadow(color: Color(0x99000000), blurRadius: 24)],
+      );
+
   @override
   RappTokens copyWith({Color? bg, Color? text}) => RappTokens(
     bg: bg ?? this.bg,

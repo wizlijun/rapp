@@ -77,7 +77,7 @@ class _CornerPopoverState extends State<CornerPopover> {
                     child: Container(
                       width: 340,
                       constraints: BoxConstraints(maxHeight: (MediaQuery.sizeOf(context).height - 80).clamp(200, 900)),
-                      decoration: t.panelBox(),
+                      decoration: t.stageBox(),
                       child: widget.popover,
                     ),
                   ),
