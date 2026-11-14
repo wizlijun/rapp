@@ -89,6 +89,53 @@ void main() {
       ]);
     });
 
+    testWidgets('a caret jump outside the composition snaps back into it', (tester) async {
+      await tester.pumpWidget(wrap(bar()));
+      await tester.tap(find.byType(TextField));
+      await tester.pump();
+      final c = rs.composer.controller;
+
+      // fcitx5's preedit, arriving the way the platform delivers it.
+      tester.testTextInput.updateEditingValue(const TextEditingValue(
+          text: 'bu dui',
+          selection: TextSelection.collapsed(offset: 6),
+          composing: TextRange(start: 0, end: 6)));
+      await tester.pump();
+      expect(c.value.composing, const TextRange(start: 0, end: 6));
+
+      // A stray tap during composition cannot reposition the caret, so the
+      // input method never re-anchors its preedit mid-composition.
+      await tester.tap(find.byType(TextField));
+      await tester.pump();
+      expect(c.value.selection.extentOffset, 6);
+      expect(c.value.text, 'bu dui');
+      expect(c.value.composing, const TextRange(start: 0, end: 6));
+      expect(c.value.composing, const TextRange(start: 0, end: 6));
+      expect(c.value.text, 'bu dui');
+    });
+
+    testWidgets('caret moves inside the composition stay untouched', (tester) async {
+      await tester.pumpWidget(wrap(bar()));
+      await tester.tap(find.byType(TextField));
+      await tester.pump();
+      final c = rs.composer.controller;
+
+      tester.testTextInput.updateEditingValue(const TextEditingValue(
+          text: 'bu dui',
+          selection: const TextSelection(baseOffset: 2, extentOffset: 4),
+          composing: const TextRange(start: 0, end: 6)));
+      await tester.pump();
+      expect(c.value.selection, const TextSelection(baseOffset: 2, extentOffset: 4));
+
+      // No composition: the caret is the user's, never touched.
+      tester.testTextInput.updateEditingValue(const TextEditingValue(
+          text: 'bu dui',
+          selection: TextSelection.collapsed(offset: 0),
+          composing: TextRange.empty));
+      await tester.pump();
+      expect(c.value.selection, const TextSelection.collapsed(offset: 0));
+    });
+
     testWidgets('keys row sends codes with sticky command', (tester) async {
       await tester.pumpWidget(wrap(bar()));
       await tester.tap(find.text('按键'));

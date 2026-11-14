@@ -71,7 +71,18 @@ class _ComposerBarState extends State<ComposerBar> {
   }
 
   void _focusChanged() {
-    if (_field.hasFocus) widget.state.blurPicture();
+    if (_field.hasFocus) {
+      widget.state.blurPicture();
+      return;
+    }
+    // The window still owns keyboard focus (the app lifecycle never paused),
+    // so this blur came from inside: a tap landing on the input method's own
+    // candidate surface cancels the composition and drops the field's focus.
+    // Take it back, or the candidate bar and caret vanish and keys do nothing
+    // until the user clicks the field again.
+    if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed) {
+      _field.requestFocus();
+    }
   }
 
   void _modelChanged() {
@@ -208,18 +219,32 @@ class _ComposerBarState extends State<ComposerBar> {
                         canRequestFocus: false,
                         skipTraversal: true,
                         onKeyEvent: _onKey,
-                        child: TextField(
-                          key: const Key('composer-field'),
-                          controller: _m.controller,
-                          focusNode: _field,
-                          minLines: 1,
-                          maxLines: 6,
-                          keyboardType: TextInputType.multiline,
-                          style: TextStyle(color: t.text),
-                          decoration: const InputDecoration(
-                            hintText: '发给 A 的文字（Enter 发送，Shift+Enter 换行）',
-                            isDense: true,
-                          ),
+                        child: ValueListenableBuilder(
+                          valueListenable: _m.controller,
+                          builder: (context, value, _) {
+                            final composing = value.composing.isValid && !value.composing.isCollapsed;
+                            // A tap during composition moves the caret, and the
+                            // input method then commits its preedit at the old
+                            // spot and starts it again at the new one — every
+                            // letter lands in the text twice. While composing,
+                            // taps cannot reposition the caret.
+                            return AbsorbPointer(
+                              absorbing: composing,
+                              child: TextField(
+                                key: const Key('composer-field'),
+                                controller: _m.controller,
+                                focusNode: _field,
+                                minLines: 1,
+                                maxLines: 6,
+                                keyboardType: TextInputType.multiline,
+                                style: TextStyle(color: t.text),
+                                decoration: const InputDecoration(
+                                  hintText: '发给 A 的文字（Enter 发送，Shift+Enter 换行）',
+                                  isDense: true,
+                                ),
+                              ),
+                            );
+                          },
                         ),
                       ),
                     ),
