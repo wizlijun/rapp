@@ -66,7 +66,8 @@ case let .listApps(json):
     let apps = listApps()
     if json {
         let granted = permissions(prompt: false)
-        output.result(appsJSON(apps, screenRecording: granted.screenRecording, accessibility: granted.accessibility))
+        output.result(appsJSON(apps, screenRecording: granted.screenRecording, accessibility: granted.accessibility,
+                               displays: currentDisplays()))
     } else if !apps.isEmpty {
         FileHandle.standardOutput.write(Data(appsText(apps).utf8))
     }

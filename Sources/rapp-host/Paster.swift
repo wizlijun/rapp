@@ -7,7 +7,8 @@ import RappCore
 final class Paster {
     private static let maxSnapshotBytes = 64 << 20
 
-    private let app: NSRunningApplication
+    /// nil in a desktop session: ⌘V goes to whatever is frontmost.
+    private let app: NSRunningApplication?
     private let queue: DispatchQueue
     private let transfers: () -> TransferStore?
     private let watcher: () -> ClipboardWatcher?
@@ -28,7 +29,7 @@ final class Paster {
     private var lastOwnChange = Int.min
     private var snapshot: [[(NSPasteboard.PasteboardType, Data)]]?
 
-    init(app: NSRunningApplication, queue: DispatchQueue, transfers: @escaping () -> TransferStore?,
+    init(app: NSRunningApplication?, queue: DispatchQueue, transfers: @escaping () -> TransferStore?,
          watcher: @escaping () -> ClipboardWatcher?, log: @escaping (String) -> Void,
          reply: @escaping (UInt32, String) -> Void) {
         self.app = app
@@ -125,13 +126,13 @@ final class Paster {
         }
         lastOwnChange = pb.changeCount
         noteOwnWrite(pb.changeCount)
-        app.activate()
+        app?.activate()
         waitFrontmost(tries: 10, seq: seq)
     }
 
     private func waitFrontmost(tries: Int, seq: UInt32) {
         guard !cancelled else { return }
-        if NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier {
+        if app == nil || NSWorkspace.shared.frontmostApplication?.processIdentifier == app?.processIdentifier {
             sendPaste()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                 self.queue.async { self.finish(seq: seq, error: "") }

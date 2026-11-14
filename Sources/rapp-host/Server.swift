@@ -301,6 +301,13 @@ final class Session {
     private var pendingMenuRead: DispatchWorkItem?
     private var focusedWindow: UInt32?
 
+    /// A desktop session (`desktop:` or `desktop:<id>`): the whole display, no app.
+    private var desktop = false
+    /// The lock state last sent (every session, v10); nil before ready.
+    private var sentLocked: Bool?
+    /// A password is being typed at the lock screen; another unlock waits for it.
+    private var unlocking = false
+
     /// The window table last sent; input and window commands are checked against it.
     private var table: [WindowInfo] = []
     /// The capture region last asked for (canvas points).
@@ -379,7 +386,7 @@ final class Session {
     private func handle(_ message: Message) {
         // Every command from B passes one gate; only input can be held back (R7).
         switch message {
-        case .text, .key, .mouse, .scroll, .paste, .focus, .menuPick, .setStream, .resize, .move, .close, .selectInput:
+        case .text, .key, .mouse, .scroll, .paste, .focus, .menuPick, .setStream, .resize, .move, .close, .selectInput, .unlock:
             guard started, !failing, admit(message) else { return }
         default:
             break
@@ -405,7 +412,7 @@ final class Session {
             startInputTimer()
             output.log("client connected: \(app), \(streamDescription(mode))" + (peerName.map { ", from \($0)" } ?? ""))
             output.emit(.sessionStarted(client: clientDescription, mode: mode, fps: Int(fps)))
-            startCapture(bundleID: app)
+            if let target = desktopTarget(app) { startDesktop(target) } else { startCapture(bundleID: app) }
         case .text, .key, .mouse, .scroll:
             injector?.handle(message, table: table)
             // Enabled items and check marks follow what the input did (a selection, an edit).
@@ -459,15 +466,20 @@ final class Session {
             // Picks usually change the menus (a new window, a toggled check mark).
             scheduleMenuRead(after: 1)
         case let .paste(seq, source):
+            guard let paster else {
+                // A desktop session on another screen has no clipboard; B must not wait for an answer.
+                if desktop { send(.pasted(seq: seq, error: "no clipboard on this screen")) }
+                return
+            }
             if case let .text(text) = source { inlinePastes[seq] = text.utf8.count }
-            paster?.paste(seq: seq, source)
+            paster.paste(seq: seq, source)
         case let .selectInput(id):
             selectInput(id)
 
         case let .frameAck(processingMs):
             paced?.ack(processingMs: processingMs)
-        case .unlock:
-            break // Task 2: type the password at the lock screen
+        case let .unlock(password):
+            unlock(password)
         case .ready, .error, .frame, .windows, .menuBar, .clip, .pasted, .fetch, .put, .transferStart, .chunk, .inputBlocked, .weak,
              .inputSource, .screenLocked:
             fail("unexpected message from client")
@@ -582,7 +594,22 @@ final class Session {
         scheduleMenuRead(after: 0)
         startClipboard(app: app)
         startInputSource()
+        sendLocked()
+        startTimers()
 
+        // Windows are looked up 10 times a second (spec §3.2), off the session queue.
+        let poll = DispatchSource.makeTimerSource(queue: trackerQueue)
+        poll.schedule(deadline: .now() + 0.1, repeating: 0.1)
+        poll.setEventHandler { [weak self] in
+            let next = tracker.poll()
+            self?.queue.async { self?.tableChanged(next) }
+        }
+        poll.resume()
+        pollTimer = poll
+    }
+
+    /// The 1 s tick and the 300 ms settle check, for app and desktop sessions alike.
+    private func startTimers() {
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + 1, repeating: 1.0)
         timer.setEventHandler { [weak self] in self?.tick() }
@@ -598,23 +625,101 @@ final class Session {
         }
         settle.resume()
         self.settleTimer = settle
-
-        // Windows are looked up 10 times a second (spec §3.2), off the session queue.
-        let poll = DispatchSource.makeTimerSource(queue: trackerQueue)
-        poll.schedule(deadline: .now() + 0.1, repeating: 0.1)
-        poll.setEventHandler { [weak self] in
-            let next = tracker.poll()
-            self?.queue.async { self?.tableChanged(next) }
-        }
-        poll.resume()
-        pollTimer = poll
     }
 
-    private func startClipboard(app: NSRunningApplication) {
+    // MARK: Desktop sessions
+
+    /// The whole display `target` names: one fixed window the size of the display, no menus.
+    private func startDesktop(_ target: DesktopTarget) {
+        desktop = true
+        let (fps, density) = (self.fps, Double(self.density))
+        Task { [weak self] in
+            do {
+                let (scDisplay, info, number) = try await WindowCapture.findDisplay(target)
+                guard let self else { return }
+                let frame = scDisplay.frame
+                let region = CanvasRect(x: 0, y: 0, w: Float(frame.width), h: Float(frame.height))
+                let capture = WindowCapture(
+                    display: scDisplay, region: region, fps: fps, density: density,
+                    onFrame: { [weak self] pixelBuffer, frameRegion in self?.frameArrived(pixelBuffer, region: frameRegion) },
+                    onStopped: { [weak self] reason in
+                        self?.queue.async { self?.fail("capture stopped: \(reason)") }
+                    })
+                let title = desktopTitle(computer: Host.current().localizedName ?? "", number: number)
+                self.queue.async { self.desktopReady(capture, main: info.main, title: title, region: region) }
+                try await capture.start()
+            } catch {
+                guard let self else { return }
+                self.queue.async { self.fail(describe(error)) }
+            }
+        }
+    }
+
+    private func desktopReady(_ capture: WindowCapture, main: Bool, title: String, region: CanvasRect) {
+        guard !ended else {
+            capture.stop()
+            return
+        }
+        self.capture = capture
+        self.display = capture.displayFrame
+        self.region = region
+        let (fps, density) = (self.fps, Double(self.density))
+        Task { await capture.setStream(fps: fps, density: density) }
+        injector = InputInjector(app: nil, display: display, log: { [output] in output.log($0) })
+        let width = UInt16(clamping: Int(display.width.rounded())), height = UInt16(clamping: Int(display.height.rounded()))
+        send(.ready(appName: title, width: width, height: height))
+        table = desktopTable(width: Double(width), height: Double(height), title: title)
+        send(.windows(table))
+        // One clipboard for the Mac: only the main screen's session carries it.
+        if main { startClipboard(app: nil) }
+        startInputSource()
+        sendLocked()
+        startTimers()
+    }
+
+    /// Sends A's lock state if it changed since the last send (at ready, then every tick).
+    private func sendLocked() {
+        guard !ended, !failing else { return }
+        let locked = screenLocked(CGSessionCopyCurrentDictionary() as? [String: Any])
+        guard locked != sentLocked else { return }
+        sentLocked = locked
+        output.log(locked ? "A is locked" : "A is unlocked")
+        send(.screenLocked(locked))
+    }
+
+    /// Types B's password at the lock screen; dropped (and B told A's state again) when A is not locked.
+    private func unlock(_ password: String) {
+        guard injector != nil else { return }
+        guard screenLocked(CGSessionCopyCurrentDictionary() as? [String: Any]) else {
+            output.log("unlock dropped: A is not locked")
+            sentLocked = false
+            send(.screenLocked(false))
+            return
+        }
+        guard !unlocking else {
+            output.log("unlock dropped: already typing")
+            return
+        }
+        unlocking = true
+        output.log("typing the unlock password")
+        output.emit(.unlock)
+        // The password field is on the main display, whichever screen this session shows.
+        let main = CGDisplayBounds(CGMainDisplayID())
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            UnlockTyper.type(password, display: main)
+            self?.queue.async {
+                guard let self else { return }
+                self.unlocking = false
+                self.sendLocked()
+            }
+        }
+    }
+
+    private func startClipboard(app: NSRunningApplication?) {
         let store = ClipStore(changeCount: NSPasteboard.general.changeCount)
         let uploads = DataPaths.currentTransfers()
         transfers = TransferStore(clips: store, uploads: uploads)
-        let watcher = ClipboardWatcher(pid: app.processIdentifier, store: store, queue: queue,
+        let watcher = ClipboardWatcher(pid: app?.processIdentifier, store: store, queue: queue,
                                        log: { [output] in output.log($0) }) { [weak self] id, info in
             guard let self, !self.ended else { return }
             self.send(.clip(id: id, info))
@@ -771,6 +876,7 @@ final class Session {
         }
         // Backstop for a missed change notification.
         sendInputSource()
+        sendLocked()
     }
 
     // MARK: Input source (v8)
