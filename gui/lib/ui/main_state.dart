@@ -676,6 +676,16 @@ class MainState extends ChangeNotifier {
         }
         rs.apply(e);
         if (e is WindowsEvent) _syncHidden(rs);
+        final start = _starts[e.sid];
+        if (start != null && e is ClipsEvent) {
+          resources.addClips(moving.key, start, _sourceOf(moving), e.clips);
+        } else if (start != null && e is TransferProgressEvent) {
+          resources.transfer(moving.key, start, _sourceOf(moving), e);
+        } else if (e is DetachedEvent) {
+          // Still the hub's session until the swap, which carries the state over to the new one.
+          if (_hubHas(e.sid)) hub!.note(e.sid, e.detached ? 'detach' : 'attach', rs.tabs.tabs.length);
+          if (e.detached && pictureFocused == e.sid) _blur();
+        }
         notifyListeners();
         return;
       }
@@ -684,7 +694,8 @@ class MainState extends ChangeNotifier {
       if (holder != null) {
         holder.lastSid = null; // the runner closed it itself: nothing left to close or restore
         remote.remove(e.sid)?.dispose();
-        _starts.remove(e.sid);
+        final start = _starts.remove(e.sid);
+        if (start != null) resources.linkDown(start); // what it was still sending ends 没传完
         // A move whose old session went (A gave its window to the new one): the new one is all
         // there is, so the move is done.
         _rerouteEnd(holder, true);
@@ -833,14 +844,20 @@ class MainState extends ChangeNotifier {
     if (old == null || fresh == null) return;
     final rs = remote[fresh];
     if (rs == null || !rs.windows.any((w) => w.hasPicture)) return;
+    final detached = remote[old]?.detached ?? false;
     port?.close(old);
     remote.remove(old)?.dispose();
-    _starts.remove(old);
+    final start = _starts.remove(old);
+    if (start != null) resources.linkDown(start); // what it was still sending ends 没传完
     r.lastSid = null;
-    if (_reroutes.containsKey(r) && pictureFocused == old) {
-      // A move: the keys typed into the old picture go on into the new one.
-      pictureFocused = fresh;
-      port?.pictureFocus(fresh);
+    if (_reroutes.containsKey(r)) {
+      if (pictureFocused == old) {
+        // A move: the keys typed into the old picture go on into the new one.
+        pictureFocused = fresh;
+        port?.pictureFocus(fresh);
+      }
+      // A move keeps the session where the user put it: off the stage stays off.
+      if (detached && port?.supportsDetach == true) port!.detach(fresh);
     }
     _rerouteEnd(r, true);
   }
@@ -1039,7 +1056,7 @@ class MainState extends ChangeNotifier {
       for (var path = _moveTo.remove(id); path != null && !_disposed; path = _moveTo.remove(id)) {
         for (final r in [for (final r in _records.values) if (r.id == id) r]) {
           if (_disposed || !hubUsable) return;
-          if (!_movable(r) || r.lastSid != null || r.path == path) continue;
+          if (!_movable(r) || r.lastSid != null || _reroutes.containsKey(r) || r.path == path) continue;
           if (await reroute(r.key)) continue;
           if (_disposed) return;
           if (!_movable(r)) continue; // ended, disconnected or removed meanwhile: skipped, not failed

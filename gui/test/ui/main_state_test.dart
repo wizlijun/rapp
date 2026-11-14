@@ -2298,6 +2298,81 @@ void main() {
         });
       });
 
+      test('a session detached before the move is still detached after the swap', () {
+        move((a, t, port, st, hints, reopens) {
+          st.select('111/a');
+          port.emit(const DetachedEvent(1, true));
+          a.flushMicrotasks();
+          path(a, t, 'lan');
+          answer(a, t, reopens[0], 11, 'lan');
+          picture(a, port, 11);
+          expect(st.recordFor('111/a')!.sid, 11);
+          expect(port.calls.where((c) => c.$1 == 'detach').last.$2, {'sid': 11});
+          port.emit(const DetachedEvent(11, true));
+          a.flushMicrotasks();
+          expect(st.currentRemote!.detached, true);
+        });
+      });
+
+      test('a detach made mid-move is told to the hub and survives the swap', () {
+        move((a, t, port, st, hints, reopens) {
+          st.select('111/a');
+          st.focusPicture(1);
+          path(a, t, 'lan');
+          answer(a, t, reopens[0], 11, 'lan');
+          st.detach();
+          expect(port.calls.last.$1, 'detach');
+          expect(port.calls.last.$2, {'sid': 1});
+          port.emit(const DetachedEvent(1, true));
+          a.flushMicrotasks();
+          expect(t.sent.any((m) => m['cmd'] == 'note' && m['sid'] == 1 && m['what'] == 'detach'), true);
+          expect(st.pictureFocused, isNull);
+          picture(a, port, 11);
+          expect(port.calls.where((c) => c.$1 == 'detach').last.$2, {'sid': 11});
+          expect(st.pictureFocused, isNull, reason: 'no keys go to a detached session');
+        });
+      });
+
+      test('an attached session is not detached by the move', () {
+        move((a, t, port, st, hints, reopens) {
+          path(a, t, 'lan');
+          answer(a, t, reopens[0], 11, 'lan');
+          picture(a, port, 11);
+          expect(port.calls.where((c) => c.$1 == 'detach'), isEmpty);
+        });
+      });
+
+      test('clips and transfers of the old session mid-move reach the resources; what runs at the swap ends 没传完',
+          () {
+        move((a, t, port, st, hints, reopens) {
+          path(a, t, 'lan');
+          answer(a, t, reopens[0], 11, 'lan');
+          port.emit(const ClipsEvent(1, [ClipRow(1, 'mid', true)]));
+          port.emit(const TransferProgressEvent(1, 5, true, 'a.log', 10, 100, TransferState.running, null, null));
+          a.flushMicrotasks();
+          expect(st.resources.clips.map((e) => e.title), ['mid']);
+          expect(st.resources.running.single.name, 'a.log');
+          picture(a, port, 11);
+          expect(st.resources.running, isEmpty);
+          final row = st.resources.ended.single;
+          expect(row.state, TransferState.failed);
+          expect(row.error, '没传完');
+        });
+      });
+
+      test('a transfer of the old session ends 没传完 when the runner closes it mid-move', () {
+        move((a, t, port, st, hints, reopens) {
+          port.emit(const TransferProgressEvent(1, 5, true, 'a.log', 10, 100, TransferState.running, null, null));
+          path(a, t, 'lan');
+          answer(a, t, reopens[0], 11, 'lan');
+          port.emit(const ClosedEvent(1, 'rapp-client: quit'));
+          a.flushMicrotasks();
+          expect(st.resources.running, isEmpty);
+          expect(st.resources.ended.single.error, '没传完');
+          expect(st.recordFor('111/a')!.sid, 11);
+        });
+      });
+
       test('the old session gone during a move that then fails: the record is down, not revived elsewhere', () {
         move((a, t, port, st, hints, reopens) {
           path(a, t, 'lan');
