@@ -63,4 +63,13 @@ void main() {
     expect(openVerb(Lamp.idle), '切到');
     expect(openVerb(Lamp.connecting), '切到');
   });
+
+  test('desktop entry and its other screens', () {
+    expect(isDesktopApp('desktop:'), isTrue);
+    expect(isDesktopApp('desktop:42'), isTrue);
+    expect(isDesktopApp('com.apple.Safari'), isFalse);
+    expect(isDesktopScreen('desktop:'), isFalse);
+    expect(isDesktopScreen('desktop:42'), isTrue);
+    expect(isDesktopScreen('term:'), isFalse);
+  });
 }

@@ -37,6 +37,20 @@ void main() {
     expect(parseSessionEvent('ready', 'x'), isNull);
   });
 
+  test('screen_locked parses strictly; unlock and set_banner go out as calls', () async {
+    final e = parseSessionEvent('screen_locked', {'sid': 4, 'locked': true}) as ScreenLockedEvent;
+    expect((e.sid, e.locked), (4, true));
+    expect(parseSessionEvent('screen_locked', {'sid': 4}), isNull);
+    expect(parseSessionEvent('screen_locked', {'sid': 4, 'locked': 1}), isNull);
+    final port = _PinPort();
+    port.unlock(4, 'pw');
+    port.setBanner(4, 'locked');
+    await Future<void>.delayed(Duration.zero);
+    expect(port.calls.map((c) => c.$1), ['unlock', 'set_banner']);
+    expect(port.calls[0].$2, {'sid': 4, 'password': 'pw'});
+    expect(port.calls[1].$2, {'sid': 4, 'text': 'locked'});
+  });
+
   test('a window without a texture has none', () {
     final e = parseSessionEvent('windows', {'sid': 1, 'windows': [win(kind: 'menu', texture: null)]}) as WindowsEvent;
     expect(e.windows.single.texture, isNull);

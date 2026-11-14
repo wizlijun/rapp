@@ -74,10 +74,31 @@ class HubHost {
   bool get forcedRelay => route == 'relay';
 }
 
+/// One of A's screens, as the `desktop:` entry of its app list names them (main first).
+class RemoteDisplay {
+  const RemoteDisplay(this.id, this.name, {required this.main, required this.width, required this.height});
+  final String id;
+  final String name;
+  final bool main;
+  final int width;
+  final int height;
+
+  static RemoteDisplay? fromJson(Object? v) {
+    if (v is! Map) return null;
+    final id = v['id'], w = v['width'], h = v['height'];
+    if (id is! String || id.isEmpty || w is! int || h is! int) return null;
+    final name = v['name'];
+    return RemoteDisplay(id, name is String ? name : '', main: v['main'] == true, width: w, height: h);
+  }
+}
+
 class HubApp {
-  const HubApp(this.app, this.name);
+  const HubApp(this.app, this.name, {this.displays = const []});
   final String app;
   final String name;
+
+  /// A's screens; empty except on `desktop:`.
+  final List<RemoteDisplay> displays;
 }
 
 class AppList {
@@ -152,7 +173,10 @@ class HubClient extends ChangeNotifier {
     final m = await _request({'cmd': 'apps', 'id': id}, 'apps');
     final list = (m['apps'] as List? ?? const [])
         .whereType<Map>()
-        .map((a) => HubApp('${a['app']}', '${a['name'] ?? a['app']}'))
+        .map((a) => HubApp('${a['app']}', '${a['name'] ?? a['app']}', displays: [
+              if (a['displays'] is List)
+                for (final d in a['displays'] as List) ?RemoteDisplay.fromJson(d),
+            ]))
         .toList();
     final perms = m['permissions'];
     return AppList('${m['id'] ?? id}', '${m['path'] ?? ''}', list,

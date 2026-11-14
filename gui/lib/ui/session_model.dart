@@ -110,3 +110,9 @@ String? stepKey(List<SessionGroup> groups, String? current, int delta) {
   if (i < 0) return keys.first;
   return keys[((i + delta) % keys.length + keys.length) % keys.length];
 }
+
+/// A's whole-desktop entry (`desktop:`, the main screen) or one of its other screens (`desktop:<id>`).
+bool isDesktopApp(String app) => app.startsWith('desktop:');
+
+/// One of A's other screens (`desktop:<id>`): opened alongside `desktop:`, never listed on its own.
+bool isDesktopScreen(String app) => app.length > 8 && app.startsWith('desktop:');

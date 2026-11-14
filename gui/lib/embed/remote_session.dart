@@ -54,6 +54,9 @@ class RemoteSession extends ChangeNotifier {
     }
   }
 
+  /// A's screen is locked, as its host last said; null until told (an older host never says).
+  bool? screenLocked;
+
   /// A's input source as its host last said (null: an older host that never says).
   ({String id, String name, bool ascii})? inputSource;
 
@@ -273,6 +276,8 @@ class RemoteSession extends ChangeNotifier {
       case InputSourceEvent():
         inputSource = (id: e.id, name: e.name, ascii: e.ascii);
         if (!e.ascii) lastInputMethod = inputSource;
+      case ScreenLockedEvent():
+        screenLocked = e.locked;
       case ClosedEvent():
         endReason = e.reason;
     }
