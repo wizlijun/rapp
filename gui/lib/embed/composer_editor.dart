@@ -34,6 +34,13 @@ class EditorStyle {
   final Color color, hintColor, cursor;
 }
 
+/// The contract:
+/// - Calls apply in the order they are made (FIFO): a [read] or [take] reflects every earlier
+///   [setText] and [insert], also when those wait for an input method's commit.
+/// - [read] and [take] may complete with an error. A caller must not lose the model's draft when
+///   they do. Today [ComposerModel] does not catch it: `submit` and `detach` leave the draft as it
+///   was (the last copy; `submit` clears it only after a take succeeded), the idle copy keeps the
+///   draft it had, and the error is not caught there (it goes on to whoever awaits).
 abstract class ComposerEditor {
   /// Set by the panel before the first [view].
   EditorHandlers? handlers;

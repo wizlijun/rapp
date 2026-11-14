@@ -141,7 +141,8 @@ class _MainWindowState extends State<MainWindow> {
         mac
             ? const SingleActivator(LogicalKeyboardKey.keyF, control: true, meta: true)
             : const SingleActivator(LogicalKeyboardKey.f11): _toggleFull,
-        const SingleActivator(LogicalKeyboardKey.escape): _esc,
+        // A held Esc leaves one thing, not the panel and then fullscreen with the key repeat.
+        const SingleActivator(LogicalKeyboardKey.escape, includeRepeats: false): _esc,
         // Ctrl+Enter, on every platform: the writing panel's caret (macOS keeps ⌃↩ from A too).
         const SingleActivator(LogicalKeyboardKey.enter, control: true, includeRepeats: false): state.composerKey,
         const SingleActivator(LogicalKeyboardKey.numpadEnter, control: true, includeRepeats: false):

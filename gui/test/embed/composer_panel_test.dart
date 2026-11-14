@@ -257,7 +257,8 @@ void main() {
       await tester.pump();
       expect(rs.composer.taking, isTrue);
       expect(retry().onPressed, isNull);
-      field(tester).controller!.value = const TextEditingValue(text: '你', selection: TextSelection.collapsed(offset: 1));
+      field(tester).controller!.value =
+          const TextEditingValue(text: '你', selection: TextSelection.collapsed(offset: 1));
       await tester.pump();
       final sent = callsOf('composer_send');
       expect(sent.length, 2);
@@ -451,6 +452,31 @@ void main() {
         expect(callsOf('key').last, equals({'sid': 1, 'keyCode': 124, 'modifiers': 0}));
       });
 
+      testWidgets('closing the menu lets go of an armed ⌘ (m1)', (tester) async {
+        big(tester);
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        for (final close in ['outside', 'plus']) {
+          await openMenu(tester);
+          await tester.tap(find.text('⌘'));
+          await tester.pump();
+          if (close == 'outside') {
+            await tester.tapAt(const Offset(5, 5));
+          } else {
+            await tester.tap(find.byKey(const Key('composer-plus')));
+          }
+          await tester.pump();
+          expect(menu, findsNothing, reason: close);
+          await openMenu(tester);
+          port.calls.clear();
+          await tester.tap(find.text('Tab'));
+          await tester.pump();
+          expect(callsOf('key').single, equals({'sid': 1, 'keyCode': 48, 'modifiers': 0}), reason: close);
+          await tester.tapAt(const Offset(5, 5));
+          await tester.pump();
+        }
+      });
+
       testWidgets('在远端复制 sends ⌘C and the hint line says 已复制', (tester) async {
         big(tester);
         await tester.pumpWidget(layer());
@@ -538,6 +564,25 @@ void main() {
         expect(find.descendant(of: hint, matching: find.text('上传 1/2 · a.txt')), findsOneWidget);
         await tester.tap(find.descendant(of: hint, matching: find.text('取消')));
         expect(callsOf('cancel_transfer').single, equals({'sid': 1}));
+      });
+
+      testWidgets('hint line on a narrow stage: long texts ellipsize, nothing overflows (m4)', (tester) async {
+        big(tester);
+        rs.apply(TransferStatusEvent(1, '上传 1/2 · ${'很长的文件名' * 10}.txt'));
+        rs.apply(const InputSourceEvent(1, 'im', '拼音', false));
+        await tester.pumpWidget(wrap(SizedBox(
+            width: 360, height: 700, child: Stack(children: composerLayer(state: es, session: rs, port: port)))));
+        await tester.pump();
+        rs.composer.note('已贴入 ${'一张很大的图' * 10}');
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+        for (final t in tester.widgetList<Text>(find.descendant(of: hint, matching: find.byType(Text)))) {
+          if (t.data == '取消') continue;
+          expect(t.maxLines, 1, reason: t.data);
+          expect(t.overflow, TextOverflow.ellipsis, reason: t.data);
+        }
+        expect(find.descendant(of: hint, matching: find.text('取消')), findsOneWidget);
+        await tester.pump(const Duration(seconds: 5));
       });
 
       testWidgets('hint line: a paste or attach note shows and goes', (tester) async {
@@ -712,19 +757,8 @@ void main() {
           child: Focus(autofocus: true, child: SizedBox(width: 800, height: 600, child: Stage(state: es))),
         );
 
-    Future<void> showPicture(WidgetTester tester) async {
-      escs = 0;
-      await tester.pumpWidget(wrap(mainLike()));
-      await tester.pump();
-      await openEmbedded(tester);
-      port.emit(const ReadyEvent(1, 'Safari'));
-      port.emit(WindowsEvent(1, [rw(5, 800, 628)]));
-      await tester.pump();
-      es.focusPicture(1);
-      await tester.pump();
-    }
-
-    Future<void> showPictureWith(WidgetTester tester, {bool reduced = false}) async {
+    // [reduced]: the platform asks for reduced motion.
+    Future<void> showPicture(WidgetTester tester, {bool reduced = false}) async {
       escs = 0;
       await tester.pumpWidget(wrap(mainLike(), disableAnimations: reduced));
       await tester.pump();
@@ -763,17 +797,21 @@ void main() {
       expect(top(tester), y0 - pictureLift);
     });
 
-    testWidgets('the lift is at most 0.15 s, and instant with reduced motion', (tester) async {
+    testWidgets('the lift moves over at most 0.15 s', (tester) async {
       await showPicture(tester);
       final y0 = top(tester);
       await tester.tap(find.byKey(const Key('composer-open')));
       await tester.pump();
-      await tester.pump(const Duration(milliseconds: 150));
+      await tester.pump(const Duration(milliseconds: 75));
+      final half = y0 - top(tester);
+      expect(half, greaterThan(0));
+      expect(half, lessThan(pictureLift));
+      await tester.pump(const Duration(milliseconds: 75));
       expect(top(tester), y0 - pictureLift);
     });
 
     testWidgets('reduced motion lifts in one pump', (tester) async {
-      await showPictureWith(tester, reduced: true);
+      await showPicture(tester, reduced: true);
       final y0 = top(tester);
       await tester.tap(find.byKey(const Key('composer-open')));
       await tester.pump();
@@ -918,10 +956,18 @@ void main() {
       expect(fieldFocused(tester), isTrue);
       expect(es.pictureFocused, isNull);
 
-      // Already open, the picture pressed meanwhile: the insert brings the caret back.
-      es.focusPicture(1);
+      // Already open, the picture clicked with the mouse meanwhile (Flutter's focus really moves
+      // to it): the insert brings the caret back.
+      final g = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await g.down(tester.getCenter(find.byType(Picture)));
+      await g.up();
       await tester.pump();
+      expect(es.pictureFocused, 1);
+      expect(fieldFocused(tester), isFalse);
       port.emit(const ComposerInsertEvent(1, PasteResult(text: 'b')));
+      // MainState listens to the port from setUp, outside the test's fake zone: the focus change
+      // the event asks for is a real-zone microtask, which pump alone does not run.
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
       await tester.pump();
       await tester.pump();
       expect(fieldFocused(tester), isTrue);

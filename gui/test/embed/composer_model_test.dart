@@ -134,11 +134,11 @@ void main() {
     expect(allSent, 0);
   });
 
-  test('a cancelled send (empty failure) is a failed item saying 已取消', () async {
+  test('an empty failure (cancelled, or an upload that failed) is a failed item saying 没有发出去', () async {
     ed.value = 'a';
     await m.submit();
     m.done(0, '');
-    expect(m.failed.single.failure, '已取消');
+    expect(m.failed.single.failure, '没有发出去');
   });
 
   test('setSending(false) waits for done while an item is in flight', () async {
@@ -274,6 +274,12 @@ void main() {
     final ed2 = FakeEditor();
     m.attach(ed2);
     expect(ed2.value, '草稿');
+  });
+
+  test('detach clears editorFocused: a disposed editor never reports the blur (m3)', () async {
+    m.editorFocused = true;
+    await m.detach(ed);
+    expect(m.editorFocused, isFalse);
   });
 
   test('detach of an editor that is not attached does nothing', () async {

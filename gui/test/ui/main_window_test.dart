@@ -616,7 +616,8 @@ void main() {
     expect(tester.widget<TextField>(find.byKey(const Key('composer-field'))).controller!.text, 'draft text');
   });
 
-  testWidgets('in fullscreen the panel is there; Esc in it collapses the panel and stays fullscreen', (tester) async {
+  // Fullscreen, a session with a picture, the writing panel open with the caret in it.
+  Future<void> panelInFullscreen(WidgetTester tester) async {
     s.dispose();
     final port = FakeSessionPort();
     s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port);
@@ -661,6 +662,10 @@ void main() {
     expect(find.byType(ComposerPanel), findsOneWidget);
     expect(tester.widget<TextField>(find.byKey(const Key('composer-field'))).focusNode!.hasFocus, isTrue);
     fs.calls.clear();
+  }
+
+  testWidgets('in fullscreen the panel is there; Esc in it collapses the panel and stays fullscreen', (tester) async {
+    await panelInFullscreen(tester);
     // Esc in the editor is the panel's: it collapses, fullscreen stays.
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pump();
@@ -672,5 +677,20 @@ void main() {
     await tester.pump();
     expect(fs.calls, [false]);
     expect(fs.on, isFalse);
+  });
+
+  testWidgets('a held Esc collapses the panel and never leaves fullscreen (m2)', (tester) async {
+    await panelInFullscreen(tester);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(find.byType(ComposerPanel), findsNothing);
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    await tester.sendKeyRepeatEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(fs.calls, isEmpty);
+    expect(fs.on, isTrue);
   });
 }

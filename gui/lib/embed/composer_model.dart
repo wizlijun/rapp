@@ -78,7 +78,7 @@ class ComposerModel extends ChangeNotifier {
   /// A send round is running (from `submit()` until `done`).
   bool sending = false;
 
-  /// A short line under the editor; clears by itself.
+  /// A short note on the hint line above the box (W11); clears by itself.
   String? status;
 
   Outgoing? _inFlight;
@@ -106,10 +106,12 @@ class ComposerModel extends ChangeNotifier {
     e.setText(draft);
   }
 
-  /// The editor goes away: its text is copied into [draft].
+  /// The editor goes away: its text is copied into [draft]. It no longer has the focus (its
+  /// dispose drops the focus listener first, so no onFocus(false) comes).
   Future<void> detach(ComposerEditor e) async {
     if (!identical(_editor, e)) return;
     _editor = null;
+    editorFocused = false;
     _idleTimer?.cancel();
     draft = await e.read();
   }
@@ -197,7 +199,8 @@ class ComposerModel extends ChangeNotifier {
   }
 
   /// A send round ended: the first [sent] pieces of it went. What did not go stays as a failed
-  /// item; [failure] (empty: cancelled) says why, null with something left means the link dropped.
+  /// item; [failure] says why. Empty (cancelled, or an upload that failed: the runner cannot tell
+  /// them apart) and null (the link dropped) both read 「没有发出去」.
   void done(int sent, String? failure) {
     final o = _inFlight;
     _inFlight = null;
@@ -217,11 +220,7 @@ class ComposerModel extends ChangeNotifier {
     }
     final all = after >= total;
     if (!all) {
-      o.failure = (failure != null && failure.isNotEmpty)
-          ? failure
-          : failure == ''
-              ? '已取消'
-              : '没有发出去';
+      o.failure = (failure != null && failure.isNotEmpty) ? failure : '没有发出去';
       _failed.add(o);
     }
     notifyListeners();
@@ -321,7 +320,7 @@ class ComposerModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// A short line under the editor for a few seconds.
+  /// A short note on the hint line above the box for a few seconds.
   void note(String s) {
     _show(s, const Duration(seconds: 4));
     notifyListeners();

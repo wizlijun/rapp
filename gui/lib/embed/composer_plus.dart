@@ -48,7 +48,13 @@ class _ComposerPlusState extends State<ComposerPlus> {
   final _group = Object();
   int _sticky = 0;
 
-  void _close() => _portal.hide();
+  /// The menu goes, and an armed ⌘ or ⌥ with it.
+  void _close() {
+    _portal.hide();
+    if (_sticky != 0) setState(() => _sticky = 0);
+  }
+
+  void _toggle() => _portal.isShowing ? _close() : _portal.show();
 
   void _key(int code) {
     widget.port.key(widget.session.sid, code, _sticky);
@@ -191,7 +197,7 @@ class _ComposerPlusState extends State<ComposerPlus> {
             label: '＋',
             semanticLabel: '更多',
             icon: Icons.add,
-            onPressed: _portal.toggle,
+            onPressed: _toggle,
           ),
         ),
       ),

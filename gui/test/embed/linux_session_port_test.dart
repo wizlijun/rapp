@@ -81,10 +81,11 @@ void main() {
       return utf8.decode(await proc.stdout.expand((b) => b).toList());
     });
     final keys = [
-      for (final l in sent!.trim().split('\n'))
-        if ((jsonDecode(l) as Map)['down'] == true) (jsonDecode(l) as Map)['keyCode'],
+      for (final m in [for (final l in sent!.trim().split('\n')) jsonDecode(l) as Map])
+        if (m['down'] == true) (m['keyCode'], m['modifiers']),
     ];
-    expect(keys, [38, 36, 36, 36]); // J, Shift+Enter, Enter, Ctrl+Shift+Enter; no Ctrl+Enter
+    // J, Shift+Enter, Enter, Ctrl+Shift+Enter; no Ctrl+Enter. Ctrl goes as A's ⌘ (1 << 20), Shift as 1 << 17.
+    expect(keys, [(38, 1 << 20), (36, 1 << 17), (36, 0), (36, 1 << 20 | 1 << 17)]);
     port.dispose();
     // The close's kill timer is cancelled once the (already ended) worker's exit is seen.
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));

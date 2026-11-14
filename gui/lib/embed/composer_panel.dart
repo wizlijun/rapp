@@ -168,15 +168,19 @@ class _ComposerPanelState extends State<ComposerPanel> {
     final ime = src != null && !src.ascii;
     if (status == null && transfer == null && !ime) return null;
     const gap = SizedBox(width: 8);
+    const cut = TextOverflow.ellipsis; // one line each, whatever the stage's width
     return Padding(
       key: const Key('composer-hint'),
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
         children: [
+          // Both sides give way on a narrow stage; the notes and the IME line keep the larger share.
           Expanded(
+            flex: 2,
             child: Row(
               children: [
-                if (status != null) Flexible(child: Text(status, style: TextStyle(color: t.muted))),
+                if (status != null)
+                  Flexible(child: Text(status, maxLines: 1, overflow: cut, style: TextStyle(color: t.muted))),
                 if (status != null && ime) gap,
                 if (ime)
                   Flexible(
@@ -186,6 +190,8 @@ class _ComposerPanelState extends State<ComposerPanel> {
                         padding: const EdgeInsets.symmetric(vertical: 4),
                         child: Text(
                           '远端在用输入法 ${src.name}，发送前会切到英文 · 点按现在就切',
+                          maxLines: 1,
+                          overflow: cut,
                           style: TextStyle(color: t.accent, fontWeight: FontWeight.w600),
                         ),
                       ),
@@ -196,7 +202,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
           ),
           if (transfer != null) ...[
             gap,
-            Text(transfer, style: TextStyle(color: t.muted)),
+            Flexible(child: Text(transfer, maxLines: 1, overflow: cut, style: TextStyle(color: t.muted))),
             gap,
             RappButton.secondary(label: '取消', onPressed: () => widget.port.cancelTransfer(_s.sid)),
           ],
