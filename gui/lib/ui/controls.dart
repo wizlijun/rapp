@@ -103,6 +103,8 @@ class _RappButtonState extends State<RappButton> {
         child: child,
       ),
     };
+    // An icon button has no text: its name for assistive tech is the semantic label or the label.
+    final name = widget.semanticLabel ?? (icon == null ? null : widget.label);
     final reduced =
         MediaQuery.disableAnimationsOf(context) || widget.onPressed == null;
     return Listener(
@@ -112,10 +114,10 @@ class _RappButtonState extends State<RappButton> {
       child: AnimatedScale(
         scale: _down && !reduced ? .97 : 1,
         duration: reduced ? Duration.zero : const Duration(milliseconds: 80),
-        child: widget.semanticLabel == null
+        child: name == null
             ? button
             : Semantics(
-                label: widget.semanticLabel,
+                label: name,
                 excludeSemantics: true,
                 button: true,
                 enabled: widget.onPressed != null,

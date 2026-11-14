@@ -11,6 +11,7 @@ import '../ui/main_state.dart';
 import '../ui/tokens.dart';
 import 'composer_editor.dart';
 import 'composer_model.dart';
+import 'composer_plus.dart';
 import 'flutter_editor.dart';
 import 'remote_session.dart';
 import 'session_port.dart';
@@ -152,6 +153,55 @@ class _ComposerPanelState extends State<ComposerPanel> {
     _m.apply(await port.composerPaste(_s.sid));
   }
 
+  Future<void> _attach() async {
+    final port = widget.port;
+    _m.apply(await port.composerAttach(_s.sid));
+  }
+
+  /// The line above the box (W11): paste and attach notes, an upload with 取消, and A on an
+  /// input method. Not there when none of them is.
+  Widget? _hint(RappTokens t) {
+    final status = _m.status, transfer = _s.transferStatus, src = _s.inputSource;
+    final ime = src != null && !src.ascii;
+    if (status == null && transfer == null && !ime) return null;
+    const gap = SizedBox(width: 8);
+    return Padding(
+      key: const Key('composer-hint'),
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Expanded(
+            child: Row(
+              children: [
+                if (status != null) Flexible(child: Text(status, style: TextStyle(color: t.muted))),
+                if (status != null && ime) gap,
+                if (ime)
+                  Flexible(
+                    child: InkWell(
+                      onTap: () => _s.selectInput(''),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Text(
+                          '远端在用输入法 ${src.name}，发送前会切到英文 · 点按现在就切',
+                          style: TextStyle(color: t.accent, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          if (transfer != null) ...[
+            gap,
+            Text(transfer, style: TextStyle(color: t.muted)),
+            gap,
+            RappButton.secondary(label: '取消', onPressed: () => widget.port.cancelTransfer(_s.sid)),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _chip(BlockChip b, RappTokens t) => Semantics(
         button: true,
         label: '移除 ${b.label}',
@@ -186,10 +236,23 @@ class _ComposerPanelState extends State<ComposerPanel> {
         padding: const EdgeInsets.only(left: 12),
         child: Row(
           children: [
-            Text(failure ?? '发送中', style: TextStyle(color: failure == null ? t.muted : t.accent)),
-            gap,
             Expanded(
-              child: Text(first, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.muted)),
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      failure ?? '发送中',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: failure == null ? t.muted : t.accent),
+                    ),
+                  ),
+                  gap,
+                  Flexible(
+                    child: Text(first, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.muted)),
+                  ),
+                ],
+              ),
             ),
             if (failure != null) ...[
               gap,
@@ -228,7 +291,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
             children: [
               if (inFlight != null) _item(inFlight, t),
               for (final o in _m.failed) _item(o, t),
-              const SizedBox.shrink(), // the hint line (W11)
+              ?_hint(t), // W11
               Container(
                 key: const Key('composer-box'),
                 decoration: t.panelBox(),
@@ -257,15 +320,27 @@ class _ComposerPanelState extends State<ComposerPanel> {
                                   ),
                                 ),
                               ),
+                            // What is left after the blocks row, never under one line.
                             Flexible(
-                              child: _ed.view(context, style: style, hint: '写给 ${_s.appName}', maxHeight: inner),
+                              child: LayoutBuilder(
+                                builder: (context, c) => _ed.view(
+                                  context,
+                                  style: style,
+                                  hint: '写给 ${_s.appName}',
+                                  maxHeight: math.max(_line, c.maxHeight),
+                                ),
+                              ),
                             ),
                           ],
                         ),
                       ),
                     ),
-                    // Task 4 puts the real 「＋」 here.
-                    const RappButton.secondary(key: Key('composer-plus'), label: '＋', icon: Icons.add),
+                    ComposerPlus(
+                      session: _s,
+                      port: widget.port,
+                      onAttach: _attach,
+                      onPress: widget.state.blurPicture,
+                    ),
                     const SizedBox(width: 4),
                     RappButton.primary(
                       key: const Key('composer-send'),

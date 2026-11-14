@@ -12,6 +12,7 @@ import 'package:rapp/hub_client.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/stage.dart';
+import 'package:rapp/ui/tokens.dart';
 
 import '../fakes.dart';
 import '../ui/helpers.dart';
@@ -353,6 +354,220 @@ void main() {
       expect(find.text('上传 1/2 · a.txt'), findsOneWidget);
       await tester.tap(find.text('取消'));
       expect(callsOf('cancel_transfer').single, equals({'sid': 1}));
+    });
+
+    group('plus menu and hint line', () {
+      final menu = find.byKey(const Key('composer-plus-menu'));
+      final hint = find.byKey(const Key('composer-hint'));
+
+      Future<void> openMenu(WidgetTester tester) async {
+        await tester.tap(find.byKey(const Key('composer-plus')));
+        await tester.pump();
+      }
+
+      testWidgets('plus opens a menu above it: 附件…, 在远端复制, the keys, 收起', (tester) async {
+        big(tester);
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        expect(menu, findsNothing);
+        expect(find.bySemanticsLabel('更多'), findsOneWidget);
+        await openMenu(tester);
+        final m = tester.getRect(menu);
+        final plus = rect(tester, 'composer-plus');
+        expect(m.width, 300);
+        expect(m.bottom, plus.top - 8);
+        expect(m.right, plus.right);
+        expect(find.text('附件…'), findsOneWidget);
+        expect(find.text('也可以直接粘贴'), findsOneWidget);
+        expect(find.text('在远端复制'), findsOneWidget);
+        expect(find.text('Ctrl+C'), findsOneWidget);
+        expect(find.text('按键 · 直接发给远端'), findsOneWidget);
+        expect(find.text('收起'), findsOneWidget);
+        // W9 order, reading left to right, row by row.
+        final labels = ['Esc', 'Tab', '⌘', '⌥', '删除', '←', '↓', '↑', '→', '回车'];
+        final pos = [for (final l in labels) tester.getCenter(find.text(l))];
+        for (var i = 1; i < pos.length; i++) {
+          final sameRow = (pos[i].dy - pos[i - 1].dy).abs() < 1;
+          expect(sameRow ? pos[i].dx > pos[i - 1].dx : pos[i].dy > pos[i - 1].dy, isTrue, reason: labels[i]);
+        }
+      }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+
+      testWidgets('the copy shortcut reads ⌘C on macOS', (tester) async {
+        big(tester);
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        await openMenu(tester);
+        expect(find.text('⌘C'), findsOneWidget);
+      }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
+      testWidgets('keys go to A in W9 order; ⌘ sticks for one key; the menu stays open', (tester) async {
+        big(tester);
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        await openMenu(tester);
+        await tester.tap(find.text('⌘'));
+        await tester.pump();
+        await tester.tap(find.text('Tab'));
+        await tester.pump();
+        await tester.tap(find.text('Tab'));
+        await tester.pump();
+        expect(callsOf('key'), [
+          equals({'sid': 1, 'keyCode': 48, 'modifiers': 1048576}),
+          equals({'sid': 1, 'keyCode': 48, 'modifiers': 0}),
+        ]);
+        expect(menu, findsOneWidget);
+        await tester.tap(find.text('→'));
+        await tester.pump();
+        expect(callsOf('key').last, equals({'sid': 1, 'keyCode': 124, 'modifiers': 0}));
+      });
+
+      testWidgets('在远端复制 sends ⌘C and the hint line says 已复制', (tester) async {
+        big(tester);
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        await openMenu(tester);
+        await tester.tap(find.text('在远端复制'));
+        await tester.pump();
+        expect(callsOf('key').single, equals({'sid': 1, 'keyCode': 8, 'modifiers': 1048576}));
+        expect(menu, findsNothing);
+        expect(find.descendant(of: hint, matching: find.text('已复制')), findsOneWidget);
+        await tester.pump(const Duration(seconds: 4));
+      });
+
+      testWidgets('附件… asks the runner and the menu closes', (tester) async {
+        big(tester);
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        await openMenu(tester);
+        await tester.tap(find.text('附件…'));
+        await tester.pump();
+        expect(callsOf('composer_attach').single, equals({'sid': 1}));
+        expect(menu, findsNothing);
+      });
+
+      testWidgets('收起 closes the panel and keeps the text', (tester) async {
+        big(tester);
+        rs.composer.setDraft('草稿');
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        await openMenu(tester);
+        await tester.tap(find.text('收起'));
+        await tester.pump();
+        await tester.pump();
+        expect(menu, findsNothing);
+        expect(find.byKey(const Key('composer-panel')), findsNothing);
+        expect(rs.composer.open, isFalse);
+        expect(rs.composer.draft, '草稿');
+      });
+
+      testWidgets('a tap outside closes the menu without reaching A', (tester) async {
+        big(tester);
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        await openMenu(tester);
+        expect(menu, findsOneWidget);
+        await tester.tapAt(tester.getTopLeft(find.byKey(const Key('host'))) + const Offset(20, 20));
+        await tester.pump();
+        expect(menu, findsNothing);
+        expect(port.calls, isEmpty);
+      });
+
+      testWidgets('the sticky keys and the menu never carry over to another session', (tester) async {
+        big(tester);
+        final rs2 = RemoteSession(2, 'Notes');
+        addTearDown(rs2.dispose);
+        rs2.composer.open = true;
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        await openMenu(tester);
+        await tester.tap(find.text('⌘'));
+        await tester.pump();
+        await tester.pumpWidget(layer(s: rs2));
+        await tester.pump();
+        expect(menu, findsNothing);
+        await openMenu(tester);
+        await tester.tap(find.text('←'));
+        await tester.pump();
+        expect(callsOf('key').single, equals({'sid': 2, 'keyCode': 123, 'modifiers': 0}));
+      });
+
+      testWidgets('hint line: A on an input method, accent, a tap switches to English', (tester) async {
+        big(tester);
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        expect(hint, findsNothing);
+        rs.apply(const InputSourceEvent(1, 'im', '拼音', false));
+        await tester.pump();
+        const line = '远端在用输入法 拼音，发送前会切到英文 · 点按现在就切';
+        expect(find.descendant(of: hint, matching: find.text(line)), findsOneWidget);
+        final style = tester.widget<Text>(find.text(line)).style!;
+        expect(style.color, RappTokens.of(tester.element(hint)).accent);
+        expect(style.fontWeight, FontWeight.w600);
+        await tester.tap(find.text(line));
+        await tester.pump();
+        expect(callsOf('select_input').single, equals({'sid': 1, 'id': ''}));
+        rs.apply(const InputSourceEvent(1, 'ascii', 'ABC', true));
+        await tester.pump();
+        expect(find.text(line), findsNothing);
+        expect(hint, findsNothing);
+      });
+
+      testWidgets('hint line: an upload shows its progress with 取消', (tester) async {
+        big(tester);
+        rs.apply(const TransferStatusEvent(1, '上传 1/2 · a.txt'));
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        expect(find.descendant(of: hint, matching: find.text('上传 1/2 · a.txt')), findsOneWidget);
+        await tester.tap(find.descendant(of: hint, matching: find.text('取消')));
+        expect(callsOf('cancel_transfer').single, equals({'sid': 1}));
+      });
+
+      testWidgets('hint line: a paste or attach note shows and goes', (tester) async {
+        big(tester);
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        rs.composer.apply(const PasteResult(status: '已贴入 1 张图'));
+        await tester.pump();
+        expect(find.descendant(of: hint, matching: find.text('已贴入 1 张图')), findsOneWidget);
+        await tester.pump(const Duration(seconds: 6));
+        expect(hint, findsNothing);
+      });
+
+      testWidgets('hint line is gone when nothing is going on', (tester) async {
+        big(tester);
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        expect(hint, findsNothing);
+      });
+    });
+
+    testWidgets('M3.1: the editor leaves room for the blocks row inside the box', (tester) async {
+      big(tester);
+      rs.composer.apply(const PasteResult(blocks: [BlockChip(1, '[图片 #1 10×20]'), BlockChip(2, '[文件 a 1 B]')]));
+      rs.composer.setDraft(List.generate(40, (i) => 'line $i').join('\n'));
+      await tester.pumpWidget(layer());
+      await tester.pump();
+      final box = rect(tester, 'composer-box');
+      expect(box.height, lessThanOrEqualTo(350));
+      final chip = tester.getRect(find.text('[图片 #1 10×20]'));
+      final f = tester.getRect(fieldFinder);
+      expect(chip.bottom, lessThanOrEqualTo(f.top));
+      expect(f.bottom, lessThanOrEqualTo(box.bottom));
+      expect(f.height, greaterThanOrEqualTo(48));
+    });
+
+    testWidgets('M3.2: a long failure ellipsizes and 重试 / 放回输入框 stay', (tester) async {
+      await tester.pumpWidget(
+          wrap(SizedBox(width: 600, child: ComposerPanel(state: es, session: rs, port: port, maxHeight: 300))));
+      await tester.pump();
+      await tester.enterText(fieldFinder, 'hello');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      rs.apply(ComposerStateEvent(1, done: ComposerDone(0, '失败' * 100)));
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      expect(find.text('重试'), findsOneWidget);
+      expect(find.text('放回输入框'), findsOneWidget);
     });
   });
 
