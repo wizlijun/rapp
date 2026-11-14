@@ -62,13 +62,16 @@ final class TileCodecTests: XCTestCase {
         XCTAssertEqual(dec.samples, s)
     }
 
-    func testSizeChangeForcesFull() throws {
+    func testSizeChangeMovesCanvasInsteadOfFull() throws {
         let enc = FrameEncoder(mode: .color16), dec = FrameDecoder(mode: .color16)
         let a = randomSamples(width: 130, height: 70, mode: .color16, seed: 7)
         try dec.decode(try XCTUnwrap(enc.encode(samples: a, width: 130, height: 70)))
         let b = randomSamples(width: 64, height: 64, mode: .color16, seed: 8)
         let p = try XCTUnwrap(enc.encode(samples: b, width: 64, height: 64))
-        XCTAssertTrue(p.isFull)
+        XCTAssertFalse(p.isFull)
+        XCTAssertEqual(p.flags, [.start, .end])
+        XCTAssertEqual(p.dx, 0)
+        XCTAssertEqual(p.dy, 0)
         try dec.decode(p)
         XCTAssertEqual(dec.width, 64)
         XCTAssertEqual(dec.height, 64)

@@ -1,3 +1,5 @@
+import Foundation
+
 /// Frames are cut into square tiles of this many pixels per side.
 public let tileSize = 64
 
@@ -67,8 +69,29 @@ private func tileGrid(width: Int, height: Int) -> (cols: Int, rows: Int) {
     ((width + tileSize - 1) / tileSize, (height + tileSize - 1) / tileSize)
 }
 
-/// Encodes a stream of frames. Each frame is compared with the last frame
-/// this encoder returned, and only tiles that differ are sent.
+/// The canvas move shared by encoder and decoder: `src` (`width` x `height`,
+/// `bytesPerPixel` bytes each) moved into a new `w` x `h` canvas with
+/// new(x, y) = old(x + dx, y + dy); anything outside the old canvas is 0.
+func movedCanvas(_ src: [UInt8], width: Int, height: Int, bytesPerPixel bpp: Int,
+                 to w: Int, _ h: Int, dx: Int, dy: Int) -> [UInt8] {
+    var moved = [UInt8](repeating: 0, count: w * h * bpp)
+    let x0 = max(0, -dx), x1 = min(w, width - dx)
+    let y0 = max(0, -dy), y1 = min(h, height - dy)
+    guard x1 > x0, y1 > y0 else { return moved }
+    let n = (x1 - x0) * bpp
+    src.withUnsafeBufferPointer { s in
+        moved.withUnsafeMutableBufferPointer { d in
+            for y in y0..<y1 {
+                let from = ((y + dy) * width + x0 + dx) * bpp, to = (y * w + x0) * bpp
+                (d.baseAddress! + to).update(from: s.baseAddress! + from, count: n)
+            }
+        }
+    }
+    return moved
+}
+
+/// Encodes a stream of frames. Each frame is compared with the encoder's model
+/// of the client's canvas (moved first when the region moves), and only tiles that differ are sent.
 ///
 /// Frame body before compression (little-endian):
 ///
@@ -94,15 +117,31 @@ public final class FrameEncoder {
     private let mode: Mode
     private let bps: Int
     private let deflate = DeflateStream()
+    /// The model of the decoder's canvas: what the client shows after the last frame.
     private var previous = [UInt8]()
     private var previousWidth = 0
     private var previousHeight = 0
+    /// The raw BGRA of the last frame, kept only in two-tone modes when the frame
+    /// came with raw pixels. Every model sample is a correct quantization of the
+    /// key pixel at the same place (maybe under another 16x16 block alignment).
+    private var previousKey: [UInt8]?
+    /// The captured region (points) and pixels per point of the last frame.
+    private var previousRegion = CanvasRect(x: 0, y: 0, w: 0, h: 0)
+    private var previousScale = 0.0
     var forceFull = true
     /// Compressed / raw size of the previous frame, used to estimate slice sizes.
     private var ratio = 1.0
 
     /// Number of tiles in the frame most recently returned by `encode` or `encodeSlices`.
     public private(set) var lastTileCount = 0
+    /// True when the last encode left some tile unsent only because its raw
+    /// pixels matched, so the canvas there differs from this frame's samples.
+    public private(set) var lastEncodeDiverged = false
+    /// True from such an encode until a frame makes the canvas exact again
+    /// (for now only a full frame does).
+    public private(set) var needsSettle = false
+    /// The decoder's canvas as this encoder models it (for tests).
+    internal var model: [UInt8] { previous }
 
     public init(mode: Mode) {
         self.mode = mode
@@ -124,29 +163,81 @@ public final class FrameEncoder {
         }
     }
 
-    /// Returns nil when nothing changed. The first frame, the frame after a
-    /// size change and the frame after `reset()` are full frames (`isFull`),
-    /// which also restart the compression stream.
-    public func encode(samples: [UInt8], width: Int, height: Int) -> FramePayload? {
-        encodeSlices(samples: samples, width: width, height: height, limit: Int.max).first
+    /// Returns nil when nothing changed. See `encodeSlices` for the arguments
+    /// and for when a frame is full.
+    public func encode(samples: [UInt8], raw: [UInt8]? = nil, width: Int, height: Int,
+                       region: CanvasRect? = nil) -> FramePayload? {
+        encodeSlices(samples: samples, raw: raw, width: width, height: height, region: region, limit: Int.max).first
     }
 
-    /// Like `encode`, but cuts the changed tiles into slices by tile rows, top to
-    /// bottom. A slice is closed once its estimated compressed size (raw bytes of
-    /// its tiles times the previous frame's compression ratio) exceeds `limit`
-    /// (`firstLimit` for the first slice); a slice always holds at least one row.
+    /// Pixel offset between two region origins (points) at `scale` pixels per
+    /// point. Clamped to ±65536: any bigger offset leaves nothing of a canvas of
+    /// at most 65535 pixels, exactly like the real one would.
+    private static func pixelOffset(from a: Float, to b: Float, scale: Double) -> Int {
+        let d = (Double(b) * scale).rounded() - (Double(a) * scale).rounded()
+        guard d.isFinite else { return 0 }
+        return Int(max(-65536, min(65536, d)))
+    }
+
+    /// Encodes the tiles that differ from the client's canvas and cuts them into
+    /// slices by tile rows, top to bottom. A slice is closed once its estimated
+    /// compressed size (raw bytes of its tiles times the previous frame's
+    /// compression ratio) exceeds `limit` (`firstLimit` for the first slice); a
+    /// slice always holds at least one row.
+    ///
+    /// `region` is the captured area in points (nil: `(0, 0, width, height)`).
+    /// `raw` is the frame's tightly packed BGRA (`width * height * 4` bytes); it
+    /// is used only in two-tone modes, where a tile whose raw pixels match the
+    /// last frame's is not sent even if its samples differ (see `needsSettle`).
+    ///
+    /// The frame is full (`isFull`, and it restarts the compression stream) for
+    /// the first frame, after `reset()` and when the pixels per point change by
+    /// more than 1 %. Otherwise a new size or region origin moves the canvas: the
+    /// first slice carries the size and offset, the old picture is kept where it
+    /// still covers the new canvas, and only tiles that changed or reach outside
+    /// it are sent.
+    ///
     /// The first slice has `.start` (and `.full` for a full frame), the last `.end`;
-    /// the slices must be decoded in order. Returns `[]` when nothing changed. The encoder
-    /// treats the whole frame as sent: after dropping slices the caller must set
-    /// `forceFull`.
-    public func encodeSlices(samples: [UInt8], width: Int, height: Int, limit: Int,
-                             firstLimit: Int? = nil) -> [FramePayload] {
+    /// the slices must be decoded in order. Returns `[]` when nothing changed and
+    /// the canvas does not move; a move with no changed tile is one empty slice.
+    /// The encoder treats the whole frame as sent: after dropping slices the
+    /// caller must set `forceFull`.
+    public func encodeSlices(samples: [UInt8], raw: [UInt8]? = nil, width: Int, height: Int,
+                             region: CanvasRect? = nil, limit: Int, firstLimit: Int? = nil) -> [FramePayload] {
         precondition(width > 0 && height > 0 && width <= 0xFFFF && height <= 0xFFFF, "bad frame size")
         precondition(samples.count == width * height * bps, "sample count does not match frame size")
         let (cols, rows) = tileGrid(width: width, height: height)
         precondition(cols * rows <= maxTiles, "frame too large")
+        let raw = mode == .duogray || mode == .duocolor ? raw : nil
+        if let raw { precondition(raw.count == width * height * 4, "raw pixel count does not match frame size") }
+        let region = region ?? CanvasRect(x: 0, y: 0, w: Float(width), h: Float(height))
+        let scale = Double(width) / Double(region.w)
 
-        let full = forceFull || width != previousWidth || height != previousHeight
+        // Density change; written as !(<=) so a NaN previous scale also means full.
+        let full = forceFull || !(scale.isFinite && scale > 0) || !(abs(scale / previousScale - 1) <= 0.01)
+        var dx = 0, dy = 0
+        var moved = false
+        // The model after the move, the raw key moved likewise (only when both
+        // frames have raw), and the part of the new canvas the old picture covers.
+        var old = previous
+        var key: [UInt8]?
+        var cover = (x0: 0, y0: 0, x1: width, y1: height)
+        if !full {
+            dx = FrameEncoder.pixelOffset(from: previousRegion.x, to: region.x, scale: scale)
+            dy = FrameEncoder.pixelOffset(from: previousRegion.y, to: region.y, scale: scale)
+            moved = dx != 0 || dy != 0 || width != previousWidth || height != previousHeight
+            key = raw == nil ? nil : previousKey
+            if moved {
+                old = movedCanvas(previous, width: previousWidth, height: previousHeight, bytesPerPixel: bps,
+                                  to: width, height, dx: dx, dy: dy)
+                if let k = key {
+                    key = movedCanvas(k, width: previousWidth, height: previousHeight, bytesPerPixel: 4,
+                                      to: width, height, dx: dx, dy: dy)
+                }
+                cover = (max(0, -dx), max(0, -dy), min(width, previousWidth - dx), min(height, previousHeight - dy))
+            }
+        }
+
         let rowBytes = width * bps
         var groups = [[UInt8]]()
         var body: [UInt8] = [0, 0]
@@ -155,6 +246,8 @@ public final class FrameEncoder {
         var totalCount = 0
         var totalRaw = 0
         var currentLimit = firstLimit ?? limit
+        // Tiles left unsent only because their raw pixels matched: (x0, y0, tw, th).
+        var diverged = [(Int, Int, Int, Int)]()
 
         func closeGroup() {
             body[0] = UInt8(count & 0xFF)
@@ -168,38 +261,64 @@ public final class FrameEncoder {
             currentLimit = limit
         }
 
+        let rawCur = raw ?? [], rawOld = key ?? []
+        let compareRaw = key != nil
         samples.withUnsafeBufferPointer { cur in
-            previous.withUnsafeBufferPointer { old in
-                for ty in 0..<rows {
-                    let y0 = ty * tileSize, th = min(tileSize, height - y0)
-                    for tx in 0..<cols {
-                        let x0 = tx * tileSize, tw = min(tileSize, width - x0)
-                        if !full {
-                            var same = true
-                            for y in y0..<(y0 + th) {
-                                let start = y * rowBytes + x0 * bps
-                                if !cur[start..<(start + tw * bps)].elementsEqual(old[start..<(start + tw * bps)]) {
-                                    same = false
-                                    break
-                                }
-                            }
-                            if same { continue }
+        old.withUnsafeBufferPointer { old in
+        rawCur.withUnsafeBufferPointer { rawCur in
+        rawOld.withUnsafeBufferPointer { rawOld in
+            for ty in 0..<rows {
+                let y0 = ty * tileSize, th = min(tileSize, height - y0)
+                for tx in 0..<cols {
+                    let x0 = tx * tileSize, tw = min(tileSize, width - x0)
+                    // Only a tile wholly inside the old picture can be left as it is.
+                    if !full && x0 >= cover.x0 && x0 + tw <= cover.x1 && y0 >= cover.y0 && y0 + th <= cover.y1 {
+                        if tileEqual(cur, old, stride: rowBytes, x0: x0 * bps, y0: y0, w: tw * bps, h: th) { continue }
+                        if compareRaw && tileEqual(rawCur, rawOld, stride: width * 4, x0: x0 * 4, y0: y0,
+                                                   w: tw * 4, h: th) {
+                            diverged.append((x0, y0, tw, th))
+                            continue
                         }
-                        let index = ty * cols + tx
-                        body.append(UInt8(index & 0xFF))
-                        body.append(UInt8(index >> 8))
-                        encodeTile(cur, rowBytes: rowBytes, x0: x0, y0: y0, tw: tw, th: th, into: &body)
-                        count += 1
-                        groupRaw += tw * th * bps
                     }
-                    // Close the slice at a row boundary once it is estimated over the limit.
-                    if count > 0 && Double(groupRaw) * ratio > Double(currentLimit) { closeGroup() }
+                    let index = ty * cols + tx
+                    body.append(UInt8(index & 0xFF))
+                    body.append(UInt8(index >> 8))
+                    encodeTile(cur, rowBytes: rowBytes, x0: x0, y0: y0, tw: tw, th: th, into: &body)
+                    count += 1
+                    groupRaw += tw * th * bps
                 }
+                // Close the slice at a row boundary once it is estimated over the limit.
+                if count > 0 && Double(groupRaw) * ratio > Double(currentLimit) { closeGroup() }
             }
         }
-        if count > 0 { closeGroup() }
+        }
+        }
+        }
+        if count > 0 || (groups.isEmpty && moved) { closeGroup() }
 
+        // The new model is this frame's samples, except in tiles left unsent on
+        // a raw match: there the moved old samples stay.
+        if diverged.isEmpty {
+            previous = samples
+        } else {
+            var model = samples
+            for (x0, y0, tw, th) in diverged {
+                for y in y0..<(y0 + th) {
+                    let o = y * rowBytes + x0 * bps
+                    model.replaceSubrange(o..<(o + tw * bps), with: old[o..<(o + tw * bps)])
+                }
+            }
+            previous = model
+        }
+        lastEncodeDiverged = !diverged.isEmpty
+        needsSettle = lastEncodeDiverged || (needsSettle && !full)
+        previousKey = raw
+        previousWidth = width
+        previousHeight = height
+        previousRegion = region
+        previousScale = scale
         if groups.isEmpty { return [] }
+
         if full { deflate.reset() }
         var slices = [FramePayload]()
         var compressed = 0
@@ -209,16 +328,24 @@ public final class FrameEncoder {
             var flags: FrameFlags = []
             if i == 0 { flags.insert(.start); if full { flags.insert(.full) } }
             if i == groups.count - 1 { flags.insert(.end) }
-            slices.append(FramePayload(mode: mode, width: UInt16(width), height: UInt16(height),
-                                       flags: flags, data: data))
+            slices.append(FramePayload(mode: mode, width: UInt16(width), height: UInt16(height), flags: flags,
+                                       dx: i == 0 ? Int32(dx) : 0, dy: i == 0 ? Int32(dy) : 0, data: data))
         }
-        previous = samples
-        previousWidth = width
-        previousHeight = height
         forceFull = false
         lastTileCount = totalCount
-        ratio = min(1, max(0.05, Double(compressed) / Double(totalRaw)))
+        if totalRaw > 0 { ratio = min(1, max(0.05, Double(compressed) / Double(totalRaw))) }
         return slices
+    }
+
+    /// Whether the `w`-byte by `h`-row rectangle at byte `x0` of row `y0` is the same in `a` and `b`.
+    @inline(__always)
+    private func tileEqual(_ a: UnsafeBufferPointer<UInt8>, _ b: UnsafeBufferPointer<UInt8>, stride: Int,
+                           x0: Int, y0: Int, w: Int, h: Int) -> Bool {
+        guard let pa = a.baseAddress, let pb = b.baseAddress else { return false }
+        for y in y0..<(y0 + h) where memcmp(pa + y * stride + x0, pb + y * stride + x0, w) != 0 {
+            return false
+        }
+        return true
     }
 
     @inline(__always)
@@ -568,19 +695,8 @@ public final class FrameDecoder {
 
     /// New canvas of `w` x `h` with new(x, y) = old(x + dx, y + dy); the rest is 0.
     private func moveCanvas(width w: Int, height h: Int, dx: Int, dy: Int) {
-        var moved = [UInt8](repeating: 0, count: w * h * bps)
-        let x0 = max(0, -dx), x1 = min(w, width - dx)
-        if x1 > x0 {
-            for y in 0..<h {
-                let oy = y + dy
-                guard oy >= 0, oy < height else { continue }
-                let src = (oy * width + x0 + dx) * bps, dst = (y * w + x0) * bps
-                let n = (x1 - x0) * bps
-                moved.replaceSubrange(dst..<(dst + n), with: samples[src..<(src + n)])
-            }
-        }
+        samples = movedCanvas(samples, width: width, height: height, bytesPerPixel: bps, to: w, h, dx: dx, dy: dy)
         width = w
         height = h
-        samples = moved
     }
 }

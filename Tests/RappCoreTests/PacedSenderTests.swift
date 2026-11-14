@@ -59,7 +59,7 @@ final class PacedSenderTests: XCTestCase {
             if sent[count - 1].payload.width == 64 { break }
             XCTAssertFalse(sent[count - 1].payload.isFull)
         }
-        // Slices first, then the held newer frame (size change makes it full).
+        // Slices first, then the held newer frame (a resize, sent as a canvas move).
         XCTAssertGreaterThan(count, 3)
         XCTAssertEqual(sent.last?.payload.width, 64)
         XCTAssertEqual(sent.dropLast().filter { $0.payload.width == 64 }.count, 0)
