@@ -207,7 +207,13 @@ class MainState extends ChangeNotifier {
 
   /// Whether the runner or the hub may hear of [sid] (R12).
   /// Fails closed: a sid no record claims, or one it only keeps for its last frame, is not heard.
-  bool _liveSid(Object sid) => _recordOfSid(sid)?.phase == Phase.live;
+  /// The old session of a move is still live: it is the one on the stage until the swap.
+  bool _liveSid(Object sid) {
+    final r = _recordOfSid(sid);
+    if (r != null) return r.phase == Phase.live;
+    final m = _recordOfLastSid(sid);
+    return m != null && m.phase == Phase.live && _reroutes.containsKey(m);
+  }
 
   bool _hubHas(Object sid) => hub != null && hub!.sessions.any((s) => s.sid == sid);
 
@@ -250,8 +256,8 @@ class MainState extends ChangeNotifier {
       markingInput = null;
     }
     if (embeds) _entries = _mapEntries();
-    // Focus never stays on a session that is no longer current.
-    if (pictureFocused != null && current?.sid != pictureFocused) _blur();
+    // Focus never stays on a session that is no longer current (mid-move, the old one is on the stage).
+    if (pictureFocused != null && (currentRemote?.sid ?? current?.sid) != pictureFocused) _blur();
     _syncPolicy();
     // Every change of the current session or of detach state ends in a notify.
     _applyFps();
@@ -588,12 +594,18 @@ class MainState extends ChangeNotifier {
   void _onHub() {
     for (final p in hub!.takePresence()) {
       if (probes[p.id]?.lamp == Lamp.connecting) continue;
-      _setOnline(p.id, p.online);
+      _setOnline(p.id, p.online, error: p.error);
     }
+    // The labels read `hub.hostPaths`; this notify redraws them.
+    final paths = hub!.takePaths();
     if (embeds) {
+      for (final p in paths) {
+        _pathChanged(p.id, p.path);
+      }
       _onHubEmbedded();
       return;
     }
+    // Sessions run by rapp-client (no port) are not moved: their next reconnect takes the new link.
     final old = _entries;
     final oldGroups = groups;
     _entries = _mapEntries();
@@ -638,9 +650,10 @@ class MainState extends ChangeNotifier {
         notifyListeners();
       }));
     }
-    // A sid nobody shows any more (ended, or closed quietly): its `closed` is not news.
+    // A sid nobody shows any more (ended, or closed quietly): its `closed` is not news. The old sid
+    // of a move keeps its reason: a failed move goes back to it (`_rerouteFailed`).
     for (final sid in h.closeReasons.keys.toList()) {
-      if (_recordOfSid(sid) == null) h.closeReasons.remove(sid);
+      if (_recordOfSid(sid) == null && !_reroutes.keys.any((r) => r.lastSid == sid)) h.closeReasons.remove(sid);
     }
     _quiet.removeWhere((sid) => !_hubHas(sid));
     if (h.lastError != _lastError) {
@@ -655,12 +668,38 @@ class MainState extends ChangeNotifier {
     if (rs == null) return;
     final r = _recordOfSid(e.sid);
     if (r == null) {
+      final moving = _recordOfLastSid(e.sid);
+      if (moving != null && _reroutes.containsKey(moving) && e is! ClosedEvent && e is! DisconnectedEvent) {
+        // The old session of a move is still on the stage: its windows keep up until the swap.
+        if (e is InputBlockedEvent) {
+          if (moving.key == currentKey) _showBlocked(e.by);
+          return;
+        }
+        rs.apply(e);
+        if (e is WindowsEvent) _syncHidden(rs);
+        final start = _starts[e.sid];
+        if (start != null && e is ClipsEvent) {
+          resources.addClips(moving.key, start, _sourceOf(moving), e.clips);
+        } else if (start != null && e is TransferProgressEvent) {
+          resources.transfer(moving.key, start, _sourceOf(moving), e);
+        } else if (e is DetachedEvent) {
+          // Still the hub's session until the swap, which carries the state over to the new one.
+          if (_hubHas(e.sid)) hub!.note(e.sid, e.detached ? 'detach' : 'attach', rs.tabs.tabs.length);
+          if (e.detached && pictureFocused == e.sid) _blur();
+        }
+        notifyListeners();
+        return;
+      }
       // The old sid of a reconnect: only its end matters, and only to forget it.
       final holder = e is ClosedEvent ? _recordOfLastSid(e.sid) : null;
       if (holder != null) {
         holder.lastSid = null; // the runner closed it itself: nothing left to close or restore
         remote.remove(e.sid)?.dispose();
-        _starts.remove(e.sid);
+        final start = _starts.remove(e.sid);
+        if (start != null) resources.linkDown(start); // what it was still sending ends 没传完
+        // A move whose old session went (A gave its window to the new one): the new one is all
+        // there is, so the move is done.
+        _rerouteEnd(holder, true);
         notifyListeners();
       }
       return;
@@ -723,6 +762,13 @@ class MainState extends ChangeNotifier {
   /// The link of [r] ended with [raw] (the runner's or the hub's words): the record stays, with its
   /// last frame, until the user reconnects or ends it. Callers notify.
   void _disconnect(SessionRecord r, String raw, {bool hint = false, String? hintText}) {
+    final x = _reroutes[r];
+    if (x != null && x.fresh != null && x.fresh == r.sid && r.lastSid != null) {
+      // The new session of a move went before it took the stage: the old one carries on.
+      _rerouteFailed(r);
+      return;
+    }
+    _rerouteEnd(r, false);
     if (r.lastSid != null) {
       // A reconnect that never reached the stage: its new sid goes, the old picture stays.
       final fresh = r.sid;
@@ -769,6 +815,7 @@ class MainState extends ChangeNotifier {
 
   /// Takes [r] off the list and steps to the next session if it was current. Callers set the hint.
   void _endRecord(SessionRecord r) {
+    _rerouteEnd(r, false);
     _batchEnded.remove(r.key);
     final oldGroups = groups;
     final old = r.lastSid;
@@ -798,34 +845,64 @@ class MainState extends ChangeNotifier {
     if (old == null || fresh == null) return;
     final rs = remote[fresh];
     if (rs == null || !rs.windows.any((w) => w.hasPicture)) return;
+    final detached = remote[old]?.detached ?? false;
     port?.close(old);
     remote.remove(old)?.dispose();
-    _starts.remove(old);
+    final start = _starts.remove(old);
+    if (start != null) resources.linkDown(start); // what it was still sending ends 没传完
     r.lastSid = null;
+    if (_reroutes.containsKey(r)) {
+      if (pictureFocused == old) {
+        // A move: the keys typed into the old picture go on into the new one.
+        pictureFocused = fresh;
+        port?.pictureFocus(fresh);
+      }
+      // A move keeps the session where the user put it: off the stage stays off.
+      if (detached && port?.supportsDetach == true) port!.detach(fresh);
+    }
+    _rerouteEnd(r, true);
   }
 
   /// Opens (or reopens, [reconnect]) the hub session of [r] and starts the runner on it.
   /// [quiet]: no 「已打开」 hint at the end (failures still say why).
-  Future<void> _connect(SessionRecord r, {bool reconnect = false, bool quiet = false}) async {
+  /// [reroute]: a move of the live [r] onto the hub's new link ([reroute] the method). The old session
+  /// stays the record's own until the new one has opened; then it is [SessionRecord.lastSid], on the
+  /// stage until [_swapIfReady]. Failing, it stays on its route and nothing is said.
+  Future<void> _connect(SessionRecord r, {bool reconnect = false, bool quiet = false, bool reroute = false}) async {
+    final x = reroute ? _reroutes[r] : null;
+    final old = r.sid;
     final HubSession s;
     try {
       s = await hub!.open(r.id, r.app, embed: true, reconnect: reconnect);
     } catch (e) {
+      if (reroute) {
+        if (_reroutes[r] == x) _rerouteFailed(r);
+        notifyListeners();
+        return;
+      }
       if (r.ending) return;
       final missing = missingFromError('$e');
       _disconnect(r, '$e', hint: true, hintText: missing == null ? null : remoteHint(deviceName(r.id), missing));
       notifyListeners();
       return;
     }
-    if (r.ending) {
-      // Ended while it was connecting (R14): the session that just opened is not wanted.
+    if (r.ending || (reroute && (_reroutes[r] != x || !_movable(r) || r.sid != old))) {
+      // Ended while it was connecting (R14), or a move that was dropped or timed out meanwhile:
+      // the session that just opened is not wanted.
       _quiet.add(s.sid);
       hub!.close(s.sid);
+      if (reroute && _reroutes[r] == x) _rerouteEnd(r, false);
       return;
+    }
+    if (x != null) {
+      r.lastSid = old;
+      x.fresh = s.sid;
+      x.path = s.path; // the label follows at the swap: until then the stage shows the old route
+    } else {
+      r.path = s.path;
     }
     r.sid = s.sid;
     _starts[s.sid] = _Start(s.sid);
-    r.path = s.path;
     final rs = RemoteSession(s.sid, r.appName, onResize: (w, a, b) {
           if (_liveSid(s.sid)) port!.resize(s.sid, w, a, b);
         },
@@ -860,6 +937,11 @@ class MainState extends ChangeNotifier {
       await port!.start(StartArgs(s.sid, p, tk, c.mode, c.fps, c.density));
     } catch (e) {
       if (r.sid != s.sid) return; // it was dropped while starting: that already settled the record
+      if (x != null && _reroutes[r] == x && !r.ending && _records[r.key] == r) {
+        _rerouteFailed(r);
+        notifyListeners();
+        return;
+      }
       remote.remove(s.sid)?.dispose();
       _starts.remove(s.sid);
       _quiet.add(s.sid);
@@ -899,11 +981,122 @@ class MainState extends ChangeNotifier {
     if (r != null) reconnect(r.key);
   }
 
+  // ---- moving to a new route (UX spec §3) ----
+  /// Moves in flight, by record.
+  final Map<SessionRecord, _Reroute> _reroutes = {};
+
+  /// The latest path the hub gave per host whose sessions are still to be moved.
+  final Map<String, String> _moveTo = {};
+
+  /// Hosts with a round of moves running: one at a time per host.
+  final Set<String> _moving = {};
+
+  /// [r] is still the user's live session: not ended, disconnected or gone.
+  bool _movable(SessionRecord r) =>
+      _records[r.key] == r && r.phase == Phase.live && !r.ending && !r.userDisconnect && r.sid != null;
+
+  /// Reopens the live embedded session [key] over the hub's current link (`reconnect: true`). Its
+  /// old session stays on the stage, and gets the input, until the new one shows a window with a
+  /// picture; then the old one is closed. True once swapped; false when it failed (the open or the
+  /// start, or no picture within [rerouteTimeout]) — the old session then carries on, nothing said —
+  /// or when the session was ended, disconnected or removed meanwhile (it is not brought back).
+  Future<bool> reroute(String key) async {
+    final r = _records[key];
+    if (!embeds || !hubUsable || r == null || !_movable(r) || r.lastSid != null || _reroutes.containsKey(r)) {
+      return false;
+    }
+    final x = _reroutes[r] = _Reroute();
+    x.timer = Timer(rerouteTimeout, () {
+      if (_reroutes[r] != x) return;
+      _rerouteFailed(r);
+      notifyListeners();
+    });
+    unawaited(_connect(r, reconnect: true, reroute: true));
+    return x.done.future;
+  }
+
+  /// The move of [r] is over: [ok] it took the stage (its path becomes the record's).
+  void _rerouteEnd(SessionRecord r, bool ok) {
+    final x = _reroutes.remove(r);
+    if (x == null) return;
+    x.timer?.cancel();
+    final p = x.path;
+    if (ok && p != null) r.path = p;
+    x.done.complete(ok);
+  }
+
+  /// The move of [r] did not make it: its new session (if any) goes quietly, the old one stays.
+  void _rerouteFailed(SessionRecord r) {
+    final x = _reroutes[r];
+    if (x == null) return;
+    final fresh = x.fresh, old = r.lastSid;
+    if (fresh != null && r.sid == fresh && old != null) {
+      final start = _starts.remove(fresh);
+      if (start != null) resources.linkDown(start);
+      remote.remove(fresh)?.dispose();
+      _sentFps.remove(fresh);
+      _waiting.remove(fresh)?.timer.cancel();
+      _quiet.add(fresh);
+      if (_hubHas(fresh)) hub!.close(fresh);
+      port?.close(fresh);
+      r.sid = old;
+      r.lastSid = null;
+    }
+    _rerouteEnd(r, false);
+    // The old session may have ended meanwhile (its `closed` was not the record's then): down now.
+    final sid = r.sid;
+    if (sid != null && r.phase == Phase.live && !r.ending && !_hubHas(sid) && !_waiting.containsKey(sid)) {
+      _disconnect(r, hub?.closeReasons.remove(sid) ?? 'connection closed');
+    }
+  }
+
+  /// The hub cached a new link to [id] on [path]: its live sessions follow, one round at a time.
+  void _pathChanged(String id, String path) {
+    _moveTo[id] = path;
+    if (_moving.add(id)) unawaited(_moveHost(id));
+  }
+
+  /// Rounds of moves for [id], each toward the latest path, in record order, each session at most
+  /// once a round. A session that fails stops the round; toward the LAN the hub is told, so it
+  /// waits before trying the LAN again (and says `path lan` again after). A newer path stops the
+  /// round too: the next one goes by it. A reopen that lands elsewhere (the link moved again) is
+  /// done: only a new `path` event starts another round.
+  Future<void> _moveHost(String id) async {
+    try {
+      for (var path = _moveTo.remove(id); path != null && !_disposed; path = _moveTo.remove(id)) {
+        for (final r in [for (final r in _records.values) if (r.id == id) r]) {
+          if (_disposed || !hubUsable) return;
+          if (_moveTo.containsKey(id)) break; // a newer path came: the rest go by it, next round
+          if (!_movable(r) || r.lastSid != null || _reroutes.containsKey(r) || r.path == path) continue;
+          // No window with a picture (minimised, or none yet): its reopen could never show one, so it
+          // would time out and stop the round. It is skipped, not failed: its next reconnect takes the
+          // hub's link as it is then.
+          if (!(remote[r.sid]?.windows.any((w) => w.hasPicture) ?? false)) continue;
+          if (await reroute(r.key)) continue;
+          if (_disposed) return;
+          if (!_movable(r)) continue; // ended, disconnected or removed meanwhile: skipped, not failed
+          if (path == 'lan') hub!.routeFailed(id);
+          break;
+        }
+      }
+    } finally {
+      _moving.remove(id);
+    }
+  }
+
   /// 「断开连接」: closes the link, keeps the session in the list.
   void disconnectCurrent() {
     final r = currentRecord;
     if (r == null || !_reachable(r)) return;
     r.userDisconnect = true;
+    // Mid-move: the new session goes first, so it is the old one that is closed and kept.
+    if (_reroutes.containsKey(r)) {
+      _rerouteFailed(r);
+      if (!_reachable(r)) {
+        notifyListeners();
+        return;
+      }
+    }
     hub!.close(r.sid!, reason: 'user');
     notifyListeners();
   }
@@ -1167,7 +1360,9 @@ class MainState extends ChangeNotifier {
     switch (r.phase) {
       case Phase.live:
         // The runner closes the session and answers with `ClosedEvent`; a start still in flight
-        // that then fails ends the record instead of disconnecting it (M-6).
+        // that then fails ends the record instead of disconnecting it (M-6). A move is over: the
+        // new session's end takes the old one with it (`_endRecord`), nothing goes back.
+        _rerouteEnd(r, false);
         r.ending = true;
         port!.close(r.sid!);
         said = '正在结束 ${r.appName}';
@@ -1253,6 +1448,32 @@ class MainState extends ChangeNotifier {
   }
 
   int get onlineDevices => probes.values.where((p) => p.lamp == Lamp.active).length;
+
+  /// This machine has a relay set (from the service status): hosts go by bare ID and may be forced onto it.
+  bool get relaySet => _relaySet;
+  bool _relaySet = false;
+
+  void setRelaySet(bool v) {
+    if (v == _relaySet) return;
+    _relaySet = v;
+    notifyListeners();
+  }
+
+  /// The path of [id]'s link: the hub's latest word, else what the last probe said.
+  String? pathOf(String id) => hub?.hostPaths[id] ?? probes[id]?.apps?.path;
+
+  bool forcedRelay(String id) => hub?.hosts.any((h) => h.id == id && h.forcedRelay) ?? false;
+
+  /// Forces [id] onto the relay, or back to automatic. A failure goes to the hint.
+  Future<void> setRoute(String id, bool forced) async {
+    if (!hubUsable) return;
+    try {
+      await hub!.setRoute(id, forced ? 'relay' : 'auto');
+    } catch (e) {
+      hint = disconnectWord('$e');
+    }
+    notifyListeners();
+  }
 
   // ---- prefs ----
   void setTheme(RappTheme t) {
@@ -1581,11 +1802,27 @@ class MainState extends ChangeNotifier {
     for (final w in _waiting.values) {
       w.timer.cancel();
     }
+    for (final r in _reroutes.keys.toList()) {
+      _rerouteEnd(r, false);
+    }
     for (final r in remote.values) {
       r.dispose();
     }
     super.dispose();
   }
+}
+
+/// How long a moved session's new route has to show a picture before the move counts as failed.
+const rerouteTimeout = Duration(seconds: 15);
+
+/// One move of a record onto the hub's new link ([MainState.reroute]).
+class _Reroute {
+  final done = Completer<bool>();
+  Timer? timer;
+
+  /// The new session, once it opened, and the path it opened on.
+  Object? fresh;
+  String? path;
 }
 
 class _Waiting {

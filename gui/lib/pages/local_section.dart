@@ -77,6 +77,7 @@ Map<String, dynamic> permissionsOf(ServiceStatus st) =>
 class _LocalSectionState extends State<LocalSection> {
   bool _busy = false;
   bool _showPassword = false;
+  bool _lanOpen = false; // not saved: the fold starts closed every time the page opens
 
   /// The key text, fetched on 显示 and dropped on 隐藏 or once the service reports a different key state.
   String? _shownKey;
@@ -202,12 +203,36 @@ class _LocalSectionState extends State<LocalSection> {
   Widget _icon(String key, String tip, IconData icon, VoidCallback onPressed) => IconButton(
       key: Key(key), tooltip: tip, icon: Icon(icon, size: 18), visualDensity: VisualDensity.compact, onPressed: onPressed);
 
-  /// One row per ID, each with its own copy button; the label only on the first.
-  List<Widget> _idRows(List<String> ids) {
-    if (ids.isEmpty) return [_row('ID', '（还没有）')];
+  Widget _idRow(String label, String id, String key) =>
+      _row(label, id, trailing: _icon(key, '复制 ID', Icons.copy, () => _copy(id, ' ID')));
+
+  /// One row per ID, each with its own copy button; the label only on the first. With a relay set the bare ID
+  /// is the first row and the `id@ip` forms fold under one line.
+  List<Widget> _idRows(ServiceStatus st) {
+    if (!st.relaySet) {
+      final ids = st.shownIds;
+      if (ids.isEmpty) return [_row('ID', '（还没有）')];
+      return [for (final (i, id) in ids.indexed) _idRow(i == 0 ? 'ID' : '', id, 'copy-id-$i')];
+    }
+    final id = st.id;
+    final lan = st.lanIds;
     return [
-      for (final (i, id) in ids.indexed)
-        _row(i == 0 ? 'ID' : '', id, trailing: _icon('copy-id-$i', '复制 ID', Icons.copy, () => _copy(id, ' ID'))),
+      if (id == null) _row('ID', '（还没有）') else _idRow('ID', id, 'copy-id-0'),
+      if (lan.isNotEmpty) ...[
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Row(children: [
+            const SizedBox(width: 72),
+            InkWell(
+              key: const Key('lan-fold'),
+              onTap: () => setState(() => _lanOpen = !_lanOpen),
+              child: Text('${_lanOpen ? '▾' : '▸'} 局域网地址（${lan.length} 个）'),
+            ),
+          ]),
+        ),
+        if (_lanOpen)
+          for (final (i, a) in lan.indexed) _idRow('', a, 'copy-lan-$i'),
+      ],
     ];
   }
 
@@ -371,7 +396,7 @@ class _LocalSectionState extends State<LocalSection> {
         SectionCard(title: '本机', children: [
           _row('服务', st == null ? '未运行（${m.error ?? '连接中'}）' : '运行中'),
           if (st != null) ...[
-            ..._idRows(st.shownIds),
+            ..._idRows(st),
             _row('名称', st.name),
             _passwordRow(st.password),
             _relayRow(st),

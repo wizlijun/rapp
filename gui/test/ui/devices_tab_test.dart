@@ -68,6 +68,16 @@ void main() {
             ],
             'permissions': ?appsPermissions,
           });
+        case 'set_route':
+          for (final h in hosts) {
+            if (h['id'] != cmd['id']) continue;
+            if (cmd['route'] == 'relay') {
+              h['route'] = 'relay';
+            } else {
+              h.remove('route');
+            }
+          }
+          t.emit({'event': 'hosts', 'req': req, 'hosts': hosts});
         case 'open':
           if (openError != null) return t.emit({'event': 'error', 'req': req, 'error': openError});
           t.emit({'event': 'opened', 'req': req, 'sid': 1, 'id': cmd['id'], 'app': cmd['app'], 'path': 'lan'});
@@ -335,6 +345,65 @@ void main() {
     expect(find.text('离线'), findsWidgets);
     expect(find.text('连接超时'), findsOneWidget);
     expect(find.textContaining('connect timed out'), findsNothing);
+  });
+
+  testWidgets('route toggle shows only with a relay', (tester) async {
+    await pumpTab(tester);
+    await selectMini(tester);
+    expect(find.byKey(const Key('route-toggle')), findsNothing);
+    s.setRelaySet(true);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('route-toggle')), findsOneWidget);
+    expect(find.text('强制走中继'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('route-toggle')));
+    await tester.pumpAndSettle();
+    expect(t.sent.where((m) => m['cmd'] == 'set_route').last, {'cmd': 'set_route', 'id': '111', 'route': 'relay', 'req': anything});
+    expect(find.text('恢复自动'), findsOneWidget);
+    expect(find.text('强制走中继'), findsNothing);
+    await tester.tap(find.byKey(const Key('route-toggle')));
+    await tester.pumpAndSettle();
+    expect(t.sent.where((m) => m['cmd'] == 'set_route').last['route'], 'auto');
+    expect(find.text('强制走中继'), findsOneWidget);
+  });
+
+  testWidgets('route toggle is disabled once the hub is gone', (tester) async {
+    s.setRelaySet(true);
+    await pumpTab(tester);
+    await selectMini(tester);
+    await t.die();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('route-toggle')));
+    await tester.pumpAndSettle();
+    expect(t.sent.where((m) => m['cmd'] == 'set_route'), isEmpty);
+  });
+
+  testWidgets('device row path follows path events', (tester) async {
+    await pumpTab(tester);
+    await selectMini(tester);
+    expect(find.text('局域网'), findsOneWidget);
+    t.emit({'event': 'path', 'id': '111', 'path': 'relay'});
+    await tester.pumpAndSettle();
+    expect(find.text('局域网'), findsNothing);
+    expect(find.text('中继'), findsOneWidget);
+    t.emit({
+      'event': 'hosts',
+      'hosts': [
+        {'id': '111', 'name': 'mini', 'route': 'relay'},
+        {'id': '222', 'name': 'far'},
+      ],
+    });
+    await tester.pumpAndSettle();
+    expect(find.text('中继（强制）'), findsOneWidget);
+  });
+
+  testWidgets('offline from presence shows the relay error', (tester) async {
+    await pumpTab(tester);
+    await selectMini(tester);
+    t.emit({'event': 'presence', 'id': '111', 'online': false, 'error': 'relay unreachable: timed out'});
+    await tester.pumpAndSettle();
+    expect(find.text('离线'), findsWidgets);
+    expect(find.text('中继连不上'), findsOneWidget);
+    expect(find.textContaining('relay unreachable'), findsNothing);
   });
 
   testWidgets('missing permissions on a remote host show the remote hint', (tester) async {

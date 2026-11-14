@@ -172,15 +172,43 @@ void main() {
     expect(find.byType(AlertDialog), findsOneWidget);
   });
 
-  testWidgets('ids with relay: bare id first', (tester) async {
+  testWidgets('with a relay the bare ID comes first and LAN IDs fold', (tester) async {
     svc = FakeService('tok')
       ..extraStatus = {'relay_addr': 'vps:22026', 'has_key': true}
-      ..lanIds = ['123456789@192.168.1.5'];
+      ..lanIds = ['123456789@192.168.1.5', '123456789@10.0.0.7'];
     await pump(tester);
     await tester.tap(find.byKey(const Key('copy-id-0')));
     await tester.pump();
     expect(copied, ['123456789']);
+    expect(find.text('▸ 局域网地址（2 个）'), findsOneWidget);
+    expect(find.text('123456789@192.168.1.5'), findsNothing);
+
+    await tester.tap(find.byKey(const Key('lan-fold')));
+    await tester.pump();
+    expect(find.text('▾ 局域网地址（2 个）'), findsOneWidget);
     expect(find.text('123456789@192.168.1.5'), findsOneWidget);
+    expect(find.text('123456789@10.0.0.7'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('copy-lan-1')));
+    await tester.pump();
+    expect(copied.last, '123456789@10.0.0.7');
+
+    // Leaving the page and coming back: folded again.
+    await tester.pumpWidget(wrap(const SizedBox()));
+    await tester.pumpWidget(wrap(SingleChildScrollView(
+      child: LocalSection(platform: TargetPlatform.windows, monitor: m, control: null, data: DataDir(tmp.path)),
+    )));
+    await tester.pump();
+    expect(find.text('▸ 局域网地址（2 个）'), findsOneWidget);
+    expect(find.text('123456789@192.168.1.5'), findsNothing);
+  });
+
+  testWidgets('with a relay and no LAN address there is no fold row', (tester) async {
+    svc = FakeService('tok')..extraStatus = {'relay_addr': 'vps:22026', 'has_key': true};
+    await pump(tester);
+    expect(find.byKey(const Key('lan-fold')), findsNothing);
+    await tester.tap(find.byKey(const Key('copy-id-0')));
+    await tester.pump();
+    expect(copied, ['123456789']);
   });
 
   testWidgets('every LAN ID has its own copy button', (tester) async {

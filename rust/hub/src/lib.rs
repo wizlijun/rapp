@@ -1,11 +1,13 @@
 //! rapp-hub (spec §4): B side. JSON-line commands on stdin, events on stdout.
 //! Hosts are reached at the addresses saved in `hosts.json` (added as `id@ip`, or by bare ID through
-//! the relay), and through the relay when no address answers.
+//! the relay), and through the relay when no address answers. A link off the LAN moves to the LAN
+//! when it answers (`upgrade`).
 
 mod hosts;
 mod link;
 mod presence;
 mod session;
+mod upgrade;
 
 use anyhow::{bail, Context, Result};
 use hosts::{Host, Hosts};
@@ -19,6 +21,7 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex, RwLock};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+pub use upgrade::UpgradeTimes;
 
 pub struct Opts {
     pub home: PathBuf,
@@ -27,6 +30,8 @@ pub struct Opts {
     pub log: Log,
     /// Presence probe period; None = no probe (tests).
     pub presence_every: Option<std::time::Duration>,
+    /// When links off the LAN are tried on it.
+    pub upgrade: UpgradeTimes,
 }
 
 /// One open session. `tx` is the writer of the client's stdin (None once closed).
@@ -68,6 +73,11 @@ pub(crate) struct Hub {
     /// What the relay said about a host in this run: true = found it, false = `unknown id`.
     /// Probes look a host up only when that is worth a lookup (the relay counts `unknown id`).
     relay_seen: Mutex<HashMap<String, bool>>,
+    /// The LAN addresses each host last reported to the relay (`connect`), tried by the LAN upgrade.
+    relay_lan: Mutex<HashMap<String, Vec<String>>>,
+    /// When each host off the LAN is tried on it next.
+    schedule: Mutex<upgrade::Schedule>,
+    times: UpgradeTimes,
     kill: tokio::sync::watch::Sender<bool>,
     log: Log,
     /// B's self-declared name in `auth` (spec §2): this machine's hostname.
@@ -93,12 +103,16 @@ where
         close_why: Default::default(),
         probe_halt: Default::default(),
         relay_seen: Default::default(),
+        relay_lan: Default::default(),
+        schedule: Mutex::new(upgrade::Schedule::new(opts.upgrade)),
+        times: opts.upgrade,
         kill: tokio::sync::watch::channel(false).0,
         bin_dir: opts.bin_dir,
         log: opts.log,
         name: rapp_net::config::hostname(),
     });
     let probe = opts.presence_every.map(|every| tokio::spawn(presence::run(hub.clone(), every)));
+    let upgrade = tokio::spawn(upgrade::run(hub.clone()));
     let mut lines = BufReader::new(input).lines();
     let read = async {
         while let Some(line) = lines.next_line().await? {
@@ -115,6 +129,8 @@ where
         p.abort();
         let _ = p.await;
     }
+    upgrade.abort();
+    let _ = upgrade.await;
     read?;
     hub.close_all().await;
     if let Some(c) = hub.relay.lock().await.take() {
@@ -145,7 +161,7 @@ impl Hub {
     /// Moves to a new home: its device identity, its hosts, and (read per connect) its relay and key.
     /// On error nothing changes. The relay connection, dialed as the old device, is closed; cached
     /// host links are dropped from the cache (sessions on them keep running) so the next request
-    /// connects as the new device.
+    /// connects as the new device; LAN tries planned for the old hosts are dropped too.
     async fn set_home(&self, dir: &std::path::Path) -> Result<()> {
         let identity = Arc::new(rapp_wire::Identity::load_or_create(dir, "device").context("device key")?);
         self.hosts.reload(dir)?;
@@ -156,6 +172,8 @@ impl Hub {
         self.links.lock().unwrap().clear();
         self.probe_halt.lock().unwrap().clear();
         self.relay_seen.lock().unwrap().clear();
+        self.relay_lan.lock().unwrap().clear();
+        self.schedule.lock().unwrap().clear();
         Ok(())
     }
 
@@ -200,7 +218,39 @@ impl Hub {
                 let id = s("id")?;
                 self.hosts.remove(id)?;
                 self.forget(id);
+                // Its LAN tries go too, even one held after a failed move (`forget` keeps those).
+                self.schedule.lock().unwrap().remove(id);
                 self.hosts_event()
+            }
+            Some("set_route") => {
+                let route = match s("route")? {
+                    "relay" => Some("relay".to_string()),
+                    "auto" => None,
+                    _ => bail!("bad route"),
+                };
+                let id = s("id")?;
+                self.host(id)?;
+                self.hosts.set_route(id, route.clone())?;
+                self.log.msg(Lvl::Info, format_args!("{id}: route {}", route.as_deref().unwrap_or("auto")));
+                if route.is_some() {
+                    // Requests leave the old link now; this one builds the relay link (and its `path` event).
+                    self.uncache(id);
+                    let (hub, id) = (self.clone(), id.to_string());
+                    tokio::spawn(async move {
+                        let Some(host) = hub.hosts.get(&id) else { return };
+                        if let Err(e) = hub.request(&host, &Op::Ping).await {
+                            hub.log.msg(Lvl::Warn, format_args!("{id} via relay: {e:#}"));
+                        }
+                    });
+                } else {
+                    self.upgrade_now(id);
+                }
+                self.hosts_event()
+            }
+            Some("route_failed") => {
+                // A session did not reopen on the LAN: leave the host where it is for a while.
+                self.schedule.lock().unwrap().failed_move(s("id")?, std::time::Instant::now());
+                return Ok(None);
             }
             Some("set_home") => {
                 self.set_home(std::path::Path::new(s("dir")?)).await?;
