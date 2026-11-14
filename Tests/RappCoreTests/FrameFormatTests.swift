@@ -97,6 +97,29 @@ final class FrameFormatTests: XCTestCase {
         XCTAssertEqual(dec.samples[0], 1)
     }
 
+    func testExtremeOffsetsGiveBlankCanvas() throws {
+        for (dx, dy) in [(Int32.max, Int32(0)), (.min, 0), (0, .max), (0, .min), (.min, .min), (.max, .max)] {
+            let (dec, z) = try twoTiles()
+            XCTAssertNoThrow(try dec.decode(slice(z, 128, 64, [.start, .end], dx: dx, dy: dy)), "\(dx),\(dy)")
+            XCTAssertEqual(dec.samples, [UInt8](repeating: 0, count: 128 * 64), "\(dx),\(dy)")
+        }
+        let (dec, z) = try twoTiles()
+        try dec.decode(slice(z, 128, 64, [.start, .end], dx: .max, dy: 0, [solid(1, 7)]))
+        XCTAssertEqual(dec.samples[0], 0)
+        XCTAssertEqual(dec.samples[64], 7)
+    }
+
+    func testThrowLeavesDecoderNeedingFullFrame() throws {
+        let (dec, z) = try twoTiles()
+        let bad = FramePayload(width: 128, height: 64, flags: [.start, .end], dx: 1, data: [1, 2, 3])
+        XCTAssertThrowsError(try dec.decode(bad))
+        XCTAssertThrowsError(try dec.decode(slice(z, 128, 64, [.start, .end], [solid(0, 1)])))
+        let z2 = DeflateStream()
+        XCTAssertNoThrow(try dec.decode(slice(z2, 128, 64, [.full, .start, .end], [solid(0, 2), solid(1, 4)])))
+        XCTAssertEqual(dec.samples[0], 2)
+        XCTAssertEqual(dec.samples[64], 4)
+    }
+
     func testDisplayTiming() throws {
         let z = DeflateStream(), dec = FrameDecoder(mode: .gray4)
         // The session's first full frame shows slice by slice.

@@ -392,8 +392,24 @@ public final class FrameDecoder {
     /// display may be updated now: always for ordinary deltas and the session's
     /// first full frame, otherwise only after the `end` slice of a frame that
     /// replaces the picture or moves it.
+    /// After a throw the canvas is undefined: it is emptied (`width` 0) and only a
+    /// full frame can resume decoding.
     @discardableResult
     public func decode(_ frame: FramePayload) throws -> Bool {
+        do {
+            return try decodeSlice(frame)
+        } catch {
+            open = false
+            hold = false
+            reference = nil
+            width = 0
+            height = 0
+            samples = []
+            throw error
+        }
+    }
+
+    private func decodeSlice(_ frame: FramePayload) throws -> Bool {
         let flags = frame.flags
         guard FrameFlags(rawValue: flags.rawValue & 0x0F) == flags else { throw CodecError("unknown frame flags") }
         if flags.contains(.full) && !flags.contains(.start) { throw CodecError("full frame without start") }
