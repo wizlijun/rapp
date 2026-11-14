@@ -5,3 +5,45 @@
 @media(min-height:950px){.hero{padding-top:100px;padding-bottom:64px}.relay{padding-bottom:68px}}
 @media(max-width:640px){.shell{padding:0 24px}header{height:86px}nav{gap:18px}.hero{padding:54px 0 34px}h1{font-size:52px;margin-top:24px}.intro{font-size:12px;max-width:330px}.download-area{gap:12px}.download-meta{font-size:10px}.platforms{gap:16px;margin-top:10px}.relay{padding:24px 0 34px}.command{gap:10px;padding-left:12px}code{font-size:10px;padding:12px 0}.relay-heading{gap:10px}h2{font-size:12px}.relay-tag{font-size:8px}.relay-info{font-size:9px;gap:12px}.relay-note{font-size:9px;margin-left:0}footer{flex-wrap:wrap;gap:8px 20px;padding:18px 0}.footer-links{gap:16px}.theme-control{margin-left:0}select{min-height:38px}[lang=ja] h1,[lang=zh-Hans] h1{font-size:43px}}
 @media(prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+
+/* Product illustration: two remote apps, one local workspace. */
+main{max-width:none}
+.hero{display:grid;grid-template-columns:minmax(0,.91fr) minmax(0,1.09fr);align-items:center;gap:36px;padding-top:70px;padding-bottom:56px}
+.hero-copy{min-width:0}
+.hero h1{font-size:clamp(50px,5.2vw,66px)}
+.hero .intro{max-width:400px;font-size:13px}
+.hero .download-area{gap:12px}
+.hero .download-meta{font-size:10px}
+.hero .platforms{gap:16px}
+.hero .platforms a,.hero .platforms span{font-size:10px}
+.relay{max-width:800px;margin:0 auto}
+.product-illustration{min-width:0;margin:0;color:var(--text)}
+.product-scene{display:block;width:100%;height:auto;overflow:visible;font-family:var(--font)}
+.scene-label{fill:var(--muted);font-size:9px;letter-spacing:.7px}
+.scene-frame{fill:var(--bg);stroke:var(--line);stroke-width:1}
+.scene-rule{fill:none;stroke:var(--line);stroke-width:1}
+.scene-app-name{fill:var(--text);font-size:10px}
+.scene-code{fill:var(--text);font-size:11px;font-family:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace}
+.scene-content{fill:none;stroke:var(--muted);stroke-width:2;opacity:.4}
+.scene-caret,.scene-status{fill:var(--on)}
+.scene-message{fill:var(--raise);stroke:var(--line);stroke-width:.7}
+.scene-connections{fill:var(--on);stroke:var(--muted);stroke-width:1;stroke-dasharray:3 4}
+.scene-connections>path{fill:none}
+.scene-connections .scene-arrow{stroke-dasharray:none;stroke:var(--on)}
+.scene-pad-frame{fill:var(--panel);stroke:var(--text);stroke-width:1}
+.scene-menu,.scene-send{fill:none;stroke:var(--text);stroke-width:1}
+.scene-pad-name{fill:var(--on);font-size:11px}
+.scene-tab-active{fill:var(--raise);stroke:var(--text);stroke-width:.8}
+.scene-tab{fill:var(--panel);stroke:var(--line);stroke-width:.8}
+.scene-tab-text{fill:var(--text);font-size:10px}
+.scene-device-label{fill:var(--muted);font-size:9px}
+.scene-composer{fill:var(--bg);stroke:var(--line);stroke-width:1}
+.scene-input{fill:var(--muted);font-size:10px}
+.scene-note-paper{fill:var(--raise);stroke:var(--muted);stroke-opacity:.45;stroke-width:.8}
+.scene-note-fold{fill:none;stroke:var(--muted);stroke-opacity:.45;stroke-width:.8}
+.scene-context-text{fill:var(--text);font-size:10px}
+.product-illustration figcaption{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:10px;line-height:1.8;padding:5px 0 0 8.15%}
+[lang=ja] .hero h1,[lang=zh-Hans] .hero h1{font-size:clamp(40px,4.2vw,54px)}
+@media(max-width:1000px){main{max-width:800px}.hero{grid-template-columns:1fr;gap:36px;padding-top:54px;padding-bottom:42px}.hero h1{font-size:clamp(50px,7.8vw,70px)}.hero .intro{max-width:none}.product-illustration{width:100%;max-width:570px;justify-self:center}[lang=ja] .hero h1,[lang=zh-Hans] .hero h1{font-size:clamp(40px,6vw,60px)}}
+@media(max-width:640px){.hero{padding-top:42px;gap:28px}.hero h1{font-size:50px}.hero .intro{font-size:12px}.product-illustration figcaption{font-size:9px;gap:8px;padding-left:4.5%}[lang=ja] .hero h1,[lang=zh-Hans] .hero h1{font-size:41px}}
+@media(max-width:640px){.scene-label,.scene-app-name,.scene-pad-name,.scene-tab-text,.scene-code,.scene-input{font-size:15px}.scene-device-label{font-size:13px}.scene-context-text{font-size:12px}}

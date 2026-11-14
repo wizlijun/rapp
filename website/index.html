@@ -18,6 +18,7 @@
     </header>
     <main>
       <section class="hero" aria-labelledby="intro">
+        <div class="hero-copy">
         <div class="eyebrow"><span class="lamp" aria-hidden="true"></span><span data-i18n="eyebrow">REMOTE APPLICATIONS, WITHIN REACH</span></div>
         <h1 id="intro"><span data-i18n="headline1">Remote apps.</span><br><span class="bright" data-i18n="headline2">One Pad.</span></h1>
         <p class="intro" data-i18n="intro">Apps from all your machines, in one place.</p>
@@ -27,6 +28,66 @@
         </div>
         <div id="platforms" class="platforms" aria-label="Downloads"></div>
         <p id="compatibility" class="compatibility" hidden></p>
+        </div>
+        <figure class="product-illustration">
+          <svg class="product-scene" viewBox="0 0 540 418" role="img" aria-labelledby="scene-title scene-description">
+            <title id="scene-title" data-i18n="sceneTitle">Remote apps, together in One Pad</title>
+            <desc id="scene-description" data-i18n="sceneDescription">Terminal runs on cloud Linux and Claude on a remote Mac. View and control both in One Pad on Omarchy. A note labeled Context sits beside the sessions.</desc>
+            <defs>
+              <pattern id="scene-dots" width="16" height="16" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r=".65" fill="currentColor" opacity=".12"/></pattern>
+            </defs>
+            <rect class="scene-background" x="0" y="0" width="540" height="418" fill="url(#scene-dots)"/>
+
+            <g class="scene-source">
+              <text class="scene-label" x="24" y="20" data-i18n="sceneCloud">LINUX IN THE CLOUD</text>
+              <rect class="scene-frame" x="24" y="35" width="198" height="104" rx="3"/>
+              <path class="scene-rule" d="M24 60h198M113 139v10m-20 0h40"/>
+              <text class="scene-app-name" x="37" y="52">&gt;_ Terminal</text>
+              <text class="scene-code" x="38" y="81">$ agent</text>
+              <path class="scene-content" d="M38 94h96m-96 11h136m-136 11h71"/>
+              <rect class="scene-caret" x="116" y="112" width="5" height="8"/>
+            </g>
+            <g class="scene-source">
+              <text class="scene-label" x="318" y="20" data-i18n="sceneMac2">MAC AT WORK</text>
+              <rect class="scene-frame" x="318" y="35" width="198" height="104" rx="3"/>
+              <path class="scene-rule" d="M318 60h198m-109 79v10m-20 0h40"/>
+              <path class="scene-rule" d="M329 43h11v9h-6l-5 3z"/>
+              <text class="scene-app-name" x="347" y="52">Claude</text>
+              <rect class="scene-message" x="366" y="72" width="136" height="20" rx="3"/>
+              <path class="scene-content" d="M376 82h91m-135 23h143m-143 12h118"/>
+            </g>
+
+            <g class="scene-connections" aria-hidden="true">
+              <path d="M123 159v13q0 12 12 12h47q12 0 12 12v25M417 159v13q0 12-12 12h-47q-12 0-12 12v25"/>
+              <path class="scene-arrow" d="m190 217 4 4 4-4m144 0 4 4 4-4"/>
+              <circle cx="123" cy="159" r="2"/><circle cx="417" cy="159" r="2"/>
+            </g>
+
+            <g class="scene-pad">
+              <rect class="scene-pad-frame" x="44" y="231" width="452" height="163" rx="3"/>
+              <path class="scene-rule" d="M44 260h452"/>
+              <path class="scene-menu" d="M58 241h10m-10 4h10m-10 4h10"/>
+              <circle class="scene-status" cx="86" cy="246" r="3"/>
+              <text class="scene-pad-name" x="97" y="250">One Pad</text>
+              <text class="scene-label" x="480" y="249" text-anchor="end" data-i18n="sceneHere">OMARCHY</text>
+              <rect class="scene-tab-active" x="58" y="272" width="151" height="25" rx="1"/>
+              <text class="scene-tab-text" x="70" y="288">Terminal <tspan class="scene-device-label">/ <tspan data-i18n="sceneCloudTab">cloud</tspan></tspan></text>
+              <rect class="scene-tab" x="215" y="272" width="146" height="25" rx="1"/>
+              <text class="scene-tab-text" x="227" y="288">Claude <tspan class="scene-device-label">/ <tspan data-i18n="sceneWork">work</tspan></tspan></text>
+              <text class="scene-code" x="70" y="320">$ agent</text>
+              <path class="scene-content" d="M70 332h125m-125 11h180"/>
+              <g class="scene-context">
+                <path class="scene-note-paper" d="M412 278h52l10 10v52h-62z"/>
+                <path class="scene-note-fold" d="M464 278v10h10"/>
+                <text class="scene-context-text" x="443" y="313" text-anchor="middle">Context</text>
+              </g>
+              <rect class="scene-composer" x="58" y="355" width="424" height="25" rx="1"/>
+              <text class="scene-input" x="69" y="371" data-i18n="sceneInput">Reply from here…</text>
+              <path class="scene-send" d="M461 361v12m-5-5 5 5 5-5"/>
+            </g>
+          </svg>
+          <figcaption><span data-i18n="sceneCaption">Apps run there. You work here.</span></figcaption>
+        </figure>
       </section>
       <section class="relay" aria-labelledby="relay-title">
         <div class="relay-heading"><h2 id="relay-title" data-i18n="relayTitle">Your relay. Your rules.</h2><span class="relay-tag">LINUX / DOCKER</span></div>

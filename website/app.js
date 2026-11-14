@@ -5,6 +5,12 @@ const copy = {
   ja: { eyebrow:'離れたアプリを、手元に', headline1:'離れたアプリも。', headline2:'One Pad.', intro:'すべてのマシンのアプリを、ひとつの場所に。', download:'ダウンロード：', choose:'ダウンロードを選択', macos:'macOS', linux:'Omarchy / Arch', windows:'Windows', apple:'Apple シリコン', linuxArch:'x86_64', unavailable:'未提供', all:'すべてのリリース ↗', relayTitle:'自分の中継サーバーを、自由に。', e2e:'エンドツーエンド暗号化。中継サーバーが扱うのは暗号文だけ。', relayNote:'両端に rapp 0.6 以降が必要 · UDP 22026 を開放 · インストール時のキーを保存', script:'スクリプト ↗', releases:'リリース ↗', theme:'テーマ', copied:'コピーしました', copy:'インストールコマンドをコピー', legacy:'Linux v0.5.2 は旧接続方式です。E2E 中継には両端で rapp 0.6 以降が必要です。', cached:'保存済みリリース一覧', unsupported:'下から対応プラットフォームを選択してください。' },
   zh: { eyebrow:'远程的应用，手边就能用', headline1:'远程应用。', headline2:'One Pad.', intro:'所有设备上的应用，汇于一处。', download:'下载', choose:'选择下载版本', macos:'macOS', linux:'Omarchy / Arch', windows:'Windows', apple:'Apple 芯片', linuxArch:'x86_64', unavailable:'暂未提供', all:'全部版本 ↗', relayTitle:'自己的中继，自己掌握。', e2e:'端到端加密，中继只转发密文。', relayNote:'两端均需 rapp 0.6+ · 开放 UDP 22026 · 保存安装时显示的 key', script:'查看脚本 ↗', releases:'发布记录 ↗', theme:'主题', copied:'已复制', copy:'复制安装命令', legacy:'Linux v0.5.2 使用旧连接方式；E2E 新中继需要两端均为 rapp 0.6+。', cached:'已保存的版本列表', unsupported:'请从下方选择支持的平台。' },
 };
+const sceneCopy = {
+  en: { sceneTitle:'Remote apps, together in One Pad', sceneDescription:'Terminal runs on cloud Linux and Claude on a remote Mac. View and control both in One Pad on Omarchy. A note labeled Context sits beside the sessions.', sceneCloud:'LINUX IN THE CLOUD', sceneMac2:'MAC AT WORK', sceneHere:'OMARCHY', sceneCloudTab:'cloud', sceneWork:'work', sceneInput:'Reply from here…', sceneCaption:'Apps run there. You work here.' },
+  ja: { sceneTitle:'離れたアプリを One Pad に', sceneDescription:'クラウドの Linux で動く Terminal と、別の Mac で動く Claude を、Omarchy の One Pad で表示し、操作できます。セッションの横には Context と書かれたメモがあります。', sceneCloud:'クラウド LINUX', sceneMac2:'職場の MAC', sceneHere:'OMARCHY', sceneCloudTab:'クラウド', sceneWork:'職場', sceneInput:'ここから返信…', sceneCaption:'アプリは向こうで。操作はここで。' },
+  zh: { sceneTitle:'远程应用，汇入 One Pad', sceneDescription:'Terminal 在云端 Linux 上运行，Claude 在远程 Mac 上运行。在 Omarchy 的 One Pad 中查看和操作这两个会话。会话旁有一张写着 Context 的便签。', sceneCloud:'云端 LINUX', sceneMac2:'办公室的 MAC', sceneHere:'OMARCHY', sceneCloudTab:'云端', sceneWork:'办公室', sceneInput:'在这里回复…', sceneCaption:'应用在那里运行，你在这里操作。' },
+};
+for (const language of Object.keys(copy)) Object.assign(copy[language], sceneCopy[language]);
 const params = new URLSearchParams(location.search);
 let language = Object.hasOwn(copy, params.get('lang')) ? params.get('lang') : 'en';
 let downloads = {};
