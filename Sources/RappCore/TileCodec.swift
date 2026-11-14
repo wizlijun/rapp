@@ -137,6 +137,12 @@ public final class FrameEncoder {
     /// True when the last encode left some tile unsent only because its raw
     /// pixels matched, so the canvas there differs from this frame's samples.
     public private(set) var lastEncodeDiverged = false
+    /// True when the last encode made the canvas newly approximate: a tile was
+    /// accepted on raw pixels only as a copy, or against the old picture moved
+    /// by a nonzero offset. A raw match in place on an unmoved canvas does not
+    /// count; that approximation was already there. Full frames and
+    /// `encodeSettle` clear it.
+    public private(set) var lastEncodeAddedApproximation = false
     /// True from such an encode until a full frame or `encodeSettle` makes the
     /// canvas exact again.
     public private(set) var needsSettle = false
@@ -417,6 +423,7 @@ public final class FrameEncoder {
             lastDy = best.key
         }
         lastEncodeDiverged = !diverged.isEmpty || !rawCopies.isEmpty
+        lastEncodeAddedApproximation = !rawCopies.isEmpty || (!diverged.isEmpty && (dx != 0 || dy != 0))
         needsSettle = !settle && (lastEncodeDiverged || (needsSettle && !full))
         lastSamples = samples
         previousKey = raw

@@ -323,6 +323,75 @@ final class PacedSenderTests: XCTestCase {
         XCTAssertEqual(try decoded(), quantize(f.bgra, w2, h))
     }
 
+    func testNoSettleDuringContinuousScroll() throws {
+        let (w, h) = (256, 192)
+        func frame(_ scroll: Int) -> (bgra: [UInt8], region: CanvasRect) {
+            var f = scene(x: 100, y: 50 + scroll, w: w, h: h)
+            f.region = CanvasRect(x: 100, y: 50, w: Float(w), h: Float(h))
+            return f
+        }
+        let s = make(mode: .duogray)
+        offerRaw(s, frame(0), w, h)
+        drain(s)
+        var last = frame(0)
+        for i in 1...10 {
+            t += 0.1
+            last = frame(i * 5)
+            offerRaw(s, last, w, h)
+            drain(s)
+            let c = sent.count
+            s.settleIfIdle()
+            XCTAssertEqual(sent.count, c, "scroll frame \(i)")
+        }
+        let q = quantize(last.bgra, w, h)
+        XCTAssertNotEqual(try decoded(), q, "the scroll must really leave the canvas approximate")
+        // The scroll stops: settle comes 300 ms later.
+        let before = sent.count
+        t += 0.29
+        s.settleIfIdle()
+        XCTAssertEqual(sent.count, before)
+        t += 0.02
+        s.settleIfIdle()
+        XCTAssertGreaterThan(sent.count, before)
+        drain(s)
+        XCTAssertEqual(try decoded(), q)
+    }
+
+    func testSettleDoesNotJumpAHeldOffer() throws {
+        let (w, h) = (256, 128)
+        let a = scene(x: 100, y: 50, w: w, h: h)
+        let b = scene(x: 95, y: 50, w: w + 5, h: h)
+        let w2 = w + 5
+        func touched(_ f: (bgra: [UInt8], region: CanvasRect), _ seed: UInt8, row: Int) -> (bgra: [UInt8], region: CanvasRect) {
+            var g = f
+            for py in row..<(row + 16) { for px in 0..<16 { g.bgra[(py * w2 + px) * 4] = seed &+ UInt8(px) } }
+            return g
+        }
+        let c = touched(b, 7, row: 100), d = touched(c, 99, row: 100)
+        func play(settle: Bool) throws -> [Sent] {
+            let s = make(mode: .duogray)
+            offerRaw(s, a, w, h)
+            drain(s)
+            offerRaw(s, b, w2, h)
+            drain(s)
+            XCTAssertNotEqual(try decoded(), quantize(b.bgra, w2, h), "input must really diverge")
+            offerRaw(s, c, w2, h)   // sent, in flight
+            offerRaw(s, d, w2, h)   // held, queue empty
+            t += 0.5
+            let n = sent.count
+            if settle { s.settleIfIdle() }
+            XCTAssertEqual(sent.count, n)
+            s.ack(processingMs: 0)
+            XCTAssertGreaterThan(sent.count, n)
+            return sent
+        }
+        let plain = try play(settle: false)
+        let withSettle = try play(settle: true)
+        // The held frame goes out next; no correction was queued ahead of it.
+        XCTAssertEqual(withSettle.count, plain.count)
+        XCTAssertEqual(withSettle.map(\.payload), plain.map(\.payload))
+    }
+
     func testStatsCountFullFramesAndEncodeTime() {
         let s = make()
         offerSmall(s, 1)

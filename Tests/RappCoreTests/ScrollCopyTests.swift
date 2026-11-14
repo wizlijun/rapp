@@ -488,6 +488,35 @@ final class ScrollCopyTests: XCTestCase {
         }
     }
 
+    /// Only a raw match that moves the picture adds approximation: a raw copy
+    /// tile or a kept tile after a nonzero move. The same frame again keeps the
+    /// canvas inexact (`lastEncodeDiverged`) without adding any.
+    func testLastEncodeAddedApproximation() throws {
+        let cases: [(String, SceneFrame, SceneFrame)] = [
+            ("scroll", scrolled(0), scrolled(5)),
+            ("move", screen(x: 100, y: 50, w: 256, h: 128, scale: 1), screen(x: 95, y: 50, w: 261, h: 128, scale: 1)),
+        ]
+        for (name, a, b) in cases {
+            let r = run((.duogray, true))
+            try step(r, a, "\(name) a")
+            XCTAssertFalse(r.enc.lastEncodeAddedApproximation, "\(name) full frame")
+            try step(r, b, "\(name) b")
+            XCTAssertTrue(r.enc.lastEncodeDiverged, name)
+            XCTAssertTrue(r.enc.lastEncodeAddedApproximation, name)
+            try step(r, b, "\(name) b again")
+            XCTAssertTrue(r.enc.lastEncodeDiverged, name)
+            XCTAssertFalse(r.enc.lastEncodeAddedApproximation, name)
+            _ = r.enc.encodeSettle(limit: 32768)
+            XCTAssertFalse(r.enc.lastEncodeDiverged, name)
+            XCTAssertFalse(r.enc.lastEncodeAddedApproximation, name)
+        }
+        // Without raw nothing is approximate.
+        let r = run((.duogray, false))
+        try step(r, scrolled(0), "a")
+        try step(r, scrolled(5), "b")
+        XCTAssertFalse(r.enc.lastEncodeAddedApproximation)
+    }
+
     func testScenesAreDeterministic() {
         let kinds: [SceneKind] = [.terminalScroll, .regionMove, .resize(edge: .top), .localChange]
         let a = ScrollScenes.frames(seed: 3, count: 10, kinds: kinds)

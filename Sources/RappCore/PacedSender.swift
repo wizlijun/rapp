@@ -53,7 +53,7 @@ public final class PacedSender {
     private var latencyMs: Int?
     private var fullFrames = 0
     private var encodeMsMax: Int?
-    /// When the canvas first stopped being exact since it was last exact; settle waits 0.3 s from here.
+    /// The last time the canvas became more approximate (or first inexact); settle waits 0.3 s from here.
     private var divergedAt: TimeInterval?
     private var lastRegion = CanvasRect(x: 0, y: 0, w: 0, h: 0)
     private var lastCaptured: TimeInterval = 0
@@ -159,7 +159,7 @@ public final class PacedSender {
                 lastCaptured = o.captured
                 if !encoder.needsSettle {
                     divergedAt = nil
-                } else if divergedAt == nil {
+                } else if encoder.lastEncodeAddedApproximation || divergedAt == nil {
                     divergedAt = now()
                 }
                 queue = slices.map { Slice(region: o.region, payload: $0, captured: o.captured) }
