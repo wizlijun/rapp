@@ -134,6 +134,22 @@ final class ChannelTests: XCTestCase {
         XCTAssertEqual(blocks.first?["n"] as? Int, 2)
         XCTAssertEqual(blocks.first?["label"] as? String, "[图片 #1 10×20]")
 
+        let chips = [BlockChip(n: 1, label: "[贴入文字 #1 +1 行]", kind: "text", bytes: 9, text: "长文字\n第二行"),
+                     BlockChip(n: 2, label: "[文件 a.txt 9 B]", kind: "file", bytes: 9, name: "a.txt"),
+                     BlockChip(n: 3, label: "[图片 #1 10×20]", kind: "image", bytes: 70)]
+        let encoded = try XCTUnwrap(pasteResultPayload(.blocks(chips))["blocks"] as? [[String: Any]])
+        XCTAssertEqual(encoded[0]["kind"] as? String, "text")
+        XCTAssertEqual(encoded[0]["bytes"] as? Int, 9)
+        XCTAssertEqual(encoded[0]["text"] as? String, "长文字\n第二行")
+        XCTAssertNil(encoded[0]["name"])
+        XCTAssertEqual(encoded[1]["kind"] as? String, "file")
+        XCTAssertEqual(encoded[1]["name"] as? String, "a.txt")
+        XCTAssertNil(encoded[1]["text"])
+        XCTAssertEqual(encoded[2]["kind"] as? String, "image")
+        XCTAssertEqual(encoded[2]["bytes"] as? Int, 70)
+        XCTAssertNil(encoded[2]["text"])
+        XCTAssertNil(encoded[2]["name"])
+
         let weak = eventPayload(.saving(level: 1), sid: 3, textures: [:])
         XCTAssertEqual(weak?.method, "weak")
         XCTAssertEqual(weak?.args["on"] as? Bool, true)

@@ -47,12 +47,13 @@ final class EmbeddedComposerTests: XCTestCase {
 
     func testPasteLongTextBecomesABlock() {
         pasteboard.write(text: String(repeating: "a", count: 900))
-        XCTAssertEqual(composer.paste(), .blocks([BlockChip(n: 1, label: "[贴入文字 #1 +1 行]")]))
+        XCTAssertEqual(composer.paste(), .blocks([BlockChip(n: 1, label: "[贴入文字 #1 +1 行]", kind: "text", bytes: 900, text: String(repeating: "a", count: 900))]))
     }
 
     func testPastePNGBecomesImageBlock() throws {
-        pasteboard.write(png: try png(width: 10, height: 20))
-        XCTAssertEqual(composer.paste(), .blocks([BlockChip(n: 1, label: "[图片 #1 10×20]")]))
+        let image = try png(width: 10, height: 20)
+        pasteboard.write(png: image)
+        XCTAssertEqual(composer.paste(), .blocks([BlockChip(n: 1, label: "[图片 #1 10×20]", kind: "image", bytes: image.count)]))
     }
 
     func testPasteOfAnEmptyBoardIsNothing() {
@@ -81,14 +82,14 @@ final class EmbeddedComposerTests: XCTestCase {
         try Data("abc".utf8).write(to: file)
         let folder = temp.appendingPathComponent("dir")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        XCTAssertEqual(composer.attach([file, folder]), .blocks([BlockChip(n: 1, label: "[文件 a.txt 3 B]")]))
+        XCTAssertEqual(composer.attach([file, folder]), .blocks([BlockChip(n: 1, label: "[文件 a.txt 3 B]", kind: "file", bytes: 3, name: "a.txt")]))
         XCTAssertEqual(events, [.insert(.status("不支持文件夹：dir"))])
     }
 
     func testSendOrderAndDone() {
         let long = String(repeating: "a", count: 900)
         pasteboard.write(text: long)
-        XCTAssertEqual(composer.paste(), .blocks([BlockChip(n: 1, label: "[贴入文字 #1 +1 行]")]))
+        XCTAssertEqual(composer.paste(), .blocks([BlockChip(n: 1, label: "[贴入文字 #1 +1 行]", kind: "text", bytes: 900, text: String(repeating: "a", count: 900))]))
         composer.send([.chunk(1), .text("x")])
         XCTAssertEqual(sent, [.paste(seq: 1, .text(long))])
         XCTAssertTrue(composer.pasted(seq: 1, error: ""))
@@ -113,7 +114,8 @@ final class EmbeddedComposerTests: XCTestCase {
 
     func testInsertFromAsClipboardEmitsInsert() throws {
         composer.insert(.text("hi", truncated: false), .text("hi"))
-        composer.insert(.image(width: 10, height: 20, bytes: 1), .bytes(try png(width: 10, height: 20)))
-        XCTAssertEqual(events, [.insert(.text("hi")), .insert(.blocks([BlockChip(n: 1, label: "[图片 #1 10×20]")]))])
+        let image = try png(width: 10, height: 20)
+        composer.insert(.image(width: 10, height: 20, bytes: 1), .bytes(image))
+        XCTAssertEqual(events, [.insert(.text("hi")), .insert(.blocks([BlockChip(n: 1, label: "[图片 #1 10×20]", kind: "image", bytes: image.count)]))])
     }
 }

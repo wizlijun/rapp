@@ -123,7 +123,14 @@ public final class EmbeddedComposer: ComposerSink {
 
     private func add(_ payload: ChipPayload) -> BlockChip {
         let n = blocks.add(payload)
-        return BlockChip(n: n, label: blocks.label(n) ?? "")
+        let label = blocks.label(n) ?? ""
+        switch payload {
+        case let .text(text): return BlockChip(n: n, label: label, kind: "text", bytes: text.utf8.count, text: text)
+        case let .image(png, _, _): return BlockChip(n: n, label: label, kind: "image", bytes: png.count)
+        case let .data(_, bytes): return BlockChip(n: n, label: label, kind: "data", bytes: bytes.count)
+        case let .file(url, bytes):
+            return BlockChip(n: n, label: label, kind: "file", bytes: Int(bytes), name: url.lastPathComponent)
+        }
     }
 
     private func data(uti: String, _ bytes: [UInt8]) -> PasteResult {

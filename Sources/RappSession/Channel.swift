@@ -364,12 +364,19 @@ public func eventPayload(_ e: SessionEvent, sid: Int64, textures: [UInt32: Int64
     }
 }
 
-/// A paste, attach or insert result as Dart's `PasteResult` reads it: `text`, `blocks` (`[{n, label}]`)
-/// or `status`; empty for nothing.
+private func chipPayload(_ chip: BlockChip) -> [String: Any] {
+    var d: [String: Any] = ["n": chip.n, "label": chip.label, "kind": chip.kind, "bytes": chip.bytes]
+    if let text = chip.text { d["text"] = text }
+    if let name = chip.name { d["name"] = name }
+    return d
+}
+
+/// A paste, attach or insert result as Dart's `PasteResult` reads it: `text`, `blocks`
+/// (`[{n, label, kind, bytes, text?, name?}]`) or `status`; empty for nothing.
 public func pasteResultPayload(_ r: PasteResult) -> [String: Any] {
     switch r {
     case let .text(text): return ["text": text]
-    case let .blocks(chips): return ["blocks": chips.map { ["n": $0.n, "label": $0.label] as [String: Any] }]
+    case let .blocks(chips): return ["blocks": chips.map(chipPayload)]
     case let .status(status): return ["status": status]
     case .nothing: return [:]
     }

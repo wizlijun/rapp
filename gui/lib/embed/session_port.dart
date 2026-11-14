@@ -110,9 +110,19 @@ class MenuEntry {
 
 /// A composer block held by the runner (pasted image, long text, file…), shown as a chip.
 class BlockChip {
-  const BlockChip(this.n, this.label);
+  const BlockChip(this.n, this.label, {this.kind, this.bytes, this.text, this.name});
   final int n;
   final String label;
+
+  /// `text`, `image`, `data` or `file`; null from an older runner.
+  final String? kind;
+  final int? bytes;
+
+  /// Full pasted text; only for `kind == 'text'`.
+  final String? text;
+
+  /// File name; only for `kind == 'file'`.
+  final String? name;
 }
 
 /// What a composer paste or attach produced: text to insert, blocks to add, a status to show,
@@ -337,7 +347,14 @@ PasteResult _paste(Map<Object?, Object?> m) => PasteResult(
           ? const []
           : _list(m['blocks']).map((b) {
               final bm = _map(b);
-              return BlockChip(_as<int>(bm['n']), _as<String>(bm['label']));
+              return BlockChip(
+                _as<int>(bm['n']),
+                _as<String>(bm['label']),
+                kind: _as<String?>(bm['kind']),
+                bytes: _as<int?>(bm['bytes']),
+                text: _as<String?>(bm['text']),
+                name: _as<String?>(bm['name']),
+              );
             }).toList(),
       status: _as<String?>(m['status']),
     );
