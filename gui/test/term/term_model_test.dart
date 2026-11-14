@@ -188,8 +188,54 @@ void main() {
     m.scrollBy(3);
     expect(m.lineAt(-1)?.text, 'a');
     m.apply(scr(['b', 'c', 'd'], rev: 3, hist: 11, limit: 2000));
-    expect(m.offset, 0.0);
+    expect((m.offset, m.newOutput), (0.0, false));
     expect(m.lineAt(-1), isNull);
+  });
+  test('history shrinking to nothing while reading lands at the bottom without new output', () {
+    final m = TermModel()..expect('%1');
+    m.apply(scr(['a', 'b'], rev: 1, hist: 5, limit: 2000));
+    m.scrollBy(3);
+    m.apply(scr(['x', 'y'], rev: 2, hist: 0, limit: 2000));
+    expect((m.offset, m.newOutput), (0.0, false));
+  });
+  test('a failed history read is reported and the next batch can be asked for', () {
+    final m = TermModel()..expect('%1');
+    m.apply(scr(['s'], rev: 1, hist: 600, limit: 2000));
+    expect(m.wantHistory(), isNotNull);
+    m.fail('x');
+    expect(m.note, 'x');
+    expect(m.wantHistory(), (before: 0, lines: 500));
+  });
+  test('expecting the same pane again ends the request in flight and keeps the history', () {
+    final m = TermModel()..expect('%1');
+    m.apply(scr(['a', 'b'], rev: 1, hist: 600, limit: 2000));
+    m.apply(scr(['b', 'c'], rev: 2, hist: 601, limit: 2000));
+    expect(m.wantHistory(), isNotNull);
+    m.expect('%1');
+    expect(m.lineAt(-1)?.text, 'a');
+    expect(m.wantHistory(), (before: 1, lines: 500));
+  });
+  test('history reaching its limit shifts by the larger of the growth and the overlap', () {
+    final m = TermModel()..expect('%1');
+    final shifts = <int>[];
+    m.onShift = shifts.add;
+    m.apply(scr(['a', 'b', 'c', 'd'], rev: 1, hist: 1998, limit: 2000));
+    m.scrollBy(5);
+    m.apply(scr(['d', 'e', 'f', 'g'], rev: 2, hist: 2000, limit: 2000));
+    expect(shifts, [3]);
+    expect(m.offset, 8.0);
+    expect([m.lineAt(-3)?.text, m.lineAt(-2)?.text, m.lineAt(-1)?.text], ['a', 'b', 'c']);
+  });
+  test('an old device without hist shifts by the overlap', () {
+    final m = TermModel()..expect('%1');
+    final shifts = <int>[];
+    m.onShift = shifts.add;
+    m.apply(scr(['a', 'b', 'c'], rev: 1));
+    m.scrollBy(1);
+    m.apply(scr(['b', 'c', 'd'], rev: 2));
+    expect(shifts, [1]);
+    expect(m.offset, 2.0);
+    expect(m.lineAt(-1)?.text, 'a');
   });
   test('switching panes clears history and the view', () {
     final m = TermModel()..expect('%1');

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/foundation.dart';
 
 import 'sgr.dart';
@@ -50,15 +52,19 @@ class TermModel extends ChangeNotifier {
 
   List<TermLine> get screen => _screen;
 
-  /// The stage sent `view`: only this pane's screens are used from now on.
+  /// The stage sent `view`: only this pane's screens are used from now on. Also sent again on reconnect, so any
+  /// history request in flight is given up even for the same pane.
   void expect(String pane) {
-    if (pane == this.pane) return;
-    this.pane = pane;
-    _pending = null;
-    _raw = const [];
-    _screen = const [];
-    _wrapped = const {};
-    _clearHistory();
+    if (pane != this.pane) {
+      this.pane = pane;
+      _pending = null;
+      _raw = const [];
+      _screen = const [];
+      _wrapped = const {};
+      _clearHistory();
+    }
+    _inFlight = false;
+    _dropNext = false;
     notifyListeners();
   }
 
@@ -101,10 +107,14 @@ class TermModel extends ChangeNotifier {
       _clearHistory();
     } else if (had && !alt && !m.alt) {
       final oh = hist, nh = m.hist;
-      if (oh != null && nh != null && nh > oh) {
-        d = nh - oh;
-      } else if (oh != null && oh == limit && nh == m.limit) {
+      if (oh == null && nh == null) {
+        // Old device: only the overlap tells.
         d = _overlap(old, next);
+      } else if (oh != null && nh != null) {
+        final grown = nh > oh ? nh - oh : 0;
+        // At the limit the count stops growing (or grows less than the scroll): the overlap tells the rest.
+        final atLimit = nh == m.limit && (oh == limit || grown > 0);
+        d = atLimit ? math.max(grown, _overlap(old, next)) : grown;
       }
     }
     if (d > 0) {
@@ -137,6 +147,7 @@ class TermModel extends ChangeNotifier {
       offset = (offset + d).clamp(0, scrollMax).toDouble();
       if (changed) newOutput = true;
     }
+    if (offset == 0) newOutput = false;
     if (d > 0) onShift?.call(d);
     notifyListeners();
   }
@@ -171,6 +182,14 @@ class TermModel extends ChangeNotifier {
     historyTop = false;
     // A reply still on its way was cut for the old history: drop it.
     if (_inFlight) _dropNext = true;
+  }
+
+  /// The device answered with an `error` (a failed history read comes back this way, not as `history`).
+  void fail(String error) {
+    note = error;
+    _inFlight = false;
+    _dropNext = false;
+    notifyListeners();
   }
 
   void applyHistory(TermHistory m) {
