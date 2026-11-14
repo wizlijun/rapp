@@ -1,5 +1,7 @@
 //! Terminal sessions as device requests (spec §6, §8, §9): `list_terms`, `watch_terms` and `new_term` are asked of
 //! the device's one `rapp-term serve` (`workers::TERM`); `add_term_target` / `remove_term_target` edit `term.json`.
+//! `open term:…` splices B to a view on that worker (§7, §15: several may watch one, nothing is taken over). The
+//! switch in `term.json` is changed only over local IPC (`term` / `set_term`).
 //! While terminal sessions are off, or `term.json` cannot be used, every request is refused and no worker starts.
 
 use crate::peer::log_request;
@@ -9,11 +11,12 @@ use anyhow::{anyhow, Context, Result};
 use rapp_net::line::{err, ok, write_json};
 use rapp_net::log::{clean_name, Lvl};
 use rapp_net::msg::Op;
+use rapp_net::quic::{splice_metered, Meter};
 use rapp_term::config::{check_target, Target, TermConfig, INVALID, MAX_TARGETS, OFF};
 use serde_json::{json, Value};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader, Lines};
 use tokio::net::TcpStream;
 
@@ -131,12 +134,26 @@ async fn first(port: u16, token: &str, req: &Value) -> Result<(WorkerConn, Value
     tokio::time::timeout(ASK_WAIT, asked).await.map_err(|_| anyhow!("the terminal worker did not answer"))?
 }
 
+/// One session counted on the worker (`workers::start_session` succeeded), ended when this is dropped: however
+/// the request ends, even when its future is dropped, the worker is not kept from stopping as idle.
+struct Counted<'a>(&'a Arc<State>);
+
+impl Drop for Counted<'_> {
+    fn drop(&mut self) {
+        workers::end_session(self.0, TERM);
+    }
+}
+
+/// Port and token of the worker, with its session counted until the `Counted` is dropped.
+async fn start(state: &Arc<State>) -> Result<(u16, String, Counted<'_>)> {
+    let (port, token) = workers::start_session(state, TERM).await?;
+    Ok((port, token, Counted(state)))
+}
+
 /// A one-line request (`list`, `new`) to the worker.
 async fn ask(state: &Arc<State>, req: &Value) -> Result<Value> {
-    let (port, token) = workers::start_session(state, TERM).await?;
-    let r = first(port, &token, req).await.map(|(_, v)| v);
-    workers::end_session(state, TERM);
-    r
+    let (port, token, _counted) = start(state).await?;
+    first(port, &token, req).await.map(|(_, v)| v)
 }
 
 /// The worker's watch, passed on to B. The worker's session count stays up until the watch ends, so it is not
@@ -147,7 +164,7 @@ async fn watch<S: AsyncRead + AsyncWrite + Unpin + Send>(
     peer: &Peer,
     what: Value,
 ) -> Result<()> {
-    let (port, token) = match workers::start_session(state, TERM).await {
+    let (port, token, _counted) = match start(state).await {
         Ok(w) => w,
         Err(e) => {
             let r = err(&format!("{e:#}"));
@@ -155,9 +172,7 @@ async fn watch<S: AsyncRead + AsyncWrite + Unpin + Send>(
             return finish(s, &r).await;
         }
     };
-    let r = follow(state, s, peer, what, port, &token).await;
-    workers::end_session(state, TERM);
-    r
+    follow(state, s, peer, what, port, &token).await
 }
 
 /// The first line answers the request; each one after it follows, until B or the worker closes, or the worker
@@ -198,6 +213,123 @@ async fn follow<S: AsyncRead + AsyncWrite + Unpin + Send>(
     Ok(())
 }
 
+/// `open term:…`: B is spliced to a view on the worker. The service writes the view's request line, with the
+/// session's sid; the token line is B's first line, passed through. Logged as an app session is (`request`,
+/// `session_start`, `session_end`), and a kick ends it; the worker reports its inputs (`ended`) on its own.
+pub async fn open<S: AsyncRead + AsyncWrite + Unpin + Send>(
+    state: &Arc<State>,
+    s: &mut S,
+    app: &str,
+    peer: Peer,
+) -> Result<()> {
+    let what = json!({"op": "open", "app": app});
+    let ready = async {
+        allowed(state)?;
+        // Counts as "in use" for the updater from now until the session ends.
+        let opening = crate::update::begin_open(state).map_err(str::to_string)?;
+        let (port, token, counted) = start(state).await.map_err(|e| format!("{e:#}"))?;
+        Ok::<_, String>((opening, port, token, counted))
+    };
+    let (_opening, port, token, _counted) = match ready.await {
+        Ok(r) => r,
+        Err(e) => return refuse(state, s, &peer, what, &e).await,
+    };
+    let mut tcp = match TcpStream::connect(("127.0.0.1", port)).await {
+        Ok(t) => t,
+        Err(e) => return refuse(state, s, &peer, what, &format!("terminal worker unreachable: {e}")).await,
+    };
+    tcp.set_nodelay(true)?;
+    // Registered before B hears `ok`, so the worker's `ended` for this view carries a known sid.
+    let (sid, kick, _) = state.add_session(&peer, app, false);
+    let view = json!({"op": "view", "term": app, "sid": sid});
+    if let Err(e) = tcp.write_all(format!("{view}\n").as_bytes()).await {
+        state.end_session(sid);
+        return refuse(state, s, &peer, what, &format!("terminal worker unreachable: {e}")).await;
+    }
+    let reply = ok(json!({"token": token}));
+    log_request(state, &peer, what, &reply);
+    let mut fields = peer.session_fields(app, false, sid);
+    state.log.event(Lvl::Info, "session_start", fields.clone());
+    let (meter, began) = (Meter::default(), Instant::now());
+    let reason = match write_json(s, &reply).await {
+        Err(e) => format!("{e:#}"),
+        Ok(()) => {
+            crate::cm::ensure_running(state);
+            tokio::select! {
+                r = splice_metered(s, &mut tcp, &meter) => match r {
+                    Ok(()) => "closed".to_string(),
+                    Err(e) => format!("{e:#}"),
+                },
+                _ = kick.notified() => "kicked".to_string(),
+            }
+        }
+    };
+    if !state.end_session(sid) {
+        return Ok(()); // the stopping service already wrote its end line
+    }
+    // The meter counts on B's stream: read from B = up (B→A), written to B = down.
+    let (up, down) = meter.get();
+    fields["secs"] = json!(began.elapsed().as_secs());
+    (fields["up"], fields["down"], fields["reason"]) = (json!(up), json!(down), json!(reason));
+    state.log.event(Lvl::Info, "session_end", fields);
+    Ok(())
+}
+
+async fn refuse<S: AsyncWrite + Unpin>(state: &State, s: &mut S, peer: &Peer, what: Value, e: &str) -> Result<()> {
+    let r = err(e);
+    log_request(state, peer, what, &r);
+    finish(s, &r).await
+}
+
+/// The worker's `ended` for a view: `term_inputs {sid, term, inputs}`, those fields only (never what was typed).
+pub fn ended(state: &State, v: &Value) {
+    let Some(sid) = v["sid"].as_u64() else { return };
+    let fields = json!({"sid": sid, "term": v["term"].as_str(), "inputs": v["inputs"].as_u64()});
+    state.log.event(Lvl::Info, "term_inputs", fields);
+}
+
+/// IPC `term`: `{"ok":true,"allow","tmux","targets"}` (`tmux` null: the default).
+pub fn settings(state: &State) -> Value {
+    match config(state) {
+        Ok(c) => ok(json!({"allow": c.allow, "tmux": c.tmux, "targets": c.targets})),
+        Err(e) => err(&e),
+    }
+}
+
+/// IPC `set_term {"allow"?, "tmux"?}`; `tmux` null goes back to the default. Turned off, the worker is stopped,
+/// which ends every terminal session and watch on it (app sessions are another worker's).
+pub fn set(state: &State, cmd: &Value) -> Value {
+    let saved = {
+        let _held = lock();
+        config(state).and_then(|mut c| {
+            match cmd.get("allow") {
+                None => {}
+                Some(Value::Bool(a)) => c.allow = *a,
+                Some(_) => return Err("allow must be true or false".into()),
+            }
+            match cmd.get("tmux") {
+                None => {}
+                Some(Value::Null) => c.tmux = None,
+                Some(Value::String(t)) => c.tmux = Some(t.clone()),
+                Some(_) => return Err("invalid tmux path".into()),
+            }
+            c.check()?;
+            save(state, &c)?;
+            Ok(c.allow)
+        })
+    };
+    match saved {
+        Ok(allow) => {
+            if !allow {
+                workers::stop(state, TERM);
+            }
+            state.notify();
+            ok(json!({}))
+        }
+        Err(e) => err(&e),
+    }
+}
+
 fn targets(r: Result<Vec<Target>, String>) -> Value {
     match r {
         Ok(t) => ok(json!({"targets": t})),
@@ -208,14 +340,23 @@ fn targets(r: Result<Vec<Target>, String>) -> Value {
 /// Applies `change` to `term.json` under `EDIT` and returns the targets; a file that cannot be used, or a change
 /// that is refused, leaves it as it was.
 fn edit(state: &State, change: impl FnOnce(&mut TermConfig) -> Result<(), String>) -> Result<Vec<Target>, String> {
-    let _held = EDIT.lock().unwrap_or_else(|e| e.into_inner());
+    let _held = lock();
     let mut c = allowed(state)?;
     change(&mut c)?;
-    rapp_net::config::write_json(&path(state), &c).map_err(|e| {
+    save(state, &c)?;
+    Ok(c.targets)
+}
+
+fn lock() -> MutexGuard<'static, ()> {
+    EDIT.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Writes `term.json` (0600); held under `lock`.
+fn save(state: &State, c: &TermConfig) -> Result<(), String> {
+    rapp_net::config::write_json(&path(state), c).map_err(|e| {
         state.log.msg(Lvl::Warn, format!("term.json: {e:#}"));
         "could not save term.json".to_string()
-    })?;
-    Ok(c.targets)
+    })
 }
 
 fn add(c: &mut TermConfig, t: Target) -> Result<(), String> {

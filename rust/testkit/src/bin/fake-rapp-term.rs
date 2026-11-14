@@ -15,8 +15,8 @@ use std::time::Duration;
 const OFF: &str = "terminal sessions are off";
 const INVALID: &str = "term.json is invalid";
 static OUT: Mutex<()> = Mutex::new(());
-/// Every connection, so stdin EOF can close them all.
-static CONNS: Mutex<Vec<TcpStream>> = Mutex::new(Vec::new());
+/// Every open connection (by number), so stdin EOF can close them all.
+static CONNS: Mutex<Vec<(u64, TcpStream)>> = Mutex::new(Vec::new());
 
 fn emit(v: &Value) {
     let _g = OUT.lock().unwrap();
@@ -61,15 +61,20 @@ fn main() {
     let listener = TcpListener::bind((bind.as_str(), port)).unwrap_or_else(|_| exit(1, "could not listen"));
     emit(&json!({"event":"listening","port":listener.local_addr().unwrap().port()}));
     std::thread::spawn(move || {
-        for s in listener.incoming().flatten() {
-            CONNS.lock().unwrap().push(s.try_clone().unwrap());
+        for (n, s) in (0u64..).zip(listener.incoming().flatten()) {
+            CONNS.lock().unwrap().push((n, s.try_clone().unwrap()));
             let (token, config) = (token.clone(), config.clone());
-            std::thread::spawn(move || conn(s, &token, &config));
+            std::thread::spawn(move || {
+                conn(s, &token, &config);
+                // Its last handle goes, so the socket closes now: the shutdown in `view` alone, after the other
+                // end's, left the service without EOF (macOS), unlike the real worker, which drops it.
+                CONNS.lock().unwrap().retain(|(i, _)| *i != n);
+            });
         }
     });
     let mut sink = Vec::new();
     let _ = std::io::stdin().lock().read_to_end(&mut sink);
-    for s in CONNS.lock().unwrap().iter() {
+    for (_, s) in CONNS.lock().unwrap().iter() {
         let _ = s.shutdown(Shutdown::Both);
     }
     // Let the views and watches that just lost their connection log and report `ended`, as the real worker does.

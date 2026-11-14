@@ -121,6 +121,7 @@ pub async fn serve_request(state: &Arc<State>, mut s: BiStream, peer: Peer) -> R
             | Op::AddTermTarget { .. }
             | Op::RemoveTermTarget { .. }),
         ) => crate::term::request(state, &mut s, &peer, op).await,
+        Ok(Op::Open { app, .. }) if rapp_term::id::is_term(&app) => crate::term::open(state, &mut s, &app, peer).await,
         Ok(Op::Open { app, side }) => open(state, s, &app, side, peer).await,
         _ => reply_and_finish(&mut s, err("unknown op")).await,
     }

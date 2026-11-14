@@ -56,7 +56,6 @@ impl Workers {
 }
 
 /// Closes `app`'s worker stdin, so it exits; the next session starts a new one.
-#[expect(dead_code, reason = "the terminal off switch (task 7) calls it")]
 pub fn stop(state: &State, app: &str) {
     if let Some(w) = state.workers.map.lock().unwrap().get_mut(app) {
         w.stdin = None;
@@ -257,6 +256,7 @@ async fn spawn(state: &Arc<State>, app: &str, gen: u64) -> Result<(u16, String, 
                 Some(ev @ ("transfer" | "rejected")) => transcribe(&state, &app, ev, &v),
                 Some("input") => tell_others(&state, &app),
                 Some("input_blocked") => log_blocked(&state, &app, &v, &mut blocked_logged),
+                Some("ended") if app == TERM => crate::term::ended(&state, &v),
                 Some("session") if v["state"] == "ended" => {
                     if let Some(by) = taken_over_by(v["reason"].as_str().unwrap_or("")) {
                         state.mark_taken_over(&app, by);

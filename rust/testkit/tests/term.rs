@@ -4,11 +4,11 @@ mod common;
 
 use common::*;
 use quinn::{Connection, Endpoint};
-use rapp_net::line::{read_json, write_json};
+use rapp_net::line::{read_json, read_line, write_json};
 use rapp_net::quic::{bi, BiStream};
 use serde_json::{json, Value};
 use std::path::Path;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const OFF: &str = "terminal sessions are off";
 const INVALID: &str = "term.json is invalid";
@@ -194,4 +194,159 @@ async fn new_term_returns_the_id_and_logs_no_command() {
     wait_log(a.home.path(), "request", |v| v["op"] == "new_term" && v["host"].is_null() && v["result"] == "ok").await;
     assert!(!service_log_text(a.home.path()).contains("secret-cmd-1"));
     assert!(!term_log(a.bins.path()).unwrap().contains("secret-cmd-1"));
+}
+
+/// Opens `term` and passes the worker token through: the stream is then the worker's view (`hello` first).
+async fn open_term(conn: &Connection, term: &str) -> BiStream {
+    let mut s = bi(conn.open_bi().await.unwrap());
+    write_json(&mut s, &json!({"op":"open","app":term})).await.unwrap();
+    let r = read_json(&mut s).await.unwrap();
+    assert_eq!(r["ok"], true, "{r}");
+    let token = r["token"].as_str().unwrap();
+    s.write_all(format!("{token}\n").as_bytes()).await.unwrap();
+    assert_eq!(read_json(&mut s).await.unwrap(), json!({"t":"hello","fake":true,"term":term}));
+    s
+}
+
+/// Sends `line` and reads it back from the fake's echo.
+async fn echo(s: &mut BiStream, line: &str) {
+    s.write_all(format!("{line}\n").as_bytes()).await.unwrap();
+    let back = tokio::time::timeout(WAIT, read_line(s)).await.expect("an echo in time").unwrap();
+    assert_eq!(back.as_deref(), Some(line));
+}
+
+/// Reads until the stream ends (EOF or reset).
+async fn ended(s: &mut BiStream) {
+    let mut rest = Vec::new();
+    let _ = tokio::time::timeout(WAIT, s.read_to_end(&mut rest)).await.expect("the stream ended");
+}
+
+fn argv_lines(bins: &Path) -> usize {
+    term_log(bins).unwrap_or_default().lines().filter(|l| l.starts_with("argv ")).count()
+}
+
+#[tokio::test]
+async fn open_term_splices_to_the_worker_and_logs_no_content() {
+    let a = service().await;
+    let home = a.home.path();
+    let (_ep, conn) = b(&a).await;
+    let mut s = open_term(&conn, "term:tmux:work").await;
+    echo(&mut s, "hello-secret-1").await;
+    echo(&mut s, "hello-secret-2").await;
+    s.shutdown().await.unwrap();
+    ended(&mut s).await;
+
+    let start = wait_log(home, "session_start", |v| v["app"] == "term:tmux:work").await;
+    assert_eq!(start["path"], "lan", "{start}");
+    let sid = start["sid"].clone();
+    let end = wait_log(home, "session_end", |v| v["sid"] == sid).await;
+    assert_eq!((&end["app"], &end["reason"]), (&json!("term:tmux:work"), &json!("closed")), "{end}");
+    assert!(end["up"].as_u64().unwrap() > 0 && end["down"].as_u64().unwrap() > 0, "{end}");
+    assert!(end["secs"].is_u64(), "{end}");
+    let inputs = wait_log(home, "term_inputs", |v| v["sid"] == sid).await;
+    assert_eq!(inputs["term"], "term:tmux:work", "{inputs}");
+    assert_eq!(inputs["inputs"], 2, "{inputs}");
+    let req = wait_log(home, "request", |v| v["op"] == "open").await;
+    assert_eq!((&req["app"], &req["result"]), (&json!("term:tmux:work"), &json!("ok")), "{req}");
+
+    let h = ipc_once(&a.svc, home, json!({"cmd":"history","limit":10})).await;
+    let shown: Vec<_> = h["events"].as_array().unwrap().iter().filter(|v| v["sid"] == sid).map(|v| &v["ev"]).collect();
+    for ev in ["session_start", "session_end", "term_inputs"] {
+        assert!(shown.contains(&&json!(ev)), "{ev} not in {h}");
+    }
+    assert!(!service_log_text(home).contains("hello-secret"));
+    // No rapp-host was started for it (the service's own permission check is the only thing in host.log).
+    assert_eq!(host_log(a.bins.path()), "check\n");
+}
+
+/// Whether the stream ends within a short while, rather than staying open.
+async fn ends_soon(s: &mut BiStream) -> bool {
+    let mut buf = [0u8; 64];
+    let r = tokio::time::timeout(std::time::Duration::from_millis(500), s.read(&mut buf)).await;
+    matches!(r, Ok(Ok(0) | Err(_)))
+}
+
+#[tokio::test]
+async fn terminal_sessions_share_one_worker_and_can_be_kicked() {
+    let a = service().await;
+    let home = a.home.path();
+    let (_ep, conn) = b(&a).await;
+    let mut one = open_term(&conn, "term:tmux:work").await;
+    let sid = wait_log(home, "session_start", |_| true).await["sid"].clone();
+    let mut two = open_term(&conn, "term:tmux:work").await;
+    echo(&mut one, "x").await;
+    echo(&mut two, "y").await;
+    assert_eq!(argv_lines(a.bins.path()), 1);
+
+    assert_eq!(ipc_once(&a.svc, home, json!({"cmd":"kick","sid":sid})).await, json!({"ok":true}));
+    let end = wait_log(home, "session_end", |v| v["sid"] == sid).await;
+    assert_eq!(end["reason"], "kicked", "{end}");
+    assert!(ends_soon(&mut one).await);
+    echo(&mut two, "still here").await;
+    assert!(!log_events(home).iter().any(|v| v["ev"] == "session_end" && v["sid"] != sid));
+}
+
+#[tokio::test]
+async fn turning_terminals_off_ends_terminal_sessions_only() {
+    let a = service().await;
+    let home = a.home.path();
+    let (_ep, conn) = b(&a).await;
+    let mut term = open_term(&conn, "term:tmux:work").await;
+    echo(&mut term, "x").await;
+    let mut app = bi(conn.open_bi().await.unwrap());
+    write_json(&mut app, &json!({"op":"open","app":"com.example.echo"})).await.unwrap();
+    let r = read_json(&mut app).await.unwrap();
+    assert_eq!(r["ok"], true, "{r}");
+    app.write_all(format!("{}\n", r["token"].as_str().unwrap()).as_bytes()).await.unwrap();
+    assert_eq!(read_line(&mut app).await.unwrap().as_deref(), Some("ok"));
+
+    let mut ipc = Ipc::open(&a.svc, home).await;
+    assert_eq!(ipc.call(json!({"cmd":"set_term","allow":false})).await, json!({"ok":true}));
+    ended(&mut term).await;
+    wait_log(home, "worker_exit", |v| v["app"] == "term:").await;
+    echo(&mut app, "app still here").await;
+
+    let argv = argv_lines(a.bins.path());
+    assert_eq!(req(&conn, json!({"op":"list_terms"})).await, json!({"ok":false,"error":OFF}));
+    let r = req(&conn, json!({"op":"open","app":"term:tmux:work"})).await;
+    assert_eq!(r, json!({"ok":false,"error":OFF}));
+    assert_eq!(argv_lines(a.bins.path()), argv);
+    let path = home.join("term.json");
+    let file: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(file["allow"], false, "{file}");
+    use std::os::unix::fs::PermissionsExt;
+    assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    assert_eq!(ipc.call(json!({"cmd":"term"})).await, json!({"ok":true,"allow":false,"tmux":null,"targets":[]}));
+
+    assert_eq!(ipc.call(json!({"cmd":"set_term","allow":true})).await, json!({"ok":true}));
+    assert_eq!(req(&conn, json!({"op":"list_terms"})).await["ok"], true);
+}
+
+#[tokio::test]
+async fn ipc_term_refuses_a_broken_file() {
+    let a = service().await;
+    let path = a.home.path().join("term.json");
+    std::fs::write(&path, "{not json").unwrap();
+    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
+    let invalid = json!({"ok":false,"error":INVALID});
+    assert_eq!(ipc.call(json!({"cmd":"term"})).await, invalid);
+    assert_eq!(ipc.call(json!({"cmd":"set_term","allow":false})).await, invalid);
+    assert_eq!(ipc.call(json!({"cmd":"set_term","tmux":"/usr/bin/tmux"})).await, invalid);
+    assert_eq!(std::fs::read(&path).unwrap(), b"{not json");
+}
+
+#[tokio::test]
+async fn ipc_term_sets_the_tmux_path_and_keeps_targets() {
+    let a = service().await;
+    let (_ep, conn) = b(&a).await;
+    assert_eq!(req(&conn, add("gpu1", "me@gpu1")).await["ok"], true);
+    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
+    let gpu1 = json!([{"name":"gpu1","target":"me@gpu1"}]);
+    assert_eq!(ipc.call(json!({"cmd":"set_term","tmux":"/opt/homebrew/bin/tmux"})).await, json!({"ok":true}));
+    let r = ipc.call(json!({"cmd":"term"})).await;
+    assert_eq!(r, json!({"ok":true,"allow":true,"tmux":"/opt/homebrew/bin/tmux","targets":gpu1}));
+    let r = ipc.call(json!({"cmd":"set_term","tmux":"-x"})).await;
+    assert_eq!(r, json!({"ok":false,"error":"invalid tmux path"}));
+    assert_eq!(ipc.call(json!({"cmd":"set_term","tmux":null})).await, json!({"ok":true}));
+    assert_eq!(ipc.call(json!({"cmd":"term"})).await, json!({"ok":true,"allow":true,"tmux":null,"targets":gpu1}));
 }
