@@ -19,7 +19,7 @@ pub const VERBS: &[&str] = &[
 /// Format fields of one pane row, tab separated; `parse::panes` reads them in this order.
 const PANE_FORMAT: &str = "#{session_id}\t#{session_name}\t#{window_id}\t#{window_index}\t#{window_name}\t#{pane_id}\t\
 #{pane_index}\t#{pane_current_command}\t#{pane_dead}\t#{window_activity}\t#{session_attached}\t#{pane_width}\t\
-#{pane_height}\t#{pane_title}";
+#{pane_height}\t#{window_active}\t#{pane_active}\t#{pane_title}";
 
 /// Every pane of every session.
 pub fn list_panes() -> Vec<String> {

@@ -42,6 +42,7 @@ pub struct PaneInfo {
     pub cols: u16,
     pub rows: u16,
     pub dead: bool,
+    pub active: bool,
 }
 
 /// What a finished one-shot process left behind.

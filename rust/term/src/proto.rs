@@ -15,6 +15,12 @@ pub struct Pane {
     pub cols: u16,
     pub rows: u16,
     pub dead: bool,
+    /// The tmux window id (`@7`) the pane is in.
+    #[serde(default)]
+    pub win: String,
+    /// The window is its session's current window and the pane is its window's current pane.
+    #[serde(default)]
+    pub active: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -210,6 +216,15 @@ pub fn screen_msgs(pane: &str, rev: u64, s: &Frame, lines: Vec<(u16, String)>, f
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn pane_without_new_fields_still_parses() {
+        let p: super::Pane = serde_json::from_str(
+            r#"{"id":"%1","window":"w","title":"","command":"sh","cols":80,"rows":24,"dead":false}"#,
+        )
+        .unwrap();
+        assert_eq!((p.win.as_str(), p.active), ("", false));
+    }
+
     use super::*;
 
     #[test]

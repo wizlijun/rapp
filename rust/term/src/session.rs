@@ -92,6 +92,8 @@ pub fn panes_of(list: &[PaneInfo], session_id: &str) -> Vec<Pane> {
             cols: p.cols,
             rows: p.rows,
             dead: p.dead,
+            win: p.window_id.clone(),
+            active: p.active,
         })
         .collect()
 }
@@ -704,6 +706,7 @@ mod tests {
             cols: 80,
             rows: 24,
             dead: false,
+            active: window_index == 0 && pane_index == 0,
         }
     }
 
@@ -721,9 +724,12 @@ mod tests {
                 command: "cat".into(),
                 cols: 80,
                 rows: 24,
-                dead: false
+                dead: false,
+                win: "@0".into(),
+                active: true
             }
         );
+        assert!(!v[1].active);
         assert!(panes_of(&list, "$7").is_empty());
     }
 
