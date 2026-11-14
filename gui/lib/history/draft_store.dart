@@ -33,19 +33,8 @@ class DraftStore {
   final String Function() dir;
   final Map<String, Future<void>> _tails = {};
 
-  /// One flat file name per key: every byte outside `[A-Za-z0-9_-]` becomes `%XX`.
-  String pathFor(String key) {
-    final b = StringBuffer();
-    for (final c in utf8.encode(key)) {
-      final ok = (c >= 0x30 && c <= 0x39) || (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a) || c == 0x2d || c == 0x5f;
-      if (ok) {
-        b.writeCharCode(c);
-      } else {
-        b.write('%${c.toRadixString(16).toUpperCase().padLeft(2, '0')}');
-      }
-    }
-    return '${dir()}/$b.json';
-  }
+  /// One flat file name per key: the key's UTF-8 as unpadded base64url, plus `.json`.
+  String pathFor(String key) => '${dir()}/${base64Url.encode(utf8.encode(key)).replaceAll('=', '')}.json';
 
   DraftFile? _read(String path) {
     try {

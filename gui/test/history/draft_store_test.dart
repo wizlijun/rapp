@@ -27,6 +27,7 @@ void main() {
     await store.save(DraftFile(key: 'h1/term:tmux:dev', text: 'x'));
     final p = store.pathFor('h1/term:tmux:dev');
     expect(p.substring('${tmp.path}/drafts/'.length), isNot(contains('/')));
+    expect(p, '${tmp.path}/drafts/aDEvdGVybTp0bXV4OmRldg.json');
     expect(Directory('${tmp.path}/drafts').listSync().length, 1);
     expect(store.load('h1/term:tmux:dev')!.text, 'x');
   });
