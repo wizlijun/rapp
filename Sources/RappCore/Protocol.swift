@@ -131,7 +131,9 @@ public enum Message: Equatable {
             w.string(text)
         case let .frame(region, f):
             type = 4
-            w.u8(f.mode.rawValue); w.rect(region); w.u16(f.width); w.u16(f.height); w.u8(f.isFull ? 1 : 0); w.bytes.append(contentsOf: f.data)
+            w.u8(f.mode.rawValue); w.rect(region); w.u16(f.width); w.u16(f.height); w.u8(f.flags.rawValue)
+            if f.flags.contains(.start) && !f.flags.contains(.full) { w.u32(UInt32(bitPattern: f.dx)); w.u32(UInt32(bitPattern: f.dy)) }
+            w.bytes.append(contentsOf: f.data)
         case let .text(text):
             type = 5
             w.bytes.append(contentsOf: Array(text.utf8))
@@ -246,9 +248,13 @@ public enum Message: Equatable {
         case 4:
             guard let mode = Mode(rawValue: try r.u8()) else { throw CodecError("unknown mode") }
             let region = try r.rect()
-            let width = try r.u16(), height = try r.u16(), full = try r.u8()
-            guard full <= 1 else { throw CodecError("bad frame flag") }
-            message = .frame(region: region, FramePayload(mode: mode, width: width, height: height, isFull: full == 1, data: r.rest()))
+            let width = try r.u16(), height = try r.u16()
+            let flags = FrameFlags(rawValue: try r.u8())
+            var dx: Int32 = 0, dy: Int32 = 0
+            if flags.contains(.start) && !flags.contains(.full) {
+                dx = Int32(bitPattern: try r.u32()); dy = Int32(bitPattern: try r.u32())
+            }
+            message = .frame(region: region, FramePayload(mode: mode, width: width, height: height, flags: flags, dx: dx, dy: dy, data: r.rest()))
         case 5:
             message = .text(try r.utf8(r.rest()))
         case 6:

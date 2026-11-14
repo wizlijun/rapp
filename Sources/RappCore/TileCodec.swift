@@ -1,20 +1,52 @@
 /// Frames are cut into square tiles of this many pixels per side.
 public let tileSize = 64
 
-/// One encoded frame: the sample mode, the canvas size, whether it replaces
-/// the whole canvas, and the deflate-compressed tile data.
+// Frame message format (protocol v9, little endian). A frame is one or more
+// slices; each slice is one message (type 4):
+//   u8 mode; rect region (4 x f32); u16 width; u16 height; u8 flags;
+//   [only when `start` and not `full`: i32 dx; i32 dy]; deflate data
+// flags: bit0 `full` (replace the canvas: zeroed, stream restarts; needs `start`),
+// bit1 `start` (first slice of a frame), bit2 `end` (last slice), bit3 `copies`
+// (the frame may use copy tiles; only on a `start` slice). Other bits must be 0.
+// A slice without `start` continues the open frame and must follow in order.
+// Canvas move (`start`, not `full`): the new canvas is width x height with
+// new(x, y) = old(x + dx, y + dy); anything outside the old canvas is 0.
+// Reference canvas: the canvas after the move and before any tile of the frame
+// is written. Copy tiles (kind 5) read from it, never from the half-built frame.
+// Slice body: u16 count, then per tile u16 index, u8 kind, kind data. Kind 5
+// (copy) data: u16 sx; u16 sy, the top left of a source rectangle of the tile's
+// own size in the reference canvas; it must lie inside it (sx + tw <= width,
+// sy + th <= height) and is only valid in a frame that has `copies`.
+
+public struct FrameFlags: OptionSet, Equatable {
+    public let rawValue: UInt8
+    public init(rawValue: UInt8) { self.rawValue = rawValue }
+    public static let full = FrameFlags(rawValue: 1)
+    public static let start = FrameFlags(rawValue: 2)
+    public static let end = FrameFlags(rawValue: 4)
+    public static let copies = FrameFlags(rawValue: 8)
+}
+
+/// One encoded frame slice: the sample mode, the canvas size, the frame flags
+/// (and for a non-full `start` slice the canvas move) and the deflate-compressed tile data.
 public struct FramePayload: Equatable {
     public var mode: Mode
     public var width: UInt16
     public var height: UInt16
-    public var isFull: Bool
+    public var flags: FrameFlags
+    public var dx: Int32
+    public var dy: Int32
     public var data: [UInt8]
+    public var isFull: Bool { flags.contains(.full) }
 
-    public init(mode: Mode = .gray4, width: UInt16, height: UInt16, isFull: Bool, data: [UInt8]) {
+    public init(mode: Mode = .gray4, width: UInt16, height: UInt16, flags: FrameFlags,
+                dx: Int32 = 0, dy: Int32 = 0, data: [UInt8]) {
         self.mode = mode
         self.width = width
         self.height = height
-        self.isFull = isFull
+        self.flags = flags
+        self.dx = dx
+        self.dy = dy
         self.data = data
     }
 }
@@ -22,6 +54,7 @@ public struct FramePayload: Equatable {
 // Tile kinds on the wire. Palette kinds are named by their bits per pixel.
 private let kindSolid: UInt8 = 0
 private let kindDuo: UInt8 = 3
+private let kindCopy: UInt8 = 5
 private let kindRaw: UInt8 = 255
 /// Side of a two-tone sub-block inside a tile.
 private let subBlock = 16
@@ -102,8 +135,8 @@ public final class FrameEncoder {
     /// bottom. A slice is closed once its estimated compressed size (raw bytes of
     /// its tiles times the previous frame's compression ratio) exceeds `limit`
     /// (`firstLimit` for the first slice); a slice always holds at least one row.
-    /// Only the first slice of a full frame has `isFull`; the rest are deltas that
-    /// must be decoded in order. Returns `[]` when nothing changed. The encoder
+    /// The first slice has `.start` (and `.full` for a full frame), the last `.end`;
+    /// the slices must be decoded in order. Returns `[]` when nothing changed. The encoder
     /// treats the whole frame as sent: after dropping slices the caller must set
     /// `forceFull`.
     public func encodeSlices(samples: [UInt8], width: Int, height: Int, limit: Int,
@@ -173,8 +206,11 @@ public final class FrameEncoder {
         for (i, group) in groups.enumerated() {
             let data = deflate.compress(group)
             compressed += data.count
+            var flags: FrameFlags = []
+            if i == 0 { flags.insert(.start); if full { flags.insert(.full) } }
+            if i == groups.count - 1 { flags.insert(.end) }
             slices.append(FramePayload(mode: mode, width: UInt16(width), height: UInt16(height),
-                                       isFull: full && i == 0, data: data))
+                                       flags: flags, data: data))
         }
         previous = samples
         previousWidth = width
@@ -345,25 +381,57 @@ public final class FrameDecoder {
         self.bps = mode.bytesPerSample
     }
 
-    /// A full frame rebuilds the canvas at the frame's mode and size and restarts the
-    /// decompression stream. Any other frame must match the current canvas.
-    public func decode(_ frame: FramePayload) throws {
+    private var open = false
+    private var hold = false
+    private var shown = false
+    private var reference: [UInt8]?
+
+    /// Decodes one slice. A full frame rebuilds the canvas at the frame's mode and
+    /// size and restarts the decompression stream; a non-full `start` slice may move
+    /// the canvas; other slices continue the open frame. Returns true when the
+    /// display may be updated now: always for ordinary deltas and the session's
+    /// first full frame, otherwise only after the `end` slice of a frame that
+    /// replaces the picture or moves it.
+    @discardableResult
+    public func decode(_ frame: FramePayload) throws -> Bool {
+        let flags = frame.flags
+        guard FrameFlags(rawValue: flags.rawValue & 0x0F) == flags else { throw CodecError("unknown frame flags") }
+        if flags.contains(.full) && !flags.contains(.start) { throw CodecError("full frame without start") }
+        if flags.contains(.copies) && !flags.contains(.start) { throw CodecError("copies without start") }
         let w = Int(frame.width), h = Int(frame.height)
-        if frame.isFull {
+        if flags.contains(.start) {
             guard w > 0, h > 0 else { throw CodecError("frame has zero size") }
             let grid = tileGrid(width: w, height: h)
             guard grid.cols * grid.rows <= maxTiles, w * h <= maxPixels else { throw CodecError("frame too large") }
-            inflate.reset()
-            mode = frame.mode
-            bps = frame.mode.bytesPerSample
-            width = w
-            height = h
-            samples = [UInt8](repeating: 0, count: w * h * bps)
+            if flags.contains(.full) {
+                inflate.reset()
+                mode = frame.mode
+                bps = frame.mode.bytesPerSample
+                width = w
+                height = h
+                samples = [UInt8](repeating: 0, count: w * h * bps)
+                hold = shown
+            } else {
+                guard !open else { throw CodecError("frame started while another is open") }
+                guard width > 0 else { throw CodecError("update frame before any full frame") }
+                guard frame.mode == mode else { throw CodecError("update frame mode does not match canvas") }
+                let dx = Int(frame.dx), dy = Int(frame.dy)
+                hold = w != width || h != height || dx != 0 || dy != 0
+                if hold { moveCanvas(width: w, height: h, dx: dx, dy: dy) }
+            }
+            open = true
+            reference = flags.contains(.copies) ? samples : nil
         } else {
-            guard width > 0 else { throw CodecError("update frame before any full frame") }
+            guard open else { throw CodecError("slice without an open frame") }
             guard w == width, h == height else { throw CodecError("update frame size does not match canvas") }
             guard frame.mode == mode else { throw CodecError("update frame mode does not match canvas") }
         }
+        let display = !hold || flags.contains(.end)
+        if flags.contains(.end) {
+            open = false
+            shown = true
+        }
+        defer { if flags.contains(.end) { reference = nil } }
 
         let (cols, rows) = tileGrid(width: width, height: height)
         // Count, then per tile its header and at most every sample raw.
@@ -462,10 +530,41 @@ public final class FrameDecoder {
                         }
                     }
                 }
+            case kindCopy:
+                try need(4)
+                let sx = Int(body[pos]) | Int(body[pos + 1]) << 8
+                let sy = Int(body[pos + 2]) | Int(body[pos + 3]) << 8
+                pos += 4
+                guard let ref = reference else { throw CodecError("copy tile without copies flag") }
+                guard sx + tw <= width, sy + th <= height else { throw CodecError("copy source outside canvas") }
+                for y in 0..<th {
+                    let src = ((sy + y) * width + sx) * bps
+                    let dst = (y0 + y) * rowBytes + x0 * bps
+                    samples.replaceSubrange(dst..<(dst + tw * bps), with: ref[src..<(src + tw * bps)])
+                }
             default:
                 throw CodecError("unknown tile kind \(kind)")
             }
         }
         guard pos == body.count else { throw CodecError("unexpected data after last tile") }
+        return display
+    }
+
+    /// New canvas of `w` x `h` with new(x, y) = old(x + dx, y + dy); the rest is 0.
+    private func moveCanvas(width w: Int, height h: Int, dx: Int, dy: Int) {
+        var moved = [UInt8](repeating: 0, count: w * h * bps)
+        let x0 = max(0, -dx), x1 = min(w, width - dx)
+        if x1 > x0 {
+            for y in 0..<h {
+                let oy = y + dy
+                guard oy >= 0, oy < height else { continue }
+                let src = (oy * width + x0 + dx) * bps, dst = (y * w + x0) * bps
+                let n = (x1 - x0) * bps
+                moved.replaceSubrange(dst..<(dst + n), with: samples[src..<(src + n)])
+            }
+        }
+        width = w
+        height = h
+        samples = moved
     }
 }

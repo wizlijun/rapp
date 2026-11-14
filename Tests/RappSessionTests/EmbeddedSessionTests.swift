@@ -144,7 +144,7 @@ final class EmbeddedSessionTests: XCTestCase {
         XCTAssertFalse(link.cancelled)
         // A later frame whose size disagrees with the canvas it continues ends the session.
         var odd = frame
-        odd.isFull = false
+        odd.flags = [.start, .end]
         odd.width = 128; odd.height = 64
         q.sync { link.feed(.frame(region: region, odd)) }
         guard case let .disconnected(reason)? = events.last else { return XCTFail("expected disconnected, got \(events)") }

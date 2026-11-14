@@ -7,8 +7,8 @@ final class ProtocolTests: XCTestCase {
         .hello(token: "t", bundleID: "b", mode: .duogray, fps: 5, density: 0.375),
         .ready(appName: "文本编辑 😀", width: 1920, height: 1080),
         .error("bad token"),
-        .frame(region: CanvasRect(x: 208, y: 72, w: 616, h: 512), FramePayload(width: 130, height: 70, isFull: true, data: [1, 2, 3, 250])),
-        .frame(region: CanvasRect(x: 0, y: 0, w: 1, h: 1), FramePayload(width: 1, height: 1, isFull: false, data: [])),
+        .frame(region: CanvasRect(x: 208, y: 72, w: 616, h: 512), FramePayload(width: 130, height: 70, flags: [.full, .start, .end], data: [1, 2, 3, 250])),
+        .frame(region: CanvasRect(x: 0, y: 0, w: 1, h: 1), FramePayload(width: 1, height: 1, flags: [.start, .end], data: [])),
         .text("你好😀"),
         .key(keyCode: 36, modifiers: 0x100108, down: true),
         .mouse(kind: .drag, button: .right, window: 3931, x: 25.5, y: -3, clickCount: 2),
@@ -43,7 +43,7 @@ final class ProtocolTests: XCTestCase {
         .setStream(mode: .duogray, fps: 1, density: 2, pinned: false),
         .setStream(mode: .color16, fps: 30, density: 2, pinned: false),
         .hello(token: "t", bundleID: "b", mode: .duogray, fps: 1, density: 1),
-        .frame(region: CanvasRect(x: 0.5, y: 8, w: 64, h: 64), FramePayload(mode: .color16, width: 130, height: 70, isFull: true, data: [1, 2, 3, 250])),
+        .frame(region: CanvasRect(x: 0.5, y: 8, w: 64, h: 64), FramePayload(mode: .color16, width: 130, height: 70, flags: [.full, .start, .end], data: [1, 2, 3, 250])),
         .clip(id: 1, .text("你好😀", truncated: false)),
         .clip(id: 0xFFFF_FFFF, .text("", truncated: true)),
         .clip(id: 2, .image(width: 1280, height: 720, bytes: 348_160)),
@@ -207,9 +207,25 @@ final class ProtocolTests: XCTestCase {
     }
 
     func testFrameLayout() {
-        let f = Message.frame(region: CanvasRect(x: 1, y: 2, w: 3, h: 4), FramePayload(width: 0x0102, height: 0x0304, isFull: true, data: [9]))
+        let f = Message.frame(region: CanvasRect(x: 1, y: 2, w: 3, h: 4), FramePayload(width: 0x0102, height: 0x0304, flags: [.full, .start, .end], data: [9]))
         let one: [UInt8] = [0, 0, 0x80, 0x3F], two: [UInt8] = [0, 0, 0, 0x40], three: [UInt8] = [0, 0, 0x40, 0x40], four: [UInt8] = [0, 0, 0x80, 0x40]
-        XCTAssertEqual(f.encoded(), [4, 23, 0, 0, 0, 0] + one + two + three + four + [0x02, 0x01, 0x04, 0x03, 1, 9])
+        XCTAssertEqual(f.encoded(), [4, 23, 0, 0, 0, 0] + one + two + three + four + [0x02, 0x01, 0x04, 0x03, 7, 9])
+    }
+
+    func testFrameMoveHeaderRoundTrips() throws {
+        let region = CanvasRect(x: 1, y: 2, w: 3, h: 4)
+        let moved = Message.frame(region: region, FramePayload(width: 10, height: 6, flags: [.start, .end], dx: -3, dy: 7, data: [9]))
+        let plain = Message.frame(region: region, FramePayload(width: 10, height: 6, flags: [.start, .end, .copies], data: [9]))
+        let full = Message.frame(region: region, FramePayload(width: 10, height: 6, flags: [.full, .start, .end], data: [9]))
+        var p = MessageParser()
+        for m in [moved, plain, full] { p.append(m.encoded()) }
+        XCTAssertEqual(try p.next(), moved)
+        XCTAssertEqual(try p.next(), plain)
+        XCTAssertEqual(try p.next(), full)
+        // A non-full start slice carries exactly 8 more bytes than the same slice without start.
+        let middle = Message.frame(region: region, FramePayload(width: 10, height: 6, flags: [.end], data: [9]))
+        XCTAssertEqual(moved.encoded().count, middle.encoded().count + 8)
+        XCTAssertEqual(full.encoded().count, middle.encoded().count)
     }
 
     func testMouseLayout() {
