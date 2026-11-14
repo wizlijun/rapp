@@ -1,6 +1,7 @@
 // The lifecycle of an embedded session: its record, the words for why it ended, its lamp.
 import '../embed/remote_session.dart';
 import '../embed/stream_choice.dart';
+import '../history/record_id.dart';
 import '../hub_client.dart';
 import 'lamp.dart';
 
@@ -46,6 +47,9 @@ class SessionRecord {
   bool stopped = false;
 
   String get key => '$id/$app';
+
+  /// This opening of the session (it stays across reconnects); in every input record.
+  final String run = newRecordId();
 }
 
 const _takenOver = 'host says: taken over';

@@ -11,6 +11,7 @@ import '../embed/remote_session.dart';
 import '../embed/session_port.dart';
 import '../embed/stream_choice.dart';
 import '../embed/traffic_label.dart' show segments;
+import '../history/input_recorder.dart';
 import '../hub_client.dart';
 import '../permissions.dart';
 import '../embed/app_profile.dart';
@@ -75,6 +76,7 @@ class MainState extends ChangeNotifier {
     void Function(String line)? log,
   })  : resources = ResourcesState(clock: clock),
         _log = log ?? ((_) {}) {
+    recorder = InputRecorder(data: () => data, enabled: () => prefs.inputHistory, log: _log, clock: clock);
     resources.addListener(notifyListeners);
     _portSub = port?.events.listen(_onPortEvent);
     _termSub = termPort?.events.listen(_onPortEvent);
@@ -92,7 +94,11 @@ class MainState extends ChangeNotifier {
     _entries = _mapEntries();
     refreshDevices();
     _restorePins();
+    unawaited(recorder.sweep());
   }
+
+  /// The input record: what the writing panel sends, and the drafts it leaves.
+  late final InputRecorder recorder;
 
   /// Switches to a moved data root: later reads and writes go there and `workspace.json` is reread.
   /// Pinned entries saved under the old root follow to the new one.
@@ -1038,6 +1044,9 @@ class MainState extends ChangeNotifier {
     final oldGroups = groups;
     final old = r.lastSid;
     if (old != null) portOf(old)?.close(old); // reconnected but not swapped yet: the old session is still open
+    // Before a swap the old session is the one on show, the one written in.
+    final shown = remote[old] ?? remote[r.sid];
+    if (shown != null) unawaited(recorder.sessionEnded(shown, _metaOf(r, shown)));
     for (final sid in [r.sid, old]) {
       if (sid == null) continue;
       remote.remove(sid)?.dispose();
@@ -1063,6 +1072,7 @@ class MainState extends ChangeNotifier {
     if (gone == null) return;
     final to = fresh == null ? null : remote[fresh];
     to?.composer.adoptFrom(gone.composer);
+    recorder.detach(gone);
     gone.dispose();
   }
 
@@ -1179,6 +1189,8 @@ class MainState extends ChangeNotifier {
         followNewTabs: !term);
     final prof = profiles.resolve(r.app);
     rs.setProfile(prof);
+    // Wired before any swap's adoptFrom; a reconnect's old session hands its text over itself.
+    recorder.attach(rs, () => _metaOf(r, rs), restore: r.lastSid == null);
     if (prof.name != null) _log('rapp: app 配置「${prof.name}」');
     rs.choice = r.choice;
     rs.streamPinned = r.pinned;
@@ -1230,6 +1242,22 @@ class MainState extends ChangeNotifier {
     if (_pinned) _applyFps();
     if (!reconnect && !quiet) hint = '已打开 ${r.appName} @ ${deviceName(r.id)}';
     notifyListeners();
+  }
+
+  /// What an input record says of [r]'s session [rs] now.
+  SessionMeta _metaOf(SessionRecord r, RemoteSession rs) {
+    final w = rs.currentWindow;
+    return SessionMeta(
+      key: r.key,
+      hostId: r.id,
+      hostName: deviceName(r.id),
+      appId: r.app,
+      appName: r.appName,
+      run: r.run,
+      windowId: w,
+      windowTitle: w == null ? null : rs.windows.where((x) => x.id == w).firstOrNull?.title,
+      projects: [for (final p in projectsOf(r.key)) p.name],
+    );
   }
 
   /// Opens the disconnected session [key] again, in the same place with the same choices.
