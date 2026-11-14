@@ -4,9 +4,10 @@
 use crate::hosts::Host;
 use crate::{Hub, HubSession};
 use anyhow::{bail, Context, Result};
+use rapp_conn::Pipe;
 use rapp_net::log::{pipe_lines, Lvl};
 use rapp_net::msg::Op;
-use rapp_net::quic::{splice, BiStream};
+use rapp_net::quic::splice;
 use serde_json::{json, Value};
 use std::process::Stdio;
 use std::sync::atomic::Ordering;
@@ -20,13 +21,27 @@ use tokio::task::JoinSet;
 const ACCEPT_WAIT: Duration = Duration::from_secs(10);
 
 impl Hub {
-    pub async fn open(self: &Arc<Self>, id: &str, app: &str, embed: bool, reconnect: bool, req: &Option<Value>) -> Result<()> {
+    pub async fn open(
+        self: &Arc<Self>,
+        id: &str,
+        app: &str,
+        embed: bool,
+        reconnect: bool,
+        req: &Option<Value>,
+    ) -> Result<()> {
         if embed {
             return self.open_embedded(id, app, reconnect, req).await;
         }
         if !reconnect {
             if let Some(ev) = self.reuse(id, app) {
-                self.log_opened(ev["sid"].as_u64().unwrap_or(0), id, app, ev["path"].as_str().unwrap_or(""), false, true);
+                self.log_opened(
+                    ev["sid"].as_u64().unwrap_or(0),
+                    id,
+                    app,
+                    ev["path"].as_str().unwrap_or(""),
+                    false,
+                    true,
+                );
                 self.emit(ev, req).await;
                 return Ok(());
             }
@@ -126,7 +141,8 @@ impl Hub {
         let hs = HubSession { tx: Some(tx), id: id.into(), app: app.into(), path: path.into(), embed: true };
         self.sessions.lock().unwrap().insert(sid, hs);
         self.log_opened(sid, id, app, path, reconnect, false);
-        self.emit(json!({"event":"opened","sid":sid,"id":id,"app":app,"path":path,"port":port,"token":token}), req).await;
+        self.emit(json!({"event":"opened","sid":sid,"id":id,"app":app,"path":path,"port":port,"token":token}), req)
+            .await;
         tokio::spawn(self.clone().run_embedded(sid, listener, stream, host, app.to_string(), Instant::now(), rx));
         Ok(())
     }
@@ -136,7 +152,7 @@ impl Hub {
         self: Arc<Self>,
         sid: u64,
         listener: TcpListener,
-        mut stream: BiStream,
+        mut stream: Pipe,
         host: Host,
         app: String,
         since: Instant,
@@ -235,7 +251,7 @@ impl Hub {
         sid: u64,
         mut child: Child,
         mut tcp: TcpStream,
-        mut stream: BiStream,
+        mut stream: Pipe,
         listener: TcpListener,
         host: Host,
         app: String,

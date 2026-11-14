@@ -40,6 +40,10 @@ pub(crate) struct HubSession {
 type Out = Box<dyn AsyncWrite + Unpin + Send>;
 
 pub(crate) struct Hub {
+    /// Where `service.json` (relay, key) and the device key live.
+    home: PathBuf,
+    /// This device's key and certificate, shared with the service on this machine.
+    identity: Arc<rapp_wire::Identity>,
     bin_dir: Option<PathBuf>,
     ep: Endpoint,
     links: Mutex<HashMap<String, Link>>,
@@ -64,7 +68,10 @@ where
     W: AsyncWrite + Unpin + Send + 'static,
 {
     opts.log.event(Lvl::Info, "hub_start", json!({"version": env!("CARGO_PKG_VERSION")}));
+    let identity = Arc::new(rapp_wire::Identity::load_or_create(&opts.home, "device").context("device key")?);
     let hub = Arc::new(Hub {
+        home: opts.home.clone(),
+        identity,
         ep: rapp_net::quic::client_endpoint(([0, 0, 0, 0], 0).into())?,
         links: Default::default(),
         hosts: Hosts::load(&opts.home)?,
@@ -147,19 +154,8 @@ impl Hub {
         Ok(Some(match v.get("cmd").and_then(Value::as_str) {
             Some("hosts") => self.hosts_event(),
             Some("add_host") => {
-                let (id, addr) = rapp_net::addr::split_host_ref(s("id")?)?;
-                let Some(addr) = addr else { bail!("id@ip required") };
-                let (id, password) = (id.as_str(), s("password")?);
-                let auth = Op::Auth { password: Some(password.into()), name: self.me() };
-                let (conn, r) = self.dial(&addr, link::LAN_WAIT, &auth).await?;
-                conn.close(0u32.into(), b"host added");
-                if r["id"] != id {
-                    bail!("{addr} is ID {}, not {id}", r["id"].as_str().unwrap_or("?"));
-                }
-                let name = r["name"].as_str().unwrap_or(id).to_string();
-                self.hosts.upsert(Host { id: id.into(), name: name.clone(), password: password.into(), lan: vec![addr] })?;
-                self.forget(id);
-                json!({"event":"host_added","id":id,"name":name})
+                let password = v.get("password").and_then(Value::as_str);
+                self.add_host(s("id")?, password).await?
             }
             Some("remove_host") => {
                 let id = s("id")?;
@@ -218,10 +214,7 @@ impl Hub {
 /// and the GUI keeps old sids across 「重启服务」; starting from the clock keeps a restarted hub
 /// from reusing them.
 fn sid_seed() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
 #[cfg(test)]
