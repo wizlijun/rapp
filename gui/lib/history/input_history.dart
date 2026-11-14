@@ -132,7 +132,7 @@ class InputHistory extends ChangeNotifier {
             final name = f.uri.pathSegments.last;
             final day = name.substring(0, name.length - '.jsonl'.length);
             final entries = <InputEntry>[];
-            for (final line in const LineSplitter().convert(await f.readAsString())) {
+            for (final line in const LineSplitter().convert(utf8.decode(await f.readAsBytes(), allowMalformed: true))) {
               if (line.trim().isEmpty) continue;
               final e = _parseLine(line, day, me);
               if (e == null) {

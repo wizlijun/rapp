@@ -89,6 +89,20 @@ void main() {
     expect(h.forSession('h1/com.apple.Terminal').map((e) => e.text), ['three', 'one']);
   });
 
+  test('a line with malformed UTF-8 is skipped, the rest of the file is read', () async {
+    final f = day('dev1', '2026-11-14', [rec('01A', '2026-11-14T10:00:00+09:00', 'one')]);
+    f.writeAsBytesSync([
+      ...f.readAsBytesSync(),
+      ...utf8.encode('{"v":1,"id":"01X","text":"'),
+      0xE4, 0xBD, // a character cut short
+      0x0A,
+      ...utf8.encode('${jsonEncode(rec('01C', '2026-11-14T12:00:00+09:00', 'three'))}\n'),
+    ]);
+    final h = history();
+    await h.refresh();
+    expect(h.forSession('h1/com.apple.Terminal').map((e) => e.text), ['three', 'one']);
+  });
+
   test('only changed files are read again', () async {
     final a = day('dev1', '2026-11-14', [rec('01A', '2026-11-14T10:00:00+09:00', 'aaa')]);
     final b = day('dev2', '2026-11-14', [rec('01B', '2026-11-14T11:00:00+09:00', 'bbb', from: 'dev2')]);

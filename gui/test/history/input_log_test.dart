@@ -23,6 +23,14 @@ void main() {
     ]);
   });
 
+  test('an append after a torn last line starts on a new line', () async {
+    final log = InputLog(() => tmp.path);
+    final f = File('${tmp.path}/2026-11-14.jsonl')..writeAsStringSync('{"id":"a"}\n{"id":"b","te');
+    await log.append({'id': 'c'}, DateTime(2026, 11, 14));
+    await log.append({'id': 'd'}, DateTime(2026, 11, 14));
+    expect(f.readAsStringSync(), '{"id":"a"}\n{"id":"b","te\n{"id":"c"}\n{"id":"d"}\n');
+  });
+
   test('appends keep their order', () async {
     final log = InputLog(() => tmp.path);
     final at = DateTime(2026, 11, 14);

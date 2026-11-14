@@ -29,8 +29,23 @@ class InputLog {
     final path = '$d/${l.year.toString().padLeft(4, '0')}-${p(l.month)}-${p(l.day)}.jsonl';
     return _queued(path, () async {
       await Directory(d).create(recursive: true);
-      await File(path).writeAsString(line, mode: FileMode.append, flush: true);
+      final f = File(path);
+      // A torn last line (power loss mid-append) must not swallow this record too.
+      final torn = await f.exists() && await _endsTorn(f);
+      await f.writeAsString(torn ? '\n$line' : line, mode: FileMode.append, flush: true);
     });
+  }
+
+  static Future<bool> _endsTorn(File f) async {
+    final n = await f.length();
+    if (n == 0) return false;
+    final h = await f.open();
+    try {
+      await h.setPosition(n - 1);
+      return (await h.readByte()) != 0x0A;
+    } finally {
+      await h.close();
+    }
   }
 
   /// Rewrites the file at [path] without the line whose `id` is [id] (temporary file, then rename);

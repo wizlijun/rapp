@@ -101,7 +101,12 @@ class _Draft {
 
 class InputRecorder {
   /// [enabled]: the overall switch (`gui.json` `inputHistory`); each session's app has its own.
-  InputRecorder({required this.data, required this.enabled, void Function(String)? log, DateTime Function()? clock})
+  InputRecorder(
+      {required this.data,
+      required this.enabled,
+      this.recordsApp,
+      void Function(String)? log,
+      DateTime Function()? clock})
       : _log = log ?? ((_) {}),
         _clock = clock ?? DateTime.now {
     _store = DraftStore(() => data().draftsDir);
@@ -110,6 +115,11 @@ class InputRecorder {
 
   final DataDir Function() data;
   final bool Function() enabled;
+
+  /// The app's switch (`recordInput`) as it is now; asked for drafts nobody has open. Null: the
+  /// switch saved in the draft file decides. An app the profiles do not know resolves to the
+  /// default (on), so the saved switch still has to be on as well.
+  final bool Function(String appId)? recordsApp;
   final void Function(String) _log;
   final DateTime Function() _clock;
   late final DraftStore _store;
@@ -146,6 +156,9 @@ class InputRecorder {
     }
     c.onDraftChanged = (t) {
       d.text = t;
+      // A row put back is in the editor text now: not pending as well. (Not while the text is
+      // cleared: a submit asks before the composer marks its row in flight.)
+      if (t.isNotEmpty) d.pieces.removeWhere(_wentBack);
       _save(d, rs);
     };
     c.onSubmitted = (o) {
@@ -235,7 +248,7 @@ class InputRecorder {
     final now = _clock();
     var n = 0;
     for (final (f, modified) in all) {
-      if (now.difference(modified) <= age || f.meta['record'] == false || _drafts.containsKey(f.key)) continue;
+      if (now.difference(modified) <= age || !_records(f.key, f.meta) || _drafts.containsKey(f.key)) continue;
       final left = [...f.records];
       while (left.isNotEmpty && await _write(null, left.first, _atOf(left.first))) {
         left.removeAt(0);
@@ -280,6 +293,11 @@ class InputRecorder {
     if (o == null || rs == null || p.finishing) return false;
     return !identical(rs.composer.inFlight, o) && !rs.composer.failed.contains(o);
   }
+
+  /// Whether a draft nobody has open may become records: the switch saved with it and the
+  /// app's switch as it is now must both be on.
+  bool _records(String key, Map<String, Object?> meta) =>
+      meta['record'] != false && (recordsApp?.call(SessionMeta.fromJson(key, meta).appId) ?? true);
 
   /// Writes [d] (with [rs]'s session as it is now), unless its session has ended.
   void _save(_Draft d, RemoteSession? rs) {
@@ -349,7 +367,7 @@ class InputRecorder {
   Future<void> _flushAll() async {
     if (!enabled()) return;
     for (final d in [..._drafts.values]) {
-      if (d.stored.isNotEmpty && d.meta['record'] != false) await _flush(d);
+      if (d.stored.isNotEmpty && _records(d.key, d.meta)) await _flush(d);
     }
   }
 

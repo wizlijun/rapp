@@ -77,7 +77,9 @@ class MainState extends ChangeNotifier {
     void Function(String line)? log,
   })  : resources = ResourcesState(clock: clock),
         _log = log ?? ((_) {}) {
-    recorder = InputRecorder(data: () => data, enabled: () => prefs.inputHistory, log: _log, clock: clock);
+    recorder = InputRecorder(data: () => data, enabled: () => prefs.inputHistory,
+        recordsApp: (a) => this.profiles.resolve(a).recordInput,
+        log: _log, clock: clock);
     history = InputHistory(data: () => data, log: _log);
     _writtenSub = recorder.written.listen(history.add);
     resources.addListener(notifyListeners);

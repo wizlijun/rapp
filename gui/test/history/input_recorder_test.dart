@@ -20,6 +20,7 @@ void main() {
   late List<String> logs;
   late bool enabled;
   late FakeSessionPort port;
+  late Set<String> appsOff;
 
   setUp(() {
     tmp = Directory.systemTemp.createTempSync('input_recorder_test');
@@ -30,12 +31,14 @@ void main() {
     File('${data.deviceDir('dev1')}/device.json').writeAsStringSync('{"name":"bruce-tablet"}');
     logs = [];
     enabled = true;
+    appsOff = {};
     port = FakeSessionPort();
   });
 
   tearDown(() => tmp.deleteSync(recursive: true));
 
-  InputRecorder recorder() => InputRecorder(data: () => data, enabled: () => enabled, log: logs.add);
+  InputRecorder recorder() => InputRecorder(
+      data: () => data, enabled: () => enabled, recordsApp: (a) => !appsOff.contains(a), log: logs.add);
   DraftStore drafts() => DraftStore(() => data.draftsDir);
 
   RemoteSession session(int sid, String app, {AfterSend after = AfterSend.none, bool record = true}) =>
@@ -471,6 +474,57 @@ void main() {
     await settle();
     expect(drafts().load('h1/com.b')!.text, '不记');
     expect(lines(), hasLength(1));
+  });
+
+  test('sweep follows the app\'s switch now, not the one saved in the draft', () async {
+    final old = DateTime.now().subtract(const Duration(days: 8));
+    await drafts().save(DraftFile(key: 'h1/com.a', text: '后来关了', meta: {...meta('h1', 'com.a').toJson(), 'record': true}));
+    File(drafts().pathFor('h1/com.a')).setLastModifiedSync(old);
+    appsOff = {'com.a'};
+    await recorder().sweep();
+    expect(lines(), isEmpty);
+    expect(drafts().load('h1/com.a'), isNotNull);
+  });
+
+  test('a flush for another session skips a draft whose app is off now', () async {
+    await drafts().save(DraftFile(
+        key: 'h1/com.b',
+        text: '',
+        records: [
+          {'v': 1, 'id': '01B', 'ts': '2026-11-14T10:00:00+09:00', 'kind': 'sent', 'text': '等着的'}
+        ],
+        meta: {...meta('h1', 'com.b').toJson(), 'record': true}));
+    final rec = recorder();
+    final other = session(1, 'com.a');
+    rec.attach(other, () => meta('h1', 'com.a'), restore: true);
+    appsOff = {'com.b'};
+    final b = session(2, 'com.b', record: false);
+    rec.attach(b, () => meta('h1', 'com.b'), restore: false); // loads b's draft into the recorder
+    rec.detach(b);
+    await send(other, '发出去的');
+    other.composer.done(1, null);
+    await until(() => lines().isNotEmpty);
+    await settle();
+    expect(lines().map((r) => r['text']), ['发出去的']);
+    expect(drafts().load('h1/com.b')!.records, hasLength(1));
+  });
+
+  test('a put-back row is not pending any more once the text is in the editor', () async {
+    final rec = recorder();
+    final old = session(1, 'com.a'), fresh = session(11, 'com.a');
+    rec.attach(old, () => meta('h1', 'com.a'), restore: true);
+    rec.attach(fresh, () => meta('h1', 'com.a'), restore: false);
+    await send(old, '在路上');
+    final moved = fresh.composer.adoptFrom(old.composer);
+    rec.detach(old, to: fresh, moved: moved);
+    await settle();
+    expect(drafts().load('h1/com.a')!.pending, ['在路上']);
+    fresh.composer.putBack(fresh.composer.failed.single);
+    fresh.composer.setDraft('在路上');
+    await settle();
+    final f = drafts().load('h1/com.a')!;
+    expect(f.pending, isEmpty);
+    expect(f.text, '在路上');
   });
 
   test('the log never carries the text', () async {
