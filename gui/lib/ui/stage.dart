@@ -144,13 +144,49 @@ class Stage extends StatelessWidget {
             ),
           );
           final port = state.port;
-          // A detached session keeps its 「输入」 here: the placeholder stands for its windows.
-          if (full || !(picture || (rs != null && rs.detached)) || rs == null || port == null) return stage;
-          // The composer floats over the picture's bottom edge; opening it never resizes A.
+          final banner = state.lockBanner;
+          final screens = rec != null && isDesktopApp(rec.app) && port?.supportsDetach == false
+              ? state.desktopScreens(rec.id) : const [];
           return Stack(
             children: [
               stage,
-              ...composerLayer(state: state, session: rs, port: port),
+              if (!full && (picture || (rs != null && rs.detached)) && rs != null && port != null)
+                ...composerLayer(state: state, session: rs, port: port),
+              if (banner != null || screens.length > 1)
+                Positioned(
+                  top: 0, left: 0, right: 0,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (screens.length > 1)
+                        Material(
+                          color: Theme.of(context).colorScheme.surface,
+                          child: Wrap(spacing: 8, children: [
+                            for (var i = 0; i < screens.length; i++)
+                              TextButton(
+                                onPressed: () => state.openScreen(rec!.id, screens[i].id),
+                                child: Text('屏幕 ${i + 1}'),
+                              ),
+                          ]),
+                        ),
+                      if (banner != null)
+                        Material(
+                          color: const Color(0xffffe7a3),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                            child: Row(children: [
+                              Expanded(child: Text(banner.text, style: const TextStyle(color: Colors.black87))),
+                              TextButton(
+                                onPressed: isDesktopApp(rec!.app) ? null
+                                    : () => state.openOrSwitch(rec.id, 'desktop:', '桌面'),
+                                child: Text(banner.action),
+                              ),
+                            ]),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
             ],
           );
         });

@@ -53,6 +53,15 @@ class DeviceProbe {
   String? error;
 }
 
+class LockBanner {
+  const LockBanner(this.text, this.action);
+  final String text;
+  final String action;
+}
+
+const desktopLockText = '远程电脑已锁屏；输入系统密码解锁';
+const childLockText = '远程电脑已锁屏；请在主窗口输入系统密码解锁';
+
 class MainState extends ChangeNotifier {
   MainState({
     required this.hub,
@@ -156,6 +165,11 @@ class MainState extends ChangeNotifier {
   /// Embedded sessions by `id/app`, in the order they were first opened. A record outlives its
   /// link: a disconnected one stays here, with its last frame, until the user ends it.
   final Map<String, SessionRecord> _records = {};
+  final Map<String, List<RemoteDisplay>> _desktopDisplays = {};
+  final Map<String, Set<String>> _hintedScreens = {};
+  final Map<SessionRecord, Future<AppList>> _displayRequests = {};
+  final Set<Object> _autoDetached = {};
+  Timer? _desktopTimer;
   int _seq = 0;
   // Hub closed first: waiting up to 1 s for the runner's reason.
   final Map<Object, _Waiting> _waiting = {};
@@ -259,6 +273,7 @@ class MainState extends ChangeNotifier {
     // Focus never stays on a session that is no longer current (mid-move, the old one is on the stage).
     if (pictureFocused != null && (currentRemote?.sid ?? current?.sid) != pictureFocused) _blur();
     _syncPolicy();
+    _syncDesktopTimer();
     // Every change of the current session or of detach state ends in a notify.
     _applyFps();
     super.notifyListeners();
@@ -509,6 +524,8 @@ class MainState extends ChangeNotifier {
   List<SessionEntry> get entries => List.unmodifiable(_entries);
 
   SessionEntry? get current {
+    final r = currentRecord;
+    if (r != null) return _entryOf(r);
     for (final e in _entries) {
       if (e.key == currentKey) return e;
     }
@@ -552,7 +569,7 @@ class MainState extends ChangeNotifier {
       sid: sid,
       id: r.id,
       app: r.app,
-      appName: r.appName,
+      appName: r.app == 'desktop:' ? _desktopName(r.id) : r.appName,
       device: deviceName(r.id),
       path: r.path,
       lamp: recordLamp(r, rs),
@@ -563,7 +580,7 @@ class MainState extends ChangeNotifier {
   }
 
   List<SessionEntry> _mapEntries() {
-    if (embeds) return [for (final r in _records.values) _entryOf(r)];
+    if (embeds) return [for (final r in _records.values) if (!isDesktopScreen(r.app)) _entryOf(r)];
     final h = hub;
     final out = <SessionEntry>[];
     final seen = <String>{};
@@ -712,7 +729,7 @@ class MainState extends ChangeNotifier {
       final name = r.appName;
       final batch = _batchEnded.contains(r.key); // 全部结束 already said so (K13)
       _endRecord(r);
-      if (!batch) hint = endedHint(name, e.reason);
+      if (!batch && !isDesktopScreen(r.app)) hint = endedHint(name, e.reason);
       notifyListeners();
       return;
     }
@@ -720,7 +737,19 @@ class MainState extends ChangeNotifier {
       if (r.key == currentKey) _showBlocked(e.by);
       return;
     }
+    final wasLocked = rs.screenLocked;
     rs.apply(e);
+    if (e is ScreenLockedEvent && wasLocked != e.locked) {
+      if (r.app == 'desktop:') {
+        for (final child in _records.values) {
+          if (child.id == r.id && isDesktopScreen(child.app) && child.phase == Phase.live && !child.ending) {
+            port!.setBanner(child.sid!, e.locked ? childLockText : '');
+          }
+        }
+      } else if (isDesktopScreen(r.app)) {
+        port!.setBanner(e.sid, e.locked ? childLockText : '');
+      }
+    }
     if (e is WindowsEvent) _syncHidden(rs);
     final start = _starts[e.sid];
     if (start != null && e is ClipsEvent) {
@@ -740,6 +769,10 @@ class MainState extends ChangeNotifier {
       if (e.detached && pictureFocused == e.sid) _blur();
     } else if (e is WindowsEvent) {
       _swapIfReady(r);
+      if (isDesktopScreen(r.app) && !r.ending && rs.tabs.tabs.isNotEmpty &&
+          port!.supportsDetach && _autoDetached.add(e.sid)) {
+        port!.detach(e.sid);
+      }
     }
     notifyListeners();
   }
@@ -764,6 +797,12 @@ class MainState extends ChangeNotifier {
   /// The link of [r] ended with [raw] (the runner's or the hub's words): the record stays, with its
   /// last frame, until the user reconnects or ends it. Callers notify.
   void _disconnect(SessionRecord r, String raw, {bool hint = false, String? hintText, bool failedOpen = false}) {
+    if (isDesktopScreen(r.app)) {
+      if (r.sid != null) port?.close(r.sid!);
+      _endRecord(r);
+      return;
+    }
+    if (r.app == 'desktop:') _endDesktopChildren(r.id);
     final x = _reroutes[r];
     if (x != null && x.fresh != null && x.fresh == r.sid && r.lastSid != null) {
       // The new session of a move went before it took the stage: the old one carries on.
@@ -869,11 +908,16 @@ class MainState extends ChangeNotifier {
   void _finishEnding(SessionRecord r) {
     final batch = _batchEnded.contains(r.key); // 全部结束 already said so (K13)
     _endRecord(r);
-    if (!batch) hint = '已结束 ${r.appName}';
+    if (!batch && !isDesktopScreen(r.app)) hint = '已结束 ${r.appName}';
   }
 
   /// Takes [r] off the list and steps to the next session if it was current. Callers set the hint.
   void _endRecord(SessionRecord r) {
+    if (r.app == 'desktop:') {
+      _endDesktopChildren(r.id);
+      _desktopDisplays.remove(r.id);
+      _hintedScreens.remove(r.id);
+    }
     _rerouteEnd(r, false);
     _batchEnded.remove(r.key);
     _stopRetry(r);
@@ -883,6 +927,7 @@ class MainState extends ChangeNotifier {
     for (final sid in [r.sid, old]) {
       if (sid == null) continue;
       remote.remove(sid)?.dispose();
+      _autoDetached.remove(sid);
       _sentFps.remove(sid);
       _waiting.remove(sid)?.timer.cancel();
     }
@@ -894,7 +939,9 @@ class MainState extends ChangeNotifier {
     _entries = _mapEntries();
     if (currentKey == r.key) {
       final next = stepKey(oldGroups, r.key, 1);
-      currentKey = (next != null && next != r.key && _records.containsKey(next)) ? next : null;
+      currentKey = isDesktopScreen(r.app) && _records.containsKey('${r.id}/desktop:')
+          ? '${r.id}/desktop:'
+          : (next != null && next != r.key && _records.containsKey(next)) ? next : null;
     }
   }
 
@@ -1050,7 +1097,12 @@ class MainState extends ChangeNotifier {
     _sentFps[s.sid] = (c.mode, c.fps, c.density, false);
     if (rs.streamPinned) _applyFps();
     if (!reconnect && !quiet) hint = '已打开 ${r.appName} @ ${deviceName(r.id)}';
+    if (isDesktopScreen(r.app)) {
+      final main = _records['${r.id}/desktop:'];
+      if (remote[main?.sid]?.screenLocked == true) port!.setBanner(s.sid, childLockText);
+    }
     notifyListeners();
+    if (r.app == 'desktop:') unawaited(_refreshDesktop(r, openMissing: true));
   }
 
   /// Opens the disconnected session [key] again, in the same place with the same choices.
@@ -1407,8 +1459,11 @@ class MainState extends ChangeNotifier {
     } else {
       final rs = _stageRemote(r);
       if (rs != null && rs.detached) port!.raiseDetached(rs.sid);
-      hint = '已切到 $appName';
+      if (!quiet) hint = '已切到 $appName';
       notifyListeners();
+      if (r.app == 'desktop:' && !r.ending && r.phase == Phase.live) {
+        await _refreshDesktop(r, openMissing: true);
+      }
     }
   }
 
@@ -1449,7 +1504,9 @@ class MainState extends ChangeNotifier {
 
   bool _endEmbedded(String key, {bool quiet = false}) {
     final r = _records[key];
-    if (r == null) return false;
+    if (r == null || r.ending) return false;
+    if (r.app == 'desktop:') _endDesktopChildren(r.id);
+    quiet = quiet || isDesktopScreen(r.app);
     final String said;
     switch (r.phase) {
       case Phase.live:
@@ -1476,6 +1533,93 @@ class MainState extends ChangeNotifier {
     if (!quiet) hint = said;
     notifyListeners();
     return true;
+  }
+
+  // ---- desktop screens ----
+  String _desktopName(String device) {
+    final n = _records.values.where((r) => r.id == device && isDesktopApp(r.app)).length;
+    return n > 1 ? '桌面（$n 块屏）' : '桌面';
+  }
+
+  List<RemoteDisplay> desktopScreens(String device) => List.unmodifiable(_desktopDisplays[device] ?? const []);
+
+  void openScreen(String device, String displayId) {
+    final main = _records['$device/desktop:'];
+    if (main == null || main.ending || main.phase != Phase.live) return;
+    final screens = desktopScreens(device);
+    final i = screens.indexWhere((d) => d.id == displayId);
+    if (i < 0) return;
+    final d = screens[i];
+    unawaited(_openEmbedded(device, d.main ? 'desktop:' : 'desktop:${d.id}',
+        d.main ? '桌面' : '桌面 · 屏幕 ${i + 1}', quiet: true));
+  }
+
+  LockBanner? get lockBanner {
+    final r = currentRecord;
+    if (r == null || r.phase != Phase.live || r.ending || remote[r.sid]?.screenLocked != true) return null;
+    return isDesktopApp(r.app)
+        ? const LockBanner(desktopLockText, '输入系统密码')
+        : const LockBanner('A 已锁屏，操作不会生效。', '打开桌面');
+  }
+
+  void _endDesktopChildren(String device) {
+    for (final child in _records.values.where((r) => r.id == device && isDesktopScreen(r.app)).toList()) {
+      _endEmbedded(child.key, quiet: true);
+    }
+  }
+
+  void _syncDesktopTimer() {
+    final live = _records.values.any((r) => r.app == 'desktop:' && r.phase == Phase.live && !r.ending);
+    if (!live) {
+      _desktopTimer?.cancel();
+      _desktopTimer = null;
+    } else {
+      _desktopTimer ??= Timer.periodic(const Duration(seconds: 30), (_) {
+        for (final r in _records.values.toList()) {
+          if (r.app == 'desktop:' && r.phase == Phase.live && !r.ending) {
+            unawaited(_refreshDesktop(r));
+          }
+        }
+      });
+    }
+  }
+
+  Future<void> _refreshDesktop(SessionRecord r, {bool openMissing = false}) async {
+    if (!hubUsable || r.ending || r.phase != Phase.live) return;
+    final sid = r.sid;
+    final request = _displayRequests.putIfAbsent(r, () => hub!.apps(r.id));
+    try {
+      final apps = await request;
+      if (_disposed || _records[r.key] != r || r.sid != sid || r.ending || r.phase != Phase.live) return;
+      final screens = [for (final app in apps.apps) if (app.app == 'desktop:') ...app.displays];
+      final before = _desktopDisplays[r.id];
+      final ids = screens.map((d) => d.id).toSet();
+      for (final child in _records.values.where((x) => x.id == r.id && isDesktopScreen(x.app)).toList()) {
+        if (!screens.any((d) => !d.main && child.app == 'desktop:${d.id}')) _endEmbedded(child.key, quiet: true);
+      }
+      final hinted = _hintedScreens.putIfAbsent(r.id, () => {});
+      hinted.removeWhere((id) => !ids.contains(id));
+      if (!openMissing && before != null) {
+        final oldIds = before.map((d) => d.id).toSet();
+        for (final d in screens) {
+          if (!oldIds.contains(d.id) && hinted.add(d.id)) hint = 'A 多了一块屏，再点一次「桌面」打开它';
+        }
+      }
+      _desktopDisplays[r.id] = screens;
+      if (openMissing && port!.supportsDetach) {
+        for (var i = 0; i < screens.length; i++) {
+          final d = screens[i];
+          if (!d.main && !_records.containsKey('${r.id}/desktop:${d.id}')) {
+            unawaited(_openEmbedded(r.id, 'desktop:${d.id}', '桌面 · 屏幕 ${i + 1}', select: false, quiet: true));
+          }
+        }
+      }
+      notifyListeners();
+    } catch (_) {
+      // A failed probe must not look like all displays were unplugged. Retry on the next tick.
+    } finally {
+      if (identical(_displayRequests[r], request)) _displayRequests.remove(r);
+    }
   }
 
   // ---- devices ----
@@ -1893,6 +2037,7 @@ class MainState extends ChangeNotifier {
     profiles.removeListener(_onProfiles);
     _portSub?.cancel();
     _blockedTimer?.cancel();
+    _desktopTimer?.cancel();
     for (final t in _retryTimers.values) {
       t.cancel();
     }
