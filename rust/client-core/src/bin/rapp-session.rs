@@ -245,8 +245,8 @@ fn read_loop(
                 // canvases may be replaced; compressed deltas must all be applied.
                 if show {
                     out.frame(frame.try_into().unwrap(), &mut pixels)?;
-                    frames.fetch_add(1, Ordering::Relaxed);
                 }
+                frames.fetch_add(1, Ordering::Relaxed);
                 let ms = u16::try_from(received.elapsed().as_millis()).unwrap_or(u16::MAX);
                 writer.lock().unwrap().write_all(&p::frame_ack(ms))?;
             }
