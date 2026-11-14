@@ -33,6 +33,16 @@ impl Server {
         Some(s)
     }
 
+    /// Wait (up to 5 s) until the first pane of `session` runs `cmd`: tmux starts it through the shell, so for a
+    /// moment the pane's command is the shell.
+    pub fn wait_command(&self, session: &str, cmd: &str) {
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while self.raw(&["display-message", "-p", "-t", session, "#{pane_current_command}"]).trim() != cmd {
+            assert!(std::time::Instant::now() < end, "the pane of {session} never ran {cmd}");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
     pub fn tmux(&self) -> Tmux {
         Tmux { runner: Runner::Local, bin: "tmux".into(), socket: Some(self.socket.clone()) }
     }

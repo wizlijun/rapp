@@ -324,12 +324,16 @@ struct Pump {
 }
 
 fn pump(s: &common::Server, session: &str, unread: Arc<Mutex<Unread>>) -> Pump {
+    pump_with(s, session, unread, Opts::default())
+}
+
+fn pump_with(s: &common::Server, session: &str, unread: Arc<Mutex<Unread>>, opts: Opts) -> Pump {
     let (w, from_us) = tokio::io::duplex(1 << 16);
     let (to_us, r) = tokio::io::duplex(1 << 16);
     let (t, name) = (s.tmux(), session.to_string());
     let done =
         tokio::spawn(
-            async move { session::run(&t, &name, BufReader::new(from_us), to_us, unread, Opts::default()).await },
+            async move { session::run(&t, &name, BufReader::new(from_us), to_us, unread, opts).await },
         );
     Pump { w, lines: BufReader::new(r).lines(), done }
 }
@@ -400,6 +404,7 @@ fn view(pane: &str, cols: u16, rows: u16) -> In {
 async fn view_type_ack_roundtrip() {
     let Some(s) = common::Server::start() else { return };
     s.raw(&["new-session", "-d", "-s", "v", "-x", "80", "-y", "24", "cat"]);
+    s.wait_command("v", "cat");
     common::settle().await;
     let mut p = pump(&s, "v", fresh_unread());
     let (pane, panes) = greeted(&mut p).await;
@@ -836,4 +841,24 @@ async fn ssh_runner_lists_and_captures() {
     assert_eq!((p.cols, p.rows), (90, 20));
     assert_eq!(t.capture(&p.pane).await.unwrap().lines[0], "rapp-ssh-ok");
     drop(fx);
+}
+
+#[tokio::test]
+async fn inputs_are_counted_not_recorded() {
+    let Some(s) = common::Server::start() else { return };
+    s.raw(&["new-session", "-d", "-s", "n", "-x", "80", "-y", "24", "cat"]);
+    common::settle().await;
+    let opts = Opts::default();
+    let inputs = opts.inputs.clone();
+    let mut p = pump_with(&s, "n", fresh_unread(), opts);
+    let (pane, _) = greeted(&mut p).await;
+    say(&mut p.w, In::Keys { pane: pane.clone(), keys: vec!["Enter".into()] }).await;
+    say(&mut p.w, In::Keys { pane: pane.clone(), keys: vec!["Enter".into()] }).await;
+    say(&mut p.w, In::Type { pane: pane.clone(), text: "x".into() }).await;
+    say(&mut p.w, In::Text { pane: pane.clone(), data: "a".into(), enter: false, more: true }).await;
+    say(&mut p.w, In::Text { pane: pane.clone(), data: "b".into(), enter: false, more: false }).await;
+    p.w.shutdown().await.unwrap();
+    drop(p.w);
+    tokio::time::timeout(Duration::from_secs(5), p.done).await.expect("the pump ends").unwrap().unwrap();
+    assert_eq!(inputs.load(std::sync::atomic::Ordering::Relaxed), 4);
 }

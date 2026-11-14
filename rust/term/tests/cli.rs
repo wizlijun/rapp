@@ -53,6 +53,7 @@ fn list_run_and_watch_against_a_private_server() {
     let Some(s) = common::Server::start() else { return };
     let o = run(&["run", "--socket", &s.socket, "--name", "cli demo", "--size", "90x20", "--", "cat"]);
     assert_eq!((o.code, o.stdout.trim()), (0, "term:tmux:cli demo"));
+    s.wait_command("cli demo", "cat");
     let o = run(&["list", "--json", "--socket", &s.socket]);
     let v: serde_json::Value = serde_json::from_str(o.stdout.trim()).unwrap();
     assert_eq!(v["sessions"][0]["id"], "term:tmux:cli demo");

@@ -93,6 +93,8 @@ fn handle(state: &State, cmd: &Value) -> Value {
         "update_status" => ok(update::status_json(state)),
         "update_dismiss" => update::dismiss(state, cmd["version"].as_str().unwrap_or("")),
         "set_update" => update::set(state, cmd["auto_update"].as_bool(), cmd["check_updates"].as_bool()),
+        "term" => crate::term::settings(state),
+        "set_term" => crate::term::set(state, cmd),
         "history" => {
             let limit = cmd["limit"].as_u64().unwrap_or(HISTORY_DEFAULT).min(HISTORY_MAX) as usize;
             ok(json!({"events": read_recent(&state.log_dir, crate::LOG_FILE, in_history, limit)}))
@@ -104,11 +106,12 @@ fn handle(state: &State, cmd: &Value) -> Value {
 const HISTORY_DEFAULT: u64 = 50;
 const HISTORY_MAX: u64 = 500;
 
-/// 访问记录 (spec §6): sessions, failed auths, refused requests and blocked input; never side connections.
+/// 访问记录 (spec §6): sessions, terminal inputs, failed auths, refused requests and blocked input; never side
+/// connections, nor the hub's background `watch_terms` (polled like `ping`, not a user action).
 fn in_history(v: &Value) -> bool {
     let shown = match v["ev"].as_str() {
-        Some("session_start" | "session_end" | "auth_fail" | "rejected" | "input_blocked") => true,
-        Some("request") => v["result"] != "ok",
+        Some("session_start" | "session_end" | "term_inputs" | "auth_fail" | "rejected" | "input_blocked") => true,
+        Some("request") => v["result"] != "ok" && v["op"] != "watch_terms",
         _ => false,
     };
     shown && v["side"] != true

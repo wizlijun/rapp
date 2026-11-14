@@ -19,6 +19,7 @@ rapp-net.workspace = true
 rapp-wire.workspace = true
 rapp-conn.workspace = true
 rapp-update.workspace = true
+rapp-term.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

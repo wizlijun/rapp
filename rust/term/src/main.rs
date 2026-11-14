@@ -1,26 +1,30 @@
-//! The `rapp-term` command: version, list, watch, run.
+//! The `rapp-term` command: version, list, watch, run, serve.
 //!
 //! Exit codes: 0 ok, 1 a runtime error (tmux missing or failing, the session not there or not made), 2 an
 //! argument error. Errors go to stderr as one line and never carry the command, the screen or the input.
 
-use rapp_term::id::TermId;
+use rapp_term::id::{default_name, session_name, valid_host, TermId};
 use rapp_term::proto::PROTO;
 use rapp_term::runner::Runner;
+use rapp_term::serve::{self, ServeOpts};
 use rapp_term::session::{self, Opts};
-use rapp_term::tmux::{cmd, parse, PaneInfo, Tmux};
+use rapp_term::list::{host_rows, TermRow};
+use rapp_term::tmux::{PaneInfo, Tmux};
 use rapp_term::unread::Unread;
 use serde::Serialize;
-use std::collections::{BTreeMap, HashSet};
 use std::io::Write;
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const USAGE: &str = "\
 usage: rapp-term version [--json]
        rapp-term list [--json] [--ssh <destination> --host <name>] [--tmux <path>]
        rapp-term watch <term id> [--ssh <destination>] [--tmux <path>] [--json]
        rapp-term run [--name <name>] [--size <cols>x<rows>] [--ssh <destination> --host <name>] [--tmux <path>] \
--- <command...>";
+-- <command...>
+       rapp-term serve --token-env <variable> --config <path> [--bind <address>] [--port <port>] [--json]";
 
 /// The only backend this command serves.
 const BACKEND: &str = "tmux";
@@ -56,6 +60,10 @@ struct Args {
     socket: Option<String>,
     name: Option<String>,
     size: Option<String>,
+    token_env: Option<String>,
+    config: Option<String>,
+    bind: Option<String>,
+    port: Option<String>,
     /// Arguments that are not options.
     pos: Vec<String>,
     /// Everything after `--`.
@@ -96,6 +104,10 @@ fn parse_args(allowed: &[&str], argv: &[String]) -> Res<Args> {
             "socket" => &mut a.socket,
             "name" => &mut a.name,
             "size" => &mut a.size,
+            "token-env" => &mut a.token_env,
+            "config" => &mut a.config,
+            "bind" => &mut a.bind,
+            "port" => &mut a.port,
             _ => return Err(usage("unknown option")),
         };
         // The value is the next argument whatever it looks like; `Runner::ssh` rejects a destination like `-o…`.
@@ -116,20 +128,6 @@ fn parse_size(s: &str) -> Option<(u16, u16)> {
     (c > 0 && r > 0).then_some((c, r))
 }
 
-/// A session name tmux keeps as given on every version: tmux before 3.5 turns `:` and `.` into `_`, so they are
-/// turned here; empty names and control characters are refused.
-fn session_name(s: &str) -> Option<String> {
-    if s.is_empty() || s.chars().any(char::is_control) {
-        return None;
-    }
-    Some(s.replace([':', '.'], "_"))
-}
-
-/// The default name of a new session: the last path part of the command's program.
-fn default_name(program: &str) -> &str {
-    program.rsplit('/').next().unwrap_or(program)
-}
-
 fn term_id(host: Option<&str>, name: &str) -> TermId {
     TermId { backend: BACKEND.into(), host: host.map(str::to_string), name: name.to_string() }
 }
@@ -140,10 +138,9 @@ fn check_host(a: &Args) -> Res<()> {
     if a.ssh.is_none() {
         return Err(usage("--host goes with --ssh"));
     }
-    // The id must read back with the same host: `a:b` parses, but as host `a` and a name starting `b:`.
-    match TermId::parse(&term_id(Some(h), "-").to_string()) {
-        Ok(t) if t.host.as_deref() == Some(h.as_str()) => Ok(()),
-        _ => Err(usage("invalid --host name")),
+    match valid_host(h) {
+        true => Ok(()),
+        false => Err(usage("invalid --host name")),
     }
 }
 
@@ -206,44 +203,6 @@ async fn list_panes(tmux: &Tmux) -> Res<Vec<PaneInfo>> {
     tmux.list().await.map_err(|e| runtime(format!("could not list the tmux sessions: {e}")))
 }
 
-/// One session as `list` shows it.
-#[derive(Serialize, Debug, PartialEq)]
-struct SessionRow {
-    id: String,
-    name: String,
-    command: String,
-    panes: usize,
-    attached: u32,
-    activity: u64,
-    dead: bool,
-}
-
-/// The sessions in `list`, oldest first: `command` is the first pane's of the session's current window (a window
-/// in `current`; the first window when none is), `activity` the latest of its windows, `dead` when every pane
-/// has exited.
-fn sessions(list: &[PaneInfo], current: &HashSet<String>, host: Option<&str>) -> Vec<SessionRow> {
-    let mut by: BTreeMap<(u64, &str), Vec<&PaneInfo>> = BTreeMap::new();
-    for p in list {
-        let n = p.session_id.trim_start_matches('$').parse().unwrap_or(u64::MAX);
-        by.entry((n, p.session_id.as_str())).or_default().push(p);
-    }
-    by.into_values()
-        .map(|ps| {
-            let place = |p: &&&PaneInfo| (!current.contains(&p.window_id), p.window_index, p.pane_index);
-            let first = ps.iter().min_by_key(place).expect("a session has a pane");
-            SessionRow {
-                id: term_id(host, &first.session).to_string(),
-                name: first.session.clone(),
-                command: first.command.clone(),
-                panes: ps.len(),
-                attached: first.attached,
-                activity: ps.iter().map(|p| p.activity).max().unwrap_or(0),
-                dead: ps.iter().all(|p| p.dead),
-            }
-        })
-        .collect()
-}
-
 fn version(a: &Args) {
     #[derive(Serialize)]
     struct V {
@@ -264,17 +223,16 @@ async fn list(a: &Args) -> Res<()> {
     }
     check_host(a)?;
     let tmux = tmux_of(a)?;
-    let panes = list_panes(&tmux).await?;
-    // A server that went away between the two calls leaves no current window: the first window stands in.
-    let current = match panes.is_empty() {
-        true => HashSet::new(),
-        false => tmux.run(&cmd::window_flags()).await.map(|s| parse::current_windows(&s)).unwrap_or_default(),
-    };
-    let rows = sessions(&panes, &current, a.host.as_deref());
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    // `Unread::new(now)`: a one-shot listing has no history, so nothing is unread.
+    let unread = Mutex::new(Unread::new(now));
+    let rows = host_rows(&tmux, a.host.as_deref(), &unread, now)
+        .await
+        .map_err(|e| runtime(format!("could not list the tmux sessions: {e}")))?;
     if a.json {
         #[derive(Serialize)]
         struct L {
-            sessions: Vec<SessionRow>,
+            sessions: Vec<TermRow>,
         }
         println!("{}", serde_json::to_string(&L { sessions: rows }).expect("always serializes"));
     } else {
@@ -337,6 +295,65 @@ async fn run(a: &Args) -> Res<()> {
     Ok(())
 }
 
+/// One line on stdout. A closed stdout is not an error: the one reading it has gone and stops the worker anyway.
+fn say(line: &str) {
+    let mut o = std::io::stdout().lock();
+    let _ = writeln!(o, "{line}");
+    let _ = o.flush();
+}
+
+/// A worker event: the JSON line with `--json`, a few words without.
+fn event(json: bool, v: &serde_json::Value) {
+    if json {
+        return say(&v.to_string());
+    }
+    match v["event"].as_str() {
+        Some("listening") => say(&format!("listening on port {}", v["port"])),
+        Some("ended") => say(&format!("a view of {} ended after {} inputs", v["term"], v["inputs"])),
+        _ => say(&v.to_string()),
+    }
+}
+
+async fn serve(a: &Args) -> Res<()> {
+    if !a.pos.is_empty() {
+        return Err(usage("serve takes no arguments"));
+    }
+    let var = a.token_env.as_deref().ok_or_else(|| usage("serve needs --token-env"))?;
+    let token = std::env::var(var).ok().filter(|t| !t.is_empty());
+    let token = token.ok_or_else(|| usage("the --token-env variable is not set"))?;
+    let config = a.config.as_deref().ok_or_else(|| usage("serve needs --config"))?;
+    let ip: IpAddr = a.bind.as_deref().unwrap_or("127.0.0.1").parse().map_err(|_| usage("invalid --bind address"))?;
+    let port: u16 = match &a.port {
+        None => 0,
+        Some(p) => p.parse().map_err(|_| usage("invalid --port"))?,
+    };
+    let listener = tokio::net::TcpListener::bind((ip, port)).await.map_err(|_| runtime("could not listen"))?;
+    let port = listener.local_addr().map_err(|_| runtime("could not listen"))?.port();
+    let dir = ctl_dir();
+    if private_dir(&dir).is_err() {
+        eprintln!("rapp-term: could not make the ssh control directory");
+    }
+    let opts = ServeOpts { socket: a.socket.clone(), ..ServeOpts::new(PathBuf::from(config), dir) };
+    event(a.json, &serde_json::json!({ "event": "listening", "port": port }));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let json = a.json;
+    let printer = tokio::spawn(async move {
+        while let Some(v) = rx.recv().await {
+            event(json, &v);
+        }
+    });
+    let stop = async {
+        use tokio::io::AsyncReadExt;
+        let mut stdin = tokio::io::stdin();
+        let mut buf = [0u8; 1024];
+        while matches!(stdin.read(&mut buf).await, Ok(n) if n > 0) {}
+    };
+    serve::serve(listener, token, opts, tx, stop).await;
+    // Every sender is gone with the worker, so the printer ends once the last event is out.
+    let _ = printer.await;
+    Ok(())
+}
+
 fn dispatch(argv: &[String]) -> Res<()> {
     let Some((sub, rest)) = argv.split_first() else { return Err(usage("missing subcommand")) };
     let allowed: &[&str] = match sub.as_str() {
@@ -344,6 +361,7 @@ fn dispatch(argv: &[String]) -> Res<()> {
         "list" => &["json", "ssh", "host", "tmux", "socket"],
         "watch" => &["json", "ssh", "tmux", "socket"],
         "run" => &["json", "name", "size", "ssh", "host", "tmux", "socket", "--"],
+        "serve" => &["json", "token-env", "config", "bind", "port", "socket"],
         "help" | "--help" | "-h" => {
             println!("{USAGE}");
             return Ok(());
@@ -366,11 +384,20 @@ fn dispatch(argv: &[String]) -> Res<()> {
         match sub.as_str() {
             "list" => list(&a).await,
             "watch" => watch(&a).await,
+            "serve" => serve(&a).await,
             _ => run(&a).await,
         }
     });
     // Dropping the runtime would wait for tokio's blocking stdin read, which lasts as long as stdin stays open.
     rt.shutdown_background();
+    if sub == "serve" && a.json {
+        let (code, reason) = match &res {
+            Ok(()) => (0, "stdin closed"),
+            Err(Fail::Usage(m)) => (2, m.as_str()),
+            Err(Fail::Runtime(m)) => (1, m.as_str()),
+        };
+        say(&serde_json::json!({ "event": "exit", "code": code, "reason": reason }).to_string());
+    }
     res
 }
 
@@ -402,53 +429,6 @@ mod tests {
 
     fn s(v: &[&str]) -> Vec<String> {
         v.iter().map(|x| x.to_string()).collect()
-    }
-
-    fn pane(sid: &str, wid: &str, wi: u32, pi: u32, cmd: &str, activity: u64, dead: bool) -> PaneInfo {
-        PaneInfo {
-            session_id: sid.into(),
-            session: format!("s{sid}"),
-            window_id: wid.into(),
-            window: "w".into(),
-            pane: format!("%{wi}{pi}"),
-            command: cmd.into(),
-            title: "t".into(),
-            window_index: wi,
-            pane_index: pi,
-            attached: 1,
-            activity,
-            cols: 80,
-            rows: 24,
-            dead,
-        }
-    }
-
-    #[test]
-    fn sessions_take_the_current_windows_first_pane_and_the_latest_activity() {
-        let list = [
-            pane("$10", "@9", 0, 0, "vim", 5, true),
-            pane("$2", "@1", 0, 0, "zsh", 100, false),
-            pane("$2", "@2", 1, 1, "htop", 300, false),
-            pane("$2", "@2", 1, 0, "claude", 200, true),
-        ];
-        let current: HashSet<String> = ["@2".to_string()].into_iter().collect();
-        let v = sessions(&list, &current, Some("gpu1"));
-        assert_eq!(v.len(), 2);
-        assert_eq!(
-            v[0],
-            SessionRow {
-                id: "term:tmux@gpu1:s$2".into(),
-                name: "s$2".into(),
-                command: "claude".into(),
-                panes: 3,
-                attached: 1,
-                activity: 300,
-                dead: false,
-            }
-        );
-        assert_eq!((v[1].name.as_str(), v[1].command.as_str(), v[1].dead), ("s$10", "vim", true));
-        // No current window known: the first window's first pane.
-        assert_eq!(sessions(&list, &HashSet::new(), None)[0].command, "zsh");
     }
 
     #[test]
@@ -491,10 +471,5 @@ mod tests {
         for bad in ["axb", "90", "x20", "90x", "0x20", "90x0", "+9x20", "99999x20", "90x20x1"] {
             assert_eq!(parse_size(bad), None, "{bad}");
         }
-        assert_eq!(session_name("cli demo").as_deref(), Some("cli demo"));
-        assert_eq!(session_name("py3.11:x").as_deref(), Some("py3_11_x"));
-        assert_eq!(session_name(""), None);
-        assert_eq!(session_name("a\nb"), None);
-        assert_eq!((default_name("/usr/local/bin/claude"), default_name("cat")), ("claude", "cat"));
     }
 }

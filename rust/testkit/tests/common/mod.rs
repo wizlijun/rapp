@@ -22,9 +22,11 @@ pub const WAIT: Duration = Duration::from_secs(10);
 /// A temp dir with `rapp-host` / `rapp-client` symlinked to the fake workers.
 pub fn bins() -> TempDir {
     let dir = tempfile::tempdir().unwrap();
-    for (name, target) in
-        [("rapp-host", env!("CARGO_BIN_EXE_fake-rapp-host")), ("rapp-client", env!("CARGO_BIN_EXE_fake-rapp-client"))]
-    {
+    for (name, target) in [
+        ("rapp-host", env!("CARGO_BIN_EXE_fake-rapp-host")),
+        ("rapp-client", env!("CARGO_BIN_EXE_fake-rapp-client")),
+        ("rapp-term", env!("CARGO_BIN_EXE_fake-rapp-term")),
+    ] {
         std::os::unix::fs::symlink(target, dir.path().join(name)).unwrap();
     }
     dir

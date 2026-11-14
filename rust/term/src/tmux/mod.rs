@@ -125,7 +125,12 @@ impl Tmux {
     }
 
     async fn exec(&self, args: &[String], stdin: &[u8]) -> anyhow::Result<Done> {
-        let mut c = self.runner.command(&self.bin, &self.args(args));
+        self.exec_argv(self.runner.argv(&self.bin, &self.args(args)), stdin).await
+    }
+
+    async fn exec_argv(&self, argv: Vec<String>, stdin: &[u8]) -> anyhow::Result<Done> {
+        let mut c = tokio::process::Command::new(&argv[0]);
+        c.args(&argv[1..]);
         c.stdin(if stdin.is_empty() { Stdio::null() } else { Stdio::piped() })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -207,7 +212,15 @@ impl Tmux {
     /// shell quoted; empty: the default shell).
     pub async fn new_session(&self, name: &str, command: &[String], cols: u16, rows: u16) -> anyhow::Result<()> {
         let (cols, rows) = clamp_size(cols, rows);
-        self.run(&cmd::new_session(name, cols, rows, command)).await.map(|_| ())
+        let args = cmd::new_session(name, cols, rows, command);
+        if matches!(self.runner, Runner::Local) && cfg!(target_os = "linux") && has_systemd_run() {
+            let argv = scoped(self.runner.argv(&self.bin, &self.args(&args)), true, true);
+            if matches!(self.exec_argv(argv, &[]).await, Ok(d) if d.code == Some(0)) {
+                return Ok(());
+            }
+            eprintln!("new session started without systemd-run: it may stop with the service");
+        }
+        self.run(&args).await.map(|_| ())
     }
 
     /// `lines` rows of scrollback (at most `MAX_HISTORY`) ending `before` rows above the visible screen.
@@ -230,6 +243,31 @@ impl Tmux {
     }
 }
 
+/// `argv`, run in its own transient scope when `systemd-run` is there on Linux, so a session started by the rapp
+/// service is not in the service's cgroup and does not stop with it.
+pub fn scoped(argv: Vec<String>, linux: bool, has_systemd_run: bool) -> Vec<String> {
+    if !(linux && has_systemd_run) {
+        return argv;
+    }
+    let mut v: Vec<String> = ["systemd-run", "--user", "--scope", "--quiet", "--"].map(String::from).into();
+    v.extend(argv);
+    v
+}
+
+/// Is there an executable `systemd-run` on `PATH`?
+fn has_systemd_run() -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        std::env::split_paths(&path).any(|d| {
+            std::fs::metadata(d.join("systemd-run")).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+        })
+    }
+    #[cfg(not(unix))]
+    false
+}
+
 /// Keep a viewer's size within 20-500 columns and 5-200 rows.
 pub fn clamp_size(cols: u16, rows: u16) -> (u16, u16) {
     (cols.clamp(20, 500), rows.clamp(5, 200))
@@ -246,6 +284,15 @@ fn is_empty_server(code: Option<i32>, stderr: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn new_sessions_go_through_systemd_run_only_on_linux_when_it_is_there() {
+        let a = vec!["tmux".to_string(), "new-session".into(), "-d".into()];
+        assert_eq!(scoped(a.clone(), true, true)[..5], ["systemd-run", "--user", "--scope", "--quiet", "--"]);
+        assert_eq!(scoped(a.clone(), true, true)[5..], a[..]);
+        assert_eq!(scoped(a.clone(), false, true), a);
+        assert_eq!(scoped(a.clone(), true, false), a);
+    }
 
     #[test]
     fn empty_server_decision() {

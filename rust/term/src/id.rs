@@ -35,6 +35,32 @@ impl TermId {
     }
 }
 
+/// Whether `s` is a term id by its prefix: `term:` and something after it.
+pub fn is_term(s: &str) -> bool {
+    s.strip_prefix("term:").is_some_and(|r| !r.is_empty())
+}
+
+/// Whether `name` can be the host of a term id and read back the same: `a:b` would parse, but as host `a` and a
+/// name starting `b:`.
+pub fn valid_host(name: &str) -> bool {
+    let id = TermId { backend: "tmux".into(), host: Some(name.to_string()), name: "-".into() };
+    matches!(TermId::parse(&id.to_string()), Ok(t) if t.host.as_deref() == Some(name))
+}
+
+/// A session name tmux keeps as given on every version: tmux before 3.5 turns `:` and `.` into `_`, so they are
+/// turned here; empty names and control characters are refused.
+pub fn session_name(s: &str) -> Option<String> {
+    if s.is_empty() || s.chars().any(char::is_control) {
+        return None;
+    }
+    Some(s.replace([':', '.'], "_"))
+}
+
+/// The default name of a new session: the last path part of the command's program.
+pub fn default_name(program: &str) -> &str {
+    program.rsplit('/').next().unwrap_or(program)
+}
+
 impl fmt::Display for TermId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.host {
@@ -55,6 +81,22 @@ mod tests {
         let t = TermId::parse("term:tmux@gpu1:训练 run:2").unwrap();
         assert_eq!((t.host.as_deref(), t.name.as_str()), (Some("gpu1"), "训练 run:2"));
         assert_eq!(t.to_string(), "term:tmux@gpu1:训练 run:2");
+    }
+
+    #[test]
+    fn term_prefix_and_host_names() {
+        assert!(is_term("term:tmux:work") && !is_term("com.apple.Safari") && !is_term("term"));
+        assert!(valid_host("gpu1") && valid_host("gpu-1.lab"));
+        assert!(!valid_host("") && !valid_host("a:b") && !valid_host("a b") && !valid_host("a@b"));
+    }
+
+    #[test]
+    fn sessions_and_programs_are_named() {
+        assert_eq!(session_name("cli demo").as_deref(), Some("cli demo"));
+        assert_eq!(session_name("py3.11:x").as_deref(), Some("py3_11_x"));
+        assert_eq!(session_name(""), None);
+        assert_eq!(session_name("a\nb"), None);
+        assert_eq!((default_name("/usr/local/bin/claude"), default_name("cat")), ("claude", "cat"));
     }
 
     #[test]

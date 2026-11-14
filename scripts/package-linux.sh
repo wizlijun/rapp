@@ -77,7 +77,7 @@ sha256sums=('$(sha256sum "$archive" | cut -d' ' -f1)')
 package() {
   install -d "\$pkgdir/opt/rapp" "\$pkgdir/usr/bin"
   cp -a "\$srcdir/$name/." "\$pkgdir/opt/rapp/"
-  for binary in rapp rapp-client rapp-hub rapp-service; do
+  for binary in rapp rapp-client rapp-hub rapp-service rapp-term; do
     ln -s "/opt/rapp/\$binary" "\$pkgdir/usr/bin/\$binary"
   done
   install -Dm644 "\$srcdir/$name/rapp.desktop" "\$pkgdir/usr/share/applications/rapp.desktop"

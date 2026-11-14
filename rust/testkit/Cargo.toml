@@ -19,6 +19,10 @@ path = "src/bin/fake-rapp-client.rs"
 name = "rapp-weaknet"
 path = "src/bin/rapp-weaknet.rs"
 
+[[bin]]
+name = "fake-rapp-term"
+path = "src/bin/fake-rapp-term.rs"
+
 [lib]
 name = "rapp_testkit"
 path = "src/lib.rs"

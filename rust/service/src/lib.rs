@@ -7,6 +7,7 @@ mod ipc;
 mod peer;
 mod relay_link;
 mod state;
+mod term;
 mod update;
 mod workers;
 
