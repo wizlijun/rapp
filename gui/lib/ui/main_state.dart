@@ -1056,7 +1056,7 @@ class MainState extends ChangeNotifier {
         onSelect: (w) {
           if (_liveSid(s.sid)) port!.selectWindow(s.sid, w);
         },
-        onStream: (_) => _applyFps(),
+        onStream: (choice) => _streamChanged(r, choice),
         onDropBlock: (n) => port!.composerDropBlock(s.sid, n),
         appId: r.app,
         onReturn: () {
@@ -1475,6 +1475,14 @@ class MainState extends ChangeNotifier {
     if (r == null) {
       final fresh = SessionRecord(id, app, appName, '');
       fresh.choice = profiles.resolve(app).stream;
+      if (isDesktopScreen(app)) {
+        final main = _records['$id/desktop:'];
+        final rs = remote[main?.sid];
+        if (rs != null) {
+          fresh.choice = rs.choice;
+          fresh.pinned = rs.streamPinned;
+        }
+      }
       _records[key] = fresh;
       notifyListeners();
       await _connect(fresh, quiet: quiet);
@@ -1617,6 +1625,23 @@ class MainState extends ChangeNotifier {
       hint = '密码可能不对';
       notifyListeners();
     });
+  }
+
+  void _streamChanged(SessionRecord source, StreamChoice choice) {
+    if (isDesktopApp(source.app)) {
+      final pinned = remote[source.sid]?.streamPinned ?? source.pinned;
+      for (final r in _records.values) {
+        if (r.id != source.id || !isDesktopApp(r.app)) continue;
+        r.choice = choice;
+        r.pinned = pinned;
+        final rs = remote[r.sid];
+        if (rs != null) {
+          rs.choice = choice;
+          rs.streamPinned = pinned;
+        }
+      }
+    }
+    _applyFps();
   }
 
   // ---- desktop screens ----
@@ -1827,6 +1852,7 @@ class MainState extends ChangeNotifier {
 
   /// Adds the app to the end of the favourites, or removes it. [name] is kept as shown now.
   void toggleFavorite(String device, String bundle, String name) {
+    if (isDesktopScreen(bundle)) return;
     final key = '$device/$bundle';
     final i = workspace.favorites.indexWhere((f) => f.key == key);
     if (i >= 0) {

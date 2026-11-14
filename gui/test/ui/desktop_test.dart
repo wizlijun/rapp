@@ -3,6 +3,7 @@ import 'package:fake_async/fake_async.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/session_port.dart';
+import 'package:rapp/embed/stream_choice.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/paths.dart';
 import 'package:rapp/ui/main_state.dart';
@@ -160,6 +161,25 @@ void main() {
       });
     },
   );
+
+  test('desktop screens share stream choices, including screens opened later', () {
+    env((a, e) {
+      final main = e.sid('desktop:');
+      final child = e.sid('desktop:22');
+      e.port.emit(DetachedEvent(child, true));
+      e.state.remote[main]!.setChoice(const StreamChoice('duogray', 'original', 30), manual: true);
+      expect(e.state.remote[child]!.choice, e.state.remote[main]!.choice);
+      expect(e.state.remote[child]!.streamPinned, true);
+      final update = e.calls('set_stream').lastWhere((c) => c['sid'] == child);
+      expect(update['fps'], 30);
+      expect(update['pinned'], true);
+      e.port.emit(ClosedEvent(child, 'quit'));
+      e.open(); a.flushMicrotasks();
+      final fresh = e.sid('desktop:22');
+      expect(e.state.remote[fresh]!.choice, e.state.remote[main]!.choice);
+      expect(e.state.remote[fresh]!.streamPinned, true);
+    });
+  });
 
   test('disconnected secondary is removed without retries or hints', () {
     env((a, e) {
