@@ -7,11 +7,20 @@ import 'package:rapp/ui/main_state.dart' show endedHint;
 
 void main() {
   test('autoReconnects', () {
-    for (final raw in ['connection closed', 'send failed: x', 'timed out']) {
+    for (final raw in ['connection closed', 'send failed: x', 'timed out', 'offline', 'relay unreachable: timed out']) {
       expect(autoReconnects(raw), true, reason: raw);
     }
-    for (final raw in ['user', 'host says: app quit', 'host says: taken over', 'bad password', 'offline']) {
+    for (final raw in ['user', 'host says: app quit', 'host says: taken over', 'bad password', 'bad key']) {
       expect(autoReconnects(raw), false, reason: raw);
+    }
+  });
+
+  test('stopsAutoReconnect', () {
+    for (final raw in ['user', 'host says: Calculator quit', 'bad password', 'bad token', 'host says: taken over by X']) {
+      expect(stopsAutoReconnect(raw), true, reason: raw);
+    }
+    for (final raw in ['offline', 'connection closed', 'relay unreachable: timed out']) {
+      expect(stopsAutoReconnect(raw), false, reason: raw);
     }
   });
 

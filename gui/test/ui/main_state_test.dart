@@ -952,16 +952,58 @@ void main() {
         });
       });
 
-      test('a manual reconnect that fails shows its hint and does not retry', () {
+      test('a manual reconnect that fails for a password shows its hint and does not retry', () {
+        env((a, t, port, st, hints) {
+          port.emit(const DisconnectedEvent(1, 'user'));
+          t.onSend = (m) {
+            if (m['cmd'] == 'open') t.emit({'event': 'error', 'error': 'bad password', 'req': m['req']});
+          };
+          final n = opens(t);
+          st.reconnect('111/a');
+          a.flushMicrotasks();
+          a.elapse(const Duration(seconds: 60));
+          expect(opens(t), n + 1);
+          expect(hints, ['Calculator 已断开：密码不对']);
+        });
+      });
+
+      test('a manual reconnect that fails offline says so once and keeps waiting', () {
         env((a, t, port, st, hints) {
           port.emit(const DisconnectedEvent(1, 'user'));
           failOpens(t);
           final n = opens(t);
           st.reconnect('111/a');
           a.flushMicrotasks();
+          expect(st.currentRecord!.retry, isNotNull);
           a.elapse(const Duration(seconds: 60));
-          expect(opens(t), n + 1);
+          expect(opens(t), greaterThan(n + 3));
           expect(hints, ['Calculator 已断开：对方离线']);
+        });
+      });
+
+      test('a first open that fails offline waits and opens when it can', () {
+        env((a, t, port, st, hints) {
+          final send = t.onSend!;
+          failOpens(t);
+          st.openOrSwitch('222', 'b', 'Notes');
+          a.flushMicrotasks();
+          final r = st.recordFor('222/b')!;
+          expect(r.phase, Phase.disconnected);
+          expect(r.retry, isNotNull);
+          t.onSend = send;
+          a.elapse(const Duration(seconds: 2));
+          a.flushMicrotasks();
+          expect(st.recordFor('222/b')!.phase, Phase.live);
+        });
+      });
+
+      test('relay unreachable reconnects by itself', () {
+        env((a, t, port, st, hints) {
+          final n = opens(t);
+          port.emit(const DisconnectedEvent(1, 'relay unreachable: timed out'));
+          a.elapse(const Duration(seconds: 1));
+          a.flushMicrotasks();
+          expect(opens(t), n + 1);
         });
       });
 
@@ -1014,7 +1056,7 @@ void main() {
         });
       });
 
-      for (final reason in ['bad token', 'host says: taken over by X']) {
+      for (final reason in ['bad token', 'host says: taken over by X', 'host says: Calculator quit']) {
         test('attempt 1 failing with "$reason" stops retrying', () {
           env((a, t, port, st, hints) {
             var tries = 0;

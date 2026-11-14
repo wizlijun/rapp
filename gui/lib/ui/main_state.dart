@@ -805,16 +805,17 @@ class MainState extends ChangeNotifier {
       _waiting.remove(sid)?.timer.cancel();
       if (pictureFocused == sid) _blur();
     }
-    final auto = _planRetry(r, failedOpen);
-    if (hint && !auto) this.hint = hintText ?? '${r.appName} 已断开：${disconnectWord(r.reason)}';
+    final auto = _planRetry(r);
+    // A failed open that starts waiting still says why once; later automatic tries stay quiet.
+    if (hint && (!auto || (failedOpen && r.retry?.$1 == 0))) this.hint = hintText ?? '${r.appName} 已断开：${disconnectWord(r.reason)}';
   }
 
   /// Per-record timers of the automatic reconnect (the record's `retry` says the rest).
   final Map<String, Timer> _retryTimers = {};
 
-  /// After [r] went down: schedules the next automatic try when it is due. True: it did (no hint).
-  /// A failed manual open never starts automatic tries.
-  bool _planRetry(SessionRecord r, bool failedOpen) {
+  /// After [r] went down: schedules the next automatic try when it is due. True: it did.
+  /// A failed open (the first one, or a manual reconnect) for a network reason waits too (§5.3.7).
+  bool _planRetry(SessionRecord r) {
     final cur = r.retry;
     final int attempt;
     if (cur != null) {
@@ -823,7 +824,7 @@ class MainState extends ChangeNotifier {
         return false;
       }
       attempt = cur.$1 + 1;
-    } else if (!failedOpen && autoReconnects(r.reason)) {
+    } else if (autoReconnects(r.reason)) {
       attempt = 0;
     } else {
       return false;

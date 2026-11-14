@@ -391,7 +391,7 @@ void main() {
       await tester.pumpWidget(wrap(embedded()));
       await tester.runAsync(() async {
         t.onSend = (m) {
-          if (m['cmd'] == 'open') t.emit({'event': 'error', 'req': m['req'], 'error': 'cannot reach the host'});
+          if (m['cmd'] == 'open') t.emit({'event': 'error', 'req': m['req'], 'error': 'not trusted'});
         };
         es.openOrSwitch('111', 'Safari', 'Safari');
         for (var i = 0; i < 4; i++) {
@@ -400,6 +400,24 @@ void main() {
       });
       await tester.pump();
       expect(find.byType(Texture), findsNothing);
+      expect(find.byKey(const Key('reconnect-button')), findsOneWidget);
+    });
+
+    testWidgets('a first-open network failure waits with stop instead of reconnect', (tester) async {
+      await tester.pumpWidget(wrap(embedded()));
+      await tester.runAsync(() async {
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') t.emit({'event': 'error', 'req': m['req'], 'error': 'cannot reach the host'});
+        };
+        es.openOrSwitch('111', 'Safari', 'Safari');
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      await tester.pump();
+      expect(find.byKey(const Key('stop-reconnect-button')), findsOneWidget);
+      es.stopReconnectCurrent();
+      await tester.pump();
       expect(find.byKey(const Key('reconnect-button')), findsOneWidget);
     });
 

@@ -113,14 +113,14 @@ String disconnectWord(String? raw) {
 /// The link dropped for a reason the network explains: worth trying again by itself.
 bool autoReconnects(String? raw) {
   final w = disconnectWord(raw);
-  return w == '网络断了' || w == '连接超时';
+  return w == '网络断了' || w == '连接超时' || w == '中继连不上' || w == '对方离线';
 }
 
 /// A reason that ends automatic tries: the person, the app, the host or the password said no.
 bool stopsAutoReconnect(String? raw) {
   if (raw != null && raw.contains('bad token')) return true;
   final w = disconnectWord(raw);
-  return w == '你断开了' || w == 'A 端关闭了 app' || w == '密码不对' || takenOver(raw);
+  return w == '你断开了' || w == '远端关闭了 app' || w == '密码不对' || takenOver(raw);
 }
 
 Lamp recordLamp(SessionRecord r, RemoteSession? rs) {
