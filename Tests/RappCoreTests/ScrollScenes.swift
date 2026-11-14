@@ -22,6 +22,9 @@ enum SceneKind {
     case regionMove
     /// A few text cells of the document change in place.
     case localChange
+    /// The region moves by up to ±50 px each way and, in the same frame, the
+    /// document scrolls by 1...40 px.
+    case scrollWhileMoving
 }
 
 /// Deterministic scenes for codec tests: a "browser window" fixed on the
@@ -102,12 +105,19 @@ enum ScrollScenes {
     /// `count` frames; the first is the starting picture and every later one
     /// applies one kind picked from `kinds` (by the generator, so a single kind
     /// repeats). The same seed and kinds give the same frames.
-    static func frames(seed: UInt64, count: Int, kinds: [SceneKind]) -> [SceneFrame] {
+    /// With `size` the first region has that size and the browser window starts
+    /// at its top left (a capture of the window itself, no desktop showing).
+    static func frames(seed: UInt64, count: Int, kinds: [SceneKind],
+                       size: (width: Int, height: Int)? = nil) -> [SceneFrame] {
         precondition(!kinds.isEmpty, "no scene kinds")
         var rng = LCG(seed: seed)
         var x = rng.int(0...200), y = rng.int(0...200)
         var w = rng.int(100...220), h = rng.int(70...160)
         var world = World(winX: x + rng.int(0...20), winY: y + rng.int(0...20))
+        if let size {
+            (w, h) = size
+            (world.winX, world.winY) = (x, y)
+        }
         for case let .webScroll(top, side) in kinds {
             world.topBar = top
             world.sideBar = side
@@ -134,6 +144,10 @@ enum ScrollScenes {
                 case .regionMove:
                     x += rng.int(-50...50)
                     y += rng.int(-50...50)
+                case .scrollWhileMoving:
+                    x += rng.int(-50...50)
+                    y += rng.int(-50...50)
+                    world.scroll += rng.int(1...40)
                 case .localChange:
                     for _ in 0..<rng.int(1...5) {
                         let line = (world.scroll + y - world.winY + rng.int(0...max(0, h - 1))) >> 4

@@ -137,11 +137,20 @@ public final class FrameEncoder {
     /// True when the last encode left some tile unsent only because its raw
     /// pixels matched, so the canvas there differs from this frame's samples.
     public private(set) var lastEncodeDiverged = false
-    /// True from such an encode until a frame makes the canvas exact again
-    /// (for now only a full frame does).
+    /// True from such an encode until a full frame or `encodeSettle` makes the
+    /// canvas exact again.
     public private(set) var needsSettle = false
     /// The decoder's canvas as this encoder models it (for tests).
     internal var model: [UInt8] { previous }
+    /// Whether frames may use copy tiles (off only to measure against).
+    var copiesEnabled = true
+    /// The samples of the last frame, for `encodeSettle`.
+    private var lastSamples = [UInt8]()
+    /// The scroll offset most copy tiles of the last frame with copies used.
+    private var lastDy: Int?
+    private var detector = ScrollDetector()
+    /// At most this many voted scroll offsets are tried per frame (plus `lastDy`).
+    private static let maxCandidates = 3
 
     public init(mode: Mode) {
         self.mode = mode
@@ -179,11 +188,27 @@ public final class FrameEncoder {
         return Int(max(-65536, min(65536, d)))
     }
 
+    /// Encodes the last frame again comparing samples only, with no copy tiles
+    /// and no canvas move, so the canvas ends equal to that frame's samples;
+    /// clears `needsSettle`. Returns `[]` when `needsSettle` is false (or no
+    /// tile differs). Slices are cut like `encodeSlices` with `limit`.
+    public func encodeSettle(limit: Int) -> [FramePayload] {
+        guard needsSettle else { return [] }
+        return encodeFrame(samples: lastSamples, raw: previousKey, width: previousWidth, height: previousHeight,
+                           region: previousRegion, limit: limit, firstLimit: nil, settle: true)
+    }
+
     /// Encodes the tiles that differ from the client's canvas and cuts them into
     /// slices by tile rows, top to bottom. A slice is closed once its estimated
     /// compressed size (raw bytes of its tiles times the previous frame's
-    /// compression ratio) exceeds `limit` (`firstLimit` for the first slice); a
-    /// slice always holds at least one row.
+    /// compression ratio, a copy tile counting 4 bytes) exceeds `limit`
+    /// (`firstLimit` for the first slice); a slice always holds at least one row.
+    ///
+    /// A changed tile whose content is found, exactly, some rows up or down in
+    /// the old picture (after the move, wholly inside the part it covers) is
+    /// sent as a copy tile; the offsets tried are the ones `ScrollDetector`
+    /// votes for and the one the last copies used. Samples must match, or in
+    /// two-tone modes the raw pixels (that also sets `lastEncodeDiverged`).
     ///
     /// `region` is the captured area in points (nil: `(0, 0, width, height)`).
     /// `raw` is the frame's tightly packed BGRA (`width * height * 4` bytes); it
@@ -204,6 +229,13 @@ public final class FrameEncoder {
     /// caller must set `forceFull`.
     public func encodeSlices(samples: [UInt8], raw: [UInt8]? = nil, width: Int, height: Int,
                              region: CanvasRect? = nil, limit: Int, firstLimit: Int? = nil) -> [FramePayload] {
+        encodeFrame(samples: samples, raw: raw, width: width, height: height, region: region, limit: limit,
+                    firstLimit: firstLimit, settle: false)
+    }
+
+    /// `encodeSlices`; with `settle` raw pixels are not compared and no copy tiles are sent.
+    private func encodeFrame(samples: [UInt8], raw: [UInt8]?, width: Int, height: Int, region: CanvasRect?,
+                             limit: Int, firstLimit: Int?, settle: Bool) -> [FramePayload] {
         precondition(width > 0 && height > 0 && width <= 0xFFFF && height <= 0xFFFF, "bad frame size")
         precondition(samples.count == width * height * bps, "sample count does not match frame size")
         let (cols, rows) = tileGrid(width: width, height: height)
@@ -226,7 +258,7 @@ public final class FrameEncoder {
             dx = FrameEncoder.pixelOffset(from: previousRegion.x, to: region.x, scale: scale)
             dy = FrameEncoder.pixelOffset(from: previousRegion.y, to: region.y, scale: scale)
             moved = dx != 0 || dy != 0 || width != previousWidth || height != previousHeight
-            key = raw == nil ? nil : previousKey
+            key = raw == nil || settle ? nil : previousKey
             if moved {
                 old = movedCanvas(previous, width: previousWidth, height: previousHeight, bytesPerPixel: bps,
                                   to: width, height, dx: dx, dy: dy)
@@ -248,6 +280,11 @@ public final class FrameEncoder {
         var currentLimit = firstLimit ?? limit
         // Tiles left unsent only because their raw pixels matched: (x0, y0, tw, th).
         var diverged = [(Int, Int, Int, Int)]()
+        // Copy tiles that matched on raw pixels only: (x0, y0, tw, th, source y).
+        var rawCopies = [(Int, Int, Int, Int, Int)]()
+        // Copy tiles per scroll offset used.
+        var used = [Int: Int]()
+        let useCopies = copiesEnabled && !full && !settle
 
         func closeGroup() {
             body[0] = UInt8(count & 0xFF)
@@ -267,22 +304,80 @@ public final class FrameEncoder {
         old.withUnsafeBufferPointer { old in
         rawCur.withUnsafeBufferPointer { rawCur in
         rawOld.withUnsafeBufferPointer { rawOld in
+            // First pass: the tiles that changed in place. Only a tile wholly
+            // inside the old picture can be left as it is.
+            var changed = [Bool](repeating: true, count: cols * rows)
+            var changedCount = 0
             for ty in 0..<rows {
                 let y0 = ty * tileSize, th = min(tileSize, height - y0)
                 for tx in 0..<cols {
                     let x0 = tx * tileSize, tw = min(tileSize, width - x0)
-                    // Only a tile wholly inside the old picture can be left as it is.
                     if !full && x0 >= cover.x0 && x0 + tw <= cover.x1 && y0 >= cover.y0 && y0 + th <= cover.y1 {
-                        if tileEqual(cur, old, stride: rowBytes, x0: x0 * bps, y0: y0, w: tw * bps, h: th) { continue }
+                        if tileEqual(cur, old, stride: rowBytes, x0: x0 * bps, y0: y0, w: tw * bps, h: th) {
+                            changed[ty * cols + tx] = false
+                            continue
+                        }
                         if compareRaw && tileEqual(rawCur, rawOld, stride: width * 4, x0: x0 * 4, y0: y0,
                                                    w: tw * 4, h: th) {
+                            changed[ty * cols + tx] = false
                             diverged.append((x0, y0, tw, th))
                             continue
                         }
                     }
+                    changedCount += 1
+                }
+            }
+
+            // The scroll offsets to try: voted ones when enough changed, and the last used.
+            var candidates = [Int]()
+            if useCopies && changedCount > 0 {
+                if changedCount >= 4 {
+                    candidates = compareRaw
+                        ? detector.candidates(cur: rawCur, old: rawOld, bpp: 4, width: width, height: height,
+                                              changed: changed, cover: cover, limit: FrameEncoder.maxCandidates)
+                        : detector.candidates(cur: cur, old: old, bpp: bps, width: width, height: height,
+                                              changed: changed, cover: cover, limit: FrameEncoder.maxCandidates)
+                }
+                if let d = lastDy, !candidates.contains(d) { candidates.append(d) }
+            }
+
+            // Second pass: copy what is found in the old picture, encode the rest.
+            for ty in 0..<rows {
+                let y0 = ty * tileSize, th = min(tileSize, height - y0)
+                for tx in 0..<cols where changed[ty * cols + tx] {
+                    let x0 = tx * tileSize, tw = min(tileSize, width - x0)
                     let index = ty * cols + tx
                     body.append(UInt8(index & 0xFF))
                     body.append(UInt8(index >> 8))
+                    if !candidates.isEmpty && x0 >= cover.x0 && x0 + tw <= cover.x1 {
+                        // Samples first (exact), then raw pixels.
+                        var source: Int?
+                        for d in candidates where y0 + d >= cover.y0 && y0 + d + th <= cover.y1 {
+                            if tileEqual(cur, old, stride: rowBytes, x0: x0 * bps, y0: y0, w: tw * bps, h: th, dy: d) {
+                                source = d
+                                break
+                            }
+                        }
+                        if source == nil && compareRaw {
+                            for d in candidates where y0 + d >= cover.y0 && y0 + d + th <= cover.y1 {
+                                if tileEqual(rawCur, rawOld, stride: width * 4, x0: x0 * 4, y0: y0, w: tw * 4, h: th,
+                                             dy: d) {
+                                    source = d
+                                    rawCopies.append((x0, y0, tw, th, y0 + d))
+                                    break
+                                }
+                            }
+                        }
+                        if let d = source {
+                            let sy = y0 + d
+                            body.append(kindCopy)
+                            body.append(contentsOf: [UInt8(x0 & 0xFF), UInt8(x0 >> 8), UInt8(sy & 0xFF), UInt8(sy >> 8)])
+                            used[d, default: 0] += 1
+                            count += 1
+                            groupRaw += 4
+                            continue
+                        }
+                    }
                     encodeTile(cur, rowBytes: rowBytes, x0: x0, y0: y0, tw: tw, th: th, into: &body)
                     count += 1
                     groupRaw += tw * th * bps
@@ -296,9 +391,11 @@ public final class FrameEncoder {
         }
         if count > 0 || (groups.isEmpty && moved) { closeGroup() }
 
-        // The new model is this frame's samples, except in tiles left unsent on
-        // a raw match: there the moved old samples stay.
-        if diverged.isEmpty {
+        // The new model is this frame's samples, except in tiles that only
+        // matched on raw pixels: those keep the old samples, moved, from the
+        // same place or the copy source (the old picture before any tile, like
+        // the decoder's reference canvas).
+        if diverged.isEmpty && rawCopies.isEmpty {
             previous = samples
         } else {
             var model = samples
@@ -308,10 +405,20 @@ public final class FrameEncoder {
                     model.replaceSubrange(o..<(o + tw * bps), with: old[o..<(o + tw * bps)])
                 }
             }
+            for (x0, y0, tw, th, sy) in rawCopies {
+                for y in 0..<th {
+                    let o = (y0 + y) * rowBytes + x0 * bps, s = (sy + y) * rowBytes + x0 * bps
+                    model.replaceSubrange(o..<(o + tw * bps), with: old[s..<(s + tw * bps)])
+                }
+            }
             previous = model
         }
-        lastEncodeDiverged = !diverged.isEmpty
-        needsSettle = lastEncodeDiverged || (needsSettle && !full)
+        if let best = used.max(by: { $0.value < $1.value || ($0.value == $1.value && $0.key > $1.key) }) {
+            lastDy = best.key
+        }
+        lastEncodeDiverged = !diverged.isEmpty || !rawCopies.isEmpty
+        needsSettle = !settle && (lastEncodeDiverged || (needsSettle && !full))
+        lastSamples = samples
         previousKey = raw
         previousWidth = width
         previousHeight = height
@@ -326,7 +433,11 @@ public final class FrameEncoder {
             let data = deflate.compress(group)
             compressed += data.count
             var flags: FrameFlags = []
-            if i == 0 { flags.insert(.start); if full { flags.insert(.full) } }
+            if i == 0 {
+                flags.insert(.start)
+                if full { flags.insert(.full) }
+                if !used.isEmpty { flags.insert(.copies) }
+            }
             if i == groups.count - 1 { flags.insert(.end) }
             slices.append(FramePayload(mode: mode, width: UInt16(width), height: UInt16(height), flags: flags,
                                        dx: i == 0 ? Int32(dx) : 0, dy: i == 0 ? Int32(dy) : 0, data: data))
@@ -337,12 +448,13 @@ public final class FrameEncoder {
         return slices
     }
 
-    /// Whether the `w`-byte by `h`-row rectangle at byte `x0` of row `y0` is the same in `a` and `b`.
+    /// Whether the `w`-byte by `h`-row rectangle at byte `x0` of row `y0` in `a`
+    /// is the same as the one `dy` rows lower in `b`.
     @inline(__always)
     private func tileEqual(_ a: UnsafeBufferPointer<UInt8>, _ b: UnsafeBufferPointer<UInt8>, stride: Int,
-                           x0: Int, y0: Int, w: Int, h: Int) -> Bool {
+                           x0: Int, y0: Int, w: Int, h: Int, dy: Int = 0) -> Bool {
         guard let pa = a.baseAddress, let pb = b.baseAddress else { return false }
-        for y in y0..<(y0 + h) where memcmp(pa + y * stride + x0, pb + y * stride + x0, w) != 0 {
+        for y in y0..<(y0 + h) where memcmp(pa + y * stride + x0, pb + (y + dy) * stride + x0, w) != 0 {
             return false
         }
         return true
