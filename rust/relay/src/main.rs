@@ -20,7 +20,8 @@ const USAGE: &str = "\
 usage: rapp-relay [--data <dir>] [command]
   (no command)                 run the relay
   key                          make the key and show it once
-  rotate-key                   replace the key and show the new one once
+  rotate-key                   replace the key and show the new one once; every device is disconnected
+                               and must enter the new key
   devices                      list the enrolled devices
   revoke <ID|fingerprint>      revoke a device (a fingerprint prefix of 8+ hex digits works)
   unbind <ID>                  free an ID
