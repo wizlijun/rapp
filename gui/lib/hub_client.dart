@@ -252,7 +252,12 @@ class HubClient extends ChangeNotifier {
         _paths.removeWhere((p) => !ids.contains(p.id));
       case 'host_added':
         final id = '${m['id']}';
-        hosts = [...hosts.where((h) => h.id != id), HubHost(id, '${m['name'] ?? ''}')];
+        // Added again: its route and LAN addresses stay until the next hosts list says otherwise.
+        final was = hosts.where((h) => h.id == id).firstOrNull;
+        hosts = [
+          ...hosts.where((h) => h.id != id),
+          HubHost(id, '${m['name'] ?? ''}', lan: was?.lan ?? const [], route: was?.route),
+        ];
       case 'opened':
         if (m['sid'] != null) _sessions[m['sid'] as Object] = _session(m);
       case 'presence':

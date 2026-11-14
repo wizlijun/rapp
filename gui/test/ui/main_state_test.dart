@@ -2151,7 +2151,7 @@ void main() {
         });
       });
 
-      test('a second path change during a move runs once more with the latest', () {
+      test('a second path change during a move stops the round; the next one goes by the latest', () {
         move((a, t, port, st, hints, reopens) {
           path(a, t, 'lan');
           expect(reopens.length, 1);
@@ -2159,22 +2159,35 @@ void main() {
           expect(reopens.length, 1, reason: 'one round per host at a time');
           answer(a, t, reopens[0], 11, 'lan');
           picture(a, port, 11);
-          expect(reopens.length, 2);
-          answer(a, t, reopens[1], 12, 'relay'); // the hub's link is on the relay now: done, not failed
+          expect(st.recordFor('111/a')!.path, 'lan');
+          expect(reopens.length, 2, reason: 'the next round, toward relay, right away');
+          expect(reopens[1]['app'], 'a', reason: 'aa is not reopened toward the old path');
+          answer(a, t, reopens[1], 12, 'relay');
           picture(a, port, 12);
-          expect(reopens.length, 3, reason: 'the next round, toward relay');
-          expect(reopens[2]['app'], 'a');
-          answer(a, t, reopens[2], 13, 'relay');
-          picture(a, port, 13);
           a.elapse(const Duration(seconds: 20));
-          final perApp = <String, int>{};
-          for (final m in reopens) {
-            perApp[m['app'] as String] = (perApp[m['app']] ?? 0) + 1;
-          }
-          expect(perApp.values.every((n) => n <= 2), true);
-          expect(reopens.length, 3);
+          expect(reopens.length, 2, reason: 'aa is on the relay already');
           expect(st.recordFor('111/a')!.path, 'relay');
           expect(st.recordFor('111/aa')!.path, 'relay');
+          expect(st.recordFor('111/aa')!.sid, 2);
+          expect(routeFailed(t), false);
+          expect(hints, isEmpty);
+        });
+      });
+
+      test('a session with no picture is skipped, not failed: the one after it still moves', () {
+        move((a, t, port, st, hints, reopens) {
+          port.emit(const WindowsEvent(1, [])); // minimised: no window to show
+          a.flushMicrotasks();
+          path(a, t, 'lan');
+          expect(reopens.length, 1);
+          expect(reopens[0]['app'], 'aa');
+          answer(a, t, reopens[0], 12, 'lan');
+          picture(a, port, 12);
+          expect(st.recordFor('111/aa')!.path, 'lan');
+          a.elapse(const Duration(seconds: 20));
+          expect(reopens.length, 1);
+          final r = st.recordFor('111/a')!;
+          expect((r.sid, r.path, r.phase), (1, 'relay', Phase.live));
           expect(routeFailed(t), false);
           expect(hints, isEmpty);
         });

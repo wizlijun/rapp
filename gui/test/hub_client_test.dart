@@ -212,6 +212,22 @@ void main() {
       expect(hub.hosts.single.id, '123456789');
     });
 
+    test('host_added for a saved host keeps its route and LAN addresses', () async {
+      t.emit({
+        'event': 'hosts',
+        'hosts': [
+          {'id': '123456789', 'name': 'old', 'lan': ['192.168.1.5:22028'], 'route': 'relay'},
+        ],
+      });
+      await Future<void>.delayed(Duration.zero);
+      final f = hub.addHost('123456789', '');
+      t.emit({'event': 'host_added', 'req': t.sent.last['req'], 'id': '123456789', 'name': 'mac-a'});
+      await f;
+      final h = hub.hosts.single;
+      expect((h.name, h.forcedRelay), ('mac-a', true));
+      expect(h.lan, ['192.168.1.5:22028']);
+    });
+
     test('error event with req fails the matching request', () async {
       final f = hub.addHost('123456789', 'bad');
       final req = t.sent.single['req'];

@@ -1049,14 +1049,20 @@ class MainState extends ChangeNotifier {
 
   /// Rounds of moves for [id], each toward the latest path, in record order, each session at most
   /// once a round. A session that fails stops the round; toward the LAN the hub is told, so it
-  /// waits before trying the LAN again. A reopen that lands elsewhere (the link moved again) is
+  /// waits before trying the LAN again (and says `path lan` again after). A newer path stops the
+  /// round too: the next one goes by it. A reopen that lands elsewhere (the link moved again) is
   /// done: only a new `path` event starts another round.
   Future<void> _moveHost(String id) async {
     try {
       for (var path = _moveTo.remove(id); path != null && !_disposed; path = _moveTo.remove(id)) {
         for (final r in [for (final r in _records.values) if (r.id == id) r]) {
           if (_disposed || !hubUsable) return;
+          if (_moveTo.containsKey(id)) break; // a newer path came: the rest go by it, next round
           if (!_movable(r) || r.lastSid != null || _reroutes.containsKey(r) || r.path == path) continue;
+          // No window with a picture (minimised, or none yet): its reopen could never show one, so it
+          // would time out and stop the round. It is skipped, not failed: its next reconnect takes the
+          // hub's link as it is then.
+          if (!(remote[r.sid]?.windows.any((w) => w.hasPicture) ?? false)) continue;
           if (await reroute(r.key)) continue;
           if (_disposed) return;
           if (!_movable(r)) continue; // ended, disconnected or removed meanwhile: skipped, not failed
