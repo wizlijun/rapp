@@ -1700,6 +1700,50 @@ void main() {
       });
     });
 
+    test('a reconnect carries the draft and the rows\' text over to the new session (I3)', () {
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(1, [rw(3)]));
+        final c = st.remote[1]!.composer;
+        c.setDraft('x');
+        c.submit();
+        a.flushMicrotasks();
+        c.done(0, 'boom');
+        c.setDraft('y');
+        c.submit();
+        a.flushMicrotasks(); // in flight
+        c.setDraft('abc');
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        st.reconnect('111/a');
+        a.flushMicrotasks();
+        port.emit(WindowsEvent(11, [rw(3)]));
+        expect(st.currentRemote!.sid, 11);
+        final n = st.remote[11]!.composer;
+        expect(n.draft, 'abc');
+        expect([for (final o in n.failed) o.text], ['x', 'y']);
+        expect(n.sending, false);
+        expect(n.retry(n.failed.first), [
+          {'text': 'x'},
+        ]);
+      });
+    });
+
+    test('the old sid closing during a reconnect carries its composer text over too (I3)', () {
+      env((a, t, port, st, hints) {
+        final c = st.remote[1]!.composer;
+        c.setDraft('x');
+        c.submit();
+        a.flushMicrotasks();
+        c.setDraft('abc');
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        st.reconnect('111/a');
+        a.flushMicrotasks();
+        port.emit(const ClosedEvent(1, 'quit'));
+        final n = st.remote[11]!.composer;
+        expect(n.draft, 'abc');
+        expect([for (final o in n.failed) o.text], ['x']);
+      });
+    });
+
     test('new sid disconnecting before the swap closes it and brings the old frame back', () {
       env((a, t, port, st, hints) {
         port.emit(const DisconnectedEvent(1, 'connection closed'));

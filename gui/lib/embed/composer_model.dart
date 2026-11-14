@@ -239,6 +239,28 @@ class ComposerModel extends ChangeNotifier {
     return o.remaining();
   }
 
+  /// A reconnect's swap: [old] was this window's session before. Its draft and the text of its
+  /// failed rows and of its in-flight row come over, all as failed rows (the in-flight one never
+  /// got its `done`). Blocks stay behind (the old runner held them); a row without text does not
+  /// come. With [old]'s editor still attached, its text is read for the draft.
+  void adoptFrom(ComposerModel old) {
+    final rows = [...old._failed, ?old._inFlight];
+    _failed.insertAll(0, [
+      for (final o in rows)
+        if (o.text.isNotEmpty) Outgoing(const [], o.text)..failure = o.failure ?? '没有发出去',
+    ]);
+    if (draft.isEmpty) draft = old.draft;
+    final e = old._editor;
+    if (e != null) {
+      final before = draft;
+      e.read().then((t) {
+        // Only while nothing here moved on (the new panel attaches a frame later).
+        if (!_disposed && _editor == null && draft == before) draft = t;
+      }, onError: (Object _) {});
+    }
+    notifyListeners();
+  }
+
   /// [o] goes back into the composer: unsent blocks in front, unsent text at the caret.
   void putBack(Outgoing o) {
     if (!_failed.remove(o)) return;

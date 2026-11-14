@@ -713,7 +713,7 @@ class MainState extends ChangeNotifier {
       final holder = e is ClosedEvent ? _recordOfLastSid(e.sid) : null;
       if (holder != null) {
         holder.lastSid = null; // the runner closed it itself: nothing left to close or restore
-        remote.remove(e.sid)?.dispose();
+        _dropOld(e.sid, holder.sid);
         final start = _starts.remove(e.sid);
         if (start != null) resources.linkDown(start); // what it was still sending ends 没传完
         // A move whose old session went (A gave its window to the new one): the new one is all
@@ -915,6 +915,16 @@ class MainState extends ChangeNotifier {
     }
   }
 
+  /// The old session [old] of a reconnect goes for good and [fresh] stands for the window now:
+  /// what was written in the old composer carries over (text only).
+  void _dropOld(Object old, Object? fresh) {
+    final gone = remote.remove(old);
+    if (gone == null) return;
+    final to = fresh == null ? null : remote[fresh];
+    to?.composer.adoptFrom(gone.composer);
+    gone.dispose();
+  }
+
   /// A reconnect's first window with a picture: the new session takes the stage, the old one goes.
   void _swapIfReady(SessionRecord r) {
     final old = r.lastSid;
@@ -924,7 +934,7 @@ class MainState extends ChangeNotifier {
     if (rs == null || !rs.windows.any((w) => w.hasPicture)) return;
     final detached = remote[old]?.detached ?? false;
     port?.close(old);
-    remote.remove(old)?.dispose();
+    _dropOld(old, fresh);
     final start = _starts.remove(old);
     if (start != null) resources.linkDown(start); // what it was still sending ends 没传完
     r.lastSid = null;

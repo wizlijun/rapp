@@ -219,6 +219,46 @@ void main() {
     });
   });
 
+  test('adoptFrom: the draft and the text of failed and in-flight rows come over as failed (I3)', () async {
+    m.apply(const PasteResult(blocks: [BlockChip(1, 'a.png')]));
+    ed.value = 'x';
+    await m.submit();
+    m.done(0, 'boom'); // failed: block 1 and 'x'
+    m.apply(const PasteResult(blocks: [BlockChip(2, 'b.png')]));
+    await m.submit();
+    m.done(0, 'no'); // failed: a block only
+    ed.value = 'y';
+    await m.submit(); // in flight
+    ed.value = 'abc'; // typed after the last idle copy
+    final fresh = ComposerModel();
+    addTearDown(fresh.dispose);
+    var notified = 0;
+    fresh.addListener(() => notified++);
+    fresh.adoptFrom(m);
+    await Future<void>.delayed(Duration.zero); // the old editor's read
+    expect(fresh.draft, 'abc');
+    expect([for (final o in fresh.failed) o.text], ['x', 'y']);
+    expect([for (final o in fresh.failed) o.failure], ['boom', '没有发出去']);
+    expect(fresh.failed.every((o) => o.blocks.isEmpty), isTrue);
+    expect(fresh.inFlight, isNull);
+    expect(fresh.sending, isFalse);
+    expect(fresh.blocks, isEmpty);
+    expect(notified, greaterThan(0));
+    expect(fresh.retry(fresh.failed.first), [
+      {'text': 'x'},
+    ]);
+  });
+
+  test('adoptFrom without an editor takes the draft', () async {
+    await m.detach(ed);
+    m.draft = 'd';
+    final fresh = ComposerModel();
+    addTearDown(fresh.dispose);
+    fresh.adoptFrom(m);
+    expect(fresh.draft, 'd');
+    expect(fresh.failed, isEmpty);
+  });
+
   test('collapse closes and keeps the text', () {
     m.open = true;
     ed.value = 'keep';
