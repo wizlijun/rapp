@@ -1,11 +1,12 @@
 //! `rapp-term serve`: the resident worker of one device. Each connection carries one request line, then a token
-//! line, then the reply: a session list, a new session, or a whole view (the session protocol of `session::run`).
+//! line, then the reply: a session list, a watch (a list now and again on every change), a new session, or a whole
+//! view (the session protocol of `session::run`).
 //!
 //! Nothing a session shows or is sent, and no new session's command, goes to the events or to stderr.
 
 use crate::config::{self, TermConfig};
 use crate::id::{default_name, session_name, TermId};
-use crate::list::{host_rows, TermRow};
+use crate::list::{host_rows, Backoff, TermRow};
 use crate::proto::{self, Out, MAX_LINE};
 use crate::runner::{RunFail, Runner};
 use crate::session::{self, Opts};
@@ -22,7 +23,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::task::JoinSet;
+use tokio::sync::Notify;
+use tokio::task::{AbortHandle, JoinSet};
+use tokio::time::MissedTickBehavior;
 
 /// How long a connection has to send its request line and its token line, together.
 const HEAD_WAIT: Duration = Duration::from_secs(30);
@@ -44,7 +47,8 @@ pub struct ServeOpts {
     pub socket: Option<String>,
     /// Where ssh keeps its control connections.
     pub ctl_dir: PathBuf,
-    /// How often a viewed session is listed and recaptured whether or not it changed.
+    /// How often a viewed session is listed and recaptured whether or not it changed; how often a watch asks
+    /// each host for its sessions and reads `term.json` again.
     pub poll: Duration,
 }
 
@@ -58,6 +62,7 @@ impl ServeOpts {
 #[serde(tag = "op", rename_all = "snake_case")]
 enum Req {
     List,
+    Watch,
     New { host: Option<String>, name: Option<String>, command: Vec<String>, cols: u16, rows: u16 },
     View { term: String, sid: Option<u64> },
 }
@@ -152,14 +157,15 @@ impl Worker {
             let _ = reply(&mut w, &json!({ "error": BAD_REQUEST })).await;
             return;
         };
-        let cfg = config::load(&self.opts.config).map_err(|_| config::INVALID).and_then(|c| match c.allow {
-            true => Ok(c),
-            false => Err(config::OFF),
-        });
+        let cfg = self.config();
         let _ = match req {
             Req::View { term, sid } => match cfg {
                 Ok(cfg) => self.view(&cfg, &term, sid, r, &mut w).await,
                 Err(e) => put(&mut w, &Out::Error { error: e.into() }).await,
+            },
+            Req::Watch => match cfg {
+                Ok(cfg) => self.watch(cfg, r, &mut w).await,
+                Err(e) => reply(&mut w, &json!({ "error": e })).await,
             },
             Req::List => {
                 let v = match cfg {
@@ -184,6 +190,14 @@ impl Worker {
         let _ = w.shutdown().await;
     }
 
+    /// `term.json` as it is now, or the fixed words for why it cannot be used.
+    fn config(&self) -> Result<TermConfig, &'static str> {
+        config::load(&self.opts.config).map_err(|_| config::INVALID).and_then(|c| match c.allow {
+            true => Ok(c),
+            false => Err(config::OFF),
+        })
+    }
+
     /// The tmux of `host` (`None`: this machine).
     fn tmux_for(&self, cfg: &TermConfig, host: Option<&str>) -> Result<Tmux, String> {
         let Some(h) = host else {
@@ -197,13 +211,7 @@ impl Worker {
 
     /// Every host's sessions, the hosts asked at the same time. A host that fails is only marked in `hosts`.
     pub async fn list(&self, cfg: &TermConfig) -> TermList {
-        let mut hosts = vec![HostRow { host: None, target: None, tmux: None, error: None }];
-        hosts.extend(cfg.targets.iter().map(|t| HostRow {
-            host: Some(t.name.clone()),
-            target: Some(t.target.clone()),
-            tmux: t.tmux.clone(),
-            error: None,
-        }));
+        let mut hosts = host_list(cfg);
         // A `JoinSet` of this connection's own: when the connection is dropped, its asks are too.
         let mut asks = JoinSet::new();
         for (i, h) in hosts.iter().enumerate() {
@@ -236,6 +244,74 @@ impl Worker {
             }
         }
         TermList { terms, hosts }
+    }
+
+    /// Send the session list now (once this machine has answered) and again whenever it changes, until the other
+    /// end closes; if terminal sessions are turned off meanwhile, one error line ends it. Each host is asked by a
+    /// task of its own, so a slow one holds back only its own entry. `term.json` is read again every `poll`; one
+    /// that cannot be read leaves the hosts as they were.
+    async fn watch<R, W>(&self, cfg: TermConfig, mut r: R, w: &mut W) -> std::io::Result<()>
+    where
+        R: AsyncBufRead + Unpin,
+        W: AsyncWrite + Unpin,
+    {
+        let changed = Arc::new(Notify::new());
+        // The watch's own tasks: they go when it does.
+        let mut tasks = JoinSet::new();
+        let mut hosts = self.rewatch(&cfg, Vec::new(), &mut tasks, &changed);
+        let mut sent: Option<TermList> = None;
+        let mut tick = tokio::time::interval(self.opts.poll);
+        tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        // The first tick is now: `cfg` was just read.
+        tick.tick().await;
+        loop {
+            tokio::select! {
+                _ = tick.tick() => {
+                    match self.config() {
+                        Ok(cfg) => hosts = self.rewatch(&cfg, hosts, &mut tasks, &changed),
+                        Err(config::OFF) => return reply(w, &json!({ "error": config::OFF })).await,
+                        // Halfway through being rewritten, perhaps.
+                        Err(_) => {}
+                    }
+                    while tasks.try_join_next().is_some() {}
+                }
+                _ = changed.notified() => {}
+                _ = closed(&mut r) => return Ok(()),
+            }
+            if sent.is_none() && lock(&hosts[0].rows).is_none() {
+                continue;
+            }
+            let list = fit(table(&hosts));
+            if sent.as_ref() != Some(&list) {
+                reply(w, &serde_json::to_value(&list).expect("a list always serializes")).await?;
+                sent = Some(list);
+            }
+        }
+    }
+
+    /// The watched hosts of `cfg`, in its order: a host as it was keeps its task, a new or changed one gets a new
+    /// task, and the tasks of the rest end (they are dropped).
+    fn rewatch(
+        &self,
+        cfg: &TermConfig,
+        mut old: Vec<Watched>,
+        tasks: &mut JoinSet<()>,
+        changed: &Arc<Notify>,
+    ) -> Vec<Watched> {
+        host_list(cfg)
+            .into_iter()
+            .map(|row| {
+                let tmux = self.tmux_for(cfg, row.host.as_deref());
+                let key = (row, tmux.as_ref().ok().map(|t| t.bin.clone()));
+                if let Some(i) = old.iter().position(|h| h.key == key) {
+                    return old.swap_remove(i);
+                }
+                let rows = Arc::new(Mutex::new(None));
+                let unread = self.unread_for(key.0.host.as_deref());
+                let ask = ask_host(tmux, key.0.host.clone(), unread, self.opts.poll, rows.clone(), changed.clone());
+                Watched { key, rows, task: tasks.spawn(ask) }
+            })
+            .collect()
     }
 
     async fn new_session(
@@ -300,6 +376,106 @@ impl Drop for Ended<'_> {
         let n = self.inputs.load(Ordering::Relaxed);
         let _ = self.events.send(json!({ "event": "ended", "sid": self.sid, "term": self.term, "inputs": n }));
     }
+}
+
+/// What a host answered: its sessions, or why it could not say.
+type Answer = Result<Vec<TermRow>, String>;
+
+/// One host of a watch.
+struct Watched {
+    /// The host as `term.json` has it, and the tmux program asked: when either changes, it is a new host.
+    key: (HostRow, Option<String>),
+    /// Its last answer; `None` before the first.
+    rows: Arc<Mutex<Option<Answer>>>,
+    task: AbortHandle,
+}
+
+impl Drop for Watched {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+/// The hosts of `cfg`, none asked yet: this machine first, then the targets in order.
+fn host_list(cfg: &TermConfig) -> Vec<HostRow> {
+    let mut hosts = vec![HostRow { host: None, target: None, tmux: None, error: None }];
+    hosts.extend(cfg.targets.iter().map(|t| HostRow {
+        host: Some(t.name.clone()),
+        target: Some(t.target.clone()),
+        tmux: t.tmux.clone(),
+        error: None,
+    }));
+    hosts
+}
+
+/// Ask one host for its sessions every `poll`, or, after a failure, when its own `Backoff` says. Each answer goes
+/// in `rows`; `changed` hears when it differs from the one before.
+async fn ask_host(
+    tmux: Result<Tmux, String>,
+    host: Option<String>,
+    unread: Arc<Mutex<Unread>>,
+    poll: Duration,
+    rows: Arc<Mutex<Option<Answer>>>,
+    changed: Arc<Notify>,
+) {
+    let tmux = match tmux {
+        Ok(t) => t,
+        Err(e) => {
+            *lock(&rows) = Some(Err(e));
+            changed.notify_one();
+            return;
+        }
+    };
+    let mut backoff = Backoff::new();
+    loop {
+        let got =
+            host_rows(&tmux, host.as_deref(), &unread, unix_now()).await.map_err(|e| said(&e, &tmux, LIST_FAILED));
+        let wait = match got {
+            Ok(_) => {
+                backoff.reset();
+                poll
+            }
+            Err(_) => backoff.failed(),
+        };
+        {
+            let mut last = lock(&rows);
+            if last.as_ref() != Some(&got) {
+                *last = Some(got);
+                changed.notify_one();
+            }
+        }
+        tokio::time::sleep(wait).await;
+    }
+}
+
+/// The list as the watched hosts last answered; a host that has not answered yet is listed with no sessions.
+fn table(hosts: &[Watched]) -> TermList {
+    let mut list = TermList { terms: Vec::new(), hosts: Vec::new() };
+    for h in hosts {
+        let mut row = h.key.0.clone();
+        match &*lock(&h.rows) {
+            Some(Ok(v)) => list.terms.extend(v.iter().cloned()),
+            Some(Err(e)) => row.error = Some(e.clone()),
+            None => {}
+        }
+        list.hosts.push(row);
+    }
+    list
+}
+
+/// Read and drop whatever the other end sends, until it closes.
+async fn closed<R: AsyncBufRead + Unpin>(r: &mut R) {
+    while let Ok(b) = r.fill_buf().await {
+        if b.is_empty() {
+            return;
+        }
+        let n = b.len();
+        r.consume(n);
+    }
+}
+
+fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
 /// The words of a tmux failure fit to pass on: the kind of failure or a starting problem, never tmux's or ssh's
@@ -419,9 +595,25 @@ mod tests {
         assert!(matches!(r, Req::View { sid: Some(7), .. }));
         let r: Req = serde_json::from_str(r#"{"op":"new","host":null,"command":["sh"],"cols":1,"rows":2}"#).unwrap();
         assert!(matches!(r, Req::New { name: None, host: None, .. }));
-        for bad in [r#"{"op":"watch"}"#, r#"{"op":"new"}"#, r#""list""#, "{"] {
+        assert!(matches!(serde_json::from_str(r#"{"op":"watch"}"#).unwrap(), Req::Watch));
+        for bad in [r#"{"op":"nope"}"#, r#"{"op":"new"}"#, r#""list""#, "{"] {
             assert!(serde_json::from_str::<Req>(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn unread_is_kept_per_host() {
+        let opts = ServeOpts::new("term.json".into(), "ctl".into());
+        let w = Worker::new("t".into(), opts, tokio::sync::mpsc::unbounded_channel().0);
+        let (here, gpu1) = (w.unread_for(None), w.unread_for(Some("gpu1")));
+        assert!(!Arc::ptr_eq(&here, &gpu1));
+        assert!(Arc::ptr_eq(&gpu1, &w.unread_for(Some("gpu1"))));
+        // Output after the start, then quiet: unread on both until gpu1's "$0" is seen.
+        let (activity, now) = (w.started + 10, w.started + 20);
+        assert!(here.lock().unwrap().is_unread("$0", activity, now));
+        gpu1.lock().unwrap().seen("$0", now);
+        assert!(!gpu1.lock().unwrap().is_unread("$0", activity, now));
+        assert!(here.lock().unwrap().is_unread("$0", activity, now));
     }
 
     #[test]

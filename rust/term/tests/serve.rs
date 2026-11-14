@@ -24,7 +24,7 @@ struct Worker {
     out: mpsc::UnboundedReceiver<String>,
     err: JoinHandle<String>,
     port: u16,
-    _dir: tempfile::TempDir,
+    dir: tempfile::TempDir,
 }
 
 fn command(socket: &str, config: &Path) -> Command {
@@ -69,6 +69,27 @@ impl Conn {
             }
         }
     }
+
+    /// Lines until one that `f` holds for, which is returned; all within `wait`.
+    async fn until_list(&mut self, wait: Duration, f: impl Fn(&Value) -> bool) -> Value {
+        let end = Instant::now() + wait;
+        loop {
+            let m = self.line(end.saturating_duration_since(Instant::now())).await.expect("the watch ended");
+            if f(&m) {
+                return m;
+            }
+        }
+    }
+}
+
+/// The row of session `id` in a session list.
+fn row<'a>(list: &'a Value, id: &str) -> Option<&'a Value> {
+    list["terms"].as_array()?.iter().find(|r| r["id"] == id)
+}
+
+/// Whether the row of `id` in `list` is unread.
+fn unread(list: &Value, id: &str) -> Option<bool> {
+    row(list, id)?["unread"].as_bool()
 }
 
 impl Worker {
@@ -97,12 +118,16 @@ impl Worker {
             let _ = stderr.read_to_string(&mut s).await;
             s
         });
-        let mut w = Worker { child, stdin, out, err, port: 0, _dir: dir };
+        let mut w = Worker { child, stdin, out, err, port: 0, dir };
         let first = w.event().await;
         assert_eq!(first["event"], "listening", "{first}");
         w.port = first["port"].as_u64().unwrap() as u16;
         assert!(w.port > 0);
         w
+    }
+
+    fn config(&self) -> std::path::PathBuf {
+        self.dir.path().join("term.json")
     }
 
     async fn event(&mut self) -> Value {
@@ -356,6 +381,7 @@ async fn terminals_off_in_the_config_refuse_everything() {
     let w = Worker::start(&s, Some(r#"{"allow":false}"#)).await;
     let off = json!({"error": "terminal sessions are off"});
     assert_eq!(w.ask(json!({"op": "list"})).await, std::slice::from_ref(&off));
+    assert_eq!(w.ask(json!({"op": "watch"})).await, std::slice::from_ref(&off));
     let new = json!({"op": "new", "host": null, "name": "n1", "command": ["sh"], "cols": 100, "rows": 30});
     assert_eq!(w.ask(new).await, [off]);
     let v = w.ask(json!({"op": "view", "term": "term:tmux:w", "sid": 1})).await;
@@ -369,7 +395,88 @@ async fn an_unreadable_config_is_refused() {
     let Some(s) = Server::start() else { return };
     let w = Worker::start(&s, Some("{not json")).await;
     assert_eq!(w.ask(json!({"op": "list"})).await, [json!({"error": "term.json is invalid"})]);
+    assert_eq!(w.ask(json!({"op": "watch"})).await, [json!({"error": "term.json is invalid"})]);
     let v = w.ask(json!({"op": "view", "term": "term:tmux:w"})).await;
     assert_eq!(v, [json!({"t": "error", "error": "term.json is invalid"})]);
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn watch_sends_a_list_now_then_only_changes() {
+    let Some(s) = Server::start() else { return };
+    let w = Worker::start(&s, None).await;
+    let mut c = w.connect(&json!({"op": "watch"}), TOKEN).await;
+    let first = c.next().await;
+    assert_eq!((&first["terms"], &first["hosts"]), (&json!([]), &json!([{"host": null}])), "{first}");
+    // Output in the second the worker started does not count as unread.
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    s.raw(&["new-session", "-d", "-s", "w2", "-x", "80", "-y", "24", "cat"]);
+    c.until_list(WAIT, |l| row(l, "term:tmux:w2").is_some()).await;
+    c.until_list(Duration::from_secs(10), |l| unread(l, "term:tmux:w2") == Some(true)).await;
+    // Nothing changes from here, so nothing is sent.
+    let more = timeout(Duration::from_secs(3), c.lines.next_line()).await;
+    assert!(more.is_err(), "a line with no change: {more:?}");
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn a_session_goes_unread_after_output_and_quiet_and_clears_when_viewed() {
+    let Some(s) = Server::start() else { return };
+    s.raw(&["new-session", "-d", "-s", "w", "-x", "80", "-y", "24", "cat"]);
+    let w = Worker::start(&s, None).await;
+    let mut c = w.connect(&json!({"op": "watch"}), TOKEN).await;
+    assert_eq!(unread(&c.next().await, "term:tmux:w"), Some(false));
+    // Output in the second the worker started does not count as unread.
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    s.raw(&["send-keys", "-t", "w", "echo hi", "Enter"]);
+    c.until_list(Duration::from_secs(10), |l| unread(l, "term:tmux:w") == Some(true)).await;
+    let mut v = w.connect(&json!({"op": "view", "term": "term:tmux:w"}), TOKEN).await;
+    assert_eq!(v.next().await["t"], "hello");
+    let pane = v.until("panes").await["panes"][0]["id"].as_str().unwrap().to_string();
+    v.send(json!({"t": "view", "pane": pane, "cols": 80, "rows": 24})).await;
+    v.until("screen").await;
+    // A line can go out between the view attaching (`attached` changes) and its first screen, so the one that
+    // clears unread is not always the very next.
+    c.until_list(WAIT, |l| unread(l, "term:tmux:w") == Some(false)).await;
+    drop(v);
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn a_target_added_while_watching_shows_up() {
+    let Some(s) = Server::start() else { return };
+    let w = Worker::start(&s, None).await;
+    let mut c = w.connect(&json!({"op": "watch"}), TOKEN).await;
+    assert_eq!(c.next().await["hosts"], json!([{"host": null}]));
+    std::fs::write(w.config(), r#"{"targets":[{"name":"gone","target":"nohost.invalid"}]}"#).unwrap();
+    let failed = |h: &Value| h["host"] == "gone" && h["error"].as_str().is_some_and(|e| !e.is_empty());
+    let l = c.until_list(WAIT, |l| l["hosts"].as_array().unwrap().iter().any(failed)).await;
+    assert_eq!((&l["hosts"][0], &l["hosts"][1]["target"]), (&json!({"host": null}), &json!("nohost.invalid")));
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn turning_terminals_off_ends_the_watch() {
+    let Some(s) = Server::start() else { return };
+    let w = Worker::start(&s, None).await;
+    let mut c = w.connect(&json!({"op": "watch"}), TOKEN).await;
+    c.next().await;
+    std::fs::write(w.config(), r#"{"allow":false}"#).unwrap();
+    let off = json!({"error": "terminal sessions are off"});
+    c.until_list(WAIT, |l| *l == off).await;
+    assert!(c.line(WAIT).await.is_none());
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn the_watch_ends_when_the_worker_stops() {
+    let Some(s) = Server::start() else { return };
+    let mut w = Worker::start(&s, None).await;
+    let mut c = w.connect(&json!({"op": "watch"}), TOKEN).await;
+    c.next().await;
+    drop(w.stdin.take());
+    // Within 2 seconds the connection ends (a line in between would be a change, which can still come).
+    let end = Instant::now() + Duration::from_secs(2);
+    while c.line(end.saturating_duration_since(Instant::now())).await.is_some() {}
     w.stop().await;
 }
