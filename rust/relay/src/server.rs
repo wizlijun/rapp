@@ -755,7 +755,9 @@ impl Shared {
     }
 
     fn try_enroll(&self, peer: &Peer, join: &str) -> Result<(), String> {
-        if !self.enroll_open.load(Ordering::Acquire) {
+        // Closed enrollment keeps new devices out; a stale one is known and may enroll again.
+        let stale = self.registry.get(&peer.fp).is_some_and(|d| d.stale);
+        if !stale && !self.enroll_open.load(Ordering::Acquire) {
             return Err("closed".into());
         }
         if self.registry.join_hash().is_none() {
@@ -865,8 +867,10 @@ impl Control for Shared {
 
     fn rotate_join(&self, hash: &str) -> Result<usize> {
         let _no_enroll = self.enroll_lock.lock().unwrap_or_else(|e| e.into_inner());
-        // Marked first, so a failed save leaves the old key in place and every device as it was.
+        // Marked first, so a failed mark leaves the old key in place and every device as it was.
         let n = self.registry.mark_all_stale()?;
+        // If this save fails, devices show stale but stay connected; the old key clears stale again
+        // (nothing unsafe), and a retry audits `stale: 0`.
         self.registry.set_join_hash(hash)?;
         Ok(n)
     }

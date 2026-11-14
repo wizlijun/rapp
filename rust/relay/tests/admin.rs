@@ -227,6 +227,32 @@ async fn the_new_key_brings_the_old_id_back() {
 }
 
 #[tokio::test]
+async fn closed_enrollment_still_lets_a_stale_device_enter_the_new_key() {
+    let r = start_relay(|_| {}).await;
+    let a = FakeDevice::enrolled(&r).await;
+    let b = FakeDevice::enrolled(&r).await;
+    assert_eq!(a.register(A_ID, &[]).await["ok"], true);
+    assert_eq!(call(&r, json!({"cmd": "enroll", "state": "closed"})).await["ok"], true);
+    let new = rotate(&r).await;
+    assert_eq!(app_close_code(&closed(&a).await), Some(4));
+    assert_eq!(app_close_code(&closed(&b).await), Some(4));
+
+    // The old key: told `key changed` (code 4), not `closed`.
+    let old = FakeDevice::dial_as(&r, same_identity(&b.id)).await.unwrap();
+    assert_eq!(old.enroll(&r.key).await, json!({"ok": false, "error": "key changed"}));
+    assert_eq!(app_close_code(&closed(&old).await), Some(4));
+    // The new key: back in with the same ID.
+    let back = FakeDevice::dial_as(&r, same_identity(&a.id)).await.unwrap();
+    assert_eq!(back.enroll(&new).await["ok"], true);
+    assert_eq!(back.register(A_ID, &[]).await, json!({"ok": true, "id": A_ID}));
+    assert!(!r.relay.registry().get(&a.id.fp).unwrap().stale);
+    // A device the relay has never seen is still kept out.
+    let fresh = FakeDevice::dial(&r).await;
+    assert_eq!(fresh.enroll(&new).await, json!({"ok": false, "error": "closed"}));
+    assert_eq!(app_close_code(&closed(&fresh).await), Some(3));
+}
+
+#[tokio::test]
 async fn a_stale_device_is_offline_to_others() {
     let r = start_relay(|_| {}).await;
     let a = FakeDevice::enrolled(&r).await;

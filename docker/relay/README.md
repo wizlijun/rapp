@@ -79,12 +79,13 @@ key`. If not, upgrade the image first (see "Install in one line" or "Start with 
    立刻保存好（比如存进密码管理器）。所有设备马上和中继断开。
 
 4. **On every device / 在每台设备上.** In rapp: the side panel, 设备 → 本机. The 状态 row reads
-   `安全变更：中继换了 key`. Click `输入新 key`, paste the new key, click `保存`. Expected: the row reads `连接中`,
-   then `已连接`; the device keeps its ID. On the controlling side, a window that went through the relay closes; until the new key is entered on
-   that device too, opening it again fails with `中继换了 key，请到 本机 → 输入新 key`. After that, open it again.
-   在 rapp 里：侧栏 设备 → 本机。状态一行显示 `安全变更：中继换了 key`。点 `输入新 key`，粘贴新 key，点 `保存`。预期：先显示
-   `连接中`，再显示 `已连接`；设备的 ID 不变。操作的一侧，经中继打开的窗口会关掉；那台设备也输入新 key 之前，再打开会
-   提示 `中继换了 key，请到 本机 → 输入新 key`。输入以后，重新打开窗口就行。
+   `⚠ 安全变更：中继换了 key`. Click `输入新 key`, paste the new key, click `保存`. Expected: the row reads `连接中`,
+   then `已连接`; the device keeps its ID. On the controlling side, a window that went through the relay closes;
+   until the new key is entered on that device too, opening it again fails with
+   `中继换了 key，请到 本机 → 输入新 key`. After that, open it again.
+   在 rapp 里：侧栏 设备 → 本机。状态一行显示 `⚠ 安全变更：中继换了 key`。点 `输入新 key`，粘贴新 key，
+   点 `保存`。预期：先显示 `连接中`，再显示 `已连接`；设备的 ID 不变。操作的一侧，经中继打开的窗口会关掉；
+   那台设备也输入新 key 之前，再打开会提示 `中继换了 key，请到 本机 → 输入新 key`。输入以后，重新打开窗口就行。
 
    If it reads `出错：新 key 不对`, the key was mistyped: click `输入新 key` again and paste the key exactly. Each
    wrong key counts as an attack: after `lock_after` (5) wrong tries from one address the relay locks that
@@ -115,11 +116,16 @@ Notes / 说明:
   each time), which also holds back the other devices behind that address. Upgrade those devices.
   还是 rapp 0.6.0 的设备不认识"换了 key"：它会一直拿旧 key 重试，每一次都算错的 key，它的地址会被一次次锁住（每次最长
   300 秒），同一地址后面的其他设备也会被挡住。把这些设备升级。
-- **Offline devices / 换 key 时离线的设备.** A device that was off during `rotate-key` tries the old key once when
-  it comes back, which counts as one wrong try, then shows `安全变更：中继换了 key` like the others. Five or more
-  such devices behind one public address lock it for a while.
-  换 key 时关着的设备，上线时会拿旧 key 试一次，算一次错，然后和其他设备一样显示 `安全变更：中继换了 key`。同一个公网
-  地址后面有 5 台以上这样的设备，这个地址会被锁一会儿。
+- **Offline devices / 换 key 时离线的设备.** A machine that was off during `rotate-key` tries the old key when it
+  comes back, then shows `⚠ 安全变更：中继换了 key` like the others. Its service and its hub share one identity and
+  one public address, so one such machine may spend one wrong try from the service and one or more from the hub.
+  About 3 such machines behind one public address may lock it; the lock clears within 300 s.
+  换 key 时关着的机器，上线时会拿旧 key 试，然后和其他设备一样显示 `⚠ 安全变更：中继换了 key`。同一台机器上的 service 和
+  hub 用同一个身份、同一个公网地址，所以一台这样的机器可能 service 错一次、hub 再错一次或几次。同一个公网地址后面有
+  3 台左右这样的机器，这个地址就可能被锁住；300 秒内会解开。
+- **Closed enrollment / 入网已关闭.** Closed enrollment (`rapp-relay enroll closed`) does not stop a device that
+  was enrolled before from entering the new key; it only keeps out devices the relay has never seen.
+  入网关闭（`rapp-relay enroll closed`）不挡以前入过网的设备输入新 key，只挡中继从没见过的设备。
 - **Direct connections / 直连.** Devices that reach each other directly on the LAN are not affected; only the
   connection to the relay is.
   设备之间在局域网里直连不受影响，受影响的只是到中继的连接。
