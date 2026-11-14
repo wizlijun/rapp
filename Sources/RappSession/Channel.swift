@@ -349,8 +349,12 @@ public func eventPayload(_ e: SessionEvent, sid: Int64, textures: [UInt32: Int64
         return payload("composer_insert", pasteResultPayload(result))
     case let .inputBlocked(by):
         return payload("input_blocked", ["by": by])
-    case let .weak(on):
-        return payload("weak", ["on": on])
+    case let .saving(level):
+        return payload("weak", ["on": level > 0, "level": level])
+    case let .rtt(ms):
+        return payload("rtt", ["ms": ms])
+    case let .stalled(on):
+        return payload("stalled", ["on": on])
     case let .inputSource(id, name, ascii):
         return payload("input_source", ["id": id, "name": name, "ascii": ascii])
     case let .disconnected(reason):

@@ -1,0 +1,3 @@
+tags:
+  # test/term/term_paint_perf_test.dart: a one-off speed check, skipped unless RAPP_PERF is set.
+  perf:

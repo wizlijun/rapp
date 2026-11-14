@@ -1,6 +1,6 @@
 //! Wire messages: one JSON object per line, UTF-8, at most `MAX_LINE` bytes with the newline.
 
-use crate::screen::Screen as Frame;
+use crate::screen::{strip_escapes, Screen as Frame};
 use serde::{Deserialize, Serialize};
 
 pub const PROTO: u32 = 1;
@@ -15,6 +15,12 @@ pub struct Pane {
     pub cols: u16,
     pub rows: u16,
     pub dead: bool,
+    /// The tmux window id (`@7`) the pane is in.
+    #[serde(default)]
+    pub win: String,
+    /// The window is its session's current window and the pane is its window's current pane.
+    #[serde(default)]
+    pub active: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -36,6 +42,17 @@ pub enum Out {
         cy: u16,
         cursor: bool,
         alt: bool,
+        /// Rows of scrollback above the screen and the most it holds; 0 from a peer that does not send them.
+        #[serde(default)]
+        hist: u32,
+        #[serde(default)]
+        limit: u32,
+        /// `block`, `underline` or `bar`; absent is the terminal's own.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        shape: String,
+        /// The whole screen's rows whose next row is their text wrapped, in every part of a split update.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        wrapped: Vec<u16>,
         full: bool,
         more: bool,
         lines: Vec<(u16, String)>,
@@ -44,6 +61,12 @@ pub enum Out {
         pane: String,
         before: u32,
         lines: Vec<String>,
+        /// Indexes into `lines` of rows whose next row continues them.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        wrapped: Vec<u32>,
+        /// How many rows of scrollback the pane held when this was read.
+        #[serde(default)]
+        hist: u32,
     },
     Pasted {
         ok: bool,
@@ -101,40 +124,6 @@ pub fn encode(m: &Out) -> String {
     s
 }
 
-/// Remove terminal escape sequences (CSI, OSC, and two-byte escapes) from a row.
-fn strip_escapes(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut it = s.chars();
-    while let Some(c) = it.next() {
-        if c != '\x1b' {
-            out.push(c);
-            continue;
-        }
-        match it.next() {
-            Some('[') => {
-                for d in it.by_ref() {
-                    if ('\u{40}'..='\u{7e}').contains(&d) {
-                        break;
-                    }
-                }
-            }
-            Some(']') => {
-                while let Some(d) = it.next() {
-                    if d == '\x07' {
-                        break;
-                    }
-                    if d == '\x1b' {
-                        it.next();
-                        break;
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    out
-}
-
 /// Encoded size of one row inside the `lines` array, comma included.
 fn row_size(row: &(u16, String)) -> usize {
     serde_json::to_string(row).expect("a row always serializes").len() + 1
@@ -180,6 +169,10 @@ pub fn screen_msgs(pane: &str, rev: u64, s: &Frame, lines: Vec<(u16, String)>, f
         cy: s.cy,
         cursor: s.cursor,
         alt: s.alt,
+        hist: s.hist,
+        limit: s.limit,
+        shape: s.shape.clone(),
+        wrapped: s.wrapped.clone(),
         full,
         more,
         lines,
@@ -212,6 +205,31 @@ pub fn screen_msgs(pane: &str, rev: u64, s: &Frame, lines: Vec<(u16, String)>, f
 mod tests {
     use super::*;
 
+    fn frame(cols: u16, rows: u16, lines: Vec<String>) -> Frame {
+        Frame {
+            cols,
+            rows,
+            cx: 0,
+            cy: 0,
+            cursor: true,
+            alt: false,
+            hist: 0,
+            limit: 0,
+            shape: String::new(),
+            wrapped: Vec::new(),
+            lines,
+        }
+    }
+
+    #[test]
+    fn pane_without_new_fields_still_parses() {
+        let p: Pane = serde_json::from_str(
+            r#"{"id":"%1","window":"w","title":"","command":"sh","cols":80,"rows":24,"dead":false}"#,
+        )
+        .unwrap();
+        assert_eq!((p.win.as_str(), p.active), ("", false));
+    }
+
     #[test]
     fn wire_shapes_are_exact() {
         assert_eq!(
@@ -232,15 +250,7 @@ mod tests {
 
     #[test]
     fn big_screens_split_under_the_line_limit() {
-        let s = Frame {
-            cols: 500,
-            rows: 200,
-            cx: 0,
-            cy: 0,
-            cursor: true,
-            alt: false,
-            lines: vec!["\x1b[38;2;1;2;3mx".repeat(60); 200],
-        };
+        let s = frame(500, 200, vec!["\x1b[38;2;1;2;3mx".repeat(60); 200]);
         let msgs = screen_msgs("%1", 7, &s, s.changed(None), true);
         assert!(msgs.len() > 1);
         let mut seen = 0;
@@ -255,13 +265,13 @@ mod tests {
 
     #[test]
     fn a_small_change_is_one_message() {
-        let s = Frame { cols: 80, rows: 24, cx: 1, cy: 2, cursor: true, alt: false, lines: vec![String::new(); 24] };
+        let s = frame(80, 24, vec![String::new(); 24]);
         assert_eq!(screen_msgs("%1", 2, &s, vec![(3, "x".into())], false).len(), 1);
     }
 
     #[test]
     fn cursor_only_change_is_one_empty_message() {
-        let s = Frame { cols: 80, rows: 24, cx: 1, cy: 2, cursor: true, alt: false, lines: vec![String::new(); 24] };
+        let s = frame(80, 24, vec![String::new(); 24]);
         let m = screen_msgs("%1", 2, &s, vec![], false);
         assert_eq!(m.len(), 1);
         assert!(matches!(&m[0], Out::Screen { lines, more: false, .. } if lines.is_empty()));
@@ -269,7 +279,7 @@ mod tests {
 
     #[test]
     fn an_oversized_row_is_stripped_then_cut() {
-        let s = Frame { cols: 80, rows: 3, cx: 0, cy: 0, cursor: true, alt: false, lines: vec![String::new(); 3] };
+        let s = frame(80, 3, vec![String::new(); 3]);
         // Escapes alone push the row over the limit; once stripped it fits whole.
         let esc = format!("{}ok", "\x1b[1m".repeat(20000));
         let m = screen_msgs("%1", 1, &s, vec![(0, "a".into()), (1, esc), (2, "b".into())], true);
@@ -290,5 +300,22 @@ mod tests {
         assert!(encode(&m[0]).len() <= MAX_LINE);
         let Out::Screen { lines, .. } = &m[0] else { panic!() };
         assert!(lines[0].1.starts_with("é\"") && !lines[0].1.is_empty());
+    }
+
+    #[test]
+    fn screen_parts_all_carry_hist_shape_and_wrapped() {
+        let mut s = frame(500, 200, vec!["\x1b[38;2;1;2;3mx".repeat(60); 200]);
+        (s.hist, s.limit, s.shape, s.wrapped) = (120, 2000, "bar".into(), vec![0, 7, 150]);
+        let msgs = screen_msgs("%1", 3, &s, s.changed(None), true);
+        assert!(msgs.len() > 1);
+        for m in &msgs {
+            assert!(encode(m).len() <= MAX_LINE);
+            let Out::Screen { hist, limit, shape, wrapped, .. } = m else { panic!() };
+            assert_eq!((*hist, *limit, shape, wrapped), (s.hist, s.limit, &s.shape, &s.wrapped));
+        }
+        let plain = frame(80, 3, vec![String::new(); 3]);
+        let line = encode(&screen_msgs("%1", 1, &plain, vec![], false)[0]);
+        assert!(line.contains("\"hist\":0") && line.contains("\"limit\":0"));
+        assert!(!line.contains("\"shape\"") && !line.contains("\"wrapped\""));
     }
 }

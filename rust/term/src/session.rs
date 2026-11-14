@@ -2,10 +2,10 @@
 
 use crate::keys;
 use crate::proto::{self, In, Out, Pane};
-use crate::screen::Screen;
+use crate::screen::{strip_escapes, wrapped_rows, Screen};
 use crate::sender::Sender;
 use crate::tmux::control::{Control, Event};
-use crate::tmux::{cmd, PaneInfo, Tmux, MAX_PASTE};
+use crate::tmux::{cmd, HistoryRows, PaneInfo, Tmux, MAX_PASTE};
 use crate::unread::Unread;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -92,6 +92,8 @@ pub fn panes_of(list: &[PaneInfo], session_id: &str) -> Vec<Pane> {
             cols: p.cols,
             rows: p.rows,
             dead: p.dead,
+            win: p.window_id.clone(),
+            active: p.active,
         })
         .collect()
 }
@@ -141,14 +143,27 @@ async fn capture(ctl: &Control, pane: &str) -> anyhow::Result<Screen> {
     // The same text `Tmux::capture` reads from stdout, where every row ends in a newline.
     let mut text = rows.join("\n");
     text.push('\n');
-    Screen::from_capture(&text, meta.first().map(String::as_str).unwrap_or(""))
+    let mut s = Screen::from_capture(&text, meta.first().map(String::as_str).unwrap_or(""))?;
+    let joined = ctl.command(&cmd::capture_joined(pane)).await?;
+    let plain: Vec<String> = s.lines.iter().map(|l| strip_escapes(l)).collect();
+    s.wrapped = wrapped_rows(&plain, &joined);
+    Ok(s)
 }
 
 /// A `History` message that fits in one line: when the rows do not all fit, the ones nearest the screen are kept
 /// (the peer asks again from `before` plus what it got). A row too long for a line on its own is shrunk like a
 /// screen row, so there is always at least one.
-fn history_msg(pane: &str, before: u32, mut lines: Vec<String>) -> Out {
-    let mut used = proto::encode(&Out::History { pane: pane.to_string(), before, lines: Vec::new() }).len();
+fn history_msg(pane: &str, before: u32, rows: HistoryRows) -> Out {
+    let HistoryRows { mut lines, wrapped, size } = rows;
+    // Room for every index, so cutting rows never needs a second measure.
+    let mut used = proto::encode(&Out::History {
+        pane: pane.to_string(),
+        before,
+        lines: Vec::new(),
+        wrapped: wrapped.clone(),
+        hist: size,
+    })
+    .len();
     let mut keep = lines.len();
     while keep > 0 {
         let n = serde_json::to_string(&lines[keep - 1]).expect("a string always serializes").len() + 1;
@@ -160,14 +175,14 @@ fn history_msg(pane: &str, before: u32, mut lines: Vec<String>) -> Out {
     }
     if keep > 0 && keep == lines.len() {
         let last = lines.pop().expect("there are rows");
-        return Out::History {
-            pane: pane.to_string(),
-            before,
-            lines: vec![proto::shrink_text(&last, proto::MAX_LINE - used)],
-        };
+        let lines = vec![proto::shrink_text(&last, proto::MAX_LINE - used)];
+        return Out::History { pane: pane.to_string(), before, lines, wrapped: Vec::new(), hist: size };
     }
     lines.drain(..keep);
-    Out::History { pane: pane.to_string(), before, lines }
+    let n = lines.len() as u32;
+    let keep = keep as u32;
+    let wrapped = wrapped.into_iter().filter(|&k| k >= keep && k - keep < n).map(|k| k - keep).collect();
+    Out::History { pane: pane.to_string(), before, lines, wrapped, hist: size }
 }
 
 /// What reading one input line gave.
@@ -511,7 +526,7 @@ impl<W: AsyncWrite + Unpin> Pump<'_, W> {
             }
             In::Text { .. } => {}
             In::History { pane, before, lines } => match self.tmux.history(&pane, before, lines).await {
-                Ok(v) => self.put(&history_msg(&pane, before, v)).await?,
+                Ok(rows) => self.put(&history_msg(&pane, before, rows)).await?,
                 Err(_) => self.error("could not read the history").await?,
             },
             In::Refit { cols, rows, .. } => {
@@ -704,6 +719,7 @@ mod tests {
             cols: 80,
             rows: 24,
             dead: false,
+            active: window_index == 0 && pane_index == 0,
         }
     }
 
@@ -721,9 +737,12 @@ mod tests {
                 command: "cat".into(),
                 cols: 80,
                 rows: 24,
-                dead: false
+                dead: false,
+                win: "@0".into(),
+                active: true
             }
         );
+        assert!(!v[1].active);
         assert!(panes_of(&list, "$7").is_empty());
     }
 
@@ -804,20 +823,24 @@ mod tests {
     #[test]
     fn history_is_cut_to_the_line_limit_keeping_the_rows_nearest_the_screen() {
         let rows: Vec<String> = (0..1000).map(|i| format!("{i:0>200}")).collect();
-        let m = history_msg("%1", 5, rows.clone());
+        let last = rows.len() as u32 - 1;
+        let m = history_msg("%1", 5, HistoryRows { lines: rows.clone(), wrapped: vec![0, 3, last - 1], size: 9000 });
         assert!(proto::encode(&m).len() <= proto::MAX_LINE);
-        let Out::History { pane, before, lines } = m else { panic!() };
+        let Out::History { pane, before, lines, wrapped, hist } = m else { panic!() };
+        let cut = (rows.len() - lines.len()) as u32;
+        assert_eq!((wrapped, hist), (vec![last - 1 - cut], 9000));
         assert_eq!((pane.as_str(), before), ("%1", 5));
         assert!(!lines.is_empty() && lines.len() < rows.len());
         assert_eq!(lines[..], rows[rows.len() - lines.len()..]);
-        let small = history_msg("%1", 0, vec!["a".into(), "b".into()]);
-        assert!(matches!(small, Out::History { lines, .. } if lines == ["a", "b"]));
+        let two = HistoryRows { lines: vec!["a".into(), "b".into()], wrapped: vec![0], size: 2 };
+        let small = history_msg("%1", 0, two);
+        assert!(matches!(small, Out::History { lines, wrapped, hist: 2, .. } if lines == ["a", "b"] && wrapped == [0]));
     }
 
     #[test]
     fn a_single_row_over_the_line_limit_is_stripped_then_cut() {
         let row = format!("\x1b[31m{}", "é".repeat(40_000));
-        let m = history_msg("%1", 0, vec!["before".into(), row]);
+        let m = history_msg("%1", 0, HistoryRows { lines: vec!["before".into(), row], wrapped: vec![0], size: 2 });
         assert!(proto::encode(&m).len() <= proto::MAX_LINE);
         let Out::History { lines, .. } = m else { panic!() };
         assert_eq!(lines.len(), 1);

@@ -163,9 +163,22 @@ class WindowsEvent extends SessionEvent {
   final List<RemoteWindow> windows;
 }
 
-/// A says the stream entered or left the weak-network tier.
+/// A says how far it lowered the stream below the choice: [level] 0 (not), 1 or 2 (§6.4).
 class WeakEvent extends SessionEvent {
-  const WeakEvent(super.sid, this.on);
+  const WeakEvent(super.sid, this.on, [int? level]) : level = level ?? (on ? 2 : 0);
+  final bool on;
+  final int level;
+}
+
+/// The session's own ping round trip over the whole path to A (protocol v9).
+class RttEvent extends SessionEvent {
+  const RttEvent(super.sid, this.ms);
+  final int ms;
+}
+
+/// The whole path looks broken (pings unanswered), or answers again.
+class StalledEvent extends SessionEvent {
+  const StalledEvent(super.sid, this.on);
   final bool on;
 }
 
@@ -342,7 +355,13 @@ SessionEvent? parseSessionEvent(String method, Object? args) {
       case 'traffic':
         return TrafficEvent(sid, _as<int>(m['bytes']), _as<int?>(m['frames']) ?? 0);
       case 'weak':
-        return WeakEvent(sid, _as<bool?>(m['on']) ?? false);
+        final on = _as<bool?>(m['on']) ?? false;
+        final level = _as<int?>(m['level']);
+        return WeakEvent(sid, on, level?.clamp(0, 2));
+      case 'rtt':
+        return RttEvent(sid, _as<int>(m['ms']));
+      case 'stalled':
+        return StalledEvent(sid, _as<bool>(m['on']));
       case 'disconnected':
         return DisconnectedEvent(sid, _as<String?>(m['reason']) ?? '');
       case 'clipboard':

@@ -345,3 +345,64 @@ async fn an_unreadable_revoked_push_closes_the_connection() {
     }
     serve.abort();
 }
+
+#[tokio::test]
+async fn probe_gets_an_answer_and_never_trips_a_limit() {
+    let r = start().await;
+    let (ea, eb) = (endpoint(), endpoint());
+    let (ia, ib) = (Identity::generate().unwrap(), Identity::generate().unwrap());
+    let a = dial(&r, &ea, &ia).await;
+    a.register(A_ID, &["10.0.0.5:22028".to_string()]).await.unwrap();
+    let b = dial(&r, &eb, &ib).await;
+    b.ensure_enrolled().await.unwrap();
+    for _ in 0..80 {
+        let rtt = b.probe(WAIT).await.expect("an answer");
+        assert!(rtt < WAIT);
+    }
+    // Neither a lockout nor a per-target limit: a real request still goes through.
+    let answer = async {
+        match push_skipping_revoked(&a).await {
+            Pushed::Incoming { mut reply, .. } => {
+                reply.write_all(b"{\"ok\":true}\n").await.unwrap();
+                reply.flush().await.unwrap();
+            }
+            _ => panic!("expected Incoming"),
+        }
+    };
+    let (found, ()) = tokio::join!(tokio::time::timeout(WAIT, b.connect_to(A_ID)), answer);
+    found.unwrap().unwrap();
+    let s = b.stats();
+    assert!(s.rx_datagrams > 0 && s.sent > 0);
+}
+
+#[tokio::test]
+async fn probe_of_a_stopped_relay_times_out() {
+    let r = start().await;
+    let ep = endpoint();
+    let b = dial(&r, &ep, &Identity::generate().unwrap()).await;
+    b.ensure_enrolled().await.unwrap();
+    let Rig { relay, data: _data, .. } = r;
+    relay.stop().await;
+    assert!(b.probe(Duration::from_millis(500)).await.is_err());
+}
+
+#[tokio::test]
+async fn an_enrolled_connection_outlives_the_unenrolled_idle_deadline() {
+    let data = tempfile::tempdir().unwrap();
+    let mut config = Config { listen: "127.0.0.1:0".parse().unwrap(), ..Config::default() };
+    config.limits.unenrolled_idle_secs = 1;
+    let opts = Opts { data: data.path().to_path_buf(), config, log: Log::file(data.path(), "relay.log"), enroll_from_env: false };
+    let relay = Relay::start(opts).await.unwrap();
+    let key = Key::new_for_relay(&relay.fp);
+    relay.registry().set_join_hash(&join_hash(&key.join())).unwrap();
+    let ep = endpoint();
+    let addr = relay.addr.to_string();
+    let idle = RelayConn::dial(&ep, &addr, &key, &Identity::generate().unwrap()).await.unwrap();
+    let kept = RelayConn::dial(&ep, &addr, &key, &Identity::generate().unwrap()).await.unwrap();
+    kept.ensure_enrolled().await.unwrap();
+    kept.ensure_enrolled().await.unwrap(); // a no-op the second time
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    assert!(idle.is_closed());
+    assert!(!kept.is_closed());
+    kept.probe(WAIT).await.unwrap();
+}

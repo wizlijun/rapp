@@ -340,6 +340,42 @@ void main() {
         expect(full.left, greaterThanOrEqualTo(barRect.left));
       });
     }
+
+    testWidgets('no relay measured, no network marker', (tester) async {
+      await tester.pumpWidget(wrap(SizedBox(width: 800, child: TopBar(state: es, fullscreen: false, onToggleFullscreen: () {}))));
+      expect(find.byKey(const Key('net-marker')), findsNothing);
+    });
+
+    for (final w in [1200.0, 1000.0, 800.0, 600.0, 545.0, 480.0, 478.0, 400.0, 360.0, 340.0, 330.0, 328.0, 327.0, 320.0, 300.0]) {
+      testWidgets('top bar fits at $w with the network marker and the stream menu', (tester) async {
+        await tester.pumpWidget(wrap(Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: w,
+            child: TopBar(state: es, fullscreen: false, onToggleFullscreen: () {}),
+          ),
+        )));
+        await tester.runAsync(() async {
+          t.emit({'event': 'net', 'level': 'weak', 'rtt_ms': 1234, 'loss': 0.25});
+          es.openOrSwitch('111', 'Safari', 'Safari');
+          for (var i = 0; i < 4; i++) {
+            await flush();
+          }
+        });
+        await tester.pump();
+        // Below the bare row plus the marker (5 icons, the traffic bars and 40) there is no room.
+        expect(find.byKey(const Key('net-marker')), w >= 5 * 48 + 48 + 40 ? findsOneWidget : findsNothing);
+        expect(find.byKey(const Key('net-text')), w >= 480 ? findsOneWidget : findsNothing);
+        expect(tester.takeException(), isNull);
+        if (w < 5 * 48 + 48 + 40) return;
+        final full = tester.getRect(find.byKey(const Key('fullscreen-button')));
+        final barRect = tester.getRect(find.byType(TopBar));
+        expect(full.right, lessThanOrEqualTo(barRect.right + 0.01));
+        final marker = tester.getRect(find.byKey(const Key('net-marker')));
+        expect(marker.left, greaterThanOrEqualTo(barRect.left));
+        expect(marker.right, lessThanOrEqualTo(full.left + 0.01));
+      });
+    }
   });
 
   group('needs-you', () {

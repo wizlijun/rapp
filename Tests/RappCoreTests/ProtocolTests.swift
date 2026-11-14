@@ -63,12 +63,15 @@ final class ProtocolTests: XCTestCase {
         .frameAck(processingMs: 65535),
         .weak(true),
         .weak(false),
+        .ping(7),
+        .pong(0xFFFF_FFFF),
+        .saving(2),
         .setStream(mode: .duogray, fps: 1, density: 2, pinned: true),
         .inputSource(id: "com.apple.inputmethod.SCIM.ITABC", name: "简体拼音", ascii: false),
         .inputSource(id: "com.apple.keylayout.ABC", name: "ABC", ascii: true),
         .selectInput(id: ""),
         .selectInput(id: "com.apple.keylayout.US"),
-        .hello(token: "t", bundleID: "b", mode: .gray4, fps: 15, density: 1, version: 9),
+        .hello(token: "t", bundleID: "b", mode: .gray4, fps: 15, density: 1, version: 10),
         .chunk([UInt8](repeating: 7, count: chunkSize)),
     ]
 
@@ -92,6 +95,14 @@ final class ProtocolTests: XCTestCase {
         XCTAssertThrowsError(try decodeOne([30, 3, 0, 0, 0, 0, 0, 9]))
     }
 
+    func testPingPongSavingWireFormat() throws {
+        XCTAssertEqual(Message.ping(1).encoded(), [31, 4, 0, 0, 0, 1, 0, 0, 0])
+        XCTAssertEqual(Message.pong(2).encoded(), [32, 4, 0, 0, 0, 2, 0, 0, 0])
+        XCTAssertEqual(Message.saving(1).encoded(), [33, 1, 0, 0, 0, 1])
+        XCTAssertThrowsError(try decodeOne([33, 1, 0, 0, 0, 3]))
+        XCTAssertThrowsError(try decodeOne([31, 5, 0, 0, 0, 1, 0, 0, 0, 0]))
+    }
+
     func testOldClientGetsVersionError() {
         // A protocol-2 hello: version 2, token "a", bundle "b", gray4, scale 2 (strings are u16 LE length + UTF-8).
         var p = MessageParser()
@@ -99,14 +110,14 @@ final class ProtocolTests: XCTestCase {
         p.append([1, UInt8(payload.count), 0, 0, 0] + payload)
         XCTAssertThrowsError(try p.next()) { error in
             XCTAssertEqual((error as? ProtocolVersionMismatch)?.client, 2)
-            XCTAssertEqual("\(error)", "protocol version mismatch: host 9, client 2 (update both sides)")
+            XCTAssertEqual("\(error)", "protocol version mismatch: host 10, client 2 (update both sides)")
         }
     }
 
-    func testHelloAcceptsOnlyVersion9() throws {
-        let m = Message.hello(token: "t", bundleID: "b", mode: .gray4, fps: 15, density: 1, version: 9)
+    func testHelloAcceptsOnlyVersion10() throws {
+        let m = Message.hello(token: "t", bundleID: "b", mode: .gray4, fps: 15, density: 1, version: 10)
         XCTAssertEqual(try decodeOne(m.encoded()), m)
-        for v: UInt8 in [8, 10] {
+        for v: UInt8 in [9, 11] {
             var bytes = m.encoded()
             bytes[5] = v
             XCTAssertThrowsError(try decodeOne(bytes)) { XCTAssertEqual(($0 as? ProtocolVersionMismatch)?.client, v) }
@@ -114,18 +125,18 @@ final class ProtocolTests: XCTestCase {
         var old = m.encoded()
         old[5] = 4
         XCTAssertThrowsError(try decodeOne(old)) {
-            XCTAssertEqual("\($0)", "protocol version mismatch: host 9, client 4 (update both sides)")
+            XCTAssertEqual("\($0)", "protocol version mismatch: host 10, client 4 (update both sides)")
         }
     }
 
-    func testFetchAndPutAcceptOnlyVersion9() throws {
+    func testFetchAndPutAcceptOnlyVersion10() throws {
         let f = Message.fetch(token: "t", clip: 1, file: 2, offset: 3).encoded()
         let q = Message.put(token: "t", item: 1, kind: .files, uti: "u", name: "n", total: 5).encoded()
-        XCTAssertEqual(f[5], 9)
-        XCTAssertEqual(q[5], 9)
+        XCTAssertEqual(f[5], 10)
+        XCTAssertEqual(q[5], 10)
         XCTAssertEqual(try decodeOne(f), .fetch(token: "t", clip: 1, file: 2, offset: 3))
         XCTAssertEqual(try decodeOne(q), .put(token: "t", item: 1, kind: .files, uti: "u", name: "n", total: 5))
-        for v: UInt8 in [8, 10] {
+        for v: UInt8 in [9, 11] {
             for var bytes in [f, q] {
                 bytes[5] = v
                 XCTAssertThrowsError(try decodeOne(bytes)) { XCTAssertEqual(($0 as? ProtocolVersionMismatch)?.client, v) }

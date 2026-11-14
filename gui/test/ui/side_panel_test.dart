@@ -148,6 +148,17 @@ void main() {
     expect(UiPrefs.load('${tmp.path}/devices/dev1').startFullscreen, false);
   });
 
+  testWidgets('auto save traffic switch is on by default and saves', (tester) async {
+    await tester.pumpWidget(wrap(panel()));
+    expect(find.text('网络差时自动省流量'), findsOneWidget);
+    expect(s.prefs.autoSaveTraffic, true);
+    await tester.ensureVisible(find.byKey(const Key('auto-save-traffic')));
+    await tester.tap(find.byKey(const Key('auto-save-traffic')));
+    await tester.pump();
+    expect(s.prefs.autoSaveTraffic, false);
+    expect(UiPrefs.load('${tmp.path}/devices/dev1').autoSaveTraffic, false);
+  });
+
   testWidgets('legend shows all seven words', (tester) async {
     await tester.pumpWidget(wrap(panel()));
     for (final l in Lamp.values) {

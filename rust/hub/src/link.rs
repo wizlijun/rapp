@@ -90,6 +90,19 @@ pub struct RelayCache {
     key: Arc<Key>,
 }
 
+/// The relay cache as `Hub::relay_cached` finds it.
+pub(crate) enum Cached {
+    /// No relay or no key set.
+    Unset,
+    /// Someone holds the cache (dialing).
+    Busy,
+    /// The relay refused the key: not dialed again until the settings change.
+    Refused,
+    /// None for these settings, or it ended: the next `relay()` dials.
+    Gone,
+    Open(RelayConn),
+}
+
 /// A probe found the host through the relay: online, with nothing more to ask.
 #[derive(Debug)]
 struct Relayed;
@@ -271,13 +284,74 @@ impl Hub {
         Ok(Some((conn, key)))
     }
 
+    /// What the relay cache holds for the settings as they are now, without dialing (`netmon`).
+    pub(crate) fn relay_cached(&self) -> Cached {
+        let (home, identity) = self.at_home();
+        let settings = rapp_conn::settings::load(&home);
+        let (Some(addr), Some(key)) = (settings.relay, settings.key) else { return Cached::Unset };
+        let Ok(cache) = self.relay.try_lock() else { return Cached::Busy };
+        match cache.as_ref() {
+            Some(c) if c.addr == addr && c.key_text == key.to_string() && c.fp == identity.fp => {
+                if c.conn.refused().is_some() {
+                    Cached::Refused
+                } else if c.conn.is_closed() {
+                    Cached::Gone
+                } else {
+                    Cached::Open(c.conn.clone())
+                }
+            }
+            _ => Cached::Gone,
+        }
+    }
+
+    /// Dials a new connection to the relay for the settings as they are now, outside the cache
+    /// (`netmon`: the cached one stopped answering, and stays until `relay_swap`). None: no relay
+    /// or no key set.
+    pub(crate) async fn relay_fresh(&self) -> Result<Option<RelayConn>> {
+        let (home, identity) = self.at_home();
+        let settings = rapp_conn::settings::load(&home);
+        let (Some(addr), Some(key)) = (settings.relay, settings.key) else { return Ok(None) };
+        Ok(Some(RelayConn::dial(&self.ep, &addr, &key, &identity).await?))
+    }
+
+    /// Puts `new` (from `relay_fresh`) in place of `old` and closes `old`. False, and `new` is
+    /// closed, when the cache moved on meanwhile (other settings, another dial).
+    pub(crate) async fn relay_swap(&self, old: &RelayConn, new: &RelayConn) -> bool {
+        let (home, identity) = self.at_home();
+        let settings = rapp_conn::settings::load(&home);
+        let key_text = settings.key.map(|k| k.to_string());
+        let mut cache = self.relay.lock().await;
+        match cache.as_mut() {
+            Some(c)
+                if c.conn.id() == old.id()
+                    && Some(&c.addr) == settings.relay.as_ref()
+                    && Some(&c.key_text) == key_text.as_ref()
+                    && c.fp == identity.fp =>
+            {
+                c.conn.close();
+                c.conn = new.clone();
+                true
+            }
+            _ => {
+                new.close();
+                false
+            }
+        }
+    }
+
+    /// A request to the relay got no answer in time: the network monitor looks at once.
+    fn relay_timed_out(&self) -> anyhow::Error {
+        self.net_suspect();
+        anyhow!("relay unreachable: timed out")
+    }
+
     /// The relay's `connect` to `id`, within `RELAY_WAIT`: a relay that never answers must not stall
     /// a caller (presence probes run one host after another). Remembers what the relay said, and the
     /// LAN addresses the host reported (for `try_lan`).
     async fn relay_connect(&self, relay: &RelayConn, id: &str) -> Result<Found> {
         let r = tokio::time::timeout(RELAY_WAIT, relay.connect_to(id))
             .await
-            .unwrap_or_else(|_| Err(anyhow!("relay unreachable: timed out")));
+            .unwrap_or_else(|_| Err(self.relay_timed_out()));
         match &r {
             Ok(found) => {
                 self.relay_seen.lock().unwrap().insert(id.to_string(), true);
@@ -313,7 +387,7 @@ impl Hub {
                 None => Ok(None),
             }
         };
-        tokio::time::timeout(RELAY_WAIT, ask).await.unwrap_or_else(|_| Err(anyhow!("relay unreachable: timed out")))
+        tokio::time::timeout(RELAY_WAIT, ask).await.unwrap_or_else(|_| Err(self.relay_timed_out()))
     }
 
     /// A host forced onto the relay: the relay or an error, never the LAN.
@@ -325,7 +399,7 @@ impl Hub {
         }
         let relay = tokio::time::timeout(RELAY_WAIT, self.relay())
             .await
-            .unwrap_or_else(|_| Err(anyhow!("relay unreachable: timed out")));
+            .unwrap_or_else(|_| Err(self.relay_timed_out()));
         let relay = match relay {
             Ok(Some((relay, _))) => relay,
             Ok(None) => bail!("relay not set: add the host as id@ip"),

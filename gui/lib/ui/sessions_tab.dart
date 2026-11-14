@@ -219,7 +219,8 @@ class _SessionRow extends StatelessWidget {
     final backdrop = rowBackdrop(entry.lamp, t);
     final border = rowBorder(entry.lamp, t, selected: selected);
     final reason = entry.reason == null ? null : '已断开：${entry.reason}';
-    final second = reason ?? _second;
+    final pane = entry.paneTitle ?? '';
+    final second = [reason ?? _second, pane].where((s) => s.isNotEmpty).join(' · ');
     final status = _status;
     final label = [
       entry.appName,

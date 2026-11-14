@@ -1,7 +1,52 @@
 // The top bar's traffic label: five bars and the rate (design language: bars lit = --on, dark = --line).
 import 'package:flutter/material.dart';
 
+import 'dart:math' as math;
+
+import '../hub_client.dart';
+import '../ui/net_marker.dart' show weakRttMs;
 import '../ui/tokens.dart';
+
+/// The two segments of a relayed session's round trip (spec 2026-11-14-rapp-network-status §4.2):
+/// this device to the relay ([local], the network marker's) and, worked out, the relay to the other
+/// device ([peer] = whole − local). Null where a part is not known.
+typedef Segments = ({int? whole, int? local, int? peer});
+
+Segments segments({required String path, int? wholeMs, NetStatus? net}) {
+  final local = path == 'relay' && net != null && net.level != NetLevel.down ? net.rttMs : null;
+  final peer = wholeMs != null && local != null ? math.max(0, wholeMs - local) : null;
+  return (whole: wholeMs, local: local, peer: peer);
+}
+
+/// The word after the rate: which end is weak when the path tells (relayed sessions only), else
+/// the saving level A is at; null when all is well.
+String? trafficWord({required int saving, bool localWeak = false, bool peerWeak = false}) {
+  if (localWeak && peerWeak) return '弱网';
+  if (localWeak) return '本机网络弱';
+  if (peerWeak) return '对方网络弱';
+  if (saving > 0) return '省流·$saving';
+  return null;
+}
+
+/// [trafficWord] for a session on [path] with its round trip [wholeMs] and saving level.
+String? sessionTrafficWord({required String path, required int saving, int? wholeMs, NetStatus? net}) {
+  if (path != 'relay') return trafficWord(saving: saving);
+  final seg = segments(path: path, wholeMs: wholeMs, net: net);
+  final localWeak = net?.level == NetLevel.weak;
+  final peerWeak = seg.peer != null ? seg.peer! >= weakRttMs : false;
+  return trafficWord(saving: saving, localWeak: localWeak, peerWeak: peerWeak);
+}
+
+/// The 会话 group's first row after `路径 中继 · 活动`: `整条路 420ms（本机 80 · 对方约 340）` on the
+/// relay (`整条路 未知` with no round trip yet, no brackets without the local part), the round trip
+/// alone on a LAN or direct path, nothing when that is not known.
+String? pathDetail({required String path, int? wholeMs, NetStatus? net}) {
+  if (path != 'relay') return wholeMs == null ? null : '${wholeMs}ms';
+  final seg = segments(path: path, wholeMs: wholeMs, net: net);
+  if (seg.whole == null) return '整条路 未知';
+  if (seg.local == null) return '整条路 ${seg.whole}ms';
+  return '整条路 ${seg.whole}ms（本机 ${seg.local} · 对方约 ${seg.peer}）';
+}
 
 /// How many of the five bars are lit for [bytesPerSecond] (KB = 1000 B).
 int levelBars(int bytesPerSecond) {
@@ -58,15 +103,15 @@ class TrafficLabel extends StatelessWidget {
     required this.onTap,
     this.onSecondaryTap,
     this.compact = false,
-    this.weak = false,
+    this.word,
   });
 
   /// Bars only, without the rate text.
   final bool compact;
   final int bytesPerSecond;
 
-  /// A is in the weak-network tier.
-  final bool weak;
+  /// What is weak, or the saving level ([trafficWord]); null shows the rate alone.
+  final String? word;
 
   /// The stream menu is open: the selected style.
   final bool open;
@@ -81,7 +126,7 @@ class TrafficLabel extends StatelessWidget {
     return Semantics(
       button: true,
       selected: open,
-      label: weak ? '流量 $rate，弱网，打开流量优化菜单' : '流量 $rate，打开流量优化菜单',
+      label: word != null ? '流量 $rate，$word，打开流量优化菜单' : '流量 $rate，打开流量优化菜单',
       excludeSemantics: true,
       onTap: onTap,
       child: Material(
@@ -107,7 +152,7 @@ class TrafficLabel extends StatelessWidget {
                 if (!compact) const SizedBox(width: 8),
                 if (!compact)
                 Text(
-                  weak ? '$rate · 弱网' : rate,
+                  word != null ? '$rate · $word' : rate,
                   maxLines: 1,
                   style: TextStyle(
                     fontFamily: t.mono,

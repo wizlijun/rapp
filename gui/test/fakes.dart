@@ -5,6 +5,9 @@ import 'package:flutter/widgets.dart';
 import 'package:rapp/embed/composer_editor.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
+import 'package:rapp/term/term_model.dart';
+import 'package:rapp/term/term_session_port.dart';
+import 'package:rapp/term/term_wire.dart';
 
 /// In-memory [ComposerEditor]: the text is [value]; [inserted] logs every `insert`.
 class FakeEditor implements ComposerEditor {
@@ -135,4 +138,48 @@ class FakeSessionPort extends SessionPort {
     if (method == 'reveal') return revealReply;
     return null;
   }
+}
+
+/// A terminal port that never touches the network: records calls, and the test sets the model and panes.
+class FakeTermSessionPort extends TermSessionPort {
+  final calls = <(String, Map<String, Object?>)>[];
+  final models = <Object, TermModel>{};
+  final paneLists = <Object, List<TermPane>>{};
+  final _owned = <Object>{};
+
+  /// Pretend the worker made [sid] a terminal session with [panes].
+  void seed(Object sid, {List<TermPane> panes = const [], TermModel? model}) {
+    _owned.add(sid);
+    paneLists[sid] = panes;
+    models[sid] = model ?? TermModel();
+  }
+
+  /// Pretend a runner event.
+  void play(SessionEvent e) => emit(e);
+
+  @override
+  Future<Object?> invoke(String method, Map<String, Object?> args) async {
+    calls.add((method, args));
+    final sid = args['sid'];
+    if (sid == null) return null;
+    if (method == 'start') seed(sid, panes: paneLists[sid] ?? const [], model: models[sid]);
+    if (method == 'close') _owned.remove(sid);
+    return null;
+  }
+
+  @override
+  bool owns(Object sid) => _owned.contains(sid);
+  @override
+  TermModel? model(Object sid) => models[sid];
+  @override
+  List<TermPane> panes(Object sid) => paneLists[sid] ?? const [];
+  @override
+  TermPane? pane(Object sid, int window) => panes(sid).where((p) => p.number == window).firstOrNull;
+  @override
+  void view(Object sid, int window, int cols, int rows) =>
+      calls.add(('view', {'sid': sid, 'window': window, 'cols': cols, 'rows': rows}));
+  @override
+  void refit(Object sid) => calls.add(('refit', {'sid': sid}));
+  @override
+  void fetchHistory(Object sid) => calls.add(('fetchHistory', {'sid': sid}));
 }

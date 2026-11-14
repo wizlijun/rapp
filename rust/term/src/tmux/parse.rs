@@ -23,8 +23,8 @@ pub fn current_windows(s: &str) -> HashSet<String> {
 }
 
 fn pane(line: &str) -> Option<PaneInfo> {
-    let f: Vec<&str> = line.splitn(14, '\t').collect();
-    if f.len() != 14 {
+    let f: Vec<&str> = line.splitn(16, '\t').collect();
+    if f.len() != 16 {
         return None;
     }
     Some(PaneInfo {
@@ -41,7 +41,8 @@ fn pane(line: &str) -> Option<PaneInfo> {
         attached: f[10].parse().ok()?,
         cols: f[11].parse().ok()?,
         rows: f[12].parse().ok()?,
-        title: f[13].to_string(),
+        active: f[13] == "1" && f[14] == "1",
+        title: f[15].to_string(),
     })
 }
 
@@ -58,9 +59,12 @@ mod tests {
     }
     #[test]
     fn parses_pane_rows_and_skips_broken_ones() {
-        let row = "$3\t我的 \"work\"\t@7\t1\tmain win\t%12\t0\tclaude\t0\t1794592454\t2\t212\t58\ttitle with spaces";
-        let v = panes(&format!("{row}\nbroken line\n"));
-        assert_eq!(v.len(), 1);
+        let row = "$3\t我的 \"work\"\t@7\t1\tmain win\t%12\t0\tclaude\t0\t1794592454\t2\t212\t58\t1\t1\ttitle with spaces";
+        let idle = "$3\ta\t@7\t1\tw\t%13\t1\tsh\t0\t1\t2\t80\t24\t1\t0\tt";
+        let v = panes(&format!("{row}\nbroken line\n{idle}\n"));
+        assert_eq!(v.len(), 2);
+        assert!(v[0].active && !v[1].active);
+        assert_eq!(v[0].title, "title with spaces");
         assert_eq!(
             (v[0].session_id.as_str(), v[0].session.as_str(), v[0].pane.as_str()),
             ("$3", "我的 \"work\"", "%12")

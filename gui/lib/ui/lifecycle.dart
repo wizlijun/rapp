@@ -1,6 +1,7 @@
 // The lifecycle of an embedded session: its record, the words for why it ended, its lamp.
 import '../embed/remote_session.dart';
 import '../embed/stream_choice.dart';
+import '../hub_client.dart';
 import 'lamp.dart';
 
 /// Hub messages the user can meet in the hint, in plain words.
@@ -102,6 +103,8 @@ String disconnectWord(String? raw) {
     return '网络断了';
   }
   if (raw == 'GUI did not connect') return '本机没有接上会话';
+  // A terminal's device says its tmux session is gone.
+  if (raw == 'session ended') return hubWord('unknown sid');
   var rest = raw;
   const client = 'rapp-client: ';
   const host = 'host says: ';
@@ -113,14 +116,26 @@ String disconnectWord(String? raw) {
 /// The link dropped for a reason the network explains: worth trying again by itself.
 bool autoReconnects(String? raw) {
   final w = disconnectWord(raw);
-  return w == '网络断了' || w == '连接超时';
+  return w == '网络断了' || w == '连接超时' || w == '中继连不上' || w == '对方离线';
+}
+
+/// What an automatic retry of [r] waits for, in place of the reason and 「正在重连…」 on the
+/// disconnected stage (spec 2026-11-14-rapp-network-status §5.4); null: the usual words.
+/// [relayed]: [r] goes through the relay; [net]: the link to the relay (`HubClient.net`).
+String? waitWord(SessionRecord r, {required bool relayed, NetLevel? net}) {
+  if (r.retry == null) return null;
+  if (relayed && net == NetLevel.down) return '连不上中继，通了自动重连';
+  final w = disconnectWord(r.reason);
+  if (w == '对方离线') return '对方离线，上线后自动连';
+  if (relayed && net != null && (w == '网络断了' || w == '连接超时')) return '对方网络不通，正在重试…';
+  return null;
 }
 
 /// A reason that ends automatic tries: the person, the app, the host or the password said no.
 bool stopsAutoReconnect(String? raw) {
-  if (raw != null && raw.contains('bad token')) return true;
+  if (raw != null && (raw.contains('bad token') || raw == 'session ended')) return true;
   final w = disconnectWord(raw);
-  return w == '你断开了' || w == 'A 端关闭了 app' || w == '密码不对' || takenOver(raw);
+  return w == '你断开了' || w == '远端关闭了 app' || w == '密码不对' || takenOver(raw);
 }
 
 Lamp recordLamp(SessionRecord r, RemoteSession? rs) {

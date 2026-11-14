@@ -81,9 +81,6 @@ impl Controls {
                         "zoom" if stream::ZOOMS.contains(&value) => s.zoom = value as f64 / 100.,
                         _ => return,
                     }
-                    if name != "zoom" {
-                        s.stream_pinned = true;
-                    }
                     s.geometry_changed = Instant::now() - Duration::from_secs(1);
                 }
                 if let Some(group) = weak.upgrade() {
@@ -106,7 +103,6 @@ impl Controls {
                     s.mode = preset.mode;
                     s.fps = preset.fps;
                     s.density_choice = preset.density;
-                    s.stream_pinned = true;
                     s.geometry_changed = Instant::now() - Duration::from_secs(1);
                 }
                 if let Some(g) = weak.upgrade() {

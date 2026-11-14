@@ -5,10 +5,12 @@
 
 mod hosts;
 mod link;
+mod netmon;
 mod presence;
 mod session;
 mod terms;
 mod upgrade;
+mod watch;
 
 use anyhow::{bail, Context, Result};
 use hosts::{Host, Hosts};
@@ -85,6 +87,10 @@ pub(crate) struct Hub {
     name: String,
     /// One terminal-session watch per online host.
     terms: terms::Watches,
+    /// The network monitor's level and last event (`netmon`).
+    net: netmon::NetState,
+    /// Offline hosts a session waits for (`watch`).
+    watches: watch::Watches,
 }
 
 pub async fn run<R, W>(opts: Opts, input: R, output: W) -> Result<()>
@@ -114,9 +120,12 @@ where
         log: opts.log,
         name: rapp_net::config::hostname(),
         terms: Default::default(),
+        net: Default::default(),
+        watches: Default::default(),
     });
     let probe = opts.presence_every.map(|every| tokio::spawn(presence::run(hub.clone(), every)));
     let upgrade = tokio::spawn(upgrade::run(hub.clone()));
+    let netmon = tokio::spawn(netmon::run(hub.clone()));
     let mut lines = BufReader::new(input).lines();
     let read = async {
         while let Some(line) = lines.next_line().await? {
@@ -135,6 +144,8 @@ where
     }
     upgrade.abort();
     let _ = upgrade.await;
+    netmon.abort();
+    let _ = netmon.await;
     read?;
     hub.close_all().await;
     if let Some(c) = hub.relay.lock().await.take() {
@@ -300,6 +311,16 @@ impl Hub {
                     bail!("bad note");
                 };
                 self.note(sid, what, windows)?;
+                return Ok(None);
+            }
+            Some("net") => self.net_event(),
+            Some("watch") => {
+                let on = v.get("on").and_then(Value::as_bool).context("missing on")?;
+                watch::set(self, s("id")?, on);
+                return Ok(None);
+            }
+            Some("net_suspect") => {
+                self.net_suspect();
                 return Ok(None);
             }
             Some(c @ ("terms" | "add_term_target" | "remove_term_target" | "new_term")) => {

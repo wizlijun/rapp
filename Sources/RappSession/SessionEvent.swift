@@ -60,8 +60,12 @@ public enum SessionEvent: Equatable {
     case composer(ComposerEvent)
     /// A refused a key, click or paste because another device is operating it; the link stays up.
     case inputBlocked(by: String)
-    /// A entered (true) or left (false) the weak-network tier.
-    case weak(Bool)
+    /// A's traffic-saving level changed (0 = B's own pick; v9 hosts send 1 and 2, v7 and v8 only 2).
+    case saving(level: Int)
+    /// The whole path's round trip, from a `ping` B sent to A.
+    case rtt(ms: Int)
+    /// Two pings in a row went unanswered with nothing else from A (true), or A is heard again (false).
+    case stalled(Bool)
     /// A's selected input source (v8 hosts); `ascii`: a plain keyboard layout, not an input method.
     case inputSource(id: String, name: String, ascii: Bool)
     /// The link dropped (or A sent garbage): the last pictures stay; `closed` follows when the GUI ends the session.

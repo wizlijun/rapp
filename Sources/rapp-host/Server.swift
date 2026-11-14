@@ -274,9 +274,9 @@ final class Session {
     private var newestSubmittedSeq = 0
     private var fps = 15
     private var density: Float = 2
-    /// Acks, slicing and the weak tier; session queue only. Created by the hello.
+    /// Acks, slicing and the saving level; session queue only. Created by the hello.
     private var paced: PacedSender?
-    /// What B asked for last. While weak the actual mode/density differ (fps never does).
+    /// What B asked for last: the ceiling. While saving, the actual stream is below it (`SaveLadder`).
     private var requestedMode = Mode.gray4
     private var requestedDensity: Float = 2
     private var requestedFps = 15
@@ -400,6 +400,7 @@ final class Session {
             requestedDensity = density
             requestedFps = Int(fps)
             makePacedSender(mode: mode, fps: Int(fps))
+            paced?.setSteps(SaveLadder.steps(ceiling: ceiling))
             started = true
             awake.begin()
             startInputTimer()
@@ -413,11 +414,14 @@ final class Session {
         case let .setStream(mode, fps, density, pinned):
             requestedMode = mode
             requestedDensity = density
-            requestedFps = Int(fps)  // before setPinned: its weakChanged(false) must not use the old fps
-            // A manual pick leaves weak at once (that restores the requested values).
+            requestedFps = Int(fps)  // before setPinned/setSteps: their levelChanged must use the new ceiling
+            // Pinned (automatic saving off) goes back to the ceiling at once.
             paced?.setPinned(pinned)
-            if paced?.weak != true { setStream(mode, fps: Int(fps), density: density) }
-            else { setStream(Self.weakMode, fps: Int(fps), density: min(density, 1.0)) }
+            paced?.setSteps(SaveLadder.steps(ceiling: ceiling))
+            applyLevel(paced?.level ?? 0)
+        case let .ping(seq):
+            // Answered at once: B measures the whole path with it (spec §6.1).
+            send(.pong(seq))
         // Window commands naming a window no longer in the table are dropped,
         // not errors: B may not have seen the newest table yet (spec §2.4).
         case let .resize(id, width, height):
@@ -467,7 +471,7 @@ final class Session {
         case let .frameAck(processingMs):
             paced?.ack(processingMs: processingMs)
         case .ready, .error, .frame, .windows, .menuBar, .clip, .pasted, .fetch, .put, .transferStart, .chunk, .inputBlocked, .weak,
-             .inputSource:
+             .inputSource, .pong, .saving:
             fail("unexpected message from client")
         }
     }
@@ -728,22 +732,23 @@ final class Session {
                 if let error { self.end("send failed: \(error.localizedDescription)") }
             })
         }
-        paced.onWeakChange = { [weak self] weak in self?.weakChanged(weak) }
+        paced.onLevelChange = { [weak self] level in self?.levelChanged(level) }
         self.paced = paced
     }
 
-    /// The tier B is shown while the network is weak: duogray, density at most 1.0, same fps.
-    private static let weakMode = Mode.duogray
+    /// What B asked for: the stream at saving level 0.
+    private var ceiling: StreamSpec { StreamSpec(mode: requestedMode, fps: requestedFps, density: requestedDensity) }
 
-    private func weakChanged(_ weak: Bool) {
+    private func applyLevel(_ level: Int) {
+        let s = SaveLadder.stream(level: level, ceiling: ceiling)
+        setStream(s.mode, fps: s.fps, density: s.density)
+    }
+
+    private func levelChanged(_ level: Int) {
         guard !ended else { return }
-        output.log(weak ? "weak network: duogray, density <= 1.0" : "network recovered: back to the requested stream")
-        if weak {
-            setStream(Self.weakMode, fps: requestedFps, density: min(requestedDensity, 1.0))
-        } else {
-            setStream(requestedMode, fps: requestedFps, density: requestedDensity)
-        }
-        send(.weak(weak))
+        output.log(level == 0 ? "network recovered: back to the requested stream" : "slow network: saving level \(level)")
+        applyLevel(level)
+        send(.saving(UInt8(level)))
     }
 
     private func tick() {

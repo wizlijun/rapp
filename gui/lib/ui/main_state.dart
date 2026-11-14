@@ -10,13 +10,18 @@ import 'package:flutter/foundation.dart';
 import '../embed/remote_session.dart';
 import '../embed/session_port.dart';
 import '../embed/stream_choice.dart';
+import '../embed/traffic_label.dart' show segments;
 import '../hub_client.dart';
 import '../permissions.dart';
 import '../embed/app_profile.dart';
 import '../embed/composer_model.dart' show escKeyCode, returnKeyCode;
+import '../term/term_id.dart';
+import '../term/term_session_port.dart';
+import '../term/term_wire.dart' show TermPane;
 import 'app_profile_store.dart';
 import 'lamp.dart';
 import 'lifecycle.dart';
+import 'net_marker.dart' show weakRttMs;
 import 'pin_files.dart';
 import 'prefs.dart';
 import 'projects.dart';
@@ -53,6 +58,9 @@ class DeviceProbe {
   String? error;
 }
 
+/// Why a terminal session cannot open on a GUI without a terminal port.
+const noTermPortWord = '这台主控台还不能看终端会话';
+
 class MainState extends ChangeNotifier {
   MainState({
     required this.hub,
@@ -60,6 +68,7 @@ class MainState extends ChangeNotifier {
     required this.data,
     required this.prefs,
     this.port,
+    this.termPort,
     this.doubleClick = const Duration(milliseconds: 500),
     DateTime Function()? clock,
     AppProfileStore? profiles,
@@ -68,8 +77,11 @@ class MainState extends ChangeNotifier {
         _log = log ?? ((_) {}) {
     resources.addListener(notifyListeners);
     _portSub = port?.events.listen(_onPortEvent);
+    _termSub = termPort?.events.listen(_onPortEvent);
     hub?.addListener(_onHub);
+    hub?.askNet();
     _lastError = hub?.lastError;
+    _netLevel = hub?.net?.level;
     final loaded = loadWorkspace(data.sharedDir);
     workspace = loaded.workspace;
     if (loaded.problem != null) hint = loaded.problem!;
@@ -134,6 +146,19 @@ class MainState extends ChangeNotifier {
   final UiPrefs prefs;
   final SessionPort? port;
 
+  /// Terminal sessions' port; null where the GUI has no native port (no terminals there).
+  final TermSessionPort? termPort;
+
+  /// Where calls for session [sid] go: the terminal port for its own sessions, else the native one.
+  SessionPort? portOf(Object sid) => termPort?.owns(sid) == true ? termPort : port;
+
+  /// [rs]'s current pane, when it is a terminal session.
+  TermPane? termPaneOf(RemoteSession rs) {
+    final tp = termPort, w = rs.currentWindow;
+    if (tp == null || w == null || !tp.owns(rs.sid)) return null;
+    return tp.pane(rs.sid, w);
+  }
+
   /// My app profiles (`apps.json` in `shared/`) and the built-in ones; swapped by [relocate].
   late AppProfileStore profiles;
   final void Function(String line) _log;
@@ -148,7 +173,7 @@ class MainState extends ChangeNotifier {
 
   /// The double-click interval the runner reported (`init`), for counting clicks (R14).
   final Duration doubleClick;
-  StreamSubscription<SessionEvent>? _portSub;
+  StreamSubscription<SessionEvent>? _portSub, _termSub;
 
   /// Embedded sessions by hub sid.
   final Map<Object, RemoteSession> remote = {};
@@ -306,7 +331,7 @@ class MainState extends ChangeNotifier {
   void focusPicture(Object sid) {
     if (overview || pictureFocused == sid || !_liveSid(sid)) return;
     pictureFocused = sid;
-    port?.pictureFocus(sid);
+    portOf(sid)?.pictureFocus(sid);
     notifyListeners();
   }
 
@@ -362,6 +387,10 @@ class MainState extends ChangeNotifier {
   }
 
   // ---- off-stage frame rate (R6) ----
+  /// `set_stream`'s `pinned`: A keeps to the choice even on a poor network (automatic saving off,
+  /// spec 2026-11-14-rapp-network-status §6.1). A manual pick is the ceiling either way.
+  bool get _pinned => !prefs.autoSaveTraffic;
+
   /// The (mode, fps, density, pinned) last sent per started session, so nothing is sent twice.
   final Map<Object, (String, int, String, bool)> _sentFps = {};
 
@@ -380,10 +409,10 @@ class MainState extends ChangeNotifier {
       if (r == null || !_reachable(r)) continue; // a dead sid never reaches the runner (R12)
       final c = rs.choice;
       final fps = effectiveFps(c, onStage: onStage != null && identical(r, onStage), detached: rs.detached);
-      final now = (c.mode, fps, c.density, rs.streamPinned);
+      final now = (c.mode, fps, c.density, _pinned);
       if (now == last) continue;
       _sentFps[rs.sid] = now;
-      p.setStream(rs.sid, c.mode, fps, c.density, pinned: rs.streamPinned);
+      portOf(rs.sid)!.setStream(rs.sid, c.mode, fps, c.density, pinned: _pinned);
     }
   }
 
@@ -393,14 +422,14 @@ class MainState extends ChangeNotifier {
   void detach() {
     final rs = currentRemote;
     if (rs == null || rs.detached || rs.tabs.tabs.isEmpty || !_liveSid(rs.sid)) return;
-    port?.detach(rs.sid);
+    portOf(rs.sid)?.detach(rs.sid);
   }
 
   /// Puts the current session back on the stage.
   void attach() {
     final rs = currentRemote;
     if (rs == null || !_liveSid(rs.sid)) return;
-    port?.attach(rs.sid);
+    portOf(rs.sid)?.attach(rs.sid);
   }
 
   /// ⌃⌘D and the stream menu's 「分离成独立窗口」/「放回主窗口」.
@@ -413,7 +442,7 @@ class MainState extends ChangeNotifier {
   /// Whether [toggleDetach] does anything now (the menu greys its item otherwise).
   bool get canToggleDetach {
     final rs = currentRemote;
-    return port?.supportsDetach == true && rs != null && _liveSid(rs.sid) && (rs.detached || rs.tabs.tabs.isNotEmpty);
+    return rs != null && portOf(rs.sid)?.supportsDetach == true && _liveSid(rs.sid) && (rs.detached || rs.tabs.tabs.isNotEmpty);
   }
 
   // ---- hub state ----
@@ -576,6 +605,7 @@ class MainState extends ChangeNotifier {
       bytesPerSecond: r.phase == Phase.live ? rs?.bytesPerSecond : null,
       reason: r.phase == Phase.disconnected ? disconnectWord(r.reason) : null,
       takenOver: r.phase == Phase.disconnected && takenOver(r.reason),
+      paneTitle: rs == null ? null : termPaneOf(rs)?.title,
     );
   }
 
@@ -606,9 +636,21 @@ class MainState extends ChangeNotifier {
   }
 
   void _onHub() {
+    final back = <String>{};
     for (final p in hub!.takePresence()) {
+      if (p.online) back.add(p.id);
       if (probes[p.id]?.lamp == Lamp.connecting) continue;
       _setOnline(p.id, p.online, error: p.error);
+    }
+    if (!hub!.alive) _watching.clear();
+    final level = hub!.net?.level;
+    final netBack = _netLevel == NetLevel.down && level != NetLevel.down;
+    _netLevel = level;
+    if (embeds) {
+      for (final id in back) {
+        _peerBack(id);
+      }
+      if (netBack) _netBack();
     }
     // The labels read `hub.hostPaths`; this notify redraws them.
     final paths = hub!.takePaths();
@@ -723,6 +765,8 @@ class MainState extends ChangeNotifier {
       }
       return;
     }
+    // The runner saw nothing arrive for a while: the hub probes the relay now (§5.1).
+    if (e is StalledEvent && e.on && r.phase == Phase.live && hubUsable) hub!.netSuspect();
     if (e is ClosedEvent) {
       if (r.phase == Phase.disconnected) return; // ended by us already, or by nobody's business
       _waiting.remove(e.sid)?.timer.cancel();
@@ -797,7 +841,7 @@ class MainState extends ChangeNotifier {
         remote.remove(fresh)?.dispose();
         _sentFps.remove(fresh);
         _waiting.remove(fresh)?.timer.cancel();
-        port?.close(fresh);
+        portOf(fresh)?.close(fresh);
       }
       r.sid = r.lastSid;
       r.lastSid = null;
@@ -822,16 +866,17 @@ class MainState extends ChangeNotifier {
       _waiting.remove(sid)?.timer.cancel();
       if (pictureFocused == sid) _blur();
     }
-    final auto = _planRetry(r, failedOpen);
-    if (hint && !auto) this.hint = hintText ?? '${r.appName} 已断开：${disconnectWord(r.reason)}';
+    final auto = _planRetry(r);
+    // A failed open that starts waiting still says why once; later automatic tries stay quiet.
+    if (hint && (!auto || (failedOpen && r.retry?.$1 == 0))) this.hint = hintText ?? '${r.appName} 已断开：${disconnectWord(r.reason)}';
   }
 
   /// Per-record timers of the automatic reconnect (the record's `retry` says the rest).
   final Map<String, Timer> _retryTimers = {};
 
-  /// After [r] went down: schedules the next automatic try when it is due. True: it did (no hint).
-  /// A failed manual open never starts automatic tries.
-  bool _planRetry(SessionRecord r, bool failedOpen) {
+  /// After [r] went down: schedules the next automatic try when it is due. True: it did.
+  /// A failed open (the first one, or a manual reconnect) for a network reason waits too (§5.3.7).
+  bool _planRetry(SessionRecord r) {
     final cur = r.retry;
     final int attempt;
     if (cur != null) {
@@ -840,13 +885,20 @@ class MainState extends ChangeNotifier {
         return false;
       }
       attempt = cur.$1 + 1;
-    } else if (!failedOpen && autoReconnects(r.reason)) {
+    } else if (autoReconnects(r.reason)) {
       attempt = 0;
     } else {
       return false;
     }
-    final wait = Duration(seconds: attempt == 0 ? 1 : math.min(1 << attempt, 15));
     _retryTimers.remove(r.key)?.cancel();
+    // An offline host: no timer, the hub watches for it (`presence online` reconnects). A relayed
+    // session while the link to the relay is down: no timer, the link coming back reconnects.
+    if (waitsForPeer(r) || _held(r)) {
+      r.retry = (attempt, DateTime.now());
+      _syncWatch(r.id);
+      return true;
+    }
+    final wait = Duration(seconds: attempt == 0 ? 1 : math.min(1 << attempt, 15));
     r.retry = (attempt, DateTime.now().add(wait));
     _retryTimers[r.key] = Timer(wait, () {
       _retryTimers.remove(r.key);
@@ -856,8 +908,13 @@ class MainState extends ChangeNotifier {
         notifyListeners();
         return;
       }
+      if (_held(r)) {
+        notifyListeners(); // the wait word changes; the link coming back reconnects
+        return;
+      }
       reconnect(r.key, auto: true);
     });
+    _syncWatch(r.id);
     return true;
   }
 
@@ -865,6 +922,90 @@ class MainState extends ChangeNotifier {
   void _stopRetry(SessionRecord r) {
     _retryTimers.remove(r.key)?.cancel();
     r.retry = null;
+    _syncWatch(r.id);
+  }
+
+  /// The level of the link to the relay last seen (`HubClient.net`), to see it come back.
+  NetLevel? _netLevel;
+
+  /// The link to the relay is down (the network marker's 断开).
+  bool get netDown => hub?.net?.level == NetLevel.down;
+
+  /// [r] goes (or went) through the relay: its path says so, or its failure was the relay's word.
+  bool relayed(SessionRecord r) {
+    if (r.path == 'relay') return true;
+    final w = disconnectWord(r.reason);
+    return w == '对方离线' || w == '中继连不上';
+  }
+
+  /// What [r]'s automatic retry waits for, for the disconnected stage (`waitWord`).
+  String? waitWordOf(SessionRecord r) => waitWord(r, relayed: relayed(r), net: hub?.net?.level);
+
+  /// [r] waits for its host to come online (an automatic retry after 对方离线).
+  bool waitsForPeer(SessionRecord r) => r.retry != null && disconnectWord(r.reason) == '对方离线';
+
+  /// [r]'s automatic retry waits for the link to the relay.
+  bool _held(SessionRecord r) => relayed(r) && netDown;
+
+  /// Hosts the hub was asked to watch (`{"cmd":"watch"}`).
+  final Set<String> _watching = {};
+
+  /// Tells the hub to watch host [id] while a record of it waits for it, and to stop after.
+  void _syncWatch(String id) {
+    final h = hub;
+    if (h == null || !h.alive) {
+      _watching.clear();
+      return;
+    }
+    final want = _records.values.any((r) => r.id == id && r.phase == Phase.disconnected && waitsForPeer(r));
+    if (want == _watching.contains(id)) return;
+    want ? _watching.add(id) : _watching.remove(id);
+    h.watch(id, want);
+  }
+
+  /// Host [id] came online: its records waiting for it reconnect, one every 200 ms. The hub's
+  /// watch ended with that answer.
+  void _peerBack(String id) {
+    _watching.remove(id);
+    _retryEach([
+      for (final r in _records.values)
+        if (r.id == id && r.phase == Phase.disconnected && waitsForPeer(r)) r,
+    ]);
+  }
+
+  /// The link to the relay is back: relayed records waiting on it reconnect, one every 200 ms.
+  /// Those waiting for an offline host keep waiting for it.
+  void _netBack() {
+    _retryEach([
+      for (final r in _records.values)
+        if (r.phase == Phase.disconnected && r.retry != null && relayed(r) && !waitsForPeer(r)) r,
+    ]);
+  }
+
+  /// Reconnects [rs] automatically, the first at once, each next one 200 ms later, so they do not
+  /// all ask the relay in the same instant.
+  void _retryEach(List<SessionRecord> rs) {
+    for (final (i, r) in rs.indexed) {
+      _retryTimers.remove(r.key)?.cancel();
+      _retryTimers[r.key] = Timer(Duration(milliseconds: 200 * i), () {
+        _retryTimers.remove(r.key);
+        if (_disposed || _records[r.key] != r || r.retry == null) return;
+        if (r.phase != Phase.disconnected || !hubUsable) return;
+        reconnect(r.key, auto: true);
+      });
+    }
+  }
+
+  /// A live relayed session of host [id] whose far segment (relay to the host) is weak.
+  bool peerWeak(String id) {
+    for (final r in _records.values) {
+      if (r.id != id || r.phase != Phase.live || r.path != 'relay') continue;
+      final rs = r.sid == null ? null : remote[r.sid];
+      if (rs == null) continue;
+      final seg = segments(path: r.path, wholeMs: rs.rttMs, net: hub?.net);
+      if (seg.peer != null && seg.peer! >= weakRttMs) return true;
+    }
+    return false;
   }
 
   /// 「停止」 on the disconnected stage.
@@ -896,7 +1037,7 @@ class MainState extends ChangeNotifier {
     _stopRetry(r);
     final oldGroups = groups;
     final old = r.lastSid;
-    if (old != null) port?.close(old); // reconnected but not swapped yet: the old session is still open
+    if (old != null) portOf(old)?.close(old); // reconnected but not swapped yet: the old session is still open
     for (final sid in [r.sid, old]) {
       if (sid == null) continue;
       remote.remove(sid)?.dispose();
@@ -931,9 +1072,11 @@ class MainState extends ChangeNotifier {
     final fresh = r.sid;
     if (old == null || fresh == null) return;
     final rs = remote[fresh];
-    if (rs == null || !rs.windows.any((w) => w.hasPicture)) return;
+    // A terminal has no picture: its first window table is what it shows.
+    final shows = termPort?.owns(fresh) == true ? rs?.windows.isNotEmpty : rs?.windows.any((w) => w.hasPicture);
+    if (rs == null || shows != true) return;
     final detached = remote[old]?.detached ?? false;
-    port?.close(old);
+    portOf(old)?.close(old);
     _dropOld(old, fresh);
     final start = _starts.remove(old);
     if (start != null) resources.linkDown(start); // what it was still sending ends 没传完
@@ -942,10 +1085,10 @@ class MainState extends ChangeNotifier {
       if (pictureFocused == old) {
         // A move: the keys typed into the old picture go on into the new one.
         pictureFocused = fresh;
-        port?.pictureFocus(fresh);
+        portOf(fresh)?.pictureFocus(fresh);
       }
       // A move keeps the session where the user put it: off the stage stays off.
-      if (detached && port?.supportsDetach == true) port!.detach(fresh);
+      if (detached && portOf(fresh)?.supportsDetach == true) portOf(fresh)!.detach(fresh);
     }
     _rerouteEnd(r, true);
   }
@@ -958,6 +1101,13 @@ class MainState extends ChangeNotifier {
   Future<void> _connect(SessionRecord r, {bool reconnect = false, bool quiet = false, bool reroute = false}) async {
     final x = reroute ? _reroutes[r] : null;
     final old = r.sid;
+    final term = isTermApp(r.app);
+    if (term && termPort == null) {
+      // No terminal port here: nothing is opened, the record fails like a failed open.
+      _disconnect(r, noTermPortWord, hint: true, failedOpen: true);
+      notifyListeners();
+      return;
+    }
     final HubSession s;
     try {
       s = await hub!.open(r.id, r.app, embed: true, reconnect: reconnect);
@@ -1007,25 +1157,26 @@ class MainState extends ChangeNotifier {
     r.sid = s.sid;
     _starts[s.sid] = _Start(s.sid);
     final rs = RemoteSession(s.sid, r.appName, onResize: (w, a, b) {
-          if (_liveSid(s.sid)) port!.resize(s.sid, w, a, b);
+          if (_liveSid(s.sid)) portOf(s.sid)!.resize(s.sid, w, a, b);
         },
         onSelect: (w) {
-          if (_liveSid(s.sid)) port!.selectWindow(s.sid, w);
+          if (_liveSid(s.sid)) portOf(s.sid)!.selectWindow(s.sid, w);
         },
         onStream: (_) => _applyFps(),
-        onDropBlock: (n) => port!.composerDropBlock(s.sid, n),
+        onDropBlock: (n) => portOf(s.sid)!.composerDropBlock(s.sid, n),
         appId: r.app,
         onReturn: () {
-          if (_liveSid(s.sid)) port!.key(s.sid, returnKeyCode, 0);
+          if (_liveSid(s.sid)) portOf(s.sid)!.key(s.sid, returnKeyCode, 0);
         },
         onSelectInput: (id) {
-          if (_liveSid(s.sid)) port!.selectInput(s.sid, id);
+          if (_liveSid(s.sid)) portOf(s.sid)!.selectInput(s.sid, id);
         },
         onClick: (w, at) {
           if (!_liveSid(s.sid)) return;
-          port!.mouse(s.sid, w, 'down', 'left', at.dx, at.dy, 1);
-          port!.mouse(s.sid, w, 'up', 'left', at.dx, at.dy, 1);
-        });
+          portOf(s.sid)!.mouse(s.sid, w, 'down', 'left', at.dx, at.dy, 1);
+          portOf(s.sid)!.mouse(s.sid, w, 'up', 'left', at.dx, at.dy, 1);
+        },
+        followNewTabs: !term);
     final prof = profiles.resolve(r.app);
     rs.setProfile(prof);
     if (prof.name != null) _log('rapp: app 配置「${prof.name}」');
@@ -1038,7 +1189,7 @@ class MainState extends ChangeNotifier {
     try {
       final p = s.port, tk = s.token;
       if (p == null || tk == null) throw 'rapp-hub 没有给出嵌入端口';
-      await port!.start(StartArgs(s.sid, p, tk, c.mode, c.fps, c.density));
+      await (term ? termPort! : port!).start(StartArgs(s.sid, p, tk, c.mode, c.fps, c.density));
     } catch (e) {
       if (r.sid != s.sid) return; // it was dropped while starting: that already settled the record
       if (x != null && _reroutes[r] == x && !r.ending && _records[r.key] == r) {
@@ -1073,9 +1224,10 @@ class MainState extends ChangeNotifier {
       return;
     }
     r.retry = null;
-    // start carries no pin: a pinned session's first set_stream says so.
+    _syncWatch(r.id);
+    // start carries no pin: with automatic saving off, the first set_stream says so.
     _sentFps[s.sid] = (c.mode, c.fps, c.density, false);
-    if (rs.streamPinned) _applyFps();
+    if (_pinned) _applyFps();
     if (!reconnect && !quiet) hint = '已打开 ${r.appName} @ ${deviceName(r.id)}';
     notifyListeners();
   }
@@ -1112,7 +1264,9 @@ class MainState extends ChangeNotifier {
   final Set<String> _moving = {};
 
   /// [r] is still the user's live session: not ended, disconnected or gone.
+  /// A terminal never moves: its reopen would wait for a picture it never shows ([_swapIfReady]).
   bool _movable(SessionRecord r) =>
+      !isTermApp(r.app) &&
       _records[r.key] == r && r.phase == Phase.live && !r.ending && !r.userDisconnect && r.sid != null;
 
   /// Reopens the live embedded session [key] over the hub's current link (`reconnect: true`). Its
@@ -1158,7 +1312,7 @@ class MainState extends ChangeNotifier {
       _waiting.remove(fresh)?.timer.cancel();
       _quiet.add(fresh);
       if (_hubHas(fresh)) hub!.close(fresh);
-      port?.close(fresh);
+      portOf(fresh)?.close(fresh);
       r.sid = old;
       r.lastSid = null;
     }
@@ -1235,7 +1389,7 @@ class MainState extends ChangeNotifier {
       if (e.key == key && e.sid != null) {
         final rs = remote[e.sid];
         if (rs != null) {
-          if (rs.detached) port?.raiseDetached(e.sid!);
+          if (rs.detached) portOf(e.sid!)?.raiseDetached(e.sid!);
         } else {
           hub!.focus(e.sid!);
         }
@@ -1293,7 +1447,7 @@ class MainState extends ChangeNotifier {
     final last = _sentHidden[rs.sid] ?? const <int>[];
     if (!listEquals(ids, last)) {
       _sentHidden[rs.sid] = ids;
-      if (_liveSid(rs.sid)) port?.setHidden(rs.sid, ids);
+      if (_liveSid(rs.sid)) portOf(rs.sid)?.setHidden(rs.sid, ids);
     }
     final n = rs.hidden.length;
     if (n != (_loggedHidden[rs.sid] ?? 0)) {
@@ -1322,9 +1476,9 @@ class MainState extends ChangeNotifier {
     final w = rs == null ? null : _windowById(rs, window);
     if (rs == null || w == null || !_liveSid(rs.sid)) return;
     if (w.decorated) {
-      port!.closeWindow(rs.sid, window);
+      portOf(rs.sid)!.closeWindow(rs.sid, window);
     } else {
-      port!.key(rs.sid, escKeyCode, 0);
+      portOf(rs.sid)!.key(rs.sid, escKeyCode, 0);
     }
   }
 
@@ -1433,7 +1587,8 @@ class MainState extends ChangeNotifier {
       await reconnect(key);
     } else {
       final rs = _stageRemote(r);
-      if (rs != null && rs.detached) port!.raiseDetached(rs.sid);
+      // A terminal is never detached: it has no windows of its own to raise.
+      if (rs != null && rs.detached && !isTermApp(r.app)) portOf(rs.sid)!.raiseDetached(rs.sid);
       hint = '已切到 $appName';
       notifyListeners();
     }
@@ -1444,7 +1599,7 @@ class MainState extends ChangeNotifier {
     if (embeds) {
       // The runner's own windows: raised with or without the hub.
       final rs = currentRemote;
-      if (rs != null && rs.detached && !currentDisconnected) port!.raiseDetached(rs.sid);
+      if (rs != null && rs.detached && !currentDisconnected) portOf(rs.sid)!.raiseDetached(rs.sid);
       return;
     }
     final c = current;
@@ -1465,7 +1620,7 @@ class MainState extends ChangeNotifier {
     final c = entryFor(key);
     if (c?.sid == null) return false;
     if (remote.containsKey(c!.sid)) {
-      port!.close(c.sid!);
+      portOf(c.sid!)!.close(c.sid!);
     } else {
       hub!.close(c.sid!);
     }
@@ -1485,12 +1640,12 @@ class MainState extends ChangeNotifier {
         // new session's end takes the old one with it (`_endRecord`), nothing goes back.
         _rerouteEnd(r, false);
         r.ending = true;
-        port!.close(r.sid!);
+        portOf(r.sid!)!.close(r.sid!);
         said = '正在结束 ${r.appName}';
       case Phase.disconnected:
         // Nothing is running on the link; its last picture goes with the record.
         final sid = r.sid;
-        if (sid != null) port!.close(sid);
+        if (sid != null) portOf(sid)!.close(sid);
         _endRecord(r);
         said = '已结束 ${r.appName}';
       case Phase.connecting:
@@ -1517,6 +1672,7 @@ class MainState extends ChangeNotifier {
         _appNames['$id/${a.app}'] = a.name;
       }
       _setOnline(id, true, apps: apps);
+      unawaited(hub!.terms(id).then((_) {}, onError: (_) {}));
     } catch (e) {
       _setOnline(id, false, error: '$e');
     }
@@ -1604,6 +1760,13 @@ class MainState extends ChangeNotifier {
 
   void setStartFullscreen(bool v) {
     prefs.startFullscreen = v;
+    _save();
+  }
+
+  /// 「网络差时自动省流量」: saved, and every live session told at once.
+  void setAutoSaveTraffic(bool v) {
+    prefs.autoSaveTraffic = v;
+    _applyFps();
     _save();
   }
 
@@ -1834,7 +1997,8 @@ class MainState extends ChangeNotifier {
       hint = '本机副本不在了';
       notifyListeners();
     } else if (canCopy(e)) {
-      p.clipPick(_hubSid(e.sid), e.clip, false);
+      final sid = _hubSid(e.sid);
+      portOf(sid)!.clipPick(sid, e.clip, false);
     }
   }
 
@@ -1851,7 +2015,8 @@ class MainState extends ChangeNotifier {
     }
     if (!canPin(e)) return;
     resources.beginPin(e.seq);
-    final r = await p.fetchClip(_hubSid(e.sid), e.clip);
+    final sid = _hubSid(e.sid);
+    final r = await portOf(sid)!.fetchClip(sid, e.clip);
     if (_disposed) return;
     if (resources.entry(e.seq) == null) {
       final copy = r.copy;
@@ -1898,7 +2063,7 @@ class MainState extends ChangeNotifier {
 
   void cancelTransfer(TransferRow t) {
     final sid = _hubSid(t.sid);
-    if (_starts[sid] == t.sid) port?.cancelTransfer(sid, id: t.id); // never a new start's same id
+    if (_starts[sid] == t.sid) portOf(sid)?.cancelTransfer(sid, id: t.id); // never a new start's same id
   }
 
   Future<void> reveal(TransferRow t) async {
@@ -1919,6 +2084,7 @@ class MainState extends ChangeNotifier {
     hub?.removeListener(_onHub);
     profiles.removeListener(_onProfiles);
     _portSub?.cancel();
+    _termSub?.cancel();
     _blockedTimer?.cancel();
     for (final t in _retryTimers.values) {
       t.cancel();

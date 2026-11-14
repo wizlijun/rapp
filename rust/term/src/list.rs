@@ -128,6 +128,7 @@ mod tests {
             cols: 80,
             rows: 24,
             dead,
+            active: false,
         }
     }
 

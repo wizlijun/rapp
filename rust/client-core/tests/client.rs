@@ -21,7 +21,7 @@ fn hello_matches_swift_wire_layout() {
         None,
     )
     .unwrap();
-    let mut expected = vec![9, 3, 0, b'a', b'b', b'c', 15, 0];
+    let mut expected = vec![10, 3, 0, b'a', b'b', b'c', 15, 0];
     expected.extend(b"com.example.App");
     expected.extend([2, 5, 0, 0, 128, 63]);
     assert_eq!(a.hello(1.), packet(1, expected));
@@ -294,7 +294,7 @@ fn menu_and_window_validation() {
 #[test]
 fn v5_clipboard_bounds_and_legacy_selection() {
     let address = Address::parse("rapp://host/?token=x", None).unwrap();
-    assert_eq!(address.hello(1.)[5], 9);
+    assert_eq!(address.hello(1.)[5], 10);
     let text = "中文 clipboard";
     let mut payload = 1u32.to_le_bytes().to_vec();
     payload.extend([0, 0]);
@@ -483,9 +483,19 @@ fn decodes_weak_strictly() {
     assert!(decode(28, &[1, 0]).is_err());
 }
 #[test]
-fn hello_announces_version_9() {
+fn ping_pong_saving_match_swift_wire_layout() {
+    assert_eq!(ping(1), vec![31, 4, 0, 0, 0, 1, 0, 0, 0]);
+    assert!(matches!(decode(32, &[2, 0, 0, 0]).unwrap(), Incoming::Pong(2)));
+    assert!(matches!(decode(33, &[1]).unwrap(), Incoming::Saving(1)));
+    assert!(matches!(decode(33, &[2]).unwrap(), Incoming::Saving(2)));
+    assert!(decode(33, &[3]).is_err());
+    assert!(decode(32, &[2, 0, 0]).is_err());
+    assert!(decode(32, &[2, 0, 0, 0, 0]).is_err());
+}
+#[test]
+fn hello_announces_version_10() {
     let a = Address::parse("rapp://host/?token=x", None).unwrap();
-    assert_eq!(a.hello(1.)[5], 9);
+    assert_eq!(a.hello(1.)[5], 10);
 }
 
 mod v9 {
