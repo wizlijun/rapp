@@ -42,6 +42,8 @@ class StreamMenuAnchor extends StatefulWidget {
     this.onToggleDetach,
     this.onRememberStream,
     this.onOpenProfile,
+    this.forcedRelay,
+    this.onToggleRoute,
     this.onMarkInput,
     this.onClearInput,
     this.parts = allMenuParts,
@@ -106,6 +108,12 @@ class StreamMenuAnchor extends StatefulWidget {
   final VoidCallback? onRememberStream;
   final VoidCallback? onOpenProfile;
 
+  /// Whether this session's host is forced onto the relay; null hides 「改走中继」/「恢复自动选路」 (no relay set).
+  final bool? forcedRelay;
+
+  /// Flips [forcedRelay]; null greys the item (no hub to ask).
+  final VoidCallback? onToggleRoute;
+
   /// 「标记输入区」 (the next click on the picture marks it) and 「清除输入区标记」.
   final VoidCallback? onMarkInput;
   final VoidCallback? onClearInput;
@@ -143,6 +151,8 @@ class _StreamMenuAnchorState extends State<StreamMenuAnchor> {
         onToggleDetach: widget.onToggleDetach,
         onRememberStream: widget.onRememberStream,
         onOpenProfile: widget.onOpenProfile,
+        forcedRelay: widget.forcedRelay,
+        onToggleRoute: widget.onToggleRoute,
         clips: widget.clips,
         canCopy: widget.canCopy,
         canInsert: widget.canInsert,
@@ -256,6 +266,8 @@ class StreamMenu extends StatefulWidget {
     this.onToggleDetach,
     this.onRememberStream,
     this.onOpenProfile,
+    this.forcedRelay,
+    this.onToggleRoute,
     this.onMarkInput,
     this.onClearInput,
     this.parts = allMenuParts,
@@ -290,6 +302,8 @@ class StreamMenu extends StatefulWidget {
   final VoidCallback? onToggleDetach;
   final VoidCallback? onRememberStream;
   final VoidCallback? onOpenProfile;
+  final bool? forcedRelay;
+  final VoidCallback? onToggleRoute;
 
   @override
   State<StreamMenu> createState() => _StreamMenuState();
@@ -309,6 +323,11 @@ class _StreamMenuState extends State<StreamMenu> {
   void _then(VoidCallback action) {
     action();
     widget.onClose();
+  }
+
+  String _pathWord() {
+    final w = routeWord(widget.path, forced: widget.forcedRelay == true);
+    return w.isEmpty ? widget.path : w;
   }
 
   @override
@@ -360,7 +379,17 @@ class _StreamMenuState extends State<StreamMenu> {
   /// 会话: the path and state, disconnect or reconnect, detach, top-left, end.
   List<Widget> _sessionGroup(RappTokens t, int? window, bool reduced) => [
         _head(t, '会话'),
-        _Item('路径 ${pathLabels[widget.path] ?? widget.path} · ${widget.status}', enabled: false),
+        _Item('路径 ${_pathWord()} · ${widget.status}', enabled: false),
+        if (widget.forcedRelay != null && !widget.reconnecting)
+          _Item(
+            widget.forcedRelay! ? '恢复自动选路' : '改走中继',
+            enabled: widget.onToggleRoute != null,
+            // Close first: the switch may reopen this very session.
+            onTap: () {
+              widget.onClose();
+              widget.onToggleRoute!();
+            },
+          ),
         if (widget.disconnected)
           _Item(widget.reconnectWord, enabled: widget.onReconnect != null, onTap: () => _then(widget.onReconnect!))
         else if (!widget.reconnecting) ...[

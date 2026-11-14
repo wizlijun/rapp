@@ -77,7 +77,8 @@ class Stage extends StatelessWidget {
             ],
           );
         } else {
-          final path = pathLabels[cur.path];
+          final word = routeWord(cur.path, forced: state.forcedRelay(cur.id));
+          final path = word.isEmpty ? null : word;
           body = CustomPaint(
             foregroundPainter: _DashedBorder(t.line),
             child: Padding(

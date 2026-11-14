@@ -6,7 +6,8 @@
 //! A does not log pings either. A host reached through the relay is probed with the relay's `connect`
 //! (online iff it answers ok), never with a relayed stream. The relay counts `unknown id` against
 //! this device, so a probe asks it only about hosts it may know (`link::probe_asks_relay`), and not
-//! again in this run about one it said it does not know.
+//! again in this run about one it said it does not know. An offline `presence` carries the `error`
+//! that says why.
 
 use crate::link::QUIET;
 use crate::Hub;
@@ -44,7 +45,11 @@ pub(crate) async fn run(hub: Arc<Hub>, every: Duration) {
             if last.insert(host.id.clone(), online) != Some(online) {
                 hub.log.event(Lvl::Info, "presence", json!({"id":host.id,"online":online}));
             }
-            hub.emit(json!({"event":"presence","id":host.id,"online":online}), &None).await;
+            let mut ev = json!({"event":"presence","id":host.id,"online":online});
+            if let (false, Err(e)) = (online, &r) {
+                ev["error"] = format!("{e:#}").into();
+            }
+            hub.emit(ev, &None).await;
         }
     }
 }

@@ -4,6 +4,10 @@ import 'workspace_store.dart';
 
 const pathLabels = {'lan': '局域网', 'direct': '直连', 'relay': '中继'};
 
+/// The label of [path]; 「中继（强制）」 when the host is forced onto a relay it is on. Unknown → ''.
+String routeWord(String? path, {bool forced = false}) =>
+    forced && path == 'relay' ? '中继（强制）' : (pathLabels[path] ?? '');
+
 class SessionEntry {
   const SessionEntry({
     required this.sid,

@@ -73,7 +73,7 @@ void main() {
       t.emit({'event': 'presence', 'id': '111', 'online': true});
       t.emit({'event': 'presence', 'id': '222', 'online': false});
       await Future<void>.delayed(Duration.zero);
-      expect(hub.takePresence(), [(id: '111', online: true), (id: '222', online: false)]);
+      expect(hub.takePresence(), [(id: '111', online: true, error: null), (id: '222', online: false, error: null)]);
       expect(hub.takePresence(), isEmpty);
       t.emit({'event': 'apps', 'id': '111', 'path': 'lan', 'apps': [], 'req': req});
       expect((await f).id, '111');
@@ -86,7 +86,89 @@ void main() {
         t.emit({'event': 'presence', 'id': '111', 'online': i.isEven});
       }
       await Future<void>.delayed(Duration.zero);
-      expect(hub.takePresence(), [(id: '222', online: false), (id: '111', online: false)]);
+      expect(hub.takePresence(), [(id: '222', online: false, error: null), (id: '111', online: false, error: null)]);
+    });
+
+    test('presence carries the error when offline', () async {
+      t.emit({'event': 'presence', 'id': '111', 'online': false, 'error': 'relay unreachable: timed out'});
+      t.emit({'event': 'presence', 'id': '222', 'online': true});
+      await Future<void>.delayed(Duration.zero);
+      expect(hub.takePresence(), [
+        (id: '111', online: false, error: 'relay unreachable: timed out'),
+        (id: '222', online: true, error: null),
+      ]);
+    });
+
+    test('hosts carry route', () async {
+      t.emit({
+        'event': 'hosts',
+        'hosts': [
+          {'id': '1', 'name': 'a', 'route': 'relay'},
+          {'id': '2', 'name': 'b'},
+        ],
+      });
+      await Future<void>.delayed(Duration.zero);
+      expect(hub.hosts[0].forcedRelay, isTrue);
+      expect(hub.hosts[0].route, 'relay');
+      expect(hub.hosts[1].forcedRelay, isFalse);
+      expect(hub.hosts[1].route, isNull);
+    });
+
+    test('path events update hostPaths and queue the latest per host', () async {
+      t.emit({'event': 'path', 'id': '1', 'path': 'relay'});
+      t.emit({'event': 'path', 'id': '2', 'path': 'direct'});
+      t.emit({'event': 'path', 'id': '1', 'path': 'lan'});
+      await Future<void>.delayed(Duration.zero);
+      expect(hub.hostPaths, {'1': 'lan', '2': 'direct'});
+      expect(hub.takePaths(), [(id: '2', path: 'direct'), (id: '1', path: 'lan')]);
+      expect(hub.takePaths(), isEmpty);
+      expect(hub.hostPaths['1'], 'lan');
+    });
+
+    test('a hosts list drops the paths of removed hosts; set_home and hub exit forget them all', () async {
+      t.emit({'event': 'path', 'id': '1', 'path': 'relay'});
+      t.emit({'event': 'path', 'id': '2', 'path': 'lan'});
+      t.emit({'event': 'hosts', 'hosts': [{'id': '2', 'name': 'b'}]});
+      await Future<void>.delayed(Duration.zero);
+      expect(hub.hostPaths, {'2': 'lan'});
+      final f = hub.setHome('/x');
+      t.emit({'event': 'home_set', 'req': t.sent.last['req']});
+      await f;
+      expect(hub.hostPaths, isEmpty);
+      t.emit({'event': 'path', 'id': '2', 'path': 'lan'});
+      await Future<void>.delayed(Duration.zero);
+      await t.die();
+      await Future<void>.delayed(Duration.zero);
+      expect(hub.hostPaths, isEmpty);
+    });
+
+    test('setRoute sends set_route and waits for hosts', () async {
+      var done = false;
+      final f = hub.setRoute('1', 'relay').then((_) => done = true);
+      final cmd = t.sent.last;
+      expect(cmd, {'cmd': 'set_route', 'id': '1', 'route': 'relay', 'req': anything});
+      await Future<void>.delayed(Duration.zero);
+      expect(done, isFalse);
+      t.emit({
+        'event': 'hosts',
+        'req': cmd['req'],
+        'hosts': [
+          {'id': '1', 'name': 'a', 'route': 'relay'},
+        ],
+      });
+      await f;
+      expect(hub.hosts.single.forcedRelay, isTrue);
+    });
+
+    test('setRoute fails on an error reply', () async {
+      final f = hub.setRoute('9', 'auto');
+      t.emit({'event': 'error', 'req': t.sent.last['req'], 'error': 'unknown host'});
+      await expectLater(f, throwsA(isA<HubException>()));
+    });
+
+    test('routeFailed sends route_failed and waits for nothing', () {
+      hub.routeFailed('1');
+      expect(t.sent.last, {'cmd': 'route_failed', 'id': '1'});
     });
 
     test('note sends what and windows', () {
@@ -128,6 +210,22 @@ void main() {
       final h = await f;
       expect(h.name, 'mac-a');
       expect(hub.hosts.single.id, '123456789');
+    });
+
+    test('host_added for a saved host keeps its route and LAN addresses', () async {
+      t.emit({
+        'event': 'hosts',
+        'hosts': [
+          {'id': '123456789', 'name': 'old', 'lan': ['192.168.1.5:22028'], 'route': 'relay'},
+        ],
+      });
+      await Future<void>.delayed(Duration.zero);
+      final f = hub.addHost('123456789', '');
+      t.emit({'event': 'host_added', 'req': t.sent.last['req'], 'id': '123456789', 'name': 'mac-a'});
+      await f;
+      final h = hub.hosts.single;
+      expect((h.name, h.forcedRelay), ('mac-a', true));
+      expect(h.lan, ['192.168.1.5:22028']);
     });
 
     test('error event with req fails the matching request', () async {
