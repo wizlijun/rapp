@@ -37,6 +37,9 @@ public final class PacedSender {
 
     private static let sliceLimit = 32768
     private static let firstSliceLimit = 8192
+    /// Each settle frame is one slice of at most this many bytes, so a frame
+    /// captured meanwhile waits for at most one such slice.
+    private static let settleLimit = 8192
 
     private let now: () -> TimeInterval
     private let transmit: (CanvasRect, FramePayload) -> Void
@@ -56,7 +59,6 @@ public final class PacedSender {
     /// The last time the canvas became more approximate (or first inexact); settle waits 0.3 s from here.
     private var divergedAt: TimeInterval?
     private var lastRegion = CanvasRect(x: 0, y: 0, w: 0, h: 0)
-    private var lastCaptured: TimeInterval = 0
     private static let settleDelay = 0.3
 
     public var onWeakChange: ((Bool) -> Void)?
@@ -99,13 +101,20 @@ public final class PacedSender {
     }
 
     /// Call every 100 ms: once the canvas has differed from the exact quantization for 300 ms and
-    /// nothing is queued or held, sends the correcting slices.
+    /// nothing is queued or held, sends the next correcting frame (one slice of at most 8 KB).
+    /// Later calls go on with the next part without another wait, as long as nothing is queued or
+    /// held; a captured frame goes out before the next part, and one that adds approximation
+    /// restarts the 300 ms.
     public func settleIfIdle() {
         guard encoder.needsSettle, queue.isEmpty, latest == nil, let at = divergedAt,
               now() - at >= Self.settleDelay else { return }
-        let slices = encoder.encodeSettle(limit: Self.sliceLimit)
-        divergedAt = nil
-        queue = slices.map { Slice(region: lastRegion, payload: $0, captured: lastCaptured) }
+        let started = now()
+        let slices = encoder.encodeSettle(limit: Self.settleLimit)
+        let t = now()
+        encodeMsMax = max(encodeMsMax ?? 0, Int(((t - started) * 1000).rounded()))
+        if !encoder.needsSettle { divergedAt = nil }
+        // Stamped now: the capture is old, but the correction was made just now.
+        queue = slices.map { Slice(region: lastRegion, payload: $0, captured: t) }
         pump()
     }
 
@@ -156,7 +165,6 @@ public final class PacedSender {
                 encodeMsMax = max(encodeMsMax ?? 0, ms)
                 if slices.first?.isFull == true { fullFrames += 1 }
                 lastRegion = o.region
-                lastCaptured = o.captured
                 if !encoder.needsSettle {
                     divergedAt = nil
                 } else if encoder.lastEncodeAddedApproximation || divergedAt == nil {

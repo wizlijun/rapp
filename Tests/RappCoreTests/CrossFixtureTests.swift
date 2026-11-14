@@ -147,9 +147,10 @@ final class CrossFixtureTests: XCTestCase {
                     }
                 }
                 try emit(slices)
-                if enc.needsSettle {
+                while enc.needsSettle {
                     let settle = enc.encodeSettle(limit: 500)
-                    settles += settle.isEmpty ? 0 : 1
+                    if settle.isEmpty { break }
+                    settles += 1
                     try emit(settle)
                 }
             }

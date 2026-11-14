@@ -30,6 +30,22 @@ final class DeflateTests: XCTestCase {
         XCTAssertEqual(try InflateStream().decompress(DeflateStream().compress(small), limit: 1000), small)
     }
 
+    /// A try over the limit leaves the stream as it was; one within it is the same as `compress`.
+    func testCompressIfAtMostCommitsOnlyWhenItFits() throws {
+        let a = pseudoRandom(count: 4096, seed: 1), b = pseudoRandom(count: 3000, seed: 2)
+        let d = DeflateStream(), i = InflateStream(), ref = DeflateStream()
+        XCTAssertEqual(try i.decompress(d.compress(a)), a)
+        _ = ref.compress(a)
+        let over = d.compress(b, ifAtMost: 100)
+        XCTAssertFalse(over.fits)
+        XCTAssertGreaterThan(over.data.count, 100)
+        let fits = d.compress(a, ifAtMost: 8192)
+        XCTAssertTrue(fits.fits)
+        XCTAssertEqual(fits.data, ref.compress(a))
+        XCTAssertEqual(try i.decompress(fits.data), a)
+        XCTAssertEqual(try i.decompress(d.compress(b)), b)
+    }
+
     func testContextIsKeptBetweenCalls() {
         let a = pseudoRandom(count: 4096, seed: 1)
         let d = DeflateStream()

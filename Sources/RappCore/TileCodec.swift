@@ -143,8 +143,8 @@ public final class FrameEncoder {
     /// count; that approximation was already there. Full frames and
     /// `encodeSettle` clear it.
     public private(set) var lastEncodeAddedApproximation = false
-    /// True from such an encode until a full frame or `encodeSettle` makes the
-    /// canvas exact again.
+    /// True from such an encode until a full frame, or the `encodeSettle` call
+    /// that sends the last differing tile, makes the canvas exact again.
     public private(set) var needsSettle = false
     /// The decoder's canvas as this encoder models it (for tests).
     internal var model: [UInt8] { previous }
@@ -157,6 +157,9 @@ public final class FrameEncoder {
     private var detector = ScrollDetector()
     /// At most this many voted scroll offsets are tried per frame (plus `lastDy`).
     private static let maxCandidates = 3
+    /// Compressed / uncompressed size of the last settle frame, to guess how
+    /// many tiles the next one can take.
+    private var settleRatio = 1.0
 
     public init(mode: Mode) {
         self.mode = mode
@@ -194,14 +197,88 @@ public final class FrameEncoder {
         return Int(max(-65536, min(65536, d)))
     }
 
-    /// Encodes the last frame again comparing samples only, with no copy tiles
-    /// and no canvas move, so the canvas ends equal to that frame's samples;
-    /// clears `needsSettle`. Returns `[]` when `needsSettle` is false (or no
-    /// tile differs). Slices are cut like `encodeSlices` with `limit`.
+    /// Sends the next part of the correction: the tiles where the canvas
+    /// differs from the last frame's samples (compared on samples only), top
+    /// to bottom, as one independent frame of one slice: `start` and `end`,
+    /// never full, no move, no copy tiles. The slice's data is at most `limit`
+    /// bytes (checked by compressing; only a frame of a single tile, which is
+    /// always sent, could be larger). Repeated calls end with the canvas equal
+    /// to the last frame's samples; a frame encoded in between is fine, later
+    /// calls go on from it.
+    ///
+    /// Returns at most one payload, and `[]` when `needsSettle` is false, no
+    /// tile differs or the next frame must be full anyway. `needsSettle` stays
+    /// true until the call that sends the last differing tile.
     public func encodeSettle(limit: Int) -> [FramePayload] {
-        guard needsSettle else { return [] }
-        return encodeFrame(samples: lastSamples, raw: previousKey, width: previousWidth, height: previousHeight,
-                           region: previousRegion, limit: limit, firstLimit: nil, settle: true)
+        guard needsSettle, !forceFull else { return [] }
+        let width = previousWidth, height = previousHeight
+        let (cols, rows) = tileGrid(width: width, height: height)
+        let rowBytes = width * bps
+        // Tile bytes to gather: what the last settle frame suggests fits, a little under the limit.
+        let budget = max(limit, Int(Double(limit) * 0.9 / settleRatio))
+        var body: [UInt8] = [0, 0]
+        // The differing tiles gathered, and where each ends in `body`.
+        var tiles = [(x0: Int, y0: Int, tw: Int, th: Int, end: Int)]()
+        var more = false
+        lastSamples.withUnsafeBufferPointer { cur in
+        previous.withUnsafeBufferPointer { old in
+            scan: for ty in 0..<rows {
+                let y0 = ty * tileSize, th = min(tileSize, height - y0)
+                for tx in 0..<cols {
+                    let x0 = tx * tileSize, tw = min(tileSize, width - x0)
+                    if tileEqual(cur, old, stride: rowBytes, x0: x0 * bps, y0: y0, w: tw * bps, h: th) { continue }
+                    if !tiles.isEmpty && body.count >= budget {
+                        more = true
+                        break scan
+                    }
+                    let index = ty * cols + tx
+                    body.append(UInt8(index & 0xFF))
+                    body.append(UInt8(index >> 8))
+                    encodeTile(cur, rowBytes: rowBytes, x0: x0, y0: y0, tw: tw, th: th, into: &body)
+                    tiles.append((x0, y0, tw, th, body.count))
+                }
+            }
+        }
+        }
+        lastEncodeDiverged = false
+        lastEncodeAddedApproximation = false
+        guard !tiles.isEmpty else {
+            needsSettle = false
+            return []
+        }
+
+        // Compress the first n tiles; while that is over the limit, try fewer.
+        var n = tiles.count
+        var data: [UInt8]
+        while true {
+            var group = Array(body[0..<tiles[n - 1].end])
+            group[0] = UInt8(n & 0xFF)
+            group[1] = UInt8(n >> 8)
+            if n == 1 {
+                data = deflate.compress(group)
+                break
+            }
+            let trial = deflate.compress(group, ifAtMost: limit)
+            if trial.fits {
+                data = trial.data
+                break
+            }
+            n = max(1, min(n - 1, Int(Double(n) * Double(limit) * 0.9 / Double(trial.data.count))))
+        }
+        if n < tiles.count { more = true }
+        settleRatio = min(1, max(0.05, Double(data.count) / Double(tiles[n - 1].end)))
+
+        // The canvas now has the last frame's samples in the tiles sent.
+        for t in tiles[0..<n] {
+            for y in t.y0..<(t.y0 + t.th) {
+                let o = y * rowBytes + t.x0 * bps
+                previous.replaceSubrange(o..<(o + t.tw * bps), with: lastSamples[o..<(o + t.tw * bps)])
+            }
+        }
+        needsSettle = more
+        lastTileCount = n
+        return [FramePayload(mode: mode, width: UInt16(width), height: UInt16(height), flags: [.start, .end],
+                             data: data)]
     }
 
     /// Encodes the tiles that differ from the client's canvas and cuts them into
@@ -235,13 +312,6 @@ public final class FrameEncoder {
     /// caller must set `forceFull`.
     public func encodeSlices(samples: [UInt8], raw: [UInt8]? = nil, width: Int, height: Int,
                              region: CanvasRect? = nil, limit: Int, firstLimit: Int? = nil) -> [FramePayload] {
-        encodeFrame(samples: samples, raw: raw, width: width, height: height, region: region, limit: limit,
-                    firstLimit: firstLimit, settle: false)
-    }
-
-    /// `encodeSlices`; with `settle` raw pixels are not compared and no copy tiles are sent.
-    private func encodeFrame(samples: [UInt8], raw: [UInt8]?, width: Int, height: Int, region: CanvasRect?,
-                             limit: Int, firstLimit: Int?, settle: Bool) -> [FramePayload] {
         precondition(width > 0 && height > 0 && width <= 0xFFFF && height <= 0xFFFF, "bad frame size")
         precondition(samples.count == width * height * bps, "sample count does not match frame size")
         let (cols, rows) = tileGrid(width: width, height: height)
@@ -264,7 +334,7 @@ public final class FrameEncoder {
             dx = FrameEncoder.pixelOffset(from: previousRegion.x, to: region.x, scale: scale)
             dy = FrameEncoder.pixelOffset(from: previousRegion.y, to: region.y, scale: scale)
             moved = dx != 0 || dy != 0 || width != previousWidth || height != previousHeight
-            key = raw == nil || settle ? nil : previousKey
+            key = raw == nil ? nil : previousKey
             if moved {
                 old = movedCanvas(previous, width: previousWidth, height: previousHeight, bytesPerPixel: bps,
                                   to: width, height, dx: dx, dy: dy)
@@ -290,7 +360,7 @@ public final class FrameEncoder {
         var rawCopies = [(Int, Int, Int, Int, Int)]()
         // Copy tiles per scroll offset used.
         var used = [Int: Int]()
-        let useCopies = copiesEnabled && !full && !settle
+        let useCopies = copiesEnabled && !full
 
         func closeGroup() {
             body[0] = UInt8(count & 0xFF)
@@ -424,7 +494,7 @@ public final class FrameEncoder {
         }
         lastEncodeDiverged = !diverged.isEmpty || !rawCopies.isEmpty
         lastEncodeAddedApproximation = !rawCopies.isEmpty || (!diverged.isEmpty && (dx != 0 || dy != 0))
-        needsSettle = !settle && (lastEncodeDiverged || (needsSettle && !full))
+        needsSettle = lastEncodeDiverged || (needsSettle && !full)
         lastSamples = samples
         previousKey = raw
         previousWidth = width

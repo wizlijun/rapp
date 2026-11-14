@@ -213,6 +213,22 @@ final class PacedSenderTests: XCTestCase {
         XCTFail("never settled")
     }
 
+    /// Calls `settleIfIdle` (draining after each) until it sends nothing more, without moving the
+    /// clock: once settle has started, its later frames need no further wait. Returns the frames sent.
+    @discardableResult
+    private func settleAll(_ s: PacedSender) -> [FramePayload] {
+        var frames = [FramePayload]()
+        for _ in 0..<2000 {
+            let c = sent.count
+            s.settleIfIdle()
+            if sent.count == c { return frames }
+            frames += sent[c...].map(\.payload)
+            drain(s)
+        }
+        XCTFail("settle never finished")
+        return frames
+    }
+
     private func decoded() throws -> [UInt8] {
         let dec = FrameDecoder(mode: .duogray)
         for f in sent { try dec.decode(f.payload) }
@@ -235,9 +251,7 @@ final class PacedSenderTests: XCTestCase {
         s.settleIfIdle()
         XCTAssertEqual(sent.count, before)
         t += 0.02
-        s.settleIfIdle()
-        XCTAssertGreaterThan(sent.count, before)
-        drain(s)
+        XCTAssertFalse(settleAll(s).isEmpty)
         XCTAssertEqual(try decoded(), qb)
         let after = sent.count
         t += 1
@@ -285,9 +299,7 @@ final class PacedSenderTests: XCTestCase {
         drain(s)
         XCTAssertEqual(sent.count, before + bFrames)
         t += 0.31
-        s.settleIfIdle()
-        XCTAssertGreaterThan(sent.count, before + bFrames)
-        drain(s)
+        XCTAssertFalse(settleAll(s).isEmpty)
         XCTAssertEqual(try decoded(), qb)
     }
 
@@ -314,10 +326,7 @@ final class PacedSenderTests: XCTestCase {
             }
             offerRaw(s, f, w2, h)
             drain(s)
-            let c = sent.count
-            s.settleIfIdle()
-            if sent.count > c, settledAt == nil { settledAt = t }
-            drain(s)
+            if !settleAll(s).isEmpty, settledAt == nil { settledAt = t }
         }
         XCTAssertNotNil(settledAt, "settle must run although a tile keeps changing")
         XCTAssertEqual(try decoded(), quantize(f.bgra, w2, h))
@@ -351,9 +360,7 @@ final class PacedSenderTests: XCTestCase {
         s.settleIfIdle()
         XCTAssertEqual(sent.count, before)
         t += 0.02
-        s.settleIfIdle()
-        XCTAssertGreaterThan(sent.count, before)
-        drain(s)
+        XCTAssertFalse(settleAll(s).isEmpty)
         XCTAssertEqual(try decoded(), q)
     }
 
@@ -390,6 +397,103 @@ final class PacedSenderTests: XCTestCase {
         // The held frame goes out next; no correction was queued ahead of it.
         XCTAssertEqual(withSettle.count, plain.count)
         XCTAssertEqual(withSettle.map(\.payload), plain.map(\.payload))
+    }
+
+    /// A terminal page scrolled by `scroll` px in a fixed region, large enough that a duogray
+    /// settle after a 5 px scroll is far over 8 KB, with `typed` dark cells near the bottom right.
+    private func page(_ scroll: Int, typed: Int = 0, w: Int = 1024, h: Int = 768) -> (bgra: [UInt8], region: CanvasRect) {
+        var f = scene(x: 100, y: 50 + scroll, w: w, h: h)
+        f.region = CanvasRect(x: 100, y: 50, w: Float(w), h: Float(h))
+        for c in 0..<typed {
+            for py in (h - 40)..<(h - 24) { for px in (w - 200 + c * 8)..<(w - 194 + c * 8) {
+                let o = (py * w + px) * 4
+                (f.bgra[o], f.bgra[o + 1], f.bgra[o + 2]) = (10, 10, 10)
+            } }
+        }
+        return f
+    }
+
+    func testLargeSettleGoesOutAsIndependentBoundedFrames() throws {
+        let s = make(mode: .duogray)
+        let (w, h) = (1024, 768)
+        offerRaw(s, page(0), w, h)
+        drain(s)
+        offerRaw(s, page(5), w, h)
+        drain(s)
+        let q = quantize(page(5).bgra, w, h)
+        XCTAssertNotEqual(try decoded(), q, "input must really diverge")
+        t += 0.31
+        let frames = settleAll(s)
+        XCTAssertGreaterThan(frames.count, 2, "the settle must really need several frames")
+        for f in frames {
+            XCTAssertEqual(f.flags, [.start, .end])
+            XCTAssertEqual(f.dx, 0)
+            XCTAssertEqual(f.dy, 0)
+            XCTAssertLessThanOrEqual(f.data.count, 8192)
+        }
+        XCTAssertEqual(try decoded(), q)
+        // Done: nothing more, however long the calm.
+        t += 5
+        let after = sent.count
+        s.settleIfIdle()
+        XCTAssertEqual(sent.count, after)
+    }
+
+    /// Typing right after a scroll stops: the keystroke frame waits for at most the one settle
+    /// frame in flight, then the settle goes on and ends at the newest frame's quantization.
+    func testKeystrokeGoesOutBetweenSettleFrames() throws {
+        let s = make(mode: .duogray)
+        let (w, h) = (1024, 768)
+        offerRaw(s, page(0), w, h)
+        drain(s)
+        offerRaw(s, page(5), w, h)
+        drain(s)
+        t += 0.31
+        let before = sent.count
+        s.settleIfIdle()
+        XCTAssertEqual(sent.count, before + 1, "one settle frame per call")
+        XCTAssertEqual(sent[before].payload.flags, [.start, .end])
+        // The keystroke is captured while that settle frame is in flight: it is held, and settle
+        // must not send its next frame ahead of it.
+        let typed = page(5, typed: 3)
+        offerRaw(s, typed, w, h)
+        XCTAssertEqual(sent.count, before + 1)
+        s.settleIfIdle()
+        XCTAssertEqual(sent.count, before + 1)
+        s.ack(processingMs: 0)
+        XCTAssertEqual(sent.count, before + 2)
+        // The frame that went out next carries the typed cells.
+        let dec = FrameDecoder(mode: .duogray)
+        for f in sent { try dec.decode(f.payload) }
+        let qt = quantize(typed.bgra, w, h)
+        for py in (h - 40)..<(h - 24) {
+            let o = py * w + w - 200
+            XCTAssertEqual(Array(dec.samples[o..<(o + 24)]), Array(qt[o..<(o + 24)]), "typed row \(py)")
+        }
+        drain(s)
+        // Settle goes on right away (no new 300 ms: the keystroke added no approximation).
+        XCTAssertGreaterThan(settleAll(s).count, 1)
+        XCTAssertEqual(try decoded(), qt)
+    }
+
+    func testSettleFramesAreStampedAndTimedNow() {
+        let s = make(mode: .duogray)
+        let (w, h) = (1024, 768)
+        offerRaw(s, page(0), w, h)
+        drain(s)
+        offerRaw(s, page(5), w, h)
+        drain(s)
+        _ = s.takeStats()
+        // Long after the capture: the settle frame's latency counts from when it was made.
+        t += 5
+        let before = sent.count
+        s.settleIfIdle()
+        XCTAssertEqual(sent.count, before + 1)
+        t += 0.05
+        s.ack(processingMs: 0)
+        let st = s.takeStats()
+        XCTAssertEqual(st.latencyMs, 50)
+        XCTAssertNotNil(st.encodeMsMax, "the settle encode must be timed")
     }
 
     func testStatsCountFullFramesAndEncodeTime() {

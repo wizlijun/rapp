@@ -443,6 +443,38 @@ final class ScrollCopyTests: XCTestCase {
         return f
     }
 
+    /// Calls `encodeSettle(limit: 8192)` until it returns `[]` (or `calls`
+    /// times), decoding each frame. Every frame must be one independent slice
+    /// (`start` and `end`, not full, no move, no copy tiles) of at most 8192
+    /// bytes. Returns the frames.
+    @discardableResult
+    private func settleAll(_ r: Run, _ what: String, calls: Int = 10_000,
+                           file: StaticString = #filePath, line: UInt = #line) throws -> [FramePayload] {
+        var frames = [FramePayload]()
+        for _ in 0..<calls {
+            let settle = r.enc.encodeSettle(limit: 8192)
+            if settle.isEmpty { break }
+            XCTAssertEqual(settle.count, 1, "settle returned several slices: \(what)", file: file, line: line)
+            for s in settle {
+                XCTAssertEqual(s.flags, [.start, .end], what, file: file, line: line)
+                XCTAssertEqual(s.dx, 0, what, file: file, line: line)
+                XCTAssertEqual(s.dy, 0, what, file: file, line: line)
+                XCTAssertLessThanOrEqual(s.data.count, 8192, what, file: file, line: line)
+                let body = try r.inflate.decompress(s.data)
+                let tiles = wireTiles(body, width: Int(s.width), height: Int(s.height), bps: r.dec.mode.bytesPerSample)
+                XCTAssertNotNil(tiles, what, file: file, line: line)
+                XCTAssertFalse(tiles?.isEmpty ?? true, "empty settle frame: \(what)", file: file, line: line)
+                XCTAssertFalse(tiles?.contains { $0.kind == 5 } ?? true, what, file: file, line: line)
+                try r.dec.decode(s)
+                XCTAssertTrue(r.dec.samples == r.enc.model, "decoder canvas differs from model: \(what)",
+                              file: file, line: line)
+            }
+            frames += settle
+        }
+        if calls == 10_000 { XCTAssertFalse(r.enc.needsSettle, "settle never finished: \(what)", file: file, line: line) }
+        return frames
+    }
+
     func testSettleRestoresExactQuantization() throws {
         // A 5 px scroll (copies matched on raw only) and a 5 px region move
         // (tiles kept on raw only) both leave two-tone samples behind.
@@ -462,30 +494,77 @@ final class ScrollCopyTests: XCTestCase {
             XCTAssertTrue(r.enc.needsSettle, name)
             XCTAssertNotEqual(r.dec.samples, quantized, name)
 
-            let settle = r.enc.encodeSettle(limit: 32768)
-            XCTAssertFalse(settle.isEmpty, name)
-            for (i, s) in settle.enumerated() {
-                XCTAssertFalse(s.isFull, name)
-                XCTAssertFalse(s.flags.contains(.copies), name)
-                XCTAssertEqual(s.flags.contains(.start), i == 0, name)
-                XCTAssertEqual(s.flags.contains(.end), i == settle.count - 1, name)
-                XCTAssertEqual(s.dx, 0, name)
-                XCTAssertEqual(s.dy, 0, name)
-                let body = try r.inflate.decompress(s.data)
-                let tiles = wireTiles(body, width: b.width, height: b.height, bps: 1)
-                XCTAssertNotNil(tiles, name)
-                XCTAssertFalse(tiles?.contains { $0.kind == 5 } ?? true, name)
-                try r.dec.decode(s)
-            }
+            XCTAssertFalse(try settleAll(r, name).isEmpty, name)
             XCTAssertEqual(r.dec.samples, quantized, name)
             XCTAssertEqual(r.enc.model, quantized, name)
             XCTAssertFalse(r.enc.needsSettle, name)
             XCTAssertFalse(r.enc.lastEncodeDiverged, name)
-            XCTAssertEqual(r.enc.encodeSettle(limit: 32768), [], name)
+            XCTAssertEqual(r.enc.encodeSettle(limit: 8192), [], name)
             // The stream goes on from the settled canvas.
             try step(r, b, "\(name) b again")
             XCTAssertEqual(r.dec.samples, quantized, name)
         }
+    }
+
+    /// A 5 px scroll of a page much larger than 8 KB of tiles: the settle comes
+    /// as several independent frames of one slice each, at most 8192 bytes, and
+    /// the canvas ends exactly quantized.
+    func testLargeSettleComesInIndependentBoundedFrames() throws {
+        func page(_ scroll: Int) -> SceneFrame {
+            var f = screen(x: 100, y: 50 + Double(scroll), w: 1024, h: 768, scale: 1)
+            f.region = CanvasRect(x: 100, y: 50, w: 1024, h: 768)
+            return f
+        }
+        let r = run((.duogray, true))
+        try step(r, page(0), "a")
+        try step(r, page(5), "b")
+        XCTAssertTrue(r.enc.needsSettle)
+        let quantized = ScrollScenes.samples(page(5), mode: .duogray)
+        XCTAssertNotEqual(r.dec.samples, quantized, "input must really diverge")
+        let frames = try settleAll(r, "settle")
+        XCTAssertGreaterThan(frames.count, 2, "the settle must really need several frames")
+        XCTAssertTrue(r.dec.samples == quantized)
+        XCTAssertTrue(r.enc.model == quantized)
+        XCTAssertFalse(r.enc.needsSettle)
+        XCTAssertEqual(r.enc.encodeSettle(limit: 8192), [])
+    }
+
+    /// Frames encoded between settle frames go out as usual; the settle then
+    /// goes on against the newest frame and ends at its exact quantization,
+    /// also when that frame scrolls again or adds new raw-only approximation.
+    func testFramesBetweenSettleFramesAreEncodedAndSettleFollowsTheNewest() throws {
+        func page(_ scroll: Int, typed: Int = 0) -> SceneFrame {
+            var f = screen(x: 100, y: 50 + Double(scroll), w: 1024, h: 512, scale: 1)
+            f.region = CanvasRect(x: 100, y: 50, w: 1024, h: 512)
+            // A typed line near the bottom: `typed` dark 8 px cells.
+            for c in 0..<typed {
+                for py in 480..<496 { for px in (c * 8)..<(c * 8 + 6) {
+                    let o = (py * f.width + px) * 4
+                    (f.bgra[o], f.bgra[o + 1], f.bgra[o + 2]) = (10, 10, 10)
+                } }
+            }
+            return f
+        }
+        let r = run((.duogray, true))
+        try step(r, page(0), "a")
+        try step(r, page(5), "b")
+        XCTAssertEqual(try settleAll(r, "first part", calls: 1).count, 1)
+        XCTAssertTrue(r.enc.needsSettle, "the settle must take more than one frame")
+        // A keystroke between two settle frames: encoded normally, from the half-settled canvas.
+        let typed = try step(r, page(5, typed: 3), "typed")
+        XCTAssertFalse(typed.isEmpty)
+        XCTAssertTrue(r.enc.needsSettle)
+        try settleAll(r, "after typing")
+        XCTAssertTrue(r.dec.samples == ScrollScenes.samples(page(5, typed: 3), mode: .duogray))
+        // Another scroll between settle frames: it adds approximation; settle still ends exact.
+        try step(r, page(5, typed: 4), "typed more")
+        try step(r, page(12, typed: 4), "scroll again")
+        XCTAssertEqual(try settleAll(r, "part after scroll", calls: 1).count, 1)
+        try step(r, page(12, typed: 5), "typed during settle")
+        XCTAssertTrue(r.enc.needsSettle)
+        try settleAll(r, "after scroll")
+        XCTAssertTrue(r.dec.samples == ScrollScenes.samples(page(12, typed: 5), mode: .duogray))
+        XCTAssertTrue(r.enc.model == r.dec.samples)
     }
 
     /// Only a raw match that moves the picture adds approximation: a raw copy
