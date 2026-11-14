@@ -1307,6 +1307,7 @@ dependencies = [
  "rapp-conn",
  "rapp-hub",
  "rapp-net",
+ "rapp-relay",
  "rapp-service",
  "rapp-update",
  "rapp-wire",

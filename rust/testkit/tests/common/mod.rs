@@ -58,6 +58,7 @@ pub async fn start_service(home: &Path, bins: &Path, idle: Duration) -> Service 
         runner: Arc::new(FakeRunner::new()),
         update: None,
         data: None,
+        advertise_lan: None,
     })
     .await
     .unwrap()
@@ -79,6 +80,7 @@ pub async fn start_service_with(
         runner,
         update,
         data: None,
+        advertise_lan: None,
     })
     .await
     .unwrap()
@@ -299,4 +301,108 @@ impl Hub {
         self.task.await.unwrap().unwrap();
         rest
     }
+}
+
+// ---- in-process relay ----
+
+/// A relay on an ephemeral UDP port with its own data dir. `restart` brings it back on the same
+/// port and data (so the key and the relay's fingerprint stay valid).
+pub struct RelayRig {
+    pub relay: Option<rapp_relay::server::Relay>,
+    pub data: TempDir,
+    pub key: rapp_wire::Key,
+    pub addr: String,
+}
+
+impl RelayRig {
+    pub async fn start() -> RelayRig {
+        let data = tempfile::tempdir().unwrap();
+        let relay = Self::boot(data.path(), "127.0.0.1:0".parse().unwrap()).await;
+        let key = rapp_wire::Key::new_for_relay(&relay.fp);
+        relay.registry().set_join_hash(&rapp_wire::join_hash(&key.join())).unwrap();
+        let addr = relay.addr.to_string();
+        RelayRig { relay: Some(relay), data, key, addr }
+    }
+
+    async fn boot(data: &Path, listen: SocketAddr) -> rapp_relay::server::Relay {
+        let config = rapp_relay::config::Config { listen, ..Default::default() };
+        let opts = rapp_relay::server::Opts {
+            data: data.to_path_buf(),
+            config,
+            log: rapp_net::log::Log::file(data, "relay.log"),
+            enroll_from_env: false,
+        };
+        rapp_relay::server::Relay::start(opts).await.expect("relay starts")
+    }
+
+    pub async fn stop(&mut self) {
+        if let Some(r) = self.relay.take() {
+            r.stop().await;
+        }
+    }
+
+    pub async fn restart(&mut self) {
+        self.stop().await;
+        // The old socket is released a moment after `stop` returns.
+        let listen: SocketAddr = self.addr.parse().unwrap();
+        for _ in 0..50 {
+            if std::net::UdpSocket::bind(listen).is_ok() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        self.relay = Some(Self::boot(self.data.path(), listen).await);
+    }
+}
+
+/// B's side of the relay: its own endpoint and identity, dialed in with `key`.
+pub async fn relay_conn(
+    rig: &RelayRig,
+    id: &rapp_wire::Identity,
+    key: &rapp_wire::Key,
+) -> (Endpoint, rapp_conn::relay::RelayConn) {
+    let ep = b_endpoint();
+    let conn = tokio::time::timeout(WAIT, rapp_conn::relay::RelayConn::dial(&ep, &rig.addr, key, id))
+        .await
+        .expect("dial in time")
+        .expect("dial");
+    (ep, conn)
+}
+
+/// The service's status once `pred` accepts it (within `WAIT`).
+pub async fn wait_status(ipc: &mut Ipc, pred: impl Fn(&Value) -> bool) -> Value {
+    let deadline = tokio::time::Instant::now() + WAIT;
+    loop {
+        let st = ipc.call(json!({"cmd":"status"})).await;
+        if pred(&st) {
+            return st;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "status never matched: {st}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// A service whose `service.json` already names `relay` and `key`; its LAN address is a dummy.
+pub async fn service_on_relay(addr: &str, key: &rapp_wire::Key) -> TestService {
+    let (home, bins) = (tempfile::tempdir().unwrap(), bins());
+    let cfg = json!({
+        "id": null, "name": "test-a", "password": PASSWORD, "port": 0, "ipc_port": 0,
+        "relay": addr, "key": key.to_string(),
+    });
+    rapp_net::config::write_json(&home.path().join("service.json"), &cfg).unwrap();
+    let svc = Service::start(rapp_service::Opts {
+        home: home.path().to_path_buf(),
+        bin_dir: Some(bins.path().to_path_buf()),
+        gui: None,
+        worker_idle: Duration::from_secs(60),
+        log_dir: home.path().join("logs"),
+        runner: Arc::new(FakeRunner::new()),
+        update: None,
+        data: None,
+        advertise_lan: Some(vec!["127.0.0.1:1".into()]),
+    })
+    .await
+    .unwrap();
+    let id = ipc_once(&svc, home.path(), json!({"cmd":"status"})).await["id"].as_str().unwrap().to_string();
+    TestService { svc, home, bins, id }
 }

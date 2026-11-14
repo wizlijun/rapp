@@ -681,6 +681,7 @@ impl LanA {
                 runner: std::sync::Arc::new(rapp_update::fake::FakeRunner::new()),
                 update: None,
                 data: None,
+                advertise_lan: None,
             };
             match rapp_service::Service::start(opts).await {
                 Ok(s) => {

@@ -99,11 +99,16 @@ impl State {
         self.changed.send_modify(|n| *n += 1);
     }
 
-    /// The relay connection reports where it is; `error` only goes with `"error"`.
-    #[allow(dead_code)] // the relay connection calls it (plan 2a, Task 5)
+    /// The relay connection reports where it is; `error` is the latest failure text (it stays
+    /// while `"connecting"` retries). Logged and announced only when it changes.
     pub fn set_relay_status(&self, status: &'static str, error: Option<String>) {
         let next = (status, error);
         if std::mem::replace(&mut *self.relay.lock().unwrap(), next.clone()) != next {
+            let mut v = json!({"state": status});
+            if let Some(e) = &next.1 {
+                v["error"] = json!(e);
+            }
+            self.log.event(if status == "error" { Lvl::Warn } else { Lvl::Info }, "relay", v);
             self.notify();
         }
     }

@@ -752,6 +752,7 @@ async fn service_with_a_data_dir_commits_its_device_json() {
             no_dev_tools: |_| false,
             ..rapp_service::DataOpts::system(root.clone())
         }),
+        advertise_lan: None,
     })
     .await
     .unwrap();
@@ -796,7 +797,7 @@ async fn set_relay_saves_and_masks() {
     let r = ipc.call(json!({"cmd":"set_relay","relay":"vps:22026","key":key})).await;
     assert_eq!(r, json!({"ok":true}));
     let st = ipc.call(json!({"cmd":"status"})).await;
-    assert_eq!((&st["relay_addr"], &st["has_key"], &st["relay"]), (&json!("vps:22026"), &json!(true), &json!("off")));
+    assert_eq!((&st["relay_addr"], &st["has_key"], &st["relay"]), (&json!("vps:22026"), &json!(true), &json!("connecting")));
     assert!(!st.to_string().contains(&key), "status leaks the key: {st}");
     assert_eq!(ipc.call(json!({"cmd":"show_key"})).await, json!({"ok":true,"key":key}));
     let cfg = service_json_value(a.home.path());
@@ -912,4 +913,161 @@ async fn secrets_not_logged() {
     let log = std::fs::read_to_string(a.home.path().join("logs/service.log")).unwrap();
     let trust_hex: String = key.trust().iter().map(|b| format!("{b:02x}")).collect();
     assert!(!log.contains(&key.to_string()) && !log.contains(&trust_hex));
+}
+
+// ---- the relay connection ----
+
+/// B's relayed request: `relay_to`, TLS, hello and `request` in one go; returns the pipe at the reply.
+async fn relayed(
+    b: &rapp_conn::relay::RelayConn,
+    id: &rapp_wire::Identity,
+    a_id: &str,
+    key: &rapp_wire::Key,
+    request: Value,
+) -> rapp_conn::Pipe {
+    let stream = tokio::time::timeout(WAIT, b.relay_to(a_id)).await.expect("relay_to in time").unwrap();
+    let (mut pipe, facts) = tokio::time::timeout(WAIT, rapp_conn::e2e_connect(stream, id)).await.unwrap().unwrap();
+    let me = rapp_conn::Me { id: "", name: "test-b", key: Some(key) };
+    rapp_conn::send_hello(&mut pipe, &facts, &me).await.unwrap();
+    write_json(&mut pipe, &request).await.unwrap();
+    tokio::time::timeout(WAIT, rapp_conn::read_welcome(&mut pipe, &facts, Some(key), a_id, None)).await.unwrap().unwrap();
+    pipe
+}
+
+#[tokio::test]
+async fn registers_on_the_relay() {
+    let rig = RelayRig::start().await;
+    let a = service_on_relay(&rig.addr, &rig.key).await;
+    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
+    let st = wait_status(&mut ipc, |s| s["relay"] == "connected").await;
+    assert_eq!(st["relay_error"], Value::Null);
+    let b_dir = tempfile::tempdir().unwrap();
+    let (_ep, b) = relay_conn(&rig, &id_of(b_dir.path()), &rig.key).await;
+    let found = tokio::time::timeout(WAIT, b.connect_to(&a.id)).await.unwrap().unwrap();
+    assert_eq!(found.lan, vec!["127.0.0.1:1".to_string()]);
+}
+
+#[tokio::test]
+async fn relayed_request_reaches_the_service() {
+    let rig = RelayRig::start().await;
+    let a = service_on_relay(&rig.addr, &rig.key).await;
+    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
+    wait_status(&mut ipc, |s| s["relay"] == "connected").await;
+    let b_dir = tempfile::tempdir().unwrap();
+    let bid = id_of(b_dir.path());
+    let (_ep, b) = relay_conn(&rig, &bid, &rig.key).await;
+
+    let mut pipe = relayed(&b, &bid, &a.id, &rig.key, json!({"op":"list_apps"})).await;
+    let r = tokio::time::timeout(WAIT, read_json(&mut pipe)).await.unwrap().unwrap();
+    assert_eq!(r["apps"], apps());
+    let paired: Value = serde_json::from_slice(&std::fs::read(a.home.path().join("paired.json")).unwrap()).unwrap();
+    assert_eq!(paired[0]["fp"], json!(bid.fp.to_string()));
+
+    let mut pipe = relayed(&b, &bid, &a.id, &rig.key, json!({"op":"open","app":"com.example.echo"})).await;
+    let r = tokio::time::timeout(WAIT, read_json(&mut pipe)).await.unwrap().unwrap();
+    assert_eq!(r["ok"], true, "{r}");
+    let st = ipc.call(json!({"cmd":"status"})).await;
+    assert_eq!(st["sessions"][0]["path"], "relay");
+    let t = wait_log(a.home.path(), "trust", |v| v["path"] == "relay").await;
+    assert_eq!(t["fp"], json!(bid.fp.to_string()));
+}
+
+#[tokio::test]
+async fn relay_restart_reregisters_within_5s() {
+    let mut rig = RelayRig::start().await;
+    let a = service_on_relay(&rig.addr, &rig.key).await;
+    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
+    wait_status(&mut ipc, |s| s["relay"] == "connected").await;
+    rig.restart().await;
+    // Not `connected` from the old connection: wait for it to drop first, then to come back.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let b_dir = tempfile::tempdir().unwrap();
+    let (_ep, b) = relay_conn(&rig, &id_of(b_dir.path()), &rig.key).await;
+    loop {
+        if tokio::time::timeout(Duration::from_secs(1), b.connect_to(&a.id)).await.is_ok_and(|r| r.is_ok()) {
+            break;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "A did not register again within 5 s");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let st = ipc.call(json!({"cmd":"status"})).await;
+    assert_eq!(st["relay"], "connected", "{st}");
+}
+
+#[tokio::test]
+async fn wrong_relay_half_reports_mismatch() {
+    let rig = RelayRig::start().await;
+    let key = rapp_wire::Key { relay: Some([7u8; 16]), root: rig.key.root };
+    let a = service_on_relay(&rig.addr, &key).await;
+    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
+    let st = wait_status(&mut ipc, |s| s["relay_error"] == "relay identity mismatch").await;
+    assert_eq!(st["relay"], "connecting");
+    // rapp/1 with the password still works.
+    let ep = b_endpoint();
+    let (conn, r) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":PASSWORD})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(req(&conn, json!({"op":"list_apps"})).await["apps"], apps());
+}
+
+#[tokio::test]
+async fn wrong_root_half_reports_bad_key() {
+    let rig = RelayRig::start().await;
+    let key = rapp_wire::Key { relay: rig.key.relay, root: [9u8; 16] };
+    let a = service_on_relay(&rig.addr, &key).await;
+    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
+    let st = wait_status(&mut ipc, |s| s["relay_error"] == "bad key").await;
+    assert_eq!(st["relay"], "connecting");
+    let ep = b_endpoint();
+    let (conn, r) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":PASSWORD})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(req(&conn, json!({"op":"list_apps"})).await["apps"], apps());
+}
+
+#[tokio::test]
+async fn set_relay_reconnects() {
+    let rig = RelayRig::start().await;
+    let a = service().await;
+    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
+    assert_eq!(ipc.call(json!({"cmd":"status"})).await["relay"], "off");
+    let r = ipc.call(json!({"cmd":"set_relay","relay":rig.addr,"key":rig.key.to_string()})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    wait_status(&mut ipc, |s| s["relay"] == "connected").await;
+    wait_log(a.home.path(), "relay", |v| v["state"] == "connected").await;
+    let r = ipc.call(json!({"cmd":"set_relay","relay":"","key":""})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    wait_status(&mut ipc, |s| s["relay"] == "off").await;
+    // The connection was closed: A is offline on the relay.
+    let b_dir = tempfile::tempdir().unwrap();
+    let (_ep, b) = relay_conn(&rig, &id_of(b_dir.path()), &rig.key).await;
+    let deadline = tokio::time::Instant::now() + WAIT;
+    loop {
+        let r = tokio::time::timeout(WAIT, b.connect_to(&a.id)).await.unwrap();
+        if r.is_err() {
+            break;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "A is still registered");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+#[tokio::test]
+async fn relay_secrets_not_logged() {
+    let rig = RelayRig::start().await;
+    let a = service_on_relay(&rig.addr, &rig.key).await;
+    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
+    wait_status(&mut ipc, |s| s["relay"] == "connected").await;
+    ipc.call(json!({"cmd":"show_key"})).await;
+    // A device the relay already enrolled registers whatever the root half says; a wrong relay half
+    // is what fails, and its text goes into the log.
+    let bad = rapp_wire::Key { relay: Some([7u8; 16]), root: [9u8; 16] };
+    ipc.call(json!({"cmd":"set_relay","relay":rig.addr,"key":bad.to_string()})).await;
+    wait_status(&mut ipc, |s| s["relay_error"] == "relay identity mismatch").await;
+    wait_log(a.home.path(), "relay", |v| v["error"] == "relay identity mismatch").await;
+    let log = std::fs::read_to_string(a.home.path().join("logs/service.log")).unwrap();
+    let hex = |b: [u8; 32]| b.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    for key in [&rig.key, &bad] {
+        for secret in [key.to_string(), hex(key.trust()), hex(key.join())] {
+            assert!(!log.contains(&secret), "service.log has a secret of the key");
+        }
+    }
 }

@@ -10,7 +10,7 @@ use rapp_net::crypto::ct_eq;
 use rapp_net::line::{err, ok, read_json, write_json};
 use rapp_net::log::{clean_name, Lvl};
 use rapp_net::msg::Op;
-use rapp_conn::{hello_server, quic_facts, Me, Pipe, Role};
+use rapp_conn::{hello_server, quic_facts, Facts, Me, Pipe, Role};
 use rapp_net::quic::{bi, splice_metered, Meter};
 use rapp_wire::tls::{alpn, ALPN_DEVICE};
 use rapp_wire::Key;
@@ -86,18 +86,13 @@ async fn serve_device(state: Arc<State>, conn: Connection, mut peer: Peer) {
         }
     };
     peer.fp = Some(facts.peer);
-    let (id, name, key) = {
-        let cfg = state.cfg.lock().unwrap();
-        (cfg.id.clone().unwrap_or_default(), cfg.name.clone(), cfg.key.as_deref().and_then(|k| k.parse::<Key>().ok()))
-    };
-    let me = Me { id: &id, name: &name, key: key.as_ref() };
     let hello = async {
         let mut pipe: Pipe = Box::new(bi(conn.accept_bi().await?));
-        let greeted = hello_server(&mut pipe, &facts, &me, &state.paired).await?;
-        anyhow::Ok((pipe, greeted))
+        greet(&state, &mut pipe, &facts, &mut peer).await?;
+        anyhow::Ok(pipe)
     };
-    let (pipe, greeted) = match tokio::time::timeout(AUTH_WAIT, hello).await {
-        Ok(Ok(g)) => g,
+    let pipe = match tokio::time::timeout(AUTH_WAIT, hello).await {
+        Ok(Ok(p)) => p,
         failed => {
             let reason = match failed {
                 Ok(Err(e)) => format!("{e:#}"),
@@ -110,9 +105,6 @@ async fn serve_device(state: Arc<State>, conn: Connection, mut peer: Peer) {
             return;
         }
     };
-    peer.name = Some(clean_name(&greeted.name)).filter(|n| !n.is_empty());
-    let result = if greeted.newly { "paired" } else { "known" };
-    state.log.event(Lvl::Info, "trust", peer.fields(json!({"fp": greeted.fp.to_string(), "result": result})));
     let serve = |pipe: Pipe, state: Arc<State>, peer: Peer, conn: Connection| {
         tokio::spawn(async move {
             // A stream cut off by the connection closing is not worth a line.
@@ -127,6 +119,22 @@ async fn serve_device(state: Arc<State>, conn: Connection, mut peer: Peer) {
     while let Ok(pair) = conn.accept_bi().await {
         serve(Box::new(bi(pair)), state.clone(), peer.clone(), conn.clone());
     }
+}
+
+/// A's side of the hello on a `rapp/2` stream or a relayed one: the key or `paired.json` must
+/// vouch for B. Sets `peer.name` and logs the `trust` line; on failure `hello_server` has already
+/// replied `not trusted`.
+pub(crate) async fn greet(state: &State, pipe: &mut Pipe, facts: &Facts, peer: &mut Peer) -> Result<()> {
+    let (id, name, key) = {
+        let cfg = state.cfg.lock().unwrap();
+        (cfg.id.clone().unwrap_or_default(), cfg.name.clone(), cfg.key.as_deref().and_then(|k| k.parse::<Key>().ok()))
+    };
+    let me = Me { id: &id, name: &name, key: key.as_ref() };
+    let greeted = hello_server(pipe, facts, &me, &state.paired).await?;
+    peer.name = Some(clean_name(&greeted.name)).filter(|n| !n.is_empty());
+    let result = if greeted.newly { "paired" } else { "known" };
+    state.log.event(Lvl::Info, "trust", peer.fields(json!({"fp": greeted.fp.to_string(), "result": result})));
+    Ok(())
 }
 
 /// The first stream must be `{"op":"auth",...}`. None when it passed, else the reason;

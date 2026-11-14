@@ -5,6 +5,7 @@ pub mod config;
 mod data;
 mod ipc;
 mod peer;
+mod relay_link;
 mod state;
 mod update;
 mod workers;
@@ -44,6 +45,8 @@ pub struct Opts {
     pub update: Option<UpdateOpts>,
     /// None: no `device.json`, no git (the testkit).
     pub data: Option<DataOpts>,
+    /// The LAN addresses registered on the relay; None: this machine's own (`rapp_net::addr::lan_addrs`).
+    pub advertise_lan: Option<Vec<String>>,
 }
 
 /// Where the running app is and the updater's timings (online-update plan Task 4).
@@ -145,6 +148,7 @@ impl Service {
             tokio::spawn(peer::accept_loop(state.clone(), endpoint)),
             tokio::spawn(ipc::serve(state.clone(), listener, ipc_token)),
             update::spawn(state.clone()),
+            relay_link::spawn(state.clone(), opts.advertise_lan),
         ];
         if let Some(data) = opts.data {
             let name = state.cfg.lock().unwrap().name.clone();

@@ -29,3 +29,4 @@ rapp-hub.workspace = true
 rapp-update.workspace = true
 rapp-wire.workspace = true
 rapp-conn.workspace = true
+rapp-relay.workspace = true
