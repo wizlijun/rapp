@@ -1,3 +1,4 @@
+import CoreGraphics
 import XCTest
 @testable import RappCore
 
@@ -43,6 +44,8 @@ final class WorkerCLITests: XCTestCase {
                        .serve(HostServeOptions(app: "com.apple.Safari", token: "s3cret", port: 0, bind: "127.0.0.1", json: true)))
         XCTAssertEqual(try host("serve", "--token", "t", "--app", "a"),
                        .serve(HostServeOptions(app: "a", token: "t", port: 47800, bind: nil, json: false)))
+        XCTAssertEqual(try host("serve", "--token", "t", "--app", "desktop:"),
+                       .serve(HostServeOptions(app: "desktop:", token: "t", port: 47800, bind: nil, json: false)))
     }
 
     func testHostServeErrors() {
@@ -153,6 +156,7 @@ final class WorkerCLITests: XCTestCase {
     func testInputEvents() {
         XCTAssertEqual(WorkerEvent.input.jsonLine, #"{"event":"input"}"#)
         XCTAssertEqual(WorkerEvent.inputBlocked(by: "M").jsonLine, #"{"by":"M","event":"input_blocked"}"#)
+        XCTAssertEqual(WorkerEvent.unlock.jsonLine, #"{"event":"unlock"}"#)
     }
 
     // MARK: JSON output
@@ -212,12 +216,20 @@ final class WorkerCLITests: XCTestCase {
     }
 
     func testCommandOutputs() {
-        XCTAssertEqual(versionJSON(), #"{"protocol":9,"version":"0.3.0"}"#)
+        XCTAssertEqual(versionJSON(), #"{"protocol":10,"version":"0.3.0"}"#)
         XCTAssertEqual(checkJSON(screenRecording: true, accessibility: false),
                        #"{"accessibility":false,"screen_recording":true}"#)
         XCTAssertEqual(appsJSON([SharedApp(app: "com.apple.Safari", name: "Safari")]),
                        #"{"apps":[{"app":"com.apple.Safari","name":"Safari"}]}"#)
         XCTAssertEqual(appsJSON([]), #"{"apps":[]}"#)
+        let displays = [
+            DesktopDisplay(id: 7, name: "DELL", main: false, frame: CGRect(x: 1512, y: 0, width: 2560, height: 1440)),
+            DesktopDisplay(id: 1, name: "内建显示器", main: true, frame: CGRect(x: 0, y: 0, width: 1512, height: 982)),
+        ]
+        XCTAssertEqual(appsJSON([SharedApp(app: "com.apple.Safari", name: "Safari")], displays: displays),
+                       #"{"apps":[{"app":"desktop:","displays":[{"height":982,"id":"1","main":true,"name":"内建显示器","width":1512},"#
+                           + #"{"height":1440,"id":"7","main":false,"name":"DELL","width":2560}],"name":"桌面"},"#
+                           + #"{"app":"com.apple.Safari","name":"Safari"}]}"#)
         XCTAssertEqual(appsJSON([], screenRecording: false, accessibility: true),
                        #"{"apps":[],"permissions":{"accessibility":true,"screen_recording":false}}"#)
     }

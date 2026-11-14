@@ -466,8 +466,10 @@ final class Session {
 
         case let .frameAck(processingMs):
             paced?.ack(processingMs: processingMs)
+        case .unlock:
+            break // Task 2: type the password at the lock screen
         case .ready, .error, .frame, .windows, .menuBar, .clip, .pasted, .fetch, .put, .transferStart, .chunk, .inputBlocked, .weak,
-             .inputSource:
+             .inputSource, .screenLocked:
             fail("unexpected message from client")
         }
     }
