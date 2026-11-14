@@ -27,6 +27,16 @@ const MAX_REPLY: usize = 8192;
 /// A pushed stream whose first line does not arrive within this long is dropped.
 const PUSH_LINE_WAIT: Duration = Duration::from_secs(10);
 const DIAL_WAIT: Duration = Duration::from_secs(10);
+/// The relay closes every device's connection with this code when its key is changed (`rotate-key`).
+pub const CLOSE_KEY_CHANGED: u32 = 4;
+/// What the relay answers a device that enrolled before the key changed and has not got the new one,
+/// and the error of a request on a connection that ended because the key changed.
+pub const KEY_CHANGED: &str = "key changed";
+
+/// The relay changed its key since this device enrolled: it needs the new one.
+pub fn is_key_changed(e: &anyhow::Error) -> bool {
+    format!("{e:#}").contains(KEY_CHANGED)
+}
 
 /// What `connect` returns about a registered device.
 #[derive(Debug, Clone, PartialEq)]
@@ -64,6 +74,8 @@ pub struct RelayConn {
     conn: quinn::Connection,
     join: String,
     enrolled: Arc<AtomicBool>,
+    /// The relay answered `key changed` to an `enroll` (and then closes the connection).
+    key_changed: Arc<AtomicBool>,
     pushes: Arc<Mutex<mpsc::UnboundedReceiver<Pushed>>>,
 }
 
@@ -86,7 +98,13 @@ impl RelayConn {
         let (tx, pushes) = mpsc::unbounded_channel();
         tokio::spawn(pump(conn.clone(), tx));
         let join = data_encoding::HEXLOWER.encode(&key.join());
-        Ok(RelayConn { conn, join, enrolled: Arc::new(AtomicBool::new(false)), pushes: Arc::new(Mutex::new(pushes)) })
+        Ok(RelayConn {
+            conn,
+            join,
+            enrolled: Arc::new(AtomicBool::new(false)),
+            key_changed: Arc::new(AtomicBool::new(false)),
+            pushes: Arc::new(Mutex::new(pushes)),
+        })
     }
 
     pub async fn register(&self, id: &str, lan: &[String]) -> Result<()> {
@@ -120,11 +138,15 @@ impl RelayConn {
         if !self.enrolled.load(Ordering::Acquire) {
             self.enroll().await?;
         }
-        let (mut send, recv) = self.conn.open_bi().await?;
-        let mut line = serde_json::to_vec(&Req::Relay { id: id.into() })?;
-        line.push(b'\n');
-        send.write_all(&line).await?;
-        Ok(Box::new(Relaying::new(BufReader::new(tls::bi((send, recv))))))
+        let open = async {
+            let (mut send, recv) = self.conn.open_bi().await?;
+            let mut line = serde_json::to_vec(&Req::Relay { id: id.into() })?;
+            line.push(b'\n');
+            send.write_all(&line).await?;
+            anyhow::Ok(tls::bi((send, recv)))
+        };
+        let io = open.await.map_err(|e| self.why(e))?;
+        Ok(Box::new(Relaying::new(BufReader::new(io), self.clone())))
     }
 
     /// The next push from the relay; `Closed` when the connection ends (and from then on).
@@ -144,8 +166,33 @@ impl RelayConn {
         self.conn.close_reason().is_some()
     }
 
+    /// This connection ended (or is ending) because the relay changed its key: closed with
+    /// `CLOSE_KEY_CHANGED`, or its `enroll` was answered `key changed`.
+    fn ended_for_key(&self) -> bool {
+        let closed_for_key = matches!(
+            self.conn.close_reason(),
+            Some(quinn::ConnectionError::ApplicationClosed(c)) if u64::from(c.error_code) == u64::from(CLOSE_KEY_CHANGED)
+        );
+        closed_for_key || self.key_changed.load(Ordering::Acquire)
+    }
+
+    /// `e`, or `key changed` when the connection ended for that: a request cut off by the close
+    /// would otherwise say `connection lost`.
+    fn why(&self, e: anyhow::Error) -> anyhow::Error {
+        if self.ended_for_key() {
+            anyhow!(KEY_CHANGED)
+        } else {
+            e
+        }
+    }
+
     async fn enroll(&self) -> Result<()> {
-        self.request(&Req::Enroll { join: self.join.clone() }).await?;
+        if let Err(e) = self.request(&Req::Enroll { join: self.join.clone() }).await {
+            if e.to_string() == KEY_CHANGED {
+                self.key_changed.store(true, Ordering::Release);
+            }
+            return Err(e);
+        }
         self.enrolled.store(true, Ordering::Release);
         Ok(())
     }
@@ -167,6 +214,10 @@ impl RelayConn {
 
     /// One request, one reply line; `{"ok":false,"error":e}` is the error `e`.
     async fn request(&self, req: &Req) -> Result<Value> {
+        self.request_once(req).await.map_err(|e| self.why(e))
+    }
+
+    async fn request_once(&self, req: &Req) -> Result<Value> {
         let (mut send, recv) = self.conn.open_bi().await?;
         let mut line = serde_json::to_vec(req)?;
         line.push(b'\n');
@@ -262,6 +313,8 @@ async fn read_line_exact<R: AsyncRead + Unpin>(recv: &mut R) -> Result<Vec<u8>> 
 struct Relaying {
     io: BufReader<BiStream>,
     state: Peek,
+    /// The connection it is on, to tell a read cut off by a key change (`why`).
+    relay: RelayConn,
 }
 
 enum Peek {
@@ -271,13 +324,11 @@ enum Peek {
 }
 
 impl Relaying {
-    fn new(io: BufReader<BiStream>) -> Relaying {
-        Relaying { io, state: Peek::First }
+    fn new(io: BufReader<BiStream>, relay: RelayConn) -> Relaying {
+        Relaying { io, state: Peek::First, relay }
     }
-}
 
-impl AsyncRead for Relaying {
-    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, out: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+    fn poll_read_inner(mut self: Pin<&mut Self>, cx: &mut Context<'_>, out: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
         loop {
             let me = &mut *self;
             match &mut me.state {
@@ -304,6 +355,15 @@ impl AsyncRead for Relaying {
                     }
                 }
             }
+        }
+    }
+}
+
+impl AsyncRead for Relaying {
+    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, out: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+        match ready!(self.as_mut().poll_read_inner(cx, out)) {
+            Err(_) if self.relay.ended_for_key() => Poll::Ready(Err(io::Error::other(KEY_CHANGED))),
+            r => Poll::Ready(r),
         }
     }
 }

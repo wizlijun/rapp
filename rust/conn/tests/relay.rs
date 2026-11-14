@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use rapp_conn::relay::{Pushed, RelayConn};
+use rapp_conn::relay::{is_key_changed, Pushed, RelayConn, CLOSE_KEY_CHANGED, KEY_CHANGED};
 use rapp_conn::{e2e_accept, e2e_connect};
 use rapp_net::log::Log;
 use rapp_relay::config::Config;
@@ -208,6 +208,29 @@ async fn rotate_key_closes_every_device_with_code_4() {
             _ => panic!("expected the connection to be closed"),
         }
     }
+}
+
+#[tokio::test]
+async fn requests_after_a_key_change_say_key_changed() {
+    let r = start().await;
+    let ep = endpoint();
+    let id = Identity::generate().unwrap();
+    let a = dial(&r, &ep, &id).await;
+    a.register(A_ID, &[]).await.unwrap();
+    let rotated = tokio::time::timeout(WAIT, rapp_relay::admin::issue_key(r.data.path(), true)).await.unwrap();
+    assert!(rotated.unwrap().is_some());
+    assert!(matches!(push_skipping_revoked(&a).await, Pushed::Closed { code: CLOSE_KEY_CHANGED, .. }));
+    // On the connection the relay closed for the key change.
+    let e = tokio::time::timeout(WAIT, a.connect_to("987654321")).await.unwrap().unwrap_err();
+    assert_eq!(e.to_string(), KEY_CHANGED);
+    // Dialed anew with the old key: the relay says it, and the requests after say it too (the relay
+    // closes a connection whose enroll failed).
+    let again = dial(&r, &ep, &id).await;
+    let e = tokio::time::timeout(WAIT, again.register(A_ID, &[])).await.unwrap().unwrap_err();
+    assert!(is_key_changed(&e), "{e:#}");
+    assert!(matches!(push_skipping_revoked(&again).await, Pushed::Closed { .. }));
+    let e = tokio::time::timeout(WAIT, again.connect_to("987654321")).await.unwrap().unwrap_err();
+    assert_eq!(e.to_string(), KEY_CHANGED);
 }
 
 #[tokio::test]

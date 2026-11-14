@@ -4,11 +4,11 @@
 
 use crate::peer::{greet, serve_request};
 use crate::state::{Peer, State};
-use rapp_conn::relay::{Pushed, RelayConn};
+use rand::Rng;
+use rapp_conn::relay::{is_key_changed, Pushed, RelayConn, CLOSE_KEY_CHANGED};
 use rapp_conn::{e2e_accept, Pipe};
 use rapp_net::log::Lvl;
-use rapp_wire::Key;
-use rand::Rng;
+use rapp_wire::{join_hash, Key};
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
@@ -32,6 +32,8 @@ enum End {
     Settings,
     /// The relay revoked this device: stay down until the settings change.
     Revoked,
+    /// The relay changed its key and this one is not the new one: stay down until the settings change.
+    KeyChanged,
     /// The relay is restarting: come back after this many ms (plus a little).
     GoingAway(u64),
     /// Could not connect or register, or the relay closed the connection.
@@ -42,6 +44,9 @@ async fn run(state: Arc<State>, lan: Option<Vec<String>>) {
     let mut settings = state.relay_settings.subscribe();
     let mut backoff = BACKOFF_START;
     let mut last_err: Option<String> = None;
+    // The hash of the key in use when the relay first said `key changed` (never the key itself),
+    // until a register succeeds: another key that gets `key changed` too is a wrong new key.
+    let mut changed_from: Option<String> = None;
     loop {
         // Marks the current settings as seen before they are read: a later change wakes every wait.
         settings.borrow_and_update();
@@ -58,7 +63,7 @@ async fn run(state: Arc<State>, lan: Option<Vec<String>>) {
         let lan = lan.clone().unwrap_or_else(|| rapp_net::addr::lan_addrs(state.port));
         let end = tokio::select! {
             _ = settings.changed() => End::Settings,
-            end = session(&state, &addr, &key, &id, &lan, &mut slot) => end,
+            end = session(&state, &addr, &key, &id, &lan, &mut slot, &mut changed_from) => end,
         };
         if let Some(conn) = slot.take() {
             conn.close();
@@ -70,6 +75,23 @@ async fn run(state: Arc<State>, lan: Option<Vec<String>>) {
             }
             End::Revoked => {
                 state.set_relay_status("error", Some("revoked".into()));
+                (backoff, last_err) = (BACKOFF_START, None);
+                if settings.changed().await.is_err() {
+                    return;
+                }
+                continue;
+            }
+            End::KeyChanged => {
+                state.log.event(Lvl::Warn, "relay_key_changed", json!({}));
+                let hash = join_hash(&key.join());
+                let err = match &changed_from {
+                    Some(first) if *first != hash => "bad key",
+                    _ => {
+                        changed_from = Some(hash);
+                        "key changed"
+                    }
+                };
+                state.set_relay_status("error", Some(err.into()));
                 (backoff, last_err) = (BACKOFF_START, None);
                 if settings.changed().await.is_err() {
                     return;
@@ -106,7 +128,8 @@ fn target(state: &State) -> Option<(String, Key, String)> {
 }
 
 /// Connects, registers, then handles pushes until the connection ends. The connection is left in
-/// `slot` so the caller can close it if this future is dropped.
+/// `slot` so the caller can close it if this future is dropped. A register that succeeds clears
+/// `changed_from`.
 async fn session(
     state: &Arc<State>,
     addr: &str,
@@ -114,15 +137,18 @@ async fn session(
     id: &str,
     lan: &[String],
     slot: &mut Option<RelayConn>,
+    changed_from: &mut Option<String>,
 ) -> End {
     let failed = |e: &dyn std::fmt::Display, registered| End::Failed { err: e.to_string(), registered };
+    let refused = |e: &anyhow::Error| if is_key_changed(e) { End::KeyChanged } else { failed(e, false) };
     let conn = match RelayConn::dial(&state.endpoint, addr, key, &state.identity).await {
         Ok(c) => slot.insert(c),
-        Err(e) => return failed(&e, false),
+        Err(e) => return refused(&e),
     };
     if let Err(e) = conn.register(id, lan).await {
-        return failed(&e, false);
+        return refused(&e);
     }
+    *changed_from = None;
     state.set_relay_status("connected", None);
     loop {
         match conn.next_push().await {
@@ -138,6 +164,7 @@ async fn session(
             Ok(Pushed::GoingAway { after_ms }) => return End::GoingAway(after_ms),
             // The first `Closed` is the end; a bad push may be followed by a second.
             Ok(Pushed::Closed { code: 2, .. }) => return End::Revoked,
+            Ok(Pushed::Closed { code: CLOSE_KEY_CHANGED, .. }) => return End::KeyChanged,
             Ok(Pushed::Closed { reason, .. }) => {
                 let err = if reason.is_empty() { "relay closed the connection".to_string() } else { reason };
                 return failed(&err, true);
