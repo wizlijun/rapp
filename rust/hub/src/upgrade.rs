@@ -127,7 +127,7 @@ pub(crate) fn worth_trying(host: Option<&Host>, cached_path: Option<&str>) -> bo
 }
 
 /// This machine's IPv4 addresses, in a fixed order.
-fn local_addrs() -> Vec<std::net::Ipv4Addr> {
+pub(crate) fn local_addrs() -> Vec<std::net::Ipv4Addr> {
     let mut v = rapp_net::addr::local_ipv4s();
     v.sort();
     v

@@ -252,6 +252,7 @@ pub struct Hub {
     pub task: tokio::task::JoinHandle<anyhow::Result<()>>,
     pub home: PathBuf,
     paths: Vec<Value>,
+    nets: Vec<Value>,
 }
 
 impl Hub {
@@ -280,7 +281,7 @@ impl Hub {
             upgrade,
         };
         let task = tokio::spawn(rapp_hub::run(opts, cmd_r, out_w));
-        Hub { w: cmd_w, lines: BufReader::new(out_r).lines(), task, home: home.to_path_buf(), paths: Vec::new() }
+        Hub { w: cmd_w, lines: BufReader::new(out_r).lines(), task, home: home.to_path_buf(), paths: Vec::new(), nets: Vec::new() }
     }
 
     pub async fn send(&mut self, v: Value) {
@@ -297,15 +298,39 @@ impl Hub {
         serde_json::from_str(&line).unwrap()
     }
 
-    /// The next event that is not a `path` event (those are kept for `wait_path` / `take_paths`).
+    /// The next event that is not a `path` or `net` event (those are kept for `wait_path` /
+    /// `take_paths` and `wait_net`).
     pub async fn next(&mut self) -> Value {
         loop {
             let v = self.next_any().await;
-            if v["event"] != "path" {
+            match v["event"].as_str() {
+                Some("path") => self.paths.push(v),
+                Some("net") => self.nets.push(v),
+                _ => return v,
+            }
+        }
+    }
+
+    /// Waits up to `within` for a `net` event that `pred` accepts, dropping the `net` events
+    /// before it; other events read meanwhile are dropped too (none may be an error).
+    pub async fn wait_net(&mut self, within: Duration, pred: impl Fn(&Value) -> bool) -> Value {
+        if let Some(i) = self.nets.iter().position(&pred) {
+            return self.nets.drain(..=i).last().unwrap();
+        }
+        self.nets.clear();
+        let deadline = tokio::time::Instant::now() + within;
+        loop {
+            let v = tokio::time::timeout_at(deadline, self.next_any()).await.expect("net event in time");
+            assert_ne!(v["event"], "error", "{v}");
+            if v["event"] == "net" && pred(&v) {
                 return v;
             }
-            self.paths.push(v);
         }
+    }
+
+    /// The `net` events set aside so far, oldest first; clears them.
+    pub fn take_nets(&mut self) -> Vec<Value> {
+        std::mem::take(&mut self.nets)
     }
 
     /// Waits (within `WAIT`) for the `path` event `id` → `path`, dropping the `path` events before it
@@ -337,14 +362,14 @@ impl Hub {
         self.next().await
     }
 
-    /// Closes stdin and waits for the hub to exit; returns remaining events (`path` events left out).
+    /// Closes stdin and waits for the hub to exit; returns remaining events (`path` and `net` events left out).
     pub async fn finish(mut self) -> Vec<Value> {
         self.w.shutdown().await.unwrap();
         drop(self.w);
         let mut rest = Vec::new();
         while let Ok(Some(l)) = tokio::time::timeout(Duration::from_secs(10), self.lines.next_line()).await.unwrap() {
             let v: Value = serde_json::from_str(&l).unwrap();
-            if v["event"] != "path" {
+            if v["event"] != "path" && v["event"] != "net" {
                 rest.push(v);
             }
         }

@@ -241,6 +241,11 @@ impl RelayConn {
         LinkStats { rtt: self.conn.rtt(), rx_datagrams: s.udp_rx.datagrams, lost: s.path.lost_packets, sent: s.path.sent_packets }
     }
 
+    /// Tells this connection from a later one dialed in its place.
+    pub fn id(&self) -> usize {
+        self.conn.stable_id()
+    }
+
     /// The connection has ended (by either side); a closed one is dialed anew, not reused.
     pub fn is_closed(&self) -> bool {
         self.conn.close_reason().is_some()
