@@ -103,14 +103,16 @@ public final class PacedSender {
         divergedAt = nil
     }
 
-    /// Call every 100 ms: once the canvas has differed from the exact quantization for 300 ms and
-    /// nothing is queued or held, sends the next correcting frame (one slice of at most 8 KB).
+    /// Call every 100 ms: once the canvas has differed from the exact quantization for 300 ms,
+    /// nothing is queued or held and a send slot is free, sends the next correcting frame (one slice of at most 8 KB).
     /// Later calls go on with the next part without another wait, as long as nothing is queued or
     /// held; a captured frame goes out before the next part, and one that adds approximation
     /// restarts the 300 ms.
     public func settleIfIdle() {
-        guard encoder.needsSettle, queue.isEmpty, latest == nil, let at = divergedAt,
-              now() - at >= Self.settleDelay else { return }
+        // A free send slot too: a settle frame left waiting in the queue would hold up a
+        // keystroke captured after it.
+        guard encoder.needsSettle, queue.isEmpty, latest == nil, pacer.inFlight < pacer.cap(now: now()),
+              let at = divergedAt, now() - at >= Self.settleDelay else { return }
         let started = now()
         let slices = encoder.encodeSettle(limit: Self.settleLimit)
         let t = now()

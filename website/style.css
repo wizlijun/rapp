@@ -16,7 +16,7 @@ main{max-width:none}
 .hero .download-meta{font-size:10px}
 .hero .platforms{gap:16px}
 .hero .platforms a,.hero .platforms span{font-size:10px}
-.relay{max-width:800px;margin:0 auto}
+.relay{width:100%;margin:0}
 .product-illustration{min-width:0;margin:0;color:var(--text)}
 .product-scene{display:block;width:100%;height:auto;overflow:visible;font-family:var(--font)}
 .scene-label{fill:var(--muted);font-size:9px;letter-spacing:.7px}
@@ -42,8 +42,11 @@ main{max-width:none}
 .scene-note-paper{fill:var(--raise);stroke:var(--muted);stroke-opacity:.45;stroke-width:.8}
 .scene-note-fold{fill:none;stroke:var(--muted);stroke-opacity:.45;stroke-width:.8}
 .scene-context-text{fill:var(--text);font-size:10px}
-.product-illustration figcaption{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:10px;line-height:1.8;padding:5px 0 0 8.15%}
+.product-illustration figcaption{display:flex;justify-content:space-between;gap:12px;color:var(--muted);font-size:10px;line-height:1.8;padding:5px 0 0}
 [lang=ja] .hero h1,[lang=zh-Hans] .hero h1{font-size:clamp(40px,4.2vw,54px)}
-@media(max-width:1000px){main{max-width:800px}.hero{grid-template-columns:1fr;gap:36px;padding-top:54px;padding-bottom:42px}.hero h1{font-size:clamp(50px,7.8vw,70px)}.hero .intro{max-width:none}.product-illustration{width:100%;max-width:570px;justify-self:center}[lang=ja] .hero h1,[lang=zh-Hans] .hero h1{font-size:clamp(40px,6vw,60px)}}
-@media(max-width:640px){.hero{padding-top:42px;gap:28px}.hero h1{font-size:50px}.hero .intro{font-size:12px}.product-illustration figcaption{font-size:9px;gap:8px;padding-left:4.5%}[lang=ja] .hero h1,[lang=zh-Hans] .hero h1{font-size:41px}}
+@media(max-width:1000px){.hero{grid-template-columns:1fr;gap:36px;padding-top:54px;padding-bottom:42px}.hero h1{font-size:clamp(50px,7.8vw,70px)}.hero .intro{max-width:none}.product-illustration{width:100%;max-width:570px;justify-self:center}[lang=ja] .hero h1,[lang=zh-Hans] .hero h1{font-size:clamp(40px,6vw,60px)}}
+@media(max-width:640px){.hero{padding-top:42px;gap:28px}.hero h1{font-size:50px}.hero .intro{font-size:12px}.product-illustration figcaption{font-size:9px;gap:8px}[lang=ja] .hero h1,[lang=zh-Hans] .hero h1{font-size:41px}}
 @media(max-width:640px){.scene-label,.scene-app-name,.scene-pad-name,.scene-tab-text,.scene-code,.scene-input{font-size:15px}.scene-device-label{font-size:13px}.scene-context-text{font-size:12px}}
+
+.recommendation{color:var(--muted);font-size:10px;line-height:1.8;margin:4px 0 0}
+[lang=ja] .hero h1{font-size:clamp(22px,6.7vw,36px)}

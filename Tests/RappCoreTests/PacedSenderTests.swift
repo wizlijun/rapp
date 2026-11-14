@@ -495,6 +495,38 @@ final class PacedSenderTests: XCTestCase {
         XCTAssertEqual(try decoded(), qt)
     }
 
+    /// A settle tick while the link is full makes nothing: no settle frame may wait in the queue,
+    /// where a keystroke captured just after would have to queue behind it.
+    func testSettleTickOnFullLinkQueuesNothing() throws {
+        let s = make(mode: .duogray)
+        let (w, h) = (1024, 768)
+        offerRaw(s, page(0), w, h)
+        drain(s)
+        offerRaw(s, page(5), w, h)
+        drain(s)
+        t += 0.31
+        let before = sent.count
+        s.settleIfIdle()
+        XCTAssertEqual(sent.count, before + 1)
+        s.settleIfIdle()   // the one slot is taken
+        XCTAssertEqual(sent.count, before + 1)
+        // The keystroke arrives after that tick: it must go out on the next ack, not a settle frame.
+        let typed = page(5, typed: 3)
+        offerRaw(s, typed, w, h)
+        s.ack(processingMs: 0)
+        XCTAssertEqual(sent.count, before + 2)
+        let dec = FrameDecoder(mode: .duogray)
+        for f in sent { try dec.decode(f.payload) }
+        let qt = quantize(typed.bgra, w, h)
+        for py in (h - 40)..<(h - 24) {
+            let o = py * w + w - 200
+            XCTAssertEqual(Array(dec.samples[o..<(o + 24)]), Array(qt[o..<(o + 24)]), "typed row \(py)")
+        }
+        drain(s)
+        XCTAssertGreaterThan(settleAll(s).count, 1)
+        XCTAssertEqual(try decoded(), qt)
+    }
+
     func testSettleFramesAreStampedAndTimedNow() {
         let s = make(mode: .duogray)
         let (w, h) = (1024, 768)
