@@ -222,18 +222,32 @@ class _ComposerBarState extends State<ComposerBar> {
                         canRequestFocus: false,
                         skipTraversal: true,
                         onKeyEvent: _onKey,
-                        child: TextField(
-                          key: const Key('composer-field'),
-                          controller: _m.controller,
-                          focusNode: _field,
-                          minLines: 1,
-                          maxLines: 6,
-                          keyboardType: TextInputType.multiline,
-                          style: TextStyle(color: t.text),
-                          decoration: InputDecoration(
-                            hintText: '发给 ${widget.session.appName} 的文字（Enter 发送；空着按 Enter 发回车）',
-                            isDense: true,
-                          ),
+                        child: ValueListenableBuilder(
+                          valueListenable: _m.controller,
+                          builder: (context, value, _) {
+                            final composing = value.composing.isValid && !value.composing.isCollapsed;
+                            // A tap during composition moves the caret, and the
+                            // input method then commits its preedit at the old
+                            // spot and starts it again at the new one — every
+                            // letter lands in the text twice. While composing,
+                            // taps cannot reposition the caret.
+                            return AbsorbPointer(
+                              absorbing: composing,
+                              child: TextField(
+                                key: const Key('composer-field'),
+                                controller: _m.controller,
+                                focusNode: _field,
+                                minLines: 1,
+                                maxLines: 6,
+                                keyboardType: TextInputType.multiline,
+                                style: TextStyle(color: t.text),
+                                decoration: InputDecoration(
+                                  hintText: '发给 ${widget.session.appName} 的文字（Enter 发送；空着按 Enter 发回车）',
+                                  isDense: true,
+                                ),
+                              ),
+                            );
+                          },
                         ),
                       ),
                     ),
