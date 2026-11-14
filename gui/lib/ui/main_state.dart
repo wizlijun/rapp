@@ -631,7 +631,7 @@ class MainState extends ChangeNotifier {
 
     if (h.lastError != _lastError) {
       _lastError = h.lastError;
-      if (_lastError != null) hint = hubWord(_lastError!);
+      if (_lastError != null) hint = disconnectWord(_lastError!);
     }
     notifyListeners();
   }
@@ -664,7 +664,7 @@ class MainState extends ChangeNotifier {
     _quiet.removeWhere((sid) => !_hubHas(sid));
     if (h.lastError != _lastError) {
       _lastError = h.lastError;
-      if (_lastError != null) hint = hubWord(_lastError!);
+      if (_lastError != null) hint = disconnectWord(_lastError!);
     }
     notifyListeners();
   }
@@ -1252,7 +1252,7 @@ class MainState extends ChangeNotifier {
     } catch (e) {
       _pending.remove(key);
       final missing = missingFromError('$e');
-      hint = missing == null ? hubWord('$e') : remoteHint(deviceName(id), missing);
+      hint = missing == null ? disconnectWord('$e') : remoteHint(deviceName(id), missing);
       _entries = _mapEntries();
       // Back to what was current before, if it is still open. Not selected by this open (全部打开
       // stopped on it): nothing to go back to that is known.
@@ -1507,7 +1507,7 @@ class MainState extends ChangeNotifier {
     try {
       await hub!.refreshHosts();
     } catch (e) {
-      hint = hubWord('$e');
+      hint = disconnectWord('$e');
     }
     _entries = _mapEntries();
     notifyListeners();
@@ -1539,7 +1539,7 @@ class MainState extends ChangeNotifier {
         _saveWorkspace();
       }
     } catch (e) {
-      hint = hubWord('$e');
+      hint = disconnectWord('$e');
     }
     _entries = _mapEntries();
     notifyListeners();

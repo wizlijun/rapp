@@ -75,6 +75,7 @@ String disconnectWord(String? raw) {
   if (raw.contains('relay not set')) return '没设中继，请用 ID@IP 添加';
   if (raw.contains('relay unreachable')) return '中继连不上';
   if (raw.contains('relay identity mismatch')) return '中继的身份对不上，检查接入点和 key';
+  if (raw.contains('key changed')) return '中继换了 key，请到 本机 → 输入新 key';
   if (raw.contains('bad key')) return 'key 不对';
   if (raw.contains('host key mismatch')) return '对方的设备密钥变了';
   if (raw.contains('not trusted')) return '对方不认这台设备（key 不同？）';

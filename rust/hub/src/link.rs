@@ -11,7 +11,7 @@ use crate::hosts::Host;
 use crate::Hub;
 use anyhow::{anyhow, bail, Context, Result};
 use quinn::{Connection, Endpoint};
-use rapp_conn::relay::{Found, RelayConn};
+use rapp_conn::relay::{refused_key, Found, RelayConn};
 use rapp_conn::{e2e_connect, quic_facts, read_welcome, send_hello, Accepted, Me, Pipe, Role};
 use rapp_net::addr::{is_private, split_host_ref};
 use rapp_net::line::{read_json, write_json};
@@ -78,9 +78,11 @@ fn cacheable(host: Option<&Host>, path: &str) -> bool {
     host.is_some_and(|h| !h.forced_relay() || path == "relay")
 }
 
-/// The connection to the relay and the settings it was dialed with: a change of any redials.
+/// The connection to the relay and the settings it was dialed with: a change of any redials. Kept
+/// after the relay refused the key, so that the same key is not dialed again.
 pub struct RelayCache {
     addr: String,
+    /// In memory only; never logged.
     key_text: String,
     /// The device it was dialed as.
     fp: Fp,
@@ -241,6 +243,10 @@ impl Hub {
 
     /// The connection to the relay for the settings as they are now, dialed when there is none, it has
     /// ended or the settings changed. None: no relay or no key set.
+    ///
+    /// When the relay refused the key (`key changed`, `bad key`), that is the answer, without
+    /// dialing, until the key (or the relay) is changed: the relay locks out a device that keeps
+    /// trying a wrong key. This covers the user's requests and presence probes alike.
     pub(crate) async fn relay(&self) -> Result<Option<(RelayConn, Arc<Key>)>> {
         let (home, identity) = self.at_home();
         let settings = rapp_conn::settings::load(&home);
@@ -248,8 +254,13 @@ impl Hub {
         let key_text = key.to_string();
         let mut cache = self.relay.lock().await;
         if let Some(c) = cache.as_ref() {
-            if c.addr == addr && c.key_text == key_text && c.fp == identity.fp && !c.conn.is_closed() {
-                return Ok(Some((c.conn.clone(), c.key.clone())));
+            if c.addr == addr && c.key_text == key_text && c.fp == identity.fp {
+                if let Some(why) = c.conn.refused() {
+                    return Err(anyhow!(why));
+                }
+                if !c.conn.is_closed() {
+                    return Ok(Some((c.conn.clone(), c.key.clone())));
+                }
             }
             c.conn.close();
             *cache = None;
@@ -318,8 +329,9 @@ impl Hub {
         let relay = match relay {
             Ok(Some((relay, _))) => relay,
             Ok(None) => bail!("relay not set: add the host as id@ip"),
-            // The dial says `relay unreachable: ...` itself; other failures (a wrong relay identity) get it.
-            Err(e) if is_relay_unreachable(&e) => return Err(e),
+            // The dial says `relay unreachable: ...` itself, and a refused key is the relay's answer;
+            // other failures (a wrong relay identity) get it.
+            Err(e) if is_relay_unreachable(&e) || refused_key(&e).is_some() => return Err(e),
             Err(e) => bail!("relay unreachable: {e:#}"),
         };
         match self.relay_connect(&relay, &host.id).await {

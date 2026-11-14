@@ -61,8 +61,12 @@ async fn wrong_key_is_refused_audited_and_backs_off() {
     let wrong = Key::new_for_relay(&r.relay.fp);
     // Every failed enroll ends its connection, so each attempt dials again.
     for _ in 0..5 {
-        let v = FakeDevice::dial(&r).await.enroll(&wrong).await;
-        assert_eq!(v, json!({"ok": false, "error": "bad key"}));
+        let d = FakeDevice::dial(&r).await;
+        assert_eq!(d.enroll(&wrong).await, json!({"ok": false, "error": "bad key"}));
+        // Closed with `bad key` (code 5): a client stops until its key changes.
+        let e = timeout(WAIT, d.conn.closed()).await.expect("closed within WAIT");
+        assert_eq!(app_close_code(&e), Some(5), "{e:?}");
+        assert!(matches!(&e, quinn::ConnectionError::ApplicationClosed(c) if &c.reason[..] == b"bad key"), "{e:?}");
     }
     // Locked now: even the right key is refused, and not by checking it.
     let d = FakeDevice::dial(&r).await;
@@ -189,6 +193,9 @@ async fn device_cap_and_per_ip_rate_are_enforced() {
     assert_eq!(a.enroll(&r.key).await["ok"], true);
     let c = FakeDevice::dial(&r).await;
     assert_eq!(c.enroll(&r.key).await, json!({"ok": false, "error": "limit"}));
+    // Any failure but a wrong key keeps closing with code 3.
+    let e = timeout(WAIT, c.conn.closed()).await.expect("closed after a failed enroll");
+    assert_eq!(app_close_code(&e), Some(3), "{e:?}");
     let limits = audit_lines(&r, "limit");
     assert_eq!(limits.len(), 1, "{limits:?}");
     assert_eq!(limits[0]["what"], "enroll_per_ip_per_min");
@@ -202,10 +209,10 @@ async fn a_failed_enroll_ends_the_connection() {
     let wrong = Key::new_for_relay(&r.relay.fp);
     let d = FakeDevice::dial(&r).await;
     assert_eq!(d.enroll(&wrong).await, json!({"ok": false, "error": "bad key"}));
-    // The reply arrived, then the connection closed: no second enroll on it.
+    // The reply arrived, then the connection closed: no second enroll on it. A wrong key closes
+    // with code 5 (`bad key`).
     let code = tokio::time::timeout(WAIT, d.conn.closed()).await.expect("closed after a failed enroll");
-    let closed_with_3 = matches!(&code, quinn::ConnectionError::ApplicationClosed(c) if c.error_code.into_inner() == 3);
-    assert!(closed_with_3, "{code:?}");
+    assert_eq!(app_close_code(&code), Some(5), "{code:?}");
     // A fresh connection still enrolls; failures do not block it.
     assert_eq!(FakeDevice::dial(&r).await.enroll(&r.key).await["ok"], true);
 }

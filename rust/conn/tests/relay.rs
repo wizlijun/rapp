@@ -1,6 +1,8 @@
 use std::time::Duration;
 
-use rapp_conn::relay::{Pushed, RelayConn};
+use rapp_conn::relay::{
+    is_bad_key, is_key_changed, refused_key, Pushed, RelayConn, BAD_KEY, CLOSE_BAD_KEY, CLOSE_KEY_CHANGED, KEY_CHANGED,
+};
 use rapp_conn::{e2e_accept, e2e_connect};
 use rapp_net::log::Log;
 use rapp_relay::config::Config;
@@ -14,7 +16,7 @@ const A_ID: &str = "123456789";
 
 struct Rig {
     relay: Relay,
-    _data: TempDir,
+    data: TempDir,
     key: Key,
     addr: String,
 }
@@ -32,7 +34,7 @@ async fn start() -> Rig {
     let key = Key::new_for_relay(&relay.fp);
     relay.registry().set_join_hash(&join_hash(&key.join())).unwrap();
     let addr = relay.addr.to_string();
-    Rig { relay, _data: data, key, addr }
+    Rig { relay, data, key, addr }
 }
 
 fn endpoint() -> quinn::Endpoint {
@@ -143,10 +145,12 @@ async fn wrong_root_half() {
     let ep = endpoint();
     let a = RelayConn::dial(&ep, &r.addr, &key, &Identity::generate().unwrap()).await.unwrap();
     let err = tokio::time::timeout(WAIT, a.register(A_ID, &[])).await.unwrap().unwrap_err();
-    assert_eq!(err.to_string(), "bad key");
-    // The relay then closes the connection.
+    assert_eq!(err.to_string(), BAD_KEY);
+    assert!(is_bad_key(&err) && !is_key_changed(&err), "{err:#}");
+    assert_eq!(a.refused(), Some(BAD_KEY));
+    // The relay then closes the connection with code 5; what is asked on it after says `bad key`.
     match push(&a).await {
-        Pushed::Closed { code, .. } => assert_eq!(code, 3),
+        Pushed::Closed { code, reason } => assert_eq!((code, reason.as_str()), (CLOSE_BAD_KEY, BAD_KEY)),
         _ => panic!("expected Closed"),
     }
 }
@@ -190,6 +194,92 @@ async fn relay_to_unknown_id_fails_on_first_read() {
     let mut buf = [0u8; 1];
     let err = tokio::time::timeout(WAIT, s.read(&mut buf)).await.unwrap().unwrap_err();
     assert_eq!(err.to_string(), "unknown id");
+}
+
+#[tokio::test]
+async fn rotate_key_closes_every_device_with_code_4() {
+    let r = start().await;
+    let ep = endpoint();
+    let a = dial(&r, &ep, &Identity::generate().unwrap()).await;
+    let b = dial(&r, &ep, &Identity::generate().unwrap()).await;
+    a.register(A_ID, &[]).await.unwrap();
+    b.register("987654321", &[]).await.unwrap();
+    let rotated = tokio::time::timeout(WAIT, rapp_relay::admin::issue_key(r.data.path(), true)).await.unwrap();
+    assert!(rotated.unwrap().is_some());
+    for c in [&a, &b] {
+        match push_skipping_revoked(c).await {
+            Pushed::Closed { code, reason } => assert_eq!((code, reason.as_str()), (4, "key changed")),
+            _ => panic!("expected the connection to be closed"),
+        }
+    }
+}
+
+#[tokio::test]
+async fn requests_after_a_key_change_say_key_changed() {
+    let r = start().await;
+    let ep = endpoint();
+    let id = Identity::generate().unwrap();
+    let a = dial(&r, &ep, &id).await;
+    a.register(A_ID, &[]).await.unwrap();
+    let rotated = tokio::time::timeout(WAIT, rapp_relay::admin::issue_key(r.data.path(), true)).await.unwrap();
+    assert!(rotated.unwrap().is_some());
+    assert!(matches!(push_skipping_revoked(&a).await, Pushed::Closed { code: CLOSE_KEY_CHANGED, .. }));
+    // On the connection the relay closed for the key change.
+    let e = tokio::time::timeout(WAIT, a.connect_to("987654321")).await.unwrap().unwrap_err();
+    assert_eq!(e.to_string(), KEY_CHANGED);
+    // Dialed anew with the old key: the relay says it, and the requests after say it too (the relay
+    // closes a connection whose enroll failed).
+    let again = dial(&r, &ep, &id).await;
+    let e = tokio::time::timeout(WAIT, again.register(A_ID, &[])).await.unwrap().unwrap_err();
+    assert!(is_key_changed(&e), "{e:#}");
+    assert!(matches!(push_skipping_revoked(&again).await, Pushed::Closed { .. }));
+    let e = tokio::time::timeout(WAIT, again.connect_to("987654321")).await.unwrap().unwrap_err();
+    assert_eq!(e.to_string(), KEY_CHANGED);
+}
+
+#[tokio::test]
+async fn a_refused_key_is_told_by_its_exact_text_only() {
+    assert_eq!(refused_key(&anyhow::anyhow!(KEY_CHANGED)), Some(KEY_CHANGED));
+    assert_eq!(refused_key(&anyhow::anyhow!(BAD_KEY).context("register")), Some(BAD_KEY));
+    let io = anyhow::Error::from(std::io::Error::other(KEY_CHANGED));
+    assert!(is_key_changed(&io));
+    // An error that merely mentions the text is something else.
+    assert_eq!(refused_key(&anyhow::anyhow!("connection lost: key changed?")), None);
+    assert_eq!(refused_key(&anyhow::anyhow!("unknown id")), None);
+}
+
+#[tokio::test]
+async fn an_open_relayed_stream_says_key_changed_after_a_rotate() {
+    let r = start().await;
+    let (ea, eb) = (endpoint(), endpoint());
+    let (ia, ib) = (Identity::generate().unwrap(), Identity::generate().unwrap());
+    let a = dial(&r, &ea, &ia).await;
+    a.register(A_ID, &[]).await.unwrap();
+    let b = dial(&r, &eb, &ib).await;
+    let bs = tokio::time::timeout(WAIT, b.relay_to(A_ID)).await.unwrap().unwrap();
+    let accept = async {
+        let Pushed::Relayed { stream, .. } = push_skipping_revoked(&a).await else { panic!("expected Relayed") };
+        e2e_accept(stream, &ia).await
+    };
+    let (acc, con) = tokio::time::timeout(WAIT, async { tokio::join!(accept, e2e_connect(bs, &ib)) }).await.unwrap();
+    let ((_a_pipe, _), (mut b_pipe, _)) = (acc.unwrap(), con.unwrap());
+    let rotated = tokio::time::timeout(WAIT, rapp_relay::admin::issue_key(r.data.path(), true)).await.unwrap();
+    assert!(rotated.unwrap().is_some());
+    // B's end of the tunnel: a read fails with `key changed`, not `connection lost`.
+    let mut buf = [0u8; 16];
+    let e = tokio::time::timeout(WAIT, b_pipe.read(&mut buf)).await.expect("read ends").unwrap_err();
+    assert_eq!(e.to_string(), KEY_CHANGED, "{e:?}");
+    assert_eq!(b.refused(), Some(KEY_CHANGED));
+    // And so does a write, once the connection is gone.
+    let mut write_err = None;
+    for _ in 0..50 {
+        if let Err(e) = b_pipe.write_all(&[0u8; 1024]).await.and(b_pipe.flush().await) {
+            write_err = Some(e);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(write_err.expect("a write fails").to_string(), KEY_CHANGED);
 }
 
 #[tokio::test]

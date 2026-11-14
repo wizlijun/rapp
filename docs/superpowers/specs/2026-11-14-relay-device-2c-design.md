@@ -33,19 +33,22 @@ relay 规格 §7.4 说"换 key 不影响已经认识的设备之间的连接"：
 - 设备记录多一个 `stale`（"要重新输入 key"）。`rotate-key` 把所有没吊销的设备标成 `stale`，然后立刻用新的关闭码 **4**（原因 `key changed`）断开所有已入网的连接。审计 `rotate_key` 多记被标的台数。
 - `stale` 的设备连上来时当作没入网：只能 `enroll`。
   - 带对的（新）口令：去掉 `stale`，**保留它原来的 ID**。和第一次入网一样回复。
-  - 带错的口令：回 `key changed`（不是 `bad key`），并且**不计入**按来源的试错锁定（这台设备的证书证明它是原来入过网的那台，不是在猜口令；不然换 key 后同一个局域网里几台旧设备一重试就会把整个出口 IP 锁住）。照旧按 `enroll_per_ip_per_min` 限速。
+  - 带错的口令：回 `key changed`（不是 `bad key`），然后以关闭码 **4** 断开。
+- 任何设备用错的口令入网（不论是否 `stale`）都**计入**按来源的试错锁定，当攻击处理（用户 2026-11-14 定："key 不对时，不允许再连了。给他错误码。新的客户端需要能解析错误码并停止。如果一直重试就当攻击处理。不用考虑现在的老客户端的问题。"）。不是 `stale` 的设备用错的口令：回 `bad key`，以新的关闭码 **5**（原因 `bad key`）断开（以前是关闭码 3 `enroll failed`）。照旧按 `enroll_per_ip_per_min` 限速。
+- 代价：换 key 时离线的机器上线后会自动用旧 key 试，记失败；同一台机器上的 service 和 hub 用同一个身份、同一个出口 IP，所以一台这样的机器可能 service 错一次、hub 再错一次或几次。同一个出口 IP 后面有 3 台左右这样的机器，这个 IP 就可能被临时锁住（最长 `lock_max_secs`，默认 300 秒，300 秒内解开）。
+- 入网关闭（`enroll closed`）只挡不是 `stale` 的设备：`stale` 的设备是认识的设备，照旧可以重新入网（对的新口令回来、错的口令得到 `key changed`）。
 - `stale` 的设备照旧占着它的 ID，别人 `connect` 它得到 `offline`。
 - `rapp-relay devices` 的最后一栏，`stale` 的设备显示 `stale`（和 `revoked` 同一栏）。
 - 第一次 `key`（`rotate: false`）不标任何设备。
 
 ### 4.2 被控的一侧（rapp-service）
 
-- relay 连接以关闭码 4 结束，或请求得到 `key changed`：状态 `relay: "error"`，`relay_error: "key changed"`，**停止重试**，直到用户改了设置（和现在的"已吊销"一样）。日志 `relay_key_changed`（不含 key）。
+- relay 连接以关闭码 4 或 5 结束，或请求得到 `key changed` / `bad key`：状态 `relay: "error"`，`relay_error: "key changed"`（关闭码 5 / `bad key` 时报 `bad key`），**停止重试**，直到用户改了设置（和现在的"已吊销"一样）。日志 `relay_key_changed`（不含 key）。
 - 用户输入了新 key 之后仍然得到 `key changed`：说明新 key 也不对。这时 `relay_error` 报 `bad key`。判断办法：service 在内存里记下"第一次得到 `key changed` 时用的是哪把 key"（只存哈希，不存文本）；之后用另一把 key 又得到 `key changed`，就报 `bad key`。重启后忘掉也没关系，最多再提示一次"中继换了 key"。
 
 ### 4.3 操作的一侧（rapp-hub）
 
-hub 自己也连 relay。它连 relay 时得到关闭码 4 或 `key changed`，就把这台主机的错误报成 `key changed`。也就是说，经中继打开窗口、在线探测失败时，错误都是 `key changed`。hub 的 key 读的是 `service.json`，用户在本机一节输入一次新 key，两边都换上。
+hub 自己也连 relay。它连 relay 时得到关闭码 4 或 `key changed`，就把这台主机的错误报成 `key changed`（关闭码 5 / `bad key` 报 `bad key`）。hub 记住"哪个中继地址 + 哪把 key 文本"这样失败过，之后不再拨号，直接返回同样的错误，直到 key 文本变了（在线探测也不再拨号）。也就是说，经中继打开窗口、在线探测失败时，错误都是 `key changed`。hub 的 key 读的是 `service.json`，用户在本机一节输入一次新 key，两边都换上。
 
 ### 4.4 GUI 的交互
 
@@ -67,7 +70,7 @@ key    ••••••••                         [显示]
 
 ### 4.5 老版本
 
-- 0.6.0 的设备连到新 relay：收到关闭码 4 当普通断开，重连后入网得到 `key changed`，当普通错误显示原文并按退避重试（不会被锁定）。升级后就正常提示了。
+- 0.6.0 的设备连到新 relay：收到关闭码 4 当普通断开，重连后入网得到 `key changed`，当普通错误按退避重试，会被当攻击锁定。用户定：不考虑老客户端。
 - 新设备连 0.6.0 的 relay：不会遇到 `stale`，行为和现在一样。VPS 要升级到含本改动的 relay 镜像，"一定会失效"才成立。
 
 ## 5. 操作文档
@@ -92,6 +95,6 @@ key    ••••••••                         [显示]
 ## 7. 我替你定的
 
 1. 换 key 后设备的 ID 保留，重新输入 key 就回到原来的 ID。
-2. 旧设备用旧 key 重试回 `key changed`，不计入试错锁定。
+2. ~~旧设备用旧 key 重试回 `key changed`，不计入试错锁定。~~ 用户改了：错的 key 一律计入锁定，客户端收到关闭码 4/5 就停。
 3. 关闭码用 4（2 是吊销，3 是超限）。
 4. "新 key 也不对"由 service 记一把 key 的哈希来区分，只放内存。

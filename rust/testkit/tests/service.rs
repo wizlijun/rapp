@@ -47,7 +47,11 @@ async fn reports_status() {
     assert_eq!(st["name"], "test-a");
     assert_eq!(st["password"], PASSWORD);
     assert!(st["lan_ids"].is_array());
-    assert_eq!((&st["relay"], &st["relay_error"], &st["relay_addr"], &st["has_key"]), (&json!("off"), &Value::Null, &Value::Null, &json!(false)), "{st}");
+    assert_eq!(
+        (&st["relay"], &st["relay_error"], &st["relay_addr"], &st["has_key"]),
+        (&json!("off"), &Value::Null, &Value::Null, &json!(false)),
+        "{st}"
+    );
     assert_eq!(st["fp"].as_str().unwrap().len(), 64);
     assert_eq!(st["permissions"], json!({"screen_recording":true,"accessibility":true}));
     assert_eq!(st["sessions"], json!([]));
@@ -808,7 +812,10 @@ async fn set_relay_saves_and_masks() {
     let r = ipc.call(json!({"cmd":"set_relay","relay":"vps:22026","key":key})).await;
     assert_eq!(r, json!({"ok":true}));
     let st = ipc.call(json!({"cmd":"status"})).await;
-    assert_eq!((&st["relay_addr"], &st["has_key"], &st["relay"]), (&json!("vps:22026"), &json!(true), &json!("connecting")));
+    assert_eq!(
+        (&st["relay_addr"], &st["has_key"], &st["relay"]),
+        (&json!("vps:22026"), &json!(true), &json!("connecting"))
+    );
     assert!(!st.to_string().contains(&key), "status leaks the key: {st}");
     assert_eq!(ipc.call(json!({"cmd":"show_key"})).await, json!({"ok":true,"key":key}));
     let cfg = service_json_value(a.home.path());
@@ -941,7 +948,10 @@ async fn relayed(
     let me = rapp_conn::Me { id: "", name: "test-b", key: Some(key) };
     rapp_conn::send_hello(&mut pipe, &facts, &me).await.unwrap();
     write_json(&mut pipe, &request).await.unwrap();
-    tokio::time::timeout(WAIT, rapp_conn::read_welcome(&mut pipe, &facts, Some(key), a_id, None)).await.unwrap().unwrap();
+    tokio::time::timeout(WAIT, rapp_conn::read_welcome(&mut pipe, &facts, Some(key), a_id, None))
+        .await
+        .unwrap()
+        .unwrap();
     pipe
 }
 
@@ -1027,7 +1037,8 @@ async fn wrong_root_half_reports_bad_key() {
     let a = service_on_relay(&rig.addr, &key).await;
     let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
     let st = wait_status(&mut ipc, |s| s["relay_error"] == "bad key").await;
-    assert_eq!(st["relay"], "connecting");
+    // It stops: the relay would lock it out if it kept trying.
+    assert_eq!(st["relay"], "error");
     let ep = b_endpoint();
     let (conn, r) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":PASSWORD})).await;
     assert_eq!(r["ok"], true, "{r}");

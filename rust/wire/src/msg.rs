@@ -2,8 +2,11 @@
 //!
 //! Every reply is `{"ok":true,…}` or `{"ok":false,"error":…}` (see `line::ok`/`line::err`).
 //! The whole set of error texts: `bad request`, `bad key`, `no key`, `closed`, `limit`,
-//! `not enrolled`, `bad id`, `id taken`, `unknown id`, `offline`, `locked, retry in <N>s`, `redirect`.
-//! Connection close codes: `0` normal, `2` revoked, `3` connection limit reached.
+//! `not enrolled`, `bad id`, `id taken`, `unknown id`, `offline`, `locked, retry in <N>s`, `redirect`,
+//! `key changed`.
+//! Connection close codes: `0` normal, `2` revoked, `3` connection limit reached (or another failed
+//! enroll), `4` key changed (the relay's key changed; the device needs the new one), `5` bad key.
+//! A client stops on `4` and `5` until its key changes.
 
 use serde::{Deserialize, Serialize};
 

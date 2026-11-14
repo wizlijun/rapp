@@ -115,6 +115,11 @@ pub(crate) trait Control: Send + Sync {
     fn revoke(&self, fp: &Fp) -> Revoked;
     /// Frees `id` in the registry and in the live table; the device it belonged to, if any.
     fn unbind(&self, id: &str) -> Result<Option<Fp>>;
+    /// `rotate-key`'s change: marks every device stale, then stores `hash`, as one step with every
+    /// enrollment (none checks the old key and enrolls after the marking). How many it marked.
+    fn rotate_join(&self, hash: &str) -> Result<usize>;
+    /// Closes every enrolled connection (code 4, `key changed`) and takes it out of the live tables.
+    fn key_changed(&self);
 }
 
 pub(crate) struct Ctx {
@@ -257,11 +262,20 @@ impl Handler {
         if !rotate && reg.join_hash().is_some() {
             return err("key exists");
         }
-        if let Err(e) = reg.set_join_hash(hash) {
-            return self.failed("set_join", e);
+        if !rotate {
+            if let Err(e) = reg.set_join_hash(hash) {
+                return self.failed("set_join", e);
+            }
+            self.relay().audit().event("key", json!({"hash": &hash[..8]}), true);
+            return ok(json!({}));
         }
-        let ev = if rotate { "rotate_key" } else { "key" };
-        self.relay().audit().event(ev, json!({"hash": &hash[..8]}), true);
+        // Every device has to enter the new key.
+        let n = match self.relay().rotate_join(hash) {
+            Ok(n) => n,
+            Err(e) => return self.failed("set_join", e),
+        };
+        self.relay().key_changed();
+        self.relay().audit().event("rotate_key", json!({"hash": &hash[..8], "stale": n}), true);
         ok(json!({}))
     }
 
@@ -279,6 +293,7 @@ impl Handler {
                     "enrolled_at": d.enrolled_at,
                     "last_seen": d.last_seen,
                     "revoked": d.revoked,
+                    "stale": d.stale,
                     "online": online.contains(&d.fp),
                 })
             })

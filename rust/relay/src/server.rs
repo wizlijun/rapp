@@ -44,6 +44,9 @@ const TENANT: &str = "default";
 const CLOSE_NORMAL: u32 = 0;
 const CLOSE_REVOKED: u32 = 2;
 const CLOSE_LIMIT: u32 = 3;
+const CLOSE_KEY_CHANGED: u32 = 4;
+/// A device that is not stale enrolled with a wrong key: the client stops until its key changes.
+const CLOSE_BAD_KEY: u32 = 5;
 
 /// How long `stop` takes at most, from the first step to the flush.
 const STOP_WAIT: Duration = Duration::from_secs(2);
@@ -100,7 +103,8 @@ struct Shared {
     conns: Conns,
     enroll_rate: Rate,
     enroll_backoff: Backoff,
-    /// Makes the device-cap check and the registry write one step.
+    /// Makes the join-key check, the device-cap check and the registry write one step; a
+    /// `rotate_join` takes it too.
     enroll_lock: Mutex<()>,
     /// `connect` and `relay` failures (`bad id`, `unknown id`), keyed `fp:<fp>` and `ip:<source>`.
     connect_backoff: Backoff,
@@ -312,7 +316,9 @@ async fn serve(s: Arc<Shared>, conn: quinn::Connection, fp: Fp, from: SocketAddr
         return;
     }
     let tenant = known.as_ref().map_or(TENANT, |d| &d.tenant).to_string();
-    let peer = Arc::new(Peer { conn, fp, from, tenant, enrolled: AtomicBool::new(known.is_some()) });
+    // A stale device (the key changed since it enrolled) may only enroll again.
+    let enrolled = known.as_ref().is_some_and(|d| !d.stale);
+    let peer = Arc::new(Peer { conn, fp, from, tenant, enrolled: AtomicBool::new(enrolled) });
     s.log.event(
         Lvl::Debug,
         "conn_open",
@@ -395,14 +401,22 @@ impl Shared {
     }
 
     /// Puts an enrolled connection in the table of all of them and sends it the revocation list.
-    /// The registry is checked again under the lock, so a `revoke` that runs at the same time
-    /// either finds this connection or is seen here; then the connection is closed (code 2).
+    /// The registry is checked again under the lock, so a `revoke` or a key change that runs at the
+    /// same time either finds this connection or is seen here; then the connection is closed
+    /// (code 2 or 4).
     fn go_online(&self, peer: &Arc<Peer>) -> bool {
         {
             let mut on = self.online();
-            if !matches!(self.registry.get(&peer.fp), Some(d) if !d.revoked) {
-                peer.conn.close(CLOSE_REVOKED.into(), b"revoked");
-                return false;
+            match self.registry.get(&peer.fp) {
+                Some(d) if d.stale => {
+                    peer.conn.close(CLOSE_KEY_CHANGED.into(), b"key changed");
+                    return false;
+                }
+                Some(d) if !d.revoked => {}
+                _ => {
+                    peer.conn.close(CLOSE_REVOKED.into(), b"revoked");
+                    return false;
+                }
             }
             // Closed already (an `enroll` that finished late): `go_offline` may have run.
             if peer.conn.close_reason().is_some() {
@@ -500,6 +514,19 @@ impl Shared {
         }
         self.audit.event("revoke", rec, true);
         done
+    }
+
+    /// Takes every enrolled connection out of both tables and closes it (code 4): after a key
+    /// change each device has to enroll again.
+    fn key_changed(&self) {
+        let gone: Vec<Arc<Peer>> = {
+            let mut on = self.online();
+            on.by_id.clear();
+            on.all.drain().map(|(_, p)| p).collect()
+        };
+        for p in &gone {
+            p.conn.close(CLOSE_KEY_CHANGED.into(), b"key changed");
+        }
     }
 
     /// `register`: claims `id` for this device and makes this connection the one it reaches.
@@ -728,10 +755,14 @@ impl Shared {
     }
 
     fn try_enroll(&self, peer: &Peer, join: &str) -> Result<(), String> {
-        if !self.enroll_open.load(Ordering::Acquire) {
+        // Closed enrollment keeps new devices out; a stale one is known and may enroll again.
+        let stale = self.registry.get(&peer.fp).is_some_and(|d| d.stale);
+        if !stale && !self.enroll_open.load(Ordering::Acquire) {
             return Err("closed".into());
         }
-        let Some(want) = self.registry.join_hash() else { return Err("no key".into()) };
+        if self.registry.join_hash().is_none() {
+            return Err("no key".into());
+        }
         let source = source_key(peer.from.ip()).to_string();
         let now = Instant::now();
         if let Some(secs) = self.enroll_backoff.locked(&source, now) {
@@ -743,13 +774,21 @@ impl Shared {
             return Err("limit".into());
         }
         let _one_at_a_time = self.enroll_lock.lock().unwrap_or_else(|e| e.into_inner());
+        // Read under the lock `rotate_join` holds too: never a key that has just been replaced.
+        let Some(want) = self.registry.join_hash() else { return Err("no key".into()) };
         if self.registry.get(&peer.fp).is_none() && self.registry.count() >= self.config.limits.max_devices {
             self.limit("max_devices", Some(&peer.fp), peer.from);
             return Err("limit".into());
         }
         if !join_matches(join, &want) {
+            // A wrong key counts against the source whoever tries it: a client told `key changed`
+            // or `bad key` (with close code 4 or 5) stops, so one that keeps trying is an attack.
             if let Some(secs) = self.enroll_backoff.fail(&source, now) {
                 self.audit.event("lockout", json!({"key": source, "secs": secs}), true);
+            }
+            // The device that enrolled before the key changed: it needs the new key.
+            if self.registry.get(&peer.fp).is_some_and(|d| d.stale) {
+                return Err("key changed".into());
             }
             return Err("bad key".into());
         }
@@ -824,6 +863,20 @@ impl Control for Shared {
 
     fn unbind(&self, id: &str) -> Result<Option<Fp>> {
         self.unbind_id(id)
+    }
+
+    fn rotate_join(&self, hash: &str) -> Result<usize> {
+        let _no_enroll = self.enroll_lock.lock().unwrap_or_else(|e| e.into_inner());
+        // Marked first, so a failed mark leaves the old key in place and every device as it was.
+        let n = self.registry.mark_all_stale()?;
+        // If this save fails, devices show stale but stay connected; the old key clears stale again
+        // (nothing unsafe), and a retry audits `stale: 0`.
+        self.registry.set_join_hash(hash)?;
+        Ok(n)
+    }
+
+    fn key_changed(&self) {
+        Shared::key_changed(self)
     }
 }
 
@@ -1027,14 +1080,20 @@ async fn reply(st: BufReader<BiStream>, v: Value) {
     }
 }
 
-/// Replies, waits (briefly) until the peer has the whole reply, then closes the connection with
-/// `CLOSE_LIMIT`: closing at once would drop the reply.
+/// Replies, waits (briefly) until the peer has the whole reply, then closes the connection:
+/// closing at once would drop the reply. A wrong key closes with `CLOSE_KEY_CHANGED` (a stale
+/// device) or `CLOSE_BAD_KEY`, so the client knows to stop; any other failure with `CLOSE_LIMIT`.
 async fn reply_and_close(st: BufReader<BiStream>, v: Value, conn: &quinn::Connection) {
+    let (code, reason): (u32, &[u8]) = match v["error"].as_str() {
+        Some("key changed") => (CLOSE_KEY_CHANGED, b"key changed"),
+        Some("bad key") => (CLOSE_BAD_KEY, b"bad key"),
+        _ => (CLOSE_LIMIT, b"enroll failed"),
+    };
     let (_recv, mut send) = st.into_inner().into_inner();
     if write_json(&mut send, &v).await.is_ok() && send.finish().is_ok() {
         let _ = tokio::time::timeout(Duration::from_secs(1), send.stopped()).await;
     }
-    conn.close(CLOSE_LIMIT.into(), b"enroll failed");
+    conn.close(code.into(), reason);
 }
 
 /// `join_hex` (64 hex digits) hashes to `want`; anything that does not decode is a wrong key.

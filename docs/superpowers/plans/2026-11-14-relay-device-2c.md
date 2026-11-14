@@ -13,9 +13,9 @@
 ## Global Constraints
 
 - 基于 main（`f03af66` 或之后），在新分支 `feat/relay-2c`（worktree）上做。
-- 关闭码 `4`，关闭原因 `key changed`；请求的错误文本 `key changed`。新 key 也不对时，service 报 `bad key`。
+- 关闭码 `4`，关闭原因 `key changed`；请求的错误文本 `key changed`。新 key 也不对时，service 报 `bad key`。不是 `stale` 的设备口令不对：回 `bad key`，关闭码 `5`，关闭原因 `bad key`。客户端（service、hub）收到关闭码 4/5 或 `key changed`/`bad key` 就停止，不再拨号，直到 key 变了。
 - 设备记录 `stale: bool`：`#[serde(default, skip_serializing_if = "is_false")]`，老的 `devices.json` 照样能读。
-- `stale` 的设备用错的口令入网：回 `key changed`，不调用 `enroll_backoff.fail`；`enroll_per_ip_per_min` 限速照旧。
+- 任何口令不对的入网（含 `stale` 设备）都调用 `enroll_backoff.fail`（当攻击处理，用户 2026-11-14 改定）；`enroll_per_ip_per_min` 限速照旧。
 - GUI 文案（照抄）：状态行 `安全变更：中继换了 key`（警示色）；说明 `这台设备已经和中继断开。请向管理中继的人要新 key，再输入。`；按钮 `输入新 key`（`Key('enter-new-key')`）；对话框标题 `输入新 key`；新 key 也不对时状态 `出错：新 key 不对`；`disconnectWord('key changed')` → `中继换了 key，请到 本机 → 输入新 key`。
 - key 文本和 `trust()` 的值不得出现在日志、状态、错误文本里（`show_key` 除外）。service 只在内存里记 key 的哈希。
 - 用户同时在改仓库：不碰仓库根目录的 `README.md`、`docs/archives/`、`tasks/` 和 main 工作区里用户改着的文档（`docker/relay/README.md` 要改，它不在此列）。按文件名 `git add`，不用 `git add -u/-A/.`、`git stash/checkout/restore/reset`。不跑 `cargo fmt`；只对改过的文件跑 `rustfmt --edition 2021 --config max_width=120,use_small_heuristics=Max <file>`。
@@ -26,7 +26,7 @@
 
 ## Review Focus
 
-1. 换 key 后，同一个出口 IP 后面的几台旧设备一起用旧口令重试：一台都不能被锁定，也不能锁住同一个 IP 上一台拿着新 key 的设备。（任务 1）
+1. 换 key 后，新客户端收到关闭码 4 就停：service 和 hub 都不再用旧 key 拨号（在线探测也不拨），所以同一个出口 IP 后面的新设备不会因为旧 key 重试把这个 IP 锁住或耗尽限速。（任务 1、2）
 2. 换 key 时 relay 正在转发的中继会话：连接都被断开，设备不再自动重连；输入新 key 后恢复，ID 不变。（任务 1、2）
 3. relay 在标记完 `stale`、断开连接之前重启（或写文件失败）：重启后不能出现"口令换了、设备却没被标记"的状态——先写 `devices.json`，再换口令哈希；任何一步失败，`rotate-key` 都报错，并且不显示新 key。（任务 1）
 4. 用户输入的新 key 带了空格或换行：照现有 `set_relay` 的处理去掉首尾空白，不能因此报"新 key 不对"。（任务 3）
@@ -100,7 +100,7 @@
 **Interfaces:**
 - Consumes: 任务 2 的 `status.relay_error == "key changed"` / `"bad key"`；现有的 `set_relay`（`m.setRelay`，地址、key）。
 - Produces:
-  - `relayError == 'key changed'` 时，状态行显示 `安全变更：中继换了 key`（警示色）、下面的说明和 `输入新 key` 按钮。`relayError == 'bad key'` 且这次的 key 是从"输入新 key"保存的（`_State` 里一个布尔值）时显示 `出错：新 key 不对`，按钮保留；其他情况照现在的 `_relayState`。
+  - `relayError == 'key changed'` 时，状态行显示 `安全变更：中继换了 key`（警示色）、下面的说明和 `输入新 key` 按钮。`relayError == 'bad key'` 且这次的 key 是从"输入新 key"保存的（`_State` 里一个布尔值）时显示 `出错：新 key 不对`，按钮保留；其他情况照现在的 `_relayState`。`relayError == 'bad key'` 时（service 已停止重试）也显示 `输入新 key` 按钮。
   - `_enterNewKey(ServiceStatus st)`：对话框只有一个 key 输入框（`autofocus`、`obscureText`），保存时用 `st.relayAddr` 和去掉首尾空白的 key 调用 `setRelay`，失败照现有的方式提示 `失败：…`。
   - `disconnectWord`：`key changed` 的判断放在 `bad key` **之前**。
 

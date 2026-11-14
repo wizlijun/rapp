@@ -11,7 +11,7 @@ use rapp_net::log::Log;
 use rapp_relay::admin;
 use rapp_relay::config;
 use rapp_relay::server::{Opts, Relay};
-use rapp_wire::msg::Push;
+use rapp_wire::msg::{Push, Req};
 use rapp_wire::{join_hash, Fp, Key};
 use serde_json::{json, Value};
 use tokio::time::timeout;
@@ -128,10 +128,174 @@ async fn key_can_be_set_once_and_rotated() {
     assert_eq!(old.enroll(&k1).await, json!({"ok": false, "error": "bad key"}));
     let new = FakeDevice::dial(&r).await;
     assert_eq!(new.enroll(&k2).await["ok"], true);
-    // The device that enrolled with the old key is still in, on this connection and the next.
-    assert_eq!(enrolled.register(A_ID, &[]).await, json!({"ok": true, "id": A_ID}));
+    assert_eq!(audit_lines(&r, "key")[0]["stale"], Value::Null);
+    assert_eq!(audit_lines(&r, "rotate_key")[0]["stale"], 1);
+    // The device that enrolled with the old key was cut off and has to enter the new one.
+    assert_eq!(app_close_code(&closed(&enrolled).await), Some(4));
     let again = FakeDevice::dial_as(&r, same_identity(&enrolled.id)).await.unwrap();
-    assert_ne!(again.register(A_ID, &[]).await["error"], "not enrolled");
+    assert_eq!(again.register(A_ID, &[]).await["error"], "not enrolled");
+    assert_eq!(again.enroll(&k2).await["ok"], true);
+    assert_eq!(again.register(A_ID, &[]).await, json!({"ok": true, "id": A_ID}));
+}
+
+/// `rotate-key` the way the subcommand does it; the new key.
+async fn rotate(r: &TestRelay) -> Key {
+    timeout(WAIT, admin::issue_key(r.data.path(), true)).await.expect("rotated within WAIT").unwrap().expect("a key")
+}
+
+#[tokio::test]
+async fn a_stale_device_with_the_old_key_gets_key_changed_and_is_locked_if_it_keeps_trying() {
+    // Rate limiting still applies; room for the attempts below.
+    let r = start_relay(|c| c.limits.enroll_per_ip_per_min = 100).await;
+    let lock_after = config::Config::default().limits.lock_after;
+    let a = FakeDevice::enrolled(&r).await;
+    let new = rotate(&r).await;
+    assert_eq!(app_close_code(&closed(&a).await), Some(4));
+    // Each try is told `key changed` and closed with code 4: a client stops there.
+    for i in 0..lock_after {
+        let again = FakeDevice::dial_as(&r, same_identity(&a.id)).await.unwrap();
+        assert_eq!(again.enroll(&r.key).await, json!({"ok": false, "error": "key changed"}), "attempt {i}");
+        assert_eq!(app_close_code(&closed(&again).await), Some(4), "attempt {i}");
+    }
+    // One that keeps trying is an attack: its source is locked, the new key included.
+    let again = FakeDevice::dial_as(&r, same_identity(&a.id)).await.unwrap();
+    let v = again.enroll(&new).await;
+    assert!(v["error"].as_str().is_some_and(|e| e.starts_with("locked, retry in ")), "{v}");
+    assert_eq!(audit_lines(&r, "lockout").len(), 1);
+    let results: Vec<Value> = audit_lines(&r, "enroll").iter().map(|l| l["result"].clone()).collect();
+    assert_eq!(results.iter().filter(|x| **x == "key changed").count(), lock_after as usize, "{results:?}");
+}
+
+#[tokio::test]
+async fn no_device_stays_in_with_the_old_key_when_a_rotate_races_its_enroll() {
+    const N: usize = 24;
+    let r = start_relay(|c| {
+        c.limits.enroll_per_ip_per_min = 1000;
+        c.limits.max_conns_per_ip = 2 * N;
+        c.limits.lock_after = 1000;
+    })
+    .await;
+    // Enrolled once, so every concurrent enroll below has a devices.json write to queue behind.
+    let _first = FakeDevice::enrolled(&r).await;
+    let mut devs = Vec::new();
+    for _ in 0..N {
+        devs.push(std::sync::Arc::new(FakeDevice::dial(&r).await));
+    }
+    let mut line = serde_json::to_vec(&Req::Enroll { join: join_hex(&r.key) }).unwrap();
+    line.push(b'\n');
+    let enrolls: Vec<_> = devs
+        .iter()
+        .map(|d| {
+            let (d, line) = (d.clone(), line.clone());
+            // An enroll that gets in may be cut off (code 4) before its reply arrives.
+            tokio::spawn(async move { d.raw(&line).await.ok() })
+        })
+        .collect();
+    tokio::task::yield_now().await;
+    rotate(&r).await;
+    for (d, e) in devs.iter().zip(enrolls) {
+        let v = e.await.unwrap();
+        match r.relay.registry().get(&d.id.fp) {
+            // Let in with the old key: it has to be stale and cut off all the same.
+            Some(dev) => {
+                assert!(dev.stale, "{} is in with the old key", d.id.fp.short());
+                assert_eq!(app_close_code(&closed(d).await), Some(4));
+            }
+            None => assert_eq!(v, Some(json!({"ok": false, "error": "bad key"}))),
+        }
+    }
+}
+
+#[tokio::test]
+async fn the_new_key_brings_the_old_id_back() {
+    let r = start_relay(|_| {}).await;
+    let a = FakeDevice::enrolled(&r).await;
+    assert_eq!(a.register(A_ID, &[]).await["ok"], true);
+    let new = rotate(&r).await;
+    assert_eq!(app_close_code(&closed(&a).await), Some(4));
+
+    let mut back = FakeDevice::dial_as(&r, same_identity(&a.id)).await.unwrap();
+    assert_eq!(back.enroll(&new).await["ok"], true);
+    assert_eq!(back.register(A_ID, &[]).await, json!({"ok": true, "id": A_ID}));
+    assert_eq!(audit_lines(&r, "register").last().unwrap()["result"], "ok");
+    assert!(!r.relay.registry().get(&a.id.fp).unwrap().stale);
+
+    let b = FakeDevice::dial(&r).await;
+    assert_eq!(b.enroll(&new).await["ok"], true);
+    assert_eq!(b.connect_to(A_ID).await["ok"], true);
+    assert_eq!(back.next_incoming().await.1, b.id.fp);
+}
+
+#[tokio::test]
+async fn closed_enrollment_still_lets_a_stale_device_enter_the_new_key() {
+    let r = start_relay(|_| {}).await;
+    let a = FakeDevice::enrolled(&r).await;
+    let b = FakeDevice::enrolled(&r).await;
+    assert_eq!(a.register(A_ID, &[]).await["ok"], true);
+    assert_eq!(call(&r, json!({"cmd": "enroll", "state": "closed"})).await["ok"], true);
+    let new = rotate(&r).await;
+    assert_eq!(app_close_code(&closed(&a).await), Some(4));
+    assert_eq!(app_close_code(&closed(&b).await), Some(4));
+
+    // The old key: told `key changed` (code 4), not `closed`.
+    let old = FakeDevice::dial_as(&r, same_identity(&b.id)).await.unwrap();
+    assert_eq!(old.enroll(&r.key).await, json!({"ok": false, "error": "key changed"}));
+    assert_eq!(app_close_code(&closed(&old).await), Some(4));
+    // The new key: back in with the same ID.
+    let back = FakeDevice::dial_as(&r, same_identity(&a.id)).await.unwrap();
+    assert_eq!(back.enroll(&new).await["ok"], true);
+    assert_eq!(back.register(A_ID, &[]).await, json!({"ok": true, "id": A_ID}));
+    assert!(!r.relay.registry().get(&a.id.fp).unwrap().stale);
+    // A device the relay has never seen is still kept out.
+    let fresh = FakeDevice::dial(&r).await;
+    assert_eq!(fresh.enroll(&new).await, json!({"ok": false, "error": "closed"}));
+    assert_eq!(app_close_code(&closed(&fresh).await), Some(3));
+}
+
+#[tokio::test]
+async fn a_stale_device_is_offline_to_others() {
+    let r = start_relay(|_| {}).await;
+    let a = FakeDevice::enrolled(&r).await;
+    assert_eq!(a.register(A_ID, &[]).await["ok"], true);
+    let new = rotate(&r).await;
+    assert_eq!(app_close_code(&closed(&a).await), Some(4));
+
+    // Back without the new key: it may only enroll, and it keeps its ID.
+    let back = FakeDevice::dial_as(&r, same_identity(&a.id)).await.unwrap();
+    assert_eq!(back.register(A_ID, &[]).await, json!({"ok": false, "error": "not enrolled"}));
+    let b = FakeDevice::dial(&r).await;
+    assert_eq!(b.enroll(&new).await["ok"], true);
+    assert_eq!(b.connect_to(A_ID).await, json!({"ok": false, "error": "offline"}));
+    assert_eq!(b.register(A_ID, &[]).await, json!({"ok": false, "error": "id taken"}));
+
+    let v = call(&r, json!({"cmd": "devices"})).await;
+    let row = device_row(&v, &a.id.fp);
+    assert_eq!((&row["stale"], &row["online"], &row["id"]), (&json!(true), &json!(false), &json!(A_ID)), "{row}");
+    assert_eq!(device_row(&v, &b.id.fp)["stale"], false);
+    assert_eq!(call(&r, json!({"cmd": "info"})).await["devices"], 2);
+}
+
+#[tokio::test]
+async fn rotate_key_fails_without_showing_a_key_when_devices_json_cannot_be_written() {
+    let r = start_relay(|_| {}).await;
+    let a = FakeDevice::enrolled(&r).await;
+    // devices.json is replaced through `devices.tmp` next to it: a directory there blocks the save
+    // (even as root, unlike a read-only file or dir) and leaves the `join` file writable.
+    let blocker = r.data.path().join("devices.tmp");
+    std::fs::create_dir(&blocker).unwrap();
+    let res = timeout(WAIT, admin::issue_key(r.data.path(), true)).await.expect("reply within WAIT");
+    std::fs::remove_dir(&blocker).unwrap();
+
+    let e = format!("{:#}", res.err().expect("rotate-key fails: no key to show"));
+    assert!(e.contains("devices"), "{e}");
+    assert_eq!(r.relay.registry().join_hash(), Some(hash_of(&r.key)));
+    assert!(!r.relay.registry().get(&a.id.fp).unwrap().stale);
+    assert!(audit_lines(&r, "rotate_key").is_empty());
+    // Nothing changed: the device is still in with the old key.
+    assert!(a.conn.close_reason().is_none());
+    assert_eq!(a.register(A_ID, &[]).await, json!({"ok": true, "id": A_ID}));
+    let b = FakeDevice::dial(&r).await;
+    assert_eq!(b.enroll(&r.key).await["ok"], true);
 }
 
 #[tokio::test]

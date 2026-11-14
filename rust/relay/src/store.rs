@@ -20,6 +20,10 @@ pub struct Device {
     /// RFC 3339 UTC; shown as "last online" by `rapp-relay devices`.
     #[serde(default)]
     pub last_seen: Option<String>,
+    /// The join key changed after it enrolled: it has to enroll again with the new one, and keeps
+    /// its ID meanwhile. Never set on a revoked device.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stale: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -35,8 +39,12 @@ pub trait Registry: Send + Sync {
     fn list(&self) -> Vec<Device>;
     /// Not counting revoked devices.
     fn count(&self) -> usize;
-    /// Idempotent for an enrolled device; an error for a revoked one.
+    /// Idempotent for an enrolled device; an error for a revoked one. A stale device is enrolled
+    /// again: no longer stale, with the ID it had.
     fn enroll(&self, fp: Fp, tenant: &str) -> Result<()>;
+    /// Marks every device that is neither revoked nor stale yet as stale (the join key changed);
+    /// how many it marked.
+    fn mark_all_stale(&self) -> Result<usize>;
     fn bind_id(&self, fp: &Fp, id: &str) -> Result<Bind>;
     fn unbind(&self, id: &str) -> Result<bool>;
     /// Revokes `fp`. Unlike the other mutations this one is applied in memory even when the write
@@ -148,16 +156,37 @@ impl Registry for FileRegistry {
         self.lock().table.values().filter(|d| !d.revoked).count()
     }
     fn enroll(&self, fp: Fp, tenant: &str) -> Result<()> {
-        self.change(|t| match t.get(&fp) {
+        self.change(|t| match t.get_mut(&fp) {
             Some(d) if d.revoked => bail!("device {fp} is revoked"),
+            Some(d) if d.stale => {
+                d.stale = false;
+                Ok((true, ()))
+            }
             Some(_) => Ok((false, ())),
             None => {
                 let enrolled_at = rapp_net::log::timestamp(SystemTime::now());
-                let d =
-                    Device { fp, tenant: tenant.to_string(), id: None, enrolled_at, revoked: false, last_seen: None };
+                let d = Device {
+                    fp,
+                    tenant: tenant.to_string(),
+                    id: None,
+                    enrolled_at,
+                    revoked: false,
+                    last_seen: None,
+                    stale: false,
+                };
                 t.insert(fp, d);
                 Ok((true, ()))
             }
+        })
+    }
+    fn mark_all_stale(&self) -> Result<usize> {
+        self.change(|t| {
+            let mut n = 0;
+            for d in t.values_mut().filter(|d| !d.revoked && !d.stale) {
+                d.stale = true;
+                n += 1;
+            }
+            Ok((n > 0, n))
         })
     }
     fn bind_id(&self, fp: &Fp, id: &str) -> Result<Bind> {
@@ -323,6 +352,74 @@ mod tests {
         assert_eq!(open(&d).get(&fp(1)).unwrap().last_seen, None);
         r.flush().unwrap();
         assert_eq!(open(&d).get(&fp(1)).unwrap().last_seen.as_deref(), Some("2026-01-01T00:00:00Z"));
+    }
+
+    #[test]
+    fn mark_all_stale_skips_revoked_and_persists() {
+        let d = tempfile::tempdir().unwrap();
+        let r = open(&d);
+        for n in 1..=3 {
+            r.enroll(fp(n), "t").unwrap();
+        }
+        assert!(r.revoke(&fp(3)).changed);
+        assert_eq!(r.mark_all_stale().unwrap(), 2);
+        // Already stale: nothing more to mark.
+        assert_eq!(r.mark_all_stale().unwrap(), 0);
+        let r = open(&d);
+        assert!(r.get(&fp(1)).unwrap().stale && r.get(&fp(2)).unwrap().stale);
+        let gone = r.get(&fp(3)).unwrap();
+        assert!(gone.revoked && !gone.stale);
+        // Stale devices still count and are no revocations.
+        assert_eq!(r.count(), 2);
+        assert_eq!(r.revoked(), vec![fp(3)]);
+    }
+
+    #[test]
+    fn enroll_clears_stale_and_keeps_the_id() {
+        let d = tempfile::tempdir().unwrap();
+        let r = open(&d);
+        r.enroll(fp(1), "t").unwrap();
+        assert_eq!(r.bind_id(&fp(1), "123456789").unwrap(), Bind::New);
+        let before = r.get(&fp(1)).unwrap();
+        assert_eq!(r.mark_all_stale().unwrap(), 1);
+        // Still holding its ID while stale.
+        assert_eq!(r.by_id("123456789").unwrap().fp, fp(1));
+        r.enroll(fp(1), "t").unwrap();
+        let r = open(&d);
+        let after = r.get(&fp(1)).unwrap();
+        assert!(!after.stale);
+        assert_eq!(after.id.as_deref(), Some("123456789"));
+        assert_eq!(after.enrolled_at, before.enrolled_at);
+        assert_eq!(r.bind_id(&fp(1), "123456789").unwrap(), Bind::Same);
+    }
+
+    #[test]
+    fn old_devices_json_without_stale_loads() {
+        let d = tempfile::tempdir().unwrap();
+        let data = d.path().join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        let old = format!(
+            r#"{{"version":1,"devices":[{{"fp":"{}","tenant":"default","id":"123456789","enrolled_at":"2026-01-01T00:00:00Z","revoked":false}}]}}"#,
+            fp(1)
+        );
+        std::fs::write(data.join("devices.json"), old).unwrap();
+        let r = FileRegistry::open(&data).unwrap();
+        let dev = r.get(&fp(1)).unwrap();
+        assert!(!dev.stale && !dev.revoked);
+        assert_eq!(dev.id.as_deref(), Some("123456789"));
+    }
+
+    #[test]
+    fn stale_is_written_only_when_set() {
+        let d = tempfile::tempdir().unwrap();
+        let r = open(&d);
+        r.enroll(fp(1), "t").unwrap();
+        let file = || std::fs::read_to_string(d.path().join("data/devices.json")).unwrap();
+        assert!(!file().contains("stale"), "{}", file());
+        r.mark_all_stale().unwrap();
+        assert!(file().contains(r#""stale": true"#), "{}", file());
+        r.enroll(fp(1), "t").unwrap();
+        assert!(!file().contains("stale"), "{}", file());
     }
 
     #[test]

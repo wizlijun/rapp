@@ -139,7 +139,20 @@ void main() {
     expect(s.sessionCount, 0);
     expect(s.current, isNull);
     expect(s.currentKey, isNull);
-    expect(s.hint, contains('offline'));
+    expect(s.hint, '对方离线');
+  });
+
+  test('an open the relay refused for its key says what to do, in Chinese', () async {
+    for (final (error, word) in [
+      ('key changed', '中继换了 key，请到 本机 → 输入新 key'),
+      ('bad key', 'key 不对'),
+    ]) {
+      t.onSend = (m) {
+        if (m['cmd'] == 'open') t.emit({'event': 'error', 'error': error, 'req': m['req']});
+      };
+      await s.openOrSwitch('111', 'a', 'A');
+      expect(s.hint, word, reason: error);
+    }
   });
 
   test('a failed open goes back to the session that was current', () async {
@@ -416,7 +429,7 @@ void main() {
       expect(s.currentKey, safari.key);
       await pump();
       expect(s.currentKey, isNull);
-      expect(s.hint, contains('offline'));
+      expect(s.hint, '对方离线');
     });
 
     test('end all on the S1 path closes by sid and stays quiet', () async {
