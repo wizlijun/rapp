@@ -127,8 +127,9 @@ agent 规则：**不直接改这个文件**。加、删设备走 GUI 的设备�
 |---|---|---|
 | `theme` | `matrix`、`westworld`、`avatar`（其他值按 `matrix`） | `matrix` |
 | `start_fullscreen` | 布尔：启动时全屏沉浸 | `true` |
+| `auto_save_traffic` | 布尔：网络差时自动省流量（设置面板的开关）。`false` 时 A 始终用用户选的档位，不自动降 | `true` |
 
-生效：退出 GUI 再改，重新打开生效。没有机密。
+生效：退出 GUI 再改，重新打开生效；`auto_save_traffic` 在设置面板里改，马上告诉已开的会话。没有机密。
 
 ### 2.5 `$ROOT/shared/apps.json`（我的 app 配置）
 
