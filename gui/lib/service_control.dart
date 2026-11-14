@@ -17,7 +17,7 @@ class ShellCommand {
   /// Launch and forget (Windows service start) instead of waiting for exit.
   final bool detached;
 
-  /// Ignore the exit code (launchctl print as a readiness probe).
+  /// Ignore the exit code (bootout of an agent that is not loaded exits 3).
   final bool check;
 
   /// Run again with a 1 s pause after a nonzero exit (launchd teardown race).
@@ -40,12 +40,11 @@ List<ShellCommand> serviceCommands(
     case 'macos':
       // bootstrap right after bootout fails with "Bootstrap failed: 5: Input/output error"
       // while launchd is still tearing the old agent down (same race the pkg postinstall hit).
-      // 先 bootout 清掉可能残留的旧注册，等它退出（print 探测，失败不阻断），再 bootstrap；
+      // 先 bootout 清掉可能残留的旧注册（没加载时 exit 3，不算失败），再 bootstrap；
       // launchd 拆卸慢时 bootstrap 会报 5，隔 1 秒重试最多 5 次。
       return switch (action) {
         ServiceAction.start => [
-          ShellCommand('launchctl', ['bootout', 'gui/$uid/$serviceLabel']),
-          ShellCommand('launchctl', ['print', 'gui/$uid/$serviceLabel'], check: false),
+          ShellCommand('launchctl', ['bootout', 'gui/$uid/$serviceLabel'], check: false),
           ShellCommand('launchctl', ['bootstrap', 'gui/$uid', launchAgentPlistPath(home)], retries: 5),
         ],
         ServiceAction.stop => [ShellCommand('launchctl', ['bootout', 'gui/$uid/$serviceLabel'])],
