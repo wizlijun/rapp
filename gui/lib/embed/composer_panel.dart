@@ -19,6 +19,9 @@ import 'session_port.dart';
 /// W1: 720 wide, or the stage less 16 when the stage is narrower than 736.
 double panelWidth(double stageWidth) => stageWidth < 736 ? math.max(0, stageWidth - 16) : 720;
 
+/// How far the picture moves up while the writing panel is open (one line).
+const pictureLift = 64.0;
+
 /// One line of the editor (W2), the hit area of 「＋」 and 发送 (W13).
 const _line = 48.0;
 

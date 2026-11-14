@@ -134,7 +134,7 @@ class Stage extends StatelessWidget {
         return LayoutBuilder(builder: (context, c) {
           // The stage's size drives A's window size (R12); overlays never change it.
           state.stageSize(c.biggest);
-          final stage = Container(
+          Widget stage = Container(
             key: const Key('stage'),
             alignment: Alignment.center,
             padding: picture || full ? EdgeInsets.zero : const EdgeInsets.all(16),
@@ -143,6 +143,24 @@ class Stage extends StatelessWidget {
               child: body,
             ),
           );
+          // While the writing panel is open the picture slides up one line (the size A sees stays as it was);
+          // Transform moves hit tests with it, so a click lands where the picture is seen.
+          if (picture && rs != null) {
+            final session = rs;
+            final inner = stage;
+            stage = ClipRect(
+              child: ListenableBuilder(
+                listenable: Listenable.merge([session, session.composer]),
+                builder: (context, _) => TweenAnimationBuilder<double>(
+                  tween: Tween(end: session.composer.open && session.composerAllowed ? pictureLift : 0),
+                  duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : const Duration(milliseconds: 150),
+                  curve: Curves.easeOut,
+                  builder: (_, v, child) => Transform.translate(offset: Offset(0, -v), child: child),
+                  child: inner,
+                ),
+              ),
+            );
+          }
           final port = state.port;
           // A detached session keeps its 「输入」 here: the placeholder stands for its windows.
           if (full || !(picture || (rs != null && rs.detached)) || rs == null || port == null) return stage;

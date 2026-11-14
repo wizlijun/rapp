@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:rapp/paths.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -660,6 +661,99 @@ void main() {
       es.focusPicture(1);
       await tester.pump();
     }
+
+    Future<void> showPictureWith(WidgetTester tester, {bool reduced = false}) async {
+      escs = 0;
+      await tester.pumpWidget(wrap(mainLike(), disableAnimations: reduced));
+      await tester.pump();
+      await openEmbedded(tester);
+      port.emit(const ReadyEvent(1, 'Safari'));
+      port.emit(WindowsEvent(1, [rw(5, 800, 628)]));
+      await tester.pump();
+      es.focusPicture(1);
+      await tester.pump();
+    }
+
+    double top(WidgetTester tester) => tester.getTopLeft(find.byType(Picture)).dy;
+
+    testWidgets('opening lifts the picture 64 and closing puts it back; A is never resized', (tester) async {
+      await showPicture(tester);
+      final y0 = top(tester);
+      final size0 = tester.getSize(find.byKey(const Key('stage')));
+      port.calls.removeWhere((c) => c.$1 == 'resize');
+      await tester.tap(find.byKey(const Key('composer-open')));
+      await tester.pumpAndSettle();
+      expect(top(tester), y0 - pictureLift);
+      expect(tester.getSize(find.byKey(const Key('stage'))), size0);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(top(tester), y0);
+      expect(port.calls.where((c) => c.$1 == 'resize'), isEmpty);
+    });
+
+    testWidgets('growing does not move the picture further (W4)', (tester) async {
+      await showPicture(tester);
+      final y0 = top(tester);
+      await tester.tap(find.byKey(const Key('composer-open')));
+      await tester.pumpAndSettle();
+      es.currentRemote!.composer.setDraft(List.generate(10, (i) => 'line $i').join('\n'));
+      await tester.pumpAndSettle();
+      expect(top(tester), y0 - pictureLift);
+    });
+
+    testWidgets('the lift is at most 0.15 s, and instant with reduced motion', (tester) async {
+      await showPicture(tester);
+      final y0 = top(tester);
+      await tester.tap(find.byKey(const Key('composer-open')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 150));
+      expect(top(tester), y0 - pictureLift);
+    });
+
+    testWidgets('reduced motion lifts in one pump', (tester) async {
+      await showPictureWith(tester, reduced: true);
+      final y0 = top(tester);
+      await tester.tap(find.byKey(const Key('composer-open')));
+      await tester.pump();
+      await tester.pump();
+      expect(top(tester), y0 - pictureLift);
+    });
+
+    testWidgets('a click on the lifted picture lands where it is seen', (tester) async {
+      List<Map<String, Object?>> downs() =>
+          port.calls.where((c) => c.$1 == 'mouse' && c.$2['kind'] == 'down').map((c) => c.$2).toList();
+      await showPicture(tester);
+      final g0 = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await g0.down(tester.getCenter(find.byType(Picture)));
+      await g0.up();
+      await tester.pump();
+      final plain = downs().single;
+      port.calls.clear();
+      await tester.tap(find.byKey(const Key('composer-open')));
+      await tester.pumpAndSettle();
+      port.calls.clear();
+      final seen = tester.getCenter(find.byType(Picture));
+      expect(seen.dy, 300 - pictureLift);
+      final g = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await g.down(seen);
+      await g.up();
+      await tester.pump();
+      final lifted = downs().single;
+      expect(lifted['x'], plain['x']);
+      expect(lifted['y'], plain['y']);
+    });
+
+    testWidgets('no lift over a detached placeholder', (tester) async {
+      await showPicture(tester);
+      port.emit(const DetachedEvent(1, true));
+      await tester.pump();
+      expect(find.byType(Picture), findsNothing);
+      final before = tester.getTopLeft(find.byKey(const Key('stage'))).dy;
+      await tester.tap(find.byKey(const Key('composer-open')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('composer-panel')), findsOneWidget);
+      expect(tester.getTopLeft(find.byKey(const Key('stage'))).dy, before);
+    });
 
     testWidgets('opening the composer takes the caret from the picture', (tester) async {
       await showPicture(tester);
