@@ -232,7 +232,8 @@ class _LocalSectionState extends State<LocalSection> {
     if (st.relayAddr == null) return '未设置';
     return switch (st.relay) {
       'connected' => '已连接',
-      'connecting' => '连接中',
+      // Retrying after a failure: say why, or a relay that keeps failing reads 连接中 forever.
+      'connecting' => st.relayError == null ? '连接中' : '连接中：${disconnectWord(st.relayError)}',
       'error' => '出错：${disconnectWord(st.relayError ?? '')}',
       _ => '未设置',
     };

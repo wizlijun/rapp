@@ -36,6 +36,16 @@ void main() {
     expect(disconnectWord('offline'), '对方离线');
     expect(disconnectWord('host says: not trusted'), '对方不认这台设备（key 不同？）');
   });
+  test('relay replies in words', () {
+    expect(disconnectWord('bad address'), '接入点地址不对');
+    expect(disconnectWord('locked, retry in 12s'), '试错太多次，12 秒后再试');
+    expect(disconnectWord('locked, retry in'), '试错太多次，稍后再试');
+    expect(disconnectWord('limit'), '超出中继的限制，稍后再试');
+    expect(disconnectWord('closed'), '中继不接受新设备入网');
+    // Not the relay's `closed`.
+    expect(disconnectWord('connection closed'), '网络断了');
+    expect(disconnectWord('the host closed the connection'), '网络断了');
+  });
   test('taken over words and label', () {
     expect(disconnectWord('host says: taken over by Mac mini'), '这个窗口在 Mac mini 上打开了');
     expect(disconnectWord('host says: taken over'), '这个窗口在另一台设备上打开了');

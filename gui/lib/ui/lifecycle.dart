@@ -70,6 +70,14 @@ String disconnectWord(String? raw) {
   if (raw.contains('host key mismatch')) return '对方的设备密钥变了';
   if (raw.contains('not trusted')) return '对方不认这台设备（key 不同？）';
   if (raw.contains('unknown id')) return '没有这个 ID';
+  if (raw.contains('bad address')) return '接入点地址不对';
+  if (raw.contains('locked, retry in')) {
+    final secs = RegExp(r'locked, retry in (\d+)s').firstMatch(raw)?.group(1);
+    return secs == null ? '试错太多次，稍后再试' : '试错太多次，$secs 秒后再试';
+  }
+  // The relay's one-word replies; `closed` (入网已关闭) is not `connection closed`.
+  if (raw == 'limit' || raw.endsWith(': limit')) return '超出中继的限制，稍后再试';
+  if (raw == 'closed' || raw.endsWith(': closed')) return '中继不接受新设备入网';
   if (raw.contains('offline') || raw.contains('no path to')) {
     return '对方离线';
   }

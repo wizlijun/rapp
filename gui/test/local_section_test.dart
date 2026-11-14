@@ -98,6 +98,19 @@ void main() {
     expect(find.textContaining('出错：中继连不上'), findsOneWidget);
   });
 
+  testWidgets('connecting after a failure shows why', (tester) async {
+    svc = FakeService('tok')
+      ..extraStatus = {'relay_addr': 'vps:22026', 'has_key': true, 'relay': 'connecting', 'relay_error': 'limit'};
+    await pump(tester);
+    expect(find.text('连接中：超出中继的限制，稍后再试'), findsOneWidget);
+  });
+
+  testWidgets('connecting the first time reads 连接中', (tester) async {
+    svc = FakeService('tok')..extraStatus = {'relay_addr': 'vps:22026', 'has_key': true, 'relay': 'connecting'};
+    await pump(tester);
+    expect(find.text('连接中'), findsOneWidget);
+  });
+
   testWidgets('no relay set reads 未设置', (tester) async {
     svc = FakeService('tok');
     await pump(tester);
@@ -161,7 +174,7 @@ void main() {
 
   testWidgets('ids with relay: bare id first', (tester) async {
     svc = FakeService('tok')
-      ..extraStatus = {'relay_addr': 'vps:22026'}
+      ..extraStatus = {'relay_addr': 'vps:22026', 'has_key': true}
       ..lanIds = ['123456789@192.168.1.5'];
     await pump(tester);
     await tester.tap(find.byKey(const Key('copy-id-0')));

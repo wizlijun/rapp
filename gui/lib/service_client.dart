@@ -79,9 +79,12 @@ class ServiceStatus {
   /// This device's fingerprint.
   final String? fp;
 
+  /// The relay can be used: an address and a valid key (an address alone, e.g. with 0.5.5's key, is not).
+  bool get relaySet => hasKey && relayAddr != null;
+
   /// The ID as people should type it: with a relay set the bare ID first, then the `id@ip` forms;
   /// without, just the `id@ip` forms (bare ID if the machine has no address).
-  List<String> get shownIds => relayAddr != null ? [?id, ...lanIds] : (lanIds.isEmpty ? [?id] : lanIds);
+  List<String> get shownIds => relaySet ? [?id, ...lanIds] : (lanIds.isEmpty ? [?id] : lanIds);
 
   factory ServiceStatus.fromJson(Map<String, dynamic> m) {
     final perms = m['permissions'] is Map ? m['permissions'] as Map : const {};
