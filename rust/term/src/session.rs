@@ -8,6 +8,7 @@ use crate::tmux::control::{Control, Event};
 use crate::tmux::{cmd, PaneInfo, Tmux, MAX_PASTE};
 use crate::unread::Unread;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
@@ -29,11 +30,13 @@ pub struct Opts {
     pub poll: Duration,
     /// The shortest time between two captures.
     pub min_gap: Duration,
+    /// How many inputs (a `Keys`, a `Type`, a whole paste) the peer sent; the caller keeps a clone to read after `run`.
+    pub inputs: Arc<AtomicU64>,
 }
 
 impl Default for Opts {
     fn default() -> Opts {
-        Opts { poll: Duration::from_secs(2), min_gap: Duration::from_millis(50) }
+        Opts { poll: Duration::from_secs(2), min_gap: Duration::from_millis(50), inputs: Arc::default() }
     }
 }
 
@@ -454,6 +457,10 @@ impl<W: AsyncWrite + Unpin> Pump<'_, W> {
 
     /// Act on one input message; `false` when the pump should stop.
     async fn handle(&mut self, m: In) -> anyhow::Result<bool> {
+        // Only how many, never what: a paste counts once, on its last chunk, made or not.
+        if matches!(m, In::Keys { .. } | In::Type { .. } | In::Text { more: false, .. }) {
+            self.opts.inputs.fetch_add(1, Ordering::Relaxed);
+        }
         if let In::Text { pane, data, enter, more } = m {
             // Every paste is answered with `Pasted`, a refused one too, so the peer is never left waiting.
             return match self.is_own(&pane).await? {
