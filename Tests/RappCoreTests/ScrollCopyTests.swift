@@ -567,6 +567,57 @@ final class ScrollCopyTests: XCTestCase {
         XCTAssertTrue(r.enc.model == r.dec.samples)
     }
 
+    /// Rounded window corners: fully transparent pixels take their fill from
+    /// the row's first or last visible pixel (Quantize.swift), which may lie in
+    /// another tile. Here the top left is a transparent notch wider than a tile,
+    /// so that tile's raw pixels never change while its samples follow the
+    /// scrolled content next to it (a raw match in place that keeps other
+    /// samples). Scrolling it in the two-tone modes keeps decoder == model, and
+    /// settle ends at the exact quantization.
+    func testTransparentCornersScrollInTwoToneModes() throws {
+        let (w, h) = (320, 256)
+        func corners(_ scroll: Int) -> SceneFrame {
+            var f = screen(x: 100, y: 50 + Double(scroll), w: w, h: h, scale: 1)
+            f.region = CanvasRect(x: 100, y: 50, w: Float(w), h: Float(h))
+            let radius = 24
+            for py in 0..<h {
+                for px in 0..<w {
+                    let cx = px < radius ? radius - px : px >= w - radius ? px - (w - radius - 1) : 0
+                    let cy = py < radius ? radius - py : py >= h - radius ? py - (h - radius - 1) : 0
+                    // Rounded corners, the notch and the last rows (no visible pixel: they copy the row above).
+                    if cx * cx + cy * cy > radius * radius || (px < 72 && py < 64) || py >= h - 4 {
+                        let o = (py * w + px) * 4
+                        (f.bgra[o], f.bgra[o + 1], f.bgra[o + 2], f.bgra[o + 3]) = (0, 0, 0, 0)
+                    }
+                }
+            }
+            return f
+        }
+        let scrolls = [0, 5, 11, 11, 18, 30, 23, 9]
+        for mode in [Mode.duogray, .duocolor] {
+            let r = run((mode, true))
+            var diverged = 0, notchKept = 0
+            let bps = mode.bytesPerSample
+            for (i, scroll) in scrolls.enumerated() {
+                let f = corners(scroll), samples = ScrollScenes.samples(f, mode: mode)
+                try step(r, f, "\(mode) frame \(i)", samples: samples)
+                if r.enc.lastEncodeDiverged { diverged += 1 }
+                // The notch tile kept samples other than this frame's: the corner rule path ran.
+                if !(0..<64).allSatisfy({ same(r.dec.samples, $0 * w * bps, samples, $0 * w * bps, 64 * bps) }) {
+                    notchKept += 1
+                }
+            }
+            XCTAssertGreaterThan(diverged, 2, "\(mode): the scroll must leave the canvas approximate")
+            XCTAssertGreaterThan(notchKept, 0, "\(mode): the transparent tile never kept other samples")
+            XCTAssertGreaterThan(r.copyFrames, 0, "\(mode)")
+            XCTAssertTrue(r.enc.needsSettle, "\(mode)")
+            let quantized = ScrollScenes.samples(corners(scrolls.last!), mode: mode)
+            XCTAssertFalse(r.dec.samples == quantized, "\(mode): input must really diverge")
+            try settleAll(r, "\(mode) settle")
+            XCTAssertTrue(r.dec.samples == quantized, "\(mode)")
+        }
+    }
+
     /// Only a raw match that moves the picture adds approximation: a raw copy
     /// tile or a kept tile after a nonzero move. The same frame again keeps the
     /// canvas inexact (`lastEncodeDiverged`) without adding any.
