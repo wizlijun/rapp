@@ -489,7 +489,9 @@ public final class FrameEncoder {
             }
             previous = model
         }
-        if let best = used.max(by: { $0.value < $1.value || ($0.value == $1.value && $0.key > $1.key) }) {
+        if full {
+            lastDy = nil
+        } else if let best = used.max(by: { $0.value < $1.value || ($0.value == $1.value && $0.key > $1.key) }) {
             lastDy = best.key
         }
         lastEncodeDiverged = !diverged.isEmpty || !rawCopies.isEmpty
