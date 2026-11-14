@@ -316,13 +316,21 @@ final class TileSliceTests: XCTestCase {
     }
 
     func testFirstLimitCapsFirstSlice() {
-        let w = 1920, h = 1080
+        // One tile column, 7 tile rows (28672 raw samples): the whole frame compresses to between 8192 and 32768 bytes,
+        // so it is one slice under the plain limit and several once the first slice is capped at 8192.
+        let w = 64, h = 448
         let s = randomSamples(width: w, height: h, mode: .gray4, seed: 11)
-        let slices = FrameEncoder(mode: .gray4).encodeSlices(samples: s, width: w, height: h, limit: 32768,
+        let plain = FrameEncoder(mode: .gray4).encodeSlices(samples: s, width: w, height: h, limit: 32768,
+                                                             firstLimit: nil)
+        XCTAssertEqual(plain.count, 1)
+        let total = plain[0].data.count
+        XCTAssertGreaterThan(total, 8192)
+        XCTAssertLessThan(total, 32768)
+        let capped = FrameEncoder(mode: .gray4).encodeSlices(samples: s, width: w, height: h, limit: 32768,
                                                               firstLimit: 8192)
-        // One tile row is the soft floor: 30 tiles of at most 64*64 samples, ratio 1.
-        XCTAssertLessThanOrEqual(slices[0].data.count, 8192 + 30 * 64 * 64 / 2)
-        XCTAssertGreaterThanOrEqual(slices.count, 2)
+        XCTAssertGreaterThanOrEqual(capped.count, 2)
+        // One tile row (64 x 64 samples, ratio 1) is the soft floor over the limit.
+        XCTAssertLessThanOrEqual(capped[0].data.count, 8192 + 64 * 64 / 2)
     }
 
     func testDeltaSlicesCarryOnlyChangedTiles() throws {
