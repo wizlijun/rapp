@@ -601,6 +601,40 @@ void main() {
       expect(ed.lastMaxHeight, 48);
     });
 
+    testWidgets('many failed rows scroll; the hint line, the editor and 发送 stay on stage (I2)', (tester) async {
+      big(tester);
+      for (var i = 0; i < 8; i++) {
+        rs.composer.setDraft('row $i');
+        await rs.composer.submit();
+        rs.composer.done(0, 'boom');
+      }
+      rs.composer.note('已粘贴');
+      await tester.pumpWidget(wrap(SizedBox(
+          key: const Key('host'),
+          width: 800,
+          height: 400,
+          child: Stack(children: composerLayer(state: es, session: rs, port: port)))));
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      final host = rect(tester, 'host');
+      bool inside(Rect r) => host.contains(r.topLeft) && host.contains(r.bottomRight - const Offset(0.01, 0.01));
+      expect(inside(rect(tester, 'composer-send')), isTrue);
+      expect(inside(rect(tester, 'composer-hint')), isTrue);
+      expect(inside(tester.getRect(fieldFinder)), isTrue);
+      await tester.enterText(fieldFinder, 'z');
+      await tester.tap(find.byKey(const Key('composer-send')));
+      await tester.pump();
+      expect(callsOf('composer_send').last['pieces'], [
+        {'text': 'z'},
+      ]);
+      rs.composer.done(1, null);
+      await tester.pump();
+      // The rows open at the bottom: the last one sits right above the hint line.
+      expect(tester.getRect(find.text('row 7')).bottom, lessThanOrEqualTo(rect(tester, 'composer-hint').top));
+      expect(inside(tester.getRect(find.text('row 7'))), isTrue);
+      await tester.pump(const Duration(seconds: 5)); // the note and the idle copy
+    });
+
     testWidgets('M3.2: a long failure ellipsizes and 重试 / 放回输入框 stay', (tester) async {
       await tester.pumpWidget(
           wrap(SizedBox(width: 600, child: ComposerPanel(state: es, session: rs, port: port, maxHeight: 300))));

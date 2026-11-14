@@ -292,8 +292,21 @@ class _ComposerPanelState extends State<ComposerPanel> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (inFlight != null) _item(inFlight, t),
-              for (final o in _m.failed) _item(o, t),
+              // The rows get what the hint line and the box leave, and scroll (opening at the
+              // bottom): the box and 发送 always stay on stage.
+              if (inFlight != null || _m.failed.isNotEmpty)
+                Flexible(
+                  child: SingleChildScrollView(
+                    reverse: true,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (inFlight != null) _item(inFlight, t),
+                        for (final o in _m.failed) _item(o, t),
+                      ],
+                    ),
+                  ),
+                ),
               ?_hint(t), // W11
               Container(
                 key: const Key('composer-box'),
