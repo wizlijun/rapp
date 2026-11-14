@@ -252,8 +252,6 @@ final class Session {
 
     private var parser = MessageParser()
     private var greeted = false
-    /// The protocol version the client's hello carried; message 26 only goes to clients that understand it.
-    private var helloVersion: UInt8 = 0
     /// Holds input back while another device operates A, and paces the `input` reports (R7, R8).
     private var yield = InputYield()
     /// The device that last made this session wait.
@@ -286,11 +284,12 @@ final class Session {
     private var app: NSRunningApplication?
     private var injector: InputInjector?
     private var timer: DispatchSourceTimer?
+    private var settleTimer: DispatchSourceTimer?
     private var pollTimer: DispatchSourceTimer?
     /// Clipboard history and uploads, from the moment capture is ready until the session ends.
     private(set) var transfers: TransferStore?
     private(set) var clipWatcher: ClipboardWatcher?
-    /// Set only for a v8+ client, once Ready is sent.
+    /// Set once Ready is sent.
     private var inputWatcher: InputSourceWatcher?
     private var sentInputSource: InputSourceState?
     private var paster: Paster?
@@ -386,7 +385,7 @@ final class Session {
             break
         }
         switch message {
-        case let .hello(clientToken, bundleID, mode, fps, density, version):
+        case let .hello(clientToken, bundleID, mode, fps, density, _):
             guard !greeted else { fail("unexpected hello"); return }
             greeted = true
             let app: String
@@ -400,9 +399,8 @@ final class Session {
             requestedMode = mode
             requestedDensity = density
             requestedFps = Int(fps)
-            helloVersion = version
             makePacedSender(mode: mode, fps: Int(fps))
-            paced?.setSteps(SaveLadder.steps(ceiling: ceiling, legacy: legacySaving))
+            paced?.setSteps(SaveLadder.steps(ceiling: ceiling))
             started = true
             awake.begin()
             startInputTimer()
@@ -417,9 +415,9 @@ final class Session {
             requestedMode = mode
             requestedDensity = density
             requestedFps = Int(fps)  // before setPinned/setSteps: their levelChanged must use the new ceiling
-            // Pinned (v7, v8: a manual pick; v9: automatic saving off) goes back to the ceiling at once.
-            if clientSendsFrameAcks(helloVersion) { paced?.setPinned(pinned) }
-            paced?.setSteps(SaveLadder.steps(ceiling: ceiling, legacy: legacySaving))
+            // Pinned (automatic saving off) goes back to the ceiling at once.
+            paced?.setPinned(pinned)
+            paced?.setSteps(SaveLadder.steps(ceiling: ceiling))
             applyLevel(paced?.level ?? 0)
         case let .ping(seq):
             // Answered at once: B measures the whole path with it (spec §6.1).
@@ -471,7 +469,7 @@ final class Session {
             selectInput(id)
 
         case let .frameAck(processingMs):
-            if clientSendsFrameAcks(helloVersion) { paced?.ack(processingMs: processingMs) }
+            paced?.ack(processingMs: processingMs)
         case .ready, .error, .frame, .windows, .menuBar, .clip, .pasted, .fetch, .put, .transferStart, .chunk, .inputBlocked, .weak,
              .inputSource, .pong, .saving:
             fail("unexpected message from client")
@@ -489,8 +487,7 @@ final class Session {
         case let .drop(notify):
             if let by = notify {
                 output.emit(.inputBlocked(by: by))
-                // A v5 client would drop the connection on an unknown message type (R6).
-                if clientUnderstandsInputBlocked(helloVersion) { send(.inputBlocked(by: by)) }
+                send(.inputBlocked(by: by))
             }
             // B waits for every paste's answer before sending the next piece.
             if case let .paste(seq, _) = message { send(.pasted(seq: seq, error: inputBlockedNotice(by: yieldedBy))) }
@@ -594,6 +591,16 @@ final class Session {
         timer.resume()
         self.timer = timer
 
+        // A canvas left inexact by raw-pixel matches is corrected after 300 ms of calm; checked 10 times a second.
+        let settle = DispatchSource.makeTimerSource(queue: queue)
+        settle.schedule(deadline: .now() + 0.1, repeating: 0.1)
+        settle.setEventHandler { [weak self] in
+            guard let self, !self.ended else { return }
+            self.paced?.settleIfIdle()
+        }
+        settle.resume()
+        self.settleTimer = settle
+
         // Windows are looked up 10 times a second (spec §3.2), off the session queue.
         let poll = DispatchSource.makeTimerSource(queue: trackerQueue)
         poll.schedule(deadline: .now() + 0.1, repeating: 0.1)
@@ -651,7 +658,7 @@ final class Session {
             region = newRegion
             // No encoder reset: each frame carries its own region and B keeps
             // the decoded picture, so a diff against the previous frame stays
-            // correct; a new pixel size already makes the encoder send a full frame.
+            // correct; a new pixel size moves the canvas, and only a density change sends a full frame.
             Task { await capture.setRegion(newRegion) }
         }
     }
@@ -680,8 +687,19 @@ final class Session {
               ((width + tileSize - 1) / tileSize) * ((height + tileSize - 1) / tileSize) <= 0xFFFF else { return }
         let samples = Quantizer.quantize(bgra: UnsafeRawBufferPointer(start: base, count: bytesPerRow * height),
                                          width: width, height: height, bytesPerRow: bytesPerRow, mode: mode)
+        // Two-tone modes also get the raw pixels (the buffer is reused by capture, so copy the rows out tightly).
+        var raw: [UInt8]?
+        if mode == .duogray || mode == .duocolor {
+            let rowBytes = width * 4
+            raw = [UInt8](unsafeUninitializedCapacity: rowBytes * height) { buf, count in
+                for y in 0..<height {
+                    memcpy(buf.baseAddress! + y * rowBytes, base + y * bytesPerRow, rowBytes)
+                }
+                count = rowBytes * height
+            }
+        }
         queue.async { [weak self] in
-            self?.submit(samples: samples, width: width, height: height, region: region, mode: mode, seq: seq,
+            self?.submit(samples: samples, raw: raw, width: width, height: height, region: region, mode: mode, seq: seq,
                          captured: captured)
         }
     }
@@ -692,30 +710,26 @@ final class Session {
     /// Samples quantized for a mode that has since been switched away from are
     /// dropped (the encoder would reject their size), and so are samples older
     /// than ones already submitted (a redraw racing a newer frame).
-    private func submit(samples: [UInt8], width: Int, height: Int, region: CanvasRect, mode: Mode, seq: Int,
+    private func submit(samples: [UInt8], raw: [UInt8]?, width: Int, height: Int, region: CanvasRect, mode: Mode, seq: Int,
                         captured: TimeInterval) {
         guard !ended, capture != nil else { return }
         guard mode == sampleLock.withLock({ sampleMode }), seq >= newestSubmittedSeq else { return }
         newestSubmittedSeq = seq
         lastWidth = width
         lastHeight = height
-        paced?.offer(samples: samples, width: width, height: height, region: region, captured: captured)
+        paced?.offer(samples: samples, raw: raw, width: width, height: height, region: region, captured: captured)
     }
 
     private func makePacedSender(mode: Mode, fps: Int) {
-        let paced = PacedSender(mode: mode, fps: fps, acks: clientSendsFrameAcks(helloVersion), now: uptimeSeconds) {
-            [weak self] region, payload, done in
+        let paced = PacedSender(mode: mode, fps: fps, now: uptimeSeconds) {
+            [weak self] region, payload in
             guard let self, !self.ended else { return }
             let bytes = Message.frame(region: region, payload).encoded()
             self.bytesThisSecond += bytes.count
             self.framesThisSecond += 1
             self.connection.send(content: Data(bytes), completion: .contentProcessed { [weak self] error in
                 guard let self, !self.ended else { return }
-                if let error {
-                    self.end("send failed: \(error.localizedDescription)")
-                } else {
-                    done()
-                }
+                if let error { self.end("send failed: \(error.localizedDescription)") }
             })
         }
         paced.onLevelChange = { [weak self] level in self?.levelChanged(level) }
@@ -724,11 +738,9 @@ final class Session {
 
     /// What B asked for: the stream at saving level 0.
     private var ceiling: StreamSpec { StreamSpec(mode: requestedMode, fps: requestedFps, density: requestedDensity) }
-    /// A v7 or v8 B knows only on/off (`weak`): the one step to the floor, its frame rate kept.
-    private var legacySaving: Bool { !clientUnderstandsSaving(helloVersion) }
 
     private func applyLevel(_ level: Int) {
-        let s = SaveLadder.stream(level: level, ceiling: ceiling, legacy: legacySaving)
+        let s = SaveLadder.stream(level: level, ceiling: ceiling)
         setStream(s.mode, fps: s.fps, density: s.density)
     }
 
@@ -736,8 +748,7 @@ final class Session {
         guard !ended else { return }
         output.log(level == 0 ? "network recovered: back to the requested stream" : "slow network: saving level \(level)")
         applyLevel(level)
-        if clientUnderstandsSaving(helloVersion) { send(.saving(UInt8(level))) }
-        else if clientSendsFrameAcks(helloVersion) { send(.weak(level > 0)) }
+        send(.saving(UInt8(level)))
     }
 
     private func tick() {
@@ -747,12 +758,13 @@ final class Session {
         let p = paced?.takeStats()
         if output.json {
             output.emit(.stats(kbps: kbps, fps: framesThisSecond, width: lastWidth, height: lastHeight,
-                               rttMs: p?.rttMs, baseRttMs: p?.baseRttMs, latencyMs: p?.latencyMs, weak: p?.weak ?? false))
+                               rttMs: p?.rttMs, baseRttMs: p?.baseRttMs, latencyMs: p?.latencyMs, weak: p?.weak ?? false,
+                               fulls: p?.fullFrames ?? 0, encMs: p?.encodeMsMax))
         } else {
             func n(_ v: Int?) -> String { v.map(String.init) ?? "-" }
-            output.log(String(format: "[stats] %.1f kbps %d fps %dx%d rtt %@ base %@ latency %@ inflight %d/%d%@",
+            output.log(String(format: "[stats] %.1f kbps %d fps %dx%d rtt %@ base %@ latency %@ inflight %d/%d fulls %d encMs %@%@",
                               kbps, framesThisSecond, lastWidth, lastHeight, n(p?.rttMs), n(p?.baseRttMs), n(p?.latencyMs),
-                              p?.inFlight ?? 0, p?.cap ?? 0, p?.weak == true ? " weak" : ""))
+                              p?.inFlight ?? 0, p?.cap ?? 0, p?.fullFrames ?? 0, n(p?.encodeMsMax), p?.weak == true ? " weak" : ""))
         }
         bytesThisSecond = 0
         framesThisSecond = 0
@@ -766,9 +778,8 @@ final class Session {
 
     // MARK: Input source (v8)
 
-    /// Tells a v8+ client A's input source now and on every change.
+    /// Tells the client A's input source now and on every change.
     private func startInputSource() {
-        guard clientUnderstandsInputSource(helloVersion) else { return }
         let watcher = InputSourceWatcher(queue: queue) { [weak self] in self?.sendInputSource() }
         watcher.start()
         inputWatcher = watcher
@@ -816,8 +827,8 @@ final class Session {
             density = newDensity
             paced?.setFps(newFps)
             if let capture {
-                // No encoder reset: a density change that alters the picture's
-                // pixel size already makes the encoder send a full frame.
+                // No encoder reset: the encoder sends a full frame itself when the
+                // density (pixels per point) changes by more than 1 %.
                 Task { await capture.setStream(fps: newFps, density: Double(newDensity)) }
             }
         }
@@ -901,6 +912,8 @@ final class Session {
         pendingMenuRead = nil
         timer?.cancel()
         timer = nil
+        settleTimer?.cancel()
+        settleTimer = nil
         pollTimer?.cancel()
         pollTimer = nil
         paster?.end()

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Host-side check of the v5 side connections (fetch/put) without touching the clipboard.
+"""Host-side check of the v9 side connections (fetch/put) without touching the clipboard.
 
 usage: scripts/side-loopback.py <path to rapp-host>
 
@@ -26,16 +26,19 @@ def s16(text):
     return struct.pack("<H", len(b)) + b
 
 
-def hello(version=5):
+VERSION = 9
+
+
+def hello(version=VERSION):
     return msg(1, bytes([version]) + s16(TOKEN) + s16(APP) + bytes([0, 15]) + struct.pack("<f", 1.0))
 
 
 def fetch(token, clip, file=0, offset=0):
-    return msg(22, bytes([5]) + s16(token) + struct.pack("<IHQ", clip, file, offset))
+    return msg(22, bytes([VERSION]) + s16(token) + struct.pack("<IHQ", clip, file, offset))
 
 
 def put(item, total, token=TOKEN, kind=3, uti="public.data", name=""):
-    return msg(23, bytes([5]) + s16(token) + struct.pack("<I", item) + bytes([kind]) + s16(uti) + s16(name)
+    return msg(23, bytes([VERSION]) + s16(token) + struct.pack("<I", item) + bytes([kind]) + s16(uti) + s16(name)
                + struct.pack("<Q", total))
 
 
@@ -272,10 +275,10 @@ def main():
 
         # 6. old protocol
         s = connect(port)
-        s.sendall(hello(4))
+        s.sendall(hello(8))
         expect_error(s, "protocol version mismatch")
         s.close()
-        ok("v4 hello rejected")
+        ok("v8 hello rejected")
         print("PASS")
     except BaseException as e:
         print(f"FAIL: {type(e).__name__}: {e}")

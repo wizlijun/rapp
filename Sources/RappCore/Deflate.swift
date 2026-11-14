@@ -20,7 +20,7 @@ private func makeStream() -> UnsafeMutablePointer<z_stream> {
 /// call ends with a sync flush, so its output can be decompressed on its own,
 /// while the dictionary built from earlier calls is kept for later ones.
 public final class DeflateStream {
-    private let strm = makeStream()
+    private var strm = makeStream()
 
     public init(level: Int32 = 6) {
         let rc = deflateInit_(strm, level, ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size))
@@ -33,6 +33,29 @@ public final class DeflateStream {
     }
 
     public func compress(_ input: [UInt8]) -> [UInt8] {
+        DeflateStream.run(strm, input)
+    }
+
+    /// Compresses `input` like `compress` when the output is at most `limit`
+    /// bytes. Otherwise the stream is left as it was and `fits` is false; `data`
+    /// is then the output that would have been sent (only its size matters).
+    public func compress(_ input: [UInt8], ifAtMost limit: Int) -> (fits: Bool, data: [UInt8]) {
+        let trial = makeStream()
+        let rc = deflateCopy(trial, strm)
+        precondition(rc == Z_OK, "deflateCopy failed: \(rc)")
+        let data = DeflateStream.run(trial, input)
+        if data.count > limit {
+            deflateEnd(trial)
+            trial.deallocate()
+            return (false, data)
+        }
+        deflateEnd(strm)
+        strm.deallocate()
+        strm = trial
+        return (true, data)
+    }
+
+    private static func run(_ strm: UnsafeMutablePointer<z_stream>, _ input: [UInt8]) -> [UInt8] {
         var output = [UInt8]()
         var buffer = [UInt8](repeating: 0, count: zlibBufferSize)
         input.withUnsafeBufferPointer { inPtr in

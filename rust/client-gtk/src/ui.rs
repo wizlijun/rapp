@@ -57,6 +57,11 @@ struct State {
     fps: u8,
     density_choice: u32,
     last_stream: Option<(u8, u8, f32)>,
+    /// The user picked mode, fps or density in the menu: the host must keep
+    /// them and not switch to the weak-network tier on its own.
+    stream_pinned: bool,
+    /// The pinned flag the host has (a new connection starts unpinned).
+    sent_pinned: bool,
     geometry_changed: Instant,
     last_size: (i32, i32, i32),
 }
@@ -162,21 +167,22 @@ fn connect(
                         region,
                         width,
                         height,
-                        full,
+                        flags,
+                        dx,
+                        dy,
                         data,
                     } => {
                         if !ready {
                             bail!("frame before Ready");
                         }
                         let received = Instant::now();
-                        let pixels = decoder.decode(mode, width, height, full, &data)?;
-                        events.send(Event::Image(pixels, width, height, region))?;
-                        if address.version >= 7 {
-                            let ms = u16::try_from(received.elapsed().as_millis()).unwrap_or(u16::MAX);
-                            // Never drop an ack: the host pacer matches them FIFO, so a lost one desyncs it for
-                            // good. Blocking here is back-pressure; it fails only when the writer has ended.
-                            ack_tx.send(p::frame_ack(ms))?;
+                        if let Some(pixels) = decoder.decode(mode, width, height, flags, dx, dy, &data)? {
+                            events.send(Event::Image(pixels, width, height, region))?;
                         }
+                        let ms = u16::try_from(received.elapsed().as_millis()).unwrap_or(u16::MAX);
+                        // Never drop an ack: the host pacer matches them FIFO, so a lost one desyncs it for
+                        // good. Blocking here is back-pressure; it fails only when the writer has ended.
+                        ack_tx.send(p::frame_ack(ms))?;
                     }
                     _ => {
                         if !ready {
@@ -292,6 +298,8 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
         fps: address.as_ref().map_or(15, |a| a.fps),
         density_choice: 1,
         last_stream: None,
+        stream_pinned: false,
+        sent_pinned: false,
         geometry_changed: Instant::now(),
         last_size: (0, 0, 0),
     }));
@@ -444,6 +452,8 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
                 s.address = Some(address.clone());
                 s.mode = address.mode;
                 s.fps = address.fps;
+                s.stream_pinned = false;
+                s.sent_pinned = false;
                 let backing = connection_window
                     .surface()
                     .map_or(connection_window.scale_factor() as f64, |surface| {
@@ -712,9 +722,10 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
                 .map_or(size.2 as f64, |surface| surface.scale());
             let density = stream::capture_density(s.zoom, backing, s.density_choice);
             let next = (s.mode, s.fps, density);
-            if stream::changed(s.last_stream, next) {
-                s.send(p::stream(next.0, next.1, next.2, None));
+            if stream::changed(s.last_stream, next) || s.stream_pinned != s.sent_pinned {
+                s.send(p::stream(next.0, next.1, next.2, s.stream_pinned));
                 s.last_stream = Some(next);
+                s.sent_pinned = s.stream_pinned;
             }
         }
         glib::ControlFlow::Continue
@@ -897,11 +908,6 @@ fn install_input(
         let Some(address) = s.address.clone() else {
             return;
         };
-        if address.version == 4 {
-            s.send(p::packet(5, text.as_bytes().to_vec()));
-            e.set_text("");
-            return;
-        }
         let seq = s.next_seq;
         let Some(next) = seq.checked_add(1) else {
             return;

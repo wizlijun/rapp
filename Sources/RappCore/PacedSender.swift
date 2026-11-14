@@ -4,10 +4,8 @@ import Foundation
 ///
 /// Not thread safe: call everything (including `transmit` completions) on one queue.
 ///
-/// With `acks` (v7 clients) at most `cap` frames are outstanding; a changed frame is cut
-/// into slices, one per free slot, and only the newest offered frame is kept while the
-/// slices go out. Without `acks` (v6 clients) it behaves as before: one frame at a time,
-/// `transmit`'s `done` releases the next, the newest pending frame wins, no slicing, never weak.
+/// At most `cap` frames are outstanding; a changed frame is cut into slices, one per free slot,
+/// and only the newest offered frame is kept while the slices go out.
 public final class PacedSender {
     public struct Stats {
         public var rttMs: Int?
@@ -17,10 +15,15 @@ public final class PacedSender {
         public var cap: Int
         public var weak: Bool
         public var level: Int
+        /// Full frames encoded since the previous call.
+        public var fullFrames: Int
+        /// The slowest encode since the previous call, in ms (nil when none ran).
+        public var encodeMsMax: Int?
     }
 
     private struct Offer {
         var samples: [UInt8]
+        var raw: [UInt8]?
         var width: Int
         var height: Int
         var region: CanvasRect
@@ -35,44 +38,51 @@ public final class PacedSender {
 
     private static let sliceLimit = 32768
     private static let firstSliceLimit = 8192
+    /// Each settle frame is one slice of at most this many bytes, so a frame
+    /// captured meanwhile waits for at most one such slice.
+    private static let settleLimit = 8192
 
-    private let acks: Bool
     private let now: () -> TimeInterval
-    private let transmit: (CanvasRect, FramePayload, @escaping () -> Void) -> Void
+    private let transmit: (CanvasRect, FramePayload) -> Void
     private var encoder: FrameEncoder
     private var pacer: SendPacer
     private var tier = WeakTier()
 
     private var latest: Offer?
     private var queue: [Slice] = []
-    private var busy = false  // v6 only: a frame is waiting for its completion
     private var pumping = false
     private var sessionFirstFrame = true
     private var firstSentAt: TimeInterval?
     private var firstAckSeen = false
     private var latencyMs: Int?
+    private var fullFrames = 0
+    private var encodeMsMax: Int?
+    /// The last time the canvas became more approximate (or first inexact); settle waits 0.3 s from here.
+    private var divergedAt: TimeInterval?
+    private var lastRegion = CanvasRect(x: 0, y: 0, w: 0, h: 0)
+    private static let settleDelay = 0.3
 
     /// The saving level changed (0 = the ceiling).
     public var onLevelChange: ((Int) -> Void)?
     public var weak: Bool { tier.weak }
     public var level: Int { tier.level }
 
-    public init(mode: Mode, fps: Int, acks: Bool, now: @escaping () -> TimeInterval,
-                transmit: @escaping (_ region: CanvasRect, _ payload: FramePayload, _ done: @escaping () -> Void) -> Void) {
-        self.acks = acks
+    public init(mode: Mode, fps: Int, now: @escaping () -> TimeInterval,
+                transmit: @escaping (_ region: CanvasRect, _ payload: FramePayload) -> Void) {
         self.now = now
         self.transmit = transmit
         self.encoder = FrameEncoder(mode: mode)
         self.pacer = SendPacer(fps: fps)
     }
 
-    public func offer(samples: [UInt8], width: Int, height: Int, region: CanvasRect, captured: TimeInterval) {
-        latest = Offer(samples: samples, width: width, height: height, region: region, captured: captured)
+    /// `raw` is the frame's tightly packed BGRA, only for two-tone modes (nil otherwise).
+    public func offer(samples: [UInt8], raw: [UInt8]?, width: Int, height: Int, region: CanvasRect,
+                      captured: TimeInterval) {
+        latest = Offer(samples: samples, raw: raw, width: width, height: height, region: region, captured: captured)
         pump()
     }
 
     public func ack(processingMs: UInt16) {
-        guard acks else { return }
         let t = now()
         guard let r = pacer.acked(at: t, processingMs: processingMs) else { return }
         latencyMs = Int((r.latency * 1000).rounded())
@@ -90,6 +100,25 @@ public final class PacedSender {
         encoder = FrameEncoder(mode: mode)
         queue = []
         latest = nil
+        divergedAt = nil
+    }
+
+    /// Call every 100 ms: once the canvas has differed from the exact quantization for 300 ms and
+    /// nothing is queued or held, sends the next correcting frame (one slice of at most 8 KB).
+    /// Later calls go on with the next part without another wait, as long as nothing is queued or
+    /// held; a captured frame goes out before the next part, and one that adds approximation
+    /// restarts the 300 ms.
+    public func settleIfIdle() {
+        guard encoder.needsSettle, queue.isEmpty, latest == nil, let at = divergedAt,
+              now() - at >= Self.settleDelay else { return }
+        let started = now()
+        let slices = encoder.encodeSettle(limit: Self.settleLimit)
+        let t = now()
+        encodeMsMax = max(encodeMsMax ?? 0, Int(((t - started) * 1000).rounded()))
+        if !encoder.needsSettle { divergedAt = nil }
+        // Stamped now: the capture is old, but the correction was made just now.
+        queue = slices.map { Slice(region: lastRegion, payload: $0, captured: t) }
+        pump()
     }
 
     public func setFps(_ fps: Int) { pacer.fps = fps }
@@ -108,7 +137,6 @@ public final class PacedSender {
 
     /// Call once a second: finds an outage (no acks arriving) that no ack can report.
     public func tick() {
-        guard acks else { return }
         let t = now()
         // An idle link is not queueing: a stale slow RTT must not keep the weak timer running.
         report(tier.observe(now: t, queueing: pacer.inFlight > 0 && pacer.queueing(now: t), onAck: false))
@@ -118,10 +146,11 @@ public final class PacedSender {
     /// previous call (nil when no ack arrived); it is cleared by this call.
     public func takeStats() -> Stats {
         let t = now()
-        defer { latencyMs = nil }
+        defer { latencyMs = nil; fullFrames = 0; encodeMsMax = nil }
         return Stats(rttMs: pacer.lastRtt.map { Int(($0 * 1000).rounded()) },
                      baseRttMs: pacer.baseRtt(now: t).map { Int(($0 * 1000).rounded()) },
-                     latencyMs: latencyMs, inFlight: pacer.inFlight, cap: pacer.cap(now: t), weak: tier.weak, level: tier.level)
+                     latencyMs: latencyMs, inFlight: pacer.inFlight, cap: pacer.cap(now: t), weak: tier.weak, level: tier.level,
+                     fullFrames: fullFrames, encodeMsMax: encodeMsMax)
     }
 
     private func report(_ change: Int?) {
@@ -129,7 +158,6 @@ public final class PacedSender {
     }
 
     private func pump() {
-        if !acks { pumpV6(); return }
         guard !pumping else { return }
         pumping = true
         defer { pumping = false }
@@ -139,8 +167,18 @@ public final class PacedSender {
                 latest = nil
                 let first = sessionFirstFrame ? Self.firstSliceLimit : nil
                 sessionFirstFrame = false
-                let slices = encoder.encodeSlices(samples: o.samples, width: o.width, height: o.height,
-                                                  limit: Self.sliceLimit, firstLimit: first)
+                let started = now()
+                let slices = encoder.encodeSlices(samples: o.samples, raw: o.raw, width: o.width, height: o.height,
+                                                  region: o.region, limit: Self.sliceLimit, firstLimit: first)
+                let ms = Int(((now() - started) * 1000).rounded())
+                encodeMsMax = max(encodeMsMax ?? 0, ms)
+                if slices.first?.isFull == true { fullFrames += 1 }
+                lastRegion = o.region
+                if !encoder.needsSettle {
+                    divergedAt = nil
+                } else if encoder.lastEncodeAddedApproximation || divergedAt == nil {
+                    divergedAt = now()
+                }
                 queue = slices.map { Slice(region: o.region, payload: $0, captured: o.captured) }
                 continue
             }
@@ -148,19 +186,7 @@ public final class PacedSender {
             let t = now()
             if firstSentAt == nil { firstSentAt = t }
             pacer.sent(at: t, captured: s.captured)
-            transmit(s.region, s.payload) {}
-        }
-    }
-
-    private func pumpV6() {
-        while !busy, let o = latest {
-            latest = nil
-            guard let p = encoder.encode(samples: o.samples, width: o.width, height: o.height) else { continue }
-            busy = true
-            transmit(o.region, p) { [weak self] in
-                self?.busy = false
-                self?.pumpV6()
-            }
+            transmit(s.region, s.payload)
         }
     }
 }

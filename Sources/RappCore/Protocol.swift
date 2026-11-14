@@ -1,23 +1,9 @@
 import Foundation
 
-/// v9 = v8 (frame acks, weak tier, input source) + session ping/pong and the saving ladder: a v9
-/// client's setStream values are its ceiling and its pinned byte means "automatic saving off".
-public let protocolVersion: UInt8 = 9
-/// The oldest client version this host still serves (older clients just never get the newer host messages).
-public let oldestClientVersion: UInt8 = 5
-
-/// Clients at v7 or later acknowledge every frame; the host paces on those acks.
-public func clientSendsFrameAcks(_ v: UInt8) -> Bool { v >= 7 }
-
-/// Whether a client that said hello with `version` understands `inputBlocked` (type 26).
-public func clientUnderstandsInputBlocked(_ version: UInt8) -> Bool { version >= 6 }
-
-/// Whether a client that said hello with `version` understands `inputSource` (type 29).
-public func clientUnderstandsInputSource(_ version: UInt8) -> Bool { version >= 8 }
-
-/// Whether a client that said hello with `version` understands `pong` and `saving` (types 32, 33),
-/// and sends its stream choice as a ceiling.
-public func clientUnderstandsSaving(_ version: UInt8) -> Bool { version >= 9 }
+/// Protocol v10 = v9 (scroll copy: frame messages carry per-tile flags, see TileCodec) + session
+/// ping/pong and the saving ladder: B's setStream values are its ceiling and its pinned byte means
+/// "automatic saving off". The host and client must both speak exactly this version.
+public let protocolVersion: UInt8 = 10
 
 /// A client's `Hello` carried a different protocol version than this build speaks.
 public struct ProtocolVersionMismatch: Error, CustomStringConvertible {
@@ -109,7 +95,7 @@ public enum Message: Equatable {
     case mouse(kind: MouseKind, button: MouseButton, window: UInt32, x: Float, y: Float, clickCount: UInt8)  // 7
     case scroll(window: UInt32, x: Float, y: Float, dx: Float, dy: Float)                    // 8
     case resize(window: UInt32, width: UInt16, height: UInt16)                               // 9, client -> host (content points)
-    case setStream(mode: Mode, fps: UInt8, density: Float, pinned: Bool)                     // 11, client -> host; v6 omits the trailing pinned byte
+    case setStream(mode: Mode, fps: UInt8, density: Float, pinned: Bool)                     // 11, client -> host; ends with the pinned byte (0 or 1)
     case windows([WindowInfo])                                                               // 13, host -> client, front to back
     case focus(UInt32)                                                                       // 14, client -> host
     case close(UInt32)                                                                       // 15, client -> host
@@ -151,7 +137,9 @@ public enum Message: Equatable {
             w.string(text)
         case let .frame(region, f):
             type = 4
-            w.u8(f.mode.rawValue); w.rect(region); w.u16(f.width); w.u16(f.height); w.u8(f.isFull ? 1 : 0); w.bytes.append(contentsOf: f.data)
+            w.u8(f.mode.rawValue); w.rect(region); w.u16(f.width); w.u16(f.height); w.u8(f.flags.rawValue)
+            if f.flags.contains(.start) && !f.flags.contains(.full) { w.u32(UInt32(bitPattern: f.dx)); w.u32(UInt32(bitPattern: f.dy)) }
+            w.bytes.append(contentsOf: f.data)
         case let .text(text):
             type = 5
             w.bytes.append(contentsOf: Array(text.utf8))
@@ -263,7 +251,7 @@ public enum Message: Equatable {
         switch type {
         case 1:
             let version = try r.u8()
-            guard (oldestClientVersion...protocolVersion).contains(version) else { throw ProtocolVersionMismatch(client: version) }
+            guard version == protocolVersion else { throw ProtocolVersionMismatch(client: version) }
             let token = try r.string(), bundleID = try r.string()
             guard let mode = Mode(rawValue: try r.u8()) else { throw CodecError("unknown mode") }
             let (fps, density) = try r.stream()
@@ -275,9 +263,13 @@ public enum Message: Equatable {
         case 4:
             guard let mode = Mode(rawValue: try r.u8()) else { throw CodecError("unknown mode") }
             let region = try r.rect()
-            let width = try r.u16(), height = try r.u16(), full = try r.u8()
-            guard full <= 1 else { throw CodecError("bad frame flag") }
-            message = .frame(region: region, FramePayload(mode: mode, width: width, height: height, isFull: full == 1, data: r.rest()))
+            let width = try r.u16(), height = try r.u16()
+            let flags = FrameFlags(rawValue: try r.u8())
+            var dx: Int32 = 0, dy: Int32 = 0
+            if flags.contains(.start) && !flags.contains(.full) {
+                dx = Int32(bitPattern: try r.u32()); dy = Int32(bitPattern: try r.u32())
+            }
+            message = .frame(region: region, FramePayload(mode: mode, width: width, height: height, flags: flags, dx: dx, dy: dy, data: r.rest()))
         case 5:
             message = .text(try r.utf8(r.rest()))
         case 6:
@@ -295,13 +287,9 @@ public enum Message: Equatable {
         case 11:
             guard let mode = Mode(rawValue: try r.u8()) else { throw CodecError("unknown mode") }
             let (fps, density) = try r.stream()
-            var pinned = false
-            if !r.isAtEnd {
-                let flag = try r.u8()
-                guard flag <= 1 else { throw CodecError("bad pinned flag") }
-                pinned = flag == 1
-            }
-            message = .setStream(mode: mode, fps: fps, density: density, pinned: pinned)
+            let flag = try r.u8()
+            guard flag <= 1 else { throw CodecError("bad pinned flag") }
+            message = .setStream(mode: mode, fps: fps, density: density, pinned: flag == 1)
         case 13:
             message = .windows(try r.windows())
         case 14:
@@ -475,7 +463,7 @@ private struct Reader {
     /// The version byte that opens `fetch` and `put`.
     mutating func version() throws {
         let v = try u8()
-        guard (oldestClientVersion...protocolVersion).contains(v) else { throw ProtocolVersionMismatch(client: v) }
+        guard v == protocolVersion else { throw ProtocolVersionMismatch(client: v) }
     }
 
     mutating func clipInfo() throws -> ClipInfo {

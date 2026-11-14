@@ -70,7 +70,8 @@ def probe(binary, latest):
                                            0, 0x001f if i == 1 else 0x07e0)
                     data = z.compress(body) + z.flush(zlib.Z_SYNC_FLUSH)
                     peer.sendall(packet(4, struct.pack('<BffffHHB', 2, 0., 0.,
-                        WIDTH, HEIGHT, WIDTH, HEIGHT, i == 0) + data))
+                        WIDTH, HEIGHT, WIDTH, HEIGHT, 0x07 if i == 0 else 0x06) +
+                        (b'' if i == 0 else struct.pack('<ii', 0, 0)) + data))
                 peer.sendall(packet(17, b'\0\0'))  # ordered marker after every delta
                 time.sleep(2)  # stdout is deliberately unread while the burst arrives
                 start = time.monotonic()

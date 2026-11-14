@@ -255,13 +255,15 @@ public final class EmbeddedSession {
         case let .frame(region, payload):
             let received = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
             do {
-                try decoder.decode(payload)
-                let ids = try surfaces.draw(table: table, decoder: decoder, region: region)
-                frames += 1
-                onEvent?(.surfaces(ids))
-                if table.contains(where: { info in surfaces.visible(info.id).map { $0 != emittedVisible[info.id] } ?? false }) {
-                    emitWindows()
+                // A held frame (full or resized, not yet at its end slice) leaves the old picture up.
+                if try decoder.decode(payload) {
+                    let ids = try surfaces.draw(table: table, decoder: decoder, region: region)
+                    onEvent?(.surfaces(ids))
+                    if table.contains(where: { info in surfaces.visible(info.id).map { $0 != emittedVisible[info.id] } ?? false }) {
+                        emitWindows()
+                    }
                 }
+                frames += 1
                 let ms = (clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - received) / 1_000_000
                 link.send(.frameAck(processingMs: UInt16(min(ms, 65535))))
             } catch {

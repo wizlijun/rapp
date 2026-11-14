@@ -43,7 +43,7 @@ fn float(v: &Value, key: &str) -> Result<f32> {
     ensure!(f.is_finite(), "invalid coordinate");
     Ok(f)
 }
-fn command(v: &Value, version: u8) -> Result<Vec<u8>> {
+fn command(v: &Value) -> Result<Vec<u8>> {
     let id = || number(v, "window");
     Ok(match v["cmd"].as_str().context("missing command")? {
         "key" => {
@@ -103,8 +103,7 @@ fn command(v: &Value, version: u8) -> Result<Vec<u8>> {
                 .context("invalid mode")?;
             let fps = number(v, "fps")?;
             ensure!([1, 5, 15, 30].contains(&fps), "invalid fps");
-            // The pinned byte exists only in protocol 7; older hosts reject the longer packet.
-            let pinned = (version >= 7).then(|| v["pinned"].as_bool().unwrap_or(false));
+            let pinned = v["pinned"].as_bool().unwrap_or(false);
             p::stream(mode, fps as u8, float(v, "density")?.clamp(0.1, 8.), pinned)
         }
         "menu_pick" => {
@@ -150,10 +149,9 @@ fn run(out: &Output) -> Result<()> {
     let port = u16::try_from(number(&start, "port")?)?;
     let address = p::Address::parse(
         &format!(
-            "rapp://127.0.0.1:{port}/?mode={}&fps={}&protocol={}",
+            "rapp://127.0.0.1:{port}/?mode={}&fps={}",
             start["mode"].as_str().unwrap_or("color16"),
-            number(&start, "fps")?,
-            if start["protocol"].is_null() { p::VERSION as u32 } else { number(&start, "protocol")? }
+            number(&start, "fps")?
         ),
         Some(start["token"].as_str().context("missing token")?.into()),
     )?;
@@ -162,12 +160,9 @@ fn run(out: &Output) -> Result<()> {
     socket.set_nodelay(true)?;
     socket.set_write_timeout(Some(Duration::from_secs(5)))?;
     socket.write_all(&address.hello(float(&start, "density")?.clamp(0.1, 8.)))?;
-    // Optional start-JSON field "protocol" (4-9, default 9): the version announced in the hello; < 7 means
-    // no acks, < 9 no pings.
-    let version = address.version;
     let writer = Arc::new(Mutex::new(socket.try_clone()?));
     let stdin_writer = writer.clone();
-    let probe = Probe::new(version);
+    let probe = Probe::new();
     let stdin_probe = probe.clone();
     drop(input);
     std::thread::spawn(move || {
@@ -180,7 +175,7 @@ fn run(out: &Output) -> Result<()> {
             }
             let result = (|| -> Result<()> {
                 let v: Value = serde_json::from_str(&line)?;
-                let packet = command(&v, version)?;
+                let packet = command(&v)?;
                 // One whole packet per lock: acks from the read loop never interleave with it.
                 stdin_writer.lock().unwrap().write_all(&packet)?;
                 if is_input(&v) {
@@ -213,19 +208,19 @@ fn run(out: &Output) -> Result<()> {
         }
     });
     socket.set_read_timeout(Some(Duration::from_secs(15)))?;
-    read_loop(&mut socket, &writer, version, out, &bytes, &frames, &probe)
+    read_loop(&mut socket, &writer, out, &bytes, &frames, &probe)
 }
 /// Commands that are the user operating A: pings come faster for a while after them.
 fn is_input(v: &Value) -> bool {
     matches!(v["cmd"].as_str(), Some("key" | "mouse" | "scroll" | "text" | "paste" | "menu_pick"))
 }
-/// The whole-path probe (v9 hosts), shared by the read loop, the 1 s tick and stdin. Pings start
+/// The whole-path probe, shared by the read loop, the 1 s tick and stdin. Pings start
 /// once A said Ready: a pong must not come before it, and starting the app takes time.
 #[derive(Clone)]
-struct Probe(Arc<Mutex<(Option<PathProbe>, bool)>>, Instant);
+struct Probe(Arc<Mutex<(PathProbe, bool)>>, Instant);
 impl Probe {
-    fn new(version: u8) -> Self {
-        Probe(Arc::new(Mutex::new(((version >= 9).then(PathProbe::default), false))), Instant::now())
+    fn new() -> Self {
+        Probe(Arc::new(Mutex::new((PathProbe::default(), false))), Instant::now())
     }
     fn now(&self) -> f64 {
         self.1.elapsed().as_secs_f64()
@@ -235,14 +230,12 @@ impl Probe {
     }
     fn input(&self) {
         let now = self.now();
-        if let (Some(p), _) = &mut *self.0.lock().unwrap() {
-            p.input(now);
-        }
+        self.0.lock().unwrap().0.input(now);
     }
     fn tick(&self, writer: &Mutex<TcpStream>, out: &Output) -> Result<()> {
         let now = self.now();
         let (ping, stalled) = match &mut *self.0.lock().unwrap() {
-            (Some(p), true) => p.tick(now),
+            (p, true) => p.tick(now),
             _ => return Ok(()),
         };
         if let Some(seq) = ping {
@@ -257,9 +250,9 @@ impl Probe {
     /// Something arrived from A; for a pong, its round trip in ms when it answers the newest ping.
     fn received(&self, out: &Output, pong: Option<u32>) -> Result<()> {
         let now = self.now();
-        let (back, rtt) = match &mut *self.0.lock().unwrap() {
-            (Some(p), _) => (p.received(now), pong.and_then(|seq| p.pong(seq, now))),
-            _ => return Ok(()),
+        let (back, rtt) = {
+            let p = &mut self.0.lock().unwrap().0;
+            (p.received(now), pong.and_then(|seq| p.pong(seq, now)))
         };
         if let Some(on) = back {
             event(out, json!({"event":"stalled","on":on}))?;
@@ -273,7 +266,6 @@ impl Probe {
 fn read_loop(
     socket: &mut TcpStream,
     writer: &Mutex<TcpStream>,
-    version: u8,
     out: &Output,
     bytes: &AtomicU64,
     frames: &AtomicU64,
@@ -303,10 +295,12 @@ fn read_loop(
                 region,
                 width,
                 height,
-                full,
+                flags,
+                dx,
+                dy,
                 data,
             } => {
-                decoder.decode_into(mode, width, height, full, &data, &mut pixels)?;
+                let show = decoder.decode_into(mode, width, height, flags, dx, dy, &data, &mut pixels)?;
                 let mut frame = Vec::with_capacity(24);
                 frame.extend((width as u32).to_le_bytes());
                 frame.extend((height as u32).to_le_bytes());
@@ -315,12 +309,12 @@ fn read_loop(
                 }
                 // Decoding continues while stdout is slow. Only expanded, complete
                 // canvases may be replaced; compressed deltas must all be applied.
-                out.frame(frame.try_into().unwrap(), &mut pixels)?;
-                frames.fetch_add(1, Ordering::Relaxed);
-                if version >= 7 {
-                    let ms = u16::try_from(received.elapsed().as_millis()).unwrap_or(u16::MAX);
-                    writer.lock().unwrap().write_all(&p::frame_ack(ms))?;
+                if show {
+                    out.frame(frame.try_into().unwrap(), &mut pixels)?;
                 }
+                frames.fetch_add(1, Ordering::Relaxed);
+                let ms = u16::try_from(received.elapsed().as_millis()).unwrap_or(u16::MAX);
+                writer.lock().unwrap().write_all(&p::frame_ack(ms))?;
             }
             Incoming::Windows(windows) => {
                 let kinds = [
@@ -371,7 +365,7 @@ mod tests {
     #[test]
     fn input_packets_match_host_protocol() {
         assert_eq!(
-            command(&json!({"cmd":"resize","window":7,"w":640,"h":480}), 7).unwrap(),
+            command(&json!({"cmd":"resize","window":7,"w":640,"h":480})).unwrap(),
             p::packet(
                 9,
                 [
@@ -383,16 +377,16 @@ mod tests {
             )
         );
         assert_eq!(
-            command(&json!({"cmd":"key","keyCode":0,"modifiers":1048576,"down":false}), 7).unwrap(),
+            command(&json!({"cmd":"key","keyCode":0,"modifiers":1048576,"down":false})).unwrap(),
             p::key(0, 1 << 20, false)
         );
         assert_eq!(
-            command(&json!({"cmd":"text","text":"你好"}), 7).unwrap(),
+            command(&json!({"cmd":"text","text":"你好"})).unwrap(),
             p::packet(5, "你好".as_bytes().to_vec())
         );
-        assert_eq!(command(&json!({"cmd":"mouse","window":2,"kind":"drag","button":"left","x":1.5,"y":3.,"clicks":1}), 7).unwrap(),p::mouse(2,0,2,1.5,3.,1));
+        assert_eq!(command(&json!({"cmd":"mouse","window":2,"kind":"drag","button":"left","x":1.5,"y":3.,"clicks":1})).unwrap(),p::mouse(2,0,2,1.5,3.,1));
         assert_eq!(
-            command(&json!({"cmd":"paste","seq":7,"text":"你好"}), 7).unwrap(),
+            command(&json!({"cmd":"paste","seq":7,"text":"你好"})).unwrap(),
             p::packet(
                 20,
                 [
@@ -404,15 +398,15 @@ mod tests {
             )
         );
         assert_eq!(
-            command(&json!({"cmd":"close_window","window":7}), 7).unwrap(),
+            command(&json!({"cmd":"close_window","window":7})).unwrap(),
             p::packet(15, 7u32.to_le_bytes().to_vec())
         );
         assert_eq!(
-            command(&json!({"cmd":"select_input","id":""}), 8).unwrap(),
+            command(&json!({"cmd":"select_input","id":""})).unwrap(),
             vec![30, 2, 0, 0, 0, 0, 0]
         );
         assert_eq!(
-            command(&json!({"cmd":"select_input","id":"com.apple.keylayout.ABC"}), 8).unwrap(),
+            command(&json!({"cmd":"select_input","id":"com.apple.keylayout.ABC"})).unwrap(),
             [
                 vec![30, 25, 0, 0, 0, 23, 0],
                 b"com.apple.keylayout.ABC".to_vec()
@@ -420,7 +414,7 @@ mod tests {
             .concat()
         );
         assert_eq!(
-            command(&json!({"cmd":"paste","seq":8,"item":9}), 7).unwrap(),
+            command(&json!({"cmd":"paste","seq":8,"item":9})).unwrap(),
             p::packet(
                 20,
                 [
@@ -448,20 +442,15 @@ mod tests {
             json!({"cmd":"select_input","id":3}),
             json!({"cmd":"select_input","id":"x".repeat(1025)}),
         ] {
-            assert!(command(&v, 7).is_err());
+            assert!(command(&v).is_err());
         }
     }
     #[test]
     fn set_stream_pinned() {
         let v = json!({"cmd":"set_stream","mode":"duogray","fps":1,"density":1.,"pinned":true});
-        assert_eq!(command(&v, 7).unwrap(), p::stream(3, 1, 1., Some(true)));
+        assert_eq!(command(&v).unwrap(), p::stream(3, 1, 1., true));
         let v = json!({"cmd":"set_stream","mode":"duogray","fps":1,"density":1.});
-        assert_eq!(command(&v, 7).unwrap(), p::stream(3, 1, 1., Some(false)));
-    }
-    #[test]
-    fn set_stream_v6_has_no_pinned_byte() {
-        let v = json!({"cmd":"set_stream","mode":"duogray","fps":1,"density":1.,"pinned":true});
-        assert_eq!(command(&v, 6).unwrap(), p::stream(3, 1, 1., None));
+        assert_eq!(command(&v).unwrap(), p::stream(3, 1, 1., false));
     }
     #[derive(Clone, Default)]
     struct Sink(Arc<std::sync::Mutex<Vec<u8>>>);
@@ -485,11 +474,16 @@ mod tests {
         }
         b.extend(8u16.to_le_bytes());
         b.extend(8u16.to_le_bytes());
-        b.push(full as u8);
+        if full {
+            b.push(0x07);
+        } else {
+            b.push(0x06);
+            b.extend([0u8; 8]);
+        }
         b.extend(data);
         p::packet(4, b)
     }
-    fn session_with_host(version: u8) -> (Sink, std::net::TcpStream, std::thread::JoinHandle<Result<()>>) {
+    fn session_with_host() -> (Sink, std::net::TcpStream, std::thread::JoinHandle<Result<()>>) {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let mut socket = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
         let (host, _) = listener.accept().unwrap();
@@ -499,7 +493,7 @@ mod tests {
         let thread = std::thread::spawn(move || {
             let (bytes, frames) = (AtomicU64::new(0), AtomicU64::new(0));
             socket.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
-            read_loop(&mut socket, &writer, version, &out, &bytes, &frames, &Probe::new(version))
+            read_loop(&mut socket, &writer, &out, &bytes, &frames, &Probe::new())
         });
         (sink, host, thread)
     }
@@ -512,7 +506,7 @@ mod tests {
     }
     #[test]
     fn acks_each_frame_over_loopback() {
-        let (sink, mut host, thread) = session_with_host(7);
+        let (sink, mut host, thread) = session_with_host();
         let mut z = flate2::Compress::new(flate2::Compression::fast(), true);
         host.write_all(&ready()).unwrap();
         host.write_all(&tiny_frame(&mut z, true, 1)).unwrap();
@@ -537,7 +531,7 @@ mod tests {
     }
     #[test]
     fn saving_levels_become_weak_events() {
-        let (sink, mut host, thread) = session_with_host(9);
+        let (sink, mut host, thread) = session_with_host();
         host.write_all(&ready()).unwrap();
         host.write_all(&p::packet(33, vec![1])).unwrap();
         wait_for(&sink, br#""event":"weak","level":1,"on":true"#);
@@ -554,7 +548,7 @@ mod tests {
         let writer = Mutex::new(b);
         let sink = Sink::default();
         let (out, _w) = Output::spawn(sink.clone());
-        let probe = Probe::new(9);
+        let probe = Probe::new();
         probe.tick(&writer, &out).unwrap();
         probe.ready();
         probe.tick(&writer, &out).unwrap();
@@ -565,23 +559,5 @@ mod tests {
         assert_eq!(ping, [31, 4, 0, 0, 0, 1, 0, 0, 0]);
         probe.received(&out, Some(1)).unwrap();
         wait_for(&sink, br#""event":"rtt","ms":"#);
-        // A v8 host gets no pings.
-        let old = Probe::new(8);
-        old.ready();
-        old.tick(&writer, &out).unwrap();
-        a.set_read_timeout(Some(Duration::from_millis(300))).unwrap();
-        assert!(a.read(&mut ping).is_err());
-    }
-    #[test]
-    fn no_acks_before_v7() {
-        let (_sink, mut host, thread) = session_with_host(6);
-        let mut z = flate2::Compress::new(flate2::Compression::fast(), true);
-        host.write_all(&ready()).unwrap();
-        host.write_all(&tiny_frame(&mut z, true, 1)).unwrap();
-        host.set_read_timeout(Some(Duration::from_millis(500))).unwrap();
-        let mut b = [0; 1];
-        assert!(host.read(&mut b).is_err(), "v6 session must not ack");
-        drop(host);
-        assert!(thread.join().unwrap().is_err());
     }
 }

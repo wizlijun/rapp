@@ -184,10 +184,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case let .frame(region, payload):
             let received = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
             do {
-                try decoder.decode(payload)
-                // Cropped by the region the frame itself carries, not the table's (spec §4.4).
-                let updated = try surfaces.draw(table: coordinator.table, decoder: decoder, region: region)
-                coordinator.show(surfaces, updated: updated)
+                // A held frame (full or resized, not yet at its end slice) leaves the old picture up.
+                if try decoder.decode(payload) {
+                    // Cropped by the region the frame itself carries, not the table's (spec §4.4).
+                    let updated = try surfaces.draw(table: coordinator.table, decoder: decoder, region: region)
+                    coordinator.show(surfaces, updated: updated)
+                }
                 let ms = (clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - received) / 1_000_000
                 connection.send(.frameAck(processingMs: UInt16(min(ms, 65535))))
             } catch {

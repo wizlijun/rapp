@@ -62,13 +62,16 @@ final class TileCodecTests: XCTestCase {
         XCTAssertEqual(dec.samples, s)
     }
 
-    func testSizeChangeForcesFull() throws {
+    func testSizeChangeMovesCanvasInsteadOfFull() throws {
         let enc = FrameEncoder(mode: .color16), dec = FrameDecoder(mode: .color16)
         let a = randomSamples(width: 130, height: 70, mode: .color16, seed: 7)
         try dec.decode(try XCTUnwrap(enc.encode(samples: a, width: 130, height: 70)))
         let b = randomSamples(width: 64, height: 64, mode: .color16, seed: 8)
         let p = try XCTUnwrap(enc.encode(samples: b, width: 64, height: 64))
-        XCTAssertTrue(p.isFull)
+        XCTAssertFalse(p.isFull)
+        XCTAssertEqual(p.flags, [.start, .end])
+        XCTAssertEqual(p.dx, 0)
+        XCTAssertEqual(p.dy, 0)
         try dec.decode(p)
         XCTAssertEqual(dec.width, 64)
         XCTAssertEqual(dec.height, 64)
@@ -126,26 +129,26 @@ final class TileCodecTests: XCTestCase {
     }
 
     func testCorruptDataThrows() {
-        let bad = FramePayload(width: 64, height: 64, isFull: true, data: [1, 2, 3])
+        let bad = FramePayload(width: 64, height: 64, flags: [.full, .start, .end], data: [1, 2, 3])
         XCTAssertThrowsError(try FrameDecoder(mode: .gray4).decode(bad))
     }
 
     func testTruncatedBodyThrows() throws {
         // A well-formed zlib stream whose contents stop in the middle of a tile.
         let body: [UInt8] = [1, 0, 0, 0, 255, 9, 9, 9]     // 1 tile, index 0, raw, only 3 samples
-        let p = FramePayload(width: 64, height: 64, isFull: true, data: DeflateStream().compress(body))
+        let p = FramePayload(width: 64, height: 64, flags: [.full, .start, .end], data: DeflateStream().compress(body))
         XCTAssertThrowsError(try FrameDecoder(mode: .gray4).decode(p))
     }
 
     func testBadTileIndexOrKindThrows() {
         for body: [UInt8] in [[1, 0, 9, 0, 0, 5], [1, 0, 0, 0, 77, 5], [1, 0, 0, 0, 1, 3, 1, 2, 3]] {
-            let p = FramePayload(width: 64, height: 64, isFull: true, data: DeflateStream().compress(body))
+            let p = FramePayload(width: 64, height: 64, flags: [.full, .start, .end], data: DeflateStream().compress(body))
             XCTAssertThrowsError(try FrameDecoder(mode: .gray4).decode(p), "\(body)")
         }
     }
 
     func testOversizedFrameIsRejectedBeforeDecoding() {
-        let p = FramePayload(width: 8193, height: 8192, isFull: true, data: DeflateStream().compress([0, 0]))
+        let p = FramePayload(width: 8193, height: 8192, flags: [.full, .start, .end], data: DeflateStream().compress([0, 0]))
         XCTAssertThrowsError(try FrameDecoder(mode: .gray4).decode(p)) { error in
             XCTAssertEqual(error as? CodecError, CodecError("frame too large"))
         }
@@ -153,14 +156,14 @@ final class TileCodecTests: XCTestCase {
 
     func testDecompressionBombFrameThrows() {
         let bomb = DeflateStream().compress([UInt8](repeating: 0, count: 200 << 20))
-        let p = FramePayload(width: 64, height: 64, isFull: true, data: bomb)
+        let p = FramePayload(width: 64, height: 64, flags: [.full, .start, .end], data: bomb)
         XCTAssertThrowsError(try FrameDecoder(mode: .gray4).decode(p)) { error in
             XCTAssertEqual(error as? CodecError, CodecError("decompressed data is larger than the frame allows"))
         }
     }
 
     func testZeroSizeFrameThrows() {
-        let p = FramePayload(width: 0, height: 0, isFull: true, data: DeflateStream().compress([0, 0]))
+        let p = FramePayload(width: 0, height: 0, flags: [.full, .start, .end], data: DeflateStream().compress([0, 0]))
         XCTAssertThrowsError(try FrameDecoder(mode: .gray4).decode(p))
     }
 
@@ -257,13 +260,13 @@ final class TileCodecTests: XCTestCase {
     func testDecoderRejectsBadDuoSubBlock() {
         // One 16x16 frame, kind 3, sub-block with n = 3; then n = 0; then truncated bits.
         for body: [UInt8] in [[1, 0, 0, 0, 3, 3, 1, 2, 3], [1, 0, 0, 0, 3, 0], [1, 0, 0, 0, 3, 2, 1, 2, 0xFF]] {
-            let p = FramePayload(mode: .gray4, width: 16, height: 16, isFull: true, data: DeflateStream().compress(body))
+            let p = FramePayload(mode: .gray4, width: 16, height: 16, flags: [.full, .start, .end], data: DeflateStream().compress(body))
             XCTAssertThrowsError(try FrameDecoder().decode(p), "\(body)")
         }
         // The same frame with a valid sub-block decodes.
         let ok: [UInt8] = [1, 0, 0, 0, 3, 2, 1, 2] + [UInt8](repeating: 0x80, count: 32)
         let dec = FrameDecoder()
-        XCTAssertNoThrow(try dec.decode(FramePayload(mode: .gray4, width: 16, height: 16, isFull: true,
+        XCTAssertNoThrow(try dec.decode(FramePayload(mode: .gray4, width: 16, height: 16, flags: [.full, .start, .end],
                                                      data: DeflateStream().compress(ok))))
         XCTAssertEqual(dec.samples[0], 2)
         XCTAssertEqual(dec.samples[1], 1)

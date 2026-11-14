@@ -1,7 +1,7 @@
 use anyhow::{bail, ensure, Context, Result};
 use std::{collections::HashSet, io::Read};
 
-pub const VERSION: u8 = 9;
+pub const VERSION: u8 = 10;
 pub const MAX_MESSAGE: usize = 64 * 1024 * 1024;
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Rect {
@@ -37,7 +37,9 @@ pub enum Incoming {
         region: Rect,
         width: usize,
         height: usize,
-        full: bool,
+        flags: u8,
+        dx: i32,
+        dy: i32,
         data: Vec<u8>,
     },
     Windows(Vec<Window>),
@@ -67,7 +69,6 @@ pub enum Incoming {
 }
 #[derive(Clone, Debug)]
 pub struct Address {
-    pub version: u8,
     pub host: String,
     pub port: u16,
     pub app: String,
@@ -93,13 +94,11 @@ impl Address {
         let mut token = fallback.unwrap_or_default();
         let mut mode = 0;
         let mut fps = 15;
-        let mut version = VERSION;
         for (k, v) in u.query_pairs() {
             match k.as_ref() {
                 "token" if !v.is_empty() => token = v.into_owned(),
                 "mode" => mode = mode_number(&v).context("unknown color mode")?,
                 "fps" => fps = v.parse().context("invalid fps")?,
-                "protocol" => version = v.parse().context("invalid protocol")?,
                 _ => (),
             }
         }
@@ -109,12 +108,7 @@ impl Address {
             token.len() <= 65535 && app.len() <= 65535,
             "token or app identifier too long"
         );
-        ensure!(
-            (4..=9).contains(&version),
-            "protocol must be 4 to 9"
-        );
         Ok(Self {
-            version,
             host,
             port,
             app,
@@ -124,7 +118,7 @@ impl Address {
         })
     }
     pub fn hello(&self, density: f32) -> Vec<u8> {
-        let mut p = vec![self.version];
+        let mut p = vec![VERSION];
         string(&mut p, &self.token);
         string(&mut p, &self.app);
         p.extend([self.mode, self.fps]);
@@ -144,7 +138,6 @@ impl Address {
         url.set_port(Some(self.port)).unwrap();
         url.set_path(&self.app);
         url.query_pairs_mut()
-            .append_pair("protocol", &self.version.to_string())
             .append_pair(
                 "mode",
                 ["gray4", "color8", "color16", "duogray", "duocolor"][self.mode as usize],
@@ -206,12 +199,12 @@ pub fn ping(seq: u32) -> Vec<u8> {
 pub fn frame_ack(processing_ms: u16) -> Vec<u8> {
     packet(27, processing_ms.to_le_bytes().to_vec())
 }
-pub fn stream(mode: u8, fps: u8, density: f32, pinned: Option<bool>) -> Vec<u8> {
+/// Stream settings (type 11). `pinned`: the user picked them, so the host must
+/// not switch to the weak-network tier on its own.
+pub fn stream(mode: u8, fps: u8, density: f32, pinned: bool) -> Vec<u8> {
     let mut p = vec![mode, fps];
     p.extend(density.to_le_bytes());
-    if let Some(pinned) = pinned {
-        p.push(pinned as u8);
-    }
+    p.push(pinned as u8);
     packet(11, p)
 }
 pub fn menu_pick(path: &[u16]) -> Vec<u8> {
@@ -331,15 +324,24 @@ pub fn decode(kind: u8, p: &[u8]) -> Result<Incoming> {
             let region = r.rect()?;
             let width = r.u16()? as usize;
             let height = r.u16()? as usize;
-            let full = r.u8()?;
-            ensure!(full <= 1, "invalid full-frame flag");
+            let flags = r.u8()?;
+            ensure!(flags & 0xF0 == 0, "unknown frame flags");
+            ensure!(flags & 1 == 0 || flags & 2 != 0, "full frame without start");
+            ensure!(flags & 8 == 0 || flags & 2 != 0, "copies without start");
+            let (mut dx, mut dy) = (0, 0);
+            if flags & 2 != 0 && flags & 1 == 0 {
+                dx = r.u32()? as i32;
+                dy = r.u32()? as i32;
+            }
             let data = r.take(p.len() - r.pos)?.to_vec();
             Incoming::Frame {
                 mode,
                 region,
                 width,
                 height,
-                full: full == 1,
+                flags,
+                dx,
+                dy,
                 data,
             }
         }
