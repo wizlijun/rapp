@@ -34,6 +34,11 @@ void main() {
     expect(disconnectWord('host says: window gone'), 'window gone');
     expect(disconnectWord(null), '');
   });
+  test('a terminal session the device ended says so and stops automatic tries', () {
+    expect(disconnectWord('session ended'), '这个会话已经结束了');
+    expect(autoReconnects('session ended'), false);
+    expect(stopsAutoReconnect('session ended'), true);
+  });
   test('relay and key words', () {
     expect(disconnectWord('relay not set: add the host as id@ip'), '没设中继，请用 ID@IP 添加');
     expect(disconnectWord('relay unreachable: connection refused'), '中继连不上');

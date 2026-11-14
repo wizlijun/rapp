@@ -146,13 +146,17 @@ void main() {
     m.applyHistory(const TermHistory(pane: '%1', before: 0, lines: ['x'], hist: 11));
     expect([m.lineAt(-1)?.text, m.lineAt(-2)?.text], [null, 'x']);
   });
-  test('a history reply of another pane is dropped but ends the request', () {
+  test('a history reply of another pane is dropped and leaves the request in flight', () {
     final m = TermModel()..expect('%1');
     m.apply(scr(['s'], rev: 1, hist: 600, limit: 2000));
     expect(m.wantHistory(), isNotNull);
     m.applyHistory(const TermHistory(pane: '%2', before: 0, lines: ['o'], hist: 600));
     expect(m.lineAt(-1), isNull);
-    expect(m.wantHistory(), (before: 0, lines: 500));
+    expect(m.wantHistory(), isNull);
+    m.applyHistory(const TermHistory(pane: '%1', before: 0, lines: ['h'], hist: 600));
+    expect(m.lineAt(-1)?.text, 'h');
+    m.scrollBy(1);
+    expect(m.wantHistory(), (before: 1, lines: 500));
   });
   test('the whole history fetched is the top', () {
     final m = TermModel()..expect('%1');
@@ -198,12 +202,34 @@ void main() {
     m.apply(scr(['x', 'y'], rev: 2, hist: 0, limit: 2000));
     expect((m.offset, m.newOutput), (0.0, false));
   });
-  test('a failed history read is reported and the next batch can be asked for', () {
-    final m = TermModel()..expect('%1');
+  test('a failed history read is reported and the same batch is asked for again only after a pause', () {
+    var now = DateTime(2026);
+    final m = TermModel(clock: () => now)..expect('%1');
     m.apply(scr(['s'], rev: 1, hist: 600, limit: 2000));
     expect(m.wantHistory(), isNotNull);
     m.fail('x');
     expect(m.note, 'x');
+    expect(m.wantHistory(), isNull);
+    m.apply(scr(['t'], rev: 2, hist: 600, limit: 2000));
+    now = now.add(historyRetryAfter - const Duration(milliseconds: 1));
+    expect(m.wantHistory(), isNull);
+    now = now.add(const Duration(milliseconds: 1));
+    expect(m.wantHistory(), (before: 0, lines: 500));
+  });
+  test('an error with no history request in flight only sets the note', () {
+    final m = TermModel()..expect('%1');
+    m.apply(scr(['s'], rev: 1, hist: 600, limit: 2000));
+    m.fail('refit failed');
+    expect(m.note, 'refit failed');
+    expect(m.wantHistory(), (before: 0, lines: 500));
+  });
+  test('switching panes ends the pause after a failed history read', () {
+    final m = TermModel()..expect('%1');
+    m.apply(scr(['s'], rev: 1, hist: 600, limit: 2000));
+    m.wantHistory();
+    m.fail('no such pane');
+    m.expect('%2');
+    m.apply(scr(['s'], rev: 2, hist: 600, limit: 2000, pane: '%2'));
     expect(m.wantHistory(), (before: 0, lines: 500));
   });
   test('expecting the same pane again ends the request in flight and keeps the history', () {

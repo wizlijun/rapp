@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -5,9 +6,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/paths.dart';
+import 'package:rapp/term/term_session_port.dart';
 import 'package:rapp/term/term_stage.dart';
 import 'package:rapp/term/term_wire.dart';
 import 'package:rapp/ui/disconnected_stage.dart';
+import 'package:rapp/ui/lifecycle.dart' show Phase;
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/sessions_tab.dart';
@@ -306,5 +309,72 @@ void main() {
     expect(port.calls.where((c) => c.$1 == 'start'), isEmpty);
     expect(plain.current!.reason, '这台主控台还不能看终端会话');
     expect(plain.hint, contains('这台主控台还不能看终端会话'));
+  });
+  group('with the real terminal port', () {
+    late ServerSocket worker;
+    final conns = <Socket>[];
+
+    int opens() => t.sent.where((m) => m['cmd'] == 'open').length;
+
+    Future<void> until(bool Function() ok, {Duration within = const Duration(seconds: 3)}) async {
+      final end = DateTime.now().add(within);
+      while (!ok() && DateTime.now().isBefore(end)) {
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(ok(), isTrue, reason: 'timed out');
+    }
+
+    /// A worker that shows one pane, then does [then] to the link; the state opens a terminal on it.
+    Future<void> openOn(void Function(Socket c) then) async {
+      conns.clear();
+      worker = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() async {
+        for (final c in conns) {
+          c.destroy();
+        }
+        await worker.close();
+      });
+      worker.listen((c) {
+        conns.add(c);
+        c.listen((_) {}, onError: (_) {});
+        c.write('${jsonEncode({'t': 'panes', 'panes': [
+              {'id': '%3', 'win': '@1', 'window': 'w', 'title': 't', 'command': 'claude',
+               'cols': 80, 'rows': 24, 'dead': false, 'active': true},
+            ]})}\n');
+        if (conns.length == 1) then(c);
+      });
+      t.onSend = (m) {
+        if (m['cmd'] == 'open') {
+          t.emit({
+            'event': 'opened', 'sid': nextSid++, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+            'port': worker.port, 'token': 'tk', 'req': m['req'],
+          });
+        }
+      };
+      final real = TermSessionPort();
+      s.dispose();
+      s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port, termPort: real);
+      addTearDown(real.dispose);
+      s.openOrSwitch('111', app, 'work');
+    }
+
+    test('a terminal whose link drops reconnects by itself like an app session', () async {
+      await openOn((c) => Future<void>.delayed(const Duration(milliseconds: 50), c.destroy));
+      await until(() => s.currentRecord?.phase == Phase.disconnected);
+      expect(s.currentRecord!.retry, isNotNull);
+      expect(s.current!.reason, '网络断了');
+      await until(() => opens() == 2);
+      expect(t.sent.where((m) => m['cmd'] == 'open').last['reconnect'], true);
+      await until(() => s.currentRecord?.phase == Phase.live && s.currentRecord?.sid == 2);
+    });
+
+    test('a terminal session the device ended does not reconnect and says so in Chinese', () async {
+      await openOn((c) => c.write('${jsonEncode({'t': 'error', 'error': 'session ended'})}\n'));
+      await until(() => s.currentRecord?.phase == Phase.disconnected);
+      expect(s.currentRecord!.retry, isNull);
+      expect(s.current!.reason, '这个会话已经结束了');
+      await Future<void>.delayed(const Duration(milliseconds: 1500));
+      expect(opens(), 1);
+    });
   });
 }

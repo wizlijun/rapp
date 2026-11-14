@@ -33,12 +33,18 @@ class Worker {
   final got = <String>[];
   late final ServerSocket srv;
   void Function(Socket s)? onConnect;
-  static Future<Worker> start([void Function(Socket s)? onConnect]) async {
-    final w = Worker()..onConnect = onConnect;
+  void Function(Socket s, String line)? onLine;
+  static Future<Worker> start([void Function(Socket s)? onConnect, void Function(Socket s, String line)? onLine]) async {
+    final w = Worker()
+      ..onConnect = onConnect
+      ..onLine = onLine;
     w.srv = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
     w.srv.listen((s) {
       w.sockets.add(s);
-      s.cast<List<int>>().transform(utf8.decoder).transform(const LineSplitter()).listen(w.got.add, onError: (_) {});
+      s.cast<List<int>>().transform(utf8.decoder).transform(const LineSplitter()).listen((l) {
+        w.got.add(l);
+        w.onLine?.call(s, l);
+      }, onError: (_) {});
       w.onConnect?.call(s);
     });
     return w;
@@ -89,28 +95,19 @@ void main() {
     expect(port.pane(1, 3)!.command, 'claude');
   });
 
-  test('view is not resent on one connection, but is on a new start', () async {
+  test('view is not resent on one connection, but is on the new session of a reconnect', () async {
     await begin(await Worker.start());
     port.view(1, 3, 80, 24);
     port.view(1, 3, 80, 24);
     port.view(1, 3, 100, 24);
     await pumpUntil(() => w.got.length >= 3);
     expect(w.got.where((l) => l.contains('"view"')).length, 2);
-    await port.start(StartArgs(1, w.srv.port, 'tk', 'x', 0, 'x'));
-    port.view(1, 3, 100, 24);
+    await port.start(StartArgs(2, w.srv.port, 'tk', 'x', 0, 'x'));
+    port.view(2, 3, 100, 24);
     await pumpUntil(() => w.got.where((l) => l.contains('"view"')).length == 3);
-    port.refit(1);
+    port.refit(2);
     await pumpUntil(() => w.got.any((l) => l.contains('"refit"')));
     expect(w.got.last, jsonEncode({'t': 'refit', 'pane': '%3', 'cols': 100, 'rows': 24}));
-  });
-
-  test('a new start of the same session sends the last view without being asked again', () async {
-    await begin(await Worker.start());
-    port.view(1, 3, 80, 24);
-    await pumpUntil(() => w.got.where((l) => l.contains('"view"')).length == 1);
-    await port.start(StartArgs(1, w.srv.port, 'tk', 'x', 0, 'x'));
-    await pumpUntil(() => w.got.where((l) => l.contains('"view"')).length == 2);
-    expect(w.got.last, jsonEncode({'t': 'view', 'pane': '%3', 'cols': 80, 'rows': 24}));
   });
 
   test('a line split in the middle of a Chinese character is put back together', () async {
@@ -142,7 +139,8 @@ void main() {
     w.sockets.single.destroy();
     await pumpUntil(() => events.whereType<DisconnectedEvent>().isNotEmpty);
     await Future<void>.delayed(const Duration(milliseconds: 50));
-    expect(events.whereType<DisconnectedEvent>().single.reason, 'connection lost');
+    // The words of a dropped app session's link: the lifecycle says 网络断了 and tries again by itself.
+    expect(events.whereType<DisconnectedEvent>().single.reason, 'connection closed');
     expect(port.model(1), isNotNull);
     port.close(1);
     await pumpUntil(() => events.whereType<ClosedEvent>().isNotEmpty);
@@ -167,6 +165,33 @@ void main() {
     w.sockets.single.write(line({'t': 'error', 'error': 'session ended'}));
     await pumpUntil(() => events.whereType<DisconnectedEvent>().isNotEmpty);
     expect(events.whereType<DisconnectedEvent>().single.reason, 'session ended');
+  });
+
+  test('messages queued behind session ended are dropped', () async {
+    await begin(await Worker.start());
+    port.view(1, 3, 80, 24);
+    await pumpUntil(() => w.got.any((l) => l.contains('"view"')));
+    w.sockets.single.write(line({'t': 'error', 'error': 'session ended'}) +
+        line({'t': 'panes', 'panes': [pane('%3', '@1', 'claude', active: true)]}) +
+        line(screenJson('%3', rev: 4)));
+    await pumpUntil(() => events.whereType<DisconnectedEvent>().isNotEmpty);
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(port.model(1)!.screen, isEmpty);
+    expect(events.whereType<WindowsEvent>(), isEmpty);
+    expect(w.got.where((l) => l.contains('"ack"')), isEmpty);
+  });
+
+  test('a device that keeps failing history reads is asked a bounded number of times', () async {
+    await begin(await Worker.start(null, (s, l) {
+      if (l.contains('"view"')) s.write(line({...screenJson('%3', rev: 1), 'hist': 5000, 'limit': 5000}));
+      if (l.contains('"history"')) s.write(line({'t': 'error', 'error': 'could not read the history'}));
+    }));
+    // The stage asks for more history on every model change.
+    port.model(1)!.addListener(() => port.fetchHistory(1));
+    port.view(1, 3, 80, 24);
+    await pumpUntil(() => port.model(1)!.screen.isNotEmpty);
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    expect(w.got.where((l) => l.contains('"history"')).length, 1);
   });
 
   test('a screen for the pane switched away from is still acked', () async {

@@ -8,10 +8,17 @@ import 'term_wire.dart';
 /// History lines asked for per request.
 const int historyBatch = 500;
 
+/// After a failed history read, how long until history is asked for again.
+const Duration historyRetryAfter = Duration(seconds: 3);
+
 /// The grid of one terminal pane: the screen, the local scrollback and the scroll position (design H1, H2).
 ///
 /// Row coordinate y: y >= 0 is screen row y; y < 0 is history, -1 being the line right above the screen.
 class TermModel extends ChangeNotifier {
+  TermModel({DateTime Function()? clock}) : _clock = clock ?? DateTime.now;
+
+  final DateTime Function() _clock;
+
   /// The pane being watched; screens of other panes are only acked.
   String? pane;
   int cols = 0, rows = 0, cx = 0, cy = 0;
@@ -49,11 +56,13 @@ class TermModel extends ChangeNotifier {
   int _pendingRev = 0;
   bool _inFlight = false;
   bool _dropNext = false;
+  // A history read failed: none is asked for before this.
+  DateTime? _retryAt;
 
   List<TermLine> get screen => _screen;
 
-  /// The stage sent `view`: only this pane's screens are used from now on. Also sent again on reconnect, so any
-  /// history request in flight is given up even for the same pane.
+  /// The stage sent `view`: only this pane's screens are used from now on. Also sent again for a new size of the
+  /// same pane, so any history request in flight is given up even for the same pane.
   void expect(String pane) {
     if (pane != this.pane) {
       this.pane = pane;
@@ -62,6 +71,7 @@ class TermModel extends ChangeNotifier {
       _screen = const [];
       _wrapped = const {};
       _clearHistory();
+      _retryAt = null;
     }
     _inFlight = false;
     _dropNext = false;
@@ -184,19 +194,27 @@ class TermModel extends ChangeNotifier {
     if (_inFlight) _dropNext = true;
   }
 
-  /// The device answered with an `error` (a failed history read comes back this way, not as `history`).
+  /// The device answered with an `error` (a failed history read comes back this way, not as `history`). With a
+  /// history request in flight it is taken as that request's answer: it ends, and the next one waits
+  /// [historyRetryAfter] so a read that keeps failing is not asked again at once.
   void fail(String error) {
     note = error;
-    _inFlight = false;
-    _dropNext = false;
+    if (_inFlight) {
+      _inFlight = false;
+      _dropNext = false;
+      _retryAt = _clock().add(historyRetryAfter);
+    }
     notifyListeners();
   }
 
   void applyHistory(TermHistory m) {
+    // Another pane's reply answers no request of this one's.
+    if (pane == null || m.pane != pane) return;
     final drop = _dropNext;
     _inFlight = false;
     _dropNext = false;
-    if (drop || pane == null || m.pane != pane) return;
+    if (drop) return;
+    _retryAt = null;
     final mh = m.hist, h = hist;
     final adj = mh != null && h != null ? h - mh : 0;
     final len = m.lines.length;
@@ -214,9 +232,15 @@ class TermModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// The next batch to fetch, marked in flight; null when nothing is needed or a request is already in flight.
+  /// The next batch to fetch, marked in flight; null when nothing is needed, a request is already in flight, or a
+  /// failed one is still waiting out [historyRetryAfter].
   ({int before, int lines})? wantHistory() {
     if (_inFlight || pane == null || _screen.isEmpty) return null;
+    final retry = _retryAt;
+    if (retry != null) {
+      if (_clock().isBefore(retry)) return null;
+      _retryAt = null;
+    }
     // An unknown line in view first: from the one nearest the screen, the run of unknown lines.
     final lo = (offset.floor() - rows).clamp(0, _hist.length);
     final hi = offset.ceil().clamp(0, _hist.length);

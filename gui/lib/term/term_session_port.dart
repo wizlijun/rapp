@@ -95,13 +95,11 @@ class TermSessionPort extends SessionPort {
   }
 
   Future<void> _start(Object sid, int port, String token) async {
+    // A sid is started once: a reconnect is a new sid with a new model, and the TermStage put up for it asks for
+    // the view again. A second start of the same sid only replaces the first connection.
     final old = _terms[sid];
     if (old != null) _stop(old);
-    // The model stays across a reconnect: the picture rests on the last screen until a new one comes.
-    // So does the view: the stage stays as it was and asks nothing new, so the link-up below sends it.
-    final t = _Term(sid, old?.model ?? TermModel())
-      ..panes = old?.panes ?? const []
-      ..view = old?.view;
+    final t = _Term(sid, TermModel());
     _terms[sid] = t;
     final TermLink link;
     try {
@@ -125,7 +123,8 @@ class TermSessionPort extends SessionPort {
     });
     link.messages.listen((m) => _onMessage(t, m));
     unawaited(link.done.then((_) {
-      if (!t.closed) _lost(t, 'connection lost');
+      // The words a dropped app session's link ends with: the lifecycle tries again by itself.
+      if (!t.closed) _lost(t, 'connection closed');
     }));
   }
 
@@ -138,7 +137,8 @@ class TermSessionPort extends SessionPort {
   }
 
   void _onMessage(_Term t, TermOut m) {
-    if (t.closed) return;
+    // Lines read before `session ended` (or the link going) can still be queued: the session is over for them.
+    if (t.closed || t.disconnected) return;
     switch (m) {
       case TermPanes():
         t.panes = m.panes;
@@ -211,8 +211,9 @@ class TermSessionPort extends SessionPort {
     final t = _terms[sid];
     if (t == null || t.disconnected || t.link == null) return;
     final pane = t.model.pane;
+    if (pane == null) return;
     final w = t.model.wantHistory();
-    if (pane == null || w == null) return;
+    if (w == null) return;
     t.link!.send(historyReq(pane, w.before, w.lines));
   }
 }
