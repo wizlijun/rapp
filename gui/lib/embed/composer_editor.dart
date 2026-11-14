@@ -52,7 +52,7 @@ abstract class ComposerEditor {
   /// A copy of the whole text.
   Future<String> read();
 
-  /// The whole text; the editor is empty afterwards.
+  /// The whole text; the editor is empty afterwards. While composing: completes after the commit.
   Future<String> take();
   void dispose();
 }

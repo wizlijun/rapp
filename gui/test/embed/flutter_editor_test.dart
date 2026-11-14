@@ -139,6 +139,54 @@ void main() {
     expect(await ed.read(), '你X');
   });
 
+  Future<void> composeNi(WidgetTester tester) async {
+    await tester.pumpWidget(_host(ed));
+    ed.focus();
+    await tester.pump();
+    tester.testTextInput.updateEditingValue(const TextEditingValue(
+        text: 'ni', selection: TextSelection.collapsed(offset: 2), composing: TextRange(start: 0, end: 2)));
+    await tester.pump();
+  }
+
+  Future<void> commit(WidgetTester tester) async {
+    tester.testTextInput.updateEditingValue(const TextEditingValue(text: '你', selection: TextSelection.collapsed(offset: 1)));
+    await tester.pump();
+  }
+
+  testWidgets('take while composing waits for the commit', (tester) async {
+    await composeNi(tester);
+    String? got;
+    ed.take().then((s) => got = s);
+    await tester.pump();
+    expect(await ed.read(), 'ni');
+    expect(got, isNull);
+    await commit(tester);
+    await tester.pump();
+    expect(got, '你');
+    expect(await ed.read(), '');
+  });
+
+  testWidgets('take after a pending insert takes both', (tester) async {
+    await composeNi(tester);
+    ed.insert('X');
+    String? got;
+    ed.take().then((s) => got = s);
+    await commit(tester);
+    await tester.pump();
+    expect(got, '你X');
+    expect(await ed.read(), '');
+  });
+
+  testWidgets('dispose completes a pending take', (tester) async {
+    await composeNi(tester);
+    String? got;
+    ed.take().then((s) => got = s);
+    await tester.pumpWidget(const SizedBox());
+    ed.dispose();
+    await tester.pump();
+    expect(got, 'ni');
+  });
+
   testWidgets('one line is 48 high; many lines stop at maxHeight and scroll', (tester) async {
     await tester.pumpWidget(_host(ed));
     expect(tester.getSize(find.byKey(const Key('composer-field'))).height, 48);

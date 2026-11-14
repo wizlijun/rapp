@@ -1,5 +1,7 @@
 // The Flutter implementation of the writing panel's editing area: a TextField that owns its
 // controller and focus node and only reports to [EditorHandlers].
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -164,16 +166,34 @@ class FlutterEditor implements ComposerEditor {
 
   @override
   Future<String> take() {
-    final t = _controller.text;
-    _pending.clear();
-    _controller.value = TextEditingValue.empty;
-    return SynchronousFuture(t);
+    if (!_composing) return SynchronousFuture(_takeNow());
+    // Dart writes only after the commit: the take waits in line behind earlier edits.
+    final done = Completer<String>();
+    _takers.add(done);
+    _pending.add(() {
+      _takers.remove(done);
+      done.complete(_takeNow());
+    });
+    return done.future;
   }
+
+  String _takeNow() {
+    final t = _controller.text;
+    _controller.value = TextEditingValue.empty;
+    return t;
+  }
+
+  final _takers = <Completer<String>>[];
 
   @override
   void dispose() {
+    if (_disposed) return;
     _disposed = true;
     _pending.clear();
+    for (final c in _takers) {
+      c.complete(_controller.text);
+    }
+    _takers.clear();
     _controller.removeListener(_controllerChanged);
     _focus.removeListener(_focusChanged);
     _controller.dispose();
