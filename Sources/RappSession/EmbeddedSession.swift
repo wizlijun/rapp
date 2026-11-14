@@ -261,6 +261,8 @@ public final class EmbeddedSession {
             disconnect(reason: "host says: \(reason)")
         case let .inputBlocked(by):
             onEvent?(.inputBlocked(by: by))
+        case let .inputSource(id, name, ascii):
+            onEvent?(.inputSource(id: id, name: name, ascii: ascii))
         default:
             break
         }

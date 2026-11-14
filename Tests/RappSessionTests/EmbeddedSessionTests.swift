@@ -137,6 +137,18 @@ final class EmbeddedSessionTests: XCTestCase {
         XCTAssertFalse(events.contains { if case .disconnected = $0 { return true }; return false })
     }
 
+    func testInputSourceBecomesAnEventAndSelectInputGoesOut() throws {
+        let link = FakeLink()
+        var events = [SessionEvent]()
+        let (s, q) = make(link) { events.append($0) }
+        q.sync { link.feed(.windows([w])); link.feed(.inputSource(id: "p", name: "拼音", ascii: false)) }
+        XCTAssertEqual(events.last, .inputSource(id: "p", name: "拼音", ascii: false))
+        s.send(.selectInput(id: ""))
+        s.send(.paste(seq: 1, .text("hi")))
+        q.sync {}
+        XCTAssertEqual(Array(link.sent.suffix(2)), [.selectInput(id: ""), .paste(seq: 1, .text("hi"))])
+    }
+
     func testTakenOverDisconnectsWithTheHostText() throws {
         let link = FakeLink()
         var events = [SessionEvent]()

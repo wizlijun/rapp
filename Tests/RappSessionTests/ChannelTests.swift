@@ -23,6 +23,10 @@ final class ChannelTests: XCTestCase {
         XCTAssertEqual(try channelCommand("resize", ["sid": 1, "window": 7, "w": 800.4, "h": 70_000]),
                        .resize(sid: 1, .resize(window: 7, width: 800, height: 65535)))
         XCTAssertEqual(try channelCommand("select_window", ["sid": 1, "window": 2]), .selectWindow(sid: 1, window: 2))
+        XCTAssertEqual(try channelCommand("close_window", ["sid": 1, "window": 2]), .closeWindow(sid: 1, window: 2))
+        XCTAssertEqual(try channelCommand("select_input", ["sid": 1, "id": ""]), .selectInput(sid: 1, id: ""))
+        XCTAssertEqual(try channelCommand("select_input", ["sid": 1, "id": "com.apple.keylayout.ABC"]),
+                       .selectInput(sid: 1, id: "com.apple.keylayout.ABC"))
         XCTAssertEqual(try channelCommand("set_stream", ["sid": 1, "mode": "duogray", "fps": 1, "density": "saver1x"]),
                        .setStream(sid: 1, mode: .duogray, fps: 1, density: .saver1x))
         XCTAssertEqual(try channelCommand("close", ["sid": 4]), .close(sid: 4))
@@ -90,6 +94,24 @@ final class ChannelTests: XCTestCase {
         XCTAssertThrowsError(try channelCommand("composer_send", ["sid": 1, "pieces": ["x"]]))
         XCTAssertThrowsError(try channelCommand("composer_drop_block", ["sid": 1, "block": 1.5]))
         XCTAssertThrowsError(try channelCommand("composer_drop_block", ["sid": 1]))
+    }
+
+    func testCloseWindowAndSelectInputRejectBadArgs() {
+        XCTAssertThrowsError(try channelCommand("close_window", ["sid": 1])) { XCTAssertEqual($0 as? ChannelError, .bad("close_window")) }
+        XCTAssertThrowsError(try channelCommand("close_window", ["sid": 1, "window": -1]))
+        XCTAssertThrowsError(try channelCommand("select_input", ["sid": 1])) { XCTAssertEqual($0 as? ChannelError, .bad("select_input")) }
+        XCTAssertThrowsError(try channelCommand("select_input", ["sid": 1, "id": 3]))
+        XCTAssertThrowsError(try channelCommand("select_input", ["sid": 1, "id": String(repeating: "x", count: maxInputSourceID + 1)]))
+    }
+
+    func testInputSourcePayload() throws {
+        let p = try XCTUnwrap(eventPayload(.inputSource(id: "com.apple.inputmethod.SCIM.ITABC", name: "简体拼音", ascii: false),
+                                           sid: 3, textures: [:]))
+        XCTAssertEqual(p.method, "input_source")
+        XCTAssertEqual(p.args["id"] as? String, "com.apple.inputmethod.SCIM.ITABC")
+        XCTAssertEqual(p.args["name"] as? String, "简体拼音")
+        XCTAssertEqual(p.args["ascii"] as? Bool, false)
+        XCTAssertEqual(p.args["sid"] as? Int64, 3)
     }
 
     func testComposerPayloads() throws {

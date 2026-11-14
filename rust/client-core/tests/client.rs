@@ -261,7 +261,7 @@ fn menu_and_window_validation() {
 #[test]
 fn v5_clipboard_bounds_and_legacy_selection() {
     let address = Address::parse("rapp://host/?token=x", None).unwrap();
-    assert_eq!(address.hello(1.)[5], 6);
+    assert_eq!(address.hello(1.)[5], 8);
     let text = "中文 clipboard";
     let mut payload = 1u32.to_le_bytes().to_vec();
     payload.extend([0, 0]);
@@ -394,9 +394,32 @@ fn v6_notifications_and_paste_confirmation_are_strict() {
 }
 
 #[test]
+fn v8_input_source_is_strict_and_select_matches_host() {
+    for (id, name, flag) in [
+        ("com.apple.keylayout.ABC", "ABC", 1u8),
+        ("p", "简体拼音", 0),
+    ] {
+        let mut payload = vec![];
+        string(&mut payload, id);
+        string(&mut payload, name);
+        payload.push(flag);
+        let wire = packet(29, payload.clone());
+        assert!(matches!(read_message(&mut &wire[..]).unwrap().0,
+            Incoming::InputSource { id: i, name: n, ascii } if i == id && n == name && ascii == (flag == 1)));
+        payload.push(0);
+        assert!(decode(29, &payload).is_err());
+    }
+    assert!(decode(29, &[1, 0, b'a', 1, 0, b'B', 2]).is_err());
+    assert!(decode(29, &[1, 0, b'a', 1, 0, b'B']).is_err());
+    assert_eq!(select_input(""), vec![30, 2, 0, 0, 0, 0, 0]);
+    assert_eq!(select_input("a"), vec![30, 3, 0, 0, 0, 1, 0, b'a']);
+    assert!(Address::parse("rapp://host/?token=x&protocol=8", None).is_ok());
+}
+
+#[test]
 fn reconnect_address_roundtrips_without_exposing_token() {
     for host in ["localhost", "127.0.0.1", "[::1]"] {
-        for version in [4, 5, 6] {
+        for version in [4, 5, 6, 8] {
             let original = Address::parse(&format!("rapp://{host}:1234/com.example.%E6%96%87?protocol={version}&mode=duocolor&fps=30"), Some("secret".into())).unwrap();
             let url = original.connect_url();
             assert!(!url.contains("secret"));

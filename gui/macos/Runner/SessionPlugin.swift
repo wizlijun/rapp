@@ -133,6 +133,13 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     case let .selectWindow(sid, window):
       live[sid]?.session.send(.focus(window))
       result(nil)
+    case let .closeWindow(sid, window):
+      live[sid]?.session.send(.close(window))
+      result(nil)
+    case let .selectInput(sid, id):
+      // Queued with the session's other messages: a composer send after it reaches A after the switch.
+      live[sid]?.session.send(.selectInput(id: id))
+      result(nil)
     case let .setStream(sid, mode, fps, density):
       live[sid]?.session.setStream(mode: mode, fps: fps, choice: density)
       result(nil)
