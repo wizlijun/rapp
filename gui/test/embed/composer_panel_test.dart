@@ -545,6 +545,33 @@ void main() {
       expect(f.height, greaterThanOrEqualTo(48));
     });
 
+    testWidgets('M3.1: a self-sizing editor is handed what the blocks row leaves, at least 48', (tester) async {
+      final ed = FakeEditor()..selfSizing = true;
+      Widget withEditor() => wrap(SizedBox(
+          width: 720, child: ComposerPanel(state: es, session: rs, port: port, maxHeight: 350, editor: () => ed)));
+      await tester.pumpWidget(withEditor());
+      await tester.pump();
+      expect(ed.lastMaxHeight, 348); // 350 less the border
+      rs.composer.apply(const PasteResult(blocks: [BlockChip(1, '[图片 #1 10×20]'), BlockChip(2, '[文件 a 1 B]')]));
+      await tester.pump();
+      final row = tester.getSize(find.byType(SingleChildScrollView)).height;
+      expect(row, greaterThan(0));
+      expect(ed.lastMaxHeight, 348 - row);
+      final box = rect(tester, 'composer-box');
+      final edRect = tester.getRect(find.byKey(const Key('fake-editor')));
+      expect(box.height, lessThanOrEqualTo(350));
+      expect(edRect.height + row, lessThanOrEqualTo(box.height - 2));
+    });
+
+    testWidgets('M3.1: the editor is never handed under one line', (tester) async {
+      final ed = FakeEditor()..selfSizing = true;
+      rs.composer.apply(const PasteResult(blocks: [BlockChip(1, '[图片 #1 10×20]')]));
+      await tester.pumpWidget(wrap(SizedBox(
+          width: 600, child: ComposerPanel(state: es, session: rs, port: port, maxHeight: 60, editor: () => ed))));
+      await tester.pump();
+      expect(ed.lastMaxHeight, 48);
+    });
+
     testWidgets('M3.2: a long failure ellipsizes and 重试 / 放回输入框 stay', (tester) async {
       await tester.pumpWidget(
           wrap(SizedBox(width: 600, child: ComposerPanel(state: es, session: rs, port: port, maxHeight: 300))));

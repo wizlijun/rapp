@@ -12,12 +12,20 @@ class FakeEditor implements ComposerEditor {
   final inserted = <String>[];
   bool focused = false;
 
+  /// The maxHeight the last [view] was handed.
+  double? lastMaxHeight;
+
+  /// A view that is as tall as the maxHeight it is handed (what a native editor does).
+  bool selfSizing = false;
+
   @override
   EditorHandlers? handlers;
 
   @override
-  Widget view(BuildContext context, {required EditorStyle style, required String hint, required double maxHeight}) =>
-      const SizedBox();
+  Widget view(BuildContext context, {required EditorStyle style, required String hint, required double maxHeight}) {
+    lastMaxHeight = maxHeight;
+    return selfSizing ? SizedBox(key: const Key('fake-editor'), height: maxHeight) : const SizedBox();
+  }
 
   @override
   void focus() => focused = true;
