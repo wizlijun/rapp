@@ -17,6 +17,7 @@ class MainFlutterWindow: NSWindow {
     self.setFrame(windowFrame, display: true)
 
     RegisterGeneratedPlugins(registry: flutterViewController)
+    UnlockPlugin.register(with: flutterViewController.registrar(forPlugin: "RappUnlock"))
     SessionPlugin.register(with: flutterViewController.registrar(forPlugin: "RappSession"))
 
     super.awakeFromNib()

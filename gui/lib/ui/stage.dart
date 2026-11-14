@@ -11,10 +11,19 @@ import 'lamp.dart';
 import 'main_state.dart';
 import 'session_model.dart';
 import 'tokens.dart';
+import 'unlock.dart';
 
 class Stage extends StatelessWidget {
   const Stage({super.key, required this.state});
   final MainState state;
+
+  Future<void> _requestUnlock(BuildContext context, String device) async {
+    state.blurPicture();
+    final request = await showUnlockDialog(context, store: state.unlockStore, device: device);
+    if (request != null) {
+      await state.unlock(device, request.password, remember: request.remember, auto: request.auto);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -177,7 +186,8 @@ class Stage extends StatelessWidget {
                             child: Row(children: [
                               Expanded(child: Text(banner.text, style: const TextStyle(color: Colors.black87))),
                               TextButton(
-                                onPressed: isDesktopApp(rec!.app) ? null
+                                onPressed: isDesktopApp(rec!.app)
+                                    ? () => _requestUnlock(context, rec.id)
                                     : () => state.openOrSwitch(rec.id, 'desktop:', '桌面'),
                                 child: Text(banner.action),
                               ),

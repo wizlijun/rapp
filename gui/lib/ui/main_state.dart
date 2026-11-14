@@ -1,5 +1,6 @@
 // The single source of UI state for the main window.
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' show Offset, Size;
@@ -23,6 +24,7 @@ import 'projects.dart';
 import 'resources_state.dart';
 import 'session_model.dart';
 import 'tokens.dart';
+import 'unlock.dart';
 import 'workspace_store.dart';
 
 export 'lifecycle.dart' show hubWord, hubWords;
@@ -72,8 +74,10 @@ class MainState extends ChangeNotifier {
     this.doubleClick = const Duration(milliseconds: 500),
     DateTime Function()? clock,
     AppProfileStore? profiles,
+    UnlockStore? unlockStore,
     void Function(String line)? log,
   })  : resources = ResourcesState(clock: clock),
+        unlockStore = unlockStore ?? UnlockStore(),
         _log = log ?? ((_) {}) {
     resources.addListener(notifyListeners);
     _portSub = port?.events.listen(_onPortEvent);
@@ -142,6 +146,10 @@ class MainState extends ChangeNotifier {
   DataDir data;
   final UiPrefs prefs;
   final SessionPort? port;
+  final UnlockStore unlockStore;
+  final Set<Object> _unlockSeen = {};
+  final Map<Object, int> _lockEpoch = {};
+  final Map<Object, Timer> _unlockTimers = {};
 
   /// My app profiles (`apps.json` in `shared/`) and the built-in ones; swapped by [relocate].
   late AppProfileStore profiles;
@@ -739,6 +747,16 @@ class MainState extends ChangeNotifier {
     }
     final wasLocked = rs.screenLocked;
     rs.apply(e);
+    if (e is ScreenLockedEvent) {
+      if (wasLocked != e.locked) {
+        _lockEpoch[e.sid] = (_lockEpoch[e.sid] ?? 0) + 1;
+        _unlockTimers.remove(e.sid)?.cancel();
+      }
+      if (r.app == 'desktop:' && _unlockSeen.add(e.sid) && e.locked) {
+        final start = _starts[e.sid];
+        if (start != null) unawaited(_autoUnlock(r, start, _lockEpoch[e.sid]!));
+      }
+    }
     if (e is ScreenLockedEvent && wasLocked != e.locked) {
       if (r.app == 'desktop:') {
         for (final child in _records.values) {
@@ -928,6 +946,9 @@ class MainState extends ChangeNotifier {
       if (sid == null) continue;
       remote.remove(sid)?.dispose();
       _autoDetached.remove(sid);
+      _unlockSeen.remove(sid);
+      _lockEpoch.remove(sid);
+      _unlockTimers.remove(sid)?.cancel();
       _sentFps.remove(sid);
       _waiting.remove(sid)?.timer.cancel();
     }
@@ -1026,6 +1047,9 @@ class MainState extends ChangeNotifier {
     }
     r.sid = s.sid;
     _starts[s.sid] = _Start(s.sid);
+    _unlockSeen.remove(s.sid);
+    _lockEpoch.remove(s.sid);
+    _unlockTimers.remove(s.sid)?.cancel();
     final rs = RemoteSession(s.sid, r.appName, onResize: (w, a, b) {
           if (_liveSid(s.sid)) port!.resize(s.sid, w, a, b);
         },
@@ -1535,6 +1559,66 @@ class MainState extends ChangeNotifier {
     return true;
   }
 
+  // ---- system password ----
+  bool _canUnlock(SessionRecord r, _Start start, int epoch) =>
+      !_disposed && _records[r.key] == r && r.phase == Phase.live && !r.ending &&
+      r.sid == start.sid && identical(_starts[start.sid], start) &&
+      _lockEpoch[start.sid] == epoch && remote[start.sid]?.screenLocked == true;
+
+  Future<void> _autoUnlock(SessionRecord r, _Start start, int epoch) async {
+    if (!unlockStore.supported) return;
+    try {
+      final saved = await unlockStore.read(r.id);
+      if (saved == null || !saved.auto || !_canUnlock(r, start, epoch)) return;
+      _sendUnlock(r, start, epoch, saved.password);
+    } catch (_) {
+      if (!_canUnlock(r, start, epoch)) return;
+      hint = '无法读取钥匙串；请手动输入系统密码';
+      notifyListeners();
+    }
+  }
+
+  Future<void> unlock(String device, String password, {required bool remember, required bool auto}) async {
+    if (_disposed) return;
+    // Always use this device's main desktop connection, even when its secondary is selected.
+    final r = _records['$device/desktop:'];
+    final start = r == null ? null : _starts[r.sid];
+    if (r == null || start == null || r.phase != Phase.live || r.ending) {
+      hint = '请先连接远程桌面';
+    } else if (remote[r.sid]?.screenLocked != true) {
+      hint = remote[r.sid]?.screenLocked == false ? 'A 没有锁屏，没有输入密码' : '正在确认远程电脑的锁屏状态';
+    } else if (utf8.encode(password).length > 1024) {
+      hint = '密码过长（最多 1024 字节）';
+    } else {
+      _sendUnlock(r, start, _lockEpoch[r.sid]!, password);
+      try {
+        if (unlockStore.supported) {
+          if (remember) {
+            await unlockStore.save(device, password, auto: auto);
+          } else {
+            await unlockStore.forget(device);
+          }
+        }
+      } catch (_) {
+        if (_disposed) return;
+        hint = remember ? '密码已发送，但未能保存到钥匙串' : '密码已发送，但未能从钥匙串删除原密码';
+      }
+    }
+    notifyListeners();
+  }
+
+  void _sendUnlock(SessionRecord r, _Start start, int epoch, String password) {
+    if (!_canUnlock(r, start, epoch)) return;
+    port!.unlock(start.sid, password);
+    _unlockTimers.remove(start.sid)?.cancel();
+    _unlockTimers[start.sid] = Timer(const Duration(seconds: 5), () {
+      _unlockTimers.remove(start.sid);
+      if (!_canUnlock(r, start, epoch)) return;
+      hint = '密码可能不对';
+      notifyListeners();
+    });
+  }
+
   // ---- desktop screens ----
   String _desktopName(String device) {
     final n = _records.values.where((r) => r.id == device && isDesktopApp(r.app)).length;
@@ -2038,6 +2122,10 @@ class MainState extends ChangeNotifier {
     _portSub?.cancel();
     _blockedTimer?.cancel();
     _desktopTimer?.cancel();
+    for (final t in _unlockTimers.values) {
+      t.cancel();
+    }
+    _unlockTimers.clear();
     for (final t in _retryTimers.values) {
       t.cancel();
     }
