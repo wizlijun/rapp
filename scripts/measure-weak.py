@@ -2,11 +2,12 @@
 """Weak-network measurement (spec §4.3): runs RappTestPage through A's service, the rapp-weaknet proxy and
 B's hub + rapp-session, and writes a markdown table.
 
-usage: scripts/measure-weak.py --profile s0|n1|n2|n3|n4|lan [--path direct|relay] --minutes M [--seed N] --out FILE.md
+usage: scripts/measure-weak.py --profile s0|n1|n2|n3|n4|lan [--path direct|relay] --minutes M [--seed N]
+       [--outage EVERY:FOR:OFFSET] --out FILE.md
 Needs: cargo build --release (rust/), swift build -c release, bash scripts/testpage-app.sh.
 Reads the frame number drawn by the test page out of the decoded frames; one clock (CLOCK_UPTIME_RAW) for all times.
 """
-import argparse, bisect, collections, os, queue, shutil, signal, statistics, struct, subprocess, sys, tempfile, threading, time
+import argparse, bisect, collections, json, os, queue, shutil, signal, statistics, struct, subprocess, sys, tempfile, threading, time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
 from rig import Rig, RigError, ROOT
@@ -42,7 +43,8 @@ RULES = """Rules (fixed in the script):
   (not "taken over" or "... quit"), reopen after 1, 2, 4, 8, 15, 15... s.
 - **typing**: 200 distinct characters in 10 pastes of 20, 300 s for all ten; an unconfirmed paste is re-sent after reconnect; the editor's file is
   compared with the text as a multiset of characters (missing / extra).
-- **screen latency** (no v7 stats yet): the draw time of a frame number in the clip's marks file -> first arrival of that number at B."""
+- **--outage EVERY:FOR:OFFSET** (seconds) replaces the profile's outage schedule with that one; the edges above use it too.
+- **screen latency** (from the screen, not the v7 stats): the draw time of a frame number in the clip's marks file -> first arrival of that number at B."""
 
 
 def uptime_s():
@@ -386,7 +388,8 @@ def report(args, res):
                     if res["unconfirmed"] else "all 10 pastes confirmed"), "identical" if p in TARGET_FLIP else "-"))
     rc = res["recovery"]
     if rc:
-        cell = f"median {fmt_s(statistics.median(rc))} (n={len(rc)}, max {fmt_s(max(rc))})"
+        cell = (f"median {fmt_s(statistics.median(rc))} (n={len(rc)}, max {fmt_s(max(rc))}; "
+                + ", ".join(fmt_s(x) for x in rc) + ")")
     elif res["outages"]:
         cell = f"n/a ({res['outages']} outage(s), none recovered within the run)"
     else:
@@ -402,7 +405,8 @@ def report(args, res):
         crash += f" ({res['stuck']} recovery not readable within {RECOVERY_LIMIT:.0f} s)"
     rows.append(("crash / needs a click", crash + f"; {res['reconnects']} auto-reconnect(s)", "0 / 0"))
 
-    out = [f"# weak-network run: profile {p}, path {args.path}, {args.minutes:g} min, seed {args.seed}", "",
+    out = [f"# weak-network run: profile {p}, path {args.path}, {args.minutes:g} min, seed {args.seed}"
+           + (f", outage {args.outage}" if args.outage else ""), "",
            "| task | result | target (§4.3) |", "|---|---|---|"]
     out += [f"| {a} | {b} | {c} |" for a, b, c in rows]
     out += ["", RULES]
@@ -447,8 +451,16 @@ def main():
     ap.add_argument("--path", default="direct", choices=["direct", "relay"])
     ap.add_argument("--minutes", type=float, required=True)
     ap.add_argument("--seed", type=int, default=1)
+    ap.add_argument("--outage", metavar="EVERY:FOR:OFFSET", help="replace the profile's outage schedule (seconds)")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
+    outage = None
+    if args.outage:
+        try:
+            every, dur, offset = (float(x) for x in args.outage.split(":"))
+        except ValueError:
+            sys.exit("--outage wants EVERY:FOR:OFFSET, three numbers in seconds")
+        outage = dict(every_s=every, for_s=dur, offset_s=offset)
     if not os.path.isdir(APP_BUNDLE):
         sys.exit("run bash scripts/testpage-app.sh first")
     total = args.minutes * 60
@@ -457,10 +469,18 @@ def main():
     res = dict(open=None, flips=[], flip_timeouts=0, typing=(200, 0, 0), recovery=[], outages=0, stuck=0,
                reconnects=0, unconfirmed=[], crashes=[], human=[], latency=None)
     work = tempfile.mkdtemp(prefix="rapp-weak-")
+    profile = args.profile
+    if outage:  # a copy of the profile with the outage schedule replaced; rapp-weaknet and the rig both read it
+        with open(os.path.join(ROOT, "rust/testkit/profiles", args.profile + ".json")) as f:
+            prof = json.load(f)
+        prof["outages"] = [outage]
+        profile = os.path.join(work, "profile.json")
+        with open(profile, "w") as f:
+            json.dump(prof, f)
     rig, reason = None, None
     for attempt in range(1, CONNECT_ATTEMPTS + 1):
         try:
-            rig = Rig(args.path, args.profile, args.seed, os.path.join(work, f"attempt-{attempt}"))
+            rig = Rig(args.path, profile, args.seed, os.path.join(work, f"attempt-{attempt}"))
             break
         except RigError as e:  # B's hub could not reach A through the profile: that is the result, not a crash
             reason = str(e)
