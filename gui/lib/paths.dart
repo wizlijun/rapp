@@ -67,6 +67,14 @@ class DataDir {
   /// Shared between devices; holds `workspace.json` and `apps.json`.
   String get sharedDir => '$root/shared';
   String deviceDir(String id) => '$root/devices/$id';
+  /// Unsent input drafts, private to this device.
+  String get draftsDir => '$localDir/drafts';
+
+  /// Every device's folder.
+  String get devicesDir => '$root/devices';
+
+  /// This device's append-only input history (`YYYY-MM-DD.jsonl`).
+  String inputsDir(String id) => '${deviceDir(id)}/inputs';
   String get filesDir => '$root/files';
   String get clipboardDir => '$root/clipboard';
   String get filesClipboardDir => '$root/files/clipboard';

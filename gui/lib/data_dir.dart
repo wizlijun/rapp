@@ -90,7 +90,7 @@ bool prepareDataDir(String root, String legacy) {
   for (final (old, nu) in table) {
     _copyIfMissing('$legacy/$old', nu);
   }
-  _writePrivate('$loc/$migratedFrom', utf8.encode('$legacy\n'));
+  writePrivate('$loc/$migratedFrom', utf8.encode('$legacy\n'));
   // Last (R4): its presence means the migration finished.
   _copyIfMissing(oldService, '$loc/service.json');
   return true;
@@ -136,11 +136,11 @@ String? _serviceId(String path) {
 
 void _copyIfMissing(String from, String to) {
   if (File(to).existsSync() || !File(from).existsSync()) return;
-  _writePrivate(to, File(from).readAsBytesSync());
+  writePrivate(to, File(from).readAsBytesSync());
 }
 
 /// Writes [data] with mode 0600 via a temp file and a rename.
-void _writePrivate(String path, List<int> data) {
+void writePrivate(String path, List<int> data) {
   File(path).parent.createSync(recursive: true);
   final tmp = File('$path.tmp');
   tmp.writeAsBytesSync(const []);
