@@ -59,10 +59,12 @@ impl Link {
     }
 }
 
-/// The connection to the relay and the settings it was dialed with: a change of either redials.
+/// The connection to the relay and the settings it was dialed with: a change of any redials.
 pub struct RelayCache {
     addr: String,
     key_text: String,
+    /// The device it was dialed as.
+    fp: Fp,
     pub(crate) conn: RelayConn,
     key: Arc<Key>,
 }
@@ -163,6 +165,30 @@ fn is_refusal(e: &anyhow::Error) -> bool {
     matches!(e.to_string().as_str(), "not trusted" | "host key mismatch")
 }
 
+/// The relay has no device with this ID (it counts that against the asker).
+fn is_unknown_id(e: &anyhow::Error) -> bool {
+    e.to_string() == "unknown id"
+}
+
+/// Why a settled host was not reached: no saved address answered and the relay did not find it.
+/// A host with saved LAN addresses that the relay does not know is offline on its LAN, not an
+/// unknown ID; any other relay failure is the relay's.
+fn unreached(host: &Host, relay_err: Option<anyhow::Error>) -> anyhow::Error {
+    match relay_err {
+        Some(e) if host.lan.is_empty() || !is_unknown_id(&e) => e,
+        _ if host.lan.is_empty() => anyhow!("no address: add the host again as id@ip"),
+        _ => anyhow!("offline: no LAN address answered"),
+    }
+}
+
+/// Whether a presence probe asks the relay about a host it has no verdict on from this run: a host
+/// with no saved address (only the relay can find it), or one added over `rapp/2` with the key (no
+/// password; by bare ID, or by `id@ip`), which is likely on the same relay. A host added with a
+/// password (0.5.5 and older, LAN only) is not asked about until the relay has found it.
+fn probe_asks_relay(host: &Host, seen: Option<bool>) -> bool {
+    seen.unwrap_or(host.lan.is_empty() || host.password.is_empty())
+}
+
 /// `lan` for a private address, `direct` for a public one.
 fn direct_path(addr: &SocketAddr) -> &'static str {
     if is_private(addr.ip()) {
@@ -186,27 +212,55 @@ fn dial_order(lan: &[String]) -> Vec<&String> {
 
 impl Hub {
     fn dialer(&self, key: Option<Arc<Key>>) -> Dialer {
-        Dialer { ep: self.ep.clone(), identity: self.identity.clone(), name: self.name.clone(), key }
+        Dialer { ep: self.ep.clone(), identity: self.at_home().1, name: self.name.clone(), key }
     }
 
     /// The connection to the relay for the settings as they are now, dialed when there is none, it has
     /// ended or the settings changed. None: no relay or no key set.
     pub(crate) async fn relay(&self) -> Result<Option<(RelayConn, Arc<Key>)>> {
-        let settings = rapp_conn::settings::load(&self.home);
+        let (home, identity) = self.at_home();
+        let settings = rapp_conn::settings::load(&home);
         let (Some(addr), Some(key)) = (settings.relay, settings.key) else { return Ok(None) };
         let key_text = key.to_string();
         let mut cache = self.relay.lock().await;
         if let Some(c) = cache.as_ref() {
-            if c.addr == addr && c.key_text == key_text && !c.conn.is_closed() {
+            if c.addr == addr && c.key_text == key_text && c.fp == identity.fp && !c.conn.is_closed() {
                 return Ok(Some((c.conn.clone(), c.key.clone())));
             }
             c.conn.close();
             *cache = None;
         }
-        let conn = RelayConn::dial(&self.ep, &addr, &key, &self.identity).await?;
+        let conn = RelayConn::dial(&self.ep, &addr, &key, &identity).await?;
         let key = Arc::new(key);
-        *cache = Some(RelayCache { addr, key_text, conn: conn.clone(), key: key.clone() });
+        *cache = Some(RelayCache { addr, key_text, fp: identity.fp, conn: conn.clone(), key: key.clone() });
         Ok(Some((conn, key)))
+    }
+
+    /// The relay's `connect` to `id`, within `RELAY_WAIT`: a relay that never answers must not stall
+    /// a caller (presence probes run one host after another). Remembers what the relay said.
+    async fn relay_connect(&self, relay: &RelayConn, id: &str) -> Result<Found> {
+        let r = tokio::time::timeout(RELAY_WAIT, relay.connect_to(id))
+            .await
+            .unwrap_or_else(|_| Err(anyhow!("relay unreachable: timed out")));
+        match &r {
+            Ok(_) => drop(self.relay_seen.lock().unwrap().insert(id.to_string(), true)),
+            Err(e) if is_unknown_id(e) => drop(self.relay_seen.lock().unwrap().insert(id.to_string(), false)),
+            Err(_) => {}
+        }
+        r
+    }
+
+    /// Whether this connect asks the relay about `host`. The user acting on a host always asks (and
+    /// forgets an earlier `unknown id`); a probe asks only as `probe_asks_relay` says.
+    fn asks_relay(&self, host: &Host) -> bool {
+        let mut seen = self.relay_seen.lock().unwrap();
+        if !quiet() {
+            if seen.get(&host.id) == Some(&false) {
+                seen.remove(&host.id);
+            }
+            return true;
+        }
+        probe_asks_relay(host, seen.get(&host.id).copied())
     }
 
     /// Asks the relay where `id` is (`connect`), within `RELAY_WAIT`. `None`: no relay set, or no key.
@@ -216,7 +270,7 @@ impl Hub {
         }
         let ask = async {
             match self.relay().await? {
-                Some((relay, _)) => relay.connect_to(id).await.map(Some),
+                Some((relay, _)) => self.relay_connect(&relay, id).await.map(Some),
                 None => Ok(None),
             }
         };
@@ -225,10 +279,10 @@ impl Hub {
 
     async fn establish(&self, host: &Host) -> Result<Link> {
         // Read on every connect: the user may have set a key since the last one.
-        let key = rapp_conn::settings::load(&self.home).key.map(Arc::new);
+        let key = rapp_conn::settings::load(&self.at_home().0).key.map(Arc::new);
         // The relay lookup (its `connect` also tells A somebody is coming, and may name more addresses)
         // runs alongside the race over the saved addresses; a relay that is down never delays a LAN win.
-        let lookup = self.lookup(&host.id, key.is_some());
+        let lookup = self.lookup(&host.id, key.is_some() && self.asks_relay(host));
         tokio::pin!(lookup);
         let mut looked_up = None;
         let mut found = None;
@@ -265,22 +319,25 @@ impl Hub {
             }
             match raced {
                 Ok(Some((link, _))) => return Ok(link),
-                Err(e) if settled => return Err(e),
+                Err(e) if settled => {
+                    // A probe must not keep knocking on a host that refuses this device; a slow or
+                    // restarting host (no reply, reset) is not a refusal and keeps being probed. A host
+                    // that is not settled may still take its password below.
+                    if quiet() && is_refusal(&e) {
+                        self.probe_halt.lock().unwrap().insert(host.id.clone());
+                    }
+                    return Err(e);
+                }
                 Err(_) => {}
                 Ok(None) if found.is_some() => {
                     self.route(&host.id, "relay", None, Ok(()));
                     return Ok(Link::Relay);
                 }
                 Ok(None) if settled => {
-                    if let Some(e) = relay_err {
+                    if let Some(e) = &relay_err {
                         self.route(&host.id, "relay", None, Err(format!("{e:#}")));
-                        return Err(e);
                     }
-                    bail!(if host.lan.is_empty() {
-                        "no address: add the host again as id@ip"
-                    } else {
-                        "offline: no LAN address answered"
-                    });
+                    return Err(unreached(host, relay_err));
                 }
                 Ok(None) => {}
             }
@@ -331,11 +388,6 @@ impl Hub {
                         self.route(&host.id, direct_path(&sock), Some(&addr), Err(format!("{e:#}")));
                     }
                     if !unreachable {
-                        // A probe must not keep knocking on a host that refuses this device; a slow or
-                        // restarting host (no reply, reset) is not a refusal and keeps being probed.
-                        if quiet() && is_refusal(&e) {
-                            self.probe_halt.lock().unwrap().insert(host.id.clone());
-                        }
                         refused.get_or_insert(e);
                     }
                 }
@@ -367,14 +419,19 @@ impl Hub {
         let (id, addr) = split_host_ref(host_ref)?;
         let Some(addr) = addr else { return self.add_by_id(id).await };
         let sock: SocketAddr = addr.parse().with_context(|| format!("bad address {addr}"))?;
-        let key = rapp_conn::settings::load(&self.home).key.map(Arc::new);
-        let known = self.hosts.get(&id).and_then(|h| h.fp);
+        let key = rapp_conn::settings::load(&self.at_home().0).key.map(Arc::new);
+        let saved = self.hosts.get(&id);
+        let known = saved.as_ref().and_then(|h| h.fp);
         let password = password.filter(|p| !p.is_empty());
         let mut refused = None;
         if key.is_some() {
             match self.dialer(key).dial(sock, &id, known, LAN_WAIT).await {
                 Ok((conn, accepted)) => {
                     conn.close(0u32.into(), b"host added");
+                    if let Some(saved) = &saved {
+                        // A new fingerprint for a saved host is a key change, logged as on any connect.
+                        self.remember_fp(saved, &accepted);
+                    }
                     let name = Some(accepted.name).filter(|n| !n.is_empty()).unwrap_or_else(|| id.clone());
                     let host = Host {
                         id,
@@ -407,7 +464,7 @@ impl Hub {
     /// through the relay itself. Saved with those addresses, the fingerprint it showed and no password.
     async fn add_by_id(&self, id: String) -> Result<Value> {
         let Some((relay, key)) = self.relay().await? else { bail!("relay not set: add the host as id@ip") };
-        let found = relay.connect_to(&id).await?;
+        let found = self.relay_connect(&relay, &id).await?;
         let known = self.hosts.get(&id).and_then(|h| h.fp);
         let mut host = Host { id: id.clone(), name: String::new(), password: String::new(), lan: found.lan, fp: known };
         let accepted = match self.first_v2(&host, &dial_order(&host.lan), Some(key.clone())).await? {
@@ -434,7 +491,8 @@ impl Hub {
         let known = self.hosts.get(&host.id).map_or(host.fp, |h| h.fp);
         let stream = relay.relay_to(&host.id).await?;
         // The relay's refusal (`offline`, `unknown id`, ...) comes back as the failure of this first read.
-        let tls = tokio::time::timeout(REPLY_WAIT, e2e_connect(stream, &self.identity));
+        let identity = self.at_home().1;
+        let tls = tokio::time::timeout(REPLY_WAIT, e2e_connect(stream, &identity));
         let (mut pipe, facts) = tls.await.map_err(|_| anyhow!("no reply"))?.map_err(relay_failure)?;
         send_hello(&mut pipe, &facts, &Me { id: "", name: &self.name, key: Some(key) }).await?;
         write_json(&mut pipe, op).await?;
@@ -532,7 +590,7 @@ impl Hub {
         let cached = self.links.lock().unwrap().get(&host.id).cloned();
         if matches!(cached, Some(Link::Relay)) {
             let looked_up = match self.relay().await {
-                Ok(Some((relay, _))) => relay.connect_to(&host.id).await.map(drop),
+                Ok(Some((relay, _))) => self.relay_connect(&relay, &host.id).await.map(drop),
                 Ok(None) => Err(anyhow!("relay not set: add the host as id@ip")),
                 Err(e) => Err(e),
             };
@@ -603,8 +661,37 @@ fn finish((s, r): (Pipe, Value), path: &'static str) -> Result<(Pipe, Value, &'s
 
 #[cfg(test)]
 mod tests {
-    use super::{dial_order, is_refusal};
+    use super::{dial_order, is_refusal, probe_asks_relay, unreached};
+    use crate::hosts::Host;
     use anyhow::anyhow;
+
+    fn host(password: &str, lan: &[&str]) -> Host {
+        let lan = lan.iter().map(|a| a.to_string()).collect();
+        Host { id: "100000001".into(), name: "n".into(), password: password.into(), lan, fp: None }
+    }
+
+    #[test]
+    fn unknown_id_of_a_lan_host_reads_offline() {
+        let lan = host("", &["192.168.1.5:22028"]);
+        let bare = host("", &[]);
+        let says = |h: &Host, e: Option<&str>| unreached(h, e.map(|e| anyhow!(e.to_string()))).to_string();
+        assert_eq!(says(&lan, Some("unknown id")), "offline: no LAN address answered");
+        assert_eq!(says(&lan, None), "offline: no LAN address answered");
+        assert_eq!(says(&lan, Some("relay unreachable: timed out")), "relay unreachable: timed out");
+        assert_eq!(says(&bare, Some("unknown id")), "unknown id");
+        assert_eq!(says(&bare, Some("offline")), "offline");
+        assert_eq!(says(&bare, None), "no address: add the host again as id@ip");
+    }
+
+    #[test]
+    fn probes_ask_the_relay_only_about_hosts_it_may_know() {
+        let old = host("pw", &["192.168.1.5:22028"]);
+        assert!(!probe_asks_relay(&old, None), "a password host on the LAN");
+        assert!(probe_asks_relay(&old, Some(true)), "found through the relay in this run");
+        assert!(probe_asks_relay(&host("pw", &[]), None), "no address: only the relay can find it");
+        assert!(probe_asks_relay(&host("", &["192.168.1.5:22028"]), None), "added over rapp/2");
+        assert!(!probe_asks_relay(&host("", &[]), Some(false)), "the relay said unknown id");
+    }
 
     #[test]
     fn only_definite_refusals_halt_probes() {

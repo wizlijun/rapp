@@ -4,7 +4,9 @@
 //! offline, until the user acts on it, so probes never pile up `auth_fail` lines on A. A host that
 //! does not answer, or has no saved address, is offline, not a halt, so it is seen when it comes back.
 //! A does not log pings either. A host reached through the relay is probed with the relay's `connect`
-//! (online iff it answers ok), never with a relayed stream.
+//! (online iff it answers ok), never with a relayed stream. The relay counts `unknown id` against
+//! this device, so a probe asks it only about hosts it may know (`link::probe_asks_relay`), and not
+//! again in this run about one it said it does not know.
 
 use crate::link::QUIET;
 use crate::Hub;

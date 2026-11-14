@@ -17,7 +17,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 
 pub struct Opts {
@@ -40,11 +40,17 @@ pub(crate) struct HubSession {
 
 type Out = Box<dyn AsyncWrite + Unpin + Send>;
 
-pub(crate) struct Hub {
+/// Everything the hub reads from its home, swapped as one by `set_home`.
+pub(crate) struct HomeState {
     /// Where `service.json` (relay, key) and the device key live.
-    home: PathBuf,
+    pub home: PathBuf,
     /// This device's key and certificate, shared with the service on this machine.
-    identity: Arc<rapp_wire::Identity>,
+    pub identity: Arc<rapp_wire::Identity>,
+}
+
+pub(crate) struct Hub {
+    /// The home and what is read from it; `set_home` replaces it (hosts swap in `hosts`).
+    at: RwLock<HomeState>,
     bin_dir: Option<PathBuf>,
     ep: Endpoint,
     links: Mutex<HashMap<String, Link>>,
@@ -59,6 +65,9 @@ pub(crate) struct Hub {
     close_why: Mutex<HashMap<u64, String>>,
     /// Hosts the presence probe stopped trying after an auth-type failure, until the user acts on them.
     probe_halt: Mutex<std::collections::HashSet<String>>,
+    /// What the relay said about a host in this run: true = found it, false = `unknown id`.
+    /// Probes look a host up only when that is worth a lookup (the relay counts `unknown id`).
+    relay_seen: Mutex<HashMap<String, bool>>,
     kill: tokio::sync::watch::Sender<bool>,
     log: Log,
     /// B's self-declared name in `auth` (spec §2): this machine's hostname.
@@ -73,8 +82,7 @@ where
     opts.log.event(Lvl::Info, "hub_start", json!({"version": env!("CARGO_PKG_VERSION")}));
     let identity = Arc::new(rapp_wire::Identity::load_or_create(&opts.home, "device").context("device key")?);
     let hub = Arc::new(Hub {
-        home: opts.home.clone(),
-        identity,
+        at: RwLock::new(HomeState { home: opts.home.clone(), identity }),
         ep: rapp_net::quic::client_endpoint(([0, 0, 0, 0], 0).into())?,
         links: Default::default(),
         relay: Default::default(),
@@ -84,6 +92,7 @@ where
         next_sid: AtomicU64::new(sid_seed()),
         close_why: Default::default(),
         probe_halt: Default::default(),
+        relay_seen: Default::default(),
         kill: tokio::sync::watch::channel(false).0,
         bin_dir: opts.bin_dir,
         log: opts.log,
@@ -125,6 +134,29 @@ impl Hub {
         let mut out = self.out.lock().await;
         let _ = out.write_all(format!("{v}\n").as_bytes()).await;
         let _ = out.flush().await;
+    }
+
+    /// The home and the device identity, read together so that one operation never mixes two homes.
+    pub(crate) fn at_home(&self) -> (PathBuf, Arc<rapp_wire::Identity>) {
+        let at = self.at.read().unwrap();
+        (at.home.clone(), at.identity.clone())
+    }
+
+    /// Moves to a new home: its device identity, its hosts, and (read per connect) its relay and key.
+    /// On error nothing changes. The relay connection, dialed as the old device, is closed; cached
+    /// host links are dropped from the cache (sessions on them keep running) so the next request
+    /// connects as the new device.
+    async fn set_home(&self, dir: &std::path::Path) -> Result<()> {
+        let identity = Arc::new(rapp_wire::Identity::load_or_create(dir, "device").context("device key")?);
+        self.hosts.reload(dir)?;
+        *self.at.write().unwrap() = HomeState { home: dir.to_path_buf(), identity };
+        if let Some(c) = self.relay.lock().await.take() {
+            c.conn.close();
+        }
+        self.links.lock().unwrap().clear();
+        self.probe_halt.lock().unwrap().clear();
+        self.relay_seen.lock().unwrap().clear();
+        Ok(())
     }
 
     /// The name B introduces itself with.
@@ -171,7 +203,7 @@ impl Hub {
                 self.hosts_event()
             }
             Some("set_home") => {
-                self.hosts.reload(std::path::Path::new(s("dir")?))?;
+                self.set_home(std::path::Path::new(s("dir")?)).await?;
                 json!({"event":"home_set"})
             }
             Some("apps") => {
