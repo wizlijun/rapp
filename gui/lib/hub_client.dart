@@ -61,12 +61,17 @@ class HubException implements Exception {
 }
 
 class HubHost {
-  const HubHost(this.id, this.name, {this.lan = const []});
+  const HubHost(this.id, this.name, {this.lan = const [], this.route});
   final String id;
   final String name;
 
   /// A's LAN addresses ("ip:port") as last heard, for 屏幕共享; empty when unknown.
   final List<String> lan;
+
+  /// `relay` when this host is forced onto the relay; null is automatic.
+  final String? route;
+
+  bool get forcedRelay => route == 'relay';
 }
 
 class HubApp {
@@ -163,14 +168,33 @@ class HubClient extends ChangeNotifier {
   /// [reason] is `user` when the person closed it (the hub only accepts that value).
   void close(Object sid, {String? reason}) => _send({'cmd': 'close', 'sid': sid, 'reason': ?reason});
 
-  final _presence = <({String id, bool online})>[];
+  /// Sets [route] (`relay` or `auto`) for host [id]; resolves once the hub answers with the hosts list.
+  Future<void> setRoute(String id, String route) => _request({'cmd': 'set_route', 'id': id, 'route': route}, 'hosts');
+
+  /// Tells the hub moving a session of [id] onto its new link failed; no reply.
+  void routeFailed(String id) => _send({'cmd': 'route_failed', 'id': id});
+
+  final _presence = <({String id, bool online, String? error})>[];
 
   /// The latest presence event of each device since the last call, oldest first; takes them and clears the queue.
-  List<({String id, bool online})> takePresence() {
-    final out = List<({String id, bool online})>.of(_presence);
+  /// [error] is the hub's reason, only on an offline event.
+  List<({String id, bool online, String? error})> takePresence() {
+    final out = List<({String id, bool online, String? error})>.of(_presence);
     _presence.clear();
     return out;
   }
+
+  /// The path (`lan`, `direct`, `relay`) of the link the hub last cached per host.
+  final hostPaths = <String, String>{};
+  final _paths = <({String id, String path})>[];
+
+  /// The latest path event of each host since the last call, oldest first; takes them and clears the queue.
+  List<({String id, String path})> takePaths() {
+    final out = List<({String id, String path})>.of(_paths);
+    _paths.clear();
+    return out;
+  }
+
   void focus(Object sid) => _send({'cmd': 'focus', 'sid': sid});
 
   /// Tells the hub the GUI detached or re-attached a window ([what] is `detach` or `attach`); no reply.
@@ -219,11 +243,21 @@ class HubClient extends ChangeNotifier {
         hosts = (m['hosts'] as List? ?? const [])
             .whereType<Map>()
             .map((h) => HubHost('${h['id']}', '${h['name'] ?? ''}',
-                lan: [for (final a in (h['lan'] as List? ?? const [])) '$a']))
+                lan: [for (final a in (h['lan'] as List? ?? const [])) '$a'],
+                route: h['route'] is String ? h['route'] as String : null))
             .toList();
+        // A removed host's link is gone with it.
+        final ids = {for (final h in hosts) h.id};
+        hostPaths.removeWhere((id, _) => !ids.contains(id));
+        _paths.removeWhere((p) => !ids.contains(p.id));
       case 'host_added':
         final id = '${m['id']}';
-        hosts = [...hosts.where((h) => h.id != id), HubHost(id, '${m['name'] ?? ''}')];
+        // Added again: its route and LAN addresses stay until the next hosts list says otherwise.
+        final was = hosts.where((h) => h.id == id).firstOrNull;
+        hosts = [
+          ...hosts.where((h) => h.id != id),
+          HubHost(id, '${m['name'] ?? ''}', lan: was?.lan ?? const [], route: was?.route),
+        ];
       case 'opened':
         if (m['sid'] != null) _sessions[m['sid'] as Object] = _session(m);
       case 'presence':
@@ -231,8 +265,21 @@ class HubClient extends ChangeNotifier {
           // Only the latest word per device matters, and with no reader the queue must not grow.
           final id = '${m['id']}';
           _presence.removeWhere((p) => p.id == id);
-          _presence.add((id: id, online: m['online'] == true));
+          final online = m['online'] == true;
+          _presence.add((id: id, online: online, error: online || m['error'] == null ? null : '${m['error']}'));
         }
+      case 'path':
+        if (m['id'] != null && m['path'] is String) {
+          final id = '${m['id']}';
+          final path = m['path'] as String;
+          hostPaths[id] = path;
+          _paths.removeWhere((p) => p.id == id);
+          _paths.add((id: id, path: path));
+        }
+      case 'home_set':
+        // A new data dir: the hub dropped every link it had.
+        hostPaths.clear();
+        _paths.clear();
       case 'closed':
         _sessions.remove(m['sid']);
         if (m['sid'] != null && m['reason'] != null) closeReasons[m['sid'] as Object] = '${m['reason']}';
@@ -271,6 +318,8 @@ class HubClient extends ChangeNotifier {
     }
     _pending.clear();
     _sessions.clear();
+    hostPaths.clear();
+    _paths.clear();
     notifyListeners();
   }
 }

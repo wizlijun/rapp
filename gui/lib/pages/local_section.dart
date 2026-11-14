@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 
 import '../permissions.dart';
 import '../service_client.dart';
+import '../ui/lifecycle.dart' show disconnectWord;
 import '../service_control.dart';
 import '../data_relocate.dart';
 import 'data_section.dart';
@@ -19,6 +20,9 @@ import 'linux_update_section.dart';
 
 /// What the 密码 row shows while hidden: a fixed length, so the real length stays private too.
 const passwordMask = '••••••••';
+
+/// What the key row shows until 显示 is pressed.
+const keyMask = '••••••';
 
 /// How 立即升级 / 仍然安装 / 回到上一版 leave the app (K28): the service installs once rapp is gone.
 class UpdateHooks {
@@ -73,6 +77,10 @@ Map<String, dynamic> permissionsOf(ServiceStatus st) =>
 class _LocalSectionState extends State<LocalSection> {
   bool _busy = false;
   bool _showPassword = false;
+  bool _lanOpen = false; // not saved: the fold starts closed every time the page opens
+
+  /// The key text, fetched on 显示 and dropped on 隐藏 or once the service reports a different key state.
+  String? _shownKey;
   Timer? _poll;
   bool _guideDecided = false;
 
@@ -195,12 +203,36 @@ class _LocalSectionState extends State<LocalSection> {
   Widget _icon(String key, String tip, IconData icon, VoidCallback onPressed) => IconButton(
       key: Key(key), tooltip: tip, icon: Icon(icon, size: 18), visualDensity: VisualDensity.compact, onPressed: onPressed);
 
-  /// One row per ID, each with its own copy button; the label only on the first.
-  List<Widget> _idRows(List<String> ids) {
-    if (ids.isEmpty) return [_row('ID', '（还没有）')];
+  Widget _idRow(String label, String id, String key) =>
+      _row(label, id, trailing: _icon(key, '复制 ID', Icons.copy, () => _copy(id, ' ID')));
+
+  /// One row per ID, each with its own copy button; the label only on the first. With a relay set the bare ID
+  /// is the first row and the `id@ip` forms fold under one line.
+  List<Widget> _idRows(ServiceStatus st) {
+    if (!st.relaySet) {
+      final ids = st.shownIds;
+      if (ids.isEmpty) return [_row('ID', '（还没有）')];
+      return [for (final (i, id) in ids.indexed) _idRow(i == 0 ? 'ID' : '', id, 'copy-id-$i')];
+    }
+    final id = st.id;
+    final lan = st.lanIds;
     return [
-      for (final (i, id) in ids.indexed)
-        _row(i == 0 ? 'ID' : '', id, trailing: _icon('copy-id-$i', '复制 ID', Icons.copy, () => _copy(id, ' ID'))),
+      if (id == null) _row('ID', '（还没有）') else _idRow('ID', id, 'copy-id-0'),
+      if (lan.isNotEmpty) ...[
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: Row(children: [
+            const SizedBox(width: 72),
+            InkWell(
+              key: const Key('lan-fold'),
+              onTap: () => setState(() => _lanOpen = !_lanOpen),
+              child: Text('${_lanOpen ? '▾' : '▸'} 局域网地址（${lan.length} 个）'),
+            ),
+          ]),
+        ),
+        if (_lanOpen)
+          for (final (i, a) in lan.indexed) _idRow('', a, 'copy-lan-$i'),
+      ],
     ];
   }
 
@@ -219,6 +251,100 @@ class _LocalSectionState extends State<LocalSection> {
       TextField(controller: pw, autofocus: true, decoration: const InputDecoration(labelText: '新密码')),
     ]);
     if (ok == true && pw.text.isNotEmpty) await _apply(() => m.setPassword(pw.text));
+  }
+
+  String _relayState(ServiceStatus st) {
+    if (st.relayAddr == null) return '未设置';
+    return switch (st.relay) {
+      'connected' => '已连接',
+      // Retrying after a failure: say why, or a relay that keeps failing reads 连接中 forever.
+      'connecting' => st.relayError == null ? '连接中' : '连接中：${disconnectWord(st.relayError)}',
+      'error' => '出错：${disconnectWord(st.relayError ?? '')}',
+      _ => '未设置',
+    };
+  }
+
+  Widget _relayRow(ServiceStatus st) => _row('中继', st.relayAddr == null ? _relayState(st) : '${st.relayAddr}',
+      trailing: _icon('edit-relay', '修改中继', Icons.edit, () => _editRelay(st)));
+
+  Widget? _stateRow(ServiceStatus st) => st.relayAddr == null ? null : _row('状态', _relayState(st));
+
+  Widget _keyRow(ServiceStatus st) {
+    final key = _shownKey;
+    return _row('key', key ?? (st.hasKey ? keyMask : '未设置'),
+        selectable: key != null,
+        trailing: st.hasKey
+            ? Row(mainAxisSize: MainAxisSize.min, children: [
+                TextButton(key: const Key('key-reveal'), onPressed: key == null ? _revealKey : _hideKey, child: Text(key == null ? '显示' : '隐藏')),
+                if (key != null) _icon('copy-key', '复制 key', Icons.copy, () => _copy(key, ' key')),
+              ])
+            : null);
+  }
+
+  Future<void> _revealKey() async {
+    try {
+      final k = await m.showKey();
+      if (mounted) setState(() => _shownKey = k);
+    } catch (e) {
+      _say('失败：$e');
+    }
+  }
+
+  void _hideKey() => setState(() => _shownKey = null);
+
+  Future<void> _editRelay(ServiceStatus st) async {
+    final addr = TextEditingController(text: st.relayAddr ?? '');
+    // Prefill with the saved key (still hidden on screen) so saving an address change keeps it.
+    var current = _shownKey ?? '';
+    if (current.isEmpty && st.hasKey) {
+      try {
+        current = await m.showKey();
+      } catch (e) {
+        _say('失败：$e');
+        return;
+      }
+    }
+    if (!mounted) return;
+    final key = TextEditingController(text: current);
+    final error = ValueNotifier<String?>(null);
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('修改中继'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          TextField(controller: addr, autofocus: true, decoration: const InputDecoration(labelText: '接入点')),
+          TextField(
+              controller: key,
+              obscureText: true,
+              enableSuggestions: false,
+              autocorrect: false,
+              decoration: const InputDecoration(labelText: 'key')),
+          ValueListenableBuilder<String?>(
+            valueListenable: error,
+            builder: (_, e, _) =>
+                e == null ? const SizedBox.shrink() : Padding(padding: const EdgeInsets.only(top: 8), child: Text(e, style: const TextStyle(color: Colors.red))),
+          ),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          FilledButton(
+            onPressed: () async {
+              try {
+                await m.setRelay(addr.text.trim(), key.text.trim());
+                if (mounted) setState(() => _shownKey = null);
+                if (ctx.mounted) Navigator.pop(ctx);
+              } catch (e) {
+                error.value = disconnectWord('$e');
+              }
+            },
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    addr.dispose();
+    key.dispose();
+    error.dispose();
   }
 
   Future<void> _apply(Future<void> Function() f) async {
@@ -270,9 +396,12 @@ class _LocalSectionState extends State<LocalSection> {
         SectionCard(title: '本机', children: [
           _row('服务', st == null ? '未运行（${m.error ?? '连接中'}）' : '运行中'),
           if (st != null) ...[
-            ..._idRows(st.shownIds),
+            ..._idRows(st),
             _row('名称', st.name),
             _passwordRow(st.password),
+            _relayRow(st),
+            ?_stateRow(st),
+            _keyRow(st),
             if (_platform == TargetPlatform.macOS)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 2),

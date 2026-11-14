@@ -150,6 +150,12 @@ class AppProfileStore extends ChangeNotifier {
     _commit();
   }
 
+  /// Marks the app's text box ([p]), or clears the mark (null).
+  void setInputPoint(String appId, String appName, InputPoint? p) {
+    _target(appId, appName).input = p;
+    _commit();
+  }
+
   List<ProfileRow> rows() {
     final out = <ProfileRow>[];
     for (final b in builtin) {

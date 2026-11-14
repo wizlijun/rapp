@@ -23,14 +23,18 @@ void main() {
   var allClips = 0;
   var remembered = 0, profileOpened = 0;
   var greyClip = -1;
+  var marks = 0, clears = 0;
+  var routeToggles = 0;
 
   bool called(String name, Map<String, Object?> args) =>
       port.calls.any((c) => c.$1 == name && const DeepCollectionEquality().equals(c.$2, args));
 
   Future<void> open(WidgetTester tester,
       {VoidCallback? onDetach, bool disconnected = false, bool reconnecting = false, bool hub = true, String status = '活动', String reconnectWord = '重连',
-      List<int> seed = const [], Object seedSid = 1, int? other, int grey = -1}) async {
+      List<int> seed = const [], Object seedSid = 1, int? other, int grey = -1, Set<MenuPart> parts = allMenuParts,
+      bool? forcedRelay, bool route = true, String path = 'lan'}) async {
     shellOpen = false;
+    routeToggles = 0;
     ended = 0;
     disconnects = 0;
     reconnects = 0;
@@ -56,7 +60,7 @@ void main() {
         onClose: () => set(() => shellOpen = false),
         port: port,
         session: rs,
-        path: 'lan',
+        path: path,
         status: status,
         disconnected: disconnected,
         reconnecting: reconnecting,
@@ -67,14 +71,20 @@ void main() {
         onToggleDetach: onDetach,
         onRememberStream: () => remembered++,
         onOpenProfile: () => profileOpened++,
+        forcedRelay: forcedRelay,
+        onToggleRoute: route ? () => routeToggles++ : null,
         clips: res.clipsOf('k'),
         canCopy: (e) => e.clip != greyClip,
         canInsert: (e) => e.clip != greyClip && e.sid == rs.sid,
         onCopy: (e) => copied.add(e.clip),
         onAllClips: () => allClips++,
+        onMarkInput: () => marks++,
+        onClearInput: () => clears++,
+        parts: parts,
       )),
     )));
-    await tester.tap(find.byKey(const Key('traffic')));
+    final kind = parts.contains(MenuPart.stream) ? 'traffic' : (parts.contains(MenuPart.remote) ? 'remote-menu' : 'session-menu');
+    await tester.tap(find.byKey(Key(kind)));
     await tester.pump();
   }
 
@@ -88,12 +98,58 @@ void main() {
     expect(find.text('路径 局域网 · 活动'), findsNothing); // closed
   });
 
+  testWidgets('the route item says 改走中继 or 恢复自动选路, and is absent without a relay', (tester) async {
+    await open(tester);
+    expect(find.text('改走中继'), findsNothing);
+    expect(find.text('恢复自动选路'), findsNothing);
+    await open(tester, forcedRelay: false);
+    expect(find.text('改走中继'), findsOneWidget);
+    expect(find.text('恢复自动选路'), findsNothing);
+    await open(tester, forcedRelay: true);
+    expect(find.text('恢复自动选路'), findsOneWidget);
+    expect(find.text('改走中继'), findsNothing);
+  });
+
+  testWidgets('a forced relay path reads 中继（强制）', (tester) async {
+    await open(tester, forcedRelay: true);
+    expect(find.text('路径 局域网 · 活动'), findsOneWidget); // forced, but this session is still on the LAN
+    await open(tester, forcedRelay: true, path: 'relay');
+    expect(find.text('路径 中继（强制） · 活动'), findsOneWidget);
+    await open(tester, forcedRelay: false, path: 'relay');
+    expect(find.text('路径 中继 · 活动'), findsOneWidget);
+  });
+
+  testWidgets('the route item calls back once and closes the menu', (tester) async {
+    await open(tester, forcedRelay: false);
+    await tester.ensureVisible(find.text('改走中继'));
+    await tester.tap(find.text('改走中继'));
+    await tester.pump();
+    expect(routeToggles, 1);
+    expect(find.text('改走中继'), findsNothing); // closed
+  });
+
+  testWidgets('the route item is greyed without a callback', (tester) async {
+    await open(tester, forcedRelay: true, route: false);
+    await tester.ensureVisible(find.text('恢复自动选路'));
+    await tester.tap(find.text('恢复自动选路'));
+    await tester.pump();
+    expect(routeToggles, 0);
+    expect(find.text('恢复自动选路'), findsOneWidget); // still open
+  });
+
+  testWidgets('no route item while reconnecting; a disconnected session keeps it', (tester) async {
+    await open(tester, reconnecting: true, status: '连接中', forcedRelay: false);
+    expect(find.text('改走中继'), findsNothing);
+    await open(tester, disconnected: true, forcedRelay: false);
+    expect(find.text('改走中继'), findsOneWidget);
+  });
+
   testWidgets('disconnected menu keeps only the session group with reconnect', (tester) async {
     await open(tester, disconnected: true);
     expect(find.text('重连'), findsOneWidget);
     expect(find.text('结束会话'), findsOneWidget);
     expect(find.text('路径 局域网 · 活动'), findsOneWidget);
-    for (final gone in ['断开', '高彩（图像优化）', '分离成独立窗口', '放左上角', '预设', 'A 的剪贴板']) {
+    for (final gone in ['断开', '高彩（图像优化）', '分离成独立窗口', '放左上角', '预设', '远程剪贴板']) {
       expect(find.text(gone), findsNothing, reason: gone);
     }
     await tester.tap(find.text('重连'));
@@ -114,7 +170,7 @@ void main() {
     await open(tester, reconnecting: true, status: '连接中');
     expect(find.text('路径 局域网 · 连接中'), findsOneWidget);
     expect(find.text('结束会话'), findsOneWidget);
-    for (final gone in ['重连', '断开', '分离成独立窗口', '放左上角', '预设', 'A 的剪贴板']) {
+    for (final gone in ['重连', '断开', '分离成独立窗口', '放左上角', '预设', '远程剪贴板']) {
       expect(find.text(gone), findsNothing, reason: gone);
     }
   });
@@ -173,6 +229,7 @@ void main() {
 
   testWidgets('tapping an entry copies and closes; insert picks on the live session', (tester) async {
     await open(tester, seed: [1, 2]);
+    await tester.ensureVisible(find.text('clip 2'));
     await tester.tap(find.text('clip 2'));
     await tester.pump();
     expect(copied, [2]);
@@ -180,6 +237,7 @@ void main() {
     await tester.tap(find.byKey(const Key('traffic')));
     await tester.pump();
     expect(find.text('插入'), findsNWidgets(2));
+    await tester.ensureVisible(find.text('插入').first);
     await tester.tap(find.text('插入').first);
     await tester.pump();
     expect(called('clip_pick', {'sid': 1, 'clip': 2, 'insert': true}), isTrue);
@@ -204,7 +262,8 @@ void main() {
   testWidgets('a grey entry is not tappable and has no insert', (tester) async {
     await open(tester, seed: [1, 2], grey: 2);
     expect(find.text('插入'), findsOneWidget);
-    await tester.tap(find.text('clip 2'));
+    await tester.ensureVisible(find.text('clip 2'));
+    await tester.tap(find.text('clip 2'), warnIfMissed: false);
     await tester.pump();
     expect(copied, isEmpty);
     expect(find.text('clip 2'), findsOneWidget); // menu stays
@@ -276,7 +335,7 @@ void main() {
     expect(find.text(preset), findsNothing);
   });
 
-  testWidgets('A menu drills down and picks by path', (tester) async {
+  testWidgets('the remote menu drills down and picks by path', (tester) async {
     await open(tester);
     rs.apply(const MenuEvent(1, [
       MenuEntry(title: '文件', children: [
@@ -339,5 +398,49 @@ void main() {
     await open(tester, disconnected: true);
     expect(find.text('记为这个 app 的默认'), findsNothing);
     expect(find.text('app 配置…'), findsNothing);
+  });
+
+  group('split menus', () {
+    testWidgets('本机 has the session, clipboard, input method and input box; no stream or remote items', (tester) async {
+      await open(tester, parts: {MenuPart.session}, seed: [2]);
+      expect(find.byKey(const Key('session-menu-scrim')), findsOneWidget);
+      expect(find.text('结束会话'), findsOneWidget);
+      expect(find.text('远程剪贴板'), findsOneWidget);
+      expect(find.text(preset), findsNothing);
+      expect(find.text('远程菜单'), findsNothing);
+      expect(find.text('远端输入法'), findsNothing); // the host never said
+      rs.apply(const InputSourceEvent(1, 'im', '拼音', false));
+      await tester.pump();
+      expect(find.text('现在：拼音'), findsOneWidget);
+      await tester.ensureVisible(find.text('切到英文'));
+      await tester.tap(find.text('切到英文'));
+      await tester.pump();
+      expect(shellOpen, isFalse);
+      await tester.tap(find.byKey(const Key('session-menu')));
+      await tester.pump();
+      await tester.ensureVisible(find.text('标记输入区（再点一下画面）'));
+      await tester.tap(find.text('标记输入区（再点一下画面）'));
+      await tester.pump();
+      expect(marks, 1);
+    });
+
+    testWidgets('远程 shows only the app menu', (tester) async {
+      await open(tester, parts: {MenuPart.remote});
+      expect(find.byKey(const Key('remote-menu-scrim')), findsOneWidget);
+      expect(find.text('远端 app 还没有菜单'), findsOneWidget);
+      rs.apply(const MenuEvent(1, [MenuEntry(title: '文件')]));
+      await tester.pump();
+      expect(find.text('Calc 的菜单'), findsOneWidget);
+      expect(find.text('文件'), findsOneWidget);
+      expect(find.text('结束会话'), findsNothing);
+      expect(find.text(preset), findsNothing);
+    });
+
+    testWidgets('流量优化 alone has no session items', (tester) async {
+      await open(tester, parts: {MenuPart.stream});
+      expect(find.text(preset), findsOneWidget);
+      expect(find.text('结束会话'), findsNothing);
+      expect(find.text('远程剪贴板'), findsNothing);
+    });
   });
 }

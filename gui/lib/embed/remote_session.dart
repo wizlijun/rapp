@@ -1,8 +1,10 @@
 // One embedded session as the GUI sees it: the state the runner's events build up.
 import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart' show Offset;
 
 import 'app_profile.dart';
 import 'composer_model.dart';
+import 'geometry.dart' show contentSize;
 import 'resize_policy.dart';
 import 'session_port.dart';
 import 'stream_choice.dart';
@@ -21,7 +23,9 @@ class RemoteSession extends ChangeNotifier {
       this.onStream,
       void Function(int n)? onDropBlock,
       this.appId = '',
-      this.onReturn})
+      this.onReturn,
+      this.onSelectInput,
+      this.onClick})
       : policy = ResizePolicy(onResize ?? (_, _, _) {}) {
     composer = ComposerModel(onDrop: onDropBlock, onAllSent: _allSent);
   }
@@ -35,8 +39,62 @@ class RemoteSession extends ChangeNotifier {
   /// The composer's draft and whether it is open; kept per session (R18).
   late final ComposerModel composer;
 
+  /// Where an input source switch goes (the runner's `select_input`; '' = English).
+  final void Function(String id)? onSelectInput;
+
+  /// Where the click on the marked text box goes: a left click at A point [at] of [window].
+  final void Function(int window, Offset at)? onClick;
+
   void _allSent() {
-    if (profile.afterSend == AfterSend.pressReturn) onReturn?.call();
+    if (profile.afterSend == AfterSend.pressReturn) {
+      onReturn?.call();
+      composer.note('已发送并按了回车');
+    } else {
+      composer.note('已发送；空着再按 Enter 就给远端发回车');
+    }
+  }
+
+  /// A's input source as its host last said (null: an older host that never says).
+  ({String id, String name, bool ascii})? inputSource;
+
+  /// The last input method (not a plain layout) A had: what 「切回」 selects.
+  ({String id, String name, bool ascii})? lastInputMethod;
+
+  /// Switches A's input source: '' for English, else a source id it reported.
+  void selectInput(String id) {
+    if (inputSource == null) return; // the host would not understand
+    onSelectInput?.call(id);
+  }
+
+  /// Right before text or a Return goes to A: English input on A (so its input method cannot
+  /// eat what comes), and a click on the marked text box (so it has the focus).
+  void prepareInput() {
+    final s = inputSource;
+    if (s != null && !s.ascii) onSelectInput?.call('');
+    final c = inputClick();
+    if (c != null) onClick?.call(c.window, c.at);
+  }
+
+  /// The user sent with an empty composer: a Return for A's app.
+  void pressReturn() {
+    prepareInput();
+    onReturn?.call();
+  }
+
+  /// Where the marked text box is now, in A points of the main window; null without a mark, or
+  /// while another window is the current tab (a click would bring the main one over it).
+  ({int window, Offset at})? inputClick() {
+    final p = profile.input;
+    final m = _main;
+    if (p == null || m == null) return null;
+    final cur = currentWindow;
+    if (cur != null && cur != m) return null;
+    final w = windows.where((w) => w.id == m).firstOrNull;
+    if (w == null) return null;
+    final size = contentSize(w);
+    if (size.width <= 0 || size.height <= 0) return null;
+    final o = p.inContent(size);
+    return (window: m, at: Offset(o.dx, w.titleBar + o.dy));
   }
 
   ResolvedProfile _profile = ResolvedProfile.generic;
@@ -203,6 +261,9 @@ class RemoteSession extends ChangeNotifier {
         }
       case InputBlockedEvent():
         break; // MainState's hint.
+      case InputSourceEvent():
+        inputSource = (id: e.id, name: e.name, ascii: e.ascii);
+        if (!e.ascii) lastInputMethod = inputSource;
       case ClosedEvent():
         endReason = e.reason;
     }

@@ -37,7 +37,11 @@ String? screenShareHost(List<String> lan) {
 
 class DevicesTab extends StatefulWidget {
   const DevicesTab(
-      {super.key, required this.state, required this.local, this.localBadge = false, this.screenShare});
+      {super.key,
+      required this.state,
+      required this.local,
+      this.localBadge = false,
+      this.screenShare});
   final MainState state;
 
   /// The 本机 content, assembled by the caller.
@@ -144,6 +148,7 @@ class _DevicesTabState extends State<DevicesTab> {
               AddDeviceForm(
                 hub: state.hub!,
                 enabled: state.hubUsable,
+                relaySet: state.relaySet,
                 onAdded: (id) {
                   state.selectDevice(id);
                   state.probe(id);
@@ -183,7 +188,8 @@ class _DevicesTabState extends State<DevicesTab> {
     final apps = p?.apps;
     final name = state.deviceName(id);
     final missing = missingPermissions(apps?.permissions);
-    final pathWord = apps == null ? '' : (pathLabels[apps.path] ?? '');
+    final forced = state.forcedRelay(id);
+    final pathWord = routeWord(state.pathOf(id), forced: forced);
     final share = widget.screenShare;
     final shareHost = share == null
         ? null
@@ -206,6 +212,13 @@ class _DevicesTabState extends State<DevicesTab> {
               Text(p.word, style: TextStyle(color: t.muted)),
             ]),
           if (pathWord.isNotEmpty) Text(pathWord, style: TextStyle(color: t.muted)),
+          // Only with a relay set: without one there is nothing to force onto.
+          if (state.relaySet)
+            RappButton.secondary(
+              key: const Key('route-toggle'),
+              label: forced ? '恢复自动' : '强制走中继',
+              onPressed: state.hubUsable ? () => state.setRoute(id, !forced) : null,
+            ),
           if (share != null && shareHost != null)
             RappButton.secondary(
               key: const Key('screen-share'),

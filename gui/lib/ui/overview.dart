@@ -213,6 +213,7 @@ class _Column extends StatelessWidget {
     final t = RappTokens.of(context);
     final id = col.id;
     final small = Theme.of(context).textTheme.bodySmall;
+    final favorites = id == null ? const <AppRef>[] : [for (final f in state.idleFavorites) if (f.device == id) f];
     return SizedBox(
       key: Key('column-${id ?? 'local'}'),
       width: _colWidth,
@@ -242,25 +243,91 @@ class _Column extends StatelessWidget {
           ]),
         ),
         Expanded(
-          child: col.entries.isEmpty
-              ? Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('没有打开的 app', style: TextStyle(color: t.muted)),
-                  if (id != null) ...[
-                    const SizedBox(height: 8),
-                    RappButton.secondary(
-                      key: Key('open-app-$id'),
-                      label: '打开 app',
-                      onPressed: () => state.showDevice(id),
-                    ),
-                  ],
-                ])
-              : ListView.separated(
-                  itemCount: col.entries.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 8),
-                  itemBuilder: (_, i) => _Block(state: state, entry: col.entries[i]),
+          // The sessions, then this device's favourites that are not open (one tap opens one).
+          child: ListView(children: [
+            if (col.entries.isEmpty) Text('没有打开的 app', style: TextStyle(color: t.muted)),
+            for (final (i, e) in col.entries.indexed) ...[
+              if (i > 0) const SizedBox(height: 8),
+              _Block(state: state, entry: e),
+            ],
+            if (favorites.isNotEmpty) ...[
+              Padding(
+                padding: const EdgeInsets.only(top: 14, bottom: 6),
+                child: Text('常用', style: small?.copyWith(color: t.muted, letterSpacing: t.labelSpacing * 12)),
+              ),
+              for (final (i, f) in favorites.indexed) ...[
+                if (i > 0) const SizedBox(height: 8),
+                _FavoriteBlock(
+                  favorite: f,
+                  onTap: state.hubUsable && !col.offline ? () => state.openOrSwitch(f.device, f.bundle, f.name) : null,
                 ),
+              ],
+            ],
+            if (col.entries.isEmpty && id != null) ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: RappButton.secondary(
+                  key: Key('open-app-$id'),
+                  label: '打开 app',
+                  onPressed: () => state.showDevice(id),
+                ),
+              ),
+            ],
+          ]),
         ),
       ]),
+    );
+  }
+}
+
+/// A favourite that is not open: dashed, 「点按打开」; greyed while it cannot open.
+class _FavoriteBlock extends StatelessWidget {
+  const _FavoriteBlock({required this.favorite, required this.onTap});
+  final AppRef favorite;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RappTokens.of(context);
+    final small = Theme.of(context).textTheme.bodySmall?.copyWith(color: t.muted);
+    final radius = BorderRadius.circular(t.r);
+    return SizedBox(
+      key: Key('ov-favorite-${favorite.key}'),
+      height: 48,
+      child: Semantics(
+        button: true,
+        enabled: onTap != null,
+        label: '常用 ${favorite.name}，${onTap != null ? '点按打开' : '现在打不开'}',
+        excludeSemantics: true,
+        onTap: onTap,
+        child: Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: radius,
+            child: CustomPaint(
+              foregroundPainter: DashedOutline(t.line, t.r),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                child: Row(children: [
+                  const StatusLamp(Lamp.notOpened),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      favorite.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: onTap != null ? t.text : t.muted),
+                    ),
+                  ),
+                  if (onTap != null) Text('打开', style: small),
+                ]),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

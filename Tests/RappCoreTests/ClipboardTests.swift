@@ -59,11 +59,11 @@ final class ClipboardTests: XCTestCase {
         XCTAssertTrue(composerPrefixMatches(sent, [], length: 0))
     }
     func testPasteErrorMessageMapsKnownErrors() {
-        XCTAssertEqual(pasteErrorMessage("target not frontmost"), "A 上的目标窗口不在最前")
+        XCTAssertEqual(pasteErrorMessage("target not frontmost"), "远端的目标窗口不在最前")
         XCTAssertEqual(pasteErrorMessage("not uploaded"), "A 还没收齐这一项")
         XCTAssertEqual(pasteErrorMessage("not supported"), "A 不支持粘贴")
         XCTAssertEqual(pasteErrorMessage("boom"), "boom")
-        XCTAssertEqual(pasteErrorMessage("screen locked"), "A 已锁屏，需要在 A 上解锁")
+        XCTAssertEqual(pasteErrorMessage("screen locked"), "远端已锁屏，需要在远端解锁")
     }
     func testScreenLockedReadsTheSessionFlag() {
         XCTAssertTrue(screenLocked(["CGSSessionScreenIsLocked": true]))

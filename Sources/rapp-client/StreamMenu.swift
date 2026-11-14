@@ -8,7 +8,7 @@ import RappSession
 final class StreamMenu: NSObject, NSMenuDelegate {
     /// Called whenever the choice changes.
     var onSelect: (() -> Void)?
-    /// Makes the "A 的剪贴板" item that ends every menu; a menu cannot share an item with another.
+    /// Makes the "远程剪贴板" item that ends every menu; a menu cannot share an item with another.
     var makeHistoryItem: (() -> NSMenuItem)?
 
     private(set) var mode: Mode

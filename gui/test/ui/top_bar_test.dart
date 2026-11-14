@@ -330,7 +330,9 @@ void main() {
           }
         });
         await tester.pump();
-        expect(find.byType(StreamMenuAnchor), findsOneWidget);
+        expect(find.byKey(const Key('traffic')), findsOneWidget);
+        // The 本机 and 远程 buttons come when there is room; else the traffic menu has all.
+        expect(find.byType(StreamMenuAnchor), findsAtLeastNWidgets(1));
         expect(tester.takeException(), isNull);
         final full = tester.getRect(find.byKey(const Key('fullscreen-button')));
         final barRect = tester.getRect(find.byType(TopBar));
@@ -490,13 +492,38 @@ void main() {
       nextSid = 0; // 重启服务: the hub numbers from 1 again
       await openApp(tester, 'Safari');
       expect(es.currentRemote!.sid, 1);
-      await tester.tap(find.byKey(const Key('traffic')));
+      final local = find.byKey(const Key('session-menu'));
+      await tester.tap(local.evaluate().isNotEmpty ? local : find.byKey(const Key('traffic')));
       await tester.pump();
       expect(find.text('old'), findsOneWidget);
       expect(find.text('插入'), findsNothing);
       port.emit(const ClipsEvent(1, [ClipRow(7, 'new', true)]));
       await tester.pump();
       expect(find.text('插入'), findsOneWidget);
+    });
+
+    testWidgets('the stream menu forces the current host onto the relay, only with a relay set', (tester) async {
+      await tester.pumpWidget(wrap(ebar()));
+      await openApp(tester, 'Safari');
+      // The 会话 group sits in its own menu when the bar is split.
+      Finder menu() {
+        final session = find.byKey(const Key('session-menu'));
+        return session.evaluate().isNotEmpty ? session : find.byKey(const Key('traffic'));
+      }
+
+      await tester.tap(menu());
+      await tester.pump();
+      expect(find.text('改走中继'), findsNothing);
+      es.closeCorner();
+      es.setRelaySet(true);
+      await tester.pump();
+      await tester.tap(menu());
+      await tester.pump();
+      await tester.ensureVisible(find.text('改走中继'));
+      await tester.tap(find.text('改走中继'));
+      await tester.pump();
+      expect(es.corner, isNull);
+      expect(t.sent.last, {'cmd': 'set_route', 'id': '111', 'route': 'relay', 'req': anything});
     });
 
     testWidgets('opening needs closes the stream menu', (tester) async {

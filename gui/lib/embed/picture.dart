@@ -169,9 +169,21 @@ class _PictureState extends State<Picture> {
         ? kSecondaryButton
         : 0;
     final t = _at(e.localPosition);
+    final marking = widget.state.markingInput == _sid;
     if (!t.usable || !t.pic.contains(e.localPosition)) {
       // The letterbox is outside the picture: like the top bar, a press there takes focus away.
+      if (marking) widget.state.cancelMarkInput();
       widget.state.blurPicture();
+      return;
+    }
+    if (marking) {
+      // 「标记输入区」: this click is the mark, A never sees it.
+      if (bit == kPrimaryButton && identical(t.win, widget.window) && widget.session.isMain(t.win.id)) {
+        final p = toRemote(e.localPosition, t.fit, t.win);
+        widget.state.markInputAt(Offset(p.dx, p.dy - t.win.titleBar), contentSize(t.win));
+      } else {
+        widget.state.cancelMarkInput();
+      }
       return;
     }
     if (bit == 0 || _button != null) return;
@@ -286,6 +298,40 @@ class _PictureState extends State<Picture> {
     super.dispose();
   }
 
+  /// A × at a sheet's or popover's top-right corner (they have no close button): Esc on A.
+  Widget _popupClose(RappTokens t, _Target p, Size stage) {
+    const d = 28.0;
+    final left = (p.pic.right - d / 2).clamp(0.0, (stage.width - d).clamp(0.0, double.infinity));
+    final top = (p.pic.top - d / 2).clamp(0.0, (stage.height - d).clamp(0.0, double.infinity));
+    return Positioned(
+      left: left,
+      top: top,
+      width: d,
+      height: d,
+      child: Tooltip(
+        message: '关闭这个弹出窗口（给远端发 Esc）',
+        child: Semantics(
+          button: true,
+          label: '关闭弹出窗口',
+          excludeSemantics: true,
+          child: Material(
+            key: ValueKey('popup-close-${p.win.id}'),
+            color: t.accent,
+            shape: const CircleBorder(),
+            elevation: 2,
+            child: InkWell(
+              customBorder: const CircleBorder(),
+              onTap: () => widget.state.closeWindow(p.win.id),
+              child: Icon(Icons.close, size: 16, color: t.accentInk),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget? _inputMark(RappTokens t, RemoteWindow win, Rect fit) => _inputMarkAt(t, widget.session, win, fit);
+
   @override
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
@@ -328,7 +374,10 @@ class _PictureState extends State<Picture> {
               widget.state.blurPicture();
             }
           },
-          child: Listener(
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: Listener(
             behavior: HitTestBehavior.opaque,
             onPointerDown: _down,
             onPointerMove: _move,
@@ -358,6 +407,17 @@ class _PictureState extends State<Picture> {
                         ),
                       ),
                     ),
+                  ?_inputMark(t, win, fit),
+                  if (widget.state.markingInput == _sid)
+                    Positioned.fromRect(
+                      rect: pic.inflate(2).intersect(Offset.zero & c.biggest),
+                      child: IgnorePointer(
+                        key: const Key('picture-marking'),
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(border: Border.all(color: t.accent, width: 2)),
+                        ),
+                      ),
+                    ),
                   // Behind first, so the first of the table ends up on top.
                   for (final p in _popups.reversed)
                     Positioned.fromRect(rect: p.pic, child: windowSurface(p.win)),
@@ -365,10 +425,44 @@ class _PictureState extends State<Picture> {
               ),
             ),
           ),
+              ),
+              // Above the Listener, not in it: a press on a × never reaches A as a click.
+              for (final p in _popups)
+                if (p.win.kind == WindowKind.sheet || p.win.kind == WindowKind.popover)
+                  _popupClose(t, p, c.biggest),
+            ],
+          ),
         );
       },
     );
   }
+}
+
+/// The marked input box: a small ring on the main window's picture, where a send clicks first.
+Widget? _inputMarkAt(RappTokens t, RemoteSession session, RemoteWindow win, Rect fit) {
+  final p = session.profile.input;
+  if (p == null || !session.isMain(win.id) || fit.width <= 0 || fit.height <= 0) return null;
+  final size = contentSize(win);
+  if (size.width <= 0 || size.height <= 0) return null;
+  final o = p.inContent(size);
+  final at = Offset(fit.left + o.dx / size.width * fit.width, fit.top + o.dy / size.height * fit.height);
+  const r = 7.0;
+  return Positioned(
+    left: at.dx - r,
+    top: at.dy - r,
+    width: 2 * r,
+    height: 2 * r,
+    child: IgnorePointer(
+      key: const Key('input-mark'),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(color: t.accent, width: 2),
+          color: t.accent.withValues(alpha: 0.25),
+        ),
+      ),
+    ),
+  );
 }
 
 /// Shared live/retained surface for native textures and Linux image frames.

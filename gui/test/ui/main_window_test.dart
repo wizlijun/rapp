@@ -121,6 +121,12 @@ void main() {
     await tester.pump(const Duration(milliseconds: 100));
   }
 
+  testWidgets('the service status tells MainState whether a relay is set', (tester) async {
+    monitor.status = ServiceStatus.fromJson({'relay_addr': 'vps:22026', 'has_key': true});
+    await pump(tester);
+    expect(s.relaySet, isTrue);
+  });
+
   testWidgets('opening and closing the panel never changes the stage size', (tester) async {
     await pump(tester);
     final base = tester.getSize(find.byKey(const Key('stage')));
@@ -424,8 +430,9 @@ void main() {
     last('attach');
     port.emit(const DetachedEvent(1, false));
     await tester.pump();
-    // The stream menu's 会话 group offers the same toggle.
-    await tester.tap(find.byKey(const Key('traffic')));
+    // The 本机 menu's 会话 group offers the same toggle (the 流量 one when the bar is narrow).
+    final local = find.byKey(const Key('session-menu'));
+    await tester.tap(local.evaluate().isNotEmpty ? local : find.byKey(const Key('traffic')));
     await tester.pump();
     await tester.ensureVisible(find.text('分离成独立窗口'));
     await tester.tap(find.text('分离成独立窗口'));

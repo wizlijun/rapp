@@ -1,11 +1,14 @@
 //! rapp-hub (spec §4): B side. JSON-line commands on stdin, events on stdout.
-//! Hosts are reached only at the addresses saved in `hosts.json` (added as `id@ip`).
+//! Hosts are reached at the addresses saved in `hosts.json` (added as `id@ip`, or by bare ID through
+//! the relay), and through the relay when no address answers. A link off the LAN moves to the LAN
+//! when it answers (`upgrade`).
 
 mod hosts;
 mod link;
 mod presence;
 mod session;
 mod terms;
+mod upgrade;
 
 use anyhow::{bail, Context, Result};
 use hosts::{Host, Hosts};
@@ -17,8 +20,9 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+pub use upgrade::UpgradeTimes;
 
 pub struct Opts {
     pub home: PathBuf,
@@ -27,6 +31,8 @@ pub struct Opts {
     pub log: Log,
     /// Presence probe period; None = no probe (tests).
     pub presence_every: Option<std::time::Duration>,
+    /// When links off the LAN are tried on it.
+    pub upgrade: UpgradeTimes,
 }
 
 /// One open session. `tx` is the writer of the client's stdin (None once closed).
@@ -40,10 +46,22 @@ pub(crate) struct HubSession {
 
 type Out = Box<dyn AsyncWrite + Unpin + Send>;
 
+/// Everything the hub reads from its home, swapped as one by `set_home`.
+pub(crate) struct HomeState {
+    /// Where `service.json` (relay, key) and the device key live.
+    pub home: PathBuf,
+    /// This device's key and certificate, shared with the service on this machine.
+    pub identity: Arc<rapp_wire::Identity>,
+}
+
 pub(crate) struct Hub {
+    /// The home and what is read from it; `set_home` replaces it (hosts swap in `hosts`).
+    at: RwLock<HomeState>,
     bin_dir: Option<PathBuf>,
     ep: Endpoint,
     links: Mutex<HashMap<String, Link>>,
+    /// The connection to the relay, kept while the settings it was dialed with stand.
+    relay: tokio::sync::Mutex<Option<link::RelayCache>>,
     hosts: Hosts,
     out: tokio::sync::Mutex<Out>,
     /// sid → writer of the client's stdin (None once closed).
@@ -53,6 +71,14 @@ pub(crate) struct Hub {
     close_why: Mutex<HashMap<u64, String>>,
     /// Hosts the presence probe stopped trying after an auth-type failure, until the user acts on them.
     probe_halt: Mutex<std::collections::HashSet<String>>,
+    /// What the relay said about a host in this run: true = found it, false = `unknown id`.
+    /// Probes look a host up only when that is worth a lookup (the relay counts `unknown id`).
+    relay_seen: Mutex<HashMap<String, bool>>,
+    /// The LAN addresses each host last reported to the relay (`connect`), tried by the LAN upgrade.
+    relay_lan: Mutex<HashMap<String, Vec<String>>>,
+    /// When each host off the LAN is tried on it next.
+    schedule: Mutex<upgrade::Schedule>,
+    times: UpgradeTimes,
     kill: tokio::sync::watch::Sender<bool>,
     log: Log,
     /// B's self-declared name in `auth` (spec §2): this machine's hostname.
@@ -67,15 +93,22 @@ where
     W: AsyncWrite + Unpin + Send + 'static,
 {
     opts.log.event(Lvl::Info, "hub_start", json!({"version": env!("CARGO_PKG_VERSION")}));
+    let identity = Arc::new(rapp_wire::Identity::load_or_create(&opts.home, "device").context("device key")?);
     let hub = Arc::new(Hub {
+        at: RwLock::new(HomeState { home: opts.home.clone(), identity }),
         ep: rapp_net::quic::client_endpoint(([0, 0, 0, 0], 0).into())?,
         links: Default::default(),
+        relay: Default::default(),
         hosts: Hosts::load(&opts.home)?,
         out: tokio::sync::Mutex::new(Box::new(output)),
         sessions: Default::default(),
         next_sid: AtomicU64::new(sid_seed()),
         close_why: Default::default(),
         probe_halt: Default::default(),
+        relay_seen: Default::default(),
+        relay_lan: Default::default(),
+        schedule: Mutex::new(upgrade::Schedule::new(opts.upgrade)),
+        times: opts.upgrade,
         kill: tokio::sync::watch::channel(false).0,
         bin_dir: opts.bin_dir,
         log: opts.log,
@@ -83,6 +116,7 @@ where
         terms: Default::default(),
     });
     let probe = opts.presence_every.map(|every| tokio::spawn(presence::run(hub.clone(), every)));
+    let upgrade = tokio::spawn(upgrade::run(hub.clone()));
     let mut lines = BufReader::new(input).lines();
     let read = async {
         while let Some(line) = lines.next_line().await? {
@@ -99,8 +133,13 @@ where
         p.abort();
         let _ = p.await;
     }
+    upgrade.abort();
+    let _ = upgrade.await;
     read?;
     hub.close_all().await;
+    if let Some(c) = hub.relay.lock().await.take() {
+        c.conn.close();
+    }
     hub.ep.close(0u32.into(), b"hub exit");
     let _ = hub.out.lock().await.shutdown().await;
     Ok(())
@@ -115,6 +154,31 @@ impl Hub {
         let mut out = self.out.lock().await;
         let _ = out.write_all(format!("{v}\n").as_bytes()).await;
         let _ = out.flush().await;
+    }
+
+    /// The home and the device identity, read together so that one operation never mixes two homes.
+    pub(crate) fn at_home(&self) -> (PathBuf, Arc<rapp_wire::Identity>) {
+        let at = self.at.read().unwrap();
+        (at.home.clone(), at.identity.clone())
+    }
+
+    /// Moves to a new home: its device identity, its hosts, and (read per connect) its relay and key.
+    /// On error nothing changes. The relay connection, dialed as the old device, is closed; cached
+    /// host links are dropped from the cache (sessions on them keep running) so the next request
+    /// connects as the new device; LAN tries planned for the old hosts are dropped too.
+    async fn set_home(&self, dir: &std::path::Path) -> Result<()> {
+        let identity = Arc::new(rapp_wire::Identity::load_or_create(dir, "device").context("device key")?);
+        self.hosts.reload(dir)?;
+        *self.at.write().unwrap() = HomeState { home: dir.to_path_buf(), identity };
+        if let Some(c) = self.relay.lock().await.take() {
+            c.conn.close();
+        }
+        self.links.lock().unwrap().clear();
+        self.probe_halt.lock().unwrap().clear();
+        self.relay_seen.lock().unwrap().clear();
+        self.relay_lan.lock().unwrap().clear();
+        self.schedule.lock().unwrap().clear();
+        Ok(())
     }
 
     /// The name B introduces itself with.
@@ -151,28 +215,49 @@ impl Hub {
         Ok(Some(match v.get("cmd").and_then(Value::as_str) {
             Some("hosts") => self.hosts_event(),
             Some("add_host") => {
-                let (id, addr) = rapp_net::addr::split_host_ref(s("id")?)?;
-                let Some(addr) = addr else { bail!("id@ip required") };
-                let (id, password) = (id.as_str(), s("password")?);
-                let auth = Op::Auth { password: Some(password.into()), name: self.me() };
-                let (conn, r) = self.dial(&addr, link::LAN_WAIT, &auth).await?;
-                conn.close(0u32.into(), b"host added");
-                if r["id"] != id {
-                    bail!("{addr} is ID {}, not {id}", r["id"].as_str().unwrap_or("?"));
-                }
-                let name = r["name"].as_str().unwrap_or(id).to_string();
-                self.hosts.upsert(Host { id: id.into(), name: name.clone(), password: password.into(), lan: vec![addr] })?;
-                self.forget(id);
-                json!({"event":"host_added","id":id,"name":name})
+                let password = v.get("password").and_then(Value::as_str);
+                self.add_host(s("id")?, password).await?
             }
             Some("remove_host") => {
                 let id = s("id")?;
                 self.hosts.remove(id)?;
                 self.forget(id);
+                // Its LAN tries go too, even one held after a failed move (`forget` keeps those).
+                self.schedule.lock().unwrap().remove(id);
                 self.hosts_event()
             }
+            Some("set_route") => {
+                let route = match s("route")? {
+                    "relay" => Some("relay".to_string()),
+                    "auto" => None,
+                    _ => bail!("bad route"),
+                };
+                let id = s("id")?;
+                self.host(id)?;
+                self.hosts.set_route(id, route.clone())?;
+                self.log.msg(Lvl::Info, format_args!("{id}: route {}", route.as_deref().unwrap_or("auto")));
+                if route.is_some() {
+                    // Requests leave the old link now; this one builds the relay link (and its `path` event).
+                    self.uncache(id);
+                    let (hub, id) = (self.clone(), id.to_string());
+                    tokio::spawn(async move {
+                        let Some(host) = hub.hosts.get(&id) else { return };
+                        if let Err(e) = hub.request(&host, &Op::Ping).await {
+                            hub.log.msg(Lvl::Warn, format_args!("{id} via relay: {e:#}"));
+                        }
+                    });
+                } else {
+                    self.upgrade_now(id);
+                }
+                self.hosts_event()
+            }
+            Some("route_failed") => {
+                // A session did not reopen on the LAN: leave the host where it is for a while.
+                self.schedule.lock().unwrap().failed_move(s("id")?, std::time::Instant::now());
+                return Ok(None);
+            }
             Some("set_home") => {
-                self.hosts.reload(std::path::Path::new(s("dir")?))?;
+                self.set_home(std::path::Path::new(s("dir")?)).await?;
                 json!({"event":"home_set"})
             }
             Some("apps") => {
@@ -229,10 +314,7 @@ impl Hub {
 /// and the GUI keeps old sids across 「重启服务」; starting from the clock keeps a restarted hub
 /// from reusing them.
 fn sid_seed() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
 #[cfg(test)]

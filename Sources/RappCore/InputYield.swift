@@ -46,7 +46,7 @@ public struct InputYield {
     public mutating func admit(_ m: Message, at now: TimeInterval) -> YieldDecision {
         let blocking = now < blockedUntil
         switch m {
-        case .text, .scroll, .paste, .menuPick, .focus:
+        case .text, .scroll, .paste, .menuPick, .focus, .selectInput:
             return blocking ? blocked(at: now) : passed(at: now)
         case let .key(code, _, down):
             if down {

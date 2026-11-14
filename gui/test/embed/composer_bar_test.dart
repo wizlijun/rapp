@@ -89,6 +89,57 @@ void main() {
       ]);
     });
 
+    group('with the input source and Return wired', () {
+      late RemoteSession rs2;
+      setUp(() {
+        rs2 = RemoteSession(1, 'Safari',
+            onReturn: () => port.key(1, 36, 0), onSelectInput: (id) => port.selectInput(1, id));
+        rs2.composer.open = true;
+      });
+      tearDown(() => rs2.dispose());
+      Widget bar2() => SizedBox(width: 900, child: ComposerBar(state: es, session: rs2, port: port));
+
+      testWidgets('no input method chip until the host says', (tester) async {
+        await tester.pumpWidget(wrap(bar2()));
+        expect(find.byKey(const Key('remote-ime')), findsNothing);
+        rs2.apply(const InputSourceEvent(1, 'im', '拼音', false));
+        await tester.pump();
+        expect(find.text('远端输入法：拼音'), findsOneWidget);
+        await tester.tap(find.byKey(const Key('remote-ime')));
+        expect(callsOf('select_input').single, {'sid': 1, 'id': ''});
+        rs2.apply(const InputSourceEvent(1, 'abc', 'ABC', true));
+        await tester.pump();
+        expect(find.text('远端输入法：英文'), findsOneWidget);
+        await tester.tap(find.byKey(const Key('remote-ime')));
+        expect(callsOf('select_input').last, {'sid': 1, 'id': 'im'});
+      });
+
+      testWidgets('a send switches to English first; an empty Enter presses Return', (tester) async {
+        await tester.pumpWidget(wrap(bar2()));
+        rs2.apply(const InputSourceEvent(1, 'im', '拼音', false));
+        await tester.tap(find.byType(TextField));
+        await tester.pump();
+        rs2.composer.text = 'hi';
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pump();
+        expect([for (final c in port.calls) c.$1].where((m) => m == 'select_input' || m == 'composer_send'),
+            ['select_input', 'composer_send']);
+        rs2.apply(const ComposerStateEvent(1, done: ComposerDone(1, null)));
+        await tester.pump();
+        expect(rs2.composer.text, isEmpty);
+
+        port.calls.clear();
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pump();
+        expect(callsOf('key'), [
+          {'sid': 1, 'keyCode': 36, 'modifiers': 0},
+        ]);
+        expect(callsOf('composer_send'), isEmpty);
+        expect(find.text('已给远端发回车'), findsOneWidget);
+        await tester.pump(const Duration(seconds: 5)); // the status line clears
+      });
+    });
+
     testWidgets('keys row sends codes with sticky command', (tester) async {
       await tester.pumpWidget(wrap(bar()));
       await tester.tap(find.text('按键'));

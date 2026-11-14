@@ -29,16 +29,31 @@ pub struct Config {
     /// The scheduled checks (default true); the 检查更新 button works either way.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub check_updates: Option<bool>,
+    /// The relay as `host:port`; with `key`, the service keeps a connection to it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relay: Option<String>,
+    /// The key text (`rapp…`); devices holding the same key trust each other.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
+    /// Set by `load_or_init` when it dropped a 0.5.5 (relay1) `relay` + `key`; never saved.
+    #[serde(skip)]
+    pub legacy_dropped: bool,
 }
 
 impl Config {
     /// Reads `service.json`, filling in id / password / name on first start.
-    /// Old `relay` / `key` / `secret` fields are ignored and drop out on the next save.
+    /// An old `secret` field is ignored and drops out on the next save; empty `relay` / `key` count as unset.
+    /// A `key` that is not a 0.6 key (0.5.5's relay1 key) is dropped with its `relay`, and the file saved.
     pub fn load_or_init(home: &Path) -> Result<Config> {
         let path = home.join("service.json");
         let mut cfg: Config = rapp_net::config::read_json(&path)?.unwrap_or_default();
+        cfg.relay = cfg.relay.take().filter(|s| !s.is_empty());
+        cfg.key = cfg.key.take().filter(|s| !s.is_empty());
+        if cfg.key.as_deref().is_some_and(|k| k.parse::<rapp_wire::Key>().is_err()) {
+            (cfg.relay, cfg.key, cfg.legacy_dropped) = (None, None, true);
+        }
         let has_id = cfg.id.as_deref().is_some_and(is_valid_id);
-        let fresh = !has_id || cfg.password.is_empty() || cfg.name.is_empty();
+        let fresh = !has_id || cfg.password.is_empty() || cfg.name.is_empty() || cfg.legacy_dropped;
         if !has_id {
             cfg.id = Some(random_id());
         }
@@ -91,5 +106,24 @@ mod tests {
         let old = Config { id: Some("123456789".into()), ..Default::default() };
         old.save(dir.path()).unwrap();
         assert_eq!(Config::load_or_init(dir.path()).unwrap().id.as_deref(), Some("123456789"));
+    }
+
+    #[test]
+    fn a_relay1_key_is_dropped_with_its_relay_and_a_0_6_key_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = rapp_wire::Key::new_local().to_string();
+        let good = Config { relay: Some("vps:22026".into()), key: Some(key.clone()), ..Default::default() };
+        good.save(dir.path()).unwrap();
+        let cfg = Config::load_or_init(dir.path()).unwrap();
+        assert_eq!(
+            (cfg.relay.as_deref(), cfg.key.as_deref(), cfg.legacy_dropped),
+            (Some("vps:22026"), Some(&*key), false)
+        );
+        let old = Config { relay: Some("vps:21116".into()), key: Some("relay1-key".into()), ..Default::default() };
+        old.save(dir.path()).unwrap();
+        let cfg = Config::load_or_init(dir.path()).unwrap();
+        assert_eq!((cfg.relay.as_deref(), cfg.key.as_deref(), cfg.legacy_dropped), (None, None, true));
+        let again = Config::load_or_init(dir.path()).unwrap();
+        assert!(!again.legacy_dropped && again.relay.is_none(), "saved without them");
     }
 }

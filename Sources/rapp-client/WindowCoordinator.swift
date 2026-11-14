@@ -218,7 +218,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
         window?.composerBar.composer.insert(payload, info: info)
     }
 
-    /// 复制: ⌘C to A, then "已复制" for 2 s, or "A 上没有复制到东西" if no clip came in that time; 2 s later it is restored.
+    /// 复制: ⌘C to A, then "已复制" for 2 s, or "远端没有复制到东西" if no clip came in that time; 2 s later it is restored.
     private func copy(from bar: ComposerBar) {
         let command = UInt64(NSEvent.ModifierFlags.command.rawValue)
         send(.key(keyCode: 8, modifiers: command, down: true))
@@ -233,7 +233,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
             guard let self, self.copyGeneration == generation, let bar = self.copyBar else { return }
             guard self.copyPending else { return bar.showCopyFeedback(nil) }
             self.copyPending = false
-            bar.showCopyFeedback("A 上没有复制到东西")
+            bar.showCopyFeedback("远端没有复制到东西")
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self, weak bar] in
                 if self?.copyGeneration == generation { bar?.showCopyFeedback(nil) }
             }
@@ -341,7 +341,7 @@ final class WindowCoordinator: NSObject, NSWindowDelegate {
 
     // MARK: What the user does to B windows (spec §4.3)
 
-    static let moveToTopLeftTitle = "把 A 上的这个窗口移到左上角"
+    static let moveToTopLeftTitle = "把远端的这个窗口移到左上角"
 
     /// The key B window, or the one A last focused.
     var currentWindowID: UInt32? { (NSApp.keyWindow as? RemoteWindow)?.info.id ?? lastFocused }

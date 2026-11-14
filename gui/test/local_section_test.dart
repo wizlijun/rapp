@@ -83,18 +83,132 @@ void main() {
     expect(find.text('已复制 ID'), findsOneWidget);
   });
 
-  testWidgets('the 本机 card has no 中继 row', (tester) async {
-    svc = FakeService('tok');
+  testWidgets('relay row shows address and state', (tester) async {
+    svc = FakeService('tok')..extraStatus = {'relay_addr': 'vps:22026', 'relay': 'connected', 'has_key': true};
     await pump(tester);
-    expect(find.text('中继'), findsNothing);
-    expect(find.byKey(const Key('edit-relay')), findsNothing);
+    expect(find.text('中继'), findsOneWidget);
+    expect(find.text('vps:22026'), findsOneWidget);
+    expect(find.text('已连接'), findsOneWidget);
+    expect(find.byKey(const Key('edit-relay')), findsOneWidget);
   });
 
-  testWidgets('a status that still carries relay fields renders', (tester) async {
-    svc = FakeService('tok')..extraStatus = {'relay': 'connected', 'relay_error': 'old'};
+  testWidgets('relay states read in words', (tester) async {
+    svc = FakeService('tok')..extraStatus = {'relay_addr': 'vps:22026', 'relay': 'error', 'relay_error': 'relay unreachable: x'};
     await pump(tester);
-    expect(find.text('123456789'), findsOneWidget);
-    expect(find.text('中继'), findsNothing);
+    expect(find.textContaining('出错：中继连不上'), findsOneWidget);
+  });
+
+  testWidgets('connecting after a failure shows why', (tester) async {
+    svc = FakeService('tok')
+      ..extraStatus = {'relay_addr': 'vps:22026', 'has_key': true, 'relay': 'connecting', 'relay_error': 'limit'};
+    await pump(tester);
+    expect(find.text('连接中：超出中继的限制，稍后再试'), findsOneWidget);
+  });
+
+  testWidgets('connecting the first time reads 连接中', (tester) async {
+    svc = FakeService('tok')..extraStatus = {'relay_addr': 'vps:22026', 'has_key': true, 'relay': 'connecting'};
+    await pump(tester);
+    expect(find.text('连接中'), findsOneWidget);
+  });
+
+  testWidgets('no relay set reads 未设置', (tester) async {
+    svc = FakeService('tok');
+    await pump(tester);
+    expect(find.text('未设置'), findsWidgets);
+    expect(find.byKey(const Key('edit-relay')), findsOneWidget);
+  });
+
+  testWidgets('key is masked until shown', (tester) async {
+    svc = FakeService('tok')..extraStatus = {'relay_addr': 'vps:22026', 'relay': 'connected', 'has_key': true};
+    await pump(tester);
+    expect(find.text('KEY-TEXT-123'), findsNothing);
+    expect(find.text('••••••'), findsOneWidget);
+    await tester.tap(find.text('显示'));
+    await tester.runAsync(() => until(() => svc.received.any((c) => c['cmd'] == 'show_key')));
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(find.text('KEY-TEXT-123'), findsOneWidget);
+    expect(find.byKey(const Key('copy-key')), findsOneWidget);
+  });
+
+  testWidgets('editing relay calls set_relay', (tester) async {
+    svc = FakeService('tok');
+    await pump(tester);
+    await tester.tap(find.byKey(const Key('edit-relay')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, '接入点'), 'vps:22026');
+    await tester.enterText(find.widgetWithText(TextField, 'key'), 'K1');
+    await tester.tap(find.text('保存'));
+    await tester.runAsync(() => until(() => svc.received.any((c) => c['cmd'] == 'set_relay')));
+    await tester.pumpAndSettle();
+    expect(svc.received.lastWhere((c) => c['cmd'] == 'set_relay'),
+        {'cmd': 'set_relay', 'relay': 'vps:22026', 'key': 'K1'});
+  });
+
+  testWidgets('editing only the address keeps the key', (tester) async {
+    svc = FakeService('tok')..extraStatus = {'relay_addr': 'vps:22026', 'relay': 'connected', 'has_key': true};
+    await pump(tester);
+    await tester.tap(find.byKey(const Key('edit-relay')));
+    await tester.runAsync(() => until(() => svc.received.any((c) => c['cmd'] == 'show_key')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, '接入点'), 'vps2:22026');
+    await tester.tap(find.text('保存'));
+    await tester.runAsync(() => until(() => svc.received.any((c) => c['cmd'] == 'set_relay')));
+    await tester.pumpAndSettle();
+    expect(svc.received.lastWhere((c) => c['cmd'] == 'set_relay'),
+        {'cmd': 'set_relay', 'relay': 'vps2:22026', 'key': 'KEY-TEXT-123'});
+  });
+
+  testWidgets('bad key error is shown', (tester) async {
+    svc = FakeService('tok')..replies['set_relay'] = {'ok': false, 'error': 'bad key'};
+    await pump(tester);
+    await tester.tap(find.byKey(const Key('edit-relay')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, '接入点'), 'vps:22026');
+    await tester.enterText(find.widgetWithText(TextField, 'key'), 'bad');
+    await tester.tap(find.text('保存'));
+    await tester.runAsync(() => until(() => svc.received.any((c) => c['cmd'] == 'set_relay')));
+    await tester.pumpAndSettle();
+    expect(find.text('key 不对'), findsOneWidget);
+    expect(find.byType(AlertDialog), findsOneWidget);
+  });
+
+  testWidgets('with a relay the bare ID comes first and LAN IDs fold', (tester) async {
+    svc = FakeService('tok')
+      ..extraStatus = {'relay_addr': 'vps:22026', 'has_key': true}
+      ..lanIds = ['123456789@192.168.1.5', '123456789@10.0.0.7'];
+    await pump(tester);
+    await tester.tap(find.byKey(const Key('copy-id-0')));
+    await tester.pump();
+    expect(copied, ['123456789']);
+    expect(find.text('▸ 局域网地址（2 个）'), findsOneWidget);
+    expect(find.text('123456789@192.168.1.5'), findsNothing);
+
+    await tester.tap(find.byKey(const Key('lan-fold')));
+    await tester.pump();
+    expect(find.text('▾ 局域网地址（2 个）'), findsOneWidget);
+    expect(find.text('123456789@192.168.1.5'), findsOneWidget);
+    expect(find.text('123456789@10.0.0.7'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('copy-lan-1')));
+    await tester.pump();
+    expect(copied.last, '123456789@10.0.0.7');
+
+    // Leaving the page and coming back: folded again.
+    await tester.pumpWidget(wrap(const SizedBox()));
+    await tester.pumpWidget(wrap(SingleChildScrollView(
+      child: LocalSection(platform: TargetPlatform.windows, monitor: m, control: null, data: DataDir(tmp.path)),
+    )));
+    await tester.pump();
+    expect(find.text('▸ 局域网地址（2 个）'), findsOneWidget);
+    expect(find.text('123456789@192.168.1.5'), findsNothing);
+  });
+
+  testWidgets('with a relay and no LAN address there is no fold row', (tester) async {
+    svc = FakeService('tok')..extraStatus = {'relay_addr': 'vps:22026', 'has_key': true};
+    await pump(tester);
+    expect(find.byKey(const Key('lan-fold')), findsNothing);
+    await tester.tap(find.byKey(const Key('copy-id-0')));
+    await tester.pump();
+    expect(copied, ['123456789']);
   });
 
   testWidgets('every LAN ID has its own copy button', (tester) async {

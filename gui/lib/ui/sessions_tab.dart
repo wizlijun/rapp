@@ -62,6 +62,7 @@ class SessionsTab extends StatelessWidget {
                         padding: const EdgeInsets.only(bottom: 6),
                         child: _SessionRow(
                           entry: e,
+                          forced: state.forcedRelay(e.id),
                           selected: e.key == state.currentKey,
                           byDevice: state.grouping == Grouping.device,
                           embedded: state.embeds,
@@ -177,12 +178,16 @@ class _FavoriteRow extends StatelessWidget {
 class _SessionRow extends StatelessWidget {
   const _SessionRow({
     required this.entry,
+    this.forced = false,
     required this.selected,
     required this.byDevice,
     required this.embedded,
     required this.onTap,
   });
   final SessionEntry entry;
+
+  /// The host is forced onto the relay: its relay path reads 「中继（强制）」.
+  final bool forced;
   final bool selected;
   final bool byDevice;
 
@@ -191,7 +196,7 @@ class _SessionRow extends StatelessWidget {
   final VoidCallback onTap;
 
   String get _second {
-    final path = pathLabels[entry.path] ?? '';
+    final path = routeWord(entry.path, forced: forced);
     if (byDevice) return path;
     return path.isEmpty ? entry.device : '${entry.device} · $path';
   }
