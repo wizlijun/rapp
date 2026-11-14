@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en" data-theme="matrix">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#020a04">
+  <meta name="description" content="Apps from all your machines, in one place. rapp for macOS and Omarchy / Arch Linux.">
+  <title>rapp — Remote apps. One Pad.</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' fill='%23020a04'/%3E%3Ctext x='8' y='29' fill='%237dff9e' font-family='monospace' font-size='30'%3Er%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./style.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <a class="wordmark" href="./" aria-label="rapp home"><span class="brand-mark" aria-hidden="true">r</span>rapp<span class="cursor" aria-hidden="true">_</span></a>
+      <nav aria-label="Language"><a href="?lang=en" lang="en" data-language="en" aria-current="page">EN</a><a href="?lang=ja" lang="ja" data-language="ja">日本語</a><a href="?lang=zh" lang="zh-Hans" data-language="zh">中文</a></nav>
+    </header>
+    <main>
+      <section class="hero" aria-labelledby="intro">
+        <div class="eyebrow"><span class="lamp" aria-hidden="true"></span><span data-i18n="eyebrow">REMOTE APPLICATIONS, WITHIN REACH</span></div>
+        <h1 id="intro"><span data-i18n="headline1">Remote apps.</span><br><span class="bright" data-i18n="headline2">One Pad.</span></h1>
+        <p class="intro" data-i18n="intro">Apps from all your machines, in one place.</p>
+        <div class="download-area">
+          <a id="download" class="primary" href="https://github.com/wizlijun/rapp/releases"><span id="download-label">Choose your download</span><svg aria-hidden="true" viewBox="0 0 20 20"><path d="M10 3v10m-4-4 4 4 4-4M4 14v3h12v-3"/></svg></a>
+          <span id="download-meta" class="download-meta" aria-live="polite"></span>
+        </div>
+        <div id="platforms" class="platforms" aria-label="Downloads"></div>
+        <p id="compatibility" class="compatibility" hidden></p>
+      </section>
+      <section class="relay" aria-labelledby="relay-title">
+        <div class="relay-heading"><h2 id="relay-title" data-i18n="relayTitle">Your relay. Your rules.</h2><span class="relay-tag">LINUX / DOCKER</span></div>
+        <div class="command"><span class="prompt" aria-hidden="true">$</span><code id="install-command">curl -fsSL https://rapphub.com/install-relay.sh | sh</code><button id="copy" type="button" aria-label="Copy install command"><svg aria-hidden="true" viewBox="0 0 20 20"><rect x="7" y="6" width="9" height="11" rx="1"/><path d="M12 6V3H3v11h4"/></svg><span id="copy-label" class="sr-only">Copy</span></button></div>
+        <div class="relay-info"><p><svg aria-hidden="true" viewBox="0 0 18 18"><rect x="4" y="8" width="10" height="8" rx="1"/><path d="M6 8V5a3 3 0 0 1 6 0v3"/></svg><span data-i18n="e2e">End-to-end encrypted. Your relay only sees ciphertext.</span></p><a href="./install-relay.sh" data-i18n="script">View script ↗</a></div>
+        <p class="relay-note" data-i18n="relayNote">rapp 0.6+ on both devices · Open UDP 22026 · Save the key printed at install</p>
+      </section>
+    </main>
+    <footer><span>rapphub.com</span><div class="footer-links"><a href="https://github.com/wizlijun/rapp">GitHub ↗</a><a href="https://github.com/wizlijun/rapp/releases" data-i18n="releases">Releases ↗</a><span>GPL-3.0</span></div><label class="theme-control"><span class="sr-only" data-i18n="theme">Theme</span><select id="theme" aria-label="Theme"><option value="matrix">MATRIX</option><option value="westworld">WESTWORLD</option><option value="avatar">AVATAR</option></select></label></footer>
+  </div>
+</body>
+</html>

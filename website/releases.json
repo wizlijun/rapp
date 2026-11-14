@@ -1,0 +1,318 @@
+[
+  {
+    "assets": [
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.6.0/latest.json",
+        "name": "latest.json",
+        "size": 565
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.6.0/rapp-0.6.0-macos-arm64.zip",
+        "name": "rapp-0.6.0-macos-arm64.zip",
+        "size": 15265568
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.6.0/rapp-0.6.0.pkg",
+        "name": "rapp-0.6.0.pkg",
+        "size": 15250870
+      }
+    ],
+    "draft": false,
+    "html_url": "https://github.com/wizlijun/rapp/releases/tag/v0.6.0",
+    "prerelease": false,
+    "published_at": "2026-11-14T01:01:19Z",
+    "tag_name": "v0.6.0"
+  },
+  {
+    "assets": [
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.5.5/latest.json",
+        "name": "latest.json",
+        "size": 499
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.5.5/rapp-0.5.5-macos-arm64.zip",
+        "name": "rapp-0.5.5-macos-arm64.zip",
+        "size": 14343260
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.5.5/rapp-0.5.5.pkg",
+        "name": "rapp-0.5.5.pkg",
+        "size": 14328774
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.5.5/rapp-relay-x86_64-linux",
+        "name": "rapp-relay-x86_64-linux",
+        "size": 4709760
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.5.5/rapp-relay.service",
+        "name": "rapp-relay.service",
+        "size": 726
+      }
+    ],
+    "draft": false,
+    "html_url": "https://github.com/wizlijun/rapp/releases/tag/v0.5.5",
+    "prerelease": false,
+    "published_at": "2026-11-13T17:33:06Z",
+    "tag_name": "v0.5.5"
+  },
+  {
+    "assets": [
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.5.3/latest.json",
+        "name": "latest.json",
+        "size": 336
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.5.3/rapp-0.5.3-macos-arm64.zip",
+        "name": "rapp-0.5.3-macos-arm64.zip",
+        "size": 14266650
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.5.3/rapp-0.5.3.pkg",
+        "name": "rapp-0.5.3.pkg",
+        "size": 14252181
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.5.3/rapp-relay-x86_64-linux",
+        "name": "rapp-relay-x86_64-linux",
+        "size": 4709792
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.5.3/rapp-relay.service",
+        "name": "rapp-relay.service",
+        "size": 726
+      }
+    ],
+    "draft": false,
+    "html_url": "https://github.com/wizlijun/rapp/releases/tag/v0.5.3",
+    "prerelease": false,
+    "published_at": "2026-11-13T12:39:40Z",
+    "tag_name": "v0.5.3"
+  },
+  {
+    "assets": [
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.5.2/latest.json",
+        "name": "latest.json",
+        "size": 469
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.5.2/rapp-0.5.2-macos-arm64.zip",
+        "name": "rapp-0.5.2-macos-arm64.zip",
+        "size": 14257492
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.5.2/rapp-0.5.2-omarchy-x86_64-SHA256SUMS",
+        "name": "rapp-0.5.2-omarchy-x86_64-SHA256SUMS",
+        "size": 205
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.5.2/rapp-0.5.2-omarchy-x86_64.tar.gz",
+        "name": "rapp-0.5.2-omarchy-x86_64.tar.gz",
+        "size": 15922367
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.5.2/rapp-0.5.2.pkg",
+        "name": "rapp-0.5.2.pkg",
+        "size": 14242108
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.5.2/rapp-omarchy-0.5.2-1-x86_64.pkg.tar.zst",
+        "name": "rapp-omarchy-0.5.2-1-x86_64.pkg.tar.zst",
+        "size": 15590194
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.5.2/rapp-relay-x86_64-linux",
+        "name": "rapp-relay-x86_64-linux",
+        "size": 4709160
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.5.2/rapp-relay.service",
+        "name": "rapp-relay.service",
+        "size": 726
+      }
+    ],
+    "draft": false,
+    "html_url": "https://github.com/wizlijun/rapp/releases/tag/v0.5.2",
+    "prerelease": false,
+    "published_at": "2026-11-13T11:18:20Z",
+    "tag_name": "v0.5.2"
+  },
+  {
+    "assets": [
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.5.1/rapp-0.5.1-omarchy-x86_64-SHA256SUMS",
+        "name": "rapp-0.5.1-omarchy-x86_64-SHA256SUMS",
+        "size": 205
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.5.1/rapp-0.5.1-omarchy-x86_64.tar.gz",
+        "name": "rapp-0.5.1-omarchy-x86_64.tar.gz",
+        "size": 15569428
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.5.1/rapp-0.5.1.pkg",
+        "name": "rapp-0.5.1.pkg",
+        "size": 14089705
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.5.1/rapp-omarchy-0.5.1-1-x86_64.pkg.tar.zst",
+        "name": "rapp-omarchy-0.5.1-1-x86_64.pkg.tar.zst",
+        "size": 15236198
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.5.1/rapp-relay-x86_64-linux",
+        "name": "rapp-relay-x86_64-linux",
+        "size": 4705400
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.5.1/rapp-relay.service",
+        "name": "rapp-relay.service",
+        "size": 726
+      }
+    ],
+    "draft": false,
+    "html_url": "https://github.com/wizlijun/rapp/releases/tag/v0.5.1",
+    "prerelease": false,
+    "published_at": "2026-11-13T06:06:26Z",
+    "tag_name": "v0.5.1"
+  },
+  {
+    "assets": [
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.5.0/rapp-0.5.0-omarchy-x86_64-SHA256SUMS",
+        "name": "rapp-0.5.0-omarchy-x86_64-SHA256SUMS",
+        "size": 205
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.5.0/rapp-0.5.0-omarchy-x86_64.tar.gz",
+        "name": "rapp-0.5.0-omarchy-x86_64.tar.gz",
+        "size": 15478462
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.5.0/rapp-0.5.0.pkg",
+        "name": "rapp-0.5.0.pkg",
+        "size": 14020765
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.5.0/rapp-omarchy-0.5.0-1-x86_64.pkg.tar.zst",
+        "name": "rapp-omarchy-0.5.0-1-x86_64.pkg.tar.zst",
+        "size": 15157420
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.5.0/rapp-relay-x86_64-linux",
+        "name": "rapp-relay-x86_64-linux",
+        "size": 4703552
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.5.0/rapp-relay.service",
+        "name": "rapp-relay.service",
+        "size": 726
+      }
+    ],
+    "draft": false,
+    "html_url": "https://github.com/wizlijun/rapp/releases/tag/v0.5.0",
+    "prerelease": false,
+    "published_at": "2026-11-12T16:34:45Z",
+    "tag_name": "v0.5.0"
+  },
+  {
+    "assets": [
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.4.1/rapp-0.4.1-omarchy-x86_64-SHA256SUMS",
+        "name": "rapp-0.4.1-omarchy-x86_64-SHA256SUMS",
+        "size": 205
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.4.1/rapp-0.4.1-omarchy-x86_64.tar.gz",
+        "name": "rapp-0.4.1-omarchy-x86_64.tar.gz",
+        "size": 14984628
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.4.1/rapp-0.4.1.pkg",
+        "name": "rapp-0.4.1.pkg",
+        "size": 13539329
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.4.1/rapp-omarchy-0.4.1-1-x86_64.pkg.tar.zst",
+        "name": "rapp-omarchy-0.4.1-1-x86_64.pkg.tar.zst",
+        "size": 14747478
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.4.1/rapp-relay-x86_64-linux",
+        "name": "rapp-relay-x86_64-linux",
+        "size": 4699904
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.4.1/rapp-relay.service",
+        "name": "rapp-relay.service",
+        "size": 726
+      }
+    ],
+    "draft": false,
+    "html_url": "https://github.com/wizlijun/rapp/releases/tag/v0.4.1",
+    "prerelease": false,
+    "published_at": "2026-11-12T09:55:48Z",
+    "tag_name": "v0.4.1"
+  },
+  {
+    "assets": [
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.4.0/rapp-0.4.0-omarchy-x86_64-SHA256SUMS",
+        "name": "rapp-0.4.0-omarchy-x86_64-SHA256SUMS",
+        "size": 205
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.4.0/rapp-0.4.0-omarchy-x86_64.tar.gz",
+        "name": "rapp-0.4.0-omarchy-x86_64.tar.gz",
+        "size": 14898671
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.4.0/rapp-0.4.0.pkg",
+        "name": "rapp-0.4.0.pkg",
+        "size": 13456703
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.4.0/rapp-omarchy-0.4.0-1-x86_64.pkg.tar.zst",
+        "name": "rapp-omarchy-0.4.0-1-x86_64.pkg.tar.zst",
+        "size": 14681202
+      }
+    ],
+    "draft": false,
+    "html_url": "https://github.com/wizlijun/rapp/releases/tag/v0.4.0",
+    "prerelease": false,
+    "published_at": "2026-11-12T08:00:22Z",
+    "tag_name": "v0.4.0"
+  },
+  {
+    "assets": [
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.3.0/rapp-0.3.0.pkg",
+        "name": "rapp-0.3.0.pkg",
+        "size": 12791354
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.3.0/rapp-relay-x86_64-linux",
+        "name": "rapp-relay-x86_64-linux",
+        "size": 4690168
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.3.0/rapp-relay.service",
+        "name": "rapp-relay.service",
+        "size": 726
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.3.0/rapp.dmg",
+        "name": "rapp.dmg",
+        "size": 14144581
+      }
+    ],
+    "draft": false,
+    "html_url": "https://github.com/wizlijun/rapp/releases/tag/v0.3.0",
+    "prerelease": false,
+    "published_at": "2026-11-12T03:35:03Z",
+    "tag_name": "v0.3.0"
+  }
+]
