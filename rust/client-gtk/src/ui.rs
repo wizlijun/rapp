@@ -162,15 +162,18 @@ fn connect(
                         region,
                         width,
                         height,
-                        full,
+                        flags,
+                        dx,
+                        dy,
                         data,
                     } => {
                         if !ready {
                             bail!("frame before Ready");
                         }
                         let received = Instant::now();
-                        let pixels = decoder.decode(mode, width, height, full, &data)?;
-                        events.send(Event::Image(pixels, width, height, region))?;
+                        if let Some(pixels) = decoder.decode(mode, width, height, flags, dx, dy, &data)? {
+                            events.send(Event::Image(pixels, width, height, region))?;
+                        }
                         let ms = u16::try_from(received.elapsed().as_millis()).unwrap_or(u16::MAX);
                         // Never drop an ack: the host pacer matches them FIFO, so a lost one desyncs it for
                         // good. Blocking here is back-pressure; it fails only when the writer has ended.

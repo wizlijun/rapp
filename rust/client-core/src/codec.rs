@@ -3,12 +3,23 @@ use crate::protocol::Reader;
 use anyhow::{bail, ensure, Result};
 use flate2::{Decompress, FlushDecompress, Status};
 
+pub const FULL: u8 = 1;
+pub const START: u8 = 2;
+pub const END: u8 = 4;
+pub const COPIES: u8 = 8;
+const KIND_COPY: u8 = 5;
+
+/// Mirrors the Swift `FrameDecoder` state machine; see Sources/RappCore/TileCodec.swift.
 pub struct Decoder {
     z: Decompress,
     pub width: usize,
     pub height: usize,
     mode: u8,
     samples: Vec<u16>,
+    open: bool,
+    hold: bool,
+    shown: bool,
+    reference: Option<Vec<u16>>,
 }
 impl Default for Decoder {
     fn default() -> Self {
@@ -18,57 +29,168 @@ impl Default for Decoder {
             height: 0,
             mode: 0,
             samples: Vec::new(),
+            open: false,
+            hold: false,
+            shown: false,
+            reference: None,
         }
     }
 }
+/// new(x, y) = old(x + dx, y + dy) in a w x h canvas; anything outside the old one is 0.
+fn moved_canvas(
+    src: &[u16],
+    width: usize,
+    height: usize,
+    w: usize,
+    h: usize,
+    dx: i32,
+    dy: i32,
+) -> Vec<u16> {
+    let mut moved = vec![0; w * h];
+    let (dx, dy) = (dx as i64, dy as i64);
+    let x0 = 0.max(-dx);
+    let x1 = (w as i64).min(width as i64 - dx);
+    let y0 = 0.max(-dy);
+    let y1 = (h as i64).min(height as i64 - dy);
+    if x1 <= x0 || y1 <= y0 {
+        return moved;
+    }
+    let n = (x1 - x0) as usize;
+    for y in y0..y1 {
+        let from = ((y + dy) as usize) * width + (x0 + dx) as usize;
+        let to = y as usize * w + x0 as usize;
+        moved[to..to + n].copy_from_slice(&src[from..from + n]);
+    }
+    moved
+}
 impl Decoder {
+    /// `None`: the picture is not to be shown yet (nothing was expanded).
+    #[allow(clippy::too_many_arguments)]
     pub fn decode(
         &mut self,
         mode: u8,
         w: usize,
         h: usize,
-        full: bool,
+        flags: u8,
+        dx: i32,
+        dy: i32,
         compressed: &[u8],
-    ) -> Result<Vec<u8>> {
+    ) -> Result<Option<Vec<u8>>> {
         let mut pixels = Vec::new();
-        self.decode_into(mode, w, h, full, compressed, &mut pixels)?;
-        Ok(pixels)
+        Ok(self
+            .decode_into(mode, w, h, flags, dx, dy, compressed, &mut pixels)?
+            .then_some(pixels))
     }
-    /// Reuse the expanded pixel allocation between frames (headless renderer).
+    /// Decodes one slice; true when `pixels` now holds the canvas to show. After an error
+    /// the canvas is emptied and only a full frame resumes decoding.
     #[allow(clippy::too_many_arguments)]
     pub fn decode_into(
         &mut self,
         mode: u8,
         w: usize,
         h: usize,
-        full: bool,
+        flags: u8,
+        dx: i32,
+        dy: i32,
         compressed: &[u8],
         pixels: &mut Vec<u8>,
-    ) -> Result<()> {
-        ensure!(
-            mode <= 4 && w > 0 && h > 0 && w <= 65535 && h <= 65535 && w * h <= 8192 * 8192,
-            "invalid frame size/mode"
-        );
+    ) -> Result<bool> {
+        match self.decode_slice(mode, w, h, flags, dx, dy, compressed) {
+            Ok(true) => {
+                pixels.resize(self.samples.len() * 4, 0);
+                for (pixel, sample) in pixels.as_chunks_mut::<4>().0.iter_mut().zip(&self.samples) {
+                    pixel.copy_from_slice(&bgra(self.mode, *sample));
+                }
+                Ok(true)
+            }
+            Ok(false) => Ok(false),
+            Err(e) => {
+                self.open = false;
+                self.hold = false;
+                self.reference = None;
+                self.width = 0;
+                self.height = 0;
+                self.samples = Vec::new();
+                Err(e)
+            }
+        }
+    }
+    /// The canvas as the Swift `FrameDecoder.samples`: 1 or 2 bytes per sample, little-endian.
+    pub fn samples_le(&self) -> Vec<u8> {
+        if self.mode == 2 || self.mode == 4 {
+            self.samples.iter().flat_map(|s| s.to_le_bytes()).collect()
+        } else {
+            self.samples.iter().map(|s| *s as u8).collect()
+        }
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn decode_slice(
+        &mut self,
+        mode: u8,
+        w: usize,
+        h: usize,
+        flags: u8,
+        dx: i32,
+        dy: i32,
+        compressed: &[u8],
+    ) -> Result<bool> {
+        ensure!(flags & 0xF0 == 0, "unknown frame flags");
+        ensure!(flags & FULL == 0 || flags & START != 0, "full frame without start");
+        ensure!(flags & COPIES == 0 || flags & START != 0, "copies without start");
+        ensure!(mode <= 4, "invalid frame size/mode");
+        if flags & START != 0 {
+            ensure!(
+                w > 0 && h > 0 && w <= 65535 && h <= 65535 && w * h <= 8192 * 8192,
+                "invalid frame size/mode"
+            );
+            ensure!(w.div_ceil(64) * h.div_ceil(64) <= 65535, "too many tiles");
+            if flags & FULL != 0 {
+                self.z.reset(true);
+                self.mode = mode;
+                self.width = w;
+                self.height = h;
+                self.samples = vec![0; w * h];
+                self.hold = self.shown;
+            } else {
+                ensure!(!self.open, "frame started while another is open");
+                ensure!(self.width > 0, "update frame before any full frame");
+                ensure!(mode == self.mode, "update frame mode does not match canvas");
+                self.hold = w != self.width || h != self.height || dx != 0 || dy != 0;
+                if self.hold {
+                    self.samples =
+                        moved_canvas(&self.samples, self.width, self.height, w, h, dx, dy);
+                    self.width = w;
+                    self.height = h;
+                }
+            }
+            self.open = true;
+            self.reference = (flags & COPIES != 0).then(|| self.samples.clone());
+        } else {
+            ensure!(self.open, "slice without an open frame");
+            ensure!(
+                w == self.width && h == self.height,
+                "update frame size does not match canvas"
+            );
+            ensure!(mode == self.mode, "update frame mode does not match canvas");
+        }
+        let display = !self.hold || flags & END != 0;
+        if flags & END != 0 {
+            self.open = false;
+            self.shown = true;
+        }
+        let result = self.decode_tiles(compressed);
+        if flags & END != 0 {
+            self.reference = None;
+        }
+        result?;
+        Ok(display)
+    }
+    fn decode_tiles(&mut self, compressed: &[u8]) -> Result<()> {
+        let (w, h, mode) = (self.width, self.height, self.mode);
         let cols = w.div_ceil(64);
         let rows = h.div_ceil(64);
         let tiles = cols * rows;
-        ensure!(tiles <= 65535, "too many tiles");
         let bps = if mode == 2 || mode == 4 { 2 } else { 1 };
-        if full {
-            self.z.reset(true);
-            self.width = w;
-            self.height = h;
-            self.mode = mode;
-            self.samples = vec![0; w * h];
-        } else {
-            ensure!(
-                self.width == w
-                    && self.height == h
-                    && self.mode == mode
-                    && !self.samples.is_empty(),
-                "delta without matching full frame"
-            );
-        }
         // Every frame is terminated by Z_SYNC_FLUSH, not an independent zlib stream.
         ensure!(
             compressed.ends_with(&[0, 0, 255, 255]),
@@ -101,8 +223,6 @@ impl Decoder {
             }
             ensure!(used > 0 || n > 0, "invalid compressed data");
         }
-        // A full frame may be only the first slice of the picture (the rest arrive as later
-        // non-full slices); the tiles it lacks stay zero, as in the Swift FrameDecoder.
         let mut r = Reader::new(&body);
         let count = r.u16()? as usize;
         ensure!(
@@ -163,14 +283,23 @@ impl Decoder {
                         }
                     }
                 }
+                KIND_COPY => {
+                    let sx = r.u16()? as usize;
+                    let sy = r.u16()? as usize;
+                    let Some(reference) = &self.reference else {
+                        bail!("copy tile without copies flag");
+                    };
+                    ensure!(sx + tw <= w && sy + th <= h, "copy source outside canvas");
+                    for row in 0..th {
+                        let src = (sy + row) * w + sx;
+                        let dst = (y + row) * w + x;
+                        self.samples[dst..dst + tw].copy_from_slice(&reference[src..src + tw]);
+                    }
+                }
                 _ => bail!("unknown tile kind {kind}"),
             }
         }
         r.end()?;
-        pixels.resize(self.samples.len() * 4, 0);
-        for (pixel, sample) in pixels.as_chunks_mut::<4>().0.iter_mut().zip(&self.samples) {
-            pixel.copy_from_slice(&bgra(mode, *sample));
-        }
         Ok(())
     }
     #[allow(clippy::too_many_arguments)]

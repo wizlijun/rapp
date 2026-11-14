@@ -49,7 +49,7 @@ for binary in sys.argv[1:]:
         for i in range(FRAMES):
             credit.acquire()
             payload = z.compress(body if i == 0 else b'\0\0')+z.flush(zlib.Z_SYNC_FLUSH)
-            peer.sendall(packet(4, struct.pack('<BffffHHB', 2, 0., 0., float(WIDTH), float(HEIGHT), WIDTH, HEIGHT, i == 0)+payload))
+            peer.sendall(packet(4, struct.pack('<BffffHHB', 2, 0., 0., float(WIDTH), float(HEIGHT), WIDTH, HEIGHT, 0x07 if i == 0 else 0x06)+(b'' if i == 0 else struct.pack('<ii', 0, 0))+payload))
     start = time.monotonic()
     t = threading.Thread(target=feed)
     t.start()

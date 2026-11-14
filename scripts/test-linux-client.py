@@ -90,7 +90,7 @@ class Session:
         sample_format="<HBH" if mode in (2,4) else "<HBB"
         body = struct.pack("<H", 20) + b"".join(struct.pack(sample_format, i, 0, color) for i in range(20))
         compressed = z.compress(body) + z.flush(zlib.Z_SYNC_FLUSH)
-        send(self.s, 4, struct.pack("<BffffHHB", mode, 100., 100., 320., 240., 320, 240, int(full)) + compressed)
+        send(self.s, 4, struct.pack("<BffffHHB", mode, 100., 100., 320., 240., 320, 240, 0x07 if full else 0x06) + (b"" if full else struct.pack("<ii", 0, 0)) + compressed)
 
     def finish(self, expected):
         event = self.event("exit")
@@ -136,7 +136,7 @@ def eof(s):
 
 def malformed(s):
     s.ready()
-    send(s.s, 4, struct.pack("<BffffHHB", 2, 0., 0., 10., 10., 10, 10, 1) + b"invalid")
+    send(s.s, 4, struct.pack("<BffffHHB", 2, 0., 0., 10., 10., 10, 10, 0x07) + b"invalid")
     assert "zlib" in s.finish(1)["reason"]
 
 def mismatch(s):

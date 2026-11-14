@@ -229,10 +229,12 @@ fn read_loop(
                 region,
                 width,
                 height,
-                full,
+                flags,
+                dx,
+                dy,
                 data,
             } => {
-                decoder.decode_into(mode, width, height, full, &data, &mut pixels)?;
+                let show = decoder.decode_into(mode, width, height, flags, dx, dy, &data, &mut pixels)?;
                 let mut frame = Vec::with_capacity(24);
                 frame.extend((width as u32).to_le_bytes());
                 frame.extend((height as u32).to_le_bytes());
@@ -241,8 +243,10 @@ fn read_loop(
                 }
                 // Decoding continues while stdout is slow. Only expanded, complete
                 // canvases may be replaced; compressed deltas must all be applied.
-                out.frame(frame.try_into().unwrap(), &mut pixels)?;
-                frames.fetch_add(1, Ordering::Relaxed);
+                if show {
+                    out.frame(frame.try_into().unwrap(), &mut pixels)?;
+                    frames.fetch_add(1, Ordering::Relaxed);
+                }
                 let ms = u16::try_from(received.elapsed().as_millis()).unwrap_or(u16::MAX);
                 writer.lock().unwrap().write_all(&p::frame_ack(ms))?;
             }
@@ -402,7 +406,12 @@ mod tests {
         }
         b.extend(8u16.to_le_bytes());
         b.extend(8u16.to_le_bytes());
-        b.push(full as u8);
+        if full {
+            b.push(0x07);
+        } else {
+            b.push(0x06);
+            b.extend([0u8; 8]);
+        }
         b.extend(data);
         p::packet(4, b)
     }

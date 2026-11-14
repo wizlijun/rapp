@@ -37,7 +37,9 @@ pub enum Incoming {
         region: Rect,
         width: usize,
         height: usize,
-        full: bool,
+        flags: u8,
+        dx: i32,
+        dy: i32,
         data: Vec<u8>,
     },
     Windows(Vec<Window>),
@@ -313,15 +315,24 @@ pub fn decode(kind: u8, p: &[u8]) -> Result<Incoming> {
             let region = r.rect()?;
             let width = r.u16()? as usize;
             let height = r.u16()? as usize;
-            let full = r.u8()?;
-            ensure!(full <= 1, "invalid full-frame flag");
+            let flags = r.u8()?;
+            ensure!(flags & 0xF0 == 0, "unknown frame flags");
+            ensure!(flags & 1 == 0 || flags & 2 != 0, "full frame without start");
+            ensure!(flags & 8 == 0 || flags & 2 != 0, "copies without start");
+            let (mut dx, mut dy) = (0, 0);
+            if flags & 2 != 0 && flags & 1 == 0 {
+                dx = r.u32()? as i32;
+                dy = r.u32()? as i32;
+            }
             let data = r.take(p.len() - r.pos)?.to_vec();
             Incoming::Frame {
                 mode,
                 region,
                 width,
                 height,
-                full: full == 1,
+                flags,
+                dx,
+                dy,
                 data,
             }
         }

@@ -59,34 +59,37 @@ fn full_delta_dictionary_and_mode_reset() {
     let mut z = z();
     let full = compress(&mut z, &[1, 0, 0, 0, 0, 0, 248]);
     assert_eq!(
-        d.decode(2, 3, 2, true, &full).unwrap(),
+        d.decode(2, 3, 2, 7, 0, 0, &full).unwrap().unwrap(),
         [0, 0, 255, 255].repeat(6)
     );
     let delta = compress(&mut z, &[1, 0, 0, 0, 0, 224, 7]);
     assert_eq!(
-        d.decode(2, 3, 2, false, &delta).unwrap(),
+        d.decode(2, 3, 2, 6, 0, 0, &delta).unwrap().unwrap(),
         [0, 255, 0, 255].repeat(6)
     );
     let gray = compress(&mut self::z(), &[1, 0, 0, 0, 0, 15]);
-    assert_eq!(d.decode(3, 1, 1, true, &gray).unwrap(), [255; 4]);
+    assert_eq!(d.decode(3, 1, 1, 7, 0, 0, &gray).unwrap().unwrap(), [255; 4]);
 }
 #[test]
 fn full_frame_sent_as_slices_equals_the_unsliced_frame() {
     // 64 x 128 gray4 = two tiles: solid 1, solid 2.
     let whole = Decoder::default()
-        .decode(0, 64, 128, true, &compress(&mut z(), &[2, 0, 0, 0, 0, 1, 1, 0, 0, 2]))
+        .decode(0, 64, 128, 7, 0, 0, &compress(&mut z(), &[2, 0, 0, 0, 0, 1, 1, 0, 0, 2]))
+        .unwrap()
         .unwrap();
     let mut d = Decoder::default();
     let mut z = z();
     // First slice: full flag, top tile row only; the missing tile is zero until the next slice.
     let first = d
-        .decode(0, 64, 128, true, &compress(&mut z, &[1, 0, 0, 0, 0, 1]))
+        .decode(0, 64, 128, 3, 0, 0, &compress(&mut z, &[1, 0, 0, 0, 0, 1]))
+        .unwrap()
         .unwrap();
     assert_eq!(&first[..64 * 64 * 4], &whole[..64 * 64 * 4]);
     assert_eq!(&first[64 * 64 * 4..], &bgra(0, 0).repeat(64 * 64)[..]);
     // Second slice: a delta carrying the rest, on the same zlib stream.
     let second = d
-        .decode(0, 64, 128, false, &compress(&mut z, &[1, 0, 1, 0, 0, 2]))
+        .decode(0, 64, 128, 4, 0, 0, &compress(&mut z, &[1, 0, 1, 0, 0, 2]))
+        .unwrap()
         .unwrap();
     assert_eq!(second, whole);
 }
@@ -95,7 +98,7 @@ fn full_frame_with_too_many_tiles_is_rejected() {
     // One tile in the grid, a body claiming two.
     let body = [2, 0, 0, 0, 0, 1, 1, 0, 0, 2];
     assert!(Decoder::default()
-        .decode(0, 64, 64, true, &compress(&mut z(), &body))
+        .decode(0, 64, 64, 7, 0, 0, &compress(&mut z(), &body))
         .is_err());
 }
 #[test]
@@ -108,7 +111,8 @@ fn palette_bits_and_row_padding() {
             _ => vec![0x01, 0, 0x10, 0x10],
         });
         let image = Decoder::default()
-            .decode(0, 3, 2, true, &compress(&mut z(), &body))
+            .decode(0, 3, 2, 7, 0, 0, &compress(&mut z(), &body))
+            .unwrap()
             .unwrap();
         assert_eq!(
             image,
@@ -128,7 +132,8 @@ fn palette_bits_and_row_padding() {
 fn raw_and_edge_tiles() {
     let body = [2, 0, 0, 0, 0, 1, 1, 0, 255, 15];
     let image = Decoder::default()
-        .decode(0, 65, 1, true, &compress(&mut z(), &body))
+        .decode(0, 65, 1, 7, 0, 0, &compress(&mut z(), &body))
+        .unwrap()
         .unwrap();
     assert_eq!(&image[..256], bgra(0, 1).repeat(64));
     assert_eq!(&image[256..], bgra(0, 15));
@@ -138,7 +143,8 @@ fn duo_edge_subblocks() {
     // 17x1: first 16-pixel sub-block is alternating, last one is solid.
     let body = [1, 0, 0, 0, 3, 2, 0, 15, 0x55, 0x55, 1, 7];
     let image = Decoder::default()
-        .decode(3, 17, 1, true, &compress(&mut z(), &body))
+        .decode(3, 17, 1, 7, 0, 0, &compress(&mut z(), &body))
+        .unwrap()
         .unwrap();
     for i in 0..16 {
         assert_eq!(
@@ -168,21 +174,21 @@ fn malformed_frames_are_rejected_without_panics() {
     ] {
         assert!(
             Decoder::default()
-                .decode(0, 1, 1, true, &compress(&mut z(), &body))
+                .decode(0, 1, 1, 7, 0, 0, &compress(&mut z(), &body))
                 .is_err(),
             "{body:?}"
         );
     }
     let c = compress(&mut z(), &[1, 0, 0, 0, 0, 1]);
-    assert!(Decoder::default().decode(0, 1, 1, false, &c).is_err());
+    assert!(Decoder::default().decode(0, 1, 1, 6, 0, 0, &c).is_err());
     assert!(Decoder::default()
-        .decode(0, 65535, 65535, true, &c)
+        .decode(0, 65535, 65535, 7, 0, 0, &c)
         .is_err());
     assert!(Decoder::default()
-        .decode(0, 1, 1, true, &c[..c.len() - 1])
+        .decode(0, 1, 1, 7, 0, 0, &c[..c.len() - 1])
         .is_err());
     assert!(Decoder::default()
-        .decode(0, 1, 1, true, &compress(&mut z(), &vec![0; 10000]))
+        .decode(0, 1, 1, 7, 0, 0, &compress(&mut z(), &vec![0; 10000]))
         .is_err());
 }
 fn window() -> Window {
@@ -377,13 +383,13 @@ fn expanded_buffer_is_reused_for_delta_frames() {
     let mut z = Compress::new(Compression::default(), true);
     let full = compress(&mut z, &[1, 0, 0, 0, 0, 0, 248]);
     decoder
-        .decode_into(2, 4, 4, true, &full, &mut pixels)
+        .decode_into(2, 4, 4, 7, 0, 0, &full, &mut pixels)
         .unwrap();
     let pointer = pixels.as_ptr();
     assert_eq!(&pixels[..4], &[0, 0, 255, 255]);
     let delta = compress(&mut z, &[1, 0, 0, 0, 0, 224, 7]);
     decoder
-        .decode_into(2, 4, 4, false, &delta, &mut pixels)
+        .decode_into(2, 4, 4, 6, 0, 0, &delta, &mut pixels)
         .unwrap();
     assert_eq!(pixels.as_ptr(), pointer);
     assert_eq!(&pixels[..4], &[0, 255, 0, 255]);
@@ -482,4 +488,185 @@ fn decodes_weak_strictly() {
 fn hello_announces_version_9() {
     let a = Address::parse("rapp://host/?token=x", None).unwrap();
     assert_eq!(a.hello(1.)[5], 9);
+}
+
+mod v9 {
+    use super::{compress, z};
+    use flate2::Compress;
+    use rapp_client_core::codec::{Decoder, COPIES, END, FULL, START};
+
+    fn raw(index: u16, samples: &[u8]) -> Vec<u8> {
+        [&index.to_le_bytes()[..], &[255], samples].concat()
+    }
+    fn solid(index: u16, v: u8) -> Vec<u8> {
+        [&index.to_le_bytes()[..], &[0, v]].concat()
+    }
+    fn copy(index: u16, sx: u16, sy: u16) -> Vec<u8> {
+        [&index.to_le_bytes()[..], &[5], &sx.to_le_bytes(), &sy.to_le_bytes()].concat()
+    }
+    fn body(tiles: &[Vec<u8>]) -> Vec<u8> {
+        [&(tiles.len() as u16).to_le_bytes()[..], &tiles.concat()].concat()
+    }
+    /// One gray4 slice of a w x h canvas.
+    fn slice(z: &mut Compress, d: &mut Decoder, w: usize, h: usize, flags: u8, mv: (i32, i32), tiles: &[Vec<u8>])
+        -> anyhow::Result<Option<Vec<u8>>> {
+        d.decode(0, w, h, flags, mv.0, mv.1, &compress(z, &body(tiles)))
+    }
+    /// A decoder holding a 128x64 canvas: tile 0 all 3, tile 1 all 5.
+    fn two_tiles() -> (Decoder, Compress) {
+        let (mut d, mut z) = (Decoder::default(), z());
+        slice(&mut z, &mut d, 128, 64, FULL | START | END, (0, 0), &[solid(0, 3), solid(1, 5)]).unwrap();
+        (d, z)
+    }
+
+    #[test]
+    fn move_header_shifts_canvas() {
+        let (mut d, mut z) = (Decoder::default(), z());
+        let old: Vec<u8> = (0..64).map(|i| i % 16).collect();
+        slice(&mut z, &mut d, 8, 8, FULL | START | END, (0, 0), &[raw(0, &old)]).unwrap();
+        assert_eq!(d.samples_le(), old);
+        slice(&mut z, &mut d, 10, 6, START | END, (2, -1), &[]).unwrap();
+        assert_eq!((d.width, d.height), (10, 6));
+        let got = d.samples_le();
+        for y in 0..6i32 {
+            for x in 0..10i32 {
+                let (ox, oy) = (x + 2, y - 1);
+                let want = if ox < 8 && (0..8).contains(&oy) { old[(oy * 8 + ox) as usize] } else { 0 };
+                assert_eq!(got[(y * 10 + x) as usize], want, "({x},{y})");
+            }
+        }
+    }
+
+    #[test]
+    fn copy_tile_reads_reference_not_partial_frame() {
+        let (mut d, mut z) = two_tiles();
+        slice(&mut z, &mut d, 128, 64, START | COPIES, (0, 0), &[solid(0, 9)]).unwrap();
+        slice(&mut z, &mut d, 128, 64, END, (0, 0), &[copy(1, 0, 0)]).unwrap();
+        let s = d.samples_le();
+        assert_eq!((s[63], s[64], s[127]), (9, 3, 3));
+    }
+
+    #[test]
+    fn bad_frames_are_rejected() {
+        type Case = fn(&mut Decoder, &mut Compress) -> anyhow::Result<Option<Vec<u8>>>;
+        let cases: [(&str, Case); 8] = [
+            ("copy without copies flag", |d, z| slice(z, d, 128, 64, START | END, (0, 0), &[copy(1, 0, 0)])),
+            ("copy source outside", |d, z| slice(z, d, 128, 64, START | END | COPIES, (0, 0), &[copy(1, 65, 0)])),
+            ("unknown flag bits", |d, z| slice(z, d, 128, 64, 0x10 | START | END, (0, 0), &[])),
+            ("full without start", |d, z| slice(z, d, 128, 64, FULL | END, (0, 0), &[])),
+            ("copies without start", |d, z| {
+                slice(z, d, 128, 64, START, (0, 0), &[]).unwrap();
+                slice(z, d, 128, 64, END | COPIES, (0, 0), &[])
+            }),
+            ("slice without open frame", |d, z| slice(z, d, 128, 64, END, (0, 0), &[])),
+            ("delta start while open", |d, z| {
+                slice(z, d, 128, 64, START, (0, 0), &[]).unwrap();
+                slice(z, d, 128, 64, START | END, (0, 0), &[])
+            }),
+            ("size change inside a frame", |d, z| {
+                slice(z, d, 128, 64, START, (0, 0), &[]).unwrap();
+                slice(z, d, 64, 64, END, (0, 0), &[])
+            }),
+        ];
+        for (name, case) in cases {
+            let (mut d, mut z) = two_tiles();
+            assert!(case(&mut d, &mut z).is_err(), "{name}");
+        }
+    }
+
+    #[test]
+    fn full_frame_may_interrupt_open_frame() {
+        let (mut d, mut z) = two_tiles();
+        slice(&mut z, &mut d, 128, 64, START, (0, 0), &[]).unwrap();
+        let mut z2 = super::z();
+        let shown = slice(&mut z2, &mut d, 128, 64, FULL | START | END, (0, 0), &[solid(0, 1), solid(1, 1)]);
+        assert!(shown.unwrap().is_some());
+        assert_eq!(d.samples_le()[0], 1);
+    }
+
+    #[test]
+    fn extreme_offsets_give_blank_canvas() {
+        let extremes = [(i32::MAX, 0), (i32::MIN, 0), (0, i32::MAX), (0, i32::MIN), (i32::MIN, i32::MIN), (i32::MAX, i32::MAX)];
+        for mv in extremes {
+            let (mut d, mut z) = two_tiles();
+            slice(&mut z, &mut d, 128, 64, START | END, mv, &[]).unwrap();
+            assert_eq!(d.samples_le(), vec![0; 128 * 64], "{mv:?}");
+        }
+        let (mut d, mut z) = two_tiles();
+        slice(&mut z, &mut d, 128, 64, START | END, (i32::MAX, 0), &[solid(1, 7)]).unwrap();
+        let s = d.samples_le();
+        assert_eq!((s[0], s[64]), (0, 7));
+    }
+
+    #[test]
+    fn error_leaves_decoder_needing_a_full_frame() {
+        let (mut d, mut z) = two_tiles();
+        assert!(d.decode(0, 128, 64, START | END, 1, 0, &[1, 2, 3]).is_err());
+        assert_eq!(d.width, 0);
+        assert!(slice(&mut z, &mut d, 128, 64, START | END, (0, 0), &[solid(0, 1)]).is_err());
+        let mut z2 = super::z();
+        slice(&mut z2, &mut d, 128, 64, FULL | START | END, (0, 0), &[solid(0, 2), solid(1, 4)]).unwrap();
+        let s = d.samples_le();
+        assert_eq!((s[0], s[64]), (2, 4));
+    }
+
+    #[test]
+    fn display_timing() {
+        let (mut d, mut z) = (Decoder::default(), z());
+        let show = |d: &mut Decoder, z: &mut Compress, w, flags, mv, tiles: &[Vec<u8>]| {
+            slice(z, d, w, 64, flags, mv, tiles).unwrap().is_some()
+        };
+        // The session's first full frame shows slice by slice.
+        assert!(show(&mut d, &mut z, 128, FULL | START, (0, 0), &[solid(0, 3)]));
+        assert!(show(&mut d, &mut z, 128, END, (0, 0), &[solid(1, 3)]));
+        // Later full frames wait for the last slice.
+        let mut z2 = self::z();
+        assert!(!show(&mut d, &mut z2, 128, FULL | START, (0, 0), &[solid(0, 4)]));
+        assert!(show(&mut d, &mut z2, 128, END, (0, 0), &[solid(1, 4)]));
+        // Plain deltas show every slice.
+        assert!(show(&mut d, &mut z2, 128, START, (0, 0), &[solid(0, 5)]));
+        assert!(show(&mut d, &mut z2, 128, END, (0, 0), &[solid(1, 5)]));
+        // Moves wait for the last slice.
+        assert!(!show(&mut d, &mut z2, 128, START, (0, 3), &[solid(0, 6)]));
+        assert!(show(&mut d, &mut z2, 128, END, (0, 0), &[solid(1, 6)]));
+        assert!(!show(&mut d, &mut z2, 64, START, (0, 0), &[solid(0, 7)]));
+        assert!(show(&mut d, &mut z2, 64, END, (0, 0), &[]));
+        assert!(show(&mut d, &mut z2, 64, START | END, (0, 0), &[solid(0, 8)]));
+    }
+}
+
+/// The stream written by Swift's `CrossFixtureTests`: slices, each frame end followed by the canvas Swift got.
+#[test]
+fn scroll_copy_fixture_matches_swift() {
+    let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/scroll-copy.bin")).unwrap();
+    let mut rest = &bytes[..];
+    fn take<'a>(rest: &mut &'a [u8], n: usize) -> &'a [u8] {
+        let (head, tail) = rest.split_at(n);
+        *rest = tail;
+        head
+    }
+    let int = |b: &[u8]| b.iter().rev().fold(0u64, |a, x| a << 8 | *x as u64);
+    let mut d = Decoder::default();
+    let mut canvases = 0;
+    while !rest.is_empty() {
+        match take(&mut rest, 1)[0] {
+            1 => {
+                let mode = take(&mut rest, 1)[0];
+                let (w, h) = (int(take(&mut rest, 2)) as usize, int(take(&mut rest, 2)) as usize);
+                let flags = take(&mut rest, 1)[0];
+                let (dx, dy) = (int(take(&mut rest, 4)) as u32 as i32, int(take(&mut rest, 4)) as u32 as i32);
+                let n = int(take(&mut rest, 4)) as usize;
+                d.decode(mode, w, h, flags, dx, dy, take(&mut rest, n)).unwrap();
+            }
+            2 => {
+                let (w, h) = (int(take(&mut rest, 2)) as usize, int(take(&mut rest, 2)) as usize);
+                let n = int(take(&mut rest, 4)) as usize;
+                assert_eq!((d.width, d.height), (w, h), "canvas #{canvases}");
+                assert!(d.samples_le() == take(&mut rest, n), "canvas #{canvases} differs");
+                canvases += 1;
+            }
+            tag => panic!("bad record tag {tag}"),
+        }
+    }
+    assert!(canvases > 45);
 }
