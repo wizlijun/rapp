@@ -259,7 +259,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
             ),
             if (failure != null) ...[
               gap,
-              RappButton.secondary(label: '重试', onPressed: _m.sending ? null : () => _retry(o)),
+              RappButton.secondary(label: '重试', onPressed: _m.sending || _m.taking ? null : () => _retry(o)),
               const SizedBox(width: 4),
               RappButton.secondary(label: '放回输入框', onPressed: () => _putBack(o)),
             ],

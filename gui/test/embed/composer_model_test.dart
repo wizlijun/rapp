@@ -1,9 +1,33 @@
+import 'dart:async';
+
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/composer_model.dart';
 import 'package:rapp/embed/session_port.dart';
 
 import '../fakes.dart';
+
+/// A take that waits until [gate] completes (an input method still composing).
+class _SlowTakeEditor extends FakeEditor {
+  Completer<void>? gate;
+
+  @override
+  Future<String> take() async {
+    final g = gate = Completer<void>();
+    await g.future;
+    return super.take();
+  }
+}
+
+class _CountingEditor extends FakeEditor {
+  int reads = 0;
+
+  @override
+  Future<String> read() {
+    reads++;
+    return super.read();
+  }
+}
 
 void main() {
   late ComposerModel m;
@@ -144,6 +168,55 @@ void main() {
     await m.submit();
     expect(m.retry(m.failed.single), isNull);
     expect(m.failed, hasLength(1));
+  });
+
+  test('retry while a take is pending is refused and the failed row stays (I1)', () async {
+    ed.value = 'x';
+    await m.submit();
+    m.done(0, null);
+    final slow = _SlowTakeEditor();
+    m.attach(slow);
+    slow.value = 'y';
+    final f = m.submit();
+    expect(m.taking, isTrue);
+    expect(m.retry(m.failed.single), isNull);
+    expect(m.failed.single.text, 'x');
+    expect(m.inFlight, isNull);
+    slow.gate!.complete();
+    final s = await f as SubmitPieces;
+    expect(s.pieces, [
+      {'text': 'y'},
+    ]);
+    expect(m.taking, isFalse);
+    expect(m.inFlight!.text, 'y');
+    expect(m.failed.single.text, 'x');
+  });
+
+  test('a take that completes after another round started sends nothing and keeps the text (I1)', () async {
+    final slow = _SlowTakeEditor();
+    m.attach(slow);
+    slow.value = 'y';
+    final f = m.submit();
+    m.setSending(true); // a round the runner started meanwhile
+    slow.gate!.complete();
+    expect(await f, isA<SubmitNothing>());
+    expect(slow.value, 'y');
+    expect(m.inFlight, isNull);
+    expect(m.taking, isFalse);
+  });
+
+  test('submit stops the pending idle copy', () {
+    fakeAsync((fa) {
+      final counting = _CountingEditor();
+      m.attach(counting);
+      counting.value = 'a';
+      m.editorChanged();
+      m.submit();
+      fa.flushMicrotasks();
+      fa.elapse(const Duration(seconds: 2));
+      fa.flushMicrotasks();
+      expect(counting.reads, 0);
+    });
   });
 
   test('collapse closes and keeps the text', () {

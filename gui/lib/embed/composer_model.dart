@@ -90,7 +90,15 @@ class ComposerModel extends ChangeNotifier {
   bool _copyPending = false;
   bool _disposed = false;
   bool _taking = false;
+
+  /// A send is waiting for the editor's text (an input method still composing).
+  bool get taking => _taking;
   DateTime? _lastSend;
+
+  void _setTaking(bool on) {
+    _taking = on;
+    if (!_disposed) notifyListeners();
+  }
 
   /// The editor takes over; it starts with [draft].
   void attach(ComposerEditor e) {
@@ -146,7 +154,8 @@ class ComposerModel extends ChangeNotifier {
   /// The user pressed send (or Enter): takes the blocks and the text out of the composer.
   Future<Submit> submit() async {
     if (sending || _taking) return SubmitNothing();
-    _taking = true;
+    _idleTimer?.cancel();
+    _setTaking(true);
     final String text;
     try {
       final e = _editor;
@@ -157,7 +166,12 @@ class ComposerModel extends ChangeNotifier {
       }
       draft = '';
     } finally {
-      _taking = false;
+      _setTaking(false);
+    }
+    if (sending || _inFlight != null) {
+      // Another round started while the take waited: the text goes back, nothing is sent twice.
+      if (text.isNotEmpty) insert(text);
+      return SubmitNothing();
     }
     final now = _clock();
     if (blocks.isEmpty && text.isEmpty) {
@@ -214,9 +228,10 @@ class ComposerModel extends ChangeNotifier {
     if (all && failure == null) onAllSent?.call();
   }
 
-  /// Sends what is left of [o] again: the pieces for the runner, or null while sending.
+  /// Sends what is left of [o] again: the pieces for the runner, or null while sending or while a
+  /// send waits for its take.
   List<Map<String, Object>>? retry(Outgoing o) {
-    if (sending || !_failed.remove(o)) return null;
+    if (sending || _taking || !_failed.remove(o)) return null;
     o.failure = null;
     _inFlight = o;
     sending = true;

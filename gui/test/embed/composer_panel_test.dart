@@ -11,6 +11,7 @@ import 'package:rapp/embed/picture.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
+import 'package:rapp/ui/controls.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/stage.dart';
@@ -238,6 +239,33 @@ void main() {
       ]);
       expect(find.text('boom'), findsNothing);
       expect(find.text('发送中'), findsOneWidget);
+    });
+
+    testWidgets('重试 is off while a send waits for the input method to commit (I1)', (tester) async {
+      await tester.pumpWidget(wrap(panel()));
+      await tester.pump();
+      await tester.enterText(fieldFinder, 'x');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      rs.apply(const ComposerStateEvent(1, done: ComposerDone(0, 'boom')));
+      await tester.pump();
+      RappButton retry() => tester.widget<RappButton>(find.widgetWithText(RappButton, '重试'));
+      expect(retry().onPressed, isNotNull);
+      field(tester).controller!.value = const TextEditingValue(
+          text: 'ni', selection: TextSelection.collapsed(offset: 2), composing: TextRange(start: 0, end: 2));
+      await tester.tap(find.byKey(const Key('composer-send')));
+      await tester.pump();
+      expect(rs.composer.taking, isTrue);
+      expect(retry().onPressed, isNull);
+      field(tester).controller!.value = const TextEditingValue(text: '你', selection: TextSelection.collapsed(offset: 1));
+      await tester.pump();
+      final sent = callsOf('composer_send');
+      expect(sent.length, 2);
+      expect(sent.last['pieces'], [
+        {'text': '你'},
+      ]);
+      expect(rs.composer.failed.single.text, 'x');
+      expect(retry().onPressed, isNull); // sending
     });
 
     testWidgets('tapping a block removes it; blocks sit above the text inside the box', (tester) async {
