@@ -101,6 +101,7 @@ class _AppProfilePageState extends State<AppProfilePage> {
       _draft.fps == null &&
       _draft.afterSend == null &&
       _draft.composer == null &&
+      _draft.recordInput == null &&
       _draft.input == null &&
       _draft.windows == null &&
       _draft.tested == null &&
@@ -266,6 +267,7 @@ class _AppProfilePageState extends State<AppProfilePage> {
     final d = _draft, b = _base;
     final afterSend = d.afterSend ?? b.afterSend;
     final composer = d.composer ?? b.composer;
+    final recordInput = d.recordInput ?? b.recordInput;
     final rules = _rules;
     return Scaffold(
       backgroundColor: t.bg,
@@ -337,6 +339,18 @@ class _AppProfilePageState extends State<AppProfilePage> {
           Row(children: [
             Text('显示「输入」', style: TextStyle(color: d.composer == null ? t.muted : t.text)),
             Switch(key: const Key('composer-switch'), value: composer, onChanged: (v) => _set(() => d.composer = v)),
+          ]),
+          Row(children: [
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('记下发给这个 app 的话', style: TextStyle(color: d.recordInput == null ? t.muted : t.text)),
+                Text('关掉后草稿只存在本机', style: TextStyle(color: t.muted, fontSize: 12)),
+              ]),
+            ),
+            Switch(
+                key: const Key('record-input-switch'),
+                value: recordInput,
+                onChanged: (v) => _set(() => d.recordInput = v)),
           ]),
           Row(children: [
             Expanded(

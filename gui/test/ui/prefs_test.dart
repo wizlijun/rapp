@@ -37,6 +37,14 @@ void main() {
     expect(File('${tmp.path}/gui.json').readAsStringSync(), contains('"auto_save_traffic":false'));
     expect(UiPrefs.load(tmp.path).autoSaveTraffic, isFalse);
   });
+  test('input_history: on by default and when bad, saved when off', () {
+    expect(UiPrefs().inputHistory, isTrue);
+    File('${tmp.path}/gui.json').writeAsStringSync('{"input_history":"x"}');
+    expect(UiPrefs.load(tmp.path).inputHistory, isTrue);
+    UiPrefs(inputHistory: false).save(tmp.path);
+    expect(File('${tmp.path}/gui.json').readAsStringSync(), contains('"input_history":false'));
+    expect(UiPrefs.load(tmp.path).inputHistory, isFalse);
+  });
   test('corrupt json gives defaults', () {
     File('${tmp.path}/gui.json').writeAsStringSync('{nope');
     final p = UiPrefs.load(tmp.path);

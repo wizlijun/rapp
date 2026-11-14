@@ -134,6 +134,9 @@ class RemoteSession extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// What is sent to this app goes into the input record (the app's own switch).
+  bool get recordsInput => profile.recordInput;
+
   /// The composer is on for the app and the current tab is not a `noComposer` one.
   bool get composerAllowed {
     if (!profile.composer) return false;

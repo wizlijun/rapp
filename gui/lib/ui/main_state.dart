@@ -1770,6 +1770,13 @@ class MainState extends ChangeNotifier {
     _save();
   }
 
+  /// 「记下写作面板发出去的话」: saved.
+  void setInputHistory(bool v) {
+    prefs.inputHistory = v;
+    _save();
+    notifyListeners();
+  }
+
   void _save() {
     try {
       final dir = data.prefsDir();

@@ -130,6 +130,7 @@ class AppProfile {
     this.fps,
     this.afterSend,
     this.composer,
+    this.recordInput,
     this.input,
     this.windows,
     this.tested,
@@ -142,6 +143,7 @@ class AppProfile {
   int? fps;
   AfterSend? afterSend;
   bool? composer;
+  bool? recordInput;
   InputPoint? input;
   List<WindowRule>? windows;
   bool? tested;
@@ -161,6 +163,7 @@ class AppProfile {
         fps: fps,
         afterSend: afterSend,
         composer: composer,
+        recordInput: recordInput,
         input: input,
         windows: windows == null ? null : [...windows!],
         tested: tested,
@@ -177,6 +180,7 @@ class AppProfile {
           },
         if (afterSend != null) 'afterSend': afterSendToJson(afterSend!),
         if (composer != null) 'composer': composer,
+        if (recordInput != null) 'recordInput': recordInput,
         if (input != null) 'input': input!.toJson(),
         if (windows != null) 'windows': [for (final w in windows!) w.toJson()],
         if (tested != null) 'tested': tested,
@@ -226,6 +230,7 @@ class AppProfile {
       fps: fps,
       afterSend: afterSendFromJson(j['afterSend']),
       composer: j['composer'] is bool ? j['composer'] as bool : null,
+      recordInput: j['recordInput'] is bool ? j['recordInput'] as bool : null,
       input: InputPoint.fromJson(j['input']),
       windows: windows,
       tested: j['tested'] is bool ? j['tested'] as bool : null,
@@ -256,6 +261,7 @@ class ResolvedProfile {
     this.stream = startChoice,
     this.afterSend = AfterSend.none,
     this.composer = true,
+    this.recordInput = true,
     this.input,
     this.windows = const [],
     this.tested = true,
@@ -267,6 +273,9 @@ class ResolvedProfile {
   final StreamChoice stream;
   final AfterSend afterSend;
   final bool composer;
+
+  /// Whether what is sent to this app goes into the input record.
+  final bool recordInput;
 
   /// The marked text box; null when none is marked.
   final InputPoint? input;
@@ -311,6 +320,7 @@ ResolvedProfile resolveProfile(String appId, {required List<AppProfile> mine, re
         pick((p) => p.fps) ?? startChoice.fps),
     afterSend: pick((p) => p.afterSend) ?? AfterSend.none,
     composer: pick((p) => p.composer) ?? true,
+    recordInput: pick((p) => p.recordInput) ?? true,
     input: pick((p) => p.input),
     windows: pick((p) => p.windows) ?? const [],
     tested: pick((p) => p.tested) ?? true,
