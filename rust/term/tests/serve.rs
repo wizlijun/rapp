@@ -16,6 +16,8 @@ use tokio::time::timeout;
 const BIN: &str = env!("CARGO_BIN_EXE_rapp-term");
 const TOKEN: &str = "test-token-1";
 const WAIT: Duration = Duration::from_secs(5);
+/// For a target that cannot connect: a poll plus ssh failing, which waits on DNS.
+const SSH_WAIT: Duration = Duration::from_secs(15);
 
 /// A running `rapp-term serve` on a private tmux server.
 struct Worker {
@@ -25,6 +27,17 @@ struct Worker {
     err: JoinHandle<String>,
     port: u16,
     dir: tempfile::TempDir,
+    ctl: CtlDir,
+}
+
+/// The worker's own ssh control directory, removed with it. `rapp-term` names it `/tmp/rapp-term-$USER`, so each
+/// worker is given a `USER` of its own rather than sharing the real one's.
+struct CtlDir(std::path::PathBuf);
+
+impl Drop for CtlDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
 }
 
 fn command(socket: &str, config: &Path) -> Command {
@@ -101,6 +114,9 @@ impl Worker {
         }
         let mut c = command(&s.socket, &path);
         c.env("RAPP_TOKEN", TOKEN);
+        let user = format!("test{}", dir.path().file_name().unwrap().to_str().unwrap());
+        c.env("USER", &user);
+        let ctl = CtlDir(Path::new("/tmp").join(format!("rapp-term-{user}")));
         let mut child = c.spawn().unwrap();
         let stdin = child.stdin.take();
         let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
@@ -118,9 +134,10 @@ impl Worker {
             let _ = stderr.read_to_string(&mut s).await;
             s
         });
-        let mut w = Worker { child, stdin, out, err, port: 0, dir };
+        let mut w = Worker { child, stdin, out, err, port: 0, dir, ctl };
         let first = w.event().await;
         assert_eq!(first["event"], "listening", "{first}");
+        assert!(w.ctl.0.is_dir(), "no ssh control directory {}", w.ctl.0.display());
         w.port = first["port"].as_u64().unwrap() as u16;
         assert!(w.port > 0);
         w
@@ -241,7 +258,7 @@ async fn a_target_that_cannot_connect_is_reported_and_local_is_still_listed() {
     let w = Worker::start(&s, Some(r#"{"targets":[{"name":"gone","target":"nohost.invalid"}]}"#)).await;
     let t = Instant::now();
     let v = w.ask(json!({"op": "list"})).await;
-    assert!(t.elapsed() < Duration::from_secs(15));
+    assert!(t.elapsed() < SSH_WAIT);
     assert_eq!(v.len(), 1, "{v:?}");
     let hosts = v[0]["hosts"].as_array().unwrap();
     assert_eq!((hosts.len(), &hosts[0]), (2, &json!({"host": null})), "{hosts:?}");
@@ -450,7 +467,7 @@ async fn a_target_added_while_watching_shows_up() {
     assert_eq!(c.next().await["hosts"], json!([{"host": null}]));
     std::fs::write(w.config(), r#"{"targets":[{"name":"gone","target":"nohost.invalid"}]}"#).unwrap();
     let failed = |h: &Value| h["host"] == "gone" && h["error"].as_str().is_some_and(|e| !e.is_empty());
-    let l = c.until_list(WAIT, |l| l["hosts"].as_array().unwrap().iter().any(failed)).await;
+    let l = c.until_list(SSH_WAIT, |l| l["hosts"].as_array().unwrap().iter().any(failed)).await;
     assert_eq!((&l["hosts"][0], &l["hosts"][1]["target"]), (&json!({"host": null}), &json!("nohost.invalid")));
     w.stop().await;
 }
