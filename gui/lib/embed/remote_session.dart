@@ -175,8 +175,17 @@ class RemoteSession extends ChangeNotifier {
   /// The user picked a stream choice by hand: A never changes it on its own (kept for the session's life).
   bool streamPinned = false;
 
-  /// A is in the weak-network tier.
+  /// A lowered the stream below the choice (any saving level).
   bool weak = false;
+
+  /// How far A lowered it: 0, 1 (frame rate) or 2 (the floor).
+  int saving = 0;
+
+  /// The last ping round trip over the whole path; null before one (or from a v8 A).
+  int? rttMs;
+
+  /// The whole path looks broken.
+  bool stalled = false;
 
   /// [c] is the new choice; [manual] when the user picked it in the stream menu.
   void setChoice(StreamChoice c, {bool manual = false}) {
@@ -231,6 +240,11 @@ class RemoteSession extends ChangeNotifier {
         }
       case WeakEvent():
         weak = e.on;
+        saving = e.on ? e.level : 0;
+      case RttEvent():
+        rttMs = e.ms;
+      case StalledEvent():
+        stalled = e.on;
       case TrafficEvent():
         bytesPerSecond = e.bytes;
         if (e.frames > 0) {
@@ -282,6 +296,10 @@ class RemoteSession extends ChangeNotifier {
   /// The link is gone: no transfer or send round is running any more.
   void linkDown() {
     transferStatus = null;
+    rttMs = null;
+    stalled = false;
+    weak = false;
+    saving = 0;
     composer.done(0, null);
     notifyListeners();
   }

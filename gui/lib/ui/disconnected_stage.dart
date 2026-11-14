@@ -19,6 +19,7 @@ class DisconnectedStage extends StatefulWidget {
     required this.connecting,
     this.onReconnect,
     this.retrying = false,
+    this.waiting,
     this.onStop,
     this.onEnd,
     this.sessionKey,
@@ -41,6 +42,10 @@ class DisconnectedStage extends StatefulWidget {
 
   /// It reconnects by itself: 「正在重连…」 and 「停止」 take the place of 「重连」.
   final bool retrying;
+
+  /// What the automatic retry waits for (`waitWord`): shown in place of [reason], without
+  /// 「正在重连…」.
+  final String? waiting;
 
   /// 「停止」: gives up the automatic tries.
   final VoidCallback? onStop;
@@ -118,8 +123,8 @@ class _DisconnectedStageState extends State<DisconnectedStage> {
                         ],
                       ),
                       const SizedBox(height: 12),
-                      Text(widget.reason, key: const Key('disconnect-reason'), style: TextStyle(color: t.text)),
-                      if (widget.retrying) ...[
+                      Text(widget.waiting ?? widget.reason, key: const Key('disconnect-reason'), style: TextStyle(color: t.text)),
+                      if (widget.retrying && widget.waiting == null) ...[
                         const SizedBox(height: 4),
                         Text('正在重连…', key: const Key('retrying-note'), style: TextStyle(color: t.text)),
                       ],

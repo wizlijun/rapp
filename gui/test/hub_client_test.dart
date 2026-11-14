@@ -67,6 +67,30 @@ void main() {
       await g;
     });
 
+    test('net: the level as pushed, none forgets it; askNet, watch and netSuspect send their commands', () async {
+      expect(hub.net, isNull);
+      t.emit({'event': 'net', 'level': 'ok', 'rtt_ms': 160, 'loss': 0.03});
+      await Future<void>.delayed(Duration.zero);
+      expect(hub.net, const NetStatus(NetLevel.ok, 160, 0.03));
+      t.emit({'event': 'net', 'level': 'down', 'loss': 1});
+      await Future<void>.delayed(Duration.zero);
+      expect(hub.net, const NetStatus(NetLevel.down, null, 1.0));
+      t.emit({'event': 'net', 'level': 'none'});
+      await Future<void>.delayed(Duration.zero);
+      expect(hub.net, isNull);
+      t.emit({'event': 'net', 'level': 'bogus'});
+      await Future<void>.delayed(Duration.zero);
+      expect(hub.net, isNull);
+      hub.askNet();
+      expect(t.sent.last, {'cmd': 'net'});
+      hub.watch('111', true);
+      expect(t.sent.last, {'cmd': 'watch', 'id': '111', 'on': true});
+      hub.watch('111', false);
+      expect(t.sent.last, {'cmd': 'watch', 'id': '111', 'on': false});
+      hub.netSuspect();
+      expect(t.sent.last, {'cmd': 'net_suspect'});
+    });
+
     test('presence is queued and drained', () async {
       final f = hub.apps('111');
       final req = t.sent.last['req'];

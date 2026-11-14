@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart';
 import '../embed/remote_session.dart';
 import '../embed/session_port.dart';
 import '../embed/stream_choice.dart';
+import '../embed/traffic_label.dart' show segments;
 import '../hub_client.dart';
 import '../permissions.dart';
 import '../embed/app_profile.dart';
@@ -17,6 +18,7 @@ import '../embed/composer_model.dart' show escKeyCode, returnKeyCode;
 import 'app_profile_store.dart';
 import 'lamp.dart';
 import 'lifecycle.dart';
+import 'net_marker.dart' show weakRttMs;
 import 'pin_files.dart';
 import 'prefs.dart';
 import 'projects.dart';
@@ -69,7 +71,9 @@ class MainState extends ChangeNotifier {
     resources.addListener(notifyListeners);
     _portSub = port?.events.listen(_onPortEvent);
     hub?.addListener(_onHub);
+    hub?.askNet();
     _lastError = hub?.lastError;
+    _netLevel = hub?.net?.level;
     final loaded = loadWorkspace(data.sharedDir);
     workspace = loaded.workspace;
     if (loaded.problem != null) hint = loaded.problem!;
@@ -345,6 +349,10 @@ class MainState extends ChangeNotifier {
   }
 
   // ---- off-stage frame rate (R6) ----
+  /// `set_stream`'s `pinned`: A keeps to the choice even on a poor network (automatic saving off,
+  /// spec 2026-11-14-rapp-network-status §6.1). A manual pick is the ceiling either way.
+  bool get _pinned => !prefs.autoSaveTraffic;
+
   /// The (mode, fps, density, pinned) last sent per started session, so nothing is sent twice.
   final Map<Object, (String, int, String, bool)> _sentFps = {};
 
@@ -363,10 +371,10 @@ class MainState extends ChangeNotifier {
       if (r == null || !_reachable(r)) continue; // a dead sid never reaches the runner (R12)
       final c = rs.choice;
       final fps = effectiveFps(c, onStage: onStage != null && identical(r, onStage), detached: rs.detached);
-      final now = (c.mode, fps, c.density, rs.streamPinned);
+      final now = (c.mode, fps, c.density, _pinned);
       if (now == last) continue;
       _sentFps[rs.sid] = now;
-      p.setStream(rs.sid, c.mode, fps, c.density, pinned: rs.streamPinned);
+      p.setStream(rs.sid, c.mode, fps, c.density, pinned: _pinned);
     }
   }
 
@@ -589,9 +597,21 @@ class MainState extends ChangeNotifier {
   }
 
   void _onHub() {
+    final back = <String>{};
     for (final p in hub!.takePresence()) {
+      if (p.online) back.add(p.id);
       if (probes[p.id]?.lamp == Lamp.connecting) continue;
       _setOnline(p.id, p.online, error: p.error);
+    }
+    if (!hub!.alive) _watching.clear();
+    final level = hub!.net?.level;
+    final netBack = _netLevel == NetLevel.down && level != NetLevel.down;
+    _netLevel = level;
+    if (embeds) {
+      for (final id in back) {
+        _peerBack(id);
+      }
+      if (netBack) _netBack();
     }
     // The labels read `hub.hostPaths`; this notify redraws them.
     final paths = hub!.takePaths();
@@ -706,6 +726,8 @@ class MainState extends ChangeNotifier {
       }
       return;
     }
+    // The runner saw nothing arrive for a while: the hub probes the relay now (§5.1).
+    if (e is StalledEvent && e.on && r.phase == Phase.live && hubUsable) hub!.netSuspect();
     if (e is ClosedEvent) {
       if (r.phase == Phase.disconnected) return; // ended by us already, or by nobody's business
       _waiting.remove(e.sid)?.timer.cancel();
@@ -829,8 +851,15 @@ class MainState extends ChangeNotifier {
     } else {
       return false;
     }
-    final wait = Duration(seconds: attempt == 0 ? 1 : math.min(1 << attempt, 15));
     _retryTimers.remove(r.key)?.cancel();
+    // An offline host: no timer, the hub watches for it (`presence online` reconnects). A relayed
+    // session while the link to the relay is down: no timer, the link coming back reconnects.
+    if (waitsForPeer(r) || _held(r)) {
+      r.retry = (attempt, DateTime.now());
+      _syncWatch(r.id);
+      return true;
+    }
+    final wait = Duration(seconds: attempt == 0 ? 1 : math.min(1 << attempt, 15));
     r.retry = (attempt, DateTime.now().add(wait));
     _retryTimers[r.key] = Timer(wait, () {
       _retryTimers.remove(r.key);
@@ -840,8 +869,13 @@ class MainState extends ChangeNotifier {
         notifyListeners();
         return;
       }
+      if (_held(r)) {
+        notifyListeners(); // the wait word changes; the link coming back reconnects
+        return;
+      }
       reconnect(r.key, auto: true);
     });
+    _syncWatch(r.id);
     return true;
   }
 
@@ -849,6 +883,90 @@ class MainState extends ChangeNotifier {
   void _stopRetry(SessionRecord r) {
     _retryTimers.remove(r.key)?.cancel();
     r.retry = null;
+    _syncWatch(r.id);
+  }
+
+  /// The level of the link to the relay last seen (`HubClient.net`), to see it come back.
+  NetLevel? _netLevel;
+
+  /// The link to the relay is down (the network marker's 断开).
+  bool get netDown => hub?.net?.level == NetLevel.down;
+
+  /// [r] goes (or went) through the relay: its path says so, or its failure was the relay's word.
+  bool relayed(SessionRecord r) {
+    if (r.path == 'relay') return true;
+    final w = disconnectWord(r.reason);
+    return w == '对方离线' || w == '中继连不上';
+  }
+
+  /// What [r]'s automatic retry waits for, for the disconnected stage (`waitWord`).
+  String? waitWordOf(SessionRecord r) => waitWord(r, relayed: relayed(r), net: hub?.net?.level);
+
+  /// [r] waits for its host to come online (an automatic retry after 对方离线).
+  bool waitsForPeer(SessionRecord r) => r.retry != null && disconnectWord(r.reason) == '对方离线';
+
+  /// [r]'s automatic retry waits for the link to the relay.
+  bool _held(SessionRecord r) => relayed(r) && netDown;
+
+  /// Hosts the hub was asked to watch (`{"cmd":"watch"}`).
+  final Set<String> _watching = {};
+
+  /// Tells the hub to watch host [id] while a record of it waits for it, and to stop after.
+  void _syncWatch(String id) {
+    final h = hub;
+    if (h == null || !h.alive) {
+      _watching.clear();
+      return;
+    }
+    final want = _records.values.any((r) => r.id == id && r.phase == Phase.disconnected && waitsForPeer(r));
+    if (want == _watching.contains(id)) return;
+    want ? _watching.add(id) : _watching.remove(id);
+    h.watch(id, want);
+  }
+
+  /// Host [id] came online: its records waiting for it reconnect, one every 200 ms. The hub's
+  /// watch ended with that answer.
+  void _peerBack(String id) {
+    _watching.remove(id);
+    _retryEach([
+      for (final r in _records.values)
+        if (r.id == id && r.phase == Phase.disconnected && waitsForPeer(r)) r,
+    ]);
+  }
+
+  /// The link to the relay is back: relayed records waiting on it reconnect, one every 200 ms.
+  /// Those waiting for an offline host keep waiting for it.
+  void _netBack() {
+    _retryEach([
+      for (final r in _records.values)
+        if (r.phase == Phase.disconnected && r.retry != null && relayed(r) && !waitsForPeer(r)) r,
+    ]);
+  }
+
+  /// Reconnects [rs] automatically, the first at once, each next one 200 ms later, so they do not
+  /// all ask the relay in the same instant.
+  void _retryEach(List<SessionRecord> rs) {
+    for (final (i, r) in rs.indexed) {
+      _retryTimers.remove(r.key)?.cancel();
+      _retryTimers[r.key] = Timer(Duration(milliseconds: 200 * i), () {
+        _retryTimers.remove(r.key);
+        if (_disposed || _records[r.key] != r || r.retry == null) return;
+        if (r.phase != Phase.disconnected || !hubUsable) return;
+        reconnect(r.key, auto: true);
+      });
+    }
+  }
+
+  /// A live relayed session of host [id] whose far segment (relay to the host) is weak.
+  bool peerWeak(String id) {
+    for (final r in _records.values) {
+      if (r.id != id || r.phase != Phase.live || r.path != 'relay') continue;
+      final rs = r.sid == null ? null : remote[r.sid];
+      if (rs == null) continue;
+      final seg = segments(path: r.path, wholeMs: rs.rttMs, net: hub?.net);
+      if (seg.peer != null && seg.peer! >= weakRttMs) return true;
+    }
+    return false;
   }
 
   /// 「停止」 on the disconnected stage.
@@ -1047,9 +1165,10 @@ class MainState extends ChangeNotifier {
       return;
     }
     r.retry = null;
-    // start carries no pin: a pinned session's first set_stream says so.
+    _syncWatch(r.id);
+    // start carries no pin: with automatic saving off, the first set_stream says so.
     _sentFps[s.sid] = (c.mode, c.fps, c.density, false);
-    if (rs.streamPinned) _applyFps();
+    if (_pinned) _applyFps();
     if (!reconnect && !quiet) hint = '已打开 ${r.appName} @ ${deviceName(r.id)}';
     notifyListeners();
   }
@@ -1578,6 +1697,13 @@ class MainState extends ChangeNotifier {
 
   void setStartFullscreen(bool v) {
     prefs.startFullscreen = v;
+    _save();
+  }
+
+  /// 「网络差时自动省流量」: saved, and every live session told at once.
+  void setAutoSaveTraffic(bool v) {
+    prefs.autoSaveTraffic = v;
+    _applyFps();
     _save();
   }
 

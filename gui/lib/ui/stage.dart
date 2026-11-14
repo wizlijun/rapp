@@ -59,6 +59,7 @@ class Stage extends StatelessWidget {
             connecting: rec.phase != Phase.disconnected,
             onReconnect: state.hubUsable ? state.reconnectCurrent : null,
             retrying: rec.retry != null,
+            waiting: state.waitWordOf(rec),
             onStop: state.stopReconnectCurrent,
             onEnd: state.endCurrent,
             sessionKey: rec.key,

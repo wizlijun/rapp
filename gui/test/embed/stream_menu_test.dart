@@ -3,6 +3,7 @@ import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/remote_session.dart';
+import 'package:rapp/hub_client.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/embed/stream_choice.dart';
 import 'package:rapp/embed/stream_menu.dart';
@@ -32,7 +33,7 @@ void main() {
   Future<void> open(WidgetTester tester,
       {VoidCallback? onDetach, bool disconnected = false, bool reconnecting = false, bool hub = true, String status = '活动', String reconnectWord = '重连',
       List<int> seed = const [], Object seedSid = 1, int? other, int grey = -1, Set<MenuPart> parts = allMenuParts,
-      bool? forcedRelay, bool route = true, String path = 'lan'}) async {
+      bool? forcedRelay, bool route = true, String path = 'lan', NetStatus? net, List<SessionEvent> events = const []}) async {
     shellOpen = false;
     routeToggles = 0;
     ended = 0;
@@ -49,6 +50,9 @@ void main() {
     if (other != null) res.addClips('other', 2, 'Notes @ mini', [ClipRow(other, 'clip $other', true)]);
     port = FakeSessionPort();
     rs = RemoteSession(1, 'Calc', onStream: (c) => port.setStream(1, c.mode, c.fps, c.density));
+    for (final e in events) {
+      rs.apply(e);
+    }
     tester.view.physicalSize = const Size(800, 1600);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -81,6 +85,7 @@ void main() {
         onMarkInput: () => marks++,
         onClearInput: () => clears++,
         parts: parts,
+        net: net,
       )),
     )));
     final kind = parts.contains(MenuPart.stream) ? 'traffic' : (parts.contains(MenuPart.remote) ? 'remote-menu' : 'session-menu');
@@ -114,9 +119,43 @@ void main() {
     await open(tester, forcedRelay: true);
     expect(find.text('路径 局域网 · 活动'), findsOneWidget); // forced, but this session is still on the LAN
     await open(tester, forcedRelay: true, path: 'relay');
-    expect(find.text('路径 中继（强制） · 活动'), findsOneWidget);
+    expect(find.text('路径 中继（强制） · 活动 · 整条路 未知'), findsOneWidget);
     await open(tester, forcedRelay: false, path: 'relay');
-    expect(find.text('路径 中继 · 活动'), findsOneWidget);
+    expect(find.text('路径 中继 · 活动 · 整条路 未知'), findsOneWidget);
+  });
+
+  testWidgets('the path row splits a relayed round trip into this end and the far end', (tester) async {
+    const rtt = RttEvent(1, 420);
+    await open(tester, path: 'relay', net: const NetStatus(NetLevel.ok, 80, 0), events: [rtt]);
+    expect(find.text('路径 中继 · 活动 · 整条路 420ms（本机 80 · 对方约 340）'), findsOneWidget);
+    await open(tester, path: 'relay', events: [rtt]);
+    expect(find.text('路径 中继 · 活动 · 整条路 420ms'), findsOneWidget);
+    await open(tester, path: 'lan', events: [const RttEvent(1, 12)]);
+    expect(find.text('路径 局域网 · 活动 · 12ms'), findsOneWidget);
+    await open(tester, path: 'lan');
+    expect(find.text('路径 局域网 · 活动'), findsOneWidget);
+  });
+
+  testWidgets('while A saves traffic the stream groups say what it lowered', (tester) async {
+    await open(tester);
+    expect(find.textContaining('网络差，暂时降到'), findsNothing);
+    rs.setChoice(const StreamChoice('color16', 'adaptive', 15));
+    rs.apply(const WeakEvent(1, true, 1));
+    await tester.pump();
+    expect(find.text('（网络差，暂时降到 5 fps）'), findsOneWidget);
+    rs.apply(const WeakEvent(1, true, 2));
+    await tester.pump();
+    expect(find.text('（网络差，暂时降到 双色·灰度 · 5 fps）'), findsOneWidget);
+    rs.apply(const WeakEvent(1, false));
+    await tester.pump();
+    expect(find.textContaining('网络差'), findsNothing);
+  });
+
+  test('savingNote names only what changes', () {
+    expect(savingNote(0, const StreamChoice('color16', 'adaptive', 15)), isNull);
+    expect(savingNote(1, const StreamChoice('duogray', 'adaptive', 5)), '（网络差，暂时省流量）');
+    expect(savingNote(2, const StreamChoice('duogray', 'adaptive', 15)), '（网络差，暂时降到 5 fps）');
+    expect(savingNote(2, const StreamChoice('color16', 'adaptive', 1)), '（网络差，暂时降到 双色·灰度）');
   });
 
   testWidgets('the route item calls back once and closes the menu', (tester) async {

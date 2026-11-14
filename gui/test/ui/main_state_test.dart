@@ -536,7 +536,7 @@ void main() {
 
   group('embedded sessions', () {
     void env(void Function(FakeAsync a, FakeTransport t, FakeSessionPort port, MainState st, List<String> hints) body,
-        {int sessions = 1, bool withPort = true, AppProfileStore? profiles, void Function(String)? log, String? app}) {
+        {int sessions = 1, bool withPort = true, AppProfileStore? profiles, void Function(String)? log, String? app, String path = 'lan'}) {
       fakeAsync((a) {
         final t = FakeTransport();
         final hub = HubClient(t);
@@ -555,7 +555,7 @@ void main() {
           if (m['cmd'] == 'open') {
             final n = (m['app'] as String).length + (m['reconnect'] == true ? 10 * ++reconnects : 0);
             t.emit({
-              'event': 'opened', 'sid': n, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+              'event': 'opened', 'sid': n, 'id': m['id'], 'app': m['app'], 'path': path,
               if (m['embed'] == true) ...{'port': 5000 + n, 'token': 'tk'},
               'req': m['req'],
             });
@@ -807,23 +807,39 @@ void main() {
       });
     });
 
-    test('manual pick pins and reaches the port; a plain choice does not', () {
+    test('pinned is automatic saving off: a manual pick is only the ceiling', () {
       env((a, t, port, st, hints) {
-        st.currentRemote!.setChoice(const StreamChoice('duogray', 'adaptive', 1));
-        expect(port.calls.last.$2['pinned'], isNot(true));
         st.currentRemote!.setChoice(const StreamChoice('color16', 'adaptive', 5), manual: true);
         expect(port.calls.last.$1, 'set_stream');
+        expect(port.calls.last.$2['pinned'], isNot(true));
+        st.setAutoSaveTraffic(false);
+        expect(port.calls.last.$1, 'set_stream');
         expect(port.calls.last.$2['pinned'], true);
+        expect(st.prefs.autoSaveTraffic, false);
+      });
+    });
+
+    test('the hub is asked for the network level at once', () {
+      env((a, t, port, st, hints) {
+        expect(t.sent.where((m) => m['cmd'] == 'net').length, 1);
       });
     });
 
     group('automatic reconnect', () {
       int opens(FakeTransport t) => t.sent.where((m) => m['cmd'] == 'open').length;
-      void failOpens(FakeTransport t) {
+      void failOpens(FakeTransport t, [String error = 'timed out']) {
+        final inner = t.onSend;
         t.onSend = (m) {
-          if (m['cmd'] == 'open') t.emit({'event': 'error', 'error': 'offline', 'req': m['req']});
+          if (m['cmd'] == 'open') {
+            t.emit({'event': 'error', 'error': error, 'req': m['req']});
+          } else {
+            inner?.call(m);
+          }
         };
       }
+      List<Map<String, dynamic>> watches(FakeTransport t) => [for (final m in t.sent) if (m['cmd'] == 'watch') m];
+      void net(FakeTransport t, String level, [int? rtt]) =>
+          t.emit({'event': 'net', 'level': level, 'loss': 0, 'rtt_ms': ?rtt});
 
       test('network drop reconnects after 1s', () {
         env((a, t, port, st, hints) {
@@ -977,7 +993,144 @@ void main() {
           expect(st.currentRecord!.retry, isNotNull);
           a.elapse(const Duration(seconds: 60));
           expect(opens(t), greaterThan(n + 3));
-          expect(hints, ['Calculator 已断开：对方离线']);
+          expect(hints, ['Calculator 已断开：连接超时']);
+        });
+      });
+
+      test('offline waits for the host: watch on, no timer; presence online reconnects at once', () {
+        env((a, t, port, st, hints) {
+          final send = t.onSend!;
+          failOpens(t, 'offline');
+          port.emit(const DisconnectedEvent(1, 'connection closed'));
+          a.elapse(const Duration(seconds: 1));
+          a.flushMicrotasks();
+          final n = opens(t);
+          expect(st.currentRecord!.reason, contains('offline'));
+          expect(watches(t), [
+            {'cmd': 'watch', 'id': '111', 'on': true},
+          ]);
+          expect(st.waitWordOf(st.currentRecord!), '对方离线，上线后自动连');
+          a.elapse(const Duration(minutes: 5));
+          expect(opens(t), n); // the hub watches; nothing is tried meanwhile
+          // Back, but still offline when tried: the watch starts again.
+          t.emit({'event': 'presence', 'id': '111', 'online': true});
+          a.elapse(Duration.zero);
+          a.flushMicrotasks();
+          expect(opens(t), n + 1);
+          expect(watches(t).length, 2);
+          expect(watches(t).last['on'], true);
+          t.onSend = send;
+          t.emit({'event': 'presence', 'id': '111', 'online': true});
+          a.elapse(Duration.zero);
+          a.flushMicrotasks();
+          expect(st.currentRecord!.phase, Phase.live);
+          expect(watches(t).length, 2); // the hub's watch ended with its answer
+        });
+      });
+
+      test('stopping an offline wait stops the watch', () {
+        env((a, t, port, st, hints) {
+          failOpens(t, 'offline');
+          port.emit(const DisconnectedEvent(1, 'connection closed'));
+          a.elapse(const Duration(seconds: 1));
+          a.flushMicrotasks();
+          st.stopReconnectCurrent();
+          expect(watches(t).map((m) => m['on']), [true, false]);
+        });
+      });
+
+      test('a relayed session waits while the relay link is down, then reconnects 200 ms apart', () {
+        env(sessions: 3, path: 'relay', (a, t, port, st, hints) {
+          net(t, 'strong', 40);
+          final send = t.onSend!;
+          failOpens(t);
+          net(t, 'down');
+          for (final sid in [1, 2, 3]) {
+            port.emit(DisconnectedEvent(sid, 'connection closed'));
+          }
+          a.flushMicrotasks();
+          final n = opens(t);
+          a.elapse(const Duration(minutes: 2));
+          expect(opens(t), n);
+          final r = st.recordFor('111/a')!;
+          expect(r.retry, isNotNull);
+          expect(st.waitWordOf(r), '连不上中继，通了自动重连');
+          final times = <int>[];
+          final start = a.getClock(DateTime(2026)).now();
+          t.onSend = (m) {
+            if (m['cmd'] == 'open') times.add(a.getClock(DateTime(2026)).now().difference(start).inMilliseconds);
+            send(m);
+          };
+          net(t, 'ok', 160);
+          a.elapse(const Duration(seconds: 1));
+          a.flushMicrotasks();
+          expect(times, [0, 200, 400]);
+          expect(st.recordFor('111/a')!.phase, Phase.live);
+        });
+      });
+
+      test('a LAN session is not held by the relay link being down', () {
+        env((a, t, port, st, hints) {
+          net(t, 'strong', 40);
+          net(t, 'down');
+          final n = opens(t);
+          port.emit(const DisconnectedEvent(1, 'connection closed'));
+          a.elapse(const Duration(seconds: 1));
+          a.flushMicrotasks();
+          expect(opens(t), n + 1);
+        });
+      });
+
+      test('a relay timer that comes due while the link is down holds, and the link back retries', () {
+        env(path: 'relay', (a, t, port, st, hints) {
+          net(t, 'strong', 40);
+          port.emit(const DisconnectedEvent(1, 'connection closed'));
+          net(t, 'down');
+          final n = opens(t);
+          a.elapse(const Duration(seconds: 30));
+          expect(opens(t), n);
+          net(t, 'weak', 400);
+          a.elapse(Duration.zero);
+          a.flushMicrotasks();
+          expect(opens(t), n + 1);
+        });
+      });
+
+      test('the link up but the session dropped on the relay: 对方网络不通', () {
+        env(path: 'relay', (a, t, port, st, hints) {
+          net(t, 'ok', 120);
+          failOpens(t);
+          port.emit(const DisconnectedEvent(1, 'connection closed'));
+          a.flushMicrotasks();
+          expect(st.waitWordOf(st.currentRecord!), '对方网络不通，正在重试…');
+          net(t, 'down');
+          a.flushMicrotasks();
+          expect(st.waitWordOf(st.currentRecord!), '连不上中继，通了自动重连');
+        });
+      });
+
+      test('a stalled picture asks the hub to probe the relay', () {
+        env((a, t, port, st, hints) {
+          port.emit(const StalledEvent(1, true));
+          port.emit(const StalledEvent(1, false));
+          a.flushMicrotasks();
+          expect(t.sent.where((m) => m['cmd'] == 'net_suspect').length, 1);
+        });
+      });
+
+      test('a relayed session far slower than the relay link marks its device 网络弱', () {
+        env(path: 'relay', (a, t, port, st, hints) {
+          port.emit(const ReadyEvent(1, 'Calculator'));
+          net(t, 'ok', 100);
+          port.emit(const RttEvent(1, 350));
+          a.flushMicrotasks();
+          expect(st.peerWeak('111'), false, reason: 'the far side is 250 ms');
+          port.emit(const RttEvent(1, 420));
+          a.flushMicrotasks();
+          expect(st.peerWeak('111'), true);
+          net(t, 'none');
+          a.flushMicrotasks();
+          expect(st.peerWeak('111'), false, reason: 'no relay measured: no split');
         });
       });
 
@@ -1062,7 +1215,7 @@ void main() {
             var tries = 0;
             t.onSend = (m) {
               if (m['cmd'] == 'open') {
-                t.emit({'event': 'error', 'error': ++tries == 1 ? 'offline' : reason, 'req': m['req']});
+                t.emit({'event': 'error', 'error': ++tries == 1 ? 'timed out' : reason, 'req': m['req']});
               }
             };
             port.emit(const DisconnectedEvent(1, 'connection closed'));
@@ -1073,9 +1226,9 @@ void main() {
         });
       }
 
-      test('auto reconnect keeps a pin', () {
+      test('auto reconnect keeps saving off', () {
         env((a, t, port, st, hints) {
-          st.currentRemote!.setChoice(const StreamChoice('duogray', 'saver1x', 5), manual: true);
+          st.setAutoSaveTraffic(false);
           port.emit(const DisconnectedEvent(1, 'connection closed'));
           a.elapse(const Duration(seconds: 1));
           a.flushMicrotasks();
@@ -1085,16 +1238,22 @@ void main() {
       });
     });
 
-    test('pin survives reconnect', () {
+    test('saving off survives reconnect; on, the reconnect sends no pin', () {
       env((a, t, port, st, hints) {
-        st.currentRemote!.setChoice(const StreamChoice('duogray', 'saver1x', 5), manual: true);
+        st.setAutoSaveTraffic(false);
         port.emit(const DisconnectedEvent(1, 'connection closed'));
         st.reconnect('111/a');
         a.flushMicrotasks();
         expect(port.calls.last.$1, 'set_stream');
         expect(port.calls.last.$2, containsPair('sid', 11));
         expect(port.calls.last.$2['pinned'], true);
-        expect(st.remote[11]!.streamPinned, true);
+        st.setAutoSaveTraffic(true);
+        expect(port.calls.last.$2['pinned'], isNot(true));
+        port.emit(const DisconnectedEvent(11, 'connection closed'));
+        final n = port.calls.length;
+        st.reconnect('111/a');
+        a.flushMicrotasks();
+        expect(port.calls.skip(n).where((c) => c.$1 == 'set_stream'), isEmpty);
       });
     });
 

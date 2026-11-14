@@ -211,7 +211,9 @@ class _DevicesTabState extends State<DevicesTab> {
               const SizedBox(width: 6),
               Text(p.word, style: TextStyle(color: t.muted)),
             ]),
-          if (pathWord.isNotEmpty) Text(pathWord, style: TextStyle(color: t.muted)),
+          // 网络弱: a session of it through the relay is slow on the relay-to-host part.
+          if (pathWord.isNotEmpty)
+            Text(state.peerWeak(id) ? '$pathWord · 网络弱' : pathWord, style: TextStyle(color: t.muted)),
           // Only with a relay set: without one there is nothing to force onto.
           if (state.relaySet)
             RappButton.secondary(

@@ -569,6 +569,25 @@ void main() {
       expect(stopped, true);
     });
 
+    testWidgets('a waiting stage says what it waits for instead of the reason and 正在重连…', (tester) async {
+      var stopped = false;
+      await tester.pumpWidget(wrap(SizedBox(
+          width: 400,
+          height: 300,
+          child: DisconnectedStage(
+              session: null,
+              reason: '对方离线',
+              waiting: '对方离线，上线后自动连',
+              connecting: false,
+              retrying: true,
+              onStop: () => stopped = true))));
+      expect(find.text('对方离线，上线后自动连'), findsOneWidget);
+      expect(find.text('对方离线'), findsNothing);
+      expect(find.text('正在重连…'), findsNothing);
+      await tester.tap(find.byKey(const Key('stop-reconnect-button')));
+      expect(stopped, true);
+    });
+
     testWidgets('a retrying stage keeps 停止 while an attempt is in flight', (tester) async {
       var stopped = false;
       await tester.pumpWidget(wrap(SizedBox(

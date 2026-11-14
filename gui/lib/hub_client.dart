@@ -102,6 +102,31 @@ class HubSession {
   final String? token;
 }
 
+/// The hub's level of its link to the relay (spec 2026-11-14-rapp-network-status §3.4).
+enum NetLevel { strong, ok, weak, down }
+
+/// The hub's last `net` event: the link to the relay, measured.
+class NetStatus {
+  const NetStatus(this.level, this.rttMs, this.loss);
+  final NetLevel level;
+
+  /// The round trip to the relay; null when nothing answered lately.
+  final int? rttMs;
+
+  /// Lost share, 0 to 1.
+  final double loss;
+
+  @override
+  bool operator ==(Object other) =>
+      other is NetStatus && other.level == level && other.rttMs == rttMs && other.loss == loss;
+
+  @override
+  int get hashCode => Object.hash(level, rttMs, loss);
+
+  @override
+  String toString() => 'NetStatus($level, $rttMs, $loss)';
+}
+
 class _Pending {
   _Pending(this.event);
   final String event; // the reply event that resolves this request
@@ -129,6 +154,18 @@ class HubClient extends ChangeNotifier {
   final closeReasons = <Object, String>{};
 
   List<HubSession> get sessions => List.unmodifiable(_sessions.values);
+
+  /// The link to the relay as last pushed; null when no relay is set or nothing is known yet.
+  NetStatus? net;
+
+  /// Asks the hub for the `net` event as it stands (sent once the GUI is attached, §7).
+  void askNet() => _send({'cmd': 'net'});
+
+  /// Starts or stops the hub asking the relay whether host [id] came online (§5.3 rule 3); no reply.
+  void watch(String id, bool on) => _send({'cmd': 'watch', 'id': id, 'on': on});
+
+  /// A session's path looks broken: the hub probes the relay now.
+  void netSuspect() => _send({'cmd': 'net_suspect'});
 
   Future<List<HubHost>> refreshHosts() async {
     await _request({'cmd': 'hosts'}, 'hosts');
@@ -276,6 +313,11 @@ class HubClient extends ChangeNotifier {
           _paths.removeWhere((p) => p.id == id);
           _paths.add((id: id, path: path));
         }
+      case 'net':
+        final level = NetLevel.values.where((l) => l.name == m['level']).firstOrNull;
+        final rtt = m['rtt_ms'];
+        final loss = m['loss'];
+        net = level == null ? null : NetStatus(level, rtt is num ? rtt.round() : null, loss is num ? loss.toDouble() : 0);
       case 'home_set':
         // A new data dir: the hub dropped every link it had.
         hostPaths.clear();
@@ -320,6 +362,7 @@ class HubClient extends ChangeNotifier {
     _sessions.clear();
     hostPaths.clear();
     _paths.clear();
+    net = null;
     notifyListeners();
   }
 }

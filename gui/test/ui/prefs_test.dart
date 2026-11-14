@@ -29,6 +29,14 @@ void main() {
       contains('"start_fullscreen"'),
     );
   });
+  test('auto_save_traffic: on when missing, saved when off', () {
+    File('${tmp.path}/gui.json').writeAsStringSync('{"theme":"matrix","start_fullscreen":true}');
+    expect(UiPrefs.load(tmp.path).autoSaveTraffic, isTrue);
+    expect(UiPrefs().autoSaveTraffic, isTrue);
+    UiPrefs(autoSaveTraffic: false).save(tmp.path);
+    expect(File('${tmp.path}/gui.json').readAsStringSync(), contains('"auto_save_traffic":false'));
+    expect(UiPrefs.load(tmp.path).autoSaveTraffic, isFalse);
+  });
   test('corrupt json gives defaults', () {
     File('${tmp.path}/gui.json').writeAsStringSync('{nope');
     final p = UiPrefs.load(tmp.path);

@@ -8,6 +8,7 @@ import 'lifecycle.dart';
 import 'tab_chip.dart';
 import 'main_state.dart';
 import 'needs_you.dart';
+import 'net_marker.dart';
 import 'projects.dart';
 import 'session_model.dart';
 import 'tokens.dart';
@@ -55,8 +56,13 @@ class TopBar extends StatelessWidget {
             final splitW = embedded ? 2 * (words ? menuButtonWidth : 48.0) : 0.0;
             // Room for the gaps, a session block and the 已隐藏 chip besides (none of them shrink).
             final chip = rs != null && !rs.detached && rs.hidden.isNotEmpty ? 130.0 : 0.0;
-            final split = embedded && box.maxWidth >= (icons + 1) * 48 + trafficW + splitW + 42 + 160 + chip;
-            final streamW = trafficW + (split ? splitW : 0.0);
+            // The network marker, left of the stream anchor, while the hub has a relay to measure and
+            // the bare row (no gaps, no overview button) has room for it; it goes before those do.
+            final netWant = wide ? NetMarker.wideWidth : NetMarker.compactWidth;
+            final net = box.maxWidth >= icons * 48 + trafficW + netWant ? state.hub?.net : null;
+            final netW = net == null ? 0.0 : netWant;
+            final split = embedded && box.maxWidth >= (icons + 1) * 48 + trafficW + splitW + netW + 42 + 160 + chip;
+            final streamW = trafficW + (split ? splitW : 0.0) + netW;
             double fixed(double gap, bool overview) =>
                 (icons + (overview ? 1 : 0)) * 48 + streamW + (overview ? 7 : 6) * gap;
             // K11: never below 300.
@@ -206,6 +212,7 @@ class TopBar extends StatelessWidget {
                   else
                     const Spacer(),
                   if (state.hub != null) NeedsYouAnchor(state: state),
+                  if (net != null) NetMarker(net: net, compact: !wide, path: cur?.path),
                   if (embedded) ...[
                     if (split) ...[
                       _menu(context, cur, {MenuPart.session}, Corner.session, !words),
@@ -237,6 +244,7 @@ class TopBar extends StatelessWidget {
       port: state.port!,
       session: state.currentRemote!,
       path: cur.path,
+      net: state.hub?.net,
       status: lampWord(cur.lamp),
       disconnected: state.currentDisconnected,
       reconnecting: state.currentReconnecting,

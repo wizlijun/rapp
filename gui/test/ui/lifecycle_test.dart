@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/hub_client.dart' show NetLevel;
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/ui/lamp.dart';
@@ -74,6 +75,20 @@ void main() {
     expect(reconnectLabel('connection closed'), '重连');
     expect(endedHint('Safari', 'rapp-client: host says: taken over by M'), 'Safari：这个窗口在 M 上打开了');
     expect(endedHint('Safari', 'host says: taken over'), 'Safari：这个窗口在另一台设备上打开了');
+  });
+  test('waitWord: what an automatic retry waits for', () {
+    final r = SessionRecord('111', 'a', 'Calculator', 'relay');
+    r.reason = 'timed out';
+    expect(waitWord(r, relayed: true, net: NetLevel.down), isNull, reason: 'no retry, no word');
+    r.retry = (1, DateTime.now());
+    expect(waitWord(r, relayed: true, net: NetLevel.down), '连不上中继，通了自动重连');
+    expect(waitWord(r, relayed: true, net: NetLevel.strong), '对方网络不通，正在重试…');
+    expect(waitWord(r, relayed: true, net: null), isNull, reason: 'no relay measured: nothing to tell apart');
+    expect(waitWord(r, relayed: false, net: NetLevel.strong), isNull);
+    r.reason = 'host offline';
+    expect(waitWord(r, relayed: true, net: NetLevel.ok), '对方离线，上线后自动连');
+    expect(waitWord(r, relayed: false, net: null), '对方离线，上线后自动连');
+    expect(waitWord(r, relayed: true, net: NetLevel.down), '连不上中继，通了自动重连');
   });
   test('record lamps', () {
     final r = SessionRecord('111', 'a', 'Calculator', 'lan');

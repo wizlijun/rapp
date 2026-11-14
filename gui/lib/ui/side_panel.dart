@@ -190,6 +190,13 @@ class _Footer extends StatelessWidget {
             value: state.prefs.startFullscreen,
             onChanged: state.setStartFullscreen,
           ),
+          SwitchListTile(
+            key: const Key('auto-save-traffic'),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+            title: Text('网络差时自动省流量', style: TextStyle(color: t.text)),
+            value: state.prefs.autoSaveTraffic,
+            onChanged: state.setAutoSaveTraffic,
+          ),
           const SizedBox(height: 6),
           // The legend explains shapes; motion is kept for things that need
           // you (design language §1), so its lamps stand still.

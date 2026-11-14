@@ -45,6 +45,24 @@ void main() {
     expect(rs.weak, false);
   });
 
+  test('weak carries the saving level; rtt and stalled are kept; a link down forgets the round trip', () {
+    final rs = RemoteSession(1, 'Calc');
+    rs.apply(parseSessionEvent('weak', {'sid': 1, 'on': true, 'level': 1})!);
+    expect((rs.weak, rs.saving), (true, 1));
+    rs.apply(parseSessionEvent('weak', {'sid': 1, 'on': true})!);
+    expect(rs.saving, 2, reason: 'a runner without the level means the floor');
+    rs.apply(parseSessionEvent('weak', {'sid': 1, 'on': false, 'level': 0})!);
+    expect((rs.weak, rs.saving), (false, 0));
+    rs.apply(parseSessionEvent('rtt', {'sid': 1, 'ms': 420})!);
+    expect(rs.rttMs, 420);
+    final st = parseSessionEvent('stalled', {'sid': 1, 'on': true});
+    expect(st, isA<StalledEvent>().having((e) => e.on, 'on', true));
+    rs.apply(st!);
+    expect(rs.stalled, true);
+    rs.linkDown();
+    expect((rs.rttMs, rs.stalled, rs.saving), (null, false, 0));
+  });
+
   test('setChoice pins only when manual', () {
     final rs = RemoteSession(1, 'Calc');
     rs.setChoice(presetLeast);

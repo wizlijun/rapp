@@ -6,6 +6,7 @@
 // A bar too narrow for three buttons keeps the traffic label alone, with all three parts in it.
 import 'package:flutter/material.dart';
 
+import '../hub_client.dart';
 import '../ui/controls.dart';
 import '../ui/corner_popover.dart';
 import '../ui/resources_state.dart';
@@ -56,10 +57,14 @@ class StreamMenuAnchor extends StatefulWidget {
     required this.onCopy,
     required this.onAllClips,
     this.compact = false,
+    this.net,
   });
 
   /// Bars only, no rate text (narrow top bar).
   final bool compact;
+
+  /// The link to the relay (`HubClient.net`): splits a relayed session's round trip.
+  final NetStatus? net;
   final SessionPort port;
   final RemoteSession session;
 
@@ -158,6 +163,7 @@ class _StreamMenuAnchorState extends State<StreamMenuAnchor> {
         canInsert: widget.canInsert,
         onCopy: widget.onCopy,
         onAllClips: widget.onAllClips,
+        net: widget.net,
       ),
       child: kind != 'stream'
           ? MenuCornerButton(
@@ -172,7 +178,12 @@ class _StreamMenuAnchorState extends State<StreamMenuAnchor> {
         builder: (context, _) => TrafficLabel(
           key: const Key('traffic'),
           bytesPerSecond: widget.session.bytesPerSecond,
-          weak: widget.session.weak,
+          word: sessionTrafficWord(
+            path: widget.path,
+            saving: widget.session.saving,
+            wholeMs: widget.session.rttMs,
+            net: widget.net,
+          ),
           open: widget.open,
           compact: widget.compact,
           onTap: widget.onToggle,
@@ -249,6 +260,18 @@ class MenuCornerButton extends StatelessWidget {
 }
 
 /// The menu's content. [onClose] runs after every pick.
+/// The row atop the stream groups while A saves traffic ([RemoteSession.saving]): what it lowered
+/// below the pick, as A's ladder does (level 1 caps the rate at 5 fps; level 2 also goes to
+/// 双色·灰度), naming only what changed. Null at level 0.
+String? savingNote(int level, StreamChoice c) {
+  if (level <= 0) return null;
+  final parts = [
+    if (level >= 2 && c.mode != 'duogray') '双色·灰度',
+    if (c.fps > 5) '5 fps',
+  ];
+  return parts.isEmpty ? '（网络差，暂时省流量）' : '（网络差，暂时降到 ${parts.join(' · ')}）';
+}
+
 class StreamMenu extends StatefulWidget {
   const StreamMenu({
     super.key,
@@ -276,8 +299,10 @@ class StreamMenu extends StatefulWidget {
     required this.canInsert,
     required this.onCopy,
     required this.onAllClips,
+    this.net,
   });
 
+  final NetStatus? net;
   final Set<MenuPart> parts;
   final VoidCallback? onMarkInput;
   final VoidCallback? onClearInput;
@@ -330,6 +355,11 @@ class _StreamMenuState extends State<StreamMenu> {
     return w.isEmpty ? widget.path : w;
   }
 
+  String _pathRow() {
+    final detail = pathDetail(path: widget.path, wholeMs: _s.rttMs, net: widget.net);
+    return ['路径 ${_pathWord()}', widget.status, ?detail].join(' · ');
+  }
+
   @override
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
@@ -379,7 +409,7 @@ class _StreamMenuState extends State<StreamMenu> {
   /// 会话: the path and state, disconnect or reconnect, detach, top-left, end.
   List<Widget> _sessionGroup(RappTokens t, int? window, bool reduced) => [
         _head(t, '会话'),
-        _Item('路径 ${_pathWord()} · ${widget.status}', enabled: false),
+        _Item(_pathRow(), enabled: false),
         if (widget.forcedRelay != null && !widget.reconnecting)
           _Item(
             widget.forcedRelay! ? '恢复自动选路' : '改走中继',
@@ -451,7 +481,9 @@ class _StreamMenuState extends State<StreamMenu> {
 
   /// Presets, mode, density, rate. Not on a dead session (R21).
   List<Widget> _streamGroups(RappTokens t, StreamChoice c) {
+    final note = savingNote(_s.saving, c);
     return [
+              if (note != null) _Item(note, enabled: false),
               _head(t, '预设'),
               _Item('最省流（双色·灰度 + 自适应 + 1 fps）', checked: c == presetLeast, onTap: () => _choose(presetLeast)),
               _Item('最清晰（高彩 + 原画 + 15 fps）', checked: c == presetSharpest, onTap: () => _choose(presetSharpest)),
