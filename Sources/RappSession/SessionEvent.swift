@@ -28,7 +28,17 @@ public struct ClipRow: Equatable {
 public struct BlockChip: Equatable {
     public let n: Int
     public let label: String
-    public init(n: Int, label: String) { self.n = n; self.label = label }
+    /// `text`, `image`, `data` or `file`.
+    public let kind: String
+    /// Size of the content: UTF-8 length for text, the PNG/data length, the file size.
+    public let bytes: Int
+    /// The full text; only for pasted long text (images, data and files never carry content).
+    public let text: String?
+    /// The file name without path; only for files.
+    public let name: String?
+    public init(n: Int, label: String, kind: String = "data", bytes: Int = 0, text: String? = nil, name: String? = nil) {
+        self.n = n; self.label = label; self.kind = kind; self.bytes = bytes; self.text = text; self.name = name
+    }
 }
 
 /// What a paste, attach or clipboard insert produced: text for the editor, new blocks, a line to show, or nothing.

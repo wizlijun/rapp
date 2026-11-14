@@ -71,6 +71,10 @@ void main() {
     expect(r.tested, isFalse);
     expect(r.afterSend, AfterSend.none);
     expect(r.composer, isTrue);
+    expect(r.recordInput, isTrue);
+    expect(resolveProfile('a', mine: [AppProfile(ids: ['a'], recordInput: false)], builtin: [AppProfile(ids: ['a'], recordInput: true)]).recordInput, isFalse);
+    expect(AppProfile(ids: ['a']).toJson().containsKey('recordInput'), isFalse);
+    expect(AppProfile.fromJson(AppProfile(ids: ['a'], recordInput: false).toJson())!.recordInput, isFalse);
     expect(resolveProfile('other', mine: mine, builtin: builtin), same(ResolvedProfile.generic));
     expect(ResolvedProfile.generic.stream, startChoice);
   });

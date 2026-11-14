@@ -71,6 +71,18 @@ class FlutterEditor implements ComposerEditor {
       handlers?.onEscape();
       return KeyEventResult.handled;
     }
+    if (k == LogicalKeyboardKey.arrowUp || k == LogicalKeyboardKey.arrowDown) {
+      // Arrows while composing are the input method's (its candidates); with a modifier they select or jump.
+      if (_composing || hw.isShiftPressed || hw.isAltPressed || hw.isMetaPressed || hw.isControlPressed) {
+        return KeyEventResult.ignored;
+      }
+      final up = k == LogicalKeyboardKey.arrowUp;
+      final v = _controller.value;
+      final s = v.selection;
+      final at = !s.isValid ? v.text.length : (up ? s.start : s.end);
+      final edge = up ? !v.text.substring(0, at).contains('\n') : !v.text.substring(at).contains('\n');
+      return edge && (handlers?.onArrow(up) ?? false) ? KeyEventResult.handled : KeyEventResult.ignored;
+    }
     if (defaultTargetPlatform == TargetPlatform.macOS &&
         k == LogicalKeyboardKey.keyV &&
         hw.isMetaPressed &&
@@ -167,6 +179,9 @@ class FlutterEditor implements ComposerEditor {
 
   @override
   Future<String> read() => SynchronousFuture(_controller.text);
+
+  @override
+  bool get isEmpty => _controller.text.isEmpty && _pending.isEmpty;
 
   @override
   Future<String> take() {

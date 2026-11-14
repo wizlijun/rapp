@@ -3,6 +3,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../history/history_list.dart';
+import '../history/input_history.dart';
 import '../ui/controls.dart';
 import '../ui/tokens.dart';
 import 'remote_session.dart';
@@ -26,8 +28,16 @@ const composerKeys = <(String, int, int?)>[
   ('回车', 36, null),
 ];
 
+/// 放进输入框: the writing panel opens, the text goes in at the caret and the field takes focus.
+void putIntoComposer(RemoteSession s, String text) {
+  final c = s.composer;
+  c.open = true;
+  c.insert(text);
+  c.wantFocus();
+}
+
 class ComposerPlus extends StatefulWidget {
-  const ComposerPlus({super.key, required this.session, required this.port, required this.onAttach, this.onPress});
+  const ComposerPlus({super.key, required this.session, required this.port, required this.onAttach, this.onPress, this.history, this.historyKey});
 
   final RemoteSession session;
   final SessionPort port;
@@ -37,6 +47,10 @@ class ComposerPlus extends StatefulWidget {
 
   /// Any press in the menu (it sits in the overlay, outside the panel's own listener).
   final VoidCallback? onPress;
+
+  /// The input record for 「输入历史」 (no such row without it) and this session's key (`host/app`).
+  final InputHistory? history;
+  final String? historyKey;
 
   @override
   State<ComposerPlus> createState() => _ComposerPlusState();
@@ -55,6 +69,32 @@ class _ComposerPlusState extends State<ComposerPlus> {
   }
 
   void _toggle() => _portal.isShowing ? _close() : _portal.show();
+
+  void _openHistory() {
+    _close();
+    final h = widget.history!;
+    final key = widget.historyKey;
+    showDialog<void>(
+      context: context,
+      builder: (dialog) => Dialog(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560, maxHeight: 640),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(12),
+            child: InputHistoryList(
+              history: h,
+              session: key,
+              host: key?.split('/').first,
+              onPut: (text) {
+                putIntoComposer(widget.session, text);
+                Navigator.of(dialog).pop();
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
   void _key(int code) {
     widget.port.key(widget.session.sid, code, _sticky);
@@ -153,6 +193,7 @@ class _ComposerPlusState extends State<ComposerPlus> {
                     rowGap,
                     _row(t, '在远端复制', mac ? '⌘C' : 'Ctrl+C', _copy),
                     rowGap,
+                    if (widget.history != null) ...[_row(t, '输入历史', null, _openHistory), rowGap],
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 4),
                       child: Text('按键 · 直接发给远端', style: TextStyle(color: t.muted, fontSize: 12)),

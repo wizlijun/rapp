@@ -11,6 +11,8 @@ import '../embed/remote_session.dart';
 import '../embed/session_port.dart';
 import '../embed/stream_choice.dart';
 import '../embed/traffic_label.dart' show segments;
+import '../history/input_history.dart';
+import '../history/input_recorder.dart';
 import '../hub_client.dart';
 import '../permissions.dart';
 import '../embed/app_profile.dart';
@@ -75,6 +77,11 @@ class MainState extends ChangeNotifier {
     void Function(String line)? log,
   })  : resources = ResourcesState(clock: clock),
         _log = log ?? ((_) {}) {
+    recorder = InputRecorder(data: () => data, enabled: () => prefs.inputHistory,
+        recordsApp: (a) => this.profiles.resolve(a).recordInput,
+        log: _log, clock: clock);
+    history = InputHistory(data: () => data, log: _log);
+    _writtenSub = recorder.written.listen(history.add);
     resources.addListener(notifyListeners);
     _portSub = port?.events.listen(_onPortEvent);
     _termSub = termPort?.events.listen(_onPortEvent);
@@ -92,6 +99,25 @@ class MainState extends ChangeNotifier {
     _entries = _mapEntries();
     refreshDevices();
     _restorePins();
+    unawaited(recorder.sweep());
+    unawaited(history.refresh()); // never throws; the panel's ↑ has what is read by then
+  }
+
+  /// The input record: what the writing panel sends, and the drafts it leaves.
+  late final InputRecorder recorder;
+
+  /// The input record read back, every device's (R2, R4); what [recorder] writes comes in at once.
+  late final InputHistory history;
+  StreamSubscription<Map<String, Object?>>? _writtenSub;
+
+  /// The record key (`host/app`) of [rs]'s session, null when no record claims it.
+  String? historyKeyOf(RemoteSession rs) => (_recordOfSid(rs.sid) ?? _recordOfLastSid(rs.sid))?.key;
+
+  /// What ↑ brings back in [rs]'s writing panel, newest first (R2); empty for a session no
+  /// record claims.
+  List<InputEntry> recallOf(RemoteSession rs) {
+    final r = _recordOfSid(rs.sid) ?? _recordOfLastSid(rs.sid);
+    return r == null ? const [] : history.forSession(r.key);
   }
 
   /// Switches to a moved data root: later reads and writes go there and `workspace.json` is reread.
@@ -112,6 +138,7 @@ class MainState extends ChangeNotifier {
       _syncHidden(rs);
     }
     _entries = _mapEntries();
+    unawaited(history.refresh());
     final old = oldRoot.endsWith('/') ? oldRoot : '$oldRoot/';
     for (final e in resources.clips) {
       final p = e.path;
@@ -1038,6 +1065,10 @@ class MainState extends ChangeNotifier {
     final oldGroups = groups;
     final old = r.lastSid;
     if (old != null) portOf(old)?.close(old); // reconnected but not swapped yet: the old session is still open
+    // Before a swap the old session is the one on show, the one written in.
+    final shown = remote[old] ?? remote[r.sid];
+    unawaited(recorder.sessionEnded(shown, _metaOf(r, shown),
+        record: shown?.recordsInput ?? profiles.resolve(r.app).recordInput));
     for (final sid in [r.sid, old]) {
       if (sid == null) continue;
       remote.remove(sid)?.dispose();
@@ -1062,7 +1093,8 @@ class MainState extends ChangeNotifier {
     final gone = remote.remove(old);
     if (gone == null) return;
     final to = fresh == null ? null : remote[fresh];
-    to?.composer.adoptFrom(gone.composer);
+    final moved = to?.composer.adoptFrom(gone.composer);
+    recorder.detach(gone, to: to, moved: moved);
     gone.dispose();
   }
 
@@ -1179,6 +1211,8 @@ class MainState extends ChangeNotifier {
         followNewTabs: !term);
     final prof = profiles.resolve(r.app);
     rs.setProfile(prof);
+    // Wired before any swap's adoptFrom; a reconnect's old session hands its text over itself.
+    recorder.attach(rs, () => _metaOf(r, rs), restore: r.lastSid == null);
     if (prof.name != null) _log('rapp: app 配置「${prof.name}」');
     rs.choice = r.choice;
     rs.streamPinned = r.pinned;
@@ -1230,6 +1264,22 @@ class MainState extends ChangeNotifier {
     if (_pinned) _applyFps();
     if (!reconnect && !quiet) hint = '已打开 ${r.appName} @ ${deviceName(r.id)}';
     notifyListeners();
+  }
+
+  /// What an input record says of [r]'s session [rs] now (no window without one).
+  SessionMeta _metaOf(SessionRecord r, RemoteSession? rs) {
+    final w = rs?.currentWindow;
+    return SessionMeta(
+      key: r.key,
+      hostId: r.id,
+      hostName: deviceName(r.id),
+      appId: r.app,
+      appName: r.appName,
+      run: r.run,
+      windowId: w,
+      windowTitle: w == null ? null : rs!.windows.where((x) => x.id == w).firstOrNull?.title,
+      projects: [for (final p in projectsOf(r.key)) p.name],
+    );
   }
 
   /// Opens the disconnected session [key] again, in the same place with the same choices.
@@ -1770,6 +1820,13 @@ class MainState extends ChangeNotifier {
     _save();
   }
 
+  /// 「记下写作面板发出去的话」: saved.
+  void setInputHistory(bool v) {
+    prefs.inputHistory = v;
+    _save();
+    notifyListeners();
+  }
+
   void _save() {
     try {
       final dir = data.prefsDir();
@@ -2085,6 +2142,8 @@ class MainState extends ChangeNotifier {
     profiles.removeListener(_onProfiles);
     _portSub?.cancel();
     _termSub?.cancel();
+    _writtenSub?.cancel();
+    history.dispose();
     _blockedTimer?.cancel();
     for (final t in _retryTimers.values) {
       t.cancel();

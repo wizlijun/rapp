@@ -29,14 +29,14 @@
      $ROOT/
        README.md  .gitignore
        shared/            所有设备共用（进 git）：apps.json  workspace.json
-       devices/<id>/      每台设备一份，只由这台设备写（进 git）：device.json  gui.json
+       devices/<id>/      每台设备一份，只由这台设备写（进 git）：device.json  gui.json  inputs/<日期>.jsonl（写作面板发出去的话，《输入记录》§4、§5.1）
        agent/             用户和 agent 的内容（进 git），rapp 不动
        clipboard/         钉住的文字条目，一条一个 .md（进 git）
        files/             二进制，不进 git：transfers/（收发的文件）  clipboard/（钉住的图片和文件）
-       local/             本机私有，不进 git，0700：service.json  hosts.json  ipc.token  update.json  ……（§3）
+       local/             本机私有，不进 git，0700：service.json  hosts.json  ipc.token  update.json  drafts/（没发出去的草稿，《输入记录》§5.2）  ……（§3）
      ```
    - **进 git 的**：`shared/`、`devices/`、`agent/`、`clipboard/`、`README.md`、`.gitignore`。**不进 git 的**：`files/`、`local/`（写在 `.gitignore` 里）。rapp-service 在改动后 60 秒内合成一次提交（`rust/service/src/data.rs:41`）。
-   - **机密只在 `local/`**。`shared/`、`devices/`、`agent/`、`clipboard/` 里不写口令、key、secret、token；agent 往这些目录写东西时也一样。
+   - **机密只在 `local/`**。rapp 自己不往 `shared/`、`devices/`、`agent/`、`clipboard/` 里写口令、key、secret、token；agent 往这些目录写东西时也一样。例外是用户自己的话：`devices/<id>/inputs/` 里是写作面板发出去的原话，rapp 保证不了里面没有密钥，可能含私事，和钉住的剪贴板同样对待（《输入记录》§8）。
    - 路径函数：Rust `local`/`shared`/`device`/`files`（`rust/net/src/config.rs:79-93`），Dart `DataDir`（`gui/lib/paths.dart:60-72`）。
    - 文件先写临时文件再改名；机密文件权限 `0600`。
 5. **试验用临时目录。** 在自己机器上验证配置时，设 `RAPP_HOME=<临时目录>`（它优先于指针，所有数据都落在那里），不碰用户真实的 `~/rapp` 和旧配置目录。设了 `RAPP_HOME` 后日志在 `$RAPP_HOME/local/logs`，不用另设。
@@ -128,12 +128,15 @@ agent 规则：**不直接改这个文件**。加、删设备走 GUI 的设备�
 | `theme` | `matrix`、`westworld`、`avatar`（其他值按 `matrix`） | `matrix` |
 | `start_fullscreen` | 布尔：启动时全屏沉浸 | `true` |
 | `auto_save_traffic` | 布尔：网络差时自动省流量（设置面板的开关）。`false` 时 A 始终用用户选的档位，不自动降 | `true` |
+| `input_history`（程序里叫 `inputHistory`） | 布尔：输入记录总开关。`false` 时写作面板发出去的话不再写进 `devices/<id>/inputs/`；草稿照样在本机保存（《输入记录》§8） | `true` |
 
 生效：退出 GUI 再改，重新打开生效；`auto_save_traffic` 在设置面板里改，马上告诉已开的会话。没有机密。
 
 ### 2.5 `$ROOT/shared/apps.json`（我的 app 配置）
 
 格式和取值见《app 配置设计》§2，怎么写见《app 配置编写规范》。内置的一份在 `gui/assets/app_profiles.json`（随 GUI 发布，只在仓库里改；启动时由 `gui/lib/main.dart:82` 读出来）。没有机密。
+
+其中 `recordInput`（布尔，没写时 `true`）管输入记录：`false` 时，发给这个 app 的话不进 `devices/<id>/inputs/`，草稿照样在本机保存和恢复。密码管理器、网银这类 app 可以设成 `false`。取值见《app 配置设计》§2，规则见《输入记录》§8。
 
 谁读写：GUI，启动时读一次（`AppProfileStore.load`，`gui/lib/ui/app_profile_store.dart:57`），每次改动都写（`同文件:194`，临时文件 + 改名）。读不出来时改名为 `apps.json.bad`，从空白开始，提示「app 配置没有读到，已从空白开始」。GUI 里改它的入口：标签右键、串流菜单、设备页 ⋯、本机页「app 配置」。
 

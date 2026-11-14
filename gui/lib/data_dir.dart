@@ -10,10 +10,12 @@ rapp 的所有数据都在这个目录里。
 
 - `shared/`：所有设备共用，放 app 配置 `apps.json` 和项目、常用 `workspace.json`。进 git。
 - `devices/<设备id>/`：每台设备一份，只由这台设备写，放 `device.json`（这台是什么）和 `gui.json`（界面偏好）。进 git。
+  `inputs/` 里是写作面板发出去的话，一天一个 `YYYY-MM-DD.jsonl`，一行一条记录（格式见规格《输入记录》）：`v, id, ts, kind, from, host, app, session, run, window, projects, text, blocks, result, after, source`，只在末尾加行。里面是你的原话，可能有私事，和钉住的剪贴板同样对待。
 - `agent/`：agent 的上下文。rapp 只建目录和 `agent/README.md`，里面的内容归你和 agent。进 git。
 - `clipboard/`：钉住的文字条目，一条一个 `<时间>-<短标题>.md`。进 git。
 - `files/`：二进制，不进 git。`files/transfers/` 是收发的文件，`files/clipboard/` 是钉住的图片和文件。
 - `local/`：本机私有，不进 git。口令、密钥、`service.json`、`hosts.json` 等机密只在这里。
+  `local/drafts/` 是没发出去的草稿，每个会话一个文件，不进 git。
 
 ## git
 
@@ -90,7 +92,7 @@ bool prepareDataDir(String root, String legacy) {
   for (final (old, nu) in table) {
     _copyIfMissing('$legacy/$old', nu);
   }
-  _writePrivate('$loc/$migratedFrom', utf8.encode('$legacy\n'));
+  writePrivate('$loc/$migratedFrom', utf8.encode('$legacy\n'));
   // Last (R4): its presence means the migration finished.
   _copyIfMissing(oldService, '$loc/service.json');
   return true;
@@ -136,11 +138,11 @@ String? _serviceId(String path) {
 
 void _copyIfMissing(String from, String to) {
   if (File(to).existsSync() || !File(from).existsSync()) return;
-  _writePrivate(to, File(from).readAsBytesSync());
+  writePrivate(to, File(from).readAsBytesSync());
 }
 
 /// Writes [data] with mode 0600 via a temp file and a rename.
-void _writePrivate(String path, List<int> data) {
+void writePrivate(String path, List<int> data) {
   File(path).parent.createSync(recursive: true);
   final tmp = File('$path.tmp');
   tmp.writeAsBytesSync(const []);

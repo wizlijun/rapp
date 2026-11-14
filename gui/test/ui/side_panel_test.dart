@@ -159,6 +159,18 @@ void main() {
     expect(UiPrefs.load('${tmp.path}/devices/dev1').autoSaveTraffic, false);
   });
 
+  testWidgets('input history switch is on by default and saves', (tester) async {
+    await tester.pumpWidget(wrap(panel()));
+    expect(find.text('记下写作面板发出去的话'), findsOneWidget);
+    expect(find.text('存在数据目录的 inputs/ 里，会随 git 同步'), findsOneWidget);
+    expect(s.prefs.inputHistory, true);
+    await tester.ensureVisible(find.byKey(const Key('input-history')));
+    await tester.tap(find.byKey(const Key('input-history')));
+    await tester.pump();
+    expect(s.prefs.inputHistory, false);
+    expect(UiPrefs.load('${tmp.path}/devices/dev1').inputHistory, false);
+  });
+
   testWidgets('legend shows all seven words', (tester) async {
     await tester.pumpWidget(wrap(panel()));
     for (final l in Lamp.values) {
@@ -347,6 +359,10 @@ void main() {
   });
 
   testWidgets('a session in two projects shows in both groups', (tester) async {
+    tester.view.physicalSize = const Size(800, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     const safari = AppRef('111', 'com.apple.Safari', 'Safari');
     s.addMember(s.createProject('写周报')!.id, safari);
     s.addMember(s.createProject('发版')!.id, safari);
@@ -417,6 +433,10 @@ void main() {
   });
 
   testWidgets('idle favorites list last with a not-opened lamp', (tester) async {
+    tester.view.physicalSize = const Size(800, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
     s.toggleFavorite('111', 'com.apple.Notes', 'Notes');
     s.togglePanel();
     await tester.pumpWidget(wrap(panel()));

@@ -26,6 +26,9 @@ class Outgoing {
   final List<BlockChip> blocks;
   final String text;
 
+  /// When it was handed off (set by `submit` and `retry`).
+  DateTime? at;
+
   /// Pieces that went (blocks first, then text).
   int sent = 0;
 
@@ -56,8 +59,25 @@ class ComposerModel extends ChangeNotifier {
   final VoidCallback? onAllSent;
   final DateTime Function() _clock;
 
+  /// Called when [draft] becomes a different text.
+  ValueChanged<String>? onDraftChanged;
+
+  /// Called when a send hands [o] off (`submit`, and `retry` with the same one), while [draft]
+  /// still holds its text.
+  void Function(Outgoing o)? onSubmitted;
+
+  /// Called once per send round after `done` updated `o.sent`; [all]: everything went by now.
+  void Function(Outgoing o, {required bool all})? onFinished;
+
   /// The text while no editor is attached; the last copy otherwise.
-  String draft = '';
+  String get draft => _draft;
+  String _draft = '';
+  set draft(String v) {
+    if (_draft == v) return;
+    _draft = v;
+    onDraftChanged?.call(v);
+  }
+
   ComposerEditor? _editor;
   Timer? _idleTimer;
 
@@ -166,23 +186,26 @@ class ComposerModel extends ChangeNotifier {
       } else {
         text = draft;
       }
-      draft = '';
     } finally {
       _setTaking(false);
     }
     if (sending || _inFlight != null) {
       // Another round started while the take waited: the text goes back, nothing is sent twice.
+      if (_editor != null) draft = '';
       if (text.isNotEmpty) insert(text);
       return SubmitNothing();
     }
     final now = _clock();
     if (blocks.isEmpty && text.isEmpty) {
+      draft = '';
       final last = _lastSend;
       if (last != null && now.difference(last) < const Duration(seconds: 1)) return SubmitNothing();
       return SubmitReturn();
     }
     _lastSend = now;
-    final o = Outgoing(List.of(blocks), text);
+    final o = Outgoing(List.of(blocks), text)..at = now;
+    onSubmitted?.call(o);
+    draft = '';
     blocks.clear();
     _inFlight = o;
     sending = true;
@@ -222,8 +245,11 @@ class ComposerModel extends ChangeNotifier {
     if (!all) {
       o.failure = (failure != null && failure.isNotEmpty) ? failure : '没有发出去';
       _failed.add(o);
+    } else if (failure != null) {
+      o.failure = failure; // all went, but the round said something: no after-send step
     }
     notifyListeners();
+    onFinished?.call(o, all: all);
     if (all && failure == null) onAllSent?.call();
   }
 
@@ -232,22 +258,25 @@ class ComposerModel extends ChangeNotifier {
   List<Map<String, Object>>? retry(Outgoing o) {
     if (sending || _taking || !_failed.remove(o)) return null;
     o.failure = null;
+    o.at = _clock();
     _inFlight = o;
     sending = true;
     notifyListeners();
+    onSubmitted?.call(o);
     return o.remaining();
   }
 
   /// A reconnect's swap: [old] was this window's session before. Its draft and the text of its
   /// failed rows and of its in-flight row come over, all as failed rows (the in-flight one never
   /// got its `done`). Blocks stay behind (the old runner held them); a row without text does not
-  /// come. With [old]'s editor still attached, its text is read for the draft.
-  void adoptFrom(ComposerModel old) {
-    final rows = [...old._failed, ?old._inFlight];
-    _failed.insertAll(0, [
-      for (final o in rows)
-        if (o.text.isNotEmpty) Outgoing(const [], o.text)..failure = o.failure ?? '没有发出去',
-    ]);
+  /// come. With [old]'s editor still attached, its text is read for the draft. Returns each of
+  /// [old]'s rows that came over with the row made for it, in order.
+  Map<Outgoing, Outgoing> adoptFrom(ComposerModel old) {
+    final made = <Outgoing, Outgoing>{
+      for (final o in [...old._failed, ?old._inFlight])
+        if (o.text.isNotEmpty) o: Outgoing(const [], o.text)..failure = o.failure ?? '没有发出去',
+    };
+    _failed.insertAll(0, made.values);
     if (draft.isEmpty) draft = old.draft;
     final e = old._editor;
     if (e != null) {
@@ -258,6 +287,7 @@ class ComposerModel extends ChangeNotifier {
       }, onError: (Object _) {});
     }
     notifyListeners();
+    return made;
   }
 
   /// [o] goes back into the composer: unsent blocks in front, unsent text at the caret.

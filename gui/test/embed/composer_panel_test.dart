@@ -10,6 +10,7 @@ import 'package:rapp/embed/composer_panel.dart';
 import 'package:rapp/embed/picture.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
+import 'package:rapp/history/history_list.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/ui/controls.dart';
 import 'package:rapp/ui/main_state.dart';
@@ -905,6 +906,35 @@ void main() {
       expect(port.calls.where((c) => c.$1 == 'mouse'), isNotEmpty);
     });
 
+    testWidgets('the ＋ menu opens the history and 放进输入框 closes it', (tester) async {
+      await showPicture(tester);
+      es.history.add({
+        'id': '01A',
+        'ts': '2026-11-15T09:00:00+09:00',
+        'kind': 'sent',
+        'from': {'id': 'dev1', 'name': 'x'},
+        'host': {'id': '111', 'name': 'mini'},
+        'app': {'id': 'Safari', 'name': 'Safari'},
+        'session': '111/Safari',
+        'text': '回头再看这段',
+      });
+      await tester.tap(find.byKey(const Key('composer-open')));
+      await tester.pump();
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('composer-plus')));
+      await tester.pump();
+      await tester.tap(find.text('输入历史'));
+      await tester.pump();
+      expect(find.byKey(const Key('composer-plus-menu')), findsNothing);
+      expect(find.byType(InputHistoryList), findsOneWidget);
+      expect(find.byKey(const Key('history-01A')), findsOneWidget); // this session's, by default
+      await tester.tap(find.byKey(const Key('put-01A')));
+      await tester.pumpAndSettle();
+      expect(find.byType(InputHistoryList), findsNothing);
+      expect(es.currentRemote!.composer.open, isTrue);
+      expect(text(tester), contains('回头再看这段'));
+    });
+
     testWidgets('Esc with the plus menu open closes the panel and the menu', (tester) async {
       await showPicture(tester);
       await tester.tap(find.byKey(const Key('composer-open')));
@@ -1011,6 +1041,128 @@ void main() {
       await tester.pump();
       expect(find.byType(ComposerPanel), findsOneWidget);
       expect(text(tester), 'from A');
+    });
+
+    // R2/R3: records of 111/Safari, given newest first.
+    var recId = 0;
+    void remember(List<String> newestFirst, {String session = '111/Safari'}) {
+      for (final text in newestFirst.reversed) {
+        recId++;
+        es.history.add({
+          'v': 1,
+          'id': '01REC${recId.toString().padLeft(4, '0')}',
+          'ts': '2026-11-14T10:${recId.toString().padLeft(2, '0')}:00+09:00',
+          'kind': 'sent',
+          'from': {'id': 'dev1', 'name': 'b'},
+          'host': {'id': '111', 'name': 'mini'},
+          'app': {'id': 'Safari', 'name': 'Safari'},
+          'session': session,
+          'run': 'r',
+          'projects': <String>[],
+          'text': text,
+          'blocks': <Object>[],
+          'source': 'typed',
+        });
+      }
+    }
+
+    Future<void> liveStage(WidgetTester tester) async {
+      await tester.pumpWidget(wrap(SizedBox(width: 800, height: 600, child: Stage(state: es))));
+      await openEmbedded(tester);
+      port.emit(const ReadyEvent(1, 'Safari'));
+      port.emit(WindowsEvent(1, [rw(5, 800, 628)]));
+      await tester.pump();
+    }
+
+    // The live session's panel alone, on a FakeEditor.
+    Future<FakeEditor> livePanel(WidgetTester tester) async {
+      await openEmbedded(tester);
+      final ed = FakeEditor();
+      final s = es.currentRemote!..composer.open = true;
+      await tester.pumpWidget(wrap(SizedBox(
+          width: 720, child: ComposerPanel(state: es, session: s, port: port, maxHeight: 300, editor: () => ed))));
+      await tester.pump();
+      return ed;
+    }
+
+    testWidgets('up on an empty editor brings the last one, again the one before, down goes back to empty',
+        (tester) async {
+      remember(['c', 'b', 'a']);
+      await liveStage(tester);
+      await tester.tap(find.byKey(const Key('composer-open')));
+      await tester.pump();
+      await tester.pump();
+      expect(fieldFocused(tester), isTrue);
+      Future<String> key(LogicalKeyboardKey k) async {
+        await tester.sendKeyEvent(k);
+        await tester.pump();
+        return text(tester);
+      }
+
+      expect(await key(LogicalKeyboardKey.arrowUp), 'c');
+      expect(await key(LogicalKeyboardKey.arrowUp), 'b');
+      expect(await key(LogicalKeyboardKey.arrowDown), 'c');
+      expect(await key(LogicalKeyboardKey.arrowDown), '');
+      // Down on an empty editor that is not browsing: nothing.
+      expect(await key(LogicalKeyboardKey.arrowDown), '');
+      // Up to the oldest, and up again stays there.
+      expect(await key(LogicalKeyboardKey.arrowUp), 'c');
+      expect(await key(LogicalKeyboardKey.arrowUp), 'b');
+      expect(await key(LogicalKeyboardKey.arrowUp), 'a');
+      expect(await key(LogicalKeyboardKey.arrowUp), 'a');
+      expect(await key(LogicalKeyboardKey.arrowDown), 'b');
+    });
+
+    testWidgets('once edited, up and down move the caret', (tester) async {
+      remember(['c', 'b', 'a']);
+      final ed = await livePanel(tester);
+      final h = ed.handlers!;
+      expect(h.onArrow(true), isTrue);
+      expect(ed.value, 'c');
+      ed.value = 'cx';
+      h.onChanged();
+      await tester.pump();
+      expect(h.onArrow(true), isFalse);
+      expect(h.onArrow(false), isFalse);
+      expect(ed.value, 'cx');
+
+      // Back to empty by hand: up brings the last one again.
+      ed.value = '';
+      h.onChanged();
+      await tester.pump();
+      expect(h.onArrow(true), isTrue);
+      expect(ed.value, 'c');
+    });
+
+    testWidgets('up on a draft never replaces it', (tester) async {
+      remember(['c']);
+      final ed = await livePanel(tester);
+      ed.value = '我写了一半';
+      ed.handlers!.onChanged();
+      await tester.pump();
+      expect(ed.handlers!.onArrow(true), isFalse);
+      expect(ed.handlers!.onArrow(false), isFalse);
+      expect(ed.value, '我写了一半');
+    });
+
+    testWidgets('up with no history is not taken', (tester) async {
+      remember(['elsewhere'], session: '111/Notes');
+      final ed = await livePanel(tester);
+      expect(ed.handlers!.onArrow(true), isFalse);
+      expect(ed.handlers!.onArrow(false), isFalse);
+      expect(ed.value, '');
+    });
+
+    testWidgets('the hint says ↑ when there is history', (tester) async {
+      await liveStage(tester);
+      await tester.tap(find.byKey(const Key('composer-open')));
+      await tester.pump();
+      expect(find.text('写给 Safari'), findsOneWidget);
+      expect(find.text('写给 Safari · ↑ 上一条'), findsNothing);
+      remember(['c']);
+      await tester.pump();
+      expect(find.text('写给 Safari · ↑ 上一条'), findsOneWidget);
+      expect(find.text('写给 Safari'), findsNothing);
     });
   });
 }

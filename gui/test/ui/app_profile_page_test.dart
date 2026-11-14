@@ -59,6 +59,19 @@ void main() {
     expect(find.text('保存'), findsNothing);
   });
 
+  testWidgets('record-input switch saves into apps.json', (tester) async {
+    final store = storeWith();
+    await open(tester, store, appId: _chrome);
+    expect(find.text('记下发给这个 app 的话'), findsOneWidget);
+    expect(find.text('关掉后草稿只存在本机'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('record-input-switch')));
+    await tester.pump();
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    expect(store.mine.single.recordInput, false);
+    expect(File('${dir.path}/apps.json').readAsStringSync(), contains('"recordInput": false'));
+  });
+
   testWidgets('a non-built-in app with no profile is saved under its app name', (tester) async {
     final store = storeWith();
     await open(tester, store, appId: 'com.apple.finder', appName: 'Finder');

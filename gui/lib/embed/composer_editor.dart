@@ -10,6 +10,7 @@ class EditorHandlers {
     required this.onEscape,
     required this.onPaste,
     required this.onFocus,
+    required this.onArrow,
   });
 
   /// The text changed (no text attached).
@@ -24,6 +25,10 @@ class EditorHandlers {
   /// ⌘V (macOS) — the runner decides what it becomes.
   final VoidCallback onPaste;
   final void Function(bool on) onFocus;
+
+  /// ↑ ([up]) with the caret on the first line, or ↓ on the last, no modifier, not while
+  /// composing. true: the key is taken; false: the caret moves as usual.
+  final bool Function(bool up) onArrow;
 }
 
 class EditorStyle {
@@ -58,6 +63,10 @@ abstract class ComposerEditor {
 
   /// A copy of the whole text.
   Future<String> read();
+
+  /// No text, now (with every earlier [setText] and [insert] applied). Only for deciding on a
+  /// key the editor reports; it says nothing of what the text is.
+  bool get isEmpty;
 
   /// The whole text; the editor is empty afterwards. While composing: completes after the commit.
   Future<String> take();

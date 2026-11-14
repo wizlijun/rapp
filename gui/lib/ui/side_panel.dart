@@ -197,6 +197,14 @@ class _Footer extends StatelessWidget {
             value: state.prefs.autoSaveTraffic,
             onChanged: state.setAutoSaveTraffic,
           ),
+          SwitchListTile(
+            key: const Key('input-history'),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+            title: Text('记下写作面板发出去的话', style: TextStyle(color: t.text)),
+            subtitle: Text('存在数据目录的 inputs/ 里，会随 git 同步', style: TextStyle(color: t.muted)),
+            value: state.prefs.inputHistory,
+            onChanged: state.setInputHistory,
+          ),
           const SizedBox(height: 6),
           // The legend explains shapes; motion is kept for things that need
           // you (design language §1), so its lamps stand still.

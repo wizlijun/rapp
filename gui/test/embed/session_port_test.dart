@@ -101,6 +101,23 @@ void main() {
     }) as ComposerInsertEvent;
     expect(blocks.insert.blocks.single.n, 1);
     expect(blocks.insert.blocks.single.label, '[图片 #1 10×20]');
+    expect(blocks.insert.blocks.single.kind, isNull);
+    expect(blocks.insert.blocks.single.bytes, isNull);
+    expect(blocks.insert.blocks.single.text, isNull);
+    expect(blocks.insert.blocks.single.name, isNull);
+    final rich = parseSessionEvent('composer_insert', {
+      'sid': 1,
+      'blocks': [
+        {'n': 1, 'label': 'L', 'kind': 'text', 'bytes': 9, 'text': '长文字'},
+        {'n': 2, 'label': 'F', 'kind': 'file', 'bytes': 3, 'name': 'a.txt'},
+      ]
+    }) as ComposerInsertEvent;
+    expect(rich.insert.blocks[0].kind, 'text');
+    expect(rich.insert.blocks[0].bytes, 9);
+    expect(rich.insert.blocks[0].text, '长文字');
+    expect(rich.insert.blocks[1].kind, 'file');
+    expect(rich.insert.blocks[1].name, 'a.txt');
+    expect(rich.insert.blocks[1].text, isNull);
     final status = parseSessionEvent('composer_insert', {'sid': 1, 'status': '不支持文件夹：dir'}) as ComposerInsertEvent;
     expect(status.insert.status, '不支持文件夹：dir');
     expect(parseSessionEvent('composer_insert', {'sid': 1}), isNull);
