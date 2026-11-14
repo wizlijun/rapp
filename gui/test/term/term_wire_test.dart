@@ -43,7 +43,8 @@ void main() {
   test('every output message parses with its fields', () {
     final h = parseTermOut({'t': 'history', 'pane': '%1', 'before': 5, 'lines': ['x', 'y'], 'hist': 9, 'wrapped': [0]})
         as TermHistory;
-    expect((h.pane, h.before, h.lines, h.hist), ('%1', 5, ['x', 'y'], 9));
+    expect((h.pane, h.before, h.hist), ('%1', 5, 9));
+    expect(h.lines, ['x', 'y']);
     expect(h.wrapped, {0});
     final ps = parseTermOut({'t': 'panes', 'panes': [
       {'id': '%12', 'window': 'w', 'title': 't', 'command': 'sh', 'cols': 80, 'rows': 24, 'dead': false, 'win': '@3', 'active': true},

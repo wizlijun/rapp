@@ -1,4 +1,4 @@
-/// Wire messages of the terminal worker (`rust/term/src/proto.rs`): one JSON object per line.
+// Wire messages of the terminal worker (`rust/term/src/proto.rs`): one JSON object per line.
 
 class TermPane {
   final String id, win, window, title, command;

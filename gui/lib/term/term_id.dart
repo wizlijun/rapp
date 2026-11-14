@@ -1,4 +1,4 @@
-/// The `term:` id: `term:<backend>[@<host>]:<name>`. The only place in the GUI that parses it.
+// The `term:` id: `term:<backend>[@<host>]:<name>`. The only place in the GUI that parses it.
 
 bool isTermApp(String app) => app.startsWith('term:');
 
