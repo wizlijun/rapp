@@ -326,6 +326,30 @@ async fn stopping_leaves_no_control_client() {
 }
 
 #[tokio::test]
+async fn a_view_cut_off_by_stopping_is_still_reported() {
+    let Some(s) = Server::start() else { return };
+    s.raw(&["new-session", "-d", "-s", "w", "-x", "80", "-y", "24", "cat"]);
+    let w = Worker::start(&s, None).await;
+    let mut c = w.connect(&json!({"op": "view", "term": "term:tmux:w", "sid": 9}), TOKEN).await;
+    assert_eq!(c.next().await["t"], "hello");
+    let pane = c.until("panes").await["panes"][0]["id"].as_str().unwrap().to_string();
+    c.send(json!({"t": "type", "pane": pane, "text": "typed-before-stop"})).await;
+    let end = Instant::now() + WAIT;
+    while !s.raw(&["capture-pane", "-p", "-t", "w"]).contains("typed-before-stop") {
+        assert!(Instant::now() < end, "the typed text never reached the pane");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    // The connection stays open: stopping the worker is what ends the view.
+    let (rest, _, code) = w.stop().await;
+    assert_eq!(code, Some(0));
+    let rest: Vec<Value> = rest.iter().map(|l| serde_json::from_str(l).unwrap()).collect();
+    assert_eq!(rest.len(), 2, "{rest:?}");
+    assert_eq!(rest[0], json!({"event": "ended", "sid": 9, "term": "term:tmux:w", "inputs": 1}));
+    assert_eq!(rest[1]["event"], "exit");
+    drop(c);
+}
+
+#[tokio::test]
 async fn terminals_off_in_the_config_refuse_everything() {
     let Some(s) = Server::start() else { return };
     s.raw(&["new-session", "-d", "-s", "w", "-x", "80", "-y", "24", "cat"]);

@@ -275,16 +275,30 @@ impl Worker {
             Err(e) => return put(w, &Out::Error { error: e }).await,
         };
         let inputs = Arc::new(AtomicU64::new(0));
-        let opts = Opts { poll: self.opts.poll, inputs: inputs.clone(), ..Opts::default() };
+        // Reports when dropped, so a view cut off by the worker stopping (its task aborted) is reported too.
+        let _ended = sid.map(|sid| Ended { events: &self.events, sid, term: id.to_string(), inputs: inputs.clone() });
+        let opts = Opts { poll: self.opts.poll, inputs, ..Opts::default() };
         let res = session::run(&tmux, &id.name, r, &mut *w, self.unread_for(id.host.as_deref()), opts).await;
-        if let Some(sid) = sid {
-            let n = inputs.load(Ordering::Relaxed);
-            let _ = self.events.send(json!({ "event": "ended", "sid": sid, "term": id.to_string(), "inputs": n }));
-        }
         match res {
             Ok(()) => Ok(()),
             Err(e) => put(w, &Out::Error { error: said(&e, &tmux, "the view stopped") }).await,
         }
+    }
+}
+
+/// The `ended` event of a view with a `sid`, sent when the view is over however it ends: the send is synchronous,
+/// so it also goes out from a task being aborted.
+struct Ended<'a> {
+    events: &'a UnboundedSender<Value>,
+    sid: u64,
+    term: String,
+    inputs: Arc<AtomicU64>,
+}
+
+impl Drop for Ended<'_> {
+    fn drop(&mut self) {
+        let n = self.inputs.load(Ordering::Relaxed);
+        let _ = self.events.send(json!({ "event": "ended", "sid": self.sid, "term": self.term, "inputs": n }));
     }
 }
 
