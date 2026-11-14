@@ -38,3 +38,5 @@ rapp-relay.workspace = true
 rapp-service.workspace = true
 rapp-hub.workspace = true
 rapp-update.workspace = true
+rustls.workspace = true
+rcgen.workspace = true

@@ -1304,6 +1304,8 @@ dependencies = [
  "rapp-relay",
  "rapp-service",
  "rapp-update",
+ "rcgen",
+ "rustls",
  "serde",
  "serde_json",
  "tempfile",
