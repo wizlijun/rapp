@@ -114,13 +114,20 @@ pub async fn serve_request(state: &Arc<State>, mut s: BiStream, peer: Peer) -> R
         }
         // Presence probe: no access-log line (A's 访问记录 must not fill with probes).
         Ok(Op::Ping) => reply_and_finish(&mut s, ok(json!({}))).await,
+        Ok(
+            op @ (Op::ListTerms
+            | Op::WatchTerms
+            | Op::NewTerm { .. }
+            | Op::AddTermTarget { .. }
+            | Op::RemoveTermTarget { .. }),
+        ) => crate::term::request(state, &mut s, &peer, op).await,
         Ok(Op::Open { app, side }) => open(state, s, &app, side, peer).await,
         _ => reply_and_finish(&mut s, err("unknown op")).await,
     }
 }
 
 /// `request {peer, name?, path, op, app?, side?, result}`; result is "ok" or the error text.
-fn log_request(state: &State, peer: &Peer, what: Value, reply: &Value) {
+pub(crate) fn log_request(state: &State, peer: &Peer, what: Value, reply: &Value) {
     let result = reply["error"].as_str().unwrap_or("ok");
     let lvl = if result == "ok" { Lvl::Info } else { Lvl::Warn };
     let mut fields = peer.fields(what);

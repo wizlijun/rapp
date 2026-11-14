@@ -1270,6 +1270,7 @@ dependencies = [
  "quinn",
  "rand 0.9.5",
  "rapp-net",
+ "rapp-term",
  "rapp-update",
  "serde",
  "serde_json",

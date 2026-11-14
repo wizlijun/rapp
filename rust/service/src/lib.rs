@@ -6,6 +6,7 @@ mod data;
 mod ipc;
 mod peer;
 mod state;
+mod term;
 mod update;
 mod workers;
 

@@ -79,7 +79,11 @@ fn main() {
 
 /// `term.json` as the text it has now and, when it can be used, its value.
 fn config(path: &str) -> (String, Result<Value, &'static str>) {
-    let text = std::fs::read_to_string(path).unwrap_or_default();
+    // No file is the default, as in the real worker.
+    let text = match std::fs::read_to_string(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => "{}".to_string(),
+        r => r.unwrap_or_default(),
+    };
     let v = serde_json::from_str::<Value>(&text).ok().filter(Value::is_object).ok_or(INVALID);
     let v = v.and_then(|v| if v["allow"] == json!(false) { Err(OFF) } else { Ok(v) });
     (text, v)

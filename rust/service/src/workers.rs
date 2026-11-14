@@ -1,4 +1,5 @@
-//! `rapp-host` workers (spec §3): one per app, started on demand, stdin closed after
+//! `rapp-host` workers (spec §3) and the device's one `rapp-term serve` (keyed `TERM`):
+//! one per app, started on demand, stdin closed after
 //! `idle` without sessions, forgotten when they exit (never restarted).
 
 use crate::state::{Peer, State};
@@ -14,6 +15,9 @@ use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc::UnboundedSender;
+
+/// The key of the device's one `rapp-term serve` in the worker table (spec §6); every term id is longer.
+pub const TERM: &str = "term:";
 
 const START_WAIT: Duration = Duration::from_secs(15);
 const RUN_WAIT: Duration = Duration::from_secs(15);
@@ -48,6 +52,14 @@ impl Workers {
         for w in self.map.lock().unwrap().values_mut() {
             w.stdin = None;
         }
+    }
+}
+
+/// Closes `app`'s worker stdin, so it exits; the next session starts a new one.
+#[expect(dead_code, reason = "the terminal off switch (task 7) calls it")]
+pub fn stop(state: &State, app: &str) {
+    if let Some(w) = state.workers.map.lock().unwrap().get_mut(app) {
+        w.stdin = None;
     }
 }
 
@@ -180,34 +192,48 @@ pub fn end_session(state: &Arc<State>, app: &str) {
     }
 }
 
+/// The program for `app`'s worker, its arguments and its stderr tag: `rapp-term` for `TERM`, else `rapp-host`.
+fn worker_cmd(state: &State, app: &str) -> (&'static str, Vec<String>, Value) {
+    let listen = ["--bind", "127.0.0.1", "--port", "0", "--token-env", "RAPP_TOKEN"];
+    if app == TERM {
+        let mut args: Vec<String> = ["serve"].into_iter().chain(listen).map(String::from).collect();
+        args.extend(["--config".into(), crate::term::path(state).to_string_lossy().into_owned(), "--json".into()]);
+        return ("rapp-term", args, json!({"src": "term"}));
+    }
+    let args = ["serve", "--app", app].into_iter().chain(listen).chain(["--json"]).map(String::from).collect();
+    ("rapp-host", args, json!({"src": "host", "app": app}))
+}
+
 async fn spawn(state: &Arc<State>, app: &str, gen: u64) -> Result<(u16, String, UnboundedSender<String>)> {
     let token = random_hex(16);
-    let mut child = Command::new(host_bin(state)?)
-        .args(["serve", "--app", app, "--bind", "127.0.0.1", "--port", "0", "--token-env", "RAPP_TOKEN", "--json"])
+    let (name, args, tag) = worker_cmd(state, app);
+    let bin = rapp_net::bins::find(name, state.bin_dir.as_deref()).ok_or_else(|| anyhow!("{name} not found"))?;
+    let mut child = Command::new(bin)
+        .args(args)
         .env("RAPP_TOKEN", &token)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
-        .context("start rapp-host")?;
+        .with_context(|| format!("start {name}"))?;
     let mut stdin = child.stdin.take().expect("piped stdin");
     let stderr = child.stderr.take().expect("piped stderr");
-    pipe_lines(state.log.clone(), stderr, json!({"src": "host", "app": app}));
+    pipe_lines(state.log.clone(), stderr, tag);
     let mut lines = BufReader::new(child.stdout.take().expect("piped stdout")).lines();
     let port = tokio::time::timeout(START_WAIT, async {
         while let Some(l) = lines.next_line().await? {
             let v: Value = serde_json::from_str(&l).unwrap_or_default();
             match v["event"].as_str() {
                 Some("listening") => return v["port"].as_u64().map(|p| p as u16).context("listening without port"),
-                Some("exit") => bail!("rapp-host exited: {}", v["reason"].as_str().unwrap_or("?")),
+                Some("exit") => bail!("{name} exited: {}", v["reason"].as_str().unwrap_or("?")),
                 _ => {}
             }
         }
-        bail!("rapp-host exited before listening")
+        bail!("{name} exited before listening")
     })
     .await
-    .map_err(|_| anyhow!("rapp-host did not start"))??;
+    .map_err(|_| anyhow!("{name} did not start"))??;
 
     // One task owns the worker's stdin (R16): when every sender is gone it drains what is
     // queued, then drops stdin, so the worker sees EOF.
