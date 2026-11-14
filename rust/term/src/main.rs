@@ -1,4 +1,4 @@
-//! The `rapp-term` command: version, list, watch, run.
+//! The `rapp-term` command: version, list, watch, run, serve.
 //!
 //! Exit codes: 0 ok, 1 a runtime error (tmux missing or failing, the session not there or not made), 2 an
 //! argument error. Errors go to stderr as one line and never carry the command, the screen or the input.
@@ -6,12 +6,14 @@
 use rapp_term::id::{default_name, session_name, valid_host, TermId};
 use rapp_term::proto::PROTO;
 use rapp_term::runner::Runner;
+use rapp_term::serve::{self, ServeOpts};
 use rapp_term::session::{self, Opts};
 use rapp_term::list::{host_rows, TermRow};
 use rapp_term::tmux::{PaneInfo, Tmux};
 use rapp_term::unread::Unread;
 use serde::Serialize;
 use std::io::Write;
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -21,7 +23,8 @@ usage: rapp-term version [--json]
        rapp-term list [--json] [--ssh <destination> --host <name>] [--tmux <path>]
        rapp-term watch <term id> [--ssh <destination>] [--tmux <path>] [--json]
        rapp-term run [--name <name>] [--size <cols>x<rows>] [--ssh <destination> --host <name>] [--tmux <path>] \
--- <command...>";
+-- <command...>
+       rapp-term serve --token-env <variable> --config <path> [--bind <address>] [--port <port>] [--json]";
 
 /// The only backend this command serves.
 const BACKEND: &str = "tmux";
@@ -57,6 +60,10 @@ struct Args {
     socket: Option<String>,
     name: Option<String>,
     size: Option<String>,
+    token_env: Option<String>,
+    config: Option<String>,
+    bind: Option<String>,
+    port: Option<String>,
     /// Arguments that are not options.
     pos: Vec<String>,
     /// Everything after `--`.
@@ -97,6 +104,10 @@ fn parse_args(allowed: &[&str], argv: &[String]) -> Res<Args> {
             "socket" => &mut a.socket,
             "name" => &mut a.name,
             "size" => &mut a.size,
+            "token-env" => &mut a.token_env,
+            "config" => &mut a.config,
+            "bind" => &mut a.bind,
+            "port" => &mut a.port,
             _ => return Err(usage("unknown option")),
         };
         // The value is the next argument whatever it looks like; `Runner::ssh` rejects a destination like `-o…`.
@@ -284,6 +295,65 @@ async fn run(a: &Args) -> Res<()> {
     Ok(())
 }
 
+/// One line on stdout. A closed stdout is not an error: the one reading it has gone and stops the worker anyway.
+fn say(line: &str) {
+    let mut o = std::io::stdout().lock();
+    let _ = writeln!(o, "{line}");
+    let _ = o.flush();
+}
+
+/// A worker event: the JSON line with `--json`, a few words without.
+fn event(json: bool, v: &serde_json::Value) {
+    if json {
+        return say(&v.to_string());
+    }
+    match v["event"].as_str() {
+        Some("listening") => say(&format!("listening on port {}", v["port"])),
+        Some("ended") => say(&format!("a view of {} ended after {} inputs", v["term"], v["inputs"])),
+        _ => say(&v.to_string()),
+    }
+}
+
+async fn serve(a: &Args) -> Res<()> {
+    if !a.pos.is_empty() {
+        return Err(usage("serve takes no arguments"));
+    }
+    let var = a.token_env.as_deref().ok_or_else(|| usage("serve needs --token-env"))?;
+    let token = std::env::var(var).ok().filter(|t| !t.is_empty());
+    let token = token.ok_or_else(|| usage("the --token-env variable is not set"))?;
+    let config = a.config.as_deref().ok_or_else(|| usage("serve needs --config"))?;
+    let ip: IpAddr = a.bind.as_deref().unwrap_or("127.0.0.1").parse().map_err(|_| usage("invalid --bind address"))?;
+    let port: u16 = match &a.port {
+        None => 0,
+        Some(p) => p.parse().map_err(|_| usage("invalid --port"))?,
+    };
+    let listener = tokio::net::TcpListener::bind((ip, port)).await.map_err(|_| runtime("could not listen"))?;
+    let port = listener.local_addr().map_err(|_| runtime("could not listen"))?.port();
+    let dir = ctl_dir();
+    if private_dir(&dir).is_err() {
+        eprintln!("rapp-term: could not make the ssh control directory");
+    }
+    let opts = ServeOpts { socket: a.socket.clone(), ..ServeOpts::new(PathBuf::from(config), dir) };
+    event(a.json, &serde_json::json!({ "event": "listening", "port": port }));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let json = a.json;
+    let printer = tokio::spawn(async move {
+        while let Some(v) = rx.recv().await {
+            event(json, &v);
+        }
+    });
+    let stop = async {
+        use tokio::io::AsyncReadExt;
+        let mut stdin = tokio::io::stdin();
+        let mut buf = [0u8; 1024];
+        while matches!(stdin.read(&mut buf).await, Ok(n) if n > 0) {}
+    };
+    serve::serve(listener, token, opts, tx, stop).await;
+    // Every sender is gone with the worker, so the printer ends once the last event is out.
+    let _ = printer.await;
+    Ok(())
+}
+
 fn dispatch(argv: &[String]) -> Res<()> {
     let Some((sub, rest)) = argv.split_first() else { return Err(usage("missing subcommand")) };
     let allowed: &[&str] = match sub.as_str() {
@@ -291,6 +361,7 @@ fn dispatch(argv: &[String]) -> Res<()> {
         "list" => &["json", "ssh", "host", "tmux", "socket"],
         "watch" => &["json", "ssh", "tmux", "socket"],
         "run" => &["json", "name", "size", "ssh", "host", "tmux", "socket", "--"],
+        "serve" => &["json", "token-env", "config", "bind", "port", "socket"],
         "help" | "--help" | "-h" => {
             println!("{USAGE}");
             return Ok(());
@@ -313,11 +384,20 @@ fn dispatch(argv: &[String]) -> Res<()> {
         match sub.as_str() {
             "list" => list(&a).await,
             "watch" => watch(&a).await,
+            "serve" => serve(&a).await,
             _ => run(&a).await,
         }
     });
     // Dropping the runtime would wait for tokio's blocking stdin read, which lasts as long as stdin stays open.
     rt.shutdown_background();
+    if sub == "serve" && a.json {
+        let (code, reason) = match &res {
+            Ok(()) => (0, "stdin closed"),
+            Err(Fail::Usage(m)) => (2, m.as_str()),
+            Err(Fail::Runtime(m)) => (1, m.as_str()),
+        };
+        say(&serde_json::json!({ "event": "exit", "code": code, "reason": reason }).to_string());
+    }
     res
 }
 
