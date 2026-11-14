@@ -127,6 +127,23 @@ final class PacedSenderTests: XCTestCase {
         XCTAssertEqual(weakChanges, [true])
     }
 
+    func testIdleAfterOneSlowAckDoesNotEnterWeak() {
+        let s = make()
+        offerSmall(s, 1)
+        t = 0.01
+        s.ack(processingMs: 0)  // base rtt 10 ms
+        offerSmall(s, 2)
+        t = 0.26
+        s.ack(processingMs: 0)  // one slow ack (250 ms), nothing in flight afterwards
+        XCTAssertEqual(s.takeStats().inFlight, 0)
+        for _ in 0..<5 {
+            t += 1
+            s.tick()
+        }
+        XCTAssertTrue(weakChanges.isEmpty)
+        XCTAssertFalse(s.weak)
+    }
+
     func testPinWhileWeakLeavesAtOnce() {
         let s = make()
         offerSmall(s, 1)

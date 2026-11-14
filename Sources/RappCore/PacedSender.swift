@@ -101,7 +101,8 @@ public final class PacedSender {
     public func tick() {
         guard acks else { return }
         let t = now()
-        report(tier.observe(now: t, queueing: pacer.queueing(now: t), onAck: false))
+        // An idle link is not queueing: a stale slow RTT must not keep the weak timer running.
+        report(tier.observe(now: t, queueing: pacer.inFlight > 0 && pacer.queueing(now: t), onAck: false))
     }
 
     /// Stats for the last second. `latencyMs` is the most recent capture-to-ack latency since the
