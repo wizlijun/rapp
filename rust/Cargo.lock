@@ -1301,6 +1301,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rapp-term"
+version = "0.5.5"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "rapp-testkit"
 version = "0.5.5"
 dependencies = [
