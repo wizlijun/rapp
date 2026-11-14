@@ -105,11 +105,11 @@ const HISTORY_DEFAULT: u64 = 50;
 const HISTORY_MAX: u64 = 500;
 
 /// 访问记录 (spec §6): sessions, terminal inputs, failed auths, refused requests and blocked input; never side
-/// connections.
+/// connections, nor the hub's background `watch_terms` (polled like `ping`, not a user action).
 fn in_history(v: &Value) -> bool {
     let shown = match v["ev"].as_str() {
         Some("session_start" | "session_end" | "term_inputs" | "auth_fail" | "rejected" | "input_blocked") => true,
-        Some("request") => v["result"] != "ok",
+        Some("request") => v["result"] != "ok" && v["op"] != "watch_terms",
         _ => false,
     };
     shown && v["side"] != true

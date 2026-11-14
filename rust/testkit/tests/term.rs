@@ -91,6 +91,16 @@ async fn with_terminals_off_nothing_starts() {
     assert_eq!(term_log(a.bins.path()), None);
     assert_eq!(std::fs::read_to_string(a.home.path().join("term.json")).unwrap(), r#"{"allow":false}"#);
     assert_eq!(req(&conn, json!({"op":"list_apps"})).await["ok"], true);
+
+    // The hub's background watch stays in the log file but not in the access history; a refused new_term is in both.
+    let home = a.home.path();
+    wait_log(home, "request", |v| v["op"] == "watch_terms" && v["result"] == OFF).await;
+    wait_log(home, "request", |v| v["op"] == "remove_term_target" && v["result"] == OFF).await;
+    let h = ipc_once(&a.svc, home, json!({"cmd":"history","limit":10})).await;
+    let ops: Vec<_> =
+        h["events"].as_array().unwrap().iter().filter(|v| v["ev"] == "request").map(|v| &v["op"]).collect();
+    assert!(ops.contains(&&json!("new_term")), "{h}");
+    assert!(!ops.contains(&&json!("watch_terms")), "{h}");
 }
 
 #[tokio::test]

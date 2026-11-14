@@ -201,3 +201,35 @@ async fn a_watch_says_off_when_terminals_turn_off() {
     assert_eq!(pushed_terms(&mut hub).await, json!({"event":"terms","id":a.id,"off":true}));
     hub.finish().await;
 }
+
+#[tokio::test]
+async fn with_terminals_off_the_watch_waits_until_terms_is_asked() {
+    let a = service().await;
+    let config = a.home.path().join("term.json");
+    std::fs::write(&config, r#"{"allow":false}"#).unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = presence_hub(&a, home.path()).await;
+    assert_eq!(pushed_terms(&mut hub).await, json!({"event":"terms","id":a.id,"off":true}));
+    for _ in 0..5 {
+        next_where(&mut hub, "presence round", |r| {
+            assert_ne!(r["event"], "error", "{r}");
+            assert!(r["event"] != "terms" || r.get("req").is_some(), "{r}");
+            *r == json!({"event":"presence","id":a.id,"online":true})
+        })
+        .await;
+    }
+
+    // Turned back on: the GUI's `terms` restarts the watch at once.
+    std::fs::remove_file(&config).unwrap();
+    hub.send(json!({"cmd":"terms","id":a.id,"req":2})).await;
+    let first = pushed_terms(&mut hub).await;
+    assert_eq!(first["terms"][0]["id"], "term:tmux:work", "{first}");
+    // One refused watch over all those rounds. The service log counts identical lines in a row instead of writing
+    // them again, so a refusal asked every round would show as a `repeat` line once the next line is written.
+    let events = log_events(a.home.path());
+    let watches: Vec<_> =
+        events.iter().filter(|v| v["ev"] == "request" && v["op"] == "watch_terms").map(|v| &v["result"]).collect();
+    assert_eq!(watches, [&json!("terminal sessions are off"), &json!("ok")], "{events:?}");
+    assert!(!events.iter().any(|v| v["ev"] == "repeat"), "{events:?}");
+    hub.finish().await;
+}
