@@ -58,6 +58,11 @@ pub fn local_ipv4s() -> Vec<Ipv4Addr> {
     v
 }
 
+/// Every usable IPv4 of this machine as `ip:port`, primary first (what a device tells the relay).
+pub fn lan_addrs(port: u16) -> Vec<String> {
+    local_ipv4s().into_iter().map(|ip| format!("{ip}:{port}")).collect()
+}
+
 /// `id@ip`, with `:port` only when it is not the default.
 pub fn at_address(id: &str, ip: Ipv4Addr, port: u16) -> String {
     if port == DEFAULT_PEER_PORT {

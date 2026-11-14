@@ -241,7 +241,7 @@ void main() {
     await tester.ensureVisible(find.byKey(const Key('add-button')));
     await tester.tap(find.byKey(const Key('add-button')));
     await tester.pumpAndSettle();
-    expect(find.textContaining('bad password'), findsOneWidget);
+    expect(find.textContaining('密码不对'), findsOneWidget);
     expect(s.deviceTab, isNull);
   });
 

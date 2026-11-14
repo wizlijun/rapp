@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../hub_client.dart';
 import 'controls.dart';
+import 'lifecycle.dart' show disconnectWord;
 import 'tokens.dart';
 
 class AddDeviceForm extends StatefulWidget {
@@ -11,10 +12,14 @@ class AddDeviceForm extends StatefulWidget {
     required this.hub,
     required this.onAdded,
     this.enabled = true,
+    this.relaySet = false,
   });
   final HubClient hub;
   final ValueChanged<String> onAdded;
   final bool enabled;
+
+  /// This machine has a relay: add by bare ID, and the password may stay empty (a key does the work).
+  final bool relaySet;
 
   @override
   State<AddDeviceForm> createState() => _AddDeviceFormState();
@@ -47,7 +52,7 @@ class _AddDeviceFormState extends State<AddDeviceForm> {
       _pw.clear();
       widget.onAdded(host.id);
     } catch (e) {
-      _error = '$e';
+      _error = disconnectWord('$e');
     }
     if (mounted) setState(() => _busy = false);
   }
@@ -61,7 +66,7 @@ class _AddDeviceFormState extends State<AddDeviceForm> {
         TextField(
           key: const Key('add-id'),
           controller: _id,
-          decoration: const InputDecoration(labelText: '对方的 ID@IP', isDense: true),
+          decoration: InputDecoration(labelText: widget.relaySet ? '对方的 ID' : '对方的 ID@IP', isDense: true),
         ),
         const SizedBox(height: 8),
         TextField(
@@ -70,7 +75,8 @@ class _AddDeviceFormState extends State<AddDeviceForm> {
           obscureText: true,
           enableSuggestions: false,
           autocorrect: false,
-          decoration: const InputDecoration(labelText: '密码', isDense: true),
+          decoration: InputDecoration(
+              labelText: '密码', hintText: widget.relaySet ? '有 key 时不用填' : null, isDense: true),
           onSubmitted: (_) => _add(),
         ),
         const SizedBox(height: 8),

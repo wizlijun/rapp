@@ -19,3 +19,4 @@ rapp-net.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
+tokio-rustls.workspace = true

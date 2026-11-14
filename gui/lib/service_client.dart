@@ -40,6 +40,11 @@ class ServiceStatus {
     this.logDir,
     this.update,
     this.permissionsLostAfterUpdate = false,
+    this.relayAddr,
+    this.relay = 'off',
+    this.relayError,
+    this.hasKey = false,
+    this.fp,
   });
 
   final String? id;
@@ -61,8 +66,25 @@ class ServiceStatus {
   /// Both permissions were granted before the last update and are not now (spec §3.3).
   final bool permissionsLostAfterUpdate;
 
-  /// The ID as people should type it: the `id@ip` forms (bare ID if the machine has no address).
-  List<String> get shownIds => lanIds.isEmpty ? [?id] : lanIds;
+  /// `host:port` of the rapp-relay access point; null when none is set.
+  final String? relayAddr;
+
+  /// The relay connection: `off`, `connecting`, `connected` or `error`.
+  final String relay;
+  final String? relayError;
+
+  /// A valid key is saved (the key itself comes only from [ServiceConnection.showKey]).
+  final bool hasKey;
+
+  /// This device's fingerprint.
+  final String? fp;
+
+  /// The relay can be used: an address and a valid key (an address alone, e.g. with 0.5.5's key, is not).
+  bool get relaySet => hasKey && relayAddr != null;
+
+  /// The ID as people should type it: with a relay set the bare ID first, then the `id@ip` forms;
+  /// without, just the `id@ip` forms (bare ID if the machine has no address).
+  List<String> get shownIds => relaySet ? [?id, ...lanIds] : (lanIds.isEmpty ? [?id] : lanIds);
 
   factory ServiceStatus.fromJson(Map<String, dynamic> m) {
     final perms = m['permissions'] is Map ? m['permissions'] as Map : const {};
@@ -76,6 +98,11 @@ class ServiceStatus {
       logDir: m['log_dir']?.toString(),
       update: UpdateInfo.fromJson(m['update']),
       permissionsLostAfterUpdate: m['permissions_lost_after_update'] == true,
+      relayAddr: (m['relay_addr']?.toString() ?? '').isEmpty ? null : m['relay_addr'].toString(),
+      relay: m['relay']?.toString() ?? 'off',
+      relayError: (m['relay_error']?.toString() ?? '').isEmpty ? null : m['relay_error'].toString(),
+      hasKey: m['has_key'] == true,
+      fp: m['fp']?.toString(),
       sessions: (m['sessions'] as List? ?? const [])
           .whereType<Map>()
           .map((s) => ServiceSession(s['sid'] as Object, '${s['peer'] ?? ''}', '${s['app'] ?? ''}',
@@ -132,6 +159,12 @@ class ServiceConnection {
 
   Future<ServiceStatus> status() async => ServiceStatus.fromJson(await request({'cmd': 'status'}));
   Future<void> setPassword(String password) => request({'cmd': 'set_password', 'password': password});
+
+  /// Empty [relay] / [key] clear them. Errors: `bad key`, `bad address`.
+  Future<void> setRelay(String relay, String key) => request({'cmd': 'set_relay', 'relay': relay, 'key': key});
+
+  /// The key text; the only place the service returns it.
+  Future<String> showKey() async => '${(await request({'cmd': 'show_key'}))['key'] ?? ''}';
   Future<void> kick(Object sid) => request({'cmd': 'kick', 'sid': sid});
   Future<void> subscribe() => request({'cmd': 'subscribe'});
 
@@ -292,6 +325,13 @@ class ServiceMonitor extends ChangeNotifier {
     await _need().setPassword(pw);
     await refresh();
   }
+
+  Future<void> setRelay(String relay, String key) async {
+    await _need().setRelay(relay, key);
+    await refresh();
+  }
+
+  Future<String> showKey() => _need().showKey();
 
   Future<void> kick(Object sid) async {
     await _need().kick(sid);

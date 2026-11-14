@@ -27,3 +27,6 @@ rapp-net.workspace = true
 rapp-service.workspace = true
 rapp-hub.workspace = true
 rapp-update.workspace = true
+rapp-wire.workspace = true
+rapp-conn.workspace = true
+rapp-relay.workspace = true

@@ -10,10 +10,14 @@ use rapp_net::crypto::ct_eq;
 use rapp_net::line::{err, ok, read_json, write_json};
 use rapp_net::log::{clean_name, Lvl};
 use rapp_net::msg::Op;
-use rapp_net::quic::{bi, splice_metered, BiStream, Meter};
+use rapp_conn::{hello_server, quic_facts, Facts, Me, Pipe, Role};
+use rapp_net::quic::{bi, splice_metered, Meter};
+use rapp_wire::tls::{alpn, ALPN_DEVICE};
+use rapp_wire::Key;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::io::{AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 const AUTH_WAIT: Duration = Duration::from_secs(10);
@@ -35,7 +39,10 @@ pub async fn accept_loop(state: Arc<State>, endpoint: Endpoint) {
 async fn serve_conn(state: Arc<State>, conn: Connection) {
     let remote = conn.remote_address();
     let private = is_private(remote.ip());
-    let mut peer = Peer { addr: remote.to_string(), name: None, path: if private { "lan" } else { "direct" } };
+    let mut peer = Peer { addr: remote.to_string(), name: None, path: if private { "lan" } else { "direct" }, fp: None };
+    if alpn(&conn).as_deref() == Some(ALPN_DEVICE) {
+        return serve_device(state, conn, peer).await;
+    }
     let reason = match tokio::time::timeout(AUTH_WAIT, auth(&state, &conn, private, &mut peer)).await {
         Ok(Ok(None)) => None,
         Ok(Ok(Some(reason))) => Some(reason),
@@ -56,18 +63,85 @@ async fn serve_conn(state: Arc<State>, conn: Connection) {
     while let Ok(pair) = conn.accept_bi().await {
         let (state, peer) = (state.clone(), peer.clone());
         tokio::spawn(async move {
-            if let Err(e) = serve_request(&state, bi(pair), peer).await {
+            if let Err(e) = serve_request(&state, Box::new(bi(pair)), peer).await {
                 state.log.msg(Lvl::Warn, format!("{remote}: {e:#}"));
             }
         });
     }
 }
 
+/// A `rapp/2` connection: B must show a certificate, and its first stream starts with a hello that
+/// the key or `paired.json` vouches for. The request that follows the hello is served on that stream.
+async fn serve_device(state: Arc<State>, conn: Connection, mut peer: Peer) {
+    let remote = conn.remote_address();
+    let refuse = |peer: &Peer, reason: &str| {
+        state.log.event(Lvl::Warn, "trust", peer.fields(json!({"result": "refused", "reason": reason})));
+    };
+    let facts = match quic_facts(&conn, &state.identity.fp, Role::Server) {
+        Ok(f) => f,
+        Err(e) => {
+            refuse(&peer, &format!("{e:#}"));
+            conn.close(1u32.into(), b"auth failed");
+            return;
+        }
+    };
+    peer.fp = Some(facts.peer);
+    let hello = async {
+        let mut pipe: Pipe = Box::new(bi(conn.accept_bi().await?));
+        greet(&state, &mut pipe, &facts, &mut peer).await?;
+        anyhow::Ok(pipe)
+    };
+    let pipe = match tokio::time::timeout(AUTH_WAIT, hello).await {
+        Ok(Ok(p)) => p,
+        failed => {
+            let reason = match failed {
+                Ok(Err(e)) => format!("{e:#}"),
+                _ => "timeout".to_string(),
+            };
+            refuse(&peer, &reason);
+            // Give the `not trusted` line a moment to arrive before closing.
+            let _ = tokio::time::timeout(Duration::from_secs(1), conn.closed()).await;
+            conn.close(1u32.into(), b"auth failed");
+            return;
+        }
+    };
+    let serve = |pipe: Pipe, state: Arc<State>, peer: Peer, conn: Connection| {
+        tokio::spawn(async move {
+            // A stream cut off by the connection closing is not worth a line.
+            if let Err(e) = serve_request(&state, pipe, peer).await {
+                if conn.close_reason().is_none() {
+                    state.log.msg(Lvl::Warn, format!("{remote}: {e:#}"));
+                }
+            }
+        });
+    };
+    serve(pipe, state.clone(), peer.clone(), conn.clone());
+    while let Ok(pair) = conn.accept_bi().await {
+        serve(Box::new(bi(pair)), state.clone(), peer.clone(), conn.clone());
+    }
+}
+
+/// A's side of the hello on a `rapp/2` stream or a relayed one: the key or `paired.json` must
+/// vouch for B. Sets `peer.name` and logs the `trust` line; on failure `hello_server` has already
+/// replied `not trusted`.
+pub(crate) async fn greet(state: &State, pipe: &mut Pipe, facts: &Facts, peer: &mut Peer) -> Result<()> {
+    let (id, name, key) = {
+        let cfg = state.cfg.lock().unwrap();
+        (cfg.id.clone().unwrap_or_default(), cfg.name.clone(), cfg.key.as_deref().and_then(|k| k.parse::<Key>().ok()))
+    };
+    let me = Me { id: &id, name: &name, key: key.as_ref() };
+    let greeted = hello_server(pipe, facts, &me, &state.paired).await?;
+    peer.name = Some(clean_name(&greeted.name)).filter(|n| !n.is_empty());
+    let result = if greeted.newly { "paired" } else { "known" };
+    state.log.event(Lvl::Info, "trust", peer.fields(json!({"fp": greeted.fp.to_string(), "result": result})));
+    Ok(())
+}
+
 /// The first stream must be `{"op":"auth",...}`. None when it passed, else the reason;
 /// `peer.name` picks up the name B declared, cleaned.
 /// Err only when B never opened a stream (a dropped probe).
 async fn auth(state: &State, conn: &Connection, private: bool, peer: &mut Peer) -> Result<Option<String>> {
-    let mut s = bi(conn.accept_bi().await?);
+    let mut s: Pipe = Box::new(bi(conn.accept_bi().await?));
     let declared = |n: Option<String>| n.map(|n| clean_name(&n)).filter(|n| !n.is_empty());
     let reply = match read_json(&mut s).await.map(serde_json::from_value) {
         Err(_) => err("bad request"),
@@ -94,14 +168,14 @@ async fn auth(state: &State, conn: &Connection, private: bool, peer: &mut Peer) 
     Ok(reply["error"].as_str().map(str::to_string))
 }
 
-async fn reply_and_finish(s: &mut BiStream, v: Value) -> Result<()> {
+async fn reply_and_finish<W: AsyncWrite + Unpin>(s: &mut W, v: Value) -> Result<()> {
     write_json(s, &v).await?;
-    s.writer_mut().finish()?;
+    s.shutdown().await?;
     Ok(())
 }
 
-/// One request on an authenticated stream.
-pub async fn serve_request(state: &Arc<State>, mut s: BiStream, peer: Peer) -> Result<()> {
+/// One request on an authenticated stream (a direct QUIC stream, or a relayed one).
+pub async fn serve_request(state: &Arc<State>, mut s: Pipe, peer: Peer) -> Result<()> {
     match serde_json::from_value(read_json(&mut s).await?) {
         Ok(Op::ListApps) => {
             let r = match workers::list_apps(state).await {
@@ -137,7 +211,7 @@ fn open_fields(app: &str, side: bool) -> Value {
     v
 }
 
-async fn open(state: &Arc<State>, mut s: BiStream, app: &str, side: bool, peer: Peer) -> Result<()> {
+async fn open(state: &Arc<State>, mut s: Pipe, app: &str, side: bool, peer: Peer) -> Result<()> {
     // Counts as "in use" for the updater from now until the session ends.
     let _opening = match crate::update::begin_open(state) {
         Ok(g) => g,
@@ -166,7 +240,7 @@ async fn open(state: &Arc<State>, mut s: BiStream, app: &str, side: bool, peer: 
 
 async fn splice_session(
     state: &Arc<State>,
-    s: &mut BiStream,
+    s: &mut Pipe,
     app: &str,
     side: bool,
     port: u16,

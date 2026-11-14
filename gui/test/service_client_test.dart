@@ -59,6 +59,10 @@ class FakeService {
         case 'subscribe':
           _subscribers.add(s);
           s.write('{"ok":true}\n');
+        case 'show_key':
+          s.write('${jsonEncode(replies['show_key'] ?? {'ok': true, 'key': 'KEY-TEXT-123'})}\n');
+        case 'set_relay':
+          s.write('${jsonEncode(replies['set_relay'] ?? {'ok': true})}\n');
         case 'set_password':
         case 'kick':
           s.write('{"ok":true}\n');
@@ -143,12 +147,49 @@ void main() {
     final off = ServiceStatus.fromJson({'ok': true, 'id': '123456789', 'lan_ids': lan});
     expect(off.lanIds, lan);
     expect(off.shownIds, lan);
-    // an old service may still send relay fields: ignored
-    final old = ServiceStatus.fromJson(
-        {'ok': true, 'id': '123456789', 'relay': 'connected', 'relay_error': 'x', 'lan_ids': lan});
-    expect(old.shownIds, lan);
+    // with a relay set the bare ID comes first
+    final withRelay = ServiceStatus.fromJson(
+        {'ok': true, 'id': '123456789', 'relay_addr': 'vps:22026', 'has_key': true, 'lan_ids': lan});
+    expect(withRelay.shownIds, ['123456789', ...lan]);
+    // an address without a usable key is no relay
+    final noKey =
+        ServiceStatus.fromJson({'ok': true, 'id': '123456789', 'relay_addr': 'vps:22026', 'lan_ids': lan});
+    expect(noKey.shownIds, lan);
     final noNet = ServiceStatus.fromJson({'ok': true, 'id': '123456789', 'lan_ids': []});
     expect(noNet.shownIds, ['123456789']);
+  });
+
+  test('fromJson reads the relay fields', () {
+    final s = ServiceStatus.fromJson({
+      'ok': true,
+      'relay_addr': 'vps:22026',
+      'has_key': true,
+      'relay': 'error',
+      'relay_error': 'bad key',
+      'fp': 'abcd',
+    });
+    expect(s.relayAddr, 'vps:22026');
+    expect(s.hasKey, isTrue);
+    expect(s.relay, 'error');
+    expect(s.relayError, 'bad key');
+    expect(s.fp, 'abcd');
+  });
+
+  test('the relay is set only with both an address and a key', () {
+    ServiceStatus st(Map<String, dynamic> m) => ServiceStatus.fromJson({'ok': true, ...m});
+    expect(st({'relay_addr': 'vps:22026', 'has_key': true}).relaySet, isTrue);
+    expect(st({'relay_addr': 'vps:22026', 'has_key': false}).relaySet, isFalse);
+    expect(st({'has_key': true}).relaySet, isFalse);
+    expect(st({}).relaySet, isFalse);
+  });
+
+  test('missing relay fields default to off', () {
+    final s = ServiceStatus.fromJson({'ok': true, 'id': '1', 'relay_addr': ''});
+    expect(s.relayAddr, isNull);
+    expect(s.relay, 'off');
+    expect(s.hasKey, isFalse);
+    expect(s.relayError, isNull);
+    expect(s.fp, isNull);
   });
 
   test('ServiceStatus tolerates a null id and missing optional fields', () {

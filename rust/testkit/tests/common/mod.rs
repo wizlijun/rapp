@@ -2,6 +2,7 @@
 #![allow(dead_code)]
 
 use quinn::{Connection, Endpoint};
+use rapp_conn::{quic_facts, read_welcome, send_hello, Me, Pipe, Role};
 use rapp_net::line::{read_json, write_json};
 use rapp_net::quic::{bi, client_endpoint, connect, ALPN_PEER};
 use rapp_service::{Runner, Service, UpdateOpts};
@@ -57,6 +58,7 @@ pub async fn start_service(home: &Path, bins: &Path, idle: Duration) -> Service 
         runner: Arc::new(FakeRunner::new()),
         update: None,
         data: None,
+        advertise_lan: None,
     })
     .await
     .unwrap()
@@ -78,6 +80,7 @@ pub async fn start_service_with(
         runner,
         update,
         data: None,
+        advertise_lan: None,
     })
     .await
     .unwrap()
@@ -198,6 +201,45 @@ pub fn a_addr(svc: &Service) -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], svc.port))
 }
 
+// ---- rapp/2 B side ----
+
+/// A `rapp/2` connection to A showing `id`'s certificate.
+pub async fn dial2(a: SocketAddr, id: &rapp_wire::Identity) -> Connection {
+    let ep = b_endpoint();
+    let cfg = rapp_wire::tls::device_client_config(id, rapp_wire::tls::ALPN_DEVICE).unwrap();
+    let connecting = ep.connect_with(cfg, a, "rapp").unwrap();
+    tokio::time::timeout(Duration::from_secs(5), connecting).await.expect("connect in time").unwrap()
+}
+
+/// The hello and one request on a fresh stream, written together as B does; the welcome is
+/// checked through `quic_facts` and `read_welcome`. Returns the pipe positioned at the reply.
+pub async fn hello_and_send(
+    conn: &Connection,
+    id: &rapp_wire::Identity,
+    a_id: &str,
+    key: Option<&rapp_wire::Key>,
+    request: Value,
+) -> anyhow::Result<Pipe> {
+    let facts = quic_facts(conn, &id.fp, Role::Client)?;
+    let mut pipe: Pipe = Box::new(bi(conn.open_bi().await?));
+    send_hello(&mut pipe, &facts, &Me { id: "", name: "test-b", key }).await?;
+    write_json(&mut pipe, &request).await?;
+    tokio::time::timeout(WAIT, read_welcome(&mut pipe, &facts, key, a_id, None)).await??;
+    Ok(pipe)
+}
+
+/// `hello_and_send` and the reply to the request.
+pub async fn req2(
+    conn: &Connection,
+    id: &rapp_wire::Identity,
+    a_id: &str,
+    key: Option<&rapp_wire::Key>,
+    request: Value,
+) -> anyhow::Result<Value> {
+    let mut pipe = hello_and_send(conn, id, a_id, key, request).await?;
+    tokio::time::timeout(WAIT, read_json(&mut pipe)).await?
+}
+
 // ---- hub driver ----
 
 pub struct Hub {
@@ -259,4 +301,128 @@ impl Hub {
         self.task.await.unwrap().unwrap();
         rest
     }
+}
+
+// ---- in-process relay ----
+
+/// A relay on an ephemeral UDP port with its own data dir. `restart` brings it back on the same
+/// port and data (so the key and the relay's fingerprint stay valid).
+pub struct RelayRig {
+    pub relay: Option<rapp_relay::server::Relay>,
+    pub data: TempDir,
+    pub key: rapp_wire::Key,
+    pub addr: String,
+}
+
+impl RelayRig {
+    pub async fn start() -> RelayRig {
+        let data = tempfile::tempdir().unwrap();
+        let relay = Self::boot(data.path(), "127.0.0.1:0".parse().unwrap()).await;
+        let key = rapp_wire::Key::new_for_relay(&relay.fp);
+        relay.registry().set_join_hash(&rapp_wire::join_hash(&key.join())).unwrap();
+        let addr = relay.addr.to_string();
+        RelayRig { relay: Some(relay), data, key, addr }
+    }
+
+    async fn boot(data: &Path, listen: SocketAddr) -> rapp_relay::server::Relay {
+        let config = rapp_relay::config::Config { listen, ..Default::default() };
+        let opts = rapp_relay::server::Opts {
+            data: data.to_path_buf(),
+            config,
+            log: rapp_net::log::Log::file(data, "relay.log"),
+            enroll_from_env: false,
+        };
+        rapp_relay::server::Relay::start(opts).await.expect("relay starts")
+    }
+
+    /// Streams the relay was asked to relay so far (audited ones, failures, and the short ones it only counts).
+    pub fn streams(&self) -> u64 {
+        let relay = self.relay.as_ref().expect("relay running");
+        relay.audit().flush();
+        let lines = rapp_relay::audit::read(self.data.path(), None, None, None).unwrap_or_default();
+        lines
+            .iter()
+            .map(|v| match v["ev"].as_str() {
+                Some("relayed") => 1,
+                Some("probes") => v["n"].as_u64().unwrap_or(0),
+                _ => 0,
+            })
+            .sum()
+    }
+
+    pub async fn stop(&mut self) {
+        if let Some(r) = self.relay.take() {
+            r.stop().await;
+        }
+    }
+
+    pub async fn restart(&mut self) {
+        self.stop().await;
+        // The old socket is released a moment after `stop` returns.
+        let listen: SocketAddr = self.addr.parse().unwrap();
+        for _ in 0..50 {
+            if std::net::UdpSocket::bind(listen).is_ok() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        self.relay = Some(Self::boot(self.data.path(), listen).await);
+    }
+}
+
+/// B's side of the relay: its own endpoint and identity, dialed in with `key`.
+pub async fn relay_conn(
+    rig: &RelayRig,
+    id: &rapp_wire::Identity,
+    key: &rapp_wire::Key,
+) -> (Endpoint, rapp_conn::relay::RelayConn) {
+    let ep = b_endpoint();
+    let conn = tokio::time::timeout(WAIT, rapp_conn::relay::RelayConn::dial(&ep, &rig.addr, key, id))
+        .await
+        .expect("dial in time")
+        .expect("dial");
+    (ep, conn)
+}
+
+/// The service's status once `pred` accepts it (within `WAIT`).
+pub async fn wait_status(ipc: &mut Ipc, pred: impl Fn(&Value) -> bool) -> Value {
+    let deadline = tokio::time::Instant::now() + WAIT;
+    loop {
+        let st = ipc.call(json!({"cmd":"status"})).await;
+        if pred(&st) {
+            return st;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "status never matched: {st}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// A service whose `service.json` already names `relay` and `key`; its LAN address is a dummy.
+pub async fn service_on_relay(addr: &str, key: &rapp_wire::Key) -> TestService {
+    service_on_relay_lan(addr, key, Some(vec!["127.0.0.1:1".into()])).await
+}
+
+/// Like `service_on_relay`, registering `lan` (None: the service's own addresses).
+pub async fn service_on_relay_lan(addr: &str, key: &rapp_wire::Key, lan: Option<Vec<String>>) -> TestService {
+    let (home, bins) = (tempfile::tempdir().unwrap(), bins());
+    let cfg = json!({
+        "id": null, "name": "test-a", "password": PASSWORD, "port": 0, "ipc_port": 0,
+        "relay": addr, "key": key.to_string(),
+    });
+    rapp_net::config::write_json(&home.path().join("service.json"), &cfg).unwrap();
+    let svc = Service::start(rapp_service::Opts {
+        home: home.path().to_path_buf(),
+        bin_dir: Some(bins.path().to_path_buf()),
+        gui: None,
+        worker_idle: Duration::from_secs(60),
+        log_dir: home.path().join("logs"),
+        runner: Arc::new(FakeRunner::new()),
+        update: None,
+        data: None,
+        advertise_lan: lan,
+    })
+    .await
+    .unwrap();
+    let id = ipc_once(&svc, home.path(), json!({"cmd":"status"})).await["id"].as_str().unwrap().to_string();
+    TestService { svc, home, bins, id }
 }

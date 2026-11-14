@@ -2,7 +2,9 @@
 
 use crate::config::Config;
 use crate::workers::Workers;
+use rapp_conn::Paired;
 use rapp_net::log::{Log, Lvl};
+use rapp_wire::{Fp, Identity, Key};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -18,6 +20,8 @@ pub struct Peer {
     pub name: Option<String>,
     /// "lan" | "direct"; "direct" now only shows on `auth_fail` lines (public sources cannot authenticate).
     pub path: &'static str,
+    /// The device's fingerprint on a `rapp/2` connection; None on `rapp/1`.
+    pub fp: Option<Fp>,
 }
 
 impl Peer {
@@ -80,11 +84,33 @@ pub struct State {
     pub update_opts: Option<crate::UpdateOpts>,
     /// Set to true once a new version is in place; `main` then stops and exits 0.
     pub restart: watch::Sender<bool>,
+    /// This device's certificate and key (`device.crt` / `device.key`).
+    pub identity: Identity,
+    /// The devices that may connect without a key (`paired.json`).
+    pub paired: Paired,
+    /// The relay connection's state: `"off" | "connecting" | "connected" | "error"` and the error text.
+    pub relay: Mutex<(&'static str, Option<String>)>,
+    /// Bumped each time `set_relay` saves; the relay connection restarts when it changes.
+    pub relay_settings: watch::Sender<u64>,
 }
 
 impl State {
     pub fn notify(&self) {
         self.changed.send_modify(|n| *n += 1);
+    }
+
+    /// The relay connection reports where it is; `error` is the latest failure text (it stays
+    /// while `"connecting"` retries). Logged and announced only when it changes.
+    pub fn set_relay_status(&self, status: &'static str, error: Option<String>) {
+        let next = (status, error);
+        if std::mem::replace(&mut *self.relay.lock().unwrap(), next.clone()) != next {
+            let mut v = json!({"state": status});
+            if let Some(e) = &next.1 {
+                v["error"] = json!(e);
+            }
+            self.log.event(if status == "error" { Lvl::Warn } else { Lvl::Info }, "relay", v);
+            self.notify();
+        }
     }
 
     /// Stores a fresh permission check; subscribers hear about it only if it changed.
@@ -191,6 +217,8 @@ impl State {
             .map(|(sid, s)| json!({"sid":sid,"peer":s.peer.addr,"app":s.app,"path":s.peer.path,"since":s.since}))
             .collect();
         let id = cfg.id.clone().unwrap_or_default();
+        let (relay, relay_error) = self.relay.lock().unwrap().clone();
+        let has_key = cfg.key.as_deref().is_some_and(|k| k.parse::<Key>().is_ok());
         let lan_ids: Vec<String> =
             rapp_net::addr::local_ipv4s().into_iter().map(|ip| rapp_net::addr::at_address(&id, ip, self.port)).collect();
         json!({
@@ -198,6 +226,8 @@ impl State {
             "permissions": self.permissions.lock().unwrap().clone(),
             "permissions_lost_after_update": *self.perms_lost.lock().unwrap(), "sessions": sessions,
             "log_dir": self.log_dir, "update": crate::update::status_json(self),
+            "relay_addr": cfg.relay, "has_key": has_key, "relay": relay, "relay_error": relay_error,
+            "fp": self.identity.fp.to_string(),
         })
     }
 }
