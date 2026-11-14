@@ -59,6 +59,36 @@ async fn captures_cjk_truecolor_and_cursor() {
 }
 
 #[tokio::test]
+async fn capture_marks_wrapped_rows() {
+    let Some(s) = common::Server::start() else { return };
+    s.raw(&[
+        "new-session",
+        "-d",
+        "-s",
+        "w",
+        "-x",
+        "20",
+        "-y",
+        "6",
+        "printf 'abcdefghijklmnopqrstuvwxyz0123\\n'; sleep 60",
+    ]);
+    common::settle().await;
+    let pane = s.tmux().list().await.unwrap()[0].pane.clone();
+    let sc = s.tmux().capture(&pane).await.unwrap();
+    assert_eq!(sc.wrapped, vec![0]);
+}
+
+#[tokio::test]
+async fn capture_reads_cursor_shape() {
+    let Some(s) = common::Server::start() else { return };
+    s.raw(&["new-session", "-d", "-s", "k", "-x", "80", "-y", "6", "printf '\\033[5 q'; sleep 60"]);
+    common::settle().await;
+    let pane = s.tmux().list().await.unwrap()[0].pane.clone();
+    let sc = s.tmux().capture(&pane).await.unwrap();
+    assert_eq!(sc.shape, "bar");
+}
+
+#[tokio::test]
 async fn history_returns_lines_above_the_screen() {
     let Some(s) = common::Server::start() else { return };
     s.raw(&["new-session", "-d", "-s", "h", "-x", "80", "-y", "5", "seq 1 40; sleep 60"]);
@@ -440,6 +470,28 @@ async fn view_type_ack_roundtrip() {
     assert_eq!((shown[0].as_str(), shown[1].as_str()), ("你好", "你好"));
     drop(p.w); // end of input: the pump detaches and returns Ok
     tokio::time::timeout(Duration::from_secs(3), p.done).await.unwrap().unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn served_screens_carry_wrapped_rows_and_the_history_limit() {
+    let Some(s) = common::Server::start() else { return };
+    s.raw(&[
+        "new-session",
+        "-d",
+        "-s",
+        "sw",
+        "-x",
+        "20",
+        "-y",
+        "6",
+        "printf 'abcdefghijklmnopqrstuvwxyz0123\\n'; sleep 60",
+    ]);
+    common::settle().await;
+    let mut p = pump(&s, "sw", fresh_unread());
+    let (pane, _) = greeted(&mut p).await;
+    say(&mut p.w, view(&pane, 20, 6)).await;
+    let Out::Screen { wrapped, limit, .. } = next_not_panes(&mut p.lines).await else { panic!("expected a screen") };
+    assert_eq!((wrapped, limit), (vec![0], 2000));
 }
 
 #[tokio::test]

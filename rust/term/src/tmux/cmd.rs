@@ -37,9 +37,16 @@ pub fn capture(pane: &str) -> Vec<String> {
     ["capture-pane", "-e", "-p", "-t", pane].map(String::from).to_vec()
 }
 
-/// Cursor, alternate-screen flag and size of `pane`, space separated; `Screen::from_capture` reads it.
+/// The visible screen of `pane` as plain text, each wrapped row joined to the row it wraps into.
+pub fn capture_joined(pane: &str) -> Vec<String> {
+    ["capture-pane", "-p", "-J", "-t", pane].map(String::from).to_vec()
+}
+
+/// Cursor, alternate-screen flag, size, scrollback size and limit, and cursor shape of `pane`, space separated;
+/// `Screen::from_capture` reads it.
 pub fn meta(pane: &str) -> Vec<String> {
-    let f = "#{cursor_x} #{cursor_y} #{cursor_flag} #{alternate_on} #{pane_width} #{pane_height}";
+    let f = "#{cursor_x} #{cursor_y} #{cursor_flag} #{alternate_on} #{pane_width} #{pane_height} \
+#{history_size} #{history_limit} #{cursor_shape}";
     ["display-message", "-p", "-t", pane, f].map(String::from).to_vec()
 }
 
@@ -143,6 +150,8 @@ mod tests {
         );
         assert_eq!(list_panes()[0], "list-panes");
         assert_eq!(window_flags(), ["list-panes", "-a", "-F", "#{window_active} #{window_id}"]);
+        assert_eq!(capture_joined("%1"), ["capture-pane", "-p", "-J", "-t", "%1"]);
+        assert!(meta("%1")[4].ends_with(" #{history_size} #{history_limit} #{cursor_shape}"));
         assert_eq!(attach("$3"), ["-C", "attach-session", "-t", "$3"]);
     }
     #[test]

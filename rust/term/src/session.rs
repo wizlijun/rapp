@@ -2,7 +2,7 @@
 
 use crate::keys;
 use crate::proto::{self, In, Out, Pane};
-use crate::screen::Screen;
+use crate::screen::{strip_escapes, wrapped_rows, Screen};
 use crate::sender::Sender;
 use crate::tmux::control::{Control, Event};
 use crate::tmux::{cmd, PaneInfo, Tmux, MAX_PASTE};
@@ -143,7 +143,11 @@ async fn capture(ctl: &Control, pane: &str) -> anyhow::Result<Screen> {
     // The same text `Tmux::capture` reads from stdout, where every row ends in a newline.
     let mut text = rows.join("\n");
     text.push('\n');
-    Screen::from_capture(&text, meta.first().map(String::as_str).unwrap_or(""))
+    let mut s = Screen::from_capture(&text, meta.first().map(String::as_str).unwrap_or(""))?;
+    let joined = ctl.command(&cmd::capture_joined(pane)).await?;
+    let plain: Vec<String> = s.lines.iter().map(|l| strip_escapes(l)).collect();
+    s.wrapped = wrapped_rows(&plain, &joined);
+    Ok(s)
 }
 
 /// A `History` message that fits in one line: when the rows do not all fit, the ones nearest the screen are kept

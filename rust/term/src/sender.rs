@@ -76,6 +76,10 @@ mod tests {
             cy: 0,
             cursor: true,
             alt: false,
+            hist: 0,
+            limit: 0,
+            shape: String::new(),
+            wrapped: Vec::new(),
             lines: vec![tag.into(), "".into(), "".into()],
         }
     }
@@ -124,6 +128,18 @@ mod tests {
         let mut moved = scr("a");
         moved.cx = 5;
         assert!(matches!(&s.offer(moved)[0], Out::Screen { cx: 5, lines, .. } if lines.is_empty()));
+    }
+
+    #[test]
+    fn a_cursor_shape_change_alone_is_sent() {
+        let mut s = Sender::new("%1");
+        let r1 = rev_of(&s.offer(scr("a")));
+        s.ack(r1);
+        let mut bar = scr("a");
+        bar.shape = "bar".into();
+        let out = s.offer(bar);
+        assert_eq!(out.len(), 1);
+        assert!(matches!(&out[0], Out::Screen { shape, lines, .. } if shape == "bar" && lines.is_empty()));
     }
 
     #[test]

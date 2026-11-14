@@ -5,7 +5,7 @@ pub mod control;
 pub mod parse;
 
 use crate::runner::{classify, RunFail, Runner};
-use crate::screen::Screen;
+use crate::screen::{strip_escapes, wrapped_rows, Screen};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::io::AsyncWriteExt;
@@ -202,11 +202,16 @@ impl Tmux {
         Err(Self::failure(&d))
     }
 
-    /// The visible screen of `pane`: the capture, then its geometry.
+    /// The visible screen of `pane`: the capture, then its geometry, then the joined capture its wrapped rows are
+    /// read from.
     pub async fn capture(&self, pane: &str) -> anyhow::Result<Screen> {
         let text = self.run(&cmd::capture(pane)).await?;
         let meta = self.run(&cmd::meta(pane)).await?;
-        Screen::from_capture(&text, &meta)
+        let mut s = Screen::from_capture(&text, &meta)?;
+        let joined: Vec<String> = self.run(&cmd::capture_joined(pane)).await?.lines().map(String::from).collect();
+        let plain: Vec<String> = s.lines.iter().map(|l| strip_escapes(l)).collect();
+        s.wrapped = wrapped_rows(&plain, &joined);
+        Ok(s)
     }
 
     /// A detached session `name` running `command` (each element one word for the program, passed through the
