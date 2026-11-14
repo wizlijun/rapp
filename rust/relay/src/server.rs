@@ -45,6 +45,8 @@ const CLOSE_NORMAL: u32 = 0;
 const CLOSE_REVOKED: u32 = 2;
 const CLOSE_LIMIT: u32 = 3;
 const CLOSE_KEY_CHANGED: u32 = 4;
+/// A device that is not stale enrolled with a wrong key: the client stops until its key changes.
+const CLOSE_BAD_KEY: u32 = 5;
 
 /// How long `stop` takes at most, from the first step to the flush.
 const STOP_WAIT: Duration = Duration::from_secs(2);
@@ -777,13 +779,14 @@ impl Shared {
             return Err("limit".into());
         }
         if !join_matches(join, &want) {
-            // Its certificate shows it is the device that enrolled before the key changed, not
-            // someone guessing: no lockout, or a few old devices behind one address would lock it.
-            if self.registry.get(&peer.fp).is_some_and(|d| d.stale) {
-                return Err("key changed".into());
-            }
+            // A wrong key counts against the source whoever tries it: a client told `key changed`
+            // or `bad key` (with close code 4 or 5) stops, so one that keeps trying is an attack.
             if let Some(secs) = self.enroll_backoff.fail(&source, now) {
                 self.audit.event("lockout", json!({"key": source, "secs": secs}), true);
+            }
+            // The device that enrolled before the key changed: it needs the new key.
+            if self.registry.get(&peer.fp).is_some_and(|d| d.stale) {
+                return Err("key changed".into());
             }
             return Err("bad key".into());
         }
@@ -1073,14 +1076,20 @@ async fn reply(st: BufReader<BiStream>, v: Value) {
     }
 }
 
-/// Replies, waits (briefly) until the peer has the whole reply, then closes the connection with
-/// `CLOSE_LIMIT`: closing at once would drop the reply.
+/// Replies, waits (briefly) until the peer has the whole reply, then closes the connection:
+/// closing at once would drop the reply. A wrong key closes with `CLOSE_KEY_CHANGED` (a stale
+/// device) or `CLOSE_BAD_KEY`, so the client knows to stop; any other failure with `CLOSE_LIMIT`.
 async fn reply_and_close(st: BufReader<BiStream>, v: Value, conn: &quinn::Connection) {
+    let (code, reason): (u32, &[u8]) = match v["error"].as_str() {
+        Some("key changed") => (CLOSE_KEY_CHANGED, b"key changed"),
+        Some("bad key") => (CLOSE_BAD_KEY, b"bad key"),
+        _ => (CLOSE_LIMIT, b"enroll failed"),
+    };
     let (_recv, mut send) = st.into_inner().into_inner();
     if write_json(&mut send, &v).await.is_ok() && send.finish().is_ok() {
         let _ = tokio::time::timeout(Duration::from_secs(1), send.stopped()).await;
     }
-    conn.close(CLOSE_LIMIT.into(), b"enroll failed");
+    conn.close(code.into(), reason);
 }
 
 /// `join_hex` (64 hex digits) hashes to `want`; anything that does not decode is a wrong key.

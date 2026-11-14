@@ -4,7 +4,7 @@
 use std::io;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::task::{ready, Context, Poll};
 use std::time::Duration;
 
@@ -33,9 +33,42 @@ pub const CLOSE_KEY_CHANGED: u32 = 4;
 /// and the error of a request on a connection that ended because the key changed.
 pub const KEY_CHANGED: &str = "key changed";
 
+/// The relay closes a connection whose `enroll` had a wrong key with this code.
+pub const CLOSE_BAD_KEY: u32 = 5;
+/// What the relay answers an `enroll` with a wrong key (a device it does not know, or one whose
+/// key was not changed).
+pub const BAD_KEY: &str = "bad key";
+
+/// The relay refused this device's key: `key changed` or `bad key`, else `None`. A client stops
+/// on either until its key changes; dialing again would only be locked out.
+///
+/// Every error of this module that means a refused key is exactly one of the two texts (a link of
+/// `e`'s chain); one error that merely mentions them is not one.
+pub fn refused_key(e: &anyhow::Error) -> Option<&'static str> {
+    e.chain().find_map(|c| refusal_of(&c.to_string()))
+}
+
 /// The relay changed its key since this device enrolled: it needs the new one.
 pub fn is_key_changed(e: &anyhow::Error) -> bool {
-    format!("{e:#}").contains(KEY_CHANGED)
+    refused_key(e) == Some(KEY_CHANGED)
+}
+
+/// The relay does not take this device's key.
+pub fn is_bad_key(e: &anyhow::Error) -> bool {
+    refused_key(e) == Some(BAD_KEY)
+}
+
+fn refusal_of(text: &str) -> Option<&'static str> {
+    [KEY_CHANGED, BAD_KEY].into_iter().find(|t| *t == text)
+}
+
+/// The refusal a close code means.
+fn refusal_by_code(code: u64) -> Option<&'static str> {
+    match code {
+        c if c == u64::from(CLOSE_KEY_CHANGED) => Some(KEY_CHANGED),
+        c if c == u64::from(CLOSE_BAD_KEY) => Some(BAD_KEY),
+        _ => None,
+    }
 }
 
 /// What `connect` returns about a registered device.
@@ -74,8 +107,8 @@ pub struct RelayConn {
     conn: quinn::Connection,
     join: String,
     enrolled: Arc<AtomicBool>,
-    /// The relay answered `key changed` to an `enroll` (and then closes the connection).
-    key_changed: Arc<AtomicBool>,
+    /// The relay answered `key changed` or `bad key` to an `enroll` (and then closes the connection).
+    enroll_refused: Arc<OnceLock<&'static str>>,
     pushes: Arc<Mutex<mpsc::UnboundedReceiver<Pushed>>>,
 }
 
@@ -102,7 +135,7 @@ impl RelayConn {
             conn,
             join,
             enrolled: Arc::new(AtomicBool::new(false)),
-            key_changed: Arc::new(AtomicBool::new(false)),
+            enroll_refused: Arc::new(OnceLock::new()),
             pushes: Arc::new(Mutex::new(pushes)),
         })
     }
@@ -166,30 +199,38 @@ impl RelayConn {
         self.conn.close_reason().is_some()
     }
 
-    /// This connection ended (or is ending) because the relay changed its key: closed with
-    /// `CLOSE_KEY_CHANGED`, or its `enroll` was answered `key changed`.
-    fn ended_for_key(&self) -> bool {
-        let closed_for_key = matches!(
-            self.conn.close_reason(),
-            Some(quinn::ConnectionError::ApplicationClosed(c)) if u64::from(c.error_code) == u64::from(CLOSE_KEY_CHANGED)
-        );
-        closed_for_key || self.key_changed.load(Ordering::Acquire)
+    /// `key changed` / `bad key` when this connection ended (or is ending) because the relay
+    /// refused the key: closed with `CLOSE_KEY_CHANGED` / `CLOSE_BAD_KEY`, or its `enroll` was
+    /// answered so. A client does not dial again with the same key.
+    pub fn refused(&self) -> Option<&'static str> {
+        let by_code = match self.conn.close_reason() {
+            Some(quinn::ConnectionError::ApplicationClosed(c)) => refusal_by_code(c.error_code.into_inner()),
+            _ => None,
+        };
+        by_code.or_else(|| self.enroll_refused.get().copied())
     }
 
-    /// `e`, or `key changed` when the connection ended for that: a request cut off by the close
-    /// would otherwise say `connection lost`.
+    /// `e`, or `key changed` / `bad key` when the connection ended for that: a request cut off by
+    /// the close would otherwise say `connection lost`.
     fn why(&self, e: anyhow::Error) -> anyhow::Error {
-        if self.ended_for_key() {
-            anyhow!(KEY_CHANGED)
-        } else {
-            e
+        match self.refused() {
+            Some(text) => anyhow!(text),
+            None => e,
+        }
+    }
+
+    /// `e` of a relayed stream, or the refusal its connection ended for.
+    fn why_io(&self, e: io::Error) -> io::Error {
+        match self.refused() {
+            Some(text) => io::Error::other(text),
+            None => e,
         }
     }
 
     async fn enroll(&self) -> Result<()> {
         if let Err(e) = self.request(&Req::Enroll { join: self.join.clone() }).await {
-            if e.to_string() == KEY_CHANGED {
-                self.key_changed.store(true, Ordering::Release);
+            if let Some(text) = refused_key(&e) {
+                let _ = self.enroll_refused.set(text);
             }
             return Err(e);
         }
@@ -313,7 +354,7 @@ async fn read_line_exact<R: AsyncRead + Unpin>(recv: &mut R) -> Result<Vec<u8>> 
 struct Relaying {
     io: BufReader<BiStream>,
     state: Peek,
-    /// The connection it is on, to tell a read cut off by a key change (`why`).
+    /// The connection it is on, to tell a read or write cut off by a refused key (`why_io`).
     relay: RelayConn,
 }
 
@@ -361,22 +402,23 @@ impl Relaying {
 
 impl AsyncRead for Relaying {
     fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, out: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
-        match ready!(self.as_mut().poll_read_inner(cx, out)) {
-            Err(_) if self.relay.ended_for_key() => Poll::Ready(Err(io::Error::other(KEY_CHANGED))),
-            r => Poll::Ready(r),
-        }
+        let r = ready!(self.as_mut().poll_read_inner(cx, out));
+        Poll::Ready(r.map_err(|e| self.relay.why_io(e)))
     }
 }
 
 impl AsyncWrite for Relaying {
     fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, b: &[u8]) -> Poll<io::Result<usize>> {
-        Pin::new(&mut self.io).poll_write(cx, b)
+        let r = ready!(Pin::new(&mut self.io).poll_write(cx, b));
+        Poll::Ready(r.map_err(|e| self.relay.why_io(e)))
     }
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.io).poll_flush(cx)
+        let r = ready!(Pin::new(&mut self.io).poll_flush(cx));
+        Poll::Ready(r.map_err(|e| self.relay.why_io(e)))
     }
     fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
-        Pin::new(&mut self.io).poll_shutdown(cx)
+        let r = ready!(Pin::new(&mut self.io).poll_shutdown(cx));
+        Poll::Ready(r.map_err(|e| self.relay.why_io(e)))
     }
 }
 

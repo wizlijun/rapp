@@ -144,22 +144,26 @@ async fn rotate(r: &TestRelay) -> Key {
 }
 
 #[tokio::test]
-async fn a_stale_device_with_the_old_key_gets_key_changed_and_is_never_locked() {
-    // Rate limiting still applies; room for the 11 attempts below.
+async fn a_stale_device_with_the_old_key_gets_key_changed_and_is_locked_if_it_keeps_trying() {
+    // Rate limiting still applies; room for the attempts below.
     let r = start_relay(|c| c.limits.enroll_per_ip_per_min = 100).await;
+    let lock_after = config::Config::default().limits.lock_after;
     let a = FakeDevice::enrolled(&r).await;
     let new = rotate(&r).await;
     assert_eq!(app_close_code(&closed(&a).await), Some(4));
-    for i in 0..10 {
+    // Each try is told `key changed` and closed with code 4: a client stops there.
+    for i in 0..lock_after {
         let again = FakeDevice::dial_as(&r, same_identity(&a.id)).await.unwrap();
         assert_eq!(again.enroll(&r.key).await, json!({"ok": false, "error": "key changed"}), "attempt {i}");
+        assert_eq!(app_close_code(&closed(&again).await), Some(4), "attempt {i}");
     }
-    assert!(audit_lines(&r, "lockout").is_empty());
+    // One that keeps trying is an attack: its source is locked, the new key included.
+    let again = FakeDevice::dial_as(&r, same_identity(&a.id)).await.unwrap();
+    let v = again.enroll(&new).await;
+    assert!(v["error"].as_str().is_some_and(|e| e.starts_with("locked, retry in ")), "{v}");
+    assert_eq!(audit_lines(&r, "lockout").len(), 1);
     let results: Vec<Value> = audit_lines(&r, "enroll").iter().map(|l| l["result"].clone()).collect();
-    assert_eq!(results.iter().filter(|x| **x == "key changed").count(), 10, "{results:?}");
-    // Another device from the same source is not locked out either.
-    let other = FakeDevice::dial(&r).await;
-    assert_eq!(other.enroll(&new).await["ok"], true);
+    assert_eq!(results.iter().filter(|x| **x == "key changed").count(), lock_after as usize, "{results:?}");
 }
 
 #[tokio::test]

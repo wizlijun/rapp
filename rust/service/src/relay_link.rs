@@ -5,7 +5,7 @@
 use crate::peer::{greet, serve_request};
 use crate::state::{Peer, State};
 use rand::Rng;
-use rapp_conn::relay::{is_key_changed, Pushed, RelayConn, CLOSE_KEY_CHANGED};
+use rapp_conn::relay::{refused_key, Pushed, RelayConn, BAD_KEY, CLOSE_BAD_KEY, CLOSE_KEY_CHANGED, KEY_CHANGED};
 use rapp_conn::{e2e_accept, Pipe};
 use rapp_net::log::Lvl;
 use rapp_wire::{join_hash, Key};
@@ -34,6 +34,9 @@ enum End {
     Revoked,
     /// The relay changed its key and this one is not the new one: stay down until the settings change.
     KeyChanged,
+    /// The relay does not take this key: stay down until the settings change (dialing again with
+    /// it would only be locked out).
+    BadKey,
     /// The relay is restarting: come back after this many ms (plus a little).
     GoingAway(u64),
     /// Could not connect or register, or the relay closed the connection.
@@ -98,6 +101,15 @@ async fn run(state: Arc<State>, lan: Option<Vec<String>>) {
                 }
                 continue;
             }
+            End::BadKey => {
+                state.log.event(Lvl::Warn, "relay_bad_key", json!({}));
+                state.set_relay_status("error", Some(BAD_KEY.into()));
+                (backoff, last_err) = (BACKOFF_START, None);
+                if settings.changed().await.is_err() {
+                    return;
+                }
+                continue;
+            }
             End::GoingAway(ms) => {
                 last_err = None;
                 Duration::from_millis(ms.saturating_add(rand::rng().random_range(0..=1000)))
@@ -140,7 +152,11 @@ async fn session(
     changed_from: &mut Option<String>,
 ) -> End {
     let failed = |e: &dyn std::fmt::Display, registered| End::Failed { err: e.to_string(), registered };
-    let refused = |e: &anyhow::Error| if is_key_changed(e) { End::KeyChanged } else { failed(e, false) };
+    let refused = |e: &anyhow::Error| match refused_key(e) {
+        Some(KEY_CHANGED) => End::KeyChanged,
+        Some(_) => End::BadKey,
+        None => failed(e, false),
+    };
     let conn = match RelayConn::dial(&state.endpoint, addr, key, &state.identity).await {
         Ok(c) => slot.insert(c),
         Err(e) => return refused(&e),
@@ -165,6 +181,7 @@ async fn session(
             // The first `Closed` is the end; a bad push may be followed by a second.
             Ok(Pushed::Closed { code: 2, .. }) => return End::Revoked,
             Ok(Pushed::Closed { code: CLOSE_KEY_CHANGED, .. }) => return End::KeyChanged,
+            Ok(Pushed::Closed { code: CLOSE_BAD_KEY, .. }) => return End::BadKey,
             Ok(Pushed::Closed { reason, .. }) => {
                 let err = if reason.is_empty() { "relay closed the connection".to_string() } else { reason };
                 return failed(&err, true);
