@@ -1,15 +1,16 @@
 [workspace]
 resolver = "2"
-members = ["wire", "relay2","net", "relay", "service", "hub", "testkit", "update", "client-core", "client-gtk"]
+members = ["wire", "conn", "relay", "net", "service", "hub", "testkit", "update", "term", "client-core", "client-gtk"]
 
 [workspace.package]
-version = "0.5.5"
+version = "0.6.0"
 edition = "2021"
 publish = false
 
 [workspace.dependencies]
 anyhow = "1"
 quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }
 tokio = { version = "1", features = ["full"] }
@@ -23,11 +24,12 @@ x509-parser = "0.18"
 data-encoding = "2"
 rapp-wire = { path = "wire" }
 rapp-net = { path = "net" }
+rapp-conn = { path = "conn" }
 rapp-relay = { path = "relay" }
-rapp-relay2 = { path = "relay2" }
 rapp-service = { path = "service" }
 rapp-hub = { path = "hub" }
 rapp-update = { path = "update" }
+rapp-term = { path = "term" }
 
 [profile.release]
 lto = "thin"

@@ -1,278 +1,1094 @@
-//! Per-connection and per-stream handling of register / connect / relay.
+//! The relay service (spec §6.4, §9.2): QUIC accept with address validation, the connection
+//! caps, mandatory device certificates, revocation at the handshake, and the enrollment gate.
+//!
+//! Every bidirectional stream a device opens carries one request line and gets one reply line.
+//! A connection whose fingerprint is not enrolled may only `enroll`. Enrolled devices `register`
+//! their ID and `connect` to each other's (§5.1, §8); every enrolled connection gets the
+//! revocation list when it comes online and whenever the list changes (§7.4). A `relay` request
+//! turns its stream into one half of a splice to a fresh stream on the target's connection; from
+//! then on the relay only moves (and counts) bytes it never reads into anything (§5.3).
+//!
+//! The relay also serves the local admin socket (`crate::admin`), and stops gracefully: it tells
+//! every device it is going away before it closes (§9.3).
 
-use crate::db::{self, Db, Device};
-use crate::limit::{Limiter, Seldom};
-use crate::Opts;
-use anyhow::{anyhow, Result};
-use quinn::{Connection, Endpoint};
-use rapp_net::crypto::{ct_eq, is_valid_id, pw_hash, random_hex, random_id, sha256_hex};
-use rapp_net::line::{check, err, ok, read_json, write_json};
-use rapp_net::log::{clean_name, Lvl, Log};
-use rapp_net::msg::Op;
-use rapp_net::quic::{bi, splice_metered, BiStream, Meter};
-use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::io;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::task::{Context as TaskContext, Poll};
+use std::time::{Duration, Instant, SystemTime};
 
+use anyhow::{Context, Result};
+use rapp_net::log::{Log, Lvl};
+use rapp_wire::line::{err, ok, read_json, write_json};
+use rapp_wire::msg::{is_valid_id, Push, Req, MAX_LAN, MAX_LAN_LEN};
+use rapp_wire::tls::{self, BiStream};
+use rapp_wire::{join_hash, Fp, Identity};
+use serde_json::{json, Value};
+use tokio::io::{AsyncRead, AsyncWrite, BufReader, ReadBuf};
+
+use crate::admin::{self, Control};
+use crate::audit::Audit;
+use crate::config::{Config, Enroll};
+use crate::limits::{source_key, Backoff, Bucket, ConnGuard, Conns, Rate};
+use crate::metrics::{MetricsServer, Stats};
+use crate::store::{Bind, FileRegistry, Registry, Revoked};
+
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+const TENANT: &str = "default";
+
+/// Connection close codes (rapp_wire::msg).
+const CLOSE_NORMAL: u32 = 0;
+const CLOSE_REVOKED: u32 = 2;
+const CLOSE_LIMIT: u32 = 3;
+
+/// How long `stop` takes at most, from the first step to the flush.
+const STOP_WAIT: Duration = Duration::from_secs(2);
+
+/// What `going_away` tells devices: reconnect after this long.
+const GOING_AWAY_MS: u64 = 3000;
+/// How long `stop` waits for the `going_away` pushes to be acknowledged, all of them together.
+const GOING_AWAY_WAIT: Duration = Duration::from_millis(500);
+
+/// How long the target of a `connect` has to answer `incoming` before it counts as offline.
 const INCOMING_WAIT: Duration = Duration::from_secs(2);
 
-/// A relayed stream shorter than this and smaller than `PROBE_BYTES` (both ways together) is a
-/// presence ping or a like-sized control request, not a session: its `relayed` line is Debug, so
-/// a 30 s probe does not fill the access record. A ping costs about 100 bytes and well under a
-/// second; a session sends its first frame (tens of KB) at once and lasts longer than this.
+const BAD_REQUEST: &str = "bad request";
+const OFFLINE: &str = "offline";
+
+/// Copy buffer per splice direction.
+const SPLICE_BUF: usize = 64 * 1024;
+
+/// A relayed stream shorter than this and smaller than `PROBE_BYTES` (both directions together)
+/// is an online probe: counted into the hourly `probes` line, not audited on its own (§11.1).
 const PROBE_TIME: Duration = Duration::from_secs(5);
-const PROBE_BYTES: u64 = 8 * 1024;
+const PROBE_BYTES: u64 = 8192;
 
-/// `connect` → `offline` is a Warn line at most this often per (source ip, target id).
-const OFFLINE_LOG_EVERY: Duration = Duration::from_secs(600);
+pub struct Opts {
+    pub data: PathBuf,
+    pub config: Config,
+    pub log: Log,
+    /// `RAPP_RELAY_ENROLL` was set at startup: the admin `enroll` command says the environment
+    /// will override what it writes to `config.json`.
+    pub enroll_from_env: bool,
+}
 
+pub struct Relay {
+    /// The address the endpoint is bound to.
+    pub addr: SocketAddr,
+    /// The relay identity's fingerprint (what devices pin).
+    pub fp: Fp,
+    shared: Arc<Shared>,
+    endpoint: quinn::Endpoint,
+    accept: tokio::task::JoinHandle<()>,
+    admin: admin::Server,
+    metrics: Option<MetricsServer>,
+    stats_task: tokio::task::JoinHandle<()>,
+}
+
+/// State every connection task shares.
+struct Shared {
+    config: Config,
+    log: Log,
+    audit: Audit,
+    registry: Arc<dyn Registry>,
+    /// Starts from `config.enroll`; the admin socket flips it at runtime.
+    enroll_open: AtomicBool,
+    conns: Conns,
+    enroll_rate: Rate,
+    enroll_backoff: Backoff,
+    /// Makes the device-cap check and the registry write one step.
+    enroll_lock: Mutex<()>,
+    /// `connect` and `relay` failures (`bad id`, `unknown id`), keyed `fp:<fp>` and `ip:<source>`.
+    connect_backoff: Backoff,
+    /// `connect`s per target ID, all initiators together (not `relay`s: probes run every few seconds).
+    connect_rate: Rate,
+    online: Mutex<Online>,
+    /// Streams being relayed to each target device, by its fingerprint (`max_relayed_per_device`).
+    /// The sum of the values is the number of live splices.
+    relayed: Arc<Mutex<HashMap<Fp, usize>>>,
+    /// All relayed bytes together (`relay_bps_total`).
+    relay_total: Arc<Bucket>,
+    stats: Arc<Stats>,
+}
+
+/// The live connections. One lock covers both tables, so an admission, a `register` and a
+/// `revoke` never interleave.
+#[derive(Default)]
 struct Online {
-    conn: Connection,
+    /// Every enrolled connection, by `Peer::key`: who gets the revocation list.
+    all: HashMap<usize, Arc<Peer>>,
+    /// Registered connections, by ID: whom `connect` (and Task 10's `relay`) reaches.
+    by_id: HashMap<String, Registered>,
+}
+
+struct Registered {
+    peer: Arc<Peer>,
     lan: Vec<String>,
 }
 
-pub struct State {
-    key: String,
-    db_path: PathBuf,
-    token_ttl: Duration,
-    db: Mutex<Db>,
-    online: Mutex<HashMap<String, Online>>,
-    /// token → (device id, expiry)
-    tokens: Mutex<HashMap<String, (String, Instant)>>,
-    limiter: Mutex<Limiter>,
-    /// (source ip, target id) pairs whose `offline` was logged lately.
-    offline_seen: Mutex<Seldom>,
-    pub log: Log,
+/// One device connection, as its request streams see it.
+struct Peer {
+    conn: quinn::Connection,
+    fp: Fp,
+    from: SocketAddr,
+    tenant: String,
+    /// Set once, by a successful `enroll` (or at the handshake for a known device).
+    enrolled: AtomicBool,
 }
 
-impl State {
-    pub fn load(opts: Opts) -> Result<State> {
-        Ok(State {
-            db: Mutex::new(db::load(&opts.db)?),
-            key: opts.key,
-            db_path: opts.db,
-            token_ttl: opts.token_ttl,
-            online: Mutex::default(),
-            tokens: Mutex::default(),
-            limiter: Mutex::default(),
-            offline_seen: Mutex::new(Seldom::new(OFFLINE_LOG_EVERY)),
-            log: opts.log,
+impl Peer {
+    fn enrolled(&self) -> bool {
+        self.enrolled.load(Ordering::Acquire)
+    }
+
+    /// Fixed for the connection's lifetime.
+    fn key(&self) -> usize {
+        self.conn.stable_id()
+    }
+}
+
+impl Relay {
+    pub async fn start(opts: Opts) -> Result<Relay> {
+        let Opts { data, config, log, enroll_from_env } = opts;
+        let registry: Arc<dyn Registry> = Arc::new(FileRegistry::open(&data)?);
+        // First, so a second relay on this data dir stops here; if a later step fails, dropping
+        // it removes the socket again.
+        let mut admin = admin::Server::bind(&data).await?;
+        let identity = Identity::load_or_create(&data, "relay").context("relay identity")?;
+        let audit = Audit::open(&data, &config.audit, log.clone())?;
+        let sc = tls::server_config(&identity, tls::ALPN_RELAY, config.limits.max_streams)?;
+        let endpoint =
+            quinn::Endpoint::server(sc, config.listen).with_context(|| format!("listen on {}", config.listen))?;
+        let addr = endpoint.local_addr()?;
+        audit.event("relay_start", json!({"version": VERSION, "config": &config}), true);
+        log.event(Lvl::Info, "listening", json!({"addr": addr.to_string(), "fp": identity.fp.short()}));
+
+        let l = &config.limits;
+        let shared = Arc::new(Shared {
+            log,
+            audit,
+            registry,
+            enroll_open: AtomicBool::new(config.enroll == Enroll::Open),
+            conns: Conns::new(l.max_conns, l.max_conns_per_ip),
+            enroll_rate: Rate::new(l.enroll_per_ip_per_min),
+            enroll_backoff: Backoff::new(l.lock_after, l.lock_max_secs),
+            enroll_lock: Mutex::new(()),
+            connect_backoff: Backoff::new(l.lock_after, l.lock_max_secs),
+            connect_rate: Rate::new(l.connect_per_target_per_min),
+            online: Mutex::new(Online::default()),
+            relayed: Arc::default(),
+            relay_total: Arc::new(Bucket::new(l.relay_bps_total)),
+            stats: Arc::default(),
+            config,
+        });
+        let accept = tokio::spawn(accept_loop(shared.clone(), endpoint.clone()));
+        let fp = identity.fp;
+        let relay: Arc<dyn Control> = shared.clone();
+        admin.serve(admin::Ctx { data, fp, listen: addr, enroll_from_env, relay });
+        let metrics = match shared.config.metrics {
+            Some(m) => {
+                let s = shared.clone();
+                Some(MetricsServer::bind(m, Arc::new(move || s.prometheus())).await?)
+            }
+            None => None,
+        };
+        let stats_task = tokio::spawn(stats_loop(shared.clone()));
+        Ok(Relay { addr, fp, shared, endpoint, accept, admin, metrics, stats_task })
+    }
+
+    /// Where the Prometheus endpoint is listening, if `metrics` is configured.
+    pub fn metrics_addr(&self) -> Option<SocketAddr> {
+        self.metrics.as_ref().map(|m| m.addr)
+    }
+
+    /// `stop_with("stop")`.
+    pub async fn stop(self) {
+        self.stop_with("stop").await
+    }
+
+    /// The graceful stop (§9.3), in at most `STOP_WAIT`: stops serving the admin socket and taking
+    /// new connections, tells every enrolled device `going_away`, closes every connection
+    /// (code 0), then flushes the registry and records `relay_stop` with `reason` as the last
+    /// audit line.
+    pub async fn stop_with(self, reason: &str) {
+        let deadline = tokio::time::Instant::now() + STOP_WAIT;
+        let Relay { shared: s, endpoint, accept, admin, metrics, stats_task, .. } = self;
+        drop(admin);
+        drop(metrics);
+        stats_task.abort();
+        // Refuses new connections; the existing ones stay up for the push.
+        endpoint.set_server_config(None);
+        accept.abort();
+        s.going_away().await;
+        endpoint.close(CLOSE_NORMAL.into(), b"stop");
+        // The connection tasks see the close in here: their `last_seen` and the audit lines of
+        // splices that end with them come before the flush and `relay_stop`.
+        let _ = tokio::time::timeout_at(deadline, endpoint.wait_idle()).await;
+        if let Err(e) = s.registry.flush() {
+            s.log.event(Lvl::Error, "registry_flush_failed", json!({"error": format!("{e:#}")}));
+        }
+        s.audit.event("relay_stop", json!({"version": VERSION, "reason": reason}), true);
+        s.audit.flush();
+        s.log.flush();
+    }
+
+    pub fn registry(&self) -> Arc<dyn Registry> {
+        self.shared.registry.clone()
+    }
+
+    pub fn audit(&self) -> &Audit {
+        &self.shared.audit
+    }
+
+    /// Revokes `fp` in the registry; if that changed anything, closes its connections (code 2),
+    /// sends the new list to every other enrolled connection and records `revoke`.
+    /// `changed` is false when `fp` was unknown or already revoked. A failed save does not stop the
+    /// revocation: it is applied, audited with `saved: false`, and reported in `save_error`.
+    pub async fn revoke(&self, fp: &Fp) -> Revoked {
+        self.shared.revoke(fp)
+    }
+}
+
+async fn accept_loop(s: Arc<Shared>, endpoint: quinn::Endpoint) {
+    while let Some(incoming) = endpoint.accept().await {
+        // Address validation first: nothing but a Retry goes to an address that has not
+        // echoed a token, so the relay cannot be used to amplify traffic at a forged source.
+        if !incoming.remote_address_validated() {
+            let _ = incoming.retry();
+            continue;
+        }
+        let slot = s.conns.admit(incoming.remote_address().ip());
+        tokio::spawn(handshake(s.clone(), incoming, slot));
+    }
+}
+
+async fn handshake(s: Arc<Shared>, incoming: quinn::Incoming, slot: Result<ConnGuard, &'static str>) {
+    let from = incoming.remote_address();
+    let done = match incoming.accept() {
+        Ok(connecting) => connecting.await,
+        Err(e) => Err(e),
+    };
+    let failed = |error: String, over: Option<&str>| {
+        Stats::add(&s.stats.handshake_failures, 1);
+        s.log.event(Lvl::Info, "handshake_failed", json!({"from": from.to_string(), "error": error}));
+        if let Some(what) = over {
+            s.limit(what, None, from);
+        }
+    };
+    let conn = match done {
+        Ok(conn) => conn,
+        Err(e) => return failed(e.to_string(), slot.err()),
+    };
+    let fp = match tls::peer_fp(&conn) {
+        Ok(fp) => fp,
+        Err(e) => {
+            conn.close(CLOSE_NORMAL.into(), b"no certificate");
+            return failed(format!("{e:#}"), slot.err());
+        }
+    };
+    // Over a cap: the handshake is finished first so the device sees close code 3,
+    // not a bare transport error.
+    let guard = match slot {
+        Ok(g) => g,
+        Err(what) => {
+            s.limit(what, Some(&fp), from);
+            conn.close(CLOSE_LIMIT.into(), b"limit");
+            return;
+        }
+    };
+    serve(s, conn, fp, from, guard).await;
+}
+
+/// Runs one admitted connection until it closes; `_slot` holds its place in the caps.
+async fn serve(s: Arc<Shared>, conn: quinn::Connection, fp: Fp, from: SocketAddr, _slot: ConnGuard) {
+    let known = s.registry.get(&fp);
+    if known.as_ref().is_some_and(|d| d.revoked) {
+        s.log.event(Lvl::Info, "revoked_refused", json!({"fp": fp.short(), "from": from.to_string()}));
+        conn.close(CLOSE_REVOKED.into(), b"revoked");
+        return;
+    }
+    let tenant = known.as_ref().map_or(TENANT, |d| &d.tenant).to_string();
+    let peer = Arc::new(Peer { conn, fp, from, tenant, enrolled: AtomicBool::new(known.is_some()) });
+    s.log.event(
+        Lvl::Debug,
+        "conn_open",
+        json!({"fp": fp.short(), "from": from.to_string(), "enrolled": peer.enrolled()}),
+    );
+    if peer.enrolled() {
+        if !s.go_online(&peer) {
+            return;
+        }
+    } else {
+        tokio::spawn(enroll_deadline(Duration::from_secs(s.config.limits.unenrolled_idle_secs), peer.clone()));
+    }
+    while let Ok(pair) = peer.conn.accept_bi().await {
+        tokio::spawn(stream(s.clone(), peer.clone(), tls::bi(pair)));
+    }
+    s.go_offline(&peer);
+    s.log.event(Lvl::Debug, "conn_closed", json!({"fp": fp.short(), "from": from.to_string()}));
+}
+
+/// Closes the connection if it has not enrolled within `idle` of connecting.
+async fn enroll_deadline(idle: Duration, peer: Arc<Peer>) {
+    tokio::select! {
+        _ = tokio::time::sleep(idle) => {
+            if !peer.enrolled() {
+                peer.conn.close(CLOSE_NORMAL.into(), b"enroll timeout");
+            }
+        }
+        _ = peer.conn.closed() => {}
+    }
+}
+
+/// One request stream: read the line (within `request_timeout_secs`), dispatch, reply, finish.
+async fn stream(s: Arc<Shared>, peer: Arc<Peer>, st: BiStream) {
+    let limits = &s.config.limits;
+    let mut st = BufReader::new(st);
+    let wait = Duration::from_secs(limits.request_timeout_secs);
+    let line = match tokio::time::timeout(wait, read_json(&mut st, limits.max_line)).await {
+        // `read_json` is not cancel-safe: part of the line is gone, so the stream is reset,
+        // not read again. The connection stays up.
+        Err(_) => return reset(st),
+        Ok(Err(_)) => return reply(st, err(BAD_REQUEST)).await,
+        Ok(Ok(v)) => v,
+    };
+    let Ok(req) = serde_json::from_value::<Req>(line) else { return reply(st, err(BAD_REQUEST)).await };
+    // A failed `enroll` on a connection that is not enrolled ends the connection (after the reply is
+    // delivered): one audit line per handshake, so an outsider cannot fill the audit by retrying.
+    let unenrolled_enroll = matches!(req, Req::Enroll { .. }) && !peer.enrolled();
+    if matches!(req, Req::Enroll { .. } | Req::Connect { .. } | Req::Relay { .. }) && !s.audit_ok(&peer) {
+        let v = err("limit");
+        return if unenrolled_enroll { reply_and_close(st, v, &peer.conn).await } else { reply(st, v).await };
+    }
+    match req {
+        // The same reader that read the line: what it buffered after it is the initiator's
+        // TLS handshake.
+        Req::Relay { id } if peer.enrolled() => s.relay(&peer, &id, st).await,
+        req => {
+            let res = s.request(&peer, req).await;
+            if unenrolled_enroll && !peer.enrolled() {
+                return reply_and_close(st, res, &peer.conn).await;
+            }
+            reply(st, res).await;
+        }
+    }
+}
+
+impl Shared {
+    async fn request(&self, peer: &Arc<Peer>, req: Req) -> Value {
+        match req {
+            Req::Enroll { join } => self.enroll(peer, &join),
+            _ if !peer.enrolled() => err("not enrolled"),
+            Req::Register { id, lan } => self.register(peer, id, lan),
+            Req::Connect { id } => self.connect(peer, &id).await,
+            // Enrolled `relay`s take over their stream in `stream`.
+            Req::Relay { .. } => err(BAD_REQUEST),
+        }
+    }
+
+    fn online(&self) -> MutexGuard<'_, Online> {
+        self.online.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Puts an enrolled connection in the table of all of them and sends it the revocation list.
+    /// The registry is checked again under the lock, so a `revoke` that runs at the same time
+    /// either finds this connection or is seen here; then the connection is closed (code 2).
+    fn go_online(&self, peer: &Arc<Peer>) -> bool {
+        {
+            let mut on = self.online();
+            if !matches!(self.registry.get(&peer.fp), Some(d) if !d.revoked) {
+                peer.conn.close(CLOSE_REVOKED.into(), b"revoked");
+                return false;
+            }
+            // Closed already (an `enroll` that finished late): `go_offline` may have run.
+            if peer.conn.close_reason().is_some() {
+                return false;
+            }
+            on.all.insert(peer.key(), peer.clone());
+        }
+        self.seen(&peer.fp);
+        self.push_revoked([peer.clone()]);
+        true
+    }
+
+    /// Takes a closed connection out of both tables (out of `by_id` only where it is still the
+    /// registered one).
+    fn go_offline(&self, peer: &Arc<Peer>) {
+        let was_online = {
+            let mut on = self.online();
+            on.by_id.retain(|_, r| r.peer.key() != peer.key());
+            on.all.remove(&peer.key()).is_some()
+        };
+        if was_online {
+            self.seen(&peer.fp);
+        }
+    }
+
+    fn seen(&self, fp: &Fp) {
+        self.registry.seen(fp, &rapp_net::log::timestamp(SystemTime::now()));
+    }
+
+    /// Sends the current revocation list to each of `peers`, each on a fresh uni stream.
+    /// Never waits on a device: every push runs on its own task, and a failed one is only logged.
+    fn push_revoked(&self, peers: impl IntoIterator<Item = Arc<Peer>>) {
+        let push = Arc::new(Push::Revoked { fps: self.registry.revoked() });
+        for peer in peers {
+            let (push, log) = (push.clone(), self.log.clone());
+            tokio::spawn(async move {
+                if let Err(e) = push_uni(&peer.conn, &push).await {
+                    let error = format!("{e:#}");
+                    log.event(Lvl::Debug, "push_failed", json!({"fp": peer.fp.short(), "error": error}));
+                }
+            });
+        }
+    }
+
+    /// Pushes `going_away` to every enrolled connection and waits, at most `GOING_AWAY_WAIT` in
+    /// all, until each device has acknowledged it, so a slow one cannot hold up the stop.
+    async fn going_away(&self) {
+        let peers: Vec<Arc<Peer>> = self.online().all.values().cloned().collect();
+        let push = Arc::new(Push::GoingAway { after_ms: GOING_AWAY_MS });
+        let mut pushes = tokio::task::JoinSet::new();
+        for peer in peers {
+            let push = push.clone();
+            pushes.spawn(async move {
+                let send = push_uni(&peer.conn, &push).await?;
+                let _ = send.stopped().await;
+                anyhow::Ok(())
+            });
+        }
+        let all = async { while pushes.join_next().await.is_some() {} };
+        let _ = tokio::time::timeout(GOING_AWAY_WAIT, all).await;
+    }
+
+    /// Frees `id` in the registry and takes it out of `by_id` (the connection stays up), under the
+    /// online lock so a `register` of the ID cannot interleave.
+    fn unbind_id(&self, id: &str) -> Result<Option<Fp>> {
+        let mut on = self.online();
+        let Some(holder) = self.registry.by_id(id) else { return Ok(None) };
+        if !self.registry.unbind(id)? {
+            return Ok(None);
+        }
+        on.by_id.remove(id);
+        Ok(Some(holder.fp))
+    }
+
+    fn revoke(&self, fp: &Fp) -> Revoked {
+        let done = self.registry.revoke(fp);
+        if !done.changed {
+            return done;
+        }
+        let (gone, rest): (Vec<_>, Vec<_>) = {
+            let mut on = self.online();
+            on.by_id.retain(|_, r| r.peer.fp != *fp);
+            let (gone, rest) = on.all.values().cloned().partition(|p| p.fp == *fp);
+            on.all.retain(|_, p| p.fp != *fp);
+            (gone, rest)
+        };
+        for p in &gone {
+            p.conn.close(CLOSE_REVOKED.into(), b"revoked");
+        }
+        self.push_revoked(rest);
+        let mut rec = json!({"fp": fp.to_string()});
+        if let Some(e) = &done.save_error {
+            rec["saved"] = false.into();
+            rec["error"] = e.clone().into();
+        }
+        self.audit.event("revoke", rec, true);
+        done
+    }
+
+    /// `register`: claims `id` for this device and makes this connection the one it reaches.
+    fn register(&self, peer: &Arc<Peer>, id: String, lan: Vec<String>) -> Value {
+        if !is_valid_id(&id) {
+            return err("bad id");
+        }
+        if lan.len() > MAX_LAN || lan.iter().any(|a| a.len() > MAX_LAN_LEN) {
+            return err(BAD_REQUEST);
+        }
+        let result = match self.bind(peer, &id, lan) {
+            Ok(r) => r,
+            Err(e) => {
+                self.log.event(
+                    Lvl::Error,
+                    "register_failed",
+                    json!({"fp": peer.fp.short(), "error": format!("{e:#}")}),
+                );
+                return err(BAD_REQUEST);
+            }
+        };
+        self.audit.event(
+            "register",
+            json!({"fp": peer.fp.to_string(), "id": id, "from": peer.from.to_string(), "result": result}),
+            false,
+        );
+        match result {
+            "id taken" => err(result),
+            _ => ok(json!({"id": id})),
+        }
+    }
+
+    /// The registry bind and the table insert as one step under the online lock, so of two
+    /// devices racing for one ID exactly one ends up holding it in both. Returns the audit result.
+    fn bind(&self, peer: &Arc<Peer>, id: &str, lan: Vec<String>) -> Result<&'static str> {
+        let mut on = self.online();
+        let bound = self.registry.bind_id(&peer.fp, id)?;
+        if bound == Bind::Taken {
+            return Ok("id taken");
+        }
+        // `bind_id` moves a device's ID: an entry of this device under another ID is stale now.
+        on.by_id.retain(|k, r| k == id || r.peer.fp != peer.fp);
+        // Closed already: `go_offline` may have run, and nothing would take the entry out again.
+        let old = match peer.conn.close_reason() {
+            Some(_) => None,
+            None => on.by_id.insert(id.to_string(), Registered { peer: peer.clone(), lan }),
+        };
+        drop(on);
+        let replaced = old.is_some_and(|o| {
+            let other = o.peer.key() != peer.key();
+            if other {
+                o.peer.conn.close(CLOSE_NORMAL.into(), b"replaced");
+            }
+            other
+        });
+        Ok(match bound {
+            Bind::New => "new",
+            _ if replaced => "replaced",
+            _ => "ok",
         })
     }
 
-    pub fn devices(&self) -> usize {
-        self.db.lock().unwrap().len()
+    /// `connect`: introduces this device to the one registered as `id`. Every attempt is audited.
+    async fn connect(&self, peer: &Arc<Peer>, id: &str) -> Value {
+        let res = self.try_connect(peer, id).await;
+        let result = match &res {
+            Ok(_) => "ok",
+            Err(e) => e.as_str(),
+        };
+        self.audit.event(
+            "connect",
+            json!({"fp": peer.fp.to_string(), "from": peer.from.to_string(), "to": id, "result": result}),
+            false,
+        );
+        res.unwrap_or_else(|e| err(&e))
     }
-}
 
-/// `ok` when the reply has no error, else the error text with its variable tail cut
-/// ("locked, retry in 3s" → "locked").
-fn result_of(r: &Value) -> String {
-    match r["error"].as_str() {
-        None => "ok".into(),
-        Some(e) => e.split(',').next().unwrap_or(e).to_string(),
+    /// Only `bad id` and `unknown id` count as failures: polling a host that is asleep (`offline`)
+    /// is normal, and `limit` is the target's budget, not the initiator's fault.
+    async fn try_connect(&self, peer: &Arc<Peer>, id: &str) -> Result<Value, String> {
+        let now = Instant::now();
+        let keys = backoff_keys(peer);
+        let holder = self.lookup(&keys, id, now)?;
+        // After the lookup, so made-up IDs cannot fill the rate table (the backoff covers those).
+        if !self.connect_rate.allow(id, now) {
+            self.limit("connect_per_target_per_min", Some(&peer.fp), peer.from);
+            return Err("limit".into());
+        }
+        let Some(Registered { peer: target, lan }) = self.reachable(id, &holder, &peer.tenant) else {
+            return Err(OFFLINE.into());
+        };
+        if !introduce(&target, peer, self.config.limits.max_line).await {
+            return Err(OFFLINE.into());
+        }
+        for k in &keys {
+            self.connect_backoff.reset(k);
+        }
+        Ok(ok(json!({"lan": lan, "public": target.from.to_string()})))
     }
-}
 
-fn lvl_of(result: &str) -> Lvl {
-    if matches!(result, "ok" | "new" | "replaced") { Lvl::Info } else { Lvl::Warn }
-}
+    /// The first checks `connect` and `relay` share: the initiator's lock (first, so a locked
+    /// client costs nothing more), the ID format, then the registry. The last two are failures.
+    fn lookup(&self, keys: &[String; 2], id: &str, now: Instant) -> Result<Fp, String> {
+        if let Some(secs) = keys.iter().filter_map(|k| self.connect_backoff.locked(k, now)).max() {
+            Stats::add(&self.stats.limited, 1);
+            return Err(format!("locked, retry in {secs}s"));
+        }
+        if !is_valid_id(id) {
+            self.connect_failed(keys, now);
+            return Err("bad id".into());
+        }
+        let Some(holder) = self.registry.by_id(id) else {
+            self.connect_failed(keys, now);
+            return Err("unknown id".into());
+        };
+        Ok(holder.fp)
+    }
 
-pub async fn accept_loop(endpoint: Endpoint, state: Arc<State>) {
-    while let Some(incoming) = endpoint.accept().await {
-        let state = state.clone();
-        tokio::spawn(async move {
-            if let Ok(conn) = incoming.await {
-                serve_conn(state, conn).await;
+    /// The live connection registered as `id`, if it is still `holder`'s and in `tenant`.
+    fn reachable(&self, id: &str, holder: &Fp, tenant: &str) -> Option<Registered> {
+        let on = self.online();
+        let r = on.by_id.get(id).filter(|r| r.peer.fp == *holder && r.peer.tenant == tenant)?;
+        Some(Registered { peer: r.peer.clone(), lan: r.lan.clone() })
+    }
+
+    /// Counts one failure on each key; `lockout` is audited only by the failure that locks a key
+    /// that was not locked, never again while it stays locked.
+    fn connect_failed(&self, keys: &[String], now: Instant) {
+        for k in keys {
+            let was_locked = self.connect_backoff.locked(k, now).is_some();
+            if let Some(secs) = self.connect_backoff.fail(k, now) {
+                if !was_locked {
+                    self.audit.event("lockout", json!({"key": k, "secs": secs}), true);
+                }
             }
+        }
+    }
+
+    /// `relay`: splices `st` to a fresh stream on the target's connection. Success gets no reply
+    /// line (the target's bytes come next); a failure gets one.
+    async fn relay(&self, peer: &Arc<Peer>, id: &str, st: BufReader<BiStream>) {
+        let (target, slot) = match self.relay_target(peer, id) {
+            Ok(t) => t,
+            Err(e) => {
+                self.relay_failed(peer, id, &e);
+                return reply(st, err(&e)).await;
+            }
+        };
+        let push = Push::Relayed { peer: peer.from.to_string(), fp: peer.fp };
+        let open = async {
+            let (mut send, recv) = target.conn.open_bi().await?;
+            write_json(&mut send, &push).await?;
+            anyhow::Ok(tls::bi((send, recv)))
+        };
+        let Ok(Ok(to)) = tokio::time::timeout(INCOMING_WAIT, open).await else {
+            self.relay_failed(peer, id, OFFLINE);
+            return reply(st, err(OFFLINE)).await;
+        };
+        let end = SpliceEnd {
+            audit: self.audit.clone(),
+            stats: self.stats.clone(),
+            fp: peer.fp,
+            from: peer.from,
+            to: id.to_string(),
+        };
+        let per_stream = self.config.limits.relay_bps_per_stream;
+        let total = self.relay_total.clone();
+        // No request timeout from here on: QUIC's idle timeout ends a splice with a dead side.
+        tokio::spawn(async move {
+            let start = Instant::now();
+            let (up, down) = if per_stream == 0 && total.unlimited() {
+                splice(st, to).await
+            } else {
+                splice_metered(st, to, &Bucket::new(per_stream), &total).await
+            };
+            // Free the target's slot first: whoever sees the audit line may retry at once.
+            drop(slot);
+            end.record(start.elapsed(), up, down);
         });
     }
-}
 
-async fn serve_conn(state: Arc<State>, conn: Connection) {
-    while let Ok(pair) = conn.accept_bi().await {
-        let (state, conn) = (state.clone(), conn.clone());
-        tokio::spawn(async move {
-            let mut s = bi(pair);
-            if let Err(e) = serve_stream(&state, &conn, &mut s).await {
-                state.log.msg(Lvl::Warn, format!("{}: {e:#}", conn.remote_address()));
-            }
-        });
+    /// A `relay` that never became a splice: a `relayed` line with the `result` and no byte counts.
+    fn relay_failed(&self, peer: &Peer, id: &str, result: &str) {
+        let (fp, from) = (peer.fp.to_string(), peer.from.to_string());
+        self.audit.event("relayed", json!({"fp": fp, "from": from, "to": id, "result": result}), false);
     }
-    // Forget this device if this was its registered connection.
-    state.online.lock().unwrap().retain(|_, o| o.conn.stable_id() != conn.stable_id());
+
+    /// The checks before a splice (ruling R13: the connect backoff, but no per-target rate and no
+    /// reset on success). Returns the target and its slot under `max_relayed_per_device`.
+    fn relay_target(&self, peer: &Peer, id: &str) -> Result<(Arc<Peer>, RelaySlot), String> {
+        let keys = backoff_keys(peer);
+        let holder = self.lookup(&keys, id, Instant::now())?;
+        let Some(Registered { peer: target, .. }) = self.reachable(id, &holder, &peer.tenant) else {
+            return Err(OFFLINE.into());
+        };
+        let Some(slot) = RelaySlot::take(&self.relayed, target.fp, self.config.limits.max_relayed_per_device) else {
+            self.limit("max_relayed_per_device", Some(&peer.fp), peer.from);
+            return Err("limit".into());
+        };
+        Ok((target, slot))
+    }
+
+    /// One enrollment attempt; every attempt is audited with its result.
+    fn enroll(&self, peer: &Arc<Peer>, join: &str) -> Value {
+        let res = self.try_enroll(peer, join);
+        let result = match &res {
+            Ok(()) => "ok",
+            Err(e) => e.as_str(),
+        };
+        // `locked` and `limit` attempts come from anyone with a certificate: no fsync for them.
+        let urgent = !(result.starts_with("locked") || result == "limit");
+        self.audit.event(
+            "enroll",
+            json!({"fp": peer.fp.to_string(), "from": peer.from.to_string(), "result": result}),
+            urgent,
+        );
+        match res {
+            Ok(()) => {
+                if !peer.enrolled.swap(true, Ordering::AcqRel) {
+                    self.go_online(peer);
+                }
+                ok(json!({"relay": {"version": VERSION, "features": []}, "from": peer.from.to_string()}))
+            }
+            Err(e) => err(&e),
+        }
+    }
+
+    fn try_enroll(&self, peer: &Peer, join: &str) -> Result<(), String> {
+        if !self.enroll_open.load(Ordering::Acquire) {
+            return Err("closed".into());
+        }
+        let Some(want) = self.registry.join_hash() else { return Err("no key".into()) };
+        let source = source_key(peer.from.ip()).to_string();
+        let now = Instant::now();
+        if let Some(secs) = self.enroll_backoff.locked(&source, now) {
+            Stats::add(&self.stats.limited, 1);
+            return Err(format!("locked, retry in {secs}s"));
+        }
+        if !self.enroll_rate.allow(&source, now) {
+            self.limit("enroll_per_ip_per_min", Some(&peer.fp), peer.from);
+            return Err("limit".into());
+        }
+        let _one_at_a_time = self.enroll_lock.lock().unwrap_or_else(|e| e.into_inner());
+        if self.registry.get(&peer.fp).is_none() && self.registry.count() >= self.config.limits.max_devices {
+            self.limit("max_devices", Some(&peer.fp), peer.from);
+            return Err("limit".into());
+        }
+        if !join_matches(join, &want) {
+            if let Some(secs) = self.enroll_backoff.fail(&source, now) {
+                self.audit.event("lockout", json!({"key": source, "secs": secs}), true);
+            }
+            return Err("bad key".into());
+        }
+        if let Err(e) = self.registry.enroll(peer.fp, TENANT) {
+            self.log.event(Lvl::Error, "enroll_failed", json!({"fp": peer.fp.short(), "error": format!("{e:#}")}));
+            return Err("unavailable".into());
+        }
+        self.enroll_backoff.reset(&source);
+        Ok(())
+    }
+
+    /// The `audit.required` gate (§11.1, ruling R16): false, after counting it and trying to audit
+    /// it, when the audit is required and cannot be written.
+    fn audit_ok(&self, peer: &Peer) -> bool {
+        if !self.config.audit.required || self.audit.healthy() {
+            return true;
+        }
+        Stats::add(&self.stats.audit_failures, 1);
+        let (fp, from) = (peer.fp.to_string(), peer.from.to_string());
+        self.audit.event("limit", json!({"what": "audit.required", "fp": fp, "from": from}), false);
+        false
+    }
+
+    /// Sets the two gauges from the live tables.
+    fn prometheus(&self) -> String {
+        self.refresh_gauges();
+        self.stats.prometheus()
+    }
+
+    fn refresh_gauges(&self) {
+        self.stats.online.store(self.online_fps().len() as u64, Ordering::Relaxed);
+        let live: usize = self.relayed.lock().unwrap_or_else(|e| e.into_inner()).values().sum();
+        self.stats.relayed_streams.store(live as u64, Ordering::Relaxed);
+    }
+
+    /// Audits one hit on the limit named `what` (the config item).
+    fn limit(&self, what: &str, fp: Option<&Fp>, from: SocketAddr) {
+        Stats::add(&self.stats.limited, 1);
+        let fp = fp.map(|f| f.to_string());
+        self.audit.event("limit", json!({"what": what, "fp": fp, "from": from.to_string()}), false);
+    }
 }
 
-async fn serve_stream(state: &State, conn: &Connection, s: &mut BiStream) -> Result<()> {
-    let req = read_json(s).await?;
-    let op: Op = match serde_json::from_value(req) {
-        Ok(op) => op,
-        Err(_) => return reply(s, err("bad request")).await,
+impl Control for Shared {
+    fn registry(&self) -> &dyn Registry {
+        &*self.registry
+    }
+
+    fn audit(&self) -> &Audit {
+        &self.audit
+    }
+
+    fn log(&self) -> &Log {
+        &self.log
+    }
+
+    fn online_fps(&self) -> HashSet<Fp> {
+        self.online().all.values().map(|p| p.fp).collect()
+    }
+
+    fn enroll_open(&self) -> bool {
+        self.enroll_open.load(Ordering::Acquire)
+    }
+
+    fn set_enroll_open(&self, open: bool) {
+        self.enroll_open.store(open, Ordering::Release);
+    }
+
+    fn revoke(&self, fp: &Fp) -> Revoked {
+        Shared::revoke(self, fp)
+    }
+
+    fn unbind(&self, id: &str) -> Result<Option<Fp>> {
+        self.unbind_id(id)
+    }
+}
+
+/// Tells `target` that `from` is about to dial it; true once it answers `{"ok":true}` within
+/// `INCOMING_WAIT`.
+async fn introduce(target: &Peer, from: &Peer, max_line: usize) -> bool {
+    let push = Push::Incoming { peer: from.from.to_string(), fp: from.fp };
+    let ask = async {
+        let (mut send, recv) = target.conn.open_bi().await?;
+        write_json(&mut send, &push).await?;
+        let _ = send.finish();
+        read_json(&mut BufReader::new(recv), max_line).await
     };
-    match op {
-        Op::Register { key, ref id, .. } if !ct_eq(&key, &state.key) => {
-            let id = id.as_deref().map(clean_name);
-            state.log.event(Lvl::Warn, "register", json!({"id": id, "ip": ip_of(conn), "result": "bad key"}));
-            reply(s, err("bad relay key")).await
+    matches!(tokio::time::timeout(INCOMING_WAIT, ask).await, Ok(Ok(v)) if v["ok"] == true)
+}
+
+/// One push on a fresh unidirectional stream, finished; returned so the caller can wait for it
+/// to be acknowledged.
+async fn push_uni(conn: &quinn::Connection, push: &Push) -> Result<quinn::SendStream> {
+    let mut send = conn.open_uni().await?;
+    write_json(&mut send, push).await?;
+    send.finish()?;
+    Ok(send)
+}
+
+/// The `connect_backoff` keys of an initiator.
+fn backoff_keys(peer: &Peer) -> [String; 2] {
+    [format!("fp:{}", peer.fp), format!("ip:{}", source_key(peer.from.ip()))]
+}
+
+/// One place under `max_relayed_per_device` for a target; given back on drop, whichever way the
+/// splice ends.
+struct RelaySlot {
+    fp: Fp,
+    counts: Arc<Mutex<HashMap<Fp, usize>>>,
+}
+
+impl RelaySlot {
+    fn take(counts: &Arc<Mutex<HashMap<Fp, usize>>>, fp: Fp, max: usize) -> Option<RelaySlot> {
+        let mut c = counts.lock().unwrap_or_else(|e| e.into_inner());
+        let n = c.entry(fp).or_insert(0);
+        if *n >= max {
+            if *n == 0 {
+                c.remove(&fp);
+            }
+            return None;
         }
-        Op::Connect { key, ref id, ref name, .. } if !ct_eq(&key, &state.key) => {
-            log_connect(state, conn, name.as_deref(), Some(id), "bad key");
-            reply(s, err("bad relay key")).await
-        }
-        Op::Relay { key, .. } if !ct_eq(&key, &state.key) => {
-            log_connect(state, conn, None, None, "bad key");
-            reply(s, err("bad relay key")).await
-        }
-        Op::Register { id, secret, name, pw_salt, pw_hash, lan, .. } => {
-            let name = clean_name(&name);
-            let (r, result) =
-                register(state, conn, id, Device { secret_hash: sha256_hex(secret.as_bytes()), pw_salt, pw_hash, name }, lan);
-            let id = r["id"].as_str().map(str::to_string);
-            state.log.event(lvl_of(result), "register", json!({"id": id, "ip": ip_of(conn), "result": result}));
-            reply(s, r).await
-        }
-        Op::Connect { id, password, name, .. } => {
-            let name = name.as_deref().map(clean_name);
-            let r = connect(state, conn.remote_address(), &id, &password, name.as_deref()).await;
-            log_connect(state, conn, name.as_deref(), Some(&id), &result_of(&r));
-            reply(s, r).await
-        }
-        Op::Relay { token, .. } => relay(state, conn, &token, s).await,
-        _ => reply(s, err("unknown op")).await,
+        *n += 1;
+        Some(RelaySlot { fp, counts: counts.clone() })
     }
 }
 
-async fn reply(s: &mut BiStream, v: Value) -> Result<()> {
-    write_json(s, &v).await?;
-    s.writer_mut().finish()?;
+impl Drop for RelaySlot {
+    fn drop(&mut self) {
+        let mut c = self.counts.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(n) = c.get_mut(&self.fp) {
+            *n = n.saturating_sub(1);
+            if *n == 0 {
+                c.remove(&self.fp);
+            }
+        }
+    }
+}
+
+/// What the end of a splice is audited with.
+struct SpliceEnd {
+    audit: Audit,
+    stats: Arc<Stats>,
+    /// The initiator.
+    fp: Fp,
+    from: SocketAddr,
+    /// The target ID.
+    to: String,
+}
+
+impl SpliceEnd {
+    /// `took` is wall time since the splice started; `secs` in the record is that rounded down
+    /// to the millisecond. `up` is initiator → target, `down` the other way.
+    fn record(&self, took: Duration, up: u64, down: u64) {
+        Stats::add(&self.stats.relayed_bytes, up.saturating_add(down));
+        if took < PROBE_TIME && up.saturating_add(down) < PROBE_BYTES {
+            return self.audit.probe(&self.fp, &self.to);
+        }
+        let secs = took.as_millis() as f64 / 1000.0;
+        let (fp, from) = (self.fp.to_string(), self.from.to_string());
+        let fields = json!({"fp": fp, "from": from, "to": self.to, "secs": secs, "up": up, "down": down});
+        self.audit.event("relayed", fields, false);
+    }
+}
+
+/// The unmetered splice: no locks, 64 KiB per direction. When one side finishes, the other's
+/// send half is finished; when either fails (reset, stopped, connection gone), both are reset.
+/// Returns the bytes read from each side, `(initiator → target, target → initiator)`.
+async fn splice(a: BufReader<BiStream>, b: BiStream) -> (u64, u64) {
+    let (mut a, mut b) = (Counted::new(a), Counted::new(b));
+    let res = tokio::io::copy_bidirectional_with_sizes(&mut a, &mut b, SPLICE_BUF, SPLICE_BUF).await;
+    let counts = (a.n, b.n);
+    if res.is_err() {
+        reset_bi(a.inner.into_inner());
+        reset_bi(b.inner);
+    }
+    counts
+}
+
+/// The metered splice: every chunk passes the stream's `own` bucket (shared by both directions)
+/// and the relay-wide `total` one before it is written. Ends like `splice`.
+async fn splice_metered(a: BufReader<BiStream>, b: BiStream, own: &Bucket, total: &Bucket) -> (u64, u64) {
+    let first = a.buffer().to_vec();
+    let (mut a_recv, mut a_send) = a.into_inner().into_inner();
+    let (mut b_recv, mut b_send) = b.into_inner();
+    let (mut up, mut down) = (0, 0);
+    let res = tokio::try_join!(
+        pace(&mut a_recv, &mut b_send, &first, [own, total], &mut up),
+        pace(&mut b_recv, &mut a_send, &[], [own, total], &mut down),
+    );
+    if res.is_err() {
+        reset_bi(tokio::io::join(a_recv, a_send));
+        reset_bi(tokio::io::join(b_recv, b_send));
+    }
+    (up, down)
+}
+
+/// One metered direction: `first` (already read), then everything from `from`, then finish `to`.
+async fn pace(
+    from: &mut quinn::RecvStream,
+    to: &mut quinn::SendStream,
+    first: &[u8],
+    buckets: [&Bucket; 2],
+    n: &mut u64,
+) -> io::Result<()> {
+    let mut buf = vec![0u8; SPLICE_BUF];
+    // `first` goes out as it is, so its size never has to fit `buf`.
+    if !first.is_empty() {
+        for b in buckets {
+            b.take(first.len()).await;
+        }
+        to.write_all(first).await?;
+        *n += first.len() as u64;
+    }
+    while let Some(k) = from.read(&mut buf).await? {
+        for b in buckets {
+            b.take(k).await;
+        }
+        to.write_all(&buf[..k]).await?;
+        *n += k as u64;
+    }
+    to.finish()?;
     Ok(())
 }
 
-fn ip_of(conn: &Connection) -> String {
-    conn.remote_address().ip().to_string()
+/// Counts the bytes read through it, so a splice that fails still has its sizes.
+struct Counted<T> {
+    inner: T,
+    n: u64,
 }
 
-/// One `connect` event (spec §4.2); `from` is B's address as the relay sees it.
-/// A repeated `offline` for the same (source ip, target id) within 10 minutes is Debug (I-2).
-fn log_connect(state: &State, conn: &Connection, name: Option<&str>, to: Option<&str>, result: &str) {
-    let (name, to) = (name.map(clean_name), to.map(clean_name));
-    let mut lvl = lvl_of(result);
-    if result == "offline" {
-        let pair = format!("{}|{}", ip_of(conn), to.as_deref().unwrap_or(""));
-        if !state.offline_seen.lock().unwrap().first(&pair, Instant::now()) {
-            lvl = Lvl::Debug;
+impl<T> Counted<T> {
+    fn new(inner: T) -> Counted<T> {
+        Counted { inner, n: 0 }
+    }
+}
+
+impl<T: AsyncRead + Unpin> AsyncRead for Counted<T> {
+    fn poll_read(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>, buf: &mut ReadBuf<'_>) -> Poll<io::Result<()>> {
+        let before = buf.filled().len();
+        let res = Pin::new(&mut self.inner).poll_read(cx, buf);
+        self.n += (buf.filled().len() - before) as u64;
+        res
+    }
+}
+
+impl<T: AsyncWrite + Unpin> AsyncWrite for Counted<T> {
+    fn poll_write(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>, buf: &[u8]) -> Poll<io::Result<usize>> {
+        Pin::new(&mut self.inner).poll_write(cx, buf)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut TaskContext<'_>) -> Poll<io::Result<()>> {
+        Pin::new(&mut self.inner).poll_shutdown(cx)
+    }
+}
+
+fn reset(st: BufReader<BiStream>) {
+    reset_bi(st.into_inner());
+}
+
+/// Resets the send half and stops the receive half, so the peer sees an error, not a clean end.
+fn reset_bi(st: BiStream) {
+    let (mut recv, mut send) = st.into_inner();
+    let _ = send.reset(0u32.into());
+    let _ = recv.stop(0u32.into());
+}
+
+async fn reply(st: BufReader<BiStream>, v: Value) {
+    let (_recv, mut send) = st.into_inner().into_inner();
+    if write_json(&mut send, &v).await.is_ok() {
+        let _ = send.finish();
+    }
+}
+
+/// Replies, waits (briefly) until the peer has the whole reply, then closes the connection with
+/// `CLOSE_LIMIT`: closing at once would drop the reply.
+async fn reply_and_close(st: BufReader<BiStream>, v: Value, conn: &quinn::Connection) {
+    let (_recv, mut send) = st.into_inner().into_inner();
+    if write_json(&mut send, &v).await.is_ok() && send.finish().is_ok() {
+        let _ = tokio::time::timeout(Duration::from_secs(1), send.stopped()).await;
+    }
+    conn.close(CLOSE_LIMIT.into(), b"enroll failed");
+}
+
+/// `join_hex` (64 hex digits) hashes to `want`; anything that does not decode is a wrong key.
+fn join_matches(join_hex: &str, want: &str) -> bool {
+    let Ok(bytes) = data_encoding::HEXLOWER_PERMISSIVE.decode(join_hex.as_bytes()) else { return false };
+    let Ok(join) = <[u8; 32]>::try_from(bytes) else { return false };
+    ct_eq(join_hash(&join).as_bytes(), want.as_bytes())
+}
+
+/// Constant time in the contents (the lengths are not secret: both are hex SHA-256).
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+/// How often the `stats` line is logged.
+const STATS_EVERY: Duration = Duration::from_secs(300);
+
+/// Logs the `stats` line every `STATS_EVERY` (the first one after the first period) and flushes
+/// the registry, so `last_seen` reaches the disk even if the relay is killed.
+async fn stats_loop(s: Arc<Shared>) {
+    let mut tick = tokio::time::interval_at(tokio::time::Instant::now() + STATS_EVERY, STATS_EVERY);
+    loop {
+        tick.tick().await;
+        s.refresh_gauges();
+        s.log.event(Lvl::Info, "stats", s.stats.snapshot());
+        if let Err(e) = s.registry.flush() {
+            s.log.event(Lvl::Error, "registry_flush_failed", json!({"error": format!("{e:#}")}));
         }
     }
-    let fields = json!({"from": conn.remote_address().to_string(), "name": name, "to": to, "result": result});
-    state.log.event(lvl, "connect", fields);
 }
 
-/// The reply and the `register` event's result (`new`, `ok`, `replaced`, `id taken`).
-fn register(state: &State, conn: &Connection, id: Option<String>, dev: Device, lan: Vec<String>) -> (Value, &'static str) {
-    let mut db = state.db.lock().unwrap();
-    let (id, mut result) = match id {
-        Some(id) if db.contains_key(&id) => {
-            if !ct_eq(&db[&id].secret_hash, &dev.secret_hash) {
-                return (err("id taken"), "id taken");
-            }
-            (id, "ok")
-        }
-        Some(id) if is_valid_id(&id) => (id, "new"),
-        _ => loop {
-            let id = random_id();
-            if !db.contains_key(&id) {
-                break (id, "new");
-            }
-        },
-    };
-    db.insert(id.clone(), dev);
-    if let Err(e) = db::save(&state.db_path, &db) {
-        state.log.msg(Lvl::Error, format!("save db: {e:#}"));
-    }
-    drop(db);
-    let old = state.online.lock().unwrap().insert(id.clone(), Online { conn: conn.clone(), lan });
-    if let Some(old) = old.filter(|o| o.conn.stable_id() != conn.stable_id()) {
-        old.conn.close(0u32.into(), b"replaced by a new registration");
-        result = "replaced";
-    }
-    (ok(json!({"id": id})), result)
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rapp_wire::Key;
 
-fn fail(state: &State, lim: &mut Limiter, key: &str, now: Instant) {
-    if let Some(secs) = lim.fail(key, now) {
-        state.log.event(Lvl::Warn, "lockout", json!({"key": key, "secs": secs}));
+    #[test]
+    fn join_matches_only_the_right_secret() {
+        let k = Key::new_local();
+        let want = join_hash(&k.join());
+        let hex = data_encoding::HEXLOWER.encode(&k.join());
+        assert!(join_matches(&hex, &want));
+        assert!(join_matches(&hex.to_uppercase(), &want));
+        assert!(!join_matches(&data_encoding::HEXLOWER.encode(&Key::new_local().join()), &want));
+        assert!(!join_matches(&hex[..62], &want));
+        assert!(!join_matches("zz", &want));
+        assert!(!join_matches("", &want));
     }
-}
 
-async fn connect(state: &State, peer: SocketAddr, id: &str, password: &str, name: Option<&str>) -> Value {
-    let (id_key, ip_key) = (format!("id:{id}"), format!("ip:{}", peer.ip()));
-    let now = Instant::now();
-    {
-        let mut lim = state.limiter.lock().unwrap();
-        if let Some(secs) = lim.locked(&id_key, now).max(lim.locked(&ip_key, now)) {
-            return err(&format!("locked, retry in {secs}s"));
-        }
-        let Some(dev) = state.db.lock().unwrap().get(id).cloned() else {
-            fail(state, &mut lim, &ip_key, now);
-            return err("unknown id");
-        };
-        if !ct_eq(&pw_hash(&dev.pw_salt, password), &dev.pw_hash) {
-            fail(state, &mut lim, &id_key, now);
-            fail(state, &mut lim, &ip_key, now);
-            return err("bad password");
-        }
-        lim.reset(&id_key);
-        lim.reset(&ip_key);
+    #[test]
+    fn ct_eq_compares_whole_slices() {
+        assert!(ct_eq(b"abc", b"abc"));
+        assert!(!ct_eq(b"abc", b"abd"));
+        assert!(!ct_eq(b"abc", b"ab"));
+        assert!(ct_eq(b"", b""));
     }
-    let Some((a, lan)) = state.online.lock().unwrap().get(id).map(|o| (o.conn.clone(), o.lan.clone())) else {
-        return err("offline");
-    };
-    let token = random_hex(16);
-    let mut notify = json!({"op":"incoming","token":token,"peer":peer.to_string()});
-    if let Some(name) = name {
-        notify["name"] = name.into();
-    }
-    if tokio::time::timeout(INCOMING_WAIT, ask(&a, &notify)).await.map_err(|_| anyhow!("timeout")).and_then(|r| r).is_err() {
-        return err("offline");
-    }
-    let name = state.db.lock().unwrap().get(id).map(|d| d.name.clone()).unwrap_or_default();
-    {
-        let mut tokens = state.tokens.lock().unwrap();
-        tokens.retain(|_, (_, exp)| *exp > now);
-        tokens.insert(token.clone(), (id.to_string(), Instant::now() + state.token_ttl));
-    }
-    ok(json!({"token": token, "name": name, "lan": lan, "public": a.remote_address().to_string()}))
-}
-
-/// One request/reply exchange on a new stream to A.
-async fn ask(a: &Connection, v: &Value) -> Result<Value> {
-    let mut s = bi(a.open_bi().await?);
-    write_json(&mut s, v).await?;
-    check(read_json(&mut s).await?)
-}
-
-async fn relay(state: &State, conn: &Connection, token: &str, b: &mut BiStream) -> Result<()> {
-    let id = state.tokens.lock().unwrap().get(token).filter(|(_, exp)| *exp > Instant::now()).map(|(id, _)| id.clone());
-    let Some(id) = id else {
-        log_connect(state, conn, None, None, "bad token");
-        return reply(b, err("bad token")).await;
-    };
-    let a = state.online.lock().unwrap().get(&id).map(|o| o.conn.clone());
-    let Some(a) = a else {
-        log_connect(state, conn, None, Some(&id), "offline");
-        return reply(b, err("offline")).await;
-    };
-    let mut s = bi(a.open_bi().await?);
-    write_json(&mut s, &json!({"op":"relayed","token":token})).await?;
-    let (since, meter) = (Instant::now(), Meter::default());
-    let r = splice_metered(b, &mut s, &meter).await;
-    let (up, down) = meter.get();
-    let took = since.elapsed();
-    let probe = took < PROBE_TIME && up.saturating_add(down) < PROBE_BYTES;
-    let fields = json!({"to": id, "from": conn.remote_address().to_string(), "secs": took.as_secs(), "up": up, "down": down});
-    state.log.event(if probe { Lvl::Debug } else { Lvl::Info }, "relayed", fields);
-    r.map_err(Into::into)
 }

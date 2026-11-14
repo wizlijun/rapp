@@ -1196,7 +1196,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-client-core"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "flate2",
@@ -1207,7 +1207,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-client-gtk"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "gtk4",
@@ -1216,13 +1216,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "rapp-conn"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "data-encoding",
+ "quinn",
+ "rapp-net",
+ "rapp-relay",
+ "rapp-wire",
+ "ring",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-rustls",
+]
+
+[[package]]
 name = "rapp-hub"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "quinn",
  "rand 0.9.5",
+ "rapp-conn",
  "rapp-net",
+ "rapp-wire",
  "serde",
  "serde_json",
  "tempfile",
@@ -1231,7 +1252,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-net"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "if-addrs",
@@ -1241,28 +1262,13 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
- "sha2",
  "tempfile",
  "tokio",
 ]
 
 [[package]]
 name = "rapp-relay"
-version = "0.5.5"
-dependencies = [
- "anyhow",
- "quinn",
- "rand 0.9.5",
- "rapp-net",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
-]
-
-[[package]]
-name = "rapp-relay2"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "data-encoding",
@@ -1279,13 +1285,26 @@ dependencies = [
 
 [[package]]
 name = "rapp-service"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "quinn",
  "rand 0.9.5",
+ "rapp-conn",
  "rapp-net",
  "rapp-update",
+ "rapp-wire",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "rapp-term"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
  "serde",
  "serde_json",
  "tempfile",
@@ -1294,16 +1313,18 @@ dependencies = [
 
 [[package]]
 name = "rapp-testkit"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "quinn",
  "rand 0.9.5",
+ "rapp-conn",
  "rapp-hub",
  "rapp-net",
  "rapp-relay",
  "rapp-service",
  "rapp-update",
+ "rapp-wire",
  "rcgen",
  "rustls",
  "serde",
@@ -1314,7 +1335,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-update"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "rapp-net",
@@ -1326,7 +1347,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-wire"
-version = "0.5.5"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "data-encoding",
@@ -1339,6 +1360,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "tokio-rustls",
  "x509-parser",
 ]
 
@@ -1755,6 +1777,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.10",
+]
+
+[[package]]
+name = "tokio-rustls"
+version = "0.26.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9cc2678c2cdd569ef8215e2afd7954ada2ae20b4fdd2c5fe6139a3b02d105db"
+dependencies = [
+ "rustls",
+ "tokio",
 ]
 
 [[package]]

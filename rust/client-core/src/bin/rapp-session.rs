@@ -79,6 +79,12 @@ fn command(v: &Value, version: u8) -> Result<Vec<u8>> {
             float(v, "dy")?,
         ),
         "select_window" => p::id_packet(14, id()?),
+        "close_window" => p::id_packet(15, id()?),
+        "select_input" => {
+            let id = v["id"].as_str().context("missing id")?;
+            ensure!(id.len() <= 1024, "input source id too long");
+            p::select_input(id)
+        }
         "resize" => {
             let mut b = id()?.to_le_bytes().to_vec();
             b.extend((number(v, "w")?.clamp(1, 65535) as u16).to_le_bytes());
@@ -155,7 +161,7 @@ fn run(out: &Output) -> Result<()> {
     socket.set_nodelay(true)?;
     socket.set_write_timeout(Some(Duration::from_secs(5)))?;
     socket.write_all(&address.hello(float(&start, "density")?.clamp(0.1, 8.)))?;
-    // Optional start-JSON field "protocol" (4-7, default 7): the version announced in the hello; < 7 means no acks.
+    // Optional start-JSON field "protocol" (4-8, default 8): the version announced in the hello; < 7 means no acks.
     let version = address.version;
     let writer = Arc::new(Mutex::new(socket.try_clone()?));
     let stdin_writer = writer.clone();
@@ -270,6 +276,10 @@ fn read_loop(
             }
             Incoming::InputBlocked(by) => event(out, json!({"event":"input_blocked","by":by}))?,
             Incoming::Weak(on) => event(out, json!({"event":"weak","on":on}))?,
+            Incoming::InputSource { id, name, ascii } => event(
+                out,
+                json!({"event":"input_source","id":id,"name":name,"ascii":ascii}),
+            )?,
         }
     }
 }
@@ -323,6 +333,22 @@ mod tests {
             )
         );
         assert_eq!(
+            command(&json!({"cmd":"close_window","window":7}), 7).unwrap(),
+            p::packet(15, 7u32.to_le_bytes().to_vec())
+        );
+        assert_eq!(
+            command(&json!({"cmd":"select_input","id":""}), 8).unwrap(),
+            vec![30, 2, 0, 0, 0, 0, 0]
+        );
+        assert_eq!(
+            command(&json!({"cmd":"select_input","id":"com.apple.keylayout.ABC"}), 8).unwrap(),
+            [
+                vec![30, 25, 0, 0, 0, 23, 0],
+                b"com.apple.keylayout.ABC".to_vec()
+            ]
+            .concat()
+        );
+        assert_eq!(
             command(&json!({"cmd":"paste","seq":8,"item":9}), 7).unwrap(),
             p::packet(
                 20,
@@ -345,6 +371,11 @@ mod tests {
             json!({"cmd":"mouse","kind":"invalid"}),
             json!({"cmd":"paste","seq":4294967296u64,"text":"x"}),
             json!({"cmd":"paste","seq":1,"text":"x".repeat(60000)}),
+            json!({"cmd":"close_window","window":4294967296u64}),
+            json!({"cmd":"close_window"}),
+            json!({"cmd":"select_input"}),
+            json!({"cmd":"select_input","id":3}),
+            json!({"cmd":"select_input","id":"x".repeat(1025)}),
         ] {
             assert!(command(&v, 7).is_err());
         }

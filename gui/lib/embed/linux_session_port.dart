@@ -260,7 +260,7 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
     final s = _sessions[sid];
     if (method == 'fetch_clip') {
       if (s == null || s.closed || s.disconnected) {
-        return {'error': 'A 已断开，复制不到'};
+        return {'error': '远端已断开，复制不到'};
       }
       final text = s.clips[args['clip']];
       if (!s.clips.containsKey(args['clip'])) return {'error': 'unknown clip'};
@@ -288,6 +288,8 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
       case 'key':
       case 'resize':
       case 'menu_pick':
+      case 'close_window':
+      case 'select_input':
         s.send({'cmd': method, ...args});
       case 'move_top_left':
         final id = args['window'];
@@ -323,7 +325,7 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
           s.showStatus(
             s.clips.containsKey(args['clip'])
                 ? 'Linux 暂不支持取用图片、文件和截断文字'
-                : '取用没成功：太旧了，A 已不保留',
+                : '取用没成功：太旧了，远端已不保留',
           );
         }
     }
@@ -450,7 +452,7 @@ class _Session {
         final text = piece['text'] as String;
         final bytes = utf8.encode(text);
         if (bytes.length > 1024 * 1024) throw StateError('文字超过 1 MB');
-        if (closed || disconnected) throw StateError('A 已断开，未发送');
+        if (closed || disconnected) throw StateError('远端已断开，未发送');
         // Never recycle sequence IDs: a late reply must not finish a later send.
         if (_nextSeq > 0xffffffff) throw StateError('请重新连接后发送');
         final seq = _nextSeq++;
@@ -467,7 +469,7 @@ class _Session {
             ..clear()
             ..['item'] = seq;
         }
-        if (closed || disconnected) throw StateError('A 已断开，未发送');
+        if (closed || disconnected) throw StateError('远端已断开，未发送');
         final reply = Completer<String>();
         _pastes[seq] = reply;
         try {
@@ -477,7 +479,7 @@ class _Session {
           send({'cmd': 'paste', 'seq': seq, ...source});
           final error = await reply.future.timeout(
             const Duration(seconds: 15),
-            onTimeout: () => '未收到 A 的确认，请检查远端内容后再重试',
+            onTimeout: () => '未收到远端的确认，请检查远端内容后再重试',
           );
           if (error.isNotEmpty) {
             failure = error;
@@ -698,7 +700,7 @@ class _Session {
     _statusTimer?.cancel();
     _upload?.cancel();
     for (final reply in _pastes.values) {
-      if (!reply.isCompleted) reply.complete('A 已断开，发送未确认；请检查远端内容后再重试');
+      if (!reply.isCompleted) reply.complete('远端已断开，发送未确认；请检查远端内容后再重试');
     }
     held.clear();
     _pendingFrame = null;

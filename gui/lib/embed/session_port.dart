@@ -253,6 +253,15 @@ class InputBlockedEvent extends SessionEvent {
   final String by;
 }
 
+/// A's keyboard input source now (v8 hosts only). [ascii]: a plain keyboard layout, typing goes
+/// straight through; false for an input method (Pinyin…), which may compose what A gets.
+class InputSourceEvent extends SessionEvent {
+  const InputSourceEvent(super.sid, this.id, this.name, this.ascii);
+  final String id;
+  final String name;
+  final bool ascii;
+}
+
 class ClosedEvent extends SessionEvent {
   const ClosedEvent(super.sid, this.reason);
   final String reason;
@@ -370,6 +379,8 @@ SessionEvent? parseSessionEvent(String method, Object? args) {
         return DetachedEvent(sid, _as<bool>(m['detached']), current: _as<int?>(m['current']));
       case 'input_blocked':
         return InputBlockedEvent(sid, _as<String?>(m['by']) ?? '');
+      case 'input_source':
+        return InputSourceEvent(sid, _as<String>(m['id']), _as<String>(m['name']), _as<bool>(m['ascii']));
       case 'closed':
         return ClosedEvent(sid, _as<String>(m['reason']));
     }
@@ -434,6 +445,12 @@ abstract class SessionPort {
       _send('set_stream', {'sid': sid, 'mode': mode, 'fps': fps, 'density': density, if (pinned) 'pinned': true});
 
   void moveTopLeft(Object sid, int window) => _send('move_top_left', {'sid': sid, 'window': window});
+
+  /// Presses A window [window]'s close button (a child window; not the session's end).
+  void closeWindow(Object sid, int window) => _send('close_window', {'sid': sid, 'window': window});
+
+  /// Switches A's input source to [id]; '' is the plain English (ASCII) keyboard layout.
+  void selectInput(Object sid, String id) => _send('select_input', {'sid': sid, 'id': id});
 
   void menuPick(Object sid, List<int> path) => _send('menu_pick', {'sid': sid, 'path': path});
 

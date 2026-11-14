@@ -102,13 +102,13 @@ fi
 # Docker on a Mac runs in a VM that does not forward UDP to the Mac, so there the probe is built and run
 # in a container that shares the relay's network namespace (it dials 127.0.0.1 there).
 if [ "$(uname)" = Linux ]; then
-  (cd "$ROOT/rust" && cargo build -q -p rapp-relay2 --example probe) || fail "4 enroll" "probe did not build"
+  (cd "$ROOT/rust" && cargo build -q -p rapp-relay --example probe) || fail "4 enroll" "probe did not build"
   "$ROOT/rust/target/debug/examples/probe" "127.0.0.1:$PORT" "$KEY" --wait >"$WORK/probe.out" 2>&1 &
 else
   docker rm -f "$PROBE_C" >/dev/null 2>&1
   docker run --rm --name "$PROBE_C" --network "container:$C" -v "$ROOT/rust:/src/rust:ro" \
     -e CARGO_TARGET_DIR=/tmp/probe-target -w /src/rust rust:1.99.1-alpine3.23 sh -c \
-    "apk add -q --no-cache musl-dev && cargo run -q --locked -p rapp-relay2 --example probe -- 127.0.0.1:$PORT $KEY --wait" \
+    "apk add -q --no-cache musl-dev && cargo run -q --locked -p rapp-relay --example probe -- 127.0.0.1:$PORT $KEY --wait" \
     >"$WORK/probe.out" 2>&1 &
 fi
 PROBE_PID=$!

@@ -1,13 +1,13 @@
 # rapp relay (Docker)
 
-One Alpine image holding one program, `/usr/local/bin/rapp-relay` (the `rapp-relay2` crate). Runs as uid
+One Alpine image holding one program, `/usr/local/bin/rapp-relay` (the `rapp-relay` crate). Runs as uid
 10001, read-only root, all capabilities dropped. Spec: `docs/superpowers/specs/2026-11-13-rapp-relay-design.md` §12.
 
 ## Install in one line
 
 On a Linux host with Docker, this starts the relay and prints its key once it is up:
 
-    docker run -d --name rapp-relay --network host --restart unless-stopped --read-only --cap-drop ALL --security-opt no-new-privileges --log-opt max-size=10m --log-opt max-file=5 -v rapp-relay-data:/data ghcr.io/wizlijun/rapp-relay:0.5.5 && until docker exec rapp-relay rapp-relay check >/dev/null 2>&1; do sleep 1; done && docker exec rapp-relay rapp-relay key
+    docker run -d --name rapp-relay --network host --restart unless-stopped --read-only --cap-drop ALL --security-opt no-new-privileges --log-opt max-size=10m --log-opt max-file=5 -v rapp-relay-data:/data ghcr.io/wizlijun/rapp-relay:0.6.0 && until docker exec rapp-relay rapp-relay check >/dev/null 2>&1; do sleep 1; done && docker exec rapp-relay rapp-relay key
 
 Then open `22026/udp` in the firewall and enter the key on every device. The key is shown only once, so save it.
 Your data lives in the `rapp-relay-data` volume. To upgrade, change the tag and run the line again after
@@ -80,7 +80,7 @@ Run as `docker exec rapp-relay rapp-relay <command>`. `--data <dir>` defaults to
   relay container's network. It removes only container `rapp-relay-smoke` and volume `rapp-relay-smoke-data`.
 - `scripts/build-relay-image.sh <version> [--multi] [--push]` runs `cargo audit`, then builds. `--multi` builds
   linux/amd64 and linux/arm64 with buildx; the foreign architecture runs under QEMU and is slow.
-- `cargo run -p rapp-relay2 --example probe -- <host:port> <key> [--wait]` enrolls a throwaway device and prints
+- `cargo run -p rapp-relay --example probe -- <host:port> <key> [--wait]` enrolls a throwaway device and prints
   `enrolled from <address the relay saw>`.
 
 ## Image size

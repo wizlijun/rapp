@@ -15,7 +15,7 @@ class FakeService {
   final _subscribers = <Socket>[];
   final _all = <Socket>[];
   int sessions = 0;
-  String relay = 'connected';
+  Map<String, dynamic> extraStatus = {};
   List<String> lanIds = [];
   Map<String, dynamic> perms = {'screen_recording': true, 'accessibility': false};
   List<Map<String, dynamic>> history = [];
@@ -59,8 +59,11 @@ class FakeService {
         case 'subscribe':
           _subscribers.add(s);
           s.write('{"ok":true}\n');
-        case 'set_password':
+        case 'show_key':
+          s.write('${jsonEncode(replies['show_key'] ?? {'ok': true, 'key': 'KEY-TEXT-123'})}\n');
         case 'set_relay':
+          s.write('${jsonEncode(replies['set_relay'] ?? {'ok': true})}\n');
+        case 'set_password':
         case 'kick':
           s.write('{"ok":true}\n');
         case 'history':
@@ -85,7 +88,7 @@ class FakeService {
         'id': '123456789',
         'name': 'bruce-mac',
         'password': 'ab12cd34',
-        'relay': relay,
+        ...extraStatus,
         'lan_ids': lanIds,
         'log_dir': '/Users/u/Library/Logs/rapp',
         'permissions': perms,
@@ -126,36 +129,71 @@ void main() {
       'id': '123456789',
       'name': 'n',
       'password': 'p',
-      'relay': 'off',
-      'relay_error': 'bad relay key',
       'permissions': {'screen_recording': false, 'accessibility': true},
       'sessions': [
-        {'sid': 3, 'peer': '1.2.3.4:5', 'app': 'com.apple.Safari', 'path': 'relay', 'since': 17},
+        {'sid': 3, 'peer': '1.2.3.4:5', 'app': 'com.apple.Safari', 'path': 'lan', 'since': 17},
       ],
     });
     expect(s.id, '123456789');
-    expect(s.relay, 'off');
-    expect(s.relayError, 'bad relay key');
     expect(s.screenRecording, isFalse);
     expect(s.accessibility, isTrue);
     expect(s.sessions.single.sid, 3);
     expect(s.sessions.single.peer, '1.2.3.4:5');
-    expect(s.sessions.single.path, 'relay');
+    expect(s.sessions.single.path, 'lan');
   });
 
-  test('without a connected relay the ID is shown as id@ip, one per address', () {
+  test('the ID is shown as id@ip, one per address', () {
     final lan = ['123456789@192.168.1.5', '123456789@100.64.0.7'];
-    final off = ServiceStatus.fromJson({'ok': true, 'id': '123456789', 'relay': 'off', 'lan_ids': lan});
+    final off = ServiceStatus.fromJson({'ok': true, 'id': '123456789', 'lan_ids': lan});
     expect(off.lanIds, lan);
     expect(off.shownIds, lan);
-    final on = ServiceStatus.fromJson({'ok': true, 'id': '123456789', 'relay': 'connected', 'lan_ids': lan});
-    expect(on.shownIds, ['123456789']);
-    final noNet = ServiceStatus.fromJson({'ok': true, 'id': '123456789', 'relay': 'off', 'lan_ids': []});
+    // with a relay set the bare ID comes first
+    final withRelay = ServiceStatus.fromJson(
+        {'ok': true, 'id': '123456789', 'relay_addr': 'vps:22026', 'has_key': true, 'lan_ids': lan});
+    expect(withRelay.shownIds, ['123456789', ...lan]);
+    // an address without a usable key is no relay
+    final noKey =
+        ServiceStatus.fromJson({'ok': true, 'id': '123456789', 'relay_addr': 'vps:22026', 'lan_ids': lan});
+    expect(noKey.shownIds, lan);
+    final noNet = ServiceStatus.fromJson({'ok': true, 'id': '123456789', 'lan_ids': []});
     expect(noNet.shownIds, ['123456789']);
   });
 
+  test('fromJson reads the relay fields', () {
+    final s = ServiceStatus.fromJson({
+      'ok': true,
+      'relay_addr': 'vps:22026',
+      'has_key': true,
+      'relay': 'error',
+      'relay_error': 'bad key',
+      'fp': 'abcd',
+    });
+    expect(s.relayAddr, 'vps:22026');
+    expect(s.hasKey, isTrue);
+    expect(s.relay, 'error');
+    expect(s.relayError, 'bad key');
+    expect(s.fp, 'abcd');
+  });
+
+  test('the relay is set only with both an address and a key', () {
+    ServiceStatus st(Map<String, dynamic> m) => ServiceStatus.fromJson({'ok': true, ...m});
+    expect(st({'relay_addr': 'vps:22026', 'has_key': true}).relaySet, isTrue);
+    expect(st({'relay_addr': 'vps:22026', 'has_key': false}).relaySet, isFalse);
+    expect(st({'has_key': true}).relaySet, isFalse);
+    expect(st({}).relaySet, isFalse);
+  });
+
+  test('missing relay fields default to off', () {
+    final s = ServiceStatus.fromJson({'ok': true, 'id': '1', 'relay_addr': ''});
+    expect(s.relayAddr, isNull);
+    expect(s.relay, 'off');
+    expect(s.hasKey, isFalse);
+    expect(s.relayError, isNull);
+    expect(s.fp, isNull);
+  });
+
   test('ServiceStatus tolerates a null id and missing optional fields', () {
-    final s = ServiceStatus.fromJson({'ok': true, 'id': null, 'relay': 'connecting', 'sessions': []});
+    final s = ServiceStatus.fromJson({'ok': true, 'id': null, 'sessions': []});
     expect(s.id, isNull);
     expect(s.sessions, isEmpty);
     expect(s.screenRecording, isFalse);
@@ -175,16 +213,13 @@ void main() {
       expect(svc.firstLines.single, {'token': 'tok-1'});
       expect(st.name, 'bruce-mac');
       expect(st.password, 'ab12cd34');
-      expect(st.relay, 'connected');
       expect(st.screenRecording, isTrue);
 
       await c.setPassword('newpw');
-      await c.setRelay('vps:22026', 'K');
       await c.kick(5);
-      expect(svc.received.map((m) => m['cmd']), ['status', 'set_password', 'set_relay', 'kick']);
+      expect(svc.received.map((m) => m['cmd']), ['status', 'set_password', 'kick']);
       expect(svc.received[1]['password'], 'newpw');
-      expect(svc.received[2], {'cmd': 'set_relay', 'relay': 'vps:22026', 'key': 'K'});
-      expect(svc.received[3], {'cmd': 'kick', 'sid': 5});
+      expect(svc.received[2], {'cmd': 'kick', 'sid': 5});
       await c.close();
     });
 

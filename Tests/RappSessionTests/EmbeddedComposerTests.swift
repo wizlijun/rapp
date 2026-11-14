@@ -73,7 +73,7 @@ final class EmbeddedComposerTests: XCTestCase {
         let handle = try FileHandle(forWritingTo: big)
         try handle.truncate(atOffset: maxComposerBytes + 1)
         try handle.close()
-        XCTAssertEqual(composer.attach([big]), .status("太大了，A 最多收 256 MB"))
+        XCTAssertEqual(composer.attach([big]), .status("太大了，远端最多收 256 MB"))
     }
 
     func testAttachFilesBecomeBlocksAndAFolderAmongThemIsReported() throws {
@@ -100,7 +100,7 @@ final class EmbeddedComposerTests: XCTestCase {
     func testAFailedPasteReportsWhatWent() {
         composer.send([.text("a")])
         XCTAssertTrue(composer.pasted(seq: 1, error: "target not frontmost"))
-        XCTAssertEqual(events.last, .done(sent: 0, failure: "A 上的目标窗口不在最前"))
+        XCTAssertEqual(events.last, .done(sent: 0, failure: "远端的目标窗口不在最前"))
     }
 
     func testDroppedBlockIsForgotten() {

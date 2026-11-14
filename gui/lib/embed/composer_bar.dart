@@ -117,9 +117,19 @@ class _ComposerBarState extends State<ComposerBar> {
     return KeyEventResult.ignored;
   }
 
+  // Text goes after A is set for it (English input, the marked box clicked); an empty send is
+  // a Return for A's app.
   void _send() {
     final pieces = _m.pieces();
-    if (_m.send() == SendOutcome.sent) widget.port.composerSend(_sid, pieces);
+    switch (_m.send()) {
+      case SendOutcome.sent:
+        widget.session.prepareInput();
+        widget.port.composerSend(_sid, pieces);
+      case SendOutcome.empty:
+        widget.session.pressReturn();
+      case SendOutcome.ignored:
+        break;
+    }
   }
 
   // The model outlives the bar while the session lives; it ignores results after its end.
@@ -199,6 +209,10 @@ class _ComposerBarState extends State<ComposerBar> {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
+                    if (widget.session.inputSource != null) ...[
+                      RemoteImeChip(session: widget.session),
+                      gap,
+                    ],
                     RappButton.secondary(label: '按键', onPressed: () => setState(() => _keys = !_keys)),
                     gap,
                     RappButton.secondary(label: '附件', onPressed: _attach),
@@ -216,8 +230,8 @@ class _ComposerBarState extends State<ComposerBar> {
                           maxLines: 6,
                           keyboardType: TextInputType.multiline,
                           style: TextStyle(color: t.text),
-                          decoration: const InputDecoration(
-                            hintText: '发给 A 的文字（Enter 发送，Shift+Enter 换行）',
+                          decoration: InputDecoration(
+                            hintText: '发给 ${widget.session.appName} 的文字（Enter 发送；空着按 Enter 发回车）',
                             isDense: true,
                           ),
                         ),
@@ -252,6 +266,55 @@ class _ComposerBarState extends State<ComposerBar> {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+/// A's input source, loud when it is an input method (it would catch what is sent): a tap
+/// switches between English and the last input method A had.
+class RemoteImeChip extends StatelessWidget {
+  const RemoteImeChip({super.key, required this.session});
+
+  final RemoteSession session;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RappTokens.of(context);
+    final s = session.inputSource;
+    if (s == null) return const SizedBox.shrink();
+    final back = session.lastInputMethod;
+    final VoidCallback? tap = !s.ascii
+        ? () => session.selectInput('')
+        : back != null
+            ? () => session.selectInput(back.id)
+            : null;
+    final label = s.ascii ? '远端输入法：英文' : '远端输入法：${s.name}';
+    return Semantics(
+      button: tap != null,
+      label: s.ascii ? '$label${back != null ? '，点按切回 ${back.name}' : ''}' : '$label，点按切到英文',
+      excludeSemantics: true,
+      child: Tooltip(
+        message: s.ascii
+            ? (back != null ? '点按切回 ${back.name}' : '远端是英文输入')
+            : '远端在用输入法，发送前会切到英文；点按现在就切',
+        child: InkWell(
+          key: const Key('remote-ime'),
+          onTap: tap,
+          borderRadius: BorderRadius.circular(t.r),
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 48),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: t.raiseBox(border: s.ascii ? null : t.accent).copyWith(
+                  border: Border.all(color: s.ascii ? t.line : t.accent, width: s.ascii ? 1 : 2),
+                ),
+            child: Center(
+              widthFactor: 1,
+              child: Text(label,
+                  style: TextStyle(color: s.ascii ? t.muted : t.accent, fontWeight: s.ascii ? null : FontWeight.w600)),
+            ),
+          ),
+        ),
       ),
     );
   }

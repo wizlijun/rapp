@@ -89,10 +89,10 @@ void main() {
     final cols = deviceColumns(
       hosts: const [HubHost('m1', 'A'), HubHost('m2', 'B')],
       probes: {'m1': DeviceProbe(Lamp.active, '在线')},
-      entries: [se('m1', Lamp.active, path: ''), se('m1', Lamp.active, path: 'relay')],
+      entries: [se('m1', Lamp.active, path: ''), se('m1', Lamp.active, path: 'lan')],
       name: (id) => id,
     );
-    expect(cols[1].path, '中继');
+    expect(cols[1].path, '局域网');
     expect(cols[2].path, '');
     expect(cols[0].path, '');
   });

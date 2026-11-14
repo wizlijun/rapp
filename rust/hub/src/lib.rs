@@ -1,5 +1,6 @@
 //! rapp-hub (spec §4): B side. JSON-line commands on stdin, events on stdout.
-//! Relay address and key come from `service.json` in the same config dir.
+//! Hosts are reached at the addresses saved in `hosts.json` (added as `id@ip`, or by bare ID through
+//! the relay), and through the relay when no address answers.
 
 mod hosts;
 mod link;
@@ -8,22 +9,20 @@ mod session;
 
 use anyhow::{bail, Context, Result};
 use hosts::{Host, Hosts};
-use link::{Force, Link};
-use quinn::{Connection, Endpoint};
+use link::Link;
+use quinn::Endpoint;
 use rapp_net::log::{Log, Lvl};
 use rapp_net::msg::Op;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 
 pub struct Opts {
     pub home: PathBuf,
     pub bin_dir: Option<PathBuf>,
-    /// `RAPP_FORCE_PATH`: relay | direct | lan.
-    pub force_path: Option<String>,
     /// `hub.log` (spec §4.4); `Log::none()` writes nothing.
     pub log: Log,
     /// Presence probe period; None = no probe (tests).
@@ -41,14 +40,22 @@ pub(crate) struct HubSession {
 
 type Out = Box<dyn AsyncWrite + Unpin + Send>;
 
+/// Everything the hub reads from its home, swapped as one by `set_home`.
+pub(crate) struct HomeState {
+    /// Where `service.json` (relay, key) and the device key live.
+    pub home: PathBuf,
+    /// This device's key and certificate, shared with the service on this machine.
+    pub identity: Arc<rapp_wire::Identity>,
+}
+
 pub(crate) struct Hub {
+    /// The home and what is read from it; `set_home` replaces it (hosts swap in `hosts`).
+    at: RwLock<HomeState>,
     bin_dir: Option<PathBuf>,
-    force: Option<Force>,
     ep: Endpoint,
-    /// (address, key) from service.json.
-    relay: Option<(String, String)>,
-    relay_conn: tokio::sync::Mutex<Option<Connection>>,
     links: Mutex<HashMap<String, Link>>,
+    /// The connection to the relay, kept while the settings it was dialed with stand.
+    relay: tokio::sync::Mutex<Option<link::RelayCache>>,
     hosts: Hosts,
     out: tokio::sync::Mutex<Out>,
     /// sid → writer of the client's stdin (None once closed).
@@ -58,20 +65,13 @@ pub(crate) struct Hub {
     close_why: Mutex<HashMap<u64, String>>,
     /// Hosts the presence probe stopped trying after an auth-type failure, until the user acts on them.
     probe_halt: Mutex<std::collections::HashSet<String>>,
-    /// Hosts with LAN addresses the relay called "unknown id" this run (`id@ip` hosts that never
-    /// registered there): presence probes them over LAN only, so it never asks the relay again.
-    lan_only: Mutex<std::collections::HashSet<String>>,
+    /// What the relay said about a host in this run: true = found it, false = `unknown id`.
+    /// Probes look a host up only when that is worth a lookup (the relay counts `unknown id`).
+    relay_seen: Mutex<HashMap<String, bool>>,
     kill: tokio::sync::watch::Sender<bool>,
     log: Log,
-    /// B's self-declared name in `auth` / `connect` (spec §2): this machine's hostname.
+    /// B's self-declared name in `auth` (spec §2): this machine's hostname.
     name: String,
-}
-
-/// Relay settings from `<home>/service.json`; None when unset or empty.
-fn relay_settings(home: &std::path::Path) -> Result<Option<(String, String)>> {
-    let cfg: Option<Value> = rapp_net::config::read_json(&home.join("service.json"))?;
-    let get = |k: &str| cfg.as_ref().and_then(|c| c[k].as_str()).filter(|s| !s.is_empty()).map(str::to_string);
-    Ok(get("relay").map(|r| (r, get("key").unwrap_or_default())))
 }
 
 pub async fn run<R, W>(opts: Opts, input: R, output: W) -> Result<()>
@@ -79,25 +79,20 @@ where
     R: AsyncRead + Unpin + Send + 'static,
     W: AsyncWrite + Unpin + Send + 'static,
 {
-    let relay = relay_settings(&opts.home)?;
-    let mut start = json!({"version": env!("CARGO_PKG_VERSION")});
-    if let Some((addr, _)) = &relay {
-        start["relay"] = addr.as_str().into(); // the address only, never the key
-    }
-    opts.log.event(Lvl::Info, "hub_start", start);
+    opts.log.event(Lvl::Info, "hub_start", json!({"version": env!("CARGO_PKG_VERSION")}));
+    let identity = Arc::new(rapp_wire::Identity::load_or_create(&opts.home, "device").context("device key")?);
     let hub = Arc::new(Hub {
-        force: Force::parse(opts.force_path.as_deref())?,
+        at: RwLock::new(HomeState { home: opts.home.clone(), identity }),
         ep: rapp_net::quic::client_endpoint(([0, 0, 0, 0], 0).into())?,
-        relay,
-        relay_conn: Default::default(),
         links: Default::default(),
+        relay: Default::default(),
         hosts: Hosts::load(&opts.home)?,
         out: tokio::sync::Mutex::new(Box::new(output)),
         sessions: Default::default(),
         next_sid: AtomicU64::new(sid_seed()),
         close_why: Default::default(),
         probe_halt: Default::default(),
-        lan_only: Default::default(),
+        relay_seen: Default::default(),
         kill: tokio::sync::watch::channel(false).0,
         bin_dir: opts.bin_dir,
         log: opts.log,
@@ -122,6 +117,9 @@ where
     }
     read?;
     hub.close_all().await;
+    if let Some(c) = hub.relay.lock().await.take() {
+        c.conn.close();
+    }
     hub.ep.close(0u32.into(), b"hub exit");
     let _ = hub.out.lock().await.shutdown().await;
     Ok(())
@@ -136,6 +134,29 @@ impl Hub {
         let mut out = self.out.lock().await;
         let _ = out.write_all(format!("{v}\n").as_bytes()).await;
         let _ = out.flush().await;
+    }
+
+    /// The home and the device identity, read together so that one operation never mixes two homes.
+    pub(crate) fn at_home(&self) -> (PathBuf, Arc<rapp_wire::Identity>) {
+        let at = self.at.read().unwrap();
+        (at.home.clone(), at.identity.clone())
+    }
+
+    /// Moves to a new home: its device identity, its hosts, and (read per connect) its relay and key.
+    /// On error nothing changes. The relay connection, dialed as the old device, is closed; cached
+    /// host links are dropped from the cache (sessions on them keep running) so the next request
+    /// connects as the new device.
+    async fn set_home(&self, dir: &std::path::Path) -> Result<()> {
+        let identity = Arc::new(rapp_wire::Identity::load_or_create(dir, "device").context("device key")?);
+        self.hosts.reload(dir)?;
+        *self.at.write().unwrap() = HomeState { home: dir.to_path_buf(), identity };
+        if let Some(c) = self.relay.lock().await.take() {
+            c.conn.close();
+        }
+        self.links.lock().unwrap().clear();
+        self.probe_halt.lock().unwrap().clear();
+        self.relay_seen.lock().unwrap().clear();
+        Ok(())
     }
 
     /// The name B introduces itself with.
@@ -172,40 +193,17 @@ impl Hub {
         Ok(Some(match v.get("cmd").and_then(Value::as_str) {
             Some("hosts") => self.hosts_event(),
             Some("add_host") => {
-                let (id, addr) = rapp_net::addr::split_host_ref(s("id")?)?;
-                let (id, password) = (id.as_str(), s("password")?);
-                if let Some(addr) = addr {
-                    // `id@ip[:port]`: straight to A with the password, no relay (§2.3).
-                    let auth = Op::Auth { token: None, password: Some(password.into()), name: self.me() };
-                    let (conn, r) = self.dial(&addr, link::LAN_WAIT, &auth).await?;
-                    conn.close(0u32.into(), b"host added");
-                    if r["id"] != id {
-                        bail!("{addr} is ID {}, not {id}", r["id"].as_str().unwrap_or("?"));
-                    }
-                    let name = r["name"].as_str().unwrap_or(id).to_string();
-                    self.hosts.upsert(Host { id: id.into(), name: name.clone(), password: password.into(), lan: vec![addr] })?;
-                    self.forget_host(id);
-                    return Ok(Some(json!({"event":"host_added","id":id,"name":name})));
-                }
-                let info = match self.relay_connect(id, password).await {
-                    Ok(Ok(info)) => info,
-                    Ok(Err(msg)) => bail!(msg),
-                    Err(e) => return Err(e.context("relay unreachable")),
-                };
-                let name = info["name"].as_str().unwrap_or(id).to_string();
-                let lan = info["lan"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
-                self.hosts.upsert(Host { id: id.into(), name: name.clone(), password: password.into(), lan })?;
-                self.forget_host(id);
-                json!({"event":"host_added","id":id,"name":name})
+                let password = v.get("password").and_then(Value::as_str);
+                self.add_host(s("id")?, password).await?
             }
             Some("remove_host") => {
                 let id = s("id")?;
                 self.hosts.remove(id)?;
-                self.forget_host(id);
+                self.forget(id);
                 self.hosts_event()
             }
             Some("set_home") => {
-                self.hosts.reload(std::path::Path::new(s("dir")?))?;
+                self.set_home(std::path::Path::new(s("dir")?)).await?;
                 json!({"event":"home_set"})
             }
             Some("apps") => {
@@ -255,10 +253,7 @@ impl Hub {
 /// and the GUI keeps old sids across 「重启服务」; starting from the clock keeps a restarted hub
 /// from reusing them.
 fn sid_seed() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
 #[cfg(test)]

@@ -1,5 +1,4 @@
-//! rapp-service (spec §3): A side. Registers with the relay, authenticates peers,
-//! lists apps, runs `rapp-host` workers and splices sessions, serves local IPC.
+//! rapp-service (spec §3): A side. Authenticates B, runs `rapp-host` workers, serves local IPC.
 
 mod cm;
 pub mod config;
@@ -15,7 +14,9 @@ use anyhow::{Context, Result};
 use serde_json::json;
 use config::{Config, DEFAULT_IPC_PORT, DEFAULT_PORT};
 use rapp_net::log::{Log, Lvl};
-use rapp_net::quic::{server_endpoint, ALPN_PEER};
+use rapp_net::quic::ALPN_PEER;
+use rapp_wire::tls::{device_server_config, ALPN_DEVICE};
+use rapp_wire::Identity;
 use state::State;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -44,6 +45,8 @@ pub struct Opts {
     pub update: Option<UpdateOpts>,
     /// None: no `device.json`, no git (the testkit).
     pub data: Option<DataOpts>,
+    /// The LAN addresses registered on the relay; None: this machine's own (`rapp_net::addr::lan_addrs`).
+    pub advertise_lan: Option<Vec<String>>,
 }
 
 /// Where the running app is and the updater's timings (online-update plan Task 4).
@@ -96,15 +99,23 @@ impl Service {
         make_private(&launchd);
         let log = Log::file(&opts.log_dir, LOG_FILE);
         let cfg = Config::load_or_init(&opts.home)?;
+        if cfg.legacy_dropped {
+            log.event(Lvl::Info, "relay_legacy_dropped", json!({}));
+        }
         let (port, ipc_port) = (cfg.port.unwrap_or(DEFAULT_PORT), cfg.ipc_port.unwrap_or(DEFAULT_IPC_PORT));
-        let endpoint = server_endpoint(([0, 0, 0, 0], port).into(), ALPN_PEER)?;
+        let identity = Identity::load_or_create(&opts.home, "device")?;
+        let paired = rapp_conn::Paired::load(&opts.home).unwrap_or_else(|e| {
+            log.event(Lvl::Warn, "paired_error", json!({"err": format!("{e:#}")}));
+            rapp_conn::Paired::empty(&opts.home)
+        });
+        let server = device_server_config(&identity, &[ALPN_DEVICE, ALPN_PEER])?;
+        let endpoint = quinn::Endpoint::server(server, ([0, 0, 0, 0], port).into()).with_context(|| format!("bind udp port {port}"))?;
         let port = endpoint.local_addr()?.port();
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", ipc_port)).await.with_context(|| format!("bind ipc 127.0.0.1:{ipc_port}"))?;
         let ipc_port = listener.local_addr()?.port();
         let ipc_token = rapp_net::crypto::random_hex(16);
         rapp_net::config::write_private(&opts.home.join("ipc.token"), ipc_token.as_bytes())?;
 
-        let (relay_tx, relay_rx) = tokio::sync::mpsc::unbounded_channel();
         let state = State {
             home: opts.home,
             bin_dir: opts.bin_dir,
@@ -112,14 +123,11 @@ impl Service {
             endpoint: endpoint.clone(),
             port,
             cfg: Mutex::new(cfg),
-            tokens: Mutex::default(),
             sessions: Mutex::default(),
-            relay: Mutex::new(("off", None)),
             permissions: Mutex::new(serde_json::Value::Null),
             perms_lost: Mutex::new(false),
             workers: workers::Workers::new(opts.worker_idle),
             changed: tokio::sync::watch::channel(0).0,
-            relay_cmd: relay_tx,
             cm: Mutex::new(None),
             log,
             log_dir: opts.log_dir,
@@ -127,6 +135,10 @@ impl Service {
             update: Mutex::default(),
             update_opts: opts.update,
             restart: tokio::sync::watch::channel(false).0,
+            identity,
+            paired,
+            relay: Mutex::new(("off", None)),
+            relay_settings: tokio::sync::watch::channel(0).0,
         };
         let id = state.cfg.lock().unwrap().id.clone();
         let version = env!("CARGO_PKG_VERSION");
@@ -137,9 +149,9 @@ impl Service {
         update::on_start(&state).await;
         let mut tasks = vec![
             tokio::spawn(peer::accept_loop(state.clone(), endpoint)),
-            tokio::spawn(relay_link::run(state.clone(), relay_rx)),
             tokio::spawn(ipc::serve(state.clone(), listener, ipc_token)),
             update::spawn(state.clone()),
+            relay_link::spawn(state.clone(), opts.advertise_lan),
         ];
         if let Some(data) = opts.data {
             let name = state.cfg.lock().unwrap().name.clone();

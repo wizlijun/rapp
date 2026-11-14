@@ -23,6 +23,10 @@ public enum ChannelCommand: Equatable {
     case key(sid: Int64, keyCode: UInt16, modifiers: UInt64)
     case resize(sid: Int64, Message)
     case selectWindow(sid: Int64, window: UInt32)
+    /// Press the close button of A's window `window` (the session stays up).
+    case closeWindow(sid: Int64, window: UInt32)
+    /// Select A's input source `id`; "" selects A's ASCII-capable layout (v8 hosts).
+    case selectInput(sid: Int64, id: String)
     case setStream(sid: Int64, mode: Mode, fps: UInt8, density: DensityChoice, pinned: Bool)
     /// Stop one transfer (`id`) or, without an id, all of them.
     case cancelTransfer(sid: Int64, id: UInt32?)
@@ -64,6 +68,9 @@ public enum ChannelCommand: Equatable {
     case setHidden(sid: Int64, windows: [UInt32])
 }
 
+/// Longest input source id `select_input` passes on (hosts cut theirs to 1024 bytes).
+public let maxInputSourceID = 1024
+
 /// Parses one Dart call. Missing fields, wrong types and out-of-range values throw
 /// `ChannelError.bad(method)`; sizes and click counts clamp to what the protocol carries.
 public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelCommand {
@@ -72,7 +79,7 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
                               "cancel_transfer", "picture_focus", "clip_pick", "menu_pick", "move_top_left",
                               "composer_paste", "composer_attach", "composer_send", "composer_drop_block",
                               "detach", "attach", "raise_detached", "fetch_clip", "copy_local", "drop_copy", "reveal",
-                              "pin_save", "pin_load", "set_hidden"]
+                              "pin_save", "pin_load", "set_hidden", "close_window", "select_input"]
     guard known.contains(method) else { throw ChannelError.unknown(method) }
     guard let map = args as? [String: Any] else { throw ChannelError.bad(method) }
     let a = Args(method: method, map: map)
@@ -122,6 +129,12 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
         return .resize(sid: sid, .resize(window: try a.window(), width: try a.size("w"), height: try a.size("h")))
     case "select_window":
         return .selectWindow(sid: sid, window: try a.window())
+    case "close_window":
+        return .closeWindow(sid: sid, window: try a.window())
+    case "select_input":
+        let id = try a.string("id")
+        guard id.utf8.count <= maxInputSourceID else { throw ChannelError.bad(method) }
+        return .selectInput(sid: sid, id: id)
     case "set_stream":
         return .setStream(sid: sid, mode: try a.mode(), fps: try a.fps(), density: try a.density(),
                           pinned: try a.optionalBool("pinned"))
@@ -338,6 +351,8 @@ public func eventPayload(_ e: SessionEvent, sid: Int64, textures: [UInt32: Int64
         return payload("input_blocked", ["by": by])
     case let .weak(on):
         return payload("weak", ["on": on])
+    case let .inputSource(id, name, ascii):
+        return payload("input_source", ["id": id, "name": name, "ascii": ascii])
     case let .disconnected(reason):
         return payload("disconnected", ["reason": reason])
     case let .closed(reason):

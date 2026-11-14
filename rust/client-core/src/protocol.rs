@@ -1,7 +1,7 @@
 use anyhow::{bail, ensure, Context, Result};
 use std::{collections::HashSet, io::Read};
 
-pub const VERSION: u8 = 7;
+pub const VERSION: u8 = 8;
 pub const MAX_MESSAGE: usize = 64 * 1024 * 1024;
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Rect {
@@ -53,6 +53,12 @@ pub enum Incoming {
     },
     InputBlocked(String),
     Weak(bool),
+    /// A's selected input source (v8); `ascii`: a plain keyboard layout, not an input method.
+    InputSource {
+        id: String,
+        name: String,
+        ascii: bool,
+    },
 }
 #[derive(Clone, Debug)]
 pub struct Address {
@@ -98,7 +104,10 @@ impl Address {
             token.len() <= 65535 && app.len() <= 65535,
             "token or app identifier too long"
         );
-        ensure!([4, 5, 6, 7].contains(&version), "protocol must be 4, 5, 6 or 7");
+        ensure!(
+            [4, 5, 6, 7, 8].contains(&version),
+            "protocol must be 4, 5, 6, 7 or 8"
+        );
         Ok(Self {
             version,
             host,
@@ -157,6 +166,12 @@ pub fn string(out: &mut Vec<u8>, s: &str) {
 }
 pub fn id_packet(kind: u8, id: u32) -> Vec<u8> {
     packet(kind, id.to_le_bytes().to_vec())
+}
+/// Select A's input source `id`; "" selects A's ASCII-capable layout (v8 hosts).
+pub fn select_input(id: &str) -> Vec<u8> {
+    let mut p = vec![];
+    string(&mut p, id);
+    packet(30, p)
 }
 pub fn key(code: u16, modifiers: u64, down: bool) -> Vec<u8> {
     let mut p = code.to_le_bytes().to_vec();
@@ -280,7 +295,7 @@ pub fn read_message(input: &mut impl Read) -> Result<(Incoming, usize)> {
     let mut h = [0; 5];
     input.read_exact(&mut h).context("host disconnected")?;
     ensure!(
-        [2, 3, 4, 13, 17, 19, 21, 26, 28].contains(&h[0]),
+        [2, 3, 4, 13, 17, 19, 21, 26, 28, 29].contains(&h[0]),
         "unexpected host message type {}",
         h[0]
     );
@@ -408,6 +423,17 @@ pub fn decode(kind: u8, p: &[u8]) -> Result<Incoming> {
             ensure!(v <= 1, "invalid weak flag");
             Incoming::Weak(v == 1)
         }
+        29 => {
+            let id = r.string()?;
+            let name = r.string()?;
+            let ascii = r.u8()?;
+            ensure!(ascii <= 1, "invalid ascii flag");
+            Incoming::InputSource {
+                id,
+                name,
+                ascii: ascii == 1,
+            }
+        }
         _ => bail!("unknown host message type {kind}"),
     };
     r.end()?;
@@ -431,8 +457,8 @@ pub fn takeover_notice(reason: &str) -> Option<String> {
 
 pub fn input_blocked_notice(by: &str) -> String {
     if by.is_empty() {
-        "A 正在被另一台设备操作".into()
+        "远端正在被另一台设备操作".into()
     } else {
-        format!("A 正在被 {by} 操作")
+        format!("远端正在被 {by} 操作")
     }
 }

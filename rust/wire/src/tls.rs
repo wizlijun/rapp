@@ -16,6 +16,10 @@ use rustls::{CertificateError, DigitallySignedStruct, DistinguishedName, PeerInc
 use crate::{Fp, Identity};
 
 pub const ALPN_RELAY: &[u8] = b"rapp-relay/2";
+/// Device to device, direct or through the relay.
+pub const ALPN_DEVICE: &[u8] = b"rapp/2";
+/// The end-to-end TLS inside a relayed stream.
+pub const ALPN_E2E: &[u8] = b"rapp-e2e/1";
 pub const SNI: &str = "rapp";
 
 /// What the client accepts from the server.
@@ -45,12 +49,7 @@ pub fn bi((send, recv): (quinn::SendStream, quinn::RecvStream)) -> BiStream {
 /// Devices never open unidirectional streams toward the relay, so none are allowed.
 pub fn server_config(id: &Identity, alpn: &[u8], max_streams: u32) -> Result<quinn::ServerConfig> {
     let p = provider();
-    let verifier = ClientVerifier { algs: p.signature_verification_algorithms };
-    let mut tls = rustls::ServerConfig::builder_with_provider(p)
-        .with_protocol_versions(&[&rustls::version::TLS13])?
-        .with_client_cert_verifier(Arc::new(verifier))
-        .with_single_cert(vec![id.cert.clone()], PrivateKeyDer::Pkcs8(id.key.clone_key()))?;
-    tls.alpn_protocols = vec![alpn.to_vec()];
+    let tls = server_tls(id, p, true, vec![alpn.to_vec()])?;
     let mut sc = quinn::ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(tls)?));
     let mut t = transport();
     t.max_concurrent_bidi_streams(max_streams.into())
@@ -61,8 +60,54 @@ pub fn server_config(id: &Identity, alpn: &[u8], max_streams: u32) -> Result<qui
     Ok(sc)
 }
 
-/// TLS 1.3 only; shows this device's certificate and checks the server against `expect`.
-pub fn client_config(id: &Identity, alpn: &[u8], expect: Expect) -> Result<quinn::ClientConfig> {
+/// A device accepting other devices: TLS 1.3 only; a client certificate is optional (a `rapp/1`
+/// peer shows none), but one that is shown must be backed by its key.
+pub fn device_server_config(id: &Identity, alpns: &[&[u8]]) -> Result<quinn::ServerConfig> {
+    let tls = server_tls(id, provider(), false, alpns.iter().map(|a| a.to_vec()).collect())?;
+    let mut sc = quinn::ServerConfig::with_crypto(Arc::new(QuicServerConfig::try_from(tls)?));
+    let mut t = transport();
+    t.max_concurrent_bidi_streams(1024u32.into());
+    sc.transport_config(Arc::new(t));
+    Ok(sc)
+}
+
+/// A device dialing another device: shows its certificate; the caller compares the server's
+/// fingerprint after the handshake.
+pub fn device_client_config(id: &Identity, alpn: &[u8]) -> Result<quinn::ClientConfig> {
+    client_config(id, alpn, Expect::Any)
+}
+
+/// TLS inside a relayed stream, server side: the client must show a certificate.
+pub fn e2e_server(id: &Identity) -> Result<Arc<rustls::ServerConfig>> {
+    Ok(Arc::new(server_tls(id, provider(), true, vec![ALPN_E2E.to_vec()])?))
+}
+
+/// TLS inside a relayed stream, client side; the caller compares the server's fingerprint.
+pub fn e2e_client(id: &Identity) -> Result<Arc<rustls::ClientConfig>> {
+    Ok(Arc::new(client_tls(id, Expect::Any, ALPN_E2E)?))
+}
+
+/// The ALPN the connection negotiated.
+pub fn alpn(conn: &quinn::Connection) -> Option<Vec<u8>> {
+    conn.handshake_data()?.downcast::<quinn::crypto::rustls::HandshakeData>().ok()?.protocol
+}
+
+fn server_tls(
+    id: &Identity,
+    p: Arc<CryptoProvider>,
+    mandatory: bool,
+    alpns: Vec<Vec<u8>>,
+) -> Result<rustls::ServerConfig> {
+    let verifier = ClientVerifier { algs: p.signature_verification_algorithms, mandatory };
+    let mut tls = rustls::ServerConfig::builder_with_provider(p)
+        .with_protocol_versions(&[&rustls::version::TLS13])?
+        .with_client_cert_verifier(Arc::new(verifier))
+        .with_single_cert(vec![id.cert.clone()], PrivateKeyDer::Pkcs8(id.key.clone_key()))?;
+    tls.alpn_protocols = alpns;
+    Ok(tls)
+}
+
+fn client_tls(id: &Identity, expect: Expect, alpn: &[u8]) -> Result<rustls::ClientConfig> {
     let p = provider();
     let verifier = ServerVerifier { algs: p.signature_verification_algorithms, expect };
     let mut tls = rustls::ClientConfig::builder_with_provider(p)
@@ -71,6 +116,12 @@ pub fn client_config(id: &Identity, alpn: &[u8], expect: Expect) -> Result<quinn
         .with_custom_certificate_verifier(Arc::new(verifier))
         .with_client_auth_cert(vec![id.cert.clone()], PrivateKeyDer::Pkcs8(id.key.clone_key()))?;
     tls.alpn_protocols = vec![alpn.to_vec()];
+    Ok(tls)
+}
+
+/// TLS 1.3 only; shows this device's certificate and checks the server against `expect`.
+pub fn client_config(id: &Identity, alpn: &[u8], expect: Expect) -> Result<quinn::ClientConfig> {
+    let tls = client_tls(id, expect, alpn)?;
     let mut cc = quinn::ClientConfig::new(Arc::new(QuicClientConfig::try_from(tls)?));
     cc.transport_config(Arc::new(transport()));
     Ok(cc)
@@ -106,14 +157,16 @@ fn no_tls12() -> rustls::Error {
 }
 
 /// Server side: any client certificate x509-parser can read, as long as the client signs with its key.
+/// With `mandatory` false a client may also show no certificate at all.
 #[derive(Debug)]
 struct ClientVerifier {
     algs: WebPkiSupportedAlgorithms,
+    mandatory: bool,
 }
 
 impl ClientCertVerifier for ClientVerifier {
     fn client_auth_mandatory(&self) -> bool {
-        true
+        self.mandatory
     }
 
     fn root_hint_subjects(&self) -> &[DistinguishedName] {
@@ -341,7 +394,7 @@ mod tests {
         let (victim, thief, cid) =
             (Identity::generate().unwrap(), Identity::generate().unwrap(), Identity::generate().unwrap());
         let provider = Arc::new(rustls::crypto::ring::default_provider());
-        let verifier = ClientVerifier { algs: provider.signature_verification_algorithms };
+        let verifier = ClientVerifier { algs: provider.signature_verification_algorithms, mandatory: true };
         let mut tls = rustls::ServerConfig::builder_with_provider(provider)
             .with_protocol_versions(&[&rustls::version::TLS13])
             .unwrap()

@@ -1,5 +1,9 @@
-// The stream menu (R5, R13, R22): stream presets and settings, A's clipboard, session actions and
-// A's mirrored menus. A popover the user opens from the traffic label; a pick closes it.
+// The top bar's three menus (R5, R13, R22), each a popover a pick closes:
+// - 本机 (💻): session actions, the remote clipboard, the remote input method, the input-box mark,
+//   app 配置…;
+// - 远程 (🖥): the remote app's mirrored menus, nothing else;
+// - 流量优化 (the traffic label): stream presets and settings.
+// A bar too narrow for three buttons keeps the traffic label alone, with all three parts in it.
 import 'package:flutter/material.dart';
 
 import '../ui/controls.dart';
@@ -12,7 +16,16 @@ import 'session_port.dart';
 import 'stream_choice.dart';
 import 'traffic_label.dart';
 
-/// The traffic label with the stream menu hanging under it.
+/// Which parts a menu shows.
+enum MenuPart { session, remote, stream }
+
+const allMenuParts = {MenuPart.session, MenuPart.remote, MenuPart.stream};
+
+/// Width a 本机 or 远程 button takes in a wide bar (icon, word, arrow); a narrow one is 48.
+const menuButtonWidth = 88.0;
+
+/// A corner button with its menu hanging under it: the traffic label for a menu with the stream
+/// part, else the 本机 or 远程 button.
 class StreamMenuAnchor extends StatefulWidget {
   const StreamMenuAnchor({
     super.key,
@@ -29,6 +42,9 @@ class StreamMenuAnchor extends StatefulWidget {
     this.onToggleDetach,
     this.onRememberStream,
     this.onOpenProfile,
+    this.onMarkInput,
+    this.onClearInput,
+    this.parts = allMenuParts,
     required this.open,
     required this.onToggle,
     required this.onClose,
@@ -61,7 +77,7 @@ class StreamMenuAnchor extends StatefulWidget {
   final VoidCallback onToggle;
   final VoidCallback onClose;
 
-  /// The hub's path word (`lan`, `direct`, `relay`).
+  /// The hub's path word (`lan`, `direct`).
   final String path;
 
   /// The session's state word (`lampWord`), shown beside the path.
@@ -90,6 +106,12 @@ class StreamMenuAnchor extends StatefulWidget {
   final VoidCallback? onRememberStream;
   final VoidCallback? onOpenProfile;
 
+  /// 「标记输入区」 (the next click on the picture marks it) and 「清除输入区标记」.
+  final VoidCallback? onMarkInput;
+  final VoidCallback? onClearInput;
+
+  final Set<MenuPart> parts;
+
   @override
   State<StreamMenuAnchor> createState() => _StreamMenuAnchorState();
 }
@@ -97,11 +119,16 @@ class StreamMenuAnchor extends StatefulWidget {
 class _StreamMenuAnchorState extends State<StreamMenuAnchor> {
   @override
   Widget build(BuildContext context) {
+    final parts = widget.parts;
+    final kind = parts.contains(MenuPart.stream) ? 'stream' : (parts.contains(MenuPart.remote) ? 'remote' : 'session');
     return CornerPopover(
       open: widget.open,
       onClose: widget.onClose,
-      scrimKey: const Key('stream-menu-scrim'),
+      scrimKey: Key('$kind-menu-scrim'),
       popover: StreamMenu(
+        parts: parts,
+        onMarkInput: widget.onMarkInput,
+        onClearInput: widget.onClearInput,
         port: widget.port,
         session: widget.session,
         path: widget.path,
@@ -122,7 +149,15 @@ class _StreamMenuAnchorState extends State<StreamMenuAnchor> {
         onCopy: widget.onCopy,
         onAllClips: widget.onAllClips,
       ),
-      child: ListenableBuilder(
+      child: kind != 'stream'
+          ? MenuCornerButton(
+              key: Key('$kind-menu'),
+              remote: kind == 'remote',
+              open: widget.open,
+              compact: widget.compact,
+              onTap: widget.onToggle,
+            )
+          : ListenableBuilder(
         listenable: widget.session,
         builder: (context, _) => TrafficLabel(
           key: const Key('traffic'),
@@ -132,6 +167,71 @@ class _StreamMenuAnchorState extends State<StreamMenuAnchor> {
           compact: widget.compact,
           onTap: widget.onToggle,
           onSecondaryTap: widget.onToggle,
+        ),
+      ),
+    );
+  }
+}
+
+/// 💻 本机▾ / 🖥 远程▾ (icon alone when [compact]); the remote one is outlined in the accent colour
+/// so it never passes for rapp's own.
+class MenuCornerButton extends StatelessWidget {
+  const MenuCornerButton(
+      {super.key, required this.remote, required this.open, required this.onTap, this.compact = false});
+
+  final bool remote;
+  final bool open;
+  final bool compact;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RappTokens.of(context);
+    final radius = BorderRadius.circular(t.r);
+    final word = remote ? '远程' : '本机';
+    final color = remote ? t.accent : t.text;
+    final border = open ? t.text : (remote ? t.accent : t.line);
+    return Semantics(
+      button: true,
+      selected: open,
+      label: remote ? '远程菜单（远端 app 的菜单）' : '本机菜单（会话、剪贴板、输入法）',
+      excludeSemantics: true,
+      onTap: onTap,
+      child: Tooltip(
+        message: remote ? '远程菜单：远端 app 自己的菜单' : '本机菜单：会话、剪贴板、输入法',
+        child: Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            onTap: onTap,
+            onSecondaryTap: onTap,
+            borderRadius: radius,
+            child: Container(
+              width: compact ? 48 : menuButtonWidth,
+              constraints: const BoxConstraints(minHeight: 48),
+              decoration: open
+                  ? t.raiseBox(border: border)
+                  : BoxDecoration(borderRadius: radius, border: Border.all(color: border, width: remote ? 1.5 : 1)),
+              child: Center(
+                heightFactor: 1, // as tall as the row (48 at least), never the whole parent
+                child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(remote ? Icons.desktop_windows_outlined : Icons.laptop_mac, size: 18, color: color),
+                  if (!compact) ...[
+                    const SizedBox(width: 4),
+                    Flexible(
+                      child: Text(word,
+                          maxLines: 1,
+                          overflow: TextOverflow.clip,
+                          style: TextStyle(color: color, fontWeight: open ? FontWeight.w600 : FontWeight.w400)),
+                    ),
+                    Icon(Icons.arrow_drop_down, size: 18, color: t.muted),
+                  ],
+                ],
+              ),
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -156,6 +256,9 @@ class StreamMenu extends StatefulWidget {
     this.onToggleDetach,
     this.onRememberStream,
     this.onOpenProfile,
+    this.onMarkInput,
+    this.onClearInput,
+    this.parts = allMenuParts,
     required this.clips,
     required this.canCopy,
     required this.canInsert,
@@ -163,6 +266,9 @@ class StreamMenu extends StatefulWidget {
     required this.onAllClips,
   });
 
+  final Set<MenuPart> parts;
+  final VoidCallback? onMarkInput;
+  final VoidCallback? onClearInput;
   final List<ClipEntry> clips;
   final bool Function(ClipEntry) canCopy;
 
@@ -214,40 +320,35 @@ class _StreamMenuState extends State<StreamMenu> {
         final c = _s.choice;
         final window = _s.currentWindow;
         final reduced = widget.disconnected || widget.reconnecting; // only the session group (R21)
+        final parts = widget.parts;
+        final all = parts.length == allMenuParts.length;
         return SingleChildScrollView(
           padding: const EdgeInsets.symmetric(vertical: 6),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (!reduced) ..._streamGroups(t, c),
-              _head(t, '会话'),
-              _Item('路径 ${pathLabels[widget.path] ?? widget.path} · ${widget.status}', enabled: false),
-              if (widget.disconnected)
-                _Item(widget.reconnectWord, enabled: widget.onReconnect != null, onTap: () => _then(widget.onReconnect!))
-              else if (!widget.reconnecting) ...[
-                _Item('断开', enabled: widget.onDisconnect != null, onTap: () => _then(widget.onDisconnect!)),
-                _Item(
-                  _s.detached ? '放回主窗口' : '分离成独立窗口',
-                  enabled: widget.onToggleDetach != null,
-                  onTap: () => _then(widget.onToggleDetach!),
-                ),
-                _Item(
-                  '放左上角',
-                  enabled: window != null,
-                  onTap: () => _then(() => widget.port.moveTopLeft(_sid, window!)),
-                ),
+              if (parts.contains(MenuPart.stream)) ...[
+                if (!reduced) ..._streamGroups(t, c) else if (!all) const _Item('连接断开时不能调', enabled: false),
               ],
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: ConfirmButton(label: '结束会话', onConfirmed: () => _then(widget.onEnd)),
-                ),
-              ),
-              if (!reduced && _s.menu.isNotEmpty) ...[
-                _head(t, 'A 的菜单'),
-                ..._entries(t, _s.menu, const [], 0),
+              if (parts.contains(MenuPart.session)) ...[
+                ..._sessionGroup(t, window, reduced),
+                if (!reduced) ..._localGroups(t),
+              ],
+              if (parts.contains(MenuPart.remote)) ...[
+                if (all) ...[
+                  if (!reduced && _s.menu.isNotEmpty) ...[
+                    _head(t, '远程菜单'),
+                    ..._entries(t, _s.menu, const [], 0),
+                  ],
+                ] else if (reduced)
+                  const _Item('连接断开，远程菜单不可用', enabled: false)
+                else if (_s.menu.isEmpty)
+                  const _Item('远端 app 还没有菜单', enabled: false)
+                else ...[
+                  _head(t, '${_s.appName} 的菜单'),
+                  ..._entries(t, _s.menu, const [], 0),
+                ],
               ],
             ],
           ),
@@ -256,7 +357,70 @@ class _StreamMenuState extends State<StreamMenu> {
     );
   }
 
-  /// Groups 1 to 5: presets, mode, density, rate and A's clipboard. Not on a dead session (R21).
+  /// 会话: the path and state, disconnect or reconnect, detach, top-left, end.
+  List<Widget> _sessionGroup(RappTokens t, int? window, bool reduced) => [
+        _head(t, '会话'),
+        _Item('路径 ${pathLabels[widget.path] ?? widget.path} · ${widget.status}', enabled: false),
+        if (widget.disconnected)
+          _Item(widget.reconnectWord, enabled: widget.onReconnect != null, onTap: () => _then(widget.onReconnect!))
+        else if (!widget.reconnecting) ...[
+          _Item('断开', enabled: widget.onDisconnect != null, onTap: () => _then(widget.onDisconnect!)),
+          _Item(
+            _s.detached ? '放回主窗口' : '分离成独立窗口',
+            enabled: widget.onToggleDetach != null,
+            onTap: () => _then(widget.onToggleDetach!),
+          ),
+          _Item(
+            '放左上角',
+            enabled: window != null,
+            onTap: () => _then(() => widget.port.moveTopLeft(_sid, window!)),
+          ),
+        ],
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: ConfirmButton(label: '结束会话', onConfirmed: () => _then(widget.onEnd)),
+          ),
+        ),
+      ];
+
+  /// The live session's own settings: the remote clipboard, its input method, the input box,
+  /// app 配置….
+  List<Widget> _localGroups(RappTokens t) {
+    final src = _s.inputSource;
+    final back = _s.lastInputMethod;
+    final marked = _s.profile.input != null;
+    return [
+      _head(t, '远程剪贴板'),
+      if (widget.clips.isEmpty) const _Item('（空）', enabled: false),
+      for (final e in widget.clips.take(2))
+        _Item(
+          e.title,
+          enabled: widget.canCopy(e),
+          onTap: () => _then(() => widget.onCopy(e)),
+          trailing: widget.canInsert(e)
+              ? _InsertButton(onTap: () => _then(() => widget.port.clipPick(_sid, e.clip, true)))
+              : null,
+        ),
+      if (widget.clips.isNotEmpty) _Item('全部剪贴板', onTap: () => _then(widget.onAllClips)),
+      if (src != null) ...[
+        _head(t, '远端输入法'),
+        _Item('现在：${src.ascii ? '英文（${src.name}）' : src.name}', enabled: false),
+        _Item('切到英文', enabled: !src.ascii, onTap: () => _then(() => _s.selectInput(''))),
+        if (back != null)
+          _Item('切回 ${back.name}', enabled: src.id != back.id, onTap: () => _then(() => _s.selectInput(back.id))),
+      ],
+      _head(t, '输入区'),
+      _Item(marked ? '重新标记输入区（再点一下画面）' : '标记输入区（再点一下画面）',
+          enabled: widget.onMarkInput != null, onTap: () => _then(widget.onMarkInput!)),
+      if (marked)
+        _Item('清除输入区标记', enabled: widget.onClearInput != null, onTap: () => _then(widget.onClearInput!)),
+      _Item('app 配置…', enabled: widget.onOpenProfile != null, onTap: () => _then(widget.onOpenProfile!)),
+    ];
+  }
+
+  /// Presets, mode, density, rate. Not on a dead session (R21).
   List<Widget> _streamGroups(RappTokens t, StreamChoice c) {
     return [
               _head(t, '预设'),
@@ -272,19 +436,6 @@ class _StreamMenuState extends State<StreamMenu> {
               for (final (label, f) in const [('1 fps', 1), ('5 fps', 5), ('15 fps', 15), ('30 fps（看视频）', 30)])
                 _Item(label, checked: c.fps == f, onTap: () => _choose(c.copyWith(fps: f))),
               _Item('记为这个 app 的默认', enabled: widget.onRememberStream != null, onTap: () => _then(widget.onRememberStream!)),
-              _Item('app 配置…', enabled: widget.onOpenProfile != null, onTap: () => _then(widget.onOpenProfile!)),
-              _head(t, 'A 的剪贴板'),
-              if (widget.clips.isEmpty) _Item('（空）', enabled: false),
-              for (final e in widget.clips.take(2))
-                _Item(
-                  e.title,
-                  enabled: widget.canCopy(e),
-                  onTap: () => _then(() => widget.onCopy(e)),
-                  trailing: widget.canInsert(e)
-                      ? _InsertButton(onTap: () => _then(() => widget.port.clipPick(_sid, e.clip, true)))
-                      : null,
-                ),
-              if (widget.clips.isNotEmpty) _Item('全部剪贴板', onTap: () => _then(widget.onAllClips)),
     ];
   }
 
@@ -293,7 +444,7 @@ class _StreamMenuState extends State<StreamMenu> {
         child: Text(text, style: TextStyle(color: t.muted, fontSize: 12, letterSpacing: t.labelSpacing * 12)),
       );
 
-  /// A's menu, one level at a time: a title with children opens in place.
+  /// The remote app's menu, one level at a time: a title with children opens in place.
   List<Widget> _entries(RappTokens t, List<MenuEntry> list, List<int> prefix, int depth) {
     final out = <Widget>[];
     for (var i = 0; i < list.length; i++) {

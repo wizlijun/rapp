@@ -146,8 +146,8 @@ final class WorkerCLITests: XCTestCase {
         XCTAssertEqual(takeoverNotice("host says: taken over by Mac mini"), "这个窗口在 Mac mini 上打开了")
         XCTAssertEqual(takeoverNotice("taken over"), "这个窗口在另一台设备上打开了")
         XCTAssertNil(takeoverNotice("host says: Calculator quit"))
-        XCTAssertEqual(inputBlockedNotice(by: "Mac mini"), "A 正在被 Mac mini 操作")
-        XCTAssertEqual(inputBlockedNotice(by: ""), "A 正在被另一台设备操作")
+        XCTAssertEqual(inputBlockedNotice(by: "Mac mini"), "远端正在被 Mac mini 操作")
+        XCTAssertEqual(inputBlockedNotice(by: ""), "远端正在被另一台设备操作")
     }
 
     func testInputEvents() {
@@ -206,7 +206,7 @@ final class WorkerCLITests: XCTestCase {
     }
 
     func testCommandOutputs() {
-        XCTAssertEqual(versionJSON(), #"{"protocol":7,"version":"0.3.0"}"#)
+        XCTAssertEqual(versionJSON(), #"{"protocol":8,"version":"0.3.0"}"#)
         XCTAssertEqual(checkJSON(screenRecording: true, accessibility: false),
                        #"{"accessibility":false,"screen_recording":true}"#)
         XCTAssertEqual(appsJSON([SharedApp(app: "com.apple.Safari", name: "Safari")]),

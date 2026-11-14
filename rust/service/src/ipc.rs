@@ -1,7 +1,7 @@
 //! Local IPC (spec §3): TCP on 127.0.0.1, first line `{"token":…}` (from `ipc.token`),
 //! then JSON-line commands. No reply to a good token line; a bad one gets an error and EOF.
 
-use crate::state::{RelayCmd, State};
+use crate::state::State;
 use crate::update;
 use anyhow::Result;
 use rapp_net::crypto::ct_eq;
@@ -81,14 +81,11 @@ fn handle(state: &State, cmd: &Value) -> Value {
         "status" => state.status(),
         "subscribe" => ok(json!({})),
         "set_password" => match cmd["password"].as_str().filter(|p| !p.is_empty()) {
-            Some(p) => update(state, |c| c.password = p.to_string(), RelayCmd::Reregister),
+            Some(p) => update(state, |c| c.password = p.to_string()),
             None => err("password required"),
         },
-        "set_relay" => {
-            let relay = cmd["relay"].as_str().map(str::to_string);
-            let key = cmd["key"].as_str().map(str::to_string);
-            update(state, |c| (c.relay, c.key) = (relay, key), RelayCmd::Reconnect)
-        }
+        "set_relay" => set_relay(state, cmd),
+        "show_key" => ok(json!({"key": state.cfg.lock().unwrap().key})),
         "kick" => match cmd["sid"].as_u64() {
             Some(sid) if state.kick(sid) => ok(json!({})),
             _ => err("unknown sid"),
@@ -117,14 +114,35 @@ fn in_history(v: &Value) -> bool {
     shown && v["side"] != true
 }
 
-fn update(state: &State, f: impl FnOnce(&mut crate::config::Config), then: RelayCmd) -> Value {
+fn update(state: &State, f: impl FnOnce(&mut crate::config::Config)) -> Value {
     let mut cfg = state.cfg.lock().unwrap();
     f(&mut cfg);
     if let Err(e) = cfg.save(&state.home) {
         return err(&format!("save config: {e:#}"));
     }
     drop(cfg);
-    let _ = state.relay_cmd.send(then);
     state.notify();
     ok(json!({}))
+}
+
+/// `host:port` with a numeric port 1-65535; no resolution here.
+fn valid_relay(addr: &str) -> bool {
+    addr.rsplit_once(':').is_some_and(|(host, port)| !host.is_empty() && port.parse::<u16>().is_ok_and(|p| p != 0))
+}
+
+/// Empty `relay` / `key` clear them. Saves, then wakes the relay connection so it starts over.
+fn set_relay(state: &State, cmd: &Value) -> Value {
+    let text = |k: &str| cmd[k].as_str().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+    let (relay, key) = (text("relay"), text("key"));
+    if key.as_deref().is_some_and(|k| k.parse::<rapp_wire::Key>().is_err()) {
+        return err("bad key");
+    }
+    if relay.as_deref().is_some_and(|a| !valid_relay(a)) {
+        return err("bad address");
+    }
+    let r = update(state, |c| (c.relay, c.key) = (relay, key));
+    if r["ok"] == true {
+        state.relay_settings.send_modify(|n| *n += 1);
+    }
+    r
 }

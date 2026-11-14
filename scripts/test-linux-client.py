@@ -21,7 +21,7 @@ BINARY = Path(paths[0] if paths else "rust/target/release/rapp-client").resolve(
 
 version = json.loads(subprocess.check_output([str(BINARY), "version", "--json"], text=True))
 workspace = tomllib.loads((Path(__file__).resolve().parents[1] / "rust/Cargo.toml").read_text())
-assert version == {"version": workspace["workspace"]["package"]["version"], "protocol": 6}, version
+assert version == {"version": workspace["workspace"]["package"]["version"], "protocol": 8}, version
 print("PASS client version matches workspace")
 
 def string(s):
@@ -203,7 +203,7 @@ def keyboard(s):
     assert text=="test-input",text
     # Refused pastes keep the draft; the next Enter retries with a fresh sequence.
     send(s.s,26,string("Other Mac"))
-    send(s.s,21,struct.pack("<I",seq)+string("A 正在被 Other Mac 操作"))
+    send(s.s,21,struct.pack("<I",seq)+string("远端正在被 Other Mac 操作"))
     time.sleep(.2)
     xdo("key","Return")
     while True:

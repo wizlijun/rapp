@@ -290,6 +290,9 @@ final class Session {
     /// Clipboard history and uploads, from the moment capture is ready until the session ends.
     private(set) var transfers: TransferStore?
     private(set) var clipWatcher: ClipboardWatcher?
+    /// Set only for a v8+ client, once Ready is sent.
+    private var inputWatcher: InputSourceWatcher?
+    private var sentInputSource: InputSourceState?
     private var paster: Paster?
     /// UTF-8 sizes of inline text pastes not yet answered, by seq (an uploaded item was reported by its put).
     private var inlinePastes: [UInt32: Int] = [:]
@@ -377,7 +380,7 @@ final class Session {
     private func handle(_ message: Message) {
         // Every command from B passes one gate; only input can be held back (R7).
         switch message {
-        case .text, .key, .mouse, .scroll, .paste, .focus, .menuPick, .setStream, .resize, .move, .close:
+        case .text, .key, .mouse, .scroll, .paste, .focus, .menuPick, .setStream, .resize, .move, .close, .selectInput:
             guard started, !failing, admit(message) else { return }
         default:
             break
@@ -460,10 +463,13 @@ final class Session {
         case let .paste(seq, source):
             if case let .text(text) = source { inlinePastes[seq] = text.utf8.count }
             paster?.paste(seq: seq, source)
+        case let .selectInput(id):
+            selectInput(id)
 
         case let .frameAck(processingMs):
             if clientSendsFrameAcks(helloVersion) { paced?.ack(processingMs: processingMs) }
-        case .ready, .error, .frame, .windows, .menuBar, .clip, .pasted, .fetch, .put, .transferStart, .chunk, .inputBlocked, .weak:
+        case .ready, .error, .frame, .windows, .menuBar, .clip, .pasted, .fetch, .put, .transferStart, .chunk, .inputBlocked, .weak,
+             .inputSource:
             fail("unexpected message from client")
         }
     }
@@ -576,6 +582,7 @@ final class Session {
         tableChanged(table)
         scheduleMenuRead(after: 0)
         startClipboard(app: app)
+        startInputSource()
 
         let timer = DispatchSource.makeTimerSource(queue: queue)
         timer.schedule(deadline: .now() + 1, repeating: 1.0)
@@ -745,6 +752,46 @@ final class Session {
         if let app, app.isTerminated {
             fail("\(windowTitle("", appName: app.localizedName)) quit")
         }
+        // Backstop for a missed change notification.
+        sendInputSource()
+    }
+
+    // MARK: Input source (v8)
+
+    /// Tells a v8+ client A's input source now and on every change.
+    private func startInputSource() {
+        guard clientUnderstandsInputSource(helloVersion) else { return }
+        let watcher = InputSourceWatcher(queue: queue) { [weak self] in self?.sendInputSource() }
+        watcher.start()
+        inputWatcher = watcher
+        sendInputSource()
+    }
+
+    /// Sends A's input source if it differs from the last one sent, or always with `force`.
+    /// Read here on the session queue, so a change seen now never overtakes an earlier select.
+    private func sendInputSource(force: Bool = false) {
+        guard !ended, !failing, inputWatcher != nil, let now = InputSources.current(),
+              force || now != sentInputSource else { return }
+        sentInputSource = now
+        send(now.message)
+    }
+
+    /// Selects `id`, waits up to 300 ms for TIS to report it, then reports what A has (also when
+    /// `id` is unknown). Synchronous: the text or key B sent next lands in the new source.
+    private func selectInput(_ id: String) {
+        if let (target, switched) = InputSources.select(id) {
+            if switched {
+                let deadline = ProcessInfo.processInfo.systemUptime + 0.3
+                while InputSources.current()?.id != target, ProcessInfo.processInfo.systemUptime < deadline {
+                    usleep(10_000)
+                }
+                // The app hears of the switch on its own path; give it a moment before B's next input.
+                usleep(50_000)
+            }
+        } else {
+            output.log("could not select input source \(id.isEmpty ? "(ASCII layout)" : fitted(id, limit: 200))")
+        }
+        sendInputSource(force: true)
     }
 
     // MARK: Mode, frame rate and density switching
@@ -852,6 +899,8 @@ final class Session {
         paster = nil
         clipWatcher?.stop()
         clipWatcher = nil
+        inputWatcher?.stop()
+        inputWatcher = nil
         transfers = nil
         capture?.stop()
         capture = nil

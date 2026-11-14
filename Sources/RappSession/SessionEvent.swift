@@ -62,6 +62,8 @@ public enum SessionEvent: Equatable {
     case inputBlocked(by: String)
     /// A entered (true) or left (false) the weak-network tier.
     case weak(Bool)
+    /// A's selected input source (v8 hosts); `ascii`: a plain keyboard layout, not an input method.
+    case inputSource(id: String, name: String, ascii: Bool)
     /// The link dropped (or A sent garbage): the last pictures stay; `closed` follows when the GUI ends the session.
     case disconnected(reason: String)
     /// The session ended and its pictures are released.

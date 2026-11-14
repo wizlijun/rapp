@@ -27,6 +27,7 @@ async fn main() {
         runner: Arc::new(SystemRunner),
         // Only a service running from a `.app` updates itself.
         data,
+        advertise_lan: None,
         update: std::env::current_exe().ok().and_then(|e| rapp_update::bundle_of(&e)).map(UpdateOpts::system),
     };
     match Service::start(opts).await {

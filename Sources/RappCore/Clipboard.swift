@@ -135,8 +135,8 @@ public func composerPrefixMatches(_ a: [ComposerPiece], _ b: [ComposerPiece], le
 /// A's `pasted` error as shown to the user; unknown ones as they are.
 public func pasteErrorMessage(_ error: String) -> String {
     switch error {
-    case "target not frontmost": return "A 上的目标窗口不在最前"
-    case "screen locked": return "A 已锁屏，需要在 A 上解锁"
+    case "target not frontmost": return "远端的目标窗口不在最前"
+    case "screen locked": return "远端已锁屏，需要在远端解锁"
     case "not uploaded": return "A 还没收齐这一项"
     case "not supported": return "A 不支持粘贴"
     default: return error

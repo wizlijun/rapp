@@ -120,7 +120,7 @@ mod tests {
             let (kind, put) = packet(&mut s);
             assert_eq!(kind, 23);
             let mut r = Reader::new(&put);
-            assert_eq!(r.u8().unwrap(), 7);
+            assert_eq!(r.u8().unwrap(), p::VERSION);
             assert_eq!(r.string().unwrap(), "test");
             assert_eq!(r.u32().unwrap(), 8);
             assert_eq!(r.u8().unwrap(), 0);

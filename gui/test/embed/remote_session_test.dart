@@ -264,4 +264,81 @@ void main() {
     rs.apply(const ComposerStateEvent(1, done: ComposerDone(1, null)));
     expect(n, 1);
   });
+
+  group('input source and the marked text box', () {
+    late List<String> log;
+    RemoteSession session() {
+      log = [];
+      return RemoteSession(1, 'x',
+          onSelectInput: (id) => log.add('select:$id'),
+          onClick: (win, at) => log.add('click:$win@${at.dx},${at.dy}'),
+          onReturn: () => log.add('return'));
+    }
+
+    test('an older host (no input_source yet) gets no select_input', () {
+      final r = session();
+      r.selectInput('');
+      r.prepareInput();
+      r.pressReturn();
+      expect(log, ['return']);
+    });
+
+    test('input_source is kept, and the last input method is remembered', () {
+      final r = session();
+      r.apply(const InputSourceEvent(1, 'com.apple.inputmethod.SCIM.ITABC', '拼音', false));
+      expect(r.inputSource?.name, '拼音');
+      expect(r.lastInputMethod?.id, 'com.apple.inputmethod.SCIM.ITABC');
+      r.apply(const InputSourceEvent(1, 'com.apple.keylayout.ABC', 'ABC', true));
+      expect(r.inputSource?.ascii, true);
+      expect(r.lastInputMethod?.name, '拼音');
+    });
+
+    test('before sending, a non-English source is switched to English', () {
+      final r = session();
+      r.apply(const InputSourceEvent(1, 'im', '拼音', false));
+      r.prepareInput();
+      expect(log, ['select:']);
+      log.clear();
+      r.apply(const InputSourceEvent(1, 'abc', 'ABC', true));
+      r.prepareInput();
+      expect(log, isEmpty);
+    });
+
+    test('an empty send: English first, then Return', () {
+      final r = session();
+      r.apply(const InputSourceEvent(1, 'im', '拼音', false));
+      r.pressReturn();
+      expect(log, ['select:', 'return']);
+    });
+
+    test('the marked point is clicked in the main window, below its title bar', () {
+      final r = session();
+      r.apply(WindowsEvent(1, [w(5)])); // 100x100, title bar 28: content 100x72
+      r.setProfile(const ResolvedProfile(input: InputPoint(0.5, 10, fromBottom: true)));
+      expect(r.inputClick(), (window: 5, at: const Offset(50, 28 + 62)));
+      r.prepareInput();
+      expect(log, ['click:5@50.0,90.0']);
+    });
+
+    test('no click without a mark, or while another tab is current', () {
+      final r = session();
+      r.apply(WindowsEvent(1, [w(5), w(6)]));
+      expect(r.inputClick(), isNull);
+      r.setProfile(const ResolvedProfile(input: InputPoint(0.5, 10)));
+      expect(r.inputClick()?.window, 5);
+      r.selectWindow(6);
+      expect(r.inputClick(), isNull);
+    });
+  });
+
+  test('InputPoint keeps the distance to the nearer edge', () {
+    const size = Size(200, 100);
+    final top = InputPoint.at(const Offset(50, 20), size);
+    expect((top.x, top.dy, top.fromBottom), (0.25, 20.0, false));
+    final bottom = InputPoint.at(const Offset(150, 90), size);
+    expect((bottom.x, bottom.dy, bottom.fromBottom), (0.75, 10.0, true));
+    // A taller window keeps a bottom box at the bottom.
+    expect(bottom.inContent(const Size(400, 300)), const Offset(300, 290));
+    expect(InputPoint.fromJson(bottom.toJson())?.dy, 10);
+  });
 }

@@ -1,7 +1,8 @@
 import Foundation
 
-public let protocolVersion: UInt8 = 7
-/// The oldest client version this host still serves (v5 clients just never get `inputBlocked`).
+/// v8 = v7 (frame acks, weak tier, pinned setStream) + remote input source.
+public let protocolVersion: UInt8 = 8
+/// The oldest client version this host still serves (older clients just never get the newer host messages).
 public let oldestClientVersion: UInt8 = 5
 
 /// Clients at v7 or later acknowledge every frame; the host paces on those acks.
@@ -9,6 +10,9 @@ public func clientSendsFrameAcks(_ v: UInt8) -> Bool { v >= 7 }
 
 /// Whether a client that said hello with `version` understands `inputBlocked` (type 26).
 public func clientUnderstandsInputBlocked(_ version: UInt8) -> Bool { version >= 6 }
+
+/// Whether a client that said hello with `version` understands `inputSource` (type 29).
+public func clientUnderstandsInputSource(_ version: UInt8) -> Bool { version >= 8 }
 
 /// A client's `Hello` carried a different protocol version than this build speaks.
 public struct ProtocolVersionMismatch: Error, CustomStringConvertible {
@@ -117,6 +121,10 @@ public enum Message: Equatable {
     case inputBlocked(by: String)                                                            // 26, host -> client
     case frameAck(processingMs: UInt16)                                                      // 27, client -> host (v7)
     case weak(Bool)                                                                          // 28, host -> client (v7)
+    /// A's selected keyboard input source. `ascii`: it is a plain keyboard layout, not an input method.
+    case inputSource(id: String, name: String, ascii: Bool)                                  // 29, host -> client (v8)
+    /// Select an enabled input source on A; "" selects the current ASCII-capable layout.
+    case selectInput(id: String)                                                             // 30, client -> host (v8)
 
     public func encoded() -> [UInt8] {
         var w = Writer()
@@ -215,6 +223,12 @@ public enum Message: Equatable {
         case let .weak(on):
             type = 28
             w.u8(on ? 1 : 0)
+        case let .inputSource(id, name, ascii):
+            type = 29
+            w.string(id); w.string(name); w.u8(ascii ? 1 : 0)
+        case let .selectInput(id):
+            type = 30
+            w.string(id)
         }
         precondition(w.bytes.count <= maxMessageLength, "message too large")
         var out: [UInt8] = [type]
@@ -322,6 +336,12 @@ public enum Message: Equatable {
             let flag = try r.u8()
             guard flag <= 1 else { throw CodecError("bad weak flag") }
             message = .weak(flag == 1)
+        case 29:
+            let id = try r.string(), name = try r.string(), ascii = try r.u8()
+            guard ascii <= 1 else { throw CodecError("bad ascii flag") }
+            message = .inputSource(id: id, name: name, ascii: ascii == 1)
+        case 30:
+            message = .selectInput(id: try r.string())
         default:
             throw CodecError("unknown message type \(type)")
         }
@@ -330,7 +350,7 @@ public enum Message: Equatable {
     }
 }
 
-private let knownTypes: Set<UInt8> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28]
+private let knownTypes: Set<UInt8> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30]
 
 /// Turns a byte stream into messages. Feed it whatever the socket delivers
 /// with `append`, then call `next()` until it returns nil.

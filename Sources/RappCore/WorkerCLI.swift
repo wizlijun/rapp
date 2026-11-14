@@ -176,7 +176,7 @@ public func takeoverNotice(_ reason: String) -> String? {
 
 /// The notice shown to a client whose input is blocked because another client is operating A.
 public func inputBlockedNotice(by: String) -> String {
-    by.isEmpty ? "A 正在被另一台设备操作" : "A 正在被 \(by) 操作"
+    by.isEmpty ? "远端正在被另一台设备操作" : "远端正在被 \(by) 操作"
 }
 
 // MARK: JSON lines

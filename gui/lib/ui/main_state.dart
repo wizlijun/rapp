@@ -2,7 +2,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:ui' show Size;
+import 'dart:ui' show Offset, Size;
 
 import '../paths.dart';
 import 'package:flutter/foundation.dart';
@@ -14,7 +14,7 @@ import '../embed/stream_choice.dart';
 import '../hub_client.dart';
 import '../permissions.dart';
 import '../embed/app_profile.dart';
-import '../embed/composer_model.dart' show returnKeyCode;
+import '../embed/composer_model.dart' show escKeyCode, returnKeyCode;
 import 'app_profile_store.dart';
 import 'lamp.dart';
 import 'lifecycle.dart';
@@ -31,7 +31,7 @@ export 'lifecycle.dart' show hubWord, hubWords;
 enum PanelTab { sessions, devices, projects, resources }
 
 /// The two top-bar corners; at most one is open.
-enum Corner { stream, needs }
+enum Corner { stream, needs, session, remote }
 
 enum NeedKind { session, device }
 
@@ -244,10 +244,11 @@ class MainState extends ChangeNotifier {
   @override
   void notifyListeners() {
     if (_disposed) return;
-    // The stream menu belongs to the session it was opened on.
+    // The session's menus belong to the session they were opened on; so does a marking.
     if (currentKey != _lastKey) {
       _lastKey = currentKey;
-      if (corner == Corner.stream) corner = null;
+      if (corner != null && corner != Corner.needs) corner = null;
+      markingInput = null;
     }
     if (embeds) _entries = _mapEntries();
     // Focus never stays on a session that is no longer current.
@@ -710,7 +711,7 @@ class MainState extends ChangeNotifier {
 
   Timer? _blockedTimer;
 
-  /// 「A 正在被 X 操作」 for [blockedHintFor], only while it is still the hint.
+  /// 「远端正在被 X 操作」 for [blockedHintFor], only while it is still the hint.
   void _showBlocked(String by) {
     final text = inputBlockedHint(by);
     hint = text;
@@ -916,6 +917,14 @@ class MainState extends ChangeNotifier {
         appId: r.app,
         onReturn: () {
           if (_liveSid(s.sid)) port!.key(s.sid, returnKeyCode, 0);
+        },
+        onSelectInput: (id) {
+          if (_liveSid(s.sid)) port!.selectInput(s.sid, id);
+        },
+        onClick: (w, at) {
+          if (!_liveSid(s.sid)) return;
+          port!.mouse(s.sid, w, 'down', 'left', at.dx, at.dy, 1);
+          port!.mouse(s.sid, w, 'up', 'left', at.dx, at.dy, 1);
         });
     final prof = profiles.resolve(r.app);
     rs.setProfile(prof);
@@ -1089,6 +1098,57 @@ class MainState extends ChangeNotifier {
   RemoteWindow? _windowById(RemoteSession rs, int window) => rs.windows.where((w) => w.id == window).firstOrNull;
 
   bool isMainWindow(int window) => currentRemote?.isMain(window) ?? false;
+
+  /// The × on a child tab or a popup: a titled window closes (its close button on A), a sheet or
+  /// popover gets an Esc (they have none).
+  void closeWindow(int window) {
+    final rs = currentRemote;
+    final w = rs == null ? null : _windowById(rs, window);
+    if (rs == null || w == null || !_liveSid(rs.sid)) return;
+    if (w.decorated) {
+      port!.closeWindow(rs.sid, window);
+    } else {
+      port!.key(rs.sid, escKeyCode, 0);
+    }
+  }
+
+  /// The session whose next picture click marks its app's input box (not sent to A).
+  Object? markingInput;
+
+  /// 「标记输入区」: the main window becomes the tab, the next click on it is the mark.
+  void markInput() {
+    final rs = currentRemote;
+    if (rs == null) return;
+    final m = rs.windows.where((w) => rs.isMain(w.id)).firstOrNull;
+    if (m != null && rs.currentWindow != m.id) rs.selectWindow(m.id);
+    markingInput = rs.sid;
+    hint = '点一下 ${rs.appName} 主窗口里的输入框（点画面外取消）';
+    notifyListeners();
+  }
+
+  void cancelMarkInput() {
+    if (markingInput == null) return;
+    markingInput = null;
+    hint = '';
+    notifyListeners();
+  }
+
+  /// The marking click landed at [p], in A points of a content area of [size] (below the title bar).
+  void markInputAt(Offset p, Size size) {
+    final rs = currentRemote;
+    if (rs == null || markingInput != rs.sid) return;
+    markingInput = null;
+    profiles.setInputPoint(rs.appId, rs.appName, InputPoint.at(p, size));
+    hint = '已标记输入区：发送前会先点它';
+  }
+
+  void clearInputMark() {
+    final rs = currentRemote;
+    if (rs == null) return;
+    profiles.setInputPoint(rs.appId, rs.appName, null);
+    hint = '已清除输入区标记';
+    notifyListeners();
+  }
 
   /// Hides windows like [window] (kind and title) for this app; null for the main window (R8)
   /// or without a current session. The result undoes it.
@@ -1503,7 +1563,7 @@ class MainState extends ChangeNotifier {
     if (e.kind == ClipKind.unsupported) return '不支持';
     final r = _records[e.key];
     final now = _startOf(r?.sid);
-    if (e.ended || r == null || (r.phase == Phase.disconnected && now == e.sid)) return 'A 已断开，复制不到';
+    if (e.ended || r == null || (r.phase == Phase.disconnected && now == e.sid)) return '远端已断开，复制不到';
     if (r.phase != Phase.live || now != e.sid) return '重连前的，复制不到';
     return null;
   }
@@ -1590,7 +1650,7 @@ class MainState extends ChangeNotifier {
 
   /// The hint for a failed pin; the runner's English "unknown clip" never reaches the user.
   static String pinFailureHint(String? reason) =>
-      reason == 'unknown clip' ? '这条太旧了，A 上已不保留' : '固定没成功：$reason';
+      reason == 'unknown clip' ? '这条太旧了，远端已不保留' : '固定没成功：$reason';
 
   void cancelTransfer(TransferRow t) {
     final sid = _hubSid(t.sid);
@@ -1639,8 +1699,8 @@ class _Waiting {
 /// How long the blocked-input hint stays (R14).
 const blockedHintFor = Duration(seconds: 1);
 
-/// 「A 正在被 X 操作」 (same words as the host's notice); an unnamed device is 「另一台设备」.
-String inputBlockedHint(String by) => by.isEmpty ? 'A 正在被另一台设备操作' : 'A 正在被 $by 操作';
+/// 「远端正在被 X 操作」 (same words as the host's notice); an unnamed device is 「另一台设备」.
+String inputBlockedHint(String by) => by.isEmpty ? '远端正在被另一台设备操作' : '远端正在被 $by 操作';
 
 /// One start of a hub session in this launch; equal only to itself.
 class _Start {
@@ -1655,7 +1715,7 @@ String endedHint(String appName, String? reason) {
   final why = reason != null && reason.startsWith(prefix) ? reason.substring(prefix.length) : reason;
   if (takenOver(why)) return '$appName：${disconnectWord(why)}';
   if (why == null || why == 'stdin closed' || why == 'quit') return '已结束 $appName';
-  if (why.startsWith('host says: ') && why.endsWith(' quit')) return '$appName 已结束：A 端关闭了 app';
+  if (why.startsWith('host says: ') && why.endsWith(' quit')) return '$appName 已结束：远端关闭了 app';
   if (why == 'connection closed') return '$appName 意外结束：连接断了';
   if (why == 'GUI did not connect') return '$appName 意外结束：本机没有接上会话';
   return '$appName 意外结束：$why';

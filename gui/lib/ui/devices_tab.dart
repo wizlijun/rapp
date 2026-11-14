@@ -9,6 +9,7 @@ import '../permissions.dart';
 import 'add_device_form.dart';
 import 'controls.dart';
 import 'lamp.dart';
+import 'lifecycle.dart';
 import 'main_state.dart';
 import 'session_model.dart';
 import 'tab_chip.dart';
@@ -36,7 +37,12 @@ String? screenShareHost(List<String> lan) {
 
 class DevicesTab extends StatefulWidget {
   const DevicesTab(
-      {super.key, required this.state, required this.local, this.localBadge = false, this.screenShare});
+      {super.key,
+      required this.state,
+      required this.local,
+      this.localBadge = false,
+      this.screenShare,
+      this.relaySet = false});
   final MainState state;
 
   /// The 本机 content, assembled by the caller.
@@ -48,6 +54,9 @@ class DevicesTab extends StatefulWidget {
   /// Opens Apple's 屏幕共享 to A at this host (B types A's login password there itself;
   /// rapp never holds it). Null where there is no such app: no button.
   final Future<void> Function(String host)? screenShare;
+
+  /// This machine has a relay set: hosts are added by bare ID.
+  final bool relaySet;
 
   @override
   State<DevicesTab> createState() => _DevicesTabState();
@@ -143,6 +152,7 @@ class _DevicesTabState extends State<DevicesTab> {
               AddDeviceForm(
                 hub: state.hub!,
                 enabled: state.hubUsable,
+                relaySet: widget.relaySet,
                 onAdded: (id) {
                   state.selectDevice(id);
                   state.probe(id);
@@ -226,7 +236,7 @@ class _DevicesTabState extends State<DevicesTab> {
       if (p?.error != null)
         Padding(
           padding: const EdgeInsets.only(top: 6),
-          child: Text(p!.error!, style: TextStyle(color: t.accent)),
+          child: Text(disconnectWord(p!.error), style: TextStyle(color: t.accent)),
         ),
       if (missing.isNotEmpty)
         Padding(

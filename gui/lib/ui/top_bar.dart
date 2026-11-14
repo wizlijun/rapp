@@ -46,8 +46,17 @@ class TopBar extends StatelessWidget {
             // the overview button when shown, the stream anchor in embedded mode; and the gaps
             // (both paddings plus one after panel, overview, prev, session and next). Gaps and the
             // overview button appear only when they fit, so the row never overflows.
-            final streamW = embedded ? (wide ? _streamAnchorWidth : 48.0) : 0.0;
+            // The 本机 and 远程 buttons come before it when there is room for them and a bit of the
+            // session block; else the traffic label's menu carries all three parts.
             final icons = 4 + (state.hub != null ? 1 : 0);
+            final trafficW = embedded ? (wide ? _streamAnchorWidth : 48.0) : 0.0;
+            // Their words only in a roomy bar (the tabs and the hint need the room more).
+            final words = box.maxWidth >= 1000;
+            final splitW = embedded ? 2 * (words ? menuButtonWidth : 48.0) : 0.0;
+            // Room for the gaps, a session block and the 已隐藏 chip besides (none of them shrink).
+            final chip = rs != null && !rs.detached && rs.hidden.isNotEmpty ? 130.0 : 0.0;
+            final split = embedded && box.maxWidth >= (icons + 1) * 48 + trafficW + splitW + 42 + 160 + chip;
+            final streamW = trafficW + (split ? splitW : 0.0);
             double fixed(double gap, bool overview) =>
                 (icons + (overview ? 1 : 0)) * 48 + streamW + (overview ? 7 : 6) * gap;
             // K11: never below 300.
@@ -163,6 +172,7 @@ class TopBar extends StatelessWidget {
                                     selected: w.id == tabs.current,
                                     onTap: () => state.selectWindow(w.id),
                                     onSecondaryTap: (p) => _tabMenu(context, p, w.id),
+                                    onClose: state.isMainWindow(w.id) ? null : () => state.closeWindow(w.id),
                                   ),
                                   ),
                                 ),
@@ -196,32 +206,13 @@ class TopBar extends StatelessWidget {
                   else
                     const Spacer(),
                   if (state.hub != null) NeedsYouAnchor(state: state),
-                  if (state.port != null && state.currentRemote != null && cur != null)
-                    StreamMenuAnchor(
-                      key: ValueKey(cur.sid),
-                      compact: !wide,
-                      port: state.port!,
-                      session: state.currentRemote!,
-                      path: cur.path,
-                      status: lampWord(cur.lamp),
-                      disconnected: state.currentDisconnected,
-                      reconnecting: state.currentReconnecting,
-                      reconnectWord: reconnectLabel(state.currentRecord?.reason),
-                      onDisconnect: state.hubUsable ? state.disconnectCurrent : null,
-                      onReconnect: state.hubUsable ? state.reconnectCurrent : null,
-                      onEnd: state.endCurrent,
-                      onToggleDetach: state.canToggleDetach ? state.toggleDetach : null,
-                      onRememberStream: state.rememberStream,
-                      onOpenProfile: () => openAppProfilePage(context, state.profiles, appId: cur.app, appName: cur.appName),
-                      open: state.corner == Corner.stream,
-                      onToggle: () => state.toggleCorner(Corner.stream),
-                      onClose: state.closeCorner,
-                      clips: state.resources.clipsOf(cur.key),
-                      canCopy: state.canCopy,
-                      canInsert: state.canInsert,
-                      onCopy: state.copyLocal,
-                      onAllClips: () => state.showPanel(PanelTab.resources),
-                    ),
+                  if (embedded) ...[
+                    if (split) ...[
+                      _menu(context, cur, {MenuPart.session}, Corner.session, !words),
+                      _menu(context, cur, {MenuPart.remote}, Corner.remote, !words),
+                    ],
+                    _menu(context, cur, split ? {MenuPart.stream} : allMenuParts, Corner.stream, !wide),
+                  ],
                   _icon(
                     'fullscreen-button',
                     fullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
@@ -234,6 +225,38 @@ class TopBar extends StatelessWidget {
           },
         );
       },
+    );
+  }
+
+  /// One of the session's corner menus: [parts] of it, open while [corner] is.
+  Widget _menu(BuildContext context, SessionEntry cur, Set<MenuPart> parts, Corner corner, bool compact) {
+    return StreamMenuAnchor(
+      key: ValueKey((cur.sid, corner)),
+      parts: parts,
+      compact: compact,
+      port: state.port!,
+      session: state.currentRemote!,
+      path: cur.path,
+      status: lampWord(cur.lamp),
+      disconnected: state.currentDisconnected,
+      reconnecting: state.currentReconnecting,
+      reconnectWord: reconnectLabel(state.currentRecord?.reason),
+      onDisconnect: state.hubUsable ? state.disconnectCurrent : null,
+      onReconnect: state.hubUsable ? state.reconnectCurrent : null,
+      onEnd: state.endCurrent,
+      onToggleDetach: state.canToggleDetach ? state.toggleDetach : null,
+      onRememberStream: state.rememberStream,
+      onOpenProfile: () => openAppProfilePage(context, state.profiles, appId: cur.app, appName: cur.appName),
+      onMarkInput: state.markInput,
+      onClearInput: state.clearInputMark,
+      open: state.corner == corner,
+      onToggle: () => state.toggleCorner(corner),
+      onClose: state.closeCorner,
+      clips: state.resources.clipsOf(cur.key),
+      canCopy: state.canCopy,
+      canInsert: state.canInsert,
+      onCopy: state.copyLocal,
+      onAllClips: () => state.showPanel(PanelTab.resources),
     );
   }
 

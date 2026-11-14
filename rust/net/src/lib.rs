@@ -1,4 +1,4 @@
-//! Shared pieces of rapp-relay, rapp-service and rapp-hub (spec §1).
+//! Shared pieces of rapp-service and rapp-hub (spec §1).
 
 pub mod addr;
 pub mod bins;

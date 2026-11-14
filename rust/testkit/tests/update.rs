@@ -101,7 +101,7 @@ impl Env {
         let bundle = tmp.path().join("Applications/rapp.app");
         make_app(&bundle, "current");
         let cache = tmp.path().join("cache");
-        service_json(&home, None);
+        service_json(&home);
         let path = home.join("service.json");
         let mut cfg: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         cfg["update_url"] = json!(URL);
@@ -320,7 +320,7 @@ async fn session(svc: &Service) -> (quinn::Endpoint, quinn::Connection, rapp_net
 #[tokio::test]
 async fn not_in_bundle_is_off() {
     let (home, bins) = (tempfile::tempdir().unwrap(), bins());
-    service_json(home.path(), None);
+    service_json(home.path());
     let runner = Arc::new(FakeRunner::new());
     let svc = start_service_with(home.path(), bins.path(), runner.clone(), None).await;
     let st = ipc_once(&svc, home.path(), json!({"cmd":"status"})).await;
@@ -831,7 +831,7 @@ async fn open_while_installing_is_refused() {
     let mut s = bi(conn.open_bi().await.unwrap());
     write_json(&mut s, &json!({"op":"open","app":"com.example.echo"})).await.unwrap();
     let r = read_json(&mut s).await.unwrap();
-    assert_eq!(r, json!({"ok": false, "error": "A 正在升级，请稍后再连"}));
+    assert_eq!(r, json!({"ok": false, "error": "远端正在升级，请稍后再连"}));
     assert!(!host_log(e.bins.path()).contains("start com.example.echo"), "no rapp-host for it");
 }
 

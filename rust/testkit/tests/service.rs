@@ -38,19 +38,21 @@ async fn echo_through(s: &mut rapp_net::quic::BiStream, worker_token: &str) {
 }
 
 #[tokio::test]
-async fn registers_and_reports_status() {
-    let relay = relay(Duration::from_secs(60));
-    let a = service(Some(relay.relay.addr)).await;
+async fn reports_status() {
+    let a = service().await;
     assert_eq!(a.id.len(), 9);
     let st = ipc_once(&a.svc, a.home.path(), json!({"cmd":"status"})).await;
     assert_eq!(st["ok"], true);
+    assert_eq!(st["id"], a.id.as_str());
     assert_eq!(st["name"], "test-a");
     assert_eq!(st["password"], PASSWORD);
+    assert!(st["lan_ids"].is_array());
+    assert_eq!((&st["relay"], &st["relay_error"], &st["relay_addr"], &st["has_key"]), (&json!("off"), &Value::Null, &Value::Null, &json!(false)), "{st}");
+    assert_eq!(st["fp"].as_str().unwrap().len(), 64);
     assert_eq!(st["permissions"], json!({"screen_recording":true,"accessibility":true}));
     assert_eq!(st["sessions"], json!([]));
     let cfg: Value = serde_json::from_slice(&std::fs::read(a.home.path().join("service.json")).unwrap()).unwrap();
     assert_eq!(cfg["id"], a.id.as_str());
-    assert_eq!(cfg["secret"].as_str().unwrap().len(), 64);
 
     let mut bad = Ipc::open_with(&a.svc, "nope").await;
     assert_eq!(bad.next().await["error"], "bad token");
@@ -58,15 +60,14 @@ async fn registers_and_reports_status() {
 }
 
 #[tokio::test]
-async fn first_start_generates_secret_and_password() {
+async fn first_start_generates_id_and_password() {
     let (home, bins) = (tempfile::tempdir().unwrap(), bins());
     // Only the ports are preset (never the real 22028/22029); everything else is generated.
     rapp_net::config::write_json(&home.path().join("service.json"), &json!({"port":0,"ipc_port":0})).unwrap();
     let svc = start_service(home.path(), bins.path(), Duration::from_secs(60)).await;
     let cfg: Value = serde_json::from_slice(&std::fs::read(home.path().join("service.json")).unwrap()).unwrap();
-    assert_eq!(cfg["secret"].as_str().unwrap().len(), 64);
     assert_eq!(cfg["password"].as_str().unwrap().len(), 8);
-    // No relay configured, yet the service already has its own ID.
+    // The service picks its own ID.
     assert!(rapp_net::crypto::is_valid_id(cfg["id"].as_str().unwrap()));
     assert!(!cfg["name"].as_str().unwrap().is_empty());
     #[cfg(unix)]
@@ -78,8 +79,7 @@ async fn first_start_generates_secret_and_password() {
         }
     }
     let st = ipc_once(&svc, home.path(), json!({"cmd":"status"})).await;
-    assert_eq!(st["relay"], "off");
-    // Without a relay B reaches A by `id@ip`: one per local IPv4, port shown as it is not 22028.
+    // B reaches A by `id@ip`: one per local IPv4, port shown as it is not 22028.
     let want_tail = format!(":{}", svc.port);
     let lan_ids = st["lan_ids"].as_array().expect("lan_ids");
     for l in lan_ids {
@@ -93,38 +93,15 @@ async fn first_start_generates_secret_and_password() {
 }
 
 #[tokio::test]
-async fn token_direct_connect_and_list_apps() {
-    let relay = relay(Duration::from_secs(60));
-    let a = service(Some(relay.relay.addr)).await;
-    let ep = b_endpoint();
-    let (_rc, r) = relay_connect(&ep, relay.relay.addr, &a.id, PASSWORD).await;
-    assert_eq!(r["ok"], true, "{r}");
-    assert_eq!(r["name"], "test-a");
-    let lan = r["lan"].as_array().unwrap();
-    assert_eq!(lan.last().unwrap(), &json!(format!("127.0.0.1:{}", a.svc.port)));
-    let public: std::net::SocketAddr = r["public"].as_str().unwrap().parse().unwrap();
-    assert_eq!(public.port(), a.svc.port);
-
-    let (conn, auth) = direct(&ep, public, json!({"op":"auth","token":r["token"]})).await;
-    assert_eq!(auth, json!({"ok":true}));
-    assert_eq!(req(&conn, json!({"op":"list_apps"})).await, json!({"ok":true,"apps":apps(),"permissions":perms(true, true)}));
-    // The connection stays usable for more requests.
-    assert_eq!(req(&conn, json!({"op":"list_apps"})).await["ok"], true);
-    assert_eq!(req(&conn, json!({"op":"nope"})).await["ok"], false);
-}
-
-#[tokio::test]
 async fn direct_auth_failures_and_lan_password() {
-    let a = service(None).await;
+    let a = service().await;
     let ep = b_endpoint();
-    let (_c, r) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","token":"0".repeat(32)})).await;
-    assert_eq!(r, json!({"ok":false,"error":"bad token"}));
     let (_c, r) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":"wrong"})).await;
     assert_eq!(r, json!({"ok":false,"error":"bad password"}));
     let (c, r) = direct(&ep, a_addr(&a.svc), json!({"op":"list_apps"})).await;
     assert_eq!(r["ok"], false);
     tokio::time::timeout(WAIT, c.closed()).await.expect("unauthenticated connection closed");
-    // Loopback is a private source: password auth is accepted (relay-down fallback).
+    // Loopback is a private source: password auth is accepted.
     let (conn, r) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":PASSWORD})).await;
     // The reply names the host, so B can check an `id@ip` it was given.
     assert_eq!(r, json!({"ok":true,"id":a.id,"name":"test-a"}));
@@ -133,7 +110,7 @@ async fn direct_auth_failures_and_lan_password() {
 
 #[tokio::test]
 async fn open_splices_bytes_to_worker_and_kick_ends_it() {
-    let a = service(None).await;
+    let a = service().await;
     let mut sub = Ipc::open(&a.svc, a.home.path()).await;
     assert_eq!(sub.call(json!({"cmd":"subscribe"})).await, json!({"ok":true}));
 
@@ -172,7 +149,7 @@ async fn open_splices_bytes_to_worker_and_kick_ends_it() {
 
 #[tokio::test]
 async fn open_unknown_worker_binary_is_an_error() {
-    let a = service(None).await;
+    let a = service().await;
     std::fs::remove_file(a.bins.path().join("rapp-host")).unwrap();
     let ep = b_endpoint();
     let (conn, _) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":PASSWORD})).await;
@@ -182,7 +159,7 @@ async fn open_unknown_worker_binary_is_an_error() {
 
 #[tokio::test]
 async fn idle_worker_gets_stdin_closed() {
-    let a = service_with_idle(None, Duration::from_millis(300)).await;
+    let a = service_with_idle(Duration::from_millis(300)).await;
     let ep = b_endpoint();
     let (conn, _) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":PASSWORD})).await;
     let mut s = bi(conn.open_bi().await.unwrap());
@@ -205,85 +182,61 @@ async fn idle_worker_gets_stdin_closed() {
 }
 
 #[tokio::test]
-async fn relayed_requests_reach_the_service() {
-    let relay = relay(Duration::from_secs(60));
-    let a = service(Some(relay.relay.addr)).await;
-    let ep = b_endpoint();
-    let (rc, r) = relay_connect(&ep, relay.relay.addr, &a.id, PASSWORD).await;
-    let token = r["token"].as_str().unwrap().to_string();
-
-    let mut s = bi(rc.open_bi().await.unwrap());
-    write_json(&mut s, &json!({"op":"relay","key":KEY,"token":token})).await.unwrap();
-    write_json(&mut s, &json!({"op":"list_apps"})).await.unwrap();
-    assert_eq!(read_json(&mut s).await.unwrap()["apps"], apps());
-
-    let mut s = bi(rc.open_bi().await.unwrap());
-    write_json(&mut s, &json!({"op":"relay","key":KEY,"token":token})).await.unwrap();
-    write_json(&mut s, &json!({"op":"open","app":"com.example.echo"})).await.unwrap();
-    let wt = read_json(&mut s).await.unwrap()["token"].as_str().unwrap().to_string();
-    echo_through(&mut s, &wt).await;
-    let st = ipc_once(&a.svc, a.home.path(), json!({"cmd":"status"})).await;
-    assert_eq!(st["sessions"][0]["path"], "relay");
-}
-
-#[tokio::test]
-async fn restarted_service_rejects_old_tokens() {
-    let relay = relay(Duration::from_secs(60));
-    let a = service(Some(relay.relay.addr)).await;
-    let ep = b_endpoint();
-    let (rc, r) = relay_connect(&ep, relay.relay.addr, &a.id, PASSWORD).await;
-    let token = r["token"].as_str().unwrap().to_string();
-    a.svc.stop();
-    let svc2 = start_service(a.home.path(), a.bins.path(), Duration::from_secs(60)).await;
-    assert_eq!(wait_registered(&svc2, a.home.path()).await, a.id, "same id after restart");
-
-    let mut s = bi(rc.open_bi().await.unwrap());
-    write_json(&mut s, &json!({"op":"relay","key":KEY,"token":token})).await.unwrap();
-    write_json(&mut s, &json!({"op":"list_apps"})).await.unwrap();
-    assert_eq!(read_json(&mut s).await.unwrap(), json!({"ok":false,"error":"bad token"}));
-}
-
-#[tokio::test]
-async fn set_password_and_set_relay_via_ipc() {
-    let relay = relay(Duration::from_secs(60));
-    let a = service(Some(relay.relay.addr)).await;
+async fn set_password_via_ipc() {
+    let a = service().await;
     let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
     assert_eq!(ipc.call(json!({"cmd":"set_password","password":"new-pass"})).await, json!({"ok":true}));
     let ep = b_endpoint();
-    let deadline = tokio::time::Instant::now() + WAIT;
-    loop {
-        let (_c, r) = relay_connect(&ep, relay.relay.addr, &a.id, "new-pass").await;
-        if r["ok"] == true {
-            break;
-        }
-        assert!(tokio::time::Instant::now() < deadline, "never re-registered: {r}");
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    let (_c, r) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":"new-pass"})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    let (_c, r) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":PASSWORD})).await;
+    assert_eq!(r["error"], "bad password");
     let st = ipc.call(json!({"cmd":"status"})).await;
     assert_eq!(st["password"], "new-pass");
-
-    // Point it at a second relay with the wrong key: status reports the error.
-    let relay2 = common::relay(Duration::from_secs(60));
-    let r = ipc.call(json!({"cmd":"set_relay","relay":relay2.relay.addr.to_string(),"key":"wrong"})).await;
-    assert_eq!(r, json!({"ok":true}));
-    let deadline = tokio::time::Instant::now() + WAIT;
-    loop {
-        let st = ipc.call(json!({"cmd":"status"})).await;
-        if st["relay_error"] == "bad relay key" {
-            assert_eq!(st["relay"], "connecting");
-            break;
-        }
-        assert!(tokio::time::Instant::now() < deadline, "no relay error: {st}");
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
     let cfg: Value = serde_json::from_slice(&std::fs::read(a.home.path().join("service.json")).unwrap()).unwrap();
-    assert_eq!(cfg["key"], "wrong");
     assert_eq!(cfg["password"], "new-pass");
+    assert!(cfg.get("relay").is_none());
+}
+
+#[tokio::test]
+async fn old_service_json_with_relay_fields_still_loads() {
+    // A 0.5.5 service.json: relay1's address and operator key, and a secret that 0.6 no longer uses.
+    let (home, bins) = (tempfile::tempdir().unwrap(), bins());
+    let old_key = "k3y-from-0.5.5";
+    std::fs::write(
+        home.path().join("service.json"),
+        json!({"relay":"203.0.113.7:21116","key":old_key,"id":"123456789","secret":"ab".repeat(32),
+               "name":"old-a","password":"pw12","port":0,"ipc_port":0})
+        .to_string(),
+    )
+    .unwrap();
+    let svc = start_service(home.path(), bins.path(), Duration::from_secs(60)).await;
+    let st = ipc_once(&svc, home.path(), json!({"cmd":"status"})).await;
+    assert_eq!((&st["id"], &st["name"], &st["password"]), (&json!("123456789"), &json!("old-a"), &json!("pw12")));
+    // relay1's key is not a 0.6 key: it goes, and the relay with it.
+    assert_eq!((&st["relay_addr"], &st["has_key"], &st["relay"]), (&Value::Null, &json!(false), &json!("off")));
+    assert_eq!(ipc_once(&svc, home.path(), json!({"cmd":"show_key"})).await, json!({"ok":true,"key":null}));
+    let cfg = service_json_value(home.path());
+    assert!(cfg.get("relay").is_none() && cfg.get("key").is_none() && cfg.get("secret").is_none(), "{cfg}");
+    let ev = wait_log(home.path(), "relay_legacy_dropped", |_| true).await;
+    assert!(!ev.to_string().contains("203.0.113.7"), "{ev}");
+    let log = std::fs::read_to_string(home.path().join("logs/service.log")).unwrap();
+    assert!(!log.contains(old_key), "the log has the old key");
+}
+
+#[tokio::test]
+async fn token_only_auth_from_an_old_b_is_refused() {
+    let a = service().await;
+    let ep = b_endpoint();
+    let conn = dial(&ep, a_addr(&a.svc), rapp_net::quic::ALPN_PEER).await;
+    let r = req(&conn, json!({"op":"auth","token":"t"})).await;
+    assert_eq!(r["error"], "auth required");
+    wait_log(a.home.path(), "auth_fail", |_| true).await;
 }
 
 #[tokio::test]
 async fn permissions_command_checks_and_prompts() {
-    let a = service(None).await;
+    let a = service().await;
     set_perms(a.bins.path(), &perms(false, true));
     let mut sub = Ipc::open(&a.svc, a.home.path()).await;
     sub.call(json!({"cmd":"subscribe"})).await;
@@ -302,13 +255,13 @@ async fn permissions_command_checks_and_prompts() {
 
 type Tccutil = Box<dyn Fn(&[String]) -> rapp_update::runner::Out + Send + Sync>;
 
-/// A relay-less service whose runner scripts `/usr/bin/tccutil` with `tccutil` (None: not installed).
+/// A service whose runner scripts `/usr/bin/tccutil` with `tccutil` (None: not installed).
 async fn with_tccutil(
     tccutil: Option<Tccutil>,
     bins: &std::path::Path,
 ) -> (rapp_service::Service, tempfile::TempDir, std::sync::Arc<rapp_update::fake::FakeRunner>) {
     let home = tempfile::tempdir().unwrap();
-    service_json(home.path(), None);
+    service_json(home.path());
     let mut runner = rapp_update::fake::FakeRunner::new();
     if let Some(f) = tccutil {
         runner = runner.on(rapp_update::runner::TCCUTIL, f);
@@ -350,7 +303,11 @@ async fn permissions_reset_runs_tccutil_for_rapp_only() {
     );
     assert!(host_log(bins.path()).contains("check --prompt"));
     let ev = wait_log(home.path(), "permissions_reset", |_| true).await;
-    assert_eq!(ev.as_object().unwrap().keys().filter(|k| !["ts", "lvl", "ev"].contains(&k.as_str())).count(), 0, "{ev}");
+    assert_eq!(
+        ev.as_object().unwrap().keys().filter(|k| !["ts", "lvl", "ev"].contains(&k.as_str())).count(),
+        0,
+        "{ev}"
+    );
 }
 
 #[tokio::test]
@@ -386,7 +343,7 @@ async fn tccutil_missing_reports_false() {
 
 #[tokio::test]
 async fn failed_check_keeps_last_known_permissions() {
-    let a = service(None).await;
+    let a = service().await;
     set_perms(a.bins.path(), &perms(true, false));
     let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
     assert_eq!(ipc.call(json!({"cmd":"permissions"})).await["permissions"], perms(true, false));
@@ -397,7 +354,7 @@ async fn failed_check_keeps_last_known_permissions() {
 
 #[tokio::test]
 async fn list_apps_reports_and_stores_permissions() {
-    let a = service(None).await;
+    let a = service().await;
     set_perms(a.bins.path(), &perms(true, false));
     let ep = b_endpoint();
     let (conn, _) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":PASSWORD})).await;
@@ -408,7 +365,7 @@ async fn list_apps_reports_and_stores_permissions() {
 
 #[tokio::test]
 async fn open_without_permission_says_so_and_rechecks() {
-    let a = service(None).await;
+    let a = service().await;
     set_perms(a.bins.path(), &perms(false, false));
     let ep = b_endpoint();
     let (conn, _) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":PASSWORD})).await;
@@ -434,7 +391,7 @@ async fn open_echo(conn: &quinn::Connection) -> (rapp_net::quic::BiStream, Strin
 
 #[tokio::test]
 async fn logs_who_connected_what_they_opened_and_how_it_ended() {
-    let a = service(None).await;
+    let a = service().await;
     let home = a.home.path();
     let ep = b_endpoint();
     let (_c, r) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":"wrong-pw","name":"mbp"})).await;
@@ -452,7 +409,10 @@ async fn logs_who_connected_what_they_opened_and_how_it_ended() {
     assert_eq!((&req["app"], &req["result"], &req["name"]), (&json!("com.example.echo"), &json!("ok"), &json!("mbp")));
     let start = wait_log(home, "session_start", |_| true).await;
     let sid = start["sid"].clone();
-    assert_eq!((&start["app"], &start["path"], &start["name"]), (&json!("com.example.echo"), &json!("lan"), &json!("mbp")));
+    assert_eq!(
+        (&start["app"], &start["path"], &start["name"]),
+        (&json!("com.example.echo"), &json!("lan"), &json!("mbp"))
+    );
     // The worker's stderr text and its transfer event, tagged with the session.
     let host_line = wait_log(home, "log", |v| v["src"] == "host").await;
     assert_eq!(host_line["app"], "com.example.echo");
@@ -489,7 +449,7 @@ async fn logs_who_connected_what_they_opened_and_how_it_ended() {
     // Never a secret in the log (spec §0).
     let ipc_token = std::fs::read_to_string(home.join("ipc.token")).unwrap();
     let text = std::fs::read_to_string(home.join("logs").join("service.log")).unwrap();
-    for secret in [PASSWORD, "wrong-pw", wt.as_str(), ipc_token.trim(), KEY] {
+    for secret in [PASSWORD, "wrong-pw", wt.as_str(), ipc_token.trim()] {
         assert!(!text.contains(secret), "{secret:?} in service.log:\n{text}");
     }
 }
@@ -500,31 +460,8 @@ async fn req_open_fails(conn: &quinn::Connection) -> bool {
 }
 
 #[tokio::test]
-async fn relayed_session_logs_the_name_the_relay_passed_on() {
-    let relay = relay(Duration::from_secs(60));
-    let a = service(Some(relay.relay.addr)).await;
-    let ep = b_endpoint();
-    let rc = dial(&ep, relay.relay.addr, rapp_net::quic::ALPN_RELAY).await;
-    let r = req(&rc, json!({"op":"connect","key":KEY,"id":a.id,"password":PASSWORD,"name":"phone"})).await;
-    let token = r["token"].as_str().unwrap().to_string();
-    let mut s = bi(rc.open_bi().await.unwrap());
-    write_json(&mut s, &json!({"op":"relay","key":KEY,"token":token})).await.unwrap();
-    write_json(&mut s, &json!({"op":"open","app":"com.example.echo"})).await.unwrap();
-    let wt = read_json(&mut s).await.unwrap()["token"].as_str().unwrap().to_string();
-    echo_through(&mut s, &wt).await;
-    let start = wait_log(a.home.path(), "session_start", |_| true).await;
-    assert_eq!((&start["path"], &start["name"]), (&json!("relay"), &json!("phone")));
-    let st = wait_log(a.home.path(), "relay", |v| v["state"] == "connected").await;
-    assert_eq!(st["lvl"], "info");
-    let text = std::fs::read_to_string(a.home.path().join("logs").join("service.log")).unwrap();
-    for secret in [PASSWORD, token.as_str(), wt.as_str(), KEY] {
-        assert!(!text.contains(secret), "{secret:?} in service.log:\n{text}");
-    }
-}
-
-#[tokio::test]
 async fn logs_start_and_worker_exit() {
-    let a = service_with_idle(None, Duration::from_millis(200)).await;
+    let a = service_with_idle(Duration::from_millis(200)).await;
     let start = wait_log(a.home.path(), "service_start", |_| true).await;
     assert_eq!(start["port"], a.svc.port);
     assert_eq!(start["id"], a.id.as_str());
@@ -537,13 +474,16 @@ async fn logs_start_and_worker_exit() {
     assert_eq!(end["reason"], "closed");
     assert!(end.get("name").is_none(), "{end}");
     let exit = wait_log(a.home.path(), "worker_exit", |_| true).await;
-    assert_eq!((&exit["app"], &exit["code"], &exit["reason"]), (&json!("com.example.echo"), &json!(0), &json!("stdin closed")));
+    assert_eq!(
+        (&exit["app"], &exit["code"], &exit["reason"]),
+        (&json!("com.example.echo"), &json!(0), &json!("stdin closed"))
+    );
 }
 
 #[tokio::test]
 async fn oversized_launchd_log_is_emptied_at_start() {
     let (home, bins) = (tempfile::tempdir().unwrap(), bins());
-    service_json(home.path(), None);
+    service_json(home.path());
     let logs = home.path().join("logs");
     std::fs::create_dir_all(&logs).unwrap();
     std::fs::write(logs.join("launchd.log"), vec![b'x'; 5 * 1024 * 1024 + 1]).unwrap();
@@ -555,7 +495,7 @@ async fn oversized_launchd_log_is_emptied_at_start() {
 
 #[tokio::test]
 async fn a_host_refusal_is_in_history_as_rejected() {
-    let a = service(None).await;
+    let a = service().await;
     let home = a.home.path();
     let ep = b_endpoint();
     let (conn, _) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":PASSWORD})).await;
@@ -574,7 +514,7 @@ async fn a_host_refusal_is_in_history_as_rejected() {
 
 #[tokio::test]
 async fn a_self_declared_name_is_cleaned_and_capped() {
-    let a = service(None).await;
+    let a = service().await;
     let ep = b_endpoint();
     let dirty = format!("\u{202e}mb\np{}", "a".repeat(1000));
     let (_c, r) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":"wrong","name":dirty})).await;
@@ -585,7 +525,7 @@ async fn a_self_declared_name_is_cleaned_and_capped() {
 
 #[tokio::test]
 async fn a_malformed_auth_line_is_logged_as_an_attempt() {
-    let a = service(None).await;
+    let a = service().await;
     let ep = b_endpoint();
     let conn = dial(&ep, a_addr(&a.svc), rapp_net::quic::ALPN_PEER).await;
     let mut s = bi(conn.open_bi().await.unwrap());
@@ -596,7 +536,7 @@ async fn a_malformed_auth_line_is_logged_as_an_attempt() {
 
 #[tokio::test]
 async fn stopping_the_service_ends_open_sessions_in_the_log() {
-    let a = service(None).await;
+    let a = service().await;
     let home = a.home.path();
     let ep = b_endpoint();
     let (conn, _) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":PASSWORD,"name":"mbp"})).await;
@@ -622,7 +562,7 @@ async fn launchd_log_is_made_private_at_start() {
     std::fs::write(&launchd, "old panic\n").unwrap();
     std::fs::set_permissions(&launchd, std::fs::Permissions::from_mode(0o644)).unwrap();
     let bins = bins();
-    service_json(home.path(), None);
+    service_json(home.path());
     let _svc = start_service(home.path(), bins.path(), Duration::from_secs(60)).await;
     assert_eq!(std::fs::metadata(&launchd).unwrap().permissions().mode() & 0o777, 0o600);
 }
@@ -671,7 +611,7 @@ async fn wait_until(what: &str, f: impl Fn() -> bool) {
 
 #[tokio::test]
 async fn takeover_logs_the_old_session_as_taken_over_by_the_new_device() {
-    let a = service(None).await;
+    let a = service().await;
     let home = a.home.path();
     let ep = b_endpoint();
     let (one, two) = (b_named(&ep, &a, "b-one").await, b_named(&ep, &a, "b-two").await);
@@ -695,12 +635,15 @@ async fn takeover_logs_the_old_session_as_taken_over_by_the_new_device() {
     assert_eq!(start["name"], "b-two");
     let h = ipc_once(&a.svc, home, json!({"cmd":"history","limit":10})).await;
     let evs = h["events"].as_array().unwrap();
-    assert!(evs.iter().any(|e| e["ev"] == "session_end" && e["sid"] == first_sid && e["reason"] == "taken over"), "{h}");
+    assert!(
+        evs.iter().any(|e| e["ev"] == "session_end" && e["sid"] == first_sid && e["reason"] == "taken over"),
+        "{h}"
+    );
 }
 
 #[tokio::test]
 async fn takeover_is_recorded_even_when_old_b_resets_its_stream() {
-    let a = service(None).await;
+    let a = service().await;
     let home = a.home.path();
     let ep = b_endpoint();
     let (one, two) = (b_named(&ep, &a, "b-one").await, b_named(&ep, &a, "b-two").await);
@@ -718,7 +661,7 @@ async fn takeover_is_recorded_even_when_old_b_resets_its_stream() {
 
 #[tokio::test]
 async fn input_on_one_app_tells_other_apps_to_yield() {
-    let a = service(None).await;
+    let a = service().await;
     let ep = b_endpoint();
     let (one, two) = (b_named(&ep, &a, "b-one").await, b_named(&ep, &a, "b-two").await);
     let mut echo = open_app(&one, "com.example.echo").await;
@@ -738,7 +681,7 @@ async fn input_on_one_app_tells_other_apps_to_yield() {
 
 #[tokio::test]
 async fn same_device_does_not_yield_to_itself() {
-    let a = service(None).await;
+    let a = service().await;
     let ep = b_endpoint();
     let one = b_named(&ep, &a, "b-one").await;
     let mut echo = open_app(&one, "com.example.echo").await;
@@ -752,7 +695,7 @@ async fn same_device_does_not_yield_to_itself() {
 
 #[tokio::test]
 async fn input_on_an_app_without_a_live_session_yields_to_nobody() {
-    let a = service(None).await;
+    let a = service().await;
     let ep = b_endpoint();
     let (one, two) = (b_named(&ep, &a, "b-one").await, b_named(&ep, &a, "b-two").await);
     // echo has only a side connection (not a live session); Safari has a live one.
@@ -771,7 +714,7 @@ async fn input_on_an_app_without_a_live_session_yields_to_nobody() {
 
 #[tokio::test]
 async fn input_blocked_is_logged_once_a_minute_without_content() {
-    let a = service(None).await;
+    let a = service().await;
     let home = a.home.path();
     let ep = b_endpoint();
     let one = b_named(&ep, &a, "b-one").await;
@@ -805,7 +748,7 @@ async fn service_with_a_data_dir_commits_its_device_json() {
     let root = dir.path().join("rapp");
     rapp_net::datadir::prepare(&root, &dir.path().join("no-legacy")).unwrap();
     let home = rapp_net::config::local(&root);
-    service_json(&home, None);
+    service_json(&home);
     let svc = rapp_service::Service::start(rapp_service::Opts {
         home: home.clone(),
         bin_dir: Some(bins.path().to_path_buf()),
@@ -820,13 +763,15 @@ async fn service_with_a_data_dir_commits_its_device_json() {
             no_dev_tools: |_| false,
             ..rapp_service::DataOpts::system(root.clone())
         }),
+        advertise_lan: None,
     })
     .await
     .unwrap();
     let id = ipc_once(&svc, &home, json!({"cmd":"status"})).await["id"].as_str().unwrap().to_string();
     let path = format!("devices/{id}/device.json");
     let git = |args: &[&str]| {
-        let out = std::process::Command::new("git").current_dir(&root).args(args).envs(git_env.clone()).output().unwrap();
+        let out =
+            std::process::Command::new("git").current_dir(&root).args(args).envs(git_env.clone()).output().unwrap();
         String::from_utf8_lossy(&out.stdout).into_owned()
     };
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
@@ -839,4 +784,301 @@ async fn service_with_a_data_dir_commits_its_device_json() {
         assert!(!shown.contains(word), "{word} in device.json");
     }
     svc.stop();
+}
+
+// ---- relay and key settings, rapp/2 (relay device plan 2a, Task 4) ----
+
+fn new_key() -> rapp_wire::Key {
+    rapp_wire::Key::new_local()
+}
+
+fn id_of(dir: &std::path::Path) -> rapp_wire::Identity {
+    rapp_wire::Identity::load_or_create(dir, "device").unwrap()
+}
+
+fn service_json_value(home: &std::path::Path) -> Value {
+    serde_json::from_slice(&std::fs::read(home.join("service.json")).unwrap()).unwrap()
+}
+
+#[tokio::test]
+async fn set_relay_saves_and_masks() {
+    let a = service().await;
+    let key = new_key().to_string();
+    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
+    let r = ipc.call(json!({"cmd":"set_relay","relay":"vps:22026","key":key})).await;
+    assert_eq!(r, json!({"ok":true}));
+    let st = ipc.call(json!({"cmd":"status"})).await;
+    assert_eq!((&st["relay_addr"], &st["has_key"], &st["relay"]), (&json!("vps:22026"), &json!(true), &json!("connecting")));
+    assert!(!st.to_string().contains(&key), "status leaks the key: {st}");
+    assert_eq!(ipc.call(json!({"cmd":"show_key"})).await, json!({"ok":true,"key":key}));
+    let cfg = service_json_value(a.home.path());
+    assert_eq!((&cfg["relay"], &cfg["key"]), (&json!("vps:22026"), &json!(key)));
+    // Empty clears both; show_key then says null.
+    assert_eq!(ipc.call(json!({"cmd":"set_relay","relay":"","key":""})).await, json!({"ok":true}));
+    assert_eq!(ipc.call(json!({"cmd":"show_key"})).await, json!({"ok":true,"key":null}));
+    let st = ipc.call(json!({"cmd":"status"})).await;
+    assert_eq!((&st["relay_addr"], &st["has_key"]), (&Value::Null, &json!(false)));
+    let cfg = service_json_value(a.home.path());
+    assert!(cfg.get("relay").is_none() && cfg.get("key").is_none(), "{cfg}");
+}
+
+#[tokio::test]
+async fn set_relay_rejects_bad_key_and_bad_address() {
+    let a = service().await;
+    let key = new_key().to_string();
+    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
+    assert_eq!(ipc.call(json!({"cmd":"set_relay","relay":"vps:22026","key":key})).await["ok"], true);
+    let before = std::fs::read(a.home.path().join("service.json")).unwrap();
+    let r = ipc.call(json!({"cmd":"set_relay","relay":"other:22026","key":"rappxyz"})).await;
+    assert_eq!(r, json!({"ok":false,"error":"bad key"}));
+    for bad in ["nocolon", "host:0", "host:70000", "host:abc", ":22026", "host:"] {
+        let r = ipc.call(json!({"cmd":"set_relay","relay":bad,"key":key})).await;
+        assert_eq!(r, json!({"ok":false,"error":"bad address"}), "{bad}");
+    }
+    assert_eq!(std::fs::read(a.home.path().join("service.json")).unwrap(), before);
+}
+
+#[tokio::test]
+async fn rapp2_same_key_pairs() {
+    let a = service().await;
+    let key = new_key();
+    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
+    ipc.call(json!({"cmd":"set_relay","relay":"","key":key.to_string()})).await;
+
+    let b_dir = tempfile::tempdir().unwrap();
+    let b = id_of(b_dir.path());
+    let conn = dial2(a_addr(&a.svc), &b).await;
+    let r = req2(&conn, &b, &a.id, Some(&key), json!({"op":"list_apps"})).await.unwrap();
+    assert_eq!(r["apps"], apps());
+    let paired: Value = serde_json::from_slice(&std::fs::read(a.home.path().join("paired.json")).unwrap()).unwrap();
+    assert_eq!((&paired[0]["fp"], &paired[0]["name"]), (&json!(b.fp.to_string()), &json!("test-b")));
+    let t = wait_log(a.home.path(), "trust", |v| v["result"] == "paired").await;
+    assert_eq!((&t["fp"], &t["name"], &t["path"]), (&json!(b.fp.to_string()), &json!("test-b"), &json!("lan")));
+
+    // An open on a later stream of the same connection: the session shows the path.
+    let mut s = bi(conn.open_bi().await.unwrap());
+    write_json(&mut s, &json!({"op":"open","app":"com.example.echo"})).await.unwrap();
+    let r = read_json(&mut s).await.unwrap();
+    assert_eq!(r["ok"], true, "{r}");
+    let st = ipc.call(json!({"cmd":"status"})).await;
+    assert_eq!(st["sessions"][0]["path"], "lan");
+
+    // Next time the stored fingerprint is enough: no key on either side.
+    let conn2 = dial2(a_addr(&a.svc), &b).await;
+    let r = req2(&conn2, &b, &a.id, None, json!({"op":"list_apps"}));
+    // B has no key and no stored host fp, so it cannot accept A's reply; A did accept B though.
+    assert!(r.await.is_err());
+    wait_log(a.home.path(), "trust", |v| v["result"] == "known").await;
+}
+
+#[tokio::test]
+async fn rapp2_without_cert_is_refused() {
+    let a = service().await;
+    let ep = b_endpoint();
+    let conn = dial(&ep, a_addr(&a.svc), rapp_wire::tls::ALPN_DEVICE).await;
+    tokio::time::timeout(WAIT, conn.closed()).await.expect("connection closed");
+    let t = wait_log(a.home.path(), "trust", |v| v["result"] == "refused").await;
+    assert!(t["reason"].as_str().is_some_and(|r| !r.is_empty()), "{t}");
+}
+
+#[tokio::test]
+async fn rapp2_different_key_refused() {
+    let a = service().await;
+    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
+    ipc.call(json!({"cmd":"set_relay","relay":"","key":new_key().to_string()})).await;
+    let b_dir = tempfile::tempdir().unwrap();
+    let b = id_of(b_dir.path());
+    let conn = dial2(a_addr(&a.svc), &b).await;
+    let other = new_key();
+    let e = req2(&conn, &b, &a.id, Some(&other), json!({"op":"list_apps"})).await.expect_err("refused");
+    assert!(format!("{e:#}").contains("not trusted"), "{e:#}");
+    wait_log(a.home.path(), "trust", |v| v["result"] == "refused").await;
+    tokio::time::timeout(WAIT, conn.closed()).await.expect("connection closed");
+    assert!(!log_events(a.home.path()).iter().any(|v| v["ev"] == "request"), "request was served");
+    assert!(!a.home.path().join("paired.json").exists());
+}
+
+#[tokio::test]
+async fn rapp1_password_still_works() {
+    let a = service().await;
+    let ep = b_endpoint();
+    let (conn, r) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":PASSWORD})).await;
+    assert_eq!(r["ok"], true);
+    assert_eq!(req(&conn, json!({"op":"list_apps"})).await["apps"], apps());
+}
+
+#[tokio::test]
+async fn secrets_not_logged() {
+    let a = service().await;
+    let key = new_key();
+    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
+    ipc.call(json!({"cmd":"set_relay","relay":"vps:22026","key":key.to_string()})).await;
+    ipc.call(json!({"cmd":"show_key"})).await;
+    let b_dir = tempfile::tempdir().unwrap();
+    let b = id_of(b_dir.path());
+    let conn = dial2(a_addr(&a.svc), &b).await;
+    req2(&conn, &b, &a.id, Some(&key), json!({"op":"list_apps"})).await.unwrap();
+    let conn = dial2(a_addr(&a.svc), &b).await;
+    let _ = req2(&conn, &b, &a.id, Some(&new_key()), json!({"op":"list_apps"})).await;
+    wait_log(a.home.path(), "trust", |v| v["result"] == "paired").await;
+    let log = std::fs::read_to_string(a.home.path().join("logs/service.log")).unwrap();
+    let trust_hex: String = key.trust().iter().map(|b| format!("{b:02x}")).collect();
+    assert!(!log.contains(&key.to_string()) && !log.contains(&trust_hex));
+}
+
+// ---- the relay connection ----
+
+/// B's relayed request: `relay_to`, TLS, hello and `request` in one go; returns the pipe at the reply.
+async fn relayed(
+    b: &rapp_conn::relay::RelayConn,
+    id: &rapp_wire::Identity,
+    a_id: &str,
+    key: &rapp_wire::Key,
+    request: Value,
+) -> rapp_conn::Pipe {
+    let stream = tokio::time::timeout(WAIT, b.relay_to(a_id)).await.expect("relay_to in time").unwrap();
+    let (mut pipe, facts) = tokio::time::timeout(WAIT, rapp_conn::e2e_connect(stream, id)).await.unwrap().unwrap();
+    let me = rapp_conn::Me { id: "", name: "test-b", key: Some(key) };
+    rapp_conn::send_hello(&mut pipe, &facts, &me).await.unwrap();
+    write_json(&mut pipe, &request).await.unwrap();
+    tokio::time::timeout(WAIT, rapp_conn::read_welcome(&mut pipe, &facts, Some(key), a_id, None)).await.unwrap().unwrap();
+    pipe
+}
+
+#[tokio::test]
+async fn registers_on_the_relay() {
+    let rig = RelayRig::start().await;
+    let a = service_on_relay(&rig.addr, &rig.key).await;
+    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
+    let st = wait_status(&mut ipc, |s| s["relay"] == "connected").await;
+    assert_eq!(st["relay_error"], Value::Null);
+    let b_dir = tempfile::tempdir().unwrap();
+    let (_ep, b) = relay_conn(&rig, &id_of(b_dir.path()), &rig.key).await;
+    let found = tokio::time::timeout(WAIT, b.connect_to(&a.id)).await.unwrap().unwrap();
+    assert_eq!(found.lan, vec!["127.0.0.1:1".to_string()]);
+}
+
+#[tokio::test]
+async fn relayed_request_reaches_the_service() {
+    let rig = RelayRig::start().await;
+    let a = service_on_relay(&rig.addr, &rig.key).await;
+    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
+    wait_status(&mut ipc, |s| s["relay"] == "connected").await;
+    let b_dir = tempfile::tempdir().unwrap();
+    let bid = id_of(b_dir.path());
+    let (_ep, b) = relay_conn(&rig, &bid, &rig.key).await;
+
+    let mut pipe = relayed(&b, &bid, &a.id, &rig.key, json!({"op":"list_apps"})).await;
+    let r = tokio::time::timeout(WAIT, read_json(&mut pipe)).await.unwrap().unwrap();
+    assert_eq!(r["apps"], apps());
+    let paired: Value = serde_json::from_slice(&std::fs::read(a.home.path().join("paired.json")).unwrap()).unwrap();
+    assert_eq!(paired[0]["fp"], json!(bid.fp.to_string()));
+
+    let mut pipe = relayed(&b, &bid, &a.id, &rig.key, json!({"op":"open","app":"com.example.echo"})).await;
+    let r = tokio::time::timeout(WAIT, read_json(&mut pipe)).await.unwrap().unwrap();
+    assert_eq!(r["ok"], true, "{r}");
+    let st = ipc.call(json!({"cmd":"status"})).await;
+    assert_eq!(st["sessions"][0]["path"], "relay");
+    let t = wait_log(a.home.path(), "trust", |v| v["path"] == "relay").await;
+    assert_eq!(t["fp"], json!(bid.fp.to_string()));
+}
+
+#[tokio::test]
+async fn relay_restart_reregisters_within_5s() {
+    let mut rig = RelayRig::start().await;
+    let a = service_on_relay(&rig.addr, &rig.key).await;
+    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
+    wait_status(&mut ipc, |s| s["relay"] == "connected").await;
+    rig.restart().await;
+    // Not `connected` from the old connection: wait for it to drop first, then to come back.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let b_dir = tempfile::tempdir().unwrap();
+    let (_ep, b) = relay_conn(&rig, &id_of(b_dir.path()), &rig.key).await;
+    loop {
+        if tokio::time::timeout(Duration::from_secs(1), b.connect_to(&a.id)).await.is_ok_and(|r| r.is_ok()) {
+            break;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "A did not register again within 5 s");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let st = ipc.call(json!({"cmd":"status"})).await;
+    assert_eq!(st["relay"], "connected", "{st}");
+}
+
+#[tokio::test]
+async fn wrong_relay_half_reports_mismatch() {
+    let rig = RelayRig::start().await;
+    let key = rapp_wire::Key { relay: Some([7u8; 16]), root: rig.key.root };
+    let a = service_on_relay(&rig.addr, &key).await;
+    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
+    let st = wait_status(&mut ipc, |s| s["relay_error"] == "relay identity mismatch").await;
+    assert_eq!(st["relay"], "connecting");
+    // rapp/1 with the password still works.
+    let ep = b_endpoint();
+    let (conn, r) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":PASSWORD})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(req(&conn, json!({"op":"list_apps"})).await["apps"], apps());
+}
+
+#[tokio::test]
+async fn wrong_root_half_reports_bad_key() {
+    let rig = RelayRig::start().await;
+    let key = rapp_wire::Key { relay: rig.key.relay, root: [9u8; 16] };
+    let a = service_on_relay(&rig.addr, &key).await;
+    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
+    let st = wait_status(&mut ipc, |s| s["relay_error"] == "bad key").await;
+    assert_eq!(st["relay"], "connecting");
+    let ep = b_endpoint();
+    let (conn, r) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":PASSWORD})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(req(&conn, json!({"op":"list_apps"})).await["apps"], apps());
+}
+
+#[tokio::test]
+async fn set_relay_reconnects() {
+    let rig = RelayRig::start().await;
+    let a = service().await;
+    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
+    assert_eq!(ipc.call(json!({"cmd":"status"})).await["relay"], "off");
+    let r = ipc.call(json!({"cmd":"set_relay","relay":rig.addr,"key":rig.key.to_string()})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    wait_status(&mut ipc, |s| s["relay"] == "connected").await;
+    wait_log(a.home.path(), "relay", |v| v["state"] == "connected").await;
+    let r = ipc.call(json!({"cmd":"set_relay","relay":"","key":""})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    wait_status(&mut ipc, |s| s["relay"] == "off").await;
+    // The connection was closed: A is offline on the relay.
+    let b_dir = tempfile::tempdir().unwrap();
+    let (_ep, b) = relay_conn(&rig, &id_of(b_dir.path()), &rig.key).await;
+    let deadline = tokio::time::Instant::now() + WAIT;
+    loop {
+        let r = tokio::time::timeout(WAIT, b.connect_to(&a.id)).await.unwrap();
+        if r.is_err() {
+            break;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "A is still registered");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+#[tokio::test]
+async fn relay_secrets_not_logged() {
+    let rig = RelayRig::start().await;
+    let a = service_on_relay(&rig.addr, &rig.key).await;
+    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
+    wait_status(&mut ipc, |s| s["relay"] == "connected").await;
+    ipc.call(json!({"cmd":"show_key"})).await;
+    // A device the relay already enrolled registers whatever the root half says; a wrong relay half
+    // is what fails, and its text goes into the log.
+    let bad = rapp_wire::Key { relay: Some([7u8; 16]), root: [9u8; 16] };
+    ipc.call(json!({"cmd":"set_relay","relay":rig.addr,"key":bad.to_string()})).await;
+    wait_status(&mut ipc, |s| s["relay_error"] == "relay identity mismatch").await;
+    wait_log(a.home.path(), "relay", |v| v["error"] == "relay identity mismatch").await;
+    let log = std::fs::read_to_string(a.home.path().join("logs/service.log")).unwrap();
+    let hex = |b: [u8; 32]| b.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    for key in [&rig.key, &bad] {
+        for secret in [key.to_string(), hex(key.trust()), hex(key.join())] {
+            assert!(!log.contains(&secret), "service.log has a secret of the key");
+        }
+    }
 }

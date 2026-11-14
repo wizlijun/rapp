@@ -35,9 +35,9 @@ swift run -c release rapp-client "rapp://<A的地址>[:端口]/<bundle-id>?token
 其余像素按亮度落到这两色之间的四级上，所以文字的抗锯齿边缘会保留一两级过渡，不会断笔、也不会在字周围出灰块。
 渐变和照片会变成色块。这是最省流的档位，适合看文字。
 
-协议版本是 7：v5 的剪贴板和编辑器使用消息 19–25，v6 新增输入占用通知（26），v7 新增帧确认（27）和弱网提示（28）。见 `docs/superpowers/specs/2026-11-12-rapp-multi-client-design.md`。
-Mac 两端建议一起升级到这一版。当前源码使用 v7 协议（主机仍可服务较旧的客户端，旧客户端没有帧确认和弱网提示，v5 也不显示输入占用提示）；新的客户端连接旧主机可能收到 `protocol version mismatch`，需升级主机。
-Omarchy 的 Rust/GTK 客户端已支持 v4–v7（见下文）；Windows/Omarchy 主机端不在本仓库当前实现中。
+协议版本是 8：v5 的剪贴板和编辑器使用消息 19–25，v6 新增输入占用通知（26），v7 新增帧确认（27）和弱网提示（28），v8 = v7 再加远程输入法（29 输入源通知、30 选择输入源）。见 `docs/superpowers/specs/2026-11-12-rapp-multi-client-design.md`。
+Mac 两端建议一起升级到这一版。当前源码使用 v8 协议（主机仍可服务 v5–v7 的客户端：v7 没有远程输入法，v5/v6 还没有帧确认和弱网提示，v5 也不显示输入占用提示）；新的客户端连接旧主机可能收到 `protocol version mismatch`，需升级主机。
+Omarchy 的 Rust/GTK 客户端已支持 v4–v8（见下文）；Windows/Omarchy 主机端不在本仓库当前实现中。
 
 一定要带 `-c release`。未优化的构建处理一帧 Retina 画面要 1 秒左右。
 
