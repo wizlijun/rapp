@@ -112,6 +112,9 @@ class TermSessionPort extends SessionPort {
       throw StateError('Session start cancelled');
     }
     t.link = link;
+    // A view asked for while connecting goes out now.
+    final v = t.view;
+    if (v != null) _sendView(t, v);
     t.traffic = Timer.periodic(_trafficEvery, (_) {
       final screens = t.screens;
       t.screens = 0;
@@ -184,9 +187,13 @@ class TermSessionPort extends SessionPort {
     if (t.viewSent && t.view == v) return;
     t.view = v;
     if (t.link == null || t.disconnected) return;
+    _sendView(t, v);
+  }
+
+  void _sendView(_Term t, ({String pane, int cols, int rows}) v) {
     t.viewSent = true;
-    t.model.expect(id);
-    t.link!.send(viewMsg(id, cols, rows));
+    t.model.expect(v.pane);
+    t.link!.send(viewMsg(v.pane, v.cols, v.rows));
   }
 
   /// Asks the device to fit the pane to the latest view again.

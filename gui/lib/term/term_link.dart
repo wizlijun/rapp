@@ -14,6 +14,8 @@ const int maxLine = 65536;
 class TermLink {
   TermLink._(this._socket) {
     _socket.listen(_onData, onError: (Object _) => _finish(), onDone: _finish, cancelOnError: true);
+    // A write that fails because the peer is gone reports on this future, not at the call.
+    unawaited(_socket.done.then<void>((_) {}, onError: (Object _) => _finish()));
   }
 
   /// Connects to 127.0.0.1:[port] and sends [token] as the first line.

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -185,6 +186,34 @@ void main() {
     await dead.close();
     await expectLater(port.start(StartArgs(2, p, 'tk', 'x', 0, 'x')), throwsA(isA<SocketException>()));
     expect(port.owns(2), isFalse);
+  });
+
+  test('a view asked for while connecting is sent when the link comes up', () async {
+    w = await Worker.start();
+    port = TermSessionPort();
+    final started = port.start(StartArgs(1, w.srv.port, 'tk', 'x', 0, 'x'));
+    port.view(1, 3, 80, 24);
+    await started;
+    await pumpUntil(() => w.got.any((l) => l.contains('"view"')));
+    expect(w.got.last, jsonEncode({'t': 'view', 'pane': '%3', 'cols': 80, 'rows': 24}));
+    expect(port.model(1)!.pane, '%3');
+  });
+
+  test('a reset peer while the GUI keeps sending is one DisconnectedEvent and no unhandled error', () async {
+    final errors = <Object>[];
+    await runZonedGuarded(() async {
+      await begin(await Worker.start(), traffic: const Duration(milliseconds: 20));
+      await pumpUntil(() => w.sockets.isNotEmpty);
+      w.sockets.single.destroy();
+      for (var i = 0; i < 40; i++) {
+        port.view(1, 3, 80 + i, 24);
+        await Future<void>.delayed(const Duration(milliseconds: 5));
+      }
+      await pumpUntil(() => events.whereType<DisconnectedEvent>().isNotEmpty);
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }, (e, _) => errors.add(e));
+    expect(errors, isEmpty);
+    expect(events.whereType<DisconnectedEvent>().length, 1);
   });
 
   test('the fake records calls without a network', () async {
