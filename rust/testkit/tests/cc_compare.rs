@@ -68,6 +68,9 @@ async fn proxy(upstream: SocketAddr, p: Profile) -> SocketAddr {
 struct Result1 {
     kbps: f64,
     sent: usize,
+    failed: usize,
+    closed: String,
+    bulk_err: String,
     p50: f64,
     p95: f64,
 }
@@ -120,10 +123,11 @@ async fn one(cc: &str, profile: &str) -> Result1 {
         let mut s = c2.open_uni().await.unwrap();
         let buf = vec![7u8; 65536];
         while start.elapsed() < RUN {
-            if s.write_all(&buf).await.is_err() {
-                break;
+            if let Err(e) = s.write_all(&buf).await {
+                return Some(e.to_string());
             }
         }
+        None
     });
     let mut pings = Vec::new();
     while start.elapsed() < RUN {
@@ -144,10 +148,17 @@ async fn one(cc: &str, profile: &str) -> Result1 {
     // Pings still in flight count as their age so far (they are at least that slow).
     let sent = pings.len();
     let mut ms = Vec::new();
+    let mut failed = 0;
     for (i, h) in pings.into_iter().enumerate() {
         let age = elapsed * 1000.0 - i as f64 * 200.0;
         if h.is_finished() {
-            ms.push(h.await.unwrap().unwrap_or(age));
+            match h.await.unwrap() {
+                Some(v) => ms.push(v),
+                None => {
+                    failed += 1;
+                    ms.push(age);
+                }
+            }
         } else {
             h.abort();
             ms.push(age);
@@ -155,9 +166,16 @@ async fn one(cc: &str, profile: &str) -> Result1 {
     }
     ms.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let q = |f: f64| ms[((ms.len() as f64 * f) as usize).min(ms.len() - 1)];
-    bulk.abort();
+    // Liveness: read before our own close. A bulk task still blocked in write_all is just slow, not an error.
+    let closed = conn.close_reason().map_or("open".to_string(), |e| e.to_string());
+    let bulk_err = if bulk.is_finished() {
+        bulk.await.unwrap().unwrap_or_else(|| "none".into())
+    } else {
+        bulk.abort();
+        "none".into()
+    };
     conn.close(0u32.into(), b"");
-    Result1 { kbps: bytes as f64 * 8.0 / 1000.0 / elapsed, sent, p50: q(0.5), p95: q(0.95) }
+    Result1 { kbps: bytes as f64 * 8.0 / 1000.0 / elapsed, sent, failed, closed, bulk_err, p50: q(0.5), p95: q(0.95) }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -166,11 +184,31 @@ async fn cc_table() {
     println!(
         "VERDICT RULE: BBR >= 1.2x cubic throughput on n3, >= 1.0x on s0 and n2, ping p95 <= 1.2x cubic on all three."
     );
-    println!("{:8} {:8} {:>10} {:>8} {:>9} {:>9}", "profile", "cc", "kbit/s", "pings", "p50 ms", "p95 ms");
+    println!(
+        "{:8} {:8} {:>10} {:>6} {:>7} {:>9} {:>9}  {}",
+        "profile", "cc", "kbit/s", "pings", "failed", "p50 ms", "p95 ms", "conn at end / bulk write error"
+    );
+    let mut res = std::collections::HashMap::new();
     for profile in ["s0", "n2", "n3"] {
         for cc in ["cubic", "newreno", "bbr"] {
             let r = one(cc, profile).await;
-            println!("{profile:8} {cc:8} {:>10.1} {:>8} {:>9.0} {:>9.0}", r.kbps, r.sent, r.p50, r.p95);
+            println!(
+                "{profile:8} {cc:8} {:>10.1} {:>6} {:>7} {:>9.0} {:>9.0}  {} / {}",
+                r.kbps, r.sent, r.failed, r.p50, r.p95, r.closed, r.bulk_err
+            );
+            res.insert((profile, cc), r);
         }
     }
+    let mut ok = true;
+    for (profile, need) in [("s0", 1.0), ("n2", 1.0), ("n3", 1.2)] {
+        let (c, b) = (&res[&(profile, "cubic")], &res[&(profile, "bbr")]);
+        let (tp, p95) = (b.kbps / c.kbps, b.p95 / c.p95);
+        let pass = tp >= need && p95 <= 1.2;
+        ok &= pass;
+        println!(
+            "bbr/cubic {profile}: throughput {tp:.2}x (need >= {need}), p95 {p95:.2}x (need <= 1.2) -> {}",
+            if pass { "pass" } else { "FAIL" }
+        );
+    }
+    println!("VERDICT: {}", if ok { "switch to BBR" } else { "keep cubic" });
 }
