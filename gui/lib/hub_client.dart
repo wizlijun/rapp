@@ -90,6 +90,57 @@ class AppList {
   final Map<String, dynamic>? permissions;
 }
 
+/// One tmux session of a device (`terms` event, spec §6). [host] is null on the device itself.
+class TermRow {
+  const TermRow(this.id, this.name, this.command, this.host, this.panes, this.attached, this.activity, this.dead,
+      this.unread);
+  final String id, name, command;
+  final String? host;
+  final int panes, attached;
+
+  /// Unix seconds of the last output.
+  final int activity;
+  final bool dead, unread;
+}
+
+/// One place sessions are listed from: the device itself (`host` null) or an SSH host it knows.
+class TermHost {
+  const TermHost(this.host, {this.target, this.tmux, this.error});
+  final String? host, target, tmux, error;
+}
+
+/// A device's terminal sessions as the hub last said; [off] means the device has them turned off.
+class TermList {
+  const TermList(this.id, {this.path, this.error, this.off = false, this.terms = const [], this.hosts = const []});
+  final String id;
+  final String? path, error;
+  final bool off;
+  final List<TermRow> terms;
+  final List<TermHost> hosts;
+}
+
+int _int(Object? v) => v is num ? v.toInt() : 0;
+String? _str(Object? v) => v is String ? v : null;
+
+TermList _termList(Map<String, dynamic> m, String fallbackId) {
+  final id = '${m['id'] ?? fallbackId}';
+  if (m['off'] == true) return TermList(id, off: true);
+  if (m['error'] != null) return TermList(id, error: '${m['error']}');
+  return TermList(
+    id,
+    path: _str(m['path']),
+    terms: [
+      for (final r in (m['terms'] as List? ?? const []).whereType<Map>())
+        TermRow('${r['id']}', '${r['name'] ?? ''}', '${r['command'] ?? ''}', _str(r['host']), _int(r['panes']),
+            _int(r['attached']), _int(r['activity']), r['dead'] == true, r['unread'] == true),
+    ],
+    hosts: [
+      for (final h in (m['hosts'] as List? ?? const []).whereType<Map>())
+        TermHost(_str(h['host']), target: _str(h['target']), tmux: _str(h['tmux']), error: _str(h['error'])),
+    ],
+  );
+}
+
 class HubSession {
   const HubSession(this.sid, this.id, this.app, this.path, {this.port, this.token});
   final Object sid;
@@ -158,6 +209,21 @@ class HubClient extends ChangeNotifier {
     return AppList('${m['id'] ?? id}', '${m['path'] ?? ''}', list,
         permissions: perms is Map ? Map<String, dynamic>.from(perms) : null);
   }
+
+  /// Each device's latest terminal list, from a `terms` answer or the watch stream.
+  final termLists = <String, TermList>{};
+
+  Future<TermList> terms(String id) async {
+    final m = await _request({'cmd': 'terms', 'id': id}, 'terms');
+    return termLists[id] ?? _termList(m, id);
+  }
+
+  /// Adds (or replaces) the SSH host [name]; callers ask for [terms] again after.
+  Future<void> addTermTarget(String id, String name, String target, {String? tmux}) =>
+      _request({'cmd': 'add_term_target', 'id': id, 'name': name, 'target': target, 'tmux': ?tmux}, 'term_targets');
+
+  Future<void> removeTermTarget(String id, String name) =>
+      _request({'cmd': 'remove_term_target', 'id': id, 'name': name}, 'term_targets');
 
   Future<HubSession> open(String id, String app, {bool embed = false, bool reconnect = false}) async {
     final m = await _request(
@@ -280,12 +346,15 @@ class HubClient extends ChangeNotifier {
         // A new data dir: the hub dropped every link it had.
         hostPaths.clear();
         _paths.clear();
+      case 'terms':
+        if (m['id'] != null) termLists['${m['id']}'] = _termList(m, '${m['id']}');
       case 'closed':
         _sessions.remove(m['sid']);
         if (m['sid'] != null && m['reason'] != null) closeReasons[m['sid'] as Object] = '${m['reason']}';
     }
 
-    final p = _take(m, event);
+    // A watch event has no `req`: it answers no one (`_take` would give it to another device's `terms`).
+    final p = event == 'terms' && m['req'] is! int ? null : _take(m, event);
     if (p != null) {
       if (event == 'error') {
         p.completer.completeError(HubException('${m['error'] ?? 'unknown error'}'));

@@ -1525,6 +1525,7 @@ class MainState extends ChangeNotifier {
         _appNames['$id/${a.app}'] = a.name;
       }
       _setOnline(id, true, apps: apps);
+      unawaited(hub!.terms(id).then((_) {}, onError: (_) {}));
     } catch (e) {
       _setOnline(id, false, error: '$e');
     }

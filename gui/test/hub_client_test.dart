@@ -341,5 +341,66 @@ void main() {
       await hub.shutdown();
       expect(t.closed, isTrue);
     });
+
+    test('a watch event without req updates the list and does not answer a pending request', () async {
+      var done = false;
+      final f = hub.terms('A').then((l) {
+        done = true;
+        return l;
+      });
+      final req = t.sent.last['req'];
+      expect(t.sent.last, {'cmd': 'terms', 'id': 'A', 'req': anything});
+      t.emit({
+        'event': 'terms',
+        'id': 'B',
+        'terms': [
+          {'id': 'term:tmux:w', 'host': null, 'name': 'w', 'command': 'vim', 'panes': 2, 'attached': 1, 'activity': 100,
+           'dead': false, 'unread': true},
+        ],
+        'hosts': [
+          {'host': null},
+          {'host': 'gpu1', 'target': 'me@gpu1', 'tmux': '/x/tmux', 'error': 'refused'},
+        ],
+      });
+      await Future<void>.delayed(Duration.zero);
+      final b = hub.termLists['B']!;
+      expect(b.terms.single.panes, 2);
+      expect((b.terms.single.unread, b.terms.single.dead, b.terms.single.activity), (true, false, 100));
+      expect((b.hosts[0].host, b.hosts[1].host, b.hosts[1].target, b.hosts[1].error), (null, 'gpu1', 'me@gpu1', 'refused'));
+      expect(done, isFalse);
+      t.emit({'event': 'terms', 'id': 'A', 'path': 'lan', 'terms': [], 'hosts': [], 'req': req});
+      final a = await f;
+      expect(done, isTrue);
+      expect((a.id, a.path), ('A', 'lan'));
+      expect(a.terms, isEmpty);
+      expect(hub.termLists['A']!.path, 'lan');
+    });
+
+    test('off and error lists parse', () async {
+      t.emit({'event': 'terms', 'id': 'A', 'off': true});
+      t.emit({'event': 'terms', 'id': 'B', 'error': 'timed out'});
+      await Future<void>.delayed(Duration.zero);
+      expect(hub.termLists['A']!.off, isTrue);
+      expect(hub.termLists['A']!.terms, isEmpty);
+      expect((hub.termLists['B']!.off, hub.termLists['B']!.error), (false, 'timed out'));
+      final f = hub.terms('A');
+      t.emit({'event': 'terms', 'id': 'A', 'off': true, 'req': t.sent.last['req']});
+      expect((await f).off, isTrue);
+    });
+
+    test('term targets are asked with the optional tmux path left out', () async {
+      final f = hub.addTermTarget('A', 'gpu1', 'me@gpu1');
+      expect(t.sent.last, {'cmd': 'add_term_target', 'id': 'A', 'name': 'gpu1', 'target': 'me@gpu1', 'req': anything});
+      t.emit({'event': 'term_targets', 'id': 'A', 'targets': [], 'req': t.sent.last['req']});
+      await f;
+      final g = hub.addTermTarget('A', 'gpu1', 'me@gpu1', tmux: '/x/tmux');
+      expect(t.sent.last['tmux'], '/x/tmux');
+      t.emit({'event': 'error', 'error': 'bad target', 'req': t.sent.last['req']});
+      await expectLater(g, throwsA(isA<HubException>()));
+      final h = hub.removeTermTarget('A', 'gpu1');
+      expect(t.sent.last, {'cmd': 'remove_term_target', 'id': 'A', 'name': 'gpu1', 'req': anything});
+      t.emit({'event': 'term_targets', 'id': 'A', 'targets': [], 'req': t.sent.last['req']});
+      await h;
+    });
   });
 }

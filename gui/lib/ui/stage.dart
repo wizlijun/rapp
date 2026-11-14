@@ -5,6 +5,7 @@ import 'package:flutter/rendering.dart';
 import '../embed/composer_bar.dart';
 import '../embed/picture.dart';
 import '../embed/session_port.dart';
+import '../hub_client.dart';
 import '../term/term_stage.dart';
 import 'controls.dart';
 import 'disconnected_stage.dart';
@@ -68,7 +69,15 @@ class Stage extends StatelessWidget {
         } else if (rs != null && state.termPort?.owns(rs.sid) == true && rec?.phase == Phase.live && rec?.lastSid == null) {
           // A terminal: no composer over it yet (G2); its box lines need whole device pixels.
           full = true;
-          body = _PixelSnap(child: TermStage(state: state, session: rs, port: state.termPort!));
+          body = _PixelSnap(child: TermStage(
+              state: state,
+              session: rs,
+              port: state.termPort!,
+              attached: [
+                for (final r in state.hub?.termLists[rec?.id]?.terms ?? const <TermRow>[])
+                  if (r.id == rec?.app) r.attached
+              ].firstOrNull,
+            ));
         } else if (rs != null && !rs.detached && win != null) {
           picture = true;
           body = Picture(state: state, session: rs, window: win);

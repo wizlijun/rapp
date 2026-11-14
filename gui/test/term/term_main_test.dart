@@ -200,6 +200,31 @@ void main() {
     expect(term.calls.where((c) => c.$1 == 'refit').single.$2['sid'], 1);
   });
 
+  testWidgets('a pane larger than the stage names the other clients from the device panel list', (tester) async {
+    t.emit({
+      'event': 'terms',
+      'id': '111',
+      'terms': [
+        {'id': app, 'host': null, 'name': 'work', 'command': 'claude', 'panes': 2, 'attached': 3, 'activity': 0,
+         'dead': false, 'unread': false},
+      ],
+      'hosts': [
+        {'host': null},
+      ],
+    });
+    await tester.pumpWidget(wrap(window()));
+    await openTerm(tester, two);
+    term.models[1]!
+      ..expect('%3')
+      ..apply(TermScreen(
+          pane: '%3', rev: 1, cols: 300, rows: 90, cx: 0, cy: 0, cursor: true, alt: false, full: true, more: false,
+          lines: [for (var i = 0; i < 90; i++) (i, 'row $i')]));
+    await settle(tester);
+    final note = tester.widget<Text>(find.byKey(const Key('term-scaled'))).data!;
+    expect(note, startsWith('另有 2 个终端也接着这个会话。'));
+    expect(note, contains('300×90'));
+  });
+
   testWidgets('a wide bar shows no remote menu button for a terminal', (tester) async {
     await tester.pumpWidget(wrap(window()));
     await openTerm(tester, two);
