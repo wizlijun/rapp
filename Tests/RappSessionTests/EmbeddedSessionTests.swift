@@ -94,6 +94,56 @@ final class EmbeddedSessionTests: XCTestCase {
         XCTAssertEqual(acks.count, 3)
     }
 
+    private let tall = CanvasRect(x: 0, y: 0, w: 64, h: 128)
+    private var tallWindow: WindowInfo { WindowInfo(id: 7, parent: 0, kind: .normal, resizable: true, focused: true, rect: tall, titleBar: 0, title: "Calc") }
+
+    /// A full frame of noise, one tile wide and two tile rows tall, cut into two slices (the first starts, the last ends).
+    private func twoSliceFull() throws -> [FramePayload] {
+        var x: UInt32 = 12345
+        let samples = (0..<(64 * 128 * 2)).map { _ -> UInt8 in x = x &* 1664525 &+ 1013904223; return UInt8(truncatingIfNeeded: x >> 24) }
+        let slices = FrameEncoder(mode: .color16).encodeSlices(samples: samples, width: 64, height: 128, limit: 200)
+        XCTAssertGreaterThanOrEqual(slices.count, 2)
+        return slices
+    }
+
+    private func surfaceEvents(_ events: [SessionEvent]) -> Int {
+        events.filter { if case .surfaces = $0 { return true } else { return false } }.count
+    }
+
+    private func ackCount(_ link: FakeLink) -> Int {
+        link.sent.filter { if case .frameAck = $0 { return true } else { return false } }.count
+    }
+
+    func testHeldFrameDrawsOnlyAtEnd() throws {
+        let link = FakeLink()
+        var events = [SessionEvent]()
+        let (_, q) = make(link) { events.append($0) }
+        let slices = try twoSliceFull()
+        q.sync {
+            link.feed(.windows([tallWindow]))
+            link.feed(.frame(region: region, try! goodFrame()))
+        }
+        XCTAssertEqual(surfaceEvents(events), 1)
+        q.sync { link.feed(.frame(region: tall, slices[0])) }
+        XCTAssertEqual(surfaceEvents(events), 1, "a held slice must not draw")
+        q.sync { for s in slices.dropFirst() { link.feed(.frame(region: tall, s)) } }
+        XCTAssertEqual(surfaceEvents(events), 2)
+        XCTAssertEqual(ackCount(link), 1 + slices.count)
+    }
+
+    func testFirstFrameDrawsPerSlice() throws {
+        let link = FakeLink()
+        var events = [SessionEvent]()
+        let (_, q) = make(link) { events.append($0) }
+        let slices = try twoSliceFull()
+        q.sync { link.feed(.windows([tallWindow])) }
+        for (i, s) in slices.enumerated() {
+            q.sync { link.feed(.frame(region: tall, s)) }
+            XCTAssertEqual(surfaceEvents(events), i + 1)
+        }
+        XCTAssertEqual(ackCount(link), slices.count)
+    }
+
     func testBadFrameIsNotAcked() throws {
         let link = FakeLink()
         let (_, q) = make(link) { _ in }
