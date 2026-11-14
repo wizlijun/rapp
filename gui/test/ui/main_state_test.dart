@@ -1990,6 +1990,341 @@ void main() {
         expect(st.hint, '已结束 Calculator');
       });
     });
+
+    group('moving to a new route', () {
+      // [sessions] live sessions on 111 (`a`, `aa`, … with sids 1, 2, …) over [on], each with a picture.
+      // Reopens (`reconnect: true`) wait in `reopens` until the test answers them.
+      void move(
+          void Function(FakeAsync a, FakeTransport t, FakeSessionPort port, MainState st, List<String> hints,
+                  List<Map<String, dynamic>> reopens)
+              body,
+          {String on = 'relay',
+          int sessions = 2}) {
+        fakeAsync((a) {
+          final t = FakeTransport();
+          final port = FakeSessionPort();
+          final st = MainState(hub: HubClient(t), data: DataDir(tmp.path), prefs: UiPrefs(), port: port);
+          final reopens = <Map<String, dynamic>>[];
+          t.onSend = (m) {
+            if (m['cmd'] != 'open') return;
+            if (m['reconnect'] == true) {
+              reopens.add(m);
+              return;
+            }
+            final n = (m['app'] as String).length;
+            t.emit({...embedOpened(n, m['req'], app: m['app'] as String), 'path': on});
+          };
+          for (var i = 1; i <= sessions; i++) {
+            st.openOrSwitch('111', 'a' * i, 'App$i');
+            a.flushMicrotasks();
+            port.emit(WindowsEvent(i, [rw(3)]));
+          }
+          final hints = <String>[];
+          st.addListener(() {
+            if (st.hint.isNotEmpty && (hints.isEmpty || hints.last != st.hint)) hints.add(st.hint);
+          });
+          st.hint = '';
+          body(a, t, port, st, hints, reopens);
+        });
+      }
+
+      void path(FakeAsync a, FakeTransport t, String p) {
+        t.emit({'event': 'path', 'id': '111', 'path': p});
+        a.flushMicrotasks();
+      }
+
+      void answer(FakeAsync a, FakeTransport t, Map<String, dynamic> open, int sid, String p) {
+        t.emit({...embedOpened(sid, open['req'], app: open['app'] as String), 'path': p});
+        a.flushMicrotasks();
+      }
+
+      void picture(FakeAsync a, FakeSessionPort port, int sid) {
+        port.emit(WindowsEvent(sid, [rw(3)]));
+        a.flushMicrotasks();
+      }
+
+      bool routeFailed(FakeTransport t) => t.sent.any((m) => m['cmd'] == 'route_failed' && m['id'] == '111');
+
+      test('a path change reopens each live session once, one at a time', () {
+        move((a, t, port, st, hints, reopens) {
+          final before = t.sent.where((m) => m['cmd'] == 'open').length;
+          path(a, t, 'lan');
+          expect(reopens.length, 1);
+          expect(reopens[0]['app'], 'a');
+          expect(reopens[0]['reconnect'], true);
+          expect(reopens[0]['embed'], true);
+          answer(a, t, reopens[0], 11, 'lan');
+          expect(reopens.length, 1, reason: 'the second waits for the first to show a picture');
+          expect(st.recordFor('111/a')!.phase, Phase.live);
+          picture(a, port, 11);
+          expect(reopens.length, 2);
+          expect(reopens[1]['app'], 'aa');
+          answer(a, t, reopens[1], 12, 'lan');
+          picture(a, port, 12);
+          expect(t.sent.where((m) => m['cmd'] == 'open').length, before + 2);
+          expect(st.recordFor('111/a')!.path, 'lan');
+          expect(st.recordFor('111/aa')!.path, 'lan');
+          expect(st.recordFor('111/a')!.sid, 11);
+          expect(st.recordFor('111/aa')!.sid, 12);
+          expect(closes(port, 1), isNotEmpty);
+          expect(closes(port, 2), isNotEmpty);
+          expect(hints, isEmpty);
+          expect(routeFailed(t), false);
+          a.elapse(const Duration(seconds: 20));
+          expect(reopens.length, 2);
+        });
+      });
+
+      test('sessions already on the new path are left alone', () {
+        move((a, t, port, st, hints, reopens) {
+          path(a, t, 'lan');
+          a.elapse(const Duration(seconds: 1));
+          expect(reopens, isEmpty);
+          expect(st.recordFor('111/a')!.sid, 1);
+        }, on: 'lan');
+      });
+
+      test('a failed reopen stays on its route and tells the hub', () {
+        move((a, t, port, st, hints, reopens) {
+          path(a, t, 'lan');
+          t.emit({'event': 'error', 'error': 'offline', 'req': reopens[0]['req']});
+          a.flushMicrotasks();
+          final r = st.recordFor('111/a')!;
+          expect(r.sid, 1);
+          expect(r.lastSid, isNull);
+          expect(r.phase, Phase.live);
+          expect(r.path, 'relay');
+          expect(st.currentRemote, isNotNull);
+          expect(st.hint, isEmpty);
+          expect(hints, isEmpty);
+          expect(routeFailed(t), true);
+          a.elapse(const Duration(seconds: 20));
+          expect(reopens.length, 1, reason: 'the rest of the round stays where it is');
+          expect(st.recordFor('111/aa')!.sid, 2);
+        });
+      });
+
+      test('a failed start of the reopen also stays on its route', () {
+        move((a, t, port, st, hints, reopens) {
+          path(a, t, 'lan');
+          port.startError = 'boom';
+          answer(a, t, reopens[0], 11, 'lan');
+          final r = st.recordFor('111/a')!;
+          expect(r.sid, 1);
+          expect(r.phase, Phase.live);
+          expect(r.path, 'relay');
+          expect(st.remote.containsKey(11), false);
+          expect(t.sent.where((m) => m['cmd'] == 'close' && m['sid'] == 11), isNotEmpty);
+          expect(hints, isEmpty);
+          expect(routeFailed(t), true);
+        });
+      });
+
+      test('a reopen that never shows a picture times out', () {
+        move((a, t, port, st, hints, reopens) {
+          path(a, t, 'lan');
+          answer(a, t, reopens[0], 11, 'lan');
+          a.elapse(const Duration(seconds: 14));
+          expect(closes(port, 11), isEmpty);
+          expect(routeFailed(t), false);
+          a.elapse(const Duration(seconds: 1));
+          expect(closes(port, 11), isNotEmpty);
+          expect(t.sent.where((m) => m['cmd'] == 'close' && m['sid'] == 11), isNotEmpty);
+          expect(closes(port, 1), isEmpty);
+          final r = st.recordFor('111/a')!;
+          expect(r.sid, 1);
+          expect(r.lastSid, isNull);
+          expect(r.phase, Phase.live);
+          expect(r.path, 'relay');
+          expect(st.remote.containsKey(11), false);
+          expect(routeFailed(t), true);
+          expect(reopens.length, 1);
+          // A late picture of the dropped session changes nothing.
+          picture(a, port, 11);
+          expect(st.recordFor('111/a')!.sid, 1);
+          // The hub's `closed` for the dropped sid is not news.
+          t.emit({'event': 'closed', 'sid': 11, 'reason': 'connection closed'});
+          a.flushMicrotasks();
+          a.elapse(const Duration(seconds: 2));
+          expect(hints, isEmpty);
+          expect(st.recordFor('111/a')!.phase, Phase.live);
+        });
+      });
+
+      test('a second path change during a move runs once more with the latest', () {
+        move((a, t, port, st, hints, reopens) {
+          path(a, t, 'lan');
+          expect(reopens.length, 1);
+          path(a, t, 'relay'); // forced onto the relay while the first one moves
+          expect(reopens.length, 1, reason: 'one round per host at a time');
+          answer(a, t, reopens[0], 11, 'lan');
+          picture(a, port, 11);
+          expect(reopens.length, 2);
+          answer(a, t, reopens[1], 12, 'relay'); // the hub's link is on the relay now: done, not failed
+          picture(a, port, 12);
+          expect(reopens.length, 3, reason: 'the next round, toward relay');
+          expect(reopens[2]['app'], 'a');
+          answer(a, t, reopens[2], 13, 'relay');
+          picture(a, port, 13);
+          a.elapse(const Duration(seconds: 20));
+          final perApp = <String, int>{};
+          for (final m in reopens) {
+            perApp[m['app'] as String] = (perApp[m['app']] ?? 0) + 1;
+          }
+          expect(perApp.values.every((n) => n <= 2), true);
+          expect(reopens.length, 3);
+          expect(st.recordFor('111/a')!.path, 'relay');
+          expect(st.recordFor('111/aa')!.path, 'relay');
+          expect(routeFailed(t), false);
+          expect(hints, isEmpty);
+        });
+      });
+
+      test('ending a session mid-move does not bring it back', () {
+        move((a, t, port, st, hints, reopens) {
+          path(a, t, 'lan');
+          st.endSession('111/aa');
+          port.emit(const ClosedEvent(2, 'stdin closed'));
+          a.flushMicrotasks();
+          answer(a, t, reopens[0], 11, 'lan');
+          picture(a, port, 11);
+          a.elapse(const Duration(seconds: 20));
+          expect(reopens.length, 1);
+          expect(st.recordFor('111/aa'), isNull);
+          expect(st.entries.map((e) => e.key), ['111/a']);
+          expect(routeFailed(t), false);
+        });
+      });
+
+      test('ending the session being moved ends both sessions and the round goes on', () {
+        move((a, t, port, st, hints, reopens) {
+          path(a, t, 'lan');
+          answer(a, t, reopens[0], 11, 'lan');
+          st.endSession('111/a');
+          a.flushMicrotasks();
+          expect(reopens.length, 2, reason: 'the next session still moves');
+          expect(reopens[1]['app'], 'aa');
+          answer(a, t, reopens[1], 12, 'lan');
+          picture(a, port, 12);
+          expect(routeFailed(t), false);
+          a.elapse(const Duration(seconds: 16)); // the runner is slow to say so: past the move's time
+          expect(closes(port, 1), isEmpty, reason: 'still ending: the old one goes with the new one');
+          expect(closes(port, 11).length, 1);
+          port.emit(const ClosedEvent(11, 'stdin closed'));
+          a.flushMicrotasks();
+          expect(st.recordFor('111/a'), isNull);
+          expect(closes(port, 1).length, 1);
+          expect(closes(port, 11).length, 1);
+          expect(st.remote.containsKey(1), false);
+          expect(st.remote.containsKey(11), false);
+          expect(routeFailed(t), false);
+          a.elapse(const Duration(seconds: 20));
+          expect(st.recordFor('111/a'), isNull);
+        });
+      });
+
+      test('ending the session while its reopen is in flight closes the new one quietly', () {
+        move((a, t, port, st, hints, reopens) {
+          path(a, t, 'lan');
+          st.endSession('111/a');
+          port.emit(const ClosedEvent(1, 'stdin closed'));
+          a.flushMicrotasks();
+          expect(st.recordFor('111/a'), isNull);
+          answer(a, t, reopens[0], 11, 'lan');
+          expect(t.sent.where((m) => m['cmd'] == 'close' && m['sid'] == 11), isNotEmpty);
+          expect(port.calls.where((c) => c.$1 == 'start' && c.$2['sid'] == 11), isEmpty);
+          expect(st.recordFor('111/a'), isNull);
+          expect(reopens.length, 2);
+          expect(routeFailed(t), false);
+        });
+      });
+
+      test('disconnecting the session being moved leaves one disconnected session', () {
+        move((a, t, port, st, hints, reopens) {
+          path(a, t, 'lan');
+          answer(a, t, reopens[0], 11, 'lan');
+          st.select('111/a');
+          st.disconnectCurrent();
+          expect(t.sent.last, {'cmd': 'close', 'sid': 1, 'reason': 'user'});
+          expect(closes(port, 11), isNotEmpty);
+          expect(st.remote.containsKey(11), false);
+          t.emit({'event': 'closed', 'sid': 1, 'reason': 'user'});
+          port.emit(const DisconnectedEvent(1, 'user'));
+          a.flushMicrotasks();
+          final r = st.recordFor('111/a')!;
+          expect(r.phase, Phase.disconnected);
+          expect(r.sid, 1);
+          expect(r.lastSid, isNull);
+          expect(routeFailed(t), false);
+          expect(reopens.length, 2, reason: 'the next session still moves');
+        });
+      });
+
+      test('forcing relay moves sessions to the relay', () {
+        move((a, t, port, st, hints, reopens) {
+          path(a, t, 'relay');
+          expect(reopens.length, 1);
+          answer(a, t, reopens[0], 11, 'relay');
+          picture(a, port, 11);
+          expect(st.recordFor('111/a')!.path, 'relay');
+          expect(reopens.length, 2);
+          t.emit({'event': 'error', 'error': 'relay unreachable: x', 'req': reopens[1]['req']});
+          a.flushMicrotasks();
+          expect(st.recordFor('111/aa')!.path, 'lan');
+          expect(st.recordFor('111/aa')!.phase, Phase.live);
+          expect(routeFailed(t), false);
+          expect(hints, isEmpty);
+        }, on: 'lan');
+      });
+
+      test('mid-move the old session keeps the stage, its windows and the keys; the focus follows the swap', () {
+        move((a, t, port, st, hints, reopens) {
+          st.select('111/a');
+          st.focusPicture(1);
+          path(a, t, 'lan');
+          answer(a, t, reopens[0], 11, 'lan');
+          expect(st.pictureFocused, 1);
+          expect(st.currentRemote!.sid, 1);
+          port.emit(WindowsEvent(1, [rw(3), rw(7)]));
+          a.flushMicrotasks();
+          expect(st.remote[1]!.windows.length, 2);
+          st.selectWindow(7);
+          expect(port.calls.last.$1, 'select_window');
+          expect(port.calls.last.$2, {'sid': 1, 'window': 7});
+          picture(a, port, 11);
+          expect(st.currentRemote!.sid, 11);
+          expect(st.pictureFocused, 11);
+          expect(port.calls.where((c) => c.$1 == 'picture_focus').last.$2, {'sid': 11});
+        });
+      });
+
+      test('the old session gone during a move that then fails: the record is down, not revived elsewhere', () {
+        move((a, t, port, st, hints, reopens) {
+          path(a, t, 'lan');
+          answer(a, t, reopens[0], 11, 'lan');
+          t.emit({'event': 'closed', 'sid': 1, 'reason': 'connection closed'});
+          port.emit(const DisconnectedEvent(1, 'connection closed'));
+          a.flushMicrotasks();
+          a.elapse(const Duration(seconds: 15));
+          final r = st.recordFor('111/a')!;
+          expect(r.phase, Phase.disconnected);
+          expect(r.sid, 1);
+          expect(r.lastSid, isNull);
+          expect(st.remote.containsKey(11), false);
+          expect(closes(port, 11), isNotEmpty);
+          expect(routeFailed(t), false, reason: 'the LAN did not fail: the session went');
+          expect(reopens.length, 2);
+        });
+      });
+
+      test('another host\'s path change moves nothing here', () {
+        move((a, t, port, st, hints, reopens) {
+          t.emit({'event': 'path', 'id': '222', 'path': 'lan'});
+          a.flushMicrotasks();
+          expect(reopens, isEmpty);
+        });
+      });
+    });
   });
 
   group('needs', () {
