@@ -4,7 +4,8 @@
 //! fingerprint never falls back. When no address answers and B has a relay and key, the host is reached
 //! through the relay: one relayed stream per request. A host forced onto the relay (`route`) is reached
 //! through the relay only, never on its LAN. One connection per host is cached, and each one cached is
-//! announced with a `path` event; a lost connection triggers one fresh connect.
+//! announced with a `path` event; a lost connection triggers one fresh connect. A cached link off the
+//! LAN is moved to the LAN when it answers (`upgrade`).
 
 use crate::hosts::Host;
 use crate::Hub;
@@ -21,8 +22,9 @@ use rapp_wire::tls::{device_client_config, ALPN_DEVICE, SNI};
 use rapp_wire::{Fp, Identity, Key};
 use serde_json::{json, Value};
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub const LAN_WAIT: Duration = Duration::from_millis(500);
 const REPLY_WAIT: Duration = Duration::from_secs(20);
@@ -53,11 +55,27 @@ impl Link {
         }
     }
 
-    fn close(&self, why: &'static [u8]) {
+    pub(crate) fn close(&self, why: &'static [u8]) {
         if let Link::Quic { conn, .. } = self {
             conn.close(0u32.into(), why);
         }
     }
+
+    /// The same link (the same connection, or both the relay).
+    fn same(&self, other: &Link) -> bool {
+        match (self, other) {
+            (Link::Quic { conn: a, .. }, Link::Quic { conn: b, .. }) => a.stable_id() == b.stable_id(),
+            (Link::Relay, Link::Relay) => true,
+            _ => false,
+        }
+    }
+}
+
+/// Whether a link on `path` may be cached for `host` as saved now: a removed host takes none, and a
+/// host forced onto the relay takes only the relay (an automatic connect in flight when the host was
+/// forced may still end on the LAN).
+fn cacheable(host: Option<&Host>, path: &str) -> bool {
+    host.is_some_and(|h| !h.forced_relay() || path == "relay")
 }
 
 /// The connection to the relay and the settings it was dialed with: a change of any redials.
@@ -243,13 +261,17 @@ impl Hub {
     }
 
     /// The relay's `connect` to `id`, within `RELAY_WAIT`: a relay that never answers must not stall
-    /// a caller (presence probes run one host after another). Remembers what the relay said.
+    /// a caller (presence probes run one host after another). Remembers what the relay said, and the
+    /// LAN addresses the host reported (for `try_lan`).
     async fn relay_connect(&self, relay: &RelayConn, id: &str) -> Result<Found> {
         let r = tokio::time::timeout(RELAY_WAIT, relay.connect_to(id))
             .await
             .unwrap_or_else(|_| Err(anyhow!("relay unreachable: timed out")));
         match &r {
-            Ok(_) => drop(self.relay_seen.lock().unwrap().insert(id.to_string(), true)),
+            Ok(found) => {
+                self.relay_seen.lock().unwrap().insert(id.to_string(), true);
+                self.relay_lan.lock().unwrap().insert(id.to_string(), found.lan.clone());
+            }
             Err(e) if is_unknown_id(e) => drop(self.relay_seen.lock().unwrap().insert(id.to_string(), false)),
             Err(_) => {}
         }
@@ -623,18 +645,64 @@ impl Hub {
         None
     }
 
+    /// Puts `link` in the cache as the way to `id` when `cacheable` and when `fits` the link cached now,
+    /// and schedules its LAN tries. False: nothing changed.
+    fn put_link(&self, id: &str, link: Link, fits: impl FnOnce(Option<&Link>) -> bool) -> bool {
+        let mut links = self.links.lock().unwrap();
+        if !cacheable(self.hosts.get(id).as_ref(), link.path()) || !fits(links.get(id)) {
+            return false;
+        }
+        self.schedule.lock().unwrap().linked(id, link.path(), Instant::now());
+        links.insert(id.to_string(), link);
+        true
+    }
+
     /// Caches `link` as the way to `id` and announces it with a `path` event. A host removed meanwhile
-    /// gets neither: the link is dropped from here (not closed; a caller may still be using it).
+    /// gets neither, nor a host forced onto the relay meanwhile a link that is not the relay: the link
+    /// is dropped from here (not closed; a caller may still be using it).
     pub(crate) async fn cache_link(&self, id: &str, link: Link) {
         let path = link.path();
-        {
-            let mut links = self.links.lock().unwrap();
-            if self.hosts.get(id).is_none() {
-                return;
-            }
-            links.insert(id.to_string(), link);
+        if self.put_link(id, link, |_| true) {
+            self.emit(json!({"event":"path","id":id,"path":path}), &None).await;
+        }
+    }
+
+    /// The LAN upgrade's swap: `new` replaces `old` (left open) only while `old` is still the cached
+    /// link and `home` still the home; then it is announced like any cached link. False: nothing changed.
+    pub(crate) async fn swap_link(&self, id: &str, old: &Link, new: Link, home: &Path) -> bool {
+        let path = new.path();
+        let fits = |cached: Option<&Link>| cached.is_some_and(|c| c.same(old)) && self.at_home().0 == home;
+        if !self.put_link(id, new, fits) {
+            return false;
         }
         self.emit(json!({"event":"path","id":id,"path":path}), &None).await;
+        true
+    }
+
+    /// `host` on its LAN: the saved addresses and those it last reported to the relay, private ones
+    /// only, tried quietly over `rapp/2`. A link only when the host answered as itself, with the
+    /// fingerprint stored for it; `None` when no private address is known or none answered so.
+    pub(crate) async fn try_lan(&self, host: &Host) -> Result<Option<Link>> {
+        let mut lan = host.lan.clone();
+        for a in self.relay_lan.lock().unwrap().get(&host.id).into_iter().flatten() {
+            if !lan.contains(a) {
+                lan.push(a.clone());
+            }
+        }
+        let private = |a: &&String| a.parse::<SocketAddr>().is_ok_and(|s| is_private(s.ip()));
+        let addrs: Vec<&String> = dial_order(&lan).into_iter().filter(private).collect();
+        if addrs.is_empty() {
+            return Ok(None);
+        }
+        let key = rapp_conn::settings::load(&self.at_home().0).key.map(Arc::new);
+        match QUIET.scope(true, self.first_v2(host, &addrs, key)).await? {
+            Some((link, accepted)) if link.path() == "lan" && host.fp == Some(accepted.fp) => Ok(Some(link)),
+            Some((link, _)) => {
+                link.close(b"not this host");
+                Ok(None)
+            }
+            None => Ok(None),
+        }
     }
 
     /// Takes the link to `id` out of the cache without closing it: sessions on it keep running (quinn
@@ -643,11 +711,14 @@ impl Hub {
         self.links.lock().unwrap().remove(id);
     }
 
-    /// Tries `id`'s LAN at once (filled in by the LAN upgrade).
-    pub(crate) fn upgrade_now(&self, _id: &str) {}
+    /// Tries `id`'s LAN at once, even when a failed move held it off.
+    pub(crate) fn upgrade_now(&self, id: &str) {
+        self.schedule.lock().unwrap().now_for(id, Instant::now());
+    }
 
     pub fn forget(&self, id: &str) {
         self.probe_halt.lock().unwrap().remove(id);
+        self.schedule.lock().unwrap().forget(id);
         if let Some(link) = self.links.lock().unwrap().remove(id) {
             link.close(b"forgotten");
         }
@@ -737,13 +808,27 @@ fn finish((s, r): (Pipe, Value), path: &'static str) -> Result<(Pipe, Value, &'s
 
 #[cfg(test)]
 mod tests {
-    use super::{dial_order, is_refusal, probe_asks_relay, unreached};
+    use super::{cacheable, dial_order, is_refusal, probe_asks_relay, unreached};
     use crate::hosts::Host;
     use anyhow::anyhow;
 
     fn host(password: &str, lan: &[&str]) -> Host {
         let lan = lan.iter().map(|a| a.to_string()).collect();
         Host { id: "100000001".into(), name: "n".into(), password: password.into(), lan, fp: None, route: None }
+    }
+
+    /// An automatic connect that ends after the host was forced (or removed) is not cached.
+    #[test]
+    fn forced_hosts_cache_only_the_relay() {
+        let auto = host("", &["192.168.1.5:22028"]);
+        let forced = Host { route: Some("relay".into()), ..auto.clone() };
+        for path in ["lan", "direct", "relay"] {
+            assert!(cacheable(Some(&auto), path), "{path}");
+            assert!(!cacheable(None, path), "{path}");
+        }
+        assert!(cacheable(Some(&forced), "relay"));
+        assert!(!cacheable(Some(&forced), "lan"));
+        assert!(!cacheable(Some(&forced), "direct"));
     }
 
     #[test]

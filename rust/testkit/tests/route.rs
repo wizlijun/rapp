@@ -1,5 +1,6 @@
 //! A host's `route` (relay device plan 2b, Task 1): `set_route relay` keeps the host on the relay
 //! even with its LAN working, and every link the hub caches is announced with a `path` event.
+//! The LAN upgrade (Task 2): a link on the relay moves to the LAN once the LAN answers as this host.
 
 mod common;
 
@@ -165,5 +166,151 @@ async fn probes_of_a_forced_unknown_host_ask_the_relay_once() {
     // A known host is still reached: the hub was not locked out.
     hub.send(json!({"cmd":"add_host","id":a.id,"req":3})).await;
     assert_eq!(reply(&mut hub).await["event"], "host_added");
+    hub.finish().await;
+}
+
+// ---- the LAN upgrade ----
+
+/// Upgrade times short enough for tests.
+fn quick() -> rapp_hub::UpgradeTimes {
+    let ms = Duration::from_millis;
+    rapp_hub::UpgradeTimes { first: ms(200), every: ms(300), hold: ms(2000), tick: ms(50) }
+}
+
+/// A on the relay registering only `gate` as its LAN address (the gate forwards to A); a hub on the
+/// same relay with `quick` upgrades, and A added by bare ID while the gate is as `open` says.
+async fn behind_gate(open: bool) -> (RelayRig, TestService, LanGate, tempfile::TempDir, Hub) {
+    let rig = RelayRig::start().await;
+    let gate = LanGate::start().await;
+    let a = a_on_relay(&rig, Some(vec![gate.addr()])).await;
+    gate.forward_to(a_addr(&a.svc));
+    if open {
+        gate.open();
+    }
+    let home = tempfile::tempdir().unwrap();
+    hub_relay(home.path(), &rig.addr, &rig.key);
+    let mut hub = Hub::start_with_upgrade(home.path(), a.bins.path(), quick());
+    hub.send(json!({"cmd":"add_host","id":a.id})).await;
+    let r = reply(&mut hub).await;
+    assert_eq!(r["event"], "host_added", "{r}");
+    (rig, a, gate, home, hub)
+}
+
+/// `apps` of `a` goes by `path`.
+async fn apps_via(hub: &mut Hub, a: &TestService, path: &str) {
+    let r = hub.call(json!({"cmd":"apps","id":a.id})).await;
+    assert_eq!((&r["event"], &r["path"]), (&json!("apps"), &json!(path)), "{r}");
+}
+
+/// The `path` events of `id` in the next `wait` (events already read are dropped first).
+async fn paths_within(hub: &mut Hub, id: &str, wait: Duration) -> Vec<Value> {
+    hub.take_paths();
+    tokio::time::sleep(wait).await;
+    // Every event written before this reply is read (and `path` ones set aside) on the way to it.
+    assert_eq!(hub.call(json!({"cmd":"hosts"})).await["event"], "hosts");
+    hub.take_paths().into_iter().filter(|p| p["id"] == id).collect()
+}
+
+const WINDOW: Duration = Duration::from_millis(1500);
+
+#[tokio::test]
+async fn relay_link_moves_to_lan_when_the_lan_opens() {
+    let (_rig, a, gate, home, mut hub) = behind_gate(false).await;
+    apps_via(&mut hub, &a, "relay").await;
+    hub.wait_path(&a.id, "relay").await;
+    let first = hub.call(json!({"cmd":"open","id":a.id,"app":"com.example.echo"})).await;
+    assert_eq!((&first["event"], &first["path"]), (&json!("opened"), &json!("relay")), "{first}");
+    gate.open();
+    hub.wait_path(&a.id, "lan").await;
+    let said = format!("{}: path relay→lan", a.id);
+    wait_log_in(home.path(), "hub.log", "log", |v| v["msg"] == said.as_str()).await;
+    // Another app: a second session of the same app would take the first over on A.
+    let second = hub.call(json!({"cmd":"open","id":a.id,"app":"com.apple.Safari"})).await;
+    assert_eq!((&second["event"], &second["path"]), (&json!("opened"), &json!("lan")), "{second}");
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    // The session on the relay lived on after its link left the cache.
+    for s in [&first, &second] {
+        hub.send(json!({"cmd":"close","sid":s["sid"]})).await;
+        assert_eq!(hub.next().await, json!({"event":"closed","sid":s["sid"],"reason":"echo ok"}));
+    }
+    hub.finish().await;
+}
+
+#[tokio::test]
+async fn another_device_on_the_lan_address_is_not_taken() {
+    let (rig, a, gate, _home, mut hub) = behind_gate(false).await;
+    // Another device of the same relay (same key) answers on A's LAN address.
+    let other = a_on_relay(&rig, None).await;
+    gate.forward_to(a_addr(&other.svc));
+    apps_via(&mut hub, &a, "relay").await;
+    gate.open();
+    let paths = paths_within(&mut hub, &a.id, WINDOW).await;
+    assert!(paths.iter().all(|p| p["path"] != "lan"), "{paths:?}");
+    apps_via(&mut hub, &a, "relay").await;
+    hub.finish().await;
+}
+
+#[tokio::test]
+async fn route_failed_holds_the_host() {
+    let (_rig, a, gate, _home, mut hub) = behind_gate(false).await;
+    apps_via(&mut hub, &a, "relay").await;
+    hub.send(json!({"cmd":"route_failed","id":a.id})).await;
+    gate.open();
+    let paths = paths_within(&mut hub, &a.id, WINDOW).await;
+    assert!(paths.iter().all(|p| p["path"] != "lan"), "moved while held: {paths:?}");
+    hub.wait_path(&a.id, "lan").await;
+    hub.finish().await;
+}
+
+#[tokio::test]
+async fn forced_host_is_never_tried_and_auto_tries_at_once() {
+    let (_rig, a, _gate, _home, mut hub) = behind_gate(true).await;
+    force(&mut hub, &a).await;
+    let paths = paths_within(&mut hub, &a.id, Duration::from_secs(1)).await;
+    assert!(paths.is_empty(), "{paths:?}");
+    let r = set_route(&mut hub, &a.id, "auto").await;
+    assert_eq!(r["event"], "hosts", "{r}");
+    tokio::time::timeout(Duration::from_secs(1), hub.wait_path(&a.id, "lan")).await.expect("moved at once");
+    hub.finish().await;
+}
+
+#[tokio::test]
+async fn lan_from_the_start_never_touches_the_relay() {
+    let (rig, a, _gate, _home, mut hub) = behind_gate(true).await;
+    apps_via(&mut hub, &a, "lan").await;
+    hub.wait_path(&a.id, "lan").await;
+    let s = hub.call(json!({"cmd":"open","id":a.id,"app":"com.example.echo"})).await;
+    assert_eq!((&s["event"], &s["path"]), (&json!("opened"), &json!("lan")), "{s}");
+    assert_eq!(rig.streams(), 0);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    hub.send(json!({"cmd":"close","sid":s["sid"]})).await;
+    assert_eq!(hub.next().await, json!({"event":"closed","sid":s["sid"],"reason":"echo ok"}));
+    hub.finish().await;
+}
+
+#[tokio::test]
+async fn a_removed_host_is_not_moved() {
+    let (_rig, a, gate, _home, mut hub) = behind_gate(false).await;
+    apps_via(&mut hub, &a, "relay").await;
+    assert_eq!(hub.call(json!({"cmd":"remove_host","id":a.id})).await["event"], "hosts");
+    gate.open();
+    let paths = paths_within(&mut hub, &a.id, WINDOW).await;
+    assert!(paths.is_empty(), "{paths:?}");
+    // Added again, it connects as any new link does: LAN first.
+    assert_eq!(hub.call(json!({"cmd":"add_host","id":a.id})).await["event"], "host_added");
+    apps_via(&mut hub, &a, "lan").await;
+    hub.finish().await;
+}
+
+#[tokio::test]
+async fn set_home_drops_pending_moves() {
+    let (_rig, a, gate, _home, mut hub) = behind_gate(false).await;
+    apps_via(&mut hub, &a, "relay").await;
+    let other = tempfile::tempdir().unwrap();
+    let r = hub.call(json!({"cmd":"set_home","dir":other.path()})).await;
+    assert_eq!(r["event"], "home_set", "{r}");
+    gate.open();
+    let paths = paths_within(&mut hub, &a.id, WINDOW).await;
+    assert!(paths.is_empty(), "{paths:?}");
     hub.finish().await;
 }

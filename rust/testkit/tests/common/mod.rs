@@ -254,15 +254,20 @@ pub struct Hub {
 
 impl Hub {
     pub fn start(home: &Path, bins: &Path) -> Hub {
-        Hub::start_with(home, bins, None)
+        Hub::start_with(home, bins, None, Default::default())
     }
 
     /// Like `start`, with the presence probe running every `every`.
     pub fn start_with_presence(home: &Path, bins: &Path, every: Duration) -> Hub {
-        Hub::start_with(home, bins, Some(every))
+        Hub::start_with(home, bins, Some(every), Default::default())
     }
 
-    fn start_with(home: &Path, bins: &Path, every: Option<Duration>) -> Hub {
+    /// Like `start`, with the LAN upgrade on `times` instead of the real ones.
+    pub fn start_with_upgrade(home: &Path, bins: &Path, times: rapp_hub::UpgradeTimes) -> Hub {
+        Hub::start_with(home, bins, None, times)
+    }
+
+    fn start_with(home: &Path, bins: &Path, every: Option<Duration>, upgrade: rapp_hub::UpgradeTimes) -> Hub {
         let (cmd_r, cmd_w) = tokio::io::duplex(1 << 16);
         let (out_r, out_w) = tokio::io::duplex(1 << 16);
         let opts = rapp_hub::Opts {
@@ -270,6 +275,7 @@ impl Hub {
             bin_dir: Some(bins.to_path_buf()),
             log: rapp_net::log::Log::file(&home.join("logs"), "hub.log"),
             presence_every: every,
+            upgrade,
         };
         let task = tokio::spawn(rapp_hub::run(opts, cmd_r, out_w));
         Hub { w: cmd_w, lines: BufReader::new(out_r).lines(), task, home: home.to_path_buf(), paths: Vec::new() }
@@ -516,4 +522,84 @@ pub fn relay_connects(rig: &RelayRig, result: &str) -> usize {
     rig.relay.as_ref().expect("relay running").audit().flush();
     let lines = rapp_relay::audit::read(rig.data.path(), None, None, None).unwrap_or_default();
     lines.iter().filter(|v| v["ev"] == "connect" && v["result"] == result).count()
+}
+
+// ---- a LAN that can be cut ----
+
+/// A UDP forwarder on `127.0.0.1:0` standing in for a host's LAN address: while open, what reaches it
+/// goes on to the target (one upstream socket per sender, so replies find their way back); while
+/// closed (the start), everything is dropped.
+pub struct LanGate {
+    addr: SocketAddr,
+    open: Arc<std::sync::atomic::AtomicBool>,
+    to: Arc<std::sync::Mutex<Option<SocketAddr>>>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl LanGate {
+    pub async fn start() -> LanGate {
+        let front = Arc::new(tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap());
+        let addr = front.local_addr().unwrap();
+        let (open, to) = (Arc::new(std::sync::atomic::AtomicBool::new(false)), Arc::new(std::sync::Mutex::new(None)));
+        let task = tokio::spawn(gate_forward(front, open.clone(), to.clone()));
+        LanGate { addr, open, to, task }
+    }
+
+    pub fn addr(&self) -> String {
+        self.addr.to_string()
+    }
+
+    /// Where packets go (for senders seen from now on).
+    pub fn forward_to(&self, to: SocketAddr) {
+        *self.to.lock().unwrap() = Some(to);
+    }
+
+    pub fn open(&self) {
+        self.open.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub fn close(&self) {
+        self.open.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+impl Drop for LanGate {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+async fn gate_forward(
+    front: Arc<tokio::net::UdpSocket>,
+    open: Arc<std::sync::atomic::AtomicBool>,
+    to: Arc<std::sync::Mutex<Option<SocketAddr>>>,
+) {
+    let is_open = |o: &std::sync::atomic::AtomicBool| o.load(std::sync::atomic::Ordering::SeqCst);
+    let mut ups: std::collections::HashMap<SocketAddr, Arc<tokio::net::UdpSocket>> = Default::default();
+    // The reply pumps end with this task (dropping the set aborts them).
+    let mut pumps = tokio::task::JoinSet::new();
+    let mut buf = vec![0u8; 65536];
+    while let Ok((n, from)) = front.recv_from(&mut buf).await {
+        let target = *to.lock().unwrap();
+        let Some(target) = target.filter(|_| is_open(&open)) else { continue };
+        let up = match ups.get(&from) {
+            Some(up) => up.clone(),
+            None => {
+                let up = Arc::new(tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap());
+                up.connect(target).await.unwrap();
+                let (back, front, open) = (up.clone(), front.clone(), open.clone());
+                pumps.spawn(async move {
+                    let mut buf = vec![0u8; 65536];
+                    while let Ok(n) = back.recv(&mut buf).await {
+                        if is_open(&open) {
+                            let _ = front.send_to(&buf[..n], from).await;
+                        }
+                    }
+                });
+                ups.insert(from, up.clone());
+                up
+            }
+        };
+        let _ = up.send(&buf[..n]).await;
+    }
 }
