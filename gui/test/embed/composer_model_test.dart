@@ -373,4 +373,74 @@ void main() {
     m.done(1, null);
     expect(allSent, 1);
   });
+
+  test('submit reports the piece before the draft clears', () async {
+    final log = <String>[];
+    m.onDraftChanged = (t) => log.add('draft:$t');
+    m.onSubmitted = (o) => log.add('submitted:${o.text}:${m.draft}:${o.at == now}');
+    m.setDraft('hello');
+    log.clear();
+    expect(await m.submit(), isA<SubmitPieces>());
+    expect(log, ['submitted:hello:hello:true', 'draft:']);
+  });
+
+  test('done reports the round once with what went', () async {
+    final rounds = <String>[];
+    m.onFinished = (o, {required all}) => rounds.add('${o.sent}:$all');
+    ed.value = 'hi';
+    m.apply(const PasteResult(blocks: [BlockChip(1, 'a.png')]));
+    await m.submit();
+    m.done(1, 'x');
+    expect(rounds, ['1:false']);
+  });
+
+  test('retry reports again with the same piece', () async {
+    final seen = <Outgoing>[];
+    m.onSubmitted = seen.add;
+    ed.value = 'hi';
+    m.apply(const PasteResult(blocks: [BlockChip(1, 'a.png')]));
+    await m.submit();
+    m.done(1, 'x');
+    now = now.add(const Duration(seconds: 5));
+    m.retry(m.failed.single);
+    expect(seen.length, 2);
+    expect(identical(seen[0], seen[1]), isTrue);
+    expect(seen[1].at, now);
+  });
+
+  test('a late take that goes back reports nothing', () async {
+    var submitted = 0;
+    m.onSubmitted = (_) => submitted++;
+    final slow = _SlowTakeEditor();
+    m.attach(slow);
+    slow.value = 'y';
+    final f = m.submit();
+    m.setSending(true);
+    slow.gate!.complete();
+    expect(await f, isA<SubmitNothing>());
+    expect(submitted, 0);
+  });
+
+  test('onDraftChanged fires on idle copy, detach and setDraft, not for the same text', () {
+    fakeAsync((fa) {
+      final seen = <String>[];
+      m.onDraftChanged = seen.add;
+      ed.value = 'a';
+      m.editorChanged();
+      fa.elapse(const Duration(seconds: 2));
+      fa.flushMicrotasks();
+      expect(seen, ['a']);
+      m.editorChanged();
+      fa.elapse(const Duration(seconds: 2));
+      fa.flushMicrotasks();
+      expect(seen, ['a']);
+      m.setDraft('b');
+      m.setDraft('b');
+      expect(seen, ['a', 'b']);
+      ed.value = 'c';
+      m.detach(ed);
+      fa.flushMicrotasks();
+      expect(seen, ['a', 'b', 'c']);
+    });
+  });
 }
