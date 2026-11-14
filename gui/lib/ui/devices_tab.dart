@@ -62,7 +62,8 @@ class DevicesTab extends StatefulWidget {
 class _DevicesTabState extends State<DevicesTab> {
   final _bundle = TextEditingController();
   final _requested = <String>{};
-  String? _removeError;
+  // Per device: a failed SSH host remove, with the terminal list it was shown on; a new list clears it.
+  final _removeErrors = <String, ({String text, TermList? list})>{};
 
   MainState get state => widget.state;
 
@@ -300,6 +301,9 @@ class _DevicesTabState extends State<DevicesTab> {
   List<Widget> _termGroup(BuildContext context, String id) {
     final t = RappTokens.of(context);
     final list = state.hub?.termLists[id];
+    final failed = _removeErrors[id];
+    if (failed != null && !identical(failed.list, list)) _removeErrors.remove(id);
+    final removeError = _removeErrors[id]?.text;
     if (list == null || list.off) return const [];
     if (list.error != null) {
       return [Padding(padding: const EdgeInsets.only(top: 8), child: Text('终端：${list.error}', style: TextStyle(color: t.accent)))];
@@ -344,10 +348,10 @@ class _DevicesTabState extends State<DevicesTab> {
               ],
             ),
           ),
-      if (_removeError != null)
+      if (removeError != null)
         Padding(
           padding: const EdgeInsets.only(bottom: 6),
-          child: Text(_removeError!, key: const Key('remove-host-error'), style: TextStyle(color: t.accent)),
+          child: Text(removeError, key: const Key('remove-host-error'), style: TextStyle(color: t.accent)),
         ),
       Align(
         alignment: Alignment.centerLeft,
@@ -364,11 +368,11 @@ class _DevicesTabState extends State<DevicesTab> {
     final hub = state.hub!;
     try {
       await hub.removeTermTarget(id, name);
-      if (mounted) setState(() => _removeError = null);
+      if (mounted) setState(() => _removeErrors.remove(id));
       await hub.terms(id);
     } catch (e) {
       // A failed request's error goes to its future only (not `lastError`), so it is shown here, as the hub said it.
-      if (mounted) setState(() => _removeError = '移除失败：$e');
+      if (mounted) setState(() => _removeErrors[id] = (text: '移除失败：$e', list: hub.termLists[id]));
     }
   }
 

@@ -687,4 +687,34 @@ void main() {
     expect(find.text('移除失败：no such host: gpu1'), findsOneWidget);
     expect(find.byKey(const Key('remove-host-gpu1')), findsOneWidget);
   });
+
+  testWidgets('a failed remove shows on its own device only, until its list comes again', (tester) async {
+    removeTargetError = 'no such host: gpu1';
+    termHosts = [
+      {'host': null},
+      {'host': 'gpu1', 'target': 'me@gpu1'},
+    ];
+    await pumpTab(tester);
+    await selectMini(tester);
+    await emitTerms(tester, []);
+    await tester.ensureVisible(find.byKey(const Key('remove-host-gpu1')));
+    await tester.tap(find.byKey(const Key('remove-host-gpu1')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('remove-host-error')), findsOneWidget);
+    // Another device's list coming again leaves it; this device's own clears it.
+    t.emit({'event': 'terms', 'id': '222', 'path': 'lan', 'terms': [], 'hosts': termHosts});
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('remove-host-error')), findsOneWidget);
+    await emitTerms(tester, []);
+    expect(find.byKey(const Key('remove-host-error')), findsNothing);
+
+    await tester.ensureVisible(find.byKey(const Key('remove-host-gpu1')));
+    await tester.tap(find.byKey(const Key('remove-host-gpu1')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('remove-host-error')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('device-222')));
+    await tester.pumpAndSettle();
+    expect(find.text('终端'), findsOneWidget);
+    expect(find.byKey(const Key('remove-host-error')), findsNothing);
+  });
 }

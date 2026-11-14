@@ -373,8 +373,9 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     switch (_clicks) {
       case 1:
         final a = _anchor;
-        if (keys.isShiftPressed && a != null && _sel != null) {
-          _setSel(select(a, p, m.lineAt, block: _sel!.block));
+        // Shift extends from the anchor: the selection's, or a plain click's that has not selected yet.
+        if (keys.isShiftPressed && a != null) {
+          _setSel(select(a, p, m.lineAt, block: _sel?.block ?? _dragBlock));
         } else {
           _anchor = p;
           _setSel(null);

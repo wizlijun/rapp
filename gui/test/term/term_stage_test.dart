@@ -215,6 +215,25 @@ void main() {
     await t.pump(const Duration(seconds: 2));
   });
 
+  testWidgets('shift+click after a plain click selects from the plain click', (t) async {
+    model.apply(scr(['abcdefghij'], cols: 10));
+    await show(t);
+    Future<void> click(int x, Duration at) async {
+      final p = TestPointer(3, PointerDeviceKind.mouse);
+      await t.sendEventToBinding(p.down(cell(t, 0, x), timeStamp: at));
+      await t.sendEventToBinding(p.up(timeStamp: at + const Duration(milliseconds: 20)));
+      await t.pump();
+    }
+
+    await click(2, const Duration(seconds: 10));
+    expect(find.byKey(const Key('term-copy')), findsNothing);
+    await t.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await click(5, const Duration(seconds: 12));
+    await t.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    expect(find.text('选中了 4 个字 · 复制到本机'), findsOneWidget);
+    await t.pump(const Duration(seconds: 2));
+  });
+
   testWidgets('a selection survives a refresh that does not touch its rows', (t) async {
     model.apply(scr(['aaaa', 'bbbb', 'cccc', 'dddd']));
     await show(t);
