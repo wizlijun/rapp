@@ -40,6 +40,7 @@
       "stream": {"mode": "color16", "density": "adaptive", "fps": 15},
       "afterSend": "none",
       "composer": true,
+      "recordInput": true,
       "windows": [
         {"kind": "floating", "title": "*下载*", "action": "hide"},
         {"kind": "dialog", "action": "noComposer"}
@@ -56,6 +57,7 @@
 | `stream.mode` / `density` / `fps` | 和串流菜单里的选项一一对应（`StreamChoice` 的取值） | 通用默认 |
 | `afterSend` | `none`：只贴，不按回车（现在的做法）；`return`：输入区发完最后一块后补一个回车 | `none` |
 | `composer` | `false`：这个 app 的所有窗口都不显示「输入」按钮和输入区 | `true` |
+| `recordInput` | `false`：这个 app 的会话里，写作面板发出去的话不进输入记录（密码管理器、网银这类）；草稿照样在本机保存和恢复（《输入记录》§8） | `true` |
 | `windows[]` | 窗口规则，按顺序比，**第一条对上的生效** | 空 |
 | `tested` | `false`：界面上标「未实测」（内置配置都写 `false`，D8）。编写规则见《app 配置编写规范》（`2026-11-13-rapp-app-profile-authoring.md`） | `true` |
 

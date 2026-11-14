@@ -33,6 +33,7 @@
   devices/<设备id>/    每台设备一份，只由这台设备写（进 git）
     device.json          {"id","name","os","version"}：给别的设备和 agent 看这台是什么。没有口令和地址
     gui.json             这台的界面偏好（原 gui.json）
+    inputs/<日期>.jsonl  写作面板发出去的话，一天一个文件、只在末尾加行（进 git；格式见《输入记录》§4、§5.1）
   agent/               agent 上下文（进 git）。rapp 只建目录和 agent/README.md（指向配置规范），里面的内容归用户和 agent
   clipboard/           钉住的文字条目，一条一个 <时间>-<短标题>.md（进 git）
   files/               二进制，不进 git
@@ -40,6 +41,7 @@
     clipboard/           钉住的图片和文件
   local/               本机私有，不进 git，0700
     service.json  hosts.json  update.json  update-applied.json  sync.json  permission-guide-shown
+    drafts/<会话的键>.json  没发出去的草稿，0600（《输入记录》§5.2）
 ```
 
 - `sync.json`（程序自管）：上次提交、上次同步的时间，最近一次同步出错的原因（不含远端地址里的口令）。

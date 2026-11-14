@@ -74,6 +74,7 @@
 |---|---|---|
 | `afterSend` | 一律 `"none"` | 用户明确说「发完要回车」才写 `"return"` |
 | `composer` | 一律 `true` | 用户明确说「这个 app 不要输入区」才写 `false` |
+| `recordInput` | 不写（默认 `true`） | 密码管理器、网银这类用户点名不想留记录的 app 才写 `false`（《输入记录》§8） |
 | `windows` | 一律空（设计 D8：隐藏规则猜错了会让人找不到窗口） | 只按用户点名的窗口写，见下 |
 | `tested` | 一律 `false`（界面上显示「未实测」） | 不写 |
 
@@ -96,6 +97,7 @@
   "stream": {"mode": "duogray", "density": "adaptive", "fps": 15},
   "afterSend": "none",
   "composer": true,
+  "recordInput": true,
   "windows": [],
   "tested": false
 }
@@ -127,7 +129,7 @@
 - [ ] `ids` 至少一个，每个都已核对或标了「待核对」；没有编出来的
 - [ ] `ids` 和 `app_profiles.json`、`apps.json` 里已有的配置不重复（重复时改已有的那份，不新加）
 - [ ] `stream` 三个值都在 §3 的取值里；`fps` 不是 1
-- [ ] 内置配置：`afterSend` 是 `none`、`composer` 是 `true`、`windows` 是空、`tested` 是 `false`
+- [ ] 内置配置：`afterSend` 是 `none`、`composer` 是 `true`、`recordInput` 没写或是 `true`、`windows` 是空、`tested` 是 `false`
 - [ ] 窗口规则（如有）：具体的在前；动态部分换成了 `*`；藏 `dialog`/`sheet` 已提醒
 - [ ] JSON 能解析（`python3 -m json.tool` 过一遍整个文件）
 - [ ] 内置配置：设计 §9 的表里补了一行（组、名字、标识、画面、为什么这么配）
