@@ -6,6 +6,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../history/input_history.dart';
 import '../ui/controls.dart';
 import '../ui/main_state.dart';
 import '../ui/tokens.dart';
@@ -66,11 +67,12 @@ class _ComposerPanelState extends State<ComposerPanel> {
     _m = _s.composer;
     _ed = (widget.editor ?? FlutterEditor.new)();
     _ed.handlers = EditorHandlers(
-      onChanged: _m.editorChanged,
+      onChanged: _changed,
       onEnter: _submit,
       onEscape: _m.collapse, // W6: the text stays
       onPaste: _paste,
       onFocus: _focused,
+      onArrow: _arrow,
     );
     _m.attach(_ed);
     _focusSeen = _m.focusTick;
@@ -97,6 +99,50 @@ class _ComposerPanelState extends State<ComposerPanel> {
     final ed = _ed;
     _m.detach(ed).whenComplete(ed.dispose);
     super.dispose();
+  }
+
+  /// R2: which of [_recall] the editor shows untouched; null while not browsing.
+  int? _browsing;
+
+  /// Bumped at each text put in: a read started before it says nothing of the text now.
+  int _shown = 0;
+
+  List<InputEntry> get _recall => widget.state.recallOf(_s);
+
+  void _changed() {
+    _m.editorChanged();
+    if (_browsing == null) return;
+    // The echo of what was put in, or a change by hand: that ends browsing.
+    final list = _recall, i = _browsing!, at = _shown;
+    final want = i < list.length ? list[i].text : null;
+    _ed.read().then((t) {
+      if (_browsing != null && _shown == at && t != want) _browsing = null;
+    }, onError: (Object _) {});
+  }
+
+  /// ↑ on an empty editor puts in the last record; while it shows one untouched, ↑ goes to the
+  /// one before (staying at the oldest), ↓ back, and ↓ from the last one empties the editor.
+  bool _arrow(bool up) {
+    final list = _recall;
+    final i = _browsing;
+    if (i == null) {
+      if (!up || list.isEmpty || !_ed.isEmpty) return false;
+      _show(0, list);
+    } else if (list.isEmpty || (!up && i == 0)) {
+      _browsing = null;
+      _shown++;
+      _ed.setText('');
+    } else {
+      _show(math.min(up ? i + 1 : i - 1, list.length - 1), list);
+    }
+    return true;
+  }
+
+  void _show(int i, List<InputEntry> list) {
+    if (_browsing == i) return; // the oldest: up stays
+    _browsing = i;
+    _shown++;
+    _ed.setText(list[i].text);
   }
 
   void _focused(bool on) {
@@ -282,7 +328,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
       key: const Key('composer-panel'),
       onPointerDown: (_) => widget.state.blurPicture(),
       child: ListenableBuilder(
-        listenable: Listenable.merge([_s, _m]),
+        listenable: Listenable.merge([_s, _m, widget.state.history]),
         builder: (context, _) {
           final t = RappTokens.of(context);
           final style = EditorStyle(
@@ -348,7 +394,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
                                 builder: (context, c) => _ed.view(
                                   context,
                                   style: style,
-                                  hint: '写给 ${_s.appName}',
+                                  hint: _recall.isEmpty ? '写给 ${_s.appName}' : '写给 ${_s.appName} · ↑ 上一条',
                                   maxHeight: math.max(_line, c.maxHeight),
                                 ),
                               ),

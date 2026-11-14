@@ -11,12 +11,20 @@ import '../ui/helpers.dart';
 class _Log {
   int enter = 0, escape = 0, paste = 0, changed = 0;
   final focus = <bool>[];
+
+  /// Each onArrow's `up`; [takeArrows] is what it answers.
+  final arrows = <bool>[];
+  bool takeArrows = true;
   EditorHandlers get handlers => EditorHandlers(
         onChanged: () => changed++,
         onEnter: () => enter++,
         onEscape: () => escape++,
         onPaste: () => paste++,
         onFocus: focus.add,
+        onArrow: (up) {
+          arrows.add(up);
+          return takeArrows;
+        },
       );
 }
 
@@ -236,5 +244,78 @@ void main() {
     expect(log.changed, 1);
     expect(await ed.take(), 'a');
     expect(await ed.read(), '');
+  });
+
+  testWidgets('FlutterEditor reports up only on the first line and never while composing', (tester) async {
+    await tester.pumpWidget(_host(ed));
+    ed.focus();
+    await tester.pump();
+    TextEditingValue at(String text, int caret) =>
+        TextEditingValue(text: text, selection: TextSelection.collapsed(offset: caret));
+    int caret() =>
+        tester.widget<TextField>(find.byKey(const Key('composer-field'))).controller!.selection.baseOffset;
+
+    // Empty: one line, both the first and the last.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    expect(log.arrows, [true, false]);
+
+    // Caret on the second of two lines: up moves the caret, down is reported.
+    log.arrows.clear();
+    log.takeArrows = false;
+    tester.testTextInput.updateEditingValue(at('one\ntwo', 6));
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    expect(log.arrows, [false]);
+    expect(caret(), 7); // not taken: the field moves the caret to the end itself
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pump();
+    expect(log.arrows, [false]); // not on the first line: not reported
+    expect(caret(), lessThan(4)); // the caret went up a line
+
+    // On the first line now: reported; answered false, the field moves the caret itself.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pump();
+    expect(log.arrows, [false, true]);
+    expect(caret(), 0);
+
+    // Taken: the caret stays.
+    log.arrows.clear();
+    log.takeArrows = true;
+    tester.testTextInput.updateEditingValue(at('one\ntwo', 2));
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.pump();
+    expect(log.arrows, [true]);
+    expect(caret(), 2);
+    // Down from the first of two lines: not the last line, not reported.
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    expect(log.arrows, [true]);
+
+    // Shift+arrow selects: never reported.
+    log.arrows.clear();
+    tester.testTextInput.updateEditingValue(at('one', 3));
+    await tester.pump();
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    expect(log.arrows, isEmpty);
+
+    // Composing: the arrows are the input method's.
+    tester.testTextInput.updateEditingValue(const TextEditingValue(
+        text: 'ni', selection: TextSelection.collapsed(offset: 2), composing: TextRange(start: 0, end: 2)));
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowUp);
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+    expect(log.arrows, isEmpty);
+  });
+
+  testWidgets('isEmpty follows the text', (tester) async {
+    await tester.pumpWidget(_host(ed));
+    expect(ed.isEmpty, isTrue);
+    ed.setText('a');
+    expect(ed.isEmpty, isFalse);
+    expect(await ed.take(), 'a');
+    expect(ed.isEmpty, isTrue);
   });
 }

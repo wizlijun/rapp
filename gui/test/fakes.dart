@@ -49,6 +49,9 @@ class FakeEditor implements ComposerEditor {
   Future<String> read() async => value;
 
   @override
+  bool get isEmpty => value.isEmpty;
+
+  @override
   Future<String> take() async {
     final v = value;
     value = '';

@@ -3847,6 +3847,35 @@ void main() {
       expect(r['from'], {'id': 'dev1', 'name': 'bruce-tablet'});
     });
 
+    test('a written record is in its session\'s recall at once (R2)', () async {
+      final (st, _) = await start();
+      final rs = st.currentRemote!;
+      expect(st.recallOf(rs), isEmpty);
+      rs.composer.setDraft('上一条');
+      await rs.composer.submit();
+      rs.composer.done(1, null);
+      await until(() => st.recallOf(rs).isNotEmpty);
+      expect(st.recallOf(rs).map((e) => e.text), ['上一条']);
+      expect(st.recallOf(rs).single.mine, isTrue);
+      expect(st.history.forSession(key).single.session, key);
+    });
+
+    test('the records on disk are read at start, from every device', () async {
+      final f = File('${d.inputsDir('dev2')}/2026-11-14.jsonl');
+      f.parent.createSync(recursive: true);
+      f.writeAsStringSync('${jsonEncode({
+        'v': 1, 'id': '01A', 'ts': '2026-11-14T10:00:00+09:00', 'kind': 'draft',
+        'from': {'id': 'dev2', 'name': 'other'}, 'host': {'id': '111', 'name': 'mini'},
+        'app': {'id': 'com.a', 'name': 'A'}, 'session': key, 'run': 'r', 'projects': <String>[],
+        'text': '别处写的', 'blocks': <Object>[], 'source': 'typed',
+      })}\n{"v":1,\n');
+      final (st, _) = await start();
+      final rs = st.currentRemote!;
+      await until(() => st.recallOf(rs).isNotEmpty);
+      expect(st.recallOf(rs).single.text, '别处写的');
+      expect(st.recallOf(rs).single.mine, isFalse);
+    });
+
     test('a send cut off by a crash comes back on the next open', () async {
       final (st, _) = await start();
       final rs = st.currentRemote!;

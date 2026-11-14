@@ -11,6 +11,7 @@ import '../embed/remote_session.dart';
 import '../embed/session_port.dart';
 import '../embed/stream_choice.dart';
 import '../embed/traffic_label.dart' show segments;
+import '../history/input_history.dart';
 import '../history/input_recorder.dart';
 import '../hub_client.dart';
 import '../permissions.dart';
@@ -77,6 +78,8 @@ class MainState extends ChangeNotifier {
   })  : resources = ResourcesState(clock: clock),
         _log = log ?? ((_) {}) {
     recorder = InputRecorder(data: () => data, enabled: () => prefs.inputHistory, log: _log, clock: clock);
+    history = InputHistory(data: () => data, log: _log);
+    _writtenSub = recorder.written.listen(history.add);
     resources.addListener(notifyListeners);
     _portSub = port?.events.listen(_onPortEvent);
     _termSub = termPort?.events.listen(_onPortEvent);
@@ -95,10 +98,22 @@ class MainState extends ChangeNotifier {
     refreshDevices();
     _restorePins();
     unawaited(recorder.sweep());
+    unawaited(history.refresh()); // never throws; the panel's ↑ has what is read by then
   }
 
   /// The input record: what the writing panel sends, and the drafts it leaves.
   late final InputRecorder recorder;
+
+  /// The input record read back, every device's (R2, R4); what [recorder] writes comes in at once.
+  late final InputHistory history;
+  StreamSubscription<Map<String, Object?>>? _writtenSub;
+
+  /// What ↑ brings back in [rs]'s writing panel, newest first (R2); empty for a session no
+  /// record claims.
+  List<InputEntry> recallOf(RemoteSession rs) {
+    final r = _recordOfSid(rs.sid) ?? _recordOfLastSid(rs.sid);
+    return r == null ? const [] : history.forSession(r.key);
+  }
 
   /// Switches to a moved data root: later reads and writes go there and `workspace.json` is reread.
   /// Pinned entries saved under the old root follow to the new one.
@@ -118,6 +133,7 @@ class MainState extends ChangeNotifier {
       _syncHidden(rs);
     }
     _entries = _mapEntries();
+    unawaited(history.refresh());
     final old = oldRoot.endsWith('/') ? oldRoot : '$oldRoot/';
     for (final e in resources.clips) {
       final p = e.path;
@@ -2121,6 +2137,8 @@ class MainState extends ChangeNotifier {
     profiles.removeListener(_onProfiles);
     _portSub?.cancel();
     _termSub?.cancel();
+    _writtenSub?.cancel();
+    history.dispose();
     _blockedTimer?.cancel();
     for (final t in _retryTimers.values) {
       t.cancel();
