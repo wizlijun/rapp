@@ -65,10 +65,11 @@ impl Screen {
 
 /// The indexes of `rows` (a plain capture, escapes stripped) whose next row is their text wrapped, read off
 /// `joined` (the same screen captured with `-J`, wrapped rows joined into one). Spaces are ignored on both sides:
-/// the plain capture trims a wrapped row's trailing spaces, `-J` keeps them. Where the two disagree (the screen
-/// changed between the captures) marking stops.
+/// the plain capture trims a wrapped row's trailing spaces, `-J` keeps them. So are SO and SI (0x0e, 0x0f), which
+/// `-e` writes around line-drawing cells and `-J` does not. Where the two still disagree marking stops: the screen
+/// changed between the captures, or tmux wrote something else into one capture and not the other.
 pub fn wrapped_rows(rows: &[String], joined: &[String]) -> Vec<u16> {
-    let squeeze = |s: &str| s.chars().filter(|&c| c != ' ').collect::<String>();
+    let squeeze = |s: &str| s.chars().filter(|&c| !matches!(c, ' ' | '\x0e' | '\x0f')).collect::<String>();
     let mut out = Vec::new();
     let mut i = 0;
     for line in joined {
@@ -173,6 +174,8 @@ mod tests {
         // a wrapped row ending in spaces: plain capture trims them, -J keeps them
         let rows = ["ab", "cd"].map(String::from);
         assert_eq!(wrapped_rows(&rows, &["ab   cd".to_string()]), vec![0]);
+        // line drawing: -e wraps it in SO/SI, -J does not
+        assert_eq!(wrapped_rows(&["ab\x0eqq".into(), "q\x0fcd".into()], &["abqqqcd".into()]), vec![0]);
         // the two captures disagree (the screen changed between them): no flags from there on, no panic
         let rows = ["x", "y", "z"].map(String::from);
         assert_eq!(wrapped_rows(&rows, &["other".to_string()]), Vec::<u16>::new());

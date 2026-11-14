@@ -79,6 +79,28 @@ async fn capture_marks_wrapped_rows() {
 }
 
 #[tokio::test]
+async fn capture_marks_wrapped_rows_below_line_drawing() {
+    let Some(s) = common::Server::start() else { return };
+    // `-e` writes SO/SI around line-drawing cells, `-J` does not: the rows still match.
+    s.raw(&[
+        "new-session",
+        "-d",
+        "-s",
+        "d",
+        "-x",
+        "20",
+        "-y",
+        "6",
+        "printf 'ab\\033(0qqqqqqqqqqqqqqqqqqqqqq\\033(Bcd\\nabcdefghijklmnopqrstuvwxyz0123\\n'; sleep 60",
+    ]);
+    common::settle().await;
+    let pane = s.tmux().list().await.unwrap()[0].pane.clone();
+    let sc = s.tmux().capture(&pane).await.unwrap();
+    assert!(sc.lines[0].contains('\x0e'), "the row sent on keeps its SO: {:?}", sc.lines[0]);
+    assert_eq!(sc.wrapped, vec![0, 2]);
+}
+
+#[tokio::test]
 async fn capture_reads_cursor_shape() {
     let Some(s) = common::Server::start() else { return };
     s.raw(&["new-session", "-d", "-s", "k", "-x", "80", "-y", "6", "printf '\\033[5 q'; sleep 60"]);
