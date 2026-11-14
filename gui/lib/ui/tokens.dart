@@ -1,18 +1,16 @@
 import 'package:flutter/material.dart';
 
-/// The four themes, named after the films. Default is [RappTheme.matrix].
-enum RappTheme { avatar, ironMan, matrix, westworld }
+/// The three themes, named after the films. Default is [RappTheme.matrix].
+enum RappTheme { avatar, matrix, westworld }
 
 const themeOrder = [
   RappTheme.avatar,
-  RappTheme.ironMan,
   RappTheme.matrix,
   RappTheme.westworld,
 ];
 
 String themeLabel(RappTheme t) => switch (t) {
   RappTheme.avatar => 'AVATAR',
-  RappTheme.ironMan => 'IRON MAN',
   RappTheme.matrix => 'MATRIX',
   RappTheme.westworld => 'WESTWORLD',
 };
@@ -52,7 +50,7 @@ class RappTokens extends ThemeExtension<RappTokens> {
   /// Halo around an active lamp.
   final List<BoxShadow> glow;
 
-  /// Text glow; only MATRIX and IRON MAN.
+  /// Text glow; only MATRIX.
   final List<Shadow> textGlow;
   final String font;
   final List<String> fontFallback;
@@ -211,32 +209,6 @@ RappTokens tokensFor(RappTheme theme) {
         monoFallback: _monoFallback,
         monoBody: false,
         labelSpacing: 0.06,
-      );
-    case RappTheme.ironMan:
-      const on = Color(0xFF7FE0FF);
-      return RappTokens(
-        bg: const Color(0xFF030A12),
-        panel: const [Color.fromRGBO(90, 190, 255, .06)],
-        raise: const [Color.fromRGBO(110, 205, 255, .14)],
-        line: const Color.fromRGBO(120, 210, 255, .38),
-        text: const Color(0xFFD9F3FF),
-        muted: const Color(0xFF7FBBDD),
-        on: on,
-        accent: const Color(0xFFFF5A3C),
-        accentInk: const Color(0xFF2A0700),
-        tint: const Color.fromRGBO(255, 90, 60, .14),
-        r: 2,
-        // Prototype `holo`: --glow 0 0 10px .95; text-shadow 0 0 8px .35.
-        glow: _lampGlow(on, alpha: .95, blur: 10),
-        textGlow: const [
-          Shadow(color: Color.fromRGBO(127, 224, 255, .35), blurRadius: 8),
-        ],
-        font: _font,
-        fontFallback: _fontFallback,
-        mono: _mono,
-        monoFallback: _monoFallback,
-        monoBody: false,
-        labelSpacing: 0.2,
       );
     case RappTheme.westworld:
       const on = Color(0xFFFFFFFF);

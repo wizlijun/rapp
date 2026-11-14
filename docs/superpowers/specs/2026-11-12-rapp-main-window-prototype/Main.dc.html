@@ -26,10 +26,6 @@ a{color:inherit}a:hover{color:inherit}
 .rp[data-theme="phosphor"]::after{content:"";position:absolute;inset:0;pointer-events:none;z-index:9;background:repeating-linear-gradient(0deg,rgba(0,0,0,.3) 0 1px,rgba(0,0,0,0) 1px 3px),radial-gradient(ellipse at center,rgba(0,0,0,0) 55%,rgba(0,0,0,.45) 100%)}
 .rp[data-theme="bone"]{--bg:#070707;--panel:#0E0E0E;--raise:#1A1A1A;--line:#3A3A3A;--text:#F4F4F2;--muted:#A3A3A0;--on:#FFFFFF;--accent:#FF3B30;--accent-ink:#1A0000;--tint:rgba(255,59,48,.14);--r:2px;--glow:0 0 6px rgba(255,255,255,.6)}
 .rp[data-theme="bone"] .rp-cap{letter-spacing:.16em}
-.rp[data-theme="holo"]{--bg:#030A12;--panel:rgba(90,190,255,.06);--raise:rgba(110,205,255,.14);--line:rgba(120,210,255,.38);--text:#D9F3FF;--muted:#7FBBDD;--on:#7FE0FF;--accent:#FF5A3C;--accent-ink:#2A0700;--tint:rgba(255,90,60,.14);--r:2px;--glow:0 0 10px rgba(127,224,255,.95);text-shadow:0 0 8px rgba(127,224,255,.35)}
-.rp[data-theme="holo"]::after{content:"";position:absolute;inset:0;pointer-events:none;z-index:9;background:linear-gradient(rgba(127,224,255,.05) 1px,rgba(0,0,0,0) 1px) 0 0/100% 32px,linear-gradient(90deg,rgba(127,224,255,.05) 1px,rgba(0,0,0,0) 1px) 0 0/32px 100%,radial-gradient(ellipse at 50% 0%,rgba(60,150,255,.16),rgba(0,0,0,0) 60%)}
-.rp[data-theme="holo"] .rp-cap{letter-spacing:.2em}
-.rp[data-theme="holo"] h1,.rp[data-theme="holo"] h2{letter-spacing:.04em}
 @media (hover:hover){.rp button:hover{outline:1px solid var(--muted)}}
 .rp button,.rp select,.rp input{min-height:48px!important;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
 .rp button{user-select:none;-webkit-user-select:none;transition:transform .08s}
@@ -423,7 +419,6 @@ a{color:inherit}a:hover{color:inherit}
 <label for="theme-pick" class="rp-cap" style="font-size: 11px; letter-spacing: 0.06em; color: var(--muted)">主题</label>
 <select id="theme-pick" value="{{ theme }}" onChange="{{ setTheme }}" style="flex: 1; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--r); background: var(--raise); color: var(--text); font: inherit; cursor: pointer">
 <option value="graphite" style="background: #111; color: #EEE">AVATAR</option>
-<option value="holo" style="background: #111; color: #EEE">IRON MAN</option>
 <option value="phosphor" style="background: #111; color: #EEE">MATRIX</option>
 <option value="bone" style="background: #111; color: #EEE">WESTWORLD</option>
 </select>
@@ -444,7 +439,7 @@ a{color:inherit}a:hover{color:inherit}
 </div>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["graphite","holo","phosphor","bone"],"default":"phosphor"},"$preview":{"width":1194,"height":834}}'>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["graphite","phosphor","bone"],"default":"phosphor"},"$preview":{"width":1194,"height":834}}'>
 class Component extends DCLogic {
   state = {
     theme: '', nav: 'sessions', group: 'device', focus: 4, devFocus: 'mac', resTab: 'clips',

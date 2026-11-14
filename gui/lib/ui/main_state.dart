@@ -7,7 +7,6 @@ import 'dart:ui' show Offset, Size;
 import '../paths.dart';
 import 'package:flutter/foundation.dart';
 
-import '../embed/geometry.dart' show PictureHole;
 import '../embed/remote_session.dart';
 import '../embed/session_port.dart';
 import '../embed/stream_choice.dart';
@@ -309,9 +308,6 @@ class MainState extends ChangeNotifier {
   // ---- stage size (Ruling P2) ----
   Size? _lastStage;
   RemoteSession? _syncedRs;
-
-  /// The picture's rect in global coordinates; the IRON MAN grid leaves it out (R25).
-  final PictureHole pictureHole = PictureHole();
 
   /// The stage is [s] big now. Remembered, and given to the current session's resize policy.
   void stageSize(Size s) {

@@ -1,7 +1,6 @@
 // The stage of a session whose link is down: its last frame under stripes, with 「重连」 and 「结束会话」 (S3, R25).
 // Shows only; it takes no pointer or keyboard input, and never resizes the stage.
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 
 import '../embed/geometry.dart';
 import '../embed/picture.dart' show windowSurface;
@@ -23,7 +22,6 @@ class DisconnectedStage extends StatefulWidget {
     this.onStop,
     this.onEnd,
     this.sessionKey,
-    this.hole,
   });
 
   /// The session whose last frame stays under the stripes; null if it never showed one.
@@ -53,16 +51,11 @@ class DisconnectedStage extends StatefulWidget {
   /// Keys the end button per session: an armed confirm never carries over to the next one.
   final Object? sessionKey;
 
-  /// Receives the last frame's global rect, so the IRON MAN grid leaves it alone (R25), like Picture's.
-  final PictureHole? hole;
-
   @override
   State<DisconnectedStage> createState() => _DisconnectedStageState();
 }
 
 class _DisconnectedStageState extends State<DisconnectedStage> {
-  final _tex = GlobalKey();
-
   RemoteWindow? get _window {
     final rs = widget.session;
     if (rs == null) return null;
@@ -72,32 +65,11 @@ class _DisconnectedStageState extends State<DisconnectedStage> {
     return null;
   }
 
-  void _report() {
-    final h = widget.hole;
-    if (h == null || !mounted) return;
-    final box = _tex.currentContext?.findRenderObject();
-    if (box is! RenderBox || !box.attached || !box.hasSize) return;
-    final r = box.localToGlobal(Offset.zero) & box.size;
-    if (h.owns(this, r)) return;
-    h.claim(this, r);
-  }
-
-  @override
-  void dispose() {
-    final h = widget.hole;
-    if (h != null) {
-      // After the frame, so a successor that reports first is not cleared; release is by owner.
-      SchedulerBinding.instance.addPostFrameCallback((_) => h.release(this));
-    }
-    super.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
     final win = _window;
     final stripes = rowBackdrop(Lamp.disconnected, t);
-    SchedulerBinding.instance.addPostFrameCallback((_) => _report());
     return ColoredBox(
       color: t.bg,
       child: Stack(
@@ -108,7 +80,7 @@ class _DisconnectedStageState extends State<DisconnectedStage> {
               final fit = fitRect(contentSize(win), c.biggest);
               final pic = pictureRect(fit, win.visible);
               return Stack(children: [
-                Positioned.fromRect(rect: pic, child: windowSurface(win, key: _tex)),
+                Positioned.fromRect(rect: pic, child: windowSurface(win)),
               ]);
             }),
           if (stripes != null) DecoratedBox(decoration: stripes),

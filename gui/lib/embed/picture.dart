@@ -6,7 +6,6 @@ import 'dart:async';
 import 'package:flutter/gestures.dart';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 
 import '../ui/main_state.dart';
 import '../ui/tokens.dart';
@@ -22,16 +21,12 @@ class Picture extends StatefulWidget {
     required this.state,
     required this.session,
     required this.window,
-    this.hole,
   });
 
   /// Where focus and input go: `state.port`, `state.focusPicture`.
   final MainState state;
   final RemoteSession session;
   final RemoteWindow window;
-
-  /// Receives the texture's global rect (R25), so the IRON MAN grid can leave it alone.
-  final PictureHole? hole;
 
   @override
   State<Picture> createState() => _PictureState();
@@ -47,7 +42,6 @@ class _Target {
 }
 
 class _PictureState extends State<Picture> {
-  final _tex = GlobalKey();
   final _focus = FocusNode();
   late final _clicks = ClickCounter(widget.state.doubleClick);
 
@@ -261,16 +255,6 @@ class _PictureState extends State<Picture> {
   void _pan(PointerPanZoomUpdateEvent e) =>
       _scroll(e.localPosition, panToRemote(e.localPanDelta));
 
-  void _report() {
-    final h = widget.hole;
-    if (h == null || !mounted) return;
-    final box = _tex.currentContext?.findRenderObject();
-    if (box is! RenderBox || !box.attached || !box.hasSize) return;
-    final r = box.localToGlobal(Offset.zero) & box.size;
-    if (h.owns(this, r)) return;
-    h.claim(this, r);
-  }
-
   @override
   void didUpdateWidget(Picture old) {
     super.didUpdateWidget(old);
@@ -289,11 +273,6 @@ class _PictureState extends State<Picture> {
   @override
   void dispose() {
     _dropPending();
-    final h = widget.hole;
-    if (h != null) {
-      // Not while the tree is being torn down; and only what this picture itself reported.
-      SchedulerBinding.instance.addPostFrameCallback((_) => h.release(this));
-    }
     _focus.dispose();
     super.dispose();
   }
@@ -336,7 +315,6 @@ class _PictureState extends State<Picture> {
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
     final win = widget.window;
-    SchedulerBinding.instance.addPostFrameCallback((_) => _report());
     final focused = widget.state.pictureFocused == _sid;
     return LayoutBuilder(
       builder: (context, c) {
@@ -392,7 +370,7 @@ class _PictureState extends State<Picture> {
                 children: [
                   Positioned.fromRect(
                     rect: pic,
-                    child: windowSurface(win, key: _tex),
+                    child: windowSurface(win),
                   ),
                   if (focused)
                     // 1px outside the picture, kept on the stage when the picture fills it.
@@ -466,18 +444,18 @@ Widget? _inputMarkAt(RappTokens t, RemoteSession session, RemoteWindow win, Rect
 }
 
 /// Shared live/retained surface for native textures and Linux image frames.
-Widget windowSurface(RemoteWindow window, {Key? key}) {
+Widget windowSurface(RemoteWindow window) {
   final frames = window.frames;
   if (frames != null) {
-    return RepaintBoundary(key: key, child: ValueListenableBuilder<WindowFrame?>(
+    return RepaintBoundary(child: ValueListenableBuilder<WindowFrame?>(
       valueListenable: frames,
       builder: (_, frame, _) => frame == null ? const SizedBox.shrink() :
           CustomPaint(painter: _FramePainter(frame.image, frame.source)),
     ));
   }
   return window.image != null
-      ? CustomPaint(key: key, painter: _FramePainter(window.image!, window.source!))
-      : Texture(key: key, textureId: window.texture!);
+      ? CustomPaint(painter: _FramePainter(window.image!, window.source!))
+      : Texture(textureId: window.texture!);
 }
 
 class _FramePainter extends CustomPainter {

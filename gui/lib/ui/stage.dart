@@ -62,11 +62,10 @@ class Stage extends StatelessWidget {
             onStop: state.stopReconnectCurrent,
             onEnd: state.endCurrent,
             sessionKey: rec.key,
-            hole: state.pictureHole,
           );
         } else if (rs != null && !rs.detached && win != null) {
           picture = true;
-          body = Picture(state: state, session: rs, window: win, hole: state.pictureHole);
+          body = Picture(state: state, session: rs, window: win);
         } else if (!(rs != null && rs.detached) && (cur.lamp == Lamp.connecting || rs != null)) {
           body = Row(
             mainAxisSize: MainAxisSize.min,

@@ -125,7 +125,7 @@ agent 规则：**不直接改这个文件**。加、删设备走 GUI 的设备�
 
 | 字段 | 取值 | 没写时 |
 |---|---|---|
-| `theme` | `matrix`、`ironMan`、`westworld`、`avatar` | `matrix` |
+| `theme` | `matrix`、`westworld`、`avatar`（其他值按 `matrix`） | `matrix` |
 | `start_fullscreen` | 布尔：启动时全屏沉浸 | `true` |
 
 生效：退出 GUI 再改，重新打开生效。没有机密。

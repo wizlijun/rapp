@@ -128,7 +128,7 @@
 - 实机（只用自己起的 service、GUI、Calculator，按 PID 收尾）：启动即全屏（1920×1080）；主题切到 WESTWORLD 后 gui.json 保存、重启保持；设备标签显示在线 · 局域网和 app 列表；打开 Calculator 后舞台占位出现、提示「已打开 Calculator @ …」；「切到窗口」把 rapp-client 窗口提到最前；「结束会话」点一次变「再点一次确认」，3 秒内再点才结束（hub 记 `closed`）；⌃⌘F 进全屏、Esc 先关面板再退全屏
 - 实机发现并修好：顶栏全屏按钮会随提示长短左右漂移（0c44535，加了测试）
 - 提交：de6e07e..0c44535；打包 `dist/rapp-0.2.0.pkg`、`dist/rapp.dmg`（未替换已装的 rapp.app）
-- 未实机验证：360px 窄窗口（只有 widget 测试）；四套主题里 IRON MAN、AVATAR 的实机外观
+- 未实机验证：360px 窄窗口（只有 widget 测试）；AVATAR 主题的实机外观
 - 终审（opus）：Important 1 个——「结束会话」「删除设备」点一次后换了目标仍保持待确认，再点一次会结束/删除另一个；已修（faf2f7b，按目标分键）。同一提交顺带修了：打开失败后回到原来的会话；图例里的灯不再闪。其余 6 个小问题记在下面
 - 界面复查（高中生能懂）：分组改「按设备 / 按 App」；添加设备「对方的 ID（同一局域网可写 ID@IP）」；包名框「其他 app 的包名（例：…）」；本机里 Relay 统一为「中继」；会话自己断掉时提示「X 意外结束：原因」，用户结束的仍是「已结束 X」；hub 的英文提示改中文（8b04823）。flutter test 194 个全过
 - 留给以后的小问题：主题每次状态变化都重建（性能）；<480px 时提示条占舞台高度且不消失；主题质感（发光字、AVATAR 字重、面板模糊）未做；删除设备时正在进行的探测可能把它算回在线数；用包名打开时会话名显示成包名；「切到窗口」不还原最小化的窗口
@@ -151,7 +151,6 @@
 ## 主界面 S2–S6（分支 `feat/main-window-s2-s6`；S7 先不做，S8 不在范围内）
 顺序：S2 → S3 → S5 → S6 → S4（S4 第三层要用 S5 的项目、S6 的资源，放最后）。各规格 §6 的假设按默认执行，验收时确认。
 - [x] S2 嵌入舞台（规格：`docs/superpowers/specs/2026-11-12-rapp-s2-embedded-stage-design.md`；计划：`docs/superpowers/plans/2026-11-12-rapp-s2-embedded-stage.md`）——代码完成、自动测试全绿；**实机检查待做**
-  - IRON MAN 网格在画面处留洞（R25），有单测。
   - 自动验证（2026-11-12）：`cargo test --workspace` 97 过、clippy 0 警告、`./scripts/check.sh` EXIT=0（Swift 311 过）、`flutter analyze` 干净、`flutter test` 314 过；`scripts/package-macos.sh` 出包 `dist/rapp-0.3.0.pkg`（未安装）。
   - 实机检查没做成：检查时用户正在用这台 Mac，并用 ⌘Q 退出了测试 GUI；为了不反复抢焦点，没有重开。§7 逐条（待实机）：
     - [ ] 打开 app，画面在舞台上、没有独立窗口

@@ -20,9 +20,9 @@ void main() {
     expect(p.startFullscreen, isTrue);
   });
   test('round-trips theme and start_fullscreen', () {
-    UiPrefs(theme: RappTheme.ironMan, startFullscreen: false).save(tmp.path);
+    UiPrefs(theme: RappTheme.westworld, startFullscreen: false).save(tmp.path);
     final p = UiPrefs.load(tmp.path);
-    expect(p.theme, RappTheme.ironMan);
+    expect(p.theme, RappTheme.westworld);
     expect(p.startFullscreen, isFalse);
     expect(
       File('${tmp.path}/gui.json').readAsStringSync(),
@@ -39,6 +39,14 @@ void main() {
     File(
       '${tmp.path}/gui.json',
     ).writeAsStringSync('{"theme":"graphite","start_fullscreen":false}');
+    final p = UiPrefs.load(tmp.path);
+    expect(p.theme, RappTheme.matrix);
+    expect(p.startFullscreen, isFalse);
+  });
+  test('a saved IRON MAN (removed theme) gives matrix', () {
+    File(
+      '${tmp.path}/gui.json',
+    ).writeAsStringSync('{"theme":"ironMan","start_fullscreen":false}');
     final p = UiPrefs.load(tmp.path);
     expect(p.theme, RappTheme.matrix);
     expect(p.startFullscreen, isFalse);

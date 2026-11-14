@@ -113,30 +113,30 @@ void main() {
     expect(find.byKey(const Key('inner-stroke-111/Mail')), findsNothing);
   });
 
-  testWidgets('theme dropdown lists the four films in order', (tester) async {
+  testWidgets('theme dropdown lists the three films in order', (tester) async {
     await tester.pumpWidget(wrap(panel(), disableAnimations: true));
     expect(tester.getSize(find.byKey(const Key('theme-dropdown'))).height,
         greaterThanOrEqualTo(48));
     await tester.tap(find.byKey(const Key('theme-dropdown')));
     await tester.pumpAndSettle();
     final labels = [for (final th in themeOrder) themeLabel(th)];
-    expect(labels, ['AVATAR', 'IRON MAN', 'MATRIX', 'WESTWORLD']);
+    expect(labels, ['AVATAR', 'MATRIX', 'WESTWORLD']);
     final ys = [
       for (final l in labels)
         tester.getTopLeft(find.text(l).last).dy,
     ];
     expect(ys, orderedEquals([...ys]..sort()));
-    expect(ys.toSet().length, 4);
+    expect(ys.toSet().length, 3);
   });
 
-  testWidgets('picking IRON MAN changes prefs.theme', (tester) async {
+  testWidgets('picking WESTWORLD changes prefs.theme', (tester) async {
     await tester.pumpWidget(wrap(panel(), disableAnimations: true));
     await tester.tap(find.byKey(const Key('theme-dropdown')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('IRON MAN').last);
+    await tester.tap(find.text('WESTWORLD').last);
     await tester.pumpAndSettle();
-    expect(s.prefs.theme, RappTheme.ironMan);
-    expect(UiPrefs.load('${tmp.path}/devices/dev1').theme, RappTheme.ironMan);
+    expect(s.prefs.theme, RappTheme.westworld);
+    expect(UiPrefs.load('${tmp.path}/devices/dev1').theme, RappTheme.westworld);
   });
 
   testWidgets('start fullscreen switch saves', (tester) async {

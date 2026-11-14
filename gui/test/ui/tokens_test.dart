@@ -27,12 +27,7 @@ void main() {
     ]);
     expect(t.r, 4);
   });
-  test('IRON MAN and WESTWORLD values match the table', () {
-    final i = tokensFor(RappTheme.ironMan);
-    expect(i.bg, const Color(0xFF030A12));
-    expect(i.text, const Color(0xFFD9F3FF));
-    expect(i.accent, const Color(0xFFFF5A3C));
-    expect(i.r, 2);
+  test('WESTWORLD values match the table', () {
     final w = tokensFor(RappTheme.westworld);
     expect(w.bg, const Color(0xFF070707));
     expect(w.text, const Color(0xFFF4F4F2));
@@ -47,28 +42,18 @@ void main() {
       expect(t.monoBody, th == RappTheme.matrix, reason: '$th');
       expect(
         t.textGlow.isNotEmpty,
-        th == RappTheme.matrix || th == RappTheme.ironMan,
+        th == RappTheme.matrix,
         reason: '$th',
       );
       expect(
         t.labelSpacing,
         switch (th) {
-          RappTheme.ironMan => 0.2,
           RappTheme.westworld => 0.12,
           _ => 0.06,
         },
         reason: '$th',
       );
     }
-  });
-  test('IRON MAN glow values follow the prototype (holo)', () {
-    final i = tokensFor(RappTheme.ironMan);
-    expect(i.textGlow, const [
-      Shadow(color: Color.fromRGBO(127, 224, 255, .35), blurRadius: 8),
-    ]);
-    expect(i.glow, const [
-      BoxShadow(color: Color.fromRGBO(127, 224, 255, .95), blurRadius: 10),
-    ]);
   });
   test('themeDataFor puts the text glow on every text style', () {
     for (final th in RappTheme.values) {
@@ -86,7 +71,6 @@ void main() {
   test('dropdown order and labels', () {
     expect(themeOrder.map(themeLabel), [
       'AVATAR',
-      'IRON MAN',
       'MATRIX',
       'WESTWORLD',
     ]);

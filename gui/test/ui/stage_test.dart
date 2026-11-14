@@ -145,13 +145,6 @@ void main() {
         theme: th,
       ));
       expect(find.text('hi'), findsOneWidget);
-      if (th == RappTheme.ironMan) {
-        // 设计语言"全屏叠"：网格盖在内容（顶栏、面板）上面，不在下面。
-        final stack = tester.widget<Stack>(
-            find.descendant(of: find.byType(Backdrop), matching: find.byType(Stack)).first);
-        expect(stack.children.last, isA<Positioned>());
-        expect((stack.children.last as Positioned).child, isA<IgnorePointer>());
-      }
       if (th != RappTheme.westworld) {
         expect(find.descendant(of: find.byType(Backdrop), matching: find.byType(IgnorePointer)),
             findsWidgets);
@@ -203,7 +196,7 @@ void main() {
     Widget embedded({RappTheme theme = RappTheme.matrix}) => SizedBox(
           width: 800,
           height: 600,
-          child: Backdrop(theme: theme, hole: es.pictureHole, child: Stage(state: es)),
+          child: Backdrop(theme: theme, child: Stage(state: es)),
         );
 
     testWidgets('stage shows connecting, then the texture', (tester) async {
@@ -261,7 +254,13 @@ void main() {
       await tester.pump();
       await tester.pump();
       expect(find.byType(DisconnectedStage), findsOneWidget);
-      expect(es.pictureHole.value, isNotNull, reason: 'Linux last-frame surface remains visible');
+      expect(
+          tester
+              .widgetList<CustomPaint>(
+                  find.descendant(of: find.byType(DisconnectedStage), matching: find.byType(CustomPaint)))
+              .any((c) => c.painter.runtimeType.toString() == '_FramePainter'),
+          isTrue,
+          reason: 'Linux last-frame surface remains visible');
       expect(es.pictureFocused, isNull);
       await tester.runAsync(() async {
         t.onSend = (m) {
@@ -297,29 +296,6 @@ void main() {
       expect(r.single.$2, equals({'sid': 1, 'window': 5, 'w': 800, 'h': 600}));
     });
 
-    testWidgets('IRON MAN grid leaves the picture uncovered', (tester) async {
-      await tester.pumpWidget(wrap(embedded(theme: RappTheme.ironMan), theme: RappTheme.ironMan));
-      await openEmbedded(tester);
-      port.emit(const ReadyEvent(1, 'Safari'));
-      port.emit(WindowsEvent(1, [rw(5, 400, 328)]));
-      await tester.pump();
-      await tester.pump();
-      Rect? hole() => tester
-          .widgetList<CustomPaint>(find.byType(CustomPaint))
-          .map((c) => c.painter)
-          .whereType<HoloGrid>()
-          .single
-          .hole;
-      final origin = tester.getTopLeft(find.byType(Backdrop));
-      expect(hole(), tester.getRect(find.byType(Texture)).shift(-origin));
-      expect(es.pictureHole.value, isNotNull);
-      port.emit(const ClosedEvent(1, 'quit'));
-      await tester.pump();
-      await tester.pump();
-      expect(es.pictureHole.value, isNull);
-      expect(hole(), isNull);
-    });
-
     testWidgets('detached placeholder shows the words and buttons', (tester) async {
       await tester.pumpWidget(wrap(embedded()));
       await openEmbedded(tester, app: 'Calculator');
@@ -330,7 +306,6 @@ void main() {
       port.emit(const DetachedEvent(1, true));
       await tester.pump();
       expect(find.byType(Texture), findsNothing);
-      expect(es.pictureHole.value, isNull);
       expect(find.text('Calculator 在单独的窗口里 · mini · 局域网'), findsOneWidget);
       expect(find.text('输入'), findsOneWidget);
       // Records compare their maps by identity: match the call by its parts.
@@ -540,53 +515,6 @@ void main() {
       await tester.pump();
       es.toggleDetach();
       expect(port.calls.where((c) => c.$1 == 'mouse' || c.$1 == 'detach' || c.$1 == 'picture_focus'), isEmpty);
-    });
-
-    testWidgets('swapping the live picture for the disconnected stage keeps the hole', (tester) async {
-      await shown(tester);
-      await tester.pump();
-      expect(es.pictureHole.value, isNotNull);
-      port.emit(const DisconnectedEvent(1, 'user'));
-      await tester.pump();
-      await tester.pump();
-      expect(find.byType(DisconnectedStage), findsOneWidget);
-      expect(es.pictureHole.value, isNotNull);
-    });
-
-    testWidgets('swapping the disconnected stage for the live picture keeps the hole', (tester) async {
-      await shown(tester);
-      port.emit(const DisconnectedEvent(1, 'user'));
-      await tester.pump();
-      es.hint = 'again'; // a rebuild: the disconnected stage reports its rect
-      es.notifyListeners();
-      await tester.pump();
-      await tester.pump();
-      expect(find.byType(DisconnectedStage), findsOneWidget);
-      final before = es.pictureHole.value;
-      expect(before, isNotNull);
-      await tester.runAsync(() async {
-        t.onSend = (m) {
-          if (m['cmd'] == 'open') {
-            t.emit({
-              'event': 'opened', 'sid': 11, 'id': m['id'], 'app': m['app'], 'path': 'lan',
-              'port': 5011, 'token': 'tk', 'req': m['req'],
-            });
-          }
-        };
-        await tester.tap(find.byKey(const Key('reconnect-button')));
-        for (var i = 0; i < 4; i++) {
-          await flush();
-        }
-      });
-      await tester.pump();
-      port.emit(const ReadyEvent(11, 'Safari'));
-      port.emit(WindowsEvent(11, [rw(5, 400, 328)]));
-      await tester.pump();
-      await tester.pump();
-      await tester.pump();
-      expect(find.byType(DisconnectedStage), findsNothing);
-      expect(find.byType(Picture), findsOneWidget);
-      expect(es.pictureHole.value, before); // the same rect, now the picture's own
     });
 
     testWidgets('reconnect is off when the hub is gone', (tester) async {
