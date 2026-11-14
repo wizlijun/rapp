@@ -11,7 +11,7 @@ use rapp_net::log::Log;
 use rapp_relay::admin;
 use rapp_relay::config;
 use rapp_relay::server::{Opts, Relay};
-use rapp_wire::msg::Push;
+use rapp_wire::msg::{Push, Req};
 use rapp_wire::{join_hash, Fp, Key};
 use serde_json::{json, Value};
 use tokio::time::timeout;
@@ -160,6 +160,46 @@ async fn a_stale_device_with_the_old_key_gets_key_changed_and_is_never_locked() 
     // Another device from the same source is not locked out either.
     let other = FakeDevice::dial(&r).await;
     assert_eq!(other.enroll(&new).await["ok"], true);
+}
+
+#[tokio::test]
+async fn no_device_stays_in_with_the_old_key_when_a_rotate_races_its_enroll() {
+    const N: usize = 24;
+    let r = start_relay(|c| {
+        c.limits.enroll_per_ip_per_min = 1000;
+        c.limits.max_conns_per_ip = 2 * N;
+        c.limits.lock_after = 1000;
+    })
+    .await;
+    // Enrolled once, so every concurrent enroll below has a devices.json write to queue behind.
+    let _first = FakeDevice::enrolled(&r).await;
+    let mut devs = Vec::new();
+    for _ in 0..N {
+        devs.push(std::sync::Arc::new(FakeDevice::dial(&r).await));
+    }
+    let mut line = serde_json::to_vec(&Req::Enroll { join: join_hex(&r.key) }).unwrap();
+    line.push(b'\n');
+    let enrolls: Vec<_> = devs
+        .iter()
+        .map(|d| {
+            let (d, line) = (d.clone(), line.clone());
+            // An enroll that gets in may be cut off (code 4) before its reply arrives.
+            tokio::spawn(async move { d.raw(&line).await.ok() })
+        })
+        .collect();
+    tokio::task::yield_now().await;
+    rotate(&r).await;
+    for (d, e) in devs.iter().zip(enrolls) {
+        let v = e.await.unwrap();
+        match r.relay.registry().get(&d.id.fp) {
+            // Let in with the old key: it has to be stale and cut off all the same.
+            Some(dev) => {
+                assert!(dev.stale, "{} is in with the old key", d.id.fp.short());
+                assert_eq!(app_close_code(&closed(d).await), Some(4));
+            }
+            None => assert_eq!(v, Some(json!({"ok": false, "error": "bad key"}))),
+        }
+    }
 }
 
 #[tokio::test]

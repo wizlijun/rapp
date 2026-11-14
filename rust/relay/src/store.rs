@@ -22,7 +22,7 @@ pub struct Device {
     pub last_seen: Option<String>,
     /// The join key changed after it enrolled: it has to enroll again with the new one, and keeps
     /// its ID meanwhile. Never set on a revoked device.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub stale: bool,
 }
 
@@ -407,6 +407,19 @@ mod tests {
         let dev = r.get(&fp(1)).unwrap();
         assert!(!dev.stale && !dev.revoked);
         assert_eq!(dev.id.as_deref(), Some("123456789"));
+    }
+
+    #[test]
+    fn stale_is_written_only_when_set() {
+        let d = tempfile::tempdir().unwrap();
+        let r = open(&d);
+        r.enroll(fp(1), "t").unwrap();
+        let file = || std::fs::read_to_string(d.path().join("data/devices.json")).unwrap();
+        assert!(!file().contains("stale"), "{}", file());
+        r.mark_all_stale().unwrap();
+        assert!(file().contains(r#""stale": true"#), "{}", file());
+        r.enroll(fp(1), "t").unwrap();
+        assert!(!file().contains("stale"), "{}", file());
     }
 
     #[test]

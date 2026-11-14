@@ -101,7 +101,8 @@ struct Shared {
     conns: Conns,
     enroll_rate: Rate,
     enroll_backoff: Backoff,
-    /// Makes the device-cap check and the registry write one step.
+    /// Makes the join-key check, the device-cap check and the registry write one step; a
+    /// `rotate_join` takes it too.
     enroll_lock: Mutex<()>,
     /// `connect` and `relay` failures (`bad id`, `unknown id`), keyed `fp:<fp>` and `ip:<source>`.
     connect_backoff: Backoff,
@@ -755,7 +756,9 @@ impl Shared {
         if !self.enroll_open.load(Ordering::Acquire) {
             return Err("closed".into());
         }
-        let Some(want) = self.registry.join_hash() else { return Err("no key".into()) };
+        if self.registry.join_hash().is_none() {
+            return Err("no key".into());
+        }
         let source = source_key(peer.from.ip()).to_string();
         let now = Instant::now();
         if let Some(secs) = self.enroll_backoff.locked(&source, now) {
@@ -767,6 +770,8 @@ impl Shared {
             return Err("limit".into());
         }
         let _one_at_a_time = self.enroll_lock.lock().unwrap_or_else(|e| e.into_inner());
+        // Read under the lock `rotate_join` holds too: never a key that has just been replaced.
+        let Some(want) = self.registry.join_hash() else { return Err("no key".into()) };
         if self.registry.get(&peer.fp).is_none() && self.registry.count() >= self.config.limits.max_devices {
             self.limit("max_devices", Some(&peer.fp), peer.from);
             return Err("limit".into());
@@ -853,6 +858,14 @@ impl Control for Shared {
 
     fn unbind(&self, id: &str) -> Result<Option<Fp>> {
         self.unbind_id(id)
+    }
+
+    fn rotate_join(&self, hash: &str) -> Result<usize> {
+        let _no_enroll = self.enroll_lock.lock().unwrap_or_else(|e| e.into_inner());
+        // Marked first, so a failed save leaves the old key in place and every device as it was.
+        let n = self.registry.mark_all_stale()?;
+        self.registry.set_join_hash(hash)?;
+        Ok(n)
     }
 
     fn key_changed(&self) {
