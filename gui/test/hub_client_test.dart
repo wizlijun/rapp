@@ -424,6 +424,36 @@ void main() {
       expect(hub.termLists['A']!.path, 'lan');
     });
 
+    test('openTerm sends open_term and answers the new id', () async {
+      final f = hub.openTerm('d1', command: 'claude', app: 'Terminal');
+      final cmd = t.sent.last;
+      expect(cmd, {'cmd': 'open_term', 'id': 'd1', 'command': 'claude', 'app': 'Terminal', 'req': anything});
+      t.emit({'event': 'term_created', 'id': 'd1', 'term': 'term:pty:claude', 'req': cmd['req']});
+      expect(await f, 'term:pty:claude');
+    });
+
+    test('openTerm fails on an error reply', () async {
+      final f = hub.openTerm('d1', app: 'Terminal');
+      t.emit({'event': 'error', 'req': t.sent.last['req'], 'error': 'no such app'});
+      await expectLater(f, throwsA(isA<HubException>()));
+    });
+
+    test('a host row reads its launchers', () async {
+      t.emit({
+        'event': 'terms',
+        'id': 'B',
+        'terms': [],
+        'hosts': [
+          {'host': null, 'launchers': ['Terminal', 'iTerm', 3]},
+          {'host': 'gpu1'},
+        ],
+      });
+      await Future<void>.delayed(Duration.zero);
+      final b = hub.termLists['B']!;
+      expect(b.hosts[0].launchers, ['Terminal', 'iTerm']);
+      expect(b.hosts[1].launchers, isEmpty);
+    });
+
     test('off and error lists parse', () async {
       t.emit({'event': 'terms', 'id': 'A', 'off': true});
       t.emit({'event': 'terms', 'id': 'B', 'error': 'timed out'});

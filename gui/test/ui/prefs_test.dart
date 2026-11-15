@@ -54,6 +54,18 @@ void main() {
     expect(File('${tmp.path}/gui.json').readAsStringSync(), contains('"term_key_row":true'));
     expect(UiPrefs.load(tmp.path).termKeyRow, isTrue);
   });
+  test('term_open round-trips and defaults to text', () {
+    final p = UiPrefs()..termOpen['d1'] = 'pixels';
+    p.save(tmp.path);
+    final q = UiPrefs.load(tmp.path);
+    expect((q.termOpenFor('d1'), q.termOpenFor('d2')), ('pixels', 'text'));
+  });
+  test('a bad term_open value is dropped', () {
+    File('${tmp.path}/gui.json').writeAsStringSync('{"term_open":{"d1":"x","d2":"pixels","d3":4}}');
+    expect(UiPrefs.load(tmp.path).termOpen, {'d2': 'pixels'});
+    File('${tmp.path}/gui.json').writeAsStringSync('{"term_open":"nope"}');
+    expect(UiPrefs.load(tmp.path).termOpen, isEmpty);
+  });
   test('corrupt json gives defaults', () {
     File('${tmp.path}/gui.json').writeAsStringSync('{nope');
     final p = UiPrefs.load(tmp.path);
