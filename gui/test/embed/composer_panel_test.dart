@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/app_profile.dart';
 import 'package:rapp/embed/composer_panel.dart';
+import 'package:rapp/embed/flutter_editor.dart';
 import 'package:rapp/embed/picture.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
@@ -77,14 +78,14 @@ void main() {
     tearDown(() => rs.dispose());
 
     Widget panel() =>
-        SizedBox(width: 720, child: ComposerPanel(state: es, session: rs, port: port, maxHeight: 300));
+        SizedBox(width: 720, child: ComposerPanel(state: es, session: rs, port: port, maxHeight: 300, editor: FlutterEditor.new));
 
     // A 1000×700 stage with the composer layer on it.
     Widget layer({RemoteSession? s}) => wrap(SizedBox(
         key: const Key('host'),
         width: 1000,
         height: 700,
-        child: Stack(children: composerLayer(state: es, session: s ?? rs, port: port))));
+        child: Stack(children: composerLayer(state: es, session: s ?? rs, port: port, editor: FlutterEditor.new))));
 
     void big(WidgetTester tester) {
       tester.view.physicalSize = const Size(1200, 900);
@@ -765,7 +766,7 @@ void main() {
 
     testWidgets('M3.2: a long failure ellipsizes and 重试 / 放回输入框 stay', (tester) async {
       await tester.pumpWidget(
-          wrap(SizedBox(width: 600, child: ComposerPanel(state: es, session: rs, port: port, maxHeight: 300))));
+          wrap(SizedBox(width: 600, child: ComposerPanel(state: es, session: rs, port: port, maxHeight: 300, editor: FlutterEditor.new))));
       await tester.pump();
       await tester.enterText(fieldFinder, 'hello');
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);

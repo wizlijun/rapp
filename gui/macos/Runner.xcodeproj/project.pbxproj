@@ -32,6 +32,8 @@
 		A5E551000000000000000F12 /* UnlockPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5E551000000000000000F11 /* UnlockPlugin.swift */; };
 		A5E5510000000000000000B2 /* DetachedWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5E5510000000000000000B1 /* DetachedWindow.swift */; };
 		A5E5510000000000000000A5 /* RappSession in Frameworks */ = {isa = PBXBuildFile; productRef = A5E5510000000000000000A4 /* RappSession */; };
+		A5E552000000000000000002 /* ComposerPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5E552000000000000000001 /* ComposerPlugin.swift */; };
+		A5E552000000000000000012 /* ComposerNative.m in Sources */ = {isa = PBXBuildFile; fileRef = A5E552000000000000000011 /* ComposerNative.m */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -87,6 +89,8 @@
 		A5E5510000000000000000A1 /* SessionPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionPlugin.swift; sourceTree = "<group>"; };
 		A5E551000000000000000F11 /* UnlockPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnlockPlugin.swift; sourceTree = "<group>"; };
 		A5E5510000000000000000B1 /* DetachedWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetachedWindow.swift; sourceTree = "<group>"; };
+		A5E552000000000000000001 /* ComposerPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerPlugin.swift; sourceTree = "<group>"; };
+		A5E552000000000000000011 /* ComposerNative.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ComposerNative.m; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -177,6 +181,8 @@
 				33CC10F02044A3C60003C045 /* AppDelegate.swift */,
 				33CC11122044BFA00003C045 /* MainFlutterWindow.swift */,
 				A5E5510000000000000000A1 /* SessionPlugin.swift */,
+				A5E552000000000000000011 /* ComposerNative.m */,
+				A5E552000000000000000001 /* ComposerPlugin.swift */,
 				A5E551000000000000000F11 /* UnlockPlugin.swift */,
 				A5E5510000000000000000B1 /* DetachedWindow.swift */,
 				33E51913231747F40026EE4D /* DebugProfile.entitlements */,
@@ -369,6 +375,8 @@
 			files = (
 				33CC11132044BFA00003C045 /* MainFlutterWindow.swift in Sources */,
 				A5E5510000000000000000A2 /* SessionPlugin.swift in Sources */,
+				A5E552000000000000000012 /* ComposerNative.m in Sources */,
+				A5E552000000000000000002 /* ComposerPlugin.swift in Sources */,
 				A5E551000000000000000F12 /* UnlockPlugin.swift in Sources */,
 				A5E5510000000000000000B2 /* DetachedWindow.swift in Sources */,
 				33CC10F12044A3C60003C045 /* AppDelegate.swift in Sources */,

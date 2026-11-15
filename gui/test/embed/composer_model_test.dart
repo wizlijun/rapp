@@ -29,6 +29,12 @@ class _CountingEditor extends FakeEditor {
   }
 }
 
+class _SlowReadEditor extends FakeEditor {
+  final gate = Completer<String>();
+  @override
+  Future<String> read() => gate.future;
+}
+
 void main() {
   late ComposerModel m;
   late FakeEditor ed;
@@ -46,6 +52,19 @@ void main() {
   });
 
   tearDown(() => m.dispose());
+
+  test('reopening waits for the previous native draft read before initializing the editor', () async {
+    final old = _SlowReadEditor();
+    await m.attach(old);
+    final detached = m.detach(old);
+    final next = FakeEditor();
+    final attached = m.attach(next);
+    old.gate.complete('刚完成的组字');
+    await detached;
+    await attached;
+    expect(m.draft, '刚完成的组字');
+    expect(next.value, '刚完成的组字');
+  });
 
   test('submit takes the text: blocks first, then text; the editor is empty', () async {
     m.apply(const PasteResult(blocks: [BlockChip(1, '图片 #1')]));

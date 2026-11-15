@@ -20,6 +20,8 @@ class MainFlutterWindow: NSWindow {
     UnlockPlugin.register(with: flutterViewController.registrar(forPlugin: "RappUnlock"))
     SessionPlugin.register(with: flutterViewController.registrar(forPlugin: "RappSession"))
 
+    ComposerPlugin.register(with: flutterViewController.registrar(forPlugin: "RappComposer"))
+
     super.awakeFromNib()
   }
 }

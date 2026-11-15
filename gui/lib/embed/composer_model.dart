@@ -79,6 +79,8 @@ class ComposerModel extends ChangeNotifier {
   }
 
   ComposerEditor? _editor;
+  Future<void>? _detaching;
+  Future<void>? _attached;
   Timer? _idleTimer;
 
   /// Set by the panel from the editor's onFocus.
@@ -121,19 +123,36 @@ class ComposerModel extends ChangeNotifier {
   }
 
   /// The editor takes over; it starts with [draft].
-  void attach(ComposerEditor e) {
+  Future<void> attach(ComposerEditor e) {
     _editor = e;
-    e.setText(draft);
+    final previous = _detaching;
+    if (previous == null) {
+      e.setText(draft);
+      _attached = null;
+      return SynchronousFuture<void>(null);
+    }
+    // A native read may finish after the next panel mounts. Restore only after that read,
+    // before the new editor takes focus; otherwise reopening can resurrect an older draft.
+    return _attached = previous.then((_) => e.setText(draft));
   }
 
   /// The editor goes away: its text is copied into [draft]. It no longer has the focus (its
   /// dispose drops the focus listener first, so no onFocus(false) comes).
-  Future<void> detach(ComposerEditor e) async {
-    if (!identical(_editor, e)) return;
+  Future<void> detach(ComposerEditor e) {
+    if (!identical(_editor, e)) return Future.value();
     _editor = null;
     editorFocused = false;
     _idleTimer?.cancel();
-    draft = await e.read();
+    final ready = _attached;
+    Future<void> copy() async {
+      draft = await e.read();
+    }
+    final work = ready == null ? copy() : ready.then((_) => copy());
+    late final Future<void> pending;
+    pending = work.whenComplete(() {
+      if (identical(_detaching, pending)) _detaching = null;
+    });
+    return _detaching = pending;
   }
 
   /// Replaces the text: into the editor if attached, else the draft.

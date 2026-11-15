@@ -410,6 +410,16 @@ class MainState extends ChangeNotifier {
   }
 
   // ---- picture focus (R15, R24) ----
+  /// Native blur arrives after the frame that requested it. Let Picture retry its focus guard.
+  void composerFocusChanged(RemoteSession session, bool focused) {
+    session.composer.editorFocused = focused;
+    if (focused) {
+      blurPicture();
+    } else if (pictureFocused == session.sid) {
+      notifyListeners();
+    }
+  }
+
   /// Bumped when the terminal stage of [termFocusSid] should take the keyboard; the stage follows it.
   int termFocusTick = 0;
   Object? termFocusSid;

@@ -12,3 +12,5 @@ PRODUCT_BUNDLE_IDENTIFIER = com.rapp.rapp
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 com.rapp. All rights reserved.
+
+SWIFT_OBJC_BRIDGING_HEADER = $(PROJECT_DIR)/Runner/Runner-Bridging-Header.h

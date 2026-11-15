@@ -4,6 +4,7 @@
 // at send, session switch, 1 s idle and collapse (spec §5). The draft is the session's (R18).
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../history/input_history.dart';
@@ -17,6 +18,7 @@ import 'composer_float.dart';
 import 'composer_model.dart';
 import 'composer_plus.dart';
 import 'flutter_editor.dart';
+import 'native_editor.dart';
 import 'remote_session.dart';
 import 'session_port.dart';
 
@@ -50,7 +52,7 @@ class ComposerPanel extends StatefulWidget {
   /// The box's height limit (W3: half the stage); the editor scrolls inside it.
   final double maxHeight;
 
-  /// Makes the editing area; [FlutterEditor] by default.
+  /// Makes the editing area; NSTextView on macOS, [FlutterEditor] elsewhere.
   final ComposerEditor Function()? editor;
 
   @override
@@ -61,6 +63,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
   late final ComposerEditor _ed;
   late final RemoteSession _s;
   late final ComposerModel _m;
+  late final Future<void> _attached;
   late int _focusSeen, _releaseSeen;
 
   @override
@@ -68,7 +71,20 @@ class _ComposerPanelState extends State<ComposerPanel> {
     super.initState();
     _s = widget.session;
     _m = _s.composer;
-    _ed = (widget.editor ?? FlutterEditor.new)();
+    _ed = widget.editor?.call() ??
+        (!kIsWeb && defaultTargetPlatform == TargetPlatform.macOS
+            ? NativeEditor(
+                onToggleFocus: widget.state.composerKey,
+                onShortcut: (key) {
+                  switch (key) {
+                    case '[': widget.state.step(-1);
+                    case ']': widget.state.step(1);
+                    case 'o': widget.state.toggleOverview();
+                    case 'd': widget.state.toggleDetach();
+                  }
+                },
+              )
+            : FlutterEditor());
     _ed.handlers = EditorHandlers(
       onChanged: _changed,
       onEnter: _submit,
@@ -77,7 +93,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
       onFocus: _focused,
       onArrow: _arrow,
     );
-    _m.attach(_ed);
+    _attached = _m.attach(_ed);
     _focusSeen = _m.focusTick;
     _releaseSeen = _m.releaseTick;
     _m.addListener(_modelChanged);
@@ -161,8 +177,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
   }
 
   void _focused(bool on) {
-    _m.editorFocused = on;
-    if (on) widget.state.blurPicture();
+    if (mounted) widget.state.composerFocusChanged(_s, on);
   }
 
   void _modelChanged() {
@@ -179,17 +194,26 @@ class _ComposerPanelState extends State<ComposerPanel> {
 
   /// The editor gets key focus, and the picture loses it (also when the editor already had
   /// Flutter's focus while the picture took the keys).
-  void _takeCaret() {
+  Future<void> _takeCaret() async {
+    await _attached;
+    if (!mounted) return;
     _ed.focus();
     widget.state.blurPicture();
     if (_m.takeReplay()) {
       // The held compose letter goes back to the window only after the editor is the text input
       // client (focus attaches it in a microtask), so B's input method composes it: next frame.
       final sid = _s.sid;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) widget.port.composeReplay(sid);
-      });
-      WidgetsBinding.instance.scheduleFrame();
+      final ed = _ed;
+      if (ed is NativeEditor) {
+        ed.readyForInput.then((_) {
+          if (mounted && _m.editorFocused) widget.port.composeReplay(sid);
+        });
+      } else {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) widget.port.composeReplay(sid);
+        });
+        WidgetsBinding.instance.scheduleFrame();
+      }
     }
   }
 
@@ -357,7 +381,10 @@ class _ComposerPanelState extends State<ComposerPanel> {
         builder: (context, _) {
           final t = RappTokens.of(context);
           final style = EditorStyle(
-            text: TextStyle(fontSize: 15, height: 22 / 15, fontFamily: t.font, color: t.text, shadows: const []),
+            text: TextStyle(
+              fontSize: 15, height: 22 / 15, fontFamily: t.font,
+              fontFamilyFallback: t.fontFallback, color: t.text, shadows: const [],
+            ),
             color: t.text,
             hintColor: t.muted,
             cursor: t.text,
@@ -464,7 +491,11 @@ class _ComposerPanelState extends State<ComposerPanel> {
 /// 「输入」 just left of the right group; on a stage narrower than [keyRowWideAt] with the panel open, a line of its
 /// own right above the panel.
 List<Widget> composerLayer(
-    {required MainState state, required RemoteSession session, required SessionPort port, bool keyRow = false}) {
+    {required MainState state,
+    required RemoteSession session,
+    required SessionPort port,
+    bool keyRow = false,
+    ComposerEditor Function()? editor}) {
   final both = Listenable.merge([session, session.composer]);
   final term = port is TermSessionPort ? port : null;
   final keys = keyRow && term != null;
@@ -483,6 +514,7 @@ List<Widget> composerLayer(
                         session: session,
                         onPlace: (p) => state.placeComposer(session, p),
                         child: ComposerPanel(
+                          editor: editor,
                           key: ValueKey(session.sid),
                           state: state,
                           session: session,
@@ -506,6 +538,7 @@ List<Widget> composerLayer(
                             // Keyed by session: a switch is a new panel, and the old one's dispose
                             // copies its text into its own session's draft.
                             child: ComposerPanel(
+                              editor: editor,
                               key: ValueKey(session.sid),
                               state: state,
                               session: session,

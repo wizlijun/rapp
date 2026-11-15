@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
+import '../embed/composer_editor.dart';
 import '../embed/composer_panel.dart';
 import '../embed/picture.dart';
 import '../embed/remote_session.dart';
@@ -28,8 +29,9 @@ Future<void> requestUnlock(BuildContext context, MainState state, String device)
 }
 
 class Stage extends StatelessWidget {
-  const Stage({super.key, required this.state});
+  const Stage({super.key, required this.state, this.composerEditor});
   final MainState state;
+  final ComposerEditor Function()? composerEditor;
 
   @override
   Widget build(BuildContext context) {
@@ -181,7 +183,8 @@ class Stage extends StatelessWidget {
             return Stack(
               children: [
                 Positioned.fill(child: _lifted(rs, stage, keyRow: keyRow, narrow: c.maxWidth < keyRowWideAt)),
-                ...composerLayer(state: state, session: rs, port: state.portOf(rs.sid)!, keyRow: keyRow),
+                ...composerLayer(state: state, session: rs, port: state.portOf(rs.sid)!,
+                    keyRow: keyRow, editor: composerEditor),
               ],
             );
           }
@@ -193,7 +196,7 @@ class Stage extends StatelessWidget {
             children: [
               stage,
               if (!full && (picture || (rs != null && rs.detached)) && rs != null && port != null)
-                ...composerLayer(state: state, session: rs, port: port),
+                ...composerLayer(state: state, session: rs, port: port, editor: composerEditor),
               if (banner != null || screens.length > 1)
                 Positioned(
                   top: 0, left: 0, right: 0,

@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/app_profile.dart';
 import 'package:rapp/embed/composer_panel.dart' show pictureLift;
+import 'package:rapp/embed/flutter_editor.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/paths.dart';
@@ -78,7 +79,7 @@ void main() {
             height: 700,
             child: Column(children: [
               TopBar(state: s, fullscreen: false, onToggleFullscreen: () {}),
-              Expanded(child: Stage(state: s)),
+              Expanded(child: Stage(state: s, composerEditor: FlutterEditor.new)),
             ]),
           ),
         ),
