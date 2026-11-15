@@ -27,6 +27,9 @@ class FakeService {
   /// Replies to the update and reset commands, by `cmd`; `{"ok":true}` when not set.
   final replies = <String, Map<String, dynamic>>{};
 
+  /// How long a command carrying `to` is held before its reply.
+  Duration? holdRemote;
+
   int get port => server.port;
 
   Future<void> start() async {
@@ -78,6 +81,13 @@ class FakeService {
               'set_auto_lock' ||
               'permissions_reset':
           s.write('${jsonEncode(replies[m['cmd']] ?? {'ok': true})}\n');
+        case 'shares' || 'share' || 'unshare':
+          final reply = '${jsonEncode(replies[m['cmd']] ?? {'ok': true, 'shares': [], 'known': []})}\n';
+          if (holdRemote != null && m['to'] != null) {
+            Future<void>.delayed(holdRemote!, () => s.write(reply));
+          } else {
+            s.write(reply);
+          }
         default:
           s.write('{"ok":false,"error":"unknown cmd"}\n');
       }
@@ -358,6 +368,39 @@ void main() {
       await m.permissionsReset();
       expect(svc.received.map((r) => r['cmd']).where((c) => c != 'status' && c != 'subscribe'),
           ['set_update', 'update_check', 'update_apply', 'update_dismiss', 'update_rollback', 'permissions_reset']);
+      await svc.stop();
+      m.dispose();
+    });
+
+    test('remote share calls use their own connection', () async {
+      final svc = FakeService('tok-r1')..holdRemote = const Duration(seconds: 1);
+      await svc.start();
+      final m = ServiceMonitor(readToken: () async => 'tok-r1', port: svc.port, retry: const Duration(milliseconds: 50));
+      m.start();
+      await until(() => m.status != null);
+      var done = false;
+      final call = m.shares(to: '123456789').then((_) => done = true);
+      await until(() => svc.received.any((r) => r['cmd'] == 'shares'));
+      await m.refresh().timeout(const Duration(milliseconds: 500));
+      expect(done, isFalse);
+      await call;
+      expect(done, isTrue);
+      await svc.stop();
+      m.dispose();
+    });
+
+    test('share sends to, ports, note and allow; leaves out what is null', () async {
+      final svc = FakeService('tok-r2');
+      await svc.start();
+      final m = ServiceMonitor(readToken: () async => 'tok-r2', port: svc.port, retry: const Duration(milliseconds: 50));
+      m.start();
+      await until(() => m.status != null);
+      await m.share(to: '123456789', ports: [8000]);
+      expect(svc.received.last, {'cmd': 'share', 'to': '123456789', 'ports': [8000]});
+      await m.share(ports: [22, 80], note: 'n', allow: ['ab']);
+      expect(svc.received.last, {'cmd': 'share', 'ports': [22, 80], 'note': 'n', 'allow': ['ab']});
+      await m.unshare(port: 8000);
+      expect(svc.received.last, {'cmd': 'unshare', 'port': 8000});
       await svc.stop();
       m.dispose();
     });

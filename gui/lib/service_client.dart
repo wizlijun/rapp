@@ -5,6 +5,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
+import 'shares.dart';
 import 'update.dart';
 
 const servicePort = 22029;
@@ -46,6 +47,7 @@ class ServiceStatus {
     this.relayError,
     this.hasKey = false,
     this.fp,
+    this.rappNames = false,
   });
 
   final String? id;
@@ -83,6 +85,9 @@ class ServiceStatus {
   /// This device's fingerprint.
   final String? fp;
 
+  /// Devices can be reached as `<id>.rapp`.
+  final bool rappNames;
+
   /// The relay can be used: an address and a valid key (an address alone, e.g. with 0.5.5's key, is not).
   bool get relaySet => hasKey && relayAddr != null;
 
@@ -108,6 +113,7 @@ class ServiceStatus {
       relayError: (m['relay_error']?.toString() ?? '').isEmpty ? null : m['relay_error'].toString(),
       hasKey: m['has_key'] == true,
       fp: m['fp']?.toString(),
+      rappNames: m['rapp_names'] == true,
       sessions: (m['sessions'] as List? ?? const [])
           .whereType<Map>()
           .map((s) => ServiceSession(s['sid'] as Object, '${s['peer'] ?? ''}', '${s['app'] ?? ''}',
@@ -235,7 +241,7 @@ class ServiceConnection {
 
 /// Keeps a live view of the service: connects (retrying), subscribes,
 /// and re-reads status on every `changed` event.
-class ServiceMonitor extends ChangeNotifier {
+class ServiceMonitor extends ChangeNotifier implements SharesApi {
   ServiceMonitor({
     required this.readToken,
     this.port = servicePort,
@@ -253,6 +259,7 @@ class ServiceMonitor extends ChangeNotifier {
 
   ServiceConnection? _cmd;
   ServiceConnection? _sub;
+  ServiceConnection? _remote;
   Timer? _timer;
   var _disposed = false;
   var _connecting = false;
@@ -318,11 +325,13 @@ class ServiceMonitor extends ChangeNotifier {
   }
 
   void _closeAll() {
-    final c = _cmd, s = _sub;
+    final c = _cmd, s = _sub, r = _remote;
     _cmd = null;
     _sub = null;
+    _remote = null;
     c?.close();
     s?.close();
+    r?.close();
   }
 
   ServiceConnection _need() => _cmd ?? (throw ServiceException('service not running'));
@@ -365,6 +374,48 @@ class ServiceMonitor extends ChangeNotifier {
       _then((c) => c.setUpdate(autoUpdate: autoUpdate, checkUpdates: checkUpdates));
   Future<Map<String, Object?>> setAutoLock(bool on) => _then((c) => c.setAutoLock(on));
   Future<Map<String, Object?>> permissionsReset() => _then((c) => c.permissionsReset());
+
+  @override
+  bool get rappNames => status?.rappNames ?? false;
+
+  /// A call to another device can wait seconds for it, so these commands get a connection of their own,
+  /// opened on first use and again after it breaks; the status connection never queues behind them.
+  Future<Map<String, dynamic>> _remoteRequest(Map<String, dynamic> cmd) async {
+    if (_cmd == null) throw ServiceException('service not running');
+    var c = _remote;
+    if (c == null) {
+      final token = await readToken();
+      if (token == null || token.isEmpty) throw ServiceException('service not running');
+      try {
+        c = await ServiceConnection.connect(token: token, port: port);
+      } on SocketException {
+        throw ServiceException('service not running');
+      }
+      _remote = c;
+      final made = c;
+      c.done.then((_) {
+        if (identical(_remote, made)) _remote = null;
+      });
+    }
+    return c.request(cmd);
+  }
+
+  @override
+  Future<ShareTable> shares({String? to}) async =>
+      ShareTable.fromJson(await _remoteRequest({'cmd': 'shares', 'to': ?to}));
+
+  @override
+  Future<List<Shared>> share({String? to, required List<int> ports, String? note, List<String>? allow}) async {
+    final r = await _remoteRequest({'cmd': 'share', 'to': ?to, 'ports': ports, 'note': ?note, 'allow': ?allow});
+    return [
+      for (final s in (r['shared'] as List? ?? const []))
+        if (s is Map) Shared(port: (s['port'] as num).toInt(), warn: s['warn']?.toString()),
+    ];
+  }
+
+  @override
+  Future<bool> unshare({String? to, required int port}) async =>
+      (await _remoteRequest({'cmd': 'unshare', 'to': ?to, 'port': port}))['was'] == true;
 
   @override
   void dispose() {

@@ -40,6 +40,8 @@ Future<void> openUrl(String url) async {
       await Process.start('open', [url], mode: ProcessStartMode.detached);
     } else if (Platform.isLinux) {
       await Process.start('xdg-open', [url], mode: ProcessStartMode.detached);
+    } else if (Platform.isWindows) {
+      await Process.start('cmd', ['/c', 'start', '', url], mode: ProcessStartMode.detached);
     }
   } catch (_) {
     // No opener: nothing to do.
