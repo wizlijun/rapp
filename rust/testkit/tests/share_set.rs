@@ -156,6 +156,8 @@ async fn the_65th_port_is_limit_and_nothing_changes() {
     let before = std::fs::read(&file).unwrap();
     let r = say(&a, &key, &b, json!({"op":"share","ports":[7000]})).await;
     assert_eq!(r, json!({"ok":false,"error":"limit"}));
+    let l = wait_log(a.home.path(), "share_refused", |v| v["reason"] == "limit").await;
+    assert_eq!((&l["op"], &l["by"]), (&json!("share"), &json!(b.id.fp.short())), "{l}");
     assert_eq!(std::fs::read(&file).unwrap(), before);
     let r = say(&a, &key, &b, json!({"op":"share","ports":[6001,7000],"note":"x"})).await;
     assert_eq!(r, json!({"ok":false,"error":"limit"}));

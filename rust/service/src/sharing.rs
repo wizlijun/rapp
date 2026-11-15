@@ -162,7 +162,7 @@ async fn answer(state: &Arc<State>, op: &Op, peer: &Peer) -> Value {
         _ => "unshare",
     };
     if let Err(d) = admit(&Caller { fp: peer.fp.as_ref(), server: false }, true) {
-        state.log.event(Lvl::Warn, "share_refused", peer.fields(json!({"op": name, "reason": d.as_str()})));
+        state.log.event(Lvl::Warn, "share_refused", By::Remote(peer).fields(json!({"op": name, "reason": d.as_str()})));
         return err(d.as_str());
     }
     let by = By::Remote(peer);
@@ -210,7 +210,7 @@ async fn answer(state: &Arc<State>, op: &Op, peer: &Peer) -> Value {
 }
 
 fn refused(state: &State, peer: &Peer, op: &str, reason: String) -> Value {
-    state.log.event(Lvl::Warn, "share_refused", peer.fields(json!({"op": op, "reason": reason})));
+    state.log.event(Lvl::Warn, "share_refused", By::Remote(peer).fields(json!({"op": op, "reason": reason})));
     err(&reason)
 }
 
