@@ -17,7 +17,11 @@ void main() {
 
   test('every row: authoring field order, none / true / [] / tested false', () {
     for (final e in (raw['apps'] as List).cast<Map>()) {
-      expect(e.keys.toList(), ['name', 'ids', 'stream', 'afterSend', 'composer', 'windows', 'tested']);
+      expect(e.keys.toList(), [
+        'name', 'ids', 'stream', 'afterSend', 'composer',
+        if (e.containsKey('typeToCompose')) 'typeToCompose',
+        'windows', 'tested',
+      ]);
       expect(e['afterSend'], 'none');
       expect(e['composer'], true);
       expect(e['windows'], isEmpty);
@@ -47,6 +51,13 @@ void main() {
       'sh.paseo.desktop duocolor/adaptive/15',
       'net.notemd.app duocolor/adaptive/5',
     ]);
+  });
+
+  test('terminal emulators keep letters for A (vim, less, y/n, sudo password); the rest compose', () {
+    // A streamed terminal lives on single letters; a password typed there must not land in the draft.
+    expect([for (final p in apps) if (p.typeToCompose == false) p.name], ['终端', 'iTerm2', 'Ghostty', 'Warp']);
+    expect(resolveProfile('com.apple.Terminal', mine: const [], builtin: apps).typeToCompose, isFalse);
+    expect(resolveProfile('com.anthropic.claudefordesktop', mine: const [], builtin: apps).typeToCompose, isTrue);
   });
 
   test('no id appears in two built-in profiles', () {
