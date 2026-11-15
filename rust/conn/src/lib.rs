@@ -1,6 +1,7 @@
 //! Device-to-device connections: end-to-end TLS over any byte stream, the key-trust proof
 //! bound to the TLS handshake, the hello exchange and the list of paired devices.
 
+pub mod dial;
 pub mod e2e;
 pub mod hello;
 pub mod netq;

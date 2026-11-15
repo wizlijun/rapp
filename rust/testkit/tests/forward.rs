@@ -284,3 +284,130 @@ async fn an_unreadable_shares_file_starts_empty_and_says_so() {
     wait_log(a.home.path(), "shares_unreadable", |_| true).await;
     assert_eq!(std::fs::read(a.home.path().join("shares.json")).unwrap(), b"{not json");
 }
+
+// ---- Outbound: one request to another device, LAN first, then the relay (Task 5) ----
+
+use rapp_conn::dial::{NotReached, Outbound, Target, Via};
+use rapp_net::msg::Op;
+use std::sync::Arc;
+
+/// An `Outbound` that dials as the device whose identity is kept in `home`.
+fn outbound(home: &Path) -> Outbound {
+    let identity = Arc::new(rapp_wire::Identity::load_or_create(home, "device").unwrap());
+    Outbound::new(b_endpoint(), identity, "test-b".into())
+}
+
+/// The fingerprint a service shows, as `status` reports it.
+async fn fp_of(a: &TestService) -> String {
+    ipc_once(&a.svc, a.home.path(), json!({"cmd":"status"})).await["fp"].as_str().unwrap().to_string()
+}
+
+/// The `NotReached` text of `e`, if it is one.
+fn not_reached(e: &anyhow::Error) -> Option<&'static str> {
+    e.downcast_ref::<NotReached>().map(|n| n.0)
+}
+
+#[tokio::test]
+async fn outbound_reaches_a_device_on_the_lan_address() {
+    let rig = RelayRig::start().await;
+    let a = a_on_relay(&rig, Some(vec![])).await;
+    let b = tempfile::tempdir().unwrap();
+    let out = outbound(b.path());
+    let lan = [a_addr(&a.svc).to_string()];
+    let to = Target { id: &a.id, lan: &lan, known: None };
+    let sent = out.request(&Via { relay: None, key: &rig.key }, &to, &Op::Ping).await.unwrap();
+    assert_eq!(sent.reply["ok"], true, "{}", sent.reply);
+    // 127.0.0.1 is a private address by the hub's `direct_path` rule.
+    assert_eq!(sent.path, "lan");
+    assert_eq!(sent.fp.to_string(), fp_of(&a).await);
+    out.close();
+}
+
+#[tokio::test]
+async fn outbound_goes_through_the_relay_when_there_is_no_address() {
+    let rig = RelayRig::start().await;
+    let a = a_on_relay(&rig, Some(vec![])).await;
+    let b = tempfile::tempdir().unwrap();
+    let out = outbound(b.path());
+    let before = rig.streams();
+    let to = Target { id: &a.id, lan: &[], known: None };
+    let sent = out.request(&Via { relay: Some(&rig.addr), key: &rig.key }, &to, &Op::Ping).await.unwrap();
+    assert_eq!(sent.reply["ok"], true, "{}", sent.reply);
+    assert_eq!(sent.path, "relay");
+    assert_eq!(sent.fp.to_string(), fp_of(&a).await);
+    // The relay writes a stream down when it ends.
+    drop(sent);
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while rig.streams() == before {
+        assert!(tokio::time::Instant::now() < deadline, "nothing went through the relay");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(rig.streams(), before + 1);
+    out.close();
+}
+
+#[tokio::test]
+async fn a_second_request_reuses_the_direct_connection() {
+    let rig = RelayRig::start().await;
+    let a = a_on_relay(&rig, Some(vec![])).await;
+    let b = tempfile::tempdir().unwrap();
+    let b_fp = rapp_wire::Identity::load_or_create(b.path(), "device").unwrap().fp.to_string();
+    let out = outbound(b.path());
+    let lan = [a_addr(&a.svc).to_string()];
+    let to = Target { id: &a.id, lan: &lan, known: None };
+    let via = Via { relay: None, key: &rig.key };
+    for _ in 0..2 {
+        let sent = out.request(&via, &to, &Op::Ping).await.unwrap();
+        assert_eq!((&sent.reply["ok"], sent.path), (&json!(true), "lan"), "{}", sent.reply);
+    }
+    wait_log(a.home.path(), "trust", |v| v["fp"] == b_fp).await;
+    let trusts = log_events(a.home.path()).into_iter().filter(|v| v["ev"] == "trust" && v["fp"] == b_fp).count();
+    assert_eq!(trusts, 1, "{:?}", log_events(a.home.path()));
+    out.close();
+}
+
+#[tokio::test]
+async fn an_id_the_relay_does_not_know_and_one_that_is_offline() {
+    let rig = RelayRig::start().await;
+    let a = a_on_relay(&rig, Some(vec![])).await;
+    let b = tempfile::tempdir().unwrap();
+    let out = outbound(b.path());
+    let via = Via { relay: Some(&rig.addr), key: &rig.key };
+    let e = out.request(&via, &Target { id: "999999999", lan: &[], known: None }, &Op::Ping).await.err().unwrap();
+    assert_eq!(not_reached(&e), Some("unknown id"), "{e:#}");
+    assert_eq!(e.to_string(), "unknown id");
+    let to = Target { id: &a.id, lan: &[], known: None };
+    assert_eq!(out.request(&via, &to, &Op::Ping).await.unwrap().reply["ok"], true);
+    a.svc.stop();
+    // The relay learns A is gone a moment after.
+    let deadline = tokio::time::Instant::now() + WAIT;
+    loop {
+        let r = out.request(&via, &to, &Op::Ping).await;
+        if let Err(e) = &r {
+            if not_reached(e) == Some("offline") {
+                assert_eq!(e.to_string(), "offline");
+                break;
+            }
+        }
+        assert!(tokio::time::Instant::now() < deadline, "{:?}", r.map(|s| s.reply));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    out.close();
+}
+
+#[tokio::test]
+async fn a_device_with_another_key_is_not_trusted() {
+    let rig = RelayRig::start().await;
+    let a = a_on_relay(&rig, Some(vec![])).await;
+    let b = tempfile::tempdir().unwrap();
+    let out = outbound(b.path());
+    let other = rapp_wire::Key::new_local();
+    let lan = [a_addr(&a.svc).to_string()];
+    let to = Target { id: &a.id, lan: &lan, known: None };
+    let r = out.request(&Via { relay: None, key: &other }, &to, &Op::Ping).await;
+    let e = r.err().expect("an error, not a reply");
+    assert_eq!(not_reached(&e), None, "{e:#}");
+    assert_eq!(e.to_string(), "not trusted");
+    wait_log(a.home.path(), "trust", |v| v["result"] == "refused").await;
+    out.close();
+}
