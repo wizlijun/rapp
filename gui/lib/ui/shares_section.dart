@@ -4,22 +4,24 @@ import 'package:flutter/services.dart';
 
 import '../shares.dart';
 import '../term/term_stage.dart' as term;
+import 'allow_dialog.dart';
 import 'controls.dart';
 import 'inline_edit.dart';
 import 'lamp.dart';
 import 'tokens.dart';
 
-/// Asks which devices may use [row]; null means leave it as it is (Task 7 supplies the real dialog).
+/// Asks which devices may use [row]; null means leave it as it is.
 typedef PickAllow = Future<List<String>?> Function(BuildContext context, ShareRow row, List<Device> known);
 
-Future<List<String>?> _noPick(BuildContext context, ShareRow row, List<Device> known) async => null;
+Future<List<String>?> _dialogPick(BuildContext context, ShareRow row, List<Device> known) =>
+    showAllowDialog(context, candidates: known, current: row.allow);
 
 class SharesSection extends StatefulWidget {
   const SharesSection({
     super.key,
     required this.api,
     this.to,
-    this.pickAllow = _noPick,
+    this.pickAllow = _dialogPick,
     this.open = term.openUrl,
   });
   final SharesApi api;
@@ -138,7 +140,7 @@ class _SharesSectionState extends State<SharesSection> {
     final allow = await widget.pickAllow(context, row, known);
     if (allow == null || !mounted) return;
     await _set(() async {
-      await widget.api.share(to: widget.to, ports: [row.port], note: row.note, allow: allow);
+      await widget.api.share(to: widget.to, ports: [row.port], allow: allow);
     });
   }
 

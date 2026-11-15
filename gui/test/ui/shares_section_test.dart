@@ -217,7 +217,7 @@ void main() {
     await t.tap(find.byKey(const Key('share-allow-8000')));
     await t.pump();
     expect(got?.port, 8000);
-    expect(api.calls, contains('share null [8000] n [b]'));
+    expect(api.calls, contains('share null [8000] null [b]'));
   });
 
   testWidgets('refresh asks again; nothing is asked on a timer', (t) async {
