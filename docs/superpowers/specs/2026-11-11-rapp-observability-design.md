@@ -83,9 +83,18 @@
 | `transfer` | info | `sid, dir`（`a_to_b`、`b_to_a`），`kind`（text、image、files、data），`bytes`，`name?` | 一次剪贴板或文件传输完成。由 host 的 stdout 事件转写（§4.3）。文件只记名字，不记内容 |
 | `kick` | info | `sid` | GUI 或 cm 发了断开 |
 | `worker_exit` | info/warn | `app, code, reason` | rapp-host 退出 |
+| `share` | info | `port, allow`（只给几台设备，0 是所有持 key 的设备） | IPC `share` 每个端口一行，再分享一次同一个端口也记（`rust/service/src/ipc.rs:254`） |
+| `unshare` | info | `port` | IPC `unshare` 真的删掉了一项时（`rust/service/src/ipc.rs:300`） |
+| `shares_unreadable` | warn | `err` | 启动时 `local/shares.json` 读不懂，分享表当作空的（配置规范 §2.11，`rust/service/src/lib.rs:121-124`） |
+| `forward_open` | info | `peer, name?, path, fp, port` | 一条转发连接接上了本机端口，回 `ok` 之前。`forward_log` 是 `each` 时每条一行；合并（默认）时只记这个（来访设备, 端口）自上次 `forward_sum` 以来的第一条。连接还开着、服务就停了，也已经有记录（`rust/service/src/forward_log.rs:71`） |
+| `forward` | info | `peer, name?, path, fp, port, secs, bytes_in, bytes_out` | 一条转发连接结束。`each` 每条一行；合并时只记第一条，其余算进 `forward_sum`。`bytes_in` 是来访设备发来的，`bytes_out` 是发给它的（`forward_log.rs:83`） |
+| `forward_sum` | info | `peer, name?, path, fp, port, conns, bytes_in, bytes_out` | 只在合并时有：每 10 分钟一次，服务停止时再一次；这段时间里有连接结束的每个（来访设备, 端口）一行，`conns` 和字节数含第一条（`forward_log.rs:130`） |
+| `forward_refused` | warn | `peer, name?, path, fp?, port?, reason` | `forward` 或 `list_shares` 被拒。reason 取 `not supported`（旧的密码认证连接）、`host only`、`policy`、`not shared`、`not allowed`、`refused`（端口上没有服务在听）、`limit`（这台来访设备已有 256 条转发）。同一（来访设备, 端口, 原因）60 秒内只记一行；`list_shares` 被拒的没有 `port`（`forward_log.rs:106`） |
 | `log` | 任意 | `msg, src?, app?` | 原来的 `eprintln!`，以及 worker 的 stderr 行（加上 `src:"host"` 和 `app`） |
 
 `peer` 是对方的地址。走 relay 时，就是 relay 报来的 B 的公网地址。
+
+端口分享的几个事件（`share` 到 `forward_refused`，端口分享规格 §14.3）：来访设备按指纹区分，没有指纹时按地址。`fp` 是来访设备的指纹（64 位十六进制）。只记地址、名字、指纹、端口、字节数和时长，不记流里的内容。`list_shares` 成功不记。这几个事件现在不进 IPC `history`（§6）。
 
 **`name`**（新增，可选）：B 自报的设备名，取 hub 所在机器的主机名。
 - 直连时放在 `Op::Auth` 里；走 relay 时放在 `Op::Connect` 里，由 relay 通过 `Op::Incoming` 转给 A。
