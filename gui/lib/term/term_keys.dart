@@ -115,11 +115,11 @@ TermInput? termInputOf(KeyEvent e, {required bool mac, required Set<LogicalKeybo
 
   // K2 shortcuts: Cmd on macOS, Ctrl+Shift elsewhere.
   if (mac && meta) {
-    return _shortcut(phys, shift: shift, plusNeedsShift: false);
+    return _shortcut(e);
   }
   if (!mac && meta) return null;
   if (!mac && ctrl && shift && !alt) {
-    final s = _shortcut(phys, shift: shift, plusNeedsShift: true);
+    final s = _shortcut(e);
     if (s != null) return s;
   }
 
@@ -141,11 +141,14 @@ TermInput? termInputOf(KeyEvent e, {required bool mac, required Set<LogicalKeybo
   final us = _us[phys];
   if (ctrl) {
     if (us == null) return null;
+    // Letters follow the layout (logical key); punctuation uses the US table.
+    final letter = _logicalLetter(logical);
+    if (letter != null) return TermKeys(['${_prefix(true, alt, false)}$letter']);
     final c = shift ? us.$2 : us.$1;
-    final isLetter = RegExp(r'^[a-zA-Z]$').hasMatch(c);
-    if (isLetter || '[]\\@_'.contains(c)) {
+    if (RegExp(r'^[a-zA-Z]$').hasMatch(c)) {
       return TermKeys(['${_prefix(true, alt, false)}${c.toLowerCase()}']);
     }
+    if ('[]\\@_'.contains(c)) return TermKeys(['${_prefix(true, alt, false)}$c']);
     return null;
   }
   if (alt) {
@@ -161,15 +164,21 @@ TermInput? termInputOf(KeyEvent e, {required bool mac, required Set<LogicalKeybo
 
 String _prefix(bool ctrl, bool alt, bool shift) => '${ctrl ? 'Ctrl-' : ''}${alt ? 'Alt-' : ''}${shift ? 'Shift-' : ''}';
 
-/// Copy / paste / find / font size. `plusNeedsShift`: on non-mac, `+` is
-/// Ctrl+Shift+= (shift is already required by the caller).
-TermInput? _shortcut(PhysicalKeyboardKey phys, {required bool shift, required bool plusNeedsShift}) {
-  if (phys == PhysicalKeyboardKey.keyC) return TermAction(TermShortcut.copy);
-  if (phys == PhysicalKeyboardKey.keyV) return TermAction(TermShortcut.paste);
-  if (phys == PhysicalKeyboardKey.keyF ||
-      phys == PhysicalKeyboardKey.equal ||
-      phys == PhysicalKeyboardKey.minus) {
-    return TermReserved();
-  }
+/// The lowercase ASCII letter a logical key is labelled with, or null.
+String? _logicalLetter(LogicalKeyboardKey k) {
+  final l = k.keyLabel;
+  return RegExp(r'^[a-zA-Z]$').hasMatch(l) ? l.toLowerCase() : null;
+}
+
+/// Copy / paste / find / font size. Letters follow the keyboard layout
+/// (logical key, falling back to the US physical position); `=` and `-` use
+/// the physical key. The caller has already checked the modifiers.
+TermInput? _shortcut(KeyEvent e) {
+  final phys = e.physicalKey;
+  final letter = _logicalLetter(e.logicalKey) ?? _us[phys]?.$1;
+  if (letter == 'c') return TermAction(TermShortcut.copy);
+  if (letter == 'v') return TermAction(TermShortcut.paste);
+  if (letter == 'f') return TermReserved();
+  if (phys == PhysicalKeyboardKey.equal || phys == PhysicalKeyboardKey.minus) return TermReserved();
   return null;
 }

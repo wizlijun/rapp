@@ -121,4 +121,21 @@ void main() {
       expectKeys(run(down(PhysicalKeyboardKey.keyC, LogicalKeyboardKey.keyC), _ctrl), ['Ctrl-c']);
     });
   });
+
+  group('non-US layouts', () {
+    test('ctrl+letter follows the logical key', () {
+      // Dvorak: the key labelled C sits on the physical J position.
+      expectKeys(run(down(PhysicalKeyboardKey.keyJ, LogicalKeyboardKey.keyC), _ctrl), ['Ctrl-c']);
+      expectKeys(run(down(PhysicalKeyboardKey.keyJ, LogicalKeyboardKey.keyC), _ctrl, mac: true), ['Ctrl-c']);
+    });
+    test('mac Cmd+C and non-mac Ctrl+Shift+C follow the logical key', () {
+      final e = down(PhysicalKeyboardKey.keyI, LogicalKeyboardKey.keyC, 'c');
+      expect((run(e, _meta, mac: true) as TermAction).action, TermShortcut.copy);
+      expect((run(e, {..._ctrl, ..._shift}) as TermAction).action,
+          TermShortcut.copy);
+      // The physical C position now holds another letter: not a shortcut.
+      final other = down(PhysicalKeyboardKey.keyC, LogicalKeyboardKey.keyJ, 'j');
+      expect(run(other, _meta, mac: true), isNull);
+    });
+  });
 }
