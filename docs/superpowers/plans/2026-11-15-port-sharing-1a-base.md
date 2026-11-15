@@ -81,7 +81,7 @@
 **Interfaces:**
 - Produces: `Op::ListShares`（线上是 `{"op":"list_shares"}`）；`Op::Forward { port: u16 }`（线上是 `{"op":"forward","port":8000}`）。
 
-- [ ] **Step 1: 写失败的测试**（加在 `msg.rs` 的 `tests` 里）
+- [x] **Step 1: 写失败的测试**（加在 `msg.rs` 的 `tests` 里）
 
 ```rust
 #[test]
@@ -94,19 +94,19 @@ fn share_requests() {
 }
 ```
 
-- [ ] **Step 2: 跑，确认失败**
+- [x] **Step 2: 跑，确认失败**
 
 Run: `cargo test -p rapp-net share_requests`
 Expected: 编译失败，`no variant named ListShares`。
 
-- [ ] **Step 3: 在 `Op` 里加两个变体**，各带一行说明。`rust/service/src/peer.rs` 的 `serve_request` 是对 `Op` 的 `match`，这时会编译不过：给它加一个临时分支，两个新变体都回 `err("not supported")`（Task 4 换掉）。
+- [x] **Step 3: 在 `Op` 里加两个变体**，各带一行说明。`rust/service/src/peer.rs` 的 `serve_request` 是对 `Op` 的 `match`，这时会编译不过：给它加一个临时分支，两个新变体都回 `err("not supported")`（Task 4 换掉）。
 
-- [ ] **Step 4: 跑，确认通过**
+- [x] **Step 4: 跑，确认通过**
 
 Run: `cargo test -p rapp-net share_requests && cargo build --workspace`
 Expected: PASS；整个工作区编译通过。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add rust/net/src/msg.rs rust/service/src/peer.rs
@@ -162,7 +162,7 @@ pub fn sensitive(port: u16) -> bool;
 
 `raw` 和 `open_web` 这一步只存不用（第 5 步用）。
 
-- [ ] **Step 1: 写失败的测试**（`shares.rs` 里的 `tests`）
+- [x] **Step 1: 写失败的测试**（`shares.rs` 里的 `tests`）
 
 ```rust
 fn fp(b: u8) -> Fp { Fp([b; 32]) }
@@ -248,19 +248,19 @@ fn sensitive_ports() {
 }
 ```
 
-- [ ] **Step 2: 跑，确认失败**
+- [x] **Step 2: 跑，确认失败**
 
 Run: `cargo test -p rapp-service shares::`
 Expected: 编译失败，`cannot find type Shares`。
 
-- [ ] **Step 3: 实现 `shares.rs`**。文件格式是一个 JSON 数组。`add`、`remove` 在锁里改完就整份写回。
+- [x] **Step 3: 实现 `shares.rs`**。文件格式是一个 JSON 数组。`add`、`remove` 在锁里改完就整份写回。
 
-- [ ] **Step 4: 跑，确认通过**
+- [x] **Step 4: 跑，确认通过**
 
 Run: `cargo test -p rapp-service shares::`
 Expected: 8 个测试 PASS。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add rust/service/src/shares.rs rust/service/src/lib.rs
@@ -312,7 +312,7 @@ impl ForwardLog {
 
 `bytes_in` 是来访设备发来的，`bytes_out` 是发给它的。
 
-- [ ] **Step 1: 写失败的测试**（`forward_log.rs` 的 `tests`；`Log::file(dir, "t.log")` 写文件，`rapp_net::log::read_recent(dir, "t.log", |_| true, 100)` 读回）
+- [x] **Step 1: 写失败的测试**（`forward_log.rs` 的 `tests`；`Log::file(dir, "t.log")` 写文件，`rapp_net::log::read_recent(dir, "t.log", |_| true, 100)` 读回）
 
 ```rust
 fn peer(b: u8) -> Peer { Peer { addr: "1.2.3.4:5".into(), name: Some("mini".into()), path: "lan", fp: Some(Fp([b; 32])) } }
@@ -356,19 +356,19 @@ fn mode_parse() {
 
 把注释里的断言写成代码。限速那一条用可注入的"现在"（`refused_at(&self, now: Instant, …)`，`refused` 调它），测试里不睡。
 
-- [ ] **Step 2: 跑，确认失败**
+- [x] **Step 2: 跑，确认失败**
 
 Run: `cargo test -p rapp-service forward_log::`
 Expected: 编译失败。
 
-- [ ] **Step 3: 实现**。`Service::start` 里起一个任务，每 `opts.forward_sum_every` 调一次 `flush`；`Service::stop` 时再调一次。
+- [x] **Step 3: 实现**。`Service::start` 里起一个任务，每 `opts.forward_sum_every` 调一次 `flush`；`Service::stop` 时再调一次。
 
-- [ ] **Step 4: 跑，确认通过**
+- [x] **Step 4: 跑，确认通过**
 
 Run: `cargo test -p rapp-service forward_log:: && cargo build --workspace`
 Expected: 5 个测试 PASS；工作区编译通过（`Opts` 的所有构造处都填了新字段）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add rust/service/src rust/testkit/tests/common/mod.rs
@@ -425,7 +425,7 @@ pub async fn serve_forward(state: &Arc<State>, s: Pipe, port: u16, peer: Peer) -
 
 `serve_forward` 的顺序：`authorize` → `Forwards::enter`（没有就回 `limit`）→ 连本机（`127.0.0.1:port`，失败再 `[::1]:port`，每个最多等 `LOCAL_CONNECT_WAIT`；都失败回 `refused`）→ 回 `{"ok":true}` → 用 `tokio::io::copy_bidirectional` 对接，同时等 `cuts()` 里出现这个端口 → 结束后 `forward_log.done(…)`。每一种拒绝都调 `forward_log.refused(…)`。`Mode` 取自 `state.cfg` 的 `forward_log`。
 
-- [ ] **Step 1: 写检查点的失败测试**（`forward.rs` 的 `tests`）
+- [x] **Step 1: 写检查点的失败测试**（`forward.rs` 的 `tests`）
 
 ```rust
 fn share(allow: Vec<Fp>) -> Share { Share { port: 8000, note: String::new(), allow, raw: false, open_web: false } }
@@ -468,19 +468,19 @@ fn the_257th_forward_of_one_device_is_refused_and_slots_come_back() {
 }
 ```
 
-- [ ] **Step 2: 跑，确认失败**
+- [x] **Step 2: 跑，确认失败**
 
 Run: `cargo test -p rapp-service forward::`
 Expected: 编译失败。
 
-- [ ] **Step 3: 实现 `Deny`、`Caller`、`authorize`、`Forwards`**
+- [x] **Step 3: 实现 `Deny`、`Caller`、`authorize`、`Forwards`**
 
-- [ ] **Step 4: 跑，确认通过**
+- [x] **Step 4: 跑，确认通过**
 
 Run: `cargo test -p rapp-service forward::`
 Expected: 3 个测试 PASS。
 
-- [ ] **Step 5: 写受理这一层的失败测试**（新文件 `rust/testkit/tests/forward.rs`，`mod common; use common::*;`）
+- [x] **Step 5: 写受理这一层的失败测试**（新文件 `rust/testkit/tests/forward.rs`，`mod common; use common::*;`）
 
 一个辅助函数 `echo() -> (u16, JoinHandle)`：在 `127.0.0.1:0` 上起一个回声服务（读到什么写回什么，对方写完时自己也写完），返回端口。另一个 `share_file(home: &Path, shares: Value)`：直接写 `home/shares.json`（在服务启动前）。连接和发请求用 `common` 里的 `dial2`、`req2`、`hello_and_send`（它们走 `rapp/2`、按 key 互信）；旧的密码连接用 `direct`。写法照 `rust/testkit/tests/service.rs` 里已有的 `rapp/2` 用例。
 
@@ -550,21 +550,21 @@ async fn an_unreadable_shares_file_starts_empty_and_says_so() {
 }
 ```
 
-- [ ] **Step 6: 跑，确认失败**
+- [x] **Step 6: 跑，确认失败**
 
 Run: `cargo test -p rapp-testkit --test forward`
 Expected: 除了 `a_password_connection_cannot_forward_or_list` 以外都 FAIL（Task 1 的临时分支回的是 `not supported`）。
 
-- [ ] **Step 7: 实现 `serve_list`、`serve_forward`，接进 `peer.rs`**
+- [x] **Step 7: 实现 `serve_list`、`serve_forward`，接进 `peer.rs`**
 
 `serve_request` 里把 Task 1 的临时分支换成：`Ok(Op::ListShares) => crate::forward::serve_list(state, s, peer).await`，`Ok(Op::Forward { port }) => crate::forward::serve_forward(state, s, port, peer).await`。`Caller.fp` 取 `peer.fp.as_ref()`；`server` 填 `false`；`policy_allows` 填 `true`。
 
-- [ ] **Step 8: 跑，确认通过**
+- [x] **Step 8: 跑，确认通过**
 
 Run: `cargo test -p rapp-testkit --test forward && cargo test -p rapp-service`
 Expected: 全部 PASS。
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add rust/service/src rust/testkit/tests/forward.rs
@@ -637,7 +637,7 @@ impl Outbound {
 
 relay 拒绝 key（`rapp_conn::relay::refused_key` 给出 `key changed` 或 `bad key`）时原样把错误传上去。`path` 的 `"lan"`/`"direct"` 照 hub 的 `direct_path` 的规则分（私有地址是 `lan`）。
 
-- [ ] **Step 1: 写失败的测试**（加在 `rust/testkit/tests/forward.rs`）
+- [x] **Step 1: 写失败的测试**（加在 `rust/testkit/tests/forward.rs`）
 
 辅助：`RelayRig::start()` 起一个 relay；两台服务 A、B 各自的 `service.json` 里填 `rig.addr` 和 `rig.key`（照 `rust/testkit/tests/key_change.rs` 开头搭两台设备的写法）；`outbound(home: &Path) -> Outbound` 用 B 的设备密钥（`Identity::load_or_create(home, "device")`）和 `b_endpoint()` 构造。
 
@@ -672,19 +672,19 @@ async fn a_device_with_another_key_is_not_trusted() {
 }
 ```
 
-- [ ] **Step 2: 跑，确认失败**
+- [x] **Step 2: 跑，确认失败**
 
 Run: `cargo test -p rapp-testkit --test forward outbound`
 Expected: 编译失败，`unresolved import rapp_conn::dial`。
 
-- [ ] **Step 3: 实现 `dial.rs`**
+- [x] **Step 3: 实现 `dial.rs`**
 
-- [ ] **Step 4: 跑，确认通过**
+- [x] **Step 4: 跑，确认通过**
 
 Run: `cargo test -p rapp-testkit --test forward`
 Expected: 全部 PASS。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add rust/conn/src rust/testkit/tests/forward.rs
@@ -728,7 +728,7 @@ pub async fn shares_of(state: &State, name: &str) -> Result<Value /* the "shares
 
 `open` 和 `shares_of` 每次都从 `state.cfg` 现读 `relay` 和 `key`，从 `local/hosts.json` 找这个 ID 的 `lan` 和 `fp`（文件没有、读不懂、里面没有这个 ID：`lan` 空、`known` 是 `None`）。
 
-- [ ] **Step 1: 写失败的测试**（`pipe.rs` 的 `tests`）
+- [x] **Step 1: 写失败的测试**（`pipe.rs` 的 `tests`）
 
 ```rust
 #[test]
@@ -750,19 +750,19 @@ fn error_texts() {
 }
 ```
 
-- [ ] **Step 2: 跑，确认失败**
+- [x] **Step 2: 跑，确认失败**
 
 Run: `cargo test -p rapp-service pipe::`
 Expected: 编译失败。
 
-- [ ] **Step 3: 实现 `pipe.rs`**
+- [x] **Step 3: 实现 `pipe.rs`**
 
-- [ ] **Step 4: 跑，确认通过**
+- [x] **Step 4: 跑，确认通过**
 
 Run: `cargo test -p rapp-service pipe:: && cargo build --workspace`
 Expected: 2 个测试 PASS；工作区编译通过。（`open`、`shares_of` 的行为在 Task 7、8 的端到端测试里验。）
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add rust/service/src
@@ -804,7 +804,7 @@ impl Paired {
 
 `pipe` 在 `ipc.rs` 里怎么接：`conn` 现在用 `BufReader::new(r).lines()`。收到 `pipe` 并且 `open` 成功时，先写回那一行 `ok`，再 `lines.into_inner()` 拿回 `BufReader`（它里面可能已经缓冲了对方紧跟着发来的字节，所以必须用它而不是底下的读端），和写端拼成一个双向流，同转发的那条 `Pipe` 做 `copy_bidirectional`，结束后这个 IPC 连接就结束。
 
-- [ ] **Step 1: 写 `Paired::find` 的失败测试**（`paired.rs` 的 `tests`）
+- [x] **Step 1: 写 `Paired::find` 的失败测试**（`paired.rs` 的 `tests`）
 
 ```rust
 #[test]
@@ -825,12 +825,12 @@ fn find_by_name_or_fingerprint_prefix() {
 }
 ```
 
-- [ ] **Step 2: 跑，确认失败；实现；跑，确认通过**
+- [x] **Step 2: 跑，确认失败；实现；跑，确认通过**
 
 Run: `cargo test -p rapp-conn find_by_name_or_fingerprint_prefix`
 Expected: 先编译失败，实现后 PASS。
 
-- [ ] **Step 3: 写 IPC 的失败测试**（加在 `rust/testkit/tests/forward.rs`；用 `Ipc::open`、`Ipc::call`）
+- [x] **Step 3: 写 IPC 的失败测试**（加在 `rust/testkit/tests/forward.rs`；用 `Ipc::open`、`Ipc::call`）
 
 ```rust
 #[tokio::test]
@@ -868,19 +868,19 @@ async fn unshare_cuts_what_is_running() {
 }
 ```
 
-- [ ] **Step 4: 跑，确认失败**
+- [x] **Step 4: 跑，确认失败**
 
 Run: `cargo test -p rapp-testkit --test forward share`
 Expected: FAIL，回的是空对象或 `unknown command`。
 
-- [ ] **Step 5: 实现五个命令**
+- [x] **Step 5: 实现五个命令**
 
-- [ ] **Step 6: 跑，确认通过**
+- [x] **Step 6: 跑，确认通过**
 
 Run: `cargo test -p rapp-testkit --test forward && cargo test -p rapp-conn`
 Expected: 全部 PASS。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add rust/service/src/ipc.rs rust/conn/src/paired.rs rust/testkit/tests/forward.rs
@@ -898,7 +898,7 @@ git commit -m "feat(service): share, unshare, shares, hosts and pipe over the lo
 - Consumes: Task 4 到 7 的全部。两台服务 A（分享方）、B（访问方）加 `RelayRig`，搭法同 Task 5。B 的 `local/hosts.json` 里写不写 A 的局域网地址，决定走哪条路。
 - 辅助：`pipe(ipc_port, token, to, port) -> (Value, TcpStream)`：连 B 的 IPC，发令牌行和 `pipe` 命令，读回第一行，把这条 TCP 连接交回来。
 
-- [ ] **Step 1: 写测试**
+- [x] **Step 1: 写测试**
 
 ```rust
 #[tokio::test]
@@ -948,12 +948,12 @@ async fn the_relay_saw_nothing_it_could_read() {
 }
 ```
 
-- [ ] **Step 2: 跑**
+- [x] **Step 2: 跑**
 
 Run: `cargo test -p rapp-testkit --test forward`
 Expected: 全部 PASS。有不过的，改的是 Task 4 到 7 的代码，不是测试。`half_close_survives_the_relay` 不过时先停下来报告：那说明 relay 对接流的方式不传"写完了"，要改的可能在 relay 里，而这份计划不许动 relay。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add rust/testkit/tests/forward.rs
@@ -1027,7 +1027,7 @@ rapp pipe <名字> <端口>
 
 `中继：` 后面按 `relay` 的值：`online` → `已连接`，`connecting` → `连接中`，`error` → `出错`，其他（没有配）→ `没有配置`。先看一眼 `State::status` 里 `relay` 实际有哪些值，按实际的写全。
 
-- [ ] **Step 1: 写 `args` 的失败测试**
+- [x] **Step 1: 写 `args` 的失败测试**
 
 ```rust
 fn p(s: &str) -> Result<Cmd, String> { parse(&s.split_whitespace().map(String::from).collect::<Vec<_>>()) }
@@ -1055,7 +1055,7 @@ fn bad_input_says_what_is_wrong() {
 }
 ```
 
-- [ ] **Step 2: 写 `say` 的失败测试**
+- [x] **Step 2: 写 `say` 的失败测试**
 
 ```rust
 #[test]
@@ -1103,19 +1103,19 @@ fn hosts_lists_devices_and_what_is_wrong() {
 }
 ```
 
-- [ ] **Step 3: 跑，确认失败**
+- [x] **Step 3: 跑，确认失败**
 
 Run: `cargo test -p rapp-cli`
 Expected: 编译失败（crate 还不存在时是 `package ID specification rapp-cli did not match`）。
 
-- [ ] **Step 4: 建 crate，实现 `args.rs`、`say.rs`、`main.rs`**
+- [x] **Step 4: 建 crate，实现 `args.rs`、`say.rs`、`main.rs`**
 
-- [ ] **Step 5: 跑，确认通过**
+- [x] **Step 5: 跑，确认通过**
 
 Run: `cargo test -p rapp-cli`
 Expected: 6 个测试 PASS。
 
-- [ ] **Step 6: 起真程序的一条测试**（加在 `rust/testkit/tests/forward.rs`）
+- [x] **Step 6: 起真程序的一条测试**（加在 `rust/testkit/tests/forward.rs`）
 
 ```rust
 #[tokio::test]
@@ -1132,12 +1132,12 @@ async fn the_cli_shares_and_pipes() {
 
 `RAPP_HOME` 指的是数据根还是 `local/`，以及测试里的服务把 `ipc.token` 写在哪，先看 `rust/testkit/tests/common/mod.rs` 的 `start_service` 和 `rapp_net::config::home`/`local`，照实际的对上；对不上时给 `rapp-cli` 加一个只给测试用的环境变量 `RAPP_LOCAL`（直接指到放 `ipc.token` 的目录），并在这条测试里用它。
 
-- [ ] **Step 7: 跑，确认通过**
+- [x] **Step 7: 跑，确认通过**
 
 Run: `cargo test -p rapp-testkit --test forward the_cli`
 Expected: PASS。
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add rust/Cargo.toml rust/Cargo.lock rust/cli rust/testkit/tests/forward.rs
@@ -1164,9 +1164,9 @@ git commit -m "feat(cli): rapp-cli share, unshare, hosts and pipe"
 | `first_byte` | 收到 `ok` 以后发 1 个字节到收回 1 个字节（对着回声端口） |
 | `path` | 每条走的路（`lan`、`relay`）各多少条 |
 
-- [ ] **Step 1: 写 `measure_forward.rs`**
+- [x] **Step 1: 写 `measure_forward.rs`**
 
-- [ ] **Step 2: 本机自测**
+- [x] **Step 2: 本机自测**
 
 用 `rust/testkit/tests/forward.rs` 的搭法在一条测试里起 relay 加两台服务，调 `measure_forward` 的核心函数（把它放在 `rust/testkit/src/lib.rs` 里，`bin` 只管解析参数），断言 `open_seq` 有 50 个样本、`path` 全是 `relay`。
 
@@ -1180,11 +1180,11 @@ Expected: PASS。
 Run: `cargo run -p rapp-testkit --bin measure-forward -- --to <分享方的 ID> --port <回声端口>`
 Expected: 四行数字。同时用 `ping` 量访问方到 relay、分享方到 relay 的往返时间，一起记下来。
 
-- [ ] **Step 4: 写测量文档**
+- [x] **Step 4: 写测量文档**
 
 机器、网络、两个往返时间、四行数字。最后一节"给下一份计划的"：规格 §5.2 的要求是"通道建好以后，每新开一条转发连接，额外的耗时不超过两台设备经 relay 的一个往返"；这里量到的 `open_seq` 中位数是它的几倍，就是下一份计划（复用通道）要消掉的量。
 
-- [ ] **Step 5: 改相关文档**
+- [x] **Step 5: 改相关文档**
 
 | 文档 | 加什么 |
 |---|---|
@@ -1193,12 +1193,12 @@ Expected: 四行数字。同时用 `ping` 量访问方到 relay、分享方到 r
 | 平台规格 | 设备请求表加 `list_shares`、`forward`；IPC 命令表加 `shares`、`share`、`unshare`、`hosts`、`pipe` |
 | 端口分享规格 | §5 末尾"要挪成 service 和 hub 共用"一句后面加：这一步没有挪，原因见本计划"计划定的"第 1 条；§15 第 1 步那一行注明拆成上、下两份计划，复用通道和会话优先在下；§6"只给谁"加一句：这一步只能写这台设备已经认识的设备 |
 
-- [ ] **Step 6: 全量检查**
+- [x] **Step 6: 全量检查**
 
 Run: `cd rust && cargo build --workspace 2>&1 | grep -c warning; cargo test --workspace`
 Expected: 第一条打印 `0`；测试全部 PASS。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add rust/testkit docs/superpowers
