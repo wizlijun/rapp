@@ -7,6 +7,9 @@ mod data;
 mod ipc;
 mod peer;
 mod relay_link;
+// Not used until Task 4 wires it into the service; that task removes this allow.
+#[allow(dead_code)]
+mod shares;
 mod state;
 mod term;
 mod update;
