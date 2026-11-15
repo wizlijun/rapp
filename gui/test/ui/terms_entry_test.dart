@@ -50,6 +50,16 @@ void main() {
         'term:tmux:a');
   });
 
+  test('text mode with no launchers prefers a tmux session on this machine to one on an SSH host', () {
+    const remote = TermRow('term:tmux@box:r', 'r', 'zsh', 'box', 1, 0, 9, false, false);
+    final list = TermList('d', terms: [remote, tmuxRow('a', activity: 5)], hosts: [local(const [])]);
+    expect(termsTarget(mode: 'text', list: list, apps: const []),
+        isA<OpenTerm>().having((t) => t.app, 'app', 'term:tmux:a'));
+    final only = TermList('d', terms: const [remote], hosts: [local(const [])]);
+    expect(termsTarget(mode: 'text', list: only, apps: const []),
+        isA<OpenTerm>().having((t) => t.app, 'app', 'term:tmux@box:r').having((t) => t.name, 'name', 'r @box'));
+  });
+
   test('text mode asks for a new text terminal before it falls back to tmux', () {
     final list = TermList('d', terms: [tmuxRow('w', activity: 9)], hosts: [local(['Terminal'])]);
     expect(termsTarget(mode: 'text', list: list, apps: const []), isA<AskNewText>());

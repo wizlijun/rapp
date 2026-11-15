@@ -52,13 +52,14 @@ class AskNewText extends TermsTarget {
 }
 
 /// [mode] is `text` or `pixels`. Text mode opens the latest text terminal, else asks for a new one when this
-/// machine has launchers, else opens the latest tmux session; text mode that can open nothing is treated as pixels.
+/// machine has launchers, else opens the latest tmux session (one on this machine before one on an SSH host); text
+/// mode that can open nothing is treated as pixels.
 TermsTarget termsTarget({required String mode, required TermList list, required List<HubApp> apps}) {
   if (mode == 'text') {
-    TermRow? latest(String backend) {
+    TermRow? latest(String backend, {bool localOnly = false}) {
       TermRow? out;
       for (final r in list.terms) {
-        if (parseTermId(r.id)?.backend != backend) continue;
+        if (parseTermId(r.id)?.backend != backend || (localOnly && r.host != null)) continue;
         if (out == null || r.activity > out.activity) out = r;
       }
       return out;
@@ -68,7 +69,7 @@ TermsTarget termsTarget({required String mode, required TermList list, required 
     if (pty != null) return OpenTerm(pty.id, termDisplayName(pty.name, pty.host));
     final local = list.hosts.where((h) => h.host == null).firstOrNull;
     if (local != null && local.launchers.isNotEmpty) return const AskNewText();
-    final tmux = latest('tmux');
+    final tmux = latest('tmux', localOnly: true) ?? latest('tmux');
     if (tmux != null) return OpenTerm(tmux.id, termDisplayName(tmux.name, tmux.host));
   }
   final first = terminalAppsOf(apps).firstOrNull;
