@@ -12,6 +12,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../embed/remote_session.dart';
+import '../ui/keep_focus.dart';
 import '../ui/main_state.dart';
 import '../ui/tokens.dart';
 import 'sgr.dart' show TermLine;
@@ -688,7 +689,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
       );
 
       final note = _note;
-      return Focus(
+      return KeepFocus(child: Focus(
         focusNode: _focus,
         onKeyEvent: _onKey,
         child: ColoredBox(
@@ -742,7 +743,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
               ),
           ]),
         ),
-      );
+      ));
     });
   }
 }

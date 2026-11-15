@@ -156,6 +156,12 @@ class AppProfileStore extends ChangeNotifier {
     _commit();
   }
 
+  /// Whether the app gets a Return after a submitted paste (the ＋ menu's 「直接回车且隐藏」, the settings page's radios).
+  void setAfterSend(String appId, String appName, AfterSend a) {
+    _target(appId, appName).afterSend = a;
+    _commit();
+  }
+
   /// Where the app's writing panel sits ([p], its bottom centre), or back to the default (null).
   /// Clearing what is not there writes nothing.
   void setComposerAt(String appId, String appName, InputPoint? p) {

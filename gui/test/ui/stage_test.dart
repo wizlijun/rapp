@@ -307,7 +307,11 @@ void main() {
       await tester.pump();
       expect(find.byType(Texture), findsNothing);
       expect(find.text('Calculator 在单独的窗口里 · mini · 局域网'), findsOneWidget);
-      expect(find.text('输入'), findsOneWidget);
+      // Collapsed, the composer is a keyboard icon; 输入 is its name for assistive tech.
+      expect(find.text('输入'), findsNothing);
+      expect(find.descendant(of: find.byKey(const Key('composer-open')), matching: find.byIcon(Icons.keyboard_outlined)),
+          findsOneWidget);
+      expect(find.bySemanticsLabel('输入'), findsOneWidget);
       // Records compare their maps by identity: match the call by its parts.
       void last(String method) {
         expect(port.calls.last.$1, method);
@@ -623,7 +627,7 @@ void main() {
     List<Map<String, Object?>> mouse() => port.calls.where((c) => c.$1 == 'mouse').map((c) => c.$2).toList();
     final border = find.byKey(const Key('picture-focus'));
 
-    testWidgets('picture focus follows taps', (tester) async {
+    testWidgets('the picture holds the keys without a tap; a press on the top bar gives them back', (tester) async {
       tester.view.physicalSize = const Size(1194, 834);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
@@ -635,19 +639,58 @@ void main() {
       )));
       final size = tester.getSize(find.byKey(const Key('stage')));
       await showWindow(tester, rw(7, size.width, size.height + 28));
-      final pictureCenter = tester.getCenter(find.byType(Texture));
-      await tester.tapAt(pictureCenter);
       await tester.pump();
       expect(port.calls.where((c) => c.$1 == 'picture_focus').map((c) => c.$2), contains(equals({'sid': 1, 'compose': true})));
       expect(es.pictureFocused, 1);
       expect(border, findsOneWidget);
+      port.calls.clear();
       final topBarPoint = tester.getCenter(find.byType(TopBar));
       await tester.tapAt(topBarPoint);
       await tester.pump();
-      expect(port.calls.last.$1, 'picture_focus');
-      expect(port.calls.last.$2, equals({'sid': null}));
-      expect(es.pictureFocused, isNull);
-      expect(border, findsNothing);
+      await tester.pump();
+      expect(port.calls.where((c) => c.$1 == 'picture_focus').map((c) => c.$2),
+          [equals({'sid': null}), equals({'sid': 1, 'compose': true})]);
+      expect(es.pictureFocused, 1);
+      expect(border, findsOneWidget);
+    });
+
+    testWidgets('Tab and the arrows the picture lets through never walk the focus onto the top bar', (tester) async {
+      tester.view.physicalSize = const Size(1194, 834);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(wrap(MainWindow(
+        state: es,
+        monitor: ServiceMonitor(readToken: () async => null),
+        control: null,
+        fullscreen: _NoFullscreen(),
+      )));
+      final size = tester.getSize(find.byKey(const Key('stage')));
+      await showWindow(tester, rw(7, size.width, size.height + 28));
+      await tester.pump();
+      final picture = FocusManager.instance.primaryFocus;
+      expect(picture?.context?.findAncestorWidgetOfExactType<Picture>(), isNotNull);
+      final seen = <FocusNode?>[];
+      void log() => seen.add(FocusManager.instance.primaryFocus);
+      FocusManager.instance.addListener(log);
+      addTearDown(() => FocusManager.instance.removeListener(log));
+      for (final k in [
+        LogicalKeyboardKey.tab,
+        LogicalKeyboardKey.arrowUp,
+        LogicalKeyboardKey.arrowLeft,
+        LogicalKeyboardKey.arrowRight,
+        LogicalKeyboardKey.arrowDown,
+      ]) {
+        await tester.sendKeyEvent(k);
+        await tester.pump();
+        await tester.pump();
+      }
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shift);
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shift);
+      await tester.pump();
+      // Not even for a frame: a highlight that comes and goes is the flashing.
+      expect(seen.where((f) => f != picture), isEmpty);
+      expect(FocusManager.instance.primaryFocus, picture);
     });
 
     testWidgets('a session that stops being current loses picture focus', (tester) async {
@@ -671,7 +714,6 @@ void main() {
       await tester.tapAt(o + const Offset(400, 50));
       await tester.pump();
       expect(mouse(), isEmpty);
-      expect(es.pictureFocused, isNull);
       final g = await tester.startGesture(o + const Offset(400, 300), kind: PointerDeviceKind.mouse);
       await g.moveTo(o + const Offset(850, 300));
       await g.up();
@@ -683,20 +725,28 @@ void main() {
       expect(m[2]['x'], 400.0);
     });
 
-    testWidgets('a press in the letterbox blurs the picture and sends nothing', (tester) async {
+    testWidgets('a press in the letterbox sends nothing, and the keys come back to the picture', (tester) async {
       await tester.pumpWidget(wrap(embedded()));
       await showWindow(tester, rw(7, 400, 228)); // fit (0,100) 800x400
-      final o = tester.getTopLeft(find.byKey(const Key('stage')));
-      await tester.tapAt(o + const Offset(400, 300));
       await tester.pump();
+      final o = tester.getTopLeft(find.byKey(const Key('stage')));
       expect(es.pictureFocused, 1);
       port.calls.clear();
       await tester.tapAt(o + const Offset(400, 50));
       await tester.pump();
-      expect(es.pictureFocused, isNull);
-      expect(port.calls.single.$1, 'picture_focus');
-      expect(port.calls.single.$2, equals({'sid': null}));
-      expect(border, findsNothing);
+      await tester.pump();
+      expect(port.calls.map((c) => c.$1), ['picture_focus', 'picture_focus']);
+      expect(port.calls.first.$2, equals({'sid': null}));
+      expect(es.pictureFocused, 1);
+      expect(border, findsOneWidget);
+    });
+
+    testWidgets('a new current session\'s picture takes the keys without a tap', (tester) async {
+      await tester.pumpWidget(wrap(embedded()));
+      await showWindow(tester, rw(7, 400, 328));
+      await tester.pump();
+      expect(es.pictureFocused, 1);
+      expect(border, findsOneWidget);
     });
 
     testWidgets('a picture with no area sends nothing', (tester) async {

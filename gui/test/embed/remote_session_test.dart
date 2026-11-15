@@ -291,7 +291,7 @@ void main() {
     await rs.composer.submit();
     rs.apply(const ComposerStateEvent(1, done: ComposerDone(1, null)));
     expect(n, 1);
-    rs.setProfile(ResolvedProfile.generic);
+    rs.setProfile(const ResolvedProfile(name: 'X', afterSend: AfterSend.none));
     ed.value = 'go';
     await rs.composer.submit();
     rs.apply(const ComposerStateEvent(1, done: ComposerDone(1, null)));

@@ -28,6 +28,24 @@ int main(void) {@autoreleasepool {
         if([method isEqual:@"changed"])changed++;
     };
     [v perform:@"set" text:@"草稿 " reply:^(id _){}];
+    {   // ⌘V with only an image on the clipboard: the host reads it, so 粘贴 must stay enabled.
+        NSPasteboard *pb=NSPasteboard.generalPasteboard;NSMutableArray *saved=[NSMutableArray new];
+        for(NSPasteboardItem *item in pb.pasteboardItems){
+            NSPasteboardItem *copy=[NSPasteboardItem new];
+            for(NSPasteboardType type in item.types){NSData *d=[item dataForType:type];if(d)[copy setData:d forType:type];}
+            [saved addObject:copy];
+        }
+        NSImage *image=[[NSImage alloc]initWithSize:NSMakeSize(4,4)];
+        [image lockFocus];[NSColor.redColor set];NSRectFill(NSMakeRect(0,0,4,4));[image unlockFocus];
+        [pb clearContents];[pb writeObjects:@[image]];
+        NSMenuItem *item=[[NSMenuItem alloc]initWithTitle:@"Paste" action:@selector(paste:) keyEquivalent:@"v"];
+        BOOL enabled=[v.text validateMenuItem:item];
+        __block BOOL pasted=NO;void (^was)(NSString *,id,void (^)(id))=v.event;
+        v.event=^(NSString *method,id args,void (^reply)(id)){if([method isEqual:@"paste"])pasted=YES;};
+        [NSApp sendAction:@selector(paste:) to:v.text from:item];v.event=was;
+        [pb clearContents];if(saved.count)[pb writeObjects:saved];
+        check(enabled && pasted,@"image-only clipboard: paste stays enabled and reaches the host");
+    }
     NSMutableAttributedString *marked=[[NSMutableAttributedString alloc]initWithString:@"ni"
         attributes:@{NSBackgroundColorAttributeName:NSColor.blueColor,NSFontAttributeName:[NSFont systemFontOfSize:30]}];
     [v.text setMarkedText:marked selectedRange:NSMakeRange(2,0) replacementRange:NSMakeRange(NSNotFound,0)];
@@ -63,6 +81,8 @@ int main(void) {@autoreleasepool {
     NSMutableDictionary *present=[packet(v.bridge,@"present")mutableCopy];present[@"serial"]=@"1";
     [v.bridge receive:present];
     check(!v.candidates.hidden && [before isEqual:v.text.string],@"candidate present does not change body");
+    check(v.candidates.rowCount==1 && v.candidates.frame.size.height==22+13 && v.reportedHeight==48+22+13,
+          @"one candidate row with the body's 13pt inset below it");
     NSDictionary *candidate=[v.candidates.items.firstObject.text attributesAtIndex:2 effectiveRange:nil];
     check([candidate[NSForegroundColorAttributeName]isEqual:v.attributes[NSForegroundColorAttributeName]] &&
           [candidate[NSFontAttributeName]isEqual:v.attributes[NSFontAttributeName]],@"candidates inherit exact font and color");
@@ -84,6 +104,10 @@ int main(void) {@autoreleasepool {
     [v.bridge receive:stale];check(v.bridge.connected,@"old release cannot revoke current lease");
     v.bridge.lastSeen=CACurrentMediaTime()-2;[v.bridge checkLease];
     check(!v.bridge.connected && v.candidates.hidden && [before isEqual:v.text.string],@"timeout clears candidates without touching text");
+    check(v.reportedHeight==48+22+13,@"the candidate row stays reserved while composing, so the box does not jump");
+    [v perform:@"set" text:@"" reply:^(id _){}];
+    check(v.reportedHeight==48,@"an empty draft gives the reserved row back");
+    [v perform:@"set" text:before reply:^(id _){}];
     pump();
     [v.bridge receive:@{@"v":@1,@"type":@"hello",@"token":v.bridge.token,@"context":@"ctx2",@"reply":replyName}];
     pump();
@@ -93,7 +117,7 @@ int main(void) {@autoreleasepool {
     [snapshot addEntriesFromDictionary:@{@"serial":@"2",@"cursor":@17,@"hasPrev":@NO,@"hasNext":@NO,@"candidates":many}];
     [v setFrameSize:NSMakeSize(120,180)];[v.bridge receive:snapshot];
     present=[packet(v.bridge,@"present")mutableCopy];present[@"serial"]=@"2";[v.bridge receive:present];
-    check(v.candidates.rowCount<=4 && v.candidates.localPageCount>1 && v.candidates.localPage>0,@"narrow layout has at most four rows and follows selected candidate");
+    check(v.candidates.rowCount==1 && v.candidates.localPageCount>1 && v.candidates.localPage>0,@"long candidates never wrap: one row, local pages follow the selected candidate");
     check([v.candidates.items filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(SumiCandidateItem *item,id _){return !item.action && item.candidateIndex==17;}]].count==1,@"local pages preserve original candidate indices");
     [v setFrameSize:NSMakeSize(1,180)];
     check(!v.bridge.connected && v.candidates.hidden,@"insufficient space releases the default candidate window");

@@ -16,6 +16,7 @@ class RappButton extends StatefulWidget {
     this.semanticLabel,
     this.focusNode,
     this.icon,
+    this.size = 48,
   }) : _kind = _Kind.primary,
        onPicture = false;
   const RappButton.secondary({
@@ -26,6 +27,7 @@ class RappButton extends StatefulWidget {
     this.focusNode,
     this.icon,
     this.onPicture = false,
+    this.size = 48,
   }) : _kind = _Kind.secondary;
   const RappButton.accent({
     super.key,
@@ -35,7 +37,8 @@ class RappButton extends StatefulWidget {
     this.focusNode,
     this.icon,
   }) : _kind = _Kind.accent,
-       onPicture = false;
+       onPicture = false,
+       size = 48;
 
   final String label;
   final VoidCallback? onPressed;
@@ -44,6 +47,10 @@ class RappButton extends StatefulWidget {
 
   /// Shown instead of [label]: a square 48×48 button (give it a [semanticLabel]).
   final IconData? icon;
+
+  /// The square side for an [icon] button; below 48 only where the layout asks for it (the
+  /// writing panel's ＋ and 发送, 40 with an even 4 around them).
+  final double size;
 
   /// Drawn straight over the remote picture: the fill is the raise colour laid on the opaque float
   /// surface, so a see-through theme (AVATAR) never lets the picture show through the button.
@@ -67,8 +74,10 @@ class _RappButtonState extends State<RappButton> {
     final shape = RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(t.r),
     );
-    const min = Size(48, 48);
     final icon = widget.icon;
+    final min = icon == null ? const Size(48, 48) : Size.square(widget.size);
+    // A smaller square is the whole button: no padded tap target around it.
+    final tap = widget.size < 48 ? MaterialTapTargetSize.shrinkWrap : null;
     final child = icon == null ? Text(widget.label) : Icon(icon);
     final pad = icon == null ? null : EdgeInsets.zero;
     final Widget button = switch (widget._kind) {
@@ -79,6 +88,7 @@ class _RappButtonState extends State<RappButton> {
           backgroundColor: t.text,
           foregroundColor: t.bg,
           minimumSize: min,
+          tapTargetSize: tap,
           padding: pad,
           shape: shape,
         ),
@@ -91,6 +101,7 @@ class _RappButtonState extends State<RappButton> {
           backgroundColor: t.accent,
           foregroundColor: t.accentInk,
           minimumSize: min,
+          tapTargetSize: tap,
           padding: pad,
           shape: shape,
         ),
@@ -104,6 +115,7 @@ class _RappButtonState extends State<RappButton> {
           foregroundColor: t.text,
           side: BorderSide(color: t.line),
           minimumSize: min,
+          tapTargetSize: tap,
           padding: pad,
           shape: shape,
         ),

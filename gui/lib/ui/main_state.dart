@@ -453,10 +453,21 @@ class MainState extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    panelHolds = null;
     if (pictureFocused == sid) return;
     pictureFocused = sid;
     _sendFocus(sid);
     notifyListeners();
+  }
+
+  /// The session whose writing panel took the keys from its picture by a press on it (or by taking
+  /// the caret): while that panel is open the picture does not take them back by itself.
+  Object? panelHolds;
+
+  /// A press on [rs]'s writing panel, or its editor taking the caret: keys stay with the panel.
+  void holdForPanel(RemoteSession rs) {
+    panelHolds = rs.sid;
+    blurPicture();
   }
 
   /// What the runner was last told about [pictureFocused]'s compose (type-to-compose).
@@ -509,7 +520,8 @@ class MainState extends ChangeNotifier {
     return const TermPasted();
   }
 
-  /// A press outside the picture (top bar, overlays): keys stay with rapp.
+  /// A press outside the picture (top bar, overlays): keys leave A for now. The picture takes them
+  /// back once nothing else wants them (no text field, dialog or open menu): see `Picture`.
   void blurPicture() {
     if (_blur()) notifyListeners();
   }
@@ -1817,6 +1829,12 @@ class MainState extends ChangeNotifier {
   void placeComposer(RemoteSession rs, InputPoint? p) {
     if (rs.appId.isEmpty) return;
     profiles.setComposerAt(rs.appId, rs.appName, p);
+  }
+
+  /// The ＋ menu's 「直接回车且隐藏」 for [rs]'s app; a session without an app id has no profile to keep it in.
+  void setAfterSend(RemoteSession rs, AfterSend a) {
+    if (rs.appId.isEmpty) return;
+    profiles.setAfterSend(rs.appId, rs.appName, a);
   }
 
   void clearInputMark() {
