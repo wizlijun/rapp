@@ -297,7 +297,10 @@ mod tests {
     // The `[::1]` fallback itself, with addresses this container has (it has no IPv6 loopback).
     #[tokio::test]
     async fn the_next_address_is_tried_when_one_refuses() {
-        let dead = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap().local_addr().unwrap();
+        // Port 1 is outside the ephemeral range and nothing listens there, so it refuses at once.
+        // A port taken from bind(0) and released can be handed out again (or self-connect),
+        // and then the "dead" address answers.
+        let dead: std::net::SocketAddr = "127.0.0.1:1".parse().unwrap();
         let live = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let t = connect_local(&[dead, live.local_addr().unwrap()], LOCAL_CONNECT_WAIT).await.unwrap();
         assert_eq!(t.peer_addr().unwrap(), live.local_addr().unwrap());
