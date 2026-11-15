@@ -72,6 +72,19 @@ void main() {
     expect(File('${dir.path}/apps.json').readAsStringSync(), contains('"recordInput": false'));
   });
 
+  testWidgets('type-to-compose switch saves into apps.json', (tester) async {
+    final store = storeWith();
+    await open(tester, store, appId: _chrome);
+    expect(find.text('在画面上按字母键时打开写作面板'), findsOneWidget);
+    expect(find.text('关掉后字母直接发给这个 app，适合 Figma、游戏、密码管理器'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('type-to-compose-switch')));
+    await tester.pump();
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    expect(store.mine.single.typeToCompose, false);
+    expect(File('${dir.path}/apps.json').readAsStringSync(), contains('"typeToCompose": false'));
+  });
+
   testWidgets('panel place row: default, then a saved place, then 回到默认', (tester) async {
     final store = storeWith();
     await open(tester, store, appId: _chrome);

@@ -102,6 +102,7 @@ class _AppProfilePageState extends State<AppProfilePage> {
       _draft.afterSend == null &&
       _draft.composer == null &&
       _draft.recordInput == null &&
+      _draft.typeToCompose == null &&
       _draft.input == null &&
       _draft.windows == null &&
       _draft.tested == null &&
@@ -268,6 +269,7 @@ class _AppProfilePageState extends State<AppProfilePage> {
     final afterSend = d.afterSend ?? b.afterSend;
     final composer = d.composer ?? b.composer;
     final recordInput = d.recordInput ?? b.recordInput;
+    final typeToCompose = d.typeToCompose ?? b.typeToCompose;
     final rules = _rules;
     return Scaffold(
       backgroundColor: t.bg,
@@ -351,6 +353,19 @@ class _AppProfilePageState extends State<AppProfilePage> {
                 key: const Key('record-input-switch'),
                 value: recordInput,
                 onChanged: (v) => _set(() => d.recordInput = v)),
+          ]),
+          Row(children: [
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('在画面上按字母键时打开写作面板',
+                    style: TextStyle(color: d.typeToCompose == null ? t.muted : t.text)),
+                Text('关掉后字母直接发给这个 app，适合 Figma、游戏、密码管理器', style: TextStyle(color: t.muted, fontSize: 12)),
+              ]),
+            ),
+            Switch(
+                key: const Key('type-to-compose-switch'),
+                value: typeToCompose,
+                onChanged: (v) => _set(() => d.typeToCompose = v)),
           ]),
           Row(children: [
             Expanded(

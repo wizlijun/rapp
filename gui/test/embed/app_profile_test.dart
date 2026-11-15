@@ -75,6 +75,11 @@ void main() {
     expect(resolveProfile('a', mine: [AppProfile(ids: ['a'], recordInput: false)], builtin: [AppProfile(ids: ['a'], recordInput: true)]).recordInput, isFalse);
     expect(AppProfile(ids: ['a']).toJson().containsKey('recordInput'), isFalse);
     expect(AppProfile.fromJson(AppProfile(ids: ['a'], recordInput: false).toJson())!.recordInput, isFalse);
+    expect(r.typeToCompose, isTrue);
+    expect(resolveProfile('a', mine: [AppProfile(ids: ['a'], typeToCompose: false)], builtin: [AppProfile(ids: ['a'], typeToCompose: true)]).typeToCompose, isFalse);
+    expect(AppProfile(ids: ['a']).toJson().containsKey('typeToCompose'), isFalse);
+    expect(AppProfile(ids: ['a'], typeToCompose: false).toJson()['typeToCompose'], false);
+    expect(AppProfile.fromJson(AppProfile(ids: ['a'], typeToCompose: false).toJson())!.typeToCompose, isFalse);
     expect(resolveProfile('other', mine: mine, builtin: builtin), same(ResolvedProfile.generic));
     expect(ResolvedProfile.generic.stream, startChoice);
   });
