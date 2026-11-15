@@ -411,3 +411,46 @@ async fn a_device_with_another_key_is_not_trusted() {
     wait_log(a.home.path(), "trust", |v| v["result"] == "refused").await;
     out.close();
 }
+
+/// A `rapp/2` device on `127.0.0.1` that says it is `id` and trusts `key`: it welcomes the hello
+/// and answers its `ping`, then closes the connection when the next stream comes. Its address.
+fn fails_after_hello(id: String, key: rapp_wire::Key) -> (std::net::SocketAddr, quinn::Endpoint, tempfile::TempDir) {
+    let home = tempfile::tempdir().unwrap();
+    let me = rapp_wire::Identity::generate().unwrap();
+    let cfg = rapp_wire::tls::device_server_config(&me, &[rapp_wire::tls::ALPN_DEVICE]).unwrap();
+    let ep = quinn::Endpoint::server(cfg, "127.0.0.1:0".parse().unwrap()).unwrap();
+    let (addr, server, paired) = (ep.local_addr().unwrap(), ep.clone(), rapp_conn::Paired::empty(home.path()));
+    tokio::spawn(async move {
+        while let Some(incoming) = server.accept().await {
+            let Ok(conn) = incoming.await else { continue };
+            let Ok(pair) = conn.accept_bi().await else { continue };
+            let mut pipe: Pipe = Box::new(rapp_net::quic::bi(pair));
+            let facts = rapp_conn::quic_facts(&conn, &me.fp, rapp_conn::Role::Server).unwrap();
+            let hello = rapp_conn::Me { id: &id, name: "fake-a", key: Some(&key) };
+            rapp_conn::hello_server(&mut pipe, &facts, &hello, &paired).await.unwrap();
+            assert_eq!(read_json(&mut pipe).await.unwrap()["op"], "ping");
+            rapp_net::line::write_json(&mut pipe, &json!({"ok": true})).await.unwrap();
+            pipe.shutdown().await.unwrap();
+            let _ = conn.accept_bi().await;
+            conn.close(0u32.into(), b"fake");
+        }
+    });
+    (addr, ep, home)
+}
+
+#[tokio::test]
+async fn a_lan_link_whose_request_fails_gives_way_to_the_relay() {
+    let rig = RelayRig::start().await;
+    let a = a_on_relay(&rig, Some(vec![])).await;
+    let key = rapp_wire::Key { relay: rig.key.relay, root: rig.key.root };
+    let (fake, _ep, _home) = fails_after_hello(a.id.clone(), key);
+    let b = tempfile::tempdir().unwrap();
+    let out = outbound(b.path());
+    let lan = [fake.to_string()];
+    let to = Target { id: &a.id, lan: &lan, known: None };
+    let via = Via { relay: Some(&rig.addr), key: &rig.key };
+    let sent = out.request(&via, &to, &Op::Ping).await.unwrap();
+    assert_eq!((&sent.reply["ok"], sent.path), (&json!(true), "relay"), "{}", sent.reply);
+    assert_eq!(sent.fp.to_string(), fp_of(&a).await);
+    out.close();
+}

@@ -85,18 +85,6 @@ struct RelayCache {
     conn: RelayConn,
 }
 
-/// The connection never came up (as opposed to the device answering).
-#[derive(Debug)]
-struct Unreachable(String);
-
-impl std::fmt::Display for Unreachable {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl std::error::Error for Unreachable {}
-
 pub struct Outbound {
     ep: quinn::Endpoint,
     identity: Arc<Identity>,
@@ -116,12 +104,12 @@ impl Outbound {
         if let Some(sent) = self.on_held(to, &key_text, op).await {
             return Ok(sent);
         }
-        // The first answer from a LAN address that was not a welcome (another device, another
-        // key): the error when the relay does not reach the device either.
+        // The first definite refusal from a LAN address (another device, another key): the error
+        // when the relay does not reach the device either.
         let mut refused = None;
         let tried: Vec<&String> = dial_order(to.lan).into_iter().take(MAX_LAN).collect();
         if let Some(sent) = self.on_lan(via, to, &tried, op, &mut refused).await {
-            return sent;
+            return Ok(sent);
         }
         let Some(addr) = via.relay else {
             return Err(refused.unwrap_or_else(|| NotReached("offline").into()));
@@ -162,18 +150,24 @@ impl Outbound {
         match exchange(&conn, op).await {
             Ok((pipe, reply)) => Some(Sent { pipe, reply, path, fp }),
             Err(_) => {
-                conn.close(0u32.into(), b"request failed");
-                let mut links = self.links.lock().unwrap();
-                if links.get(to.id).is_some_and(|l| l.conn.stable_id() == conn.stable_id()) {
-                    links.remove(to.id);
-                }
+                self.forget(to.id, &conn);
                 None
             }
         }
     }
 
+    /// Closes `conn` and drops it as the link held for `id`, unless another has replaced it meanwhile.
+    fn forget(&self, id: &str, conn: &Connection) {
+        conn.close(0u32.into(), b"request failed");
+        let mut links = self.links.lock().unwrap();
+        if links.get(id).is_some_and(|l| l.conn.stable_id() == conn.stable_id()) {
+            links.remove(id);
+        }
+    }
+
     /// Step 2: `addrs` one after another; the first that welcomes us is kept for the device and
-    /// carries `op`. None when none did; the first answer that was not a welcome goes to `refused`.
+    /// carries `op` as in step 1 (a link whose request fails is dropped and the next address tried).
+    /// None when none did; the first definite refusal goes to `refused`.
     async fn on_lan(
         &self,
         via: &Via<'_>,
@@ -181,7 +175,7 @@ impl Outbound {
         addrs: &[&String],
         op: &Op,
         refused: &mut Option<anyhow::Error>,
-    ) -> Option<Result<Sent>> {
+    ) -> Option<Sent> {
         for a in addrs {
             let Ok(sock) = a.parse::<SocketAddr>() else { continue };
             match self.dial(sock, via.key, to).await {
@@ -189,11 +183,13 @@ impl Outbound {
                     let path = direct_path(&sock);
                     let link = Link { conn: conn.clone(), path, fp: accepted.fp, key_text: via.key.to_string() };
                     self.links.lock().unwrap().insert(to.id.to_string(), link);
-                    let sent = exchange(&conn, op).await;
-                    return Some(sent.map(|(pipe, reply)| Sent { pipe, reply, path, fp: accepted.fp }));
+                    match exchange(&conn, op).await {
+                        Ok((pipe, reply)) => return Some(Sent { pipe, reply, path, fp: accepted.fp }),
+                        Err(_) => self.forget(to.id, &conn),
+                    }
                 }
-                Err(e) if e.downcast_ref::<Unreachable>().is_some() => {}
-                Err(e) => drop(refused.get_or_insert(e)),
+                Err(e) if is_refusal(&e) && refused.is_none() => *refused = Some(e),
+                Err(_) => {}
             }
         }
         None
@@ -218,7 +214,7 @@ impl Outbound {
         let extra: Vec<&String> =
             dial_order(&found.lan).into_iter().filter(|a| !tried.contains(a)).take(MAX_LAN).collect();
         if let Some(sent) = self.on_lan(via, to, &extra, op, refused).await {
-            return sent;
+            return Ok(sent);
         }
         self.relayed(&relay, via.key, to, op).await
     }
@@ -264,14 +260,13 @@ impl Outbound {
     }
 
     /// Connects over `rapp/2` and says hello, with a `ping` in the same flight (as the hub's
-    /// `Dialer::dial`). A connection that does not come up is `Unreachable`.
+    /// `Dialer::dial`).
     async fn dial(&self, addr: SocketAddr, key: &Key, to: &Target<'_>) -> Result<(Connection, Accepted)> {
         let cfg = device_client_config(&self.identity, ALPN_DEVICE)?;
-        let connecting = self.ep.connect_with(cfg, addr, SNI).map_err(|e| Unreachable(e.to_string()))?;
+        let connecting = self.ep.connect_with(cfg, addr, SNI)?;
         let conn = match tokio::time::timeout(DIRECT_WAIT, connecting).await {
-            Err(_) => return Err(Unreachable("timed out".into()).into()),
-            Ok(Err(e)) => return Err(Unreachable(e.to_string()).into()),
-            Ok(Ok(c)) => c,
+            Err(_) => bail!("timed out"),
+            Ok(r) => r?,
         };
         match self.hello(&conn, key, to).await {
             Ok(accepted) => Ok((conn, accepted)),
@@ -320,6 +315,12 @@ async fn exchange(conn: &Connection, op: &Op) -> Result<(Pipe, Value)> {
     Ok((s, reply))
 }
 
+/// A definite answer of the device (or of the known fingerprint) that retrying cannot change
+/// (the hub's `is_refusal`): kept in place of `offline`. A timeout or a lost connection is not one.
+fn is_refusal(e: &anyhow::Error) -> bool {
+    matches!(e.to_string().as_str(), "not trusted" | "host key mismatch")
+}
+
 /// The relay's `offline` and `unknown id` as `NotReached`; any other error as it is.
 fn not_reached(e: anyhow::Error) -> anyhow::Error {
     match e.to_string().as_str() {
@@ -354,5 +355,101 @@ fn dial_order(lan: &[String]) -> Vec<&String> {
         lan.iter().filter(|a| !loopback(a)).collect()
     } else {
         lan.iter().collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{hello_server, Paired};
+    use rapp_net::line::ok;
+    use rapp_wire::tls::device_server_config;
+    use serde_json::json;
+    use tokio::io::AsyncWriteExt;
+
+    const A_ID: &str = "123456789";
+
+    /// What the fake device does with a connection.
+    #[derive(Clone, Copy)]
+    enum Fake {
+        /// Welcomes the hello and answers its `ping`, then closes the connection on the next stream.
+        FailsAfterHello,
+        /// Takes the hello stream and closes the connection without a word.
+        Silent,
+    }
+
+    /// A `rapp/2` device on `127.0.0.1` trusting `key`, behaving as `how`; its address.
+    fn fake_device(key: Key, how: Fake) -> (SocketAddr, quinn::Endpoint, tempfile::TempDir) {
+        let home = tempfile::tempdir().unwrap();
+        let id = Identity::generate().unwrap();
+        let cfg = device_server_config(&id, &[ALPN_DEVICE]).unwrap();
+        let ep = quinn::Endpoint::server(cfg, "127.0.0.1:0".parse().unwrap()).unwrap();
+        let (addr, server, paired) = (ep.local_addr().unwrap(), ep.clone(), Paired::empty(home.path()));
+        tokio::spawn(async move {
+            while let Some(incoming) = server.accept().await {
+                let Ok(conn) = incoming.await else { continue };
+                let Ok(pair) = conn.accept_bi().await else { continue };
+                let mut pipe: Pipe = Box::new(bi(pair));
+                if let Fake::FailsAfterHello = how {
+                    let facts = quic_facts(&conn, &id.fp, Role::Server).unwrap();
+                    let me = Me { id: A_ID, name: "fake-a", key: Some(&key) };
+                    hello_server(&mut pipe, &facts, &me, &paired).await.unwrap();
+                    assert_eq!(read_json(&mut pipe).await.unwrap()["op"], "ping");
+                    write_json(&mut pipe, &ok(json!({}))).await.unwrap();
+                    pipe.shutdown().await.unwrap();
+                    let _ = conn.accept_bi().await;
+                }
+                conn.close(0u32.into(), b"fake");
+            }
+        });
+        (addr, ep, home)
+    }
+
+    fn outbound() -> Outbound {
+        let ep = rapp_net::quic::client_endpoint("127.0.0.1:0".parse().unwrap()).unwrap();
+        Outbound::new(ep, Arc::new(Identity::generate().unwrap()), "test-b".into())
+    }
+
+    fn not_reached(r: Result<Sent>) -> Option<&'static str> {
+        r.err().and_then(|e| e.downcast_ref::<NotReached>().map(|n| n.0))
+    }
+
+    #[tokio::test]
+    async fn a_lan_link_whose_request_fails_is_dropped_and_the_request_goes_on() {
+        let key = Key::new_local();
+        let (addr, _ep, _home) = fake_device(key_copy(&key), Fake::FailsAfterHello);
+        let out = outbound();
+        let lan = [addr.to_string()];
+        let to = Target { id: A_ID, lan: &lan, known: None };
+        let r = out.request(&Via { relay: None, key: &key }, &to, &Op::Ping).await;
+        assert_eq!(not_reached(r), Some("offline"));
+        assert!(out.links.lock().unwrap().is_empty(), "the dead link is still held");
+    }
+
+    #[tokio::test]
+    async fn a_lan_failure_that_is_not_a_refusal_is_offline() {
+        let key = Key::new_local();
+        let (addr, _ep, _home) = fake_device(key_copy(&key), Fake::Silent);
+        let out = outbound();
+        let lan = [addr.to_string()];
+        let to = Target { id: A_ID, lan: &lan, known: None };
+        let r = out.request(&Via { relay: None, key: &key }, &to, &Op::Ping).await;
+        assert_eq!(not_reached(r), Some("offline"));
+        assert!(out.links.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn only_definite_answers_are_refusals() {
+        for e in ["not trusted", "host key mismatch"] {
+            assert!(is_refusal(&anyhow!(e)), "{e}");
+        }
+        for e in ["no reply", "timed out", "connection lost", "bad reply"] {
+            assert!(!is_refusal(&anyhow!(e)), "{e}");
+        }
+    }
+
+    /// `Key` is not `Clone` (on purpose); a copy for the fake device.
+    fn key_copy(k: &Key) -> Key {
+        Key { relay: k.relay, root: k.root }
     }
 }
