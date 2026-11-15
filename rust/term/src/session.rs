@@ -487,6 +487,7 @@ impl<W: AsyncWrite + Unpin> Pump<'_, W> {
         let target = match &m {
             In::View { pane: Some(p), .. }
             | In::Keys { pane: p, .. }
+            | In::NewWindow { pane: p }
             | In::Type { pane: p, .. }
             | In::History { pane: p, .. } => Some(p.clone()),
             _ => None,
@@ -525,6 +526,14 @@ impl<W: AsyncWrite + Unpin> Pump<'_, W> {
                 }
             }
             In::Text { .. } => {}
+            In::NewWindow { pane } => {
+                // Which session only, never anything typed.
+                eprintln!("rapp-term: new window in session {}", self.sid);
+                match self.tmux.new_window(&pane).await {
+                    Ok(made) => self.put(&Out::WindowOpened { pane: made }).await?,
+                    Err(_) => self.error("could not open a window").await?,
+                }
+            }
             In::History { pane, before, lines } => match self.tmux.history(&pane, before, lines).await {
                 Ok(rows) => self.put(&history_msg(&pane, before, rows)).await?,
                 Err(_) => self.error("could not read the history").await?,

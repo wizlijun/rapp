@@ -478,7 +478,7 @@ async fn say(w: &mut DuplexStream, m: In) {
 
 /// Hello, then the pane list: the first pane's id, and the list.
 async fn greeted(p: &mut Pump) -> (String, Vec<rapp_term::proto::Pane>) {
-    assert_eq!(next(&mut p.lines).await, Out::Hello { v: 1, backend: "tmux".into() });
+    assert_eq!(next(&mut p.lines).await, Out::Hello { v: 2, backend: "tmux".into() });
     let Out::Panes { panes } = next(&mut p.lines).await else { panic!("expected the pane list") };
     (panes[0].id.clone(), panes)
 }
@@ -981,4 +981,43 @@ async fn inputs_are_counted_not_recorded() {
     drop(p.w);
     tokio::time::timeout(Duration::from_secs(5), p.done).await.expect("the pump ends").unwrap().unwrap();
     assert_eq!(inputs.load(std::sync::atomic::Ordering::Relaxed), 4);
+}
+
+#[tokio::test]
+async fn new_window_opens_beside_the_pane_in_its_directory_and_keeps_the_current_window() {
+    let Some(s) = common::Server::start() else { return };
+    let dir = std::env::temp_dir().join(format!("rapp-nw-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("a")).unwrap();
+    let a = std::fs::canonicalize(dir.join("a")).unwrap();
+    s.raw(&["new-session", "-d", "-s", "nw", "-x", "80", "-y", "24", "-c", a.to_str().unwrap(), "cat"]);
+    s.raw(&["new-session", "-d", "-s", "other", "cat"]);
+    common::settle().await;
+    let mut p = pump(&s, "nw", fresh_unread());
+    let (pane, panes) = greeted(&mut p).await;
+    assert_eq!(panes.len(), 1);
+    let active = s.raw(&["display-message", "-p", "-t", "nw", "#{window_id}"]);
+    say(&mut p.w, In::NewWindow { pane: pane.clone() }).await;
+    let Out::WindowOpened { pane: made } = next_not_panes(&mut p.lines).await else { panic!("expected window_opened") };
+    let rows = s.raw(&["list-panes", "-s", "-t", "nw", "-F", "#{pane_id} #{pane_current_path} #{window_active}"]);
+    assert_eq!(rows.lines().count(), 2, "{rows}");
+    let line = rows.lines().find(|l| l.starts_with(&format!("{made} "))).unwrap_or_else(|| panic!("{made} in {rows}"));
+    assert_eq!(line, format!("{made} {} 0", a.display()));
+    assert_eq!(s.raw(&["display-message", "-p", "-t", "nw", "#{window_id}"]), active);
+    // Another session's pane is refused, and no window is made.
+    let foreign = s.raw(&["list-panes", "-t", "other", "-F", "#{pane_id}"]).trim().to_string();
+    say(&mut p.w, In::NewWindow { pane: foreign }).await;
+    assert_eq!(next_not_panes(&mut p.lines).await, Out::Error { error: "no such pane".into() });
+    assert_eq!(s.raw(&["list-panes", "-a", "-F", "x"]).lines().count(), 3);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn new_session_without_a_command_runs_the_shell() {
+    let Some(s) = common::Server::start() else { return };
+    s.tmux().new_session("sh1", &[], 100, 30).await.unwrap();
+    common::settle().await;
+    let cmd = s.raw(&["display-message", "-p", "-t", "sh1", "#{pane_current_command}"]);
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "sh".into());
+    let name = shell.rsplit('/').next().unwrap().to_string();
+    assert!(cmd.trim().trim_start_matches('-') == name || cmd.trim() == "sh", "{cmd} vs {shell}");
 }

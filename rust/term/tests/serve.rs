@@ -330,7 +330,8 @@ async fn new_makes_a_session_and_refuses_a_taken_name() {
     assert!(sessions(&s).contains(&"n1".to_string()), "{:?}", sessions(&s));
     assert_eq!(w.ask(new).await, [json!({"error": "a session with that name already exists"})]);
     let empty = json!({"op": "new", "host": null, "name": "n2", "command": [], "cols": 100, "rows": 30});
-    assert_eq!(w.ask(empty).await, [json!({"error": "command required"})]);
+    assert_eq!(w.ask(empty).await, [json!({"ok": true, "id": "term:tmux:n2"})]);
+    assert!(sessions(&s).contains(&"n2".to_string()), "{:?}", sessions(&s));
     let far = json!({"op": "new", "host": "nope", "name": "n3", "command": ["sh"], "cols": 100, "rows": 30});
     assert_eq!(w.ask(far).await, [json!({"error": "unknown host"})]);
     // No name: the program's.

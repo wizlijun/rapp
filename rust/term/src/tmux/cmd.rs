@@ -12,6 +12,7 @@ pub const VERBS: &[&str] = &[
     "paste-buffer",
     "delete-buffer",
     "new-session",
+    "new-window",
     "refresh-client",
     "attach-session",
 ];
@@ -103,6 +104,19 @@ pub fn delete_buffer(name: &str) -> Vec<String> {
     ["delete-buffer", "-b", name].map(String::from).to_vec()
 }
 
+/// The id of the window `pane` is in.
+pub fn window_of(pane: &str) -> Vec<String> {
+    ["display-message", "-p", "-t", pane, "#{window_id}"].map(String::from).to_vec()
+}
+
+/// A window made just after `window` (`new-window -t` takes no pane), in the directory of that window's current pane,
+/// not made current; prints its pane id. `-c` is expanded by tmux.
+pub fn new_window(window: &str) -> Vec<String> {
+    ["new-window", "-d", "-a", "-t", window, "-c", "#{pane_current_path}", "-P", "-F", "#{pane_id}"]
+        .map(String::from)
+        .to_vec()
+}
+
 /// A control-mode client of the session `session_id`.
 pub fn attach(session_id: &str) -> Vec<String> {
     ["-C", "attach-session", "-t", session_id].map(String::from).to_vec()
@@ -151,6 +165,7 @@ mod tests {
                 "paste-buffer",
                 "delete-buffer",
                 "new-session",
+                "new-window",
                 "refresh-client",
                 "attach-session"
             ]
@@ -168,6 +183,11 @@ mod tests {
         assert_eq!(load_buffer("rapp-1-0"), ["load-buffer", "-b", "rapp-1-0", "-"]);
         assert_eq!(paste_buffer("rapp-1-0", "%1"), ["paste-buffer", "-p", "-d", "-b", "rapp-1-0", "-t", "%1"]);
         assert_eq!(delete_buffer("rapp-1-0"), ["delete-buffer", "-b", "rapp-1-0"]);
+        assert_eq!(window_of("%3"), ["display-message", "-p", "-t", "%3", "#{window_id}"]);
+        assert_eq!(
+            new_window("@2"),
+            ["new-window", "-d", "-a", "-t", "@2", "-c", "#{pane_current_path}", "-P", "-F", "#{pane_id}"]
+        );
     }
     #[test]
     fn size_and_new_session_builders() {

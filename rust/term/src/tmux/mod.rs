@@ -122,6 +122,17 @@ impl Tmux {
         Ok(())
     }
 
+    /// Open a window after the one `pane` is in (see `cmd::new_window`); the new pane's id.
+    pub async fn new_window(&self, pane: &str) -> anyhow::Result<String> {
+        let window = self.run(&cmd::window_of(pane)).await?;
+        let window = window.trim();
+        anyhow::ensure!(window.starts_with('@'), "no window id");
+        let out = self.run(&cmd::new_window(window)).await?;
+        let id = out.trim().to_string();
+        anyhow::ensure!(id.starts_with('%'), "no pane id");
+        Ok(id)
+    }
+
     fn failure(d: &Done) -> anyhow::Error {
         let text = classify(d.code, &d.stderr).to_string();
         if !text.is_empty() {
