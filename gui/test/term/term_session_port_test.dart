@@ -257,4 +257,25 @@ void main() {
     expect(f.owns(1), isTrue);
     expect(f.calls.map((c) => c.$1), ['start', 'view']);
   });
+  test('the fake records sends and answers pastes with pasteReply', () async {
+    final f = FakeTermSessionPort();
+    await f.start(StartArgs(1, 1, 't', 'x', 0, 'x'));
+    f.sendKeys(1, ['Enter']);
+    f.type(1, 'hi');
+    expect(await f.paste(1, 'p', enter: true), isNull);
+    f.pasteReply = 'no';
+    expect(await f.paste(1, 'q'), 'no');
+    expect(await f.newWindow(1), isNull);
+    f.view(1, 3, 90, 30);
+    final sent = f.calls.skip(1).take(5).toList();
+    expect([for (final c in sent) c.$1], ['keys', 'type', 'paste', 'paste', 'newWindow']);
+    expect([for (final c in sent) c.$2], [
+      {'sid': 1, 'keys': ['Enter']},
+      {'sid': 1, 'text': 'hi'},
+      {'sid': 1, 'data': 'p', 'enter': true},
+      {'sid': 1, 'data': 'q', 'enter': false},
+      {'sid': 1},
+    ]);
+    expect((f.lastCols, f.lastRows), (90, 30));
+  });
 }

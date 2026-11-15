@@ -285,6 +285,8 @@ class RemoteSession extends ChangeNotifier {
         }
       case InputBlockedEvent():
         break; // MainState's hint.
+      case TermOpenedPaneEvent():
+        break; // MainState's.
       case InputSourceEvent():
         inputSource = (id: e.id, name: e.name, ascii: e.ascii);
         if (!e.ascii) lastInputMethod = inputSource;

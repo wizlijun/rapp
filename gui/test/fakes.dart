@@ -179,8 +179,36 @@ class FakeTermSessionPort extends TermSessionPort {
   @override
   TermPane? pane(Object sid, int window) => panes(sid).where((p) => p.number == window).firstOrNull;
   @override
-  void view(Object sid, int window, int cols, int rows) =>
-      calls.add(('view', {'sid': sid, 'window': window, 'cols': cols, 'rows': rows}));
+  void view(Object sid, int window, int cols, int rows) {
+    calls.add(('view', {'sid': sid, 'window': window, 'cols': cols, 'rows': rows}));
+    lastCols = cols;
+    lastRows = rows;
+  }
+
+  /// What [paste] answers (null: it went in).
+  String? pasteReply;
+
+  /// What [newWindow] answers, and whether [canNewWindow].
+  String? newWindowReply;
+  bool newWindowOk = true;
+
+  @override
+  void sendKeys(Object sid, List<String> keys) => calls.add(('keys', {'sid': sid, 'keys': keys}));
+  @override
+  void type(Object sid, String text) => calls.add(('type', {'sid': sid, 'text': text}));
+  @override
+  Future<String?> paste(Object sid, String data, {bool enter = false}) async {
+    calls.add(('paste', {'sid': sid, 'data': data, 'enter': enter}));
+    return pasteReply;
+  }
+
+  @override
+  bool canNewWindow(Object sid) => newWindowOk;
+  @override
+  Future<String?> newWindow(Object sid) async {
+    calls.add(('newWindow', {'sid': sid}));
+    return newWindowReply;
+  }
   @override
   void refit(Object sid) => calls.add(('refit', {'sid': sid}));
   @override
