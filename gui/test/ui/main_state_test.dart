@@ -18,6 +18,7 @@ import 'package:rapp/ui/lifecycle.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/pin_files.dart';
 import 'package:rapp/ui/prefs.dart';
+import 'package:rapp/ui/project_positions.dart';
 import 'package:rapp/ui/resources_state.dart';
 import 'package:rapp/ui/session_model.dart';
 import 'package:rapp/ui/tokens.dart';
@@ -4043,6 +4044,288 @@ void main() {
         await drafts().delete(key);
         st.dispose();
       }
+    });
+  });
+
+  group('working spheres', () {
+    late DateTime now;
+    setUp(() => now = DateTime(2026, 11, 15, 9));
+
+    MainState make({UiPrefs? prefs}) {
+      final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: prefs ?? UiPrefs(), clock: () => now);
+      addTearDown(st.dispose);
+      return st;
+    }
+
+    Project project(MainState st, String name, List<String> bundles) {
+      final p = st.createProject(name)!;
+      for (final b in bundles) {
+        st.addMember(p.id, AppRef('111', b, b));
+      }
+      return p;
+    }
+
+    Future<void> open(List<String> bundles, {int from = 1}) async {
+      for (final (i, b) in bundles.indexed) {
+        t.emit(opened(from + i, '111', b));
+      }
+      await pump();
+    }
+
+    test('switching lands on the session last used in that project', () async {
+      final st = make();
+      await open(['com.a', 'com.b', 'com.q']);
+      final p = project(st, 'P', ['com.a', 'com.b']);
+      final q = project(st, 'Q', ['com.q']);
+      st.switchProject(p.id);
+      expect(st.currentProject, p.id);
+      expect(st.currentKey, '111/com.a');
+      expect(st.grouping, Grouping.project);
+      expect(st.groups.first.projectId, p.id);
+      st.select('111/com.b');
+      expect(st.currentProject, p.id);
+      st.switchProject(q.id);
+      expect(st.currentKey, '111/com.q');
+      expect(st.groups.first.projectId, q.id);
+      st.switchProject(p.id);
+      expect(st.currentKey, '111/com.b');
+      expect(st.currentProject, p.id);
+    });
+
+    test('switching away records when and where, and it survives a restart', () async {
+      final st = make();
+      await open(['com.a', 'com.b']);
+      final p = project(st, 'P', ['com.a', 'com.b']);
+      final q = project(st, 'Q', []);
+      st.switchProject(p.id);
+      st.select('111/com.b');
+      now = now.add(const Duration(minutes: 25));
+      st.switchProject(q.id);
+      final again = make();
+      final pos = again.positions.byProject[p.id]!;
+      expect(pos.last, '111/com.b');
+      expect(pos.leftAt!.isAtSameMomentAs(now), isTrue);
+    });
+
+    test('coming back shows the cue for five seconds', () {
+      fakeAsync((a) {
+        final st = make();
+        final p = project(st, 'P', []);
+        final q = project(st, 'Q', []);
+        var n = 0;
+        st.addListener(() => n++);
+        st.switchProject(p.id);
+        st.switchProject(q.id);
+        now = now.add(const Duration(minutes: 25));
+        st.switchProject(p.id);
+        expect(st.cue, '25 分钟前离开');
+        a.elapse(MainState.cueFor - const Duration(milliseconds: 1));
+        expect(st.cue, '25 分钟前离开');
+        final before = n;
+        a.elapse(const Duration(milliseconds: 1));
+        expect(st.cue, '');
+        expect(n, before + 1);
+        // A new cue replaces the old one, and its own five seconds start over.
+        now = now.add(const Duration(minutes: 2));
+        st.switchProject(q.id);
+        expect(st.cue, '2 分钟前离开');
+        a.elapse(const Duration(seconds: 3));
+        now = now.add(const Duration(minutes: 3));
+        st.switchProject(p.id);
+        expect(st.cue, '3 分钟前离开');
+        a.elapse(const Duration(seconds: 2));
+        expect(st.cue, '3 分钟前离开');
+        a.elapse(const Duration(seconds: 3));
+        expect(st.cue, '');
+      });
+    });
+
+    test('the cue counts members that went 已断开 while away; ones already so before leaving do not count', () {
+      // No session lamp is 等你 yet (recordLamp never gives it), so 已断开 drives the count here;
+      // both go through the same _attentionSince bookkeeping.
+      fakeAsync((a) {
+        final t = FakeTransport();
+        final hub = HubClient(t);
+        final port = FakeSessionPort();
+        final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port, clock: () => now);
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            final n = (m['app'] as String).length;
+            t.emit({
+              'event': 'opened', 'sid': n, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+              if (m['embed'] == true) ...{'port': 5000 + n, 'token': 'tk'},
+              'req': m['req'],
+            });
+          }
+        };
+        a.flushMicrotasks();
+        for (final b in ['a', 'aa', 'aaa']) {
+          st.openOrSwitch('111', b, b);
+          a.flushMicrotasks();
+        }
+        final p = project(st, 'P', ['a', 'aa', 'aaa']);
+        final q = project(st, 'Q', []);
+        st.switchProject(p.id);
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        a.flushMicrotasks();
+        now = now.add(const Duration(minutes: 1));
+        st.switchProject(q.id);
+        now = now.add(const Duration(minutes: 10));
+        port.emit(const DisconnectedEvent(2, 'connection closed'));
+        a.flushMicrotasks();
+        expect(st.entryFor('111/a')!.lamp, Lamp.disconnected);
+        expect(st.entryFor('111/aa')!.lamp, Lamp.disconnected);
+        expect(st.entryFor('111/aaa')!.lamp, isNot(Lamp.disconnected));
+        now = now.add(const Duration(minutes: 20));
+        st.switchProject(p.id);
+        expect(st.cue, '30 分钟前离开 · 这期间 1 个已断开');
+        st.dispose();
+      });
+    });
+
+    test('first switch to a project has no cue', () {
+      final st = make();
+      final p = project(st, 'P', []);
+      st.switchProject(p.id);
+      expect(st.cue, '');
+      expect(st.previousProject, isNull);
+    });
+
+    test('back to the previous project and back again', () {
+      final st = make();
+      final p = project(st, 'P', []);
+      final q = project(st, 'Q', []);
+      st.switchProject(p.id);
+      st.switchProject(q.id);
+      expect((st.currentProject, st.previousProject), (q.id, p.id));
+      st.backToPreviousProject();
+      expect((st.currentProject, st.previousProject), (p.id, q.id));
+      st.backToPreviousProject();
+      expect((st.currentProject, st.previousProject), (q.id, p.id));
+    });
+
+    test('backToPreviousProject without one does nothing', () {
+      final st = make();
+      final p = project(st, 'P', []);
+      var n = 0;
+      st.addListener(() => n++);
+      st.backToPreviousProject();
+      expect((st.currentProject, st.previousProject, n), (null, null, 0));
+      st.switchProject(p.id);
+      n = 0;
+      st.backToPreviousProject();
+      expect((st.currentProject, st.previousProject, n), (p.id, null, 0));
+    });
+
+    test('selecting a session outside the current project leaves the project', () async {
+      final st = make();
+      await open(['com.a', 'com.z']);
+      final p = project(st, 'P', ['com.a']);
+      st.switchProject(p.id);
+      expect(st.currentKey, '111/com.a');
+      now = now.add(const Duration(minutes: 5));
+      st.select('111/com.z');
+      expect(st.currentKey, '111/com.z');
+      expect((st.currentProject, st.previousProject), (null, p.id));
+      expect(st.positions.of(p.id).last, '111/com.a');
+      expect(st.positions.of(p.id).leftAt!.isAtSameMomentAs(now), isTrue);
+      final saved = ProjectPositions.load(DataDir(tmp.path).localDir).byProject[p.id]!;
+      expect(saved.last, '111/com.a');
+      expect(saved.leftAt!.isAtSameMomentAs(now), isTrue);
+      // Back to it from no project: the cue counts from that leave, and there is no other project to go back to.
+      now = now.add(const Duration(minutes: 3));
+      st.backToPreviousProject();
+      expect((st.currentProject, st.previousProject, st.currentKey), (p.id, null, '111/com.a'));
+      expect(st.cue, '3 分钟前离开');
+    });
+
+    test('leaveProject goes back to no current project and records where', () async {
+      final st = make();
+      await open(['com.a']);
+      final p = project(st, 'P', ['com.a']);
+      st.switchProject(p.id);
+      var n = 0;
+      st.addListener(() => n++);
+      st.leaveProject();
+      expect((st.currentProject, st.previousProject, st.currentKey), (null, p.id, '111/com.a'));
+      expect(n, greaterThan(0));
+      final saved = ProjectPositions.load(DataDir(tmp.path).localDir).byProject[p.id]!;
+      expect(saved.last, '111/com.a');
+      expect(saved.leftAt!.isAtSameMomentAs(now), isTrue);
+    });
+
+    test('stepping stays inside the current project', () async {
+      final st = make();
+      await open(['com.a', 'com.c', 'com.z']);
+      final p = project(st, 'P', ['com.a', 'com.b', 'com.c']);
+      st.switchProject(p.id);
+      final seen = [st.currentKey];
+      for (var i = 0; i < 4; i++) {
+        st.step(1);
+        seen.add(st.currentKey);
+      }
+      expect(seen, ['111/com.a', '111/com.c', '111/com.a', '111/com.c', '111/com.a']);
+      st.step(-1);
+      expect(st.currentKey, '111/com.c');
+      expect(st.currentProject, p.id);
+    });
+
+    test('a project with nothing open can still be switched to', () {
+      final st = make();
+      final p = project(st, 'P', ['com.a']);
+      st.switchProject(p.id);
+      expect(st.currentKey, isNull);
+      expect(st.currentProject, p.id);
+      expect(st.grouping, Grouping.project);
+    });
+
+    test('the current session ending keeps the current project', () async {
+      final st = make();
+      await open(['com.a']);
+      final p = project(st, 'P', ['com.a']);
+      st.switchProject(p.id);
+      t.emit({'event': 'closed', 'sid': 1});
+      await pump();
+      expect(st.currentKey, isNull);
+      expect(st.currentProject, p.id);
+    });
+
+    test('positions of projects that no longer exist are dropped at start', () {
+      final p = s.createProject('P')!;
+      final local = DataDir(tmp.path).localDir;
+      ProjectPositions({
+        p.id: ProjectPosition(last: '111/com.a'),
+        'gone': ProjectPosition(last: '111/com.b', leftAt: DateTime.utc(2026, 11, 14)),
+      }).save(local);
+      final st = make();
+      expect(st.positions.byProject.keys, [p.id]);
+      expect(st.currentProject, isNull);
+    });
+
+    test('deleting the current project clears it', () {
+      final st = make();
+      final p = project(st, 'P', []);
+      final q = project(st, 'Q', []);
+      st.switchProject(p.id);
+      st.switchProject(q.id);
+      st.deleteProject(q.id);
+      expect((st.currentProject, st.previousProject), (null, p.id));
+      st.deleteProject(p.id);
+      expect((st.currentProject, st.previousProject), (null, null));
+      expect(st.positions.byProject, isEmpty);
+      st.backToPreviousProject();
+      expect(st.currentProject, isNull);
+    });
+
+    test('project-first preference starts grouped by project', () {
+      expect(make(prefs: UiPrefs(first: FirstLayer.project)).grouping, Grouping.project);
+      expect(make(prefs: UiPrefs(first: FirstLayer.device)).grouping, Grouping.device);
+    });
+
+    test('with no projects nothing changes', () {
+      final st = make();
+      expect((st.currentProject, st.previousProject, st.cue, st.grouping), (null, null, '', Grouping.device));
+      expect(File('${DataDir(tmp.path).localDir}/$positionsFile').existsSync(), isFalse);
     });
   });
 
