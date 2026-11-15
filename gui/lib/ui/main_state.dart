@@ -2426,7 +2426,8 @@ class MainState extends ChangeNotifier {
   /// A new current session inside the current project is remembered as its last one; one outside
   /// it leaves the project. No session (it ended) keeps the project. One outside it that is still
   /// opening leaves only once the open succeeds ([_open] calls this again), so a failed open keeps
-  /// the project.
+  /// the project. Embedded opens have no pending entry: their record is on stage at once and stays
+  /// there when the open fails (it retries), so they leave at once.
   void _followCurrentKey() {
     final id = currentProject, k = currentKey;
     if (id == null || k == null) return;

@@ -4330,6 +4330,33 @@ void main() {
       expect(st.positions.of(p.id).leftAt, isNull);
     });
 
+    test('embedded: a failed open stays on stage (it retries), so the project is left', () {
+      fakeAsync((a) {
+        final t = FakeTransport();
+        final st = MainState(hub: HubClient(t), data: DataDir(tmp.path), prefs: UiPrefs(), port: FakeSessionPort(), clock: () => now);
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            final ok = m['app'] == 'a';
+            t.emit(ok
+                ? {'event': 'opened', 'sid': 1, 'id': m['id'], 'app': m['app'], 'path': 'lan', 'port': 5001, 'token': 'tk', 'req': m['req']}
+                : {'event': 'error', 'error': 'timed out', 'req': m['req']});
+          }
+        };
+        a.flushMicrotasks();
+        st.openOrSwitch('111', 'a', 'a');
+        a.flushMicrotasks();
+        final p = project(st, 'P', ['a']);
+        st.switchProject(p.id);
+        st.openOrSwitch('111', 'z', 'z');
+        a.flushMicrotasks();
+        expect(st.currentKey, '111/z');
+        expect(st.recordFor('111/z')!.phase, Phase.disconnected);
+        expect((st.currentProject, st.previousProject), (null, p.id));
+        st.dispose();
+        a.flushTimers();
+      });
+    });
+
     test('an open of a session outside the project leaves the project once it opens', () async {
       final st = make();
       await open(['com.a']);
