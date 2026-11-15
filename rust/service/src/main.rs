@@ -30,6 +30,8 @@ async fn main() {
         data,
         advertise_lan: None,
         forward_sum_every: rapp_service::forward_log::SUM_EVERY,
+        forward_priority: rapp_conn::relay::FORWARD_PRIORITY,
+        channels: true,
         update: std::env::current_exe().ok().and_then(|e| rapp_update::bundle_of(&e)).map(UpdateOpts::system),
     };
     match Service::start(opts).await {

@@ -4,6 +4,7 @@ mod common;
 use common::sharing::*;
 use common::*;
 
+use quinn::Endpoint;
 use rapp_conn::Pipe;
 use rapp_net::line::read_json;
 use rapp_net::quic::ALPN_PEER;
@@ -1166,4 +1167,116 @@ async fn ipc_allow_takes_a_full_fingerprint_it_does_not_know() {
     assert_eq!(saved[0]["allow"], json!([fp]), "{saved}");
     let r = c.call(json!({"cmd":"share","ports":[8001],"allow":["abababab"]})).await;
     assert_eq!(r, json!({"ok":false,"error":"unknown device: abababab"}));
+}
+
+// ---- the channel over the relay (port-sharing 1b, Task 4) ----
+
+use rapp_conn::mux::{Mux, Reader, Writer};
+use rapp_conn::relay::RelayConn;
+
+/// A sharer on `rig` sharing `ports`, once it is connected to the relay.
+async fn relay_sharer(rig: &RelayRig, ports: &[u16], channels: bool) -> TestService {
+    let shares: Vec<Value> = ports.iter().map(|p| json!({"port": p})).collect();
+    let a = service_on_relay_with(&rig.addr, &rig.key, Some(vec!["127.0.0.1:1".into()]), |o| {
+        share_file(&o.home, json!(shares));
+        o.channels = channels;
+    })
+    .await;
+    let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
+    wait_status(&mut ipc, |s| s["relay"] == "connected").await;
+    a
+}
+
+/// A visitor's relay connection with a new identity.
+async fn relay_visitor(rig: &RelayRig) -> (Visitor, Endpoint, RelayConn) {
+    let b = visitor();
+    let (ep, conn) = relay_conn(rig, &b.id, &rig.key).await;
+    (b, ep, conn)
+}
+
+/// Hand-built channel: `relayed_request` sends `mux`, reads `{"ok":true}`, then the pipe is split
+/// and a client `Mux` runs on it.
+async fn raw_channel(rig: &RelayRig, a: &TestService) -> (Visitor, Endpoint, RelayConn, Mux) {
+    let (b, ep, conn) = relay_visitor(rig).await;
+    let mut pipe = relayed_request(&conn, &b.id, &a.id, &rig.key, json!({"op":"mux"})).await;
+    let r = tokio::time::timeout(WAIT, read_json(&mut pipe)).await.unwrap().unwrap();
+    assert_eq!(r, json!({"ok":true}));
+    let (r, w) = tokio::io::split(pipe);
+    let mux = Mux::client(async move { Ok(Box::new(r) as Reader) }, Box::new(w) as Writer);
+    (b, ep, conn, mux)
+}
+
+/// A forward request on a new substream; returns the reply and the stream.
+async fn sub_request(mux: &Mux, req: Value) -> (Value, rapp_conn::mux::MuxStream) {
+    let mut s = mux.open().unwrap();
+    rapp_net::line::write_json(&mut s, &req).await.unwrap();
+    let r = tokio::time::timeout(WAIT, read_json(&mut s)).await.unwrap().unwrap();
+    (r, s)
+}
+
+#[tokio::test]
+async fn a_channel_carries_forwards_to_two_ports() {
+    let (p1, _e1) = echo().await;
+    let (p2, _e2) = echo().await;
+    let rig = RelayRig::start().await;
+    let a = relay_sharer(&rig, &[p1, p2], true).await;
+    let (_b, _ep, conn, mux) = raw_channel(&rig, &a).await;
+    for p in [p1, p2] {
+        let (r, mut s) = sub_request(&mux, json!({"op":"forward","port":p})).await;
+        assert_eq!(r["ok"], true, "{r}");
+        s.write_all(b"hi").await.unwrap();
+        let mut got = [0u8; 2];
+        tokio::time::timeout(WAIT, s.read_exact(&mut got)).await.unwrap().unwrap();
+        assert_eq!(&got, b"hi");
+    }
+    let logs = log_events(a.home.path());
+    let n = |ev: &str| logs.iter().filter(|v| v["ev"] == ev).count();
+    assert_eq!((n("channel"), n("trust")), (1, 1), "{logs:?}");
+    let mut ports: Vec<u64> = logs.iter().filter(|v| v["ev"] == "forward_open").map(|v| v["port"].as_u64().unwrap()).collect();
+    ports.sort();
+    let mut want = vec![p1 as u64, p2 as u64];
+    want.sort();
+    assert_eq!(ports, want);
+    drop(mux);
+    conn.close();
+    let end = wait_log(a.home.path(), "channel_end", |_| true).await;
+    assert_eq!(end["streams"], 2, "{end}");
+}
+
+#[tokio::test]
+async fn mux_is_unknown_elsewhere() {
+    let (port, _echo) = echo().await;
+    let rig = RelayRig::start().await;
+    let a = relay_sharer(&rig, &[port], true).await;
+    let (_b, _ep, _conn, mux) = raw_channel(&rig, &a).await;
+    let (r, _s) = sub_request(&mux, json!({"op":"mux"})).await;
+    assert_eq!(r["error"], "unknown op", "{r}");
+    let (r, _s) = sub_request(&mux, json!({"op":"forward","port":port})).await;
+    assert_eq!(r["ok"], true, "{r}");
+}
+
+#[tokio::test]
+async fn a_sharer_without_channels_says_unknown_op() {
+    let rig = RelayRig::start().await;
+    let a = relay_sharer(&rig, &[], false).await;
+    let (b, _ep, conn) = relay_visitor(&rig).await;
+    let mut pipe = relayed_request(&conn, &b.id, &a.id, &rig.key, json!({"op":"mux"})).await;
+    let r = tokio::time::timeout(WAIT, read_json(&mut pipe)).await.unwrap().unwrap();
+    assert_eq!(r["error"], "unknown op", "{r}");
+    assert!(!log_events(a.home.path()).iter().any(|v| v["ev"] == "channel"));
+}
+
+#[tokio::test]
+async fn a_lone_forward_is_still_served() {
+    let (port, _echo) = echo().await;
+    let rig = RelayRig::start().await;
+    let a = relay_sharer(&rig, &[port], true).await;
+    let (b, _ep, conn) = relay_visitor(&rig).await;
+    let mut pipe = relayed_request(&conn, &b.id, &a.id, &rig.key, json!({"op":"forward","port":port})).await;
+    let r = tokio::time::timeout(WAIT, read_json(&mut pipe)).await.unwrap().unwrap();
+    assert_eq!(r["ok"], true, "{r}");
+    pipe.write_all(b"old").await.unwrap();
+    let mut got = [0u8; 3];
+    tokio::time::timeout(WAIT, pipe.read_exact(&mut got)).await.unwrap().unwrap();
+    assert_eq!(&got, b"old");
 }

@@ -176,7 +176,15 @@ async fn reply_and_finish<W: AsyncWrite + Unpin>(s: &mut W, v: Value) -> Result<
 
 /// One request on an authenticated stream (a direct QUIC stream, or a relayed one).
 pub async fn serve_request(state: &Arc<State>, mut s: Pipe, peer: Peer) -> Result<()> {
-    match serde_json::from_value(read_json(&mut s).await?) {
+    let v = read_json(&mut s).await?;
+    serve_value(state, s, v, peer).await
+}
+
+/// The request `v`, already read from `s`. `mux` is not served here (it is only meaningful as the
+/// first request of a relayed stream, `channel::serve`): on a direct connection, or inside a
+/// channel, it is an unknown op.
+pub async fn serve_value(state: &Arc<State>, mut s: Pipe, v: Value, peer: Peer) -> Result<()> {
+    match serde_json::from_value(v) {
         Ok(Op::ListApps) => {
             let r = match workers::list_apps(state).await {
                 Ok((apps, Some(perms))) => ok(json!({"apps": apps, "permissions": perms})),

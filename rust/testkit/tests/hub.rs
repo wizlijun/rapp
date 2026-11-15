@@ -674,6 +674,8 @@ impl LanA {
                 data: None,
                 advertise_lan: None,
         forward_sum_every: Duration::from_secs(600),
+        forward_priority: rapp_conn::relay::FORWARD_PRIORITY,
+        channels: true,
             };
             match rapp_service::Service::start(opts).await {
                 Ok(s) => {

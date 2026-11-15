@@ -770,6 +770,8 @@ async fn service_with_a_data_dir_commits_its_device_json() {
         }),
         advertise_lan: None,
         forward_sum_every: Duration::from_secs(600),
+        forward_priority: rapp_conn::relay::FORWARD_PRIORITY,
+        channels: true,
     })
     .await
     .unwrap();
@@ -937,26 +939,6 @@ async fn secrets_not_logged() {
 
 // ---- the relay connection ----
 
-/// B's relayed request: `relay_to`, TLS, hello and `request` in one go; returns the pipe at the reply.
-async fn relayed(
-    b: &rapp_conn::relay::RelayConn,
-    id: &rapp_wire::Identity,
-    a_id: &str,
-    key: &rapp_wire::Key,
-    request: Value,
-) -> rapp_conn::Pipe {
-    let stream = tokio::time::timeout(WAIT, b.relay_to(a_id)).await.expect("relay_to in time").unwrap();
-    let (mut pipe, facts) = tokio::time::timeout(WAIT, rapp_conn::e2e_connect(stream, id)).await.unwrap().unwrap();
-    let me = rapp_conn::Me { id: "", name: "test-b", key: Some(key) };
-    rapp_conn::send_hello(&mut pipe, &facts, &me).await.unwrap();
-    write_json(&mut pipe, &request).await.unwrap();
-    tokio::time::timeout(WAIT, rapp_conn::read_welcome(&mut pipe, &facts, Some(key), a_id, None))
-        .await
-        .unwrap()
-        .unwrap();
-    pipe
-}
-
 #[tokio::test]
 async fn registers_on_the_relay() {
     let rig = RelayRig::start().await;
@@ -980,13 +962,13 @@ async fn relayed_request_reaches_the_service() {
     let bid = id_of(b_dir.path());
     let (_ep, b) = relay_conn(&rig, &bid, &rig.key).await;
 
-    let mut pipe = relayed(&b, &bid, &a.id, &rig.key, json!({"op":"list_apps"})).await;
+    let mut pipe = relayed_request(&b, &bid, &a.id, &rig.key, json!({"op":"list_apps"})).await;
     let r = tokio::time::timeout(WAIT, read_json(&mut pipe)).await.unwrap().unwrap();
     assert_eq!(r["apps"], apps());
     let paired: Value = serde_json::from_slice(&std::fs::read(a.home.path().join("paired.json")).unwrap()).unwrap();
     assert_eq!(paired[0]["fp"], json!(bid.fp.to_string()));
 
-    let mut pipe = relayed(&b, &bid, &a.id, &rig.key, json!({"op":"open","app":"com.example.echo"})).await;
+    let mut pipe = relayed_request(&b, &bid, &a.id, &rig.key, json!({"op":"open","app":"com.example.echo"})).await;
     let r = tokio::time::timeout(WAIT, read_json(&mut pipe)).await.unwrap().unwrap();
     assert_eq!(r["ok"], true, "{r}");
     let st = ipc.call(json!({"cmd":"status"})).await;

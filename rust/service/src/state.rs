@@ -98,6 +98,10 @@ pub struct State {
     pub shares: crate::shares::Shares,
     /// The forwards running now.
     pub forwards: crate::forward::Forwards,
+    /// See `Opts::forward_priority`.
+    pub forward_priority: i32,
+    /// See `Opts::channels`.
+    pub channels: bool,
     /// Sends requests to other devices (LAN first, then the relay).
     pub outbound: rapp_conn::dial::Outbound,
 }

@@ -6,13 +6,15 @@
 //! this machine's addresses ends the connection and dials again at once; no datagram for 12 s
 //! (keep-alives go every 10 s) starts probing, and three probes without an answer end it.
 
-use crate::peer::{greet, serve_request};
+use crate::peer::{greet, serve_value};
 use crate::state::{Peer, State};
 use rand::Rng;
 use rapp_conn::netq::{Stall, MISSES_DOWN};
-use rapp_conn::relay::{refused_key, Pushed, RelayConn, BAD_KEY, CLOSE_BAD_KEY, CLOSE_KEY_CHANGED, KEY_CHANGED};
+use rapp_conn::relay::{refused_key, Prio, Pushed, RelayConn, BAD_KEY, CLOSE_BAD_KEY, CLOSE_KEY_CHANGED, KEY_CHANGED};
 use rapp_conn::{e2e_accept, Pipe};
+use rapp_net::line::read_json;
 use rapp_net::log::Lvl;
+use rapp_net::msg::Op;
 use rapp_wire::{join_hash, Key};
 use serde_json::json;
 use std::sync::Arc;
@@ -210,8 +212,8 @@ async fn session(
             Ok(Pushed::Incoming { reply, .. }) => {
                 tokio::spawn(answer(reply));
             }
-            Ok(Pushed::Relayed { peer, stream, prio: _ }) => {
-                tokio::spawn(serve_relayed(state.clone(), stream, peer));
+            Ok(Pushed::Relayed { peer, stream, prio }) => {
+                tokio::spawn(serve_relayed(state.clone(), stream, peer, prio));
             }
             Ok(Pushed::Revoked(fps)) => {
                 state.log.event(Lvl::Info, "relay_revoked", json!({"count": fps.len()}));
@@ -294,7 +296,7 @@ async fn answer(mut reply: Pipe) {
 }
 
 /// One stream a device relayed to this one: TLS, the hello, then one request.
-async fn serve_relayed(state: Arc<State>, stream: Pipe, from: String) {
+async fn serve_relayed(state: Arc<State>, stream: Pipe, from: String, prio: Prio) {
     let mut peer = Peer { addr: from, name: None, path: "relay", fp: None };
     let hello = async {
         let (mut pipe, facts) = e2e_accept(stream, &state.identity).await?;
@@ -302,7 +304,13 @@ async fn serve_relayed(state: Arc<State>, stream: Pipe, from: String) {
         greet(&state, &mut pipe, &facts, &mut peer).await?;
         anyhow::Ok(pipe)
     };
-    let pipe = match tokio::time::timeout(HELLO_WAIT, hello).await {
+    // The first request too, inside the same wait: a channel announces itself with `mux`.
+    let first = async {
+        let mut pipe = hello.await?;
+        let v = read_json(&mut pipe).await?;
+        anyhow::Ok((pipe, v))
+    };
+    let (pipe, v) = match tokio::time::timeout(HELLO_WAIT, first).await {
         Ok(Ok(p)) => p,
         failed => {
             let reason = match failed {
@@ -313,7 +321,12 @@ async fn serve_relayed(state: Arc<State>, stream: Pipe, from: String) {
             return;
         }
     };
-    if let Err(e) = serve_request(&state, pipe, peer.clone()).await {
+    match serde_json::from_value::<Op>(v.clone()) {
+        Ok(Op::Mux) if state.channels => return crate::channel::serve(state, pipe, prio, peer).await,
+        Ok(Op::Forward { .. }) => prio.set(state.forward_priority),
+        _ => {}
+    }
+    if let Err(e) = serve_value(&state, pipe, v, peer.clone()).await {
         state.log.msg(Lvl::Warn, format!("{}: {e:#}", peer.addr));
     }
 }
