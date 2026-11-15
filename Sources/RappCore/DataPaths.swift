@@ -21,6 +21,11 @@ public enum DataPaths {
         return root(env: env, home: home, read: read).appendingPathComponent("files/transfers", isDirectory: true)
     }
 
+    /// Machine-local lock for typing the unlock password, next to the `data-root` pointer (never in the synced data dir).
+    public static func unlockLockFile(home: URL) -> URL {
+        home.appendingPathComponent("Library/Application Support/rapp/unlock.lock")
+    }
+
     public static func readFile(_ url: URL) -> String? {
         try? String(contentsOf: url, encoding: .utf8)
     }

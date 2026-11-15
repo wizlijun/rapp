@@ -23,4 +23,8 @@ final class DataPathsTests: XCTestCase {
     func testPointerFirstLineTrimmed() {
         XCTAssertEqual(DataPaths.root(env: [:], home: home, read: { _ in "  /x/y  \nignored\n" }).path, "/x/y")
     }
+    func testUnlockLockFile() {
+        XCTAssertEqual(DataPaths.unlockLockFile(home: URL(fileURLWithPath: "/Users/x")).path,
+                       "/Users/x/Library/Application Support/rapp/unlock.lock")
+    }
 }

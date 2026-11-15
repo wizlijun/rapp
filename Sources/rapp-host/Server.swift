@@ -286,6 +286,10 @@ final class Session {
     private var timer: DispatchSourceTimer?
     private var settleTimer: DispatchSourceTimer?
     private var pollTimer: DispatchSourceTimer?
+    /// Set when the app session was opened while A is locked: `ready` is already sent with this canvas size.
+    private var announced: CGSize?
+    /// Polls A's lock state (1 s) until it unlocks, then starts capture; session queue only.
+    private var lockWaitTimer: DispatchSourceTimer?
     /// Clipboard history and uploads, from the moment capture is ready until the session ends.
     private(set) var transfers: TransferStore?
     private(set) var clipWatcher: ClipboardWatcher?
@@ -539,7 +543,45 @@ final class Session {
 
     // MARK: Capture
 
+    /// Name shown to B before a window exists: the running app, else the bundle's display name, else the ID.
+    private func appDisplayName(bundleID: String) -> String {
+        if let name = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first?.localizedName {
+            return name
+        }
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+            return FileManager.default.displayName(atPath: url.path)
+        }
+        return bundleID
+    }
+
+    /// A is locked at session start: announce the main display, tell B, and wait for the unlock.
+    private func waitForUnlock(bundleID: String) {
+        let size = CGDisplayBounds(CGMainDisplayID()).size
+        announced = size
+        output.log("A is locked at start; waiting for unlock")
+        send(.ready(appName: windowTitle("", appName: appDisplayName(bundleID: bundleID)),
+                    width: UInt16(clamping: Int(size.width.rounded())),
+                    height: UInt16(clamping: Int(size.height.rounded()))))
+        sendLocked()
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + 1, repeating: 1.0)
+        timer.setEventHandler { [weak self] in
+            guard let self, !self.ended, !self.failing else { return }
+            self.sendLocked()
+            guard !screenLocked(CGSessionCopyCurrentDictionary() as? [String: Any]) else { return }
+            self.lockWaitTimer?.cancel()
+            self.lockWaitTimer = nil
+            self.startCapture(bundleID: bundleID)
+        }
+        timer.resume()
+        lockWaitTimer = timer
+    }
+
     private func startCapture(bundleID: String) {
+        if announced == nil, screenLocked(CGSessionCopyCurrentDictionary() as? [String: Any]) {
+            waitForUnlock(bundleID: bundleID)
+            return
+        }
         let (fps, density) = (self.fps, Double(self.density))
         let trackerQueue = self.trackerQueue
         Task { [weak self] in
@@ -583,6 +625,11 @@ final class Session {
             capture.stop()
             return
         }
+        if let announced, capture.displayFrame.size != announced {
+            capture.stop()
+            fail("解锁后，应用窗口在另一块屏幕上；请重新打开")
+            return
+        }
         self.capture = capture
         self.app = app
         self.display = capture.displayFrame
@@ -591,9 +638,11 @@ final class Session {
         let (fps, density) = (self.fps, Double(self.density))
         Task { await capture.setStream(fps: fps, density: density) }
         injector = InputInjector(app: app, display: display, log: { [output] in output.log($0) })
-        send(.ready(appName: windowTitle("", appName: app.localizedName),
-                    width: UInt16(clamping: Int(display.width.rounded())),
-                    height: UInt16(clamping: Int(display.height.rounded()))))
+        if announced == nil {
+            send(.ready(appName: windowTitle("", appName: app.localizedName),
+                        width: UInt16(clamping: Int(display.width.rounded())),
+                        height: UInt16(clamping: Int(display.height.rounded()))))
+        }
         tableChanged(table)
         scheduleMenuRead(after: 0)
         startClipboard(app: app)
@@ -693,7 +742,7 @@ final class Session {
 
     /// Types B's password at the lock screen; dropped (and B told A's state again) when A is not locked.
     private func unlock(_ password: String) {
-        guard injector != nil else { return }
+        guard injector != nil || announced != nil && capture == nil else { return }
         guard screenLocked(CGSessionCopyCurrentDictionary() as? [String: Any]) else {
             output.log("unlock dropped: A is not locked")
             sentLocked = false
@@ -710,7 +759,14 @@ final class Session {
         // The password field is on the main display, whichever screen this session shows.
         let main = CGDisplayBounds(CGMainDisplayID())
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            UnlockTyper.type(password, display: main)
+            // One typist at a time across sessions: a second holder finds A already unlocked and types nothing.
+            let lockFile = DataPaths.unlockLockFile(home: FileManager.default.homeDirectoryForCurrentUser)
+            do {
+                try FileLock.exclusive(at: lockFile) { UnlockTyper.type(password, display: main) }
+            } catch {
+                self?.output.log("unlock lock unavailable")
+                UnlockTyper.type(password, display: main)
+            }
             self?.queue.async {
                 guard let self else { return }
                 self.unlocking = false
@@ -1024,6 +1080,8 @@ final class Session {
         settleTimer = nil
         pollTimer?.cancel()
         pollTimer = nil
+        lockWaitTimer?.cancel()
+        lockWaitTimer = nil
         paster?.end()
         paster = nil
         clipWatcher?.stop()
