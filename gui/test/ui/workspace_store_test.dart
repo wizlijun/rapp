@@ -37,6 +37,7 @@ void main() {
     expect((raw['projects'] as List).single, {
       'id': 'p1',
       'name': '写周报',
+      'pinned': false,
       'members': [
         {'device': '222', 'bundle': 'com.apple.Notes', 'name': 'Notes', 'task': '整理 PR'},
       ],
@@ -146,6 +147,21 @@ void main() {
     final r = loadWorkspace(dir.path);
     expect(r.problem, isNull);
     expect(r.workspace.favorites, isEmpty);
+  });
+
+  test('pinned round-trips and defaults to false', () {
+    final w = Workspace(projects: [Project('p', '写周报', [], true), Project('q', '发版')]);
+    final back = Workspace.fromJson(jsonDecode(jsonEncode(w.toJson())));
+    expect(back.projects.map((p) => p.pinned), [true, false]);
+    final old = Workspace.fromJson({'version': 1, 'projects': [{'id': 'p', 'name': 'x', 'members': []}]});
+    expect(old.projects.single.pinned, isFalse);
+  });
+
+  test('a pinned that is not a bool is a bad file', () {
+    expect(
+      () => Workspace.fromJson({'version': 1, 'projects': [{'id': 'p', 'name': 'x', 'pinned': 'yes'}]}),
+      throwsFormatException,
+    );
   });
 
   test('project ids are uuid v4 and differ', () {

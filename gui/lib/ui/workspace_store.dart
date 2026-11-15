@@ -22,10 +22,11 @@ class Member {
 }
 
 class Project {
-  Project(this.id, this.name, [List<Member>? members]) : members = members ?? [];
+  Project(this.id, this.name, [List<Member>? members, this.pinned = false]) : members = members ?? [];
   final String id;
   String name;
   final List<Member> members;
+  bool pinned;
 }
 
 /// Folds `\r` and `\n` into spaces and trims.
@@ -42,6 +43,11 @@ AppRef _appRef(Object? j) {
   final bundle = _str(j['bundle'], required: true);
   final name = j.containsKey('name') ? oneLine(_str(j['name'])) : bundle;
   return AppRef(device, bundle, name);
+}
+
+bool _bool(Object? v) {
+  if (v is! bool) throw const FormatException('bad field');
+  return v;
 }
 
 List<Object?> _list(Object? v) {
@@ -67,6 +73,7 @@ class Workspace {
             {
               'id': p.id,
               'name': p.name,
+              'pinned': p.pinned,
               'members': [
                 for (final m in p.members)
                   {'device': m.app.device, 'bundle': m.app.bundle, 'name': m.app.name, 'task': m.task},
@@ -89,6 +96,7 @@ class Workspace {
       if (p is! Map) throw const FormatException('bad project');
       final id = _str(p['id'], required: true);
       final name = p.containsKey('name') ? oneLine(_str(p['name'])) : '';
+      final pinned = p.containsKey('pinned') ? _bool(p['pinned']) : false;
       final members = <Member>[];
       final seenKeys = <String>{};
       for (final m in _list(p['members'])) {
@@ -96,7 +104,7 @@ class Workspace {
         final task = (m as Map).containsKey('task') ? oneLine(_str(m['task'])) : '';
         if (seenKeys.add(a.key)) members.add(Member(a, task));
       }
-      if (seenIds.add(id)) projects.add(Project(id, name, members));
+      if (seenIds.add(id)) projects.add(Project(id, name, members, pinned));
     }
     return Workspace(favorites: favorites, projects: projects);
   }
