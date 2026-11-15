@@ -367,6 +367,23 @@ class _AppProfilePageState extends State<AppProfilePage> {
               RappButton.secondary(
                   key: const Key('input-point-clear'), label: '清除', onPressed: () => _set(() => d.input = null)),
           ]),
+          Row(children: [
+            Expanded(
+              child: Text(
+                d.composerAt == null
+                    ? '写作面板位置：底部居中（默认）'
+                    : '写作面板位置：左起 ${(d.composerAt!.x * 100).round()}%，'
+                        '距${d.composerAt!.fromBottom ? '底' : '顶'} ${d.composerAt!.dy.round()}',
+                key: const Key('composer-at'),
+                style: TextStyle(color: d.composerAt == null ? t.muted : t.text),
+              ),
+            ),
+            if (d.composerAt != null)
+              RappButton.secondary(
+                  key: const Key('composer-at-clear'),
+                  label: '回到默认',
+                  onPressed: () => _set(() => d.composerAt = null)),
+          ]),
           _label(t, '窗口规则'),
           for (var i = 0; i < rules.length; i++) _ruleRow(t, i, rules[i], d.windows == null),
           Align(alignment: Alignment.centerLeft, child: RappButton.secondary(label: '加一条', onPressed: _add)),

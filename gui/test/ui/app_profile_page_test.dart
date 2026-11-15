@@ -72,6 +72,28 @@ void main() {
     expect(File('${dir.path}/apps.json').readAsStringSync(), contains('"recordInput": false'));
   });
 
+  testWidgets('panel place row: default, then a saved place, then 回到默认', (tester) async {
+    final store = storeWith();
+    await open(tester, store, appId: _chrome);
+    expect(tester.widget<Text>(find.byKey(const Key('composer-at'))).data, '写作面板位置：底部居中（默认）');
+    expect(find.byKey(const Key('composer-at-clear')), findsNothing);
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+
+    store.setComposerAt(_chrome, 'Google Chrome', const InputPoint(0.3, 8, fromBottom: true));
+    await tester.tap(find.text('go'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<Text>(find.byKey(const Key('composer-at'))).data, '写作面板位置：左起 30%，距底 8');
+    expect(find.text('回到默认'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('composer-at-clear')));
+    await tester.pump();
+    expect(tester.widget<Text>(find.byKey(const Key('composer-at'))).data, '写作面板位置：底部居中（默认）');
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    expect(store.resolve(_chrome).composerAt, isNull);
+    expect(File('${dir.path}/apps.json').readAsStringSync(), isNot(contains('composerAt')));
+  });
+
   testWidgets('a non-built-in app with no profile is saved under its app name', (tester) async {
     final store = storeWith();
     await open(tester, store, appId: 'com.apple.finder', appName: 'Finder');
