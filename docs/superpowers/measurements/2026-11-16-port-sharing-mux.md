@@ -59,13 +59,13 @@ path        relay=100
 
 进程内，经弱网代理，量分享方的 relay 连接上一条大转发对远程会话往返的影响。测试 `rust/testkit/tests/session_priority.rs`（`#[ignore]`）。机器同上（Apple M5，macOS 27.0.1），提交 5f7309f 之上加本测试。
 
-Run: `cd rust && cargo test -p rapp-testkit --release --test session_priority -- --ignored --nocapture`（发布配置，约 86 s；没优化的配置里加密太慢，会先成为瓶颈）
+Run: `cd rust && cargo test -p rapp-testkit --release --test session_priority session_latency -- --ignored --nocapture`（发布配置，约 86 s；没优化的配置里加密太慢，会先成为瓶颈）
 
 做法：每组各起一套新的 relay、A（分享方）、B（访问方）。会话是另一个 B 身份的 relay 连接，开 `com.example.echo`，每 20 ms 写 16 字节、读回 16 字节，记往返。大转发是 A 上一个不停写的 TCP 服务，B 的 `pipe` 过去一直读（转发开始后先等 1 s 让下载爬升，再量 10 s）。每组先只跑会话 10 s（基线），再加上大转发跑 10 s。`wan`：A 的 relay 地址前放代理，`lan.json` 改成 `rate_kbps` 20000、`delay_ms` 15（单向）、`queue_ms` 100、`seed` 7；B 直连 relay。`lan`：不经代理。每种网络两组：A 的转发优先级为 `FORWARD_PRIORITY`（-1）和 0（关掉优先级）。
 
 判定规则（跑之前定的，写在测试文件头）：`wan` 下优先级 -1 那一组，和同组没有转发时相比，会话往返 p50 增加 ≤ 20 ms 且 p95 增加 ≤ 40 ms，算达标。
 
-表里数字是 毫秒，增加 = 有转发 − 基线，"转发"是大转发那 10 s 的下载速率（Mbit/s）。
+往返的单位是毫秒，增加 = 有转发 − 基线，"转发"是大转发那 10 s 的下载速率（Mbit/s）。
 
 ### 第 1 遍
 
@@ -104,13 +104,38 @@ Run: `cd rust && cargo test -p rapp-testkit --release --test session_priority --
 
 没有改阈值。限速（给转发定一个低于瓶颈的上限）或换拥塞控制（BBR 之类，见 `cc_compare.rs`）作为下一件事，要用户定；这一份都没做。
 
+### 同一通道里的小连接
+
+量的是同一条通道里，一条大转发旁边的一条小转发（比如一边 `curl` 一个大文件、一边开着 `ssh`）。通道是一条 relay 流、一条 QUIC 流；复用层自己每条子流最多缓 64 KiB，但 quinn 收下写进来的字节，直到这条流的流量窗口（relay 每条流 1 MiB，`rust/wire/src/tls.rs` 的 `SERVER_STREAM_WINDOW`）用满，所以小转发的帧可能排在最多约 1 MiB 已经交给 quinn 的大转发字节后面。
+
+测试 `small_forward_beside_a_bulk_one`（同一个文件，`#[ignore]`）。`wan` 配置同上（A 的 relay 地址前放代理，20 Mbit/s、单向 15 ms、`queue_ms` 100、`seed` 7），A 的转发优先级 `FORWARD_PRIORITY`。A 分享一个回声端口和上面那个不停写的服务；B 先 `pipe` 到回声端口，每 20 ms 写 16 字节、读回 16 字节，单独量 10 s；再 `pipe` 到不停写的服务一直读（同一条通道，测试断言 A 只记了一行 `channel`），等 1 s 让下载爬升，再量 10 s。只记数，不判定（跑之前写在测试文件头）：规格没给同一通道里两条转发之间的要求。机器同上，提交 86e0a46 之上加本测试。
+
+Run: `cd rust && cargo test -p rapp-testkit --release --test session_priority small_forward -- --ignored --nocapture`（约 25 s）
+
+往返的单位是毫秒，增加 = 有大转发 − 单独，"大转发"是那 10 s 的下载速率（Mbit/s）。
+
+| 遍 | 网络 | 单独 p50/p95 | 有大转发 p50/p95 | 增加 p50/p95 | 大转发 Mbit/s |
+|---|---|---|---|---|---|
+| 1 | wan | 34.5/36.1 | 218.2/310.0 | 183.7/273.9 | 19.5 |
+| 2 | wan | 34.7/36.4 | 218.5/220.2 | 183.8/183.9 | 19.5 |
+| 3 | wan | 34.8/36.4 | 218.4/220.0 | 183.6/183.5 | 19.5 |
+
+三遍的 p50 一致：有大转发时小转发的往返约 218 ms，增加约 184 ms，是同样配置下会话增加量（约 80 ms，上面的表）的两倍多。会话那 80 ms 是路上瓶颈队列；小转发还要多排约 100 ms，排在同一条 QUIC 流里大转发已经交出去的字节后面（上限是流的窗口 1 MiB，20 Mbit/s 下约 420 ms）。第 1 遍的 p95 310 ms 是开头一段更长的排队，后两遍没有。
+
+### 已知的限制
+
+- **一条通道的总吞吐。** 通道是一条 QUIC 流，在途的字节最多一个流窗口（1 MiB），所以一对设备之间所有转发加起来最多约每个往返 1 MiB：往返 100 ms 时约 80 Mbit/s，往返 200 ms 时约 40 Mbit/s。1a 是每条转发各一条流、各 1 MiB；1b 把它们放进一条，几条大转发同时跑时总和不再随条数增加。上面 `wan` 的瓶颈是 20 Mbit/s，量不到这个上限。
+- **严格优先级可能触发 `DEAD_AFTER`。** quinn 的优先级是严格的：分享方的 relay 连接上会话一直有东西要发，通道就一个字节都发不出去，连 `PONG` 也不发。会话连续占满 30 s，访问方 `DEAD_AFTER` 到了就把通道关掉（原因 `dead`），上面开着的转发（比如 `ssh`）一起断。只记下，没改代码；会话一直占满 relay 连接 30 s 不常见（画面有变化时才发），但大画面持续变化时可能。
+
+小连接排在大转发后面、一条通道的吞吐上限，和上面会话的不达标是同一件待用户定的事（限速或换拥塞控制）：在复用层给每条子流（或整条通道）限速，也能缓解这两条。
+
 ### 真机测量（待做）
 
 分享方在 relay 上分享一个大文件的 http 服务（如 `python3 -m http.server`）。访问方一边开着到分享方的远程会话，看 `[stats]` 的画面延迟，一边 `curl -o /dev/null http://<ID>.rapp:<端口>/<大文件>`。记有无下载时画面延迟的中位数和第 95 百分位，对照流畅串流规格的目标（中位数/第 95 百分位 ≤ 60/100 ms）。
 
 ## 真机测量（待做）
 
-步骤同基线文档的"真机测量（待做）"：两台都跑这一版的 `rapp-service`，访问方在 `rust/` 下跑 `cargo run --release -p rapp-testkit --bin measure-forward -- --to <分享方的 ID> --port 9000`（对着回声服务），另外两台各 `ping -c 20 <relay 的主机>`。**先 `pipe` 一次**（或丢掉前几条）再看数。倍数 = `open_seq` 中位数 ÷ 两台经 relay 的一个往返，要不超过 1。`path` 应该只有 `relay=100`。
+步骤同基线文档的"真机测量（待做）"：两台都跑这一版的 `rapp-service`，访问方在 `rust/` 下跑 `cargo run --release -p rapp-testkit --bin measure-forward -- --to <分享方的 ID> --port 9000`（对着回声服务），另外两台各 `ping -c 20 <relay 的主机>`。**先 `pipe` 一次**（或丢掉前几条）再看数。倍数 = `open_seq` 中位数 ÷ 两台经 relay 的一个往返，要不超过 1.5，和测试 `opening_over_the_channel_costs_one_round_trip` 的判定一样：规格要的是"额外不超过一个往返"，开一条要等的就是这一个往返，再给两头的处理（TLS 记录、帧、调度）留半个往返；进程内量到的是 1.13。`path` 应该只有 `relay=100`。
 
 | 项 | 值 |
 |---|---|
