@@ -41,6 +41,30 @@ void main() {
     expect(termsTarget(mode: 'text', list: TermList('d', hosts: [local(const [])]), apps: const []), isA<OpenPixels>());
   });
 
+  test('text mode with no launchers opens the most recently active tmux session', () {
+    final list = TermList('d', terms: [tmuxRow('a', activity: 5), tmuxRow('w', activity: 9)], hosts: [local(const [])]);
+    expect(termsTarget(mode: 'text', list: list, apps: [app('com.googlecode.iterm2')]),
+        isA<OpenTerm>().having((t) => t.app, 'app', 'term:tmux:w').having((t) => t.name, 'name', 'w'));
+    // An old service sends no hosts at all.
+    expect((termsTarget(mode: 'text', list: TermList('d', terms: [tmuxRow('a')]), apps: const []) as OpenTerm).app,
+        'term:tmux:a');
+  });
+
+  test('text mode asks for a new text terminal before it falls back to tmux', () {
+    final list = TermList('d', terms: [tmuxRow('w', activity: 9)], hosts: [local(['Terminal'])]);
+    expect(termsTarget(mode: 'text', list: list, apps: const []), isA<AskNewText>());
+  });
+
+  test('text mode with no launchers and no sessions opens pixels', () {
+    final t = termsTarget(mode: 'text', list: TermList('d', hosts: [local(const [])]), apps: [app('com.googlecode.iterm2')]);
+    expect((t as OpenPixels).bundle, 'com.googlecode.iterm2');
+  });
+
+  test('pixels mode ignores tmux sessions', () {
+    final list = TermList('d', terms: [tmuxRow('w', activity: 9)], hosts: [local(const [])]);
+    expect(termsTarget(mode: 'pixels', list: list, apps: const []), isA<OpenPixels>());
+  });
+
   test('pixels mode opens the first terminal app, else Terminal', () {
     expect(
         (termsTarget(mode: 'pixels', list: const TermList('d'), apps: [app('com.googlecode.iterm2')]) as OpenPixels)
