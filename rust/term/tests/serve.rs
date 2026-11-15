@@ -1,5 +1,6 @@
 mod common;
 
+use common::pty::{short_dir, Window};
 use common::Server;
 use serde_json::{json, Value};
 use std::path::Path;
@@ -95,6 +96,13 @@ impl Conn {
     }
 }
 
+/// A host row without its `launchers`, which depend on the machine the test runs on.
+fn plain(host: &Value) -> Value {
+    let mut h = host.clone();
+    h.as_object_mut().unwrap().remove("launchers");
+    h
+}
+
 /// The row of session `id` in a session list.
 fn row<'a>(list: &'a Value, id: &str) -> Option<&'a Value> {
     list["terms"].as_array()?.iter().find(|r| r["id"] == id)
@@ -107,13 +115,34 @@ fn unread(list: &Value, id: &str) -> Option<bool> {
 
 impl Worker {
     async fn start(s: &Server, config: Option<&str>) -> Worker {
-        let dir = tempfile::tempdir().unwrap();
+        Worker::start_in(s, short_dir(), config, None).await
+    }
+
+    /// Started in `dir` (short, so `term/pty/<pid>.sock` fits a unix socket address), with `PATH` set to `bin_path`.
+    async fn start_in(s: &Server, dir: tempfile::TempDir, config: Option<&str>, bin_path: Option<&Path>) -> Worker {
+        Worker::start_with(s, dir, config, bin_path, None).await
+    }
+
+    /// Started with `--launch-with launcher`: the program `open` runs instead of macOS's `open -a`.
+    async fn start_with(
+        s: &Server,
+        dir: tempfile::TempDir,
+        config: Option<&str>,
+        bin_path: Option<&Path>,
+        launch_with: Option<&Path>,
+    ) -> Worker {
         let path = dir.path().join("term.json");
         if let Some(c) = config {
             std::fs::write(&path, c).unwrap();
         }
         let mut c = command(&s.socket, &path);
         c.env("RAPP_TOKEN", TOKEN);
+        if let Some(l) = launch_with {
+            c.arg("--launch-with").arg(l);
+        }
+        if let Some(p) = bin_path {
+            c.env("PATH", p);
+        }
         let user = format!("test{}", dir.path().file_name().unwrap().to_str().unwrap());
         c.env("USER", &user);
         let ctl = CtlDir(Path::new("/tmp").join(format!("rapp-term-{user}")));
@@ -143,6 +172,23 @@ impl Worker {
         w
     }
 
+    /// Where `rapp-term run --dir` puts its sockets for this worker.
+    fn pty_dir(&self) -> std::path::PathBuf {
+        let d = self.dir.path().join("term");
+        rapp_term::pty::local::ensure_dirs(&d).unwrap();
+        d
+    }
+
+    /// Started with a launcher that runs the `.command` file in a pty of its own, as a window would. `script`
+    /// gives up its window when its input ends, so the input is held open for 20 s, longer than any test here.
+    async fn start_launching(s: &Server) -> Worker {
+        let dir = short_dir();
+        let script = dir.path().join("launch.sh");
+        std::fs::write(&script, "#!/bin/sh\nsleep 20 | script -q /dev/null sh \"$2\" >/dev/null 2>&1 &\n").unwrap();
+        std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
+        Worker::start_with(s, dir, None, None, Some(&script)).await
+    }
+
     fn config(&self) -> std::path::PathBuf {
         self.dir.path().join("term.json")
     }
@@ -153,7 +199,13 @@ impl Worker {
     }
 
     /// Close stdin: the rest of stdout, all of stderr and the exit code.
-    async fn stop(mut self) -> (Vec<String>, String, Option<i32>) {
+    async fn stop(self) -> (Vec<String>, String, Option<i32>) {
+        let (rest, err, code, _) = self.stop_keeping().await;
+        (rest, err, code)
+    }
+
+    /// `stop`, handing back the directory too.
+    async fn stop_keeping(mut self) -> (Vec<String>, String, Option<i32>, tempfile::TempDir) {
         drop(self.stdin.take());
         let mut rest = Vec::new();
         while let Some(l) = timeout(WAIT, self.out.recv()).await.expect("stdout did not end within 5 seconds") {
@@ -161,7 +213,7 @@ impl Worker {
         }
         let status = timeout(WAIT, self.child.wait()).await.expect("the worker did not exit").unwrap();
         let err = timeout(WAIT, self.err).await.expect("stderr did not end").unwrap();
-        (rest, err, status.code())
+        (rest, err, status.code(), self.dir)
     }
 
     async fn connect(&self, req: &Value, token: &str) -> Conn {
@@ -248,7 +300,8 @@ async fn list_shows_the_sessions_and_the_local_host() {
     let row = terms.iter().find(|r| r["id"] == "term:tmux:a b").expect("no row for the session");
     assert_eq!((&row["host"], &row["name"], &row["unread"]), (&json!(null), &json!("a b"), &json!(false)));
     assert_eq!((&row["command"], &row["panes"], &row["dead"]), (&json!("cat"), &json!(1), &json!(false)));
-    assert_eq!(v[0]["hosts"], json!([{"host": null}]));
+    assert_eq!(plain(&v[0]["hosts"][0]), json!({"host": null}));
+    assert_eq!(v[0]["hosts"].as_array().unwrap().len(), 1);
     w.stop().await;
 }
 
@@ -262,7 +315,7 @@ async fn a_target_that_cannot_connect_is_reported_and_local_is_still_listed() {
     assert!(t.elapsed() < SSH_WAIT);
     assert_eq!(v.len(), 1, "{v:?}");
     let hosts = v[0]["hosts"].as_array().unwrap();
-    assert_eq!((hosts.len(), &hosts[0]), (2, &json!({"host": null})), "{hosts:?}");
+    assert_eq!((hosts.len(), plain(&hosts[0])), (2, json!({"host": null})), "{hosts:?}");
     assert_eq!((&hosts[1]["host"], &hosts[1]["target"]), (&json!("gone"), &json!("nohost.invalid")));
     assert!(hosts[1]["error"].as_str().is_some_and(|e| !e.is_empty()), "{}", hosts[1]);
     assert!(hosts[1].get("tmux").is_none());
@@ -430,7 +483,7 @@ async fn watch_sends_a_list_now_then_only_changes() {
     let w = Worker::start(&s, None).await;
     let mut c = w.connect(&json!({"op": "watch"}), TOKEN).await;
     let first = c.next().await;
-    assert_eq!((&first["terms"], &first["hosts"]), (&json!([]), &json!([{"host": null}])), "{first}");
+    assert_eq!((&first["terms"], plain(&first["hosts"][0])), (&json!([]), json!({"host": null})), "{first}");
     // Output in the second the worker started does not count as unread.
     tokio::time::sleep(Duration::from_millis(1100)).await;
     s.raw(&["new-session", "-d", "-s", "w2", "-x", "80", "-y", "24", "cat"]);
@@ -470,11 +523,11 @@ async fn a_target_added_while_watching_shows_up() {
     let Some(s) = Server::start() else { return };
     let w = Worker::start(&s, None).await;
     let mut c = w.connect(&json!({"op": "watch"}), TOKEN).await;
-    assert_eq!(c.next().await["hosts"], json!([{"host": null}]));
+    assert_eq!(plain(&c.next().await["hosts"][0]), json!({"host": null}));
     std::fs::write(w.config(), r#"{"targets":[{"name":"gone","target":"nohost.invalid"}]}"#).unwrap();
     let failed = |h: &Value| h["host"] == "gone" && h["error"].as_str().is_some_and(|e| !e.is_empty());
     let l = c.until_list(SSH_WAIT, |l| l["hosts"].as_array().unwrap().iter().any(failed)).await;
-    assert_eq!((&l["hosts"][0], &l["hosts"][1]["target"]), (&json!({"host": null}), &json!("nohost.invalid")));
+    assert_eq!((plain(&l["hosts"][0]), &l["hosts"][1]["target"]), (json!({"host": null}), &json!("nohost.invalid")));
     w.stop().await;
 }
 
@@ -501,5 +554,151 @@ async fn the_watch_ends_when_the_worker_stops() {
     // Within 2 seconds the connection ends (a line in between would be a change, which can still come).
     let end = Instant::now() + Duration::from_secs(2);
     while c.line(end.saturating_duration_since(Instant::now())).await.is_some() {}
+    w.stop().await;
+}
+
+fn terms_of(v: &[Value]) -> Vec<String> {
+    v[0]["terms"].as_array().unwrap().iter().map(|r| r["id"].as_str().unwrap().to_string()).collect()
+}
+
+#[tokio::test]
+async fn a_pty_session_is_listed_after_tmux_ones() {
+    let Some(s) = Server::start() else { return };
+    s.raw(&["new-session", "-d", "-s", "a", "-x", "80", "-y", "24", "cat"]);
+    let w = Worker::start(&s, None).await;
+    let _win = Window::start(&w.pty_dir(), &["--name", "t", "--", "/bin/cat"]);
+    common::pty::wait_status(&w.pty_dir(), "t").await;
+    let v = w.ask(json!({"op": "list"})).await;
+    assert_eq!(terms_of(&v), ["term:tmux:a", "term:pty:t"], "{v:?}");
+    let t = row(&v[0], "term:pty:t").unwrap();
+    assert_eq!((t["panes"].as_u64(), t["attached"].as_u64(), t["dead"].as_bool()), (Some(1), Some(0), Some(false)));
+    assert_eq!((&t["host"], &t["name"], &t["command"]), (&json!(null), &json!("t"), &json!("/bin/cat")));
+    assert_eq!(t["unread"], false);
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn pty_rows_are_listed_without_tmux() {
+    let Some(s) = Server::start() else { return };
+    let empty = tempfile::tempdir().unwrap();
+    let w = Worker::start_in(&s, short_dir(), None, Some(empty.path())).await;
+    let _win = Window::start(&w.pty_dir(), &["--name", "t", "--", "/bin/cat"]);
+    common::pty::wait_status(&w.pty_dir(), "t").await;
+    let v = w.ask(json!({"op": "list"})).await;
+    assert!(v[0]["hosts"][0]["error"].is_string(), "{v:?}");
+    assert_eq!(terms_of(&v), ["term:pty:t"], "{v:?}");
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn a_watch_sees_a_pty_session_come_and_go() {
+    let Some(s) = Server::start() else { return };
+    let w = Worker::start(&s, None).await;
+    let mut c = w.connect(&json!({"op": "watch"}), TOKEN).await;
+    assert_eq!(c.next().await["terms"], json!([]));
+    let _win = Window::start(&w.pty_dir(), &["--name", "t", "--", "/bin/cat"]);
+    c.until_list(WAIT, |l| row(l, "term:pty:t").is_some()).await;
+    let mut v = w.connect(&json!({"op": "view", "term": "term:pty:t"}), TOKEN).await;
+    assert_eq!(v.next().await["t"], "hello");
+    v.until("panes").await;
+    v.send(json!({"t": "keys", "pane": "%0", "keys": ["Ctrl-D"]})).await;
+    c.until_list(WAIT, |l| row(l, "term:pty:t").is_none()).await;
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn viewing_a_pty_session_goes_through_serve() {
+    let Some(s) = Server::start() else { return };
+    let mut w = Worker::start(&s, None).await;
+    let win = Window::start(&w.pty_dir(), &["--name", "t", "--", "/bin/cat"]);
+    common::pty::wait_status(&w.pty_dir(), "t").await;
+    let mut c = w.connect(&json!({"op": "view", "term": "term:pty:t", "sid": 5}), TOKEN).await;
+    let hello = c.next().await;
+    assert_eq!((hello["t"].as_str(), hello["backend"].as_str()), (Some("hello"), Some("pty")), "{hello}");
+    c.until("panes").await;
+    c.send(json!({"t": "view", "pane": "%0", "cols": 80, "rows": 24})).await;
+    let screen = c.until("screen").await;
+    c.send(json!({"t": "ack", "rev": screen["rev"]})).await;
+    c.send(json!({"t": "type", "pane": "%0", "text": "secret-word-2\r"})).await;
+    win.wait_output("secret-word-2");
+    drop(c);
+    let ended = w.event().await;
+    assert_eq!(ended, json!({"event": "ended", "sid": 5, "term": "term:pty:t", "inputs": 1}));
+    let (rest, err, _) = w.stop().await;
+    assert!(!rest.iter().any(|l| l.contains("secret-word-2")) && !err.contains("secret-word-2"), "{rest:?} {err}");
+}
+
+#[tokio::test]
+async fn an_unknown_text_terminal_is_an_error() {
+    let Some(s) = Server::start() else { return };
+    let w = Worker::start(&s, None).await;
+    let v = w.ask(json!({"op": "view", "term": "term:pty:nope"})).await;
+    assert_eq!(v, [json!({"t": "error", "error": "no such text terminal"})]);
+    let v = w.ask(json!({"op": "view", "term": "term:pty@h:nope"})).await;
+    assert_eq!(v, [json!({"t": "error", "error": "invalid term id"})]);
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn restarting_serve_finds_the_session_again() {
+    let Some(s) = Server::start() else { return };
+    let first = Worker::start(&s, None).await;
+    let mut win = Window::start(&first.pty_dir(), &["--name", "t", "--", "/bin/cat"]);
+    common::pty::wait_status(&first.pty_dir(), "t").await;
+    let (_, _, code, dir) = first.stop_keeping().await;
+    assert_eq!(code, Some(0));
+    assert!(win.alive());
+    let second = Worker::start_in(&s, dir, None, None).await;
+    let v = second.ask(json!({"op": "list"})).await;
+    assert_eq!(terms_of(&v), ["term:pty:t"], "{v:?}");
+    assert!(win.alive());
+    second.stop().await;
+}
+
+#[tokio::test]
+async fn open_starts_a_window_and_answers_its_id() {
+    let Some(s) = Server::start() else { return };
+    let w = Worker::start_launching(&s).await;
+    let r = w.ask(json!({"op":"open","command":"/bin/cat","name":"c","app":"Terminal"})).await;
+    assert_eq!(r, [json!({"id": "term:pty:c"})]);
+    let list = &w.ask(json!({"op": "list"})).await[0];
+    assert!(row(list, "term:pty:c").is_some(), "{list}");
+    let st = common::pty::wait_status(&w.pty_dir(), "c").await;
+    unsafe { libc::kill(st.pid as i32, libc::SIGTERM) };
+    let launch = w.pty_dir().join("launch");
+    assert!(std::fs::read_dir(launch).unwrap().next().is_none(), "the .command file is removed");
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn open_refuses_a_missing_directory_and_an_unknown_app() {
+    let Some(s) = Server::start() else { return };
+    let w = Worker::start_launching(&s).await;
+    let r = w.ask(json!({"op":"open","cwd":"/no/such","app":"Terminal"})).await;
+    assert_eq!(r, [json!({"error": "no such directory: /no/such"})]);
+    let r = w.ask(json!({"op":"open","app":"Warp"})).await;
+    assert_eq!(r, [json!({"error": "unknown terminal app"})]);
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn open_gives_up_after_ten_seconds() {
+    let Some(s) = Server::start() else { return };
+    let w = Worker::start_with(&s, short_dir(), None, None, Some(Path::new("/usr/bin/true"))).await;
+    let r = w.ask(json!({"op":"open","app":"Terminal"})).await;
+    assert_eq!(r, [json!({"error": "the terminal window did not start in 10 s"})]);
+    // A window that is slow to start may still read it; a later open sweeps it once it is old.
+    let launch = w.pty_dir().join("launch");
+    assert_eq!(std::fs::read_dir(launch).unwrap().count(), 1, "the .command file is kept");
+    w.stop().await;
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn this_machine_lists_its_launchers() {
+    let Some(s) = Server::start() else { return };
+    let w = Worker::start(&s, None).await;
+    let list = &w.ask(json!({"op": "list"})).await[0];
+    assert!(list["hosts"][0]["launchers"].as_array().unwrap().contains(&json!("Terminal")), "{list}");
     w.stop().await;
 }

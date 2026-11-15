@@ -153,6 +153,25 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('a new-text ask shows the device panel and the 新开文本终端 dialog once', (tester) async {
+    await pump(tester);
+    t.emit({
+      'event': 'terms',
+      'id': '111',
+      'terms': [],
+      'hosts': [
+        {'host': null, 'launchers': ['Terminal']},
+      ],
+    });
+    await settle(tester);
+    s.openOrSwitch('111', 'terms:', '终端');
+    s.openOrSwitch('111', 'terms:', '终端');
+    await settle(tester);
+    expect(find.text('新开文本终端'), findsOneWidget);
+    expect((s.panel, s.deviceTab), (PanelTab.devices, '111'));
+    expect(t.sent.where((m) => m['cmd'] == 'open'), isEmpty);
+  });
+
   testWidgets('the service status tells MainState whether a relay is set', (tester) async {
     monitor.status = ServiceStatus.fromJson({'relay_addr': 'vps:22026', 'has_key': true});
     await pump(tester);

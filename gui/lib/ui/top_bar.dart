@@ -14,6 +14,7 @@ import 'corner_popover.dart';
 import 'projects.dart';
 import 'rule_snack.dart';
 import 'session_model.dart';
+import '../term/term_id.dart';
 import 'session_switcher.dart';
 import 'tokens.dart';
 
@@ -68,7 +69,8 @@ class TopBar extends StatelessWidget {
             final hidden = rs != null && !rs.detached && !term && rs.hidden.isNotEmpty;
             // Room for the gaps, a session block and the 已隐藏 chip besides (none of them shrink).
             // The 「＋」 of a terminal (a chip's minimum width) goes with them.
-            final plus = term && !rs.detached && state.canNewTermWindow;
+            final pty = term && isPtyTerm(rs.appId);
+            final plus = term && !rs.detached && (pty || state.canNewTermWindow);
             final chip = (hidden ? 130.0 : 0.0) + (plus ? 48.0 : 0.0);
             // The network marker, left of the stream anchor, while the hub has a relay to measure and
             // the bare row (no gaps, no overview button) has room for it; it goes before those do.
@@ -244,12 +246,15 @@ class TopBar extends StatelessWidget {
                   // It is the only tmux-changing action: asks the device for a window, on click only.
                   if (plus)
                     Tooltip(
-                      message: '新开一个窗口',
-                      child: TabChip(
-                        key: const Key('term-new-window'),
-                        label: '＋',
-                        selected: false,
-                        onTap: state.newTermWindow,
+                      message: pty ? '新开窗口：文本终端只有一个窗口' : '新开一个窗口',
+                      child: Opacity(
+                        opacity: pty ? 0.4 : 1,
+                        child: TabChip(
+                          key: const Key('term-new-window'),
+                          label: '＋',
+                          selected: false,
+                          onTap: pty ? () {} : state.newTermWindow,
+                        ),
                       ),
                     ),
                   // Outside the scroll view: the only way back to hidden windows must never scroll away.

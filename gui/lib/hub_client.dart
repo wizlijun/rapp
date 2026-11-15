@@ -126,8 +126,11 @@ class TermRow {
 
 /// One place sessions are listed from: the device itself (`host` null) or an SSH host it knows.
 class TermHost {
-  const TermHost(this.host, {this.target, this.tmux, this.error});
+  const TermHost(this.host, {this.target, this.tmux, this.error, this.launchers = const []});
   final String? host, target, tmux, error;
+
+  /// The local host row only: the terminal apps the device can open a text terminal in.
+  final List<String> launchers;
 }
 
 /// A device's terminal sessions as the hub last said; [off] means the device has them turned off.
@@ -157,7 +160,8 @@ TermList _termList(Map<String, dynamic> m, String fallbackId) {
     ],
     hosts: [
       for (final h in (m['hosts'] as List? ?? const []).whereType<Map>())
-        TermHost(_str(h['host']), target: _str(h['target']), tmux: _str(h['tmux']), error: _str(h['error'])),
+        TermHost(_str(h['host']), target: _str(h['target']), tmux: _str(h['tmux']), error: _str(h['error']),
+            launchers: [for (final l in (h['launchers'] as List? ?? const [])) if (l is String) l]),
     ],
   );
 }
@@ -290,6 +294,13 @@ class HubClient extends ChangeNotifier {
     final m = await _request(
         {'cmd': 'new_term', 'id': id, 'host': ?host, 'name': ?name, 'command': command, 'cols': cols, 'rows': rows},
         'term_created');
+    return '${m['term']}';
+  }
+
+  /// Opens a text terminal window on device [id] in terminal app [app]; answers the new term id.
+  Future<String> openTerm(String id, {String? cwd, String? name, String? command, required String app}) async {
+    final m = await _request(
+        {'cmd': 'open_term', 'id': id, 'cwd': ?cwd, 'name': ?name, 'command': ?command, 'app': app}, 'term_created');
     return '${m['term']}';
   }
 

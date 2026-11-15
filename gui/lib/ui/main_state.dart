@@ -33,6 +33,7 @@ import 'project_positions.dart';
 import 'projects.dart';
 import 'resources_state.dart';
 import 'session_model.dart';
+import 'terms_entry.dart';
 import 'tokens.dart';
 import 'unlock.dart';
 import 'workspace_store.dart';
@@ -211,6 +212,11 @@ class MainState extends ChangeNotifier {
 
   /// Device ids that want the password dialog (the current session is locked and nothing could unlock it).
   Stream<String> get unlockAsks => _unlockAsks.stream;
+
+  final StreamController<String> _newTextAsks = StreamController<String>.broadcast();
+
+  /// Device ids whose 终端 entry was opened in text mode with no text terminal yet: the 新开文本终端 dialog.
+  Stream<String> get newTextAsks => _newTextAsks.stream;
 
   /// A session went away: the device's unlock check dies with it unless another session still carries it.
   void _releaseUnlockBusy(SessionRecord r) {
@@ -1688,7 +1694,51 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> openOrSwitch(String id, String app, String appName) => _open(id, app, appName);
+  Future<void> openOrSwitch(String id, String app, String appName) =>
+      app == termsEntry ? _openTerms(id) : _open(id, app, appName);
+
+  /// What the 终端 entry on [id] opens now: it follows the device's 打开方式 (spec §2.2).
+  TermsTarget _termsTargetOf(String id) => termsTarget(
+      mode: prefs.termOpenFor(id),
+      list: hub?.termLists[id] ?? TermList(id),
+      apps: probes[id]?.apps?.apps ?? const []);
+
+  /// The key of the session [m] opens; null for a 终端 entry that asks for a new text terminal.
+  String? _openedKey(Member m) {
+    if (m.app.bundle != termsEntry) return m.key;
+    final id = m.app.device;
+    return switch (_termsTargetOf(id)) {
+      OpenTerm(:final app) => '$id/$app',
+      OpenPixels(:final bundle) => '$id/$bundle',
+      AskNewText() => null,
+    };
+  }
+
+  /// The 终端 entry; [select] and [quiet] as for [_open].
+  Future<void> _openTerms(String id, {bool select = true, bool quiet = false}) async {
+    if (!hubUsable) return;
+    switch (_termsTargetOf(id)) {
+      case OpenTerm(:final app, :final name):
+        return _open(id, app, name, select: select, quiet: quiet);
+      case OpenPixels(:final bundle, :final name):
+        return _open(id, bundle, name, select: select, quiet: quiet);
+      case AskNewText():
+        _newTextAsks.add(id);
+    }
+  }
+
+  /// Opens a text terminal window on [id], then switches to it without waiting for the session to connect; a
+  /// refusal is thrown with the hub's words.
+  Future<void> openText(String id, {String? cwd, String? name, String? command, required String app}) async {
+    if (!hubUsable) return;
+    final term = await hub!.openTerm(id, cwd: cwd, name: name, command: command, app: app);
+    try {
+      await hub?.terms(id);
+    } catch (_) {}
+    final row = hub?.termLists[id]?.terms.where((r) => r.id == term).firstOrNull;
+    final shown = row == null ? (parseTermId(term)?.name ?? term) : termDisplayName(row.name, row.host);
+    unawaited(openOrSwitch(id, term, shown));
+  }
 
   /// Opens [app] on [id], or switches to it if it is open. [select]: it becomes current and the
   /// panel closes; [quiet]: no 「已打开」 hint (failures still say why).
@@ -2369,6 +2419,12 @@ class MainState extends ChangeNotifier {
     _save();
   }
 
+  /// 「打开方式」 of [device]'s 终端 entry (`text` or `pixels`); saved.
+  void setTermOpen(String device, String mode) {
+    prefs.termOpen[device] = mode;
+    _save();
+  }
+
   void _save() {
     try {
       final dir = data.prefsDir();
@@ -2729,14 +2785,18 @@ class MainState extends ChangeNotifier {
     if (!hubUsable || p == null) return;
     if (currentProject != projectId) switchProject(projectId);
     final plan = planOpenAll(p, lampOf: (k) => entryFor(k)?.lamp, offline: deviceOffline);
+    // Before the opens: the 终端 entry's key is the session it opens, which they may change.
+    final first = p.members.where((m) => m.key == plan.first).map(_openedKey).firstOrNull;
     for (final m in plan.open) {
       // Not awaited: each open has its record or pending entry before its first await, so a
-      // second 「全部打开」 right after sees them connecting.
-      unawaited(_open(m.app.device, m.app.bundle, m.app.name, select: false, quiet: true));
+      // second 「全部打开」 right after sees them connecting. The 终端 entry opens what tapping it opens.
+      unawaited(m.app.bundle == termsEntry
+          ? _openTerms(m.app.device, select: false, quiet: true)
+          : _open(m.app.device, m.app.bundle, m.app.name, select: false, quiet: true));
     }
     hint = openAllHint(p, plan, deviceName);
-    if (plan.first != null) {
-      currentKey = plan.first;
+    if (first != null) {
+      currentKey = first;
       panel = null;
       overview = false;
     }
@@ -2934,6 +2994,7 @@ class MainState extends ChangeNotifier {
     }
     _unlockBusy.clear();
     unawaited(_unlockAsks.close());
+    unawaited(_newTextAsks.close());
     for (final t in _retryTimers.values) {
       t.cancel();
     }

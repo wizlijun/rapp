@@ -40,8 +40,8 @@ fn bad_arguments_exit_2() {
         &["nope"],
         &["watch"],
         &["watch", "com.apple.Safari"],
-        &["run"],
-        &["run", "--size", "axb", "--", "sh"],
+        &["new"],
+        &["new", "--size", "axb", "--", "sh"],
         &["list", "--ssh", "-oProxyCommand=x"],
     ] {
         assert_eq!(run(a).code, 2, "{a:?}");
@@ -49,9 +49,16 @@ fn bad_arguments_exit_2() {
 }
 
 #[test]
-fn list_run_and_watch_against_a_private_server() {
+fn usage_lists_new_for_tmux_sessions() {
+    let out = Command::new(BIN).arg("help").output().unwrap();
+    let usage = String::from_utf8_lossy(&out.stdout);
+    assert!(usage.contains("rapp-term new"), "{usage}");
+}
+
+#[test]
+fn list_new_and_watch_against_a_private_server() {
     let Some(s) = common::Server::start() else { return };
-    let o = run(&["run", "--socket", &s.socket, "--name", "cli demo", "--size", "90x20", "--", "cat"]);
+    let o = run(&["new", "--socket", &s.socket, "--name", "cli demo", "--size", "90x20", "--", "cat"]);
     assert_eq!((o.code, o.stdout.trim()), (0, "term:tmux:cli demo"));
     s.wait_command("cli demo", "cat");
     let o = run(&["list", "--json", "--socket", &s.socket]);
@@ -116,9 +123,24 @@ fn list_run_and_watch_against_a_private_server() {
 }
 
 #[test]
+fn run_refuses_a_cwd_that_is_not_a_directory_without_echoing_it() {
+    let d = tempfile::Builder::new().prefix("rt").tempdir_in("/tmp").unwrap();
+    let file = d.path().join("SECRET-FILE");
+    std::fs::write(&file, b"").unwrap();
+    let missing = d.path().join("SECRET-MISSING");
+    let dir = d.path().to_str().unwrap();
+    for cwd in [&file, &missing] {
+        let o = run(&["run", "--dir", dir, "--cwd", cwd.to_str().unwrap(), "--", "/bin/cat"]);
+        assert_eq!(o.code, 2, "{cwd:?}");
+        assert!(o.stderr.contains("--cwd is not a directory"), "{}", o.stderr);
+        assert!(!o.stderr.contains("SECRET"), "{}", o.stderr);
+    }
+}
+
+#[test]
 fn runtime_errors_exit_1_and_do_not_echo_content() {
     let Some(s) = common::Server::start() else { return };
-    let o = run(&["run", "--socket", &s.socket, "--tmux", "/nonexistent/tmux", "--", "echo", "SECRET-TEXT"]);
+    let o = run(&["new", "--socket", &s.socket, "--tmux", "/nonexistent/tmux", "--", "echo", "SECRET-TEXT"]);
     assert_eq!(o.code, 1);
     assert!(!o.stderr.contains("SECRET-TEXT"));
 }

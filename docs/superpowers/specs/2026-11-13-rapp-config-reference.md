@@ -133,6 +133,7 @@ agent 规则：**不直接改这个文件**。加、删设备走 GUI 的设备�
 | `start_fullscreen` | 布尔：启动时全屏沉浸 | `true` |
 | `auto_save_traffic` | 布尔：网络差时自动省流量（设置面板的开关）。`false` 时 A 始终用用户选的档位，不自动降 | `true` |
 | `first` | `device`、`project`（其他值按 `device`）：设备在前还是项目在前，决定左侧面板标签、全景两排和启动时会话列表分组的顺序；改它不改当前的分组。侧面板下拉「设备在前 / 项目在前」 | `device` |
+| `term_open`（程序里叫 `termOpen`） | 对象：`{"<被控端设备 id>": "text" \| "pixels"}`。点设备面板里“终端”那一项时怎么打开：`text`（界面上叫「文本」）开最近有动静的文本终端，`pixels`（「画面」）开被控端终端 app 的画面会话。每台被控端各记一个；别的值载入时丢掉（`gui/lib/ui/prefs.dart`） | `{}`（每台都是 `text`） |
 | `input_history`（程序里叫 `inputHistory`） | 布尔：输入记录总开关。`false` 时写作面板发出去的话不再写进 `devices/<id>/inputs/`；草稿照样在本机保存（《输入记录》§8） | `true` |
 
 生效：退出 GUI 再改，重新打开生效；`auto_save_traffic` 在设置面板里改，马上告诉已开的会话。没有机密。
@@ -215,6 +216,7 @@ agent 规则：加、删分享走 `rapp share` / `rapp unshare`（或 IPC 的 `s
 | 文件 | 在哪 | 是什么 | 机密 |
 |---|---|---|---|
 | `$ROOT/local/ipc.token` | A、B | GUI 连本机 service 用的 token，每次启动重新生成（`rust/service/src/lib.rs:105`） | **机密** |
+| `$ROOT/local/term/` | A | 文本终端（`rapp-term run`）的本机状态，目录 0700（`rust/term/src/pty/local.rs` `ensure_dirs`）。`pty/<pid>.sock`：每个在跑的 `run` 一个 unix socket，`run` 退出时删，`serve` 扫到连不上的旧 socket 也会删；`pty/.lock`：`run` 挑名字时的文件锁；`launch/<ticket>.command`：`serve` 为“新开文本终端”写的临时脚本（0700），等到 `run` 出现就删，10 秒没等到就先留着，下次 `open` 时删掉超过 5 分钟的（`rust/term/src/serve.rs` `sweep_launch`）；`pty.token`：本机 socket 的固定 token，0600，第一次用到时生成，之后不换（`run` 要活过服务重启）；文件是空的或不足 32 个字符、又已经超过 1 秒没改过，算是写到一半崩了留下的，重新生成。只防同机的其他用户 | token 是**机密** |
 | `$ROOT/local/shares.json.bad` | A | `shares.json` 读不懂时，第一次写分享表前把它原样改名到这里，盖掉以前的（`rust/service/src/shares.rs:161-166`）。rapp 不读它；要找回原来的内容，从这里抄回 `shares.json`（§2.11） | |
 | `$ROOT/local/update.json` | A | 最近查到的版本、上次检查时间、用户按过「不装」的版本（`rust/service/src/update.rs:133`）。「不装」走 IPC `update_dismiss` | |
 | `$ROOT/local/update-applied.json` | A | 上次升级的记录，用于回滚和授权提示（`rust/update/src/apply.rs:10`） | |

@@ -1,10 +1,13 @@
-//! The `rapp-term` command: version, list, watch, run, serve.
+//! The `rapp-term` command: version, list, watch, new, run, serve.
 //!
 //! Exit codes: 0 ok, 1 a runtime error (tmux missing or failing, the session not there or not made), 2 an
-//! argument error. Errors go to stderr as one line and never carry the command, the screen or the input.
+//! argument error or `run` without a terminal. `run` otherwise exits as its program did (see `pty::holder`).
+//! Errors go to stderr as one line and never carry the command, the screen or the input.
 
 use rapp_term::id::{default_name, session_name, valid_host, TermId};
 use rapp_term::proto::PROTO;
+use rapp_term::pty::holder::{self, NoTerminal, RunOpts};
+use rapp_term::pty::local;
 use rapp_term::runner::Runner;
 use rapp_term::serve::{self, ServeOpts};
 use rapp_term::session::{self, Opts};
@@ -22,8 +25,9 @@ const USAGE: &str = "\
 usage: rapp-term version [--json]
        rapp-term list [--json] [--ssh <destination> --host <name>] [--tmux <path>]
        rapp-term watch <term id> [--ssh <destination>] [--tmux <path>] [--json]
-       rapp-term run [--name <name>] [--size <cols>x<rows>] [--ssh <destination> --host <name>] [--tmux <path>] \
+       rapp-term new [--name <name>] [--size <cols>x<rows>] [--ssh <destination> --host <name>] [--tmux <path>] \
 -- <command...>
+       rapp-term run [--name N] [--cwd DIR] [--dir DIR] [--ticket T] [-- COMMAND...]
        rapp-term serve --token-env <variable> --config <path> [--bind <address>] [--port <port>] [--json]";
 
 /// The only backend this command serves.
@@ -37,6 +41,8 @@ enum Fail {
     Usage(String),
     /// Exit 1.
     Runtime(String),
+    /// Exit 2: `run` started without a terminal.
+    Terminal(String),
 }
 
 fn usage(m: impl Into<String>) -> Fail {
@@ -64,6 +70,11 @@ struct Args {
     config: Option<String>,
     bind: Option<String>,
     port: Option<String>,
+    cwd: Option<String>,
+    dir: Option<String>,
+    ticket: Option<String>,
+    /// Hidden: the program `serve` runs to open a window instead of `open -a`, for tests.
+    launch_with: Option<String>,
     /// Arguments that are not options.
     pos: Vec<String>,
     /// Everything after `--`.
@@ -108,6 +119,10 @@ fn parse_args(allowed: &[&str], argv: &[String]) -> Res<Args> {
             "config" => &mut a.config,
             "bind" => &mut a.bind,
             "port" => &mut a.port,
+            "cwd" => &mut a.cwd,
+            "dir" => &mut a.dir,
+            "ticket" => &mut a.ticket,
+            "launch-with" => &mut a.launch_with,
             _ => return Err(usage("unknown option")),
         };
         // The value is the next argument whatever it looks like; `Runner::ssh` rejects a destination like `-o…`.
@@ -264,13 +279,13 @@ async fn watch(a: &Args) -> Res<()> {
         .map_err(|e| runtime(format!("watch stopped: {e}")))
 }
 
-async fn run(a: &Args) -> Res<()> {
+async fn new(a: &Args) -> Res<()> {
     if !a.pos.is_empty() {
         return Err(usage("unexpected argument: the command goes after --"));
     }
     let command = match &a.command {
         Some(c) if !c.is_empty() => c,
-        _ => return Err(usage("run needs a command after --")),
+        _ => return Err(usage("new needs a command after --")),
     };
     let (cols, rows) = match &a.size {
         None => DEFAULT_SIZE,
@@ -293,6 +308,31 @@ async fn run(a: &Args) -> Res<()> {
         println!("{id}");
     }
     Ok(())
+}
+
+/// A program in a pty in this terminal window; the program's exit code.
+async fn run(a: &Args) -> Res<i32> {
+    if !a.pos.is_empty() {
+        return Err(usage("unexpected argument: the command goes after --"));
+    }
+    if a.name.as_deref().is_some_and(|n| session_name(n).is_none()) {
+        return Err(usage("invalid session name"));
+    }
+    // The path is not echoed: it is the user's.
+    if a.cwd.as_deref().is_some_and(|d| !Path::new(d).is_dir()) {
+        return Err(usage("--cwd is not a directory"));
+    }
+    let opts = RunOpts {
+        name: a.name.clone(),
+        cwd: a.cwd.as_ref().map(PathBuf::from),
+        dir: a.dir.as_ref().map_or_else(local::default_dir, PathBuf::from),
+        ticket: a.ticket.clone(),
+        command: a.command.clone().unwrap_or_default(),
+    };
+    holder::run(opts).await.map_err(|e| match e.downcast_ref::<NoTerminal>() {
+        Some(n) => Fail::Terminal(n.to_string()),
+        None => runtime(format!("run stopped: {e:#}")),
+    })
 }
 
 /// One line on stdout. A closed stdout is not an error: the one reading it has gone and stops the worker anyway.
@@ -333,7 +373,11 @@ async fn serve(a: &Args) -> Res<()> {
     if private_dir(&dir).is_err() {
         eprintln!("rapp-term: could not make the ssh control directory");
     }
-    let opts = ServeOpts { socket: a.socket.clone(), ..ServeOpts::new(PathBuf::from(config), dir) };
+    let opts = ServeOpts {
+        socket: a.socket.clone(),
+        launch_with: a.launch_with.as_ref().map(PathBuf::from),
+        ..ServeOpts::new(PathBuf::from(config), dir)
+    };
     event(a.json, &serde_json::json!({ "event": "listening", "port": port }));
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let json = a.json;
@@ -354,17 +398,18 @@ async fn serve(a: &Args) -> Res<()> {
     Ok(())
 }
 
-fn dispatch(argv: &[String]) -> Res<()> {
+fn dispatch(argv: &[String]) -> Res<i32> {
     let Some((sub, rest)) = argv.split_first() else { return Err(usage("missing subcommand")) };
     let allowed: &[&str] = match sub.as_str() {
         "version" => &["json", "socket"],
         "list" => &["json", "ssh", "host", "tmux", "socket"],
         "watch" => &["json", "ssh", "tmux", "socket"],
-        "run" => &["json", "name", "size", "ssh", "host", "tmux", "socket", "--"],
-        "serve" => &["json", "token-env", "config", "bind", "port", "socket"],
+        "new" => &["json", "name", "size", "ssh", "host", "tmux", "socket", "--"],
+        "run" => &["name", "cwd", "dir", "ticket", "--"],
+        "serve" => &["json", "token-env", "config", "bind", "port", "socket", "launch-with"],
         "help" | "--help" | "-h" => {
             println!("{USAGE}");
-            return Ok(());
+            return Ok(0);
         }
         _ => return Err(usage("unknown subcommand")),
     };
@@ -374,7 +419,7 @@ fn dispatch(argv: &[String]) -> Res<()> {
             return Err(usage("version takes no arguments"));
         }
         version(&a);
-        return Ok(());
+        return Ok(0);
     }
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -382,18 +427,19 @@ fn dispatch(argv: &[String]) -> Res<()> {
         .map_err(|_| runtime("could not start the async runtime"))?;
     let res = rt.block_on(async {
         match sub.as_str() {
-            "list" => list(&a).await,
-            "watch" => watch(&a).await,
-            "serve" => serve(&a).await,
-            _ => run(&a).await,
+            "list" => list(&a).await.map(|()| 0),
+            "watch" => watch(&a).await.map(|()| 0),
+            "serve" => serve(&a).await.map(|()| 0),
+            "run" => run(&a).await,
+            _ => new(&a).await.map(|()| 0),
         }
     });
     // Dropping the runtime would wait for tokio's blocking stdin read, which lasts as long as stdin stays open.
     rt.shutdown_background();
     if sub == "serve" && a.json {
         let (code, reason) = match &res {
-            Ok(()) => (0, "stdin closed"),
-            Err(Fail::Usage(m)) => (2, m.as_str()),
+            Ok(_) => (0, "stdin closed"),
+            Err(Fail::Usage(m) | Fail::Terminal(m)) => (2, m.as_str()),
             Err(Fail::Runtime(m)) => (1, m.as_str()),
         };
         say(&serde_json::json!({ "event": "exit", "code": code, "reason": reason }).to_string());
@@ -408,7 +454,7 @@ fn main() {
         None => Err(usage("arguments must be UTF-8")),
     };
     let code = match res {
-        Ok(()) => 0,
+        Ok(code) => code,
         Err(Fail::Usage(m)) => {
             eprintln!("rapp-term: {} (see rapp-term help)", m.replace('\n', " "));
             2
@@ -416,6 +462,11 @@ fn main() {
         Err(Fail::Runtime(m)) => {
             eprintln!("rapp-term: {}", m.replace('\n', " "));
             1
+        }
+        Err(Fail::Terminal(m)) => {
+            // It names the command already.
+            eprintln!("{m}");
+            2
         }
     };
     let _ = std::io::stdout().flush();

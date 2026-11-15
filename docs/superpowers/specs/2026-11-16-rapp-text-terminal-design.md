@@ -1,6 +1,6 @@
 # rapp 文本终端设计规格（照 hurryvc 的方法）
 
-日期：2026-11-16。状态：第 1 稿，待用户确认。本文不改代码。
+日期：2026-11-16。状态：已确认 2026-11-16。计划实际做成的地方已在各节改过（`terms:`、`<pid>.sock`、`dead`、`.command` 和 `--ticket`）。
 
 - 上游：《终端会话设计》（`2026-11-14-rapp-terminal-sessions-design.md`，下称“终端规格”）、它的评审（`2026-11-14-rapp-terminal-sessions-review.md`，下称“评审”）、调研（`2026-11-14-rapp-terminal-sessions-research.md`）、终端界面设计（`2026-11-14-rapp-terminal-gui-design.md`）、桌面会话（`2026-11-14-rapp-desktop-sessions-design.md`）、app 配置（`2026-11-13-rapp-app-profiles-design.md`）、配置规范总览（`2026-11-13-rapp-config-reference.md`）。
 - 参考项目：hurryvc（<https://github.com/swigger/hurryvc>，读的是提交 b54749d，2026-04-12，也就是本文写作时的最新提交）。已列进 README 的致谢。
@@ -76,7 +76,7 @@ bruce-mac                                       ● 在线 · 局域网
 ```
 
 - **顺序**（X4）：应用列表里“桌面”（`desktop:`）第一，“终端”第二，其余 app 照原来的顺序排在后面。被控端没有“桌面”时，“终端”就排第一。
-- **“终端”这一项**【我定的】：它是一个合成的入口，像“桌面”一样，app 标识是 `term:`，可以设为常用。只要这台设备允许终端会话（`term.json` 的 `allow`），它就在，不管被控端开没开终端 app。
+- **“终端”这一项**【我定的】：它是一个合成的入口，像“桌面”一样，app 标识是 `terms:`（不用 `term:`：GUI 的 `isTermApp` 是 `startsWith('term:')`，service 的工作进程表也用 `term:` 当 `serve` 的键，`term:` 会被当成一个终端会话），可以设为常用。只要这台设备允许终端会话（`term.json` 的 `allow`），它就在，不管被控端开没开终端 app。
 - **原来那组“终端”**（`devices_tab.dart` 的 `_termGroup`）并进这一项（X3），tmux 会话、SSH 主机都列在这里。
 - **终端 app 自己的那一行**从普通 app 列表里拿掉，列在“终端”里面，标“只能用画面看”，按钮是 [画面]，点了就是现在的 app 会话。这样同一个终端 app 不会出现在两个地方【我定的】。算作终端 app 的有：Terminal `com.apple.Terminal`、iTerm `com.googlecode.iterm2`、Ghostty、WezTerm、kitty、Alacritty、Warp（bundle id 由计划核对）。
 - **能用来开文本终端的只有 Terminal 和 iTerm**（用户 2026-11-16 定的）。其他终端 app 只能用画面看，以后要支持再加。
@@ -86,7 +86,13 @@ bruce-mac                                       ● 在线 · 局域网
 
 - 两个值：文本（默认）、画面。
 - 决定两件事：
-  - 点“终端”这一项本身，或者从常用里点它：选“文本”时，有 rapp 开的文本终端就打开最近有动静的那个，一个都没有就弹出“新开文本终端”；选“画面”时，打开被控端的终端 app 的画面会话。
+  - 点“终端”这一项本身，或者从常用里点它，或者项目“全部打开”时它是成员：选“文本”时按顺序找：
+    1. 有 rapp 开的文本终端，就打开最近有动静的那个；
+    2. 一个都没有，而本机那条 `HostRow` 的 `launchers` 不空（§4.4），就弹出“新开文本终端”；
+    3. 开不了文本终端（Linux 被控端，或者旧版服务没有 `launchers`），有 tmux 会话就打开最近有动静的那个（`term:tmux:<名字>`）：先在本机的里面挑，本机一个都没有才挑 SSH 主机上的；
+    4. 都没有，就照“画面”办。
+
+    选“画面”时，打开被控端的终端 app 的画面会话，不看上面这些。
   - 列表里每一行的按钮写明自己是文本还是画面，不受这个设置影响。
 - 存在哪【我定的】：主控台的 `$ROOT/devices/<主控台 id>/gui.json`，新字段 `term_open`，值是 `{"<被控端设备 id>": "text" | "pixels"}`，没写就是 `text`。这是主控台这边“怎么看”的偏好，和 `first`、`theme` 放在一起；每台被控端设备各记一个。
 
@@ -138,7 +144,7 @@ bruce-mac                                       ● 在线 · 局域网
 │   ├ 伪终端（portable-pty） ⇄ claude                                         │
 │   ├ 输出：原样写回这个窗口 ＋ 喂给 alacritty_terminal → 字符网格           │
 │   ├ 本机键盘：raw 模式读标准输入 → 伪终端                                   │
-│   └ 本机 socket：$ROOT/local/term/pty/<名字>.sock（0700 目录）←─┐          │
+│   └ 本机 socket：$ROOT/local/term/pty/<pid>.sock（0700 目录）←─┐          │
 └──────────────────────────────────────────────────────────────────│──────────┘
                                                                    │ 连上去看、送输入
 rapp-service ── 起 ──▶ rapp-term serve ────────────────────────────┘
@@ -158,7 +164,7 @@ rapp-service ── 起 ──▶ rapp-term serve ──────────
 
 另外两件是 rapp 要加的：
 
-4. **本机 socket。** `run` 自己开一个 unix socket 等别人来连，路径 `$ROOT/local/term/pty/<名字>.sock`，目录 0700【我定的】。谁来连都先给一个 token，对不上就断开。现成的两个 token 都不能用：`serve` 的 token 每次启动随机生成、只放在环境变量里（`rust/service/src/workers.rs:231`），`local/ipc.token` 每次服务启动也会重新生成（`rust/service/src/lib.rs:120`），而 `run` 要活过服务重启。所以新建一个固定的 `$ROOT/local/term/pty.token`（0600），第一次用到时生成，之后不换；`run` 和 `serve` 都读它【我定的】。`serve` 是来连的那一方，所以 `serve` 重启后重新扫这个目录就能接上，`run` 不用知道 `serve` 在不在、什么时候重启（§5）。
+4. **本机 socket。** `run` 自己开一个 unix socket 等别人来连，路径 `$ROOT/local/term/pty/<pid>.sock`，目录 0700【我定的】。用 pid 不用名字：macOS 的 unix socket 路径最多 104 字节，名字可能很长，改名、重名也不用动文件；名字放在状态里。路径超长就报错退出，写明路径。谁来连都先给一个 token，对不上就断开。现成的两个 token 都不能用：`serve` 的 token 每次启动随机生成、只放在环境变量里（`rust/service/src/workers.rs:231`），`local/ipc.token` 每次服务启动也会重新生成（`rust/service/src/lib.rs:120`），而 `run` 要活过服务重启。所以新建一个固定的 `$ROOT/local/term/pty.token`（0600），第一次用到时生成，之后不换；`run` 和 `serve` 都读它【我定的】。`serve` 是来连的那一方，所以 `serve` 重启后重新扫这个目录就能接上，`run` 不用知道 `serve` 在不在、什么时候重启（§5）。
 5. **对终端查询的应答。** 程序发来的查询（光标位置、设备属性这类）由被控端的那个窗口回答，`run` 不另外回，不然会回两次。hurryvc 也是这么分的：有本机终端时让它回答，没有时才自己回（`src/producer.rs:113-114`、`TerminalResponder`）。rapp 开的文本终端总有一个窗口，所以 `run` 只需要“不回”这一种【我定的】。
 
 `run` 什么时候结束：程序退出，或者所在窗口没了（伪终端另一头收到 SIGHUP）。**不因为任何连进来的观众断开而结束。**
@@ -172,17 +178,18 @@ rapp-service ── 起 ──▶ rapp-term serve ──────────
 ### 4.3 `rapp-term serve` 的改动
 
 - **一个新后端 `pty`**：会话标识 `term:pty:<名字>`（`id.rs` 不用改格式，后端名本来就是参数）。
-  - 列出会话：扫 `$ROOT/local/term/pty/`，每个 socket 连一下问状态（名字、命令、尺寸、最后输出时间、观众数、是否已退出）；连不上的 socket 是死掉的 `run` 留下的，删掉。
+  - 列出会话：扫 `$ROOT/local/term/pty/`，每个 socket 连一下问状态（名字、命令、尺寸、最后输出时间、观众数、pid、ticket）；连不上的 socket 是死掉的 `run` 留下的，删掉（还在忙、状态半秒没回的不删）。`run` 自己拿 `pty/.lock` 的文件锁，挑没人用的名字（`名字`、`名字-2`…）。
   - 看：连上那个 socket，后面照 §7 的会话协议，消息格式和 tmux 那边一模一样（`Hello` 的 `backend` 写 `pty`）。
-- **新请求 `open`**（主控台的“新开文本终端”）：带目录、命令、名字、用哪个终端 app。`serve` 打开窗口的做法见 §4.4，然后等那个 socket 出现（最多等 10 秒【我定的】），回给主控台会话标识，主控台直接打开它。
+- **新请求 `open`**（主控台的“新开文本终端”）：带目录、命令、名字、用哪个终端 app。`serve` 打开窗口的做法见 §4.4，然后每 100 毫秒扫一次状态，等 `ticket` 对上的那个 `run` 出现（最多等 10 秒【我定的】），回给主控台会话标识，主控台直接打开它。
 - **抽出后端这一层**（评审 R3 说的时候到了）：现在 `serve.rs`、`session.rs` 里的列会话、取屏、送输入都直接写着 tmux。计划的第一步是把这三样提成一个两边都能实现的接口，tmux 后端的行为和测试不变。具体怎么切由计划定，但要守住一条：线协议（`proto.rs`）一个字段都不为 `pty` 加。
-- `TermRow` 对 `pty` 会话的填法：`panes` 是 1，`attached` 是观众数（被控端那个窗口不算），`activity` 是最后输出时间，`dead` 是程序已退出，`unread` 照 `Unread` 的规则。主控台据此在列表里写“文本”，不写“几个面板”。
+- `TermRow` 对 `pty` 会话的填法：`panes` 是 1，`attached` 是观众数（被控端那个窗口不算），`activity` 是最后输出时间，`dead` 总是 false（程序一退出，`run` 给观众发 `session ended`、删掉 socket，这一行就从列表里消失；正在看的主控台留着最后一屏），`unread` 照 `Unread` 的规则。主控台据此在列表里写“文本”，不写“几个面板”。
 
 ### 4.4 在被控端打开窗口（macOS）
 
-- `serve` 在 `$ROOT/local/term/launch/` 写一个 `.command` 文件（0700），内容就一行：`exec '<rapp-term 的绝对路径>' run --name '<名字>' --cwd '<目录>' -- <命令>`（用单引号转义）。然后执行 `open -a Terminal <这个文件>`。Terminal 打开 `.command` 不需要“自动化”权限【我定的】。
+- `serve` 在 `$ROOT/local/term/launch/` 写一个 `.command` 文件（0700），内容是 `#!/bin/sh` 加一行：`exec '<rapp-term 的绝对路径>' run --dir '<term 目录>' --ticket '<t>' [--name '<名字>'] [--cwd '<目录>'] [-- <命令>]`（路径、名字、目录用单引号转义，`'` 写成 `'\''`；命令原样放在 `--` 后面，由 shell 去拆；没有命令就不写 `--`）。`ticket` 是 `serve` 生成的随机串，`serve` 靠它认出自己开的那个 `run`。然后执行 `open -a Terminal <这个文件>`。Terminal 打开 `.command` 不需要“自动化”权限【我定的】。
   - iTerm：`open -a iTerm <文件>`，未实测，T0 要验证。
-  - 文件在 `run` 起来以后就删掉。
+  - `run` 出现了，`serve` 就删掉这个文件；10 秒到了还没出现，文件先留着（冷启动的 Terminal 加上慢的 shell 配置可能更久才读它，删早了窗口里会报找不到文件）。每次 `open` 写新文件前，`serve` 先删掉 `launch/` 里修改时间超过 5 分钟的 `.command`。`run` 不知道这个文件。
+  - 能用哪些终端 app：`serve` 起来时查一次，macOS 上 Terminal 总有，`open -Ra iTerm` 成功就有 iTerm；结果放在本机那条 `HostRow` 的 `launchers` 里，主控台只在它非空时显示“新开文本终端…”。
 - 这样起来的 `run` 是 Terminal 的子孙，不在 rapp-service 的 launchd 任务里。T0 要实测这一点：停掉服务，看 `run` 和程序还在不在（§11）。
 - `rapp-term` 的绝对路径取 `serve` 自己所在的目录（`.app/Contents/MacOS/`）。
 
@@ -244,7 +251,7 @@ Windows 被控端不在本文里做，等 Mac 做完另起一份设计（用户 
 
 - `term.json` 不加字段。`allow` 为假时，文本终端和 tmux 一样都关掉，“终端”这一项也不出现。
 - 主控台 `gui.json` 加 `term_open`（§2.2），写进《配置规范总览》§2.4。
-- 新目录 `$ROOT/local/term/`（`pty/` 放 socket，`launch/` 放临时的 `.command`），0700，属于“程序自管的状态”，写进总览 §3。
+- 新目录 `$ROOT/local/term/`（`pty/` 放 socket，`launch/` 放临时的 `.command`，固定的 token 在 `pty.token`），0700，属于“程序自管的状态”，写进总览 §3。
 - 日志照终端规格 §14：记谁什么时候开了、看了哪个文本终端，发了几次输入；不记屏幕内容、输入内容和命令。
 - 安全边界不变（终端规格 §15）：relay 的 key，加上每台设备的“允许终端会话”开关。本机 socket 用 0700 目录加 token，只防同机的其他用户，不当成新的一道门（安全取向：relay 是唯一的门）。
 
@@ -271,4 +278,4 @@ Windows 被控端不在本文里做，等 Mac 做完另起一份设计（用户 
 
 - 终端规格：§1“不做”里去掉“Unix 上自带的伪终端和持有进程”，§10 改成指向本文。
 - 《配置规范总览》§2.4、§3。
-- README 里如果写了终端会话的用法，加上 `rapp-term run` 和 `rapp-term new`。
+- README 里如果写了终端会话的用法，加上 `rapp-term run` 和 `rapp-term new`。（2026-11-16 查过：两份 README 都没写终端会话的用法，所以没有加。）

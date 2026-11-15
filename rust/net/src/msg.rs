@@ -37,6 +37,16 @@ pub enum Op {
         cols: u16,
         rows: u16,
     },
+    /// A new text terminal: a window on this device that runs `rapp-term run`, started with `app`.
+    OpenTerm {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cwd: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        command: Option<String>,
+        app: String,
+    },
     AddTermTarget {
         name: String,
         target: String,
@@ -112,6 +122,8 @@ mod tests {
             serde_json::to_value(new).unwrap(),
             json!({"op":"new_term","command":["claude"],"cols":120,"rows":40})
         );
+        let op = Op::OpenTerm { cwd: None, name: None, command: Some("claude".into()), app: "Terminal".into() };
+        assert_eq!(serde_json::to_value(&op).unwrap(), json!({"op":"open_term","command":"claude","app":"Terminal"}));
         let new = Op::NewTerm { host: Some("gpu1".into()), name: Some("x".into()), command: vec![], cols: 1, rows: 2 };
         let v = serde_json::to_value(&new).unwrap();
         assert_eq!(v["host"], "gpu1");

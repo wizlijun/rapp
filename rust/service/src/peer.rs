@@ -192,6 +192,7 @@ pub async fn serve_request(state: &Arc<State>, mut s: Pipe, peer: Peer) -> Resul
             op @ (Op::ListTerms
             | Op::WatchTerms
             | Op::NewTerm { .. }
+            | Op::OpenTerm { .. }
             | Op::AddTermTarget { .. }
             | Op::RemoveTermTarget { .. }),
         ) => crate::term::request(state, &mut s, &peer, op).await,

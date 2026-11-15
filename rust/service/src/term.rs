@@ -73,6 +73,10 @@ pub async fn request<S: AsyncRead + AsyncWrite + Unpin + Send>(
                 }
                 answer(ask(state, &req).await)
             }
+            Op::OpenTerm { cwd, name, command, app } => {
+                let req = json!({"op": "open", "cwd": cwd, "name": name, "command": command, "app": app});
+                answer(ask(state, &req).await)
+            }
             Op::AddTermTarget { name, target, tmux } => targets(edit(state, |c| add(c, Target { name, target, tmux }))),
             Op::RemoveTermTarget { name } => targets(edit(state, |c| remove(c, &name))),
             _ => err("unknown op"),
@@ -88,6 +92,7 @@ fn log_fields(op: &Op) -> Value {
         Op::ListTerms => json!({"op": "list_terms"}),
         Op::WatchTerms => json!({"op": "watch_terms"}),
         Op::NewTerm { host, .. } => json!({"op": "new_term", "host": host.as_deref().map(clean_name)}),
+        Op::OpenTerm { app, .. } => json!({"op": "open_term", "app": app}),
         Op::AddTermTarget { name, .. } => json!({"op": "add_term_target", "name": clean_name(name)}),
         Op::RemoveTermTarget { name } => json!({"op": "remove_term_target", "name": clean_name(name)}),
         _ => json!({}),
@@ -419,4 +424,20 @@ fn remove(c: &mut TermConfig, name: &str) -> Result<(), String> {
         return Err("unknown target".into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn open_term_logs_only_the_app() {
+        let op = Op::OpenTerm {
+            cwd: Some("/secret".into()),
+            name: Some("n".into()),
+            command: Some("rm".into()),
+            app: "iTerm".into(),
+        };
+        assert_eq!(log_fields(&op), json!({"op":"open_term","app":"iTerm"}));
+    }
 }
