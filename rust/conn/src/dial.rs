@@ -572,6 +572,68 @@ mod tests {
         (socks, addrs)
     }
 
+    /// A `rapp/2` device on `127.0.0.1` trusting `key` that welcomes every connection and answers
+    /// each request on it with ok; `ended` gets a word whenever one of its connections has ended.
+    fn welcoming_device(
+        key: Key,
+        ended: tokio::sync::mpsc::UnboundedSender<()>,
+    ) -> (SocketAddr, quinn::Endpoint, tempfile::TempDir) {
+        let home = tempfile::tempdir().unwrap();
+        let id = Arc::new(Identity::generate().unwrap());
+        let cfg = device_server_config(&id, &[ALPN_DEVICE]).unwrap();
+        let ep = quinn::Endpoint::server(cfg, "127.0.0.1:0".parse().unwrap()).unwrap();
+        let (addr, server) = (ep.local_addr().unwrap(), ep.clone());
+        let (key, paired) = (Arc::new(key), Arc::new(Paired::empty(home.path())));
+        tokio::spawn(async move {
+            while let Some(incoming) = server.accept().await {
+                let (id, key, paired, ended) = (id.clone(), key.clone(), paired.clone(), ended.clone());
+                tokio::spawn(async move {
+                    if let Ok(conn) = incoming.await {
+                        let mut welcomed = false;
+                        while let Ok(pair) = conn.accept_bi().await {
+                            let mut pipe: Pipe = Box::new(bi(pair));
+                            if !welcomed {
+                                let facts = quic_facts(&conn, &id.fp, Role::Server).unwrap();
+                                let me = Me { id: A_ID, name: "fake-a", key: Some(&key) };
+                                if hello_server(&mut pipe, &facts, &me, &paired).await.is_err() {
+                                    break;
+                                }
+                                welcomed = true;
+                            }
+                            if read_json(&mut pipe).await.is_err() {
+                                break;
+                            }
+                            let _ = write_json(&mut pipe, &ok(json!({}))).await;
+                            let _ = pipe.shutdown().await;
+                        }
+                    }
+                    let _ = ended.send(());
+                });
+            }
+        });
+        (addr, ep, home)
+    }
+
+    #[tokio::test]
+    async fn the_dials_that_did_not_win_are_closed() {
+        let key = Key::new_local();
+        let (ended_tx, mut ended) = tokio::sync::mpsc::unbounded_channel();
+        let (one, _ep1, _home1) = welcoming_device(key_copy(&key), ended_tx.clone());
+        let (two, _ep2, _home2) = welcoming_device(key_copy(&key), ended_tx);
+        let out = outbound();
+        let lan = [one.to_string(), two.to_string()];
+        let to = Target { id: A_ID, lan: &lan, known: None };
+        let sent = out.request(&Via { relay: None, key: &key }, &to, &Op::Ping).await.unwrap();
+        assert_eq!((&sent.reply["ok"], sent.path), (&json!(true), "lan"), "{}", sent.reply);
+        // The connection to the other address ends now, not at its idle timeout; the one that won is kept.
+        tokio::time::timeout(Duration::from_secs(2), ended.recv()).await.expect("the other dial was not closed").unwrap();
+        assert!(tokio::time::timeout(Duration::from_millis(300), ended.recv()).await.is_err(), "the link that won was closed too");
+        assert_eq!(out.links.lock().unwrap().len(), 1);
+        // and the next request goes on the link that is held
+        let again = out.request(&Via { relay: None, key: &key }, &to, &Op::Ping).await.unwrap();
+        assert_eq!((&again.reply["ok"], again.path), (&json!(true), "lan"));
+    }
+
     #[tokio::test]
     async fn dead_lan_addresses_are_dialed_together() {
         let key = Key::new_local();
