@@ -560,7 +560,7 @@ async fn opening_over_the_channel_costs_one_round_trip() {
     // 也等 relay connected。先 pipe 一次（建通道 / 记下旧版本），再 measure(n = 50, parallel = 6)。
     // 两组都把 open_seq/open_par/first_byte 的中位数和 p95 打出来（--nocapture 时记进测量文档）。
     // 断言：
-    //   两组 report.path 的 relay 计数都 == 50
+    //   两组 report.path 的 relay 计数都 == 100（顺序和并发两轮各 50，measure 合在一起计）
     //   旧式组 open_seq 中位数 ≥ 1.7 × RTT_MS（延迟真的加上了，而且确实是两个往返）
     //   通道组 open_seq 中位数 ≤ 1.5 × RTT_MS，open_par 中位数 ≤ 1.5 × RTT_MS
     //   通道组 A 的日志恰好一行 channel

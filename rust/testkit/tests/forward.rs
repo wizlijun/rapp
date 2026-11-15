@@ -1175,7 +1175,8 @@ async fn opening_over_the_channel_costs_one_round_trip() {
         let plan = rapp_testkit::Plan { ipc_port: b.svc.ipc_port, token, to, port, n: 50, parallel: 6 };
         let report = rapp_testkit::measure(&plan).await.unwrap();
         eprintln!("[{group}]\n{}", report.lines().join("\n"));
-        assert_eq!(report.path["relay"], 50 * 2 / 2 * 2 / 2 * 2 / 2 * 2 / 2 * 2, "{:?}", report.path);
+        // `measure` counts the sequential and the parallel opens together (n each).
+        assert_eq!(report.path["relay"], 100, "{:?}", report.path);
         let seq = rapp_testkit::quantile_ms(&report.open_seq, 0.5);
         let par = rapp_testkit::quantile_ms(&report.open_par, 0.5);
         medians.push((seq, par));
