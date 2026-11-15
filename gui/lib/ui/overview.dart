@@ -483,7 +483,7 @@ class _Block extends StatelessWidget {
 const _projectCellWidth = 200.0;
 const _resourcesWidth = 300.0;
 
-/// Projects (scrolling) on the left, the resources cell pinned to the right (K13).
+/// Projects (scrolling) on the left, the resources cell pinned to the right (K13); no projects, no cell.
 class _ThirdLayer extends StatelessWidget {
   const _ThirdLayer({required this.state});
   final MainState state;
@@ -495,22 +495,9 @@ class _ThirdLayer extends StatelessWidget {
       height: 88 + 2 * _gap,
       child: Row(children: [
         Expanded(
+          // No projects: nothing here, not even a word (project spec §5).
           child: projects.isEmpty
-              ? Padding(
-                  padding: const EdgeInsets.all(_gap),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: _Cell(
-                      cellKey: 'ov-no-projects',
-                      width: _projectCellWidth,
-                      label: '还没有项目',
-                      onTap: () => state.showPanel(PanelTab.projects),
-                      child: Center(
-                        child: Text('还没有项目', style: TextStyle(color: RappTokens.of(context).muted)),
-                      ),
-                    ),
-                  ),
-                )
+              ? const SizedBox.shrink()
               : ListView.separated(
                   key: const Key('ov-projects'),
                   scrollDirection: Axis.horizontal,

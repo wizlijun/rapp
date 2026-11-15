@@ -316,6 +316,22 @@ void main() {
     await tester.pump(MainState.undoFor);
   });
 
+  testWidgets('切到 and 固定 sit in the title row; a long name on a narrow card does not overflow', (tester) async {
+    await tester.runAsync(boot);
+    await pump(tester);
+    final id = await oneProject(tester, members: [safari, notes]);
+    double mid(String k) => tester.getCenter(find.byKey(Key(k))).dy;
+    expect(mid('switch-$id'), moreOrLessEquals(mid('project-name-$id'), epsilon: 1));
+    expect(mid('pin-$id'), moreOrLessEquals(mid('project-name-$id'), epsilon: 1));
+    expect(mid('switch-$id'), lessThan(tester.getRect(find.byKey(Key('open-all-$id'))).top));
+    s.renameProject(id, '一个很长很长很长很长很长很长很长很长很长很长的项目名字');
+    await tester.pumpWidget(wrap(SizedBox(width: 300, height: 800, child: ProjectsTab(state: s))));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(tester.getSize(find.byKey(Key('switch-$id'))).height, greaterThanOrEqualTo(48));
+    expect(tester.getRect(find.byKey(Key('pin-$id'))).right, lessThanOrEqualTo(tester.getRect(find.byType(ProjectsTab)).right));
+  });
+
   testWidgets('tap the name to rename', (tester) async {
     await tester.runAsync(boot);
     await pump(tester);

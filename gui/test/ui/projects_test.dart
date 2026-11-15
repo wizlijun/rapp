@@ -37,6 +37,15 @@ void main() {
       final p3 = Project('p', '写周报', [Member(a, '整理 PR')]);
       expect(projectSubtitle(en('111/a'), [p3, p2]), 'mini · 写周报等 · 整理 PR');
     });
+    test('the current project is the one named, still with 等', () {
+      final p1 = Project('p', '写周报', [Member(a)]);
+      final p2 = Project('q', '发版', [Member(a, '跑测试')]);
+      expect(projectSubtitle(en('111/a'), [p1, p2], current: 'q'), 'mini · 发版等 · 跑测试');
+      final p3 = Project('p', '写周报', [Member(a, '整理 PR')]);
+      expect(projectSubtitle(en('111/a'), [p3, p2], current: 'q'), 'mini · 发版等 · 跑测试');
+      // A current project the session is not in changes nothing.
+      expect(projectSubtitle(en('111/a'), [p1, p2], current: 'x'), 'mini · 写周报等 · 跑测试');
+    });
   });
 
   test('plan: open, reconnect, skip and stop', () {

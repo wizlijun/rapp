@@ -57,8 +57,11 @@ String endAllHint(String name, int ended, int shared) {
 }
 
 /// The top bar's second line for a session that is in a project (K16); null when it is in none.
-String? projectSubtitle(SessionEntry e, List<Project> projects) {
+/// The [current] project comes first when the session is in it.
+String? projectSubtitle(SessionEntry e, List<Project> projects, {String? current}) {
   final mine = [for (final p in projects) if (p.members.any((m) => m.key == e.key)) p];
+  final i = mine.indexWhere((p) => p.id == current);
+  if (i > 0) mine.insert(0, mine.removeAt(i));
   if (mine.isEmpty) return null;
   String task = '';
   for (final p in mine) {

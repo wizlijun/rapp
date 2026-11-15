@@ -361,12 +361,15 @@ void main() {
     expect(tester.widget<StatusLamp>(lamps.at(1)).kind, Lamp.notOpened);
   });
 
-  testWidgets('no projects: one cell that opens the projects tab', (tester) async {
-    await boot(tester);
+  testWidgets('no projects: no project cell and no words about it; the resources cell stays (project spec §5)',
+      (tester) async {
+    await boot(tester, apps: ['m1/a']);
     await show(tester);
-    expect(inside('ov-no-projects', find.text('还没有项目')), findsOneWidget);
-    await tester.tap(find.byKey(const Key('ov-no-projects')));
-    expect(s.panel, PanelTab.projects);
+    expect(find.textContaining('还没有项目'), findsNothing);
+    expect(find.textContaining('项目'), findsNothing);
+    expect(find.byKey(const Key('ov-no-projects')), findsNothing);
+    expect(find.byKey(const Key('ov-projects')), findsNothing);
+    expect(find.byKey(const Key('ov-resources')), findsOneWidget);
   });
 
   testWidgets('the resources cell sums clips and transfers and opens the resources tab', (tester) async {

@@ -91,7 +91,8 @@ class TopBar extends StatelessWidget {
             final sessionMax = (box.maxWidth - fixed(gap, showOverview) - (plus ? 48 : 0)).clamp(0.0, 260.0).toDouble();
             // A detached session's windows are its tabs now; the bar shows none.
             final tabs = rs == null || rs.detached ? null : rs.tabs;
-            final multi = state.sessionCount >= 2;
+            // With a current project, stepping stays inside it: only its open sessions count.
+            final multi = state.steppableCount >= 2;
             final small = Theme.of(context).textTheme.bodySmall;
             return Container(
               height: topBarHeight,
@@ -187,7 +188,7 @@ class TopBar extends StatelessWidget {
                         message: '上一个项目：${previous.name}',
                         child: IconButton(
                           key: const Key('prev-project'),
-                          icon: const Icon(Icons.undo),
+                          icon: const Icon(Icons.swap_horiz),
                           onPressed: state.backToPreviousProject,
                           constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
                         ),
@@ -387,7 +388,7 @@ class TopBar extends StatelessWidget {
   }
 
   String _routeSub(SessionEntry e) {
-    final inProject = projectSubtitle(e, state.projects);
+    final inProject = projectSubtitle(e, state.projects, current: state.currentProject);
     if (inProject != null) return inProject;
     final p = routeWord(e.path, forced: state.forcedRelay(e.id));
     if (e.lamp == Lamp.connecting || p.isEmpty) {

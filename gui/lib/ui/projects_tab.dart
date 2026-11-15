@@ -215,25 +215,29 @@ class _ProjectCardState extends State<_ProjectCard> {
                   ],
                 ),
               ),
-            ],
-          ),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
+              // 切到 and 固定 belong to the title row (project spec §14); the name gives way.
+              const SizedBox(width: 4),
               RappButton.secondary(
                 key: Key('switch-${p.id}'),
                 label: '切到',
                 semanticLabel: '切到 ${p.name}',
                 onPressed: () => s.switchProject(p.id),
               ),
+              const SizedBox(width: 6),
               RappButton.secondary(
                 key: Key('pin-${p.id}'),
                 label: p.pinned ? '取消固定' : '固定',
                 semanticLabel: '${p.pinned ? '取消固定' : '固定'} ${p.name}',
                 onPressed: () => s.togglePinned(p.id),
               ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
               RappButton.primary(
                 key: Key('open-all-${p.id}'),
                 label: '全部打开',

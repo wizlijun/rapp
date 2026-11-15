@@ -850,6 +850,49 @@ void main() {
       await tester.pump(MainState.cueFor);
     });
 
+    testWidgets('the second line names the current project when the session is in several', (tester) async {
+      await boot(tester);
+      final a = s.createProject('写周报')!;
+      final b = s.createProject('发版')!;
+      s.addMember(a.id, const AppRef('111', 'Safari', 'Safari'));
+      s.addMember(b.id, const AppRef('111', 'Safari', 'Safari'));
+      await open(tester, 1, 'Safari');
+      s.switchProject(b.id);
+      await tester.pump();
+      expect(find.text('mini · 发版等'), findsOneWidget);
+    });
+
+    testWidgets('prev/next count only the open sessions in the current project', (tester) async {
+      await boot(tester);
+      final a = s.createProject('A')!;
+      s.addMember(a.id, const AppRef('111', 'Safari', 'Safari'));
+      s.addMember(a.id, const AppRef('111', 'Notes', 'Notes')); // not open
+      await open(tester, 1, 'Safari');
+      await open(tester, 2, 'Mail');
+      IconButton b(String k) => tester.widget<IconButton>(find.byKey(Key(k)));
+      expect(b('prev').onPressed, isNotNull);
+      s.switchProject(a.id);
+      await tester.pump();
+      expect(b('prev').onPressed, isNull);
+      expect(b('next').onPressed, isNull);
+      s.addMember(a.id, const AppRef('111', 'Mail', 'Mail'));
+      await tester.pump();
+      expect(b('prev').onPressed, isNotNull);
+      expect(b('next').onPressed, isNotNull);
+    });
+
+    testWidgets('上一个项目 does not look like 撤销', (tester) async {
+      await boot(tester);
+      final a = s.createProject('写周报')!;
+      final b = s.createProject('发版')!;
+      s.switchProject(a.id);
+      s.switchProject(b.id);
+      await tester.pump();
+      final icon = tester.widget<Icon>(find.descendant(of: find.byKey(const Key('prev-project')), matching: find.byType(Icon)));
+      expect(icon.icon, Icons.swap_horiz);
+      await tester.pump(MainState.cueFor);
+    });
+
     testWidgets('with a current project and no session the bar names the project', (tester) async {
       await boot(tester);
       final a = s.createProject('写周报')!;
