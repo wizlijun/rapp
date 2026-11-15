@@ -62,6 +62,7 @@ pub async fn start_service(home: &Path, bins: &Path, idle: Duration) -> Service 
         update: None,
         data: None,
         advertise_lan: None,
+        forward_sum_every: Duration::from_secs(600),
     })
     .await
     .unwrap()
@@ -85,6 +86,7 @@ pub async fn start_service_with(
         update,
         data: None,
         advertise_lan: None,
+        forward_sum_every: Duration::from_secs(600),
     })
     .await
     .unwrap()
@@ -507,6 +509,7 @@ pub async fn service_on_relay_lan(addr: &str, key: &rapp_wire::Key, lan: Option<
         update: None,
         data: None,
         advertise_lan: lan,
+        forward_sum_every: Duration::from_secs(600),
     })
     .await
     .unwrap();

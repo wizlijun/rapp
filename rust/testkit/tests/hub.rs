@@ -673,6 +673,7 @@ impl LanA {
                 update: None,
                 data: None,
                 advertise_lan: None,
+        forward_sum_every: Duration::from_secs(600),
             };
             match rapp_service::Service::start(opts).await {
                 Ok(s) => {

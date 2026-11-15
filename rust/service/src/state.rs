@@ -92,6 +92,8 @@ pub struct State {
     pub relay: Mutex<(&'static str, Option<String>)>,
     /// Bumped each time `set_relay` saves; the relay connection restarts when it changes.
     pub relay_settings: watch::Sender<u64>,
+    /// The access record of forwarded connections.
+    pub forward_log: crate::forward_log::ForwardLog,
 }
 
 impl State {

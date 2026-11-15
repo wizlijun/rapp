@@ -769,6 +769,7 @@ async fn service_with_a_data_dir_commits_its_device_json() {
             ..rapp_service::DataOpts::system(root.clone())
         }),
         advertise_lan: None,
+        forward_sum_every: Duration::from_secs(600),
     })
     .await
     .unwrap();

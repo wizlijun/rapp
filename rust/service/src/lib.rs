@@ -4,6 +4,7 @@ pub mod autolock;
 mod cm;
 pub mod config;
 mod data;
+pub mod forward_log;
 mod ipc;
 mod peer;
 mod relay_link;
@@ -54,6 +55,8 @@ pub struct Opts {
     pub data: Option<DataOpts>,
     /// The LAN addresses registered on the relay; None: this machine's own (`rapp_net::addr::lan_addrs`).
     pub advertise_lan: Option<Vec<String>>,
+    /// How often the `forward_sum` lines are written (`forward_log::SUM_EVERY` in the real service).
+    pub forward_sum_every: Duration,
 }
 
 /// Where the running app is and the updater's timings (online-update plan Task 4).
@@ -136,7 +139,7 @@ impl Service {
             workers: workers::Workers::new(opts.worker_idle),
             changed: tokio::sync::watch::channel(0).0,
             cm: Mutex::new(None),
-            log,
+            log: log.clone(),
             log_dir: opts.log_dir,
             runner: opts.runner,
             update: Mutex::default(),
@@ -146,6 +149,7 @@ impl Service {
             paired,
             relay: Mutex::new(("off", None)),
             relay_settings: tokio::sync::watch::channel(0).0,
+            forward_log: forward_log::ForwardLog::new(log.clone()),
         };
         let id = state.cfg.lock().unwrap().id.clone();
         let version = env!("CARGO_PKG_VERSION");
@@ -160,6 +164,7 @@ impl Service {
             update::spawn(state.clone()),
             autolock::spawn(state.clone(), opts.lock_grace),
             relay_link::spawn(state.clone(), opts.advertise_lan),
+            spawn_forward_sums(state.clone(), opts.forward_sum_every),
         ];
         if let Some(data) = opts.data {
             let name = state.cfg.lock().unwrap().name.clone();
@@ -194,6 +199,7 @@ impl Service {
             (f["secs"], f["reason"]) = (json!(now.saturating_sub(s.since)), json!("service stopped"));
             self.state.log.event(Lvl::Info, "session_end", f);
         }
+        self.state.forward_log.flush();
         self.state.log.event(Lvl::Info, "service_stop", json!({}));
         self.state.log.flush();
         for t in &self.tasks {
@@ -202,6 +208,18 @@ impl Service {
         self.state.endpoint.close(0u32.into(), b"service stopped");
         self.state.workers.close_all();
     }
+}
+
+/// Writes the `forward_sum` lines every `every`.
+fn spawn_forward_sums(state: Arc<State>, every: Duration) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(every);
+        tick.tick().await;
+        loop {
+            tick.tick().await;
+            state.forward_log.flush();
+        }
+    })
 }
 
 /// Truncates `path` once it is bigger than `max` (launchd keeps appending to the same file).
