@@ -451,6 +451,30 @@ void main() {
         }
       }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 
+      testWidgets('plus menu opens up from a panel at the bottom', (tester) async {
+        big(tester);
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        await openMenu(tester);
+        expect(tester.getRect(menu).bottom, lessThanOrEqualTo(rect(tester, 'composer-plus').top));
+      });
+
+      testWidgets('plus menu opens down from a panel near the top', (tester) async {
+        big(tester);
+        es.profiles.setComposerAt('Notes', 'Notes', const InputPoint(0.5, 200));
+        rs.setProfile(es.profiles.resolve('Notes'));
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        await openMenu(tester);
+        final m = tester.getRect(menu);
+        final plus = rect(tester, 'composer-plus');
+        final host = rect(tester, 'host');
+        expect(m.top, plus.bottom + 8);
+        expect(m.right, plus.right);
+        expect(m.top, greaterThanOrEqualTo(host.top));
+        expect(m.bottom, lessThanOrEqualTo(host.bottom));
+      });
+
       testWidgets('the copy shortcut reads ⌘C on macOS', (tester) async {
         big(tester);
         await tester.pumpWidget(layer());
