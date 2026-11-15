@@ -3,6 +3,9 @@
 import 'package:flutter/widgets.dart';
 
 /// What the editor reports; it never carries the text (规格 §5).
+/// The writing panel's zoom keys: ⌘= (also ⌘+), ⌘-, ⌘0; Ctrl instead of ⌘ off macOS.
+enum ZoomKey { bigger, smaller, reset }
+
 class EditorHandlers {
   const EditorHandlers({
     required this.onChanged,
@@ -31,8 +34,8 @@ class EditorHandlers {
   /// composing. true: the key is taken; false: the caret moves as usual.
   final bool Function(bool up) onArrow;
 
-  /// ⌘= / ⌘- / ⌘0 (Ctrl elsewhere) with the caret here: +1, -1, or null for the default size.
-  final void Function(int? by)? onZoom;
+  /// ⌘= / ⌘- / ⌘0 (Ctrl elsewhere) with the caret here.
+  final ValueChanged<ZoomKey>? onZoom;
 }
 
 class EditorStyle {

@@ -381,13 +381,16 @@ class _ComposerPlusState extends State<ComposerPlus> {
       ),
     );
     // A tap outside is the menu's: a barrier under it takes the tap, so it never reaches A.
-    return Stack(
-      children: [
-        Positioned.fill(
-          child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: _close),
-        ),
-        menu,
-      ],
+    // The menu keeps its own size at any panel zoom: its rows are laid out for the default text.
+    return MediaQuery.withNoTextScaling(
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: GestureDetector(behavior: HitTestBehavior.opaque, onTap: _close),
+          ),
+          menu,
+        ],
+      ),
     );
   }
 

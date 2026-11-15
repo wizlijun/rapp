@@ -182,7 +182,7 @@ class Stage extends StatelessWidget {
             final keyRow = state.prefs.termKeyRow;
             return Stack(
               children: [
-                Positioned.fill(child: _lifted(rs, stage, keyRow: keyRow, narrow: c.maxWidth < keyRowWideAt)),
+                Positioned.fill(child: _lifted(state, rs, stage, keyRow: keyRow, narrow: c.maxWidth < keyRowWideAt)),
                 ...composerLayer(state: state, session: rs, port: state.portOf(rs.sid)!,
                     keyRow: keyRow, editor: composerEditor),
               ],
@@ -244,11 +244,12 @@ class Stage extends StatelessWidget {
 /// (at once without animations); Transform moves hit tests with it, so a click lands where the picture is seen.
 /// A terminal's [keyRow] lifts it the same line, panel open or not; on a [narrow] stage with both, the row has a
 /// line of its own above the panel and the picture goes [keyRowLift] further.
-Widget _lifted(RemoteSession session, Widget child, {bool keyRow = false, bool narrow = false}) => ClipRect(
+Widget _lifted(MainState state, RemoteSession session, Widget child, {bool keyRow = false, bool narrow = false}) =>
+    ClipRect(
       child: ListenableBuilder(
-        listenable: Listenable.merge([session, session.composer]),
+        listenable: Listenable.merge([session, session.composer, state.composerZoom]),
         builder: (context, _) => TweenAnimationBuilder<double>(
-          tween: Tween(end: _lift(session.composer.open && session.composerAllowed, keyRow, narrow)),
+          tween: Tween(end: _lift(session.composer.open && session.composerAllowed, keyRow, narrow, state.composerScale)),
           duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : const Duration(milliseconds: 150),
           curve: Curves.easeOut,
           builder: (_, v, child) => Transform.translate(offset: Offset(0, -v), child: child),
@@ -257,8 +258,9 @@ Widget _lifted(RemoteSession session, Widget child, {bool keyRow = false, bool n
       ),
     );
 
-double _lift(bool open, bool keyRow, bool narrow) =>
-    (open || keyRow ? pictureLift : 0) + (open && keyRow && narrow ? keyRowLift : 0);
+/// The open panel's line grows with its zoom ([scale]); the key row alone keeps its own height.
+double _lift(bool open, bool keyRow, bool narrow, double scale) =>
+    (open ? pictureLift * scale : keyRow ? pictureLift : 0) + (open && keyRow && narrow ? keyRowLift : 0);
 
 /// Paints [child] moved by under a device pixel, so its top-left lands on one: whatever it snaps in
 /// its own coordinates is then snapped on the screen too, wherever the layout put it.

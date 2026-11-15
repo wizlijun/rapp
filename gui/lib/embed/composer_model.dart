@@ -91,53 +91,60 @@ class ComposerModel extends ChangeNotifier {
 
   bool _open = false;
   bool get open => _open;
-  set open(bool v) {
+  set open(bool v) => _setOpen(v, byLetter: false);
+
+  /// Opens the panel for a typed letter (type-to-compose); [openedByLetter] until it closes or sends.
+  void openByLetter() => _setOpen(true, byLetter: true);
+
+  void _setOpen(bool v, {required bool byLetter}) {
     if (_open == v) return;
     _open = v;
     if (v) {
-      _autoAt = _byLetter ? _clock() : null;
-      _declineFrom = null;
-    } else {
-      _declineFrom = _autoAt;
-      _autoAt = null;
+      _letterOpenAt = byLetter ? _clock() : null;
+      _toCheck = null;
+    } else if (_letterOpenAt != null) {
+      _toCheck = _letterOpenAt;
+      _letterOpenAt = null;
       // With an editor the check waits for [detach], which brings its text into [draft].
       if (_editor == null) _checkDeclined();
     }
     notifyListeners();
   }
 
-  /// When the panel was opened by a typed letter (type-to-compose) and nothing has been sent since.
-  DateTime? _autoAt;
-  DateTime? _declineFrom;
-  bool _byLetter = false;
+  /// When a letter opened the panel, while it is open and nothing has been sent from it.
+  DateTime? _letterOpenAt;
+
+  /// A letter-opened panel closed: when it opened, until [_checkDeclined] has looked at its text.
+  DateTime? _toCheck;
 
   /// This open was a typed letter's, not the user's own (button, key, a clip's 「插入」).
-  bool get openedByLetter => _autoAt != null;
+  bool get openedByLetter => _letterOpenAt != null;
 
-  /// Opens the panel for a typed letter (type-to-compose).
-  void openByLetter() {
-    _byLetter = true;
-    open = true;
-    _byLetter = false;
-  }
-
-  /// Called when a letter-opened panel was closed unused: nothing sent, no chips, nothing but a few ASCII
-  /// letters (the captured ones) in the text, or any ASCII text closed within [_declineWithin]. The user
-  /// meant the app's own keys, so letters stop opening the panel until they open it themselves.
+  /// A letter-opened panel was closed unused (see [_unused]): the user meant the app's own keys, so letters
+  /// stop opening the panel until they open it themselves.
   VoidCallback? onDeclined;
 
+  /// A close this soon after the letter (Esc right away) leaves any ASCII text unused.
   static const _declineWithin = Duration(seconds: 3);
 
+  /// The most letters the panel can hold from the picture (typed before it took the caret): a later close
+  /// with no more than these was not written in.
+  static const _heldLetters = 3;
+
+  /// Nothing sent (else no check), no chips, ASCII only, and either just the held letters or a quick close.
+  bool _unused(String t, DateTime openedAt) {
+    if (blocks.isNotEmpty || t.runes.any((r) => r >= 128)) return false;
+    final s = t.trim();
+    return (s.length <= _heldLetters && !s.contains(' ')) || _clock().difference(openedAt) < _declineWithin;
+  }
+
   void _checkDeclined() {
-    final from = _declineFrom;
-    if (from == null) return;
-    _declineFrom = null;
-    final t = _draft;
-    final quick = _clock().difference(from) < _declineWithin;
-    if (blocks.isEmpty && t.runes.every((r) => r < 128) && (t.trim().isEmpty || quick)) {
-      draft = ''; // only the captured letters: they were never for the panel
-      onDeclined?.call();
-    }
+    final at = _toCheck;
+    if (at == null) return;
+    _toCheck = null;
+    if (!_unused(_draft, at)) return;
+    draft = ''; // the held letters were never for the panel
+    onDeclined?.call();
   }
 
   /// A send round is running (from `submit()` until `done`).
@@ -239,8 +246,8 @@ class ComposerModel extends ChangeNotifier {
   /// The user pressed send (or Enter): takes the blocks and the text out of the composer.
   Future<Submit> submit() async {
     if (sending || _taking) return SubmitNothing();
-    _autoAt = null; // sent: the panel was wanted
-    _declineFrom = null;
+    _letterOpenAt = null; // sent: the panel was wanted
+    _toCheck = null;
     _idleTimer?.cancel();
     _setTaking(true);
     final String text;

@@ -351,6 +351,15 @@ void main() {
       expect(rs.composeArmed, isFalse);
     });
 
+    test('a slow close with no more than the held letters is unused too: off', () async {
+      rs.apply(const ComposeKeyEvent(1));
+      ed.value = 'ls';
+      now = now.add(const Duration(seconds: 20)); // looked at the panel a while, typed nothing
+      await close();
+      expect(rs.composeArmed, isFalse);
+      expect(rs.composer.draft, isEmpty);
+    });
+
     test('a long stay with ASCII text, or any non-ASCII text, is composing: stays on', () async {
       rs.apply(const ComposeKeyEvent(1));
       ed.value = 'hello';

@@ -90,9 +90,9 @@ class _ComposerPanelState extends State<ComposerPanel> {
                     case ']': widget.state.step(1);
                     case 'o': widget.state.toggleOverview();
                     case 'd': widget.state.toggleDetach();
-                    case 'zoom+': widget.state.zoomComposer(1);
-                    case 'zoom-': widget.state.zoomComposer(-1);
-                    case 'zoom0': widget.state.zoomComposer(null);
+                    case 'zoom+': widget.state.zoomKey(ZoomKey.bigger);
+                    case 'zoom-': widget.state.zoomKey(ZoomKey.smaller);
+                    case 'zoom0': widget.state.zoomKey(ZoomKey.reset);
                   }
                 },
               )
@@ -104,7 +104,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
       onPaste: _paste,
       onFocus: _focused,
       onArrow: _arrow,
-      onZoom: widget.state.zoomComposer,
+      onZoom: widget.state.zoomKey,
     );
     _attached = _m.attach(_ed);
     _focusSeen = _m.focusTick;
@@ -393,7 +393,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
       key: const Key('composer-panel'),
       onPointerDown: (_) => widget.state.holdForPanel(_s),
       child: ListenableBuilder(
-        listenable: Listenable.merge([_s, _m, widget.state.history, widget.state]),
+        listenable: Listenable.merge([_s, _m, widget.state.history, widget.state.composerZoom]),
         builder: (context, _) => MediaQuery(
           data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(_k)),
           child: Builder(builder: (context) {
@@ -471,8 +471,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
                                   behavior: HitTestBehavior.translucent,
                                   child: LayoutBuilder(
                                     // The font size is already zoomed: the editor takes no text scale on top.
-                                    builder: (context, c) => MediaQuery(
-                                      data: MediaQuery.of(context).copyWith(textScaler: TextScaler.noScaling),
+                                    builder: (context, c) => MediaQuery.withNoTextScaling(
                                       child: _ed.view(
                                         context,
                                         style: style,
@@ -506,8 +505,8 @@ class _ComposerPanelState extends State<ComposerPanel> {
                                 : (on) => widget.state.setAfterSend(_s, on ? AfterSend.pressReturn : AfterSend.none),
                             terminal: _terminal,
                             scale: k,
-                            zoom: widget.state.prefs.composerZoom,
-                            onZoom: (z) => widget.state.zoomComposer(z - widget.state.prefs.composerZoom),
+                            zoom: widget.state.composerZoom.value,
+                            onZoom: widget.state.setComposerZoom,
                           ),
                           const SizedBox(width: 4),
                           RappButton.primary(
@@ -546,7 +545,7 @@ List<Widget> composerLayer(
     required SessionPort port,
     bool keyRow = false,
     ComposerEditor Function()? editor}) {
-  final both = Listenable.merge([session, session.composer, state]);
+  final both = Listenable.merge([session, session.composer, state.composerZoom]);
   final term = port is TermSessionPort ? port : null;
   final keys = keyRow && term != null;
   bool open() => session.composer.open && session.composerAllowed;

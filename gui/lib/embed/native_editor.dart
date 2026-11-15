@@ -2,6 +2,7 @@
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -171,7 +172,9 @@ class _NativeSurfaceState extends State<_NativeSurface> {
 
   void _updateStyle() {
     final ed = widget.editor;
-    ed._latestStyle = ed._style(widget.style, widget.hint, widget.maxHeight);
+    final style = ed._style(widget.style, widget.hint, widget.maxHeight);
+    if (_sameStyle(style, ed._latestStyle)) return;
+    ed._latestStyle = style;
     if (ed._ready.isCompleted) {
       unawaited(ed._ready.future.then((c) => c.invokeMethod<void>('style', ed._latestStyle)));
     }
@@ -192,3 +195,9 @@ class _NativeSurfaceState extends State<_NativeSurface> {
     );
   }
 }
+
+bool _sameStyle(Map<String, Object?> a, Map<String, Object?>? b) =>
+    b != null && a.length == b.length && a.entries.every((e) {
+      final o = b[e.key];
+      return e.value is List && o is List ? listEquals(e.value as List, o) : e.value == o;
+    });

@@ -6,11 +6,11 @@ import 'tokens.dart';
 /// Which layer the window opens on (`first` in gui.json): the devices or the projects.
 enum FirstLayer { device, project }
 
-/// The writing panel's zoom steps above the default (⌘= / ⌘- / ⌘0).
-const composerZoomMax = 4;
-
-/// Size factor of each zoom step: the default, then four larger.
+/// Size factor of each writing-panel zoom step (⌘= / ⌘- / ⌘0): the default, then four larger.
 const composerZoomScales = [1.0, 1.15, 1.3, 1.5, 1.75];
+
+/// The top zoom step; 0 is the default and the smallest.
+final composerZoomMax = composerZoomScales.length - 1;
 
 /// GUI preferences, stored in `<dir>/gui.json` (`devices/<id>/` in the data root).
 class UiPrefs {

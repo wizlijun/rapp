@@ -87,14 +87,14 @@ class FlutterEditor implements ComposerEditor {
     if ((mac ? hw.isMetaPressed && !hw.isControlPressed : hw.isControlPressed && !hw.isMetaPressed) &&
         !hw.isAltPressed &&
         handlers?.onZoom != null) {
-      final by = switch (k) {
-        LogicalKeyboardKey.equal || LogicalKeyboardKey.add || LogicalKeyboardKey.numpadAdd => 1,
-        LogicalKeyboardKey.minus || LogicalKeyboardKey.numpadSubtract => -1,
-        LogicalKeyboardKey.digit0 || LogicalKeyboardKey.numpad0 => 0,
+      final zoom = switch (k) {
+        LogicalKeyboardKey.equal || LogicalKeyboardKey.add || LogicalKeyboardKey.numpadAdd => ZoomKey.bigger,
+        LogicalKeyboardKey.minus || LogicalKeyboardKey.numpadSubtract => ZoomKey.smaller,
+        LogicalKeyboardKey.digit0 || LogicalKeyboardKey.numpad0 => ZoomKey.reset,
         _ => null,
       };
-      if (by != null) {
-        handlers!.onZoom!(by == 0 ? null : by);
+      if (zoom != null) {
+        handlers!.onZoom!(zoom);
         return KeyEventResult.handled;
       }
     }

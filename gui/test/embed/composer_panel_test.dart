@@ -524,6 +524,24 @@ void main() {
         await tester.pump();
       }
 
+      testWidgets('「大小」 slides the zoom; the menu keeps its own size at the top step', (tester) async {
+        big(tester);
+        es.setComposerZoom(composerZoomMax);
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        await openMenu(tester);
+        expect(tester.takeException(), isNull); // no row overflows at 175%
+        expect(tester.getRect(menu).width, 300);
+        expect(find.text('175%'), findsOneWidget);
+        tester.widget<Slider>(find.byType(Slider)).onChanged!(1);
+        await tester.pump();
+        expect(es.composerZoom.value, 1);
+        expect(es.prefs.composerZoom, 1);
+        expect(find.text('115%'), findsOneWidget);
+        expect(rect(tester, 'composer-panel').width, closeTo(720 * 1.15, 1e-9));
+        es.setComposerZoom(0);
+      });
+
       testWidgets('plus opens a menu above it: 附件…, 在远端复制, the keys, 收起', (tester) async {
         big(tester);
         await tester.pumpWidget(layer());

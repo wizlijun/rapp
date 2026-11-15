@@ -28,6 +28,7 @@ import 'lifecycle.dart';
 import 'net_marker.dart' show weakRttMs;
 import 'pin_files.dart';
 import 'prefs.dart';
+import '../embed/composer_editor.dart' show ZoomKey;
 import 'project_positions.dart';
 import 'projects.dart';
 import 'resources_state.dart';
@@ -2332,16 +2333,28 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// The writing panel's size factor (1.0 is the default and the smallest).
-  double get composerScale => composerZoomScales[prefs.composerZoom.clamp(0, composerZoomMax)];
+  /// The writing panel's zoom step (0 is the default), for every panel. Its own notifier: the panel follows
+  /// it without rebuilding on every other change here.
+  late final ValueNotifier<int> composerZoom = ValueNotifier(prefs.composerZoom.clamp(0, composerZoomMax));
 
-  /// ⌘= (+1), ⌘- (-1), ⌘0 (null: back to the default); saved, for every panel.
-  void zoomComposer(int? by) {
-    final z = by == null ? 0 : (prefs.composerZoom + by).clamp(0, composerZoomMax);
-    if (z == prefs.composerZoom) return;
+  /// The writing panel's size factor (1.0 is the default and the smallest).
+  double get composerScale => composerZoomScales[composerZoom.value];
+
+  /// The 「大小」 slider: step [z]; saved.
+  void setComposerZoom(int z) {
+    z = z.clamp(0, composerZoomMax);
+    if (z == composerZoom.value) return;
+    composerZoom.value = z;
     prefs.composerZoom = z;
     _save();
   }
+
+  /// ⌘= / ⌘- / ⌘0 (Ctrl elsewhere) in the panel.
+  void zoomKey(ZoomKey k) => setComposerZoom(switch (k) {
+        ZoomKey.bigger => composerZoom.value + 1,
+        ZoomKey.smaller => composerZoom.value - 1,
+        ZoomKey.reset => 0,
+      });
 
   /// 「按键排」: the terminal key row on or off; saved.
   void setTermKeyRow(bool v) {
@@ -2895,6 +2908,7 @@ class MainState extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    composerZoom.dispose();
     resources.removeListener(notifyListeners);
     resources.dispose();
     hub?.removeListener(_onHub);
