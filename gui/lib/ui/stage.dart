@@ -4,6 +4,7 @@ import 'package:flutter/rendering.dart';
 
 import '../embed/composer_panel.dart';
 import '../embed/picture.dart';
+import '../embed/remote_session.dart';
 import '../embed/session_port.dart';
 import '../hub_client.dart';
 import '../term/term_stage.dart';
@@ -31,6 +32,7 @@ class Stage extends StatelessWidget {
         Widget body;
         var picture = false;
         var full = false; // the body fills the stage: no padding
+        var term = false; // a live terminal: the composer floats over it
         final rec = state.currentRecord;
         final rs = state.currentRemote;
         RemoteWindow? win;
@@ -68,8 +70,9 @@ class Stage extends StatelessWidget {
             sessionKey: rec.key,
           );
         } else if (rs != null && state.termPort?.owns(rs.sid) == true && rec?.phase == Phase.live && rec?.lastSid == null) {
-          // A terminal: no composer over it yet (G2); its box lines need whole device pixels.
+          // A terminal: its box lines need whole device pixels.
           full = true;
+          term = true;
           body = _PixelSnap(child: TermStage(
               state: state,
               session: rs,
@@ -159,24 +162,17 @@ class Stage extends StatelessWidget {
               child: body,
             ),
           );
-          // While the writing panel is open the picture slides up one line (the size A sees stays as it was);
-          // Transform moves hit tests with it, so a click lands where the picture is seen.
-          if (picture && rs != null) {
-            final session = rs;
-            final inner = stage;
-            stage = ClipRect(
-              child: ListenableBuilder(
-                listenable: Listenable.merge([session, session.composer]),
-                builder: (context, _) => TweenAnimationBuilder<double>(
-                  tween: Tween(end: session.composer.open && session.composerAllowed ? pictureLift : 0),
-                  duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : const Duration(milliseconds: 150),
-                  curve: Curves.easeOut,
-                  builder: (_, v, child) => Transform.translate(offset: Offset(0, -v), child: child),
-                  child: inner,
-                ),
-              ),
+          if (term && rs != null) {
+            // The same tree whether the panel is open or not: the terminal stage is never remounted (its focus
+            // would fight the panel's caret), and the lift never changes the size it lays out at (Z2).
+            return Stack(
+              children: [
+                Positioned.fill(child: _lifted(rs, stage)),
+                ...composerLayer(state: state, session: rs, port: state.portOf(rs.sid)!),
+              ],
             );
           }
+          if (picture && rs != null) stage = _lifted(rs, stage);
           final port = state.port;
           // A detached session keeps its 「输入」 here: the placeholder stands for its windows.
           if (full || !(picture || (rs != null && rs.detached)) || rs == null || port == null) return stage;
@@ -192,6 +188,21 @@ class Stage extends StatelessWidget {
     );
   }
 }
+
+/// While the writing panel is open the picture slides up one line (the size A sees stays as it was), in 150 ms
+/// (at once without animations); Transform moves hit tests with it, so a click lands where the picture is seen.
+Widget _lifted(RemoteSession session, Widget child) => ClipRect(
+      child: ListenableBuilder(
+        listenable: Listenable.merge([session, session.composer]),
+        builder: (context, _) => TweenAnimationBuilder<double>(
+          tween: Tween(end: session.composer.open && session.composerAllowed ? pictureLift : 0),
+          duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : const Duration(milliseconds: 150),
+          curve: Curves.easeOut,
+          builder: (_, v, child) => Transform.translate(offset: Offset(0, -v), child: child),
+          child: child,
+        ),
+      ),
+    );
 
 /// Paints [child] moved by under a device pixel, so its top-left lands on one: whatever it snaps in
 /// its own coordinates is then snapped on the screen too, wherever the layout put it.

@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'dart:ui' show Rect;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show Clipboard;
 
 import '../embed/session_port.dart';
 import 'term_link.dart';
@@ -17,6 +18,7 @@ export '../embed/session_port.dart' show TermOpenedPaneEvent;
 const int maxPaste = 1048576;
 
 const pasteTooLong = '太长了：终端一次最多贴 1 MiB';
+const termNoAttach = '终端会话不支持';
 const pasteFailed = '没有贴进去';
 const linkGone = '连接断了';
 
@@ -25,6 +27,9 @@ const windowFailed = 'could not open a window';
 
 /// The device's answer to input for a pane that is not one of the session's.
 const noSuchPane = 'no such pane';
+
+/// The writing panel's paste rule (W14): under 800 characters and under 10 lines goes in as text, else a block.
+bool pastesInline(String text) => text.runes.length < 800 && '\n'.allMatches(text).length + 1 < 10;
 
 /// macOS key codes the writing panel sends -> the worker's key names.
 const _keyNames = {
@@ -102,6 +107,10 @@ class TermSessionPort extends SessionPort {
   final _terms = <Object, _Term>{};
   bool _disposed = false;
 
+  /// The writing panel's text blocks, per session: their text by block number.
+  final _blocks = <Object, Map<int, String>>{};
+  final _lastBlock = <Object, int>{};
+
   @override
   bool get supportsDetach => false;
   @override
@@ -144,6 +153,8 @@ class TermSessionPort extends SessionPort {
       case 'start':
         await _start(sid, args['port'] as int, args['token'] as String);
       case 'close':
+        _blocks.remove(sid);
+        _lastBlock.remove(sid);
         final t = _terms.remove(sid);
         if (t == null) return null;
         _stop(t);
@@ -329,6 +340,58 @@ class TermSessionPort extends SessionPort {
     for (final l in p.lines) {
       t.link!.sendLine(l);
     }
+  }
+
+  /// The writing panel's ⌘V: the clipboard's text by W14, a long one as a block this port keeps until dropped.
+  @override
+  Future<PasteResult> composerPaste(Object sid) async {
+    String? text;
+    try {
+      text = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
+    } catch (_) {
+      return const PasteResult(); // no clipboard to read: nothing
+    }
+    if (text == null || text.isEmpty) return const PasteResult();
+    if (pastesInline(text)) return PasteResult(text: text);
+    final n = (_lastBlock[sid] ?? 0) + 1;
+    _lastBlock[sid] = n;
+    (_blocks[sid] ??= {})[n] = text;
+    final lines = '\n'.allMatches(text).length + 1;
+    return PasteResult(blocks: [
+      BlockChip(n, '[贴入文字 #$n +$lines 行]', kind: 'text', bytes: utf8.encode(text).length, text: text),
+    ]);
+  }
+
+  @override
+  Future<PasteResult> composerAttach(Object sid) async => const PasteResult(status: termNoAttach);
+
+  @override
+  void composerDropBlock(Object sid, int block) => _blocks[sid]?.remove(block);
+
+  /// The writing panel's send: its pieces joined in order into one paste (no Return: the after-send step is
+  /// the session's). `sending` goes first; `done` when the paste is answered, all of it or none.
+  @override
+  void composerSend(Object sid, List<Map<String, Object>> pieces) {
+    emit(ComposerStateEvent(sid, sending: true));
+    final data = StringBuffer();
+    String? missing;
+    for (final p in pieces) {
+      final text = p['text'], block = p['block'];
+      if (text is String) {
+        data.write(text);
+      } else if (block is int && _blocks[sid]?[block] != null) {
+        data.write(_blocks[sid]![block]);
+      } else {
+        missing = pasteFailed;
+      }
+    }
+    void done(String? why) =>
+        emit(ComposerStateEvent(sid, sending: false, done: ComposerDone(why == null ? pieces.length : 0, why)));
+    if (missing != null) {
+      done(missing);
+      return;
+    }
+    paste(sid, data.toString()).then(done, onError: (Object _) => done(pasteFailed));
   }
 
   /// The device can open windows (`hello` v2 and up).

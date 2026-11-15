@@ -1,10 +1,12 @@
 // The 「＋」 button of the writing panel and the menu above it (spec W9, W13): 附件…, 在远端复制,
 // the keys that go straight to A, 收起. The ⌘ and ⌥ stick for one key; a key does not close the menu.
+// A terminal's menu: 附件… greyed, no 在远端复制, and 15 keys by their terminal names (no sticky keys).
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../history/history_list.dart';
 import '../history/input_history.dart';
+import '../term/term_session_port.dart';
 import '../ui/controls.dart';
 import '../ui/tokens.dart';
 import 'remote_session.dart';
@@ -28,6 +30,25 @@ const composerKeys = <(String, int, int?)>[
   ('回车', 36, null),
 ];
 
+/// A terminal's keys grid: label, and the key name the pane gets (删除 is Backspace).
+const termComposerKeys = <(String, String)>[
+  ('Esc', 'Esc'),
+  ('Tab', 'Tab'),
+  ('⇧Tab', 'Shift-Tab'),
+  ('删除', 'Backspace'),
+  ('回车', 'Enter'),
+  ('←', 'Left'),
+  ('↓', 'Down'),
+  ('↑', 'Up'),
+  ('→', 'Right'),
+  ('⌃C', 'Ctrl-C'),
+  ('⌃D', 'Ctrl-D'),
+  ('⌃L', 'Ctrl-L'),
+  ('⌃R', 'Ctrl-R'),
+  ('PgUp', 'PageUp'),
+  ('PgDn', 'PageDown'),
+];
+
 /// 放进输入框: the writing panel opens, the text goes in at the caret and the field takes focus.
 void putIntoComposer(RemoteSession s, String text) {
   final c = s.composer;
@@ -37,7 +58,15 @@ void putIntoComposer(RemoteSession s, String text) {
 }
 
 class ComposerPlus extends StatefulWidget {
-  const ComposerPlus({super.key, required this.session, required this.port, required this.onAttach, this.onPress, this.history, this.historyKey});
+  const ComposerPlus(
+      {super.key,
+      required this.session,
+      required this.port,
+      required this.onAttach,
+      this.onPress,
+      this.history,
+      this.historyKey,
+      this.terminal = false});
 
   final RemoteSession session;
   final SessionPort port;
@@ -51,6 +80,9 @@ class ComposerPlus extends StatefulWidget {
   /// The input record for 「输入历史」 (no such row without it) and this session's key (`host/app`).
   final InputHistory? history;
   final String? historyKey;
+
+  /// A terminal session's menu; [port] is then a [TermSessionPort].
+  final bool terminal;
 
   @override
   State<ComposerPlus> createState() => _ComposerPlusState();
@@ -107,7 +139,8 @@ class _ComposerPlusState extends State<ComposerPlus> {
     _close();
   }
 
-  Widget _row(RappTokens t, String label, String? side, VoidCallback onTap) => InkWell(
+  /// A menu row; greyed and not pressable without [onTap].
+  Widget _row(RappTokens t, String label, String? side, VoidCallback? onTap) => InkWell(
     onTap: onTap,
     borderRadius: BorderRadius.circular(t.r),
     child: SizedBox(
@@ -116,7 +149,7 @@ class _ComposerPlusState extends State<ComposerPlus> {
         padding: const EdgeInsets.symmetric(horizontal: 12),
         child: Row(
           children: [
-            Text(label, style: TextStyle(color: t.text)),
+            Text(label, style: TextStyle(color: onTap == null ? t.muted : t.text)),
             if (side != null) ...[const Spacer(), Text(side, style: TextStyle(color: t.muted, fontSize: 12))],
           ],
         ),
@@ -126,6 +159,16 @@ class _ComposerPlusState extends State<ComposerPlus> {
 
   Widget _keyCell(RappTokens t, (String, int, int?) k) {
     final (label, code, bit) = k;
+    return _cell(t, label, bit, bit == null ? () => _key(code) : () => setState(() => _sticky ^= bit));
+  }
+
+  Widget _termKeyCell(RappTokens t, (String, String) k) {
+    final (label, name) = k;
+    return _cell(t, label, null, () => (widget.port as TermSessionPort).sendKeys(widget.session.sid, [name]));
+  }
+
+  /// A key; [bit] for a sticky one.
+  Widget _cell(RappTokens t, String label, int? bit, VoidCallback onTap) {
     final on = bit != null && _sticky & bit != 0;
     return Semantics(
       button: true,
@@ -134,7 +177,7 @@ class _ComposerPlusState extends State<ComposerPlus> {
       excludeSemantics: true,
       child: InkWell(
         key: bit == null ? null : ValueKey('sticky-$label'),
-        onTap: bit == null ? () => _key(code) : () => setState(() => _sticky ^= bit),
+        onTap: onTap,
         borderRadius: BorderRadius.circular(t.r),
         child: Container(
           height: 44,
@@ -152,13 +195,17 @@ class _ComposerPlusState extends State<ComposerPlus> {
     final t = RappTokens.of(context);
     final mac = defaultTargetPlatform == TargetPlatform.macOS;
     const rowGap = SizedBox(height: 6);
+    final term = widget.terminal;
+    final cells = term
+        ? [for (final k in termComposerKeys) _termKeyCell(t, k)]
+        : [for (final k in composerKeys) _keyCell(t, k)];
     final rows = <Widget>[
-      for (var i = 0; i < composerKeys.length; i += 5)
+      for (var i = 0; i < cells.length; i += 5)
         Row(
           children: [
             for (var j = i; j < i + 5; j++) ...[
               if (j > i) const SizedBox(width: 6),
-              Expanded(child: _keyCell(t, composerKeys[j])),
+              Expanded(child: cells[j]),
             ],
           ],
         ),
@@ -186,13 +233,15 @@ class _ComposerPlusState extends State<ComposerPlus> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _row(t, '附件…', '也可以直接粘贴', () {
-                      _close();
-                      widget.onAttach();
-                    }),
+                    if (term)
+                      _row(t, '附件…', termNoAttach, null)
+                    else
+                      _row(t, '附件…', '也可以直接粘贴', () {
+                        _close();
+                        widget.onAttach();
+                      }),
                     rowGap,
-                    _row(t, '在远端复制', mac ? '⌘C' : 'Ctrl+C', _copy),
-                    rowGap,
+                    if (!term) ...[_row(t, '在远端复制', mac ? '⌘C' : 'Ctrl+C', _copy), rowGap],
                     if (widget.history != null) ...[_row(t, '输入历史', null, _openHistory), rowGap],
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 4),

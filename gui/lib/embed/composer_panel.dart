@@ -7,6 +7,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../history/input_history.dart';
+import '../term/term_session_port.dart';
 import '../ui/controls.dart';
 import '../ui/main_state.dart';
 import '../ui/tokens.dart';
@@ -111,6 +112,15 @@ class _ComposerPanelState extends State<ComposerPanel> {
   int _shown = 0;
 
   List<InputEntry> get _recall => widget.state.recallOf(_s);
+
+  /// A terminal session's panel: what it sends is a paste into the pane.
+  bool get _terminal => widget.port is TermSessionPort;
+
+  /// Who the text is for: a terminal's current command (its session's name when the pane has none), else A's app.
+  String get _to {
+    final cmd = _terminal ? widget.state.termPaneOf(_s)?.command ?? '' : '';
+    return cmd.isEmpty ? _s.appName : cmd;
+  }
 
   void _changed() {
     _m.editorChanged();
@@ -398,7 +408,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
                                 builder: (context, c) => _ed.view(
                                   context,
                                   style: style,
-                                  hint: _recall.isEmpty ? '写给 ${_s.appName}' : '写给 ${_s.appName} · ↑ 上一条',
+                                  hint: _recall.isEmpty ? '写给 $_to' : '写给 $_to · ↑ 上一条',
                                   maxHeight: math.max(_line, c.maxHeight),
                                 ),
                               ),
@@ -414,6 +424,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
                       history: widget.state.history,
                       historyKey: widget.state.historyKeyOf(_s),
                       onPress: widget.state.blurPicture,
+                      terminal: _terminal,
                     ),
                     const SizedBox(width: 4),
                     RappButton.primary(

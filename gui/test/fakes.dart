@@ -160,6 +160,15 @@ class FakeTermSessionPort extends TermSessionPort {
   /// Pretend a runner event.
   void play(SessionEvent e) => emit(e);
 
+  /// The port's own writing-panel events go into [calls] too, as `composer`, in the order they are made.
+  @override
+  void emit(SessionEvent e) {
+    if (e is ComposerStateEvent) {
+      calls.add(('composer', {'sid': e.sid, 'sending': e.sending, 'sent': e.done?.sent, 'failure': e.done?.failure}));
+    }
+    super.emit(e);
+  }
+
   @override
   Future<Object?> invoke(String method, Map<String, Object?> args) async {
     calls.add((method, args));
@@ -196,10 +205,14 @@ class FakeTermSessionPort extends TermSessionPort {
   void sendKeys(Object sid, List<String> keys) => calls.add(('keys', {'sid': sid, 'keys': keys}));
   @override
   void type(Object sid, String text) => calls.add(('type', {'sid': sid, 'text': text}));
+  /// When set, [paste] answers when it completes instead of with [pasteReply].
+  Completer<String?>? pasteWait;
+
   @override
   Future<String?> paste(Object sid, String data, {bool enter = false}) async {
     calls.add(('paste', {'sid': sid, 'data': data, 'enter': enter}));
-    return pasteReply;
+    final w = pasteWait;
+    return w == null ? pasteReply : w.future;
   }
 
   @override
