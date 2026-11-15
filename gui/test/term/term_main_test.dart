@@ -118,10 +118,10 @@ void main() {
     await tester.pump();
   }
 
-  Future<void> openTerm(WidgetTester tester, List<TermPane> panes) async {
+  Future<void> openTerm(WidgetTester tester, List<TermPane> panes, {String id = app}) async {
     term.paneLists[1] = panes;
     await tester.runAsync(() async {
-      s.openOrSwitch('111', app, 'work');
+      s.openOrSwitch('111', id, 'work');
       for (var i = 0; i < 4; i++) {
         await flush();
       }
@@ -202,6 +202,42 @@ void main() {
     await tester.tap(find.byKey(const Key('term-refit')));
     await tester.pumpAndSettle();
     expect(term.calls.where((c) => c.$1 == 'refit').single.$2['sid'], 1);
+  });
+
+  testWidgets('a text terminal greys out refit with the reason', (tester) async {
+    await tester.pumpWidget(wrap(window(width: 600)));
+    await openTerm(tester, two, id: 'term:pty:c');
+    await tester.tap(find.byKey(const Key('traffic')));
+    await tester.pumpAndSettle();
+    expect(find.text('尺寸跟着被控端的窗口'), findsOneWidget);
+    term.calls.clear();
+    await tester.tap(find.byKey(const Key('term-refit')), warnIfMissed: false);
+    await tester.pumpAndSettle();
+    expect(term.calls.where((c) => c.$1 == 'refit'), isEmpty);
+  });
+
+  testWidgets('a text terminal greys out 新开窗口 with the reason', (tester) async {
+    await tester.pumpWidget(wrap(window()));
+    await openTerm(tester, two, id: 'term:pty:c');
+    expect(find.byKey(const Key('term-new-window')), findsOneWidget);
+    expect(find.byWidgetPredicate((w) => w is Tooltip && (w.message ?? '').contains('文本终端只有一个窗口')), findsOneWidget);
+    term.calls.clear();
+    await tester.tap(find.byKey(const Key('term-new-window')));
+    await settle(tester);
+    expect(term.calls.where((c) => c.$1 == 'newWindow'), isEmpty);
+  });
+
+  testWidgets('a tmux session keeps refit and 新开窗口', (tester) async {
+    await tester.pumpWidget(wrap(window(width: 600)));
+    await openTerm(tester, two, id: 'term:tmux:w');
+    expect(find.byKey(const Key('term-new-window')), findsOneWidget);
+    expect(find.byWidgetPredicate((w) => w is Tooltip && (w.message ?? '').contains('文本终端')), findsNothing);
+    await tester.tap(find.byKey(const Key('traffic')));
+    await tester.pumpAndSettle();
+    expect(find.text('尺寸跟着被控端的窗口'), findsNothing);
+    await tester.tap(find.byKey(const Key('term-refit')));
+    await tester.pumpAndSettle();
+    expect(term.calls.where((c) => c.$1 == 'refit'), hasLength(1));
   });
 
   testWidgets('a pane larger than the stage names the other clients from the device panel list', (tester) async {

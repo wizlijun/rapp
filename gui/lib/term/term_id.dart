@@ -2,6 +2,9 @@
 
 bool isTermApp(String app) => app.startsWith('term:');
 
+/// A text terminal: a pty session held by `rapp-term run`. Its size follows the host window and it has one window.
+bool isPtyTerm(String app) => parseTermId(app)?.backend == 'pty';
+
 ({String backend, String? host, String name})? parseTermId(String id) {
   if (!id.startsWith('term:')) return null;
   final rest = id.substring(5);
