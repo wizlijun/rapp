@@ -116,7 +116,7 @@ agent 规则：**不直接改这个文件**。加、删设备走 GUI 的设备�
 | `bundle` | app 标识（macOS bundle id / Windows exe / Omarchy class） |
 | `name` | 存下时 app 的显示名 |
 | `task` | 用户自己写的备注（界面上叫「备注」，键仍是 `task`），可以空 |
-| `pinned` | 项目是否固定，固定的排在前面（项目页、全景、分组）；可省略，缺了当 `false` |
+| `pinned` | 项目是否固定，固定的排在前面（项目页、全景、分组）；可省略，缺了当 `false`。旧版 rapp 重写 `workspace.json` 时会丢掉这个字段（固定的项目变回不固定） |
 
 生效：先退出 GUI 再手改，改完重新打开。没有机密。旧位置是旧 GUI 配置目录，会被复制过来。
 
@@ -188,7 +188,7 @@ agent 规则：加、删 SSH 目标走设备请求，不直接改文件；要关
 | `$ROOT/local/last-dr` | A | 上次运行时的签名要求（一个字符串），升级时对照用（`rust/service/src/update.rs:242`） | |
 | `$ROOT/local/sync.json` | A | rapp-service 写的 git 状态：`git`（`missing`、`local`、`synced`、`conflict`、`error`）、`last_commit`、`last_sync`、`error`（不含远端地址里的口令）；GUI 读（`rust/service/src/data.rs:49-55`） | |
 | `$ROOT/local/migrated-from` | A、B | 搬家时写的旧目录路径，只是记录（`rust/net/src/datadir.rs:12`） | |
-| `$ROOT/local/project_positions.json` | B | 每个项目上次停在哪个会话、什么时候离开的：`{"version":1,"projects":{"<id>":{"last":"<会话键>","left_at":"<UTC 时间>"}}}`。不同步；已删项目的条目在启动和搬数据目录时丢掉 | |
+| `$ROOT/local/project_positions.json` | B | 每个项目上次停在哪个会话、什么时候离开的：`{"version":1,"projects":{"<id>":{"last":"<会话键>","left_at":"<UTC 时间>"}}}`。不同步；已删项目的条目在启动和搬数据目录时丢掉（`gui/lib/ui/project_positions.dart`） | |
 | `$ROOT/local/pin-hint-shown` | B | 「钉住会进 git 历史」的提示已经显示过的标记，没有内容（`gui/lib/ui/pin_files.dart:10`）。删掉它，下次钉住时会再提示 | |
 | `~/Library/Caches/rapp/update` | A（macOS） | 升级包下载缓存 | |
 | `$ROOT/local/permission-guide-shown` | A | 授权引导已经显示过的标记，没有内容（`gui/lib/pages/permissions_panel.dart:140`）。删掉它，下次启动会再引导一次 | |
