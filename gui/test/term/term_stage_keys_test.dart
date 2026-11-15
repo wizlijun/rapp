@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/app_profile.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
@@ -315,6 +316,32 @@ void main() {
       expect(session.composer.pasteTick, 1);
       expect(session.composer.focusTick, greaterThan(focusTick));
       expect(sent(), isEmpty);
+    }, variant: _macLinux);
+
+    testWidgets('with the writing panel off, three lines go straight in as one paste (K4)', (t) async {
+      clipboard(t, 'a\nb\nc');
+      session.setProfile(const ResolvedProfile(name: 'term', composer: false));
+      final rows = [for (var i = 0; i < 10; i++) 'row $i'];
+      model.apply(scr(rows, hist: 5, limit: 2000));
+      model.applyHistory(const TermHistory(pane: '%3', before: 0, lines: ['h-5', 'h-4', 'h-3', 'h-2', 'h-1'], hist: 5));
+      await show(t);
+      await focusStage(t);
+      final p = TestPointer(1, PointerDeviceKind.mouse);
+      await t.sendEventToBinding(p.hover(t.getCenter(find.byKey(const Key('term-grid')))));
+      await t.sendEventToBinding(p.scroll(Offset(0, -3 * ch)));
+      await t.pump();
+      expect(model.offset, greaterThan(0));
+      await pasteKey(t);
+      await t.pump();
+      expect(port.calls.where((c) => c.$1 == 'paste').map((c) => c.$2).toList(), [
+        {'sid': 1, 'data': 'a\nb\nc', 'enter': false},
+      ]);
+      expect(session.composer.open, isFalse);
+      expect(session.composer.pasteTick, 0);
+      // Input, as a one-line paste is: back to the latest, and the ellipsis wait (H3, K6).
+      expect(model.offset, 0);
+      await t.pump(const Duration(milliseconds: 350));
+      expect(painter(t).waiting, isTrue);
     }, variant: _macLinux);
 
     testWidgets('a paste that does not go in shows why on the stage', (t) async {

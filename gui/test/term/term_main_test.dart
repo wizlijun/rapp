@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -268,6 +269,25 @@ void main() {
     await tester.tap(find.byKey(const Key('term-new-window')));
     await settle(tester);
     expect(term.calls.where((c) => c.$1 == 'newWindow').single.$2['sid'], 1);
+  });
+
+  testWidgets('a second plus while the first is unanswered asks nothing; once answered it asks again', (tester) async {
+    await tester.pumpWidget(wrap(window()));
+    await openTerm(tester, two);
+    final gate = term.newWindowWait = Completer<String?>();
+    term.calls.clear();
+    await tester.tap(find.byKey(const Key('term-new-window')));
+    await settle(tester);
+    await tester.tap(find.byKey(const Key('term-new-window')));
+    await settle(tester);
+    expect(term.calls.where((c) => c.$1 == 'newWindow'), hasLength(1));
+    gate.complete('no space');
+    term.newWindowWait = null;
+    await settle(tester);
+    await tester.pump(const Duration(seconds: 4));
+    await tester.tap(find.byKey(const Key('term-new-window')));
+    await settle(tester);
+    expect(term.calls.where((c) => c.$1 == 'newWindow'), hasLength(2));
   });
 
   testWidgets('the opened pane becomes the current tab', (tester) async {

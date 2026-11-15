@@ -393,7 +393,9 @@ class MainState extends ChangeNotifier {
   }
 
   /// ⌘V / Ctrl+Shift+V on [rs]'s terminal stage (K4): one line of clipboard text goes in as a paste (no Return);
-  /// text with line breaks opens the writing panel, which pastes it by its own rules and takes the caret.
+  /// text with line breaks opens the writing panel, which pastes it by its own rules and takes the caret. With the
+  /// writing panel off for this session ([RemoteSession.composerAllowed]) there is no panel to open, so text with
+  /// line breaks goes in as one paste too.
   /// [TermPasted.sent] when the text went to the terminal itself (input, as a key is: H3, K6);
   /// [TermPasted.note] says why a paste did not go in.
   Future<TermPasted> termPaste(RemoteSession rs) async {
@@ -406,7 +408,7 @@ class MainState extends ChangeNotifier {
       return const TermPasted(); // no clipboard to read: nothing to paste
     }
     if (text == null || text.isEmpty) return const TermPasted();
-    if (!text.contains('\n') && !text.contains('\r')) {
+    if (!rs.composerAllowed || (!text.contains('\n') && !text.contains('\r'))) {
       final why = await tp.paste(rs.sid, text);
       return why == null ? const TermPasted(sent: true) : TermPasted(note: why);
     }
@@ -451,13 +453,22 @@ class MainState extends ChangeNotifier {
     return rs != null && tp != null && tp.owns(rs.sid) && tp.canNewWindow(rs.sid);
   }
 
+  // Sessions whose 「＋」 is waiting for its answer (which the port always gives, at the latest at its timeout).
+  final _newWindowPending = <Object>{};
+
   /// The 「＋」 was clicked: the device opens a window in the viewed pane's directory, and its pane comes as a
-  /// `TermOpenedPaneEvent`. A refusal is said on the stage.
+  /// `TermOpenedPaneEvent`. A refusal is said on the stage. A click while the last one is unanswered does nothing.
   Future<void> newTermWindow() async {
     final rs = currentRemote, tp = termPort;
     if (rs == null || tp == null || !tp.owns(rs.sid) || !tp.canNewWindow(rs.sid)) return;
     final sid = rs.sid;
-    final why = await tp.newWindow(sid);
+    if (!_newWindowPending.add(sid)) return;
+    final String? why;
+    try {
+      why = await tp.newWindow(sid);
+    } finally {
+      _newWindowPending.remove(sid);
+    }
     if (why != null) tp.model(sid)?.say('新开窗口失败：$why');
   }
 

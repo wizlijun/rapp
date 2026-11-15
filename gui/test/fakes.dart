@@ -220,8 +220,12 @@ class FakeTermSessionPort extends TermSessionPort {
   @override
   Future<String?> newWindow(Object sid) async {
     calls.add(('newWindow', {'sid': sid}));
-    return newWindowReply;
+    final w = newWindowWait;
+    return w == null ? newWindowReply : w.future;
   }
+
+  /// When set, [newWindow] answers when it completes instead of with [newWindowReply].
+  Completer<String?>? newWindowWait;
   @override
   void refit(Object sid) => calls.add(('refit', {'sid': sid}));
   @override
