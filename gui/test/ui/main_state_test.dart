@@ -4072,6 +4072,30 @@ void main() {
       await pump();
     }
 
+    /// Inside fakeAsync: an embedded MainState with sessions 111/a, 111/aa, 111/aaa (sids 1, 2, 3) open.
+    (FakeSessionPort, MainState) embedded(FakeAsync a) {
+      final t = FakeTransport();
+      final hub = HubClient(t);
+      final port = FakeSessionPort();
+      final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port, clock: () => now);
+      t.onSend = (m) {
+        if (m['cmd'] == 'open') {
+          final n = (m['app'] as String).length;
+          t.emit({
+            'event': 'opened', 'sid': n, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+            if (m['embed'] == true) ...{'port': 5000 + n, 'token': 'tk'},
+            'req': m['req'],
+          });
+        }
+      };
+      a.flushMicrotasks();
+      for (final b in ['a', 'aa', 'aaa']) {
+        st.openOrSwitch('111', b, b);
+        a.flushMicrotasks();
+      }
+      return (port, st);
+    }
+
     test('switching lands on the session last used in that project', () async {
       final st = make();
       await open(['com.a', 'com.b', 'com.q']);
@@ -4144,25 +4168,7 @@ void main() {
       // No session lamp is 等你 yet (recordLamp never gives it), so 已断开 drives the count here;
       // both go through the same _attentionSince bookkeeping.
       fakeAsync((a) {
-        final t = FakeTransport();
-        final hub = HubClient(t);
-        final port = FakeSessionPort();
-        final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port, clock: () => now);
-        t.onSend = (m) {
-          if (m['cmd'] == 'open') {
-            final n = (m['app'] as String).length;
-            t.emit({
-              'event': 'opened', 'sid': n, 'id': m['id'], 'app': m['app'], 'path': 'lan',
-              if (m['embed'] == true) ...{'port': 5000 + n, 'token': 'tk'},
-              'req': m['req'],
-            });
-          }
-        };
-        a.flushMicrotasks();
-        for (final b in ['a', 'aa', 'aaa']) {
-          st.openOrSwitch('111', b, b);
-          a.flushMicrotasks();
-        }
+        final (port, st) = embedded(a);
         final p = project(st, 'P', ['a', 'aa', 'aaa']);
         final q = project(st, 'Q', []);
         st.switchProject(p.id);
@@ -4288,6 +4294,38 @@ void main() {
       await pump();
       expect(st.currentKey, isNull);
       expect(st.currentProject, p.id);
+    });
+
+    test('the current session ending steps to the next one in the project, not outside it (S1)', () async {
+      final st = make();
+      await open(['com.a', 'com.b', 'com.z']);
+      final p = project(st, 'P', ['com.b', 'com.a']); // a is last in P: next in the list would be z
+      st.switchProject(p.id);
+      st.select('111/com.a');
+      t.emit({'event': 'closed', 'sid': 1});
+      await pump();
+      expect((st.currentKey, st.currentProject), ('111/com.b', p.id));
+      t.emit({'event': 'closed', 'sid': 2});
+      await pump();
+      expect((st.currentKey, st.currentProject), (null, p.id));
+      expect(st.entryFor('111/com.z'), isNotNull);
+    });
+
+    test('the current session ending steps to the next one in the project, not outside it (embedded)', () {
+      fakeAsync((a) {
+        final (port, st) = embedded(a);
+        final p = project(st, 'P', ['aa', 'a']); // a is last in P: next in the list would be aaa
+        st.switchProject(p.id);
+        st.select('111/a');
+        port.emit(const ClosedEvent(1, 'quit'));
+        a.flushMicrotasks();
+        expect((st.currentKey, st.currentProject), ('111/aa', p.id));
+        port.emit(const ClosedEvent(2, 'quit'));
+        a.flushMicrotasks();
+        expect((st.currentKey, st.currentProject), (null, p.id));
+        expect(st.entryFor('111/aaa'), isNotNull);
+        st.dispose();
+      });
     });
 
     test('positions of projects that no longer exist are dropped at start', () {

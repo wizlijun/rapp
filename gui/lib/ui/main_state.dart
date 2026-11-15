@@ -819,8 +819,7 @@ class MainState extends ChangeNotifier {
       for (final e in old) {
         if (e.sid == null || newKeys.contains(e.key)) continue;
         if (e.key == currentKey) {
-          final next = stepKey(oldGroups, e.key, 1);
-          currentKey = (next != null && next != e.key && newKeys.contains(next)) ? next : null;
+          currentKey = _nextAfterEnd(oldGroups, e.key, newKeys.contains);
         }
         final hubReason = h.closeReasons.remove(e.sid);
         if (_quiet.remove(e.sid)) continue;
@@ -1245,10 +1244,9 @@ class MainState extends ChangeNotifier {
     _records.remove(r.key);
     _entries = _mapEntries();
     if (currentKey == r.key) {
-      final next = stepKey(oldGroups, r.key, 1);
       currentKey = isDesktopScreen(r.app) && _records.containsKey('${r.id}/desktop:')
           ? '${r.id}/desktop:'
-          : (next != null && next != r.key && _records.containsKey(next)) ? next : null;
+          : _nextAfterEnd(oldGroups, r.key, _records.containsKey);
     }
   }
 
@@ -2325,6 +2323,15 @@ class MainState extends ChangeNotifier {
     } else {
       _leave();
     }
+  }
+
+  /// The session after [gone] (current, just ended) in [oldGroups], if [stillOpen]; null when none.
+  /// With a current project, only its members take part, so a session ending never leaves it.
+  String? _nextAfterEnd(List<SessionGroup> oldGroups, String gone, bool Function(String key) stillOpen) {
+    final p = currentProject == null ? null : _project(currentProject!);
+    final within = p == null ? null : [for (final k in projectKeys(p)) if (k == gone || stillOpen(k)) k];
+    final next = stepKey(oldGroups, gone, 1, within: within);
+    return next != null && next != gone && stillOpen(next) ? next : null;
   }
 
   /// Records where the current project was left; it becomes the previous one. No notify.
