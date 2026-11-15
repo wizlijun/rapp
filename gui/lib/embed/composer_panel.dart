@@ -13,6 +13,7 @@ import '../ui/controls.dart';
 import '../ui/main_state.dart';
 import '../ui/tokens.dart';
 import 'composer_editor.dart';
+import 'composer_float.dart';
 import 'composer_model.dart';
 import 'composer_plus.dart';
 import 'flutter_editor.dart';
@@ -465,7 +466,20 @@ List<Widget> composerLayer(
         listenable: both,
         builder: (context, _) => open()
             ? LayoutBuilder(
-                builder: (context, c) => Align(
+                builder: (context, c) => term == null
+                    // An app window: the panel floats where the app's place is (floating-composer spec).
+                    ? FloatingComposer(
+                        session: session,
+                        onPlace: (p) => state.placeComposer(session, p),
+                        child: ComposerPanel(
+                          key: ValueKey(session.sid),
+                          state: state,
+                          session: session,
+                          port: port,
+                          maxHeight: c.maxHeight / 2,
+                        ),
+                      )
+                    : Align(
                   alignment: Alignment.bottomCenter,
                   child: Padding(
                     padding: const EdgeInsets.only(bottom: 8),

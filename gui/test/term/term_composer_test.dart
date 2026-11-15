@@ -361,6 +361,7 @@ void main() {
       expect(tester.getSize(find.byType(TermStage)), size);
       expect(tester.getTopLeft(find.byType(TermStage)).dy, top - pictureLift);
       expect(fieldFocused(tester), isTrue);
+      expect(find.byKey(const Key('composer-grip')), findsNothing); // terminals keep the fixed panel
       s.currentRemote!.composer.collapse();
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 200));

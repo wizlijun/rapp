@@ -184,7 +184,6 @@ class Stage extends StatelessWidget {
               ],
             );
           }
-          if (picture && rs != null) stage = _lifted(rs, stage);
           final port = state.port;
           final banner = state.lockBanner;
           final screens = rec != null && isDesktopApp(rec.app) && port?.supportsDetach == false
@@ -239,7 +238,7 @@ class Stage extends StatelessWidget {
   }
 }
 
-/// While the writing panel is open the picture slides up one line (the size A sees stays as it was), in 150 ms
+/// A terminal only (an app window's panel floats instead): while the writing panel is open the picture slides up one line (the size A sees stays as it was), in 150 ms
 /// (at once without animations); Transform moves hit tests with it, so a click lands where the picture is seen.
 /// A terminal's [keyRow] lifts it the same line, panel open or not; on a [narrow] stage with both, the row has a
 /// line of its own above the panel and the picture goes [keyRowLift] further.
