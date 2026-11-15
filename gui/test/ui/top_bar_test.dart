@@ -159,6 +159,19 @@ void main() {
       expect(find.byKey(const Key('sessions-scrim')), findsNothing);
     });
 
+    testWidgets('assistive tech sees the session block as one button it can press', (tester) async {
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(wrap(top()));
+      await three(tester);
+      final block = find.bySemanticsLabel(RegExp('^Mail，'));
+      expect(block, findsOneWidget);
+      expect(tester.getSemantics(block), isSemantics(isButton: true, hasTapAction: true));
+      tester.semantics.tap(find.semantics.byLabel(RegExp('^Mail，')));
+      await tester.pump();
+      expect(s.corner, Corner.sessions);
+      handle.dispose();
+    });
+
     testWidgets('picking the current session just closes the list', (tester) async {
       await tester.pumpWidget(wrap(top()));
       await three(tester);

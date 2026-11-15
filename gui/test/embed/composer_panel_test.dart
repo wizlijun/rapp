@@ -415,6 +415,37 @@ void main() {
       expect(callsOf('cancel_transfer').single, equals({'sid': 1}));
     });
 
+    // What a secondary button over the picture fills with (AVATAR's raise is see-through).
+    double fillAlpha(WidgetTester tester, Finder button) => tester
+        .widget<OutlinedButton>(find.descendant(of: button, matching: find.byType(OutlinedButton)))
+        .style!
+        .backgroundColor!
+        .resolve(<WidgetState>{})!
+        .a;
+
+    testWidgets('输入 and 取消 over the picture are opaque in AVATAR', (tester) async {
+      rs.composer.open = false;
+      rs.apply(const TransferStatusEvent(1, '上传 1/2 · a.txt'));
+      await tester.pumpWidget(wrap(
+          SizedBox(width: 900, height: 400, child: Stack(children: composerLayer(state: es, session: rs, port: port))),
+          theme: RappTheme.avatar));
+      expect(fillAlpha(tester, find.byKey(const Key('composer-open'))), 1.0);
+      expect(fillAlpha(tester, find.widgetWithText(RappButton, '取消')), 1.0);
+    });
+
+    testWidgets('the hint line\'s 取消 is opaque in AVATAR', (tester) async {
+      tester.view.physicalSize = const Size(1600, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      rs.apply(const TransferStatusEvent(1, '上传 1/2 · a.txt'));
+      await tester.pumpWidget(wrap(
+          SizedBox(width: 900, height: 600, child: Stack(children: composerLayer(state: es, session: rs, port: port))),
+          theme: RappTheme.avatar));
+      await tester.pump();
+      final hint = find.byKey(const Key('composer-hint'));
+      expect(fillAlpha(tester, find.descendant(of: hint, matching: find.widgetWithText(RappButton, '取消'))), 1.0);
+    });
+
     group('plus menu and hint line', () {
       final menu = find.byKey(const Key('composer-plus-menu'));
       final hint = find.byKey(const Key('composer-hint'));

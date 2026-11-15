@@ -127,16 +127,21 @@ class TopBar extends StatelessWidget {
                         canSwitch: canSwitch,
                         arrow: arrow,
                         child: cur == null
-                          ? Text(
-                              _projectName() ?? '没有选中的会话',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(color: t.muted),
+                          ? Semantics(
+                              button: canSwitch,
+                              onTap: canSwitch ? _toggleSessions : null,
+                              child: Text(
+                                _projectName() ?? '没有选中的会话',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(color: t.muted),
+                              ),
                             )
                           : Semantics(
                               container: true,
                               excludeSemantics: true,
                               button: canSwitch,
+                              onTap: canSwitch ? _toggleSessions : null,
                               label:
                                   '$title，${lampWord(cur.lamp)}，$sub',
                               child: Row(
@@ -337,6 +342,8 @@ class TopBar extends StatelessWidget {
     );
   }
 
+  void _toggleSessions() => state.toggleCorner(Corner.sessions);
+
   /// The session block, the session list's button while there is a session to switch to.
   Widget _sessionBlock(RappTokens t, {required bool canSwitch, required bool arrow, required Widget child}) {
     if (!canSwitch) return KeyedSubtree(key: const Key('session-block'), child: child);
@@ -352,7 +359,9 @@ class TopBar extends StatelessWidget {
         type: MaterialType.transparency,
         child: InkWell(
           key: const Key('session-block'),
-          onTap: () => state.toggleCorner(Corner.sessions),
+          onTap: _toggleSessions,
+          // The block's own Semantics carries the label, the button flag and this tap.
+          excludeFromSemantics: true,
           borderRadius: radius,
           child: DecoratedBox(
             decoration: open ? t.raiseBox(border: t.text) : BoxDecoration(borderRadius: radius),
