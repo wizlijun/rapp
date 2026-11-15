@@ -178,6 +178,51 @@ void main() {
     expect(s.currentProject, s.projects.single.id);
   });
 
+  testWidgets('新建项目 leaves save mode: Enter then creates an empty project', (
+    tester,
+  ) async {
+    await tester.runAsync(boot);
+    await pump(tester);
+    await tester.runAsync(() async {
+      await s.openOrSwitch('111', 'com.apple.Safari', 'Safari');
+      await flush();
+    });
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('save-open')));
+    await tester.pump();
+    await tester.enterText(find.byKey(const Key('new-project')), '空的');
+    await tester.tap(find.byKey(const Key('new-mode')));
+    await tester.pump();
+    await tester.enterText(find.byKey(const Key('new-project')), '空的');
+    await done(tester);
+    expect(s.projects.single.name, '空的');
+    expect(s.projects.single.members, isEmpty);
+  });
+
+  testWidgets('save mode ends when nothing is open any more: Enter creates a plain project', (
+    tester,
+  ) async {
+    await tester.runAsync(boot);
+    await pump(tester);
+    await tester.runAsync(() async {
+      await s.openOrSwitch('111', 'com.apple.Safari', 'Safari');
+      await flush();
+    });
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('save-open')));
+    await tester.pump();
+    await tester.enterText(find.byKey(const Key('new-project')), '甲');
+    await tester.runAsync(() async {
+      t.emit({'event': 'closed', 'sid': 1});
+      await flush();
+    });
+    await tester.pump();
+    expect(s.canSaveOpenAsProject, isFalse);
+    expect(find.byKey(const Key('new-mode')), findsNothing);
+    await done(tester);
+    expect(s.projects.single.name, '甲');
+  });
+
   testWidgets('pinned projects come first; the pin button toggles its label', (
     tester,
   ) async {

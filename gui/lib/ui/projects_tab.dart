@@ -95,6 +95,17 @@ class _NewProjectState extends State<_NewProject> {
   bool _saveOpen = false;
 
   @override
+  void initState() {
+    super.initState();
+    _focus.addListener(() {
+      // Leaving an empty field drops save mode; a typed name keeps it.
+      if (!_focus.hasFocus && _c.text.isEmpty && _saveOpen) {
+        setState(() => _saveOpen = false);
+      }
+    });
+  }
+
+  @override
   void dispose() {
     _c.dispose();
     _focus.dispose();
@@ -102,7 +113,7 @@ class _NewProjectState extends State<_NewProject> {
   }
 
   void _submit(String v) {
-    final made = _saveOpen
+    final made = _saveOpen && widget.state.canSaveOpenAsProject
         ? widget.state.saveOpenAsProject(v)
         : widget.state.createProject(v);
     if (made != null) {
@@ -114,6 +125,7 @@ class _NewProjectState extends State<_NewProject> {
   @override
   Widget build(BuildContext context) {
     final can = widget.state.canSaveOpenAsProject;
+    if (_saveOpen && !can) _saveOpen = false; // nothing left to save
     return Row(children: [
       Expanded(
         child: TextField(
@@ -122,7 +134,7 @@ class _NewProjectState extends State<_NewProject> {
           focusNode: _focus,
           textInputAction: TextInputAction.done,
           decoration: InputDecoration(
-            hintText: _saveOpen && can ? '存成项目' : '新建项目',
+            hintText: _saveOpen ? '存成项目' : '新建项目',
             isDense: true,
             contentPadding:
                 const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
@@ -130,6 +142,14 @@ class _NewProjectState extends State<_NewProject> {
           onSubmitted: _submit,
         ),
       ),
+      if (_saveOpen) ...[
+        const SizedBox(width: 6),
+        RappButton.secondary(
+          key: const Key('new-mode'),
+          label: '新建项目',
+          onPressed: () => setState(() => _saveOpen = false),
+        ),
+      ],
       const SizedBox(width: 6),
       RappButton.secondary(
         key: const Key('save-open'),
