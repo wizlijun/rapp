@@ -20,6 +20,8 @@ rapp 将远程 Mac 上的应用汇入一个工作台，让你在眼前这台电�
 
 中文等需要输入法的文字在控制端输入：输入板在本机组字后整段发送，被控端始终保持英文输入。想要最流畅的输入体验，推荐使用 [Fcitx5](https://github.com/fcitx/fcitx5) 输入法；在 macOS 上，候选词会直接显示在输入板下方，字体与正文一致。详见[输入板设计说明](docs/writing-panel.md)。
 
+macOS Apple 芯片用户可下载配套的 [Fcitx5 for Sumi 0.5.0.15 安装包（.pkg）](https://github.com/wizlijun/rapp/releases/download/v0.10.7/Fcitx5-for-Sumi-0.5.0.15-arm64.pkg)。
+
 跨网络连接可参考[自建中继说明](docker/relay/README.md)。E2E 中继要求两端均为 rapp 0.6+；Linux v0.5.2 使用旧连接方式。各平台分别选择对应的下载版本。
 
 Linux v0.5.2 无法连接 macOS 0.8+ 被控端。在兼容的安装包发布前，请从当前源码构建 Linux 客户端，并同步升级两端。

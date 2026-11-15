@@ -20,6 +20,8 @@ Install rapp on your Mac host and controlling computer. On the host, allow Scree
 
 Type Chinese and other IME text on the controlling computer: the writing panel composes it locally and sends it whole, while the host stays in English. For the smoothest input, use the [Fcitx5](https://github.com/fcitx/fcitx5) input method; on macOS its candidates appear right under the writing panel, in the panel's own font. See [writing panel design](docs/writing-panel.md) (Chinese).
 
+For macOS on Apple silicon, download the companion [Fcitx5 for Sumi 0.5.0.15 installer (.pkg)](https://github.com/wizlijun/rapp/releases/download/v0.10.7/Fcitx5-for-Sumi-0.5.0.15-arm64.pkg).
+
 For access across networks, see [self-hosted relay setup](docker/relay/README.md). E2E relay connections require rapp 0.6+ on both ends; Linux v0.5.2 uses the legacy connection path. Downloads are selected separately for each platform.
 
 Linux v0.5.2 cannot connect to macOS hosts running 0.8+. Build the Linux client from current source until a compatible package is available; update both ends together.
