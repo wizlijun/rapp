@@ -1,4 +1,4 @@
-//! Terminal sessions (spec §6): `terms`, `add_term_target`, `remove_term_target` and `new_term` are asked of the
+//! Terminal sessions (spec §6): `terms`, `add_term_target`, `remove_term_target`, `new_term` and `open_term` are asked of the
 //! device; each online device has one `watch_terms` stream, every line of it a `terms` event without `req`.
 //! Opening one goes the embedded `open` path unchanged.
 
@@ -81,7 +81,7 @@ fn due(w: Option<&Watch>, now: Instant) -> Option<Option<Duration>> {
     }
 }
 
-/// The terminal commands; `cmd` is one of `terms`, `add_term_target`, `remove_term_target`, `new_term`, whose
+/// The terminal commands; `cmd` is one of `terms`, `add_term_target`, `remove_term_target`, `new_term`, `open_term`, whose
 /// fields (other than `cmd`, `id`, `req`) are the device request's.
 pub(crate) async fn command(hub: &Arc<Hub>, cmd: &str, v: &Value) -> Result<Value> {
     let id = v.get("id").and_then(Value::as_str).context("missing id")?;
@@ -99,10 +99,15 @@ pub(crate) async fn command(hub: &Arc<Hub>, cmd: &str, v: &Value) -> Result<Valu
     op["op"] = json!(cmd);
     let op: Op = serde_json::from_value(op).with_context(|| format!("bad {cmd}"))?;
     let (_, r, _) = hub.request(&host, &op).await?;
-    Ok(match op {
-        Op::NewTerm { .. } => json!({"event":"term_created","id":id,"term":r["id"]}),
+    Ok(event(&op, id, &r))
+}
+
+/// The event that tells the GUI how its terminal command `op` went on device `id`, `r` being the reply.
+fn event(op: &Op, id: &str, r: &Value) -> Value {
+    match op {
+        Op::NewTerm { .. } | Op::OpenTerm { .. } => json!({"event":"term_created","id":id,"term":r["id"]}),
         _ => json!({"event":"term_targets","id":id,"targets":r["targets"]}),
-    })
+    }
 }
 
 /// Starts `host`'s watch if one is due (`due`).
@@ -184,10 +189,19 @@ async fn follow(hub: &Hub, host: &Host, listed: &mut bool) -> Result<std::conver
 
 #[cfg(test)]
 mod tests {
-    use super::{after_end, due, ended, Next, Watch, OFF_RECHECK};
+    use super::{after_end, due, ended, event, Next, Watch, OFF_RECHECK};
+    use rapp_net::msg::Op;
+    use serde_json::json;
     use std::time::{Duration, Instant};
 
     const S: Duration = Duration::from_secs(1);
+
+    #[test]
+    fn open_term_is_answered_with_term_created() {
+        let op = Op::OpenTerm { cwd: None, name: None, command: None, app: "Terminal".into() };
+        let e = event(&op, "d1", &json!({"id": "term:pty:c"}));
+        assert_eq!(e, json!({"event":"term_created","id":"d1","term":"term:pty:c"}));
+    }
 
     #[test]
     fn what_a_watch_does_after_it_ends() {

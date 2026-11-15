@@ -11,6 +11,7 @@ use crate::config::{self, TermConfig};
 use crate::id::{default_name, session_name, TermId};
 use crate::list::{host_rows, Backoff, TermRow};
 use crate::proto::{self, Out, MAX_LINE};
+use crate::pty::launch;
 use crate::pty::local::{self, Status};
 use crate::runner::{RunFail, Runner};
 use crate::session::{self, Opts};
@@ -45,6 +46,8 @@ const UNKNOWN_HOST: &str = "unknown host";
 const BAD_ID: &str = "invalid term id";
 const TAKEN: &str = "a session with that name already exists";
 const NO_TEXT_TERMINAL: &str = "no such text terminal";
+const UNKNOWN_APP: &str = "unknown terminal app";
+const NOT_STARTED: &str = "the terminal window did not start in 10 s";
 const LIST_FAILED: &str = "could not list the tmux sessions";
 
 pub struct ServeOpts {
@@ -59,12 +62,14 @@ pub struct ServeOpts {
     pub poll: Duration,
     /// The directory `rapp-term run` keeps its sockets and token in (`pty/<pid>.sock`, `pty.token`).
     pub pty_dir: PathBuf,
+    /// Run instead of `open -a`, for tests: `<program> <app> <file>`.
+    pub launch_with: Option<PathBuf>,
 }
 
 impl ServeOpts {
     pub fn new(config: PathBuf, ctl_dir: PathBuf) -> ServeOpts {
         let pty_dir = config.parent().unwrap_or(&config).join("term");
-        ServeOpts { config, socket: None, ctl_dir, poll: Duration::from_secs(2), pty_dir }
+        ServeOpts { config, socket: None, ctl_dir, poll: Duration::from_secs(2), pty_dir, launch_with: None }
     }
 }
 
@@ -75,6 +80,7 @@ enum Req {
     Watch,
     New { host: Option<String>, name: Option<String>, command: Vec<String>, cols: u16, rows: u16 },
     View { term: String, sid: Option<u64> },
+    Open { cwd: Option<String>, name: Option<String>, command: Option<String>, app: String },
 }
 
 /// The session list: every host's sessions, and how each host went.
@@ -108,6 +114,10 @@ pub struct Worker {
     /// The unread state of each host (`None`: this machine).
     unread: Mutex<HashMap<Option<String>, Arc<Mutex<Unread>>>>,
     events: UnboundedSender<Value>,
+    /// The terminal programs this machine can open a window with, looked up once.
+    launchers: Vec<String>,
+    /// One `open` at a time.
+    opening: tokio::sync::Mutex<()>,
 }
 
 /// Accept connections on `listener` until `stop` completes; then end every connection (a view's control client
@@ -141,7 +151,15 @@ pub async fn serve(
 
 impl Worker {
     pub fn new(token: String, opts: ServeOpts, events: UnboundedSender<Value>) -> Worker {
-        Worker { opts, token, started: unix_now(), unread: Mutex::new(HashMap::new()), events }
+        Worker {
+            opts,
+            token,
+            started: unix_now(),
+            unread: Mutex::new(HashMap::new()),
+            events,
+            launchers: launch::launchers(),
+            opening: Default::default(),
+        }
     }
 
     /// The unread state of `host`, made on first use.
@@ -197,6 +215,13 @@ impl Worker {
                 };
                 reply(&mut w, &v).await
             }
+            Req::Open { cwd, name, command, app } => {
+                let v = match self.open(cwd.as_deref(), name.as_deref(), command.as_deref(), &app).await {
+                    Ok(id) => json!({ "id": id }),
+                    Err(e) => json!({ "error": e }),
+                };
+                reply(&mut w, &v).await
+            }
             Req::New { host, name, command, cols, rows } => {
                 let v = match cfg {
                     Ok(cfg) => {
@@ -234,7 +259,7 @@ impl Worker {
 
     /// Every host's sessions, the hosts asked at the same time. A host that fails is only marked in `hosts`.
     pub async fn list(&self, cfg: &TermConfig) -> TermList {
-        let mut hosts = host_list(cfg);
+        let mut hosts = host_list(cfg, &self.launchers);
         // A `JoinSet` of this connection's own: when the connection is dropped, its asks are too.
         let mut asks = JoinSet::new();
         for (i, h) in hosts.iter().enumerate() {
@@ -337,7 +362,7 @@ impl Worker {
         tasks: &mut JoinSet<()>,
         changed: &Arc<Notify>,
     ) -> Vec<Watched> {
-        host_list(cfg)
+        host_list(cfg, &self.launchers)
             .into_iter()
             .map(|row| {
                 let tmux = self.tmux_for(cfg, row.host.as_deref());
@@ -351,6 +376,73 @@ impl Worker {
                 Watched { key, rows, task: tasks.spawn(ask) }
             })
             .collect()
+    }
+
+    /// Open a window of `app` that runs `rapp-term run`, and wait for that `run` to show itself: the id of its
+    /// session. One at a time, so each wait has only its own ticket to look for.
+    async fn open(
+        &self,
+        cwd: Option<&str>,
+        name: Option<&str>,
+        command: Option<&str>,
+        app: &str,
+    ) -> Result<String, String> {
+        let known = ["Terminal", "iTerm"].contains(&app);
+        if !known || (self.opts.launch_with.is_none() && !self.launchers.iter().any(|l| l == app)) {
+            return Err(UNKNOWN_APP.into());
+        }
+        let cwd = cwd.filter(|c| !c.is_empty()).map(expand_home);
+        if let Some(c) = &cwd {
+            if !c.is_dir() {
+                return Err(format!("no such directory: {}", c.display()));
+            }
+        }
+        const FAILED: &str = "could not open the terminal window";
+        let _one = self.opening.lock().await;
+        let dir = &self.opts.pty_dir;
+        local::ensure_dirs(dir).map_err(|_| FAILED)?;
+        let token = local::token(dir).map_err(|_| FAILED)?;
+        let bin = std::env::current_exe().map_err(|_| FAILED)?;
+        let ticket = ticket();
+        let body = launch::command_file(
+            &bin,
+            dir,
+            &ticket,
+            name.filter(|n| !n.is_empty()),
+            cwd.as_deref(),
+            command.filter(|c| !c.trim().is_empty()),
+        );
+        let file = dir.join("launch").join(format!("{ticket}.command"));
+        write_private(&file, &body).map_err(|_| FAILED)?;
+        let res = self.wait_for(&file, app, &ticket, dir, &token).await;
+        let _ = std::fs::remove_file(&file);
+        res
+    }
+
+    async fn wait_for(
+        &self,
+        file: &std::path::Path,
+        app: &str,
+        ticket: &str,
+        dir: &std::path::Path,
+        token: &str,
+    ) -> Result<String, String> {
+        let (app, file, with) = (app.to_string(), file.to_path_buf(), self.opts.launch_with.clone());
+        let started = tokio::task::spawn_blocking(move || launch::open(&app, &file, with.as_deref())).await;
+        if !matches!(started, Ok(Ok(()))) {
+            return Err("could not open the terminal window".into());
+        }
+        let end = tokio::time::Instant::now() + OPEN_WAIT;
+        loop {
+            let found = local::scan(dir, token).await.into_iter().find(|s| s.ticket.as_deref() == Some(ticket));
+            if let Some(s) = found {
+                return Ok(TermId { backend: PTY.into(), host: None, name: s.name }.to_string());
+            }
+            if tokio::time::Instant::now() >= end {
+                return Err(NOT_STARTED.into());
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
     }
 
     async fn new_session(
@@ -574,9 +666,37 @@ async fn ask_pty(
     }
 }
 
-/// The hosts of `cfg`, none asked yet: this machine first, then the targets in order.
-fn host_list(cfg: &TermConfig) -> Vec<HostRow> {
-    let mut hosts = vec![HostRow { host: None, target: None, tmux: None, error: None, launchers: Vec::new() }];
+/// How long `open` waits for the window's `run` to appear.
+const OPEN_WAIT: Duration = Duration::from_secs(10);
+
+/// `path` with a leading `~/` meaning the home directory; none given: the home directory itself.
+fn expand_home(path: &str) -> PathBuf {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    match (path.strip_prefix("~/"), home) {
+        (Some(rest), Some(h)) => h.join(rest),
+        _ => PathBuf::from(path),
+    }
+}
+
+/// 16 hex characters nobody could have guessed: a random hash seed mixed with the clock.
+fn ticket() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_u128(SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos()));
+    format!("{:016x}", h.finish())
+}
+
+/// Write `body` to a new file only its owner can use.
+fn write_private(path: &std::path::Path, body: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o700).open(path)?;
+    f.write_all(body.as_bytes())
+}
+
+/// The hosts of `cfg`, none asked yet: this machine first (offering `launchers`), then the targets in order.
+fn host_list(cfg: &TermConfig, launchers: &[String]) -> Vec<HostRow> {
+    let mut hosts = vec![HostRow { host: None, target: None, tmux: None, error: None, launchers: launchers.to_vec() }];
     hosts.extend(cfg.targets.iter().map(|t| HostRow {
         host: Some(t.name.clone()),
         target: Some(t.target.clone()),
@@ -820,5 +940,15 @@ mod tests {
         assert_eq!(cut.terms[..], list.terms[..cut.terms.len()]);
         let small = TermList { terms: list.terms[..3].to_vec(), hosts: list.hosts.clone() };
         assert_eq!(fit(small.clone()), small);
+    }
+
+    #[test]
+    fn a_leading_tilde_is_the_home_directory_and_tickets_differ() {
+        let home = std::env::var_os("HOME").map(PathBuf::from).unwrap();
+        assert_eq!(expand_home("~/work"), home.join("work"));
+        assert_eq!(expand_home("/tmp/~/x"), PathBuf::from("/tmp/~/x"));
+        let (a, b) = (ticket(), ticket());
+        assert!(a.len() == 16 && a.bytes().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(a, b);
     }
 }

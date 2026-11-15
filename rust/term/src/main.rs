@@ -73,6 +73,8 @@ struct Args {
     cwd: Option<String>,
     dir: Option<String>,
     ticket: Option<String>,
+    /// Hidden: the program `serve` runs to open a window instead of `open -a`, for tests.
+    launch_with: Option<String>,
     /// Arguments that are not options.
     pos: Vec<String>,
     /// Everything after `--`.
@@ -120,6 +122,7 @@ fn parse_args(allowed: &[&str], argv: &[String]) -> Res<Args> {
             "cwd" => &mut a.cwd,
             "dir" => &mut a.dir,
             "ticket" => &mut a.ticket,
+            "launch-with" => &mut a.launch_with,
             _ => return Err(usage("unknown option")),
         };
         // The value is the next argument whatever it looks like; `Runner::ssh` rejects a destination like `-o…`.
@@ -370,7 +373,11 @@ async fn serve(a: &Args) -> Res<()> {
     if private_dir(&dir).is_err() {
         eprintln!("rapp-term: could not make the ssh control directory");
     }
-    let opts = ServeOpts { socket: a.socket.clone(), ..ServeOpts::new(PathBuf::from(config), dir) };
+    let opts = ServeOpts {
+        socket: a.socket.clone(),
+        launch_with: a.launch_with.as_ref().map(PathBuf::from),
+        ..ServeOpts::new(PathBuf::from(config), dir)
+    };
     event(a.json, &serde_json::json!({ "event": "listening", "port": port }));
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let json = a.json;
@@ -399,7 +406,7 @@ fn dispatch(argv: &[String]) -> Res<i32> {
         "watch" => &["json", "ssh", "tmux", "socket"],
         "new" => &["json", "name", "size", "ssh", "host", "tmux", "socket", "--"],
         "run" => &["name", "cwd", "dir", "ticket", "--"],
-        "serve" => &["json", "token-env", "config", "bind", "port", "socket"],
+        "serve" => &["json", "token-env", "config", "bind", "port", "socket", "launch-with"],
         "help" | "--help" | "-h" => {
             println!("{USAGE}");
             return Ok(0);
