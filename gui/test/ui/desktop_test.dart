@@ -47,7 +47,7 @@ class DesktopEnv {
       data: DataDir(tmp.path),
       prefs: UiPrefs(),
       port: port,
-      unlockStore: unlockStore ?? UnlockStore(supported: false),
+      unlockStore: unlockStore ?? UnlockStore(supported: false, memory: false),
     );
   }
   final tmp = Directory.systemTemp.createTempSync('desktop_test');
@@ -278,6 +278,13 @@ void main() {
     e.port.emit(ScreenLockedEvent(e.sid('app'), true));
     await tester.pumpWidget(wrap(Stage(state: e.state)));
     expect(find.text(desktopLockText), findsOneWidget);
+    await tester.tap(find.text('输入系统密码'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(UnlockDialog), findsOneWidget);
+    await tester.tap(find.text('取消'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
     await tester.runAsync(() => e.state.openOrSwitch('111', 'desktop:', '桌面'));
     await tester.pump();
     await tester.pump();

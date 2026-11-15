@@ -10,7 +10,7 @@ import 'desktop_test.dart' show DesktopEnv;
 import 'helpers.dart';
 
 class MemoryUnlockStore extends UnlockStore {
-  MemoryUnlockStore({bool supported = true}) : super(supported: supported);
+  MemoryUnlockStore({bool supported = true}) : super(supported: supported, memory: false);
   UnlockCredential? credential;
   Completer<UnlockCredential?>? pending;
   bool fail = false;
@@ -61,7 +61,7 @@ void main() {
         () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
             .setMockMethodCallHandler(channel, null),
       );
-      final store = UnlockStore(supported: true);
+      final store = UnlockStore(supported: true, memory: false);
       await store.save('A', 'pässword', auto: true);
       final read = await store.read('A');
       expect(read!.password, 'pässword');
@@ -69,7 +69,7 @@ void main() {
       await store.forget('A');
       expect(await store.read('A'), isNull);
       final count = calls.length;
-      final other = UnlockStore(supported: false);
+      final other = UnlockStore(supported: false, memory: false);
       expect(await other.read('A'), isNull);
       await other.forget('A');
       await expectLater(
@@ -378,6 +378,59 @@ void main() {
       expect(result!.auto, false);
     },
   );
+
+  test('memory store round trips without the channel', () async {
+    final calls = <MethodCall>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(const MethodChannel('rapp/unlock'), (c) async {
+      calls.add(c);
+      return null;
+    });
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(const MethodChannel('rapp/unlock'), null),
+    );
+    final store = UnlockStore(memory: true);
+    expect(store.supported, isTrue);
+    await store.save('A', 'pw', auto: true);
+    final got = await store.read('A');
+    expect((got!.password, got.auto), ('pw', true));
+    await store.forget('A');
+    expect(await store.read('A'), isNull);
+    expect(calls, isEmpty);
+  });
+
+  testWidgets('memory store dialog says this run only', (tester) async {
+    await tester.pumpWidget(
+      wrap(UnlockDialog(store: UnlockStore(memory: true), device: 'A')),
+    );
+    await tester.pump();
+    expect(find.text('本次运行期间记住密码'), findsOneWidget);
+    expect(find.text('连上时自动输入'), findsOneWidget);
+    expect(find.text('记住密码'), findsNothing);
+  });
+
+  testWidgets('app banner opens the dialog and sends the password to the app', (
+    tester,
+  ) async {
+    final e = DesktopEnv(unlockStore: MemoryUnlockStore(supported: false));
+    await tester.runAsync(() => e.state.openOrSwitch('111', 'app', 'App'));
+    e.port.emit(ScreenLockedEvent(e.sid('app'), true));
+    await tester.pumpWidget(wrap(Stage(state: e.state)));
+    await tester.tap(find.text('输入系统密码'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(UnlockDialog), findsOneWidget);
+    await tester.enterText(find.byType(TextField), 'typed secret');
+    await tester.tap(find.widgetWithText(FilledButton, '输入系统密码'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    final c = e.calls('unlock').single;
+    expect(c['password'], 'typed secret');
+    expect(c['sid'], e.sid('app'));
+    await tester.pumpWidget(const SizedBox());
+    e.dispose();
+  });
 
   testWidgets('desktop banner opens dialog and sends entered password', (
     tester,

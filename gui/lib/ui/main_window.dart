@@ -54,6 +54,8 @@ class MainWindow extends StatefulWidget {
 class _MainWindowState extends State<MainWindow> {
   bool _full = false;
   StreamSubscription<bool>? _sub;
+  StreamSubscription<String>? _asks;
+  bool _asking = false;
 
   MainState get state => widget.state;
 
@@ -66,6 +68,7 @@ class _MainWindowState extends State<MainWindow> {
     widget.fullscreen.isFullScreen().then((v) {
       if (mounted) setState(() => _full = v);
     });
+    _asks = state.unlockAsks.listen(_onAsk);
     widget.monitor.addListener(_onMonitor);
     // After the first frame: a change notifies MainState's listeners, never during a build.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -76,9 +79,21 @@ class _MainWindowState extends State<MainWindow> {
   /// Whether a relay is set lives in the service status; MainState keeps a copy for the device rows and the menu.
   void _onMonitor() => state.setRelaySet(widget.monitor.status?.relaySet ?? false);
 
+  /// A locked session wants the password: one dialog at a time.
+  Future<void> _onAsk(String device) async {
+    if (_asking || !mounted) return;
+    _asking = true;
+    try {
+      await requestUnlock(context, state, device);
+    } finally {
+      _asking = false;
+    }
+  }
+
   @override
   void dispose() {
     widget.monitor.removeListener(_onMonitor);
+    _asks?.cancel();
     _sub?.cancel();
     super.dispose();
   }
