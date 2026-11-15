@@ -26,6 +26,7 @@ void main() {
   String? addTargetError;
   var termsOff = false;
   String? removeTargetError;
+  String? newTermError;
   var termHosts = <Map<String, dynamic>>[{'host': null}];
 
   Future<void> flush() => Future<void>.delayed(Duration.zero);
@@ -38,6 +39,7 @@ void main() {
     addTargetError = null;
     termsOff = false;
     removeTargetError = null;
+    newTermError = null;
     termHosts = [{'host': null}];
     tmp = Directory.systemTemp.createTempSync('devices_tab_test');
     t = FakeTransport();
@@ -94,6 +96,9 @@ void main() {
           if (removeTargetError != null) return t.emit({'event': 'error', 'req': req, 'error': removeTargetError});
           termHosts.removeWhere((h) => h['host'] == cmd['name']);
           t.emit({'event': 'term_targets', 'req': req, 'id': cmd['id'], 'targets': []});
+        case 'new_term':
+          if (newTermError != null) return t.emit({'event': 'error', 'req': req, 'error': newTermError});
+          t.emit({'event': 'term_created', 'req': req, 'id': cmd['id'], 'term': 'term:tmux:new'});
         case 'set_route':
           for (final h in hosts) {
             if (h['id'] != cmd['id']) continue;
@@ -713,5 +718,72 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('终端'), findsOneWidget);
     expect(find.byKey(const Key('remove-host-error')), findsNothing);
+  });
+
+  Future<void> openNewTerm(WidgetTester tester) async {
+    await pumpTab(tester);
+    await selectMini(tester);
+    await emitTerms(tester, []);
+    t.sent.clear();
+    await tester.ensureVisible(find.byKey(const Key('new-term')));
+    await tester.tap(find.byKey(const Key('new-term')));
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> submitNewTerm(WidgetTester tester) async {
+    await tester.tap(find.text('新开'));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('new terminal: the command goes as one argument, no host or name, then it opens', (tester) async {
+    await openNewTerm(tester);
+    await tester.enterText(find.byKey(const Key('new-term-command')), '  claude --resume ');
+    await submitNewTerm(tester);
+    final m = t.sent.firstWhere((m) => m['cmd'] == 'new_term');
+    expect(m, {'cmd': 'new_term', 'id': '111', 'command': ['claude --resume'], 'cols': 120, 'rows': 40, 'req': anything});
+    expect(t.sent.map((m) => m['cmd']), containsAllInOrder(['new_term', 'terms', 'open']));
+    expect(t.sent.lastWhere((m) => m['cmd'] == 'open')['app'], 'term:tmux:new');
+    expect(find.byKey(const Key('new-term-command')), findsNothing);
+  });
+
+  testWidgets('new terminal: an empty command is an empty list, and a name is sent', (tester) async {
+    await openNewTerm(tester);
+    await tester.enterText(find.byKey(const Key('new-term-name')), ' build ');
+    await submitNewTerm(tester);
+    final m = t.sent.firstWhere((m) => m['cmd'] == 'new_term');
+    expect(m['command'], isEmpty);
+    expect((m['name'], m.containsKey('host')), ('build', false));
+  });
+
+  testWidgets('new terminal: an SSH host is chosen from the where dropdown', (tester) async {
+    termHosts = [
+      {'host': null},
+      {'host': 'gpu1', 'target': 'me@gpu1'},
+    ];
+    await openNewTerm(tester);
+    await tester.tap(find.byKey(const Key('new-term-where')));
+    await tester.pumpAndSettle();
+    expect(find.text('本机'), findsWidgets);
+    await tester.tap(find.text('gpu1').last);
+    await tester.pumpAndSettle();
+    await submitNewTerm(tester);
+    final m = t.sent.firstWhere((m) => m['cmd'] == 'new_term');
+    expect((m['host'], m.containsKey('name')), ('gpu1', false));
+  });
+
+  testWidgets('new terminal: a refusal stays in the dialog with the hub words', (tester) async {
+    newTermError = 'no tmux on gpu1';
+    await openNewTerm(tester);
+    await submitNewTerm(tester);
+    expect(find.text('no tmux on gpu1'), findsOneWidget);
+    expect(find.byKey(const Key('new-term-command')), findsOneWidget);
+    expect(t.sent.any((m) => m['cmd'] == 'open'), isFalse);
+  });
+
+  testWidgets('new terminal: no button while terminals are off', (tester) async {
+    termsOff = true;
+    await pumpTab(tester);
+    await selectMini(tester);
+    expect(find.byKey(const Key('new-term')), findsNothing);
   });
 }

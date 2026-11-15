@@ -122,6 +122,17 @@ impl Tmux {
         Ok(())
     }
 
+    /// Open a window in the session `pane` is in, in the pane's directory (see `cmd::new_window`); the new pane's id.
+    pub async fn new_window(&self, pane: &str) -> anyhow::Result<String> {
+        let found = self.run(&cmd::session_of(pane)).await?;
+        let (session, dir) = found.trim_end_matches('\n').split_once('\t').unwrap_or_default();
+        anyhow::ensure!(session.starts_with('$'), "no session id");
+        let out = self.run(&cmd::new_window(session, dir)).await?;
+        let id = out.trim().to_string();
+        anyhow::ensure!(id.starts_with('%'), "no pane id");
+        Ok(id)
+    }
+
     fn failure(d: &Done) -> anyhow::Error {
         let text = classify(d.code, &d.stderr).to_string();
         if !text.is_empty() {
@@ -223,8 +234,8 @@ impl Tmux {
         Ok(s)
     }
 
-    /// A detached session `name` running `command` (each element one word for the program, passed through the
-    /// shell quoted; empty: the default shell).
+    /// A detached session `name` running `command` (one element: a shell command line; several: one program's
+    /// words, each quoted; empty: the default shell; see `cmd::new_session`).
     pub async fn new_session(&self, name: &str, command: &[String], cols: u16, rows: u16) -> anyhow::Result<()> {
         let (cols, rows) = clamp_size(cols, rows);
         let args = cmd::new_session(name, cols, rows, command);

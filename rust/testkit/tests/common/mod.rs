@@ -315,7 +315,7 @@ impl Hub {
     /// before it; other events read meanwhile are dropped too (none may be an error).
     pub async fn wait_net(&mut self, within: Duration, pred: impl Fn(&Value) -> bool) -> Value {
         if let Some(i) = self.nets.iter().position(&pred) {
-            return self.nets.drain(..=i).last().unwrap();
+            return self.nets.drain(..=i).next_back().unwrap();
         }
         self.nets.clear();
         let deadline = tokio::time::Instant::now() + within;

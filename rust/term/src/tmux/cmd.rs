@@ -12,6 +12,7 @@ pub const VERBS: &[&str] = &[
     "paste-buffer",
     "delete-buffer",
     "new-session",
+    "new-window",
     "refresh-client",
     "attach-session",
 ];
@@ -103,6 +104,23 @@ pub fn delete_buffer(name: &str) -> Vec<String> {
     ["delete-buffer", "-b", name].map(String::from).to_vec()
 }
 
+/// The id of the session `pane` is in and the pane's own directory, tab separated.
+pub fn session_of(pane: &str) -> Vec<String> {
+    ["display-message", "-p", "-t", pane, "#{session_id}\t#{pane_current_path}"].map(String::from).to_vec()
+}
+
+/// A window in the session `session_id`, at its first free index (no window moves: `-a` would move every later one
+/// up), starting in `dir` (none: tmux's default), not made current; prints its pane id. tmux expands formats in
+/// `-c`, so each `#` of the path is doubled.
+pub fn new_window(session_id: &str, dir: &str) -> Vec<String> {
+    let mut v: Vec<String> = vec!["new-window".into(), "-d".into(), "-t".into(), format!("{session_id}:")];
+    if !dir.is_empty() {
+        v.extend(["-c".to_string(), dir.replace('#', "##")]);
+    }
+    v.extend(["-P", "-F", "#{pane_id}"].map(String::from));
+    v
+}
+
 /// A control-mode client of the session `session_id`.
 pub fn attach(session_id: &str) -> Vec<String> {
     ["-C", "attach-session", "-t", session_id].map(String::from).to_vec()
@@ -113,15 +131,25 @@ pub fn set_size(cols: u16, rows: u16) -> Vec<String> {
     vec!["refresh-client".into(), "-C".into(), format!("{cols}x{rows}")]
 }
 
-/// A detached session running `command` (none: the default shell). The words go to tmux as one argument, each in
-/// single quotes, which tmux hands to the shell: as separate arguments tmux would read an argument ending in `;` as
-/// the start of another tmux command, and a first word like `-c` as one of its own options.
+/// A detached session running `command` (none, or one blank line: the default shell). The command goes to tmux as
+/// one argument after `--`, which tmux hands to the shell: as separate arguments tmux would read an argument ending
+/// in `;` as the start of another tmux command, and a first word like `-c` as one of its own options. One element
+/// is a command line as typed (the GUI's): it goes as it is, with a space after a final `;` so tmux does not cut
+/// it there. Several elements are one program's words (the CLI's): each goes in single quotes.
 pub fn new_session(name: &str, cols: u16, rows: u16, command: &[String]) -> Vec<String> {
     let mut v: Vec<String> =
         ["new-session", "-d", "-s", name, "-x", &cols.to_string(), "-y", &rows.to_string()].map(String::from).to_vec();
-    if !command.is_empty() {
-        v.push("--".into());
-        v.push(command.iter().map(|w| sh_quote(w)).collect::<Vec<_>>().join(" "));
+    match command {
+        [] => {}
+        [line] if line.trim().is_empty() => {}
+        [line] => {
+            v.push("--".into());
+            v.push(if line.ends_with(';') { format!("{line} ") } else { line.clone() });
+        }
+        words => {
+            v.push("--".into());
+            v.push(words.iter().map(|w| sh_quote(w)).collect::<Vec<_>>().join(" "));
+        }
     }
     v
 }
@@ -151,6 +179,7 @@ mod tests {
                 "paste-buffer",
                 "delete-buffer",
                 "new-session",
+                "new-window",
                 "refresh-client",
                 "attach-session"
             ]
@@ -168,6 +197,17 @@ mod tests {
         assert_eq!(load_buffer("rapp-1-0"), ["load-buffer", "-b", "rapp-1-0", "-"]);
         assert_eq!(paste_buffer("rapp-1-0", "%1"), ["paste-buffer", "-p", "-d", "-b", "rapp-1-0", "-t", "%1"]);
         assert_eq!(delete_buffer("rapp-1-0"), ["delete-buffer", "-b", "rapp-1-0"]);
+        assert_eq!(session_of("%3"), ["display-message", "-p", "-t", "%3", "#{session_id}\t#{pane_current_path}"]);
+    }
+    #[test]
+    fn a_new_window_takes_the_sessions_first_free_index_in_the_panes_directory() {
+        // The session as the target (`$3:`), never `-a` after a window: `-a` moves every later window up one.
+        assert_eq!(new_window("$3", "/a b"), ["new-window", "-d", "-t", "$3:", "-c", "/a b", "-P", "-F", "#{pane_id}"]);
+        assert!(!new_window("$3", "/a b").iter().any(|a| a == "-a"));
+        // tmux expands formats in `-c`, so a `#` in the path is doubled to stay a `#`.
+        assert_eq!(new_window("$3", "/x/#{session_name}/##")[4..6], ["-c", "/x/##{session_name}/####"]);
+        // No directory: no `-c` at all (tmux's own default), not `-c ""`.
+        assert_eq!(new_window("$3", ""), ["new-window", "-d", "-t", "$3:", "-P", "-F", "#{pane_id}"]);
     }
     #[test]
     fn size_and_new_session_builders() {
@@ -178,6 +218,19 @@ mod tests {
             ["new-session", "-d", "-s", "a b", "-x", "118", "-y", "38", "--", "'sh' '-c' 'echo hi'"]
         );
         assert_eq!(new_session("n", 80, 24, &[]).len(), 8);
+    }
+    #[test]
+    fn one_command_element_is_a_shell_line_and_several_are_quoted_words() {
+        // One element is a command line as typed: tmux hands it to the shell unquoted.
+        assert_eq!(new_session("c", 80, 24, &["claude --resume".into()])[8..], ["--", "claude --resume"]);
+        let line = "cd ~/x && claude -c 'it''s'";
+        assert_eq!(new_session("c", 80, 24, &[line.into()])[8..], ["--", line]);
+        // A line ending in `;` would be cut there by tmux (its command separator): a space keeps it whole.
+        assert_eq!(new_session("c", 80, 24, &["echo hi;".into()])[8..], ["--", "echo hi; "]);
+        // Several elements are argv words: each quoted.
+        assert_eq!(new_session("c", 80, 24, &["claude".into(), "--resume".into()])[8..], ["--", "'claude' '--resume'"]);
+        // A blank line is no command: the default shell.
+        assert_eq!(new_session("c", 80, 24, &["  ".into()]).len(), 8);
     }
     #[test]
     fn a_new_sessions_command_is_one_shell_string_tmux_cannot_split_or_read_as_options() {

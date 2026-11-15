@@ -194,6 +194,12 @@ class TermModel extends ChangeNotifier {
     if (_inFlight) _dropNext = true;
   }
 
+  /// Shows [text] on the stage as its note.
+  void say(String text) {
+    note = text;
+    notifyListeners();
+  }
+
   /// The device answered with an `error` (a failed history read comes back this way, not as `history`). With a
   /// history request in flight it is taken as that request's answer: it ends, and the next one waits
   /// [historyRetryAfter] so a read that keeps failing is not asked again at once.

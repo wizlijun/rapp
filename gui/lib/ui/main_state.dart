@@ -7,6 +7,7 @@ import 'dart:ui' show Offset, Size;
 
 import '../paths.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show Clipboard;
 
 import '../embed/remote_session.dart';
 import '../embed/session_port.dart';
@@ -332,6 +333,7 @@ class MainState extends ChangeNotifier {
     if (embeds) _entries = _mapEntries();
     // Focus never stays on a session that is no longer current (mid-move, the old one is on the stage).
     if (pictureFocused != null && (currentRemote?.sid ?? current?.sid) != pictureFocused) _blur();
+    _focusNewTerm();
     _syncPolicy();
     _syncDesktopTimer();
     // Every change of the current session or of detach state ends in a notify.
@@ -374,15 +376,70 @@ class MainState extends ChangeNotifier {
   }
 
   // ---- picture focus (R15, R24) ----
+  /// Bumped when the terminal stage of [termFocusSid] should take the keyboard; the stage follows it.
+  int termFocusTick = 0;
+  Object? termFocusSid;
+
+  // The live terminal last put on the stage: a different one (opened, switched to, reconnected) takes the keys.
+  Object? _stagedTerm;
+
+  void _wantTermFocus(Object sid) {
+    termFocusSid = sid;
+    termFocusTick++;
+  }
+
+  void _focusNewTerm() {
+    final r = currentRecord, rs = currentRemote;
+    final live = r != null && r.phase == Phase.live && r.lastSid == null;
+    final sid = live && rs != null && termPort?.owns(rs.sid) == true ? rs.sid : null;
+    if (sid == _stagedTerm) return;
+    _stagedTerm = sid;
+    if (sid != null) _wantTermFocus(sid);
+  }
+
   /// The session whose picture has keyboard focus: its keys go to A (the runner routes them).
   Object? pictureFocused;
 
   /// A press on [sid]'s picture: keys go to A from now on.
   void focusPicture(Object sid) {
-    if (overview || pictureFocused == sid || !_liveSid(sid)) return;
+    if (overview || !_liveSid(sid)) return;
+    if (termPort?.owns(sid) == true) {
+      // A terminal's keys are the stage's own (its Focus), not the runner's.
+      _wantTermFocus(sid);
+      notifyListeners();
+      return;
+    }
+    if (pictureFocused == sid) return;
     pictureFocused = sid;
     portOf(sid)?.pictureFocus(sid);
     notifyListeners();
+  }
+
+  /// ⌘V / Ctrl+Shift+V on [rs]'s terminal stage (K4): one line of clipboard text goes in as a paste (no Return);
+  /// text with line breaks opens the writing panel, which pastes it by its own rules and takes the caret. With the
+  /// writing panel off for this session ([RemoteSession.composerAllowed]) there is no panel to open, so text with
+  /// line breaks goes in as one paste too.
+  /// [TermPasted.sent] when the text went to the terminal itself (input, as a key is: H3, K6);
+  /// [TermPasted.note] says why a paste did not go in.
+  Future<TermPasted> termPaste(RemoteSession rs) async {
+    final tp = termPort;
+    if (tp == null || !tp.owns(rs.sid)) return const TermPasted();
+    String? text;
+    try {
+      text = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
+    } catch (_) {
+      return const TermPasted(); // no clipboard to read: nothing to paste
+    }
+    if (text == null || text.isEmpty) return const TermPasted();
+    if (!rs.composerAllowed || (!text.contains('\n') && !text.contains('\r'))) {
+      final why = await tp.paste(rs.sid, text);
+      return why == null ? const TermPasted(sent: true) : TermPasted(note: why);
+    }
+    final c = rs.composer;
+    c.open = true;
+    c.requestPaste();
+    c.wantFocus();
+    return const TermPasted();
   }
 
   /// A press outside the picture (top bar, overlays): keys stay with rapp.
@@ -411,6 +468,31 @@ class MainState extends ChangeNotifier {
   void selectWindow(int id) {
     currentRemote?.selectWindow(id);
     notifyListeners();
+  }
+
+  /// Whether the current session is a terminal whose device can open a window (the 「＋」 shows).
+  bool get canNewTermWindow {
+    final rs = currentRemote, tp = termPort;
+    return rs != null && tp != null && tp.owns(rs.sid) && tp.canNewWindow(rs.sid);
+  }
+
+  // Sessions whose 「＋」 is waiting for its answer (which the port always gives, at the latest at its timeout).
+  final _newWindowPending = <Object>{};
+
+  /// The 「＋」 was clicked: the device opens a window in the viewed pane's directory, and its pane comes as a
+  /// `TermOpenedPaneEvent`. A refusal is said on the stage. A click while the last one is unanswered does nothing.
+  Future<void> newTermWindow() async {
+    final rs = currentRemote, tp = termPort;
+    if (rs == null || tp == null || !tp.owns(rs.sid) || !tp.canNewWindow(rs.sid)) return;
+    final sid = rs.sid;
+    if (!_newWindowPending.add(sid)) return;
+    final String? why;
+    try {
+      why = await tp.newWindow(sid);
+    } finally {
+      _newWindowPending.remove(sid);
+    }
+    if (why != null) tp.model(sid)?.say('新开窗口失败：$why');
   }
 
   RemoteWindow? _windowOf(RemoteSession rs) {
@@ -861,6 +943,8 @@ class MainState extends ChangeNotifier {
       }
     }
     if (e is WindowsEvent) _syncHidden(rs);
+    // The pane a 「＋」 opened is in the tab list now: show it (selectWindow ignores a pane that is not).
+    if (e is TermOpenedPaneEvent) rs.selectWindow(e.window);
     final start = _starts[e.sid];
     if (start != null && e is ClipsEvent) {
       resources.addClips(r.key, start, _sourceOf(r), e.clips);
@@ -2084,6 +2168,12 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 「按键排」: the terminal key row on or off; saved.
+  void setTermKeyRow(bool v) {
+    prefs.termKeyRow = v;
+    _save();
+  }
+
   void _save() {
     try {
       final dir = data.prefsDir();
@@ -2467,4 +2557,15 @@ String endedHint(String appName, String? reason) {
   if (why == 'connection closed') return '$appName 意外结束：连接断了';
   if (why == 'GUI did not connect') return '$appName 意外结束：本机没有接上会话';
   return '$appName 意外结束：$why';
+}
+
+/// What a paste on a terminal stage did ([MainState.termPaste]).
+class TermPasted {
+  const TermPasted({this.sent = false, this.note});
+
+  /// The clipboard text went to the terminal.
+  final bool sent;
+
+  /// Why the paste did not go in, to show on the stage.
+  final String? note;
 }

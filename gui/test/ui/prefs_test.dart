@@ -45,6 +45,15 @@ void main() {
     expect(File('${tmp.path}/gui.json').readAsStringSync(), contains('"input_history":false'));
     expect(UiPrefs.load(tmp.path).inputHistory, isFalse);
   });
+  test('term_key_row: off by default and when bad, saved when on', () {
+    expect(UiPrefs().termKeyRow, isFalse);
+    expect(UiPrefs.load(tmp.path).termKeyRow, isFalse);
+    File('${tmp.path}/gui.json').writeAsStringSync('{"term_key_row":"x"}');
+    expect(UiPrefs.load(tmp.path).termKeyRow, isFalse);
+    UiPrefs(termKeyRow: true).save(tmp.path);
+    expect(File('${tmp.path}/gui.json').readAsStringSync(), contains('"term_key_row":true'));
+    expect(UiPrefs.load(tmp.path).termKeyRow, isTrue);
+  });
   test('corrupt json gives defaults', () {
     File('${tmp.path}/gui.json').writeAsStringSync('{nope');
     final p = UiPrefs.load(tmp.path);

@@ -36,7 +36,6 @@ pub const BAD_TOKEN: &str = "bad token";
 pub const BAD_REQUEST: &str = "bad request";
 const UNKNOWN_HOST: &str = "unknown host";
 const BAD_ID: &str = "invalid term id";
-const NO_COMMAND: &str = "command required";
 const TAKEN: &str = "a session with that name already exists";
 const LIST_FAILED: &str = "could not list the tmux sessions";
 
@@ -324,8 +323,9 @@ impl Worker {
         rows: u16,
     ) -> Result<String, String> {
         let tmux = self.tmux_for(cfg, host)?;
-        let Some(program) = command.first() else { return Err(NO_COMMAND.into()) };
-        let name = session_name(name.unwrap_or_else(|| default_name(program))).ok_or("invalid session name")?;
+        // No command: tmux's default shell, named `shell` unless asked otherwise.
+        let default = command.first().map_or("shell", |program| default_name(program));
+        let name = session_name(name.unwrap_or(default)).ok_or("invalid session name")?;
         let panes = tmux.list().await.map_err(|e| said(&e, &tmux, LIST_FAILED))?;
         if panes.iter().any(|p| p.session == name) {
             return Err(TAKEN.into());

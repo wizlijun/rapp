@@ -3,7 +3,7 @@
 use crate::screen::{strip_escapes, Screen as Frame};
 use serde::{Deserialize, Serialize};
 
-pub const PROTO: u32 = 1;
+pub const PROTO: u32 = 2;
 pub const MAX_LINE: usize = 65536;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -73,6 +73,10 @@ pub enum Out {
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
+    /// A window made by `In::NewWindow`: its pane.
+    WindowOpened {
+        pane: String,
+    },
     Error {
         error: String,
     },
@@ -109,6 +113,10 @@ pub enum In {
         pane: String,
         before: u32,
         lines: u32,
+    },
+    /// Open a new window beside `pane`'s, in its directory, without switching to it.
+    NewWindow {
+        pane: String,
     },
     Refit {
         pane: String,
@@ -233,10 +241,16 @@ mod tests {
     #[test]
     fn wire_shapes_are_exact() {
         assert_eq!(
-            encode(&Out::Hello { v: 1, backend: "tmux".into() }),
-            "{\"t\":\"hello\",\"v\":1,\"backend\":\"tmux\"}\n"
+            encode(&Out::Hello { v: 2, backend: "tmux".into() }),
+            "{\"t\":\"hello\",\"v\":2,\"backend\":\"tmux\"}\n"
         );
         assert_eq!(encode(&Out::Pasted { ok: true, error: None }), "{\"t\":\"pasted\",\"ok\":true}\n");
+        assert_eq!(
+            encode(&Out::WindowOpened { pane: "%7".into() }),
+            "{\"t\":\"window_opened\",\"pane\":\"%7\"}\n"
+        );
+        let i: In = serde_json::from_str(r#"{"t":"new_window","pane":"%3"}"#).unwrap();
+        assert!(matches!(i, In::NewWindow { pane } if pane == "%3"));
         let i: In = serde_json::from_str(r#"{"t":"view","pane":"%3","cols":118,"rows":38}"#).unwrap();
         assert!(matches!(i, In::View { pane: Some(p), cols: 118, rows: 38 } if p == "%3"));
         let i: In = serde_json::from_str(r#"{"t":"view","pane":null,"cols":0,"rows":0}"#).unwrap();

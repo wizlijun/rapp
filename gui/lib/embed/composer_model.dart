@@ -298,6 +298,24 @@ class ComposerModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Bumped by [requestPaste]; the panel runs its own paste for each bump it has not taken yet.
+  int pasteTick = 0;
+  int _pasteTaken = 0;
+
+  /// The panel should paste from the clipboard (K4: several lines pasted on a terminal's stage), also when
+  /// it is only about to be shown.
+  void requestPaste() {
+    pasteTick++;
+    notifyListeners();
+  }
+
+  /// For the panel: whether a [requestPaste] waits; it is taken once.
+  bool takePaste() {
+    if (_pasteTaken == pasteTick) return false;
+    _pasteTaken = pasteTick;
+    return true;
+  }
+
   /// Bumped when the field should take the caret (a clip's 「插入」); the panel follows it.
   int focusTick = 0;
 

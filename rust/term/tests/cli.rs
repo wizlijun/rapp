@@ -29,7 +29,7 @@ fn version_json() {
     let o = run(&["version", "--json"]);
     assert_eq!(o.code, 0);
     let v: serde_json::Value = serde_json::from_str(o.stdout.trim()).unwrap();
-    assert_eq!(v["proto"], 1);
+    assert_eq!(v["proto"], 2);
     assert_eq!(v["version"], env!("CARGO_PKG_VERSION"));
 }
 

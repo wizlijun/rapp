@@ -1,4 +1,5 @@
 // Wire messages of the terminal worker (`rust/term/src/proto.rs`): one JSON object per line.
+import 'dart:convert';
 
 class TermPane {
   final String id, win, window, title, command;
@@ -75,6 +76,12 @@ class TermPasted extends TermOut {
   final bool ok;
   final String? error;
   const TermPasted(this.ok, this.error);
+}
+
+/// The pane of a window opened by `new_window`.
+class TermWindowOpened extends TermOut {
+  final String pane;
+  const TermWindowOpened(this.pane);
 }
 
 class TermError extends TermOut {
@@ -169,6 +176,8 @@ TermOut? _parse(Map m) {
       );
     case 'pasted':
       return TermPasted(_req<bool>(m, 'ok'), _opt<String>(m, 'error'));
+    case 'window_opened':
+      return TermWindowOpened(_req<String>(m, 'pane'));
     case 'error':
       return TermError(_req<String>(m, 'error'));
   }
@@ -180,6 +189,49 @@ Map<String, Object?> ackMsg(int rev) => {'t': 'ack', 'rev': rev};
 Map<String, Object?> historyReq(String pane, int before, int lines) =>
     {'t': 'history', 'pane': pane, 'before': before, 'lines': lines};
 Map<String, Object?> refitMsg(String pane, int cols, int rows) => {'t': 'refit', 'pane': pane, 'cols': cols, 'rows': rows};
+
+// Input lines, JSON-encoded without their newline.
+String keysMsg(String pane, List<String> keys) => jsonEncode({'t': 'keys', 'pane': pane, 'keys': keys});
+String typeMsg(String pane, String text) => jsonEncode({'t': 'type', 'pane': pane, 'text': text});
+String newWindowMsg(String pane) => jsonEncode({'t': 'new_window', 'pane': pane});
+
+/// Raw UTF-8 bytes of paste text in one `text` line.
+const int pasteChunk = 16384;
+
+/// A paste as `text` lines: at most [pasteChunk] bytes of UTF-8 each, cut between characters, and each line with
+/// its newline at most 65536 bytes however its text escapes. `more` on all but the last, which carries [enter].
+List<String> textMsgs(String pane, String data, {bool enter = false}) {
+  String msg(String d, bool more) =>
+      jsonEncode({'t': 'text', 'pane': pane, 'data': d, 'enter': !more && enter, 'more': more});
+  // What a line costs besides its data: the newline and the rest of the object.
+  final room = 65536 - 1 - utf8.encode(msg('', false)).length;
+  final out = <String>[];
+  var start = 0, raw = 0, escaped = 0, i = 0;
+  while (i < data.length) {
+    final c = data.codeUnitAt(i);
+    final pair = c >= 0xd800 && c < 0xdc00 && i + 1 < data.length && (data.codeUnitAt(i + 1) & 0xfc00) == 0xdc00;
+    final n = pair ? 2 : 1;
+    // UTF-8 bytes, and the most the JSON string can take for it (a control or lone surrogate is `\uXXXX`).
+    final (bytes, cost) = switch (c) {
+      _ when pair => (4, 4),
+      < 0x20 => (1, 6),
+      >= 0xd800 && < 0xe000 => (3, 6),
+      0x22 || 0x5c => (1, 2),
+      < 0x80 => (1, 1),
+      < 0x800 => (2, 2),
+      _ => (3, 3),
+    };
+    if (i > start && (raw + bytes > pasteChunk || escaped + cost > room)) {
+      out.add(msg(data.substring(start, i), true));
+      (start, raw, escaped) = (i, 0, 0);
+    }
+    raw += bytes;
+    escaped += cost;
+    i += n;
+  }
+  out.add(msg(data.substring(start), false));
+  return out;
+}
 
 /// Pane id -> tab text: `<window> <command>`, or `<window>.<pane> <command>` when the window has several panes;
 /// numbered from 1 in the device's order; dead panes get ` · 已退出`. Old devices send no `win`: then the window name groups.

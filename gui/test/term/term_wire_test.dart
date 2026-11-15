@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/term/term_id.dart';
 import 'package:rapp/term/term_wire.dart';
@@ -62,5 +64,47 @@ void main() {
         'shape': 'bar', 'wrapped': [0, 2]}) as TermScreen;
     expect((s.hist, s.limit, s.shape), (4, 100, 'bar'));
     expect(s.wrapped, {0, 2});
+  });
+  test('keys, type and new_window lines use the wire names', () {
+    expect(jsonDecode(keysMsg('%3', ['Enter', 'Ctrl-c'])), {'t': 'keys', 'pane': '%3', 'keys': ['Enter', 'Ctrl-c']});
+    expect(jsonDecode(typeMsg('%3', '\u001b\r')), {'t': 'type', 'pane': '%3', 'text': '\u001b\r'});
+    expect(jsonDecode(newWindowMsg('%3')), {'t': 'new_window', 'pane': '%3'});
+    expect((parseTermOut({'t': 'window_opened', 'pane': '%7'}) as TermWindowOpened).pane, '%7');
+    expect(parseTermOut({'t': 'window_opened'}), isNull);
+    expect((parseTermOut({'t': 'hello', 'v': 2, 'backend': 'tmux'}) as TermHello).v, 2);
+  });
+  test('a short paste is one text line with more false', () {
+    final m = textMsgs('%1', 'ls', enter: true);
+    expect(m.map(jsonDecode), [
+      {'t': 'text', 'pane': '%1', 'data': 'ls', 'enter': true, 'more': false},
+    ]);
+    expect(textMsgs('%1', '').map(jsonDecode), [
+      {'t': 'text', 'pane': '%1', 'data': '', 'enter': false, 'more': false},
+    ]);
+  });
+  test('70000 bytes of Chinese are cut into lines of at most 64 KiB, never inside a character', () {
+    final data = '中文测' * 7778; // 70002 bytes
+    expect(utf8.encode(data).length, greaterThan(70000));
+    final m = textMsgs('%1', data, enter: true);
+    expect(m.length, greaterThan(1));
+    final parts = [for (final l in m) jsonDecode(l) as Map];
+    for (final l in m) {
+      expect(utf8.encode('$l\n').length, lessThanOrEqualTo(65536));
+    }
+    for (final p in parts) {
+      expect(utf8.encode(p['data'] as String).length, lessThanOrEqualTo(16384));
+    }
+    expect(parts.map((p) => p['data']).join(), data);
+    expect([for (final p in parts) p['more']], [for (var i = 0; i < parts.length; i++) i < parts.length - 1]);
+    expect(parts.last['enter'], true);
+    expect(parts.first['pane'], '%1');
+  });
+  test('text that escapes to six times its size still fits a line; pairs are not split', () {
+    final data = '\u0001' * 40000 + '😀' * 9000;
+    final m = textMsgs('%1', data);
+    for (final l in m) {
+      expect(utf8.encode('$l\n').length, lessThanOrEqualTo(65536));
+    }
+    expect(m.map((l) => (jsonDecode(l) as Map)['data']).join(), data);
   });
 }

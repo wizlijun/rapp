@@ -38,10 +38,13 @@ class TermLink {
   /// The connection ended, by either side or by an error.
   Future<void> get done => _done.future;
 
-  void send(Map<String, Object?> m) {
+  void send(Map<String, Object?> m) => sendLine(jsonEncode(m));
+
+  /// One line already encoded, without its newline.
+  void sendLine(String line) {
     if (_done.isCompleted) return;
     try {
-      _socket.write('${jsonEncode(m)}\n');
+      _socket.write('$line\n');
     } catch (_) {
       _finish();
     }

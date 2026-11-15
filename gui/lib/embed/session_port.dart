@@ -296,6 +296,13 @@ class ClosedEvent extends SessionEvent {
   final String reason;
 }
 
+/// A terminal session's window opened by `TermSessionPort.newWindow` is in its pane list now: its pane [window].
+/// (Here because [SessionEvent] is sealed; `term_session_port.dart` exports it.)
+class TermOpenedPaneEvent extends SessionEvent {
+  const TermOpenedPaneEvent(super.sid, this.window);
+  final int window;
+}
+
 class _Bad implements Exception {
   const _Bad();
 }

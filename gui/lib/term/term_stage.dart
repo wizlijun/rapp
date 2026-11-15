@@ -1,5 +1,5 @@
 // The stage of a terminal session: draws the pane, asks for the size the stage can show (Z1), scrolls the
-// history (H1, H2), selects and copies (C1–C5) and opens links (L1).
+// history (H1, H2), selects and copies (C1–C5), opens links (L1) and, with focus, sends the keyboard (K1–K6).
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
@@ -14,6 +14,8 @@ import 'package:flutter/services.dart';
 import '../embed/remote_session.dart';
 import '../ui/main_state.dart';
 import '../ui/tokens.dart';
+import 'sgr.dart' show TermLine;
+import 'term_keys.dart';
 import 'term_layout.dart';
 import 'term_model.dart';
 import 'term_painter.dart';
@@ -49,6 +51,9 @@ const _multiClickSlop = 4.0;
 const _edgeEvery = Duration(milliseconds: 50);
 const _noteFor = Duration(seconds: 3);
 const _copiedFor = Duration(seconds: 1);
+
+/// K6: how long a key or text may go without a new screen before the ellipsis shows.
+const _echoWait = Duration(milliseconds: 300);
 
 /// The height kept under a scaled-down pane for its note.
 const _scaledNoteH = 24.0;
@@ -122,6 +127,14 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
   String? _note;
   Timer? _noteTimer;
 
+  // Focus asked for by MainState (`termFocusTick`).
+  int _focusSeen = 0;
+
+  // K6: the screen when the latest input went out; null when not waiting for one.
+  List<TermLine>? _echoFrom;
+  Timer? _echoTimer;
+  bool _waiting = false;
+
   bool get _mac => defaultTargetPlatform == TargetPlatform.macOS;
 
   @override
@@ -131,15 +144,24 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     widget.session.addListener(_onSession);
     _focus.addListener(_onFocus);
     HardwareKeyboard.instance.addHandler(_onKeys);
+    _focusSeen = widget.state.termFocusTick;
+    widget.state.addListener(_onState);
     _bind();
+    _focusIfWanted();
   }
 
   @override
   void didUpdateWidget(TermStage old) {
     super.didUpdateWidget(old);
+    if (!identical(old.state, widget.state)) {
+      old.state.removeListener(_onState);
+      widget.state.addListener(_onState);
+      _focusSeen = widget.state.termFocusTick;
+    }
     if (!identical(old.session, widget.session)) {
       old.session.removeListener(_onSession);
       widget.session.addListener(_onSession);
+      _focusIfWanted();
     }
     if (!identical(old.session, widget.session) || !identical(old.port, widget.port)) {
       _sent = null;
@@ -150,12 +172,13 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
   @override
   void dispose() {
     widget.session.removeListener(_onSession);
+    widget.state.removeListener(_onState);
     HardwareKeyboard.instance.removeHandler(_onKeys);
     _unbind();
     _fling.dispose();
     _focus.dispose();
     _cache.dispose();
-    for (final t in [_viewTimer, _edgeTimer, _copiedTimer, _noteTimer]) {
+    for (final t in [_viewTimer, _edgeTimer, _copiedTimer, _noteTimer, _echoTimer]) {
       t?.cancel();
     }
     super.dispose();
@@ -171,6 +194,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     _ver++;
     _sel = null;
     _anchor = null;
+    _endWait();
     // The port drops a view for a session it has no model of yet: send again now there is one.
     _sent = null;
     if (m != null) {
@@ -204,6 +228,8 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     // A refresh keeps the selection unless one of its rows changed (C4).
     if (s != null) _sel = shifted(s, 0, m.lineAt);
     if (m.alt) _stopFling();
+    // K6: a new screen came; whatever it shows, the input is no longer unanswered.
+    if (_echoFrom != null && !identical(m.screen, _echoFrom)) _endWait();
     _takeNote(m);
     widget.port.fetchHistory(widget.session.sid);
     setState(() => _ver++);
@@ -214,6 +240,10 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     if (n == null) return;
     // Taken, so the same error coming again shows again.
     m.note = null;
+    _showNote(n);
+  }
+
+  void _showNote(String n) {
     _note = n;
     _noteTimer?.cancel();
     _noteTimer = Timer(_noteFor, () {
@@ -222,6 +252,24 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
   }
 
   void _onFocus() => setState(() => _ver++);
+
+  // ---- focus ----
+
+  /// MainState asked for the keys to come here (`focusPicture`, a terminal opened or switched to).
+  void _onState() {
+    final tick = widget.state.termFocusTick;
+    if (tick == _focusSeen) return;
+    _focusSeen = tick;
+    _focusIfWanted();
+  }
+
+  /// After the frame: the writing panel's editor lets go of the caret first (`composerKey`).
+  void _focusIfWanted() {
+    if (widget.state.termFocusSid != widget.session.sid) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.state.termFocusSid == widget.session.sid) _focus.requestFocus();
+    });
+  }
 
   // ---- size (Z1) ----
 
@@ -463,6 +511,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
   KeyEventResult _onKey(FocusNode node, KeyEvent e) {
     if (e is KeyUpEvent) return KeyEventResult.ignored;
     final k = HardwareKeyboard.instance;
+    // A selection first: its copy, and Esc only clears it (C2, C3).
     final copyKeys = _mac
         ? k.isMetaPressed && !k.isControlPressed && !k.isAltPressed
         : k.isControlPressed && k.isShiftPressed && !k.isMetaPressed && !k.isAltPressed;
@@ -477,7 +526,74 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
       });
       return KeyEventResult.handled;
     }
-    return KeyEventResult.ignored;
+    final input = termInputOf(e, mac: _mac, pressed: k.logicalKeysPressed);
+    if (input case TermAction(action: TermShortcut.copy)) {
+      _copy();
+      return KeyEventResult.handled;
+    }
+    // An exited pane (T4) takes nothing: nothing is sent or kept, and the window's own keys
+    // (Esc, Ctrl+[ / ], Ctrl+O, F11) are the window's again.
+    if (!_canInput) return KeyEventResult.ignored;
+    switch (input) {
+      case null:
+        // Not the terminal's (Ctrl+Enter, macOS's other ⌘ chords): the window has it.
+        return KeyEventResult.ignored;
+      case TermKeys(:final keys):
+        widget.port.sendKeys(widget.session.sid, keys);
+        _sentInput();
+      case TermText(:final text):
+        widget.port.type(widget.session.sid, text);
+        _sentInput();
+      case TermAction():
+        _paste();
+      case TermReserved():
+        break; // rapp's (find, font size); not the terminal's either
+    }
+    // A key the live terminal would take is never the window's.
+    return KeyEventResult.handled;
+  }
+
+  /// Input can go to the pane on the stage: it has not exited (T4). A dropped link (N4) the port itself drops.
+  bool get _canInput {
+    final w = widget.session.currentWindow;
+    return w != null && widget.port.pane(widget.session.sid, w)?.dead != true;
+  }
+
+  Future<void> _paste() async {
+    final r = await widget.state.termPaste(widget.session);
+    if (!mounted) return;
+    if (r.sent) _sentInput(); // one line straight in: input, as a key is (H3, K6)
+    final why = r.note;
+    if (why != null) setState(() => _showNote(why));
+  }
+
+  /// Input went out (a key, text, a one-line paste): back to the latest (H3); an ellipsis when no screen
+  /// answers within 0.3 s of the first input still unanswered (K6), however much more follows it.
+  void _sentInput() {
+    final m = _model;
+    if (m == null) return;
+    if (m.offset > 0) m.toBottom();
+    // Already waiting: the earlier screen and its clock still stand.
+    if (_echoFrom != null) return;
+    _echoFrom = m.screen;
+    _echoTimer?.cancel();
+    _echoTimer = Timer(_echoWait, () {
+      if (!mounted || _echoFrom == null || _waiting) return;
+      setState(() {
+        _waiting = true;
+        _ver++;
+      });
+    });
+  }
+
+  void _endWait() {
+    _echoTimer?.cancel();
+    _echoTimer = null;
+    _echoFrom = null;
+    if (_waiting) {
+      _waiting = false;
+      _ver++;
+    }
   }
 
   // ---- build ----
@@ -547,6 +663,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
                 selection: s,
                 links: _links,
                 focused: _focus.hasFocus,
+                waiting: _waiting,
               ),
       );
       grid = Listener(
