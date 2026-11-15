@@ -426,5 +426,17 @@ void main() {
       t.emit({'event': 'term_targets', 'id': 'A', 'targets': [], 'req': t.sent.last['req']});
       await h;
     });
+
+    test('newTerm leaves null host and name out and answers the term id', () async {
+      final f = hub.newTerm('A', command: ['claude --resume'], cols: 100, rows: 30);
+      expect(t.sent.last, {'cmd': 'new_term', 'id': 'A', 'command': ['claude --resume'], 'cols': 100, 'rows': 30, 'req': anything});
+      t.emit({'event': 'term_created', 'id': 'A', 'term': 'term:tmux:%1', 'req': t.sent.last['req']});
+      expect(await f, 'term:tmux:%1');
+      final g = hub.newTerm('A', host: 'gpu1', name: 'x', command: [], cols: 1, rows: 2);
+      expect((t.sent.last['host'], t.sent.last['name']), ('gpu1', 'x'));
+      expect(t.sent.last['command'], isEmpty);
+      t.emit({'event': 'error', 'error': 'no tmux', 'req': t.sent.last['req']});
+      await expectLater(g, throwsA(isA<HubException>()));
+    });
   });
 }

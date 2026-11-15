@@ -358,6 +358,14 @@ class _DevicesTabState extends State<DevicesTab> {
       Align(
         alignment: Alignment.centerLeft,
         child: RappButton.secondary(
+          key: const Key('new-term'),
+          label: '新开终端…',
+          onPressed: state.hubUsable ? () => _newTerm(context, id, [for (final h in list.hosts) ?h.host]) : null,
+        ),
+      ),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: RappButton.secondary(
           key: const Key('add-ssh-host'),
           label: '添加 SSH 主机…',
           onPressed: state.hubUsable ? () => _addHost(context, id) : null,
@@ -382,6 +390,24 @@ class _DevicesTabState extends State<DevicesTab> {
         context: context,
         builder: (_) => _AddHostDialog(hub: state.hub!, id: id),
       );
+
+  Future<void> _newTerm(BuildContext context, String id, List<String> hosts) async {
+    final tp = state.termPort;
+    final cols = tp?.lastCols, rows = tp?.lastRows;
+    final term = await showDialog<String>(
+      context: context,
+      builder: (_) => _NewTermDialog(
+        hub: state.hub!,
+        id: id,
+        hosts: hosts,
+        cols: cols == null || cols <= 0 ? 120 : cols,
+        rows: rows == null || rows <= 0 ? 40 : rows,
+      ),
+    );
+    if (term == null) return;
+    final name = state.hub?.termLists[id]?.terms.where((r) => r.id == term).firstOrNull;
+    state.openOrSwitch(id, term, termDisplayName(name?.name ?? '', name?.host));
+  }
 
   void _openBundle(String id) {
     final b = _bundle.text.trim();
@@ -646,6 +672,103 @@ class _AddHostDialogState extends State<_AddHostDialog> {
       actions: [
         RappButton.secondary(key: const Key('ssh-cancel'), label: '取消', onPressed: () => Navigator.of(context).pop()),
         RappButton.secondary(key: const Key('ssh-add'), label: '添加', onPressed: _busy ? null : _add),
+      ],
+    );
+  }
+}
+
+class _NewTermDialog extends StatefulWidget {
+  const _NewTermDialog({required this.hub, required this.id, required this.hosts, required this.cols, required this.rows});
+  final HubClient hub;
+  final String id;
+  final List<String> hosts;
+  final int cols, rows;
+
+  @override
+  State<_NewTermDialog> createState() => _NewTermDialogState();
+}
+
+class _NewTermDialogState extends State<_NewTermDialog> {
+  final _command = TextEditingController(), _name = TextEditingController();
+  String? _host, _error;
+  bool _busy = false;
+
+  @override
+  void dispose() {
+    _command.dispose();
+    _name.dispose();
+    super.dispose();
+  }
+
+  Future<void> _create() async {
+    if (_busy) return;
+    final command = _command.text.trim(), name = _name.text.trim();
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    final String term;
+    try {
+      term = await widget.hub.newTerm(widget.id,
+          host: _host,
+          name: name.isEmpty ? null : name,
+          command: command.isEmpty ? <String>[] : [command],
+          cols: widget.cols,
+          rows: widget.rows);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _error = '$e';
+        });
+      }
+      return;
+    }
+    try {
+      await widget.hub.terms(widget.id);
+    } catch (_) {}
+    if (mounted) Navigator.of(context).pop(term);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RappTokens.of(context);
+    return AlertDialog(
+      title: const Text('新开终端'),
+      content: SizedBox(
+        width: 360,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            DropdownButtonFormField<String?>(
+              key: const Key('new-term-where'),
+              initialValue: _host,
+              decoration: const InputDecoration(labelText: '在哪'),
+              items: [
+                const DropdownMenuItem<String?>(value: null, child: Text('本机')),
+                for (final h in widget.hosts) DropdownMenuItem<String?>(value: h, child: Text(h)),
+              ],
+              onChanged: _busy ? null : (v) => setState(() => _host = v),
+            ),
+            TextField(
+                key: const Key('new-term-command'),
+                controller: _command,
+                decoration: const InputDecoration(labelText: '命令（如 claude；空着就是 shell）')),
+            TextField(
+                key: const Key('new-term-name'),
+                controller: _name,
+                decoration: const InputDecoration(labelText: '名字（可不填）')),
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(_error!, key: const Key('new-term-error'), style: TextStyle(color: t.accent)),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        RappButton.secondary(key: const Key('new-term-cancel'), label: '取消', onPressed: () => Navigator.of(context).pop()),
+        RappButton.secondary(key: const Key('new-term-go'), label: '新开', onPressed: _busy ? null : _create),
       ],
     );
   }

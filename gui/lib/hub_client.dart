@@ -259,6 +259,16 @@ class HubClient extends ChangeNotifier {
   Future<void> addTermTarget(String id, String name, String target, {String? tmux}) =>
       _request({'cmd': 'add_term_target', 'id': id, 'name': name, 'target': target, 'tmux': ?tmux}, 'term_targets');
 
+  /// Starts a tmux session on [id] (or its SSH host [host]) and answers its `term:` id; an empty [command] is the
+  /// default shell. Callers ask for [terms] again after.
+  Future<String> newTerm(String id,
+      {String? host, String? name, required List<String> command, required int cols, required int rows}) async {
+    final m = await _request(
+        {'cmd': 'new_term', 'id': id, 'host': ?host, 'name': ?name, 'command': command, 'cols': cols, 'rows': rows},
+        'term_created');
+    return '${m['term']}';
+  }
+
   Future<void> removeTermTarget(String id, String name) =>
       _request({'cmd': 'remove_term_target', 'id': id, 'name': name}, 'term_targets');
 
