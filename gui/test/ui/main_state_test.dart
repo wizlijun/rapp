@@ -4355,6 +4355,76 @@ void main() {
       expect(st.currentProject, isNull);
     });
 
+    group('relocate', () {
+      late Directory other;
+      late DataDir d;
+      setUp(() {
+        other = Directory.systemTemp.createTempSync('main_state_spheres_reloc');
+        d = DataDir(other.path);
+      });
+      tearDown(() => other.deleteSync(recursive: true));
+
+      test('reads the new root\'s positions and does not overwrite them', () {
+        final st = make();
+        final p = project(st, 'P', []);
+        final q = project(st, 'Q', []);
+        final r = project(st, 'R', []);
+        st.switchProject(p.id);
+        st.switchProject(q.id); // P's position is in memory and in the old root
+        Directory(d.sharedDir).createSync(recursive: true);
+        saveWorkspace(d.sharedDir, Workspace()..projects.addAll([Project(q.id, 'Q'), Project(r.id, 'R')]));
+        final there = DateTime.utc(2026, 11, 14, 8);
+        ProjectPositions({
+          r.id: ProjectPosition(last: '111/com.r', leftAt: there),
+          'gone': ProjectPosition(last: '111/com.g'),
+        }).save(d.localDir);
+        st.relocate(d);
+        expect(st.positions.byProject.keys, [r.id]);
+        expect(st.positions.byProject[r.id]!.last, '111/com.r');
+        now = now.add(const Duration(minutes: 2));
+        st.switchProject(r.id); // leaves Q: a save into the new root
+        final saved = ProjectPositions.load(d.localDir).byProject;
+        expect(saved.keys.toSet(), {q.id, r.id});
+        expect(saved[r.id]!.leftAt!.isAtSameMomentAs(there), isTrue);
+        expect(saved.containsKey(p.id), isFalse);
+      });
+
+      test('a current or previous project the new root lacks is cleared, without an error', () {
+        fakeAsync((a) {
+          final st = make();
+          final p = project(st, 'P', []);
+          final q = project(st, 'Q', []);
+          st.switchProject(p.id);
+          st.switchProject(q.id);
+          now = now.add(const Duration(minutes: 5));
+          st.switchProject(p.id);
+          expect(st.cue, '5 分钟前离开');
+          Directory(d.sharedDir).createSync(recursive: true);
+          saveWorkspace(d.sharedDir, Workspace());
+          st.relocate(d);
+          expect((st.currentProject, st.previousProject, st.cue, st.hint), (null, null, '', ''));
+          st.backToPreviousProject();
+          expect(st.currentProject, isNull);
+          a.elapse(MainState.cueFor);
+          expect(st.cue, '');
+        });
+      });
+
+      test('a current and a previous project that exist in both roots stay', () {
+        final st = make();
+        final p = project(st, 'P', []);
+        final q = project(st, 'Q', []);
+        st.switchProject(p.id);
+        st.switchProject(q.id);
+        Directory(d.sharedDir).createSync(recursive: true);
+        saveWorkspace(d.sharedDir, Workspace()..projects.addAll([Project(p.id, 'P'), Project(q.id, 'Q')]));
+        st.relocate(d);
+        expect((st.currentProject, st.previousProject), (q.id, p.id));
+        st.backToPreviousProject();
+        expect((st.currentProject, st.previousProject), (p.id, q.id));
+      });
+    });
+
     test('project-first preference starts grouped by project', () {
       expect(make(prefs: UiPrefs(first: FirstLayer.project)).grouping, Grouping.project);
       expect(make(prefs: UiPrefs(first: FirstLayer.device)).grouping, Grouping.device);

@@ -148,6 +148,7 @@ class MainState extends ChangeNotifier {
     final loaded = loadWorkspace(d.sharedDir);
     workspace = loaded.workspace;
     if (loaded.problem != null) hint = loaded.problem!;
+    _reloadProjectState();
     profiles.removeListener(_onProfiles);
     profiles = AppProfileStore.loadWith(d.sharedDir, profiles.builtin);
     final pp = profiles.problem;
@@ -2297,6 +2298,21 @@ class MainState extends ChangeNotifier {
   String cue = '';
   static const cueFor = Duration(seconds: 5);
   Timer? _cueTimer;
+
+  /// After [relocate]: the new root's positions, and no current or previous project the new
+  /// workspace lacks (§14 case 1).
+  void _reloadProjectState() {
+    positions.byProject
+      ..clear()
+      ..addAll(ProjectPositions.load(data.localDir).byProject);
+    final ids = {for (final p in workspace.projects) p.id};
+    positions.dropExcept(ids);
+    if (!ids.contains(currentProject)) {
+      currentProject = null;
+      _setCue('');
+    }
+    if (!ids.contains(previousProject)) previousProject = null;
+  }
 
   /// Since when each session's lamp has been 等你 or 已断开.
   final Map<String, DateTime> _attentionSince = {};
