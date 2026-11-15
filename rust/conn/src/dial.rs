@@ -1,7 +1,7 @@
 //! Sending one request to another device: over a direct `rapp/2` connection when one is held or a
 //! known LAN address answers, else through the relay (one relayed stream per request). The
 //! direct connection is kept per device ID and reused; the connection to the relay is kept for
-//! the settings it was dialed with.
+//! the settings it was dialed with, and what the relay said about a device for `FOUND_KEEP`.
 //!
 //! A smaller sibling of the hub's `link.rs` (same hello, same path rule), without its host list,
 //! presence probes or LAN upgrades.
@@ -12,7 +12,7 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::Poll;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Result};
 use quinn::Connection;
@@ -24,7 +24,7 @@ use rapp_wire::tls::{device_client_config, ALPN_DEVICE, SNI};
 use rapp_wire::{Fp, Identity, Key};
 use serde_json::Value;
 
-use crate::relay::RelayConn;
+use crate::relay::{Found, RelayConn};
 use crate::{e2e_connect, quic_facts, read_welcome, send_hello, Accepted, Me, Pipe, Role};
 
 /// How long one LAN address may take to connect and welcome us. The addresses of one list are
@@ -34,6 +34,10 @@ pub const DIRECT_WAIT: Duration = Duration::from_secs(1);
 pub const REPLY_WAIT: Duration = Duration::from_secs(20);
 /// At most this many LAN addresses are tried, from each list.
 const MAX_LAN: usize = 3;
+/// How long the relay's answer about a device (`connect`) serves the relayed requests that
+/// follow. Every `connect` spends the device's per-minute budget on the relay, which remote
+/// sessions share, and costs a round trip.
+pub const FOUND_KEEP: Duration = Duration::from_secs(30);
 
 /// Where to find the other device and how to trust it.
 pub struct Target<'a> {
@@ -89,17 +93,50 @@ struct RelayCache {
     conn: RelayConn,
 }
 
+/// What the last relayed request to a device learned, kept for `FOUND_KEEP` from the relay's
+/// answer: the requests that follow go straight to a relayed stream.
+#[derive(Clone)]
+struct Looked {
+    /// When the relay answered.
+    at: Instant,
+    /// The relay that was asked and the key that was shown (in memory only, never logged):
+    /// another relay or key asks anew.
+    relay: String,
+    key_text: String,
+    /// The relay's answer.
+    found: Found,
+    /// The LAN addresses, ours and the relay's, that did not welcome us since then.
+    dead: Vec<String>,
+}
+
+impl Looked {
+    /// Still good at `now` for a request through `relay` showing `key_text`.
+    fn holds(&self, now: Instant, relay: &str, key_text: &str) -> bool {
+        now.saturating_duration_since(self.at) < FOUND_KEEP && self.relay == relay && self.key_text == key_text
+    }
+}
+
 pub struct Outbound {
     ep: quinn::Endpoint,
     identity: Arc<Identity>,
     name: String,
     links: Mutex<HashMap<String, Link>>,
     relay: tokio::sync::Mutex<Option<RelayCache>>,
+    /// By device ID. An entry is put by a relayed request that got through and dropped by one
+    /// that failed.
+    looked: Mutex<HashMap<String, Looked>>,
 }
 
 impl Outbound {
     pub fn new(ep: quinn::Endpoint, identity: Arc<Identity>, name: String) -> Outbound {
-        Outbound { ep, identity, name, links: Mutex::new(HashMap::new()), relay: tokio::sync::Mutex::new(None) }
+        Outbound {
+            ep,
+            identity,
+            name,
+            links: Mutex::new(HashMap::new()),
+            relay: tokio::sync::Mutex::new(None),
+            looked: Mutex::new(HashMap::new()),
+        }
     }
 
     /// Sends `op` on a new stream to the device and returns it with the reply.
@@ -108,20 +145,36 @@ impl Outbound {
         if let Some(sent) = self.on_held(to, &key_text, op).await {
             return Ok(sent);
         }
+        // What a relayed request learned a moment ago; it only counts for a request that can
+        // go through that relay again.
+        let looked = via.relay.and_then(|addr| self.looked_for(to.id, addr, &key_text));
+        let dead = |a: &&String| looked.as_ref().is_some_and(|l| l.dead.contains(a));
         // The first definite refusal from a LAN address (another device, another key): the error
         // when the relay does not reach the device either.
         let mut refused = None;
-        let tried: Vec<&String> = dial_order(to.lan).into_iter().take(MAX_LAN).collect();
+        let tried: Vec<&String> = dial_order(to.lan).into_iter().take(MAX_LAN).filter(|a| !dead(a)).collect();
         if let Some(sent) = self.on_lan(via, to, &tried, op, &mut refused).await {
             return Ok(sent);
         }
         let Some(addr) = via.relay else {
             return Err(refused.unwrap_or_else(|| NotReached("offline").into()));
         };
-        match self.through_relay(addr, via, to, &tried, op, &mut refused).await {
-            Err(e) if e.downcast_ref::<NotReached>().is_some() => Err(refused.unwrap_or(e)),
-            r => r,
+        match self.through_relay(addr, via, to, looked, &tried, op, &mut refused).await {
+            Ok(sent) => Ok(sent),
+            Err(e) => {
+                // Whatever failed, the next request asks the relay again.
+                self.looked.lock().unwrap().remove(to.id);
+                match e.downcast_ref::<NotReached>() {
+                    Some(_) => Err(refused.unwrap_or(e)),
+                    None => Err(e),
+                }
+            }
         }
+    }
+
+    /// What is kept about `id`, when it still holds for `relay` and `key_text`.
+    fn looked_for(&self, id: &str, relay: &str, key_text: &str) -> Option<Looked> {
+        self.looked.lock().unwrap().get(id).filter(|l| l.holds(Instant::now(), relay, key_text)).cloned()
     }
 
     /// Closes every connection it holds. A request in flight may still open new ones.
@@ -209,28 +262,47 @@ impl Outbound {
         }
     }
 
-    /// Steps 4 and 5: ask the relay where the device is, try the LAN addresses only it knows,
-    /// else one relayed stream.
+    /// Steps 4 and 5: ask the relay where the device is (unless `looked` still has its answer),
+    /// try the LAN addresses only it knows, else one relayed stream. A relayed request that got
+    /// through keeps the answer, and the addresses that were dead, for the ones that follow.
+    #[allow(clippy::too_many_arguments)]
     async fn through_relay(
         &self,
         addr: &str,
         via: &Via<'_>,
         to: &Target<'_>,
+        looked: Option<Looked>,
         tried: &[&String],
         op: &Op,
         refused: &mut Option<anyhow::Error>,
     ) -> Result<Sent> {
         let relay = self.relay_conn(addr, via.key).await?;
-        let found = tokio::time::timeout(REPLY_WAIT, relay.connect_to(to.id))
-            .await
-            .map_err(|_| anyhow!("relay unreachable: timed out"))?
-            .map_err(not_reached)?;
-        let extra: Vec<&String> =
-            dial_order(&found.lan).into_iter().filter(|a| !tried.contains(a)).take(MAX_LAN).collect();
-        if let Some(sent) = self.on_lan(via, to, &extra, op, refused).await {
+        let mut looked = match looked {
+            Some(l) => l,
+            None => {
+                let found = tokio::time::timeout(REPLY_WAIT, relay.connect_to(to.id))
+                    .await
+                    .map_err(|_| anyhow!("relay unreachable: timed out"))?
+                    .map_err(not_reached)?;
+                Looked { at: Instant::now(), relay: addr.to_string(), key_text: via.key.to_string(), found, dead: Vec::new() }
+            }
+        };
+        let extra: Vec<String> = dial_order(&looked.found.lan)
+            .into_iter()
+            .filter(|a| !tried.contains(a) && !looked.dead.contains(a))
+            .take(MAX_LAN)
+            .cloned()
+            .collect();
+        if let Some(sent) = self.on_lan(via, to, &extra.iter().collect::<Vec<_>>(), op, refused).await {
             return Ok(sent);
         }
-        self.relayed(&relay, via.key, to, op).await
+        let sent = self.relayed(&relay, via.key, to, op).await?;
+        looked.dead.extend(tried.iter().map(|a| a.to_string()).chain(extra));
+        let mut kept = self.looked.lock().unwrap();
+        let now = Instant::now();
+        kept.retain(|_, l| now.saturating_duration_since(l.at) < FOUND_KEEP);
+        kept.insert(to.id.to_string(), looked);
+        Ok(sent)
     }
 
     /// The connection to the relay for `addr` and `key`: the one held, or a new one when there is
@@ -535,6 +607,19 @@ mod tests {
         let took = began.elapsed();
         assert_eq!(not_reached(r), Some("offline"));
         assert!(took >= DIRECT_WAIT && took < DIRECT_WAIT * 2, "{took:?}");
+    }
+
+    #[test]
+    fn what_the_relay_said_holds_for_a_while_and_for_the_same_relay_and_key() {
+        let at = Instant::now();
+        let found = Found { lan: vec![], public: String::new() };
+        let l = Looked { at, relay: "relay:1".into(), key_text: "k".into(), found, dead: vec![] };
+        assert!(l.holds(at, "relay:1", "k"));
+        assert!(l.holds(at + FOUND_KEEP - Duration::from_millis(1), "relay:1", "k"));
+        assert!(!l.holds(at + FOUND_KEEP, "relay:1", "k"));
+        assert!(!l.holds(at, "relay:2", "k"));
+        assert!(!l.holds(at, "relay:1", "another"));
+        assert_eq!(FOUND_KEEP, Duration::from_secs(30));
     }
 
     #[test]

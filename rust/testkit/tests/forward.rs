@@ -497,6 +497,42 @@ async fn silent_lan_addresses_cost_one_wait_and_the_relay_still_answers() {
     assert_eq!(r, json!({"ok":true,"hosts":[{"id": a.id, "name": "a", "shares": [{"port": port}]}]}));
 }
 
+#[tokio::test]
+async fn relayed_requests_in_a_row_ask_the_relay_where_the_device_is_once() {
+    let rig = RelayRig::start().await;
+    let a = a_on_relay(&rig, Some(vec![])).await;
+    let dir = tempfile::tempdir().unwrap();
+    let out = outbound(dir.path());
+    let via = Via { relay: Some(&rig.addr), key: &rig.key };
+    // One LAN address that is dead: the first request waits for it, the next ones do not try it again.
+    let (_socks, lan) = silent_addrs(1);
+    let to = Target { id: &a.id, lan: &lan, known: None };
+    let before = relay_connects(&rig, "ok");
+    for i in 0..5 {
+        let began = std::time::Instant::now();
+        let sent = out.request(&via, &to, &Op::Ping).await.unwrap();
+        let took = began.elapsed();
+        assert_eq!((&sent.reply["ok"], sent.path), (&json!(true), "relay"), "{}", sent.reply);
+        if i == 0 {
+            assert!(took >= Duration::from_millis(900), "the LAN address was not tried: {took:?}");
+        } else {
+            assert!(took < Duration::from_millis(900), "request {i} tried the dead LAN address again: {took:?}");
+        }
+    }
+    assert_eq!(relay_connects(&rig, "ok") - before, 1, "one `connect` for five relayed requests");
+
+    // A relayed request that fails forgets what the relay said: the next one asks again.
+    a.svc.stop();
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while relay_connects(&rig, "offline") == 0 {
+        let r = out.request(&via, &to, &Op::Ping).await;
+        assert!(tokio::time::Instant::now() < deadline, "the relay was not asked again: {:?}", r.map(|s| s.reply));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(relay_connects(&rig, "ok") - before, 1);
+    out.close();
+}
+
 // ---- the local IPC: shares, share, unshare (Task 7) ----
 
 const SENSITIVE_WARN: &str = "分享这个端口，等于把这台机器能到的网络也交出去";
