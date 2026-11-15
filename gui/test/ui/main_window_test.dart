@@ -548,7 +548,7 @@ void main() {
     expect(pictureHasFlutterFocus(), true);
     expect(find.byKey(const Key('picture-focus')), findsOneWidget);
     expect(find.byType(ComposerPanel), findsOneWidget);
-    expect(port.calls.where((c) => c.$1 == 'picture_focus').last.$2, {'sid': 1});
+    expect(port.calls.where((c) => c.$1 == 'picture_focus').last.$2, {'sid': 1, 'compose': true});
 
     // 3: picture -> editor again; nothing typed, nothing sent.
     await ctrlEnter();

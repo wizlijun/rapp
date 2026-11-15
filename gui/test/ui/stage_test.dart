@@ -638,7 +638,7 @@ void main() {
       final pictureCenter = tester.getCenter(find.byType(Texture));
       await tester.tapAt(pictureCenter);
       await tester.pump();
-      expect(port.calls.where((c) => c.$1 == 'picture_focus').map((c) => c.$2), contains(equals({'sid': 1})));
+      expect(port.calls.where((c) => c.$1 == 'picture_focus').map((c) => c.$2), contains(equals({'sid': 1, 'compose': true})));
       expect(es.pictureFocused, 1);
       expect(border, findsOneWidget);
       final topBarPoint = tester.getCenter(find.byType(TopBar));
