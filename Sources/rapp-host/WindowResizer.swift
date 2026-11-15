@@ -44,12 +44,15 @@ enum WindowResizer {
     }
 
     /// Role, subrole and whether the size can be set; nil if Accessibility has no such window.
-    static func describe(pid: pid_t, frame: CGRect) -> (role: String?, subrole: String?, resizable: Bool)? {
+    static func describe(pid: pid_t, frame: CGRect)
+        -> (role: String?, subrole: String?, resizable: Bool, closeButton: Bool, title: String?)? {
         guard let target = element(pid: pid, frame: frame) else { return nil }
         var settable: DarwinBoolean = false
         _ = AXUIElementIsAttributeSettable(target, kAXSizeAttribute as CFString, &settable)
+        let close = attribute(target, kAXCloseButtonAttribute)
         return (attribute(target, kAXRoleAttribute) as? String, attribute(target, kAXSubroleAttribute) as? String,
-                settable.boolValue)
+                settable.boolValue, close.map { CFGetTypeID($0) == AXUIElementGetTypeID() } ?? false,
+                attribute(target, kAXTitleAttribute) as? String)
     }
 
     /// The frame of the app's focused window, or nil.

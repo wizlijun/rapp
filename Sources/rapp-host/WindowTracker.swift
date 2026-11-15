@@ -65,6 +65,9 @@ final class WindowTracker {
                 let attempts = (known[id]?.attempts ?? 0) + 1
                 info = known[id] ?? Known(kind: .normal, resizable: false)
                 info.kind = classifyWindow(level: level, role: ax?.role, subrole: ax?.subrole)
+                if let ax {
+                    info.kind = demoteChromeless(info.kind, closeButton: ax.closeButton, title: ax.title, size: frame.size)
+                }
                 info.resizable = ax?.resizable ?? false
                 info.attempts = attempts
                 info.final = classificationIsFinal(foundAccessibility: ax != nil, belowPopUp: level < popUpLevel,

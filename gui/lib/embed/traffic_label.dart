@@ -1,4 +1,5 @@
-// The top bar's traffic label: five bars and the rate (design language: bars lit = --on, dark = --line).
+// The top bar's traffic label: the five bars (design language: bars lit = --on, dark = --line); the
+// rate and what is weak sit atop its menu, so the bar stays short.
 import 'package:flutter/material.dart';
 
 import 'dart:math' as math;
@@ -36,6 +37,9 @@ String? sessionTrafficWord({required String path, required int saving, int? whol
   final peerWeak = seg.peer != null ? seg.peer! >= weakRttMs : false;
   return trafficWord(saving: saving, localWeak: localWeak, peerWeak: peerWeak);
 }
+
+/// The stream menu's first row: `流量 12.3 KB/s`, and the [word] after it when there is one.
+String trafficRow(int bytesPerSecond, String? word) => ['流量 ${formatRate(bytesPerSecond)}', ?word].join(' · ');
 
 /// The 会话 group's first row after `路径 中继 · 活动`: `整条路 420ms（本机 80 · 对方约 340）` on the
 /// relay (`整条路 未知` with no round trip yet, no brackets without the local part), the round trip
@@ -95,18 +99,7 @@ class LevelBars extends StatelessWidget {
   }
 }
 
-const _barsWidth = 5 * 3.0 + 4 * 2.0;
-const _rateGap = 8.0;
-const _padding = 10.0;
-
-TextStyle _rateStyle(RappTokens t, {required bool open}) => TextStyle(
-      fontFamily: t.mono,
-      fontFamilyFallback: t.monoFallback,
-      fontSize: 12,
-      color: t.text,
-      fontWeight: open ? FontWeight.w600 : FontWeight.w400,
-    );
-
+/// The traffic button: the bars alone, 48 wide; its menu starts with [trafficRow].
 class TrafficLabel extends StatelessWidget {
   const TrafficLabel({
     super.key,
@@ -114,23 +107,15 @@ class TrafficLabel extends StatelessWidget {
     required this.open,
     required this.onTap,
     this.onSecondaryTap,
-    this.compact = false,
     this.word,
   });
 
-  /// The label's width with the rate (not [compact]): the same for every rate and word, so what
-  /// sits left of it in the top bar stays put.
-  static const wideWidth = 127.0;
+  /// The label's width in the top bar.
+  static const width = 48.0;
 
-  /// Width of the rate's box. The longest rate, `999.9 KB/s`, fits it in the app's monospace font;
-  /// a wider font or a large text scale shrinks the rate instead of widening the label.
-  static const _rateWidth = wideWidth - 2 * (_padding + 1) - _barsWidth - _rateGap;
-
-  /// Bars only, without the rate text.
-  final bool compact;
   final int bytesPerSecond;
 
-  /// What is weak, or the saving level ([trafficWord]); null shows the rate alone.
+  /// What is weak, or the saving level ([trafficWord]); told to the screen reader, shown in the menu.
   final String? word;
 
   /// The stream menu is open: the selected style.
@@ -141,12 +126,11 @@ class TrafficLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
-    final rate = formatRate(bytesPerSecond);
     final radius = BorderRadius.circular(t.r);
     return Semantics(
       button: true,
       selected: open,
-      label: word != null ? '流量 $rate，$word，打开流量优化菜单' : '流量 $rate，打开流量优化菜单',
+      label: '${trafficRow(bytesPerSecond, word)}，打开流量优化菜单',
       excludeSemantics: true,
       onTap: onTap,
       child: Material(
@@ -156,58 +140,13 @@ class TrafficLabel extends StatelessWidget {
           onSecondaryTap: onSecondaryTap,
           borderRadius: radius,
           child: Container(
-            constraints: const BoxConstraints(minHeight: 48, minWidth: 48),
-            padding: const EdgeInsets.symmetric(horizontal: _padding),
+            constraints: const BoxConstraints(minHeight: 48, minWidth: width, maxWidth: width),
             decoration: open
                 ? t.raiseBox(border: t.text)
                 : BoxDecoration(borderRadius: radius, border: Border.all(color: Colors.transparent)),
-            child: Center(
-              widthFactor: 1,
-              heightFactor: 1,
-              child: compact ? LevelBars(bytesPerSecond) : _withRate(t, rate),
-            ),
+            child: Center(heightFactor: 1, child: LevelBars(bytesPerSecond)),
           ),
         ),
-      ),
-    );
-  }
-
-  /// Bars and the rate in a fixed box, right-aligned so the unit stays put; the word goes on a
-  /// smaller line under them, so it never widens the label either.
-  Widget _withRate(RappTokens t, String rate) {
-    return SizedBox(
-      width: _barsWidth + _rateGap + _rateWidth,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              LevelBars(bytesPerSecond),
-              const SizedBox(width: _rateGap),
-              SizedBox(
-                width: _rateWidth,
-                child: FittedBox(
-                  key: const Key('traffic-rate'),
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerRight,
-                  child: Text(rate, maxLines: 1, softWrap: false, style: _rateStyle(t, open: open)),
-                ),
-              ),
-            ],
-          ),
-          if (word != null)
-            Text(
-              word!,
-              key: const Key('traffic-word'),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.right,
-              style: TextStyle(fontSize: 11, color: t.text, fontWeight: open ? FontWeight.w600 : FontWeight.w400),
-            ),
-        ],
       ),
     );
   }

@@ -66,31 +66,24 @@ String netTooltip(NetStatus n, {String? path}) {
   return parts.join(' · ') + (off ? '\n当前会话走${routeWord(path)}，不经过中继' : '');
 }
 
-/// The words beside the line: the round trip, 断开, or none while no round trip is known.
-String? netText(NetStatus n) => n.level == NetLevel.down ? '断开' : (n.rttMs == null ? null : '${n.rttMs}ms');
-
+/// The line alone; the words (the tooltip's) are in its hover and atop the traffic menu.
 class NetMarker extends StatelessWidget {
-  const NetMarker({super.key, required this.net, this.compact = false, this.path});
+  const NetMarker({super.key, required this.net, this.path});
 
   final NetStatus net;
-
-  /// The line alone, no words (narrow top bar).
-  final bool compact;
 
   /// The current session's path, for the tooltip.
   final String? path;
 
   static const lineSize = Size(28, 14);
 
-  /// Width the marker takes in the top bar, with words and without.
-  static const wideWidth = 96.0;
-  static const compactWidth = 40.0;
+  /// Width the marker takes in the top bar.
+  static const width = 40.0;
 
   @override
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
     final color = netColor(net.level, t, Theme.of(context).colorScheme);
-    final text = compact ? null : netText(net);
     final tip = netTooltip(net, path: path);
     return Tooltip(
       message: tip,
@@ -99,30 +92,13 @@ class NetMarker extends StatelessWidget {
         label: tip,
         excludeSemantics: true,
         child: Container(
-          width: compact ? compactWidth : wideWidth,
+          width: width,
           padding: const EdgeInsets.symmetric(horizontal: 6),
           alignment: Alignment.centerLeft,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              CustomPaint(
-                key: const Key('net-line'),
-                size: lineSize,
-                painter: NetLinePainter(netLine(net.level), color),
-              ),
-              if (text != null) ...[
-                const SizedBox(width: 4),
-                Flexible(
-                  child: Text(
-                  text,
-                  key: const Key('net-text'),
-                  maxLines: 1,
-                  overflow: TextOverflow.clip,
-                  style: TextStyle(fontFamily: t.mono, fontFamilyFallback: t.monoFallback, fontSize: 12, color: color),
-                ),
-                ),
-              ],
-            ],
+          child: CustomPaint(
+            key: const Key('net-line'),
+            size: lineSize,
+            painter: NetLinePainter(netLine(net.level), color),
           ),
         ),
       ),

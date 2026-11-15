@@ -976,6 +976,34 @@ void main() {
       expect(g.center.dx, 400);
     });
 
+    testWidgets('the grip bar shows only with the mouse over the panel, or while dragging', (tester) async {
+      await showPicture(tester);
+      await openPanel(tester);
+      double bar() => tester.widget<AnimatedOpacity>(find.byKey(const Key('composer-grip-bar'))).opacity;
+      expect(bar(), 0);
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer(location: const Offset(400, 20));
+      await mouse.moveTo(panelRect(tester).center);
+      await tester.pump();
+      expect(bar(), 1);
+      await mouse.moveTo(tester.getCenter(grip));
+      await tester.pump();
+      expect(bar(), 1);
+      await mouse.moveTo(const Offset(400, 20));
+      await tester.pump();
+      expect(bar(), 0);
+      // A touch drag shows it while it moves.
+      final g = await tester.startGesture(tester.getCenter(grip));
+      await g.moveBy(const Offset(0, -40));
+      await tester.pump();
+      expect(bar(), 1);
+      await g.up();
+      await tester.pump();
+      expect(bar(), 0);
+      await mouse.removePointer();
+      await tester.pump(kDoubleTapTimeout);
+    });
+
     testWidgets('dragging the grip moves the panel and saves once on release', (tester) async {
       await showPicture(tester);
       await openPanel(tester);

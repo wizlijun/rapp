@@ -524,6 +524,37 @@ void main() {
       expect(tester.getSize(local).width, 48);
       expect(tester.getSize(remote).width, 48);
       expect(find.byTooltip('本机菜单：会话、剪贴板、输入法'), findsOneWidget);
+      // 远程 sits beside the window tabs, after 下一个; 本机 stays at the right, before the traffic bars.
+      final next = tester.getRect(find.byKey(const Key('next')));
+      final traffic = tester.getRect(find.byKey(const Key('traffic')));
+      expect(tester.getRect(remote).left, greaterThanOrEqualTo(next.right));
+      expect(tester.getRect(remote).right, lessThan(tester.getRect(local).left));
+      expect(tester.getRect(local).right, lessThanOrEqualTo(traffic.left + 0.01));
+      // The traffic label is the bars alone: the rate is atop its menu.
+      expect(tester.getSize(find.byKey(const Key('traffic'))).width, 48);
+      expect(find.textContaining('KB/s'), findsNothing);
+    });
+
+    testWidgets('the traffic menu starts with the rate and the link to the relay', (tester) async {
+      await tester.pumpWidget(wrap(Align(
+        alignment: Alignment.topLeft,
+        child: SizedBox(width: 1200, height: 800, child: TopBar(state: es, fullscreen: false, onToggleFullscreen: () {})),
+      )));
+      await tester.runAsync(() async {
+        t.emit({'event': 'net', 'level': 'ok', 'rtt_ms': 160, 'loss': 0.03});
+        es.openOrSwitch('111', 'Safari', 'Safari');
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('traffic')));
+      await tester.pump();
+      expect(find.text('流量 0 KB/s'), findsOneWidget);
+      expect(find.text('本机网络 · 一般 · 中继 160ms · 丢包 3%'), findsOneWidget);
+      final traffic = tester.getRect(find.byKey(const Key('menu-traffic')));
+      expect(tester.getRect(find.byKey(const Key('menu-net-0'))).top, greaterThanOrEqualTo(traffic.bottom));
+      expect(tester.getRect(find.text('预设')).top, greaterThan(traffic.bottom));
     });
 
     testWidgets('no relay measured, no network marker', (tester) async {
@@ -550,7 +581,8 @@ void main() {
         await tester.pump();
         // Below the bare row plus the marker (5 icons, the traffic bars and 40) there is no room.
         expect(find.byKey(const Key('net-marker')), w >= 5 * 48 + 48 + 40 ? findsOneWidget : findsNothing);
-        expect(find.byKey(const Key('net-text')), w >= 480 ? findsOneWidget : findsNothing);
+        // The line alone: the round trip is in its hover and atop the traffic menu, never in the bar.
+        expect(find.textContaining('ms'), findsNothing);
         expect(tester.takeException(), isNull);
         if (w < 5 * 48 + 48 + 40) return;
         final full = tester.getRect(find.byKey(const Key('fullscreen-button')));

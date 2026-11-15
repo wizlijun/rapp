@@ -27,6 +27,19 @@ public func classifyWindow(level: Int, role: String?, subrole: String?) -> Windo
     }
 }
 
+/// Largest size of a chromeless window drawn in place (see `demoteChromeless`).
+public let chromelessMax = CGSize(width: 640, height: 1000)
+
+/// A small normal or floating window with no close button or no title is an app's own menu or
+/// dropdown (Claude desktop's right-click menu is a floating AXStandardWindow): it is drawn in
+/// place over its parent like a popover, not fitted to the screen as a tab of its own.
+public func demoteChromeless(_ kind: WindowKind, closeButton: Bool, title: String?, size: CGSize) -> WindowKind {
+    guard kind == .normal || kind == .floating,
+          !closeButton || (title ?? "").isEmpty,
+          size.width <= chromelessMax.width, size.height <= chromelessMax.height else { return kind }
+    return .popover
+}
+
 /// Removes windows too small to be anything but an indicator, such as the
 /// 66x20 screen-recording pill macOS 27 puts on captured windows (it reports
 /// itself as a dialog): at most 120 x 48 points. Menus stay (spec §3.2).
