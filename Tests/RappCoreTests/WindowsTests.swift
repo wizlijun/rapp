@@ -38,6 +38,22 @@ final class WindowsTests: XCTestCase {
         XCTAssertEqual(classifyWindow(level: level(.helpWindow), role: nil, subrole: nil), .tooltip)
     }
 
+    func testSmallChromelessWindowsAreDrawnInPlace() {
+        let menu = CGSize(width: 220, height: 400)
+        // Claude desktop's right-click menu: a floating standard window, no close button, no title.
+        XCTAssertEqual(demoteChromeless(.floating, closeButton: false, title: "", size: menu), .popover)
+        XCTAssertEqual(demoteChromeless(.normal, closeButton: false, title: "菜单", size: menu), .popover)
+        XCTAssertEqual(demoteChromeless(.normal, closeButton: true, title: nil, size: menu), .popover)
+        // A small titled window with a close button (Calculator) keeps its tab.
+        XCTAssertEqual(demoteChromeless(.normal, closeButton: true, title: "计算器", size: menu), .normal)
+        XCTAssertEqual(demoteChromeless(.floating, closeButton: true, title: "检查器", size: menu), .floating)
+        // Dialogs and sheets stay what they are; big windows too.
+        XCTAssertEqual(demoteChromeless(.dialog, closeButton: false, title: "", size: menu), .dialog)
+        XCTAssertEqual(demoteChromeless(.sheet, closeButton: false, title: "", size: menu), .sheet)
+        XCTAssertEqual(demoteChromeless(.normal, closeButton: false, title: "", size: CGSize(width: 641, height: 400)), .normal)
+        XCTAssertEqual(demoteChromeless(.floating, closeButton: false, title: "", size: CGSize(width: 300, height: 1001)), .floating)
+    }
+
     // MARK: assignParents (spec §3.2)
 
     func testDecoratedWindowsHaveNoParent() {
