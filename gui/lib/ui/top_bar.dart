@@ -61,7 +61,9 @@ class TopBar extends StatelessWidget {
             final splitW = embedded ? (term ? 1 : 2) * (words ? menuButtonWidth : 48.0) : 0.0;
             final hidden = rs != null && !rs.detached && !term && rs.hidden.isNotEmpty;
             // Room for the gaps, a session block and the 已隐藏 chip besides (none of them shrink).
-            final chip = hidden ? 130.0 : 0.0;
+            // The 「＋」 of a terminal (a chip's minimum width) goes with them.
+            final plus = term && !rs.detached && state.canNewTermWindow;
+            final chip = (hidden ? 130.0 : 0.0) + (plus ? 48.0 : 0.0);
             // The network marker, left of the stream anchor, while the hub has a relay to measure and
             // the bare row (no gaps, no overview button) has room for it; it goes before those do.
             final netWant = wide ? NetMarker.wideWidth : NetMarker.compactWidth;
@@ -79,7 +81,7 @@ class TopBar extends StatelessWidget {
             // Expanded takes all the slack and the fullscreen button stays at the
             // right edge. (A loose Flexible would leave its unused share of the
             // slack at the end of the row.)
-            final sessionMax = (box.maxWidth - fixed(gap, showOverview)).clamp(0.0, 260.0).toDouble();
+            final sessionMax = (box.maxWidth - fixed(gap, showOverview) - (plus ? 48 : 0)).clamp(0.0, 260.0).toDouble();
             // A detached session's windows are its tabs now; the bar shows none.
             final tabs = rs == null || rs.detached ? null : rs.tabs;
             final multi = state.sessionCount >= 2;
@@ -166,7 +168,7 @@ class TopBar extends StatelessWidget {
                     multi ? () => state.step(1) : null,
                   ),
                   SizedBox(width: gap),
-                  if (tabs != null && (tabs.tabs.length >= 2 || hidden))
+                  if (tabs != null && (tabs.tabs.length >= 2 || hidden || term))
                     Flexible(
                       child: SingleChildScrollView(
                         scrollDirection: Axis.horizontal,
@@ -191,6 +193,18 @@ class TopBar extends StatelessWidget {
                               ),
                           ],
                         ),
+                      ),
+                    ),
+                  // Outside the scroll view too: the tabs scroll, the 「＋」 must not scroll out of reach.
+                  // It is the only tmux-changing action: asks the device for a window, on click only.
+                  if (plus)
+                    Tooltip(
+                      message: '新开一个窗口',
+                      child: TabChip(
+                        key: const Key('term-new-window'),
+                        label: '＋',
+                        selected: false,
+                        onTap: state.newTermWindow,
                       ),
                     ),
                   // Outside the scroll view: the only way back to hidden windows must never scroll away.

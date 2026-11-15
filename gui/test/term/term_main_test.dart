@@ -258,6 +258,51 @@ void main() {
     expect(find.widgetWithText(TabChip, '2 htop'), findsOneWidget);
   });
 
+  testWidgets('one pane shows the tab row with a plus that opens a window', (tester) async {
+    await tester.pumpWidget(wrap(window()));
+    await openTerm(tester, [tp(3, 'claude', active: true)]);
+    expect(find.byType(TabChip), findsWidgets);
+    expect(find.byKey(const Key('term-new-window')), findsOneWidget);
+    expect(find.text('＋'), findsOneWidget);
+    term.calls.clear();
+    await tester.tap(find.byKey(const Key('term-new-window')));
+    await settle(tester);
+    expect(term.calls.where((c) => c.$1 == 'newWindow').single.$2['sid'], 1);
+  });
+
+  testWidgets('the opened pane becomes the current tab', (tester) async {
+    await tester.pumpWidget(wrap(window()));
+    await openTerm(tester, two);
+    term.paneLists[1] = [...two, tp(7, 'zsh', win: '@2')];
+    term.play(windowsOf(1, term.paneLists[1]!));
+    await settle(tester);
+    expect(s.currentRemote!.currentWindow, 3);
+    term.play(const TermOpenedPaneEvent(1, 7));
+    await settle(tester);
+    expect(s.currentRemote!.currentWindow, 7);
+    // A pane not in the tab list is ignored.
+    term.play(const TermOpenedPaneEvent(1, 99));
+    await settle(tester);
+    expect(s.currentRemote!.currentWindow, 7);
+  });
+
+  testWidgets('a failed new window puts the device words in the stage note', (tester) async {
+    await tester.pumpWidget(wrap(window()));
+    await openTerm(tester, two);
+    term.newWindowReply = 'no space';
+    await tester.tap(find.byKey(const Key('term-new-window')));
+    await settle(tester);
+    expect(find.text('新开窗口失败：no space'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 4));
+  });
+
+  testWidgets('an old device has no plus', (tester) async {
+    await tester.pumpWidget(wrap(window()));
+    term.newWindowOk = false;
+    await openTerm(tester, two);
+    expect(find.byKey(const Key('term-new-window')), findsNothing);
+  });
+
   testWidgets('a dead pane keeps its screen and says so on the tab', (tester) async {
     await tester.pumpWidget(wrap(window()));
     await openTerm(tester, two);
