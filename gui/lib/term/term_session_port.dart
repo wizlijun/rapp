@@ -23,6 +23,9 @@ const linkGone = '连接断了';
 /// The device's words for a window it could not open (its `error` answer to `new_window`).
 const windowFailed = 'could not open a window';
 
+/// The device's answer to input for a pane that is not one of the session's.
+const noSuchPane = 'no such pane';
+
 /// macOS key codes the writing panel sends -> the worker's key names.
 const _keyNames = {
   36: 'Enter', 53: 'Esc', 48: 'Tab', 51: 'Backspace', 123: 'Left', 124: 'Right', 125: 'Down', 126: 'Up',
@@ -33,6 +36,20 @@ class _Paste {
   _Paste(this.lines);
   final List<String> lines;
   final done = Completer<String?>();
+}
+
+/// A `new_window` sent and not answered yet. One past its timeout is settled but stays in the queue as a
+/// placeholder: the device answers every `new_window` in order, so its late answer is its own, not the next one's.
+class _Window {
+  _Window(this.pane, this.timer);
+  final String pane;
+  final Timer timer;
+  final done = Completer<String?>();
+
+  void settle(String? why) {
+    timer.cancel();
+    if (!done.isCompleted) done.complete(why);
+  }
 }
 
 class _Term {
@@ -54,7 +71,7 @@ class _Term {
   final pastes = Queue<_Paste>();
 
   /// `new_window`s waiting for their answer, in the order sent.
-  final windows = Queue<Completer<String?>>();
+  final windows = Queue<_Window>();
 
   /// Panes of opened windows not in the pane list yet.
   final opening = <String>{};
@@ -65,14 +82,22 @@ class _Term {
 }
 
 class TermSessionPort extends SessionPort {
-  TermSessionPort({Dial? dial, Duration trafficEvery = const Duration(seconds: 1)})
+  TermSessionPort(
+      {Dial? dial,
+      Duration trafficEvery = const Duration(seconds: 1),
+      Duration newWindowTimeout = const Duration(seconds: 10)})
       // ignore: prefer_initializing_formals
       : _dial = dial,
         // ignore: prefer_initializing_formals
-        _trafficEvery = trafficEvery;
+        _trafficEvery = trafficEvery,
+        // ignore: prefer_initializing_formals
+        _newWindowTimeout = newWindowTimeout;
 
   final Dial? _dial;
   final Duration _trafficEvery;
+
+  /// How long a `new_window` waits for its answer before it is taken as failed.
+  final Duration _newWindowTimeout;
   final _events = StreamController<SessionEvent>.broadcast();
   final _terms = <Object, _Term>{};
   bool _disposed = false;
@@ -140,7 +165,7 @@ class TermSessionPort extends SessionPort {
       t.pastes.removeFirst().done.complete(linkGone);
     }
     while (t.windows.isNotEmpty) {
-      t.windows.removeFirst().complete(linkGone);
+      t.windows.removeFirst().settle(linkGone);
     }
     t.opening.clear();
   }
@@ -228,8 +253,11 @@ class TermSessionPort extends SessionPort {
       case TermError():
         if (m.error == 'session ended') {
           _lost(t, 'session ended');
-        } else if (m.error == windowFailed && t.windows.isNotEmpty) {
-          t.windows.removeFirst().complete(m.error);
+        } else if (t.windows.isNotEmpty &&
+            (m.error == windowFailed ||
+                // Refused because its pane went between our listing and the device reading the request.
+                (m.error == noSuchPane && !t.panes.any((p) => p.id == t.windows.first.pane)))) {
+          t.windows.removeFirst().settle(m.error);
         } else {
           t.model.fail(m.error);
         }
@@ -240,7 +268,7 @@ class TermSessionPort extends SessionPort {
         t.pastes.removeFirst().done.complete(m.ok ? null : (m.error ?? pasteFailed));
         if (t.pastes.isNotEmpty) _sendPaste(t, t.pastes.first);
       case TermWindowOpened():
-        if (t.windows.isNotEmpty) t.windows.removeFirst().complete(null);
+        if (t.windows.isNotEmpty) t.windows.removeFirst().settle(null);
         final p = t.panes.where((p) => p.id == m.pane).firstOrNull;
         if (p != null) {
           emit(TermOpenedPaneEvent(t.sid, p.number));
@@ -306,17 +334,19 @@ class TermSessionPort extends SessionPort {
   /// The device can open windows (`hello` v2 and up).
   bool canNewWindow(Object sid) => (_terms[sid]?.v ?? 0) >= 2;
 
-  /// Opens a window beside the pane being viewed: null when it opened, otherwise the device's words. Its pane
-  /// comes as a [TermOpenedPaneEvent] once it is in the pane list.
+  /// Opens a window beside the pane being viewed: null when it opened, otherwise the device's words (or
+  /// [windowFailed] when there is no answer in time). Its pane comes as a [TermOpenedPaneEvent] once it is in the
+  /// pane list. A viewed pane the list does not have is not asked about.
   Future<String?> newWindow(Object sid) {
     final t = _terms[sid];
     if (t == null || !_live(t)) return Future.value(linkGone);
     final pane = t.view?.pane;
-    if (pane == null || !canNewWindow(sid)) return Future.value(windowFailed);
-    final c = Completer<String?>();
-    t.windows.add(c);
+    if (pane == null || !canNewWindow(sid) || !t.panes.any((p) => p.id == pane)) return Future.value(windowFailed);
+    late final _Window w;
+    w = _Window(pane, Timer(_newWindowTimeout, () => w.settle(windowFailed)));
+    t.windows.add(w);
     t.link!.sendLine(newWindowMsg(pane));
-    return c.future;
+    return w.done.future;
   }
 
   /// Shows pane [window] at [cols]x[rows]; the same parameters are not sent twice on one connection.

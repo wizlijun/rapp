@@ -69,9 +69,9 @@ void main() {
   late TermSessionPort port;
   late List<SessionEvent> events;
 
-  Future<void> begin(Worker worker) async {
+  Future<void> begin(Worker worker, {Duration newWindowTimeout = const Duration(seconds: 10)}) async {
     w = worker;
-    port = TermSessionPort();
+    port = TermSessionPort(newWindowTimeout: newWindowTimeout);
     events = [];
     port.events.listen(events.add);
     await port.start(StartArgs(1, w.srv.port, 'tk', 'x', 0, 'x'));
@@ -190,6 +190,22 @@ void main() {
     expect(w.of('text'), isEmpty);
   });
 
+  test('a paste is measured in UTF-8 bytes: Chinese over 1 MiB is refused, exactly 1 MiB goes out', () async {
+    await begin(await Worker.start(onLine: (s, m) {
+      if (m['t'] == 'text' && m['more'] == false) s.write(line({'t': 'pasted', 'ok': true}));
+    }));
+    port.view(1, 3, 80, 24);
+    final cjk = '中' * 349526; // 1048578 bytes, far fewer characters
+    expect(cjk.length, lessThan(1048576));
+    expect(await port.paste(1, cjk), '太长了：终端一次最多贴 1 MiB');
+    await settle();
+    expect(w.of('text'), isEmpty);
+    final exact = '中' * 349525 + 'x'; // 1048576 bytes
+    expect(utf8.encode(exact).length, 1048576);
+    expect(await port.paste(1, exact), isNull);
+    expect(w.of('text').map((m) => m['data']).join(), exact);
+  });
+
   test('a paste with no link, no pane, or into a dead pane does not go out', () async {
     await begin(await Worker.start());
     expect(await port.paste(1, 'x'), '没有贴进去'); // nothing viewed
@@ -280,6 +296,50 @@ void main() {
     }));
     port.view(1, 3, 80, 24);
     expect(await port.newWindow(1), 'could not open a window');
+    expect(port.model(1)!.note, isNull);
+  });
+
+  test('a viewed window the pane list does not have opens nothing and says so', () async {
+    await begin(await Worker.start());
+    port.view(1, 9, 80, 24); // not listed: the view falls back to %9
+    expect(await port.newWindow(1), 'could not open a window');
+    await settle();
+    expect(w.of('new_window'), isEmpty);
+  });
+
+  test('a new window refused for a pane gone meanwhile ends, and the next gets its own answer', () async {
+    var n = 0;
+    await begin(await Worker.start(onLine: (s, m) {
+      if (m['t'] != 'new_window') return;
+      if (n++ == 0) {
+        s.write(line({'t': 'panes', 'panes': [pane('%3', '@1', 'claude', active: true)]}));
+        s.write(line({'t': 'error', 'error': 'no such pane'}));
+      } else {
+        s.write(line({'t': 'window_opened', 'pane': '%8'}));
+      }
+    }));
+    port.view(1, 4, 80, 24);
+    expect(await port.newWindow(1), 'no such pane');
+    port.view(1, 3, 80, 24);
+    expect(await port.newWindow(1), isNull);
+    expect(w.of('new_window').map((m) => m['pane']), ['%4', '%3']);
+  });
+
+  test('a new window with no answer ends after the timeout; its late answer is not the next one\'s', () async {
+    Socket? sock;
+    await begin(await Worker.start(onLine: (s, m) {
+      if (m['t'] == 'new_window') sock = s; // answered by hand below
+    }), newWindowTimeout: const Duration(milliseconds: 100));
+    port.view(1, 3, 80, 24);
+    final clock = Stopwatch()..start();
+    expect(await port.newWindow(1), 'could not open a window');
+    expect(clock.elapsedMilliseconds, greaterThanOrEqualTo(90));
+    final second = port.newWindow(1);
+    await pumpUntil(() => w.of('new_window').length == 2);
+    // The device answers in order: the first's late answer, then the second's.
+    sock!.write(line({'t': 'window_opened', 'pane': '%8'}));
+    sock!.write(line({'t': 'error', 'error': 'could not open a window'}));
+    expect(await second, 'could not open a window');
     expect(port.model(1)!.note, isNull);
   });
 
