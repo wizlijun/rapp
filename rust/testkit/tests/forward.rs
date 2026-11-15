@@ -1510,13 +1510,20 @@ struct FakeA {
 }
 
 impl FakeA {
-    /// TLS, the hello and `mux` on a relayed stream, as a sharer answers them; the channel.
-    async fn channel(&self, stream: Pipe) -> (Mux, rapp_conn::mux::Incoming) {
+    /// TLS and the hello on a relayed stream, as a sharer answers them, and the request `mux`
+    /// read: the pipe is at its reply.
+    async fn asked_mux(&self, stream: Pipe) -> Pipe {
         let (mut pipe, facts) = rapp_conn::e2e_accept(stream, &self.me).await.unwrap();
         let home = tempfile::tempdir().unwrap();
         let hello = rapp_conn::Me { id: &self.id, name: "fake-a", key: Some(&self.key) };
         rapp_conn::hello_server(&mut pipe, &facts, &hello, &rapp_conn::Paired::empty(home.path())).await.unwrap();
         assert_eq!(read_json(&mut pipe).await.unwrap()["op"], "mux");
+        pipe
+    }
+
+    /// `asked_mux`, answered as a sharer does; the channel.
+    async fn channel(&self, stream: Pipe) -> (Mux, rapp_conn::mux::Incoming) {
+        let mut pipe = self.asked_mux(stream).await;
         rapp_net::line::write_json(&mut pipe, &json!({"ok": true})).await.unwrap();
         let (r, w) = tokio::io::split(pipe);
         Mux::server(Box::new(r) as Reader, Box::new(w) as Writer)
@@ -1547,26 +1554,8 @@ async fn a_burst_shares_the_failure_of_its_channel() {
     let b = tempfile::tempdir().unwrap();
     let out = Arc::new(outbound(b.path()));
     let began = std::time::Instant::now();
-    let tries: Vec<_> = (0..4)
-        .map(|_| {
-            let (out, id, key) = (out.clone(), id.clone(), rapp_wire::Key { relay: rig.key.relay, root: rig.key.root });
-            let relay = rig.addr.clone();
-            tokio::spawn(async move {
-                let to = Target { id: &id, lan: &[], known: None };
-                out.request(&Via { relay: Some(&relay), key: &key }, &to, &Op::Ping).await.err().map(|e| e.to_string())
-            })
-        })
-        .collect();
     let wait = rapp_conn::dial::REPLY_WAIT;
-    let all = tokio::time::timeout(wait * 2, async {
-        let mut got = Vec::new();
-        for t in tries {
-            got.push(t.await.unwrap());
-        }
-        got
-    })
-    .await
-    .expect("the burst ends within about one REPLY_WAIT");
+    let all = tokio::time::timeout(wait * 2, burst(&out, &rig, &id, 4)).await.expect("the burst ends within about one REPLY_WAIT");
     assert_eq!(all, vec![Some("no reply".to_string()); 4]);
     assert!(began.elapsed() < wait + Duration::from_secs(10), "{:?}", began.elapsed());
     assert_eq!(streams.load(Ordering::SeqCst), 1);
@@ -1575,6 +1564,45 @@ async fn a_burst_shares_the_failure_of_its_channel() {
     let via = Via { relay: Some(&rig.addr), key: &rig.key };
     let _ = tokio::time::timeout(Duration::from_secs(2), out.request(&via, &to, &Op::Ping)).await;
     assert_eq!(streams.load(Ordering::SeqCst), 2);
+    out.close();
+}
+
+/// `n` requests at once from `out` to `id` over `rig`; their errors' texts (None: it got through).
+async fn burst(out: &Arc<Outbound>, rig: &RelayRig, id: &str, n: usize) -> Vec<Option<String>> {
+    let tries: Vec<_> = (0..n)
+        .map(|_| {
+            let (out, id, key) = (out.clone(), id.to_string(), rapp_wire::Key { relay: rig.key.relay, root: rig.key.root });
+            let relay = rig.addr.clone();
+            tokio::spawn(async move {
+                let to = Target { id: &id, lan: &[], known: None };
+                out.request(&Via { relay: Some(&relay), key: &key }, &to, &Op::Ping).await.err().map(|e| e.to_string())
+            })
+        })
+        .collect();
+    let mut got = Vec::new();
+    for t in tries {
+        got.push(t.await.unwrap());
+    }
+    got
+}
+
+#[tokio::test]
+async fn a_burst_shares_a_channel_that_fails_once_open() {
+    // TLS and the welcome, and `mux` refused: the channel is open (and gone on with) before it
+    // fails, once for all the requests that went on it or waited for it.
+    let rig = RelayRig::start().await;
+    let (id, streams, _a) = fake_on_relay(&rig, |_, stream, fake| async move {
+        let mut pipe = fake.asked_mux(stream).await;
+        let _ = rapp_net::line::write_json(&mut pipe, &json!({"ok": false, "error": "busy"})).await;
+        let mut rest = Vec::new();
+        let _ = pipe.read_to_end(&mut rest).await;
+    })
+    .await;
+    let b = tempfile::tempdir().unwrap();
+    let out = Arc::new(outbound(b.path()));
+    let all = tokio::time::timeout(rapp_conn::dial::REPLY_WAIT, burst(&out, &rig, &id, 4)).await.expect("in time");
+    assert_eq!(all, vec![Some("busy".to_string()); 4]);
+    assert_eq!(streams.load(Ordering::SeqCst), 1);
     out.close();
 }
 

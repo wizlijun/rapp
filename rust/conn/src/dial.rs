@@ -146,28 +146,30 @@ impl Chan {
     }
 }
 
-/// Where a device's channel is kept. The lock is held while one is being opened and its first
-/// request answered, so the requests that come meanwhile wait for it instead of opening their own,
-/// and find it working or its failure.
-type Slot = Arc<tokio::sync::Mutex<Held>>;
-
+/// Where a device's channel is kept. The lock is held while one is being opened, so the requests
+/// that come meanwhile wait for it instead of opening their own; they go on it as soon as its
+/// writer exists.
 #[derive(Default)]
-struct Held {
-    chan: Option<Chan>,
+struct Slot {
+    chan: tokio::sync::Mutex<Option<Chan>>,
     /// The last opening that failed, and when: the answer for the requests that waited for it.
-    failed: Option<(Instant, Failure)>,
+    failed: Failed,
 }
 
-impl Held {
-    /// Notes `e` as the failure of the opening, for those waiting; `e` as it is for the caller.
-    fn fail(&mut self, e: anyhow::Error) -> anyhow::Error {
-        self.failed = Some((Instant::now(), Failure::of(&e)));
-        e
-    }
+/// Written by an opening that failed: under the lock before the channel exists, or by the
+/// channel's ready future before it returns its error (so before the channel counts as closed).
+type Failed = Arc<Mutex<Option<(Instant, Failure)>>>;
 
+/// Notes `e` as the failure of an opening; `e` as it is for the caller.
+fn fail(failed: &Failed, e: anyhow::Error) -> anyhow::Error {
+    *failed.lock().unwrap() = Some((Instant::now(), Failure::of(&e)));
+    e
+}
+
+impl Slot {
     /// The failure of an opening that ended after `waited` (when the request began to wait).
     fn failed_since(&self, waited: Instant) -> Option<anyhow::Error> {
-        self.failed.as_ref().filter(|(at, _)| *at >= waited).map(|(_, f)| f.error())
+        self.failed.lock().unwrap().as_ref().filter(|(at, _)| *at >= waited).map(|(_, f)| f.error())
     }
 }
 
@@ -218,7 +220,7 @@ pub struct Outbound {
     /// that failed.
     looked: Mutex<HashMap<String, Looked>>,
     /// By device ID: the channel through the relay.
-    chans: Mutex<HashMap<String, Slot>>,
+    chans: Mutex<HashMap<String, Arc<Slot>>>,
     /// By device ID: when it answered `mux` as an older version does (good for `OLD_KEEP`).
     old: Mutex<HashMap<String, Instant>>,
 }
@@ -253,106 +255,86 @@ impl Outbound {
 
     /// Steps 2, 4 and 5 without a channel: the LAN addresses, else one relayed stream.
     async fn the_old_way(&self, via: &Via<'_>, to: &Target<'_>, op: &Op) -> Result<Sent> {
-        match self.reach(via, to, op, false).await? {
+        match self.reach(via, to, op, None).await? {
             Reached::Sent(sent) => Ok(sent),
             Reached::Chan(..) => unreachable!("no channel was asked for"),
         }
     }
 
     /// Steps 3 to 5 with the channel held for the device, or a new one ("plan" rules 7 to 9 of
-    /// port-sharing 1b): the slot is locked while a channel is opened and its first request
-    /// answered, so it is opened once, and the requests that waited share how that went. A channel
-    /// held that worked and is found dead is dropped and the request starts over, once; an older
+    /// port-sharing 1b): the slot is locked while a channel is opened, so it is opened once, and
+    /// an opening that fails is the answer for the requests that waited for it. A channel held
+    /// that worked and is found dead is dropped and the request starts over, once; an older
     /// version (its answer to `mux`) is noted for `OLD_KEEP` and sent one relayed stream.
     async fn on_channel(&self, addr: &str, via: &Via<'_>, to: &Target<'_>, key_text: &str, op: &Op) -> Result<Sent> {
-        let slot: Slot = self.chans.lock().unwrap().entry(to.id.to_string()).or_default().clone();
+        let slot = self.chans.lock().unwrap().entry(to.id.to_string()).or_default().clone();
+        let waited = Instant::now();
         let mut again = true;
         loop {
-            let waited = Instant::now();
-            let mut held = slot.lock().await;
-            if let Some(c) = held.chan.as_ref().filter(|c| c.holds(addr, key_text, to.known)) {
-                let (mux, fp) = (c.mux.clone(), c.fp.clone());
-                drop(held);
-                let e = match send_on(&mux, &fp, to, op).await {
-                    Ok(sent) => return Ok(sent),
-                    Err(e) => e,
-                };
-                let why = mux.reason();
-                if is_older(why.as_deref()) {
-                    self.old_now(to.id);
-                    drop_chan(&slot, &fp).await;
-                    return self.relayed_alone(addr, via, to, op).await;
-                }
-                if mux.is_closed() {
-                    drop_chan(&slot, &fp).await;
-                    // It got as far as the welcome and was not refused: it worked, and has
-                    // closed since (the relay or the device went away). Only then once more;
-                    // dropping a live channel for one substream's reset or timeout would cut the
-                    // others on it.
-                    if again && fp.get().is_some() && !why.as_deref().is_some_and(refuses) {
-                        again = false;
-                        continue;
+            let mut held = slot.chan.lock().await;
+            let (mux, fp, refused, kept) = match held.as_ref().filter(|c| c.holds(addr, key_text, to.known)) {
+                Some(c) => (c.mux.clone(), c.fp.clone(), None, true),
+                None => {
+                    // An opening that failed since this one began waiting is its answer too.
+                    if let Some(e) = slot.failed_since(waited) {
+                        return Err(e);
+                    }
+                    if let Some(c) = held.take() {
+                        if is_older(c.mux.reason().as_deref()) {
+                            self.old_now(to.id);
+                        }
+                        c.mux.close();
+                    }
+                    // While this one waited, the request before it may have found the device on
+                    // the LAN, or found it to be an older version.
+                    if let Some(sent) = self.on_held(to, key_text, op).await {
+                        return Ok(sent);
+                    }
+                    if self.is_old(to.id) {
+                        drop(held);
+                        return self.the_old_way(via, to, op).await;
+                    }
+                    match self.reach(via, to, op, Some(&slot.failed)).await {
+                        Ok(Reached::Sent(sent)) => return Ok(sent),
+                        Ok(Reached::Chan(c, refused)) => {
+                            let got = (c.mux.clone(), c.fp.clone(), refused, false);
+                            *held = Some(c);
+                            got
+                        }
+                        Err(e) => return Err(fail(&slot.failed, e)),
                     }
                 }
-                // Whatever failed, the next request asks the relay again.
-                self.looked.lock().unwrap().remove(to.id);
-                return Err(why.map_or(e, |w| not_reached(anyhow!(w))));
-            }
-            // No channel to go on: an opening that failed while this one waited is its answer too.
-            if let Some(e) = held.failed_since(waited) {
-                return Err(e);
-            }
-            if let Some(c) = held.chan.take() {
-                c.mux.close();
-            }
-            // While this one waited, the request before it may have found the device on the LAN,
-            // or found it to be an older version.
-            if let Some(sent) = self.on_held(to, key_text, op).await {
-                return Ok(sent);
-            }
-            if self.is_old(to.id) {
-                drop(held);
-                return self.the_old_way(via, to, op).await;
-            }
-            let (c, refused) = match self.reach(via, to, op, true).await {
-                Ok(Reached::Sent(sent)) => return Ok(sent),
-                Ok(Reached::Chan(c, refused)) => (c, refused),
-                Err(e) => return Err(held.fail(e)),
             };
-            let (mux, fp) = (c.mux.clone(), c.fp.clone());
-            held.chan = Some(c);
-            // The first request goes out right behind the hello and `mux`, with the slot still
-            // locked.
-            let e = match send_on(&mux, &fp, to, op).await {
-                Ok(sent) => {
-                    held.failed = None;
-                    return Ok(sent);
-                }
+            // The first request goes out right behind the hello and `mux`, and the others with it.
+            drop(held);
+            let e = match send_on(&mux, &fp, op).await {
+                Ok(sent) => return Ok(sent),
                 Err(e) => e,
             };
             let why = mux.reason();
             if is_older(why.as_deref()) {
                 self.old_now(to.id);
-                if let Some(c) = held.chan.take() {
-                    c.mux.close();
-                }
-                drop(held);
+                drop_chan(&slot, &fp).await;
                 return self.relayed_alone(addr, via, to, op).await;
             }
+            if mux.is_closed() {
+                drop_chan(&slot, &fp).await;
+                // It got as far as the welcome and was not refused: it worked, and has closed
+                // since (the relay or the device went away). Only then once more; dropping a live
+                // channel for one substream's reset or timeout would cut the others on it. An
+                // opening that failed is found on the way round.
+                if kept && again && fp.get().is_some() && !why.as_deref().is_some_and(refuses) {
+                    again = false;
+                    continue;
+                }
+            }
+            // Whatever failed, the next request asks the relay again.
             self.looked.lock().unwrap().remove(to.id);
-            if !mux.is_closed() {
-                // The channel works; only this request failed.
-                return Err(e);
-            }
-            if let Some(c) = held.chan.take() {
-                c.mux.close();
-            }
             let e = why.map_or(e, |w| not_reached(anyhow!(w)));
-            let e = match refused {
+            return Err(match refused {
                 Some(r) if e.downcast_ref::<NotReached>().is_some() => r,
                 _ => e,
-            };
-            return Err(held.fail(e));
+            });
         }
     }
 
@@ -379,7 +361,7 @@ impl Outbound {
 
     /// Steps 2, 4 and 5: the LAN addresses, else through the relay: a new channel when `chan`,
     /// else one relayed stream.
-    async fn reach(&self, via: &Via<'_>, to: &Target<'_>, op: &Op, chan: bool) -> Result<Reached> {
+    async fn reach(&self, via: &Via<'_>, to: &Target<'_>, op: &Op, chan: Option<&Failed>) -> Result<Reached> {
         let key_text = via.key.to_string();
         // What a relayed request learned a moment ago; it only counts for a request that can
         // go through that relay again.
@@ -430,8 +412,8 @@ impl Outbound {
     /// Closes the channels held (one being opened right now is left to its request).
     fn close_chans(&self) {
         for (_, slot) in self.chans.lock().unwrap().drain() {
-            if let Ok(mut held) = slot.try_lock() {
-                if let Some(c) = held.chan.take() {
+            if let Ok(mut held) = slot.chan.try_lock() {
+                if let Some(c) = held.take() {
                     c.mux.close();
                 }
             }
@@ -524,7 +506,7 @@ impl Outbound {
         looked: Option<Looked>,
         tried: &[&String],
         op: &Op,
-        chan: bool,
+        chan: Option<&Failed>,
         refused: &mut Option<anyhow::Error>,
     ) -> Result<Reached> {
         let relay = self.relay_conn(addr, via.key).await?;
@@ -547,8 +529,8 @@ impl Outbound {
         if let Some(sent) = self.on_lan(via, to, &extra.iter().collect::<Vec<_>>(), op, refused).await {
             return Ok(Reached::Sent(sent));
         }
-        let sent = if chan {
-            Reached::Chan(self.open_channel(&relay, addr, via.key, to).await?, None)
+        let sent = if let Some(failed) = chan {
+            Reached::Chan(self.open_channel(&relay, addr, via.key, to, failed.clone()).await?, None)
         } else {
             Reached::Sent(self.relayed(&relay, via.key, to, op).await?)
         };
@@ -605,7 +587,7 @@ impl Outbound {
     /// out right behind them. The channel starts reading its frames once the welcome and the
     /// answer to `mux` are read (within `REPLY_WAIT`); a failure there closes it with the text as
     /// its reason (`unknown op` or `bad request` from an older version; `no reply` on timeout).
-    async fn open_channel(&self, relay: &RelayConn, addr: &str, key: &Key, to: &Target<'_>) -> Result<Chan> {
+    async fn open_channel(&self, relay: &RelayConn, addr: &str, key: &Key, to: &Target<'_>, failed: Failed) -> Result<Chan> {
         let stream = relay.relay_to_at(to.id, FORWARD_PRIORITY).await?;
         // The relay's refusal (`offline`, `unknown id`, ...) comes back as the failure of the first read.
         let tls = tokio::time::timeout(REPLY_WAIT, e2e_connect(stream, &self.identity));
@@ -626,12 +608,17 @@ impl Outbound {
                 }
                 anyhow::Ok(())
             };
-            let done = tokio::time::timeout(REPLY_WAIT, wait).await;
-            match done {
-                Ok(Ok(())) => Ok(Box::new(r) as Reader),
-                Ok(Err(e)) => Err(io::Error::other(relay_failure(e).to_string())),
-                Err(_) => Err(io::Error::other("no reply")),
+            let why = match tokio::time::timeout(REPLY_WAIT, wait).await {
+                Ok(Ok(())) => return Ok(Box::new(r) as Reader),
+                Ok(Err(e)) => relay_failure(e).to_string(),
+                Err(_) => "no reply".to_string(),
+            };
+            // Before the error closes the channel: whoever finds it closed finds this too. An
+            // older version's answer is not a failure (its requests go another way).
+            if !is_older(Some(&why)) {
+                fail(&failed, not_reached(anyhow!(why.clone())));
             }
+            Err(io::Error::other(why))
         };
         let mux = Mux::client(ready, Box::new(w) as Writer);
         Ok(Chan { mux, relay: addr.to_string(), key_text: key.to_string(), fp })
@@ -689,22 +676,19 @@ impl Drop for Outbound {
 /// Closes the channel whose fingerprint cell is `fp` and empties `slot`, unless another channel
 /// has taken its place meanwhile.
 async fn drop_chan(slot: &Slot, fp: &Arc<OnceLock<Fp>>) {
-    let mut held = slot.lock().await;
-    if held.chan.as_ref().is_some_and(|c| Arc::ptr_eq(&c.fp, fp)) {
-        if let Some(c) = held.chan.take() {
+    let mut held = slot.chan.lock().await;
+    if held.as_ref().is_some_and(|c| Arc::ptr_eq(&c.fp, fp)) {
+        if let Some(c) = held.take() {
             c.mux.close();
         }
     }
 }
 
 /// `op` on the channel, as a request's result. The reply comes after the welcome, so the
-/// fingerprint is there; a channel opened for a request knowing another one is not used by it.
-async fn send_on(mux: &Mux, fp: &OnceLock<Fp>, to: &Target<'_>, op: &Op) -> Result<Sent> {
+/// fingerprint is there (a changed one vouched for by the key, as on every other path).
+async fn send_on(mux: &Mux, fp: &OnceLock<Fp>, op: &Op) -> Result<Sent> {
     let (s, reply) = on_mux(mux, op).await?;
     let fp = *fp.get().ok_or_else(|| anyhow!("no reply"))?;
-    if to.known.is_some_and(|k| k != fp) {
-        bail!("host key mismatch");
-    }
     Ok(Sent { pipe: Box::new(s), reply, path: "relay", fp })
 }
 
