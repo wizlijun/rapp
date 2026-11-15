@@ -83,7 +83,22 @@ class FlutterEditor implements ComposerEditor {
       final edge = up ? !v.text.substring(0, at).contains('\n') : !v.text.substring(at).contains('\n');
       return edge && (handlers?.onArrow(up) ?? false) ? KeyEventResult.handled : KeyEventResult.ignored;
     }
-    if (defaultTargetPlatform == TargetPlatform.macOS &&
+    final mac = defaultTargetPlatform == TargetPlatform.macOS;
+    if ((mac ? hw.isMetaPressed && !hw.isControlPressed : hw.isControlPressed && !hw.isMetaPressed) &&
+        !hw.isAltPressed &&
+        handlers?.onZoom != null) {
+      final by = switch (k) {
+        LogicalKeyboardKey.equal || LogicalKeyboardKey.add || LogicalKeyboardKey.numpadAdd => 1,
+        LogicalKeyboardKey.minus || LogicalKeyboardKey.numpadSubtract => -1,
+        LogicalKeyboardKey.digit0 || LogicalKeyboardKey.numpad0 => 0,
+        _ => null,
+      };
+      if (by != null) {
+        handlers!.onZoom!(by == 0 ? null : by);
+        return KeyEventResult.handled;
+      }
+    }
+    if (mac &&
         k == LogicalKeyboardKey.keyV &&
         hw.isMetaPressed &&
         !hw.isAltPressed &&

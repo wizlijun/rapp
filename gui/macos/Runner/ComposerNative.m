@@ -114,6 +114,14 @@
         }
         if([key isEqual:@"f"]){if(!event.isARepeat)[self.window toggleFullScreen:nil];return;}
     }
+    if((flags & ~NSEventModifierFlagShift)==NSEventModifierFlagCommand){
+        NSString *key=event.charactersIgnoringModifiers;
+        NSString *zoom=nil;
+        if([@[@"=",@"+"] containsObject:key])zoom=@"zoom+";
+        else if([key isEqual:@"-"])zoom=@"zoom-";
+        else if([key isEqual:@"0"] && flags==NSEventModifierFlagCommand)zoom=@"zoom0";
+        if(zoom){if(owner.event)owner.event(@"shortcut",zoom,nil);return;}
+    }
     if(!self.hasMarkedText && flags==NSEventModifierFlagControl && (event.keyCode==36 || event.keyCode==76)){
         if(!event.isARepeat && owner.event)owner.event(@"toggleFocus",nil,nil);
         return;

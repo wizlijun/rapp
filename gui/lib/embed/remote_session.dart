@@ -27,12 +27,21 @@ class RemoteSession extends ChangeNotifier {
       this.onReturn,
       this.onSelectInput,
       this.onClick,
-      bool followNewTabs = true})
+      bool followNewTabs = true,
+      DateTime Function()? clock})
       : policy = ResizePolicy(onResize ?? (_, _, _) {}),
         tabs = WindowTabs(followNew: followNewTabs) {
-    composer = ComposerModel(onDrop: onDropBlock, onAllSent: _allSent);
+    composer = ComposerModel(onDrop: onDropBlock, onAllSent: _allSent, clock: clock);
     composer.addListener(_composerChanged);
+    composer.onDeclined = () {
+      composeArmed = false;
+      notifyListeners();
+    };
   }
+
+  /// Whether a typed letter opens the writing panel. A panel opened by a letter and closed unused means the
+  /// user wants the app's own keys (vim, y/n, a password): off until they open the panel themselves.
+  bool composeArmed = true;
 
   bool _wasOpen = false;
 
@@ -41,6 +50,10 @@ class RemoteSession extends ChangeNotifier {
   void _composerChanged() {
     final open = composer.open;
     if (open && !_wasOpen) {
+      if (!composeArmed && !composer.openedByLetter) {
+        composeArmed = true;
+        notifyListeners();
+      }
       final s = inputSource;
       if (s != null && !s.ascii) selectInput('');
     }
@@ -296,9 +309,9 @@ class RemoteSession extends ChangeNotifier {
         // A letter on the picture (type-to-compose): the panel opens, takes the caret, then asks for the letter.
         // Not when the panel is off here (the tab just became noComposer): the runner drops its hold when
         // MainState sends compose:false for that picture.
-        if (!composerAllowed) break;
+        if (!composerAllowed || !composeArmed) break;
         composer.replayPending = true;
-        composer.open = true;
+        composer.openByLetter();
         composer.wantFocus();
       case TransferStatusEvent():
         transferStatus = e.status;

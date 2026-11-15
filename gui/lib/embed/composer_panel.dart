@@ -24,7 +24,9 @@ import 'remote_session.dart';
 import 'session_port.dart';
 
 /// W1: 720 wide, or the stage less 16 when the stage is narrower than 736.
-double panelWidth(double stageWidth) => stageWidth < 736 ? math.max(0, stageWidth - 16) : 720;
+/// Zoomed ([scale] above 1) it is 720 × [scale], never wider than the stage less 16.
+double panelWidth(double stageWidth, [double scale = 1]) =>
+    stageWidth < 736 * scale ? math.max(0, stageWidth - 16) : 720 * scale;
 
 /// How far the picture moves up while the writing panel is open (one line).
 const pictureLift = 64.0;
@@ -88,6 +90,9 @@ class _ComposerPanelState extends State<ComposerPanel> {
                     case ']': widget.state.step(1);
                     case 'o': widget.state.toggleOverview();
                     case 'd': widget.state.toggleDetach();
+                    case 'zoom+': widget.state.zoomComposer(1);
+                    case 'zoom-': widget.state.zoomComposer(-1);
+                    case 'zoom0': widget.state.zoomComposer(null);
                   }
                 },
               )
@@ -99,6 +104,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
       onPaste: _paste,
       onFocus: _focused,
       onArrow: _arrow,
+      onZoom: widget.state.zoomComposer,
     );
     _attached = _m.attach(_ed);
     _focusSeen = _m.focusTick;
@@ -323,7 +329,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
           child: CustomPaint(
             foregroundPainter: DashedOutline(t.line, t.r),
             child: ConstrainedBox(
-              constraints: const BoxConstraints(minHeight: _line),
+              constraints: BoxConstraints(minHeight: _line * _k),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 child: Center(widthFactor: 1, child: Text(b.label, style: TextStyle(color: t.text))),
@@ -343,7 +349,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
       padding: const EdgeInsets.only(bottom: 8),
       child: Container(
         decoration: t.floatBox(),
-        constraints: const BoxConstraints(minHeight: _line + _border),
+        constraints: BoxConstraints(minHeight: _line * _k + _border),
         padding: const EdgeInsets.only(left: 12),
         child: Row(
           children: [
@@ -377,6 +383,9 @@ class _ComposerPanelState extends State<ComposerPanel> {
     );
   }
 
+  /// The zoom (⌘= / ⌘- / ⌘0): every size below is its default times this.
+  double get _k => widget.state.composerScale;
+
   @override
   Widget build(BuildContext context) {
     // A press anywhere on the panel takes key focus from the picture (R24).
@@ -384,12 +393,15 @@ class _ComposerPanelState extends State<ComposerPanel> {
       key: const Key('composer-panel'),
       onPointerDown: (_) => widget.state.holdForPanel(_s),
       child: ListenableBuilder(
-        listenable: Listenable.merge([_s, _m, widget.state.history]),
-        builder: (context, _) {
+        listenable: Listenable.merge([_s, _m, widget.state.history, widget.state]),
+        builder: (context, _) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(textScaler: TextScaler.linear(_k)),
+          child: Builder(builder: (context) {
           final t = RappTokens.of(context);
+          final k = _k, line = _line * k, pad = _pad * k, edge = _edge * k;
           final style = EditorStyle(
             text: TextStyle(
-              fontSize: 15, height: 22 / 15, fontFamily: t.font,
+              fontSize: 15 * k, height: 22 / 15, fontFamily: t.font,
               fontFamilyFallback: t.fontFallback, color: t.text, shadows: const [],
             ),
             color: t.text,
@@ -397,7 +409,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
             cursor: t.text,
           );
           // Inside the border; the editor never gets less than one line.
-          final inner = math.max(_line + 2 * _pad, widget.maxHeight - _border);
+          final inner = math.max(line + 2 * pad, widget.maxHeight - _border);
           final inFlight = _m.inFlight;
           return Column(
             mainAxisSize: MainAxisSize.min,
@@ -435,7 +447,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
                           children: [
                             if (_m.blocks.isNotEmpty)
                               ConstrainedBox(
-                                constraints: BoxConstraints(maxHeight: math.max(0, inner - _line - 2 * _pad)),
+                                constraints: BoxConstraints(maxHeight: math.max(0, inner - line - 2 * pad)),
                                 child: SingleChildScrollView(
                                   child: Padding(
                                     padding: const EdgeInsets.only(top: 8),
@@ -451,18 +463,22 @@ class _ComposerPanelState extends State<ComposerPanel> {
                             // below it, so one line is as tall as ＋ and 发送 with their margins.
                             Flexible(
                               child: Padding(
-                                padding: const EdgeInsets.symmetric(vertical: _pad),
+                                padding: EdgeInsets.symmetric(vertical: pad),
                                 // Selecting and scrolling stay the text's: a floating panel moves from here
                                 // only after a touch held still (composer_float.dart).
                                 child: MetaData(
                                   metaData: composerTextArea,
                                   behavior: HitTestBehavior.translucent,
                                   child: LayoutBuilder(
-                                    builder: (context, c) => _ed.view(
-                                      context,
-                                      style: style,
-                                      hint: _recall.isEmpty ? '写给 $_to' : '写给 $_to · ↑ 上一条',
-                                      maxHeight: math.max(_line, c.maxHeight),
+                                    // The font size is already zoomed: the editor takes no text scale on top.
+                                    builder: (context, c) => MediaQuery(
+                                      data: MediaQuery.of(context).copyWith(textScaler: TextScaler.noScaling),
+                                      child: _ed.view(
+                                        context,
+                                        style: style,
+                                        hint: _recall.isEmpty ? '写给 $_to' : '写给 $_to · ↑ 上一条',
+                                        maxHeight: math.max(line, c.maxHeight),
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -474,7 +490,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
                     ),
                     // ＋ and 发送: 40 square, [_edge] to the border on every side (one line), 4 between them.
                     Padding(
-                      padding: const EdgeInsets.all(_edge),
+                      padding: EdgeInsets.all(edge),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -489,6 +505,9 @@ class _ComposerPanelState extends State<ComposerPanel> {
                                 ? null
                                 : (on) => widget.state.setAfterSend(_s, on ? AfterSend.pressReturn : AfterSend.none),
                             terminal: _terminal,
+                            scale: k,
+                            zoom: widget.state.prefs.composerZoom,
+                            onZoom: (z) => widget.state.zoomComposer(z - widget.state.prefs.composerZoom),
                           ),
                           const SizedBox(width: 4),
                           RappButton.primary(
@@ -496,7 +515,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
                             label: '发送',
                             semanticLabel: '发送',
                             icon: Icons.arrow_upward,
-                            size: 40,
+                            size: 40 * k,
                             onPressed: _m.sending ? null : _submit,
                           ),
                         ],
@@ -507,7 +526,8 @@ class _ComposerPanelState extends State<ComposerPanel> {
               ),
             ],
           );
-        },
+          }),
+        ),
       ),
     );
   }
@@ -526,7 +546,7 @@ List<Widget> composerLayer(
     required SessionPort port,
     bool keyRow = false,
     ComposerEditor Function()? editor}) {
-  final both = Listenable.merge([session, session.composer]);
+  final both = Listenable.merge([session, session.composer, state]);
   final term = port is TermSessionPort ? port : null;
   final keys = keyRow && term != null;
   bool open() => session.composer.open && session.composerAllowed;
@@ -542,6 +562,7 @@ List<Widget> composerLayer(
                         // Per session: a switch mid-drag drops that drag instead of saving it into the new app.
                         key: ValueKey(session.sid),
                         session: session,
+                        scale: state.composerScale,
                         onPlace: (p) => state.placeComposer(session, p),
                         child: ComposerPanel(
                           editor: editor,
@@ -557,7 +578,7 @@ List<Widget> composerLayer(
                   child: Padding(
                     padding: const EdgeInsets.only(bottom: 8),
                     child: SizedBox(
-                      width: panelWidth(c.maxWidth),
+                      width: panelWidth(c.maxWidth, state.composerScale),
                       // The key row comes and goes before the panel; the panel stays the same element.
                       child: Column(
                         mainAxisSize: MainAxisSize.min,

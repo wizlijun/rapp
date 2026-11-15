@@ -6,6 +6,12 @@ import 'tokens.dart';
 /// Which layer the window opens on (`first` in gui.json): the devices or the projects.
 enum FirstLayer { device, project }
 
+/// The writing panel's zoom steps above the default (⌘= / ⌘- / ⌘0).
+const composerZoomMax = 4;
+
+/// Size factor of each zoom step: the default, then four larger.
+const composerZoomScales = [1.0, 1.15, 1.3, 1.5, 1.75];
+
 /// GUI preferences, stored in `<dir>/gui.json` (`devices/<id>/` in the data root).
 class UiPrefs {
   UiPrefs({
@@ -15,6 +21,7 @@ class UiPrefs {
     this.inputHistory = true,
     this.termKeyRow = false,
     this.first = FirstLayer.device,
+    this.composerZoom = 0,
   });
 
   RappTheme theme;
@@ -30,6 +37,9 @@ class UiPrefs {
   /// 按键排 (`term_key_row`): the six big keys on a terminal's stage, on this console. Missing or bad means off.
   bool termKeyRow;
 
+  /// 输入板缩放档 (`composer_zoom`): 0 is the default size, up to [composerZoomMax]. Missing or bad means 0.
+  int composerZoom;
+
   /// 排列 (`first`): the layer shown first. Missing or unknown means devices.
   FirstLayer first;
 
@@ -44,6 +54,7 @@ class UiPrefs {
       final ih = j['input_history'];
       final kr = j['term_key_row'];
       final fl = j['first'];
+      final cz = j['composer_zoom'];
       return UiPrefs(
         theme: RappTheme.values.firstWhere(
           (t) => t.name == name,
@@ -53,6 +64,7 @@ class UiPrefs {
         autoSaveTraffic: save is bool ? save : true,
         inputHistory: ih is bool ? ih : true,
         termKeyRow: kr is bool ? kr : false,
+        composerZoom: cz is int ? cz.clamp(0, composerZoomMax) : 0,
         first: FirstLayer.values.firstWhere(
           (v) => v.name == fl,
           orElse: () => FirstLayer.device,
@@ -74,6 +86,7 @@ class UiPrefs {
         'input_history': inputHistory,
         'term_key_row': termKeyRow,
         'first': first.name,
+        'composer_zoom': composerZoom,
       }),
     );
   }

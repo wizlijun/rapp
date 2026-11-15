@@ -2391,6 +2391,23 @@ void main() {
       });
     });
 
+    test('a letter-opened panel closed unused sends compose:false; the user opening the panel sends it true again', () {
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(1, [rw(7)]));
+        st.focusPicture(1);
+        lastCall(port, 'picture_focus', {'sid': 1, 'compose': true});
+        final rs = st.currentRemote!;
+        port.emit(const ComposeKeyEvent(1));
+        expect(rs.composer.open, true);
+        rs.composer.collapse();
+        expect(rs.composeArmed, false);
+        lastCall(port, 'picture_focus', {'sid': 1});
+        st.composerKey(); // the user's own open (Ctrl+Enter)
+        expect(rs.composeArmed, true);
+        lastCall(port, 'picture_focus', {'sid': 1, 'compose': true});
+      });
+    });
+
     test('a tab switch to a noComposer window re-sends compose:false, and back', () {
       env((a, t, port, st, hints) {
         port.emit(WindowsEvent(1, [rw(7)]));

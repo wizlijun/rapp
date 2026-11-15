@@ -11,6 +11,7 @@ class EditorHandlers {
     required this.onPaste,
     required this.onFocus,
     required this.onArrow,
+    this.onZoom,
   });
 
   /// The text changed (no text attached).
@@ -29,6 +30,9 @@ class EditorHandlers {
   /// ↑ ([up]) with the caret on the first line, or ↓ on the last, no modifier, not while
   /// composing. true: the key is taken; false: the caret moves as usual.
   final bool Function(bool up) onArrow;
+
+  /// ⌘= / ⌘- / ⌘0 (Ctrl elsewhere) with the caret here: +1, -1, or null for the default size.
+  final void Function(int? by)? onZoom;
 }
 
 class EditorStyle {

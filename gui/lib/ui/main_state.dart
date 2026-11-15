@@ -474,11 +474,12 @@ class MainState extends ChangeNotifier {
   bool _composeSent = false;
 
   /// A letter on [sid]'s picture opens the writing panel: an app window on the stage whose panel is
-  /// allowed (no `noComposer` rule) and whose app has `typeToCompose` on. Never a terminal.
+  /// allowed (no `noComposer` rule) and whose app has `typeToCompose` on, until a letter-opened panel is closed unused
+  /// ([RemoteSession.composeArmed]). Never rapp's own terminal.
   bool _composeFor(Object sid) {
     final rs = remote[sid];
     if (rs == null || rs.detached || termPort?.owns(sid) == true) return false;
-    return rs.composerAllowed && rs.profile.typeToCompose;
+    return rs.composerAllowed && rs.profile.typeToCompose && rs.composeArmed;
   }
 
   void _sendFocus(Object sid) {
@@ -2329,6 +2330,17 @@ class MainState extends ChangeNotifier {
     prefs.inputHistory = v;
     _save();
     notifyListeners();
+  }
+
+  /// The writing panel's size factor (1.0 is the default and the smallest).
+  double get composerScale => composerZoomScales[prefs.composerZoom.clamp(0, composerZoomMax)];
+
+  /// ⌘= (+1), ⌘- (-1), ⌘0 (null: back to the default); saved, for every panel.
+  void zoomComposer(int? by) {
+    final z = by == null ? 0 : (prefs.composerZoom + by).clamp(0, composerZoomMax);
+    if (z == prefs.composerZoom) return;
+    prefs.composerZoom = z;
+    _save();
   }
 
   /// 「按键排」: the terminal key row on or off; saved.

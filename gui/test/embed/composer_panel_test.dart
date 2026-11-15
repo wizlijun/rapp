@@ -63,6 +63,8 @@ void main() {
     expect(panelWidth(1200), 720);
     expect(panelWidth(736), 720);
     expect(panelWidth(700), 684);
+    expect(panelWidth(1200, 1.5), 1080);
+    expect(panelWidth(900, 1.5), 884); // never wider than the stage less 16
   });
 
   group('panel', () {
@@ -94,6 +96,38 @@ void main() {
     }
 
     Rect rect(WidgetTester tester, String key) => tester.getRect(find.byKey(Key(key)));
+
+    testWidgets('⌘= / ⌘- / ⌘0 zoom the whole panel in four steps; the default is the smallest', (tester) async {
+      big(tester);
+      await tester.pumpWidget(layer());
+      await tester.pump();
+      Future<void> chord(LogicalKeyboardKey k) async {
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+        await tester.sendKeyEvent(k);
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+        await tester.pump();
+      }
+
+      await tester.tap(fieldFinder);
+      await tester.pump();
+      await chord(LogicalKeyboardKey.equal);
+      expect(es.prefs.composerZoom, 1);
+      expect(field(tester).style!.fontSize, closeTo(15 * 1.15, 1e-9));
+      expect(rect(tester, 'composer-panel').width, closeTo(720 * 1.15, 1e-9));
+      for (var i = 0; i < 6; i++) {
+        await chord(LogicalKeyboardKey.equal);
+      }
+      expect(es.prefs.composerZoom, 4); // the top step
+      expect(es.composerScale, 1.75);
+      await chord(LogicalKeyboardKey.minus);
+      expect(es.prefs.composerZoom, 3);
+      await chord(LogicalKeyboardKey.digit0);
+      expect(es.prefs.composerZoom, 0);
+      expect(field(tester).style!.fontSize, 15);
+      expect(rect(tester, 'composer-panel').width, 720);
+      await chord(LogicalKeyboardKey.minus); // never under the default
+      expect(es.prefs.composerZoom, 0);
+    });
 
     testWidgets('open: one line, 720 wide, centred, 8 above the stage bottom', (tester) async {
       big(tester);

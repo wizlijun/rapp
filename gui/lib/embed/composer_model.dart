@@ -94,7 +94,50 @@ class ComposerModel extends ChangeNotifier {
   set open(bool v) {
     if (_open == v) return;
     _open = v;
+    if (v) {
+      _autoAt = _byLetter ? _clock() : null;
+      _declineFrom = null;
+    } else {
+      _declineFrom = _autoAt;
+      _autoAt = null;
+      // With an editor the check waits for [detach], which brings its text into [draft].
+      if (_editor == null) _checkDeclined();
+    }
     notifyListeners();
+  }
+
+  /// When the panel was opened by a typed letter (type-to-compose) and nothing has been sent since.
+  DateTime? _autoAt;
+  DateTime? _declineFrom;
+  bool _byLetter = false;
+
+  /// This open was a typed letter's, not the user's own (button, key, a clip's 「插入」).
+  bool get openedByLetter => _autoAt != null;
+
+  /// Opens the panel for a typed letter (type-to-compose).
+  void openByLetter() {
+    _byLetter = true;
+    open = true;
+    _byLetter = false;
+  }
+
+  /// Called when a letter-opened panel was closed unused: nothing sent, no chips, nothing but a few ASCII
+  /// letters (the captured ones) in the text, or any ASCII text closed within [_declineWithin]. The user
+  /// meant the app's own keys, so letters stop opening the panel until they open it themselves.
+  VoidCallback? onDeclined;
+
+  static const _declineWithin = Duration(seconds: 3);
+
+  void _checkDeclined() {
+    final from = _declineFrom;
+    if (from == null) return;
+    _declineFrom = null;
+    final t = _draft;
+    final quick = _clock().difference(from) < _declineWithin;
+    if (blocks.isEmpty && t.runes.every((r) => r < 128) && (t.trim().isEmpty || quick)) {
+      draft = ''; // only the captured letters: they were never for the panel
+      onDeclined?.call();
+    }
   }
 
   /// A send round is running (from `submit()` until `done`).
@@ -146,6 +189,7 @@ class ComposerModel extends ChangeNotifier {
     final ready = _attached;
     Future<void> copy() async {
       draft = await e.read();
+      if (!_disposed) _checkDeclined();
     }
     final work = ready == null ? copy() : ready.then((_) => copy());
     late final Future<void> pending;
@@ -195,6 +239,8 @@ class ComposerModel extends ChangeNotifier {
   /// The user pressed send (or Enter): takes the blocks and the text out of the composer.
   Future<Submit> submit() async {
     if (sending || _taking) return SubmitNothing();
+    _autoAt = null; // sent: the panel was wanted
+    _declineFrom = null;
     _idleTimer?.cancel();
     _setTaking(true);
     final String text;

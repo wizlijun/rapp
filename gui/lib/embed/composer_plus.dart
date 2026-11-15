@@ -8,6 +8,7 @@ import '../history/history_list.dart';
 import '../history/input_history.dart';
 import '../term/term_session_port.dart';
 import '../ui/controls.dart';
+import '../ui/prefs.dart' show composerZoomMax, composerZoomScales;
 import '../ui/tokens.dart';
 import 'app_profile.dart';
 import 'remote_session.dart';
@@ -68,7 +69,17 @@ class ComposerPlus extends StatefulWidget {
       this.history,
       this.historyKey,
       this.onReturnAfter,
-      this.terminal = false});
+      this.terminal = false,
+      this.scale = 1,
+      this.zoom,
+      this.onZoom});
+
+  /// The panel's zoom: the ＋ button's size.
+  final double scale;
+
+  /// The zoom step (0 is the default) and its setter, for the menu's slider; no slider without them.
+  final int? zoom;
+  final ValueChanged<int>? onZoom;
 
   final RemoteSession session;
   final SessionPort port;
@@ -206,6 +217,44 @@ class _ComposerPlusState extends State<ComposerPlus> {
     },
   );
 
+  /// 「大小」: a slider over the zoom steps (what ⌘= / ⌘- / ⌘0 step through); 默认 sits at its left end.
+  Widget _zoomRow(RappTokens t) => SizedBox(
+        key: const Key('composer-plus-zoom'),
+        height: 48,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
+            children: [
+              Text('大小', style: TextStyle(color: t.text)),
+              Expanded(
+                child: SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    activeTrackColor: t.accent,
+                    inactiveTrackColor: t.line,
+                    thumbColor: t.accent,
+                    overlayShape: SliderComponentShape.noOverlay,
+                    trackHeight: 3,
+                  ),
+                  child: Slider(
+                    value: widget.zoom!.toDouble(),
+                    min: 0,
+                    max: composerZoomMax.toDouble(),
+                    divisions: composerZoomMax,
+                    semanticFormatterCallback: (v) => '${(composerZoomScales[v.round()] * 100).round()}%',
+                    onChanged: (v) => widget.onZoom!(v.round()),
+                  ),
+                ),
+              ),
+              SizedBox(
+                width: 40,
+                child: Text('${(composerZoomScales[widget.zoom!] * 100).round()}%',
+                    textAlign: TextAlign.end, style: TextStyle(color: t.muted, fontSize: 12)),
+              ),
+            ],
+          ),
+        ),
+      );
+
   Widget _keyCell(RappTokens t, (String, int, int?) k) {
     final (label, code, bit) = k;
     return _cell(t, label, bit, bit == null ? () => _key(code) : () => setState(() => _sticky ^= bit));
@@ -293,6 +342,7 @@ class _ComposerPlusState extends State<ComposerPlus> {
                     if (!term) ...[_row(t, '在远端复制', mac ? '⌘C' : 'Ctrl+C', _copy), rowGap],
                     if (widget.history != null) ...[_row(t, '输入历史', null, _openHistory), rowGap],
                     if (widget.onReturnAfter != null) ...[_returnAfter(t), rowGap],
+                    if (widget.zoom != null && widget.onZoom != null) ...[_zoomRow(t), rowGap],
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 4),
                       child: Text('按键 · 直接发给远端', style: TextStyle(color: t.muted, fontSize: 12)),
@@ -356,7 +406,7 @@ class _ComposerPlusState extends State<ComposerPlus> {
             label: '＋',
             semanticLabel: '更多',
             icon: Icons.add,
-            size: 40,
+            size: 40 * widget.scale,
             onPressed: _toggle,
           ),
         ),
