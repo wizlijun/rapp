@@ -910,3 +910,93 @@ async fn hosts_lists_what_each_device_offers_this_one() {
     assert_eq!(entry(made_up), json!({"id": made_up, "name": "ghost", "error": "offline"}));
     assert_eq!(r["hosts"].as_array().unwrap().len(), 2, "{r}");
 }
+
+/// `rapp-cli`, built next to the other programs of this test run. `cargo build` is the same
+/// build the test run itself did (a no-op when the binary is current); it is bounded so a held
+/// build lock cannot make the test wait forever.
+fn cli_bin() -> std::path::PathBuf {
+    static BIN: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+    BIN.get_or_init(|| {
+        let dir = Path::new(env!("CARGO_BIN_EXE_fake-rapp-host")).parent().unwrap().to_path_buf();
+        let mut build = std::process::Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
+        build.args(["build", "-p", "rapp-cli", "--quiet"]);
+        if dir.file_name().is_some_and(|n| n == "release") {
+            build.arg("--release");
+        }
+        let mut child = build.spawn().expect("cargo starts");
+        let deadline = std::time::Instant::now() + Duration::from_secs(300);
+        loop {
+            match child.try_wait().unwrap() {
+                Some(status) => {
+                    assert!(status.success(), "cargo build -p rapp-cli failed");
+                    break;
+                }
+                None if std::time::Instant::now() > deadline => {
+                    let _ = child.kill();
+                    panic!("cargo build -p rapp-cli took too long");
+                }
+                None => std::thread::sleep(Duration::from_millis(100)),
+            }
+        }
+        let bin = dir.join("rapp-cli");
+        assert!(bin.exists(), "{} was not built", bin.display());
+        bin
+    })
+    .clone()
+}
+
+/// A `local/` directory the program can find a service by: the service's token, and the IPC port
+/// the test's service picked (its own `service.json` says 0).
+fn cli_local(svc: &TestService) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("ipc.token"), token_of(svc.home.path())).unwrap();
+    std::fs::write(dir.path().join("service.json"), json!({"ipc_port": svc.svc.ipc_port}).to_string()).unwrap();
+    dir
+}
+
+/// Runs `rapp-cli args` against `local`, feeding `stdin` and then closing it.
+async fn cli(local: &Path, args: &[&str], stdin: &[u8]) -> std::process::Output {
+    let mut child = tokio::process::Command::new(cli_bin())
+        .args(args)
+        .env("RAPP_LOCAL", local)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    input.write_all(stdin).await.unwrap();
+    drop(input);
+    tokio::time::timeout(WAIT, child.wait_with_output()).await.expect("the program ends in time").unwrap()
+}
+
+#[tokio::test]
+async fn the_cli_shares_and_pipes() {
+    let rig = over_relay().await;
+    let (a_local, b_local) = (cli_local(&rig.a), cli_local(&rig.b));
+    let (port, _echo) = echo().await;
+    let out = cli(a_local.path(), &["share", &port.to_string()], b"").await;
+    assert_eq!(String::from_utf8_lossy(&out.stdout), format!("已分享：http://{}.rapp:{port}\n", rig.a.id));
+    assert_eq!(out.status.code(), Some(0));
+
+    let out = cli(a_local.path(), &["share"], b"").await;
+    assert!(String::from_utf8_lossy(&out.stdout).contains(&format!("http://{}.rapp:{port}", rig.a.id)));
+
+    let out = cli(b_local.path(), &["pipe", &format!("{}.rapp", rig.a.id), &port.to_string()], b"hello").await;
+    assert_eq!(out.stdout, b"hello");
+    assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+
+    let out = cli(b_local.path(), &["pipe", &rig.a.id, "9"], b"").await;
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(String::from_utf8_lossy(&out.stderr), format!("{0} 没有分享 9。在 {0} 上运行 rapp share 9\n", rig.a.id));
+
+    let out = cli(a_local.path(), &["unshare", &port.to_string()], b"").await;
+    assert_eq!(out.status.code(), Some(0));
+    let out = cli(b_local.path(), &["pipe", &rig.a.id, &port.to_string()], b"").await;
+    assert_eq!(out.status.code(), Some(1));
+
+    let empty = tempfile::tempdir().unwrap();
+    let out = cli(empty.path(), &["share"], b"").await;
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(String::from_utf8_lossy(&out.stderr), "本机的 rapp 服务没有在运行\n");
+}

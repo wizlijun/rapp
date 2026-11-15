@@ -1195,6 +1195,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rapp-cli"
+version = "0.10.0"
+dependencies = [
+ "anyhow",
+ "rapp-net",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "rapp-client-core"
 version = "0.10.2"
 dependencies = [
