@@ -564,9 +564,10 @@ impl Outbound {
         Ok(conn)
     }
 
-    /// Step 5: one relayed stream: end-to-end TLS, hello and `op` in one flight, the welcome, the reply.
+    /// Step 5: one relayed stream (at `priority_of(op)`): end-to-end TLS, hello and `op` in one
+    /// flight, the welcome, the reply.
     async fn relayed(&self, relay: &RelayConn, key: &Key, to: &Target<'_>, op: &Op) -> Result<Sent> {
-        let stream = relay.relay_to(to.id).await?;
+        let stream = relay.relay_to_at(to.id, priority_of(op)).await?;
         // The relay's refusal (`offline`, `unknown id`, ...) comes back as the failure of the first read.
         let tls = tokio::time::timeout(REPLY_WAIT, e2e_connect(stream, &self.identity));
         let (mut pipe, facts) = tls.await.map_err(|_| anyhow!("no reply"))?.map_err(|e| not_reached(relay_failure(e)))?;
@@ -691,6 +692,16 @@ async fn send_on(mux: &Mux, fp: &OnceLock<Fp>, op: &Op) -> Result<Sent> {
     Ok(Sent { pipe: Box::new(s), reply, path: "relay", fp })
 }
 
+/// The priority of a relayed stream that carries `op` alone: a forward (to an older version, or
+/// on the way without a channel) yields to the sessions on the same relay connection, as one on a
+/// channel does; any other request keeps quinn's default.
+fn priority_of(op: &Op) -> i32 {
+    match op {
+        Op::Forward { .. } => FORWARD_PRIORITY,
+        _ => 0,
+    }
+}
+
 /// What an older version answers `mux` with.
 fn is_older(why: Option<&str>) -> bool {
     matches!(why, Some("unknown op" | "bad request"))
@@ -795,6 +806,13 @@ mod tests {
     use tokio::io::AsyncWriteExt;
 
     const A_ID: &str = "123456789";
+
+    #[test]
+    fn a_lone_forward_goes_at_forward_priority() {
+        assert_eq!(priority_of(&Op::Forward { port: 22 }), FORWARD_PRIORITY);
+        assert_eq!(priority_of(&Op::ListShares), 0);
+        assert_eq!(priority_of(&Op::Ping), 0);
+    }
 
     /// What the fake device does with a connection.
     #[derive(Clone, Copy)]
