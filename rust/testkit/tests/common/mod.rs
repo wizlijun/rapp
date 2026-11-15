@@ -65,6 +65,8 @@ pub async fn start_service(home: &Path, bins: &Path, idle: Duration) -> Service 
         data: None,
         advertise_lan: None,
         forward_sum_every: Duration::from_secs(600),
+        forward_priority: rapp_conn::relay::FORWARD_PRIORITY,
+        channels: true,
     })
     .await
     .unwrap()
@@ -89,6 +91,8 @@ pub async fn start_service_with(
         data: None,
         advertise_lan: None,
         forward_sum_every: Duration::from_secs(600),
+        forward_priority: rapp_conn::relay::FORWARD_PRIORITY,
+        channels: true,
     })
     .await
     .unwrap()
@@ -510,13 +514,24 @@ pub async fn service_on_relay(addr: &str, key: &rapp_wire::Key) -> TestService {
 
 /// Like `service_on_relay`, registering `lan` (None: the service's own addresses).
 pub async fn service_on_relay_lan(addr: &str, key: &rapp_wire::Key, lan: Option<Vec<String>>) -> TestService {
+    service_on_relay_with(addr, key, lan, |_| {}).await
+}
+
+/// Like `service_on_relay_lan`, with `tune` given the `Opts` last (its `home` is the service's home,
+/// for files that must exist before it starts).
+pub async fn service_on_relay_with(
+    addr: &str,
+    key: &rapp_wire::Key,
+    lan: Option<Vec<String>>,
+    tune: impl FnOnce(&mut rapp_service::Opts),
+) -> TestService {
     let (home, bins) = (tempfile::tempdir().unwrap(), bins());
     let cfg = json!({
         "id": null, "name": "test-a", "password": PASSWORD, "port": 0, "ipc_port": 0,
         "relay": addr, "key": key.to_string(),
     });
     rapp_net::config::write_json(&home.path().join("service.json"), &cfg).unwrap();
-    let svc = Service::start(rapp_service::Opts {
+    let mut opts = rapp_service::Opts {
         home: home.path().to_path_buf(),
         bin_dir: Some(bins.path().to_path_buf()),
         gui: None,
@@ -528,9 +543,11 @@ pub async fn service_on_relay_lan(addr: &str, key: &rapp_wire::Key, lan: Option<
         data: None,
         advertise_lan: lan,
         forward_sum_every: Duration::from_secs(600),
-    })
-    .await
-    .unwrap();
+        forward_priority: rapp_conn::relay::FORWARD_PRIORITY,
+        channels: true,
+    };
+    tune(&mut opts);
+    let svc = Service::start(opts).await.unwrap();
     let id = ipc_once(&svc, home.path(), json!({"cmd":"status"})).await["id"].as_str().unwrap().to_string();
     TestService { svc, home, bins, id }
 }
@@ -662,4 +679,24 @@ async fn gate_forward(
         };
         let _ = up.send(&buf[..n]).await;
     }
+}
+
+/// B's relayed request: `relay_to`, TLS, hello and `request` in one go; returns the pipe at the reply.
+pub async fn relayed_request(
+    b: &rapp_conn::relay::RelayConn,
+    id: &rapp_wire::Identity,
+    a_id: &str,
+    key: &rapp_wire::Key,
+    request: Value,
+) -> rapp_conn::Pipe {
+    let stream = tokio::time::timeout(WAIT, b.relay_to(a_id)).await.expect("relay_to in time").unwrap();
+    let (mut pipe, facts) = tokio::time::timeout(WAIT, rapp_conn::e2e_connect(stream, id)).await.unwrap().unwrap();
+    let me = rapp_conn::Me { id: "", name: "test-b", key: Some(key) };
+    rapp_conn::send_hello(&mut pipe, &facts, &me).await.unwrap();
+    write_json(&mut pipe, &request).await.unwrap();
+    tokio::time::timeout(WAIT, rapp_conn::read_welcome(&mut pipe, &facts, Some(key), a_id, None))
+        .await
+        .unwrap()
+        .unwrap();
+    pipe
 }

@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use rapp_conn::relay::{
     is_bad_key, is_key_changed, refused_key, Pushed, RelayConn, BAD_KEY, CLOSE_BAD_KEY, CLOSE_KEY_CHANGED, KEY_CHANGED,
+    FORWARD_PRIORITY,
 };
 use rapp_conn::{e2e_accept, e2e_connect};
 use rapp_net::log::Log;
@@ -405,4 +406,28 @@ async fn an_enrolled_connection_outlives_the_unenrolled_idle_deadline() {
     assert!(idle.is_closed());
     assert!(!kept.is_closed());
     kept.probe(WAIT).await.unwrap();
+}
+
+#[tokio::test]
+async fn a_pushed_stream_takes_its_priority_on_the_next_write() {
+    let r = start().await;
+    let (ea, eb) = (endpoint(), endpoint());
+    let (ia, ib) = (Identity::generate().unwrap(), Identity::generate().unwrap());
+    let a = dial(&r, &ea, &ia).await;
+    a.register(A_ID, &[]).await.unwrap();
+    let b = dial(&r, &eb, &ib).await;
+
+    let mut bs = tokio::time::timeout(WAIT, b.relay_to_at(A_ID, FORWARD_PRIORITY)).await.unwrap().unwrap();
+    bs.write_all(b"h").await.unwrap();
+    let Pushed::Relayed { mut stream, prio, .. } = push_skipping_revoked(&a).await else { panic!("expected Relayed") };
+    assert_eq!(prio.applied(), None);
+    let mut buf = [0u8; 1];
+    tokio::time::timeout(WAIT, stream.read_exact(&mut buf)).await.unwrap().unwrap();
+    assert_eq!(&buf, b"h");
+    prio.set(FORWARD_PRIORITY);
+    stream.write_all(b"x").await.unwrap();
+    stream.flush().await.unwrap();
+    assert_eq!(prio.applied(), Some(FORWARD_PRIORITY));
+    tokio::time::timeout(WAIT, bs.read_exact(&mut buf)).await.unwrap().unwrap();
+    assert_eq!(&buf, b"x");
 }

@@ -4,6 +4,7 @@
 pub mod dial;
 pub mod e2e;
 pub mod hello;
+pub mod mux;
 pub mod netq;
 pub mod paired;
 pub mod proof;

@@ -1,6 +1,7 @@
 //! rapp-service (spec §3): A side. Authenticates B, runs `rapp-host` workers, serves local IPC.
 
 pub mod autolock;
+mod channel;
 mod cm;
 pub mod config;
 mod data;
@@ -59,6 +60,11 @@ pub struct Opts {
     pub advertise_lan: Option<Vec<String>>,
     /// How often the `forward_sum` lines are written (`forward_log::SUM_EVERY` in the real service).
     pub forward_sum_every: Duration,
+    /// The priority of forwarded traffic on the relay connection (`rapp_conn::relay::FORWARD_PRIORITY`
+    /// in the real service). Only the testkit and measurements set anything else.
+    pub forward_priority: i32,
+    /// False: `mux` is an unknown op, as on an older version (true in the real service).
+    pub channels: bool,
 }
 
 /// Where the running app is and the updater's timings (online-update plan Task 4).
@@ -160,6 +166,8 @@ impl Service {
             forward_log: forward_log::ForwardLog::new(log.clone()),
             shares,
             forwards: forward::Forwards::new(),
+            forward_priority: opts.forward_priority,
+            channels: opts.channels,
             outbound: rapp_conn::dial::Outbound::new(client_ep, identity.clone(), name),
         };
         let id = state.cfg.lock().unwrap().id.clone();

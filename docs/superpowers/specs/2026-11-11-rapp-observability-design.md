@@ -91,6 +91,8 @@
 | `forward` | info | `peer, name?, path, fp, port, secs, bytes_in, bytes_out` | 一条转发连接结束。`each` 每条一行；合并时只记第一条，其余算进 `forward_sum`。`bytes_in` 是来访设备发来的，`bytes_out` 是发给它的（`forward_log.rs:83`） |
 | `forward_sum` | info | `peer, name?, path, fp, port, conns, bytes_in, bytes_out` | 只在合并时有：每 10 分钟一次，服务停止时再一次；这段时间里有连接结束的每个（来访设备, 端口）一行，`conns` 和字节数含第一条（`forward_log.rs:130`） |
 | `forward_refused` | warn | `peer, name?, path, fp?, port?, reason` | `forward` 或 `list_shares` 被拒。reason 取 `not supported`（旧的密码认证连接）、`host only`、`policy`、`not shared`、`not allowed`、`refused`（端口上没有服务在听）、`limit`（这台来访设备已有 256 条转发）。同一（来访设备, 端口, 原因）60 秒内只记一行；`list_shares` 被拒的没有 `port`（`forward_log.rs:106`） |
+| `channel` | info | `peer, name?, path, fp` | （实现注，2026-11-16）一台设备经 relay 和本机建了一条转发通道（端口分享规格 §5.2）。一条通道里的转发各自照常记 `forward_open`、`forward`（`rust/service/src/channel.rs`） |
+| `channel_end` | info | `peer, name?, path, fp, streams, reason, secs` | 这条通道关了。`streams` 是它上面一共开过的连接数；`reason` 取 `closed`、`idle`、`dead`、`eof`、`protocol: …` 或底下连接的错误 |
 | `log` | 任意 | `msg, src?, app?` | 原来的 `eprintln!`，以及 worker 的 stderr 行（加上 `src:"host"` 和 `app`） |
 
 `peer` 是对方的地址。走 relay 时，就是 relay 报来的 B 的公网地址。
