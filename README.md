@@ -58,5 +58,6 @@ Thanks to the open-source projects that informed or support rapp:
 
 - [RustDesk](https://github.com/rustdesk/rustdesk) — device connection and self-hosted relay design references.
 - [Sunshine](https://github.com/SunshineStream/Sunshine) — a reference for streaming research.
+- [hurryvc](https://github.com/swigger/hurryvc) — the design reference for text terminals on macOS and Windows (pseudo-terminal plus screen-state sync).
 - [Flutter](https://github.com/flutter/flutter) and [GTK](https://www.gtk.org/) — user interfaces.
 - [Tokio](https://github.com/tokio-rs/tokio), [Quinn](https://github.com/quinn-rs/quinn), and [rustls](https://github.com/rustls/rustls) — networking foundations.

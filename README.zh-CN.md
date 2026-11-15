@@ -58,5 +58,6 @@ RAPP_ALLOW_ADHOC=1 ./scripts/package-macos.sh
 
 - [RustDesk](https://github.com/rustdesk/rustdesk)：设备连接与自建中继的设计参考。
 - [Sunshine](https://github.com/SunshineStream/Sunshine)：串流技术研究参考。
+- [hurryvc](https://github.com/swigger/hurryvc)：macOS、Windows 上文本终端（伪终端加屏幕状态同步）的设计参考。
 - [Flutter](https://github.com/flutter/flutter)、[GTK](https://www.gtk.org/)：用户界面。
 - [Tokio](https://github.com/tokio-rs/tokio)、[Quinn](https://github.com/quinn-rs/quinn)、[rustls](https://github.com/rustls/rustls)：网络基础。
