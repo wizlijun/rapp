@@ -45,6 +45,10 @@ pub enum Op {
     RemoveTermTarget {
         name: String,
     },
+    /// The ports this device shares with the caller.
+    ListShares,
+    /// Open a TCP forward to one of the ports this device shares with the caller.
+    Forward { port: u16 },
 }
 
 #[cfg(test)]
@@ -60,6 +64,15 @@ mod tests {
         assert_eq!(serde_json::to_value(Op::Ping).unwrap(), json!({"op":"ping"}));
         let op: Op = serde_json::from_value(json!({"op":"auth","password":"p"})).unwrap();
         assert_eq!(op, Op::Auth { password: Some("p".into()), name: None });
+    }
+
+    #[test]
+    fn share_requests() {
+        assert_eq!(serde_json::to_value(Op::ListShares).unwrap(), json!({"op":"list_shares"}));
+        assert_eq!(serde_json::to_value(Op::Forward { port: 8000 }).unwrap(), json!({"op":"forward","port":8000}));
+        assert_eq!(serde_json::from_value::<Op>(json!({"op":"forward","port":22})).unwrap(), Op::Forward { port: 22 });
+        assert!(serde_json::from_value::<Op>(json!({"op":"forward","port":70000})).is_err());
+        assert!(serde_json::from_value::<Op>(json!({"op":"forward"})).is_err());
     }
 
     #[test]
