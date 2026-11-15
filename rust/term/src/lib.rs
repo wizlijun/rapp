@@ -3,6 +3,7 @@ pub mod id;
 pub mod keys;
 pub mod list;
 pub mod proto;
+pub mod pty;
 pub mod runner;
 pub mod screen;
 pub mod sender;
