@@ -164,7 +164,7 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
             _ = int.recv() => break End::Signal(libc::SIGINT),
             _ = quit.recv() => break End::Signal(libc::SIGQUIT),
             _ = winch.recv() => resize(pair.master.as_ref(), &shared),
-            _ = tick.tick() => tick_sync(&shared),
+            _ = tick.tick() => tick_sync(&shared, Emu::tick),
         }
     };
     let code = match end {
@@ -222,20 +222,22 @@ fn window_size() -> Option<(u16, u16)> {
 fn resize(master: &dyn MasterPty, shared: &Shared) {
     let Some((cols, rows)) = window_size() else { return };
     let _ = master.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 });
-    shared.emu.lock().unwrap_or_else(|e| e.into_inner()).resize(cols, rows);
+    guarded(shared, Some((cols, rows)), |emu| emu.resize(cols, rows));
     shared.rev.send_modify(|r| *r += 1);
 }
 
-/// Apply a synchronized update whose end never came once its time is up.
-fn tick_sync(shared: &Shared) {
-    let mut emu = shared.emu.lock().unwrap_or_else(|e| e.into_inner());
-    if !emu.sync_pending() {
-        return;
-    }
-    emu.tick();
-    let applied = !emu.sync_pending();
-    drop(emu);
-    if applied {
+/// Apply a synchronized update whose end never came once its time is up, through `tick`.
+fn tick_sync(shared: &Shared, tick: impl FnOnce(&mut Emu)) {
+    // Applying replays the held bytes through the parser, so it can panic like a feed.
+    let applied = guarded(shared, None, |emu| {
+        if !emu.sync_pending() {
+            return false;
+        }
+        tick(emu);
+        !emu.sync_pending()
+    });
+    // None: a fresh emulator, which viewers are shown too.
+    if applied != Some(false) {
         shared.rev.send_modify(|r| *r += 1);
     }
 }
@@ -259,22 +261,28 @@ fn pump_output(
         };
         // A window that is gone is no reason to stop: viewers still see the screen.
         let _ = window.write_all(&b[..n]).and_then(|()| window.flush());
-        feed_guarded(shared, &b[..n], &feed);
+        guarded(shared, None, |emu| feed(emu, &b[..n]));
         shared.activity.store(now(), Ordering::Relaxed);
         shared.rev.send_modify(|r| *r += 1);
     }
     let _ = drained.send(());
 }
 
-/// The emulator takes `bytes`. One that panics on them is replaced by a fresh one of the same size, so the output
-/// keeps reaching the window: this thread is the only one draining the pty.
-fn feed_guarded(shared: &Shared, bytes: &[u8], feed: &impl Fn(&mut Emu, &[u8])) {
+/// Runs `f` on the emulator; None when it panicked, and the emulator is then a fresh one of size `fresh`, or else of
+/// the size it had. No escape sequence may end run (the main loop ticks and resizes it) or stop its output
+/// (`pump_output` is the only thread draining the pty).
+fn guarded<T>(shared: &Shared, fresh: Option<(u16, u16)>, f: impl FnOnce(&mut Emu) -> T) -> Option<T> {
     let mut emu = shared.emu.lock().unwrap_or_else(|e| e.into_inner());
-    let size = emu.size();
-    if std::panic::catch_unwind(AssertUnwindSafe(|| feed(&mut emu, bytes))).is_err() {
-        // The window is raw: the line ends with its own carriage return.
-        eprint!("rapp-term: the emulator failed on the program's output; viewers start from a blank screen\r\n");
-        *emu = Emu::new(size.0, size.1);
+    let (cols, rows) = fresh.unwrap_or_else(|| emu.size());
+    match std::panic::catch_unwind(AssertUnwindSafe(|| f(&mut emu))) {
+        Ok(v) => Some(v),
+        Err(_) => {
+            // The window is raw: the line ends with its own carriage return. A window that is gone fails quietly.
+            let line = b"rapp-term: the emulator failed on the program's output; viewers start from a blank screen\r\n";
+            let _ = std::io::stderr().write_all(line);
+            *emu = Emu::new(cols, rows);
+            None
+        }
     }
 }
 
@@ -422,5 +430,28 @@ mod tests {
         // A fresh emulator, at the old size, with what came after.
         let s = sh.emu.lock().unwrap().screen();
         assert_eq!((s.cols, s.rows, s.lines[0].as_str()), (30, 4, "two"));
+    }
+
+    #[test]
+    fn an_emulator_panic_on_a_tick_is_caught_and_shown() {
+        let sh = shared(30, 4);
+        // A synchronized update whose end never comes.
+        sh.emu.lock().unwrap().feed(b"\x1b[?2026hheld");
+        assert!(sh.emu.lock().unwrap().sync_pending());
+        let rev = sh.rev.subscribe();
+        tick_sync(&sh, |_: &mut Emu| panic!("the emulator fell over"));
+        let emu = sh.emu.lock().unwrap();
+        assert!(!emu.sync_pending());
+        assert_eq!((emu.size(), emu.screen().lines[0].as_str()), ((30, 4), ""));
+        assert!(rev.has_changed().unwrap(), "viewers are told");
+    }
+
+    #[test]
+    fn an_emulator_that_panics_on_a_resize_comes_back_at_the_new_size() {
+        let sh = shared(30, 4);
+        let done = guarded(&sh, Some((50, 6)), |_: &mut Emu| panic!("the emulator fell over"));
+        assert!(done.is_none());
+        assert_eq!(sh.emu.lock().unwrap().size(), (50, 6));
+        assert_eq!(guarded(&sh, None, |e: &mut Emu| e.size()), Some((50, 6)));
     }
 }
