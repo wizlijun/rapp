@@ -8,13 +8,11 @@ use quinn::congestion::{BbrConfig, CubicConfig, NewRenoConfig};
 use quinn::crypto::rustls::QuicServerConfig;
 use quinn::{ClientConfig, Endpoint, ServerConfig, TransportConfig};
 use rapp_net::quic::{client_config, ALPN_PEER, SNI};
-use rapp_testkit::weaknet::{self, Profile, ProxyStats};
+use rapp_testkit::weaknet::{self, Profile};
 use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
-use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::net::UdpSocket;
 
 const RUN: Duration = Duration::from_secs(20);
 
@@ -52,17 +50,6 @@ fn client(cc: &str) -> ClientConfig {
     let mut c = client_config(ALPN_PEER).unwrap();
     c.transport_config(transport(cc));
     c
-}
-
-async fn proxy(upstream: SocketAddr, p: Profile) -> SocketAddr {
-    let probe = UdpSocket::bind("127.0.0.1:0").await.unwrap();
-    let listen = probe.local_addr().unwrap();
-    drop(probe);
-    tokio::spawn(async move {
-        let _ = weaknet::run(listen, upstream, p, Arc::new(ProxyStats::default())).await;
-    });
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    listen
 }
 
 struct Result1 {
@@ -110,7 +97,7 @@ async fn one(cc: &str, profile: &str) -> Result1 {
             });
         }
     });
-    let px = proxy(srv_addr, p).await;
+    let px = weaknet::spawn_proxy(srv_addr, p).await;
     let ep = Endpoint::client("127.0.0.1:0".parse().unwrap()).unwrap();
     let conn = tokio::time::timeout(Duration::from_secs(20), ep.connect_with(client(cc), px, SNI).unwrap())
         .await

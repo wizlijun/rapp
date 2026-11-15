@@ -1148,6 +1148,48 @@ async fn measure_the_forward_over_the_relay() {
     eprintln!("{}", lines.join("\n"));
 }
 
+/// B is 25 ms from the relay each way (a 50 ms round trip), A is not delayed. A round trip between
+/// the two devices over the relay is about 50 ms. 1a needs two for every forward (about 100 ms);
+/// with the channel built, one.
+#[tokio::test]
+async fn opening_over_the_channel_costs_one_round_trip() {
+    const RTT_MS: f64 = 50.0;
+    let mut p = rapp_testkit::weaknet::Profile::load(&Path::new(env!("CARGO_MANIFEST_DIR")).join("profiles/lan.json")).unwrap();
+    p.delay_ms = (25, 25);
+    p.seed = 1;
+    let mut medians = Vec::new();
+    for (group, channels) in [("old", false), ("channel", true)] {
+        let (port, _echo) = echo().await;
+        let rig = RelayRig::start_with_connect_limit(1000).await;
+        let a = service_on_relay_with(&rig.addr, &rig.key, Some(vec![]), |o| o.channels = channels).await;
+        wait_status(&mut Ipc::open(&a.svc, a.home.path()).await, |s| s["relay"] == "connected").await;
+        assert_eq!(ipc_once(&a.svc, a.home.path(), json!({"cmd":"share","ports":[port]})).await["ok"], true);
+        let through = rapp_testkit::weaknet::spawn_proxy(rig.addr.parse().unwrap(), p.clone()).await;
+        let b = service_on_relay_with(&through.to_string(), &rig.key, Some(vec![]), |_| {}).await;
+        wait_status(&mut Ipc::open(&b.svc, b.home.path()).await, |s| s["relay"] == "connected").await;
+        let (token, to) = (token_of(b.home.path()), format!("{}.rapp", a.id));
+        // The first forward builds the channel (or finds out that A is an old sharer).
+        let (r, mut first) = pipe(b.svc.ipc_port, &token, &to, port).await;
+        assert_eq!(r, json!({"ok":true,"path":"relay"}));
+        say_hi(&mut first).await;
+        let plan = rapp_testkit::Plan { ipc_port: b.svc.ipc_port, token, to, port, n: 50, parallel: 6 };
+        let report = rapp_testkit::measure(&plan).await.unwrap();
+        eprintln!("[{group}]\n{}", report.lines().join("\n"));
+        assert_eq!(report.path["relay"], 50 * 2 / 2 * 2 / 2 * 2 / 2 * 2 / 2 * 2, "{:?}", report.path);
+        let seq = rapp_testkit::quantile_ms(&report.open_seq, 0.5);
+        let par = rapp_testkit::quantile_ms(&report.open_par, 0.5);
+        medians.push((seq, par));
+        if channels {
+            assert!(seq <= 1.5 * RTT_MS, "channel open_seq median {seq} ms");
+            assert!(par <= 1.5 * RTT_MS, "channel open_par median {par} ms");
+            assert_eq!(count(a.home.path(), "channel"), 1, "{:?}", log_events(a.home.path()));
+        } else {
+            assert!(seq >= 1.7 * RTT_MS, "old open_seq median {seq} ms: the delay is not applied, or 1a is not two round trips");
+        }
+    }
+    eprintln!("medians (open_seq, open_par): old {:?}, channel {:?}", medians[0], medians[1]);
+}
+
 #[tokio::test]
 async fn a_local_share_and_unshare_are_logged_as_local() {
     let (a, _key) = start_sharing(|_| {}).await;

@@ -256,6 +256,8 @@ relay 规格里，经中继的每一条流都要在里面再做一次 TLS 握手
 
 局域网直连时不需要：一条 QUIC 连接上本来就能开很多条流。
 
+（实现注，2026-11-16）通道是 `rapp-conn` 里自己写的复用层（`rust/conn/src/mux.rs`），帧格式和窗口照实现计划"计划定的"第 1、2 条。第一条连接和建通道一起发（两个往返），之后每条一个往返。旧分享方对 `mux` 回 `unknown op` 时，访问方退回每条一流，记 10 分钟。通道开着时不再试局域网，空闲 5 分钟关。本机加了 25 ms 单向延迟的测量：旧式 `open_seq` 中位数约 117 ms，通道约 57 ms，见 `docs/superpowers/measurements/2026-11-16-port-sharing-mux.md`。
+
 ### 5.3 不拖慢远程会话
 
 转发的流和远程会话的流走同一条设备连接。要求：同一对设备之间有大流量转发时，远程会话的输入和画面延迟不明显变差。做法（流的优先级，或限制转发占的份额）和验收的数字留给实现计划，用流畅串流规格 §4.1 的工具量。
@@ -601,7 +603,7 @@ relay 规格 §4.3 的"relay 知道什么"多两行：每台设备占着几个�
 | 步 | 做什么 | 做完以后 |
 |---|---|---|
 | 0 先验证 | §16 第 1 到 4 条：macOS 和 Linux 上域名怎么交给本机解析；浏览器开着加密 DNS 时；1024 以下端口的监听 | §9.2 的做法定下来，或者换掉 |
-| 1 底座 | 分享表、`rapp share`（含打印地址、"只给谁"）；`list_shares`、`forward` 和授权检查点；`rapp pipe`；访问记录（两种模式）；经 relay 的复用通道（§5.2）；向外拨号的代码挪成共用。（实现注，2026-11-16）拆成上、下两份计划：上（`docs/superpowers/plans/2026-11-15-port-sharing-1a-base.md`）做分享表、`rapp share`、`list_shares`、`forward`、检查点、`rapp pipe`、访问记录，经 relay 每条转发各握一次手，拨号代码没有挪（见 §5 的实现注）；下做 §5.2 的复用通道和 §5.3 的会话优先，基线见 `docs/superpowers/measurements/2026-11-15-port-sharing-forward-baseline.md` | 两台普通设备之间：`rapp pipe` 能接任何分享了的端口；按 §9.4 加两行配置后能 `ssh 123456789.rapp`；没分享的端口被拒 |
+| 1 底座 | 分享表、`rapp share`（含打印地址、"只给谁"）；`list_shares`、`forward` 和授权检查点；`rapp pipe`；访问记录（两种模式）；经 relay 的复用通道（§5.2）；向外拨号的代码挪成共用。（实现注，2026-11-16）拆成上、下两份计划：上（`docs/superpowers/plans/2026-11-15-port-sharing-1a-base.md`）做分享表、`rapp share`、`list_shares`、`forward`、检查点、`rapp pipe`、访问记录，经 relay 每条转发各握一次手，拨号代码没有挪（见 §5 的实现注）；下做 §5.2 的复用通道和 §5.3 的会话优先，基线见 `docs/superpowers/measurements/2026-11-15-port-sharing-forward-baseline.md`。（实现注，2026-11-16）复用通道和会话优先已做（`docs/superpowers/plans/` 下的 1b 计划），真机数字见 `docs/superpowers/measurements/2026-11-16-port-sharing-mux.md` | 两台普通设备之间：`rapp pipe` 能接任何分享了的端口；按 §9.4 加两行配置后能 `ssh 123456789.rapp`；没分享的端口被拒 |
 | 1.5 面板和远程设置 | （面板增补，2026-11-16）设备面板列出每台设备分享的端口和 `.rapp` 地址（能复制）；在一台设备上替另一台开关端口、改备注和"只给谁"，存进那台设备自己的 `shares.json`。排在第 1 步（上）之后、（下）之前（U145）。见面板增补 | 选中一台设备就看到它分享的端口；远程分享的端口在对方重启后还在；"打开"要等第 4 步 |
 | 2 名字 | 机器名（含自动加序号）、短名；relay 的名字指纹；`resolve` | `ssh ubuntu-2.rapp`；短名重名当场被拒 |
 | 3 服务器 | 服务器 key（设备和 relay 两边）；入网串；`rapp add-server`；无界面 Linux 的安装包和那一行 | NAT 后面的一台服务器：复制一行、运行，从桌面 `ssh` 上去；从那台服务器发起的访问全部被拒 |
