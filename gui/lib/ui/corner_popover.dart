@@ -17,17 +17,22 @@ class CornerPopover extends StatefulWidget {
     required this.scrimKey,
     required this.popover,
     required this.child,
+    this.alignLeft = false,
   });
 
   final bool open;
   final VoidCallback onClose;
   final Key scrimKey;
 
-  /// The popover's content, 340 wide inside a panel box.
+  /// The popover's content, 340 wide inside an opaque float box.
   final Widget popover;
 
   /// The corner's button.
   final Widget child;
+
+  /// Hang from the button's left edge instead of its right; then the popover narrows and moves
+  /// left as needed to stay 8 inside the window.
+  final bool alignLeft;
 
   @override
   State<CornerPopover> createState() => _CornerPopoverState();
@@ -56,6 +61,16 @@ class _CornerPopoverState extends State<CornerPopover> {
         controller: _portal,
         overlayChildBuilder: (context) {
           if (!widget.open) return const SizedBox.shrink();
+          final screen = MediaQuery.sizeOf(context).width;
+          var width = 340.0;
+          var dx = 0.0;
+          if (widget.alignLeft) {
+            width = width.clamp(0.0, (screen - 16).clamp(0.0, double.infinity)).toDouble();
+            // The button was laid out in the frame that opened the popover.
+            final box = this.context.findRenderObject() as RenderBox?;
+            final left = box != null && box.hasSize ? box.localToGlobal(Offset.zero).dx : 0.0;
+            dx = -(left + width - (screen - 8)).clamp(0.0, double.infinity).toDouble();
+          }
           return Stack(
             children: [
               // Below the bar, so the bar's own buttons stay live (the tap that closes the corner
@@ -66,16 +81,16 @@ class _CornerPopoverState extends State<CornerPopover> {
               ),
               CompositedTransformFollower(
                 link: _link,
-                targetAnchor: Alignment.bottomRight,
-                followerAnchor: Alignment.topRight,
-                offset: const Offset(0, 4),
+                targetAnchor: widget.alignLeft ? Alignment.bottomLeft : Alignment.bottomRight,
+                followerAnchor: widget.alignLeft ? Alignment.topLeft : Alignment.topRight,
+                offset: Offset(dx, 4),
                 child: TapRegion(
                   groupId: cornerTapGroup,
                   onTapOutside: (_) => widget.onClose(),
                   child: Material(
                     type: MaterialType.transparency,
                     child: Container(
-                      width: 340,
+                      width: width,
                       constraints: BoxConstraints(maxHeight: (MediaQuery.sizeOf(context).height - 80).clamp(200, 900)),
                       decoration: t.floatBox(),
                       child: widget.popover,

@@ -41,7 +41,8 @@ export 'lifecycle.dart' show hubWord, hubWords;
 enum PanelTab { sessions, devices, projects, resources }
 
 /// The two top-bar corners; at most one is open.
-enum Corner { stream, needs, session, remote }
+/// The top bar's popovers: the stream menu, 需要你, 本机, 远程, and the session list.
+enum Corner { stream, needs, session, remote, sessions }
 
 enum NeedKind { session, device }
 
@@ -340,6 +341,8 @@ class MainState extends ChangeNotifier {
       _followCurrentKey();
     }
     if (embeds) _entries = _mapEntries();
+    // The session list has nothing to show once the last session is gone.
+    if (corner == Corner.sessions && _entries.isEmpty) corner = null;
     _trackAttention();
     // Focus never stays on a session that is no longer current (mid-move, the old one is on the stage).
     if (pictureFocused != null && (currentRemote?.sid ?? current?.sid) != pictureFocused) _blur();

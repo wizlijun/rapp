@@ -9,8 +9,10 @@ import 'tab_chip.dart';
 import 'main_state.dart';
 import 'needs_you.dart';
 import 'net_marker.dart';
+import 'corner_popover.dart';
 import 'projects.dart';
 import 'session_model.dart';
+import 'session_switcher.dart';
 import 'tokens.dart';
 
 class TopBar extends StatelessWidget {
@@ -91,6 +93,10 @@ class TopBar extends StatelessWidget {
             final tabs = rs == null || rs.detached ? null : rs.tabs;
             // With a current project, stepping stays inside it: only its open sessions count.
             final multi = state.steppableCount >= 2;
+            // Any open session makes the block the session list's button; its ▾ (and padding)
+            // only where it leaves the name some room.
+            final canSwitch = state.sessionCount > 0;
+            final arrow = canSwitch && sessionMax >= 60;
             final small = Theme.of(context).textTheme.bodySmall;
             return Container(
               height: topBarHeight,
@@ -116,7 +122,11 @@ class TopBar extends StatelessWidget {
                   SizedBox(width: gap),
                   ConstrainedBox(
                       constraints: BoxConstraints(maxWidth: sessionMax),
-                      child: cur == null
+                      child: _sessionBlock(
+                        t,
+                        canSwitch: canSwitch,
+                        arrow: arrow,
+                        child: cur == null
                           ? Text(
                               _projectName() ?? '没有选中的会话',
                               maxLines: 1,
@@ -126,6 +136,7 @@ class TopBar extends StatelessWidget {
                           : Semantics(
                               container: true,
                               excludeSemantics: true,
+                              button: canSwitch,
                               label:
                                   '$title，${lampWord(cur.lamp)}，$sub',
                               child: Row(
@@ -166,6 +177,7 @@ class TopBar extends StatelessWidget {
                                 ],
                               ),
                             ),
+                      ),
                   ),
                   SizedBox(width: gap),
                   _icon(
@@ -322,6 +334,44 @@ class TopBar extends StatelessWidget {
       onAddToProject: (id) => state.addMember(id, MainState.appRefOf(cur)),
       canSaveProject: state.canSaveOpenAsProject,
       onSaveProject: state.saveOpenAsProject,
+    );
+  }
+
+  /// The session block, the session list's button while there is a session to switch to.
+  Widget _sessionBlock(RappTokens t, {required bool canSwitch, required bool arrow, required Widget child}) {
+    if (!canSwitch) return KeyedSubtree(key: const Key('session-block'), child: child);
+    final open = state.corner == Corner.sessions;
+    final radius = BorderRadius.circular(t.r);
+    return CornerPopover(
+      open: open,
+      onClose: state.closeCorner,
+      scrimKey: const Key('sessions-scrim'),
+      alignLeft: true,
+      popover: SessionSwitcher(state: state),
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          key: const Key('session-block'),
+          onTap: () => state.toggleCorner(Corner.sessions),
+          borderRadius: radius,
+          child: DecoratedBox(
+            decoration: open ? t.raiseBox(border: t.text) : BoxDecoration(borderRadius: radius),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 48),
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: arrow ? 4 : 0),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(child: child),
+                    if (arrow) Icon(Icons.arrow_drop_down, size: 18, color: t.muted),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 
