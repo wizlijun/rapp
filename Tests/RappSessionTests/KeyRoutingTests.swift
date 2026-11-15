@@ -148,4 +148,75 @@ final class KeyTrackerRouteTests: XCTestCase {
         XCTAssertEqual(k.route(keyCode: 57, down: true, flags: [.capsLock], pictureFocused: false), KeyDecision(.local))
         XCTAssertEqual(k.releaseAll(), [])
     }
+
+    // MARK: type-to-compose
+
+    func testComposeKeyLetters() {
+        XCTAssertTrue(isComposeKey(characters: "a", flags: [], isRepeat: false))
+        XCTAssertTrue(isComposeKey(characters: "A", flags: [.shift], isRepeat: false))
+        XCTAssertTrue(isComposeKey(characters: "a", flags: [.capsLock], isRepeat: false))
+        XCTAssertTrue(isComposeKey(characters: "é", flags: [], isRepeat: false))
+        XCTAssertTrue(isComposeKey(characters: "я", flags: [], isRepeat: false))
+    }
+
+    func testComposeKeyRejects() {
+        XCTAssertFalse(isComposeKey(characters: "a", flags: [.command], isRepeat: false))
+        XCTAssertFalse(isComposeKey(characters: "a", flags: [.control], isRepeat: false))
+        XCTAssertFalse(isComposeKey(characters: "å", flags: [.option], isRepeat: false))
+        XCTAssertFalse(isComposeKey(characters: "a", flags: [], isRepeat: true))
+        XCTAssertFalse(isComposeKey(characters: "1", flags: [], isRepeat: false))
+        XCTAssertFalse(isComposeKey(characters: " ", flags: [], isRepeat: false))
+        XCTAssertFalse(isComposeKey(characters: "\r", flags: [], isRepeat: false))
+        XCTAssertFalse(isComposeKey(characters: "ab", flags: [], isRepeat: false))
+        XCTAssertFalse(isComposeKey(characters: "", flags: [], isRepeat: false))
+        XCTAssertFalse(isComposeKey(characters: nil, flags: [], isRepeat: false))
+        XCTAssertFalse(isComposeKey(characters: "\u{F700}", flags: [], isRepeat: false))  // up arrow
+    }
+
+    func testHoldQueuesLaterEventsInOrder() {
+        var h = ComposeHold<String>()
+        h.start(sid: 7, "n", now: 0)
+        XCTAssertTrue(h.holding)
+        XCTAssertTrue(h.add("i", now: 0.1))
+        XCTAssertTrue(h.add("h", now: 0.2))
+        XCTAssertEqual(h.take(sid: 7, now: 0.3), ["n", "i", "h"])
+        XCTAssertFalse(h.holding)
+    }
+
+    func testComposeKeyUpIsNotSentToA() {
+        // The compose press never reached A, so its release stays with rapp.
+        var k = KeyTracker()
+        XCTAssertEqual(k.route(keyCode: 45, down: false, flags: [], pictureFocused: true), KeyDecision(.local))
+    }
+
+    func testExpiredHoldIsDropped() {
+        var h = ComposeHold<String>()
+        h.start(sid: 7, "n", now: 0)
+        XCTAssertFalse(h.add("i", now: 0.6))
+        XCTAssertFalse(h.holding)
+        XCTAssertEqual(h.take(sid: 7, now: 0.6), [])
+    }
+
+    func testExpiredHoldIsNotReplayed() {
+        var h = ComposeHold<String>()
+        h.start(sid: 7, "n", now: 0)
+        XCTAssertEqual(h.take(sid: 7, now: 0.6), [])
+    }
+
+    func testTakeClearsTheHold() {
+        var h = ComposeHold<String>()
+        h.start(sid: 7, "n", now: 0)
+        XCTAssertEqual(h.take(sid: 8, now: 0.1), [])
+        XCTAssertFalse(h.holding)
+        XCTAssertEqual(h.take(sid: 7, now: 0.1), [])
+    }
+
+    func testHoldCap() {
+        var h = ComposeHold<String>(cap: 3)
+        h.start(sid: 7, "a", now: 0)
+        XCTAssertTrue(h.add("b", now: 0))
+        XCTAssertTrue(h.add("c", now: 0))
+        XCTAssertFalse(h.add("d", now: 0))
+        XCTAssertFalse(h.holding)
+    }
 }
