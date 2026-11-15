@@ -49,7 +49,12 @@ fn share(args: &[String]) -> Result<Cmd, String> {
         match a.as_str() {
             "--allow" => {
                 let v = it.next().ok_or("--allow 后面要写设备")?;
-                allow.extend(v.split(',').map(str::trim).filter(|s| !s.is_empty()).map(String::from));
+                let names: Vec<String> = v.split(',').map(str::trim).filter(|s| !s.is_empty()).map(String::from).collect();
+                // An empty list would be dropped and widen the share to every device.
+                if names.is_empty() {
+                    return Err("--allow 后面要写设备".into());
+                }
+                allow.extend(names);
             }
             "--note" => note = Some(it.next().ok_or("--note 后面要写备注")?.clone()),
             "--raw" => raw = true,
@@ -92,6 +97,13 @@ mod tests {
         assert_eq!(p("share 70000").unwrap_err(), "端口要在 1 到 65535 之间：70000");
         assert_eq!(p("share abc").unwrap_err(), "端口要在 1 到 65535 之间：abc");
         assert_eq!(p("share --allow").unwrap_err(), "--allow 后面要写设备");
+        assert_eq!(p("share 8000 --allow ,").unwrap_err(), "--allow 后面要写设备");
+        assert_eq!(p("share 8000 --allow  , ").unwrap_err(), "--allow 后面要写设备");
+        // Arguments that `split_whitespace` cannot make: an empty one, and one of blanks and commas.
+        for bad in ["", " , "] {
+            let args: Vec<String> = ["share", "8000", "--allow", bad].map(String::from).to_vec();
+            assert_eq!(parse(&args).unwrap_err(), "--allow 后面要写设备", "{bad:?}");
+        }
         assert_eq!(p("unshare").unwrap_err(), "要写端口");
         assert_eq!(p("pipe gpu1").unwrap_err(), "要写名字和端口");
         assert_eq!(p("frobnicate").unwrap_err(), "不认识的命令：frobnicate");
