@@ -189,18 +189,27 @@ final class KeyTrackerRouteTests: XCTestCase {
         XCTAssertEqual(k.route(keyCode: 45, down: false, flags: [], pictureFocused: true), KeyDecision(.local))
     }
 
+    func testSlowFirstOpenStillReplays() {
+        // The first panel open can take longer than a frame; the letters typed meanwhile are kept.
+        var h = ComposeHold<String>()
+        h.start(sid: 7, "n", now: 0)
+        XCTAssertTrue(h.add("i", now: 0.3))
+        XCTAssertTrue(h.add("h", now: 0.7))
+        XCTAssertEqual(h.take(sid: 7, now: 0.9), ["n", "i", "h"])
+    }
+
     func testExpiredHoldIsDropped() {
         var h = ComposeHold<String>()
         h.start(sid: 7, "n", now: 0)
-        XCTAssertFalse(h.add("i", now: 0.6))
+        XCTAssertFalse(h.add("i", now: 1.6))
         XCTAssertFalse(h.holding)
-        XCTAssertEqual(h.take(sid: 7, now: 0.6), [])
+        XCTAssertEqual(h.take(sid: 7, now: 1.6), [])
     }
 
     func testExpiredHoldIsNotReplayed() {
         var h = ComposeHold<String>()
         h.start(sid: 7, "n", now: 0)
-        XCTAssertEqual(h.take(sid: 7, now: 0.6), [])
+        XCTAssertEqual(h.take(sid: 7, now: 1.6), [])
     }
 
     func testTakeClearsTheHold() {

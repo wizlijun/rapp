@@ -123,7 +123,8 @@ public struct ComposeHold<Event> {
     private var started: TimeInterval = 0
     private var events: [Event] = []
 
-    public init(expiry: TimeInterval = 0.5, cap: Int = 32) {
+    // 1.5 s, not one frame: the first panel open can be slow, and its letters must not be lost.
+    public init(expiry: TimeInterval = 1.5, cap: Int = 32) {
         self.expiry = expiry
         self.cap = cap
     }
