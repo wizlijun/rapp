@@ -104,14 +104,25 @@ pub enum Probe {
 /// Connects to `path` and writes the request head for `op`.
 pub async fn connect(path: &Path, op: &str, token: &str) -> std::io::Result<UnixStream> {
     let mut s = UnixStream::connect(path).await?;
-    s.write_all(format!("{{\"op\":{},\"v\":{LOCAL_V}}}\n{token}\n", serde_json::to_string(op)?).as_bytes()).await?;
+    send_head(&mut s, op, token).await?;
     Ok(s)
+}
+
+async fn send_head(s: &mut UnixStream, op: &str, token: &str) -> std::io::Result<()> {
+    s.write_all(format!("{{\"op\":{},\"v\":{LOCAL_V}}}\n{token}\n", serde_json::to_string(op)?).as_bytes()).await
+}
+
+/// Whether a failed connect means nobody listens. Any other error (too many files, a full backlog, no access)
+/// says nothing about the process behind the socket, so its file must stay.
+fn gone(e: &std::io::Error) -> bool {
+    matches!(e.kind(), std::io::ErrorKind::ConnectionRefused | std::io::ErrorKind::NotFound)
 }
 
 /// Asks the socket at `path` for its status.
 pub async fn status(path: &Path, token: &str) -> Result<Status, Probe> {
     let ask = async {
-        let s = connect(path, "status", token).await.map_err(|_| Probe::Gone)?;
+        let mut s = UnixStream::connect(path).await.map_err(|e| if gone(&e) { Probe::Gone } else { Probe::Busy })?;
+        send_head(&mut s, "status", token).await.map_err(|_| Probe::Busy)?;
         let got = Lines::new(BufReader::new(s), MAX_IN_LINE).next().await;
         let Ok(Got::Line(line)) = got else {
             return Err(Probe::Refused("bad status".into()));
@@ -299,6 +310,36 @@ mod tests {
         assert!(!dir.join("pty/1.sock").exists() && dir.join("pty/3.sock").exists());
         assert_eq!(status(&dir.join("pty/3.sock"), &tok).await.unwrap_err(), Probe::Busy);
         assert_eq!(status(&dir.join("pty/1.sock"), &tok).await.unwrap_err(), Probe::Gone);
+    }
+
+    #[test]
+    fn only_a_refused_or_missing_socket_is_gone() {
+        use std::io::{Error, ErrorKind};
+        assert!(gone(&Error::from(ErrorKind::ConnectionRefused)));
+        assert!(gone(&Error::from(ErrorKind::NotFound)));
+        for k in [ErrorKind::PermissionDenied, ErrorKind::WouldBlock, ErrorKind::Other] {
+            assert!(!gone(&Error::from(k)));
+        }
+        assert!(!gone(&Error::from_raw_os_error(libc::EMFILE)));
+        assert!(!gone(&Error::from_raw_os_error(libc::EACCES)));
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_socket_is_not_removed() {
+        let d = tempfile::Builder::new().tempdir_in("/tmp").unwrap();
+        ensure_dirs(d.path()).unwrap();
+        let tok = token(d.path()).unwrap();
+        let p = d.path().join("pty/4.sock");
+        drop(std::os::unix::net::UnixListener::bind(&p).unwrap());
+        // No access to the socket: EACCES, not a refusal.
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let r = status(&p, &tok).await;
+        let uid_is_root = unsafe { libc::geteuid() } == 0;
+        if !uid_is_root {
+            assert_eq!(r.unwrap_err(), Probe::Busy);
+            assert!(scan(d.path(), &tok).await.is_empty());
+            assert!(p.exists());
+        }
     }
 
     #[tokio::test]
