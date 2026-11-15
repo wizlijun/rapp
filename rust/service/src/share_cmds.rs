@@ -1,6 +1,6 @@
 //! The local IPC `shares`, `share` and `unshare`.
 
-use crate::sharing::{self, Allow, By};
+use crate::sharing::{self, Allow, By, SENSITIVE_WARN};
 use crate::shares::sensitive;
 use crate::state::State;
 use rapp_net::line::{err, ok};
@@ -8,37 +8,25 @@ use rapp_net::log::clean_name;
 use rapp_wire::Fp;
 use serde_json::{json, Value};
 use std::sync::Arc;
-use std::time::Duration;
 
-/// How long `shares` gives each local address of a shared port to accept before saying nothing listens there.
-const LISTENING_WAIT: Duration = Duration::from_millis(200);
-const SENSITIVE_WARN: &str = "分享这个端口，等于把这台机器能到的网络也交出去";
 
 /// `http://<id>.rapp:<port>`: the address other devices use for this device's `port`.
 fn share_url(state: &State, port: u16) -> String {
     format!("http://{}.rapp:{port}", state.cfg.lock().unwrap().id.clone().unwrap_or_default())
 }
 
-/// This device's shares, each with whether something accepts on the port now: on the addresses
-/// a forward would reach (`127.0.0.1`, then `[::1]`).
+/// This device's shares, each with whether something accepts on the port now.
 pub async fn shares(state: &Arc<State>) -> Value {
-    let list = state.shares.list();
-    let probes: Vec<_> = list
-        .iter()
-        .map(|s| {
-            let port = s.port;
-            tokio::spawn(async move {
-                crate::forward::connect_local(&crate::forward::local_addrs(port), LISTENING_WAIT).await.is_some()
+    let shares: Vec<Value> = sharing::table(state)
+        .await
+        .into_iter()
+        .map(|(s, listening)| {
+            json!({
+                "port": s.port, "note": s.note, "allow": allow_names(state, &s.allow), "url": share_url(state, s.port),
+                "listening": listening,
             })
         })
         .collect();
-    let mut shares = Vec::new();
-    for (s, probe) in list.iter().zip(probes) {
-        shares.push(json!({
-            "port": s.port, "note": s.note, "allow": allow_names(state, &s.allow), "url": share_url(state, s.port),
-            "listening": probe.await.unwrap_or(false),
-        }));
-    }
     let id = state.cfg.lock().unwrap().id.clone();
     let relay = state.relay.lock().unwrap().0;
     ok(json!({"id": id, "relay": relay, "shares": shares}))

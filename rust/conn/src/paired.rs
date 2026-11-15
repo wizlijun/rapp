@@ -59,6 +59,11 @@ impl Paired {
         self.list.lock().unwrap().iter().find(|e| e.fp == *fp).map(|e| e.name.clone()).filter(|n| !n.is_empty())
     }
 
+    /// Every device with its name (empty when it gave none), in the order of the file.
+    pub fn list(&self) -> Vec<(Fp, String)> {
+        self.list.lock().unwrap().iter().map(|e| (e.fp, e.name.clone())).collect()
+    }
+
     /// Adds the device, or updates the name of one already there; writes the file.
     pub fn add(&self, fp: &Fp, name: &str) -> Result<()> {
         let mut list = self.list.lock().unwrap();
@@ -109,6 +114,17 @@ mod tests {
         assert_eq!(v[0]["fp"], Fp([1; 32]).to_string());
         assert_eq!(v[0]["name"], "laptop");
         assert!(v[0]["since"].as_str().unwrap().ends_with('Z'));
+    }
+
+    #[test]
+    fn list_is_in_file_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = Paired::load(dir.path()).unwrap();
+        assert!(p.list().is_empty());
+        p.add(&Fp([2; 32]), "second-fp-first").unwrap();
+        p.add(&Fp([1; 32]), "").unwrap();
+        p.add(&Fp([2; 32]), "renamed").unwrap();
+        assert_eq!(p.list(), vec![(Fp([2; 32]), "renamed".to_string()), (Fp([1; 32]), String::new())]);
     }
 
     #[cfg(unix)]

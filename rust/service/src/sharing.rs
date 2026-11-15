@@ -1,16 +1,27 @@
 //! Changing this device's share table: the one code path for the local IPC and (Task 2) a device that may set it.
 
-use crate::shares::{Patch, Shared};
+use crate::forward::{admit, Caller};
+use crate::shares::{sensitive, Patch, Share, Shared};
 use crate::state::{Peer, State};
-use rapp_net::log::Lvl;
+use anyhow::Result;
+use rapp_conn::Pipe;
+use rapp_net::line::{err, ok, write_json};
+use rapp_net::log::{clean_name, Lvl};
+use rapp_net::msg::Op;
 use rapp_wire::Fp;
 use serde_json::{json, Value};
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::io::AsyncWriteExt;
+
+/// How long `table` gives each local address of a shared port to accept before saying nothing listens there.
+const LISTENING_WAIT: Duration = Duration::from_millis(200);
+/// Said with a share of a port that usually exposes a login, a proxy, a database or a container API.
+pub const SENSITIVE_WARN: &str = "分享这个端口，等于把这台机器能到的网络也交出去";
 
 /// Who sets the table; the `share` / `unshare` log lines say so.
 pub enum By<'a> {
     Local,
-    // Task 2 is its first caller.
-    #[allow(dead_code)]
     Remote(&'a Peer),
 }
 
@@ -113,6 +124,99 @@ pub fn unshare(state: &State, port: &Value, by: &By) -> Result<bool, String> {
     // Also when it was not shared: a forward may still run from a share removed by hand.
     state.forwards.cut(port);
     Ok(was)
+}
+
+/// The whole share table, each share with whether something accepts on its port now: on the
+/// addresses a forward would reach (`127.0.0.1`, then `[::1]`). All ports are probed at once.
+pub async fn table(state: &Arc<State>) -> Vec<(Share, bool)> {
+    let list = state.shares.list();
+    let probes: Vec<_> = list
+        .iter()
+        .map(|s| {
+            let port = s.port;
+            tokio::spawn(async move {
+                crate::forward::connect_local(&crate::forward::local_addrs(port), LISTENING_WAIT).await.is_some()
+            })
+        })
+        .collect();
+    let mut out = Vec::new();
+    for (s, probe) in list.into_iter().zip(probes) {
+        out.push((s, probe.await.unwrap_or(false)));
+    }
+    out
+}
+
+/// Answers `shares`, `share` or `unshare` from another device with one JSON line, then closes
+/// the stream. Only a key-trusted device may (the checkpoint's steps 1-3).
+pub async fn serve(state: &Arc<State>, mut s: Pipe, op: Op, peer: Peer) -> Result<()> {
+    let reply = answer(state, &op, &peer).await;
+    write_json(&mut s, &reply).await?;
+    s.shutdown().await?;
+    Ok(())
+}
+
+async fn answer(state: &Arc<State>, op: &Op, peer: &Peer) -> Value {
+    let name = match op {
+        Op::Shares => "shares",
+        Op::Share { .. } => "share",
+        _ => "unshare",
+    };
+    if let Err(d) = admit(&Caller { fp: peer.fp.as_ref(), server: false }, true) {
+        state.log.event(Lvl::Warn, "share_refused", peer.fields(json!({"op": name, "reason": d.as_str()})));
+        return err(d.as_str());
+    }
+    let by = By::Remote(peer);
+    match op {
+        Op::Shares => {
+            let shares: Vec<Value> = table(state)
+                .await
+                .into_iter()
+                .map(|(s, listening)| {
+                    let allow: Vec<Value> = s.allow.iter().map(|fp| device(fp, &state.paired.name_of(fp).unwrap_or_default())).collect();
+                    json!({"port": s.port, "note": s.note, "allow": allow, "listening": listening})
+                })
+                .collect();
+            let known: Vec<Value> = state.paired.list().iter().map(|(fp, n)| device(fp, n)).collect();
+            ok(json!({"shares": shares, "known": known}))
+        }
+        Op::Share { ports, note, allow } => {
+            let mut req = json!({"ports": ports, "allow": allow});
+            if let Some(note) = note {
+                req["note"] = json!(note);
+            }
+            match share(state, &req, Allow::Fps, &by) {
+                Ok(done) => {
+                    let shared: Vec<Value> = done
+                        .iter()
+                        .map(|d| {
+                            let mut v = json!({"port": d.share.port});
+                            if sensitive(d.share.port) {
+                                v["warn"] = json!(SENSITIVE_WARN);
+                            }
+                            v
+                        })
+                        .collect();
+                    ok(json!({"shared": shared}))
+                }
+                Err(e) => refused(state, peer, name, e),
+            }
+        }
+        Op::Unshare { port } => match unshare(state, port, &by) {
+            Ok(was) => ok(json!({"was": was})),
+            Err(e) => refused(state, peer, name, e),
+        },
+        _ => err("unknown op"),
+    }
+}
+
+fn refused(state: &State, peer: &Peer, op: &str, reason: String) -> Value {
+    state.log.event(Lvl::Warn, "share_refused", peer.fields(json!({"op": op, "reason": reason})));
+    err(&reason)
+}
+
+/// `{"fp","name"}`: a device with the name `paired.json` has for it (made safe to show), or "".
+fn device(fp: &Fp, name: &str) -> Value {
+    json!({"fp": fp.to_string(), "name": clean_name(name)})
 }
 
 #[cfg(test)]

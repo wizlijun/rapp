@@ -1,6 +1,8 @@
 //! Shared fixtures: service (with fake rapp-host), raw B client, IPC and hub drivers.
 #![allow(dead_code)]
 
+pub mod sharing;
+
 use quinn::{Connection, Endpoint};
 use rapp_conn::{quic_facts, read_welcome, send_hello, Me, Pipe, Role};
 use rapp_net::line::{read_json, write_json};

@@ -58,7 +58,7 @@ pub struct Caller<'a> {
 }
 
 /// Steps 1–3 of the checkpoint, the ones that do not depend on the port. Ok is the caller's fingerprint.
-fn admit<'a>(caller: &Caller<'a>, policy_allows: bool) -> Result<&'a Fp, Deny> {
+pub(crate) fn admit<'a>(caller: &Caller<'a>, policy_allows: bool) -> Result<&'a Fp, Deny> {
     let fp = caller.fp.ok_or(Deny::NotSupported)?;
     if caller.server {
         return Err(Deny::HostOnly);
