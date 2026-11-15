@@ -687,8 +687,9 @@ async fn open_gives_up_after_ten_seconds() {
     let w = Worker::start_with(&s, short_dir(), None, None, Some(Path::new("/usr/bin/true"))).await;
     let r = w.ask(json!({"op":"open","app":"Terminal"})).await;
     assert_eq!(r, [json!({"error": "the terminal window did not start in 10 s"})]);
+    // A window that is slow to start may still read it; a later open sweeps it once it is old.
     let launch = w.pty_dir().join("launch");
-    assert!(std::fs::read_dir(launch).unwrap().next().is_none(), "the .command file is removed");
+    assert_eq!(std::fs::read_dir(launch).unwrap().count(), 1, "the .command file is kept");
     w.stop().await;
 }
 

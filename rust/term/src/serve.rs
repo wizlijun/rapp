@@ -401,6 +401,7 @@ impl Worker {
         let _one = self.opening.lock().await;
         let dir = &self.opts.pty_dir;
         local::ensure_dirs(dir).map_err(|_| FAILED)?;
+        sweep_launch(&dir.join("launch"));
         let token = local::token(dir).map_err(|_| FAILED)?;
         let bin = std::env::current_exe().map_err(|_| FAILED)?;
         let ticket = ticket();
@@ -415,7 +416,10 @@ impl Worker {
         let file = dir.join("launch").join(format!("{ticket}.command"));
         write_private(&file, &body).map_err(|_| FAILED)?;
         let res = self.wait_for(&file, app, &ticket, dir, &token).await;
-        let _ = std::fs::remove_file(&file);
+        // A window that is slow to start may still read it after the wait: that one is left for the sweep.
+        if !matches!(&res, Err(e) if e == NOT_STARTED) {
+            let _ = std::fs::remove_file(&file);
+        }
         res
     }
 
@@ -668,6 +672,26 @@ async fn ask_pty(
 
 /// How long `open` waits for the window's `run` to appear.
 const OPEN_WAIT: Duration = Duration::from_secs(10);
+
+/// How long a `launch/*.command` file is kept when its window was not seen starting: a cold Terminal start with a
+/// slow shell rc can take longer than `OPEN_WAIT`.
+const LAUNCH_KEEP: Duration = Duration::from_secs(5 * 60);
+
+/// Removes the `.command` files in `launch` last written more than `LAUNCH_KEEP` ago.
+fn sweep_launch(launch: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(launch) else { return };
+    let now = SystemTime::now();
+    for e in entries.flatten() {
+        let p = e.path();
+        if p.extension() != Some(std::ffi::OsStr::new("command")) {
+            continue;
+        }
+        let age = e.metadata().and_then(|m| m.modified()).ok().and_then(|t| now.duration_since(t).ok());
+        if age.is_some_and(|a| a > LAUNCH_KEEP) {
+            let _ = std::fs::remove_file(&p);
+        }
+    }
+}
 
 /// `path` from the home directory: `~` is the home directory, `~/x` and a relative `x` are under it; an absolute
 /// path stays as it is.
@@ -952,6 +976,23 @@ mod tests {
         let (a, b) = (ticket(), ticket());
         assert!(a.len() == 16 && a.bytes().all(|c| c.is_ascii_hexdigit()));
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn the_sweep_removes_old_command_files_and_keeps_fresh_ones() {
+        let d = tempfile::tempdir().unwrap();
+        let aged = |name: &str, age: Duration| {
+            let f = std::fs::File::create(d.path().join(name)).unwrap();
+            f.set_modified(SystemTime::now() - age).unwrap();
+        };
+        aged("old.command", Duration::from_secs(6 * 60));
+        aged("fresh.command", Duration::from_secs(60));
+        aged("old.txt", Duration::from_secs(6 * 60));
+        sweep_launch(d.path());
+        let mut left: Vec<String> =
+            std::fs::read_dir(d.path()).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+        left.sort();
+        assert_eq!(left, ["fresh.command", "old.txt"]);
     }
 
     #[test]

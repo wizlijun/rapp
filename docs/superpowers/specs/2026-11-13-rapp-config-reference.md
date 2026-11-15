@@ -216,7 +216,7 @@ agent 规则：加、删分享走 `rapp share` / `rapp unshare`（或 IPC 的 `s
 | 文件 | 在哪 | 是什么 | 机密 |
 |---|---|---|---|
 | `$ROOT/local/ipc.token` | A、B | GUI 连本机 service 用的 token，每次启动重新生成（`rust/service/src/lib.rs:105`） | **机密** |
-| `$ROOT/local/term/` | A | 文本终端（`rapp-term run`）的本机状态，目录 0700（`rust/term/src/pty/local.rs` `ensure_dirs`）。`pty/<pid>.sock`：每个在跑的 `run` 一个 unix socket，`run` 退出时删，`serve` 扫到连不上的旧 socket 也会删；`pty/.lock`：`run` 挑名字时的文件锁；`launch/<ticket>.command`：`serve` 为“新开文本终端”写的临时脚本（0700），`serve` 等完就删；`pty.token`：本机 socket 的固定 token，0600，第一次用到时生成，之后不换（`run` 要活过服务重启）。只防同机的其他用户 | token 是**机密** |
+| `$ROOT/local/term/` | A | 文本终端（`rapp-term run`）的本机状态，目录 0700（`rust/term/src/pty/local.rs` `ensure_dirs`）。`pty/<pid>.sock`：每个在跑的 `run` 一个 unix socket，`run` 退出时删，`serve` 扫到连不上的旧 socket 也会删；`pty/.lock`：`run` 挑名字时的文件锁；`launch/<ticket>.command`：`serve` 为“新开文本终端”写的临时脚本（0700），等到 `run` 出现就删，10 秒没等到就先留着，下次 `open` 时删掉超过 5 分钟的（`rust/term/src/serve.rs` `sweep_launch`）；`pty.token`：本机 socket 的固定 token，0600，第一次用到时生成，之后不换（`run` 要活过服务重启）；文件是空的或不足 32 个字符、又已经超过 1 秒没改过，算是写到一半崩了留下的，重新生成。只防同机的其他用户 | token 是**机密** |
 | `$ROOT/local/shares.json.bad` | A | `shares.json` 读不懂时，第一次写分享表前把它原样改名到这里，盖掉以前的（`rust/service/src/shares.rs:161-166`）。rapp 不读它；要找回原来的内容，从这里抄回 `shares.json`（§2.11） | |
 | `$ROOT/local/update.json` | A | 最近查到的版本、上次检查时间、用户按过「不装」的版本（`rust/service/src/update.rs:133`）。「不装」走 IPC `update_dismiss` | |
 | `$ROOT/local/update-applied.json` | A | 上次升级的记录，用于回滚和授权提示（`rust/update/src/apply.rs:10`） | |

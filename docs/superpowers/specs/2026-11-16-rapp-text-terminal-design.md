@@ -182,7 +182,7 @@ rapp-service ── 起 ──▶ rapp-term serve ──────────
 
 - `serve` 在 `$ROOT/local/term/launch/` 写一个 `.command` 文件（0700），内容是 `#!/bin/sh` 加一行：`exec '<rapp-term 的绝对路径>' run --dir '<term 目录>' --ticket '<t>' [--name '<名字>'] [--cwd '<目录>'] [-- <命令>]`（路径、名字、目录用单引号转义，`'` 写成 `'\''`；命令原样放在 `--` 后面，由 shell 去拆；没有命令就不写 `--`）。`ticket` 是 `serve` 生成的随机串，`serve` 靠它认出自己开的那个 `run`。然后执行 `open -a Terminal <这个文件>`。Terminal 打开 `.command` 不需要“自动化”权限【我定的】。
   - iTerm：`open -a iTerm <文件>`，未实测，T0 要验证。
-  - `serve` 等完（`run` 出现了，或者 10 秒到了）就删掉这个文件；`run` 不知道这个文件。
+  - `run` 出现了，`serve` 就删掉这个文件；10 秒到了还没出现，文件先留着（冷启动的 Terminal 加上慢的 shell 配置可能更久才读它，删早了窗口里会报找不到文件）。每次 `open` 写新文件前，`serve` 先删掉 `launch/` 里修改时间超过 5 分钟的 `.command`。`run` 不知道这个文件。
   - 能用哪些终端 app：`serve` 起来时查一次，macOS 上 Terminal 总有，`open -Ra iTerm` 成功就有 iTerm；结果放在本机那条 `HostRow` 的 `launchers` 里，主控台只在它非空时显示“新开文本终端…”。
 - 这样起来的 `run` 是 Terminal 的子孙，不在 rapp-service 的 launchd 任务里。T0 要实测这一点：停掉服务，看 `run` 和程序还在不在（§11）。
 - `rapp-term` 的绝对路径取 `serve` 自己所在的目录（`.app/Contents/MacOS/`）。
