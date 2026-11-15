@@ -25,9 +25,6 @@ enum MenuPart { session, remote, stream }
 
 const allMenuParts = {MenuPart.session, MenuPart.remote, MenuPart.stream};
 
-/// Width a 本机 or 远程 button takes in a wide bar (icon, word, arrow); a narrow one is 48.
-const menuButtonWidth = 88.0;
-
 /// A corner button with its menu hanging under it: the traffic label for a menu with the stream
 /// part, else the 本机 or 远程 button.
 class StreamMenuAnchor extends StatefulWidget {
@@ -196,7 +193,6 @@ class _StreamMenuAnchorState extends State<StreamMenuAnchor> {
               key: Key('$kind-menu'),
               remote: kind == 'remote',
               open: widget.open,
-              compact: widget.compact,
               onTap: widget.onToggle,
             )
           : ListenableBuilder(
@@ -220,22 +216,20 @@ class _StreamMenuAnchorState extends State<StreamMenuAnchor> {
   }
 }
 
-/// 💻 本机▾ / 🖥 远程▾ (icon alone when [compact]); the remote one is outlined in the accent colour
-/// so it never passes for rapp's own.
+/// ⋯ 本机 / ≡ 远程, icons only, 48 wide; the remote one is outlined in the accent colour so it never
+/// passes for rapp's own.
 class MenuCornerButton extends StatelessWidget {
   const MenuCornerButton(
-      {super.key, required this.remote, required this.open, required this.onTap, this.compact = false});
+      {super.key, required this.remote, required this.open, required this.onTap});
 
   final bool remote;
   final bool open;
-  final bool compact;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
     final radius = BorderRadius.circular(t.r);
-    final word = remote ? '远程' : '本机';
     final color = remote ? t.accent : t.text;
     final border = open ? t.text : (remote ? t.accent : t.line);
     return Semantics(
@@ -253,29 +247,14 @@ class MenuCornerButton extends StatelessWidget {
             onSecondaryTap: onTap,
             borderRadius: radius,
             child: Container(
-              width: compact ? 48 : menuButtonWidth,
+              width: 48,
               constraints: const BoxConstraints(minHeight: 48),
               decoration: open
                   ? t.raiseBox(border: border)
                   : BoxDecoration(borderRadius: radius, border: Border.all(color: border, width: remote ? 1.5 : 1)),
               child: Center(
                 heightFactor: 1, // as tall as the row (48 at least), never the whole parent
-                child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(remote ? Icons.desktop_windows_outlined : Icons.laptop_mac, size: 18, color: color),
-                  if (!compact) ...[
-                    const SizedBox(width: 4),
-                    Flexible(
-                      child: Text(word,
-                          maxLines: 1,
-                          overflow: TextOverflow.clip,
-                          style: TextStyle(color: color, fontWeight: open ? FontWeight.w600 : FontWeight.w400)),
-                    ),
-                    Icon(Icons.arrow_drop_down, size: 18, color: t.muted),
-                  ],
-                ],
-              ),
+                child: Icon(remote ? Icons.menu : Icons.more_horiz, size: 20, color: color),
               ),
             ),
           ),

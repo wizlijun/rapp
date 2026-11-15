@@ -9,8 +9,10 @@ import 'tab_chip.dart';
 import 'main_state.dart';
 import 'needs_you.dart';
 import 'net_marker.dart';
+import 'corner_popover.dart';
 import 'projects.dart';
 import 'session_model.dart';
+import 'session_switcher.dart';
 import 'tokens.dart';
 
 class TopBar extends StatelessWidget {
@@ -63,9 +65,7 @@ class TopBar extends StatelessWidget {
                 : state.projects.where((p) => p.id == state.previousProject).firstOrNull;
             final showPrevProject = previous != null && box.maxWidth >= (baseIcons + 1) * 48 + trafficW;
             final icons = baseIcons + (showPrevProject ? 1 : 0);
-            // Their words only in a roomy bar (the tabs and the hint need the room more).
-            final words = box.maxWidth >= 1000;
-            final splitW = embedded ? (term ? 1 : 2) * (words ? menuButtonWidth : 48.0) : 0.0;
+            final splitW = embedded ? (term ? 1 : 2) * 48.0 : 0.0;
             final hidden = rs != null && !rs.detached && !term && rs.hidden.isNotEmpty;
             // Room for the gaps, a session block and the 已隐藏 chip besides (none of them shrink).
             // The 「＋」 of a terminal (a chip's minimum width) goes with them.
@@ -93,6 +93,10 @@ class TopBar extends StatelessWidget {
             final tabs = rs == null || rs.detached ? null : rs.tabs;
             // With a current project, stepping stays inside it: only its open sessions count.
             final multi = state.steppableCount >= 2;
+            // Any open session makes the block the session list's button; its ▾ (and padding)
+            // only where it leaves the name some room.
+            final canSwitch = state.sessionCount > 0;
+            final arrow = canSwitch && sessionMax >= 60;
             final small = Theme.of(context).textTheme.bodySmall;
             return Container(
               height: topBarHeight,
@@ -103,7 +107,7 @@ class TopBar extends StatelessWidget {
               ),
               child: Row(
                 children: [
-                  _icon('panel-button', Icons.menu, '面板', state.togglePanel),
+                  _icon('panel-button', Icons.view_sidebar_outlined, '面板', state.togglePanel),
                   SizedBox(width: gap),
                   if (showOverview) ...[
                     _overviewButton(t),
@@ -118,16 +122,26 @@ class TopBar extends StatelessWidget {
                   SizedBox(width: gap),
                   ConstrainedBox(
                       constraints: BoxConstraints(maxWidth: sessionMax),
-                      child: cur == null
-                          ? Text(
-                              _projectName() ?? '没有选中的会话',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(color: t.muted),
+                      child: _sessionBlock(
+                        t,
+                        canSwitch: canSwitch,
+                        arrow: arrow,
+                        child: cur == null
+                          ? Semantics(
+                              button: canSwitch,
+                              onTap: canSwitch ? _toggleSessions : null,
+                              child: Text(
+                                _projectName() ?? '没有选中的会话',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(color: t.muted),
+                              ),
                             )
                           : Semantics(
                               container: true,
                               excludeSemantics: true,
+                              button: canSwitch,
+                              onTap: canSwitch ? _toggleSessions : null,
                               label:
                                   '$title，${lampWord(cur.lamp)}，$sub',
                               child: Row(
@@ -168,6 +182,7 @@ class TopBar extends StatelessWidget {
                                 ],
                               ),
                             ),
+                      ),
                   ),
                   SizedBox(width: gap),
                   _icon(
@@ -263,8 +278,8 @@ class TopBar extends StatelessWidget {
                   if (net != null) NetMarker(net: net, compact: !wide, path: cur?.path),
                   if (embedded) ...[
                     if (split) ...[
-                      _menu(context, cur, {MenuPart.session}, Corner.session, !words),
-                      if (!term) _menu(context, cur, {MenuPart.remote}, Corner.remote, !words),
+                      _menu(context, cur, {MenuPart.session}, Corner.session, true),
+                      if (!term) _menu(context, cur, {MenuPart.remote}, Corner.remote, true),
                     ],
                     _menu(context, cur, split ? {MenuPart.stream} : allMenuParts, Corner.stream, !wide),
                   ],
@@ -324,6 +339,48 @@ class TopBar extends StatelessWidget {
       onAddToProject: (id) => state.addMember(id, MainState.appRefOf(cur)),
       canSaveProject: state.canSaveOpenAsProject,
       onSaveProject: state.saveOpenAsProject,
+    );
+  }
+
+  void _toggleSessions() => state.toggleCorner(Corner.sessions);
+
+  /// The session block, the session list's button while there is a session to switch to.
+  Widget _sessionBlock(RappTokens t, {required bool canSwitch, required bool arrow, required Widget child}) {
+    if (!canSwitch) return KeyedSubtree(key: const Key('session-block'), child: child);
+    final open = state.corner == Corner.sessions;
+    final radius = BorderRadius.circular(t.r);
+    return CornerPopover(
+      open: open,
+      onClose: state.closeCorner,
+      scrimKey: const Key('sessions-scrim'),
+      alignLeft: true,
+      popover: SessionSwitcher(state: state),
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          key: const Key('session-block'),
+          onTap: _toggleSessions,
+          // The block's own Semantics carries the label, the button flag and this tap.
+          excludeFromSemantics: true,
+          borderRadius: radius,
+          child: DecoratedBox(
+            decoration: open ? t.raiseBox(border: t.text) : BoxDecoration(borderRadius: radius),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 48),
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: arrow ? 4 : 0),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Flexible(child: child),
+                    if (arrow) Icon(Icons.arrow_drop_down, size: 18, color: t.muted),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 

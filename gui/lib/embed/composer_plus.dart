@@ -239,7 +239,7 @@ class _ComposerPlusState extends State<ComposerPlus> {
               child: Container(
                 key: const Key('composer-plus-menu'),
                 width: 300,
-                decoration: t.panelBox(),
+                decoration: t.floatBox(),
                 padding: const EdgeInsets.all(8),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,

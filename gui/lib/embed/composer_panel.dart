@@ -266,7 +266,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
             gap,
             Flexible(child: Text(transfer, maxLines: 1, overflow: cut, style: TextStyle(color: t.muted))),
             gap,
-            RappButton.secondary(label: '取消', onPressed: () => widget.port.cancelTransfer(_s.sid)),
+            RappButton.secondary(label: '取消', onPicture: true, onPressed: () => widget.port.cancelTransfer(_s.sid)),
           ],
         ],
       ),
@@ -302,7 +302,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Container(
-        decoration: t.panelBox(),
+        decoration: t.floatBox(),
         constraints: const BoxConstraints(minHeight: _line + _border),
         padding: const EdgeInsets.only(left: 12),
         child: Row(
@@ -378,7 +378,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
               ?_hint(t), // W11
               Container(
                 key: const Key('composer-box'),
-                decoration: t.panelBox(),
+                decoration: t.floatBox(),
                 constraints: BoxConstraints(maxHeight: inner + _border),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
@@ -548,20 +548,21 @@ List<Widget> composerLayer(
               children: [
                 if (transfer != null) ...[
                   DecoratedBox(
-                    decoration: t.panelBox(),
+                    decoration: t.floatBox(),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       child: Text(transfer, style: TextStyle(color: t.muted)),
                     ),
                   ),
                   const SizedBox(width: 8),
-                  RappButton.secondary(label: '取消', onPressed: () => port.cancelTransfer(session.sid)),
+                  RappButton.secondary(label: '取消', onPicture: true, onPressed: () => port.cancelTransfer(session.sid)),
                   const SizedBox(width: 8),
                 ],
                 if (button)
                   RappButton.secondary(
                     key: const Key('composer-open'),
                     label: '输入',
+                    onPicture: true,
                     onPressed: () => session.composer.open = true,
                   ),
               ],

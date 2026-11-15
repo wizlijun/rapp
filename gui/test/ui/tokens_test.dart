@@ -90,4 +90,16 @@ void main() {
     expect(m.gradient, isNull);
     expect(m.borderRadius, BorderRadius.circular(0));
   });
+  test('what floats over the remote picture is opaque in every theme', () {
+    for (final th in RappTheme.values) {
+      final t = tokensFor(th);
+      expect(t.float, isNotEmpty, reason: '$th');
+      for (final c in t.float) {
+        expect(c.a, 1.0, reason: '$th $c');
+      }
+      expect(t.copyWith(text: Colors.white).float, t.float, reason: '$th');
+    }
+    // AVATAR's glass panel stays see-through on its own backdrop.
+    expect(tokensFor(RappTheme.avatar).panel.first.a, lessThan(1.0));
+  });
 }

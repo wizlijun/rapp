@@ -13,6 +13,8 @@ import 'package:rapp/embed/app_profile.dart';
 import 'package:rapp/ui/app_profile_store.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
+import 'package:rapp/ui/session_model.dart';
+import 'package:rapp/ui/session_switcher.dart';
 import 'package:rapp/ui/tokens.dart';
 import 'package:rapp/ui/top_bar.dart';
 import 'package:rapp/ui/workspace_store.dart';
@@ -99,6 +101,138 @@ void main() {
     await tester.pumpWidget(wrap(bar()));
     await tester.tap(find.byKey(const Key('panel-button')));
     expect(s.panel, isNotNull);
+  });
+
+  testWidgets('the panel button shows the sidebar icon', (tester) async {
+    await tester.pumpWidget(wrap(bar()));
+    final panel = find.byKey(const Key('panel-button'));
+    expect(find.descendant(of: panel, matching: find.byIcon(Icons.view_sidebar_outlined)), findsOneWidget);
+    expect(find.byIcon(Icons.menu), findsNothing);
+  });
+
+  group('session switcher', () {
+    Widget top({double width = 800}) => SizedBox(
+          width: width,
+          height: 600,
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: TopBar(state: s, fullscreen: false, onToggleFullscreen: () {}),
+          ),
+        );
+
+    Future<void> three(WidgetTester tester) async {
+      await tester.runAsync(() async {
+        t.emit({
+          'event': 'hosts',
+          'hosts': [
+            {'id': '111', 'name': 'mini'},
+            {'id': '222', 'name': 'studio'},
+          ],
+        });
+        t.emit({'event': 'opened', 'sid': 1, 'id': '111', 'app': 'Mail', 'path': 'lan'});
+        t.emit({'event': 'opened', 'sid': 2, 'id': '111', 'app': 'Safari', 'path': 'lan'});
+        t.emit({'event': 'opened', 'sid': 3, 'id': '222', 'app': 'Notes', 'path': 'lan'});
+        await flush();
+      });
+      s.select('111/Mail');
+      await tester.pump();
+    }
+
+    testWidgets('the session block lists open sessions by device and switches on tap', (tester) async {
+      await tester.pumpWidget(wrap(top()));
+      await three(tester);
+      await tester.tap(find.byKey(const Key('session-block')));
+      await tester.pump();
+      expect(s.corner, Corner.sessions);
+      expect(find.byKey(const Key('sessions-scrim')), findsOneWidget);
+      expect(find.text('mini'), findsOneWidget);
+      expect(find.text('studio'), findsOneWidget);
+      expect(find.byKey(const ValueKey('switch-111/Mail')), findsOneWidget);
+      expect(find.byKey(const ValueKey('switch-111/Safari')), findsOneWidget);
+      expect(
+          find.descendant(of: find.byKey(const ValueKey('switch-222/Notes')), matching: find.byType(StatusLamp)),
+          findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('switch-222/Notes')));
+      await tester.pump();
+      expect(s.currentKey, '222/Notes');
+      expect(s.corner, isNull);
+      expect(find.byKey(const Key('sessions-scrim')), findsNothing);
+    });
+
+    testWidgets('assistive tech sees the session block as one button it can press', (tester) async {
+      final handle = tester.ensureSemantics();
+      await tester.pumpWidget(wrap(top()));
+      await three(tester);
+      final block = find.bySemanticsLabel(RegExp('^Mail，'));
+      expect(block, findsOneWidget);
+      expect(tester.getSemantics(block), isSemantics(isButton: true, hasTapAction: true));
+      tester.semantics.tap(find.semantics.byLabel(RegExp('^Mail，')));
+      await tester.pump();
+      expect(s.corner, Corner.sessions);
+      handle.dispose();
+    });
+
+    testWidgets('picking the current session just closes the list', (tester) async {
+      await tester.pumpWidget(wrap(top()));
+      await three(tester);
+      await tester.tap(find.byKey(const Key('session-block')));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('switch-111/Mail')));
+      await tester.pump();
+      expect(s.currentKey, '111/Mail');
+      expect(s.corner, isNull);
+    });
+
+    testWidgets('the list groups by device even when the panel groups by app', (tester) async {
+      await tester.pumpWidget(wrap(top()));
+      await three(tester);
+      s.setGrouping(Grouping.app);
+      await tester.tap(find.byKey(const Key('session-block')));
+      await tester.pump();
+      expect(find.text('mini'), findsOneWidget);
+      expect(find.text('studio'), findsOneWidget);
+    });
+
+    testWidgets('no session: the block is not a button', (tester) async {
+      await tester.pumpWidget(wrap(top()));
+      await tester.tap(find.byKey(const Key('session-block')));
+      await tester.pump();
+      expect(s.corner, isNull);
+      expect(find.descendant(of: find.byKey(const Key('session-block')), matching: find.byIcon(Icons.arrow_drop_down)),
+          findsNothing);
+    });
+
+    testWidgets('the last session ending closes the open list', (tester) async {
+      await tester.pumpWidget(wrap(top()));
+      await open(tester, 1, 'Safari');
+      s.select('111/Safari');
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('session-block')));
+      await tester.pump();
+      expect(s.corner, Corner.sessions);
+      await tester.runAsync(() async {
+        t.emit({'event': 'closed', 'sid': 1});
+        await flush();
+      });
+      await tester.pump();
+      expect(s.corner, isNull);
+      expect(find.byKey(const Key('sessions-scrim')), findsNothing);
+    });
+
+    testWidgets('the list fits a 320-wide window', (tester) async {
+      tester.view.physicalSize = const Size(320, 600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(wrap(top(width: 320)));
+      await three(tester);
+      await tester.tap(find.byKey(const Key('session-block')));
+      await tester.pump();
+      final list = tester.getRect(find.byType(SessionSwitcher));
+      expect(list.left, greaterThanOrEqualTo(0));
+      expect(list.right, lessThanOrEqualTo(320));
+      expect(tester.takeException(), isNull);
+    });
   });
 
   testWidgets('long hint is one line with ellipsis', (tester) async {
@@ -341,6 +475,56 @@ void main() {
         expect(full.left, greaterThanOrEqualTo(barRect.left));
       });
     }
+
+    testWidgets('opening the list closes 本机, and 本机 closes the list', (tester) async {
+      await tester.pumpWidget(wrap(SizedBox(
+        width: 1200,
+        height: 600,
+        child: Align(
+          alignment: Alignment.topLeft,
+          child: TopBar(state: es, fullscreen: false, onToggleFullscreen: () {}),
+        ),
+      )));
+      await tester.runAsync(() async {
+        es.openOrSwitch('111', 'Safari', 'Safari');
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('session-menu')));
+      await tester.pump();
+      expect(es.corner, Corner.session);
+      await tester.tap(find.byKey(const Key('session-block')));
+      await tester.pump();
+      expect(es.corner, Corner.sessions);
+      await tester.tap(find.byKey(const Key('session-menu')));
+      await tester.pump();
+      expect(es.corner, Corner.session);
+    });
+
+    testWidgets('the 本机 and 远程 buttons are icons only, even in a wide bar', (tester) async {
+      await tester.pumpWidget(wrap(Align(
+        alignment: Alignment.topLeft,
+        child: SizedBox(width: 1200, child: TopBar(state: es, fullscreen: false, onToggleFullscreen: () {})),
+      )));
+      await tester.runAsync(() async {
+        es.openOrSwitch('111', 'Safari', 'Safari');
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      await tester.pump();
+      final local = find.byKey(const Key('session-menu'));
+      final remote = find.byKey(const Key('remote-menu'));
+      expect(find.descendant(of: local, matching: find.byIcon(Icons.more_horiz)), findsOneWidget);
+      expect(find.descendant(of: remote, matching: find.byIcon(Icons.menu)), findsOneWidget);
+      expect(find.descendant(of: local, matching: find.text('本机')), findsNothing);
+      expect(find.descendant(of: remote, matching: find.text('远程')), findsNothing);
+      expect(tester.getSize(local).width, 48);
+      expect(tester.getSize(remote).width, 48);
+      expect(find.byTooltip('本机菜单：会话、剪贴板、输入法'), findsOneWidget);
+    });
 
     testWidgets('no relay measured, no network marker', (tester) async {
       await tester.pumpWidget(wrap(SizedBox(width: 800, child: TopBar(state: es, fullscreen: false, onToggleFullscreen: () {}))));

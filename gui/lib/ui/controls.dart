@@ -16,7 +16,8 @@ class RappButton extends StatefulWidget {
     this.semanticLabel,
     this.focusNode,
     this.icon,
-  }) : _kind = _Kind.primary;
+  }) : _kind = _Kind.primary,
+       onPicture = false;
   const RappButton.secondary({
     super.key,
     required this.label,
@@ -24,6 +25,7 @@ class RappButton extends StatefulWidget {
     this.semanticLabel,
     this.focusNode,
     this.icon,
+    this.onPicture = false,
   }) : _kind = _Kind.secondary;
   const RappButton.accent({
     super.key,
@@ -32,7 +34,8 @@ class RappButton extends StatefulWidget {
     this.semanticLabel,
     this.focusNode,
     this.icon,
-  }) : _kind = _Kind.accent;
+  }) : _kind = _Kind.accent,
+       onPicture = false;
 
   final String label;
   final VoidCallback? onPressed;
@@ -41,6 +44,10 @@ class RappButton extends StatefulWidget {
 
   /// Shown instead of [label]: a square 48×48 button (give it a [semanticLabel]).
   final IconData? icon;
+
+  /// Drawn straight over the remote picture: the fill is the raise colour laid on the opaque float
+  /// surface, so a see-through theme (AVATAR) never lets the picture show through the button.
+  final bool onPicture;
   final _Kind _kind;
 
   @override
@@ -93,7 +100,7 @@ class _RappButtonState extends State<RappButton> {
         onPressed: widget.onPressed,
         focusNode: widget.focusNode,
         style: OutlinedButton.styleFrom(
-          backgroundColor: t.raise.first,
+          backgroundColor: widget.onPicture ? Color.alphaBlend(t.raise.first, t.float.first) : t.raise.first,
           foregroundColor: t.text,
           side: BorderSide(color: t.line),
           minimumSize: min,

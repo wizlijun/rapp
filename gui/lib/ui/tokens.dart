@@ -23,6 +23,7 @@ class RappTokens extends ThemeExtension<RappTokens> {
     required this.bg,
     required this.panel,
     required this.raise,
+    List<Color>? float,
     required this.line,
     required this.text,
     required this.muted,
@@ -40,12 +41,16 @@ class RappTokens extends ThemeExtension<RappTokens> {
     required this.monoBody,
     required this.labelSpacing,
     this.overviewArt,
-  });
+  }) : float = float ?? panel;
 
   final Color bg, line, text, muted, on, accent, accentInk, tint;
 
   /// One colour = solid fill; two = top-to-bottom gradient.
   final List<Color> panel, raise;
+
+  /// What floats over the remote picture (menus, the writing panel): always opaque, since the
+  /// picture under it may be any colour. Defaults to [panel] where that is opaque already.
+  final List<Color> float;
   final double r;
 
   /// Halo around an active lamp.
@@ -91,12 +96,14 @@ class RappTokens extends ThemeExtension<RappTokens> {
 
   BoxDecoration panelBox({Color? border}) => _box(panel, border);
   BoxDecoration raiseBox({Color? border}) => _box(raise, border);
+  BoxDecoration floatBox({Color? border}) => _box(float, border);
 
   @override
   RappTokens copyWith({Color? bg, Color? text, String? overviewArt}) => RappTokens(
     bg: bg ?? this.bg,
     panel: panel,
     raise: raise,
+    float: float,
     line: line,
     text: text ?? this.text,
     muted: muted,
@@ -206,6 +213,9 @@ RappTokens tokensFor(RappTheme theme) {
           Color.fromRGBO(150, 225, 255, .14),
           Color.fromRGBO(150, 225, 255, .07),
         ],
+        // The glass panel is see-through, made for the dark backdrop; over a light remote
+        // window it vanishes. Same look, but solid.
+        float: const [Color(0xFF13222A), Color(0xFF0E181D)],
         line: const Color.fromRGBO(150, 225, 255, .45),
         text: const Color(0xFFE9FAFF),
         muted: const Color(0xFF93C9DD),
