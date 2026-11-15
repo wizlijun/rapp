@@ -116,6 +116,25 @@ final class ChannelTests: XCTestCase {
         XCTAssertThrowsError(try channelCommand("select_input", ["sid": 1, "id": String(repeating: "x", count: maxInputSourceID + 1)]))
     }
 
+    func testUnlockAndBannerCommands() {
+        XCTAssertEqual(try channelCommand("unlock", ["sid": 2, "password": "pässwörd"]), .unlock(sid: 2, password: "pässwörd"))
+        XCTAssertEqual(try channelCommand("unlock", ["sid": 2, "password": String(repeating: "x", count: 1024)]),
+                       .unlock(sid: 2, password: String(repeating: "x", count: 1024)))
+        XCTAssertThrowsError(try channelCommand("unlock", ["sid": 2])) { XCTAssertEqual($0 as? ChannelError, .bad("unlock")) }
+        XCTAssertThrowsError(try channelCommand("unlock", ["sid": 2, "password": 7]))
+        XCTAssertThrowsError(try channelCommand("unlock", ["sid": 2, "password": String(repeating: "x", count: 1025)]))
+        XCTAssertEqual(try channelCommand("set_banner", ["sid": 2, "text": "A 已锁屏"]), .setBanner(sid: 2, text: "A 已锁屏"))
+        XCTAssertEqual(try channelCommand("set_banner", ["sid": 2, "text": ""]), .setBanner(sid: 2, text: ""))
+        XCTAssertThrowsError(try channelCommand("set_banner", ["sid": 2])) { XCTAssertEqual($0 as? ChannelError, .bad("set_banner")) }
+    }
+
+    func testScreenLockedPayload() throws {
+        let p = try XCTUnwrap(eventPayload(.screenLocked(true), sid: 4, textures: [:]))
+        XCTAssertEqual(p.method, "screen_locked")
+        XCTAssertEqual(p.args["locked"] as? Bool, true)
+        XCTAssertEqual(p.args["sid"] as? Int64, 4)
+    }
+
     func testInputSourcePayload() throws {
         let p = try XCTUnwrap(eventPayload(.inputSource(id: "com.apple.inputmethod.SCIM.ITABC", name: "简体拼音", ascii: false),
                                            sid: 3, textures: [:]))

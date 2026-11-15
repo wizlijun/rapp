@@ -5,6 +5,8 @@ import RappSession
 /// One decorated A window of a detached session: a titled B window whose content is A's picture.
 final class DetachedWindow: NSWindow {
   let remoteView = RemoteView(frame: .zero)
+  /// A strip of text over the top of the picture (a desktop session's lock notice); hidden when empty.
+  private let bannerLabel = BannerLabel(labelWithString: "")
   /// The window-table item last applied.
   private(set) var info: WindowInfo
 
@@ -18,10 +20,30 @@ final class DetachedWindow: NSWindow {
     // rapp places them beside the main window (R20); AppKit must not cascade or restore them.
     isRestorable = false
     tabbingMode = .disallowed
+    // RemoteView hosts its own layer and takes no subviews: picture and banner share a plain container.
+    let container = NSView(frame: content)
     remoteView.frame = content
     remoteView.autoresizingMask = [.width, .height]
-    contentView = remoteView
+    container.addSubview(remoteView)
+    bannerLabel.isHidden = true
+    bannerLabel.alignment = .center
+    bannerLabel.font = .systemFont(ofSize: 13, weight: .medium)
+    bannerLabel.textColor = .black
+    bannerLabel.drawsBackground = true
+    bannerLabel.backgroundColor = NSColor(calibratedRed: 1, green: 0.85, blue: 0.4, alpha: 0.95)
+    bannerLabel.lineBreakMode = .byTruncatingTail
+    bannerLabel.frame = NSRect(x: 0, y: content.height - 26, width: content.width, height: 26)
+    bannerLabel.autoresizingMask = [.width, .minYMargin]
+    container.addSubview(bannerLabel)
+    contentView = container
     update(info)
+  }
+
+  /// Shows `text` over the top of the picture; nil or "" takes it away.
+  func setBanner(_ text: String?) {
+    let text = text ?? ""
+    bannerLabel.stringValue = text
+    bannerLabel.isHidden = text.isEmpty
   }
 
   func update(_ new: WindowInfo) {
@@ -38,6 +60,11 @@ final class DetachedWindow: NSWindow {
 
   /// Where A's content is drawn inside the content (top-left origin), aspect-fitted as `RemoteView` does.
   var pictureFit: CGRect { aspectFitRect(imageSize: remoteView.remoteSize, in: contentSize) }
+}
+
+/// The banner never takes a click: what is under it on A's picture stays reachable.
+private final class BannerLabel: NSTextField {
+  override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
 /// A session moved off the GUI's stage into native windows (R20, R21): one `DetachedWindow` per
@@ -63,6 +90,10 @@ final class DetachedSession: NSObject, NSWindowDelegate {
   private var placing = false
   private var closed = false
   private var attachAsked = false
+  /// Shown over the top of every window (`DetachedWindow.setBanner`); nil for none.
+  var banner: String? {
+    didSet { for window in windows.values { window.setBanner(banner) } }
+  }
 
   init(session: EmbeddedSession, windows: [SessionWindow], beside main: NSWindow?, onAttach: @escaping () -> Void) {
     self.session = session
@@ -115,6 +146,7 @@ final class DetachedSession: NSObject, NSWindowDelegate {
         if let follow, !window.inLiveResize, !window.isMiniaturized { resize(window, content: follow) }
       } else {
         let window = DetachedWindow(info: info)
+        window.setBanner(banner)
         window.delegate = self
         window.remoteView.onMouse = { [weak self] in self?.session.send($0) }
         windows[info.id] = window

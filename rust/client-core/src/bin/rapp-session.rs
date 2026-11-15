@@ -81,6 +81,14 @@ fn command(v: &Value) -> Result<Vec<u8>> {
         ),
         "select_window" => p::id_packet(14, id()?),
         "close_window" => p::id_packet(15, id()?),
+        "unlock" => {
+            let password = v["password"].as_str().context("missing password")?;
+            ensure!(
+                password.len() <= p::UNLOCK_PASSWORD_LIMIT,
+                "password too long"
+            );
+            p::unlock(password)
+        }
         "select_input" => {
             let id = v["id"].as_str().context("missing id")?;
             ensure!(id.len() <= 1024, "input source id too long");
@@ -345,6 +353,9 @@ fn read_loop(
                 out,
                 json!({"event":"input_source","id":id,"name":name,"ascii":ascii}),
             )?,
+            Incoming::ScreenLocked(locked) => {
+                event(out, json!({"event":"screen_locked","locked":locked}))?
+            }
         }
     }
 }
@@ -414,6 +425,14 @@ mod tests {
             .concat()
         );
         assert_eq!(
+            command(&json!({"cmd":"unlock","password":"ab"})).unwrap(),
+            vec![35, 4, 0, 0, 0, 2, 0, b'a', b'b']
+        );
+        assert_eq!(
+            command(&json!({"cmd":"unlock","password":"x".repeat(1024)})).unwrap().len(),
+            7 + 1024
+        );
+        assert_eq!(
             command(&json!({"cmd":"paste","seq":8,"item":9})).unwrap(),
             p::packet(
                 20,
@@ -441,6 +460,9 @@ mod tests {
             json!({"cmd":"select_input"}),
             json!({"cmd":"select_input","id":3}),
             json!({"cmd":"select_input","id":"x".repeat(1025)}),
+            json!({"cmd":"unlock"}),
+            json!({"cmd":"unlock","password":7}),
+            json!({"cmd":"unlock","password":"x".repeat(1025)}),
         ] {
             assert!(command(&v).is_err());
         }

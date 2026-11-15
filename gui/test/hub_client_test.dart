@@ -91,6 +91,30 @@ void main() {
       expect(t.sent.last, {'cmd': 'net_suspect'});
     });
 
+    test('apps carry the desktop entry\'s screens; bad screens are skipped', () async {
+      final f = hub.apps('111');
+      t.emit({
+        'event': 'apps', 'id': '111', 'path': 'lan', 'req': t.sent.last['req'],
+        'apps': [
+          {
+            'app': 'desktop:', 'name': '桌面',
+            'displays': [
+              {'id': '1', 'name': 'Built-in', 'main': true, 'width': 1512, 'height': 982},
+              {'id': '69733382', 'name': 'LG', 'main': false, 'width': 2560, 'height': 1440},
+              {'id': 7, 'width': 1, 'height': 1},
+              'junk',
+            ],
+          },
+          {'app': 'com.apple.Safari', 'name': 'Safari'},
+        ],
+      });
+      final apps = (await f).apps;
+      final d = apps.first.displays;
+      expect(d.map((x) => (x.id, x.name, x.main, x.width, x.height)),
+          [('1', 'Built-in', true, 1512, 982), ('69733382', 'LG', false, 2560, 1440)]);
+      expect(apps.last.displays, isEmpty);
+    });
+
     test('presence is queued and drained', () async {
       final f = hub.apps('111');
       final req = t.sent.last['req'];

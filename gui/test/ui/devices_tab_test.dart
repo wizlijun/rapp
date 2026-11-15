@@ -72,6 +72,13 @@ void main() {
             'id': cmd['id'],
             'path': 'lan',
             'apps': [
+              {
+                'app': 'desktop:',
+                'name': '桌面',
+                'displays': [
+                  {'id': '1', 'name': 'Built-in', 'main': true, 'width': 1512, 'height': 982},
+                ],
+              },
               {'app': 'com.apple.Safari', 'name': 'Safari'},
             ],
             'permissions': ?appsPermissions,
@@ -111,7 +118,7 @@ void main() {
   });
 
   Future<void> pumpTab(WidgetTester tester,
-      {bool settle = true, bool localBadge = false, Future<void> Function(String host)? screenShare}) async {
+      {bool settle = true, bool localBadge = false}) async {
     s.togglePanel(PanelTab.devices);
     // MainState's constructor already asked for the hosts, in setUp's real zone.
     await tester.runAsync(() async {
@@ -122,7 +129,7 @@ void main() {
     await tester.pumpWidget(wrap(SizedBox(
       width: 420,
       height: 900,
-      child: DevicesTab(state: s, local: const Text('local-body'), localBadge: localBadge, screenShare: screenShare),
+      child: DevicesTab(state: s, local: const Text('local-body'), localBadge: localBadge),
     )));
     if (settle) {
       await tester.pumpAndSettle();
@@ -145,30 +152,13 @@ void main() {
     expect(find.textContaining('mini'), findsWidgets);
   });
 
-  testWidgets('屏幕共享 opens A by its first non-loopback LAN address', (tester) async {
-    final opened = <String>[];
-    await pumpTab(tester, screenShare: (h) async => opened.add(h));
-    await selectMini(tester);
-    await tester.tap(find.byKey(const Key('screen-share')));
-    await tester.pumpAndSettle();
-    expect(opened, ['192.168.2.7']);
-  });
-
-  testWidgets('no 屏幕共享 without a known LAN address or without an opener', (tester) async {
-    await pumpTab(tester, screenShare: (_) async {});
-    await tester.tap(find.byKey(const Key('device-222')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('screen-share')), findsNothing);
+  testWidgets('no 屏幕共享 button; 桌面 is an app row with a favourite star', (tester) async {
     await pumpTab(tester);
     await selectMini(tester);
     expect(find.byKey(const Key('screen-share')), findsNothing);
-  });
-
-  test('screenShareHost picks a reachable host part', () {
-    expect(screenShareHost(const ['127.0.0.1:1', '[::1]:2']), isNull);
-    expect(screenShareHost(const ['[fd7a::5]:22028']), 'fd7a::5');
-    expect(screenShareHost(const ['100.64.0.9:22028']), '100.64.0.9');
-    expect(screenShareHost(const []), isNull);
+    expect(find.text('用屏幕共享打开'), findsNothing);
+    expect(find.text('桌面'), findsOneWidget);
+    expect(find.byKey(const Key('fav-desktop:')), findsOneWidget);
   });
 
   testWidgets('typed add form text survives switching device chips', (tester) async {
@@ -712,6 +702,13 @@ void main() {
     await tester.tap(find.byKey(const Key('remove-host-gpu1')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('remove-host-error')), findsOneWidget);
+    // The device chips ride at the top of the scrolling tab; the earlier ensureVisible
+    // scrolled far enough (a 桌面 app row makes the body taller) that the chip row left
+    // the viewport and was disposed. Bring device-222 back before tapping it.
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('device-222')), -300.0,
+      scrollable: find.byType(Scrollable).first,
+    );
     await tester.tap(find.byKey(const Key('device-222')));
     await tester.pumpAndSettle();
     expect(find.text('终端'), findsOneWidget);

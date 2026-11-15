@@ -293,6 +293,8 @@ public final class EmbeddedSession {
             if let ms = probe.pong(seq: seq, now: t) { onEvent?(.rtt(ms: ms)) }
         case let .inputSource(id, name, ascii):
             onEvent?(.inputSource(id: id, name: name, ascii: ascii))
+        case let .screenLocked(locked):
+            onEvent?(.screenLocked(locked))
         default:
             break
         }

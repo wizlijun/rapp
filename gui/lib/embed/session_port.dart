@@ -285,6 +285,12 @@ class InputSourceEvent extends SessionEvent {
   final bool ascii;
 }
 
+/// A's screen is locked (or no longer); sent at ready and on every change (v10 hosts).
+class ScreenLockedEvent extends SessionEvent {
+  const ScreenLockedEvent(super.sid, this.locked);
+  final bool locked;
+}
+
 class ClosedEvent extends SessionEvent {
   const ClosedEvent(super.sid, this.reason);
   final String reason;
@@ -417,6 +423,8 @@ SessionEvent? parseSessionEvent(String method, Object? args) {
         return InputBlockedEvent(sid, _as<String?>(m['by']) ?? '');
       case 'input_source':
         return InputSourceEvent(sid, _as<String>(m['id']), _as<String>(m['name']), _as<bool>(m['ascii']));
+      case 'screen_locked':
+        return ScreenLockedEvent(sid, _as<bool>(m['locked']));
       case 'closed':
         return ClosedEvent(sid, _as<String>(m['reason']));
     }
@@ -487,6 +495,12 @@ abstract class SessionPort {
 
   /// Switches A's input source to [id]; '' is the plain English (ASCII) keyboard layout.
   void selectInput(Object sid, String id) => _send('select_input', {'sid': sid, 'id': id});
+
+  /// Types A's system password into its lock screen (a desktop session; A drops it when unlocked).
+  void unlock(Object sid, String password) => _send('unlock', {'sid': sid, 'password': password});
+
+  /// A line over the top of the session's own windows; '' for none (no-op without detach).
+  void setBanner(Object sid, String text) => _send('set_banner', {'sid': sid, 'text': text});
 
   void menuPick(Object sid, List<int> path) => _send('menu_pick', {'sid': sid, 'path': path});
 

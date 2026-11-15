@@ -304,6 +304,7 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
       case 'menu_pick':
       case 'close_window':
       case 'select_input':
+      case 'unlock':
         s.send({'cmd': method, ...args});
       case 'move_top_left':
         final id = args['window'];

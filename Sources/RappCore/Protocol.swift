@@ -1,9 +1,13 @@
 import Foundation
 
-/// Protocol v10 = v9 (scroll copy: frame messages carry per-tile flags, see TileCodec) + session
+/// Protocol v11 = v10 (scroll copy: frame messages carry per-tile flags, see TileCodec; session
 /// ping/pong and the saving ladder: B's setStream values are its ceiling and its pinned byte means
-/// "automatic saving off". The host and client must both speak exactly this version.
-public let protocolVersion: UInt8 = 10
+/// "automatic saving off") + desktop sessions: screenLocked/unlock for the remote lock screen.
+/// The host and client must both speak exactly this version.
+public let protocolVersion: UInt8 = 11
+
+/// The longest system password `unlock` carries, in UTF-8 bytes.
+public let unlockPasswordLimit = 1024
 
 /// A client's `Hello` carried a different protocol version than this build speaks.
 public struct ProtocolVersionMismatch: Error, CustomStringConvertible {
@@ -121,6 +125,10 @@ public enum Message: Equatable {
     case pong(UInt32)                                                                        // 32, host -> client (v9)
     /// The saving level A streams at: 0 = B's ceiling, 1 = at most 5 fps, 2 = the weak floor.
     case saving(UInt8)                                                                       // 33, host -> client (v9)
+    /// Whether A's screen is locked (input reaches only the lock screen then). Sent at ready and on change.
+    case screenLocked(Bool)                                                                  // 34, host -> client (v11)
+    /// Type A's system password at the lock screen; the host drops it unless A is locked.
+    case unlock(password: String)                                                            // 35, client -> host (v11)
 
     public func encoded() -> [UInt8] {
         var w = Writer()
@@ -236,6 +244,13 @@ public enum Message: Equatable {
         case let .saving(level):
             type = 33
             w.u8(level)
+        case let .screenLocked(on):
+            type = 34
+            w.u8(on ? 1 : 0)
+        case let .unlock(password):
+            type = 35
+            precondition(password.utf8.count <= unlockPasswordLimit, "password too long")
+            w.string(password)
         }
         precondition(w.bytes.count <= maxMessageLength, "message too large")
         var out: [UInt8] = [type]
@@ -357,6 +372,16 @@ public enum Message: Equatable {
             let level = try r.u8()
             guard level <= 2 else { throw CodecError("bad saving level") }
             message = .saving(level)
+        case 34:
+            let flag = try r.u8()
+            guard flag <= 1 else { throw CodecError("bad locked flag") }
+            message = .screenLocked(flag == 1)
+        case 35:
+            let password = try r.string()
+            guard password.utf8.count <= unlockPasswordLimit else {
+                throw CodecError("password longer than \(unlockPasswordLimit) bytes")
+            }
+            message = .unlock(password: password)
         default:
             throw CodecError("unknown message type \(type)")
         }
@@ -365,7 +390,7 @@ public enum Message: Equatable {
     }
 }
 
-private let knownTypes: Set<UInt8> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33]
+private let knownTypes: Set<UInt8> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35]
 
 /// Turns a byte stream into messages. Feed it whatever the socket delivers
 /// with `append`, then call `next()` until it returns nil.

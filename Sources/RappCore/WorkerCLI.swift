@@ -206,6 +206,8 @@ public enum WorkerEvent: Equatable {
     case input
     /// This client's input was blocked because `by` is operating A.
     case inputBlocked(by: String)
+    /// B had A's system password typed at the lock screen (never the password itself).
+    case unlock
     case exit(code: Int32, reason: String)
 
     public var jsonLine: String {
@@ -240,6 +242,8 @@ public enum WorkerEvent: Equatable {
             return RappCore.jsonLine(["event": "input"])
         case let .inputBlocked(by):
             return RappCore.jsonLine(["event": "input_blocked", "by": by])
+        case .unlock:
+            return RappCore.jsonLine(["event": "unlock"])
         case let .exit(code, reason):
             return RappCore.jsonLine(["event": "exit", "code": Int(code), "reason": reason])
         }
@@ -318,8 +322,11 @@ public func shareableApps(windows: [ListedWindow], regularApps: [Int32: SharedAp
 }
 
 /// With the permissions when given, so B sees what A is missing before opening an app.
-public func appsJSON(_ apps: [SharedApp], screenRecording: Bool? = nil, accessibility: Bool? = nil) -> String {
-    var object: [String: Any] = ["apps": apps.map { ["app": $0.app, "name": $0.name] }]
+/// With `displays`, the list starts with the desktop entry (desktop sessions spec §4.1).
+public func appsJSON(_ apps: [SharedApp], screenRecording: Bool? = nil, accessibility: Bool? = nil,
+                     displays: [DesktopDisplay] = []) -> String {
+    let listed: [[String: Any]] = apps.map { ["app": $0.app, "name": $0.name] }
+    var object: [String: Any] = ["apps": (desktopEntry(displays).map { [$0] } ?? []) + listed]
     if let screenRecording, let accessibility {
         object["permissions"] = ["screen_recording": screenRecording, "accessibility": accessibility]
     }

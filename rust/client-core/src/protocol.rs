@@ -1,7 +1,10 @@
 use anyhow::{bail, ensure, Context, Result};
 use std::{collections::HashSet, io::Read};
 
-pub const VERSION: u8 = 10;
+pub const VERSION: u8 = 11;
+
+/// The longest unlock password a client may send (bytes, v11).
+pub const UNLOCK_PASSWORD_LIMIT: usize = 1024;
 pub const MAX_MESSAGE: usize = 64 * 1024 * 1024;
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Rect {
@@ -66,6 +69,8 @@ pub enum Incoming {
         name: String,
         ascii: bool,
     },
+    /// A's screen is locked (v10): input reaches only the lock screen.
+    ScreenLocked(bool),
 }
 #[derive(Clone, Debug)]
 pub struct Address {
@@ -166,6 +171,12 @@ pub fn id_packet(kind: u8, id: u32) -> Vec<u8> {
     packet(kind, id.to_le_bytes().to_vec())
 }
 /// Select A's input source `id`; "" selects A's ASCII-capable layout (v8 hosts).
+/// Types `password` at A's lock screen (v11); at most `UNLOCK_PASSWORD_LIMIT` bytes.
+pub fn unlock(password: &str) -> Vec<u8> {
+    let mut p = vec![];
+    string(&mut p, password);
+    packet(35, p)
+}
 pub fn select_input(id: &str) -> Vec<u8> {
     let mut p = vec![];
     string(&mut p, id);
@@ -297,7 +308,7 @@ pub fn read_message(input: &mut impl Read) -> Result<(Incoming, usize)> {
     let mut h = [0; 5];
     input.read_exact(&mut h).context("host disconnected")?;
     ensure!(
-        [2, 3, 4, 13, 17, 19, 21, 26, 28, 29, 32, 33].contains(&h[0]),
+        [2, 3, 4, 13, 17, 19, 21, 26, 28, 29, 32, 33, 34].contains(&h[0]),
         "unexpected host message type {}",
         h[0]
     );
@@ -450,6 +461,11 @@ pub fn decode(kind: u8, p: &[u8]) -> Result<Incoming> {
             let v = r.u8()?;
             ensure!(v <= 2, "invalid saving level");
             Incoming::Saving(v)
+        }
+        34 => {
+            let v = r.u8()?;
+            ensure!(v <= 1, "invalid locked flag");
+            Incoming::ScreenLocked(v == 1)
         }
         _ => bail!("unknown host message type {kind}"),
     };

@@ -268,7 +268,7 @@ async fn spawn(state: &Arc<State>, app: &str, gen: u64) -> Result<(u16, String, 
             let v: Value = serde_json::from_str(&l).unwrap_or_default();
             match v["event"].as_str() {
                 Some("exit") => said = Some(v),
-                Some(ev @ ("transfer" | "rejected")) => transcribe(&state, &app, ev, &v),
+                Some(ev @ ("transfer" | "rejected" | "unlock")) => transcribe(&state, &app, ev, &v),
                 Some("input") => tell_others(&state, &app),
                 Some("input_blocked") => log_blocked(&state, &app, &v, &mut blocked_logged),
                 Some("ended") if app == TERM => crate::term::ended(&state, &v),
@@ -316,7 +316,7 @@ fn log_blocked(state: &State, app: &str, v: &Value, logged: &mut HashMap<u64, In
     state.log.event(Lvl::Info, "input_blocked", json!({"app": app, "sid": sid, "by": by}));
 }
 
-/// A worker's `transfer` / `rejected` stdout event as a log line, tagged with the app's current session.
+/// A worker's `transfer` / `rejected` / `unlock` stdout event as a log line, tagged with the app's current session.
 /// Only the named fields are copied, so nothing the host adds later can carry content into the log.
 fn transcribe(state: &State, app: &str, ev: &str, v: &Value) {
     let mut fields = json!({"app": app});

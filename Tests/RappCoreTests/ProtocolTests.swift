@@ -71,7 +71,11 @@ final class ProtocolTests: XCTestCase {
         .inputSource(id: "com.apple.keylayout.ABC", name: "ABC", ascii: true),
         .selectInput(id: ""),
         .selectInput(id: "com.apple.keylayout.US"),
-        .hello(token: "t", bundleID: "b", mode: .gray4, fps: 15, density: 1, version: 10),
+        .hello(token: "t", bundleID: "b", mode: .gray4, fps: 15, density: 1, version: 11),
+        .screenLocked(true),
+        .screenLocked(false),
+        .unlock(password: "pässwörd 1"),
+        .unlock(password: ""),
         .chunk([UInt8](repeating: 7, count: chunkSize)),
     ]
 
@@ -103,6 +107,19 @@ final class ProtocolTests: XCTestCase {
         XCTAssertThrowsError(try decodeOne([31, 5, 0, 0, 0, 1, 0, 0, 0, 0]))
     }
 
+    func testScreenLockedAndUnlockWireFormat() throws {
+        XCTAssertEqual(protocolVersion, 11)
+        XCTAssertEqual(Message.screenLocked(true).encoded(), [34, 1, 0, 0, 0, 1])
+        XCTAssertEqual(Message.unlock(password: "ab").encoded(), [35, 4, 0, 0, 0, 2, 0, 0x61, 0x62])
+        XCTAssertThrowsError(try decodeOne([34, 1, 0, 0, 0, 2])) { XCTAssertEqual("\($0)", "bad locked flag") }
+        let long = String(repeating: "x", count: unlockPasswordLimit + 1)
+        var w: [UInt8] = [35] + withUnsafeBytes(of: UInt32(long.utf8.count + 2).littleEndian, Array.init)
+        w += withUnsafeBytes(of: UInt16(long.utf8.count).littleEndian, Array.init) + Array(long.utf8)
+        XCTAssertThrowsError(try decodeOne(w))
+        let max = String(repeating: "y", count: unlockPasswordLimit)
+        XCTAssertEqual(try decodeOne(Message.unlock(password: max).encoded()), .unlock(password: max))
+    }
+
     func testOldClientGetsVersionError() {
         // A protocol-2 hello: version 2, token "a", bundle "b", gray4, scale 2 (strings are u16 LE length + UTF-8).
         var p = MessageParser()
@@ -110,14 +127,14 @@ final class ProtocolTests: XCTestCase {
         p.append([1, UInt8(payload.count), 0, 0, 0] + payload)
         XCTAssertThrowsError(try p.next()) { error in
             XCTAssertEqual((error as? ProtocolVersionMismatch)?.client, 2)
-            XCTAssertEqual("\(error)", "protocol version mismatch: host 10, client 2 (update both sides)")
+            XCTAssertEqual("\(error)", "protocol version mismatch: host 11, client 2 (update both sides)")
         }
     }
 
-    func testHelloAcceptsOnlyVersion10() throws {
-        let m = Message.hello(token: "t", bundleID: "b", mode: .gray4, fps: 15, density: 1, version: 10)
+    func testHelloAcceptsOnlyVersion11() throws {
+        let m = Message.hello(token: "t", bundleID: "b", mode: .gray4, fps: 15, density: 1, version: 11)
         XCTAssertEqual(try decodeOne(m.encoded()), m)
-        for v: UInt8 in [9, 11] {
+        for v: UInt8 in [10, 12] {
             var bytes = m.encoded()
             bytes[5] = v
             XCTAssertThrowsError(try decodeOne(bytes)) { XCTAssertEqual(($0 as? ProtocolVersionMismatch)?.client, v) }
@@ -125,18 +142,18 @@ final class ProtocolTests: XCTestCase {
         var old = m.encoded()
         old[5] = 4
         XCTAssertThrowsError(try decodeOne(old)) {
-            XCTAssertEqual("\($0)", "protocol version mismatch: host 10, client 4 (update both sides)")
+            XCTAssertEqual("\($0)", "protocol version mismatch: host 11, client 4 (update both sides)")
         }
     }
 
-    func testFetchAndPutAcceptOnlyVersion10() throws {
+    func testFetchAndPutAcceptOnlyVersion11() throws {
         let f = Message.fetch(token: "t", clip: 1, file: 2, offset: 3).encoded()
         let q = Message.put(token: "t", item: 1, kind: .files, uti: "u", name: "n", total: 5).encoded()
-        XCTAssertEqual(f[5], 10)
-        XCTAssertEqual(q[5], 10)
+        XCTAssertEqual(f[5], 11)
+        XCTAssertEqual(q[5], 11)
         XCTAssertEqual(try decodeOne(f), .fetch(token: "t", clip: 1, file: 2, offset: 3))
         XCTAssertEqual(try decodeOne(q), .put(token: "t", item: 1, kind: .files, uti: "u", name: "n", total: 5))
-        for v: UInt8 in [9, 11] {
+        for v: UInt8 in [10, 12] {
             for var bytes in [f, q] {
                 bytes[5] = v
                 XCTAssertThrowsError(try decodeOne(bytes)) { XCTAssertEqual(($0 as? ProtocolVersionMismatch)?.client, v) }

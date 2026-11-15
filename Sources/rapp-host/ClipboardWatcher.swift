@@ -23,7 +23,7 @@ func fitted(_ s: String, limit: Int = 1024) -> String {
 final class ClipboardWatcher {
     private static let memoryLimit = 64 << 20
 
-    private let pid: pid_t
+    private let pid: pid_t? // nil in a desktop session: every copy counts
     private let store: ClipStore
     private let queue: DispatchQueue
     private let log: (String) -> Void
@@ -32,7 +32,7 @@ final class ClipboardWatcher {
     /// Session queue only.
     private var stopped = false
 
-    init(pid: pid_t, store: ClipStore, queue: DispatchQueue, log: @escaping (String) -> Void,
+    init(pid: pid_t?, store: ClipStore, queue: DispatchQueue, log: @escaping (String) -> Void,
          onClip: @escaping (UInt32, ClipInfo) -> Void) {
         self.pid = pid
         self.store = store
@@ -63,7 +63,7 @@ final class ClipboardWatcher {
 
     private func tick() {
         let count = NSPasteboard.general.changeCount
-        let frontmost = NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
+        let frontmost = pid == nil || NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
         queue.async { [self] in
             guard !stopped, store.changed(changeCount: count, targetFrontmost: frontmost) else { return }
             DispatchQueue.main.async { [self] in read(changeCount: count) }

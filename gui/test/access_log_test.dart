@@ -63,6 +63,16 @@ void main() {
       expect(list.app, '（列出应用）');
     });
 
+    test('desktop sessions and typed system passwords', () {
+      final base = {'ts': ts, 'peer': 'p', 'path': 'lan', 'sid': 3};
+      expect(historyRow({...base, 'ev': 'session_start', 'app': 'desktop:'}).app, '桌面');
+      expect(historyRow({...base, 'ev': 'session_start', 'app': 'desktop:69733382'}).app, '桌面（其他屏）');
+      final unlock = historyRow({'ts': ts, 'ev': 'unlock', 'app': 'desktop:', 'sid': 3});
+      expect(unlock.result, '输入了系统密码');
+      expect(unlock.app, '桌面');
+      expect(unlock.warn, isFalse);
+    });
+
     test('takeover and blocked input rows', () {
       final base = {'ts': ts, 'peer': 'p', 'path': 'lan', 'app': 'x', 'sid': 3};
       final named = historyRow({...base, 'ev': 'session_end', 'reason': 'taken over', 'by': 'b-two'});

@@ -66,6 +66,10 @@ public enum ChannelCommand: Equatable {
     case raiseDetached(sid: Int64)
     /// The windows the GUI hides for this session (its app profile's rules); detached windows leave them out.
     case setHidden(sid: Int64, windows: [UInt32])
+    /// Type `password` at A's lock screen (v10).
+    case unlock(sid: Int64, password: String)
+    /// A strip of text over the top of every detached window of the session; "" takes it away.
+    case setBanner(sid: Int64, text: String)
 }
 
 /// Longest input source id `select_input` passes on (hosts cut theirs to 1024 bytes).
@@ -79,7 +83,8 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
                               "cancel_transfer", "picture_focus", "clip_pick", "menu_pick", "move_top_left",
                               "composer_paste", "composer_attach", "composer_send", "composer_drop_block",
                               "detach", "attach", "raise_detached", "fetch_clip", "copy_local", "drop_copy", "reveal",
-                              "pin_save", "pin_load", "set_hidden", "close_window", "select_input"]
+                              "pin_save", "pin_load", "set_hidden", "close_window", "select_input",
+                              "unlock", "set_banner"]
     guard known.contains(method) else { throw ChannelError.unknown(method) }
     guard let map = args as? [String: Any] else { throw ChannelError.bad(method) }
     let a = Args(method: method, map: map)
@@ -135,6 +140,12 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
         let id = try a.string("id")
         guard id.utf8.count <= maxInputSourceID else { throw ChannelError.bad(method) }
         return .selectInput(sid: sid, id: id)
+    case "unlock":
+        let password = try a.string("password")
+        guard password.utf8.count <= unlockPasswordLimit else { throw ChannelError.bad(method) }
+        return .unlock(sid: sid, password: password)
+    case "set_banner":
+        return .setBanner(sid: sid, text: try a.string("text"))
     case "set_stream":
         return .setStream(sid: sid, mode: try a.mode(), fps: try a.fps(), density: try a.density(),
                           pinned: try a.optionalBool("pinned"))
@@ -357,6 +368,8 @@ public func eventPayload(_ e: SessionEvent, sid: Int64, textures: [UInt32: Int64
         return payload("stalled", ["on": on])
     case let .inputSource(id, name, ascii):
         return payload("input_source", ["id": id, "name": name, "ascii": ascii])
+    case let .screenLocked(locked):
+        return payload("screen_locked", ["locked": locked])
     case let .disconnected(reason):
         return payload("disconnected", ["reason": reason])
     case let .closed(reason):

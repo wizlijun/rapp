@@ -1,6 +1,4 @@
 // Devices tab of the side panel: 本机, each remote device's apps, add device.
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 
 import '../hub_client.dart';
@@ -23,26 +21,12 @@ TextStyle _mono(RappTokens t, {double size = 12, Color? color}) => TextStyle(
       color: color ?? t.muted,
     );
 
-/// The host part of A's first LAN address that another machine can reach ("ip:port" or
-/// "[v6]:port"); null when there is none (loopback only, or unknown).
-String? screenShareHost(List<String> lan) {
-  for (final a in lan) {
-    final v6 = a.startsWith('[');
-    final end = v6 ? a.indexOf(']') : a.lastIndexOf(':');
-    final host = v6 ? (end > 0 ? a.substring(1, end) : '') : (end > 0 ? a.substring(0, end) : a);
-    final ip = InternetAddress.tryParse(host);
-    if (ip != null && !ip.isLoopback) return host;
-  }
-  return null;
-}
-
 class DevicesTab extends StatefulWidget {
   const DevicesTab(
       {super.key,
       required this.state,
       required this.local,
-      this.localBadge = false,
-      this.screenShare});
+      this.localBadge = false});
   final MainState state;
 
   /// The 本机 content, assembled by the caller.
@@ -50,10 +34,6 @@ class DevicesTab extends StatefulWidget {
 
   /// A new version is on its way in: a still, muted dot on 本机 (K27).
   final bool localBadge;
-
-  /// Opens Apple's 屏幕共享 to A at this host (B types A's login password there itself;
-  /// rapp never holds it). Null where there is no such app: no button.
-  final Future<void> Function(String host)? screenShare;
 
   @override
   State<DevicesTab> createState() => _DevicesTabState();
@@ -193,13 +173,6 @@ class _DevicesTabState extends State<DevicesTab> {
     final missing = missingPermissions(apps?.permissions);
     final forced = state.forcedRelay(id);
     final pathWord = routeWord(state.pathOf(id), forced: forced);
-    final share = widget.screenShare;
-    final shareHost = share == null
-        ? null
-        : screenShareHost([
-            for (final h in state.hub?.hosts ?? const <HubHost>[])
-              if (h.id == id) ...h.lan
-          ]);
     return [
       Wrap(
         crossAxisAlignment: WrapCrossAlignment.center,
@@ -223,13 +196,6 @@ class _DevicesTabState extends State<DevicesTab> {
               key: const Key('route-toggle'),
               label: forced ? '恢复自动' : '强制走中继',
               onPressed: state.hubUsable ? () => state.setRoute(id, !forced) : null,
-            ),
-          if (share != null && shareHost != null)
-            RappButton.secondary(
-              key: const Key('screen-share'),
-              label: '用屏幕共享打开',
-              semanticLabel: '用屏幕共享打开 $name（可在那里解锁）',
-              onPressed: () => share(shareHost),
             ),
           // Keyed per device: an armed confirm never carries over to another device.
           KeyedSubtree(

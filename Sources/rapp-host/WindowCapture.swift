@@ -93,6 +93,43 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         throw HostError("\(bundleID) has no window on screen (open one, and make sure it is not minimized)")
     }
 
+    /// The display a desktop session shows (`desktop:` is the main one), with its number in
+    /// `orderedDisplays` (1 = main). Gives up after 10 seconds like `find`.
+    static func findDisplay(_ target: DesktopTarget) async throws -> (SCDisplay, DesktopDisplay, number: Int) {
+        let content: SCShareableContent
+        do {
+            content = try await withTimeout(seconds: 10) {
+                try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+            }
+        } catch is TimeoutError {
+            throw HostError(windowLookupTimeoutText)
+        }
+        let displays = currentDisplays()
+        let id: CGDirectDisplayID
+        switch target {
+        case .main: id = displays.first(where: \.main)?.id ?? CGMainDisplayID()
+        case let .display(wanted): id = wanted
+        }
+        guard let sc = content.displays.first(where: { $0.displayID == id }),
+              let index = displays.firstIndex(where: { $0.id == id }) else {
+            throw HostError("display \(id) is not connected")
+        }
+        return (sc, displays[index], index + 1)
+    }
+
+    /// A desktop session: the whole display, every window on it.
+    init(display: SCDisplay, region: CanvasRect, fps: Int, density: Double,
+         onFrame: @escaping (CVPixelBuffer, CanvasRect) -> Void, onStopped: @escaping (String) -> Void) {
+        self.displayFrame = display.frame
+        self.configuredRegion = region
+        self.configuredFps = fps
+        self.configuredDensity = density
+        self.onFrame = onFrame
+        self.onStopped = onStopped
+        self.filter = SCContentFilter(display: display, excludingWindows: [])
+        super.init()
+    }
+
     init(found: FoundApp, region: CanvasRect, fps: Int, density: Double,
          onFrame: @escaping (CVPixelBuffer, CanvasRect) -> Void, onStopped: @escaping (String) -> Void) {
         self.displayFrame = found.display.frame
@@ -203,4 +240,22 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
         let expected = lock.withLock { stoppedByUs }
         if !expected { onStopped(error.localizedDescription) }
     }
+}
+
+/// A's active displays in global points, in `orderedDisplays` order (main first, then left to right).
+func currentDisplays() -> [DesktopDisplay] {
+    var count: UInt32 = 0
+    guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
+    var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+    guard CGGetActiveDisplayList(count, &ids, &count) == .success else { return [] }
+    let names: [CGDirectDisplayID: String] = Dictionary(NSScreen.screens.compactMap { screen in
+        (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)
+            .map { ($0.uint32Value, screen.localizedName) }
+    }, uniquingKeysWith: { a, _ in a })
+    let main = CGMainDisplayID()
+    // Mirrored displays show the same picture: only the one leading the mirror set counts.
+    let shown = ids.prefix(Int(count)).filter { CGDisplayMirrorsDisplay($0) == kCGNullDirectDisplay }
+    return orderedDisplays(shown.map { id in
+        DesktopDisplay(id: id, name: names[id] ?? "屏幕", main: id == main, frame: CGDisplayBounds(id))
+    })
 }

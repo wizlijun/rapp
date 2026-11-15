@@ -597,6 +597,16 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
                     notice_deadline = Some(Instant::now() + Duration::from_secs(1));
                     emit(json_mode, json!({"event":"input_blocked","by":by}));
                 }
+                Event::Message(Incoming::ScreenLocked(locked)) => {
+                    if locked {
+                        info.set_text("远程电脑已锁屏，鼠标和键盘只能操作锁屏界面；请打开「桌面」输入密码解锁");
+                        info.set_visible(true);
+                        notice_deadline = None;
+                    } else if !state.borrow().windows.is_empty() {
+                        info.set_visible(false);
+                    }
+                    emit(json_mode, json!({"event":"screen_locked","locked":locked}));
+                }
                 Event::PastePrepared(seq, result) => {
                     let mut s = state.borrow_mut();
                     if let Some(pending) = &s.pending_text {

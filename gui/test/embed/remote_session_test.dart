@@ -84,6 +84,15 @@ void main() {
     expect(r.composer.sending, false);
   });
 
+  test('screenLocked is null until A says, then follows it', () {
+    final r = RemoteSession(1, 'desktop:');
+    expect(r.screenLocked, isNull);
+    r.apply(const ScreenLockedEvent(1, true));
+    expect(r.screenLocked, isTrue);
+    r.apply(const ScreenLockedEvent(1, false));
+    expect(r.screenLocked, isFalse);
+  });
+
   test('ready sets appName and ready', () {
     final r = RemoteSession(1, 'x');
     var n = 0;

@@ -288,6 +288,20 @@ final class EmbeddedSessionTests: XCTestCase {
         XCTAssertEqual(Array(link.sent.suffix(2)), [.selectInput(id: ""), .paste(seq: 1, .text("hi"))])
     }
 
+    func testScreenLockedBecomesAnEventAndUnlockGoesOut() throws {
+        let link = FakeLink()
+        var events = [SessionEvent]()
+        let (s, q) = make(link) { events.append($0) }
+        q.sync { link.feed(.windows([w])); link.feed(.screenLocked(true)) }
+        XCTAssertEqual(events.last, .screenLocked(true))
+        s.send(.unlock(password: "pw"))
+        q.sync {}
+        XCTAssertEqual(link.sent.last, .unlock(password: "pw"))
+        q.sync { link.feed(.screenLocked(false)) }
+        XCTAssertEqual(events.last, .screenLocked(false))
+        XCTAssertFalse(events.contains { if case .disconnected = $0 { return true }; return false })
+    }
+
     func testTakenOverDisconnectsWithTheHostText() throws {
         let link = FakeLink()
         var events = [SessionEvent]()

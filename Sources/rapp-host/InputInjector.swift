@@ -5,12 +5,17 @@ import RappCore
 /// Turns input messages into system-wide events. These are the same events a
 /// real mouse and keyboard produce, so the target app needs no cooperation;
 /// the price is that the Mac's real pointer and focus are used.
+///
+/// `app == nil` is a desktop session: the input goes to whatever is under the
+/// pointer or frontmost, with no activation and no top-window check.
 final class InputInjector {
-    private let app: NSRunningApplication
+    private let app: NSRunningApplication?
     /// The canvas display in global points.
     private let display: CGRect
     private let log: (String) -> Void
-    private let source = CGEventSource(stateID: .hidSystemState)
+    /// The combined state (as RustDesk does): events carry no stale modifier
+    /// from the real keyboard, and flags are set explicitly on every event.
+    private let source = CGEventSource(stateID: .combinedSessionState)
     /// Buttons whose down was dropped by the top-window check: their drags and
     /// up are dropped too, so the app never sees half a click.
     private var droppedButtons = Set<MouseButton>()
@@ -18,7 +23,7 @@ final class InputInjector {
     private var held = HeldInput()
     private var lastPoint = CGPoint.zero
 
-    init(app: NSRunningApplication, display: CGRect, log: @escaping (String) -> Void) {
+    init(app: NSRunningApplication?, display: CGRect, log: @escaping (String) -> Void) {
         self.app = app
         self.display = display
         self.log = log
@@ -39,8 +44,10 @@ final class InputInjector {
             let point = globalPoint(target, x, y)
             post(.mouseMoved, at: point, button: .left)
             let clamp: (Float) -> Int32 = { Int32(max(-10_000, min(10_000, $0.rounded()))) }
-            CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 2,
-                    wheel1: clamp(dy), wheel2: clamp(dx), wheel3: 0)?.post(tap: .cghidEventTap)
+            guard let event = CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 2,
+                                      wheel1: clamp(dy), wheel2: clamp(dx), wheel3: 0) else { return }
+            event.flags = []
+            event.post(tap: .cghidEventTap)
 
         case let .text(text):
             activateIfNeeded()
@@ -100,6 +107,7 @@ final class InputInjector {
         guard let event = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point,
                                   mouseButton: cgButton) else { return }
         event.setIntegerValueField(.mouseEventClickState, value: Int64(max(1, clickCount)))
+        event.flags = []
         event.post(tap: .cghidEventTap)
         lastPoint = point
         if kind == .down { held.pressButton(button) } else if kind == .up { held.releaseButton(button) }
@@ -123,6 +131,7 @@ final class InputInjector {
     /// `point` must be the app's. If not, brings the app and the window to
     /// the front, waits 50 ms and looks again; still covered drops the press.
     private func clearToClick(at point: CGPoint, window: WindowInfo, table: [WindowInfo]) -> Bool {
+        guard let app else { return true }
         if topOwner(at: point).pid == app.processIdentifier { return true }
         // Only decorated windows are raised (a popup has no AX window).
         WindowResizer.bringToFront(pid: app.processIdentifier,
@@ -158,14 +167,16 @@ final class InputInjector {
     }
 
     private func activateIfNeeded() {
-        guard !app.isActive else { return }
+        guard let app, !app.isActive else { return }
         app.activate()
         usleep(50_000)
     }
 
     private func post(_ type: CGEventType, at point: CGPoint, button: CGMouseButton) {
-        CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: button)?
-            .post(tap: .cghidEventTap)
+        guard let event = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point,
+                                  mouseButton: button) else { return }
+        event.flags = []
+        event.post(tap: .cghidEventTap)
     }
 
     /// Display origin + window top-left + (x, y), kept on the display (spec §3.4).

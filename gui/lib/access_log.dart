@@ -38,18 +38,25 @@ HistoryRow historyRow(Map<String, dynamic> ev) {
     'request' => ('失败：${s('result')}', true),
     // The host turned the session away (busy, version mismatch, bad token).
     'rejected' => ('拒绝：${s('reason')}', true),
+    'unlock' => ('输入了系统密码', false),
     final other => (other, false),
   };
   return HistoryRow(
     time: _localTime(s('ts')),
     who: name.isEmpty ? peer : '$name（自称）· $peer',
     path: _paths[s('path')] ?? s('path'),
-    app: s('op') == 'list_apps' ? '（列出应用）' : s('app'),
+    app: s('op') == 'list_apps' ? '（列出应用）' : _appWord(s('app')),
     duration: ev['secs'] is int ? _duration(ev['secs'] as int) : '',
     result: result,
     warn: warn,
   );
 }
+
+String _appWord(String app) => app == 'desktop:'
+    ? '桌面'
+    : app.startsWith('desktop:')
+        ? '桌面（其他屏）'
+        : app;
 
 String _endReason(String reason) => switch (reason) {
       'closed' => '结束',
