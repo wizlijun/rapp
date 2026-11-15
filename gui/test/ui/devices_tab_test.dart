@@ -27,7 +27,10 @@ void main() {
   var termsOff = false;
   String? removeTargetError;
   String? newTermError;
+  String? openTermError;
   var termHosts = <Map<String, dynamic>>[{'host': null}];
+  var termRows = <Map<String, dynamic>>[];
+  List<Map<String, dynamic>>? remoteApps;
 
   Future<void> flush() => Future<void>.delayed(Duration.zero);
 
@@ -40,7 +43,10 @@ void main() {
     termsOff = false;
     removeTargetError = null;
     newTermError = null;
+    openTermError = null;
     termHosts = [{'host': null}];
+    termRows = [];
+    remoteApps = null;
     tmp = Directory.systemTemp.createTempSync('devices_tab_test');
     t = FakeTransport();
     hub = HubClient(t);
@@ -73,7 +79,7 @@ void main() {
             'req': req,
             'id': cmd['id'],
             'path': 'lan',
-            'apps': [
+            'apps': remoteApps ?? [
               {
                 'app': 'desktop:',
                 'name': '桌面',
@@ -87,7 +93,7 @@ void main() {
           });
         case 'terms':
           if (termsOff) return t.emit({'event': 'terms', 'req': req, 'id': cmd['id'], 'off': true});
-          t.emit({'event': 'terms', 'req': req, 'id': cmd['id'], 'path': 'lan', 'terms': [], 'hosts': termHosts});
+          t.emit({'event': 'terms', 'req': req, 'id': cmd['id'], 'path': 'lan', 'terms': termRows, 'hosts': termHosts});
         case 'add_term_target':
           if (addTargetError != null) return t.emit({'event': 'error', 'req': req, 'error': addTargetError});
           termHosts.add({'host': cmd['name'], 'target': cmd['target']});
@@ -99,6 +105,10 @@ void main() {
         case 'new_term':
           if (newTermError != null) return t.emit({'event': 'error', 'req': req, 'error': newTermError});
           t.emit({'event': 'term_created', 'req': req, 'id': cmd['id'], 'term': 'term:tmux:new'});
+        case 'open_term':
+          if (openTermError != null) return t.emit({'event': 'error', 'req': req, 'error': openTermError});
+          termRows = [...termRows, {'id': 'term:pty:c', 'name': 'c', 'command': 'claude', 'activity': 0}];
+          t.emit({'event': 'term_created', 'req': req, 'id': cmd['id'], 'term': 'term:pty:c'});
         case 'set_route':
           for (final h in hosts) {
             if (h['id'] != cmd['id']) continue;
@@ -172,6 +182,9 @@ void main() {
     await tester.tap(find.byKey(const Key('device-111')));
     await tester.pumpAndSettle();
     expect(tester.widget<TextField>(find.byKey(const Key('add-id'))).controller!.text, '999');
+    // Typing scrolled the form into view; with mini's 终端 group the chip row is off the top by then.
+    await tester.scrollUntilVisible(find.byKey(const Key('device-local')), -300.0,
+        scrollable: find.byType(Scrollable).first);
     await tester.tap(find.byKey(const Key('device-local')));
     await tester.pumpAndSettle();
     expect(tester.widget<TextField>(find.byKey(const Key('add-id'))).controller!.text, '999');
@@ -476,7 +489,8 @@ void main() {
     expect(s.hubUsable, isFalse);
     final b = find.descendant(of: find.byKey(const Key('open-com.apple.Safari')), matching: find.byType(OutlinedButton));
     expect(tester.widget<OutlinedButton>(b).onPressed, isNull);
-    await tester.ensureVisible(find.byKey(const Key('add-button')));
+    // Below mini's 终端 group the form is past the list's cache extent: scrolled to, not just made visible.
+    await tester.scrollUntilVisible(find.byKey(const Key('add-button')), 300.0, scrollable: find.byType(Scrollable).first);
     final add = tester.widget<FilledButton>(
         find.descendant(of: find.byKey(const Key('add-button')), matching: find.byType(FilledButton)));
     expect(add.onPressed, isNull);
@@ -607,7 +621,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('终端：timed out'), findsOneWidget);
     await emitTerms(tester, []);
-    expect(find.text('这台设备的 tmux 里现在没有会话。'), findsOneWidget);
+    expect(find.text('这台设备上现在没有终端会话。'), findsOneWidget);
   });
 
   Future<void> fillHost(WidgetTester tester, {String tmux = ''}) async {
@@ -785,5 +799,162 @@ void main() {
     await pumpTab(tester);
     await selectMini(tester);
     expect(find.byKey(const Key('new-term')), findsNothing);
+  });
+
+  List<Map<String, dynamic>> appsWithTerminal() => [
+        {'app': 'com.apple.Safari', 'name': 'Safari'},
+        {'app': 'com.apple.Terminal', 'name': 'Terminal'},
+        {'app': 'desktop:', 'name': '桌面'},
+      ];
+
+  testWidgets('desktop, then 终端, then the other apps; Terminal only inside 终端', (tester) async {
+    remoteApps = appsWithTerminal();
+    await pumpTab(tester);
+    await selectMini(tester);
+    await emitTerms(tester, [termRow('term:pty:claude', 'claude', 'claude')],
+        hosts: [{'host': null, 'launchers': ['Terminal']}]);
+    double y(Finder f) => tester.getTopLeft(f).dy;
+    expect(y(find.text('桌面')), lessThan(y(find.text('终端'))));
+    expect(y(find.text('终端')), lessThan(y(find.text('Safari'))));
+    expect(find.text('Terminal'), findsOneWidget);
+    expect(find.byKey(const Key('app-com.apple.Terminal')), findsNothing);
+    final row = find.byKey(const Key('term-app-com.apple.Terminal'));
+    expect(find.descendant(of: row, matching: find.text('Terminal')), findsOneWidget);
+    expect(find.descendant(of: row, matching: find.text('只能用画面看')), findsOneWidget);
+    expect(find.descendant(of: row, matching: find.text('画面')), findsOneWidget);
+    t.sent.clear();
+    await tester.ensureVisible(find.byKey(const Key('pixels-com.apple.Terminal')));
+    await tester.tap(find.byKey(const Key('pixels-com.apple.Terminal')));
+    await tester.pump();
+    final open = t.sent.lastWhere((m) => m['cmd'] == 'open');
+    expect((open['id'], open['app']), ('111', 'com.apple.Terminal'));
+  });
+
+  testWidgets('without the entry, terminal apps stay in the app list', (tester) async {
+    remoteApps = appsWithTerminal();
+    termsOff = true;
+    await pumpTab(tester);
+    await selectMini(tester);
+    expect(find.text('终端'), findsNothing);
+    expect(find.byKey(const Key('app-com.apple.Terminal')), findsOneWidget);
+    expect(find.text('只能用画面看'), findsNothing);
+  });
+
+  testWidgets('the terms entry shows with a tmux error', (tester) async {
+    await pumpTab(tester);
+    await selectMini(tester);
+    await emitTerms(tester, [termRow('term:pty:claude', 'claude', 'claude')],
+        hosts: [{'host': null, 'error': 'tmux not found'}]);
+    expect(find.byKey(const Key('app-terms:')), findsOneWidget);
+    expect(find.text('终端'), findsOneWidget);
+    expect(find.byKey(const Key('term-term:pty:claude')), findsOneWidget);
+  });
+
+  testWidgets('the 终端 row opens the entry and can be a favourite', (tester) async {
+    s.prefs.termOpen['111'] = 'pixels';
+    await pumpTab(tester);
+    await selectMini(tester);
+    await emitTerms(tester, []);
+    await tester.tap(find.byKey(const Key('fav-terms:')));
+    await tester.pump();
+    expect(s.isFavorite('111', 'terms:'), isTrue);
+    expect(s.favorites.last.name, '终端');
+    t.sent.clear();
+    await tester.tap(find.byKey(const Key('open-terms:')));
+    await tester.pump();
+    expect(t.sent.lastWhere((m) => m['cmd'] == 'open')['app'], 'com.apple.Terminal');
+  });
+
+  testWidgets('rows say 文本 or tmux', (tester) async {
+    await pumpTab(tester);
+    await selectMini(tester);
+    await emitTerms(tester, [termRow('term:pty:claude', 'claude', 'claude'), termRow('term:tmux:work', 'work', 'zsh')]);
+    expect(find.descendant(of: find.byKey(const Key('term-term:pty:claude')), matching: find.text('文本')), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const Key('term-term:tmux:work')), matching: find.text('tmux')), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const Key('term-term:tmux:work')), matching: find.text('文本')), findsNothing);
+  });
+
+  // On a tab already showing mini.
+  Future<void> openNewText(WidgetTester tester, List<String> launchers) async {
+    await emitTerms(tester, [], hosts: [{'host': null, 'launchers': launchers}]);
+    t.sent.clear();
+    await tester.ensureVisible(find.byKey(const Key('new-text-term')));
+    await tester.tap(find.byKey(const Key('new-text-term')));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('新开文本终端 only when the host can open one; the app dropdown only with two', (tester) async {
+    await pumpTab(tester);
+    await selectMini(tester);
+    await emitTerms(tester, []);
+    expect(find.byKey(const Key('new-term')), findsOneWidget);
+    expect(find.text('新开 tmux 会话…'), findsOneWidget);
+    expect(find.byKey(const Key('new-text-term')), findsNothing);
+
+    await openNewText(tester, ['Terminal']);
+    expect(find.text('新开文本终端'), findsOneWidget);
+    expect(find.text('目录（空着就是家目录）'), findsOneWidget);
+    expect(find.text('命令（如 claude；空着就是 shell）'), findsOneWidget);
+    expect(find.text('名字（可不填）'), findsOneWidget);
+    expect(find.text('用哪个终端 app'), findsNothing);
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(find.text('新开文本终端'), findsNothing);
+
+    await openNewText(tester, ['Terminal', 'iTerm']);
+    expect(find.text('用哪个终端 app'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('new-text-app')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('iTerm').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('新开'));
+    await tester.pumpAndSettle();
+    expect(t.sent.firstWhere((m) => m['cmd'] == 'open_term')['app'], 'iTerm');
+  });
+
+  testWidgets('the dialog sends only filled fields and keeps itself open on failure', (tester) async {
+    termHosts = [{'host': null, 'launchers': ['Terminal']}];
+    await pumpTab(tester);
+    await selectMini(tester);
+    await openNewText(tester, ['Terminal']);
+    await tester.enterText(find.byKey(const Key('new-text-command')), ' claude ');
+    await tester.tap(find.text('新开'));
+    await tester.pumpAndSettle();
+    final m = t.sent.firstWhere((m) => m['cmd'] == 'open_term');
+    expect(m, {'cmd': 'open_term', 'id': '111', 'command': 'claude', 'app': 'Terminal', 'req': anything});
+    expect(t.sent.map((m) => m['cmd']), containsAllInOrder(['open_term', 'terms', 'open']));
+    expect(t.sent.lastWhere((m) => m['cmd'] == 'open')['app'], 'term:pty:c');
+    expect(find.text('新开文本终端'), findsNothing);
+
+    openTermError = 'no such directory: /x';
+    await tester.ensureVisible(find.byKey(const Key('new-text-term')));
+    await tester.tap(find.byKey(const Key('new-text-term')));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('new-text-cwd')), '/x');
+    await tester.enterText(find.byKey(const Key('new-text-name')), 'n');
+    await tester.tap(find.text('新开'));
+    await tester.pumpAndSettle();
+    final m2 = t.sent.lastWhere((m) => m['cmd'] == 'open_term');
+    expect((m2['cwd'], m2['name'], m2.containsKey('command')), ('/x', 'n', false));
+    expect(find.text('新开文本终端'), findsOneWidget);
+    expect(find.text('no such directory: /x'), findsOneWidget);
+  });
+
+  testWidgets('打开方式 is saved per device', (tester) async {
+    Directory('${tmp.path}/local').createSync(recursive: true);
+    File('${tmp.path}/local/service.json').writeAsStringSync('{"id":"dev1"}');
+    await pumpTab(tester);
+    await selectMini(tester);
+    await emitTerms(tester, []);
+    expect(s.prefs.termOpenFor('111'), 'text');
+    expect(tester.getSize(find.byKey(const Key('term-open-text'))).height, greaterThanOrEqualTo(48));
+    await tester.ensureVisible(find.byKey(const Key('term-open-pixels')));
+    await tester.tap(find.byKey(const Key('term-open-pixels')));
+    await tester.pump();
+    expect((s.prefs.termOpenFor('111'), s.prefs.termOpenFor('222')), ('pixels', 'text'));
+    expect(UiPrefs.load(s.data.prefsDir()!).termOpenFor('111'), 'pixels');
+    await tester.tap(find.byKey(const Key('term-open-text')));
+    await tester.pump();
+    expect(s.prefs.termOpenFor('111'), 'text');
   });
 }

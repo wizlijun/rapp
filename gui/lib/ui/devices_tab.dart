@@ -14,6 +14,7 @@ import 'main_state.dart';
 import 'session_model.dart';
 import 'shares_section.dart';
 import 'tab_chip.dart';
+import 'terms_entry.dart';
 import 'tokens.dart';
 
 TextStyle _mono(RappTokens t, {double size = 12, Color? color}) => TextStyle(
@@ -179,6 +180,8 @@ class _DevicesTabState extends State<DevicesTab> {
     final missing = missingPermissions(apps?.permissions);
     final forced = state.forcedRelay(id);
     final pathWord = routeWord(state.pathOf(id), forced: forced);
+    final terms = state.hub?.termLists[id];
+    final ordered = apps == null ? const <HubApp>[] : orderApps(apps.apps, entry: showsTermsEntry(terms));
     return [
       Wrap(
         crossAxisAlignment: WrapCrossAlignment.center,
@@ -230,23 +233,11 @@ class _DevicesTabState extends State<DevicesTab> {
           padding: const EdgeInsets.symmetric(vertical: 8),
           child: Text('对方没有可共享的窗口', style: TextStyle(color: t.muted)),
         ),
-      if (apps != null)
-        for (final a in apps.apps)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: _AppRow(
-              id: id,
-              app: a.app,
-              name: a.name,
-              session: _session(id, a.app),
-              enabled: state.hubUsable,
-              favorite: state.isFavorite(id, a.app),
-              onFavorite: () => state.toggleFavorite(id, a.app, a.name),
-              onProfile: () => openAppProfilePage(context, state.profiles, appId: a.app, appName: a.name),
-              onOpen: () => state.openOrSwitch(id, a.app, a.name),
-            ),
-          ),
-      ..._termGroup(context, id),
+      // 桌面 first, 终端 second (spec §2.1), the rest in their order.
+      if (ordered.firstOrNull?.app == 'desktop:') _appRow(context, id, ordered.first),
+      ..._termsEntry(context, id, terms, apps?.apps ?? const []),
+      for (final a in ordered)
+        if (a.app != 'desktop:') _appRow(context, id, a),
       if (widget.shares != null) SharesSection(key: ValueKey('shares-$id'), api: widget.shares!, to: id),
       const SizedBox(height: 8),
       Row(
@@ -273,75 +264,133 @@ class _DevicesTabState extends State<DevicesTab> {
     ];
   }
 
-  List<Widget> _termGroup(BuildContext context, String id) {
+  Widget _appRow(BuildContext context, String id, HubApp a) => Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: _AppRow(
+          id: id,
+          app: a.app,
+          name: a.name,
+          session: _session(id, a.app),
+          enabled: state.hubUsable,
+          favorite: state.isFavorite(id, a.app),
+          onFavorite: () => state.toggleFavorite(id, a.app, a.name),
+          onProfile: () => openAppProfilePage(context, state.profiles, appId: a.app, appName: a.name),
+          onOpen: () => state.openOrSwitch(id, a.app, a.name),
+        ),
+      );
+
+  /// The 终端 row and, below it and always expanded, its sessions, terminal apps, SSH hosts and 打开方式.
+  List<Widget> _termsEntry(BuildContext context, String id, TermList? list, List<HubApp> apps) {
     final t = RappTokens.of(context);
-    final list = state.hub?.termLists[id];
     final failed = _removeErrors[id];
     if (failed != null && !identical(failed.list, list)) _removeErrors.remove(id);
     final removeError = _removeErrors[id]?.text;
-    if (list == null || list.off) return const [];
-    if (list.error != null) {
-      return [Padding(padding: const EdgeInsets.only(top: 8), child: Text('终端：${list.error}', style: TextStyle(color: t.accent)))];
+    if (list != null && !list.off && list.error != null) {
+      return [Padding(padding: const EdgeInsets.only(bottom: 6), child: Text('终端：${list.error}', style: TextStyle(color: t.accent)))];
     }
+    if (!showsTermsEntry(list)) return const [];
+    final launchers = list!.hosts.where((h) => h.host == null).firstOrNull?.launchers ?? const <String>[];
+    final mode = state.prefs.termOpenFor(id);
+    Widget button(Key key, String label, VoidCallback? onPressed) => Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: RappButton.secondary(key: key, label: label, onPressed: onPressed),
+          ),
+        );
     return [
       Padding(
-        padding: const EdgeInsets.only(top: 8, bottom: 6),
-        child: Text('终端', style: TextStyle(color: t.text, fontWeight: FontWeight.w600)),
+        padding: const EdgeInsets.only(bottom: 6),
+        child: _AppRow(
+          id: id,
+          app: termsEntry,
+          name: termsEntryName,
+          session: null,
+          enabled: state.hubUsable,
+          favorite: state.isFavorite(id, termsEntry),
+          onFavorite: () => state.toggleFavorite(id, termsEntry, termsEntryName),
+          onOpen: () => state.openOrSwitch(id, termsEntry, termsEntryName),
+        ),
       ),
-      if (list.terms.isEmpty)
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Text('这台设备的 tmux 里现在没有会话。', style: TextStyle(color: t.muted)),
-        ),
-      for (final r in list.terms)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 6),
-          child: _TermRow(
-            row: r,
-            session: _session(id, r.id),
-            enabled: state.hubUsable && state.embeds,
-            onOpen: () => state.openOrSwitch(id, r.id, termDisplayName(r.name, r.host)),
-          ),
-        ),
-      for (final h in list.hosts)
-        if (h.host != null)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '${h.host} · ${h.target ?? ''}${h.error == null ? '' : '　连不上：${h.error}'}',
-                    style: TextStyle(color: h.error == null ? t.muted : t.accent),
+      Padding(
+        padding: const EdgeInsets.only(left: 16, bottom: 6),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (list.terms.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Text('这台设备上现在没有终端会话。', style: TextStyle(color: t.muted)),
+              ),
+            for (final r in list.terms)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: _TermRow(
+                  row: r,
+                  session: _session(id, r.id),
+                  enabled: state.hubUsable && state.embeds,
+                  onOpen: () => state.openOrSwitch(id, r.id, termDisplayName(r.name, r.host)),
+                ),
+              ),
+            for (final a in terminalAppsOf(apps))
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: _PixelsRow(
+                  app: a,
+                  session: _session(id, a.app),
+                  enabled: state.hubUsable,
+                  onOpen: () => state.openOrSwitch(id, a.app, a.name),
+                ),
+              ),
+            for (final h in list.hosts)
+              if (h.host != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '${h.host} · ${h.target ?? ''}${h.error == null ? '' : '　连不上：${h.error}'}',
+                          style: TextStyle(color: h.error == null ? t.muted : t.accent),
+                        ),
+                      ),
+                      RappButton.secondary(
+                        key: Key('remove-host-${h.host}'),
+                        label: '移除',
+                        onPressed: state.hubUsable ? () => _removeHost(id, h.host!) : null,
+                      ),
+                    ],
                   ),
                 ),
-                RappButton.secondary(
-                  key: Key('remove-host-${h.host}'),
-                  label: '移除',
-                  onPressed: state.hubUsable ? () => _removeHost(id, h.host!) : null,
-                ),
+            if (removeError != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text(removeError, key: const Key('remove-host-error'), style: TextStyle(color: t.accent)),
+              ),
+            if (launchers.isNotEmpty)
+              button(const Key('new-text-term'), '新开文本终端…',
+                  state.hubUsable ? () => showNewTextDialog(context, state, id) : null),
+            button(const Key('new-term'), '新开 tmux 会话…',
+                state.hubUsable ? () => _newTerm(context, id, [for (final h in list.hosts) ?h.host]) : null),
+            button(const Key('add-ssh-host'), '添加 SSH 主机…', state.hubUsable ? () => _addHost(context, id) : null),
+            Row(
+              children: [
+                Text('打开方式', style: TextStyle(color: t.text)),
+                const SizedBox(width: 12),
+                _ModeChoice(
+                    key: const Key('term-open-text'),
+                    label: '文本',
+                    selected: mode == 'text',
+                    onTap: () => state.setTermOpen(id, 'text')),
+                const SizedBox(width: 12),
+                _ModeChoice(
+                    key: const Key('term-open-pixels'),
+                    label: '画面',
+                    selected: mode == 'pixels',
+                    onTap: () => state.setTermOpen(id, 'pixels')),
               ],
             ),
-          ),
-      if (removeError != null)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 6),
-          child: Text(removeError, key: const Key('remove-host-error'), style: TextStyle(color: t.accent)),
-        ),
-      Align(
-        alignment: Alignment.centerLeft,
-        child: RappButton.secondary(
-          key: const Key('new-term'),
-          label: '新开终端…',
-          onPressed: state.hubUsable ? () => _newTerm(context, id, [for (final h in list.hosts) ?h.host]) : null,
-        ),
-      ),
-      Align(
-        alignment: Alignment.centerLeft,
-        child: RappButton.secondary(
-          key: const Key('add-ssh-host'),
-          label: '添加 SSH 主机…',
-          onPressed: state.hubUsable ? () => _addHost(context, id) : null,
+          ],
         ),
       ),
     ];
@@ -413,7 +462,7 @@ class _AppRow extends StatelessWidget {
     required this.enabled,
     required this.favorite,
     required this.onFavorite,
-    required this.onProfile,
+    this.onProfile,
     required this.onOpen,
   });
   final String id, app, name;
@@ -421,7 +470,9 @@ class _AppRow extends StatelessWidget {
   final bool enabled;
   final bool favorite;
   final VoidCallback onFavorite;
-  final VoidCallback onProfile;
+
+  /// Null leaves the ⋯ out (the 终端 entry has no app 配置).
+  final VoidCallback? onProfile;
   final VoidCallback onOpen;
 
   @override
@@ -472,14 +523,16 @@ class _AppRow extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      IconButton(
-                        key: Key('profile-$app'),
-                        icon: const Icon(Icons.more_horiz),
-                        tooltip: 'app 配置',
-                        constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-                        onPressed: onProfile,
-                      ),
-                      const SizedBox(width: 6),
+                      if (onProfile != null) ...[
+                        IconButton(
+                          key: Key('profile-$app'),
+                          icon: const Icon(Icons.more_horiz),
+                          tooltip: 'app 配置',
+                          constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                          onPressed: onProfile,
+                        ),
+                        const SizedBox(width: 6),
+                      ],
                       RappButton.secondary(
                         key: Key('fav-$app'),
                         label: favLabel,
@@ -537,6 +590,8 @@ class _TermRow extends StatelessWidget {
     final name = termDisplayName(row.name, row.host);
     final status = termStatus(row, now);
     final verb = openVerb(session?.lamp, takenOver: session?.takenOver ?? false);
+    final text = parseTermId(row.id)?.backend == 'pty';
+    final kind = text ? '文本' : 'tmux';
     return Container(
       key: Key('term-${row.id}'),
       constraints: const BoxConstraints(minHeight: 68),
@@ -550,8 +605,19 @@ class _TermRow extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.text, fontWeight: FontWeight.w600)),
-                Text('${row.command} · ${row.panes} 个面板', maxLines: 1, overflow: TextOverflow.ellipsis, style: _mono(t)),
+                Row(children: [
+                  Flexible(
+                    child: Text(name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(color: t.text, fontWeight: FontWeight.w600)),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(kind, style: _mono(t)),
+                ]),
+                // A text terminal has one pane: no count.
+                Text(text ? row.command : '${row.command} · ${row.panes} 个面板',
+                    maxLines: 1, overflow: TextOverflow.ellipsis, style: _mono(t)),
                 Text(status, style: TextStyle(color: t.muted)),
               ],
             ),
@@ -560,11 +626,185 @@ class _TermRow extends StatelessWidget {
           RappButton.secondary(
             key: Key('open-${row.id}'),
             label: verb,
-            semanticLabel: '$verb $name，$status',
+            semanticLabel: '$verb $name，$kind，$status',
             onPressed: enabled ? onOpen : null,
           ),
         ],
       ),
+    );
+  }
+}
+
+/// A terminal app inside 终端: its windows are seen as pictures only.
+class _PixelsRow extends StatelessWidget {
+  const _PixelsRow({required this.app, required this.session, required this.enabled, required this.onOpen});
+  final HubApp app;
+  final SessionEntry? session;
+  final bool enabled;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RappTokens.of(context);
+    final lamp = session?.lamp ?? Lamp.notOpened;
+    return Container(
+      key: Key('term-app-${app.app}'),
+      constraints: const BoxConstraints(minHeight: 68),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: t.panelBox(border: t.line),
+      child: Row(
+        children: [
+          StatusLamp(lamp),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(app.name,
+                    maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.text, fontWeight: FontWeight.w600)),
+                Text('只能用画面看', style: TextStyle(color: t.muted)),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          RappButton.secondary(
+            key: Key('pixels-${app.app}'),
+            label: '画面',
+            semanticLabel: '画面 ${app.name}，${lampWord(lamp)}',
+            onPressed: enabled && lamp != Lamp.connecting ? onOpen : null,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One of the two 打开方式 choices.
+class _ModeChoice extends StatelessWidget {
+  const _ModeChoice({super.key, required this.label, required this.selected, required this.onTap});
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RappTokens.of(context);
+    return Semantics(
+      inMutuallyExclusiveGroup: true,
+      checked: selected,
+      child: InkWell(
+        onTap: onTap,
+        child: SizedBox(
+          height: 48,
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(selected ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                size: 18, color: selected ? t.accent : t.muted),
+            const SizedBox(width: 6),
+            Text(label, style: TextStyle(color: t.text)),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// The 新开文本终端 dialog for device [id]; it opens the new terminal itself (from the panel or a [MainState.newTextAsks]).
+Future<void> showNewTextDialog(BuildContext context, MainState state, String id) {
+  final local = state.hub?.termLists[id]?.hosts.where((h) => h.host == null).firstOrNull;
+  return showDialog<void>(
+    context: context,
+    builder: (_) => _NewTextDialog(state: state, id: id, launchers: local?.launchers ?? const []),
+  );
+}
+
+class _NewTextDialog extends StatefulWidget {
+  const _NewTextDialog({required this.state, required this.id, required this.launchers});
+  final MainState state;
+  final String id;
+  final List<String> launchers;
+
+  @override
+  State<_NewTextDialog> createState() => _NewTextDialogState();
+}
+
+class _NewTextDialogState extends State<_NewTextDialog> {
+  final _cwd = TextEditingController(), _command = TextEditingController(), _name = TextEditingController();
+  late String _app = widget.launchers.firstOrNull ?? 'Terminal';
+  String? _error;
+  bool _busy = false;
+
+  @override
+  void dispose() {
+    _cwd.dispose();
+    _command.dispose();
+    _name.dispose();
+    super.dispose();
+  }
+
+  Future<void> _open() async {
+    if (_busy) return;
+    String? filled(TextEditingController c) => c.text.trim().isEmpty ? null : c.text.trim();
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await widget.state.openText(widget.id,
+          cwd: filled(_cwd), name: filled(_name), command: filled(_command), app: _app);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _error = '$e';
+        });
+      }
+      return;
+    }
+    if (mounted) Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RappTokens.of(context);
+    return AlertDialog(
+      title: const Text('新开文本终端'),
+      content: SizedBox(
+        width: 360,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+                key: const Key('new-text-cwd'),
+                controller: _cwd,
+                decoration: const InputDecoration(labelText: '目录（空着就是家目录）')),
+            TextField(
+                key: const Key('new-text-command'),
+                controller: _command,
+                decoration: const InputDecoration(labelText: '命令（如 claude；空着就是 shell）')),
+            TextField(
+                key: const Key('new-text-name'),
+                controller: _name,
+                decoration: const InputDecoration(labelText: '名字（可不填）')),
+            if (widget.launchers.length > 1)
+              DropdownButtonFormField<String>(
+                key: const Key('new-text-app'),
+                initialValue: _app,
+                decoration: const InputDecoration(labelText: '用哪个终端 app'),
+                items: [for (final l in widget.launchers) DropdownMenuItem(value: l, child: Text(l))],
+                onChanged: _busy ? null : (v) => setState(() => _app = v ?? _app),
+              ),
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(_error!, key: const Key('new-text-error'), style: TextStyle(color: t.accent)),
+              ),
+          ],
+        ),
+      ),
+      actions: [
+        RappButton.secondary(key: const Key('new-text-cancel'), label: '取消', onPressed: () => Navigator.of(context).pop()),
+        RappButton.secondary(key: const Key('new-text-go'), label: '新开', onPressed: _busy ? null : _open),
+      ],
     );
   }
 }
