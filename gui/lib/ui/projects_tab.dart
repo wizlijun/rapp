@@ -191,7 +191,7 @@ class _ProjectCardState extends State<_ProjectCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
+          LayoutBuilder(builder: (context, row) => Row(
             children: [
               Expanded(
                 child: InlineEdit(
@@ -203,20 +203,21 @@ class _ProjectCardState extends State<_ProjectCard> {
                 ),
               ),
               const SizedBox(width: 8),
-              ExcludeSemantics(
-                child: Row(
-                  key: Key('project-lamps-${p.id}'),
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    for (final m in p.members) ...[
-                      StatusLamp(s.memberLamp(m)),
-                      const SizedBox(width: 4),
-                    ],
-                  ],
+              // Many members on a narrow card: the lamps wrap within a part of the row, so the
+              // name and the buttons keep their room.
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: row.maxWidth * 0.25),
+                child: ExcludeSemantics(
+                  child: Wrap(
+                    key: Key('project-lamps-${p.id}'),
+                    spacing: 4,
+                    runSpacing: 4,
+                    children: [for (final m in p.members) StatusLamp(s.memberLamp(m))],
+                  ),
                 ),
               ),
               // 切到 and 固定 belong to the title row (project spec §14); the name gives way.
-              const SizedBox(width: 4),
+              const SizedBox(width: 8),
               RappButton.secondary(
                 key: Key('switch-${p.id}'),
                 label: '切到',
@@ -231,7 +232,7 @@ class _ProjectCardState extends State<_ProjectCard> {
                 onPressed: () => s.togglePinned(p.id),
               ),
             ],
-          ),
+          )),
           const SizedBox(height: 6),
           Wrap(
             spacing: 6,

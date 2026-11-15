@@ -119,12 +119,7 @@ class TopBar extends StatelessWidget {
                   ConstrainedBox(
                       constraints: BoxConstraints(maxWidth: sessionMax),
                       child: cur == null
-                          ? Text(
-                              _projectName() ?? '没有选中的会话',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(color: t.muted),
-                            )
+                          ? _noSession(t, small)
                           : Semantics(
                               container: true,
                               excludeSemantics: true,
@@ -376,6 +371,34 @@ class TopBar extends StatelessWidget {
     } else {
       state.unhide(pick.$2);
     }
+  }
+
+  /// The session's place when no session is current: the current project's name, and under it the
+  /// cue while it shows (a project with nothing open still gets its cue, project spec §6.2).
+  Widget _noSession(RappTokens t, TextStyle? small) {
+    final project = _projectName();
+    final name = Text(
+      project ?? '没有选中的会话',
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(color: t.muted),
+    );
+    if (project == null || state.cue.isEmpty) return name;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        name,
+        Text(
+          state.cue,
+          key: const Key('return-cue'),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: small?.copyWith(color: t.muted),
+        ),
+      ],
+    );
   }
 
   /// The current project's name, for the session's place when no session is current.

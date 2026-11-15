@@ -1660,6 +1660,8 @@ class MainState extends ChangeNotifier {
       await hub!.open(id, app);
       _pending.remove(key);
       if (!quiet) hint = '已打开 $appName @ ${deviceName(id)}';
+      // Opened while current: the leave or the remembered position waited for this.
+      if (currentKey == key) _followCurrentKey();
     } catch (e) {
       _pending.remove(key);
       final missing = missingFromError('$e');
@@ -2422,7 +2424,9 @@ class MainState extends ChangeNotifier {
   }
 
   /// A new current session inside the current project is remembered as its last one; one outside
-  /// it leaves the project. No session (it ended) keeps the project.
+  /// it leaves the project. No session (it ended) keeps the project. One outside it that is still
+  /// opening leaves only once the open succeeds ([_open] calls this again), so a failed open keeps
+  /// the project.
   void _followCurrentKey() {
     final id = currentProject, k = currentKey;
     if (id == null || k == null) return;
@@ -2433,7 +2437,7 @@ class MainState extends ChangeNotifier {
       pos.last = k;
       _positionsTimer?.cancel();
       _positionsTimer = Timer(positionsSaveDelay, _savePositions);
-    } else {
+    } else if (!_pending.containsKey(k)) {
       _leave();
     }
   }
@@ -2559,9 +2563,11 @@ class MainState extends ChangeNotifier {
 
   /// 「全部打开」: every member that is not open (or is disconnected) opens at once, members on an
   /// offline device are skipped, and it stops on the first member not skipped (K11). One hint.
+  /// On a project that is not the current one, it first switches to it.
   void openAll(String projectId) {
     final p = _project(projectId);
     if (!hubUsable || p == null) return;
+    if (currentProject != projectId) switchProject(projectId);
     final plan = planOpenAll(p, lampOf: (k) => entryFor(k)?.lamp, offline: deviceOffline);
     for (final m in plan.open) {
       // Not awaited: each open has its record or pending entry before its first await, so a

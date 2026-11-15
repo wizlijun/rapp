@@ -332,6 +332,21 @@ void main() {
     expect(tester.getRect(find.byKey(Key('pin-$id'))).right, lessThanOrEqualTo(tester.getRect(find.byType(ProjectsTab)).right));
   });
 
+  testWidgets('many members on a narrow card: the lamps wrap and the title row does not overflow', (tester) async {
+    await tester.runAsync(boot);
+    await pump(tester);
+    final id = await oneProject(tester, members: [for (var i = 0; i < 16; i++) AppRef('111', 'com.x$i', 'X$i')]);
+    await tester.pumpWidget(wrap(SizedBox(width: 300, height: 800, child: ProjectsTab(state: s))));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    final lamps = find.descendant(of: find.byKey(Key('project-lamps-$id')), matching: find.byType(StatusLamp));
+    expect(lamps, findsNWidgets(16));
+    // More than one row of lamps, and the name keeps some room.
+    expect(tester.getSize(find.byKey(Key('project-lamps-$id'))).height, greaterThan(tester.getSize(lamps.first).height * 2));
+    expect(tester.getSize(find.byKey(Key('project-name-$id'))).width, greaterThan(0));
+    expect(tester.getRect(find.byKey(Key('pin-$id'))).right, lessThanOrEqualTo(tester.getRect(find.byType(ProjectsTab)).right));
+  });
+
   testWidgets('tap the name to rename', (tester) async {
     await tester.runAsync(boot);
     await pump(tester);
@@ -544,6 +559,7 @@ void main() {
     expect(s.currentKey, '111/com.apple.Safari');
     expect(t.sent.where((m) => m['cmd'] == 'open'), hasLength(1));
     await tester.runAsync(flush);
+    await tester.pump(MainState.positionsSaveDelay);
   });
 
   testWidgets('the new-project field is at least 48 tall', (tester) async {
