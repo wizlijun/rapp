@@ -132,17 +132,16 @@ struct Chan {
     key_text: String,
     /// Filled when the channel's welcome has been read (in its ready future).
     fp: Arc<OnceLock<Fp>>,
+    /// The fingerprint the caller knew the device by when it was opened (`hosts.json`).
+    known: Option<Fp>,
 }
 
 impl Chan {
-    /// Still good for a request through `relay` showing `key_text` to a device known by `known`
-    /// (a fingerprint not yet read does not count against it).
+    /// Still good for a request through `relay` showing `key_text` to a device known by `known`.
+    /// Only a change of what the caller knows counts, not a fingerprint that differs from it: the
+    /// welcome accepted that one because the key vouched for it, as every other path does.
     fn holds(&self, relay: &str, key_text: &str, known: Option<Fp>) -> bool {
-        let same_fp = match (known, self.fp.get()) {
-            (Some(k), Some(f)) => k == *f,
-            _ => true,
-        };
-        !self.mux.is_closed() && self.relay == relay && self.key_text == key_text && same_fp
+        !self.mux.is_closed() && self.relay == relay && self.key_text == key_text && self.known == known
     }
 }
 
@@ -621,7 +620,7 @@ impl Outbound {
             Err(io::Error::other(why))
         };
         let mux = Mux::client(ready, Box::new(w) as Writer);
-        Ok(Chan { mux, relay: addr.to_string(), key_text: key.to_string(), fp })
+        Ok(Chan { mux, relay: addr.to_string(), key_text: key.to_string(), fp, known: to.known })
     }
 
     /// Connects over `rapp/2` and says hello, with a `ping` in the same flight (as the hub's

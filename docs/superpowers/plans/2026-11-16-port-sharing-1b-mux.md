@@ -32,7 +32,7 @@
 6. **第一条请求和建通道一起发。** 访问方：开 relay 流、TLS 握手（一个往返）、然后把 hello、`{"op":"mux"}`、第一条子流的 `OPEN` 和请求一口气写出去，再读 welcome、`mux` 的回复和子流的回复（又一个往返）。所以第一条转发和 1a 一样是两个往返，之后每条一个往返。为此 `Mux::client` 接受一个"读端就绪"的 future：写端立刻能用，读端等 welcome 和 `{"ok":true}` 读完才开始读帧；future 出错时整条通道带着它的文字关掉。
 7. **旧分享方。** 通道的就绪 future 读到的回复是 `unknown op` 或 `bad request` 时，访问方记下"这台是旧的"`OLD_KEEP` = 10 分钟，这次和这段时间里的请求都走 1a 的每条一流（`relayed`）。子流自己的回复是 `{"error":"unknown op"}`（分享方不认识某个子流里的请求）不算，照常当作回复交回去。
 8. **选路的顺序。** 已有的局域网 QUIC 连接 → 已有的通道 → 局域网 → relay（建通道）。通道开着的时候不再试局域网，直到它空闲关掉；接受的代价：两台机器后来到了同一个局域网，最多 5 分钟后才换到直连。
-9. **通道失效。** relay 地址、key 换了，或者对方的指纹和 `hosts.json` 里记的不一样了，就关掉旧通道重建。在已有通道上开子流失败（通道已经断了），丢掉它，重来一次（新建）；新建的也失败就报错。
+9. **通道失效。** relay 地址、key 换了，或者 `hosts.json` 里给对方记的指纹在通道建好之后改了，就关掉旧通道重建；对方的指纹和 `hosts.json` 里记的不一样、但 key 为它作了证的，照 1a 接受，通道照用。在已有通道上开子流失败（通道已经断了），丢掉它，重来一次（新建）；新建的也失败就报错。
 10. **优先级。** `FORWARD_PRIORITY` = `-1`；会话不设，保持 quinn 的默认 `0`。quinn 的优先级是严格的：会话流有东西要发时，同一条 QUIC 连接上的转发一个字节都不发。分享方：通道，以及旧式的单条 `forward` 流，在读到请求之后降到 `-1`。访问方：建通道的 relay 流开的时候就设 `-1`（这台设备自己也在被别人远程时，它的 relay 连接上也有会话流）。局域网上转发和会话是两条不同的 QUIC 连接，优先级管不到；访问方这边，会话走 hub 自己的 relay 连接，也不在一起。**真正挤在一起的只有分享方的 relay 连接（画面和转发下载同向）**，测量就量这里。
 11. **优先级管不到瓶颈上的排队。** quinn 的优先级只决定自己发送缓冲里谁先走；包一旦发出去，在路上的瓶颈队列里会话和转发一样排队，拥塞控制（quinn 默认 Cubic）会把这个队列填满。所以测量很可能不达标；不达标就记下数字，把"限速或换拥塞控制"作为下一件事交给用户定。
 12. **开关。** `rapp_service::Opts` 加两个字段：`forward_priority: i32`（正式程序里是 `FORWARD_PRIORITY`）和 `channels: bool`（正式程序里是 `true`；`false` 时分享方把 `mux` 当成不认识的请求，像旧版本一样）。两个都只给测试和测量用，不进 `service.json`。
@@ -448,9 +448,11 @@ struct Chan {
     key_text: String,
     /// 通道的 welcome 读完时填上（就绪 future 里）。
     fp: Arc<OnceLock<Fp>>,
+    /// 建通道时 `hosts.json` 里记的指纹（`to.known`）。
+    known: Option<Fp>,
 }
 // Outbound 里：
-chans: Mutex<HashMap<String, Arc<tokio::sync::Mutex<Option<Chan>>>>>, // 按设备 ID；内层锁保证同时只建一次
+chans: Mutex<HashMap<String, Arc<Slot>>>, // 按设备 ID；Slot { chan: tokio::sync::Mutex<Option<Chan>>, failed }，内层锁保证同时只建一次
 old: Mutex<HashMap<String, Instant>>,                                   // 按设备 ID，旧版本，OLD_KEEP 内有效
 ```
 
@@ -458,7 +460,7 @@ old: Mutex<HashMap<String, Instant>>,                                   // 按�
 
 1. `on_held` 命中就返回（不变）。
 2. 没配 relay，或者这台在 `old` 里：走现在的路（局域网 → `through_relay` → `relayed`），结束。
-3. 拿这台的通道槽，`lock().await`（别的请求在建时就在这里等）。槽里的通道还能用（没关、`relay`/`key_text` 一样、`to.known` 是 `Some` 时和 `fp` 一样或 `fp` 还没填）：克隆 `Mux`、放锁、在上面发请求。不能用：`close()` 它、清空。
+3. 拿这台的通道槽，`lock().await`（别的请求在建时就在这里等）。槽里的通道还能用（没关、`relay`/`key_text` 一样、`to.known` 和建通道时的 `known` 一样；不拿 `fp` 和 `to.known` 比，key 作证的新指纹照 1a 接受）：克隆 `Mux`、放锁、在上面发请求。不能用：`close()` 它、清空。
 4. 拿着锁：再试一次 `on_held`（等锁的时候前面的请求可能走局域网连上了），再走局域网和 `through_relay`；`through_relay` 最后一步从 `relayed` 换成 `open_channel`，建好的通道放进槽里，放锁，在上面发请求。
 5. 在通道上发请求：`mux.open()`，写请求，`REPLY_WAIT` 内读一个 JSON 回复。失败时看 `mux.reason()`：是 `unknown op` 或 `bad request` → 记进 `old`、清空槽、这一条改走 `relayed`；通道是第 3 步拿的旧通道 → 清空槽、从第 3 步再来一次（只一次）；否则按 `relayed` 现在的规矩报错（读不到回复是 `no reply`；TLS 或 relay 的拒绝照 `not_reached(relay_failure(e))`）。从第 3 步再来的那一次只在拿到的旧通道已经关闭时才做：一个子流被 RST 或超时就丢掉还活着的通道，会把它上面别的子流一起切断。
 

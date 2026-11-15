@@ -1399,6 +1399,52 @@ async fn forwards_share_one_channel() {
 }
 
 #[tokio::test]
+async fn a_stale_fingerprint_the_key_vouches_for_keeps_the_channel() {
+    // B's hosts.json remembers another fingerprint for A (A was reinstalled since): the key vouches
+    // for the new one, as on every other path, and the channel stays.
+    let t = over_relay().await;
+    let stale = rapp_wire::Fp([0x12; 32]).to_string();
+    let hosts = json!([{"id": t.a.id, "name": "a", "fp": stale}]);
+    std::fs::write(t.b.home.path().join("hosts.json"), hosts.to_string()).unwrap();
+    let before = t.rig.streams();
+    let (r, mut one) = t.pipe().await;
+    assert_eq!(r, json!({"ok":true,"path":"relay"}));
+    say_hi(&mut one).await;
+    let (r, mut two) = t.pipe().await;
+    assert_eq!(r, json!({"ok":true,"path":"relay"}));
+    say_hi(&mut two).await;
+    // The first forward was not cut by the second's request.
+    say_hi(&mut one).await;
+    let home = t.a.home.path();
+    assert_eq!((count(home, "channel"), count(home, "channel_end"), count(home, "trust")), (1, 0, 1), "{:?}", log_events(home));
+    drop((one, two));
+    // The relay records a stream when it ends: close the channel, then it has seen just that one.
+    t.b.svc.stop();
+    streams_grow(&t.rig, before).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(t.rig.streams() - before, 1);
+}
+
+#[tokio::test]
+async fn a_changed_hosts_entry_rebuilds_the_channel() {
+    let t = over_relay().await;
+    let (r, mut tcp) = t.pipe().await;
+    assert_eq!(r, json!({"ok":true,"path":"relay"}));
+    say_hi(&mut tcp).await;
+    // hosts.json now records A's fingerprint: what B knows A by changed since the channel was built.
+    let hosts = json!([{"id": t.a.id, "name": "a", "fp": fp_of(&t.a).await}]);
+    std::fs::write(t.b.home.path().join("hosts.json"), hosts.to_string()).unwrap();
+    for _ in 0..2 {
+        let (r, mut tcp) = t.pipe().await;
+        assert_eq!(r, json!({"ok":true,"path":"relay"}));
+        say_hi(&mut tcp).await;
+    }
+    let home = t.a.home.path();
+    wait_log(home, "channel_end", |_| true).await;
+    assert_eq!(count(home, "channel"), 2, "{:?}", log_events(home));
+}
+
+#[tokio::test]
 async fn fifty_at_once_share_one_channel() {
     // The relay's default limits: 32 relayed streams per device, 60 connects a minute.
     let t = over_relay().await;
