@@ -3,7 +3,7 @@
 
 use std::io;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::task::{ready, Context, Poll};
 use std::time::{Duration, Instant};
@@ -78,6 +78,69 @@ pub struct Found {
     pub public: String,
 }
 
+/// The priority of a stream carrying port-forward traffic: below a session's default 0.
+pub const FORWARD_PRIORITY: i32 = -1;
+
+/// The priority handle of a pushed relay stream. `set` takes effect on the next write to the stream.
+#[derive(Clone)]
+pub struct Prio(Arc<AtomicI32>, Arc<AtomicI32>);
+
+impl Prio {
+    pub fn new() -> Prio {
+        Prio(Arc::new(AtomicI32::new(0)), Arc::new(AtomicI32::new(i32::MIN)))
+    }
+
+    pub fn set(&self, p: i32) {
+        self.0.store(p, Ordering::Release);
+    }
+
+    /// The value actually set on the quinn stream; `None` until then.
+    pub fn applied(&self) -> Option<i32> {
+        match self.1.load(Ordering::Acquire) {
+            i32::MIN => None,
+            p => Some(p),
+        }
+    }
+}
+
+impl Default for Prio {
+    fn default() -> Prio {
+        Prio::new()
+    }
+}
+
+/// A quinn send stream whose priority follows a `Prio` at each write.
+struct Prioritized {
+    send: quinn::SendStream,
+    prio: Prio,
+}
+
+impl Prioritized {
+    fn sync(&mut self) {
+        let want = self.prio.0.load(Ordering::Acquire);
+        if self.prio.1.load(Ordering::Acquire) != want {
+            // An error means the stream is closed; the write reports that.
+            let _ = self.send.set_priority(want);
+            self.prio.1.store(want, Ordering::Release);
+        }
+    }
+}
+
+impl AsyncWrite for Prioritized {
+    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<io::Result<usize>> {
+        self.sync();
+        AsyncWrite::poll_write(Pin::new(&mut self.send), cx, buf)
+    }
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        self.sync();
+        Pin::new(&mut self.send).poll_flush(cx)
+    }
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        self.sync();
+        Pin::new(&mut self.send).poll_shutdown(cx)
+    }
+}
+
 pub enum Pushed {
     /// Someone looked this device up; the caller writes `{"ok":true}` on `reply`.
     Incoming {
@@ -88,6 +151,7 @@ pub enum Pushed {
     Relayed {
         peer: String,
         stream: Pipe,
+        prio: Prio,
     },
     /// The relay's whole list of revoked fingerprints.
     Revoked(Vec<Fp>),
@@ -175,6 +239,11 @@ impl RelayConn {
     /// the connection is not yet known to be enrolled: an enrolled connection only loses its
     /// enrollment through revocation, which closes the connection.
     pub async fn relay_to(&self, id: &str) -> Result<Pipe> {
+        self.relay_to_at(id, 0).await
+    }
+
+    /// Like `relay_to`, with the quinn stream's priority set to `priority` as it is opened.
+    pub async fn relay_to_at(&self, id: &str, priority: i32) -> Result<Pipe> {
         // A success has no reply to tell "not enrolled" from, so make sure first (a no-op for a
         // device the relay already knows).
         if !self.enrolled.load(Ordering::Acquire) {
@@ -182,6 +251,8 @@ impl RelayConn {
         }
         let open = async {
             let (mut send, recv) = self.conn.open_bi().await?;
+            // An error means the stream is already closed; the next write says so.
+            let _ = send.set_priority(priority);
             let mut line = serde_json::to_vec(&Req::Relay { id: id.into() })?;
             line.push(b'\n');
             send.write_all(&line).await?;
@@ -385,15 +456,17 @@ async fn uni_push(conn: quinn::Connection, mut recv: quinn::RecvStream, tx: mpsc
 
 async fn bi_push(send: quinn::SendStream, mut recv: quinn::RecvStream, tx: mpsc::UnboundedSender<Pushed>) {
     let Ok(Ok(line)) = tokio::time::timeout(PUSH_LINE_WAIT, read_line_exact(&mut recv)).await else { return };
-    let stream = BufReader::new(tls::bi((send, recv)));
     let pushed = match serde_json::from_slice::<Push>(&line) {
-        Ok(Push::Incoming { peer, .. }) => Pushed::Incoming { peer, reply: Box::new(stream) },
+        Ok(Push::Incoming { peer, .. }) => {
+            Pushed::Incoming { peer, reply: Box::new(BufReader::new(tls::bi((send, recv)))) }
+        }
         Ok(Push::Relayed { peer, .. }) => {
+            let prio = Prio::new();
+            let mut stream = BufReader::new(tokio::io::join(recv, Prioritized { send, prio: prio.clone() }));
             // The initiator speaks first (it is the TLS client): a stream that ends before any byte
             // is a request the relay gave up on, not a connection.
-            let mut stream = stream;
             match std::future::poll_fn(|cx| Pin::new(&mut stream).poll_fill_buf(cx).map_ok(|b| b.is_empty())).await {
-                Ok(false) => Pushed::Relayed { peer, stream: Box::new(stream) },
+                Ok(false) => Pushed::Relayed { peer, stream: Box::new(stream), prio },
                 _ => return,
             }
         }

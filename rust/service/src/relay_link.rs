@@ -210,7 +210,7 @@ async fn session(
             Ok(Pushed::Incoming { reply, .. }) => {
                 tokio::spawn(answer(reply));
             }
-            Ok(Pushed::Relayed { peer, stream }) => {
+            Ok(Pushed::Relayed { peer, stream, prio: _ }) => {
                 tokio::spawn(serve_relayed(state.clone(), stream, peer));
             }
             Ok(Pushed::Revoked(fps)) => {
