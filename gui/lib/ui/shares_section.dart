@@ -209,7 +209,7 @@ class _SharesSectionState extends State<SharesSection> {
                 child: TextField(
                   key: const Key('share-port'),
                   controller: _port,
-                  decoration: const InputDecoration(labelText: '端口', isDense: true),
+                  decoration: const InputDecoration(hintText: '端口号', isDense: true),
                   onSubmitted: (_) => _busy ? null : _add(),
                 ),
               ),
@@ -218,7 +218,7 @@ class _SharesSectionState extends State<SharesSection> {
                 child: TextField(
                   key: const Key('share-note'),
                   controller: _note,
-                  decoration: const InputDecoration(labelText: '备注（可不填）', isDense: true),
+                  decoration: const InputDecoration(hintText: '备注，可不填', isDense: true),
                   onSubmitted: (_) => _busy ? null : _add(),
                 ),
               ),

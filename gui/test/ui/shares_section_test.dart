@@ -141,6 +141,13 @@ void main() {
     expect(api.calls.where((c) => c.startsWith('shares')).length, 2);
   });
 
+  testWidgets('the inputs carry their placeholders', (t) async {
+    await show(t, table([]));
+    InputDecoration deco(String k) => t.widget<TextField>(find.byKey(Key(k))).decoration!;
+    expect(deco('share-port').hintText, '端口号');
+    expect(deco('share-note').hintText, '备注，可不填');
+  });
+
   testWidgets('the port spellings', (t) async {
     final api = await show(t, table([]));
     for (final s in ['', '0', '65536', '80a', '８０００', '-1']) {
