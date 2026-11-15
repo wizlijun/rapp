@@ -134,6 +134,34 @@ class _FloatingComposerState extends State<FloatingComposer> {
         ),
       ),
     );
+    // A small × at the right end of the grip row: collapses the panel (as Esc does), keeping the text.
+    // Shown with the bar, and only pressable while shown, so an unseen one never takes a click.
+    final shown = _hover && _drag == null;
+    final close = AnimatedOpacity(
+      opacity: shown ? 1 : 0,
+      duration: const Duration(milliseconds: 120),
+      child: IgnorePointer(
+        ignoring: !shown,
+        child: Tooltip(
+          message: '收起（Esc）',
+          child: Semantics(
+            button: true,
+            label: '收起写作面板',
+            excludeSemantics: true,
+            child: InkWell(
+              key: const Key('composer-grip-close'),
+              onTap: widget.session.composer.collapse,
+              borderRadius: BorderRadius.circular(t.r),
+              child: SizedBox(
+                width: 28,
+                height: gripSize.height,
+                child: Icon(Icons.close, size: 14, color: t.muted),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
     return LayoutBuilder(builder: (context, c) {
       _stage = c.biggest;
       return CustomSingleChildLayout(
@@ -146,7 +174,13 @@ class _FloatingComposerState extends State<FloatingComposer> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Center(child: grip),
+              SizedBox(
+                height: gripSize.height,
+                child: Stack(children: [
+                  Center(child: grip),
+                  Positioned(right: 4, top: 0, bottom: 0, child: Material(type: MaterialType.transparency, child: close)),
+                ]),
+              ),
               Flexible(child: widget.child),
             ],
           ),

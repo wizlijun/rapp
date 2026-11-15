@@ -16,6 +16,7 @@ import '../ui/tokens.dart';
 import 'composer_editor.dart';
 import 'composer_float.dart';
 import 'composer_model.dart';
+import 'app_profile.dart';
 import 'composer_plus.dart';
 import 'flutter_editor.dart';
 import 'native_editor.dart';
@@ -455,22 +456,35 @@ class _ComposerPanelState extends State<ComposerPanel> {
                         ),
                       ),
                     ),
-                    ComposerPlus(
-                      session: _s,
-                      port: widget.port,
-                      onAttach: _attach,
-                      history: widget.state.history,
-                      historyKey: widget.state.historyKeyOf(_s),
-                      onPress: widget.state.blurPicture,
-                      terminal: _terminal,
-                    ),
-                    const SizedBox(width: 4),
-                    RappButton.primary(
-                      key: const Key('composer-send'),
-                      label: '发送',
-                      semanticLabel: '发送',
-                      icon: Icons.arrow_upward,
-                      onPressed: _m.sending ? null : _submit,
+                    // ＋ and 发送: 40 square, the same 4 to the border, between them and (one line) above.
+                    Padding(
+                      padding: const EdgeInsets.all(4),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          ComposerPlus(
+                            session: _s,
+                            port: widget.port,
+                            onAttach: _attach,
+                            history: widget.state.history,
+                            historyKey: widget.state.historyKeyOf(_s),
+                            onPress: widget.state.blurPicture,
+                            onReturnAfter: _s.appId.isEmpty
+                                ? null
+                                : (on) => widget.state.setAfterSend(_s, on ? AfterSend.pressReturn : AfterSend.none),
+                            terminal: _terminal,
+                          ),
+                          const SizedBox(width: 4),
+                          RappButton.primary(
+                            key: const Key('composer-send'),
+                            label: '发送',
+                            semanticLabel: '发送',
+                            icon: Icons.arrow_upward,
+                            size: 40,
+                            onPressed: _m.sending ? null : _submit,
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -604,6 +618,8 @@ List<Widget> composerLayer(
                   RappButton.secondary(
                     key: const Key('composer-open'),
                     label: '输入',
+                    semanticLabel: '输入',
+                    icon: Icons.keyboard_outlined,
                     onPicture: true,
                     onPressed: () => session.composer.open = true,
                   ),

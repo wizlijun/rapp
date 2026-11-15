@@ -1819,6 +1819,12 @@ class MainState extends ChangeNotifier {
     profiles.setComposerAt(rs.appId, rs.appName, p);
   }
 
+  /// The ＋ menu's 「直接回车」 for [rs]'s app; a session without an app id has no profile to keep it in.
+  void setAfterSend(RemoteSession rs, AfterSend a) {
+    if (rs.appId.isEmpty) return;
+    profiles.setAfterSend(rs.appId, rs.appName, a);
+  }
+
   void clearInputMark() {
     final rs = currentRemote;
     if (rs == null) return;

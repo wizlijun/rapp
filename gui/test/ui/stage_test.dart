@@ -307,7 +307,11 @@ void main() {
       await tester.pump();
       expect(find.byType(Texture), findsNothing);
       expect(find.text('Calculator 在单独的窗口里 · mini · 局域网'), findsOneWidget);
-      expect(find.text('输入'), findsOneWidget);
+      // Collapsed, the composer is a keyboard icon; 输入 is its name for assistive tech.
+      expect(find.text('输入'), findsNothing);
+      expect(find.descendant(of: find.byKey(const Key('composer-open')), matching: find.byIcon(Icons.keyboard_outlined)),
+          findsOneWidget);
+      expect(find.bySemanticsLabel('输入'), findsOneWidget);
       // Records compare their maps by identity: match the call by its parts.
       void last(String method) {
         expect(port.calls.last.$1, method);

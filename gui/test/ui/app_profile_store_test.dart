@@ -179,4 +179,15 @@ void main() {
     s.setComposerAt('com.x', 'X', null);
     expect(s.resolve('com.x').composerAt, isNull);
   });
+
+  test('setAfterSend: Return by default; turning it off is remembered per app', () {
+    final s = AppProfileStore(dir.path);
+    expect(s.resolve('com.x').afterSend, AfterSend.pressReturn);
+    s.setAfterSend('com.x', 'X', AfterSend.none);
+    expect(s.resolve('com.x').afterSend, AfterSend.none);
+    expect(s.resolve('com.y').afterSend, AfterSend.pressReturn);
+    expect((jsonDecode(f('apps.json').readAsStringSync())['apps'] as List).single['afterSend'], 'none');
+    s.setAfterSend('com.x', 'X', AfterSend.pressReturn);
+    expect(s.resolve('com.x').afterSend, AfterSend.pressReturn);
+  });
 }

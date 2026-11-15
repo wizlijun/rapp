@@ -9,6 +9,7 @@ import '../history/input_history.dart';
 import '../term/term_session_port.dart';
 import '../ui/controls.dart';
 import '../ui/tokens.dart';
+import 'app_profile.dart';
 import 'remote_session.dart';
 import 'session_port.dart';
 
@@ -66,6 +67,7 @@ class ComposerPlus extends StatefulWidget {
       this.onPress,
       this.history,
       this.historyKey,
+      this.onReturnAfter,
       this.terminal = false});
 
   final RemoteSession session;
@@ -80,6 +82,10 @@ class ComposerPlus extends StatefulWidget {
   /// The input record for 「输入历史」 (no such row without it) and this session's key (`host/app`).
   final InputHistory? history;
   final String? historyKey;
+
+  /// 「直接回车」 toggled: whether a submit gets a Return after its paste (the app's afterSend).
+  /// No such row without it.
+  final ValueChanged<bool>? onReturnAfter;
 
   /// A terminal session's menu; [port] is then a [TermSessionPort].
   final bool terminal;
@@ -169,6 +175,37 @@ class _ComposerPlusState extends State<ComposerPlus> {
     ),
   );
 
+  /// A check row; the menu stays open so the new state shows. Follows the session's profile.
+  Widget _returnAfter(RappTokens t) => ListenableBuilder(
+    listenable: widget.session,
+    builder: (context, _) {
+      final on = widget.session.profile.afterSend == AfterSend.pressReturn;
+      return Semantics(
+        checked: on,
+        child: InkWell(
+          key: const Key('composer-plus-return'),
+          onTap: () => widget.onReturnAfter!(!on),
+          borderRadius: BorderRadius.circular(t.r),
+          child: SizedBox(
+            height: 48,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Row(
+                children: [
+                  Text('直接回车', style: TextStyle(color: t.text)),
+                  const SizedBox(width: 8),
+                  Text('贴完按回车', style: TextStyle(color: t.muted, fontSize: 12)),
+                  const Spacer(),
+                  Icon(on ? Icons.check_box : Icons.check_box_outline_blank, size: 20, color: on ? t.accent : t.muted),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    },
+  );
+
   Widget _keyCell(RappTokens t, (String, int, int?) k) {
     final (label, code, bit) = k;
     return _cell(t, label, bit, bit == null ? () => _key(code) : () => setState(() => _sticky ^= bit));
@@ -255,16 +292,36 @@ class _ComposerPlusState extends State<ComposerPlus> {
                     rowGap,
                     if (!term) ...[_row(t, '在远端复制', mac ? '⌘C' : 'Ctrl+C', _copy), rowGap],
                     if (widget.history != null) ...[_row(t, '输入历史', null, _openHistory), rowGap],
+                    if (widget.onReturnAfter != null) ...[_returnAfter(t), rowGap],
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 4),
                       child: Text('按键 · 直接发给远端', style: TextStyle(color: t.muted, fontSize: 12)),
                     ),
                     rowGap,
                     for (final r in rows) ...[r, rowGap],
-                    _row(t, '收起', null, () {
-                      _close();
-                      widget.session.composer.collapse();
-                    }),
+                    // On the right, next to ＋, so collapsing is a short move; Esc in the editor does the same.
+                    InkWell(
+                      key: const Key('composer-plus-collapse'),
+                      onTap: () {
+                        _close();
+                        widget.session.composer.collapse();
+                      },
+                      borderRadius: BorderRadius.circular(t.r),
+                      child: SizedBox(
+                        height: 48,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          child: Row(
+                            children: [
+                              const Spacer(),
+                              Text('Esc', style: TextStyle(color: t.muted, fontSize: 12)),
+                              const SizedBox(width: 8),
+                              Text('收起', style: TextStyle(color: t.text)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -299,6 +356,7 @@ class _ComposerPlusState extends State<ComposerPlus> {
             label: '＋',
             semanticLabel: '更多',
             icon: Icons.add,
+            size: 40,
             onPressed: _toggle,
           ),
         ),

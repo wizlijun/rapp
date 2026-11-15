@@ -181,6 +181,7 @@ void main() {
 
   testWidgets('a send goes out as one paste without Return; success empties the box', (tester) async {
     await openTerm(tester);
+    s.currentRemote!.setProfile(const ResolvedProfile(afterSend: AfterSend.none));
     await openPanel(tester);
     term.calls.clear();
     final gate = term.pasteWait = Completer<String?>();
@@ -196,7 +197,7 @@ void main() {
     expect(callsOf('composer').last, {'sid': 1, 'sending': false, 'sent': 1, 'failure': null});
     expect(text(tester), isEmpty);
     expect(find.text('发送中'), findsNothing);
-    expect(keys(), isEmpty, reason: 'no Return without afterSend');
+    expect(keys(), isEmpty, reason: 'no Return with afterSend none');
   });
 
   testWidgets('afterSend pressReturn sends Enter after the paste is in', (tester) async {
@@ -248,7 +249,9 @@ void main() {
     expect(find.byKey(const Key('composer-plus-menu')), findsOneWidget);
     const labels = ['Esc', 'Tab', '⇧Tab', '删除', '回车', '←', '↓', '↑', '→', '⌃C', '⌃D', '⌃L', '⌃R', 'PgUp', 'PgDn'];
     for (final l in labels) {
-      expect(find.descendant(of: find.byKey(const Key('composer-plus-menu')), matching: find.text(l)), findsOneWidget,
+      // 收起 also shows Esc, as its shortcut: the key is the first.
+      expect(find.descendant(of: find.byKey(const Key('composer-plus-menu')), matching: find.text(l)),
+          l == 'Esc' ? findsNWidgets(2) : findsOneWidget,
           reason: l);
     }
     expect(find.byKey(const ValueKey('sticky-⌘')), findsNothing);
@@ -264,7 +267,7 @@ void main() {
     const names = ['Esc', 'Tab', 'Shift-Tab', 'Backspace', 'Enter', 'Left', 'Down', 'Up', 'Right', 'Ctrl-C', 'Ctrl-D',
         'Ctrl-L', 'Ctrl-R', 'PageUp', 'PageDown'];
     for (final l in labels) {
-      await tester.tap(find.descendant(of: find.byKey(const Key('composer-plus-menu')), matching: find.text(l)));
+      await tester.tap(find.descendant(of: find.byKey(const Key('composer-plus-menu')), matching: find.text(l)).first);
       await tester.pump();
     }
     expect(keys(), [
