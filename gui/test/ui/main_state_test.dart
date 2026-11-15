@@ -4143,6 +4143,52 @@ void main() {
       expect(pos.leftAt!.isAtSameMomentAs(now), isTrue);
     });
 
+    test('the session last used in a project survives a restart while still in it', () {
+      fakeAsync((a) {
+        final (_, st) = embedded(a);
+        final p = project(st, 'P', ['a', 'aa']);
+        st.switchProject(p.id);
+        expect(st.currentKey, '111/a');
+        st.select('111/aa');
+        a.elapse(MainState.positionsSaveDelay);
+        expect(ProjectPositions.load(DataDir(tmp.path).localDir).byProject[p.id]!.last, '111/aa');
+        // Quit while in P (no leave is recorded), start again, 切到 P.
+        final (_, again) = embedded(a);
+        again.switchProject(p.id);
+        expect(again.currentKey, '111/aa');
+        st.dispose();
+        again.dispose();
+      });
+    });
+
+    test('a pending position save is written on dispose and leaves no timer', () {
+      fakeAsync((a) {
+        final (_, st) = embedded(a);
+        final p = project(st, 'P', ['a', 'aa']);
+        st.switchProject(p.id);
+        st.select('111/aa');
+        st.dispose();
+        expect(a.pendingTimers.where((t) => t.duration == MainState.positionsSaveDelay), isEmpty);
+        expect(ProjectPositions.load(DataDir(tmp.path).localDir).byProject[p.id]!.last, '111/aa');
+      });
+    });
+
+    test('a leave that was not recorded shows no cue rather than one counted from an older leave', () {
+      final st = make();
+      final p = project(st, 'P', []);
+      final q = project(st, 'Q', []);
+      st.switchProject(p.id);
+      st.switchProject(q.id); // Monday: left P
+      now = now.add(const Duration(days: 1));
+      st.switchProject(p.id); // Tuesday: works in P and quits while in it
+      expect(st.cue, '1 天前离开');
+      expect(ProjectPositions.load(DataDir(tmp.path).localDir).byProject[p.id]!.leftAt, isNull);
+      now = now.add(const Duration(days: 1));
+      final again = make(); // Wednesday
+      again.switchProject(p.id);
+      expect(again.cue, '');
+    });
+
     test('coming back shows the cue for five seconds', () {
       fakeAsync((a) {
         final st = make();
@@ -4397,7 +4443,8 @@ void main() {
         st.switchProject(r.id); // leaves Q: a save into the new root
         final saved = ProjectPositions.load(d.localDir).byProject;
         expect(saved.keys.toSet(), {q.id, r.id});
-        expect(saved[r.id]!.leftAt!.isAtSameMomentAs(there), isTrue);
+        expect(st.cue, isNotEmpty); // counted from the new root's leave
+        expect(saved[r.id]!.last, '111/com.r');
         expect(saved.containsKey(p.id), isFalse);
       });
 
@@ -4453,7 +4500,12 @@ void main() {
         final st = make();
         await open(['a', 'b']);
         expect(st.canSaveOpenAsProject, isTrue);
+        st.select('111/b');
+        var sawEmpty = false;
+        st.addListener(() => sawEmpty |= st.projects.any((p) => p.members.isEmpty));
         final p = st.saveOpenAsProject('写周报')!;
+        expect(sawEmpty, isFalse);
+        expect(st.currentKey, '111/b');
         expect(p.members.map((m) => m.key), ['111/a', '111/b']);
         expect(p.members.every((m) => m.task.isEmpty), isTrue);
         expect(st.currentProject, p.id);
@@ -4506,16 +4558,22 @@ void main() {
         });
       });
 
-      test('undo does not restore position or current/previous', () {
+      test('undo restores the position, saved, but not current/previous', () {
         fakeAsync((a) {
           final st = make();
           final p = st.createProject('P')!;
+          final q = st.createProject('Q')!;
           st.switchProject(p.id);
+          st.switchProject(q.id); // P is left: it has a position
+          final local = DataDir(tmp.path).localDir;
           st.deleteProject(p.id);
-          st.undoDelete();
-          expect(st.projects.single.name, 'P');
-          expect((st.currentProject, st.previousProject), (null, null));
           expect(st.positions.byProject.containsKey(p.id), isFalse);
+          expect(ProjectPositions.load(local).byProject.containsKey(p.id), isFalse);
+          st.undoDelete();
+          expect(st.projects.map((x) => x.name), ['P', 'Q']);
+          expect((st.currentProject, st.previousProject), (q.id, null));
+          expect(st.positions.byProject[p.id]!.leftAt!.isAtSameMomentAs(now), isTrue);
+          expect(ProjectPositions.load(local).byProject[p.id]!.leftAt!.isAtSameMomentAs(now), isTrue);
         });
       });
 

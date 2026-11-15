@@ -143,6 +143,7 @@ class MainState extends ChangeNotifier {
   /// Switches to a moved data root: later reads and writes go there and `workspace.json` is reread.
   /// Pinned entries saved under the old root follow to the new one.
   void relocate(DataDir d) {
+    _flushPositions();
     final oldRoot = data.root;
     data = d;
     final loaded = loadWorkspace(d.sharedDir);
@@ -720,9 +721,20 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void step(int delta) {
+  /// The keys [step] may stop on: the current project's members, or null (any session).
+  List<String>? get _stepWithin {
     final p = currentProject == null ? null : _project(currentProject!);
-    final k = stepKey(groups, currentKey, delta, within: p == null ? null : projectKeys(p));
+    return p == null ? null : projectKeys(p);
+  }
+
+  /// How many open sessions [step] walks through.
+  int get steppableCount {
+    final within = _stepWithin;
+    return within == null ? sessionCount : _entries.where((e) => within.contains(e.key)).length;
+  }
+
+  void step(int delta) {
+    final k = stepKey(groups, currentKey, delta, within: _stepWithin);
     if (k == null) return;
     currentKey = k;
     notifyListeners();
@@ -2265,14 +2277,15 @@ class MainState extends ChangeNotifier {
 
   /// Every open session becomes a member (list order, no notes), and it becomes the current
   /// project. Null, with nothing changed, for an empty name or when nothing is open.
+  /// The stage stays on the current session.
   Project? saveOpenAsProject(String name) {
-    if (_entries.isEmpty) return null;
-    final p = createProject(name);
-    if (p == null) return null;
-    for (final e in _entries) {
-      p.members.add(Member(appRefOf(e)));
-    }
+    final n = oneLine(name);
+    if (_entries.isEmpty || n.isEmpty) return null;
+    final p = Project(newProjectId(), n, [for (final e in _entries) Member(appRefOf(e))]);
+    workspace.projects.add(p);
     _saveWorkspace();
+    final k = currentKey;
+    if (k != null && p.members.any((m) => m.key == k)) positions.of(p.id).last = k;
     switchProject(p.id);
     return p;
   }
@@ -2286,7 +2299,7 @@ class MainState extends ChangeNotifier {
 
   static const undoFor = Duration(seconds: 5);
   Timer? _undoTimer;
-  ({Project project, int index})? _undo;
+  ({Project project, int index, ProjectPosition? position})? _undo;
 
   /// The deleted project's name while it can still be undone; null otherwise.
   String? get undoableDelete => _undo?.project.name;
@@ -2295,7 +2308,7 @@ class MainState extends ChangeNotifier {
   void deleteProject(String id) {
     final i = workspace.projects.indexWhere((p) => p.id == id);
     if (i >= 0) {
-      _undo = (project: workspace.projects[i], index: i);
+      _undo = (project: workspace.projects[i], index: i, position: positions.byProject[id]);
       _undoTimer?.cancel();
       _undoTimer = Timer(undoFor, () {
         _undoTimer = null;
@@ -2309,12 +2322,12 @@ class MainState extends ChangeNotifier {
       _setCue('');
     }
     if (previousProject == id) previousProject = null;
-    positions.byProject.remove(id);
+    if (positions.byProject.remove(id) != null) _savePositions();
     _saveWorkspace();
   }
 
-  /// Puts the last deleted project back where it was (members, notes, pin); its position and
-  /// current/previous status are not restored.
+  /// Puts the last deleted project back where it was (members, notes, pin, where it was left); its
+  /// current/previous status is not restored.
   void undoDelete() {
     final u = _undo;
     if (u == null) return;
@@ -2322,6 +2335,10 @@ class MainState extends ChangeNotifier {
     _undoTimer = null;
     _undo = null;
     workspace.projects.insert(math.min(u.index, workspace.projects.length), u.project);
+    if (u.position != null) {
+      positions.byProject[u.project.id] = u.position!;
+      _savePositions();
+    }
     _saveWorkspace();
   }
 
@@ -2365,6 +2382,9 @@ class MainState extends ChangeNotifier {
   static const cueFor = Duration(seconds: 5);
   Timer? _cueTimer;
 
+  /// A new last session inside the current project is written this long after it changes.
+  static const positionsSaveDelay = Duration(seconds: 1);
+
   /// After [relocate]: the new root's positions, and no current or previous project the new
   /// workspace lacks (§14 case 1).
   void _reloadProjectState() {
@@ -2401,7 +2421,11 @@ class MainState extends ChangeNotifier {
     if (id == null || k == null) return;
     final p = _project(id);
     if (p != null && p.members.any((m) => m.key == k)) {
-      positions.of(id).last = k;
+      final pos = positions.of(id);
+      if (pos.last == k) return;
+      pos.last = k;
+      _positionsTimer?.cancel();
+      _positionsTimer = Timer(positionsSaveDelay, _savePositions);
     } else {
       _leave();
     }
@@ -2442,7 +2466,17 @@ class MainState extends ChangeNotifier {
     });
   }
 
+  Timer? _positionsTimer;
+
+  /// Writes a position save that is still waiting for [positionsSaveDelay].
+  void _flushPositions() {
+    if (_positionsTimer != null) _savePositions();
+  }
+
+  /// Also stands for a waiting save.
   void _savePositions() {
+    _positionsTimer?.cancel();
+    _positionsTimer = null;
     try {
       positions.save(data.localDir);
     } on FileSystemException catch (e) {
@@ -2476,6 +2510,10 @@ class MainState extends ChangeNotifier {
       }
       _setCue(returnCue(leftAt: leftAt, now: _now(), needs: needs, disconnected: disconnected) ?? '');
     }
+    // A leave is recorded only when it is seen; one that is missed (a quit) then gives no cue,
+    // rather than one counted from an older leave.
+    pos.leftAt = null;
+    if (currentKey != null) pos.last = currentKey;
     _savePositions();
     notifyListeners();
   }
@@ -2716,6 +2754,7 @@ class MainState extends ChangeNotifier {
     _desktopTimer?.cancel();
     _cueTimer?.cancel();
     _undoTimer?.cancel();
+    _flushPositions();
     for (final t in _unlockTimers.values) {
       t.cancel();
     }
