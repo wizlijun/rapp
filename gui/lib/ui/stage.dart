@@ -18,17 +18,18 @@ import 'session_model.dart';
 import 'tokens.dart';
 import 'unlock.dart';
 
+/// The password dialog for [device]; a password sent goes through [MainState.unlock].
+Future<void> requestUnlock(BuildContext context, MainState state, String device) async {
+  state.blurPicture();
+  final request = await showUnlockDialog(context, store: state.unlockStore, device: device);
+  if (request != null) {
+    await state.unlock(device, request.password, remember: request.remember, auto: request.auto);
+  }
+}
+
 class Stage extends StatelessWidget {
   const Stage({super.key, required this.state});
   final MainState state;
-
-  Future<void> _requestUnlock(BuildContext context, String device) async {
-    state.blurPicture();
-    final request = await showUnlockDialog(context, store: state.unlockStore, device: device);
-    if (request != null) {
-      await state.unlock(device, request.password, remember: request.remember, auto: request.auto);
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -219,9 +220,7 @@ class Stage extends StatelessWidget {
                               Expanded(child: Text(banner.text, style: const TextStyle(color: Colors.black87))),
                               TextButton(
                                 style: TextButton.styleFrom(foregroundColor: Colors.black87),
-                                onPressed: isDesktopApp(rec!.app)
-                                    ? () => _requestUnlock(context, rec.id)
-                                    : () => state.openOrSwitch(rec.id, 'desktop:', '桌面'),
+                                onPressed: () => requestUnlock(context, state, rec!.id),
                                 child: Text(banner.action),
                               ),
                             ]),

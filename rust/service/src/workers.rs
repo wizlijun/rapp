@@ -97,6 +97,15 @@ async fn run_json(state: &State, args: &[&str]) -> Result<Value> {
         .ok_or_else(|| anyhow!("rapp-host {} gave no result", args[0]))
 }
 
+/// `rapp-host lock`: Ok(true) locked now, Ok(false) was already locked, Err with the host's `error`.
+pub async fn lock(state: &State) -> Result<bool> {
+    let v = run_json(state, &["lock"]).await?;
+    if v["ok"] == true {
+        return Ok(v["already"] != true);
+    }
+    Err(anyhow!("{}", v["error"].as_str().unwrap_or("rapp-host lock failed")))
+}
+
 fn permissions(v: &Value) -> Value {
     json!({"screen_recording": v["screen_recording"] == true, "accessibility": v["accessibility"] == true})
 }

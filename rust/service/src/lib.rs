@@ -1,5 +1,6 @@
 //! rapp-service (spec §3): A side. Authenticates B, runs `rapp-host` workers, serves local IPC.
 
+pub mod autolock;
 mod cm;
 pub mod config;
 mod data;
@@ -38,6 +39,8 @@ pub struct Opts {
     pub bin_dir: Option<PathBuf>,
     pub gui: Option<PathBuf>,
     pub worker_idle: Duration,
+    /// How long after the last counted session ends A is locked (`autolock::GRACE` in the real service).
+    pub lock_grace: Duration,
     /// Where `service.log` goes (`rapp_net::log::log_dir()` in the real service).
     pub log_dir: PathBuf,
     /// Runs every external program of the updater (`SystemRunner` in the real service).
@@ -152,6 +155,7 @@ impl Service {
             tokio::spawn(peer::accept_loop(state.clone(), endpoint)),
             tokio::spawn(ipc::serve(state.clone(), listener, ipc_token)),
             update::spawn(state.clone()),
+            autolock::spawn(state.clone(), opts.lock_grace),
             relay_link::spawn(state.clone(), opts.advertise_lan),
         ];
         if let Some(data) = opts.data {

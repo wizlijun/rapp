@@ -63,6 +63,15 @@ void main() {
       expect(list.app, '（列出应用）');
     });
 
+    test('auto lock rows', () {
+      final ok = historyRow({'ts': ts, 'ev': 'auto_lock'});
+      expect(ok.result, '远程 app 都已关闭，已自动锁屏');
+      expect(ok.warn, isFalse);
+      final bad = historyRow({'ts': ts, 'ev': 'auto_lock_failed', 'error': 'forced'});
+      expect(bad.result, '自动锁屏失败：forced');
+      expect(bad.warn, isTrue);
+    });
+
     test('desktop sessions and typed system passwords', () {
       final base = {'ts': ts, 'peer': 'p', 'path': 'lan', 'sid': 3};
       expect(historyRow({...base, 'ev': 'session_start', 'app': 'desktop:'}).app, '桌面');

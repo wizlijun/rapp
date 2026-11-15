@@ -80,6 +80,7 @@
 | `port` | 整数 | 22028（UDP） | 1–65535 | 手改 | |
 | `ipc_port` | 整数 | 22029（TCP，只听 127.0.0.1） | 1–65535；改了 GUI 要能找到它 | 手改 | |
 | `update_url` | 字符串 | 内置的 `latest.json` 地址 | 只收 `https://` | 手改 | |
+| `auto_lock` | 布尔 | `true` | 远程 App / 桌面全部关闭 10 秒后自动锁定 A | 仅本机 GUI（IPC `set_auto_lock`；B 不能改） | |
 | `auto_update` | 布尔 | `true` | 没人用时自己装新版 | GUI（IPC `set_update`） | |
 | `check_updates` | 布尔 | `true` | 定时检查更新 | GUI（IPC `set_update`） | |
 

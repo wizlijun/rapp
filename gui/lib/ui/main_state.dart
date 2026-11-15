@@ -198,7 +198,28 @@ class MainState extends ChangeNotifier {
   final UnlockStore unlockStore;
   final Set<Object> _unlockSeen = {};
   final Map<Object, int> _lockEpoch = {};
-  final Map<Object, Timer> _unlockTimers = {};
+  /// Devices the user locked on purpose (seen going unlocked -> locked): no unlock on reconnect.
+  final Set<String> _manualLock = {};
+
+  /// Per device: the 5 s check after a password was sent. Present = an unlock is in flight.
+  final Map<String, Timer> _unlockBusy = {};
+  /// Devices whose saved password was typed by itself and no unlocked report has come since.
+  /// Survives session end and reconnect; while set, the saved password is not typed again (§6.6).
+  final Set<String> _autoUnconfirmed = {};
+  final StreamController<String> _unlockAsks = StreamController<String>.broadcast();
+
+  /// Device ids that want the password dialog (the current session is locked and nothing could unlock it).
+  Stream<String> get unlockAsks => _unlockAsks.stream;
+
+  /// A session went away: the device's unlock check dies with it unless another session still carries it.
+  void _releaseUnlockBusy(SessionRecord r) {
+    final others = _records.values.any((x) =>
+        x != r && x.id == r.id && _countsForUnlock(x.app) && x.phase == Phase.live && !x.ending);
+    if (!others) _unlockBusy.remove(r.id)?.cancel();
+  }
+
+  /// Secondary screens share the main desktop's lock state; terminals never report it.
+  bool _countsForUnlock(String app) => !isTermApp(app) && !isDesktopScreen(app);
 
   /// Terminal sessions' port; null where the GUI has no native port (no terminals there).
   final TermSessionPort? termPort;
@@ -971,9 +992,15 @@ class MainState extends ChangeNotifier {
     if (e is ScreenLockedEvent) {
       if (wasLocked != e.locked) {
         _lockEpoch[e.sid] = (_lockEpoch[e.sid] ?? 0) + 1;
-        _unlockTimers.remove(e.sid)?.cancel();
+        if (wasLocked == false && e.locked) _manualLock.add(r.id);
+        if (!e.locked) {
+          _manualLock.remove(r.id);
+          _unlockBusy.remove(r.id)?.cancel();
+        }
       }
-      if (r.app == 'desktop:' && _unlockSeen.add(e.sid) && e.locked) {
+      if (!e.locked) _autoUnconfirmed.remove(r.id);
+      if (_unlockSeen.add(e.sid) && _countsForUnlock(r.app) && e.locked &&
+          !_manualLock.contains(r.id) && !_unlockBusy.containsKey(r.id)) {
         final start = _starts[e.sid];
         if (start != null) unawaited(_autoUnlock(r, start, _lockEpoch[e.sid]!));
       }
@@ -1266,13 +1293,13 @@ class MainState extends ChangeNotifier {
     final shown = remote[old] ?? remote[r.sid];
     unawaited(recorder.sessionEnded(shown, _metaOf(r, shown),
         record: shown?.recordsInput ?? profiles.resolve(r.app).recordInput));
+    _releaseUnlockBusy(r);
     for (final sid in [r.sid, old]) {
       if (sid == null) continue;
       remote.remove(sid)?.dispose();
       _autoDetached.remove(sid);
       _unlockSeen.remove(sid);
       _lockEpoch.remove(sid);
-      _unlockTimers.remove(sid)?.cancel();
       _sentFps.remove(sid);
       _waiting.remove(sid)?.timer.cancel();
     }
@@ -1390,9 +1417,9 @@ class MainState extends ChangeNotifier {
     }
     r.sid = s.sid;
     _starts[s.sid] = _Start(s.sid);
+    _releaseUnlockBusy(r);
     _unlockSeen.remove(s.sid);
     _lockEpoch.remove(s.sid);
-    _unlockTimers.remove(s.sid)?.cancel();
     final rs = RemoteSession(s.sid, r.appName, onResize: (w, a, b) {
           if (_liveSid(s.sid)) portOf(s.sid)!.resize(s.sid, w, a, b);
         },
@@ -1950,30 +1977,59 @@ class MainState extends ChangeNotifier {
       _lockEpoch[start.sid] == epoch && remote[start.sid]?.screenLocked == true;
 
   Future<void> _autoUnlock(SessionRecord r, _Start start, int epoch) async {
-    if (!unlockStore.supported) return;
-    try {
-      final saved = await unlockStore.read(r.id);
-      if (saved == null || !saved.auto || !_canUnlock(r, start, epoch)) return;
-      _sendUnlock(r, start, epoch, saved.password);
-    } catch (_) {
-      if (!_canUnlock(r, start, epoch)) return;
+    UnlockCredential? saved;
+    var failed = false;
+    if (unlockStore.supported) {
+      try {
+        saved = await unlockStore.read(r.id);
+      } catch (_) {
+        failed = true;
+      }
+    }
+    if (!_canUnlock(r, start, epoch) || _unlockBusy.containsKey(r.id) || _manualLock.contains(r.id)) return;
+    if (saved != null && saved.auto) {
+      if (!_autoUnconfirmed.contains(r.id)) {
+        _sendUnlock(r, start, epoch, saved.password, auto: true);
+        return;
+      }
+      // The last attempt never came back unlocked (its session went away first): don't type it again.
+      _autoUnconfirmed.remove(r.id);
+      unawaited(_autoFailed(r.id, saved.password));
+      return;
+    }
+    if (failed) {
       hint = '无法读取钥匙串；请手动输入系统密码';
       notifyListeners();
     }
+    if (r.key == currentKey) _unlockAsks.add(r.id);
+  }
+
+  /// The session to type the password through: the current one when it is this device's, else any locked one.
+  SessionRecord? _unlockTarget(String device) {
+    bool usable(SessionRecord x) =>
+        x.id == device && _countsForUnlock(x.app) && x.phase == Phase.live && !x.ending && _starts[x.sid] != null;
+    final cur = currentRecord;
+    if (cur != null && usable(cur)) return cur;
+    final mine = _records.values.where(usable).toList();
+    for (final x in mine) {
+      if (remote[x.sid]?.screenLocked == true) return x;
+    }
+    // None locked: still answer with that session's lock state ("not locked" / "checking").
+    return mine.isEmpty ? null : mine.first;
   }
 
   Future<void> unlock(String device, String password, {required bool remember, required bool auto}) async {
     if (_disposed) return;
-    // Always use this device's main desktop connection, even when its secondary is selected.
-    final r = _records['$device/desktop:'];
+    final r = _unlockTarget(device);
     final start = r == null ? null : _starts[r.sid];
-    if (r == null || start == null || r.phase != Phase.live || r.ending) {
-      hint = '请先连接远程桌面';
+    if (r == null || start == null) {
+      hint = '请先打开这台电脑上的 app 或桌面';
     } else if (remote[r.sid]?.screenLocked != true) {
       hint = remote[r.sid]?.screenLocked == false ? 'A 没有锁屏，没有输入密码' : '正在确认远程电脑的锁屏状态';
     } else if (utf8.encode(password).length > 1024) {
       hint = '密码过长（最多 1024 字节）';
     } else {
+      _autoUnconfirmed.remove(device);
       _sendUnlock(r, start, _lockEpoch[r.sid]!, password);
       try {
         if (unlockStore.supported) {
@@ -1991,16 +2047,33 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _sendUnlock(SessionRecord r, _Start start, int epoch, String password) {
+  void _sendUnlock(SessionRecord r, _Start start, int epoch, String password, {bool auto = false}) {
     if (!_canUnlock(r, start, epoch)) return;
     port!.unlock(start.sid, password);
-    _unlockTimers.remove(start.sid)?.cancel();
-    _unlockTimers[start.sid] = Timer(const Duration(seconds: 5), () {
-      _unlockTimers.remove(start.sid);
-      if (!_canUnlock(r, start, epoch)) return;
+    final device = r.id;
+    if (auto) _autoUnconfirmed.add(device);
+    _unlockBusy.remove(device)?.cancel();
+    _unlockBusy[device] = Timer(const Duration(seconds: 5), () {
+      _unlockBusy.remove(device);
+      final live = _canUnlock(r, start, epoch);
+      // Any unlocked report cancels this timer, so a pending auto attempt here did not work,
+      // even when the session it went through is gone.
+      if (auto && _autoUnconfirmed.remove(device)) unawaited(_autoFailed(device, password));
+      if (!live) return;
       hint = '密码可能不对';
       notifyListeners();
     });
+  }
+
+  /// A saved password did not work: stop trying it by itself, and ask the user once
+  /// (when the device's current session is locked).
+  Future<void> _autoFailed(String device, String password) async {
+    try {
+      await unlockStore.save(device, password, auto: false);
+    } catch (_) {}
+    if (_disposed) return;
+    final cur = currentRecord;
+    if (cur?.id == device && remote[cur!.sid]?.screenLocked == true) _unlockAsks.add(device);
   }
 
   void _streamChanged(SessionRecord source, StreamChoice choice) {
@@ -2041,10 +2114,9 @@ class MainState extends ChangeNotifier {
 
   LockBanner? get lockBanner {
     final r = currentRecord;
+    // Terminals never report lock state, so every session that gets here can take the password.
     if (r == null || r.phase != Phase.live || r.ending || remote[r.sid]?.screenLocked != true) return null;
-    return isDesktopApp(r.app)
-        ? const LockBanner(desktopLockText, '输入系统密码')
-        : const LockBanner('A 已锁屏，操作不会生效。', '打开桌面');
+    return const LockBanner(desktopLockText, '输入系统密码');
   }
 
   void _endDesktopChildren(String device) {
@@ -2796,10 +2868,11 @@ class MainState extends ChangeNotifier {
     _cueTimer?.cancel();
     _undoTimer?.cancel();
     _flushPositions();
-    for (final t in _unlockTimers.values) {
+    for (final t in _unlockBusy.values) {
       t.cancel();
     }
-    _unlockTimers.clear();
+    _unlockBusy.clear();
+    unawaited(_unlockAsks.close());
     for (final t in _retryTimers.values) {
       t.cancel();
     }

@@ -219,9 +219,10 @@ async fn hub_log_records_route_session_and_client_stderr_without_secrets() {
     assert!(!text.contains(PASSWORD), "password in hub.log:\n{text}");
 }
 
+/// Waits until `path` holds something: the fake client creates the file before it writes to it.
 async fn wait_for_file(path: &std::path::Path) {
     for _ in 0..150 {
-        if path.exists() {
+        if std::fs::read(path).is_ok_and(|b| !b.is_empty()) {
             return;
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -665,6 +666,7 @@ impl LanA {
                 home: self.home.path().to_path_buf(),
                 bin_dir: Some(self.bins.path().to_path_buf()),
                 gui: None,
+                lock_grace: Duration::from_secs(1),
                 worker_idle: Duration::from_secs(60),
                 log_dir: self.home.path().join("logs"),
                 runner: std::sync::Arc::new(rapp_update::fake::FakeRunner::new()),

@@ -19,7 +19,9 @@ import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/side_panel.dart';
 import 'package:rapp/ui/top_bar.dart';
 
+import 'package:rapp/ui/unlock.dart';
 import '../fakes.dart';
+import 'desktop_test.dart' show DesktopEnv;
 import 'helpers.dart';
 
 class FakeFullscreen implements FullscreenControl {
@@ -121,6 +123,35 @@ void main() {
     });
     await tester.pump(const Duration(milliseconds: 100));
   }
+
+  testWidgets('two asks open one unlock dialog and the password is sent', (tester) async {
+    final e = DesktopEnv();
+    addTearDown(e.dispose);
+    tester.view.physicalSize = const Size(1194, 834);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.runAsync(() => e.state.openOrSwitch('111', 'app', 'App'));
+    await tester.pumpWidget(wrap(
+      MainWindow(state: e.state, monitor: monitor, control: null, fullscreen: fs),
+      disableAnimations: true,
+    ));
+    final sid = e.sid('app');
+    e.port.emit(ScreenLockedEvent(sid, true));
+    await tester.runAsync(() => flush());
+    await tester.pump();
+    e.port.emit(ScreenLockedEvent(sid, false));
+    e.port.emit(ScreenLockedEvent(sid, true));
+    await tester.runAsync(() => flush());
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(UnlockDialog), findsOneWidget);
+    await tester.enterText(find.byType(TextField), 'typed secret');
+    await tester.tap(find.widgetWithText(FilledButton, '输入系统密码'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(e.calls('unlock').single['password'], 'typed secret');
+    await tester.pump(const Duration(seconds: 6)); // the 5 s check settles
+    await tester.pumpWidget(const SizedBox());
+  });
 
   testWidgets('the service status tells MainState whether a relay is set', (tester) async {
     monitor.status = ServiceStatus.fromJson({'relay_addr': 'vps:22026', 'has_key': true});

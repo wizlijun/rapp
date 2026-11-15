@@ -39,6 +39,8 @@ HistoryRow historyRow(Map<String, dynamic> ev) {
     // The host turned the session away (busy, version mismatch, bad token).
     'rejected' => ('拒绝：${s('reason')}', true),
     'unlock' => ('输入了系统密码', false),
+    'auto_lock' => ('远程 app 都已关闭，已自动锁屏', false),
+    'auto_lock_failed' => ('自动锁屏失败：${s('error')}', true),
     final other => (other, false),
   };
   return HistoryRow(

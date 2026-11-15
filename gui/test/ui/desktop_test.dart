@@ -47,7 +47,7 @@ class DesktopEnv {
       data: DataDir(tmp.path),
       prefs: UiPrefs(),
       port: port,
-      unlockStore: unlockStore ?? UnlockStore(supported: false),
+      unlockStore: unlockStore ?? UnlockStore(supported: false, memory: false),
     );
   }
   final tmp = Directory.systemTemp.createTempSync('desktop_test');
@@ -264,12 +264,12 @@ void main() {
       e.state.openOrSwitch('111', 'app', 'App');
       a.flushMicrotasks();
       e.port.emit(ScreenLockedEvent(e.sid('app'), true));
-      expect(e.state.lockBanner!.text, 'A 已锁屏，操作不会生效。');
-      expect(e.state.lockBanner!.action, '打开桌面');
+      expect(e.state.lockBanner!.text, desktopLockText);
+      expect(e.state.lockBanner!.action, '输入系统密码');
     });
   });
 
-  testWidgets('app lock action opens desktop; Linux switcher selects screen', (
+  testWidgets('app lock banner asks for the password; Linux switcher selects screen', (
     tester,
   ) async {
     final e = DesktopEnv(detach: false);
@@ -277,8 +277,15 @@ void main() {
     await tester.runAsync(() => e.state.openOrSwitch('111', 'app', 'App'));
     e.port.emit(ScreenLockedEvent(e.sid('app'), true));
     await tester.pumpWidget(wrap(Stage(state: e.state)));
-    expect(find.text('A 已锁屏，操作不会生效。'), findsOneWidget);
-    await tester.tap(find.text('打开桌面'));
+    expect(find.text(desktopLockText), findsOneWidget);
+    await tester.tap(find.text('输入系统密码'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.byType(UnlockDialog), findsOneWidget);
+    await tester.tap(find.text('取消'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.runAsync(() => e.state.openOrSwitch('111', 'desktop:', '桌面'));
     await tester.pump();
     await tester.pump();
     expect(find.text('屏幕 1'), findsOneWidget);

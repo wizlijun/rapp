@@ -102,6 +102,19 @@ fn main() {
             ));
             exit(0, "ok")
         }
+        Some("lock") => {
+            // `lock.log` next to argv[0]; `lock-fail` / `already-locked` files pick the reply.
+            let dir = bin_dir();
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("lock.log")) {
+                let _ = writeln!(f, "lock");
+            }
+            if dir.join("lock-fail").exists() {
+                emit(r#"{"ok":false,"error":"forced"}"#);
+                exit(1, "error")
+            }
+            emit(if dir.join("already-locked").exists() { r#"{"ok":true,"already":true}"# } else { r#"{"ok":true}"# });
+            exit(0, "ok")
+        }
         Some("serve") => serve(&args[1..]),
         _ => {
             eprintln!("fake-rapp-host: usage: check|list-apps|serve");

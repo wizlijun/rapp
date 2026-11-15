@@ -40,6 +40,7 @@ class ServiceStatus {
     this.logDir,
     this.update,
     this.permissionsLostAfterUpdate = false,
+    this.autoLock = true,
     this.relayAddr,
     this.relay = 'off',
     this.relayError,
@@ -65,6 +66,9 @@ class ServiceStatus {
 
   /// Both permissions were granted before the last update and are not now (spec §3.3).
   final bool permissionsLostAfterUpdate;
+
+  /// Lock the screen after the last remote app closes (macOS); on when the service does not say.
+  final bool autoLock;
 
   /// `host:port` of the rapp-relay access point; null when none is set.
   final String? relayAddr;
@@ -98,6 +102,7 @@ class ServiceStatus {
       logDir: m['log_dir']?.toString(),
       update: UpdateInfo.fromJson(m['update']),
       permissionsLostAfterUpdate: m['permissions_lost_after_update'] == true,
+      autoLock: m['auto_lock'] != false,
       relayAddr: (m['relay_addr']?.toString() ?? '').isEmpty ? null : m['relay_addr'].toString(),
       relay: m['relay']?.toString() ?? 'off',
       relayError: (m['relay_error']?.toString() ?? '').isEmpty ? null : m['relay_error'].toString(),
@@ -186,6 +191,7 @@ class ServiceConnection {
   Future<Map<String, Object?>> updateRollback() => request({'cmd': 'update_rollback'});
   Future<Map<String, Object?>> setUpdate({bool? autoUpdate, bool? checkUpdates}) =>
       request({'cmd': 'set_update', 'auto_update': ?autoUpdate, 'check_updates': ?checkUpdates});
+  Future<Map<String, Object?>> setAutoLock(bool on) => request({'cmd': 'set_auto_lock', 'on': on});
 
   /// Clears rapp's own screen recording and accessibility records; the reply says which took.
   Future<Map<String, Object?>> permissionsReset() => request({'cmd': 'permissions_reset'});
@@ -357,6 +363,7 @@ class ServiceMonitor extends ChangeNotifier {
   Future<Map<String, Object?>> updateRollback() => _then((c) => c.updateRollback());
   Future<Map<String, Object?>> setUpdate({bool? autoUpdate, bool? checkUpdates}) =>
       _then((c) => c.setUpdate(autoUpdate: autoUpdate, checkUpdates: checkUpdates));
+  Future<Map<String, Object?>> setAutoLock(bool on) => _then((c) => c.setAutoLock(on));
   Future<Map<String, Object?>> permissionsReset() => _then((c) => c.permissionsReset());
 
   @override

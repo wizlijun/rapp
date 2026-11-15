@@ -11,16 +11,23 @@ class UnlockCredential {
 }
 
 /// The macOS runner stores both fields in a local, non-syncing Keychain item.
-/// Other platforms intentionally have no persistence backend.
+/// Linux keeps them in memory for this run only; other platforms have no backend.
 class UnlockStore {
-  UnlockStore({bool? supported, MethodChannel? channel})
-    : supported = supported ?? Platform.isMacOS,
-      _channel = channel ?? const MethodChannel('rapp/unlock');
-  final bool supported;
+  UnlockStore({bool? supported, MethodChannel? channel, bool? memory})
+    : memory = memory ?? Platform.isLinux,
+      _channel = channel ?? const MethodChannel('rapp/unlock') {
+    this.supported = supported ?? (Platform.isMacOS || this.memory);
+  }
+  late final bool supported;
+
+  /// Passwords live in this object only (never the channel, never disk).
+  final bool memory;
   final MethodChannel _channel;
+  final Map<String, UnlockCredential> _mem = {};
 
   Future<UnlockCredential?> read(String device) async {
     if (!supported) return null;
+    if (memory) return _mem[device];
     final value = await _channel.invokeMapMethod<String, dynamic>('read', {
       'device': device,
     });
@@ -44,6 +51,10 @@ class UnlockStore {
     if (utf8.encode(password).length > 1024) {
       throw const FormatException('密码过长');
     }
+    if (memory) {
+      _mem[device] = UnlockCredential(password, auto: auto);
+      return;
+    }
     await _channel.invokeMethod<void>('save', {
       'device': device,
       'password': password,
@@ -52,7 +63,9 @@ class UnlockStore {
   }
 
   Future<void> forget(String device) async {
-    if (supported) {
+    if (memory) {
+      _mem.remove(device);
+    } else if (supported) {
       await _channel.invokeMethod<void>('forget', {'device': device});
     }
   }
@@ -178,7 +191,7 @@ class _UnlockDialogState extends State<UnlockDialog> {
           if (widget.store.supported) ...[
             CheckboxListTile(
               contentPadding: EdgeInsets.zero,
-              title: const Text('记住密码'),
+              title: Text(widget.store.memory ? '本次运行期间记住密码' : '记住密码'),
               value: _remember,
               onChanged: _loading
                   ? null

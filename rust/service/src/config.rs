@@ -29,6 +29,9 @@ pub struct Config {
     /// The scheduled checks (default true); the 检查更新 button works either way.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub check_updates: Option<bool>,
+    /// Lock A when the last remote app or desktop closes (default true).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_lock: Option<bool>,
     /// The relay as `host:port`; with `key`, the service keeps a connection to it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relay: Option<String>,
@@ -81,6 +84,10 @@ impl Config {
         self.auto_update.unwrap_or(true)
     }
 
+    pub fn auto_lock(&self) -> bool {
+        self.auto_lock.unwrap_or(true)
+    }
+
     pub fn check_updates(&self) -> bool {
         self.check_updates.unwrap_or(true)
     }
@@ -125,5 +132,15 @@ mod tests {
         assert_eq!((cfg.relay.as_deref(), cfg.key.as_deref(), cfg.legacy_dropped), (None, None, true));
         let again = Config::load_or_init(dir.path()).unwrap();
         assert!(!again.legacy_dropped && again.relay.is_none(), "saved without them");
+    }
+
+    #[test]
+    fn auto_lock_defaults_on_and_saves_off() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(Config::default().auto_lock());
+        let cfg = Config { auto_lock: Some(false), ..Default::default() };
+        cfg.save(dir.path()).unwrap();
+        let back: Config = rapp_net::config::read_json(&dir.path().join("service.json")).unwrap().unwrap();
+        assert!(!back.auto_lock());
     }
 }

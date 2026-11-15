@@ -75,6 +75,9 @@ final class WorkerCLITests: XCTestCase {
         XCTAssertEqual(try host("list-apps"), .listApps(json: false))
         XCTAssertThrowsError(try host("check", "--token", "x"))
         XCTAssertThrowsError(try host("list-apps", "extra"))
+        XCTAssertEqual(try host("lock", "--json"), .lock(json: true))
+        XCTAssertEqual(try host("lock"), .lock(json: false))
+        XCTAssertThrowsError(try host("lock", "extra"))
     }
 
     // MARK: rapp-client arguments
