@@ -314,6 +314,9 @@ class TopBar extends StatelessWidget {
     messenger.showSnackBar(SnackBar(
       content: Text(pick == 'hide' ? '已隐藏，可在 app 配置里改' : '已关掉这个窗口的输入区，可在 app 配置里改'),
       action: SnackBarAction(label: '撤销', onPressed: undo),
+      // With an action, Flutter keeps the snackbar up until it is tapped;
+      // this one is a heads-up, so let it go on its own.
+      persist: false,
     ));
   }
 

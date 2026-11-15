@@ -696,6 +696,19 @@ void main() {
       expect(store.mine.single.windows!.single.action, RuleAction.noComposer);
     });
 
+    testWidgets('the 隐藏这类窗口 snackbar goes away on its own', (tester) async {
+      await setup(tester, three);
+      await tester.tap(find.text('Downloads'), buttons: kSecondaryButton);
+      await settle(tester);
+      await tester.tap(find.text('隐藏这类窗口'));
+      await settle(tester);
+      expect(find.text('已隐藏，可在 app 配置里改'), findsOneWidget);
+      await tester.pump(const Duration(seconds: 5));
+      await settle(tester);
+      expect(find.text('已隐藏，可在 app 配置里改'), findsNothing);
+      expect(find.text('已隐藏 1 个'), findsOneWidget);
+    });
+
     testWidgets('隐藏这类窗口 is greyed for the main window', (tester) async {
       await setup(tester, three);
       await tester.tap(find.text('Main'), buttons: kSecondaryButton);
