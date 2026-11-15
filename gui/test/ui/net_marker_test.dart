@@ -49,23 +49,16 @@ void main() {
     expect(netTooltip(ok, path: 'lan'), '本机网络 · 一般 · 中继 160ms · 丢包 3%\n当前会话走局域网，不经过中继');
     expect(netTooltip(const NetStatus(NetLevel.down, 160, 1)), '本机网络 · 断开');
     expect(netTooltip(const NetStatus(NetLevel.strong, null, 0)), '本机网络 · 强 · 丢包 0%');
-    expect(netText(ok), '160ms');
-    expect(netText(const NetStatus(NetLevel.down, 160, 1)), '断开');
-    expect(netText(const NetStatus(NetLevel.strong, null, 0)), isNull);
   });
 
-  testWidgets('wide shows line and round trip; compact the line alone', (tester) async {
+  testWidgets('the line alone, no round trip; the words are its hover', (tester) async {
     const n = NetStatus(NetLevel.strong, 42, 0);
     await tester.pumpWidget(wrap(const NetMarker(net: n)));
     expect(find.byKey(const Key('net-line')), findsOneWidget);
-    expect(find.text('42ms'), findsOneWidget);
-    expect(tester.getSize(find.byKey(const Key('net-marker'))).width, NetMarker.wideWidth);
+    expect(find.text('42ms'), findsNothing);
+    expect(tester.getSize(find.byKey(const Key('net-marker'))).width, NetMarker.width);
     expect(tester.getSemantics(find.byKey(const Key('net-marker'))).label, netTooltip(n));
-
-    await tester.pumpWidget(wrap(const NetMarker(net: n, compact: true)));
-    expect(find.byKey(const Key('net-line')), findsOneWidget);
-    expect(find.byKey(const Key('net-text')), findsNothing);
-    expect(tester.getSize(find.byKey(const Key('net-marker'))).width, NetMarker.compactWidth);
+    expect(find.byTooltip(netTooltip(n)), findsOneWidget);
   });
 
   testWidgets('every level paints without error', (tester) async {
@@ -73,7 +66,6 @@ void main() {
       await tester.pumpWidget(wrap(NetMarker(net: NetStatus(l, 500, 0.2))));
       expect(tester.takeException(), isNull);
     }
-    expect(find.text('断开'), findsOneWidget);
   });
 
   test('the gap under the cross is cleared inside its own layer, never through the bar', () {

@@ -39,9 +39,8 @@ class TopBar extends StatelessWidget {
           builder: (context, _) {
             final cur = state.current;
             final rs = state.currentRemote;
-            // Embedded mode with a current session adds the stream anchor to the row
-            // (full label when wide, bars only when narrow), so the thresholds that
-            // keep the fixed content inside the bar move up with it.
+            // Embedded mode with a current session adds the stream anchor (the bars, 48) to the
+            // row, so the thresholds that keep the fixed content inside the bar move up with it.
             final embedded = state.port != null && rs != null && cur != null;
             // A terminal: its tabs are panes (no ×, no rules), and it has no remote menu.
             final term = rs != null && state.termPort?.owns(rs.sid) == true;
@@ -53,10 +52,11 @@ class TopBar extends StatelessWidget {
             // the overview button when shown, the stream anchor in embedded mode; and the gaps
             // (both paddings plus one after panel, overview, prev, session and next). Gaps and the
             // overview button appear only when they fit, so the row never overflows.
-            // The 本机 and 远程 buttons come before it when there is room for them and a bit of the
-            // session block; else the traffic label's menu carries all three parts.
+            // The 本机 button comes before it and the 远程 one before the window tabs when there is
+            // room for them and a bit of the session block; else the traffic label's menu carries
+            // all three parts.
             final baseIcons = 4 + (state.hub != null ? 1 : 0);
-            final trafficW = embedded ? (wide ? TrafficLabel.wideWidth : 48.0) : 0.0;
+            final trafficW = embedded ? TrafficLabel.width : 0.0;
             // 上一个项目 sits beside prev/next only when the bare row still has room for it.
             final previous = state.previousProject == null
                 ? null
@@ -71,13 +71,16 @@ class TopBar extends StatelessWidget {
             final chip = (hidden ? 130.0 : 0.0) + (plus ? 48.0 : 0.0);
             // The network marker, left of the stream anchor, while the hub has a relay to measure and
             // the bare row (no gaps, no overview button) has room for it; it goes before those do.
-            final netWant = wide ? NetMarker.wideWidth : NetMarker.compactWidth;
+            const netWant = NetMarker.width;
             final net = box.maxWidth >= icons * 48 + trafficW + netWant ? state.hub?.net : null;
             final netW = net == null ? 0.0 : netWant;
             final split = embedded && box.maxWidth >= (icons + 1) * 48 + trafficW + splitW + netW + 42 + 160 + chip;
+            final remoteButton = split && !term;
             final streamW = trafficW + (split ? splitW : 0.0) + netW;
             double fixed(double gap, bool overview) =>
-                (icons + (overview ? 1 : 0)) * 48 + streamW + ((overview ? 7 : 6) + (showPrevProject ? 1 : 0)) * gap;
+                (icons + (overview ? 1 : 0)) * 48 +
+                streamW +
+                ((overview ? 7 : 6) + (showPrevProject ? 1 : 0) + (remoteButton ? 1 : 0)) * gap;
             // K11: never below 300.
             final showOverview = box.maxWidth >= 300 && box.maxWidth >= fixed(0, true);
             // Room for the gaps plus the session block's lamp (13) and its gap (8).
@@ -204,6 +207,11 @@ class TopBar extends StatelessWidget {
                     ),
                     SizedBox(width: gap),
                   ],
+                  // The remote app's own menu, beside its window tabs.
+                  if (remoteButton) ...[
+                    _menu(context, cur, {MenuPart.remote}, Corner.remote),
+                    SizedBox(width: gap),
+                  ],
                   if (tabs != null && (tabs.tabs.length >= 2 || hidden || term))
                     Flexible(
                       child: SingleChildScrollView(
@@ -268,13 +276,10 @@ class TopBar extends StatelessWidget {
                   else
                     const Spacer(),
                   if (state.hub != null) NeedsYouAnchor(state: state),
-                  if (net != null) NetMarker(net: net, compact: !wide, path: cur?.path),
+                  if (net != null) NetMarker(net: net, path: cur?.path),
                   if (embedded) ...[
-                    if (split) ...[
-                      _menu(context, cur, {MenuPart.session}, Corner.session, true),
-                      if (!term) _menu(context, cur, {MenuPart.remote}, Corner.remote, true),
-                    ],
-                    _menu(context, cur, split ? {MenuPart.stream} : allMenuParts, Corner.stream, !wide),
+                    if (split) _menu(context, cur, {MenuPart.session}, Corner.session),
+                    _menu(context, cur, split ? {MenuPart.stream} : allMenuParts, Corner.stream),
                   ],
                   _icon(
                     'fullscreen-button',
@@ -292,11 +297,10 @@ class TopBar extends StatelessWidget {
   }
 
   /// One of the session's corner menus: [parts] of it, open while [corner] is.
-  Widget _menu(BuildContext context, SessionEntry cur, Set<MenuPart> parts, Corner corner, bool compact) {
+  Widget _menu(BuildContext context, SessionEntry cur, Set<MenuPart> parts, Corner corner) {
     return StreamMenuAnchor(
       key: ValueKey((cur.sid, corner)),
       parts: parts,
-      compact: compact,
       port: state.portOf(state.currentRemote!.sid)!,
       session: state.currentRemote!,
       path: cur.path,

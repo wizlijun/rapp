@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import '../hub_client.dart';
 import '../ui/controls.dart';
 import '../ui/corner_popover.dart';
+import '../ui/net_marker.dart' show netTooltip;
 import '../ui/resources_state.dart';
 import '../ui/session_model.dart';
 import '../term/term_session_port.dart';
@@ -58,7 +59,6 @@ class StreamMenuAnchor extends StatefulWidget {
     required this.canInsert,
     required this.onCopy,
     required this.onAllClips,
-    this.compact = false,
     this.net,
     this.addTargets = const [],
     this.onAddToProject,
@@ -66,10 +66,8 @@ class StreamMenuAnchor extends StatefulWidget {
     this.onSaveProject,
   });
 
-  /// Bars only, no rate text (narrow top bar).
-  final bool compact;
-
-  /// The link to the relay (`HubClient.net`): splits a relayed session's round trip.
+  /// The link to the relay (`HubClient.net`): splits a relayed session's round trip, and its words
+  /// open the traffic menu.
   final NetStatus? net;
   final SessionPort port;
   final RemoteSession session;
@@ -207,7 +205,6 @@ class _StreamMenuAnchorState extends State<StreamMenuAnchor> {
             net: widget.net,
           ),
           open: widget.open,
-          compact: widget.compact,
           onTap: widget.onToggle,
           onSecondaryTap: widget.onToggle,
         ),
@@ -216,8 +213,8 @@ class _StreamMenuAnchorState extends State<StreamMenuAnchor> {
   }
 }
 
-/// ⋯ 本机 / ≡ 远程, icons only, 48 wide; the remote one is outlined in the accent colour so it never
-/// passes for rapp's own.
+/// ⋯ 本机 / ≡ 远程, icons only, 48 wide, no box until open; the remote icon is in the accent colour
+/// so it never passes for rapp's own.
 class MenuCornerButton extends StatelessWidget {
   const MenuCornerButton(
       {super.key, required this.remote, required this.open, required this.onTap});
@@ -231,7 +228,6 @@ class MenuCornerButton extends StatelessWidget {
     final t = RappTokens.of(context);
     final radius = BorderRadius.circular(t.r);
     final color = remote ? t.accent : t.text;
-    final border = open ? t.text : (remote ? t.accent : t.line);
     return Semantics(
       button: true,
       selected: open,
@@ -250,8 +246,8 @@ class MenuCornerButton extends StatelessWidget {
               width: 48,
               constraints: const BoxConstraints(minHeight: 48),
               decoration: open
-                  ? t.raiseBox(border: border)
-                  : BoxDecoration(borderRadius: radius, border: Border.all(color: border, width: remote ? 1.5 : 1)),
+                  ? t.raiseBox(border: t.text)
+                  : BoxDecoration(borderRadius: radius, border: Border.all(color: Colors.transparent)),
               child: Center(
                 heightFactor: 1, // as tall as the row (48 at least), never the whole parent
                 child: Icon(remote ? Icons.menu : Icons.more_horiz, size: 20, color: color),
@@ -409,6 +405,7 @@ class _StreamMenuState extends State<StreamMenu> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               if (parts.contains(MenuPart.stream)) ...[
+                ..._statusRows(reduced),
                 if (!reduced && term) ...[
                   _Item('按我的屏幕重排', key: const Key('term-refit'), onTap: () => _then(() => port.refit(_sid))),
                   _head(t, '本机'),
@@ -448,6 +445,26 @@ class _StreamMenuState extends State<StreamMenu> {
         );
       },
     );
+  }
+
+  /// What the top bar's bars and network line stand for, atop the traffic menu: the rate and what is
+  /// weak (not on a dead session), then the link to the relay ([netTooltip]'s lines).
+  List<Widget> _statusRows(bool reduced) {
+    final net = widget.net;
+    return [
+      if (!reduced)
+        _Item(
+          trafficRow(
+            _s.bytesPerSecond,
+            sessionTrafficWord(path: widget.path, saving: _s.saving, wholeMs: _s.rttMs, net: net),
+          ),
+          key: const Key('menu-traffic'),
+          enabled: false,
+        ),
+      if (net != null)
+        for (final (i, line) in netTooltip(net, path: widget.path).split('\n').indexed)
+          _Item(line, key: Key('menu-net-$i'), enabled: false),
+    ];
   }
 
   /// 会话: the path and state, disconnect or reconnect, detach, top-left (not for a [term]), end.

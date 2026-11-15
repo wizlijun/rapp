@@ -49,25 +49,31 @@ void main() {
         ),
       );
 
-  testWidgets('traffic label shows the saving level', (tester) async {
+  testWidgets('the bar shows the bars alone; the rate and the saving level are atop its menu', (tester) async {
     open = false;
     final port = FakeSessionPort();
     final rs = RemoteSession(1, 'Calc')
       ..apply(const TrafficEvent(1, 12000))
       ..apply(const WeakEvent(1, true, 1));
     await tester.pumpWidget(wrap(anchor(rs, port)));
-    expect(find.text('12.0 KB/s'), findsOneWidget);
-    expect(find.text('省流·1'), findsOneWidget);
-    // The word sits under the rate, not beside it.
-    expect(tester.getRect(find.text('省流·1')).top, greaterThanOrEqualTo(tester.getRect(find.text('12.0 KB/s')).bottom));
-    expect(find.bySemanticsLabel('流量 12.0 KB/s，省流·1，打开流量优化菜单'), findsOneWidget);
+    expect(find.textContaining('KB/s'), findsNothing);
+    expect(find.textContaining('省流'), findsNothing);
+    expect(find.bySemanticsLabel('流量 12.0 KB/s · 省流·1，打开流量优化菜单'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('traffic')));
+    await tester.pump();
+    expect(find.text('流量 12.0 KB/s · 省流·1'), findsOneWidget);
+    // Live while open.
     rs.apply(const WeakEvent(1, true, 2));
     await tester.pump();
-    expect(find.text('省流·2'), findsOneWidget);
+    expect(find.text('流量 12.0 KB/s · 省流·2'), findsOneWidget);
     rs.apply(const WeakEvent(1, false));
     await tester.pump();
-    expect(find.text('12.0 KB/s'), findsOneWidget);
-    expect(find.byKey(const Key('traffic-word')), findsNothing);
+    expect(find.text('流量 12.0 KB/s'), findsOneWidget);
+  });
+
+  test('trafficRow: the rate, then the word', () {
+    expect(trafficRow(12000, null), '流量 12.0 KB/s');
+    expect(trafficRow(0, '本机网络弱'), '流量 0 KB/s · 本机网络弱');
   });
 
   testWidgets('the label keeps one width whatever the rate, the word or open', (tester) async {
@@ -83,13 +89,7 @@ void main() {
         }
       }
     }
-    expect(widths, {TrafficLabel.wideWidth});
-    // The unit stays put: the rate is right-aligned in its box.
-    double unitRight() => tester.getRect(find.descendant(of: find.byKey(const Key('traffic-rate')), matching: find.byType(Text))).right;
-    await tester.pumpWidget(wrap(Center(child: TrafficLabel(bytesPerSecond: 0, open: false, onTap: () {}))));
-    final a = unitRight();
-    await tester.pumpWidget(wrap(Center(child: TrafficLabel(bytesPerSecond: 999949, open: false, onTap: () {}))));
-    expect(unitRight(), moreOrLessEquals(a));
+    expect(widths, {TrafficLabel.width});
   });
 
   test('trafficWord: which end is weak, else the saving level', () {
@@ -112,12 +112,11 @@ void main() {
     expect(segments(path: 'relay', wholeMs: 420, net: const NetStatus(NetLevel.down, 80, 1)).local, isNull);
   });
 
-  testWidgets('traffic label shows the rate and opens the menu by tap and by right click', (tester) async {
+  testWidgets('traffic label opens the menu by tap and by right click', (tester) async {
     open = false;
     final port = FakeSessionPort();
     final rs = RemoteSession(1, 'Calc')..apply(const TrafficEvent(1, 12000));
     await tester.pumpWidget(wrap(anchor(rs, port)));
-    expect(find.text('12.0 KB/s'), findsOneWidget);
     expect(find.bySemanticsLabel('流量 12.0 KB/s，打开流量优化菜单'), findsOneWidget);
     expect(find.text('最省流（双色·灰度 + 自适应 + 1 fps）'), findsNothing);
     await tester.tap(find.byKey(const Key('traffic')));
