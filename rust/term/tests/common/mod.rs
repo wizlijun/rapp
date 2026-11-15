@@ -1,5 +1,7 @@
 //! A private tmux server for live tests; never the user's own.
 
+pub mod pty;
+
 use rapp_term::runner::Runner;
 use rapp_term::tmux::Tmux;
 use std::process::Command;
