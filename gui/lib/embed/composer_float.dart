@@ -86,7 +86,11 @@ Offset composerTopLeft(InputPoint at, Size stage, Size panel) => _topLeftOf(at.i
 /// gets the new place; a double-tap on the grip gives [onPlace] null (back to [defaultComposerAt]).
 /// Either way the caret goes back to the editor.
 class FloatingComposer extends StatefulWidget {
-  const FloatingComposer({super.key, required this.session, required this.onPlace, required this.child});
+  const FloatingComposer(
+      {super.key, required this.session, required this.onPlace, required this.child, this.scale = 1});
+
+  /// The panel's zoom: its width is 720 × this.
+  final double scale;
 
   final RemoteSession session;
   final ValueChanged<InputPoint?> onPlace;
@@ -215,7 +219,7 @@ class _FloatingComposerState extends State<FloatingComposer> {
     return LayoutBuilder(builder: (context, c) {
       _stage = c.biggest;
       return CustomSingleChildLayout(
-        delegate: _Place(_drag ?? _at.inContent(_stage), panelWidth(_stage.width)),
+        delegate: _Place(_drag ?? _at.inContent(_stage), panelWidth(_stage.width, widget.scale)),
         child: TapRegion(
           onTapOutside: (_) {
             if (_touched) setState(() => _touched = false);

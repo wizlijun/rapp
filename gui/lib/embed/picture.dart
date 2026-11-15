@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 
 import '../ui/keep_focus.dart';
 import '../ui/main_state.dart';
+import '../ui/rule_snack.dart';
 import '../ui/tokens.dart';
 import 'geometry.dart';
 import 'pointer.dart';
@@ -344,12 +345,36 @@ class _PictureState extends State<Picture> {
             child: InkWell(
               customBorder: const CircleBorder(),
               onTap: () => widget.state.closeWindow(p.win.id),
+              onSecondaryTapUp: (e) => _popupMenu(e.globalPosition, p.win.id),
+              onLongPress: () => _popupMenu(_global(left + d / 2, top + d / 2), p.win.id),
               child: Icon(Icons.close, size: 16, color: t.accentInk),
             ),
           ),
         ),
       ),
     );
+  }
+
+  Offset _global(double x, double y) {
+    final box = context.findRenderObject() as RenderBox?;
+    return box == null ? Offset(x, y) : box.localToGlobal(Offset(x, y));
+  }
+
+  /// Right-click (or long-press) on a popup's ×: 「隐藏这类窗口」 closes this one and hides the
+  /// ones like it from now on (a window rule of the app, with 撤销).
+  Future<void> _popupMenu(Offset at, int window) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final pick = await showMenu<String>(
+      context: context,
+      position: menuAt(context, at),
+      items: const [PopupMenuItem(value: 'hide', child: Text('隐藏这类窗口'))],
+    );
+    if (pick != 'hide' || !mounted) return;
+    final s = widget.state;
+    final undo = s.hideLike(window);
+    if (undo == null) return;
+    s.closeWindow(window);
+    if (messenger != null) ruleSnack(messenger, '已隐藏这类弹出窗口，可在 app 配置里改', undo);
   }
 
   Widget? _inputMark(RappTokens t, RemoteWindow win, Rect fit) => _inputMarkAt(t, widget.session, win, fit);

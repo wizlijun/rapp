@@ -53,11 +53,10 @@ void main() {
     ]);
   });
 
-  test('terminal emulators keep letters for A (vim, less, y/n, sudo password); the rest compose', () {
-    // A streamed terminal lives on single letters; a password typed there must not land in the draft.
-    expect([for (final p in apps) if (p.typeToCompose == false) p.name], ['终端', 'iTerm2', 'Ghostty', 'Warp']);
-    expect(resolveProfile('com.apple.Terminal', mine: const [], builtin: apps).typeToCompose, isFalse);
-    expect(resolveProfile('com.anthropic.claudefordesktop', mine: const [], builtin: apps).typeToCompose, isTrue);
+  test('terminal emulators compose too: what stops it is the adaptive rule, not the profile', () {
+    // Letters open the panel everywhere; a panel closed unused turns them off for that session (RemoteSession.composeArmed).
+    expect([for (final p in apps) if (p.typeToCompose == false) p.name], isEmpty);
+    expect(resolveProfile('com.apple.Terminal', mine: const [], builtin: apps).typeToCompose, isTrue);
   });
 
   test('no id appears in two built-in profiles', () {

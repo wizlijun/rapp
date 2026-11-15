@@ -94,6 +94,8 @@ Future<void> main(List<String> args) async {
       profiles: AppProfileStore.load(data.sharedDir, builtin),
       log: stderr.writeln);
   mainState = state;
+  // rapp opens on the overview (全景): every device and project at a glance. Opening an app leaves it.
+  state.overview = true;
   await _showWindow(const Size(1194, 834), 'rapp');
   if (prefs.startFullscreen) await WindowManagerFullscreen().setFullScreen(true);
   await windowManager.setPreventClose(true);

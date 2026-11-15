@@ -91,10 +91,60 @@ class ComposerModel extends ChangeNotifier {
 
   bool _open = false;
   bool get open => _open;
-  set open(bool v) {
+  set open(bool v) => _setOpen(v, byLetter: false);
+
+  /// Opens the panel for a typed letter (type-to-compose); [openedByLetter] until it closes or sends.
+  void openByLetter() => _setOpen(true, byLetter: true);
+
+  void _setOpen(bool v, {required bool byLetter}) {
     if (_open == v) return;
     _open = v;
+    if (v) {
+      _letterOpenAt = byLetter ? _clock() : null;
+      _toCheck = null;
+    } else if (_letterOpenAt != null) {
+      _toCheck = _letterOpenAt;
+      _letterOpenAt = null;
+      // With an editor the check waits for [detach], which brings its text into [draft].
+      if (_editor == null) _checkDeclined();
+    }
     notifyListeners();
+  }
+
+  /// When a letter opened the panel, while it is open and nothing has been sent from it.
+  DateTime? _letterOpenAt;
+
+  /// A letter-opened panel closed: when it opened, until [_checkDeclined] has looked at its text.
+  DateTime? _toCheck;
+
+  /// This open was a typed letter's, not the user's own (button, key, a clip's 「插入」).
+  bool get openedByLetter => _letterOpenAt != null;
+
+  /// A letter-opened panel was closed unused (see [_unused]): the user meant the app's own keys, so letters
+  /// stop opening the panel until they open it themselves.
+  VoidCallback? onDeclined;
+
+  /// A close this soon after the letter (Esc right away) leaves any ASCII text unused.
+  static const _declineWithin = Duration(seconds: 3);
+
+  /// The most letters the panel can hold from the picture (typed before it took the caret): a later close
+  /// with no more than these was not written in.
+  static const _heldLetters = 3;
+
+  /// Nothing sent (else no check), no chips, ASCII only, and either just the held letters or a quick close.
+  bool _unused(String t, DateTime openedAt) {
+    if (blocks.isNotEmpty || t.runes.any((r) => r >= 128)) return false;
+    final s = t.trim();
+    return (s.length <= _heldLetters && !s.contains(' ')) || _clock().difference(openedAt) < _declineWithin;
+  }
+
+  void _checkDeclined() {
+    final at = _toCheck;
+    if (at == null) return;
+    _toCheck = null;
+    if (!_unused(_draft, at)) return;
+    draft = ''; // the held letters were never for the panel
+    onDeclined?.call();
   }
 
   /// A send round is running (from `submit()` until `done`).
@@ -146,6 +196,7 @@ class ComposerModel extends ChangeNotifier {
     final ready = _attached;
     Future<void> copy() async {
       draft = await e.read();
+      if (!_disposed) _checkDeclined();
     }
     final work = ready == null ? copy() : ready.then((_) => copy());
     late final Future<void> pending;
@@ -195,6 +246,8 @@ class ComposerModel extends ChangeNotifier {
   /// The user pressed send (or Enter): takes the blocks and the text out of the composer.
   Future<Submit> submit() async {
     if (sending || _taking) return SubmitNothing();
+    _letterOpenAt = null; // sent: the panel was wanted
+    _toCheck = null;
     _idleTimer?.cancel();
     _setTaking(true);
     final String text;

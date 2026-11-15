@@ -28,6 +28,7 @@ import 'lifecycle.dart';
 import 'net_marker.dart' show weakRttMs;
 import 'pin_files.dart';
 import 'prefs.dart';
+import '../embed/composer_editor.dart' show ZoomKey;
 import 'project_positions.dart';
 import 'projects.dart';
 import 'resources_state.dart';
@@ -474,11 +475,12 @@ class MainState extends ChangeNotifier {
   bool _composeSent = false;
 
   /// A letter on [sid]'s picture opens the writing panel: an app window on the stage whose panel is
-  /// allowed (no `noComposer` rule) and whose app has `typeToCompose` on. Never a terminal.
+  /// allowed (no `noComposer` rule) and whose app has `typeToCompose` on, until a letter-opened panel is closed unused
+  /// ([RemoteSession.composeArmed]). Never rapp's own terminal.
   bool _composeFor(Object sid) {
     final rs = remote[sid];
     if (rs == null || rs.detached || termPort?.owns(sid) == true) return false;
-    return rs.composerAllowed && rs.profile.typeToCompose;
+    return rs.composerAllowed && rs.profile.typeToCompose && rs.composeArmed;
   }
 
   void _sendFocus(Object sid) {
@@ -2271,7 +2273,14 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
-  int get onlineDevices => probes.values.where((p) => p.lamp == Lamp.active).length;
+  /// Remote devices whose last probe found them up.
+  int get remoteOnline => probes.values.where((p) => p.lamp == Lamp.active).length;
+
+  /// Devices online, 本机 included: this rapp runs on it, so it is always up.
+  int get onlineDevices => 1 + remoteOnline;
+
+  /// Every device, 本机 and the added ones: as many as the overview's device wall has columns.
+  int get deviceCount => 1 + (hub?.hosts.length ?? 0);
 
   /// This machine has a relay set (from the service status): hosts go by bare ID and may be forced onto it.
   bool get relaySet => _relaySet;
@@ -2330,6 +2339,29 @@ class MainState extends ChangeNotifier {
     _save();
     notifyListeners();
   }
+
+  /// The writing panel's zoom step (0 is the default), for every panel. Its own notifier: the panel follows
+  /// it without rebuilding on every other change here.
+  late final ValueNotifier<int> composerZoom = ValueNotifier(prefs.composerZoom.clamp(0, composerZoomMax));
+
+  /// The writing panel's size factor (1.0 is the default and the smallest).
+  double get composerScale => composerZoomScales[composerZoom.value];
+
+  /// The 「大小」 slider: step [z]; saved.
+  void setComposerZoom(int z) {
+    z = z.clamp(0, composerZoomMax);
+    if (z == composerZoom.value) return;
+    composerZoom.value = z;
+    prefs.composerZoom = z;
+    _save();
+  }
+
+  /// ⌘= / ⌘- / ⌘0 (Ctrl elsewhere) in the panel.
+  void zoomKey(ZoomKey k) => setComposerZoom(switch (k) {
+        ZoomKey.bigger => composerZoom.value + 1,
+        ZoomKey.smaller => composerZoom.value - 1,
+        ZoomKey.reset => 0,
+      });
 
   /// 「按键排」: the terminal key row on or off; saved.
   void setTermKeyRow(bool v) {
@@ -2883,6 +2915,7 @@ class MainState extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    composerZoom.dispose();
     resources.removeListener(notifyListeners);
     resources.dispose();
     hub?.removeListener(_onHub);

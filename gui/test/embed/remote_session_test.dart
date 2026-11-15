@@ -316,6 +316,89 @@ void main() {
     expect(rs.composer.takeReplay(), isFalse);
   });
 
+  group('a letter-opened panel closed unused turns letters off, until the user opens it', () {
+    late RemoteSession rs;
+    late FakeEditor ed;
+    var now = DateTime(2026, 11, 16, 10);
+    setUp(() {
+      now = DateTime(2026, 11, 16, 10);
+      rs = RemoteSession(1, 'x', clock: () => now);
+      ed = FakeEditor();
+      rs.composer.attach(ed);
+    });
+
+    Future<void> close() async {
+      rs.composer.collapse();
+      await rs.composer.detach(ed); // the panel going away brings its text into the draft
+    }
+
+    test('closed at once with only the captured letter: off, and the letter is dropped', () async {
+      rs.apply(const ComposeKeyEvent(1));
+      ed.value = 'i';
+      await close();
+      expect(rs.composeArmed, isFalse);
+      expect(rs.composer.draft, isEmpty);
+      // A stale compose_key does not reopen it.
+      rs.apply(const ComposeKeyEvent(1));
+      expect(rs.composer.open, isFalse);
+    });
+
+    test('after a quick close with a short ASCII text: off', () async {
+      rs.apply(const ComposeKeyEvent(1));
+      ed.value = 'ls';
+      now = now.add(const Duration(seconds: 2));
+      await close();
+      expect(rs.composeArmed, isFalse);
+    });
+
+    test('a slow close with no more than the held letters is unused too: off', () async {
+      rs.apply(const ComposeKeyEvent(1));
+      ed.value = 'ls';
+      now = now.add(const Duration(seconds: 20)); // looked at the panel a while, typed nothing
+      await close();
+      expect(rs.composeArmed, isFalse);
+      expect(rs.composer.draft, isEmpty);
+    });
+
+    test('a long stay with ASCII text, or any non-ASCII text, is composing: stays on', () async {
+      rs.apply(const ComposeKeyEvent(1));
+      ed.value = 'hello';
+      now = now.add(const Duration(seconds: 10));
+      await close();
+      expect(rs.composeArmed, isTrue);
+      expect(rs.composer.draft, 'hello');
+      rs.composer.attach(ed); // the next panel's editor
+      rs.apply(const ComposeKeyEvent(1));
+      ed.value = '你好';
+      await close();
+      expect(rs.composeArmed, isTrue);
+      expect(rs.composer.draft, '你好');
+    });
+
+    test('a send keeps it on, the 直接回车且隐藏 collapse after it too', () async {
+      rs.apply(const ComposeKeyEvent(1));
+      ed.value = 'ls';
+      await rs.composer.submit();
+      await close();
+      expect(rs.composeArmed, isTrue);
+    });
+
+    test('the user opening the panel (not a letter) turns letters on again', () async {
+      rs.apply(const ComposeKeyEvent(1));
+      await close();
+      expect(rs.composeArmed, isFalse);
+      rs.composer.open = true; // the button, Ctrl+Enter, a clip's 「插入」
+      expect(rs.composeArmed, isTrue);
+      expect(rs.composer.openedByLetter, isFalse);
+    });
+
+    test('a panel the user opened and closed empty does not turn letters off', () async {
+      rs.composer.open = true;
+      await close();
+      expect(rs.composeArmed, isTrue);
+    });
+  });
+
   test('a compose replay not taken before the panel closes is gone', () {
     final rs = RemoteSession(1, 'x');
     rs.apply(const ComposeKeyEvent(1));

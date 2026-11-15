@@ -277,7 +277,8 @@ void main() {
     expect(s.probes['222']!.lamp, Lamp.offline);
     expect(s.probes['222']!.word, '离线');
     expect(s.probes['222']!.error, isNotEmpty);
-    expect(s.onlineDevices, 1);
+    expect(s.remoteOnline, 1);
+    expect(s.onlineDevices, 2); // 本机 counts too
     expect(s.appName('111', 'a'), 'Aaa');
     expect(s.appName('111', 'zzz'), 'zzz');
     expect(s.deviceName('222'), '222');
@@ -2388,6 +2389,23 @@ void main() {
         final n1 = sends();
         rs.setProfile(const ResolvedProfile(typeToCompose: false));
         expect(sends(), n1); // not focused: nothing to re-send
+      });
+    });
+
+    test('a letter-opened panel closed unused sends compose:false; the user opening the panel sends it true again', () {
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(1, [rw(7)]));
+        st.focusPicture(1);
+        lastCall(port, 'picture_focus', {'sid': 1, 'compose': true});
+        final rs = st.currentRemote!;
+        port.emit(const ComposeKeyEvent(1));
+        expect(rs.composer.open, true);
+        rs.composer.collapse();
+        expect(rs.composeArmed, false);
+        lastCall(port, 'picture_focus', {'sid': 1});
+        st.composerKey(); // the user's own open (Ctrl+Enter)
+        expect(rs.composeArmed, true);
+        lastCall(port, 'picture_focus', {'sid': 1, 'compose': true});
       });
     });
 
