@@ -91,6 +91,67 @@ void main() {
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
   }, skip: Platform.isWindows);
 
+  testWidgets('a compose letter opens the draft with it; digits, Ctrl+letter and compose off go to A',
+      (tester) async {
+    final port = LinuxSessionPort('unused', framePresented: () async {});
+    final proc = await tester.runAsync(() => Process.start('cat', const []));
+    port.seedSessionForTest(3, proc!);
+    final events = <SessionEvent>[];
+    // Listen outside the fake-async zone: a fake-zone subscription keeps the test from finishing.
+    final sub = (await tester.runAsync(() async => port.events.listen(events.add)))!;
+    KeyDownEvent down(PhysicalKeyboardKey p, LogicalKeyboardKey l, String ch) =>
+        KeyDownEvent(physicalKey: p, logicalKey: l, character: ch, timeStamp: Duration.zero);
+    KeyUpEvent up(PhysicalKeyboardKey p, LogicalKeyboardKey l) =>
+        KeyUpEvent(physicalKey: p, logicalKey: l, timeStamp: Duration.zero);
+    final a = down(PhysicalKeyboardKey.keyA, LogicalKeyboardKey.keyA, 'a');
+    final upA = up(PhysicalKeyboardKey.keyA, LogicalKeyboardKey.keyA);
+
+    await port.invoke('picture_focus', {'sid': 3, 'compose': true});
+    expect(port.handleKeyEvent(3, a), true);
+    expect(port.handleKeyEvent(3, upA), true); // its release is not A's either
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    expect(events.whereType<ComposerInsertEvent>().map((e) => e.insert.text), ['a']);
+
+    // The panel takes the keys before the letter is let go; back on the picture, a letter is a fresh one.
+    expect(port.handleKeyEvent(3, a), true);
+    await port.invoke('picture_focus', {'sid': null});
+    expect(port.handleKeyEvent(3, upA), false); // the editor's now
+    await port.invoke('picture_focus', {'sid': 3, 'compose': true});
+    expect(port.handleKeyEvent(3, a), true);
+    expect(port.handleKeyEvent(3, upA), true);
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    expect(events.whereType<ComposerInsertEvent>().map((e) => e.insert.text), ['a', 'a', 'a']);
+
+    // A digit goes to A.
+    expect(port.handleKeyEvent(3, down(PhysicalKeyboardKey.digit1, LogicalKeyboardKey.digit1, '1')), true);
+    expect(port.handleKeyEvent(3, up(PhysicalKeyboardKey.digit1, LogicalKeyboardKey.digit1)), true);
+    // Ctrl+A goes to A (as ⌘A).
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    expect(port.handleKeyEvent(3, a), true);
+    expect(port.handleKeyEvent(3, upA), true);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    // compose off (picture_focus without it): the letter goes to A.
+    await port.invoke('picture_focus', {'sid': 3});
+    expect(port.handleKeyEvent(3, a), true);
+    expect(port.handleKeyEvent(3, upA), true);
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    expect(events.whereType<ComposerInsertEvent>(), hasLength(3));
+
+    final sent = await tester.runAsync(() async {
+      await proc.stdin.close();
+      return utf8.decode(await proc.stdout.expand((b) => b).toList());
+    });
+    final keys = [
+      for (final m in [for (final l in sent!.trim().split('\n')) jsonDecode(l) as Map])
+        if (m['cmd'] == 'key') (m['keyCode'], m['down']),
+    ];
+    // 1 down/up, ⌘A down/up, A down/up; the compose A (keyCode 0) never went.
+    expect(keys, [(18, true), (18, false), (0, true), (0, false), (0, true), (0, false)]);
+    port.dispose();
+    await tester.runAsync(sub.cancel);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+  }, skip: Platform.isWindows);
+
   final worker = File('../rust/target/release/rapp-session').absolute.path;
   test('real Linux worker decodes full/delta, crops titlebar, sends input and closes on EOF', () async {
     final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);

@@ -69,6 +69,14 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
   final _copies = <int, String>{};
   int _nextCopy = 1;
   Object? _focused;
+
+  /// A letter on the focused picture opens the writing panel with it (`picture_focus` `compose`).
+  bool _compose = false;
+
+  /// Compose letters taken off A: their repeats and releases are not A's either.
+  final Set<PhysicalKeyboardKey> _swallowed = {};
+
+  static final _letter = RegExp(r'^\p{L}$', unicode: true);
   bool _disposed = false;
 
   @override
@@ -124,6 +132,22 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
         !keyboard.isShiftPressed &&
         !keyboard.isAltPressed) {
       return false;
+    }
+    // type-to-compose: a plain letter goes into the draft, not to A (its repeats and release too).
+    if (_swallowed.contains(event.physicalKey)) {
+      if (event is KeyUpEvent) _swallowed.remove(event.physicalKey);
+      return true;
+    }
+    final ch = event.character;
+    if (_compose &&
+        event is KeyDownEvent &&
+        !keyboard.isControlPressed &&
+        !keyboard.isAltPressed &&
+        ch != null &&
+        _letter.hasMatch(ch)) {
+      _swallowed.add(event.physicalKey);
+      _emit(ComposerInsertEvent(sid, PasteResult(text: ch)));
+      return true;
     }
     final code = linuxMacKeyCode(event.physicalKey);
     if (code == null) return false;
@@ -215,8 +239,12 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
     }
     final sid = args['sid'];
     if (method == 'picture_focus') {
-      if (_focused != sid) _releaseFocus();
+      if (_focused != sid) {
+        _releaseFocus();
+        _swallowed.clear(); // their releases now go elsewhere
+      }
       _focused = sid;
+      _compose = sid != null && args['compose'] == true;
       return null;
     }
     if (method == 'start') {
