@@ -18,6 +18,8 @@ rapp 将远程 Mac 上的应用汇入一个工作台，让你在眼前这台电�
 
 在被控 Mac 和控制端电脑上安装 rapp。为被控端授予屏幕录制、辅助功能权限，并保持不睡眠。远程 app 全部关闭后，被控 Mac 会自动锁屏，下次打开 app 时在控制端输入被控 Mac 的系统密码解锁（可在「本机」里关掉）；开机后的登录窗口和睡眠仍不支持。在 rapp 中添加该设备，即可打开应用。
 
+中文等需要输入法的文字在控制端输入：输入板在本机组字后整段发送，被控端始终保持英文输入。想要最流畅的输入体验，推荐使用 [Fcitx5](https://github.com/fcitx/fcitx5) 输入法；在 macOS 上，候选词会直接显示在输入板下方，字体与正文一致。详见[输入板设计说明](docs/writing-panel.md)。
+
 跨网络连接可参考[自建中继说明](docker/relay/README.md)。E2E 中继要求两端均为 rapp 0.6+；Linux v0.5.2 使用旧连接方式。各平台分别选择对应的下载版本。
 
 Linux v0.5.2 无法连接 macOS 0.8+ 被控端。在兼容的安装包发布前，请从当前源码构建 Linux 客户端，并同步升级两端。
@@ -58,5 +60,6 @@ RAPP_ALLOW_ADHOC=1 ./scripts/package-macos.sh
 
 - [RustDesk](https://github.com/rustdesk/rustdesk)：设备连接与自建中继的设计参考。
 - [Sunshine](https://github.com/SunshineStream/Sunshine)：串流技术研究参考。
+- [Fcitx5](https://github.com/fcitx/fcitx5)：输入法，带来输入板流畅的输入体验。
 - [Flutter](https://github.com/flutter/flutter)、[GTK](https://www.gtk.org/)：用户界面。
 - [Tokio](https://github.com/tokio-rs/tokio)、[Quinn](https://github.com/quinn-rs/quinn)、[rustls](https://github.com/rustls/rustls)：网络基础。
