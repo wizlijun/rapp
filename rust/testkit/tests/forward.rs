@@ -621,20 +621,6 @@ async fn hosts_is_empty_without_a_hosts_file() {
     assert_eq!(ipc_once(&a.svc, a.home.path(), json!({"cmd":"hosts"})).await, json!({"ok":true,"hosts":[]}));
 }
 
-#[tokio::test]
-async fn pipe_errors_keep_the_connection() {
-    let a = service().await;
-    let mut c = ipc(&a).await;
-    let r = c.call(json!({"cmd":"pipe","to":"gpu1.rapp","port":22})).await;
-    assert_eq!(r, json!({"ok":false,"error":"unknown name"}));
-    // this service has no key
-    let r = c.call(json!({"cmd":"pipe","to":"123456789.rapp","port":22})).await;
-    assert_eq!(r, json!({"ok":false,"error":"no key"}));
-    let r = c.call(json!({"cmd":"pipe","to":"123456789.rapp","port":0})).await;
-    assert_eq!(r, json!({"ok":false,"error":"bad port"}));
-    assert_eq!(c.call(json!({"cmd":"status"})).await["ok"], true);
-}
-
 // A on `rig` sharing an echo port; B, another service on `rig`, whose `hosts.json` names A with its LAN address.
 #[tokio::test]
 async fn pipe_carries_the_port_and_bytes_right_behind_the_command() {
@@ -683,4 +669,244 @@ async fn a_device_that_gave_no_name_shows_its_fingerprint_prefix() {
     assert_eq!(c.call(json!({"cmd":"share","ports":[8000],"allow":[&fp[..8]]})).await["ok"], true);
     let r = c.call(json!({"cmd":"shares"})).await;
     assert_eq!(r["shares"][0]["allow"], json!([&fp[..8]]), "{r}");
+}
+
+// ---- pipe end to end, over the LAN and over the relay (Task 8) ----
+//
+// `pipe_over_the_lan` and `bytes_sent_right_behind_the_command_are_not_lost` of the plan are
+// `pipe_carries_the_port_and_bytes_right_behind_the_command` above: it pipes over the LAN path,
+// sends the token line, the command and the first bytes in one write, and checks the echo.
+
+/// Opens B's IPC, sends the token line and a `pipe` command, and reads back the first line only
+/// (byte by byte, so nothing of what follows is taken). The reply and the TCP connection.
+async fn pipe(ipc_port: u16, token: &str, to: &str, port: u16) -> (Value, tokio::net::TcpStream) {
+    let mut tcp = tokio::net::TcpStream::connect(("127.0.0.1", ipc_port)).await.unwrap();
+    let cmd = json!({"cmd":"pipe","to":to,"port":port});
+    tcp.write_all(format!("{}\n{cmd}\n", json!({"token": token})).as_bytes()).await.unwrap();
+    let mut line = Vec::new();
+    while !line.ends_with(b"\n") {
+        let mut one = [0u8; 1];
+        let n = tokio::time::timeout(WAIT, tcp.read(&mut one)).await.expect("reply in time").unwrap();
+        assert_eq!(n, 1, "the connection ended before the reply: {:?}", String::from_utf8_lossy(&line));
+        line.push(one[0]);
+    }
+    (serde_json::from_slice(&line).unwrap(), tcp)
+}
+
+fn token_of(home: &Path) -> String {
+    std::fs::read_to_string(home.join("ipc.token")).unwrap().trim().to_string()
+}
+
+/// A and B on one relay, neither registering a LAN address and B with no `hosts.json`, so a
+/// pipe from B to A can only go through the relay. A shares an echo port.
+struct OverRelay {
+    rig: RelayRig,
+    a: TestService,
+    b: TestService,
+    port: u16,
+    _echo: JoinHandle<()>,
+}
+
+async fn over_relay() -> OverRelay {
+    let rig = RelayRig::start().await;
+    let (port, echo) = echo().await;
+    let a = a_on_relay(&rig, Some(vec![])).await;
+    assert_eq!(ipc_once(&a.svc, a.home.path(), json!({"cmd":"share","ports":[port]})).await["ok"], true);
+    let b = a_on_relay(&rig, Some(vec![])).await;
+    assert!(!b.home.path().join("hosts.json").exists());
+    OverRelay { rig, a, b, port, _echo: echo }
+}
+
+impl OverRelay {
+    async fn pipe(&self) -> (Value, tokio::net::TcpStream) {
+        pipe(self.b.svc.ipc_port, &token_of(self.b.home.path()), &format!("{}.rapp", self.a.id), self.port).await
+    }
+}
+
+/// Waits until the relay has written down more than `before` streams.
+async fn streams_grow(rig: &RelayRig, before: u64) {
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while rig.streams() <= before {
+        assert!(tokio::time::Instant::now() < deadline, "nothing went through the relay");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// Writes `sent`, finishes writing, and reads the connection to its end.
+async fn echo_through(tcp: tokio::net::TcpStream, sent: &[u8]) -> Vec<u8> {
+    let (mut rd, mut wr) = tcp.into_split();
+    let data = sent.to_vec();
+    let writer = tokio::spawn(async move {
+        wr.write_all(&data).await.unwrap();
+        wr.shutdown().await.unwrap();
+        wr
+    });
+    let mut got = Vec::new();
+    tokio::time::timeout(WAIT, rd.read_to_end(&mut got)).await.expect("the echo ends in time").unwrap();
+    writer.await.unwrap();
+    got
+}
+
+#[tokio::test]
+async fn pipe_over_the_relay() {
+    let t = over_relay().await;
+    let before = t.rig.streams();
+    let (r, mut tcp) = t.pipe().await;
+    assert_eq!(r, json!({"ok":true,"path":"relay"}));
+    tcp.write_all(b"hello").await.unwrap();
+    let mut got = [0u8; 5];
+    tokio::time::timeout(WAIT, tcp.read_exact(&mut got)).await.unwrap().unwrap();
+    assert_eq!(&got, b"hello");
+    // The relay writes a stream down when it ends.
+    drop(tcp);
+    streams_grow(&t.rig, before).await;
+}
+
+#[tokio::test]
+async fn half_close_survives_the_relay() {
+    let t = over_relay().await;
+    let (r, tcp) = t.pipe().await;
+    assert_eq!(r, json!({"ok":true,"path":"relay"}));
+    let sent: Vec<u8> = (0..1 << 20).map(|i| (i % 251) as u8).collect();
+    let got = echo_through(tcp, &sent).await;
+    assert_eq!(got.len(), 1 << 20);
+    assert!(got == sent, "the echo differs from what was sent");
+}
+
+/// Every regular file under `dir`, recursively (not the relay's admin socket).
+fn files_under(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(dir).unwrap() {
+        let e = e.unwrap();
+        let kind = e.file_type().unwrap();
+        if kind.is_dir() {
+            out.extend(files_under(&e.path()));
+        } else if kind.is_file() {
+            out.push(e.path());
+        }
+    }
+    out
+}
+
+#[tokio::test]
+async fn the_relay_saw_nothing_it_could_read() {
+    let t = over_relay().await;
+    let before = t.rig.streams();
+    let (r, tcp) = t.pipe().await;
+    assert_eq!(r, json!({"ok":true,"path":"relay"}));
+    let marker = b"rapp-marker:7f3c9e21a4b8d056e1f2";
+    assert_eq!(marker.len(), 32);
+    assert_eq!(echo_through(tcp, marker).await, marker);
+    // `streams` flushes the audit, so what the relay keeps is on disk once it has grown.
+    streams_grow(&t.rig, before).await;
+    let files = files_under(t.rig.data.path());
+    assert!(!files.is_empty());
+    let port_fields = [format!("\"port\":{}", t.port), format!("\"port\": {}", t.port)];
+    for f in files {
+        let bytes = std::fs::read(&f).unwrap();
+        assert!(!bytes.windows(marker.len()).any(|w| w == marker), "{} holds the marker", f.display());
+        let text = String::from_utf8_lossy(&bytes);
+        for field in &port_fields {
+            assert!(!text.contains(field.as_str()), "{} holds {field}", f.display());
+        }
+        assert!(!text.contains("forward"), "{} mentions forward", f.display());
+    }
+}
+
+/// `cmd` on `c` answers the error `want`, and the same connection still answers `status`.
+async fn check(c: &mut Ipc, cmd: Value, want: &str) {
+    assert_eq!(c.call(cmd.clone()).await, json!({"ok":false,"error":want}), "{cmd}");
+    assert_eq!(c.call(json!({"cmd":"status"})).await["ok"], true, "after {cmd}");
+}
+
+/// Retries `cmd` on `c` until its reply is `want` (within `WAIT`).
+async fn call_until(c: &mut Ipc, cmd: Value, want: Value) {
+    let deadline = tokio::time::Instant::now() + WAIT;
+    loop {
+        let r = c.call(cmd.clone()).await;
+        if r == want {
+            return;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "{cmd} still answers {r}, not {want}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+#[tokio::test]
+async fn pipe_errors() {
+    let rig = RelayRig::start().await;
+    let a = a_on_relay(&rig, Some(vec![])).await;
+    let mut a_ipc = ipc(&a).await;
+    let to_a = format!("{}.rapp", a.id);
+    // B starts with no key in its service.json.
+    let b = service().await;
+    let mut c = ipc(&b).await;
+    let pipe_to = |to: &str, port: u16| json!({"cmd":"pipe","to":to,"port":port});
+    let error = |e: &str| json!({"ok":false,"error":e});
+    check(&mut c, pipe_to("gpu1.rapp", 22), "unknown name").await;
+    check(&mut c, pipe_to(&to_a, 22), "no key").await;
+    check(&mut c, pipe_to(&to_a, 0), "bad port").await;
+
+    // B on the relay, with no hosts.json: everything goes by the relay.
+    let r = c.call(json!({"cmd":"set_relay","relay":rig.addr,"key":rig.key.to_string()})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    check(&mut c, pipe_to("999999999.rapp", 22), "offline").await;
+
+    let shared = dead_port().await;
+    check(&mut c, pipe_to(&to_a, shared), "not shared").await;
+    // shared with another device only: one that A knows, so that `allow` can name it
+    let other = visitor();
+    let (r, _, _conn) = ask(&a, &rig.key, &other, json!({"op":"list_shares"})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    let prefix = other.id.fp.to_string()[..8].to_string();
+    let r = a_ipc.call(json!({"cmd":"share","ports":[shared],"allow":[prefix]})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    check(&mut c, pipe_to(&to_a, shared), "not allowed").await;
+    // shared with everyone, nothing listening
+    assert_eq!(a_ipc.call(json!({"cmd":"share","ports":[shared]})).await["ok"], true);
+    check(&mut c, pipe_to(&to_a, shared), "refused").await;
+
+    // any other failure is the dialer's text: a device whose key differs is not trusted
+    let hosts = json!([{"id": a.id, "name": "a", "lan": [a_addr(&a.svc).to_string()]}]);
+    std::fs::write(b.home.path().join("hosts.json"), hosts.to_string()).unwrap();
+    let other_key = rapp_wire::Key::new_local();
+    let r = c.call(json!({"cmd":"set_relay","relay":"","key":other_key.to_string()})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    check(&mut c, pipe_to(&to_a, shared), "not trusted").await;
+
+    // a device the relay knows, but that is down
+    std::fs::remove_file(b.home.path().join("hosts.json")).unwrap();
+    let r = c.call(json!({"cmd":"set_relay","relay":rig.addr,"key":rig.key.to_string()})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    drop(a_ipc);
+    a.svc.stop();
+    // The relay learns A is gone a moment after.
+    call_until(&mut c, pipe_to(&to_a, shared), error("offline")).await;
+    assert_eq!(c.call(json!({"cmd":"status"})).await["ok"], true);
+}
+
+#[tokio::test]
+async fn hosts_lists_what_each_device_offers_this_one() {
+    let rig = RelayRig::start().await;
+    let (p, _echo) = echo().await;
+    let q = dead_port().await;
+    let a = a_on_relay(&rig, Some(vec![])).await;
+    // Q only for another device, one that A knows so that `allow` can name it
+    let other = visitor();
+    let (r, _, _conn) = ask(&a, &rig.key, &other, json!({"op":"list_shares"})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    let mut a_ipc = ipc(&a).await;
+    assert_eq!(a_ipc.call(json!({"cmd":"share","ports":[p]})).await["ok"], true);
+    let prefix = other.id.fp.to_string()[..8].to_string();
+    assert_eq!(a_ipc.call(json!({"cmd":"share","ports":[q],"allow":[prefix]})).await["ok"], true);
+    let b = a_on_relay(&rig, Some(vec![])).await;
+    let made_up = "999999999";
+    let hosts = json!([{"id": a.id, "name": "a"}, {"id": made_up, "name": "ghost"}]);
+    std::fs::write(b.home.path().join("hosts.json"), hosts.to_string()).unwrap();
+    let r = ipc_once(&b.svc, b.home.path(), json!({"cmd":"hosts"})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    let entry = |id: &str| r["hosts"].as_array().unwrap().iter().find(|h| h["id"] == id).cloned().unwrap_or_else(|| panic!("{id}: {r}"));
+    assert_eq!(entry(&a.id), json!({"id": a.id, "name": "a", "shares": [{"port": p}]}));
+    assert_eq!(entry(made_up), json!({"id": made_up, "name": "ghost", "error": "offline"}));
+    assert_eq!(r["hosts"].as_array().unwrap().len(), 2, "{r}");
 }
