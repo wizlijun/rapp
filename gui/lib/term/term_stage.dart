@@ -527,28 +527,29 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
       return KeyEventResult.handled;
     }
     final input = termInputOf(e, mac: _mac, pressed: k.logicalKeysPressed);
+    if (input case TermAction(action: TermShortcut.copy)) {
+      _copy();
+      return KeyEventResult.handled;
+    }
+    // An exited pane (T4) takes nothing: nothing is sent or kept, and the window's own keys
+    // (Esc, Ctrl+[ / ], Ctrl+O, F11) are the window's again.
+    if (!_canInput) return KeyEventResult.ignored;
     switch (input) {
       case null:
         // Not the terminal's (Ctrl+Enter, macOS's other ⌘ chords): the window has it.
         return KeyEventResult.ignored;
       case TermKeys(:final keys):
-        if (_canInput) {
-          widget.port.sendKeys(widget.session.sid, keys);
-          _sentInput();
-        }
+        widget.port.sendKeys(widget.session.sid, keys);
+        _sentInput();
       case TermText(:final text):
-        if (_canInput) {
-          widget.port.type(widget.session.sid, text);
-          _sentInput();
-        }
-      case TermAction(action: TermShortcut.copy):
-        _copy();
-      case TermAction(action: TermShortcut.paste):
-        if (_canInput) _paste();
+        widget.port.type(widget.session.sid, text);
+        _sentInput();
+      case TermAction():
+        _paste();
       case TermReserved():
         break; // rapp's (find, font size); not the terminal's either
     }
-    // Sent or not (an exited pane, T4), a key the terminal would take is never the window's.
+    // A key the live terminal would take is never the window's.
     return KeyEventResult.handled;
   }
 
@@ -559,17 +560,22 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
   }
 
   Future<void> _paste() async {
-    final why = await widget.state.termPaste(widget.session);
-    if (why != null && mounted) setState(() => _showNote(why));
+    final r = await widget.state.termPaste(widget.session);
+    if (!mounted) return;
+    if (r.sent) _sentInput(); // one line straight in: input, as a key is (H3, K6)
+    final why = r.note;
+    if (why != null) setState(() => _showNote(why));
   }
 
-  /// A key or text went out: back to the latest (H3); an ellipsis when no screen answers in time (K6).
+  /// Input went out (a key, text, a one-line paste): back to the latest (H3); an ellipsis when no screen
+  /// answers within 0.3 s of the first input still unanswered (K6), however much more follows it.
   void _sentInput() {
     final m = _model;
     if (m == null) return;
     if (m.offset > 0) m.toBottom();
-    // Already waiting: the earlier screen is still the one to see change.
-    _echoFrom ??= m.screen;
+    // Already waiting: the earlier screen and its clock still stand.
+    if (_echoFrom != null) return;
+    _echoFrom = m.screen;
     _echoTimer?.cancel();
     _echoTimer = Timer(_echoWait, () {
       if (!mounted || _echoFrom == null || _waiting) return;

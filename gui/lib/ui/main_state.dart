@@ -394,23 +394,27 @@ class MainState extends ChangeNotifier {
 
   /// ⌘V / Ctrl+Shift+V on [rs]'s terminal stage (K4): one line of clipboard text goes in as a paste (no Return);
   /// text with line breaks opens the writing panel, which pastes it by its own rules and takes the caret.
-  /// Null when nothing went wrong; otherwise why the paste did not go in.
-  Future<String?> termPaste(RemoteSession rs) async {
+  /// [TermPasted.sent] when the text went to the terminal itself (input, as a key is: H3, K6);
+  /// [TermPasted.note] says why a paste did not go in.
+  Future<TermPasted> termPaste(RemoteSession rs) async {
     final tp = termPort;
-    if (tp == null || !tp.owns(rs.sid)) return null;
+    if (tp == null || !tp.owns(rs.sid)) return const TermPasted();
     String? text;
     try {
       text = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
     } catch (_) {
-      return null; // no clipboard to read: nothing to paste
+      return const TermPasted(); // no clipboard to read: nothing to paste
     }
-    if (text == null || text.isEmpty) return null;
-    if (!text.contains('\n') && !text.contains('\r')) return tp.paste(rs.sid, text);
+    if (text == null || text.isEmpty) return const TermPasted();
+    if (!text.contains('\n') && !text.contains('\r')) {
+      final why = await tp.paste(rs.sid, text);
+      return why == null ? const TermPasted(sent: true) : TermPasted(note: why);
+    }
     final c = rs.composer;
     c.open = true;
     c.requestPaste();
     c.wantFocus();
-    return null;
+    return const TermPasted();
   }
 
   /// A press outside the picture (top bar, overlays): keys stay with rapp.
@@ -2255,4 +2259,15 @@ String endedHint(String appName, String? reason) {
   if (why == 'connection closed') return '$appName 意外结束：连接断了';
   if (why == 'GUI did not connect') return '$appName 意外结束：本机没有接上会话';
   return '$appName 意外结束：$why';
+}
+
+/// What a paste on a terminal stage did ([MainState.termPaste]).
+class TermPasted {
+  const TermPasted({this.sent = false, this.note});
+
+  /// The clipboard text went to the terminal.
+  final bool sent;
+
+  /// Why the paste did not go in, to show on the stage.
+  final String? note;
 }

@@ -226,7 +226,8 @@ void main() {
       ]);
     }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
 
-    testWidgets('an exited pane gets no keys, text or pastes (Review Focus 4)', (t) async {
+    testWidgets('an exited pane gets no keys, text or pastes; the window keys work again (Review Focus 4)',
+        (t) async {
       port.paneLists[1] = [tp(3, 'claude', active: true, dead: true)];
       clipboard(t, 'one line');
       model.apply(scr(['\$ ']));
@@ -234,12 +235,16 @@ void main() {
       await focusStage(t);
       await chord(t, [LogicalKeyboardKey.controlLeft], LogicalKeyboardKey.keyR);
       await chord(t, [], LogicalKeyboardKey.keyX);
-      await chord(t, [], LogicalKeyboardKey.escape);
       await pasteKey(t);
       await t.pump();
+      // Nothing for the terminal to take, so the window's own keys are the window's again.
+      await chord(t, [], LogicalKeyboardKey.escape);
+      await chord(t, [LogicalKeyboardKey.controlLeft], LogicalKeyboardKey.bracketLeft);
+      await chord(t, [LogicalKeyboardKey.controlLeft], LogicalKeyboardKey.bracketRight);
+      await chord(t, [LogicalKeyboardKey.controlLeft], LogicalKeyboardKey.keyO);
+      await chord(t, [], LogicalKeyboardKey.f11);
       expect(port.calls.where((c) => {'keys', 'type', 'paste'}.contains(c.$1)), isEmpty);
-      // Still the terminal's keys: the window does not act on them.
-      expect(fired, isEmpty);
+      expect(fired, {'esc': 1, 'prev': 1, 'next': 1, 'overview': 1, 'fullscreen': 1});
       await t.pump(const Duration(milliseconds: 400));
       expect(painter(t).waiting, isFalse);
     }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
@@ -274,6 +279,27 @@ void main() {
       expect(session.composer.open, isFalse);
       expect(session.composer.pasteTick, 0);
       expect(sent(), isEmpty);
+    }, variant: _macLinux);
+
+    testWidgets('a one-line paste is input too: back to the latest, and the ellipsis wait (H3, K6)', (t) async {
+      clipboard(t, 'git status');
+      final rows = [for (var i = 0; i < 10; i++) 'row $i'];
+      model.apply(scr(rows, hist: 5, limit: 2000));
+      model.applyHistory(const TermHistory(pane: '%3', before: 0, lines: ['h-5', 'h-4', 'h-3', 'h-2', 'h-1'], hist: 5));
+      await show(t);
+      await focusStage(t);
+      final p = TestPointer(1, PointerDeviceKind.mouse);
+      await t.sendEventToBinding(p.hover(t.getCenter(find.byKey(const Key('term-grid')))));
+      await t.sendEventToBinding(p.scroll(Offset(0, -3 * ch)));
+      await t.pump();
+      expect(model.offset, greaterThan(0));
+      await pasteKey(t);
+      await t.pump();
+      expect(port.calls.where((c) => c.$1 == 'paste'), hasLength(1));
+      expect(model.offset, 0);
+      expect(painter(t).waiting, isFalse);
+      await t.pump(const Duration(milliseconds: 350));
+      expect(painter(t).waiting, isTrue);
     }, variant: _macLinux);
 
     testWidgets('pasting three lines opens the writing panel for its own paste instead', (t) async {
@@ -325,6 +351,21 @@ void main() {
       model.apply(scr(['\$ a', '\$ '], rev: 3, cx: 2, cy: 1));
       await t.pump(const Duration(milliseconds: 400));
       expect(painter(t).waiting, isFalse);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
+
+    testWidgets('keys every 0.2 s with no screen: the ellipsis still shows 0.3 s after the first (K6)', (t) async {
+      model.apply(scr(['\$ ', ''], cx: 2));
+      await show(t);
+      await focusStage(t);
+      await chord(t, [], LogicalKeyboardKey.keyA);
+      await t.pump(const Duration(milliseconds: 200));
+      await chord(t, [], LogicalKeyboardKey.keyB);
+      await t.pump(const Duration(milliseconds: 150));
+      expect(painter(t).waiting, isTrue);
+      await t.pump(const Duration(milliseconds: 50));
+      await chord(t, [], LogicalKeyboardKey.keyC);
+      expect(painter(t).waiting, isTrue);
+      expect(sent(), ['type:a', 'type:b', 'type:c']);
     }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
 
     testWidgets('the painter draws the ellipsis one cell after the cursor', (t) async {
