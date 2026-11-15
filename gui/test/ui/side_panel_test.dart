@@ -113,6 +113,35 @@ void main() {
     expect(find.byKey(const Key('inner-stroke-111/Mail')), findsNothing);
   });
 
+  test('tabOrder', () {
+    expect(tabOrder(FirstLayer.device), [PanelTab.sessions, PanelTab.devices, PanelTab.projects, PanelTab.resources]);
+    expect(tabOrder(FirstLayer.project), [PanelTab.sessions, PanelTab.projects, PanelTab.devices, PanelTab.resources]);
+  });
+
+  testWidgets('the dropdown shows 设备在前 by default and switches the tab order', (tester) async {
+    await tester.pumpWidget(wrap(panel(), disableAnimations: true));
+    expect(find.descendant(of: find.byKey(const Key('first-dropdown')), matching: find.text('设备在前')), findsOneWidget);
+    expect(tester.getSize(find.byKey(const Key('first-dropdown'))).height, greaterThanOrEqualTo(48));
+    double x(String k) => tester.getTopLeft(find.byKey(Key(k))).dx;
+    expect(x('tab-devices'), lessThan(x('tab-projects')));
+    await tester.tap(find.byKey(const Key('first-dropdown')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('项目在前').last);
+    await tester.pumpAndSettle();
+    expect(s.prefs.first, FirstLayer.project);
+    expect(UiPrefs.load('${tmp.path}/devices/dev1').first, FirstLayer.project);
+    expect(x('tab-projects'), lessThan(x('tab-devices')));
+  });
+
+  testWidgets('reordering the tabs keeps the open tab', (tester) async {
+    s.togglePanel(PanelTab.devices);
+    await tester.pumpWidget(wrap(panel(), disableAnimations: true));
+    s.setFirst(FirstLayer.project);
+    await tester.pump();
+    expect(s.panel, PanelTab.devices);
+    expect(find.text('devices-body'), findsOneWidget);
+  });
+
   testWidgets('theme dropdown lists the three films in order', (tester) async {
     await tester.pumpWidget(wrap(panel(), disableAnimations: true));
     expect(tester.getSize(find.byKey(const Key('theme-dropdown'))).height,

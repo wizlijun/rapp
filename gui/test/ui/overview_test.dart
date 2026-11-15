@@ -384,6 +384,25 @@ void main() {
     expect(s.panel, PanelTab.resources);
   });
 
+  testWidgets('overview: projects row above the device wall when projects come first', (tester) async {
+    await boot(tester, apps: ['m1/a']);
+    final p = s.createProject('写周报')!;
+    await show(tester);
+    expect(rectOf(tester, 'ov-project-${p.id}').top, greaterThan(rectOf(tester, 'wall').top));
+    s.setFirst(FirstLayer.project);
+    await tester.pump();
+    expect(rectOf(tester, 'ov-project-${p.id}').top, lessThan(rectOf(tester, 'wall').top));
+  });
+
+  testWidgets('overview: pinned projects come first in the row', (tester) async {
+    await boot(tester);
+    final a = s.createProject('甲')!;
+    final b = s.createProject('乙')!;
+    s.togglePinned(b.id);
+    await show(tester);
+    expect(rectOf(tester, 'ov-project-${b.id}').left, lessThan(rectOf(tester, 'ov-project-${a.id}').left));
+  });
+
   testWidgets('the resources cell stays at the right edge', (tester) async {
     await boot(tester);
     for (var i = 0; i < 12; i++) {

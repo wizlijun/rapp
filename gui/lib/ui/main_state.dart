@@ -2157,6 +2157,13 @@ class MainState extends ChangeNotifier {
     _save();
   }
 
+  /// 设备在前 / 项目在前: the tab order and the overview's rows. The current grouping stays; the
+  /// preference only decides the default at startup (§8).
+  void setFirst(FirstLayer f) {
+    prefs.first = f;
+    _save();
+  }
+
   void setStartFullscreen(bool v) {
     prefs.startFullscreen = v;
     _save();

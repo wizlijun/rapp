@@ -72,6 +72,18 @@ void main() {
     expect(s.favorites, isEmpty);
   });
 
+  test('setFirst persists and leaves the current grouping alone', () {
+    Directory('${tmp.path}/local').createSync(recursive: true);
+    File('${tmp.path}/local/service.json').writeAsStringSync('{"id":"dev1"}');
+    s.setGrouping(Grouping.app);
+    s.setFirst(FirstLayer.project);
+    expect(s.grouping, Grouping.app);
+    final s2 = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs.load(s.data.prefsDir()!));
+    addTearDown(s2.dispose);
+    expect(s2.prefs.first, FirstLayer.project);
+    expect(s2.grouping, Grouping.project);
+  });
+
   int opens() => t.sent.where((m) => m['cmd'] == 'open').length;
 
   Map<String, dynamic> opened(int sid, String id, String app) =>

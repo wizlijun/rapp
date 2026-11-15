@@ -7,11 +7,26 @@ import 'package:flutter/material.dart';
 import '../embed/traffic_label.dart' show formatRate;
 import 'lamp.dart';
 import 'main_state.dart';
+import 'prefs.dart' show FirstLayer;
 import 'projects_tab.dart';
 import 'resources_tab.dart';
 import 'sessions_tab.dart';
 import 'tab_chip.dart';
 import 'tokens.dart';
+
+/// The panel's tabs, left to right: the preferred layer comes right after the sessions.
+List<PanelTab> tabOrder(FirstLayer f) => [
+      PanelTab.sessions,
+      if (f == FirstLayer.project) ...[PanelTab.projects, PanelTab.devices] else ...[PanelTab.devices, PanelTab.projects],
+      PanelTab.resources,
+    ];
+
+String _tabLabel(PanelTab t) => switch (t) {
+      PanelTab.sessions => '会话',
+      PanelTab.devices => '设备',
+      PanelTab.projects => '项目',
+      PanelTab.resources => '资源',
+    };
 
 class SidePanel extends StatelessWidget {
   const SidePanel({super.key, required this.state, required this.devicesTab});
@@ -52,53 +67,20 @@ class SidePanel extends StatelessWidget {
                         Expanded(
                           child: Row(
                             children: [
+                              for (final (i, tab) in tabOrder(state.prefs.first).indexed) ...[
+                                if (i > 0) const SizedBox(width: 6),
                                 Flexible(
                                   child: ConstrainedBox(
                                     constraints: const BoxConstraints(maxWidth: 96),
                                     child: TabChip(
-                                      key: const Key('tab-sessions'),
-                                      label: '会话',
-                                      selected: !devices && !projects && !resources,
-                                      onTap: () => _tab(PanelTab.sessions),
+                                      key: Key('tab-${tab.name}'),
+                                      label: _tabLabel(tab),
+                                      selected: _selected(tab),
+                                      onTap: () => _tab(tab),
                                     ),
                                   ),
                                 ),
-                                const SizedBox(width: 6),
-                                Flexible(
-                                  child: ConstrainedBox(
-                                    constraints: const BoxConstraints(maxWidth: 96),
-                                    child: TabChip(
-                                      key: const Key('tab-devices'),
-                                      label: '设备',
-                                      selected: devices,
-                                      onTap: () => _tab(PanelTab.devices),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 6),
-                                Flexible(
-                                  child: ConstrainedBox(
-                                    constraints: const BoxConstraints(maxWidth: 96),
-                                    child: TabChip(
-                                      key: const Key('tab-projects'),
-                                      label: '项目',
-                                      selected: projects,
-                                      onTap: () => _tab(PanelTab.projects),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 6),
-                                Flexible(
-                                  child: ConstrainedBox(
-                                    constraints: const BoxConstraints(maxWidth: 96),
-                                    child: TabChip(
-                                      key: const Key('tab-resources'),
-                                      label: '资源',
-                                      selected: resources,
-                                      onTap: () => _tab(PanelTab.resources),
-                                    ),
-                                  ),
-                                ),
+                              ],
                             ],
                           ),
                         ),
@@ -136,6 +118,10 @@ class SidePanel extends StatelessWidget {
       },
     );
   }
+
+  bool _selected(PanelTab tab) => tab == PanelTab.sessions
+      ? state.panel == null || state.panel == PanelTab.sessions
+      : state.panel == tab;
 
   void _tab(PanelTab tab) {
     if (state.panel != tab) state.togglePanel(tab);
@@ -178,6 +164,32 @@ class _Footer extends StatelessWidget {
                 ],
                 onChanged: (v) {
                   if (v != null) state.setTheme(v);
+                },
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(t.r),
+              border: Border.all(color: t.line),
+            ),
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<FirstLayer>(
+                key: const Key('first-dropdown'),
+                value: state.prefs.first,
+                isExpanded: true,
+                itemHeight: 48,
+                dropdownColor: t.bg,
+                iconEnabledColor: t.text,
+                style: TextStyle(color: t.text),
+                items: const [
+                  DropdownMenuItem(value: FirstLayer.device, child: Text('设备在前')),
+                  DropdownMenuItem(value: FirstLayer.project, child: Text('项目在前')),
+                ],
+                onChanged: (v) {
+                  if (v != null) state.setFirst(v);
                 },
               ),
             ),
