@@ -1223,3 +1223,29 @@ async fn measure_the_forward_over_the_relay() {
     assert!(lines[0].starts_with("open_seq") && lines[3].starts_with("path") && lines[3].ends_with("relay=100"), "{lines:?}");
     eprintln!("{}", lines.join("\n"));
 }
+
+#[tokio::test]
+async fn a_local_share_and_unshare_are_logged_as_local() {
+    let (a, _key) = start_sharing(|_| {}).await;
+    let mut c = ipc(&a).await;
+    assert_eq!(c.call(json!({"cmd":"share","ports":[8000]})).await["ok"], true);
+    let l = wait_log(a.home.path(), "share", |v| v["port"] == 8000).await;
+    assert_eq!(l["by"], "local", "{l}");
+    assert_eq!(c.call(json!({"cmd":"unshare","port":8000})).await, json!({"ok":true,"was":true}));
+    let l = wait_log(a.home.path(), "unshare", |v| v["port"] == 8000).await;
+    assert_eq!(l["by"], "local", "{l}");
+}
+
+#[tokio::test]
+async fn ipc_allow_takes_a_full_fingerprint_it_does_not_know() {
+    let (a, _key) = start_sharing(|_| {}).await;
+    let mut c = ipc(&a).await;
+    let fp = rapp_wire::Identity::generate().unwrap().fp.to_string();
+    assert_eq!(fp.len(), 64);
+    let r = c.call(json!({"cmd":"share","ports":[8000],"allow":[fp]})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    let saved: Value = serde_json::from_slice(&std::fs::read(a.home.path().join("shares.json")).unwrap()).unwrap();
+    assert_eq!(saved[0]["allow"], json!([fp]), "{saved}");
+    let r = c.call(json!({"cmd":"share","ports":[8001],"allow":["abababab"]})).await;
+    assert_eq!(r, json!({"ok":false,"error":"unknown device: abababab"}));
+}

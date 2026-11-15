@@ -1,27 +1,22 @@
 //! Local IPC (spec §3): TCP on 127.0.0.1, first line `{"token":…}` (from `ipc.token`),
 //! then JSON-line commands. No reply to a good token line; a bad one gets an error and EOF.
 
-use crate::shares::{sensitive, Patch};
 use crate::state::State;
 use crate::update;
 use anyhow::Result;
 use rapp_conn::Pipe;
 use rapp_net::crypto::ct_eq;
 use rapp_net::line::{err, ok, write_json};
-use rapp_net::log::{clean_name, read_recent, Lvl};
-use rapp_wire::Fp;
+use rapp_net::log::{read_recent, Lvl};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 
-/// How long `shares` gives each local address of a shared port to accept before saying nothing listens there.
-const LISTENING_WAIT: Duration = Duration::from_millis(200);
 /// How long `hosts` waits for each device's list of shares: the LAN addresses in `hosts.json`
 /// and the ones the relay knows cost one `DIRECT_WAIT` each list, and the relayed request follows.
 const HOSTS_WAIT: Duration = Duration::from_secs(6);
-const SENSITIVE_WARN: &str = "分享这个端口，等于把这台机器能到的网络也交出去";
 
 pub async fn serve(state: Arc<State>, listener: TcpListener, token: String) {
     while let Ok((tcp, _)) = listener.accept().await {
@@ -77,9 +72,9 @@ async fn conn(state: &Arc<State>, tcp: TcpStream, token: &str) -> Result<()> {
                         update::apply(state, cmd["confirm_signature_change"] == true, closed.clone()).await
                     }
                     "update_rollback" => update::rollback(state, closed.clone()).await,
-                    "shares" => shares(state).await,
-                    "share" => share(state, &cmd),
-                    "unshare" => unshare(state, &cmd),
+                    "shares" => crate::share_cmds::shares(state).await,
+                    "share" => crate::share_cmds::share(state, &cmd),
+                    "unshare" => crate::share_cmds::unshare(state, &cmd),
                     "hosts" => hosts(state).await,
                     "pipe" => match pipe(state, &cmd).await {
                         Ok((p, path)) => {
@@ -185,125 +180,6 @@ fn set_relay(state: &State, cmd: &Value) -> Value {
     r
 }
 
-/// `http://<id>.rapp:<port>`: the address other devices use for this device's `port`.
-fn share_url(state: &State, port: u16) -> String {
-    format!("http://{}.rapp:{port}", state.cfg.lock().unwrap().id.clone().unwrap_or_default())
-}
-
-/// This device's shares, each with whether something accepts on the port now: on the addresses
-/// a forward would reach (`127.0.0.1`, then `[::1]`).
-async fn shares(state: &Arc<State>) -> Value {
-    let list = state.shares.list();
-    let probes: Vec<_> = list
-        .iter()
-        .map(|s| {
-            let port = s.port;
-            tokio::spawn(async move {
-                crate::forward::connect_local(&crate::forward::local_addrs(port), LISTENING_WAIT).await.is_some()
-            })
-        })
-        .collect();
-    let mut shares = Vec::new();
-    for (s, probe) in list.iter().zip(probes) {
-        shares.push(json!({
-            "port": s.port, "note": s.note, "allow": allow_names(state, &s.allow), "url": share_url(state, s.port),
-            "listening": probe.await.unwrap_or(false),
-        }));
-    }
-    let id = state.cfg.lock().unwrap().id.clone();
-    let relay = state.relay.lock().unwrap().0;
-    ok(json!({"id": id, "relay": relay, "shares": shares}))
-}
-
-/// The devices of an `allow` as the user knows them: the name each one gave (made safe to show),
-/// or the first 8 hex digits of its fingerprint when it gave none.
-fn allow_names(state: &State, allow: &[Fp]) -> Vec<String> {
-    let name = |fp: &Fp| state.paired.name_of(fp).map(|n| clean_name(&n)).filter(|n| !n.is_empty());
-    allow.iter().map(|fp| name(fp).unwrap_or_else(|| fp.short())).collect()
-}
-
-/// A port from JSON: an integer 1-65535.
-fn port_of(v: &Value) -> Option<u16> {
-    v.as_u64().and_then(|p| u16::try_from(p).ok()).filter(|&p| p != 0)
-}
-
-/// Shares every port of `ports` with the `note`, `allow` and `raw` given; one that is left out
-/// stays as the port's share has it now, so sharing a port again never widens it in silence.
-/// Every port is checked before anything is saved, so either all of them are shared or none.
-/// A port whose `allow` changed has its running forwards cut: a device that was left out must
-/// not go on, and one that still may connects again.
-fn share(state: &State, cmd: &Value) -> Value {
-    let Some(ports) = cmd["ports"].as_array().filter(|p| !p.is_empty()) else { return err("bad port") };
-    let Some(ports) = ports.iter().map(port_of).collect::<Option<Vec<u16>>>() else { return err("bad port") };
-    let allow = match &cmd["allow"] {
-        Value::Null => None,
-        names => match allowed(state, names) {
-            Ok(a) => Some(a),
-            Err(e) => return err(&e),
-        },
-    };
-    let patch = Patch { note: cmd["note"].as_str().map(str::to_string), allow, raw: cmd["raw"].as_bool() };
-    let done = match state.shares.share_all(&ports, &patch) {
-        Ok(done) => done,
-        Err(e) => return err(&format!("{e:#}")),
-    };
-    let shared: Vec<Value> = done
-        .iter()
-        .map(|d| {
-            let (port, allow) = (d.share.port, &d.share.allow);
-            state.log.event(Lvl::Info, "share", json!({"port": port, "allow": allow.len()}));
-            if d.allow_changed {
-                state.forwards.cut(port);
-            }
-            let mut v = json!({"port": port, "url": share_url(state, port)});
-            if !allow.is_empty() {
-                v["allow"] = json!(allow_names(state, allow));
-            }
-            if sensitive(port) {
-                v["warn"] = json!(SENSITIVE_WARN);
-            }
-            v
-        })
-        .collect();
-    ok(json!({"shared": shared}))
-}
-
-/// The devices the `allow` array names (an empty one: none, which means every trusted device).
-/// Each entry must mean exactly one device `paired.json` knows.
-fn allowed(state: &State, allow: &Value) -> Result<Vec<Fp>, String> {
-    let Some(names) = allow.as_array() else { return Err("bad allow".into()) };
-    let mut fps = Vec::new();
-    for name in names {
-        let Some(name) = name.as_str() else { return Err("bad allow".into()) };
-        // A blank entry names no device (and must not match the ones that gave no name).
-        let found = if name.trim().is_empty() { Vec::new() } else { state.paired.find(name) };
-        let fp = match found.as_slice() {
-            [] => return Err(format!("unknown device: {name}")),
-            [(fp, _)] => *fp,
-            _ => return Err(format!("ambiguous device: {name}")),
-        };
-        if !fps.contains(&fp) {
-            fps.push(fp);
-        }
-    }
-    Ok(fps)
-}
-
-/// Stops sharing `port` and cuts its forwards that are running.
-fn unshare(state: &State, cmd: &Value) -> Value {
-    let Some(port) = port_of(&cmd["port"]) else { return err("bad port") };
-    let was = match state.shares.remove(port) {
-        Ok(was) => was,
-        Err(e) => return err(&format!("{e:#}")),
-    };
-    if was {
-        state.log.event(Lvl::Info, "unshare", json!({"port": port}));
-    }
-    // Also when it was not shared: a forward may still run from a share removed by hand.
-    state.forwards.cut(port);
-    ok(json!({"was": was}))
-}
-
 /// What each device in `hosts.json` offers this one, all asked at the same time.
 async fn hosts(state: &Arc<State>) -> Value {
     let asks: Vec<_> = crate::pipe::known_hosts(&state.home)
@@ -333,6 +209,6 @@ async fn hosts(state: &Arc<State>) -> Value {
 
 /// Opens a forward to `port` of the device `to` names.
 async fn pipe(state: &State, cmd: &Value) -> Result<(Pipe, &'static str), String> {
-    let port = port_of(&cmd["port"]).ok_or("bad port")?;
+    let port = crate::sharing::port_of(&cmd["port"]).ok_or("bad port")?;
     crate::pipe::open(state, cmd["to"].as_str().unwrap_or(""), port).await.map_err(|e| e.as_str().to_string())
 }

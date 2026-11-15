@@ -10,6 +10,8 @@ mod ipc;
 mod peer;
 mod pipe;
 mod relay_link;
+mod share_cmds;
+mod sharing;
 mod shares;
 mod state;
 mod term;
