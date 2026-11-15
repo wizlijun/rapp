@@ -347,6 +347,32 @@ void main() {
       expect(log, isEmpty);
     });
 
+    test('opening the panel switches A to English, once per opening', () {
+      final r = session();
+      r.apply(const InputSourceEvent(1, 'im', '拼音', false));
+      r.composer.open = true;
+      expect(log, ['select:']);
+      r.composer.open = true;
+      r.composer.wantFocus();
+      expect(log, ['select:']);
+      r.composer.open = false;
+      r.composer.open = true;
+      expect(log, ['select:', 'select:']);
+    });
+
+    test('opening the panel: already English, no call', () {
+      final r = session();
+      r.apply(const InputSourceEvent(1, 'abc', 'ABC', true));
+      r.composer.open = true;
+      expect(log, isEmpty);
+    });
+
+    test('opening the panel: no source reported, no call', () {
+      final r = session();
+      r.composer.open = true;
+      expect(log, isEmpty);
+    });
+
     test('an empty send: English first, then Return', () {
       final r = session();
       r.apply(const InputSourceEvent(1, 'im', '拼音', false));
