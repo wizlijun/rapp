@@ -1,5 +1,6 @@
 // Session list model: entries, grouping, prev/next stepping.
 import 'lamp.dart';
+import 'projects.dart';
 import 'workspace_store.dart';
 
 const pathLabels = {'lan': '局域网', 'direct': '直连', 'relay': '中继'};
@@ -63,12 +64,15 @@ String groupingLabel(Grouping g) => switch (g) {
     };
 
 class SessionGroup {
-  const SessionGroup(this.title, this.entries);
+  const SessionGroup(this.title, this.entries, {this.projectId});
   final String title;
+
+  /// The project this group is, in project mode; null for 未归项目的 and device/app groups.
+  final String? projectId;
   final List<SessionEntry> entries;
 }
 
-const otherGroupTitle = '其他';
+const otherGroupTitle = '未归项目的';
 
 /// [all] sorted by device, then app name; stable.
 List<SessionEntry> _byDeviceThenApp(List<SessionEntry> all) {
@@ -82,17 +86,22 @@ List<SessionEntry> _byDeviceThenApp(List<SessionEntry> all) {
   return [for (final (_, e) in indexed) e];
 }
 
-/// By project, a session in several projects appears in each (K15); [projects] is in order.
-List<SessionGroup> groupSessions(List<SessionEntry> all, Grouping g, {List<Project> projects = const []}) {
+/// By project, a session in several projects appears in each (K15). Project groups follow
+/// [orderedProjects]; the project [first] names (if it has open members) goes before them all.
+List<SessionGroup> groupSessions(List<SessionEntry> all, Grouping g,
+    {List<Project> projects = const [], String? first}) {
   if (g == Grouping.project) {
     final byKey = {for (final e in all) e.key: e};
     final inProject = <String>{};
     final groups = <SessionGroup>[];
-    for (final p in projects) {
+    final ordered = orderedProjects(projects);
+    final at = ordered.indexWhere((p) => p.id == first);
+    if (at > 0) ordered.insert(0, ordered.removeAt(at));
+    for (final p in ordered) {
       final es = [for (final m in p.members) ?byKey[m.key]];
       if (es.isEmpty) continue;
       inProject.addAll(es.map((e) => e.key));
-      groups.add(SessionGroup(p.name, es));
+      groups.add(SessionGroup(p.name, es, projectId: p.id));
     }
     final rest = _byDeviceThenApp([for (final e in all) if (!inProject.contains(e.key)) e]);
     if (rest.isNotEmpty) groups.add(SessionGroup(otherGroupTitle, rest));
@@ -107,11 +116,14 @@ List<SessionGroup> groupSessions(List<SessionEntry> all, Grouping g, {List<Proje
   return [for (final t in titles) SessionGroup(t, byTitle[t]!)];
 }
 
-String? stepKey(List<SessionGroup> groups, String? current, int delta) {
-  final keys = {for (final g in groups) for (final e in g.entries) e.key}.toList();
+/// The next (or previous) key in list order. With [within], only those keys that are listed (open)
+/// take part; a [current] outside them starts from the first (delta > 0) or last (delta < 0).
+String? stepKey(List<SessionGroup> groups, String? current, int delta, {List<String>? within}) {
+  var keys = {for (final g in groups) for (final e in g.entries) e.key}.toList();
+  if (within != null) keys = [for (final k in within) if (keys.contains(k)) k];
   if (keys.isEmpty) return null;
   final i = current == null ? -1 : keys.indexOf(current);
-  if (i < 0) return keys.first;
+  if (i < 0) return within != null && delta < 0 ? keys.last : keys.first;
   return keys[((i + delta) % keys.length + keys.length) % keys.length];
 }
 

@@ -101,4 +101,38 @@ void main() {
     expect(endAllHint('写周报', 2, 0), '写周报：结束 2 个会话');
     expect(endAllHint('写周报', 0, 0), '写周报：没有要结束的会话');
   });
+
+  group('resumeKey', () {
+    final p = Project('p', 'x', [Member(const AppRef('1', 'a', 'A')), Member(const AppRef('1', 'b', 'B')), Member(const AppRef('2', 'c', 'C'))]);
+    test('last if still a member and open', () => expect(resumeKey(p, '1/b', (k) => true), '1/b'));
+    test('first open member when last is closed', () => expect(resumeKey(p, '1/b', (k) => k == '2/c'), '2/c'));
+    test('first open member when last left the project', () => expect(resumeKey(p, '9/z', (k) => true), '1/a'));
+    test('null when nothing is open', () => expect(resumeKey(p, '1/b', (k) => false), isNull));
+  });
+  group('returnCue', () {
+    final now = DateTime.utc(2026, 11, 14, 12);
+    String? cue(Duration ago, [int n = 0, int d = 0]) => returnCue(leftAt: now.subtract(ago), now: now, needs: n, disconnected: d);
+    test('minutes, hours, days', () {
+      expect(cue(const Duration(minutes: 25)), '25 分钟前离开');
+      expect(cue(const Duration(minutes: 119)), '1 小时前离开');
+      expect(cue(const Duration(hours: 49)), '2 天前离开');
+    });
+    test('what changed', () {
+      expect(cue(const Duration(minutes: 25), 1), '25 分钟前离开 · 这期间 1 个等你');
+      expect(cue(const Duration(minutes: 25), 0, 2), '25 分钟前离开 · 这期间 2 个已断开');
+      expect(cue(const Duration(minutes: 25), 1, 2), '25 分钟前离开 · 这期间 1 个等你、2 个已断开');
+    });
+    test('nothing under a minute, without a time, or with a time in the future', () {
+      expect(cue(const Duration(seconds: 59)), isNull);
+      expect(returnCue(leftAt: null, now: now, needs: 3, disconnected: 0), isNull);
+      expect(returnCue(leftAt: now.add(const Duration(hours: 1)), now: now, needs: 0, disconnected: 0), isNull);
+    });
+  });
+  test('orderedProjects: pinned first, order kept', () {
+    final ps = [Project('a', 'A'), Project('b', 'B', [], true), Project('c', 'C'), Project('d', 'D', [], true)];
+    expect(orderedProjects(ps).map((p) => p.id), ['b', 'd', 'a', 'c']);
+  });
+  test('projectKeys follows member order', () {
+    expect(projectKeys(Project('p', 'x', [Member(const AppRef('2', 'c', 'C')), Member(const AppRef('1', 'a', 'A'))])), ['2/c', '1/a']);
+  });
 }
