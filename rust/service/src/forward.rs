@@ -173,6 +173,9 @@ pub async fn serve_forward(state: &Arc<State>, mut s: Pipe, port: u16, peer: Pee
         return refuse(state, s, &peer, port, REFUSED).await;
     };
     let _ = tcp.set_nodelay(true);
+    let mode = Mode::parse(state.cfg.lock().unwrap().forward_log.as_deref());
+    // Before the reply: the record of an access must not wait for the connection to end.
+    state.forward_log.opened(mode, &peer, port);
     let (meter, began) = (Meter::default(), Instant::now());
     if write_json(&mut s, &ok(json!({}))).await.is_ok() {
         tokio::select! {
@@ -183,7 +186,6 @@ pub async fn serve_forward(state: &Arc<State>, mut s: Pipe, port: u16, peer: Pee
     }
     // The meter counts on the visitor's stream: read from it = in, written to it = out.
     let (bytes_in, bytes_out) = meter.get();
-    let mode = Mode::parse(state.cfg.lock().unwrap().forward_log.as_deref());
     state.forward_log.done(mode, &peer, port, began.elapsed().as_secs_f64(), bytes_in, bytes_out);
     Ok(())
 }

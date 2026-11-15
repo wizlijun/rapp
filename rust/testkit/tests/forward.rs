@@ -267,6 +267,10 @@ async fn a_finished_forward_is_recorded() {
     let b = visitor();
     let (r, mut s, _conn) = forward(&a, &key, &b, port).await;
     assert_eq!(r, json!({"ok":true}));
+    // The access is on record while the stream is still open.
+    let open = wait_log(a.home.path(), "forward_open", |v| v["port"] == port).await;
+    assert_eq!((&open["fp"], &open["path"]), (&json!(b.id.fp.to_string()), &json!("lan")), "{open}");
+    assert!(log_events(a.home.path()).iter().all(|v| v["ev"] != "forward"));
     s.write_all(b"hello").await.unwrap();
     s.shutdown().await.unwrap();
     assert_eq!(read_all(&mut s, WAIT).await, b"hello");

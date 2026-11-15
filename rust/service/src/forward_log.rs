@@ -1,11 +1,12 @@
-//! The access record of forwarded connections (port-sharing spec §14): one `forward` line per
-//! connection, or one per (device, port) plus a `forward_sum` every `SUM_EVERY`; refusals are
-//! rate-limited. Only addresses, names, fingerprints, ports and byte counts are written.
+//! The access record of forwarded connections (port-sharing spec §14): a `forward_open` line when
+//! a connection opens and a `forward` line when it ends, for every connection or for the first of
+//! each (device, port) plus a `forward_sum` every `SUM_EVERY`; refusals are rate-limited. Only
+//! addresses, names, fingerprints, ports and byte counts are written.
 
 use crate::state::Peer;
 use rapp_net::log::{Log, Lvl};
 use serde_json::json;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -43,6 +44,8 @@ struct Tally {
 
 #[derive(Default)]
 struct Inner {
+    /// The (device, port) pairs whose `forward_open` line was written since the last flush.
+    opened: HashSet<(String, u16)>,
     tally: HashMap<(String, u16), Tally>,
     refused: HashMap<(String, Option<u16>, String), Instant>,
 }
@@ -60,6 +63,20 @@ fn who(peer: &Peer) -> String {
 impl ForwardLog {
     pub fn new(log: Log) -> ForwardLog {
         ForwardLog { log, inner: Mutex::default() }
+    }
+
+    /// One forwarded connection opened: written at once, so an access is on record while the
+    /// connection still runs (and when the service stops before it ends). `Each`: every
+    /// connection; `Summary`: the first of its (device, port) since the last flush.
+    pub fn opened(&self, mode: Mode, peer: &Peer, port: u16) {
+        let first = match mode {
+            Mode::Each => true,
+            Mode::Summary => self.inner.lock().unwrap().opened.insert((who(peer), port)),
+        };
+        if first {
+            let more = json!({"fp": peer.fp.map(|f| f.to_string()), "port": port});
+            self.log.event(Lvl::Info, "forward_open", peer.fields(more));
+        }
     }
 
     /// One forwarded connection ended. `bytes_in` came from the visiting device, `bytes_out` went to it.
@@ -108,9 +125,14 @@ impl ForwardLog {
         self.log.event(Lvl::Warn, "forward_refused", peer.fields(more));
     }
 
-    /// Writes one `forward_sum` line per (device, port) that had connections since the last flush.
+    /// Writes one `forward_sum` line per (device, port) whose connections ended since the last
+    /// flush; from here on the next connection of a (device, port) is a first one again.
     pub fn flush(&self) {
-        let tallies = std::mem::take(&mut self.inner.lock().unwrap().tally);
+        let tallies = {
+            let mut inner = self.inner.lock().unwrap();
+            inner.opened.clear();
+            std::mem::take(&mut inner.tally)
+        };
         let mut sums: Vec<_> = tallies.into_iter().collect();
         sums.sort_by(|a, b| a.0.cmp(&b.0));
         for ((_, port), t) in sums {
@@ -125,7 +147,7 @@ impl ForwardLog {
 mod tests {
     use super::*;
     use rapp_wire::Fp;
-    use serde_json::Value;
+    use serde_json::{json, Value};
     use std::path::Path;
 
     fn peer(b: u8) -> Peer {
@@ -197,6 +219,51 @@ mod tests {
     }
 
     #[test]
+    fn each_writes_an_open_line_for_every_connection() {
+        let d = tempfile::tempdir().unwrap();
+        let f = fl(d.path());
+        // (the log folds identical lines that follow each other, so the ports alternate)
+        for port in [8000, 8001, 8000] {
+            f.opened(Mode::Each, &peer(1), port);
+        }
+        let l = lines(&f, d.path(), "forward_open");
+        assert_eq!(l.iter().map(|v| v["port"].as_u64().unwrap()).collect::<Vec<_>>(), [8000, 8001, 8000]);
+        assert_eq!(l[0]["fp"], Fp([1; 32]).to_string());
+        assert_eq!((&l[0]["peer"], &l[0]["name"], &l[0]["path"]), (&json!("1.2.3.4:5"), &json!("mini"), &json!("lan")));
+        assert_eq!(l[0]["lvl"], "info");
+        assert_eq!(l[0].as_object().unwrap().len(), 8, "{}", l[0]); // ts, ev, lvl, peer, name, path, fp, port
+    }
+
+    #[test]
+    fn summary_writes_an_open_line_for_the_first_connection_since_the_last_flush() {
+        let d = tempfile::tempdir().unwrap();
+        let f = fl(d.path());
+        let opens = |f: &ForwardLog| {
+            let l = lines(f, d.path(), "forward_open");
+            l.iter().map(|v| (v["fp"].as_str().unwrap()[..2].to_string(), v["port"].as_u64().unwrap())).collect::<Vec<_>>()
+        };
+        f.opened(Mode::Summary, &peer(1), 8000);
+        // written at once: before that connection, or any other, has ended
+        assert_eq!(opens(&f), [("01".to_string(), 8000)]);
+        f.opened(Mode::Summary, &peer(1), 8000);
+        f.opened(Mode::Summary, &peer(1), 8001); // another port
+        f.opened(Mode::Summary, &peer(2), 8000); // another device
+        f.opened(Mode::Summary, &peer(2), 8000);
+        f.done(Mode::Summary, &peer(1), 8000, 1.0, 1, 2);
+        f.opened(Mode::Summary, &peer(1), 8000); // a connection that ended does not make the next one a first
+        assert_eq!(opens(&f), [("01".to_string(), 8000), ("01".to_string(), 8001), ("02".to_string(), 8000)]);
+
+        f.flush();
+        f.opened(Mode::Summary, &peer(1), 8000);
+        f.opened(Mode::Summary, &peer(1), 8000);
+        assert_eq!(opens(&f).len(), 4);
+        assert_eq!(opens(&f)[3], ("01".to_string(), 8000));
+        // `forward` and `forward_sum` are as before
+        assert_eq!(lines(&f, d.path(), "forward").len(), 1);
+        assert_eq!(lines(&f, d.path(), "forward_sum").len(), 1);
+    }
+
+    #[test]
     fn refusals_are_rate_limited_per_peer_port_and_reason() {
         let d = tempfile::tempdir().unwrap();
         let f = fl(d.path());
@@ -233,12 +300,14 @@ mod tests {
     fn nothing_secret_is_logged() {
         let d = tempfile::tempdir().unwrap();
         let f = fl(d.path());
+        f.opened(Mode::Each, &peer(1), 8000);
         f.done(Mode::Each, &peer(1), 8000, 1.0, 1, 2);
+        f.opened(Mode::Summary, &peer(2), 8000);
         f.done(Mode::Summary, &peer(2), 8000, 1.0, 1, 2);
         f.refused(&peer(1), Some(22), "not shared");
         f.flush();
         let l = all(&f, d.path());
-        assert!(l.len() >= 4);
+        assert!(l.len() >= 6);
         for v in &l {
             for k in v.as_object().unwrap().keys() {
                 let k = k.to_lowercase();
