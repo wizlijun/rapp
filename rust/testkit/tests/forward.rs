@@ -454,3 +454,215 @@ async fn a_lan_link_whose_request_fails_gives_way_to_the_relay() {
     assert_eq!(sent.fp.to_string(), fp_of(&a).await);
     out.close();
 }
+
+// ---- the local IPC: shares, share, unshare (Task 7) ----
+
+const SENSITIVE_WARN: &str = "分享这个端口，等于把这台机器能到的网络也交出去";
+
+async fn ipc(a: &TestService) -> Ipc {
+    Ipc::open(&a.svc, a.home.path()).await
+}
+
+/// The ports in a `shares` reply.
+fn ports_of(r: &Value) -> Vec<u64> {
+    r["shares"].as_array().unwrap_or_else(|| panic!("{r}")).iter().map(|s| s["port"].as_u64().unwrap()).collect()
+}
+
+/// The ports in `home/shares.json`.
+fn saved_ports(home: &Path) -> Vec<u64> {
+    let Ok(b) = std::fs::read(home.join("shares.json")) else { return vec![] };
+    let v: Value = serde_json::from_slice(&b).unwrap();
+    v.as_array().unwrap().iter().map(|s| s["port"].as_u64().unwrap()).collect()
+}
+
+#[tokio::test]
+async fn share_then_shares_then_unshare() {
+    let (port, _echo) = echo().await;
+    let (a, _key) = start_sharing(|_| {}).await;
+    let mut c = ipc(&a).await;
+    let url = format!("http://{}.rapp:{port}", a.id);
+    let r = c.call(json!({"cmd":"share","ports":[port]})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(r["shared"], json!([{"port": port, "url": url}]), "{r}");
+    assert!(r["shared"][0].get("warn").is_none(), "{r}");
+    let r = c.call(json!({"cmd":"shares"})).await;
+    assert_eq!((&r["ok"], &r["id"]), (&json!(true), &json!(a.id)), "{r}");
+    assert!(r["relay"].is_string(), "{r}");
+    assert_eq!(ports_of(&r), [port as u64]);
+    assert_eq!((&r["shares"][0]["listening"], &r["shares"][0]["url"]), (&json!(true), &json!(url)), "{r}");
+    assert_eq!(r["shares"][0]["allow"], json!([]), "{r}");
+    assert_eq!(saved_ports(a.home.path()), [port as u64]);
+    assert_eq!(c.call(json!({"cmd":"unshare","port":port})).await, json!({"ok":true,"was":true}));
+    assert_eq!(c.call(json!({"cmd":"unshare","port":port})).await, json!({"ok":true,"was":false}));
+    assert!(saved_ports(a.home.path()).is_empty());
+    assert!(ports_of(&c.call(json!({"cmd":"shares"})).await).is_empty());
+    let l = wait_log(a.home.path(), "share", |v| v["port"] == port).await;
+    assert_eq!(l["allow"], 0, "{l}");
+    wait_log(a.home.path(), "unshare", |v| v["port"] == port).await;
+}
+
+#[tokio::test]
+async fn shares_says_when_nothing_listens_and_keeps_the_note() {
+    let port = dead_port().await;
+    let (a, _key) = start_sharing(|_| {}).await;
+    let mut c = ipc(&a).await;
+    assert_eq!(c.call(json!({"cmd":"share","ports":[port],"note":"模型"})).await["ok"], true);
+    let r = c.call(json!({"cmd":"shares"})).await;
+    assert_eq!((&r["shares"][0]["listening"], &r["shares"][0]["note"]), (&json!(false), &json!("模型")), "{r}");
+}
+
+#[tokio::test]
+async fn sharing_a_sensitive_port_warns_and_still_shares() {
+    let (a, _key) = start_sharing(|_| {}).await;
+    let mut c = ipc(&a).await;
+    let r = c.call(json!({"cmd":"share","ports":[8000, 22]})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    assert!(r["shared"][0].get("warn").is_none(), "{r}");
+    assert_eq!(r["shared"][1]["port"], 22, "{r}");
+    assert_eq!(r["shared"][1]["warn"], SENSITIVE_WARN, "{r}");
+    assert_eq!(r["shared"][1]["url"], format!("http://{}.rapp:22", a.id), "{r}");
+    assert_eq!(ports_of(&c.call(json!({"cmd":"shares"})).await), [22, 8000]);
+}
+
+#[tokio::test]
+async fn bad_ports_are_refused_before_anything_is_saved() {
+    let (a, _key) = start_sharing(|_| {}).await;
+    let mut c = ipc(&a).await;
+    let bad = json!({"ok":false,"error":"bad port"});
+    for ports in [json!([8000, 0]), json!([8000, 70000]), json!(["x"]), json!([]), json!([8000, -1]), json!([8000.5]), json!(8000)] {
+        assert_eq!(c.call(json!({"cmd":"share","ports":ports})).await, bad, "{ports}");
+        assert!(ports_of(&c.call(json!({"cmd":"shares"})).await).is_empty(), "{ports}");
+    }
+    assert_eq!(c.call(json!({"cmd":"share"})).await, bad);
+    assert!(saved_ports(a.home.path()).is_empty());
+    assert!(log_events(a.home.path()).iter().all(|v| v["ev"] != "share"));
+}
+
+#[tokio::test]
+async fn the_65th_share_is_refused_and_nothing_of_it_is_saved() {
+    let (a, _key) = start_sharing(|_| {}).await;
+    let mut c = ipc(&a).await;
+    let first: Vec<u16> = (10001..=10063).collect();
+    assert_eq!(c.call(json!({"cmd":"share","ports":first})).await["ok"], true);
+    assert_eq!(c.call(json!({"cmd":"share","ports":[20001, 20002]})).await, json!({"ok":false,"error":"limit"}));
+    assert_eq!(saved_ports(a.home.path()).len(), 63);
+    assert_eq!(c.call(json!({"cmd":"share","ports":[20001]})).await["ok"], true);
+}
+
+#[tokio::test]
+async fn allow_names_a_known_device_or_is_refused() {
+    let (port, _echo) = echo().await;
+    let (a, key) = start_sharing(|_| {}).await;
+    let b = visitor();
+    // B connects once, so A's paired.json has B under the name B said.
+    let (r, _, _conn) = ask(&a, &key, &b, json!({"op":"list_shares"})).await;
+    assert_eq!(r, json!({"ok":true,"shares":[]}));
+    let mut c = ipc(&a).await;
+    let r = c.call(json!({"cmd":"share","ports":[port],"allow":["test-b"]})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    let r = c.call(json!({"cmd":"shares"})).await;
+    assert_eq!(r["shares"][0]["allow"], json!(["test-b"]), "{r}");
+    let saved: Value = serde_json::from_slice(&std::fs::read(a.home.path().join("shares.json")).unwrap()).unwrap();
+    assert_eq!(saved[0]["allow"], json!([b.id.fp.to_string()]));
+    let l = wait_log(a.home.path(), "share", |v| v["port"] == port).await;
+    assert_eq!(l["allow"], 1, "{l}");
+    // B may use it; the fingerprint prefix means B too
+    let (r, _, _conn) = ask(&a, &key, &b, json!({"op":"list_shares"})).await;
+    assert_eq!(r, json!({"ok":true,"shares":[{"port":port}]}));
+    let prefix = &b.id.fp.to_string()[..8].to_ascii_uppercase();
+    assert_eq!(c.call(json!({"cmd":"share","ports":[port],"allow":[prefix]})).await["ok"], true);
+    assert_eq!(c.call(json!({"cmd":"share","ports":[port],"allow":["nobody"]})).await,
+               json!({"ok":false,"error":"unknown device: nobody"}));
+    // nothing of a refused share is saved
+    assert_eq!(c.call(json!({"cmd":"share","ports":[port, port + 1],"allow":["test-b","nobody"]})).await["ok"], false);
+    assert_eq!(saved_ports(a.home.path()), [port as u64]);
+}
+
+#[tokio::test]
+async fn an_allow_that_means_two_devices_is_ambiguous() {
+    let (a, key) = start_sharing(|_| {}).await;
+    // two devices that both say they are `test-b`
+    for b in [visitor(), visitor()] {
+        let (r, _, _conn) = ask(&a, &key, &b, json!({"op":"list_shares"})).await;
+        assert_eq!(r["ok"], true, "{r}");
+    }
+    let r = ipc_once(&a.svc, a.home.path(), json!({"cmd":"share","ports":[8000],"allow":["test-b"]})).await;
+    assert_eq!(r, json!({"ok":false,"error":"ambiguous device: test-b"}));
+    assert!(saved_ports(a.home.path()).is_empty());
+}
+
+#[tokio::test]
+async fn unshare_cuts_what_is_running() {
+    let (port, _echo) = echo().await;
+    let (a, key) = sharing_ports(&[port]).await;
+    let (r, mut s, _conn) = forward(&a, &key, &visitor(), port).await;
+    assert_eq!(r, json!({"ok":true}));
+    s.write_all(b"hello").await.unwrap();
+    let mut got = [0u8; 5];
+    tokio::time::timeout(WAIT, s.read_exact(&mut got)).await.unwrap().unwrap();
+    assert_eq!(&got, b"hello");
+    let r = ipc_once(&a.svc, a.home.path(), json!({"cmd":"unshare","port":port})).await;
+    assert_eq!(r, json!({"ok":true,"was":true}));
+    let mut b = [0u8; 16];
+    let read = tokio::time::timeout(Duration::from_secs(2), s.read(&mut b)).await.expect("cut within 2 s");
+    assert!(matches!(read, Ok(0) | Err(_)), "{read:?}");
+}
+
+// ---- the local IPC: hosts and pipe, the simple local cases (Task 8 covers them end to end) ----
+
+#[tokio::test]
+async fn hosts_is_empty_without_a_hosts_file() {
+    let a = service().await;
+    assert_eq!(ipc_once(&a.svc, a.home.path(), json!({"cmd":"hosts"})).await, json!({"ok":true,"hosts":[]}));
+}
+
+#[tokio::test]
+async fn pipe_errors_keep_the_connection() {
+    let a = service().await;
+    let mut c = ipc(&a).await;
+    let r = c.call(json!({"cmd":"pipe","to":"gpu1.rapp","port":22})).await;
+    assert_eq!(r, json!({"ok":false,"error":"unknown name"}));
+    // this service has no key
+    let r = c.call(json!({"cmd":"pipe","to":"123456789.rapp","port":22})).await;
+    assert_eq!(r, json!({"ok":false,"error":"no key"}));
+    let r = c.call(json!({"cmd":"pipe","to":"123456789.rapp","port":0})).await;
+    assert_eq!(r, json!({"ok":false,"error":"bad port"}));
+    assert_eq!(c.call(json!({"cmd":"status"})).await["ok"], true);
+}
+
+// A on `rig` sharing an echo port; B, another service on `rig`, whose `hosts.json` names A with its LAN address.
+#[tokio::test]
+async fn pipe_carries_the_port_and_bytes_right_behind_the_command() {
+    let rig = RelayRig::start().await;
+    let (port, _echo) = echo().await;
+    let a = a_on_relay(&rig, Some(vec![])).await;
+    assert_eq!(ipc_once(&a.svc, a.home.path(), json!({"cmd":"share","ports":[port]})).await["ok"], true);
+    let b = a_on_relay(&rig, Some(vec![])).await;
+    let hosts = json!([{"id": a.id, "name": "a", "lan": [a_addr(&a.svc).to_string()]}]);
+    std::fs::write(b.home.path().join("hosts.json"), hosts.to_string()).unwrap();
+    // The token line, the pipe command and the first bytes in one write.
+    let token = std::fs::read_to_string(b.home.path().join("ipc.token")).unwrap();
+    let mut tcp = tokio::net::TcpStream::connect(("127.0.0.1", b.svc.ipc_port)).await.unwrap();
+    let cmd = json!({"cmd":"pipe","to":format!("{}.rapp", a.id),"port":port});
+    tcp.write_all(format!("{}\n{cmd}\nhello", json!({"token": token.trim()})).as_bytes()).await.unwrap();
+    let mut line = Vec::new();
+    while !line.ends_with(b"\n") {
+        let mut one = [0u8; 1];
+        tokio::time::timeout(WAIT, tcp.read_exact(&mut one)).await.expect("reply in time").unwrap();
+        line.push(one[0]);
+    }
+    let r: Value = serde_json::from_slice(&line).unwrap();
+    assert_eq!(r, json!({"ok":true,"path":"lan"}));
+    let mut got = [0u8; 5];
+    tokio::time::timeout(WAIT, tcp.read_exact(&mut got)).await.unwrap().unwrap();
+    assert_eq!(&got, b"hello");
+    // the IPC connection is the port's stream now: a half-close goes through, and the end comes back
+    tcp.write_all(b" world").await.unwrap();
+    tcp.shutdown().await.unwrap();
+    let mut rest = Vec::new();
+    tokio::time::timeout(WAIT, tcp.read_to_end(&mut rest)).await.unwrap().unwrap();
+    assert_eq!(rest, b" world");
+    // and B's hosts lists what A offers B
+    let r = ipc_once(&b.svc, b.home.path(), json!({"cmd":"hosts"})).await;
+    assert_eq!(r, json!({"ok":true,"hosts":[{"id": a.id, "name": "a", "shares": [{"port": port}]}]}));
+}

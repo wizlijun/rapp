@@ -14,7 +14,6 @@ use crate::state::State;
 
 /// The device a name means, in this step: the 9-digit ID that is the last label before `.rapp`
 /// (or the whole name, when it is just the ID). Anything else is None.
-#[allow(dead_code)] // Used from Task 7 (the forward listener).
 pub fn target_id(name: &str) -> Option<String> {
     let name = name.trim().to_ascii_lowercase();
     let name = name.strip_suffix('.').unwrap_or(&name);
@@ -28,7 +27,6 @@ pub fn target_id(name: &str) -> Option<String> {
 }
 
 #[derive(Debug, PartialEq)]
-#[allow(dead_code)] // Used from Task 7.
 pub enum PipeErr {
     /// The name does not mean a device.
     UnknownName,
@@ -43,8 +41,7 @@ pub enum PipeErr {
 }
 
 impl PipeErr {
-    #[allow(dead_code)] // Used from Task 7.
-    pub fn as_str(&self) -> &str {
+        pub fn as_str(&self) -> &str {
         match self {
             PipeErr::UnknownName => "unknown name",
             PipeErr::NoKey => "no key",
@@ -56,7 +53,6 @@ impl PipeErr {
 
 /// One entry of `local/hosts.json` (the hub's `hosts::Host`, without what is not needed here).
 #[derive(Debug, Clone, PartialEq, Deserialize)]
-#[allow(dead_code)] // `known_hosts` is also used from Task 7.
 pub struct KnownHost {
     pub id: String,
     pub name: String,
@@ -75,7 +71,6 @@ pub fn known_hosts(home: &Path) -> Vec<KnownHost> {
 
 /// Opens a forward to `port` of the device `name` means. The pipe carries the port's bytes;
 /// the second value is the path it goes by (`lan`, `direct` or `relay`).
-#[allow(dead_code)] // Used from Task 7.
 pub async fn open(state: &State, name: &str, port: u16) -> Result<(Pipe, &'static str), PipeErr> {
     let (pipe, reply, path) = ask(state, name, &Op::Forward { port }).await?;
     answer(&reply)?;
@@ -83,7 +78,6 @@ pub async fn open(state: &State, name: &str, port: u16) -> Result<(Pipe, &'stati
 }
 
 /// The shares the device `name` means offers this one: the `shares` array of its reply.
-#[allow(dead_code)] // Used from Task 7.
 pub async fn shares_of(state: &State, name: &str) -> Result<Value, PipeErr> {
     let (_, reply, _) = ask(state, name, &Op::ListShares).await?;
     answer(&reply)?;

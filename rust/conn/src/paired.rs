@@ -42,6 +42,20 @@ impl Paired {
         self.list.lock().unwrap().iter().any(|e| e.fp == *fp)
     }
 
+    /// The devices `who` can mean: an exact self-declared name, or a fingerprint that starts with
+    /// `who` (at least 8 hex digits, case ignored). Each with its name.
+    pub fn find(&self, who: &str) -> Vec<(Fp, String)> {
+        let prefix = (who.len() >= 8 && who.bytes().all(|b| b.is_ascii_hexdigit())).then(|| who.to_ascii_lowercase());
+        let by_fp = |e: &Entry| prefix.as_deref().is_some_and(|p| e.fp.to_string().starts_with(p));
+        let list = self.list.lock().unwrap();
+        list.iter().filter(|e| e.name == who || by_fp(e)).map(|e| (e.fp, e.name.clone())).collect()
+    }
+
+    /// The name stored for `fp`, if any.
+    pub fn name_of(&self, fp: &Fp) -> Option<String> {
+        self.list.lock().unwrap().iter().find(|e| e.fp == *fp).map(|e| e.name.clone())
+    }
+
     /// Adds the device, or updates the name of one already there; writes the file.
     pub fn add(&self, fp: &Fp, name: &str) -> Result<()> {
         let mut list = self.list.lock().unwrap();
@@ -120,6 +134,23 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("paired.json"), "{nope").unwrap();
         assert!(Paired::load(dir.path()).is_err());
+    }
+
+    #[test]
+    fn find_by_name_or_fingerprint_prefix() {
+        let d = tempfile::tempdir().unwrap();
+        let p = Paired::empty(d.path());
+        let (a, b) = (Fp([0xab; 32]), Fp([0xcd; 32]));
+        p.add(&a, "mini").unwrap();
+        p.add(&b, "mini").unwrap(); // two devices that call themselves the same
+        p.add(&Fp([0xef; 32]), "书房").unwrap();
+        assert_eq!(p.find("书房").len(), 1);
+        assert_eq!(p.find("mini").len(), 2);
+        assert_eq!(p.find("abababab"), vec![(a, "mini".to_string())]);
+        assert_eq!(p.find("ABABABAB").len(), 1);
+        assert!(p.find("ababab").is_empty()); // under 8 hex digits is not a prefix
+        assert!(p.find("nobody").is_empty());
+        assert_eq!(p.name_of(&a).as_deref(), Some("mini"));
     }
 
     #[test]

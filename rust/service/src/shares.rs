@@ -13,7 +13,6 @@ const FILE: &str = "shares.json";
 const BAD: &str = "shares.json.bad";
 
 /// Ports that usually expose a login, a proxy, a database or a container API.
-#[allow(dead_code)] // used by `rapp share`'s warning (Task 7)
 const SENSITIVE: [u16; 17] = [
     22, 23, 3389, 5900, 5901, 2375, 2376, 1080, 3128, 8118, 3306, 5432, 6379, 27017, 9200, 1433, 1521,
 ];
@@ -70,15 +69,26 @@ impl Shares {
 
     /// Adds, or replaces the share of the same port. Err("limit") at MAX_SHARES; Err("bad port") for 0.
     pub fn add(&self, share: Share) -> Result<()> {
-        if share.port == 0 {
+        self.add_all(vec![share])
+    }
+
+    /// `add` for each, saved as one write: either all of them are in the table, or none.
+    /// A port given twice is added once, the later one winning.
+    pub fn add_all(&self, shares: Vec<Share>) -> Result<()> {
+        if shares.iter().any(|s| s.port == 0) {
             return Err(anyhow!("bad port"));
         }
         let mut items = self.items.lock().unwrap();
         let mut next = items.0.clone();
-        match next.iter().position(|s| s.port == share.port) {
-            Some(i) => next[i] = share,
-            None if next.len() >= MAX_SHARES => return Err(anyhow!("limit")),
-            None => next.push(share),
+        for share in shares {
+            match next.iter().position(|s| s.port == share.port) {
+                Some(i) => next[i] = share,
+                None => next.push(share),
+            }
+        }
+        // A table that is over the limit already (written by hand) may still have its shares replaced.
+        if next.len() > MAX_SHARES.max(items.0.len()) {
+            return Err(anyhow!("limit"));
         }
         next.sort_by_key(|s| s.port);
         self.save(&mut items, next)
@@ -118,7 +128,6 @@ impl Shares {
 }
 
 /// Ports the user should be warned about before sharing them.
-#[allow(dead_code)] // used by `rapp share`'s warning (Task 7)
 pub fn sensitive(port: u16) -> bool {
     SENSITIVE.contains(&port)
 }
@@ -169,6 +178,27 @@ mod tests {
         for p in 1..=64 { s.add(share(p)).unwrap(); }
         assert_eq!(s.add(share(65)).unwrap_err().to_string(), "limit");
         s.add(share(64)).unwrap(); // replacing one that exists is not a 65th
+    }
+
+    #[test]
+    fn add_all_saves_all_or_none() {
+        let d = tempfile::tempdir().unwrap();
+        let (s, _) = Shares::load(d.path());
+        for p in 1..=62 { s.add(share(p)).unwrap(); }
+        // 62 + two new ones is 64; 62 replaced plus two new is also 64
+        s.add_all(vec![Share { note: "x".into(), ..share(62) }, share(100), share(101)]).unwrap();
+        assert_eq!(s.list().len(), 64);
+        assert_eq!(s.get(62).unwrap().note, "x");
+        assert_eq!(Shares::load(d.path()).0.list().len(), 64);
+        // a 65th is refused and nothing of the batch is kept
+        s.remove(100).unwrap();
+        assert_eq!(s.add_all(vec![share(200), share(201)]).unwrap_err().to_string(), "limit");
+        assert_eq!(s.add_all(vec![share(200), share(0)]).unwrap_err().to_string(), "bad port");
+        assert!(s.get(200).is_none());
+        assert!(Shares::load(d.path()).0.get(200).is_none());
+        // the same port twice counts once
+        s.add_all(vec![share(300), Share { note: "y".into(), ..share(300) }]).unwrap();
+        assert_eq!(s.get(300).unwrap().note, "y");
     }
 
     #[test]
