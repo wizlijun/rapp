@@ -189,12 +189,64 @@ void main() {
       e.port.emit(ScreenLockedEvent(sid, true));
       a.flushMicrotasks();
       expect(e.calls('unlock'), hasLength(1));
+      e.port.emit(ScreenLockedEvent(sid, false)); // the saved password worked
       e.port.emit(DisconnectedEvent(sid, 'connection closed'));
       e.state.reconnect('111/desktop:');
       a.flushMicrotasks();
       e.port.emit(ScreenLockedEvent(e.sid('desktop:'), true));
       a.flushMicrotasks();
       expect(e.calls('unlock'), hasLength(2));
+    });
+  });
+
+  test('unconfirmed auto attempt is not typed again after a reconnect', () {
+    env((a, e, store) {
+      final asks = <String>[];
+      e.state.unlockAsks.listen(asks.add);
+      final sid = e.sid('desktop:');
+      e.port.emit(ScreenLockedEvent(sid, true));
+      a.flushMicrotasks();
+      expect(e.calls('unlock'), hasLength(1));
+      a.elapse(const Duration(seconds: 2));
+      e.port.emit(DisconnectedEvent(sid, 'connection closed'));
+      e.state.reconnect('111/desktop:');
+      a.flushMicrotasks();
+      e.port.emit(ScreenLockedEvent(e.sid('desktop:'), true));
+      a.flushMicrotasks();
+      expect(e.calls('unlock'), hasLength(1));
+      expect(store.credential!.password, 'secret');
+      expect(store.credential!.auto, false);
+      expect(asks, ['111']);
+      a.elapse(const Duration(seconds: 10));
+      a.flushMicrotasks();
+      expect(e.calls('unlock'), hasLength(1));
+      expect(asks, ['111']);
+    });
+  });
+
+  test('unconfirmed auto attempt survives the session ending', () {
+    env((a, e, store) {
+      e.state.openOrSwitch('111', 'app', 'App');
+      a.flushMicrotasks();
+      final appSid = e.sid('app');
+      e.port.emit(ScreenLockedEvent(appSid, true));
+      a.flushMicrotasks();
+      expect(e.calls('unlock'), hasLength(1));
+      e.state.select('111/app');
+      e.state.endCurrent();
+      e.port.emit(ClosedEvent(appSid, 'closed'));
+      a.flushMicrotasks();
+      e.state.openOrSwitch('111', 'app2', 'App2');
+      a.flushMicrotasks();
+      final asks = <String>[];
+      e.state.unlockAsks.listen(asks.add);
+      e.port.emit(ScreenLockedEvent(e.sid('app2'), true));
+      a.flushMicrotasks();
+      a.elapse(const Duration(seconds: 5));
+      a.flushMicrotasks();
+      expect(e.calls('unlock'), hasLength(1));
+      expect(store.credential!.auto, false);
+      expect(asks, ['111']);
     });
   });
 
