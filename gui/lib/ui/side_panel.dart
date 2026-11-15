@@ -251,7 +251,7 @@ class _Footer extends StatelessWidget {
                 '在线设备',
                 '${state.onlineDevices}',
                 const Key('total-online'),
-                state.onlineDevices == 0,
+                state.deviceCount > 1 && state.remoteOnline == 0,
               ),
               _Total(
                 '会话',

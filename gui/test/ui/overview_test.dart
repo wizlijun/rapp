@@ -259,7 +259,7 @@ void main() {
     expect(find.ancestor(of: find.byKey(const Key('count-active')), matching: find.byType(InkWell)), findsNothing);
   });
 
-  testWidgets('device online shows online/total without 本机', (tester) async {
+  testWidgets('device online shows online/total with 本机, as many as the wall has columns', (tester) async {
     hosts = [
       {'id': 'm1', 'name': 'mini'},
       {'id': 'm2', 'name': 'air'},
@@ -267,20 +267,20 @@ void main() {
     offline = {'m2'};
     await boot(tester);
     await show(tester);
-    expect(inside('count-online', find.text('1/2')), findsOneWidget);
+    expect(inside('count-online', find.text('2/3')), findsOneWidget);
   });
 
-  testWidgets('device online cell shows the offline lamp at 0 online, active otherwise', (tester) async {
+  testWidgets('device online cell shows the offline lamp when every added device is off, active otherwise', (tester) async {
     offline = {'m1'};
     await boot(tester);
     await show(tester);
-    expect(inside('count-online', find.text('0/1')), findsOneWidget);
+    expect(inside('count-online', find.text('1/2')), findsOneWidget);
     expect(tester.widget<StatusLamp>(inside('count-online', find.byType(StatusLamp))).kind, Lamp.offline);
     s.dispose();
     offline = {};
     await boot(tester);
     await show(tester);
-    expect(inside('count-online', find.text('1/1')), findsOneWidget);
+    expect(inside('count-online', find.text('2/2')), findsOneWidget);
     expect(tester.widget<StatusLamp>(inside('count-online', find.byType(StatusLamp))).kind, Lamp.active);
   });
 

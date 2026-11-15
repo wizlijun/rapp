@@ -2273,7 +2273,14 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
-  int get onlineDevices => probes.values.where((p) => p.lamp == Lamp.active).length;
+  /// Remote devices whose last probe found them up.
+  int get remoteOnline => probes.values.where((p) => p.lamp == Lamp.active).length;
+
+  /// Devices online, 本机 included: this rapp runs on it, so it is always up.
+  int get onlineDevices => 1 + remoteOnline;
+
+  /// Every device, 本机 and the added ones: as many as the overview's device wall has columns.
+  int get deviceCount => 1 + (hub?.hosts.length ?? 0);
 
   /// This machine has a relay set (from the service status): hosts go by bare ID and may be forced onto it.
   bool get relaySet => _relaySet;

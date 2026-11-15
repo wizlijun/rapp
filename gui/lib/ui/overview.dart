@@ -37,7 +37,7 @@ class Overview extends StatelessWidget {
       builder: (context, _) {
         final entries = state.entries;
         final hosts = state.hub?.hosts ?? const [];
-        final counts = overviewCounts(entries, online: state.onlineDevices, devices: hosts.length);
+        final counts = overviewCounts(entries, online: state.onlineDevices, devices: state.deviceCount);
         final cols = deviceColumns(
           hosts: hosts,
           probes: state.probes,
@@ -152,9 +152,10 @@ class _CountsRow extends StatelessWidget {
             const SizedBox(width: _gap),
             _CountCell(
               cellKey: 'count-online',
-              lamp: c.online == 0 ? Lamp.offline : Lamp.active,
+              // 本机 is always up and counted; the lamp goes out when every added device is off.
+              lamp: c.devices > 1 && c.online <= 1 ? Lamp.offline : Lamp.active,
               value: '${c.online}/${c.devices}',
-              muted: c.online == 0,
+              muted: c.devices > 1 && c.online <= 1,
               label: '设备在线',
               onTap: () => state.showPanel(PanelTab.devices),
             ),

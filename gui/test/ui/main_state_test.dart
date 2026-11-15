@@ -277,7 +277,8 @@ void main() {
     expect(s.probes['222']!.lamp, Lamp.offline);
     expect(s.probes['222']!.word, '离线');
     expect(s.probes['222']!.error, isNotEmpty);
-    expect(s.onlineDevices, 1);
+    expect(s.remoteOnline, 1);
+    expect(s.onlineDevices, 2); // 本机 counts too
     expect(s.appName('111', 'a'), 'Aaa');
     expect(s.appName('111', 'zzz'), 'zzz');
     expect(s.deviceName('222'), '222');
