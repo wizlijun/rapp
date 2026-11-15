@@ -85,4 +85,17 @@ void main() {
     Process.runSync('chmod', ['500', tmp.path]);
     expect(() => UiPrefs().save(tmp.path), throwsA(isA<FileSystemException>()));
   });
+  test('first round-trips, defaults to device, and keeps the old fields', () {
+    final p = UiPrefs(first: FirstLayer.project)..save(tmp.path);
+    final back = UiPrefs.load(tmp.path);
+    expect(back.first, FirstLayer.project);
+    expect(back.theme, p.theme);
+    expect(UiPrefs().first, FirstLayer.device);
+    expect(UiPrefs.load('${tmp.path}/none').first, FirstLayer.device);
+    expect(File('${tmp.path}/gui.json').readAsStringSync(), contains('"first":"project"'));
+  });
+  test('an unknown first is device', () {
+    File('${tmp.path}/gui.json').writeAsStringSync('{"first":"sideways"}');
+    expect(UiPrefs.load(tmp.path).first, FirstLayer.device);
+  });
 }

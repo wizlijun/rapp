@@ -3,6 +3,9 @@ import 'dart:io';
 
 import 'tokens.dart';
 
+/// Which layer the window opens on (`first` in gui.json): the devices or the projects.
+enum FirstLayer { device, project }
+
 /// GUI preferences, stored in `<dir>/gui.json` (`devices/<id>/` in the data root).
 class UiPrefs {
   UiPrefs({
@@ -11,6 +14,7 @@ class UiPrefs {
     this.autoSaveTraffic = true,
     this.inputHistory = true,
     this.termKeyRow = false,
+    this.first = FirstLayer.device,
   });
 
   RappTheme theme;
@@ -26,6 +30,9 @@ class UiPrefs {
   /// 按键排 (`term_key_row`): the six big keys on a terminal's stage, on this console. Missing or bad means off.
   bool termKeyRow;
 
+  /// 排列 (`first`): the layer shown first. Missing or unknown means devices.
+  FirstLayer first;
+
   /// Never throws: a missing or corrupt file gives the defaults.
   static UiPrefs load(String dir) {
     try {
@@ -36,6 +43,7 @@ class UiPrefs {
       final save = j['auto_save_traffic'];
       final ih = j['input_history'];
       final kr = j['term_key_row'];
+      final fl = j['first'];
       return UiPrefs(
         theme: RappTheme.values.firstWhere(
           (t) => t.name == name,
@@ -45,6 +53,10 @@ class UiPrefs {
         autoSaveTraffic: save is bool ? save : true,
         inputHistory: ih is bool ? ih : true,
         termKeyRow: kr is bool ? kr : false,
+        first: FirstLayer.values.firstWhere(
+          (v) => v.name == fl,
+          orElse: () => FirstLayer.device,
+        ),
       );
     } catch (_) {
       return UiPrefs();
@@ -61,6 +73,7 @@ class UiPrefs {
         'auto_save_traffic': autoSaveTraffic,
         'input_history': inputHistory,
         'term_key_row': termKeyRow,
+        'first': first.name,
       }),
     );
   }
