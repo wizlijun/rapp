@@ -469,6 +469,8 @@ List<Widget> composerLayer(
                 builder: (context, c) => term == null
                     // An app window: the panel floats where the app's place is (floating-composer spec).
                     ? FloatingComposer(
+                        // Per session: a switch mid-drag drops that drag instead of saving it into the new app.
+                        key: ValueKey(session.sid),
                         session: session,
                         onPlace: (p) => state.placeComposer(session, p),
                         child: ComposerPanel(

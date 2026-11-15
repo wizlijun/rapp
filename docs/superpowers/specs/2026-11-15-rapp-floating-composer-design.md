@@ -1,6 +1,6 @@
 # 写作面板浮动、可拖动（设计稿，短）
 
-状态：设计稿，待用户确认。改的是《写作面板》（`2026-11-14-rapp-composer-writing-panel-design.md`）W4 的画面上移，只影响 app 窗口；终端照旧。
+状态：用户已确认（2026-11-15），已实现并合入本地 main 913daab。改的是《写作面板》（`2026-11-14-rapp-composer-writing-panel-design.md`）W4 的画面上移，只影响 app 窗口；终端照旧。
 
 ## 1. 为什么
 

@@ -804,14 +804,18 @@ void main() {
 
     // Like MainWindow: a focused Focus above everything, and a CallbackShortcuts Esc (fullscreen).
     var escs = 0;
+    var stageSize = const Size(800, 600);
     Widget mainLike() => CallbackShortcuts(
           bindings: {const SingleActivator(LogicalKeyboardKey.escape): () => escs++},
-          child: Focus(autofocus: true, child: SizedBox(width: 800, height: 600, child: Stage(state: es))),
+          child: Focus(
+              autofocus: true,
+              child: SizedBox(width: stageSize.width, height: stageSize.height, child: Stage(state: es))),
         );
 
     // [reduced]: the platform asks for reduced motion.
     Future<void> showPicture(WidgetTester tester, {bool reduced = false}) async {
       escs = 0;
+      stageSize = const Size(800, 600);
       await tester.pumpWidget(wrap(mainLike(), disableAnimations: reduced));
       await tester.pump();
       await openEmbedded(tester);
@@ -1002,9 +1006,70 @@ void main() {
       await tester.pump();
       await tester.pump();
       expect(es.currentRemote!.appId, 'Notes');
-      if (find.byKey(const Key('composer-panel')).evaluate().isEmpty) await openPanel(tester);
+      // Open or not is the session's (R18): Notes' panel starts closed.
+      expect(find.byKey(const Key('composer-panel')), findsNothing);
+      await openPanel(tester);
       expect(panelRect(tester).bottom, 592);
       expect(panelRect(tester).center.dx, 400);
+    });
+
+    testWidgets('a session switch mid-drag saves for neither app', (tester) async {
+      await showPicture(tester);
+      await openEmbedded(tester, sid: 2, app: 'Notes');
+      port.emit(const ReadyEvent(2, 'Notes'));
+      port.emit(WindowsEvent(2, [rw(6, 800, 628)]));
+      await tester.pump();
+      await openPanel(tester);
+      await openEmbedded(tester, sid: 1, app: 'Safari');
+      await tester.pump();
+      expect(es.currentRemote!.appId, 'Safari');
+      await openPanel(tester);
+      final g = await tester.startGesture(tester.getCenter(grip));
+      await g.moveBy(const Offset(0, -100));
+      await tester.pump();
+      await openEmbedded(tester, sid: 2, app: 'Notes');
+      await tester.pump();
+      expect(es.currentRemote!.appId, 'Notes');
+      await g.moveBy(const Offset(0, -50));
+      await tester.pump();
+      await g.up();
+      await tester.pump();
+      await tester.pump(kDoubleTapTimeout);
+      expect(es.profiles.resolve('Notes').composerAt, isNull);
+      expect(es.profiles.resolve('Safari').composerAt, isNull);
+      expect(panelRect(tester).bottom, 592);
+    });
+
+    testWidgets('a drag that ends where it started writes nothing', (tester) async {
+      await showPicture(tester);
+      await openPanel(tester);
+      var saves = 0;
+      es.profiles.addListener(() => saves++);
+      await dragGrip(tester, const [Offset(0, -100), Offset(0, 100)]);
+      expect(panelRect(tester).bottom, 592);
+      expect(saves, 0);
+      expect(es.profiles.mine, isEmpty);
+    });
+
+    testWidgets('a smaller stage clamps the panel without rewriting its place; it comes back', (tester) async {
+      const at = InputPoint(0.5, 500);
+      es.profiles.setComposerAt('Safari', 'Safari', at);
+      await showPicture(tester);
+      await openPanel(tester);
+      expect(panelRect(tester).bottom, 500);
+      var saves = 0;
+      es.profiles.addListener(() => saves++);
+      stageSize = const Size(800, 400);
+      await tester.pumpWidget(wrap(mainLike()));
+      await tester.pump();
+      expect(panelRect(tester).bottom - tester.getTopLeft(find.byType(Stage)).dy, 392);
+      stageSize = const Size(800, 600);
+      await tester.pumpWidget(wrap(mainLike()));
+      await tester.pump();
+      expect(panelRect(tester).bottom, 500);
+      expect(saves, 0);
+      expect(es.profiles.resolve('Safari').composerAt, at);
+      await tester.pump(const Duration(seconds: 2));
     });
 
     testWidgets('the panel grows upward; its bottom stays', (tester) async {

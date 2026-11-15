@@ -69,7 +69,9 @@ class _FloatingComposerState extends State<FloatingComposer> {
   void _end(DragEndDetails _) {
     final bc = _drag;
     if (bc == null) return;
-    widget.onPlace(InputPoint.at(bc, _stage));
+    final p = InputPoint.at(bc, _stage);
+    // Dropped where it was: nothing to write (a default stays unwritten).
+    if (p != _at) widget.onPlace(p);
     setState(() => _drag = null);
     widget.session.composer.wantFocus();
   }
