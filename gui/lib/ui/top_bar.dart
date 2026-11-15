@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 
 import '../embed/stream_menu.dart';
+import '../embed/traffic_label.dart';
 import '../pages/app_profile_page.dart';
 import 'lamp.dart';
 import 'lifecycle.dart';
@@ -22,9 +23,6 @@ class TopBar extends StatelessWidget {
     required this.fullscreen,
     required this.onToggleFullscreen,
   });
-
-  /// Width the stream menu anchor (five bars + `0.0 KB/s`) takes in the row.
-  static const _streamAnchorWidth = 127.0;
 
   final MainState state;
   final bool fullscreen;
@@ -58,7 +56,7 @@ class TopBar extends StatelessWidget {
             // The 本机 and 远程 buttons come before it when there is room for them and a bit of the
             // session block; else the traffic label's menu carries all three parts.
             final baseIcons = 4 + (state.hub != null ? 1 : 0);
-            final trafficW = embedded ? (wide ? _streamAnchorWidth : 48.0) : 0.0;
+            final trafficW = embedded ? (wide ? TrafficLabel.wideWidth : 48.0) : 0.0;
             // 上一个项目 sits beside prev/next only when the bare row still has room for it.
             final previous = state.previousProject == null
                 ? null

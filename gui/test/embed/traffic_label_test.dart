@@ -56,14 +56,40 @@ void main() {
       ..apply(const TrafficEvent(1, 12000))
       ..apply(const WeakEvent(1, true, 1));
     await tester.pumpWidget(wrap(anchor(rs, port)));
-    expect(find.text('12.0 KB/s · 省流·1'), findsOneWidget);
+    expect(find.text('12.0 KB/s'), findsOneWidget);
+    expect(find.text('省流·1'), findsOneWidget);
+    // The word sits under the rate, not beside it.
+    expect(tester.getRect(find.text('省流·1')).top, greaterThanOrEqualTo(tester.getRect(find.text('12.0 KB/s')).bottom));
     expect(find.bySemanticsLabel('流量 12.0 KB/s，省流·1，打开流量优化菜单'), findsOneWidget);
     rs.apply(const WeakEvent(1, true, 2));
     await tester.pump();
-    expect(find.text('12.0 KB/s · 省流·2'), findsOneWidget);
+    expect(find.text('省流·2'), findsOneWidget);
     rs.apply(const WeakEvent(1, false));
     await tester.pump();
     expect(find.text('12.0 KB/s'), findsOneWidget);
+    expect(find.byKey(const Key('traffic-word')), findsNothing);
+  });
+
+  testWidgets('the label keeps one width whatever the rate, the word or open', (tester) async {
+    final widths = <double>{};
+    for (final bytes in [0, 1500, 12000, 999949, 2500000]) {
+      for (final word in [null, '省流·1', '本机网络弱', '弱网']) {
+        for (final isOpen in [false, true]) {
+          await tester.pumpWidget(wrap(Center(
+            child: TrafficLabel(bytesPerSecond: bytes, word: word, open: isOpen, onTap: () {}),
+          )));
+          expect(tester.takeException(), isNull, reason: '$bytes $word $isOpen');
+          widths.add(tester.getSize(find.byType(TrafficLabel)).width);
+        }
+      }
+    }
+    expect(widths, {TrafficLabel.wideWidth});
+    // The unit stays put: the rate is right-aligned in its box.
+    double unitRight() => tester.getRect(find.descendant(of: find.byKey(const Key('traffic-rate')), matching: find.byType(Text))).right;
+    await tester.pumpWidget(wrap(Center(child: TrafficLabel(bytesPerSecond: 0, open: false, onTap: () {}))));
+    final a = unitRight();
+    await tester.pumpWidget(wrap(Center(child: TrafficLabel(bytesPerSecond: 999949, open: false, onTap: () {}))));
+    expect(unitRight(), moreOrLessEquals(a));
   });
 
   test('trafficWord: which end is weak, else the saving level', () {
