@@ -379,6 +379,33 @@ void main() {
     expect(s.panel, isNull);
   });
 
+  testWidgets('tapping a project group switches to it; 未归项目的 is not tappable and has no count', (tester) async {
+    tester.view.physicalSize = const Size(800, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final p = s.createProject('写周报')!;
+    s.addMember(p.id, const AppRef('111', 'Safari', 'Safari'));
+    s.togglePanel();
+    await tester.pumpWidget(wrap(panel()));
+    await open(tester, 1, 'Safari');
+    await open(tester, 2, 'Mail');
+    await tester.tap(find.byKey(const Key('group-project')));
+    await tester.pump();
+    expect(find.byKey(Key('group-${p.id}')), findsOneWidget);
+    expect(find.text('未归项目的'), findsOneWidget);
+    expect(tester.getSize(find.byKey(Key('group-${p.id}'))).height, greaterThanOrEqualTo(48));
+    await tester.tap(find.byKey(Key('group-${p.id}')));
+    await tester.pump();
+    expect(s.currentProject, p.id);
+    expect(s.currentKey, '111/Safari');
+    expect(s.cue, '');
+    // Not a button, no count: the title is plain text.
+    expect(find.ancestor(of: find.text('未归项目的'), matching: find.byType(InkWell)), findsNothing);
+    expect(find.textContaining('未归项目的 '), findsNothing);
+    expect(find.textContaining('未归项目的（'), findsNothing);
+  });
+
   testWidgets('no overflow on a 400x500 window', (tester) async {
     tester.view.physicalSize = const Size(400, 500);
     tester.view.devicePixelRatio = 1;

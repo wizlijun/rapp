@@ -63,6 +63,10 @@ class StreamMenuAnchor extends StatefulWidget {
     required this.onAllClips,
     this.compact = false,
     this.net,
+    this.addTargets = const [],
+    this.onAddToProject,
+    this.canSaveProject = false,
+    this.onSaveProject,
   });
 
   /// Bars only, no rate text (narrow top bar).
@@ -134,6 +138,13 @@ class StreamMenuAnchor extends StatefulWidget {
 
   final Set<MenuPart> parts;
 
+  /// 「加入项目」: the projects (id, name) this session is not in yet, the pick, and 「存成项目」
+  /// (greyed when [canSaveProject] is false). A null [onSaveProject] leaves 「加入项目」 out.
+  final List<(String, String)> addTargets;
+  final void Function(String projectId)? onAddToProject;
+  final bool canSaveProject;
+  final void Function(String name)? onSaveProject;
+
   @override
   State<StreamMenuAnchor> createState() => _StreamMenuAnchorState();
 }
@@ -175,6 +186,10 @@ class _StreamMenuAnchorState extends State<StreamMenuAnchor> {
         onCopy: widget.onCopy,
         onAllClips: widget.onAllClips,
         net: widget.net,
+        addTargets: widget.addTargets,
+        onAddToProject: widget.onAddToProject,
+        canSaveProject: widget.canSaveProject,
+        onSaveProject: widget.onSaveProject,
       ),
       child: kind != 'stream'
           ? MenuCornerButton(
@@ -313,6 +328,10 @@ class StreamMenu extends StatefulWidget {
     required this.onCopy,
     required this.onAllClips,
     this.net,
+    this.addTargets = const [],
+    this.onAddToProject,
+    this.canSaveProject = false,
+    this.onSaveProject,
   });
 
   final NetStatus? net;
@@ -345,12 +364,28 @@ class StreamMenu extends StatefulWidget {
   final bool? forcedRelay;
   final VoidCallback? onToggleRoute;
 
+  /// 「加入项目」: the projects (id, name) this session is not in yet, the pick, and 「存成项目」
+  /// (greyed when [canSaveProject] is false). A null [onSaveProject] leaves 「加入项目」 out.
+  final List<(String, String)> addTargets;
+  final void Function(String projectId)? onAddToProject;
+  final bool canSaveProject;
+  final void Function(String name)? onSaveProject;
+
   @override
   State<StreamMenu> createState() => _StreamMenuState();
 }
 
 class _StreamMenuState extends State<StreamMenu> {
   final _expanded = <String>{};
+  bool _adding = false;
+  bool _naming = false;
+  final _name = TextEditingController();
+
+  @override
+  void dispose() {
+    _name.dispose();
+    super.dispose();
+  }
 
   RemoteSession get _s => widget.session;
   Object get _sid => _s.sid;
@@ -465,6 +500,40 @@ class _StreamMenuState extends State<StreamMenu> {
               enabled: window != null,
               onTap: () => _then(() => widget.port.moveTopLeft(_sid, window!)),
             ),
+          ],
+        ],
+        if (widget.onSaveProject != null) ...[
+          _Item('加入项目', key: const Key('add-to-project'), onTap: () => setState(() => _adding = !_adding)),
+          if (_adding) ...[
+            for (final (id, name) in widget.addTargets)
+              _Item(name, key: Key('add-to-$id'), indent: 24, onTap: () => _then(() => widget.onAddToProject!(id))),
+            if (_naming)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(36, 4, 12, 4),
+                child: TextField(
+                  key: const Key('save-project-name'),
+                  controller: _name,
+                  autofocus: true,
+                  textInputAction: TextInputAction.done,
+                  decoration: const InputDecoration(
+                    hintText: '存成项目',
+                    isDense: true,
+                    contentPadding: EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+                  ),
+                  onSubmitted: (v) {
+                    if (v.trim().isEmpty) return;
+                    _then(() => widget.onSaveProject!(v));
+                  },
+                ),
+              )
+            else
+              _Item(
+                '存成项目',
+                key: const Key('add-save-project'),
+                indent: 24,
+                enabled: widget.canSaveProject,
+                onTap: () => setState(() => _naming = true),
+              ),
           ],
         ],
         Padding(

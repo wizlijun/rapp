@@ -2250,6 +2250,9 @@ class MainState extends ChangeNotifier {
     _saveWorkspace();
   }
 
+  /// The app an open session is, as a project member.
+  static AppRef appRefOf(SessionEntry e) => AppRef(e.id, e.app, oneLine(e.appName));
+
   /// Whether there is anything open to save as a project.
   bool get canSaveOpenAsProject => _entries.isNotEmpty;
 
@@ -2260,7 +2263,7 @@ class MainState extends ChangeNotifier {
     final p = createProject(name);
     if (p == null) return null;
     for (final e in _entries) {
-      p.members.add(Member(AppRef(e.id, e.app, oneLine(e.appName))));
+      p.members.add(Member(appRefOf(e)));
     }
     _saveWorkspace();
     switchProject(p.id);

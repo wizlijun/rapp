@@ -47,15 +47,22 @@ class TopBar extends StatelessWidget {
             final term = rs != null && state.termPort?.owns(rs.sid) == true;
             final pane = rs == null ? null : state.termPaneOf(rs);
             final title = cur == null ? '' : (pane == null ? cur.appName : '${pane.command} · ${cur.appName}');
-            final sub = cur == null ? '' : _sub(cur, pane?.title);
+            final cueOn = state.cue.isNotEmpty;
+            final sub = cur == null ? '' : (cueOn ? state.cue : _sub(cur, pane?.title));
             // The fixed row: panel, prev, next, fullscreen, the needs anchor when there is a hub,
             // the overview button when shown, the stream anchor in embedded mode; and the gaps
             // (both paddings plus one after panel, overview, prev, session and next). Gaps and the
             // overview button appear only when they fit, so the row never overflows.
             // The 本机 and 远程 buttons come before it when there is room for them and a bit of the
             // session block; else the traffic label's menu carries all three parts.
-            final icons = 4 + (state.hub != null ? 1 : 0);
+            final baseIcons = 4 + (state.hub != null ? 1 : 0);
             final trafficW = embedded ? (wide ? _streamAnchorWidth : 48.0) : 0.0;
+            // 上一个项目 sits beside prev/next only when the bare row still has room for it.
+            final previous = state.previousProject == null
+                ? null
+                : state.projects.where((p) => p.id == state.previousProject).firstOrNull;
+            final showPrevProject = previous != null && box.maxWidth >= (baseIcons + 1) * 48 + trafficW;
+            final icons = baseIcons + (showPrevProject ? 1 : 0);
             // Their words only in a roomy bar (the tabs and the hint need the room more).
             final words = box.maxWidth >= 1000;
             final splitW = embedded ? (term ? 1 : 2) * (words ? menuButtonWidth : 48.0) : 0.0;
@@ -72,7 +79,7 @@ class TopBar extends StatelessWidget {
             final split = embedded && box.maxWidth >= (icons + 1) * 48 + trafficW + splitW + netW + 42 + 160 + chip;
             final streamW = trafficW + (split ? splitW : 0.0) + netW;
             double fixed(double gap, bool overview) =>
-                (icons + (overview ? 1 : 0)) * 48 + streamW + (overview ? 7 : 6) * gap;
+                (icons + (overview ? 1 : 0)) * 48 + streamW + ((overview ? 7 : 6) + (showPrevProject ? 1 : 0)) * gap;
             // K11: never below 300.
             final showOverview = box.maxWidth >= 300 && box.maxWidth >= fixed(0, true);
             // Room for the gaps plus the session block's lamp (13) and its gap (8).
@@ -112,7 +119,7 @@ class TopBar extends StatelessWidget {
                       constraints: BoxConstraints(maxWidth: sessionMax),
                       child: cur == null
                           ? Text(
-                              '没有选中的会话',
+                              _projectName() ?? '没有选中的会话',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(color: t.muted),
@@ -147,6 +154,7 @@ class TopBar extends StatelessWidget {
                                         ),
                                         Text(
                                           sub,
+                                          key: cueOn ? const Key('return-cue') : null,
                                           maxLines: 1,
                                           overflow: TextOverflow.ellipsis,
                                           style: small?.copyWith(
@@ -168,6 +176,25 @@ class TopBar extends StatelessWidget {
                     multi ? () => state.step(1) : null,
                   ),
                   SizedBox(width: gap),
+                  if (showPrevProject) ...[
+                    Semantics(
+                      container: true,
+                      excludeSemantics: true,
+                      button: true,
+                      label: '上一个项目：${previous.name}',
+                      onTap: state.backToPreviousProject,
+                      child: Tooltip(
+                        message: '上一个项目：${previous.name}',
+                        child: IconButton(
+                          key: const Key('prev-project'),
+                          icon: const Icon(Icons.undo),
+                          onPressed: state.backToPreviousProject,
+                          constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                        ),
+                      ),
+                    ),
+                    SizedBox(width: gap),
+                  ],
                   if (tabs != null && (tabs.tabs.length >= 2 || hidden || term))
                     Flexible(
                       child: SingleChildScrollView(
@@ -289,6 +316,13 @@ class TopBar extends StatelessWidget {
       canInsert: state.canInsert,
       onCopy: state.copyLocal,
       onAllClips: () => state.showPanel(PanelTab.resources),
+      addTargets: [
+        for (final p in state.projects)
+          if (!p.members.any((m) => m.key == cur.key)) (p.id, p.name),
+      ],
+      onAddToProject: (id) => state.addMember(id, MainState.appRefOf(cur)),
+      canSaveProject: state.canSaveOpenAsProject,
+      onSaveProject: state.saveOpenAsProject,
     );
   }
 
@@ -338,6 +372,12 @@ class TopBar extends StatelessWidget {
     } else {
       state.unhide(pick.$2);
     }
+  }
+
+  /// The current project's name, for the session's place when no session is current.
+  String? _projectName() {
+    final id = state.currentProject;
+    return state.projects.where((p) => p.id == id).firstOrNull?.name;
   }
 
   /// The session's second line, and a terminal's [pane] title after it.
