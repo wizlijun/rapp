@@ -4,8 +4,8 @@
 // - 远程 (🖥): the remote app's mirrored menus, nothing else;
 // - 流量优化 (the traffic label): stream presets and settings.
 // A bar too narrow for three buttons keeps the traffic label alone, with all three parts in it.
-// A terminal session (its port is a TermSessionPort) has 「按我的屏幕重排」 for traffic and only the
-// session group besides.
+// A terminal session (its port is a TermSessionPort) has 「按我的屏幕重排」 and 「本机 · 按键排」 for traffic and only
+// the session group besides.
 import 'package:flutter/material.dart';
 
 import '../hub_client.dart';
@@ -50,6 +50,8 @@ class StreamMenuAnchor extends StatefulWidget {
     this.onToggleRoute,
     this.onMarkInput,
     this.onClearInput,
+    this.termKeyRow = false,
+    this.onTermKeyRow,
     this.parts = allMenuParts,
     required this.open,
     required this.onToggle,
@@ -126,6 +128,10 @@ class StreamMenuAnchor extends StatefulWidget {
   final VoidCallback? onMarkInput;
   final VoidCallback? onClearInput;
 
+  /// A terminal's 「本机 · 按键排」: whether the key row is on, and the switch (null greys it).
+  final bool termKeyRow;
+  final ValueChanged<bool>? onTermKeyRow;
+
   final Set<MenuPart> parts;
 
   @override
@@ -145,6 +151,8 @@ class _StreamMenuAnchorState extends State<StreamMenuAnchor> {
         parts: parts,
         onMarkInput: widget.onMarkInput,
         onClearInput: widget.onClearInput,
+        termKeyRow: widget.termKeyRow,
+        onTermKeyRow: widget.onTermKeyRow,
         port: widget.port,
         session: widget.session,
         path: widget.path,
@@ -296,6 +304,8 @@ class StreamMenu extends StatefulWidget {
     this.onToggleRoute,
     this.onMarkInput,
     this.onClearInput,
+    this.termKeyRow = false,
+    this.onTermKeyRow,
     this.parts = allMenuParts,
     required this.clips,
     required this.canCopy,
@@ -309,6 +319,8 @@ class StreamMenu extends StatefulWidget {
   final Set<MenuPart> parts;
   final VoidCallback? onMarkInput;
   final VoidCallback? onClearInput;
+  final bool termKeyRow;
+  final ValueChanged<bool>? onTermKeyRow;
   final List<ClipEntry> clips;
   final bool Function(ClipEntry) canCopy;
 
@@ -383,9 +395,17 @@ class _StreamMenuState extends State<StreamMenu> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               if (parts.contains(MenuPart.stream)) ...[
-                if (!reduced && term)
-                  _Item('按我的屏幕重排', key: const Key('term-refit'), onTap: () => _then(() => port.refit(_sid)))
-                else if (!reduced)
+                if (!reduced && term) ...[
+                  _Item('按我的屏幕重排', key: const Key('term-refit'), onTap: () => _then(() => port.refit(_sid))),
+                  _head(t, '本机'),
+                  _Item(
+                    '按键排',
+                    key: const Key('term-key-row'),
+                    checked: widget.termKeyRow,
+                    enabled: widget.onTermKeyRow != null,
+                    onTap: () => _then(() => widget.onTermKeyRow!(!widget.termKeyRow)),
+                  ),
+                ] else if (!reduced)
                   ..._streamGroups(t, c)
                 else if (!all)
                   const _Item('连接断开时不能调', enabled: false),

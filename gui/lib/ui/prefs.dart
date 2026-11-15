@@ -5,7 +5,13 @@ import 'tokens.dart';
 
 /// GUI preferences, stored in `<dir>/gui.json` (`devices/<id>/` in the data root).
 class UiPrefs {
-  UiPrefs({this.theme = RappTheme.matrix, this.startFullscreen = true, this.autoSaveTraffic = true, this.inputHistory = true});
+  UiPrefs({
+    this.theme = RappTheme.matrix,
+    this.startFullscreen = true,
+    this.autoSaveTraffic = true,
+    this.inputHistory = true,
+    this.termKeyRow = false,
+  });
 
   RappTheme theme;
   bool startFullscreen;
@@ -17,6 +23,9 @@ class UiPrefs {
   /// 记下写作面板发出去的话 (`input_history`): the input record is kept. Missing or bad means on.
   bool inputHistory;
 
+  /// 按键排 (`term_key_row`): the six big keys on a terminal's stage, on this console. Missing or bad means off.
+  bool termKeyRow;
+
   /// Never throws: a missing or corrupt file gives the defaults.
   static UiPrefs load(String dir) {
     try {
@@ -26,6 +35,7 @@ class UiPrefs {
       final fs = j['start_fullscreen'];
       final save = j['auto_save_traffic'];
       final ih = j['input_history'];
+      final kr = j['term_key_row'];
       return UiPrefs(
         theme: RappTheme.values.firstWhere(
           (t) => t.name == name,
@@ -34,6 +44,7 @@ class UiPrefs {
         startFullscreen: fs is bool ? fs : true,
         autoSaveTraffic: save is bool ? save : true,
         inputHistory: ih is bool ? ih : true,
+        termKeyRow: kr is bool ? kr : false,
       );
     } catch (_) {
       return UiPrefs();
@@ -44,7 +55,13 @@ class UiPrefs {
   void save(String dir) {
     Directory(dir).createSync(recursive: true);
     File('$dir/gui.json').writeAsStringSync(
-      jsonEncode({'theme': theme.name, 'start_fullscreen': startFullscreen, 'auto_save_traffic': autoSaveTraffic, 'input_history': inputHistory}),
+      jsonEncode({
+        'theme': theme.name,
+        'start_fullscreen': startFullscreen,
+        'auto_save_traffic': autoSaveTraffic,
+        'input_history': inputHistory,
+        'term_key_row': termKeyRow,
+      }),
     );
   }
 }

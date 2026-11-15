@@ -1882,6 +1882,12 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 「按键排」: the terminal key row on or off; saved.
+  void setTermKeyRow(bool v) {
+    prefs.termKeyRow = v;
+    _save();
+  }
+
   void _save() {
     try {
       final dir = data.prefsDir();

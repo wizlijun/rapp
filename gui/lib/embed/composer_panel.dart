@@ -7,6 +7,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 import '../history/input_history.dart';
+import '../term/term_key_row.dart';
 import '../term/term_session_port.dart';
 import '../ui/controls.dart';
 import '../ui/main_state.dart';
@@ -448,13 +449,21 @@ class _ComposerPanelState extends State<ComposerPanel> {
 /// The stage's composer layer: the 「输入」 button at the bottom right while closed (with the
 /// upload strip, if any), the writing panel at the bottom centre while open. Both float over
 /// the picture and never change the stage's size (R12).
-List<Widget> composerLayer({required MainState state, required RemoteSession session, required SessionPort port}) {
+///
+/// A terminal's [keyRow] (「按键排」) adds the six keys: on the panel's line at the stage's two bottom corners, with
+/// 「输入」 just left of the right group; on a stage narrower than [keyRowWideAt] with the panel open, a line of its
+/// own right above the panel.
+List<Widget> composerLayer(
+    {required MainState state, required RemoteSession session, required SessionPort port, bool keyRow = false}) {
   final both = Listenable.merge([session, session.composer]);
+  final term = port is TermSessionPort ? port : null;
+  final keys = keyRow && term != null;
+  bool open() => session.composer.open && session.composerAllowed;
   return [
     Positioned.fill(
       child: ListenableBuilder(
         listenable: both,
-        builder: (context, _) => session.composer.open && session.composerAllowed
+        builder: (context, _) => open()
             ? LayoutBuilder(
                 builder: (context, c) => Align(
                   alignment: Alignment.bottomCenter,
@@ -462,14 +471,24 @@ List<Widget> composerLayer({required MainState state, required RemoteSession ses
                     padding: const EdgeInsets.only(bottom: 8),
                     child: SizedBox(
                       width: panelWidth(c.maxWidth),
-                      // Keyed by session: a switch is a new panel, and the old one's dispose
-                      // copies its text into its own session's draft.
-                      child: ComposerPanel(
-                        key: ValueKey(session.sid),
-                        state: state,
-                        session: session,
-                        port: port,
-                        maxHeight: c.maxHeight / 2,
+                      // The key row comes and goes before the panel; the panel stays the same element.
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          if (keys && c.maxWidth < keyRowWideAt) TermKeyRow(port: term, sid: session.sid, split: false),
+                          Flexible(
+                            // Keyed by session: a switch is a new panel, and the old one's dispose
+                            // copies its text into its own session's draft.
+                            child: ComposerPanel(
+                              key: ValueKey(session.sid),
+                              state: state,
+                              session: session,
+                              port: port,
+                              maxHeight: c.maxHeight / 2,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -478,9 +497,26 @@ List<Widget> composerLayer({required MainState state, required RemoteSession ses
             : const SizedBox.shrink(),
       ),
     ),
+    // A terminal's key row on the panel's line; always in the list, so toggling it moves nothing else.
+    if (term != null)
+      Positioned.fill(
+        child: ListenableBuilder(
+          listenable: both,
+          builder: (context, _) => keys
+              ? LayoutBuilder(
+                  builder: (context, c) => open() && c.maxWidth < keyRowWideAt
+                      ? const SizedBox.shrink() // above the panel instead
+                      : Align(
+                          alignment: Alignment.bottomCenter,
+                          child: TermKeyRow(port: term, sid: session.sid, split: true),
+                        ),
+                )
+              : const SizedBox.shrink(),
+        ),
+      ),
     Positioned(
-      right: 12,
-      bottom: 12,
+      right: keys ? keyRowInset + keyRowGroupWidth + 8 : 12,
+      bottom: keys ? keyRowBottom : 12,
       child: ListenableBuilder(
         listenable: both,
         builder: (context, _) {

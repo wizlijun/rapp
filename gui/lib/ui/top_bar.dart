@@ -265,6 +265,8 @@ class TopBar extends StatelessWidget {
       onToggleRoute: state.hubUsable ? () => state.setRoute(cur.id, !state.forcedRelay(cur.id)) : null,
       onMarkInput: state.markInput,
       onClearInput: state.clearInputMark,
+      termKeyRow: state.prefs.termKeyRow,
+      onTermKeyRow: state.setTermKeyRow,
       open: state.corner == corner,
       onToggle: () => state.toggleCorner(corner),
       onClose: state.closeCorner,

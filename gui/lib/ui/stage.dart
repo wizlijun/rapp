@@ -7,6 +7,7 @@ import '../embed/picture.dart';
 import '../embed/remote_session.dart';
 import '../embed/session_port.dart';
 import '../hub_client.dart';
+import '../term/term_key_row.dart';
 import '../term/term_stage.dart';
 import 'controls.dart';
 import 'disconnected_stage.dart';
@@ -164,11 +165,13 @@ class Stage extends StatelessWidget {
           );
           if (term && rs != null) {
             // The same tree whether the panel is open or not: the terminal stage is never remounted (its focus
-            // would fight the panel's caret), and the lift never changes the size it lays out at (Z2).
+            // would fight the panel's caret), and the lift never changes the size it lays out at (Z2). Nor does the
+            // key row: it floats over the picture too.
+            final keyRow = state.prefs.termKeyRow;
             return Stack(
               children: [
-                Positioned.fill(child: _lifted(rs, stage)),
-                ...composerLayer(state: state, session: rs, port: state.portOf(rs.sid)!),
+                Positioned.fill(child: _lifted(rs, stage, keyRow: keyRow, narrow: c.maxWidth < keyRowWideAt)),
+                ...composerLayer(state: state, session: rs, port: state.portOf(rs.sid)!, keyRow: keyRow),
               ],
             );
           }
@@ -191,11 +194,13 @@ class Stage extends StatelessWidget {
 
 /// While the writing panel is open the picture slides up one line (the size A sees stays as it was), in 150 ms
 /// (at once without animations); Transform moves hit tests with it, so a click lands where the picture is seen.
-Widget _lifted(RemoteSession session, Widget child) => ClipRect(
+/// A terminal's [keyRow] lifts it the same line, panel open or not; on a [narrow] stage with both, the row has a
+/// line of its own above the panel and the picture goes [keyRowLift] further.
+Widget _lifted(RemoteSession session, Widget child, {bool keyRow = false, bool narrow = false}) => ClipRect(
       child: ListenableBuilder(
         listenable: Listenable.merge([session, session.composer]),
         builder: (context, _) => TweenAnimationBuilder<double>(
-          tween: Tween(end: session.composer.open && session.composerAllowed ? pictureLift : 0),
+          tween: Tween(end: _lift(session.composer.open && session.composerAllowed, keyRow, narrow)),
           duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : const Duration(milliseconds: 150),
           curve: Curves.easeOut,
           builder: (_, v, child) => Transform.translate(offset: Offset(0, -v), child: child),
@@ -203,6 +208,9 @@ Widget _lifted(RemoteSession session, Widget child) => ClipRect(
         ),
       ),
     );
+
+double _lift(bool open, bool keyRow, bool narrow) =>
+    (open || keyRow ? pictureLift : 0) + (open && keyRow && narrow ? keyRowLift : 0);
 
 /// Paints [child] moved by under a device pixel, so its top-left lands on one: whatever it snaps in
 /// its own coordinates is then snapped on the screen too, wherever the layout put it.
