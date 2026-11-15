@@ -4316,6 +4316,82 @@ void main() {
       expect(st.cue, '3 分钟前离开');
     });
 
+    test('a failed open of a session outside the project keeps the project', () async {
+      final st = make();
+      await open(['com.a']);
+      final p = project(st, 'P', ['com.a']);
+      st.switchProject(p.id);
+      t.onSend = (m) {
+        if (m['cmd'] == 'open') t.emit({'event': 'error', 'req': m['req'], 'error': 'offline'});
+      };
+      await st.openOrSwitch('111', 'com.z', 'Z');
+      expect(st.currentKey, '111/com.a');
+      expect((st.currentProject, st.previousProject), (p.id, null));
+      expect(st.positions.of(p.id).leftAt, isNull);
+    });
+
+    test('embedded: a failed open stays on stage (it retries), so the project is left', () {
+      fakeAsync((a) {
+        final t = FakeTransport();
+        final st = MainState(hub: HubClient(t), data: DataDir(tmp.path), prefs: UiPrefs(), port: FakeSessionPort(), clock: () => now);
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            final ok = m['app'] == 'a';
+            t.emit(ok
+                ? {'event': 'opened', 'sid': 1, 'id': m['id'], 'app': m['app'], 'path': 'lan', 'port': 5001, 'token': 'tk', 'req': m['req']}
+                : {'event': 'error', 'error': 'timed out', 'req': m['req']});
+          }
+        };
+        a.flushMicrotasks();
+        st.openOrSwitch('111', 'a', 'a');
+        a.flushMicrotasks();
+        final p = project(st, 'P', ['a']);
+        st.switchProject(p.id);
+        st.openOrSwitch('111', 'z', 'z');
+        a.flushMicrotasks();
+        expect(st.currentKey, '111/z');
+        expect(st.recordFor('111/z')!.phase, Phase.disconnected);
+        expect((st.currentProject, st.previousProject), (null, p.id));
+        st.dispose();
+        a.flushTimers();
+      });
+    });
+
+    test('an open of a session outside the project leaves the project once it opens', () async {
+      final st = make();
+      await open(['com.a']);
+      final p = project(st, 'P', ['com.a']);
+      st.switchProject(p.id);
+      t.onSend = (m) {
+        if (m['cmd'] == 'open') t.emit({...opened(9, m['id'] as String, m['app'] as String), 'req': m['req']});
+      };
+      final opening = st.openOrSwitch('111', 'com.z', 'Z');
+      expect(st.currentKey, '111/com.z');
+      expect(st.currentProject, p.id, reason: 'still opening');
+      await opening;
+      expect(st.currentKey, '111/com.z');
+      expect((st.currentProject, st.previousProject), (null, p.id));
+      expect(st.positions.of(p.id).last, '111/com.a');
+    });
+
+    test('「全部打开」 on another project switches to it', () async {
+      final st = make();
+      await open(['com.a', 'com.q']);
+      final p = project(st, 'P', ['com.a']);
+      final q = project(st, 'Q', ['com.q', 'com.r']);
+      st.switchProject(p.id);
+      t.onSend = (m) {
+        if (m['cmd'] == 'open') t.emit({...opened(9, m['id'] as String, m['app'] as String), 'req': m['req']});
+      };
+      st.openAll(q.id);
+      expect((st.currentProject, st.previousProject), (q.id, p.id));
+      expect(st.grouping, Grouping.project);
+      await pump();
+      await pump();
+      expect(st.currentProject, q.id);
+      expect(q.members.map((m) => m.key), contains(st.currentKey));
+    });
+
     test('leaveProject goes back to no current project and records where', () async {
       final st = make();
       await open(['com.a']);

@@ -1100,5 +1100,23 @@ void main() {
       expect(find.text('写周报'), findsOneWidget);
       expect(find.text('没有选中的会话'), findsNothing);
     });
+
+    testWidgets('with nothing open in the project the cue shows under its name', (tester) async {
+      await boot(tester);
+      final a = s.createProject('写周报')!;
+      final b = s.createProject('发版')!;
+      s.switchProject(a.id);
+      s.switchProject(b.id);
+      now = now.add(const Duration(minutes: 25));
+      s.switchProject(a.id);
+      await tester.pump();
+      expect(find.text('写周报'), findsOneWidget);
+      final cue = find.byKey(const Key('return-cue'));
+      expect(tester.widget<Text>(cue).data, '25 分钟前离开');
+      expect(tester.widget<Text>(cue).style!.color, RappTokens.of(tester.element(cue)).muted);
+      await tester.pump(MainState.cueFor);
+      expect(find.byKey(const Key('return-cue')), findsNothing);
+      expect(find.text('写周报'), findsOneWidget);
+    });
   });
 }
