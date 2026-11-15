@@ -8,6 +8,7 @@ mod forward;
 pub mod forward_log;
 mod ipc;
 mod peer;
+mod pipe;
 mod relay_link;
 mod shares;
 mod state;
@@ -112,7 +113,7 @@ impl Service {
             log.event(Lvl::Info, "relay_legacy_dropped", json!({}));
         }
         let (port, ipc_port) = (cfg.port.unwrap_or(DEFAULT_PORT), cfg.ipc_port.unwrap_or(DEFAULT_IPC_PORT));
-        let identity = Identity::load_or_create(&opts.home, "device")?;
+        let identity = Arc::new(Identity::load_or_create(&opts.home, "device")?);
         let paired = rapp_conn::Paired::load(&opts.home).unwrap_or_else(|e| {
             log.event(Lvl::Warn, "paired_error", json!({"err": format!("{e:#}")}));
             rapp_conn::Paired::empty(&opts.home)
@@ -129,6 +130,8 @@ impl Service {
         let ipc_token = rapp_net::crypto::random_hex(16);
         rapp_net::config::write_private(&opts.home.join("ipc.token"), ipc_token.as_bytes())?;
 
+        let client_ep = rapp_net::quic::client_endpoint(([0, 0, 0, 0], 0).into())?;
+        let name = cfg.name.clone();
         let state = State {
             home: opts.home,
             bin_dir: opts.bin_dir,
@@ -148,13 +151,14 @@ impl Service {
             update: Mutex::default(),
             update_opts: opts.update,
             restart: tokio::sync::watch::channel(false).0,
-            identity,
+            identity: identity.clone(),
             paired,
             relay: Mutex::new(("off", None)),
             relay_settings: tokio::sync::watch::channel(0).0,
             forward_log: forward_log::ForwardLog::new(log.clone()),
             shares,
             forwards: forward::Forwards::new(),
+            outbound: rapp_conn::dial::Outbound::new(client_ep, identity.clone(), name),
         };
         let id = state.cfg.lock().unwrap().id.clone();
         let version = env!("CARGO_PKG_VERSION");
@@ -210,6 +214,7 @@ impl Service {
         for t in &self.tasks {
             t.abort();
         }
+        self.state.outbound.close();
         self.state.endpoint.close(0u32.into(), b"service stopped");
         self.state.workers.close_all();
     }
