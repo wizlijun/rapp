@@ -308,6 +308,22 @@ void main() {
     expect(rs.composer.takeReplay(), isFalse);
   });
 
+  test('compose_key does nothing when the panel is not allowed (the tab just became noComposer)', () {
+    final rs = RemoteSession(1, 'x');
+    rs.setProfile(const ResolvedProfile(name: 'X', composer: false));
+    rs.apply(const ComposeKeyEvent(1));
+    expect(rs.composer.open, isFalse);
+    expect(rs.composer.takeReplay(), isFalse);
+  });
+
+  test('a compose replay not taken before the panel closes is gone', () {
+    final rs = RemoteSession(1, 'x');
+    rs.apply(const ComposeKeyEvent(1));
+    rs.composer.open = false; // closed before its field took the caret
+    rs.composer.open = true; // a later open by the button must not replay
+    expect(rs.composer.takeReplay(), isFalse);
+  });
+
   group('input source and the marked text box', () {
     late List<String> log;
     RemoteSession session() {

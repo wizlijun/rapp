@@ -177,8 +177,8 @@ final class KeyTrackerRouteTests: XCTestCase {
         var h = ComposeHold<String>()
         h.start(sid: 7, "n", now: 0)
         XCTAssertTrue(h.holding)
-        XCTAssertTrue(h.add("i", now: 0.1))
-        XCTAssertTrue(h.add("h", now: 0.2))
+        XCTAssertEqual(h.add("i", now: 0.1), .held)
+        XCTAssertEqual(h.add("h", now: 0.2), .held)
         XCTAssertEqual(h.take(sid: 7, now: 0.3), ["n", "i", "h"])
         XCTAssertFalse(h.holding)
     }
@@ -193,15 +193,15 @@ final class KeyTrackerRouteTests: XCTestCase {
         // The first panel open can take longer than a frame; the letters typed meanwhile are kept.
         var h = ComposeHold<String>()
         h.start(sid: 7, "n", now: 0)
-        XCTAssertTrue(h.add("i", now: 0.3))
-        XCTAssertTrue(h.add("h", now: 0.7))
+        XCTAssertEqual(h.add("i", now: 0.3), .held)
+        XCTAssertEqual(h.add("h", now: 0.7), .held)
         XCTAssertEqual(h.take(sid: 7, now: 0.9), ["n", "i", "h"])
     }
 
     func testExpiredHoldIsDropped() {
         var h = ComposeHold<String>()
         h.start(sid: 7, "n", now: 0)
-        XCTAssertFalse(h.add("i", now: 1.6))
+        XCTAssertEqual(h.add("i", now: 1.6), .dropped)
         XCTAssertFalse(h.holding)
         XCTAssertEqual(h.take(sid: 7, now: 1.6), [])
     }
@@ -220,12 +220,59 @@ final class KeyTrackerRouteTests: XCTestCase {
         XCTAssertEqual(h.take(sid: 7, now: 0.1), [])
     }
 
+    func testFnGlobeLetterIsNotACompose() {
+        // Globe+E (emoji), Globe+F (full screen) are A's shortcuts.
+        XCTAssertFalse(isComposeKey(characters: "e", flags: [.function], isRepeat: false))
+    }
+
+    func testFocusOnAnotherPictureDropsTheHold() {
+        var h = ComposeHold<String>()
+        h.start(sid: 7, "n", now: 0)
+        h.focus(7)
+        h.focus(nil)  // the panel's blur, before the replay: the hold stays
+        XCTAssertTrue(h.holding)
+        h.focus(8)
+        XCTAssertFalse(h.holding)
+        XCTAssertEqual(h.add("i", now: 0.1), .notHolding)
+    }
+
+    func testComposeTurnedOffDropsTheHold() {
+        // The tab became a noComposer one before the panel opened: Dart ignores the compose_key, so
+        // the keys after the letter must not sit in the hold for 1.5 s.
+        var h = ComposeHold<String>()
+        h.start(sid: 7, "n", now: 0)
+        h.focus(7, compose: true)
+        XCTAssertTrue(h.holding)
+        h.focus(7, compose: false)
+        XCTAssertFalse(h.holding)
+    }
+
+    func testAddReportsADroppedHold() {
+        var h = ComposeHold<String>()
+        XCTAssertEqual(h.add("x", now: 0), .notHolding)
+        h.start(sid: 7, "n", now: 0)
+        XCTAssertEqual(h.add("i", now: 0.1), .held)
+        XCTAssertEqual(h.add("h", now: 1.6), .dropped)  // the caller lets go of what A holds
+        XCTAssertEqual(h.add("a", now: 1.7), .notHolding)
+    }
+
+    func testComposeStartsOnlyForAFocusedComposePicture() {
+        func start(_ down: Bool = true, composeOn: Bool = true, sid: Int64? = 3, c: String = "a") -> Int64? {
+            composeStart(keyDown: down, composeOn: composeOn, targetSid: sid, characters: c, flags: [], isRepeat: false)
+        }
+        XCTAssertEqual(start(), 3)
+        XCTAssertNil(start(composeOn: false))  // switch off, terminal, noComposer window
+        XCTAssertNil(start(sid: nil))          // picture not focused
+        XCTAssertNil(start(false))             // a release
+        XCTAssertNil(start(c: "1"))             // not a letter
+    }
+
     func testHoldCap() {
         var h = ComposeHold<String>(cap: 3)
         h.start(sid: 7, "a", now: 0)
-        XCTAssertTrue(h.add("b", now: 0))
-        XCTAssertTrue(h.add("c", now: 0))
-        XCTAssertFalse(h.add("d", now: 0))
+        XCTAssertEqual(h.add("b", now: 0), .held)
+        XCTAssertEqual(h.add("c", now: 0), .held)
+        XCTAssertEqual(h.add("d", now: 0), .dropped)
         XCTAssertFalse(h.holding)
     }
 }

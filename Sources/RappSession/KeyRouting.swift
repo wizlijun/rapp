@@ -105,12 +105,32 @@ public struct KeyTracker {
 }
 
 /// Whether a key press on the picture opens the writing panel (type-to-compose): a first press
-/// (not a repeat) without ⌘ ⌃ ⌥ whose characters, under the current layout, are exactly one
-/// letter. Shift and caps lock are fine; judged by character, not key position.
+/// (not a repeat) without ⌘ ⌃ ⌥ or Fn/Globe whose characters, under the current layout, are
+/// exactly one letter. Shift and caps lock are fine; judged by character, not key position.
 public func isComposeKey(characters: String?, flags: NSEvent.ModifierFlags, isRepeat: Bool) -> Bool {
-    guard !isRepeat, flags.intersection([.command, .control, .option]).isEmpty,
+    guard !isRepeat, flags.intersection([.command, .control, .option, .function]).isEmpty,
           let chars = characters, chars.count == 1, let c = chars.first else { return false }
     return c.isLetter
+}
+
+/// The session whose writing panel a main-window key opens (type-to-compose), or nil when the key
+/// goes on as usual: a key-down on the focused picture, compose on for it, and a compose letter.
+public func composeStart(keyDown: Bool, composeOn: Bool, targetSid: Int64?, characters: String?,
+                         flags: NSEvent.ModifierFlags, isRepeat: Bool) -> Int64? {
+    guard keyDown, composeOn, let sid = targetSid,
+          isComposeKey(characters: characters, flags: flags, isRepeat: isRepeat) else { return nil }
+    return sid
+}
+
+/// What `ComposeHold.add` did with an event.
+public enum HoldAdd: Equatable {
+    /// Queued behind the letter.
+    case held
+    /// Nothing is held: route the event as usual.
+    case notHolding
+    /// The hold was too old or too long and is gone, unreplayed: route the event as usual, and let
+    /// go of what A holds (a release that sat in the hold is gone with it).
+    case dropped
 }
 
 /// The compose letter and every main-window key event after it, held until Dart has moved the
@@ -137,16 +157,22 @@ public struct ComposeHold<Event> {
         events = [e]
     }
 
-    /// Queues `e` behind the held ones; false when nothing is held (or the hold just expired or
-    /// overflowed and was dropped): the caller routes `e` as usual.
-    public mutating func add(_ e: Event, now: TimeInterval) -> Bool {
-        guard sid != nil else { return false }
+    /// Queues `e` behind the held ones, or says why not (see `HoldAdd`).
+    public mutating func add(_ e: Event, now: TimeInterval) -> HoldAdd {
+        guard sid != nil else { return .notHolding }
         guard now - started <= expiry, events.count < cap else {
             clear()
-            return false
+            return .dropped
         }
         events.append(e)
-        return true
+        return .held
+    }
+
+    /// Picture focus moved to `sid`: a hold for another picture, or for one whose compose just went
+    /// off (the panel will not open), is dropped. nil is the panel's own blur before the replay, so
+    /// the hold stays.
+    public mutating func focus(_ sid: Int64?, compose: Bool = true) {
+        if let sid, let held = self.sid, held != sid || !compose { clear() }
     }
 
     /// The held events in arrival order when the hold is `sid`'s and still fresh; always clears.

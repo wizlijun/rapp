@@ -77,6 +77,11 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
   final Set<PhysicalKeyboardKey> _swallowed = {};
 
   static final _letter = RegExp(r'^\p{L}$', unicode: true);
+
+  /// A compose letter went to the draft and the panel has not taken the keys yet (no `picture_focus`
+  /// since): what is typed in that gap (a space, a digit) follows the letter, not A.
+  bool _composing = false;
+  static final _printable = RegExp(r'^\P{C}$', unicode: true);
   bool _disposed = false;
 
   @override
@@ -144,7 +149,8 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
         !keyboard.isControlPressed &&
         !keyboard.isAltPressed &&
         ch != null &&
-        _letter.hasMatch(ch)) {
+        (_composing ? _printable : _letter).hasMatch(ch)) {
+      _composing = true;
       _swallowed.add(event.physicalKey);
       _emit(ComposerInsertEvent(sid, PasteResult(text: ch)));
       return true;
@@ -245,6 +251,7 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
       }
       _focused = sid;
       _compose = sid != null && args['compose'] == true;
+      _composing = false;
       return null;
     }
     if (method == 'start') {

@@ -44,6 +44,8 @@ class RemoteSession extends ChangeNotifier {
       final s = inputSource;
       if (s != null && !s.ascii) selectInput('');
     }
+    // A held letter is for the open that asked for it; the runner has dropped it by the next one.
+    if (!open) composer.replayPending = false;
     _wasOpen = open;
   }
 
@@ -288,6 +290,9 @@ class RemoteSession extends ChangeNotifier {
         composer.wantFocus();
       case ComposeKeyEvent():
         // A letter on the picture (type-to-compose): the panel opens, takes the caret, then asks for the letter.
+        // Not when the panel is off here (the tab just became noComposer): the runner drops its hold when
+        // MainState sends compose:false for that picture.
+        if (!composerAllowed) break;
         composer.replayPending = true;
         composer.open = true;
         composer.wantFocus();

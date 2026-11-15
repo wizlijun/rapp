@@ -2391,6 +2391,20 @@ void main() {
       });
     });
 
+    test('a tab switch to a noComposer window re-sends compose:false, and back', () {
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(1, [rw(7)]));
+        final rs = st.currentRemote!;
+        rs.setProfile(const ResolvedProfile(windows: [WindowRule(kind: WindowKind.dialog, action: RuleAction.noComposer)]));
+        st.focusPicture(1);
+        lastCall(port, 'picture_focus', {'sid': 1, 'compose': true});
+        port.emit(WindowsEvent(1, [rw(7), rw(8, kind: WindowKind.dialog)])); // 8 is new: current
+        lastCall(port, 'picture_focus', {'sid': 1});
+        rs.selectWindow(7);
+        lastCall(port, 'picture_focus', {'sid': 1, 'compose': true});
+      });
+    });
+
     test('a detached session is not resized from the stage; attach judges once', () {
       env((a, t, port, st, hints) {
         List<Map<String, Object?>> resizes() => port.calls.where((c) => c.$1 == 'resize').map((c) => c.$2).toList();
