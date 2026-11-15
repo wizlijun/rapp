@@ -31,9 +31,6 @@ const VIEWERS_WAIT: Duration = Duration::from_secs(1);
 /// How long the program's last output gets to come in after it exited. A process it left behind can keep the pty
 /// open for ever.
 const DRAIN_WAIT: Duration = Duration::from_secs(1);
-/// How long viewers get for the last screen before they are told the program ended. `view` sends a changed screen
-/// at most every 50 ms and only once the one before is acknowledged, and on the end it sends no more screens.
-const LAST_SCREEN_WAIT: Duration = Duration::from_millis(150);
 /// How long the program gets to end on SIGHUP before it is killed.
 const KILL_WAIT: Duration = Duration::from_secs(1);
 /// The size when the window's cannot be read.
@@ -177,11 +174,8 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
             128 + sig
         }
     };
-    // The last screen is in before anyone is told it was the last.
+    // The last screen is in before anyone is told it was the last; each viewer sends it before saying so.
     let _ = tokio::time::timeout(DRAIN_WAIT, drained).await;
-    if shared.viewers.load(Ordering::Relaxed) > 0 {
-        tokio::time::sleep(LAST_SCREEN_WAIT).await;
-    }
     shared.ended.send_replace(true);
     let until = Instant::now() + VIEWERS_WAIT;
     while shared.viewers.load(Ordering::Relaxed) > 0 && Instant::now() < until {

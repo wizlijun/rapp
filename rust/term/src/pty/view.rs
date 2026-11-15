@@ -139,7 +139,9 @@ impl<W: AsyncWrite + Unpin> Viewer<'_, W> {
         }
     }
 
+    /// The program is gone: its last screen first, past the ack gate and the gap, as no ack will release it later.
     async fn ended(&mut self) -> std::io::Result<()> {
+        self.send_screen(true).await?;
         self.error("session ended").await
     }
 
@@ -153,6 +155,11 @@ impl<W: AsyncWrite + Unpin> Viewer<'_, W> {
 
     /// The screen as it is, offered to the sender; a changed size is announced first.
     async fn refresh(&mut self) -> std::io::Result<()> {
+        self.send_screen(false).await
+    }
+
+    /// The screen as it is; `last` sends it now whatever is in flight. A changed size is announced first.
+    async fn send_screen(&mut self, last: bool) -> std::io::Result<()> {
         if !self.viewing {
             return Ok(());
         }
@@ -162,7 +169,8 @@ impl<W: AsyncWrite + Unpin> Viewer<'_, W> {
             self.panes = vec![pane];
             self.put(&panes_msg(&self.panes)).await?;
         }
-        for m in self.sender.offer(screen) {
+        let out = if last { self.sender.last(screen) } else { self.sender.offer(screen) };
+        for m in out {
             self.put(&m).await?;
         }
         Ok(())
@@ -506,6 +514,44 @@ mod tests {
         assert_eq!(late.next().await["t"], "panes");
         assert_eq!(late.next().await["error"], "session ended");
         assert_eq!(late.next().await, Value::Null);
+    }
+
+    #[tokio::test]
+    async fn the_last_screen_reaches_a_viewer_that_never_acks_before_the_end() {
+        let (sh, _input) = shared(20, 5);
+        let mut c = viewer(&sh);
+        let first = c.open().await;
+        assert_eq!(first["lines"][0][1], "");
+        // The first screen is never acknowledged, so nothing more is offered...
+        sh.emu.lock().unwrap().feed(b"working");
+        sh.rev.send_modify(|r| *r += 1);
+        settle().await;
+        // ...and the last output comes right before the end, inside MIN_GAP.
+        sh.emu.lock().unwrap().feed(b"\r\nBYE");
+        sh.rev.send_modify(|r| *r += 1);
+        sh.ended.send(true).unwrap();
+        let s = c.next().await;
+        assert_eq!((s["t"].as_str(), s["full"].as_bool()), (Some("screen"), Some(false)), "{s}");
+        let lines: Vec<(u64, &str)> =
+            s["lines"].as_array().unwrap().iter().map(|l| (l[0].as_u64().unwrap(), l[1].as_str().unwrap())).collect();
+        assert_eq!(lines, [(0, "working"), (1, "BYE")]);
+        assert_eq!(c.next().await["error"], "session ended");
+        assert_eq!(c.next().await, Value::Null);
+    }
+
+    #[tokio::test]
+    async fn the_last_screen_announces_a_new_size_first() {
+        let (sh, _input) = shared(20, 5);
+        let mut c = viewer(&sh);
+        c.open().await;
+        sh.emu.lock().unwrap().resize(30, 6);
+        sh.rev.send_modify(|r| *r += 1);
+        sh.ended.send(true).unwrap();
+        let p = c.next().await;
+        assert_eq!((p["t"].as_str(), p["panes"][0]["cols"].as_u64()), (Some("panes"), Some(30)), "{p}");
+        let s = c.next().await;
+        assert_eq!((s["cols"].as_u64(), s["full"].as_bool()), (Some(30), Some(true)));
+        assert_eq!(c.next().await["error"], "session ended");
     }
 
     #[tokio::test]

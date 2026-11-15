@@ -315,6 +315,10 @@ async fn run(a: &Args) -> Res<i32> {
     if a.name.as_deref().is_some_and(|n| session_name(n).is_none()) {
         return Err(usage("invalid session name"));
     }
+    // The path is not echoed: it is the user's.
+    if a.cwd.as_deref().is_some_and(|d| !Path::new(d).is_dir()) {
+        return Err(usage("--cwd is not a directory"));
+    }
     let opts = RunOpts {
         name: a.name.clone(),
         cwd: a.cwd.as_ref().map(PathBuf::from),

@@ -48,6 +48,16 @@ impl Sender {
         }
     }
 
+    /// The last screen there will be: it goes out now, in flight or not, as no ack will come for anything after it.
+    /// The peer has the in-flight screen, or is about to, so it is the base.
+    pub fn last(&mut self, s: Frame) -> Vec<Out> {
+        if let Some((_, sent)) = self.in_flight.take() {
+            self.acked = Some(sent);
+        }
+        self.latest = Some(s);
+        self.send_latest()
+    }
+
     fn send_latest(&mut self) -> Vec<Out> {
         let Some(latest) = self.latest.take() else { return Vec::new() };
         if self.acked.as_ref() == Some(&latest) {
@@ -150,6 +160,17 @@ mod tests {
         let mut big = scr("a");
         big.cols = 100;
         assert!(matches!(&s.offer(big)[0], Out::Screen { full: true, rev: 2, lines, .. } if lines.len() == 3));
+    }
+
+    #[test]
+    fn the_last_screen_goes_out_past_the_gate_as_a_diff_from_the_one_in_flight() {
+        let mut s = Sender::new("%1");
+        rev_of(&s.offer(scr("a")));
+        assert!(s.offer(scr("b")).is_empty());
+        let out = s.last(scr("c"));
+        assert!(matches!(&out[0], Out::Screen { full: false, rev: 2, lines, .. } if lines == &[(0, "c".to_string())]));
+        // Nothing when the peer already has it.
+        assert!(s.last(scr("c")).is_empty());
     }
 
     #[test]

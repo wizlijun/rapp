@@ -49,8 +49,12 @@ fn dup(master: &dyn MasterPty) -> File {
 
 impl Window {
     pub fn start(dir: &Path, args: &[&str]) -> Window {
-        let pair =
-            native_pty_system().openpty(PtySize { rows: 30, cols: 100, pixel_width: 0, pixel_height: 0 }).unwrap();
+        // One at a time: on macOS openpty is not safe to call from two threads at once (ptsname's buffer is shared).
+        static OPEN: Mutex<()> = Mutex::new(());
+        let pair = {
+            let _one = OPEN.lock().unwrap_or_else(|e| e.into_inner());
+            native_pty_system().openpty(PtySize { rows: 30, cols: 100, pixel_width: 0, pixel_height: 0 }).unwrap()
+        };
         let mut cmd = CommandBuilder::new(BIN);
         cmd.arg("run");
         cmd.arg("--dir");
@@ -159,6 +163,10 @@ impl Window {
 
 impl Drop for Window {
     fn drop(&mut self) {
+        if std::thread::panicking() {
+            // What run said, for the failing test's report.
+            eprintln!("the window showed: {:?}", self.output());
+        }
         if !matches!(self.child.try_wait(), Ok(Some(_))) {
             // SIGTERM first so `run` ends its program; then for sure.
             if let Some(pid) = self.child.process_id() {
@@ -250,7 +258,8 @@ impl Viewer {
         }
         self.mid = v["more"] == true;
         if !self.mid {
-            self.send(json!({"t":"ack","rev":v["rev"]})).await;
+            // The last screen comes right before the end, when there may be nobody left to ack to.
+            let _ = self.w.write_all(format!("{}\n", json!({"t":"ack","rev":v["rev"]})).as_bytes()).await;
         }
     }
 

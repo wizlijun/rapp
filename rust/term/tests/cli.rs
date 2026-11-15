@@ -123,6 +123,21 @@ fn list_new_and_watch_against_a_private_server() {
 }
 
 #[test]
+fn run_refuses_a_cwd_that_is_not_a_directory_without_echoing_it() {
+    let d = tempfile::Builder::new().prefix("rt").tempdir_in("/tmp").unwrap();
+    let file = d.path().join("SECRET-FILE");
+    std::fs::write(&file, b"").unwrap();
+    let missing = d.path().join("SECRET-MISSING");
+    let dir = d.path().to_str().unwrap();
+    for cwd in [&file, &missing] {
+        let o = run(&["run", "--dir", dir, "--cwd", cwd.to_str().unwrap(), "--", "/bin/cat"]);
+        assert_eq!(o.code, 2, "{cwd:?}");
+        assert!(o.stderr.contains("--cwd is not a directory"), "{}", o.stderr);
+        assert!(!o.stderr.contains("SECRET"), "{}", o.stderr);
+    }
+}
+
+#[test]
 fn runtime_errors_exit_1_and_do_not_echo_content() {
     let Some(s) = common::Server::start() else { return };
     let o = run(&["new", "--socket", &s.socket, "--tmux", "/nonexistent/tmux", "--", "echo", "SECRET-TEXT"]);
