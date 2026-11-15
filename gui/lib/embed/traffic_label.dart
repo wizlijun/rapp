@@ -95,6 +95,18 @@ class LevelBars extends StatelessWidget {
   }
 }
 
+const _barsWidth = 5 * 3.0 + 4 * 2.0;
+const _rateGap = 8.0;
+const _padding = 10.0;
+
+TextStyle _rateStyle(RappTokens t, {required bool open}) => TextStyle(
+      fontFamily: t.mono,
+      fontFamilyFallback: t.monoFallback,
+      fontSize: 12,
+      color: t.text,
+      fontWeight: open ? FontWeight.w600 : FontWeight.w400,
+    );
+
 class TrafficLabel extends StatelessWidget {
   const TrafficLabel({
     super.key,
@@ -105,6 +117,14 @@ class TrafficLabel extends StatelessWidget {
     this.compact = false,
     this.word,
   });
+
+  /// The label's width with the rate (not [compact]): the same for every rate and word, so what
+  /// sits left of it in the top bar stays put.
+  static const wideWidth = 127.0;
+
+  /// Width of the rate's box. The longest rate, `999.9 KB/s`, fits it in the app's monospace font;
+  /// a wider font or a large text scale shrinks the rate instead of widening the label.
+  static const _rateWidth = wideWidth - 2 * (_padding + 1) - _barsWidth - _rateGap;
 
   /// Bars only, without the rate text.
   final bool compact;
@@ -137,36 +157,57 @@ class TrafficLabel extends StatelessWidget {
           borderRadius: radius,
           child: Container(
             constraints: const BoxConstraints(minHeight: 48, minWidth: 48),
-            padding: const EdgeInsets.symmetric(horizontal: 10),
+            padding: const EdgeInsets.symmetric(horizontal: _padding),
             decoration: open
                 ? t.raiseBox(border: t.text)
                 : BoxDecoration(borderRadius: radius, border: Border.all(color: Colors.transparent)),
             child: Center(
               widthFactor: 1,
               heightFactor: 1,
-              child: Row(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                LevelBars(bytesPerSecond),
-                if (!compact) const SizedBox(width: 8),
-                if (!compact)
-                Text(
-                  word != null ? '$rate · $word' : rate,
-                  maxLines: 1,
-                  style: TextStyle(
-                    fontFamily: t.mono,
-                    fontFamilyFallback: t.monoFallback,
-                    fontSize: 12,
-                    color: t.text,
-                    fontWeight: open ? FontWeight.w600 : FontWeight.w400,
-                  ),
-                ),
-              ],
-            ),
+              child: compact ? LevelBars(bytesPerSecond) : _withRate(t, rate),
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  /// Bars and the rate in a fixed box, right-aligned so the unit stays put; the word goes on a
+  /// smaller line under them, so it never widens the label either.
+  Widget _withRate(RappTokens t, String rate) {
+    return SizedBox(
+      width: _barsWidth + _rateGap + _rateWidth,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              LevelBars(bytesPerSecond),
+              const SizedBox(width: _rateGap),
+              SizedBox(
+                width: _rateWidth,
+                child: FittedBox(
+                  key: const Key('traffic-rate'),
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: Text(rate, maxLines: 1, softWrap: false, style: _rateStyle(t, open: open)),
+                ),
+              ),
+            ],
+          ),
+          if (word != null)
+            Text(
+              word!,
+              key: const Key('traffic-word'),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.right,
+              style: TextStyle(fontSize: 11, color: t.text, fontWeight: open ? FontWeight.w600 : FontWeight.w400),
+            ),
+        ],
       ),
     );
   }
