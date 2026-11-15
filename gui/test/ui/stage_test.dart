@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/app_profile.dart' show RuleAction, WindowRule;
+import 'package:rapp/embed/composer_model.dart' show escKeyCode;
 import 'package:rapp/embed/picture.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
@@ -1090,6 +1092,35 @@ void main() {
       expect(m['window'], 9);
       expect(m['x'], 10.0);
       expect(m['y'], 10.0);
+    });
+
+    testWidgets('right-click on a popup\'s ×: 隐藏这类窗口 closes it and hides the ones like it, with 撤销', (tester) async {
+      await tester.pumpWidget(wrap(embedded()));
+      await showWindows(tester, [popup(9, WindowKind.popover, parent: 5), rw(5, 400, 328)]);
+      expect(find.byType(Texture), findsNWidgets(2));
+      await tester.tap(find.byKey(const ValueKey('popup-close-9')), buttons: kSecondaryButton);
+      await tester.pumpAndSettle();
+      expect(port.calls.where((c) => c.$1 == 'key'), isEmpty); // the menu alone sends nothing
+      await tester.tap(find.text('隐藏这类窗口'));
+      await tester.pumpAndSettle();
+      expect(port.calls.where((c) => c.$1 == 'key').single.$2['keyCode'], escKeyCode);
+      expect(find.byType(Texture), findsOneWidget);
+      expect(find.byKey(const ValueKey('popup-close-9')), findsNothing);
+      expect(es.profiles.resolve('Safari').windows.first,
+          const WindowRule(kind: WindowKind.popover, title: '', action: RuleAction.hide));
+      expect(find.text('已隐藏这类弹出窗口，可在 app 配置里改'), findsOneWidget);
+      await tester.tap(find.text('撤销'));
+      await tester.pumpAndSettle();
+      expect(find.byType(Texture), findsNWidgets(2));
+    });
+
+    testWidgets('a long press on a popup\'s × offers 隐藏这类窗口 too (touch)', (tester) async {
+      await tester.pumpWidget(wrap(embedded()));
+      await showWindows(tester, [popup(9, WindowKind.sheet, parent: 5), rw(5, 400, 328)]);
+      await tester.longPress(find.byKey(const ValueKey('popup-close-9')));
+      await tester.pumpAndSettle();
+      expect(find.text('隐藏这类窗口'), findsOneWidget);
+      expect(port.calls.where((c) => c.$1 == 'key'), isEmpty);
     });
 
     testWidgets('a popup of another window is not drawn', (tester) async {

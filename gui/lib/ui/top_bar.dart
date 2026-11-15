@@ -12,6 +12,7 @@ import 'needs_you.dart';
 import 'net_marker.dart';
 import 'corner_popover.dart';
 import 'projects.dart';
+import 'rule_snack.dart';
 import 'session_model.dart';
 import 'session_switcher.dart';
 import 'tokens.dart';
@@ -381,16 +382,11 @@ class TopBar extends StatelessWidget {
     );
   }
 
-  RelativeRect _at(BuildContext context, Offset p) {
-    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
-    return RelativeRect.fromLTRB(p.dx, p.dy, overlay.size.width - p.dx, overlay.size.height - p.dy);
-  }
-
   Future<void> _tabMenu(BuildContext context, Offset p, int window) async {
     final messenger = ScaffoldMessenger.of(context);
     final pick = await showMenu<Object?>(
       context: context,
-      position: _at(context, p),
+      position: menuAt(context, p),
       items: [
         PopupMenuItem<Object?>(value: 'hide', enabled: !state.isMainWindow(window), child: const Text('隐藏这类窗口')),
         const PopupMenuItem<Object?>(value: 'noComposer', child: Text('这个窗口不要输入区')),
@@ -399,14 +395,7 @@ class TopBar extends StatelessWidget {
     if (pick == null) return;
     final undo = pick == 'hide' ? state.hideLike(window) : state.noComposerLike(window);
     if (undo == null) return;
-    messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(SnackBar(
-      content: Text(pick == 'hide' ? '已隐藏，可在 app 配置里改' : '已关掉这个窗口的输入区，可在 app 配置里改'),
-      action: SnackBarAction(label: '撤销', onPressed: undo),
-      // With an action, Flutter keeps the snackbar up until it is tapped;
-      // this one is a heads-up, so let it go on its own.
-      persist: false,
-    ));
+    ruleSnack(messenger, pick == 'hide' ? '已隐藏，可在 app 配置里改' : '已关掉这个窗口的输入区，可在 app 配置里改', undo);
   }
 
   Future<void> _hiddenMenu(BuildContext context, Offset p) async {
@@ -415,7 +404,7 @@ class TopBar extends StatelessWidget {
     final app = state.current?.appName ?? '';
     final pick = await showMenu<(String, int)>(
       context: context,
-      position: _at(context, p),
+      position: menuAt(context, p),
       items: [
         for (final w in rs.hidden) ...[
           PopupMenuItem<(String, int)>(enabled: false, child: Text(w.title.isEmpty ? app : w.title)),
