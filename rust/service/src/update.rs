@@ -485,12 +485,18 @@ fn ps_fields(line: &str) -> Option<(u32, u32, &str)> {
 }
 
 /// Why rapp counts as in use, or None when nobody is using it (K17): a remote session, or a
-/// process from the bundle other than this service and its own children. A ps that fails, or
-/// whose output doesn't show this service, counts as in use.
+/// process from the bundle other than this service and its own children. Only an auto install
+/// waits for remote sessions; a manual one cuts them off (people upgrade A from B through rapp).
 pub async fn in_use(state: &State) -> Option<String> {
     if let Some(why) = sessions_in_use(state) {
         return Some(why);
     }
+    procs_in_use(state).await
+}
+
+/// A process from the bundle other than this service and its own children (session workers are
+/// its children). A ps that fails, or whose output doesn't show this service, counts as in use.
+async fn procs_in_use(state: &State) -> Option<String> {
     let o = state.update_opts.as_ref()?;
     let prefix = format!("{}/Contents/", o.bundle.display());
     let args = vec!["-axo".to_string(), "pid=,ppid=,comm=".to_string()];
@@ -611,16 +617,19 @@ async fn put_in_place(state: &Arc<State>, busy: Busy, mode: Mode) {
     let from = state.update.lock().unwrap().current.clone().unwrap_or_default();
     // The last gate (fix round 1): from here on B's opens are refused, then everything is checked
     // once more after the last await, right before the swap.
+    // A manual install or rollback goes in over open sessions: they drop with the restart.
     let before = {
         let mut u = state.update.lock().unwrap();
         let before = u.state;
-        if u.opening == 0 {
+        if gui || u.opening == 0 {
             u.state = "installing";
         }
         before
     };
     state.notify();
-    let why = if state.update.lock().unwrap().state == "installing" {
+    let why = if gui {
+        procs_in_use(state).await
+    } else if state.update.lock().unwrap().state == "installing" {
         in_use(state).await
     } else {
         Some("有远程会话正在连进来".to_string())
@@ -687,14 +696,15 @@ async fn put_in_place(state: &Arc<State>, busy: Busy, mode: Mode) {
     }
 }
 
-/// K20: after the GUI's connection closes (at most `gui_wait`), look for nobody using rapp for
-/// at most `gui_wait` more. Still in use: open the GUI again and fail.
+/// K20: after the GUI's connection closes (at most `gui_wait`), look for no other rapp process
+/// for at most `gui_wait` more; remote sessions don't count. Still open: open the GUI again and
+/// fail.
 async fn wait_for_nobody(state: &Arc<State>, o: &UpdateOpts, mut closed: watch::Receiver<()>) -> bool {
     // Nothing is ever sent: `changed` returns once the connection's sender is dropped.
     let _ = tokio::time::timeout(o.gui_wait, closed.changed()).await;
     let deadline = Instant::now() + o.gui_wait;
     loop {
-        if in_use(state).await.is_none() {
+        if procs_in_use(state).await.is_none() {
             return true;
         }
         let now = Instant::now();
@@ -722,9 +732,6 @@ pub async fn apply(state: &Arc<State>, confirm: bool, closed: watch::Receiver<()
         if u.needs_admin || !o.launchd {
             return page_err(if u.needs_admin { NEEDS_ADMIN } else { NOT_LAUNCHD }, u.page.clone());
         }
-    }
-    if let Some(why) = sessions_in_use(state) {
-        return err(&why);
     }
     if leftover(state) {
         return err(LEFTOVER);
@@ -754,9 +761,6 @@ pub async fn rollback(state: &Arc<State>, closed: watch::Receiver<()>) -> Value 
     }
     if leftover(state) {
         return err(LEFTOVER);
-    }
-    if let Some(why) = sessions_in_use(state) {
-        return err(&why);
     }
     let Some(busy) = Busy::begin(state) else { return err(BUSY) };
     let state = state.clone();

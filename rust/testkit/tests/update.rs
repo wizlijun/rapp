@@ -522,17 +522,30 @@ async fn signature_change_waits_for_confirm() {
 }
 
 #[tokio::test]
-async fn manual_apply_with_sessions_is_refused() {
+async fn manual_apply_goes_in_over_open_sessions() {
+    // People upgrade A from B through a rapp session: the session must not block it.
     let mut e = Env::new(Knobs { cfg: json!({"check_updates": false}), ..Default::default() });
     e.start().await;
     let (_ep, _conn, _s) = session(e.svc()).await;
     e.call(json!({"cmd":"update_check"})).await;
     e.wait_state("ready").await;
     let r = e.call(json!({"cmd":"update_apply"})).await;
-    assert_eq!(r["ok"], false, "{r}");
-    assert!(r["error"].as_str().unwrap().contains("个远程会话"), "{r}");
-    e.no_restart_for(POLL * 4).await;
-    assert_eq!(marker_of(&e.bundle), "current");
+    assert_eq!(r, json!({"ok": true}));
+    e.wait_restart().await;
+    assert_eq!(marker_of(&e.bundle), "new");
+    assert_eq!(e.applied()["mode"], "manual");
+}
+
+#[tokio::test]
+async fn rollback_goes_in_over_open_sessions() {
+    let mut e = Env::new(Knobs { cfg: json!({"check_updates": false}), ..Default::default() });
+    make_app(&e.previous(), "prev");
+    e.start().await;
+    let (_ep, _conn, _s) = session(e.svc()).await;
+    assert_eq!(e.call(json!({"cmd":"update_rollback"})).await, json!({"ok": true}));
+    e.wait_restart().await;
+    assert_eq!(marker_of(&e.bundle), "prev");
+    assert_eq!(e.applied()["mode"], "rollback");
 }
 
 #[tokio::test]

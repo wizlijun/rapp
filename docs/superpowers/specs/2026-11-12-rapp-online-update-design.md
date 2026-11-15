@@ -149,7 +149,7 @@
 - 新 app 的 `CFBundleShortVersionString` 必须等于 manifest 的 version。
 
 **④ 安装**（自动：满足 2.3 的「没人在用」；手动：GUI 点「立即升级」）
-1. 手动时，GUI 先发 `update_apply`，然后自己退出。service 等这个 GUI 的 IPC 连接断开（最多 10 秒），再检查一次「没人在用」。
+1. 手动时，GUI 先发 `update_apply`，然后自己退出。service 等这个 GUI 的 IPC 连接断开（最多 10 秒），再检查一次 rapp.app 里没有别的进程。手动升级和回到上一版**不管远程会话**：常有人从 B 远程连到 A 上点升级，会话随 service 重启断开，之后重连（2026-11-15 改）。自动升级仍等会话结束。
 2. 把新 app 移到 `/Applications/.rapp-new.app`，和目标在同一目录、同一个卷，改名是原子的。
 3. `rename(/Applications/rapp.app → ~/Library/Application Support/rapp/previous/rapp.app)`，跨目录改名失败时退回 `ditto` 复制再删除。然后 `rename(/Applications/.rapp-new.app → /Applications/rapp.app)`。第二步失败就把第一步移回去，并记 `update_failed`。
 4. `/Applications/rapp.app` 不可写（还是 root 所有、或者当前用户不是管理员）时，不自动替换，GUI 提示「这次需要管理员密码」，并给「打开安装包」按钮：下载的不是 pkg，所以这一步改为打开 release 页面，让用户手动装 pkg。之后 §3.1 的 chown 会让下次不再需要。
