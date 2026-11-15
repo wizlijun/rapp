@@ -101,6 +101,13 @@ void main() {
     expect(s.panel, isNotNull);
   });
 
+  testWidgets('the panel button shows the sidebar icon', (tester) async {
+    await tester.pumpWidget(wrap(bar()));
+    final panel = find.byKey(const Key('panel-button'));
+    expect(find.descendant(of: panel, matching: find.byIcon(Icons.view_sidebar_outlined)), findsOneWidget);
+    expect(find.byIcon(Icons.menu), findsNothing);
+  });
+
   testWidgets('long hint is one line with ellipsis', (tester) async {
     s.hint = 'x' * 500;
     await tester.pumpWidget(wrap(bar()));
@@ -341,6 +348,29 @@ void main() {
         expect(full.left, greaterThanOrEqualTo(barRect.left));
       });
     }
+
+    testWidgets('the 本机 and 远程 buttons are icons only, even in a wide bar', (tester) async {
+      await tester.pumpWidget(wrap(Align(
+        alignment: Alignment.topLeft,
+        child: SizedBox(width: 1200, child: TopBar(state: es, fullscreen: false, onToggleFullscreen: () {})),
+      )));
+      await tester.runAsync(() async {
+        es.openOrSwitch('111', 'Safari', 'Safari');
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      await tester.pump();
+      final local = find.byKey(const Key('session-menu'));
+      final remote = find.byKey(const Key('remote-menu'));
+      expect(find.descendant(of: local, matching: find.byIcon(Icons.more_horiz)), findsOneWidget);
+      expect(find.descendant(of: remote, matching: find.byIcon(Icons.menu)), findsOneWidget);
+      expect(find.descendant(of: local, matching: find.text('本机')), findsNothing);
+      expect(find.descendant(of: remote, matching: find.text('远程')), findsNothing);
+      expect(tester.getSize(local).width, 48);
+      expect(tester.getSize(remote).width, 48);
+      expect(find.byTooltip('本机菜单：会话、剪贴板、输入法'), findsOneWidget);
+    });
 
     testWidgets('no relay measured, no network marker', (tester) async {
       await tester.pumpWidget(wrap(SizedBox(width: 800, child: TopBar(state: es, fullscreen: false, onToggleFullscreen: () {}))));

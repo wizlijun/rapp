@@ -63,9 +63,7 @@ class TopBar extends StatelessWidget {
                 : state.projects.where((p) => p.id == state.previousProject).firstOrNull;
             final showPrevProject = previous != null && box.maxWidth >= (baseIcons + 1) * 48 + trafficW;
             final icons = baseIcons + (showPrevProject ? 1 : 0);
-            // Their words only in a roomy bar (the tabs and the hint need the room more).
-            final words = box.maxWidth >= 1000;
-            final splitW = embedded ? (term ? 1 : 2) * (words ? menuButtonWidth : 48.0) : 0.0;
+            final splitW = embedded ? (term ? 1 : 2) * 48.0 : 0.0;
             final hidden = rs != null && !rs.detached && !term && rs.hidden.isNotEmpty;
             // Room for the gaps, a session block and the 已隐藏 chip besides (none of them shrink).
             // The 「＋」 of a terminal (a chip's minimum width) goes with them.
@@ -103,7 +101,7 @@ class TopBar extends StatelessWidget {
               ),
               child: Row(
                 children: [
-                  _icon('panel-button', Icons.menu, '面板', state.togglePanel),
+                  _icon('panel-button', Icons.view_sidebar_outlined, '面板', state.togglePanel),
                   SizedBox(width: gap),
                   if (showOverview) ...[
                     _overviewButton(t),
@@ -263,8 +261,8 @@ class TopBar extends StatelessWidget {
                   if (net != null) NetMarker(net: net, compact: !wide, path: cur?.path),
                   if (embedded) ...[
                     if (split) ...[
-                      _menu(context, cur, {MenuPart.session}, Corner.session, !words),
-                      if (!term) _menu(context, cur, {MenuPart.remote}, Corner.remote, !words),
+                      _menu(context, cur, {MenuPart.session}, Corner.session, true),
+                      if (!term) _menu(context, cur, {MenuPart.remote}, Corner.remote, true),
                     ],
                     _menu(context, cur, split ? {MenuPart.stream} : allMenuParts, Corner.stream, !wide),
                   ],
