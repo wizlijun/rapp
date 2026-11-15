@@ -156,6 +156,14 @@ class AppProfileStore extends ChangeNotifier {
     _commit();
   }
 
+  /// Where the app's writing panel sits ([p], its bottom centre), or back to the default (null).
+  /// Clearing what is not there writes nothing.
+  void setComposerAt(String appId, String appName, InputPoint? p) {
+    if (p == null && mineFor(appId)?.composerAt == null) return;
+    _target(appId, appName).composerAt = p;
+    _commit();
+  }
+
   List<ProfileRow> rows() {
     final out = <ProfileRow>[];
     for (final b in builtin) {

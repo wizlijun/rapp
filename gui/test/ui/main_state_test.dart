@@ -6,6 +6,7 @@ import 'dart:ui' show Rect, Size;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fake_async/fake_async.dart';
 import 'package:rapp/embed/app_profile.dart';
+import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/ui/app_profile_store.dart';
 import 'package:rapp/embed/stream_choice.dart';
@@ -672,6 +673,18 @@ void main() {
         expect(port.calls.first.$2, containsPair('y', 28 + 250.0));
         st.clearInputMark();
         expect(st.currentRemote!.profile.input, isNull);
+      }, app: chrome, profiles: store());
+    });
+
+    test('placeComposer saves for the session\'s app and the session sees it; an unknown app saves nothing', () {
+      env((a, t, port, st, hints) {
+        const p = InputPoint(0.2, 8, fromBottom: true);
+        st.placeComposer(RemoteSession(99, 'X'), p); // appId ''
+        expect(st.profiles.mine, isEmpty);
+        st.placeComposer(st.currentRemote!, p);
+        expect(st.currentRemote!.profile.composerAt, p);
+        st.placeComposer(st.currentRemote!, null);
+        expect(st.currentRemote!.profile.composerAt, isNull);
       }, app: chrome, profiles: store());
     });
 

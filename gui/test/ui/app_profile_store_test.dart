@@ -162,4 +162,21 @@ void main() {
     s.addRule('b', 'B', const WindowRule(action: RuleAction.hide));
     expect(s.problem, isNull);
   });
+
+  test('setComposerAt writes once; clearing nothing creates nothing', () {
+    final s = AppProfileStore(dir.path);
+    var n = 0;
+    s.addListener(() => n++);
+    s.setComposerAt('com.x', 'X', null);
+    expect(s.mine, isEmpty);
+    expect(f('apps.json').existsSync(), isFalse);
+    expect(n, 0);
+    s.setComposerAt('com.x', 'X', const InputPoint(0.3, 8, fromBottom: true));
+    expect(n, 1);
+    expect(s.resolve('com.x').composerAt, const InputPoint(0.3, 8, fromBottom: true));
+    expect((jsonDecode(f('apps.json').readAsStringSync())['apps'] as List).single['composerAt'],
+        {'x': 0.3, 'bottom': 8});
+    s.setComposerAt('com.x', 'X', null);
+    expect(s.resolve('com.x').composerAt, isNull);
+  });
 }

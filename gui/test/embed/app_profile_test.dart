@@ -90,4 +90,17 @@ void main() {
     expect(r.stream.fps, 30);
     expect(r.name, 'x.app');
   });
+
+  test('composerAt round-trips and resolves mine over built-in', () {
+    final p = AppProfile.fromJson({'ids': ['a'], 'composerAt': {'x': 0.3, 'top': 120}})!;
+    expect(p.composerAt, const InputPoint(0.3, 120));
+    expect(p.toJson()['composerAt'], {'x': 0.3, 'top': 120});
+    expect(p.copy().composerAt, p.composerAt);
+    expect(AppProfile.fromJson({'ids': ['a'], 'composerAt': {'x': 2, 'top': 1}})!.composerAt, isNull);
+    final b = AppProfile(ids: ['a'], composerAt: const InputPoint(0.5, 8, fromBottom: true));
+    expect(resolveProfile('a', mine: [p], builtin: [b]).composerAt, const InputPoint(0.3, 120));
+    expect(resolveProfile('a', mine: [], builtin: [b]).composerAt, b.composerAt);
+    expect(resolveProfile('z', mine: [p], builtin: [b]).composerAt, isNull);
+    expect(defaultComposerAt, const InputPoint(0.5, 8, fromBottom: true));
+  });
 }

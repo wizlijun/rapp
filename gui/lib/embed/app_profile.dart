@@ -70,6 +70,9 @@ class InputPoint {
   int get hashCode => Object.hash(x, dy, fromBottom);
 }
 
+/// The writing panel's place when the app has none: bottom centre, 8 up.
+const defaultComposerAt = InputPoint(0.5, 8, fromBottom: true);
+
 /// One window rule: matches a window by kind and title glob; the first matching rule wins.
 class WindowRule {
   const WindowRule({this.kind, this.title, this.child = true, required this.action});
@@ -132,6 +135,7 @@ class AppProfile {
     this.composer,
     this.recordInput,
     this.input,
+    this.composerAt,
     this.windows,
     this.tested,
   });
@@ -145,6 +149,9 @@ class AppProfile {
   bool? composer;
   bool? recordInput;
   InputPoint? input;
+
+  /// Where the writing panel sits (its bottom centre); null: [defaultComposerAt].
+  InputPoint? composerAt;
   List<WindowRule>? windows;
   bool? tested;
 
@@ -165,6 +172,7 @@ class AppProfile {
         composer: composer,
         recordInput: recordInput,
         input: input,
+        composerAt: composerAt,
         windows: windows == null ? null : [...windows!],
         tested: tested,
       );
@@ -182,6 +190,7 @@ class AppProfile {
         if (composer != null) 'composer': composer,
         if (recordInput != null) 'recordInput': recordInput,
         if (input != null) 'input': input!.toJson(),
+        if (composerAt != null) 'composerAt': composerAt!.toJson(),
         if (windows != null) 'windows': [for (final w in windows!) w.toJson()],
         if (tested != null) 'tested': tested,
       };
@@ -232,6 +241,7 @@ class AppProfile {
       composer: j['composer'] is bool ? j['composer'] as bool : null,
       recordInput: j['recordInput'] is bool ? j['recordInput'] as bool : null,
       input: InputPoint.fromJson(j['input']),
+      composerAt: InputPoint.fromJson(j['composerAt']),
       windows: windows,
       tested: j['tested'] is bool ? j['tested'] as bool : null,
     );
@@ -263,6 +273,7 @@ class ResolvedProfile {
     this.composer = true,
     this.recordInput = true,
     this.input,
+    this.composerAt,
     this.windows = const [],
     this.tested = true,
   });
@@ -279,6 +290,9 @@ class ResolvedProfile {
 
   /// The marked text box; null when none is marked.
   final InputPoint? input;
+
+  /// Where the writing panel sits; null: [defaultComposerAt].
+  final InputPoint? composerAt;
   final List<WindowRule> windows;
   final bool tested;
 }
@@ -322,6 +336,7 @@ ResolvedProfile resolveProfile(String appId, {required List<AppProfile> mine, re
     composer: pick((p) => p.composer) ?? true,
     recordInput: pick((p) => p.recordInput) ?? true,
     input: pick((p) => p.input),
+    composerAt: pick((p) => p.composerAt),
     windows: pick((p) => p.windows) ?? const [],
     tested: pick((p) => p.tested) ?? true,
   );

@@ -1726,6 +1726,13 @@ class MainState extends ChangeNotifier {
     hint = '已标记输入区：发送前会先点它';
   }
 
+  /// The writing panel of [rs] was dragged to [p] (null: back to the default); kept for its app.
+  /// A session of an unknown app has nowhere to keep it.
+  void placeComposer(RemoteSession rs, InputPoint? p) {
+    if (rs.appId.isEmpty) return;
+    profiles.setComposerAt(rs.appId, rs.appName, p);
+  }
+
   void clearInputMark() {
     final rs = currentRemote;
     if (rs == null) return;
