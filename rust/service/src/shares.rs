@@ -17,7 +17,10 @@ const SENSITIVE: [u16; 17] = [
     22, 23, 3389, 5900, 5901, 2375, 2376, 1080, 3128, 8118, 3306, 5432, 6379, 27017, 9200, 1433, 1521,
 ];
 
+/// A field this does not know makes the file unreadable: a misspelt `allow` dropped in silence
+/// would share the port with every trusted device.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Share {
     pub port: u16,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -229,6 +232,21 @@ mod tests {
         assert!(s.list().is_empty());
         assert!(why.is_some());
         assert_eq!(std::fs::read(d.path().join("shares.json")).unwrap(), b"{not json"); // left as it was
+    }
+
+    // A misspelt field must not be dropped: `alow` would otherwise share the port with everyone.
+    #[test]
+    fn a_field_it_does_not_know_makes_the_file_unreadable() {
+        let d = tempfile::tempdir().unwrap();
+        let text = format!(r#"[{{"port":8000,"alow":["{}"]}}]"#, fp(1));
+        std::fs::write(d.path().join("shares.json"), &text).unwrap();
+        let (s, why) = Shares::load(d.path());
+        assert!(s.list().is_empty(), "{:?}", s.list());
+        assert!(why.is_some_and(|w| w.contains("alow")));
+        // kept as `.bad` on the first write, like any unreadable file
+        s.add(share(8001)).unwrap();
+        assert_eq!(std::fs::read_to_string(d.path().join("shares.json.bad")).unwrap(), text);
+        assert_eq!(Shares::load(d.path()).0.list(), [share(8001)]);
     }
 
     #[test]
