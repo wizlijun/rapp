@@ -1241,6 +1241,11 @@ async fn a_channel_carries_forwards_to_two_ports() {
     conn.close();
     let end = wait_log(a.home.path(), "channel_end", |_| true).await;
     assert_eq!(end["streams"], 2, "{end}");
+    assert!(end["reason"].as_str().is_some_and(|r| !r.is_empty()), "{end}");
+    assert!(end["secs"].is_u64(), "{end}");
+    assert!(end["fp"].as_str().is_some_and(|f| f.len() == 64), "{end}");
+    let open = logs.iter().find(|v| v["ev"] == "channel").unwrap();
+    assert_eq!(open["fp"], end["fp"]);
 }
 
 #[tokio::test]
@@ -1279,4 +1284,29 @@ async fn a_lone_forward_is_still_served() {
     let mut got = [0u8; 3];
     tokio::time::timeout(WAIT, pipe.read_exact(&mut got)).await.unwrap().unwrap();
     assert_eq!(&got, b"old");
+}
+
+#[tokio::test]
+async fn mux_on_a_direct_connection_is_unknown() {
+    let (a, key) = start_sharing(|_| {}).await;
+    let (r, _, _conn) = ask(&a, &key, &visitor(), json!({"op":"mux"})).await;
+    assert_eq!(r["error"], "unknown op", "{r}");
+}
+
+#[tokio::test]
+async fn hello_then_close_logs_one_trust_line() {
+    let rig = RelayRig::start().await;
+    let a = relay_sharer(&rig, &[], true).await;
+    let (b, _ep, conn) = relay_visitor(&rig).await;
+    let stream = conn.relay_to(&a.id).await.unwrap();
+    let (mut pipe, facts) = rapp_conn::e2e_connect(stream, &b.id).await.unwrap();
+    let me = rapp_conn::Me { id: "", name: "test-b", key: Some(&rig.key) };
+    rapp_conn::send_hello(&mut pipe, &facts, &me).await.unwrap();
+    pipe.shutdown().await.unwrap();
+    drop(pipe);
+    wait_log(a.home.path(), "trust", |_| true).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let trust: Vec<Value> = log_events(a.home.path()).into_iter().filter(|v| v["ev"] == "trust").collect();
+    assert_eq!(trust.len(), 1, "{trust:?}");
+    assert_ne!(trust[0]["result"], "refused", "{trust:?}");
 }

@@ -16,6 +16,7 @@ use rapp_net::line::read_json;
 use rapp_net::log::Lvl;
 use rapp_net::msg::Op;
 use rapp_wire::{join_hash, Key};
+use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
 use std::net::Ipv4Addr;
@@ -295,13 +296,16 @@ async fn answer(mut reply: Pipe) {
     .await;
 }
 
-/// One stream a device relayed to this one: TLS, the hello, then one request.
+/// One stream a device relayed to this one: TLS, the hello, then one request; or, when that
+/// request is `mux`, a channel carrying many.
 async fn serve_relayed(state: Arc<State>, stream: Pipe, from: String, prio: Prio) {
     let mut peer = Peer { addr: from, name: None, path: "relay", fp: None };
+    let greeted = std::sync::atomic::AtomicBool::new(false);
     let hello = async {
         let (mut pipe, facts) = e2e_accept(stream, &state.identity).await?;
         peer.fp = Some(facts.peer);
         greet(&state, &mut pipe, &facts, &mut peer).await?;
+        greeted.store(true, std::sync::atomic::Ordering::Relaxed);
         anyhow::Ok(pipe)
     };
     // The first request too, inside the same wait: a channel announces itself with `mux`.
@@ -317,11 +321,16 @@ async fn serve_relayed(state: Arc<State>, stream: Pipe, from: String, prio: Prio
                 Ok(Err(e)) => format!("{e:#}"),
                 _ => "timeout".to_string(),
             };
-            state.log.event(Lvl::Warn, "trust", peer.fields(json!({"result": "refused", "reason": reason})));
+            if greeted.load(std::sync::atomic::Ordering::Relaxed) {
+                // `greet` has recorded the trust decision; only the request is missing.
+                state.log.msg(Lvl::Warn, format!("{}: {reason}", peer.addr));
+            } else {
+                state.log.event(Lvl::Warn, "trust", peer.fields(json!({"result": "refused", "reason": reason})));
+            }
             return;
         }
     };
-    match serde_json::from_value::<Op>(v.clone()) {
+    match Op::deserialize(&v) {
         Ok(Op::Mux) if state.channels => return crate::channel::serve(state, pipe, prio, peer).await,
         Ok(Op::Forward { .. }) => prio.set(state.forward_priority),
         _ => {}
