@@ -69,15 +69,22 @@ fn admit<'a>(caller: &Caller<'a>, policy_allows: bool) -> Result<&'a Fp, Deny> {
     Ok(fp)
 }
 
-/// The one place that decides. The order is spec §5.1's.
-pub fn authorize(caller: &Caller<'_>, policy_allows: bool, share: Option<&Share>) -> Result<(), Deny> {
+/// The one place that decides. The order is spec §5.1's. Ok is the admitted caller's fingerprint.
+pub fn authorize(caller: &Caller<'_>, policy_allows: bool, share: Option<&Share>) -> Result<Fp, Deny> {
     let fp = admit(caller, policy_allows)?;
     let share = share.ok_or(Deny::NotShared)?;
     if share.allow.is_empty() || share.allow.contains(fp) {
-        Ok(())
+        Ok(*fp)
     } else {
         Err(Deny::NotAllowed)
     }
+}
+
+/// The shares of `shares` the caller may use, in their order: the ones `authorize` allows. Err
+/// when the checkpoint refuses the caller whatever the port.
+fn offered<'s>(caller: &Caller<'_>, policy_allows: bool, shares: &'s [Share]) -> Result<Vec<&'s Share>, Deny> {
+    admit(caller, policy_allows)?;
+    Ok(shares.iter().filter(|s| authorize(caller, policy_allows, Some(s)).is_ok()).collect())
 }
 
 /// Live forwards: the count per visiting device, and the way to cut a port's connections.
@@ -134,11 +141,8 @@ impl Forwards {
 /// `{"ok":true,"shares":[{"port","note"?}]}`: the shares this device may use, sorted by port.
 pub async fn serve_list(state: &Arc<State>, mut s: Pipe, peer: Peer) -> Result<()> {
     let caller = Caller { fp: peer.fp.as_ref(), server: false };
-    let reply = match admit(&caller, true) {
-        Ok(fp) => {
-            let shares: Vec<Value> = state.shares.visible_to(fp).iter().map(listed).collect();
-            ok(json!({"shares": shares}))
-        }
+    let reply = match offered(&caller, true, &state.shares.list()) {
+        Ok(shares) => ok(json!({"shares": shares.into_iter().map(listed).collect::<Vec<Value>>()})),
         Err(d) => {
             state.forward_log.refused(&peer, None, d.as_str());
             err(d.as_str())
@@ -161,11 +165,10 @@ pub async fn serve_forward(state: &Arc<State>, mut s: Pipe, port: u16, peer: Pee
     // Before the checkpoint, so a cut that comes after it is not missed.
     let mut cuts = state.forwards.cuts();
     let caller = Caller { fp: peer.fp.as_ref(), server: false };
-    if let Err(d) = authorize(&caller, true, state.shares.get(port).as_ref()) {
-        return refuse(state, s, &peer, port, d.as_str()).await;
-    }
-    // `authorize` has refused every caller without one.
-    let Some(fp) = peer.fp else { return refuse(state, s, &peer, port, Deny::NotSupported.as_str()).await };
+    let fp = match authorize(&caller, true, state.shares.get(port).as_ref()) {
+        Ok(fp) => fp,
+        Err(d) => return refuse(state, s, &peer, port, d.as_str()).await,
+    };
     let Some(_slot) = state.forwards.enter(&fp) else {
         return refuse(state, s, &peer, port, LIMIT).await;
     };
@@ -215,12 +218,12 @@ async fn cut_of(cuts: &mut broadcast::Receiver<u16>, port: u16) {
 }
 
 /// The only addresses a forward may reach: this device's own loopback, IPv4 first.
-fn local_addrs(port: u16) -> [SocketAddr; 2] {
+pub(crate) fn local_addrs(port: u16) -> [SocketAddr; 2] {
     [SocketAddr::from((Ipv4Addr::LOCALHOST, port)), SocketAddr::from((Ipv6Addr::LOCALHOST, port))]
 }
 
 /// The first of `addrs` that accepts within `wait` each.
-async fn connect_local(addrs: &[SocketAddr], wait: Duration) -> Option<TcpStream> {
+pub(crate) async fn connect_local(addrs: &[SocketAddr], wait: Duration) -> Option<TcpStream> {
     for a in addrs {
         if let Ok(Ok(t)) = tokio::time::timeout(wait, TcpStream::connect(a)).await {
             return Some(t);
@@ -241,7 +244,8 @@ mod tests {
     fn the_five_steps_in_order() {
         let ok = Caller { fp: Some(&A), server: false };
         let open = share(vec![]);
-        assert_eq!(authorize(&ok, true, Some(&open)), Ok(()));
+        // allowed: the answer is the caller's fingerprint
+        assert_eq!(authorize(&ok, true, Some(&open)), Ok(A));
         // 1: not a key-trusted connection — wins over everything after it
         assert_eq!(authorize(&Caller { fp: None, server: true }, false, None), Err(Deny::NotSupported));
         // 2: a server device
@@ -252,7 +256,20 @@ mod tests {
         assert_eq!(authorize(&ok, true, None), Err(Deny::NotShared));
         // 5: shared, but not with this device
         assert_eq!(authorize(&ok, true, Some(&share(vec![B]))), Err(Deny::NotAllowed));
-        assert_eq!(authorize(&ok, true, Some(&share(vec![B, A]))), Ok(()));
+        assert_eq!(authorize(&ok, true, Some(&share(vec![B, A]))), Ok(A));
+    }
+
+    // The list a device gets goes through the same checkpoint as a forward.
+    #[test]
+    fn the_shares_offered_to_a_device_honour_allow() {
+        let shares = [Share { port: 1, ..share(vec![]) }, Share { port: 2, ..share(vec![A]) }];
+        let ports = |caller: &Caller<'_>| offered(caller, true, &shares).map(|v| v.iter().map(|s| s.port).collect::<Vec<_>>());
+        assert_eq!(ports(&Caller { fp: Some(&A), server: false }), Ok(vec![1, 2]));
+        assert_eq!(ports(&Caller { fp: Some(&B), server: false }), Ok(vec![1]));
+        // a caller the checkpoint refuses whatever the port gets the refusal, not an empty list
+        assert_eq!(ports(&Caller { fp: None, server: false }), Err(Deny::NotSupported));
+        assert_eq!(ports(&Caller { fp: Some(&A), server: true }), Err(Deny::HostOnly));
+        assert_eq!(offered(&Caller { fp: Some(&A), server: false }, false, &shares), Err(Deny::Policy));
     }
 
     #[test]

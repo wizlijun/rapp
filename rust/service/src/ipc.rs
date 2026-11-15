@@ -16,7 +16,7 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 
-/// How long `shares` waits for a shared port to accept before saying nothing listens there.
+/// How long `shares` gives each local address of a shared port to accept before saying nothing listens there.
 const LISTENING_WAIT: Duration = Duration::from_millis(200);
 /// How long `hosts` waits for each device's list of shares.
 const HOSTS_WAIT: Duration = Duration::from_secs(3);
@@ -189,7 +189,8 @@ fn share_url(state: &State, port: u16) -> String {
     format!("http://{}.rapp:{port}", state.cfg.lock().unwrap().id.clone().unwrap_or_default())
 }
 
-/// This device's shares, each with whether something accepts on `127.0.0.1:<port>` now.
+/// This device's shares, each with whether something accepts on the port now: on the addresses
+/// a forward would reach (`127.0.0.1`, then `[::1]`).
 async fn shares(state: &Arc<State>) -> Value {
     let list = state.shares.list();
     let probes: Vec<_> = list
@@ -197,7 +198,7 @@ async fn shares(state: &Arc<State>) -> Value {
         .map(|s| {
             let port = s.port;
             tokio::spawn(async move {
-                matches!(tokio::time::timeout(LISTENING_WAIT, TcpStream::connect(("127.0.0.1", port))).await, Ok(Ok(_)))
+                crate::forward::connect_local(&crate::forward::local_addrs(port), LISTENING_WAIT).await.is_some()
             })
         })
         .collect();

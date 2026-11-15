@@ -121,13 +121,6 @@ impl Shares {
         items.0 = next;
         Ok(())
     }
-
-    /// The shares `fp` may use: `allow` empty or containing it. Sorted by port.
-    pub fn visible_to(&self, fp: &Fp) -> Vec<Share> {
-        let mut v = self.list();
-        v.retain(|s| s.allow.is_empty() || s.allow.contains(fp));
-        v
-    }
 }
 
 /// Ports the user should be warned about before sharing them.
@@ -212,16 +205,6 @@ mod tests {
         assert!(s.remove(8000).unwrap());
         assert!(!s.remove(8000).unwrap());
         assert!(Shares::load(d.path()).0.list().is_empty());
-    }
-
-    #[test]
-    fn visible_to_honours_allow() {
-        let d = tempfile::tempdir().unwrap();
-        let (s, _) = Shares::load(d.path());
-        s.add(share(1)).unwrap();
-        s.add(Share { allow: vec![fp(1)], ..share(2) }).unwrap();
-        assert_eq!(s.visible_to(&fp(1)).len(), 2);
-        assert_eq!(s.visible_to(&fp(9)).iter().map(|s| s.port).collect::<Vec<_>>(), [1]);
     }
 
     #[test]

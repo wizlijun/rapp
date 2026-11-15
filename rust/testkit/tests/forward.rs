@@ -515,6 +515,19 @@ async fn shares_says_when_nothing_listens_and_keeps_the_note() {
     assert_eq!((&r["shares"][0]["listening"], &r["shares"][0]["note"]), (&json!(false), &json!("模型")), "{r}");
 }
 
+// The probe looks where a forward would connect: `[::1]` when `127.0.0.1` does not accept.
+#[tokio::test]
+async fn shares_sees_a_service_that_listens_on_ipv6_loopback_only() {
+    let Ok(l) = TcpListener::bind("[::1]:0").await else {
+        eprintln!("no IPv6 loopback here: skipped");
+        return;
+    };
+    let (port, _echo) = echo_on(l);
+    let (a, _key) = sharing_ports(&[port]).await;
+    let r = ipc_once(&a.svc, a.home.path(), json!({"cmd":"shares"})).await;
+    assert_eq!((&r["shares"][0]["port"], &r["shares"][0]["listening"]), (&json!(port), &json!(true)), "{r}");
+}
+
 #[tokio::test]
 async fn sharing_a_sensitive_port_warns_and_still_shares() {
     let (a, _key) = start_sharing(|_| {}).await;
