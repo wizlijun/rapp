@@ -40,8 +40,8 @@ fn bad_arguments_exit_2() {
         &["nope"],
         &["watch"],
         &["watch", "com.apple.Safari"],
-        &["run"],
-        &["run", "--size", "axb", "--", "sh"],
+        &["new"],
+        &["new", "--size", "axb", "--", "sh"],
         &["list", "--ssh", "-oProxyCommand=x"],
     ] {
         assert_eq!(run(a).code, 2, "{a:?}");
@@ -49,9 +49,16 @@ fn bad_arguments_exit_2() {
 }
 
 #[test]
-fn list_run_and_watch_against_a_private_server() {
+fn usage_lists_new_for_tmux_sessions() {
+    let out = Command::new(BIN).arg("help").output().unwrap();
+    let usage = String::from_utf8_lossy(&out.stdout);
+    assert!(usage.contains("rapp-term new"), "{usage}");
+}
+
+#[test]
+fn list_new_and_watch_against_a_private_server() {
     let Some(s) = common::Server::start() else { return };
-    let o = run(&["run", "--socket", &s.socket, "--name", "cli demo", "--size", "90x20", "--", "cat"]);
+    let o = run(&["new", "--socket", &s.socket, "--name", "cli demo", "--size", "90x20", "--", "cat"]);
     assert_eq!((o.code, o.stdout.trim()), (0, "term:tmux:cli demo"));
     s.wait_command("cli demo", "cat");
     let o = run(&["list", "--json", "--socket", &s.socket]);
@@ -118,7 +125,7 @@ fn list_run_and_watch_against_a_private_server() {
 #[test]
 fn runtime_errors_exit_1_and_do_not_echo_content() {
     let Some(s) = common::Server::start() else { return };
-    let o = run(&["run", "--socket", &s.socket, "--tmux", "/nonexistent/tmux", "--", "echo", "SECRET-TEXT"]);
+    let o = run(&["new", "--socket", &s.socket, "--tmux", "/nonexistent/tmux", "--", "echo", "SECRET-TEXT"]);
     assert_eq!(o.code, 1);
     assert!(!o.stderr.contains("SECRET-TEXT"));
 }

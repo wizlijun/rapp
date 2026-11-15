@@ -1,4 +1,4 @@
-//! The `rapp-term` command: version, list, watch, run, serve.
+//! The `rapp-term` command: version, list, watch, new, serve.
 //!
 //! Exit codes: 0 ok, 1 a runtime error (tmux missing or failing, the session not there or not made), 2 an
 //! argument error. Errors go to stderr as one line and never carry the command, the screen or the input.
@@ -22,7 +22,7 @@ const USAGE: &str = "\
 usage: rapp-term version [--json]
        rapp-term list [--json] [--ssh <destination> --host <name>] [--tmux <path>]
        rapp-term watch <term id> [--ssh <destination>] [--tmux <path>] [--json]
-       rapp-term run [--name <name>] [--size <cols>x<rows>] [--ssh <destination> --host <name>] [--tmux <path>] \
+       rapp-term new [--name <name>] [--size <cols>x<rows>] [--ssh <destination> --host <name>] [--tmux <path>] \
 -- <command...>
        rapp-term serve --token-env <variable> --config <path> [--bind <address>] [--port <port>] [--json]";
 
@@ -264,13 +264,13 @@ async fn watch(a: &Args) -> Res<()> {
         .map_err(|e| runtime(format!("watch stopped: {e}")))
 }
 
-async fn run(a: &Args) -> Res<()> {
+async fn new(a: &Args) -> Res<()> {
     if !a.pos.is_empty() {
         return Err(usage("unexpected argument: the command goes after --"));
     }
     let command = match &a.command {
         Some(c) if !c.is_empty() => c,
-        _ => return Err(usage("run needs a command after --")),
+        _ => return Err(usage("new needs a command after --")),
     };
     let (cols, rows) = match &a.size {
         None => DEFAULT_SIZE,
@@ -360,7 +360,7 @@ fn dispatch(argv: &[String]) -> Res<()> {
         "version" => &["json", "socket"],
         "list" => &["json", "ssh", "host", "tmux", "socket"],
         "watch" => &["json", "ssh", "tmux", "socket"],
-        "run" => &["json", "name", "size", "ssh", "host", "tmux", "socket", "--"],
+        "new" => &["json", "name", "size", "ssh", "host", "tmux", "socket", "--"],
         "serve" => &["json", "token-env", "config", "bind", "port", "socket"],
         "help" | "--help" | "-h" => {
             println!("{USAGE}");
@@ -385,7 +385,7 @@ fn dispatch(argv: &[String]) -> Res<()> {
             "list" => list(&a).await,
             "watch" => watch(&a).await,
             "serve" => serve(&a).await,
-            _ => run(&a).await,
+            _ => new(&a).await,
         }
     });
     // Dropping the runtime would wait for tokio's blocking stdin read, which lasts as long as stdin stays open.
