@@ -51,6 +51,9 @@ class _FloatingComposerState extends State<FloatingComposer> {
   Offset? _drag;
   Size _stage = Size.zero;
 
+  /// The pointer is over the panel or its grip: only then (or while dragging) is the bar drawn.
+  bool _hover = false;
+
   InputPoint get _at => widget.session.profile.composerAt ?? defaultComposerAt;
 
   Size get _panel => _box.currentContext?.size ?? Size.zero;
@@ -113,11 +116,17 @@ class _FloatingComposerState extends State<FloatingComposer> {
             label: '移动写作面板',
             child: SizedBox.fromSize(
               size: gripSize,
+              // Hidden but still there to grab: the bar only shows with the pointer over the panel.
               child: Center(
-                child: Container(
-                  width: 32,
-                  height: 4,
-                  decoration: BoxDecoration(color: t.line, borderRadius: BorderRadius.circular(2)),
+                child: AnimatedOpacity(
+                  key: const Key('composer-grip-bar'),
+                  opacity: _hover || _drag != null ? 1 : 0,
+                  duration: const Duration(milliseconds: 120),
+                  child: Container(
+                    width: 32,
+                    height: 4,
+                    decoration: BoxDecoration(color: t.line, borderRadius: BorderRadius.circular(2)),
+                  ),
                 ),
               ),
             ),
@@ -129,14 +138,18 @@ class _FloatingComposerState extends State<FloatingComposer> {
       _stage = c.biggest;
       return CustomSingleChildLayout(
         delegate: _Place(_drag ?? _at.inContent(_stage), panelWidth(_stage.width)),
-        child: Column(
-          key: _box,
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Center(child: grip),
-            Flexible(child: widget.child),
-          ],
+        child: MouseRegion(
+          onEnter: (_) => setState(() => _hover = true),
+          onExit: (_) => setState(() => _hover = false),
+          child: Column(
+            key: _box,
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(child: grip),
+              Flexible(child: widget.child),
+            ],
+          ),
         ),
       );
     });
