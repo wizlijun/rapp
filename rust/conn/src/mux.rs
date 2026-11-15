@@ -7,8 +7,11 @@
 //! nobody reads only ever holds its own window, so it cannot block the others.
 //!
 //! One reader task and one writer task per channel. The shared state sits under one
-//! `std::sync::Mutex`; no io happens under it. When the channel closes (or every `Mux`,
-//! `Incoming` and `MuxStream` handle is dropped) both tasks end.
+//! `std::sync::Mutex`; no io happens under it. When the channel closes both tasks end.
+//!
+//! Dropping every `Mux`, `Incoming` and `MuxStream` handle aborts the channel, it does not
+//! close it gracefully: output still queued (including FINs) is thrown away and the reason
+//! is "closed", the same as `Mux::close()`.
 
 use std::collections::{HashMap, VecDeque};
 use std::future::{poll_fn, Future};
@@ -143,6 +146,23 @@ struct State {
 }
 
 impl State {
+    fn new(client: bool) -> State {
+        State {
+            client,
+            closed: None,
+            streams: HashMap::new(),
+            ctrl: VecDeque::new(),
+            ready: VecDeque::new(),
+            next_id: if client { 1 } else { 0 },
+            opened: 0,
+            idle_since: client.then(Instant::now),
+            incoming: VecDeque::new(),
+            incoming_waker: None,
+            incoming_gone: false,
+            ping_seq: 0,
+        }
+    }
+
     fn schedule(&mut self, id: u32) {
         if let Some(s) = self.streams.get_mut(&id) {
             if !s.queued {
@@ -272,6 +292,8 @@ impl State {
                 s.recv_rst = true;
                 s.rst_pending = false;
                 s.send.clear();
+                // The stream is over: no FIN goes out for it any more.
+                s.fin_sent = true;
                 wakers.extend(s.read_waker.take());
                 wakers.extend(s.write_waker.take());
                 if s.dropped {
@@ -369,20 +391,7 @@ pub struct Mux {
 impl Mux {
     fn start(client: bool) -> Arc<Shared> {
         Arc::new(Shared {
-            st: Mutex::new(State {
-                client,
-                closed: None,
-                streams: HashMap::new(),
-                ctrl: VecDeque::new(),
-                ready: VecDeque::new(),
-                next_id: if client { 1 } else { 0 },
-                opened: 0,
-                idle_since: client.then(Instant::now),
-                incoming: VecDeque::new(),
-                incoming_waker: None,
-                incoming_gone: false,
-                ping_seq: 0,
-            }),
+            st: Mutex::new(State::new(client)),
             wake_writer: Notify::new(),
             closed_tx: watch::Sender::new(false),
         })
@@ -683,7 +692,7 @@ where
             Err(e) => return sh.close(e.to_string()),
         };
         dead.as_mut().reset(Instant::now() + DEAD_AFTER);
-        let res = {
+        let (res, wake) = {
             let mut st = sh.lock();
             if st.closed.is_some() {
                 return;
@@ -693,7 +702,6 @@ where
             // stream ended and the idle deadline may have moved.
             (res, !st.ctrl.is_empty() || !matches!(t, DATA | PONG))
         };
-        let (res, wake) = res;
         if let Err(why) = res {
             return sh.close(why);
         }
@@ -853,6 +861,54 @@ mod tests {
             b.read_exact(&mut back).await.unwrap();
             assert_eq!(back, out);
         }
+    }
+
+    /// Frame (type, id) pairs in what `collect` wrote.
+    fn frames_in(mut out: &[u8]) -> Vec<(u8, u32)> {
+        let mut v = Vec::new();
+        while !out.is_empty() {
+            let id = u32::from_be_bytes([out[1], out[2], out[3], out[4]]);
+            let len = u16::from_be_bytes([out[5], out[6]]) as usize;
+            v.push((out[0], id));
+            out = &out[HEAD + len..];
+        }
+        v
+    }
+
+    /// A stream holding `n` bytes to send, with full credit, queued for the writer.
+    fn busy(st: &mut State, id: u32, n: usize) {
+        let mut s = Sub::new();
+        s.send.push(&vec![0u8; n]);
+        st.streams.insert(id, s);
+        st.schedule(id);
+    }
+
+    #[tokio::test]
+    async fn data_frames_take_turns() {
+        let mut st = State::new(true);
+        busy(&mut st, 1, 3 * MAX_FRAME);
+        busy(&mut st, 3, 3 * MAX_FRAME);
+        let (mut out, mut wakers, mut ids) = (Vec::new(), Vec::new(), Vec::new());
+        loop {
+            st.collect(&mut out, &mut wakers);
+            if out.is_empty() {
+                break;
+            }
+            ids.extend(frames_in(&out).into_iter().map(|(t, id)| (t == DATA).then_some(id).unwrap()));
+            out.clear();
+        }
+        assert_eq!(ids, [1, 3, 1, 3, 1, 3]);
+    }
+
+    #[tokio::test]
+    async fn no_fin_after_a_reset() {
+        let mut st = State::new(true);
+        busy(&mut st, 1, 10);
+        st.streams.get_mut(&1).unwrap().fin_queued = true;
+        st.on_frame(RST, 1, &[], &mut Vec::new()).unwrap();
+        let mut out = Vec::new();
+        st.collect(&mut out, &mut Vec::new());
+        assert_eq!(frames_in(&out), []);
     }
 
     #[tokio::test]
@@ -1090,7 +1146,9 @@ mod tests {
         drop(a);
         drop(b);
         let start = Instant::now();
-        sleep(CHANNEL_IDLE + Duration::from_secs(1)).await;
+        sleep(CHANNEL_IDLE - Duration::from_secs(1)).await;
+        assert!(!c.is_closed(), "closed early: {:?}", c.reason());
+        sleep(Duration::from_secs(2)).await;
         assert!(start.elapsed() > CHANNEL_IDLE);
         assert_eq!(c.reason().as_deref(), Some("idle"));
 
