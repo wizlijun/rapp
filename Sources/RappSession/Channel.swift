@@ -42,8 +42,11 @@ public enum ChannelCommand: Equatable {
     case pinLoad(path: String)
     /// Show the file at `path` in Finder.
     case reveal(path: String)
-    /// The session whose picture has keyboard focus; nil for none.
-    case pictureFocus(sid: Int64?)
+    /// The session whose picture has keyboard focus; nil for none. `compose`: a letter key on it
+    /// opens the writing panel (type-to-compose) instead of going to A.
+    case pictureFocus(sid: Int64?, compose: Bool)
+    /// Re-dispatch the key events held for `sid`'s compose letter into rapp's own window.
+    case composeReplay(sid: Int64)
     /// Take A's clipboard entry `clip` onto B's clipboard, or (insert) into the composer.
     case clipPick(sid: Int64, clip: UInt32, insert: Bool)
     /// Press the A menu item at `path` (indices into the last menu, separators counted).
@@ -80,7 +83,7 @@ public let maxInputSourceID = 1024
 public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelCommand {
     if method == "init" { return .initialize }
     let known: Set<String> = ["start", "close", "mouse", "scroll", "key", "resize", "select_window", "set_stream",
-                              "cancel_transfer", "picture_focus", "clip_pick", "menu_pick", "move_top_left",
+                              "cancel_transfer", "picture_focus", "compose_replay", "clip_pick", "menu_pick", "move_top_left",
                               "composer_paste", "composer_attach", "composer_send", "composer_drop_block",
                               "detach", "attach", "raise_detached", "fetch_clip", "copy_local", "drop_copy", "reveal",
                               "pin_save", "pin_load", "set_hidden", "close_window", "select_input",
@@ -91,7 +94,8 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
     if method == "picture_focus" {
         // `sid` is required but may be null (Dart's null arrives as NSNull).
         guard let raw = map["sid"] else { throw ChannelError.bad(method) }
-        return .pictureFocus(sid: raw is NSNull ? nil : try a.int("sid"))
+        let compose = map["compose"] is NSNull ? false : try a.optionalBool("compose")
+        return .pictureFocus(sid: raw is NSNull ? nil : try a.int("sid"), compose: compose)
     }
     switch method {
     case "copy_local": return .copyLocal(copy: try a.block("copy"))
@@ -114,6 +118,8 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
                       density: try a.density())
     case "close":
         return .close(sid: sid)
+    case "compose_replay":
+        return .composeReplay(sid: sid)
     case "mouse":
         let kinds: [String: MouseKind] = ["down": .down, "up": .up, "drag": .drag, "move": .move]
         let buttons: [String: MouseButton] = ["left": .left, "right": .right]

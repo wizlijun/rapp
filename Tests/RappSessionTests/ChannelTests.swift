@@ -200,10 +200,14 @@ final class ChannelTests: XCTestCase {
     }
 
     func testPictureFocusTakesASidOrNull() throws {
-        XCTAssertEqual(try channelCommand("picture_focus", ["sid": 3]), .pictureFocus(sid: 3))
-        XCTAssertEqual(try channelCommand("picture_focus", ["sid": NSNull()]), .pictureFocus(sid: nil))
+        XCTAssertEqual(try channelCommand("picture_focus", ["sid": 3]), .pictureFocus(sid: 3, compose: false))
+        XCTAssertEqual(try channelCommand("picture_focus", ["sid": 3, "compose": true]), .pictureFocus(sid: 3, compose: true))
+        XCTAssertEqual(try channelCommand("picture_focus", ["sid": 3, "compose": NSNull()]), .pictureFocus(sid: 3, compose: false))
+        XCTAssertEqual(try channelCommand("picture_focus", ["sid": NSNull()]), .pictureFocus(sid: nil, compose: false))
         XCTAssertThrowsError(try channelCommand("picture_focus", [:]))
         XCTAssertThrowsError(try channelCommand("picture_focus", ["sid": "3"]))
+        XCTAssertEqual(try channelCommand("compose_replay", ["sid": 5]), .composeReplay(sid: 5))
+        XCTAssertThrowsError(try channelCommand("compose_replay", [:]))
     }
 
     func testUnknownMethodIsNotImplemented() {
