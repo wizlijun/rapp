@@ -55,6 +55,19 @@ impl Emu {
         self.parser.advance(&mut self.term, bytes);
     }
 
+    /// Is a synchronized update (`CSI ? 2026 h`) open, its bytes held back until the matching end?
+    pub fn sync_pending(&self) -> bool {
+        self.parser.sync_timeout().sync_timeout().is_some()
+    }
+
+    /// Apply a synchronized update whose end never came, once its 150 ms timeout has passed. The `run` loop calls
+    /// this on its own timer (about every 50 ms); nothing happens when no update is open or it has time left.
+    pub fn tick(&mut self) {
+        if self.parser.sync_timeout().sync_timeout().is_some_and(|t| std::time::Instant::now() >= t) {
+            self.parser.stop_sync(&mut self.term);
+        }
+    }
+
     pub fn resize(&mut self, cols: u16, rows: u16) {
         self.term.resize(Size { cols: cols.max(1) as usize, rows: rows.max(1) as usize });
     }
@@ -308,6 +321,37 @@ mod tests {
         assert_eq!((h.lines, h.size), (vec!["6".to_string(), "7".into(), "8".into()], 9));
         assert_eq!(e.history(2, 100).lines.len(), 7);
         assert!(e.history(50, 3).lines.is_empty());
+    }
+
+    #[test]
+    fn a_complete_synchronized_update_shows_at_once() {
+        let mut e = Emu::new(20, 3);
+        e.feed(b"\x1b[?2026hhello\x1b[?2026l");
+        assert!(!e.sync_pending());
+        assert_eq!(e.screen().lines[0], "hello");
+    }
+
+    #[test]
+    fn an_unfinished_synchronized_update_shows_after_tick() {
+        let mut e = Emu::new(20, 3);
+        e.feed(b"\x1b[?2026hhello");
+        assert!(e.sync_pending());
+        e.tick();
+        assert_eq!(e.screen().lines[0], "", "the timeout has not passed yet");
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        e.tick();
+        assert!(!e.sync_pending());
+        assert_eq!(e.screen().lines[0], "hello");
+    }
+
+    #[test]
+    fn tick_with_nothing_pending_changes_nothing() {
+        let mut e = Emu::new(20, 3);
+        e.feed(b"abc");
+        let before = e.screen();
+        e.tick();
+        assert!(!e.sync_pending());
+        assert_eq!(e.screen(), before);
     }
 
     #[test]
