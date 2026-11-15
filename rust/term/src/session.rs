@@ -5,21 +5,16 @@ use crate::proto::{self, In, Out, Pane};
 use crate::screen::{strip_escapes, wrapped_rows, Screen};
 use crate::sender::Sender;
 use crate::tmux::control::{Control, Event};
-use crate::tmux::{cmd, HistoryRows, PaneInfo, Tmux, MAX_PASTE};
+use crate::tmux::{cmd, PaneInfo, Tmux};
 use crate::unread::Unread;
-use std::collections::HashMap;
+use crate::wire::{history_msg, panes_msg, put, Got, Lines, PasteBuf, PasteStep, MAX_IN_LINE, TOO_LONG};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncBufRead, AsyncWrite};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::{Instant, Interval, MissedTickBehavior};
 
-/// The longest `In` line accepted, newline excluded: input lines are held to `proto::MAX_LINE` like output.
-/// A longer paste comes as several `Text` chunks.
-const MAX_IN_LINE: usize = proto::MAX_LINE - 1;
-/// Why a paste over `MAX_PASTE` in all was not made.
-const TOO_LONG: &str = "text is too long (1 MiB at most)";
 /// The most bytes of a pane's title, window name or command put in the pane list.
 const MAX_NAME: usize = 256;
 /// The exit reason the control client gives when its stream just ended rather than tmux saying `%exit`.
@@ -70,7 +65,7 @@ where
         panes: Vec::new(),
         view: None,
         sender: Sender::new(""),
-        pastes: HashMap::new(),
+        pastes: PasteBuf::default(),
     };
     let res = p.pump(Lines::new(r, MAX_IN_LINE), &list).await;
     if let Some(v) = p.view.take() {
@@ -107,31 +102,6 @@ fn cut(s: &str, max: usize) -> &str {
     &s[..end]
 }
 
-/// A `Panes` message that fits in one line: when the panes do not all fit, the ones at the end are left out.
-fn panes_msg(panes: &[Pane]) -> Out {
-    let mut used = proto::encode(&Out::Panes { panes: Vec::new() }).len();
-    let mut keep = 0;
-    for p in panes {
-        // The pane and the comma before it.
-        used += serde_json::to_string(p).expect("a pane always serializes").len() + 1;
-        if used > proto::MAX_LINE {
-            break;
-        }
-        keep += 1;
-    }
-    Out::Panes { panes: panes[..keep].to_vec() }
-}
-
-/// One line written to `w`, flushed. A message too long for one line is never written: a fixed error goes instead.
-async fn put<W: AsyncWrite + Unpin>(w: &mut W, m: &Out) -> std::io::Result<()> {
-    let mut line = proto::encode(m);
-    if line.len() > proto::MAX_LINE {
-        line = proto::encode(&Out::Error { error: "message too large".into() });
-    }
-    w.write_all(line.as_bytes()).await?;
-    w.flush().await
-}
-
 fn unix_now() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
@@ -148,101 +118,6 @@ async fn capture(ctl: &Control, pane: &str) -> anyhow::Result<Screen> {
     let plain: Vec<String> = s.lines.iter().map(|l| strip_escapes(l)).collect();
     s.wrapped = wrapped_rows(&plain, &joined);
     Ok(s)
-}
-
-/// A `History` message that fits in one line: when the rows do not all fit, the ones nearest the screen are kept
-/// (the peer asks again from `before` plus what it got). A row too long for a line on its own is shrunk like a
-/// screen row, so there is always at least one.
-fn history_msg(pane: &str, before: u32, rows: HistoryRows) -> Out {
-    let HistoryRows { mut lines, wrapped, size } = rows;
-    // Room for every index, so cutting rows never needs a second measure.
-    let mut used = proto::encode(&Out::History {
-        pane: pane.to_string(),
-        before,
-        lines: Vec::new(),
-        wrapped: wrapped.clone(),
-        hist: size,
-    })
-    .len();
-    let mut keep = lines.len();
-    while keep > 0 {
-        let n = serde_json::to_string(&lines[keep - 1]).expect("a string always serializes").len() + 1;
-        if used + n > proto::MAX_LINE {
-            break;
-        }
-        used += n;
-        keep -= 1;
-    }
-    if keep > 0 && keep == lines.len() {
-        let last = lines.pop().expect("there are rows");
-        let lines = vec![proto::shrink_text(&last, proto::MAX_LINE - used)];
-        return Out::History { pane: pane.to_string(), before, lines, wrapped: Vec::new(), hist: size };
-    }
-    lines.drain(..keep);
-    let n = lines.len() as u32;
-    let keep = keep as u32;
-    let wrapped = wrapped.into_iter().filter(|&k| k >= keep && k - keep < n).map(|k| k - keep).collect();
-    Out::History { pane: pane.to_string(), before, lines, wrapped, hist: size }
-}
-
-/// What reading one input line gave.
-enum Got {
-    /// A line, newline removed.
-    Line(Vec<u8>),
-    /// A line longer than the limit; it was read and dropped.
-    TooLong,
-    Eof,
-}
-
-/// Lines of `r` up to `limit` bytes each. Cancel-safe: a read cancelled half way keeps what it had, and the next
-/// call goes on from there. A line over the limit is dropped as it streams past, never held whole.
-struct Lines<R> {
-    r: R,
-    buf: Vec<u8>,
-    limit: usize,
-    /// The current line went over the limit.
-    over: bool,
-}
-
-impl<R: AsyncBufRead + Unpin> Lines<R> {
-    fn new(r: R, limit: usize) -> Lines<R> {
-        Lines { r, buf: Vec::new(), limit, over: false }
-    }
-
-    async fn next(&mut self) -> std::io::Result<Got> {
-        loop {
-            // The only await; nothing is consumed or kept until it has returned.
-            let chunk = self.r.fill_buf().await?;
-            if chunk.is_empty() {
-                if std::mem::take(&mut self.over) {
-                    return Ok(Got::TooLong);
-                }
-                if self.buf.is_empty() {
-                    return Ok(Got::Eof);
-                }
-                return Ok(Got::Line(std::mem::take(&mut self.buf)));
-            }
-            let (part, used, ends) = match chunk.iter().position(|&b| b == b'\n') {
-                Some(i) => (&chunk[..i], i + 1, true),
-                None => (chunk, chunk.len(), false),
-            };
-            if !self.over {
-                if self.buf.len() + part.len() > self.limit {
-                    self.over = true;
-                    self.buf = Vec::new();
-                } else {
-                    self.buf.extend_from_slice(part);
-                }
-            }
-            self.r.consume(used);
-            if ends {
-                if std::mem::take(&mut self.over) {
-                    return Ok(Got::TooLong);
-                }
-                return Ok(Got::Line(std::mem::take(&mut self.buf)));
-            }
-        }
-    }
 }
 
 /// The control client and what goes with it, while someone views the session.
@@ -327,14 +202,6 @@ enum Step {
     Wake(Wake),
 }
 
-/// A paste still coming in chunks.
-enum Paste {
-    /// The chunks so far, joined.
-    Text(String),
-    /// A chunk went wrong: the paste is not made, and its last chunk is answered with this.
-    Failed(&'static str),
-}
-
 struct Pump<'a, W> {
     tmux: &'a Tmux,
     /// The session's id, which unread state is kept under: a rename does not change it.
@@ -349,8 +216,8 @@ struct Pump<'a, W> {
     view: Option<View>,
     /// The screens sent to the peer. It outlives a view, so revisions never repeat while the pump runs.
     sender: Sender,
-    /// Pastes waiting for their last chunk, by pane.
-    pastes: HashMap<String, Paste>,
+    /// The paste waiting for its last chunk.
+    pastes: PasteBuf,
 }
 
 impl<W: AsyncWrite + Unpin> Pump<'_, W> {
@@ -374,7 +241,7 @@ impl<W: AsyncWrite + Unpin> Pump<'_, W> {
                 Step::Input(Got::Eof) => return Ok(()),
                 Step::Input(Got::TooLong) => {
                     // Which paste it was a chunk of, if any, cannot be told: none still coming is made.
-                    self.fail_pastes();
+                    self.pastes.fail_all("bad message");
                     self.bad().await?
                 }
                 Step::Input(Got::Line(l)) => match serde_json::from_slice::<In>(&l) {
@@ -404,7 +271,7 @@ impl<W: AsyncWrite + Unpin> Pump<'_, W> {
             self.paste_failed(pane, more, "bad message").await?;
             return Ok(true);
         }
-        self.fail_pastes();
+        self.pastes.fail_all("bad message");
         if text.is_some_and(|v| v["more"].as_bool() != Some(true)) {
             self.put(&Out::Pasted { ok: false, error: Some("bad message".into()) }).await?;
             return Ok(true);
@@ -412,60 +279,31 @@ impl<W: AsyncWrite + Unpin> Pump<'_, W> {
         self.bad().await
     }
 
-    /// Every paste still coming fails: a line that may have been one of its chunks was lost.
-    fn fail_pastes(&mut self) {
-        for p in self.pastes.values_mut() {
-            if let Paste::Text(_) = p {
-                *p = Paste::Failed("bad message");
-            }
-        }
-    }
-
     /// A chunk of `pane`'s paste could not be taken. The last chunk is answered; before it, the paste is marked
     /// failed (kept only for one of this session's panes, so made-up names hold nothing).
     async fn paste_failed(&mut self, pane: &str, more: bool, why: &'static str) -> anyhow::Result<()> {
-        if !more {
-            let why = match self.pastes.remove(pane) {
-                Some(Paste::Failed(first)) => first,
-                _ => why,
-            };
-            return self.put(&Out::Pasted { ok: false, error: Some(why.into()) }).await;
+        let known = self.panes.iter().any(|p| p.id == pane);
+        match self.pastes.fail(pane, more, why, known) {
+            Some(why) => self.put(&Out::Pasted { ok: false, error: Some(why.into()) }).await,
+            None => Ok(()),
         }
-        match self.pastes.get_mut(pane) {
-            Some(p @ Paste::Text(_)) => *p = Paste::Failed(why),
-            Some(Paste::Failed(_)) => {}
-            None if self.panes.iter().any(|p| p.id == pane) => {
-                self.pastes.insert(pane.to_string(), Paste::Failed(why));
-            }
-            None => {}
-        }
-        Ok(())
     }
 
     /// One chunk of a paste into one of this session's panes: joined to the ones before; on the last, the whole
     /// text is pasted once and answered.
     async fn paste_chunk(&mut self, pane: &str, data: String, enter: bool, more: bool) -> anyhow::Result<()> {
-        let joined = match self.pastes.remove(pane) {
-            None if data.len() > MAX_PASTE => Paste::Failed(TOO_LONG),
-            None => Paste::Text(data),
-            Some(Paste::Text(t)) if t.len() + data.len() > MAX_PASTE => Paste::Failed(TOO_LONG),
-            Some(Paste::Text(mut t)) => {
-                t.push_str(&data);
-                Paste::Text(t)
-            }
-            Some(failed) => failed,
-        };
-        if more {
-            self.pastes.insert(pane.to_string(), joined);
-            return Ok(());
+        // A paste that already failed (a lost line) is answered with the first reason, on its last chunk.
+        if let Some(why) = self.pastes.failure(pane) {
+            return self.paste_failed(pane, more, why).await;
         }
-        let m = match joined {
+        let m = match self.pastes.push(pane, data, more) {
+            PasteStep::Pending | PasteStep::Dropped => return Ok(()),
             // The paste's errors say what went wrong, never what the text was.
-            Paste::Text(t) => match self.tmux.paste(pane, &t, enter).await {
+            PasteStep::Ready(t) => match self.tmux.paste(pane, &t, enter).await {
                 Ok(()) => Out::Pasted { ok: true, error: None },
                 Err(e) => Out::Pasted { ok: false, error: Some(e.to_string()) },
             },
-            Paste::Failed(why) => Out::Pasted { ok: false, error: Some(why.into()) },
+            PasteStep::TooLong => Out::Pasted { ok: false, error: Some(TOO_LONG.into()) },
         };
         self.put(&m).await
     }
@@ -710,7 +548,6 @@ impl<W: AsyncWrite + Unpin> Pump<'_, W> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::io::AsyncWriteExt;
 
     fn info(sid: &str, window_index: u32, pane_index: u32, pane: &str) -> PaneInfo {
         PaneInfo {
@@ -767,92 +604,4 @@ mod tests {
         assert_eq!(panes_of(&[p], "$1")[0].title.len(), 255);
     }
 
-    #[test]
-    fn the_pane_list_fits_one_line_dropping_panes_at_the_end() {
-        // Control characters escape to six bytes each: 100 such panes cannot fit in 64 KiB.
-        let list: Vec<PaneInfo> = (0..100)
-            .map(|i| {
-                let mut p = info("$1", 0, i, &format!("%{i}"));
-                (p.title, p.window, p.command) = ("\u{1}".repeat(256), "\u{1}".repeat(256), "\u{1}".repeat(256));
-                p
-            })
-            .collect();
-        let panes = panes_of(&list, "$1");
-        let m = panes_msg(&panes);
-        assert!(proto::encode(&m).len() <= proto::MAX_LINE);
-        let Out::Panes { panes: sent } = m else { panic!() };
-        assert!(!sent.is_empty() && sent.len() < panes.len());
-        assert_eq!(sent[..], panes[..sent.len()]);
-        let small = panes_of(&list[..2], "$1");
-        assert_eq!(panes_msg(&small), Out::Panes { panes: small.clone() });
-    }
-
-    #[tokio::test]
-    async fn no_message_is_written_over_the_line_limit() {
-        let mut w: Vec<u8> = Vec::new();
-        put(&mut w, &Out::Error { error: "x".repeat(70000) }).await.unwrap();
-        assert_eq!(String::from_utf8(w).unwrap(), proto::encode(&Out::Error { error: "message too large".into() }));
-    }
-
-    fn line(got: Got) -> Vec<u8> {
-        match got {
-            Got::Line(l) => l,
-            Got::TooLong => panic!("too long"),
-            Got::Eof => panic!("eof"),
-        }
-    }
-
-    #[tokio::test]
-    async fn a_line_over_the_limit_is_dropped_and_reading_goes_on() {
-        let (mut w, r) = tokio::io::duplex(8);
-        let mut lines = Lines::new(tokio::io::BufReader::with_capacity(4, r), 16);
-        let feed = tokio::spawn(async move {
-            w.write_all(b"0123456789abcdef\n0123456789abcdefg\nok\nlast").await.unwrap();
-        });
-        assert_eq!(line(lines.next().await.unwrap()), b"0123456789abcdef"); // exactly the limit is fine
-        assert!(matches!(lines.next().await.unwrap(), Got::TooLong));
-        assert_eq!(line(lines.next().await.unwrap()), b"ok");
-        feed.await.unwrap();
-        assert_eq!(line(lines.next().await.unwrap()), b"last"); // a last line without a newline still counts
-        assert!(matches!(lines.next().await.unwrap(), Got::Eof));
-    }
-
-    #[tokio::test]
-    async fn a_cancelled_read_keeps_what_it_had_read() {
-        let (mut w, r) = tokio::io::duplex(64);
-        let mut lines = Lines::new(tokio::io::BufReader::new(r), 1024);
-        w.write_all(b"{\"t\":\"ack\",").await.unwrap();
-        assert!(tokio::time::timeout(Duration::from_millis(20), lines.next()).await.is_err());
-        w.write_all(b"\"rev\":3}\n").await.unwrap();
-        assert_eq!(line(lines.next().await.unwrap()), b"{\"t\":\"ack\",\"rev\":3}");
-        drop(w);
-        assert!(matches!(lines.next().await.unwrap(), Got::Eof));
-    }
-
-    #[test]
-    fn history_is_cut_to_the_line_limit_keeping_the_rows_nearest_the_screen() {
-        let rows: Vec<String> = (0..1000).map(|i| format!("{i:0>200}")).collect();
-        let last = rows.len() as u32 - 1;
-        let m = history_msg("%1", 5, HistoryRows { lines: rows.clone(), wrapped: vec![0, 3, last - 1], size: 9000 });
-        assert!(proto::encode(&m).len() <= proto::MAX_LINE);
-        let Out::History { pane, before, lines, wrapped, hist } = m else { panic!() };
-        let cut = (rows.len() - lines.len()) as u32;
-        assert_eq!((wrapped, hist), (vec![last - 1 - cut], 9000));
-        assert_eq!((pane.as_str(), before), ("%1", 5));
-        assert!(!lines.is_empty() && lines.len() < rows.len());
-        assert_eq!(lines[..], rows[rows.len() - lines.len()..]);
-        let two = HistoryRows { lines: vec!["a".into(), "b".into()], wrapped: vec![0], size: 2 };
-        let small = history_msg("%1", 0, two);
-        assert!(matches!(small, Out::History { lines, wrapped, hist: 2, .. } if lines == ["a", "b"] && wrapped == [0]));
-    }
-
-    #[test]
-    fn a_single_row_over_the_line_limit_is_stripped_then_cut() {
-        let row = format!("\x1b[31m{}", "é".repeat(40_000));
-        let m = history_msg("%1", 0, HistoryRows { lines: vec!["before".into(), row], wrapped: vec![0], size: 2 });
-        assert!(proto::encode(&m).len() <= proto::MAX_LINE);
-        let Out::History { lines, .. } = m else { panic!() };
-        assert_eq!(lines.len(), 1);
-        assert!(lines[0].len() > 60_000 && lines[0].chars().all(|c| c == 'é'), "{}", lines[0].len());
-    }
 }

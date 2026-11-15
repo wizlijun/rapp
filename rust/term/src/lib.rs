@@ -10,3 +10,4 @@ pub mod serve;
 pub mod session;
 pub mod tmux;
 pub mod unread;
+pub mod wire;
