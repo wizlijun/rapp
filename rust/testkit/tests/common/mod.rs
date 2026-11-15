@@ -398,6 +398,19 @@ impl RelayRig {
         Self::start_enroll(rapp_relay::config::Enroll::Open).await
     }
 
+    /// A relay that lets a device be connected to `per_min` times a minute (the default is 60),
+    /// for tests that open more forwards than that.
+    pub async fn start_with_connect_limit(per_min: u32) -> RelayRig {
+        let data = tempfile::tempdir().unwrap();
+        let mut config = rapp_relay::config::Config { listen: "127.0.0.1:0".parse().unwrap(), ..Default::default() };
+        config.limits.connect_per_target_per_min = per_min;
+        let relay = Self::boot_config(data.path(), config).await;
+        let key = rapp_wire::Key::new_for_relay(&relay.fp);
+        relay.registry().set_join_hash(&rapp_wire::join_hash(&key.join())).unwrap();
+        let addr = relay.addr.to_string();
+        RelayRig { relay: Some(relay), data, key, addr }
+    }
+
     /// A relay whose enrollment is `enroll` (`Closed`: new devices are answered `closed`).
     pub async fn start_enroll(enroll: rapp_relay::config::Enroll) -> RelayRig {
         let data = tempfile::tempdir().unwrap();
@@ -413,7 +426,10 @@ impl RelayRig {
     }
 
     async fn boot_with(data: &Path, listen: SocketAddr, enroll: rapp_relay::config::Enroll) -> rapp_relay::server::Relay {
-        let config = rapp_relay::config::Config { listen, enroll, ..Default::default() };
+        Self::boot_config(data, rapp_relay::config::Config { listen, enroll, ..Default::default() }).await
+    }
+
+    async fn boot_config(data: &Path, config: rapp_relay::config::Config) -> rapp_relay::server::Relay {
         let opts = rapp_relay::server::Opts {
             data: data.to_path_buf(),
             config,

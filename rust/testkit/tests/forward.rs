@@ -708,7 +708,10 @@ struct OverRelay {
 }
 
 async fn over_relay() -> OverRelay {
-    let rig = RelayRig::start().await;
+    over_relay_on(RelayRig::start().await).await
+}
+
+async fn over_relay_on(rig: RelayRig) -> OverRelay {
     let (port, echo) = echo().await;
     let a = a_on_relay(&rig, Some(vec![])).await;
     assert_eq!(ipc_once(&a.svc, a.home.path(), json!({"cmd":"share","ports":[port]})).await["ok"], true);
@@ -999,4 +1002,31 @@ async fn the_cli_shares_and_pipes() {
     let out = cli(empty.path(), &["share"], b"").await;
     assert_eq!(out.status.code(), Some(1));
     assert_eq!(String::from_utf8_lossy(&out.stderr), "本机的 rapp 服务没有在运行\n");
+}
+
+// ---- the forward measurement (Task 10) ----
+
+#[tokio::test]
+async fn measure_the_forward_over_the_relay() {
+    // 100 forwards to one device in a few seconds: more than the relay's default of 60 a minute.
+    let t = over_relay_on(RelayRig::start_with_connect_limit(1000).await).await;
+    let plan = rapp_testkit::Plan {
+        ipc_port: t.b.svc.ipc_port,
+        token: token_of(t.b.home.path()),
+        to: format!("{}.rapp", t.a.id),
+        port: t.port,
+        n: 50,
+        parallel: 6,
+    };
+    let report = rapp_testkit::measure(&plan).await.unwrap();
+    assert_eq!(report.open_seq.len(), 50);
+    assert_eq!(report.open_par.len(), 50);
+    assert_eq!(report.first_byte.len(), 50);
+    // Nothing registered a LAN address, so every forward went through the relay.
+    assert_eq!(report.path.keys().collect::<Vec<_>>(), ["relay"]);
+    assert_eq!(report.path["relay"], 100);
+    let lines = report.lines();
+    assert_eq!(lines.len(), 4);
+    assert!(lines[0].starts_with("open_seq") && lines[3].starts_with("path") && lines[3].ends_with("relay=100"), "{lines:?}");
+    eprintln!("{}", lines.join("\n"));
 }
