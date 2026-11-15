@@ -208,6 +208,7 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       live[sid]?.session.moveToTopLeft(window: window)
       result(nil)
     case let .pictureFocus(sid, compose):
+      hold.focus(sid, compose: compose)
       if sid != focusedSid {
         releaseKeys()
         focusedSid = sid
@@ -375,9 +376,14 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       targetSid = focusedSid.flatMap { live[$0] != nil && detached[$0] == nil ? $0 : nil }
       let now = ProcessInfo.processInfo.systemUptime
       // Waiting for the panel to take the caret: everything typed meanwhile waits behind the letter.
-      if hold.add(event, now: now) { return nil }
-      if down, event.type == .keyDown, composeOn, let sid = targetSid,
-         isComposeKey(characters: event.characters, flags: event.modifierFlags, isRepeat: event.isARepeat) {
+      switch hold.add(event, now: now) {
+      case .held: return nil
+      case .dropped: releaseKeys()  // a release that sat in the hold is gone: nothing stays stuck on A
+      case .notHolding: break
+      }
+      if let sid = composeStart(keyDown: down && event.type == .keyDown, composeOn: composeOn,
+                                targetSid: targetSid, characters: event.characters,
+                                flags: event.modifierFlags, isRepeat: event.isARepeat) {
         // Type-to-compose: the letter never reaches A; Dart opens the panel, then asks for it back.
         hold.start(sid: sid, event, now: now)
         channel.invokeMethod("compose_key", arguments: ["sid": sid])

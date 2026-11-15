@@ -122,7 +122,9 @@ void main() {
     await tester.runAsync(() => Future<void>.delayed(Duration.zero));
     expect(events.whereType<ComposerInsertEvent>().map((e) => e.insert.text), ['a', 'a', 'a']);
 
-    // A digit goes to A.
+    // The panel took the keys and the picture got them back: no compose is pending. A digit goes to A.
+    await port.invoke('picture_focus', {'sid': null});
+    await port.invoke('picture_focus', {'sid': 3, 'compose': true});
     expect(port.handleKeyEvent(3, down(PhysicalKeyboardKey.digit1, LogicalKeyboardKey.digit1, '1')), true);
     expect(port.handleKeyEvent(3, up(PhysicalKeyboardKey.digit1, LogicalKeyboardKey.digit1)), true);
     // Ctrl+A goes to A (as ⌘A).
@@ -147,6 +149,49 @@ void main() {
     ];
     // 1 down/up, ⌘A down/up, A down/up; the compose A (keyCode 0) never went.
     expect(keys, [(18, true), (18, false), (0, true), (0, false), (0, true), (0, false)]);
+    port.dispose();
+    await tester.runAsync(sub.cancel);
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+  }, skip: Platform.isWindows);
+
+  testWidgets('before the panel takes the keys, a space or digit after the letter goes into the draft too',
+      (tester) async {
+    final port = LinuxSessionPort('unused', framePresented: () async {});
+    final proc = await tester.runAsync(() => Process.start('cat', const []));
+    port.seedSessionForTest(3, proc!);
+    final events = <SessionEvent>[];
+    final sub = (await tester.runAsync(() async => port.events.listen(events.add)))!;
+    KeyDownEvent down(PhysicalKeyboardKey p, LogicalKeyboardKey l, String ch) =>
+        KeyDownEvent(physicalKey: p, logicalKey: l, character: ch, timeStamp: Duration.zero);
+    KeyUpEvent up(PhysicalKeyboardKey p, LogicalKeyboardKey l) =>
+        KeyUpEvent(physicalKey: p, logicalKey: l, timeStamp: Duration.zero);
+    final one = down(PhysicalKeyboardKey.digit1, LogicalKeyboardKey.digit1, '1');
+    final upOne = up(PhysicalKeyboardKey.digit1, LogicalKeyboardKey.digit1);
+
+    await port.invoke('picture_focus', {'sid': 3, 'compose': true});
+    expect(port.handleKeyEvent(3, down(PhysicalKeyboardKey.keyN, LogicalKeyboardKey.keyN, 'n')), true);
+    expect(port.handleKeyEvent(3, down(PhysicalKeyboardKey.space, LogicalKeyboardKey.space, ' ')), true);
+    expect(port.handleKeyEvent(3, up(PhysicalKeyboardKey.space, LogicalKeyboardKey.space)), true);
+    expect(port.handleKeyEvent(3, one), true);
+    expect(port.handleKeyEvent(3, upOne), true);
+    expect(port.handleKeyEvent(3, up(PhysicalKeyboardKey.keyN, LogicalKeyboardKey.keyN)), true);
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    expect(events.whereType<ComposerInsertEvent>().map((e) => e.insert.text), ['n', ' ', '1']);
+
+    // Focus moved (here: compose re-sent for the picture): nothing is pending, the digit is A's again.
+    await port.invoke('picture_focus', {'sid': 3, 'compose': true});
+    expect(port.handleKeyEvent(3, one), true);
+    expect(port.handleKeyEvent(3, upOne), true);
+
+    final sent = await tester.runAsync(() async {
+      await proc.stdin.close();
+      return utf8.decode(await proc.stdout.expand((b) => b).toList());
+    });
+    final keys = [
+      for (final m in [for (final l in sent!.trim().split('\n')) jsonDecode(l) as Map])
+        if (m['cmd'] == 'key') (m['keyCode'], m['down']),
+    ];
+    expect(keys, [(18, true), (18, false)]); // only the last 1
     port.dispose();
     await tester.runAsync(sub.cancel);
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
