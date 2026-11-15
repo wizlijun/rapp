@@ -268,7 +268,6 @@ async fn outbound_goes_through_the_relay_when_there_is_no_address() {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     assert_eq!(rig.streams(), before + 1);
-    out.close();
 }
 
 #[tokio::test]
@@ -1378,6 +1377,7 @@ async fn fifty_at_once_share_one_channel() {
     }
     let home = t.a.home.path();
     assert_eq!(count(home, "channel"), 1, "{:?}", log_events(home));
+    assert_eq!(count(home, "trust"), 1, "{:?}", log_events(home));
     t.rig.relay.as_ref().unwrap().audit().flush();
     let relayed = rapp_relay::audit::read(t.rig.data.path(), None, None, Some("relayed")).unwrap_or_default();
     assert!(!relayed.iter().any(|v| v["result"] == "limit"), "{relayed:?}");
@@ -1463,4 +1463,148 @@ async fn a_dead_channel_is_rebuilt() {
     let home = t.a.home.path();
     wait_log(home, "channel_end", |_| true).await;
     assert_eq!(count(home, "channel"), 2, "{:?}", log_events(home));
+}
+
+// ---- a device on the relay that misbehaves (port-sharing 1b, Task 5) ----
+
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+/// A device on `rig` with an ID and identity of its own, trusting the relay's key: lookups are
+/// answered, and each relayed stream is handed to `serve` with its number (from 0) on a task of
+/// its own. Its ID, the streams so far, and what keeps it on the relay.
+async fn fake_on_relay<F, Fut>(rig: &RelayRig, serve: F) -> (String, Arc<AtomicUsize>, (Endpoint, RelayConn))
+where
+    F: Fn(usize, Pipe, FakeA) -> Fut + Send + Sync + 'static,
+    Fut: std::future::Future<Output = ()> + Send + 'static,
+{
+    let id = "876543219".to_string();
+    let me = Arc::new(rapp_wire::Identity::generate().unwrap());
+    let (ep, conn) = relay_conn(rig, &me, &rig.key).await;
+    conn.register(&id, &[]).await.unwrap();
+    let streams = Arc::new(AtomicUsize::new(0));
+    let (pushes, n, key) = (conn.clone(), streams.clone(), Arc::new(rapp_wire::Key { relay: rig.key.relay, root: rig.key.root }));
+    let fake = FakeA { id: id.clone(), me, key };
+    tokio::spawn(async move {
+        loop {
+            match pushes.next_push().await {
+                Ok(rapp_conn::relay::Pushed::Incoming { mut reply, .. }) => {
+                    let _ = reply.write_all(b"{\"ok\":true}\n").await;
+                    let _ = reply.flush().await;
+                }
+                Ok(rapp_conn::relay::Pushed::Relayed { stream, .. }) => {
+                    tokio::spawn(serve(n.fetch_add(1, Ordering::SeqCst), stream, fake.clone()));
+                }
+                Ok(rapp_conn::relay::Pushed::Closed { .. }) | Err(_) => return,
+                Ok(_) => {}
+            }
+        }
+    });
+    (id, streams, (ep, conn))
+}
+
+#[derive(Clone)]
+struct FakeA {
+    id: String,
+    me: Arc<rapp_wire::Identity>,
+    key: Arc<rapp_wire::Key>,
+}
+
+impl FakeA {
+    /// TLS, the hello and `mux` on a relayed stream, as a sharer answers them; the channel.
+    async fn channel(&self, stream: Pipe) -> (Mux, rapp_conn::mux::Incoming) {
+        let (mut pipe, facts) = rapp_conn::e2e_accept(stream, &self.me).await.unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let hello = rapp_conn::Me { id: &self.id, name: "fake-a", key: Some(&self.key) };
+        rapp_conn::hello_server(&mut pipe, &facts, &hello, &rapp_conn::Paired::empty(home.path())).await.unwrap();
+        assert_eq!(read_json(&mut pipe).await.unwrap()["op"], "mux");
+        rapp_net::line::write_json(&mut pipe, &json!({"ok": true})).await.unwrap();
+        let (r, w) = tokio::io::split(pipe);
+        Mux::server(Box::new(r) as Reader, Box::new(w) as Writer)
+    }
+}
+
+/// Answers a substream's request with `{"ok":true}` and keeps it open.
+async fn answer_ok(mut s: rapp_conn::mux::MuxStream) {
+    if read_json(&mut s).await.is_ok() {
+        let _ = rapp_net::line::write_json(&mut s, &json!({"ok": true})).await;
+        let mut rest = Vec::new();
+        let _ = s.read_to_end(&mut rest).await;
+    }
+}
+
+#[tokio::test]
+async fn a_burst_shares_the_failure_of_its_channel() {
+    // Online at the relay, and never a word of TLS: the channel's opening fails after
+    // `REPLY_WAIT`, once for all the requests that waited for it.
+    let rig = RelayRig::start().await;
+    let held = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let keep = held.clone();
+    let (id, streams, _a) = fake_on_relay(&rig, move |_, stream, _| {
+        keep.lock().unwrap().push(stream);
+        async {}
+    })
+    .await;
+    let b = tempfile::tempdir().unwrap();
+    let out = Arc::new(outbound(b.path()));
+    let began = std::time::Instant::now();
+    let tries: Vec<_> = (0..4)
+        .map(|_| {
+            let (out, id, key) = (out.clone(), id.clone(), rapp_wire::Key { relay: rig.key.relay, root: rig.key.root });
+            let relay = rig.addr.clone();
+            tokio::spawn(async move {
+                let to = Target { id: &id, lan: &[], known: None };
+                out.request(&Via { relay: Some(&relay), key: &key }, &to, &Op::Ping).await.err().map(|e| e.to_string())
+            })
+        })
+        .collect();
+    let wait = rapp_conn::dial::REPLY_WAIT;
+    let all = tokio::time::timeout(wait * 2, async {
+        let mut got = Vec::new();
+        for t in tries {
+            got.push(t.await.unwrap());
+        }
+        got
+    })
+    .await
+    .expect("the burst ends within about one REPLY_WAIT");
+    assert_eq!(all, vec![Some("no reply".to_string()); 4]);
+    assert!(began.elapsed() < wait + Duration::from_secs(10), "{:?}", began.elapsed());
+    assert_eq!(streams.load(Ordering::SeqCst), 1);
+    // One that comes after the failure tries afresh.
+    let to = Target { id: &id, lan: &[], known: None };
+    let via = Via { relay: Some(&rig.addr), key: &rig.key };
+    let _ = tokio::time::timeout(Duration::from_secs(2), out.request(&via, &to, &Op::Ping)).await;
+    assert_eq!(streams.load(Ordering::SeqCst), 2);
+    out.close();
+}
+
+#[tokio::test]
+async fn a_channel_cut_under_a_request_is_rebuilt_once() {
+    // The first channel answers one request and is cut when the next one comes: the visitor did
+    // not see it end before sending on it.
+    let rig = RelayRig::start().await;
+    let (id, streams, _a) = fake_on_relay(&rig, |n, stream, fake| async move {
+        let (mux, mut incoming) = fake.channel(stream).await;
+        let mut subs = 0;
+        while let Some(s) = incoming.next().await {
+            subs += 1;
+            if n == 0 && subs == 2 {
+                mux.close();
+                return;
+            }
+            tokio::spawn(answer_ok(s));
+        }
+    })
+    .await;
+    let b = tempfile::tempdir().unwrap();
+    let out = outbound(b.path());
+    let to = Target { id: &id, lan: &[], known: None };
+    let via = Via { relay: Some(&rig.addr), key: &rig.key };
+    let first = out.request(&via, &to, &Op::Ping).await.unwrap();
+    assert_eq!(first.reply, json!({"ok":true}));
+    let second = out.request(&via, &to, &Op::Ping).await.unwrap();
+    assert_eq!((second.reply, second.path), (json!({"ok":true}), "relay"));
+    assert_eq!(second.fp, first.fp);
+    assert_eq!(streams.load(Ordering::SeqCst), 2);
+    out.close();
 }

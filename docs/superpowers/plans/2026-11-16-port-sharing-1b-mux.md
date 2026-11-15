@@ -460,7 +460,7 @@ old: Mutex<HashMap<String, Instant>>,                                   // 按�
 2. 没配 relay，或者这台在 `old` 里：走现在的路（局域网 → `through_relay` → `relayed`），结束。
 3. 拿这台的通道槽，`lock().await`（别的请求在建时就在这里等）。槽里的通道还能用（没关、`relay`/`key_text` 一样、`to.known` 是 `Some` 时和 `fp` 一样或 `fp` 还没填）：克隆 `Mux`、放锁、在上面发请求。不能用：`close()` 它、清空。
 4. 拿着锁：再试一次 `on_held`（等锁的时候前面的请求可能走局域网连上了），再走局域网和 `through_relay`；`through_relay` 最后一步从 `relayed` 换成 `open_channel`，建好的通道放进槽里，放锁，在上面发请求。
-5. 在通道上发请求：`mux.open()`，写请求，`REPLY_WAIT` 内读一个 JSON 回复。失败时看 `mux.reason()`：是 `unknown op` 或 `bad request` → 记进 `old`、清空槽、这一条改走 `relayed`；通道是第 3 步拿的旧通道 → 清空槽、从第 3 步再来一次（只一次）；否则按 `relayed` 现在的规矩报错（读不到回复是 `no reply`；TLS 或 relay 的拒绝照 `not_reached(relay_failure(e))`）。
+5. 在通道上发请求：`mux.open()`，写请求，`REPLY_WAIT` 内读一个 JSON 回复。失败时看 `mux.reason()`：是 `unknown op` 或 `bad request` → 记进 `old`、清空槽、这一条改走 `relayed`；通道是第 3 步拿的旧通道 → 清空槽、从第 3 步再来一次（只一次）；否则按 `relayed` 现在的规矩报错（读不到回复是 `no reply`；TLS 或 relay 的拒绝照 `not_reached(relay_failure(e))`）。从第 3 步再来的那一次只在拿到的旧通道已经关闭时才做：一个子流被 RST 或超时就丢掉还活着的通道，会把它上面别的子流一起切断。
 
 ```rust
 /// 经 relay 建通道：relay_to_at(id, FORWARD_PRIORITY)，REPLY_WAIT 内 e2e_connect，
