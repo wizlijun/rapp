@@ -191,6 +191,12 @@ async fn bad_values() {
 
 /// Services A and B that trust each other (the same key); B's `hosts.json` has A's LAN address.
 async fn a_and_b() -> (TestService, TestService, String) {
+    let (a, b, me, _) = a_and_b_key().await;
+    (a, b, me)
+}
+
+/// `a_and_b`, and the key they trust each other with.
+async fn a_and_b_key() -> (TestService, TestService, String, rapp_wire::Key) {
     let (a, key) = start_sharing(|_| {}).await;
     let (b, _) = start_sharing(|_| {}).await;
     let r = ipc_once(&b.svc, b.home.path(), json!({"cmd":"set_relay","relay":"","key":key.to_string()})).await;
@@ -198,7 +204,7 @@ async fn a_and_b() -> (TestService, TestService, String) {
     let hosts = json!([{"id": a.id, "name": "a", "lan": [a_addr(&a.svc).to_string()]}]);
     std::fs::write(b.home.path().join("hosts.json"), hosts.to_string()).unwrap();
     let me = ipc_once(&b.svc, b.home.path(), json!({"cmd":"status"})).await["fp"].as_str().unwrap().to_string();
-    (a, b, me)
+    (a, b, me, key)
 }
 
 async fn b_ipc(b: &TestService, cmd: Value) -> Value {
@@ -305,4 +311,106 @@ async fn the_cli_still_prints_the_same() {
         id = a.id
     );
     assert_eq!(String::from_utf8_lossy(&out.stdout), want, "{}", String::from_utf8_lossy(&out.stderr));
+}
+
+// ---- end to end: three devices, over the LAN and the relay, across a restart (Task 4) ----
+
+/// Writes `data`, finishes writing, and reads the stream to its end.
+async fn echo_via(pipe: &mut rapp_conn::Pipe, data: &[u8]) -> Vec<u8> {
+    use tokio::io::AsyncWriteExt;
+    pipe.write_all(data).await.unwrap();
+    pipe.shutdown().await.unwrap();
+    read_all(pipe, WAIT).await
+}
+
+/// Waits until `s`'s forward ends (the other side closed it).
+async fn ends_within_2s(s: &mut rapp_conn::Pipe) {
+    let mut buf = [0u8; 8];
+    let n = tokio::time::timeout(Duration::from_secs(2), s.read(&mut buf)).await.expect("ends within 2 s");
+    assert!(matches!(n, Ok(0) | Err(_)), "{n:?}");
+}
+
+#[tokio::test]
+async fn set_from_b_forward_from_c() {
+    let (port, _echo) = echo().await;
+    let (a, b, _, key) = a_and_b_key().await;
+    let c = visitor();
+    let r = b_ipc(&b, json!({"cmd":"share","to":a.id,"ports":[port]})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    let (r, mut s, _conn) = forward(&a, &key, &c, port).await;
+    assert_eq!(r, json!({"ok":true}));
+    assert_eq!(echo_via(&mut s, b"hello").await, b"hello");
+}
+
+#[tokio::test]
+async fn set_through_the_relay() {
+    let rig = RelayRig::start().await;
+    let (port, _echo) = echo().await;
+    // Neither registers a LAN address and B has no hosts.json: B can only reach A through the relay.
+    let a = a_on_relay(&rig, Some(vec![])).await;
+    let b = a_on_relay(&rig, Some(vec![])).await;
+    assert!(!b.home.path().join("hosts.json").exists());
+    let before = rig.streams();
+    let r = b_ipc(&b, json!({"cmd":"shares","to":a.id})).await;
+    assert_eq!((&r["ok"], &r["shares"]), (&json!(true), &json!([])), "{r}");
+    let r = b_ipc(&b, json!({"cmd":"share","to":a.id,"ports":[port],"note":"relayed"})).await;
+    assert_eq!(r, json!({"ok":true,"shared":[{"port":port}]}));
+    assert_eq!(saved_port(a.home.path(), port), json!({"port":port,"note":"relayed"}));
+    let deadline = tokio::time::Instant::now() + WAIT;
+    while rig.streams() <= before {
+        assert!(tokio::time::Instant::now() < deadline, "nothing went through the relay");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    let r = b_ipc(&b, json!({"cmd":"shares","to":a.id})).await;
+    assert_eq!((&r["shares"][0]["port"], &r["shares"][0]["note"]), (&json!(port), &json!("relayed")), "{r}");
+}
+
+#[tokio::test]
+async fn a_restart_keeps_what_was_set_remotely() {
+    let (port, _echo) = echo().await;
+    let (mut a, b, _, key) = a_and_b_key().await;
+    let c = visitor();
+    let r = b_ipc(&b, json!({"cmd":"share","to":a.id,"ports":[port],"note":"n"})).await;
+    assert_eq!(r["ok"], true, "{r}");
+
+    a.svc.stop();
+    a.svc = start_service(a.home.path(), a.bins.path(), Duration::from_secs(60)).await;
+    // A's LAN port changed: B is told the new address.
+    let hosts = json!([{"id": a.id, "name": "a", "lan": [a_addr(&a.svc).to_string()]}]);
+    std::fs::write(b.home.path().join("hosts.json"), hosts.to_string()).unwrap();
+
+    let r = b_ipc(&b, json!({"cmd":"shares","to":a.id})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    let row = &r["shares"][0];
+    assert_eq!((&row["port"], &row["note"], &row["listening"]), (&json!(port), &json!("n"), &json!(true)), "{r}");
+    let (r, mut s, _conn) = forward(&a, &key, &c, port).await;
+    assert_eq!(r, json!({"ok":true}));
+    assert_eq!(echo_via(&mut s, b"again").await, b"again");
+}
+
+#[tokio::test]
+async fn remote_unshare_and_narrowing_cut_c() {
+    let ((p, _e1), (q, _e2)) = (echo().await, echo().await);
+    let (a, b, me, key) = a_and_b_key().await;
+    let c = visitor();
+    let r = b_ipc(&b, json!({"cmd":"share","to":a.id,"ports":[p,q]})).await;
+    assert_eq!(r["ok"], true, "{r}");
+
+    // Narrowing P to B alone cuts C's forward, and C is no longer allowed in.
+    let (r, mut sp, _cp) = forward(&a, &key, &c, p).await;
+    assert_eq!(r, json!({"ok":true}));
+    let r = b_ipc(&b, json!({"cmd":"share","to":a.id,"ports":[p],"allow":[me]})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    ends_within_2s(&mut sp).await;
+    let (r, _, _c2) = forward(&a, &key, &c, p).await;
+    assert_eq!(r, json!({"ok":false,"error":"not allowed"}));
+
+    // Unsharing Q cuts C's forward, and Q is gone.
+    let (r, mut sq, _cq) = forward(&a, &key, &c, q).await;
+    assert_eq!(r, json!({"ok":true}));
+    let r = b_ipc(&b, json!({"cmd":"unshare","to":a.id,"port":q})).await;
+    assert_eq!(r, json!({"ok":true,"was":true}));
+    ends_within_2s(&mut sq).await;
+    let (r, _, _c3) = forward(&a, &key, &c, q).await;
+    assert_eq!(r, json!({"ok":false,"error":"not shared"}));
 }
