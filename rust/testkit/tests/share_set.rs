@@ -260,15 +260,49 @@ async fn an_offline_device_is_offline_within_the_wait() {
     assert!(began.elapsed() < Duration::from_secs(7), "{:?}", began.elapsed());
 }
 
+/// `rapp-cli`, built next to the other programs of this test run (bounded, like forward.rs).
+fn cli_bin() -> std::path::PathBuf {
+    let dir = Path::new(env!("CARGO_BIN_EXE_fake-rapp-host")).parent().unwrap().to_path_buf();
+    let mut build = std::process::Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
+    build.args(["build", "-p", "rapp-cli", "--quiet"]);
+    if dir.file_name().is_some_and(|n| n == "release") {
+        build.arg("--release");
+    }
+    assert!(build.status().expect("cargo starts").success(), "cargo build -p rapp-cli failed");
+    dir.join("rapp-cli")
+}
+
 #[tokio::test]
 async fn the_cli_still_prints_the_same() {
-    let (a, _) = start_sharing(|_| {}).await;
+    let x = fp_hex(9);
+    let entry = json!([{"fp": x, "name": "mini", "since": "2026-11-15T00:00:00Z"}]);
+    let (a, _) = start_sharing(|home| std::fs::write(home.join("paired.json"), entry.to_string()).unwrap()).await;
     let p = 5103u16;
-    let r = ipc_once(&a.svc, a.home.path(), json!({"cmd":"share","ports":[p]})).await;
+    let r = ipc_once(&a.svc, a.home.path(), json!({"cmd":"share","ports":[p],"allow":["mini"]})).await;
     assert_eq!(r["ok"], true, "{r}");
-    // A shares with no allow list prints no "只给" column text; the allowed case is in say.rs's
-    // tests (strings and objects both print the name).
-    let r = ipc_once(&a.svc, a.home.path(), json!({"cmd":"shares"})).await;
-    assert_eq!(r["shares"][0]["allow"], json!([]), "{r}");
-    assert_eq!(r["shares"][0]["url"], format!("http://{}.rapp:{p}", a.id), "{r}");
+
+    let local = tempfile::tempdir().unwrap();
+    let token = std::fs::read_to_string(a.home.path().join("ipc.token")).unwrap();
+    std::fs::write(local.path().join("ipc.token"), token.trim()).unwrap();
+    std::fs::write(local.path().join("service.json"), json!({"ipc_port": a.svc.ipc_port}).to_string()).unwrap();
+    let run = |args: &'static [&'static str]| {
+        let (bin, dir) = (cli_bin(), local.path().to_path_buf());
+        async move {
+            let child = tokio::process::Command::new(bin)
+                .args(args)
+                .env("RAPP_LOCAL", dir)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .unwrap();
+            tokio::time::timeout(Duration::from_secs(20), child.wait_with_output()).await.expect("the program ends in time").unwrap()
+        }
+    };
+    let out = run(&["share"]).await;
+    let want = format!(
+        "这台设备：{id}.rapp   中继：没有配置\n端口  状态          只给  地址\n{p}  没有服务在听  mini  http://{id}.rapp:{p}\n",
+        id = a.id
+    );
+    assert_eq!(String::from_utf8_lossy(&out.stdout), want, "{}", String::from_utf8_lossy(&out.stderr));
 }
