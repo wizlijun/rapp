@@ -1,11 +1,12 @@
 // 项目 tab of the side panel (S5 K17): named groups of apps, each with an
-// optional Agent task, a lamp per member, and open/switch per member.
+// optional note, a lamp per member, and open/switch per member.
 import 'package:flutter/material.dart';
 
 import 'controls.dart';
 import 'inline_edit.dart';
 import 'lamp.dart';
 import 'main_state.dart';
+import 'projects.dart';
 import 'session_model.dart';
 import 'tokens.dart';
 import 'workspace_store.dart';
@@ -39,21 +40,27 @@ class _ProjectsTabState extends State<ProjectsTab> {
       listenable: state,
       builder: (context, _) {
         final t = RappTokens.of(context);
-        final projects = state.projects;
+        final projects = orderedProjects(state.projects);
+        final undo = state.undoableDelete;
         _focus();
         return SingleChildScrollView(
           padding: const EdgeInsets.all(10),
           child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             _NewProject(state: state),
             const SizedBox(height: 10),
-            if (projects.isEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Text(
-                  '还没有项目。在上面输入名字，回车新建。',
-                  style: TextStyle(color: t.muted),
+            if (undo != null) ...[
+              Row(children: [
+                Expanded(
+                  child: Text('已删除「$undo」', style: TextStyle(color: t.muted)),
                 ),
-              ),
+                RappButton.secondary(
+                  key: const Key('undo-delete'),
+                  label: '撤销',
+                  onPressed: state.undoDelete,
+                ),
+              ]),
+              const SizedBox(height: 10),
+            ],
             for (final p in projects) ...[
               KeyedSubtree(
                 key: _cards.putIfAbsent(p.id, GlobalKey.new),
@@ -72,6 +79,8 @@ class _ProjectsTabState extends State<ProjectsTab> {
   }
 }
 
+/// The top row: one input shared by 新建项目 and 存成项目 (so they can never both be open),
+/// and the 存成项目 button, which turns the input into "name the open sessions".
 class _NewProject extends StatefulWidget {
   const _NewProject({required this.state});
   final MainState state;
@@ -82,30 +91,57 @@ class _NewProject extends StatefulWidget {
 
 class _NewProjectState extends State<_NewProject> {
   final _c = TextEditingController();
+  final _focus = FocusNode();
+  bool _saveOpen = false;
 
   @override
   void dispose() {
     _c.dispose();
+    _focus.dispose();
     super.dispose();
   }
 
   void _submit(String v) {
-    if (widget.state.createProject(v) != null) _c.clear();
+    final made = _saveOpen
+        ? widget.state.saveOpenAsProject(v)
+        : widget.state.createProject(v);
+    if (made != null) {
+      _c.clear();
+      setState(() => _saveOpen = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return TextField(
-      key: const Key('new-project'),
-      controller: _c,
-      textInputAction: TextInputAction.done,
-      decoration: const InputDecoration(
-        hintText: '新建项目',
-        isDense: true,
-        contentPadding: EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+    final can = widget.state.canSaveOpenAsProject;
+    return Row(children: [
+      Expanded(
+        child: TextField(
+          key: const Key('new-project'),
+          controller: _c,
+          focusNode: _focus,
+          textInputAction: TextInputAction.done,
+          decoration: InputDecoration(
+            hintText: _saveOpen && can ? '存成项目' : '新建项目',
+            isDense: true,
+            contentPadding:
+                const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+          ),
+          onSubmitted: _submit,
+        ),
       ),
-      onSubmitted: _submit,
-    );
+      const SizedBox(width: 6),
+      RappButton.secondary(
+        key: const Key('save-open'),
+        label: '存成项目',
+        onPressed: can
+            ? () {
+                setState(() => _saveOpen = true);
+                _focus.requestFocus();
+              }
+            : null,
+      ),
+    ]);
   }
 }
 
@@ -126,9 +162,12 @@ class _ProjectCardState extends State<_ProjectCard> {
     final t = RappTokens.of(context);
     final s = widget.state;
     final p = widget.project;
+    final current = s.currentProject == p.id;
     return Container(
       padding: const EdgeInsets.all(10),
-      decoration: t.panelBox(border: t.line),
+      decoration: current
+          ? t.panelBox().copyWith(border: Border.all(color: t.text, width: 2))
+          : t.panelBox(border: t.line),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -163,6 +202,18 @@ class _ProjectCardState extends State<_ProjectCard> {
             runSpacing: 6,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
+              RappButton.secondary(
+                key: Key('switch-${p.id}'),
+                label: '切到',
+                semanticLabel: '切到 ${p.name}',
+                onPressed: () => s.switchProject(p.id),
+              ),
+              RappButton.secondary(
+                key: Key('pin-${p.id}'),
+                label: p.pinned ? '取消固定' : '固定',
+                semanticLabel: '${p.pinned ? '取消固定' : '固定'} ${p.name}',
+                onPressed: () => s.togglePinned(p.id),
+              ),
               RappButton.primary(
                 key: Key('open-all-${p.id}'),
                 label: '全部打开',
@@ -177,10 +228,10 @@ class _ProjectCardState extends State<_ProjectCard> {
                     ? () => s.endAll(p.id)
                     : null,
               ),
-              ConfirmButton(
+              RappButton.secondary(
                 key: Key('delete-project-${p.id}'),
                 label: '删除项目',
-                onConfirmed: () => s.deleteProject(p.id),
+                onPressed: () => s.deleteProject(p.id),
               ),
             ],
           ),
@@ -281,10 +332,10 @@ class _MemberRow extends StatelessWidget {
                           child: InlineEdit(
                             key: Key('task-$id-${m.key}'),
                             text: m.task,
-                            placeholder: '添加 Agent 任务',
+                            placeholder: '备注',
                             semanticLabel: m.task.isEmpty
-                                ? '添加 Agent 任务 ${m.app.name}'
-                                : '任务 ${m.task}',
+                                ? '备注 ${m.app.name}'
+                                : '备注 ${m.task}',
                             style: TextStyle(color: t.text, fontSize: 13),
                             onCommit: (v) => s.setTask(id, m.key, v),
                           ),
