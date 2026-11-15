@@ -34,6 +34,23 @@ pub struct Share {
     pub open_web: bool,
 }
 
+/// What a `share` request sets. A field left out keeps what the port's share has now; a port
+/// that is not shared yet starts with no note, every trusted device and not raw.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Patch {
+    pub note: Option<String>,
+    pub allow: Option<Vec<Fp>>,
+    pub raw: Option<bool>,
+}
+
+/// One port after `share_all`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Shared {
+    pub share: Share,
+    /// The port was shared before, with other devices than now.
+    pub allow_changed: bool,
+}
+
 /// The shares of this device, kept in `local/shares.json` as a JSON array.
 pub struct Shares {
     path: PathBuf,
@@ -78,10 +95,41 @@ impl Shares {
     /// `add` for each, saved as one write: either all of them are in the table, or none.
     /// A port given twice is added once, the later one winning.
     pub fn add_all(&self, shares: Vec<Share>) -> Result<()> {
+        self.put(&mut self.items.lock().unwrap(), shares)
+    }
+
+    /// Shares every port of `ports` as `patch` says, saved as one write: either all of them are
+    /// in the table, or none. One entry per port, in the order given. Each port's share is read
+    /// and replaced under one lock, so a field the patch leaves out is the one it has now.
+    pub fn share_all(&self, ports: &[u16], patch: &Patch) -> Result<Vec<Shared>> {
+        let mut items = self.items.lock().unwrap();
+        let mut done: Vec<Shared> = Vec::new();
+        for &port in ports {
+            // A port given twice: the second time it has what the first gave it.
+            let now = done.iter().find(|d| d.share.port == port).map(|d| &d.share);
+            let was = now.or_else(|| items.0.iter().find(|s| s.port == port));
+            let mut share = was.cloned().unwrap_or(Share { port, note: String::new(), allow: Vec::new(), raw: false, open_web: false });
+            if let Some(note) = &patch.note {
+                share.note = note.clone();
+            }
+            if let Some(allow) = &patch.allow {
+                share.allow = allow.clone();
+            }
+            if let Some(raw) = patch.raw {
+                share.raw = raw;
+            }
+            let allow_changed = was.is_some_and(|w| !same_devices(&w.allow, &share.allow));
+            done.push(Shared { share, allow_changed });
+        }
+        self.put(&mut items, done.iter().map(|d| d.share.clone()).collect())?;
+        Ok(done)
+    }
+
+    /// `shares` into the table (each replacing the share of its port) and into the file.
+    fn put(&self, items: &mut (Vec<Share>, bool), shares: Vec<Share>) -> Result<()> {
         if shares.iter().any(|s| s.port == 0) {
             return Err(anyhow!("bad port"));
         }
-        let mut items = self.items.lock().unwrap();
         let mut next = items.0.clone();
         for share in shares {
             match next.iter().position(|s| s.port == share.port) {
@@ -94,7 +142,7 @@ impl Shares {
             return Err(anyhow!("limit"));
         }
         next.sort_by_key(|s| s.port);
-        self.save(&mut items, next)
+        self.save(items, next)
     }
 
     /// True when there was one.
@@ -121,6 +169,11 @@ impl Shares {
         items.0 = next;
         Ok(())
     }
+}
+
+/// The two lists name the same devices, in whatever order.
+fn same_devices(a: &[Fp], b: &[Fp]) -> bool {
+    a.iter().all(|f| b.contains(f)) && b.iter().all(|f| a.contains(f))
 }
 
 /// Ports the user should be warned about before sharing them.
@@ -195,6 +248,54 @@ mod tests {
         // the same port twice counts once
         s.add_all(vec![share(300), Share { note: "y".into(), ..share(300) }]).unwrap();
         assert_eq!(s.get(300).unwrap().note, "y");
+    }
+
+    #[test]
+    fn share_all_keeps_what_the_patch_leaves_out() {
+        let d = tempfile::tempdir().unwrap();
+        let (s, _) = Shares::load(d.path());
+        let only = |fps: &[Fp]| Patch { allow: Some(fps.to_vec()), ..Patch::default() };
+        // a port not shared yet starts with no note, every trusted device, not raw
+        let done = s.share_all(&[8000], &Patch::default()).unwrap();
+        assert_eq!((&done[0].share, done[0].allow_changed), (&share(8000), false));
+        let full = Patch { note: Some("模型".into()), allow: Some(vec![fp(1)]), raw: Some(true) };
+        let done = s.share_all(&[8000, 8001], &full).unwrap();
+        let want = |port| Share { note: "模型".into(), allow: vec![fp(1)], raw: true, ..share(port) };
+        assert_eq!(done.iter().map(|d| d.share.clone()).collect::<Vec<_>>(), [want(8000), want(8001)]);
+        // 8000 was shared with everyone before; 8001 was not shared at all
+        assert_eq!(done.iter().map(|d| d.allow_changed).collect::<Vec<_>>(), [true, false]);
+
+        // nothing given: nothing changes, in the table and in the file
+        let done = s.share_all(&[8000], &Patch::default()).unwrap();
+        assert_eq!((&done[0].share, done[0].allow_changed), (&want(8000), false));
+        assert_eq!(Shares::load(d.path()).0.get(8000), Some(want(8000)));
+        // one field given: only that one changes
+        let done = s.share_all(&[8000], &Patch { note: Some(String::new()), ..Patch::default() }).unwrap();
+        assert_eq!((&done[0].share, done[0].allow_changed), (&Share { note: String::new(), ..want(8000) }, false));
+        let done = s.share_all(&[8000], &Patch { raw: Some(false), ..Patch::default() }).unwrap();
+        assert_eq!(done[0].share, Share { allow: vec![fp(1)], ..share(8000) });
+
+        // the same devices in another order are not a change; other devices are, and so is everyone
+        s.share_all(&[8000], &only(&[fp(1), fp(2)])).unwrap();
+        assert!(!s.share_all(&[8000], &only(&[fp(2), fp(1)])).unwrap()[0].allow_changed);
+        assert!(s.share_all(&[8000], &only(&[fp(2)])).unwrap()[0].allow_changed);
+        assert!(s.share_all(&[8000], &only(&[fp(2), fp(3)])).unwrap()[0].allow_changed);
+        assert!(s.share_all(&[8000], &only(&[])).unwrap()[0].allow_changed);
+        assert_eq!(s.get(8000), Some(share(8000)));
+    }
+
+    #[test]
+    fn share_all_shares_all_or_none() {
+        let d = tempfile::tempdir().unwrap();
+        let (s, _) = Shares::load(d.path());
+        let ports: Vec<u16> = (1..=63).collect();
+        s.share_all(&ports, &Patch::default()).unwrap();
+        assert_eq!(s.share_all(&[100, 101], &Patch::default()).unwrap_err().to_string(), "limit");
+        assert_eq!(s.share_all(&[100, 0], &Patch::default()).unwrap_err().to_string(), "bad port");
+        assert!(s.get(100).is_none() && Shares::load(d.path()).0.get(100).is_none());
+        // one that is shared already and a new one make 64; a port given twice counts once
+        assert_eq!(s.share_all(&[63, 100, 100], &Patch::default()).unwrap().len(), 3);
+        assert_eq!(s.list().len(), 64);
     }
 
     #[test]

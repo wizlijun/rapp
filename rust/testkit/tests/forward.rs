@@ -630,6 +630,81 @@ async fn unshare_cuts_what_is_running() {
     assert!(matches!(read, Ok(0) | Err(_)), "{read:?}");
 }
 
+#[tokio::test]
+async fn narrowing_allow_cuts_the_forward_of_a_device_it_leaves_out() {
+    let (port, _echo) = echo().await;
+    let (a, key) = sharing_ports(&[port]).await;
+    // B and C each have a forward running (and A knows both from their hellos).
+    let (b, c) = (visitor(), visitor());
+    let (r, mut to_b, _b_conn) = forward(&a, &key, &b, port).await;
+    assert_eq!(r, json!({"ok":true}));
+    let (r, _to_c, _c_conn) = forward(&a, &key, &c, port).await;
+    assert_eq!(r, json!({"ok":true}));
+    to_b.write_all(b"hello").await.unwrap();
+    let mut got = [0u8; 5];
+    tokio::time::timeout(WAIT, to_b.read_exact(&mut got)).await.unwrap().unwrap();
+    assert_eq!(&got, b"hello");
+    // From now on only C.
+    let only_c = c.id.fp.to_string()[..8].to_string();
+    let r = ipc_once(&a.svc, a.home.path(), json!({"cmd":"share","ports":[port],"allow":[only_c]})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    let mut buf = [0u8; 16];
+    let read = tokio::time::timeout(Duration::from_secs(2), to_b.read(&mut buf)).await.expect("cut within 2 s");
+    assert!(matches!(read, Ok(0) | Err(_)), "{read:?}");
+    // B cannot come back; C can.
+    let (r, _, _conn) = forward(&a, &key, &b, port).await;
+    assert_eq!(r, json!({"ok":false,"error":"not allowed"}));
+    let (r, _, _conn) = forward(&a, &key, &c, port).await;
+    assert_eq!(r, json!({"ok":true}));
+}
+
+#[tokio::test]
+async fn sharing_again_without_allow_keeps_the_restriction() {
+    let (port, _echo) = echo().await;
+    let (a, key) = start_sharing(|_| {}).await;
+    let b = visitor();
+    // B connects once, so A's paired.json has B under the name B said.
+    let (r, _, _conn) = ask(&a, &key, &b, json!({"op":"list_shares"})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    let mut c = ipc(&a).await;
+    let restricted = json!([{"port": port, "url": format!("http://{}.rapp:{port}", a.id), "allow": ["test-b"]}]);
+    let r = c.call(json!({"cmd":"share","ports":[port],"allow":["test-b"],"note":"模型","raw":true})).await;
+    assert_eq!((&r["ok"], &r["shared"]), (&json!(true), &restricted), "{r}");
+    let (r, mut s, _conn) = forward(&a, &key, &b, port).await;
+    assert_eq!(r, json!({"ok":true}));
+
+    // Again, with nothing but the port: the share stays as it is, and the reply says who it is for.
+    let r = c.call(json!({"cmd":"share","ports":[port]})).await;
+    assert_eq!((&r["ok"], &r["shared"]), (&json!(true), &restricted), "{r}");
+    let saved = || -> Value { serde_json::from_slice(&std::fs::read(a.home.path().join("shares.json")).unwrap()).unwrap() };
+    assert_eq!(saved(), json!([{"port": port, "note": "模型", "allow": [b.id.fp.to_string()], "raw": true}]));
+    let r = c.call(json!({"cmd":"shares"})).await;
+    assert_eq!((&r["shares"][0]["allow"], &r["shares"][0]["note"]), (&json!(["test-b"]), &json!("模型")), "{r}");
+    // Another device is still kept out, and B's forward was not cut: `allow` did not change.
+    let (r, _, _conn) = forward(&a, &key, &visitor(), port).await;
+    assert_eq!(r, json!({"ok":false,"error":"not allowed"}));
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    s.write_all(b"still").await.unwrap();
+    let mut got = [0u8; 5];
+    tokio::time::timeout(WAIT, s.read_exact(&mut got)).await.unwrap().unwrap();
+    assert_eq!(&got, b"still");
+
+    // A field that is given replaces that field only.
+    let r = c.call(json!({"cmd":"share","ports":[port],"note":"","raw":false})).await;
+    assert_eq!((&r["ok"], &r["shared"]), (&json!(true), &restricted), "{r}");
+    assert_eq!(saved(), json!([{"port": port, "allow": [b.id.fp.to_string()]}]));
+    // A port that was not shared starts open to every trusted device: no `allow` in the reply.
+    let r = c.call(json!({"cmd":"share","ports":[port, 8000]})).await;
+    assert_eq!(r["shared"][0], restricted[0], "{r}");
+    assert_eq!(r["shared"][1], json!({"port": 8000, "url": format!("http://{}.rapp:8000", a.id)}), "{r}");
+    // The restriction goes with `unshare`, then `share`.
+    assert_eq!(c.call(json!({"cmd":"unshare","port":port})).await, json!({"ok":true,"was":true}));
+    let r = c.call(json!({"cmd":"share","ports":[port]})).await;
+    assert!(r["shared"][0].get("allow").is_none(), "{r}");
+    let (r, _, _conn) = forward(&a, &key, &visitor(), port).await;
+    assert_eq!(r, json!({"ok":true}));
+}
+
 // ---- the local IPC: hosts and pipe, the simple local cases (Task 8 covers them end to end) ----
 
 #[tokio::test]
@@ -686,6 +761,19 @@ async fn a_device_that_gave_no_name_shows_its_fingerprint_prefix() {
     assert_eq!(c.call(json!({"cmd":"share","ports":[8000],"allow":[&fp[..8]]})).await["ok"], true);
     let r = c.call(json!({"cmd":"shares"})).await;
     assert_eq!(r["shares"][0]["allow"], json!([&fp[..8]]), "{r}");
+}
+
+// A name in paired.json is what another device said: the replies carry it made safe to show.
+#[tokio::test]
+async fn allow_names_in_the_replies_have_no_control_characters() {
+    let fp = rapp_wire::Fp([0x34; 32]).to_string();
+    let entry = json!([{"fp": fp, "name": "mi\u{1b}[31mni\n", "since": "2026-11-15T00:00:00Z"}]);
+    let (a, _key) = start_sharing(|home| std::fs::write(home.join("paired.json"), entry.to_string()).unwrap()).await;
+    let mut c = ipc(&a).await;
+    let r = c.call(json!({"cmd":"share","ports":[8000],"allow":[&fp[..8]]})).await;
+    assert_eq!((&r["ok"], &r["shared"][0]["allow"]), (&json!(true), &json!(["mi[31mni"])), "{r}");
+    let r = c.call(json!({"cmd":"shares"})).await;
+    assert_eq!(r["shares"][0]["allow"], json!(["mi[31mni"]), "{r}");
 }
 
 // ---- pipe end to end, over the LAN and over the relay (Task 8) ----
@@ -882,7 +970,8 @@ async fn pipe_errors() {
     let r = a_ipc.call(json!({"cmd":"share","ports":[shared],"allow":[prefix]})).await;
     assert_eq!(r["ok"], true, "{r}");
     check(&mut c, pipe_to(&to_a, shared), "not allowed").await;
-    // shared with everyone, nothing listening
+    // shared with everyone, nothing listening (sharing again keeps `allow`: unshare first)
+    assert_eq!(a_ipc.call(json!({"cmd":"unshare","port":shared})).await["ok"], true);
     assert_eq!(a_ipc.call(json!({"cmd":"share","ports":[shared]})).await["ok"], true);
     check(&mut c, pipe_to(&to_a, shared), "refused").await;
 
@@ -1005,6 +1094,19 @@ async fn the_cli_shares_and_pipes() {
     let out = cli(b_local.path(), &["pipe", &format!("{}.rapp", rig.a.id), &port.to_string()], b"hello").await;
     assert_eq!(out.stdout, b"hello");
     assert_eq!(out.status.code(), Some(0), "{}", String::from_utf8_lossy(&out.stderr));
+
+    // B has connected, so A knows it by the name it gave. A share narrowed to B says so, and
+    // sharing the port again with nothing but the port keeps it narrowed.
+    let narrowed = format!("已分享：http://{}.rapp:{port}\n只给：test-a\n", rig.a.id);
+    let out = cli(a_local.path(), &["share", &port.to_string(), "--allow", "test-a"], b"").await;
+    assert_eq!(String::from_utf8_lossy(&out.stdout), narrowed, "{}", String::from_utf8_lossy(&out.stderr));
+    let out = cli(a_local.path(), &["share", &port.to_string()], b"").await;
+    assert_eq!(String::from_utf8_lossy(&out.stdout), narrowed);
+    // An option with no port is an error, not the table.
+    let out = cli(a_local.path(), &["share", "--raw"], b"").await;
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).starts_with("要写端口\n"), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(out.stdout.is_empty());
 
     let out = cli(b_local.path(), &["pipe", &rig.a.id, "9"], b"").await;
     assert_eq!(out.status.code(), Some(1));

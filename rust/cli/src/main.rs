@@ -85,8 +85,7 @@ async fn main() {
         }
     };
     match cmd {
-        Cmd::Share { ports, allow, raw, note } if ports.is_empty() => {
-            let _ = (allow, raw, note);
+        Cmd::Share { ports, .. } if ports.is_empty() => {
             let (r, ..) = call(json!({"cmd":"shares"})).await;
             if r["ok"] != true {
                 fail(&format!("没有成功：{}", error_of(&r)));
@@ -94,7 +93,11 @@ async fn main() {
             print!("{}", say::table(&r));
         }
         Cmd::Share { ports, allow, raw, note } => {
-            let mut c = json!({"cmd":"share","ports":ports,"raw":raw});
+            // What is not written is not sent: the service keeps what the port's share has now.
+            let mut c = json!({"cmd":"share","ports":ports});
+            if raw {
+                c["raw"] = json!(true);
+            }
             if !allow.is_empty() {
                 c["allow"] = json!(allow);
             }

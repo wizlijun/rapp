@@ -1,14 +1,14 @@
 //! Local IPC (spec §3): TCP on 127.0.0.1, first line `{"token":…}` (from `ipc.token`),
 //! then JSON-line commands. No reply to a good token line; a bad one gets an error and EOF.
 
-use crate::shares::{sensitive, Share};
+use crate::shares::{sensitive, Patch};
 use crate::state::State;
 use crate::update;
 use anyhow::Result;
 use rapp_conn::Pipe;
 use rapp_net::crypto::ct_eq;
 use rapp_net::line::{err, ok, write_json};
-use rapp_net::log::{read_recent, Lvl};
+use rapp_net::log::{clean_name, read_recent, Lvl};
 use rapp_wire::Fp;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -204,9 +204,8 @@ async fn shares(state: &Arc<State>) -> Value {
         .collect();
     let mut shares = Vec::new();
     for (s, probe) in list.iter().zip(probes) {
-        let allow: Vec<String> = s.allow.iter().map(|fp| state.paired.name_of(fp).unwrap_or_else(|| fp.short())).collect();
         shares.push(json!({
-            "port": s.port, "note": s.note, "allow": allow, "url": share_url(state, s.port),
+            "port": s.port, "note": s.note, "allow": allow_names(state, &s.allow), "url": share_url(state, s.port),
             "listening": probe.await.unwrap_or(false),
         }));
     }
@@ -215,31 +214,50 @@ async fn shares(state: &Arc<State>) -> Value {
     ok(json!({"id": id, "relay": relay, "shares": shares}))
 }
 
+/// The devices of an `allow` as the user knows them: the name each one gave (made safe to show),
+/// or the first 8 hex digits of its fingerprint when it gave none.
+fn allow_names(state: &State, allow: &[Fp]) -> Vec<String> {
+    let name = |fp: &Fp| state.paired.name_of(fp).map(|n| clean_name(&n)).filter(|n| !n.is_empty());
+    allow.iter().map(|fp| name(fp).unwrap_or_else(|| fp.short())).collect()
+}
+
 /// A port from JSON: an integer 1-65535.
 fn port_of(v: &Value) -> Option<u16> {
     v.as_u64().and_then(|p| u16::try_from(p).ok()).filter(|&p| p != 0)
 }
 
-/// Shares every port of `ports` with the same `note`, `allow` and `raw`; every one is checked
-/// before anything is saved, so either all of them are shared or none.
+/// Shares every port of `ports` with the `note`, `allow` and `raw` given; one that is left out
+/// stays as the port's share has it now, so sharing a port again never widens it in silence.
+/// Every port is checked before anything is saved, so either all of them are shared or none.
+/// A port whose `allow` changed has its running forwards cut: a device that was left out must
+/// not go on, and one that still may connects again.
 fn share(state: &State, cmd: &Value) -> Value {
     let Some(ports) = cmd["ports"].as_array().filter(|p| !p.is_empty()) else { return err("bad port") };
     let Some(ports) = ports.iter().map(port_of).collect::<Option<Vec<u16>>>() else { return err("bad port") };
-    let allow = match allowed(state, &cmd["allow"]) {
-        Ok(a) => a,
-        Err(e) => return err(&e),
+    let allow = match &cmd["allow"] {
+        Value::Null => None,
+        names => match allowed(state, names) {
+            Ok(a) => Some(a),
+            Err(e) => return err(&e),
+        },
     };
-    let note = cmd["note"].as_str().unwrap_or("").to_string();
-    let raw = cmd["raw"] == true;
-    let batch = ports.iter().map(|&port| Share { port, note: note.clone(), allow: allow.clone(), raw, open_web: false });
-    if let Err(e) = state.shares.add_all(batch.collect()) {
-        return err(&format!("{e:#}"));
-    }
-    let shared: Vec<Value> = ports
+    let patch = Patch { note: cmd["note"].as_str().map(str::to_string), allow, raw: cmd["raw"].as_bool() };
+    let done = match state.shares.share_all(&ports, &patch) {
+        Ok(done) => done,
+        Err(e) => return err(&format!("{e:#}")),
+    };
+    let shared: Vec<Value> = done
         .iter()
-        .map(|&port| {
+        .map(|d| {
+            let (port, allow) = (d.share.port, &d.share.allow);
             state.log.event(Lvl::Info, "share", json!({"port": port, "allow": allow.len()}));
+            if d.allow_changed {
+                state.forwards.cut(port);
+            }
             let mut v = json!({"port": port, "url": share_url(state, port)});
+            if !allow.is_empty() {
+                v["allow"] = json!(allow_names(state, allow));
+            }
             if sensitive(port) {
                 v["warn"] = json!(SENSITIVE_WARN);
             }
@@ -249,12 +267,9 @@ fn share(state: &State, cmd: &Value) -> Value {
     ok(json!({"shared": shared}))
 }
 
-/// The devices `allow` names (missing: none, which means every trusted device). Each entry must
-/// mean exactly one device `paired.json` knows.
+/// The devices the `allow` array names (an empty one: none, which means every trusted device).
+/// Each entry must mean exactly one device `paired.json` knows.
 fn allowed(state: &State, allow: &Value) -> Result<Vec<Fp>, String> {
-    if allow.is_null() {
-        return Ok(Vec::new());
-    }
     let Some(names) = allow.as_array() else { return Err("bad allow".into()) };
     let mut fps = Vec::new();
     for name in names {

@@ -2,6 +2,12 @@
 
 use serde_json::Value;
 
+/// `s` without control characters: what another device sent (a name, an error text) is printed
+/// through this, so it cannot move the cursor, colour the terminal or start a new line.
+fn plain(s: &str) -> String {
+    s.chars().filter(|c| !c.is_control()).collect()
+}
+
 /// Terminal columns of `s`: ASCII is one, everything else (Chinese) two.
 fn width(s: &str) -> usize {
     s.chars().map(|c| if c.is_ascii() { 1 } else { 2 }).sum()
@@ -25,12 +31,22 @@ fn columns(rows: &[Vec<String>]) -> String {
     out
 }
 
-/// One `已分享：<url>` per port; a warning goes right under its port.
+/// The device names in a JSON array, each made `plain`.
+fn names(list: &Value) -> Vec<String> {
+    list.as_array().map(|a| a.iter().filter_map(Value::as_str).map(plain).collect()).unwrap_or_default()
+}
+
+/// One `已分享：<url>` per port; right under it who the share is for when it is not for every
+/// device, then a warning.
 pub fn shared(reply: &Value) -> String {
     let mut out = String::new();
     let empty = Vec::new();
     for s in reply["shared"].as_array().unwrap_or(&empty) {
         out.push_str(&format!("已分享：{}\n", s["url"].as_str().unwrap_or("")));
+        let allow = names(&s["allow"]);
+        if !allow.is_empty() {
+            out.push_str(&format!("只给：{}\n", allow.join("、")));
+        }
         if let Some(w) = s["warn"].as_str() {
             out.push_str(w);
             out.push('\n');
@@ -41,7 +57,8 @@ pub fn shared(reply: &Value) -> String {
 
 /// The line for an error the service's `share` command can answer.
 pub fn share_error(error: &str) -> String {
-    match error {
+    let error = plain(error);
+    match error.as_str() {
         "bad port" => "端口不对".into(),
         "limit" => "最多分享 64 个端口".into(),
         "bad allow" => "--allow 写得不对".into(),
@@ -74,11 +91,10 @@ pub fn table(reply: &Value) -> String {
     let Some(shares) = shares else { return out + "（没有分享）\n" };
     let mut rows = vec![["端口", "状态", "只给", "地址"].map(String::from).to_vec()];
     for s in shares {
-        let allow: Vec<&str> = s["allow"].as_array().map(|a| a.iter().filter_map(Value::as_str).collect()).unwrap_or_default();
         rows.push(vec![
             s["port"].to_string(),
             if s["listening"] == true { "有服务在听" } else { "没有服务在听" }.into(),
-            allow.join(","),
+            names(&s["allow"]).join(","),
             s["url"].as_str().unwrap_or("").into(),
         ]);
     }
@@ -98,11 +114,11 @@ pub fn hosts(reply: &Value) -> String {
             let what = match (h["error"].as_str(), h["shares"].as_array()) {
                 (Some("offline"), _) => "不在线".to_string(),
                 (Some("no key"), _) => "这台设备还没有填 key".to_string(),
-                (Some(e), _) => format!("接不上：{e}"),
+                (Some(e), _) => format!("接不上：{}", plain(e)),
                 (None, Some(s)) if !s.is_empty() => s.iter().map(|s| s["port"].to_string()).collect::<Vec<_>>().join("  "),
                 (None, _) => "（没有分享）".to_string(),
             };
-            vec![h["name"].as_str().unwrap_or("").into(), format!("{}.rapp", h["id"].as_str().unwrap_or("")), what]
+            vec![plain(h["name"].as_str().unwrap_or("")), format!("{}.rapp", plain(h["id"].as_str().unwrap_or(""))), what]
         })
         .collect();
     columns(&rows)
@@ -118,7 +134,7 @@ pub fn pipe_error(to: &str, port: u16, error: &str) -> String {
         "refused" => format!("{to} 的 {port} 上没有服务在听"),
         "unknown name" => format!("不认识 {to}。现在只能写 9 位的设备 ID"),
         "no key" => "这台设备还没有填 key".into(),
-        other => format!("接不上 {to} 的 {port}：{other}"),
+        other => format!("接不上 {to} 的 {port}：{}", plain(other)),
     }
 }
 
@@ -136,6 +152,51 @@ mod tests {
             shared(&r),
             "已分享：http://123456789.rapp:8000\n已分享：http://123456789.rapp:22\n分享这个端口，等于把这台机器能到的网络也交出去\n"
         );
+    }
+
+    #[test]
+    fn shared_says_who_a_restricted_share_is_for() {
+        let r = json!({"ok":true,"shared":[
+            {"port":8000,"url":"http://123456789.rapp:8000","allow":["mini","abababab"]},
+            {"port":22,"url":"http://123456789.rapp:22","allow":["mini"],"warn":"分享这个端口，等于把这台机器能到的网络也交出去"},
+            {"port":8001,"url":"http://123456789.rapp:8001"},
+            {"port":8002,"url":"http://123456789.rapp:8002","allow":[]}]});
+        assert_eq!(
+            shared(&r),
+            "已分享：http://123456789.rapp:8000\n只给：mini、abababab\n\
+             已分享：http://123456789.rapp:22\n只给：mini\n分享这个端口，等于把这台机器能到的网络也交出去\n\
+             已分享：http://123456789.rapp:8001\n已分享：http://123456789.rapp:8002\n"
+        );
+    }
+
+    // A name another device chose, or an error text it sent, must not drive the terminal.
+    #[test]
+    fn what_another_device_sent_is_printed_without_control_characters() {
+        let evil = "mi\u{1b}[31mni\nroot\r\u{7}";
+        let clean = "mi[31mniroot";
+        assert_eq!(plain(evil), clean);
+        assert_eq!(plain("书房 mini-2"), "书房 mini-2");
+
+        let r = json!({"ok":true,"shared":[{"port":8000,"url":"http://123456789.rapp:8000","allow":[evil,"b"]}]});
+        assert_eq!(shared(&r), format!("已分享：http://123456789.rapp:8000\n只给：{clean}、b\n"));
+
+        let r = json!({"ok":true,"id":"123456789","relay":"connected","shares":[
+            {"port":22,"allow":[evil],"url":"http://123456789.rapp:22","listening":true}]});
+        let t = table(&r);
+        assert!(t.lines().nth(2).unwrap().contains(clean), "{t:?}");
+        assert_eq!((t.lines().count(), t.chars().filter(|c| c.is_control()).count()), (3, 3), "{t:?}");
+
+        let r = json!({"ok":true,"hosts":[
+            {"id":"123456789","name":evil,"shares":[{"port":8000}]},
+            {"id":"987654321","name":"b","error":evil}]});
+        let t = hosts(&r);
+        assert!(t.lines().next().unwrap().starts_with(clean), "{t:?}");
+        assert!(t.lines().nth(1).unwrap().ends_with(&format!("接不上：{clean}")), "{t:?}");
+        assert_eq!((t.lines().count(), t.chars().filter(|c| c.is_control()).count()), (2, 2), "{t:?}");
+
+        assert_eq!(pipe_error("123456789", 22, evil), format!("接不上 123456789 的 22：{clean}"));
+        assert_eq!(share_error(evil), format!("没有成功：{clean}"));
+        assert_eq!(share_error(&format!("unknown device: {evil}")), format!("不认识设备：{clean}"));
     }
 
     #[test]

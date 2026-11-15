@@ -8,7 +8,7 @@ rapp pipe <名字> <端口>";
 
 #[derive(Debug, PartialEq)]
 pub enum Cmd {
-    /// No ports: show the table.
+    /// No ports (and then no options either): show the table.
     Share { ports: Vec<u16>, allow: Vec<String>, raw: bool, note: Option<String> },
     Unshare { port: u16 },
     Hosts,
@@ -67,6 +67,10 @@ fn share(args: &[String]) -> Result<Cmd, String> {
             }
         }
     }
+    // An option says how to share a port; with none it would be dropped and the table shown.
+    if ports.is_empty() && (!allow.is_empty() || raw || note.is_some()) {
+        return Err("要写端口".into());
+    }
     Ok(Cmd::Share { ports, allow, raw, note })
 }
 
@@ -105,6 +109,10 @@ mod tests {
             assert_eq!(parse(&args).unwrap_err(), "--allow 后面要写设备", "{bad:?}");
         }
         assert_eq!(p("unshare").unwrap_err(), "要写端口");
+        // An option says how to share a port: without a port it would be dropped and the table shown.
+        for bad in ["share --allow mini", "share --raw", "share --note x", "share --allow mini,abababab --raw --note x"] {
+            assert_eq!(p(bad).unwrap_err(), "要写端口", "{bad}");
+        }
         assert_eq!(p("pipe gpu1").unwrap_err(), "要写名字和端口");
         assert_eq!(p("frobnicate").unwrap_err(), "不认识的命令：frobnicate");
     }
