@@ -2,12 +2,13 @@
 //! types exactly as if the program ran there directly; the output also feeds an emulator, which viewers reach over
 //! the unix socket `pty/<pid>.sock` (the local protocol in `local`).
 //!
-//! `run` ends only when the program exits, or on SIGHUP (the window was closed) or SIGTERM; never because of a
-//! viewer, a missing `serve` or a socket error. It answers none of the program's terminal queries (the window
+//! `run` ends only when the program exits, or on SIGHUP (the window was closed), SIGTERM, SIGINT or SIGQUIT sent
+//! to its pid (^C and ^\ typed in the window go to the program: the window is raw); never because of a viewer, a
+//! missing `serve` or a socket error. It answers none of the program's terminal queries (the window
 //! does), and viewers never change the pty's size.
 //!
 //! The exit code is the program's, 1 when the program was killed by a signal; 128 + the signal when `run` itself
-//! got SIGHUP (129) or SIGTERM (143).
+//! got SIGHUP (129), SIGINT (130), SIGQUIT (131) or SIGTERM (143).
 
 use super::grid::Emu;
 use super::{local, view, Meta, Shared};
@@ -67,6 +68,8 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
     // First, so that a window closed during setup still ends run the way it should.
     let mut hup = signal(SignalKind::hangup())?;
     let mut term = signal(SignalKind::terminate())?;
+    let mut int = signal(SignalKind::interrupt())?;
+    let mut quit = signal(SignalKind::quit())?;
     let mut winch = signal(SignalKind::window_change())?;
     local::ensure_dirs(&opts.dir)?;
     let token: Arc<str> = local::token(&opts.dir)?.into();
@@ -157,6 +160,8 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
             status = &mut exited => break End::Exited(exit_code(status)),
             _ = hup.recv() => break End::Signal(libc::SIGHUP),
             _ = term.recv() => break End::Signal(libc::SIGTERM),
+            _ = int.recv() => break End::Signal(libc::SIGINT),
+            _ = quit.recv() => break End::Signal(libc::SIGQUIT),
             _ = winch.recv() => resize(pair.master.as_ref(), &shared),
             _ = tick.tick() => tick_sync(&shared),
         }

@@ -196,6 +196,24 @@ async fn sigterm_ends_run_and_its_program() {
     assert!(!kids.is_empty() && !process_exists(kids[0]));
 }
 
+/// SIGINT and SIGQUIT sent to run's pid end it like SIGTERM, the window put back on the way out.
+#[tokio::test]
+async fn sigint_and_sigquit_end_run_like_sigterm() {
+    for (sig, code) in [(libc::SIGINT, 130), (libc::SIGQUIT, 131)] {
+        let d = short_dir();
+        let mut w = Window::start(d.path(), &["--name", "t", "--", "/bin/cat"]);
+        let mut v = Viewer::connect(d.path(), "t").await;
+        v.open().await;
+        let kids = w.children();
+        unsafe { libc::kill(w.pid() as i32, sig) };
+        let seen = v.until(|_, m| m["t"] == "error").await;
+        assert_eq!(seen.last().unwrap()["error"], "session ended");
+        assert_eq!(w.wait_exit(), code);
+        assert!(!socket_of(d.path(), w.pid()).exists());
+        assert!(!kids.is_empty() && !process_exists(kids[0]));
+    }
+}
+
 #[tokio::test]
 async fn an_unfinished_synchronized_update_still_reaches_a_viewer() {
     let d = short_dir();
