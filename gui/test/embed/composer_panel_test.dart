@@ -325,6 +325,33 @@ void main() {
       expect(text(tester), 'hello');
     }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
+    testWidgets('a paste asked for before the panel is shown runs once it is, once (K4)', (tester) async {
+      port.pasteReply = {'text': 'a\nb'};
+      rs.composer.requestPaste();
+      await tester.pumpWidget(wrap(panel()));
+      await tester.pump();
+      await tester.pump();
+      expect(callsOf('composer_paste'), [
+        equals({'sid': 1}),
+      ]);
+      expect(text(tester), 'a\nb');
+      expect(fieldFocused(tester), isTrue);
+      await tester.pump();
+      expect(callsOf('composer_paste'), hasLength(1));
+    });
+
+    testWidgets('a paste asked for while the panel is shown runs at once', (tester) async {
+      port.pasteReply = {'text': 'x'};
+      await tester.pumpWidget(wrap(panel()));
+      await tester.pump();
+      expect(callsOf('composer_paste'), isEmpty);
+      rs.composer.requestPaste();
+      await tester.pump();
+      await tester.pump();
+      expect(callsOf('composer_paste'), hasLength(1));
+      expect(text(tester), 'x');
+    });
+
     testWidgets('focusing the field takes focus from the picture', (tester) async {
       await tester.runAsync(() async {
         t.onSend = (m) {

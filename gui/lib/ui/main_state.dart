@@ -6,6 +6,7 @@ import 'dart:ui' show Offset, Size;
 
 import '../paths.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show Clipboard;
 
 import '../embed/remote_session.dart';
 import '../embed/session_port.dart';
@@ -310,6 +311,7 @@ class MainState extends ChangeNotifier {
     if (embeds) _entries = _mapEntries();
     // Focus never stays on a session that is no longer current (mid-move, the old one is on the stage).
     if (pictureFocused != null && (currentRemote?.sid ?? current?.sid) != pictureFocused) _blur();
+    _focusNewTerm();
     _syncPolicy();
     // Every change of the current session or of detach state ends in a notify.
     _applyFps();
@@ -351,15 +353,64 @@ class MainState extends ChangeNotifier {
   }
 
   // ---- picture focus (R15, R24) ----
+  /// Bumped when the terminal stage of [termFocusSid] should take the keyboard; the stage follows it.
+  int termFocusTick = 0;
+  Object? termFocusSid;
+
+  // The live terminal last put on the stage: a different one (opened, switched to, reconnected) takes the keys.
+  Object? _stagedTerm;
+
+  void _wantTermFocus(Object sid) {
+    termFocusSid = sid;
+    termFocusTick++;
+  }
+
+  void _focusNewTerm() {
+    final r = currentRecord, rs = currentRemote;
+    final live = r != null && r.phase == Phase.live && r.lastSid == null;
+    final sid = live && rs != null && termPort?.owns(rs.sid) == true ? rs.sid : null;
+    if (sid == _stagedTerm) return;
+    _stagedTerm = sid;
+    if (sid != null) _wantTermFocus(sid);
+  }
+
   /// The session whose picture has keyboard focus: its keys go to A (the runner routes them).
   Object? pictureFocused;
 
   /// A press on [sid]'s picture: keys go to A from now on.
   void focusPicture(Object sid) {
-    if (overview || pictureFocused == sid || !_liveSid(sid)) return;
+    if (overview || !_liveSid(sid)) return;
+    if (termPort?.owns(sid) == true) {
+      // A terminal's keys are the stage's own (its Focus), not the runner's.
+      _wantTermFocus(sid);
+      notifyListeners();
+      return;
+    }
+    if (pictureFocused == sid) return;
     pictureFocused = sid;
     portOf(sid)?.pictureFocus(sid);
     notifyListeners();
+  }
+
+  /// ⌘V / Ctrl+Shift+V on [rs]'s terminal stage (K4): one line of clipboard text goes in as a paste (no Return);
+  /// text with line breaks opens the writing panel, which pastes it by its own rules and takes the caret.
+  /// Null when nothing went wrong; otherwise why the paste did not go in.
+  Future<String?> termPaste(RemoteSession rs) async {
+    final tp = termPort;
+    if (tp == null || !tp.owns(rs.sid)) return null;
+    String? text;
+    try {
+      text = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
+    } catch (_) {
+      return null; // no clipboard to read: nothing to paste
+    }
+    if (text == null || text.isEmpty) return null;
+    if (!text.contains('\n') && !text.contains('\r')) return tp.paste(rs.sid, text);
+    final c = rs.composer;
+    c.open = true;
+    c.requestPaste();
+    c.wantFocus();
+    return null;
   }
 
   /// A press outside the picture (top bar, overlays): keys stay with rapp.

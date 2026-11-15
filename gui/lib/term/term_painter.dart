@@ -161,6 +161,7 @@ class TermPainter extends CustomPainter {
     this.selection,
     this.links = const [],
     this.focused = false,
+    this.waiting = false,
   });
 
   final TermModel model;
@@ -172,6 +173,9 @@ class TermPainter extends CustomPainter {
   final TermSelection? selection;
   final List<LinkSpan> links;
   final bool focused;
+
+  /// Input went out and no new screen came within 0.3 s (K6): an ellipsis one cell after the cursor.
+  final bool waiting;
 
   /// The line at the top of the view (partly hidden while the offset is fractional).
   int get topY => (-model.offset).floor();
@@ -233,22 +237,36 @@ class TermPainter extends CustomPainter {
     }
 
     if (m.cursor && m.cy >= 0 && m.cy < m.rows && visible(m.cy)) _cursor(canvas, snap);
+    if (waiting && m.cy >= 0 && m.cy < m.rows && visible(m.cy)) _ellipsis(canvas, snap);
+    canvas.restore();
+  }
+
+  /// The cell under the cursor, for its width and its glyph; null when none starts there.
+  TermCell? _underCursor() {
+    final m = model;
+    var col = 0;
+    for (final c in m.lineAt(m.cy)?.cells ?? const <TermCell>[]) {
+      if (col + c.width > m.cx) return col == m.cx ? c : null;
+      col += c.width;
+    }
+    return null;
+  }
+
+  /// K6: a muted 「…」 in the cell after the cursor (the last column when the cursor is at the edge).
+  void _ellipsis(Canvas canvas, double Function(double) snap) {
+    final m = model;
+    final x = math.min(m.cx + (_underCursor()?.width ?? 1), m.cols - 1);
+    canvas.save();
+    canvas.translate(snap(x * metrics.cellW), snap(_top(m.cy)));
+    final muted = Color.lerp(palette.bg, palette.fg, 0.6)!;
+    cache._glyphs(canvas, const GlyphRun(0, 1, '…', TermStyle(), GlyphKind.single), muted, 0);
     canvas.restore();
   }
 
   void _cursor(Canvas canvas, double Function(double) snap) {
     final m = model;
     final cw = metrics.cellW, ch = metrics.cellH;
-    // The cell under the cursor, for its width and its glyph.
-    TermCell? under;
-    var col = 0;
-    for (final c in m.lineAt(m.cy)?.cells ?? const <TermCell>[]) {
-      if (col + c.width > m.cx) {
-        if (col == m.cx) under = c;
-        break;
-      }
-      col += c.width;
-    }
+    final under = _underCursor();
     final top = snap(_top(m.cy));
     final r = Rect.fromLTRB(snap(m.cx * cw), top, snap((m.cx + (under?.width ?? 1)) * cw), top + ch);
     final paint = Paint()..color = palette.fg;

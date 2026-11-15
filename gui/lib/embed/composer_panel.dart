@@ -81,7 +81,10 @@ class _ComposerPanelState extends State<ComposerPanel> {
     // Opened: the caret goes to the editor. Not `autofocus`, which yields to the main window's
     // already focused Focus.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _takeCaret();
+      if (!mounted) return;
+      _takeCaret();
+      // Opened to paste (K4): the paste asked for before the panel was there.
+      if (_m.takePaste()) _paste();
     });
   }
 
@@ -159,6 +162,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
       _releaseSeen = _m.releaseTick;
       _ed.unfocus();
     }
+    if (_m.takePaste()) _paste();
   }
 
   /// The editor gets key focus, and the picture loses it (also when the editor already had
