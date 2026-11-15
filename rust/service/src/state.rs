@@ -94,6 +94,10 @@ pub struct State {
     pub relay_settings: watch::Sender<u64>,
     /// The access record of forwarded connections.
     pub forward_log: crate::forward_log::ForwardLog,
+    /// The ports this device shares (`shares.json`).
+    pub shares: crate::shares::Shares,
+    /// The forwards running now.
+    pub forwards: crate::forward::Forwards,
 }
 
 impl State {

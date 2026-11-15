@@ -4,12 +4,11 @@ pub mod autolock;
 mod cm;
 pub mod config;
 mod data;
+mod forward;
 pub mod forward_log;
 mod ipc;
 mod peer;
 mod relay_link;
-// Not used until Task 4 wires it into the service; that task removes this allow.
-#[allow(dead_code)]
 mod shares;
 mod state;
 mod term;
@@ -118,6 +117,10 @@ impl Service {
             log.event(Lvl::Warn, "paired_error", json!({"err": format!("{e:#}")}));
             rapp_conn::Paired::empty(&opts.home)
         });
+        let (shares, unreadable) = shares::Shares::load(&opts.home);
+        if let Some(why) = unreadable {
+            log.event(Lvl::Warn, "shares_unreadable", json!({"err": why}));
+        }
         let server = device_server_config(&identity, &[ALPN_DEVICE, ALPN_PEER])?;
         let endpoint = quinn::Endpoint::server(server, ([0, 0, 0, 0], port).into()).with_context(|| format!("bind udp port {port}"))?;
         let port = endpoint.local_addr()?.port();
@@ -150,6 +153,8 @@ impl Service {
             relay: Mutex::new(("off", None)),
             relay_settings: tokio::sync::watch::channel(0).0,
             forward_log: forward_log::ForwardLog::new(log.clone()),
+            shares,
+            forwards: forward::Forwards::new(),
         };
         let id = state.cfg.lock().unwrap().id.clone();
         let version = env!("CARGO_PKG_VERSION");

@@ -197,8 +197,8 @@ pub async fn serve_request(state: &Arc<State>, mut s: Pipe, peer: Peer) -> Resul
         ) => crate::term::request(state, &mut s, &peer, op).await,
         Ok(Op::Open { app, .. }) if rapp_term::id::is_term(&app) => crate::term::open(state, &mut s, &app, peer).await,
         Ok(Op::Open { app, side }) => open(state, s, &app, side, peer).await,
-        // Placeholder until port sharing is served (Task 4).
-        Ok(Op::ListShares | Op::Forward { .. }) => reply_and_finish(&mut s, err("not supported")).await,
+        Ok(Op::ListShares) => crate::forward::serve_list(state, s, peer).await,
+        Ok(Op::Forward { port }) => crate::forward::serve_forward(state, s, port, peer).await,
         _ => reply_and_finish(&mut s, err("unknown op")).await,
     }
 }
