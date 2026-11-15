@@ -259,3 +259,22 @@ func currentDisplays() -> [DesktopDisplay] {
         DesktopDisplay(id: id, name: names[id] ?? "屏幕", main: id == main, frame: CGDisplayBounds(id))
     })
 }
+
+/// While A is locked: the display `bundleID`'s largest window is on, from the window server's list
+/// (ScreenCaptureKit cannot be asked then). nil when the app is not running or lists no usable window;
+/// the caller then uses the main display.
+func lockedAppDisplay(bundleID: String) -> CGRect? {
+    guard let pid = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first?.processIdentifier,
+          let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
+                                                kCGNullWindowID) as? [[String: Any]]
+    else { return nil }
+    let windows = list.compactMap { info -> CGRect? in
+        guard (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == pid,
+              (info[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
+              let bounds = info[kCGWindowBounds as String] as? NSDictionary
+        else { return nil }
+        return CGRect(dictionaryRepresentation: bounds as CFDictionary)
+    }
+    return lockedStartDisplay(windows: windows, displays: currentDisplays().map(\.frame))
+}
+

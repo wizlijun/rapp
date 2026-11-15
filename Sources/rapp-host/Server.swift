@@ -476,7 +476,12 @@ final class Session {
         case let .paste(seq, source):
             guard let paster else {
                 // A desktop session on another screen has no clipboard; B must not wait for an answer.
-                if desktop { send(.pasted(seq: seq, error: "no clipboard on this screen")) }
+                if desktop {
+                    send(.pasted(seq: seq, error: "no clipboard on this screen"))
+                } else if announced != nil && capture == nil {
+                    // Waiting for the unlock: the app is not attached yet, but B still waits for this answer.
+                    send(.pasted(seq: seq, error: "远程电脑已锁屏，解锁后再发送"))
+                }
                 return
             }
             if case let .text(text) = source { inlinePastes[seq] = text.utf8.count }
@@ -554,11 +559,13 @@ final class Session {
         return bundleID
     }
 
-    /// A is locked at session start: announce the main display, tell B, and wait for the unlock.
+    /// A is locked at session start: announce the display the app's window is on (the main one when the
+    /// app has no window yet), tell B, and wait for the unlock.
     private func waitForUnlock(bundleID: String) {
-        let size = CGDisplayBounds(CGMainDisplayID()).size
+        let onApp = lockedAppDisplay(bundleID: bundleID)
+        let size = (onApp ?? CGDisplayBounds(CGMainDisplayID())).size
         announced = size
-        output.log("A is locked at start; waiting for unlock")
+        output.log("A is locked at start; waiting for unlock (canvas: \(onApp == nil ? "main display" : "the app's display"))")
         send(.ready(appName: windowTitle("", appName: appDisplayName(bundleID: bundleID)),
                     width: UInt16(clamping: Int(size.width.rounded())),
                     height: UInt16(clamping: Int(size.height.rounded()))))
