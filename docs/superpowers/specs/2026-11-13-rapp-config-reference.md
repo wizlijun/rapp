@@ -186,6 +186,8 @@ agent 规则：加、删 SSH 目标走设备请求，不直接改文件；要关
 
 谁读写：`rapp-service`。启动时读一次（`rust/service/src/shares.rs:65`，`rust/service/src/lib.rs:121-124`）；IPC 的 `share`、`unshare`（命令行 `rapp share`、`rapp unshare`）在内存里改完，整份写回（`rapp_net::config::write_json`：0600，先写临时文件再改名，`rust/service/src/shares.rs:161`）。不进 git。没有机密：`allow` 里是对方的设备指纹，不是 key。规格：《端口分享设计》§6、§14.1。
 
+（实现注，2026-11-16）`shares.json` 也可能是别的设备写进来的：持同一把 key 的设备发来设备请求 `share`、`unshare`（面板里"替另一台设备开关端口"），本机服务照本机 IPC 同一段代码（`rust/service/src/sharing.rs`）改表、整份写回，写法和上面一样。区别：对方给的 `allow` 只收 64 位十六进制的完整指纹（名字或前缀回 `bad allow`），不能改 `raw`。旧的 `rapp share --allow` 收名字、存指纹这一点不变。每次改表记一行 `share` 或 `unshare`，用 `by` 区分是本机（`local`）还是哪台设备（指纹前 8 位）（《可观测性》§事件表）。
+
 格式：数组，按端口排好，每项一个分享的端口。没有这个文件就是什么都不分享。
 
 ```json

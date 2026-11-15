@@ -100,7 +100,7 @@
   - `sharing::unshare(state: &State, port: &Value, by: &By) -> Result<bool, String>`
   - `share_cmds::{shares, share, unshare}`：这一个任务里还只有本机的写法，签名同 `ipc.rs` 原来的三个函数；Task 3 给它们加 `to`
 
-- [ ] **Step 0: 开分支，并入两条 main**
+- [x] **Step 0: 开分支，并入两条 main**
 
 ```bash
 cd /Users/bruce/git/rapp
@@ -112,7 +112,7 @@ git merge main            # 端口分享的规格、评审、这份计划
 
 有冲突时停下来报告，不要自己挑一边。合完跑 `cargo test --workspace` 和 `flutter test`，都过了再往下。
 
-- [ ] **Step 1: 写测试**
+- [x] **Step 1: 写测试**
 
 `msg.rs` 的 `share_requests` 里加：
 
@@ -144,24 +144,24 @@ async fn ipc_allow_takes_a_full_fingerprint_it_does_not_know() {
 }
 ```
 
-- [ ] **Step 2: 跑，确认失败**
+- [x] **Step 2: 跑，确认失败**
 
 Run: `cargo test -p rapp-net share_requests; cargo test -p rapp-testkit --test forward local_share`
 Expected: 编译失败（`Op::Shares` 不存在）或断言失败（日志里没有 `by`）。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 - `msg.rs` 加三个变体，字段如 Interfaces。
 - `sharing.rs`：`share` 的校验、`Patch`、`share_all`、日志、`allow_changed` 时 `forwards.cut` 照搬 `ipc.rs` 现在的 `share`；日志行 `share {port, allow: <个数>}` 经 `by.fields` 加上 `by`。`allow` 的解析：`Allow::Fps` 时每一项必须 `parse::<Fp>()` 成功，否则 `bad allow`；`Allow::Names` 时先试 `parse::<Fp>()`，不行再走原来的 `paired.find`。`By::Remote` 时 `Patch.raw` 恒为 `None`。`unshare` 同理，`was` 为真才记日志、总是 `cut`（照搬）。
 - `share_cmds.rs`：`ipc.rs` 原来的 `shares`、`share`、`unshare`、`allow_names`、`share_url`、`port_of` 挪过来；`share`、`unshare` 改成调 `sharing::share(state, cmd, Allow::Names, &By::Local)` 再组回原来的回复。
 - `ipc.rs` 的分派改调 `share_cmds::*`。
 
-- [ ] **Step 4: 跑**
+- [x] **Step 4: 跑**
 
 Run: `cargo test -p rapp-net && cargo test -p rapp-service && cargo test -p rapp-testkit --test forward && cargo test -p rapp-cli`
 Expected: 全部 PASS（1a 的测试一条不改就过）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add rust/net/src/msg.rs rust/service/src/{sharing,share_cmds,ipc,lib}.rs rust/testkit/tests/forward.rs
@@ -190,7 +190,7 @@ git commit -m "feat(service): one code path for changing the share table, logged
     - `unshare` → `{"ok":true,"was":<bool>}`
   - 测试辅助：`common::sharing::*`，签名不变
 
-- [ ] **Step 1: 写测试**
+- [x] **Step 1: 写测试**
 
 `paired.rs`：`list_is_in_file_order`。
 
@@ -257,24 +257,24 @@ async fn bad_values() {
 }
 ```
 
-- [ ] **Step 2: 跑，确认失败**
+- [x] **Step 2: 跑，确认失败**
 
 Run: `cargo test -p rapp-testkit --test share_set`
 Expected: FAIL，回复是 `unknown op`。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 - `Paired::list`。
 - `sharing::serve`：先 `admit(&Caller { fp: peer.fp.as_ref(), server: false }, true)`；`Err(d)` 时记 `share_refused` 并回 `d.as_str()`。通过后：`Op::Shares` 组表；`Op::Share` 把 `ports`、`note`、`allow` 拼成一个 `Value` 交给 `share(state, &req, Allow::Fps, &By::Remote(&peer))`；`Op::Unshare` 调 `unshare`。
 - `peer.rs` 的 `serve_request` 加 `Ok(op @ (Op::Shares | Op::Share { .. } | Op::Unshare { .. })) => crate::sharing::serve(state, s, op, peer).await`。
 - 测试辅助挪进 `common/sharing.rs`，`forward.rs` 里删掉原来的那些定义。
 
-- [ ] **Step 4: 跑**
+- [x] **Step 4: 跑**
 
 Run: `cargo test -p rapp-conn && cargo test -p rapp-testkit --test share_set --test forward`
 Expected: 全部 PASS。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add rust/conn/src/paired.rs rust/service/src rust/testkit/tests
@@ -307,7 +307,7 @@ git commit -m "feat(service): other devices can list, share and unshare this dev
   - 带 `to` 时的错误：`offline`（含 6 秒没回，沿用 `HOSTS_WAIT`）、`old version`、`no key`、`unknown name`，以及目标设备的原文
   - 命令行（`say.rs`）读 `allow[].name`，打出来的字一个不变
 
-- [ ] **Step 1: 写测试**
+- [x] **Step 1: 写测试**
 
 `pipe.rs`：
 
@@ -359,23 +359,23 @@ async fn the_cli_still_prints_the_same() {
 }
 ```
 
-- [ ] **Step 2: 跑，确认失败**
+- [x] **Step 2: 跑，确认失败**
 
 Run: `cargo test -p rapp-service share_cmds pipe && cargo test -p rapp-testkit --test share_set b_lists`
 Expected: FAIL。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 - `pipe::ask` 多带回 `sent.fp`；`open`、`shares_of` 不变。
 - `share_cmds` 的三个函数开头：`to` 不在、或 `target_id(to)` 等于本机 ID → 本机的写法；否则用 `tokio::time::timeout(HOSTS_WAIT, pipe::set(..))` 发 `Op::Shares`、`Op::Share`、`Op::Unshare`，再按上面的字段组回复。
 - `say.rs` 的 `names()` 读对象的 `name`。
 
-- [ ] **Step 4: 跑**
+- [x] **Step 4: 跑**
 
 Run: `cargo test --workspace`
 Expected: 全部 PASS。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add rust/service/src rust/cli/src rust/testkit/tests
@@ -393,7 +393,7 @@ git commit -m "feat(service): shares, share and unshare take a device to ask"
 - Consumes: Task 1 到 3 的全部；`RelayRig`、`a_on_relay`（1a 的 `forward.rs` 里有，需要的话一起挪进 `common/sharing.rs`）。
 - 三台：A 是目标，B 在自己的 IPC 上设置 A，C 是转发的访问者（`visitor()` 或第三台服务）。
 
-- [ ] **Step 1: 写测试**
+- [x] **Step 1: 写测试**
 
 ```rust
 #[tokio::test]
@@ -421,12 +421,12 @@ async fn remote_unshare_and_narrowing_cut_c() {                    // 第 3、4 
 }
 ```
 
-- [ ] **Step 2: 跑**
+- [x] **Step 2: 跑**
 
 Run: `cargo test -p rapp-testkit --test share_set`
 Expected: 全部 PASS。不过的，改 Task 1 到 3 的代码，不改测试。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add rust/testkit/tests
@@ -456,7 +456,7 @@ git commit -m "test: remote share setting end to end, with a restart of the targ
   - `ServiceStatus.rappNames`：`json['rapp_names'] == true`
   - `ServiceMonitor implements SharesApi`：三个命令走一条专用连接（第一次用时 `ServiceConnection.connect`，断了下次再连），不走 `_cmd`，也不调 `refresh()`
 
-- [ ] **Step 1: 写测试**
+- [x] **Step 1: 写测试**
 
 `shares_test.dart`：
 
@@ -485,19 +485,19 @@ test('share sends to, ports, note and allow; leaves out what is null', () async 
 });
 ```
 
-- [ ] **Step 2: 跑，确认失败**
+- [x] **Step 2: 跑，确认失败**
 
 Run: `cd gui && ~/development/flutter/bin/flutter test test/shares_test.dart test/service_client_test.dart`
 Expected: 编译失败。
 
-- [ ] **Step 3: 实现** `shares.dart` 和 `ServiceMonitor` 的三个方法；`openUrl` 加 Windows 分支（计划定的第 9 条）。
+- [x] **Step 3: 实现** `shares.dart` 和 `ServiceMonitor` 的三个方法；`openUrl` 加 Windows 分支（计划定的第 9 条）。
 
-- [ ] **Step 4: 跑**
+- [x] **Step 4: 跑**
 
 Run: `~/development/flutter/bin/flutter test && ~/development/flutter/bin/flutter analyze`
 Expected: 全部 PASS，analyze 没有新问题。`git checkout pubspec.lock`（如果变了）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add gui/lib/shares.dart gui/lib/service_client.dart gui/lib/term/term_stage.dart gui/test
@@ -520,7 +520,7 @@ git commit -m "feat(gui): service calls for listing and setting a device's share
   - 一个钩子留给 Task 7：点"所有设备 / 只给 …"时调 `Future<List<String>?> Function(BuildContext, ShareRow, List<Device> known)`，这一任务里先给一个返回 null 的默认值。
   - 测试用的 Key：`shares-refresh`、`share-port`、`share-note`、`share-add`、`share-row-<port>`、`share-open-<port>`、`share-copy-<port>`、`share-unshare-<port>`、`share-allow-<port>`、`share-warn-<port>`、`share-names-off`
 
-- [ ] **Step 1: 写测试**（用一个假的 `SharesApi`，回复可以控制先后和失败）
+- [x] **Step 1: 写测试**（用一个假的 `SharesApi`，回复可以控制先后和失败）
 
 ```dart
 testWidgets('rows', (t) async {
@@ -552,21 +552,21 @@ testWidgets('a late reply for the previous device is dropped', ...);
   // section for A (reply held), rebuilt for B (reply at once), then A's offline arrives → B's rows still shown
 ```
 
-- [ ] **Step 2: 跑，确认失败**
+- [x] **Step 2: 跑，确认失败**
 
 Run: `~/development/flutter/bin/flutter test test/ui/shares_section_test.dart`
 Expected: 编译失败。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 视觉照 `rapp-design-language` 和 `_TermRow`：标题和"终端"一组一样（`fontWeight: w600`，上 8 下 6）；一行里依次是灯、端口（等宽）、备注、地址（等宽、可选中）、范围、按钮。灯：`listening` 用 `Lamp.active`，否则 `Lamp.idle`。设置成功后重新问一次；失败时表不动，错误字显示在输入框下面。回复晚到的判断：每次发请求记一个序号，回来时不是最新的就丢掉；`didUpdateWidget` 里 `to` 变了也算新的一轮。
 
-- [ ] **Step 4: 跑**
+- [x] **Step 4: 跑**
 
 Run: `~/development/flutter/bin/flutter test && ~/development/flutter/bin/flutter analyze`
 Expected: 全部 PASS（`devices_tab_test`、`main_window_test` 照旧过，需要时给它们传一个假的 `SharesApi`）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add gui/lib/ui gui/test/ui
@@ -586,7 +586,7 @@ git commit -m "feat(gui): a Ports section on each device and on this one"
 - Consumes: Task 5 的 `Device`、`ShareRow`；Task 6 的钩子。
 - Produces: `Future<List<String>?> showAllowDialog(BuildContext context, {required List<Device> candidates, required List<Device> current})`：取消 → `null`；`所有设备` → `[]`；否则勾着的指纹，顺序是候选的顺序，后面接不在候选里的。
 
-- [ ] **Step 1: 写测试**
+- [x] **Step 1: 写测试**
 
 ```dart
 testWidgets('everyone', ...);
@@ -603,19 +603,19 @@ testWidgets('saving from the section sends the fingerprints', ...);
   // in SharesSection: tap share-allow-8000, pick mini, 保存 → api.share(to, [8000], allow [mini's fp], note null)
 ```
 
-- [ ] **Step 2: 跑，确认失败**
+- [x] **Step 2: 跑，确认失败**
 
 Run: `~/development/flutter/bin/flutter test test/ui/allow_dialog_test.dart`
 Expected: 编译失败。
 
-- [ ] **Step 3: 实现**：两个单选项，下面是候选的勾选列表（选"所有设备"时勾选列表不可用），按钮 `取消`、`保存`；样子照面板里已有的对话框。
+- [x] **Step 3: 实现**：两个单选项，下面是候选的勾选列表（选"所有设备"时勾选列表不可用），按钮 `取消`、`保存`；样子照面板里已有的对话框。
 
-- [ ] **Step 4: 跑**
+- [x] **Step 4: 跑**
 
 Run: `~/development/flutter/bin/flutter test && ~/development/flutter/bin/flutter analyze`
 Expected: 全部 PASS。`git checkout pubspec.lock`（如果变了）。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add gui/lib/ui gui/test/ui
@@ -633,17 +633,32 @@ git commit -m "feat(gui): choose who may use a shared port"
 - Modify: `docs/superpowers/specs/2026-11-15-rapp-port-sharing-panel-design.md`（状态行：已实现，分支名）
 - Modify: 本计划（勾选）
 
-- [ ] **Step 1: 照代码写**：字段名、错误文本、事件名以代码为准；和规格不一样的地方在规格里标"（实现注，日期）"，不改规格原文。
-- [ ] **Step 2: 写真机检查单**，追加到本计划末尾，给用户在两台真机上做：
+- [x] **Step 1: 照代码写**：字段名、错误文本、事件名以代码为准；和规格不一样的地方在规格里标"（实现注，日期）"，不改规格原文。
+- [x] **Step 2: 写真机检查单**，追加到本计划末尾，给用户在两台真机上做：
   1. Mac 上选中另一台在线的设备 → 看到它的表；分享一个端口 → 那台的 `~/.rapp/local/shares.json` 里有它。
   2. 分享 22 → 行下面出现提醒。
   3. "只给谁"改成只给本机 → 第三台 `rapp-cli pipe` 被拒 `not allowed`。
   4. 取消分享按两次 → 第三台正在用的 `pipe` 断开。
   5. 重启那台的服务 → 面板按"刷新"，表还在。
   6. 断开那台的网络 → 刷新后 6 秒内显示"离线，读不到它的端口"，本机那一段照常可用。
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add docs
 git commit -m "docs: remote share setting in the config, observability and platform specs"
 ```
+
+---
+
+## 真机检查单（任务 8）
+
+给用户在两台真机（再加第三台持同一把 key 的设备）上做：
+
+1. Mac 上选中另一台在线的设备 → 看到它的表；分享一个端口 → 那台的 `~/.rapp/local/shares.json` 里有它。
+2. 分享 22 → 行下面出现提醒。
+3. "只给谁"改成只给本机 → 第三台 `rapp-cli pipe` 被拒 `not allowed`。
+4. 取消分享按两次 → 第三台正在用的 `pipe` 断开。
+5. 重启那台的服务 → 面板按"刷新"，表还在。
+6. 断开那台的网络 → 刷新后 6 秒内显示"离线，读不到它的端口"，本机那一段照常可用。
+7. 把窗口拉窄（大约 360 像素宽）→ 端口那一段的每一行不溢出、不出现黄黑条，按钮还能点。
+8. 在"谁能用这个端口"小窗口里勾选、改成"所有设备"、取消 → 行上的"只给…"跟着变，取消时不变。

@@ -111,6 +111,11 @@ relay 在 A 的长连接上开一条流，发 `{"op":"relayed","token":T}`，然
     - `{"op":"forward","port":8000}` → `{"ok":true}`，之后这条流双向传原始字节，对着 A 自己的 `127.0.0.1:8000`（连不上再试 `[::1]:8000`），直到有一方关闭（`serve_forward`）。A 只连自己的回环，不连别的地址。
     - 只在 key 认证的连接上做（对方出示了 key 证书，`Peer.fp` 有值）。拒绝时回 `{"ok":false,"error":E}` 再关流，按这个顺序查：`not supported`（旧的密码认证连接）→ `host only` → `policy` → `not shared` → `not allowed`；过了这五步还可能是 `refused`（端口上没有服务在听，回环上每个地址最多等 3 秒）或 `limit`（B 已经开着 256 条转发）。`host only` 和 `policy` 这一版还不会出现：这一步不区分服务器设备，也没有总开关。`list_shares` 只走前三步，不会是 `not shared`、`not allowed`。
     - 本机 IPC 的 `unshare`，或 `share` 改了某个端口的 `allow`，会切断这个端口上正开着的转发。
+    - （实现注，2026-11-16）设置对方的分享表（面板"端口"一段用；只在 key 认证的连接上，过 `not supported`、`host only`、`policy` 三步，被拒回 `{"ok":false,"error":E}` 再关流，记 `share_refused`）：
+      - `{"op":"shares"}` → `{"ok":true,"shares":[{"port","note","allow":[{"fp","name"}],"listening":b}],"known":[{"fp","name"}…]}`。整张表，不按来访设备过滤；`known` 是这台设备认识的设备（`paired.json`），给"只给谁"当候选。
+      - `{"op":"share","ports":[8000,…],"note":"…"?,"allow":["<64 位指纹>"…]?}` → `{"ok":true,"shared":[{"port","warn"?}]}`。语义同本机 IPC `share`（没给的字段保持原值，全成或全不成，`allow` 变了切断转发），但 `allow` 只收完整指纹，不能设 `raw`。`warn` 是 `分享这个端口，等于把这台机器能到的网络也交出去`。
+      - `{"op":"unshare","port":8000}` → `{"ok":true,"was":b}`。
+      - 对方是旧版本（回 `unknown op` 或 `bad request`）时，本机 IPC 回 `old version`。
 
 ### 2.4 选路（hub）
 1. 依次连 A 的局域网地址，每个最多等 500 ms。localhost 测试时局域网地址包含 `127.0.0.1:22028`。
@@ -145,6 +150,8 @@ relay 在 A 的长连接上开一条流，发 `{"op":"relayed","token":T}`，然
   - `{"cmd":"subscribe"}` → 先回 `{"ok":true}`，之后每当有会话开始、结束，或者 relay 状态变化，就推一行 `{"event":"changed"}`。客户端收到后再发一次 `status`。
   - 端口分享（`rapp share`、`rapp pipe` 等命令行用的就是这几条，`rust/service/src/ipc.rs`）：
     - `{"cmd":"shares"}` → `{"ok":true,"id":"123456789"|null,"relay":"off|connecting|connected|error","shares":[{"port","note","allow":["名字"…],"url":"http://<id>.rapp:<port>","listening":b}]}`。`note` 和 `allow` 总在，`allow` 是设备名（没名字的写指纹前 8 位），空表示所有持 key 的设备。`listening` 是现在回环上有没有服务在听，每个地址最多等 200 ms。
+    - （实现注，2026-11-16）`shares`、`share`、`unshare` 现在都可带 `"to":"<ID> 或 <ID>.rapp"`，替那台设备办（发上面的设备请求；`to` 是本机或不带就是本机）。`to` 不是 9 位 ID 回 `unknown name`；其余错误同 `pipe`（`no key`、`offline`、`old version`，或对方回的错误原样转过来），对方 6 秒没答算 `offline`。`shares` 的回复现在是：`{"ok":true,"id","me","shares":[{"port","note","allow":[{"fp","name"}],"url","addr","web","listening","mine"}],"known":[{"fp","name"}…]}`，本机的回复另有 `relay`。`allow` 从名字数组改成 `{fp,name}` 对象数组：本机显示成`本机`，被问的设备显示成本机给它起的名字，其他设备是它自己给的名字，没名字用指纹前 8 位。`addr` 是给人看的地址（22 端口是 `ssh <id>.rapp`，其余同 `url`），`web` 是端口不是 22，`mine` 是本机（`me`）能不能用。`known` 的第一项总是本机（名字`本机`）。`share` 带 `to` 时回 `{"ok":true,"shared":[…]}`（内容是对方回的，只有 `port`、`warn?`），`unshare` 带 `to` 时回 `{"ok":true,"was":b}`；`allow` 带 `to` 时只收完整指纹。
+    - （实现注，2026-11-16）服务状态里的 `rapp_names`（本机能不能用 `.rapp` 名字）这一版没做，留给端口分享第 4 步；界面读不到它时当作 `false`。
     - `{"cmd":"share","ports":[8000,…],"note":"…"?,"allow":["名字或指纹前缀"…]?,"raw":b?}` → `{"ok":true,"shared":[{"port","url","allow"?,"warn"?}]}`。没给的字段保持这个端口现在的值（新分享就是空、空、false），所以再分享一次不会悄悄放宽。`allow` 的每一项要在 `paired.json` 里正好对上一台设备：名字，或至少 8 位的指纹前缀。所有端口先查一遍再一起存，要么全成要么全不成。`allow` 变了的端口切断正开着的转发。`warn` 只在敏感端口上有（SSH、远程桌面、VNC、Docker、代理、数据库一类，`rust/service/src/shares.rs` 的 `SENSITIVE`）。错误：`bad port`、`bad allow`、`unknown device: X`、`ambiguous device: X`、超过 64 个分享时的 `limit`。
     - `{"cmd":"unshare","port":8000}` → `{"ok":true,"was":b}`。`was` 是原来有没有这项。不管有没有，都切断这个端口正开着的转发。
     - `{"cmd":"hosts"}` → `{"ok":true,"hosts":[{"id","name","shares":[…]}|{"id","name","error":"…"}]}`。对 `local/hosts.json` 里的每台设备同时发一次 `list_shares`，每台最多等 6 秒，超时算 `offline`。
