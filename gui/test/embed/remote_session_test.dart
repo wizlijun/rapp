@@ -298,6 +298,16 @@ void main() {
     expect(n, 1);
   });
 
+  test('compose_key opens the panel and asks for a replay', () {
+    final rs = RemoteSession(1, 'x');
+    final tick = rs.composer.focusTick;
+    rs.apply(const ComposeKeyEvent(1));
+    expect(rs.composer.open, isTrue);
+    expect(rs.composer.focusTick, tick + 1);
+    expect(rs.composer.takeReplay(), isTrue);
+    expect(rs.composer.takeReplay(), isFalse);
+  });
+
   group('input source and the marked text box', () {
     late List<String> log;
     RemoteSession session() {
@@ -334,6 +344,32 @@ void main() {
       log.clear();
       r.apply(const InputSourceEvent(1, 'abc', 'ABC', true));
       r.prepareInput();
+      expect(log, isEmpty);
+    });
+
+    test('opening the panel switches A to English, once per opening', () {
+      final r = session();
+      r.apply(const InputSourceEvent(1, 'im', '拼音', false));
+      r.composer.open = true;
+      expect(log, ['select:']);
+      r.composer.open = true;
+      r.composer.wantFocus();
+      expect(log, ['select:']);
+      r.composer.open = false;
+      r.composer.open = true;
+      expect(log, ['select:', 'select:']);
+    });
+
+    test('opening the panel: already English, no call', () {
+      final r = session();
+      r.apply(const InputSourceEvent(1, 'abc', 'ABC', true));
+      r.composer.open = true;
+      expect(log, isEmpty);
+    });
+
+    test('opening the panel: no source reported, no call', () {
+      final r = session();
+      r.composer.open = true;
       expect(log, isEmpty);
     });
 

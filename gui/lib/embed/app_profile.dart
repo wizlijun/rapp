@@ -134,6 +134,7 @@ class AppProfile {
     this.afterSend,
     this.composer,
     this.recordInput,
+    this.typeToCompose,
     this.input,
     this.composerAt,
     this.windows,
@@ -148,6 +149,9 @@ class AppProfile {
   AfterSend? afterSend;
   bool? composer;
   bool? recordInput;
+
+  /// False: a letter key on this app's picture goes to A instead of opening the writing panel.
+  bool? typeToCompose;
   InputPoint? input;
 
   /// Where the writing panel sits (its bottom centre); null: [defaultComposerAt].
@@ -171,6 +175,7 @@ class AppProfile {
         afterSend: afterSend,
         composer: composer,
         recordInput: recordInput,
+        typeToCompose: typeToCompose,
         input: input,
         composerAt: composerAt,
         windows: windows == null ? null : [...windows!],
@@ -189,6 +194,7 @@ class AppProfile {
         if (afterSend != null) 'afterSend': afterSendToJson(afterSend!),
         if (composer != null) 'composer': composer,
         if (recordInput != null) 'recordInput': recordInput,
+        if (typeToCompose != null) 'typeToCompose': typeToCompose,
         if (input != null) 'input': input!.toJson(),
         if (composerAt != null) 'composerAt': composerAt!.toJson(),
         if (windows != null) 'windows': [for (final w in windows!) w.toJson()],
@@ -240,6 +246,7 @@ class AppProfile {
       afterSend: afterSendFromJson(j['afterSend']),
       composer: j['composer'] is bool ? j['composer'] as bool : null,
       recordInput: j['recordInput'] is bool ? j['recordInput'] as bool : null,
+      typeToCompose: j['typeToCompose'] is bool ? j['typeToCompose'] as bool : null,
       input: InputPoint.fromJson(j['input']),
       composerAt: InputPoint.fromJson(j['composerAt']),
       windows: windows,
@@ -272,6 +279,7 @@ class ResolvedProfile {
     this.afterSend = AfterSend.none,
     this.composer = true,
     this.recordInput = true,
+    this.typeToCompose = true,
     this.input,
     this.composerAt,
     this.windows = const [],
@@ -287,6 +295,9 @@ class ResolvedProfile {
 
   /// Whether what is sent to this app goes into the input record.
   final bool recordInput;
+
+  /// Whether a letter key on the picture opens the writing panel (type-to-compose).
+  final bool typeToCompose;
 
   /// The marked text box; null when none is marked.
   final InputPoint? input;
@@ -335,6 +346,7 @@ ResolvedProfile resolveProfile(String appId, {required List<AppProfile> mine, re
     afterSend: pick((p) => p.afterSend) ?? AfterSend.none,
     composer: pick((p) => p.composer) ?? true,
     recordInput: pick((p) => p.recordInput) ?? true,
+    typeToCompose: pick((p) => p.typeToCompose) ?? true,
     input: pick((p) => p.input),
     composerAt: pick((p) => p.composerAt),
     windows: pick((p) => p.windows) ?? const [],

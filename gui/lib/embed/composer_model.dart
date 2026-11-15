@@ -325,6 +325,17 @@ class ComposerModel extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// A compose letter is held by the runner (type-to-compose): once the field has the caret, the panel asks
+  /// for it back ([takeReplay]).
+  bool replayPending = false;
+
+  /// True once per held compose letter.
+  bool takeReplay() {
+    if (!replayPending) return false;
+    replayPending = false;
+    return true;
+  }
+
   /// 「复制」 was pressed (the caller sent ⌘C to A): A's clipboard should change within 2 s.
   void copyPressed() {
     _copyPending = true;

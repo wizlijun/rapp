@@ -31,6 +31,20 @@ class RemoteSession extends ChangeNotifier {
       : policy = ResizePolicy(onResize ?? (_, _, _) {}),
         tabs = WindowTabs(followNew: followNewTabs) {
     composer = ComposerModel(onDrop: onDropBlock, onAllSent: _allSent);
+    composer.addListener(_composerChanged);
+  }
+
+  bool _wasOpen = false;
+
+  /// The panel opened (button, key, a clip's 「插入」, a compose letter): A goes to English now, so
+  /// Chinese is composed on B (type-to-compose §1.1). [prepareInput] still checks before sending.
+  void _composerChanged() {
+    final open = composer.open;
+    if (open && !_wasOpen) {
+      final s = inputSource;
+      if (s != null && !s.ascii) selectInput('');
+    }
+    _wasOpen = open;
   }
 
   /// The app this session runs (the profile's key); empty when unknown.
@@ -272,6 +286,11 @@ class RemoteSession extends ChangeNotifier {
         composer.apply(e.insert);
         composer.open = true;
         composer.wantFocus();
+      case ComposeKeyEvent():
+        // A letter on the picture (type-to-compose): the panel opens, takes the caret, then asks for the letter.
+        composer.replayPending = true;
+        composer.open = true;
+        composer.wantFocus();
       case TransferStatusEvent():
         transferStatus = e.status;
       case TransferProgressEvent():
@@ -330,6 +349,7 @@ class RemoteSession extends ChangeNotifier {
   @override
   void dispose() {
     policy.dispose();
+    composer.removeListener(_composerChanged);
     composer.dispose();
     super.dispose();
   }

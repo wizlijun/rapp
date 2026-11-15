@@ -60,6 +60,12 @@ final class SessionPlugin: NSObject, FlutterPlugin {
   private var keys = KeyTracker()
   /// The session `keys` holds presses for (the one they were sent to), if any.
   private var keysHolder: Int64?
+  /// Dart's `picture_focus` compose flag for `focusedSid`: a letter there opens the writing panel.
+  private var composeOn = false
+  /// The compose letter and what followed it, until Dart asks for them back (`compose_replay`).
+  private var hold = ComposeHold<NSEvent>()
+  /// Re-dispatching held events: they go to rapp's window as they are.
+  private var replaying = false
   /// Sessions shown in their own windows instead of on the stage (R20).
   private var detached = [Int64: DetachedSession]()
   /// Windows the GUI hides per session (set_hidden); detached windows leave them out.
@@ -201,11 +207,20 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     case let .moveTopLeft(sid, window):
       live[sid]?.session.moveToTopLeft(window: window)
       result(nil)
-    case let .pictureFocus(sid):
+    case let .pictureFocus(sid, compose):
       if sid != focusedSid {
         releaseKeys()
         focusedSid = sid
       }
+      composeOn = compose && sid != nil
+      result(nil)
+    case let .composeReplay(sid):
+      // The caret is in the panel and the picture blurred (Dart sent `picture_focus(nil)` first):
+      // the held keys now reach Flutter's text input, and B's IME, in the order they were typed.
+      let events = hold.take(sid: sid, now: ProcessInfo.processInfo.systemUptime)
+      replaying = true
+      for e in events { NSApp.sendEvent(e) }
+      replaying = false
       result(nil)
     case let .detach(sid):
       detachSession(sid)
@@ -333,6 +348,7 @@ final class SessionPlugin: NSObject, FlutterPlugin {
   /// window's is the one whose picture has focus (`routeKey`), a detached window's is its own
   /// (`routeDetachedKey`), any other window's (panels, sheets) or none is rapp's (finding v).
   private func route(_ event: NSEvent) -> NSEvent? {
+    if replaying { return event }
     let down: Bool
     switch event.type {
     case .keyDown: down = true
@@ -357,6 +373,16 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       return event
     case .main:
       targetSid = focusedSid.flatMap { live[$0] != nil && detached[$0] == nil ? $0 : nil }
+      let now = ProcessInfo.processInfo.systemUptime
+      // Waiting for the panel to take the caret: everything typed meanwhile waits behind the letter.
+      if hold.add(event, now: now) { return nil }
+      if down, event.type == .keyDown, composeOn, let sid = targetSid,
+         isComposeKey(characters: event.characters, flags: event.modifierFlags, isRepeat: event.isARepeat) {
+        // Type-to-compose: the letter never reaches A; Dart opens the panel, then asks for it back.
+        hold.start(sid: sid, event, now: now)
+        channel.invokeMethod("compose_key", arguments: ["sid": sid])
+        return nil
+      }
       if targetSid != keysHolder { releaseKeys() }
       decision = keys.route(keyCode: event.keyCode, down: down, flags: event.modifierFlags,
                             pictureFocused: targetSid != nil)

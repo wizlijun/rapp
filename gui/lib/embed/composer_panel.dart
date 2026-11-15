@@ -182,6 +182,15 @@ class _ComposerPanelState extends State<ComposerPanel> {
   void _takeCaret() {
     _ed.focus();
     widget.state.blurPicture();
+    if (_m.takeReplay()) {
+      // The held compose letter goes back to the window only after the editor is the text input
+      // client (focus attaches it in a microtask), so B's input method composes it: next frame.
+      final sid = _s.sid;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.port.composeReplay(sid);
+      });
+      WidgetsBinding.instance.scheduleFrame();
+    }
   }
 
   // Text goes after A is set for it (English input, the marked box clicked); an empty send is

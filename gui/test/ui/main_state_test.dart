@@ -2294,7 +2294,7 @@ void main() {
         expect(c.releaseTick, release0 + 1);
         expect(st.pictureFocused, 1);
         expect(c.open, true);
-        lastCall(port, 'picture_focus', {'sid': 1});
+        lastCall(port, 'picture_focus', {'sid': 1, 'compose': true});
       });
     });
 
@@ -2346,6 +2346,48 @@ void main() {
         port.emit(const DetachedEvent(1, true));
         expect(st.pictureFocused, isNull);
         lastCall(port, 'picture_focus', {'sid': null});
+      });
+    });
+
+    test('focusPicture sends compose for an app picture, not when typeToCompose is off or noComposer', () {
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(1, [rw(7)]));
+        st.focusPicture(1);
+        lastCall(port, 'picture_focus', {'sid': 1, 'compose': true});
+      });
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(1, [rw(7)]));
+        st.currentRemote!.setProfile(const ResolvedProfile(typeToCompose: false));
+        st.focusPicture(1);
+        lastCall(port, 'picture_focus', {'sid': 1});
+      });
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(1, [rw(7)]));
+        st.currentRemote!.setProfile(const ResolvedProfile(composer: false));
+        st.focusPicture(1);
+        lastCall(port, 'picture_focus', {'sid': 1});
+      });
+    });
+
+    test('a profile change re-sends compose to the focused picture, once', () {
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(1, [rw(7)]));
+        st.focusPicture(1);
+        final rs = st.currentRemote!;
+        int sends() => port.calls.where((c) => c.$1 == 'picture_focus').length;
+        final n0 = sends();
+        rs.setProfile(const ResolvedProfile(typeToCompose: false));
+        lastCall(port, 'picture_focus', {'sid': 1});
+        expect(sends(), n0 + 1);
+        rs.setProfile(const ResolvedProfile(typeToCompose: false, recordInput: false));
+        expect(sends(), n0 + 1); // unchanged: nothing re-sent
+        rs.setProfile(const ResolvedProfile());
+        lastCall(port, 'picture_focus', {'sid': 1, 'compose': true});
+        expect(sends(), n0 + 2);
+        st.blurPicture();
+        final n1 = sends();
+        rs.setProfile(const ResolvedProfile(typeToCompose: false));
+        expect(sends(), n1); // not focused: nothing to re-send
       });
     });
 
@@ -2953,7 +2995,7 @@ void main() {
           picture(a, port, 11);
           expect(st.currentRemote!.sid, 11);
           expect(st.pictureFocused, 11);
-          expect(port.calls.where((c) => c.$1 == 'picture_focus').last.$2, {'sid': 11});
+          expect(port.calls.where((c) => c.$1 == 'picture_focus').last.$2, {'sid': 11, 'compose': true});
         });
       });
 

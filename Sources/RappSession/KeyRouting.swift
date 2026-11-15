@@ -103,3 +103,61 @@ public struct KeyTracker {
         return KeyDecision(.remote)
     }
 }
+
+/// Whether a key press on the picture opens the writing panel (type-to-compose): a first press
+/// (not a repeat) without ⌘ ⌃ ⌥ whose characters, under the current layout, are exactly one
+/// letter. Shift and caps lock are fine; judged by character, not key position.
+public func isComposeKey(characters: String?, flags: NSEvent.ModifierFlags, isRepeat: Bool) -> Bool {
+    guard !isRepeat, flags.intersection([.command, .control, .option]).isEmpty,
+          let chars = characters, chars.count == 1, let c = chars.first else { return false }
+    return c.isLetter
+}
+
+/// The compose letter and every main-window key event after it, held until Dart has moved the
+/// caret into the writing panel and asks for them back (so fast typing stays in order and none
+/// reaches A). A hold older than `expiry` or longer than `cap` is dropped, never replayed late.
+public struct ComposeHold<Event> {
+    private let expiry: TimeInterval
+    private let cap: Int
+    private var sid: Int64?
+    private var started: TimeInterval = 0
+    private var events: [Event] = []
+
+    // 1.5 s, not one frame: the first panel open can be slow, and its letters must not be lost.
+    public init(expiry: TimeInterval = 1.5, cap: Int = 32) {
+        self.expiry = expiry
+        self.cap = cap
+    }
+
+    public var holding: Bool { sid != nil }
+
+    public mutating func start(sid: Int64, _ e: Event, now: TimeInterval) {
+        self.sid = sid
+        started = now
+        events = [e]
+    }
+
+    /// Queues `e` behind the held ones; false when nothing is held (or the hold just expired or
+    /// overflowed and was dropped): the caller routes `e` as usual.
+    public mutating func add(_ e: Event, now: TimeInterval) -> Bool {
+        guard sid != nil else { return false }
+        guard now - started <= expiry, events.count < cap else {
+            clear()
+            return false
+        }
+        events.append(e)
+        return true
+    }
+
+    /// The held events in arrival order when the hold is `sid`'s and still fresh; always clears.
+    public mutating func take(sid: Int64, now: TimeInterval) -> [Event] {
+        defer { clear() }
+        guard self.sid == sid, now - started <= expiry else { return [] }
+        return events
+    }
+
+    private mutating func clear() {
+        sid = nil
+        events = []
+    }
+}
