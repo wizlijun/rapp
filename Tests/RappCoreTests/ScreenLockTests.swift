@@ -24,4 +24,25 @@ final class ScreenLockTests: XCTestCase {
         XCTAssertEqual(lockScreen(isLocked: { false }, call: { "找不到 SACLockScreenImmediate" }, sleep: { _ in }),
                        .failed("找不到 SACLockScreenImmediate"))
     }
+
+    func testWaitUntilUnlockedReturnsAtOnceWhenNotLocked() {
+        var slept = 0.0
+        waitUntilUnlocked(isLocked: { false }, sleep: { slept += $0 })
+        XCTAssertEqual(slept, 0)
+    }
+
+    func testWaitUntilUnlockedPollsUntilStateFlips() {
+        var n = 0
+        var slept = 0.0
+        waitUntilUnlocked(isLocked: { n += 1; return n <= 5 }, sleep: { slept += $0 })
+        XCTAssertEqual(n, 6)
+        XCTAssertEqual(slept, 0.5, accuracy: 0.001)
+    }
+
+    func testWaitUntilUnlockedGivesUpAfterTimeout() {
+        var slept = 0.0
+        waitUntilUnlocked(isLocked: { true }, sleep: { slept += $0 })
+        XCTAssertGreaterThanOrEqual(slept, 3)
+        XCTAssertLessThan(slept, 3.5)
+    }
 }

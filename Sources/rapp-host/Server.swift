@@ -761,11 +761,17 @@ final class Session {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             // One typist at a time across sessions: a second holder finds A already unlocked and types nothing.
             let lockFile = DataPaths.unlockLockFile(home: FileManager.default.homeDirectoryForCurrentUser)
+            // Hold the lock until macOS has finished verifying, so the next typist sees the settled state.
+            let typeAndSettle = {
+                UnlockTyper.type(password, display: main)
+                waitUntilUnlocked(isLocked: { screenLocked(CGSessionCopyCurrentDictionary() as? [String: Any]) },
+                                  sleep: { Thread.sleep(forTimeInterval: $0) })
+            }
             do {
-                try FileLock.exclusive(at: lockFile) { UnlockTyper.type(password, display: main) }
+                try FileLock.exclusive(at: lockFile, typeAndSettle)
             } catch {
                 self?.output.log("unlock lock unavailable")
-                UnlockTyper.type(password, display: main)
+                typeAndSettle()
             }
             self?.queue.async {
                 guard let self else { return }

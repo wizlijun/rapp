@@ -18,3 +18,14 @@ public func lockScreen(isLocked: () -> Bool, call: () -> String?, sleep: (TimeIn
     }
     return .failed("调用后 \(Int(timeout)) 秒内没有锁上")
 }
+
+/// After typing the unlock password: waits until `isLocked` turns false (at most `timeout`), so the next
+/// typist starts only once the result is settled. Returns at once when A is not locked.
+public func waitUntilUnlocked(isLocked: () -> Bool, sleep: (TimeInterval) -> Void,
+                              timeout: TimeInterval = 3, step: TimeInterval = 0.1) {
+    var waited = 0.0
+    while waited < timeout, isLocked() {
+        sleep(step)
+        waited += step
+    }
+}
