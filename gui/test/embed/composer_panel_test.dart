@@ -955,6 +955,42 @@ void main() {
       expect(panelRect(tester).bottom, 592);
     });
 
+    testWidgets('a touch held still on the grip, then moved, still drags (no long-press tooltip)', (tester) async {
+      await showPicture(tester);
+      await openPanel(tester);
+      final g = await tester.startGesture(tester.getCenter(grip));
+      await tester.pump(const Duration(milliseconds: 800));
+      await g.moveBy(const Offset(0, -100));
+      await tester.pump();
+      await g.moveBy(const Offset(0, -100));
+      await tester.pump();
+      await g.up();
+      await tester.pump();
+      await tester.pump(kDoubleTapTimeout);
+      expect(panelRect(tester).bottom, 392);
+      expect(find.text('拖动；双击回到底部居中'), findsNothing);
+    });
+
+    testWidgets('a two-finger trackpad scroll over the grip does not move the panel', (tester) async {
+      await showPicture(tester);
+      await openPanel(tester);
+      var saves = 0;
+      es.profiles.addListener(() => saves++);
+      final at = tester.getCenter(grip);
+      final g = await tester.createGesture(kind: PointerDeviceKind.trackpad);
+      await g.panZoomStart(at);
+      await tester.pump();
+      await g.panZoomUpdate(at, pan: const Offset(0, -100));
+      await tester.pump();
+      await g.panZoomUpdate(at, pan: const Offset(0, -200));
+      await tester.pump();
+      await g.panZoomEnd();
+      await tester.pump();
+      await tester.pump(kDoubleTapTimeout);
+      expect(panelRect(tester).bottom, 592);
+      expect(saves, 0);
+    });
+
     testWidgets('each app has its own place', (tester) async {
       es.profiles.setComposerAt('Safari', 'Safari', const InputPoint(0.25, 100));
       await showPicture(tester);

@@ -3,7 +3,7 @@
 // the bottom-centre panel and the lift (composer_panel.dart).
 import 'dart:math' as math;
 
-import 'package:flutter/gestures.dart' show DragStartBehavior;
+import 'package:flutter/gestures.dart' show DragStartBehavior, PointerDeviceKind;
 import 'package:flutter/material.dart';
 
 import '../ui/tokens.dart';
@@ -88,6 +88,14 @@ class _FloatingComposerState extends State<FloatingComposer> {
       key: const Key('composer-grip'),
       behavior: HitTestBehavior.opaque,
       dragStartBehavior: DragStartBehavior.down,
+      // No trackpad: a two-finger scroll over the grip scrolls the picture, it does not move the panel.
+      supportedDevices: const {
+        PointerDeviceKind.touch,
+        PointerDeviceKind.mouse,
+        PointerDeviceKind.stylus,
+        PointerDeviceKind.invertedStylus,
+        PointerDeviceKind.unknown,
+      },
       onPanStart: _start,
       onPanUpdate: _update,
       onPanEnd: _end,
@@ -97,6 +105,8 @@ class _FloatingComposerState extends State<FloatingComposer> {
         cursor: _drag == null ? SystemMouseCursors.grab : SystemMouseCursors.grabbing,
         child: Tooltip(
           message: '拖动；双击回到底部居中',
+          // Hover only: a long-press tooltip would take a touch held still before it moves.
+          triggerMode: TooltipTriggerMode.manual,
           child: Semantics(
             label: '移动写作面板',
             child: SizedBox.fromSize(
