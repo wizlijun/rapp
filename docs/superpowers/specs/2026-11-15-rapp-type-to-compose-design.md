@@ -1,6 +1,6 @@
 # 按字母键打开写作面板（设计稿，短）
 
-状态：用户已确认（2026-11-15），先归档；实现另行排期。补《写作面板》（`2026-11-14-rapp-composer-writing-panel-design.md`）和《写作面板浮动》（`2026-11-15-rapp-floating-composer-design.md`）。
+状态：用户已确认（2026-11-15），已实现（feat/type-to-compose）；待真机确认 §5 拼音检查和 Figma 关开关后 V/R。补《写作面板》（`2026-11-14-rapp-composer-writing-panel-design.md`）和《写作面板浮动》（`2026-11-15-rapp-floating-composer-design.md`）。
 
 ## 1. 要什么、为什么
 
