@@ -34,6 +34,8 @@ pub enum PipeErr {
     NoKey,
     /// The device cannot be reached (`offline` or `unknown id`).
     Offline,
+    /// The other device does not know the request (an older version).
+    Old,
     /// The other device's own error text: `not shared`, `not allowed`, `refused`, `limit`, ...
     Refused(String),
     /// Anything else that went wrong on the way.
@@ -41,8 +43,9 @@ pub enum PipeErr {
 }
 
 impl PipeErr {
-        pub fn as_str(&self) -> &str {
+    pub fn as_str(&self) -> &str {
         match self {
+            PipeErr::Old => "old version",
             PipeErr::UnknownName => "unknown name",
             PipeErr::NoKey => "no key",
             PipeErr::Offline => "offline",
@@ -72,20 +75,38 @@ pub fn known_hosts(home: &Path) -> Vec<KnownHost> {
 /// Opens a forward to `port` of the device `name` means. The pipe carries the port's bytes;
 /// the second value is the path it goes by (`lan`, `direct` or `relay`).
 pub async fn open(state: &State, name: &str, port: u16) -> Result<(Pipe, &'static str), PipeErr> {
-    let (pipe, reply, path) = ask(state, name, &Op::Forward { port }).await?;
+    let (pipe, reply, path, _) = ask(state, name, &Op::Forward { port }).await?;
     answer(&reply)?;
     Ok((pipe, path))
 }
 
 /// The shares the device `name` means offers this one: the `shares` array of its reply.
 pub async fn shares_of(state: &State, name: &str) -> Result<Value, PipeErr> {
-    let (_, reply, _) = ask(state, name, &Op::ListShares).await?;
+    let (_, reply, _, _) = ask(state, name, &Op::ListShares).await?;
     answer(&reply)?;
     Ok(reply["shares"].clone())
 }
 
+/// Sends a share-table request (`Shares`, `Share`, `Unshare`) to the device `name` means: its
+/// reply and its fingerprint. A device that does not know the request is `Old`.
+pub async fn set(state: &State, name: &str, op: &Op) -> Result<(Value, Fp), PipeErr> {
+    let (_, reply, _, fp) = ask(state, name, op).await?;
+    if reply["ok"] != true {
+        return Err(reply_err(&reply));
+    }
+    Ok((reply, fp))
+}
+
+/// The error of a refused reply: `Old` when the other device does not know the request.
+fn reply_err(reply: &Value) -> PipeErr {
+    match reply["error"].as_str().unwrap_or("bad reply") {
+        "unknown op" | "bad request" => PipeErr::Old,
+        e => PipeErr::Refused(e.to_string()),
+    }
+}
+
 /// Sends `op` to the device `name` means, with the relay and key as configured now.
-async fn ask(state: &State, name: &str, op: &Op) -> Result<(Pipe, Value, &'static str), PipeErr> {
+async fn ask(state: &State, name: &str, op: &Op) -> Result<(Pipe, Value, &'static str, Fp), PipeErr> {
     let id = target_id(name).ok_or(PipeErr::UnknownName)?;
     let (relay, key) = {
         let cfg = state.cfg.lock().unwrap();
@@ -97,7 +118,7 @@ async fn ask(state: &State, name: &str, op: &Op) -> Result<(Pipe, Value, &'stati
     let to = Target { id: &id, lan: &lan, known: fp };
     let via = Via { relay: relay.as_deref(), key: &key };
     match state.outbound.request(&via, &to, op).await {
-        Ok(sent) => Ok((sent.pipe, sent.reply, sent.path)),
+        Ok(sent) => Ok((sent.pipe, sent.reply, sent.path, sent.fp)),
         Err(e) if e.downcast_ref::<NotReached>().is_some() => Err(PipeErr::Offline),
         Err(e) => Err(PipeErr::Other(e.to_string())),
     }
@@ -123,6 +144,15 @@ mod tests {
         for bad in ["", "rapp", ".rapp", "gpu1", "gpu1.rapp", "12345678.rapp", "1234567890.rapp", "123456789.com", "123456789.rapp.com"] {
             assert_eq!(target_id(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn an_old_device_is_old() {
+        for e in ["unknown op", "bad request"] {
+            assert_eq!(reply_err(&serde_json::json!({"ok":false,"error":e})), PipeErr::Old, "{e}");
+        }
+        assert_eq!(reply_err(&serde_json::json!({"ok":false,"error":"policy"})), PipeErr::Refused("policy".into()));
+        assert_eq!(PipeErr::Old.as_str(), "old version");
     }
 
     #[test]

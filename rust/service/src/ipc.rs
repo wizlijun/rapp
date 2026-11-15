@@ -16,7 +16,7 @@ use tokio::net::{TcpListener, TcpStream};
 
 /// How long `hosts` waits for each device's list of shares: the LAN addresses in `hosts.json`
 /// and the ones the relay knows cost one `DIRECT_WAIT` each list, and the relayed request follows.
-const HOSTS_WAIT: Duration = Duration::from_secs(6);
+pub(crate) const HOSTS_WAIT: Duration = Duration::from_secs(6);
 
 pub async fn serve(state: Arc<State>, listener: TcpListener, token: String) {
     while let Ok((tcp, _)) = listener.accept().await {
@@ -72,9 +72,9 @@ async fn conn(state: &Arc<State>, tcp: TcpStream, token: &str) -> Result<()> {
                         update::apply(state, cmd["confirm_signature_change"] == true, closed.clone()).await
                     }
                     "update_rollback" => update::rollback(state, closed.clone()).await,
-                    "shares" => crate::share_cmds::shares(state).await,
-                    "share" => crate::share_cmds::share(state, &cmd),
-                    "unshare" => crate::share_cmds::unshare(state, &cmd),
+                    "shares" => crate::share_cmds::shares(state, &cmd).await,
+                    "share" => crate::share_cmds::share(state, &cmd).await,
+                    "unshare" => crate::share_cmds::unshare(state, &cmd).await,
                     "hosts" => hosts(state).await,
                     "pipe" => match pipe(state, &cmd).await {
                         Ok((p, path)) => {

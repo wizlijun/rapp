@@ -188,3 +188,87 @@ async fn bad_values() {
     assert_eq!(r["ok"], true, "{r}");
     assert_eq!(saved_port(a.home.path(), 5001)["allow"], json!([fp_hex(9)]));
 }
+
+/// Services A and B that trust each other (the same key); B's `hosts.json` has A's LAN address.
+async fn a_and_b() -> (TestService, TestService, String) {
+    let (a, key) = start_sharing(|_| {}).await;
+    let (b, _) = start_sharing(|_| {}).await;
+    let r = ipc_once(&b.svc, b.home.path(), json!({"cmd":"set_relay","relay":"","key":key.to_string()})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    let hosts = json!([{"id": a.id, "name": "a", "lan": [a_addr(&a.svc).to_string()]}]);
+    std::fs::write(b.home.path().join("hosts.json"), hosts.to_string()).unwrap();
+    let me = ipc_once(&b.svc, b.home.path(), json!({"cmd":"status"})).await["fp"].as_str().unwrap().to_string();
+    (a, b, me)
+}
+
+async fn b_ipc(b: &TestService, cmd: Value) -> Value {
+    ipc_once(&b.svc, b.home.path(), cmd).await
+}
+
+#[tokio::test]
+async fn b_lists_and_sets_a_through_its_own_ipc() {
+    let (a, b, me) = a_and_b().await;
+    let p = 5101u16;
+    let r = b_ipc(&b, json!({"cmd":"share","to":a.id,"ports":[p],"note":"n"})).await;
+    assert_eq!(r, json!({"ok":true,"shared":[{"port":p}]}));
+    assert_eq!(saved_port(a.home.path(), p)["port"], p);
+
+    let r = b_ipc(&b, json!({"cmd":"shares","to":a.id})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!((r["id"].as_str(), r["me"].as_str()), (Some(a.id.as_str()), Some(me.as_str())), "{r}");
+    let row = &r["shares"][0];
+    let url = format!("http://{}.rapp:{p}", a.id);
+    assert_eq!((&row["url"], &row["addr"], &row["web"], &row["mine"], &row["note"]), (&json!(url), &json!(url), &json!(true), &json!(true), &json!("n")), "{r}");
+    assert_eq!(r["known"][0], json!({"fp": me, "name": "本机"}), "{r}");
+
+    let r = b_ipc(&b, json!({"cmd":"share","to":a.id,"ports":[22]})).await;
+    assert_eq!(r["shared"][0]["warn"], WARN, "{r}");
+    let r = b_ipc(&b, json!({"cmd":"shares","to":a.id})).await;
+    let ssh = r["shares"].as_array().unwrap().iter().find(|s| s["port"] == 22).unwrap();
+    assert_eq!((&ssh["addr"], &ssh["web"]), (&json!(format!("ssh {}.rapp", a.id)), &json!(false)), "{r}");
+
+    let x = fp_hex(9);
+    let r = b_ipc(&b, json!({"cmd":"share","to":a.id,"ports":[p],"allow":[x]})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    let r = b_ipc(&b, json!({"cmd":"shares","to":a.id})).await;
+    let row = r["shares"].as_array().unwrap().iter().find(|s| s["port"] == p).unwrap();
+    assert_eq!(row["mine"], false, "{r}");
+    assert_eq!(row["allow"], json!([{"fp": x, "name": &x[..8]}]), "{r}");
+
+    let r = b_ipc(&b, json!({"cmd":"unshare","to":a.id,"port":p})).await;
+    assert_eq!(r, json!({"ok":true,"was":true}));
+}
+
+#[tokio::test]
+async fn to_this_device_is_local() {
+    let (a, _) = start_sharing(|_| {}).await;
+    let p = 5102u16;
+    let r = ipc_once(&a.svc, a.home.path(), json!({"cmd":"share","to":a.id,"ports":[p]})).await;
+    assert_eq!(r["shared"][0]["url"], format!("http://{}.rapp:{p}", a.id), "{r}");
+    let log = log_events(a.home.path());
+    for l in log.iter().filter(|l| l["ev"] == "share") {
+        assert_eq!(l["by"], "local", "{l}");
+    }
+}
+
+#[tokio::test]
+async fn an_offline_device_is_offline_within_the_wait() {
+    let (_, b, _) = a_and_b().await;
+    let began = std::time::Instant::now();
+    let r = b_ipc(&b, json!({"cmd":"shares","to":"999999999"})).await;
+    assert_eq!(r, json!({"ok":false,"error":"offline"}));
+    assert!(began.elapsed() < Duration::from_secs(7), "{:?}", began.elapsed());
+}
+
+#[tokio::test]
+async fn the_cli_still_prints_the_same() {
+    let (a, _) = start_sharing(|_| {}).await;
+    let p = 5103u16;
+    let r = ipc_once(&a.svc, a.home.path(), json!({"cmd":"share","ports":[p]})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    // A shares with no allow list prints no "只给" column text; the allowed case is in say.rs's
+    // tests (strings and objects both print the name).
+    let r = ipc_once(&a.svc, a.home.path(), json!({"cmd":"shares"})).await;
+    assert_eq!(r["shares"][0]["allow"], json!([]), "{r}");
+    assert_eq!(r["shares"][0]["url"], format!("http://{}.rapp:{p}", a.id), "{r}");
+}

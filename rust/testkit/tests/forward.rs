@@ -570,7 +570,7 @@ async fn allow_names_a_known_device_or_is_refused() {
     let r = c.call(json!({"cmd":"share","ports":[port],"allow":["test-b"]})).await;
     assert_eq!(r["ok"], true, "{r}");
     let r = c.call(json!({"cmd":"shares"})).await;
-    assert_eq!(r["shares"][0]["allow"], json!(["test-b"]), "{r}");
+    assert_eq!(r["shares"][0]["allow"], json!([{"fp": b.id.fp.to_string(), "name": "test-b"}]), "{r}");
     let saved: Value = serde_json::from_slice(&std::fs::read(a.home.path().join("shares.json")).unwrap()).unwrap();
     assert_eq!(saved[0]["allow"], json!([b.id.fp.to_string()]));
     let l = wait_log(a.home.path(), "share", |v| v["port"] == port).await;
@@ -671,7 +671,7 @@ async fn sharing_again_without_allow_keeps_the_restriction() {
     let saved = || -> Value { serde_json::from_slice(&std::fs::read(a.home.path().join("shares.json")).unwrap()).unwrap() };
     assert_eq!(saved(), json!([{"port": port, "note": "模型", "allow": [b.id.fp.to_string()], "raw": true}]));
     let r = c.call(json!({"cmd":"shares"})).await;
-    assert_eq!((&r["shares"][0]["allow"], &r["shares"][0]["note"]), (&json!(["test-b"]), &json!("模型")), "{r}");
+    assert_eq!((&r["shares"][0]["allow"], &r["shares"][0]["note"]), (&json!([{"fp": b.id.fp.to_string(), "name": "test-b"}]), &json!("模型")), "{r}");
     // Another device is still kept out, and B's forward was not cut: `allow` did not change.
     let (r, _, _conn) = forward(&a, &key, &visitor(), port).await;
     assert_eq!(r, json!({"ok":false,"error":"not allowed"}));
@@ -752,7 +752,7 @@ async fn a_device_that_gave_no_name_shows_its_fingerprint_prefix() {
                json!({"ok":false,"error":"unknown device: "}));
     assert_eq!(c.call(json!({"cmd":"share","ports":[8000],"allow":[&fp[..8]]})).await["ok"], true);
     let r = c.call(json!({"cmd":"shares"})).await;
-    assert_eq!(r["shares"][0]["allow"], json!([&fp[..8]]), "{r}");
+    assert_eq!(r["shares"][0]["allow"], json!([{"fp": fp, "name": &fp[..8]}]), "{r}");
 }
 
 // A name in paired.json is what another device said: the replies carry it made safe to show.
@@ -765,7 +765,7 @@ async fn allow_names_in_the_replies_have_no_control_characters() {
     let r = c.call(json!({"cmd":"share","ports":[8000],"allow":[&fp[..8]]})).await;
     assert_eq!((&r["ok"], &r["shared"][0]["allow"]), (&json!(true), &json!(["mi[31mni"])), "{r}");
     let r = c.call(json!({"cmd":"shares"})).await;
-    assert_eq!(r["shares"][0]["allow"], json!(["mi[31mni"]), "{r}");
+    assert_eq!(r["shares"][0]["allow"], json!([{"fp": fp, "name": "mi[31mni"}]), "{r}");
 }
 
 // ---- pipe end to end, over the LAN and over the relay (Task 8) ----

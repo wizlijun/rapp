@@ -31,9 +31,10 @@ fn columns(rows: &[Vec<String>]) -> String {
     out
 }
 
-/// The device names in a JSON array, each made `plain`.
+/// The device names in a JSON array, each made `plain`: strings, or objects with a `name`.
 fn names(list: &Value) -> Vec<String> {
-    list.as_array().map(|a| a.iter().filter_map(Value::as_str).map(plain).collect()).unwrap_or_default()
+    let name = |v: &Value| v.as_str().or_else(|| v["name"].as_str()).map(plain);
+    list.as_array().map(|a| a.iter().filter_map(name).collect()).unwrap_or_default()
 }
 
 /// One `已分享：<url>` per port; right under it who the share is for when it is not for every
@@ -181,7 +182,7 @@ mod tests {
         assert_eq!(shared(&r), format!("已分享：http://123456789.rapp:8000\n只给：{clean}、b\n"));
 
         let r = json!({"ok":true,"id":"123456789","relay":"connected","shares":[
-            {"port":22,"allow":[evil],"url":"http://123456789.rapp:22","listening":true}]});
+            {"port":22,"allow":[{"fp":"ab","name":evil}],"url":"http://123456789.rapp:22","listening":true}]});
         let t = table(&r);
         assert!(t.lines().nth(2).unwrap().contains(clean), "{t:?}");
         assert_eq!((t.lines().count(), t.chars().filter(|c| c.is_control()).count()), (3, 3), "{t:?}");
@@ -225,7 +226,7 @@ mod tests {
         let none = json!({"ok":true,"id":"123456789","relay":"connected","shares":[]});
         assert_eq!(table(&none), "这台设备：123456789.rapp   中继：已连接\n（没有分享）\n");
         let some = json!({"ok":true,"id":"123456789","relay":"connected","shares":[
-            {"port":22,"allow":["mini"],"url":"http://123456789.rapp:22","listening":true},
+            {"port":22,"allow":[{"fp":"ab","name":"mini"}],"url":"http://123456789.rapp:22","listening":true},
             {"port":8000,"url":"http://123456789.rapp:8000","listening":false}]});
         let t = table(&some);
         assert!(t.lines().nth(1).unwrap().starts_with("端口"));
