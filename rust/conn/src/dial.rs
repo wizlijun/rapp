@@ -7,8 +7,11 @@
 //! presence probes or LAN upgrades.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::task::Poll;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
@@ -24,7 +27,8 @@ use serde_json::Value;
 use crate::relay::RelayConn;
 use crate::{e2e_connect, quic_facts, read_welcome, send_hello, Accepted, Me, Pipe, Role};
 
-/// How long one LAN address may take to connect.
+/// How long one LAN address may take to connect and welcome us. The addresses of one list are
+/// dialed at the same time, so this is also what a list of dead addresses costs.
 pub const DIRECT_WAIT: Duration = Duration::from_secs(1);
 /// How long the other device (or the relay) may take to answer.
 pub const REPLY_WAIT: Duration = Duration::from_secs(20);
@@ -165,9 +169,11 @@ impl Outbound {
         }
     }
 
-    /// Step 2: `addrs` one after another; the first that welcomes us is kept for the device and
-    /// carries `op` as in step 1 (a link whose request fails is dropped and the next address tried).
-    /// None when none did; the first definite refusal goes to `refused`.
+    /// Step 2: `addrs` all at the same time, each within `DIRECT_WAIT`. The first that welcomes
+    /// us is kept for the device and carries `op` as in step 1; the other dials are dropped,
+    /// which closes them. A link whose request fails is dropped too. None when the device was not
+    /// reached this way; when no address welcomed us, the first definite refusal (in the order
+    /// of `addrs`) goes to `refused`.
     async fn on_lan(
         &self,
         via: &Via<'_>,
@@ -176,23 +182,31 @@ impl Outbound {
         op: &Op,
         refused: &mut Option<anyhow::Error>,
     ) -> Option<Sent> {
-        for a in addrs {
-            let Ok(sock) = a.parse::<SocketAddr>() else { continue };
-            match self.dial(sock, via.key, to).await {
-                Ok((conn, accepted)) => {
-                    let path = direct_path(&sock);
-                    let link = Link { conn: conn.clone(), path, fp: accepted.fp, key_text: via.key.to_string() };
-                    self.links.lock().unwrap().insert(to.id.to_string(), link);
-                    match exchange(&conn, op).await {
-                        Ok((pipe, reply)) => return Some(Sent { pipe, reply, path, fp: accepted.fp }),
-                        Err(_) => self.forget(to.id, &conn),
+        let socks = addrs.iter().filter_map(|a| a.parse::<SocketAddr>().ok());
+        let dials = socks.map(|sock| async move {
+            let (conn, accepted) = self.dial(sock, via.key, to).await?;
+            anyhow::Ok((sock, conn, accepted))
+        });
+        match first_ok(dials).await {
+            Ok((sock, conn, accepted)) => {
+                let path = direct_path(&sock);
+                let link = Link { conn: conn.clone(), path, fp: accepted.fp, key_text: via.key.to_string() };
+                self.links.lock().unwrap().insert(to.id.to_string(), link);
+                match exchange(&conn, op).await {
+                    Ok((pipe, reply)) => Some(Sent { pipe, reply, path, fp: accepted.fp }),
+                    Err(_) => {
+                        self.forget(to.id, &conn);
+                        None
                     }
                 }
-                Err(e) if is_refusal(&e) && refused.is_none() => *refused = Some(e),
-                Err(_) => {}
+            }
+            Err(errors) => {
+                if refused.is_none() {
+                    *refused = errors.into_iter().find(is_refusal);
+                }
+                None
             }
         }
-        None
     }
 
     /// Steps 4 and 5: ask the relay where the device is, try the LAN addresses only it knows,
@@ -260,15 +274,17 @@ impl Outbound {
     }
 
     /// Connects over `rapp/2` and says hello, with a `ping` in the same flight (as the hub's
-    /// `Dialer::dial`).
+    /// `Dialer::dial`); all of it within `DIRECT_WAIT`.
     async fn dial(&self, addr: SocketAddr, key: &Key, to: &Target<'_>) -> Result<(Connection, Accepted)> {
         let cfg = device_client_config(&self.identity, ALPN_DEVICE)?;
         let connecting = self.ep.connect_with(cfg, addr, SNI)?;
-        let conn = match tokio::time::timeout(DIRECT_WAIT, connecting).await {
+        let deadline = tokio::time::Instant::now() + DIRECT_WAIT;
+        let conn = match tokio::time::timeout_at(deadline, connecting).await {
             Err(_) => bail!("timed out"),
             Ok(r) => r?,
         };
-        match self.hello(&conn, key, to).await {
+        let hello = tokio::time::timeout_at(deadline, self.hello(&conn, key, to)).await;
+        match hello.unwrap_or_else(|_| Err(anyhow!("timed out"))) {
             Ok(accepted) => Ok((conn, accepted)),
             Err(e) => {
                 conn.close(0u32.into(), b"hello failed");
@@ -277,20 +293,18 @@ impl Outbound {
         }
     }
 
+    /// The hello and a `ping` on a new stream of `conn`; the caller bounds the wait.
     async fn hello(&self, conn: &Connection, key: &Key, to: &Target<'_>) -> Result<Accepted> {
         let facts = quic_facts(conn, &self.identity.fp, Role::Client)?;
         let mut pipe: Pipe = Box::new(bi(conn.open_bi().await?));
         send_hello(&mut pipe, &facts, &Me { id: "", name: &self.name, key: Some(key) }).await?;
         write_json(&mut pipe, &Op::Ping).await?;
-        let wait = async {
-            let accepted = read_welcome(&mut pipe, &facts, Some(key), to.id, to.known.as_ref()).await?;
-            let r = read_json(&mut pipe).await?;
-            if r["ok"] != true {
-                bail!(r["error"].as_str().unwrap_or("bad reply").to_string());
-            }
-            anyhow::Ok(accepted)
-        };
-        tokio::time::timeout(REPLY_WAIT, wait).await.map_err(|_| anyhow!("no reply"))?
+        let accepted = read_welcome(&mut pipe, &facts, Some(key), to.id, to.known.as_ref()).await?;
+        let r = read_json(&mut pipe).await?;
+        if r["ok"] != true {
+            bail!(r["error"].as_str().unwrap_or("bad reply").to_string());
+        }
+        Ok(accepted)
     }
 }
 
@@ -305,6 +319,32 @@ impl Drop for Outbound {
             l.conn.close(0u32.into(), b"bye");
         }
     }
+}
+
+/// Runs `tries` at the same time. The first that is Ok wins, and the others are dropped where
+/// they are; when none is, every error, in the order of `tries`.
+async fn first_ok<T, F>(tries: impl IntoIterator<Item = F>) -> Result<T, Vec<anyhow::Error>>
+where
+    F: Future<Output = Result<T>>,
+{
+    let mut running: Vec<Option<Pin<Box<F>>>> = tries.into_iter().map(|f| Some(Box::pin(f))).collect();
+    let mut errors: Vec<Option<anyhow::Error>> = running.iter().map(|_| None).collect();
+    std::future::poll_fn(|cx| {
+        for (slot, error) in running.iter_mut().zip(errors.iter_mut()) {
+            let Some(f) = slot else { continue };
+            match f.as_mut().poll(cx) {
+                Poll::Ready(Ok(t)) => return Poll::Ready(Ok(t)),
+                Poll::Ready(Err(e)) => (*slot, *error) = (None, Some(e)),
+                Poll::Pending => {}
+            }
+        }
+        if running.iter().any(Option::is_some) {
+            Poll::Pending
+        } else {
+            Poll::Ready(Err(errors.iter_mut().filter_map(Option::take).collect()))
+        }
+    })
+    .await
 }
 
 /// `op` on a new stream, and the reply; the stream stays open after it.
@@ -436,6 +476,65 @@ mod tests {
         let r = out.request(&Via { relay: None, key: &key }, &to, &Op::Ping).await;
         assert_eq!(not_reached(r), Some("offline"));
         assert!(out.links.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn first_ok_takes_the_first_success_and_else_every_error_in_order() {
+        let after = |ms: u64, r: Result<u8, &'static str>| async move {
+            tokio::time::sleep(Duration::from_millis(ms)).await;
+            r.map_err(|e| anyhow!(e))
+        };
+        // the quickest success wins, wherever it stands; a failure before it does not end the wait
+        let began = std::time::Instant::now();
+        assert_eq!(first_ok([after(5_000, Ok(1)), after(1, Err("a")), after(50, Ok(3))]).await.unwrap(), 3);
+        assert!(began.elapsed() < Duration::from_secs(2), "it waited for the slow one");
+        let errors = first_ok([after(30, Err("a")), after(1, Err("b"))]).await.unwrap_err();
+        assert_eq!(errors.iter().map(|e| e.to_string()).collect::<Vec<_>>(), ["a", "b"]);
+        assert!(first_ok::<u8, std::future::Ready<Result<u8>>>([]).await.unwrap_err().is_empty());
+    }
+
+    /// Addresses that take packets and never answer, with the sockets that keep them so.
+    fn silent(n: usize) -> (Vec<std::net::UdpSocket>, Vec<String>) {
+        let socks: Vec<_> = (0..n).map(|_| std::net::UdpSocket::bind("127.0.0.1:0").unwrap()).collect();
+        let addrs = socks.iter().map(|s| s.local_addr().unwrap().to_string()).collect();
+        (socks, addrs)
+    }
+
+    #[tokio::test]
+    async fn dead_lan_addresses_are_dialed_together() {
+        let key = Key::new_local();
+        let out = outbound();
+        let (_socks, lan) = silent(3);
+        let to = Target { id: A_ID, lan: &lan, known: None };
+        let began = std::time::Instant::now();
+        let r = out.request(&Via { relay: None, key: &key }, &to, &Op::Ping).await;
+        let took = began.elapsed();
+        assert_eq!(not_reached(r), Some("offline"));
+        assert!(took >= DIRECT_WAIT && took < DIRECT_WAIT * 2, "{took:?}");
+    }
+
+    // A device that takes the connection and then says nothing costs `DIRECT_WAIT` too, not `REPLY_WAIT`.
+    #[tokio::test]
+    async fn a_device_that_never_welcomes_is_given_up_within_the_direct_wait() {
+        let key = Key::new_local();
+        let id = Identity::generate().unwrap();
+        let cfg = device_server_config(&id, &[ALPN_DEVICE]).unwrap();
+        let ep = quinn::Endpoint::server(cfg, "127.0.0.1:0".parse().unwrap()).unwrap();
+        let (addr, server) = (ep.local_addr().unwrap(), ep.clone());
+        tokio::spawn(async move {
+            let mut held = Vec::new();
+            while let Some(incoming) = server.accept().await {
+                held.extend(incoming.await);
+            }
+        });
+        let out = outbound();
+        let lan = [addr.to_string()];
+        let to = Target { id: A_ID, lan: &lan, known: None };
+        let began = std::time::Instant::now();
+        let r = out.request(&Via { relay: None, key: &key }, &to, &Op::Ping).await;
+        let took = began.elapsed();
+        assert_eq!(not_reached(r), Some("offline"));
+        assert!(took >= DIRECT_WAIT && took < DIRECT_WAIT * 2, "{took:?}");
     }
 
     #[test]

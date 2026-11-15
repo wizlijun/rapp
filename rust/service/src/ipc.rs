@@ -18,8 +18,9 @@ use tokio::net::{TcpListener, TcpStream};
 
 /// How long `shares` gives each local address of a shared port to accept before saying nothing listens there.
 const LISTENING_WAIT: Duration = Duration::from_millis(200);
-/// How long `hosts` waits for each device's list of shares.
-const HOSTS_WAIT: Duration = Duration::from_secs(3);
+/// How long `hosts` waits for each device's list of shares: the LAN addresses in `hosts.json`
+/// and the ones the relay knows cost one `DIRECT_WAIT` each list, and the relayed request follows.
+const HOSTS_WAIT: Duration = Duration::from_secs(6);
 const SENSITIVE_WARN: &str = "分享这个端口，等于把这台机器能到的网络也交出去";
 
 pub async fn serve(state: Arc<State>, listener: TcpListener, token: String) {

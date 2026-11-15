@@ -406,7 +406,9 @@ async fn a_device_with_another_key_is_not_trusted() {
     let b = tempfile::tempdir().unwrap();
     let out = outbound(b.path());
     let other = rapp_wire::Key::new_local();
-    let lan = [a_addr(&a.svc).to_string()];
+    // An address that does not answer, tried at the same time, does not hide the refusal.
+    let (_socks, silent) = silent_addrs(1);
+    let lan = [silent[0].clone(), a_addr(&a.svc).to_string()];
     let to = Target { id: &a.id, lan: &lan, known: None };
     let r = out.request(&Via { relay: None, key: &other }, &to, &Op::Ping).await;
     let e = r.err().expect("an error, not a reply");
@@ -457,6 +459,42 @@ async fn a_lan_link_whose_request_fails_gives_way_to_the_relay() {
     assert_eq!((&sent.reply["ok"], sent.path), (&json!(true), "relay"), "{}", sent.reply);
     assert_eq!(sent.fp.to_string(), fp_of(&a).await);
     out.close();
+}
+
+/// `n` addresses on `127.0.0.1` that take packets and never answer, as a LAN address does once
+/// its device has left. The sockets must be kept for the addresses to stay silent.
+fn silent_addrs(n: usize) -> (Vec<std::net::UdpSocket>, Vec<String>) {
+    let socks: Vec<_> = (0..n).map(|_| std::net::UdpSocket::bind("127.0.0.1:0").unwrap()).collect();
+    let addrs = socks.iter().map(|s| s.local_addr().unwrap().to_string()).collect();
+    (socks, addrs)
+}
+
+#[tokio::test]
+async fn silent_lan_addresses_cost_one_wait_and_the_relay_still_answers() {
+    let rig = RelayRig::start().await;
+    let (port, _echo) = echo().await;
+    let a = a_on_relay(&rig, Some(vec![])).await;
+    assert_eq!(ipc_once(&a.svc, a.home.path(), json!({"cmd":"share","ports":[port]})).await["ok"], true);
+    let (_socks, lan) = silent_addrs(3);
+
+    let dir = tempfile::tempdir().unwrap();
+    let out = outbound(dir.path());
+    let to = Target { id: &a.id, lan: &lan, known: None };
+    let began = std::time::Instant::now();
+    let sent = out.request(&Via { relay: Some(&rig.addr), key: &rig.key }, &to, &Op::Ping).await.unwrap();
+    let took = began.elapsed();
+    assert_eq!((&sent.reply["ok"], sent.path), (&json!(true), "relay"), "{}", sent.reply);
+    // The three were waited for (they are silent, not refusing), all at the same time.
+    assert!(took >= Duration::from_millis(900), "the LAN addresses were not tried: {took:?}");
+    assert!(took < Duration::from_millis(2500), "took {took:?}");
+    out.close();
+
+    // The same through a service: its `hosts` lists what A offers, not `offline`.
+    let b = a_on_relay(&rig, Some(vec![])).await;
+    let hosts = json!([{"id": a.id, "name": "a", "lan": lan}]);
+    std::fs::write(b.home.path().join("hosts.json"), hosts.to_string()).unwrap();
+    let r = ipc_once(&b.svc, b.home.path(), json!({"cmd":"hosts"})).await;
+    assert_eq!(r, json!({"ok":true,"hosts":[{"id": a.id, "name": "a", "shares": [{"port": port}]}]}));
 }
 
 // ---- the local IPC: shares, share, unshare (Task 7) ----
