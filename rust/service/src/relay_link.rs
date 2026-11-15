@@ -29,7 +29,10 @@ const BACKOFF_MAX: Duration = Duration::from_secs(10);
 /// How often a standing connection is looked at, and how long a probe waits for its answer.
 const GUARD_EVERY: Duration = Duration::from_secs(2);
 const PROBE_WAIT: Duration = Duration::from_secs(2);
-/// How long a relayed stream has to finish the TLS handshake and the hello.
+/// How long a relayed stream has to finish the TLS handshake and the hello, and since port-sharing
+/// 1b to send its first request as well (`mux` for a channel): every in-tree client writes the
+/// request right behind the hello, so it costs none of them anything. A client that waits for the
+/// welcome before it asks would have to ask within what is left of it.
 const HELLO_WAIT: Duration = Duration::from_secs(10);
 const REPLY_WAIT: Duration = Duration::from_secs(5);
 
@@ -308,7 +311,7 @@ async fn serve_relayed(state: Arc<State>, stream: Pipe, from: String, prio: Prio
         greeted.store(true, std::sync::atomic::Ordering::Relaxed);
         anyhow::Ok(pipe)
     };
-    // The first request too, inside the same wait: a channel announces itself with `mux`.
+    // The first request too, inside the same `HELLO_WAIT`: a channel announces itself with `mux`.
     let first = async {
         let mut pipe = hello.await?;
         let v = read_json(&mut pipe).await?;
