@@ -451,6 +451,30 @@ void main() {
         }
       }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 
+      testWidgets('plus menu opens up from a panel at the bottom', (tester) async {
+        big(tester);
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        await openMenu(tester);
+        expect(tester.getRect(menu).bottom, lessThanOrEqualTo(rect(tester, 'composer-plus').top));
+      });
+
+      testWidgets('plus menu opens down from a panel near the top', (tester) async {
+        big(tester);
+        es.profiles.setComposerAt('Notes', 'Notes', const InputPoint(0.5, 200));
+        rs.setProfile(es.profiles.resolve('Notes'));
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        await openMenu(tester);
+        final m = tester.getRect(menu);
+        final plus = rect(tester, 'composer-plus');
+        final host = rect(tester, 'host');
+        expect(m.top, plus.bottom + 8);
+        expect(m.right, plus.right);
+        expect(m.top, greaterThanOrEqualTo(host.top));
+        expect(m.bottom, lessThanOrEqualTo(host.bottom));
+      });
+
       testWidgets('the copy shortcut reads ⌘C on macOS', (tester) async {
         big(tester);
         await tester.pumpWidget(layer());
@@ -800,14 +824,36 @@ void main() {
 
     double top(WidgetTester tester) => tester.getTopLeft(find.byType(Picture)).dy;
 
-    testWidgets('opening lifts the picture 64 and closing puts it back; A is never resized', (tester) async {
+    Rect panelRect(WidgetTester tester) => tester.getRect(find.byKey(const Key('composer-panel')));
+    final grip = find.byKey(const Key('composer-grip'));
+
+    Future<void> openPanel(WidgetTester tester) async {
+      await tester.tap(find.byKey(const Key('composer-open')));
+      await tester.pumpAndSettle();
+    }
+
+    // One touch drag on the grip, pumping after each move.
+    Future<void> dragGrip(WidgetTester tester, List<Offset> moves) async {
+      final g = await tester.startGesture(tester.getCenter(grip));
+      for (final m in moves) {
+        await g.moveBy(m);
+        await tester.pump();
+      }
+      await g.up();
+      await tester.pump();
+      await tester.pump(kDoubleTapTimeout); // the grip also waits for a second tap
+    }
+
+    testWidgets('opening, growing and closing never move the picture; A is never resized', (tester) async {
       await showPicture(tester);
       final y0 = top(tester);
       final size0 = tester.getSize(find.byKey(const Key('stage')));
       port.calls.removeWhere((c) => c.$1 == 'resize');
-      await tester.tap(find.byKey(const Key('composer-open')));
+      await openPanel(tester);
+      expect(top(tester), y0);
+      es.currentRemote!.composer.setDraft(List.generate(10, (i) => 'line $i').join('\n'));
       await tester.pumpAndSettle();
-      expect(top(tester), y0 - pictureLift);
+      expect(top(tester), y0);
       expect(tester.getSize(find.byKey(const Key('stage'))), size0);
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
@@ -815,39 +861,7 @@ void main() {
       expect(port.calls.where((c) => c.$1 == 'resize'), isEmpty);
     });
 
-    testWidgets('growing does not move the picture further (W4)', (tester) async {
-      await showPicture(tester);
-      final y0 = top(tester);
-      await tester.tap(find.byKey(const Key('composer-open')));
-      await tester.pumpAndSettle();
-      es.currentRemote!.composer.setDraft(List.generate(10, (i) => 'line $i').join('\n'));
-      await tester.pumpAndSettle();
-      expect(top(tester), y0 - pictureLift);
-    });
-
-    testWidgets('the lift moves over at most 0.15 s', (tester) async {
-      await showPicture(tester);
-      final y0 = top(tester);
-      await tester.tap(find.byKey(const Key('composer-open')));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 75));
-      final half = y0 - top(tester);
-      expect(half, greaterThan(0));
-      expect(half, lessThan(pictureLift));
-      await tester.pump(const Duration(milliseconds: 75));
-      expect(top(tester), y0 - pictureLift);
-    });
-
-    testWidgets('reduced motion lifts in one pump', (tester) async {
-      await showPicture(tester, reduced: true);
-      final y0 = top(tester);
-      await tester.tap(find.byKey(const Key('composer-open')));
-      await tester.pump();
-      await tester.pump();
-      expect(top(tester), y0 - pictureLift);
-    });
-
-    testWidgets('a click on the lifted picture lands where it is seen', (tester) async {
+    testWidgets('a click on the picture with the panel open lands as with it closed', (tester) async {
       List<Map<String, Object?>> downs() =>
           port.calls.where((c) => c.$1 == 'mouse' && c.$2['kind'] == 'down').map((c) => c.$2).toList();
       await showPicture(tester);
@@ -857,18 +871,152 @@ void main() {
       await tester.pump();
       final plain = downs().single;
       port.calls.clear();
-      await tester.tap(find.byKey(const Key('composer-open')));
-      await tester.pumpAndSettle();
+      await openPanel(tester);
       port.calls.clear();
       final seen = tester.getCenter(find.byType(Picture));
-      expect(seen.dy, 300 - pictureLift);
+      expect(seen.dy, 300);
       final g = await tester.createGesture(kind: PointerDeviceKind.mouse);
       await g.down(seen);
       await g.up();
       await tester.pump();
-      final lifted = downs().single;
-      expect(lifted['x'], plain['x']);
-      expect(lifted['y'], plain['y']);
+      final open = downs().single;
+      expect(open['x'], plain['x']);
+      expect(open['y'], plain['y']);
+    });
+
+    testWidgets('the panel starts bottom centre, 8 up, the grip above it', (tester) async {
+      await showPicture(tester);
+      await openPanel(tester);
+      final p = panelRect(tester);
+      expect(p.bottom, 600 - 8);
+      expect(p.center.dx, 400);
+      final g = tester.getRect(grip);
+      expect(g.width, greaterThanOrEqualTo(48));
+      expect(g.height, greaterThanOrEqualTo(20));
+      expect(g.bottom, p.top);
+      expect(g.center.dx, 400);
+    });
+
+    testWidgets('dragging the grip moves the panel and saves once on release', (tester) async {
+      await showPicture(tester);
+      await openPanel(tester);
+      var saves = 0;
+      es.profiles.addListener(() => saves++);
+      final g = await tester.startGesture(tester.getCenter(grip));
+      for (final m in const [Offset(-10, -100), Offset(-5, -50), Offset(-5, -50)]) {
+        await g.moveBy(m);
+        await tester.pump();
+      }
+      expect(saves, 0);
+      expect(panelRect(tester).bottom, 392);
+      expect(panelRect(tester).center.dx, 380);
+      await g.up();
+      await tester.pump();
+      expect(saves, 1);
+      expect(es.profiles.resolve('Safari').composerAt, InputPoint.at(const Offset(380, 392), const Size(800, 600)));
+      expect(panelRect(tester).bottom, 392);
+      expect(panelRect(tester).center.dx, 380);
+      await tester.pump(kDoubleTapTimeout);
+    });
+
+    testWidgets('double-tap on the grip goes back to the default', (tester) async {
+      es.profiles.setComposerAt('Safari', 'Safari', const InputPoint(0.5, 100));
+      await showPicture(tester);
+      await openPanel(tester);
+      expect(panelRect(tester).bottom, 100);
+      expect(panelRect(tester).center.dx, 400);
+      await tester.tap(grip);
+      await tester.pump(kDoubleTapMinTime);
+      await tester.tap(grip);
+      await tester.pumpAndSettle();
+      expect(es.profiles.resolve('Safari').composerAt, isNull);
+      expect(panelRect(tester).bottom, 592);
+      expect(panelRect(tester).center.dx, 400);
+      expect(fieldFocused(tester), isTrue);
+    });
+
+    testWidgets('a drag keeps the text and the caret', (tester) async {
+      await showPicture(tester);
+      await openPanel(tester);
+      await tester.enterText(fieldFinder, 'keep');
+      await tester.pump();
+      await dragGrip(tester, const [Offset(0, -150), Offset(0, -50)]);
+      expect(panelRect(tester).bottom, 392);
+      expect(text(tester), 'keep');
+      expect(fieldFocused(tester), isTrue);
+    });
+
+    testWidgets('no dead zone past the edge', (tester) async {
+      await showPicture(tester);
+      await openPanel(tester);
+      // 720 wide on 800: the centre can go from 368 to 432.
+      await dragGrip(tester, const [Offset(2000, 0), Offset(-50, 0)]);
+      expect(panelRect(tester).center.dx, 382);
+      expect(panelRect(tester).bottom, 592);
+    });
+
+    testWidgets('a touch held still on the grip, then moved, still drags (no long-press tooltip)', (tester) async {
+      await showPicture(tester);
+      await openPanel(tester);
+      final g = await tester.startGesture(tester.getCenter(grip));
+      await tester.pump(const Duration(milliseconds: 800));
+      await g.moveBy(const Offset(0, -100));
+      await tester.pump();
+      await g.moveBy(const Offset(0, -100));
+      await tester.pump();
+      await g.up();
+      await tester.pump();
+      await tester.pump(kDoubleTapTimeout);
+      expect(panelRect(tester).bottom, 392);
+      expect(find.text('拖动；双击回到底部居中'), findsNothing);
+    });
+
+    testWidgets('a two-finger trackpad scroll over the grip does not move the panel', (tester) async {
+      await showPicture(tester);
+      await openPanel(tester);
+      var saves = 0;
+      es.profiles.addListener(() => saves++);
+      final at = tester.getCenter(grip);
+      final g = await tester.createGesture(kind: PointerDeviceKind.trackpad);
+      await g.panZoomStart(at);
+      await tester.pump();
+      await g.panZoomUpdate(at, pan: const Offset(0, -100));
+      await tester.pump();
+      await g.panZoomUpdate(at, pan: const Offset(0, -200));
+      await tester.pump();
+      await g.panZoomEnd();
+      await tester.pump();
+      await tester.pump(kDoubleTapTimeout);
+      expect(panelRect(tester).bottom, 592);
+      expect(saves, 0);
+    });
+
+    testWidgets('each app has its own place', (tester) async {
+      es.profiles.setComposerAt('Safari', 'Safari', const InputPoint(0.25, 100));
+      await showPicture(tester);
+      await openPanel(tester);
+      expect(panelRect(tester).bottom, 100);
+      await openEmbedded(tester, sid: 2, app: 'Notes');
+      port.emit(const ReadyEvent(2, 'Notes'));
+      port.emit(WindowsEvent(2, [rw(6, 800, 628)]));
+      await tester.pump();
+      await tester.pump();
+      expect(es.currentRemote!.appId, 'Notes');
+      if (find.byKey(const Key('composer-panel')).evaluate().isEmpty) await openPanel(tester);
+      expect(panelRect(tester).bottom, 592);
+      expect(panelRect(tester).center.dx, 400);
+    });
+
+    testWidgets('the panel grows upward; its bottom stays', (tester) async {
+      es.profiles.setComposerAt('Safari', 'Safari', const InputPoint(0.5, 400));
+      await showPicture(tester);
+      await openPanel(tester);
+      final before = panelRect(tester);
+      es.currentRemote!.composer.setDraft(List.generate(10, (i) => 'line $i').join('\n'));
+      await tester.pumpAndSettle();
+      final after = panelRect(tester);
+      expect(after.height, greaterThan(before.height));
+      expect(after.bottom, before.bottom);
     });
 
     testWidgets('no lift over a detached placeholder', (tester) async {

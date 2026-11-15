@@ -100,7 +100,19 @@ class _ComposerPlusState extends State<ComposerPlus> {
     if (_sticky != 0) setState(() => _sticky = 0);
   }
 
-  void _toggle() => _portal.isShowing ? _close() : _portal.show();
+  /// The menu opens below 「＋」 when the button sits in the upper half of the overlay (a panel moved up
+  /// there, floating-composer spec), else above it. Decided once, at open.
+  bool _down = false;
+
+  void _toggle() {
+    if (_portal.isShowing) return _close();
+    final box = context.findRenderObject();
+    final overlay = Overlay.maybeOf(context)?.context.findRenderObject();
+    if (box is RenderBox && overlay is RenderBox && box.hasSize) {
+      _down = box.localToGlobal(Offset.zero, ancestor: overlay).dy < overlay.size.height / 2;
+    }
+    _portal.show();
+  }
 
   void _openHistory() {
     _close();
@@ -215,9 +227,9 @@ class _ComposerPlusState extends State<ComposerPlus> {
       alignment: Alignment.topLeft,
       child: CompositedTransformFollower(
         link: _link,
-        targetAnchor: Alignment.topRight,
-        followerAnchor: Alignment.bottomRight,
-        offset: const Offset(0, -8),
+        targetAnchor: _down ? Alignment.bottomRight : Alignment.topRight,
+        followerAnchor: _down ? Alignment.topRight : Alignment.bottomRight,
+        offset: Offset(0, _down ? 8 : -8),
         child: TapRegion(
           groupId: _group,
           child: Listener(
