@@ -1021,3 +1021,24 @@ async fn new_session_without_a_command_runs_the_shell() {
     let name = shell.rsplit('/').next().unwrap().to_string();
     assert!(cmd.trim().trim_start_matches('-') == name || cmd.trim() == "sh", "{cmd} vs {shell}");
 }
+
+#[tokio::test]
+async fn new_window_opens_in_the_named_panes_directory_not_the_active_one() {
+    let Some(s) = common::Server::start() else { return };
+    let dir = std::env::temp_dir().join(format!("rapp-nw2-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("a b")).unwrap();
+    std::fs::create_dir_all(dir.join("b")).unwrap();
+    let a = std::fs::canonicalize(dir.join("a b")).unwrap();
+    let b = std::fs::canonicalize(dir.join("b")).unwrap();
+    s.raw(&["new-session", "-d", "-s", "sp", "-x", "80", "-y", "24", "-c", a.to_str().unwrap(), "cat"]);
+    let pane_a = s.raw(&["display-message", "-p", "-t", "sp", "#{pane_id}"]).trim().to_string();
+    s.raw(&["split-window", "-d", "-t", &pane_a, "-c", b.to_str().unwrap(), "cat"]);
+    s.raw(&["select-pane", "-t", "sp.1"]);
+    common::settle().await;
+    let made = s.tmux().new_window(&pane_a).await.unwrap();
+    let path = s.raw(&["display-message", "-p", "-t", &made, "#{pane_current_path}"]);
+    assert_eq!(path.trim(), a.to_str().unwrap());
+    // A pane that is not there cannot open a window.
+    assert!(s.tmux().new_window("%999").await.is_err());
+    let _ = std::fs::remove_dir_all(&dir);
+}

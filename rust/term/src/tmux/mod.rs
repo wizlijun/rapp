@@ -125,9 +125,9 @@ impl Tmux {
     /// Open a window after the one `pane` is in (see `cmd::new_window`); the new pane's id.
     pub async fn new_window(&self, pane: &str) -> anyhow::Result<String> {
         let window = self.run(&cmd::window_of(pane)).await?;
-        let window = window.trim();
+        let (window, dir) = window.trim_end_matches('\n').split_once('\t').unwrap_or_default();
         anyhow::ensure!(window.starts_with('@'), "no window id");
-        let out = self.run(&cmd::new_window(window)).await?;
+        let out = self.run(&cmd::new_window(window, dir)).await?;
         let id = out.trim().to_string();
         anyhow::ensure!(id.starts_with('%'), "no pane id");
         Ok(id)

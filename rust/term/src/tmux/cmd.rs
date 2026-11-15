@@ -104,17 +104,15 @@ pub fn delete_buffer(name: &str) -> Vec<String> {
     ["delete-buffer", "-b", name].map(String::from).to_vec()
 }
 
-/// The id of the window `pane` is in.
+/// The id of the window `pane` is in and the pane's own directory, tab separated.
 pub fn window_of(pane: &str) -> Vec<String> {
-    ["display-message", "-p", "-t", pane, "#{window_id}"].map(String::from).to_vec()
+    ["display-message", "-p", "-t", pane, "#{window_id}\t#{pane_current_path}"].map(String::from).to_vec()
 }
 
-/// A window made just after `window` (`new-window -t` takes no pane), in the directory of that window's current pane,
-/// not made current; prints its pane id. `-c` is expanded by tmux.
-pub fn new_window(window: &str) -> Vec<String> {
-    ["new-window", "-d", "-a", "-t", window, "-c", "#{pane_current_path}", "-P", "-F", "#{pane_id}"]
-        .map(String::from)
-        .to_vec()
+/// A window made just after `window` (`new-window -t` takes no pane), starting in `dir`, not made current; prints
+/// its pane id.
+pub fn new_window(window: &str, dir: &str) -> Vec<String> {
+    ["new-window", "-d", "-a", "-t", window, "-c", dir, "-P", "-F", "#{pane_id}"].map(String::from).to_vec()
 }
 
 /// A control-mode client of the session `session_id`.
@@ -183,10 +181,10 @@ mod tests {
         assert_eq!(load_buffer("rapp-1-0"), ["load-buffer", "-b", "rapp-1-0", "-"]);
         assert_eq!(paste_buffer("rapp-1-0", "%1"), ["paste-buffer", "-p", "-d", "-b", "rapp-1-0", "-t", "%1"]);
         assert_eq!(delete_buffer("rapp-1-0"), ["delete-buffer", "-b", "rapp-1-0"]);
-        assert_eq!(window_of("%3"), ["display-message", "-p", "-t", "%3", "#{window_id}"]);
+        assert_eq!(window_of("%3")[4], "#{window_id}\t#{pane_current_path}");
         assert_eq!(
-            new_window("@2"),
-            ["new-window", "-d", "-a", "-t", "@2", "-c", "#{pane_current_path}", "-P", "-F", "#{pane_id}"]
+            new_window("@2", "/a b"),
+            ["new-window", "-d", "-a", "-t", "@2", "-c", "/a b", "-P", "-F", "#{pane_id}"]
         );
     }
     #[test]
