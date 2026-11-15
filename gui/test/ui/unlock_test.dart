@@ -110,12 +110,6 @@ void main() {
         e.port.emit(ScreenLockedEvent(sid, true));
         a.flushMicrotasks();
         expect(e.calls('unlock'), hasLength(1));
-        e.port.emit(DisconnectedEvent(sid, 'connection closed'));
-        e.state.reconnect('111/desktop:');
-        a.flushMicrotasks();
-        e.port.emit(ScreenLockedEvent(e.sid('desktop:'), true));
-        a.flushMicrotasks();
-        expect(e.calls('unlock'), hasLength(2));
       });
       env((a, e, store) {
         final sid = e.sid('desktop:');
@@ -126,6 +120,149 @@ void main() {
       });
     },
   );
+
+  test('one unlock per device across sessions', () {
+    env((a, e, store) {
+      e.state.openOrSwitch('111', 'app', 'App');
+      a.flushMicrotasks();
+      final appSid = e.sid('app');
+      e.port.emit(ScreenLockedEvent(appSid, true));
+      a.flushMicrotasks();
+      e.port.emit(ScreenLockedEvent(e.sid('desktop:'), true));
+      a.flushMicrotasks();
+      expect(e.calls('unlock').single, {'sid': appSid, 'password': 'secret'});
+      e.port.emit(ScreenLockedEvent(appSid, false));
+      e.state.openOrSwitch('111', 'app2', 'App2');
+      a.flushMicrotasks();
+      e.port.emit(ScreenLockedEvent(e.sid('app2'), true));
+      a.flushMicrotasks();
+      expect(e.calls('unlock'), hasLength(2));
+    });
+  });
+
+  test('no saved password asks only for the current session', () {
+    env((a, e, store) {
+      store.credential = null;
+      final asks = <String>[];
+      e.state.unlockAsks.listen(asks.add);
+      e.state.openOrSwitch('111', 'app', 'App');
+      a.flushMicrotasks();
+      e.port.emit(ScreenLockedEvent(e.sid('app'), true));
+      a.flushMicrotasks();
+      expect(asks, ['111']);
+      e.port.emit(ScreenLockedEvent(e.sid('desktop:'), true));
+      a.flushMicrotasks();
+      expect(asks, ['111']);
+      expect(e.calls('unlock'), isEmpty);
+    });
+  });
+
+  test('manual lock survives reconnect', () {
+    env((a, e, store) {
+      final asks = <String>[];
+      e.state.unlockAsks.listen(asks.add);
+      final sid = e.sid('desktop:');
+      e.port.emit(ScreenLockedEvent(sid, false));
+      e.port.emit(ScreenLockedEvent(sid, true));
+      a.flushMicrotasks();
+      expect(e.calls('unlock'), isEmpty);
+      e.port.emit(DisconnectedEvent(sid, 'connection closed'));
+      e.state.reconnect('111/desktop:');
+      a.flushMicrotasks();
+      e.port.emit(ScreenLockedEvent(e.sid('desktop:'), true));
+      a.flushMicrotasks();
+      expect(e.calls('unlock'), isEmpty);
+      expect(asks, isEmpty);
+      e.port.emit(ScreenLockedEvent(e.sid('desktop:'), false));
+      e.port.emit(DisconnectedEvent(e.sid('desktop:'), 'connection closed'));
+      e.state.reconnect('111/desktop:');
+      a.flushMicrotasks();
+      e.port.emit(ScreenLockedEvent(e.sid('desktop:'), true));
+      a.flushMicrotasks();
+      expect(e.calls('unlock'), hasLength(1));
+    });
+  });
+
+  test('reconnect without a manual lock unlocks again', () {
+    env((a, e, store) {
+      final sid = e.sid('desktop:');
+      e.port.emit(ScreenLockedEvent(sid, true));
+      a.flushMicrotasks();
+      expect(e.calls('unlock'), hasLength(1));
+      e.port.emit(DisconnectedEvent(sid, 'connection closed'));
+      e.state.reconnect('111/desktop:');
+      a.flushMicrotasks();
+      e.port.emit(ScreenLockedEvent(e.sid('desktop:'), true));
+      a.flushMicrotasks();
+      expect(e.calls('unlock'), hasLength(2));
+    });
+  });
+
+  test('auto failure turns auto off and asks once', () {
+    env((a, e, store) {
+      final asks = <String>[];
+      e.state.unlockAsks.listen(asks.add);
+      e.state.openOrSwitch('111', 'app', 'App');
+      a.flushMicrotasks();
+      e.port.emit(ScreenLockedEvent(e.sid('app'), true));
+      a.flushMicrotasks();
+      expect(e.calls('unlock'), hasLength(1));
+      a.elapse(const Duration(seconds: 5));
+      a.flushMicrotasks();
+      expect(e.state.hint, '密码可能不对');
+      expect(store.credential!.password, 'secret');
+      expect(store.credential!.auto, false);
+      expect(asks, ['111']);
+      e.port.emit(ScreenLockedEvent(e.sid('app'), false));
+      e.state.openOrSwitch('111', 'app2', 'App2');
+      a.flushMicrotasks();
+      e.port.emit(ScreenLockedEvent(e.sid('app2'), true));
+      a.flushMicrotasks();
+      expect(e.calls('unlock'), hasLength(1));
+      expect(asks, ['111', '111']);
+    });
+  });
+
+  test('terminals and secondary screens never trigger', () {
+    env((a, e, store) {
+      e.port.emit(ScreenLockedEvent(e.sid('desktop:22'), true));
+      a.flushMicrotasks();
+      expect(e.calls('unlock'), isEmpty);
+    });
+  });
+
+  test('unlock picks the session by device', () {
+    env((a, e, store) {
+      store.credential = null;
+      e.state.openOrSwitch('111', 'app', 'App');
+      a.flushMicrotasks();
+      final appSid = e.sid('app');
+      e.port.emit(ScreenLockedEvent(appSid, true));
+      a.flushMicrotasks();
+      e.state.unlock('111', 'x', remember: false, auto: false);
+      a.flushMicrotasks();
+      expect(e.calls('unlock').single['sid'], appSid);
+      for (final k in ['111/app', '111/desktop:']) {
+        e.state.select(k);
+        e.state.endCurrent();
+      }
+      a.flushMicrotasks();
+      e.state.unlock('111', 'x', remember: false, auto: false);
+      a.flushMicrotasks();
+      expect(e.state.hint, '请先打开这台电脑上的 app 或桌面');
+    });
+  });
+
+  test('lock banner asks for the password on app sessions', () {
+    env((a, e, store) {
+      store.credential = null;
+      e.state.openOrSwitch('111', 'app', 'App');
+      a.flushMicrotasks();
+      e.port.emit(ScreenLockedEvent(e.sid('app'), true));
+      final b = e.state.lockBanner!;
+      expect((b.text, b.action), ('远程电脑已锁屏；输入系统密码解锁', '输入系统密码'));
+    });
+  });
 
   test(
     'pending Keychain read never unlocks a later lock or ended connection',
