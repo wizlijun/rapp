@@ -258,8 +258,10 @@ async fn outbound_goes_through_the_relay_when_there_is_no_address() {
     assert_eq!(sent.reply["ok"], true, "{}", sent.reply);
     assert_eq!(sent.path, "relay");
     assert_eq!(sent.fp.to_string(), fp_of(&a).await);
-    // The relay writes a stream down when it ends.
+    // The relay writes a stream down when it ends; the request went on a channel, which ends
+    // when it is closed.
     drop(sent);
+    out.close();
     let deadline = tokio::time::Instant::now() + WAIT;
     while rig.streams() == before {
         assert!(tokio::time::Instant::now() < deadline, "nothing went through the relay");
@@ -858,8 +860,10 @@ async fn pipe_over_the_relay() {
     let mut got = [0u8; 5];
     tokio::time::timeout(WAIT, tcp.read_exact(&mut got)).await.unwrap().unwrap();
     assert_eq!(&got, b"hello");
-    // The relay writes a stream down when it ends.
+    // The relay writes a stream down when it ends; the forward went on B's channel to A, which
+    // ends when B stops.
     drop(tcp);
+    t.b.svc.stop();
     streams_grow(&t.rig, before).await;
 }
 
@@ -898,7 +902,9 @@ async fn the_relay_saw_nothing_it_could_read() {
     let marker = b"rapp-marker:7f3c9e21a4b8d056e1f2";
     assert_eq!(marker.len(), 32);
     assert_eq!(echo_through(tcp, marker).await, marker);
-    // `streams` flushes the audit, so what the relay keeps is on disk once it has grown.
+    // B's channel to A ends when B stops; `streams` flushes the audit, so what the relay keeps
+    // is on disk once it has grown.
+    t.b.svc.stop();
     streams_grow(&t.rig, before).await;
     let files = files_under(t.rig.data.path());
     assert!(!files.is_empty());
@@ -1309,4 +1315,152 @@ async fn hello_then_close_logs_one_trust_line() {
     let trust: Vec<Value> = log_events(a.home.path()).into_iter().filter(|v| v["ev"] == "trust").collect();
     assert_eq!(trust.len(), 1, "{trust:?}");
     assert_ne!(trust[0]["result"], "refused", "{trust:?}");
+}
+
+// ---- one channel per device pair, the visiting side (port-sharing 1b, Task 5) ----
+
+/// Writes "hi" on `tcp` and reads the echo back.
+async fn say_hi(tcp: &mut tokio::net::TcpStream) {
+    tcp.write_all(b"hi").await.unwrap();
+    let mut got = [0u8; 2];
+    tokio::time::timeout(WAIT, tcp.read_exact(&mut got)).await.expect("the echo comes in time").unwrap();
+    assert_eq!(&got, b"hi");
+}
+
+/// How many `ev` lines the service in `home` has logged, counting the `repeat` lines the log
+/// writes in place of the same line again.
+fn count(home: &Path, ev: &str) -> usize {
+    let (mut n, mut last) = (0, String::new());
+    for v in log_events(home) {
+        match v["ev"].as_str().unwrap_or("") {
+            "repeat" if last == ev => n += v["repeat"].as_u64().unwrap_or(0) as usize,
+            "repeat" => {}
+            e => {
+                n += usize::from(e == ev);
+                last = e.to_string();
+            }
+        }
+    }
+    n
+}
+
+#[tokio::test]
+async fn forwards_share_one_channel() {
+    let t = over_relay().await;
+    for _ in 0..3 {
+        let (r, mut tcp) = t.pipe().await;
+        assert_eq!(r, json!({"ok":true,"path":"relay"}));
+        say_hi(&mut tcp).await;
+    }
+    let home = t.a.home.path();
+    assert_eq!((count(home, "channel"), count(home, "trust")), (1, 1), "{:?}", log_events(home));
+}
+
+#[tokio::test]
+async fn fifty_at_once_share_one_channel() {
+    // The relay's default limits: 32 relayed streams per device, 60 connects a minute.
+    let t = over_relay().await;
+    let (ipc_port, token, to, port) = (t.b.svc.ipc_port, token_of(t.b.home.path()), format!("{}.rapp", t.a.id), t.port);
+    let pipes: Vec<_> = (0..50)
+        .map(|_| {
+            let (token, to) = (token.clone(), to.clone());
+            tokio::spawn(async move {
+                let (r, mut tcp) = pipe(ipc_port, &token, &to, port).await;
+                assert_eq!(r, json!({"ok":true,"path":"relay"}));
+                say_hi(&mut tcp).await;
+                tcp
+            })
+        })
+        .collect();
+    let mut open = Vec::new();
+    for p in pipes {
+        open.push(p.await.unwrap());
+    }
+    let home = t.a.home.path();
+    assert_eq!(count(home, "channel"), 1, "{:?}", log_events(home));
+    t.rig.relay.as_ref().unwrap().audit().flush();
+    let relayed = rapp_relay::audit::read(t.rig.data.path(), None, None, Some("relayed")).unwrap_or_default();
+    assert!(!relayed.iter().any(|v| v["result"] == "limit"), "{relayed:?}");
+}
+
+#[tokio::test]
+async fn half_close_survives_the_channel() {
+    let t = over_relay().await;
+    let (r, mut tcp) = t.pipe().await;
+    assert_eq!(r, json!({"ok":true,"path":"relay"}));
+    say_hi(&mut tcp).await;
+    // The second one goes on the channel the first has built.
+    let (r, tcp) = t.pipe().await;
+    assert_eq!(r, json!({"ok":true,"path":"relay"}));
+    let sent: Vec<u8> = (0..1 << 20).map(|i| (i % 251) as u8).collect();
+    let got = echo_through(tcp, &sent).await;
+    assert_eq!(got.len(), 1 << 20);
+    assert!(got == sent, "the echo differs from what was sent");
+    assert_eq!(count(t.a.home.path(), "channel"), 1);
+}
+
+#[tokio::test]
+async fn unshare_cuts_only_that_port() {
+    let (p1, _e1) = echo().await;
+    let (p2, _e2) = echo().await;
+    let rig = RelayRig::start().await;
+    let a = a_on_relay(&rig, Some(vec![])).await;
+    assert_eq!(ipc_once(&a.svc, a.home.path(), json!({"cmd":"share","ports":[p1, p2]})).await["ok"], true);
+    let b = a_on_relay(&rig, Some(vec![])).await;
+    let (token, to) = (token_of(b.home.path()), format!("{}.rapp", a.id));
+    let (r, mut one) = pipe(b.svc.ipc_port, &token, &to, p1).await;
+    assert_eq!(r, json!({"ok":true,"path":"relay"}));
+    say_hi(&mut one).await;
+    let (r, mut two) = pipe(b.svc.ipc_port, &token, &to, p2).await;
+    assert_eq!(r, json!({"ok":true,"path":"relay"}));
+    say_hi(&mut two).await;
+    assert_eq!(count(a.home.path(), "channel"), 1, "{:?}", log_events(a.home.path()));
+    let r = ipc_once(&a.svc, a.home.path(), json!({"cmd":"unshare","port":p1})).await;
+    assert_eq!(r, json!({"ok":true,"was":true}));
+    let mut buf = [0u8; 16];
+    let read = tokio::time::timeout(WAIT, one.read(&mut buf)).await.expect("p1 is cut in time");
+    assert!(matches!(read, Ok(0) | Err(_)), "{read:?}");
+    // p2's forward on the same channel goes on, and p2 still opens new ones.
+    say_hi(&mut two).await;
+    let (r, mut three) = pipe(b.svc.ipc_port, &token, &to, p2).await;
+    assert_eq!(r, json!({"ok":true,"path":"relay"}));
+    say_hi(&mut three).await;
+    assert_eq!(count(a.home.path(), "channel"), 1);
+}
+
+#[tokio::test]
+async fn an_old_sharer_falls_back_once() {
+    let (port, _echo) = echo().await;
+    let rig = RelayRig::start().await;
+    let a = service_on_relay_with(&rig.addr, &rig.key, Some(vec![]), |o| o.channels = false).await;
+    wait_status(&mut Ipc::open(&a.svc, a.home.path()).await, |s| s["relay"] == "connected").await;
+    assert_eq!(ipc_once(&a.svc, a.home.path(), json!({"cmd":"share","ports":[port]})).await["ok"], true);
+    let b = a_on_relay(&rig, Some(vec![])).await;
+    let (token, to) = (token_of(b.home.path()), format!("{}.rapp", a.id));
+    for _ in 0..2 {
+        let (r, mut tcp) = pipe(b.svc.ipc_port, &token, &to, port).await;
+        assert_eq!(r, json!({"ok":true,"path":"relay"}));
+        say_hi(&mut tcp).await;
+    }
+    // One try of a channel, then one stream for each forward.
+    let home = a.home.path();
+    assert_eq!((count(home, "trust"), count(home, "channel")), (3, 0), "{:?}", log_events(home));
+}
+
+#[tokio::test]
+async fn a_dead_channel_is_rebuilt() {
+    let mut t = over_relay().await;
+    let (r, mut tcp) = t.pipe().await;
+    assert_eq!(r, json!({"ok":true,"path":"relay"}));
+    say_hi(&mut tcp).await;
+    t.rig.restart().await;
+    for s in [&t.a, &t.b] {
+        wait_status(&mut Ipc::open(&s.svc, s.home.path()).await, |st| st["relay"] == "connected").await;
+    }
+    let (r, mut tcp) = t.pipe().await;
+    assert_eq!(r, json!({"ok":true,"path":"relay"}));
+    say_hi(&mut tcp).await;
+    let home = t.a.home.path();
+    wait_log(home, "channel_end", |_| true).await;
+    assert_eq!(count(home, "channel"), 2, "{:?}", log_events(home));
 }
