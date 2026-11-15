@@ -1,6 +1,7 @@
 //! The first line on a device connection: who is asking, and the proof that both hold the same key.
 
 use anyhow::{bail, Result};
+use tokio::io::AsyncRead;
 use rapp_net::line::{check as reply_ok, err, ok, read_json, write_json};
 use rapp_wire::{Fp, Key};
 use serde_json::{json, Value};
@@ -40,8 +41,8 @@ pub async fn send_hello(s: &mut Pipe, f: &Facts, me: &Me<'_>) -> Result<()> {
 }
 
 /// B reads A's reply to the hello.
-pub async fn read_welcome(
-    s: &mut Pipe,
+pub async fn read_welcome<R: AsyncRead + Unpin>(
+    s: &mut R,
     f: &Facts,
     key: Option<&Key>,
     want_id: &str,

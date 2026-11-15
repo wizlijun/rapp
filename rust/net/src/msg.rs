@@ -50,6 +50,8 @@ pub enum Op {
     ListShares,
     /// Open a TCP forward to one of the ports this device shares with the caller.
     Forward { port: u16 },
+    /// Turn this connection into a multiplexed channel carrying many streams.
+    Mux,
     /// This device's whole share table (for a device that is allowed to set it).
     Shares,
     /// Share `ports`. `ports` and `allow` stay raw JSON: a bad one is answered "bad port" by sharing.rs, not "unknown op".
@@ -80,6 +82,12 @@ mod tests {
         assert_eq!(serde_json::to_value(Op::Ping).unwrap(), json!({"op":"ping"}));
         let op: Op = serde_json::from_value(json!({"op":"auth","password":"p"})).unwrap();
         assert_eq!(op, Op::Auth { password: Some("p".into()), name: None });
+    }
+
+    #[test]
+    fn mux_op() {
+        assert_eq!(serde_json::to_value(Op::Mux).unwrap(), json!({"op":"mux"}));
+        assert_eq!(serde_json::from_value::<Op>(json!({"op":"mux"})).unwrap(), Op::Mux);
     }
 
     #[test]
