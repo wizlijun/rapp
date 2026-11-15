@@ -28,7 +28,7 @@ class ShareRow {
   final bool web;
   final bool listening;
 
-  /// Set from this computer (not by another device).
+  /// This computer may use the share: its allow list is empty or names this device.
   final bool mine;
 
   static ShareRow fromJson(Map<String, dynamic> m) => ShareRow(
