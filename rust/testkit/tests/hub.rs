@@ -665,6 +665,7 @@ impl LanA {
                 home: self.home.path().to_path_buf(),
                 bin_dir: Some(self.bins.path().to_path_buf()),
                 gui: None,
+                lock_grace: Duration::from_secs(1),
                 worker_idle: Duration::from_secs(60),
                 log_dir: self.home.path().join("logs"),
                 runner: std::sync::Arc::new(rapp_update::fake::FakeRunner::new()),

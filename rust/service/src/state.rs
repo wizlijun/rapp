@@ -95,6 +95,11 @@ pub struct State {
 }
 
 impl State {
+    /// Viewing sessions that keep A unlocked (see `autolock::counted`).
+    pub fn counted_sessions(&self) -> usize {
+        self.sessions.lock().unwrap().1.values().filter(|s| crate::autolock::counted(&s.app, s.side)).count()
+    }
+
     pub fn notify(&self) {
         self.changed.send_modify(|n| *n += 1);
     }
@@ -227,7 +232,7 @@ impl State {
             "permissions_lost_after_update": *self.perms_lost.lock().unwrap(), "sessions": sessions,
             "log_dir": self.log_dir, "update": crate::update::status_json(self),
             "relay_addr": cfg.relay, "has_key": has_key, "relay": relay, "relay_error": relay_error,
-            "fp": self.identity.fp.to_string(),
+            "fp": self.identity.fp.to_string(), "auto_lock": cfg.auto_lock(),
         })
     }
 }

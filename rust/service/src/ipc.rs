@@ -99,6 +99,10 @@ fn handle(state: &State, cmd: &Value) -> Value {
             let limit = cmd["limit"].as_u64().unwrap_or(HISTORY_DEFAULT).min(HISTORY_MAX) as usize;
             ok(json!({"events": read_recent(&state.log_dir, crate::LOG_FILE, in_history, limit)}))
         }
+        "set_auto_lock" => match cmd["on"].as_bool() {
+            Some(on) => update(state, |c| c.auto_lock = Some(on)),
+            None => err("on required"),
+        },
         _ => err("unknown cmd"),
     }
 }
@@ -110,7 +114,7 @@ const HISTORY_MAX: u64 = 500;
 /// connections, nor the hub's background `watch_terms` (polled like `ping`, not a user action).
 fn in_history(v: &Value) -> bool {
     let shown = match v["ev"].as_str() {
-        Some("session_start" | "session_end" | "term_inputs" | "auth_fail" | "rejected" | "input_blocked" | "unlock") => true,
+        Some("session_start" | "session_end" | "term_inputs" | "auth_fail" | "rejected" | "input_blocked" | "unlock" | "auto_lock" | "auto_lock_failed") => true,
         Some("request") => v["result"] != "ok" && v["op"] != "watch_terms",
         _ => false,
     };

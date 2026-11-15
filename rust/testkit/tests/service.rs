@@ -757,6 +757,7 @@ async fn service_with_a_data_dir_commits_its_device_json() {
         home: home.clone(),
         bin_dir: Some(bins.path().to_path_buf()),
         gui: None,
+        lock_grace: Duration::from_secs(1),
         worker_idle: Duration::from_secs(60),
         log_dir: dir.path().join("logs"),
         runner: std::sync::Arc::new(rapp_update::fake::FakeRunner::new()),
@@ -1092,4 +1093,112 @@ async fn relay_secrets_not_logged() {
             assert!(!log.contains(&secret), "service.log has a secret of the key");
         }
     }
+}
+
+// ---- auto-lock (grace is 1 s in tests) ----
+
+fn lock_lines(bins: &std::path::Path) -> usize {
+    std::fs::read_to_string(bins.join("lock.log")).map(|t| t.lines().count()).unwrap_or(0)
+}
+
+/// Ends a session from B's side and waits until A has logged `n` session ends in all.
+async fn close_app(home: &std::path::Path, mut s: rapp_net::quic::BiStream, n: usize) {
+    s.writer_mut().finish().unwrap();
+    drop(s);
+    wait_until("session_end", || log_events(home).iter().filter(|v| v["ev"] == "session_end").count() >= n).await;
+}
+
+async fn no_lock_for_a_while(bins: &std::path::Path, home: &std::path::Path) {
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    assert_eq!(lock_lines(bins), 0, "{:?}", log_events(home));
+}
+
+#[tokio::test]
+async fn auto_lock_after_last_app_closes() {
+    let a = service().await;
+    let (home, ep) = (a.home.path(), b_endpoint());
+    let b = b_named(&ep, &a, "b-one").await;
+    let s = open_app(&b, "com.example.echo").await;
+    close_app(home, s, 1).await;
+    wait_log(home, "auto_lock", |_| true).await;
+    assert_eq!(lock_lines(a.bins.path()), 1);
+    let h = ipc_once(&a.svc, home, json!({"cmd":"history"})).await;
+    assert!(h["events"].as_array().unwrap().iter().any(|e| e["ev"] == "auto_lock"), "{h}");
+}
+
+#[tokio::test]
+async fn reopen_within_grace_does_not_lock() {
+    let a = service().await;
+    let (home, ep) = (a.home.path(), b_endpoint());
+    let b = b_named(&ep, &a, "b-one").await;
+    let s = open_app(&b, "com.example.echo").await;
+    close_app(home, s, 1).await;
+    let s2 = open_app(&b, "com.example.echo").await;
+    no_lock_for_a_while(a.bins.path(), home).await;
+    close_app(home, s2, 2).await;
+    wait_log(home, "auto_lock", |_| true).await;
+    assert_eq!(lock_lines(a.bins.path()), 1);
+}
+
+#[tokio::test]
+async fn two_devices_lock_only_when_both_closed() {
+    let a = service().await;
+    let (home, ep) = (a.home.path(), b_endpoint());
+    let (one, two) = (b_named(&ep, &a, "b-one").await, b_named(&ep, &a, "b-two").await);
+    let s1 = open_app(&one, "com.example.echo").await;
+    let s2 = open_app(&two, "com.apple.Safari").await;
+    close_app(home, s2, 1).await;
+    no_lock_for_a_while(a.bins.path(), home).await;
+    close_app(home, s1, 2).await;
+    wait_log(home, "auto_lock", |_| true).await;
+    assert_eq!(lock_lines(a.bins.path()), 1);
+}
+
+#[tokio::test]
+async fn switch_off_and_toggle_during_grace() {
+    let a = service().await;
+    let (home, ep) = (a.home.path(), b_endpoint());
+    let st = ipc_once(&a.svc, home, json!({"cmd":"status"})).await;
+    assert_eq!(st["auto_lock"], true, "{st}");
+    let b = b_named(&ep, &a, "b-one").await;
+    let s = open_app(&b, "com.example.echo").await;
+    close_app(home, s, 1).await;
+    let r = ipc_once(&a.svc, home, json!({"cmd":"set_auto_lock","on":false})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    no_lock_for_a_while(a.bins.path(), home).await;
+    let st = ipc_once(&a.svc, home, json!({"cmd":"status"})).await;
+    assert_eq!(st["auto_lock"], false, "{st}");
+    let s = open_app(&b, "com.example.echo").await;
+    close_app(home, s, 2).await;
+    no_lock_for_a_while(a.bins.path(), home).await;
+    let r = ipc_once(&a.svc, home, json!({"cmd":"set_auto_lock"})).await;
+    assert_eq!((&r["ok"], &r["error"]), (&json!(false), &json!("on required")), "{r}");
+}
+
+#[tokio::test]
+async fn no_lock_at_start() {
+    let a = service().await;
+    no_lock_for_a_while(a.bins.path(), a.home.path()).await;
+}
+
+#[tokio::test]
+async fn lock_failure_is_recorded() {
+    let a = service().await;
+    let (home, ep) = (a.home.path(), b_endpoint());
+    let b = b_named(&ep, &a, "b-one").await;
+    std::fs::write(a.bins.path().join("lock-fail"), "").unwrap();
+    let s = open_app(&b, "com.example.echo").await;
+    close_app(home, s, 1).await;
+    wait_log(home, "auto_lock_failed", |v| v["error"] == "forced").await;
+    let h = ipc_once(&a.svc, home, json!({"cmd":"history"})).await;
+    assert!(h["events"].as_array().unwrap().iter().any(|e| e["ev"] == "auto_lock_failed"), "{h}");
+
+    std::fs::remove_file(a.bins.path().join("lock-fail")).unwrap();
+    std::fs::write(a.bins.path().join("already-locked"), "").unwrap();
+    let before = lock_lines(a.bins.path());
+    let s = open_app(&b, "com.example.echo").await;
+    close_app(home, s, 2).await;
+    wait_until("another lock call", || lock_lines(a.bins.path()) > before).await;
+    tokio::time::sleep(Duration::from_millis(2500)).await;
+    assert!(!log_events(home).iter().any(|v| v["ev"] == "auto_lock"), "{:?}", log_events(home));
 }
