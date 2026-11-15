@@ -1695,18 +1695,31 @@ class MainState extends ChangeNotifier {
   Future<void> openOrSwitch(String id, String app, String appName) =>
       app == termsEntry ? _openTerms(id) : _open(id, app, appName);
 
-  /// The 终端 entry: what it opens follows the device's 打开方式 (spec §2.2).
-  Future<void> _openTerms(String id) async {
+  /// What the 终端 entry on [id] opens now: it follows the device's 打开方式 (spec §2.2).
+  TermsTarget _termsTargetOf(String id) => termsTarget(
+      mode: prefs.termOpenFor(id),
+      list: hub?.termLists[id] ?? TermList(id),
+      apps: probes[id]?.apps?.apps ?? const []);
+
+  /// The key of the session [m] opens; null for a 终端 entry that asks for a new text terminal.
+  String? _openedKey(Member m) {
+    if (m.app.bundle != termsEntry) return m.key;
+    final id = m.app.device;
+    return switch (_termsTargetOf(id)) {
+      OpenTerm(:final app) => '$id/$app',
+      OpenPixels(:final bundle) => '$id/$bundle',
+      AskNewText() => null,
+    };
+  }
+
+  /// The 终端 entry; [select] and [quiet] as for [_open].
+  Future<void> _openTerms(String id, {bool select = true, bool quiet = false}) async {
     if (!hubUsable) return;
-    final target = termsTarget(
-        mode: prefs.termOpenFor(id),
-        list: hub!.termLists[id] ?? TermList(id),
-        apps: probes[id]?.apps?.apps ?? const []);
-    switch (target) {
+    switch (_termsTargetOf(id)) {
       case OpenTerm(:final app, :final name):
-        return _open(id, app, name);
+        return _open(id, app, name, select: select, quiet: quiet);
       case OpenPixels(:final bundle, :final name):
-        return _open(id, bundle, name);
+        return _open(id, bundle, name, select: select, quiet: quiet);
       case AskNewText():
         _newTextAsks.add(id);
     }
@@ -2740,14 +2753,18 @@ class MainState extends ChangeNotifier {
     if (!hubUsable || p == null) return;
     if (currentProject != projectId) switchProject(projectId);
     final plan = planOpenAll(p, lampOf: (k) => entryFor(k)?.lamp, offline: deviceOffline);
+    // Before the opens: the 终端 entry's key is the session it opens, which they may change.
+    final first = p.members.where((m) => m.key == plan.first).map(_openedKey).firstOrNull;
     for (final m in plan.open) {
       // Not awaited: each open has its record or pending entry before its first await, so a
-      // second 「全部打开」 right after sees them connecting.
-      unawaited(_open(m.app.device, m.app.bundle, m.app.name, select: false, quiet: true));
+      // second 「全部打开」 right after sees them connecting. The 终端 entry opens what tapping it opens.
+      unawaited(m.app.bundle == termsEntry
+          ? _openTerms(m.app.device, select: false, quiet: true)
+          : _open(m.app.device, m.app.bundle, m.app.name, select: false, quiet: true));
     }
     hint = openAllHint(p, plan, deviceName);
-    if (plan.first != null) {
-      currentKey = plan.first;
+    if (first != null) {
+      currentKey = first;
       panel = null;
       overview = false;
     }

@@ -4865,6 +4865,19 @@ void main() {
       expect((p.termOpenFor('111'), p.termOpenFor('222')), ('pixels', 'text'));
     });
 
+    test('open all opens a terms: member the way tapping it does', () async {
+      await termsOf([ptyRow('a', 5), ptyRow('b', 7)]);
+      final p = s.createProject('写周报')!;
+      s.addMember(p.id, const AppRef('111', 'terms:', '终端'));
+      s.openAll(p.id);
+      await pump();
+      final apps = t.sent.where((m) => m['cmd'] == 'open').map((m) => m['app']);
+      expect(apps, ['term:pty:b']);
+      expect(s.entryFor('111/term:pty:b')!.lamp, Lamp.connecting);
+      expect(s.currentKey, '111/term:pty:b');
+      expect(s.hint, '写周报：打开 1 个');
+    });
+
     test('terms: can be a favorite', () {
       s.toggleFavorite('111', 'terms:', '终端');
       expect(s.isFavorite('111', 'terms:'), isTrue);
