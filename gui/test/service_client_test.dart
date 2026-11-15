@@ -75,6 +75,7 @@ class FakeService {
               'update_dismiss' ||
               'update_rollback' ||
               'set_update' ||
+              'set_auto_lock' ||
               'permissions_reset':
           s.write('${jsonEncode(replies[m['cmd']] ?? {'ok': true})}\n');
         default:
@@ -325,6 +326,20 @@ void main() {
 
       await svc.stop();
       m.dispose();
+    });
+
+    test('auto_lock defaults to true and setAutoLock sends the right json', () async {
+      expect(ServiceStatus.fromJson({'id': '1'}).autoLock, isTrue);
+      expect(ServiceStatus.fromJson({'id': '1', 'auto_lock': false}).autoLock, isFalse);
+      final svc = FakeService('tok-al');
+      await svc.start();
+      final c = await ServiceConnection.connect(token: 'tok-al', port: svc.port);
+      await c.setAutoLock(false);
+      expect(svc.received, [
+        {'cmd': 'set_auto_lock', 'on': false},
+      ]);
+      await c.close();
+      await svc.stop();
     });
 
     test('update wrappers ask the service and refresh the status', () async {

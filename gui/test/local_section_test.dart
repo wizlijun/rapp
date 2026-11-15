@@ -24,7 +24,7 @@ void main() {
 
   tearDown(() => tmp.deleteSync(recursive: true));
 
-  Future<void> pump(WidgetTester tester) async {
+  Future<void> pump(WidgetTester tester, {TargetPlatform platform = TargetPlatform.windows}) async {
     await tester.binding.setSurfaceSize(const Size(900, 1600));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
@@ -43,7 +43,7 @@ void main() {
       await tester.runAsync(svc.stop);
     });
     await tester.pumpWidget(wrap(SingleChildScrollView(
-      child: LocalSection(platform: TargetPlatform.windows, monitor: m, control: null, data: DataDir(tmp.path)),
+      child: LocalSection(platform: platform, monitor: m, control: null, data: DataDir(tmp.path)),
     )));
     await tester.pump();
   }
@@ -291,5 +291,30 @@ void main() {
     await tester.tap(find.byKey(const Key('copy-id-0')));
     await tester.pump();
     expect(copied, ['123456789@10.0.0.7', '123456789@192.168.1.5']);
+  });
+
+  const label = '远程 app 都关闭后自动锁屏';
+  const note = '锁屏后，B 打开 app 时需要输入这台 Mac 的登录密码。';
+
+  testWidgets('the auto-lock switch shows on macOS, reflects the status and sends set_auto_lock', (tester) async {
+    svc = FakeService('tok');
+    svc.extraStatus = {'auto_lock': true};
+    await pump(tester, platform: TargetPlatform.macOS);
+    expect(find.text(label), findsOneWidget);
+    expect(find.text(note), findsOneWidget);
+    expect(tester.widget<Switch>(find.byKey(const Key('auto-lock-switch'))).value, isTrue);
+    await tester.runAsync(() async {
+      tester.widget<Switch>(find.byKey(const Key('auto-lock-switch'))).onChanged!(false);
+      await until(() => svc.received.any((r) => r['cmd'] == 'set_auto_lock'));
+    });
+    expect(svc.received.where((r) => r['cmd'] == 'set_auto_lock'), [
+      {'cmd': 'set_auto_lock', 'on': false},
+    ]);
+  });
+
+  testWidgets('the auto-lock switch is absent off macOS', (tester) async {
+    svc = FakeService('tok');
+    await pump(tester, platform: TargetPlatform.linux);
+    expect(find.text(label), findsNothing);
   });
 }

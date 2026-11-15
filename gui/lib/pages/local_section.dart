@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 
 import '../permissions.dart';
 import '../service_client.dart';
+import '../ui/tokens.dart';
 import '../ui/lifecycle.dart' show disconnectWord;
 import '../service_control.dart';
 import '../data_relocate.dart';
@@ -170,6 +171,30 @@ class _LocalSectionState extends State<LocalSection> {
     } catch (e) {
       _say('失败：$e');
     }
+  }
+
+  Future<void> _setAutoLock(bool on) async {
+    try {
+      await m.setAutoLock(on);
+    } catch (e) {
+      _say('失败：$e');
+    }
+  }
+
+  Widget _autoLockRow(ServiceStatus st) {
+    final t = RappTokens.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        MergeSemantics(
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text('远程 app 都关闭后自动锁屏', style: TextStyle(color: t.text)),
+            Switch(key: const Key('auto-lock-switch'), value: st.autoLock, onChanged: _setAutoLock),
+          ]),
+        ),
+        Text('锁屏后，B 打开 app 时需要输入这台 Mac 的登录密码。', style: TextStyle(color: t.muted, fontSize: 12)),
+      ]),
+    );
   }
 
   /// The service installs once this app's connection closes, so ok means quit now (K28).
@@ -503,8 +528,9 @@ class _LocalSectionState extends State<LocalSection> {
                     ),
                   ),
                 ]),
-              )
-            else if (_platform != TargetPlatform.linux)
+              ),
+            if (_platform == TargetPlatform.macOS) _autoLockRow(st),
+            if (_platform != TargetPlatform.macOS && _platform != TargetPlatform.linux)
               _row('权限',
                   '屏幕录制 ${st.screenRecording ? '✓' : '✗'}   辅助功能 ${st.accessibility ? '✓' : '✗'}'),
             if (update != null && _platform != TargetPlatform.linux)
