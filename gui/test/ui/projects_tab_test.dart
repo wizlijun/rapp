@@ -261,6 +261,7 @@ void main() {
     await tester.pump();
     expect(s.projects, isEmpty);
     expect(find.byKey(Key('project-$id')), findsNothing);
+    await tester.pump(MainState.undoFor); // let the undo window close
   });
 
   testWidgets('title lamps show one lamp per member', (tester) async {

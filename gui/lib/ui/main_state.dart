@@ -2250,12 +2250,68 @@ class MainState extends ChangeNotifier {
     _saveWorkspace();
   }
 
-  /// Ends no session.
+  /// Whether there is anything open to save as a project.
+  bool get canSaveOpenAsProject => _entries.isNotEmpty;
+
+  /// Every open session becomes a member (list order, no notes), and it becomes the current
+  /// project. Null, with nothing changed, for an empty name or when nothing is open.
+  Project? saveOpenAsProject(String name) {
+    if (_entries.isEmpty) return null;
+    final p = createProject(name);
+    if (p == null) return null;
+    for (final e in _entries) {
+      p.members.add(Member(AppRef(e.id, e.app, oneLine(e.appName))));
+    }
+    _saveWorkspace();
+    switchProject(p.id);
+    return p;
+  }
+
+  void togglePinned(String projectId) {
+    final p = _project(projectId);
+    if (p == null) return;
+    p.pinned = !p.pinned;
+    _saveWorkspace();
+  }
+
+  static const undoFor = Duration(seconds: 5);
+  Timer? _undoTimer;
+  ({Project project, int index})? _undo;
+
+  /// The deleted project's name while it can still be undone; null otherwise.
+  String? get undoableDelete => _undo?.project.name;
+
+  /// Ends no session. The project can be brought back for [undoFor].
   void deleteProject(String id) {
+    final i = workspace.projects.indexWhere((p) => p.id == id);
+    if (i >= 0) {
+      _undo = (project: workspace.projects[i], index: i);
+      _undoTimer?.cancel();
+      _undoTimer = Timer(undoFor, () {
+        _undoTimer = null;
+        _undo = null;
+        notifyListeners();
+      });
+    }
     workspace.projects.removeWhere((p) => p.id == id);
-    if (currentProject == id) currentProject = null;
+    if (currentProject == id) {
+      currentProject = null;
+      _setCue('');
+    }
     if (previousProject == id) previousProject = null;
     positions.byProject.remove(id);
+    _saveWorkspace();
+  }
+
+  /// Puts the last deleted project back where it was (members, notes, pin); its position and
+  /// current/previous status are not restored.
+  void undoDelete() {
+    final u = _undo;
+    if (u == null) return;
+    _undoTimer?.cancel();
+    _undoTimer = null;
+    _undo = null;
+    workspace.projects.insert(math.min(u.index, workspace.projects.length), u.project);
     _saveWorkspace();
   }
 
@@ -2649,6 +2705,7 @@ class MainState extends ChangeNotifier {
     _blockedTimer?.cancel();
     _desktopTimer?.cancel();
     _cueTimer?.cancel();
+    _undoTimer?.cancel();
     for (final t in _unlockTimers.values) {
       t.cancel();
     }

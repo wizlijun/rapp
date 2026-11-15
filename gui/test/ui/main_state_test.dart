@@ -4435,6 +4435,158 @@ void main() {
       expect((st.currentProject, st.previousProject, st.cue, st.grouping), (null, null, '', Grouping.device));
       expect(File('${DataDir(tmp.path).localDir}/$positionsFile').existsSync(), isFalse);
     });
+
+    group('save as project, pin, undo delete', () {
+      test('save what is open as a project and switch to it', () async {
+        final st = make();
+        await open(['a', 'b']);
+        expect(st.canSaveOpenAsProject, isTrue);
+        final p = st.saveOpenAsProject('写周报')!;
+        expect(p.members.map((m) => m.key), ['111/a', '111/b']);
+        expect(p.members.every((m) => m.task.isEmpty), isTrue);
+        expect(st.currentProject, p.id);
+        expect(File('${tmp.path}/shared/workspace.json').readAsStringSync(), contains('写周报'));
+      });
+
+      test('nothing open: cannot save, returns null, creates nothing', () {
+        final st = make();
+        expect(st.canSaveOpenAsProject, isFalse);
+        expect(st.saveOpenAsProject('x'), isNull);
+        expect(st.projects, isEmpty);
+        expect(st.currentProject, isNull);
+      });
+
+      test('an empty name creates nothing', () async {
+        final st = make();
+        await open(['a']);
+        expect(st.saveOpenAsProject('  '), isNull);
+        expect(st.projects, isEmpty);
+        expect(st.currentProject, isNull);
+      });
+
+      test('togglePinned persists', () {
+        final st = make();
+        final p = st.createProject('P')!;
+        st.togglePinned(p.id);
+        expect(make().projects.single.pinned, isTrue);
+        st.togglePinned(p.id);
+        expect(make().projects.single.pinned, isFalse);
+      });
+
+      test('a deleted project can be undone for five seconds and goes back where it was', () {
+        fakeAsync((a) {
+          final st = make();
+          st.createProject('A');
+          final b = st.createProject('B')!;
+          st.createProject('C');
+          st.addMember(b.id, const AppRef('111', 'x', 'X'));
+          st.setTask(b.id, '111/x', '整理');
+          st.togglePinned(b.id);
+          st.deleteProject(b.id);
+          expect(st.undoableDelete, 'B');
+          expect(st.projects.map((p) => p.name), ['A', 'C']);
+          st.undoDelete();
+          expect(st.projects.map((p) => p.name), ['A', 'B', 'C']);
+          final r = st.projects[1];
+          expect((r.members.single.key, r.members.single.task, r.pinned), ('111/x', '整理', true));
+          expect(st.undoableDelete, isNull);
+          expect(File('${tmp.path}/shared/workspace.json').readAsStringSync(), contains('"B"'));
+        });
+      });
+
+      test('undo does not restore position or current/previous', () {
+        fakeAsync((a) {
+          final st = make();
+          final p = st.createProject('P')!;
+          st.switchProject(p.id);
+          st.deleteProject(p.id);
+          st.undoDelete();
+          expect(st.projects.single.name, 'P');
+          expect((st.currentProject, st.previousProject), (null, null));
+          expect(st.positions.byProject.containsKey(p.id), isFalse);
+        });
+      });
+
+      test('after five seconds it is gone for good', () {
+        fakeAsync((a) {
+          final st = make();
+          final p = st.createProject('A')!;
+          st.deleteProject(p.id);
+          a.elapse(MainState.undoFor - const Duration(milliseconds: 1));
+          expect(st.undoableDelete, 'A');
+          a.elapse(const Duration(milliseconds: 1));
+          expect(st.undoableDelete, isNull);
+          st.undoDelete();
+          expect(st.projects, isEmpty);
+        });
+      });
+
+      test('deleting a second project forfeits the first undo', () {
+        fakeAsync((a) {
+          final st = make();
+          final pa = st.createProject('A')!;
+          final pb = st.createProject('B')!;
+          st.deleteProject(pa.id);
+          a.elapse(const Duration(seconds: 3));
+          st.deleteProject(pb.id);
+          expect(st.undoableDelete, 'B');
+          // The first timer would fire at 5s; the second one must keep its own five seconds.
+          a.elapse(const Duration(seconds: 3));
+          expect(st.undoableDelete, 'B');
+          st.undoDelete();
+          expect(st.projects.map((p) => p.name), ['B']);
+        });
+      });
+
+      test('undo saves', () {
+        fakeAsync((a) {
+          final st = make();
+          final p = st.createProject('A')!;
+          st.deleteProject(p.id);
+          expect(make().projects, isEmpty);
+          st.undoDelete();
+          expect(make().projects.single.name, 'A');
+        });
+      });
+
+      test('undo puts it last when the list is now shorter', () {
+        fakeAsync((a) {
+          final st = make();
+          st.createProject('A');
+          final b = st.createProject('B')!;
+          final c = st.createProject('C')!;
+          st.deleteProject(c.id);
+          st.deleteProject(b.id);
+          st.undoDelete();
+          expect(st.projects.map((p) => p.name), ['A', 'B']);
+        });
+      });
+
+      test('deleting the current project clears its cue', () {
+        fakeAsync((a) {
+          final st = make();
+          final p = st.createProject('P')!;
+          final q = st.createProject('Q')!;
+          st.switchProject(p.id);
+          st.switchProject(q.id);
+          now = now.add(const Duration(minutes: 5));
+          st.switchProject(p.id);
+          expect(st.cue, isNotEmpty);
+          st.deleteProject(p.id);
+          expect(st.cue, '');
+        });
+      });
+
+      test('dispose cancels the undo timer', () {
+        fakeAsync((a) {
+          final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), clock: () => now);
+          final p = st.createProject('P')!;
+          st.deleteProject(p.id);
+          st.dispose();
+          expect(a.pendingTimers, isEmpty);
+        });
+      });
+    });
   });
 
   group('endedHint', () {
