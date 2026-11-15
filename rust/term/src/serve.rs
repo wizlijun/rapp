@@ -669,12 +669,14 @@ async fn ask_pty(
 /// How long `open` waits for the window's `run` to appear.
 const OPEN_WAIT: Duration = Duration::from_secs(10);
 
-/// `path` with a leading `~/` meaning the home directory; none given: the home directory itself.
+/// `path` from the home directory: `~` is the home directory, `~/x` and a relative `x` are under it; an absolute
+/// path stays as it is.
 fn expand_home(path: &str) -> PathBuf {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    match (path.strip_prefix("~/"), home) {
-        (Some(rest), Some(h)) => h.join(rest),
-        _ => PathBuf::from(path),
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else { return PathBuf::from(path) };
+    match path {
+        "~" => home,
+        _ if path.starts_with('/') => PathBuf::from(path),
+        _ => home.join(path.strip_prefix("~/").unwrap_or(path)),
     }
 }
 
@@ -950,5 +952,14 @@ mod tests {
         let (a, b) = (ticket(), ticket());
         assert!(a.len() == 16 && a.bytes().all(|c| c.is_ascii_hexdigit()));
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn a_bare_tilde_is_home_a_relative_path_is_under_home_an_absolute_one_stays() {
+        let home = std::env::var_os("HOME").map(PathBuf::from).unwrap();
+        assert_eq!(expand_home("~"), home);
+        assert_eq!(expand_home("proj"), home.join("proj"));
+        assert_eq!(expand_home("proj/sub"), home.join("proj/sub"));
+        assert_eq!(expand_home("/srv/proj"), PathBuf::from("/srv/proj"));
     }
 }
