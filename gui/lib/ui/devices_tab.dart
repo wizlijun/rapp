@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../hub_client.dart';
 import '../pages/app_profile_page.dart';
 import '../permissions.dart';
+import '../shares.dart';
 import '../term/term_id.dart';
 import 'add_device_form.dart';
 import 'controls.dart';
@@ -11,6 +12,7 @@ import 'lamp.dart';
 import 'lifecycle.dart';
 import 'main_state.dart';
 import 'session_model.dart';
+import 'shares_section.dart';
 import 'tab_chip.dart';
 import 'tokens.dart';
 
@@ -26,7 +28,8 @@ class DevicesTab extends StatefulWidget {
       {super.key,
       required this.state,
       required this.local,
-      this.localBadge = false});
+      this.localBadge = false,
+      this.shares});
   final MainState state;
 
   /// The 本机 content, assembled by the caller.
@@ -34,6 +37,9 @@ class DevicesTab extends StatefulWidget {
 
   /// A new version is on its way in: a still, muted dot on 本机 (K27).
   final bool localBadge;
+
+  /// Asked for each device's shared ports; null leaves the 端口 section out.
+  final SharesApi? shares;
 
   @override
   State<DevicesTab> createState() => _DevicesTabState();
@@ -241,6 +247,7 @@ class _DevicesTabState extends State<DevicesTab> {
             ),
           ),
       ..._termGroup(context, id),
+      if (widget.shares != null) SharesSection(key: ValueKey('shares-$id'), api: widget.shares!, to: id),
       const SizedBox(height: 8),
       Row(
         children: [

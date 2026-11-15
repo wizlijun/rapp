@@ -38,6 +38,9 @@ pub struct Config {
     /// The key text (`rapp…`); devices holding the same key trust each other.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub key: Option<String>,
+    /// "each": log every forwarded connection; otherwise one summary line per device and port (`forward_log::Mode`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forward_log: Option<String>,
     /// Set by `load_or_init` when it dropped a 0.5.5 (relay1) `relay` + `key`; never saved.
     #[serde(skip)]
     pub legacy_dropped: bool,

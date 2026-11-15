@@ -276,7 +276,7 @@ class ResolvedProfile {
   const ResolvedProfile({
     this.name,
     this.stream = startChoice,
-    this.afterSend = AfterSend.none,
+    this.afterSend = AfterSend.pressReturn,
     this.composer = true,
     this.recordInput = true,
     this.typeToCompose = true,
@@ -343,7 +343,7 @@ ResolvedProfile resolveProfile(String appId, {required List<AppProfile> mine, re
     name: pick((p) => p.name) ?? (m ?? b)!.ids.first,
     stream: StreamChoice(pick((p) => p.mode) ?? startChoice.mode, pick((p) => p.density) ?? startChoice.density,
         pick((p) => p.fps) ?? startChoice.fps),
-    afterSend: pick((p) => p.afterSend) ?? AfterSend.none,
+    afterSend: pick((p) => p.afterSend) ?? AfterSend.pressReturn,
     composer: pick((p) => p.composer) ?? true,
     recordInput: pick((p) => p.recordInput) ?? true,
     typeToCompose: pick((p) => p.typeToCompose) ?? true,

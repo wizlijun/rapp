@@ -1,12 +1,13 @@
 // The remote window's picture on the stage: the runner's texture, letterboxed. Presses, drags,
-// wheels and trackpad scrolls on it go to A; a press gives it keyboard focus. On a touchscreen a
-// two-finger swipe scrolls A (P3, docs/superpowers/specs/2026-11-13-rapp-touch-scroll-design.md).
+// wheels and trackpad scrolls on it go to A; it holds the keys whenever nothing else wants them,
+// without a press. On a touchscreen a two-finger swipe scrolls A (P3, docs/superpowers/specs/2026-11-13-rapp-touch-scroll-design.md).
 import 'dart:async';
 
 import 'package:flutter/gestures.dart';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
+import '../ui/keep_focus.dart';
 import '../ui/main_state.dart';
 import '../ui/tokens.dart';
 import 'geometry.dart';
@@ -256,8 +257,48 @@ class _PictureState extends State<Picture> {
       _scroll(e.localPosition, panToRemote(e.localPanDelta));
 
   @override
+  void initState() {
+    super.initState();
+    widget.session.composer.addListener(_settleSoon);
+    FocusManager.instance.addListener(_settleSoon);
+  }
+
+  bool _settleQueued = false;
+
+  /// After this frame: the keys come (back) to A unless something else wants them.
+  void _settleSoon() {
+    if (_settleQueued) return;
+    _settleQueued = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _settleQueued = false;
+      _settle();
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
+  /// The app window holds the keys whenever nothing else does: not the writing panel (its editor,
+  /// or a press on it while it is open), not another text field, a dialog or menu above the stage,
+  /// nor an open corner list. So it never needs a click to take them.
+  void _settle() {
+    if (!mounted) return;
+    final s = widget.state, rs = widget.session;
+    if (s.pictureFocused != null || s.overview || s.corner != null || s.markingInput != null) return;
+    if (s.currentRemote?.sid != _sid || rs.detached) return;
+    final c = rs.composer;
+    if (c.editorFocused || (c.open && s.panelHolds == _sid)) return;
+    if (!(ModalRoute.of(context)?.isCurrent ?? true)) return;
+    final f = FocusManager.instance.primaryFocus;
+    if (f != null && f != _focus && f.context?.findAncestorStateOfType<EditableTextState>() != null) return;
+    s.focusPicture(_sid);
+  }
+
+  @override
   void didUpdateWidget(Picture old) {
     super.didUpdateWidget(old);
+    if (!identical(old.session.composer, widget.session.composer)) {
+      old.session.composer.removeListener(_settleSoon);
+      widget.session.composer.addListener(_settleSoon);
+    }
     // A held-back press belongs to the window it landed on; never send it to another.
     if (old.window.id != widget.window.id || old.session.sid != widget.session.sid) _dropPending();
     // A held button belongs to its session: release it there now, or A keeps it down.
@@ -272,6 +313,8 @@ class _PictureState extends State<Picture> {
 
   @override
   void dispose() {
+    widget.session.composer.removeListener(_settleSoon);
+    FocusManager.instance.removeListener(_settleSoon);
     _dropPending();
     _focus.dispose();
     super.dispose();
@@ -316,6 +359,7 @@ class _PictureState extends State<Picture> {
     final t = RappTokens.of(context);
     final win = widget.window;
     final focused = widget.state.pictureFocused == _sid;
+    if (!focused) _settleSoon();
     if (focused && !_focus.hasFocus) {
       // The keys went to A without a press (Ctrl+Enter from the editor): Flutter's focus follows,
       // unless the writing panel's editor still holds the caret (this assumes the editor's unfocus
@@ -354,7 +398,7 @@ class _PictureState extends State<Picture> {
           }
         }
         _popups = popups;
-        return Focus(
+        return KeepFocus(child: Focus(
           focusNode: _focus,
           onKeyEvent: (_, event) =>
               widget.state.port?.handleKeyEvent(_sid, event) == true
@@ -423,7 +467,7 @@ class _PictureState extends State<Picture> {
                   _popupClose(t, p, c.biggest),
             ],
           ),
-        );
+        ));
       },
     );
   }

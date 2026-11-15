@@ -2,6 +2,7 @@
 //! Replies are plain `serde_json::Value`s built with `line::ok` / `line::err`.
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
@@ -45,6 +46,25 @@ pub enum Op {
     RemoveTermTarget {
         name: String,
     },
+    /// The ports this device shares with the caller.
+    ListShares,
+    /// Open a TCP forward to one of the ports this device shares with the caller.
+    Forward { port: u16 },
+    /// This device's whole share table (for a device that is allowed to set it).
+    Shares,
+    /// Share `ports`. `ports` and `allow` stay raw JSON: a bad one is answered "bad port" by sharing.rs, not "unknown op".
+    Share {
+        #[serde(default)]
+        ports: Value,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        note: Option<String>,
+        #[serde(default, skip_serializing_if = "Value::is_null")]
+        allow: Value,
+    },
+    Unshare {
+        #[serde(default)]
+        port: Value,
+    },
 }
 
 #[cfg(test)]
@@ -60,6 +80,27 @@ mod tests {
         assert_eq!(serde_json::to_value(Op::Ping).unwrap(), json!({"op":"ping"}));
         let op: Op = serde_json::from_value(json!({"op":"auth","password":"p"})).unwrap();
         assert_eq!(op, Op::Auth { password: Some("p".into()), name: None });
+    }
+
+    #[test]
+    fn share_requests() {
+        assert_eq!(serde_json::to_value(Op::ListShares).unwrap(), json!({"op":"list_shares"}));
+        assert_eq!(serde_json::to_value(Op::Forward { port: 8000 }).unwrap(), json!({"op":"forward","port":8000}));
+        assert_eq!(serde_json::from_value::<Op>(json!({"op":"forward","port":22})).unwrap(), Op::Forward { port: 22 });
+        assert!(serde_json::from_value::<Op>(json!({"op":"forward","port":70000})).is_err());
+        assert!(serde_json::from_value::<Op>(json!({"op":"forward"})).is_err());
+        assert_eq!(serde_json::to_value(Op::Shares).unwrap(), json!({"op":"shares"}));
+        assert_eq!(
+            serde_json::from_value::<Op>(json!({"op":"share","ports":[8000],"note":"jupyter"})).unwrap(),
+            Op::Share { ports: json!([8000]), note: Some("jupyter".into()), allow: Value::Null }
+        );
+        // A bad port still parses: sharing.rs answers "bad port", not peer.rs "unknown op".
+        assert!(serde_json::from_value::<Op>(json!({"op":"share","ports":[70000]})).is_ok());
+        assert!(serde_json::from_value::<Op>(json!({"op":"unshare","port":"x"})).is_ok());
+        assert_eq!(
+            serde_json::to_value(Op::Share { ports: json!([22]), note: None, allow: Value::Null }).unwrap(),
+            json!({"op":"share","ports":[22]})
+        );
     }
 
     #[test]

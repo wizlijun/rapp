@@ -33,7 +33,7 @@
        agent/             用户和 agent 的内容（进 git），rapp 不动
        clipboard/         钉住的文字条目，一条一个 .md（进 git）
        files/             二进制，不进 git：transfers/（收发的文件）  clipboard/（钉住的图片和文件）
-       local/             本机私有，不进 git，0700：service.json  hosts.json  ipc.token  update.json  drafts/（没发出去的草稿，《输入记录》§5.2）  ……（§3）
+       local/             本机私有，不进 git，0700：service.json  hosts.json  shares.json  ipc.token  update.json  drafts/（没发出去的草稿，《输入记录》§5.2）  ……（§3）
      ```
    - **进 git 的**：`shared/`、`devices/`、`agent/`、`clipboard/`、`README.md`、`.gitignore`。**不进 git 的**：`files/`、`local/`（写在 `.gitignore` 里）。rapp-service 在改动后 60 秒内合成一次提交（`rust/service/src/data.rs:41`）。
    - **机密只在 `local/`**。rapp 自己不往 `shared/`、`devices/`、`agent/`、`clipboard/` 里写口令、key、secret、token；agent 往这些目录写东西时也一样。例外是用户自己的话：`devices/<id>/inputs/` 里是写作面板发出去的原话，rapp 保证不了里面没有密钥，可能含私事，和钉住的剪贴板同样对待（《输入记录》§8）。
@@ -51,6 +51,7 @@
 | `$ROOT/devices/<id>/gui.json` | B | GUI，可手改 | 无 | §2.4 |
 | `$ROOT/shared/apps.json` | B | GUI，可手改 | 无 | §2.5 |
 | `$ROOT/local/term.json` | A | GUI 经 IPC 改开关和 tmux 路径，目标经设备请求改，可手改 | 无 | §2.10 |
+| `$ROOT/local/shares.json` | A（分享方） | `rapp share` / `rapp unshare`（经 IPC），可手改 | 无 | §2.11 |
 | `$ROOT/devices/<id>/device.json` | A / B | 程序自管（rapp-service 写，没有机密） | 无 | §2.6 |
 | `<旧配置目录>/data-root` | A / B | GUI「更改位置…」写，可手改 | 无 | §2.7 |
 | `$ROOT/clipboard/`、`$ROOT/files/clipboard/` | B | GUI 写，可手删 | 无（用户钉住的内容可能含私事） | §2.8 |
@@ -83,6 +84,7 @@
 | `auto_lock` | 布尔 | `true` | 远程 App / 桌面全部关闭 10 秒后自动锁定 A | 仅本机 GUI（IPC `set_auto_lock`；B 不能改） | |
 | `auto_update` | 布尔 | `true` | 没人用时自己装新版 | GUI（IPC `set_update`） | |
 | `check_updates` | 布尔 | `true` | 定时检查更新 | GUI（IPC `set_update`） | |
+| `forward_log` | 字符串 | 合并 | 端口分享的访问记录怎么写（`rust/service/src/config.rs:41-43`）：`each` 每条转发连接各记一行 `forward_open` 和 `forward`；其他值（默认 `summary`）按「来访设备 + 端口」合并，第一条立刻记，其余每 10 分钟一行 `forward_sum`。事件见可观测性规格 §4.1 | 手改 | |
 
 生效：手改后要重启 `rapp-service`。macOS：`launchctl kickstart -k gui/$(id -u)/com.rapp.service`（这会断开正在连着的会话，先问用户）。agent 改 `shared/` 和自己设备的 `devices/<id>/` 里的文件时，注意 rapp-service 一分钟内会把改动提交进 git。
 
@@ -180,11 +182,40 @@ agent 规则：**不直接改这个文件**。加、删设备走 GUI 的设备�
 
 agent 规则：加、删 SSH 目标走设备请求，不直接改文件；要关终端会话让用户在 GUI 里关。
 
+### 2.11 `$ROOT/local/shares.json`（分享的端口）
+
+谁读写：`rapp-service`。启动时读一次（`rust/service/src/shares.rs:65`，`rust/service/src/lib.rs:121-124`）；IPC 的 `share`、`unshare`（命令行 `rapp share`、`rapp unshare`）在内存里改完，整份写回（`rapp_net::config::write_json`：0600，先写临时文件再改名，`rust/service/src/shares.rs:161`）。不进 git。没有机密：`allow` 里是对方的设备指纹，不是 key。规格：《端口分享设计》§6、§14.1。
+
+（实现注，2026-11-16）`shares.json` 也可能是别的设备写进来的：持同一把 key 的设备发来设备请求 `share`、`unshare`（面板里"替另一台设备开关端口"），本机服务照本机 IPC 同一段代码（`rust/service/src/sharing.rs`）改表、整份写回，写法和上面一样。区别：对方给的 `allow` 只收 64 位十六进制的完整指纹（名字或前缀回 `bad allow`），不能改 `raw`。旧的 `rapp share --allow` 收名字、存指纹这一点不变。每次改表记一行 `share` 或 `unshare`，用 `by` 区分是本机（`local`）还是哪台设备（指纹前 8 位）（《可观测性》§事件表）。
+
+格式：数组，按端口排好，每项一个分享的端口。没有这个文件就是什么都不分享。
+
+```json
+[{"port": 22}, {"port": 11434, "note": "模型", "allow": ["<64 位十六进制的设备指纹>"]}]
+```
+
+| 字段 | 类型 | 没写时 | 取值 |
+|---|---|---|---|
+| `port` | 整数 | 必填 | 1–65535；一个端口只有一项。分享的是这台设备自己的 `127.0.0.1:端口`（连不上再试 `[::1]`），别的地址不连 |
+| `note` | 字符串 | 空 | 备注，`list_shares` 原样给对方看 |
+| `allow` | 数组 | `[]` | 空：所有持同一把 key 的设备。否则只给这些设备：每项是对方设备指纹，64 位十六进制。`rapp share --allow` 收名字或指纹前缀，存下来的是指纹 |
+| `raw` | 布尔 | `false` | 原样转发，不做 HTTP 适配（规格 §10.4）。这一版只存不用 |
+| `open_web` | 布尔 | `false` | 放开公网网页（规格 §10.3）。这一版只存不用 |
+
+限制：最多 64 项。手写超过 64 项的表照样读进来，但只能替换已有的，不能再加（`share` 回 `limit`）。
+
+读不懂（不是 JSON、不是数组、端口超范围、指纹不是 64 位十六进制、有不认识的字段）：服务照常启动，分享表当作空的，`service.log` 记一行 `shares_unreadable`（warn，`err` 是解析错误）。不认识的字段也算读不懂：拼错的 `alow` 要是被悄悄丢掉，这个端口就给了所有设备（`rust/service/src/shares.rs:20-23`）。文件原样留着；第一次真的写分享表时（`share`，或者 `unshare` 删掉了一项），先把它改名成 `shares.json.bad`（盖掉以前的），再写新表（§3）。
+
+生效：`share`、`unshare` 马上生效，不用重启；取消分享、改了 `allow` 的端口，正在转发的连接马上断开。手改要先停 `rapp-service`（§0.3），改完再启动；服务开着时它下次写表会盖掉你的改动。
+
+agent 规则：加、删分享走 `rapp share` / `rapp unshare`（或 IPC 的 `share`、`unshare`），不直接改文件。分享 22、3389、5900、数据库、Docker 接口、本机代理这类端口前，先问用户。
+
 ## 3. 程序自管的状态（不要改）
 
 | 文件 | 在哪 | 是什么 | 机密 |
 |---|---|---|---|
 | `$ROOT/local/ipc.token` | A、B | GUI 连本机 service 用的 token，每次启动重新生成（`rust/service/src/lib.rs:105`） | **机密** |
+| `$ROOT/local/shares.json.bad` | A | `shares.json` 读不懂时，第一次写分享表前把它原样改名到这里，盖掉以前的（`rust/service/src/shares.rs:161-166`）。rapp 不读它；要找回原来的内容，从这里抄回 `shares.json`（§2.11） | |
 | `$ROOT/local/update.json` | A | 最近查到的版本、上次检查时间、用户按过「不装」的版本（`rust/service/src/update.rs:133`）。「不装」走 IPC `update_dismiss` | |
 | `$ROOT/local/update-applied.json` | A | 上次升级的记录，用于回滚和授权提示（`rust/update/src/apply.rs:10`） | |
 | `$ROOT/local/previous/` | A | 升级前的旧版，用于回滚（`rust/service/src/update.rs:136`） | |
@@ -299,6 +330,7 @@ relay 只能跑在 Linux 主机上（Mac 和 Windows 上的 Docker 在虚拟机�
 | `RAPP_FORCE_PATH` | B | 强制走 `relay`、`direct` 或 `lan` | 自动选 | |
 | `RAPP_DOWNLOADS` | A、B（A：`rapp-host` 收上传；B：GUI 嵌入会话下载，`gui/macos/Runner/SessionPlugin.swift:47`） | 收发文件的目录（`Sources/RappCore/DataPaths.swift:18-21`） | `$ROOT/files/transfers`（旧版是 `~/Downloads/rapp`，那里的文件不会搬） | |
 | `RAPP_TOKEN` | 内部 | service / hub 传给子进程的会话 token，不要自己设 | — | **机密** |
+| `RAPP_LOCAL` | A、B（测试） | `rapp-cli` 和 `measure-forward` 直接把它当 `local/`，去那里找 `ipc.token` 和 `service.json` 的 `ipc_port`（`rust/cli/src/main.rs:17-22`、`rust/testkit/src/bin/measure_forward.rs:9-14`）。服务不看它 | `$ROOT/local` | |
 | `RAPP_RELAY_KEY` | VPS（旧 relay，迁移结束后删除） | 中继密钥，见 §5.2 | — | **机密** |
 | `RAPP_RELAY_*` | 新 relay | 配置项的环境变量形式，全表见 §5.1 | 见 §5.1 | 无（没有机密经环境变量传入） |
 
@@ -312,6 +344,7 @@ relay 只能跑在 Linux 主机上（Mac 和 Windows 上的 Docker 在虚拟机�
 | `rapp-host` | `serve --app <标识> --token-env <变量> --port <端口>（默认 47800，0=随机）--bind <地址> --json`；`list-apps`；`check [--prompt]`；`version [--json]` | rapp-service（`Sources/RappCore/WorkerCLI.swift:97`） |
 | `rapp-client`（Swift、GTK） | `[connect] rapp://… [--token-env <变量>] [--json]`；`version [--json]` | rapp-hub |
 | `rapp-session` | 不收参数，从标准输入读 JSON 命令 | GUI |
+| `rapp-cli` | `share [端口…] [--allow 设备,设备] [--raw] [--note 备注]`（不带端口：列出本机的分享）；`unshare <端口>`；`hosts`；`pipe <名字> <端口>`（`rust/cli/src/args.rs:3-7`）。只和本机 `rapp-service` 的 IPC 说话。参数不对退出码 2，服务没在运行或命令失败退出码 1 | 用户；`~/.ssh/config` 的 `ProxyCommand rapp pipe %h %p`（端口分享规格 §9.4）。用户面对的名字是 `rapp`，怎么落到它上面归打包 |
 
 agent 规则：`rapp-host`、`rapp-client`、`rapp-session` 是由上面的程序拉起的，一般不用手动跑；测试时只用自己起的实例，端口用临时端口，不用 47800、21116–21119、22026–22029。
 

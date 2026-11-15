@@ -29,6 +29,7 @@ async fn main() {
         // Only a service running from a `.app` updates itself.
         data,
         advertise_lan: None,
+        forward_sum_every: rapp_service::forward_log::SUM_EVERY,
         update: std::env::current_exe().ok().and_then(|e| rapp_update::bundle_of(&e)).map(UpdateOpts::system),
     };
     match Service::start(opts).await {

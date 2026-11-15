@@ -64,8 +64,12 @@ class RemoteSession extends ChangeNotifier {
   /// Where the click on the marked text box goes: a left click at A point [at] of [window].
   final void Function(int window, Offset at)? onClick;
 
+  /// 「直接回车且隐藏」: everything is in A, so the Return goes and the panel hides (the text stays,
+  /// W6; the picture takes the keys back).
   void _allSent() {
-    if (profile.afterSend == AfterSend.pressReturn) onReturn?.call();
+    if (profile.afterSend != AfterSend.pressReturn) return;
+    onReturn?.call();
+    composer.collapse();
   }
 
   /// A's screen is locked, as its host last said; null until told (an older host never says).

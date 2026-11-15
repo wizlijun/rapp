@@ -69,7 +69,8 @@ void main() {
     expect(r.stream, const StreamChoice('color16', 'adaptive', 5));
     expect(r.windows.single.action, RuleAction.hide);
     expect(r.tested, isFalse);
-    expect(r.afterSend, AfterSend.none);
+    expect(r.afterSend, AfterSend.pressReturn);
+    expect(ResolvedProfile.generic.afterSend, AfterSend.pressReturn);
     expect(r.composer, isTrue);
     expect(r.recordInput, isTrue);
     expect(resolveProfile('a', mine: [AppProfile(ids: ['a'], recordInput: false)], builtin: [AppProfile(ids: ['a'], recordInput: true)]).recordInput, isFalse);

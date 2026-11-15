@@ -1,0 +1,15 @@
+[package]
+name = "rapp-cli"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "rapp-cli"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+rapp-net.workspace = true

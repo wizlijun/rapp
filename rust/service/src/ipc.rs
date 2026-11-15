@@ -4,13 +4,19 @@
 use crate::state::State;
 use crate::update;
 use anyhow::Result;
+use rapp_conn::Pipe;
 use rapp_net::crypto::ct_eq;
 use rapp_net::line::{err, ok, write_json};
 use rapp_net::log::{read_recent, Lvl};
 use serde_json::{json, Value};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
+
+/// How long `hosts` waits for each device's list of shares: the LAN addresses in `hosts.json`
+/// and the ones the relay knows cost one `DIRECT_WAIT` each list, and the relayed request follows.
+pub(crate) const HOSTS_WAIT: Duration = Duration::from_secs(6);
 
 pub async fn serve(state: Arc<State>, listener: TcpListener, token: String) {
     while let Ok((tcp, _)) = listener.accept().await {
@@ -35,7 +41,9 @@ async fn conn(state: &Arc<State>, tcp: TcpStream, token: &str) -> Result<()> {
     // Dropped when this function returns: every `update_apply`/`update_rollback` on this
     // connection gets its own receiver and sees the connection close (K21).
     let (_closed, closed) = tokio::sync::watch::channel(());
-    loop {
+    // Set by a `pipe` that opened: from then on the connection carries that port's bytes.
+    let mut piped: Option<Pipe> = None;
+    while piped.is_none() {
         tokio::select! {
             line = lines.next_line() => {
                 let Some(line) = line? else { return Ok(()) };
@@ -64,6 +72,17 @@ async fn conn(state: &Arc<State>, tcp: TcpStream, token: &str) -> Result<()> {
                         update::apply(state, cmd["confirm_signature_change"] == true, closed.clone()).await
                     }
                     "update_rollback" => update::rollback(state, closed.clone()).await,
+                    "shares" => crate::share_cmds::shares(state, &cmd).await,
+                    "share" => crate::share_cmds::share(state, &cmd).await,
+                    "unshare" => crate::share_cmds::unshare(state, &cmd).await,
+                    "hosts" => hosts(state).await,
+                    "pipe" => match pipe(state, &cmd).await {
+                        Ok((p, path)) => {
+                            piped = Some(p);
+                            ok(json!({"path": path}))
+                        }
+                        Err(e) => err(&e),
+                    },
                     _ => handle(state, &cmd),
                 };
                 write_json(&mut w, &reply).await?;
@@ -74,6 +93,13 @@ async fn conn(state: &Arc<State>, tcp: TcpStream, token: &str) -> Result<()> {
             }
         }
     }
+    let Some(mut far) = piped else { return Ok(()) };
+    // The reader's buffer may already hold bytes the client sent right behind the command line,
+    // so the stream is read through it, never through the socket underneath.
+    let mut near = tokio::io::join(lines.into_inner(), w);
+    // However the stream ends (closed, reset), that is the port's business, not an IPC failure.
+    let _ = rapp_net::quic::splice(&mut near, &mut far).await;
+    Ok(())
 }
 
 fn handle(state: &State, cmd: &Value) -> Value {
@@ -152,4 +178,37 @@ fn set_relay(state: &State, cmd: &Value) -> Value {
         state.relay_settings.send_modify(|n| *n += 1);
     }
     r
+}
+
+/// What each device in `hosts.json` offers this one, all asked at the same time.
+async fn hosts(state: &Arc<State>) -> Value {
+    let asks: Vec<_> = crate::pipe::known_hosts(&state.home)
+        .into_iter()
+        .map(|h| {
+            let state = state.clone();
+            tokio::spawn(async move {
+                let got = tokio::time::timeout(HOSTS_WAIT, crate::pipe::shares_of(&state, &h.id)).await;
+                let mut v = json!({"id": h.id, "name": h.name});
+                match got {
+                    Ok(Ok(shares)) => v["shares"] = shares,
+                    Ok(Err(e)) => v["error"] = json!(e.as_str()),
+                    Err(_) => v["error"] = json!(crate::pipe::PipeErr::Offline.as_str()),
+                }
+                v
+            })
+        })
+        .collect();
+    let mut hosts = Vec::new();
+    for ask in asks {
+        if let Ok(v) = ask.await {
+            hosts.push(v);
+        }
+    }
+    ok(json!({"hosts": hosts}))
+}
+
+/// Opens a forward to `port` of the device `to` names.
+async fn pipe(state: &State, cmd: &Value) -> Result<(Pipe, &'static str), String> {
+    let port = crate::sharing::port_of(&cmd["port"]).ok_or("bad port")?;
+    crate::pipe::open(state, cmd["to"].as_str().unwrap_or(""), port).await.map_err(|e| e.as_str().to_string())
 }

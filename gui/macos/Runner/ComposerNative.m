@@ -13,6 +13,9 @@
 @property(nonatomic,strong) NSColor *hintColor;
 @property(nonatomic) CGFloat maxHeight, lineHeight, reportedHeight;
 @property(nonatomic) BOOL presented, updating, closed;
+// The candidate row stays reserved from its first appearance until the draft empties or focus
+// leaves, so the box does not jump between keystrokes.
+@property(nonatomic) BOOL reserveRow;
 @property(nonatomic,strong) NSMutableArray<void (^)(void)> *pending;
 @property(nonatomic,copy) void (^pendingFocus)(id);
 - (void)changed;
@@ -42,7 +45,7 @@
 - (BOOL)resignFirstResponder {
     RappComposerView *owner=self.owner;
     BOOL okay=[super resignFirstResponder];
-    if(okay){[owner.bridge releaseLease];if(owner.event)owner.event(@"focus",@NO,nil);}
+    if(okay){[owner.bridge releaseLease];owner.reserveRow=NO;[owner measure];if(owner.event)owner.event(@"focus",@NO,nil);}
     return okay;
 }
 - (void)didChangeText {
@@ -89,6 +92,16 @@
 }
 - (void)paste:(id)sender {
     RappComposerView *owner=self.owner;if(owner.event)owner.event(@"paste",nil,nil);}
+// The host reads the clipboard (images, files, long text) itself. A plain-text NSTextView would
+// disable 粘贴 for an image-only clipboard, and ⌘V would never reach paste:.
+- (BOOL)validateUserInterfaceItem:(id<NSValidatedUserInterfaceItem>)item {
+    if(item.action==@selector(paste:))return self.isEditable;
+    return [super validateUserInterfaceItem:item];
+}
+- (BOOL)validateMenuItem:(NSMenuItem *)item {
+    if(item.action==@selector(paste:))return self.isEditable;
+    return [super validateMenuItem:item];
+}
 - (void)keyDown:(NSEvent *)event {
     RappComposerView *owner=self.owner;
     NSEventModifierFlags flags=event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
@@ -263,12 +276,16 @@ static NSColor *ComposerColor(NSNumber *argb) {
 - (void)measure {
     if(self.updating || self.closed || !self.text)return;
     self.updating=YES;
+    // One candidate row (never wrapped: the rest go to local pages) with the body's 13pt inset below.
+    const CGFloat inset=13;
     CGFloat width=MAX(1,self.bounds.size.width),gap=0;
     if(self.snapshot){
         if([self.candidates prepareSnapshot:self.snapshot attributes:self.attributes lineHeight:self.lineHeight
-                                     width:width maxHeight:MAX(0,self.maxHeight-48)])gap=self.candidates.contentHeight;
-        else [self.bridge releaseLease];
-    }
+                                     width:width maxHeight:MIN(self.lineHeight,MAX(0,self.maxHeight-48-inset))]){
+            if(self.candidates.contentHeight>0)self.reserveRow=YES;
+        }else{[self.bridge releaseLease];self.reserveRow=NO;}
+    }else if(!self.text.string.length)self.reserveRow=NO;
+    if(self.reserveRow)gap=self.lineHeight+inset;
     self.text.frame=NSMakeRect(0,0,width,MAX(48,self.text.frame.size.height));
     self.text.textContainer.containerSize=NSMakeSize(width,CGFLOAT_MAX);
     NSTextContainer *container=self.text.textContainer;

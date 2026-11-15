@@ -12,6 +12,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../embed/remote_session.dart';
+import '../ui/keep_focus.dart';
 import '../ui/main_state.dart';
 import '../ui/tokens.dart';
 import 'sgr.dart' show TermLine;
@@ -39,6 +40,8 @@ Future<void> openUrl(String url) async {
       await Process.start('open', [url], mode: ProcessStartMode.detached);
     } else if (Platform.isLinux) {
       await Process.start('xdg-open', [url], mode: ProcessStartMode.detached);
+    } else if (Platform.isWindows) {
+      await Process.start('cmd', ['/c', 'start', '', url], mode: ProcessStartMode.detached);
     }
   } catch (_) {
     // No opener: nothing to do.
@@ -688,7 +691,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
       );
 
       final note = _note;
-      return Focus(
+      return KeepFocus(child: Focus(
         focusNode: _focus,
         onKeyEvent: _onKey,
         child: ColoredBox(
@@ -742,7 +745,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
               ),
           ]),
         ),
-      );
+      ));
     });
   }
 }

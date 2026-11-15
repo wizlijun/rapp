@@ -23,6 +23,10 @@ path = "src/bin/rapp-weaknet.rs"
 name = "fake-rapp-term"
 path = "src/bin/fake-rapp-term.rs"
 
+[[bin]]
+name = "measure-forward"
+path = "src/bin/measure_forward.rs"
+
 [lib]
 name = "rapp_testkit"
 path = "src/lib.rs"
@@ -33,11 +37,11 @@ rand.workspace = true
 tokio.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+rapp-net.workspace = true
 
 [dev-dependencies]
 quinn.workspace = true
 tempfile.workspace = true
-rapp-net.workspace = true
 rapp-service.workspace = true
 rapp-hub.workspace = true
 rapp-update.workspace = true

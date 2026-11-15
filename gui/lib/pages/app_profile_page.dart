@@ -336,7 +336,7 @@ class _AppProfilePageState extends State<AppProfilePage> {
               t),
           _label(t, '发送后'),
           _radio(t, '只贴，不按回车', AfterSend.none, afterSend, d.afterSend == null),
-          _radio(t, '贴完按回车', AfterSend.pressReturn, afterSend, d.afterSend == null),
+          _radio(t, '贴完按回车并收起输入板', AfterSend.pressReturn, afterSend, d.afterSend == null),
           _label(t, '输入区'),
           Row(children: [
             Text('显示「输入」', style: TextStyle(color: d.composer == null ? t.muted : t.text)),

@@ -437,10 +437,12 @@ void main() {
       await tester.pump();
     }
 
-    // Records compare their maps by identity: match the call by its parts.
+    // Records compare their maps by identity: match the call by its parts. The picture's focus
+    // (it holds the keys by itself, and lets them go when detached) is not what is looked at.
     void last(String method) {
-      expect(port.calls.last.$1, method);
-      expect(port.calls.last.$2, equals({'sid': 1}));
+      final c = port.calls.lastWhere((c) => c.$1 != 'picture_focus');
+      expect(c.$1, method);
+      expect(c.$2, equals({'sid': 1}));
     }
 
     // Holding the chord: the key repeats toggle nothing more.

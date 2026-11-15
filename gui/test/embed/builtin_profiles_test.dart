@@ -15,14 +15,14 @@ void main() {
     ]);
   });
 
-  test('every row: authoring field order, none / true / [] / tested false', () {
+  test('every row: authoring field order, return / true / [] / tested false', () {
     for (final e in (raw['apps'] as List).cast<Map>()) {
       expect(e.keys.toList(), [
         'name', 'ids', 'stream', 'afterSend', 'composer',
         if (e.containsKey('typeToCompose')) 'typeToCompose',
         'windows', 'tested',
       ]);
-      expect(e['afterSend'], 'none');
+      expect(e['afterSend'], 'return');
       expect(e['composer'], true);
       expect(e['windows'], isEmpty);
       expect(e['tested'], false);

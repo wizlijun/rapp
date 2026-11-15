@@ -19,6 +19,7 @@ import 'main_state.dart';
 import 'overview.dart';
 import 'side_panel.dart';
 import 'stage.dart';
+import 'shares_section.dart';
 import 'tokens.dart';
 import 'top_bar.dart';
 
@@ -129,6 +130,10 @@ class _MainWindowState extends State<MainWindow> {
           ),
         ),
         ListenableBuilder(
+          listenable: widget.monitor,
+          builder: (context, _) => SharesSection(key: const ValueKey('shares-local'), api: widget.monitor, online: widget.monitor.running),
+        ),
+        ListenableBuilder(
           listenable: widget.state,
           builder: (context, _) => AppProfilesSection(store: widget.state.profiles, openFolder: _openFolder),
         ),
@@ -221,6 +226,7 @@ class _MainWindowState extends State<MainWindow> {
                                   state: state,
                                   local: _local(),
                                   localBadge: updateBadge(widget.monitor.status?.update),
+                                  shares: widget.monitor,
                                 ),
                               ),
                             ),

@@ -85,13 +85,21 @@ pub struct State {
     /// Set to true once a new version is in place; `main` then stops and exits 0.
     pub restart: watch::Sender<bool>,
     /// This device's certificate and key (`device.crt` / `device.key`).
-    pub identity: Identity,
+    pub identity: Arc<Identity>,
     /// The devices that may connect without a key (`paired.json`).
     pub paired: Paired,
     /// The relay connection's state: `"off" | "connecting" | "connected" | "error"` and the error text.
     pub relay: Mutex<(&'static str, Option<String>)>,
     /// Bumped each time `set_relay` saves; the relay connection restarts when it changes.
     pub relay_settings: watch::Sender<u64>,
+    /// The access record of forwarded connections.
+    pub forward_log: crate::forward_log::ForwardLog,
+    /// The ports this device shares (`shares.json`).
+    pub shares: crate::shares::Shares,
+    /// The forwards running now.
+    pub forwards: crate::forward::Forwards,
+    /// Sends requests to other devices (LAN first, then the relay).
+    pub outbound: rapp_conn::dial::Outbound,
 }
 
 impl State {

@@ -4,9 +4,15 @@ pub mod autolock;
 mod cm;
 pub mod config;
 mod data;
+mod forward;
+pub mod forward_log;
 mod ipc;
 mod peer;
+mod pipe;
 mod relay_link;
+mod share_cmds;
+mod sharing;
+mod shares;
 mod state;
 mod term;
 mod update;
@@ -51,6 +57,8 @@ pub struct Opts {
     pub data: Option<DataOpts>,
     /// The LAN addresses registered on the relay; None: this machine's own (`rapp_net::addr::lan_addrs`).
     pub advertise_lan: Option<Vec<String>>,
+    /// How often the `forward_sum` lines are written (`forward_log::SUM_EVERY` in the real service).
+    pub forward_sum_every: Duration,
 }
 
 /// Where the running app is and the updater's timings (online-update plan Task 4).
@@ -107,11 +115,15 @@ impl Service {
             log.event(Lvl::Info, "relay_legacy_dropped", json!({}));
         }
         let (port, ipc_port) = (cfg.port.unwrap_or(DEFAULT_PORT), cfg.ipc_port.unwrap_or(DEFAULT_IPC_PORT));
-        let identity = Identity::load_or_create(&opts.home, "device")?;
+        let identity = Arc::new(Identity::load_or_create(&opts.home, "device")?);
         let paired = rapp_conn::Paired::load(&opts.home).unwrap_or_else(|e| {
             log.event(Lvl::Warn, "paired_error", json!({"err": format!("{e:#}")}));
             rapp_conn::Paired::empty(&opts.home)
         });
+        let (shares, unreadable) = shares::Shares::load(&opts.home);
+        if let Some(why) = unreadable {
+            log.event(Lvl::Warn, "shares_unreadable", json!({"err": why}));
+        }
         let server = device_server_config(&identity, &[ALPN_DEVICE, ALPN_PEER])?;
         let endpoint = quinn::Endpoint::server(server, ([0, 0, 0, 0], port).into()).with_context(|| format!("bind udp port {port}"))?;
         let port = endpoint.local_addr()?.port();
@@ -120,6 +132,8 @@ impl Service {
         let ipc_token = rapp_net::crypto::random_hex(16);
         rapp_net::config::write_private(&opts.home.join("ipc.token"), ipc_token.as_bytes())?;
 
+        let client_ep = rapp_net::quic::client_endpoint(([0, 0, 0, 0], 0).into())?;
+        let name = cfg.name.clone();
         let state = State {
             home: opts.home,
             bin_dir: opts.bin_dir,
@@ -133,16 +147,20 @@ impl Service {
             workers: workers::Workers::new(opts.worker_idle),
             changed: tokio::sync::watch::channel(0).0,
             cm: Mutex::new(None),
-            log,
+            log: log.clone(),
             log_dir: opts.log_dir,
             runner: opts.runner,
             update: Mutex::default(),
             update_opts: opts.update,
             restart: tokio::sync::watch::channel(false).0,
-            identity,
+            identity: identity.clone(),
             paired,
             relay: Mutex::new(("off", None)),
             relay_settings: tokio::sync::watch::channel(0).0,
+            forward_log: forward_log::ForwardLog::new(log.clone()),
+            shares,
+            forwards: forward::Forwards::new(),
+            outbound: rapp_conn::dial::Outbound::new(client_ep, identity.clone(), name),
         };
         let id = state.cfg.lock().unwrap().id.clone();
         let version = env!("CARGO_PKG_VERSION");
@@ -157,6 +175,7 @@ impl Service {
             update::spawn(state.clone()),
             autolock::spawn(state.clone(), opts.lock_grace),
             relay_link::spawn(state.clone(), opts.advertise_lan),
+            spawn_forward_sums(state.clone(), opts.forward_sum_every),
         ];
         if let Some(data) = opts.data {
             let name = state.cfg.lock().unwrap().name.clone();
@@ -191,14 +210,28 @@ impl Service {
             (f["secs"], f["reason"]) = (json!(now.saturating_sub(s.since)), json!("service stopped"));
             self.state.log.event(Lvl::Info, "session_end", f);
         }
+        self.state.forward_log.flush();
         self.state.log.event(Lvl::Info, "service_stop", json!({}));
         self.state.log.flush();
         for t in &self.tasks {
             t.abort();
         }
+        self.state.outbound.close();
         self.state.endpoint.close(0u32.into(), b"service stopped");
         self.state.workers.close_all();
     }
+}
+
+/// Writes the `forward_sum` lines every `every`.
+fn spawn_forward_sums(state: Arc<State>, every: Duration) -> JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(every);
+        tick.tick().await;
+        loop {
+            tick.tick().await;
+            state.forward_log.flush();
+        }
+    })
 }
 
 /// Truncates `path` once it is bigger than `max` (launchd keeps appending to the same file).

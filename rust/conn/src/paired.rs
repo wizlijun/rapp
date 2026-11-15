@@ -42,6 +42,28 @@ impl Paired {
         self.list.lock().unwrap().iter().any(|e| e.fp == *fp)
     }
 
+    /// The devices `who` can mean: an exact self-declared name, or a fingerprint that starts with
+    /// `who` (at least 8 hex digits, case ignored). Each with its name. An empty `who` means none.
+    pub fn find(&self, who: &str) -> Vec<(Fp, String)> {
+        if who.is_empty() {
+            return Vec::new();
+        }
+        let prefix = (who.len() >= 8 && who.bytes().all(|b| b.is_ascii_hexdigit())).then(|| who.to_ascii_lowercase());
+        let by_fp = |e: &Entry| prefix.as_deref().is_some_and(|p| e.fp.to_string().starts_with(p));
+        let list = self.list.lock().unwrap();
+        list.iter().filter(|e| e.name == who || by_fp(e)).map(|e| (e.fp, e.name.clone())).collect()
+    }
+
+    /// The name stored for `fp`, if any (a device that gave no name has none).
+    pub fn name_of(&self, fp: &Fp) -> Option<String> {
+        self.list.lock().unwrap().iter().find(|e| e.fp == *fp).map(|e| e.name.clone()).filter(|n| !n.is_empty())
+    }
+
+    /// Every device with its name (empty when it gave none), in the order of the file.
+    pub fn list(&self) -> Vec<(Fp, String)> {
+        self.list.lock().unwrap().iter().map(|e| (e.fp, e.name.clone())).collect()
+    }
+
     /// Adds the device, or updates the name of one already there; writes the file.
     pub fn add(&self, fp: &Fp, name: &str) -> Result<()> {
         let mut list = self.list.lock().unwrap();
@@ -94,6 +116,17 @@ mod tests {
         assert!(v[0]["since"].as_str().unwrap().ends_with('Z'));
     }
 
+    #[test]
+    fn list_is_in_file_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = Paired::load(dir.path()).unwrap();
+        assert!(p.list().is_empty());
+        p.add(&Fp([2; 32]), "second-fp-first").unwrap();
+        p.add(&Fp([1; 32]), "").unwrap();
+        p.add(&Fp([2; 32]), "renamed").unwrap();
+        assert_eq!(p.list(), vec![(Fp([2; 32]), "renamed".to_string()), (Fp([1; 32]), String::new())]);
+    }
+
     #[cfg(unix)]
     #[test]
     fn file_is_private() {
@@ -120,6 +153,29 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("paired.json"), "{nope").unwrap();
         assert!(Paired::load(dir.path()).is_err());
+    }
+
+    #[test]
+    fn find_by_name_or_fingerprint_prefix() {
+        let d = tempfile::tempdir().unwrap();
+        let p = Paired::empty(d.path());
+        let (a, b) = (Fp([0xab; 32]), Fp([0xcd; 32]));
+        p.add(&a, "mini").unwrap();
+        p.add(&b, "mini").unwrap(); // two devices that call themselves the same
+        p.add(&Fp([0xef; 32]), "书房").unwrap();
+        assert_eq!(p.find("书房").len(), 1);
+        assert_eq!(p.find("mini").len(), 2);
+        assert_eq!(p.find("abababab"), vec![(a, "mini".to_string())]);
+        assert_eq!(p.find("ABABABAB").len(), 1);
+        assert!(p.find("ababab").is_empty()); // under 8 hex digits is not a prefix
+        assert!(p.find("nobody").is_empty());
+        assert_eq!(p.name_of(&a).as_deref(), Some("mini"));
+        // a device that gave no name: found by its fingerprint, never by ""
+        let nameless = Fp([0x12; 32]);
+        p.add(&nameless, "").unwrap();
+        assert_eq!(p.name_of(&nameless), None);
+        assert!(p.find("").is_empty());
+        assert_eq!(p.find("12121212"), vec![(nameless, String::new())]);
     }
 
     #[test]
