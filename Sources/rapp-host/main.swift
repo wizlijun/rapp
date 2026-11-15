@@ -9,6 +9,7 @@ let usage = """
            rapp-host serve --app <bundle-id> (--token <secret> | --token-env <VAR>) [--port \(defaultPort)] [--bind <address>] [--json]
            rapp-host list-apps [--json]
            rapp-host check [--prompt] [--json]
+           rapp-host lock [--json]
            rapp-host version [--json]
     """
 
@@ -80,6 +81,20 @@ case let .check(json, prompt):
     let missing = missingPermissions(granted)
     if missing.isEmpty { output.finish(ExitCode.ok, "done") }
     output.finish(ExitCode.permission, "missing permission: \(missing.joined(separator: ", "))")
+
+case let .lock(json):
+    let output = WorkerOutput(json: json)
+    switch ScreenLocker.lock() {
+    case .locked:
+        output.result(json ? jsonLine(["ok": true]) : "locked")
+        output.finish(ExitCode.ok, "done")
+    case .already:
+        output.result(json ? jsonLine(["ok": true, "already": true]) : "already locked")
+        output.finish(ExitCode.ok, "done")
+    case let .failed(reason):
+        output.result(json ? jsonLine(["ok": false, "error": reason]) : "lock failed: \(reason)")
+        output.finish(ExitCode.runtime, reason)
+    }
 
 case let .serve(options):
     let output = WorkerOutput(json: options.json)
