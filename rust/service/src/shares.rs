@@ -9,8 +9,11 @@ use std::sync::Mutex;
 
 pub const MAX_SHARES: usize = 64;
 const FILE: &str = "shares.json";
+/// Where an unreadable `shares.json` goes before the first write replaces it.
+const BAD: &str = "shares.json.bad";
 
 /// Ports that usually expose a login, a proxy, a database or a container API.
+#[allow(dead_code)] // used by `rapp share`'s warning (Task 7)
 const SENSITIVE: [u16; 17] = [
     22, 23, 3389, 5900, 5901, 2375, 2376, 1080, 3128, 8118, 3306, 5432, 6379, 27017, 9200, 1433, 1521,
 ];
@@ -32,12 +35,14 @@ pub struct Share {
 /// The shares of this device, kept in `local/shares.json` as a JSON array.
 pub struct Shares {
     path: PathBuf,
-    items: Mutex<Vec<Share>>,
+    /// The table, and whether the file on disk is one `load` could not read (kept until the first write).
+    items: Mutex<(Vec<Share>, bool)>,
 }
 
 impl Shares {
     /// `home` is the device's `local/`. A missing file is an empty table. So is an unreadable one;
-    /// the second field then carries why, so the caller can log it. The file is left as it was.
+    /// the second field then carries why, so the caller can log it. The file is left as it was
+    /// until the first write, which first moves it to `shares.json.bad`.
     pub fn load(home: &Path) -> (Shares, Option<String>) {
         let path = home.join(FILE);
         let (items, why) = match std::fs::read(&path) {
@@ -48,18 +53,19 @@ impl Shares {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => (Vec::new(), None),
             Err(e) => (Vec::new(), Some(e.to_string())),
         };
-        (Shares { path, items: Mutex::new(items) }, why)
+        let bad = why.is_some();
+        (Shares { path, items: Mutex::new((items, bad)) }, why)
     }
 
     /// Sorted by port.
     pub fn list(&self) -> Vec<Share> {
-        let mut v = self.items.lock().unwrap().clone();
+        let mut v = self.items.lock().unwrap().0.clone();
         v.sort_by_key(|s| s.port);
         v
     }
 
     pub fn get(&self, port: u16) -> Option<Share> {
-        self.items.lock().unwrap().iter().find(|s| s.port == port).cloned()
+        self.items.lock().unwrap().0.iter().find(|s| s.port == port).cloned()
     }
 
     /// Adds, or replaces the share of the same port. Err("limit") at MAX_SHARES; Err("bad port") for 0.
@@ -68,28 +74,39 @@ impl Shares {
             return Err(anyhow!("bad port"));
         }
         let mut items = self.items.lock().unwrap();
-        let mut next = items.clone();
+        let mut next = items.0.clone();
         match next.iter().position(|s| s.port == share.port) {
             Some(i) => next[i] = share,
             None if next.len() >= MAX_SHARES => return Err(anyhow!("limit")),
             None => next.push(share),
         }
         next.sort_by_key(|s| s.port);
-        write_json(&self.path, &next)?;
-        *items = next;
-        Ok(())
+        self.save(&mut items, next)
     }
 
     /// True when there was one.
     pub fn remove(&self, port: u16) -> Result<bool> {
         let mut items = self.items.lock().unwrap();
-        if !items.iter().any(|s| s.port == port) {
+        if !items.0.iter().any(|s| s.port == port) {
             return Ok(false);
         }
-        let next: Vec<Share> = items.iter().filter(|s| s.port != port).cloned().collect();
-        write_json(&self.path, &next)?;
-        *items = next;
+        let next: Vec<Share> = items.0.iter().filter(|s| s.port != port).cloned().collect();
+        self.save(&mut items, next)?;
         Ok(true)
+    }
+
+    /// Writes `next` and makes it the table. An unreadable file is first kept as `shares.json.bad`
+    /// (replacing an older one), so the user's content is not lost.
+    fn save(&self, items: &mut (Vec<Share>, bool), next: Vec<Share>) -> Result<()> {
+        if items.1 {
+            match std::fs::rename(&self.path, self.path.with_file_name(BAD)) {
+                Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+                _ => items.1 = false,
+            }
+        }
+        write_json(&self.path, &next)?;
+        items.0 = next;
+        Ok(())
     }
 
     /// The shares `fp` may use: `allow` empty or containing it. Sorted by port.
@@ -101,6 +118,7 @@ impl Shares {
 }
 
 /// Ports the user should be warned about before sharing them.
+#[allow(dead_code)] // used by `rapp share`'s warning (Task 7)
 pub fn sensitive(port: u16) -> bool {
     SENSITIVE.contains(&port)
 }
@@ -181,6 +199,32 @@ mod tests {
         assert!(s.list().is_empty());
         assert!(why.is_some());
         assert_eq!(std::fs::read(d.path().join("shares.json")).unwrap(), b"{not json"); // left as it was
+    }
+
+    #[test]
+    fn an_unreadable_file_is_kept_as_bad_on_the_first_write() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("shares.json.bad"), b"older").unwrap();
+        std::fs::write(d.path().join("shares.json"), b"{not json").unwrap();
+        let (s, _) = Shares::load(d.path());
+        s.add(share(8000)).unwrap();
+        assert_eq!(std::fs::read(d.path().join("shares.json.bad")).unwrap(), b"{not json");
+        let (again, why) = Shares::load(d.path());
+        assert!(why.is_none());
+        assert_eq!(again.list(), [share(8000)]);
+        // only the first write keeps it: a later one leaves the .bad alone
+        s.add(share(8001)).unwrap();
+        assert_eq!(std::fs::read(d.path().join("shares.json.bad")).unwrap(), b"{not json");
+    }
+
+    #[test]
+    fn a_remove_that_changes_nothing_keeps_the_unreadable_file() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("shares.json"), b"{not json").unwrap();
+        let (s, _) = Shares::load(d.path());
+        assert!(!s.remove(8000).unwrap());
+        assert_eq!(std::fs::read(d.path().join("shares.json")).unwrap(), b"{not json");
+        assert!(!d.path().join("shares.json.bad").exists());
     }
 
     #[test]
