@@ -68,6 +68,11 @@ impl Emu {
         }
     }
 
+    /// Columns and rows.
+    pub fn size(&self) -> (u16, u16) {
+        (self.term.columns() as u16, self.term.screen_lines() as u16)
+    }
+
     pub fn resize(&mut self, cols: u16, rows: u16) {
         self.term.resize(Size { cols: cols.max(1) as usize, rows: rows.max(1) as usize });
     }

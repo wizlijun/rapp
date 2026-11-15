@@ -16,6 +16,7 @@ use crate::id::{default_name, session_name};
 use anyhow::{anyhow, Context};
 use portable_pty::{native_pty_system, CommandBuilder, ExitStatus, MasterPty, PtySize};
 use std::io::{Read, Write};
+use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -143,7 +144,7 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
 
     let (drained_tx, drained) = oneshot::channel();
     let sh = shared.clone();
-    std::thread::spawn(move || pump_output(from_pty, &sh, drained_tx));
+    std::thread::spawn(move || pump_output(from_pty, std::io::stdout(), &sh, drained_tx, Emu::feed));
     let to_window = shared.input.clone();
     // It may stay blocked on a read when run ends; the process exits under it.
     std::thread::spawn(move || pump_keyboard(to_window));
@@ -239,9 +240,15 @@ fn tick_sync(shared: &Shared) {
     }
 }
 
-/// The program's output: to the window first, then to the emulator. Says so on `drained` when the pty is done.
-fn pump_output(mut pty: Box<dyn Read + Send>, shared: &Shared, drained: oneshot::Sender<()>) {
-    let mut window = std::io::stdout();
+/// The program's output: to the window first, then to the emulator through `feed`. Says so on `drained` when the
+/// pty is done.
+fn pump_output(
+    mut pty: impl Read,
+    mut window: impl Write,
+    shared: &Shared,
+    drained: oneshot::Sender<()>,
+    feed: impl Fn(&mut Emu, &[u8]),
+) {
     let mut b = vec![0u8; 64 * 1024];
     loop {
         let n = match pty.read(&mut b) {
@@ -252,11 +259,23 @@ fn pump_output(mut pty: Box<dyn Read + Send>, shared: &Shared, drained: oneshot:
         };
         // A window that is gone is no reason to stop: viewers still see the screen.
         let _ = window.write_all(&b[..n]).and_then(|()| window.flush());
-        shared.emu.lock().unwrap_or_else(|e| e.into_inner()).feed(&b[..n]);
+        feed_guarded(shared, &b[..n], &feed);
         shared.activity.store(now(), Ordering::Relaxed);
         shared.rev.send_modify(|r| *r += 1);
     }
     let _ = drained.send(());
+}
+
+/// The emulator takes `bytes`. One that panics on them is replaced by a fresh one of the same size, so the output
+/// keeps reaching the window: this thread is the only one draining the pty.
+fn feed_guarded(shared: &Shared, bytes: &[u8], feed: &impl Fn(&mut Emu, &[u8])) {
+    let mut emu = shared.emu.lock().unwrap_or_else(|e| e.into_inner());
+    let size = emu.size();
+    if std::panic::catch_unwind(AssertUnwindSafe(|| feed(&mut emu, bytes))).is_err() {
+        // The window is raw: the line ends with its own carriage return.
+        eprint!("rapp-term: the emulator failed on the program's output; viewers start from a blank screen\r\n");
+        *emu = Emu::new(size.0, size.1);
+    }
 }
 
 /// The window's keyboard, into the same queue viewers type into.
@@ -357,5 +376,51 @@ impl Drop for Raw {
     fn drop(&mut self) {
         // Fails harmlessly when the window is gone.
         unsafe { libc::tcsetattr(0, libc::TCSANOW, &self.0) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::VecDeque;
+
+    /// Hands out one chunk per read.
+    struct Chunks(VecDeque<&'static [u8]>);
+
+    impl Read for Chunks {
+        fn read(&mut self, b: &mut [u8]) -> std::io::Result<usize> {
+            let Some(c) = self.0.pop_front() else { return Ok(0) };
+            b[..c.len()].copy_from_slice(c);
+            Ok(c.len())
+        }
+    }
+
+    fn shared(cols: u16, rows: u16) -> Shared {
+        Shared {
+            emu: Mutex::new(Emu::new(cols, rows)),
+            rev: watch::channel(0).0,
+            input: mpsc::unbounded_channel().0,
+            meta: Meta { name: "t".into(), command: "sh".into(), pid: 1, ticket: None },
+            viewers: AtomicU32::new(0),
+            ended: watch::channel(false).0,
+            activity: AtomicU64::new(0),
+        }
+    }
+
+    #[test]
+    fn an_emulator_panic_never_stops_the_window_s_output() {
+        let sh = shared(30, 4);
+        let mut window = Vec::new();
+        let (tx, mut drained) = oneshot::channel();
+        let pty = Chunks(VecDeque::from([&b"one "[..], b"boom ", b"two"]));
+        pump_output(pty, &mut window, &sh, tx, |emu: &mut Emu, b: &[u8]| {
+            assert!(!b.starts_with(b"boom"), "the emulator fell over");
+            emu.feed(b);
+        });
+        assert_eq!(window, b"one boom two");
+        assert!(drained.try_recv().is_ok());
+        // A fresh emulator, at the old size, with what came after.
+        let s = sh.emu.lock().unwrap().screen();
+        assert_eq!((s.cols, s.rows, s.lines[0].as_str()), (30, 4, "two"));
     }
 }
