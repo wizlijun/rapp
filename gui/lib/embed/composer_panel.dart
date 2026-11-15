@@ -35,6 +35,12 @@ const _line = 48.0;
 /// The box's border, top plus bottom.
 const _border = 2.0;
 
+/// ＋ and 发送's margin to the box (they are 40 square): one line is 40 + 2 × 8 = 56 inside the border.
+const _edge = 8.0;
+
+/// The editor's extra room above and below, so its one line (48) fills those 56.
+const _pad = (40 + 2 * _edge - _line) / 2;
+
 class ComposerPanel extends StatefulWidget {
   const ComposerPanel({
     super.key,
@@ -45,7 +51,7 @@ class ComposerPanel extends StatefulWidget {
     this.editor,
   });
 
-  /// For `blurPicture`: keys typed here stay with rapp.
+  /// For `holdForPanel`: keys typed here stay with rapp.
   final MainState state;
   final RemoteSession session;
   final SessionPort port;
@@ -199,7 +205,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
     await _attached;
     if (!mounted) return;
     _ed.focus();
-    widget.state.blurPicture();
+    widget.state.holdForPanel(_s);
     if (_m.takeReplay()) {
       // The held compose letter goes back to the window only after the editor is the text input
       // client (focus attaches it in a microtask), so B's input method composes it: next frame.
@@ -376,7 +382,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
     // A press anywhere on the panel takes key focus from the picture (R24).
     return Listener(
       key: const Key('composer-panel'),
-      onPointerDown: (_) => widget.state.blurPicture(),
+      onPointerDown: (_) => widget.state.holdForPanel(_s),
       child: ListenableBuilder(
         listenable: Listenable.merge([_s, _m, widget.state.history]),
         builder: (context, _) {
@@ -391,7 +397,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
             cursor: t.text,
           );
           // Inside the border; the editor never gets less than one line.
-          final inner = math.max(_line, widget.maxHeight - _border);
+          final inner = math.max(_line + 2 * _pad, widget.maxHeight - _border);
           final inFlight = _m.inFlight;
           return Column(
             mainAxisSize: MainAxisSize.min,
@@ -429,7 +435,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
                           children: [
                             if (_m.blocks.isNotEmpty)
                               ConstrainedBox(
-                                constraints: BoxConstraints(maxHeight: inner - _line),
+                                constraints: BoxConstraints(maxHeight: math.max(0, inner - _line - 2 * _pad)),
                                 child: SingleChildScrollView(
                                   child: Padding(
                                     padding: const EdgeInsets.only(top: 8),
@@ -441,14 +447,24 @@ class _ComposerPanelState extends State<ComposerPanel> {
                                   ),
                                 ),
                               ),
-                            // What is left after the blocks row, never under one line.
+                            // What is left after the blocks row, never under one line; [_pad] above and
+                            // below it, so one line is as tall as ＋ and 发送 with their margins.
                             Flexible(
-                              child: LayoutBuilder(
-                                builder: (context, c) => _ed.view(
-                                  context,
-                                  style: style,
-                                  hint: _recall.isEmpty ? '写给 $_to' : '写给 $_to · ↑ 上一条',
-                                  maxHeight: math.max(_line, c.maxHeight),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(vertical: _pad),
+                                // Selecting and scrolling stay the text's: a floating panel moves from here
+                                // only after a touch held still (composer_float.dart).
+                                child: MetaData(
+                                  metaData: composerTextArea,
+                                  behavior: HitTestBehavior.translucent,
+                                  child: LayoutBuilder(
+                                    builder: (context, c) => _ed.view(
+                                      context,
+                                      style: style,
+                                      hint: _recall.isEmpty ? '写给 $_to' : '写给 $_to · ↑ 上一条',
+                                      maxHeight: math.max(_line, c.maxHeight),
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
@@ -456,9 +472,9 @@ class _ComposerPanelState extends State<ComposerPanel> {
                         ),
                       ),
                     ),
-                    // ＋ and 发送: 40 square, the same 4 to the border, between them and (one line) above.
+                    // ＋ and 发送: 40 square, [_edge] to the border on every side (one line), 4 between them.
                     Padding(
-                      padding: const EdgeInsets.all(4),
+                      padding: const EdgeInsets.all(_edge),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -468,7 +484,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
                             onAttach: _attach,
                             history: widget.state.history,
                             historyKey: widget.state.historyKeyOf(_s),
-                            onPress: widget.state.blurPicture,
+                            onPress: () => widget.state.holdForPanel(_s),
                             onReturnAfter: _s.appId.isEmpty
                                 ? null
                                 : (on) => widget.state.setAfterSend(_s, on ? AfterSend.pressReturn : AfterSend.none),
@@ -598,7 +614,7 @@ List<Widget> composerLayer(
           if ((session.composer.open && button) || (transfer == null && !button)) return const SizedBox.shrink();
           final t = RappTokens.of(context);
           return Listener(
-            onPointerDown: (_) => state.blurPicture(),
+            onPointerDown: (_) => state.holdForPanel(session),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [

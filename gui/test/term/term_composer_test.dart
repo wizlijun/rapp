@@ -198,9 +198,10 @@ void main() {
     expect(text(tester), isEmpty);
     expect(find.text('发送中'), findsNothing);
     expect(keys(), isEmpty, reason: 'no Return with afterSend none');
+    expect(s.currentRemote!.composer.open, isTrue, reason: 'only 直接回车且隐藏 hides the panel');
   });
 
-  testWidgets('afterSend pressReturn sends Enter after the paste is in', (tester) async {
+  testWidgets('afterSend pressReturn (直接回车且隐藏) sends Enter after the paste is in, then hides the panel', (tester) async {
     await openTerm(tester);
     s.currentRemote!.setProfile(const ResolvedProfile(afterSend: AfterSend.pressReturn));
     await openPanel(tester);
@@ -211,6 +212,8 @@ void main() {
     expect(keys(), [
       ['Enter'],
     ]);
+    await settle(tester);
+    expect(s.currentRemote!.composer.open, isFalse);
   });
 
   testWidgets('a failed paste keeps the text and says why', (tester) async {

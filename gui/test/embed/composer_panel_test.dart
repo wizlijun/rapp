@@ -101,7 +101,7 @@ void main() {
       await tester.pump();
       final host = rect(tester, 'host');
       final p = rect(tester, 'composer-panel');
-      expect(p.size, const Size(720, 48 + 2)); // one 48 line inside a 1 px border
+      expect(p.size, const Size(720, 56 + 2)); // one line as tall as ＋/发送 and their 8s, inside a 1 px border
       expect(p.center.dx - host.left, 500);
       expect(p.bottom - host.top, 692);
       // W2: 15 on 22, no MATRIX glow in the editor.
@@ -111,7 +111,7 @@ void main() {
       expect(style.shadows, isEmpty);
     });
 
-    testWidgets('＋ and 发送: 40 square with an even 4 all round, inside the one-line box', (tester) async {
+    testWidgets('＋ and 发送: 40 square with an even 8 all round, inside the one-line box', (tester) async {
       big(tester);
       await tester.pumpWidget(layer());
       await tester.pump();
@@ -119,12 +119,13 @@ void main() {
       final plus = rect(tester, 'composer-plus'), send = rect(tester, 'composer-send');
       expect(plus.size, const Size(40, 40));
       expect(send.size, const Size(40, 40));
-      expect(box.right - send.right, 4);
-      expect(box.bottom - send.bottom, 4);
-      expect(send.top - box.top, 4);
+      expect(box.right - send.right, 8);
+      expect(box.bottom - send.bottom, 8);
+      expect(send.top - box.top, 8);
+      expect(plus.left - box.left, greaterThan(8));
       expect(send.left - plus.right, 4);
       expect(plus.top, send.top);
-      expect(box.height, 48);
+      expect(box.height, 56);
     });
 
     testWidgets('long text grows upward to half the stage, bottom and width fixed', (tester) async {
@@ -142,7 +143,7 @@ void main() {
       expect(after.width, before.width);
     });
 
-    testWidgets('Enter sends and the box stays, one line, caret inside (W7)', (tester) async {
+    testWidgets('Enter sends and the box stays, one line, caret inside (W7); once all is in, 直接回车且隐藏 hides it', (tester) async {
       big(tester);
       await tester.pumpWidget(layer());
       await tester.pump();
@@ -155,13 +156,30 @@ void main() {
         {'text': 'a'},
       ]);
       expect(text(tester), isEmpty);
-      expect(rect(tester, 'composer-box').height, 50);
+      expect(rect(tester, 'composer-box').height, 58);
       expect(fieldFocused(tester), isTrue);
       expect(find.text('发送中'), findsOneWidget);
       rs.apply(const ComposerStateEvent(1, done: ComposerDone(1, null)));
       await tester.pump();
       expect(find.text('发送中'), findsNothing);
+      // The default 直接回车且隐藏: the Return goes and the panel hides.
+      expect(rs.composer.open, isFalse);
+      expect(find.byKey(const Key('composer-panel')), findsNothing);
+    });
+
+    testWidgets('without 直接回车且隐藏 the panel stays once all is in', (tester) async {
+      big(tester);
+      rs.setProfile(const ResolvedProfile(afterSend: AfterSend.none));
+      await tester.pumpWidget(layer());
+      await tester.pump();
+      await tester.enterText(fieldFinder, 'a');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pump();
+      rs.apply(const ComposerStateEvent(1, done: ComposerDone(1, null)));
+      await tester.pump();
+      expect(rs.composer.open, isTrue);
       expect(find.byKey(const Key('composer-panel')), findsOneWidget);
+      expect(fieldFocused(tester), isTrue);
     });
 
     testWidgets('the send button sends, and waits while a send runs', (tester) async {
@@ -321,9 +339,9 @@ void main() {
       expect(box.height, greaterThan(100));
       expect(send.size, const Size(40, 40));
       expect(plus.size, const Size(40, 40));
-      expect(send.bottom, box.bottom - 1 - 4); // 4 inside the 1 px border
-      expect(plus.bottom, box.bottom - 1 - 4);
-      expect(send.right, box.right - 1 - 4);
+      expect(send.bottom, box.bottom - 1 - 8); // 8 inside the 1 px border
+      expect(plus.bottom, box.bottom - 1 - 8);
+      expect(send.right, box.right - 1 - 8);
       expect(plus.right, send.left - 4);
     });
 
@@ -629,7 +647,7 @@ void main() {
         expect(esc.right, lessThan(label.left));
       });
 
-      testWidgets('直接回车: checked by default, a tap turns it off for this app and keeps the menu open', (tester) async {
+      testWidgets('直接回车且隐藏: checked by default, a tap turns it off for this app and keeps the menu open', (tester) async {
         big(tester);
         final x = RemoteSession(3, 'Notes', appId: 'com.x')..composer.open = true;
         addTearDown(x.dispose);
@@ -642,7 +660,7 @@ void main() {
         await openMenu(tester);
         final row = find.byKey(const Key('composer-plus-return'));
         Icon box() => tester.widget<Icon>(find.descendant(of: row, matching: find.byType(Icon)));
-        expect(find.descendant(of: row, matching: find.text('直接回车')), findsOneWidget);
+        expect(find.descendant(of: row, matching: find.text('直接回车且隐藏')), findsOneWidget);
         expect(box().icon, Icons.check_box);
         await tester.tap(row);
         await tester.pump();
@@ -655,7 +673,7 @@ void main() {
         expect(box().icon, Icons.check_box);
       });
 
-      testWidgets('直接回车 is not offered for a session without an app id', (tester) async {
+      testWidgets('直接回车且隐藏 is not offered for a session without an app id', (tester) async {
         big(tester);
         await tester.pumpWidget(layer());
         await tester.pump();
@@ -772,12 +790,12 @@ void main() {
           width: 720, child: ComposerPanel(state: es, session: rs, port: port, maxHeight: 350, editor: () => ed)));
       await tester.pumpWidget(withEditor());
       await tester.pump();
-      expect(ed.lastMaxHeight, 348); // 350 less the border
+      expect(ed.lastMaxHeight, 340); // 350 less the border and 4 above and below
       rs.composer.apply(const PasteResult(blocks: [BlockChip(1, '[图片 #1 10×20]'), BlockChip(2, '[文件 a 1 B]')]));
       await tester.pump();
       final row = tester.getSize(find.byType(SingleChildScrollView)).height;
       expect(row, greaterThan(0));
-      expect(ed.lastMaxHeight, 348 - row);
+      expect(ed.lastMaxHeight, 340 - row);
       final box = rect(tester, 'composer-box');
       final edRect = tester.getRect(find.byKey(const Key('fake-editor')));
       expect(box.height, lessThanOrEqualTo(350));
@@ -795,6 +813,7 @@ void main() {
 
     testWidgets('many failed rows scroll; the hint line, the editor and 发送 stay on stage (I2)', (tester) async {
       big(tester);
+      rs.setProfile(const ResolvedProfile(afterSend: AfterSend.none));
       for (var i = 0; i < 8; i++) {
         rs.composer.setDraft('row $i');
         await rs.composer.submit();
@@ -1040,7 +1059,7 @@ void main() {
       expect(g.center.dx, 400);
     });
 
-    testWidgets('the grip bar shows only with the mouse over the panel, or while dragging', (tester) async {
+    testWidgets('the grip bar shows with the mouse over the panel, while dragging, and after a touch', (tester) async {
       await showPicture(tester);
       await openPanel(tester);
       double bar() => tester.widget<AnimatedOpacity>(find.byKey(const Key('composer-grip-bar'))).opacity;
@@ -1056,19 +1075,38 @@ void main() {
       await mouse.moveTo(const Offset(400, 20));
       await tester.pump();
       expect(bar(), 0);
-      // A touch drag shows it while it moves.
+      // A touch drag shows it while it moves, and after: a touch screen has no hover.
       final g = await tester.startGesture(tester.getCenter(grip));
       await g.moveBy(const Offset(0, -40));
       await tester.pump();
       expect(bar(), 1);
       await g.up();
       await tester.pump();
+      expect(bar(), 1);
+      // A tap elsewhere hides it again.
+      await tester.tapAt(const Offset(400, 20));
+      await tester.pump();
       expect(bar(), 0);
       await mouse.removePointer();
       await tester.pump(kDoubleTapTimeout);
     });
 
-    testWidgets('a small × at the right of the grip row shows with the bar and collapses the panel', (tester) async {
+    testWidgets('a touch on the panel shows the bar and the × (no hover to show them)', (tester) async {
+      await showPicture(tester);
+      await openPanel(tester);
+      final close = find.byKey(const Key('composer-grip-close'));
+      double shown() => tester.widget<AnimatedOpacity>(
+          find.ancestor(of: close, matching: find.byType(AnimatedOpacity)).first).opacity;
+      expect(shown(), 0);
+      await tester.tapAt(tester.getCenter(fieldFinder));
+      await tester.pump();
+      expect(shown(), 1);
+      await tester.tap(close);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('composer-panel')), findsNothing);
+    });
+
+    testWidgets('a small × right beside the grip shows with the bar and collapses the panel', (tester) async {
       await showPicture(tester);
       await openPanel(tester);
       final close = find.byKey(const Key('composer-grip-close'));
@@ -1083,7 +1121,8 @@ void main() {
       final x = tester.getRect(close), p = panelRect(tester), g = tester.getRect(grip);
       expect(x.bottom, lessThanOrEqualTo(p.top));
       expect(x.center.dy, g.center.dy);
-      expect(p.right - x.right, lessThan(16));
+      expect(x.left, g.right);
+      expect(g.center.dx, p.center.dx);
       await mouse.moveTo(x.center);
       await tester.pump();
       expect(shown(), 1);
@@ -1166,6 +1205,89 @@ void main() {
       await tester.pump(kDoubleTapTimeout);
       expect(panelRect(tester).bottom, 392);
       expect(find.text('拖动；双击回到底部居中'), findsNothing);
+    });
+
+    Offset blank(WidgetTester tester) {
+      // Under 发送, in its 8 to the border: on the panel, off the text.
+      final box = tester.getRect(find.byKey(const Key('composer-box')));
+      final send = tester.getRect(find.byKey(const Key('composer-send')));
+      return Offset(send.center.dx, box.bottom - 4);
+    }
+
+    for (final kind in const [PointerDeviceKind.touch, PointerDeviceKind.mouse]) {
+      testWidgets('a ${kind.name} drag anywhere on the panel off the text moves it', (tester) async {
+        await showPicture(tester);
+        await openPanel(tester);
+        final g = await tester.startGesture(blank(tester), kind: kind);
+        for (final m in const [Offset(-10, -100), Offset(-10, -100)]) {
+          await g.moveBy(m);
+          await tester.pump();
+        }
+        await g.up();
+        await tester.pump();
+        await tester.pump(kDoubleTapTimeout);
+        expect(panelRect(tester).bottom, 392);
+        expect(panelRect(tester).center.dx, 380);
+        expect(es.profiles.resolve('Safari').composerAt, InputPoint.at(const Offset(380, 392), const Size(800, 600)));
+      });
+    }
+
+    for (final kind in const [PointerDeviceKind.touch, PointerDeviceKind.mouse]) {
+      testWidgets('a quick ${kind.name} drag on the text leaves the panel where it is', (tester) async {
+        await showPicture(tester);
+        await openPanel(tester);
+        await tester.enterText(fieldFinder, 'some text to select');
+        await tester.pump();
+        final g = await tester.startGesture(tester.getCenter(fieldFinder), kind: kind);
+        for (final m in const [Offset(-10, -100), Offset(-10, -100)]) {
+          await g.moveBy(m);
+          await tester.pump();
+        }
+        await g.up();
+        await tester.pump();
+        await tester.pump(kDoubleTapTimeout);
+        expect(panelRect(tester).bottom, 592);
+        expect(es.profiles.resolve('Safari').composerAt, isNull);
+        expect(text(tester), 'some text to select');
+      });
+    }
+
+    testWidgets('the picture holds the keys until the panel takes the caret, and gets them back on collapse', (tester) async {
+      await showPicture(tester);
+      await tester.pump();
+      expect(es.pictureFocused, isNotNull);
+      await openPanel(tester);
+      expect(fieldFocused(tester), isTrue);
+      expect(es.pictureFocused, isNull);
+      // A press on the panel (off the text) keeps the keys with it.
+      await tester.tapAt(blank(tester));
+      await tester.pump();
+      await tester.pump();
+      expect(es.pictureFocused, isNull);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('composer-panel')), findsNothing);
+      expect(es.pictureFocused, isNotNull);
+    });
+
+    testWidgets('a touch held still on the text, then moved, moves the panel', (tester) async {
+      await showPicture(tester);
+      await openPanel(tester);
+      await tester.enterText(fieldFinder, 'keep');
+      await tester.pump();
+      final g = await tester.startGesture(tester.getCenter(fieldFinder));
+      await tester.pump(const Duration(milliseconds: 400));
+      for (final m in const [Offset(-10, -100), Offset(-10, -100)]) {
+        await g.moveBy(m);
+        await tester.pump();
+      }
+      await g.up();
+      await tester.pump();
+      await tester.pump(kDoubleTapTimeout);
+      expect(panelRect(tester).bottom, 392);
+      expect(panelRect(tester).center.dx, 380);
+      expect(text(tester), 'keep');
+      expect(fieldFocused(tester), isTrue);
     });
 
     testWidgets('a two-finger trackpad scroll over the grip does not move the panel', (tester) async {

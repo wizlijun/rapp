@@ -156,7 +156,7 @@ class AppProfileStore extends ChangeNotifier {
     _commit();
   }
 
-  /// Whether the app gets a Return after a submitted paste (the ＋ menu's 「直接回车」, the settings page's radios).
+  /// Whether the app gets a Return after a submitted paste (the ＋ menu's 「直接回车且隐藏」, the settings page's radios).
   void setAfterSend(String appId, String appName, AfterSend a) {
     _target(appId, appName).afterSend = a;
     _commit();

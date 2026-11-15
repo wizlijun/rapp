@@ -83,7 +83,7 @@ class ComposerPlus extends StatefulWidget {
   final InputHistory? history;
   final String? historyKey;
 
-  /// 「直接回车」 toggled: whether a submit gets a Return after its paste (the app's afterSend).
+  /// 「直接回车且隐藏」 toggled: whether a submit gets a Return after its paste, then hides the panel (the app's afterSend).
   /// No such row without it.
   final ValueChanged<bool>? onReturnAfter;
 
@@ -192,9 +192,9 @@ class _ComposerPlusState extends State<ComposerPlus> {
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Row(
                 children: [
-                  Text('直接回车', style: TextStyle(color: t.text)),
+                  Text('直接回车且隐藏', style: TextStyle(color: t.text)),
                   const SizedBox(width: 8),
-                  Text('贴完按回车', style: TextStyle(color: t.muted, fontSize: 12)),
+                  Text('贴完按回车再收起', style: TextStyle(color: t.muted, fontSize: 12)),
                   const Spacer(),
                   Icon(on ? Icons.check_box : Icons.check_box_outline_blank, size: 20, color: on ? t.accent : t.muted),
                 ],

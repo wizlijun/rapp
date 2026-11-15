@@ -250,6 +250,19 @@ void main() {
       expect(painter(t).waiting, isFalse);
     }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
 
+    testWidgets('Tab and the arrows an exited pane lets through keep the focus on the terminal', (t) async {
+      port.paneLists[1] = [tp(3, 'claude', active: true, dead: true)];
+      model.apply(scr(['\$ ']));
+      await show(t);
+      await focusStage(t);
+      final term = FocusManager.instance.primaryFocus;
+      for (final k in [LogicalKeyboardKey.tab, LogicalKeyboardKey.arrowUp, LogicalKeyboardKey.arrowLeft]) {
+        await chord(t, [], k);
+        await t.pump();
+        expect(FocusManager.instance.primaryFocus, term);
+      }
+    }, variant: TargetPlatformVariant.only(TargetPlatform.linux));
+
     testWidgets('a letter typed while reading history goes back to the latest', (t) async {
       final rows = [for (var i = 0; i < 10; i++) 'row $i'];
       model.apply(scr(rows, hist: 5, limit: 2000));

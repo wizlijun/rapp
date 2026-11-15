@@ -1,10 +1,11 @@
 // The writing panel over an app window (floating-composer spec §4): it floats over a still
-// picture where the app's `composerAt` says, and a grip on its top edge moves it. Terminals keep
-// the bottom-centre panel and the lift (composer_panel.dart).
+// picture where the app's `composerAt` says, and a drag on it moves it. Terminals keep the
+// bottom-centre panel and the lift (composer_panel.dart).
 import 'dart:math' as math;
 
-import 'package:flutter/gestures.dart' show DragStartBehavior, PointerDeviceKind;
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderMetaData;
 
 import '../ui/tokens.dart';
 import 'app_profile.dart';
@@ -16,6 +17,56 @@ const composerMargin = 8.0;
 
 /// The grip's hit area (spec: at least 48×20).
 const gripSize = Size(48, 20);
+
+/// The collapse ×'s hit area, right beside the grip.
+const _closeSize = Size(28, 20);
+
+/// Marks the panel's text area (a [MetaData] around the editor): there a mouse selects text and a
+/// touch scrolls or selects as usual, and only a touch held still ([_holdToMove]) moves the panel.
+/// Anywhere else on the panel a drag moves it at once.
+final composerTextArea = Object();
+
+/// How long a touch rests on the text before it moves the panel: under the text's own long press
+/// (500ms), so the move wins.
+const _holdToMove = Duration(milliseconds: 350);
+
+/// No trackpad: a two-finger scroll over the panel scrolls the picture, it does not move the panel.
+const _dragDevices = {
+  PointerDeviceKind.touch,
+  PointerDeviceKind.mouse,
+  PointerDeviceKind.stylus,
+  PointerDeviceKind.invertedStylus,
+  PointerDeviceKind.unknown,
+};
+
+bool _onText(PointerEvent e) {
+  final r = HitTestResult();
+  WidgetsBinding.instance.hitTestInView(r, e.position, e.viewId);
+  return r.path.any((h) {
+    final target = h.target;
+    return target is RenderMetaData && identical(target.metaData, composerTextArea);
+  });
+}
+
+/// A drag that starts on the panel outside its text.
+class _PanelPan extends PanGestureRecognizer {
+  _PanelPan({super.debugOwner}) : super(supportedDevices: _dragDevices);
+
+  @override
+  bool isPointerAllowed(PointerEvent event) => super.isPointerAllowed(event) && !_onText(event);
+}
+
+/// A touch held still on the text, then moved.
+class _TextHold extends LongPressGestureRecognizer {
+  _TextHold({super.debugOwner})
+      : super(
+          duration: _holdToMove,
+          supportedDevices: const {PointerDeviceKind.touch, PointerDeviceKind.stylus, PointerDeviceKind.invertedStylus},
+        );
+
+  @override
+  bool isPointerAllowed(PointerDownEvent event) => super.isPointerAllowed(event) && _onText(event);
+}
 
 /// Top-left of a [panel]-sized box whose bottom centre is [bc], kept [composerMargin] inside
 /// [stage]. Where a range is empty (a panel larger than the stage), the left or top margin wins.
@@ -31,8 +82,9 @@ Offset _topLeftOf(Offset bc, Size stage, Size panel) {
 Offset composerTopLeft(InputPoint at, Size stage, Size panel) => _topLeftOf(at.inContent(stage), stage, panel);
 
 /// The writing panel ([child]) floating at the session's app's place, with the grip above it.
-/// A drag moves it and, on release, [onPlace] gets the new place; a double-tap on the grip gives
-/// [onPlace] null (back to [defaultComposerAt]). Either way the caret goes back to the editor.
+/// A drag on it (on its text, only after a touch held still) moves it and, on release, [onPlace]
+/// gets the new place; a double-tap on the grip gives [onPlace] null (back to [defaultComposerAt]).
+/// Either way the caret goes back to the editor.
 class FloatingComposer extends StatefulWidget {
   const FloatingComposer({super.key, required this.session, required this.onPlace, required this.child});
 
@@ -54,6 +106,13 @@ class _FloatingComposerState extends State<FloatingComposer> {
   /// The pointer is over the panel or its grip: only then (or while dragging) is the bar drawn.
   bool _hover = false;
 
+  /// A touch landed on the panel and no tap elsewhere since: a touch screen has no hover, so this
+  /// shows the bar and the × instead.
+  bool _touched = false;
+
+  /// Where the held touch was last, for its moves.
+  Offset? _held;
+
   InputPoint get _at => widget.session.profile.composerAt ?? defaultComposerAt;
 
   Size get _panel => _box.currentContext?.size ?? Size.zero;
@@ -64,12 +123,13 @@ class _FloatingComposerState extends State<FloatingComposer> {
     return _topLeftOf(bc, _stage, p) + Offset(p.width / 2, p.height);
   }
 
-  void _start(DragStartDetails _) => setState(() => _drag = _seen(_at.inContent(_stage)));
+  void _start() => setState(() => _drag = _seen(_at.inContent(_stage)));
 
   // Moved from where it is seen, so going past an edge and back has no dead zone.
-  void _update(DragUpdateDetails d) => setState(() => _drag = _seen((_drag ?? _at.inContent(_stage)) + d.delta));
+  void _move(Offset delta) => setState(() => _drag = _seen((_drag ?? _at.inContent(_stage)) + delta));
 
-  void _end(DragEndDetails _) {
+  void _end() {
+    _held = null;
     final bc = _drag;
     if (bc == null) return;
     final p = InputPoint.at(bc, _stage);
@@ -79,7 +139,10 @@ class _FloatingComposerState extends State<FloatingComposer> {
     widget.session.composer.wantFocus();
   }
 
-  void _cancel() => setState(() => _drag = null);
+  void _cancel() {
+    _held = null;
+    setState(() => _drag = null);
+  }
 
   void _reset() {
     widget.onPlace(null);
@@ -89,22 +152,11 @@ class _FloatingComposerState extends State<FloatingComposer> {
   @override
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
+    final shown = (_hover || _touched) && _drag == null;
+    // The drag itself is the panel's (below); the grip shows where to take it, and resets on a double-tap.
     final grip = GestureDetector(
       key: const Key('composer-grip'),
       behavior: HitTestBehavior.opaque,
-      dragStartBehavior: DragStartBehavior.down,
-      // No trackpad: a two-finger scroll over the grip scrolls the picture, it does not move the panel.
-      supportedDevices: const {
-        PointerDeviceKind.touch,
-        PointerDeviceKind.mouse,
-        PointerDeviceKind.stylus,
-        PointerDeviceKind.invertedStylus,
-        PointerDeviceKind.unknown,
-      },
-      onPanStart: _start,
-      onPanUpdate: _update,
-      onPanEnd: _end,
-      onPanCancel: _cancel,
       onDoubleTap: _reset,
       child: MouseRegion(
         cursor: _drag == null ? SystemMouseCursors.grab : SystemMouseCursors.grabbing,
@@ -120,7 +172,7 @@ class _FloatingComposerState extends State<FloatingComposer> {
               child: Center(
                 child: AnimatedOpacity(
                   key: const Key('composer-grip-bar'),
-                  opacity: _hover || _drag != null ? 1 : 0,
+                  opacity: _hover || _touched || _drag != null ? 1 : 0,
                   duration: const Duration(milliseconds: 120),
                   child: Container(
                     width: 32,
@@ -134,9 +186,8 @@ class _FloatingComposerState extends State<FloatingComposer> {
         ),
       ),
     );
-    // A small × at the right end of the grip row: collapses the panel (as Esc does), keeping the text.
+    // A small × right beside the grip: collapses the panel (as Esc does), keeping the text.
     // Shown with the bar, and only pressable while shown, so an unseen one never takes a click.
-    final shown = _hover && _drag == null;
     final close = AnimatedOpacity(
       opacity: shown ? 1 : 0,
       duration: const Duration(milliseconds: 120),
@@ -152,9 +203,8 @@ class _FloatingComposerState extends State<FloatingComposer> {
               key: const Key('composer-grip-close'),
               onTap: widget.session.composer.collapse,
               borderRadius: BorderRadius.circular(t.r),
-              child: SizedBox(
-                width: 28,
-                height: gripSize.height,
+              child: SizedBox.fromSize(
+                size: _closeSize,
                 child: Icon(Icons.close, size: 14, color: t.muted),
               ),
             ),
@@ -166,23 +216,65 @@ class _FloatingComposerState extends State<FloatingComposer> {
       _stage = c.biggest;
       return CustomSingleChildLayout(
         delegate: _Place(_drag ?? _at.inContent(_stage), panelWidth(_stage.width)),
-        child: MouseRegion(
-          onEnter: (_) => setState(() => _hover = true),
-          onExit: (_) => setState(() => _hover = false),
-          child: Column(
-            key: _box,
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              SizedBox(
-                height: gripSize.height,
-                child: Stack(children: [
-                  Center(child: grip),
-                  Positioned(right: 4, top: 0, bottom: 0, child: Material(type: MaterialType.transparency, child: close)),
-                ]),
+        child: TapRegion(
+          onTapOutside: (_) {
+            if (_touched) setState(() => _touched = false);
+          },
+          child: Listener(
+            onPointerDown: (e) {
+              if (!_touched && e.kind != PointerDeviceKind.mouse && e.kind != PointerDeviceKind.trackpad) {
+                setState(() => _touched = true);
+              }
+            },
+            child: MouseRegion(
+              onEnter: (_) => setState(() => _hover = true),
+              onExit: (_) => setState(() => _hover = false),
+              child: RawGestureDetector(
+                gestures: {
+                  _PanelPan: GestureRecognizerFactoryWithHandlers<_PanelPan>(
+                    () => _PanelPan(debugOwner: this),
+                    (r) => r
+                      ..dragStartBehavior = DragStartBehavior.down
+                      ..onStart = ((_) => _start())
+                      ..onUpdate = ((d) => _move(d.delta))
+                      ..onEnd = ((_) => _end())
+                      ..onCancel = _cancel,
+                  ),
+                  _TextHold: GestureRecognizerFactoryWithHandlers<_TextHold>(
+                    () => _TextHold(debugOwner: this),
+                    (r) => r
+                      ..onLongPressStart = (d) {
+                        _held = d.globalPosition;
+                        _start();
+                      }
+                      ..onLongPressMoveUpdate = (d) {
+                        final from = _held ?? d.globalPosition;
+                        _held = d.globalPosition;
+                        _move(d.globalPosition - from);
+                      }
+                      ..onLongPressEnd = ((_) => _end())
+                      ..onLongPressCancel = _cancel,
+                  ),
+                },
+                child: Column(
+                  key: _box,
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // The grip centred and the × right after it (a blank as wide before, keeping the grip centred).
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        SizedBox.fromSize(size: _closeSize),
+                        grip,
+                        Material(type: MaterialType.transparency, child: close),
+                      ],
+                    ),
+                    Flexible(child: widget.child),
+                  ],
+                ),
               ),
-              Flexible(child: widget.child),
-            ],
+            ),
           ),
         ),
       );
