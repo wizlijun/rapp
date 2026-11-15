@@ -573,6 +573,11 @@ async fn allow_names_a_known_device_or_is_refused() {
     assert_eq!(c.call(json!({"cmd":"share","ports":[port],"allow":[prefix]})).await["ok"], true);
     assert_eq!(c.call(json!({"cmd":"share","ports":[port],"allow":["nobody"]})).await,
                json!({"ok":false,"error":"unknown device: nobody"}));
+    // a blank entry names no device
+    for blank in ["", "  "] {
+        assert_eq!(c.call(json!({"cmd":"share","ports":[port + 1],"allow":[blank]})).await,
+                   json!({"ok":false,"error":format!("unknown device: {blank}")}), "{blank:?}");
+    }
     // nothing of a refused share is saved
     assert_eq!(c.call(json!({"cmd":"share","ports":[port, port + 1],"allow":["test-b","nobody"]})).await["ok"], false);
     assert_eq!(saved_ports(a.home.path()), [port as u64]);
@@ -665,4 +670,17 @@ async fn pipe_carries_the_port_and_bytes_right_behind_the_command() {
     // and B's hosts lists what A offers B
     let r = ipc_once(&b.svc, b.home.path(), json!({"cmd":"hosts"})).await;
     assert_eq!(r, json!({"ok":true,"hosts":[{"id": a.id, "name": "a", "shares": [{"port": port}]}]}));
+}
+
+#[tokio::test]
+async fn a_device_that_gave_no_name_shows_its_fingerprint_prefix() {
+    let fp = rapp_wire::Fp([0x12; 32]).to_string();
+    let entry = json!([{"fp": fp, "name": "", "since": "2026-11-15T00:00:00Z"}]);
+    let (a, _key) = start_sharing(|home| std::fs::write(home.join("paired.json"), entry.to_string()).unwrap()).await;
+    let mut c = ipc(&a).await;
+    assert_eq!(c.call(json!({"cmd":"share","ports":[8000],"allow":[""]})).await,
+               json!({"ok":false,"error":"unknown device: "}));
+    assert_eq!(c.call(json!({"cmd":"share","ports":[8000],"allow":[&fp[..8]]})).await["ok"], true);
+    let r = c.call(json!({"cmd":"shares"})).await;
+    assert_eq!(r["shares"][0]["allow"], json!([&fp[..8]]), "{r}");
 }

@@ -43,17 +43,20 @@ impl Paired {
     }
 
     /// The devices `who` can mean: an exact self-declared name, or a fingerprint that starts with
-    /// `who` (at least 8 hex digits, case ignored). Each with its name.
+    /// `who` (at least 8 hex digits, case ignored). Each with its name. An empty `who` means none.
     pub fn find(&self, who: &str) -> Vec<(Fp, String)> {
+        if who.is_empty() {
+            return Vec::new();
+        }
         let prefix = (who.len() >= 8 && who.bytes().all(|b| b.is_ascii_hexdigit())).then(|| who.to_ascii_lowercase());
         let by_fp = |e: &Entry| prefix.as_deref().is_some_and(|p| e.fp.to_string().starts_with(p));
         let list = self.list.lock().unwrap();
         list.iter().filter(|e| e.name == who || by_fp(e)).map(|e| (e.fp, e.name.clone())).collect()
     }
 
-    /// The name stored for `fp`, if any.
+    /// The name stored for `fp`, if any (a device that gave no name has none).
     pub fn name_of(&self, fp: &Fp) -> Option<String> {
-        self.list.lock().unwrap().iter().find(|e| e.fp == *fp).map(|e| e.name.clone())
+        self.list.lock().unwrap().iter().find(|e| e.fp == *fp).map(|e| e.name.clone()).filter(|n| !n.is_empty())
     }
 
     /// Adds the device, or updates the name of one already there; writes the file.
@@ -151,6 +154,12 @@ mod tests {
         assert!(p.find("ababab").is_empty()); // under 8 hex digits is not a prefix
         assert!(p.find("nobody").is_empty());
         assert_eq!(p.name_of(&a).as_deref(), Some("mini"));
+        // a device that gave no name: found by its fingerprint, never by ""
+        let nameless = Fp([0x12; 32]);
+        p.add(&nameless, "").unwrap();
+        assert_eq!(p.name_of(&nameless), None);
+        assert!(p.find("").is_empty());
+        assert_eq!(p.find("12121212"), vec![(nameless, String::new())]);
     }
 
     #[test]

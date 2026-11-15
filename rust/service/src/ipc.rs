@@ -258,7 +258,9 @@ fn allowed(state: &State, allow: &Value) -> Result<Vec<Fp>, String> {
     let mut fps = Vec::new();
     for name in names {
         let Some(name) = name.as_str() else { return Err("bad allow".into()) };
-        let fp = match state.paired.find(name).as_slice() {
+        // A blank entry names no device (and must not match the ones that gave no name).
+        let found = if name.trim().is_empty() { Vec::new() } else { state.paired.find(name) };
+        let fp = match found.as_slice() {
             [] => return Err(format!("unknown device: {name}")),
             [(fp, _)] => *fp,
             _ => return Err(format!("ambiguous device: {name}")),
