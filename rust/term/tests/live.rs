@@ -984,7 +984,7 @@ async fn inputs_are_counted_not_recorded() {
 }
 
 #[tokio::test]
-async fn new_window_opens_beside_the_pane_in_its_directory_and_keeps_the_current_window() {
+async fn new_window_opens_in_the_panes_directory_and_keeps_the_current_window() {
     let Some(s) = common::Server::start() else { return };
     let dir = std::env::temp_dir().join(format!("rapp-nw-{}", std::process::id()));
     std::fs::create_dir_all(dir.join("a")).unwrap();
@@ -1041,4 +1041,59 @@ async fn new_window_opens_in_the_named_panes_directory_not_the_active_one() {
     // A pane that is not there cannot open a window.
     assert!(s.tmux().new_window("%999").await.is_err());
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn new_window_moves_no_window_and_changes_no_current_window() {
+    let Some(s) = common::Server::start() else { return };
+    s.raw(&["new-session", "-d", "-s", "ix", "-x", "80", "-y", "24", "cat"]);
+    s.raw(&["new-window", "-d", "-t", "ix:1", "cat"]);
+    s.raw(&["new-window", "-d", "-t", "ix:2", "cat"]);
+    let windows = || s.raw(&["list-windows", "-t", "ix", "-F", "#{window_index} #{window_id}"]);
+    let before = windows();
+    assert_eq!(before.lines().count(), 3, "{before}");
+    let _real = s.attach_real("ix", 80, 24);
+    let current = || {
+        let session = s.raw(&["display-message", "-p", "-t", "ix", "#{window_id}"]);
+        (session, s.raw(&["list-clients", "-t", "ix", "-F", "#{window_id}"]))
+    };
+    let was = current();
+    let pane0 = s.raw(&["list-panes", "-t", "ix:0", "-F", "#{pane_id}"]).trim().to_string();
+    common::settle().await;
+    let made = s.tmux().new_window(&pane0).await.unwrap();
+    let after = windows();
+    // Every window keeps its number; the new one takes the first free one.
+    let new_id = s.raw(&["display-message", "-p", "-t", &made, "#{window_id}"]).trim().to_string();
+    assert_eq!(after, format!("{before}3 {new_id}\n"));
+    assert_eq!(current(), was);
+}
+
+#[tokio::test]
+async fn new_window_opens_in_a_directory_whose_name_has_a_hash() {
+    let Some(s) = common::Server::start() else { return };
+    let dir = tempfile::Builder::new().prefix("rt").tempdir_in("/tmp").unwrap();
+    let odd = dir.path().join("a#{session_name}##b");
+    std::fs::create_dir_all(&odd).unwrap();
+    let odd = std::fs::canonicalize(&odd).unwrap();
+    // The fixture's own `-c` is format-expanded too, so it doubles the `#`s itself.
+    let escaped = odd.to_str().unwrap().replace('#', "##");
+    s.raw(&["new-session", "-d", "-s", "hash", "-x", "80", "-y", "24", "-c", &escaped, "cat"]);
+    let pane = s.raw(&["display-message", "-p", "-t", "hash", "#{pane_id}"]).trim().to_string();
+    common::settle().await;
+    let start = s.raw(&["display-message", "-p", "-t", &pane, "#{pane_current_path}"]);
+    assert_eq!(start.trim(), odd.to_str().unwrap(), "the fixture's pane is not in the directory");
+    let made = s.tmux().new_window(&pane).await.unwrap();
+    let path = s.raw(&["display-message", "-p", "-t", &made, "#{pane_current_path}"]);
+    assert_eq!(path.trim(), odd.to_str().unwrap());
+}
+
+#[tokio::test]
+async fn new_session_runs_a_one_line_command_through_the_shell() {
+    // The GUI sends what was typed as one element: a command line, not one program's name.
+    let Some(s) = common::Server::start() else { return };
+    s.tmux().new_session("line", &["echo hi there; sleep 3".into()], 80, 24).await.unwrap();
+    common::settle().await;
+    let p = s.tmux().list().await.unwrap().into_iter().find(|p| p.session == "line").expect("the session is alive");
+    assert!(!p.dead);
+    assert_eq!(s.tmux().capture(&p.pane).await.unwrap().lines[0], "hi there");
 }

@@ -56,9 +56,14 @@ pub fn session_name(s: &str) -> Option<String> {
     Some(s.replace([':', '.'], "_"))
 }
 
-/// The default name of a new session: the last path part of the command's program.
-pub fn default_name(program: &str) -> &str {
-    program.rsplit('/').next().unwrap_or(program)
+/// The default name of a new session: the last path part of the command's first word (`claude --resume` and
+/// `/usr/local/bin/claude -c` are both `claude`); `shell` when that is empty.
+pub fn default_name(command: &str) -> &str {
+    let program = command.split_whitespace().next().unwrap_or_default();
+    match program.rsplit('/').next() {
+        Some(n) if !n.is_empty() => n,
+        _ => "shell",
+    }
 }
 
 impl fmt::Display for TermId {
@@ -97,6 +102,19 @@ mod tests {
         assert_eq!(session_name(""), None);
         assert_eq!(session_name("a\nb"), None);
         assert_eq!((default_name("/usr/local/bin/claude"), default_name("cat")), ("claude", "cat"));
+    }
+
+    #[test]
+    fn a_command_lines_default_name_is_its_first_words_last_path_part() {
+        assert_eq!(default_name("claude --resume"), "claude");
+        assert_eq!(default_name("/usr/local/bin/claude -c"), "claude");
+        assert_eq!(default_name("  cd ~/x && claude"), "cd");
+        assert_eq!(default_name("./run.sh\targ"), "run.sh");
+        // Nothing to name it by: `shell`, never an empty (invalid) name.
+        for blank in ["", "  ", "/", "a/ b"] {
+            assert!(session_name(default_name(blank)).is_some(), "{blank:?}");
+        }
+        assert_eq!(default_name("  "), "shell");
     }
 
     #[test]

@@ -337,6 +337,10 @@ async fn new_makes_a_session_and_refuses_a_taken_name() {
     // No name: the program's.
     let unnamed = json!({"op": "new", "host": null, "command": ["/bin/sh"], "cols": 100, "rows": 30});
     assert_eq!(w.ask(unnamed).await, [json!({"ok": true, "id": "term:tmux:sh"})]);
+    // No name for a typed command line: its first word's.
+    let line = json!({"op": "new", "host": null, "command": ["/bin/sleep 30 && true"], "cols": 100, "rows": 30});
+    assert_eq!(w.ask(line).await, [json!({"ok": true, "id": "term:tmux:sleep"})]);
+    assert!(sessions(&s).contains(&"sleep".to_string()), "{:?}", sessions(&s));
     let (rest, err, _) = w.stop().await;
     assert!(!rest.iter().any(|l| l.contains("/bin/sh")) && !err.contains("/bin/sh"), "{rest:?} {err}");
 }
