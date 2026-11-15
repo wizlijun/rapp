@@ -36,13 +36,23 @@ pub fn ensure_dirs(term_dir: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// The token in `pty.token`; made (32 hex characters, 0600) when there is none yet.
+/// The length of a token: 16 random bytes in hex.
+const TOKEN_LEN: usize = 32;
+/// An empty or short token file this old was left by a crash between its creation and its write.
+const TOKEN_BROKEN_AFTER: Duration = Duration::from_secs(1);
+
+/// The token in `pty.token`; made (32 hex characters, 0600) when there is none yet, or when the file is broken.
 pub fn token(term_dir: &Path) -> anyhow::Result<String> {
     let path = term_dir.join("pty.token");
     for _ in 0..20 {
         match std::fs::read_to_string(&path) {
-            Ok(s) if !s.trim().is_empty() => return Ok(s.trim().to_string()),
-            // Empty: someone is writing it right now. Nothing: make it.
+            Ok(s) if s.trim().len() >= TOKEN_LEN => return Ok(s.trim().to_string()),
+            // Empty or short: someone is writing it right now, or it is broken and made again. Nothing: make it.
+            Ok(_) if broken_token(&path) => match std::fs::remove_file(&path) {
+                Ok(()) => continue,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => return Err(e).with_context(|| format!("cannot remove {}", path.display())),
+            },
             Ok(_) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 let mut raw = [0u8; 16];
@@ -63,6 +73,12 @@ pub fn token(term_dir: &Path) -> anyhow::Result<String> {
         std::thread::sleep(Duration::from_millis(50));
     }
     bail!("the token file stays empty: {}", path.display())
+}
+
+/// The token file was last written long enough ago that nobody is writing it now.
+fn broken_token(path: &Path) -> bool {
+    let Ok(at) = std::fs::metadata(path).and_then(|m| m.modified()) else { return false };
+    std::time::SystemTime::now().duration_since(at).is_ok_and(|age| age > TOKEN_BROKEN_AFTER)
 }
 
 /// `pty/<pid>.sock`, which must fit a unix socket address.
@@ -245,6 +261,22 @@ mod tests {
         assert_eq!(mode(&d.path().join("pty.token")), 0o600);
         assert_eq!(mode(&d.path().join("pty")), 0o700);
         assert_eq!(mode(&d.path().join("launch")), 0o700);
+    }
+
+    #[test]
+    fn an_old_empty_token_file_is_made_again_at_once() {
+        let d = tempfile::tempdir().unwrap();
+        ensure_dirs(d.path()).unwrap();
+        let path = d.path().join("pty.token");
+        let f = std::fs::File::create(&path).unwrap();
+        f.set_modified(std::time::SystemTime::now() - Duration::from_secs(5)).unwrap();
+        drop(f);
+        let started = std::time::Instant::now();
+        let t = token(d.path()).unwrap();
+        assert!(started.elapsed() < Duration::from_millis(200), "{:?}", started.elapsed());
+        assert!(t.len() == 32 && t.bytes().all(|b| b.is_ascii_hexdigit()), "{t}");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), t);
+        assert_eq!(mode(&path), 0o600);
     }
 
     #[test]
