@@ -219,9 +219,10 @@ async fn hub_log_records_route_session_and_client_stderr_without_secrets() {
     assert!(!text.contains(PASSWORD), "password in hub.log:\n{text}");
 }
 
+/// Waits until `path` holds something: the fake client creates the file before it writes to it.
 async fn wait_for_file(path: &std::path::Path) {
     for _ in 0..150 {
-        if path.exists() {
+        if std::fs::read(path).is_ok_and(|b| !b.is_empty()) {
             return;
         }
         tokio::time::sleep(Duration::from_millis(20)).await;
