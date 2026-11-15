@@ -234,6 +234,12 @@ class ComposerInsertEvent extends SessionEvent {
   final PasteResult insert;
 }
 
+/// A compose letter on [sid]'s picture (type-to-compose): the runner held the key; open the writing panel,
+/// take the caret, then ask for it back with [SessionPort.composeReplay].
+class ComposeKeyEvent extends SessionEvent {
+  const ComposeKeyEvent(super.sid);
+}
+
 /// File transfer status text; null when idle.
 class TransferStatusEvent extends SessionEvent {
   const TransferStatusEvent(super.sid, this.status);
@@ -414,6 +420,8 @@ SessionEvent? parseSessionEvent(String method, Object? args) {
       case 'composer_insert':
         if (m['text'] == null && m['blocks'] == null && m['status'] == null) return null;
         return ComposerInsertEvent(sid, _paste(m));
+      case 'compose_key':
+        return ComposeKeyEvent(sid);
       case 'transfer_status':
         return TransferStatusEvent(sid, _as<String?>(m['status']));
       case 'transfer':
@@ -485,7 +493,12 @@ abstract class SessionPort {
       _send('key', {'sid': sid, 'keyCode': keyCode, 'modifiers': modifiers});
 
   /// The session whose picture has keyboard focus; null for none.
-  void pictureFocus(Object? sid) => _send('picture_focus', {'sid': sid});
+  /// [compose]: a letter on this picture opens the writing panel (sent only when true).
+  void pictureFocus(Object? sid, {bool compose = false}) =>
+      _send('picture_focus', {'sid': sid, if (compose) 'compose': true});
+
+  /// The held compose letter goes back into rapp's window, now that the editor has the caret.
+  void composeReplay(Object sid) => _send('compose_replay', {'sid': sid});
 
   void resize(Object sid, int window, int w, int h) =>
       _send('resize', {'sid': sid, 'window': window, 'w': w, 'h': h});

@@ -272,6 +272,11 @@ class RemoteSession extends ChangeNotifier {
         composer.apply(e.insert);
         composer.open = true;
         composer.wantFocus();
+      case ComposeKeyEvent():
+        // A letter on the picture (type-to-compose): the panel opens, takes the caret, then asks for the letter.
+        composer.replayPending = true;
+        composer.open = true;
+        composer.wantFocus();
       case TransferStatusEvent():
         transferStatus = e.status;
       case TransferProgressEvent():

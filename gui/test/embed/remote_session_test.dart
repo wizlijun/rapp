@@ -298,6 +298,16 @@ void main() {
     expect(n, 1);
   });
 
+  test('compose_key opens the panel and asks for a replay', () {
+    final rs = RemoteSession(1, 'x');
+    final tick = rs.composer.focusTick;
+    rs.apply(const ComposeKeyEvent(1));
+    expect(rs.composer.open, isTrue);
+    expect(rs.composer.focusTick, tick + 1);
+    expect(rs.composer.takeReplay(), isTrue);
+    expect(rs.composer.takeReplay(), isFalse);
+  });
+
   group('input source and the marked text box', () {
     late List<String> log;
     RemoteSession session() {

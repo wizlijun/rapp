@@ -848,6 +848,50 @@ void main() {
       await tester.pump(kDoubleTapTimeout); // the grip also waits for a second tap
     }
 
+    // A compose letter (type-to-compose): the editor takes the caret, the picture lets go of the
+    // keys, and only then the runner is asked to replay the letter.
+    Future<void> composeKey(WidgetTester tester) async {
+      port.calls.clear();
+      port.emit(const ComposeKeyEvent(1));
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+      final names = [for (final c in port.calls) c.$1];
+      expect(es.currentRemote!.composer.editorFocused, isTrue);
+      expect(es.pictureFocused, isNull);
+      expect(names.where((m) => m == 'compose_replay').length, 1);
+      final blur = port.calls.indexWhere((c) => c.$1 == 'picture_focus' && c.$2['sid'] == null);
+      expect(blur, greaterThanOrEqualTo(0));
+      expect(blur, lessThan(names.indexOf('compose_replay')));
+      expect(port.calls.firstWhere((c) => c.$1 == 'compose_replay').$2, {'sid': 1});
+    }
+
+    testWidgets('compose_key: caret in the editor, picture blurred, then replay', (tester) async {
+      await showPicture(tester);
+      expect(find.byType(ComposerPanel), findsNothing);
+      await composeKey(tester);
+      expect(find.byType(ComposerPanel), findsOneWidget);
+      await tester.pump(const Duration(seconds: 2));
+    });
+
+    testWidgets('compose_key with the panel open but the picture focused', (tester) async {
+      await showPicture(tester);
+      await openPanel(tester);
+      es.focusPicture(1);
+      await tester.pump();
+      expect(es.pictureFocused, 1);
+      await composeKey(tester);
+      await tester.pump(const Duration(seconds: 2));
+    });
+
+    testWidgets('no replay without compose_key', (tester) async {
+      await showPicture(tester);
+      port.calls.clear();
+      await openPanel(tester);
+      expect(port.calls.where((c) => c.$1 == 'compose_replay'), isEmpty);
+      await tester.pump(const Duration(seconds: 2));
+    });
+
     testWidgets('opening, growing and closing never move the picture; A is never resized', (tester) async {
       await showPicture(tester);
       final y0 = top(tester);

@@ -411,8 +411,31 @@ class MainState extends ChangeNotifier {
     }
     if (pictureFocused == sid) return;
     pictureFocused = sid;
-    portOf(sid)?.pictureFocus(sid);
+    _sendFocus(sid);
     notifyListeners();
+  }
+
+  /// What the runner was last told about [pictureFocused]'s compose (type-to-compose).
+  bool _composeSent = false;
+
+  /// A letter on [sid]'s picture opens the writing panel: an app window on the stage whose panel is
+  /// allowed (no `noComposer` rule) and whose app has `typeToCompose` on. Never a terminal.
+  bool _composeFor(Object sid) {
+    final rs = remote[sid];
+    if (rs == null || rs.detached || termPort?.owns(sid) == true) return false;
+    return rs.composerAllowed && rs.profile.typeToCompose;
+  }
+
+  void _sendFocus(Object sid) {
+    _composeSent = _composeFor(sid);
+    portOf(sid)?.pictureFocus(sid, compose: _composeSent);
+  }
+
+  /// A session changed (profile, current tab): the focused picture's compose is sent again if it moved.
+  void _syncCompose() {
+    final sid = pictureFocused;
+    if (sid == null || _composeFor(sid) == _composeSent) return;
+    _sendFocus(sid);
   }
 
   /// ⌘V / Ctrl+Shift+V on [rs]'s terminal stage (K4): one line of clipboard text goes in as a paste (no Return);
@@ -1273,7 +1296,7 @@ class MainState extends ChangeNotifier {
       if (pictureFocused == old) {
         // A move: the keys typed into the old picture go on into the new one.
         pictureFocused = fresh;
-        portOf(fresh)?.pictureFocus(fresh);
+        _sendFocus(fresh);
       }
       // A move keeps the session where the user put it: off the stage stays off.
       if (detached && portOf(fresh)?.supportsDetach == true) portOf(fresh)!.detach(fresh);
@@ -1377,6 +1400,7 @@ class MainState extends ChangeNotifier {
     rs.streamPinned = r.pinned;
     rs.preferWindow(r.window);
     remote[s.sid] = rs;
+    rs.addListener(_syncCompose);
     r.phase = Phase.live;
     final c = r.choice;
     try {

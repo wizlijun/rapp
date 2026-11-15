@@ -57,6 +57,28 @@ void main() {
     expect(e.windows.single.decorated, isFalse);
   });
 
+  test('compose_key decodes', () {
+    final e = parseSessionEvent('compose_key', {'sid': 3});
+    expect(e, isA<ComposeKeyEvent>());
+    expect(e!.sid, 3);
+  });
+
+  test('picture_focus carries compose only when on; compose_replay goes out', () async {
+    final port = FakeSessionPort();
+    port.pictureFocus(3, compose: true);
+    port.pictureFocus(3);
+    port.pictureFocus(null);
+    port.composeReplay(3);
+    await Future<void>.delayed(Duration.zero);
+    expect([for (final c in port.calls) c.$1], ['picture_focus', 'picture_focus', 'picture_focus', 'compose_replay']);
+    expect([for (final c in port.calls) c.$2], [
+      {'sid': 3, 'compose': true},
+      {'sid': 3},
+      {'sid': null},
+      {'sid': 3},
+    ]);
+  });
+
   test('closed carries the reason', () {
     final e = parseSessionEvent('closed', {'sid': 3, 'reason': 'quit'});
     expect((e as ClosedEvent).reason, 'quit');
