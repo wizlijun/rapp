@@ -15,7 +15,7 @@ class FakeApi implements SharesApi {
   Future<ShareTable> shares({String? to}) async => ShareTable(
         id: '123456789',
         me: 'a',
-        rows: const [ShareRow(port: 8000, note: 'n', allow: [], addr: '123456789.rapp:8000', web: true, listening: true, mine: true)],
+        rows: const [ShareRow(port: 8000, note: 'n', allow: [], addr: 'http://123456789.rapp:8000', web: true, listening: true, mine: true)],
         known: const [me, mini],
       );
   @override

@@ -18,7 +18,8 @@ class RappButton extends StatefulWidget {
     this.icon,
     this.size = 48,
   }) : _kind = _Kind.primary,
-       onPicture = false;
+       onPicture = false,
+       oneLine = false;
   const RappButton.secondary({
     super.key,
     required this.label,
@@ -28,6 +29,7 @@ class RappButton extends StatefulWidget {
     this.icon,
     this.onPicture = false,
     this.size = 48,
+    this.oneLine = false,
   }) : _kind = _Kind.secondary;
   const RappButton.accent({
     super.key,
@@ -38,6 +40,7 @@ class RappButton extends StatefulWidget {
     this.icon,
   }) : _kind = _Kind.accent,
        onPicture = false,
+       oneLine = false,
        size = 48;
 
   final String label;
@@ -55,6 +58,9 @@ class RappButton extends StatefulWidget {
   /// Drawn straight over the remote picture: the fill is the raise colour laid on the opaque float
   /// surface, so a see-through theme (AVATAR) never lets the picture show through the button.
   final bool onPicture;
+
+  /// The label stays on one line and ends in … when the button is made narrower than it.
+  final bool oneLine;
   final _Kind _kind;
 
   @override
@@ -78,7 +84,9 @@ class _RappButtonState extends State<RappButton> {
     final min = icon == null ? const Size(48, 48) : Size.square(widget.size);
     // A smaller square is the whole button: no padded tap target around it.
     final tap = widget.size < 48 ? MaterialTapTargetSize.shrinkWrap : null;
-    final child = icon == null ? Text(widget.label) : Icon(icon);
+    final child = icon == null
+        ? (widget.oneLine ? Text(widget.label, maxLines: 1, overflow: TextOverflow.ellipsis) : Text(widget.label))
+        : Icon(icon);
     final pad = icon == null ? null : EdgeInsets.zero;
     final Widget button = switch (widget._kind) {
       _Kind.primary => FilledButton(

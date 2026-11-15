@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/service_client.dart';
 import 'package:rapp/shares.dart';
@@ -16,7 +17,7 @@ ShareRow row(int port, {String note = '', List<Device> allow = const [], bool we
       port: port,
       note: note,
       allow: allow,
-      addr: web ? '123456789.rapp:$port' : 'ssh 123456789.rapp',
+      addr: web ? 'http://123456789.rapp:$port' : 'ssh 123456789.rapp',
       web: web,
       listening: listening,
       mine: mine,
@@ -92,6 +93,59 @@ void main() {
     expect(find.byKey(const Key('share-names-off')), findsNothing);
     await t.tap(find.byKey(const Key('share-open-8000')));
     expect(opened, ['http://123456789.rapp:8000']);
+  });
+
+  testWidgets('the address is shown, copied and opened as the service sent it', (t) async {
+    final opened = <String>[];
+    String? copied;
+    t.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (c) async {
+      if (c.method == 'Clipboard.setData') copied = (c.arguments as Map)['text'] as String?;
+      return null;
+    });
+    addTearDown(() => t.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
+    await show(t, table([row(8000)]), open: (u) async => opened.add(u));
+    expect(find.text('http://123456789.rapp:8000'), findsOneWidget);
+    expect(find.textContaining('http://http://'), findsNothing);
+    await t.tap(find.byKey(const Key('share-open-8000')));
+    await t.tap(find.byKey(const Key('share-copy-8000')));
+    expect(opened, ['http://123456789.rapp:8000']);
+    expect(copied, 'http://123456789.rapp:8000');
+  });
+
+  for (final w in [400.0, 360.0]) {
+    testWidgets('a long scope at ${w.toInt()}px wide does not overflow and unshare stays tappable', (t) async {
+      t.view.physicalSize = Size(w, 800);
+      t.view.devicePixelRatio = 1;
+      addTearDown(t.view.reset);
+      final long = [for (var i = 0; i < 3; i++) Device(fp: 'f$i', name: '很长很长的设备名称' * 6 + '$i')];
+      final api = await show(t, table([row(8000, allow: long, note: 'jupyter')]));
+      expect(t.takeException(), isNull);
+      final f = find.byKey(const Key('share-unshare-8000'));
+      expect(t.getRect(f).right, lessThanOrEqualTo(w));
+      await t.tap(f);
+      await t.pump();
+      await t.tap(f);
+      await t.pump();
+      await t.pump();
+      expect(api.calls.any((c) => c.startsWith('unshare')), isTrue);
+      expect(t.takeException(), isNull);
+    });
+  }
+
+  testWidgets('the section reloads once when the service comes back', (t) async {
+    final api = FakeApi((_) => Future.error(ServiceException('service not running')));
+    Widget host(bool online) => wrap(SharesSection(api: api, online: online));
+    await t.pumpWidget(host(false));
+    await t.pump();
+    expect(find.text('本机的 rapp 服务没有在运行'), findsOneWidget);
+    api.next = (_) async => table([row(8000)]);
+    await t.pumpWidget(host(true));
+    await t.pump();
+    expect(find.text('http://123456789.rapp:8000'), findsOneWidget);
+    expect(api.calls.where((c) => c.startsWith('shares')).length, 2);
+    await t.pumpWidget(host(true));
+    await t.pump();
+    expect(api.calls.where((c) => c.startsWith('shares')).length, 2);
   });
 
   testWidgets('a share that leaves this device out', (t) async {

@@ -23,7 +23,8 @@ class ShareRow {
   final String note;
   final List<Device> allow;
 
-  /// What to type to reach it, e.g. `ssh <id>.rapp` or `<id>.rapp:8000`.
+  /// What to type or open to reach it, exactly as the service says it: `ssh <id>.rapp` or
+  /// `http://<id>.rapp:8000`.
   final String addr;
   final bool web;
   final bool listening;

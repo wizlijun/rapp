@@ -3,6 +3,22 @@ import 'package:rapp/service_client.dart';
 import 'package:rapp/shares.dart';
 
 void main() {
+  test('the exact row the service sends', () {
+    final r = ShareRow.fromJson({
+      'port': 8000,
+      'note': 'n',
+      'allow': [],
+      'url': 'http://123456789.rapp:8000',
+      'addr': 'http://123456789.rapp:8000',
+      'web': true,
+      'listening': true,
+      'mine': true,
+    });
+    expect(r.addr, 'http://123456789.rapp:8000');
+    expect(r.web, isTrue);
+    expect(r.mine, isTrue);
+  });
+
   test('a table from the service', () {
     final t = ShareTable.fromJson({
       'ok': true,
@@ -16,7 +32,7 @@ void main() {
             {'fp': 'cd' * 32, 'name': '笔记本'}
           ],
           'url': 'http://123456789.rapp:8000',
-          'addr': '123456789.rapp:8000',
+          'addr': 'http://123456789.rapp:8000',
           'web': true,
           'listening': true,
           'mine': false,

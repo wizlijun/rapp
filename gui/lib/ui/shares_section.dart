@@ -23,6 +23,7 @@ class SharesSection extends StatefulWidget {
     this.to,
     this.pickAllow = _dialogPick,
     this.open = term.openUrl,
+    this.online = true,
   });
   final SharesApi api;
 
@@ -30,6 +31,9 @@ class SharesSection extends StatefulWidget {
   final String? to;
   final PickAllow pickAllow;
   final Future<void> Function(String url) open;
+
+  /// False while the service this section asks is unreachable; going back to true reloads once.
+  final bool online;
 
   @override
   State<SharesSection> createState() => _SharesSectionState();
@@ -55,6 +59,7 @@ class _SharesSectionState extends State<SharesSection> {
   @override
   void didUpdateWidget(SharesSection old) {
     super.didUpdateWidget(old);
+    if (!old.online && widget.online) _load();
     if (old.to != widget.to || !identical(old.api, widget.api)) {
       _table = null;
       _loadError = null;
@@ -179,7 +184,7 @@ class _SharesSectionState extends State<SharesSection> {
                 openEnabled: widget.api.rappNames && r.mine && r.web,
                 warn: _warns[r.port],
                 busy: _busy,
-                onOpen: () => widget.open('http://${r.addr}'),
+                onOpen: () => widget.open(r.addr),
                 onUnshare: () => _set(() async {
                   await widget.api.unshare(to: widget.to, port: r.port);
                   _warns.remove(r.port);
@@ -269,7 +274,7 @@ class _ShareRowView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final shown = row.web ? 'http://${row.addr}' : row.addr;
+    final shown = row.addr;
     return Container(
       key: Key('share-row-${row.port}'),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -293,24 +298,33 @@ class _ShareRowView extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               Expanded(flex: 2, child: SelectableText(shown, style: _mono)),
-              const SizedBox(width: 8),
-              RappButton.secondary(key: Key('share-allow-${row.port}'), label: _scope, onPressed: busy ? null : onAllow),
-              const SizedBox(width: 6),
-              if (row.web)
-                RappButton.secondary(key: Key('share-open-${row.port}'), label: '打开', onPressed: openEnabled ? onOpen : null),
-              if (row.web) const SizedBox(width: 6),
-              RappButton.secondary(
-                key: Key('share-copy-${row.port}'),
-                label: '复制',
-                onPressed: () => Clipboard.setData(ClipboardData(text: shown)),
-              ),
-              const SizedBox(width: 6),
-              ConfirmButton(
-                key: Key('share-unshare-${row.port}'),
-                label: '取消分享',
-                onConfirmed: busy ? null : onUnshare,
-              ),
             ],
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 220),
+                  child: RappButton.secondary(key: Key('share-allow-${row.port}'), label: _scope, oneLine: true, onPressed: busy ? null : onAllow),
+                ),
+                if (row.web)
+                  RappButton.secondary(key: Key('share-open-${row.port}'), label: '打开', onPressed: openEnabled ? onOpen : null),
+                RappButton.secondary(
+                  key: Key('share-copy-${row.port}'),
+                  label: '复制',
+                  onPressed: () => Clipboard.setData(ClipboardData(text: shown)),
+                ),
+                ConfirmButton(
+                  key: Key('share-unshare-${row.port}'),
+                  label: '取消分享',
+                  onConfirmed: busy ? null : onUnshare,
+                ),
+              ],
+            ),
           ),
           if (warn != null)
             Padding(

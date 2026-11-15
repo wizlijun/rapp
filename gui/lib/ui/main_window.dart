@@ -131,7 +131,7 @@ class _MainWindowState extends State<MainWindow> {
         ),
         ListenableBuilder(
           listenable: widget.monitor,
-          builder: (context, _) => SharesSection(key: const ValueKey('shares-local'), api: widget.monitor),
+          builder: (context, _) => SharesSection(key: const ValueKey('shares-local'), api: widget.monitor, online: widget.monitor.running),
         ),
         ListenableBuilder(
           listenable: widget.state,
