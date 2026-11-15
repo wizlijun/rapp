@@ -113,6 +113,35 @@ void main() {
     expect(find.byKey(const Key('inner-stroke-111/Mail')), findsNothing);
   });
 
+  test('tabOrder', () {
+    expect(tabOrder(FirstLayer.device), [PanelTab.sessions, PanelTab.devices, PanelTab.projects, PanelTab.resources]);
+    expect(tabOrder(FirstLayer.project), [PanelTab.sessions, PanelTab.projects, PanelTab.devices, PanelTab.resources]);
+  });
+
+  testWidgets('the dropdown shows 设备在前 by default and switches the tab order', (tester) async {
+    await tester.pumpWidget(wrap(panel(), disableAnimations: true));
+    expect(find.descendant(of: find.byKey(const Key('first-dropdown')), matching: find.text('设备在前')), findsOneWidget);
+    expect(tester.getSize(find.byKey(const Key('first-dropdown'))).height, greaterThanOrEqualTo(48));
+    double x(String k) => tester.getTopLeft(find.byKey(Key(k))).dx;
+    expect(x('tab-devices'), lessThan(x('tab-projects')));
+    await tester.tap(find.byKey(const Key('first-dropdown')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('项目在前').last);
+    await tester.pumpAndSettle();
+    expect(s.prefs.first, FirstLayer.project);
+    expect(UiPrefs.load('${tmp.path}/devices/dev1').first, FirstLayer.project);
+    expect(x('tab-projects'), lessThan(x('tab-devices')));
+  });
+
+  testWidgets('reordering the tabs keeps the open tab', (tester) async {
+    s.togglePanel(PanelTab.devices);
+    await tester.pumpWidget(wrap(panel(), disableAnimations: true));
+    s.setFirst(FirstLayer.project);
+    await tester.pump();
+    expect(s.panel, PanelTab.devices);
+    expect(find.text('devices-body'), findsOneWidget);
+  });
+
   testWidgets('theme dropdown lists the three films in order', (tester) async {
     await tester.pumpWidget(wrap(panel(), disableAnimations: true));
     expect(tester.getSize(find.byKey(const Key('theme-dropdown'))).height,
@@ -377,6 +406,33 @@ void main() {
     await tester.pump();
     expect(s.currentKey, '111/com.apple.Safari');
     expect(s.panel, isNull);
+  });
+
+  testWidgets('tapping a project group switches to it; 未归项目的 is not tappable and has no count', (tester) async {
+    tester.view.physicalSize = const Size(800, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final p = s.createProject('写周报')!;
+    s.addMember(p.id, const AppRef('111', 'Safari', 'Safari'));
+    s.togglePanel();
+    await tester.pumpWidget(wrap(panel()));
+    await open(tester, 1, 'Safari');
+    await open(tester, 2, 'Mail');
+    await tester.tap(find.byKey(const Key('group-project')));
+    await tester.pump();
+    expect(find.byKey(Key('group-${p.id}')), findsOneWidget);
+    expect(find.text('未归项目的'), findsOneWidget);
+    expect(tester.getSize(find.byKey(Key('group-${p.id}'))).height, greaterThanOrEqualTo(48));
+    await tester.tap(find.byKey(Key('group-${p.id}')));
+    await tester.pump();
+    expect(s.currentProject, p.id);
+    expect(s.currentKey, '111/Safari');
+    expect(s.cue, '');
+    // Not a button, no count: the title is plain text.
+    expect(find.ancestor(of: find.text('未归项目的'), matching: find.byType(InkWell)), findsNothing);
+    expect(find.textContaining('未归项目的 '), findsNothing);
+    expect(find.textContaining('未归项目的（'), findsNothing);
   });
 
   testWidgets('no overflow on a 400x500 window', (tester) async {

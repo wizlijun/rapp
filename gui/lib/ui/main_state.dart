@@ -28,6 +28,7 @@ import 'lifecycle.dart';
 import 'net_marker.dart' show weakRttMs;
 import 'pin_files.dart';
 import 'prefs.dart';
+import 'project_positions.dart';
 import 'projects.dart';
 import 'resources_state.dart';
 import 'session_model.dart';
@@ -90,6 +91,8 @@ class MainState extends ChangeNotifier {
     void Function(String line)? log,
   })  : resources = ResourcesState(clock: clock),
         unlockStore = unlockStore ?? UnlockStore(),
+        _now = clock ?? DateTime.now,
+        positions = ProjectPositions.load(data.localDir),
         _log = log ?? ((_) {}) {
     recorder = InputRecorder(data: () => data, enabled: () => prefs.inputHistory,
         recordsApp: (a) => this.profiles.resolve(a).recordInput,
@@ -110,7 +113,10 @@ class MainState extends ChangeNotifier {
     final pp = this.profiles.problem;
     if (pp != null) hint = hint.isEmpty ? pp : '$hint；$pp';
     this.profiles.addListener(_onProfiles);
+    positions.dropExcept({for (final p in workspace.projects) p.id});
+    if (prefs.first == FirstLayer.project) grouping = Grouping.project;
     _entries = _mapEntries();
+    _trackAttention();
     refreshDevices();
     _restorePins();
     unawaited(recorder.sweep());
@@ -137,11 +143,13 @@ class MainState extends ChangeNotifier {
   /// Switches to a moved data root: later reads and writes go there and `workspace.json` is reread.
   /// Pinned entries saved under the old root follow to the new one.
   void relocate(DataDir d) {
+    _flushPositions();
     final oldRoot = data.root;
     data = d;
     final loaded = loadWorkspace(d.sharedDir);
     workspace = loaded.workspace;
     if (loaded.problem != null) hint = loaded.problem!;
+    _reloadProjectState();
     profiles.removeListener(_onProfiles);
     profiles = AppProfileStore.loadWith(d.sharedDir, profiles.builtin);
     final pp = profiles.problem;
@@ -329,8 +337,10 @@ class MainState extends ChangeNotifier {
       _lastKey = currentKey;
       if (corner != null && corner != Corner.needs) corner = null;
       markingInput = null;
+      _followCurrentKey();
     }
     if (embeds) _entries = _mapEntries();
+    _trackAttention();
     // Focus never stays on a session that is no longer current (mid-move, the old one is on the stage).
     if (pictureFocused != null && (currentRemote?.sid ?? current?.sid) != pictureFocused) _blur();
     _focusNewTerm();
@@ -683,7 +693,7 @@ class MainState extends ChangeNotifier {
   }
 
   // ---- sessions ----
-  List<SessionGroup> get groups => groupSessions(_entries, grouping, projects: projects);
+  List<SessionGroup> get groups => groupSessions(_entries, grouping, projects: projects, first: currentProject);
 
   int get sessionCount => _entries.length;
 
@@ -711,8 +721,20 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// The keys [step] may stop on: the current project's members, or null (any session).
+  List<String>? get _stepWithin {
+    final p = currentProject == null ? null : _project(currentProject!);
+    return p == null ? null : projectKeys(p);
+  }
+
+  /// How many open sessions [step] walks through.
+  int get steppableCount {
+    final within = _stepWithin;
+    return within == null ? sessionCount : _entries.where((e) => within.contains(e.key)).length;
+  }
+
   void step(int delta) {
-    final k = stepKey(groups, currentKey, delta);
+    final k = stepKey(groups, currentKey, delta, within: _stepWithin);
     if (k == null) return;
     currentKey = k;
     notifyListeners();
@@ -810,8 +832,7 @@ class MainState extends ChangeNotifier {
       for (final e in old) {
         if (e.sid == null || newKeys.contains(e.key)) continue;
         if (e.key == currentKey) {
-          final next = stepKey(oldGroups, e.key, 1);
-          currentKey = (next != null && next != e.key && newKeys.contains(next)) ? next : null;
+          currentKey = _nextAfterEnd(oldGroups, e.key, newKeys.contains);
         }
         final hubReason = h.closeReasons.remove(e.sid);
         if (_quiet.remove(e.sid)) continue;
@@ -1236,10 +1257,9 @@ class MainState extends ChangeNotifier {
     _records.remove(r.key);
     _entries = _mapEntries();
     if (currentKey == r.key) {
-      final next = stepKey(oldGroups, r.key, 1);
       currentKey = isDesktopScreen(r.app) && _records.containsKey('${r.id}/desktop:')
           ? '${r.id}/desktop:'
-          : (next != null && next != r.key && _records.containsKey(next)) ? next : null;
+          : _nextAfterEnd(oldGroups, r.key, _records.containsKey);
     }
   }
 
@@ -2156,6 +2176,13 @@ class MainState extends ChangeNotifier {
     _save();
   }
 
+  /// 设备在前 / 项目在前: the tab order and the overview's rows. The current grouping stays; the
+  /// preference only decides the default at startup (§8).
+  void setFirst(FirstLayer f) {
+    prefs.first = f;
+    _save();
+  }
+
   void setStartFullscreen(bool v) {
     prefs.startFullscreen = v;
     _save();
@@ -2249,9 +2276,76 @@ class MainState extends ChangeNotifier {
     _saveWorkspace();
   }
 
-  /// Ends no session.
+  /// The app an open session is, as a project member.
+  static AppRef appRefOf(SessionEntry e) => AppRef(e.id, e.app, oneLine(e.appName));
+
+  /// Whether there is anything open to save as a project.
+  bool get canSaveOpenAsProject => _entries.isNotEmpty;
+
+  /// Every open session becomes a member (list order, no notes), and it becomes the current
+  /// project. Null, with nothing changed, for an empty name or when nothing is open.
+  /// The stage stays on the current session.
+  Project? saveOpenAsProject(String name) {
+    final n = oneLine(name);
+    if (_entries.isEmpty || n.isEmpty) return null;
+    final p = Project(newProjectId(), n, [for (final e in _entries) Member(appRefOf(e))]);
+    workspace.projects.add(p);
+    _saveWorkspace();
+    final k = currentKey;
+    if (k != null && p.members.any((m) => m.key == k)) positions.of(p.id).last = k;
+    switchProject(p.id);
+    return p;
+  }
+
+  void togglePinned(String projectId) {
+    final p = _project(projectId);
+    if (p == null) return;
+    p.pinned = !p.pinned;
+    _saveWorkspace();
+  }
+
+  static const undoFor = Duration(seconds: 5);
+  Timer? _undoTimer;
+  ({Project project, int index, ProjectPosition? position})? _undo;
+
+  /// The deleted project's name while it can still be undone; null otherwise.
+  String? get undoableDelete => _undo?.project.name;
+
+  /// Ends no session. The project can be brought back for [undoFor].
   void deleteProject(String id) {
+    final i = workspace.projects.indexWhere((p) => p.id == id);
+    if (i >= 0) {
+      _undo = (project: workspace.projects[i], index: i, position: positions.byProject[id]);
+      _undoTimer?.cancel();
+      _undoTimer = Timer(undoFor, () {
+        _undoTimer = null;
+        _undo = null;
+        notifyListeners();
+      });
+    }
     workspace.projects.removeWhere((p) => p.id == id);
+    if (currentProject == id) {
+      currentProject = null;
+      _setCue('');
+    }
+    if (previousProject == id) previousProject = null;
+    if (positions.byProject.remove(id) != null) _savePositions();
+    _saveWorkspace();
+  }
+
+  /// Puts the last deleted project back where it was (members, notes, pin, where it was left); its
+  /// current/previous status is not restored.
+  void undoDelete() {
+    final u = _undo;
+    if (u == null) return;
+    _undoTimer?.cancel();
+    _undoTimer = null;
+    _undo = null;
+    workspace.projects.insert(math.min(u.index, workspace.projects.length), u.project);
+    if (u.position != null) {
+      positions.byProject[u.project.id] = u.position!;
+      _savePositions();
+    }
     _saveWorkspace();
   }
 
@@ -2278,6 +2372,170 @@ class MainState extends ChangeNotifier {
       if (m.key == key) m.task = oneLine(task);
     }
     _saveWorkspace();
+  }
+
+  // ---- current project (§6) ----
+  final DateTime Function() _now;
+
+  /// Where each project was left (`local/project_positions.json`).
+  final ProjectPositions positions;
+
+  /// The current project's id; null when there is none.
+  String? currentProject;
+  String? previousProject;
+
+  /// The cue on coming back to a project; empty when none shows.
+  String cue = '';
+  static const cueFor = Duration(seconds: 5);
+  Timer? _cueTimer;
+
+  /// A new last session inside the current project is written this long after it changes.
+  static const positionsSaveDelay = Duration(seconds: 1);
+
+  /// After [relocate]: the new root's positions, and no current or previous project the new
+  /// workspace lacks (§14 case 1).
+  void _reloadProjectState() {
+    positions.byProject
+      ..clear()
+      ..addAll(ProjectPositions.load(data.localDir).byProject);
+    final ids = {for (final p in workspace.projects) p.id};
+    positions.dropExcept(ids);
+    if (!ids.contains(currentProject)) {
+      currentProject = null;
+      _setCue('');
+    }
+    if (!ids.contains(previousProject)) previousProject = null;
+  }
+
+  /// Since when each session's lamp has been 等你 or 已断开.
+  final Map<String, DateTime> _attentionSince = {};
+
+  void _trackAttention() {
+    final now = <String>{};
+    for (final e in _entries) {
+      if (e.lamp == Lamp.waiting || e.lamp == Lamp.disconnected) {
+        now.add(e.key);
+        _attentionSince.putIfAbsent(e.key, _now);
+      }
+    }
+    _attentionSince.removeWhere((k, _) => !now.contains(k));
+  }
+
+  /// A new current session inside the current project is remembered as its last one; one outside
+  /// it leaves the project. No session (it ended) keeps the project.
+  void _followCurrentKey() {
+    final id = currentProject, k = currentKey;
+    if (id == null || k == null) return;
+    final p = _project(id);
+    if (p != null && p.members.any((m) => m.key == k)) {
+      final pos = positions.of(id);
+      if (pos.last == k) return;
+      pos.last = k;
+      _positionsTimer?.cancel();
+      _positionsTimer = Timer(positionsSaveDelay, _savePositions);
+    } else {
+      _leave();
+    }
+  }
+
+  /// The session after [gone] (current, just ended) in [oldGroups], if [stillOpen]; null when none.
+  /// With a current project, only its members take part, so a session ending never leaves it.
+  String? _nextAfterEnd(List<SessionGroup> oldGroups, String gone, bool Function(String key) stillOpen) {
+    final p = currentProject == null ? null : _project(currentProject!);
+    final within = p == null ? null : [for (final k in projectKeys(p)) if (k == gone || stillOpen(k)) k];
+    final next = stepKey(oldGroups, gone, 1, within: within);
+    return next != null && next != gone && stillOpen(next) ? next : null;
+  }
+
+  /// Records where the current project was left; it becomes the previous one. No notify.
+  void _leave() {
+    final id = currentProject;
+    if (id == null) return;
+    final pos = positions.of(id);
+    pos.leftAt = _now();
+    final k = currentKey, p = _project(id);
+    if (k != null && p != null && p.members.any((m) => m.key == k)) pos.last = k;
+    previousProject = id;
+    currentProject = null;
+    _setCue('');
+    _savePositions();
+  }
+
+  void _setCue(String c) {
+    _cueTimer?.cancel();
+    _cueTimer = null;
+    cue = c;
+    if (c.isEmpty) return;
+    _cueTimer = Timer(cueFor, () {
+      _cueTimer = null;
+      cue = '';
+      notifyListeners();
+    });
+  }
+
+  Timer? _positionsTimer;
+
+  /// Writes a position save that is still waiting for [positionsSaveDelay].
+  void _flushPositions() {
+    if (_positionsTimer != null) _savePositions();
+  }
+
+  /// Also stands for a waiting save.
+  void _savePositions() {
+    _positionsTimer?.cancel();
+    _positionsTimer = null;
+    try {
+      positions.save(data.localDir);
+    } on FileSystemException catch (e) {
+      _log('rapp: 项目位置没有保存：${e.message}');
+    }
+  }
+
+  /// 切到 project [id]: grouped by project, it stops on the session last used there (§6.1) and
+  /// shows the cue (§6.2). Opens nothing.
+  void switchProject(String id) {
+    final p = _project(id);
+    if (p == null) return;
+    final back = currentProject != id;
+    if (currentProject != null && back) _leave();
+    if (previousProject == id) previousProject = null;
+    final pos = positions.of(id);
+    currentProject = id;
+    grouping = Grouping.project;
+    currentKey = resumeKey(p, pos.last, (k) => entryFor(k) != null);
+    panel = null;
+    overview = false;
+    if (back) {
+      final leftAt = pos.leftAt;
+      var needs = 0, disconnected = 0;
+      for (final m in p.members) {
+        final since = _attentionSince[m.key];
+        if (leftAt == null || since == null || !since.isAfter(leftAt)) continue;
+        final l = entryFor(m.key)?.lamp;
+        if (l == Lamp.waiting) needs++;
+        if (l == Lamp.disconnected) disconnected++;
+      }
+      _setCue(returnCue(leftAt: leftAt, now: _now(), needs: needs, disconnected: disconnected) ?? '');
+    }
+    // A leave is recorded only when it is seen; one that is missed (a quit) then gives no cue,
+    // rather than one counted from an older leave.
+    pos.leftAt = null;
+    if (currentKey != null) pos.last = currentKey;
+    _savePositions();
+    notifyListeners();
+  }
+
+  /// 上一个项目; nothing when there is none.
+  void backToPreviousProject() {
+    final id = previousProject;
+    if (id != null) switchProject(id);
+  }
+
+  /// Back to no current project.
+  void leaveProject() {
+    if (currentProject == null) return;
+    _leave();
+    notifyListeners();
   }
 
   SessionEntry? entryFor(String key) {
@@ -2501,6 +2759,9 @@ class MainState extends ChangeNotifier {
     history.dispose();
     _blockedTimer?.cancel();
     _desktopTimer?.cancel();
+    _cueTimer?.cancel();
+    _undoTimer?.cancel();
+    _flushPositions();
     for (final t in _unlockTimers.values) {
       t.cancel();
     }

@@ -56,7 +56,9 @@ class SessionsTab extends StatelessWidget {
                       ),
                     ),
                   for (final g in groups) ...[
-                    _GroupTitle(g.title),
+                    g.projectId == null
+                        ? _GroupTitle(g.title)
+                        : _GroupTitle(g.title, key: Key('group-${g.projectId}'), onTap: () => state.switchProject(g.projectId!)),
                     for (final e in g.entries)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 6),
@@ -93,19 +95,37 @@ class SessionsTab extends StatelessWidget {
 }
 
 class _GroupTitle extends StatelessWidget {
-  const _GroupTitle(this.title, {super.key});
+  const _GroupTitle(this.title, {super.key, this.onTap});
   final String title;
+
+  /// A project's name is a button (切到); the other titles are plain text.
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(2, 10, 2, 6),
-      child: Text(
-        title,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(fontSize: 11, color: t.muted, letterSpacing: 11 * t.labelSpacing),
+    final text = Text(
+      title,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(fontSize: 11, color: t.muted, letterSpacing: 11 * t.labelSpacing),
+    );
+    if (onTap == null) {
+      return Padding(padding: const EdgeInsets.fromLTRB(2, 10, 2, 6), child: text);
+    }
+    return Semantics(
+      button: true,
+      label: title,
+      excludeSemantics: true,
+      onTap: onTap,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: 48),
+          padding: const EdgeInsets.symmetric(horizontal: 2),
+          alignment: Alignment.centerLeft,
+          child: text,
+        ),
       ),
     );
   }

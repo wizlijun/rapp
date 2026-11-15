@@ -138,11 +138,198 @@ void main() {
     );
   });
 
-  testWidgets('empty state text', (tester) async {
+  testWidgets('no projects: only the two buttons, no guidance', (tester) async {
     await tester.runAsync(boot);
     await pump(tester);
-    expect(find.text('还没有项目。在上面输入名字，回车新建。'), findsOneWidget);
     expect(find.text('新建项目'), findsOneWidget);
+    expect(find.text('存成项目'), findsOneWidget);
+    final texts = tester
+        .widgetList<Text>(find.byType(Text))
+        .map((w) => w.data)
+        .toSet();
+    expect(texts, {'新建项目', '存成项目'});
+  });
+
+  bool enabled(WidgetTester tester, Key k) => tester
+      .widget<OutlinedButton>(
+        find.descendant(of: find.byKey(k), matching: find.byType(OutlinedButton)),
+      )
+      .onPressed !=
+      null;
+
+  testWidgets('存成项目 is disabled with nothing open and creates a project when something is', (
+    tester,
+  ) async {
+    await tester.runAsync(boot);
+    await pump(tester);
+    expect(enabled(tester, const Key('save-open')), isFalse);
+    await tester.runAsync(() async {
+      await s.openOrSwitch('111', 'com.apple.Safari', 'Safari');
+      await flush();
+    });
+    await tester.pump();
+    expect(enabled(tester, const Key('save-open')), isTrue);
+    await tester.tap(find.byKey(const Key('save-open')));
+    await tester.pump();
+    await tester.enterText(find.byKey(const Key('new-project')), '开着的');
+    await done(tester);
+    expect(s.projects.single.name, '开着的');
+    expect(s.projects.single.members.single.key, '111/com.apple.Safari');
+    expect(s.currentProject, s.projects.single.id);
+  });
+
+  testWidgets('新建项目 leaves save mode: Enter then creates an empty project', (
+    tester,
+  ) async {
+    await tester.runAsync(boot);
+    await pump(tester);
+    await tester.runAsync(() async {
+      await s.openOrSwitch('111', 'com.apple.Safari', 'Safari');
+      await flush();
+    });
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('save-open')));
+    await tester.pump();
+    await tester.enterText(find.byKey(const Key('new-project')), '空的');
+    await tester.tap(find.byKey(const Key('new-mode')));
+    await tester.pump();
+    await tester.enterText(find.byKey(const Key('new-project')), '空的');
+    await done(tester);
+    expect(s.projects.single.name, '空的');
+    expect(s.projects.single.members, isEmpty);
+  });
+
+  testWidgets('save mode ends when nothing is open any more: Enter creates a plain project', (
+    tester,
+  ) async {
+    await tester.runAsync(boot);
+    await pump(tester);
+    await tester.runAsync(() async {
+      await s.openOrSwitch('111', 'com.apple.Safari', 'Safari');
+      await flush();
+    });
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('save-open')));
+    await tester.pump();
+    await tester.enterText(find.byKey(const Key('new-project')), '甲');
+    await tester.runAsync(() async {
+      t.emit({'event': 'closed', 'sid': 1});
+      await flush();
+    });
+    await tester.pump();
+    expect(s.canSaveOpenAsProject, isFalse);
+    expect(find.byKey(const Key('new-mode')), findsNothing);
+    await done(tester);
+    expect(s.projects.single.name, '甲');
+  });
+
+  testWidgets('pinned projects come first; the pin button toggles its label', (
+    tester,
+  ) async {
+    await tester.runAsync(boot);
+    await pump(tester);
+    final a = s.createProject('甲')!;
+    final b = s.createProject('乙')!;
+    await tester.pump();
+    expect(find.descendant(of: find.byKey(Key('pin-${b.id}')), matching: find.text('固定')), findsOneWidget);
+    await tester.tap(find.byKey(Key('pin-${b.id}')));
+    await tester.pump();
+    expect(s.projects.firstWhere((p) => p.id == b.id).pinned, isTrue);
+    expect(find.descendant(of: find.byKey(Key('pin-${b.id}')), matching: find.text('取消固定')), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.byKey(Key('project-${b.id}'))).dy,
+      lessThan(tester.getTopLeft(find.byKey(Key('project-${a.id}'))).dy),
+    );
+  });
+
+  testWidgets('切到 switches and marks the card as current', (tester) async {
+    await tester.runAsync(boot);
+    await pump(tester);
+    final a = s.createProject('甲')!;
+    final b = s.createProject('乙')!;
+    await tester.pump();
+    BoxDecoration deco(String id) => tester
+        .widget<Container>(find.descendant(
+          of: find.byKey(Key('project-$id')),
+          matching: find.byType(Container),
+        ).first)
+        .decoration! as BoxDecoration;
+    final before = deco(b.id).border;
+    await tester.tap(find.byKey(Key('switch-${b.id}')));
+    await tester.pump();
+    expect(s.currentProject, b.id);
+    expect(deco(b.id).border, isNot(before));
+    expect(deco(a.id).border, before);
+  });
+
+  testWidgets('delete is one tap, shows 撤销, and 撤销 brings the card back', (
+    tester,
+  ) async {
+    await tester.runAsync(boot);
+    await pump(tester);
+    final id = await oneProject(tester);
+    expect(find.byKey(const Key('undo-delete')), findsNothing);
+    await tester.tap(find.byKey(Key('delete-project-$id')));
+    await tester.pump();
+    expect(s.projects, isEmpty);
+    expect(find.byKey(Key('project-$id')), findsNothing);
+    expect(find.text('已删除「写周报」'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('undo-delete')));
+    await tester.pump();
+    expect(find.byKey(Key('project-$id')), findsOneWidget);
+    expect(find.byKey(const Key('undo-delete')), findsNothing);
+    await tester.pump(MainState.undoFor);
+  });
+
+  testWidgets('the undo row disappears after five seconds', (tester) async {
+    await tester.runAsync(boot);
+    await pump(tester);
+    final id = await oneProject(tester);
+    await tester.tap(find.byKey(Key('delete-project-$id')));
+    await tester.pump();
+    expect(find.byKey(const Key('undo-delete')), findsOneWidget);
+    await tester.pump(MainState.undoFor);
+    await tester.pump();
+    expect(find.byKey(const Key('undo-delete')), findsNothing);
+    expect(find.textContaining('已删除'), findsNothing);
+  });
+
+  testWidgets('the member note placeholder says 备注', (tester) async {
+    await tester.runAsync(boot);
+    await pump(tester);
+    await oneProject(tester, members: [safari]);
+    expect(find.text('备注'), findsOneWidget);
+    expect(find.textContaining('Agent'), findsNothing);
+  });
+
+  testWidgets('every new control is at least 48 high', (tester) async {
+    await tester.runAsync(boot);
+    await pump(tester);
+    final id = await oneProject(tester);
+    expect(tester.getSize(find.byKey(const Key('save-open'))).height, greaterThanOrEqualTo(48));
+    for (final k in ['switch-$id', 'pin-$id']) {
+      expect(tester.getSize(find.byKey(Key(k))).height, greaterThanOrEqualTo(48));
+    }
+    await tester.tap(find.byKey(Key('delete-project-$id')));
+    await tester.pump();
+    expect(tester.getSize(find.byKey(const Key('undo-delete'))).height, greaterThanOrEqualTo(48));
+    await tester.pump(MainState.undoFor);
+  });
+
+  testWidgets('切到 and 固定 sit in the title row; a long name on a narrow card does not overflow', (tester) async {
+    await tester.runAsync(boot);
+    await pump(tester);
+    final id = await oneProject(tester, members: [safari, notes]);
+    double mid(String k) => tester.getCenter(find.byKey(Key(k))).dy;
+    expect(mid('switch-$id'), moreOrLessEquals(mid('project-name-$id'), epsilon: 1));
+    expect(mid('pin-$id'), moreOrLessEquals(mid('project-name-$id'), epsilon: 1));
+    expect(mid('switch-$id'), lessThan(tester.getRect(find.byKey(Key('open-all-$id'))).top));
+    s.renameProject(id, '一个很长很长很长很长很长很长很长很长很长很长的项目名字');
+    await tester.pumpWidget(wrap(SizedBox(width: 300, height: 800, child: ProjectsTab(state: s))));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(tester.getSize(find.byKey(Key('switch-$id'))).height, greaterThanOrEqualTo(48));
+    expect(tester.getRect(find.byKey(Key('pin-$id'))).right, lessThanOrEqualTo(tester.getRect(find.byType(ProjectsTab)).right));
   });
 
   testWidgets('tap the name to rename', (tester) async {
@@ -195,7 +382,7 @@ void main() {
     await pump(tester);
     final id = await oneProject(tester, members: [safari]);
     expect(find.text('Safari @ mini'), findsOneWidget);
-    expect(find.text('添加 Agent 任务'), findsOneWidget);
+    expect(find.text('备注'), findsOneWidget);
     expect(find.text('未打开'), findsOneWidget);
     expect(
       find.descendant(
@@ -247,20 +434,6 @@ void main() {
       '111/com.apple.Notes',
     ]);
     expect(find.byKey(Key('member-$id-111/com.apple.Safari')), findsNothing);
-  });
-
-  testWidgets('删除项目 needs two taps', (tester) async {
-    await tester.runAsync(boot);
-    await pump(tester);
-    final id = await oneProject(tester);
-    await tester.tap(find.byKey(Key('delete-project-$id')));
-    await tester.pump();
-    expect(s.projects, hasLength(1));
-    expect(find.text('再点一次确认'), findsOneWidget);
-    await tester.tap(find.text('再点一次确认'));
-    await tester.pump();
-    expect(s.projects, isEmpty);
-    expect(find.byKey(Key('project-$id')), findsNothing);
   });
 
   testWidgets('title lamps show one lamp per member', (tester) async {

@@ -13,6 +13,7 @@ import 'package:rapp/embed/app_profile.dart';
 import 'package:rapp/ui/app_profile_store.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
+import 'package:rapp/ui/tokens.dart';
 import 'package:rapp/ui/top_bar.dart';
 import 'package:rapp/ui/workspace_store.dart';
 
@@ -562,6 +563,51 @@ void main() {
       expect(t.sent.last, {'cmd': 'set_route', 'id': '111', 'route': 'relay', 'req': anything});
     });
 
+    Finder sessionMenu() {
+      final session = find.byKey(const Key('session-menu'));
+      return session.evaluate().isNotEmpty ? session : find.byKey(const Key('traffic'));
+    }
+
+    testWidgets('加入项目 lists projects that do not have the session yet and adds on tap', (tester) async {
+      final has = es.createProject('写周报')!;
+      es.addMember(has.id, const AppRef('111', 'Safari', 'Safari'));
+      final lacks = es.createProject('发版')!;
+      await tester.pumpWidget(wrap(ebar()));
+      await openApp(tester, 'Safari');
+      await tester.tap(sessionMenu());
+      await tester.pump();
+      await tester.ensureVisible(find.byKey(const Key('add-to-project')));
+      await tester.tap(find.byKey(const Key('add-to-project')));
+      await tester.pump();
+      expect(find.byKey(Key('add-to-${has.id}')), findsNothing);
+      expect(find.byKey(const Key('add-save-project')), findsOneWidget);
+      await tester.tap(find.byKey(Key('add-to-${lacks.id}')));
+      await tester.pump();
+      expect(es.projects.firstWhere((p) => p.id == lacks.id).members.single.key, '111/Safari');
+      expect(es.projects.firstWhere((p) => p.id == lacks.id).members.single.task, '');
+      expect(es.corner, isNull);
+    });
+
+    testWidgets('加入项目 with no projects offers only 存成项目, which names the project inline', (tester) async {
+      await tester.pumpWidget(wrap(ebar()));
+      await openApp(tester, 'Safari');
+      await tester.tap(sessionMenu());
+      await tester.pump();
+      await tester.ensureVisible(find.byKey(const Key('add-to-project')));
+      await tester.tap(find.byKey(const Key('add-to-project')));
+      await tester.pump();
+      expect(find.byWidgetPredicate((w) => w.key is ValueKey && (w.key as ValueKey).value.toString().startsWith('add-to-') && w.key != const Key('add-to-project')), findsNothing);
+      await tester.tap(find.byKey(const Key('add-save-project')));
+      await tester.pump();
+      await tester.enterText(find.byKey(const Key('save-project-name')), '写周报');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+      expect(es.projects.single.name, '写周报');
+      expect(es.projects.single.members.single.key, '111/Safari');
+      expect(es.currentProject, es.projects.single.id);
+      expect(es.corner, isNull);
+    });
+
     testWidgets('opening needs closes the stream menu', (tester) async {
       await tester.pumpWidget(wrap(ebar()));
       await openApp(tester, 'Safari');
@@ -762,6 +808,113 @@ void main() {
       await setup(tester, [rw(1, 'Main'), rw(2, 'w2', kind: WindowKind.floating, focused: true)], rules: [hideFloating]);
       final chip = tester.widget<TabChip>(find.byKey(const Key('hidden-tabs')));
       expect(chip.selected, isTrue);
+    });
+  });
+  group('project in the top bar', () {
+    var now = DateTime(2026, 11, 15, 10);
+
+    Future<void> boot(WidgetTester tester) async {
+      s.dispose();
+      now = DateTime(2026, 11, 15, 10);
+      s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), clock: () => now);
+      await tester.pumpWidget(wrap(bar()));
+    }
+
+    testWidgets('the cue replaces the second line for five seconds, without accent or blink', (tester) async {
+      await boot(tester);
+      final a = s.createProject('A')!;
+      final b = s.createProject('B')!;
+      s.addMember(a.id, const AppRef('111', 'Safari', 'Safari'));
+      await open(tester, 1, 'Safari');
+      s.switchProject(a.id);
+      s.switchProject(b.id);
+      now = now.add(const Duration(minutes: 25));
+      s.switchProject(a.id);
+      await tester.pump();
+      final cue = find.byKey(const Key('return-cue'));
+      final text = tester.widget<Text>(cue);
+      expect(text.data, '25 分钟前离开');
+      expect(text.style!.color, RappTokens.of(tester.element(cue)).muted);
+      expect(text.style!.fontWeight!.value, lessThan(FontWeight.w600.value));
+      expect(find.text('mini · A'), findsNothing);
+      await tester.pump(MainState.cueFor);
+      expect(find.byKey(const Key('return-cue')), findsNothing);
+      expect(find.text('mini · A'), findsOneWidget);
+    });
+
+    testWidgets('上一个项目 appears only when there is one and goes back', (tester) async {
+      await boot(tester);
+      final a = s.createProject('写周报')!;
+      final b = s.createProject('发版')!;
+      s.switchProject(a.id);
+      await tester.pump();
+      expect(find.byKey(const Key('prev-project')), findsNothing);
+      s.switchProject(b.id);
+      await tester.pump();
+      final btn = find.byKey(const Key('prev-project'));
+      expect(btn, findsOneWidget);
+      expect(find.bySemanticsLabel('上一个项目：写周报'), findsOneWidget);
+      expect(tester.getSize(btn).height, greaterThanOrEqualTo(48));
+      await tester.tap(btn);
+      await tester.pump();
+      expect(s.currentProject, a.id);
+      expect(find.byKey(const Key('prev-project')), findsOneWidget);
+      expect(find.bySemanticsLabel('上一个项目：发版'), findsOneWidget);
+      await tester.pump(MainState.cueFor);
+    });
+
+    testWidgets('the second line names the current project when the session is in several', (tester) async {
+      await boot(tester);
+      final a = s.createProject('写周报')!;
+      final b = s.createProject('发版')!;
+      s.addMember(a.id, const AppRef('111', 'Safari', 'Safari'));
+      s.addMember(b.id, const AppRef('111', 'Safari', 'Safari'));
+      await open(tester, 1, 'Safari');
+      s.switchProject(b.id);
+      await tester.pump();
+      expect(find.text('mini · 发版等'), findsOneWidget);
+    });
+
+    testWidgets('prev/next count only the open sessions in the current project', (tester) async {
+      await boot(tester);
+      final a = s.createProject('A')!;
+      s.addMember(a.id, const AppRef('111', 'Safari', 'Safari'));
+      s.addMember(a.id, const AppRef('111', 'Notes', 'Notes')); // not open
+      await open(tester, 1, 'Safari');
+      await open(tester, 2, 'Mail');
+      IconButton b(String k) => tester.widget<IconButton>(find.byKey(Key(k)));
+      expect(b('prev').onPressed, isNotNull);
+      s.switchProject(a.id);
+      await tester.pump();
+      expect(b('prev').onPressed, isNull);
+      expect(b('next').onPressed, isNull);
+      s.addMember(a.id, const AppRef('111', 'Mail', 'Mail'));
+      await tester.pump();
+      expect(b('prev').onPressed, isNotNull);
+      expect(b('next').onPressed, isNotNull);
+    });
+
+    testWidgets('上一个项目 does not look like 撤销', (tester) async {
+      await boot(tester);
+      final a = s.createProject('写周报')!;
+      final b = s.createProject('发版')!;
+      s.switchProject(a.id);
+      s.switchProject(b.id);
+      await tester.pump();
+      final icon = tester.widget<Icon>(find.descendant(of: find.byKey(const Key('prev-project')), matching: find.byType(Icon)));
+      expect(icon.icon, Icons.swap_horiz);
+      await tester.pump(MainState.cueFor);
+    });
+
+    testWidgets('with a current project and no session the bar names the project', (tester) async {
+      await boot(tester);
+      final a = s.createProject('写周报')!;
+      await tester.pump();
+      expect(find.text('没有选中的会话'), findsOneWidget);
+      s.switchProject(a.id);
+      await tester.pump();
+      expect(find.text('写周报'), findsOneWidget);
+      expect(find.text('没有选中的会话'), findsNothing);
     });
   });
 }

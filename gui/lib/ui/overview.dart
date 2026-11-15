@@ -9,6 +9,8 @@ import 'controls.dart';
 import 'lamp.dart';
 import 'main_state.dart';
 import 'overview_model.dart';
+import 'prefs.dart' show FirstLayer;
+import 'projects.dart' show orderedProjects;
 import 'session_model.dart';
 import 'workspace_store.dart';
 import 'tokens.dart';
@@ -42,10 +44,12 @@ class Overview extends StatelessWidget {
           entries: entries,
           name: state.deviceName,
         );
+        final projectsFirst = state.prefs.first == FirstLayer.project;
         return Stack(children: [
-          const Positioned.fill(child: OverviewArt()),
+          Positioned.fill(child: OverviewArt(projectsFirst: projectsFirst)),
           Column(key: const Key('overview'), crossAxisAlignment: CrossAxisAlignment.stretch, children: [
             _CountsRow(state: state, counts: counts),
+            if (projectsFirst) _ThirdLayer(state: state),
             Expanded(
               child: ListView.separated(
                 key: const Key('wall'),
@@ -56,7 +60,7 @@ class Overview extends StatelessWidget {
                 itemBuilder: (_, i) => _Column(state: state, col: cols[i]),
               ),
             ),
-            _ThirdLayer(state: state),
+            if (!projectsFirst) _ThirdLayer(state: state),
           ]),
         ]);
       },
@@ -68,7 +72,10 @@ class Overview extends StatelessWidget {
 /// just above the project/resource row. Decoration only: it takes no pointer events, is hidden from
 /// screen readers, and a missing or unreadable file paints nothing.
 class OverviewArt extends StatelessWidget {
-  const OverviewArt({super.key});
+  const OverviewArt({super.key, this.projectsFirst = false});
+
+  /// The project row is above the wall, so the wall's corner is the bottom edge.
+  final bool projectsFirst;
 
   @override
   Widget build(BuildContext context) {
@@ -82,7 +89,7 @@ class OverviewArt extends StatelessWidget {
       return Stack(children: [
         Positioned(
           right: _gap,
-          bottom: _bandHeight,
+          bottom: projectsFirst ? 0 : _bandHeight,
           width: side,
           height: side,
           child: IgnorePointer(
@@ -476,34 +483,21 @@ class _Block extends StatelessWidget {
 const _projectCellWidth = 200.0;
 const _resourcesWidth = 300.0;
 
-/// Projects (scrolling) on the left, the resources cell pinned to the right (K13).
+/// Projects (scrolling) on the left, the resources cell pinned to the right (K13); no projects, no cell.
 class _ThirdLayer extends StatelessWidget {
   const _ThirdLayer({required this.state});
   final MainState state;
 
   @override
   Widget build(BuildContext context) {
-    final projects = state.projects;
+    final projects = orderedProjects(state.projects);
     return SizedBox(
       height: 88 + 2 * _gap,
       child: Row(children: [
         Expanded(
+          // No projects: nothing here, not even a word (project spec §5).
           child: projects.isEmpty
-              ? Padding(
-                  padding: const EdgeInsets.all(_gap),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: _Cell(
-                      cellKey: 'ov-no-projects',
-                      width: _projectCellWidth,
-                      label: '还没有项目',
-                      onTap: () => state.showPanel(PanelTab.projects),
-                      child: Center(
-                        child: Text('还没有项目', style: TextStyle(color: RappTokens.of(context).muted)),
-                      ),
-                    ),
-                  ),
-                )
+              ? const SizedBox.shrink()
               : ListView.separated(
                   key: const Key('ov-projects'),
                   scrollDirection: Axis.horizontal,

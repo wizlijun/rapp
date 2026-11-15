@@ -57,8 +57,11 @@ String endAllHint(String name, int ended, int shared) {
 }
 
 /// The top bar's second line for a session that is in a project (K16); null when it is in none.
-String? projectSubtitle(SessionEntry e, List<Project> projects) {
+/// The [current] project comes first when the session is in it.
+String? projectSubtitle(SessionEntry e, List<Project> projects, {String? current}) {
   final mine = [for (final p in projects) if (p.members.any((m) => m.key == e.key)) p];
+  final i = mine.indexWhere((p) => p.id == current);
+  if (i > 0) mine.insert(0, mine.removeAt(i));
   if (mine.isEmpty) return null;
   String task = '';
   for (final p in mine) {
@@ -67,3 +70,34 @@ String? projectSubtitle(SessionEntry e, List<Project> projects) {
   }
   return '${e.device} · ${mine.first.name}${mine.length > 1 ? '等' : ''}${task.isEmpty ? '' : ' · $task'}';
 }
+
+/// Where to stop on switching to [p]: [last] if it is still a member and open, else the first open
+/// member; null when none is open.
+String? resumeKey(Project p, String? last, bool Function(String key) isOpen) {
+  if (last != null && p.members.any((m) => m.key == last) && isOpen(last)) return last;
+  for (final m in p.members) {
+    if (isOpen(m.key)) return m.key;
+  }
+  return null;
+}
+
+/// The cue shown on coming back to a project; null when it should not show.
+String? returnCue({required DateTime? leftAt, required DateTime now, required int needs, required int disconnected}) {
+  if (leftAt == null) return null;
+  final ago = now.difference(leftAt);
+  if (ago < const Duration(seconds: 60)) return null;
+  final time = ago.inMinutes < 60
+      ? '${ago.inMinutes} 分钟前离开'
+      : ago.inHours < 24
+          ? '${ago.inHours} 小时前离开'
+          : '${ago.inDays} 天前离开';
+  final changes = [if (needs > 0) '$needs 个等你', if (disconnected > 0) '$disconnected 个已断开'];
+  return changes.isEmpty ? time : '$time · 这期间 ${changes.join('、')}';
+}
+
+/// Pinned projects first, the rest after; each keeps its own order.
+List<Project> orderedProjects(List<Project> all) =>
+    [for (final p in all) if (p.pinned) p, for (final p in all) if (!p.pinned) p];
+
+/// The keys of [p]'s members, in member order.
+List<String> projectKeys(Project p) => [for (final m in p.members) m.key];

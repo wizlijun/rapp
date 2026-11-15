@@ -361,12 +361,15 @@ void main() {
     expect(tester.widget<StatusLamp>(lamps.at(1)).kind, Lamp.notOpened);
   });
 
-  testWidgets('no projects: one cell that opens the projects tab', (tester) async {
-    await boot(tester);
+  testWidgets('no projects: no project cell and no words about it; the resources cell stays (project spec §5)',
+      (tester) async {
+    await boot(tester, apps: ['m1/a']);
     await show(tester);
-    expect(inside('ov-no-projects', find.text('还没有项目')), findsOneWidget);
-    await tester.tap(find.byKey(const Key('ov-no-projects')));
-    expect(s.panel, PanelTab.projects);
+    expect(find.textContaining('还没有项目'), findsNothing);
+    expect(find.textContaining('项目'), findsNothing);
+    expect(find.byKey(const Key('ov-no-projects')), findsNothing);
+    expect(find.byKey(const Key('ov-projects')), findsNothing);
+    expect(find.byKey(const Key('ov-resources')), findsOneWidget);
   });
 
   testWidgets('the resources cell sums clips and transfers and opens the resources tab', (tester) async {
@@ -382,6 +385,25 @@ void main() {
     expect(find.textContaining('s4-secret-title'), findsNothing);
     await tester.tap(find.byKey(const Key('ov-resources')));
     expect(s.panel, PanelTab.resources);
+  });
+
+  testWidgets('overview: projects row above the device wall when projects come first', (tester) async {
+    await boot(tester, apps: ['m1/a']);
+    final p = s.createProject('写周报')!;
+    await show(tester);
+    expect(rectOf(tester, 'ov-project-${p.id}').top, greaterThan(rectOf(tester, 'wall').top));
+    s.setFirst(FirstLayer.project);
+    await tester.pump();
+    expect(rectOf(tester, 'ov-project-${p.id}').top, lessThan(rectOf(tester, 'wall').top));
+  });
+
+  testWidgets('overview: pinned projects come first in the row', (tester) async {
+    await boot(tester);
+    final a = s.createProject('甲')!;
+    final b = s.createProject('乙')!;
+    s.togglePinned(b.id);
+    await show(tester);
+    expect(rectOf(tester, 'ov-project-${b.id}').left, lessThan(rectOf(tester, 'ov-project-${a.id}').left));
   });
 
   testWidgets('the resources cell stays at the right edge', (tester) async {
