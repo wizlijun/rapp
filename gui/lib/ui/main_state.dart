@@ -1134,6 +1134,7 @@ class MainState extends ChangeNotifier {
     r.phase = Phase.disconnected;
     r.reason = r.userDisconnect ? 'user' : raw;
     r.frozen = autoReconnects(r.reason);
+    if (r.frozen) rs?.policy.cancel();
     r.seq = ++_seq;
     if (rs != null) {
       r.choice = rs.choice;

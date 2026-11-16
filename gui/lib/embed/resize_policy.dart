@@ -40,6 +40,12 @@ class ResizePolicy {
     _send(w.id, sw, sh);
   }
 
+  /// Drops a judgement still waiting (the link went down under it).
+  void cancel() {
+    _timer?.cancel();
+    _timer = null;
+  }
+
   void dispose() {
     _timer?.cancel();
     _timer = null;

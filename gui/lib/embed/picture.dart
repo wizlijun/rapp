@@ -90,12 +90,14 @@ class _PictureState extends State<Picture> {
   Offset _heldAt = Offset.zero;
 
   void _mouse(String kind, String button, Offset local, _Target t, {Object? sid}) {
+    if (widget.frozen) return;
     if (kind == 'down' || kind == 'drag') _heldAt = local;
     final p = toRemote(local, t.fit, t.win);
     widget.state.port?.mouse(sid ?? _sid, t.win.id, kind, button, p.dx, p.dy, _count);
   }
 
   void _scroll(Offset local, Offset delta) {
+    if (widget.frozen) return;
     final t = _at(local);
     if (!t.usable || !t.pic.contains(local)) return;
     final p = toRemote(local, t.fit, t.win);
@@ -300,6 +302,16 @@ class _PictureState extends State<Picture> {
   @override
   void didUpdateWidget(Picture old) {
     super.didUpdateWidget(old);
+    if (!old.frozen && widget.frozen) {
+      // Gestures in flight at the drop end here: nothing more reaches the port.
+      _dropPending();
+      _touches.clear();
+      _touchScroll = false;
+      _scrollAcc = Offset.zero;
+      _button = null;
+      _buttonPointer = null;
+      _held = null;
+    }
     if (!identical(old.session.composer, widget.session.composer)) {
       old.session.composer.removeListener(_settleSoon);
       widget.session.composer.addListener(_settleSoon);

@@ -419,14 +419,51 @@ void main() {
       await tester.tapAt(o + const Offset(200, 200));
       await tester.sendEventToBinding(PointerScrollEvent(position: o + const Offset(200, 200), scrollDelta: const Offset(0, 40)));
       await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
-      await tester.binding.setSurfaceSize(const Size(700, 500));
-      await tester.pump();
-      await tester.binding.setSurfaceSize(null);
-      await tester.pump();
+      await tester.pumpWidget(wrap(SizedBox(width: 700, height: 500, child: Backdrop(theme: RappTheme.matrix, child: Stage(state: es)))));
+      await tester.pump(const Duration(milliseconds: 400)); // past the policy's 300 ms
       for (final m in ['mouse', 'scroll', 'key', 'picture_focus', 'resize']) {
         expect(port.calls.where((c) => c.$1 == m), isEmpty, reason: m);
       }
       expect(es.pictureFocused, isNull);
+    });
+
+    testWidgets('a mouse drag in flight at the drop sends nothing more', (tester) async {
+      await shown(tester);
+      final o = tester.getTopLeft(find.byKey(const Key('stage')));
+      final g = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await g.down(o + const Offset(300, 250));
+      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      await tester.pump();
+      port.calls.clear();
+      await g.moveBy(const Offset(10, 0));
+      await g.up();
+      await tester.pump();
+      expect(port.calls.where((c) => c.$1 == 'mouse' || c.$1 == 'scroll'), isEmpty);
+    });
+
+    testWidgets('a held-back touch press is dropped at the drop', (tester) async {
+      await shown(tester);
+      final o = tester.getTopLeft(find.byKey(const Key('stage')));
+      final f = await tester.createGesture(kind: PointerDeviceKind.touch, pointer: 11);
+      await f.down(o + const Offset(300, 250));
+      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      await tester.pump();
+      port.calls.clear();
+      await tester.pump(const Duration(milliseconds: 300));
+      await f.up();
+      await tester.pump();
+      expect(port.calls.where((c) => c.$1 == 'mouse'), isEmpty);
+    });
+
+    testWidgets('a resize timer started just before the drop never fires', (tester) async {
+      await shown(tester);
+      port.calls.clear();
+      await tester.pumpWidget(wrap(SizedBox(width: 700, height: 500, child: Backdrop(theme: RappTheme.matrix, child: Stage(state: es)))));
+      await tester.pump(const Duration(milliseconds: 100));
+      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(port.calls.where((c) => c.$1 == 'resize'), isEmpty);
     });
 
     testWidgets('the picture element survives the drop', (tester) async {
