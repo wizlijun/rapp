@@ -13,7 +13,8 @@ const _me = Device(fp: 'a', name: '本机');
 const _mini = Device(fp: 'b', name: 'mini');
 
 ShareRow row(int port,
-        {String note = '', List<Device> allow = const [], bool web = true, bool listening = true, bool mine = true, String? addr}) =>
+        {String note = '', List<Device> allow = const [], bool web = true, bool listening = true, bool mine = true, String? addr,
+        String proto = 'http', bool protoAuto = false, int? local, int? wanted, bool taken = false, Renumbered? renumbered}) =>
     ShareRow(
       port: port,
       note: note,
@@ -23,9 +24,16 @@ ShareRow row(int port,
       web: web,
       listening: listening,
       mine: mine,
+      proto: proto,
+      protoAuto: protoAuto,
+      local: local,
+      wanted: wanted,
+      taken: taken,
+      renumbered: renumbered,
     );
 
-ShareTable table(List<ShareRow> rows) => ShareTable(id: '123456789', me: 'a', rows: rows, known: const [_me, _mini]);
+ShareTable table(List<ShareRow> rows, {bool old = false}) =>
+    ShareTable(id: '123456789', me: 'a', rows: rows, known: const [_me, _mini], old: old);
 
 class FakeApi implements SharesApi {
   FakeApi(this.next);
@@ -41,8 +49,8 @@ class FakeApi implements SharesApi {
   }
 
   @override
-  Future<List<Shared>> share({String? to, required List<int> ports, String? note, List<String>? allow}) {
-    calls.add('share $to $ports $note $allow');
+  Future<List<Shared>> share({String? to, required List<int> ports, String? note, List<String>? allow, String? proto}) {
+    calls.add('share $to $ports $note $allow${proto == null ? '' : ' $proto'}');
     return onShare?.call() ?? Future.value([for (final p in ports) Shared(port: p)]);
   }
 
@@ -107,7 +115,7 @@ void main() {
     expect(opened, isEmpty);
     expect(copied, isNull);
     expect(find.text('只给 mini（不含本机）'), findsOneWidget);
-    expect(find.text('没有本机端口可用'), findsOneWidget);
+    expect(find.text('没有空的号'), findsOneWidget);
   });
 
   testWidgets('the address is shown, copied and opened as the service sent it', (t) async {
@@ -322,5 +330,72 @@ void main() {
     await t.pump();
     expect(find.byKey(const Key('share-row-9000')), findsOneWidget);
     expect(find.text('离线，读不到它的端口'), findsNothing);
+  });
+
+  testWidgets('protocol picker: shows the proto, 自动, and chooses tcp', (t) async {
+    final api = await show(t, table([row(8000, protoAuto: true), row(22, proto: 'ssh', web: false)]));
+    expect(find.byKey(const Key('share-proto-8000')), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const Key('share-proto-8000')), matching: find.text('http')), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const Key('share-row-8000')), matching: find.text('自动')), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const Key('share-row-22')), matching: find.text('自动')), findsNothing);
+    await t.tap(find.byKey(const Key('share-proto-8000')));
+    await t.pumpAndSettle();
+    await t.tap(find.text('tcp').last);
+    await t.pumpAndSettle();
+    expect(api.calls, contains('share null [8000] null null tcp'));
+  });
+
+  testWidgets('choosing the proto already set does nothing', (t) async {
+    final api = await show(t, table([row(8000)]));
+    await t.tap(find.byKey(const Key('share-proto-8000')));
+    await t.pumpAndSettle();
+    await t.tap(find.text('http').last);
+    await t.pumpAndSettle();
+    expect(api.calls.where((c) => c.startsWith('share ')), isEmpty);
+  });
+
+  testWidgets('an old table has no protocol picker', (t) async {
+    await show(t, table([row(8000)], old: true));
+    expect(find.byKey(const Key('share-proto-8000')), findsNothing);
+  });
+
+  testWidgets('copy gives addr exactly, open only when web', (t) async {
+    String? copied;
+    t.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (c) async {
+      if (c.method == 'Clipboard.setData') copied = (c.arguments as Map)['text'] as String;
+      return null;
+    });
+    await show(t, table([
+      row(9000, proto: 'tcp', web: false, addr: 'tcp://localhost:28000'),
+      row(22, proto: 'ssh', web: false, addr: 'ssh -p 28001 localhost'),
+    ]));
+    await t.tap(find.byKey(const Key('share-copy-9000')));
+    expect(copied, 'tcp://localhost:28000');
+    await t.tap(find.byKey(const Key('share-copy-22')));
+    expect(copied, 'ssh -p 28001 localhost');
+    expect(find.byKey(const Key('share-open-9000')), findsNothing);
+    expect(find.byKey(const Key('share-open-22')), findsNothing);
+  });
+
+  testWidgets('notices: yielded, taken, renumbered', (t) async {
+    final api = await show(t, table([
+      row(8000, wanted: 28000, local: 28005),
+      row(8007, taken: true, local: 28000),
+      row(8008, local: 28003, renumbered: const Renumbered(from: 28000, with_: 'Mini')),
+    ]));
+    expect(find.text('这台上是 28005（28000 被占）'), findsOneWidget);
+    expect(find.text('本机上 28000 被别的程序占着，本机请用 localhost:8007'), findsOneWidget);
+    expect(find.text('28000 和 Mini 撞了，换成 28003'), findsOneWidget);
+    await t.tap(find.byKey(const Key('share-renumbered-ok-8008')));
+    await t.pump();
+    expect(api.calls, contains('share null [8008] null null'));
+  });
+
+  testWidgets('no address: own table says 没有空的号, remote keeps 没有本机端口可用', (t) async {
+    await show(t, table([row(8000, addr: '')]));
+    expect(find.text('没有空的号'), findsOneWidget);
+    await show(t, table([row(8000, addr: '')]), to: 'x');
+    await t.pump();
+    expect(find.text('没有本机端口可用'), findsOneWidget);
   });
 }
