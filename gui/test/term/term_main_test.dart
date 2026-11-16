@@ -5,6 +5,7 @@ import 'dart:ui' show PointerDeviceKind;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart' show kSecondaryButton;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/session_port.dart';
@@ -21,7 +22,6 @@ import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/sessions_tab.dart';
 import 'package:rapp/ui/stage.dart';
-import 'package:rapp/ui/tab_chip.dart';
 import 'package:rapp/ui/top_bar.dart';
 
 import '../fakes.dart';
@@ -149,11 +149,16 @@ void main() {
     expect(term.calls.where((c) => c.$1 == 'start').single.$2['sid'], 1);
     expect(port.calls.where((c) => c.$1 == 'start'), isEmpty);
     expect(find.byType(TermStage), findsOneWidget);
-    expect(find.widgetWithText(TabChip, 'claude'), findsOneWidget);
-    expect(find.widgetWithText(TabChip, 'logs'), findsOneWidget);
-    for (final c in tester.widgetList<TabChip>(find.byType(TabChip))) {
-      expect((c.onClose, c.onSecondaryTap), (null, null));
-    }
+    // The control names the current pane; the others are in its menu.
+    expect(tester.widget<Text>(find.byKey(const Key('window-menu-label'))).data, 'claude');
+    await tester.tap(find.byKey(const Key('window-menu')));
+    await settle(tester);
+    expect(find.text('logs'), findsOneWidget);
+    // A pane has no × and no window rules.
+    expect(find.byKey(const Key('close-window-4')), findsNothing);
+    await tester.tap(find.byKey(const Key('window-row-4')), buttons: kSecondaryButton);
+    await settle(tester);
+    expect(find.text('隐藏这类窗口'), findsNothing);
     // The device's current pane is the first tab, and it is viewed.
     expect(s.currentRemote!.currentWindow, 3);
     expect(term.calls.where((c) => c.$1 == 'view').last.$2['window'], 3);
@@ -271,7 +276,7 @@ void main() {
   testWidgets('a terminal has no plus for a new window', (tester) async {
     await tester.pumpWidget(wrap(window()));
     await openTerm(tester, [tp(3, 'claude', active: true)]);
-    expect(find.byType(TabChip), findsWidgets);
+    expect(find.byKey(const Key('window-menu')), findsOneWidget);
     expect(find.byKey(const Key('term-new-window')), findsNothing);
     expect(find.text('＋'), findsNothing);
   });
@@ -283,7 +288,9 @@ void main() {
     term.play(windowsOf(1, term.paneLists[1]!));
     await settle(tester);
     expect(s.currentRemote!.currentWindow, 3);
-    expect(find.widgetWithText(TabChip, 'htop'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('window-menu')));
+    await settle(tester);
+    expect(find.text('htop'), findsOneWidget);
   });
 
   testWidgets('a dead pane keeps its screen and says so on the tab', (tester) async {
@@ -292,7 +299,7 @@ void main() {
     term.paneLists[1] = [tp(3, 'claude', active: true, dead: true), tp(4, 'logs')];
     term.play(windowsOf(1, term.paneLists[1]!));
     await settle(tester);
-    expect(find.widgetWithText(TabChip, 'claude · 已退出'), findsOneWidget);
+    expect(tester.widget<Text>(find.byKey(const Key('window-menu-label'))).data, 'claude · 已退出');
     expect(find.byType(TermStage), findsOneWidget);
     expect(s.currentRemote!.currentWindow, 3);
   });

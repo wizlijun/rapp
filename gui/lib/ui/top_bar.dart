@@ -6,13 +6,12 @@ import '../embed/traffic_label.dart';
 import '../pages/app_profile_page.dart';
 import 'lamp.dart';
 import 'lifecycle.dart';
-import 'tab_chip.dart';
 import 'main_state.dart';
 import 'needs_you.dart';
+import 'window_menu.dart';
 import 'net_marker.dart';
 import 'corner_popover.dart';
 import 'projects.dart';
-import 'rule_snack.dart';
 import 'session_model.dart';
 import 'session_switcher.dart';
 import 'tokens.dart';
@@ -64,21 +63,31 @@ class TopBar extends StatelessWidget {
             final showPrevProject = previous != null && box.maxWidth >= (baseIcons + 1) * 48 + trafficW;
             final icons = baseIcons + (showPrevProject ? 1 : 0);
             final splitW = embedded ? (term ? 1 : 2) * 48.0 : 0.0;
-            final hidden = rs != null && !rs.detached && !term && rs.hidden.isNotEmpty;
-            // Room for the gaps, a session block and the 已隐藏 chip besides (none of them shrink).
-            final chip = hidden ? 130.0 : 0.0;
             // The network marker, left of the stream anchor, while the hub has a relay to measure and
             // the bare row (no gaps, no overview button) has room for it; it goes before those do.
             const netWant = NetMarker.width;
             final net = box.maxWidth >= icons * 48 + trafficW + netWant ? state.hub?.net : null;
             final netW = net == null ? 0.0 : netWant;
-            final split = embedded && box.maxWidth >= (icons + 1) * 48 + trafficW + splitW + netW + 42 + 160 + chip;
+            // The window control: one button, never a row that grows. What the bare row leaves it,
+            // beside a bit of the session block, decides whether it carries a title or shrinks to
+            // the icon and the count. Hidden windows keep it on screen at any width: the menu is
+            // the only way back to them.
+            final wmRoom = box.maxWidth - (icons * 48 + trafficW + netW);
+            final wmHidden = rs != null && !rs.detached && WindowMenu.hiddenOf(state, term: term).isNotEmpty;
+            final wmShow = rs != null &&
+                !rs.detached &&
+                WindowMenu.shows(state, term: term) &&
+                (wmHidden || wmRoom >= WindowMenu.compactWidth + 60);
+            final wmFull = wmShow && wmRoom >= WindowMenu.fullWidth + 60;
+            final wmW = !wmShow ? 0.0 : (wmFull ? WindowMenu.fullWidth : WindowMenu.compactWidth);
+            final split = embedded && box.maxWidth >= (icons + 1) * 48 + trafficW + splitW + netW + 42 + 160 + wmW;
             final remoteButton = split && !term;
             final streamW = trafficW + (split ? splitW : 0.0) + netW;
             double fixed(double gap, bool overview) =>
                 (icons + (overview ? 1 : 0)) * 48 +
                 streamW +
-                ((overview ? 7 : 6) + (showPrevProject ? 1 : 0) + (remoteButton ? 1 : 0)) * gap;
+                wmW +
+                ((overview ? 7 : 6) + (showPrevProject ? 1 : 0) + (remoteButton ? 1 : 0) + (wmShow ? 1 : 0)) * gap;
             // K11: never below 300.
             final showOverview = box.maxWidth >= 300 && box.maxWidth >= fixed(0, true);
             // Room for the gaps plus the session block's lamp (13) and its gap (8).
@@ -88,8 +97,6 @@ class TopBar extends StatelessWidget {
             // right edge. (A loose Flexible would leave its unused share of the
             // slack at the end of the row.)
             final sessionMax = (box.maxWidth - fixed(gap, showOverview)).clamp(0.0, 260.0).toDouble();
-            // A detached session's windows are its tabs now; the bar shows none.
-            final tabs = rs == null || rs.detached ? null : rs.tabs;
             // With a current project, stepping stays inside it: only its open sessions count.
             final multi = state.steppableCount >= 2;
             // Any open session makes the block the session list's button; its ▾ (and padding)
@@ -210,46 +217,12 @@ class TopBar extends StatelessWidget {
                     _menu(context, cur, {MenuPart.remote}, Corner.remote),
                     SizedBox(width: gap),
                   ],
-                  if (tabs != null && (tabs.tabs.length >= 2 || hidden || term))
-                    Flexible(
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            for (final w in tabs.tabs)
-                              Padding(
-                                padding: EdgeInsets.only(right: gap),
-                                child: ConstrainedBox(
-                                  constraints: const BoxConstraints(maxWidth: 200),
-                                  child: IntrinsicWidth(
-                                    child: TabChip(
-                                    label: w.title.isEmpty ? cur!.appName : w.title,
-                                    selected: w.id == tabs.current,
-                                    onTap: () => state.selectWindow(w.id),
-                                    onSecondaryTap: term ? null : (p) => _tabMenu(context, p, w.id),
-                                    onClose: term || state.isMainWindow(w.id) ? null : () => state.closeWindow(w.id),
-                                  ),
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  // Outside the scroll view: the only way back to hidden windows must never scroll away.
-                  if (tabs != null && hidden)
-                        Builder(
-                          builder: (chipCtx) => TabChip(
-                            key: const Key('hidden-tabs'),
-                            label: '已隐藏 ${rs.hidden.length} 个',
-                            selected: rs.hiddenFocused,
-                            onTap: () {
-                              final box = chipCtx.findRenderObject() as RenderBox;
-                              _hiddenMenu(context, box.localToGlobal(Offset(0, box.size.height)));
-                            },
-                          ),
-                        ),
+                  // One button for every window, hidden ones included: the title, and a menu to
+                  // switch. It is not flexible, so it can never push the rest of the row out.
+                  if (wmShow) ...[
+                    WindowMenu(state: state, term: term, compact: !wmFull),
+                    SizedBox(width: gap),
+                  ],
                   if (wide)
                     Expanded(
                       child: Text(
@@ -365,45 +338,6 @@ class TopBar extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  Future<void> _tabMenu(BuildContext context, Offset p, int window) async {
-    final messenger = ScaffoldMessenger.of(context);
-    final pick = await showMenu<Object?>(
-      context: context,
-      position: menuAt(context, p),
-      items: [
-        PopupMenuItem<Object?>(value: 'hide', enabled: !state.isMainWindow(window), child: const Text('隐藏这类窗口')),
-        const PopupMenuItem<Object?>(value: 'noComposer', child: Text('这个窗口不要输入区')),
-      ],
-    );
-    if (pick == null) return;
-    final undo = pick == 'hide' ? state.hideLike(window) : state.noComposerLike(window);
-    if (undo == null) return;
-    ruleSnack(messenger, pick == 'hide' ? '已隐藏，可在 app 配置里改' : '已关掉这个窗口的输入区，可在 app 配置里改', undo);
-  }
-
-  Future<void> _hiddenMenu(BuildContext context, Offset p) async {
-    final rs = state.currentRemote;
-    if (rs == null) return;
-    final app = state.current?.appName ?? '';
-    final pick = await showMenu<(String, int)>(
-      context: context,
-      position: menuAt(context, p),
-      items: [
-        for (final w in rs.hidden) ...[
-          PopupMenuItem<(String, int)>(enabled: false, child: Text(w.title.isEmpty ? app : w.title)),
-          PopupMenuItem<(String, int)>(value: ('show', w.id), child: const Text('这次显示')),
-          PopupMenuItem<(String, int)>(value: ('unhide', w.id), child: const Text('不再隐藏')),
-        ],
-      ],
-    );
-    if (pick == null) return;
-    if (pick.$1 == 'show') {
-      state.showHiddenOnce(pick.$2);
-    } else {
-      state.unhide(pick.$2);
-    }
   }
 
   /// The session's place when no session is current: the current project's name, and under it the

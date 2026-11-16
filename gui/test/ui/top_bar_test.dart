@@ -8,7 +8,6 @@ import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/embed/stream_menu.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/ui/lamp.dart';
-import 'package:rapp/ui/tab_chip.dart';
 import 'package:rapp/embed/app_profile.dart';
 import 'package:rapp/ui/app_profile_store.dart';
 import 'package:rapp/ui/main_state.dart';
@@ -17,6 +16,7 @@ import 'package:rapp/ui/session_model.dart';
 import 'package:rapp/ui/session_switcher.dart';
 import 'package:rapp/ui/tokens.dart';
 import 'package:rapp/ui/top_bar.dart';
+import 'package:rapp/ui/window_menu.dart';
 import 'package:rapp/ui/workspace_store.dart';
 
 import '../fakes.dart';
@@ -343,7 +343,7 @@ void main() {
     expect(find.bySemanticsLabel('com.apple.Safari，活动，mini · 写周报 · 整理 PR'), findsOneWidget);
   });
 
-  group('window tabs', () {
+  group('window menu', () {
     RemoteWindow rw(int id, String title) => RemoteWindow(
           id: id,
           parent: 0,
@@ -357,12 +357,12 @@ void main() {
           visible: const Rect.fromLTWH(0, 0, 1, 1),
         );
 
-    testWidgets('tabs appear at two windows and switch on tap', (tester) async {
+    Future<(MainState, FakeSessionPort)> boot(WidgetTester tester, {double width = 800}) async {
       final port = FakeSessionPort();
       final es = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port);
       addTearDown(es.dispose);
       await tester.pumpWidget(wrap(SizedBox(
-        width: 800,
+        width: width,
         child: TopBar(state: es, fullscreen: false, onToggleFullscreen: () {}),
       )));
       await tester.runAsync(() async {
@@ -382,17 +382,43 @@ void main() {
       await tester.pump();
       es.stageSize(const Size(800, 600));
       port.emit(const ReadyEvent(1, 'Safari'));
+      return (es, port);
+    }
+
+    /// A menu opens and closes on its own animation; the stage keeps pumping, so never settle.
+    Future<void> settle(WidgetTester tester) async {
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 600));
+    }
+
+    // The session block has an arrow of its own: look for the control's inside it.
+    final arrow = find.descendant(
+      of: find.byKey(const Key('window-menu')),
+      matching: find.byIcon(Icons.arrow_drop_down),
+    );
+
+    testWidgets('the button names the current window; the menu switches', (tester) async {
+      final (es, port) = await boot(tester);
       port.emit(WindowsEvent(1, [rw(1, 'One')]));
       await tester.pump();
-      expect(find.byType(TabChip), findsNothing);
+      // One window: its title, and nothing to open.
+      expect(find.byKey(const Key('window-menu')), findsOneWidget);
+      expect(find.text('One'), findsOneWidget);
+      expect(arrow, findsNothing);
+
       port.emit(WindowsEvent(1, [rw(1, 'One'), rw(2, 'Two')]));
       await tester.pump();
-      expect(find.byType(TabChip), findsNWidgets(2));
-      // A new window becomes current, so the other tab is the one to pick.
+      // A new window becomes current: the button names it, the other is in the menu only.
       expect(es.currentRemote!.currentWindow, 2);
+      expect(find.text('Two'), findsOneWidget);
+      expect(find.text('One'), findsNothing);
+      expect(arrow, findsOneWidget);
+
       port.calls.clear();
-      await tester.tap(find.widgetWithText(TabChip, 'One'));
-      await tester.pump();
+      await tester.tap(find.byKey(const Key('window-menu')));
+      await settle(tester);
+      await tester.tap(find.text('One'));
+      await settle(tester);
       expect(
         port.calls.any((c) => c.$1 == 'select_window' && c.$2['sid'] == 1 && c.$2['window'] == 1),
         isTrue,
@@ -401,8 +427,34 @@ void main() {
       expect(r.length, 1);
       expect(r.single.$2['window'], 1);
       expect(es.currentRemote!.currentWindow, 1);
-      expect(tester.widget<TabChip>(find.widgetWithText(TabChip, 'One')).selected, isTrue);
-      expect(tester.widget<TabChip>(find.widgetWithText(TabChip, 'Two')).selected, isFalse);
+      expect(find.text('One'), findsOneWidget);
+      expect(find.text('Two'), findsNothing);
+    });
+
+    testWidgets('× in the menu closes that window, never the main one', (tester) async {
+      final (es, port) = await boot(tester);
+      port.emit(WindowsEvent(1, [rw(1, 'One'), rw(2, 'Two')]));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('window-menu')));
+      await settle(tester);
+      // The first window A reported is the main one: no ×.
+      expect(find.byKey(const Key('close-window-1')), findsNothing);
+      port.calls.clear();
+      await tester.tap(find.byKey(const Key('close-window-2')));
+      await settle(tester);
+      expect(port.calls.any((c) => c.$1 == 'close_window' && c.$2['window'] == 2), isTrue);
+    });
+
+    testWidgets('a narrow bar leaves the count, and the title in the tooltip', (tester) async {
+      final (_, port) = await boot(tester, width: 420);
+      port.emit(WindowsEvent(1, [rw(1, 'A window with a long title'), rw(2, 'Two')]));
+      await tester.pump();
+      expect(tester.getSize(find.byKey(const Key('window-menu'))).width,
+          lessThanOrEqualTo(WindowMenu.compactWidth));
+      expect(tester.widget<Text>(find.byKey(const Key('window-menu-label'))).data, '2');
+      expect(find.byTooltip('A window with a long title（2 个窗口）'), findsOneWidget);
+      // The bar still fits: nothing overflowed.
+      expect(tester.takeException(), isNull);
     });
   });
 
@@ -892,6 +944,17 @@ void main() {
       await tester.pump(const Duration(milliseconds: 600));
     }
 
+    /// The windows live in the menu now: open it before picking or right-clicking a row.
+    Future<void> openMenu(WidgetTester tester) async {
+      await tester.tap(find.byKey(const Key('window-menu')));
+      await settle(tester);
+    }
+
+    Future<void> closeMenu(WidgetTester tester) async {
+      await tester.tapAt(const Offset(5, 400));
+      await settle(tester);
+    }
+
     late FakeSessionPort port;
     late MainState es;
     late AppProfileStore store;
@@ -933,24 +996,29 @@ void main() {
 
     final three = [rw(1, 'Main'), rw(2, 'Downloads', kind: WindowKind.floating), rw(3, 'Other')];
 
-    testWidgets('right-click a tab, 隐藏这类窗口: the tab goes, a snackbar offers 撤销', (tester) async {
+    testWidgets('right-click a row, 隐藏这类窗口: the window goes, a snackbar offers 撤销', (tester) async {
       await setup(tester, three);
-      await tester.tap(find.text('Downloads'), buttons: kSecondaryButton);
+      await openMenu(tester);
+      await tester.tap(find.byKey(const Key('window-row-2')), buttons: kSecondaryButton);
       await settle(tester);
       await tester.tap(find.text('隐藏这类窗口'));
       await settle(tester);
-      expect(find.text('Downloads'), findsNothing);
-      expect(find.text('已隐藏 1 个'), findsOneWidget);
       expect(find.text('已隐藏，可在 app 配置里改'), findsOneWidget);
+      await openMenu(tester);
+      expect(find.text('Downloads'), findsOneWidget); // in the 已隐藏 group now
+      expect(find.text('已隐藏 1 个'), findsOneWidget);
+      await closeMenu(tester);
       await tester.tap(find.text('撤销'));
       await settle(tester);
-      expect(find.text('Downloads'), findsOneWidget);
+      await openMenu(tester);
       expect(find.text('已隐藏 1 个'), findsNothing);
+      expect(find.byKey(const Key('window-row-2')), findsOneWidget); // a window again
     });
 
     testWidgets('这个窗口不要输入区 shows its snackbar', (tester) async {
       await setup(tester, three);
-      await tester.tap(find.text('Other'), buttons: kSecondaryButton);
+      await openMenu(tester);
+      await tester.tap(find.byKey(const Key('window-row-3')), buttons: kSecondaryButton);
       await settle(tester);
       await tester.tap(find.text('这个窗口不要输入区'));
       await settle(tester);
@@ -960,7 +1028,8 @@ void main() {
 
     testWidgets('the 隐藏这类窗口 snackbar goes away on its own', (tester) async {
       await setup(tester, three);
-      await tester.tap(find.text('Downloads'), buttons: kSecondaryButton);
+      await openMenu(tester);
+      await tester.tap(find.byKey(const Key('window-row-2')), buttons: kSecondaryButton);
       await settle(tester);
       await tester.tap(find.text('隐藏这类窗口'));
       await settle(tester);
@@ -968,62 +1037,65 @@ void main() {
       await tester.pump(const Duration(seconds: 5));
       await settle(tester);
       expect(find.text('已隐藏，可在 app 配置里改'), findsNothing);
+      await openMenu(tester);
       expect(find.text('已隐藏 1 个'), findsOneWidget);
     });
 
     testWidgets('隐藏这类窗口 is greyed for the main window', (tester) async {
       await setup(tester, three);
-      await tester.tap(find.text('Main'), buttons: kSecondaryButton);
+      await openMenu(tester);
+      await tester.tap(find.byKey(const Key('window-row-1')), buttons: kSecondaryButton);
       await settle(tester);
       final item = tester.widget<PopupMenuItem<Object?>>(
           find.ancestor(of: find.text('隐藏这类窗口'), matching: find.byType(PopupMenuItem<Object?>)));
       expect(item.enabled, isFalse);
     });
 
-    testWidgets('已隐藏 N 个 shows with a single tab; 这次显示 and 不再隐藏 work', (tester) async {
+    testWidgets('the 已隐藏 group: 这次显示 and 不再隐藏 work with one window left', (tester) async {
       final two = [rw(1, 'Main'), rw(2, 'w2', kind: WindowKind.floating)];
       await setup(tester, two, rules: [hideFloating]);
+      // One window and one hidden: the menu opens for the hidden one alone.
+      await openMenu(tester);
       expect(find.text('已隐藏 1 个'), findsOneWidget);
-      await tester.tap(find.byKey(const Key('hidden-tabs')));
-      await settle(tester);
       expect(find.text('w2'), findsOneWidget); // the unclickable name row
       await tester.tap(find.text('这次显示'));
       await settle(tester);
-      expect(find.text('w2'), findsOneWidget); // now a tab
+      expect(find.text('w2'), findsOneWidget); // a window now, named on the button
+      await openMenu(tester);
       expect(find.text('已隐藏 1 个'), findsNothing);
+      await closeMenu(tester);
 
       // A fresh table with the rule again: 不再隐藏 removes the rule.
       await setup(tester, two, rules: [hideFloating]);
-      await tester.tap(find.byKey(const Key('hidden-tabs')));
-      await settle(tester);
+      await openMenu(tester);
       await tester.tap(find.text('不再隐藏'));
       await settle(tester);
       expect(store.mine.where((p) => p.windows?.isNotEmpty ?? false), isEmpty);
+      await openMenu(tester);
       expect(find.text('已隐藏 1 个'), findsNothing);
     });
 
-    testWidgets('已隐藏 N 个 stays on screen with many tabs at a narrow width', (tester) async {
+    testWidgets('the control stays on screen with many windows at a narrow width', (tester) async {
       final many = [
         for (var i = 1; i <= 8; i++) rw(i, 'Window number $i'),
         rw(9, 'w9', kind: WindowKind.floating),
       ];
-      await setup(tester, many, rules: [hideFloating], width: 800);
-      final chip = find.byKey(const Key('hidden-tabs'));
-      expect(chip, findsOneWidget);
-      final r = tester.getRect(chip);
+      await setup(tester, many, rules: [hideFloating], width: 460);
+      final button = find.byKey(const Key('window-menu'));
+      expect(button, findsOneWidget);
+      final r = tester.getRect(button);
       expect(r.left, greaterThanOrEqualTo(0));
-      expect(r.right, lessThanOrEqualTo(800));
+      expect(r.right, lessThanOrEqualTo(460));
       expect(tester.getRect(find.byType(TopBar)).contains(r.center), isTrue);
-      // Hit-testable: tapping it opens the menu.
-      await tester.tap(chip);
-      await settle(tester);
+      expect(tester.takeException(), isNull);
+      // Hit-testable, and the hidden window is still reachable.
+      await openMenu(tester);
       expect(find.text('这次显示'), findsOneWidget);
     });
 
-    testWidgets('已隐藏 N 个 is selected while A focuses a hidden window', (tester) async {
+    testWidgets('the control is selected while A focuses a hidden window', (tester) async {
       await setup(tester, [rw(1, 'Main'), rw(2, 'w2', kind: WindowKind.floating, focused: true)], rules: [hideFloating]);
-      final chip = tester.widget<TabChip>(find.byKey(const Key('hidden-tabs')));
-      expect(chip.selected, isTrue);
+      expect(tester.widget<Semantics>(find.byKey(const Key('window-menu'))).properties.selected, isTrue);
     });
   });
   group('project in the top bar', () {
