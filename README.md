@@ -30,6 +30,8 @@ Linux supports embedded sessions, detach/reattach into native windows, and the s
 
 Linux graphical hosting is not implemented. Text-terminal windows require an installed supported terminal, a graphical login and a systemd user manager; they run separately from the rapp service so restarting it does not end the terminal. `rapp` with no arguments opens the GUI; `rapp hosts`, `rapp share`, `rapp unshare` and `rapp pipe` run the CLI. Linux updates are installed through the package manager, or by replacing the portable bundle.
 
+For direct connections, allow inbound **UDP 22028** (or the service's configured UDP port) from the intended peers. Do not open an entire `2202x` range: TCP 22029 is localhost-only IPC; TCP 28000–28999 are localhost-only port mappings carried over the existing rapp connection. Neither needs a LAN firewall exception. UDP 22026 belongs to a separately deployed relay, not a normal rapp device. The Linux Local page shows the actual UDP listener, offers a read-only check of recent UFW block logs, and provides a command restricted to one peer IP. A timeout or an empty log alone does not establish whether a firewall blocked the connection.
+
 Upgrades preserve the data directory and saved hosts. The legacy relay configuration from 0.5.x is retired by the mainline migration; enter a current relay key to use the new relay. This is separate from preserving local data.
 
 ## Build

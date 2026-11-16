@@ -47,6 +47,7 @@ async fn reports_status() {
     assert_eq!(st["name"], "test-a");
     assert_eq!(st["password"], PASSWORD);
     assert!(st["lan_ids"].is_array());
+    assert_eq!(st["port"], a.svc.port, "advertise the actual bound UDP port, not the IPC port");
     assert_eq!(
         (&st["relay"], &st["relay_error"], &st["relay_addr"], &st["has_key"]),
         (&json!("off"), &Value::Null, &Value::Null, &json!(false)),

@@ -48,6 +48,7 @@ class ServiceStatus {
     this.hasKey = false,
     this.fp,
     this.capabilities,
+    this.port = 22028,
   });
 
   final String? id;
@@ -85,6 +86,8 @@ class ServiceStatus {
   /// This device's fingerprint.
   final String? fp;
   final Map<String, dynamic>? capabilities;
+  /// Actual QUIC listener, distinct from the localhost IPC port.
+  final int port;
 
   /// The relay can be used: an address and a valid key (an address alone, e.g. with 0.5.5's key, is not).
   bool get relaySet => hasKey && relayAddr != null;
@@ -112,6 +115,7 @@ class ServiceStatus {
       hasKey: m['has_key'] == true,
       fp: m['fp']?.toString(),
       capabilities: m['capabilities'] is Map ? Map<String, dynamic>.from(m['capabilities']) : null,
+      port: _serviceUdpPort(m),
       sessions: (m['sessions'] as List? ?? const [])
           .whereType<Map>()
           .map((s) => ServiceSession(s['sid'] as Object, '${s['peer'] ?? ''}', '${s['app'] ?? ''}',
@@ -119,6 +123,19 @@ class ServiceStatus {
           .toList(),
     );
   }
+}
+
+int _serviceUdpPort(Map<String, dynamic> m) {
+  final port = m['port'];
+  if (port is int && port > 0 && port <= 65535) return port;
+  // Older services already advertise a custom port in their LAN IDs.
+  for (final id in (m['lan_ids'] as List? ?? const [])) {
+    final address = '$id'.split('@');
+    if (address.length != 2) continue;
+    final uri = Uri.tryParse('udp://${address.last}');
+    if (uri != null && uri.hasPort && uri.port > 0 && uri.port <= 65535) return uri.port;
+  }
+  return 22028;
 }
 
 /// One authenticated IPC connection. Replies come back in request order;
