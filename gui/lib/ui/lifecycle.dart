@@ -125,13 +125,34 @@ String disconnectWord(String? raw) {
   return hubWord(rest);
 }
 
+/// Actionable advice only for connection failures, not every operation containing "timeout".
+/// Keep [disconnectWord] short: reconnect policy also uses its classifications.
+String connectionFailureHint(String raw, {int? peerPort, bool relayed = false}) {
+  final lower = raw.toLowerCase().trim().replaceFirst(RegExp(r'^(?:rapp-client|rapp-hub|host says): '), '');
+  final timeout = lower.contains('timed out') || lower.contains('timeout') || lower.contains('no reply');
+  final connection = lower == 'timed out' || lower == 'timeout' || lower == 'no reply' ||
+      lower.startsWith('connect ') || lower.startsWith('connection ') || lower.startsWith('relay unreachable:') || lower.startsWith('relay:');
+  if (!timeout || !connection) return disconnectWord(raw);
+  if (relayed || lower.startsWith('relay unreachable:') || lower.startsWith('relay:')) {
+    return '连接超时，原因尚未确定。请确认对方在线、ID 正确，并检查中继接入点、网络隔离及防火墙是否允许访问中继配置的端口。';
+  }
+  // An explicit peer endpoint in a connect error is authoritative, including a custom port.
+  final match = RegExp(r'^connect (?:\[[^\]]+\]|[^:\s]+):([0-9]+):').firstMatch(lower);
+  final reportedPort = int.tryParse(match?.group(1) ?? '');
+  final port = reportedPort ?? peerPort;
+  final udp = port != null && port > 0 && port <= 65535
+      ? 'UDP $port'
+      : 'UDP 监听端口（以对方配置为准）';
+  return '连接超时，原因尚未确定。请确认对方在线、ID/IP 正确，检查网络隔离，并在对方及网络防火墙中允许 rapp 的 $udp。';
+}
+
 /// The bar's words for a record that is down or coming back; [waiting] replaces the plain
 /// "network down" line (e.g. the peer is offline).
 String offlineWords(SessionRecord r, {String? waiting}) {
   if (r.phase != Phase.disconnected) return '正在重连…';
   if (waiting != null) return waiting;
-  final w = disconnectWord(r.reason);
-  return r.retry != null ? '$w，正在重连…' : w;
+  final w = r.reason == null ? '' : connectionFailureHint(r.reason!, relayed: r.path == 'relay');
+  return r.retry != null ? '$w${w.endsWith('。') ? '' : '，'}正在重连…' : w;
 }
 
 /// The link dropped for a reason the network explains: worth trying again by itself.
