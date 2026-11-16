@@ -242,6 +242,30 @@ void main() {
     expect(find.text(preset), findsNothing);
   });
 
+  testWidgets('智能 sits between the two presets, ticks alone, and any manual pick leaves it', (tester) async {
+    await open(tester);
+    const smart = '智能（按网络和焦点自动调）';
+    final ys = [for (final s in [preset, smart, '最清晰（高彩 + 原画 + 15 fps）']) tester.getTopLeft(find.text(s)).dy];
+    expect(ys[0] < ys[1] && ys[1] < ys[2], isTrue);
+    await tester.tap(find.text(smart));
+    await tester.pump();
+    expect(rs.choice, presetSmart);
+    expect(find.text(smart), findsNothing); // closed
+
+    await open(tester);
+    rs.setChoice(presetSmart, manual: true);
+    await tester.pump();
+    expect(find.byIcon(Icons.check), findsOneWidget); // only smart
+    await tester.tap(find.text('原画'));
+    await tester.pump();
+    expect(rs.choice.smart, isFalse);
+    expect(rs.choice, const StreamChoice('color16', 'original', 15));
+    await open(tester);
+    rs.setChoice(const StreamChoice('color16', 'original', 15), manual: true);
+    await tester.pump();
+    expect(find.byIcon(Icons.check), findsNWidgets(4)); // mode, density, fps + 最清晰 (same values)
+  });
+
   testWidgets('the current choice is ticked; picking one group keeps the others', (tester) async {
     await open(tester);
     expect(rs.choice, const StreamChoice('color16', 'adaptive', 15));

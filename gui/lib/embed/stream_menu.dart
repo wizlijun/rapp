@@ -592,16 +592,17 @@ class _StreamMenuState extends State<StreamMenu> {
               if (note != null) _Item(note, enabled: false),
               _head(t, '预设'),
               _Item('最省流（双色·灰度 + 自适应 + 1 fps）', checked: c == presetLeast, onTap: () => _choose(presetLeast)),
+              _Item('智能（按网络和焦点自动调）', checked: c == presetSmart, onTap: () => _choose(presetSmart)),
               _Item('最清晰（高彩 + 原画 + 15 fps）', checked: c == presetSharpest, onTap: () => _choose(presetSharpest)),
               _head(t, '档位'),
               for (final (label, mode) in const [('双色·灰度（文本优化）', 'duogray'), ('双色·彩色', 'duocolor'), ('高彩（图像优化）', 'color16')])
-                _Item(label, checked: c.mode == mode, onTap: () => _choose(c.copyWith(mode: mode))),
+                _Item(label, checked: !c.smart && c.mode == mode, onTap: () => _choose(c.copyWith(mode: mode))),
               _head(t, '密度'),
               for (final (label, d) in const [('省流 1x', 'saver1x'), ('自适应', 'adaptive'), ('原画', 'original')])
-                _Item(label, checked: c.density == d, onTap: () => _choose(c.copyWith(density: d))),
+                _Item(label, checked: !c.smart && c.density == d, onTap: () => _choose(c.copyWith(density: d))),
               _head(t, '帧率'),
               for (final (label, f) in const [('1 fps', 1), ('5 fps', 5), ('15 fps', 15), ('30 fps（看视频）', 30)])
-                _Item(label, checked: c.fps == f, onTap: () => _choose(c.copyWith(fps: f))),
+                _Item(label, checked: !c.smart && c.fps == f, onTap: () => _choose(c.copyWith(fps: f))),
               _Item('记为这个 app 的默认', enabled: widget.onRememberStream != null, onTap: () => _then(widget.onRememberStream!)),
     ];
   }
