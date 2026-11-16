@@ -599,7 +599,7 @@ class _StreamMenuState extends State<StreamMenu> {
 
   Widget _head(RappTokens t, String text) => Padding(
         padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
-        child: Text(text, style: TextStyle(color: t.muted, fontSize: 12, letterSpacing: t.labelSpacing * 12)),
+        child: Text(text, style: TextStyle(color: t.muted, letterSpacing: t.labelSpacing * t.textSize)),
       );
 
   /// The remote app's menu, one level at a time: a title with children opens in place.
@@ -648,7 +648,7 @@ class _Shortcut extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
     return Text(text,
-        style: TextStyle(fontFamily: t.mono, fontFamilyFallback: t.monoFallback, fontSize: 12, color: t.muted));
+        style: TextStyle(fontFamily: t.mono, fontFamilyFallback: t.monoFallback, color: t.muted));
   }
 }
 

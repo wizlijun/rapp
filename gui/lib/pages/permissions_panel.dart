@@ -33,7 +33,7 @@ class PermissionsPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final missing = missingPermissions(permissions);
-    final grey = TextStyle(color: Theme.of(context).hintColor, fontSize: 12);
+    final grey = TextStyle(color: Theme.of(context).hintColor);
     return Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
       for (final p in Permission.values) ...[
         Padding(

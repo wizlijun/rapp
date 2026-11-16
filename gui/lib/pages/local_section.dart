@@ -192,7 +192,7 @@ class _LocalSectionState extends State<LocalSection> {
             Switch(key: const Key('auto-lock-switch'), value: st.autoLock, onChanged: _setAutoLock),
           ]),
         ),
-        Text('锁屏后，B 打开 app 时需要输入这台 Mac 的登录密码。', style: TextStyle(color: t.muted, fontSize: 12)),
+        Text('锁屏后，B 打开 app 时需要输入这台 Mac 的登录密码。', style: TextStyle(color: t.muted)),
       ]),
     );
   }

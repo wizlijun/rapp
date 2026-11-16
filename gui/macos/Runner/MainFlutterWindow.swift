@@ -2,6 +2,9 @@ import Cocoa
 import FlutterMacOS
 
 class MainFlutterWindow: NSWindow {
+  /// The system's text size, read once by Dart at start.
+  private var systemChannel: FlutterMethodChannel?
+
   override func awakeFromNib() {
     // Before Flutter starts: a second main instance only hands off and quits.
     if !SingleInstance.isConnectionManager && !SingleInstance.claim() {
@@ -21,6 +24,16 @@ class MainFlutterWindow: NSWindow {
     SessionPlugin.register(with: flutterViewController.registrar(forPlugin: "RappSession"))
 
     ComposerPlugin.register(with: flutterViewController.registrar(forPlugin: "RappComposer"))
+
+    let system = FlutterMethodChannel(name: "rapp/system", binaryMessenger: flutterViewController.engine.binaryMessenger)
+    system.setMethodCallHandler { call, result in
+      if call.method == "fontSize" {
+        result(Double(NSFont.systemFontSize))
+      } else {
+        result(FlutterMethodNotImplemented)
+      }
+    }
+    systemChannel = system
 
     super.awakeFromNib()
   }

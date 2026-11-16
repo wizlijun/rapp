@@ -282,7 +282,7 @@ class _AppProfilePageState extends State<AppProfilePage> {
           Flexible(child: Text(_title, style: TextStyle(color: t.text), overflow: TextOverflow.ellipsis)),
           if (_builtin != null && !b.tested) ...[
             const SizedBox(width: 10),
-            Text('未实测', style: TextStyle(color: t.muted, fontSize: 13)),
+            Text('未实测', style: TextStyle(color: t.muted)),
           ],
         ]),
       ),
@@ -355,7 +355,7 @@ class _AppProfilePageState extends State<AppProfilePage> {
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('记下发给这个 app 的话', style: TextStyle(color: d.recordInput == null ? t.muted : t.text)),
-                Text('关掉后草稿只存在本机', style: TextStyle(color: t.muted, fontSize: 12)),
+                Text('关掉后草稿只存在本机', style: TextStyle(color: t.muted)),
               ]),
             ),
             Switch(
@@ -368,7 +368,7 @@ class _AppProfilePageState extends State<AppProfilePage> {
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('在画面上按字母键时打开写作面板',
                     style: TextStyle(color: d.typeToCompose == null ? t.muted : t.text)),
-                Text('关掉后字母直接发给这个 app，适合 Figma、游戏、密码管理器', style: TextStyle(color: t.muted, fontSize: 12)),
+                Text('关掉后字母直接发给这个 app，适合 Figma、游戏、密码管理器', style: TextStyle(color: t.muted)),
               ]),
             ),
             Switch(

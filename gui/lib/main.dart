@@ -23,6 +23,7 @@ import 'tray_menu.dart';
 import 'ui/main_state.dart';
 import 'ui/main_window.dart';
 import 'ui/prefs.dart';
+import 'ui/system_font.dart';
 import 'ui/tokens.dart';
 
 Future<void> main(List<String> args) async {
@@ -37,6 +38,7 @@ Future<void> main(List<String> args) async {
     stderr.writeln('rapp: 数据目录 $root: $e');
   }
   final data = DataDir(root);
+  final textSize = await systemTextSize();
   // The token follows the current root: `state.data` once the window exists, `data` before.
   MainState? mainState;
   final monitor = ServiceMonitor(readToken: tokenFileReader(() => (mainState?.data ?? data).localDir))..start();
@@ -45,7 +47,7 @@ Future<void> main(List<String> args) async {
     await _showWindow(const Size(400, 320), 'rapp 连接管理');
     await windowManager.setPreventClose(true);
     windowManager.addListener(_QuitOnClose());
-    runApp(_App(home: CmPage(monitor: monitor, onQuit: () => exit(0))));
+    runApp(_App(textSize: textSize, home: CmPage(monitor: monitor, onQuit: () => exit(0))));
     return;
   }
 
@@ -105,6 +107,7 @@ Future<void> main(List<String> args) async {
   await shell.setupTray();
 
   runApp(_App(
+    textSize: textSize,
     navigatorKey: shell.navigatorKey,
     state: state,
     home: MainWindow(
@@ -141,8 +144,9 @@ Future<void> _showWindow(Size size, String title) => windowManager.waitUntilRead
     );
 
 class _App extends StatelessWidget {
-  const _App({required this.home, this.navigatorKey, this.state});
+  const _App({required this.home, required this.textSize, this.navigatorKey, this.state});
   final Widget home;
+  final double textSize;
   final MainState? state;
   final GlobalKey<NavigatorState>? navigatorKey;
 
@@ -153,7 +157,7 @@ class _App extends StatelessWidget {
       return MaterialApp(
         title: 'rapp',
         debugShowCheckedModeBanner: false,
-        theme: themeDataFor(RappTheme.matrix),
+        theme: themeDataFor(RappTheme.matrix, textSize: textSize),
         themeMode: ThemeMode.dark,
         home: home,
       );
@@ -164,7 +168,7 @@ class _App extends StatelessWidget {
         title: 'rapp',
         navigatorKey: navigatorKey,
         debugShowCheckedModeBanner: false,
-        theme: themeDataFor(st.prefs.theme),
+        theme: themeDataFor(st.prefs.theme, textSize: textSize),
         themeMode: ThemeMode.dark,
         home: home,
       ),

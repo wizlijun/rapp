@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'system_font.dart';
+
 /// The three themes, named after the films. Default is [RappTheme.matrix].
 enum RappTheme { avatar, matrix, westworld }
 
@@ -41,6 +43,7 @@ class RappTokens extends ThemeExtension<RappTokens> {
     required this.monoBody,
     required this.labelSpacing,
     this.overviewArt,
+    this.textSize = fallbackTextSize,
   }) : float = float ?? panel;
 
   final Color bg, line, text, muted, on, accent, accentInk, tint;
@@ -68,6 +71,9 @@ class RappTokens extends ThemeExtension<RappTokens> {
 
   /// Letter spacing (em) for small headings.
   final double labelSpacing;
+
+  /// The one text size (the system's, see [systemTextSize]); only the big dashboard numbers differ.
+  final double textSize;
 
   /// File name of the overview's bottom-right illustration, under [themeAssetDir].
   /// Null: the theme has none.
@@ -99,7 +105,7 @@ class RappTokens extends ThemeExtension<RappTokens> {
   BoxDecoration floatBox({Color? border}) => _box(float, border);
 
   @override
-  RappTokens copyWith({Color? bg, Color? text, String? overviewArt}) => RappTokens(
+  RappTokens copyWith({Color? bg, Color? text, String? overviewArt, double? textSize}) => RappTokens(
     bg: bg ?? this.bg,
     panel: panel,
     raise: raise,
@@ -121,6 +127,7 @@ class RappTokens extends ThemeExtension<RappTokens> {
     monoBody: monoBody,
     labelSpacing: labelSpacing,
     overviewArt: overviewArt ?? this.overviewArt,
+    textSize: textSize ?? this.textSize,
   );
 
   // Themes are switched discretely, not animated.
@@ -261,8 +268,31 @@ RappTokens tokensFor(RappTheme theme) {
   }
 }
 
-ThemeData themeDataFor(RappTheme theme) {
-  final t = tokensFor(theme);
+/// Every text style at [size]: one text size throughout (the dashboard numbers set their own).
+TextTheme _oneSize(TextTheme tt, double size) {
+  TextStyle? z(TextStyle? x) => x?.copyWith(fontSize: size);
+  return tt.copyWith(
+    displayLarge: z(tt.displayLarge),
+    displayMedium: z(tt.displayMedium),
+    displaySmall: z(tt.displaySmall),
+    headlineLarge: z(tt.headlineLarge),
+    headlineMedium: z(tt.headlineMedium),
+    headlineSmall: z(tt.headlineSmall),
+    titleLarge: z(tt.titleLarge),
+    titleMedium: z(tt.titleMedium),
+    titleSmall: z(tt.titleSmall),
+    bodyLarge: z(tt.bodyLarge),
+    bodyMedium: z(tt.bodyMedium),
+    bodySmall: z(tt.bodySmall),
+    labelLarge: z(tt.labelLarge),
+    labelMedium: z(tt.labelMedium),
+    labelSmall: z(tt.labelSmall),
+  );
+}
+
+/// [textSize]: the system's text size ([systemTextSize]), used by every text style.
+ThemeData themeDataFor(RappTheme theme, {double textSize = fallbackTextSize}) {
+  final t = tokensFor(theme).copyWith(textSize: textSize);
   final family = t.monoBody ? t.mono : t.font;
   final fallback = t.monoBody ? t.monoFallback : t.fontFallback;
   final scheme = ColorScheme.dark(
@@ -289,7 +319,7 @@ ThemeData themeDataFor(RappTheme theme) {
     canvasColor: t.bg,
     fontFamily: family,
     fontFamilyFallback: fallback,
-    textTheme: _withShadows(Typography.material2021().white
+    textTheme: _withShadows(_oneSize(Typography.material2021().white
         .apply(
           fontFamily: family,
           fontFamilyFallback: fallback,
@@ -298,13 +328,12 @@ ThemeData themeDataFor(RappTheme theme) {
         )
         .copyWith(
           bodyMedium: TextStyle(
-            fontSize: 15,
             height: 1.4,
             color: t.text,
             fontFamily: family,
             fontFamilyFallback: fallback,
           ),
-        ), t.textGlow),
+        ), textSize), t.textGlow),
     filledButtonTheme: FilledButtonThemeData(style: button),
     elevatedButtonTheme: ElevatedButtonThemeData(style: button),
     outlinedButtonTheme: OutlinedButtonThemeData(style: button),

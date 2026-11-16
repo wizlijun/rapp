@@ -346,7 +346,7 @@ class _MemberRow extends StatelessWidget {
                                 status,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: TextStyle(color: t.muted, fontSize: 12),
+                                style: TextStyle(color: t.muted),
                               ),
                             ],
                           ),
@@ -361,7 +361,7 @@ class _MemberRow extends StatelessWidget {
                             semanticLabel: m.task.isEmpty
                                 ? '备注 ${s.labelOf(m.app)}'
                                 : '备注 ${m.task}',
-                            style: TextStyle(color: t.text, fontSize: 13),
+                            style: TextStyle(color: t.text),
                             onCommit: (v) => s.setTask(id, m.key, v),
                           ),
                         ),

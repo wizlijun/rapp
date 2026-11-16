@@ -84,7 +84,6 @@ class _NeedsYouAnchorState extends State<NeedsYouAnchor> {
                               style: TextStyle(
                                 fontFamily: t.mono,
                                 fontFamilyFallback: t.monoFallback,
-                                fontSize: 14,
                                 fontWeight: FontWeight.w600,
                                 color: t.text,
                               ),

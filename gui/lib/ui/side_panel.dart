@@ -235,7 +235,7 @@ class _Footer extends StatelessWidget {
                       const SizedBox(width: 4),
                       Text(
                         lampWord(l),
-                        style: TextStyle(color: t.muted, fontSize: 12),
+                        style: TextStyle(color: t.muted),
                       ),
                     ],
                   ),
@@ -287,7 +287,7 @@ class _Total extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: TextStyle(color: t.muted, fontSize: 12)),
+        Text(label, style: TextStyle(color: t.muted)),
         Text(
           value,
           key: valueKey,

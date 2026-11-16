@@ -68,6 +68,20 @@ void main() {
       }
     }
   });
+  test('themeDataFor gives every text style the one text size', () {
+    for (final th in RappTheme.values) {
+      final d = themeDataFor(th, textSize: 13);
+      expect(d.extension<RappTokens>()!.textSize, 13, reason: '$th');
+      final tt = d.textTheme;
+      for (final s in [
+        tt.displayLarge, tt.headlineSmall, tt.titleLarge, tt.titleMedium, tt.titleSmall,
+        tt.bodyLarge, tt.bodyMedium, tt.bodySmall, tt.labelLarge, tt.labelMedium, tt.labelSmall,
+      ]) {
+        expect(s!.fontSize, 13, reason: '$th');
+      }
+    }
+    expect(themeDataFor(RappTheme.matrix).textTheme.bodySmall!.fontSize, 15);
+  });
   test('dropdown order and labels', () {
     expect(themeOrder.map(themeLabel), [
       'AVATAR',

@@ -40,7 +40,7 @@ class AppProfilesSection extends StatelessWidget {
   }
 
   Widget _row(BuildContext context, RappTokens t, ProfileRow row) {
-    final mono = TextStyle(fontFamily: t.mono, fontFamilyFallback: t.monoFallback, fontSize: 12, color: t.muted);
+    final mono = TextStyle(fontFamily: t.mono, fontFamilyFallback: t.monoFallback, color: t.muted);
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(children: [
@@ -49,10 +49,10 @@ class AppProfilesSection extends StatelessWidget {
             Text(row.name, style: const TextStyle(fontWeight: FontWeight.w600)),
             Text(row.ids.join(', '), style: mono),
             Wrap(spacing: 8, children: [
-              Text(sourceLabel(row.source), style: TextStyle(color: t.muted, fontSize: 12)),
-              if (!row.tested) Text('未实测', style: TextStyle(color: t.muted, fontSize: 12)),
+              Text(sourceLabel(row.source), style: TextStyle(color: t.muted)),
+              if (!row.tested) Text('未实测', style: TextStyle(color: t.muted)),
               if (row.duplicateOf != null)
-                Text('和 ${row.duplicateOf} 重复', style: TextStyle(color: t.accent, fontSize: 12)),
+                Text('和 ${row.duplicateOf} 重复', style: TextStyle(color: t.accent)),
             ]),
           ]),
         ),

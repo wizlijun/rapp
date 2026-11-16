@@ -183,7 +183,7 @@ class _ComposerPlusState extends State<ComposerPlus> {
         child: Row(
           children: [
             Text(label, style: TextStyle(color: onTap == null ? t.muted : t.text)),
-            if (side != null) ...[const Spacer(), Text(side, style: TextStyle(color: t.muted, fontSize: 12))],
+            if (side != null) ...[const Spacer(), Text(side, style: TextStyle(color: t.muted))],
           ],
         ),
       ),
@@ -209,7 +209,7 @@ class _ComposerPlusState extends State<ComposerPlus> {
                 children: [
                   Text('直接回车且隐藏', style: TextStyle(color: t.text)),
                   const SizedBox(width: 8),
-                  Text('贴完按回车再收起', style: TextStyle(color: t.muted, fontSize: 12)),
+                  Text('贴完按回车再收起', style: TextStyle(color: t.muted)),
                   const Spacer(),
                   Icon(on ? Icons.check_box : Icons.check_box_outline_blank, size: 20, color: on ? t.accent : t.muted),
                 ],
@@ -252,7 +252,7 @@ class _ComposerPlusState extends State<ComposerPlus> {
               SizedBox(
                 width: 40,
                 child: Text('${(composerZoomScales[widget.zoom!] * 100).round()}%',
-                    textAlign: TextAlign.end, style: TextStyle(color: t.muted, fontSize: 12)),
+                    textAlign: TextAlign.end, style: TextStyle(color: t.muted)),
               ),
             ],
           ),
@@ -351,7 +351,7 @@ class _ComposerPlusState extends State<ComposerPlus> {
                     if (widget.zoom != null && widget.onZoom != null) ...[_zoomRow(t), rowGap],
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: Text('按键 · 直接发给远端', style: TextStyle(color: t.muted, fontSize: 12)),
+                      child: Text('按键 · 直接发给远端', style: TextStyle(color: t.muted)),
                     ),
                     rowGap,
                     for (final r in rows) ...[r, rowGap],
@@ -370,7 +370,7 @@ class _ComposerPlusState extends State<ComposerPlus> {
                           child: Row(
                             children: [
                               const Spacer(),
-                              Text('Esc', style: TextStyle(color: t.muted, fontSize: 12)),
+                              Text('Esc', style: TextStyle(color: t.muted)),
                               const SizedBox(width: 8),
                               Text('收起', style: TextStyle(color: t.text)),
                             ],

@@ -406,7 +406,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
           final k = _k, line = _line * k, pad = _pad * k, edge = _edge * k;
           final style = EditorStyle(
             text: TextStyle(
-              fontSize: 15 * k, height: 22 / 15, fontFamily: t.font,
+              fontSize: t.textSize * k, height: 22 / 15, fontFamily: t.font,
               fontFamilyFallback: t.fontFallback, color: t.text, shadows: const [],
             ),
             color: t.text,

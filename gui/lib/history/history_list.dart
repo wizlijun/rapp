@@ -177,13 +177,13 @@ class _HistoryRow extends StatelessWidget {
         children: [
           Row(
             children: [
-              Text(view._when(e.ts), style: TextStyle(color: t.muted, fontSize: 12)),
+              Text(view._when(e.ts), style: TextStyle(color: t.muted)),
               const SizedBox(width: 8),
               Expanded(
-                child: Text(where, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.muted, fontSize: 12)),
+                child: Text(where, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.muted)),
               ),
               if (e.kind == 'draft')
-                Text('没发出', key: Key('draft-${e.id}'), style: TextStyle(color: t.text, fontSize: 12)),
+                Text('没发出', key: Key('draft-${e.id}'), style: TextStyle(color: t.text)),
             ],
           ),
           const SizedBox(height: 2),
@@ -211,7 +211,7 @@ class _HistoryRow extends StatelessWidget {
                   label: '从记录里去掉',
                   onPressed: () => w.history.remove(e),
                 ),
-                Text('git 历史里还在', style: TextStyle(color: t.muted, fontSize: 12)),
+                Text('git 历史里还在', style: TextStyle(color: t.muted)),
               ],
             ],
           ),

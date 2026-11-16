@@ -103,7 +103,7 @@ class _UpdateSectionState extends State<UpdateSection> {
       if (u.state == 'ready' && notes.isNotEmpty)
         Padding(
           padding: const EdgeInsets.only(top: 4),
-          child: Text(notes, style: TextStyle(color: t.muted, fontSize: 12)),
+          child: Text(notes, style: TextStyle(color: t.muted)),
         ),
       if (failure != null)
         Padding(

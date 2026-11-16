@@ -87,7 +87,7 @@ class _Half extends StatelessWidget {
       children: [
         Padding(
           padding: const EdgeInsets.only(bottom: 4),
-          child: Text(title, style: TextStyle(color: t.muted, fontSize: 12, letterSpacing: t.labelSpacing * 12)),
+          child: Text(title, style: TextStyle(color: t.muted, letterSpacing: t.labelSpacing * t.textSize)),
         ),
         ...children,
       ],
@@ -132,7 +132,7 @@ class KindTag extends StatelessWidget {
     final grey = kind == ClipKind.unsupported;
     final color = grey ? t.muted : t.text;
     final line = grey ? t.muted : t.line;
-    final label = Text(kindWord(kind), style: TextStyle(color: color, fontSize: 12));
+    final label = Text(kindWord(kind), style: TextStyle(color: color));
     const pad = EdgeInsets.symmetric(horizontal: 6, vertical: 2);
     final radius = BorderRadius.circular(t.r);
     final Widget tag = switch (kind) {
@@ -202,7 +202,7 @@ class _ClipRow extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 2),
-          Text('${e.source} · ${hhmm(e.at)}', style: TextStyle(color: t.muted, fontSize: 12)),
+          Text('${e.source} · ${hhmm(e.at)}', style: TextStyle(color: t.muted)),
           const SizedBox(height: 6),
           Wrap(
             alignment: WrapAlignment.end,
@@ -257,7 +257,7 @@ class _RunningRow extends StatelessWidget {
           const SizedBox(height: 4),
           Row(
             children: [
-              Expanded(child: Text(x.source, style: TextStyle(color: t.muted, fontSize: 12))),
+              Expanded(child: Text(x.source, style: TextStyle(color: t.muted))),
               RappButton.secondary(
                 key: Key('cancel-${x.seq}'),
                 label: '取消',
@@ -301,11 +301,11 @@ class _EndedRow extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 2),
-          Text('${x.source}${at == null ? '' : ' · ${hhmm(at)}'}', style: TextStyle(color: t.muted, fontSize: 12)),
+          Text('${x.source}${at == null ? '' : ' · ${hhmm(at)}'}', style: TextStyle(color: t.muted)),
           if (done && !x.down && x.kind == ClipKind.files) // K10: only a file lands in a folder on A
             Padding(
               padding: const EdgeInsets.only(top: 2),
-              child: Text('A：~/rapp/files/transfers/${x.name}', style: TextStyle(color: t.muted, fontSize: 12)),
+              child: Text('A：~/rapp/files/transfers/${x.name}', style: TextStyle(color: t.muted)),
             ),
           if (done && x.down && x.path != null)
             Padding(

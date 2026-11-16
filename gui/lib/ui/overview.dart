@@ -229,7 +229,7 @@ class _CountCell extends StatelessWidget {
               color: muted ? t.muted : t.text,
             ),
           ),
-          Text(label, maxLines: 1, style: TextStyle(fontSize: 12, color: t.muted)),
+          Text(label, maxLines: 1, style: TextStyle(color: t.muted)),
         ],
       ),
     );
@@ -311,7 +311,7 @@ class _Column extends StatelessWidget {
             if (favorites.isNotEmpty) ...[
               Padding(
                 padding: const EdgeInsets.only(top: 14, bottom: 6),
-                child: Text('常用', style: small?.copyWith(color: t.muted, letterSpacing: t.labelSpacing * 12)),
+                child: Text('常用', style: small?.copyWith(color: t.muted, letterSpacing: t.labelSpacing * t.textSize)),
               ),
               for (final (i, f) in favorites.indexed) ...[
                 if (i > 0) const SizedBox(height: 8),

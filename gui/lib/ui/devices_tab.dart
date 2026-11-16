@@ -18,10 +18,9 @@ import 'tab_chip.dart';
 import 'terms_entry.dart';
 import 'tokens.dart';
 
-TextStyle _mono(RappTokens t, {double size = 12, Color? color}) => TextStyle(
+TextStyle _mono(RappTokens t, {Color? color}) => TextStyle(
       fontFamily: t.mono,
       fontFamilyFallback: t.monoFallback,
-      fontSize: size,
       color: color ?? t.muted,
     );
 

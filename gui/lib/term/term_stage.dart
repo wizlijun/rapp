@@ -746,7 +746,7 @@ class _Pill extends StatelessWidget {
         border: Border.all(color: t.text),
         borderRadius: BorderRadius.circular(t.r),
       ),
-      child: Text(text, style: TextStyle(color: t.text, fontSize: 13)),
+      child: Text(text, style: TextStyle(color: t.text)),
     );
     final tap = onTap;
     if (tap != null) {

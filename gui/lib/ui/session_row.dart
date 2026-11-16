@@ -21,7 +21,7 @@ class SessionGroupTitle extends StatelessWidget {
       title,
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
-      style: TextStyle(fontSize: 11, color: t.muted, letterSpacing: 11 * t.labelSpacing),
+      style: TextStyle(color: t.muted, letterSpacing: t.textSize * t.labelSpacing),
     );
     if (onTap == null) {
       return Padding(padding: const EdgeInsets.fromLTRB(2, 10, 2, 6), child: text);
@@ -173,7 +173,6 @@ class SessionRow extends StatelessWidget {
                               style: TextStyle(
                                 fontFamily: t.mono,
                                 fontFamilyFallback: t.monoFallback,
-                                fontSize: 12,
                                 color: t.muted,
                               ),
                             ),

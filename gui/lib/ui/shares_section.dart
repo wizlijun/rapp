@@ -259,7 +259,7 @@ class _ShareRowView extends StatelessWidget {
   final VoidCallback onAllow;
   final ValueChanged<String> onNote;
 
-  TextStyle get _mono => TextStyle(fontFamily: t.mono, fontFamilyFallback: t.monoFallback, fontSize: 12, color: t.muted);
+  TextStyle get _mono => TextStyle(fontFamily: t.mono, fontFamilyFallback: t.monoFallback, color: t.muted);
 
   String get _scope {
     if (row.allow.isEmpty) return '所有设备';
