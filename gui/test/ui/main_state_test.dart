@@ -853,6 +853,65 @@ void main() {
       });
     });
 
+    group('smart preset asks A for the focus region', () {
+      List<Map<String, Object?>> sets(FakeSessionPort port) => [for (final c in port.calls) if (c.$1 == 'set_stream') c.$2];
+
+      test('smart is never pinned and asks for focus, even with automatic saving off', () {
+        env((a, t, port, st, hints) {
+          st.setAutoSaveTraffic(false);
+          expect(port.calls.last.$2['pinned'], true);
+          st.currentRemote!.setChoice(presetSmart, manual: true);
+          final m = port.calls.last;
+          expect(m.$1, 'set_stream');
+          expect(m.$2['pinned'], isNot(true));
+          expect(m.$2['focus'], true);
+        });
+      });
+
+      test('only the focus changing resends; nothing changing does not; leaving smart clears rs.focus', () {
+        env((a, t, port, st, hints) {
+          final rs = st.currentRemote!;
+          rs.setChoice(presetSmart, manual: true);
+          final n = sets(port).length;
+          st.setAutoSaveTraffic(true); // a no-op for the wire
+          expect(sets(port).length, n);
+          rs.apply(FocusRegionEvent(1, 5, const [Rect.fromLTWH(0, 0, 4, 4)]));
+          expect(rs.focus, isNotNull);
+          rs.setChoice(presetSmart.copyWith(), manual: true); // same numbers, smart off
+          expect(sets(port).length, n + 1);
+          expect(sets(port).last.containsKey('focus'), false);
+          expect(rs.focus, isNull);
+        });
+      });
+
+      test('an app whose profile has focusPane off never asks', () {
+        final store = AppProfileStore('${tmp.path}/shared', mine: [AppProfile(ids: ['a'], focusPane: false)], builtin: []);
+        env(profiles: store, (a, t, port, st, hints) {
+          st.currentRemote!.setChoice(presetSmart.copyWith(fps: 5), manual: true);
+          st.currentRemote!.setChoice(presetSmart, manual: true);
+          expect(sets(port).where((m) => m.containsKey('focus')), isEmpty);
+          expect(sets(port).last['pinned'], isNot(true));
+        });
+      });
+
+      test('start of a smart session sends focus; the record keeps the smart choice', () {
+        env((a, t, port, st, hints) {
+          st.currentRemote!.setChoice(presetSmart, manual: true);
+          port.emit(const DisconnectedEvent(1, 'connection closed'));
+          expect(st.currentRecord!.choice, presetSmart);
+          expect(st.currentRecord!.choice.smart, true);
+          st.reconnect('111/a');
+          a.flushMicrotasks();
+          final i = port.calls.lastIndexWhere((c) => c.$1 == 'start');
+          expect(i, isNonNegative);
+          expect(port.calls[i + 1].$1, 'set_stream');
+          expect(port.calls[i + 1].$2['focus'], true);
+          expect(port.calls[i + 1].$2['pinned'], isNot(true));
+          expect(st.currentRemote!.choice.smart, true);
+        });
+      });
+    });
+
     test('the hub is asked for the network level at once', () {
       env((a, t, port, st, hints) {
         expect(t.sent.where((m) => m['cmd'] == 'net').length, 1);

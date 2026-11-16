@@ -35,6 +35,39 @@ RemoteWindow win(int id, WindowKind kind) => RemoteWindow(
     );
 
 void main() {
+  group('focus', () {
+    FocusRegionEvent ev(int window) => FocusRegionEvent(1, window, const [Rect.fromLTWH(0, 0, 10, 10)]);
+
+    test('the event is kept; linkDown and clearFocus drop it and notify', () {
+      final rs = RemoteSession(1, 'Calc');
+      var n = 0;
+      rs.addListener(() => n++);
+      expect(rs.focus, isNull);
+      rs.apply(ev(7));
+      expect(rs.focus!.window, 7);
+      expect(rs.focus!.rects, const [Rect.fromLTWH(0, 0, 10, 10)]);
+      expect(n, 1);
+      rs.linkDown();
+      expect(rs.focus, isNull);
+      rs.apply(ev(7));
+      n = 0;
+      rs.clearFocus();
+      expect(rs.focus, isNull);
+      expect(n, 1);
+      rs.clearFocus();
+      expect(n, 1, reason: 'nothing to clear, nothing to tell');
+    });
+
+    test('focus cleared when its window leaves the table', () {
+      final rs = RemoteSession(1, 'Calc');
+      rs.apply(ev(7));
+      rs.apply(WindowsEvent(1, [w(7)]));
+      expect(rs.focus, isNotNull);
+      rs.apply(WindowsEvent(1, [w(8)]));
+      expect(rs.focus, isNull);
+    });
+  });
+
   test('weak event sets RemoteSession.weak', () {
     final rs = RemoteSession(1, 'Calc');
     var n = 0;
