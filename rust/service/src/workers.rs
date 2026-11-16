@@ -86,6 +86,20 @@ fn host_bin(state: &State) -> Result<PathBuf> {
     rapp_net::bins::find("rapp-host", state.bin_dir.as_deref()).ok_or_else(|| anyhow!("rapp-host not found"))
 }
 
+/// Installed capabilities, independent of whether a particular session is enabled.
+/// Linux can serve terminals and ports without a graphical host worker.
+pub fn capabilities(state: &State) -> Value {
+    json!({
+        "graphical": host_bin(state).is_ok(),
+        "terminal": rapp_net::bins::find("rapp-term", state.bin_dir.as_deref()).is_some(),
+        "ports": true,
+    })
+}
+
+fn client_only_linux(state: &State) -> bool {
+    cfg!(target_os = "linux") && host_bin(state).is_err()
+}
+
 /// Runs `rapp-host <args> --json` and returns its first non-event JSON line.
 async fn run_json(state: &State, args: &[&str]) -> Result<Value> {
     let out = Command::new(host_bin(state)?).args(args).arg("--json").stdin(Stdio::null()).kill_on_drop(true).output();
@@ -113,6 +127,7 @@ fn permissions(v: &Value) -> Value {
 /// `rapp-host check`; with `prompt`, macOS is asked for what is missing, so rapp shows up in System Settings.
 /// None when the check itself failed (that says nothing about the permissions).
 pub async fn check(state: &State, prompt: bool) -> Option<Value> {
+    if client_only_linux(state) { return None; }
     let args: &[&str] = if prompt { &["check", "--prompt"] } else { &["check"] };
     match run_json(state, args).await {
         Ok(v) => Some(permissions(&v)),
@@ -135,6 +150,9 @@ pub async fn refresh_permissions(state: &State, prompt: bool) -> Value {
 /// prompt so rapp shows up in System Settings. A `_reset` is true only if tccutil exited 0 and the
 /// permission really reads as missing afterwards.
 pub async fn reset_permissions(state: &State) -> Value {
+    if client_only_linux(state) {
+        return json!({"screen_recording_reset": false, "accessibility_reset": false, "permissions": null});
+    }
     let mut ran = [false; 2];
     for (i, service) in ["ScreenCapture", "Accessibility"].into_iter().enumerate() {
         let args = ["reset", service, rapp_update::BUNDLE_ID].map(String::from);
@@ -153,6 +171,7 @@ pub async fn reset_permissions(state: &State) -> Value {
 
 /// The shareable apps, plus A's permissions when the host reports them (it stores those too).
 pub async fn list_apps(state: &State) -> Result<(Value, Option<Value>)> {
+    if client_only_linux(state) { return Ok((json!([]), None)); }
     let v = run_json(state, &["list-apps"]).await?;
     let perms = v.get("permissions").filter(|p| p.is_object()).map(permissions);
     if let Some(p) = &perms {
@@ -168,6 +187,9 @@ pub async fn start_session(state: &Arc<State>, app: &str) -> Result<(u16, String
 
 /// `start_session`, plus the generation of the worker the session is counted on, for `end_counted`.
 pub async fn start_counted(state: &Arc<State>, app: &str) -> Result<(u16, String, u64)> {
+    if app != TERM && client_only_linux(state) {
+        bail!("graphical sessions are not supported on this device");
+    }
     let w = &state.workers;
     let _guard = w.spawn_lock.lock().await;
     if let Some(wk) = w.map.lock().unwrap().get_mut(app).filter(|wk| wk.stdin.is_some()) {
