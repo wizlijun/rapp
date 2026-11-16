@@ -11,6 +11,7 @@ import '../ui/keep_focus.dart';
 import '../ui/main_state.dart';
 import '../ui/rule_snack.dart';
 import '../ui/tokens.dart';
+import 'focus_gray.dart';
 import 'geometry.dart';
 import 'pointer.dart';
 import 'remote_session.dart';
@@ -453,6 +454,23 @@ class _PictureState extends State<Picture> {
                   Positioned.fromRect(
                     rect: pic,
                     child: windowSurface(win),
+                  ),
+                  // 智能: everything outside A's focus panes in gray. Only for the window A says
+                  // has the focus, and never without a rect (nothing known: nothing gray).
+                  Positioned.fromRect(
+                    rect: pic,
+                    child: ListenableBuilder(
+                      listenable: widget.session,
+                      builder: (_, _) {
+                        final f = widget.session.focus;
+                        if (f == null || f.window != win.id || f.rects.isEmpty || pic.isEmpty) {
+                          return const SizedBox.shrink();
+                        }
+                        return focusGray(pic.size, [
+                          for (final r in f.rects) fromRemoteRect(r, fit, win).shift(-pic.topLeft),
+                        ]);
+                      },
+                    ),
                   ),
                   if (focused)
                     // 1px outside the picture, kept on the stage when the picture fills it.
