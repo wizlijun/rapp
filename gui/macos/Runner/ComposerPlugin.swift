@@ -28,6 +28,14 @@ final class ComposerPlugin: NSObject, FlutterPlatformViewFactory {
       } else if call.method == "style", let style = call.arguments as? [String: Any] {
         view.configure(style)
         result(nil)
+      } else if call.method == "chips" {
+        // At once: Dart sends them in line before the set/insert that brings their marks in.
+        var labels: [NSNumber: String] = [:]
+        for (k, v) in call.arguments as? [AnyHashable: Any] ?? [:] {
+          if let k = k as? NSNumber, let v = v as? String { labels[k] = v }
+        }
+        view.setChips(labels)
+        result(nil)
       } else if ["focus", "unfocus", "set", "insert", "read", "take"].contains(call.method) {
         view.perform(call.method, text: call.arguments as? String, reply: result)
       } else {

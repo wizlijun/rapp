@@ -17,6 +17,7 @@ const int maxPaste = 1048576;
 
 const pasteTooLong = '太长了：终端一次最多贴 1 MiB';
 const termNoAttach = '终端会话不支持';
+const termNoText = '剪贴板里没有文字：终端会话不能贴图片或文件';
 const pasteFailed = '没有贴进去';
 const linkGone = '连接断了';
 
@@ -298,7 +299,9 @@ class TermSessionPort extends SessionPort {
     } catch (_) {
       return const PasteResult(); // no clipboard to read: nothing
     }
-    if (text == null || text.isEmpty) return const PasteResult();
+    // Flutter reads text only: a clipboard without any is an image or files (or nothing), which a
+    // terminal cannot take. Said, so the paste does not look ignored.
+    if (text == null || text.isEmpty) return const PasteResult(status: termNoText);
     if (pastesInline(text)) return PasteResult(text: text);
     final n = (_lastBlock[sid] ?? 0) + 1;
     _lastBlock[sid] = n;

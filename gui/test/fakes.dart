@@ -36,14 +36,35 @@ class FakeEditor implements ComposerEditor {
   @override
   void unfocus() => focused = false;
 
+  /// The last [chips] labels.
+  Map<int, String> labels = {};
+
+  /// Where [insert] puts text (and moves on past it); null: at the end.
+  int? caret;
+
+  @override
+  void chips(Map<int, String> labels) => this.labels = Map.of(labels);
+
   @override
   void setText(String text) => value = text;
 
   @override
   void insert(String text) {
     inserted.add(text);
-    value += text;
+    final at = caret;
+    if (at == null) {
+      value += text;
+    } else {
+      value = value.replaceRange(at, at, text);
+      caret = at + text.length;
+    }
   }
+
+  /// [value] with each labelled mark shown as `[label]`.
+  String get shown => String.fromCharCodes(value.codeUnits.expand((u) {
+        final l = labels[u];
+        return l == null ? [u] : '[$l]'.codeUnits;
+      }));
 
   @override
   Future<String> read() async => value;

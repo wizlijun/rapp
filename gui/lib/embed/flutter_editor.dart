@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../ui/controls.dart';
 import 'composer_editor.dart';
 
 class FlutterEditor implements ComposerEditor {
@@ -17,7 +18,7 @@ class FlutterEditor implements ComposerEditor {
   @override
   EditorHandlers? handlers;
 
-  final _controller = TextEditingController();
+  final _controller = _ChipController();
   final _focus = FocusNode(debugLabel: 'composer');
   String _seen = '';
   bool _disposed = false;
@@ -133,7 +134,7 @@ class FlutterEditor implements ComposerEditor {
                 minLines: 1,
                 maxLines: null,
                 keyboardType: TextInputType.multiline,
-                style: style.text.copyWith(color: style.color, shadows: const []),
+                style: (_controller.style = style).text.copyWith(color: style.color, shadows: const []),
                 cursorColor: style.cursor,
                 decoration: InputDecoration(
                   isCollapsed: true,
@@ -155,6 +156,9 @@ class FlutterEditor implements ComposerEditor {
 
   @override
   void focus() => _focus.requestFocus();
+
+  @override
+  void chips(Map<int, String> labels) => _controller.labels = Map.of(labels);
 
   @override
   void unfocus() => _focus.unfocus();
@@ -233,4 +237,76 @@ class FlutterEditor implements ComposerEditor {
     _controller.dispose();
     _focus.dispose();
   }
+}
+
+/// Shows each labelled block mark as a chip: a [WidgetSpan] is one character, like the mark it stands
+/// for, so carets, selections and Backspace keep counting right. A copy out of the field carries the
+/// mark itself; pasted back here it is dropped (the composer sends a block once).
+class _ChipController extends TextEditingController {
+  Map<int, String> _labels = const {};
+  set labels(Map<int, String> v) {
+    _labels = v;
+    notifyListeners(); // the same text may now draw differently
+  }
+
+  EditorStyle? style;
+
+  @override
+  TextSpan buildTextSpan({required BuildContext context, TextStyle? style, required bool withComposing}) {
+    final t = text, look = this.style;
+    if (look == null || _labels.isEmpty || !t.codeUnits.any(_labels.containsKey)) {
+      return super.buildTextSpan(context: context, style: style, withComposing: withComposing);
+    }
+    final c = value.composing;
+    final composing = withComposing && value.isComposingRangeValid;
+    final under = style?.merge(const TextStyle(decoration: TextDecoration.underline)) ??
+        const TextStyle(decoration: TextDecoration.underline);
+    final out = <InlineSpan>[];
+    // Text [a, b), the input method's part underlined as the plain field does.
+    void run(int a, int b) {
+      if (a >= b) return;
+      final cs = composing ? c.start.clamp(a, b) : b, ce = composing ? c.end.clamp(a, b) : b;
+      if (cs > a) out.add(TextSpan(text: t.substring(a, cs)));
+      if (ce > cs) out.add(TextSpan(text: t.substring(cs, ce), style: under));
+      if (b > ce) out.add(TextSpan(text: t.substring(ce, b)));
+    }
+
+    var start = 0;
+    for (var i = 0; i < t.length; i++) {
+      final label = _labels[t.codeUnitAt(i)];
+      if (label == null) continue;
+      run(start, i);
+      start = i + 1;
+      out.add(WidgetSpan(alignment: PlaceholderAlignment.middle, child: _Chip(label, look)));
+    }
+    run(start, t.length);
+    return TextSpan(style: style, children: out);
+  }
+}
+
+/// A block in the text: its label in a dashed outline, as the chips above the text used to be.
+class _Chip extends StatelessWidget {
+  const _Chip(this.label, this.look);
+  final String label;
+  final EditorStyle look;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 2),
+        child: CustomPaint(
+          foregroundPainter: DashedOutline(look.hintColor, 4),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 240),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: look.text.copyWith(color: look.color, shadows: const []),
+              ),
+            ),
+          ),
+        ),
+      );
 }

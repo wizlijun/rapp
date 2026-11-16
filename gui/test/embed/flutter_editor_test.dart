@@ -171,6 +171,49 @@ void main() {
     expect(await ed.read(), '你X');
   });
 
+  testWidgets('a labelled mark shows as a chip in the text, at its place; read gives the mark back',
+      (tester) async {
+    await tester.pumpWidget(_host(ed));
+    ed.focus();
+    await tester.pump();
+    ed.chips({0xFDD0: '[图片 #1]'});
+    ed.setText('ab');
+    tester.testTextInput.updateEditingValue(
+        const TextEditingValue(text: 'ab', selection: TextSelection.collapsed(offset: 1)));
+    await tester.pump();
+    ed.insert('﷐');
+    await tester.pump();
+    expect(await ed.read(), 'a﷐b');
+    final chip = tester.getRect(find.text('[图片 #1]'));
+    final field = tester.getRect(find.byKey(const Key('composer-field')));
+    expect(field.contains(chip.center), isTrue);
+    // A mark without a label is just text: no chip.
+    ed.chips({});
+    await tester.pump();
+    expect(find.text('[图片 #1]'), findsNothing);
+    expect(await ed.read(), 'a﷐b');
+  });
+
+  testWidgets('a chip next to composing text keeps the input method\'s underline span', (tester) async {
+    await tester.pumpWidget(_host(ed));
+    ed.focus();
+    await tester.pump();
+    ed.chips({0xFDD0: '[c]'});
+    ed.setText('﷐');
+    await tester.pump();
+    tester.testTextInput.updateEditingValue(const TextEditingValue(
+        text: '﷐ni', selection: TextSelection.collapsed(offset: 3), composing: TextRange(start: 1, end: 3)));
+    await tester.pump();
+    expect(find.text('[c]'), findsOneWidget);
+    final editable = tester.widget<EditableText>(find.byType(EditableText));
+    final span = editable.controller.buildTextSpan(
+        context: tester.element(find.byType(EditableText)), style: const TextStyle(), withComposing: true);
+    final kids = span.children!;
+    expect(kids.first, isA<WidgetSpan>());
+    expect((kids[1] as TextSpan).text, 'ni');
+    expect((kids[1] as TextSpan).style!.decoration, TextDecoration.underline);
+  });
+
   Future<void> composeNi(WidgetTester tester) async {
     await tester.pumpWidget(_host(ed));
     ed.focus();
