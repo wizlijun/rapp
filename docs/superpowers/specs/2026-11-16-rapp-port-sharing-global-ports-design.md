@@ -133,7 +133,7 @@
 
 ### 5.1 `local/shares.json`
 
-`Share` 加三个字段（`deny_unknown_fields` 照旧）：
+`Share` 加三个字段。`Share` 不再用 `deny_unknown_fields`：认不得的字段读的时候忽略、下次写时丢掉，这样从更新的版本回退到这一版不会丢分享（回退到 0.12.2 会丢，那一版还是严格的）：
 
 ```json
 {"port": 8007, "note": "", "local": 28000, "proto": "http", "proto_auto": true}
