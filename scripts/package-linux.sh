@@ -26,6 +26,7 @@ mkdir -p "$stage"
 cp -a gui/build/linux/x64/release/bundle/. "$stage/"
 cp gui/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_256.png "$stage/rapp.png"
 cp scripts/linux/rapp.desktop "$stage/rapp.desktop"
+cp LICENSE "$stage/LICENSE"
 python3 - "$stage" <<'PY'
 import json, platform, subprocess, sys
 from pathlib import Path
@@ -88,6 +89,7 @@ pkgver=$version
 pkgrel=1
 pkgdesc='Remote apps, text terminals and port sharing (Omarchy/Arch)'
 arch=('x86_64')
+license=('GPL-3.0-only')
 url='https://github.com/wizlijun/rapp'
 depends=('glibc>=2.39' 'gcc-libs' 'gtk3' 'gtk4>=4.12' 'libayatana-appindicator' 'xdg-utils' 'systemd')
 optdepends=('git: data directory version history and remote synchronization')
@@ -102,6 +104,7 @@ package() {
   for binary in rapp rapp-client rapp-hub rapp-service rapp-term rapp-cli; do
     ln -s "/opt/rapp/\$binary" "\$pkgdir/usr/bin/\$binary"
   done
+  install -Dm644 "\$srcdir/$name/LICENSE" "\$pkgdir/usr/share/licenses/rapp-omarchy/LICENSE"
   install -Dm644 "\$srcdir/$name/rapp.desktop" "\$pkgdir/usr/share/applications/rapp.desktop"
   install -Dm644 "\$srcdir/$name/rapp.png" "\$pkgdir/usr/share/icons/hicolor/256x256/apps/rapp.png"
 }
