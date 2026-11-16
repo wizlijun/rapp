@@ -340,7 +340,7 @@ pub fn set(state: &State, cmd: &Value) -> Value {
                 Some(Value::Bool(a)) => c.allow = *a,
                 Some(_) => return Err("allow must be true or false".into()),
             }
-            save(state, &c)?;
+            save(state, c.allow)?;
             Ok(c.allow)
         })
     };
@@ -360,17 +360,49 @@ fn lock() -> MutexGuard<'static, ()> {
     EDIT.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Writes `term.json` (0600); held under `lock`.
-fn save(state: &State, c: &TermConfig) -> Result<(), String> {
-    rapp_net::config::write_json(&path(state), c).map_err(|e| {
+/// Writes `allow` into `term.json` (0600); held under `lock`.
+fn save(state: &State, allow: bool) -> Result<(), String> {
+    write_allow(&path(state), allow).map_err(|e| {
         state.log.msg(Lvl::Warn, format!("term.json: {e:#}"));
         "could not save term.json".to_string()
     })
 }
 
+/// `allow` set in the file at `path`; every other field in it stays as it is (an older version still reads its own).
+/// A file that is missing or is not a JSON object is replaced by `{"allow":…}`.
+fn write_allow(path: &std::path::Path, allow: bool) -> Result<()> {
+    let mut v = std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok());
+    let obj = match v.as_mut().and_then(Value::as_object_mut) {
+        Some(o) => o,
+        None => {
+            v = Some(json!({}));
+            v.as_mut().and_then(Value::as_object_mut).expect("an object")
+        }
+    };
+    obj.insert("allow".into(), Value::Bool(allow));
+    rapp_net::config::write_json(path, &v)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn set_allow_keeps_the_other_fields_of_term_json() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("term.json");
+        std::fs::write(&p, r#"{"allow":true,"targets":[{"host":"h"}],"tmux":"x"}"#).unwrap();
+        write_allow(&p, false).unwrap();
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+        assert_eq!(v, json!({"allow":false,"targets":[{"host":"h"}],"tmux":"x"}));
+        // Missing, or not an object: just `allow`.
+        let q = d.path().join("new.json");
+        write_allow(&q, true).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&std::fs::read_to_string(&q).unwrap()).unwrap(), json!({"allow":true}));
+        std::fs::write(&q, "[1]").unwrap();
+        write_allow(&q, false).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&std::fs::read_to_string(&q).unwrap()).unwrap(), json!({"allow":false}));
+    }
 
     #[test]
     fn open_term_logs_only_the_app() {
