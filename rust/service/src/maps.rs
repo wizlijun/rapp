@@ -67,6 +67,11 @@ impl Maps {
         (Maps { path, first, count, items: Mutex::new(items) }, why)
     }
 
+    /// The range the local ports are given from: the first one, and how many.
+    pub fn range(&self) -> (u16, u16) {
+        (self.first, self.count)
+    }
+
     /// Every map, in the order they were given out.
     pub fn list(&self) -> Vec<Map> {
         self.items.lock().unwrap().iter().map(|e| e.map.clone()).collect()
@@ -166,16 +171,22 @@ impl Maps {
     }
 }
 
+/// No program answers on `local` of either loopback address. A program listening on every
+/// address does not always stop a bind to one of them (macOS), so the port is asked, not bound.
+pub fn free(local: u16) -> bool {
+    let v4: SocketAddr = (Ipv4Addr::LOCALHOST, local).into();
+    let v6: SocketAddr = (Ipv6Addr::LOCALHOST, local).into();
+    ![v4, v6].iter().any(|a| std::net::TcpStream::connect_timeout(a, TAKEN_WAIT).is_ok())
+}
+
 /// Listeners on `local` of both loopback addresses (`localhost` may mean either). None when
 /// the port is not free: another program answers on it, or holds it on one of the two.
 fn listen(local: u16) -> Option<Vec<TcpListener>> {
-    let v4: SocketAddr = (Ipv4Addr::LOCALHOST, local).into();
-    let v6: SocketAddr = (Ipv6Addr::LOCALHOST, local).into();
-    // A program listening on every address does not always stop a bind to one of them (macOS):
-    // ask the port first.
-    if [v4, v6].iter().any(|a| std::net::TcpStream::connect_timeout(a, TAKEN_WAIT).is_ok()) {
+    if !free(local) {
         return None;
     }
+    let v4: SocketAddr = (Ipv4Addr::LOCALHOST, local).into();
+    let v6: SocketAddr = (Ipv6Addr::LOCALHOST, local).into();
     let mut out = vec![bind(v4).ok()?];
     match bind(v6) {
         Ok(l) => out.push(l),
@@ -391,6 +402,15 @@ mod tests {
         assert_eq!(maps.start(None, &quiet()), vec![]);
         assert_eq!(maps.list(), both);
         assert!(connects(29220) && connects(29221));
+    }
+
+    #[tokio::test]
+    async fn free_says_whether_something_answers() {
+        assert!(free(29230));
+        let _theirs = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 29230)).unwrap();
+        assert!(!free(29230));
+        let (maps, _) = Maps::load(tempfile::tempdir().unwrap().path(), 29231, 7);
+        assert_eq!(maps.range(), (29231, 7));
     }
 
     #[tokio::test]

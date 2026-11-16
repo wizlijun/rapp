@@ -1,7 +1,7 @@
 //! Changing this device's share table: the one code path for the local IPC and (Task 2) a device that may set it.
 
 use crate::forward::{admit, Caller};
-use crate::shares::{sensitive, Patch, Share, Shared};
+use crate::shares::{sensitive, Patch, Proto, Share, Shared};
 use crate::state::{Peer, State};
 use anyhow::Result;
 use rapp_conn::Pipe;
@@ -74,8 +74,12 @@ pub fn share(state: &State, req: &Value, allow: Allow, by: &By) -> Result<Vec<Sh
         By::Local => req["raw"].as_bool(),
         By::Remote(_) => None,
     };
-    let patch = Patch { note: req["note"].as_str().map(str::to_string), allow, raw };
-    let done = state.shares.share_all(&ports, &patch).map_err(|e| format!("{e:#}"))?;
+    let proto = match &req["proto"] {
+        Value::Null => None,
+        v => Some(v.as_str().and_then(Proto::parse).ok_or("bad proto")?),
+    };
+    let patch = Patch { note: req["note"].as_str().map(str::to_string), allow, raw, proto };
+    let done = state.shares.share_all(&ports, &patch, &|used| crate::numbers::pick(state, used)).map_err(|e| format!("{e:#}"))?;
     for d in &done {
         let (port, allow) = (d.share.port, &d.share.allow);
         state.log.event(Lvl::Info, "share", by.fields(json!({"port": port, "allow": allow.len()})));

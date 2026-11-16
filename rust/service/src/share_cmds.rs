@@ -5,7 +5,7 @@
 use crate::ipc::HOSTS_WAIT;
 use crate::pipe::{self, known_hosts, target_id};
 use crate::sharing::{self, Allow, By, SENSITIVE_WARN};
-use crate::shares::sensitive;
+use crate::shares::{sensitive, Proto};
 use crate::state::State;
 use rapp_net::line::{err, ok};
 use rapp_net::log::clean_name;
@@ -56,13 +56,13 @@ fn device(fp: &Fp, name: String) -> Value {
     json!({"fp": fp.to_string(), "name": name})
 }
 
-/// What to type or open on this computer to reach a share of `port` that is on its `local`
-/// port here: `http://localhost:<local>`, or for SSH `ssh -p <local> localhost`.
-pub fn addr(port: u16, local: u16) -> String {
-    match (port, local) {
-        (22, 22) => "ssh localhost".into(),
-        (22, _) => format!("ssh -p {local} localhost"),
-        _ => format!("http://localhost:{local}"),
+/// What to type or open on this computer to reach a share of protocol `proto` that is on its
+/// `local` port here: `http://localhost:<local>` (likewise `https` and `tcp`), or for SSH
+/// `ssh -p <local> localhost`.
+pub fn addr(proto: Proto, local: u16) -> String {
+    match proto {
+        Proto::Ssh => format!("ssh -p {local} localhost"),
+        _ => format!("{}://localhost:{local}", proto.as_str()),
     }
 }
 
@@ -74,12 +74,12 @@ fn mine(me: &Fp, allow: &[(Fp, String)]) -> bool {
 /// One row of the `shares` reply; `allow` is what `shown` made of each device. `local` is the
 /// port of this computer the share is reached on; None when there is none, and then `addr` is
 /// empty.
-fn row(me: &Fp, port: u16, note: &str, allow: Vec<(Fp, String)>, listening: bool, local: Option<u16>) -> Value {
+fn row(me: &Fp, port: u16, proto: Proto, note: &str, allow: Vec<(Fp, String)>, listening: bool, local: Option<u16>) -> Value {
     let mine = mine(me, &allow);
     let allow: Vec<Value> = allow.into_iter().map(|(fp, name)| device(&fp, name)).collect();
     let mut v = json!({
-        "port": port, "note": note, "allow": allow, "addr": local.map(|l| addr(port, l)).unwrap_or_default(),
-        "web": port != 22, "listening": listening, "mine": mine,
+        "port": port, "note": note, "allow": allow, "addr": local.map(|l| addr(proto, l)).unwrap_or_default(),
+        "web": proto.web(), "listening": listening, "mine": mine,
     });
     if let Some(local) = local {
         v["local"] = json!(local);
@@ -107,7 +107,7 @@ pub async fn shares(state: &Arc<State>, cmd: &Value) -> Value {
         let shares: Vec<Value> = sharing::table(state)
             .await
             .into_iter()
-            .map(|(s, listening)| row(&me, s.port, &s.note, s.allow.iter().map(|fp| (*fp, named(fp))).collect(), listening, Some(s.port)))
+            .map(|(s, listening)| row(&me, s.port, s.protocol(), &s.note, s.allow.iter().map(|fp| (*fp, named(fp))).collect(), listening, Some(s.port)))
             .collect();
         let mut known = vec![device(&me, "本机".into())];
         known.extend(state.paired.list().iter().filter(|(fp, _)| *fp != me).map(|(fp, _)| device(fp, named(fp))));
@@ -140,7 +140,8 @@ pub async fn shares(state: &Arc<State>, cmd: &Value) -> Value {
         .into_iter()
         .map(|(port, s, allow)| {
             let local = if usable.contains(&port) { state.maps.ensure(&id, port, &serve) } else { None };
-            row(&me, port, s["note"].as_str().unwrap_or(""), allow, s["listening"] == true, local)
+            let proto = s["proto"].as_str().and_then(Proto::parse).unwrap_or_else(|| Proto::guess(port));
+            row(&me, port, proto, s["note"].as_str().unwrap_or(""), allow, s["listening"] == true, local)
         })
         .collect();
     let mut known = vec![device(&me, "本机".into())];
@@ -211,6 +212,15 @@ pub async fn unshare(state: &State, cmd: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn addresses_by_protocol() {
+        assert_eq!(addr(Proto::Http, 28000), "http://localhost:28000");
+        assert_eq!(addr(Proto::Https, 28000), "https://localhost:28000");
+        assert_eq!(addr(Proto::Tcp, 28000), "tcp://localhost:28000");
+        assert_eq!(addr(Proto::Ssh, 28000), "ssh -p 28000 localhost");
+        assert_eq!(addr(Proto::Ssh, 28001), "ssh -p 28001 localhost");
+    }
 
     #[test]
     fn names_from_the_other_device_are_cleaned() {

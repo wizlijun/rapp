@@ -200,7 +200,7 @@ async fn a_and_b() -> (TestService, TestService, String) {
 /// `a_and_b`, and the key they trust each other with.
 async fn a_and_b_key() -> (TestService, TestService, String, rapp_wire::Key) {
     let (a, key) = start_sharing(|_| {}).await;
-    let (b, _) = start_sharing(|_| {}).await;
+    let (b, _) = start_sharing_ports(|_| {}, (29400, 10)).await;
     let r = ipc_once(&b.svc, b.home.path(), json!({"cmd":"set_relay","relay":"","key":key.to_string()})).await;
     assert_eq!(r["ok"], true, "{r}");
     let hosts = json!([{"id": a.id, "name": "a", "lan": [a_addr(&a.svc).to_string()]}]);
@@ -350,7 +350,7 @@ async fn set_through_the_relay() {
     let rig = RelayRig::start().await;
     let (port, _echo) = echo().await;
     // Neither registers a LAN address and B has no hosts.json: B can only reach A through the relay.
-    let a = a_on_relay(&rig, Some(vec![])).await;
+    let a = a_on_relay_ports(&rig, Some(vec![]), (0, 0)).await;
     let b = a_on_relay(&rig, Some(vec![])).await;
     assert!(!b.home.path().join("hosts.json").exists());
     let before = rig.streams();

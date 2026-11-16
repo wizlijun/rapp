@@ -40,10 +40,15 @@ pub fn share_file(home: &Path, shares: Value) {
 /// A service started after `prepare` ran on its home, with a key set so that a device showing
 /// the same key is trusted.
 pub async fn start_sharing(prepare: impl FnOnce(&Path)) -> (TestService, rapp_wire::Key) {
+    start_sharing_ports(prepare, (0, 0)).await
+}
+
+/// `start_sharing`, with the local ports of other devices' shares from `map_ports`.
+pub async fn start_sharing_ports(prepare: impl FnOnce(&Path), map_ports: (u16, u16)) -> (TestService, rapp_wire::Key) {
     let (home, bins) = (tempfile::tempdir().unwrap(), bins());
     service_json(home.path());
     prepare(home.path());
-    let svc = start_service(home.path(), bins.path(), Duration::from_secs(60)).await;
+    let svc = start_service_ports(home.path(), bins.path(), Duration::from_secs(60), map_ports).await;
     let id = ipc_once(&svc, home.path(), json!({"cmd":"status"})).await["id"].as_str().unwrap().to_string();
     let key = rapp_wire::Key::new_local();
     let r = ipc_once(&svc, home.path(), json!({"cmd":"set_relay","relay":"","key":key.to_string()})).await;

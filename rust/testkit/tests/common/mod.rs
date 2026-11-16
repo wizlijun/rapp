@@ -53,7 +53,7 @@ pub fn service_json(home: &Path) {
 }
 
 pub async fn start_service(home: &Path, bins: &Path, idle: Duration) -> Service {
-    start_service_ports(home, bins, idle, rapp_service::MAP_PORTS).await
+    start_service_ports(home, bins, idle, (0, 0)).await
 }
 
 /// `start_service`, giving other devices' shares local ports from `map_ports` (the first one,
@@ -571,7 +571,12 @@ pub fn hub_relay(home: &Path, addr: &str, key: &rapp_wire::Key) {
 
 /// A service on `rig` (registering `lan`; None: its own addresses), once it is connected there.
 pub async fn a_on_relay(rig: &RelayRig, lan: Option<Vec<String>>) -> TestService {
-    let a = service_on_relay_lan(&rig.addr, &rig.key, lan).await;
+    a_on_relay_ports(rig, lan, rapp_service::MAP_PORTS).await
+}
+
+/// `a_on_relay`, with the local ports of other devices' shares (and the share numbers) from `map_ports`.
+pub async fn a_on_relay_ports(rig: &RelayRig, lan: Option<Vec<String>>, map_ports: (u16, u16)) -> TestService {
+    let a = service_on_relay_with(&rig.addr, &rig.key, lan, |o| o.map_ports = map_ports).await;
     let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
     wait_status(&mut ipc, |s| s["relay"] == "connected").await;
     a

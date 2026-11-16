@@ -236,7 +236,7 @@ pub(crate) async fn connect_local(addrs: &[SocketAddr], wait: Duration) -> Optio
 mod tests {
     use super::*;
 
-    fn share(allow: Vec<Fp>) -> Share { Share { port: 8000, note: String::new(), allow, raw: false, open_web: false } }
+    fn share(allow: Vec<Fp>) -> Share { Share { allow, ..Share::new(8000) } }
     const A: Fp = Fp([1; 32]);
     const B: Fp = Fp([2; 32]);
 

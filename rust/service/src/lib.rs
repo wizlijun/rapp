@@ -9,6 +9,7 @@ mod forward;
 pub mod forward_log;
 mod ipc;
 mod maps;
+mod numbers;
 mod pace;
 mod peer;
 mod pipe;
@@ -182,6 +183,7 @@ impl Service {
             forward_log: forward_log::ForwardLog::new(log.clone()),
             shares,
             maps,
+            numbers: numbers::Numbers::new(),
             forwards: forward::Forwards::new(),
             forward_priority: opts.forward_priority,
             channels: opts.channels,

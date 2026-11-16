@@ -100,7 +100,7 @@ async fn this_devices_own_shares_are_reached_on_themselves() {
     let (a, _) = sharing(json!([{"port": 22}, {"port": 8000}])).await;
     let r = ipc(&a, json!({"cmd":"shares"})).await;
     let s = r["shares"].as_array().unwrap();
-    assert_eq!((&s[0]["addr"], &s[0]["local"]), (&json!("ssh localhost"), &json!(22)), "{r}");
+    assert_eq!((&s[0]["addr"], &s[0]["local"]), (&json!("ssh -p 22 localhost"), &json!(22)), "{r}");
     assert_eq!((&s[1]["addr"], &s[1]["local"]), (&json!("http://localhost:8000"), &json!(8000)), "{r}");
     assert_eq!(saved_maps(a.home.path()), json!([]));
 }

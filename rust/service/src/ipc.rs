@@ -1,6 +1,7 @@
 //! Local IPC (spec §3): TCP on 127.0.0.1, first line `{"token":…}` (from `ipc.token`),
 //! then JSON-line commands. No reply to a good token line; a bad one gets an error and EOF.
 
+use crate::shares::Proto;
 use crate::state::State;
 use crate::update;
 use anyhow::Result;
@@ -223,7 +224,8 @@ fn reached(state: &Arc<State>, id: &str, mut shares: Value) -> Value {
         .map(|mut s| {
             let local = crate::sharing::port_of(&s["port"]).and_then(|port| Some((port, state.maps.ensure(id, port, &serve)?)));
             if let Some((port, local)) = local {
-                (s["local"], s["addr"]) = (json!(local), json!(crate::share_cmds::addr(port, local)));
+                let proto = s["proto"].as_str().and_then(Proto::parse).unwrap_or_else(|| Proto::guess(port));
+                (s["local"], s["addr"]) = (json!(local), json!(crate::share_cmds::addr(proto, local)));
             }
             s
         })
