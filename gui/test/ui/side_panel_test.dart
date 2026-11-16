@@ -609,4 +609,38 @@ void main() {
       }
     }
   }
+
+  testWidgets('wrapped navigation and footer remain reachable at the minimum window height', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(360, 260));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    // The app top bar occupies 56px of the window's minimum 260px height.
+    await tester.pumpWidget(wrap(MediaQuery(
+      data: const MediaQueryData(size: Size(360, 260), textScaler: TextScaler.linear(2)),
+      child: SizedBox(height: 204, child: panel()),
+    )));
+    for (final k in ['sessions', 'devices', 'projects', 'resources']) {
+      final tab = find.byKey(Key('tab-$k'));
+      await tester.ensureVisible(tab);
+      final p = tester.renderObject<RenderParagraph>(find.descendant(of: tab, matching: find.byType(RichText)));
+      expect(p.didExceedMaxLines, isFalse);
+    }
+    await tester.ensureVisible(find.byKey(const Key('theme-dropdown')));
+    expect(find.byKey(const Key('theme-dropdown')).hitTestable(), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('resizing across the short-panel layout preserves an in-progress editor', (tester) async {
+    s.togglePanel(PanelTab.devices);
+    Future<void> sized(double height) => tester.pumpWidget(wrap(MediaQuery(
+      data: MediaQueryData(size: Size(360, height), textScaler: const TextScaler.linear(2)),
+      child: SizedBox(width: 360, height: height, child: panel(devices: const TextField(key: Key('draft')))),
+    )));
+    await sized(600);
+    await tester.enterText(find.byKey(const Key('draft')), 'unfinished device address');
+    await sized(204);
+    expect(find.text('unfinished device address'), findsOneWidget);
+    await sized(600);
+    expect(find.text('unfinished device address'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }
