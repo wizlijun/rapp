@@ -90,6 +90,8 @@ struct Env {
     curl_fail: Arc<AtomicI32>,
     launchd: bool,
     gui_wait: Duration,
+    /// `UpdateOpts.install_level`; None skips the check.
+    install_level: Option<PathBuf>,
     svc: Option<Service>,
 }
 
@@ -126,6 +128,7 @@ impl Env {
             curl_fail,
             launchd: k.launchd,
             gui_wait: k.gui_wait,
+            install_level: None,
             svc: None,
         }
     }
@@ -140,6 +143,7 @@ impl Env {
             idle_poll: POLL,
             healthy_after: Duration::from_millis(200),
             gui_wait: self.gui_wait,
+            install_level: self.install_level.clone(),
         };
         let runner: Arc<dyn Runner> = self.runner.clone();
         self.svc = Some(start_service_with(&self.home, self.bins.path(), runner, Some(opts)).await);
@@ -327,8 +331,33 @@ async fn not_in_bundle_is_off() {
     assert_eq!(st["update"]["state"], "off", "{st}");
     let u = ipc_once(&svc, home.path(), json!({"cmd":"update_status"})).await;
     assert_eq!((&u["ok"], &u["state"]), (&json!(true), &json!("off")), "{u}");
+    assert_eq!(u["needs_reinstall"], false, "a dev build never asks for the pkg: {u}");
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert!(runner.calls().is_empty(), "{:?}", runner.calls());
+}
+
+#[tokio::test]
+async fn reinstall_follows_the_level_file() {
+    let mut e = Env::new(Knobs::default());
+    let f = e.home.join("install-level");
+    e.install_level = Some(f.clone());
+    e.start().await;
+    let u = e.update().await;
+    assert_eq!(u["needs_reinstall"], true, "no level file yet: {u}");
+    assert_eq!(u["reinstall_page"], "https://github.com/wizlijun/rapp/releases/latest", "{u}");
+    std::fs::write(&f, "1\n").unwrap();
+    assert_eq!(e.update().await["needs_reinstall"], false, "the pkg ran while the service was up");
+    std::fs::write(&f, "0\n").unwrap();
+    assert_eq!(e.update().await["needs_reinstall"], true, "an older installer");
+    let u = e.call(json!({"cmd":"update_status"})).await;
+    assert_eq!(u["needs_reinstall"], true, "update_status says it too: {u}");
+}
+
+#[tokio::test]
+async fn no_level_check_never_asks_for_a_reinstall() {
+    let mut e = Env::new(Knobs::default());
+    e.start().await;
+    assert_eq!(e.update().await["needs_reinstall"], false);
 }
 
 #[tokio::test]
@@ -452,6 +481,20 @@ async fn gui_process_blocks_auto_install() {
     assert_eq!(e.update().await["state"], "ready");
     assert_eq!(marker_of(&e.bundle), "current");
     // Only the service's own child (rapp-host, ppid = service) is left: that is nobody.
+    e.ps_extra.lock().unwrap().clear();
+    e.wait_restart().await;
+    assert_eq!(marker_of(&e.bundle), "new");
+}
+
+#[tokio::test]
+async fn a_pipe_through_the_rapp_link_blocks_auto_install() {
+    let mut e = Env::new(Knobs::default());
+    // ps names a process started as /usr/local/bin/rapp by the link, not the bundle path.
+    e.ps_extra.lock().unwrap().push(format!("  777   776 {}", rapp_update::CLI_LINK));
+    e.start().await;
+    e.wait_state("ready").await;
+    e.no_restart_for(POLL * 4).await;
+    assert_eq!(marker_of(&e.bundle), "current");
     e.ps_extra.lock().unwrap().clear();
     e.wait_restart().await;
     assert_eq!(marker_of(&e.bundle), "new");

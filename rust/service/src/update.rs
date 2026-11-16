@@ -190,12 +190,19 @@ pub fn status_json(state: &State) -> Value {
     let cache = up::load_cache(&cache_file(state));
     let dismissed = cache.latest_version.is_some() && cache.latest_version == cache.dismissed_version;
     let can_rollback = state.update_opts.is_some() && previous_dir(state).join("rapp.app").is_dir();
+    // Read on every report, so a pkg run while the service is up clears it at once.
+    let needs_reinstall = state
+        .update_opts
+        .as_ref()
+        .and_then(|o| o.install_level.as_ref())
+        .is_some_and(|f| up::needs_reinstall(std::fs::read_to_string(f).ok().as_deref()));
     let u = state.update.lock().unwrap();
     json!({
         "state": u.state, "current": u.current, "latest": u.latest, "progress": u.progress, "error": u.error,
         "notes": u.notes, "auto_update": auto_update, "check_updates": check_updates,
         "needs_confirm": u.needs_confirm, "needs_admin": u.needs_admin, "page": u.page,
         "can_rollback": can_rollback, "dismissed": dismissed,
+        "needs_reinstall": needs_reinstall, "reinstall_page": up::RELEASES_PAGE,
     })
 }
 
@@ -495,7 +502,8 @@ pub async fn in_use(state: &State) -> Option<String> {
 }
 
 /// A process from the bundle other than this service and its own children (session workers are
-/// its children). A ps that fails, or whose output doesn't show this service, counts as in use.
+/// its children), or one started through the `rapp` link (a `rapp pipe`). A ps that
+/// fails, or whose output doesn't show this service, counts as in use.
 async fn procs_in_use(state: &State) -> Option<String> {
     let o = state.update_opts.as_ref()?;
     let prefix = format!("{}/Contents/", o.bundle.display());
@@ -509,7 +517,9 @@ async fn procs_in_use(state: &State) -> Option<String> {
     if !procs.iter().any(|&(pid, _, comm)| pid == me && comm.starts_with(&prefix)) {
         return Some("看不懂进程表".into());
     }
-    let other = procs.iter().any(|&(pid, ppid, comm)| comm.starts_with(&prefix) && pid != me && ppid != me);
+    let other = procs
+        .iter()
+        .any(|&(pid, ppid, comm)| (comm.starts_with(&prefix) && pid != me && ppid != me) || comm == up::CLI_LINK);
     other.then(|| STILL_OPEN.to_string())
 }
 

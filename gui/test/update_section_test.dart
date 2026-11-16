@@ -72,6 +72,21 @@ void main() {
     expect(opened, ['https://example.invalid/tag']);
   });
 
+  testWidgets('a reinstall opens the releases page', (tester) async {
+    await tester.pumpWidget(section(const UpdateInfo(
+        current: '0.12.2',
+        state: 'idle',
+        latest: '0.12.2',
+        needsReinstall: true,
+        reinstallPage: 'https://github.com/wizlijun/rapp/releases/latest')));
+    expect(find.text('这一版要重新运行一次安装包，才能在终端里用 rapp 命令'), findsOneWidget);
+    expect(find.text('检查更新'), findsNothing);
+    await tester.tap(find.text('下载安装包'));
+    await tester.pump();
+    expect(opened, ['https://github.com/wizlijun/rapp/releases/latest']);
+    expect(calls, isEmpty);
+  });
+
   testWidgets('a failed call shows its error in the section, with the page when it has one', (tester) async {
     applyError = ServiceException('服务不是由系统启动的，请从 release 页面手动装 pkg', page: 'https://example.invalid/tag');
     await tester.pumpWidget(section(ready));

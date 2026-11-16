@@ -13,6 +13,7 @@ const _labels = {
   UpdateAction.applyAnyway: '仍然安装',
   UpdateAction.dismiss: '这一版先不装',
   UpdateAction.openPage: '打开安装包',
+  UpdateAction.reinstall: '下载安装包',
 };
 
 class UpdateSection extends StatefulWidget {
@@ -80,6 +81,7 @@ class _UpdateSectionState extends State<UpdateSection> {
       UpdateAction.applyAnyway => () => _run(() => widget.onApply(true)),
       UpdateAction.dismiss => v == null ? null : () => _run(() => widget.onDismiss(v)),
       UpdateAction.openPage => u.page == null ? null : () => widget.onOpenPage(u.page!),
+      UpdateAction.reinstall => u.reinstallPage == null ? null : () => widget.onOpenPage(u.reinstallPage!),
     };
   }
 

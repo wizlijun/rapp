@@ -1,10 +1,32 @@
 #!/bin/bash
-# Runs as root after rapp.app lands in /Applications. Sets up the LaunchAgent
-# for the console user (same plist the GUI's 启动 writes, §4), starts it,
-# then opens the GUI. Nothing to do when nobody is logged in.
+# Runs as root after rapp.app lands in /Applications. Sets up what a zip upgrade
+# cannot (the `rapp` command, the install level), then the
+# LaunchAgent for the console user (same plist the GUI's 启动 writes, §4),
+# starts it, and opens the GUI. The per-user part is skipped when nobody is logged in.
 set -u
 APP=/Applications/rapp.app
 LABEL=com.rapp.service
+
+# System-wide steps (install-level spec). Raise INSTALL_LEVEL together with
+# rapp_update::INSTALL_LEVEL whenever a step is added here.
+INSTALL_LEVEL=1
+CLI=/usr/local/bin/rapp
+mkdir -p /usr/local/bin
+# A `rapp` that is not our link (or a dangling one) belongs to someone else: leave it.
+case "$(readlink "$CLI" 2>/dev/null)" in
+    */rapp.app/Contents/MacOS/rapp-cli) ours=1 ;;
+    *) ours=0 ;;
+esac
+if [ "$ours" = 1 ] || { [ ! -e "$CLI" ] && [ ! -L "$CLI" ]; }; then
+    ln -sfn "$APP/Contents/MacOS/rapp-cli" "$CLI"
+fi
+# A test build once wrote ssh settings for .rapp names, which are given up (local ports instead).
+rm -f /etc/ssh/ssh_config.d/rapp.conf
+# The level says every step above took: only then does the GUI stop asking for a reinstall.
+if [ "$(readlink "$CLI")" = "$APP/Contents/MacOS/rapp-cli" ]; then
+    mkdir -p "/Library/Application Support/rapp"
+    echo "$INSTALL_LEVEL" > "/Library/Application Support/rapp/install-level"
+fi
 USER_NAME=$(stat -f %Su /dev/console)
 if [ -z "$USER_NAME" ] || [ "$USER_NAME" = root ] || [ "$USER_NAME" = loginwindow ]; then
     exit 0

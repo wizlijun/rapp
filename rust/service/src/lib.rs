@@ -92,6 +92,8 @@ pub struct UpdateOpts {
     pub healthy_after: Duration,
     /// How long a manual install waits for the GUI to go, and then for nobody to be using rapp.
     pub gui_wait: Duration,
+    /// The file the pkg writes its install level to; `None` skips the check (install-level spec).
+    pub install_level: Option<PathBuf>,
 }
 
 impl UpdateOpts {
@@ -106,6 +108,7 @@ impl UpdateOpts {
             idle_poll: Duration::from_secs(60),
             healthy_after: Duration::from_secs(30),
             gui_wait: Duration::from_secs(10),
+            install_level: Some(PathBuf::from(rapp_update::INSTALL_LEVEL_FILE)),
         }
     }
 }

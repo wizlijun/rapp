@@ -387,8 +387,8 @@
 - 交接：`docs/superpowers/plans/2026-11-16-port-sharing-local-ports-handoff.md`（东西在哪、验证到哪、下一步）
 
 ### 未经实机验证
-- [ ] `cd gui && flutter analyze && flutter test`：界面的改动和测试没有跑过（做这次改动的机器上没有 Flutter）
-- [ ] macOS 上 `cd rust && cargo test -p rapp-service maps:: && cargo test -p rapp-testkit --test maps --test share_set --test forward`
+- [x] `cd gui && flutter analyze && flutter test`：2026-11-16 在 Mac 上跑过。`a share that leaves this device out` 不过，是测试数据给不含本机的分享也配了地址（服务不给），改了测试数据（8133648），之后 1693 条全过
+- [x] macOS 上 `cargo test --workspace`：2026-11-16 547 条过；`rapp-term` 的 `a_dead_socket_is_removed_and_skipped` 跑全套时失败一次，单跑 3 次都过，和这次改动无关
 - [ ] 真机：两台设备，一台分享 Jupyter / Ollama / Vite / sshd，另一台在面板里点"打开"、用 `curl http://localhost:<端口>`、`ssh -p <端口> localhost`；经 relay 和局域网各一次
 - [ ] 真机：访问方的服务重启后，不打开面板，原来的地址还能用
 - [ ] macOS：别的程序在"所有地址"上监听 28000 时，rapp 跳过它
