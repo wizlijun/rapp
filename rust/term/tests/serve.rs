@@ -624,6 +624,44 @@ async fn a_rename_reaches_a_watch_at_once() {
     let _ = server.await;
 }
 
+#[tokio::test]
+async fn a_watch_sees_the_installed_shells_change() {
+    use rapp_term::shells::Shell;
+    use std::sync::{Arc, Mutex};
+    let dir = short_dir();
+    let config = dir.path().join("term.json");
+    std::fs::write(&config, r#"{"allow":true}"#).unwrap();
+    let mut opts = rapp_term::serve::ServeOpts::new(config);
+    opts.poll = Duration::from_millis(100);
+    let sh = |name: &str, default| Shell { name: name.into(), path: format!("/bin/{name}"), default };
+    let installed = Arc::new(Mutex::new(vec![sh("sh", true), sh("fish", false)]));
+    let now = installed.clone();
+    opts.shells_with = Some(Arc::new(move || now.lock().unwrap().clone()));
+    rapp_term::pty::local::ensure_dirs(&opts.pty_dir).unwrap();
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (tx, _events) = mpsc::unbounded_channel();
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let server = tokio::spawn(rapp_term::serve::serve(listener, TOKEN.into(), opts, tx, async {
+        let _ = stopped.await;
+    }));
+    let s = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    let (r, mut w) = s.into_split();
+    w.write_all(format!("{}\n{TOKEN}\n", json!({"op": "watch"})).as_bytes()).await.unwrap();
+    let mut watch = Conn { lines: BufReader::new(r).lines(), w };
+    let names = |l: &Value| -> Vec<String> {
+        l["hosts"][0]["shells"].as_array().unwrap().iter().map(|s| s["name"].as_str().unwrap().to_string()).collect()
+    };
+    let first = watch.until_list(WAIT, |_| true).await;
+    assert_eq!(names(&first), ["sh", "fish"]);
+    // fish is uninstalled while the watch runs: the next push drops its button.
+    *installed.lock().unwrap() = vec![sh("sh", true)];
+    let seen = watch.until_list(Duration::from_secs(2), |l| names(l) == ["sh"]).await;
+    assert_eq!(names(&seen), ["sh"]);
+    let _ = stop.send(());
+    let _ = server.await;
+}
+
 fn row_named(list: &Value, name: &str) -> bool {
     list["terms"].as_array().is_some_and(|t| t.iter().any(|r| r["name"] == name))
 }

@@ -52,12 +52,14 @@ pub struct ServeOpts {
     pub pty_dir: PathBuf,
     /// Run instead of `open -a`, for tests: `<program> <app> <file>`.
     pub launch_with: Option<PathBuf>,
+    /// Look up the installed shells with this instead of the machine's own, for tests.
+    pub shells_with: Option<Arc<dyn Fn() -> Vec<Shell> + Send + Sync>>,
 }
 
 impl ServeOpts {
     pub fn new(config: PathBuf) -> ServeOpts {
         let pty_dir = config.parent().unwrap_or(&config).join("term");
-        ServeOpts { config, poll: Duration::from_secs(2), pty_dir, launch_with: None }
+        ServeOpts { config, poll: Duration::from_secs(2), pty_dir, launch_with: None, shells_with: None }
     }
 }
 
@@ -220,7 +222,13 @@ impl Worker {
     /// This machine's sessions and what it offers.
     pub async fn list(&self) -> TermList {
         let statuses = self.pty_statuses().await;
-        TermList { terms: pty_rows(&self.unread, &statuses, unix_now()), hosts: host_list(&self.launchers) }
+        TermList { terms: pty_rows(&self.unread, &statuses, unix_now()), hosts: self.hosts() }
+    }
+
+    /// This machine as a host, with the shells it has now.
+    fn hosts(&self) -> Vec<HostRow> {
+        let shells = self.opts.shells_with.as_ref().map_or_else(installed_shells, |f| f());
+        vec![HostRow { host: None, launchers: self.launchers.clone(), shells }]
     }
 
     /// Send the session list now and again whenever it changes, until the other end closes; if terminal sessions
@@ -243,7 +251,6 @@ impl Worker {
             changed.clone(),
             self.rescan.subscribe(),
         ));
-        let hosts = host_list(&self.launchers);
         let mut sent: Option<TermList> = None;
         let mut tick = tokio::time::interval(self.opts.poll);
         tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -263,7 +270,8 @@ impl Worker {
             let Some(terms) = lock(&pty).clone() else {
                 continue;
             };
-            let list = fit(TermList { terms, hosts: hosts.clone() });
+            // The shells are looked up on every pass: one installed or removed is a change too.
+            let list = fit(TermList { terms, hosts: self.hosts() });
             if sent.as_ref() != Some(&list) {
                 reply(w, &serde_json::to_value(&list).expect("a list always serializes")).await?;
                 sent = Some(list);
@@ -306,7 +314,7 @@ impl Worker {
         if !known || (self.opts.launch_with.is_none() && !self.launchers.iter().any(|l| l == app)) {
             return Err(UNKNOWN_APP.into());
         }
-        let shells = installed_shells();
+        let shells = self.opts.shells_with.as_ref().map_or_else(installed_shells, |f| f());
         let found = match shell {
             Some(p) => shells.iter().find(|s| s.path == p),
             None => shells.iter().find(|s| s.default),
@@ -587,11 +595,6 @@ fn write_private(path: &std::path::Path, body: &str) -> std::io::Result<()> {
     f.write_all(body.as_bytes())
 }
 
-/// The hosts: this machine, offering `launchers` and the shells it has now.
-fn host_list(launchers: &[String]) -> Vec<HostRow> {
-    vec![HostRow { host: None, launchers: launchers.to_vec(), shells: installed_shells() }]
-}
-
 /// The shells on this machine now; none where they are not looked up yet.
 fn installed_shells() -> Vec<Shell> {
     #[cfg(unix)]
@@ -746,7 +749,7 @@ mod tests {
             dead: false,
             unread: false,
         };
-        let hosts = host_list(&[]);
+        let hosts = vec![HostRow { host: None, launchers: Vec::new(), shells: installed_shells() }];
         let list = TermList { terms: (0..1000).map(row).collect(), hosts };
         let cut = fit(list.clone());
         assert!(!cut.terms.is_empty() && cut.terms.len() < 1000);
