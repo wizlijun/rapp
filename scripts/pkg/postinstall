@@ -1,10 +1,29 @@
 #!/bin/bash
-# Runs as root after rapp.app lands in /Applications. Sets up the LaunchAgent
-# for the console user (same plist the GUI's 启动 writes, §4), starts it,
-# then opens the GUI. Nothing to do when nobody is logged in.
+# Runs as root after rapp.app lands in /Applications. Sets up what a zip upgrade
+# cannot (the `rapp` command, ssh's .rapp names, the install level), then the
+# LaunchAgent for the console user (same plist the GUI's 启动 writes, §4),
+# starts it, and opens the GUI. The per-user part is skipped when nobody is logged in.
 set -u
 APP=/Applications/rapp.app
 LABEL=com.rapp.service
+
+# System-wide steps (install-level spec). Raise INSTALL_LEVEL together with
+# rapp_update::INSTALL_LEVEL whenever a step is added here.
+INSTALL_LEVEL=1
+mkdir -p /usr/local/bin
+# A `rapp` that is not our link belongs to someone else: leave it.
+if [ ! -e /usr/local/bin/rapp ] || [ -L /usr/local/bin/rapp ]; then
+    ln -sfn "$APP/Contents/MacOS/rapp-cli" /usr/local/bin/rapp
+fi
+# /etc/ssh/ssh_config includes ssh_config.d/*; a user's ~/.ssh/config still wins.
+mkdir -p /etc/ssh/ssh_config.d
+cat > /etc/ssh/ssh_config.d/rapp.conf <<'SSH'
+# Written by the rapp installer: `ssh <device>.rapp` goes through rapp.
+Host *.rapp
+    ProxyCommand /usr/local/bin/rapp pipe %h %p
+SSH
+mkdir -p "/Library/Application Support/rapp"
+echo "$INSTALL_LEVEL" > "/Library/Application Support/rapp/install-level"
 USER_NAME=$(stat -f %Su /dev/console)
 if [ -z "$USER_NAME" ] || [ "$USER_NAME" = root ] || [ "$USER_NAME" = loginwindow ]; then
     exit 0

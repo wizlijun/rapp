@@ -8,7 +8,8 @@ UpdateInfo info(String state,
         bool autoUpdate = true,
         bool needsConfirm = false,
         bool needsAdmin = false,
-        bool dismissed = false}) =>
+        bool dismissed = false,
+        bool needsReinstall = false}) =>
     UpdateInfo(
       current: '0.4.1',
       state: state,
@@ -19,6 +20,8 @@ UpdateInfo info(String state,
       needsConfirm: needsConfirm,
       needsAdmin: needsAdmin,
       dismissed: dismissed,
+      needsReinstall: needsReinstall,
+      reinstallPage: needsReinstall ? 'https://github.com/wizlijun/rapp/releases/latest' : null,
     );
 
 void main() {
@@ -27,7 +30,8 @@ void main() {
     expect(u.current, '0.4.1');
     expect(u.state, 'idle');
     expect(u.autoUpdate, isTrue);
-    expect([u.checkUpdates, u.needsConfirm, u.needsAdmin, u.dismissed, u.canRollback], everyElement(isFalse));
+    expect([u.checkUpdates, u.needsConfirm, u.needsAdmin, u.dismissed, u.canRollback, u.needsReinstall], everyElement(isFalse));
+    expect(u.reinstallPage, isNull);
     expect([u.latest, u.error, u.notes, u.page, u.progress], everyElement(isNull));
     expect(UpdateInfo.fromJson(null), isNull);
     expect(UpdateInfo.fromJson('x'), isNull);
@@ -99,5 +103,43 @@ void main() {
       expect(updateBadge(info(s)), isFalse, reason: s);
     }
     expect(updateBadge(null), isFalse);
+  });
+
+  test('fromJson reads the reinstall fields', () {
+    final u = UpdateInfo.fromJson({
+      'current': '0.12.2',
+      'state': 'idle',
+      'needs_reinstall': true,
+      'reinstall_page': 'https://github.com/wizlijun/rapp/releases/latest',
+    })!;
+    expect(u.needsReinstall, isTrue);
+    expect(u.reinstallPage, 'https://github.com/wizlijun/rapp/releases/latest');
+  });
+
+  test('a reinstall is said over everything but work in progress', () {
+    const line = '这一版要重新运行一次安装包，才能用上命令行 rapp 和 ssh 的 .rapp 设置';
+    for (final u in [
+      info('idle', latest: null, needsReinstall: true),
+      info('up_to_date', latest: '0.4.1', needsReinstall: true),
+      info('ready', needsAdmin: true, needsReinstall: true),
+      info('ready', needsConfirm: true, needsReinstall: true),
+      info('failed', error: '大小不对', needsReinstall: true),
+      info('idle', dismissed: true, needsReinstall: true),
+    ]) {
+      final v = updateView(u);
+      expect(v.line, line, reason: u.state);
+      expect(v.actions, [UpdateAction.reinstall], reason: u.state);
+    }
+    expect(updateView(info('downloading', progress: 45, needsReinstall: true)).line, '正在下载 0.5.0（45%）');
+    expect(updateView(info('installing', needsReinstall: true)).line, '正在安装 0.5.0');
+    expect(updateView(info('checking', needsReinstall: true)).line, '当前 0.4.1 · 正在检查');
+    expect(updateView(info('off', latest: null, needsReinstall: true)).line, '开发构建，不检查更新');
+  });
+
+  test('badge while a reinstall is needed, even dismissed, never on a dev build', () {
+    expect(updateBadge(info('idle', latest: null, needsReinstall: true)), isTrue);
+    expect(updateBadge(info('ready', dismissed: true, needsReinstall: true)), isTrue);
+    expect(updateBadge(info('failed', needsReinstall: true)), isTrue);
+    expect(updateBadge(info('off', latest: null, needsReinstall: true)), isFalse);
   });
 }

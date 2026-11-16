@@ -53,7 +53,7 @@ check "stable dr is not cdhash" not is_cdhash_dr "$DR_STABLE"
 
 CS_OUT=$'Executable=/x/rapp.app/Contents/MacOS/rapp-host\nIdentifier=com.rapp.host\nFormat=Mach-O thin (arm64)'
 check "identifier parsed" eq "$(identifier_of "$CS_OUT")" "com.rapp.host"
-check "expected ids" eq "$EXPECTED_IDS" "rapp-service:com.rapp.service rapp-hub:com.rapp.hub rapp-term:com.rapp.term rapp-host:com.rapp.host rapp-client:com.rapp.client"
+check "expected ids" eq "$EXPECTED_IDS" "rapp-service:com.rapp.service rapp-hub:com.rapp.hub rapp-term:com.rapp.term rapp-cli:com.rapp.cli rapp-host:com.rapp.host rapp-client:com.rapp.client"
 
 CH=$(grep -n 'chown -R "$USER_NAME":staff "$APP"' scripts/pkg/postinstall | head -1 | cut -d: -f1 || true)
 BS=$(grep -n 'launchctl bootstrap' scripts/pkg/postinstall | head -1 | cut -d: -f1 || true)
@@ -70,6 +70,16 @@ signs_with_ids() {
 }
 check "signing loop passes -i from EXPECTED_IDS" signs_with_ids scripts/package-macos.sh
 check "postinstall waits for the old agent to leave" grep -q 'while launchctl print "gui/$USER_ID/$LABEL"' scripts/pkg/postinstall
+check "package script builds and bundles rapp-cli" bash -c 'grep -q -- "-p rapp-cli" scripts/package-macos.sh && grep -q "release/rapp-cli \"\$APP/Contents/MacOS/\"" scripts/package-macos.sh'
+check "postinstall links the rapp command" grep -q 'ln -sfn "$APP/Contents/MacOS/rapp-cli" /usr/local/bin/rapp' scripts/pkg/postinstall
+check "postinstall writes the ssh proxy" grep -q 'ProxyCommand /usr/local/bin/rapp pipe %h %p' scripts/pkg/postinstall
+pkg_level=$(sed -n 's/^INSTALL_LEVEL=\([0-9]*\)$/\1/p' scripts/pkg/postinstall)
+rust_level=$(sed -n 's/^pub const INSTALL_LEVEL: u32 = \([0-9]*\);$/\1/p' rust/update/src/lib.rs)
+check "install level matches rapp_update" test -n "$pkg_level" -a "$pkg_level" = "$rust_level"
+check "postinstall writes the level" grep -q 'echo "$INSTALL_LEVEL" > "/Library/Application Support/rapp/install-level"' scripts/pkg/postinstall
+LV=$(grep -n 'install-level"$' scripts/pkg/postinstall | head -1 | cut -d: -f1 || true)
+UC=$(grep -n '^USER_NAME=' scripts/pkg/postinstall | head -1 | cut -d: -f1 || true)
+check "system steps run before the logged-in check" test -n "$LV" -a -n "$UC" -a "${LV:-999}" -lt "${UC:-0}"
 check "postinstall retries bootstrap" grep -q 'for _ in 1 2 3 4 5; do launchctl bootstrap' scripts/pkg/postinstall
 check "scripts parse" bash -c 'bash -n scripts/package-macos.sh && bash -n scripts/pkg/postinstall && bash -n scripts/lib/sign-check.sh'
 

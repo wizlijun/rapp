@@ -15,6 +15,8 @@ class UpdateInfo {
     this.needsAdmin = false,
     this.dismissed = false,
     this.canRollback = false,
+    this.needsReinstall = false,
+    this.reinstallPage,
   });
 
   /// The running bundle version ('' when the service could not read it).
@@ -27,6 +29,12 @@ class UpdateInfo {
   /// Download progress in percent.
   final int? progress;
   final bool autoUpdate, checkUpdates, needsConfirm, needsAdmin, dismissed, canRollback;
+
+  /// The pkg that ran here is older than this build: run it again (install-level spec).
+  final bool needsReinstall;
+
+  /// Where to get that pkg.
+  final String? reinstallPage;
 
   /// Null unless [j] is a map (an older service sends no `update`).
   static UpdateInfo? fromJson(Object? j) {
@@ -47,11 +55,13 @@ class UpdateInfo {
       needsAdmin: j['needs_admin'] == true,
       dismissed: j['dismissed'] == true,
       canRollback: j['can_rollback'] == true,
+      needsReinstall: j['needs_reinstall'] == true,
+      reinstallPage: s('reinstall_page'),
     );
   }
 }
 
-enum UpdateAction { check, apply, applyAnyway, dismiss, openPage }
+enum UpdateAction { check, apply, applyAnyway, dismiss, openPage, reinstall }
 
 /// The one line under 版本与升级 and the buttons beside it (K26).
 ({String line, List<UpdateAction> actions}) updateView(UpdateInfo u) {
@@ -61,8 +71,6 @@ enum UpdateAction { check, apply, applyAnyway, dismiss, openPage }
   switch (u.state) {
     case 'off':
       return (line: '开发构建，不检查更新', actions: const []);
-    case 'failed':
-      return (line: '升级没有完成：${u.error ?? ''}', actions: check);
     case 'checking':
       return (line: '$cur · 正在检查', actions: const []);
     case 'downloading':
@@ -70,6 +78,11 @@ enum UpdateAction { check, apply, applyAnyway, dismiss, openPage }
     case 'installing':
       return (line: '正在安装 $v', actions: const []);
   }
+  // Running the pkg again also brings whatever is waiting or failed, so it is said before them.
+  if (u.needsReinstall) {
+    return (line: '这一版要重新运行一次安装包，才能用上命令行 rapp 和 ssh 的 .rapp 设置', actions: const [UpdateAction.reinstall]);
+  }
+  if (u.state == 'failed') return (line: '升级没有完成：${u.error ?? ''}', actions: check);
   if (u.dismissed && u.latest != null) return (line: '$cur · $v 先不装', actions: check);
   if (u.state == 'ready') {
     // An admin password blocks the install whatever is confirmed, so it is said first.
@@ -104,4 +117,6 @@ bool _newer(String? a, String b) {
 
 /// The quiet dot on the 本机 chip: a version is on its way in and was not dismissed (K27).
 bool updateBadge(UpdateInfo? u) =>
-    u != null && !u.dismissed && const {'downloading', 'ready', 'installing'}.contains(u.state);
+    u != null &&
+    u.state != 'off' &&
+    (u.needsReinstall || !u.dismissed && const {'downloading', 'ready', 'installing'}.contains(u.state));

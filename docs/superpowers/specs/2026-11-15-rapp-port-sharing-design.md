@@ -442,6 +442,8 @@ Host *.rapp
 
 SSH 自己的登录验证（密钥、`known_hosts`）不变，rapp 不碰。
 
+（实现注，2026-11-16，见 `2026-11-16-rapp-install-level-design.md`）macOS 的 pkg 现在带 `rapp-cli`，链接成 `/usr/local/bin/rapp`；并写 `/etc/ssh/ssh_config.d/rapp.conf`（上面两行，`ProxyCommand /usr/local/bin/rapp pipe %h %p`），装完 `ssh <ID>.rapp` 就通，用户不用改 `~/.ssh/config`。用户自己的 `~/.ssh/config` 先读，写了的仍然优先。
+
 ## 10. HTTP 适配
 
 ### 10.1 为什么需要

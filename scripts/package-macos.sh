@@ -9,7 +9,7 @@
 # With a "Developer ID Installer" identity the pkg is signed too, and if the
 # notarytool profile exists (xcrun notarytool store-credentials rapp-notary ...)
 # the pkg is notarized and stapled. Override with RAPP_SIGN_PKG / RAPP_NOTARY_PROFILE.
-# Sub-programs get fixed identifiers (com.rapp.service/hub/host/client) so the
+# Sub-programs get fixed identifiers (com.rapp.service/hub/term/cli/host/client) so the
 # designated requirement stays stable. An ad-hoc result (cdhash requirement)
 # fails the build unless RAPP_ALLOW_ADHOC=1 (local builds only).
 set -euo pipefail
@@ -30,8 +30,8 @@ rm -rf "$DIST" && mkdir -p "$DIST"
 echo "== swift (rapp-host, rapp-client)"
 swift build -c release
 
-echo "== rust (rapp-service, rapp-hub, rapp-term)"
-(cd rust && cargo build --release -p rapp-service -p rapp-hub -p rapp-term)
+echo "== rust (rapp-service, rapp-hub, rapp-term, rapp-cli)"
+(cd rust && cargo build --release -p rapp-service -p rapp-hub -p rapp-term -p rapp-cli)
 
 echo "== flutter (rapp.app)"
 # Universal builds fail in lipo with this Xcode; the GUI ships arm64 only.
@@ -41,14 +41,14 @@ echo "== bundle"
 APP=$DIST/stage/rapp.app
 mkdir -p "$DIST/stage"
 cp -R gui/build/macos/Build/Products/Release/rapp.app "$APP"
-cp rust/target/release/rapp-service rust/target/release/rapp-hub rust/target/release/rapp-term "$APP/Contents/MacOS/"
+cp rust/target/release/rapp-service rust/target/release/rapp-hub rust/target/release/rapp-term rust/target/release/rapp-cli "$APP/Contents/MacOS/"
 cp .build/release/rapp-host .build/release/rapp-client "$APP/Contents/MacOS/"
 # Inside out: frameworks, helpers (with fixed identifiers), then the app (keeping its entitlements).
 SIGN=(codesign --force $(runtime_flags "$KIND") --sign "$SIGN_ID")
 if [ "$KIND" != adhoc ]; then
     "${SIGN[@]}" "$APP"/Contents/Frameworks/*.framework
 fi
-# Identifiers: -i com.rapp.service / com.rapp.hub / com.rapp.term / com.rapp.host / com.rapp.client (EXPECTED_IDS).
+# Identifiers: -i com.rapp.service / com.rapp.hub / com.rapp.term / com.rapp.cli / com.rapp.host / com.rapp.client (EXPECTED_IDS).
 for pair in $EXPECTED_IDS; do
     "${SIGN[@]}" -i "${pair#*:}" "$APP/Contents/MacOS/${pair%%:*}"
 done

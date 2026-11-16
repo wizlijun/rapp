@@ -21,6 +21,20 @@ pub const DEFAULT_URL: &str = "https://github.com/wizlijun/rapp/releases/latest/
 pub const PLATFORM: &str = "macos-arm64";
 pub const CHECK_EVERY_SECS: u64 = 20 * 3600;
 
+/// What the pkg's installer sets up that a zip upgrade cannot carry (install-level spec). Raise it
+/// together with the number `scripts/pkg/postinstall` writes whenever the installer gains a step.
+pub const INSTALL_LEVEL: u32 = 1;
+/// Where the installer writes its level.
+pub const INSTALL_LEVEL_FILE: &str = "/Library/Application Support/rapp/install-level";
+/// Where to get the pkg when the running app needs it run again.
+pub const RELEASES_PAGE: &str = "https://github.com/wizlijun/rapp/releases/latest";
+
+/// True when the installer that ran here is older than this build: no level file, one that is not
+/// a number, or a number below [INSTALL_LEVEL].
+pub fn needs_reinstall(level_file: Option<&str>) -> bool {
+    level_file.and_then(|s| s.trim().parse::<u32>().ok()).is_none_or(|n| n < INSTALL_LEVEL)
+}
+
 /// `x.y.z` with an optional leading `v`. Anything else (suffixes, path characters, whitespace) is `None`.
 pub fn parse_version(s: &str) -> Option<(u64, u64, u64)> {
     let s = s.strip_prefix('v').unwrap_or(s);
@@ -190,6 +204,17 @@ pub fn now_secs() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn reinstall_until_the_level_is_reached() {
+        use super::needs_reinstall;
+        assert!(needs_reinstall(None));
+        assert!(needs_reinstall(Some("")));
+        assert!(needs_reinstall(Some("one")));
+        assert!(needs_reinstall(Some("0\n")));
+        assert!(!needs_reinstall(Some("1\n")));
+        assert!(!needs_reinstall(Some(" 2 ")));
+    }
+
     use super::*;
 
     const SHA: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";

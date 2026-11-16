@@ -190,12 +190,19 @@ pub fn status_json(state: &State) -> Value {
     let cache = up::load_cache(&cache_file(state));
     let dismissed = cache.latest_version.is_some() && cache.latest_version == cache.dismissed_version;
     let can_rollback = state.update_opts.is_some() && previous_dir(state).join("rapp.app").is_dir();
+    // Read on every report, so a pkg run while the service is up clears it at once.
+    let needs_reinstall = state
+        .update_opts
+        .as_ref()
+        .and_then(|o| o.install_level.as_ref())
+        .is_some_and(|f| up::needs_reinstall(std::fs::read_to_string(f).ok().as_deref()));
     let u = state.update.lock().unwrap();
     json!({
         "state": u.state, "current": u.current, "latest": u.latest, "progress": u.progress, "error": u.error,
         "notes": u.notes, "auto_update": auto_update, "check_updates": check_updates,
         "needs_confirm": u.needs_confirm, "needs_admin": u.needs_admin, "page": u.page,
         "can_rollback": can_rollback, "dismissed": dismissed,
+        "needs_reinstall": needs_reinstall, "reinstall_page": up::RELEASES_PAGE,
     })
 }
 
