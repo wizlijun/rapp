@@ -49,7 +49,7 @@ pub fn paint(
             (w.rect.h - w.title_bar) as f64 * sy,
         );
         cr.clip();
-        let rects = panes.get(&w.id).filter(|r| !r.is_empty());
+        let rects = panes.get(&w.id).filter(|r| w.flags & 2 != 0 && !r.is_empty());
         let _ = cr.set_source_surface(if rects.is_some() { gray } else { colour }, 0., 0.);
         let _ = cr.paint();
         if let Some(rects) = rects {
@@ -124,5 +124,24 @@ mod tests {
         assert_eq!(pixel(&target, 5, 5), vec![76, 76, 76]);
         assert_eq!(pixel(&target, 40, 40), vec![0, 0, 255]);
         assert_eq!(pixel(&target, 90, 90), vec![0, 0, 255]);
+    }
+    #[test]
+    fn old_panes_do_not_gray_a_window_after_focus_moved_away() {
+        let source = cairo::ImageSurface::create_for_data(
+            [0u8, 0, 255, 255].repeat(100 * 100),
+            cairo::Format::Rgb24,
+            100,
+            100,
+            400,
+        )
+        .unwrap();
+        let gray = grayscale(&source).unwrap();
+        let target = cairo::ImageSurface::create(cairo::Format::Rgb24, 100, 100).unwrap();
+        let cr = cairo::Context::new(&target).unwrap();
+        let region = Rect { x: 0., y: 0., w: 100., h: 100. };
+        let window = Window { id: 1, parent: 0, kind: 0, flags: 1, rect: region, title_bar: 0., title: String::new() };
+        let panes = HashMap::from([(1, vec![Rect { x: 10., y: 10., w: 40., h: 40. }])]);
+        paint(&cr, &source, Some(&gray), region, &[window], &panes);
+        assert_eq!(pixel(&target, 5, 5), vec![0, 0, 255]);
     }
 }

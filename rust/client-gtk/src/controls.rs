@@ -86,7 +86,8 @@ impl Controls {
                     }
                     if name != "zoom" {
                         s.set_smart(false);
-                        s.pinned = true;
+                        // Like macOS's standalone client, a pick remains a ceiling for automatic saving.
+                        s.pinned = false;
                     }
                     s.geometry_changed = Instant::now() - Duration::from_secs(1);
                 }
@@ -109,7 +110,7 @@ impl Controls {
                 {
                     let mut s = s.borrow_mut();
                     s.set_smart(name == "smart");
-                    s.pinned = name != "smart";
+                    s.pinned = false;
                     s.mode = preset.mode;
                     s.fps = preset.fps;
                     s.density_choice = preset.density;

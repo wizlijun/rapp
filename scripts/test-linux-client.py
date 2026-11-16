@@ -315,7 +315,7 @@ def stream_menu(s):
         kind,payload=recv(s.s)
         if kind==11 and payload[:2]==bytes([3,1]):break
     assert struct.unpack("<f",payload[2:6])[0]>0
-    assert payload[6:]==b"\x01",payload  # manual stream choices pin the requested quality
+    assert payload[6:]==b"\x00",payload  # standalone clients keep automatic saving on
     z=zlib.compressobj();s.frame(z,True,15,mode=3);s.frame(z,False,5,mode=3)
     time.sleep(.3)
     xdo("mousemove","--window",window,int(geom["WIDTH"])-200,26)
@@ -325,7 +325,7 @@ def stream_menu(s):
     while True:
         kind,payload=recv(s.s)
         if kind==11 and payload[:2]==bytes([2,15]):break
-    assert struct.unpack("<f",payload[2:6])[0]==8. and payload[6:]==b"\x01",payload
+    assert struct.unpack("<f",payload[2:6])[0]==8. and payload[6:]==b"\x00",payload
     s.frame(zlib.compressobj(),True,0xf800)
     time.sleep(.2)
     s.p.stdin.close();s.finish(0)
