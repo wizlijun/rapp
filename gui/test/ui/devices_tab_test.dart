@@ -184,6 +184,36 @@ void main() {
     expect(find.text('终端'), findsWidgets);
   });
 
+  testWidgets('remote no-graphics capability makes a saved pixels choice open the existing text terminal', (tester) async {
+    capabilities = {'graphical': false, 'terminal': true, 'ports': true};
+    remoteApps = [];
+    termRows = [{'id': 'term:pty:work', 'name': 'work', 'command': 'bash', 'activity': 1}];
+    s.prefs.termOpen['111'] = 'pixels';
+    await pumpTab(tester);
+    await selectMini(tester);
+    expect(find.byKey(const Key('term-open-pixels')), findsNothing);
+    expect(find.descendant(of: find.byKey(const Key('term-open-text')),
+        matching: find.byIcon(Icons.radio_button_checked)), findsOneWidget);
+    expect(s.prefs.termOpenFor('111'), 'pixels', reason: 'capabilities affect the effective choice, not saved preferences');
+    await tester.ensureVisible(find.byKey(const Key('open-terms:')));
+    await tester.tap(find.byKey(const Key('open-terms:')));
+    await tester.pumpAndSettle();
+    expect(t.sent.lastWhere((m) => m['cmd'] == 'open')['app'], 'term:pty:work');
+  });
+
+  testWidgets('remote no-graphics capability opens a new text terminal with its advertised launcher', (tester) async {
+    capabilities = {'graphical': false, 'terminal': true, 'ports': true};
+    remoteApps = [];
+    termHosts = [{'host': null, 'launchers': ['kitty']}];
+    s.prefs.termOpen['111'] = 'pixels';
+    await pumpTab(tester);
+    await selectMini(tester);
+    await tester.tap(find.byKey(const Key('open-terms:')));
+    await tester.pumpAndSettle();
+    expect(t.sent.lastWhere((m) => m['cmd'] == 'open_term')['app'], 'kitty');
+    expect(t.sent.lastWhere((m) => m['cmd'] == 'open')['app'], 'term:pty:c');
+  });
+
   testWidgets('typed add form text survives switching device chips', (tester) async {
     await pumpTab(tester);
     await tester.enterText(find.byKey(const Key('add-id')), '999');

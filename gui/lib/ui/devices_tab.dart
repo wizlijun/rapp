@@ -242,7 +242,7 @@ class _DevicesTabState extends State<DevicesTab> {
         ),
       // 桌面 first, 终端 second (spec §2.1), the rest in their order.
       if (ordered.firstOrNull?.app == 'desktop:') _appRow(context, id, ordered.first),
-      ..._termsEntry(context, id, terms, apps?.apps ?? const []),
+      ..._termsEntry(context, id, terms, apps?.apps ?? const [], graphical: graphical),
       for (final a in ordered)
         if (a.app != 'desktop:') _appRow(context, id, a),
       if (widget.shares != null) SharesSection(key: ValueKey('shares-$id'), api: widget.shares!, to: id),
@@ -287,14 +287,14 @@ class _DevicesTabState extends State<DevicesTab> {
       );
 
   /// The 终端 row and, below it and always expanded, its sessions, terminal apps and 打开方式.
-  List<Widget> _termsEntry(BuildContext context, String id, TermList? list, List<HubApp> apps) {
+  List<Widget> _termsEntry(BuildContext context, String id, TermList? list, List<HubApp> apps, {required bool graphical}) {
     final t = RappTokens.of(context);
     if (list != null && !list.off && list.error != null) {
       return [Padding(padding: const EdgeInsets.only(bottom: 6), child: Text('终端：${list.error}', style: TextStyle(color: t.accent)))];
     }
     if (!showsTermsEntry(list)) return const [];
     final launchers = list!.hosts.where((h) => h.host == null).firstOrNull?.launchers ?? const <String>[];
-    final mode = state.prefs.termOpenFor(id);
+    final mode = graphical ? state.prefs.termOpenFor(id) : 'text';
     final termApp = launchers.isEmpty ? null : state.prefs.termAppFor(id, launchers);
     final shells = list.hosts.where((h) => h.host == null).firstOrNull?.shells;
     // (key, label, path); an old device lists none and gets one 默认 shell that sends no shell.
@@ -344,7 +344,7 @@ class _DevicesTabState extends State<DevicesTab> {
                 padding: const EdgeInsets.only(bottom: 6),
                 child: Text(_renameErrors[id]!, key: const Key('rename-error'), style: TextStyle(color: t.accent)),
               ),
-            for (final a in terminalAppsOf(apps))
+            for (final a in graphical ? terminalAppsOf(apps) : const <HubApp>[])
               Padding(
                 padding: const EdgeInsets.only(bottom: 6),
                 child: _PixelsRow(
@@ -405,12 +405,14 @@ class _DevicesTabState extends State<DevicesTab> {
                     label: '文本',
                     selected: mode == 'text',
                     onTap: () => state.setTermOpen(id, 'text')),
-                const SizedBox(width: 12),
-                _ModeChoice(
-                    key: const Key('term-open-pixels'),
-                    label: '画面',
-                    selected: mode == 'pixels',
-                    onTap: () => state.setTermOpen(id, 'pixels')),
+                if (graphical) ...[
+                  const SizedBox(width: 12),
+                  _ModeChoice(
+                      key: const Key('term-open-pixels'),
+                      label: '画面',
+                      selected: mode == 'pixels',
+                      onTap: () => state.setTermOpen(id, 'pixels')),
+                ],
               ],
             ),
           ],
