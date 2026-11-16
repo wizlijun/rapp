@@ -6,7 +6,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rapp/embed/app_profile.dart' show RuleAction, WindowRule;
+import 'package:rapp/embed/app_profile.dart' show AfterSend, RuleAction, WindowRule;
+import 'package:rapp/embed/flutter_editor.dart' show FlutterEditor;
 import 'package:rapp/embed/composer_model.dart' show escKeyCode;
 import 'package:rapp/embed/picture.dart';
 import 'package:rapp/embed/session_port.dart';
@@ -199,7 +200,7 @@ void main() {
     Widget embedded({RappTheme theme = RappTheme.matrix}) => SizedBox(
           width: 800,
           height: 600,
-          child: Backdrop(theme: theme, child: Stage(state: es)),
+          child: Backdrop(theme: theme, child: Stage(state: es, composerEditor: FlutterEditor.new)),
         );
 
     testWidgets('stage shows connecting, then the texture', (tester) async {
@@ -646,6 +647,110 @@ void main() {
       await tester.pump();
       expect(es.currentRecord!.frozen, false);
       expect(es.sendBlocked(1), false);
+    });
+
+    group('the writing panel while frozen', () {
+      final field = find.byKey(const Key('composer-field'));
+      final send = find.byKey(const Key('composer-send'));
+      String text(WidgetTester tester) => tester.widget<TextField>(field).controller!.text;
+
+      Future<void> dropWithDraft(WidgetTester tester) async {
+        await shown(tester);
+        es.currentRemote!.composer.open = true;
+        await tester.pump();
+        await tester.pump();
+        await tester.enterText(field, 'git push');
+        await tester.pump();
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        await tester.pump();
+      }
+
+      Future<void> reconnect(WidgetTester tester) async {
+        await tester.runAsync(() async {
+          t.onSend = (m) {
+            if (m['cmd'] == 'open') {
+              t.emit({
+                'event': 'opened', 'sid': 11, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+                'port': 5011, 'token': 'tk', 'req': m['req'],
+              });
+            }
+          };
+          es.reconnectCurrent();
+          for (var i = 0; i < 4; i++) {
+            await flush();
+          }
+        });
+        await tester.pump();
+        port.emit(const ReadyEvent(11, 'Safari'));
+        port.emit(WindowsEvent(11, [rw(5, 400, 328)]));
+        await tester.pump();
+        await tester.pump();
+      }
+
+      List<String> sends() => [for (final c in port.calls) c.$1].where((m) => m == 'composer_send' || m == 'key').toList();
+
+      testWidgets('a frozen panel keeps its text and greys 发送', (tester) async {
+        await dropWithDraft(tester);
+        expect(tester.widget<RappButton>(send).onPressed, isNull);
+        await tester.enterText(field, 'git push origin');
+        await tester.pump();
+        expect(text(tester), 'git push origin');
+        port.calls.clear();
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pump();
+        expect(sends(), isEmpty);
+        expect(text(tester), 'git push origin');
+      });
+
+      testWidgets('直接回车 while frozen sends no Return', (tester) async {
+        await dropWithDraft(tester);
+        await tester.enterText(field, '');
+        await tester.showKeyboard(field);
+        await tester.pump();
+        expect(es.currentRemote!.profile.afterSend, AfterSend.pressReturn);
+        port.calls.clear();
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pump();
+        expect(sends(), isEmpty);
+      });
+
+      testWidgets('the frozen keys grid and copy send nothing', (tester) async {
+        await dropWithDraft(tester);
+        await tester.tap(find.byKey(const Key('composer-plus')));
+        await tester.pumpAndSettle();
+        port.calls.clear();
+        await tester.tap(find.text('回车'));
+        await tester.tap(find.text('在远端复制'));
+        await tester.pump();
+        expect(sends(), isEmpty);
+      });
+
+      testWidgets('the frozen draft comes back live after the swap', (tester) async {
+        await dropWithDraft(tester);
+        await tester.enterText(field, 'git push origin');
+        await tester.pump();
+        await reconnect(tester);
+        expect(text(tester), 'git push origin');
+        expect(tester.widget<RappButton>(send).onPressed, isNotNull);
+        port.calls.clear();
+        await tester.tap(send);
+        await tester.pump();
+        final c = port.calls.where((c) => c.$1 == 'composer_send').toList();
+        expect(c.length, 1);
+        expect(c.single.$2['sid'], 11);
+      });
+
+      testWidgets('a focused editor and an open panel survive the swap with the draft', (tester) async {
+        await dropWithDraft(tester);
+        await tester.showKeyboard(field);
+        await tester.pump();
+        expect(tester.widget<TextField>(field).focusNode!.hasPrimaryFocus, isTrue);
+        await reconnect(tester);
+        expect(es.currentRemote!.composer.open, isTrue);
+        expect(field, findsOneWidget);
+        expect(tester.widget<TextField>(field).focusNode!.hasPrimaryFocus, isTrue);
+        expect(text(tester), 'git push');
+      });
     });
 
     testWidgets('a frozen record stays frozen while it reconnects, and thaws on the swap', (tester) async {

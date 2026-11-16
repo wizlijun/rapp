@@ -433,6 +433,26 @@ void main() {
     expect(copied.first, startsWith('a'));
   }, variant: TargetPlatformVariant.only(TargetPlatform.macOS)..values.add(TargetPlatform.linux));
 
+  testWidgets('a frozen key row and the panel keys grid send no keys', (tester) async {
+    s.prefs.termKeyRow = true;
+    await tester.pumpWidget(wrap(window()));
+    await openTerm(tester, two);
+    await tester.tap(find.byKey(const Key('composer-open')));
+    await tester.pump();
+    await tester.pump();
+    await drop(tester);
+    term.calls.clear();
+    await tester.tap(find.byKey(const Key('keyrow-Ctrl-C')));
+    await tester.tap(find.byKey(const Key('keyrow-Enter')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('composer-plus')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('回车'));
+    await tester.tap(find.descendant(of: find.byKey(const Key('composer-plus-menu')), matching: find.text('⌃C')));
+    await tester.pump();
+    expect(term.calls.where((c) => {'keys', 'type', 'paste'}.contains(c.$1)), isEmpty);
+  });
+
   testWidgets('a paste that read the clipboard before the drop sends nothing after it', (tester) async {
     final read = Completer<Map<String, Object?>>();
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
