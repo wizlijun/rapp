@@ -58,7 +58,7 @@ Packages are written to `dist/`. Ad-hoc signing is allowed for local builds; see
 ./gui/build/linux/x64/release/bundle/rapp
 ```
 
-To create Linux packages, run `./scripts/package-linux.sh` from a clean checkout; it also requires makepkg, fakeroot, and zstd. Outputs go to `dist/`.
+To create Linux packages, run `./scripts/package-linux.sh` from a clean checkout; it also requires makepkg, fakeroot, and zstd. Outputs go to `dist/`. For a package-only revision, use `PKGREL=2 ./scripts/package-linux.sh`; revised artifacts go to `dist/pkgrel-2/`, retaining the earlier artifacts. `DIST_DIR` can override the output directory.
 
 Implementation scope and verification status: [Linux 0.12.2 integration](docs/superpowers/plans/2026-11-16-linux-012-parity.md).
 

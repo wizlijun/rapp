@@ -76,6 +76,11 @@ session, a supported terminal app, and a working systemd user manager.
 They run in separate transient user services and survive a rapp-service restart.
 Run `rapp share`, `rapp unshare`, `rapp hosts`, or `rapp pipe` for CLI access.
 No arguments opens the GUI; `./rapp-gui` opens it explicitly.
+For direct LAN access, allow the service's UDP listener (default 22028) from the
+intended peers. TCP 22029 (IPC) and TCP 28000-28999 (port mappings) bind only to
+localhost and do not need inbound LAN rules. UDP 22026 is for a separate relay.
+Use Local / 本机 for the actual port and read-only UFW diagnostics; an empty log
+does not prove that the network or firewall allows the connection.
 Local configuration and saved hosts are not included.
 The package does not automatically start a background service at installation.
 In rapp, open Local / 本机 and click Start / 启动 to install and enable the user
