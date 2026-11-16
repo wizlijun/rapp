@@ -154,7 +154,7 @@ pub async fn shares(state: &Arc<State>, cmd: &Value) -> Value {
         .map(|(port, s, allow)| {
             let (local, proto) = (local_of(port), protocol(s, port));
             let mut v = row(&me, port, proto, s["note"].as_str().unwrap_or(""), allow, s["listening"] == true, local);
-            told(&mut v, s, proto, local);
+            told(&mut v, s, proto, local, state.maps.honoured(number(s)));
             v
         })
         .collect();
@@ -182,11 +182,11 @@ pub fn protocol(item: &Value, port: u16) -> Proto {
 
 /// Adds to the row `v` of another device's share `item` what the sharer said of its protocol
 /// (`proto_auto` true when it did not say: it was guessed), whether it is opened in a browser,
-/// and, when this device yielded to another port than the share number, the number (`wanted`)
-/// so that the row can say why the address differs here.
-pub fn told(v: &mut Value, item: &Value, proto: Proto, local: Option<u16>) {
+/// and, when this device yielded to another port than the share number it takes (`wanted`, see
+/// `Maps::honoured`), that number, so that the row can say why the address differs here.
+pub fn told(v: &mut Value, item: &Value, proto: Proto, local: Option<u16>, wanted: Option<u16>) {
     (v["proto"], v["proto_auto"], v["web"]) = (json!(proto.as_str()), json!(item["proto_auto"].as_bool().unwrap_or(true)), json!(proto.web()));
-    if let (Some(local), Some(wanted)) = (local, number(item)) {
+    if let (Some(local), Some(wanted)) = (local, wanted) {
         if local != wanted {
             v["wanted"] = json!(wanted);
         }

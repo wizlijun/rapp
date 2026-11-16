@@ -373,3 +373,21 @@ async fn long_lived_streams_are_not_held_back() {
         assert!(gap <= Duration::from_millis(200), "{what}: a gap of {gap:?}");
     }
 }
+
+/// A share number outside the visitor's own range is not taken (it could be a port the user's
+/// own servers need) and not shown as wanted: the visitor maps the share as for a sharer from
+/// before numbers, in its own range.
+#[tokio::test]
+async fn a_number_outside_the_visitors_range_is_ignored() {
+    let (port, _echo) = echo().await;
+    let (a, key) = sharer_on(port, 29700).await;
+    let b = visiting(29710, &key, &a).await;
+    let s = their_row(&b, &a, port).await;
+    assert_eq!((&s["local"], &s["addr"]), (&json!(29710), &json!("http://localhost:29710")), "{s}");
+    assert!(s.get("wanted").is_none(), "{s}");
+    let s = hosts_item(&b, &a, port).await;
+    assert_eq!((&s["local"], &s["addr"]), (&json!(29710), &json!("http://localhost:29710")), "{s}");
+    assert!(s.get("wanted").is_none(), "{s}");
+    assert_eq!(through(29710, b"x").await, b"x");
+    refuses(29700).await;
+}

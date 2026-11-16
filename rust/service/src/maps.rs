@@ -85,6 +85,13 @@ impl Maps {
         (self.first, self.count)
     }
 
+    /// The share number `wanted` if this device takes it: only one it could hand out itself.
+    /// One outside the range (or 0) would sit on a port the user's own servers may need, so
+    /// its sharer is treated as one from before numbers, and no number is said to be wanted.
+    pub fn honoured(&self, wanted: Option<u16>) -> Option<u16> {
+        wanted.filter(|&w| w != 0 && (self.first..self.first.saturating_add(self.count)).contains(&w))
+    }
+
     /// Every map, in the order they were given out.
     pub fn list(&self) -> Vec<Map> {
         self.items.lock().unwrap().iter().map(|e| e.map.clone()).collect()
@@ -136,6 +143,7 @@ impl Maps {
     /// put in `closing`.
     #[allow(clippy::too_many_arguments)]
     fn place(&self, items: &mut Vec<Entry>, id: &str, port: u16, wanted: Option<u16>, avoid: &[u16], serve: Serve, closing: &mut Vec<JoinHandle<()>>) -> Option<u16> {
+        let wanted = self.honoured(wanted);
         let at = items.iter().position(|e| e.map.id == id && e.map.port == port);
         if let Some(i) = at {
             items[i].map.wanted = wanted;
@@ -673,5 +681,18 @@ mod tests {
         let (maps, _) = Maps::load(home.path(), 29490, 10);
         assert_eq!(maps.ensure("111111111", 8000, None, &[29490, 29491], &quiet()), Some(29492));
         assert_eq!(saved(home.path()), vec![map("111111111", 8000, 29492)]);
+    }
+
+    /// A number outside this device's range is not one this device hands out, and 0 is no
+    /// port at all: binding it would sit on a port the user's own server may want later. Such
+    /// a map is placed as for a sharer from before numbers, and says it wanted nothing.
+    #[tokio::test]
+    async fn a_wanted_number_outside_the_range_is_ignored() {
+        let home = tempfile::tempdir().unwrap();
+        let (maps, _) = Maps::load(home.path(), 29580, 10);
+        let serve = quiet();
+        assert_eq!(maps.ensure("111111111", 8000, Some(5432), &[], &serve), Some(29580));
+        assert_eq!(maps.ensure("111111111", 8001, Some(0), &[], &serve), Some(29581));
+        assert_eq!(saved(home.path()), vec![map("111111111", 8000, 29580), map("111111111", 8001, 29581)]);
     }
 }

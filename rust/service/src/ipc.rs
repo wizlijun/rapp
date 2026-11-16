@@ -228,7 +228,7 @@ async fn reached(state: &Arc<State>, id: &str, name: &str, mut shares: Value) ->
             let local = wants.iter().zip(&locals).find(|((p, _), _)| *p == port).and_then(|(_, l)| *l);
             let proto = protocol(&s, port);
             let item = s.clone();
-            told(&mut s, &item, proto, local);
+            told(&mut s, &item, proto, local, state.maps.honoured(number(&item)));
             match local {
                 Some(local) => (s["local"], s["addr"]) = (json!(local), json!(addr(proto, local))),
                 // The share number the sharer sent is not a port of this device.
