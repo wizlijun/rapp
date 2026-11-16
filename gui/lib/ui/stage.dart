@@ -15,6 +15,7 @@ import 'disconnected_stage.dart';
 import 'lifecycle.dart';
 import 'lamp.dart';
 import 'main_state.dart';
+import 'offline_bar.dart';
 import 'session_model.dart';
 import 'tokens.dart';
 import 'unlock.dart';
@@ -27,6 +28,15 @@ Future<void> requestUnlock(BuildContext context, MainState state, String device)
     await state.unlock(device, request.password, remember: request.remember, auto: request.auto);
   }
 }
+
+/// The offline bar for a frozen [rec]: 停止 while a try is pending, else 重连.
+Widget offlineBarFor(MainState state, SessionRecord rec) => OfflineBar(
+      text: offlineWords(rec, waiting: state.waitWordOf(rec)),
+      onStop: rec.retry != null ? state.stopReconnectCurrent : null,
+      reconnect: rec.phase == Phase.disconnected,
+      onReconnect: state.hubUsable ? state.reconnectCurrent : null,
+      connecting: rec.phase != Phase.disconnected,
+    );
 
 class Stage extends StatelessWidget {
   const Stage({super.key, required this.state, this.composerEditor});
@@ -66,6 +76,11 @@ class Stage extends StatelessWidget {
               RappButton.secondary(label: '打开面板', onPressed: state.togglePanel),
             ],
           );
+        } else if (rec != null && rec.frozen && rs != null && !rs.detached && win != null &&
+            state.termPort?.owns(rs.sid) != true) {
+          // A network drop: the same Picture, frozen, under the offline bar (never input, never a resize).
+          picture = true;
+          body = Picture(state: state, session: rs, window: win, frozen: true);
         } else if (rec != null && (rec.phase == Phase.disconnected || rec.lastSid != null)) {
           // Dead, or reconnecting until the new picture swaps in (R10): the old frame under stripes.
           // Never input, never a resize (R25).
@@ -190,6 +205,7 @@ class Stage extends StatelessWidget {
           }
           final port = state.port;
           final banner = state.lockBanner;
+          final offline = rec != null && rec.frozen && picture ? offlineBarFor(state, rec) : null;
           final screens = rec != null && isDesktopApp(rec.app) && port?.supportsDetach == false
               ? state.desktopScreens(rec.id) : const [];
           return Stack(
@@ -197,12 +213,13 @@ class Stage extends StatelessWidget {
               stage,
               if (!full && (picture || (rs != null && rs.detached)) && rs != null && port != null)
                 ...composerLayer(state: state, session: rs, port: port, editor: composerEditor),
-              if (banner != null || screens.length > 1)
+              if (offline != null || banner != null || screens.length > 1)
                 Positioned(
                   top: 0, left: 0, right: 0,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      ?offline,
                       if (screens.length > 1)
                         Material(
                           color: Theme.of(context).colorScheme.surface,

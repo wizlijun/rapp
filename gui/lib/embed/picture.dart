@@ -23,12 +23,16 @@ class Picture extends StatefulWidget {
     required this.state,
     required this.session,
     required this.window,
+    this.frozen = false,
   });
 
   /// Where focus and input go: `state.port`, `state.focusPicture`.
   final MainState state;
   final RemoteSession session;
   final RemoteWindow window;
+
+  /// Offline: the last frame stays, and nothing reaches the port.
+  final bool frozen;
 
   @override
   State<Picture> createState() => _PictureState();
@@ -281,7 +285,7 @@ class _PictureState extends State<Picture> {
   /// or a press on it while it is open), not another text field, a dialog or menu above the stage,
   /// nor an open corner list. So it never needs a click to take them.
   void _settle() {
-    if (!mounted) return;
+    if (!mounted || widget.frozen) return;
     final s = widget.state, rs = widget.session;
     if (s.pictureFocused != null || s.overview || s.corner != null || s.markingInput != null) return;
     if (s.currentRemote?.sid != _sid || rs.detached) return;
@@ -384,7 +388,7 @@ class _PictureState extends State<Picture> {
     final t = RappTokens.of(context);
     final win = widget.window;
     final focused = widget.state.pictureFocused == _sid;
-    if (!focused) _settleSoon();
+    if (!focused && !widget.frozen) _settleSoon();
     if (focused && !_focus.hasFocus) {
       // The keys went to A without a press (Ctrl+Enter from the editor): Flutter's focus follows,
       // unless the writing panel's editor still holds the caret (this assumes the editor's unfocus
@@ -425,8 +429,10 @@ class _PictureState extends State<Picture> {
         _popups = popups;
         return KeepFocus(child: Focus(
           focusNode: _focus,
-          onKeyEvent: (_, event) =>
-              widget.state.port?.handleKeyEvent(_sid, event) == true
+          canRequestFocus: !widget.frozen,
+          onKeyEvent: (_, event) => widget.frozen
+              ? KeyEventResult.ignored
+              : widget.state.port?.handleKeyEvent(_sid, event) == true
               ? KeyEventResult.handled
               : KeyEventResult.ignored,
           onFocusChange: (hasFocus) {
@@ -437,7 +443,9 @@ class _PictureState extends State<Picture> {
           child: Stack(
             children: [
               Positioned.fill(
-                child: Listener(
+                child: IgnorePointer(
+                  ignoring: widget.frozen,
+                  child: Listener(
             behavior: HitTestBehavior.opaque,
             onPointerDown: _down,
             onPointerMove: _move,
@@ -485,10 +493,12 @@ class _PictureState extends State<Picture> {
               ),
             ),
           ),
+                ),
               ),
               // Above the Listener, not in it: a press on a × never reaches A as a click.
-              for (final p in _popups)
-                if (p.win.kind == WindowKind.sheet || p.win.kind == WindowKind.popover)
+              if (!widget.frozen)
+                for (final p in _popups)
+                  if (p.win.kind == WindowKind.sheet || p.win.kind == WindowKind.popover)
                   _popupClose(t, p, c.biggest),
             ],
           ),

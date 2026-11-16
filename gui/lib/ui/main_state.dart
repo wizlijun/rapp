@@ -548,7 +548,8 @@ class MainState extends ChangeNotifier {
   /// The stage is [s] big now. Remembered, and given to the current session's resize policy.
   void stageSize(Size s) {
     _lastStage = s;
-    currentRemote?.policy.stage(s);
+    // Frozen (offline): A never hears of it; the next session gets the latest size.
+    if (currentRecord?.frozen != true) currentRemote?.policy.stage(s);
   }
 
   /// A tab was picked on the current session.

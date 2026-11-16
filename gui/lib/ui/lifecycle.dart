@@ -121,7 +121,6 @@ String disconnectWord(String? raw) {
   return hubWord(rest);
 }
 
-/// The link dropped for a reason the network explains: worth trying again by itself.
 /// The bar's words for a record that is down or coming back; [waiting] replaces the plain
 /// "network down" line (e.g. the peer is offline).
 String offlineWords(SessionRecord r, {String? waiting}) {
@@ -131,6 +130,7 @@ String offlineWords(SessionRecord r, {String? waiting}) {
   return r.retry != null ? '$w，正在重连…' : w;
 }
 
+/// The link dropped for a reason the network explains: worth trying again by itself.
 bool autoReconnects(String? raw) {
   final w = disconnectWord(raw);
   return w == '网络断了' || w == '连接超时' || w == '中继连不上' || w == '对方离线';

@@ -394,6 +394,57 @@ void main() {
       expect(es.pictureFocused, isNull);
     });
 
+    testWidgets('a network drop keeps the picture with a bar, not the disconnected stage', (tester) async {
+      await shown(tester);
+      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      await tester.pump();
+      expect(find.byType(DisconnectedStage), findsNothing);
+      expect(find.byType(Picture), findsOneWidget);
+      expect(tex42, findsOneWidget);
+      expect(tester.widget<Text>(find.byKey(const Key('offline-text'))).data, '网络断了，正在重连…');
+      expect(find.byKey(const Key('stop-reconnect-button')), findsOneWidget);
+      expect(find.byKey(const Key('disconnected-end-button')), findsNothing);
+      await tester.tap(find.byKey(const Key('stop-reconnect-button')));
+      await tester.pump();
+      expect(es.currentRecord!.retry, isNull);
+      expect(find.byKey(const Key('reconnect-button')), findsOneWidget);
+    });
+
+    testWidgets('a frozen picture takes no input and never resizes', (tester) async {
+      await shown(tester);
+      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      await tester.pump();
+      port.calls.clear();
+      final o = tester.getTopLeft(find.byKey(const Key('stage')));
+      await tester.tapAt(o + const Offset(200, 200));
+      await tester.sendEventToBinding(PointerScrollEvent(position: o + const Offset(200, 200), scrollDelta: const Offset(0, 40)));
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+      await tester.binding.setSurfaceSize(const Size(700, 500));
+      await tester.pump();
+      await tester.binding.setSurfaceSize(null);
+      await tester.pump();
+      for (final m in ['mouse', 'scroll', 'key', 'picture_focus', 'resize']) {
+        expect(port.calls.where((c) => c.$1 == m), isEmpty, reason: m);
+      }
+      expect(es.pictureFocused, isNull);
+    });
+
+    testWidgets('the picture element survives the drop', (tester) async {
+      await shown(tester);
+      final before = tester.element(find.byType(Picture));
+      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      await tester.pump();
+      expect(identical(tester.element(find.byType(Picture)), before), isTrue);
+    });
+
+    testWidgets('a non-network drop still shows the disconnected stage', (tester) async {
+      await shown(tester);
+      port.emit(const DisconnectedEvent(1, 'bad password'));
+      await tester.pump();
+      expect(find.byType(DisconnectedStage), findsOneWidget);
+      expect(find.byKey(const Key('offline-bar')), findsNothing);
+    });
+
     testWidgets('first-open failure shows reconnect without a frame', (tester) async {
       await tester.pumpWidget(wrap(embedded()));
       await tester.runAsync(() async {
