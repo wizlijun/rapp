@@ -265,13 +265,11 @@ class _ComposerPanelState extends State<ComposerPanel> {
 
   // The model ignores results that come after the session's end.
   Future<void> _paste() async {
-    if (_blocked) return;
     final port = widget.port;
     _m.apply(await port.composerPaste(_s.sid));
   }
 
   Future<void> _attach() async {
-    if (_blocked) return;
     final port = widget.port;
     _m.apply(await port.composerAttach(_s.sid));
   }

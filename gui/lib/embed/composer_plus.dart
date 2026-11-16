@@ -102,7 +102,7 @@ class ComposerPlus extends StatefulWidget {
   /// A terminal session's menu; [port] is then a [TermSessionPort].
   final bool terminal;
 
-  /// A network drop froze the session: the menu's keys, copy and attach go grey and send nothing.
+  /// A network drop froze the session: the menu's keys and copy go grey and send nothing.
   final bool blocked;
 
   @override
@@ -340,7 +340,7 @@ class _ComposerPlusState extends State<ComposerPlus> {
                     if (term)
                       _row(t, '附件…', termNoAttach, null)
                     else
-                      _row(t, '附件…', '也可以直接粘贴', widget.blocked ? null : () {
+                      _row(t, '附件…', '也可以直接粘贴', () {
                         _close();
                         widget.onAttach();
                       }),

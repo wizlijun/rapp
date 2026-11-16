@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:rapp/paths.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/services.dart';
 
 import 'package:flutter/gestures.dart';
@@ -712,6 +713,48 @@ void main() {
         await tester.sendKeyEvent(LogicalKeyboardKey.enter);
         await tester.pump();
         expect(sends(), isEmpty);
+      });
+
+      testWidgets('a frozen panel still pastes and attaches locally', (tester) async {
+        await dropWithDraft(tester);
+        await tester.showKeyboard(field);
+        port.calls.clear();
+        final mac = defaultTargetPlatform == TargetPlatform.macOS;
+        final mod = mac ? LogicalKeyboardKey.metaLeft : LogicalKeyboardKey.controlLeft;
+        await tester.sendKeyDownEvent(mod);
+        await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+        await tester.sendKeyUpEvent(mod);
+        await tester.pump();
+        expect(port.calls.where((c) => c.$1 == 'composer_paste'), isNotEmpty);
+        await tester.tap(find.byKey(const Key('composer-plus')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('附件…'));
+        await tester.pump();
+        expect(port.calls.where((c) => c.$1 == 'composer_attach'), isNotEmpty);
+        expect(sends(), isEmpty);
+      }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
+      testWidgets('a failed row while frozen: 重试 is grey, 放回输入框 works', (tester) async {
+        await shown(tester);
+        final rs = es.currentRemote!;
+        rs.composer.open = true;
+        await tester.pump();
+        await tester.pump();
+        await tester.enterText(field, 'hello');
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pump();
+        rs.apply(const ComposerStateEvent(1, done: ComposerDone(0, 'A 上贴不进去')));
+        await tester.pump();
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        await tester.pump();
+        expect(find.text('A 上贴不进去'), findsOneWidget);
+        final retry = find.widgetWithText(RappButton, '重试');
+        expect(tester.widget<RappButton>(retry).onPressed, isNull);
+        await tester.tap(find.text('放回输入框'));
+        await tester.pump();
+        expect(text(tester), 'hello');
+        expect(find.text('A 上贴不进去'), findsNothing);
+        await tester.pump(const Duration(seconds: 5));
       });
 
       testWidgets('the frozen keys grid and copy send nothing', (tester) async {
