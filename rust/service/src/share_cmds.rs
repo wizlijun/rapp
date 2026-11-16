@@ -1,5 +1,6 @@
 //! The local IPC `shares`, `share` and `unshare`. With `to` they ask another device through
-//! `pipe` and answer in the same shape.
+//! `pipe` and answer in the same shape. `shares` also says where each share is reached from
+//! this computer: another device's through a local port (`maps`), this device's own directly.
 
 use crate::ipc::HOSTS_WAIT;
 use crate::pipe::{self, known_hosts, target_id};
@@ -55,27 +56,41 @@ fn device(fp: &Fp, name: String) -> Value {
     json!({"fp": fp.to_string(), "name": name})
 }
 
-/// One row of the `shares` reply; `allow` is what `shown` made of each device.
-fn row(id: &str, me: &Fp, port: u16, note: &str, allow: Vec<(Fp, String)>, listening: bool) -> Value {
-    let url = format!("http://{id}.rapp:{port}");
-    let addr = if port == 22 { format!("ssh {id}.rapp") } else { url.clone() };
-    let mine = allow.is_empty() || allow.iter().any(|(fp, _)| fp == me);
+/// What to type or open on this computer to reach a share of `port` that is on its `local`
+/// port here: `http://localhost:<local>`, or for SSH `ssh -p <local> localhost`.
+pub fn addr(port: u16, local: u16) -> String {
+    match (port, local) {
+        (22, 22) => "ssh localhost".into(),
+        (22, _) => format!("ssh -p {local} localhost"),
+        _ => format!("http://localhost:{local}"),
+    }
+}
+
+/// This device may use a share with this `allow`: it is for every device, or names this one.
+fn mine(me: &Fp, allow: &[(Fp, String)]) -> bool {
+    allow.is_empty() || allow.iter().any(|(fp, _)| fp == me)
+}
+
+/// One row of the `shares` reply; `allow` is what `shown` made of each device. `local` is the
+/// port of this computer the share is reached on; None when there is none, and then `addr` is
+/// empty.
+fn row(me: &Fp, port: u16, note: &str, allow: Vec<(Fp, String)>, listening: bool, local: Option<u16>) -> Value {
+    let mine = mine(me, &allow);
     let allow: Vec<Value> = allow.into_iter().map(|(fp, name)| device(&fp, name)).collect();
-    json!({
-        "port": port, "note": note, "allow": allow, "url": url, "addr": addr, "web": port != 22,
-        "listening": listening, "mine": mine,
-    })
+    let mut v = json!({
+        "port": port, "note": note, "allow": allow, "addr": local.map(|l| addr(port, l)).unwrap_or_default(),
+        "web": port != 22, "listening": listening, "mine": mine,
+    });
+    if let Some(local) = local {
+        v["local"] = json!(local);
+    }
+    v
 }
 
 /// A device list of the other device's reply (`[{"fp","name"}]`).
 fn devices(list: &Value) -> Vec<(Fp, String)> {
     let one = |d: &Value| Some((d["fp"].as_str()?.parse::<Fp>().ok()?, d["name"].as_str().unwrap_or("").to_string()));
     list.as_array().map(|a| a.iter().filter_map(one).collect()).unwrap_or_default()
-}
-
-/// `http://<id>.rapp:<port>`: the address other devices use for this device's `port`.
-fn share_url(state: &State, port: u16) -> String {
-    format!("http://{}.rapp:{port}", state.cfg.lock().unwrap().id.clone().unwrap_or_default())
 }
 
 /// The share table of this device, or of the device `to` means.
@@ -87,12 +102,12 @@ pub async fn shares(state: &Arc<State>, cmd: &Value) -> Value {
     };
     let Some((id, name)) = target else {
         let id = state.cfg.lock().unwrap().id.clone();
-        let own = id.clone().unwrap_or_default();
         let named = |fp: &Fp| shown(fp, &me, None, &state.paired.name_of(fp).unwrap_or_default());
+        // This device's own ports are reached on themselves.
         let shares: Vec<Value> = sharing::table(state)
             .await
             .into_iter()
-            .map(|(s, listening)| row(&own, &me, s.port, &s.note, s.allow.iter().map(|fp| (*fp, named(fp))).collect(), listening))
+            .map(|(s, listening)| row(&me, s.port, &s.note, s.allow.iter().map(|fp| (*fp, named(fp))).collect(), listening, Some(s.port)))
             .collect();
         let mut known = vec![device(&me, "本机".into())];
         known.extend(state.paired.list().iter().filter(|(fp, _)| *fp != me).map(|(fp, _)| device(fp, named(fp))));
@@ -104,15 +119,28 @@ pub async fn shares(state: &Arc<State>, cmd: &Value) -> Value {
         Err(e) => return e,
     };
     let named = |fp: &Fp, given: &str| shown(fp, &me, Some((&tfp, &name)), given);
-    let shares: Vec<Value> = reply["shares"]
+    // Each share of theirs: its port, what they said of it, and the devices it is for as shown here.
+    let theirs: Vec<_> = reply["shares"]
         .as_array()
         .map(|a| a.as_slice())
         .unwrap_or_default()
         .iter()
         .filter_map(|s| {
             let port = sharing::port_of(&s["port"])?;
-            let allow = devices(&s["allow"]).into_iter().map(|(fp, n)| (fp, named(&fp, &n))).collect();
-            Some(row(&id, &me, port, s["note"].as_str().unwrap_or(""), allow, s["listening"] == true))
+            let allow: Vec<(Fp, String)> = devices(&s["allow"]).into_iter().map(|(fp, n)| (fp, named(&fp, &n))).collect();
+            Some((port, s, allow))
+        })
+        .collect();
+    // A local port for every share this device may use; the ones of shares that are gone, or
+    // no longer for this device, are given back first.
+    let usable: Vec<u16> = theirs.iter().filter(|(_, _, allow)| mine(&me, allow)).map(|(port, ..)| *port).collect();
+    state.maps.keep(&id, &usable);
+    let serve = crate::maps::serve(state);
+    let shares: Vec<Value> = theirs
+        .into_iter()
+        .map(|(port, s, allow)| {
+            let local = if usable.contains(&port) { state.maps.ensure(&id, port, &serve) } else { None };
+            row(&me, port, s["note"].as_str().unwrap_or(""), allow, s["listening"] == true, local)
         })
         .collect();
     let mut known = vec![device(&me, "本机".into())];
@@ -127,7 +155,7 @@ fn allow_names(state: &State, allow: &[Fp]) -> Vec<String> {
     allow.iter().map(|fp| name(fp).unwrap_or_else(|| fp.short())).collect()
 }
 
-/// Shares the ports of `cmd` (see `sharing::share`) and answers each one's address.
+/// Shares the ports of `cmd` (see `sharing::share`).
 pub async fn share(state: &State, cmd: &Value) -> Value {
     match target(state, cmd) {
         Err(e) => return e,
@@ -149,7 +177,7 @@ pub async fn share(state: &State, cmd: &Value) -> Value {
         .iter()
         .map(|d| {
             let (port, allow) = (d.share.port, &d.share.allow);
-            let mut v = json!({"port": port, "url": share_url(state, port)});
+            let mut v = json!({"port": port});
             if !allow.is_empty() {
                 v["allow"] = json!(allow_names(state, allow));
             }

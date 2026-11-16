@@ -72,6 +72,13 @@ pub fn known_hosts(home: &Path) -> Vec<KnownHost> {
     rapp_net::config::read_json(&home.join("hosts.json")).ok().flatten().unwrap_or_default()
 }
 
+/// The IDs of the devices in `<home>/hosts.json`; None when the file is missing or unreadable
+/// (which is not the same as a list with no device in it).
+pub fn known_ids(home: &Path) -> Option<Vec<String>> {
+    let hosts: Option<Vec<KnownHost>> = rapp_net::config::read_json(&home.join("hosts.json")).ok().flatten();
+    hosts.map(|hosts| hosts.into_iter().map(|h| h.id).collect())
+}
+
 /// Opens a forward to `port` of the device `name` means. The pipe carries the port's bytes;
 /// the second value is the path it goes by (`lan`, `direct` or `relay`).
 pub async fn open(state: &State, name: &str, port: u16) -> Result<(Pipe, &'static str), PipeErr> {
@@ -177,6 +184,18 @@ mod tests {
         assert_eq!((hosts[0].id.as_str(), hosts[0].name.as_str()), ("111111111", "a"));
         assert_eq!((hosts[0].lan.clone(), hosts[0].fp), (vec!["10.0.0.2:22025".to_string()], Some(fp)));
         assert_eq!((hosts[1].id.as_str(), hosts[1].lan.is_empty(), hosts[1].fp), ("222222222", true, None));
+    }
+
+    #[test]
+    fn known_ids_tells_no_list_from_an_empty_one() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(known_ids(dir.path()), None);
+        std::fs::write(dir.path().join("hosts.json"), "{ not json").unwrap();
+        assert_eq!(known_ids(dir.path()), None);
+        std::fs::write(dir.path().join("hosts.json"), "[]").unwrap();
+        assert_eq!(known_ids(dir.path()), Some(vec![]));
+        std::fs::write(dir.path().join("hosts.json"), r#"[{"id":"111111111","name":"a"}]"#).unwrap();
+        assert_eq!(known_ids(dir.path()), Some(vec!["111111111".to_string()]));
     }
 
     #[test]

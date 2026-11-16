@@ -86,6 +86,23 @@ pub async fn forward(a: &TestService, key: &rapp_wire::Key, b: &Visitor, port: u
     ask(a, key, b, json!({"op":"forward","port":port})).await
 }
 
+/// A `hosts` reply without each share's `local` and `addr`, after checking them: a local port
+/// from the real service's range, and an address that names it.
+pub fn without_local(mut reply: Value) -> Value {
+    let (first, count) = rapp_service::MAP_PORTS;
+    for h in reply.get_mut("hosts").and_then(Value::as_array_mut).into_iter().flatten() {
+        for s in h.get_mut("shares").and_then(Value::as_array_mut).into_iter().flatten() {
+            let s = s.as_object_mut().unwrap();
+            let local = s.remove("local").and_then(|l| l.as_u64()).expect("a local port");
+            assert!((first as u64..first as u64 + count as u64).contains(&local), "{local}");
+            let addr = s.remove("addr").expect("an address");
+            let want = [format!("http://localhost:{local}"), format!("ssh -p {local} localhost")];
+            assert!(want.iter().any(|w| addr == w.as_str()), "{addr}");
+        }
+    }
+    reply
+}
+
 /// Reads the stream to its end within `within`.
 pub async fn read_all(pipe: &mut Pipe, within: Duration) -> Vec<u8> {
     let mut got = Vec::new();

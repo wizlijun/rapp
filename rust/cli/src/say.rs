@@ -13,10 +13,12 @@ fn width(s: &str) -> usize {
     s.chars().map(|c| if c.is_ascii() { 1 } else { 2 }).sum()
 }
 
-/// Pads every cell but the last of each row to its column's widest cell plus two spaces.
+/// Pads every cell but the last of each row to its column's widest cell plus two spaces. A
+/// row's last cell is not padded, so it does not widen its column either.
 fn columns(rows: &[Vec<String>]) -> String {
     let n = rows.iter().map(Vec::len).max().unwrap_or(0);
-    let widths: Vec<usize> = (0..n).map(|i| rows.iter().filter_map(|r| r.get(i)).map(|c| width(c)).max().unwrap_or(0)).collect();
+    let padded = |r: &Vec<String>, i: usize| (i + 1 < r.len()).then(|| width(&r[i]));
+    let widths: Vec<usize> = (0..n).map(|i| rows.iter().filter_map(|r| padded(r, i)).max().unwrap_or(0)).collect();
     let mut out = String::new();
     for row in rows {
         let last = row.len() - 1;
@@ -37,13 +39,18 @@ fn names(list: &Value) -> Vec<String> {
     list.as_array().map(|a| a.iter().filter_map(name).collect()).unwrap_or_default()
 }
 
-/// One `已分享：<url>` per port; right under it who the share is for when it is not for every
-/// device, then a warning.
+/// Where a share is used from: its address is a local port of each device that uses it, so
+/// the device sharing it cannot print one.
+const ELSEWHERE: &str = "在别的设备上用：打开 rapp 的设备面板，或运行 rapp hosts，看那台设备上的地址";
+
+/// One `已分享：<port>` per port; right under it who the share is for when it is not for every
+/// device, then a warning. At the end, where to find the address.
 pub fn shared(reply: &Value) -> String {
     let mut out = String::new();
     let empty = Vec::new();
-    for s in reply["shared"].as_array().unwrap_or(&empty) {
-        out.push_str(&format!("已分享：{}\n", s["url"].as_str().unwrap_or("")));
+    let list = reply["shared"].as_array().unwrap_or(&empty);
+    for s in list {
+        out.push_str(&format!("已分享：{}\n", s["port"]));
         let allow = names(&s["allow"]);
         if !allow.is_empty() {
             out.push_str(&format!("只给：{}\n", allow.join("、")));
@@ -52,6 +59,10 @@ pub fn shared(reply: &Value) -> String {
             out.push_str(w);
             out.push('\n');
         }
+    }
+    if !list.is_empty() {
+        out.push_str(ELSEWHERE);
+        out.push('\n');
     }
     out
 }
@@ -90,38 +101,47 @@ pub fn table(reply: &Value) -> String {
     let out = format!("这台设备：{id}   中继：{}\n", relay_text(reply["relay"].as_str().unwrap_or("")));
     let shares = reply["shares"].as_array().filter(|s| !s.is_empty());
     let Some(shares) = shares else { return out + "（没有分享）\n" };
-    let mut rows = vec![["端口", "状态", "只给", "地址"].map(String::from).to_vec()];
+    let mut rows = vec![["端口", "状态", "只给"].map(String::from).to_vec()];
     for s in shares {
         rows.push(vec![
             s["port"].to_string(),
             if s["listening"] == true { "有服务在听" } else { "没有服务在听" }.into(),
             names(&s["allow"]).join(","),
-            s["url"].as_str().unwrap_or("").into(),
         ]);
     }
     out + &columns(&rows)
 }
 
-/// `rapp hosts`: each known device with its ports, or what is wrong with it.
+/// `rapp hosts`: each known device with its ports and where each is reached on this computer
+/// (one line per port), or what is wrong with it.
 pub fn hosts(reply: &Value) -> String {
     let empty = Vec::new();
     let list = reply["hosts"].as_array().unwrap_or(&empty);
     if list.is_empty() {
         return "（没有主机）\n".into();
     }
-    let rows: Vec<Vec<String>> = list
-        .iter()
-        .map(|h| {
-            let what = match (h["error"].as_str(), h["shares"].as_array()) {
-                (Some("offline"), _) => "不在线".to_string(),
-                (Some("no key"), _) => "这台设备还没有填 key".to_string(),
-                (Some(e), _) => format!("接不上：{}", plain(e)),
-                (None, Some(s)) if !s.is_empty() => s.iter().map(|s| s["port"].to_string()).collect::<Vec<_>>().join("  "),
-                (None, _) => "（没有分享）".to_string(),
-            };
-            vec![plain(h["name"].as_str().unwrap_or("")), format!("{}.rapp", plain(h["id"].as_str().unwrap_or(""))), what]
-        })
-        .collect();
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    for h in list {
+        let mut who = vec![plain(h["name"].as_str().unwrap_or("")), format!("{}.rapp", plain(h["id"].as_str().unwrap_or("")))];
+        let what = match (h["error"].as_str(), h["shares"].as_array()) {
+            (Some("offline"), _) => "不在线".to_string(),
+            (Some("no key"), _) => "这台设备还没有填 key".to_string(),
+            (Some(e), _) => format!("接不上：{}", plain(e)),
+            (None, Some(shares)) if !shares.is_empty() => {
+                for s in shares {
+                    let addr = s["addr"].as_str().map(plain).unwrap_or_else(|| "（没有本机端口可用）".into());
+                    // The device is named on its first line only.
+                    let mut row = std::mem::replace(&mut who, vec![String::new(), String::new()]);
+                    row.extend([s["port"].to_string(), addr]);
+                    rows.push(row);
+                }
+                continue;
+            }
+            (None, _) => "（没有分享）".to_string(),
+        };
+        who.push(what);
+        rows.push(who);
+    }
     columns(&rows)
 }
 
@@ -145,28 +165,32 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn shared_prints_the_address_and_the_warning() {
+    fn shared_prints_the_port_the_warning_and_where_the_address_is() {
         let r = json!({"ok":true,"shared":[
-            {"port":8000,"url":"http://123456789.rapp:8000"},
-            {"port":22,"url":"http://123456789.rapp:22","warn":"分享这个端口，等于把这台机器能到的网络也交出去"}]});
+            {"port":8000},
+            {"port":22,"warn":"分享这个端口，等于把这台机器能到的网络也交出去"}]});
         assert_eq!(
             shared(&r),
-            "已分享：http://123456789.rapp:8000\n已分享：http://123456789.rapp:22\n分享这个端口，等于把这台机器能到的网络也交出去\n"
+            format!("已分享：8000\n已分享：22\n分享这个端口，等于把这台机器能到的网络也交出去\n{ELSEWHERE}\n")
         );
+        assert_eq!(shared(&json!({"ok":true,"shared":[]})), "");
+        assert!(!shared(&r).contains(".rapp:"), "an address no device can open is not printed");
     }
 
     #[test]
     fn shared_says_who_a_restricted_share_is_for() {
         let r = json!({"ok":true,"shared":[
-            {"port":8000,"url":"http://123456789.rapp:8000","allow":["mini","abababab"]},
-            {"port":22,"url":"http://123456789.rapp:22","allow":["mini"],"warn":"分享这个端口，等于把这台机器能到的网络也交出去"},
-            {"port":8001,"url":"http://123456789.rapp:8001"},
-            {"port":8002,"url":"http://123456789.rapp:8002","allow":[]}]});
+            {"port":8000,"allow":["mini","abababab"]},
+            {"port":22,"allow":["mini"],"warn":"分享这个端口，等于把这台机器能到的网络也交出去"},
+            {"port":8001},
+            {"port":8002,"allow":[]}]});
         assert_eq!(
             shared(&r),
-            "已分享：http://123456789.rapp:8000\n只给：mini、abababab\n\
-             已分享：http://123456789.rapp:22\n只给：mini\n分享这个端口，等于把这台机器能到的网络也交出去\n\
-             已分享：http://123456789.rapp:8001\n已分享：http://123456789.rapp:8002\n"
+            format!(
+                "已分享：8000\n只给：mini、abababab\n\
+                 已分享：22\n只给：mini\n分享这个端口，等于把这台机器能到的网络也交出去\n\
+                 已分享：8001\n已分享：8002\n{ELSEWHERE}\n"
+            )
         );
     }
 
@@ -178,17 +202,17 @@ mod tests {
         assert_eq!(plain(evil), clean);
         assert_eq!(plain("书房 mini-2"), "书房 mini-2");
 
-        let r = json!({"ok":true,"shared":[{"port":8000,"url":"http://123456789.rapp:8000","allow":[evil,"b"]}]});
-        assert_eq!(shared(&r), format!("已分享：http://123456789.rapp:8000\n只给：{clean}、b\n"));
+        let r = json!({"ok":true,"shared":[{"port":8000,"allow":[evil,"b"]}]});
+        assert_eq!(shared(&r), format!("已分享：8000\n只给：{clean}、b\n{ELSEWHERE}\n"));
 
         let r = json!({"ok":true,"id":"123456789","relay":"connected","shares":[
-            {"port":22,"allow":[{"fp":"ab","name":evil}],"url":"http://123456789.rapp:22","listening":true}]});
+            {"port":22,"allow":[{"fp":"ab","name":evil}],"addr":"ssh localhost","listening":true}]});
         let t = table(&r);
         assert!(t.lines().nth(2).unwrap().contains(clean), "{t:?}");
         assert_eq!((t.lines().count(), t.chars().filter(|c| c.is_control()).count()), (3, 3), "{t:?}");
 
         let r = json!({"ok":true,"hosts":[
-            {"id":"123456789","name":evil,"shares":[{"port":8000}]},
+            {"id":"123456789","name":evil,"shares":[{"port":8000,"local":28000,"addr":"http://localhost:28000"}]},
             {"id":"987654321","name":"b","error":evil}]});
         let t = hosts(&r);
         assert!(t.lines().next().unwrap().starts_with(clean), "{t:?}");
@@ -226,12 +250,12 @@ mod tests {
         let none = json!({"ok":true,"id":"123456789","relay":"connected","shares":[]});
         assert_eq!(table(&none), "这台设备：123456789.rapp   中继：已连接\n（没有分享）\n");
         let some = json!({"ok":true,"id":"123456789","relay":"connected","shares":[
-            {"port":22,"allow":[{"fp":"ab","name":"mini"}],"url":"http://123456789.rapp:22","listening":true},
-            {"port":8000,"url":"http://123456789.rapp:8000","listening":false}]});
-        let t = table(&some);
-        assert!(t.lines().nth(1).unwrap().starts_with("端口"));
-        assert!(t.contains("有服务在听") && t.contains("没有服务在听") && t.contains("mini"));
-        assert_eq!(t.lines().count(), 4);
+            {"port":22,"allow":[{"fp":"ab","name":"mini"}],"addr":"ssh localhost","listening":true},
+            {"port":8000,"addr":"http://localhost:8000","listening":false}]});
+        assert_eq!(
+            table(&some),
+            "这台设备：123456789.rapp   中继：已连接\n端口  状态          只给\n22    有服务在听    mini\n8000  没有服务在听\n"
+        );
     }
 
     #[test]
@@ -245,12 +269,19 @@ mod tests {
     #[test]
     fn hosts_lists_devices_and_what_is_wrong() {
         let r = json!({"ok":true,"hosts":[
-            {"id":"123456789","name":"gpu1","shares":[{"port":8000},{"port":22}]},
+            {"id":"123456789","name":"gpu1","shares":[
+                {"port":8000,"local":28000,"addr":"http://localhost:28000"},
+                {"port":22,"local":28001,"addr":"ssh -p 28001 localhost"},
+                {"port":9000}]},
             {"id":"987654321","name":"mini","error":"offline"},
             {"id":"111111111","name":"书房","shares":[]}]});
-        let t = hosts(&r);
-        assert!(t.contains("gpu1") && t.contains("123456789.rapp") && t.contains("8000  22"));
-        assert!(t.lines().any(|l| l.contains("mini") && l.contains("不在线")));
-        assert!(t.lines().any(|l| l.contains("书房") && l.contains("（没有分享）")));
+        assert_eq!(
+            hosts(&r),
+            "gpu1  123456789.rapp  8000  http://localhost:28000\n\
+             \x20                     22    ssh -p 28001 localhost\n\
+             \x20                     9000  （没有本机端口可用）\n\
+             mini  987654321.rapp  不在线\n\
+             书房  111111111.rapp  （没有分享）\n"
+        );
     }
 }

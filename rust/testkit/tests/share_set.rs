@@ -225,15 +225,16 @@ async fn b_lists_and_sets_a_through_its_own_ipc() {
     assert_eq!(r["ok"], true, "{r}");
     assert_eq!((r["id"].as_str(), r["me"].as_str()), (Some(a.id.as_str()), Some(me.as_str())), "{r}");
     let row = &r["shares"][0];
-    let url = format!("http://{}.rapp:{p}", a.id);
-    assert_eq!((&row["url"], &row["addr"], &row["web"], &row["mine"], &row["note"]), (&json!(url), &json!(url), &json!(true), &json!(true), &json!("n")), "{r}");
+    let here = format!("http://localhost:{}", row["local"]);
+    assert!(row["local"].is_u64() && row.get("url").is_none(), "{r}");
+    assert_eq!((&row["addr"], &row["web"], &row["mine"], &row["note"]), (&json!(here), &json!(true), &json!(true), &json!("n")), "{r}");
     assert_eq!(r["known"][0], json!({"fp": me, "name": "本机"}), "{r}");
 
     let r = b_ipc(&b, json!({"cmd":"share","to":a.id,"ports":[22]})).await;
     assert_eq!(r["shared"][0]["warn"], WARN, "{r}");
     let r = b_ipc(&b, json!({"cmd":"shares","to":a.id})).await;
     let ssh = r["shares"].as_array().unwrap().iter().find(|s| s["port"] == 22).unwrap();
-    assert_eq!((&ssh["addr"], &ssh["web"]), (&json!(format!("ssh {}.rapp", a.id)), &json!(false)), "{r}");
+    assert_eq!((&ssh["addr"], &ssh["web"]), (&json!(format!("ssh -p {} localhost", ssh["local"])), &json!(false)), "{r}");
 
     let x = fp_hex(9);
     let r = b_ipc(&b, json!({"cmd":"share","to":a.id,"ports":[p],"allow":[x]})).await;
@@ -252,7 +253,7 @@ async fn to_this_device_is_local() {
     let (a, _) = start_sharing(|_| {}).await;
     let p = 5102u16;
     let r = ipc_once(&a.svc, a.home.path(), json!({"cmd":"share","to":a.id,"ports":[p]})).await;
-    assert_eq!(r["shared"][0]["url"], format!("http://{}.rapp:{p}", a.id), "{r}");
+    assert_eq!(r["shared"], json!([{"port": p}]), "{r}");
     let log = log_events(a.home.path());
     for l in log.iter().filter(|l| l["ev"] == "share") {
         assert_eq!(l["by"], "local", "{l}");
@@ -309,7 +310,7 @@ async fn the_cli_still_prints_the_same() {
     };
     let out = run(&["share"]).await;
     let want = format!(
-        "这台设备：{id}.rapp   中继：没有配置\n端口  状态          只给  地址\n{p}  没有服务在听  mini  http://{id}.rapp:{p}\n",
+        "这台设备：{id}.rapp   中继：没有配置\n端口  状态          只给\n{p}  没有服务在听  mini\n",
         id = a.id
     );
     assert_eq!(String::from_utf8_lossy(&out.stdout), want, "{}", String::from_utf8_lossy(&out.stderr));

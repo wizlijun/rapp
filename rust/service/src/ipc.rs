@@ -182,6 +182,9 @@ fn set_relay(state: &State, cmd: &Value) -> Value {
 
 /// What each device in `hosts.json` offers this one, all asked at the same time.
 async fn hosts(state: &Arc<State>) -> Value {
+    if let Some(known) = crate::pipe::known_ids(&state.home) {
+        state.maps.keep_devices(&known);
+    }
     let asks: Vec<_> = crate::pipe::known_hosts(&state.home)
         .into_iter()
         .map(|h| {
@@ -190,7 +193,7 @@ async fn hosts(state: &Arc<State>) -> Value {
                 let got = tokio::time::timeout(HOSTS_WAIT, crate::pipe::shares_of(&state, &h.id)).await;
                 let mut v = json!({"id": h.id, "name": h.name});
                 match got {
-                    Ok(Ok(shares)) => v["shares"] = shares,
+                    Ok(Ok(shares)) => v["shares"] = reached(&state, &h.id, shares),
                     Ok(Err(e)) => v["error"] = json!(e.as_str()),
                     Err(_) => v["error"] = json!(crate::pipe::PipeErr::Offline.as_str()),
                 }
@@ -205,6 +208,27 @@ async fn hosts(state: &Arc<State>) -> Value {
         }
     }
     ok(json!({"hosts": hosts}))
+}
+
+/// The shares the device `id` offers this one, each with the local port it is reached on here
+/// (`local`) and what to type or open (`addr`); neither when no local port could be had. The
+/// local ports of shares it no longer offers are given back.
+fn reached(state: &Arc<State>, id: &str, mut shares: Value) -> Value {
+    let list = shares.as_array_mut().map(std::mem::take).unwrap_or_default();
+    let ports: Vec<u16> = list.iter().filter_map(|s| crate::sharing::port_of(&s["port"])).collect();
+    state.maps.keep(id, &ports);
+    let serve = crate::maps::serve(state);
+    let list = list
+        .into_iter()
+        .map(|mut s| {
+            let local = crate::sharing::port_of(&s["port"]).and_then(|port| Some((port, state.maps.ensure(id, port, &serve)?)));
+            if let Some((port, local)) = local {
+                (s["local"], s["addr"]) = (json!(local), json!(crate::share_cmds::addr(port, local)));
+            }
+            s
+        })
+        .collect();
+    Value::Array(list)
 }
 
 /// Opens a forward to `port` of the device `to` names.

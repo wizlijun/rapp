@@ -8,6 +8,7 @@ mod data;
 mod forward;
 pub mod forward_log;
 mod ipc;
+mod maps;
 mod pace;
 mod peer;
 mod pipe;
@@ -37,6 +38,8 @@ pub use data::{DataOpts, SyncStatus};
 pub use rapp_update::{Runner, SystemRunner};
 
 pub const WORKER_IDLE: Duration = Duration::from_secs(60);
+/// The local ports given to other devices' shares in the real service: the first one, and how many.
+pub const MAP_PORTS: (u16, u16) = (maps::FIRST, maps::COUNT);
 /// The service's log in `Opts::log_dir` (observability spec §3).
 pub const LOG_FILE: &str = "service.log";
 /// launchd's catch-all for panics and pre-log output; emptied at start once past this.
@@ -68,6 +71,9 @@ pub struct Opts {
     pub channels: bool,
     /// False: forwards are never paced (true in the real service; the measurements' control group sets false).
     pub pacing: bool,
+    /// The local ports given to other devices' shares: the first one, and how many (`MAP_PORTS`
+    /// in the real service; a test that counts on its ports sets its own).
+    pub map_ports: (u16, u16),
 }
 
 /// Where the running app is and the updater's timings (online-update plan Task 4).
@@ -133,6 +139,10 @@ impl Service {
         if let Some(why) = unreadable {
             log.event(Lvl::Warn, "shares_unreadable", json!({"err": why}));
         }
+        let (maps, unreadable) = maps::Maps::load(&opts.home, opts.map_ports.0, opts.map_ports.1);
+        if let Some(why) = unreadable {
+            log.event(Lvl::Warn, "maps_unreadable", json!({"err": why}));
+        }
         let server = device_server_config(&identity, &[ALPN_DEVICE, ALPN_PEER])?;
         let endpoint = quinn::Endpoint::server(server, ([0, 0, 0, 0], port).into()).with_context(|| format!("bind udp port {port}"))?;
         let port = endpoint.local_addr()?.port();
@@ -168,6 +178,7 @@ impl Service {
             relay_settings: tokio::sync::watch::channel(0).0,
             forward_log: forward_log::ForwardLog::new(log.clone()),
             shares,
+            maps,
             forwards: forward::Forwards::new(),
             forward_priority: opts.forward_priority,
             channels: opts.channels,
@@ -180,6 +191,9 @@ impl Service {
         let checked = workers::check(&state, false).await.unwrap_or(serde_json::json!({"screen_recording": false, "accessibility": false}));
         state.set_permissions(checked);
         let state = Arc::new(state);
+        for m in state.maps.start(pipe::known_ids(&state.home).as_deref(), &maps::serve(&state)) {
+            state.log.event(Lvl::Warn, "map_port_taken", json!({"id": m.id, "port": m.port, "local": m.local}));
+        }
         update::on_start(&state).await;
         let mut tasks = vec![
             tokio::spawn(peer::accept_loop(state.clone(), endpoint)),
@@ -228,6 +242,7 @@ impl Service {
         for t in &self.tasks {
             t.abort();
         }
+        self.state.maps.stop();
         self.state.outbound.close();
         self.state.endpoint.close(0u32.into(), b"service stopped");
         self.state.workers.close_all();
