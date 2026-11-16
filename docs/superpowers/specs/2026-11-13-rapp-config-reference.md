@@ -50,7 +50,7 @@
 | `$ROOT/shared/workspace.json` | B | GUI，可手改 | 无 | §2.3 |
 | `$ROOT/devices/<id>/gui.json` | B | GUI，可手改 | 无 | §2.4 |
 | `$ROOT/shared/apps.json` | B | GUI，可手改 | 无 | §2.5 |
-| `$ROOT/local/term.json` | A | GUI 经 IPC 改开关和 tmux 路径，目标经设备请求改，可手改 | 无 | §2.10 |
+| `$ROOT/local/term.json` | A | GUI 经 IPC 改开关，可手改 | 无 | §2.10 |
 | `$ROOT/local/shares.json` | A（分享方） | `rapp share` / `rapp unshare`（经 IPC），可手改 | 无 | §2.11 |
 | `$ROOT/devices/<id>/device.json` | A / B | 程序自管（rapp-service 写，没有机密） | 无 | §2.6 |
 | `<旧配置目录>/data-root` | A / B | GUI「更改位置…」写，可手改 | 无 | §2.7 |
@@ -134,6 +134,7 @@ agent 规则：**不直接改这个文件**。加、删设备走 GUI 的设备�
 | `auto_save_traffic` | 布尔：网络差时自动省流量（设置面板的开关）。`false` 时 A 始终用用户选的档位，不自动降 | `true` |
 | `first` | `device`、`project`（其他值按 `device`）：设备在前还是项目在前，决定左侧面板标签、全景两排和启动时会话列表分组的顺序；改它不改当前的分组。侧面板下拉「设备在前 / 项目在前」 | `device` |
 | `term_open`（程序里叫 `termOpen`） | 对象：`{"<被控端设备 id>": "text" \| "pixels"}`。点设备面板里“终端”那一项时怎么打开：`text`（界面上叫「文本」）开最近有动静的文本终端，`pixels`（「画面」）开被控端终端 app 的画面会话。每台被控端各记一个；别的值载入时丢掉（`gui/lib/ui/prefs.dart`） | `{}`（每台都是 `text`） |
+| `term_app`（程序里叫 `termApp`） | 对象：`{"<被控端设备 id>": "<终端 app 名>"}`。在这台被控端上新开文本终端时用哪个终端 app；值不是字符串的载入时丢掉。记的 app 不在该设备的启动器列表里时，用列表里的第一个（《终端入口整理》§2.3） | `{}`（每台用列表里第一个） |
 | `input_history`（程序里叫 `inputHistory`） | 布尔：输入记录总开关。`false` 时写作面板发出去的话不再写进 `devices/<id>/inputs/`；草稿照样在本机保存（《输入记录》§8） | `true` |
 
 生效：退出 GUI 再改，重新打开生效；`auto_save_traffic` 在设置面板里改，马上告诉已开的会话。没有机密。
@@ -168,20 +169,15 @@ agent 规则：**不直接改这个文件**。加、删设备走 GUI 的设备�
 
 ### 2.10 `$ROOT/local/term.json`（终端会话）
 
-谁读写：`rapp-service` 和它拉起的 `rapp-term serve`（`rust/term/src/config.rs`）。权限 `0600`（`rapp_net::config::write_json`），不进 git，没有机密：rapp 不存 SSH 凭据，只存目标字符串（认证走用户自己的 ssh 配置和 agent）。
+谁读写：`rapp-service` 和它拉起的 `rapp-term serve`（`rust/term/src/config.rs`）。权限 `0600`（`rapp_net::config::write_json`），不进 git，没有机密。
 
 | 字段 | 类型 | 没写时 | 取值 | 谁改 |
 |---|---|---|---|---|
 | `allow` | 布尔 | `true` | `false` 时不起 `rapp-term`，所有终端请求回 `terminal sessions are off` | GUI（IPC `set_term`；开关只能经本机 IPC 改，不是设备请求） |
-| `tmux` | 字符串 | `"tmux"`（本机 PATH 里的） | 本机 tmux 的路径；不能空、不能以 `-` 开头、不含控制字符，不超过 1024 字节 | GUI（IPC `set_term`），手改 |
-| `targets` | 数组 | `[]` | 至多 32 项，`name` 不能重复 | 设备请求 `add_term_target` / `remove_term_target`，手改 |
-| `targets[].name` | 字符串 | 必填 | term 标识里叫这台机器的名字：非空，只用字母、数字、`.`、`_`、`-`，不超过 64 字节 | 同上 |
-| `targets[].target` | 字符串 | 必填 | 交给 `ssh` 的目标（如 `me@gpu1`）：非空，不以 `-` 开头，不含空白和控制字符，不超过 255 字节 | 同上 |
-| `targets[].tmux` | 字符串 | 该机器上的 `tmux` | 对方机器上 tmux 的路径，规则同顶层 `tmux` | 同上 |
 
-文件不存在就是默认值（允许，本机 tmux，没有目标）。生效：每次用时现读，不用重启。坏了的文件（读不出、不是这个格式、超出上面的限制）rapp 不改，所有终端会话请求都回 `term.json is invalid`；改好就恢复。
+只有 `allow` 一个字段。老版本留下的 `tmux` 和 `targets` 读的时候忽略，不报错（2026-11-16 起，见《终端入口整理》§6）。文件不存在就是默认值（允许）。生效：每次用时现读，不用重启。坏了的文件（读不出、不是这个格式、超出上面的限制）rapp 不改，所有终端会话请求都回 `term.json is invalid`；改好就恢复。
 
-agent 规则：加、删 SSH 目标走设备请求，不直接改文件；要关终端会话让用户在 GUI 里关。
+agent 规则：要关终端会话让用户在 GUI 里关。
 
 ### 2.11 `$ROOT/local/shares.json`（分享的端口）
 
