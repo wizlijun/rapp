@@ -4,6 +4,8 @@ mod controls;
 mod focus;
 #[path = "editor.rs"]
 mod editor;
+#[path = "candidates.rs"]
+mod candidates;
 #[path = "windows.rs"]
 mod windows;
 use anyhow::{bail, Context, Result};
@@ -429,7 +431,7 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
         .hexpand(true)
         .build();
     editor_scroll.set_child(Some(&*entry));
-    input.append(&editor_scroll);
+    input.append(&entry.with_candidates(&editor_scroll));
     let attach = gtk::Button::with_label("附件");
     let editor_for_attach = entry.clone();
     let window_for_attach = window.clone();
@@ -1204,7 +1206,7 @@ fn install_input(
         {
             return glib::Propagation::Proceed;
         }
-        if preedit.get() {
+        if preedit.get() || e.ime_active() {
             return glib::Propagation::Proceed;
         }
         if !e.text().is_empty() {

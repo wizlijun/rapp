@@ -19,6 +19,7 @@ struct Inner {
     next: Cell<u32>,
     activate: RefCell<Vec<Activate>>,
     preedit: Rc<Cell<bool>>,
+    candidates: RefCell<Option<Rc<super::candidates::Panel>>>,
 }
 impl Deref for Editor {
     type Target = gtk::TextView;
@@ -45,6 +46,7 @@ impl Editor {
             next: Cell::new(0x80000000),
             activate: RefCell::new(vec![]),
             preedit,
+            candidates: RefCell::new(None),
         }));
         let keys = gtk::EventControllerKey::new();
         keys.set_propagation_phase(gtk::PropagationPhase::Capture);
@@ -52,7 +54,7 @@ impl Editor {
         keys.connect_key_pressed(move |_, key, _, mods| {
             if let Some(inner) = weak.upgrade() {
                 let e = Editor(inner);
-                if !e.0.preedit.get()
+                if !e.ime_active()
                     && matches!(key, gdk::Key::Return | gdk::Key::KP_Enter)
                     && !mods.contains(gdk::ModifierType::SHIFT_MASK)
                 {
@@ -96,6 +98,9 @@ impl Editor {
         self.0.activate.borrow_mut().push(Box::new(f));
     }
     pub fn emit_activate(&self) {
+        if self.ime_active() {
+            return;
+        }
         for f in self.0.activate.borrow().iter() {
             f(self);
         }
@@ -110,6 +115,15 @@ impl Editor {
     }
     pub fn preedit(&self) -> Rc<Cell<bool>> {
         self.0.preedit.clone()
+    }
+    pub fn ime_active(&self) -> bool {
+        self.0.preedit.get()
+            || self.0.candidates.borrow().as_ref().is_some_and(|p| p.composing())
+    }
+    pub fn with_candidates(&self, scroll: &gtk::ScrolledWindow) -> gtk::Box {
+        let (widget, panel) = super::candidates::Panel::wrap(&self.0.view, scroll);
+        *self.0.candidates.borrow_mut() = Some(panel);
+        widget
     }
     pub fn chips(&self) -> gtk::Box {
         self.0.chips.clone()

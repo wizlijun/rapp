@@ -27,6 +27,7 @@ struct View {
     shell: gtk::Widget,
     area: gtk::DrawingArea,
     popup: bool,
+    _candidates: Option<Rc<super::candidates::Panel>>,
 }
 pub struct Windows {
     views: HashMap<u32, View>,
@@ -72,6 +73,7 @@ impl Windows {
         for popup in [false, true] {
             for remote in table.iter().filter(|w| (w.kind >= 3) == popup) {
                 if !self.views.contains_key(&remote.id) {
+                    let mut candidates = None;
                     let parent = if popup {
                         self.views.get(&remote.parent).map(|v| v.area.clone())
                     } else {
@@ -123,7 +125,9 @@ impl Windows {
                             .hexpand(true)
                             .child(&editor)
                             .build();
-                        input.append(&scroll);
+                        let (composer, panel) = super::candidates::Panel::wrap(&editor, &scroll);
+                        candidates = Some(panel.clone());
+                        input.append(&composer);
                         let draft = self.editor.clone();
                         editor.connect_paste_clipboard(move |v| {
                             v.stop_signal_emission_by_name("paste-clipboard");
@@ -136,8 +140,11 @@ impl Windows {
                         key.set_propagation_phase(gtk::PropagationPhase::Capture);
                         let draft = self.editor.clone();
                         let state = self.state.clone();
+                        let candidate_ime = Rc::downgrade(&panel);
                         key.connect_key_pressed(move |_, k, _, m| {
-                            if !composing.get()
+                            let ime = composing.get()
+                                || candidate_ime.upgrade().is_some_and(|p| p.composing());
+                            if !ime
                                 && matches!(k, gdk::Key::Return | gdk::Key::KP_Enter)
                                 && !m.contains(gdk::ModifierType::SHIFT_MASK)
                             {
@@ -149,7 +156,7 @@ impl Windows {
                             {
                                 return glib::Propagation::Proceed;
                             }
-                            if !composing.get()
+                            if !ime
                                 && draft.text().is_empty()
                                 && state.borrow().ready
                                 && !m.intersects(
@@ -179,7 +186,12 @@ impl Windows {
                         editor.add_controller(key);
                         let send = gtk::Button::with_label("发送");
                         let draft = self.editor.clone();
-                        send.connect_clicked(move |_| draft.emit_activate());
+                        let candidate_ime = Rc::downgrade(&panel);
+                        send.connect_clicked(move |_| {
+                            if !candidate_ime.upgrade().is_some_and(|p| p.composing()) {
+                                draft.emit_activate();
+                            }
+                        });
                         input.append(&send);
                         let attach = gtk::Button::with_label("附件");
                         let draft = self.editor.clone();
@@ -218,7 +230,9 @@ impl Windows {
                         &self.editor,
                         self.json,
                     );
-                    self.views.insert(remote.id, View { shell, area, popup });
+                    self.views.insert(remote.id, View {
+                        shell, area, popup, _candidates: candidates,
+                    });
                 }
                 let v = &self.views[&remote.id];
                 if let Ok(win) = v.shell.clone().downcast::<gtk::Window>() {
