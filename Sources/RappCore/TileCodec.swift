@@ -327,6 +327,7 @@ public final class FrameEncoder {
 
         // Density change; written as !(<=) so a NaN previous scale also means full.
         let full = forceFull || !(scale.isFinite && scale > 0) || !(abs(scale / previousScale - 1) <= 0.01)
+        let resized = width != previousWidth || height != previousHeight
         var dx = 0, dy = 0
         var moved = false
         // The model after the move, the raw key moved likewise (only when both
@@ -480,7 +481,7 @@ public final class FrameEncoder {
         }
         if count > 0 || (groups.isEmpty && moved) { closeGroup() }
         lastReport = EncodeReport(
-            region: region, width: width, height: height, full: full, changed: sentTiles,
+            region: region, width: width, height: height, full: full || resized, changed: sentTiles,
             copyBounds: copyBox.map { CGRect(x: $0.x0, y: $0.y0, width: $0.x1 - $0.x0, height: $0.y1 - $0.y0) })
 
         // The new model is this frame's samples, except in tiles that only

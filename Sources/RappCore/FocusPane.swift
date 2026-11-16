@@ -14,6 +14,7 @@ public struct EncodeReport: Equatable {
     public let region: CanvasRect
     public let width: Int
     public let height: Int
+    /// Whole frame encoded, or the frame size changed.
     public let full: Bool
     /// Tile indexes ty*cols+tx sent this frame (any kind, copies too).
     public let changed: [Int]

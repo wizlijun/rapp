@@ -389,6 +389,20 @@ final class TileSliceTests: XCTestCase {
         XCTAssertFalse(none.full)
     }
 
+    func testReportFullOnSizeChangeAtSameScale() throws {
+        let enc = FrameEncoder(mode: .gray4)
+        let r1 = CanvasRect(x: 0, y: 0, w: 256, h: 192)
+        _ = enc.encodeSlices(samples: randomSamples(width: 256, height: 192, mode: .gray4, seed: 8),
+                             width: 256, height: 192, region: r1, limit: Int.max)
+        let r2 = CanvasRect(x: 0, y: 0, w: 256, h: 128)
+        var s = randomSamples(width: 256, height: 128, mode: .gray4, seed: 9)
+        _ = enc.encodeSlices(samples: s, width: 256, height: 128, region: r2, limit: Int.max)
+        XCTAssertTrue(try XCTUnwrap(enc.lastReport).full)
+        s[5] ^= 0x01
+        _ = enc.encodeSlices(samples: s, width: 256, height: 128, region: r2, limit: Int.max)
+        XCTAssertFalse(try XCTUnwrap(enc.lastReport).full)
+    }
+
     func testReportFullFrame() throws {
         let enc = FrameEncoder(mode: .gray4)
         XCTAssertNil(enc.lastReport)
