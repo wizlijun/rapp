@@ -1,6 +1,7 @@
 //! The local protocol between `rapp-term run`, which holds a pty in a terminal window, and `rapp-term serve`, which
-//! reaches it over a unix socket `pty/<pid>.sock`. A client writes a request line `{"op":…,"v":1}` and then a line
-//! holding the token. The token only keeps other local users out (the directory is 0700, the token 0600).
+//! reaches it over a unix socket `pty/<pid>.sock`. A client writes a request line `{"op":…,"v":2}` (`rename` adds
+//! `"name"`) and then a line holding the token. A run of version 1 answers `status` and `view` whatever version the
+//! request names, and `rename` as an unsupported op. The token only keeps other local users out (the directory is 0700, the token 0600).
 
 use crate::wire::{Got, Lines, MAX_IN_LINE};
 use anyhow::{anyhow, bail, Context};
@@ -13,7 +14,7 @@ use tokio::io::{AsyncBufRead, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
 /// The version of this protocol.
-pub const LOCAL_V: u32 = 1;
+pub const LOCAL_V: u32 = 2;
 /// How long a client has to send its request line and token.
 const HEAD_WAIT: Duration = Duration::from_secs(5);
 /// How long `status` waits for a reply before calling the socket busy.
@@ -104,6 +105,9 @@ pub struct Status {
     pub pid: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ticket: Option<String>,
+    /// The session's stable key: 16 lowercase hex characters made at start. A run of version 1 sends none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
 }
 
 /// Why a socket gave no status.
@@ -125,7 +129,19 @@ pub async fn connect(path: &Path, op: &str, token: &str) -> std::io::Result<Unix
 }
 
 async fn send_head(s: &mut UnixStream, op: &str, token: &str) -> std::io::Result<()> {
-    s.write_all(format!("{{\"op\":{},\"v\":{LOCAL_V}}}\n{token}\n", serde_json::to_string(op)?).as_bytes()).await
+    send_head_with(s, serde_json::json!({ "op": op, "v": LOCAL_V }), token).await
+}
+
+async fn send_head_with(s: &mut UnixStream, req: serde_json::Value, token: &str) -> std::io::Result<()> {
+    s.write_all(format!("{req}\n{token}\n").as_bytes()).await
+}
+
+/// 16 lowercase hex characters nobody could have guessed: a random hash seed mixed with the clock.
+pub fn new_key() -> String {
+    use std::hash::{BuildHasher, Hasher};
+    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+    h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos()));
+    format!("{:016x}", h.finish())
 }
 
 /// Whether a failed connect means nobody listens. Any other error (too many files, a full backlog, no access)
@@ -148,6 +164,26 @@ pub async fn status(path: &Path, token: &str) -> Result<Status, Probe> {
             return Err(Probe::Refused(e.as_str().unwrap_or("error").to_string()));
         }
         serde_json::from_value(v).map_err(|_| Probe::Refused("bad status".into()))
+    };
+    tokio::time::timeout(STATUS_WAIT, ask).await.unwrap_or(Err(Probe::Busy))
+}
+
+/// Asks the run at `path` to be called `name`. A run of version 1 refuses with `unsupported`.
+pub async fn rename(path: &Path, token: &str, name: &str) -> Result<(), Probe> {
+    let ask = async {
+        let mut s = UnixStream::connect(path).await.map_err(|e| if gone(&e) { Probe::Gone } else { Probe::Busy })?;
+        let req = serde_json::json!({ "op": "rename", "v": LOCAL_V, "name": name });
+        send_head_with(&mut s, req, token).await.map_err(|_| Probe::Busy)?;
+        let got = Lines::new(BufReader::new(s), MAX_IN_LINE).next().await;
+        let Ok(Got::Line(line)) = got else {
+            return Err(Probe::Refused("bad reply".into()));
+        };
+        let v: serde_json::Value = serde_json::from_slice(&line).map_err(|_| Probe::Refused("bad reply".into()))?;
+        match (v.get("ok"), v.get("error")) {
+            (Some(serde_json::Value::Bool(true)), _) => Ok(()),
+            (_, Some(e)) => Err(Probe::Refused(e.as_str().unwrap_or("error").to_string())),
+            _ => Err(Probe::Refused("bad reply".into())),
+        }
     };
     tokio::time::timeout(STATUS_WAIT, ask).await.unwrap_or(Err(Probe::Busy))
 }
@@ -182,12 +218,15 @@ pub async fn scan(term_dir: &Path, token: &str) -> Vec<Status> {
 pub struct Head {
     pub op: String,
     pub v: u32,
+    /// The new name of a `rename`.
+    pub name: Option<String>,
 }
 
 #[derive(Deserialize)]
 struct Request {
     op: String,
     v: u32,
+    name: Option<String>,
 }
 
 /// Reads the request line and the token line, both within `HEAD_WAIT`. The error is what to tell the client.
@@ -200,7 +239,7 @@ pub async fn read_head<R: AsyncBufRead + Unpin>(r: &mut R, token: &str) -> Resul
         if sent.strip_suffix(b"\r").unwrap_or(&sent) != token.as_bytes() {
             return Err("bad token");
         }
-        Ok(Head { op: req.op, v: req.v })
+        Ok(Head { op: req.op, v: req.v, name: req.name })
     };
     tokio::time::timeout(HEAD_WAIT, both).await.unwrap_or(Err("timeout"))
 }
@@ -325,6 +364,7 @@ mod tests {
                     viewers: 0,
                     pid: 2,
                     ticket: None,
+                    key: None,
                 };
                 w.write_all(format!("{}\n", serde_json::to_string(&st).unwrap()).as_bytes()).await.unwrap();
             }
@@ -416,5 +456,22 @@ mod tests {
         .unwrap();
         assert_eq!(s.name, "a");
         assert!(!serde_json::to_string(&s).unwrap().contains("ticket"));
+        // A run of version 1 sends no key, and none is sent back.
+        assert_eq!(s.key, None);
+        assert!(!serde_json::to_string(&s).unwrap().contains("key"));
+    }
+
+    #[test]
+    fn keys_are_16_lowercase_hex_and_differ() {
+        let (a, b) = (new_key(), new_key());
+        assert!(a.len() == 16 && a.bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f')), "{a}");
+        assert_ne!(a, b);
+    }
+
+    #[tokio::test]
+    async fn a_rename_head_carries_the_name() {
+        let mut r = BufReader::new(&b"{\"op\":\"rename\",\"v\":2,\"name\":\"\xe5\x90\x8e\xe7\xab\xaf\"}\ngood\n"[..]);
+        let h = read_head(&mut r, "good").await.unwrap();
+        assert_eq!((h.op.as_str(), h.v, h.name.as_deref()), ("rename", 2, Some("后端")));
     }
 }

@@ -7,7 +7,7 @@
 //! Nothing a session shows or is sent, and no new session's command, goes to the events or to stderr.
 
 use crate::config::{self, TermConfig};
-use crate::id::TermId;
+use crate::id::{clean_name, TermId};
 use crate::list::TermRow;
 use crate::proto::{self, Out, MAX_LINE};
 use crate::pty::launch;
@@ -37,6 +37,8 @@ pub const BAD_TOKEN: &str = "bad token";
 pub const BAD_REQUEST: &str = "bad request";
 const BAD_ID: &str = "invalid term id";
 const NO_TEXT_TERMINAL: &str = "no such text terminal";
+const OLD_RUN: &str = "this window was opened by an older version and cannot be renamed";
+const INVALID_NAME: &str = "invalid name";
 const UNKNOWN_APP: &str = "unknown terminal app";
 const NOT_STARTED: &str = "the terminal window did not start in 10 s";
 
@@ -65,6 +67,7 @@ enum Req {
     Watch,
     View { term: String, sid: Option<u64> },
     Open { cwd: Option<String>, name: Option<String>, command: Option<String>, app: String },
+    Rename { term: String, name: String },
 }
 
 /// The session list: this machine's sessions, and what it offers.
@@ -94,10 +97,11 @@ pub struct Worker {
     launchers: Vec<String>,
     /// One `open` at a time.
     opening: tokio::sync::Mutex<()>,
+    /// Told when a rename is done, so a watch does not wait out its `poll` to show the new name.
+    rescan: Arc<Notify>,
 }
 
-/// Accept connections on `listener` until `stop` completes; then end every connection (a view's control client
-/// goes with it) and return.
+/// Accept connections on `listener` until `stop` completes; then end every connection and return.
 pub async fn serve(
     listener: TcpListener,
     token: String,
@@ -134,6 +138,7 @@ impl Worker {
             events,
             launchers: launch::launchers(),
             opening: Default::default(),
+            rescan: Default::default(),
         }
     }
 
@@ -175,6 +180,16 @@ impl Worker {
             Req::List => {
                 let v = match cfg {
                     Ok(_) => serde_json::to_value(fit(self.list().await)).expect("a list always serializes"),
+                    Err(e) => json!({ "error": e }),
+                };
+                reply(&mut w, &v).await
+            }
+            Req::Rename { term, name } => {
+                let v = match cfg {
+                    Ok(_) => match self.rename(&term, &name).await {
+                        Ok(()) => json!({ "ok": true }),
+                        Err(e) => json!({ "error": e }),
+                    },
                     Err(e) => json!({ "error": e }),
                 };
                 reply(&mut w, &v).await
@@ -222,6 +237,7 @@ impl Worker {
             self.opts.poll,
             pty.clone(),
             changed.clone(),
+            self.rescan.clone(),
         ));
         let hosts = host_list(&self.launchers);
         let mut sent: Option<TermList> = None;
@@ -248,6 +264,33 @@ impl Worker {
                 reply(w, &serde_json::to_value(&list).expect("a list always serializes")).await?;
                 sent = Some(list);
             }
+        }
+    }
+
+    /// Call the session `term` by `name`; it keeps its id.
+    async fn rename(&self, term: &str, name: &str) -> Result<(), String> {
+        let id = match TermId::parse(term) {
+            Ok(id) if id.backend == PTY && id.host.is_none() => id,
+            _ => return Err(BAD_ID.into()),
+        };
+        let name = clean_name(name).ok_or(INVALID_NAME)?;
+        let statuses = self.pty_statuses().await;
+        let Some(st) = statuses.iter().find(|s| is_session(s, &id.name)) else {
+            return Err(NO_TEXT_TERMINAL.into());
+        };
+        if st.key.is_none() {
+            return Err(OLD_RUN.into());
+        }
+        let path = local::socket_path(&self.opts.pty_dir, st.pid).map_err(|_| NO_TEXT_TERMINAL)?;
+        let token = local::token(&self.opts.pty_dir).map_err(|_| NO_TEXT_TERMINAL)?;
+        match local::rename(&path, &token, &name).await {
+            Ok(()) => {
+                self.rescan.notify_one();
+                Ok(())
+            }
+            Err(local::Probe::Refused(e)) if e == "unsupported" => Err(OLD_RUN.into()),
+            Err(local::Probe::Refused(e)) if e == INVALID_NAME => Err(INVALID_NAME.into()),
+            Err(_) => Err(NO_TEXT_TERMINAL.into()),
         }
     }
 
@@ -313,7 +356,7 @@ impl Worker {
         loop {
             let found = local::scan(dir, token).await.into_iter().find(|s| s.ticket.as_deref() == Some(ticket));
             if let Some(s) = found {
-                return Ok(TermId { backend: PTY.into(), host: None, name: s.name }.to_string());
+                return Ok(pty_id(&s));
             }
             if tokio::time::Instant::now() >= end {
                 return Err(NOT_STARTED.into());
@@ -346,7 +389,7 @@ impl Worker {
         W: AsyncWrite + Unpin,
     {
         let statuses = self.pty_statuses().await;
-        let Some(st) = statuses.iter().find(|s| s.name == id.name) else {
+        let Some(st) = statuses.iter().find(|s| is_session(s, &id.name)) else {
             return put(w, &Out::Error { error: NO_TEXT_TERMINAL.into() }).await;
         };
         let (path, key) = match (local::socket_path(&self.opts.pty_dir, st.pid), format!("{PTY}:{}", st.pid)) {
@@ -374,8 +417,8 @@ impl Worker {
 }
 
 /// The lines the viewer sends, on to `run`; a line too long for a message goes on as one `run` calls a bad message,
-/// which it answers as `session` does. The count of `inputs` is by the rule of `session`: a `Keys`, a `Type`, the
-/// last chunk of a paste.
+/// which it answers with a bad message of its own. `inputs` counts a `Keys`, a `Type` and the last chunk of a
+/// paste.
 async fn to_run<R, S>(r: R, run: &mut S, inputs: &AtomicU64) -> std::io::Result<()>
 where
     R: AsyncBufRead + Unpin,
@@ -450,13 +493,27 @@ async fn scan_pty(dir: &std::path::Path) -> Vec<Status> {
     }
 }
 
+/// The id of a `run` session: its key, or its name when it was started by a version that has no key.
+pub fn pty_id(s: &Status) -> String {
+    let name = s.key.clone().unwrap_or_else(|| s.name.clone());
+    TermId { backend: PTY.into(), host: None, name }.to_string()
+}
+
+/// Whether the id's last part `id_name` is this session's: its key, or its name when it has no key.
+pub fn is_session(s: &Status, id_name: &str) -> bool {
+    match &s.key {
+        Some(k) => k == id_name,
+        None => s.name == id_name,
+    }
+}
+
 /// The `pty` rows of `statuses`: one pane each, and attached by as many viewers as `run` counts.
 fn pty_rows(unread: &Mutex<Unread>, statuses: &[Status], now: u64) -> Vec<TermRow> {
     let u = lock(unread);
     statuses
         .iter()
         .map(|s| TermRow {
-            id: TermId { backend: PTY.into(), host: None, name: s.name.clone() }.to_string(),
+            id: pty_id(s),
             host: None,
             name: s.name.clone(),
             command: s.command.clone(),
@@ -469,13 +526,15 @@ fn pty_rows(unread: &Mutex<Unread>, statuses: &[Status], now: u64) -> Vec<TermRo
         .collect()
 }
 
-/// Scan for `run` sessions every `poll`; each answer goes in `rows`, and `changed` hears when it differs.
+/// Scan for `run` sessions every `poll`, or at once when `rescan` is told; each answer goes in `rows`, and `changed`
+/// hears when it differs.
 async fn ask_pty(
     dir: PathBuf,
     unread: Arc<Mutex<Unread>>,
     poll: Duration,
     rows: Arc<Mutex<Option<Vec<TermRow>>>>,
     changed: Arc<Notify>,
+    rescan: Arc<Notify>,
 ) {
     loop {
         let got = pty_rows(&unread, &scan_pty(&dir).await, unix_now());
@@ -486,7 +545,10 @@ async fn ask_pty(
                 changed.notify_one();
             }
         }
-        tokio::time::sleep(poll).await;
+        tokio::select! {
+            _ = tokio::time::sleep(poll) => {}
+            _ = rescan.notified() => {}
+        }
     }
 }
 
@@ -528,12 +590,9 @@ fn expand_home(path: &str) -> PathBuf {
     }
 }
 
-/// 16 hex characters nobody could have guessed: a random hash seed mixed with the clock.
+/// 16 hex characters nobody could have guessed.
 fn ticket() -> String {
-    use std::hash::{BuildHasher, Hasher};
-    let mut h = std::collections::hash_map::RandomState::new().build_hasher();
-    h.write_u128(SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos()));
-    format!("{:016x}", h.finish())
+    local::new_key()
 }
 
 /// Write `body` to a new file only its owner can use.
@@ -669,6 +728,8 @@ mod tests {
         assert!(matches!(r, Req::View { sid: Some(7), .. }));
         // Removed requests are bad requests now.
         assert!(matches!(serde_json::from_str(r#"{"op":"watch"}"#).unwrap(), Req::Watch));
+        let r: Req = serde_json::from_str(r#"{"op":"rename","term":"term:pty:ab","name":"x"}"#).unwrap();
+        assert!(matches!(r, Req::Rename { .. }));
         for bad in [
             r#"{"op":"nope"}"#,
             r#"{"op":"new","host":null,"command":["sh"],"cols":1,"rows":2}"#,

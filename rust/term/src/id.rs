@@ -56,6 +56,19 @@ pub fn session_name(s: &str) -> Option<String> {
     Some(s.replace([':', '.'], "_"))
 }
 
+/// The most characters a session name has.
+pub const NAME_MAX: usize = 64;
+
+/// A name a session can be renamed to: trimmed, not empty, without control characters, at most `NAME_MAX`
+/// characters. Duplicates are fine: the id is the key, not the name.
+pub fn clean_name(s: &str) -> Option<String> {
+    let t = s.trim();
+    if t.is_empty() || t.chars().any(char::is_control) || t.chars().count() > NAME_MAX {
+        return None;
+    }
+    Some(t.to_string())
+}
+
 /// The default name of a new session: the last path part of the command's first word (`claude --resume` and
 /// `/usr/local/bin/claude -c` are both `claude`); `shell` when that is empty.
 pub fn default_name(command: &str) -> &str {
@@ -93,6 +106,16 @@ mod tests {
         assert!(is_term("term:pty:work") && !is_term("com.apple.Safari") && !is_term("term"));
         assert!(valid_host("gpu1") && valid_host("gpu-1.lab"));
         assert!(!valid_host("") && !valid_host("a:b") && !valid_host("a b") && !valid_host("a@b"));
+    }
+
+    #[test]
+    fn a_rename_is_trimmed_and_bounded() {
+        assert_eq!(clean_name("  后端 ").as_deref(), Some("后端"));
+        assert_eq!(clean_name("a:b.c").as_deref(), Some("a:b.c"));
+        assert_eq!((clean_name(""), clean_name("  "), clean_name("a\u{7}"), clean_name("a\nb")), (None, None, None, None));
+        assert!(clean_name(&"x".repeat(64)).is_some() && clean_name(&"x".repeat(65)).is_none());
+        // 64 characters, more than 64 bytes.
+        assert!(clean_name(&"后".repeat(64)).is_some() && clean_name(&"后".repeat(65)).is_none());
     }
 
     #[test]

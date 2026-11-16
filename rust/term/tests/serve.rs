@@ -297,7 +297,7 @@ async fn watch_sends_a_list_now_then_only_changes() {
     let first = c.next().await;
     assert_eq!((&first["terms"], plain(&first["hosts"][0])), (&json!([]), json!({"host": null})), "{first}");
     let _win = Window::start(&w.pty_dir(), &["--name", "w2", "--", "/bin/cat"]);
-    c.until_list(WAIT, |l| row(l, "term:pty:w2").is_some()).await;
+    c.until_list(WAIT, |l| row_named(l, "w2")).await;
     // Nothing changes from here, so nothing is sent.
     let more = timeout(Duration::from_secs(3), c.lines.next_line()).await;
     assert!(more.is_err(), "a line with no change: {more:?}");
@@ -328,6 +328,11 @@ async fn the_watch_ends_when_the_worker_stops() {
     w.stop().await;
 }
 
+/// The id of the session called `name`, which is made from its key.
+async fn id_of(dir: &Path, name: &str) -> String {
+    format!("term:pty:{}", pty::wait_status(dir, name).await.key.expect("a new run has a key"))
+}
+
 fn terms_of(v: &[Value]) -> Vec<String> {
     v[0]["terms"].as_array().unwrap().iter().map(|r| r["id"].as_str().unwrap().to_string()).collect()
 }
@@ -336,12 +341,12 @@ fn terms_of(v: &[Value]) -> Vec<String> {
 async fn a_pty_session_is_listed() {
     let w = Worker::start(None).await;
     let _win = Window::start(&w.pty_dir(), &["--name", "t", "--", "/bin/cat"]);
-    pty::wait_status(&w.pty_dir(), "t").await;
+    let id = id_of(&w.pty_dir(), "t").await;
     let v = w.ask(json!({"op": "list"})).await;
-    assert_eq!(terms_of(&v), ["term:pty:t"], "{v:?}");
+    assert_eq!(terms_of(&v), [id.as_str()], "{v:?}");
     assert_eq!(v[0]["hosts"].as_array().unwrap().len(), 1);
     assert_eq!(plain(&v[0]["hosts"][0]), json!({"host": null}));
-    let t = row(&v[0], "term:pty:t").unwrap();
+    let t = row(&v[0], &id).unwrap();
     assert_eq!((t["panes"].as_u64(), t["attached"].as_u64(), t["dead"].as_bool()), (Some(1), Some(0), Some(false)));
     assert_eq!((&t["host"], &t["name"], &t["command"]), (&json!(null), &json!("t"), &json!("/bin/cat")));
     assert_eq!(t["unread"], false);
@@ -354,12 +359,13 @@ async fn a_watch_sees_a_pty_session_come_and_go() {
     let mut c = w.connect(&json!({"op": "watch"}), TOKEN).await;
     assert_eq!(c.next().await["terms"], json!([]));
     let _win = Window::start(&w.pty_dir(), &["--name", "t", "--", "/bin/cat"]);
-    c.until_list(WAIT, |l| row(l, "term:pty:t").is_some()).await;
-    let mut v = w.connect(&json!({"op": "view", "term": "term:pty:t"}), TOKEN).await;
+    c.until_list(WAIT, |l| row_named(l, "t")).await;
+    let id = id_of(&w.pty_dir(), "t").await;
+    let mut v = w.connect(&json!({"op": "view", "term": id}), TOKEN).await;
     assert_eq!(v.next().await["t"], "hello");
     v.until("panes").await;
     v.send(json!({"t": "keys", "pane": "%0", "keys": ["Ctrl-D"]})).await;
-    c.until_list(WAIT, |l| row(l, "term:pty:t").is_none()).await;
+    c.until_list(WAIT, |l| !row_named(l, "t")).await;
     w.stop().await;
 }
 
@@ -367,8 +373,8 @@ async fn a_watch_sees_a_pty_session_come_and_go() {
 async fn viewing_a_pty_session_goes_through_serve() {
     let mut w = Worker::start(None).await;
     let win = Window::start(&w.pty_dir(), &["--name", "t", "--", "/bin/cat"]);
-    pty::wait_status(&w.pty_dir(), "t").await;
-    let mut c = w.connect(&json!({"op": "view", "term": "term:pty:t", "sid": 5}), TOKEN).await;
+    let id = id_of(&w.pty_dir(), "t").await;
+    let mut c = w.connect(&json!({"op": "view", "term": id, "sid": 5}), TOKEN).await;
     let hello = c.next().await;
     assert_eq!((hello["t"].as_str(), hello["backend"].as_str()), (Some("hello"), Some("pty")), "{hello}");
     c.until("panes").await;
@@ -379,7 +385,7 @@ async fn viewing_a_pty_session_goes_through_serve() {
     win.wait_output("secret-word-2");
     drop(c);
     let ended = w.event().await;
-    assert_eq!(ended, json!({"event": "ended", "sid": 5, "term": "term:pty:t", "inputs": 1}));
+    assert_eq!(ended, json!({"event": "ended", "sid": 5, "term": id, "inputs": 1}));
     let (rest, err, _) = w.stop().await;
     assert!(!rest.iter().any(|l| l.contains("secret-word-2")) && !err.contains("secret-word-2"), "{rest:?} {err}");
 }
@@ -409,13 +415,13 @@ async fn an_unknown_text_terminal_is_an_error() {
 async fn restarting_serve_finds_the_session_again() {
     let first = Worker::start(None).await;
     let mut win = Window::start(&first.pty_dir(), &["--name", "t", "--", "/bin/cat"]);
-    pty::wait_status(&first.pty_dir(), "t").await;
+    let id = id_of(&first.pty_dir(), "t").await;
     let (_, _, code, dir) = first.stop_keeping().await;
     assert_eq!(code, Some(0));
     assert!(win.alive());
     let second = Worker::start_in(dir, None, None).await;
     let v = second.ask(json!({"op": "list"})).await;
-    assert_eq!(terms_of(&v), ["term:pty:t"], "{v:?}");
+    assert_eq!(terms_of(&v), [id.as_str()], "{v:?}");
     assert!(win.alive());
     second.stop().await;
 }
@@ -424,10 +430,11 @@ async fn restarting_serve_finds_the_session_again() {
 async fn open_starts_a_window_and_answers_its_id() {
     let w = Worker::start_launching().await;
     let r = w.ask(json!({"op":"open","command":"/bin/cat","name":"c","app":"Terminal"})).await;
-    assert_eq!(r, [json!({"id": "term:pty:c"})]);
-    let list = &w.ask(json!({"op": "list"})).await[0];
-    assert!(row(list, "term:pty:c").is_some(), "{list}");
     let st = pty::wait_status(&w.pty_dir(), "c").await;
+    let id = format!("term:pty:{}", st.key.clone().unwrap());
+    assert_eq!(r, [json!({"id": id})]);
+    let list = &w.ask(json!({"op": "list"})).await[0];
+    assert!(row(list, &id).is_some(), "{list}");
     unsafe { libc::kill(st.pid as i32, libc::SIGTERM) };
     let launch = w.pty_dir().join("launch");
     assert!(std::fs::read_dir(launch).unwrap().next().is_none(), "the .command file is removed");
@@ -461,5 +468,144 @@ async fn this_machine_lists_its_launchers() {
     let w = Worker::start(None).await;
     let list = &w.ask(json!({"op": "list"})).await[0];
     assert!(list["hosts"][0]["launchers"].as_array().unwrap().contains(&json!("Terminal")), "{list}");
+    w.stop().await;
+}
+
+/// 16 lowercase hex characters.
+fn is_key(s: &str) -> bool {
+    s.len() == 16 && s.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+fn rename_req(id: &str, name: &str) -> Value {
+    json!({"op": "rename", "term": id, "name": name})
+}
+
+/// The id of the one session in the list `w` gives.
+async fn only_id(w: &Worker) -> String {
+    let v = w.ask(json!({"op": "list"})).await;
+    let terms = v[0]["terms"].as_array().unwrap();
+    assert_eq!(terms.len(), 1, "{v:?}");
+    terms[0]["id"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn a_pty_row_is_keyed_not_named() {
+    let w = Worker::start(None).await;
+    let _win = Window::start(&w.pty_dir(), &["--name", "t", "--", "/bin/cat"]);
+    pty::wait_status(&w.pty_dir(), "t").await;
+    let v = w.ask(json!({"op": "list"})).await;
+    let t = &v[0]["terms"][0];
+    let id = t["id"].as_str().unwrap();
+    assert!(id.strip_prefix("term:pty:").is_some_and(is_key), "{id}");
+    assert_eq!(t["name"], "t");
+    let mut c = w.connect(&json!({"op": "view", "term": id}), TOKEN).await;
+    assert_eq!(c.next().await["t"], "hello");
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn rename_changes_the_name_not_the_id() {
+    let w = Worker::start(None).await;
+    let _win = Window::start(&w.pty_dir(), &["--name", "t", "--", "/bin/cat"]);
+    pty::wait_status(&w.pty_dir(), "t").await;
+    let id = only_id(&w).await;
+    assert_eq!(w.ask(rename_req(&id, "  后端 ")).await, [json!({"ok": true})]);
+    let v = w.ask(json!({"op": "list"})).await;
+    let t = row(&v[0], &id).expect("the same id");
+    assert_eq!(t["name"], "后端");
+    // The new name shows in a view's pane too.
+    let mut c = w.connect(&json!({"op": "view", "term": id}), TOKEN).await;
+    c.next().await;
+    assert_eq!(c.until("panes").await["panes"][0]["title"], "后端");
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn rename_refuses_bad_names() {
+    let w = Worker::start(None).await;
+    let _win = Window::start(&w.pty_dir(), &["--name", "t", "--", "/bin/cat"]);
+    pty::wait_status(&w.pty_dir(), "t").await;
+    let id = only_id(&w).await;
+    for bad in ["".to_string(), "a\u{7}".into(), "x".repeat(65)] {
+        assert_eq!(w.ask(rename_req(&id, &bad)).await, [json!({"error": "invalid name"})], "{bad:?}");
+    }
+    assert_eq!(w.ask(rename_req(&id, &"x".repeat(64))).await, [json!({"ok": true})]);
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn rename_of_an_unknown_term_says_so() {
+    let w = Worker::start(None).await;
+    let r = w.ask(rename_req("term:pty:0123456789abcdef", "x")).await;
+    assert_eq!(r, [json!({"error": "no such text terminal"})]);
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn a_rename_reaches_a_watch_at_once() {
+    let dir = short_dir();
+    let config = dir.path().join("term.json");
+    std::fs::write(&config, r#"{"allow":true}"#).unwrap();
+    let mut opts = rapp_term::serve::ServeOpts::new(config);
+    opts.poll = Duration::from_secs(30);
+    let pty_dir = opts.pty_dir.clone();
+    rapp_term::pty::local::ensure_dirs(&pty_dir).unwrap();
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (tx, _events) = mpsc::unbounded_channel();
+    let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
+    let server = tokio::spawn(rapp_term::serve::serve(listener, TOKEN.into(), opts, tx, async {
+        let _ = stopped.await;
+    }));
+    let _win = Window::start(&pty_dir, &["--name", "t", "--", "/bin/cat"]);
+    pty::wait_status(&pty_dir, "t").await;
+    let open = |req: Value| async move {
+        let s = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let (r, mut w) = s.into_split();
+        w.write_all(format!("{req}\n{TOKEN}\n").as_bytes()).await.unwrap();
+        Conn { lines: BufReader::new(r).lines(), w }
+    };
+    let mut watch = open(json!({"op": "watch"})).await;
+    // The first scan may come before or after the window is known; wait for the row.
+    let first = watch.until_list(WAIT, |l| row_named(l, "t")).await;
+    let id = first["terms"][0]["id"].as_str().unwrap().to_string();
+    let mut ask = open(rename_req(&id, "new")).await;
+    assert_eq!(ask.next().await, json!({"ok": true}));
+    let seen = watch.until_list(Duration::from_secs(1), |l| row_named(l, "new")).await;
+    assert_eq!(seen["terms"][0]["id"], id.as_str());
+    let _ = stop.send(());
+    let _ = server.await;
+}
+
+fn row_named(list: &Value, name: &str) -> bool {
+    list["terms"].as_array().is_some_and(|t| t.iter().any(|r| r["name"] == name))
+}
+
+#[tokio::test]
+async fn an_old_run_is_listed_by_name_and_refuses_rename() {
+    let w = Worker::start(None).await;
+    let dir = w.pty_dir();
+    let token = rapp_term::pty::local::token(&dir).unwrap();
+    let listener = tokio::net::UnixListener::bind(dir.join("pty/4242.sock")).unwrap();
+    tokio::spawn(async move {
+        loop {
+            let (mut s, _) = listener.accept().await.unwrap();
+            let token = token.clone();
+            tokio::spawn(async move {
+                let (r, mut w) = s.split();
+                let head = rapp_term::pty::local::read_head(&mut BufReader::new(r), &token).await.unwrap();
+                let reply = match head.op.as_str() {
+                    "status" => json!({"v": 1, "name": "old", "command": "sh", "cols": 80, "rows": 24,
+                        "activity": 5, "viewers": 0, "pid": 4242}),
+                    _ => json!({"error": "unsupported", "v": 1}),
+                };
+                w.write_all(format!("{reply}\n").as_bytes()).await.unwrap();
+            });
+        }
+    });
+    let v = w.ask(json!({"op": "list"})).await;
+    assert_eq!(terms_of(&v), ["term:pty:old"], "{v:?}");
+    let old = "this window was opened by an older version and cannot be renamed";
+    assert_eq!(w.ask(rename_req("term:pty:old", "new")).await, [json!({"error": old})]);
     w.stop().await;
 }

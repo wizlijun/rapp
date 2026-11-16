@@ -14,7 +14,7 @@ use tokio::time::Instant;
 
 /// The only pane a `run` has.
 const PANE: &str = "%0";
-/// The shortest time between two screens offered, as `session::Opts::min_gap`.
+/// The shortest time between two screens offered, so a busy program does not flood a viewer.
 const MIN_GAP: Duration = Duration::from_millis(50);
 
 /// Counts one viewer for as long as it lives, on every way out.
@@ -128,7 +128,7 @@ impl<W: AsyncWrite + Unpin> Viewer<'_, W> {
         Pane {
             id: PANE.into(),
             window: "0".into(),
-            title: self.shared.meta.name.clone(),
+            title: self.shared.meta.name(),
             command: default_name(&self.shared.meta.command).to_string(),
             cols: s.cols,
             rows: s.rows,
@@ -320,7 +320,7 @@ mod tests {
             emu: Mutex::new(Emu::new(cols, rows)),
             rev: watch::channel(0).0,
             input,
-            meta: Meta { name: "claude".into(), command: "/usr/bin/claude -c".into(), pid: 7, ticket: None },
+            meta: Meta { key: "0123456789abcdef".into(), name: Mutex::new("claude".into()), command: "/usr/bin/claude -c".into(), pid: 7, ticket: None },
             viewers: AtomicU32::new(0),
             ended: watch::channel(false).0,
             activity: AtomicU64::new(0),
