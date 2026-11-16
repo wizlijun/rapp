@@ -78,7 +78,7 @@ async fn a_share_of_a_is_reached_on_a_local_port_of_b() {
     assert_eq!(
         r,
         json!({"port": port, "note": "echo", "allow": [], "addr": "http://localhost:29300", "local": 29300,
-               "web": true, "listening": true, "mine": true})
+               "web": true, "listening": true, "mine": true, "proto": "http", "proto_auto": true})
     );
     assert_eq!(through(29300, b"hello").await, b"hello");
     assert_eq!(saved_maps(b.home.path()), json!([{"id": a.id, "port": port, "local": 29300}]));
@@ -182,8 +182,8 @@ async fn hosts_says_the_local_address_of_every_share() {
     assert_eq!(
         r["hosts"],
         json!([{"id": a.id, "name": "a", "shares": [
-            {"port": 22, "proto": "ssh", "local": 29360, "addr": "ssh -p 29360 localhost"},
-            {"port": 8000, "note": "web", "proto": "http", "local": 29361, "addr": "http://localhost:29361"},
+            {"port": 22, "proto": "ssh", "proto_auto": true, "web": false, "local": 29360, "addr": "ssh -p 29360 localhost"},
+            {"port": 8000, "note": "web", "proto": "http", "proto_auto": true, "web": true, "local": 29361, "addr": "http://localhost:29361"},
         ]}])
     );
 }

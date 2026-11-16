@@ -39,6 +39,15 @@ impl Numbers {
     }
 }
 
+/// Another device's table was read: remember its numbers, so that numbers given out here and
+/// ports visitors yield to stay clear of them.
+pub fn saw(state: &Arc<State>, id: &str, name: &str, numbers: &[u16]) {
+    state.numbers.set_seen(id, numbers.to_vec());
+    // Task 4: a clash between `numbers` and this device's own share numbers is settled here
+    // (`yields`); `name` is who it is shown as in the renumbering message.
+    let _ = name;
+}
+
 /// The lowest number of `state.maps.range()` that is not in `used`, not a local of `maps.json`
 /// (this device's own visitors sit there), not seen on another device, and `maps::free`.
 pub fn pick(state: &State, used: &[u16]) -> Option<u16> {

@@ -414,7 +414,7 @@ async fn silent_lan_addresses_cost_one_wait_and_the_relay_still_answers() {
     let hosts = json!([{"id": a.id, "name": "a", "lan": lan}]);
     std::fs::write(b.home.path().join("hosts.json"), hosts.to_string()).unwrap();
     let r = without_local(ipc_once(&b.svc, b.home.path(), json!({"cmd":"hosts"})).await);
-    assert_eq!(r, json!({"ok":true,"hosts":[{"id": a.id, "name": "a", "shares": [{"port": port, "proto": "http"}]}]}));
+    assert_eq!(r, json!({"ok":true,"hosts":[{"id": a.id, "name": "a", "shares": [{"port": port, "proto": "http", "proto_auto": true, "web": true}]}]}));
 }
 
 #[tokio::test]
@@ -741,7 +741,7 @@ async fn pipe_carries_the_port_and_bytes_right_behind_the_command() {
     assert_eq!(rest, b" world");
     // and B's hosts lists what A offers B
     let r = without_local(ipc_once(&b.svc, b.home.path(), json!({"cmd":"hosts"})).await);
-    assert_eq!(r, json!({"ok":true,"hosts":[{"id": a.id, "name": "a", "shares": [{"port": port, "proto": "http"}]}]}));
+    assert_eq!(r, json!({"ok":true,"hosts":[{"id": a.id, "name": "a", "shares": [{"port": port, "proto": "http", "proto_auto": true, "web": true}]}]}));
 }
 
 #[tokio::test]
@@ -1013,7 +1013,7 @@ async fn hosts_lists_what_each_device_offers_this_one() {
     let r = without_local(ipc_once(&b.svc, b.home.path(), json!({"cmd":"hosts"})).await);
     assert_eq!(r["ok"], true, "{r}");
     let entry = |id: &str| r["hosts"].as_array().unwrap().iter().find(|h| h["id"] == id).cloned().unwrap_or_else(|| panic!("{id}: {r}"));
-    assert_eq!(entry(&a.id), json!({"id": a.id, "name": "a", "shares": [{"port": p, "proto": "http"}]}));
+    assert_eq!(entry(&a.id), json!({"id": a.id, "name": "a", "shares": [{"port": p, "proto": "http", "proto_auto": true, "web": true}]}));
     assert_eq!(entry(made_up), json!({"id": made_up, "name": "ghost", "error": "offline"}));
     assert_eq!(r["hosts"].as_array().unwrap().len(), 2, "{r}");
 }

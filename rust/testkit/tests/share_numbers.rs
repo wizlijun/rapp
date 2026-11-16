@@ -199,3 +199,177 @@ async fn an_old_table_avoids_the_numbers_of_devices_online_at_start() {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }
+
+// Task 3: visitors take the share number, or yield and say so. The sharer here does not listen
+// on its numbers (`own_ports` off), so that its visitors on the same machine can take them.
+
+/// A visitor trusting `key` that knows `a` by its LAN address and gives ports from `first`
+/// (ten): the same range as the sharer's, as on real devices.
+async fn visiting(first: u16, key: &rapp_wire::Key, a: &TestService) -> TestService {
+    let hosts = json!([{"id": a.id, "name": "a", "lan": [a_addr(&a.svc).to_string()]}]);
+    let key = key.to_string().parse().unwrap();
+    let write = |home: &Path| std::fs::write(home.join("hosts.json"), hosts.to_string()).unwrap();
+    start_sharing_opts(write, (first, 10), true, Some(key)).await.0
+}
+
+/// A sharer of `port` on the number `first`, not listening on it itself.
+async fn sharer_on(port: u16, first: u16) -> (TestService, rapp_wire::Key) {
+    start_sharing_opts(|home| share_file(home, json!([{"port": port, "local": first}])), (first, 10), false, None).await
+}
+
+/// `b`'s `shares` of `a`: the whole reply, after checking it is ok.
+async fn table_of(b: &TestService, a: &TestService) -> Value {
+    let r = ipc(b, json!({"cmd":"shares","to":a.id})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    r
+}
+
+/// `b`'s `shares` of `a`: the row of `port`.
+async fn their_row(b: &TestService, a: &TestService, port: u16) -> Value {
+    let r = table_of(b, a).await;
+    r["shares"].as_array().unwrap().iter().find(|s| s["port"] == port).cloned().unwrap_or(Value::Null)
+}
+
+/// `b`'s `hosts`: the item of `port` of `a`.
+async fn hosts_item(b: &TestService, a: &TestService, port: u16) -> Value {
+    let r = ipc(b, json!({"cmd":"hosts"})).await;
+    let h = r["hosts"].as_array().unwrap().iter().find(|h| h["id"] == a.id.as_str()).cloned().unwrap_or(Value::Null);
+    h["shares"].as_array().into_iter().flatten().find(|s| s["port"] == port).cloned().unwrap_or(Value::Null)
+}
+
+#[tokio::test]
+async fn a_visitor_uses_the_share_number_and_a_second_one_yields() {
+    let (port, _echo) = echo().await;
+    let (a, key) = sharer_on(port, 29600).await;
+    let b = visiting(29600, &key, &a).await;
+    let c = visiting(29600, &key, &a).await;
+    let r = table_of(&b, &a).await;
+    assert_eq!(r["old"], false, "{r}");
+    let s = &r["shares"][0];
+    assert_eq!((&s["local"], &s["addr"], &s["proto"], &s["proto_auto"]), (&json!(29600), &json!("http://localhost:29600"), &json!("http"), &json!(true)), "{r}");
+    assert!(s.get("wanted").is_none(), "{r}");
+    assert_eq!(through(29600, b"hi").await, b"hi");
+    let s = their_row(&c, &a, port).await;
+    assert_eq!((&s["local"], &s["wanted"], &s["addr"]), (&json!(29601), &json!(29600), &json!("http://localhost:29601")), "{s}");
+    assert_eq!(through(29601, b"too").await, b"too");
+}
+
+#[tokio::test]
+async fn the_yielded_visitor_moves_back() {
+    let (port, _echo) = echo().await;
+    let (a, key) = sharer_on(port, 29610).await;
+    let b = visiting(29610, &key, &a).await;
+    let c = visiting(29610, &key, &a).await;
+    assert_eq!(their_row(&b, &a, port).await["local"], 29610);
+    assert_eq!(their_row(&c, &a, port).await["wanted"], 29610);
+    b.svc.stop();
+    refuses(29610).await;
+    let s = their_row(&c, &a, port).await;
+    assert_eq!((&s["local"], &s["addr"]), (&json!(29610), &json!("http://localhost:29610")), "{s}");
+    assert!(s.get("wanted").is_none(), "{s}");
+    assert_eq!(through(29610, b"back").await, b"back");
+    refuses(29611).await;
+}
+
+#[tokio::test]
+async fn hosts_carries_the_number_and_the_yield() {
+    let (port, _echo) = echo().await;
+    let (a, key) = sharer_on(port, 29620).await;
+    let b = visiting(29620, &key, &a).await;
+    let c = visiting(29620, &key, &a).await;
+    let s = hosts_item(&b, &a, port).await;
+    assert_eq!(
+        s,
+        json!({"port": port, "proto": "http", "proto_auto": true, "web": true, "local": 29620, "addr": "http://localhost:29620"})
+    );
+    let s = hosts_item(&c, &a, port).await;
+    assert_eq!((&s["local"], &s["wanted"], &s["addr"]), (&json!(29621), &json!(29620), &json!("http://localhost:29621")), "{s}");
+    assert_eq!(through(29621, b"x").await, b"x");
+}
+
+#[tokio::test]
+async fn an_old_sharer_still_works() {
+    let (port, _echo) = echo().await;
+    // In the (0, 0) range the sharer has no number to give, like a sharer from before numbers.
+    let (a, key) = start_sharing_opts(|home| share_file(home, json!([{"port": port}])), (0, 0), false, None).await;
+    let b = visiting(29630, &key, &a).await;
+    let r = table_of(&b, &a).await;
+    let s = &r["shares"][0];
+    assert_eq!((&s["local"], &s["addr"]), (&json!(29630), &json!("http://localhost:29630")), "{r}");
+    assert!(s.get("wanted").is_none(), "{r}");
+    assert_eq!(through(29630, b"old").await, b"old");
+    let s = hosts_item(&b, &a, port).await;
+    assert_eq!(s["local"], 29630, "{s}");
+    assert!(s.get("wanted").is_none(), "{s}");
+}
+
+/// A server that writes `data: <n>\n\n` every 100 ms to every connection, like an SSE stream.
+async fn ticking() -> (u16, tokio::task::JoinHandle<()>) {
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = l.local_addr().unwrap().port();
+    let task = tokio::spawn(async move {
+        while let Ok((mut c, _)) = l.accept().await {
+            let _ = c.set_nodelay(true);
+            tokio::spawn(async move {
+                for n in 0u64.. {
+                    if c.write_all(format!("data: {n}\n\n").as_bytes()).await.is_err() {
+                        return;
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            });
+        }
+    });
+    (port, task)
+}
+
+/// Reads the events of `127.0.0.1:<local>` for `within` from the first one: the longest gap between two of them,
+/// and how many came.
+async fn longest_gap(local: u16, within: Duration) -> (Duration, usize) {
+    let mut c = TcpStream::connect(("127.0.0.1", local)).await.expect("accepts");
+    c.write_all(b"GET /events HTTP/1.1\r\nHost: localhost\r\nAccept: text/event-stream\r\n\r\n").await.unwrap();
+    let (mut buf, mut n, mut last, mut worst) = (Vec::new(), 0usize, None::<tokio::time::Instant>, Duration::ZERO);
+    let mut chunk = [0u8; 4096];
+    let mut end = None;
+    loop {
+        let now = tokio::time::Instant::now();
+        if end.is_some_and(|e| now >= e) {
+            return (worst, n);
+        }
+        let wait = end.map_or(WAIT, |e: tokio::time::Instant| e - now);
+        let got = match tokio::time::timeout(wait, c.read(&mut chunk)).await {
+            Ok(r) => r.unwrap(),
+            Err(_) => return (worst, n),
+        };
+        assert!(got > 0, "the stream ended");
+        buf.extend_from_slice(&chunk[..got]);
+        let at = tokio::time::Instant::now();
+        while let Some(i) = buf.windows(2).position(|w| w == b"\n\n") {
+            buf.drain(..i + 2);
+            if let Some(l) = last {
+                worst = worst.max(at - l);
+            } else {
+                // The gaps are counted from the first event: the road is set up before it.
+                end = Some(at + within);
+            }
+            (last, n) = (Some(at), n + 1);
+        }
+    }
+}
+
+#[tokio::test]
+async fn long_lived_streams_are_not_held_back() {
+    let (port, _ticks) = ticking().await;
+    let (a, key) = sharer_on(port, 29640).await;
+    let b = visiting(29640, &key, &a).await;
+    assert_eq!(their_row(&b, &a, port).await["local"], 29640);
+    // A second sharer of the same server that listens on its own number.
+    let (own, _) = numbered(json!([{"port": port}]), 29650).await;
+    assert_eq!(row(&own, port).await["local"], 29650);
+    let within = Duration::from_secs(3);
+    let (visited, at_home) = tokio::join!(longest_gap(29640, within), longest_gap(29650, within));
+    for (what, (gap, n)) in [("through the visitor's map", visited), ("on the sharer's own number", at_home)] {
+        assert!(n >= 25, "{what}: only {n} events");
+        assert!(gap <= Duration::from_millis(200), "{what}: a gap of {gap:?}");
+    }
+}

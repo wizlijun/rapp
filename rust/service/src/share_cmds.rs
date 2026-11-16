@@ -140,22 +140,63 @@ pub async fn shares(state: &Arc<State>, cmd: &Value) -> Value {
             Some((port, s, allow))
         })
         .collect();
-    // A local port for every share this device may use; the ones of shares that are gone, or
-    // no longer for this device, are given back first.
-    let usable: Vec<u16> = theirs.iter().filter(|(_, _, allow)| mine(&me, allow)).map(|(port, ..)| *port).collect();
-    state.maps.keep(&id, &usable);
-    let serve = crate::maps::serve(state);
+    let items = reply["shares"].as_array().map(|a| a.as_slice()).unwrap_or_default();
+    crate::numbers::saw(state, &id, &name, &numbers(items));
+    // A local port for every share this device may use, on its share number when it can; the
+    // ones of shares that are gone, or no longer for this device, are given back first.
+    let usable: Vec<(u16, Option<u16>)> =
+        theirs.iter().filter(|(_, _, allow)| mine(&me, allow)).map(|(port, s, _)| (*port, number(s))).collect();
+    state.maps.keep(&id, &usable.iter().map(|(port, _)| *port).collect::<Vec<u16>>());
+    let locals = crate::maps::ensure_all(state, &id, &usable).await;
+    let local_of = |port: u16| usable.iter().zip(&locals).find(|((p, _), _)| *p == port).and_then(|(_, l)| *l);
     let shares: Vec<Value> = theirs
         .into_iter()
         .map(|(port, s, allow)| {
-            let local = if usable.contains(&port) { state.maps.ensure(&id, port, &serve) } else { None };
-            let proto = s["proto"].as_str().and_then(Proto::parse).unwrap_or_else(|| Proto::guess(port));
-            row(&me, port, proto, s["note"].as_str().unwrap_or(""), allow, s["listening"] == true, local)
+            let (local, proto) = (local_of(port), protocol(s, port));
+            let mut v = row(&me, port, proto, s["note"].as_str().unwrap_or(""), allow, s["listening"] == true, local);
+            told(&mut v, s, proto, local);
+            v
         })
         .collect();
     let mut known = vec![device(&me, "本机".into())];
     known.extend(devices(&reply["known"]).into_iter().filter(|(fp, _)| *fp != me).map(|(fp, n)| device(&fp, named(&fp, &n))));
-    ok(json!({"id": id, "me": me.to_string(), "shares": shares, "known": known}))
+    ok(json!({"id": id, "me": me.to_string(), "shares": shares, "known": known, "old": old(items)}))
+}
+
+/// The share number an item of another device's table carries; None from a sharer from before
+/// numbers, or one that had no number to give.
+pub fn number(item: &Value) -> Option<u16> {
+    item["local"].as_u64()?.try_into().ok()
+}
+
+/// The share numbers of another device's table.
+pub fn numbers(items: &[Value]) -> Vec<u16> {
+    items.iter().filter_map(number).collect()
+}
+
+/// What an item of another device's table speaks: what it says, or for a sharer from before
+/// protocols what its port suggests.
+pub fn protocol(item: &Value, port: u16) -> Proto {
+    item["proto"].as_str().and_then(Proto::parse).unwrap_or_else(|| Proto::guess(port))
+}
+
+/// Adds to the row `v` of another device's share `item` what the sharer said of its protocol
+/// (`proto_auto` true when it did not say: it was guessed), whether it is opened in a browser,
+/// and, when this device yielded to another port than the share number, the number (`wanted`)
+/// so that the row can say why the address differs here.
+pub fn told(v: &mut Value, item: &Value, proto: Proto, local: Option<u16>) {
+    (v["proto"], v["proto_auto"], v["web"]) = (json!(proto.as_str()), json!(item["proto_auto"].as_bool().unwrap_or(true)), json!(proto.web()));
+    if let (Some(local), Some(wanted)) = (local, number(item)) {
+        if local != wanted {
+            v["wanted"] = json!(wanted);
+        }
+    }
+}
+
+/// The other device's table is from before protocols: some item does not say its `proto`, so
+/// the panel offers no protocol choice for it (an old sharer would ignore one).
+fn old(items: &[Value]) -> bool {
+    items.iter().any(|s| s.get("proto").is_none())
 }
 
 /// The devices of an `allow` as the user knows them: the name each one gave (made safe to show),
@@ -237,6 +278,13 @@ mod tests {
         assert_eq!(addr(Proto::Tcp, 28000), "tcp://localhost:28000");
         assert_eq!(addr(Proto::Ssh, 28000), "ssh -p 28000 localhost");
         assert_eq!(addr(Proto::Ssh, 28001), "ssh -p 28001 localhost");
+    }
+
+    #[test]
+    fn a_table_with_an_item_lacking_proto_is_old() {
+        assert!(old(&[json!({"port": 8000, "proto": "http"}), json!({"port": 22})]));
+        assert!(!old(&[json!({"port": 8000, "proto": "http"})]));
+        assert!(!old(&[]));
     }
 
     #[test]
