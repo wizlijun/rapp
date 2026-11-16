@@ -83,10 +83,11 @@ impl Conn {
     }
 }
 
-/// A host row without its `launchers`, which depend on the machine the test runs on.
+/// A host row without its `launchers` and `shells`, which depend on the machine the test runs on.
 fn plain(host: &Value) -> Value {
     let mut h = host.clone();
     h.as_object_mut().unwrap().remove("launchers");
+    h.as_object_mut().unwrap().remove("shells");
     h
 }
 
@@ -426,26 +427,65 @@ async fn restarting_serve_finds_the_session_again() {
     second.stop().await;
 }
 
-#[tokio::test]
-async fn open_starts_a_window_and_answers_its_id() {
-    let w = Worker::start_launching().await;
-    let r = w.ask(json!({"op":"open","command":"/bin/cat","name":"c","app":"Terminal"})).await;
-    let st = pty::wait_status(&w.pty_dir(), "c").await;
-    let id = format!("term:pty:{}", st.key.clone().unwrap());
-    assert_eq!(r, [json!({"id": id})]);
+/// The path of the default shell on this machine, from a list.
+async fn default_shell(w: &Worker) -> String {
     let list = &w.ask(json!({"op": "list"})).await[0];
-    assert!(row(list, &id).is_some(), "{list}");
-    unsafe { libc::kill(st.pid as i32, libc::SIGTERM) };
-    let launch = w.pty_dir().join("launch");
-    assert!(std::fs::read_dir(launch).unwrap().next().is_none(), "the .command file is removed");
+    let d = list["hosts"][0]["shells"].as_array().unwrap().iter().find(|s| s["default"] == true).unwrap().clone();
+    d["path"].as_str().unwrap().to_string()
+}
+
+#[tokio::test]
+async fn the_local_row_lists_shells() {
+    let w = Worker::start(None).await;
+    let list = &w.ask(json!({"op": "list"})).await[0];
+    let shells = list["hosts"][0]["shells"].as_array().unwrap();
+    assert!(!shells.is_empty(), "{list}");
+    assert_eq!(shells.iter().filter(|s| s["default"] == true).count(), 1, "{list}");
     w.stop().await;
 }
 
 #[tokio::test]
-async fn open_refuses_a_missing_directory_and_an_unknown_app() {
+async fn open_runs_the_shell_as_a_login_shell() {
     let w = Worker::start_launching().await;
-    let r = w.ask(json!({"op":"open","cwd":"/no/such","app":"Terminal"})).await;
-    assert_eq!(r, [json!({"error": "no such directory: /no/such"})]);
+    let path = default_shell(&w).await;
+    let file_name = path.rsplit('/').next().unwrap().to_string();
+    let r = w.ask(json!({"op":"open","shell":path,"app":"Terminal"})).await;
+    let st = pty::wait_status(&w.pty_dir(), &file_name).await;
+    let id = format!("term:pty:{}", st.key.clone().unwrap());
+    assert_eq!(r, [json!({"id": id})]);
+    let list = &w.ask(json!({"op": "list"})).await[0];
+    let t = row(list, &id).unwrap();
+    assert_eq!((&t["command"], &t["name"]), (&json!(format!("{path} -l")), &json!(file_name)), "{t}");
+    unsafe { libc::kill(st.pid as i32, libc::SIGTERM) };
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn open_refuses_a_shell_not_found_now() {
+    let w = Worker::start_launching().await;
+    let r = w.ask(json!({"op":"open","shell":"/no/such/sh","app":"Terminal"})).await;
+    assert_eq!(r, [json!({"error": "this shell is not found any more"})]);
+    let launch = w.pty_dir().join("launch");
+    assert!(!launch.exists() || std::fs::read_dir(launch).unwrap().next().is_none(), "no window was started");
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn open_without_shell_uses_the_default() {
+    let w = Worker::start_launching().await;
+    let path = default_shell(&w).await;
+    let file_name = path.rsplit('/').next().unwrap().to_string();
+    let r = w.ask(json!({"op":"open","cwd":"/tmp","name":"x","command":"claude","app":"Terminal"})).await;
+    let st = pty::wait_status(&w.pty_dir(), &file_name).await;
+    assert_eq!(r, [json!({"id": format!("term:pty:{}", st.key.clone().unwrap())})]);
+    assert_ne!(st.name, "x");
+    unsafe { libc::kill(st.pid as i32, libc::SIGTERM) };
+    w.stop().await;
+}
+
+#[tokio::test]
+async fn open_refuses_an_unknown_app() {
+    let w = Worker::start_launching().await;
     let r = w.ask(json!({"op":"open","app":"Warp"})).await;
     assert_eq!(r, [json!({"error": "unknown terminal app"})]);
     w.stop().await;

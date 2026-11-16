@@ -12,6 +12,7 @@ use crate::list::TermRow;
 use crate::proto::{self, Out, MAX_LINE};
 use crate::pty::launch;
 use crate::pty::local::{self, Status};
+use crate::shells::{self, Shell};
 use crate::unread::Unread;
 use crate::wire::{Got, Lines, MAX_IN_LINE};
 use serde::{Deserialize, Serialize};
@@ -66,7 +67,7 @@ enum Req {
     List,
     Watch,
     View { term: String, sid: Option<u64> },
-    Open { cwd: Option<String>, name: Option<String>, command: Option<String>, app: String },
+    Open { shell: Option<String>, app: String },
     Rename { term: String, name: String },
 }
 
@@ -84,6 +85,9 @@ pub struct HostRow {
     /// The terminal programs this host offers to start a session with.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub launchers: Vec<String>,
+    /// The shells installed here, the user's own first, looked up on every list.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub shells: Vec<Shell>,
 }
 
 /// What every connection shares.
@@ -194,8 +198,8 @@ impl Worker {
                 };
                 reply(&mut w, &v).await
             }
-            Req::Open { cwd, name, command, app } => {
-                let v = match self.open(cwd.as_deref(), name.as_deref(), command.as_deref(), &app).await {
+            Req::Open { shell, app } => {
+                let v = match self.open(shell.as_deref(), &app).await {
                     Ok(id) => json!({ "id": id }),
                     Err(e) => json!({ "error": e }),
                 };
@@ -294,25 +298,20 @@ impl Worker {
         }
     }
 
-    /// Open a window of `app` that runs `rapp-term run`, and wait for that `run` to show itself: the id of its
-    /// session. One at a time, so each wait has only its own ticket to look for.
-    async fn open(
-        &self,
-        cwd: Option<&str>,
-        name: Option<&str>,
-        command: Option<&str>,
-        app: &str,
-    ) -> Result<String, String> {
+    /// Open a window of `app` that runs `rapp-term run` with `shell` (the default one when none is named) as a login
+    /// shell, and wait for that `run` to show itself: the id of its session. One at a time, so each wait has only its
+    /// own ticket to look for.
+    async fn open(&self, shell: Option<&str>, app: &str) -> Result<String, String> {
         let known = ["Terminal", "iTerm"].contains(&app);
         if !known || (self.opts.launch_with.is_none() && !self.launchers.iter().any(|l| l == app)) {
             return Err(UNKNOWN_APP.into());
         }
-        let cwd = cwd.filter(|c| !c.is_empty()).map(expand_home);
-        if let Some(c) = &cwd {
-            if !c.is_dir() {
-                return Err(format!("no such directory: {}", c.display()));
-            }
-        }
+        let shells = installed_shells();
+        let found = match shell {
+            Some(p) => shells.iter().find(|s| s.path == p),
+            None => shells.iter().find(|s| s.default),
+        };
+        let shell = found.ok_or("this shell is not found any more")?.path.clone();
         const FAILED: &str = "could not open the terminal window";
         let _one = self.opening.lock().await;
         let dir = &self.opts.pty_dir;
@@ -325,9 +324,7 @@ impl Worker {
             &bin,
             dir,
             &ticket,
-            name.filter(|n| !n.is_empty()),
-            cwd.as_deref(),
-            command.filter(|c| !c.trim().is_empty()),
+            &shell,
         );
         let file = dir.join("launch").join(format!("{ticket}.command"));
         write_private(&file, &body).map_err(|_| FAILED)?;
@@ -577,19 +574,6 @@ fn sweep_launch(launch: &std::path::Path) {
     }
 }
 
-/// `path` from the home directory: `~` is the home directory, `~/x` and a relative `x` are under it; an absolute
-/// path stays as it is.
-fn expand_home(path: &str) -> PathBuf {
-    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
-        return PathBuf::from(path);
-    };
-    match path {
-        "~" => home,
-        _ if path.starts_with('/') => PathBuf::from(path),
-        _ => home.join(path.strip_prefix("~/").unwrap_or(path)),
-    }
-}
-
 /// 16 hex characters nobody could have guessed.
 fn ticket() -> String {
     local::new_key()
@@ -603,9 +587,17 @@ fn write_private(path: &std::path::Path, body: &str) -> std::io::Result<()> {
     f.write_all(body.as_bytes())
 }
 
-/// The hosts: this machine, offering `launchers`.
+/// The hosts: this machine, offering `launchers` and the shells it has now.
 fn host_list(launchers: &[String]) -> Vec<HostRow> {
-    vec![HostRow { host: None, launchers: launchers.to_vec() }]
+    vec![HostRow { host: None, launchers: launchers.to_vec(), shells: installed_shells() }]
+}
+
+/// The shells on this machine now; none where they are not looked up yet.
+fn installed_shells() -> Vec<Shell> {
+    #[cfg(unix)]
+    return shells::here();
+    #[cfg(not(unix))]
+    Vec::new()
 }
 
 /// Read and drop whatever the other end sends, until it closes.
@@ -765,10 +757,7 @@ mod tests {
     }
 
     #[test]
-    fn a_leading_tilde_is_the_home_directory_and_tickets_differ() {
-        let home = std::env::var_os("HOME").map(PathBuf::from).unwrap();
-        assert_eq!(expand_home("~/work"), home.join("work"));
-        assert_eq!(expand_home("/tmp/~/x"), PathBuf::from("/tmp/~/x"));
+    fn tickets_differ() {
         let (a, b) = (ticket(), ticket());
         assert!(a.len() == 16 && a.bytes().all(|c| c.is_ascii_hexdigit()));
         assert_ne!(a, b);
@@ -789,14 +778,5 @@ mod tests {
             std::fs::read_dir(d.path()).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
         left.sort();
         assert_eq!(left, ["fresh.command", "old.txt"]);
-    }
-
-    #[test]
-    fn a_bare_tilde_is_home_a_relative_path_is_under_home_an_absolute_one_stays() {
-        let home = std::env::var_os("HOME").map(PathBuf::from).unwrap();
-        assert_eq!(expand_home("~"), home);
-        assert_eq!(expand_home("proj"), home.join("proj"));
-        assert_eq!(expand_home("proj/sub"), home.join("proj/sub"));
-        assert_eq!(expand_home("/srv/proj"), PathBuf::from("/srv/proj"));
     }
 }

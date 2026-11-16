@@ -7,5 +7,6 @@ pub mod pty;
 pub mod screen;
 pub mod sender;
 pub mod serve;
+pub mod shells;
 pub mod unread;
 pub mod wire;
