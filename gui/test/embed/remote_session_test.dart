@@ -68,6 +68,39 @@ void main() {
       rs.apply(WindowsEvent(1, [w(8)]));
       expect(rs.focus, isNull);
     });
+
+    RemoteWindow sized(int id, Rect r) => RemoteWindow(
+          id: id,
+          parent: 0,
+          kind: WindowKind.normal,
+          title: 'w$id',
+          rect: r,
+          titleBar: 28,
+          resizable: true,
+          focused: true,
+          texture: id,
+          visible: const Rect.fromLTWH(0, 0, 1, 1),
+        );
+
+    test('focus cleared, and listeners told, when its window is resized', () {
+      final rs = RemoteSession(1, 'Calc')..focusWanted = true;
+      rs.apply(WindowsEvent(1, [sized(7, const Rect.fromLTWH(0, 0, 800, 600))]));
+      rs.apply(ev(7));
+      expect(rs.focus, isNotNull);
+      var n = 0;
+      rs.addListener(() => n++);
+      rs.apply(WindowsEvent(1, [sized(7, const Rect.fromLTWH(0, 0, 900, 600))]));
+      expect(rs.focus, isNull);
+      expect(n, greaterThan(0));
+    });
+
+    test('focus kept when its window only moves', () {
+      final rs = RemoteSession(1, 'Calc')..focusWanted = true;
+      rs.apply(WindowsEvent(1, [sized(7, const Rect.fromLTWH(0, 0, 800, 600))]));
+      rs.apply(ev(7));
+      rs.apply(WindowsEvent(1, [sized(7, const Rect.fromLTWH(50, 40, 800, 600))]));
+      expect(rs.focus, isNotNull);
+    });
   });
 
   group('late focus events', () {

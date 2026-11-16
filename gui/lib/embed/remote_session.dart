@@ -268,8 +268,16 @@ class RemoteSession extends ChangeNotifier {
         ready = true;
         appName = e.appName;
       case WindowsEvent():
+        final old = windows;
         windows = e.windows;
-        if (focus != null && !windows.any((w) => w.id == focus!.window)) focus = null;
+        if (focus != null) {
+          final f = focus!;
+          final now = windows.where((w) => w.id == f.window).firstOrNull;
+          final before = old.where((w) => w.id == f.window).firstOrNull;
+          // Gone, or resized: the rects are in the old size's points. Clear until A sends fresh ones
+          // (extra colour meanwhile, never wrong gray). Moving or a title bar change is harmless.
+          if (now == null || (before != null && before.rect.size != now.rect.size)) focus = null;
+        }
         _refilter();
         final p = _pendingCurrent;
         if (p != null && _isTab(p)) {

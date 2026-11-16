@@ -92,11 +92,14 @@ void main() {
       expect(p.contains(const Offset(600, 500)), isTrue);
       expect(find.descendant(of: gray, matching: find.byType(BackdropFilter)), findsOneWidget);
       // Above the surface: the gray comes after it in the stack.
-      final surface = find.byType(CustomPaint).evaluate().isNotEmpty && w.image != null
-          ? find.byType(CustomPaint)
-          : find.byType(Texture);
+      final surface = w.image != null
+          ? find.descendant(
+              of: find.byType(Picture),
+              matching: find.byWidgetPredicate((x) => x is CustomPaint && x.painter.runtimeType.toString() == '_FramePainter'))
+          : find.descendant(of: find.byType(Picture), matching: find.byType(Texture));
+      expect(surface, findsOneWidget);
       final all = tester.allWidgets.toList();
-      expect(all.indexOf(tester.widget(gray)), greaterThan(all.indexOf(tester.widget(surface.first))));
+      expect(all.indexOf(tester.widget(gray)), greaterThan(all.indexOf(tester.widget(surface))));
 
       focusEvent(5, const []);
       await tester.pump();
