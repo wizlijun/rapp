@@ -134,6 +134,10 @@ public final class FrameEncoder {
 
     /// Number of tiles in the frame most recently returned by `encode` or `encodeSlices`.
     public private(set) var lastTileCount = 0
+    /// What the last `encodeSlices` call sent: the tile indexes, and the pixel
+    /// bounds of its copy tiles. `changed` is empty when it returned no slices.
+    /// `encodeSettle` leaves it alone. nil before the first call.
+    public private(set) var lastReport: EncodeReport?
     /// True when the last encode left some tile unsent only because its raw
     /// pixels matched, so the canvas there differs from this frame's samples.
     public private(set) var lastEncodeDiverged = false
@@ -360,6 +364,9 @@ public final class FrameEncoder {
         var rawCopies = [(Int, Int, Int, Int, Int)]()
         // Copy tiles per scroll offset used.
         var used = [Int: Int]()
+        // The report: tile indexes sent, and the box of the copy tiles (pixels).
+        var sentTiles = [Int]()
+        var copyBox: (x0: Int, y0: Int, x1: Int, y1: Int)?
         let useCopies = copiesEnabled && !full
 
         func closeGroup() {
@@ -423,6 +430,7 @@ public final class FrameEncoder {
                 for tx in 0..<cols where changed[ty * cols + tx] {
                     let x0 = tx * tileSize, tw = min(tileSize, width - x0)
                     let index = ty * cols + tx
+                    sentTiles.append(index)
                     body.append(UInt8(index & 0xFF))
                     body.append(UInt8(index >> 8))
                     if !candidates.isEmpty && x0 >= cover.x0 && x0 + tw <= cover.x1 {
@@ -449,6 +457,11 @@ public final class FrameEncoder {
                             body.append(kindCopy)
                             body.append(contentsOf: [UInt8(x0 & 0xFF), UInt8(x0 >> 8), UInt8(sy & 0xFF), UInt8(sy >> 8)])
                             used[d, default: 0] += 1
+                            if let b = copyBox {
+                                copyBox = (min(b.x0, x0), min(b.y0, y0), max(b.x1, x0 + tw), max(b.y1, y0 + th))
+                            } else {
+                                copyBox = (x0, y0, x0 + tw, y0 + th)
+                            }
                             count += 1
                             groupRaw += 4
                             continue
@@ -466,6 +479,9 @@ public final class FrameEncoder {
         }
         }
         if count > 0 || (groups.isEmpty && moved) { closeGroup() }
+        lastReport = EncodeReport(
+            region: region, width: width, height: height, full: full, changed: sentTiles,
+            copyBounds: copyBox.map { CGRect(x: $0.x0, y: $0.y0, width: $0.x1 - $0.x0, height: $0.y1 - $0.y0) })
 
         // The new model is this frame's samples, except in tiles that only
         // matched on raw pixels: those keep the old samples, moved, from the

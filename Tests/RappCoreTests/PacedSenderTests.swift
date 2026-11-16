@@ -26,6 +26,20 @@ final class PacedSenderTests: XCTestCase {
         s.offer(samples: small(seed), raw: nil, width: 64, height: 64, region: rect, captured: t)
     }
 
+    func testOnEncodedCalledPerEncode() {
+        let s = make()
+        var reports: [EncodeReport] = []
+        s.onEncoded = { reports.append($0) }
+        offerSmall(s, 1)
+        XCTAssertEqual(reports.count, 1)
+        XCTAssertTrue(reports[0].full)
+        XCTAssertEqual(reports[0].changed, [0])
+        s.ack(processingMs: 0)
+        offerSmall(s, 2)
+        XCTAssertEqual(reports.count, 2)
+        XCTAssertFalse(reports[1].full)
+    }
+
     func testOnlyCapFramesInFlightAndNewestWins() throws {
         let s = make()
         let a = small(1), b = small(2), c = small(3)

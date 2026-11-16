@@ -366,4 +366,99 @@ final class TileSliceTests: XCTestCase {
         for p in second { try dec.decode(p) }
         XCTAssertEqual(dec.samples, two)
     }
+
+    // MARK: encode report
+
+    func testReportMatchesSentTiles() throws {
+        let enc = FrameEncoder(mode: .gray4)
+        var s = randomSamples(width: 256, height: 192, mode: .gray4, seed: 5)
+        _ = try XCTUnwrap(enc.encode(samples: s, width: 256, height: 192))
+        s[10 * 256 + 70] ^= 0x01            // tile (1, 0) = 1
+        s[130 * 256 + 200] ^= 0x01          // tile (3, 2) = 11
+        _ = try XCTUnwrap(enc.encode(samples: s, width: 256, height: 192))
+        let r = try XCTUnwrap(enc.lastReport)
+        XCTAssertFalse(r.full)
+        XCTAssertEqual(r.changed.sorted(), [1, 11])
+        XCTAssertEqual(r.width, 256)
+        XCTAssertEqual(r.height, 192)
+        XCTAssertNil(r.copyBounds)
+        // Nothing changed: no slices, an empty report.
+        XCTAssertTrue(enc.encodeSlices(samples: s, width: 256, height: 192, limit: Int.max).isEmpty)
+        let none = try XCTUnwrap(enc.lastReport)
+        XCTAssertTrue(none.changed.isEmpty)
+        XCTAssertFalse(none.full)
+    }
+
+    func testReportFullFrame() throws {
+        let enc = FrameEncoder(mode: .gray4)
+        XCTAssertNil(enc.lastReport)
+        let region = CanvasRect(x: 5, y: 6, w: 130, h: 70)
+        let s = randomSamples(width: 130, height: 70, mode: .gray4, seed: 6)
+        _ = try XCTUnwrap(enc.encodeSlices(samples: s, width: 130, height: 70, region: region, limit: Int.max).first)
+        let r = try XCTUnwrap(enc.lastReport)
+        XCTAssertTrue(r.full)
+        XCTAssertEqual(r.changed.sorted(), Array(0..<6))   // 3 columns x 2 rows
+        XCTAssertEqual(r.region, region)
+        XCTAssertEqual(r.width, 130)
+        XCTAssertEqual(r.height, 70)
+        XCTAssertNil(r.copyBounds)
+    }
+
+    /// The tiles of a slice body (gray4: one byte per sample): index and kind, plus the source of a copy.
+    private func wireKinds(_ body: [UInt8], width: Int, height: Int) throws -> [(index: Int, kind: UInt8)] {
+        let cols = (width + 63) / 64, bps = 1
+        var pos = 2, out = [(index: Int, kind: UInt8)]()
+        for _ in 0..<(Int(body[0]) | Int(body[1]) << 8) {
+            let index = Int(body[pos]) | Int(body[pos + 1]) << 8, kind = body[pos + 2]
+            pos += 3
+            let x0 = index % cols * 64, y0 = index / cols * 64
+            let tw = min(64, width - x0), th = min(64, height - y0)
+            switch kind {
+            case 0: pos += bps
+            case 1, 2, 4: pos += 1 + Int(body[pos]) * bps + (tw * Int(kind) + 7) / 8 * th
+            case 3:
+                for sy in stride(from: 0, to: th, by: 16) {
+                    for sx in stride(from: 0, to: tw, by: 16) {
+                        let n = Int(body[pos])
+                        pos += 1 + n * bps + (n == 2 ? (min(16, tw - sx) + 7) / 8 * min(16, th - sy) : 0)
+                    }
+                }
+            case 5: pos += 4
+            case 255: pos += tw * th * bps
+            default: XCTFail("unknown tile kind \(kind)")
+            }
+            out.append((index, kind))
+        }
+        XCTAssertEqual(pos, body.count)
+        return out
+    }
+
+    func testReportCopyBounds() throws {
+        let frames = ScrollScenes.frames(seed: 7, count: 12, kinds: [.terminalScroll], size: (width: 256, height: 192))
+        let enc = FrameEncoder(mode: .gray4)
+        let inflate = InflateStream()
+        var copyFrames = 0
+        for f in frames {
+            let slices = enc.encodeSlices(samples: ScrollScenes.samples(f, mode: .gray4), width: f.width,
+                                          height: f.height, region: f.region, limit: 32768, firstLimit: 8192)
+            let r = try XCTUnwrap(enc.lastReport)
+            var wire = [Int: UInt8]()
+            for s in slices {
+                if s.isFull { inflate.reset() }
+                for t in try wireKinds(try inflate.decompress(s.data), width: f.width, height: f.height) { wire[t.index] = t.kind }
+            }
+            XCTAssertEqual(Set(r.changed), Set(wire.keys))
+            XCTAssertEqual(r.changed.count, wire.count)
+            let cols = (f.width + 63) / 64
+            var box: CGRect?
+            for (index, kind) in wire where kind == 5 {
+                let x0 = index % cols * 64, y0 = index / cols * 64
+                let rect = CGRect(x: x0, y: y0, width: min(64, f.width - x0), height: min(64, f.height - y0))
+                box = box.map { $0.union(rect) } ?? rect
+            }
+            XCTAssertEqual(r.copyBounds, box)
+            if box != nil { copyFrames += 1 }
+        }
+        XCTAssertGreaterThan(copyFrames, 3)
+    }
 }
