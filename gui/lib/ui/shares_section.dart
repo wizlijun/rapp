@@ -376,7 +376,8 @@ class _ShareRowView extends StatelessWidget {
           ),
           for (final n in _notices)
             Padding(padding: const EdgeInsets.only(top: 4), child: Text(n, style: TextStyle(color: t.muted, fontSize: 12))),
-          if (row.renumbered != null)
+          // The notice names the new number: a share with none (the range had none left) has no notice.
+          if (row.renumbered != null && row.local != null)
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Row(children: [

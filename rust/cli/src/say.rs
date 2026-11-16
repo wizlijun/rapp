@@ -119,13 +119,14 @@ pub fn table(reply: &Value) -> String {
             if s["listening"] == true { "有服务在听" } else { "没有服务在听" }.into(),
             names(&s["allow"]).join(","),
         ]);
-        notes.push(if s["taken"] == true {
-            let local = s["local"].as_u64().unwrap_or(0);
-            Some(format!("本机上 {local} 被别的程序占着，本机请用 localhost:{}", s["port"]))
-        } else if let Some(r) = s.get("renumbered").filter(|r| r.is_object()) {
-            Some(format!("{} 和 {} 撞了，换成 {}", r["from"], plain(r["with"].as_str().unwrap_or("")), s["local"]))
-        } else {
-            None
+        // Both notices name the share's number: one with none (the range had none left) has neither.
+        let local = s["local"].as_u64();
+        notes.push(match (local, s.get("renumbered").filter(|r| r.is_object())) {
+            (Some(local), _) if s["taken"] == true => {
+                Some(format!("本机上 {local} 被别的程序占着，本机请用 localhost:{}", s["port"]))
+            }
+            (Some(local), Some(r)) => Some(format!("{} 和 {} 撞了，换成 {local}", r["from"], plain(r["with"].as_str().unwrap_or("")))),
+            _ => None,
         });
     }
     let mut text = String::new();
@@ -317,6 +318,21 @@ mod tests {
              8008  http://localhost:28003  有服务在听\n\
              28000 和 Mini 撞了，换成 28003\n\
              8009  http://localhost:28004  有服务在听\n"
+        );
+    }
+
+    /// A share with no number here (the range had none) has no notice: not "0", not "null".
+    #[test]
+    fn a_notice_needs_a_number() {
+        let r = json!({"ok":true,"id":"123456789","relay":"connected","shares":[
+            {"port":8007,"listening":true,"taken":true},
+            {"port":8008,"listening":true,"renumbered":{"from":28000,"with":"Mini"}}]});
+        assert_eq!(
+            table(&r),
+            "这台设备：123456789   中继：已连接\n\
+             端口  地址        状态        只给\n\
+             8007  没有空的号  有服务在听\n\
+             8008  没有空的号  有服务在听\n"
         );
     }
 

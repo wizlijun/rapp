@@ -391,6 +391,13 @@ void main() {
     expect(api.calls, contains('share null [8008] null null'));
   });
 
+  testWidgets('a renumbered share with no number here has no notice (never null)', (t) async {
+    await show(t, table([row(8008, addr: '', renumbered: const Renumbered(from: 28000, with_: 'Mini'))]));
+    expect(find.textContaining('撞了'), findsNothing);
+    expect(find.textContaining('null'), findsNothing);
+    expect(find.byKey(const Key('share-renumbered-ok-8008')), findsNothing);
+  });
+
   testWidgets('no address: own table says 没有空的号, remote keeps 没有本机端口可用', (t) async {
     await show(t, table([row(8000, addr: '')]));
     expect(find.text('没有空的号'), findsOneWidget);
