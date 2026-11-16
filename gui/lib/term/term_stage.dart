@@ -59,11 +59,14 @@ const _copiedFor = Duration(seconds: 1);
 const _echoWait = Duration(milliseconds: 300);
 
 class TermStage extends StatefulWidget {
-  const TermStage({super.key, required this.state, required this.session, required this.port});
+  const TermStage({super.key, required this.state, required this.session, required this.port, this.frozen = false});
 
   final MainState state;
   final RemoteSession session;
   final TermSessionPort port;
+
+  /// A network drop: the picture stays for reading and copying, but no input goes out.
+  final bool frozen;
 
   @override
   State<TermStage> createState() => _TermStageState();
@@ -530,7 +533,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     }
     // An exited pane (T4) takes nothing: nothing is sent or kept, and the window's own keys
     // (Esc, Ctrl+[ / ], Ctrl+O, F11) are the window's again.
-    if (!_canInput) return KeyEventResult.ignored;
+    if (!_canInput || widget.frozen) return KeyEventResult.ignored;
     switch (input) {
       case null:
         // Not the terminal's (Ctrl+Enter, macOS's other ⌘ chords): the window has it.

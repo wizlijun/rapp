@@ -395,7 +395,8 @@ class MainState extends ChangeNotifier {
   }
 
   /// Ctrl+Enter: the panel opens with the caret; from the picture the caret comes back to the
-  /// editor; from the editor the keys go to the picture (the panel stays).
+  /// editor; from the editor the keys go to the picture (the panel stays). A frozen picture takes
+  /// no keys: the caret stays in the editor (offline-freeze spec).
   void composerKey() {
     final rs = currentRemote;
     if (overview || rs == null || !rs.composerAllowed) return; // no panel in the overview to take the caret
@@ -405,7 +406,7 @@ class MainState extends ChangeNotifier {
       c.wantFocus();
     } else if (!c.editorFocused) {
       c.wantFocus();
-    } else {
+    } else if (!sendBlocked(rs.sid)) {
       c.releaseFocus();
       if (!rs.detached) focusPicture(rs.sid);
     }
@@ -512,6 +513,8 @@ class MainState extends ChangeNotifier {
       return const TermPasted(); // no clipboard to read: nothing to paste
     }
     if (text == null || text.isEmpty) return const TermPasted();
+    // A drop during the clipboard read: nothing goes out after it.
+    if (sendBlocked(rs.sid)) return const TermPasted();
     if (!rs.composerAllowed || (!text.contains('\n') && !text.contains('\r'))) {
       final why = await tp.paste(rs.sid, text);
       return why == null ? const TermPasted(sent: true) : TermPasted(note: why);
@@ -543,7 +546,8 @@ class MainState extends ChangeNotifier {
   /// The stage is [s] big now. Remembered, and given to the current session's resize policy.
   void stageSize(Size s) {
     _lastStage = s;
-    currentRemote?.policy.stage(s);
+    // Frozen (offline): A never hears of it; the next session gets the latest size.
+    if (currentRecord?.frozen != true) currentRemote?.policy.stage(s);
   }
 
   /// A tab was picked on the current session.
@@ -974,6 +978,7 @@ class MainState extends ChangeNotifier {
       final holder = e is ClosedEvent ? _recordOfLastSid(e.sid) : null;
       if (holder != null) {
         holder.lastSid = null; // the runner closed it itself: nothing left to close or restore
+        holder.frozen = false; // nothing frozen is left to swap out
         _dropOld(e.sid, holder.sid);
         final start = _starts.remove(e.sid);
         if (start != null) resources.linkDown(start); // what it was still sending ends 没传完
@@ -1071,11 +1076,16 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// [sid] is what a frozen record keeps on the stage: its writing panel sends nothing (offline-freeze).
+  bool sendBlocked(Object sid) => _records.values.any((r) => r.frozen && (r.lastSid ?? r.sid) == sid);
+
   String _sourceOf(SessionRecord r) => '${r.appName} @ ${deviceName(r.id)}';
 
   /// The link of [r] ended with [raw] (the runner's or the hub's words): the record stays, with its
-  /// last frame, until the user reconnects or ends it. Callers notify.
-  void _disconnect(SessionRecord r, String raw, {bool hint = false, String? hintText, bool failedOpen = false}) {
+  /// last frame, until the user reconnects or ends it. [retry] false: no automatic try is planned.
+  /// Callers notify.
+  void _disconnect(SessionRecord r, String raw,
+      {bool hint = false, String? hintText, bool failedOpen = false, bool retry = true}) {
     if (isDesktopScreen(r.app)) {
       if (r.sid != null) port?.close(r.sid!);
       _endRecord(r);
@@ -1110,6 +1120,12 @@ class MainState extends ChangeNotifier {
     final rs = sid == null ? null : remote[sid];
     r.phase = Phase.disconnected;
     r.reason = r.userDisconnect ? 'user' : raw;
+    // Frozen only over something on show: a first open that failed has no picture to keep.
+    r.frozen = autoReconnects(r.reason) && rs != null;
+    if (r.frozen) {
+      r.frozeFor = r.reason;
+      rs?.policy.cancel();
+    }
     r.seq = ++_seq;
     if (rs != null) {
       r.choice = rs.choice;
@@ -1123,7 +1139,7 @@ class MainState extends ChangeNotifier {
       _waiting.remove(sid)?.timer.cancel();
       if (pictureFocused == sid) _blur();
     }
-    final auto = _planRetry(r);
+    final auto = retry && _planRetry(r);
     // A failed open that starts waiting still says why once; later automatic tries stay quiet.
     if (hint && (!auto || (failedOpen && r.retry?.$1 == 0))) this.hint = hintText ?? '${r.appName} 已断开：${disconnectWord(r.reason)}';
   }
@@ -1265,18 +1281,26 @@ class MainState extends ChangeNotifier {
     return false;
   }
 
-  /// 「停止」 on the disconnected stage.
+  /// 「停止」 on the disconnected stage or the offline bar.
   void stopReconnect(String key) {
     final r = _records[key];
     if (r == null || r.retry == null) return;
     _stopRetry(r);
-    r.stopped = r.phase != Phase.disconnected; // a try in flight finishes as a plain disconnect
+    r.stopped = r.phase != Phase.disconnected; // a try in flight finishes by [_stopTry]
     notifyListeners();
   }
 
   void stopReconnectCurrent() {
     final k = currentKey;
     if (k != null) stopReconnect(k);
+  }
+
+  /// The try in flight of [r] finishes after 「停止」: a frozen record stays frozen under its bar, with
+  /// its network words, 「重连」 and no new try (offline-freeze spec); any other is the user's own
+  /// disconnect. Callers notify.
+  void _stopTry(SessionRecord r) {
+    r.stopped = false;
+    r.frozen ? _disconnect(r, r.frozeFor ?? 'connection closed', retry: false) : _disconnect(r, 'user');
   }
 
   /// [r] was being ended and its link went away before the runner's `ClosedEvent`: that finishes
@@ -1348,11 +1372,22 @@ class MainState extends ChangeNotifier {
     final shows = termPort?.owns(fresh) == true ? rs?.windows.isNotEmpty : rs?.windows.any((w) => w.hasPicture);
     if (rs == null || shows != true) return;
     final detached = remote[old]?.detached ?? false;
+    // A frozen stage keeps its writing panel: open (and focused) before, open (and focused) after.
+    final oldComposer = remote[old]?.composer;
+    final keepOpen = r.frozen && oldComposer?.open == true;
+    final keepFocus = keepOpen && oldComposer?.editorFocused == true;
     portOf(old)?.close(old);
     _dropOld(old, fresh);
+    if (keepOpen) {
+      rs.composer.open = true;
+      if (keepFocus) rs.composer.wantFocus();
+    }
     final start = _starts.remove(old);
     if (start != null) resources.linkDown(start); // what it was still sending ends 没传完
+    // A frozen terminal's stage element is reused: it keeps its focus, so the fresh sid is not newly staged.
+    if (r.frozen && termPort?.owns(fresh) == true && identical(r, currentRecord)) _stagedTerm = fresh;
     r.lastSid = null;
+    r.frozen = false;
     if (_reroutes.containsKey(r)) {
       if (pictureFocused == old) {
         // A move: the keys typed into the old picture go on into the new one.
@@ -1391,8 +1426,7 @@ class MainState extends ChangeNotifier {
       }
       if (r.ending) return;
       if (r.stopped) {
-        r.stopped = false;
-        _disconnect(r, 'user');
+        _stopTry(r);
         notifyListeners();
         return;
       }
@@ -1412,10 +1446,9 @@ class MainState extends ChangeNotifier {
     }
     if (r.stopped) {
       // 「停止」 came while it was opening: the new link is closed quietly, the record stays disconnected.
-      r.stopped = false;
       _quiet.add(s.sid);
       hub!.close(s.sid);
-      _disconnect(r, 'user');
+      _stopTry(r);
       notifyListeners();
       return;
     }
@@ -1463,6 +1496,7 @@ class MainState extends ChangeNotifier {
     remote[s.sid] = rs;
     rs.addListener(_syncCompose);
     r.phase = Phase.live;
+    if (r.lastSid == null) r.frozen = false; // no old picture to swap out: nothing stays frozen
     final c = r.choice;
     try {
       final p = s.port, tk = s.token;
@@ -1486,18 +1520,27 @@ class MainState extends ChangeNotifier {
         notifyListeners();
         return;
       }
-      final stopped = r.stopped;
-      r.stopped = false;
-      _disconnect(r, stopped ? 'user' : '$e', hint: !stopped, failedOpen: true);
+      if (r.stopped) {
+        _stopTry(r);
+      } else {
+        _disconnect(r, '$e', hint: true, failedOpen: true);
+      }
       notifyListeners();
       return;
     }
     if (r.sid != s.sid || r.phase != Phase.live || r.ending) return;
     if (r.stopped) {
-      // 「停止」 came while it was starting: close the link as the user's own disconnect.
-      r.stopped = false;
-      r.userDisconnect = true;
-      hub!.close(s.sid, reason: 'user');
+      if (r.frozen) {
+        // 「停止」 came while it was starting over a frozen stage: the new link goes quietly, the bar stays.
+        _quiet.add(s.sid);
+        hub!.close(s.sid);
+        _stopTry(r);
+      } else {
+        // 「停止」 came while it was starting: close the link as the user's own disconnect.
+        r.stopped = false;
+        r.userDisconnect = true;
+        hub!.close(s.sid, reason: 'user');
+      }
       notifyListeners();
       return;
     }

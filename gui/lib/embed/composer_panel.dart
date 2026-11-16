@@ -219,21 +219,25 @@ class _ComposerPanelState extends State<ComposerPanel> {
       final ed = _ed;
       if (ed is NativeEditor) {
         ed.readyForInput.then((_) {
-          if (mounted && _m.editorFocused) widget.port.composeReplay(sid);
+          if (mounted && _m.editorFocused && !_blocked) widget.port.composeReplay(sid);
         });
       } else {
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) widget.port.composeReplay(sid);
+          if (mounted && !_blocked) widget.port.composeReplay(sid);
         });
         WidgetsBinding.instance.scheduleFrame();
       }
     }
   }
 
+  /// A network drop froze the session: nothing goes to the remote, the draft stays (offline-freeze spec).
+  bool get _blocked => widget.state.sendBlocked(_s.sid);
+
   // Text goes after A is set for it (English input, the marked box clicked); an empty send is
   // a Return for A's app. The session outlives the panel: a take that ends after the panel is
   // gone still sends.
   Future<void> _submit() async {
+    if (_blocked) return;
     final port = widget.port;
     switch (await _m.submit()) {
       case SubmitPieces(:final pieces):
@@ -247,6 +251,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
   }
 
   void _retry(Outgoing o) {
+    if (_blocked) return;
     final pieces = _m.retry(o);
     if (pieces == null) return;
     _s.prepareInput();
@@ -373,7 +378,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
             ),
             if (failure != null) ...[
               gap,
-              RappButton.secondary(label: '重试', onPressed: _m.sending || _m.taking ? null : () => _retry(o)),
+              RappButton.secondary(label: '重试', onPressed: _m.sending || _m.taking || _blocked ? null : () => _retry(o)),
               const SizedBox(width: 4),
               RappButton.secondary(label: '放回输入框', onPressed: () => _putBack(o)),
             ],
@@ -504,6 +509,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
                                 ? null
                                 : (on) => widget.state.setAfterSend(_s, on ? AfterSend.pressReturn : AfterSend.none),
                             terminal: _terminal,
+                            blocked: _blocked,
                             scale: k,
                             zoom: widget.state.composerZoom.value,
                             onZoom: widget.state.setComposerZoom,
@@ -515,7 +521,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
                             semanticLabel: '发送',
                             icon: Icons.arrow_upward,
                             size: 40 * k,
-                            onPressed: _m.sending ? null : _submit,
+                            onPressed: _m.sending || _blocked ? null : _submit,
                           ),
                         ],
                       ),
@@ -583,7 +589,7 @@ List<Widget> composerLayer(
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          if (keys && c.maxWidth < keyRowWideAt) TermKeyRow(port: term, sid: session.sid, split: false),
+                          if (keys && c.maxWidth < keyRowWideAt) TermKeyRow(port: term, sid: session.sid, split: false, blocked: state.sendBlocked(session.sid)),
                           Flexible(
                             // Keyed by session: a switch is a new panel, and the old one's dispose
                             // copies its text into its own session's draft.
@@ -616,7 +622,7 @@ List<Widget> composerLayer(
                       ? const SizedBox.shrink() // above the panel instead
                       : Align(
                           alignment: Alignment.bottomCenter,
-                          child: TermKeyRow(port: term, sid: session.sid, split: true),
+                          child: TermKeyRow(port: term, sid: session.sid, split: true, blocked: state.sendBlocked(session.sid)),
                         ),
                 )
               : const SizedBox.shrink(),

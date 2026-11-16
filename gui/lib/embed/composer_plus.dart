@@ -70,6 +70,7 @@ class ComposerPlus extends StatefulWidget {
       this.historyKey,
       this.onReturnAfter,
       this.terminal = false,
+      this.blocked = false,
       this.scale = 1,
       this.zoom,
       this.onZoom});
@@ -100,6 +101,9 @@ class ComposerPlus extends StatefulWidget {
 
   /// A terminal session's menu; [port] is then a [TermSessionPort].
   final bool terminal;
+
+  /// A network drop froze the session: the menu's keys and copy go grey and send nothing.
+  final bool blocked;
 
   @override
   State<ComposerPlus> createState() => _ComposerPlusState();
@@ -257,16 +261,18 @@ class _ComposerPlusState extends State<ComposerPlus> {
 
   Widget _keyCell(RappTokens t, (String, int, int?) k) {
     final (label, code, bit) = k;
-    return _cell(t, label, bit, bit == null ? () => _key(code) : () => setState(() => _sticky ^= bit));
+    return _cell(t, label, bit,
+        bit != null ? () => setState(() => _sticky ^= bit) : widget.blocked ? null : () => _key(code));
   }
 
   Widget _termKeyCell(RappTokens t, (String, String) k) {
     final (label, name) = k;
-    return _cell(t, label, null, () => (widget.port as TermSessionPort).sendKeys(widget.session.sid, [name]));
+    return _cell(t, label, null,
+        widget.blocked ? null : () => (widget.port as TermSessionPort).sendKeys(widget.session.sid, [name]));
   }
 
   /// A key; [bit] for a sticky one.
-  Widget _cell(RappTokens t, String label, int? bit, VoidCallback onTap) {
+  Widget _cell(RappTokens t, String label, int? bit, VoidCallback? onTap) {
     final on = bit != null && _sticky & bit != 0;
     return Semantics(
       button: true,
@@ -283,7 +289,7 @@ class _ComposerPlusState extends State<ComposerPlus> {
           decoration: on
               ? BoxDecoration(color: t.text, borderRadius: BorderRadius.circular(t.r))
               : t.raiseBox().copyWith(border: Border.all(color: t.line)),
-          child: Text(label, style: TextStyle(color: on ? t.bg : t.text)),
+          child: Text(label, style: TextStyle(color: on ? t.bg : onTap == null ? t.muted : t.text)),
         ),
       ),
     );
@@ -339,7 +345,7 @@ class _ComposerPlusState extends State<ComposerPlus> {
                         widget.onAttach();
                       }),
                     rowGap,
-                    if (!term) ...[_row(t, '在远端复制', mac ? '⌘C' : 'Ctrl+C', _copy), rowGap],
+                    if (!term) ...[_row(t, '在远端复制', mac ? '⌘C' : 'Ctrl+C', widget.blocked ? null : _copy), rowGap],
                     if (widget.history != null) ...[_row(t, '输入历史', null, _openHistory), rowGap],
                     if (widget.onReturnAfter != null) ...[_returnAfter(t), rowGap],
                     if (widget.zoom != null && widget.onZoom != null) ...[_zoomRow(t), rowGap],

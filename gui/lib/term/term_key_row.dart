@@ -31,7 +31,7 @@ const keyRowLeft = [('Esc', 'Esc'), ('⌃C', 'Ctrl-C'), ('Tab', 'Tab')];
 const keyRowRight = [('↑', 'Up'), ('↓', 'Down'), ('⏎', 'Enter')];
 
 class TermKeyRow extends StatelessWidget {
-  const TermKeyRow({super.key, required this.port, required this.sid, required this.split});
+  const TermKeyRow({super.key, required this.port, required this.sid, required this.split, this.blocked = false});
 
   final TermSessionPort port;
   final Object sid;
@@ -40,6 +40,9 @@ class TermKeyRow extends StatelessWidget {
   /// the panel or 「输入」 (and to the picture: it takes no taps there). False: a line of its own right above the open
   /// panel, as wide as the panel, the groups at its two ends.
   final bool split;
+
+  /// A network drop froze the session: the keys go grey and send nothing.
+  final bool blocked;
 
   @override
   Widget build(BuildContext context) {
@@ -63,7 +66,7 @@ class TermKeyRow extends StatelessWidget {
         children: [
           for (final (i, (label, name)) in keys.indexed) ...[
             if (i > 0) const SizedBox(width: keyRowGap),
-            _Key(key: Key('keyrow-$name'), label: label, onTap: () => port.sendKeys(sid, [name])),
+            _Key(key: Key('keyrow-$name'), label: label, onTap: blocked ? null : () => port.sendKeys(sid, [name])),
           ],
         ],
       );
@@ -72,7 +75,7 @@ class TermKeyRow extends StatelessWidget {
 class _Key extends StatelessWidget {
   const _Key({super.key, required this.label, required this.onTap});
   final String label;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -94,7 +97,7 @@ class _Key extends StatelessWidget {
             canRequestFocus: false,
             onTap: onTap,
             child: Center(
-              child: Text(label, style: TextStyle(color: t.text, fontFamily: t.mono, fontFamilyFallback: t.monoFallback)),
+              child: Text(label, style: TextStyle(color: onTap == null ? t.muted : t.text, fontFamily: t.mono, fontFamilyFallback: t.monoFallback)),
             ),
           ),
         ),

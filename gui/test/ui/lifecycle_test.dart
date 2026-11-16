@@ -7,6 +7,16 @@ import 'package:rapp/ui/lifecycle.dart';
 import 'package:rapp/ui/main_state.dart' show endedHint;
 
 void main() {
+  test('offlineWords: reconnecting, waiting, retrying, stopped', () {
+    final r = SessionRecord('111', 'Safari', 'Safari', 'lan')..phase = Phase.disconnected..reason = 'connection closed';
+    expect(offlineWords(r), '网络断了');
+    r.retry = (1, DateTime(2026));
+    expect(offlineWords(r), '网络断了，正在重连…');
+    expect(offlineWords(r, waiting: '对方离线，上线后自动连'), '对方离线，上线后自动连');
+    r.phase = Phase.connecting;
+    expect(offlineWords(r, waiting: 'x'), '正在重连…');
+  });
+
   test('autoReconnects', () {
     for (final raw in ['connection closed', 'send failed: x', 'timed out', 'offline', 'relay unreachable: timed out']) {
       expect(autoReconnects(raw), true, reason: raw);

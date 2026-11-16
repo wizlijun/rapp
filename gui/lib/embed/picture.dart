@@ -23,12 +23,16 @@ class Picture extends StatefulWidget {
     required this.state,
     required this.session,
     required this.window,
+    this.frozen = false,
   });
 
   /// Where focus and input go: `state.port`, `state.focusPicture`.
   final MainState state;
   final RemoteSession session;
   final RemoteWindow window;
+
+  /// Offline: the last frame stays, and nothing reaches the port.
+  final bool frozen;
 
   @override
   State<Picture> createState() => _PictureState();
@@ -86,12 +90,14 @@ class _PictureState extends State<Picture> {
   Offset _heldAt = Offset.zero;
 
   void _mouse(String kind, String button, Offset local, _Target t, {Object? sid}) {
+    if (widget.frozen) return;
     if (kind == 'down' || kind == 'drag') _heldAt = local;
     final p = toRemote(local, t.fit, t.win);
     widget.state.port?.mouse(sid ?? _sid, t.win.id, kind, button, p.dx, p.dy, _count);
   }
 
   void _scroll(Offset local, Offset delta) {
+    if (widget.frozen) return;
     final t = _at(local);
     if (!t.usable || !t.pic.contains(local)) return;
     final p = toRemote(local, t.fit, t.win);
@@ -281,7 +287,7 @@ class _PictureState extends State<Picture> {
   /// or a press on it while it is open), not another text field, a dialog or menu above the stage,
   /// nor an open corner list. So it never needs a click to take them.
   void _settle() {
-    if (!mounted) return;
+    if (!mounted || widget.frozen) return;
     final s = widget.state, rs = widget.session;
     if (s.pictureFocused != null || s.overview || s.corner != null || s.markingInput != null) return;
     if (s.currentRemote?.sid != _sid || rs.detached) return;
@@ -296,6 +302,16 @@ class _PictureState extends State<Picture> {
   @override
   void didUpdateWidget(Picture old) {
     super.didUpdateWidget(old);
+    if (!old.frozen && widget.frozen) {
+      // Gestures in flight at the drop end here: nothing more reaches the port.
+      _dropPending();
+      _touches.clear();
+      _touchScroll = false;
+      _scrollAcc = Offset.zero;
+      _button = null;
+      _buttonPointer = null;
+      _held = null;
+    }
     if (!identical(old.session.composer, widget.session.composer)) {
       old.session.composer.removeListener(_settleSoon);
       widget.session.composer.addListener(_settleSoon);
@@ -384,7 +400,7 @@ class _PictureState extends State<Picture> {
     final t = RappTokens.of(context);
     final win = widget.window;
     final focused = widget.state.pictureFocused == _sid;
-    if (!focused) _settleSoon();
+    if (!focused && !widget.frozen) _settleSoon();
     if (focused && !_focus.hasFocus) {
       // The keys went to A without a press (Ctrl+Enter from the editor): Flutter's focus follows,
       // unless the writing panel's editor still holds the caret (this assumes the editor's unfocus
@@ -425,8 +441,10 @@ class _PictureState extends State<Picture> {
         _popups = popups;
         return KeepFocus(child: Focus(
           focusNode: _focus,
-          onKeyEvent: (_, event) =>
-              widget.state.port?.handleKeyEvent(_sid, event) == true
+          canRequestFocus: !widget.frozen,
+          onKeyEvent: (_, event) => widget.frozen
+              ? KeyEventResult.ignored
+              : widget.state.port?.handleKeyEvent(_sid, event) == true
               ? KeyEventResult.handled
               : KeyEventResult.ignored,
           onFocusChange: (hasFocus) {
@@ -437,7 +455,9 @@ class _PictureState extends State<Picture> {
           child: Stack(
             children: [
               Positioned.fill(
-                child: Listener(
+                child: IgnorePointer(
+                  ignoring: widget.frozen,
+                  child: Listener(
             behavior: HitTestBehavior.opaque,
             onPointerDown: _down,
             onPointerMove: _move,
@@ -485,10 +505,12 @@ class _PictureState extends State<Picture> {
               ),
             ),
           ),
+                ),
               ),
               // Above the Listener, not in it: a press on a × never reaches A as a click.
-              for (final p in _popups)
-                if (p.win.kind == WindowKind.sheet || p.win.kind == WindowKind.popover)
+              if (!widget.frozen)
+                for (final p in _popups)
+                  if (p.win.kind == WindowKind.sheet || p.win.kind == WindowKind.popover)
                   _popupClose(t, p, c.biggest),
             ],
           ),
