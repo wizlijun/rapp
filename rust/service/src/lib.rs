@@ -8,6 +8,7 @@ mod data;
 mod forward;
 pub mod forward_log;
 mod ipc;
+mod pace;
 mod peer;
 mod pipe;
 mod relay_link;
@@ -65,6 +66,8 @@ pub struct Opts {
     pub forward_priority: i32,
     /// False: `mux` is an unknown op, as on an older version (true in the real service).
     pub channels: bool,
+    /// False: forwards are never paced (true in the real service; the measurements' control group sets false).
+    pub pacing: bool,
 }
 
 /// Where the running app is and the updater's timings (online-update plan Task 4).
@@ -168,6 +171,7 @@ impl Service {
             forwards: forward::Forwards::new(),
             forward_priority: opts.forward_priority,
             channels: opts.channels,
+            pacer: pace::Pacer::new(opts.pacing),
             outbound: rapp_conn::dial::Outbound::new(client_ep, identity.clone(), name),
         };
         let id = state.cfg.lock().unwrap().id.clone();

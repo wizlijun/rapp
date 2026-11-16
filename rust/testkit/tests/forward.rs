@@ -1725,3 +1725,95 @@ async fn a_channel_cut_under_a_request_is_rebuilt_once() {
     assert_eq!(streams.load(Ordering::SeqCst), 2);
     out.close();
 }
+
+// ---- forward pacing (port-sharing forward-pacing plan, Task 3) ----
+
+/// A relay with A (sharing `port`, pacing as given) and B, both connected.
+async fn pacing_pair(pacing: bool, port: u16) -> (RelayRig, TestService, TestService) {
+    let rig = RelayRig::start().await;
+    let a = service_on_relay_with(&rig.addr, &rig.key, Some(vec![]), |o| o.pacing = pacing).await;
+    wait_status(&mut Ipc::open(&a.svc, a.home.path()).await, |s| s["relay"] == "connected").await;
+    assert_eq!(ipc_once(&a.svc, a.home.path(), json!({"cmd":"share","ports":[port]})).await["ok"], true);
+    let b = service_on_relay_with(&rig.addr, &rig.key, Some(vec![]), |_| {}).await;
+    wait_status(&mut Ipc::open(&b.svc, b.home.path()).await, |s| s["relay"] == "connected").await;
+    (rig, a, b)
+}
+
+/// B's forward to A's `port` through the relay, held open by the returned stream.
+async fn held_forward(b: &TestService, a: &TestService, port: u16) -> tokio::net::TcpStream {
+    let token = std::fs::read_to_string(b.home.path().join("ipc.token")).unwrap().trim().to_string();
+    let mut tcp = tokio::net::TcpStream::connect(("127.0.0.1", b.svc.ipc_port)).await.unwrap();
+    let cmd = json!({"cmd":"pipe","to":format!("{}.rapp", a.id),"port":port});
+    tcp.write_all(format!("{}\n{cmd}\n", json!({"token": token})).as_bytes()).await.unwrap();
+    let mut line = Vec::new();
+    while !line.ends_with(b"\n") {
+        let mut one = [0u8; 1];
+        assert_eq!(tokio::time::timeout(WAIT, tcp.read(&mut one)).await.unwrap().unwrap(), 1);
+        line.push(one[0]);
+    }
+    let reply: Value = serde_json::from_slice(&line).unwrap();
+    assert_eq!(reply, json!({"ok":true,"path":"relay"}));
+    tcp
+}
+
+/// A session on A from another device, through the relay, up to `ok\n`.
+async fn a_session(rig: &RelayRig, a: &TestService) -> (Pipe, Visitor, rapp_conn::relay::RelayConn) {
+    let v = visitor();
+    let (_ep, conn) = relay_conn(rig, &v.id, &rig.key).await;
+    let mut s = relayed_request(&conn, &v.id, &a.id, &rig.key, json!({"op":"open","app":"com.example.echo"})).await;
+    let r = tokio::time::timeout(WAIT, read_json(&mut s)).await.unwrap().unwrap();
+    assert_eq!(r["ok"], true, "{r}");
+    s.write_all(format!("{}\n", r["token"].as_str().unwrap()).as_bytes()).await.unwrap();
+    let mut ok = [0u8; 3];
+    tokio::time::timeout(WAIT, s.read_exact(&mut ok)).await.unwrap().unwrap();
+    assert_eq!(&ok, b"ok\n");
+    (s, v, conn)
+}
+
+fn pace_lines(a: &TestService) -> Vec<Value> {
+    log_events(a.home.path()).into_iter().filter(|v| v["ev"] == "pace").collect()
+}
+
+#[tokio::test]
+async fn a_session_turns_pacing_on_and_off() {
+    let (port, _echo) = echo().await;
+    let (rig, a, b) = pacing_pair(true, port).await;
+    let _fwd = held_forward(&b, &a, port).await;
+    let (s, _v, _conn) = a_session(&rig, &a).await;
+    let on = wait_log(a.home.path(), "pace", |v| v["on"] == true).await;
+    assert!(on["kbps"].as_u64().unwrap() >= 256, "{on}");
+    assert!(on["base_ms"].is_u64(), "{on}");
+    drop(s);
+    let off = wait_log(a.home.path(), "pace", |v| v["on"] == false).await;
+    assert!(off["secs"].is_u64() && off["kbps"].is_u64(), "{off}");
+}
+
+#[tokio::test]
+async fn a_failed_open_does_not_leave_pacing_on() {
+    let (port, _echo) = echo().await;
+    let (rig, a, _b) = pacing_pair(true, port).await;
+    // The worker refuses to start: the open fails.
+    std::fs::write(a.bins.path().join("perms"), r#"{"screen_recording":false,"accessibility":true}"#).unwrap();
+    let v = visitor();
+    let (_ep, conn) = relay_conn(&rig, &v.id, &rig.key).await;
+    let mut s = relayed_request(&conn, &v.id, &a.id, &rig.key, json!({"op":"open","app":"com.example.echo"})).await;
+    let r = tokio::time::timeout(WAIT, read_json(&mut s)).await.unwrap().unwrap();
+    assert_eq!(r["ok"], false, "{r}");
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let lines = pace_lines(&a);
+    if let Some(last) = lines.last() {
+        assert_eq!(last["on"], false, "pacing left on: {lines:?}");
+    }
+}
+
+#[tokio::test]
+async fn pacing_off_logs_nothing() {
+    let (port, _echo) = echo().await;
+    let (rig, a, b) = pacing_pair(false, port).await;
+    let _fwd = held_forward(&b, &a, port).await;
+    let (s, _v, _conn) = a_session(&rig, &a).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    drop(s);
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(pace_lines(&a).is_empty(), "{:?}", pace_lines(&a));
+}

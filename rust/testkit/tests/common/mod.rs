@@ -67,6 +67,7 @@ pub async fn start_service(home: &Path, bins: &Path, idle: Duration) -> Service 
         forward_sum_every: Duration::from_secs(600),
         forward_priority: rapp_conn::relay::FORWARD_PRIORITY,
         channels: true,
+        pacing: true,
     })
     .await
     .unwrap()
@@ -93,6 +94,7 @@ pub async fn start_service_with(
         forward_sum_every: Duration::from_secs(600),
         forward_priority: rapp_conn::relay::FORWARD_PRIORITY,
         channels: true,
+        pacing: true,
     })
     .await
     .unwrap()
@@ -545,6 +547,7 @@ pub async fn service_on_relay_with(
         forward_sum_every: Duration::from_secs(600),
         forward_priority: rapp_conn::relay::FORWARD_PRIORITY,
         channels: true,
+        pacing: true,
     };
     tune(&mut opts);
     let svc = Service::start(opts).await.unwrap();

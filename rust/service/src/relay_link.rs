@@ -6,6 +6,7 @@
 //! this machine's addresses ends the connection and dials again at once; no datagram for 12 s
 //! (keep-alives go every 10 s) starts probing, and three probes without an answer end it.
 
+use crate::pace::PaceEvent;
 use crate::peer::{greet, serve_value};
 use crate::state::{Peer, State};
 use rand::Rng;
@@ -187,14 +188,21 @@ async fn session(
         return refused(&e);
     }
     *changed_from = None;
+    log_pace(state, state.pacer.reset(Instant::now()));
     state.set_relay_status("connected", None);
     let mut guard = Guard::new(local_addrs());
     let mut every = tokio::time::interval(GUARD_EVERY);
     every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     every.tick().await;
+    let mut pace = tokio::time::interval(crate::pace::TICK);
+    pace.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         let push = tokio::select! {
             p = conn.next_push() => p,
+            _ = pace.tick() => {
+                log_pace(state, state.pacer.tick(Instant::now(), conn.stats().rtt));
+                continue;
+            }
             _ = every.tick() => {
                 match guard.check(Instant::now(), conn.stats().rx_datagrams, local_addrs()) {
                     Check::Fine => {}
@@ -234,6 +242,16 @@ async fn session(
             Err(e) => return failed(&e, true),
         }
     }
+}
+
+/// `pace {on, kbps, base_ms}` when forwards start giving way, `pace {on:false, kbps, secs}` when they stop.
+fn log_pace(state: &State, ev: Option<PaceEvent>) {
+    let fields = match ev {
+        None => return,
+        Some(PaceEvent::On { kbps, base_ms }) => json!({"on": true, "kbps": kbps, "base_ms": base_ms}),
+        Some(PaceEvent::Off { kbps, secs }) => json!({"on": false, "kbps": kbps, "secs": secs}),
+    };
+    state.log.event(Lvl::Info, "pace", fields);
 }
 
 fn local_addrs() -> Vec<Ipv4Addr> {
@@ -333,9 +351,21 @@ async fn serve_relayed(state: Arc<State>, stream: Pipe, from: String, prio: Prio
             return;
         }
     };
+    // A session counts while its request is served; forwards (and channels) go through the pacer.
+    let mut _session = None;
+    let mut pipe = pipe;
     match Op::deserialize(&v) {
-        Ok(Op::Mux) if state.channels => return crate::channel::serve(state, pipe, prio, peer).await,
-        Ok(Op::Forward { .. }) => prio.set(state.forward_priority),
+        Ok(Op::Mux) if state.channels => {
+            // Requests on the channel's substreams are paced with it and never count as sessions
+            // (the hub never sends `Open` over a channel).
+            let pipe = state.pacer.wrap(pipe);
+            return crate::channel::serve(state, pipe, prio, peer).await;
+        }
+        Ok(Op::Forward { .. }) => {
+            prio.set(state.forward_priority);
+            pipe = state.pacer.wrap(pipe);
+        }
+        Ok(Op::Open { .. } | Op::OpenTerm { .. }) => _session = Some(state.pacer.session()),
         _ => {}
     }
     if let Err(e) = serve_value(&state, pipe, v, peer.clone()).await {
