@@ -39,12 +39,12 @@ async fn shares_is_the_whole_table_and_known_is_paired_json() {
     assert_eq!(r["ok"], true, "{r}");
     let shares = r["shares"].as_array().unwrap();
     assert_eq!(shares.len(), 2, "{r}");
-    assert_eq!(shares[0], json!({"port": p, "note": "", "allow": [{"fp": x, "name": ""}], "listening": false}));
+    assert_eq!(shares[0], json!({"port": p, "note": "", "allow": [{"fp": x, "name": ""}], "listening": false, "proto": "http", "proto_auto": true}));
     assert_eq!(shares[1]["port"], q);
     assert_eq!(shares[1]["allow"], json!([]));
     assert!(r["known"].as_array().unwrap().contains(&json!({"fp": b.id.fp.to_string(), "name": "test-b"})), "{r}");
     let r = say(&a, &key, &b, json!({"op":"list_shares"})).await;
-    assert_eq!(r, json!({"ok":true,"shares":[{"port": q}]}));
+    assert_eq!(r, json!({"ok":true,"shares":[{"port": q, "proto": "http"}]}));
 }
 
 #[tokio::test]
@@ -60,7 +60,7 @@ async fn a_remote_share_is_saved_and_says_who() {
     let (a, key) = start_sharing(|_| {}).await;
     let b = visitor();
     let r = say(&a, &key, &b, json!({"op":"share","ports":[5001],"note":"jupyter"})).await;
-    assert_eq!(r, json!({"ok":true,"shared":[{"port":5001}]}));
+    assert_eq!(r, json!({"ok":true,"shared":[{"port":5001,"proto":"http","proto_auto":true}]}));
     assert_eq!(saved_port(a.home.path(), 5001), json!({"port":5001,"note":"jupyter"}));
     let short = b.id.fp.short();
     let l = wait_log(a.home.path(), "share", |v| v["port"] == 5001).await;
@@ -200,7 +200,7 @@ async fn a_and_b() -> (TestService, TestService, String) {
 /// `a_and_b`, and the key they trust each other with.
 async fn a_and_b_key() -> (TestService, TestService, String, rapp_wire::Key) {
     let (a, key) = start_sharing(|_| {}).await;
-    let (b, _) = start_sharing(|_| {}).await;
+    let (b, _) = start_sharing_ports(|_| {}, (29400, 10)).await;
     let r = ipc_once(&b.svc, b.home.path(), json!({"cmd":"set_relay","relay":"","key":key.to_string()})).await;
     assert_eq!(r["ok"], true, "{r}");
     let hosts = json!([{"id": a.id, "name": "a", "lan": [a_addr(&a.svc).to_string()]}]);
@@ -218,7 +218,7 @@ async fn b_lists_and_sets_a_through_its_own_ipc() {
     let (a, b, me) = a_and_b().await;
     let p = 5101u16;
     let r = b_ipc(&b, json!({"cmd":"share","to":a.id,"ports":[p],"note":"n"})).await;
-    assert_eq!(r, json!({"ok":true,"shared":[{"port":p}]}));
+    assert_eq!(r, json!({"ok":true,"shared":[{"port":p,"proto":"http","proto_auto":true}]}));
     assert_eq!(saved_port(a.home.path(), p)["port"], p);
 
     let r = b_ipc(&b, json!({"cmd":"shares","to":a.id})).await;
@@ -253,7 +253,7 @@ async fn to_this_device_is_local() {
     let (a, _) = start_sharing(|_| {}).await;
     let p = 5102u16;
     let r = ipc_once(&a.svc, a.home.path(), json!({"cmd":"share","to":a.id,"ports":[p]})).await;
-    assert_eq!(r["shared"], json!([{"port": p}]), "{r}");
+    assert_eq!(r["shared"], json!([{"port": p, "proto": "http", "proto_auto": true, "addr": ""}]), "{r}");
     let log = log_events(a.home.path());
     for l in log.iter().filter(|l| l["ev"] == "share") {
         assert_eq!(l["by"], "local", "{l}");
@@ -310,7 +310,7 @@ async fn the_cli_still_prints_the_same() {
     };
     let out = run(&["share"]).await;
     let want = format!(
-        "这台设备：{id}.rapp   中继：没有配置\n端口  状态          只给\n{p}  没有服务在听  mini\n",
+        "这台设备：{id}   中继：没有配置\n端口  地址        状态          只给\n{p}  没有空的号  没有服务在听  mini\n",
         id = a.id
     );
     assert_eq!(String::from_utf8_lossy(&out.stdout), want, "{}", String::from_utf8_lossy(&out.stderr));
@@ -350,15 +350,15 @@ async fn set_through_the_relay() {
     let rig = RelayRig::start().await;
     let (port, _echo) = echo().await;
     // Neither registers a LAN address and B has no hosts.json: B can only reach A through the relay.
-    let a = a_on_relay(&rig, Some(vec![])).await;
+    let a = a_on_relay_ports(&rig, Some(vec![]), (0, 0)).await;
     let b = a_on_relay(&rig, Some(vec![])).await;
     assert!(!b.home.path().join("hosts.json").exists());
     let before = rig.streams();
     let r = b_ipc(&b, json!({"cmd":"shares","to":a.id})).await;
     assert_eq!((&r["ok"], &r["shares"]), (&json!(true), &json!([])), "{r}");
     let r = b_ipc(&b, json!({"cmd":"share","to":a.id,"ports":[port],"note":"relayed"})).await;
-    assert_eq!(r, json!({"ok":true,"shared":[{"port":port}]}));
-    assert_eq!(saved_port(a.home.path(), port), json!({"port":port,"note":"relayed"}));
+    assert_eq!(r, json!({"ok":true,"shared":[{"port":port,"proto":"tcp","proto_auto":true}]}));
+    assert_eq!(saved_port(a.home.path(), port), json!({"port":port,"note":"relayed","proto":"tcp"}));
     let r = b_ipc(&b, json!({"cmd":"shares","to":a.id})).await;
     assert_eq!((&r["shares"][0]["port"], &r["shares"][0]["note"]), (&json!(port), &json!("relayed")), "{r}");
     // The relay records a stream when it ends, and B's requests share one channel: close it first.

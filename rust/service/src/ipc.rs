@@ -193,7 +193,7 @@ async fn hosts(state: &Arc<State>) -> Value {
                 let got = tokio::time::timeout(HOSTS_WAIT, crate::pipe::shares_of(&state, &h.id)).await;
                 let mut v = json!({"id": h.id, "name": h.name});
                 match got {
-                    Ok(Ok(shares)) => v["shares"] = reached(&state, &h.id, shares),
+                    Ok(Ok(shares)) => v["shares"] = reached(&state, &h.id, &h.name, shares).await,
                     Ok(Err(e)) => v["error"] = json!(e.as_str()),
                     Err(_) => v["error"] = json!(crate::pipe::PipeErr::Offline.as_str()),
                 }
@@ -210,20 +210,31 @@ async fn hosts(state: &Arc<State>) -> Value {
     ok(json!({"hosts": hosts}))
 }
 
-/// The shares the device `id` offers this one, each with the local port it is reached on here
-/// (`local`) and what to type or open (`addr`); neither when no local port could be had. The
-/// local ports of shares it no longer offers are given back.
-fn reached(state: &Arc<State>, id: &str, mut shares: Value) -> Value {
+/// The shares the device `id` (known here as `name`) offers this one, each with the local port
+/// it is reached on here (`local`, on its share number when it can), what to type or open
+/// (`addr`), and what it speaks; neither `local` nor `addr` when no local port could be had.
+/// The local ports of shares it no longer offers are given back.
+async fn reached(state: &Arc<State>, id: &str, name: &str, mut shares: Value) -> Value {
+    use crate::share_cmds::{addr, number, numbers, protocol, told};
     let list = shares.as_array_mut().map(std::mem::take).unwrap_or_default();
-    let ports: Vec<u16> = list.iter().filter_map(|s| crate::sharing::port_of(&s["port"])).collect();
-    state.maps.keep(id, &ports);
-    let serve = crate::maps::serve(state);
+    crate::numbers::saw(state, id, name, &numbers(&list));
+    let wants: Vec<(u16, Option<u16>)> = list.iter().filter_map(|s| Some((crate::sharing::port_of(&s["port"])?, number(s)))).collect();
+    state.maps.keep(id, &wants.iter().map(|(port, _)| *port).collect::<Vec<u16>>());
+    let locals = crate::maps::ensure_all(state, id, &wants).await;
     let list = list
         .into_iter()
         .map(|mut s| {
-            let local = crate::sharing::port_of(&s["port"]).and_then(|port| Some((port, state.maps.ensure(id, port, &serve)?)));
-            if let Some((port, local)) = local {
-                (s["local"], s["addr"]) = (json!(local), json!(crate::share_cmds::addr(port, local)));
+            let Some(port) = crate::sharing::port_of(&s["port"]) else { return s };
+            let local = wants.iter().zip(&locals).find(|((p, _), _)| *p == port).and_then(|(_, l)| *l);
+            let proto = protocol(&s, port);
+            let item = s.clone();
+            told(&mut s, &item, proto, local, state.maps.honoured(number(&item)));
+            match local {
+                Some(local) => (s["local"], s["addr"]) = (json!(local), json!(addr(proto, local))),
+                // The share number the sharer sent is not a port of this device.
+                None => {
+                    s.as_object_mut().map(|o| o.remove("local"));
+                }
             }
             s
         })

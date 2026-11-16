@@ -77,8 +77,8 @@ async fn a_share_of_a_is_reached_on_a_local_port_of_b() {
     let r = row(&b, &a, port).await;
     assert_eq!(
         r,
-        json!({"port": port, "note": "echo", "allow": [], "addr": "http://localhost:29300", "local": 29300,
-               "web": true, "listening": true, "mine": true})
+        json!({"port": port, "note": "echo", "allow": [], "addr": "tcp://localhost:29300", "local": 29300,
+               "web": false, "listening": true, "mine": true, "proto": "tcp", "proto_auto": true})
     );
     assert_eq!(through(29300, b"hello").await, b"hello");
     assert_eq!(saved_maps(b.home.path()), json!([{"id": a.id, "port": port, "local": 29300}]));
@@ -97,11 +97,20 @@ async fn ssh_is_reached_with_the_port_spelled_out() {
 
 #[tokio::test]
 async fn this_devices_own_shares_are_reached_on_themselves() {
-    let (a, _) = sharing(json!([{"port": 22}, {"port": 8000}])).await;
-    let r = ipc(&a, json!({"cmd":"shares"})).await;
+    let (a, _) = start_sharing_ports(|home| share_file(home, json!([{"port": 22}, {"port": 8000}])), (29365, 10)).await;
+    // Numbered by a task just after start.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(6);
+    let r = loop {
+        let r = ipc(&a, json!({"cmd":"shares"})).await;
+        if r["shares"].as_array().unwrap().iter().all(|s| s["local"].is_number()) {
+            break r;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "never numbered: {r}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    };
     let s = r["shares"].as_array().unwrap();
-    assert_eq!((&s[0]["addr"], &s[0]["local"]), (&json!("ssh localhost"), &json!(22)), "{r}");
-    assert_eq!((&s[1]["addr"], &s[1]["local"]), (&json!("http://localhost:8000"), &json!(8000)), "{r}");
+    assert_eq!((&s[0]["addr"], &s[0]["local"]), (&json!("ssh -p 29365 localhost"), &json!(29365)), "{r}");
+    assert_eq!((&s[1]["addr"], &s[1]["local"]), (&json!("http://localhost:29366"), &json!(29366)), "{r}");
     assert_eq!(saved_maps(a.home.path()), json!([]));
 }
 
@@ -173,8 +182,8 @@ async fn hosts_says_the_local_address_of_every_share() {
     assert_eq!(
         r["hosts"],
         json!([{"id": a.id, "name": "a", "shares": [
-            {"port": 22, "local": 29360, "addr": "ssh -p 29360 localhost"},
-            {"port": 8000, "note": "web", "local": 29361, "addr": "http://localhost:29361"},
+            {"port": 22, "proto": "ssh", "proto_auto": true, "web": false, "local": 29360, "addr": "ssh -p 29360 localhost"},
+            {"port": 8000, "note": "web", "proto": "http", "proto_auto": true, "web": true, "local": 29361, "addr": "http://localhost:29361"},
         ]}])
     );
 }

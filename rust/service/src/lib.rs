@@ -9,9 +9,12 @@ mod forward;
 pub mod forward_log;
 mod ipc;
 mod maps;
+mod numbers;
+mod own;
 mod pace;
 mod peer;
 mod pipe;
+mod probe;
 mod relay_link;
 mod share_cmds;
 mod sharing;
@@ -74,6 +77,10 @@ pub struct Opts {
     /// The local ports given to other devices' shares: the first one, and how many (`MAP_PORTS`
     /// in the real service; a test that counts on its ports sets its own).
     pub map_ports: (u16, u16),
+    /// True: this device's own shares are served on their share numbers (true in the real
+    /// service). A test whose devices share one machine turns it off on a sharer, so that a
+    /// visitor can take a number only when the sharer is not listening on it.
+    pub own_ports: bool,
 }
 
 /// Where the running app is and the updater's timings (online-update plan Task 4).
@@ -182,6 +189,9 @@ impl Service {
             forward_log: forward_log::ForwardLog::new(log.clone()),
             shares,
             maps,
+            numbers: numbers::Numbers::new(),
+            own: own::Own::new(opts.own_ports),
+            probed: probe::Probed::default(),
             forwards: forward::Forwards::new(),
             forward_priority: opts.forward_priority,
             channels: opts.channels,
@@ -203,8 +213,11 @@ impl Service {
         for m in state.maps.start(pipe::known_ids(&state.home).as_deref(), &maps::serve(&state)) {
             state.log.event(Lvl::Warn, "map_port_taken", json!({"id": m.id, "port": m.port, "local": m.local}));
         }
+        // Numbered shares listen at once; the ones that still lack a number are numbered after.
+        sharing::sync_own(&state);
         update::on_start(&state).await;
         let mut tasks = vec![
+            tokio::spawn(numbers::on_start(state.clone())),
             tokio::spawn(peer::accept_loop(state.clone(), endpoint)),
             tokio::spawn(ipc::serve(state.clone(), listener, ipc_token)),
             update::spawn(state.clone()),
@@ -252,6 +265,7 @@ impl Service {
             t.abort();
         }
         self.state.maps.stop();
+        self.state.own.stop();
         self.state.outbound.close();
         self.state.endpoint.close(0u32.into(), b"service stopped");
         self.state.workers.close_all();

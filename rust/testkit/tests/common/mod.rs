@@ -21,6 +21,13 @@ use tokio::net::TcpStream;
 pub const PASSWORD: &str = "a-pass-1";
 pub const WAIT: Duration = Duration::from_secs(10);
 
+/// The share numbers and local ports a test service hands out unless its test gives a range of
+/// its own: off rapp's real range (`rapp_service::MAP_PORTS`, 28000-28999), so that a test never
+/// listens on, or probes, the numbers of a rapp running on the developer's machine. Wide enough
+/// for every test of one binary at once; the per-test ranges of `share_numbers.rs`, `maps.rs`
+/// and `share_set.rs` sit below it.
+pub const TEST_PORTS: (u16, u16) = (29800, 100);
+
 /// A temp dir with `rapp-host` / `rapp-client` symlinked to the fake workers.
 pub fn bins() -> TempDir {
     let dir = tempfile::tempdir().unwrap();
@@ -53,12 +60,18 @@ pub fn service_json(home: &Path) {
 }
 
 pub async fn start_service(home: &Path, bins: &Path, idle: Duration) -> Service {
-    start_service_ports(home, bins, idle, rapp_service::MAP_PORTS).await
+    start_service_ports(home, bins, idle, (0, 0)).await
 }
 
 /// `start_service`, giving other devices' shares local ports from `map_ports` (the first one,
 /// and how many): for a test that counts on which port it gets.
 pub async fn start_service_ports(home: &Path, bins: &Path, idle: Duration, map_ports: (u16, u16)) -> Service {
+    start_service_opts(home, bins, idle, map_ports, true).await
+}
+
+/// `start_service_ports`, with `own_ports` (whether this device serves its own share numbers):
+/// off for a sharer whose numbers a visitor on the same machine must be able to take.
+pub async fn start_service_opts(home: &Path, bins: &Path, idle: Duration, map_ports: (u16, u16), own_ports: bool) -> Service {
     Service::start(rapp_service::Opts {
         home: home.to_path_buf(),
         bin_dir: Some(bins.to_path_buf()),
@@ -75,6 +88,7 @@ pub async fn start_service_ports(home: &Path, bins: &Path, idle: Duration, map_p
         channels: true,
         pacing: true,
         map_ports,
+        own_ports,
     })
     .await
     .unwrap()
@@ -102,7 +116,8 @@ pub async fn start_service_with(
         forward_priority: rapp_conn::relay::FORWARD_PRIORITY,
         channels: true,
         pacing: true,
-        map_ports: rapp_service::MAP_PORTS,
+        map_ports: TEST_PORTS,
+        own_ports: true,
     })
     .await
     .unwrap()
@@ -556,7 +571,8 @@ pub async fn service_on_relay_with(
         forward_priority: rapp_conn::relay::FORWARD_PRIORITY,
         channels: true,
         pacing: true,
-        map_ports: rapp_service::MAP_PORTS,
+        map_ports: TEST_PORTS,
+        own_ports: true,
     };
     tune(&mut opts);
     let svc = Service::start(opts).await.unwrap();
@@ -571,7 +587,12 @@ pub fn hub_relay(home: &Path, addr: &str, key: &rapp_wire::Key) {
 
 /// A service on `rig` (registering `lan`; None: its own addresses), once it is connected there.
 pub async fn a_on_relay(rig: &RelayRig, lan: Option<Vec<String>>) -> TestService {
-    let a = service_on_relay_lan(&rig.addr, &rig.key, lan).await;
+    a_on_relay_ports(rig, lan, TEST_PORTS).await
+}
+
+/// `a_on_relay`, with the local ports of other devices' shares (and the share numbers) from `map_ports`.
+pub async fn a_on_relay_ports(rig: &RelayRig, lan: Option<Vec<String>>, map_ports: (u16, u16)) -> TestService {
+    let a = service_on_relay_with(&rig.addr, &rig.key, lan, |o| o.map_ports = map_ports).await;
     let mut ipc = Ipc::open(&a.svc, a.home.path()).await;
     wait_status(&mut ipc, |s| s["relay"] == "connected").await;
     a

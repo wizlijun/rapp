@@ -5,7 +5,7 @@
 use crate::ipc::HOSTS_WAIT;
 use crate::pipe::{self, known_hosts, target_id};
 use crate::sharing::{self, Allow, By, SENSITIVE_WARN};
-use crate::shares::sensitive;
+use crate::shares::{sensitive, Proto};
 use crate::state::State;
 use rapp_net::line::{err, ok};
 use rapp_net::log::clean_name;
@@ -56,13 +56,13 @@ fn device(fp: &Fp, name: String) -> Value {
     json!({"fp": fp.to_string(), "name": name})
 }
 
-/// What to type or open on this computer to reach a share of `port` that is on its `local`
-/// port here: `http://localhost:<local>`, or for SSH `ssh -p <local> localhost`.
-pub fn addr(port: u16, local: u16) -> String {
-    match (port, local) {
-        (22, 22) => "ssh localhost".into(),
-        (22, _) => format!("ssh -p {local} localhost"),
-        _ => format!("http://localhost:{local}"),
+/// What to type or open on this computer to reach a share of protocol `proto` that is on its
+/// `local` port here: `http://localhost:<local>` (likewise `https` and `tcp`), or for SSH
+/// `ssh -p <local> localhost`.
+pub fn addr(proto: Proto, local: u16) -> String {
+    match proto {
+        Proto::Ssh => format!("ssh -p {local} localhost"),
+        _ => format!("{}://localhost:{local}", proto.as_str()),
     }
 }
 
@@ -74,12 +74,12 @@ fn mine(me: &Fp, allow: &[(Fp, String)]) -> bool {
 /// One row of the `shares` reply; `allow` is what `shown` made of each device. `local` is the
 /// port of this computer the share is reached on; None when there is none, and then `addr` is
 /// empty.
-fn row(me: &Fp, port: u16, note: &str, allow: Vec<(Fp, String)>, listening: bool, local: Option<u16>) -> Value {
+fn row(me: &Fp, port: u16, proto: Proto, note: &str, allow: Vec<(Fp, String)>, listening: bool, local: Option<u16>) -> Value {
     let mine = mine(me, &allow);
     let allow: Vec<Value> = allow.into_iter().map(|(fp, name)| device(&fp, name)).collect();
     let mut v = json!({
-        "port": port, "note": note, "allow": allow, "addr": local.map(|l| addr(port, l)).unwrap_or_default(),
-        "web": port != 22, "listening": listening, "mine": mine,
+        "port": port, "note": note, "allow": allow, "addr": local.map(|l| addr(proto, l)).unwrap_or_default(),
+        "web": proto.web(), "listening": listening, "mine": mine,
     });
     if let Some(local) = local {
         v["local"] = json!(local);
@@ -103,11 +103,23 @@ pub async fn shares(state: &Arc<State>, cmd: &Value) -> Value {
     let Some((id, name)) = target else {
         let id = state.cfg.lock().unwrap().id.clone();
         let named = |fp: &Fp| shown(fp, &me, None, &state.paired.name_of(fp).unwrap_or_default());
-        // This device's own ports are reached on themselves.
+        // This device's own shares are reached on their numbers, which it listens on itself.
         let shares: Vec<Value> = sharing::table(state)
             .await
             .into_iter()
-            .map(|(s, listening)| row(&me, s.port, &s.note, s.allow.iter().map(|fp| (*fp, named(fp))).collect(), listening, Some(s.port)))
+            .map(|(s, listening)| {
+                let allow = s.allow.iter().map(|fp| (*fp, named(fp))).collect();
+                let mut v = row(&me, s.port, s.protocol(), &s.note, allow, listening, s.local);
+                v["proto"] = json!(s.protocol().as_str());
+                v["proto_auto"] = json!(s.proto_auto);
+                if state.own.taken(s.port) {
+                    v["taken"] = json!(true);
+                }
+                if let Some(r) = state.numbers.renumbered(s.port) {
+                    v["renumbered"] = json!({"from": r.from, "with": r.with});
+                }
+                v
+            })
             .collect();
         let mut known = vec![device(&me, "本机".into())];
         known.extend(state.paired.list().iter().filter(|(fp, _)| *fp != me).map(|(fp, _)| device(fp, named(fp))));
@@ -131,21 +143,63 @@ pub async fn shares(state: &Arc<State>, cmd: &Value) -> Value {
             Some((port, s, allow))
         })
         .collect();
-    // A local port for every share this device may use; the ones of shares that are gone, or
-    // no longer for this device, are given back first.
-    let usable: Vec<u16> = theirs.iter().filter(|(_, _, allow)| mine(&me, allow)).map(|(port, ..)| *port).collect();
-    state.maps.keep(&id, &usable);
-    let serve = crate::maps::serve(state);
+    let items = reply["shares"].as_array().map(|a| a.as_slice()).unwrap_or_default();
+    crate::numbers::saw(state, &id, &name, &numbers(items));
+    // A local port for every share this device may use, on its share number when it can; the
+    // ones of shares that are gone, or no longer for this device, are given back first.
+    let usable: Vec<(u16, Option<u16>)> =
+        theirs.iter().filter(|(_, _, allow)| mine(&me, allow)).map(|(port, s, _)| (*port, number(s))).collect();
+    state.maps.keep(&id, &usable.iter().map(|(port, _)| *port).collect::<Vec<u16>>());
+    let locals = crate::maps::ensure_all(state, &id, &usable).await;
+    let local_of = |port: u16| usable.iter().zip(&locals).find(|((p, _), _)| *p == port).and_then(|(_, l)| *l);
     let shares: Vec<Value> = theirs
         .into_iter()
         .map(|(port, s, allow)| {
-            let local = if usable.contains(&port) { state.maps.ensure(&id, port, &serve) } else { None };
-            row(&me, port, s["note"].as_str().unwrap_or(""), allow, s["listening"] == true, local)
+            let (local, proto) = (local_of(port), protocol(s, port));
+            let mut v = row(&me, port, proto, s["note"].as_str().unwrap_or(""), allow, s["listening"] == true, local);
+            told(&mut v, s, proto, local, state.maps.honoured(number(s)));
+            v
         })
         .collect();
     let mut known = vec![device(&me, "本机".into())];
     known.extend(devices(&reply["known"]).into_iter().filter(|(fp, _)| *fp != me).map(|(fp, n)| device(&fp, named(&fp, &n))));
-    ok(json!({"id": id, "me": me.to_string(), "shares": shares, "known": known}))
+    ok(json!({"id": id, "me": me.to_string(), "shares": shares, "known": known, "old": old(items)}))
+}
+
+/// The share number an item of another device's table carries; None from a sharer from before
+/// numbers, or one that had no number to give.
+pub fn number(item: &Value) -> Option<u16> {
+    item["local"].as_u64()?.try_into().ok()
+}
+
+/// The share numbers of another device's table.
+pub fn numbers(items: &[Value]) -> Vec<u16> {
+    items.iter().filter_map(number).collect()
+}
+
+/// What an item of another device's table speaks: what it says, or for a sharer from before
+/// protocols what its port suggests.
+pub fn protocol(item: &Value, port: u16) -> Proto {
+    item["proto"].as_str().and_then(Proto::parse).unwrap_or_else(|| Proto::guess(port))
+}
+
+/// Adds to the row `v` of another device's share `item` what the sharer said of its protocol
+/// (`proto_auto` true when it did not say: it was guessed), whether it is opened in a browser,
+/// and, when this device yielded to another port than the share number it takes (`wanted`, see
+/// `Maps::honoured`), that number, so that the row can say why the address differs here.
+pub fn told(v: &mut Value, item: &Value, proto: Proto, local: Option<u16>, wanted: Option<u16>) {
+    (v["proto"], v["proto_auto"], v["web"]) = (json!(proto.as_str()), json!(item["proto_auto"].as_bool().unwrap_or(true)), json!(proto.web()));
+    if let (Some(local), Some(wanted)) = (local, wanted) {
+        if local != wanted {
+            v["wanted"] = json!(wanted);
+        }
+    }
+}
+
+/// The other device's table is from before protocols: some item does not say its `proto`, so
+/// the panel offers no protocol choice for it (an old sharer would ignore one).
+fn old(items: &[Value]) -> bool {
+    items.iter().any(|s| s.get("proto").is_none())
 }
 
 /// The devices of an `allow` as the user knows them: the name each one gave (made safe to show),
@@ -161,7 +215,8 @@ pub async fn share(state: &State, cmd: &Value) -> Value {
         Err(e) => return e,
         Ok(Some((id, _))) => {
             let note = cmd["note"].as_str().map(str::to_string);
-            let op = Op::Share { ports: cmd["ports"].clone(), note, allow: cmd["allow"].clone() };
+            let proto = cmd["proto"].as_str().map(str::to_string);
+            let op = Op::Share { ports: cmd["ports"].clone(), note, allow: cmd["allow"].clone(), proto };
             return match ask_there(state, &id, &op).await {
                 Ok((reply, _)) => ok(json!({"shared": reply["shared"]})),
                 Err(e) => e,
@@ -173,11 +228,20 @@ pub async fn share(state: &State, cmd: &Value) -> Value {
         Ok(done) => done,
         Err(e) => return err(&e),
     };
-    let shared: Vec<Value> = done
+    // Before the reply, so that it gives the address with the protocol detected.
+    let shared: Vec<Value> = sharing::settled(state, &done)
+        .await
         .iter()
-        .map(|d| {
-            let (port, allow) = (d.share.port, &d.share.allow);
-            let mut v = json!({"port": port});
+        .map(|s| {
+            let (port, allow) = (s.port, &s.allow);
+            let proto = s.protocol();
+            let mut v = json!({
+                "port": port, "proto": proto.as_str(), "proto_auto": s.proto_auto,
+                "addr": s.local.map(|l| addr(proto, l)).unwrap_or_default(),
+            });
+            if let Some(local) = s.local {
+                v["local"] = json!(local);
+            }
             if !allow.is_empty() {
                 v["allow"] = json!(allow_names(state, allow));
             }
@@ -211,6 +275,22 @@ pub async fn unshare(state: &State, cmd: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn addresses_by_protocol() {
+        assert_eq!(addr(Proto::Http, 28000), "http://localhost:28000");
+        assert_eq!(addr(Proto::Https, 28000), "https://localhost:28000");
+        assert_eq!(addr(Proto::Tcp, 28000), "tcp://localhost:28000");
+        assert_eq!(addr(Proto::Ssh, 28000), "ssh -p 28000 localhost");
+        assert_eq!(addr(Proto::Ssh, 28001), "ssh -p 28001 localhost");
+    }
+
+    #[test]
+    fn a_table_with_an_item_lacking_proto_is_old() {
+        assert!(old(&[json!({"port": 8000, "proto": "http"}), json!({"port": 22})]));
+        assert!(!old(&[json!({"port": 8000, "proto": "http"})]));
+        assert!(!old(&[]));
+    }
 
     #[test]
     fn names_from_the_other_device_are_cleaned() {

@@ -115,6 +115,25 @@ fn server_config(alpn: &[u8]) -> Result<ServerConfig> {
     Ok(sc)
 }
 
+/// The TLS client a shared port is probed with, to see whether it answers a ClientHello with a
+/// ServerHello (`https`). It never finishes a handshake, so it checks no certificate (`AcceptAny`)
+/// and offers no ALPN: any HTTPS server answers, whatever it serves. It offers TLS 1.3 and 1.2
+/// (`ALL_VERSIONS`; the workspace enables rustls `tls12` for this alone, every other config
+/// pins TLS 1.3), so that a server without TLS 1.3 answers with a ServerHello too. Built once.
+pub fn probe_tls_config() -> Arc<rustls::ClientConfig> {
+    static TLS: std::sync::OnceLock<Arc<rustls::ClientConfig>> = std::sync::OnceLock::new();
+    TLS.get_or_init(|| {
+        let tls = rustls::ClientConfig::builder_with_provider(provider())
+            .with_protocol_versions(rustls::ALL_VERSIONS)
+            .expect("the ring provider supports these versions")
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(AcceptAny(provider())))
+            .with_no_client_auth();
+        Arc::new(tls)
+    })
+    .clone()
+}
+
 pub fn client_config(alpn: &[u8]) -> Result<ClientConfig> {
     let mut tls = rustls::ClientConfig::builder_with_provider(provider())
         .with_protocol_versions(&[&rustls::version::TLS13])?

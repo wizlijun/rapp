@@ -17,7 +17,7 @@ class FakeApi implements SharesApi {
         known: const [me, mini],
       );
   @override
-  Future<List<Shared>> share({String? to, required List<int> ports, String? note, List<String>? allow}) async {
+  Future<List<Shared>> share({String? to, required List<int> ports, String? note, List<String>? allow, String? proto}) async {
     calls.add('share $to $ports $note $allow');
     return [for (final p in ports) Shared(port: p)];
   }

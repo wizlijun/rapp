@@ -40,12 +40,33 @@ pub fn share_file(home: &Path, shares: Value) {
 /// A service started after `prepare` ran on its home, with a key set so that a device showing
 /// the same key is trusted.
 pub async fn start_sharing(prepare: impl FnOnce(&Path)) -> (TestService, rapp_wire::Key) {
+    start_sharing_ports(prepare, (0, 0)).await
+}
+
+/// `start_sharing`, with the local ports of other devices' shares from `map_ports`.
+pub async fn start_sharing_ports(prepare: impl FnOnce(&Path), map_ports: (u16, u16)) -> (TestService, rapp_wire::Key) {
+    start_sharing_opts(prepare, map_ports, true, None).await
+}
+
+/// `start_sharing_ports`, with `own_ports` (see `start_service_opts`) and, when given, the `key`
+/// to trust instead of a new one: two devices of one test share a key to trust each other.
+pub async fn start_sharing_opts(
+    prepare: impl FnOnce(&Path),
+    map_ports: (u16, u16),
+    own_ports: bool,
+    key: Option<rapp_wire::Key>,
+) -> (TestService, rapp_wire::Key) {
     let (home, bins) = (tempfile::tempdir().unwrap(), bins());
     service_json(home.path());
+    if let Some(key) = &key {
+        // Before start: what the service asks other devices at start needs the key already.
+        let cfg = json!({"id": null, "name": "test-a", "password": PASSWORD, "port": 0, "ipc_port": 0, "key": key.to_string()});
+        rapp_net::config::write_json(&home.path().join("service.json"), &cfg).unwrap();
+    }
     prepare(home.path());
-    let svc = start_service(home.path(), bins.path(), Duration::from_secs(60)).await;
+    let svc = start_service_opts(home.path(), bins.path(), Duration::from_secs(60), map_ports, own_ports).await;
     let id = ipc_once(&svc, home.path(), json!({"cmd":"status"})).await["id"].as_str().unwrap().to_string();
-    let key = rapp_wire::Key::new_local();
+    let key = key.unwrap_or_else(rapp_wire::Key::new_local);
     let r = ipc_once(&svc, home.path(), json!({"cmd":"set_relay","relay":"","key":key.to_string()})).await;
     assert_eq!(r["ok"], true, "{r}");
     (TestService { svc, home, bins, id }, key)
@@ -86,17 +107,23 @@ pub async fn forward(a: &TestService, key: &rapp_wire::Key, b: &Visitor, port: u
     ask(a, key, b, json!({"op":"forward","port":port})).await
 }
 
-/// A `hosts` reply without each share's `local` and `addr`, after checking them: a local port
-/// from the real service's range, and an address that names it.
+/// A `hosts` reply without each share's `local`, `addr` and `wanted`, after checking them: a
+/// local port from the test services' range (`TEST_PORTS`), and an address that names it.
+/// `wanted` is there when the sharer runs on the same machine and listens on its share number
+/// itself, so that the visitor yields; that says nothing about what these tests look at.
 pub fn without_local(mut reply: Value) -> Value {
-    let (first, count) = rapp_service::MAP_PORTS;
+    let (first, count) = TEST_PORTS;
     for h in reply.get_mut("hosts").and_then(Value::as_array_mut).into_iter().flatten() {
         for s in h.get_mut("shares").and_then(Value::as_array_mut).into_iter().flatten() {
             let s = s.as_object_mut().unwrap();
             let local = s.remove("local").and_then(|l| l.as_u64()).expect("a local port");
             assert!((first as u64..first as u64 + count as u64).contains(&local), "{local}");
+            if let Some(wanted) = s.remove("wanted") {
+                assert!(wanted.as_u64().is_some_and(|w| w != local), "{wanted}");
+            }
             let addr = s.remove("addr").expect("an address");
-            let want = [format!("http://localhost:{local}"), format!("ssh -p {local} localhost")];
+            let want = ["http", "https", "tcp"].map(|p| format!("{p}://localhost:{local}"));
+            let want = [&want[..], &[format!("ssh -p {local} localhost")]].concat();
             assert!(want.iter().any(|w| addr == w.as_str()), "{addr}");
         }
     }

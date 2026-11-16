@@ -151,9 +151,13 @@ pub async fn serve_list(state: &Arc<State>, mut s: Pipe, peer: Peer) -> Result<(
     reply_and_finish(&mut s, &reply).await
 }
 
-/// What `list_shares` tells about one share: its port, and its note when there is one.
+/// What `list_shares` tells about one share: its port, its number when it has one, what it
+/// speaks, and its note when there is one.
 fn listed(share: &Share) -> Value {
-    let mut v = json!({"port": share.port});
+    let mut v = json!({"port": share.port, "proto": share.protocol().as_str()});
+    if let Some(local) = share.local {
+        v["local"] = json!(local);
+    }
     if !share.note.is_empty() {
         v["note"] = json!(share.note);
     }
@@ -236,7 +240,7 @@ pub(crate) async fn connect_local(addrs: &[SocketAddr], wait: Duration) -> Optio
 mod tests {
     use super::*;
 
-    fn share(allow: Vec<Fp>) -> Share { Share { port: 8000, note: String::new(), allow, raw: false, open_web: false } }
+    fn share(allow: Vec<Fp>) -> Share { Share { allow, ..Share::new(8000) } }
     const A: Fp = Fp([1; 32]);
     const B: Fp = Fp([2; 32]);
 

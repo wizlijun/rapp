@@ -1,7 +1,7 @@
 //! Changing this device's share table: the one code path for the local IPC and (Task 2) a device that may set it.
 
 use crate::forward::{admit, Caller};
-use crate::shares::{sensitive, Patch, Share, Shared};
+use crate::shares::{sensitive, Patch, Proto, Share, Shared};
 use crate::state::{Peer, State};
 use anyhow::Result;
 use rapp_conn::Pipe;
@@ -74,16 +74,37 @@ pub fn share(state: &State, req: &Value, allow: Allow, by: &By) -> Result<Vec<Sh
         By::Local => req["raw"].as_bool(),
         By::Remote(_) => None,
     };
-    let patch = Patch { note: req["note"].as_str().map(str::to_string), allow, raw };
-    let done = state.shares.share_all(&ports, &patch).map_err(|e| format!("{e:#}"))?;
+    let proto = match &req["proto"] {
+        Value::Null => None,
+        v => Some(v.as_str().and_then(Proto::parse).ok_or("bad proto")?),
+    };
+    let patch = Patch { note: req["note"].as_str().map(str::to_string), allow, raw, proto };
+    let done = state.shares.share_all(&ports, &patch, &|used| crate::numbers::pick(state, used)).map_err(|e| format!("{e:#}"))?;
     for d in &done {
         let (port, allow) = (d.share.port, &d.share.allow);
+        // Sharing a port again is how the user says they saw that it moved.
+        state.numbers.clear_renumbered(port);
+        // And it is detected again (`settle`), as what listens there may have changed.
+        state.probed.forget(port);
         state.log.event(Lvl::Info, "share", by.fields(json!({"port": port, "allow": allow.len()})));
         if d.allow_changed {
             state.forwards.cut(port);
         }
     }
+    sync_own(state);
     Ok(done)
+}
+
+/// Makes this device listen on the numbers of its shares as the table has them now. A number
+/// another program has is logged (`share_number_taken`) once per share and number, not on every
+/// call: the table asks again each time it is read, to take the number once it is free.
+pub fn sync_own(state: &State) {
+    for s in state.own.sync(&|| state.shares.list()) {
+        let Some(local) = s.local else { continue };
+        if state.own.first_taken(s.port, local) {
+            state.log.event(Lvl::Warn, "share_number_taken", json!({"port": s.port, "local": local}));
+        }
+    }
 }
 
 /// The devices the `allow` array names (an empty one: none, which means every trusted device).
@@ -121,14 +142,19 @@ pub fn unshare(state: &State, port: &Value, by: &By) -> Result<bool, String> {
     if was {
         state.log.event(Lvl::Info, "unshare", by.fields(json!({"port": port})));
     }
+    // A share of it later is detected afresh.
+    state.probed.forget(port);
     // Also when it was not shared: a forward may still run from a share removed by hand.
     state.forwards.cut(port);
+    sync_own(state);
     Ok(was)
 }
 
 /// The whole share table, each share with whether something accepts on its port now: on the
 /// addresses a forward would reach (`127.0.0.1`, then `[::1]`). All ports are probed at once.
 pub async fn table(state: &Arc<State>) -> Vec<(Share, bool)> {
+    // Retries a number another program had.
+    sync_own(state);
     let list = state.shares.list();
     let probes: Vec<_> = list
         .iter()
@@ -139,11 +165,55 @@ pub async fn table(state: &Arc<State>) -> Vec<(Share, bool)> {
             })
         })
         .collect();
-    let mut out = Vec::new();
-    for (s, probe) in list.into_iter().zip(probes) {
-        out.push((s, probe.await.unwrap_or(false)));
+    let mut listening = Vec::new();
+    for (s, probe) in list.iter().zip(probes) {
+        if probe.await.unwrap_or(false) {
+            listening.push(s.port);
+        }
     }
-    out
+    // A port nothing listened on when it was shared is detected now that something does.
+    settle(state, &listening).await;
+    // Read again: `settle` may have changed what some of them speak.
+    state
+        .shares
+        .list()
+        .into_iter()
+        .map(|s| {
+            let on = listening.contains(&s.port);
+            (s, on)
+        })
+        .collect()
+}
+
+/// Detects the protocol of each share of `ports` that is still `proto_auto` and not detected
+/// yet in this run (`Probed`), all at once, and records what was found. A port nothing accepts
+/// on keeps its guess and is left to a later call. No lock of `state` is held while probing:
+/// the table is read first, and `set_proto` checks again that the share is there and still
+/// `proto_auto` (the sharer may have chosen a protocol meanwhile).
+pub async fn settle(state: &State, ports: &[u16]) {
+    let mut todo: Vec<u16> = ports
+        .iter()
+        .copied()
+        .filter(|&p| !state.probed.has(p) && state.shares.get(p).is_some_and(|s| s.proto_auto))
+        .collect();
+    todo.sort_unstable();
+    todo.dedup();
+    let mut probes = tokio::task::JoinSet::new();
+    for port in todo {
+        probes.spawn(async move { (port, crate::probe::detect(port).await) });
+    }
+    while let Some(done) = probes.join_next().await {
+        let Ok((port, Some(proto))) = done else { continue };
+        if let Err(e) = state.shares.set_proto(port, proto, true) {
+            state.log.event(Lvl::Warn, "share_proto_failed", json!({"port": port, "error": format!("{e:#}")}));
+            continue;
+        }
+        // Not when the share went away or the sharer chose meanwhile: `set_proto` left those.
+        if state.shares.get(port).is_some_and(|s| s.proto_auto) {
+            state.probed.mark(port);
+            state.log.event(Lvl::Info, "share_proto", json!({"port": port, "proto": proto.as_str()}));
+        }
+    }
 }
 
 /// Answers `shares`, `share` or `unshare` from another device with one JSON line, then closes
@@ -173,24 +243,35 @@ async fn answer(state: &Arc<State>, op: &Op, peer: &Peer) -> Value {
                 .into_iter()
                 .map(|(s, listening)| {
                     let allow: Vec<Value> = s.allow.iter().map(|fp| device(fp, &state.paired.name_of(fp).unwrap_or_default())).collect();
-                    json!({"port": s.port, "note": s.note, "allow": allow, "listening": listening})
+                    let mut v = json!({
+                        "port": s.port, "note": s.note, "allow": allow, "listening": listening,
+                        "proto": s.protocol().as_str(), "proto_auto": s.proto_auto,
+                    });
+                    if let Some(local) = s.local {
+                        v["local"] = json!(local);
+                    }
+                    v
                 })
                 .collect();
             let known: Vec<Value> = state.paired.list().iter().map(|(fp, n)| device(fp, n)).collect();
             ok(json!({"shares": shares, "known": known}))
         }
-        Op::Share { ports, note, allow } => {
-            let mut req = json!({"ports": ports, "allow": allow});
+        Op::Share { ports, note, allow, proto } => {
+            let mut req = json!({"ports": ports, "allow": allow, "proto": proto});
             if let Some(note) = note {
                 req["note"] = json!(note);
             }
             match share(state, &req, Allow::Fps, &by) {
                 Ok(done) => {
-                    let shared: Vec<Value> = done
+                    let shared: Vec<Value> = settled(state, &done)
+                        .await
                         .iter()
-                        .map(|d| {
-                            let mut v = json!({"port": d.share.port});
-                            if sensitive(d.share.port) {
+                        .map(|s| {
+                            let mut v = json!({"port": s.port, "proto": s.protocol().as_str(), "proto_auto": s.proto_auto});
+                            if let Some(local) = s.local {
+                                v["local"] = json!(local);
+                            }
+                            if sensitive(s.port) {
                                 v["warn"] = json!(SENSITIVE_WARN);
                             }
                             v
@@ -209,6 +290,16 @@ async fn answer(state: &Arc<State>, op: &Op, peer: &Peer) -> Value {
     }
 }
 
+/// The shares `share` just made, after `settle` detected their protocols: the reply to a
+/// share says what was found, so the sharer can show the right address at once. A share gone
+/// meanwhile is as `share` left it.
+pub async fn settled(state: &State, done: &[Shared]) -> Vec<Share> {
+    let ports: Vec<u16> = done.iter().map(|d| d.share.port).collect();
+    settle(state, &ports).await;
+    done.iter().map(|d| state.shares.get(d.share.port).unwrap_or_else(|| d.share.clone())).collect()
+}
+
+/// Logs why a request of another device was refused, and the reply that says so.
 fn refused(state: &State, peer: &Peer, op: &str, reason: String) -> Value {
     state.log.event(Lvl::Warn, "share_refused", By::Remote(peer).fields(json!({"op": op, "reason": reason})));
     err(&reason)

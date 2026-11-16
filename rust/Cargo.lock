@@ -1499,6 +1499,7 @@ dependencies = [
  "rapp-term",
  "rapp-update",
  "rapp-wire",
+ "rustls",
  "serde",
  "serde_json",
  "tempfile",

@@ -39,18 +39,27 @@ fn names(list: &Value) -> Vec<String> {
     list.as_array().map(|a| a.iter().filter_map(name).collect()).unwrap_or_default()
 }
 
-/// Where a share is used from: its address is a local port of each device that uses it, so
-/// the device sharing it cannot print one.
-const ELSEWHERE: &str = "在别的设备上用：打开 rapp 的设备面板，或运行 rapp hosts，看那台设备上的地址";
+/// `s` as an address cell: the service gives an empty `addr` when no number in the range is
+/// free, and then there is nothing to type, which the user is told in words.
+fn address(s: &Value) -> Option<String> {
+    s["addr"].as_str().filter(|a| !a.is_empty()).map(plain)
+}
 
-/// One `已分享：<port>` per port; right under it who the share is for when it is not for every
-/// device, then a warning. At the end, where to find the address.
+/// One `已分享：<port> → <address>` per port, with what the protocol is when it was detected;
+/// right under it who the share is for when it is not for every device, then a warning. At the
+/// end, that the other devices use the same address (the number is the same everywhere).
 pub fn shared(reply: &Value) -> String {
     let mut out = String::new();
     let empty = Vec::new();
     let list = reply["shared"].as_array().unwrap_or(&empty);
     for s in list {
-        out.push_str(&format!("已分享：{}\n", s["port"]));
+        match address(s) {
+            Some(addr) if s["proto_auto"] == true => {
+                out.push_str(&format!("已分享：{} → {addr}（探测到 {}）\n", s["port"], plain(s["proto"].as_str().unwrap_or(""))))
+            }
+            Some(addr) => out.push_str(&format!("已分享：{} → {addr}\n", s["port"])),
+            None => out.push_str(&format!("已分享：{}（没有空的号）\n", s["port"])),
+        }
         let allow = names(&s["allow"]);
         if !allow.is_empty() {
             out.push_str(&format!("只给：{}\n", allow.join("、")));
@@ -60,9 +69,8 @@ pub fn shared(reply: &Value) -> String {
             out.push('\n');
         }
     }
-    if !list.is_empty() {
-        out.push_str(ELSEWHERE);
-        out.push('\n');
+    if list.iter().any(|s| address(s).is_some()) {
+        out.push_str("在别的设备上也用这个地址\n");
     }
     out
 }
@@ -97,19 +105,40 @@ fn relay_text(relay: &str) -> &'static str {
 
 /// `rapp share` with no ports: this device's shares.
 pub fn table(reply: &Value) -> String {
-    let id = reply["id"].as_str().map(|id| format!("{id}.rapp")).unwrap_or_else(|| "（还没有 ID）".into());
+    let id = reply["id"].as_str().map(plain).unwrap_or_else(|| "（还没有 ID）".into());
     let out = format!("这台设备：{id}   中继：{}\n", relay_text(reply["relay"].as_str().unwrap_or("")));
     let shares = reply["shares"].as_array().filter(|s| !s.is_empty());
     let Some(shares) = shares else { return out + "（没有分享）\n" };
-    let mut rows = vec![["端口", "状态", "只给"].map(String::from).to_vec()];
+    let mut rows = vec![["端口", "地址", "状态", "只给"].map(String::from).to_vec()];
+    // What goes on the line under a row: a share whose number is not the one it should be says so.
+    let mut notes: Vec<Option<String>> = vec![None];
     for s in shares {
         rows.push(vec![
             s["port"].to_string(),
+            address(s).unwrap_or_else(|| "没有空的号".into()),
             if s["listening"] == true { "有服务在听" } else { "没有服务在听" }.into(),
             names(&s["allow"]).join(","),
         ]);
+        // Both notices name the share's number: one with none (the range had none left) has neither.
+        let local = s["local"].as_u64();
+        notes.push(match (local, s.get("renumbered").filter(|r| r.is_object())) {
+            (Some(local), _) if s["taken"] == true => {
+                Some(format!("本机上 {local} 被别的程序占着，本机请用 localhost:{}", s["port"]))
+            }
+            (Some(local), Some(r)) => Some(format!("{} 和 {} 撞了，换成 {local}", r["from"], plain(r["with"].as_str().unwrap_or("")))),
+            _ => None,
+        });
     }
-    out + &columns(&rows)
+    let mut text = String::new();
+    for (line, note) in columns(&rows).lines().zip(notes) {
+        text.push_str(line);
+        text.push('\n');
+        if let Some(n) = note {
+            text.push_str(&n);
+            text.push('\n');
+        }
+    }
+    out + &text
 }
 
 /// `rapp hosts`: each known device with its ports and where each is reached on this computer
@@ -122,7 +151,7 @@ pub fn hosts(reply: &Value) -> String {
     }
     let mut rows: Vec<Vec<String>> = Vec::new();
     for h in list {
-        let mut who = vec![plain(h["name"].as_str().unwrap_or("")), format!("{}.rapp", plain(h["id"].as_str().unwrap_or("")))];
+        let mut who = vec![plain(h["name"].as_str().unwrap_or("")), plain(h["id"].as_str().unwrap_or(""))];
         let what = match (h["error"].as_str(), h["shares"].as_array()) {
             (Some("offline"), _) => "不在线".to_string(),
             (Some("no key"), _) => "这台设备还没有填 key".to_string(),
@@ -133,6 +162,10 @@ pub fn hosts(reply: &Value) -> String {
                     // The device is named on its first line only.
                     let mut row = std::mem::replace(&mut who, vec![String::new(), String::new()]);
                     row.extend([s["port"].to_string(), addr]);
+                    // This device yielded: its address is not the share number.
+                    if let Some(w) = s["wanted"].as_u64() {
+                        row.push(format!("这台上是 {}（{w} 被占）", s["local"]));
+                    }
                     rows.push(row);
                 }
                 continue;
@@ -165,32 +198,39 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn shared_prints_the_port_the_warning_and_where_the_address_is() {
+    fn shared_prints_the_address_with_the_protocol_and_the_warning() {
         let r = json!({"ok":true,"shared":[
-            {"port":8000},
-            {"port":22,"warn":"分享这个端口，等于把这台机器能到的网络也交出去"}]});
+            {"port":8007,"local":28000,"proto":"http","proto_auto":true,"addr":"http://localhost:28000"},
+            {"port":22,"local":28001,"proto":"ssh","proto_auto":true,"addr":"ssh -p 28001 localhost",
+             "warn":"分享这个端口，等于把这台机器能到的网络也交出去"}]});
         assert_eq!(
             shared(&r),
-            format!("已分享：8000\n已分享：22\n分享这个端口，等于把这台机器能到的网络也交出去\n{ELSEWHERE}\n")
+            "已分享：8007 → http://localhost:28000（探测到 http）\n\
+             已分享：22 → ssh -p 28001 localhost（探测到 ssh）\n\
+             分享这个端口，等于把这台机器能到的网络也交出去\n\
+             在别的设备上也用这个地址\n"
         );
         assert_eq!(shared(&json!({"ok":true,"shared":[]})), "");
-        assert!(!shared(&r).contains(".rapp:"), "an address no device can open is not printed");
+        let chosen = json!({"ok":true,"shared":[
+            {"port":8007,"local":28000,"proto":"tcp","proto_auto":false,"addr":"tcp://localhost:28000"}]});
+        assert_eq!(shared(&chosen), "已分享：8007 → tcp://localhost:28000\n在别的设备上也用这个地址\n");
+        let none = json!({"ok":true,"shared":[{"port":8007,"proto":"http","proto_auto":true,"addr":""}]});
+        assert_eq!(shared(&none), "已分享：8007（没有空的号）\n");
+        assert!(!shared(&r).contains(".rapp"));
     }
 
     #[test]
     fn shared_says_who_a_restricted_share_is_for() {
         let r = json!({"ok":true,"shared":[
-            {"port":8000,"allow":["mini","abababab"]},
-            {"port":22,"allow":["mini"],"warn":"分享这个端口，等于把这台机器能到的网络也交出去"},
-            {"port":8001},
-            {"port":8002,"allow":[]}]});
+            {"port":8000,"addr":"http://localhost:28000","proto_auto":true,"proto":"http","allow":["mini","abababab"]},
+            {"port":22,"addr":"ssh -p 28001 localhost","proto_auto":false,"proto":"ssh","allow":["mini"],"warn":"分享这个端口，等于把这台机器能到的网络也交出去"},
+            {"port":8001,"addr":"http://localhost:28002","proto_auto":false,"proto":"http"},
+            {"port":8002,"addr":"","allow":[]}]});
         assert_eq!(
             shared(&r),
-            format!(
-                "已分享：8000\n只给：mini、abababab\n\
-                 已分享：22\n只给：mini\n分享这个端口，等于把这台机器能到的网络也交出去\n\
-                 已分享：8001\n已分享：8002\n{ELSEWHERE}\n"
-            )
+            "已分享：8000 → http://localhost:28000（探测到 http）\n只给：mini、abababab\n\
+             已分享：22 → ssh -p 28001 localhost\n只给：mini\n分享这个端口，等于把这台机器能到的网络也交出去\n\
+             已分享：8001 → http://localhost:28002\n已分享：8002（没有空的号）\n在别的设备上也用这个地址\n"
         );
     }
 
@@ -202,11 +242,11 @@ mod tests {
         assert_eq!(plain(evil), clean);
         assert_eq!(plain("书房 mini-2"), "书房 mini-2");
 
-        let r = json!({"ok":true,"shared":[{"port":8000,"allow":[evil,"b"]}]});
-        assert_eq!(shared(&r), format!("已分享：8000\n只给：{clean}、b\n{ELSEWHERE}\n"));
+        let r = json!({"ok":true,"shared":[{"port":8000,"addr":"http://localhost:28000","proto_auto":false,"allow":[evil,"b"]}]});
+        assert_eq!(shared(&r), format!("已分享：8000 → http://localhost:28000\n只给：{clean}、b\n在别的设备上也用这个地址\n"));
 
         let r = json!({"ok":true,"id":"123456789","relay":"connected","shares":[
-            {"port":22,"allow":[{"fp":"ab","name":evil}],"addr":"ssh localhost","listening":true}]});
+            {"port":22,"allow":[{"fp":"ab","name":evil}],"addr":"ssh -p 28000 localhost","listening":true}]});
         let t = table(&r);
         assert!(t.lines().nth(2).unwrap().contains(clean), "{t:?}");
         assert_eq!((t.lines().count(), t.chars().filter(|c| c.is_control()).count()), (3, 3), "{t:?}");
@@ -248,13 +288,51 @@ mod tests {
     #[test]
     fn table_with_and_without_shares() {
         let none = json!({"ok":true,"id":"123456789","relay":"connected","shares":[]});
-        assert_eq!(table(&none), "这台设备：123456789.rapp   中继：已连接\n（没有分享）\n");
+        assert_eq!(table(&none), "这台设备：123456789   中继：已连接\n（没有分享）\n");
         let some = json!({"ok":true,"id":"123456789","relay":"connected","shares":[
-            {"port":22,"allow":[{"fp":"ab","name":"mini"}],"addr":"ssh localhost","listening":true},
-            {"port":8000,"addr":"http://localhost:8000","listening":false}]});
+            {"port":22,"allow":[{"fp":"ab","name":"mini"}],"addr":"ssh -p 28001 localhost","listening":true},
+            {"port":8000,"addr":"http://localhost:28000","listening":false},
+            {"port":9000,"addr":"","listening":false}]});
         assert_eq!(
             table(&some),
-            "这台设备：123456789.rapp   中继：已连接\n端口  状态          只给\n22    有服务在听    mini\n8000  没有服务在听\n"
+            "这台设备：123456789   中继：已连接\n\
+             端口  地址                    状态          只给\n\
+             22    ssh -p 28001 localhost  有服务在听    mini\n\
+             8000  http://localhost:28000  没有服务在听\n\
+             9000  没有空的号              没有服务在听\n"
+        );
+    }
+
+    #[test]
+    fn table_says_when_a_number_is_taken_or_was_changed() {
+        let r = json!({"ok":true,"id":"123456789","relay":"connected","shares":[
+            {"port":8007,"addr":"http://localhost:28000","listening":true,"local":28000,"taken":true},
+            {"port":8008,"addr":"http://localhost:28003","listening":true,"local":28003,"renumbered":{"from":28000,"with":"Mini"}},
+            {"port":8009,"addr":"http://localhost:28004","listening":true}]});
+        assert_eq!(
+            table(&r),
+            "这台设备：123456789   中继：已连接\n\
+             端口  地址                    状态        只给\n\
+             8007  http://localhost:28000  有服务在听\n\
+             本机上 28000 被别的程序占着，本机请用 localhost:8007\n\
+             8008  http://localhost:28003  有服务在听\n\
+             28000 和 Mini 撞了，换成 28003\n\
+             8009  http://localhost:28004  有服务在听\n"
+        );
+    }
+
+    /// A share with no number here (the range had none) has no notice: not "0", not "null".
+    #[test]
+    fn a_notice_needs_a_number() {
+        let r = json!({"ok":true,"id":"123456789","relay":"connected","shares":[
+            {"port":8007,"listening":true,"taken":true},
+            {"port":8008,"listening":true,"renumbered":{"from":28000,"with":"Mini"}}]});
+        assert_eq!(
+            table(&r),
+            "这台设备：123456789   中继：已连接\n\
+             端口  地址        状态        只给\n\
+             8007  没有空的号  有服务在听\n\
+             8008  没有空的号  有服务在听\n"
         );
     }
 
@@ -262,7 +340,7 @@ mod tests {
     fn relay_states_have_a_text_each() {
         for (relay, want) in [("connecting", "连接中"), ("error", "出错"), ("off", "没有配置")] {
             let r = json!({"id":"123456789","relay":relay,"shares":[]});
-            assert!(table(&r).starts_with(&format!("这台设备：123456789.rapp   中继：{want}\n")), "{relay}");
+            assert!(table(&r).starts_with(&format!("这台设备：123456789   中继：{want}\n")), "{relay}");
         }
     }
 
@@ -272,16 +350,18 @@ mod tests {
             {"id":"123456789","name":"gpu1","shares":[
                 {"port":8000,"local":28000,"addr":"http://localhost:28000"},
                 {"port":22,"local":28001,"addr":"ssh -p 28001 localhost"},
-                {"port":9000}]},
+                {"port":9000},
+                {"port":8001,"local":28003,"addr":"http://localhost:28003","wanted":28002}]},
             {"id":"987654321","name":"mini","error":"offline"},
             {"id":"111111111","name":"书房","shares":[]}]});
         assert_eq!(
             hosts(&r),
-            "gpu1  123456789.rapp  8000  http://localhost:28000\n\
-             \x20                     22    ssh -p 28001 localhost\n\
-             \x20                     9000  （没有本机端口可用）\n\
-             mini  987654321.rapp  不在线\n\
-             书房  111111111.rapp  （没有分享）\n"
+            "gpu1  123456789  8000  http://localhost:28000\n\
+             \x20                22    ssh -p 28001 localhost\n\
+             \x20                9000  （没有本机端口可用）\n\
+             \x20                8001  http://localhost:28003  这台上是 28003（28002 被占）\n\
+             mini  987654321  不在线\n\
+             书房  111111111  （没有分享）\n"
         );
     }
 }

@@ -190,6 +190,14 @@ class _SharesSectionState extends State<SharesSection> {
                   _warns.remove(r.port);
                 }),
                 onAllow: () => _pick(r, table.known),
+                ownTable: widget.to == null,
+                canPickProto: !table.old,
+                onProto: (p) => _set(() async {
+                  await widget.api.share(to: widget.to, ports: [r.port], proto: p);
+                }),
+                onAck: () => _set(() async {
+                  await widget.api.share(to: widget.to, ports: [r.port]);
+                }),
                 onNote: (s) => _set(() async {
                   await widget.api.share(to: widget.to, ports: [r.port], note: s.trim());
                 }),
@@ -248,6 +256,10 @@ class _ShareRowView extends StatelessWidget {
     required this.onUnshare,
     required this.onAllow,
     required this.onNote,
+    required this.ownTable,
+    required this.canPickProto,
+    required this.onProto,
+    required this.onAck,
   });
   final ShareRow row;
   final RappTokens t;
@@ -258,6 +270,42 @@ class _ShareRowView extends StatelessWidget {
   final VoidCallback onUnshare;
   final VoidCallback onAllow;
   final ValueChanged<String> onNote;
+
+  /// This device's own table: a missing address means no free number, not no way to the share.
+  final bool ownTable;
+
+  /// False for an older device, which would ignore a protocol.
+  final bool canPickProto;
+  final ValueChanged<String> onProto;
+
+  /// Acknowledges a renumbering (a plain share call clears the notice).
+  final VoidCallback onAck;
+
+  static const _protos = ['http', 'https', 'tcp', 'ssh'];
+
+  /// The notices under a row, in the exact words the CLI uses.
+  List<String> get _notices => [
+        if (row.wanted != null && row.local != null) '这台上是 ${row.local}（${row.wanted} 被占）',
+        if (row.taken && row.local != null) '本机上 ${row.local} 被别的程序占着，本机请用 localhost:${row.port}',
+      ];
+
+  /// The protocol control: a menu in the style of the window menu; picking the current one is a no-op.
+  Widget _protoPicker() => PopupMenuButton<String>(
+        key: Key('share-proto-${row.port}'),
+        tooltip: '协议',
+        enabled: !busy,
+        onSelected: (p) {
+          if (p != row.proto) onProto(p);
+        },
+        itemBuilder: (_) => [for (final p in _protos) PopupMenuItem<String>(value: p, child: Text(p))],
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Text(row.proto, style: TextStyle(color: t.text)),
+            Icon(Icons.arrow_drop_down, size: 16, color: t.muted),
+          ]),
+        ),
+      );
 
   TextStyle get _mono => TextStyle(fontFamily: t.mono, fontFamilyFallback: t.monoFallback, color: t.muted);
 
@@ -272,7 +320,7 @@ class _ShareRowView extends StatelessWidget {
     final addr = row.addr;
     // No address: the share is not for this computer (the scope button says so), or the
     // service has no local port left for it.
-    final shown = addr.isNotEmpty ? addr : (row.mine ? '没有本机端口可用' : '');
+    final shown = addr.isNotEmpty ? addr : (row.mine ? (ownTable ? '没有空的号' : '没有本机端口可用') : '');
     return Container(
       key: Key('share-row-${row.port}'),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -309,6 +357,8 @@ class _ShareRowView extends StatelessWidget {
                   constraints: const BoxConstraints(maxWidth: 220),
                   child: RappButton.secondary(key: Key('share-allow-${row.port}'), label: _scope, oneLine: true, onPressed: busy ? null : onAllow),
                 ),
+                if (canPickProto) _protoPicker(),
+                if (canPickProto && row.protoAuto) Text('自动', style: TextStyle(color: t.muted)),
                 if (row.web)
                   RappButton.secondary(key: Key('share-open-${row.port}'), label: '打开', onPressed: openEnabled ? onOpen : null),
                 RappButton.secondary(
@@ -324,6 +374,21 @@ class _ShareRowView extends StatelessWidget {
               ],
             ),
           ),
+          for (final n in _notices)
+            Padding(padding: const EdgeInsets.only(top: 4), child: Text(n, style: TextStyle(color: t.muted))),
+          // The notice names the new number: a share with none (the range had none left) has no notice.
+          if (row.renumbered != null && row.local != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(children: [
+                Flexible(
+                  child: Text('${row.renumbered!.from} 和 ${row.renumbered!.with_} 撞了，换成 ${row.local}',
+                      style: TextStyle(color: t.accent)),
+                ),
+                const SizedBox(width: 8),
+                RappButton.secondary(key: Key('share-renumbered-ok-${row.port}'), label: '知道了', onPressed: busy ? null : onAck),
+              ]),
+            ),
           if (warn != null)
             Padding(
               padding: const EdgeInsets.only(top: 4),

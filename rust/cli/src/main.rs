@@ -96,7 +96,7 @@ async fn main() {
             }
             print!("{}", say::table(&r));
         }
-        Cmd::Share { ports, allow, raw, note } => {
+        Cmd::Share { ports, allow, raw, note, proto } => {
             // What is not written is not sent: the service keeps what the port's share has now.
             let mut c = json!({"cmd":"share","ports":ports});
             if raw {
@@ -107,6 +107,9 @@ async fn main() {
             }
             if let Some(n) = note {
                 c["note"] = json!(n);
+            }
+            if let Some(p) = proto {
+                c["proto"] = json!(p);
             }
             let (r, ..) = call(c).await;
             if r["ok"] != true {

@@ -98,6 +98,12 @@ pub struct State {
     pub shares: crate::shares::Shares,
     /// The local ports that carry to other devices' shares.
     pub maps: crate::maps::Maps,
+    /// The share numbers other devices are seen to use.
+    pub numbers: crate::numbers::Numbers,
+    /// This device's own shares, served on their numbers.
+    pub own: crate::own::Own,
+    /// The shared ports whose protocol was detected in this run (`sharing::settle`).
+    pub probed: crate::probe::Probed,
     /// The forwards running now.
     pub forwards: crate::forward::Forwards,
     /// See `Opts::forward_priority`.

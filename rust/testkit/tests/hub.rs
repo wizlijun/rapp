@@ -677,7 +677,8 @@ impl LanA {
                 forward_priority: rapp_conn::relay::FORWARD_PRIORITY,
                 channels: true,
                 pacing: true,
-                map_ports: rapp_service::MAP_PORTS,
+                map_ports: TEST_PORTS,
+        own_ports: true,
             };
             match rapp_service::Service::start(opts).await {
                 Ok(s) => {

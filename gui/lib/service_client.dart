@@ -417,8 +417,8 @@ class ServiceMonitor extends ChangeNotifier implements SharesApi {
       ShareTable.fromJson(await _remoteRequest({'cmd': 'shares', 'to': ?to}));
 
   @override
-  Future<List<Shared>> share({String? to, required List<int> ports, String? note, List<String>? allow}) async {
-    final r = await _remoteRequest({'cmd': 'share', 'to': ?to, 'ports': ports, 'note': ?note, 'allow': ?allow});
+  Future<List<Shared>> share({String? to, required List<int> ports, String? note, List<String>? allow, String? proto}) async {
+    final r = await _remoteRequest({'cmd': 'share', 'to': ?to, 'ports': ports, 'note': ?note, 'allow': ?allow, 'proto': ?proto});
     return [
       for (final s in (r['shared'] as List? ?? const []))
         if (s is Map) Shared(port: (s['port'] as num).toInt(), warn: s['warn']?.toString()),
