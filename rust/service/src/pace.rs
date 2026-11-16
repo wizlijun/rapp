@@ -127,7 +127,8 @@ fn depth(rate: u64) -> f64 {
 }
 
 enum Take {
-    Go(usize),
+    /// Bytes allowed, and whether they were charged to the bucket.
+    Go(usize, bool),
     Wait(Duration),
 }
 
@@ -242,12 +243,23 @@ impl Pacer {
         st.last = tokio::time::Instant::now();
     }
 
+    /// Give back tokens charged for bytes the inner pipe did not accept.
+    fn refund(&self, n: usize) {
+        if n == 0 {
+            return;
+        }
+        let mut st = self.state.lock().unwrap();
+        if let Some(rate) = st.rate {
+            st.tokens = (st.tokens + n as f64).min(depth(rate));
+        }
+    }
+
     /// How many of `want` bytes may go now, or how long to wait for a worthwhile chunk.
     fn take(&self, want: usize) -> Take {
         let mut st = self.state.lock().unwrap();
         let rate = match st.rate {
             Some(r) if self.sessions.load(Ordering::SeqCst) > 0 => r,
-            _ => return Take::Go(want),
+            _ => return Take::Go(want, false),
         };
         let now = tokio::time::Instant::now();
         let per_sec = rate as f64 / 8.0;
@@ -258,7 +270,7 @@ impl Pacer {
         if st.tokens >= need {
             let n = want.min(st.tokens as usize);
             st.tokens -= n as f64;
-            Take::Go(n)
+            Take::Go(n, true)
         } else {
             Take::Wait(Duration::from_secs_f64((need - st.tokens) / per_sec))
         }
@@ -302,10 +314,15 @@ impl AsyncWrite for Paced {
                     continue;
                 }
             }
-            let Take::Go(n) = act else { unreachable!() };
+            let Take::Go(n, charged) = act else { unreachable!() };
             let r = Pin::new(&mut self.inner).poll_write(cx, &buf[..n]);
-            if let Poll::Ready(Ok(w)) = &r {
-                self.pacer.sent.fetch_add(*w as u64, Ordering::Relaxed);
+            let written = match &r {
+                Poll::Ready(Ok(w)) => *w,
+                _ => 0,
+            };
+            self.pacer.sent.fetch_add(written as u64, Ordering::Relaxed);
+            if charged {
+                self.pacer.refund(n - written);
             }
             return r;
         }
@@ -472,6 +489,24 @@ mod tests {
         drop(g);
         let done = writer.await.unwrap();
         assert!(done.duration_since(t) <= ms(110), "{:?}", done.duration_since(t));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn backpressure_does_not_burn_tokens() {
+        let p = Pacer::new(true);
+        let _g = p.session();
+        p.force_rate(8_000_000);
+        let (a, _b) = duplex(4096); // nobody reads: the inner pipe fills and returns Pending
+        let mut w = p.wrap(Box::new(a));
+        let writer = tokio::spawn(async move {
+            let _ = w.write_all(&vec![0u8; 100_000]).await;
+        });
+        tokio::time::sleep(ms(1)).await;
+        let tokens = p.state.lock().unwrap().tokens;
+        // 16 KiB bucket minus the 4 KiB actually written (plus a little refill), not ~0.
+        assert!(tokens > 10_000.0, "{tokens}");
+        assert_eq!(p.sent.load(Ordering::Relaxed), 4096);
+        writer.abort();
     }
 
     #[tokio::test(start_paused = true)]
