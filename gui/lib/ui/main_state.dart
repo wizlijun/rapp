@@ -557,31 +557,6 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Whether the current session is a terminal whose device can open a window (the 「＋」 shows).
-  bool get canNewTermWindow {
-    final rs = currentRemote, tp = termPort;
-    return rs != null && tp != null && tp.owns(rs.sid) && tp.canNewWindow(rs.sid);
-  }
-
-  // Sessions whose 「＋」 is waiting for its answer (which the port always gives, at the latest at its timeout).
-  final _newWindowPending = <Object>{};
-
-  /// The 「＋」 was clicked: the device opens a window in the viewed pane's directory, and its pane comes as a
-  /// `TermOpenedPaneEvent`. A refusal is said on the stage. A click while the last one is unanswered does nothing.
-  Future<void> newTermWindow() async {
-    final rs = currentRemote, tp = termPort;
-    if (rs == null || tp == null || !tp.owns(rs.sid) || !tp.canNewWindow(rs.sid)) return;
-    final sid = rs.sid;
-    if (!_newWindowPending.add(sid)) return;
-    final String? why;
-    try {
-      why = await tp.newWindow(sid);
-    } finally {
-      _newWindowPending.remove(sid);
-    }
-    if (why != null) tp.model(sid)?.say('新开窗口失败：$why');
-  }
-
   RemoteWindow? _windowOf(RemoteSession rs) {
     for (final w in rs.windows) {
       if (w.id == rs.currentWindow) return w;
@@ -1047,8 +1022,6 @@ class MainState extends ChangeNotifier {
       }
     }
     if (e is WindowsEvent) _syncHidden(rs);
-    // The pane a 「＋」 opened is in the tab list now: show it (selectWindow ignores a pane that is not).
-    if (e is TermOpenedPaneEvent) rs.selectWindow(e.window);
     final start = _starts[e.sid];
     if (start != null && e is ClipsEvent) {
       resources.addClips(r.key, start, _sourceOf(r), e.clips);

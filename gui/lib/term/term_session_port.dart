@@ -12,8 +12,6 @@ import 'term_link.dart';
 import 'term_model.dart';
 import 'term_wire.dart';
 
-export '../embed/session_port.dart' show TermOpenedPaneEvent;
-
 /// The most one paste may be, in UTF-8 bytes (`MAX_PASTE` in the worker).
 const int maxPaste = 1048576;
 
@@ -21,12 +19,6 @@ const pasteTooLong = '太长了：终端一次最多贴 1 MiB';
 const termNoAttach = '终端会话不支持';
 const pasteFailed = '没有贴进去';
 const linkGone = '连接断了';
-
-/// The device's words for a window it could not open (its `error` answer to `new_window`).
-const windowFailed = 'could not open a window';
-
-/// The device's answer to input for a pane that is not one of the session's.
-const noSuchPane = 'no such pane';
 
 /// The writing panel's paste rule (W14): under 800 characters and under 10 lines goes in as text, else a block.
 bool pastesInline(String text) => text.runes.length < 800 && '\n'.allMatches(text).length + 1 < 10;
@@ -41,20 +33,6 @@ class _Paste {
   _Paste(this.lines);
   final List<String> lines;
   final done = Completer<String?>();
-}
-
-/// A `new_window` sent and not answered yet. One past its timeout is settled but stays in the queue as a
-/// placeholder: the device answers every `new_window` in order, so its late answer is its own, not the next one's.
-class _Window {
-  _Window(this.pane, this.timer);
-  final String pane;
-  final Timer timer;
-  final done = Completer<String?>();
-
-  void settle(String? why) {
-    timer.cancel();
-    if (!done.isCompleted) done.complete(why);
-  }
 }
 
 class _Term {
@@ -75,12 +53,6 @@ class _Term {
   /// Pastes in the order made: the first is out and waits for its `pasted`, the rest wait their turn.
   final pastes = Queue<_Paste>();
 
-  /// `new_window`s waiting for their answer, in the order sent.
-  final windows = Queue<_Window>();
-
-  /// Panes of opened windows not in the pane list yet.
-  final opening = <String>{};
-
   /// The latest view asked for, and whether this connection has been sent it.
   ({String pane, int cols, int rows})? view;
   bool viewSent = false;
@@ -89,20 +61,15 @@ class _Term {
 class TermSessionPort extends SessionPort {
   TermSessionPort(
       {Dial? dial,
-      Duration trafficEvery = const Duration(seconds: 1),
-      Duration newWindowTimeout = const Duration(seconds: 10)})
+      Duration trafficEvery = const Duration(seconds: 1)})
       // ignore: prefer_initializing_formals
       : _dial = dial,
         // ignore: prefer_initializing_formals
-        _trafficEvery = trafficEvery,
-        // ignore: prefer_initializing_formals
-        _newWindowTimeout = newWindowTimeout;
+        _trafficEvery = trafficEvery;
 
   final Dial? _dial;
   final Duration _trafficEvery;
 
-  /// How long a `new_window` waits for its answer before it is taken as failed.
-  final Duration _newWindowTimeout;
   final _events = StreamController<SessionEvent>.broadcast();
   final _terms = <Object, _Term>{};
   bool _disposed = false;
@@ -175,10 +142,6 @@ class TermSessionPort extends SessionPort {
     while (t.pastes.isNotEmpty) {
       t.pastes.removeFirst().done.complete(linkGone);
     }
-    while (t.windows.isNotEmpty) {
-      t.windows.removeFirst().settle(linkGone);
-    }
-    t.opening.clear();
   }
 
   Future<void> _start(Object sid, int port, String token) async {
@@ -251,9 +214,6 @@ class TermSessionPort extends SessionPort {
           final cur = m.panes.where((p) => p.active).firstOrNull ?? m.panes.firstOrNull;
           emit(ReadyEvent(t.sid, cur?.command ?? ''));
         }
-        for (final p in m.panes) {
-          if (t.opening.remove(p.id)) emit(TermOpenedPaneEvent(t.sid, p.number));
-        }
       case TermScreen():
         if (!m.more) t.screens++;
         final rev = t.model.apply(m);
@@ -264,11 +224,6 @@ class TermSessionPort extends SessionPort {
       case TermError():
         if (m.error == 'session ended') {
           _lost(t, 'session ended');
-        } else if (t.windows.isNotEmpty &&
-            (m.error == windowFailed ||
-                // Refused because its pane went between our listing and the device reading the request.
-                (m.error == noSuchPane && !t.panes.any((p) => p.id == t.windows.first.pane)))) {
-          t.windows.removeFirst().settle(m.error);
         } else {
           t.model.fail(m.error);
         }
@@ -278,14 +233,6 @@ class TermSessionPort extends SessionPort {
         if (t.pastes.isEmpty) return;
         t.pastes.removeFirst().done.complete(m.ok ? null : (m.error ?? pasteFailed));
         if (t.pastes.isNotEmpty) _sendPaste(t, t.pastes.first);
-      case TermWindowOpened():
-        if (t.windows.isNotEmpty) t.windows.removeFirst().settle(null);
-        final p = t.panes.where((p) => p.id == m.pane).firstOrNull;
-        if (p != null) {
-          emit(TermOpenedPaneEvent(t.sid, p.number));
-        } else {
-          t.opening.add(m.pane);
-        }
     }
   }
 
@@ -394,24 +341,6 @@ class TermSessionPort extends SessionPort {
     paste(sid, data.toString()).then(done, onError: (Object _) => done(pasteFailed));
   }
 
-  /// The device can open windows (`hello` v2 and up).
-  bool canNewWindow(Object sid) => (_terms[sid]?.v ?? 0) >= 2;
-
-  /// Opens a window beside the pane being viewed: null when it opened, otherwise the device's words (or
-  /// [windowFailed] when there is no answer in time). Its pane comes as a [TermOpenedPaneEvent] once it is in the
-  /// pane list. A viewed pane the list does not have is not asked about.
-  Future<String?> newWindow(Object sid) {
-    final t = _terms[sid];
-    if (t == null || !_live(t)) return Future.value(linkGone);
-    final pane = t.view?.pane;
-    if (pane == null || !canNewWindow(sid) || !t.panes.any((p) => p.id == pane)) return Future.value(windowFailed);
-    late final _Window w;
-    w = _Window(pane, Timer(_newWindowTimeout, () => w.settle(windowFailed)));
-    t.windows.add(w);
-    t.link!.sendLine(newWindowMsg(pane));
-    return w.done.future;
-  }
-
   /// Shows pane [window] at [cols]x[rows]; the same parameters are not sent twice on one connection.
   void view(Object sid, int window, int cols, int rows) {
     final t = _terms[sid];
@@ -430,13 +359,6 @@ class TermSessionPort extends SessionPort {
     lastRows = v.rows;
     t.model.expect(v.pane);
     t.link!.send(viewMsg(v.pane, v.cols, v.rows));
-  }
-
-  /// Asks the device to fit the pane to the latest view again.
-  void refit(Object sid) {
-    final t = _terms[sid], v = t?.view;
-    if (t == null || v == null || t.disconnected) return;
-    t.link?.send(refitMsg(v.pane, v.cols, v.rows));
   }
 
   /// Sends the next history request the model wants, if any.

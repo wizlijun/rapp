@@ -49,8 +49,6 @@ class DevicesTab extends StatefulWidget {
 class _DevicesTabState extends State<DevicesTab> {
   final _bundle = TextEditingController();
   final _requested = <String>{};
-  // Per device: a failed SSH host remove, with the terminal list it was shown on; a new list clears it.
-  final _removeErrors = <String, ({String text, TermList? list})>{};
 
   MainState get state => widget.state;
 
@@ -279,12 +277,9 @@ class _DevicesTabState extends State<DevicesTab> {
         ),
       );
 
-  /// The 终端 row and, below it and always expanded, its sessions, terminal apps, SSH hosts and 打开方式.
+  /// The 终端 row and, below it and always expanded, its sessions, terminal apps and 打开方式.
   List<Widget> _termsEntry(BuildContext context, String id, TermList? list, List<HubApp> apps) {
     final t = RappTokens.of(context);
-    final failed = _removeErrors[id];
-    if (failed != null && !identical(failed.list, list)) _removeErrors.remove(id);
-    final removeError = _removeErrors[id]?.text;
     if (list != null && !list.off && list.error != null) {
       return [Padding(padding: const EdgeInsets.only(bottom: 6), child: Text('终端：${list.error}', style: TextStyle(color: t.accent)))];
     }
@@ -342,37 +337,9 @@ class _DevicesTabState extends State<DevicesTab> {
                   onOpen: () => state.openOrSwitch(id, a.app, a.name),
                 ),
               ),
-            for (final h in list.hosts)
-              if (h.host != null)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          '${h.host} · ${h.target ?? ''}${h.error == null ? '' : '　连不上：${h.error}'}',
-                          style: TextStyle(color: h.error == null ? t.muted : t.accent),
-                        ),
-                      ),
-                      RappButton.secondary(
-                        key: Key('remove-host-${h.host}'),
-                        label: '移除',
-                        onPressed: state.hubUsable ? () => _removeHost(id, h.host!) : null,
-                      ),
-                    ],
-                  ),
-                ),
-            if (removeError != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Text(removeError, key: const Key('remove-host-error'), style: TextStyle(color: t.accent)),
-              ),
             if (launchers.isNotEmpty)
               button(const Key('new-text-term'), '新开文本终端…',
                   state.hubUsable ? () => showNewTextDialog(context, state, id) : null),
-            button(const Key('new-term'), '新开 tmux 会话…',
-                state.hubUsable ? () => _newTerm(context, id, [for (final h in list.hosts) ?h.host]) : null),
-            button(const Key('add-ssh-host'), '添加 SSH 主机…', state.hubUsable ? () => _addHost(context, id) : null),
             Row(
               children: [
                 Text('打开方式', style: TextStyle(color: t.text)),
@@ -394,41 +361,6 @@ class _DevicesTabState extends State<DevicesTab> {
         ),
       ),
     ];
-  }
-
-  Future<void> _removeHost(String id, String name) async {
-    final hub = state.hub!;
-    try {
-      await hub.removeTermTarget(id, name);
-      if (mounted) setState(() => _removeErrors.remove(id));
-      await hub.terms(id);
-    } catch (e) {
-      // A failed request's error goes to its future only (not `lastError`), so it is shown here, as the hub said it.
-      if (mounted) setState(() => _removeErrors[id] = (text: '移除失败：$e', list: hub.termLists[id]));
-    }
-  }
-
-  Future<void> _addHost(BuildContext context, String id) => showDialog<void>(
-        context: context,
-        builder: (_) => _AddHostDialog(hub: state.hub!, id: id),
-      );
-
-  Future<void> _newTerm(BuildContext context, String id, List<String> hosts) async {
-    final tp = state.termPort;
-    final cols = tp?.lastCols, rows = tp?.lastRows;
-    final term = await showDialog<String>(
-      context: context,
-      builder: (_) => _NewTermDialog(
-        hub: state.hub!,
-        id: id,
-        hosts: hosts,
-        cols: cols == null || cols <= 0 ? 120 : cols,
-        rows: rows == null || rows <= 0 ? 40 : rows,
-      ),
-    );
-    if (term == null) return;
-    final name = state.hub?.termLists[id]?.terms.where((r) => r.id == term).firstOrNull;
-    state.openOrSwitch(id, term, termDisplayName(name?.name ?? '', name?.host));
   }
 
   void _openBundle(String id) {
@@ -590,8 +522,6 @@ class _TermRow extends StatelessWidget {
     final name = termDisplayName(row.name, row.host);
     final status = termStatus(row, now);
     final verb = openVerb(session?.lamp, takenOver: session?.takenOver ?? false);
-    final text = parseTermId(row.id)?.backend == 'pty';
-    final kind = text ? '文本' : 'tmux';
     return Container(
       key: Key('term-${row.id}'),
       constraints: const BoxConstraints(minHeight: 68),
@@ -612,12 +542,8 @@ class _TermRow extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(color: t.text, fontWeight: FontWeight.w600)),
                   ),
-                  const SizedBox(width: 8),
-                  Text(kind, style: _mono(t)),
                 ]),
-                // A text terminal has one pane: no count.
-                Text(text ? row.command : '${row.command} · ${row.panes} 个面板',
-                    maxLines: 1, overflow: TextOverflow.ellipsis, style: _mono(t)),
+                Text(row.command, maxLines: 1, overflow: TextOverflow.ellipsis, style: _mono(t)),
                 Text(status, style: TextStyle(color: t.muted)),
               ],
             ),
@@ -626,7 +552,7 @@ class _TermRow extends StatelessWidget {
           RappButton.secondary(
             key: Key('open-${row.id}'),
             label: verb,
-            semanticLabel: '$verb $name，$kind，$status',
+            semanticLabel: '$verb $name，$status',
             onPressed: enabled ? onOpen : null,
           ),
         ],
@@ -804,184 +730,6 @@ class _NewTextDialogState extends State<_NewTextDialog> {
       actions: [
         RappButton.secondary(key: const Key('new-text-cancel'), label: '取消', onPressed: () => Navigator.of(context).pop()),
         RappButton.secondary(key: const Key('new-text-go'), label: '新开', onPressed: _busy ? null : _open),
-      ],
-    );
-  }
-}
-
-class _AddHostDialog extends StatefulWidget {
-  const _AddHostDialog({required this.hub, required this.id});
-  final HubClient hub;
-  final String id;
-
-  @override
-  State<_AddHostDialog> createState() => _AddHostDialogState();
-}
-
-class _AddHostDialogState extends State<_AddHostDialog> {
-  final _name = TextEditingController(), _target = TextEditingController(), _tmux = TextEditingController();
-  String? _error;
-  bool _busy = false;
-
-  @override
-  void dispose() {
-    _name.dispose();
-    _target.dispose();
-    _tmux.dispose();
-    super.dispose();
-  }
-
-  Future<void> _add() async {
-    final name = _name.text.trim(), target = _target.text.trim(), tmux = _tmux.text.trim();
-    if (name.isEmpty || target.isEmpty || _busy) return;
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    try {
-      await widget.hub.addTermTarget(widget.id, name, target, tmux: tmux.isEmpty ? null : tmux);
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _busy = false;
-          _error = '$e';
-        });
-      }
-      return;
-    }
-    if (mounted) Navigator.of(context).pop();
-    try {
-      await widget.hub.terms(widget.id);
-    } catch (_) {}
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RappTokens.of(context);
-    return AlertDialog(
-      title: const Text('添加 SSH 主机…'),
-      content: SizedBox(
-        width: 360,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(key: const Key('ssh-name'), controller: _name, decoration: const InputDecoration(labelText: '名字')),
-            TextField(
-                key: const Key('ssh-target'),
-                controller: _target,
-                decoration: const InputDecoration(labelText: '目标（如 me@gpu1）')),
-            TextField(
-                key: const Key('ssh-tmux'),
-                controller: _tmux,
-                decoration: const InputDecoration(labelText: 'tmux 的路径（可不填）')),
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(_error!, key: const Key('ssh-error'), style: TextStyle(color: t.accent)),
-              ),
-          ],
-        ),
-      ),
-      actions: [
-        RappButton.secondary(key: const Key('ssh-cancel'), label: '取消', onPressed: () => Navigator.of(context).pop()),
-        RappButton.secondary(key: const Key('ssh-add'), label: '添加', onPressed: _busy ? null : _add),
-      ],
-    );
-  }
-}
-
-class _NewTermDialog extends StatefulWidget {
-  const _NewTermDialog({required this.hub, required this.id, required this.hosts, required this.cols, required this.rows});
-  final HubClient hub;
-  final String id;
-  final List<String> hosts;
-  final int cols, rows;
-
-  @override
-  State<_NewTermDialog> createState() => _NewTermDialogState();
-}
-
-class _NewTermDialogState extends State<_NewTermDialog> {
-  final _command = TextEditingController(), _name = TextEditingController();
-  String? _host, _error;
-  bool _busy = false;
-
-  @override
-  void dispose() {
-    _command.dispose();
-    _name.dispose();
-    super.dispose();
-  }
-
-  Future<void> _create() async {
-    if (_busy) return;
-    final command = _command.text.trim(), name = _name.text.trim();
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    final String term;
-    try {
-      term = await widget.hub.newTerm(widget.id,
-          host: _host,
-          name: name.isEmpty ? null : name,
-          command: command.isEmpty ? <String>[] : [command],
-          cols: widget.cols,
-          rows: widget.rows);
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _busy = false;
-          _error = '$e';
-        });
-      }
-      return;
-    }
-    try {
-      await widget.hub.terms(widget.id);
-    } catch (_) {}
-    if (mounted) Navigator.of(context).pop(term);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RappTokens.of(context);
-    return AlertDialog(
-      title: const Text('新开终端'),
-      content: SizedBox(
-        width: 360,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            DropdownButtonFormField<String?>(
-              key: const Key('new-term-where'),
-              initialValue: _host,
-              decoration: const InputDecoration(labelText: '在哪'),
-              items: [
-                const DropdownMenuItem<String?>(value: null, child: Text('本机')),
-                for (final h in widget.hosts) DropdownMenuItem<String?>(value: h, child: Text(h)),
-              ],
-              onChanged: _busy ? null : (v) => setState(() => _host = v),
-            ),
-            TextField(
-                key: const Key('new-term-command'),
-                controller: _command,
-                decoration: const InputDecoration(labelText: '命令（如 claude；空着就是 shell）')),
-            TextField(
-                key: const Key('new-term-name'),
-                controller: _name,
-                decoration: const InputDecoration(labelText: '名字（可不填）')),
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(_error!, key: const Key('new-term-error'), style: TextStyle(color: t.accent)),
-              ),
-          ],
-        ),
-      ),
-      actions: [
-        RappButton.secondary(key: const Key('new-term-cancel'), label: '取消', onPressed: () => Navigator.of(context).pop()),
-        RappButton.secondary(key: const Key('new-term-go'), label: '新开', onPressed: _busy ? null : _create),
       ],
     );
   }

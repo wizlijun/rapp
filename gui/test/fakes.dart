@@ -197,10 +197,6 @@ class FakeTermSessionPort extends TermSessionPort {
   /// What [paste] answers (null: it went in).
   String? pasteReply;
 
-  /// What [newWindow] answers, and whether [canNewWindow].
-  String? newWindowReply;
-  bool newWindowOk = true;
-
   @override
   void sendKeys(Object sid, List<String> keys) => calls.add(('keys', {'sid': sid, 'keys': keys}));
   @override
@@ -215,19 +211,6 @@ class FakeTermSessionPort extends TermSessionPort {
     return w == null ? pasteReply : w.future;
   }
 
-  @override
-  bool canNewWindow(Object sid) => newWindowOk;
-  @override
-  Future<String?> newWindow(Object sid) async {
-    calls.add(('newWindow', {'sid': sid}));
-    final w = newWindowWait;
-    return w == null ? newWindowReply : w.future;
-  }
-
-  /// When set, [newWindow] answers when it completes instead of with [newWindowReply].
-  Completer<String?>? newWindowWait;
-  @override
-  void refit(Object sid) => calls.add(('refit', {'sid': sid}));
   @override
   void fetchHistory(Object sid) => calls.add(('fetchHistory', {'sid': sid}));
 }

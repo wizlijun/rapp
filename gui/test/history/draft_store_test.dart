@@ -45,12 +45,12 @@ void main() {
   });
 
   test('a key with / and : makes one flat file name', () async {
-    await store.save(DraftFile(key: 'h1/term:tmux:dev', text: 'x'));
-    final p = store.pathFor('h1/term:tmux:dev');
+    await store.save(DraftFile(key: 'h1/term:pty:dev', text: 'x'));
+    final p = store.pathFor('h1/term:pty:dev');
     expect(p.substring('${tmp.path}/drafts/'.length), isNot(contains('/')));
-    expect(p, '${tmp.path}/drafts/aDEvdGVybTp0bXV4OmRldg.json');
+    expect(p, '${tmp.path}/drafts/aDEvdGVybTpwdHk6ZGV2.json');
     expect(Directory('${tmp.path}/drafts').listSync().length, 1);
-    expect(store.load('h1/term:tmux:dev')!.text, 'x');
+    expect(store.load('h1/term:pty:dev')!.text, 'x');
   });
 
   test('an empty draft with nothing pending deletes the file', () async {

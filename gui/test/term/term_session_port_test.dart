@@ -89,7 +89,7 @@ void main() {
     await pumpUntil(() => w.got.contains(jsonEncode({'t': 'ack', 'rev': 7})));
     expect(w.got.first, 'tk');
     final win = events.whereType<WindowsEvent>().single.windows.single;
-    expect((win.id, win.title, win.focused), (3, '1 claude', true));
+    expect((win.id, win.title, win.focused), (3, 'claude', true));
     expect(events.whereType<ReadyEvent>().single.appName, 'claude');
     await pumpUntil(() => events.whereType<TrafficEvent>().any((e) => e.bytes > 0));
     expect(port.pane(1, 3)!.command, 'claude');
@@ -105,9 +105,6 @@ void main() {
     await port.start(StartArgs(2, w.srv.port, 'tk', 'x', 0, 'x'));
     port.view(2, 3, 100, 24);
     await pumpUntil(() => w.got.where((l) => l.contains('"view"')).length == 3);
-    port.refit(2);
-    await pumpUntil(() => w.got.any((l) => l.contains('"refit"')));
-    expect(w.got.last, jsonEncode({'t': 'refit', 'pane': '%3', 'cols': 100, 'rows': 24}));
   });
 
   test('a line split in the middle of a Chinese character is put back together', () async {
@@ -265,16 +262,14 @@ void main() {
     expect(await f.paste(1, 'p', enter: true), isNull);
     f.pasteReply = 'no';
     expect(await f.paste(1, 'q'), 'no');
-    expect(await f.newWindow(1), isNull);
     f.view(1, 3, 90, 30);
-    final sent = f.calls.skip(1).take(5).toList();
-    expect([for (final c in sent) c.$1], ['keys', 'type', 'paste', 'paste', 'newWindow']);
+    final sent = f.calls.skip(1).take(4).toList();
+    expect([for (final c in sent) c.$1], ['keys', 'type', 'paste', 'paste']);
     expect([for (final c in sent) c.$2], [
       {'sid': 1, 'keys': ['Enter']},
       {'sid': 1, 'text': 'hi'},
       {'sid': 1, 'data': 'p', 'enter': true},
       {'sid': 1, 'data': 'q', 'enter': false},
-      {'sid': 1},
     ]);
     expect((f.lastCols, f.lastRows), (90, 30));
   });

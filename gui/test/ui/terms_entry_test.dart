@@ -25,7 +25,7 @@ void main() {
     expect(showsTermsEntry(null), isFalse);
     expect(showsTermsEntry(const TermList('d', off: true)), isFalse);
     expect(showsTermsEntry(const TermList('d', error: 'timed out')), isFalse);
-    expect(showsTermsEntry(const TermList('d', hosts: [TermHost(null, error: 'tmux not found')])), isTrue);
+    expect(showsTermsEntry(const TermList('d', hosts: [TermHost(null)])), isTrue);
   });
 
   test('text mode opens the most recently active text terminal', () {
@@ -41,26 +41,14 @@ void main() {
     expect(termsTarget(mode: 'text', list: TermList('d', hosts: [local(const [])]), apps: const []), isA<OpenPixels>());
   });
 
-  test('text mode with no launchers opens the most recently active tmux session', () {
+  test('text mode with only tmux rows and no launchers opens pixels', () {
     final list = TermList('d', terms: [tmuxRow('a', activity: 5), tmuxRow('w', activity: 9)], hosts: [local(const [])]);
-    expect(termsTarget(mode: 'text', list: list, apps: [app('com.googlecode.iterm2')]),
-        isA<OpenTerm>().having((t) => t.app, 'app', 'term:tmux:w').having((t) => t.name, 'name', 'w'));
-    // An old service sends no hosts at all.
-    expect((termsTarget(mode: 'text', list: TermList('d', terms: [tmuxRow('a')]), apps: const []) as OpenTerm).app,
-        'term:tmux:a');
+    expect(termsTarget(mode: 'text', list: list, apps: const []), isA<OpenPixels>());
+    expect(termsTarget(mode: 'text', list: TermList('d', terms: [tmuxRow('a')]), apps: [app('com.googlecode.iterm2')]),
+        isA<OpenPixels>());
   });
 
-  test('text mode with no launchers prefers a tmux session on this machine to one on an SSH host', () {
-    const remote = TermRow('term:tmux@box:r', 'r', 'zsh', 'box', 1, 0, 9, false, false);
-    final list = TermList('d', terms: [remote, tmuxRow('a', activity: 5)], hosts: [local(const [])]);
-    expect(termsTarget(mode: 'text', list: list, apps: const []),
-        isA<OpenTerm>().having((t) => t.app, 'app', 'term:tmux:a'));
-    final only = TermList('d', terms: const [remote], hosts: [local(const [])]);
-    expect(termsTarget(mode: 'text', list: only, apps: const []),
-        isA<OpenTerm>().having((t) => t.app, 'app', 'term:tmux@box:r').having((t) => t.name, 'name', 'r @box'));
-  });
-
-  test('text mode asks for a new text terminal before it falls back to tmux', () {
+  test('text mode asks for a new text terminal when the only rows are tmux ones', () {
     final list = TermList('d', terms: [tmuxRow('w', activity: 9)], hosts: [local(['Terminal'])]);
     expect(termsTarget(mode: 'text', list: list, apps: const []), isA<AskNewText>());
   });

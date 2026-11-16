@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'term/term_id.dart';
 
 /// One JSON object per line, `\n`-terminated.
 String encodeLine(Map<String, dynamic> m) => '${jsonEncode(m)}\n';
@@ -111,7 +112,7 @@ class AppList {
   final Map<String, dynamic>? permissions;
 }
 
-/// One tmux session of a device (`terms` event, spec §6). [host] is null on the device itself.
+/// One terminal session of a device (`terms` event, spec §6). [host] is null on the device itself.
 class TermRow {
   const TermRow(this.id, this.name, this.command, this.host, this.panes, this.attached, this.activity, this.dead,
       this.unread);
@@ -124,10 +125,11 @@ class TermRow {
   final bool dead, unread;
 }
 
-/// One place sessions are listed from: the device itself (`host` null) or an SSH host it knows.
+/// The place sessions are listed from: the device itself (`host` null). An old device may also list SSH hosts; those
+/// rows are dropped.
 class TermHost {
-  const TermHost(this.host, {this.target, this.tmux, this.error, this.launchers = const []});
-  final String? host, target, tmux, error;
+  const TermHost(this.host, {this.launchers = const []});
+  final String? host;
 
   /// The local host row only: the terminal apps the device can open a text terminal in.
   final List<String> launchers;
@@ -155,13 +157,15 @@ TermList _termList(Map<String, dynamic> m, String fallbackId) {
     path: _str(m['path']),
     terms: [
       for (final r in (m['terms'] as List? ?? const []).whereType<Map>())
-        TermRow('${r['id']}', '${r['name'] ?? ''}', '${r['command'] ?? ''}', _str(r['host']), _int(r['panes']),
+        if (parseTermId('${r['id']}')?.backend == 'pty')
+          TermRow('${r['id']}', '${r['name'] ?? ''}', '${r['command'] ?? ''}', _str(r['host']), _int(r['panes']),
             _int(r['attached']), _int(r['activity']), r['dead'] == true, r['unread'] == true),
     ],
     hosts: [
       for (final h in (m['hosts'] as List? ?? const []).whereType<Map>())
-        TermHost(_str(h['host']), target: _str(h['target']), tmux: _str(h['tmux']), error: _str(h['error']),
-            launchers: [for (final l in (h['launchers'] as List? ?? const [])) if (l is String) l]),
+        if (h['host'] == null)
+          TermHost(null,
+              launchers: [for (final l in (h['launchers'] as List? ?? const [])) if (l is String) l]),
     ],
   );
 }
@@ -283,29 +287,12 @@ class HubClient extends ChangeNotifier {
     return termLists[id] ?? _termList(m, id);
   }
 
-  /// Adds (or replaces) the SSH host [name]; callers ask for [terms] again after.
-  Future<void> addTermTarget(String id, String name, String target, {String? tmux}) =>
-      _request({'cmd': 'add_term_target', 'id': id, 'name': name, 'target': target, 'tmux': ?tmux}, 'term_targets');
-
-  /// Starts a tmux session on [id] (or its SSH host [host]) and answers its `term:` id; an empty [command] is the
-  /// default shell. Callers ask for [terms] again after.
-  Future<String> newTerm(String id,
-      {String? host, String? name, required List<String> command, required int cols, required int rows}) async {
-    final m = await _request(
-        {'cmd': 'new_term', 'id': id, 'host': ?host, 'name': ?name, 'command': command, 'cols': cols, 'rows': rows},
-        'term_created');
-    return '${m['term']}';
-  }
-
   /// Opens a text terminal window on device [id] in terminal app [app]; answers the new term id.
   Future<String> openTerm(String id, {String? cwd, String? name, String? command, required String app}) async {
     final m = await _request(
         {'cmd': 'open_term', 'id': id, 'cwd': ?cwd, 'name': ?name, 'command': ?command, 'app': app}, 'term_created');
     return '${m['term']}';
   }
-
-  Future<void> removeTermTarget(String id, String name) =>
-      _request({'cmd': 'remove_term_target', 'id': id, 'name': name}, 'term_targets');
 
   Future<HubSession> open(String id, String app, {bool embed = false, bool reconnect = false}) async {
     final m = await _request(

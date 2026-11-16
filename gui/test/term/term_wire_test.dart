@@ -25,22 +25,15 @@ void main() {
     expect(parseTermOut('x'), isNull);
     expect(parseTermOut({'t': 'pasted', 'ok': 'yes'}), isNull);
   });
-  test('tab labels number windows and panes from 1', () {
-    TermPane p(String id, String win, String cmd, {bool dead = false}) => TermPane(id: id, win: win, window: 'w',
+  test('tab labels are the command, a dead pane says so', () {
+    TermPane p(String id, String cmd, {bool dead = false}) => TermPane(id: id, win: '@1', window: 'w',
         title: '', command: cmd, cols: 80, rows: 24, dead: dead, active: false);
-    expect(tabLabels([p('%1', '@1', 'claude'), p('%2', '@2', 'nvim'), p('%3', '@2', 'logs', dead: true)]),
-        {'%1': '1 claude', '%2': '2.1 nvim', '%3': '2.2 logs · 已退出'});
-  });
-  test('tab labels group by window name when the device sends no win', () {
-    TermPane p(String id, String window) => TermPane(
-        id: id, window: window, title: '', command: 'sh', cols: 80, rows: 24, dead: false);
-    expect(tabLabels([p('%1', 'a'), p('%2', 'b'), p('%3', 'b')]), {'%1': '1 sh', '%2': '2.1 sh', '%3': '2.2 sh'});
+    expect(tabLabels([p('%1', 'claude'), p('%2', 'logs', dead: true)]), {'%1': 'claude', '%2': 'logs · 已退出'});
   });
   test('messages to the worker use the wire names', () {
     expect(viewMsg('%1', 120, 40), {'t': 'view', 'pane': '%1', 'cols': 120, 'rows': 40});
     expect(historyReq('%1', 500, 500), {'t': 'history', 'pane': '%1', 'before': 500, 'lines': 500});
     expect(ackMsg(7), {'t': 'ack', 'rev': 7});
-    expect(refitMsg('%1', 80, 24), {'t': 'refit', 'pane': '%1', 'cols': 80, 'rows': 24});
   });
   test('every output message parses with its fields', () {
     final h = parseTermOut({'t': 'history', 'pane': '%1', 'before': 5, 'lines': ['x', 'y'], 'hist': 9, 'wrapped': [0]})
@@ -65,12 +58,11 @@ void main() {
     expect((s.hist, s.limit, s.shape), (4, 100, 'bar'));
     expect(s.wrapped, {0, 2});
   });
-  test('keys, type and new_window lines use the wire names', () {
+  test('keys and type lines use the wire names', () {
     expect(jsonDecode(keysMsg('%3', ['Enter', 'Ctrl-c'])), {'t': 'keys', 'pane': '%3', 'keys': ['Enter', 'Ctrl-c']});
     expect(jsonDecode(typeMsg('%3', '\u001b\r')), {'t': 'type', 'pane': '%3', 'text': '\u001b\r'});
-    expect(jsonDecode(newWindowMsg('%3')), {'t': 'new_window', 'pane': '%3'});
-    expect((parseTermOut({'t': 'window_opened', 'pane': '%7'}) as TermWindowOpened).pane, '%7');
-    expect(parseTermOut({'t': 'window_opened'}), isNull);
+    // A message of a removed kind (an old device) parses to nothing.
+    expect(parseTermOut({'t': 'window_opened', 'pane': '%7'}), isNull);
     expect((parseTermOut({'t': 'hello', 'v': 2, 'backend': 'tmux'}) as TermHello).v, 2);
   });
   test('a short paste is one text line with more false', () {

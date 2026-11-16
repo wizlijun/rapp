@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -22,7 +21,7 @@ import 'package:rapp/ui/top_bar.dart';
 import '../fakes.dart';
 import '../ui/helpers.dart';
 
-const app = 'term:tmux:work';
+const app = 'term:pty:work';
 
 TermPane tp(int n, String command, {String title = '', bool active = false, bool dead = false, String win = '@1'}) =>
     TermPane(
@@ -144,21 +143,14 @@ void main() {
     expect(term.calls.where((c) => c.$1 == 'start').single.$2['sid'], 1);
     expect(port.calls.where((c) => c.$1 == 'start'), isEmpty);
     expect(find.byType(TermStage), findsOneWidget);
-    expect(find.widgetWithText(TabChip, '1.1 claude'), findsOneWidget);
-    expect(find.widgetWithText(TabChip, '1.2 logs'), findsOneWidget);
+    expect(find.widgetWithText(TabChip, 'claude'), findsOneWidget);
+    expect(find.widgetWithText(TabChip, 'logs'), findsOneWidget);
     for (final c in tester.widgetList<TabChip>(find.byType(TabChip))) {
       expect((c.onClose, c.onSecondaryTap), (null, null));
     }
     // The device's current pane is the first tab, and it is viewed.
     expect(s.currentRemote!.currentWindow, 3);
     expect(term.calls.where((c) => c.$1 == 'view').last.$2['window'], 3);
-  });
-
-  testWidgets('two windows of one pane each are labelled by window number', (tester) async {
-    await tester.pumpWidget(wrap(window()));
-    await openTerm(tester, [tp(3, 'claude', active: true), tp(4, 'logs', win: '@2')]);
-    expect(find.widgetWithText(TabChip, '1 claude'), findsOneWidget);
-    expect(find.widgetWithText(TabChip, '2 logs'), findsOneWidget);
   });
 
   testWidgets('app-session calls for a terminal sid never reach the native port', (tester) async {
@@ -187,57 +179,19 @@ void main() {
     expect(find.text('局域网 · tail'), findsOneWidget);
   });
 
-  testWidgets('the traffic menu of a terminal has refit and no stream presets', (tester) async {
+  testWidgets('the traffic menu of a terminal has no refit and no stream presets', (tester) async {
     // Narrow: the traffic label carries every part of the menu.
-    await tester.pumpWidget(wrap(window(width: 600)));
+    await tester.pumpWidget(wrap(window(width: 500)));
     await openTerm(tester, two);
     await tester.tap(find.byKey(const Key('traffic')));
     await tester.pumpAndSettle();
-    expect(find.text('按我的屏幕重排'), findsOneWidget);
+    expect(find.text('按我的屏幕重排'), findsNothing);
+    expect(find.byKey(const Key('term-refit')), findsNothing);
     for (final gone in ['预设', '分离成独立窗口', '放左上角', '远程剪贴板', '输入区', 'app 配置…', '远程菜单']) {
       expect(find.text(gone), findsNothing, reason: gone);
     }
     expect(find.text('会话'), findsOneWidget);
     expect(find.text('结束会话'), findsWidgets);
-    await tester.tap(find.byKey(const Key('term-refit')));
-    await tester.pumpAndSettle();
-    expect(term.calls.where((c) => c.$1 == 'refit').single.$2['sid'], 1);
-  });
-
-  testWidgets('a text terminal greys out refit with the reason', (tester) async {
-    await tester.pumpWidget(wrap(window(width: 600)));
-    await openTerm(tester, two, id: 'term:pty:c');
-    await tester.tap(find.byKey(const Key('traffic')));
-    await tester.pumpAndSettle();
-    expect(find.text('尺寸跟着被控端的窗口'), findsOneWidget);
-    term.calls.clear();
-    await tester.tap(find.byKey(const Key('term-refit')), warnIfMissed: false);
-    await tester.pumpAndSettle();
-    expect(term.calls.where((c) => c.$1 == 'refit'), isEmpty);
-  });
-
-  testWidgets('a text terminal greys out 新开窗口 with the reason', (tester) async {
-    await tester.pumpWidget(wrap(window()));
-    await openTerm(tester, two, id: 'term:pty:c');
-    expect(find.byKey(const Key('term-new-window')), findsOneWidget);
-    expect(find.byWidgetPredicate((w) => w is Tooltip && (w.message ?? '').contains('文本终端只有一个窗口')), findsOneWidget);
-    term.calls.clear();
-    await tester.tap(find.byKey(const Key('term-new-window')));
-    await settle(tester);
-    expect(term.calls.where((c) => c.$1 == 'newWindow'), isEmpty);
-  });
-
-  testWidgets('a tmux session keeps refit and 新开窗口', (tester) async {
-    await tester.pumpWidget(wrap(window(width: 600)));
-    await openTerm(tester, two, id: 'term:tmux:w');
-    expect(find.byKey(const Key('term-new-window')), findsOneWidget);
-    expect(find.byWidgetPredicate((w) => w is Tooltip && (w.message ?? '').contains('文本终端')), findsNothing);
-    await tester.tap(find.byKey(const Key('traffic')));
-    await tester.pumpAndSettle();
-    expect(find.text('尺寸跟着被控端的窗口'), findsNothing);
-    await tester.tap(find.byKey(const Key('term-refit')));
-    await tester.pumpAndSettle();
-    expect(term.calls.where((c) => c.$1 == 'refit'), hasLength(1));
   });
 
   testWidgets('a pane larger than the stage names the other clients from the device panel list', (tester) async {
@@ -285,6 +239,14 @@ void main() {
     expect(find.byType(TermStage), findsOneWidget);
   });
 
+  testWidgets('a terminal has no plus for a new window', (tester) async {
+    await tester.pumpWidget(wrap(window()));
+    await openTerm(tester, [tp(3, 'claude', active: true)]);
+    expect(find.byType(TabChip), findsWidgets);
+    expect(find.byKey(const Key('term-new-window')), findsNothing);
+    expect(find.text('＋'), findsNothing);
+  });
+
   testWidgets('a new pane does not take over the current tab', (tester) async {
     await tester.pumpWidget(wrap(window()));
     await openTerm(tester, two);
@@ -292,71 +254,7 @@ void main() {
     term.play(windowsOf(1, term.paneLists[1]!));
     await settle(tester);
     expect(s.currentRemote!.currentWindow, 3);
-    expect(find.widgetWithText(TabChip, '2 htop'), findsOneWidget);
-  });
-
-  testWidgets('one pane shows the tab row with a plus that opens a window', (tester) async {
-    await tester.pumpWidget(wrap(window()));
-    await openTerm(tester, [tp(3, 'claude', active: true)]);
-    expect(find.byType(TabChip), findsWidgets);
-    expect(find.byKey(const Key('term-new-window')), findsOneWidget);
-    expect(find.text('＋'), findsOneWidget);
-    term.calls.clear();
-    await tester.tap(find.byKey(const Key('term-new-window')));
-    await settle(tester);
-    expect(term.calls.where((c) => c.$1 == 'newWindow').single.$2['sid'], 1);
-  });
-
-  testWidgets('a second plus while the first is unanswered asks nothing; once answered it asks again', (tester) async {
-    await tester.pumpWidget(wrap(window()));
-    await openTerm(tester, two);
-    final gate = term.newWindowWait = Completer<String?>();
-    term.calls.clear();
-    await tester.tap(find.byKey(const Key('term-new-window')));
-    await settle(tester);
-    await tester.tap(find.byKey(const Key('term-new-window')));
-    await settle(tester);
-    expect(term.calls.where((c) => c.$1 == 'newWindow'), hasLength(1));
-    gate.complete('no space');
-    term.newWindowWait = null;
-    await settle(tester);
-    await tester.pump(const Duration(seconds: 4));
-    await tester.tap(find.byKey(const Key('term-new-window')));
-    await settle(tester);
-    expect(term.calls.where((c) => c.$1 == 'newWindow'), hasLength(2));
-  });
-
-  testWidgets('the opened pane becomes the current tab', (tester) async {
-    await tester.pumpWidget(wrap(window()));
-    await openTerm(tester, two);
-    term.paneLists[1] = [...two, tp(7, 'zsh', win: '@2')];
-    term.play(windowsOf(1, term.paneLists[1]!));
-    await settle(tester);
-    expect(s.currentRemote!.currentWindow, 3);
-    term.play(const TermOpenedPaneEvent(1, 7));
-    await settle(tester);
-    expect(s.currentRemote!.currentWindow, 7);
-    // A pane not in the tab list is ignored.
-    term.play(const TermOpenedPaneEvent(1, 99));
-    await settle(tester);
-    expect(s.currentRemote!.currentWindow, 7);
-  });
-
-  testWidgets('a failed new window puts the device words in the stage note', (tester) async {
-    await tester.pumpWidget(wrap(window()));
-    await openTerm(tester, two);
-    term.newWindowReply = 'no space';
-    await tester.tap(find.byKey(const Key('term-new-window')));
-    await settle(tester);
-    expect(find.text('新开窗口失败：no space'), findsOneWidget);
-    await tester.pump(const Duration(seconds: 4));
-  });
-
-  testWidgets('an old device has no plus', (tester) async {
-    await tester.pumpWidget(wrap(window()));
-    term.newWindowOk = false;
-    await openTerm(tester, two);
-    expect(find.byKey(const Key('term-new-window')), findsNothing);
+    expect(find.widgetWithText(TabChip, 'htop'), findsOneWidget);
   });
 
   testWidgets('a dead pane keeps its screen and says so on the tab', (tester) async {
@@ -365,7 +263,7 @@ void main() {
     term.paneLists[1] = [tp(3, 'claude', active: true, dead: true), tp(4, 'logs')];
     term.play(windowsOf(1, term.paneLists[1]!));
     await settle(tester);
-    expect(find.widgetWithText(TabChip, '1.1 claude · 已退出'), findsOneWidget);
+    expect(find.widgetWithText(TabChip, 'claude · 已退出'), findsOneWidget);
     expect(find.byType(TermStage), findsOneWidget);
     expect(s.currentRemote!.currentWindow, 3);
   });

@@ -402,19 +402,18 @@ void main() {
         'event': 'terms',
         'id': 'B',
         'terms': [
-          {'id': 'term:tmux:w', 'host': null, 'name': 'w', 'command': 'vim', 'panes': 2, 'attached': 1, 'activity': 100,
+          {'id': 'term:pty:w', 'host': null, 'name': 'w', 'command': 'vim', 'panes': 2, 'attached': 1, 'activity': 100,
            'dead': false, 'unread': true},
         ],
         'hosts': [
           {'host': null},
-          {'host': 'gpu1', 'target': 'me@gpu1', 'tmux': '/x/tmux', 'error': 'refused'},
         ],
       });
       await Future<void>.delayed(Duration.zero);
       final b = hub.termLists['B']!;
       expect(b.terms.single.panes, 2);
       expect((b.terms.single.unread, b.terms.single.dead, b.terms.single.activity), (true, false, 100));
-      expect((b.hosts[0].host, b.hosts[1].host, b.hosts[1].target, b.hosts[1].error), (null, 'gpu1', 'me@gpu1', 'refused'));
+      expect(b.hosts.single.host, null);
       expect(done, isFalse);
       t.emit({'event': 'terms', 'id': 'A', 'path': 'lan', 'terms': [], 'hosts': [], 'req': req});
       final a = await f;
@@ -445,13 +444,33 @@ void main() {
         'terms': [],
         'hosts': [
           {'host': null, 'launchers': ['Terminal', 'iTerm', 3]},
-          {'host': 'gpu1'},
         ],
       });
       await Future<void>.delayed(Duration.zero);
       final b = hub.termLists['B']!;
-      expect(b.hosts[0].launchers, ['Terminal', 'iTerm']);
-      expect(b.hosts[1].launchers, isEmpty);
+      expect(b.hosts.single.launchers, ['Terminal', 'iTerm']);
+    });
+
+    test('a terms event from an old device keeps only pty rows', () async {
+      t.emit({
+        'event': 'terms',
+        'id': 'O',
+        'terms': [
+          {'id': 'term:tmux:a', 'host': null, 'name': 'a', 'command': 'zsh', 'panes': 1},
+          {'id': 'term:tmux@gpu1:b', 'host': 'gpu1', 'name': 'b', 'command': 'zsh', 'panes': 1},
+          {'id': 'term:pty:c', 'host': null, 'name': 'c', 'command': 'zsh', 'panes': 1},
+        ],
+        'hosts': [
+          {'host': null, 'launchers': ['Terminal'], 'tmux': '/x/tmux', 'target': 'me', 'error': 'old'},
+          {'host': 'gpu1', 'target': 'me@gpu1', 'tmux': '/x/tmux', 'error': 'refused'},
+        ],
+      });
+      await Future<void>.delayed(Duration.zero);
+      final o = hub.termLists['O']!;
+      expect(o.terms.map((r) => r.id), ['term:pty:c']);
+      expect(o.hosts.length, 1);
+      expect(o.hosts.single.host, isNull);
+      expect(o.hosts.single.launchers, ['Terminal']);
     });
 
     test('off and error lists parse', () async {
@@ -466,31 +485,5 @@ void main() {
       expect((await f).off, isTrue);
     });
 
-    test('term targets are asked with the optional tmux path left out', () async {
-      final f = hub.addTermTarget('A', 'gpu1', 'me@gpu1');
-      expect(t.sent.last, {'cmd': 'add_term_target', 'id': 'A', 'name': 'gpu1', 'target': 'me@gpu1', 'req': anything});
-      t.emit({'event': 'term_targets', 'id': 'A', 'targets': [], 'req': t.sent.last['req']});
-      await f;
-      final g = hub.addTermTarget('A', 'gpu1', 'me@gpu1', tmux: '/x/tmux');
-      expect(t.sent.last['tmux'], '/x/tmux');
-      t.emit({'event': 'error', 'error': 'bad target', 'req': t.sent.last['req']});
-      await expectLater(g, throwsA(isA<HubException>()));
-      final h = hub.removeTermTarget('A', 'gpu1');
-      expect(t.sent.last, {'cmd': 'remove_term_target', 'id': 'A', 'name': 'gpu1', 'req': anything});
-      t.emit({'event': 'term_targets', 'id': 'A', 'targets': [], 'req': t.sent.last['req']});
-      await h;
-    });
-
-    test('newTerm leaves null host and name out and answers the term id', () async {
-      final f = hub.newTerm('A', command: ['claude --resume'], cols: 100, rows: 30);
-      expect(t.sent.last, {'cmd': 'new_term', 'id': 'A', 'command': ['claude --resume'], 'cols': 100, 'rows': 30, 'req': anything});
-      t.emit({'event': 'term_created', 'id': 'A', 'term': 'term:tmux:%1', 'req': t.sent.last['req']});
-      expect(await f, 'term:tmux:%1');
-      final g = hub.newTerm('A', host: 'gpu1', name: 'x', command: [], cols: 1, rows: 2);
-      expect((t.sent.last['host'], t.sent.last['name']), ('gpu1', 'x'));
-      expect(t.sent.last['command'], isEmpty);
-      t.emit({'event': 'error', 'error': 'no tmux', 'req': t.sent.last['req']});
-      await expectLater(g, throwsA(isA<HubException>()));
-    });
   });
 }
