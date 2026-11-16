@@ -63,6 +63,7 @@
 ## 未来规划
 - **多窗口 / 弹出窗口**：macOS 已做（见上）；Windows、Omarchy 端升到 v4 待做
 - **按区域选编码**（参考 Xpra）：静止的文字区用无损或低色深，正在变的区域用视频编码；见 `docs/superpowers/specs/2026-11-14-rapp-smooth-streaming-design.md`（第二步）
+- **按焦点分区串流**（U146–U148）：焦点面板彩色，其余灰度低流量。规格见 `docs/superpowers/specs/2026-11-16-rapp-focus-pane-rules.md`（第 2 稿，可实施第 0 步探查和第 1 步"看得见"，入口是预设里的「智能」）；真的省流量（改编码）另写设计
 - **硬件编码**（参考 Sunshine）：A 端用 VideoToolbox 编 H.264/HEVC，作为"看视频"档；B 端用 VideoToolbox 解码。30 fps 全屏动画时比瓦片编码省流量也省 CPU。见 `docs/superpowers/specs/2026-11-14-rapp-smooth-streaming-design.md`（第二步）；暂不排期
 
 ## 回顾
