@@ -103,6 +103,9 @@ class FakeSessionPort extends SessionPort {
 
   /// When set, `start` throws it.
   Object? startError;
+
+  /// When set, `start` waits for it to complete first.
+  Completer<void>? startGate;
   int doubleClickMs = 500;
 
   /// What `composer_paste` and `composer_attach` answer (a runner `PasteResult` map).
@@ -129,6 +132,7 @@ class FakeSessionPort extends SessionPort {
   Future<Object?> invoke(String method, Map<String, Object?> args) async {
     calls.add((method, args));
     if (method == 'init') return {'doubleClickMs': doubleClickMs};
+    if (method == 'start' && startGate != null) await startGate!.future;
     if (method == 'start' && startError != null) throw startError!;
     if (method == 'composer_paste' || method == 'composer_attach') return pasteReply;
     if (method == 'fetch_clip') {

@@ -1100,8 +1100,10 @@ class MainState extends ChangeNotifier {
   String _sourceOf(SessionRecord r) => '${r.appName} @ ${deviceName(r.id)}';
 
   /// The link of [r] ended with [raw] (the runner's or the hub's words): the record stays, with its
-  /// last frame, until the user reconnects or ends it. Callers notify.
-  void _disconnect(SessionRecord r, String raw, {bool hint = false, String? hintText, bool failedOpen = false}) {
+  /// last frame, until the user reconnects or ends it. [retry] false: no automatic try is planned.
+  /// Callers notify.
+  void _disconnect(SessionRecord r, String raw,
+      {bool hint = false, String? hintText, bool failedOpen = false, bool retry = true}) {
     if (isDesktopScreen(r.app)) {
       if (r.sid != null) port?.close(r.sid!);
       _endRecord(r);
@@ -1138,7 +1140,10 @@ class MainState extends ChangeNotifier {
     r.reason = r.userDisconnect ? 'user' : raw;
     // Frozen only over something on show: a first open that failed has no picture to keep.
     r.frozen = autoReconnects(r.reason) && rs != null;
-    if (r.frozen) rs?.policy.cancel();
+    if (r.frozen) {
+      r.frozeFor = r.reason;
+      rs?.policy.cancel();
+    }
     r.seq = ++_seq;
     if (rs != null) {
       r.choice = rs.choice;
@@ -1152,7 +1157,7 @@ class MainState extends ChangeNotifier {
       _waiting.remove(sid)?.timer.cancel();
       if (pictureFocused == sid) _blur();
     }
-    final auto = _planRetry(r);
+    final auto = retry && _planRetry(r);
     // A failed open that starts waiting still says why once; later automatic tries stay quiet.
     if (hint && (!auto || (failedOpen && r.retry?.$1 == 0))) this.hint = hintText ?? '${r.appName} 已断开：${disconnectWord(r.reason)}';
   }
@@ -1294,18 +1299,26 @@ class MainState extends ChangeNotifier {
     return false;
   }
 
-  /// 「停止」 on the disconnected stage.
+  /// 「停止」 on the disconnected stage or the offline bar.
   void stopReconnect(String key) {
     final r = _records[key];
     if (r == null || r.retry == null) return;
     _stopRetry(r);
-    r.stopped = r.phase != Phase.disconnected; // a try in flight finishes as a plain disconnect
+    r.stopped = r.phase != Phase.disconnected; // a try in flight finishes by [_stopTry]
     notifyListeners();
   }
 
   void stopReconnectCurrent() {
     final k = currentKey;
     if (k != null) stopReconnect(k);
+  }
+
+  /// The try in flight of [r] finishes after 「停止」: a frozen record stays frozen under its bar, with
+  /// its network words, 「重连」 and no new try (offline-freeze spec); any other is the user's own
+  /// disconnect. Callers notify.
+  void _stopTry(SessionRecord r) {
+    r.stopped = false;
+    r.frozen ? _disconnect(r, r.frozeFor ?? 'connection closed', retry: false) : _disconnect(r, 'user');
   }
 
   /// [r] was being ended and its link went away before the runner's `ClosedEvent`: that finishes
@@ -1431,8 +1444,7 @@ class MainState extends ChangeNotifier {
       }
       if (r.ending) return;
       if (r.stopped) {
-        r.stopped = false;
-        _disconnect(r, 'user');
+        _stopTry(r);
         notifyListeners();
         return;
       }
@@ -1452,10 +1464,9 @@ class MainState extends ChangeNotifier {
     }
     if (r.stopped) {
       // 「停止」 came while it was opening: the new link is closed quietly, the record stays disconnected.
-      r.stopped = false;
       _quiet.add(s.sid);
       hub!.close(s.sid);
-      _disconnect(r, 'user');
+      _stopTry(r);
       notifyListeners();
       return;
     }
@@ -1527,18 +1538,27 @@ class MainState extends ChangeNotifier {
         notifyListeners();
         return;
       }
-      final stopped = r.stopped;
-      r.stopped = false;
-      _disconnect(r, stopped ? 'user' : '$e', hint: !stopped, failedOpen: true);
+      if (r.stopped) {
+        _stopTry(r);
+      } else {
+        _disconnect(r, '$e', hint: true, failedOpen: true);
+      }
       notifyListeners();
       return;
     }
     if (r.sid != s.sid || r.phase != Phase.live || r.ending) return;
     if (r.stopped) {
-      // 「停止」 came while it was starting: close the link as the user's own disconnect.
-      r.stopped = false;
-      r.userDisconnect = true;
-      hub!.close(s.sid, reason: 'user');
+      if (r.frozen) {
+        // 「停止」 came while it was starting over a frozen stage: the new link goes quietly, the bar stays.
+        _quiet.add(s.sid);
+        hub!.close(s.sid);
+        _stopTry(r);
+      } else {
+        // 「停止」 came while it was starting: close the link as the user's own disconnect.
+        r.stopped = false;
+        r.userDisconnect = true;
+        hub!.close(s.sid, reason: 'user');
+      }
       notifyListeners();
       return;
     }

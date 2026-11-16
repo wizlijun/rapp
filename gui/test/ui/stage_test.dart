@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:rapp/paths.dart';
@@ -794,6 +795,169 @@ void main() {
         expect(tester.widget<TextField>(field).focusNode!.hasPrimaryFocus, isTrue);
         expect(text(tester), 'git push');
       });
+
+      int opens() => t.sent.where((m) => m['cmd'] == 'open').length;
+
+      /// The bar after a 停止: frozen still, 重连 on it, the network words without 正在重连, no new try.
+      Future<void> stoppedUnderTheBar(WidgetTester tester) async {
+        expect(es.currentRecord!.phase, Phase.disconnected);
+        expect(es.currentRecord!.frozen, isTrue);
+        expect(es.currentRecord!.retry, isNull);
+        expect(find.byType(DisconnectedStage), findsNothing);
+        expect(find.byKey(const Key('offline-bar')), findsOneWidget);
+        expect(find.byKey(const Key('reconnect-button')), findsOneWidget);
+        expect(find.byKey(const Key('stop-reconnect-button')), findsNothing);
+        expect(tester.widget<Text>(find.byKey(const Key('offline-text'))).data, '网络断了');
+        expect(field, findsOneWidget);
+        expect(text(tester), 'git push');
+        final n = opens();
+        await tester.pump(const Duration(seconds: 60));
+        expect(opens(), n);
+        expect(es.currentRecord!.retry, isNull);
+      }
+
+      /// 重连 on the bar: the new session (sid 11) swaps in under the same panel.
+      Future<void> tapReconnect(WidgetTester tester) async {
+        await tester.runAsync(() async {
+          t.onSend = (m) {
+            if (m['cmd'] == 'open') {
+              t.emit({
+                'event': 'opened', 'sid': 11, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+                'port': 5011, 'token': 'tk', 'req': m['req'],
+              });
+            }
+          };
+          await tester.tap(find.byKey(const Key('reconnect-button')));
+          for (var i = 0; i < 4; i++) {
+            await flush();
+          }
+        });
+        await tester.pump();
+        port.emit(const ReadyEvent(11, 'Safari'));
+        port.emit(WindowsEvent(11, [rw(5, 400, 328)]));
+        await tester.pump();
+        await tester.pump();
+        expect(es.currentRecord!.frozen, isFalse);
+        expect(es.currentRemote!.sid, 11);
+        expect(find.byKey(const Key('offline-bar')), findsNothing);
+        expect(text(tester), 'git push');
+        expect(tester.widget<RappButton>(send).onPressed, isNotNull);
+      }
+
+      testWidgets('停止 while an automatic try is opening keeps the frozen bar; 重连 then swaps in', (tester) async {
+        await dropWithDraft(tester);
+        Object? req;
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') req = m['req'];
+        };
+        await tester.runAsync(() async {
+          es.reconnect(es.currentKey!, auto: true);
+          await flush();
+        });
+        await tester.pump();
+        expect(es.currentRecord!.phase, Phase.connecting);
+        await tester.tap(find.byKey(const Key('stop-reconnect-button')));
+        await tester.pump();
+        await tester.runAsync(() async {
+          t.emit({'event': 'error', 'req': req, 'error': 'cannot reach the host'});
+          for (var i = 0; i < 4; i++) {
+            await flush();
+          }
+        });
+        await tester.pump();
+        await stoppedUnderTheBar(tester);
+        await tapReconnect(tester);
+      });
+
+      testWidgets('停止 while an automatic try is opening, then the open succeeds: still the frozen bar', (tester) async {
+        await dropWithDraft(tester);
+        Object? req;
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') req = m['req'];
+        };
+        await tester.runAsync(() async {
+          es.reconnect(es.currentKey!, auto: true);
+          await flush();
+        });
+        await tester.pump();
+        await tester.tap(find.byKey(const Key('stop-reconnect-button')));
+        await tester.pump();
+        await tester.runAsync(() async {
+          t.emit({
+            'event': 'opened', 'sid': 11, 'id': '111', 'app': 'Safari', 'path': 'lan',
+            'port': 5011, 'token': 'tk', 'req': req,
+          });
+          for (var i = 0; i < 4; i++) {
+            await flush();
+          }
+        });
+        await tester.pump();
+        expect(t.sent.where((m) => m['cmd'] == 'close' && m['sid'] == 11), isNotEmpty);
+        await stoppedUnderTheBar(tester);
+      });
+
+      testWidgets('停止 while an automatic try is starting keeps the frozen bar', (tester) async {
+        await dropWithDraft(tester);
+        port.startGate = Completer<void>();
+        await tester.runAsync(() async {
+          t.onSend = (m) {
+            if (m['cmd'] == 'open') {
+              t.emit({
+                'event': 'opened', 'sid': 11, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+                'port': 5011, 'token': 'tk', 'req': m['req'],
+              });
+            }
+          };
+          es.reconnect(es.currentKey!, auto: true);
+          for (var i = 0; i < 4; i++) {
+            await flush();
+          }
+        });
+        await tester.pump();
+        expect(port.calls.where((c) => c.$1 == 'start' && c.$2['sid'] == 11), isNotEmpty);
+        await tester.tap(find.byKey(const Key('stop-reconnect-button')));
+        await tester.pump();
+        await tester.runAsync(() async {
+          port.startGate!.complete();
+          port.startGate = null;
+          for (var i = 0; i < 4; i++) {
+            await flush();
+          }
+        });
+        await tester.pump();
+        expect(t.sent.where((m) => m['cmd'] == 'close' && m['sid'] == 11), isNotEmpty);
+        expect(es.currentRemote!.sid, 1);
+        await stoppedUnderTheBar(tester);
+        await tapReconnect(tester);
+      });
+    });
+
+    testWidgets('停止 on a reconnect of a session that never froze still ends as 你断开了', (tester) async {
+      await shown(tester);
+      port.emit(const DisconnectedEvent(1, 'user'));
+      await tester.pump();
+      expect(es.currentRecord!.frozen, isFalse);
+      Object? req;
+      t.onSend = (m) {
+        if (m['cmd'] == 'open') req = m['req'];
+      };
+      await tester.runAsync(() async {
+        es.reconnectCurrent();
+        await flush();
+      });
+      // A manual try has no 停止 of its own: the record is marked as an automatic one was.
+      es.currentRecord!.retry = (0, DateTime.now());
+      es.stopReconnectCurrent();
+      await tester.runAsync(() async {
+        t.emit({'event': 'error', 'req': req, 'error': 'cannot reach the host'});
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      await tester.pump();
+      expect(es.currentRecord!.reason, 'user');
+      expect(find.byType(DisconnectedStage), findsOneWidget);
+      expect(find.byKey(const Key('offline-bar')), findsNothing);
     });
 
     testWidgets('a frozen record stays frozen while it reconnects, and thaws on the swap', (tester) async {

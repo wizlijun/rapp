@@ -36,6 +36,10 @@ class SessionRecord {
   /// session swaps in (offline-freeze spec).
   bool frozen = false;
 
+  /// The network reason [frozen] was set for: a 「停止」 of the try in flight goes back to it, so the
+  /// stage stays frozen under the bar with 「重连」 (offline-freeze spec).
+  String? frozeFor;
+
   /// Ended while reconnecting (R14).
   bool ending = false;
   StreamChoice choice = startChoice;
