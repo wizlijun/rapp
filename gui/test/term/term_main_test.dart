@@ -165,18 +165,54 @@ void main() {
     expect(term.calls.where((c) => c.$1 == 'close').single.$2['sid'], 1);
   });
 
-  testWidgets('the top bar and the session list carry the pane title', (tester) async {
+  void termsEvent(String name) => t.emit({
+        'event': 'terms',
+        'id': '111',
+        'terms': [
+          {'id': app, 'host': null, 'name': name, 'command': 'claude', 'panes': 1, 'attached': 1, 'activity': 0,
+           'dead': false, 'unread': false},
+        ],
+        'hosts': [
+          {'host': null},
+        ],
+      });
+
+  testWidgets('the top bar says CLI · zsh', (tester) async {
+    termsEvent('zsh');
     await tester.pumpWidget(wrap(window()));
     await openTerm(tester, two);
-    expect(find.text('claude · work'), findsOneWidget);
-    expect(find.text('mini · 局域网 · build-box'), findsOneWidget);
-    expect(s.current!.paneTitle, 'build-box');
-    s.selectWindow(4);
-    await tester.pump();
-    expect(find.text('logs · work'), findsOneWidget);
-    expect(find.text('mini · 局域网 · tail'), findsOneWidget);
+    expect(find.text('CLI · zsh'), findsOneWidget);
+    // No pane command prefix and no pane title in the second line.
+    expect(find.text('claude · zsh'), findsNothing);
+    expect(find.text('mini · 局域网'), findsOneWidget);
+    expect(s.current!.title, 'CLI · zsh');
     await tester.pumpWidget(wrap(SizedBox(width: 330, height: 400, child: SessionsTab(state: s))));
-    expect(find.text('局域网 · tail'), findsOneWidget);
+    expect(find.text('CLI · zsh'), findsOneWidget);
+  });
+
+  testWidgets('the title follows a rename', (tester) async {
+    termsEvent('zsh');
+    await tester.pumpWidget(wrap(window()));
+    await openTerm(tester, two);
+    expect(find.text('CLI · zsh'), findsOneWidget);
+    termsEvent('后端');
+    await settle(tester);
+    expect(find.text('CLI · 后端'), findsOneWidget);
+    expect(find.text('CLI · zsh'), findsNothing);
+    // The row is gone from the list: the last name seen stays.
+    t.emit({'event': 'terms', 'id': '111', 'terms': [], 'hosts': [{'host': null}]});
+    await settle(tester);
+    expect(find.text('CLI · 后端'), findsOneWidget);
+  });
+
+  testWidgets('a favorite of a terminal is labelled CLI ·', (tester) async {
+    termsEvent('zsh');
+    s.toggleFavorite('111', app, 'zsh');
+    await tester.pumpWidget(wrap(SizedBox(width: 330, height: 400, child: SessionsTab(state: s))));
+    expect(find.text('CLI · zsh'), findsOneWidget);
+    termsEvent('后端');
+    await tester.pump();
+    expect(find.text('CLI · 后端'), findsOneWidget);
   });
 
   testWidgets('the traffic menu of a terminal has no refit and no stream presets', (tester) async {
@@ -194,18 +230,7 @@ void main() {
     expect(find.text('结束会话'), findsWidgets);
   });
 
-  testWidgets('a pane larger than the stage names the other clients from the device panel list', (tester) async {
-    t.emit({
-      'event': 'terms',
-      'id': '111',
-      'terms': [
-        {'id': app, 'host': null, 'name': 'work', 'command': 'claude', 'panes': 2, 'attached': 3, 'activity': 0,
-         'dead': false, 'unread': false},
-      ],
-      'hosts': [
-        {'host': null},
-      ],
-    });
+  testWidgets('a pane larger than the stage says nothing about being scaled', (tester) async {
     await tester.pumpWidget(wrap(window()));
     await openTerm(tester, two);
     term.models[1]!
@@ -214,9 +239,7 @@ void main() {
           pane: '%3', rev: 1, cols: 300, rows: 90, cx: 0, cy: 0, cursor: true, alt: false, full: true, more: false,
           lines: [for (var i = 0; i < 90; i++) (i, 'row $i')]));
     await settle(tester);
-    final note = tester.widget<Text>(find.byKey(const Key('term-scaled'))).data!;
-    expect(note, startsWith('另有 2 个终端也接着这个会话。'));
-    expect(note, contains('300×90'));
+    expect(find.byKey(const Key('term-scaled')), findsNothing);
   });
 
   testWidgets('a wide bar shows no remote menu button for a terminal', (tester) async {

@@ -795,12 +795,26 @@ class MainState extends ChangeNotifier {
   }
 
   String appName(String id, String app) {
-    return _appNames['$id/$app'] ?? app;
+    final name = _appNames['$id/$app'] ?? app;
+    if (!isTermApp(app)) return name;
+    return termName(id, app) ?? name;
   }
+
+  /// A text terminal's current name on [device], from the device's terms list; null when it is not listed (the
+  /// session ended, or the list has not come yet).
+  String? termName(String device, String term) =>
+      hub?.termLists[device]?.terms.where((r) => r.id == term).firstOrNull?.name;
+
+  /// What a favourite or project member is called: `CLI · <name>` for a text terminal, whose name is the list's
+  /// current one, else the one stored with it.
+  String labelOf(AppRef a) => isTermApp(a.bundle) ? termTitle(termName(a.device, a.bundle) ?? a.name) : a.name;
 
   SessionEntry _entryOf(SessionRecord r) {
     final sid = r.sid;
     final rs = sid == null ? null : remote[sid];
+    // A terminal's name is the device's current one; the last one seen stays when the row is gone.
+    final tn = isTermApp(r.app) ? termName(r.id, r.app) : null;
+    if (tn != null) r.appName = tn;
     return SessionEntry(
       sid: sid,
       id: r.id,
@@ -812,7 +826,6 @@ class MainState extends ChangeNotifier {
       bytesPerSecond: r.phase == Phase.live ? rs?.bytesPerSecond : null,
       reason: r.phase == Phase.disconnected ? disconnectWord(r.reason) : null,
       takenOver: r.phase == Phase.disconnected && takenOver(r.reason),
-      paneTitle: rs == null ? null : termPaneOf(rs)?.title,
     );
   }
 
@@ -1711,7 +1724,7 @@ class MainState extends ChangeNotifier {
       await hub?.terms(id);
     } catch (_) {}
     final row = hub?.termLists[id]?.terms.where((r) => r.id == term).firstOrNull;
-    final shown = row == null ? (parseTermId(term)?.name ?? term) : termDisplayName(row.name, row.host);
+    final shown = row == null ? '已结束' : termDisplayName(row.name, row.host);
     unawaited(openOrSwitch(id, term, shown));
   }
 

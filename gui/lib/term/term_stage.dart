@@ -58,18 +58,12 @@ const _copiedFor = Duration(seconds: 1);
 /// K6: how long a key or text may go without a new screen before the ellipsis shows.
 const _echoWait = Duration(milliseconds: 300);
 
-/// The height kept under a scaled-down pane for its note.
-const _scaledNoteH = 24.0;
-
 class TermStage extends StatefulWidget {
-  const TermStage({super.key, required this.state, required this.session, required this.port, this.attached});
+  const TermStage({super.key, required this.state, required this.session, required this.port});
 
   final MainState state;
   final RemoteSession session;
   final TermSessionPort port;
-
-  /// The device panel's `attached` for this session; null when unknown.
-  final int? attached;
 
   @override
   State<TermStage> createState() => _TermStageState();
@@ -619,12 +613,6 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     }
   }
 
-  String _scaledNote(TermModel m) {
-    final a = widget.attached;
-    final who = a == null ? '另有终端' : '另有 ${math.max(1, a - 1)} 个终端';
-    return '$who也接着这个会话。为了不改它看到的尺寸，这里按 ${m.cols}×${m.rows} 原样缩小显示。';
-  }
-
   @override
   Widget build(BuildContext context) {
     _look(context);
@@ -636,8 +624,8 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
       final m = _model;
       final shown = m != null && m.screen.isNotEmpty;
       final gridW = shown ? m.cols * cw : 0.0, gridH = shown ? m.rows * ch : 0.0;
-      final scaled = shown && (gridW > w + 0.01 || gridH > h + 0.01);
-      _scale = scaled ? math.min(w / gridW, math.max(1.0, h - _scaledNoteH) / gridH) : 1.0;
+      // The pane keeps the device's rows and columns; it is scaled to fit the stage, up as well as down.
+      _scale = shown ? math.min(w / gridW, h / gridH) : 1.0;
 
       if (m != null && _linksVer != _ver) {
         _linksVer = _ver;
@@ -713,7 +701,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
               Positioned(
                 left: 0,
                 right: 0,
-                bottom: scaled ? _scaledNoteH + 8 : 14,
+                bottom: 14,
                 child: Center(
                   child: _Pill(
                     key: const Key('term-latest'),
@@ -726,22 +714,8 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
             if (note != null)
               Positioned(
                 left: 12,
-                bottom: scaled ? _scaledNoteH + 8 : 14,
+                bottom: 14,
                 child: _Pill(key: const Key('term-note'), tokens: t, text: note),
-              ),
-            if (scaled)
-              Positioned(
-                left: 12,
-                right: 12,
-                bottom: 4,
-                child: Text(
-                  _scaledNote(m),
-                  key: const Key('term-scaled'),
-                  textAlign: TextAlign.center,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(color: t.muted, fontSize: 12),
-                ),
               ),
           ]),
         ),

@@ -299,7 +299,7 @@ class _MemberRow extends StatelessWidget {
     final entry = s.entryFor(m.key);
     final lamp = entry?.lamp ?? Lamp.notOpened;
     final status = s.memberStatus(m);
-    final title = '${m.app.name} @ ${s.deviceName(m.app.device)}';
+    final title = '${s.labelOf(m.app)} @ ${s.deviceName(m.app.device)}';
     final verb = openVerb(entry?.lamp, takenOver: entry?.takenOver ?? false);
     final dashed = entry == null;
     final backdrop = rowBackdrop(lamp, t);
@@ -359,7 +359,7 @@ class _MemberRow extends StatelessWidget {
                             text: m.task,
                             placeholder: '备注',
                             semanticLabel: m.task.isEmpty
-                                ? '备注 ${m.app.name}'
+                                ? '备注 ${s.labelOf(m.app)}'
                                 : '备注 ${m.task}',
                             style: TextStyle(color: t.text, fontSize: 13),
                             onCommit: (v) => s.setTask(id, m.key, v),
@@ -369,7 +369,7 @@ class _MemberRow extends StatelessWidget {
                         RappButton.secondary(
                           key: Key('member-open-$id-${m.key}'),
                           label: verb,
-                          semanticLabel: '$verb ${m.app.name}',
+                          semanticLabel: '$verb ${s.labelOf(m.app)}',
                           onPressed: (s.hubUsable && lamp != Lamp.connecting)
                               ? () {
                                   s.openOrSwitch(
@@ -385,7 +385,7 @@ class _MemberRow extends StatelessWidget {
                         RappButton.secondary(
                           key: Key('member-remove-$id-${m.key}'),
                           label: '移出',
-                          semanticLabel: '移出 ${m.app.name}',
+                          semanticLabel: '移出 ${s.labelOf(m.app)}',
                           onPressed: () => s.removeMember(id, m.key),
                         ),
                       ],
@@ -425,7 +425,7 @@ class _AddList extends StatelessWidget {
         for (final a in apps)
           Builder(
             builder: (context) {
-              final label = '${a.name} @ ${state.deviceName(a.device)}';
+              final label = '${state.labelOf(a)} @ ${state.deviceName(a.device)}';
               return Semantics(
                 button: true,
                 label: label,

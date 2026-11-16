@@ -79,6 +79,7 @@ class SessionsTab extends StatelessWidget {
                         padding: const EdgeInsets.only(bottom: 6),
                         child: _FavoriteRow(
                           favorite: f,
+                          label: state.labelOf(f),
                           deviceName: state.deviceName(f.device),
                           onTap: state.hubUsable ? () => state.openOrSwitch(f.device, f.bundle, f.name) : null,
                         ),
@@ -96,8 +97,9 @@ class SessionsTab extends StatelessWidget {
 
 /// A favourite with no session: 60px, dashed outline, not-opened lamp (K9).
 class _FavoriteRow extends StatelessWidget {
-  const _FavoriteRow({required this.favorite, required this.deviceName, required this.onTap});
+  const _FavoriteRow({required this.favorite, required this.label, required this.deviceName, required this.onTap});
   final AppRef favorite;
+  final String label;
   final String deviceName;
   final VoidCallback? onTap;
 
@@ -110,7 +112,7 @@ class _FavoriteRow extends StatelessWidget {
       height: 60,
       child: Semantics(
         button: true,
-        label: '${favorite.name} @ $deviceName，${lampWord(Lamp.notOpened)}',
+        label: '$label @ $deviceName，${lampWord(Lamp.notOpened)}',
         excludeSemantics: true,
         onTap: onTap,
         child: Material(
@@ -133,7 +135,7 @@ class _FavoriteRow extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            favorite.name,
+                            label,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(color: t.text, fontWeight: FontWeight.w600),

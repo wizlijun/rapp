@@ -21,6 +21,9 @@ bool isPtyTerm(String app) => parseTermId(app)?.backend == 'pty';
   return (backend: backend, host: host, name: name);
 }
 
+/// The label of a text terminal in the top bar, the session list, the overview and the favourites.
+String termTitle(String name) => 'CLI · $name';
+
 String termDisplayName(String name, String? host) => host == null ? name : '$name @$host';
 
 /// The longest name a text terminal can be renamed to, in characters (code points).

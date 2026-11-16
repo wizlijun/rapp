@@ -7,7 +7,6 @@ import '../embed/composer_panel.dart';
 import '../embed/picture.dart';
 import '../embed/remote_session.dart';
 import '../embed/session_port.dart';
-import '../hub_client.dart';
 import '../term/term_key_row.dart';
 import '../term/term_stage.dart';
 import 'controls.dart';
@@ -90,10 +89,6 @@ class Stage extends StatelessWidget {
               state: state,
               session: rs,
               port: state.termPort!,
-              attached: [
-                for (final r in state.hub?.termLists[rec?.id]?.terms ?? const <TermRow>[])
-                  if (r.id == rec?.app) r.attached
-              ].firstOrNull,
             ));
         } else if (rs != null && !rs.detached && win != null) {
           picture = true;

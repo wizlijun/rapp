@@ -45,10 +45,9 @@ class TopBar extends StatelessWidget {
             final embedded = state.port != null && rs != null && cur != null;
             // A terminal: its tabs are panes (no ×, no rules), and it has no remote menu.
             final term = rs != null && state.termPort?.owns(rs.sid) == true;
-            final pane = rs == null ? null : state.termPaneOf(rs);
-            final title = cur == null ? '' : (pane == null ? cur.appName : '${pane.command} · ${cur.appName}');
+            final title = cur?.title ?? '';
             final cueOn = state.cue.isNotEmpty;
-            final sub = cur == null ? '' : (cueOn ? state.cue : _sub(cur, pane?.title));
+            final sub = cur == null ? '' : (cueOn ? state.cue : _routeSub(cur));
             // The fixed row: panel, prev, next, fullscreen, the needs anchor when there is a hub,
             // the overview button when shown, the stream anchor in embedded mode; and the gaps
             // (both paddings plus one after panel, overview, prev, session and next). Gaps and the
@@ -439,12 +438,6 @@ class TopBar extends StatelessWidget {
   String? _projectName() {
     final id = state.currentProject;
     return state.projects.where((p) => p.id == id).firstOrNull?.name;
-  }
-
-  /// The session's second line, and a terminal's [pane] title after it.
-  String _sub(SessionEntry e, String? pane) {
-    final s = _routeSub(e);
-    return pane == null || pane.isEmpty ? s : '$s · $pane';
   }
 
   String _routeSub(SessionEntry e) {
