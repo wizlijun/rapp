@@ -30,3 +30,12 @@ Rapp macOS 使用一行候选、局部分页、编辑器字体字号、透明背
 - 原生：GTK3 / GTK4 编译与适当静态检查，纯布局和状态测试；能够隔离验证的显示测试使用私有会话，不操作用户桌面。
 - 真实桌面验收另列：拼音 Enter/Space/数字和鼠标提交恰好一次，应用/字段/窗口切换，拆窗、主题缩放、服务重启与原生回退。
 - 构建在隔离目录进行，不覆盖用户源码中的未跟踪 `tasks/`，不在开发过程中重启正在使用的 fcitx5。
+
+## 实现与验收记录
+
+- fcitx 修复提交 `b4fc5f217badff31131fd0f075d6a0fbfc1a1727`，已快进合回 `/home/bruce/git/fcitx5` 的 `typewriter-candidate-theme`，未跟踪 `tasks/` 保持原样。源码及可安装包内实际 addon 各通过 14 条真实拼音/私有 D-Bus 回归；原代码可重现跨应用 pending 交接失败。
+- 插件包 `fcitx5-sumi-candidates-5.1.23.r5.gb4fc5f21-1-x86_64.pkg.tar.zst` 和源码、校验和、验证记录保存在 `dist/fcitx5-candidates-r5/`。仅包含 addon、addon 声明和许可证，不修改系统输入法配置。尚未安装。
+- 原生 C++ 候选连接增加 12 组私有总线检查，覆盖错误、超时、提前信号、过期请求、最大 uint64 序列、跨编辑器协调和实际总线关闭。动作失败后释放，不重试可能已经提交的选词。
+- GTK3 使用 `gui/linux/runner/tests/test-candidates-gtk.py` 启动独立 Broadway、临时 Chromium profile 和私有 D-Bus。真实窗口回归覆盖透明字形绘制、原始 index/serial 选择、草稿不变且不夺焦点、24px 字体缩放、长 Unicode 局部分页、共享草稿多视图交接、普通输入框隔离及销毁。纯布局测试另覆盖 1/1.2222/1.5/2 倍测量。
+- GTK4 使用 `rust/client-gtk/tests/test-candidates.py` 验证实际绘制和 GestureClick 选择、空候选行高与滚动区域保留、失焦后 D-Bus owner 消失、旧信号无效、重新聚焦新 token、服务消失回退。常规单测 7 条通过，原客户端 6 场景回归通过。
+- 自动测试没有操作用户桌面或重启输入法。真实 Wayland/fcitx 连续输入、输入法切换及跨设备提交仍需实际验收。Linux 协议无输入法端心跳：Flutter 渲染线程失联可由原生 watchdog 释放，但整个原生客户端主线程冻结时，不能承诺立即恢复系统候选。
