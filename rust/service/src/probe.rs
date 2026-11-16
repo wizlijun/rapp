@@ -52,7 +52,9 @@ async fn ssh(mut c: TcpStream) -> bool {
 /// Step 2: sends the first flight of a TLS handshake (server name `localhost`) and looks at the
 /// first record back. A handshake record (0x16, version 3.x) whose message is a ServerHello
 /// (type 2) is TLS; checking the type tells it from an echo service sending the ClientHello
-/// (type 1) back. The handshake is never finished.
+/// (type 1) back. So is an alert record (0x15, version 3.x): only a TLS server sends one, e.g.
+/// one that will not speak the versions or ciphers offered, and it is still `https` to a
+/// browser. The handshake is never finished.
 async fn https(mut c: TcpStream) -> bool {
     let name = ServerName::try_from("localhost").expect("a valid name");
     let Ok(mut tls) = rustls::ClientConnection::new(rapp_net::quic::probe_tls_config(), name) else { return false };
@@ -61,7 +63,9 @@ async fn https(mut c: TcpStream) -> bool {
         return false;
     }
     let got = read_up_to(&mut c, 6).await;
-    got.len() == 6 && got[0] == 0x16 && got[1] == 0x03 && got[5] == 0x02
+    let server_hello = got.len() == 6 && got[0] == 0x16 && got[1] == 0x03 && got[5] == 0x02;
+    let alert = got.len() >= 2 && got[0] == 0x15 && got[1] == 0x03;
+    server_hello || alert
 }
 
 /// Step 3: a `HEAD /`; any HTTP server answers it, even with an error.
@@ -158,6 +162,13 @@ mod tests {
     #[tokio::test]
     async fn a_server_hello_is_https() {
         let port = fake(|c| read_then(c, &[0x16, 0x03, 0x03, 0x00, 0x04, 0x02, 0, 0, 0])).await;
+        assert_eq!(detect(port).await, Some(Proto::Https));
+    }
+
+    // A server that will not speak the versions offered answers with an alert, not a ServerHello.
+    #[tokio::test]
+    async fn a_tls_alert_is_https() {
+        let port = fake(|c| read_then(c, &[0x15, 0x03, 0x03, 0x00, 0x02, 0x02, 0x28])).await;
         assert_eq!(detect(port).await, Some(Proto::Https));
     }
 
