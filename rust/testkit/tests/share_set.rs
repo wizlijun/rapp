@@ -310,7 +310,7 @@ async fn the_cli_still_prints_the_same() {
     };
     let out = run(&["share"]).await;
     let want = format!(
-        "这台设备：{id}.rapp   中继：没有配置\n端口  状态          只给\n{p}  没有服务在听  mini\n",
+        "这台设备：{id}   中继：没有配置\n端口  地址        状态          只给\n{p}  没有空的号  没有服务在听  mini\n",
         id = a.id
     );
     assert_eq!(String::from_utf8_lossy(&out.stdout), want, "{}", String::from_utf8_lossy(&out.stderr));

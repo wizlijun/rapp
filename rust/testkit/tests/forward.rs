@@ -1077,8 +1077,8 @@ async fn cli(local: &Path, args: &[&str], stdin: &[u8]) -> std::process::Output 
     tokio::time::timeout(WAIT, child.wait_with_output()).await.expect("the program ends in time").unwrap()
 }
 
-/// What `rapp share <port>` prints last: where the address of a share is found.
-const ELSEWHERE: &str = "在别的设备上用：打开 rapp 的设备面板，或运行 rapp hosts，看那台设备上的地址";
+/// What `rapp share <port>` prints last: the share number is the same on every device.
+const ELSEWHERE: &str = "在别的设备上也用这个地址";
 
 #[tokio::test]
 async fn the_cli_shares_and_pipes() {
@@ -1086,22 +1086,29 @@ async fn the_cli_shares_and_pipes() {
     let (a_local, b_local) = (cli_local(&rig.a), cli_local(&rig.b));
     let (port, _echo) = echo().await;
     let out = cli(a_local.path(), &["share", &port.to_string()], b"").await;
-    assert_eq!(String::from_utf8_lossy(&out.stdout), format!("已分享：{port}\n{ELSEWHERE}\n"));
+    // The echo server says nothing, so the protocol is not detected as http or ssh: it is tcp.
+    let first = String::from_utf8_lossy(&out.stdout).to_string();
+    let addr = first.lines().next().and_then(|l| l.split(" → ").nth(1)).and_then(|a| a.split('（').next()).unwrap_or("").to_string();
+    assert!(addr.starts_with("tcp://localhost:"), "{first:?}");
+    assert_eq!(first, format!("已分享：{port} → {addr}（探测到 tcp）\n{ELSEWHERE}\n"));
     assert_eq!(out.status.code(), Some(0));
 
     let out = cli(a_local.path(), &["share"], b"").await;
-    assert!(String::from_utf8_lossy(&out.stdout).contains(&format!("\n{port}  有服务在听")), "{}", String::from_utf8_lossy(&out.stdout));
+    assert!(String::from_utf8_lossy(&out.stdout).contains(&format!("\n{port}  {addr}  有服务在听")), "{}", String::from_utf8_lossy(&out.stdout));
 
     // On B the share has an address: a local port of B. (`hosts` goes by B's device list.)
     std::fs::write(rig.b.home.path().join("hosts.json"), json!([{"id": rig.a.id, "name": "a"}]).to_string()).unwrap();
     let out = cli(b_local.path(), &["hosts"], b"").await;
     let text = String::from_utf8_lossy(&out.stdout).to_string();
-    assert!(text.starts_with(&format!("a  {}.rapp  ", rig.a.id)), "{text:?}");
+    assert!(text.starts_with(&format!("a  {}  ", rig.a.id)), "{text:?}");
     // One line per port A shares; this one's ends with where it is reached.
     let line = text.lines().find(|l| l.contains(&format!("  {port}  "))).unwrap_or_else(|| panic!("{text:?}"));
-    let addr = line.split_whitespace().last().unwrap_or("").to_string();
-    assert!(addr.starts_with("tcp://localhost:"), "{line:?}");
-    let local: u16 = addr.rsplit(':').next().unwrap().parse().unwrap();
+    let seen = line.split_whitespace().find(|w| w.starts_with("tcp://")).unwrap_or("").to_string();
+    // Both rigs are one computer, and A itself holds the share number: B yields and says so.
+    let number = addr.rsplit(':').next().unwrap();
+    assert!(line.ends_with(&format!("（{number} 被占）")), "{line:?}");
+    let addr_b = seen;
+    let local: u16 = addr_b.rsplit(':').next().unwrap().parse().unwrap();
     let mut tcp = tokio::net::TcpStream::connect(("127.0.0.1", local)).await.unwrap();
     tcp.write_all(b"by hand").await.unwrap();
     tcp.shutdown().await.unwrap();
@@ -1115,7 +1122,7 @@ async fn the_cli_shares_and_pipes() {
 
     // B has connected, so A knows it by the name it gave. A share narrowed to B says so, and
     // sharing the port again with nothing but the port keeps it narrowed.
-    let narrowed = format!("已分享：{port}\n只给：test-a\n{ELSEWHERE}\n");
+    let narrowed = format!("已分享：{port} → {addr}（探测到 tcp）\n只给：test-a\n{ELSEWHERE}\n");
     let out = cli(a_local.path(), &["share", &port.to_string(), "--allow", "test-a"], b"").await;
     assert_eq!(String::from_utf8_lossy(&out.stdout), narrowed, "{}", String::from_utf8_lossy(&out.stderr));
     let out = cli(a_local.path(), &["share", &port.to_string()], b"").await;
