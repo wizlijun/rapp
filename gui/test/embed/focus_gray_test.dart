@@ -37,6 +37,27 @@ void main() {
     expect(c.shouldReclip(OutsideClipper(const [Rect.fromLTWH(10, 10, 40, 40)])), isTrue);
   });
 
+  testWidgets('debug frames: one green frame per rect, at the rect, only when asked', (t) async {
+    const rects = [Rect.fromLTWH(10, 20, 100, 80), Rect.fromLTWH(150, 20, 60, 60)];
+    Widget host(bool frames) => Directionality(
+          textDirection: TextDirection.ltr,
+          child: Center(
+            child: SizedBox(width: 300, height: 200, child: focusGray(const Size(300, 200), rects, frames: frames)),
+          ),
+        );
+    await t.pumpWidget(host(true));
+    final f = find.byKey(const Key('focus-debug-frame'));
+    expect(f, findsNWidgets(2));
+    final origin = t.getTopLeft(find.byKey(const Key('focus-gray')));
+    expect(t.getRect(f.first).shift(-origin), rects[0]);
+    expect(t.getRect(f.last).shift(-origin), rects[1]);
+    await t.pumpWidget(host(false));
+    expect(find.byKey(const Key('focus-debug-frame')), findsNothing);
+    expect(find.byKey(const Key('focus-gray')), findsOneWidget);
+  });
+
+  test('debug frames are on in this build', () => expect(showFocusFrames, isTrue));
+
   group('on the Picture', () {
     late MainState es;
     late RemoteSession rs;
