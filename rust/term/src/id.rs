@@ -40,13 +40,6 @@ pub fn is_term(s: &str) -> bool {
     s.strip_prefix("term:").is_some_and(|r| !r.is_empty())
 }
 
-/// Whether `name` can be the host of a term id and read back the same: `a:b` would parse, but as host `a` and a
-/// name starting `b:`.
-pub fn valid_host(name: &str) -> bool {
-    let id = TermId { backend: "pty".into(), host: Some(name.to_string()), name: "-".into() };
-    matches!(TermId::parse(&id.to_string()), Ok(t) if t.host.as_deref() == Some(name))
-}
-
 /// A session name fit for a term id and a socket name: `:` and `.` are turned into `_`; empty names and control
 /// characters are refused.
 pub fn session_name(s: &str) -> Option<String> {
@@ -102,10 +95,8 @@ mod tests {
     }
 
     #[test]
-    fn term_prefix_and_host_names() {
+    fn term_prefix() {
         assert!(is_term("term:pty:work") && !is_term("com.apple.Safari") && !is_term("term"));
-        assert!(valid_host("gpu1") && valid_host("gpu-1.lab"));
-        assert!(!valid_host("") && !valid_host("a:b") && !valid_host("a b") && !valid_host("a@b"));
     }
 
     #[test]

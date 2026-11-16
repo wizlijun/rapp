@@ -79,8 +79,9 @@ async fn terms_lists_a_hosts_terminal_sessions() {
         (&r["event"], &r["id"], &r["path"], &r["req"]),
         (&json!("terms"), &json!(a.id), &json!("lan"), &json!(2))
     );
-    assert_eq!(r["terms"][0]["id"], "term:tmux:work", "{r}");
-    assert_eq!(r["hosts"][0], json!({"host":null}), "{r}");
+    assert_eq!(r["terms"][0]["id"], "term:pty:work", "{r}");
+    let host = json!({"host":null,"launchers":["Terminal"],"shells":[{"name":"zsh","path":"/bin/zsh","default":true}]});
+    assert_eq!(r["hosts"][0], host, "{r}");
     hub.finish().await;
 }
 
@@ -96,20 +97,28 @@ async fn terms_on_a_host_with_terminals_off_says_off() {
 }
 
 #[tokio::test]
-async fn targets_and_new_sessions_go_through_the_hub() {
+async fn open_and_rename_go_through_the_hub() {
     let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let mut hub = hub_with_host(&a, home.path()).await;
-    let r = hub.call(json!({"cmd":"add_term_target","id":a.id,"name":"gpu1","target":"me@gpu1","req":3})).await;
-    let targets = json!([{"name":"gpu1","target":"me@gpu1"}]);
-    assert_eq!(r, json!({"event":"term_targets","id":a.id,"targets":targets,"req":3}));
-    let new = json!({"cmd":"new_term","id":a.id,"name":"n1","command":["sh"],"cols":80,"rows":24,"req":4});
-    assert_eq!(hub.call(new).await, json!({"event":"term_created","id":a.id,"term":"term:tmux:n1","req":4}));
-    let r = hub.call(json!({"cmd":"remove_term_target","id":a.id,"name":"gpu1","req":5})).await;
-    assert_eq!(r, json!({"event":"term_targets","id":a.id,"targets":[],"req":5}));
-    // A refusal comes back as an error.
-    let r = hub.call(json!({"cmd":"remove_term_target","id":a.id,"name":"gpu1","req":6})).await;
-    assert_eq!(r, json!({"event":"error","error":"unknown target","req":6}));
+    let open = json!({"cmd":"open_term","id":a.id,"shell":"zsh","app":"Terminal","req":4});
+    assert_eq!(hub.call(open).await, json!({"event":"term_created","id":a.id,"term":"term:pty:opened","req":4}));
+    let rename = json!({"cmd":"rename_term","id":a.id,"term":"term:pty:k","name":"n","req":5});
+    assert_eq!(hub.call(rename).await, json!({"event":"term_renamed","id":a.id,"term":"term:pty:k","req":5}));
+    let log = term_log(a.bins.path());
+    assert!(log.contains(r#""shell":"zsh""#) && log.contains(r#""name":"n""#), "{log}");
+    hub.finish().await;
+}
+
+#[tokio::test]
+async fn new_term_is_an_unknown_cmd() {
+    let a = service().await;
+    let home = tempfile::tempdir().unwrap();
+    let mut hub = hub_with_host(&a, home.path()).await;
+    for cmd in ["new_term", "add_term_target", "remove_term_target"] {
+        let r = hub.call(json!({"cmd":cmd,"id":a.id,"name":"n","command":["sh"],"cols":80,"rows":24,"req":6})).await;
+        assert_eq!(r, json!({"event":"error","error":"unknown cmd","req":6}), "{cmd}");
+    }
     hub.finish().await;
 }
 
@@ -118,11 +127,11 @@ async fn a_terminal_session_opens_embedded_only() {
     let a = service().await;
     let home = tempfile::tempdir().unwrap();
     let mut hub = hub_with_host(&a, home.path()).await;
-    let r = hub.call(json!({"cmd":"open","id":a.id,"app":"term:tmux:work","req":"o"})).await;
+    let r = hub.call(json!({"cmd":"open","id":a.id,"app":"term:pty:work","req":"o"})).await;
     assert_eq!(r, json!({"event":"error","error":"terminal sessions open embedded only","req":"o"}));
 
-    let r = hub.call(json!({"cmd":"open","id":a.id,"app":"term:tmux:work","embed":true,"req":"e"})).await;
-    assert_eq!((&r["event"], &r["app"], &r["req"]), (&json!("opened"), &json!("term:tmux:work"), &json!("e")), "{r}");
+    let r = hub.call(json!({"cmd":"open","id":a.id,"app":"term:pty:work","embed":true,"req":"e"})).await;
+    assert_eq!((&r["event"], &r["app"], &r["req"]), (&json!("opened"), &json!("term:pty:work"), &json!("e")), "{r}");
     let (sid, port, token) = (r["sid"].clone(), r["port"].as_u64().unwrap(), r["token"].as_str().unwrap());
     let mut tcp = tokio::net::TcpStream::connect(("127.0.0.1", port as u16)).await.unwrap();
     tcp.write_all(format!("{token}\nx\n").as_bytes()).await.unwrap();
@@ -130,7 +139,7 @@ async fn a_terminal_session_opens_embedded_only() {
     let hello = tokio::time::timeout(WAIT, lines.next_line()).await.unwrap().unwrap().unwrap();
     assert_eq!(
         serde_json::from_str::<Value>(&hello).unwrap(),
-        json!({"t":"hello","fake":true,"term":"term:tmux:work"})
+        json!({"t":"hello","fake":true,"term":"term:pty:work"})
     );
     let echo = tokio::time::timeout(WAIT, lines.next_line()).await.unwrap().unwrap();
     assert_eq!(echo.as_deref(), Some("x"));
@@ -147,14 +156,14 @@ async fn an_online_host_gets_one_watch() {
     let home = tempfile::tempdir().unwrap();
     let mut hub = presence_hub(&a, home.path()).await;
     let first = pushed_terms(&mut hub).await;
-    assert_eq!((&first["id"], &first["terms"][0]["id"]), (&json!(a.id), &json!("term:tmux:work")), "{first}");
-    assert_eq!(first["hosts"], json!([{"host":null}]), "{first}");
+    assert_eq!((&first["id"], &first["terms"][0]["id"]), (&json!(a.id), &json!("term:pty:work")), "{first}");
+    let host = json!({"host":null,"launchers":["Terminal"],"shells":[{"name":"zsh","path":"/bin/zsh","default":true}]});
+    assert_eq!(first["hosts"], json!([host]), "{first}");
 
-    hub.send(json!({"cmd":"add_term_target","id":a.id,"name":"gpu1","target":"me@gpu1","req":2})).await;
-    assert_eq!(reply(&mut hub, 2).await["event"], "term_targets");
+    std::fs::write(a.home.path().join("term.json"), r#"{"allow":true,"fake_rows":["k2"]}"#).unwrap();
     loop {
         let r = pushed_terms(&mut hub).await;
-        if r["terms"].as_array().unwrap().iter().any(|t| t["id"] == "term:tmux@gpu1:main") {
+        if r["terms"].as_array().unwrap().iter().any(|t| t["id"] == "term:pty:k2") {
             break;
         }
     }
@@ -223,7 +232,7 @@ async fn with_terminals_off_the_watch_waits_until_terms_is_asked() {
     std::fs::remove_file(&config).unwrap();
     hub.send(json!({"cmd":"terms","id":a.id,"req":2})).await;
     let first = pushed_terms(&mut hub).await;
-    assert_eq!(first["terms"][0]["id"], "term:tmux:work", "{first}");
+    assert_eq!(first["terms"][0]["id"], "term:pty:work", "{first}");
     // One refused watch over all those rounds. The service log counts identical lines in a row instead of writing
     // them again, so a refusal asked every round would show as a `repeat` line once the next line is written.
     let events = log_events(a.home.path());
