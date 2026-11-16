@@ -70,6 +70,23 @@ void main() {
     expect(port.calls[1].$2, {'sid': 4, 'text': 'locked'});
   });
 
+  test('v13 host hints parse strictly; dismiss_cover goes out as a call', () async {
+    final c = parseSessionEvent('covered', {'sid': 4, 'id': 9, 'name': 'N', 'bundle': 'b', 'dismissable': true})
+        as CoveredEvent;
+    expect((c.sid, c.id, c.name, c.bundle, c.dismissable), (4, 9, 'N', 'b', true));
+    expect(parseSessionEvent('covered', {'sid': 4, 'id': 9, 'name': 'N', 'bundle': 'b'}), isNull);
+    final o = parseSessionEvent('app_opened', {'sid': 4, 'bundle': 'com.apple.Safari', 'name': 'Safari'}) as AppOpenedEvent;
+    expect((o.bundle, o.name), ('com.apple.Safari', 'Safari'));
+    expect(parseSessionEvent('app_opened', {'sid': 4, 'bundle': 1, 'name': 'x'}), isNull);
+    expect((parseSessionEvent('secure_focus', {'sid': 4, 'on': true}) as SecureFocusEvent).on, isTrue);
+    expect(parseSessionEvent('secure_focus', {'sid': 4, 'on': 1}), isNull);
+    final port = _PinPort();
+    port.dismissCover(4, 9);
+    await Future<void>.delayed(Duration.zero);
+    expect(port.calls.single.$1, 'dismiss_cover');
+    expect(port.calls.single.$2, {'sid': 4, 'id': 9});
+  });
+
   test('a window without a texture has none', () {
     final e = parseSessionEvent('windows', {'sid': 1, 'windows': [win(kind: 'menu', texture: null)]}) as WindowsEvent;
     expect(e.windows.single.texture, isNull);

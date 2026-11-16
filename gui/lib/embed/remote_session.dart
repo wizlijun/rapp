@@ -173,6 +173,10 @@ class RemoteSession extends ChangeNotifier {
   /// What is sent to this app goes into the input record (the app's own switch).
   bool get recordsInput => profile.recordInput;
 
+  /// A's keyboard focus is in a password field, as its host last said (v13; false before that):
+  /// type-to-compose does not open the panel and nothing sent is recorded (InputRecorder).
+  bool secureFocus = false;
+
   /// The composer is on for the app and the current tab is not a `noComposer` one.
   bool get composerAllowed {
     if (!profile.composer) return false;
@@ -324,7 +328,7 @@ class RemoteSession extends ChangeNotifier {
         // A letter on the picture (type-to-compose): the panel opens, takes the caret, then asks for the letter.
         // Not when the panel is off here (the tab just became noComposer): the runner drops its hold when
         // MainState sends compose:false for that picture.
-        if (!composerAllowed || !composeArmed) break;
+        if (!composerAllowed || !composeArmed || secureFocus) break;
         composer.replayPending = true;
         composer.openByLetter();
         composer.wantFocus();
@@ -349,6 +353,11 @@ class RemoteSession extends ChangeNotifier {
         if (!e.ascii) lastInputMethod = inputSource;
       case ScreenLockedEvent():
         screenLocked = e.locked;
+      case SecureFocusEvent():
+        secureFocus = e.on;
+      case CoveredEvent():
+      case AppOpenedEvent():
+        break; // MainState's notice.
       case ClosedEvent():
         endReason = e.reason;
     }
@@ -358,6 +367,7 @@ class RemoteSession extends ChangeNotifier {
   /// The link is gone: no transfer or send round is running any more.
   void linkDown() {
     focus = null;
+    secureFocus = false; // a new link's host says it again when it is still so
     _focusWanted = false;
     transferStatus = null;
     rttMs = null;

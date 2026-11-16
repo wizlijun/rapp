@@ -264,6 +264,23 @@ void main() {
     }
   });
 
+  test('what is sent into a password field on A is never recorded, and recording comes back after', () async {
+    final rec = recorder();
+    final rs = session(1, 'com.a');
+    rec.attach(rs, () => meta('h1', 'com.a'), restore: true);
+    rs.apply(const SecureFocusEvent(1, true));
+    await send(rs, 'hunter2');
+    rs.composer.done(1, null);
+    await settle();
+    expect(lines(), isEmpty);
+    expect(drafts().load('h1/com.a')?.pending ?? const [], isEmpty);
+    rs.apply(const SecureFocusEvent(1, false));
+    await send(rs, '普通的');
+    rs.composer.done(1, null);
+    await until(() => lines().isNotEmpty);
+    expect([for (final l in lines()) l['text']], ['普通的']);
+  });
+
   test('a failed write does not stop the send and is said once', () async {
     File(data.inputsDir('dev1')).writeAsStringSync('in the way');
     final rec = recorder();

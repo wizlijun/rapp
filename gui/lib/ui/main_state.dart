@@ -76,6 +76,34 @@ class LockBanner {
   final String action;
 }
 
+/// A line about what A just did around this session (v13 host hints): a window of another app
+/// covers where the click went, or a click opened another app. Its buttons act on it.
+class HostNotice {
+  const HostNotice.covered(this.text, {required this.coverId, required this.dismissable, required this.desktop})
+      : bundle = null,
+        name = null;
+  const HostNotice.opened(this.text, {required String this.bundle, required String this.name})
+      : coverId = null,
+        dismissable = false,
+        desktop = false;
+  final String text;
+  /// The cover's id for 「关掉它」 (null: an opened app).
+  final int? coverId;
+  /// A says the cover may be closed for the user (never a security or password prompt).
+  final bool dismissable;
+  /// 「在桌面会话里处理」 is offered (not from the desktop session itself).
+  final bool desktop;
+  /// The opened app 「打开」 opens or switches to.
+  final String? bundle;
+  final String? name;
+}
+
+/// How long a host notice stays unless acted on or closed.
+const hostNoticeFor = Duration(seconds: 15);
+
+String coveredText(String name) => 'A 上「$name」的弹窗挡住了点击';
+String openedText(String name) => 'A 上打开了「$name」';
+
 const desktopLockText = '远程电脑已锁屏；输入系统密码解锁';
 const childLockText = '远程电脑已锁屏；请在主窗口输入系统密码解锁';
 
@@ -1013,6 +1041,22 @@ class MainState extends ChangeNotifier {
       if (r.key == currentKey) _showBlocked(e.by);
       return;
     }
+    if (e is CoveredEvent) {
+      final name = e.name.isEmpty ? e.bundle : e.name;
+      _notify(r, HostNotice.covered(coveredText(name), coverId: e.id, dismissable: e.dismissable,
+          desktop: !isDesktopApp(r.app)));
+      notifyListeners();
+      return;
+    }
+    if (e is AppOpenedEvent) {
+      // The desktop session shows it already; A sends these for app sessions only.
+      if (!isDesktopApp(r.app) && e.bundle.isNotEmpty) {
+        final name = e.name.isEmpty ? e.bundle : e.name;
+        _notify(r, HostNotice.opened(openedText(name), bundle: e.bundle, name: name));
+        notifyListeners();
+      }
+      return;
+    }
     final wasLocked = rs.screenLocked;
     rs.apply(e);
     if (e is ScreenLockedEvent) {
@@ -1070,6 +1114,58 @@ class MainState extends ChangeNotifier {
   }
 
   Timer? _blockedTimer;
+
+  /// Each record's latest host notice (by record key: a reconnect keeps it), and its expiry.
+  final _notices = <String, ({HostNotice notice, Timer timer})>{};
+
+  /// The notice for what is on show, if any.
+  HostNotice? get hostNotice => currentKey == null ? null : _notices[currentKey]?.notice;
+
+  void _notify(SessionRecord r, HostNotice n) {
+    _notices.remove(r.key)?.timer.cancel();
+    late final Timer t;
+    t = Timer(hostNoticeFor, () {
+      if (_disposed || !identical(_notices[r.key]?.timer, t)) return;
+      _notices.remove(r.key);
+      notifyListeners();
+    });
+    _notices[r.key] = (notice: n, timer: t);
+  }
+
+  /// The notice on show goes (its ×, or after one of its buttons).
+  void closeHostNotice() {
+    final k = currentKey;
+    if (k == null) return;
+    _notices.remove(k)?.timer.cancel();
+    notifyListeners();
+  }
+
+  /// 「在桌面会话里处理」: the desktop session of the device on show opens, or comes forward.
+  void noticeDesktop() {
+    final r = currentRecord;
+    if (r == null) return;
+    closeHostNotice();
+    unawaited(openOrSwitch(r.id, 'desktop:', '桌面'));
+  }
+
+  /// 「关掉它」: A closes the cover (A itself refuses anything not safe to close).
+  void noticeDismiss() {
+    final r = currentRecord;
+    final id = hostNotice?.coverId;
+    final sid = r?.sid;
+    if (r == null || id == null || sid == null || r.phase != Phase.live) return;
+    portOf(sid)?.dismissCover(sid, id);
+    closeHostNotice();
+  }
+
+  /// 「打开」: the app A just opened, as a session of its own.
+  void noticeOpen() {
+    final r = currentRecord;
+    final n = hostNotice;
+    if (r == null || n == null || n.bundle == null) return;
+    closeHostNotice();
+    unawaited(openOrSwitch(r.id, n.bundle!, n.name!));
+  }
 
   /// 「远端正在被 X 操作」 for [blockedHintFor], only while it is still the hint.
   void _showBlocked(String by) {
@@ -1321,6 +1417,7 @@ class MainState extends ChangeNotifier {
 
   /// Takes [r] off the list and steps to the next session if it was current. Callers set the hint.
   void _endRecord(SessionRecord r) {
+    _notices.remove(r.key)?.timer.cancel();
     if (r.app == 'desktop:') {
       _endDesktopChildren(r.id);
       _desktopDisplays.remove(r.id);
@@ -3038,6 +3135,9 @@ class MainState extends ChangeNotifier {
     _writtenSub?.cancel();
     history.dispose();
     _blockedTimer?.cancel();
+    for (final n in _notices.values) {
+      n.timer.cancel();
+    }
     _desktopTimer?.cancel();
     _cueTimer?.cancel();
     _undoTimer?.cancel();

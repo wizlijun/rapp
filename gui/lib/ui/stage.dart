@@ -203,6 +203,7 @@ class Stage extends StatelessWidget {
           }
           final port = state.port;
           final banner = state.lockBanner;
+          final notice = state.hostNotice;
           final offline = rec != null && rec.frozen && picture ? offlineBarFor(state, rec) : null;
           final screens = rec != null && isDesktopApp(rec.app) && port?.supportsDetach == false
               ? state.desktopScreens(rec.id) : const [];
@@ -211,7 +212,7 @@ class Stage extends StatelessWidget {
               stage,
               if (!full && (picture || (rs != null && rs.detached)) && rs != null && port != null)
                 ...composerLayer(state: state, session: rs, port: port, editor: composerEditor),
-              if (offline != null || banner != null || screens.length > 1)
+              if (offline != null || banner != null || notice != null || screens.length > 1)
                 Positioned(
                   top: 0, left: 0, right: 0,
                   child: Column(
@@ -244,6 +245,7 @@ class Stage extends StatelessWidget {
                             ]),
                           ),
                         ),
+                      if (notice != null) _HostNoticeBar(state: state, notice: notice),
                     ],
                   ),
                 ),
@@ -251,6 +253,41 @@ class Stage extends StatelessWidget {
           );
         });
       },
+    );
+  }
+}
+
+/// A v13 host notice over the picture, in the lock banner's colours: what A did, and what to do about it.
+class _HostNoticeBar extends StatelessWidget {
+  const _HostNoticeBar({required this.state, required this.notice});
+  final MainState state;
+  final HostNotice notice;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = TextButton.styleFrom(foregroundColor: Colors.black87);
+    return Material(
+      key: const Key('host-notice'),
+      color: const Color(0xffffe7a3),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        child: Row(children: [
+          Expanded(child: Text(notice.text, style: const TextStyle(color: Colors.black87))),
+          if (notice.desktop)
+            TextButton(style: style, onPressed: state.noticeDesktop, child: const Text('在桌面会话里处理')),
+          if (notice.dismissable)
+            TextButton(style: style, onPressed: state.noticeDismiss, child: const Text('关掉它')),
+          if (notice.bundle != null)
+            TextButton(style: style, onPressed: state.noticeOpen, child: const Text('打开')),
+          IconButton(
+            tooltip: '关闭提示',
+            iconSize: 16,
+            color: Colors.black54,
+            onPressed: state.closeHostNotice,
+            icon: const Icon(Icons.close),
+          ),
+        ]),
+      ),
     );
   }
 }

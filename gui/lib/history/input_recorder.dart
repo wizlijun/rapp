@@ -323,7 +323,8 @@ class InputRecorder {
     final p = d.pieces.where((p) => identical(p.owner, o)).firstOrNull;
     final a = _attached[rs];
     var changed = false;
-    if (a != null && enabled() && rs.recordsInput) {
+    // Sent into a password field on A (v13 secure_focus): never kept in the record.
+    if (a != null && enabled() && rs.recordsInput && !rs.secureFocus) {
       final at = o.at ?? _clock();
       final rec = _sentRecord(_handed[o] ?? a.meta(), o, all, rs.profile.afterSend, at);
       p?.finishing = true;
