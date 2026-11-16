@@ -339,9 +339,10 @@ fn read_loop(
                 id,
                 text,
                 truncated,
+                info,
             } => event(
                 out,
-                json!({"event":"clip","id":id,"text":text,"truncated":truncated}),
+                json!({"event":"clip","id":id,"text":text,"truncated":truncated,"info":info}),
             )?,
             Incoming::Pasted { seq, error } => {
                 event(out, json!({"event":"paste_result","seq":seq,"error":error}))?

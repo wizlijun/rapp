@@ -35,7 +35,13 @@ pub fn prepare(root: &Path, legacy: &Path) -> Result<bool> {
         }
     }
     let old_service = legacy.join("service.json");
-    if loc.join("service.json").exists() || !old_service.is_file() {
+    let current_id = service_id(&loc.join("service.json"));
+    if let Some(id) = &current_id {
+        copy_if_missing(&loc.join("gui.json"), &device(root, id).join("gui.json"))?;
+    }
+    // A Linux client may have saved hosts and projects without ever running a
+    // local service. A separate completion marker also covers that migration.
+    if loc.join(MIGRATED_FROM).exists() {
         return Ok(false);
     }
     let mut table: Vec<(&str, std::path::PathBuf)> = vec![
@@ -46,21 +52,25 @@ pub fn prepare(root: &Path, legacy: &Path) -> Result<bool> {
         ("workspace.json", shared(root).join("workspace.json")),
         ("apps.json", shared(root).join("apps.json")),
     ];
-    let id = read_json::<serde_json::Value>(&old_service)
-        .ok()
-        .flatten()
-        .and_then(|v| v.get("id").and_then(|i| i.as_str().map(String::from)))
-        .filter(|i| !i.is_empty() && i.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
-    if let Some(id) = id {
-        table.push(("gui.json", device(root, &id).join("gui.json")));
+    let id = current_id.or_else(|| service_id(&old_service));
+    table.push(("gui.json", id.map_or_else(|| loc.join("gui.json"), |id| device(root, &id).join("gui.json"))));
+    table.push(("service.json", loc.join("service.json")));
+    if !table.iter().any(|(old, _)| legacy.join(old).is_file()) {
+        return Ok(false);
     }
     for (old, new) in table {
         copy_if_missing(&legacy.join(old), &new)?;
     }
     write_private(&loc.join(MIGRATED_FROM), format!("{}\n", legacy.display()).as_bytes())?;
-    // Last (R4): its presence means the migration finished.
-    copy_if_missing(&old_service, &loc.join("service.json"))?;
     Ok(true)
+}
+
+fn service_id(path: &Path) -> Option<String> {
+    read_json::<serde_json::Value>(path)
+        .ok()
+        .flatten()
+        .and_then(|v| v.get("id").and_then(|i| i.as_str().map(String::from)))
+        .filter(|i| !i.is_empty() && i.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
 }
 
 fn mkdir(p: &Path) -> Result<()> {
@@ -198,11 +208,38 @@ mod tests {
     }
 
     #[test]
-    fn no_legacy_service_json_no_migration() {
+    fn client_only_migration_preserves_hosts_projects_and_pending_preferences() {
         let (_t, root, legacy) = dirs();
         put(&legacy.join("workspace.json"), "w");
+        put(&legacy.join("hosts.json"), "h");
+        put(&legacy.join("gui.json"), "g");
+        assert!(prepare(&root, &legacy).unwrap());
+        assert_eq!(read(&root.join("shared/workspace.json")), "w");
+        assert_eq!(read(&root.join("local/hosts.json")), "h");
+        assert_eq!(read(&root.join("local/gui.json")), "g");
+        assert!(!root.join("local/service.json").exists());
+        assert_eq!(read(&legacy.join("hosts.json")), "h");
+        std::fs::remove_file(root.join("shared/workspace.json")).unwrap();
         assert!(!prepare(&root, &legacy).unwrap());
         assert!(!root.join("shared/workspace.json").exists());
+        put(&root.join("local/service.json"), r#"{"id":"123456789"}"#);
+        assert!(!prepare(&root, &legacy).unwrap());
+        assert_eq!(read(&root.join("devices/123456789/gui.json")), "g");
+        put(&root.join("devices/123456789/gui.json"), "edited");
+        prepare(&root, &legacy).unwrap();
+        assert_eq!(read(&root.join("devices/123456789/gui.json")), "edited");
+    }
+
+    #[test]
+    fn a_new_service_identity_does_not_prevent_client_migration() {
+        let (_t, root, legacy) = dirs();
+        put(&root.join("local/service.json"), r#"{"id":"987654321"}"#);
+        put(&legacy.join("hosts.json"), "h");
+        put(&legacy.join("gui.json"), "g");
+        assert!(prepare(&root, &legacy).unwrap());
+        assert_eq!(read(&root.join("local/hosts.json")), "h");
+        assert_eq!(read(&root.join("devices/987654321/gui.json")), "g");
+        assert_eq!(read(&root.join("local/service.json")), r#"{"id":"987654321"}"#);
     }
 
     #[cfg(unix)]

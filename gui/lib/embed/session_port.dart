@@ -161,6 +161,12 @@ sealed class SessionEvent {
   final Object sid;
 }
 
+class StreamChoiceEvent extends SessionEvent {
+  const StreamChoiceEvent(super.sid, this.mode, this.density, this.fps);
+  final String mode, density;
+  final int fps;
+}
+
 class ReadyEvent extends SessionEvent {
   const ReadyEvent(super.sid, this.appName);
   final String appName;
@@ -246,6 +252,14 @@ class ComposerInsertEvent extends SessionEvent {
 /// take the caret, then ask for it back with [SessionPort.composeReplay].
 class ComposeKeyEvent extends SessionEvent {
   const ComposeKeyEvent(super.sid);
+}
+
+/// Edits made in a native detached composer's draft, shared with the stage.
+class ComposerDraftEvent extends SessionEvent {
+  const ComposerDraftEvent(super.sid, {this.text, this.drop, this.send = false});
+  final String? text;
+  final int? drop;
+  final bool send;
 }
 
 /// File transfer status text; null when idle.
@@ -464,6 +478,7 @@ SessionEvent? parseSessionEvent(String method, Object? args) {
 abstract class SessionPort {
   bool get supportsDetach => true;
   bool handleKeyEvent(Object sid, KeyEvent event) => false;
+  void dropTarget(Object? sid) {}
   void dispose() {}
   Stream<SessionEvent> get events;
 
@@ -637,7 +652,10 @@ abstract class SessionPort {
     }
   }
 
-  void detach(Object sid) => _send('detach', {'sid': sid});
+  void detach(Object sid, {String text = '', List<BlockChip> blocks = const []}) => _send('detach', {
+    'sid': sid, 'text': text,
+    'blocks': [for (final b in blocks) {'n': b.n, 'label': b.label}],
+  });
 
   void attach(Object sid) => _send('attach', {'sid': sid});
 
