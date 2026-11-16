@@ -234,7 +234,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
   }
 
   /// A network drop froze the session: nothing goes to the remote, the draft stays (offline-freeze spec).
-  bool get _blocked => widget.state.sendBlocked(_s.sid);
+  bool get _blocked => widget.state.isDetaching(_s.sid) || widget.state.sendBlocked(_s.sid);
 
   // Text goes after A is set for it (English input, the marked box clicked); an empty send is
   // a Return for A's app. The session outlives the panel: a take that ends after the panel is
@@ -244,10 +244,14 @@ class _ComposerPanelState extends State<ComposerPanel> {
     final port = widget.port;
     switch (await _m.submit()) {
       case SubmitPieces(:final pieces):
+        if (_blocked) {
+          _m.done(0, '连接已断开或正在移动，内容尚未发送');
+          return;
+        }
         _s.prepareInput();
         port.composerSend(_s.sid, pieces);
       case SubmitReturn():
-        _s.pressReturn();
+        if (!_blocked) _s.pressReturn();
       case SubmitNothing():
         break;
     }
@@ -268,13 +272,15 @@ class _ComposerPanelState extends State<ComposerPanel> {
 
   // The model ignores results that come after the session's end.
   Future<void> _paste() async {
+    if (widget.state.isDetaching(_s.sid)) return;
     final port = widget.port;
-    _m.apply(await port.composerPaste(_s.sid));
+    await _m.applyPending(port.composerPaste(_s.sid));
   }
 
   Future<void> _attach() async {
+    if (widget.state.isDetaching(_s.sid)) return;
     final port = widget.port;
-    _m.apply(await port.composerAttach(_s.sid));
+    await _m.applyPending(port.composerAttach(_s.sid));
   }
 
   /// The line above the box (W11): paste and attach notes, an upload with 取消, and A on an

@@ -1,14 +1,16 @@
 //! Native menu structure matching the Mac client; all menu surfaces share one action state.
-use super::{finish, Shared};
+use super::{finish, Event, Shared};
 use gtk::{gio, glib, prelude::*};
 use rapp_client_core::{geometry, protocol as p, stream};
+use serde_json::Value;
+use std::sync::mpsc::SyncSender;
 use std::{
     cell::RefCell,
     rc::Rc,
     time::{Duration, Instant},
 };
 
-type HistoryEntry = (u32, Option<String>, bool);
+type HistoryEntry = (u32, Option<String>, bool, Value);
 
 #[derive(Clone)]
 pub struct Controls {
@@ -16,6 +18,7 @@ pub struct Controls {
     pub stream_menu: gio::Menu,
     group: gio::SimpleActionGroup,
     history_menu: gio::Menu,
+    network_menu: gio::Menu,
     history: Rc<RefCell<Vec<HistoryEntry>>>,
 }
 fn radio(menu: &gio::Menu, label: &str, action: &str, value: &str) {
@@ -81,6 +84,11 @@ impl Controls {
                         "zoom" if stream::ZOOMS.contains(&value) => s.zoom = value as f64 / 100.,
                         _ => return,
                     }
+                    if name != "zoom" {
+                        s.set_smart(false);
+                        // Like macOS's standalone client, a pick remains a ceiling for automatic saving.
+                        s.pinned = false;
+                    }
                     s.geometry_changed = Instant::now() - Duration::from_secs(1);
                 }
                 if let Some(group) = weak.upgrade() {
@@ -91,6 +99,7 @@ impl Controls {
             group.add_action(&action);
         }
         for (name, preset) in [
+            ("smart", stream::Choice { mode: 2, fps: 15, density: 1 }),
             ("least-traffic", stream::LEAST_TRAFFIC),
             ("sharpest", stream::SHARPEST),
         ] {
@@ -100,6 +109,8 @@ impl Controls {
             action.connect_activate(move |_, _| {
                 {
                     let mut s = s.borrow_mut();
+                    s.set_smart(name == "smart");
+                    s.pinned = false;
                     s.mode = preset.mode;
                     s.fps = preset.fps;
                     s.density_choice = preset.density;
@@ -152,7 +163,11 @@ impl Controls {
         });
         group.add_action(&fit);
         let stream_menu = gio::Menu::new();
+        let network_menu = gio::Menu::new();
+        network_menu.append(Some("正在连接…"), None);
+        stream_menu.append_section(None, &network_menu);
         let presets = gio::Menu::new();
+        presets.append(Some("智能（高彩 + 自适应 + 15 fps）"), Some("client.smart"));
         presets.append(
             Some("最省流（双色·灰度 + 自适应 + 1 fps）"),
             Some("client.least-traffic"),
@@ -207,8 +222,13 @@ impl Controls {
             stream_menu,
             group,
             history_menu,
+            network_menu,
             history: Rc::new(RefCell::new(Vec::new())),
         }
+    }
+    pub fn set_network_status(&self, label: &str) {
+        self.network_menu.remove_all();
+        self.network_menu.append(Some(label), None);
     }
     pub fn sync(&self, state: &Shared) {
         sync(&self.group, state);
@@ -218,18 +238,20 @@ impl Controls {
         id: u32,
         text: Option<String>,
         truncated: bool,
-        window: &gtk::ApplicationWindow,
+        info: Value,
+        events: SyncSender<Event>,
     ) {
         let mut history = self.history.borrow_mut();
-        for (id, _, _) in history.iter() {
+        for (id, _, _, _) in history.iter() {
             self.group.remove_action(&format!("clip{id}"));
+            self.group.remove_action(&format!("insert{id}"));
         }
         if history.first().is_none_or(|entry| entry.0 != id) {
-            history.insert(0, (id, text, truncated));
+            history.insert(0, (id, text, truncated, info));
             history.truncate(20);
         }
         self.history_menu.remove_all();
-        for (id, text, truncated) in history.iter() {
+        for (id, text, truncated, info) in history.iter() {
             let name = format!("clip{id}");
             let action = gio::SimpleAction::new(&name, None);
             let label = if let Some(text) = text {
@@ -243,26 +265,41 @@ impl Controls {
                     } else {
                         ""
                     },
-                    if *truncated {
-                        "（内容截断，暂不支持下载）"
-                    } else {
-                        ""
-                    }
+                    if *truncated { "（摘要）" } else { "" }
                 )
             } else {
-                "图片/文件/数据（暂不支持下载）".into()
-            };
-            action.set_enabled(text.is_some() && !truncated);
-            let text = text.clone();
-            let clipboard = gtk::prelude::WidgetExt::display(window).clipboard();
-            action.connect_activate(move |_, _| {
-                if let Some(text) = &text {
-                    clipboard.set_text(text);
+                match info["kind"].as_str() {
+                    Some("image") => format!("图片 {}×{}", info["width"], info["height"]),
+                    Some("files") => {
+                        format!("{} 个文件", info["files"].as_array().map_or(0, |f| f.len()))
+                    }
+                    Some("data") => format!("数据 {}", info["uti"]),
+                    _ => info["label"].as_str().unwrap_or("不支持的内容").into(),
                 }
-            });
-            self.group.add_action(&action);
-            self.history_menu
-                .append(Some(&label), Some(&format!("client.{name}")));
+            };
+            let submenu = gio::Menu::new();
+            for (name, label, insert) in [
+                (name, "复制到本机", false),
+                (format!("insert{id}"), "插入到输入区", true),
+            ] {
+                let action = if insert {
+                    gio::SimpleAction::new(&name, None)
+                } else {
+                    action.clone()
+                };
+                action.set_enabled(info["kind"] != "unsupported");
+                let text = text.clone();
+                let info = info.clone();
+                let id = *id;
+                let events = events.clone();
+                action.connect_activate(move |_, _| {
+                    let _ =
+                        events.try_send(Event::ClipPick(id, info.clone(), text.clone(), insert));
+                });
+                self.group.add_action(&action);
+                submenu.append(Some(label), Some(&format!("client.{name}")));
+            }
+            self.history_menu.append_submenu(Some(&label), &submenu);
         }
     }
 }

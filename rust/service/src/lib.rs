@@ -191,7 +191,13 @@ impl Service {
         let id = state.cfg.lock().unwrap().id.clone();
         let version = env!("CARGO_PKG_VERSION");
         state.log.event(Lvl::Info, "service_start", json!({"version": version, "id": id, "port": port, "ipc_port": ipc_port}));
-        let checked = workers::check(&state, false).await.unwrap_or(serde_json::json!({"screen_recording": false, "accessibility": false}));
+        let checked = workers::check(&state, false).await.unwrap_or_else(|| {
+            if cfg!(target_os = "linux") && workers::capabilities(&state)["graphical"] == false {
+                serde_json::Value::Null
+            } else {
+                json!({"screen_recording": false, "accessibility": false})
+            }
+        });
         state.set_permissions(checked);
         let state = Arc::new(state);
         for m in state.maps.start(pipe::known_ids(&state.home).as_deref(), &maps::serve(&state)) {

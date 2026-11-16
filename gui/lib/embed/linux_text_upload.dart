@@ -1,9 +1,11 @@
-// Large composer text uses the same v6 side connection as the macOS sender.
+// Large composer text uses the same v12 side connection as the macOS sender.
 // Socket backpressure keeps uploads separate from the picture and input pipes.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+
+import 'session_protocol.dart';
 
 class LinuxTextUpload {
   Socket? _socket;
@@ -70,7 +72,7 @@ class LinuxTextUpload {
 
     try {
       await packet(23, [
-        6,
+        sessionProtocolVersion,
         ..._string(token),
         ..._u32(item),
         0,

@@ -1,10 +1,21 @@
 #[path = "controls.rs"]
 mod controls;
+#[path = "focus.rs"]
+mod focus;
+#[path = "editor.rs"]
+mod editor;
+#[path = "candidates.rs"]
+mod candidates;
+#[path = "windows.rs"]
+mod windows;
 use anyhow::{bail, Context, Result};
+use editor::Editor;
 use glib::translate::IntoGlib;
 use gtk::{cairo, gdk, gio, glib, prelude::*};
+use rapp_client_core::transfer::{self, Cancel, Copy, Downloads};
 use rapp_client_core::{
     codec::Decoder,
+    probe::PathProbe,
     geometry,
     protocol::{self as p, Address, Incoming, Menu, Rect, Window},
     stream,
@@ -25,6 +36,9 @@ use std::{
 
 enum Event {
     Focus,
+    ClipPick(u32, serde_json::Value, Option<String>, bool),
+    ClipFetched(Result<Copy>, bool),
+    TransferProgress(String, u64, u64),
     PastePrepared(u32, Result<Vec<u8>>),
     Message(Incoming),
     Image(Vec<u8>, usize, usize, Rect),
@@ -35,15 +49,30 @@ struct TextSend {
     text: String,
     window: Option<u32>,
     started: Instant,
+    block: Option<u32>,
+    waiting: bool,
 }
 type Shared = Rc<RefCell<State>>;
 struct State {
     windows: Vec<Window>,
     region: Rect,
     surface: Option<cairo::ImageSurface>,
+    gray_surface: Option<cairo::ImageSurface>,
+    focus_regions: std::collections::HashMap<u32, Vec<Rect>>,
+    smart: bool,
+    redraw: bool,
+    pinned: bool,
+    probe: RefCell<PathProbe>,
+    began: Instant,
+    rtt: Option<u32>,
+    saving: u8,
+    input_ascii: bool,
     tx: Option<SyncSender<Vec<u8>>>,
     pending_text: Option<TextSend>,
+    send_queue: std::collections::VecDeque<(Option<u32>, Copy)>,
     next_seq: u32,
+    upload: Option<Cancel>,
+    download: Option<Cancel>,
     ready: bool,
     takeover_pending: bool,
     address: Option<Address>,
@@ -56,18 +85,31 @@ struct State {
     mode: u8,
     fps: u8,
     density_choice: u32,
-    last_stream: Option<(u8, u8, f32)>,
+    last_stream: Option<(u8, u8, f32, bool, bool)>,
     geometry_changed: Instant,
     last_size: (i32, i32, i32),
 }
 impl State {
     fn send(&self, bytes: Vec<u8>) {
+        if matches!(bytes.first(), Some(5 | 6 | 7 | 8 | 18 | 20)) {
+            self.probe.borrow_mut().input(self.began.elapsed().as_secs_f64());
+        }
         if let Some(tx) = &self.tx {
             // Bounded: an unresponsive peer cannot accumulate unlimited input or block GTK.
             if tx.try_send(bytes).is_err() {
                 self.send_failed.set(true);
             }
         }
+    }
+    fn set_smart(&mut self, smart: bool) {
+        self.smart = smart;
+        self.redraw = true;
+        self.focus_regions.clear();
+        self.gray_surface = if smart { self.surface.as_ref().and_then(focus::grayscale) } else { None };
+        self.last_stream = None;
+    }
+    fn paint(&self, cr: &cairo::Context, surface: &cairo::ImageSurface) {
+        focus::paint(cr, surface, self.gray_surface.as_ref(), self.region, &self.windows, &self.focus_regions);
     }
     fn hit(&self, area: &gtk::DrawingArea, x: f64, y: f64, clamp: bool) -> Option<(u32, f32, f32)> {
         let (cx, cy) = geometry::zoom_point(
@@ -277,9 +319,22 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
             h: 500.,
         },
         surface: None,
+        gray_surface: None,
+        focus_regions: Default::default(),
+        smart: false,
+        redraw: false,
+        pinned: false,
+        probe: RefCell::new(PathProbe::default()),
+        began: Instant::now(),
+        rtt: None,
+        saving: 0,
+        input_ascii: true,
         tx: None,
         pending_text: None,
+        send_queue: Default::default(),
         next_seq: 1,
+        upload: None,
+        download: None,
         ready: false,
         takeover_pending: false,
         address: address.clone(),
@@ -360,16 +415,40 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
     let local_menu = gio::Menu::new();
     local_menu.append_submenu(Some("rapp-client"), &controls.app_menu);
     menu_bar.set_menu_model(Some(&local_menu));
-    let entry = gtk::Entry::builder()
-        .placeholder_text("在此输入或粘贴，回车发送")
-        .build();
+    let entry = Editor::new();
+    root.append(&entry.chips());
+    root.append(&entry.error_label());
     let input = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     entry.set_hexpand(true);
     let copy = gtk::Button::with_label("复制");
     copy.set_tooltip_text(Some("复制远端选中的文字到本地剪贴板（v5）"));
     let send = gtk::Button::with_label("发送 ⏎");
     send.set_sensitive(false);
-    input.append(&entry);
+    let editor_scroll = gtk::ScrolledWindow::builder()
+        .min_content_height(60)
+        .max_content_height(180)
+        .propagate_natural_height(true)
+        .hexpand(true)
+        .build();
+    editor_scroll.set_child(Some(&*entry));
+    input.append(&entry.with_candidates(&editor_scroll));
+    let attach = gtk::Button::with_label("附件");
+    let editor_for_attach = entry.clone();
+    let window_for_attach = window.clone();
+    attach.connect_clicked(move |_| editor_for_attach.attach(&window_for_attach));
+    input.append(&attach);
+    let cancel = gtk::Button::with_label("取消传输");
+    let state_for_cancel = state.clone();
+    cancel.connect_clicked(move |_| {
+        let s = state_for_cancel.borrow();
+        if let Some(c) = &s.upload {
+            c.cancel();
+        }
+        if let Some(c) = &s.download {
+            c.cancel();
+        }
+    });
+    input.append(&cancel);
     input.append(&copy);
     input.append(&send);
     root.append(&input);
@@ -388,7 +467,7 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
         e.grab_focus();
     });
     let send_button = send.clone();
-    entry.connect_changed(move |entry| send_button.set_sensitive(!entry.text().is_empty()));
+    entry.connect_changed(move |entry| send_button.set_sensitive(entry.has_content()));
     window.set_child(Some(&root));
     let s = state.clone();
     area.set_draw_func(move |_, cr, w, h| {
@@ -403,9 +482,7 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
                 z * s.region.w as f64 / surface.width() as f64,
                 z * s.region.h as f64 / surface.height() as f64,
             );
-            if cr.set_source_surface(surface, 0., 0.).is_ok() {
-                let _ = cr.paint();
-            }
+            s.paint(cr, surface);
             let _ = cr.restore();
         }
     });
@@ -451,7 +528,7 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
                         surface.scale()
                     });
                 let density = stream::capture_density(s.zoom, backing, s.density_choice);
-                s.last_stream = Some((address.mode, address.fps, density));
+                s.last_stream = Some((address.mode, address.fps, density, s.pinned, s.smart));
                 s.tx = Some(connect(address, ev.clone(), meter.clone(), density));
                 drop(s);
                 menu_controls.sync(&state_for_connect);
@@ -469,7 +546,7 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
             .surface()
             .map_or(window.scale_factor() as f64, |surface| surface.scale());
         let density = stream::capture_density(s.zoom, backing, s.density_choice);
-        s.last_stream = Some((address.mode, address.fps, density));
+        s.last_stream = Some((address.mode, address.fps, density, s.pinned, s.smart));
         s.tx = Some(connect(address, events.clone(), bytes.clone(), density));
     }
     if json_mode {
@@ -496,6 +573,8 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
     let app = app.clone();
     let mut last_rate = Instant::now();
     let mut notice_deadline = None;
+    let downloads = Downloads::default();
+    let mut native_windows = windows::Windows::new(&app, &state, &entry, &window, json_mode);
     glib::timeout_add_local(Duration::from_millis(16), move || {
         if state.borrow().finished {
             return glib::ControlFlow::Break;
@@ -509,12 +588,28 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
             let Ok(event) = rx.try_recv() else {
                 break;
             };
+            if matches!(&event, Event::Message(_) | Event::Image(..)) {
+                let s = state.borrow();
+                if s.probe.borrow_mut().received(s.began.elapsed().as_secs_f64()).is_some() {
+                    emit(json_mode, json!({"event":"stalled","on":false}));
+                }
+            }
             match event {
                 Event::Focus => {
                     window.unminimize();
                     window.present();
+                    entry.grab_focus();
                 }
                 Event::End(code, reason) => {
+                    {
+                        let s = state.borrow();
+                        if let Some(c) = &s.upload {
+                            c.cancel();
+                        }
+                        if let Some(c) = &s.download {
+                            c.cancel();
+                        }
+                    }
                     if state.borrow().takeover_pending {
                         continue;
                     }
@@ -560,8 +655,14 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
                             .find(|w| w.flags & 2 != 0 && w.kind <= 2)
                             .or_else(|| table.iter().find(|w| w.kind <= 2))
                             .map(|w| w.id);
+                        let keep: std::collections::HashSet<_> = table.iter().filter(|w| s.windows.iter().any(|old|
+                            old.id == w.id && old.rect.w == w.rect.w && old.rect.h == w.rect.h)).map(|w| w.id).collect();
+                        s.focus_regions.retain(|id, _| keep.contains(id));
+                        s.redraw = true; // Clear stale masks even when the host has no new pixels.
                         s.windows = table;
                     }
+                    viewport.set_visible(!state.borrow().windows.iter().any(|w| w.kind <= 2));
+                    native_windows.sync();
                     controls.sync(&state);
                 }
                 Event::Message(Incoming::Menus(items)) => {
@@ -574,8 +675,9 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
                     id,
                     text,
                     truncated,
+                    info: clip_info,
                 }) => {
-                    controls.add_clip(id, text.clone(), truncated, &window);
+                    controls.add_clip(id, text.clone(), truncated, clip_info, events.clone());
                     info.set_visible(true);
                     notice_deadline = Some(Instant::now() + Duration::from_secs(3));
                     if let Some(text) = text {
@@ -585,10 +687,10 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
                                 .set_text(&text);
                             info.set_text("远程文字已复制到本地剪贴板");
                         } else {
-                            info.set_text("远程剪贴板文字过长，暂不支持完整下载");
+                            info.set_text("已收到远端的文字摘要");
                         }
                     } else {
-                        info.set_text("已收到远程剪贴板信息；此版本暂不支持图片和文件下载");
+                        info.set_text("已收到远程剪贴板，可在“A 的剪贴板”中取用");
                     }
                 }
                 Event::Message(Incoming::InputBlocked(by)) => {
@@ -597,7 +699,37 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
                     notice_deadline = Some(Instant::now() + Duration::from_secs(1));
                     emit(json_mode, json!({"event":"input_blocked","by":by}));
                 }
-                Event::Message(Incoming::FocusRegion { .. }) => {}
+                Event::Message(Incoming::FocusRegion { window, rects }) => {
+                    let mut s = state.borrow_mut();
+                    if s.smart && s.windows.iter().any(|w| w.id == window) {
+                        emit(json_mode, json!({"event":"focus","window":window,"rects":rects.iter().map(|r|[r.x,r.y,r.w,r.h]).collect::<Vec<_>>()}));
+                        s.focus_regions.insert(window, rects);
+                        area.queue_draw();
+                        drop(s);
+                        native_windows.redraw();
+                    }
+                }
+                Event::Message(Incoming::Weak(on)) => {
+                    state.borrow_mut().saving = if on { 2 } else { 0 };
+                    emit(json_mode, json!({"event":"weak","level":if on { 2 } else { 0 }}));
+                }
+                Event::Message(Incoming::Saving(level)) => {
+                    state.borrow_mut().saving = level;
+                    emit(json_mode, json!({"event":"weak","level":level}));
+                }
+                Event::Message(Incoming::Pong(seq)) => {
+                    let mut s = state.borrow_mut();
+                    let now = s.began.elapsed().as_secs_f64();
+                    let ms = s.probe.borrow_mut().pong(seq, now);
+                    if let Some(ms) = ms {
+                        s.rtt = Some(ms);
+                        emit(json_mode, json!({"event":"rtt","ms":ms}));
+                    }
+                }
+                Event::Message(Incoming::InputSource { id, name, ascii }) => {
+                    emit(json_mode, json!({"event":"input_source","id":id,"name":name,"ascii":ascii}));
+                    state.borrow_mut().input_ascii = ascii;
+                }
                 Event::Message(Incoming::ScreenLocked(locked)) => {
                     if locked {
                         info.set_text("远程电脑已锁屏，鼠标和键盘只能操作锁屏界面；请打开「桌面」输入密码解锁");
@@ -608,8 +740,72 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
                     }
                     emit(json_mode, json!({"event":"screen_locked","locked":locked}));
                 }
+                Event::TransferProgress(name, done, total) => {
+                    info.set_text(&format!(
+                        "{name} {}%",
+                        done.saturating_mul(100).checked_div(total).unwrap_or(100)
+                    ));
+                    info.set_visible(true);
+                    notice_deadline = Some(Instant::now() + Duration::from_secs(5));
+                }
+                Event::ClipPick(id, clip_info, text, insert) => {
+                    let mut s = state.borrow_mut();
+                    if !s.ready || s.download.is_some() {
+                        continue;
+                    }
+                    let Some(address) = s.address.clone() else {
+                        continue;
+                    };
+                    let cancel = Cancel::default();
+                    s.download = Some(cancel.clone());
+                    let events = events.clone();
+                    let downloads = downloads.clone();
+                    std::thread::spawn(move || {
+                        let root = downloads_dir();
+                        let result = downloads.fetch(
+                            &address,
+                            id,
+                            &clip_info,
+                            text,
+                            &root,
+                            &cancel,
+                            |name, done, total| {
+                                let _ = events.send(Event::TransferProgress(
+                                    format!("下载 {name}"),
+                                    done,
+                                    total,
+                                ));
+                            },
+                        );
+                        let _ = events.send(Event::ClipFetched(result, insert));
+                    });
+                }
+                Event::ClipFetched(result, insert) => {
+                    state.borrow_mut().download = None;
+                    match result {
+                        Ok(copy) if state.borrow().ready => {
+                            if insert {
+                                entry.insert(copy);
+                                entry.grab_focus();
+                            } else if let Err(e) = editor::write_clipboard(
+                                &gtk::prelude::WidgetExt::display(&window).clipboard(),
+                                &copy,
+                            ) {
+                                info.set_text(&format!("复制没成功：{e}"));
+                                info.set_visible(true);
+                            }
+                        }
+                        Err(e) => {
+                            info.set_text(&format!("取用没成功：{e}"));
+                            info.set_visible(true);
+                            notice_deadline = Some(Instant::now() + Duration::from_secs(5));
+                        }
+                        _ => {}
+                    }
+                }
                 Event::PastePrepared(seq, result) => {
                     let mut s = state.borrow_mut();
+                    s.upload = None;
                     if let Some(pending) = &s.pending_text {
                         if pending.seq == seq {
                             match result {
@@ -618,9 +814,14 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
                                         s.send(p::id_packet(14, id));
                                     }
                                     s.send(packet);
+                                    if let Some(pending) = s.pending_text.as_mut() {
+                                        pending.waiting = true;
+                                        pending.started = Instant::now();
+                                    }
                                 }
                                 Err(error) => {
                                     s.pending_text = None;
+                                    s.send_queue.clear();
                                     info.set_text(&format!("发送没成功：{error}"));
                                     info.set_visible(true);
                                     notice_deadline = Some(Instant::now() + Duration::from_secs(5));
@@ -640,11 +841,20 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
                     };
                     let Some(pending) = pending else { continue };
                     if error.is_empty() {
-                        let current = entry.text();
-                        if let Some(rest) = current.strip_prefix(&pending.text) {
-                            entry.set_text(rest);
+                        if let Some(id) = pending.block {
+                            entry.remove(id);
+                        } else {
+                            let current = entry.text();
+                            if let Some(rest) = current.strip_prefix(&pending.text) {
+                                entry.set_text(rest);
+                            }
+                        }
+                        let more = !state.borrow().send_queue.is_empty();
+                        if more {
+                            entry.emit_activate();
                         }
                     } else {
+                        state.borrow_mut().send_queue.clear();
                         info.set_visible(true);
                         notice_deadline = Some(Instant::now() + Duration::from_secs(3));
                         info.set_text(&error);
@@ -660,12 +870,15 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
                     ) {
                         Ok(surface) => {
                             let mut s = state.borrow_mut();
+                            s.gray_surface = if s.smart { focus::grayscale(&surface) } else { None };
                             s.surface = Some(surface);
                             if s.region != region {
                                 s.geometry_changed = Instant::now();
                             }
                             s.region = region;
                             area.queue_draw();
+                            drop(s);
+                            native_windows.redraw();
                         }
                         Err(e) => {
                             status.set(1);
@@ -678,6 +891,19 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
             }
         }
         if last_rate.elapsed() >= Duration::from_secs(1) {
+            {
+                let s = state.borrow();
+                if s.ready {
+                    let (ping, change) = s.probe.borrow_mut().tick(s.began.elapsed().as_secs_f64());
+                    if let Some(seq) = ping { s.send(p::ping(seq)); }
+                    if let Some(on) = change { emit(json_mode, json!({"event":"stalled","on":on})); }
+                    let status = if s.probe.borrow().stalled() { "连接等待" }
+                        else if s.saving == 2 { "弱网" } else if s.saving == 1 { "省流" } else { "连接正常" };
+                    let label = format!("{status}{}", s.rtt.map(|ms| format!(" · {ms} ms")).unwrap_or_default());
+                    rate.set_tooltip_text(Some(&label));
+                    controls.set_network_status(&label);
+                }
+            }
             rate.set_label(&stream::rate(
                 bytes.swap(0, Ordering::Relaxed),
                 last_rate.elapsed().as_secs_f64(),
@@ -695,15 +921,21 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
         let mut s = state.borrow_mut();
         if s.pending_text
             .as_ref()
-            .is_some_and(|p| p.started.elapsed() >= Duration::from_secs(30))
+            .is_some_and(|p| p.waiting && p.started.elapsed() >= Duration::from_secs(30))
         {
             s.pending_text = None;
-            info.set_text("未收到远端的确认，请检查远端内容后再重试");
+            s.send_queue.clear();
+            info.set_text("未收到 A 的确认，请检查远端内容后再重试");
             info.set_visible(true);
             notice_deadline = Some(Instant::now() + Duration::from_secs(5));
         }
+        drop(s);
+        let redraw = std::mem::take(&mut state.borrow_mut().redraw);
+        if redraw { area.queue_draw(); native_windows.redraw(); }
+        native_windows.update_zoom();
+        let mut s = state.borrow_mut();
         copy.set_sensitive(s.ready);
-        send.set_sensitive(s.ready && s.pending_text.is_none() && !entry.text().is_empty());
+        send.set_sensitive(s.ready && s.pending_text.is_none() && entry.has_content());
         let content_width = (s.region.w as f64 * s.zoom).ceil().clamp(1., 65535.) as i32;
         let content_height = (s.region.h as f64 * s.zoom).ceil().clamp(1., 65535.) as i32;
         if area.content_width() != content_width {
@@ -723,11 +955,10 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
                 .and_then(|n| n.surface())
                 .map_or(size.2 as f64, |surface| surface.scale());
             let density = stream::capture_density(s.zoom, backing, s.density_choice);
-            let next = (s.mode, s.fps, density);
-            // What the user picked is the ceiling; this client has no switch for automatic
-            // saving, so it stays on (pinned false) and the host may save below the pick.
-            if stream::changed(s.last_stream, next) {
-                s.send(p::stream(next.0, next.1, next.2, false, false));
+            let next = (s.mode, s.fps, density, s.pinned, s.smart);
+            if stream::changed(s.last_stream.map(|s| (s.0, s.1, s.2)), (next.0, next.1, next.2))
+                || s.last_stream.is_none_or(|old| old.3 != next.3 || old.4 != next.4) {
+                s.send(p::stream(next.0, next.1, next.2, next.3, next.4));
                 s.last_stream = Some(next);
             }
         }
@@ -803,7 +1034,7 @@ fn finish(app: &gtk::Application, state: &Shared, json_mode: bool, code: i32, re
 }
 fn install_input(
     area: &gtk::DrawingArea,
-    entry: &gtk::Entry,
+    entry: &Editor,
     app: &gtk::Application,
     state: &Shared,
     json_mode: bool,
@@ -902,50 +1133,59 @@ fn install_input(
         if !s.ready || s.pending_text.is_some() {
             return;
         }
-        let text = e.text().to_string();
-        if text.is_empty() {
+        if !s.input_ascii { s.send(p::select_input("")); }
+        if s.send_queue.is_empty() {
+            s.send_queue = e.snapshot();
+        }
+        let Some((block_id, copy)) = s.send_queue.pop_front() else {
             s.send(p::key(36, 0, true));
             s.send(p::key(36, 0, false));
             return;
-        }
+        };
+        let text = if let Copy::Text(t) = &copy {
+            t.clone()
+        } else {
+            String::new()
+        };
+        let block = block_id.map(|id| (id, copy));
         let Some(address) = s.address.clone() else {
+            s.send_queue.clear();
             return;
         };
         let seq = s.next_seq;
-        let Some(next) = seq.checked_add(1) else {
+        let Some(next) = seq.checked_add(1).filter(|n| *n < 0x80000000) else {
             return;
         };
         s.next_seq = next;
+        let cancel = Cancel::default();
+        s.upload = Some(cancel.clone());
         s.pending_text = Some(TextSend {
             seq,
             text: text.clone(),
             window: s.focused,
             started: Instant::now(),
+            block: block.as_ref().map(|(id, _)| *id),
+            waiting: false,
         });
         let events = events.clone();
         std::thread::spawn(move || {
-            let result = rapp_client_core::text::prepare_paste(&address, seq, &text);
+            let result = if let Some((id, copy)) = block {
+                transfer::upload(&address, id, &copy, &cancel, |done, total| {
+                    let _ = events.send(Event::TransferProgress("上传附件".into(), done, total));
+                })
+                .map(|_| transfer::paste_item(seq, id))
+            } else if text.len() >= 60000 {
+                transfer::upload(&address, seq, &Copy::Text(text), &cancel, |done, total| {
+                    let _ = events.send(Event::TransferProgress("上传文字".into(), done, total));
+                })
+                .map(|_| transfer::paste_item(seq, seq))
+            } else {
+                rapp_client_core::text::prepare_paste(&address, seq, &text)
+            };
             let _ = events.send(Event::PastePrepared(seq, result));
         });
     });
-    // Observe GtkText's own IM context; leave composing keystrokes to the input method.
-    let preedit = Rc::new(Cell::new(false));
-    if let Some(text) = entry.first_child() {
-        let controllers = text.observe_controllers();
-        for i in 0..controllers.n_items() {
-            if let Some(key) = controllers
-                .item(i)
-                .and_then(|o| o.downcast::<gtk::EventControllerKey>().ok())
-            {
-                if let Some(im) = key.im_context() {
-                    let active = preedit.clone();
-                    im.connect_preedit_changed(move |im| {
-                        active.set(!im.preedit_string().0.is_empty())
-                    });
-                }
-            }
-        }
-    }
+    let preedit = entry.preedit();
     let key = gtk::EventControllerKey::new();
     key.set_propagation_phase(gtk::PropagationPhase::Capture);
     let s = state.clone();
@@ -966,7 +1206,7 @@ fn install_input(
         {
             return glib::Propagation::Proceed;
         }
-        if preedit.get() {
+        if preedit.get() || e.ime_active() {
             return glib::Propagation::Proceed;
         }
         if !e.text().is_empty() {
@@ -1075,4 +1315,26 @@ fn menus(items: &[Menu], state: &Shared) -> (gio::Menu, gio::SimpleActionGroup) 
         );
     }
     (model, group)
+}
+
+fn downloads_dir() -> std::path::PathBuf {
+    if let Some(p) = std::env::var_os("RAPP_DOWNLOADS").filter(|v| !v.is_empty()) {
+        return p.into();
+    }
+    if let Some(p) = std::env::var_os("RAPP_HOME").filter(|v| !v.is_empty()) {
+        return std::path::PathBuf::from(p).join("files/transfers");
+    }
+    let home = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| ".".into());
+    let config = std::env::var_os("XDG_CONFIG_HOME")
+        .filter(|v| !v.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| home.join(".config"));
+    let root = std::fs::read_to_string(config.join("rapp/data-root"))
+        .ok()
+        .and_then(|s| s.lines().next().map(|l| std::path::PathBuf::from(l.trim())))
+        .filter(|p| p.is_absolute())
+        .unwrap_or_else(|| home.join("rapp"));
+    root.join("files/transfers")
 }

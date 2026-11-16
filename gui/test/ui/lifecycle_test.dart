@@ -17,6 +17,48 @@ void main() {
     expect(offlineWords(r, waiting: 'x'), '正在重连…');
   });
 
+  test('connection timeout guidance distinguishes peer UDP from relay ports', () {
+    final direct = connectionFailureHint('connect 10.0.0.2:23128: timed out', peerPort: 22028);
+    expect(direct, contains('UDP 23128'));
+    expect(direct, contains('原因尚未确定'));
+    expect(direct, contains('对方在线'));
+    expect(direct, contains('ID/IP'));
+    expect(direct, contains('网络隔离'));
+    expect(direct, contains('防火墙'));
+    expect(direct, isNot(contains('密码不对')));
+    expect(direct, isNot(contains('22029')));
+    final ipv6 = connectionFailureHint('connect [2001:db8::2]:24128: timed out');
+    expect(ipv6, contains('UDP 24128'));
+    for (final raw in ['relay unreachable: timed out', 'relay: no reply', 'timed out', 'no reply']) {
+      final relay = connectionFailureHint(raw, peerPort: 22028, relayed: true);
+      expect(relay, contains('中继配置的端口'));
+      expect(relay, isNot(contains('UDP 22028')));
+    }
+    expect(connectionFailureHint('relay unreachable: timed out', peerPort: 22028), contains('中继配置的端口'));
+  });
+
+  test('connection guidance preserves other errors and does not diagnose operation timeouts', () {
+    for (final raw in ['bad password', 'bad key', 'upload timed out', 'download timeout', 'command timed out']) {
+      expect(connectionFailureHint(raw, peerPort: 22028), disconnectWord(raw));
+    }
+    final unknownPort = connectionFailureHint('no reply');
+    expect(unknownPort, contains('以对方配置为准'));
+    expect(unknownPort, isNot(contains('22028')));
+  });
+
+  test('disconnected stage gives connection checks without changing retry classification', () {
+    final r = SessionRecord('111', 'Safari', 'Safari', 'lan')
+      ..phase = Phase.disconnected
+      ..reason = 'connect 10.0.0.2:23128: timed out';
+    expect(offlineWords(r), contains('UDP 23128'));
+    expect(autoReconnects(r.reason), true);
+    r.retry = (1, DateTime.now());
+    expect(offlineWords(r), endsWith('。正在重连…'));
+    r.path = 'relay';
+    expect(offlineWords(r), contains('中继配置的端口'));
+    expect(offlineWords(r, waiting: '正在等待'), '正在等待');
+  });
+
   test('autoReconnects', () {
     for (final raw in ['connection closed', 'send failed: x', 'timed out', 'offline', 'relay unreachable: timed out']) {
       expect(autoReconnects(raw), true, reason: raw);

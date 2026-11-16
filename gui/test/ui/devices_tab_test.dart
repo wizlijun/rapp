@@ -21,6 +21,7 @@ void main() {
   late MainState s;
   late Directory tmp;
   Map<String, dynamic>? appsPermissions;
+  Map<String, dynamic>? capabilities;
   String? openError;
   bool offline = false;
   bool holdApps = false;
@@ -36,6 +37,7 @@ void main() {
 
   setUp(() async {
     appsPermissions = null;
+    capabilities = null;
     openError = null;
     offline = false;
     holdApps = false;
@@ -89,6 +91,7 @@ void main() {
               {'app': 'com.apple.Safari', 'name': 'Safari'},
             ],
             'permissions': ?appsPermissions,
+            'capabilities': ?capabilities,
           });
         case 'terms':
           if (termsOff) return t.emit({'event': 'terms', 'req': req, 'id': cmd['id'], 'off': true});
@@ -166,6 +169,49 @@ void main() {
     expect(find.text('用屏幕共享打开'), findsNothing);
     expect(find.text('桌面'), findsOneWidget);
     expect(find.byKey(const Key('fav-desktop:')), findsOneWidget);
+  });
+
+  testWidgets('Linux terminal device hides graphical controls and macOS permission hints', (tester) async {
+    capabilities = {'graphical': false, 'terminal': true, 'ports': true};
+    remoteApps = [];
+    termHosts = [{'host': null, 'launchers': ['kitty']}];
+    await pumpTab(tester);
+    await selectMini(tester);
+    expect(find.byKey(const Key('bundle-id')), findsNothing);
+    expect(find.byKey(const Key('open-bundle')), findsNothing);
+    expect(find.textContaining('暂不提供应用画面'), findsOneWidget);
+    expect(find.textContaining('屏幕录制'), findsNothing);
+    expect(find.text('终端'), findsWidgets);
+  });
+
+  testWidgets('remote no-graphics capability makes a saved pixels choice open the existing text terminal', (tester) async {
+    capabilities = {'graphical': false, 'terminal': true, 'ports': true};
+    remoteApps = [];
+    termRows = [{'id': 'term:pty:work', 'name': 'work', 'command': 'bash', 'activity': 1}];
+    s.prefs.termOpen['111'] = 'pixels';
+    await pumpTab(tester);
+    await selectMini(tester);
+    expect(find.byKey(const Key('term-open-pixels')), findsNothing);
+    expect(find.descendant(of: find.byKey(const Key('term-open-text')),
+        matching: find.byIcon(Icons.radio_button_checked)), findsOneWidget);
+    expect(s.prefs.termOpenFor('111'), 'pixels', reason: 'capabilities affect the effective choice, not saved preferences');
+    await tester.ensureVisible(find.byKey(const Key('open-terms:')));
+    await tester.tap(find.byKey(const Key('open-terms:')));
+    await tester.pumpAndSettle();
+    expect(t.sent.lastWhere((m) => m['cmd'] == 'open')['app'], 'term:pty:work');
+  });
+
+  testWidgets('remote no-graphics capability opens a new text terminal with its advertised launcher', (tester) async {
+    capabilities = {'graphical': false, 'terminal': true, 'ports': true};
+    remoteApps = [];
+    termHosts = [{'host': null, 'launchers': ['kitty']}];
+    s.prefs.termOpen['111'] = 'pixels';
+    await pumpTab(tester);
+    await selectMini(tester);
+    await tester.tap(find.byKey(const Key('open-terms:')));
+    await tester.pumpAndSettle();
+    expect(t.sent.lastWhere((m) => m['cmd'] == 'open_term')['app'], 'kitty');
+    expect(t.sent.lastWhere((m) => m['cmd'] == 'open')['app'], 'term:pty:c');
   });
 
   testWidgets('typed add form text survives switching device chips', (tester) async {

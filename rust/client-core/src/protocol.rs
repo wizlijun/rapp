@@ -56,6 +56,7 @@ pub enum Incoming {
         id: u32,
         text: Option<String>,
         truncated: bool,
+        info: serde_json::Value,
     },
     Pasted {
         seq: u32,
@@ -109,6 +110,8 @@ impl Address {
                 "token" if !v.is_empty() => token = v.into_owned(),
                 "mode" => mode = mode_number(&v).context("unknown color mode")?,
                 "fps" => fps = v.parse().context("invalid fps")?,
+                "protocol" => ensure!(v.parse::<u8>().ok() == Some(VERSION),
+                    "this client supports protocol {VERSION} only (update both sides)"),
                 _ => (),
             }
         }
@@ -314,7 +317,9 @@ pub fn read_message(input: &mut impl Read) -> Result<(Incoming, usize)> {
     let mut h = [0; 5];
     input.read_exact(&mut h).context("host disconnected")?;
     ensure!(
-        [2, 3, 4, 13, 17, 19, 21, 26, 28, 29, 32, 33, 34].contains(&h[0]),
+        // Main-connection host messages in RappCore/Protocol.swift, including
+        // v12 focusRegion. Side-transfer and client-to-host types stay rejected.
+        [2, 3, 4, 13, 17, 19, 21, 26, 28, 29, 32, 33, 34, 36].contains(&h[0]),
         "unexpected host message type {}",
         h[0]
     );
@@ -404,7 +409,7 @@ pub fn decode(kind: u8, p: &[u8]) -> Result<Incoming> {
             let id = r.u32()?;
             let mut text = None;
             let mut truncated = false;
-            match r.u8()? {
+            let info = match r.u8()? {
                 0 => {
                     let flag = r.u8()?;
                     ensure!(flag <= 1, "invalid clip truncation flag");
@@ -412,33 +417,29 @@ pub fn decode(kind: u8, p: &[u8]) -> Result<Incoming> {
                     let n = r.u32()? as usize;
                     ensure!(n <= 1024 * 1024, "clipboard text too large");
                     text = Some(std::str::from_utf8(r.take(n)?)?.to_owned());
+                    serde_json::json!({"kind":"text"})
                 }
                 1 => {
-                    r.u16()?;
-                    r.u16()?;
-                    r.u64()?;
+                    serde_json::json!({"kind":"image","width":r.u16()?,"height":r.u16()?,"bytes":r.u64()?})
                 }
                 2 => {
                     let n = r.u16()?;
                     ensure!(n <= 100, "too many clipboard files");
+                    let mut files = Vec::new();
                     for _ in 0..n {
-                        r.string()?;
-                        r.u64()?;
+                        files.push(serde_json::json!({"name":r.string()?,"bytes":r.u64()?}));
                     }
+                    serde_json::json!({"kind":"files","files":files})
                 }
-                3 => {
-                    r.string()?;
-                    r.u64()?;
-                }
-                4 => {
-                    r.string()?;
-                }
+                3 => serde_json::json!({"kind":"data","uti":r.string()?,"bytes":r.u64()?}),
+                4 => serde_json::json!({"kind":"unsupported","label":r.string()?}),
                 _ => bail!("invalid clipboard kind"),
-            }
+            };
             Incoming::Clipboard {
                 id,
                 text,
                 truncated,
+                info,
             }
         }
         21 => Incoming::Pasted {

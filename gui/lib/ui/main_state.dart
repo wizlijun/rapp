@@ -18,7 +18,7 @@ import '../history/input_recorder.dart';
 import '../hub_client.dart';
 import '../permissions.dart';
 import '../embed/app_profile.dart';
-import '../embed/composer_model.dart' show escKeyCode, returnKeyCode;
+import '../embed/composer_model.dart';
 import '../term/term_id.dart';
 import '../term/term_session_port.dart';
 import '../term/term_wire.dart' show TermPane;
@@ -624,10 +624,32 @@ class MainState extends ChangeNotifier {
   // ---- detach (R20, R21) ----
   /// Moves the current session from the stage into native windows; the runner answers with a
   /// `DetachedEvent`. The same sid and hub session throughout: nothing is reopened.
-  void detach() {
+  final Set<Object> _detaching = {};
+  bool isDetaching(Object sid) => _detaching.contains(sid);
+
+  Future<void> detach() async {
     final rs = currentRemote;
     if (rs == null || rs.detached || rs.tabs.tabs.isEmpty || !_liveSid(rs.sid)) return;
-    portOf(rs.sid)?.detach(rs.sid);
+    await _detachSession(rs);
+  }
+
+  Future<void> _detachSession(RemoteSession rs) async {
+    if (!_detaching.add(rs.sid)) return;
+    rs.composer.handoff(true);
+    try {
+      final text = await rs.composer.readDraft();
+      if (identical(remote[rs.sid], rs) && _liveSid(rs.sid) && !rs.detached) {
+        await portOf(rs.sid)?.detach(rs.sid, text: text, blocks: List.of(rs.composer.blocks));
+      } else {
+        rs.composer.handoff(false);
+      }
+    } catch (e) {
+      rs.composer.handoff(false);
+      hint = '分离没成功：$e';
+      notifyListeners();
+    } finally {
+      _detaching.remove(rs.sid);
+    }
   }
 
   /// Puts the current session back on the stage.
@@ -955,12 +977,91 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
+  final Map<Object, (int, String)> _nativeRecall = {};
+  void _nativeAction(RemoteSession rs, String action) {
+    if (action == 'zoom+' || action == 'zoom-' || action == 'zoom0') {
+      zoomKey(action == 'zoom+' ? ZoomKey.bigger : action == 'zoom-' ? ZoomKey.smaller : ZoomKey.reset);
+    } else if (action == 'compose') {
+      rs.composer.openByLetter();
+      rs.prepareInput();
+    } else if (action == 'open') {
+      rs.composer.open = true;
+      rs.prepareInput();
+    } else if (action == 'close') {
+      rs.composer.collapse();
+    } else if (action == 'up' || action == 'down') {
+      final list = recallOf(rs);
+      final previous = _nativeRecall[rs.sid];
+      final same = previous != null && previous.$2 == rs.composer.draft;
+      int? index;
+      if (!same) {
+        if (action != 'up' || rs.composer.draft.isNotEmpty || list.isEmpty) return;
+        index = 0;
+      } else if (action == 'up' && list.isNotEmpty) {
+        index = math.min(previous.$1 + 1, list.length - 1);
+      } else if (action == 'down' && previous.$1 > 0 && list.isNotEmpty) {
+        index = math.min(previous.$1 - 1, list.length - 1);
+      }
+      final text = index == null ? '' : list[index].text;
+      if (index == null) { _nativeRecall.remove(rs.sid); } else { _nativeRecall[rs.sid] = (index, text); }
+      rs.composer.setDraft(text);
+      portOf(rs.sid)?.nativeComposerDraft(rs.sid, text);
+    }
+  }
+
+  Future<void> _submitNative(RemoteSession rs, ComposerDraftEvent event) async {
+    final port = portOf(rs.sid);
+    if (sendBlocked(rs.sid) || !_liveSid(rs.sid)) {
+      port?.nativeComposerSubmitted(rs.sid, taken: false);
+      return;
+    }
+    if (port == null) return;
+    if (event.retry) {
+      if (rs.composer.failed.isEmpty) {
+        port.nativeComposerSubmitted(rs.sid, taken: false);
+        return;
+      }
+      final pieces = rs.composer.retry(rs.composer.failed.first);
+      if (pieces != null) {
+        port.nativeComposerSubmitted(rs.sid, retry: true);
+        rs.prepareInput();
+        port.composerSend(rs.sid, pieces);
+      }
+      return;
+    }
+    switch (await rs.composer.submit()) {
+      case SubmitPieces(:final pieces):
+        if (!identical(remote[rs.sid], rs)) return;
+        port.nativeComposerSubmitted(rs.sid);
+        if (!_liveSid(rs.sid) || sendBlocked(rs.sid)) {
+          rs.composer.done(0, '连接已断开，内容尚未发送');
+          return;
+        }
+        rs.prepareInput();
+        port.composerSend(rs.sid, pieces);
+      case SubmitReturn():
+        port.nativeComposerSubmitted(rs.sid, taken: false);
+        if (_liveSid(rs.sid) && !sendBlocked(rs.sid)) rs.pressReturn();
+      case SubmitNothing():
+        port.nativeComposerSubmitted(rs.sid, taken: false);
+        break;
+    }
+  }
+
   void _onPortEvent(SessionEvent e) {
     final rs = remote[e.sid];
     if (rs == null) return;
     final r = _recordOfSid(e.sid);
     if (r == null) {
       final moving = _recordOfLastSid(e.sid);
+      // A reconnect keeps the old native editor visible until the first new frame.
+      // Local edits still belong to that draft; they must never be sent to a dead link.
+      if (moving?.frozen == true && (e is ComposerDraftEvent || e is ComposerInsertEvent || e is ComposerStateEvent)) {
+        rs.apply(e);
+        if (e is ComposerDraftEvent && e.action != null) _nativeAction(rs, e.action!);
+        notifyListeners();
+        return;
+      }
       if (moving != null && _reroutes.containsKey(moving) && e is! ClosedEvent && e is! DisconnectedEvent) {
         // The old session of a move is still on the stage: its windows keep up until the swap.
         if (e is InputBlockedEvent) {
@@ -1015,6 +1116,8 @@ class MainState extends ChangeNotifier {
     }
     final wasLocked = rs.screenLocked;
     rs.apply(e);
+    if (e is ComposerDraftEvent && e.action != null) _nativeAction(rs, e.action!);
+    if (e is ComposerDraftEvent && (e.send || e.retry)) unawaited(_submitNative(rs, e));
     if (e is ScreenLockedEvent) {
       if (wasLocked != e.locked) {
         _lockEpoch[e.sid] = (_lockEpoch[e.sid] ?? 0) + 1;
@@ -1056,6 +1159,7 @@ class MainState extends ChangeNotifier {
         _disconnect(r, e.reason);
       }
     } else if (e is DetachedEvent) {
+      _syncHidden(rs);
       // The hub logs one line per move (R10); keys typed on the stage no longer go to it.
       if (_reachable(r)) hub!.note(e.sid, e.detached ? 'detach' : 'attach', rs.tabs.tabs.length);
       if (e.detached && pictureFocused == e.sid) _blur();
@@ -1140,6 +1244,7 @@ class MainState extends ChangeNotifier {
       r.pinned = rs.streamPinned;
       r.window = rs.currentWindow;
       rs.bytesPerSecond = 0;
+      if (sid != null) portOf(sid)?.freeze(sid, r.reason ?? raw);
       rs.linkDown(); // the runner may have said nothing (hub-first): same cleanup as its word
     }
     if (sid != null) {
@@ -1403,7 +1508,7 @@ class MainState extends ChangeNotifier {
         _sendFocus(fresh);
       }
       // A move keeps the session where the user put it: off the stage stays off.
-      if (detached && portOf(fresh)?.supportsDetach == true) portOf(fresh)!.detach(fresh);
+      if (detached && portOf(fresh)?.supportsDetach == true) unawaited(_detachSession(rs));
     }
     _rerouteEnd(r, true);
   }
@@ -1733,7 +1838,8 @@ class MainState extends ChangeNotifier {
   TermsTarget _termsTargetOf(String id) => termsTarget(
       mode: prefs.termOpenFor(id),
       list: hub?.termLists[id] ?? TermList(id),
-      apps: probes[id]?.apps?.apps ?? const []);
+      apps: probes[id]?.apps?.apps ?? const [],
+      graphical: probes[id]?.apps?.capabilities?['graphical'] != false);
 
   /// The key of the session [m] opens; null for a 终端 entry that opens a new text terminal.
   String? _openedKey(Member m) {
@@ -1742,7 +1848,7 @@ class MainState extends ChangeNotifier {
     return switch (_termsTargetOf(id)) {
       OpenTerm(:final app) => '$id/$app',
       OpenPixels(:final bundle) => '$id/$bundle',
-      NewText() => null,
+      NewText() || NoTerminal() => null,
     };
   }
 
@@ -1754,6 +1860,9 @@ class MainState extends ChangeNotifier {
         return _open(id, app, name, select: select, quiet: quiet);
       case OpenPixels(:final bundle, :final name):
         return _open(id, bundle, name, select: select, quiet: quiet);
+      case NoTerminal():
+        hint = '这台设备没有可用的终端窗口，请在设备上安装终端并登录桌面后重试';
+        notifyListeners();
       case NewText(:final shell):
         try {
           await openText(id, shell: shell);
@@ -1769,7 +1878,8 @@ class MainState extends ChangeNotifier {
   Future<void> openText(String id, {String? shell}) async {
     if (!hubUsable) return;
     final launchers = hub?.termLists[id]?.hosts.where((h) => h.host == null).firstOrNull?.launchers ?? const <String>[];
-    final app = prefs.termAppFor(id, launchers.isEmpty ? const ['Terminal'] : launchers);
+    if (launchers.isEmpty) throw StateError('这台设备没有可用的终端窗口');
+    final app = prefs.termAppFor(id, launchers);
     final term = await hub!.openTerm(id, shell: shell, app: app);
     try {
       await hub?.terms(id);
@@ -1853,6 +1963,8 @@ class MainState extends ChangeNotifier {
 
   /// Sends the hidden window set to the runner when it changed, and logs how many (D9: no titles).
   void _syncHidden(RemoteSession rs) {
+    portOf(rs.sid)?.nativeComposerOptions(rs.sid, allowed: rs.composerAllowed,
+        compose: rs.composerAllowed && rs.profile.typeToCompose && rs.composeArmed, scale: composerScale);
     final ids = rs.hiddenIds.toList()..sort();
     final last = _sentHidden[rs.sid] ?? const <int>[];
     if (!listEquals(ids, last)) {
@@ -2450,6 +2562,7 @@ class MainState extends ChangeNotifier {
     if (z == composerZoom.value) return;
     composerZoom.value = z;
     prefs.composerZoom = z;
+    for (final rs in remote.values) { if (rs.detached) _syncHidden(rs); }
     _save();
   }
 

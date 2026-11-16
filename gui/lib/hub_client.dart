@@ -103,7 +103,8 @@ class HubApp {
 }
 
 class AppList {
-  const AppList(this.id, this.path, this.apps, {this.permissions});
+  const AppList(this.id, this.path, this.apps, {this.permissions, this.capabilities});
+  final Map<String, dynamic>? capabilities;
   final String id;
   final String path;
   final List<HubApp> apps;
@@ -292,7 +293,8 @@ class HubClient extends ChangeNotifier {
         .toList();
     final perms = m['permissions'];
     return AppList('${m['id'] ?? id}', '${m['path'] ?? ''}', list,
-        permissions: perms is Map ? Map<String, dynamic>.from(perms) : null);
+        permissions: perms is Map ? Map<String, dynamic>.from(perms) : null,
+        capabilities: m['capabilities'] is Map ? Map<String, dynamic>.from(m['capabilities']) : null);
   }
 
   /// Each device's latest terminal list, from a `terms` answer or the watch stream.

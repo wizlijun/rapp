@@ -442,7 +442,11 @@ void main() {
     void last(String method) {
       final c = port.calls.lastWhere((c) => c.$1 != 'picture_focus');
       expect(c.$1, method);
-      expect(c.$2, equals({'sid': 1}));
+      // detach also hands over the draft it is leaving with: empty here, nothing was typed.
+      expect(
+        c.$2,
+        equals(method == 'detach' ? {'sid': 1, 'text': '', 'blocks': <Object>[]} : {'sid': 1}),
+      );
     }
 
     // Holding the chord: the key repeats toggle nothing more.

@@ -73,7 +73,36 @@ def probe(binary, latest):
                         WIDTH, HEIGHT, WIDTH, HEIGHT, 0x07 if i == 0 else 0x06) +
                         (b'' if i == 0 else struct.pack('<ii', 0, 0)) + data))
                 peer.sendall(packet(17, b'\0\0'))  # ordered marker after every delta
-                time.sleep(2)  # stdout is deliberately unread while the burst arrives
+                if latest:
+                    # Wait until every compressed delta was consumed while stdout stays unread.
+                    # A fixed sleep confuses slow decoding (especially under concurrent builds)
+                    # with a queue of stale expanded canvases. ACKs are on the independent socket.
+                    deadline = time.monotonic() + 60
+                    def wire_exact(n):
+                        out = bytearray()
+                        while len(out) < n:
+                            peer.settimeout(max(0.001, deadline - time.monotonic()))
+                            if time.monotonic() >= deadline:
+                                raise TimeoutError('worker did not acknowledge the frame burst')
+                            chunk = peer.recv(n - len(out))
+                            if not chunk:
+                                raise EOFError('worker closed before acknowledging the frame burst')
+                            out.extend(chunk)
+                        return out
+                    acknowledged = 0
+                    while acknowledged < FRAMES:
+                        kind, n = struct.unpack('<BI', wire_exact(5))
+                        assert n <= 65536, 'invalid worker packet'
+                        body = wire_exact(n)
+                        if kind == 27:
+                            assert n == 2
+                            acknowledged += 1
+                        elif kind == 31:
+                            peer.sendall(packet(32, body))
+                else:
+                    # Old workers can block decoding on stdout and cannot reach an ACK barrier.
+                    # This timed legacy result includes decode work; it is not directly comparable.
+                    time.sleep(2)
                 start = time.monotonic()
                 frames, last = 0, None
                 while True:
@@ -90,7 +119,7 @@ def probe(binary, latest):
                 if latest:
                     assert frames <= 3, f'pipe drained {frames} stale canvases'
                 print(json.dumps(dict(binary=str(binary), decoded_frames=FRAMES,
-                    delivered_frames=frames, catchup_seconds=round(elapsed, 3))), flush=True)
+                    preload='all_frames_acknowledged' if latest else 'legacy_2_seconds', delivered_frames=frames, catchup_seconds=round(elapsed, 3))), flush=True)
             finally:
                 if peer is not None:
                     peer.close()

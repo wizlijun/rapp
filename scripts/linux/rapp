@@ -1,0 +1,13 @@
+#!/bin/sh
+# One entry point: no arguments opens the GUI; documented CLI verbs use local IPC.
+# Resolve installed symlinks as well as portable paths, retaining spaces in either.
+self=$(readlink -f -- "$0") || exit 1
+bundle=${self%/*}
+case "${1-}" in
+  share|unshare|hosts|pipe|-h|--help|--version)
+    exec "$bundle/rapp-cli" "$@"
+    ;;
+  *)
+    exec "$bundle/rapp-gui" "$@"
+    ;;
+esac

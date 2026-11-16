@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/pages/local_section.dart';
 import 'package:rapp/paths.dart';
 import 'package:rapp/service_client.dart';
+import 'package:rapp/linux_firewall.dart';
 
 import 'service_client_test.dart' show FakeService, until;
 import 'ui/helpers.dart';
@@ -43,7 +44,8 @@ void main() {
       await tester.runAsync(svc.stop);
     });
     await tester.pumpWidget(wrap(SingleChildScrollView(
-      child: LocalSection(platform: platform, monitor: m, control: null, data: DataDir(tmp.path)),
+      child: LocalSection(platform: platform, monitor: m, control: null, data: DataDir(tmp.path),
+        firewallCheck: ({required port, required localAddresses, bool authorize = false}) async => const FirewallReport()),
     )));
     await tester.pump();
   }

@@ -19,6 +19,8 @@ import 'permissions_panel.dart';
 import 'section_card.dart';
 import 'update_section.dart';
 import 'linux_update_section.dart';
+import 'linux_firewall_section.dart';
+import '../linux_firewall.dart';
 
 /// What the 密码 row shows while hidden: a fixed length, so the real length stays private too.
 const passwordMask = '••••••••';
@@ -54,9 +56,11 @@ class LocalSection extends StatefulWidget {
     this.hooks,
     this.openPage = openInstallerPage,
     this.platform,
+    this.firewallCheck = checkLinuxFirewall,
   });
   /// Platform override for testing both desktop interfaces on either OS.
   final TargetPlatform? platform;
+  final FirewallCheck firewallCheck;
   final ServiceMonitor monitor;
   final ServiceController? control;
   /// The current data root; the caller passes `state.data` and rebuilds when it changes.
@@ -525,6 +529,8 @@ class _LocalSectionState extends State<LocalSection> {
                 ]),
               ),
             if (_platform == TargetPlatform.macOS) _autoLockRow(st),
+            if (_platform == TargetPlatform.linux)
+              LinuxFirewallSection(port: st.port, localAddresses: localFirewallAddresses(st.lanIds), check: widget.firewallCheck),
             if (_platform != TargetPlatform.macOS && _platform != TargetPlatform.linux)
               _row('权限',
                   '屏幕录制 ${st.screenRecording ? '✓' : '✗'}   辅助功能 ${st.accessibility ? '✓' : '✗'}'),
@@ -544,7 +550,9 @@ class _LocalSectionState extends State<LocalSection> {
             _row('会话', '${st.sessions.length} 个被访问中'),
           ],
           if (_platform == TargetPlatform.linux) ...[
-            const Text('本机为 Linux 客户端，暂不支持被远程控制。'),
+            Text(st?.capabilities == null
+              ? '本机为 Linux 控制端；启动或更新后台服务后，可提供文本终端和端口分享。'
+              : '本机支持端口分享${st?.capabilities?['terminal'] == true ? '和文本终端' : ''}；暂不支持应用和桌面画面被控。'),
             Padding(padding: const EdgeInsets.symmetric(vertical: 8),
               child: LinuxUpdateSection(openPage: widget.openPage)),
           ],

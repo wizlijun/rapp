@@ -9,6 +9,26 @@ void main() {
       TermRow('term:tmux:$name', name, 'zsh', null, 1, 0, activity, false, false);
   TermHost local(List<String> launchers, {List<TermShell>? shells}) => TermHost(null, launchers: launchers, shells: shells);
 
+  test('a device without graphics never invents a macOS terminal', () {
+    expect(termsTarget(mode: 'text', list: const TermList('linux'), apps: const [], graphical: false), isA<NoTerminal>());
+    expect(termsTarget(mode: 'pixels', list: const TermList('linux'), apps: const [], graphical: false), isA<NoTerminal>());
+    expect(termsTarget(mode: 'text', list: TermList('linux', hosts: [local(['ghostty'])]), apps: const [], graphical: false), isA<NewText>());
+  });
+
+  test('a device without graphics treats a saved pixels choice as text', () {
+    final list = TermList('linux', terms: [pty('old', activity: 1), pty('recent', activity: 5)]);
+    expect(termsTarget(mode: 'pixels', list: list, apps: const [], graphical: false),
+        isA<OpenTerm>().having((t) => t.app, 'app', 'term:pty:recent'));
+    final fresh = TermList('linux', hosts: [local(['kitty'], shells: [const TermShell('bash', '/bin/bash', true)])]);
+    expect(termsTarget(mode: 'pixels', list: fresh, apps: const [], graphical: false),
+        isA<NewText>().having((t) => t.shell, 'shell', '/bin/bash'));
+  });
+
+  test('a no-graphics capability wins over stale graphical app entries', () {
+    expect(termsTarget(mode: 'pixels', list: const TermList('linux'),
+        apps: [app('com.apple.Terminal')], graphical: false), isA<NoTerminal>());
+  });
+
   test('desktop first and terminal apps folded when the entry shows', () {
     final apps = [app('com.apple.Safari'), app('com.apple.Terminal'), app('desktop:'), app('com.googlecode.iterm2')];
     expect(orderApps(apps, entry: true).map((a) => a.app), ['desktop:', 'com.apple.Safari']);

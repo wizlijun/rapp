@@ -73,6 +73,10 @@ fn error_of(reply: &Value) -> &str {
 #[tokio::main]
 async fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
+    if argv == ["--version"] {
+        println!("rapp {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
     if argv.is_empty() || argv[0] == "-h" || argv[0] == "--help" {
         println!("{}", args::USAGE);
         return;

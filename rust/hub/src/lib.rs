@@ -279,6 +279,9 @@ impl Hub {
                 if r["permissions"].is_object() {
                     ev["permissions"] = r["permissions"].clone();
                 }
+                if r["capabilities"].is_object() {
+                    ev["capabilities"] = r["capabilities"].clone();
+                }
                 ev
             }
             Some("open") => {

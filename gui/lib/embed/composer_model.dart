@@ -81,7 +81,9 @@ class ComposerModel extends ChangeNotifier {
   /// The text while no editor is attached; the last copy otherwise. A held block is in it as its mark.
   String get draft => _draft;
   String _draft = '';
+  int _draftEpoch = 0;
   set draft(String v) {
+    _draftEpoch++;
     if (_draft == v) return;
     _draft = v;
     onDraftChanged?.call(_plain(v));
@@ -268,17 +270,30 @@ class ComposerModel extends ChangeNotifier {
     _editor = e;
     final previous = _detaching;
     if (previous == null) {
-      _showChips(e);
-      e.setText(draft);
+      _start(e);
       _attached = null;
       return SynchronousFuture<void>(null);
     }
     // A native read may finish after the next panel mounts. Restore only after that read,
     // before the new editor takes focus; otherwise reopening can resurrect an older draft.
-    return _attached = previous.then((_) {
-      _showChips(e);
-      e.setText(draft);
-    });
+    return _attached = previous.then((_) => _start(e));
+  }
+
+  /// The editor takes the draft: its chips, then the text with their marks in it.
+  void _start(ComposerEditor e) {
+    _restoreMarks();
+    _showChips(e);
+    e.setText(draft);
+  }
+
+  /// A detached native composer's text has no marks in it (its chips are held here). Put the marks of
+  /// the blocks still held back at the end, so the editor can show them and a read cannot drop them.
+  void _restoreMarks() {
+    if (blocks.isEmpty) return;
+    final units = _draft.codeUnits.toSet();
+    final missing = [for (final b in blocks) if (!units.contains(_marks[b.n])) _marks[b.n]!];
+    if (missing.isEmpty) return;
+    draft = _draft + String.fromCharCodes(missing);
   }
 
   /// The editor goes away: its text is copied into [draft]. It no longer has the focus (its
@@ -289,10 +304,14 @@ class ComposerModel extends ChangeNotifier {
     editorFocused = false;
     _idleTimer?.cancel();
     final ready = _attached;
+    final epoch = _draftEpoch;
     Future<void> copy() async {
-      draft = await e.read();
+      final text = await e.read();
+      // Assigning draft bumps the epoch, so decide before the write whether this read is still ours.
+      final mine = _draftEpoch == epoch;
+      if (mine) draft = text;
       if (_disposed) return;
-      _dropMissing(draft); // the editor's undo goes with it
+      if (mine) _dropMissing(draft); // the editor's undo goes with it
       _checkDeclined();
     }
     final work = ready == null ? copy() : ready.then((_) => copy());
@@ -303,12 +322,80 @@ class ComposerModel extends ChangeNotifier {
     return _detaching = pending;
   }
 
+  /// Stop user input before reading; the two editors must never both accept edits.
+  void handoff(bool active) {
+    final e = _editor;
+    if (e is HandoffEditor) (e as HandoffEditor).setHandoff(active);
+  }
+
+  Future<void>? _inserting;
+
+  /// Clipboard/file-picker results belong to the draft even across a window handoff.
+  /// Preserve request order and let the handoff wait until they are reflected in the editor.
+  Future<void> applyPending(Future<PasteResult> result) {
+    final previous = _inserting;
+    final work = () async {
+      if (previous != null) await previous.catchError((Object _) {});
+      apply(await result);
+    }();
+    late final Future<void> pending;
+    pending = work.whenComplete(() {
+      if (identical(_inserting, pending)) _inserting = null;
+    });
+    return _inserting = pending;
+  }
+
+  /// Flush the current editor before handing the draft to a native detached window.
+  Future<String> readDraft() async {
+    await _inserting;
+    await _attached;
+    await _detaching;
+    final e = _editor;
+    final epoch = _draftEpoch;
+    if (e != null) {
+      final text = await e.read();
+      if (identical(_editor, e) && _draftEpoch == epoch && !_disposed) draft = text;
+    }
+    return draftText; // the marks stay here; the blocks go to the other window as chips
+  }
+
+  /// Text typed in a detached native composer. It carries no block marks — the chips are held here, and
+  /// that window reports a removed one as its own drop — so the held blocks are not judged by it.
+  void setDetachedDraft(String s) {
+    draft = s;
+    _editor?.setText(s);
+  }
+
   /// Replaces the text: into the editor if attached, else the draft. Held blocks [s] has no mark of are
   /// dropped.
   void setDraft(String s) {
     _dropMissing(s);
     draft = s;
     _editor?.setText(s);
+  }
+
+  /// A chip tapped away in a native or detached composer (a draft event's `drop`): that block goes, and
+  /// its mark leaves the text. Only that block — [draft] can be a copy behind the attached editor's text,
+  /// so the other blocks' marks are never judged by it here (that is [_dropMissing]'s job, on a read).
+  void removeBlock(int n) {
+    final mark = _marks.remove(n);
+    if (mark == null) return;
+    blocks.removeWhere((b) => b.n == n);
+    onDrop?.call(n); // the other window has no undo: the runner can forget it now
+    final s = String.fromCharCode(mark);
+    if (_draft.contains(s)) draft = _draft.replaceAll(s, '');
+    final e = _editor;
+    if (e != null) unawaited(_stripMark(e, s));
+    notifyListeners();
+  }
+
+  /// Takes [mark] out of the attached editor's text, which the draft copy can be behind.
+  Future<void> _stripMark(ComposerEditor e, String mark) async {
+    final text = await e.read();
+    if (_disposed || !identical(_editor, e) || !text.contains(mark)) return;
+    final stripped = text.replaceAll(mark, '');
+    draft = stripped;
+    e.setText(stripped);
   }
 
   /// The editor's text changed: 1 s after the last change it is copied into [draft].
@@ -362,6 +449,7 @@ class ComposerModel extends ChangeNotifier {
     } finally {
       _setTaking(false);
     }
+    if (_disposed) return SubmitNothing();
     if (sending || _inFlight != null) {
       // Another round started while the take waited: the text goes back, nothing is sent twice.
       if (_editor != null) draft = '';

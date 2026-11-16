@@ -59,7 +59,7 @@ void main() {
         expect(await input.moveNext(), true);
         expect(input.current.$1, 23);
         expect(input.current.$2, [
-          6,
+          12,
           ...string('secret'),
           ...u32(9),
           0,

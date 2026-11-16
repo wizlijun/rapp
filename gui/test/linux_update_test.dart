@@ -40,7 +40,7 @@ void main() {
     expect(find.byType(LinuxUpdateSection), findsOneWidget);
     expect(find.text('检查更新'), findsOneWidget);
     expect(find.textContaining('屏幕录制'), findsNothing);
-    expect(find.textContaining('暂不支持被远程控制'), findsOneWidget);
+    expect(find.textContaining('本机为 Linux 控制端'), findsOneWidget);
   });
   testWidgets('missing Linux assets and network failures do not offer macOS installers', (tester) async {
     var fail = false;

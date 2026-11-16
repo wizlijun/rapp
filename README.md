@@ -14,7 +14,7 @@ Recommended: an Omarchy tablet.
 | Platform | Installation |
 | --- | --- |
 | macOS 14+ · Apple silicon | Download and open the `.pkg`. Supports hosting and controlling apps. |
-| Omarchy / Arch · x86_64 | Download the `.pkg.tar.zst`, then run `sudo pacman -U ./rapp-omarchy-*.pkg.tar.zst`. Client only. |
+| Omarchy / Arch · x86_64 | Install the matching `.pkg.tar.zst` with `sudo pacman -U ./rapp-omarchy-*.pkg.tar.zst`. Controls Mac apps and desktops; also serves text terminals and shared ports. |
 
 Install rapp on your Mac host and controlling computer. On the host, allow Screen Recording and Accessibility, and keep it awake. When the last remote app closes, the host locks itself; the next time you open an app, the controlling computer asks for the host's system password (or types the remembered one). Turn this off under This Mac (本机). The login window after a restart and sleep are still not supported. Add the host in rapp, then open an app.
 
@@ -24,7 +24,15 @@ For macOS on Apple silicon, download the companion [Fcitx5 for Sumi 0.5.0.15 ins
 
 For access across networks, see [self-hosted relay setup](docker/relay/README.md). E2E relay connections require rapp 0.6+ on both ends; Linux v0.5.2 uses the legacy connection path. Downloads are selected separately for each platform.
 
-Linux v0.5.2 cannot connect to macOS hosts running 0.8+. Build the Linux client from current source until a compatible package is available; update both ends together.
+Linux v0.5.2 cannot connect to macOS hosts running 0.8+. This Linux source targets 0.12.2 / app protocol 12; update both ends together. Build and package this source if the release page does not yet offer the matching Linux assets. Older explicit `protocol=4/5/6` addresses are rejected.
+
+Linux supports embedded sessions, detach/reattach into native windows, and the standalone GTK client. The main window retains the last picture and draft while reconnecting. The standalone client, like its Mac counterpart, exits on an ordinary disconnect and offers an explicit take-back after takeover. Text, images and file transfers use the same current protocol as the picture connection.
+
+Linux graphical hosting is not implemented. Text-terminal windows require an installed supported terminal, a graphical login and a systemd user manager; they run separately from the rapp service so restarting it does not end the terminal. `rapp` with no arguments opens the GUI; `rapp hosts`, `rapp share`, `rapp unshare` and `rapp pipe` run the CLI. Linux updates are installed through the package manager, or by replacing the portable bundle.
+
+For direct connections, allow inbound **UDP 22028** (or the service's configured UDP port) from the intended peers. Do not open an entire `2202x` range: TCP 22029 is localhost-only IPC; TCP 28000–28999 are localhost-only port mappings carried over the existing rapp connection. Neither needs a LAN firewall exception. UDP 22026 belongs to a separately deployed relay, not a normal rapp device. The Linux Local page shows the actual UDP listener, offers a read-only check of recent UFW block logs, and provides a command restricted to one peer IP. A timeout or an empty log alone does not establish whether a firewall blocked the connection.
+
+Upgrades preserve the data directory and saved hosts. The legacy relay configuration from 0.5.x is retired by the mainline migration; enter a current relay key to use the new relay. This is separate from preserving local data.
 
 ## Build
 
@@ -50,7 +58,9 @@ Packages are written to `dist/`. Ad-hoc signing is allowed for local builds; see
 ./gui/build/linux/x64/release/bundle/rapp
 ```
 
-To create Linux packages, run `./scripts/package-linux.sh` from a clean checkout; it also requires makepkg, fakeroot, and zstd. Outputs go to `dist/`.
+To create Linux packages, run `./scripts/package-linux.sh` from a clean checkout; it also requires makepkg, fakeroot, and zstd. Outputs go to `dist/`. For a package-only revision, use `PKGREL=2 ./scripts/package-linux.sh`; revised artifacts go to `dist/pkgrel-2/`, retaining the earlier artifacts. `DIST_DIR` can override the output directory.
+
+Implementation scope and verification status: [Linux 0.12.2 integration](docs/superpowers/plans/2026-11-16-linux-012-parity.md).
 
 ## License
 

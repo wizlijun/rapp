@@ -3,6 +3,15 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 repo_root=$PWD
+package_revision=${PKGREL-1}
+[[ $package_revision =~ ^[1-9][0-9]*$ ]] || { echo 'PKGREL must be a positive integer.' >&2; exit 1; }
+# Keep release asset names compatible with LinuxUpdate. Revised portable archives
+# have the same name, so put revisions in separate directories rather than overwrite.
+default_dist="$repo_root/dist"
+if [[ $package_revision != 1 ]]; then
+  default_dist="$default_dist/pkgrel-$package_revision"
+fi
+dist_dir=${DIST_DIR:-$default_dist}
 [[ $(uname -m) == x86_64 ]] || { echo 'This package targets x86_64.' >&2; exit 1; }
 for tool in python3 makepkg fakeroot zstd tar; do
   command -v "$tool" >/dev/null || { echo "Missing build tool: $tool" >&2; exit 1; }
@@ -14,18 +23,25 @@ from pathlib import Path
 print(tomllib.loads(Path('rust/Cargo.toml').read_text())['workspace']['package']['version'])
 PY
 )
+name="rapp-$version-omarchy-x86_64"
+package="rapp-omarchy-$version-$package_revision-x86_64.pkg.tar.zst"
+checksums="$name-SHA256SUMS"
+mkdir -p "$dist_dir"
+dist_dir=$(cd "$dist_dir" && pwd -P)
+for artifact in "$name.tar.gz" "$package" "$checksums"; do
+  [[ ! -e "$dist_dir/$artifact" && ! -L "$dist_dir/$artifact" ]] || { echo "Already exists: $dist_dir/$artifact" >&2; exit 1; }
+done
 ./scripts/build-linux.sh
-mkdir -p dist
 # Flutter may migrate files for a different SDK. Do not mislabel such a build.
 [[ -z $(git status --porcelain) ]] || { echo 'Build modified source files; review and commit before packaging.' >&2; exit 1; }
-work=$(mktemp -d "$repo_root/dist/.linux-package.XXXXXX")
+work=$(mktemp -d "$dist_dir/.linux-package.XXXXXX")
 trap 'rm -rf "$work"' EXIT
-name="rapp-$version-omarchy-x86_64"
 stage="$work/$name"
 mkdir -p "$stage"
 cp -a gui/build/linux/x64/release/bundle/. "$stage/"
 cp gui/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_256.png "$stage/rapp.png"
 cp scripts/linux/rapp.desktop "$stage/rapp.desktop"
+cp LICENSE "$stage/LICENSE"
 python3 - "$stage" <<'PY'
 import json, platform, subprocess, sys
 from pathlib import Path
@@ -44,31 +60,62 @@ Open rapp from the application launcher or run `rapp`.
 Remove the installed package with `sudo pacman -R rapp-omarchy`.
 
 Portable bundle:
-  sudo pacman -S --needed gtk3 gtk4 libayatana-appindicator
+  sudo pacman -S --needed gtk3 gtk4 libayatana-appindicator xdg-utils
   ./rapp
 Keep the entire directory together (lib/, data/, and the worker executables).
 Requires glibc >= 2.39, GTK4 >= 4.12, and a graphical Wayland or X11 session.
 This build targets current Omarchy/Arch; it is not a generic all-distributions binary.
 
 Remote applications render inside the app. The standalone `./rapp-client` is
-also available. Linux hosting, embedded detach/attach, and image/file attachments
-are not implemented. Local configuration and saved hosts are not included.
+also available with native per-app windows. Embedded sessions can detach and
+reattach without reconnecting. Text, images, files and typed clipboard data can
+be pasted, transferred, cancelled and pinned; files stream to disk with resume.
+Folders cannot be attached. Linux graphical application/desktop hosting is not implemented.
+Writing panels optionally render inline candidates with Fcitx5's sumicandidates
+addon (org.fcitx.Fcitx.SumiCandidates1). Without that separately installed addon,
+the system candidate window remains available. Rapp does not install or restart
+the input method. Composition and commits remain owned by the local input method.
+Linux can share ports and text terminals. New terminal windows require a graphical
+session, a supported terminal app, and a working systemd user manager.
+They run in separate transient user services and survive a rapp-service restart.
+Run `rapp share`, `rapp unshare`, `rapp hosts`, or `rapp pipe` for CLI access.
+No arguments opens the GUI; `./rapp-gui` opens it explicitly.
+For direct LAN access, allow the service's UDP listener (default 22028) from the
+intended peers. TCP 22029 (IPC) and TCP 28000-28999 (port mappings) bind only to
+localhost and do not need inbound LAN rules. UDP 22026 is for a separate relay.
+Use Local / 本机 for the actual port and read-only UFW diagnostics; an empty log
+does not prove that the network or firewall allows the connection.
+Local configuration and saved hosts are not included.
 The package does not automatically start a background service at installation.
+In rapp, open Local / 本机 and click Start / 启动 to install and enable the user
+systemd service. The service records text changes with git (install git to use it).
+Start/restart also refreshes the executable path after moving a portable bundle.
+Stop stops the current process; to turn off login startup, run:
+  systemctl --user disable --now rapp-service.service
+
+Data is in ~/rapp, or RAPP_HOME / the data-root pointer in $XDG_CONFIG_HOME/rapp
+(~/.config/rapp by default). Upgrading copies old configuration without deleting
+it, including saved hosts and projects from client-only installations.
+Pinned text survives restart in clipboard/; binary pins are in files/.
+Downloads use files/transfers/ (override with RAPP_DOWNLOADS). Credentials stay in local/ and are
+excluded from git. The Data directory / 数据目录 section can change the location.
+Linux logs are in $XDG_STATE_HOME/rapp (~/.local/state/rapp by default).
 See BUILD-INFO.json for the exact source revision and build environment.
 ''')
 PY
-archive="$repo_root/dist/$name.tar.gz"
-[[ ! -e "$archive" ]] || { echo "Already exists: $archive" >&2; exit 1; }
+archive="$dist_dir/$name.tar.gz"
 tar -C "$work" -czf "$archive" "$name"
 cp "$archive" "$work/"
 cat > "$work/PKGBUILD" <<PKG
 pkgname=rapp-omarchy
 pkgver=$version
-pkgrel=1
-pkgdesc='Remote Mac apps embedded in a Linux desktop client (Omarchy/Arch)'
+pkgrel=$package_revision
+pkgdesc='Remote apps, text terminals and port sharing (Omarchy/Arch)'
 arch=('x86_64')
+license=('GPL-3.0-only')
 url='https://github.com/wizlijun/rapp'
-depends=('glibc>=2.39' 'gcc-libs' 'gtk3' 'gtk4>=4.12' 'libayatana-appindicator')
+depends=('glibc>=2.39' 'gcc-libs' 'gtk3' 'gtk4>=4.12' 'libayatana-appindicator' 'xdg-utils' 'systemd')
+optdepends=('git: data directory version history and remote synchronization')
 provides=('rapp=$version')
 conflicts=('rapp')
 options=('!strip' '!debug')
@@ -77,13 +124,14 @@ sha256sums=('$(sha256sum "$archive" | cut -d' ' -f1)')
 package() {
   install -d "\$pkgdir/opt/rapp" "\$pkgdir/usr/bin"
   cp -a "\$srcdir/$name/." "\$pkgdir/opt/rapp/"
-  for binary in rapp rapp-client rapp-hub rapp-service rapp-term; do
+  for binary in rapp rapp-client rapp-hub rapp-service rapp-term rapp-cli; do
     ln -s "/opt/rapp/\$binary" "\$pkgdir/usr/bin/\$binary"
   done
+  install -Dm644 "\$srcdir/$name/LICENSE" "\$pkgdir/usr/share/licenses/rapp-omarchy/LICENSE"
   install -Dm644 "\$srcdir/$name/rapp.desktop" "\$pkgdir/usr/share/applications/rapp.desktop"
   install -Dm644 "\$srcdir/$name/rapp.png" "\$pkgdir/usr/share/icons/hicolor/256x256/apps/rapp.png"
 }
 PKG
-(cd "$work" && PKGDEST="$repo_root/dist" makepkg --noconfirm)
-(cd dist && sha256sum "$name.tar.gz" "rapp-omarchy-$version-1-x86_64.pkg.tar.zst" > "$name-SHA256SUMS")
-printf 'Release artifacts are in %s/dist\n' "$repo_root"
+(cd "$work" && PKGDEST="$dist_dir" makepkg --noconfirm)
+(cd "$dist_dir" && sha256sum "$name.tar.gz" "$package" > "$checksums")
+printf 'Release artifacts are in %s\n' "$dist_dir"

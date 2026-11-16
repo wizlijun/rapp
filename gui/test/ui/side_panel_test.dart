@@ -560,4 +560,87 @@ void main() {
       expect(p.didExceedMaxLines, isFalse, reason: 'tab-$k is ellipsized');
     }
   });
+
+  testWidgets('all four navigation labels remain readable with Linux desktop text scaling', (tester) async {
+    await tester.pumpWidget(wrap(MediaQuery(
+      data: const MediaQueryData(size: Size(800, 600), textScaler: TextScaler.linear(1.2222)),
+      child: panel(),
+    )));
+    for (final k in ['sessions', 'devices', 'projects', 'resources']) {
+      final label = find.descendant(of: find.byKey(Key('tab-$k')), matching: find.byType(RichText));
+      final paragraph = tester.renderObject<RenderParagraph>(label);
+      expect(paragraph.didExceedMaxLines, isFalse, reason: 'tab-$k hides its label at desktop text scale');
+    }
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final theme in RappTheme.values) {
+    for (final scale in [1.2222, 1.5, 2.0]) {
+      for (final width in [360.0, 800.0]) {
+        testWidgets('navigation labels fit ${theme.name} at $scale text scale and $width width', (tester) async {
+          await tester.binding.setSurfaceSize(Size(width, 700));
+          addTearDown(() => tester.binding.setSurfaceSize(null));
+          await tester.pumpWidget(wrap(MediaQuery(
+            data: MediaQueryData(size: Size(width, 700), textScaler: TextScaler.linear(scale)),
+            child: panel(),
+          ), theme: theme));
+          for (final k in ['sessions', 'devices', 'projects', 'resources']) {
+            final tab = find.byKey(Key('tab-$k'));
+            final paragraph = tester.renderObject<RenderParagraph>(find.descendant(of: tab, matching: find.byType(RichText)));
+            expect(paragraph.didExceedMaxLines, isFalse, reason: 'tab-$k label must remain complete');
+            final bounds = tester.getRect(tab);
+            expect(bounds.width, greaterThanOrEqualTo(48));
+            expect(bounds.height, greaterThanOrEqualTo(48));
+            expect(bounds.right, lessThanOrEqualTo(width));
+          }
+          final first = tester.getRect(find.byKey(const Key('tab-sessions')));
+          final last = tester.getRect(find.byKey(const Key('tab-resources')));
+          if (width == 360 && scale == 2) {
+            expect(last.top, greaterThan(first.top), reason: 'whole tabs should wrap in the constrained window');
+          }
+          await tester.tap(find.byKey(const Key('tab-devices')));
+          await tester.pump();
+          expect(find.text('devices-body'), findsOneWidget);
+          await tester.tap(find.byKey(const Key('tab-sessions')));
+          await tester.pump();
+          expect(s.panel, PanelTab.sessions);
+          expect(tester.takeException(), isNull);
+        });
+      }
+    }
+  }
+
+  testWidgets('wrapped navigation and footer remain reachable at the minimum window height', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(360, 260));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    // The app top bar occupies 56px of the window's minimum 260px height.
+    await tester.pumpWidget(wrap(MediaQuery(
+      data: const MediaQueryData(size: Size(360, 260), textScaler: TextScaler.linear(2)),
+      child: SizedBox(height: 204, child: panel()),
+    )));
+    for (final k in ['sessions', 'devices', 'projects', 'resources']) {
+      final tab = find.byKey(Key('tab-$k'));
+      await tester.ensureVisible(tab);
+      final p = tester.renderObject<RenderParagraph>(find.descendant(of: tab, matching: find.byType(RichText)));
+      expect(p.didExceedMaxLines, isFalse);
+    }
+    await tester.ensureVisible(find.byKey(const Key('theme-dropdown')));
+    expect(find.byKey(const Key('theme-dropdown')).hitTestable(), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('resizing across the short-panel layout preserves an in-progress editor', (tester) async {
+    s.togglePanel(PanelTab.devices);
+    Future<void> sized(double height) => tester.pumpWidget(wrap(MediaQuery(
+      data: MediaQueryData(size: Size(360, height), textScaler: const TextScaler.linear(2)),
+      child: SizedBox(width: 360, height: height, child: panel(devices: const TextField(key: Key('draft')))),
+    )));
+    await sized(600);
+    await tester.enterText(find.byKey(const Key('draft')), 'unfinished device address');
+    await sized(204);
+    expect(find.text('unfinished device address'), findsOneWidget);
+    await sized(600);
+    expect(find.text('unfinished device address'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }

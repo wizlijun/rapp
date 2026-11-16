@@ -710,7 +710,9 @@ fn focus_region_shared_sample() {
         .map(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).unwrap())
         .collect();
     assert_eq!(bytes[0], 0x24);
-    match decode(36, &bytes[5..]).unwrap() {
+    let (message, consumed) = read_message(&mut &bytes[..]).unwrap();
+    assert_eq!(consumed, bytes.len());
+    match message {
         Incoming::FocusRegion { window, rects } => {
             assert_eq!(window, 7);
             assert_eq!(rects.len(), 1);
@@ -728,4 +730,13 @@ fn focus_region_shared_sample() {
 fn stream_focus_bit() {
     assert_eq!(stream(4, 15, 1., false, true).last(), Some(&2));
     assert_eq!(stream(4, 15, 1., true, true).last(), Some(&3));
+}
+
+#[test]
+fn explicit_protocol_does_not_silently_ignore_an_old_host_request() {
+    assert!(Address::parse("rapp://host/?token=x&protocol=12", None).is_ok());
+    for old in ["4", "5", "6", "10", "11", "garbage"] {
+        let error = Address::parse(&format!("rapp://host/?token=x&protocol={old}"), None).unwrap_err();
+        assert!(error.to_string().contains("supports protocol 12 only"));
+    }
 }

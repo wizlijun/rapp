@@ -54,6 +54,27 @@ void main() {
 
   tearDown(() => m.dispose());
 
+  test('a late editor detach read does not overwrite a native draft', () async {
+    final old = _SlowReadEditor();
+    await m.attach(old);
+    final detached = m.detach(old);
+    m.setDraft('native typing');
+    m.setDraft(''); // ABA: equal text does not make the old read current again.
+    m.setDraft('native typing');
+    old.gate.complete('old stage');
+    await detached;
+    expect(m.draft, 'native typing');
+  });
+
+  test('native handoff waits for the editor composition snapshot', () async {
+    final old = _SlowReadEditor();
+    await m.attach(old);
+    final read = m.readDraft();
+    old.gate.complete('刚组好的字');
+    expect(await read, '刚组好的字');
+    expect(m.draft, '刚组好的字');
+  });
+
   test('reopening waits for the previous native draft read before initializing the editor', () async {
     final old = _SlowReadEditor();
     await m.attach(old);
@@ -402,6 +423,58 @@ void main() {
       a.elapse(const Duration(milliseconds: 500));
       expect(m.status, isNull);
     });
+  });
+
+  test('a round trip through a detached native composer keeps the blocks', () async {
+    m.apply(const PasteResult(text: 'hi', blocks: [BlockChip(1, 'a'), BlockChip(2, 'b')]));
+    // Handing over: the other window gets the text without marks, the blocks beside it as chips.
+    final handed = await m.readDraft();
+    expect(handed, 'hi');
+    await m.detach(ed);
+    // It types in that window and taps chip 1 away; neither touches the blocks by mark.
+    m.setDetachedDraft('hi there');
+    expect(m.blocks.map((b) => b.n), [1, 2], reason: 'plain text must not condemn the chips');
+    m.removeBlock(1);
+    expect(dropped, [1]);
+    expect(m.blocks.map((b) => b.n), [2]);
+    // Back on the stage: block 2 is still held, so its mark is in the editor's text again.
+    final next = FakeEditor();
+    await m.attach(next);
+    expect(next.labels.values.toSet(), {'b'}, reason: 'the chip comes back with the editor');
+    expect(m.draftText, 'hi there');
+    expect((await m.submit() as SubmitPieces).pieces, [
+      {'text': 'hi there'},
+      {'block': 2},
+    ]);
+  });
+
+  test('a chip tapped away in a native composer drops that block only, and its mark leaves the text', () async {
+    m.apply(const PasteResult(text: 'hi', blocks: [BlockChip(1, 'a'), BlockChip(2, 'b')]));
+    expect(m.blocks.map((b) => b.n), [1, 2]);
+    final before = ed.value;
+    m.removeBlock(1);
+    expect(dropped, [1], reason: 'the other window has no undo, so the runner can forget it');
+    expect(m.blocks.map((b) => b.n), [2], reason: 'the stale draft must not condemn the other block');
+    await pumpEventQueue();
+    expect(ed.value.length, before.length - 1, reason: 'one mark unit left the editor');
+    expect(m.draftText, 'hi', reason: 'the text itself is untouched');
+    // Block 2's mark is still in the text, so a send still carries it.
+    expect((await m.submit() as SubmitPieces).pieces, [
+      {'text': 'hi'},
+      {'block': 2},
+    ]);
+    expect(dropped, [1], reason: 'block 2 went out with the send; the runner keeps it until done');
+  });
+
+  test('a chip tapped away with no editor attached only touches the draft', () async {
+    m.apply(const PasteResult(text: 'hi', blocks: [BlockChip(1, 'a')]));
+    final mark = ed.value[2];
+    await m.detach(ed);
+    expect(m.draft.contains(mark), isTrue);
+    m.removeBlock(1);
+    expect(dropped, [1]);
+    expect(m.blocks, isEmpty);
+    expect(m.draft, 'hi');
   });
 
   test('a block deleted from the text (Backspace) is dropped in the runner at send, not before', () async {

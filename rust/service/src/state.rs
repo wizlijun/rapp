@@ -244,7 +244,9 @@ impl State {
             rapp_net::addr::local_ipv4s().into_iter().map(|ip| rapp_net::addr::at_address(&id, ip, self.port)).collect();
         json!({
             "ok": true, "id": cfg.id, "name": cfg.name, "password": cfg.password, "lan_ids": lan_ids,
+            "port": self.port,
             "permissions": self.permissions.lock().unwrap().clone(),
+            "capabilities": crate::workers::capabilities(self),
             "permissions_lost_after_update": *self.perms_lost.lock().unwrap(), "sessions": sessions,
             "log_dir": self.log_dir, "update": crate::update::status_json(self),
             "relay_addr": cfg.relay, "has_key": has_key, "relay": relay, "relay_error": relay_error,

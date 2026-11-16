@@ -264,6 +264,8 @@ class RemoteSession extends ChangeNotifier {
 
   void apply(SessionEvent e) {
     switch (e) {
+      case StreamChoiceEvent():
+        setChoice(StreamChoice(e.mode, e.density, e.fps, smart: e.smart), manual: true);
       case ReadyEvent():
         ready = true;
         appName = e.appName;
@@ -315,6 +317,17 @@ class RemoteSession extends ChangeNotifier {
         if (e.sending != null) composer.setSending(e.sending!);
         final d = e.done;
         if (d != null) composer.done(d.sent, d.failure);
+      case ComposerDraftEvent():
+        // Detached, the other window holds the text and has no marks in it; it reports a chip it lost
+        // as `drop` instead. Attached, the text is ours and its marks say which blocks are still held.
+        if (e.text != null) {
+          if (detached) {
+            composer.setDetachedDraft(e.text!);
+          } else {
+            composer.setDraft(e.text!);
+          }
+        }
+        if (e.drop != null) composer.removeBlock(e.drop!);
       case ComposerInsertEvent():
         // A clip's 「插入」: into the draft, which opens to show it.
         composer.apply(e.insert);

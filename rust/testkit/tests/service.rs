@@ -47,6 +47,7 @@ async fn reports_status() {
     assert_eq!(st["name"], "test-a");
     assert_eq!(st["password"], PASSWORD);
     assert!(st["lan_ids"].is_array());
+    assert_eq!(st["port"], a.svc.port, "advertise the actual bound UDP port, not the IPC port");
     assert_eq!(
         (&st["relay"], &st["relay_error"], &st["relay_addr"], &st["has_key"]),
         (&json!("off"), &Value::Null, &Value::Null, &json!(false)),
@@ -363,7 +364,7 @@ async fn list_apps_reports_and_stores_permissions() {
     let ep = b_endpoint();
     let (conn, _) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":PASSWORD})).await;
     let r = req(&conn, json!({"op":"list_apps"})).await;
-    assert_eq!(r, json!({"ok":true,"apps":apps(),"permissions":perms(true, false)}));
+    assert_eq!(r, json!({"ok":true,"apps":apps(),"permissions":perms(true, false),"capabilities":{"graphical":true,"terminal":true,"ports":true}}));
     assert_eq!(ipc_once(&a.svc, a.home.path(), json!({"cmd":"status"})).await["permissions"], perms(true, false));
 }
 
@@ -1186,4 +1187,46 @@ async fn lock_failure_is_recorded() {
     wait_until("another lock call", || lock_lines(a.bins.path()) > before).await;
     tokio::time::sleep(Duration::from_millis(2500)).await;
     assert!(!log_events(home).iter().any(|v| v["ev"] == "auto_lock"), "{:?}", log_events(home));
+}
+
+/// A client-only Linux package still serves terminals and shared ports. Missing a
+/// graphical host is a capability boundary, not a failed macOS permission check.
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn linux_without_graphical_host_lists_capabilities_and_still_serves_terms_and_ports() {
+    let home = tempfile::tempdir().unwrap();
+    let bins = bins();
+    std::fs::remove_file(bins.path().join("rapp-host")).unwrap();
+    service_json(home.path());
+    let svc = start_service(home.path(), bins.path(), Duration::from_secs(60)).await;
+    let st = ipc_once(&svc, home.path(), json!({"cmd":"status"})).await;
+    assert_eq!(st["permissions"], Value::Null);
+    assert_eq!(st["capabilities"], json!({"graphical":false,"terminal":true,"ports":true}));
+    let ep = b_endpoint();
+    let (c, auth) = direct(&ep, a_addr(&svc), json!({"op":"auth","password":PASSWORD})).await;
+    assert_eq!(auth["ok"], true);
+    let apps = req(&c, json!({"op":"list_apps"})).await;
+    assert_eq!(apps["ok"], true);
+    assert_eq!(apps["apps"], json!([]));
+    assert_eq!(apps["capabilities"], st["capabilities"]);
+    assert_eq!(req(&c, json!({"op":"open","app":"desktop:"})).await,
+        json!({"ok":false,"error":"graphical sessions are not supported on this device"}));
+    assert_eq!(req(&c, json!({"op":"list_terms"})).await["ok"], true);
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let shared = ipc_once(&svc, home.path(), json!({"cmd":"share","ports":[port]})).await;
+    assert_eq!(shared["ok"], true, "{shared}");
+    // Password-only legacy connections still cannot enumerate shared ports.
+    assert_eq!(req(&c, json!({"op":"list_shares"})).await, json!({"ok":false,"error":"not supported"}));
+    let key = rapp_wire::Key::new_local();
+    let configured = ipc_once(&svc, home.path(), json!({"cmd":"set_relay","relay":"","key":key.to_string()})).await;
+    assert_eq!(configured["ok"], true);
+    let visitor = common::sharing::visitor();
+    let trusted = dial2(a_addr(&svc), &visitor.id).await;
+    let mut stream = hello_and_send(&trusted, &visitor.id, st["id"].as_str().unwrap(), Some(&key), json!({"op":"list_shares"})).await.unwrap();
+    let shares = read_json(&mut stream).await.unwrap();
+    assert_eq!(shares["ok"], true);
+    assert!(shares["shares"].as_array().unwrap().iter().any(|s| s["port"] == port), "{shares}");
+    let perms = ipc_once(&svc, home.path(), json!({"cmd":"permissions","prompt":true})).await;
+    assert_eq!(perms["permissions"], Value::Null);
 }

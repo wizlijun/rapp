@@ -187,8 +187,8 @@ pub async fn serve_value(state: &Arc<State>, mut s: Pipe, v: Value, peer: Peer) 
     match serde_json::from_value(v) {
         Ok(Op::ListApps) => {
             let r = match workers::list_apps(state).await {
-                Ok((apps, Some(perms))) => ok(json!({"apps": apps, "permissions": perms})),
-                Ok((apps, None)) => ok(json!({"apps": apps})),
+                Ok((apps, Some(perms))) => ok(json!({"apps": apps, "permissions": perms, "capabilities": workers::capabilities(state)})),
+                Ok((apps, None)) => ok(json!({"apps": apps, "capabilities": workers::capabilities(state)})),
                 Err(e) => err(&e.to_string()),
             };
             log_request(state, &peer, json!({"op": "list_apps"}), &r);

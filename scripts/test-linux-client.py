@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""Exercise the real GTK worker against an independent Python v10 host fixture.
+"""Exercise the real GTK worker against an independent Python v12 host fixture.
 Requires a graphical session (or xvfb-run). No real host credentials are used.
+For isolated input with a rootful Xwayland server, set DISPLAY to that server
+and RAPP_TEST_NO_WM=1. Window-manager minimize/take-back checks are then omitted.
 """
 import json
 import os
@@ -15,7 +17,20 @@ import time
 import tomllib
 import zlib
 
-PROTOCOL = 10
+PROTOCOL = 12
+NO_WM = os.environ.get("RAPP_TEST_NO_WM") == "1"
+
+def xdo_command(args):
+    # A rootful Xwayland display provides isolated input without a window manager.
+    args = list(map(str, args))
+    if NO_WM:
+        if args[0] == "getactivewindow": args[0] = "getwindowfocus"
+        if args[0] == "windowactivate":
+            window = args[-1]
+            subprocess.check_call(["xdotool", "windowmap", window])
+            subprocess.check_call(["xdotool", "windowraise", window])
+            args = ["windowfocus", "--sync", window]
+    return subprocess.check_output(["xdotool", *args], text=True, timeout=8).strip()
 
 INPUT = "--input" in sys.argv
 paths = [a for a in sys.argv[1:] if a != "--input"]
@@ -167,33 +182,62 @@ def multi_client(s):
     send(s.s, 3, string("taken over by 客厅的 Mac"))
     assert s.finish(1)["reason"] == "taken over by 客厅的 Mac"
 
-case("v6 input refusal, continued frames, focus and takeover", multi_client)
+case("input refusal, continued frames, focus and takeover", multi_client)
+
+
+def network_metadata(s):
+    s.ready()
+    send(s.s, 33, b"\x01")
+    assert s.event("weak")["level"] == 1
+    send(s.s, 29, string("input.test") + string("Test IME") + b"\x00")
+    assert s.event("input_source")["ascii"] is False
+    send(s.s, 34, b"\x01")
+    assert s.event("screen_locked")["locked"] is True
+    while True:
+        kind, payload = recv(s.s)
+        if kind == 31:
+            send(s.s, 32, payload)
+            break
+    assert s.event("rtt")["ms"] >= 0
+    send(s.s, 34, b"\x00")
+    assert s.event("screen_locked")["locked"] is False
+    s.p.stdin.close()
+    s.finish(0)
+
+case("saving, input source, lock status and round-trip probe", network_metadata)
 
 
 def keyboard(s):
     s.ready()
     s.frame(zlib.compressobj(), True, 0x001f)
     def xdo(*args):
-        return subprocess.check_output(["xdotool", *map(str,args)], text=True).strip()
-    time.sleep(0.3)
-    window=xdo("search", "--pid", s.p.pid, "--name", "rapp protocol fixture").splitlines()[-1]
+        return xdo_command(args)
+    time.sleep(0.8)
+    window=xdo("search", "--all", "--pid", s.p.pid, "--name", "rapp protocol fixture").splitlines()[-1]
+    xdo("mousemove", "--window", window, 10, 10)
     xdo("windowactivate", "--sync", window)
-    assert xdo("getactivewindow")==window
-    xdo("windowminimize", window)
     time.sleep(0.2)
-    s.p.stdin.write('{"cmd":"focus"}\n')
-    s.p.stdin.flush()
-    deadline = time.monotonic() + 5
-    while xdo("getactivewindow") != window:
-        assert time.monotonic() < deadline, "hub focus did not restore client window"
-        time.sleep(0.05)
+    assert xdo("getactivewindow")==window, (window,xdo("getactivewindow"),s.err)
+    if NO_WM:
+        s.p.stdin.write('{"cmd":"focus"}\n');s.p.stdin.flush();time.sleep(.2)
+    else:
+        xdo("windowminimize", window)
+        time.sleep(0.2)
+        s.p.stdin.write('{"cmd":"focus"}\n')
+        s.p.stdin.flush()
+        deadline = time.monotonic() + 5
+        while xdo("getactivewindow") != window:
+            assert time.monotonic() < deadline, "hub focus did not restore client window"
+            time.sleep(0.05)
+        xdo("windowfocus", "--sync", window)
     xdo("key", "ctrl+a")
     xdo("type", "--clearmodifiers","test-input")
     assert xdo("getactivewindow")==window
     xdo("key", "Return")
     keys=[]; text=None
     while text is None:
-        kind,payload=recv(s.s)
+        try: kind,payload=recv(s.s)
+        except TimeoutError: raise AssertionError(("missing composer send",keys,s.err))
         if kind==6:keys.append(struct.unpack("<HQB",payload))
         if kind==20:
             seq=struct.unpack("<I",payload[:4])[0]
@@ -213,8 +257,11 @@ def keyboard(s):
     assert next_seq != seq and payload[7:].decode()==text
     send(s.s,21,struct.pack("<I",next_seq)+string(""))
     time.sleep(.2)
+    # Each remote decorated window now has its own native Linux window.
+    window=xdo("search","--all","--pid",s.p.pid,"--name","^Fixture$").splitlines()[-1]
+    xdo("windowactivate","--sync",window)
     geom=dict(line.split("=",1) for line in xdo("getwindowgeometry","--shell",window).splitlines())
-    x,y=int(geom["WIDTH"])//2,int(geom["HEIGHT"])//2
+    x,y=int(geom["WIDTH"])//2,int(geom["HEIGHT"])//3
     assert xdo("getactivewindow")==window
     xdo("mousemove","--window",window,x,y)
     xdo("click","1")
@@ -224,7 +271,7 @@ def keyboard(s):
     while len(mouse)<4 or wheel is None:
         try: kind,payload=recv(s.s)
         except TimeoutError: raise AssertionError(("missing mouse events",mouse,wheel,geom,xdo("getmouselocation","--shell"),s.err))
-        if kind==7:mouse.append(struct.unpack("<BBIffB",payload))
+        if kind==7 and payload[0]!=3:mouse.append(struct.unpack("<BBIffB",payload))
         if kind==8:wheel=struct.unpack("<Iffff",payload)
     assert [(m[0],m[1],m[2]) for m in mouse[:4]]==[(0,0,1),(1,0,1),(0,1,1),(1,1,1)],mouse
     assert all(0<=m[3]<=320 and 0<=m[4]<=240 for m in mouse),mouse
@@ -246,26 +293,35 @@ if INPUT:
 
 def stream_menu(s):
     s.ready();s.frame(zlib.compressobj(),True,0x001f)
-    def xdo(*args):return subprocess.check_output(["xdotool",*map(str,args)],text=True).strip()
+    def xdo(*args):return xdo_command(args)
     time.sleep(0.8)
-    window=xdo("search","--pid",s.p.pid,"--name","rapp protocol fixture").splitlines()[-1]
+    window=xdo("search","--all","--pid",s.p.pid,"--name","rapp protocol fixture").splitlines()[-1]
     xdo("windowactivate","--sync",window)
     geom=dict(line.split("=",1) for line in xdo("getwindowgeometry","--shell",window).splitlines())
-    xdo("mousemove","--window",window,int(geom["WIDTH"])-250,40)
+    xdo("mousemove","--window",window,int(geom["WIDTH"])-200,26)
     xdo("click","3")
     time.sleep(0.3)
     xdo("key","Home","Return")
     while True:
         kind,payload=recv(s.s)
+        if kind==11 and payload[:2]==bytes([2,15]) and payload[6:]==b"\x02":break
+    send(s.s,36,struct.pack("<IBffff",1,1,10.,10.,100.,80.))
+    assert s.event("focus")["window"]==1
+    xdo("mousemove","--window",window,int(geom["WIDTH"])-200,26)
+    xdo("click","3")
+    time.sleep(.3)
+    xdo("key","Home","Down","Return")
+    while True:
+        kind,payload=recv(s.s)
         if kind==11 and payload[:2]==bytes([3,1]):break
     assert struct.unpack("<f",payload[2:6])[0]>0
-    assert payload[6:]==b"\x00",payload  # a pick is the ceiling; automatic saving stays on
+    assert payload[6:]==b"\x00",payload  # standalone clients keep automatic saving on
     z=zlib.compressobj();s.frame(z,True,15,mode=3);s.frame(z,False,5,mode=3)
     time.sleep(.3)
-    xdo("mousemove","--window",window,int(geom["WIDTH"])-250,40)
+    xdo("mousemove","--window",window,int(geom["WIDTH"])-200,26)
     xdo("click","3")
     time.sleep(0.3)
-    xdo("key","Home","Down","Return")
+    xdo("key","Home","Down","Down","Return")
     while True:
         kind,payload=recv(s.s)
         if kind==11 and payload[:2]==bytes([2,15]):break
@@ -298,7 +354,7 @@ def standalone_takeback():
             second,_=listener.accept()
             raise AssertionError("must not take back automatically")
         except TimeoutError:pass
-        def xdo(*args):return subprocess.check_output(["xdotool",*map(str,args)],text=True).strip()
+        def xdo(*args):return xdo_command(args)
         deadline=time.monotonic()+5
         while True:
             active=xdo("getactivewindow")
@@ -319,5 +375,5 @@ def standalone_takeback():
         except ProcessLookupError:pass
         child.wait(timeout=5)
 
-if INPUT:
+if INPUT and not NO_WM:
     standalone_takeback()

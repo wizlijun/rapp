@@ -1,9 +1,11 @@
 // Add-device form: ID@IP plus password, with the error inline.
+import 'dart:io' show InternetAddress;
+
 import 'package:flutter/material.dart';
 
 import '../hub_client.dart';
 import 'controls.dart';
-import 'lifecycle.dart' show disconnectWord;
+import 'lifecycle.dart' show connectionFailureHint;
 import 'secure_text_field.dart';
 import 'tokens.dart';
 
@@ -39,6 +41,19 @@ class _AddDeviceFormState extends State<AddDeviceForm> {
     super.dispose();
   }
 
+  /// Match the hub's ID@IP[:port] syntax; a bare IPv6 address uses the default.
+  /// This is the remote peer's UDP port, never the local service IPC port.
+  int? _peerPort(String host) {
+    final at = host.indexOf('@');
+    if (at < 0) return null;
+    final address = host.substring(at + 1);
+    if (InternetAddress.tryParse(address) != null) return 22028;
+    final match = RegExp(r'^(?:\[([^\]]+)\]|([^:]+)):([0-9]+)$').firstMatch(address);
+    if (match == null || InternetAddress.tryParse(match.group(1) ?? match.group(2)!) == null) return null;
+    final port = int.tryParse(match.group(3)!);
+    return port != null && port > 0 && port <= 65535 ? port : null;
+  }
+
   Future<void> _add() async {
     final id = _id.text.trim();
     if (id.isEmpty || _busy || !widget.enabled) return;
@@ -53,7 +68,7 @@ class _AddDeviceFormState extends State<AddDeviceForm> {
       _pw.clear();
       widget.onAdded(host.id);
     } catch (e) {
-      _error = disconnectWord('$e');
+      _error = connectionFailureHint('$e', peerPort: _peerPort(id), relayed: !id.contains('@') && widget.relaySet);
     }
     if (mounted) setState(() => _busy = false);
   }
