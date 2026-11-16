@@ -54,7 +54,12 @@ Remote applications render inside the app. The standalone `./rapp-client` is
 also available with native per-app windows. Embedded sessions can detach and
 reattach without reconnecting. Text, images, files and typed clipboard data can
 be pasted, transferred, cancelled and pinned; files stream to disk with resume.
-Folders cannot be attached. Linux hosting is not implemented.
+Folders cannot be attached. Linux graphical application/desktop hosting is not implemented.
+Linux can share ports and text terminals. New terminal windows require a graphical
+session, a supported terminal app, and a working systemd user manager.
+They run in separate transient user services and survive a rapp-service restart.
+Run `rapp share`, `rapp unshare`, `rapp hosts`, or `rapp pipe` for CLI access.
+No arguments opens the GUI; `./rapp-gui` opens it explicitly.
 Local configuration and saved hosts are not included.
 The package does not automatically start a background service at installation.
 In rapp, open Local / 本机 and click Start / 启动 to install and enable the user
@@ -81,7 +86,7 @@ cat > "$work/PKGBUILD" <<PKG
 pkgname=rapp-omarchy
 pkgver=$version
 pkgrel=1
-pkgdesc='Remote Mac apps embedded in a Linux desktop client (Omarchy/Arch)'
+pkgdesc='Remote apps, text terminals and port sharing (Omarchy/Arch)'
 arch=('x86_64')
 url='https://github.com/wizlijun/rapp'
 depends=('glibc>=2.39' 'gcc-libs' 'gtk3' 'gtk4>=4.12' 'libayatana-appindicator' 'xdg-utils' 'systemd')
@@ -94,7 +99,7 @@ sha256sums=('$(sha256sum "$archive" | cut -d' ' -f1)')
 package() {
   install -d "\$pkgdir/opt/rapp" "\$pkgdir/usr/bin"
   cp -a "\$srcdir/$name/." "\$pkgdir/opt/rapp/"
-  for binary in rapp rapp-client rapp-hub rapp-service rapp-term; do
+  for binary in rapp rapp-client rapp-hub rapp-service rapp-term rapp-cli; do
     ln -s "/opt/rapp/\$binary" "\$pkgdir/usr/bin/\$binary"
   done
   install -Dm644 "\$srcdir/$name/rapp.desktop" "\$pkgdir/usr/share/applications/rapp.desktop"
