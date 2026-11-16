@@ -3,7 +3,6 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/ui/net_marker.dart';
-import 'package:rapp/ui/tokens.dart';
 
 import 'helpers.dart';
 
@@ -28,20 +27,6 @@ void main() {
     }
   });
 
-  testWidgets('colours: strong on, ok text, weak accent, down error', (tester) async {
-    late RappTokens t;
-    late ColorScheme cs;
-    await tester.pumpWidget(wrap(Builder(builder: (context) {
-      t = RappTokens.of(context);
-      cs = Theme.of(context).colorScheme;
-      return const SizedBox();
-    })));
-    expect(netColor(NetLevel.strong, t, cs), t.on);
-    expect(netColor(NetLevel.ok, t, cs), t.text);
-    expect(netColor(NetLevel.weak, t, cs), t.accent);
-    expect(netColor(NetLevel.down, t, cs), cs.error);
-  });
-
   test('words and tooltip', () {
     expect(NetLevel.values.map(netWord), ['强', '一般', '弱', '断开']);
     const ok = NetStatus(NetLevel.ok, 160, 0.03);
@@ -62,23 +47,17 @@ void main() {
     expect(find.byTooltip(netTooltip(n)), findsOneWidget);
   });
 
-  testWidgets('the mark keeps its whole 28×14 canvas and is tinted as a template', (tester) async {
-    late RappTokens t;
-    late ColorScheme cs;
+  testWidgets('the mark keeps its whole 14×14 canvas, in its own colours, unsmoothed', (tester) async {
     for (final l in NetLevel.values) {
-      await tester.pumpWidget(wrap(Builder(builder: (context) {
-        t = RappTokens.of(context);
-        cs = Theme.of(context).colorScheme;
-        return NetMarker(net: NetStatus(l, 500, 0.2));
-      })));
+      await tester.pumpWidget(wrap(NetMarker(net: NetStatus(l, 500, 0.2))));
       expect(tester.takeException(), isNull, reason: '$l');
       final img = tester.widget<Image>(find.byKey(const Key('net-mark')));
       expect((img.image as AssetImage).assetName, netAsset(l), reason: '$l');
-      expect(img.color, netColor(l, t, cs), reason: '$l');
-      expect(img.colorBlendMode ?? BlendMode.srcIn, BlendMode.srcIn, reason: '$l');
+      expect(img.color, isNull, reason: '$l'); // not a template: white and gray stay
+      expect(img.filterQuality, FilterQuality.none, reason: '$l');
       // No crop, no stretch: the canvas is the art's own size, drawn whole.
       expect(img.fit, isNull, reason: '$l');
-      expect(tester.getSize(find.byKey(const Key('net-mark'))), const Size(28, 14), reason: '$l');
+      expect(tester.getSize(find.byKey(const Key('net-mark'))), const Size(14, 14), reason: '$l');
     }
   });
 }
