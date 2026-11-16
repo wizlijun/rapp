@@ -11,6 +11,7 @@ import '../permissions.dart';
 import '../service_client.dart';
 import '../ui/tokens.dart';
 import '../ui/lifecycle.dart' show disconnectWord;
+import '../ui/secure_text_field.dart';
 import '../service_control.dart';
 import '../data_relocate.dart';
 import 'data_section.dart';
@@ -327,12 +328,9 @@ class _LocalSectionState extends State<LocalSection> {
       builder: (ctx) => AlertDialog(
         title: const Text('输入新 key'),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
-          TextField(
+          SecureTextField(
               controller: key,
               autofocus: true,
-              obscureText: true,
-              enableSuggestions: false,
-              autocorrect: false,
               decoration: const InputDecoration(labelText: 'key')),
           ValueListenableBuilder<String?>(
             valueListenable: error,
@@ -414,11 +412,8 @@ class _LocalSectionState extends State<LocalSection> {
         title: const Text('修改中继'),
         content: Column(mainAxisSize: MainAxisSize.min, children: [
           TextField(controller: addr, autofocus: true, decoration: const InputDecoration(labelText: '接入点')),
-          TextField(
+          SecureTextField(
               controller: key,
-              obscureText: true,
-              enableSuggestions: false,
-              autocorrect: false,
               decoration: const InputDecoration(labelText: 'key')),
           ValueListenableBuilder<String?>(
             valueListenable: error,

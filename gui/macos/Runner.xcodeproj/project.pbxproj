@@ -30,6 +30,7 @@
 		78A318202AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage in Frameworks */ = {isa = PBXBuildFile; productRef = 78A3181F2AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage */; };
 		A5E5510000000000000000A2 /* SessionPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5E5510000000000000000A1 /* SessionPlugin.swift */; };
 		A5E551000000000000000F12 /* UnlockPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5E551000000000000000F11 /* UnlockPlugin.swift */; };
+		A5E551000000000000000F14 /* SecureInputPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5E551000000000000000F13 /* SecureInputPlugin.swift */; };
 		A5E5510000000000000000B2 /* DetachedWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5E5510000000000000000B1 /* DetachedWindow.swift */; };
 		A5E5510000000000000000A5 /* RappSession in Frameworks */ = {isa = PBXBuildFile; productRef = A5E5510000000000000000A4 /* RappSession */; };
 		A5E552000000000000000002 /* ComposerPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5E552000000000000000001 /* ComposerPlugin.swift */; };
@@ -88,6 +89,7 @@
 		9740EEB21CF90195004384FC /* Debug.xcconfig */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		A5E5510000000000000000A1 /* SessionPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionPlugin.swift; sourceTree = "<group>"; };
 		A5E551000000000000000F11 /* UnlockPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnlockPlugin.swift; sourceTree = "<group>"; };
+		A5E551000000000000000F13 /* SecureInputPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureInputPlugin.swift; sourceTree = "<group>"; };
 		A5E5510000000000000000B1 /* DetachedWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetachedWindow.swift; sourceTree = "<group>"; };
 		A5E552000000000000000001 /* ComposerPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerPlugin.swift; sourceTree = "<group>"; };
 		A5E552000000000000000011 /* ComposerNative.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ComposerNative.m; sourceTree = "<group>"; };
@@ -184,6 +186,7 @@
 				A5E552000000000000000011 /* ComposerNative.m */,
 				A5E552000000000000000001 /* ComposerPlugin.swift */,
 				A5E551000000000000000F11 /* UnlockPlugin.swift */,
+				A5E551000000000000000F13 /* SecureInputPlugin.swift */,
 				A5E5510000000000000000B1 /* DetachedWindow.swift */,
 				33E51913231747F40026EE4D /* DebugProfile.entitlements */,
 				33E51914231749380026EE4D /* Release.entitlements */,
@@ -378,6 +381,7 @@
 				A5E552000000000000000012 /* ComposerNative.m in Sources */,
 				A5E552000000000000000002 /* ComposerPlugin.swift in Sources */,
 				A5E551000000000000000F12 /* UnlockPlugin.swift in Sources */,
+				A5E551000000000000000F14 /* SecureInputPlugin.swift in Sources */,
 				A5E5510000000000000000B2 /* DetachedWindow.swift in Sources */,
 				33CC10F12044A3C60003C045 /* AppDelegate.swift in Sources */,
 				335BBD1B22A9A15E00E9071D /* GeneratedPluginRegistrant.swift in Sources */,

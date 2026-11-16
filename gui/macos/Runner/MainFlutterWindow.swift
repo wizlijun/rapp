@@ -19,6 +19,7 @@ class MainFlutterWindow: NSWindow {
     RegisterGeneratedPlugins(registry: flutterViewController)
     UnlockPlugin.register(with: flutterViewController.registrar(forPlugin: "RappUnlock"))
     SessionPlugin.register(with: flutterViewController.registrar(forPlugin: "RappSession"))
+    SecureInputPlugin.register(with: flutterViewController.registrar(forPlugin: "RappSecureInput"), window: self)
 
     ComposerPlugin.register(with: flutterViewController.registrar(forPlugin: "RappComposer"))
 

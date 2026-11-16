@@ -254,13 +254,13 @@ void main() {
     expect(t.sent.where((m) => m['cmd'] == 'apps').length, before + 1);
     expect(t.sent.last, containsPair('id', '222'));
     // form cleared
-    expect(tester.widget<TextField>(find.byKey(const Key('add-password'))).controller!.text, '');
+    expect(tester.widget<TextField>(find.descendant(of: find.byKey(const Key('add-password')), matching: find.byType(TextField))).controller!.text, '');
     expect(tester.widget<TextField>(find.byKey(const Key('add-id'))).controller!.text, '');
   });
 
   testWidgets('password field is obscured', (tester) async {
     await pumpTab(tester);
-    expect(tester.widget<TextField>(find.byKey(const Key('add-password'))).obscureText, isTrue);
+    expect(tester.widget<TextField>(find.descendant(of: find.byKey(const Key('add-password')), matching: find.byType(TextField))).obscureText, isTrue);
   });
 
   testWidgets('add error is shown inline and nothing switches', (tester) async {
