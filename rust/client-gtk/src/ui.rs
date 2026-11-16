@@ -1,5 +1,7 @@
 #[path = "controls.rs"]
 mod controls;
+#[path = "focus.rs"]
+mod focus;
 #[path = "editor.rs"]
 mod editor;
 #[path = "windows.rs"]
@@ -11,6 +13,7 @@ use gtk::{cairo, gdk, gio, glib, prelude::*};
 use rapp_client_core::transfer::{self, Cancel, Copy, Downloads};
 use rapp_client_core::{
     codec::Decoder,
+    probe::PathProbe,
     geometry,
     protocol::{self as p, Address, Incoming, Menu, Rect, Window},
     stream,
@@ -52,6 +55,16 @@ struct State {
     windows: Vec<Window>,
     region: Rect,
     surface: Option<cairo::ImageSurface>,
+    gray_surface: Option<cairo::ImageSurface>,
+    focus_regions: std::collections::HashMap<u32, Vec<Rect>>,
+    smart: bool,
+    redraw: bool,
+    pinned: bool,
+    probe: RefCell<PathProbe>,
+    began: Instant,
+    rtt: Option<u32>,
+    saving: u8,
+    input_ascii: bool,
     tx: Option<SyncSender<Vec<u8>>>,
     pending_text: Option<TextSend>,
     send_queue: std::collections::VecDeque<(Option<u32>, Copy)>,
@@ -70,18 +83,31 @@ struct State {
     mode: u8,
     fps: u8,
     density_choice: u32,
-    last_stream: Option<(u8, u8, f32)>,
+    last_stream: Option<(u8, u8, f32, bool, bool)>,
     geometry_changed: Instant,
     last_size: (i32, i32, i32),
 }
 impl State {
     fn send(&self, bytes: Vec<u8>) {
+        if matches!(bytes.first(), Some(5 | 6 | 7 | 8 | 18 | 20)) {
+            self.probe.borrow_mut().input(self.began.elapsed().as_secs_f64());
+        }
         if let Some(tx) = &self.tx {
             // Bounded: an unresponsive peer cannot accumulate unlimited input or block GTK.
             if tx.try_send(bytes).is_err() {
                 self.send_failed.set(true);
             }
         }
+    }
+    fn set_smart(&mut self, smart: bool) {
+        self.smart = smart;
+        self.redraw = true;
+        self.focus_regions.clear();
+        self.gray_surface = if smart { self.surface.as_ref().and_then(focus::grayscale) } else { None };
+        self.last_stream = None;
+    }
+    fn paint(&self, cr: &cairo::Context, surface: &cairo::ImageSurface) {
+        focus::paint(cr, surface, self.gray_surface.as_ref(), self.region, &self.windows, &self.focus_regions);
     }
     fn hit(&self, area: &gtk::DrawingArea, x: f64, y: f64, clamp: bool) -> Option<(u32, f32, f32)> {
         let (cx, cy) = geometry::zoom_point(
@@ -291,6 +317,16 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
             h: 500.,
         },
         surface: None,
+        gray_surface: None,
+        focus_regions: Default::default(),
+        smart: false,
+        redraw: false,
+        pinned: false,
+        probe: RefCell::new(PathProbe::default()),
+        began: Instant::now(),
+        rtt: None,
+        saving: 0,
+        input_ascii: true,
         tx: None,
         pending_text: None,
         send_queue: Default::default(),
@@ -444,9 +480,7 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
                 z * s.region.w as f64 / surface.width() as f64,
                 z * s.region.h as f64 / surface.height() as f64,
             );
-            if cr.set_source_surface(surface, 0., 0.).is_ok() {
-                let _ = cr.paint();
-            }
+            s.paint(cr, surface);
             let _ = cr.restore();
         }
     });
@@ -492,7 +526,7 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
                         surface.scale()
                     });
                 let density = stream::capture_density(s.zoom, backing, s.density_choice);
-                s.last_stream = Some((address.mode, address.fps, density));
+                s.last_stream = Some((address.mode, address.fps, density, s.pinned, s.smart));
                 s.tx = Some(connect(address, ev.clone(), meter.clone(), density));
                 drop(s);
                 menu_controls.sync(&state_for_connect);
@@ -510,7 +544,7 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
             .surface()
             .map_or(window.scale_factor() as f64, |surface| surface.scale());
         let density = stream::capture_density(s.zoom, backing, s.density_choice);
-        s.last_stream = Some((address.mode, address.fps, density));
+        s.last_stream = Some((address.mode, address.fps, density, s.pinned, s.smart));
         s.tx = Some(connect(address, events.clone(), bytes.clone(), density));
     }
     if json_mode {
@@ -552,6 +586,12 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
             let Ok(event) = rx.try_recv() else {
                 break;
             };
+            if matches!(&event, Event::Message(_) | Event::Image(..)) {
+                let s = state.borrow();
+                if s.probe.borrow_mut().received(s.began.elapsed().as_secs_f64()).is_some() {
+                    emit(json_mode, json!({"event":"stalled","on":false}));
+                }
+            }
             match event {
                 Event::Focus => {
                     window.unminimize();
@@ -613,6 +653,10 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
                             .find(|w| w.flags & 2 != 0 && w.kind <= 2)
                             .or_else(|| table.iter().find(|w| w.kind <= 2))
                             .map(|w| w.id);
+                        let keep: std::collections::HashSet<_> = table.iter().filter(|w| s.windows.iter().any(|old|
+                            old.id == w.id && old.rect.w == w.rect.w && old.rect.h == w.rect.h)).map(|w| w.id).collect();
+                        s.focus_regions.retain(|id, _| keep.contains(id));
+                        s.redraw = true; // Clear stale masks even when the host has no new pixels.
                         s.windows = table;
                     }
                     viewport.set_visible(!state.borrow().windows.iter().any(|w| w.kind <= 2));
@@ -653,7 +697,37 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
                     notice_deadline = Some(Instant::now() + Duration::from_secs(1));
                     emit(json_mode, json!({"event":"input_blocked","by":by}));
                 }
-                Event::Message(Incoming::FocusRegion { .. }) => {}
+                Event::Message(Incoming::FocusRegion { window, rects }) => {
+                    let mut s = state.borrow_mut();
+                    if s.smart && s.windows.iter().any(|w| w.id == window) {
+                        emit(json_mode, json!({"event":"focus","window":window,"rects":rects.iter().map(|r|[r.x,r.y,r.w,r.h]).collect::<Vec<_>>()}));
+                        s.focus_regions.insert(window, rects);
+                        area.queue_draw();
+                        drop(s);
+                        native_windows.redraw();
+                    }
+                }
+                Event::Message(Incoming::Weak(on)) => {
+                    state.borrow_mut().saving = if on { 2 } else { 0 };
+                    emit(json_mode, json!({"event":"weak","level":if on { 2 } else { 0 }}));
+                }
+                Event::Message(Incoming::Saving(level)) => {
+                    state.borrow_mut().saving = level;
+                    emit(json_mode, json!({"event":"weak","level":level}));
+                }
+                Event::Message(Incoming::Pong(seq)) => {
+                    let mut s = state.borrow_mut();
+                    let now = s.began.elapsed().as_secs_f64();
+                    let ms = s.probe.borrow_mut().pong(seq, now);
+                    if let Some(ms) = ms {
+                        s.rtt = Some(ms);
+                        emit(json_mode, json!({"event":"rtt","ms":ms}));
+                    }
+                }
+                Event::Message(Incoming::InputSource { id, name, ascii }) => {
+                    emit(json_mode, json!({"event":"input_source","id":id,"name":name,"ascii":ascii}));
+                    state.borrow_mut().input_ascii = ascii;
+                }
                 Event::Message(Incoming::ScreenLocked(locked)) => {
                     if locked {
                         info.set_text("远程电脑已锁屏，鼠标和键盘只能操作锁屏界面；请打开「桌面」输入密码解锁");
@@ -794,6 +868,7 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
                     ) {
                         Ok(surface) => {
                             let mut s = state.borrow_mut();
+                            s.gray_surface = if s.smart { focus::grayscale(&surface) } else { None };
                             s.surface = Some(surface);
                             if s.region != region {
                                 s.geometry_changed = Instant::now();
@@ -814,6 +889,19 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
             }
         }
         if last_rate.elapsed() >= Duration::from_secs(1) {
+            {
+                let s = state.borrow();
+                if s.ready {
+                    let (ping, change) = s.probe.borrow_mut().tick(s.began.elapsed().as_secs_f64());
+                    if let Some(seq) = ping { s.send(p::ping(seq)); }
+                    if let Some(on) = change { emit(json_mode, json!({"event":"stalled","on":on})); }
+                    let status = if s.probe.borrow().stalled() { "连接等待" }
+                        else if s.saving == 2 { "弱网" } else if s.saving == 1 { "省流" } else { "连接正常" };
+                    let label = format!("{status}{}", s.rtt.map(|ms| format!(" · {ms} ms")).unwrap_or_default());
+                    rate.set_tooltip_text(Some(&label));
+                    controls.set_network_status(&label);
+                }
+            }
             rate.set_label(&stream::rate(
                 bytes.swap(0, Ordering::Relaxed),
                 last_rate.elapsed().as_secs_f64(),
@@ -840,6 +928,8 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
             notice_deadline = Some(Instant::now() + Duration::from_secs(5));
         }
         drop(s);
+        let redraw = std::mem::take(&mut state.borrow_mut().redraw);
+        if redraw { area.queue_draw(); native_windows.redraw(); }
         native_windows.update_zoom();
         let mut s = state.borrow_mut();
         copy.set_sensitive(s.ready);
@@ -863,11 +953,10 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
                 .and_then(|n| n.surface())
                 .map_or(size.2 as f64, |surface| surface.scale());
             let density = stream::capture_density(s.zoom, backing, s.density_choice);
-            let next = (s.mode, s.fps, density);
-            // What the user picked is the ceiling; this client has no switch for automatic
-            // saving, so it stays on (pinned false) and the host may save below the pick.
-            if stream::changed(s.last_stream, next) {
-                s.send(p::stream(next.0, next.1, next.2, false, false));
+            let next = (s.mode, s.fps, density, s.pinned, s.smart);
+            if stream::changed(s.last_stream.map(|s| (s.0, s.1, s.2)), (next.0, next.1, next.2))
+                || s.last_stream.is_none_or(|old| old.3 != next.3 || old.4 != next.4) {
+                s.send(p::stream(next.0, next.1, next.2, next.3, next.4));
                 s.last_stream = Some(next);
             }
         }
@@ -1042,6 +1131,7 @@ fn install_input(
         if !s.ready || s.pending_text.is_some() {
             return;
         }
+        if !s.input_ascii { s.send(p::select_input("")); }
         if s.send_queue.is_empty() {
             s.send_queue = e.snapshot();
         }

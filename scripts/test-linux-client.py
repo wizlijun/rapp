@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the real GTK worker against an independent Python v10 host fixture.
+"""Exercise the real GTK worker against an independent Python v12 host fixture.
 Requires a graphical session (or xvfb-run). No real host credentials are used.
 For isolated input with a rootful Xwayland server, set DISPLAY to that server
 and RAPP_TEST_NO_WM=1. Window-manager minimize/take-back checks are then omitted.
@@ -17,7 +17,7 @@ import time
 import tomllib
 import zlib
 
-PROTOCOL = 10
+PROTOCOL = 12
 NO_WM = os.environ.get("RAPP_TEST_NO_WM") == "1"
 
 def xdo_command(args):
@@ -182,7 +182,29 @@ def multi_client(s):
     send(s.s, 3, string("taken over by 客厅的 Mac"))
     assert s.finish(1)["reason"] == "taken over by 客厅的 Mac"
 
-case("v6 input refusal, continued frames, focus and takeover", multi_client)
+case("input refusal, continued frames, focus and takeover", multi_client)
+
+
+def network_metadata(s):
+    s.ready()
+    send(s.s, 33, b"\x01")
+    assert s.event("weak")["level"] == 1
+    send(s.s, 29, string("input.test") + string("Test IME") + b"\x00")
+    assert s.event("input_source")["ascii"] is False
+    send(s.s, 34, b"\x01")
+    assert s.event("screen_locked")["locked"] is True
+    while True:
+        kind, payload = recv(s.s)
+        if kind == 31:
+            send(s.s, 32, payload)
+            break
+    assert s.event("rtt")["ms"] >= 0
+    send(s.s, 34, b"\x00")
+    assert s.event("screen_locked")["locked"] is False
+    s.p.stdin.close()
+    s.finish(0)
+
+case("saving, input source, lock status and round-trip probe", network_metadata)
 
 
 def keyboard(s):
@@ -282,19 +304,28 @@ def stream_menu(s):
     xdo("key","Home","Return")
     while True:
         kind,payload=recv(s.s)
+        if kind==11 and payload[:2]==bytes([2,15]) and payload[6:]==b"\x02":break
+    send(s.s,36,struct.pack("<IBffff",1,1,10.,10.,100.,80.))
+    assert s.event("focus")["window"]==1
+    xdo("mousemove","--window",window,int(geom["WIDTH"])-200,26)
+    xdo("click","3")
+    time.sleep(.3)
+    xdo("key","Home","Down","Return")
+    while True:
+        kind,payload=recv(s.s)
         if kind==11 and payload[:2]==bytes([3,1]):break
     assert struct.unpack("<f",payload[2:6])[0]>0
-    assert payload[6:]==b"\x00",payload  # a pick is the ceiling; automatic saving stays on
+    assert payload[6:]==b"\x01",payload  # manual stream choices pin the requested quality
     z=zlib.compressobj();s.frame(z,True,15,mode=3);s.frame(z,False,5,mode=3)
     time.sleep(.3)
     xdo("mousemove","--window",window,int(geom["WIDTH"])-200,26)
     xdo("click","3")
     time.sleep(0.3)
-    xdo("key","Home","Down","Return")
+    xdo("key","Home","Down","Down","Return")
     while True:
         kind,payload=recv(s.s)
         if kind==11 and payload[:2]==bytes([2,15]):break
-    assert struct.unpack("<f",payload[2:6])[0]==8. and payload[6:]==b"\x00",payload
+    assert struct.unpack("<f",payload[2:6])[0]==8. and payload[6:]==b"\x01",payload
     s.frame(zlib.compressobj(),True,0xf800)
     time.sleep(.2)
     s.p.stdin.close();s.finish(0)

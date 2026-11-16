@@ -355,8 +355,7 @@ fn install(
             s.region.w as f64 / surface.width() as f64,
             s.region.h as f64 / surface.height() as f64,
         );
-        let _ = cr.set_source_surface(surface, 0., 0.);
-        let _ = cr.paint();
+        s.paint(cr, surface);
         let _ = cr.restore();
     });
     let pointer = Rc::new(Cell::new((0., 0.)));

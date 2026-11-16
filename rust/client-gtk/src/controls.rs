@@ -18,6 +18,7 @@ pub struct Controls {
     pub stream_menu: gio::Menu,
     group: gio::SimpleActionGroup,
     history_menu: gio::Menu,
+    network_menu: gio::Menu,
     history: Rc<RefCell<Vec<HistoryEntry>>>,
 }
 fn radio(menu: &gio::Menu, label: &str, action: &str, value: &str) {
@@ -83,6 +84,10 @@ impl Controls {
                         "zoom" if stream::ZOOMS.contains(&value) => s.zoom = value as f64 / 100.,
                         _ => return,
                     }
+                    if name != "zoom" {
+                        s.set_smart(false);
+                        s.pinned = true;
+                    }
                     s.geometry_changed = Instant::now() - Duration::from_secs(1);
                 }
                 if let Some(group) = weak.upgrade() {
@@ -93,6 +98,7 @@ impl Controls {
             group.add_action(&action);
         }
         for (name, preset) in [
+            ("smart", stream::Choice { mode: 2, fps: 15, density: 1 }),
             ("least-traffic", stream::LEAST_TRAFFIC),
             ("sharpest", stream::SHARPEST),
         ] {
@@ -102,6 +108,8 @@ impl Controls {
             action.connect_activate(move |_, _| {
                 {
                     let mut s = s.borrow_mut();
+                    s.set_smart(name == "smart");
+                    s.pinned = name != "smart";
                     s.mode = preset.mode;
                     s.fps = preset.fps;
                     s.density_choice = preset.density;
@@ -154,7 +162,11 @@ impl Controls {
         });
         group.add_action(&fit);
         let stream_menu = gio::Menu::new();
+        let network_menu = gio::Menu::new();
+        network_menu.append(Some("正在连接…"), None);
+        stream_menu.append_section(None, &network_menu);
         let presets = gio::Menu::new();
+        presets.append(Some("智能（高彩 + 自适应 + 15 fps）"), Some("client.smart"));
         presets.append(
             Some("最省流（双色·灰度 + 自适应 + 1 fps）"),
             Some("client.least-traffic"),
@@ -209,8 +221,13 @@ impl Controls {
             stream_menu,
             group,
             history_menu,
+            network_menu,
             history: Rc::new(RefCell::new(Vec::new())),
         }
+    }
+    pub fn set_network_status(&self, label: &str) {
+        self.network_menu.remove_all();
+        self.network_menu.append(Some(label), None);
     }
     pub fn sync(&self, state: &Shared) {
         sync(&self.group, state);
