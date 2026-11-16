@@ -33,7 +33,7 @@
        agent/             用户和 agent 的内容（进 git），rapp 不动
        clipboard/         钉住的文字条目，一条一个 .md（进 git）
        files/             二进制，不进 git：transfers/（收发的文件）  clipboard/（钉住的图片和文件）
-       local/             本机私有，不进 git，0700：service.json  hosts.json  shares.json  ipc.token  update.json  drafts/（没发出去的草稿，《输入记录》§5.2）  ……（§3）
+       local/             本机私有，不进 git，0700：service.json  hosts.json  shares.json  maps.json  ipc.token  update.json  drafts/（没发出去的草稿，《输入记录》§5.2）  ……（§3）
      ```
    - **进 git 的**：`shared/`、`devices/`、`agent/`、`clipboard/`、`README.md`、`.gitignore`。**不进 git 的**：`files/`、`local/`（写在 `.gitignore` 里）。rapp-service 在改动后 60 秒内合成一次提交（`rust/service/src/data.rs:41`）。
    - **机密只在 `local/`**。rapp 自己不往 `shared/`、`devices/`、`agent/`、`clipboard/` 里写口令、key、secret、token；agent 往这些目录写东西时也一样。例外是用户自己的话：`devices/<id>/inputs/` 里是写作面板发出去的原话，rapp 保证不了里面没有密钥，可能含私事，和钉住的剪贴板同样对待（《输入记录》§8）。
@@ -215,6 +215,7 @@ agent 规则：加、删分享走 `rapp share` / `rapp unshare`（或 IPC 的 `s
 |---|---|---|---|
 | `$ROOT/local/ipc.token` | A、B | GUI 连本机 service 用的 token，每次启动重新生成（`rust/service/src/lib.rs:105`） | **机密** |
 | `$ROOT/local/term/` | A | 文本终端（`rapp-term run`）的本机状态，目录 0700（`rust/term/src/pty/local.rs` `ensure_dirs`）。`pty/<pid>.sock`：每个在跑的 `run` 一个 unix socket，`run` 退出时删，`serve` 扫到连不上的旧 socket 也会删；`pty/.lock`：`run` 挑名字时的文件锁；`launch/<ticket>.command`：`serve` 为“新开文本终端”写的临时脚本（0700），等到 `run` 出现就删，10 秒没等到就先留着，下次 `open` 时删掉超过 5 分钟的（`rust/term/src/serve.rs` `sweep_launch`）；`pty.token`：本机 socket 的固定 token，0600，第一次用到时生成，之后不换（`run` 要活过服务重启）；文件是空的或不足 32 个字符、又已经超过 1 秒没改过，算是写到一半崩了留下的，重新生成。只防同机的其他用户 | token 是**机密** |
+| `$ROOT/local/maps.json` | B（访问方） | 别的设备分享的端口在本机用哪个本机端口：`[{"id","port","local"}]`，`localhost:<local>` 就是设备 `id` 的 `port`（`rust/service/src/maps.rs`，《用本机端口访问》§3）。服务启动时读、照着监听；面板读分享表或 `rapp hosts` 时增删，整份写回（0600）。读不懂时当作空的（`service.log` 记 `maps_unreadable`），下次写时盖掉，后果只是地址重新分配。删掉这个文件也只是这样 | |
 | `$ROOT/local/shares.json.bad` | A | `shares.json` 读不懂时，第一次写分享表前把它原样改名到这里，盖掉以前的（`rust/service/src/shares.rs:161-166`）。rapp 不读它；要找回原来的内容，从这里抄回 `shares.json`（§2.11） | |
 | `$ROOT/local/update.json` | A | 最近查到的版本、上次检查时间、用户按过「不装」的版本（`rust/service/src/update.rs:133`）。「不装」走 IPC `update_dismiss` | |
 | `$ROOT/local/update-applied.json` | A | 上次升级的记录，用于回滚和授权提示（`rust/update/src/apply.rs:10`） | |

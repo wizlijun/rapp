@@ -53,6 +53,12 @@ pub fn service_json(home: &Path) {
 }
 
 pub async fn start_service(home: &Path, bins: &Path, idle: Duration) -> Service {
+    start_service_ports(home, bins, idle, rapp_service::MAP_PORTS).await
+}
+
+/// `start_service`, giving other devices' shares local ports from `map_ports` (the first one,
+/// and how many): for a test that counts on which port it gets.
+pub async fn start_service_ports(home: &Path, bins: &Path, idle: Duration, map_ports: (u16, u16)) -> Service {
     Service::start(rapp_service::Opts {
         home: home.to_path_buf(),
         bin_dir: Some(bins.to_path_buf()),
@@ -68,6 +74,7 @@ pub async fn start_service(home: &Path, bins: &Path, idle: Duration) -> Service 
         forward_priority: rapp_conn::relay::FORWARD_PRIORITY,
         channels: true,
         pacing: true,
+        map_ports,
     })
     .await
     .unwrap()
@@ -95,6 +102,7 @@ pub async fn start_service_with(
         forward_priority: rapp_conn::relay::FORWARD_PRIORITY,
         channels: true,
         pacing: true,
+        map_ports: rapp_service::MAP_PORTS,
     })
     .await
     .unwrap()
@@ -548,6 +556,7 @@ pub async fn service_on_relay_with(
         forward_priority: rapp_conn::relay::FORWARD_PRIORITY,
         channels: true,
         pacing: true,
+        map_ports: rapp_service::MAP_PORTS,
     };
     tune(&mut opts);
     let svc = Service::start(opts).await.unwrap();

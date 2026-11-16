@@ -33,6 +33,7 @@ async fn main() {
         forward_priority: rapp_conn::relay::FORWARD_PRIORITY,
         channels: true,
         pacing: true,
+        map_ports: rapp_service::MAP_PORTS,
         update: std::env::current_exe().ok().and_then(|e| rapp_update::bundle_of(&e)).map(UpdateOpts::system),
     };
     match Service::start(opts).await {

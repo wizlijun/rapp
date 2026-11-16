@@ -181,7 +181,7 @@ class _SharesSectionState extends State<SharesSection> {
               child: _ShareRowView(
                 row: r,
                 t: t,
-                openEnabled: widget.api.rappNames && r.mine && r.web,
+                openEnabled: r.web && r.addr.isNotEmpty,
                 warn: _warns[r.port],
                 busy: _busy,
                 onOpen: () => widget.open(r.addr),
@@ -194,11 +194,6 @@ class _SharesSectionState extends State<SharesSection> {
                   await widget.api.share(to: widget.to, ports: [r.port], note: s.trim());
                 }),
               ),
-            ),
-          if (!widget.api.rappNames && table.rows.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Text('这台电脑还没有启用 .rapp 域名，地址现在只能复制。', key: const Key('share-names-off'), style: TextStyle(color: t.muted)),
             ),
         ],
         if (!hidden && !(table == null && _loading)) _form(t),
@@ -274,7 +269,10 @@ class _ShareRowView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final shown = row.addr;
+    final addr = row.addr;
+    // No address: the share is not for this computer (the scope button says so), or the
+    // service has no local port left for it.
+    final shown = addr.isNotEmpty ? addr : (row.mine ? '没有本机端口可用' : '');
     return Container(
       key: Key('share-row-${row.port}'),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
@@ -316,7 +314,7 @@ class _ShareRowView extends StatelessWidget {
                 RappButton.secondary(
                   key: Key('share-copy-${row.port}'),
                   label: '复制',
-                  onPressed: () => Clipboard.setData(ClipboardData(text: shown)),
+                  onPressed: addr.isEmpty ? null : () => Clipboard.setData(ClipboardData(text: addr)),
                 ),
                 ConfirmButton(
                   key: Key('share-unshare-${row.port}'),

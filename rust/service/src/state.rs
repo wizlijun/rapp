@@ -96,6 +96,8 @@ pub struct State {
     pub forward_log: crate::forward_log::ForwardLog,
     /// The ports this device shares (`shares.json`).
     pub shares: crate::shares::Shares,
+    /// The local ports that carry to other devices' shares.
+    pub maps: crate::maps::Maps,
     /// The forwards running now.
     pub forwards: crate::forward::Forwards,
     /// See `Opts::forward_priority`.

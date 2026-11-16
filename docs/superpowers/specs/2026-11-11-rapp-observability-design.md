@@ -86,6 +86,9 @@
 | `share` | info | `port, allow`（只给几台设备，0 是所有持 key 的设备） | IPC `share` 每个端口一行，再分享一次同一个端口也记（`rust/service/src/ipc.rs:254`） |
 | `unshare` | info | `port` | IPC `unshare` 真的删掉了一项时（`rust/service/src/sharing.rs`）。（实现注，2026-11-16）现在加 `by`，也可能是别的设备发来的 `unshare`，见下 |
 | `share_refused` | warn | `peer, name?, path, by, op, reason` | （实现注，2026-11-16）别的设备发来的 `shares`、`share`、`unshare` 被拒。`op` 是这三个之一；`reason` 是 `not supported`、`host only`、`policy`（`forward_refused` 同一套检查的前三步），或改表时的错误：`bad port`、`bad allow`、`unknown device: X`、`limit`（`limit` 只有 `share` 会有）（`rust/service/src/sharing.rs`）。`by` 是发来的设备指纹的前 8 位十六进制（密码认证的连接没有指纹，是空串），同 `share`、`unshare`。不限频 |
+| `map_refused` | warn | `id, port, local, reason` | （本机端口，2026-11-16）访问方：一条连到本机端口 `local` 的连接没有接上设备 `id` 的 `port`，被关掉。`reason` 是对方的拒绝（`not shared`、`not allowed`、`refused`、`limit`）或 `offline`、`no key`（`rust/service/src/maps.rs`） |
+| `map_port_taken` | warn | `id, port, local` | （本机端口，2026-11-16）启动时，存下的本机端口 `local` 被别的程序占了，这一项先不监听；下次读那台设备的分享表时换一个端口 |
+| `maps_unreadable` | warn | `err` | （本机端口，2026-11-16）启动时 `local/maps.json` 读不懂，当作空的（配置规范 §3） |
 | `shares_unreadable` | warn | `err` | 启动时 `local/shares.json` 读不懂，分享表当作空的（配置规范 §2.11，`rust/service/src/lib.rs:121-124`） |
 | `forward_open` | info | `peer, name?, path, fp, port` | 一条转发连接接上了本机端口，回 `ok` 之前。`forward_log` 是 `each` 时每条一行；合并（默认）时只记这个（来访设备, 端口）自上次 `forward_sum` 以来的第一条。连接还开着、服务就停了，也已经有记录（`rust/service/src/forward_log.rs:71`） |
 | `forward` | info | `peer, name?, path, fp, port, secs, bytes_in, bytes_out` | 一条转发连接结束。`each` 每条一行；合并时只记第一条，其余算进 `forward_sum`。`bytes_in` 是来访设备发来的，`bytes_out` 是发给它的（`forward_log.rs:83`） |

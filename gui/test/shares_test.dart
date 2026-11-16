@@ -8,13 +8,13 @@ void main() {
       'port': 8000,
       'note': 'n',
       'allow': [],
-      'url': 'http://123456789.rapp:8000',
-      'addr': 'http://123456789.rapp:8000',
+      'addr': 'http://localhost:28000',
+      'local': 28000,
       'web': true,
       'listening': true,
       'mine': true,
     });
-    expect(r.addr, 'http://123456789.rapp:8000');
+    expect(r.addr, 'http://localhost:28000');
     expect(r.web, isTrue);
     expect(r.mine, isTrue);
   });
@@ -31,8 +31,7 @@ void main() {
           'allow': [
             {'fp': 'cd' * 32, 'name': '笔记本'}
           ],
-          'url': 'http://123456789.rapp:8000',
-          'addr': 'http://123456789.rapp:8000',
+          'addr': '',
           'web': true,
           'listening': true,
           'mine': false,
@@ -41,7 +40,8 @@ void main() {
           'port': 22,
           'note': '',
           'allow': [],
-          'addr': 'ssh 123456789.rapp',
+          'addr': 'ssh -p 28001 localhost',
+          'local': 28001,
           'web': false,
           'listening': false,
           'mine': true,
@@ -62,7 +62,8 @@ void main() {
     expect(t.rows[0].web, isTrue);
     expect(t.rows[0].listening, isTrue);
     expect(t.rows[0].mine, isFalse);
-    expect(t.rows[1].addr, 'ssh 123456789.rapp');
+    expect(t.rows[0].addr, isEmpty);
+    expect(t.rows[1].addr, 'ssh -p 28001 localhost');
     expect(t.rows[1].web, isFalse);
     expect(t.rows[1].mine, isTrue);
     expect(t.known[0].name, '本机');
@@ -96,10 +97,5 @@ void main() {
     for (final s in ['', '0', '65536', '80a', '８０００', '-1', '8000.0']) {
       expect(parsePort(s), isNull, reason: s);
     }
-  });
-
-  test('rappNames comes from the status', () {
-    expect(ServiceStatus.fromJson({'rapp_names': true}).rappNames, isTrue);
-    expect(ServiceStatus.fromJson({}).rappNames, isFalse);
   });
 }

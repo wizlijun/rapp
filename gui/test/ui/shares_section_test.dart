@@ -12,12 +12,13 @@ import 'helpers.dart';
 const _me = Device(fp: 'a', name: '本机');
 const _mini = Device(fp: 'b', name: 'mini');
 
-ShareRow row(int port, {String note = '', List<Device> allow = const [], bool web = true, bool listening = true, bool mine = true}) =>
+ShareRow row(int port,
+        {String note = '', List<Device> allow = const [], bool web = true, bool listening = true, bool mine = true, String? addr}) =>
     ShareRow(
       port: port,
       note: note,
       allow: allow,
-      addr: web ? 'http://123456789.rapp:$port' : 'ssh 123456789.rapp',
+      addr: addr ?? (web ? 'http://localhost:28000' : 'ssh -p 28001 localhost'),
       web: web,
       listening: listening,
       mine: mine,
@@ -26,9 +27,7 @@ ShareRow row(int port, {String note = '', List<Device> allow = const [], bool we
 ShareTable table(List<ShareRow> rows) => ShareTable(id: '123456789', me: 'a', rows: rows, known: const [_me, _mini]);
 
 class FakeApi implements SharesApi {
-  FakeApi(this.next, {this.rappNames = true});
-  @override
-  bool rappNames;
+  FakeApi(this.next);
   Future<ShareTable> Function(String? to) next;
   final calls = <String>[];
   Future<List<Shared>> Function()? onShare;
@@ -53,8 +52,8 @@ class FakeApi implements SharesApi {
   }
 }
 
-Future<FakeApi> show(WidgetTester t, ShareTable tb, {String? to, bool rappNames = true, Future<void> Function(String)? open, PickAllow? pick}) async {
-  final api = FakeApi((_) async => tb, rappNames: rappNames);
+Future<FakeApi> show(WidgetTester t, ShareTable tb, {String? to, Future<void> Function(String)? open, PickAllow? pick}) async {
+  final api = FakeApi((_) async => tb);
   await t.pumpWidget(wrap(SingleChildScrollView(
     child: SharesSection(api: api, to: to, open: open ?? (_) async {}, pickAllow: pick ?? (c, r, k) async => null),
   )));
@@ -73,8 +72,8 @@ void main() {
   testWidgets('rows', (t) async {
     await show(t, table([row(8000, note: 'jupyter'), row(22, web: false, listening: false, allow: const [_me, _mini])]));
     expect(find.text('端口'), findsWidgets);
-    expect(find.text('http://123456789.rapp:8000'), findsOneWidget);
-    expect(find.text('ssh 123456789.rapp'), findsOneWidget);
+    expect(find.text('http://localhost:28000'), findsOneWidget);
+    expect(find.text('ssh -p 28001 localhost'), findsOneWidget);
     expect(find.text('所有设备'), findsOneWidget);
     expect(find.text('只给 本机、mini'), findsOneWidget);
     expect(find.byKey(const Key('share-open-22')), findsNothing);
@@ -82,17 +81,32 @@ void main() {
     expect(find.byKey(const Key('share-open-8000')), findsOneWidget);
   });
 
-  testWidgets('open is grey without .rapp names, with the line under the section', (t) async {
+  testWidgets('open works with nothing to switch on first', (t) async {
     final opened = <String>[];
-    await show(t, table([row(8000)]), rappNames: false, open: (u) async => opened.add(u));
-    await t.tap(find.byKey(const Key('share-open-8000')), warnIfMissed: false);
-    expect(opened, isEmpty);
-    expect(find.text('这台电脑还没有启用 .rapp 域名，地址现在只能复制。'), findsOneWidget);
-
     await show(t, table([row(8000)]), open: (u) async => opened.add(u));
-    expect(find.byKey(const Key('share-names-off')), findsNothing);
+    expect(find.textContaining('.rapp'), findsNothing);
     await t.tap(find.byKey(const Key('share-open-8000')));
-    expect(opened, ['http://123456789.rapp:8000']);
+    expect(opened, ['http://localhost:28000']);
+  });
+
+  testWidgets('a share with no address on this computer cannot be opened or copied', (t) async {
+    final opened = <String>[];
+    String? copied;
+    t.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (c) async {
+      if (c.method == 'Clipboard.setData') copied = (c.arguments as Map)['text'] as String?;
+      return null;
+    });
+    addTearDown(() => t.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
+    // 8000 is for mini alone; 9000 is for this computer, but the service had no local port left.
+    await show(t, table([row(8000, allow: const [_mini], mine: false, addr: ''), row(9000, addr: '')]), open: (u) async => opened.add(u));
+    for (final port in [8000, 9000]) {
+      await t.tap(find.byKey(Key('share-open-$port')), warnIfMissed: false);
+      await t.tap(find.byKey(Key('share-copy-$port')), warnIfMissed: false);
+    }
+    expect(opened, isEmpty);
+    expect(copied, isNull);
+    expect(find.text('只给 mini（不含本机）'), findsOneWidget);
+    expect(find.text('没有本机端口可用'), findsOneWidget);
   });
 
   testWidgets('the address is shown, copied and opened as the service sent it', (t) async {
@@ -104,12 +118,12 @@ void main() {
     });
     addTearDown(() => t.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
     await show(t, table([row(8000)]), open: (u) async => opened.add(u));
-    expect(find.text('http://123456789.rapp:8000'), findsOneWidget);
+    expect(find.text('http://localhost:28000'), findsOneWidget);
     expect(find.textContaining('http://http://'), findsNothing);
     await t.tap(find.byKey(const Key('share-open-8000')));
     await t.tap(find.byKey(const Key('share-copy-8000')));
-    expect(opened, ['http://123456789.rapp:8000']);
-    expect(copied, 'http://123456789.rapp:8000');
+    expect(opened, ['http://localhost:28000']);
+    expect(copied, 'http://localhost:28000');
   });
 
   for (final w in [400.0, 360.0]) {
@@ -141,7 +155,7 @@ void main() {
     api.next = (_) async => table([row(8000)]);
     await t.pumpWidget(host(true));
     await t.pump();
-    expect(find.text('http://123456789.rapp:8000'), findsOneWidget);
+    expect(find.text('http://localhost:28000'), findsOneWidget);
     expect(api.calls.where((c) => c.startsWith('shares')).length, 2);
     await t.pumpWidget(host(true));
     await t.pump();
