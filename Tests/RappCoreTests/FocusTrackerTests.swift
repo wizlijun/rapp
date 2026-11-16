@@ -327,18 +327,65 @@ final class FocusTrackerTests: XCTestCase {
         XCTAssertEqual(t.result(.keyboard, generation: old, pick(left), now: 2), [])
         XCTAssertNil(t.keyboardPanel)
         XCTAssertEqual(t.tick(now: 3), [])
-        _ = t.window(id: 2, size: CGSize(width: 900, height: 800), appeared: -10, now: 4)
+        // Resize: answers to queries asked before it are dropped too, keyboard and pointer alike.
+        XCTAssertEqual(keyboard(t, pick(left), now: 4), [out([left], .window, window: 2)])
+        _ = t.window(id: 2, size: CGSize(width: 900, height: 800), appeared: -10, now: 5)
         XCTAssertEqual(t.generation, old + 2)
+        XCTAssertEqual(t.result(.keyboard, generation: old + 1, .failure(.small), now: 6), [])
+        XCTAssertEqual(t.result(.pointer(CGPoint(x: 700, y: 400)), generation: old + 1, pick(right), now: 6), [])
+        XCTAssertEqual(t.keyboardPanel, left)
+        XCTAssertNil(t.pointerPanel)
+        XCTAssertEqual(t.tick(now: 7), [])
     }
     func testOutputClippedToWindow() {
         let t = started()
         let p = CGRect(x: 600, y: 0, width: 400, height: 800)
         XCTAssertEqual(keyboard(t, pick(p), now: 1), [out([p], .on)])
         let narrow = CGSize(width: 800, height: 800)
+        let clipped = CGRect(x: 600, y: 0, width: 200, height: 800)
         XCTAssertEqual(t.window(id: 1, size: narrow, appeared: -10, now: 2),
-                       [.query(.keyboard, generation: t.generation), out([], .resize)])
+                       [.query(.keyboard, generation: t.generation), out([clipped], .resize)])
         // Even a pick wider than the window never leaves it.
-        XCTAssertEqual(keyboard(t, pick(p), now: 3), [out([CGRect(x: 600, y: 0, width: 200, height: 800)], .resize)])
+        XCTAssertEqual(keyboard(t, pick(p), now: 3), [])
+        XCTAssertEqual(keyboard(t, pick(CGRect(x: 500, y: 0, width: 500, height: 800)), now: 4),
+                       [out([CGRect(x: 500, y: 0, width: 300, height: 800)], .resize)])
+    }
+    func testPointerPanelSurvivesResize() {
+        let t = started()
+        _ = keyboard(t, .failure(.small), now: 0.5)
+        _ = t.pointer(.click, at: CGPoint(x: 700, y: 400), now: 1)
+        XCTAssertEqual(t.result(.pointer(CGPoint(x: 700, y: 400)), generation: t.generation, pick(right), now: 1),
+                       [out([right], .click)])
+        _ = t.tick(now: 1.2)
+        XCTAssertEqual(t.window(id: 1, size: CGSize(width: 900, height: 800), appeared: -10, now: 2),
+                       [.query(.keyboard, generation: t.generation),
+                        out([CGRect(x: 500, y: 0, width: 400, height: 800)], .resize)])
+        XCTAssertEqual(t.pointerPanel, right)
+        XCTAssertEqual(t.keyboardMiss, .small)
+        // Still inside the kept pointer panel: no query.
+        XCTAssertEqual(t.pointer(.scroll, at: CGPoint(x: 700, y: 400), now: 3), [])
+    }
+    func testFollowPanelSurvivesResize() {
+        let t = clicked()
+        _ = t.frame(frame(tiles(cols: 5...9, rows: 0...7)), now: 1.2)
+        let f = CGRect(x: 500, y: 0, width: 300, height: 400)
+        _ = t.result(.follow(CGPoint(x: 750, y: 400)), generation: t.generation, pick(f), now: 1.3)
+        // 800x800 box of 1000x900: 71%, output unchanged, so only the keyboard requery.
+        XCTAssertEqual(t.window(id: 1, size: CGSize(width: 1000, height: 900), appeared: -10, now: 2),
+                       [.query(.keyboard, generation: t.generation)])
+        XCTAssertEqual(t.followPanel, f)
+        XCTAssertEqual(t.pointerPanel, left)
+    }
+    func testCopyBoundsSurviveResize() {
+        let t = started()
+        _ = keyboard(t, .failure(.blocked), now: 0.5)
+        let copy = CGRect(x: 300, y: 0, width: 600, height: 800)
+        XCTAssertEqual(t.frame(frame([], copy: copy), now: 1), [out([copy], .scroll)])
+        XCTAssertEqual(t.window(id: 1, size: CGSize(width: 1000, height: 900), appeared: -10, now: 2),
+                       [.query(.keyboard, generation: t.generation)])
+        // A new window forgets it.
+        XCTAssertEqual(t.window(id: 2, size: win, appeared: -10, now: 3),
+                       [.query(.keyboard, generation: t.generation), out([], .window, window: 2)])
     }
     func testRectsRoundedOutward() {
         let t = started()

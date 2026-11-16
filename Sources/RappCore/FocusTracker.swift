@@ -74,11 +74,14 @@ public final class FocusTracker {
     public func window(id: UInt32?, size: CGSize, appeared: TimeInterval?, now: TimeInterval) -> [Action] {
         self.appeared = appeared
         if id == windowID && size == self.size { return started ? update(lastCause, now: now) : [] }
-        let cause: Cause = id != nil && id == windowID ? .resize : .window
+        let resized = id != nil && id == windowID
         windowID = id
         self.size = size
         generation += 1
-        resetWindowState()
+        // A resize keeps the panels (rects() clips them; rule 4 keeps the pointer panel) and only
+        // drops in-flight answers; a new window starts from nothing.
+        if resized { followAsked = nil } else { resetWindowState() }
+        let cause: Cause = resized ? .resize : .window
         guard started else { return [] }
         return queryKeyboard(cause) + update(cause, now: now)
     }
