@@ -99,7 +99,7 @@ pub struct Worker {
     /// The unread state of this machine's sessions.
     unread: Arc<Mutex<Unread>>,
     events: UnboundedSender<Value>,
-    /// The terminal programs this machine can open a window with, looked up once.
+    /// macOS launcher discovery is unchanged; Linux rechecks the desktop on demand.
     launchers: Vec<String>,
     /// One `open` at a time.
     opening: tokio::sync::Mutex<()>,
@@ -142,7 +142,7 @@ impl Worker {
             token,
             unread: Arc::new(Mutex::new(Unread::new(unix_now()))),
             events,
-            launchers: launch::launchers(),
+            launchers: if cfg!(target_os = "linux") { Vec::new() } else { launch::launchers() },
             opening: Default::default(),
             rescan: tokio::sync::watch::channel(0).0,
         }
@@ -222,13 +222,22 @@ impl Worker {
     /// This machine's sessions and what it offers.
     pub async fn list(&self) -> TermList {
         let statuses = self.pty_statuses().await;
-        TermList { terms: pty_rows(&self.unread, &statuses, unix_now()), hosts: self.hosts() }
+        TermList { terms: pty_rows(&self.unread, &statuses, unix_now()), hosts: self.hosts().await }
     }
 
     /// This machine as a host, with the shells it has now.
-    fn hosts(&self) -> Vec<HostRow> {
+    async fn hosts(&self) -> Vec<HostRow> {
         let shells = self.opts.shells_with.as_ref().map_or_else(installed_shells, |f| f());
-        vec![HostRow { host: None, launchers: self.launchers.clone(), shells }]
+        vec![HostRow { host: None, launchers: self.available_launchers().await, shells }]
+    }
+
+    async fn available_launchers(&self) -> Vec<String> {
+        if cfg!(target_os = "linux") {
+            // The user bus can be unavailable: keep its bounded wait off the I/O runtime.
+            tokio::task::spawn_blocking(launch::launchers).await.unwrap_or_default()
+        } else {
+            self.launchers.clone()
+        }
     }
 
     /// Send the session list now and again whenever it changes, until the other end closes; if terminal sessions
@@ -271,7 +280,7 @@ impl Worker {
                 continue;
             };
             // The shells are looked up on every pass: one installed or removed is a change too.
-            let list = fit(TermList { terms, hosts: self.hosts() });
+            let list = fit(TermList { terms, hosts: self.hosts().await });
             if sent.as_ref() != Some(&list) {
                 reply(w, &serde_json::to_value(&list).expect("a list always serializes")).await?;
                 sent = Some(list);
@@ -310,9 +319,10 @@ impl Worker {
     /// shell, and wait for that `run` to show itself: the id of its session. One at a time, so each wait has only its
     /// own ticket to look for.
     async fn open(&self, shell: Option<&str>, app: &str) -> Result<String, String> {
-        let known = ["Terminal", "iTerm"].contains(&app);
-        if !known || (self.opts.launch_with.is_none() && !self.launchers.iter().any(|l| l == app)) {
-            return Err(UNKNOWN_APP.into());
+        let known = launch::known(app) || (self.opts.launch_with.is_some() && ["Terminal", "iTerm"].contains(&app));
+        if !known { return Err(UNKNOWN_APP.into()); }
+        if self.opts.launch_with.is_none() && !self.available_launchers().await.iter().any(|l| l == app) {
+            return Err("terminal app unavailable: a graphical desktop and installed terminal are required".into());
         }
         let shells = self.opts.shells_with.as_ref().map_or_else(installed_shells, |f| f());
         let found = match shell {
@@ -354,8 +364,10 @@ impl Worker {
     ) -> Result<String, String> {
         let (app, file, with) = (app.to_string(), file.to_path_buf(), self.opts.launch_with.clone());
         let started = tokio::task::spawn_blocking(move || launch::open(&app, &file, with.as_deref())).await;
-        if !matches!(started, Ok(Ok(()))) {
-            return Err("could not open the terminal window".into());
+        match started {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) if e.to_string() == launch::NO_DESKTOP => return Err(launch::NO_DESKTOP.into()),
+            _ => return Err("could not open the terminal window".into()),
         }
         let end = tokio::time::Instant::now() + OPEN_WAIT;
         loop {

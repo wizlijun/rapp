@@ -161,7 +161,12 @@ impl Worker {
     async fn start_launching() -> Worker {
         let dir = short_dir();
         let script = dir.path().join("launch.sh");
-        std::fs::write(&script, "#!/bin/sh\nsleep 20 | script -q /dev/null sh \"$2\" >/dev/null 2>&1 &\n").unwrap();
+        let launch = if cfg!(target_os = "linux") {
+            "#!/bin/sh\nexport RAPP_TEST_COMMAND_FILE=\"$2\"\nsleep 20 | script -q -c 'exec sh \"$RAPP_TEST_COMMAND_FILE\"' /dev/null >/dev/null 2>&1 &\n"
+        } else {
+            "#!/bin/sh\nsleep 20 | script -q /dev/null sh \"$2\" >/dev/null 2>&1 &\n"
+        };
+        std::fs::write(&script, launch).unwrap();
         std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
         Worker::start_with(dir, None, None, Some(&script)).await
     }
@@ -293,12 +298,18 @@ async fn an_unreadable_config_is_refused() {
 
 #[tokio::test]
 async fn watch_sends_a_list_now_then_only_changes() {
-    let w = Worker::start(None).await;
+    let dir = short_dir();
+    let term_dir = dir.path().join("term");
+    rapp_term::pty::local::ensure_dirs(&term_dir).unwrap();
+    let _win = Window::start(&term_dir, &["--name", "w2", "--", "/bin/cat"]);
+    pty::wait_status(&term_dir, "w2").await;
+    // Output before serve starts is already read. A new session started after
+    // serve legitimately changes to unread after 3 s, even without new output.
+    let w = Worker::start_in(dir, None, None).await;
     let mut c = w.connect(&json!({"op": "watch"}), TOKEN).await;
     let first = c.next().await;
-    assert_eq!((&first["terms"], plain(&first["hosts"][0])), (&json!([]), json!({"host": null})), "{first}");
-    let _win = Window::start(&w.pty_dir(), &["--name", "w2", "--", "/bin/cat"]);
-    c.until_list(WAIT, |l| row_named(l, "w2")).await;
+    assert!(row_named(&first, "w2"), "{first}");
+    assert_eq!(plain(&first["hosts"][0]), json!({"host": null}), "{first}");
     // Nothing changes from here, so nothing is sent.
     let more = timeout(Duration::from_secs(3), c.lines.next_line()).await;
     assert!(more.is_err(), "a line with no change: {more:?}");
