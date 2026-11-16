@@ -71,6 +71,10 @@ also available with native per-app windows. Embedded sessions can detach and
 reattach without reconnecting. Text, images, files and typed clipboard data can
 be pasted, transferred, cancelled and pinned; files stream to disk with resume.
 Folders cannot be attached. Linux graphical application/desktop hosting is not implemented.
+Writing panels optionally render inline candidates with Fcitx5's sumicandidates
+addon (org.fcitx.Fcitx.SumiCandidates1). Without that separately installed addon,
+the system candidate window remains available. Rapp does not install or restart
+the input method. Composition and commits remain owned by the local input method.
 Linux can share ports and text terminals. New terminal windows require a graphical
 session, a supported terminal app, and a working systemd user manager.
 They run in separate transient user services and survive a rapp-service restart.
