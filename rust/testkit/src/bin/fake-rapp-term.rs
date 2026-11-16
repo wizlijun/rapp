@@ -2,9 +2,11 @@
 //! (`serve --bind B --port P --token-env VAR --config term.json [--json]`), the same connections (a request
 //! line, then the token line) and the same events (`listening`, `ended`, `exit`) as the real worker.
 //! `term.json` is read afresh for each request and polled by `watch`: `allow:false` answers "terminal sessions
-//! are off". The data: one session `term:tmux:work` here and `term:tmux@<name>:main` on each target; a target
-//! named `down` is unreachable. `view` says hello and echoes every line back. `term.log` next to argv[0]
-//! gets `argv <arguments>` per start, `view <term> <lines>` per view (never the lines) and `watch closed`.
+//! are off". The data: one session `term:pty:work`, and one `term:pty:<key>` for each key in `term.json`'s
+//! `fake_rows`; one host with the launcher `Terminal` and the shell `zsh`. `open` answers `term:pty:opened`,
+//! `rename` `{"ok":true}`. `view` says hello and echoes every line back. `term.log` next to argv[0] gets
+//! `argv <arguments>` per start, `view <term> <lines>` per view (never the lines), `open <request>`,
+//! `rename <request>` and `watch closed`.
 
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -94,30 +96,15 @@ fn config(path: &str) -> (String, Result<Value, &'static str>) {
     (text, v)
 }
 
-fn row(host: Option<&str>, name: &str) -> Value {
-    let id = match host {
-        Some(h) => format!("term:tmux@{h}:{name}"),
-        None => format!("term:tmux:{name}"),
-    };
-    json!({"id":id,"host":host,"name":name,"command":"bash","panes":1,"attached":0,"activity":0,"dead":false,"unread":false})
+fn row(key: &str) -> Value {
+    json!({"id":format!("term:pty:{key}"),"host":null,"name":key,"command":"bash","panes":1,"attached":0,"activity":0,"dead":false,"unread":false})
 }
 
 fn term_list(cfg: &Value) -> Value {
-    let (mut terms, mut hosts) = (vec![row(None, "work")], vec![json!({"host":null})]);
-    for t in cfg["targets"].as_array().cloned().unwrap_or_default() {
-        let name = t["name"].as_str().unwrap_or_default();
-        let mut h = json!({"host":name,"target":t["target"]});
-        if !t["tmux"].is_null() {
-            h["tmux"] = t["tmux"].clone();
-        }
-        if name == "down" {
-            h["error"] = json!("unreachable");
-        } else {
-            terms.push(row(Some(name), "main"));
-        }
-        hosts.push(h);
-    }
-    json!({"terms":terms,"hosts":hosts})
+    let mut terms = vec![row("work")];
+    terms.extend(cfg["fake_rows"].as_array().into_iter().flatten().filter_map(Value::as_str).map(row));
+    let host = json!({"host":null,"launchers":["Terminal"],"shells":[{"name":"zsh","path":"/bin/zsh","default":true}]});
+    json!({"terms":terms,"hosts":[host]})
 }
 
 fn send(s: &mut TcpStream, v: &Value) -> bool {
@@ -151,14 +138,23 @@ fn conn(mut s: TcpStream, token: &str, config_path: &str) {
                 send(&mut s, &json!({"error":e}));
             }
         },
-        Some("new") => {
+        Some("open") => {
             let v = match cfg {
                 Err(e) => json!({"error":e}),
-                Ok(_) => match (req["name"].as_str().or(req["command"][0].as_str()), req["host"].as_str()) {
-                    (None, _) => json!({"error":"no command"}),
-                    (Some(n), None) => json!({"ok":true,"id":format!("term:tmux:{n}")}),
-                    (Some(n), Some(h)) => json!({"ok":true,"id":format!("term:tmux@{h}:{n}")}),
-                },
+                Ok(_) => {
+                    log(&format!("open {req}"));
+                    json!({"id":"term:pty:opened"})
+                }
+            };
+            send(&mut s, &v);
+        }
+        Some("rename") => {
+            let v = match cfg {
+                Err(e) => json!({"error":e}),
+                Ok(_) => {
+                    log(&format!("rename {req}"));
+                    json!({"ok":true})
+                }
             };
             send(&mut s, &v);
         }

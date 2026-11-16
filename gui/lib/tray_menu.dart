@@ -21,7 +21,7 @@ List<MenuItem> trayItems(List<SessionEntry> sessions) {
       for (final e in g.entries)
         MenuItem(
           key: '$sessionKeyPrefix${e.key}',
-          label: '    ${e.appName}${e.lamp == Lamp.disconnected ? '（已断开）' : ''}',
+          label: '    ${e.title}${e.lamp == Lamp.disconnected ? '（已断开）' : ''}',
         ),
     ],
     MenuItem.separator(),

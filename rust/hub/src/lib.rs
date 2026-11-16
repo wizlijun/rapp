@@ -323,7 +323,7 @@ impl Hub {
                 self.net_suspect();
                 return Ok(None);
             }
-            Some(c @ ("terms" | "add_term_target" | "remove_term_target" | "new_term" | "open_term")) => {
+            Some(c @ ("terms" | "open_term" | "rename_term")) => {
                 terms::command(self, c, v).await?
             }
             _ => bail!("unknown cmd"),

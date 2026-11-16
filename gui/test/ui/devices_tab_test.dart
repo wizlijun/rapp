@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/pages/app_profile_page.dart';
+import 'package:rapp/ui/controls.dart';
 import 'package:rapp/ui/devices_tab.dart';
 import 'package:rapp/ui/lamp.dart';
 import 'package:rapp/ui/main_state.dart';
@@ -23,11 +24,10 @@ void main() {
   String? openError;
   bool offline = false;
   bool holdApps = false;
-  String? addTargetError;
   var termsOff = false;
-  String? removeTargetError;
-  String? newTermError;
   String? openTermError;
+  var holdOpenTerm = false;
+  String? renameError;
   var termHosts = <Map<String, dynamic>>[{'host': null}];
   var termRows = <Map<String, dynamic>>[];
   List<Map<String, dynamic>>? remoteApps;
@@ -39,11 +39,10 @@ void main() {
     openError = null;
     offline = false;
     holdApps = false;
-    addTargetError = null;
     termsOff = false;
-    removeTargetError = null;
-    newTermError = null;
     openTermError = null;
+    holdOpenTerm = false;
+    renameError = null;
     termHosts = [{'host': null}];
     termRows = [];
     remoteApps = null;
@@ -94,21 +93,14 @@ void main() {
         case 'terms':
           if (termsOff) return t.emit({'event': 'terms', 'req': req, 'id': cmd['id'], 'off': true});
           t.emit({'event': 'terms', 'req': req, 'id': cmd['id'], 'path': 'lan', 'terms': termRows, 'hosts': termHosts});
-        case 'add_term_target':
-          if (addTargetError != null) return t.emit({'event': 'error', 'req': req, 'error': addTargetError});
-          termHosts.add({'host': cmd['name'], 'target': cmd['target']});
-          t.emit({'event': 'term_targets', 'req': req, 'id': cmd['id'], 'targets': []});
-        case 'remove_term_target':
-          if (removeTargetError != null) return t.emit({'event': 'error', 'req': req, 'error': removeTargetError});
-          termHosts.removeWhere((h) => h['host'] == cmd['name']);
-          t.emit({'event': 'term_targets', 'req': req, 'id': cmd['id'], 'targets': []});
-        case 'new_term':
-          if (newTermError != null) return t.emit({'event': 'error', 'req': req, 'error': newTermError});
-          t.emit({'event': 'term_created', 'req': req, 'id': cmd['id'], 'term': 'term:tmux:new'});
         case 'open_term':
+          if (holdOpenTerm) return;
           if (openTermError != null) return t.emit({'event': 'error', 'req': req, 'error': openTermError});
           termRows = [...termRows, {'id': 'term:pty:c', 'name': 'c', 'command': 'claude', 'activity': 0}];
           t.emit({'event': 'term_created', 'req': req, 'id': cmd['id'], 'term': 'term:pty:c'});
+        case 'rename_term':
+          if (renameError != null) return t.emit({'event': 'error', 'req': req, 'error': renameError});
+          t.emit({'event': 'term_renamed', 'req': req, 'id': cmd['id'], 'term': cmd['term']});
         case 'set_route':
           for (final h in hosts) {
             if (h['id'] != cmd['id']) continue;
@@ -566,31 +558,31 @@ void main() {
     await pumpTab(tester);
     await selectMini(tester);
     await emitTerms(tester, [
-      termRow('term:tmux:work', 'work', 'claude', panes: 2, unread: true),
-      termRow('term:tmux@gpu1:train', 'train', 'python', host: 'gpu1', panes: 3, activity: now() - 2),
-      termRow('term:tmux:old', 'old', 'sh', dead: true),
-      termRow('term:tmux:idle', 'idle', 'zsh', activity: now() - 30),
+      termRow('term:pty:work', 'work', 'claude', panes: 2, unread: true),
+      termRow('term:pty:train', 'train', 'python', activity: now() - 2),
+      termRow('term:pty:old', 'old', 'sh', dead: true),
+      termRow('term:pty:idle', 'idle', 'zsh', activity: now() - 30),
     ]);
     expect(find.text('终端'), findsOneWidget);
-    expect(find.text('train @gpu1'), findsOneWidget);
-    expect(find.textContaining('3 个面板'), findsOneWidget);
+    expect(find.text('train'), findsOneWidget);
+    expect(find.textContaining('个面板'), findsNothing);
     expect(find.text('刚刚有输出'), findsOneWidget);
     expect(find.text('未读'), findsOneWidget);
     expect(find.text('已退出'), findsOneWidget);
     expect(find.text('不到 1 分钟没动静'), findsOneWidget);
-    await tester.ensureVisible(find.byKey(const Key('open-term:tmux:work')));
-    await tester.tap(find.byKey(const Key('open-term:tmux:work')));
+    await tester.ensureVisible(find.byKey(const Key('open-term:pty:work')));
+    await tester.tap(find.byKey(const Key('open-term:pty:work')));
     for (var i = 0; i < 3; i++) {
       await tester.pump(const Duration(milliseconds: 50));
     }
     final open = t.sent.lastWhere((m) => m['cmd'] == 'open');
-    expect((open['id'], open['app']), ('111', 'term:tmux:work'));
+    expect((open['id'], open['app']), ('111', 'term:pty:work'));
     term.dispose();
   });
 
   test('the status words of a terminal row', () {
     TermRow row(int ago, {bool dead = false, bool unread = false}) =>
-        TermRow('term:tmux:w', 'w', 'sh', null, 1, 1, 1000 - ago, dead, unread);
+        TermRow('term:pty:w', 'w', 'sh', null, 1, 1, 1000 - ago, dead, unread);
     expect(termStatus(row(5), 1000), '刚刚有输出');
     expect(termStatus(row(10), 1000), '不到 1 分钟没动静');
     expect(termStatus(row(59), 1000), '不到 1 分钟没动静');
@@ -624,181 +616,26 @@ void main() {
     expect(find.text('这台设备上现在没有终端会话。'), findsOneWidget);
   });
 
-  Future<void> fillHost(WidgetTester tester, {String tmux = ''}) async {
-    await tester.ensureVisible(find.byKey(const Key('add-ssh-host')));
-    await tester.tap(find.byKey(const Key('add-ssh-host')));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const Key('ssh-name')), 'gpu1');
-    await tester.enterText(find.byKey(const Key('ssh-target')), 'me@gpu1');
-    if (tmux.isNotEmpty) await tester.enterText(find.byKey(const Key('ssh-tmux')), tmux);
-    await tester.tap(find.byKey(const Key('ssh-add')));
-    await tester.pumpAndSettle();
-  }
-
-  testWidgets('adding an SSH host sends add_term_target and refreshes', (tester) async {
-    await pumpTab(tester);
-    await selectMini(tester);
-    await emitTerms(tester, []);
-    t.sent.clear();
-    await fillHost(tester);
-    final add = t.sent.firstWhere((m) => m['cmd'] == 'add_term_target');
-    expect(add, {'cmd': 'add_term_target', 'id': '111', 'name': 'gpu1', 'target': 'me@gpu1', 'req': anything});
-    expect(t.sent.map((m) => m['cmd']).toList().sublist(t.sent.indexOf(add)), ['add_term_target', 'terms']);
-    expect(find.byKey(const Key('ssh-name')), findsNothing);
-    expect(find.text('gpu1 · me@gpu1'), findsOneWidget);
-  });
-
-  testWidgets('a tmux path is sent when filled, and a refused host keeps the dialog with the hub words', (tester) async {
-    addTargetError = 'bad target: me@gpu1';
-    await pumpTab(tester);
-    await selectMini(tester);
-    await emitTerms(tester, []);
-    await fillHost(tester, tmux: '/opt/tmux');
-    expect(t.sent.lastWhere((m) => m['cmd'] == 'add_term_target')['tmux'], '/opt/tmux');
-    expect(find.byKey(const Key('ssh-name')), findsOneWidget);
-    expect(find.text('bad target: me@gpu1'), findsOneWidget);
-    await tester.tap(find.byKey(const Key('ssh-cancel')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('ssh-name')), findsNothing);
-  });
-
-  testWidgets('a host that cannot be reached says why and can be removed', (tester) async {
+  testWidgets('no tmux or SSH controls', (tester) async {
+    termRows = [
+      {'id': 'term:pty:a', 'name': 'a', 'command': 'zsh', 'activity': 0},
+      {'id': 'term:tmux:old', 'name': 'old', 'command': 'zsh', 'activity': 0},
+    ];
     termHosts = [
-      {'host': null},
-      {'host': 'gpu1', 'target': 'me@gpu1', 'error': 'connection refused'},
+      {'host': null, 'launchers': ['Terminal']},
+      {'host': 'gpu1', 'target': 'me@gpu1', 'tmux': '/x/tmux'},
     ];
     await pumpTab(tester);
     await selectMini(tester);
-    await emitTerms(tester, []);
-    expect(find.textContaining('gpu1 · me@gpu1'), findsOneWidget);
-    expect(find.textContaining('连不上：connection refused'), findsOneWidget);
-    await tester.ensureVisible(find.byKey(const Key('remove-host-gpu1')));
-    await tester.tap(find.byKey(const Key('remove-host-gpu1')));
-    await tester.pumpAndSettle();
-    final rm = t.sent.lastWhere((m) => m['cmd'] == 'remove_term_target');
-    expect((rm['id'], rm['name']), ('111', 'gpu1'));
-    expect(t.sent.last['cmd'], 'terms');
-    expect(find.byKey(const Key('remove-host-gpu1')), findsNothing);
-  });
-
-  testWidgets('a failed remove of an SSH host says so with the hub words and keeps the host', (tester) async {
-    removeTargetError = 'no such host: gpu1';
-    termHosts = [
-      {'host': null},
-      {'host': 'gpu1', 'target': 'me@gpu1'},
-    ];
-    await pumpTab(tester);
-    await selectMini(tester);
-    await emitTerms(tester, []);
-    await tester.ensureVisible(find.byKey(const Key('remove-host-gpu1')));
-    await tester.tap(find.byKey(const Key('remove-host-gpu1')));
-    await tester.pumpAndSettle();
-    expect(find.text('移除失败：no such host: gpu1'), findsOneWidget);
-    expect(find.byKey(const Key('remove-host-gpu1')), findsOneWidget);
-  });
-
-  testWidgets('a failed remove shows on its own device only, until its list comes again', (tester) async {
-    removeTargetError = 'no such host: gpu1';
-    termHosts = [
-      {'host': null},
-      {'host': 'gpu1', 'target': 'me@gpu1'},
-    ];
-    await pumpTab(tester);
-    await selectMini(tester);
-    await emitTerms(tester, []);
-    await tester.ensureVisible(find.byKey(const Key('remove-host-gpu1')));
-    await tester.tap(find.byKey(const Key('remove-host-gpu1')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('remove-host-error')), findsOneWidget);
-    // Another device's list coming again leaves it; this device's own clears it.
-    t.emit({'event': 'terms', 'id': '222', 'path': 'lan', 'terms': [], 'hosts': termHosts});
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('remove-host-error')), findsOneWidget);
-    await emitTerms(tester, []);
-    expect(find.byKey(const Key('remove-host-error')), findsNothing);
-
-    await tester.ensureVisible(find.byKey(const Key('remove-host-gpu1')));
-    await tester.tap(find.byKey(const Key('remove-host-gpu1')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('remove-host-error')), findsOneWidget);
-    // The device chips ride at the top of the scrolling tab; the earlier ensureVisible
-    // scrolled far enough (a 桌面 app row makes the body taller) that the chip row left
-    // the viewport and was disposed. Bring device-222 back before tapping it.
-    await tester.scrollUntilVisible(
-      find.byKey(const Key('device-222')), -300.0,
-      scrollable: find.byType(Scrollable).first,
-    );
-    await tester.tap(find.byKey(const Key('device-222')));
-    await tester.pumpAndSettle();
-    expect(find.text('终端'), findsOneWidget);
-    expect(find.byKey(const Key('remove-host-error')), findsNothing);
-  });
-
-  Future<void> openNewTerm(WidgetTester tester) async {
-    await pumpTab(tester);
-    await selectMini(tester);
-    await emitTerms(tester, []);
-    t.sent.clear();
-    await tester.ensureVisible(find.byKey(const Key('new-term')));
-    await tester.tap(find.byKey(const Key('new-term')));
-    await tester.pumpAndSettle();
-  }
-
-  Future<void> submitNewTerm(WidgetTester tester) async {
-    await tester.tap(find.text('新开'));
-    await tester.pumpAndSettle();
-  }
-
-  testWidgets('new terminal: the command goes as one argument, no host or name, then it opens', (tester) async {
-    await openNewTerm(tester);
-    await tester.enterText(find.byKey(const Key('new-term-command')), '  claude --resume ');
-    await submitNewTerm(tester);
-    final m = t.sent.firstWhere((m) => m['cmd'] == 'new_term');
-    expect(m, {'cmd': 'new_term', 'id': '111', 'command': ['claude --resume'], 'cols': 120, 'rows': 40, 'req': anything});
-    expect(t.sent.map((m) => m['cmd']), containsAllInOrder(['new_term', 'terms', 'open']));
-    expect(t.sent.lastWhere((m) => m['cmd'] == 'open')['app'], 'term:tmux:new');
-    expect(find.byKey(const Key('new-term-command')), findsNothing);
-  });
-
-  testWidgets('new terminal: an empty command is an empty list, and a name is sent', (tester) async {
-    await openNewTerm(tester);
-    await tester.enterText(find.byKey(const Key('new-term-name')), ' build ');
-    await submitNewTerm(tester);
-    final m = t.sent.firstWhere((m) => m['cmd'] == 'new_term');
-    expect(m['command'], isEmpty);
-    expect((m['name'], m.containsKey('host')), ('build', false));
-  });
-
-  testWidgets('new terminal: an SSH host is chosen from the where dropdown', (tester) async {
-    termHosts = [
-      {'host': null},
-      {'host': 'gpu1', 'target': 'me@gpu1'},
-    ];
-    await openNewTerm(tester);
-    await tester.tap(find.byKey(const Key('new-term-where')));
-    await tester.pumpAndSettle();
-    expect(find.text('本机'), findsWidgets);
-    await tester.tap(find.text('gpu1').last);
-    await tester.pumpAndSettle();
-    await submitNewTerm(tester);
-    final m = t.sent.firstWhere((m) => m['cmd'] == 'new_term');
-    expect((m['host'], m.containsKey('name')), ('gpu1', false));
-  });
-
-  testWidgets('new terminal: a refusal stays in the dialog with the hub words', (tester) async {
-    newTermError = 'no tmux on gpu1';
-    await openNewTerm(tester);
-    await submitNewTerm(tester);
-    expect(find.text('no tmux on gpu1'), findsOneWidget);
-    expect(find.byKey(const Key('new-term-command')), findsOneWidget);
-    expect(t.sent.any((m) => m['cmd'] == 'open'), isFalse);
-  });
-
-  testWidgets('new terminal: no button while terminals are off', (tester) async {
-    termsOff = true;
-    await pumpTab(tester);
-    await selectMini(tester);
-    expect(find.byKey(const Key('new-term')), findsNothing);
+    await emitTerms(tester, termRows, hosts: termHosts);
+    expect(find.byKey(const Key('term-term:pty:a')), findsOneWidget);
+    expect(find.byKey(const Key('term-term:tmux:old')), findsNothing);
+    for (final k in ['new-term', 'add-ssh-host', 'remove-host-gpu1']) {
+      expect(find.byKey(Key(k)), findsNothing, reason: k);
+    }
+    expect(find.textContaining('tmux'), findsNothing);
+    expect(find.textContaining('SSH'), findsNothing);
+    expect(find.textContaining('gpu1'), findsNothing);
   });
 
   List<Map<String, dynamic>> appsWithTerminal() => [
@@ -840,16 +677,6 @@ void main() {
     expect(find.text('只能用画面看'), findsNothing);
   });
 
-  testWidgets('the terms entry shows with a tmux error', (tester) async {
-    await pumpTab(tester);
-    await selectMini(tester);
-    await emitTerms(tester, [termRow('term:pty:claude', 'claude', 'claude')],
-        hosts: [{'host': null, 'error': 'tmux not found'}]);
-    expect(find.byKey(const Key('app-terms:')), findsOneWidget);
-    expect(find.text('终端'), findsOneWidget);
-    expect(find.byKey(const Key('term-term:pty:claude')), findsOneWidget);
-  });
-
   testWidgets('the 终端 row opens the entry and can be a favourite', (tester) async {
     s.prefs.termOpen['111'] = 'pixels';
     await pumpTab(tester);
@@ -865,79 +692,156 @@ void main() {
     expect(t.sent.lastWhere((m) => m['cmd'] == 'open')['app'], 'com.apple.Terminal');
   });
 
-  testWidgets('rows say 文本 or tmux', (tester) async {
+  testWidgets('a row shows no kind word, only the command', (tester) async {
     await pumpTab(tester);
     await selectMini(tester);
-    await emitTerms(tester, [termRow('term:pty:claude', 'claude', 'claude'), termRow('term:tmux:work', 'work', 'zsh')]);
-    expect(find.descendant(of: find.byKey(const Key('term-term:pty:claude')), matching: find.text('文本')), findsOneWidget);
-    expect(find.descendant(of: find.byKey(const Key('term-term:tmux:work')), matching: find.text('tmux')), findsOneWidget);
-    expect(find.descendant(of: find.byKey(const Key('term-term:tmux:work')), matching: find.text('文本')), findsNothing);
+    await emitTerms(tester, [termRow('term:pty:claude', 'claude', 'claude'), termRow('term:pty:work', 'work', 'zsh')]);
+    final row = find.byKey(const Key('term-term:pty:work'));
+    expect(find.descendant(of: row, matching: find.text('zsh')), findsOneWidget);
+    expect(find.descendant(of: row, matching: find.text('文本')), findsNothing);
+    expect(find.descendant(of: row, matching: find.text('tmux')), findsNothing);
   });
+
+  const shellsZshBash = [
+    {'name': 'zsh', 'path': '/bin/zsh', 'default': true},
+    {'name': 'bash', 'path': '/bin/bash'},
+  ];
 
   // On a tab already showing mini.
-  Future<void> openNewText(WidgetTester tester, List<String> launchers) async {
-    await emitTerms(tester, [], hosts: [{'host': null, 'launchers': launchers}]);
+  Future<void> showHost(WidgetTester tester, List<String> launchers, {List<Map<String, dynamic>>? shells}) async {
+    await emitTerms(tester, [], hosts: [
+      {'host': null, 'launchers': launchers, 'shells': ?shells}
+    ]);
     t.sent.clear();
-    await tester.ensureVisible(find.byKey(const Key('new-text-term')));
-    await tester.tap(find.byKey(const Key('new-text-term')));
-    await tester.pumpAndSettle();
   }
 
-  testWidgets('新开文本终端 only when the host can open one; the app dropdown only with two', (tester) async {
+  RappButton shellButton(WidgetTester tester, String key) => tester.widget<RappButton>(find.byKey(Key(key)));
+
+  testWidgets('one button per listed shell, default first', (tester) async {
     await pumpTab(tester);
     await selectMini(tester);
-    await emitTerms(tester, []);
-    expect(find.byKey(const Key('new-term')), findsOneWidget);
-    expect(find.text('新开 tmux 会话…'), findsOneWidget);
+    await showHost(tester, ['Terminal'], shells: shellsZshBash);
+    expect(find.text('新开'), findsOneWidget);
+    expect(find.byKey(const Key('new-shell-zsh')), findsOneWidget);
+    expect(find.byKey(const Key('new-shell-bash')), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const Key('new-shell-zsh')), matching: find.text('zsh')), findsOneWidget);
+    expect(tester.getTopLeft(find.byKey(const Key('new-shell-zsh'))).dx,
+        lessThan(tester.getTopLeft(find.byKey(const Key('new-shell-bash'))).dx));
     expect(find.byKey(const Key('new-text-term')), findsNothing);
-
-    await openNewText(tester, ['Terminal']);
-    expect(find.text('新开文本终端'), findsOneWidget);
-    expect(find.text('目录（空着就是家目录）'), findsOneWidget);
-    expect(find.text('命令（如 claude；空着就是 shell）'), findsOneWidget);
-    expect(find.text('名字（可不填）'), findsOneWidget);
-    expect(find.text('用哪个终端 app'), findsNothing);
-    await tester.tap(find.text('取消'));
-    await tester.pumpAndSettle();
-    expect(find.text('新开文本终端'), findsNothing);
-
-    await openNewText(tester, ['Terminal', 'iTerm']);
-    expect(find.text('用哪个终端 app'), findsOneWidget);
-    await tester.tap(find.byKey(const Key('new-text-app')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('iTerm').last);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('新开'));
-    await tester.pumpAndSettle();
-    expect(t.sent.firstWhere((m) => m['cmd'] == 'open_term')['app'], 'iTerm');
   });
 
-  testWidgets('the dialog sends only filled fields and keeps itself open on failure', (tester) async {
-    termHosts = [{'host': null, 'launchers': ['Terminal']}];
+  testWidgets('tapping a shell opens it with the chosen app', (tester) async {
     await pumpTab(tester);
     await selectMini(tester);
-    await openNewText(tester, ['Terminal']);
-    await tester.enterText(find.byKey(const Key('new-text-command')), ' claude ');
-    await tester.tap(find.text('新开'));
+    await showHost(tester, ['Terminal', 'iTerm'], shells: shellsZshBash);
+    await tester.ensureVisible(find.byKey(const Key('term-app-iTerm')));
+    await tester.tap(find.byKey(const Key('term-app-iTerm')));
+    await tester.pump();
+    expect(s.prefs.termApp, {'111': 'iTerm'});
+    await tester.ensureVisible(find.byKey(const Key('new-shell-bash')));
+    await tester.tap(find.byKey(const Key('new-shell-bash')));
     await tester.pumpAndSettle();
     final m = t.sent.firstWhere((m) => m['cmd'] == 'open_term');
-    expect(m, {'cmd': 'open_term', 'id': '111', 'command': 'claude', 'app': 'Terminal', 'req': anything});
+    expect(m, {'cmd': 'open_term', 'id': '111', 'shell': '/bin/bash', 'app': 'iTerm', 'req': anything});
     expect(t.sent.map((m) => m['cmd']), containsAllInOrder(['open_term', 'terms', 'open']));
     expect(t.sent.lastWhere((m) => m['cmd'] == 'open')['app'], 'term:pty:c');
-    expect(find.text('新开文本终端'), findsNothing);
+  });
 
-    openTermError = 'no such directory: /x';
-    await tester.ensureVisible(find.byKey(const Key('new-text-term')));
-    await tester.tap(find.byKey(const Key('new-text-term')));
+  testWidgets('the 终端 app row shows only with two launchers', (tester) async {
+    await pumpTab(tester);
+    await selectMini(tester);
+    await showHost(tester, ['Terminal'], shells: shellsZshBash);
+    expect(find.text('终端 app'), findsNothing);
+    expect(find.byKey(const Key('term-app-Terminal')), findsNothing);
+    await showHost(tester, ['Terminal', 'iTerm'], shells: shellsZshBash);
+    expect(find.text('终端 app'), findsOneWidget);
+    expect(find.byKey(const Key('term-app-Terminal')), findsOneWidget);
+    expect(find.byKey(const Key('term-app-iTerm')), findsOneWidget);
+  });
+
+  testWidgets('an old device gets one 默认 shell button', (tester) async {
+    await pumpTab(tester);
+    await selectMini(tester);
+    await showHost(tester, ['Terminal']);
+    expect(find.text('默认 shell'), findsOneWidget);
+    await tester.ensureVisible(find.byKey(const Key('new-shell-default')));
+    await tester.tap(find.byKey(const Key('new-shell-default')));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const Key('new-text-cwd')), '/x');
-    await tester.enterText(find.byKey(const Key('new-text-name')), 'n');
-    await tester.tap(find.text('新开'));
+    final m = t.sent.firstWhere((m) => m['cmd'] == 'open_term');
+    expect(m, {'cmd': 'open_term', 'id': '111', 'app': 'Terminal', 'req': anything});
+  });
+
+  testWidgets('no new row without launchers', (tester) async {
+    await pumpTab(tester);
+    await selectMini(tester);
+    await showHost(tester, [], shells: shellsZshBash);
+    expect(find.text('新开'), findsNothing);
+    expect(find.text('终端 app'), findsNothing);
+    expect(find.byKey(const Key('new-shell-zsh')), findsNothing);
+  });
+
+  testWidgets('a refused open shows its words under the row; the button is busy meanwhile', (tester) async {
+    holdOpenTerm = true;
+    await pumpTab(tester);
+    await selectMini(tester);
+    await showHost(tester, ['Terminal'], shells: shellsZshBash);
+    await tester.ensureVisible(find.byKey(const Key('new-shell-bash')));
+    await tester.tap(find.byKey(const Key('new-shell-bash')));
+    await tester.pump();
+    expect(shellButton(tester, 'new-shell-bash').onPressed, isNull);
+    t.emit({'event': 'error', 'req': t.sent.lastWhere((m) => m['cmd'] == 'open_term')['req'], 'error': 'this shell is not found any more'});
     await tester.pumpAndSettle();
-    final m2 = t.sent.lastWhere((m) => m['cmd'] == 'open_term');
-    expect((m2['cwd'], m2['name'], m2.containsKey('command')), ('/x', 'n', false));
-    expect(find.text('新开文本终端'), findsOneWidget);
-    expect(find.text('no such directory: /x'), findsOneWidget);
+    expect(tester.widget<Text>(find.byKey(const Key('new-shell-error'))).data, 'this shell is not found any more');
+    expect(shellButton(tester, 'new-shell-bash').onPressed, isNotNull);
+    expect(find.byKey(const Key('new-text-term')), findsNothing);
+  });
+
+  Future<void> showWork(WidgetTester tester, {List<Map<String, dynamic>>? shells = shellsZshBash}) async {
+    await pumpTab(tester);
+    await selectMini(tester);
+    await emitTerms(tester, [termRow('term:pty:work', 'work', 'claude')],
+        hosts: [{'host': null, 'launchers': ['Terminal'], 'shells': ?shells}]);
+    t.sent.clear();
+  }
+
+  Future<void> renameTo(WidgetTester tester, String text) async {
+    await tester.ensureVisible(find.byKey(const Key('term-name-term:pty:work')));
+    await tester.tap(find.byKey(const Key('term-name-term:pty:work')));
+    await tester.pump();
+    await tester.enterText(find.descendant(of: find.byKey(const Key('term-name-term:pty:work')), matching: find.byType(TextField)), text);
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    await tester.pump();
+  }
+
+  testWidgets('renaming a row sends rename_term with the trimmed name', (tester) async {
+    await showWork(tester);
+    await renameTo(tester, '  build  ');
+    final m = t.sent.firstWhere((m) => m['cmd'] == 'rename_term');
+    expect(m, {'cmd': 'rename_term', 'id': '111', 'term': 'term:pty:work', 'name': 'build', 'req': anything});
+    expect(t.sent.map((m) => m['cmd']), containsAllInOrder(['rename_term', 'terms']));
+    expect(find.byKey(const Key('rename-error')), findsNothing);
+  });
+
+  testWidgets('an invalid name is not sent and the old name stays', (tester) async {
+    await showWork(tester);
+    await renameTo(tester, '   ');
+    expect(t.sent.where((m) => m['cmd'] == 'rename_term'), isEmpty);
+    expect(find.text('work'), findsOneWidget);
+  });
+
+  testWidgets('a refusal shows under the list', (tester) async {
+    renameError = 'this text terminal is too old to rename';
+    await showWork(tester);
+    await renameTo(tester, 'build');
+    expect(tester.widget<Text>(find.byKey(const Key('rename-error'))).data, 'this text terminal is too old to rename');
+    expect(find.text('work'), findsOneWidget);
+  });
+
+  testWidgets('an old device has no inline edit', (tester) async {
+    await showWork(tester, shells: null);
+    expect(find.byKey(const Key('term-name-term:pty:work')), findsNothing);
+    expect(find.text('work'), findsOneWidget);
   });
 
   testWidgets('打开方式 is saved per device', (tester) async {

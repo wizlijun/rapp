@@ -78,12 +78,6 @@ class TermPasted extends TermOut {
   const TermPasted(this.ok, this.error);
 }
 
-/// The pane of a window opened by `new_window`.
-class TermWindowOpened extends TermOut {
-  final String pane;
-  const TermWindowOpened(this.pane);
-}
-
 class TermError extends TermOut {
   final String error;
   const TermError(this.error);
@@ -176,8 +170,6 @@ TermOut? _parse(Map m) {
       );
     case 'pasted':
       return TermPasted(_req<bool>(m, 'ok'), _opt<String>(m, 'error'));
-    case 'window_opened':
-      return TermWindowOpened(_req<String>(m, 'pane'));
     case 'error':
       return TermError(_req<String>(m, 'error'));
   }
@@ -188,12 +180,10 @@ Map<String, Object?> viewMsg(String? pane, int cols, int rows) => {'t': 'view', 
 Map<String, Object?> ackMsg(int rev) => {'t': 'ack', 'rev': rev};
 Map<String, Object?> historyReq(String pane, int before, int lines) =>
     {'t': 'history', 'pane': pane, 'before': before, 'lines': lines};
-Map<String, Object?> refitMsg(String pane, int cols, int rows) => {'t': 'refit', 'pane': pane, 'cols': cols, 'rows': rows};
 
 // Input lines, JSON-encoded without their newline.
 String keysMsg(String pane, List<String> keys) => jsonEncode({'t': 'keys', 'pane': pane, 'keys': keys});
 String typeMsg(String pane, String text) => jsonEncode({'t': 'type', 'pane': pane, 'text': text});
-String newWindowMsg(String pane) => jsonEncode({'t': 'new_window', 'pane': pane});
 
 /// Raw UTF-8 bytes of paste text in one `text` line.
 const int pasteChunk = 16384;
@@ -233,26 +223,7 @@ List<String> textMsgs(String pane, String data, {bool enter = false}) {
   return out;
 }
 
-/// Pane id -> tab text: `<window> <command>`, or `<window>.<pane> <command>` when the window has several panes;
-/// numbered from 1 in the device's order; dead panes get ` · 已退出`. Old devices send no `win`: then the window name groups.
-Map<String, String> tabLabels(List<TermPane> panes) {
-  String key(TermPane p) => p.win.isEmpty ? p.window : p.win;
-  final order = <String>[];
-  final members = <String, List<TermPane>>{};
-  for (final p in panes) {
-    (members[key(p)] ??= (() {
-      order.add(key(p));
-      return <TermPane>[];
-    })())
-        .add(p);
-  }
-  final out = <String, String>{};
-  for (final p in panes) {
-    final k = key(p);
-    final w = order.indexOf(k) + 1;
-    final group = members[k]!;
-    final head = group.length > 1 ? '$w.${group.indexOf(p) + 1}' : '$w';
-    out[p.id] = '$head ${p.command}${p.dead ? ' · 已退出' : ''}';
-  }
-  return out;
-}
+/// Pane id -> tab text: the command, with ` · 已退出` for a dead pane.
+Map<String, String> tabLabels(List<TermPane> panes) => {
+      for (final p in panes) p.id: '${p.command}${p.dead ? ' · 已退出' : ''}',
+    };

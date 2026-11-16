@@ -8,9 +8,11 @@ use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Mutex;
 use tokio::sync::{mpsc, watch};
 
-/// What a `run` is called and what it runs; fixed for its life.
+/// What a `run` is called and what it runs. Only the name changes, by a rename.
 pub struct Meta {
-    pub name: String,
+    /// The stable id of the session, made at start.
+    pub key: String,
+    pub name: Mutex<String>,
     pub command: String,
     pub pid: u32,
     pub ticket: Option<String>,
@@ -32,12 +34,18 @@ pub struct Shared {
     pub activity: AtomicU64,
 }
 
+impl Meta {
+    pub fn name(&self) -> String {
+        self.name.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+}
+
 impl Shared {
     pub fn status(&self) -> local::Status {
         let s = self.emu.lock().unwrap_or_else(|e| e.into_inner()).screen();
         local::Status {
             v: local::LOCAL_V,
-            name: self.meta.name.clone(),
+            name: self.meta.name(),
             command: self.meta.command.clone(),
             cols: s.cols,
             rows: s.rows,
@@ -45,6 +53,7 @@ impl Shared {
             viewers: self.viewers.load(Ordering::Relaxed),
             pid: self.meta.pid,
             ticket: self.meta.ticket.clone(),
+            key: Some(self.meta.key.clone()),
         }
     }
 }

@@ -227,6 +227,14 @@ impl Viewer {
         Viewer { r: BufReader::new(r), w, cols: 0, rows: 0, lines: BTreeMap::new(), mid: false }
     }
 
+    /// Connect to the run behind `sock`, whatever it is called.
+    pub async fn connect_op_at(sock: &Path, dir: &Path, op: &str) -> Viewer {
+        let token = local::token(dir).unwrap();
+        let stream = local::connect(sock, op, &token).await.unwrap();
+        let (r, w) = stream.into_split();
+        Viewer { r: BufReader::new(r), w, cols: 0, rows: 0, lines: BTreeMap::new(), mid: false }
+    }
+
     pub async fn connect(dir: &Path, name: &str) -> Viewer {
         Viewer::connect_op(dir, name, "view").await
     }

@@ -89,11 +89,10 @@ class SessionRow extends StatelessWidget {
     final backdrop = rowBackdrop(entry.lamp, t);
     final border = rowBorder(entry.lamp, t, selected: selected);
     final reason = entry.reason == null ? null : '已断开：${entry.reason}';
-    final pane = entry.paneTitle ?? '';
-    final second = [reason ?? _second, pane].where((s) => s.isNotEmpty).join(' · ');
+    final second = reason ?? _second;
     final status = _status;
     final label = [
-      entry.appName,
+      entry.title,
       // The state word is said once: 「空闲」 and 「连接中」 are both lamp and status.
       if (status != lampWord(entry.lamp)) lampWord(entry.lamp),
       if (status.isNotEmpty) status,
@@ -146,7 +145,7 @@ class SessionRow extends StatelessWidget {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                entry.appName,
+                                entry.title,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(

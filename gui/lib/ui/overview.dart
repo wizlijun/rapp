@@ -317,6 +317,7 @@ class _Column extends StatelessWidget {
                 if (i > 0) const SizedBox(height: 8),
                 _FavoriteBlock(
                   favorite: f,
+                  label: state.labelOf(f),
                   onTap: state.hubUsable && !col.offline ? () => state.openOrSwitch(f.device, f.bundle, f.name) : null,
                 ),
               ],
@@ -341,8 +342,9 @@ class _Column extends StatelessWidget {
 
 /// A favourite that is not open: dashed, 「点按打开」; greyed while it cannot open.
 class _FavoriteBlock extends StatelessWidget {
-  const _FavoriteBlock({required this.favorite, required this.onTap});
+  const _FavoriteBlock({required this.favorite, required this.label, required this.onTap});
   final AppRef favorite;
+  final String label;
   final VoidCallback? onTap;
 
   @override
@@ -356,7 +358,7 @@ class _FavoriteBlock extends StatelessWidget {
       child: Semantics(
         button: true,
         enabled: onTap != null,
-        label: '常用 ${favorite.name}，${onTap != null ? '点按打开' : '现在打不开'}',
+        label: '常用 $label，${onTap != null ? '点按打开' : '现在打不开'}',
         excludeSemantics: true,
         onTap: onTap,
         child: Material(
@@ -373,7 +375,7 @@ class _FavoriteBlock extends StatelessWidget {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      favorite.name,
+                      label,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(color: onTap != null ? t.text : t.muted),
@@ -418,7 +420,7 @@ class _Block extends StatelessWidget {
       child: Semantics(
         button: true,
         selected: selected,
-        label: [entry.appName, _status, ?windows].join('，'),
+        label: [entry.title, _status, ?windows].join('，'),
         excludeSemantics: true,
         onTap: onTap,
         child: Material(
@@ -444,7 +446,7 @@ class _Block extends StatelessWidget {
                           Row(children: [
                             Expanded(
                               child: Text(
-                                entry.appName,
+                                entry.title,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(color: t.text, fontWeight: FontWeight.w600),

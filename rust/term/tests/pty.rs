@@ -1,8 +1,9 @@
 //! `rapp-term run` in a terminal window of its own (a pty the test holds), seen through its local socket.
 
-mod common;
+#[path = "common/pty.rs"]
+mod pty;
 
-use common::pty::{process_exists, short_dir, socket_of, wait_status, Viewer, Window, BIN, WAIT};
+use pty::{process_exists, short_dir, socket_of, wait_status, Viewer, Window, BIN, WAIT};
 use rapp_term::pty::local;
 use serde_json::json;
 use std::process::{Command, Stdio};
@@ -96,7 +97,7 @@ async fn a_viewer_cannot_change_the_size() {
     v.open().await;
     v.send(json!({"t":"refit","pane":"%0","cols":50,"rows":10})).await;
     let seen = v.until(|_, m| m["t"] == "error").await;
-    assert_eq!(seen.last().unwrap()["error"], "the size follows the window on the host");
+    assert_eq!(seen.last().unwrap()["error"], "bad message");
     let s = wait_status(d.path(), "t").await;
     assert_eq!((s.cols, s.rows), (100, 30));
 }
@@ -232,7 +233,7 @@ async fn the_local_protocol_refuses_a_bad_token_and_an_unknown_op() {
     let token = local::token(d.path()).unwrap();
     for (op, token, want) in [
         ("status", "nope", json!({"error":"bad token"})),
-        ("dance", token.as_str(), json!({"error":"unsupported","v":1})),
+        ("dance", token.as_str(), json!({"error":"unsupported","v":2})),
     ] {
         let s = local::connect(&sock, op, token).await.unwrap();
         let mut r = BufReader::new(s);
@@ -258,4 +259,36 @@ fn without_a_terminal_it_refuses() {
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out.stderr).contains("rapp-term run needs a terminal window"));
+}
+
+#[tokio::test]
+async fn two_runs_with_the_same_name_after_a_rename_stay_apart() {
+    let d = short_dir();
+    let _a = Window::start(d.path(), &["--name", "a", "--", "/bin/cat"]);
+    let _b = Window::start(d.path(), &["--name", "b", "--", "/bin/sh", "-c", "echo bee; cat"]);
+    let (sa, sb) = (wait_status(d.path(), "a").await, wait_status(d.path(), "b").await);
+    let (ka, kb) = (sa.key.clone().unwrap(), sb.key.clone().unwrap());
+    assert!(ka != kb && ka.len() == 16 && ka.bytes().all(|c| matches!(c, b'0'..=b'9' | b'a'..=b'f')), "{ka} {kb}");
+    let token = local::token(d.path()).unwrap();
+    local::rename(&socket_of(d.path(), sb.pid), &token, "a").await.unwrap();
+    // Both are called `a` now; each id still reaches its own program.
+    let statuses = local::scan(d.path(), &token).await;
+    assert_eq!(statuses.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["a", "a"]);
+    // Equal names keep one order, scan after scan.
+    let order = |v: &[local::Status]| v.iter().map(|s| s.pid).collect::<Vec<_>>();
+    for _ in 0..10 {
+        assert_eq!(order(&local::scan(d.path(), &token).await), order(&statuses));
+    }
+    assert_eq!(statuses.iter().find(|s| s.key.as_ref() == Some(&kb)).unwrap().pid, sb.pid);
+    let mut vb = Viewer::connect_op_at(&socket_of(d.path(), sb.pid), d.path(), "view").await;
+    vb.open().await;
+    vb.wait_text("bee", 1).await;
+    let mut va = Viewer::connect_op_at(&socket_of(d.path(), sa.pid), d.path(), "view").await;
+    va.open().await;
+    assert_eq!(va.count("bee"), 0);
+    // A bad name is refused by the run itself.
+    assert_eq!(
+        local::rename(&socket_of(d.path(), sa.pid), &token, "a\u{7}").await.unwrap_err(),
+        local::Probe::Refused("invalid name".into())
+    );
 }

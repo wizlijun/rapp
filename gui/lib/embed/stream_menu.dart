@@ -15,7 +15,6 @@ import '../ui/net_marker.dart' show netTooltip;
 import '../ui/resources_state.dart';
 import '../ui/session_model.dart';
 import '../term/term_session_port.dart';
-import '../term/term_id.dart';
 import '../ui/tokens.dart';
 import 'remote_session.dart';
 import 'session_port.dart';
@@ -408,15 +407,6 @@ class _StreamMenuState extends State<StreamMenu> {
               if (parts.contains(MenuPart.stream)) ...[
                 ..._statusRows(reduced),
                 if (!reduced && term) ...[
-                  if (isPtyTerm(_s.appId))
-                    _Item(
-                      '按我的屏幕重排',
-                      key: const Key('term-refit'),
-                      enabled: false,
-                      trailing: Text('尺寸跟着被控端的窗口', style: TextStyle(color: t.muted, fontSize: 12)),
-                    )
-                  else
-                    _Item('按我的屏幕重排', key: const Key('term-refit'), onTap: () => _then(() => port.refit(_sid))),
                   _head(t, '本机'),
                   _Item(
                     '按键排',

@@ -23,7 +23,9 @@ class UiPrefs {
     this.first = FirstLayer.device,
     this.composerZoom = 0,
     Map<String, String>? termOpen,
-  }) : termOpen = termOpen ?? {};
+    Map<String, String>? termApp,
+  })  : termOpen = termOpen ?? {},
+        termApp = termApp ?? {};
 
   RappTheme theme;
   bool startFullscreen;
@@ -49,6 +51,16 @@ class UiPrefs {
 
   String termOpenFor(String device) => termOpen[device] ?? 'text';
 
+  /// 终端 app (`term_app`): device id to the terminal app a new text terminal opens in. Non-string values are
+  /// dropped on load.
+  final Map<String, String> termApp;
+
+  /// The stored app when [launchers] still has it, else the first launcher.
+  String termAppFor(String device, List<String> launchers) {
+    final a = termApp[device];
+    return a != null && launchers.contains(a) ? a : launchers.first;
+  }
+
   /// Never throws: a missing or corrupt file gives the defaults.
   static UiPrefs load(String dir) {
     try {
@@ -62,6 +74,7 @@ class UiPrefs {
       final fl = j['first'];
       final cz = j['composer_zoom'];
       final to = j['term_open'];
+      final ta = j['term_app'];
       return UiPrefs(
         theme: RappTheme.values.firstWhere(
           (t) => t.name == name,
@@ -80,6 +93,11 @@ class UiPrefs {
           if (to is Map)
             for (final e in to.entries)
               if (e.key is String && (e.value == 'text' || e.value == 'pixels')) e.key as String: e.value as String,
+        },
+        termApp: {
+          if (ta is Map)
+            for (final e in ta.entries)
+              if (e.key is String && e.value is String) e.key as String: e.value as String,
         },
       );
     } catch (_) {
@@ -100,6 +118,7 @@ class UiPrefs {
         'first': first.name,
         'composer_zoom': composerZoom,
         'term_open': termOpen,
+        'term_app': termApp,
       }),
     );
   }

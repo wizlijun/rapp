@@ -6,6 +6,8 @@
 - 评审（十条意见和九个实测）：`2026-11-14-rapp-terminal-sessions-review.md`（下称“评审”）。这一稿和第 1 稿的差别都来自它，见 §20。
 - 调研（hurryvc 的源码、tmux 的控制模式、同类工具、资料链接）：`2026-11-14-rapp-terminal-sessions-research.md`（下称“调研”）。
 
+> **tmux 的部分 2026-11-16 已去掉**（tmux 会话、SSH 主机、`term.json` 的 `tmux` 和 `targets`、新开 tmux 窗口的路径）。现在只留文本终端，见 `2026-11-16-rapp-term-entry-design.md`。本文里讲 tmux 和 SSH 主机的各节只作历史记录。
+
 > **合并 `feat/drop-relay1` 时这个文件会冲突，取 `main` 上的这一版。** 那个分支上带着的是第 1 稿（提交时工作目录正切在那个分支上），内容和 `docs/archives` 里的那份一样。合并完可以删掉这段话。
 
 相关文档：平台规格（`2026-11-11-rapp-platform-design.md`）、relay 规格（`2026-11-13-rapp-relay-design.md`）、主界面规格（`2026-11-12-rapp-main-window-design.md`）、S3 生命周期（`2026-11-12-rapp-s3-lifecycle-design.md`）、沟通机制设计（`2026-11-12-rapp-conversation-design.md`）、app 配置设计（`2026-11-13-rapp-app-profiles-design.md`）、数据目录（`2026-11-13-rapp-data-dir-design.md`）、流畅串流（`2026-11-14-rapp-smooth-streaming-design.md`）、反馈文档（`2026-11-12-rapp-requirements-feedback.md`）。

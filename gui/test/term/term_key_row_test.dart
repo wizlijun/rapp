@@ -18,7 +18,7 @@ import '../fakes.dart';
 import '../ui/helpers.dart';
 import 'term_main_test.dart' show tp, windowsOf;
 
-const app = 'term:tmux:work';
+const app = 'term:pty:work';
 
 const left = ['Esc', 'Ctrl-C', 'Tab'];
 const right = ['Up', 'Down', 'Enter'];

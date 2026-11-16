@@ -1,4 +1,5 @@
 // Session list model: entries, grouping, prev/next stepping.
+import '../term/term_id.dart';
 import 'lamp.dart';
 import 'projects.dart';
 import 'workspace_store.dart';
@@ -21,11 +22,7 @@ class SessionEntry {
     this.bytesPerSecond,
     this.reason,
     this.takenOver = false,
-    this.paneTitle,
   });
-
-  /// A terminal session's current pane title (tmux's `pane_title`); null for an app session.
-  final String? paneTitle;
 
   /// Disconnected because another device took it over: the button says 「拿回来」.
   final bool takenOver;
@@ -34,6 +31,7 @@ class SessionEntry {
   final Object? sid;
   final String id;
   final String app;
+  /// The app's name; for a text terminal its current name on the device (not the label, see [title]).
   final String appName;
   final String device;
   final String path;
@@ -46,6 +44,9 @@ class SessionEntry {
   final String? reason;
 
   String get key => '$id/$app';
+
+  /// What the session is called wherever it is listed: `CLI · <name>` for a text terminal.
+  String get title => isTermApp(app) ? termTitle(appName) : appName;
 }
 
 /// The open button's word for a row in [lamp]'s state (K10).
@@ -80,7 +81,7 @@ List<SessionEntry> _byDeviceThenApp(List<SessionEntry> all) {
   final indexed = [for (var i = 0; i < all.length; i++) (i, all[i])];
   indexed.sort((a, b) {
     var c = a.$2.device.compareTo(b.$2.device);
-    if (c == 0) c = a.$2.appName.compareTo(b.$2.appName);
+    if (c == 0) c = a.$2.title.compareTo(b.$2.title);
     return c != 0 ? c : a.$1.compareTo(b.$1);
   });
   return [for (final (_, e) in indexed) e];
@@ -107,7 +108,7 @@ List<SessionGroup> groupSessions(List<SessionEntry> all, Grouping g,
     if (rest.isNotEmpty) groups.add(SessionGroup(otherGroupTitle, rest));
     return groups;
   }
-  String titleOf(SessionEntry e) => g == Grouping.device ? e.device : e.appName;
+  String titleOf(SessionEntry e) => g == Grouping.device ? e.device : e.title;
   final byTitle = <String, List<SessionEntry>>{};
   for (final e in _byDeviceThenApp(all)) {
     byTitle.putIfAbsent(titleOf(e), () => []).add(e);

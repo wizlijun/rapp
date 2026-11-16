@@ -12,7 +12,7 @@
 
 use super::grid::Emu;
 use super::{local, view, Meta, Shared};
-use crate::id::{default_name, session_name};
+use crate::id::{clean_name, default_name, session_name};
 use anyhow::{anyhow, Context};
 use portable_pty::{native_pty_system, CommandBuilder, ExitStatus, MasterPty, PtySize};
 use std::io::{Read, Write};
@@ -96,7 +96,7 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
         emu: Mutex::new(Emu::new(cols, rows)),
         rev: watch::channel(0).0,
         input,
-        meta: Meta { name, command, pid, ticket: opts.ticket.clone() },
+        meta: Meta { key: local::new_key(), name: Mutex::new(name), command, pid, ticket: opts.ticket.clone() },
         viewers: AtomicU32::new(0),
         ended: watch::channel(false).0,
         activity: AtomicU64::new(now()),
@@ -346,6 +346,16 @@ async fn client(s: UnixStream, shared: Arc<Shared>, token: Arc<str>) {
         "view" => {
             let _ = view::serve(shared, r, w).await;
         }
+        "rename" => {
+            let reply = match head.name.as_deref().and_then(clean_name) {
+                Some(n) => {
+                    *shared.meta.name.lock().unwrap_or_else(|e| e.into_inner()) = n;
+                    serde_json::json!({ "ok": true })
+                }
+                None => serde_json::json!({ "error": "invalid name" }),
+            };
+            let _ = w.write_all(format!("{reply}\n").as_bytes()).await;
+        }
         _ => {
             let reply = serde_json::json!({ "error": "unsupported", "v": local::LOCAL_V });
             let _ = w.write_all(format!("{reply}\n").as_bytes()).await;
@@ -408,7 +418,7 @@ mod tests {
             emu: Mutex::new(Emu::new(cols, rows)),
             rev: watch::channel(0).0,
             input: mpsc::unbounded_channel().0,
-            meta: Meta { name: "t".into(), command: "sh".into(), pid: 1, ticket: None },
+            meta: Meta { key: "0123456789abcdef".into(), name: Mutex::new("t".into()), command: "sh".into(), pid: 1, ticket: None },
             viewers: AtomicU32::new(0),
             ended: watch::channel(false).0,
             activity: AtomicU64::new(0),

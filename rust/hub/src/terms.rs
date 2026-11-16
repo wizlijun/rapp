@@ -1,4 +1,4 @@
-//! Terminal sessions (spec §6): `terms`, `add_term_target`, `remove_term_target`, `new_term` and `open_term` are asked of the
+//! Terminal sessions (spec §6): `terms`, `open_term` and `rename_term` are asked of the
 //! device; each online device has one `watch_terms` stream, every line of it a `terms` event without `req`.
 //! Opening one goes the embedded `open` path unchanged.
 
@@ -81,7 +81,7 @@ fn due(w: Option<&Watch>, now: Instant) -> Option<Option<Duration>> {
     }
 }
 
-/// The terminal commands; `cmd` is one of `terms`, `add_term_target`, `remove_term_target`, `new_term`, `open_term`, whose
+/// The terminal commands; `cmd` is one of `terms`, `open_term`, `rename_term`, whose
 /// fields (other than `cmd`, `id`, `req`) are the device request's.
 pub(crate) async fn command(hub: &Arc<Hub>, cmd: &str, v: &Value) -> Result<Value> {
     let id = v.get("id").and_then(Value::as_str).context("missing id")?;
@@ -105,8 +105,8 @@ pub(crate) async fn command(hub: &Arc<Hub>, cmd: &str, v: &Value) -> Result<Valu
 /// The event that tells the GUI how its terminal command `op` went on device `id`, `r` being the reply.
 fn event(op: &Op, id: &str, r: &Value) -> Value {
     match op {
-        Op::NewTerm { .. } | Op::OpenTerm { .. } => json!({"event":"term_created","id":id,"term":r["id"]}),
-        _ => json!({"event":"term_targets","id":id,"targets":r["targets"]}),
+        Op::RenameTerm { term, .. } => json!({"event":"term_renamed","id":id,"term":term}),
+        _ => json!({"event":"term_created","id":id,"term":r["id"]}),
     }
 }
 
@@ -198,9 +198,16 @@ mod tests {
 
     #[test]
     fn open_term_is_answered_with_term_created() {
-        let op = Op::OpenTerm { cwd: None, name: None, command: None, app: "Terminal".into() };
+        let op = Op::OpenTerm { shell: None, app: "Terminal".into() };
         let e = event(&op, "d1", &json!({"id": "term:pty:c"}));
         assert_eq!(e, json!({"event":"term_created","id":"d1","term":"term:pty:c"}));
+    }
+
+    #[test]
+    fn rename_term_is_answered_with_term_renamed() {
+        let op = Op::RenameTerm { term: "term:pty:k".into(), name: "n".into() };
+        let e = event(&op, "d1", &json!({"ok": true}));
+        assert_eq!(e, json!({"event":"term_renamed","id":"d1","term":"term:pty:k"}));
     }
 
     #[test]

@@ -213,11 +213,6 @@ class MainState extends ChangeNotifier {
   /// Device ids that want the password dialog (the current session is locked and nothing could unlock it).
   Stream<String> get unlockAsks => _unlockAsks.stream;
 
-  final StreamController<String> _newTextAsks = StreamController<String>.broadcast();
-
-  /// Device ids whose 终端 entry was opened in text mode with no text terminal yet: the 新开文本终端 dialog.
-  Stream<String> get newTextAsks => _newTextAsks.stream;
-
   /// A session went away: the device's unlock check dies with it unless another session still carries it.
   void _releaseUnlockBusy(SessionRecord r) {
     final others = _records.values.any((x) =>
@@ -557,31 +552,6 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Whether the current session is a terminal whose device can open a window (the 「＋」 shows).
-  bool get canNewTermWindow {
-    final rs = currentRemote, tp = termPort;
-    return rs != null && tp != null && tp.owns(rs.sid) && tp.canNewWindow(rs.sid);
-  }
-
-  // Sessions whose 「＋」 is waiting for its answer (which the port always gives, at the latest at its timeout).
-  final _newWindowPending = <Object>{};
-
-  /// The 「＋」 was clicked: the device opens a window in the viewed pane's directory, and its pane comes as a
-  /// `TermOpenedPaneEvent`. A refusal is said on the stage. A click while the last one is unanswered does nothing.
-  Future<void> newTermWindow() async {
-    final rs = currentRemote, tp = termPort;
-    if (rs == null || tp == null || !tp.owns(rs.sid) || !tp.canNewWindow(rs.sid)) return;
-    final sid = rs.sid;
-    if (!_newWindowPending.add(sid)) return;
-    final String? why;
-    try {
-      why = await tp.newWindow(sid);
-    } finally {
-      _newWindowPending.remove(sid);
-    }
-    if (why != null) tp.model(sid)?.say('新开窗口失败：$why');
-  }
-
   RemoteWindow? _windowOf(RemoteSession rs) {
     for (final w in rs.windows) {
       if (w.id == rs.currentWindow) return w;
@@ -825,12 +795,26 @@ class MainState extends ChangeNotifier {
   }
 
   String appName(String id, String app) {
-    return _appNames['$id/$app'] ?? app;
+    final name = _appNames['$id/$app'] ?? app;
+    if (!isTermApp(app)) return name;
+    return termName(id, app) ?? name;
   }
+
+  /// A text terminal's current name on [device], from the device's terms list; null when it is not listed (the
+  /// session ended, or the list has not come yet).
+  String? termName(String device, String term) =>
+      hub?.termLists[device]?.terms.where((r) => r.id == term).firstOrNull?.name;
+
+  /// What a favourite or project member is called: `CLI · <name>` for a text terminal, whose name is the list's
+  /// current one, else the one stored with it.
+  String labelOf(AppRef a) => isTermApp(a.bundle) ? termTitle(termName(a.device, a.bundle) ?? a.name) : a.name;
 
   SessionEntry _entryOf(SessionRecord r) {
     final sid = r.sid;
     final rs = sid == null ? null : remote[sid];
+    // A terminal's name is the device's current one; the last one seen stays when the row is gone.
+    final tn = isTermApp(r.app) ? termName(r.id, r.app) : null;
+    if (tn != null) r.appName = tn;
     return SessionEntry(
       sid: sid,
       id: r.id,
@@ -842,7 +826,6 @@ class MainState extends ChangeNotifier {
       bytesPerSecond: r.phase == Phase.live ? rs?.bytesPerSecond : null,
       reason: r.phase == Phase.disconnected ? disconnectWord(r.reason) : null,
       takenOver: r.phase == Phase.disconnected && takenOver(r.reason),
-      paneTitle: rs == null ? null : termPaneOf(rs)?.title,
     );
   }
 
@@ -1047,8 +1030,6 @@ class MainState extends ChangeNotifier {
       }
     }
     if (e is WindowsEvent) _syncHidden(rs);
-    // The pane a 「＋」 opened is in the tab list now: show it (selectWindow ignores a pane that is not).
-    if (e is TermOpenedPaneEvent) rs.selectWindow(e.window);
     final start = _starts[e.sid];
     if (start != null && e is ClipsEvent) {
       resources.addClips(r.key, start, _sourceOf(r), e.clips);
@@ -1703,14 +1684,14 @@ class MainState extends ChangeNotifier {
       list: hub?.termLists[id] ?? TermList(id),
       apps: probes[id]?.apps?.apps ?? const []);
 
-  /// The key of the session [m] opens; null for a 终端 entry that asks for a new text terminal.
+  /// The key of the session [m] opens; null for a 终端 entry that opens a new text terminal.
   String? _openedKey(Member m) {
     if (m.app.bundle != termsEntry) return m.key;
     final id = m.app.device;
     return switch (_termsTargetOf(id)) {
       OpenTerm(:final app) => '$id/$app',
       OpenPixels(:final bundle) => '$id/$bundle',
-      AskNewText() => null,
+      NewText() => null,
     };
   }
 
@@ -1722,22 +1703,36 @@ class MainState extends ChangeNotifier {
         return _open(id, app, name, select: select, quiet: quiet);
       case OpenPixels(:final bundle, :final name):
         return _open(id, bundle, name, select: select, quiet: quiet);
-      case AskNewText():
-        _newTextAsks.add(id);
+      case NewText(:final shell):
+        try {
+          await openText(id, shell: shell);
+        } catch (e) {
+          hint = '$e';
+          notifyListeners();
+        }
     }
   }
 
   /// Opens a text terminal window on [id], then switches to it without waiting for the session to connect; a
   /// refusal is thrown with the hub's words.
-  Future<void> openText(String id, {String? cwd, String? name, String? command, required String app}) async {
+  Future<void> openText(String id, {String? shell}) async {
     if (!hubUsable) return;
-    final term = await hub!.openTerm(id, cwd: cwd, name: name, command: command, app: app);
+    final launchers = hub?.termLists[id]?.hosts.where((h) => h.host == null).firstOrNull?.launchers ?? const <String>[];
+    final app = prefs.termAppFor(id, launchers.isEmpty ? const ['Terminal'] : launchers);
+    final term = await hub!.openTerm(id, shell: shell, app: app);
     try {
       await hub?.terms(id);
     } catch (_) {}
     final row = hub?.termLists[id]?.terms.where((r) => r.id == term).firstOrNull;
-    final shown = row == null ? (parseTermId(term)?.name ?? term) : termDisplayName(row.name, row.host);
+    final shown = row == null ? '已结束' : termDisplayName(row.name, row.host);
     unawaited(openOrSwitch(id, term, shown));
+  }
+
+  /// Renames text terminal [term] of device [device]; an invalid name or the device's refusal is thrown.
+  Future<void> renameTerm(String device, String term, String name) async {
+    final clean = cleanTermName(name);
+    if (clean == null) throw const FormatException('名字不能为空，不能有控制字符，最长 64 个字符');
+    await hub!.renameTerm(device, term, clean);
   }
 
   /// Opens [app] on [id], or switches to it if it is open. [select]: it becomes current and the
@@ -2425,6 +2420,12 @@ class MainState extends ChangeNotifier {
     _save();
   }
 
+  /// The 终端 app a new text terminal on [device] opens in; saved.
+  void setTermApp(String device, String app) {
+    prefs.termApp[device] = app;
+    _save();
+  }
+
   void _save() {
     try {
       final dir = data.prefsDir();
@@ -2994,7 +2995,6 @@ class MainState extends ChangeNotifier {
     }
     _unlockBusy.clear();
     unawaited(_unlockAsks.close());
-    unawaited(_newTextAsks.close());
     for (final t in _retryTimers.values) {
       t.cancel();
     }

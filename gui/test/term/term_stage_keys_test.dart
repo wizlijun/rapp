@@ -499,7 +499,7 @@ void main() {
     Future<void> openTerm(WidgetTester tester, List<TermPane> panes) async {
       term.paneLists[1] = panes;
       await tester.runAsync(() async {
-        s.openOrSwitch('111', 'term:tmux:work', 'work');
+        s.openOrSwitch('111', 'term:pty:work', 'work');
         for (var i = 0; i < 4; i++) {
           await flush();
         }

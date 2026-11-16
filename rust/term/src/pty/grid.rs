@@ -1,8 +1,8 @@
-//! The emulator behind `rapp-term run`: pty output goes in, `Screen` / `HistoryRows` come out, with rows written
-//! the way `capture-pane -e` writes them so the same reader (`sgr.dart`) understands both backends.
+//! The emulator behind `rapp-term run`: pty output goes in, `Screen` / `HistoryRows` come out, with rows
+//! written with their colour escapes, as the reader (`sgr.dart`) understands them.
 
 use crate::screen::Screen;
-use crate::tmux::{HistoryRows, MAX_HISTORY};
+use crate::wire::{HistoryRows, MAX_HISTORY};
 use alacritty_terminal::event::VoidListener;
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Line};

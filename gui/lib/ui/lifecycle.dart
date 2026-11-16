@@ -107,7 +107,7 @@ String disconnectWord(String? raw) {
     return '网络断了';
   }
   if (raw == 'GUI did not connect') return '本机没有接上会话';
-  // A terminal's device says its tmux session is gone.
+  // A terminal's device says its session is gone.
   if (raw == 'session ended') return hubWord('unknown sid');
   var rest = raw;
   const client = 'rapp-client: ';

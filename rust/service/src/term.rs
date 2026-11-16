@@ -1,5 +1,5 @@
-//! Terminal sessions as device requests (spec §6, §8, §9): `list_terms`, `watch_terms` and `new_term` are asked of
-//! the device's one `rapp-term serve` (`workers::TERM`); `add_term_target` / `remove_term_target` edit `term.json`.
+//! Terminal sessions as device requests (spec §6, §8, §9): `list_terms`, `watch_terms`, `open_term` and `rename_term`
+//! are asked of the device's one `rapp-term serve` (`workers::TERM`).
 //! `open term:…` splices B to a view on that worker (§7, §15: several may watch one, nothing is taken over). The
 //! switch in `term.json` is changed only over local IPC (`term` / `set_term`).
 //! While terminal sessions are off, or `term.json` cannot be used, every request is refused and no worker starts.
@@ -9,10 +9,10 @@ use crate::state::{Peer, State};
 use crate::workers::{self, TERM};
 use anyhow::{anyhow, Context, Result};
 use rapp_net::line::{err, ok, write_json};
-use rapp_net::log::{clean_name, Lvl};
+use rapp_net::log::Lvl;
 use rapp_net::msg::Op;
 use rapp_net::quic::{splice_metered, Meter};
-use rapp_term::config::{check_target, Target, TermConfig, INVALID, MAX_TARGETS, OFF};
+use rapp_term::config::{TermConfig, INVALID, OFF};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -66,19 +66,8 @@ pub async fn request<S: AsyncRead + AsyncWrite + Unpin + Send>(
         Ok(_) => match op {
             Op::WatchTerms => return watch(state, s, peer, what).await,
             Op::ListTerms => answer(ask(state, &json!({"op": "list"})).await),
-            Op::NewTerm { host, name, command, cols, rows } => {
-                let mut req = json!({"op": "new", "host": host, "command": command, "cols": cols, "rows": rows});
-                if let Some(name) = name {
-                    req["name"] = json!(name);
-                }
-                answer(ask(state, &req).await)
-            }
-            Op::OpenTerm { cwd, name, command, app } => {
-                let req = json!({"op": "open", "cwd": cwd, "name": name, "command": command, "app": app});
-                answer(ask(state, &req).await)
-            }
-            Op::AddTermTarget { name, target, tmux } => targets(edit(state, |c| add(c, Target { name, target, tmux }))),
-            Op::RemoveTermTarget { name } => targets(edit(state, |c| remove(c, &name))),
+            Op::OpenTerm { shell, app } => answer(ask(state, &json!({"op": "open", "shell": shell, "app": app})).await),
+            Op::RenameTerm { term, name } => answer(ask(state, &json!({"op": "rename", "term": term, "name": name})).await),
             _ => err("unknown op"),
         },
     };
@@ -86,15 +75,13 @@ pub async fn request<S: AsyncRead + AsyncWrite + Unpin + Send>(
     finish(s, &r).await
 }
 
-/// The `request` line's fields: never a command, a target string or anything from `term.json`.
+/// The `request` line's fields: never a name, a term id or anything from `term.json`.
 fn log_fields(op: &Op) -> Value {
     match op {
         Op::ListTerms => json!({"op": "list_terms"}),
         Op::WatchTerms => json!({"op": "watch_terms"}),
-        Op::NewTerm { host, .. } => json!({"op": "new_term", "host": host.as_deref().map(clean_name)}),
         Op::OpenTerm { app, .. } => json!({"op": "open_term", "app": app}),
-        Op::AddTermTarget { name, .. } => json!({"op": "add_term_target", "name": clean_name(name)}),
-        Op::RemoveTermTarget { name } => json!({"op": "remove_term_target", "name": clean_name(name)}),
+        Op::RenameTerm { .. } => json!({"op": "rename_term"}),
         _ => json!({}),
     }
 }
@@ -334,15 +321,15 @@ pub fn ended(state: &State, v: &Value) {
     state.log.event(Lvl::Info, "term_inputs", fields);
 }
 
-/// IPC `term`: `{"ok":true,"allow","tmux","targets"}` (`tmux` null: the default).
+/// IPC `term`: `{"ok":true,"allow"}`.
 pub fn settings(state: &State) -> Value {
     match config(state) {
-        Ok(c) => ok(json!({"allow": c.allow, "tmux": c.tmux, "targets": c.targets})),
+        Ok(c) => ok(json!({"allow": c.allow})),
         Err(e) => err(&e),
     }
 }
 
-/// IPC `set_term {"allow"?, "tmux"?}`; `tmux` null goes back to the default. Turned off, the worker is stopped,
+/// IPC `set_term {"allow"?}`. Turned off, the worker is stopped,
 /// which ends every terminal session and watch on it (app sessions are another worker's).
 pub fn set(state: &State, cmd: &Value) -> Value {
     let saved = {
@@ -353,14 +340,7 @@ pub fn set(state: &State, cmd: &Value) -> Value {
                 Some(Value::Bool(a)) => c.allow = *a,
                 Some(_) => return Err("allow must be true or false".into()),
             }
-            match cmd.get("tmux") {
-                None => {}
-                Some(Value::Null) => c.tmux = None,
-                Some(Value::String(t)) => c.tmux = Some(t.clone()),
-                Some(_) => return Err("invalid tmux path".into()),
-            }
-            c.check()?;
-            save(state, &c)?;
+            save(state, c.allow)?;
             Ok(c.allow)
         })
     };
@@ -376,54 +356,31 @@ pub fn set(state: &State, cmd: &Value) -> Value {
     }
 }
 
-fn targets(r: Result<Vec<Target>, String>) -> Value {
-    match r {
-        Ok(t) => ok(json!({"targets": t})),
-        Err(e) => err(&e),
-    }
-}
-
-/// Applies `change` to `term.json` under `EDIT` and returns the targets; a file that cannot be used, or a change
-/// that is refused, leaves it as it was.
-fn edit(state: &State, change: impl FnOnce(&mut TermConfig) -> Result<(), String>) -> Result<Vec<Target>, String> {
-    let _held = lock();
-    let mut c = allowed(state)?;
-    change(&mut c)?;
-    save(state, &c)?;
-    Ok(c.targets)
-}
-
 fn lock() -> MutexGuard<'static, ()> {
     EDIT.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Writes `term.json` (0600); held under `lock`.
-fn save(state: &State, c: &TermConfig) -> Result<(), String> {
-    rapp_net::config::write_json(&path(state), c).map_err(|e| {
+/// Writes `allow` into `term.json` (0600); held under `lock`.
+fn save(state: &State, allow: bool) -> Result<(), String> {
+    write_allow(&path(state), allow).map_err(|e| {
         state.log.msg(Lvl::Warn, format!("term.json: {e:#}"));
         "could not save term.json".to_string()
     })
 }
 
-fn add(c: &mut TermConfig, t: Target) -> Result<(), String> {
-    check_target(&t)?;
-    if c.target(&t.name).is_some() {
-        return Err("name is taken".into());
-    }
-    if c.targets.len() >= MAX_TARGETS {
-        return Err("too many targets".into());
-    }
-    c.targets.push(t);
-    Ok(())
-}
-
-fn remove(c: &mut TermConfig, name: &str) -> Result<(), String> {
-    let before = c.targets.len();
-    c.targets.retain(|t| t.name != name);
-    if c.targets.len() == before {
-        return Err("unknown target".into());
-    }
-    Ok(())
+/// `allow` set in the file at `path`; every other field in it stays as it is (an older version still reads its own).
+/// A file that is missing or is not a JSON object is replaced by `{"allow":…}`.
+fn write_allow(path: &std::path::Path, allow: bool) -> Result<()> {
+    let mut v = std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok());
+    let obj = match v.as_mut().and_then(Value::as_object_mut) {
+        Some(o) => o,
+        None => {
+            v = Some(json!({}));
+            v.as_mut().and_then(Value::as_object_mut).expect("an object")
+        }
+    };
+    obj.insert("allow".into(), Value::Bool(allow));
+    rapp_net::config::write_json(path, &v)
 }
 
 #[cfg(test)]
@@ -431,13 +388,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn set_allow_keeps_the_other_fields_of_term_json() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("term.json");
+        std::fs::write(&p, r#"{"allow":true,"targets":[{"host":"h"}],"tmux":"x"}"#).unwrap();
+        write_allow(&p, false).unwrap();
+        let v: Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+        assert_eq!(v, json!({"allow":false,"targets":[{"host":"h"}],"tmux":"x"}));
+        // Missing, or not an object: just `allow`.
+        let q = d.path().join("new.json");
+        write_allow(&q, true).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&std::fs::read_to_string(&q).unwrap()).unwrap(), json!({"allow":true}));
+        std::fs::write(&q, "[1]").unwrap();
+        write_allow(&q, false).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&std::fs::read_to_string(&q).unwrap()).unwrap(), json!({"allow":false}));
+    }
+
+    #[test]
     fn open_term_logs_only_the_app() {
-        let op = Op::OpenTerm {
-            cwd: Some("/secret".into()),
-            name: Some("n".into()),
-            command: Some("rm".into()),
-            app: "iTerm".into(),
-        };
+        let op = Op::OpenTerm { shell: Some("zsh".into()), app: "iTerm".into() };
         assert_eq!(log_fields(&op), json!({"op":"open_term","app":"iTerm"}));
+    }
+
+    #[test]
+    fn rename_term_logs_neither_the_term_nor_the_name() {
+        let op = Op::RenameTerm { term: "term:pty:secret".into(), name: "secret-name".into() };
+        assert_eq!(log_fields(&op), json!({"op":"rename_term"}));
     }
 }

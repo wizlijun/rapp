@@ -12,6 +12,7 @@ import 'package:rapp/paths.dart';
 import 'package:rapp/term/term_layout.dart';
 import 'package:rapp/term/term_model.dart';
 import 'package:rapp/term/term_painter.dart';
+import 'package:rapp/term/term_select.dart';
 import 'package:rapp/term/term_stage.dart';
 import 'package:rapp/term/term_wire.dart';
 import 'package:rapp/ui/main_state.dart';
@@ -74,18 +75,24 @@ void main() {
     tmp.deleteSync(recursive: true);
   });
 
-  Future<void> show(WidgetTester t, {double w = 800, double h = 480, int? attached}) async {
+  Future<void> show(WidgetTester t, {double w = 800, double h = 480}) async {
     await t.pumpWidget(wrap(SizedBox(
       width: w,
       height: h,
-      child: TermStage(state: state, session: session, port: port, attached: attached),
+      child: TermStage(state: state, session: session, port: port),
     )));
   }
 
   List<Map<String, Object?>> views() => [for (final c in port.calls) if (c.$1 == 'view') c.$2];
 
-  Offset cell(WidgetTester t, int y, int x) =>
-      t.getTopLeft(find.byKey(const Key('term-grid'))) + Offset((x + .5) * cw, (y + .5) * ch);
+  TermPainter painter(WidgetTester t) =>
+      t.widget<CustomPaint>(find.byKey(const Key('term-grid'))).painter! as TermPainter;
+
+  // The centre of a cell on screen: the pane is scaled to fit the stage, so a cell is `scale` times its size.
+  Offset cell(WidgetTester t, int y, int x) {
+    final k = painter(t).scale;
+    return t.getTopLeft(find.byKey(const Key('term-grid'))) + Offset((x + .5) * cw * k, (y + .5) * ch * k);
+  }
 
   Future<void> wheel(WidgetTester t, double dy) async {
     final p = TestPointer(1, PointerDeviceKind.mouse);
@@ -93,9 +100,6 @@ void main() {
     await t.sendEventToBinding(p.scroll(Offset(0, dy)));
     await t.pump();
   }
-
-  TermPainter painter(WidgetTester t) =>
-      t.widget<CustomPaint>(find.byKey(const Key('term-grid'))).painter! as TermPainter;
 
   testWidgets('the stage asks for the size it can show, once, then after a 0.3 s pause', (t) async {
     await t.binding.setSurfaceSize(const Size(1200, 800));
@@ -267,6 +271,23 @@ void main() {
     expect((s.anchor.y, s.anchor.x, s.head.y, s.head.x), (1, 0, 1, 1));
   });
 
+  testWidgets('a stage squeezed to nothing mid-drag keeps scale 1 and does not throw', (t) async {
+    for (final (w, h) in [(800.0, 0.0), (0.0, 480.0), (0.0, 0.0)]) {
+      model.apply(scr(['abc', 'def', 'ghi', 'jkl']));
+      await show(t);
+      final g = await t.startGesture(cell(t, 1, 0), kind: PointerDeviceKind.mouse);
+      await g.moveTo(cell(t, 1, 2));
+      await show(t, w: w, h: h);
+      expect(painter(t).scale, 1.0, reason: '$w x $h');
+      await g.moveTo(const Offset(5, 500));
+      // The edge-scroll timer ticks on a stage with no size too.
+      await t.pump(const Duration(milliseconds: 120));
+      await g.up();
+      await t.pump();
+      expect(t.takeException(), isNull, reason: '$w x $h');
+    }
+  });
+
   testWidgets('only rows that changed are recorded again', (t) async {
     model.apply(scr(['a', 'b', 'c', 'd']));
     await show(t);
@@ -314,23 +335,37 @@ void main() {
     expect([for (final l in painter(t).links) l.y], [5]);
   });
 
-  testWidgets('a pane larger than the stage is scaled down with the note', (t) async {
+  testWidgets('a small pane is scaled up to fill', (t) async {
+    model.apply(scr([for (var i = 0; i < 2; i++) 'r$i'], cols: 10));
+    await show(t, w: 40 * cw, h: 20 * ch);
+    expect(painter(t).scale, closeTo(4, 1e-6));
+  });
+
+  testWidgets('a large pane is scaled down', (t) async {
     model.apply(scr([for (var i = 0; i < 60; i++) 'r$i'], cols: 200));
     await show(t, w: 600, h: 400);
-    final note = t.widget<Text>(find.byKey(const Key('term-scaled'))).data!;
-    expect(note, contains('原样缩小显示'));
-    expect(note, contains('200×60'));
-    expect(note, startsWith('另有终端也接着这个会话。'));
     expect(painter(t).scale, lessThan(1));
+  });
 
-    await show(t, w: 600, h: 400, attached: 3);
-    expect(t.widget<Text>(find.byKey(const Key('term-scaled'))).data, startsWith('另有 2 个终端也接着这个会话。'));
-
-    // A pane that fits is drawn as is.
+  testWidgets('no scaled note', (t) async {
+    model.apply(scr([for (var i = 0; i < 60; i++) 'r$i'], cols: 200));
+    await show(t, w: 600, h: 400);
+    expect(find.byKey(const Key('term-scaled')), findsNothing);
     model.apply(scr(['small'], rev: 2, cols: 10));
     await t.pump();
     expect(find.byKey(const Key('term-scaled')), findsNothing);
-    expect(painter(t).scale, 1);
+  });
+
+  testWidgets('selection maps to cells when scaled up', (t) async {
+    model.apply(scr(['abcdefghij', 'klmnopqrst'], cols: 10));
+    await show(t, w: 40 * cw, h: 20 * ch);
+    expect(painter(t).scale, closeTo(4, 1e-6));
+    final g = await t.startGesture(cell(t, 0, 1), kind: PointerDeviceKind.mouse);
+    await g.moveTo(cell(t, 0, 3));
+    await g.up();
+    await t.pump();
+    final sel = painter(t).selection!;
+    expect(selectionText(sel, model.lineAt, model.wrappedAt), 'bcd');
   });
 
   testWidgets('a scroll in the alternate screen does nothing', (t) async {

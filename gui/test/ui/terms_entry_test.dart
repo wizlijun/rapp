@@ -7,7 +7,7 @@ void main() {
   TermRow pty(String name, {int activity = 0}) => TermRow('term:pty:$name', name, 'zsh', null, 1, 0, activity, false, false);
   TermRow tmuxRow(String name, {int activity = 0}) =>
       TermRow('term:tmux:$name', name, 'zsh', null, 1, 0, activity, false, false);
-  TermHost local(List<String> launchers) => TermHost(null, launchers: launchers);
+  TermHost local(List<String> launchers, {List<TermShell>? shells}) => TermHost(null, launchers: launchers, shells: shells);
 
   test('desktop first and terminal apps folded when the entry shows', () {
     final apps = [app('com.apple.Safari'), app('com.apple.Terminal'), app('desktop:'), app('com.googlecode.iterm2')];
@@ -25,7 +25,7 @@ void main() {
     expect(showsTermsEntry(null), isFalse);
     expect(showsTermsEntry(const TermList('d', off: true)), isFalse);
     expect(showsTermsEntry(const TermList('d', error: 'timed out')), isFalse);
-    expect(showsTermsEntry(const TermList('d', hosts: [TermHost(null, error: 'tmux not found')])), isTrue);
+    expect(showsTermsEntry(const TermList('d', hosts: [TermHost(null)])), isTrue);
   });
 
   test('text mode opens the most recently active text terminal', () {
@@ -35,34 +35,25 @@ void main() {
         isA<OpenTerm>().having((t) => t.app, 'app', 'term:pty:b').having((t) => t.name, 'name', 'b'));
   });
 
-  test('text mode with none asks for a new one, if it can open one', () {
+  test('text mode with none opens a new one with the default shell, if it can open one', () {
+    const shells = [TermShell('bash', '/bin/bash', false), TermShell('zsh', '/bin/zsh', true)];
+    expect(termsTarget(mode: 'text', list: TermList('d', hosts: [local(['Terminal'], shells: shells)]), apps: const []),
+        isA<NewText>().having((n) => n.shell, 'shell', '/bin/zsh'));
     expect(termsTarget(mode: 'text', list: TermList('d', hosts: [local(['Terminal'])]), apps: const []),
-        isA<AskNewText>());
+        isA<NewText>().having((n) => n.shell, 'shell', null));
     expect(termsTarget(mode: 'text', list: TermList('d', hosts: [local(const [])]), apps: const []), isA<OpenPixels>());
   });
 
-  test('text mode with no launchers opens the most recently active tmux session', () {
+  test('text mode with only tmux rows and no launchers opens pixels', () {
     final list = TermList('d', terms: [tmuxRow('a', activity: 5), tmuxRow('w', activity: 9)], hosts: [local(const [])]);
-    expect(termsTarget(mode: 'text', list: list, apps: [app('com.googlecode.iterm2')]),
-        isA<OpenTerm>().having((t) => t.app, 'app', 'term:tmux:w').having((t) => t.name, 'name', 'w'));
-    // An old service sends no hosts at all.
-    expect((termsTarget(mode: 'text', list: TermList('d', terms: [tmuxRow('a')]), apps: const []) as OpenTerm).app,
-        'term:tmux:a');
+    expect(termsTarget(mode: 'text', list: list, apps: const []), isA<OpenPixels>());
+    expect(termsTarget(mode: 'text', list: TermList('d', terms: [tmuxRow('a')]), apps: [app('com.googlecode.iterm2')]),
+        isA<OpenPixels>());
   });
 
-  test('text mode with no launchers prefers a tmux session on this machine to one on an SSH host', () {
-    const remote = TermRow('term:tmux@box:r', 'r', 'zsh', 'box', 1, 0, 9, false, false);
-    final list = TermList('d', terms: [remote, tmuxRow('a', activity: 5)], hosts: [local(const [])]);
-    expect(termsTarget(mode: 'text', list: list, apps: const []),
-        isA<OpenTerm>().having((t) => t.app, 'app', 'term:tmux:a'));
-    final only = TermList('d', terms: const [remote], hosts: [local(const [])]);
-    expect(termsTarget(mode: 'text', list: only, apps: const []),
-        isA<OpenTerm>().having((t) => t.app, 'app', 'term:tmux@box:r').having((t) => t.name, 'name', 'r @box'));
-  });
-
-  test('text mode asks for a new text terminal before it falls back to tmux', () {
+  test('text mode opens a new text terminal when the only rows are tmux ones', () {
     final list = TermList('d', terms: [tmuxRow('w', activity: 9)], hosts: [local(['Terminal'])]);
-    expect(termsTarget(mode: 'text', list: list, apps: const []), isA<AskNewText>());
+    expect(termsTarget(mode: 'text', list: list, apps: const []), isA<NewText>());
   });
 
   test('text mode with no launchers and no sessions opens pixels', () {

@@ -10,34 +10,15 @@ pub fn quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
-/// The content of a `.command` file that runs `bin run` in `dir` for `ticket`. `command` goes after `--` as it is,
-/// for the shell to split.
-pub fn command_file(
-    bin: &Path,
-    dir: &Path,
-    ticket: &str,
-    name: Option<&str>,
-    cwd: Option<&Path>,
-    command: Option<&str>,
-) -> String {
-    let mut s = format!(
-        "#!/bin/sh\nexec {} run --dir {} --ticket {}",
+/// The content of a `.command` file that runs `bin run` in `dir` for `ticket`, with `shell` as a login shell.
+pub fn command_file(bin: &Path, dir: &Path, ticket: &str, shell: &str) -> String {
+    format!(
+        "#!/bin/sh\nexec {} run --dir {} --ticket {} -- {} -l\n",
         quote(&bin.to_string_lossy()),
         quote(&dir.to_string_lossy()),
-        quote(ticket)
-    );
-    if let Some(n) = name {
-        s.push_str(&format!(" --name {}", quote(n)));
-    }
-    if let Some(c) = cwd {
-        s.push_str(&format!(" --cwd {}", quote(&c.to_string_lossy())));
-    }
-    if let Some(c) = command {
-        s.push_str(" -- ");
-        s.push_str(c);
-    }
-    s.push('\n');
-    s
+        quote(ticket),
+        quote(shell)
+    )
 }
 
 /// The terminal programs this machine can open a window with: on macOS Terminal, and iTerm when it is installed.
@@ -89,21 +70,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_command_file_quotes_everything_but_the_command() {
-        let f = command_file(
-            Path::new("/A pp/rapp-term"),
-            Path::new("/r/local/term"),
-            "t1",
-            Some("it's"),
-            Some(Path::new("/w")),
-            Some("claude --resume"),
-        );
+    fn the_command_file_runs_the_shell_as_a_login_shell() {
+        let f = command_file(Path::new("/A pp/rapp-term"), Path::new("/r/local/term"), "t1", "/opt/my shells/fish");
         assert_eq!(
             f,
-            "#!/bin/sh\nexec '/A pp/rapp-term' run --dir '/r/local/term' --ticket 't1' --name 'it'\\''s' --cwd '/w' -- claude --resume\n"
+            "#!/bin/sh\nexec '/A pp/rapp-term' run --dir '/r/local/term' --ticket 't1' -- '/opt/my shells/fish' -l\n"
         );
-        let bare = command_file(Path::new("/b"), Path::new("/d"), "t", None, None, None);
-        assert_eq!(bare, "#!/bin/sh\nexec '/b' run --dir '/d' --ticket 't'\n");
     }
 
     #[cfg(target_os = "macos")]
