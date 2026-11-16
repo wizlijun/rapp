@@ -390,5 +390,6 @@
 - [x] `cd gui && flutter analyze && flutter test`：2026-11-16 在 Mac 上跑过。`a share that leaves this device out` 不过，是测试数据给不含本机的分享也配了地址（服务不给），改了测试数据（8133648），之后 1693 条全过
 - [x] macOS 上 `cargo test --workspace`：2026-11-16 547 条过；`rapp-term` 的 `a_dead_socket_is_removed_and_skipped` 跑全套时失败一次，单跑 3 次都过，和这次改动无关
 - [ ] 真机：两台设备，一台分享 Jupyter / Ollama / Vite / sshd，另一台在面板里点"打开"、用 `curl http://localhost:<端口>`、`ssh -p <端口> localhost`；经 relay 和局域网各一次
+  - 2026-11-16（0.12.2）：用户报告别的机器经本机映射端口访问这台的 8007（Python display_server）成功。反方向：MacBook-M4-Pro 的 8007 没有服务在听，这台连 `localhost:28000` 时日志如实记 `map_refused … refused`。还差：sshd（22）、经 relay 和局域网各一次分开确认
 - [ ] 真机：访问方的服务重启后，不打开面板，原来的地址还能用
 - [ ] macOS：别的程序在"所有地址"上监听 28000 时，rapp 跳过它
