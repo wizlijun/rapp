@@ -304,6 +304,9 @@ final class Session {
     private var menuBar: [MenuItem]?
     private var pendingMenuRead: DispatchWorkItem?
     private var focusedWindow: UInt32?
+    /// B's focus bit (v12) and its session; nil unless the bit is on, a desktop session is not, and the app is known (F5).
+    private var requestedFocus = false
+    private var focusSession: FocusSession?
 
     /// A desktop session (`desktop:` or `desktop:<id>`): the whole display, no app.
     private var desktop = false
@@ -420,9 +423,12 @@ final class Session {
             if let target = desktopTarget(app) { startDesktop(target) } else { startCapture(bundleID: app) }
         case .text, .key, .mouse, .scroll:
             injector?.handle(message, table: table)
+            focusSession?.input(message)
             // Enabled items and check marks follow what the input did (a selection, an edit).
             if message.mayChangeMenus, menuBar != nil { scheduleMenuRead(after: 0.5) }
-        case let .setStream(mode, fps, density, pinned, _):  // focus: wired in a later task
+        case let .setStream(mode, fps, density, pinned, focus):
+            requestedFocus = focus
+            syncFocus()
             requestedMode = mode
             requestedDensity = density
             requestedFps = Int(fps)  // before setPinned/setSteps: their levelChanged must use the new ceiling
@@ -485,6 +491,7 @@ final class Session {
                 return
             }
             if case let .text(text) = source { inlinePastes[seq] = text.utf8.count }
+            focusSession?.input(message)
             paster.paste(seq: seq, source)
         case let .selectInput(id):
             selectInput(id)
@@ -651,6 +658,7 @@ final class Session {
                         height: UInt16(clamping: Int(display.height.rounded()))))
         }
         tableChanged(table)
+        syncFocus()
         scheduleMenuRead(after: 0)
         startClipboard(app: app)
         startInputSource()
@@ -743,6 +751,7 @@ final class Session {
         let locked = screenLocked(CGSessionCopyCurrentDictionary() as? [String: Any])
         guard locked != sentLocked else { return }
         sentLocked = locked
+        focusSession?.locked(locked)
         output.log(locked ? "A is locked" : "A is unlocked")
         send(.screenLocked(locked))
     }
@@ -822,6 +831,7 @@ final class Session {
                 output.log("windows: " + (next.isEmpty ? "none" : next.map { "\($0.kind) \($0.id)" }.joined(separator: ", ")))
             }
             table = next
+            focusSession?.windows(next)
             send(.windows(next))
             let focused = next.first(where: \.focused)?.id
             if focused != focusedWindow {
@@ -909,6 +919,7 @@ final class Session {
             })
         }
         paced.onLevelChange = { [weak self] level in self?.levelChanged(level) }
+        paced.onEncoded = { [weak self] in self?.focusSession?.encoded($0) }
         self.paced = paced
     }
 
@@ -918,6 +929,22 @@ final class Session {
     private func applyLevel(_ level: Int) {
         let s = SaveLadder.stream(level: level, ceiling: ceiling)
         setStream(s.mode, fps: s.fps, density: s.density)
+    }
+
+    /// Creates or drops the focus session to match B's focus bit (F5: nothing exists while it is off).
+    private func syncFocus() {
+        guard !ended else { return }
+        if requestedFocus, !desktop, let app, focusSession == nil {
+            let session = FocusSession(pid: app.processIdentifier, display: display, queue: queue,
+                                       send: { [weak self] in self?.send($0) }, log: { [output] in output.log($0) })
+            focusSession = session
+            session.windows(table)
+            session.locked(sentLocked ?? false)
+            session.start()
+        } else if !requestedFocus, let session = focusSession {
+            session.stop()
+            focusSession = nil
+        }
     }
 
     private func levelChanged(_ level: Int) {
@@ -1097,6 +1124,8 @@ final class Session {
         lockWaitTimer = nil
         paster?.end()
         paster = nil
+        focusSession?.stop()
+        focusSession = nil
         clipWatcher?.stop()
         clipWatcher = nil
         inputWatcher?.stop()
@@ -1120,6 +1149,6 @@ final class Session {
 }
 
 /// CLOCK_UPTIME_RAW in seconds: the clock PacedSender's `now` and `captured` share.
-private func uptimeSeconds() -> TimeInterval {
+func uptimeSeconds() -> TimeInterval {
     Double(clock_gettime_nsec_np(CLOCK_UPTIME_RAW)) / 1e9
 }
