@@ -99,7 +99,7 @@ pub fn share(state: &State, req: &Value, allow: Allow, by: &By) -> Result<Vec<Sh
 /// another program has is logged (`share_number_taken`) once per share and number, not on every
 /// call: the table asks again each time it is read, to take the number once it is free.
 pub fn sync_own(state: &State) {
-    for s in state.own.sync(&state.shares.list()) {
+    for s in state.own.sync(&|| state.shares.list()) {
         let Some(local) = s.local else { continue };
         if state.own.first_taken(s.port, local) {
             state.log.event(Lvl::Warn, "share_number_taken", json!({"port": s.port, "local": local}));

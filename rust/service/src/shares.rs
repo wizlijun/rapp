@@ -72,10 +72,10 @@ fn is_true(b: &bool) -> bool {
 /// None when there is none left.
 pub type Pick<'a> = &'a dyn Fn(&[u16]) -> Option<u16>;
 
-/// A field this does not know makes the file unreadable: a misspelt `allow` dropped in silence
-/// would share the port with every trusted device.
+/// A field this does not know is ignored (and dropped on the next write), so that rolling back
+/// from a later version that added one keeps the shares instead of reading the whole file as
+/// broken. The file is written by rapp; a field misspelt by hand is not caught.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct Share {
     pub port: u16,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -236,11 +236,14 @@ impl Shares {
         Ok(numbered)
     }
 
-    /// Gives the share of `port` another number, as `(old, new)`. Its current number counts as
-    /// used, so the new one differs. None when it is not shared, has no number, or none is left.
-    pub fn renumber(&self, port: u16, pick: Pick) -> Result<Option<(u16, u16)>> {
+    /// Gives the share of `port` another number than `from`, as `(old, new)`. Its current number
+    /// counts as used, so the new one differs. None when it is not shared, has no number, has
+    /// another number than `from` now, or none is left. `from` is the number the caller saw
+    /// clash: two calls that saw the same clash at once then move the share once, not twice.
+    pub fn renumber(&self, port: u16, from: u16, pick: Pick) -> Result<Option<(u16, u16)>> {
         let mut items = self.items.lock().unwrap();
-        let Some(old) = items.0.iter().find(|s| s.port == port).and_then(|s| s.local) else { return Ok(None) };
+        let now = items.0.iter().find(|s| s.port == port).and_then(|s| s.local);
+        let Some(old) = now.filter(|&l| l == from) else { return Ok(None) };
         let used: Vec<u16> = items.0.iter().filter_map(|s| s.local).collect();
         let Some(new) = pick(&used) else { return Ok(None) };
         let mut next = items.0.clone();
@@ -515,10 +518,23 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let (s, _) = Shares::load(d.path());
         s.add(Share { local: Some(29000), ..share(8000) }).unwrap();
-        assert_eq!(s.renumber(8000, &lowest).unwrap(), Some((29000, 29001)));
+        assert_eq!(s.renumber(8000, 29000, &lowest).unwrap(), Some((29000, 29001)));
         assert_eq!(Shares::load(d.path()).0.get(8000).unwrap().local, Some(29001));
-        assert_eq!(s.renumber(8000, &|_| None).unwrap(), None);
-        assert_eq!(s.renumber(9, &lowest).unwrap(), None);
+        assert_eq!(s.renumber(8000, 29001, &|_| None).unwrap(), None);
+        assert_eq!(s.renumber(9, 29000, &lowest).unwrap(), None);
+    }
+
+    /// Two reads of the other device's table saw the same clash on 29000: the second finds the
+    /// share on 29001 already and leaves it there.
+    #[test]
+    fn renumber_moves_only_off_the_number_given() {
+        let d = tempfile::tempdir().unwrap();
+        let (s, _) = Shares::load(d.path());
+        s.add(Share { local: Some(29000), ..share(8000) }).unwrap();
+        assert_eq!(s.renumber(8000, 29000, &lowest).unwrap(), Some((29000, 29001)));
+        assert_eq!(s.renumber(8000, 29000, &lowest).unwrap(), None);
+        assert_eq!(s.get(8000).unwrap().local, Some(29001));
+        assert_eq!(Shares::load(d.path()).0.get(8000).unwrap().local, Some(29001));
     }
 
     #[test]
@@ -566,19 +582,20 @@ mod tests {
         assert_eq!(std::fs::read(d.path().join("shares.json")).unwrap(), b"{not json"); // left as it was
     }
 
-    // A misspelt field must not be dropped: `alow` would otherwise share the port with everyone.
+    /// A later version may add a field; rolling back to this one must keep the shares. The
+    /// field this one does not know is dropped on the next write, the share stays.
     #[test]
-    fn a_field_it_does_not_know_makes_the_file_unreadable() {
+    fn a_field_it_does_not_know_is_ignored_and_the_share_kept() {
         let d = tempfile::tempdir().unwrap();
-        let text = format!(r#"[{{"port":8000,"alow":["{}"]}}]"#, fp(1));
+        let text = format!(r#"[{{"port":8000,"allow":["{}"],"local":29000,"later":{{"x":1}}}}]"#, fp(1));
         std::fs::write(d.path().join("shares.json"), &text).unwrap();
         let (s, why) = Shares::load(d.path());
-        assert!(s.list().is_empty(), "{:?}", s.list());
-        assert!(why.is_some_and(|w| w.contains("alow")));
-        // kept as `.bad` on the first write, like any unreadable file
+        assert_eq!(why, None);
+        let kept = Share { allow: vec![fp(1)], local: Some(29000), ..share(8000) };
+        assert_eq!(s.list(), std::slice::from_ref(&kept));
         s.add(share(8001)).unwrap();
-        assert_eq!(std::fs::read_to_string(d.path().join("shares.json.bad")).unwrap(), text);
-        assert_eq!(Shares::load(d.path()).0.list(), [share(8001)]);
+        assert!(!d.path().join("shares.json.bad").exists());
+        assert_eq!(Shares::load(d.path()).0.list(), [kept, share(8001)]);
     }
 
     #[test]

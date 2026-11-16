@@ -78,14 +78,23 @@ pub fn saw(state: &Arc<State>, id: &str, name: &str, numbers: &[u16]) {
     }
     let mut moved = false;
     for s in state.shares.list() {
-        if !s.local.is_some_and(|l| numbers.contains(&l)) {
-            continue;
-        }
-        match state.shares.renumber(s.port, &|used| pick(state, used)) {
+        let Some(local) = s.local.filter(|l| numbers.contains(l)) else { continue };
+        // Whether `pick` found no number: a share that stays on the clash is logged, unlike one
+        // another call already moved.
+        let none_left = std::cell::Cell::new(false);
+        let pick = |used: &[u16]| {
+            let got = pick(state, used);
+            none_left.set(got.is_none());
+            got
+        };
+        match state.shares.renumber(s.port, local, &pick) {
             Ok(Some((from, to))) => {
                 state.log.event(Lvl::Info, "share_renumbered", json!({"port": s.port, "from": from, "to": to, "with": id}));
                 state.numbers.set_renumbered(s.port, Renumbered { from, with: name.to_string() });
                 moved = true;
+            }
+            Ok(None) if none_left.get() => {
+                state.log.event(Lvl::Warn, "share_renumber_failed", json!({"port": s.port, "local": local, "with": id}));
             }
             Ok(None) => {}
             Err(e) => state.log.event(Lvl::Warn, "shares_error", json!({"err": format!("{e:#}")})),

@@ -126,11 +126,17 @@ impl Maps {
     /// to a port that is not in `avoid` (numbers in use elsewhere) and not `wanted`. With no
     /// `wanted` (a sharer from before numbers) the map keeps the port it has, or gets the lowest
     /// free one that is not in `avoid`.
-    pub fn ensure(&self, id: &str, port: u16, wanted: Option<u16>, avoid: &[u16], serve: Serve) -> Option<u16> {
+    ///
+    /// `mine` are the numbers of this device's own shares (also in `avoid`). A `wanted` among
+    /// them is one this device listens on for its own share (two sharers gave the same number),
+    /// so the map yields straight away: no probe of it, and it is not taken in the moment that
+    /// this device is not listening there (a number changing hands).
+    #[allow(clippy::too_many_arguments)]
+    pub fn ensure(&self, id: &str, port: u16, wanted: Option<u16>, avoid: &[u16], mine: &[u16], serve: Serve) -> Option<u16> {
         let mut items = self.items.lock().unwrap();
         let before: Vec<Map> = items.iter().map(|e| e.map.clone()).collect();
         let mut closing = Vec::new();
-        let got = self.place(&mut items, id, port, wanted, avoid, serve, &mut closing);
+        let got = self.place(&mut items, id, port, wanted, avoid, mine, serve, &mut closing);
         if items.len() != before.len() || items.iter().zip(&before).any(|(e, m)| e.map != *m) {
             self.save(&items);
         }
@@ -142,13 +148,14 @@ impl Maps {
     /// `ensure` on the locked table: the rules in order, the old listeners of a map that moves
     /// put in `closing`.
     #[allow(clippy::too_many_arguments)]
-    fn place(&self, items: &mut Vec<Entry>, id: &str, port: u16, wanted: Option<u16>, avoid: &[u16], serve: Serve, closing: &mut Vec<JoinHandle<()>>) -> Option<u16> {
+    fn place(&self, items: &mut Vec<Entry>, id: &str, port: u16, wanted: Option<u16>, avoid: &[u16], mine: &[u16], serve: Serve, closing: &mut Vec<JoinHandle<()>>) -> Option<u16> {
         let wanted = self.honoured(wanted);
         let at = items.iter().position(|e| e.map.id == id && e.map.port == port);
         if let Some(i) = at {
             items[i].map.wanted = wanted;
         }
-        if let Some(w) = wanted {
+        // This device's own share is on that number (or is about to be): yield without asking.
+        if let Some(w) = wanted.filter(|w| !mine.contains(w)) {
             if let Some(i) = at.filter(|&i| items[i].map.local == w && !items[i].tasks.is_empty()) {
                 return Some(items[i].map.local);
             }
@@ -338,13 +345,15 @@ fn bind(addr: SocketAddr) -> std::io::Result<TcpListener> {
 /// number because a map that just moved still held it is asked again once that listener is
 /// closed, so that two maps on each other's numbers both end on their own in one read.
 pub async fn ensure_all(state: &Arc<State>, id: &str, wants: &[(u16, Option<u16>)]) -> Vec<Option<u16>> {
+    let mine: Vec<u16> = state.shares.list().iter().filter_map(|s| s.local).collect();
     let mut avoid = state.numbers.seen();
-    avoid.extend(state.shares.list().iter().filter_map(|s| s.local));
+    avoid.extend(&mine);
     let serve = serve(state);
-    let mut got: Vec<Option<u16>> = wants.iter().map(|&(port, wanted)| state.maps.ensure(id, port, wanted, &avoid, &serve)).collect();
+    let ensure = |&(port, wanted): &(u16, Option<u16>)| state.maps.ensure(id, port, wanted, &avoid, &mine, &serve);
+    let mut got: Vec<Option<u16>> = wants.iter().map(ensure).collect();
     let yielded = |got: &[Option<u16>]| wants.iter().zip(got).any(|((_, w), g)| w.is_some() && g != w);
     if yielded(&got) && state.maps.closed().await {
-        got = wants.iter().map(|&(port, wanted)| state.maps.ensure(id, port, wanted, &avoid, &serve)).collect();
+        got = wants.iter().map(ensure).collect();
     }
     got
 }
@@ -439,10 +448,10 @@ mod tests {
         let (maps, why) = Maps::load(home.path(), 29100, 10);
         assert_eq!(why, None);
         let serve = quiet();
-        assert_eq!(maps.ensure("111111111", 8000, None, &[], &serve), Some(29100));
-        assert_eq!(maps.ensure("111111111", 22, None, &[], &serve), Some(29101));
-        assert_eq!(maps.ensure("222222222", 8000, None, &[], &serve), Some(29102));
-        assert_eq!(maps.ensure("111111111", 8000, None, &[], &serve), Some(29100));
+        assert_eq!(maps.ensure("111111111", 8000, None, &[], &[], &serve), Some(29100));
+        assert_eq!(maps.ensure("111111111", 22, None, &[], &[], &serve), Some(29101));
+        assert_eq!(maps.ensure("222222222", 8000, None, &[], &[], &serve), Some(29102));
+        assert_eq!(maps.ensure("111111111", 8000, None, &[], &[], &serve), Some(29100));
         let all = vec![map("111111111", 8000, 29100), map("111111111", 22, 29101), map("222222222", 8000, 29102)];
         assert_eq!(maps.list(), all);
         assert_eq!(saved(home.path()), all);
@@ -454,7 +463,7 @@ mod tests {
         let (maps, _) = Maps::load(home.path(), 29110, 10);
         let n = Arc::new(AtomicUsize::new(0));
         let serve = counting(n.clone());
-        let local = maps.ensure("111111111", 8000, None, &[], &serve).unwrap();
+        let local = maps.ensure("111111111", 8000, None, &[], &[], &serve).unwrap();
         assert!(connects(local));
         until("accepted", || n.load(Ordering::SeqCst) == 1).await;
         if std::net::TcpStream::connect_timeout(&(Ipv6Addr::LOCALHOST, local).into(), TAKEN_WAIT).is_ok() {
@@ -468,8 +477,8 @@ mod tests {
         let serve = quiet();
         {
             let (maps, _) = Maps::load(home.path(), 29120, 10);
-            maps.ensure("111111111", 8000, None, &[], &serve);
-            maps.ensure("111111111", 22, None, &[], &serve);
+            maps.ensure("111111111", 8000, None, &[], &[], &serve);
+            maps.ensure("111111111", 22, None, &[], &[], &serve);
             maps.stop();
         }
         until("ports free again", || !connects(29120) && !connects(29121)).await;
@@ -477,8 +486,8 @@ mod tests {
         assert_eq!(why, None);
         assert_eq!(maps.start(Some(&["111111111".into()]), &serve), vec![]);
         assert!(connects(29120) && connects(29121));
-        assert_eq!(maps.ensure("111111111", 22, None, &[], &serve), Some(29121));
-        assert_eq!(maps.ensure("111111111", 9000, None, &[], &serve), Some(29122));
+        assert_eq!(maps.ensure("111111111", 22, None, &[], &[], &serve), Some(29121));
+        assert_eq!(maps.ensure("111111111", 9000, None, &[], &[], &serve), Some(29122));
     }
 
     #[tokio::test]
@@ -486,7 +495,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let _theirs = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 29130)).unwrap();
         let (maps, _) = Maps::load(home.path(), 29130, 10);
-        assert_eq!(maps.ensure("111111111", 8000, None, &[], &quiet()), Some(29131));
+        assert_eq!(maps.ensure("111111111", 8000, None, &[], &[], &quiet()), Some(29131));
     }
 
     #[tokio::test]
@@ -494,7 +503,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let _theirs = std::net::TcpListener::bind((Ipv4Addr::UNSPECIFIED, 29140)).unwrap();
         let (maps, _) = Maps::load(home.path(), 29140, 10);
-        assert_eq!(maps.ensure("111111111", 8000, None, &[], &quiet()), Some(29141));
+        assert_eq!(maps.ensure("111111111", 8000, None, &[], &[], &quiet()), Some(29141));
     }
 
     #[tokio::test]
@@ -505,8 +514,8 @@ mod tests {
         let (maps, _) = Maps::load(home.path(), 29150, 10);
         let serve = quiet();
         assert_eq!(maps.start(Some(&["111111111".into()]), &serve), vec![map("111111111", 8000, 29150)]);
-        assert_eq!(maps.ensure("111111111", 22, None, &[], &serve), Some(29151));
-        assert_eq!(maps.ensure("111111111", 8000, None, &[], &serve), Some(29152));
+        assert_eq!(maps.ensure("111111111", 22, None, &[], &[], &serve), Some(29151));
+        assert_eq!(maps.ensure("111111111", 8000, None, &[], &[], &serve), Some(29152));
         assert_eq!(saved(home.path()), vec![map("111111111", 22, 29151), map("111111111", 8000, 29152)]);
     }
 
@@ -515,9 +524,9 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let (maps, _) = Maps::load(home.path(), 29160, 10);
         let serve = quiet();
-        maps.ensure("111111111", 8000, None, &[], &serve);
-        maps.ensure("111111111", 22, None, &[], &serve);
-        maps.ensure("222222222", 22, None, &[], &serve);
+        maps.ensure("111111111", 8000, None, &[], &[], &serve);
+        maps.ensure("111111111", 22, None, &[], &[], &serve);
+        maps.ensure("222222222", 22, None, &[], &[], &serve);
         maps.keep("111111111", &[22]);
         let left = vec![map("111111111", 22, 29161), map("222222222", 22, 29162)];
         assert_eq!(maps.list(), left);
@@ -525,7 +534,7 @@ mod tests {
         until("29160 is closed", || !connects(29160)).await;
         assert!(connects(29161) && connects(29162));
         // The freed port is the lowest free one again.
-        assert_eq!(maps.ensure("222222222", 8000, None, &[], &serve), Some(29160));
+        assert_eq!(maps.ensure("222222222", 8000, None, &[], &[], &serve), Some(29160));
     }
 
     #[tokio::test]
@@ -537,7 +546,7 @@ mod tests {
         assert_eq!(maps.start(Some(&["222222222".into()]), &serve), vec![]);
         assert_eq!(saved(home.path()), vec![map("222222222", 8000, 29171)]);
         assert!(!connects(29170) && connects(29171));
-        maps.ensure("333333333", 1, None, &[], &serve);
+        maps.ensure("333333333", 1, None, &[], &[], &serve);
         maps.keep_devices(&["333333333".into()]);
         assert_eq!(maps.list(), vec![map("333333333", 1, 29170)]);
         until("29171 is closed", || !connects(29171)).await;
@@ -568,15 +577,15 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let (maps, _) = Maps::load(home.path(), 29180, 2);
         let serve = quiet();
-        assert_eq!(maps.ensure("111111111", 1, None, &[], &serve), Some(29180));
-        assert_eq!(maps.ensure("111111111", 2, None, &[], &serve), Some(29181));
-        assert_eq!(maps.ensure("111111111", 3, None, &[], &serve), None);
-        assert_eq!(maps.ensure("111111111", 2, None, &[], &serve), Some(29181));
+        assert_eq!(maps.ensure("111111111", 1, None, &[], &[], &serve), Some(29180));
+        assert_eq!(maps.ensure("111111111", 2, None, &[], &[], &serve), Some(29181));
+        assert_eq!(maps.ensure("111111111", 3, None, &[], &[], &serve), None);
+        assert_eq!(maps.ensure("111111111", 2, None, &[], &[], &serve), Some(29181));
         let (none, _) = Maps::load(home.path(), 29190, 0);
-        assert_eq!(none.ensure("111111111", 1, None, &[], &serve), None);
+        assert_eq!(none.ensure("111111111", 1, None, &[], &[], &serve), None);
         // The end of the port numbers is not run over.
         let (last, _) = Maps::load(tempfile::tempdir().unwrap().path(), 65535, 10);
-        let got = last.ensure("111111111", 1, None, &[], &serve);
+        let got = last.ensure("111111111", 1, None, &[], &[], &serve);
         assert!(got == Some(65535) || got.is_none(), "{got:?}");
     }
 
@@ -587,7 +596,7 @@ mod tests {
         let (maps, why) = Maps::load(home.path(), 29200, 10);
         assert!(why.is_some());
         assert_eq!(maps.list(), vec![]);
-        assert_eq!(maps.ensure("111111111", 8000, None, &[], &quiet()), Some(29200));
+        assert_eq!(maps.ensure("111111111", 8000, None, &[], &[], &quiet()), Some(29200));
         assert_eq!(saved(home.path()), vec![map("111111111", 8000, 29200)]);
     }
 
@@ -595,7 +604,7 @@ mod tests {
     async fn stop_closes_every_port_and_keeps_the_table() {
         let home = tempfile::tempdir().unwrap();
         let (maps, _) = Maps::load(home.path(), 29210, 10);
-        maps.ensure("111111111", 8000, None, &[], &quiet());
+        maps.ensure("111111111", 8000, None, &[], &[], &quiet());
         maps.stop();
         until("29210 is closed", || !connects(29210)).await;
         assert_eq!(saved(home.path()), vec![map("111111111", 8000, 29210)]);
@@ -611,7 +620,7 @@ mod tests {
     async fn a_wanted_number_is_used_when_free() {
         let home = tempfile::tempdir().unwrap();
         let (maps, _) = Maps::load(home.path(), 29440, 10);
-        assert_eq!(maps.ensure("111111111", 8000, Some(29440), &[], &quiet()), Some(29440));
+        assert_eq!(maps.ensure("111111111", 8000, Some(29440), &[], &[], &quiet()), Some(29440));
         assert_eq!(saved(home.path()), vec![wanting("111111111", 8000, 29440, 29440)]);
         assert!(connects(29440));
     }
@@ -622,10 +631,10 @@ mod tests {
         let theirs = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 29450)).unwrap();
         let (maps, _) = Maps::load(home.path(), 29450, 10);
         let serve = quiet();
-        assert_eq!(maps.ensure("111111111", 8000, Some(29450), &[29451], &serve), Some(29452));
+        assert_eq!(maps.ensure("111111111", 8000, Some(29450), &[29451], &[], &serve), Some(29452));
         assert_eq!(saved(home.path()), vec![wanting("111111111", 8000, 29452, 29450)]);
         // Asked again while the number is still taken: it stays where it yielded to.
-        assert_eq!(maps.ensure("111111111", 8000, Some(29450), &[29451], &serve), Some(29452));
+        assert_eq!(maps.ensure("111111111", 8000, Some(29450), &[29451], &[], &serve), Some(29452));
         drop(theirs);
     }
 
@@ -635,9 +644,9 @@ mod tests {
         let theirs = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 29460)).unwrap();
         let (maps, _) = Maps::load(home.path(), 29460, 10);
         let serve = quiet();
-        assert_eq!(maps.ensure("111111111", 8000, Some(29460), &[29461], &serve), Some(29462));
+        assert_eq!(maps.ensure("111111111", 8000, Some(29460), &[29461], &[], &serve), Some(29462));
         drop(theirs);
-        assert_eq!(maps.ensure("111111111", 8000, Some(29460), &[29461], &serve), Some(29460));
+        assert_eq!(maps.ensure("111111111", 8000, Some(29460), &[29461], &[], &serve), Some(29460));
         assert_eq!(saved(home.path()), vec![wanting("111111111", 8000, 29460, 29460)]);
         assert_eq!(maps.target(29460).map(|m| m.port), Some(8000));
         assert_eq!(maps.target(29462), None);
@@ -650,9 +659,9 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let (maps, _) = Maps::load(home.path(), 29470, 10);
         let serve = quiet();
-        assert_eq!(maps.ensure("111111111", 8000, Some(29470), &[], &serve), Some(29470));
-        assert_eq!(maps.ensure("333333333", 8000, Some(29470), &[], &serve), Some(29471));
-        assert_eq!(maps.ensure("111111111", 8000, Some(29470), &[], &serve), Some(29470));
+        assert_eq!(maps.ensure("111111111", 8000, Some(29470), &[], &[], &serve), Some(29470));
+        assert_eq!(maps.ensure("333333333", 8000, Some(29470), &[], &[], &serve), Some(29471));
+        assert_eq!(maps.ensure("111111111", 8000, Some(29470), &[], &[], &serve), Some(29470));
         assert_eq!(maps.list(), vec![wanting("111111111", 8000, 29470, 29470), wanting("333333333", 8000, 29471, 29470)]);
     }
 
@@ -664,10 +673,10 @@ mod tests {
         let n = Arc::new(AtomicUsize::new(0));
         let serve = counting(n.clone());
         assert_eq!(maps.start(None, &serve), vec![]);
-        assert_eq!(maps.ensure("111111111", 8000, Some(29481), &[], &serve), Some(29481));
+        assert_eq!(maps.ensure("111111111", 8000, Some(29481), &[], &[], &serve), Some(29481));
         // The listener A left is closed a moment later (its task is aborted, not yet dropped).
         maps.closed().await;
-        assert_eq!(maps.ensure("333333333", 5353, Some(29480), &[], &serve), Some(29480));
+        assert_eq!(maps.ensure("333333333", 5353, Some(29480), &[], &[], &serve), Some(29480));
         assert_eq!(maps.target(29481).map(|m| m.id), Some("111111111".into()));
         assert_eq!(maps.target(29480).map(|m| m.id), Some("333333333".into()));
         assert_eq!(maps.list().len(), 2);
@@ -679,8 +688,26 @@ mod tests {
     async fn a_map_of_an_old_sharer_avoids_seen_numbers() {
         let home = tempfile::tempdir().unwrap();
         let (maps, _) = Maps::load(home.path(), 29490, 10);
-        assert_eq!(maps.ensure("111111111", 8000, None, &[29490, 29491], &quiet()), Some(29492));
+        assert_eq!(maps.ensure("111111111", 8000, None, &[29490, 29491], &[], &quiet()), Some(29492));
         assert_eq!(saved(home.path()), vec![map("111111111", 8000, 29492)]);
+    }
+
+    /// A wanted number that is this device's own share number (two sharers gave the same one)
+    /// is not taken here even while nothing listens on it: this device's own share may be
+    /// between listeners. The map yields at once, and one already on it moves off.
+    #[tokio::test]
+    async fn a_wanted_number_this_device_shares_on_is_never_taken() {
+        let home = tempfile::tempdir().unwrap();
+        let (maps, _) = Maps::load(home.path(), 29250, 10);
+        let serve = quiet();
+        assert!(free(29250));
+        assert_eq!(maps.ensure("111111111", 8000, Some(29250), &[29250], &[29250], &serve), Some(29251));
+        assert_eq!(saved(home.path()), vec![wanting("111111111", 8000, 29251, 29250)]);
+        assert!(!connects(29250));
+        // A map that sits on it already (from before this device shared on it) moves off.
+        assert_eq!(maps.ensure("333333333", 8000, None, &[], &[], &serve), Some(29250));
+        assert_eq!(maps.ensure("333333333", 8000, Some(29250), &[29250], &[29250], &serve), Some(29252));
+        until("29250 is closed", || !connects(29250)).await;
     }
 
     /// A number outside this device's range is not one this device hands out, and 0 is no
@@ -691,8 +718,8 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let (maps, _) = Maps::load(home.path(), 29580, 10);
         let serve = quiet();
-        assert_eq!(maps.ensure("111111111", 8000, Some(5432), &[], &serve), Some(29580));
-        assert_eq!(maps.ensure("111111111", 8001, Some(0), &[], &serve), Some(29581));
+        assert_eq!(maps.ensure("111111111", 8000, Some(5432), &[], &[], &serve), Some(29580));
+        assert_eq!(maps.ensure("111111111", 8001, Some(0), &[], &[], &serve), Some(29581));
         assert_eq!(saved(home.path()), vec![map("111111111", 8000, 29580), map("111111111", 8001, 29581)]);
     }
 }

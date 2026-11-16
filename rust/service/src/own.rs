@@ -36,11 +36,17 @@ impl Own {
     /// Listens on the number of every share that has one, and stops listening for the shares
     /// that are gone or have another number now. Returns the shares whose number another
     /// program has; each is tried again on the next `sync`.
-    pub fn sync(&self, shares: &[Share]) -> Vec<Share> {
+    ///
+    /// The table is read by `list` while `held` is locked: two calls at once then each act on
+    /// the table as it is when their turn comes, so an older read can never win over a newer one
+    /// (stopping a number just shared, or listening again for one just unshared). Lock order:
+    /// `held`, then the share table; nothing takes them the other way round.
+    pub fn sync(&self, list: &dyn Fn() -> Vec<Share>) -> Vec<Share> {
         if !self.on {
             return Vec::new();
         }
         let mut held = self.held.lock().unwrap();
+        let shares = &list();
         held.retain(|port, (local, tasks)| {
             let stays = shares.iter().any(|s| s.port == *port && s.local == Some(*local));
             if !stays {
@@ -104,4 +110,22 @@ async fn carry(mut tcp: tokio::net::TcpStream, port: u16) {
     let _ = tcp.set_nodelay(true);
     let _ = to.set_nodelay(true);
     let _ = tokio::io::copy_bidirectional(&mut tcp, &mut to).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The race `sync` closes: a table read before the lock could be an older one than what
+    /// another call already acted on. So the table must be read while `held` is locked.
+    #[test]
+    fn the_table_is_read_under_the_lock() {
+        let own = Own::new(true);
+        let locked = std::cell::Cell::new(None);
+        own.sync(&|| {
+            locked.set(Some(own.held.try_lock().is_err()));
+            Vec::new()
+        });
+        assert_eq!(locked.get(), Some(true));
+    }
 }
