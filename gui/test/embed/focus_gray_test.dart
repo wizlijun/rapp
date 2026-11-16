@@ -11,6 +11,7 @@ import 'package:rapp/hub_client.dart';
 import 'package:rapp/paths.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
+import 'package:rapp/ui/tokens.dart';
 
 import '../fakes.dart';
 import '../ui/helpers.dart';
@@ -37,12 +38,12 @@ void main() {
     expect(c.shouldReclip(OutsideClipper(const [Rect.fromLTWH(10, 10, 40, 40)])), isTrue);
   });
 
-  testWidgets('debug frames: one green frame per rect, at the rect, only when asked', (t) async {
+  testWidgets('debug frames: one frame per rect, at the rect, in the given colour, only when asked', (t) async {
     const rects = [Rect.fromLTWH(10, 20, 100, 80), Rect.fromLTWH(150, 20, 60, 60)];
     Widget host(bool frames) => Directionality(
           textDirection: TextDirection.ltr,
           child: Center(
-            child: SizedBox(width: 300, height: 200, child: focusGray(const Size(300, 200), rects, frames: frames)),
+            child: SizedBox(width: 300, height: 200, child: focusGray(const Size(300, 200), rects, frameColor: const Color(0xFF123456), frames: frames)),
           ),
         );
     await t.pumpWidget(host(true));
@@ -51,6 +52,8 @@ void main() {
     final origin = t.getTopLeft(find.byKey(const Key('focus-gray')));
     expect(t.getRect(f.first).shift(-origin), rects[0]);
     expect(t.getRect(f.last).shift(-origin), rects[1]);
+    final box = t.widget<DecoratedBox>(f.first).decoration as BoxDecoration;
+    expect((box.border! as Border).top.color, const Color(0xFF123456));
     await t.pumpWidget(host(false));
     expect(find.byKey(const Key('focus-debug-frame')), findsNothing);
     expect(find.byKey(const Key('focus-gray')), findsOneWidget);
@@ -98,6 +101,19 @@ void main() {
     void focusEvent(int window, List<Rect> rects) => rs.apply(FocusRegionEvent(1, window, rects));
 
     final gray = find.byKey(const Key('focus-gray'));
+
+    testWidgets('the debug frame takes each theme\'s on colour', (tester) async {
+      for (final theme in RappTheme.values) {
+        await tester.pumpWidget(
+          wrap(SizedBox(width: 800, height: 600, child: Picture(state: es, session: rs, window: win())), theme: theme),
+        );
+        await tester.pump(const Duration(seconds: 1)); // MaterialApp animates a theme change
+        focusEvent(5, const [Rect.fromLTWH(0, 28, 200, 150)]);
+        await tester.pump();
+        final box = tester.widget<DecoratedBox>(find.byKey(const Key('focus-debug-frame'))).decoration as BoxDecoration;
+        expect((box.border! as Border).top.color, tokensFor(theme).on, reason: theme.name);
+      }
+    });
 
     Future<void> checks(WidgetTester tester, RemoteWindow w) async {
       await show(tester, w);
