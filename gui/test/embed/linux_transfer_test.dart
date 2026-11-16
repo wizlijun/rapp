@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/session_protocol.dart';
 import 'package:rapp/embed/linux_transfer.dart';
 import 'package:rapp/embed/linux_clipboard.dart';
 import 'linux_text_upload_test.dart' as wire;
@@ -45,7 +46,7 @@ void main() {
         expect(await input.moveNext(), true);
         expect(input.current.$1, 23);
         expect(input.current.$2, [
-          12,
+          sessionProtocolVersion,
           ...wire.string('secret'),
           ...wire.u32(7),
           2,

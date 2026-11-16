@@ -153,6 +153,38 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('a covered notice shows its buttons; 关掉它 asks A, × closes', (tester) async {
+    final e = DesktopEnv();
+    addTearDown(e.dispose);
+    tester.view.physicalSize = const Size(1194, 834);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.runAsync(() => e.state.openOrSwitch('111', 'app', 'App'));
+    await tester.pumpWidget(wrap(
+      MainWindow(state: e.state, monitor: monitor, control: null, fullscreen: fs),
+      disableAnimations: true,
+    ));
+    final sid = e.sid('app');
+    e.port.emit(CoveredEvent(sid, 3, '通知中心', 'com.apple.notificationcenterui', true));
+    await tester.runAsync(() => flush());
+    await tester.pump();
+    expect(find.text('A 上「通知中心」的弹窗挡住了点击'), findsOneWidget);
+    expect(find.text('在桌面会话里处理'), findsOneWidget);
+    await tester.tap(find.text('关掉它'));
+    await tester.pump();
+    expect(e.calls('dismiss_cover').single, {'sid': sid, 'id': 3});
+    expect(find.byKey(const Key('host-notice')), findsNothing);
+    e.port.emit(CoveredEvent(sid, 4, '安全代理', 'com.apple.SecurityAgent', false));
+    await tester.runAsync(() => flush());
+    await tester.pump();
+    expect(find.text('关掉它'), findsNothing);
+    await tester.tap(find.byTooltip('关闭提示'));
+    await tester.pump();
+    expect(find.byKey(const Key('host-notice')), findsNothing);
+    await tester.pump(const Duration(seconds: 1)); // the stage's resize settles
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('the service status tells MainState whether a relay is set', (tester) async {
     monitor.status = ServiceStatus.fromJson({'relay_addr': 'vps:22026', 'has_key': true});
     await pump(tester);

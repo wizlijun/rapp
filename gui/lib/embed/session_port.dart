@@ -322,6 +322,29 @@ class ScreenLockedEvent extends SessionEvent {
   final bool locked;
 }
 
+/// A press on the picture was dropped because another app's window covers that point on A (v13):
+/// [id] names the cover for [SessionPort.dismissCover], offered only when [dismissable].
+class CoveredEvent extends SessionEvent {
+  const CoveredEvent(super.sid, this.id, this.name, this.bundle, this.dismissable);
+  final int id;
+  final String name;
+  final String bundle;
+  final bool dismissable;
+}
+
+/// Another app came to the front on A just after input to this session (a click opened it, v13).
+class AppOpenedEvent extends SessionEvent {
+  const AppOpenedEvent(super.sid, this.bundle, this.name);
+  final String bundle;
+  final String name;
+}
+
+/// A's keyboard focus is (or no longer is) in a password field (v13; role only, never its text).
+class SecureFocusEvent extends SessionEvent {
+  const SecureFocusEvent(super.sid, this.on);
+  final bool on;
+}
+
 class ClosedEvent extends SessionEvent {
   const ClosedEvent(super.sid, this.reason);
   final String reason;
@@ -467,6 +490,13 @@ SessionEvent? parseSessionEvent(String method, Object? args) {
         return InputSourceEvent(sid, _as<String>(m['id']), _as<String>(m['name']), _as<bool>(m['ascii']));
       case 'screen_locked':
         return ScreenLockedEvent(sid, _as<bool>(m['locked']));
+      case 'covered':
+        return CoveredEvent(sid, _as<int>(m['id']), _as<String>(m['name']), _as<String>(m['bundle']),
+            _as<bool>(m['dismissable']));
+      case 'app_opened':
+        return AppOpenedEvent(sid, _as<String>(m['bundle']), _as<String>(m['name']));
+      case 'secure_focus':
+        return SecureFocusEvent(sid, _as<bool>(m['on']));
       case 'closed':
         return ClosedEvent(sid, _as<String>(m['reason']));
     }
@@ -557,6 +587,9 @@ abstract class SessionPort {
 
   /// Types A's system password into its lock screen (a desktop session; A drops it when unlocked).
   void unlock(Object sid, String password) => _send('unlock', {'sid': sid, 'password': password});
+
+  /// Asks A to close the cover [id] of a [CoveredEvent] (A refuses system prompts itself).
+  void dismissCover(Object sid, int id) => _send('dismiss_cover', {'sid': sid, 'id': id});
 
   /// A line over the top of the session's own windows; '' for none (no-op without detach).
   void setBanner(Object sid, String text) => _send('set_banner', {'sid': sid, 'text': text});

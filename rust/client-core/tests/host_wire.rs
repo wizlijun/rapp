@@ -62,6 +62,9 @@ fn host_messages() -> Vec<(u8, Vec<u8>)> {
     let clip = [7u32.to_le_bytes().to_vec(), vec![4], text("unsupported")].concat();
     let pasted = [42u32.to_le_bytes().to_vec(), text("")].concat();
     let input = [text("com.apple.keylayout.ABC"), text("ABC"), vec![1]].concat();
+    // v13: a cover over the press point, another app coming to the front, a password field.
+    let covered = [9u32.to_le_bytes().to_vec(), text("提示"), text("com.apple.Notes"), vec![1]].concat();
+    let opened = [text("com.apple.Safari"), text("Safari")].concat();
     vec![
         (2, ready),
         (3, text("host error")),
@@ -76,6 +79,9 @@ fn host_messages() -> Vec<(u8, Vec<u8>)> {
         (33, vec![2]),
         (34, vec![1]),
         (36, focus(3)),
+        (37, covered),
+        (39, opened),
+        (40, vec![1]),
         (
             4,
             frame(
@@ -104,6 +110,9 @@ fn kind(message: &Incoming) -> u8 {
         Incoming::Saving(_) => 33,
         Incoming::ScreenLocked(_) => 34,
         Incoming::FocusRegion { .. } => 36,
+        Incoming::Covered { .. } => 37,
+        Incoming::AppOpened { .. } => 39,
+        Incoming::SecureFocus(_) => 40,
     }
 }
 
@@ -242,7 +251,7 @@ fn real_worker_smart_stream_keeps_focus_events_frames_and_clear_then_rejects_unk
     socket
         .set_write_timeout(Some(Duration::from_secs(5)))
         .unwrap();
-    assert_eq!(read_client(&mut socket, 1)[0], 12);
+    assert_eq!(read_client(&mut socket, 1)[0], rapp_client_core::protocol::VERSION);
     let mut stdout = worker.0.stdout.take().unwrap();
     let (tx, output) = mpsc::channel();
     std::thread::spawn(move || {
@@ -323,7 +332,9 @@ fn real_worker_smart_stream_keeps_focus_events_frames_and_clear_then_rejects_unk
         );
     }
     assert!(worker.0.try_wait().unwrap().is_none());
-    socket.write_all(&wire(37, &[])).unwrap();
+    // A type outside read_message's allow-list must take the connection down. 37 used to stand in for
+    // "unknown future type" here; it is v13's covered now, so this picks a number far from the protocol.
+    socket.write_all(&wire(200, &[])).unwrap();
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
         let packet = next_output(&output, deadline);
@@ -332,7 +343,7 @@ fn real_worker_smart_stream_keeps_focus_events_frames_and_clear_then_rejects_unk
             assert!(event["reason"]
                 .as_str()
                 .unwrap()
-                .contains("unexpected host message type 37"));
+                .contains("unexpected host message type 200"));
             break;
         }
     }

@@ -73,6 +73,8 @@ public enum ChannelCommand: Equatable {
     case unlock(sid: Int64, password: String)
     /// A strip of text over the top of every detached window of the session; "" takes it away.
     case setBanner(sid: Int64, text: String)
+    /// Ask A to close the cover `id` of a dismissable `covered` (v13).
+    case dismissCover(sid: Int64, id: UInt32)
 }
 
 /// Longest input source id `select_input` passes on (hosts cut theirs to 1024 bytes).
@@ -87,7 +89,7 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
                               "composer_paste", "composer_attach", "composer_send", "composer_drop_block",
                               "detach", "attach", "raise_detached", "fetch_clip", "copy_local", "drop_copy", "reveal",
                               "pin_save", "pin_load", "set_hidden", "close_window", "select_input",
-                              "unlock", "set_banner"]
+                              "unlock", "set_banner", "dismiss_cover"]
     guard known.contains(method) else { throw ChannelError.unknown(method) }
     guard let map = args as? [String: Any] else { throw ChannelError.bad(method) }
     let a = Args(method: method, map: map)
@@ -152,6 +154,9 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
         return .unlock(sid: sid, password: password)
     case "set_banner":
         return .setBanner(sid: sid, text: try a.string("text"))
+    case "dismiss_cover":
+        guard let id = UInt32(exactly: try a.int("id")) else { throw ChannelError.bad(method) }
+        return .dismissCover(sid: sid, id: id)
     case "set_stream":
         return .setStream(sid: sid, mode: try a.mode(), fps: try a.fps(), density: try a.density(),
                           pinned: try a.optionalBool("pinned"), focus: try a.optionalBool("focus"))
@@ -378,6 +383,12 @@ public func eventPayload(_ e: SessionEvent, sid: Int64, textures: [UInt32: Int64
         return payload("screen_locked", ["locked": locked])
     case let .focusRegion(window, rects):
         return payload("focus", ["window": window, "rects": rects.map { [Double($0.x), Double($0.y), Double($0.w), Double($0.h)] }])
+    case let .covered(id, name, bundleID, dismissable):
+        return payload("covered", ["id": id, "name": name, "bundle": bundleID, "dismissable": dismissable])
+    case let .appOpened(bundleID, name):
+        return payload("app_opened", ["bundle": bundleID, "name": name])
+    case let .secureFocus(on):
+        return payload("secure_focus", ["on": on])
     case let .disconnected(reason):
         return payload("disconnected", ["reason": reason])
     case let .closed(reason):

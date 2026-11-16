@@ -1,7 +1,7 @@
 use anyhow::{bail, ensure, Context, Result};
 use std::{collections::HashSet, io::Read};
 
-pub const VERSION: u8 = 12;
+pub const VERSION: u8 = 13;
 
 /// The longest unlock password a client may send (bytes, v11).
 pub const UNLOCK_PASSWORD_LIMIT: usize = 1024;
@@ -77,6 +77,18 @@ pub enum Incoming {
     },
     /// A's screen is locked (v10): input reaches only the lock screen.
     ScreenLocked(bool),
+    /// A press was dropped: another app's window covers that point on A (v13). `id` names the
+    /// cover for `dismiss_cover`, which A honours only when `dismissable`.
+    Covered {
+        id: u32,
+        name: String,
+        bundle: String,
+        dismissable: bool,
+    },
+    /// Another app came to the front on A just after input (a click opened it, v13).
+    AppOpened { bundle: String, name: String },
+    /// A's keyboard focus is in a password field (v13; its role only, never the text).
+    SecureFocus(bool),
 }
 #[derive(Clone, Debug)]
 pub struct Address {
@@ -184,6 +196,10 @@ pub fn unlock(password: &str) -> Vec<u8> {
     let mut p = vec![];
     string(&mut p, password);
     packet(35, p)
+}
+/// Asks A to close the cover `id` of a `Covered` message (v13; A refuses system prompts).
+pub fn dismiss_cover(id: u32) -> Vec<u8> {
+    id_packet(38, id)
 }
 pub fn select_input(id: &str) -> Vec<u8> {
     let mut p = vec![];
@@ -317,9 +333,9 @@ pub fn read_message(input: &mut impl Read) -> Result<(Incoming, usize)> {
     let mut h = [0; 5];
     input.read_exact(&mut h).context("host disconnected")?;
     ensure!(
-        // Main-connection host messages in RappCore/Protocol.swift, including
-        // v12 focusRegion. Side-transfer and client-to-host types stay rejected.
-        [2, 3, 4, 13, 17, 19, 21, 26, 28, 29, 32, 33, 34, 36].contains(&h[0]),
+        // Main-connection host messages in RappCore/Protocol.swift, including v12 focusRegion and
+        // v13 covered/appOpened/secureFocus. Side-transfer and client-to-host types stay rejected.
+        [2, 3, 4, 13, 17, 19, 21, 26, 28, 29, 32, 33, 34, 36, 37, 39, 40].contains(&h[0]),
         "unexpected host message type {}",
         h[0]
     );
@@ -483,6 +499,29 @@ pub fn decode(kind: u8, p: &[u8]) -> Result<Incoming> {
                 rects.push(r.rect()?);
             }
             Incoming::FocusRegion { window, rects }
+        }
+        37 => {
+            let id = r.u32()?;
+            let name = r.string()?;
+            let bundle = r.string()?;
+            let v = r.u8()?;
+            ensure!(v <= 1, "invalid dismissable flag");
+            Incoming::Covered {
+                id,
+                name,
+                bundle,
+                dismissable: v == 1,
+            }
+        }
+        39 => {
+            let bundle = r.string()?;
+            let name = r.string()?;
+            Incoming::AppOpened { bundle, name }
+        }
+        40 => {
+            let v = r.u8()?;
+            ensure!(v <= 1, "invalid secure flag");
+            Incoming::SecureFocus(v == 1)
         }
         _ => bail!("unknown host message type {kind}"),
     };

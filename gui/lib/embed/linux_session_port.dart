@@ -287,7 +287,9 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
       return true;
     }
     final ch = event.character;
+    // Never in a password field on A (v13 secure_focus): the keys go straight there.
     if (_compose &&
+        !s.secure &&
         event is KeyDownEvent &&
         !keyboard.isControlPressed &&
         !keyboard.isAltPressed &&
@@ -550,6 +552,7 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
       case 'close_window':
       case 'select_input':
       case 'unlock':
+      case 'dismiss_cover':
         s.send({'cmd': method, ...args});
       case 'move_top_left':
         final id = args['window'];
@@ -824,6 +827,8 @@ class _Session {
   int? selected;
   bool closed = false;
   bool disconnected = false;
+  /// A's focus is in a password field (v13 secure_focus): no type-to-compose.
+  bool secure = false;
 
   bool _sending = false;
   int _nextSeq = 1;
@@ -1109,6 +1114,7 @@ class _Session {
                 focusRegion = e;
                 nativeFocus();
               }
+              if (e is SecureFocusEvent) secure = e.on;
               emit(e);
             }
           }

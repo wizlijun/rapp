@@ -196,6 +196,17 @@ void main() {
     expect(r.screenLocked, isFalse);
   });
 
+  test('secureFocus follows A, blocks type-to-compose, and goes with the link', () {
+    final r = RemoteSession(1, 'x');
+    expect(r.secureFocus, isFalse);
+    r.apply(const SecureFocusEvent(1, true));
+    expect(r.secureFocus, isTrue);
+    r.apply(const ComposeKeyEvent(1));
+    expect(r.composer.open, isFalse);
+    r.apply(const DisconnectedEvent(1, 'connection closed'));
+    expect(r.secureFocus, isFalse);
+  });
+
   test('ready sets appName and ready', () {
     final r = RemoteSession(1, 'x');
     var n = 0;

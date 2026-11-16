@@ -147,6 +147,31 @@ final class ChannelTests: XCTestCase {
         XCTAssertEqual((e.args["rects"] as? [[Double]])?.count, 0)
     }
 
+    func testDismissCoverCommand() {
+        XCTAssertEqual(try channelCommand("dismiss_cover", ["sid": 2, "id": 412]), .dismissCover(sid: 2, id: 412))
+        XCTAssertThrowsError(try channelCommand("dismiss_cover", ["sid": 2])) { XCTAssertEqual($0 as? ChannelError, .bad("dismiss_cover")) }
+        XCTAssertThrowsError(try channelCommand("dismiss_cover", ["sid": 2, "id": -1]))
+        XCTAssertThrowsError(try channelCommand("dismiss_cover", ["sid": 2, "id": 1 << 33]))
+    }
+
+    func testHostHintPayloads() throws {
+        let c = try XCTUnwrap(eventPayload(.covered(id: 9, name: "通知中心", bundleID: "com.apple.notificationcenterui",
+                                                    dismissable: true), sid: 4, textures: [:]))
+        XCTAssertEqual(c.method, "covered")
+        XCTAssertEqual(c.args["id"] as? UInt32, 9)
+        XCTAssertEqual(c.args["name"] as? String, "通知中心")
+        XCTAssertEqual(c.args["bundle"] as? String, "com.apple.notificationcenterui")
+        XCTAssertEqual(c.args["dismissable"] as? Bool, true)
+        XCTAssertEqual(c.args["sid"] as? Int64, 4)
+        let o = try XCTUnwrap(eventPayload(.appOpened(bundleID: "com.apple.Safari", name: "Safari"), sid: 4, textures: [:]))
+        XCTAssertEqual(o.method, "app_opened")
+        XCTAssertEqual(o.args["bundle"] as? String, "com.apple.Safari")
+        XCTAssertEqual(o.args["name"] as? String, "Safari")
+        let s = try XCTUnwrap(eventPayload(.secureFocus(true), sid: 4, textures: [:]))
+        XCTAssertEqual(s.method, "secure_focus")
+        XCTAssertEqual(s.args["on"] as? Bool, true)
+    }
+
     func testScreenLockedPayload() throws {
         let p = try XCTUnwrap(eventPayload(.screenLocked(true), sid: 4, textures: [:]))
         XCTAssertEqual(p.method, "screen_locked")

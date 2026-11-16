@@ -1,11 +1,14 @@
 import Foundation
 
-/// Protocol v12 = v11 + focusRegion (host -> client: which part of a window has focus) and a focus bit
+/// Protocol v13 = v12 + host hints: covered (a press was dropped because another app's window was on
+/// top) with dismissCover to close it, appOpened (another app came to the front right after B's
+/// input) and secureFocus (A's keyboard focus is in a password field).
+/// v12 = v11 + focusRegion (host -> client: which part of a window has focus) and a focus bit
 /// in setStream's flag byte. v11 = v10 (scroll copy: frame messages carry per-tile flags, see TileCodec; session
 /// ping/pong and the saving ladder: B's setStream values are its ceiling and its pinned byte means
 /// "automatic saving off") + desktop sessions: screenLocked/unlock for the remote lock screen.
 /// The host and client must both speak exactly this version.
-public let protocolVersion: UInt8 = 12
+public let protocolVersion: UInt8 = 13
 
 /// The longest system password `unlock` carries, in UTF-8 bytes.
 public let unlockPasswordLimit = 1024
@@ -135,6 +138,15 @@ public enum Message: Equatable {
     case unlock(password: String)                                                            // 35, client -> host (v11)
     /// The part(s) of `window` that hold keyboard focus, in canvas coordinates; no rects = the whole window.
     case focusRegion(window: UInt32, rects: [CanvasRect])                                    // 36, host -> client (v12)
+    /// A press was dropped: another process's window (`id` = its pid) is on top there. `dismissable`:
+    /// the host may close it on `dismissCover`; never for system security or password prompts.
+    case covered(id: UInt32, name: String, bundleID: String, dismissable: Bool)              // 37, host -> client (v13)
+    /// Close the covering window of a `covered` that said dismissable; dropped otherwise.
+    case dismissCover(UInt32)                                                                // 38, client -> host (v13)
+    /// Another regular app came to the front right after this session's input (a link, a preview).
+    case appOpened(bundleID: String, name: String)                                           // 39, host -> client (v13)
+    /// Whether A's keyboard focus is in a secure (password) text field; sent on change.
+    case secureFocus(Bool)                                                                   // 40, host -> client (v13)
 
     public func encoded() -> [UInt8] {
         var w = Writer()
@@ -262,6 +274,18 @@ public enum Message: Equatable {
             type = 35
             precondition(password.utf8.count <= unlockPasswordLimit, "password too long")
             w.string(password)
+        case let .covered(id, name, bundleID, dismissable):
+            type = 37
+            w.u32(id); w.string(name); w.string(bundleID); w.u8(dismissable ? 1 : 0)
+        case let .dismissCover(id):
+            type = 38
+            w.u32(id)
+        case let .appOpened(bundleID, name):
+            type = 39
+            w.string(bundleID); w.string(name)
+        case let .secureFocus(on):
+            type = 40
+            w.u8(on ? 1 : 0)
         }
         precondition(w.bytes.count <= maxMessageLength, "message too large")
         var out: [UInt8] = [type]
@@ -398,6 +422,18 @@ public enum Message: Equatable {
                 throw CodecError("password longer than \(unlockPasswordLimit) bytes")
             }
             message = .unlock(password: password)
+        case 37:
+            let id = try r.u32(), name = try r.string(), bundleID = try r.string(), flag = try r.u8()
+            guard flag <= 1 else { throw CodecError("bad dismissable flag") }
+            message = .covered(id: id, name: name, bundleID: bundleID, dismissable: flag == 1)
+        case 38:
+            message = .dismissCover(try r.u32())
+        case 39:
+            message = .appOpened(bundleID: try r.string(), name: try r.string())
+        case 40:
+            let flag = try r.u8()
+            guard flag <= 1 else { throw CodecError("bad secure flag") }
+            message = .secureFocus(flag == 1)
         default:
             throw CodecError("unknown message type \(type)")
         }
@@ -406,7 +442,7 @@ public enum Message: Equatable {
     }
 }
 
-private let knownTypes: Set<UInt8> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36]
+private let knownTypes: Set<UInt8> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40]
 
 /// Turns a byte stream into messages. Feed it whatever the socket delivers
 /// with `append`, then call `next()` until it returns nil.

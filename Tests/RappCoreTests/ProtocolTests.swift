@@ -71,7 +71,13 @@ final class ProtocolTests: XCTestCase {
         .inputSource(id: "com.apple.keylayout.ABC", name: "ABC", ascii: true),
         .selectInput(id: ""),
         .selectInput(id: "com.apple.keylayout.US"),
-        .hello(token: "t", bundleID: "b", mode: .gray4, fps: 15, density: 1, version: 12),
+        .hello(token: "t", bundleID: "b", mode: .gray4, fps: 15, density: 1, version: 13),
+        .covered(id: 412, name: "通知中心", bundleID: "com.apple.notificationcenterui", dismissable: true),
+        .covered(id: 0, name: "", bundleID: "", dismissable: false),
+        .dismissCover(412),
+        .appOpened(bundleID: "com.apple.Safari", name: "Safari"),
+        .secureFocus(true),
+        .secureFocus(false),
         .screenLocked(true),
         .screenLocked(false),
         .unlock(password: "pässwörd 1"),
@@ -108,7 +114,7 @@ final class ProtocolTests: XCTestCase {
     }
 
     func testScreenLockedAndUnlockWireFormat() throws {
-        XCTAssertEqual(protocolVersion, 12)
+        XCTAssertEqual(protocolVersion, 13)
         XCTAssertEqual(Message.screenLocked(true).encoded(), [34, 1, 0, 0, 0, 1])
         XCTAssertEqual(Message.unlock(password: "ab").encoded(), [35, 4, 0, 0, 0, 2, 0, 0x61, 0x62])
         XCTAssertThrowsError(try decodeOne([34, 1, 0, 0, 0, 2])) { XCTAssertEqual("\($0)", "bad locked flag") }
@@ -127,14 +133,14 @@ final class ProtocolTests: XCTestCase {
         p.append([1, UInt8(payload.count), 0, 0, 0] + payload)
         XCTAssertThrowsError(try p.next()) { error in
             XCTAssertEqual((error as? ProtocolVersionMismatch)?.client, 2)
-            XCTAssertEqual("\(error)", "protocol version mismatch: host 12, client 2 (update both sides)")
+            XCTAssertEqual("\(error)", "protocol version mismatch: host 13, client 2 (update both sides)")
         }
     }
 
-    func testHelloAcceptsOnlyVersion12() throws {
-        let m = Message.hello(token: "t", bundleID: "b", mode: .gray4, fps: 15, density: 1, version: 12)
+    func testHelloAcceptsOnlyVersion13() throws {
+        let m = Message.hello(token: "t", bundleID: "b", mode: .gray4, fps: 15, density: 1, version: 13)
         XCTAssertEqual(try decodeOne(m.encoded()), m)
-        for v: UInt8 in [10, 11] {
+        for v: UInt8 in [11, 12] {
             var bytes = m.encoded()
             bytes[5] = v
             XCTAssertThrowsError(try decodeOne(bytes)) { XCTAssertEqual(($0 as? ProtocolVersionMismatch)?.client, v) }
@@ -142,18 +148,18 @@ final class ProtocolTests: XCTestCase {
         var old = m.encoded()
         old[5] = 4
         XCTAssertThrowsError(try decodeOne(old)) {
-            XCTAssertEqual("\($0)", "protocol version mismatch: host 12, client 4 (update both sides)")
+            XCTAssertEqual("\($0)", "protocol version mismatch: host 13, client 4 (update both sides)")
         }
     }
 
-    func testFetchAndPutAcceptOnlyVersion12() throws {
+    func testFetchAndPutAcceptOnlyVersion13() throws {
         let f = Message.fetch(token: "t", clip: 1, file: 2, offset: 3).encoded()
         let q = Message.put(token: "t", item: 1, kind: .files, uti: "u", name: "n", total: 5).encoded()
-        XCTAssertEqual(f[5], 12)
-        XCTAssertEqual(q[5], 12)
+        XCTAssertEqual(f[5], 13)
+        XCTAssertEqual(q[5], 13)
         XCTAssertEqual(try decodeOne(f), .fetch(token: "t", clip: 1, file: 2, offset: 3))
         XCTAssertEqual(try decodeOne(q), .put(token: "t", item: 1, kind: .files, uti: "u", name: "n", total: 5))
-        for v: UInt8 in [10, 11] {
+        for v: UInt8 in [11, 12] {
             for var bytes in [f, q] {
                 bytes[5] = v
                 XCTAssertThrowsError(try decodeOne(bytes)) { XCTAssertEqual(($0 as? ProtocolVersionMismatch)?.client, v) }
@@ -203,6 +209,27 @@ final class ProtocolTests: XCTestCase {
         let bytes = Message.focusRegion(window: 7, rects: [CanvasRect(x: 10, y: 20, w: 300, h: 200)]).encoded()
         XCTAssertEqual(bytes.map { String(format: "%02x", $0) }.joined(),
                        "2415000000070000000100002041" + "0000a04100009643" + "00004843")
+    }
+
+    func testHostHintsWireFormat() throws {
+        XCTAssertEqual(Message.covered(id: 5, name: "a", bundleID: "b", dismissable: true).encoded(),
+                       [37, 11, 0, 0, 0, 5, 0, 0, 0, 1, 0, 0x61, 1, 0, 0x62, 1])
+        XCTAssertEqual(Message.dismissCover(5).encoded(), [38, 4, 0, 0, 0, 5, 0, 0, 0])
+        XCTAssertEqual(Message.appOpened(bundleID: "b", name: "a").encoded(), [39, 6, 0, 0, 0, 1, 0, 0x62, 1, 0, 0x61])
+        XCTAssertEqual(Message.secureFocus(true).encoded(), [40, 1, 0, 0, 0, 1])
+        assertRejects(frame(37, [5, 0, 0, 0, 1, 0, 0x61, 1, 0, 0x62, 2]), "bad dismissable flag")
+        assertRejects(frame(40, [2]), "bad secure flag")
+        assertRejects(frame(38, [5, 0, 0, 0, 0]), "dismissCover trailing byte")
+        assertRejects(frame(39, [1, 0, 0x62]), "appOpened without name")
+    }
+
+    func testHostHintsSharedSample() {
+        // Same bytes in rust/client-core/tests/client.rs (host_hints_shared_sample).
+        var bytes: [UInt8] = Message.covered(id: 9, name: "Ab", bundleID: "c.d", dismissable: false).encoded()
+        bytes += Message.appOpened(bundleID: "x", name: "Y").encoded()
+        bytes += Message.secureFocus(true).encoded()
+        let hex: String = bytes.map { String(format: "%02x", $0) }.joined()
+        XCTAssertEqual(hex, "250e00000009000000020041620300632e6400" + "2706000000010078010059" + "280100000001")
     }
 
     func testFocusRegionMoreThanThreeIsBad() {

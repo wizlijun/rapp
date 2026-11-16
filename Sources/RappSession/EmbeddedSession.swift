@@ -299,6 +299,12 @@ public final class EmbeddedSession {
             onEvent?(.screenLocked(locked))
         case let .focusRegion(window, rects):
             onEvent?(.focusRegion(window: window, rects: rects))
+        case let .covered(id, name, bundleID, dismissable):
+            onEvent?(.covered(id: id, name: name, bundleID: bundleID, dismissable: dismissable))
+        case let .appOpened(bundleID, name):
+            onEvent?(.appOpened(bundleID: bundleID, name: name))
+        case let .secureFocus(on):
+            onEvent?(.secureFocus(on))
         default:
             break
         }

@@ -310,6 +310,15 @@ final class Session {
 
     /// A desktop session (`desktop:` or `desktop:<id>`): the whole display, no app.
     private var desktop = false
+    /// The `covered` notices sent (v13): throttled per owner, and what `dismissCover` may close.
+    private var coverNotices = CoverNotices()
+    /// When this session last pressed, typed or picked on A (uptime); an app that comes to the front
+    /// soon after is one the input opened (v13 `appOpened`).
+    private var lastInputAt: TimeInterval?
+    /// NSWorkspace's activation observer; app sessions only.
+    private var activationObserver: NSObjectProtocol?
+    /// Whether A's focus is in a password field (v13); from ready until the end.
+    private var secureWatcher: SecureFocusWatcher?
     /// The lock state last sent (every session, v10); nil before ready.
     private var sentLocked: Bool?
     /// A password is being typed at the lock screen; another unlock waits for it.
@@ -393,7 +402,7 @@ final class Session {
     private func handle(_ message: Message) {
         // Every command from B passes one gate; only input can be held back (R7).
         switch message {
-        case .text, .key, .mouse, .scroll, .paste, .focus, .menuPick, .setStream, .resize, .move, .close, .selectInput, .unlock:
+        case .text, .key, .mouse, .scroll, .paste, .focus, .menuPick, .setStream, .resize, .move, .close, .selectInput, .unlock, .dismissCover:
             guard started, !failing, admit(message) else { return }
         default:
             break
@@ -422,6 +431,7 @@ final class Session {
             output.emit(.sessionStarted(client: clientDescription, mode: mode, fps: Int(fps)))
             if let target = desktopTarget(app) { startDesktop(target) } else { startCapture(bundleID: app) }
         case .text, .key, .mouse, .scroll:
+            if message.opensThings { lastInputAt = ProcessInfo.processInfo.systemUptime }
             injector?.handle(message, table: table)
             focusSession?.input(message)
             // Enabled items and check marks follow what the input did (a selection, an edit).
@@ -471,6 +481,7 @@ final class Session {
                 return
             }
             let pid = app.processIdentifier
+            lastInputAt = ProcessInfo.processInfo.systemUptime
             menuQueue.async { [output] in
                 // Pressed only if A's titles along the path are still what B showed.
                 if !MenuBarReader.press(pid: pid, path: path, titles: titles) {
@@ -500,9 +511,83 @@ final class Session {
             paced?.ack(processingMs: processingMs)
         case let .unlock(password):
             unlock(password)
+        case let .dismissCover(id):
+            dismissCover(id)
         case .ready, .error, .frame, .windows, .menuBar, .clip, .pasted, .fetch, .put, .transferStart, .chunk, .inputBlocked, .weak,
-             .inputSource, .pong, .saving, .screenLocked, .focusRegion:
+             .inputSource, .pong, .saving, .screenLocked, .focusRegion, .covered, .appOpened, .secureFocus:
             fail("unexpected message from client")
+        }
+    }
+
+    /// Closes the window of a `covered` this session reported as dismissable; anything else is dropped.
+    /// The owner is judged again now: a pid reused by a security prompt is never closed.
+    private func dismissCover(_ id: UInt32) {
+        let pid = pid_t(bitPattern: id)
+        guard injector != nil, let point = coverNotices.dismissPoint(pid: pid) else {
+            output.log("dismiss dropped: no such cover")
+            return
+        }
+        coverNotices.forget(pid: pid)
+        let owner = NSRunningApplication(processIdentifier: pid)
+        guard let owner, coverDismissable(bundleID: owner.bundleIdentifier, regular: owner.activationPolicy == .regular)
+        else {
+            output.log("dismiss dropped: the cover may not be closed")
+            return
+        }
+        let name = owner.localizedName ?? "pid \(pid)"
+        menuQueue.async { [output] in
+            if let done = CoverCloser.close(pid: pid, at: point) {
+                output.log("closed the cover of \(name): \(done)")
+            } else {
+                output.log("could not close the cover of \(name)")
+            }
+        }
+    }
+
+    /// A press was dropped under `pid`'s window: tells B once per owner per few seconds (v13), with
+    /// whether `dismissCover` may close it.
+    private func covered(pid: pid_t, name: String, at point: CGPoint) {
+        guard !ended, coverNotices.shouldSend(pid: pid, at: ProcessInfo.processInfo.systemUptime) else { return }
+        let owner = NSRunningApplication(processIdentifier: pid)
+        let bundle = owner?.bundleIdentifier ?? ""
+        let dismissable = coverDismissable(bundleID: bundle, regular: owner?.activationPolicy == .regular)
+        coverNotices.reported(pid: pid, dismissable: dismissable, at: point)
+        send(.covered(id: UInt32(bitPattern: pid), name: owner?.localizedName ?? name, bundleID: bundle,
+                      dismissable: dismissable))
+    }
+
+    /// Another app became frontmost: if it came right after this session's input, B is told it opened.
+    private func activated(_ other: NSRunningApplication) {
+        guard !ended, let app else { return }
+        let since = lastInputAt.map { ProcessInfo.processInfo.systemUptime - $0 }
+        guard appOpenedWorthTelling(bundleID: other.bundleIdentifier, pid: other.processIdentifier,
+                                    regular: other.activationPolicy == .regular, sessionPID: app.processIdentifier,
+                                    ownPID: ProcessInfo.processInfo.processIdentifier, sinceInput: since),
+              let bundle = other.bundleIdentifier else { return }
+        // Once per input: a second activation from the same press is not news.
+        lastInputAt = nil
+        let name = other.localizedName ?? bundle
+        output.log("\(name) came to the front after input")
+        send(.appOpened(bundleID: bundle, name: name))
+    }
+
+    /// From ready on: dropped presses, other apps' activations (app sessions) and password-field focus.
+    private func startHints(app: NSRunningApplication?) {
+        injector?.onCovered = { [weak self] pid, name, point in self?.covered(pid: pid, name: name, at: point) }
+        if app != nil {
+            activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+                forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: nil
+            ) { [weak self] note in
+                guard let other = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+                self?.queue.async { self?.activated(other) }
+            }
+        }
+        secureWatcher = SecureFocusWatcher(pid: app?.processIdentifier) { [weak self] secure in
+            self?.queue.async {
+                guard let self, !self.ended else { return }
+                self.output.log(secure ? "focus is in a password field" : "focus left the password field")
+                self.send(.secureFocus(secure))
+            }
         }
     }
 
@@ -662,6 +747,7 @@ final class Session {
         scheduleMenuRead(after: 0)
         startClipboard(app: app)
         startInputSource()
+        startHints(app: app)
         sendLocked()
         startTimers()
 
@@ -741,6 +827,7 @@ final class Session {
         // One clipboard for the Mac: only the main screen's session carries it.
         if main { startClipboard(app: nil) }
         startInputSource()
+        startHints(app: nil)
         sendLocked()
         startTimers()
     }
@@ -977,9 +1064,10 @@ final class Session {
         if let app, app.isTerminated {
             fail("\(windowTitle("", appName: app.localizedName)) quit")
         }
-        // Backstop for a missed change notification.
+        // Backstop for a missed change notification (the only check for a desktop session's focus).
         sendInputSource()
         sendLocked()
+        secureWatcher?.check()
     }
 
     // MARK: Input source (v8)
@@ -1132,6 +1220,10 @@ final class Session {
         clipWatcher = nil
         inputWatcher?.stop()
         inputWatcher = nil
+        secureWatcher?.stop()
+        secureWatcher = nil
+        if let activationObserver { NSWorkspace.shared.notificationCenter.removeObserver(activationObserver) }
+        activationObserver = nil
         transfers = nil
         capture?.stop()
         capture = nil

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/session_protocol.dart';
 import 'package:rapp/embed/linux_text_upload.dart';
 
 Uint8List u32(int n) =>
@@ -59,7 +60,7 @@ void main() {
         expect(await input.moveNext(), true);
         expect(input.current.$1, 23);
         expect(input.current.$2, [
-          12,
+          sessionProtocolVersion,
           ...string('secret'),
           ...u32(9),
           0,

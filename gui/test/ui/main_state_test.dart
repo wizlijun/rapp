@@ -1513,6 +1513,50 @@ void main() {
       }, sessions: 2);
     });
 
+    test('a covered press shows a notice: dismiss goes to A, the desktop opens, 15 s later it goes', () {
+      env((a, t, port, st, hints) {
+        port.emit(const CoveredEvent(1, 77, '通知中心', 'com.apple.notificationcenterui', true));
+        final n = st.hostNotice!;
+        expect(n.text, 'A 上「通知中心」的弹窗挡住了点击');
+        expect((n.desktop, n.dismissable, n.bundle), (true, true, null));
+        st.noticeDismiss();
+        expect([for (final c in port.calls) if (c.$1 == 'dismiss_cover') c.$2], [{'sid': 1, 'id': 77}]);
+        expect(st.hostNotice, isNull);
+        // A system prompt: only the desktop is offered.
+        port.emit(const CoveredEvent(1, 5, '安全代理', 'com.apple.SecurityAgent', false));
+        expect(st.hostNotice!.dismissable, isFalse);
+        a.elapse(const Duration(seconds: 14));
+        expect(st.hostNotice, isNotNull);
+        a.elapse(const Duration(seconds: 1));
+        expect(st.hostNotice, isNull);
+        port.emit(const CoveredEvent(1, 5, '安全代理', 'com.apple.SecurityAgent', false));
+        st.noticeDesktop();
+        a.flushMicrotasks();
+        expect(t.sent.where((m) => m['cmd'] == 'open').last['app'], 'desktop:');
+        expect(st.hostNotice, isNull);
+      });
+    });
+
+    test('an app opened on A shows 「打开」, which opens it here; × just closes', () {
+      env((a, t, port, st, hints) {
+        port.emit(const AppOpenedEvent(1, 'com.apple.Safari', 'Safari'));
+        expect(st.hostNotice!.text, 'A 上打开了「Safari」');
+        st.closeHostNotice();
+        expect(st.hostNotice, isNull);
+        port.emit(const AppOpenedEvent(1, 'com.apple.Safari', 'Safari'));
+        st.noticeOpen();
+        a.flushMicrotasks();
+        expect(t.sent.where((m) => m['cmd'] == 'open').last['app'], 'com.apple.Safari');
+        expect(st.currentKey, '111/com.apple.Safari');
+      });
+      env((a, t, port, st, hints) {
+        // Only the session on show has its notice on the stage.
+        expect(st.currentKey, '111/aa');
+        port.emit(const AppOpenedEvent(1, 'com.apple.Safari', 'Safari'));
+        expect(st.hostNotice, isNull);
+      }, sessions: 2);
+    });
+
     test('a second blocked event re-arms the 1 s hint', () {
       env((a, t, port, st, hints) {
         const text = '远端正在被 Mac mini 操作';

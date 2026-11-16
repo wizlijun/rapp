@@ -115,9 +115,11 @@ public func isComposeKey(characters: String?, flags: NSEvent.ModifierFlags, isRe
 
 /// The session whose writing panel a main-window key opens (type-to-compose), or nil when the key
 /// goes on as usual: a key-down on the focused picture, compose on for it, and a compose letter.
+/// `remoteSecure`: A's focus is in a password field (v13 `secureFocus`): keys go straight to A, so a
+/// password is never shown in the panel or kept in the input record.
 public func composeStart(keyDown: Bool, composeOn: Bool, targetSid: Int64?, characters: String?,
-                         flags: NSEvent.ModifierFlags, isRepeat: Bool) -> Int64? {
-    guard keyDown, composeOn, let sid = targetSid,
+                         flags: NSEvent.ModifierFlags, isRepeat: Bool, remoteSecure: Bool = false) -> Int64? {
+    guard keyDown, composeOn, !remoteSecure, let sid = targetSid,
           isComposeKey(characters: characters, flags: flags, isRepeat: isRepeat) else { return nil }
     return sid
 }
