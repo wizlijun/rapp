@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'composer_editor.dart';
+import 'linux_candidates.dart';
 
 class FlutterEditor implements ComposerEditor, HandoffEditor {
   FlutterEditor() {
@@ -112,7 +113,7 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
 
   @override
   Widget view(BuildContext context, {required EditorStyle style, required String hint, required double maxHeight}) {
-    return ConstrainedBox(
+    final field = ConstrainedBox(
       constraints: BoxConstraints(maxHeight: maxHeight),
       child: Focus(
         canRequestFocus: false,
@@ -152,6 +153,17 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
         ),
       ),
     );
+    if (!kIsWeb && defaultTargetPlatform == TargetPlatform.linux) {
+      return LinuxCandidatesSurface(
+        key: ObjectKey(this),
+        focus: _focus,
+        controller: _controller,
+        style: style.text.copyWith(color: style.color),
+        maxHeight: maxHeight,
+        child: field,
+      );
+    }
+    return field;
   }
 
   @override

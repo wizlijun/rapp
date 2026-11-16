@@ -1,4 +1,5 @@
 #include "rapp_windows.h"
+#include "rapp_candidates_gtk.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -554,11 +555,11 @@ std::unique_ptr<Window> create_window(Session *s, int id, bool popup,
     gtk_box_pack_start(GTK_BOX(root), input, FALSE, FALSE, 0);
     auto *scroll = gtk_scrolled_window_new(nullptr, nullptr);
     gtk_widget_set_size_request(scroll, -1, 60);
-    gtk_box_pack_start(GTK_BOX(input), scroll, TRUE, TRUE, 0);
     auto *editor = gtk_text_view_new_with_buffer(s->buffer);
     w->editor = editor;
     gtk_container_add(GTK_CONTAINER(scroll), editor);
     gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(editor), GTK_WRAP_WORD_CHAR);
+    gtk_box_pack_start(GTK_BOX(input), rapp::wrap_gtk_candidates(GTK_TEXT_VIEW(editor), scroll), TRUE, TRUE, 0);
     g_signal_connect(
         editor, "paste-clipboard",
         reinterpret_cast<GCallback>(+[](GtkTextView *v, gpointer p) {
