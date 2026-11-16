@@ -115,6 +115,9 @@ pub async fn shares(state: &Arc<State>, cmd: &Value) -> Value {
                 if state.own.taken(s.port) {
                     v["taken"] = json!(true);
                 }
+                if let Some(r) = state.numbers.renumbered(s.port) {
+                    v["renumbered"] = json!({"from": r.from, "with": r.with});
+                }
                 v
             })
             .collect();

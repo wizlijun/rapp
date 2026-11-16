@@ -18,16 +18,43 @@ const ASK_WAIT: Duration = Duration::from_secs(5);
 pub struct Numbers {
     /// The share numbers each device (by ID) was last seen with.
     seen: Mutex<HashMap<String, Vec<u16>>>,
+    /// The shares (by port) that gave their number up to another sharer, until the user has seen it.
+    /// In memory only: after a restart the notice is gone, the new number stays.
+    renumbered: Mutex<HashMap<u16, Renumbered>>,
+}
+
+/// A share that moved off a number it held together with another device's share.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Renumbered {
+    /// The number the share had.
+    pub from: u16,
+    /// The device it clashed with, as this device names it.
+    pub with: String,
 }
 
 impl Numbers {
     pub fn new() -> Numbers {
-        Numbers { seen: Mutex::new(HashMap::new()) }
+        Numbers { seen: Mutex::new(HashMap::new()), renumbered: Mutex::new(HashMap::new()) }
     }
 
     /// Replaces the numbers the device `id` is seen with: a share it dropped frees its number.
     pub fn set_seen(&self, id: &str, numbers: Vec<u16>) {
         self.seen.lock().unwrap().insert(id.to_string(), numbers);
+    }
+
+    /// Remembers that the share of `port` moved off `r.from`, so the panel can say why.
+    pub fn set_renumbered(&self, port: u16, r: Renumbered) {
+        self.renumbered.lock().unwrap().insert(port, r);
+    }
+
+    /// The notice of the share of `port`, while it is kept.
+    pub fn renumbered(&self, port: u16) -> Option<Renumbered> {
+        self.renumbered.lock().unwrap().get(&port).cloned()
+    }
+
+    /// Drops the notice of `port`: the user has seen it (or the share was set again).
+    pub fn clear_renumbered(&self, port: u16) {
+        self.renumbered.lock().unwrap().remove(&port);
     }
 
     /// Every number any device is seen with, each once.
@@ -43,9 +70,30 @@ impl Numbers {
 /// ports visitors yield to stay clear of them.
 pub fn saw(state: &Arc<State>, id: &str, name: &str, numbers: &[u16]) {
     state.numbers.set_seen(id, numbers.to_vec());
-    // Task 4: a clash between `numbers` and this device's own share numbers is settled here
-    // (`yields`); `name` is who it is shown as in the renumbering message.
-    let _ = name;
+    // A number this device's share holds together with that device is given up by the larger ID,
+    // so that exactly one of the two moves. No ID here: nothing to compare, so nothing moves.
+    let Some(me) = state.cfg.lock().unwrap().id.clone() else { return };
+    if !yields(&me, id) {
+        return;
+    }
+    let mut moved = false;
+    for s in state.shares.list() {
+        if !s.local.is_some_and(|l| numbers.contains(&l)) {
+            continue;
+        }
+        match state.shares.renumber(s.port, &|used| pick(state, used)) {
+            Ok(Some((from, to))) => {
+                state.log.event(Lvl::Info, "share_renumbered", json!({"port": s.port, "from": from, "to": to, "with": id}));
+                state.numbers.set_renumbered(s.port, Renumbered { from, with: name.to_string() });
+                moved = true;
+            }
+            Ok(None) => {}
+            Err(e) => state.log.event(Lvl::Warn, "shares_error", json!({"err": format!("{e:#}")})),
+        }
+    }
+    if moved {
+        crate::sharing::sync_own(state);
+    }
 }
 
 /// The lowest number of `state.maps.range()` that is not in `used`, not a local of `maps.json`
@@ -92,8 +140,6 @@ pub async fn on_start(state: Arc<State>) {
 
 /// Of two sharers holding the same number, whether `me` gives it up: the larger ID, compared as
 /// numbers (as strings when either is not a number).
-// Used by the renumbering of a clash (a later task).
-#[allow(dead_code)]
 pub fn yields(me: &str, other: &str) -> bool {
     match (me.parse::<u64>(), other.parse::<u64>()) {
         (Ok(a), Ok(b)) => a > b,

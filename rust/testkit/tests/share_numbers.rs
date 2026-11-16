@@ -391,3 +391,93 @@ async fn a_number_outside_the_visitors_range_is_ignored() {
     assert_eq!(through(29710, b"x").await, b"x");
     refuses(29700).await;
 }
+
+// Task 4: two sharers on one number — the larger ID moves. Both sharers have `own_ports` off
+// (one machine), so both are numbered `first` before they know each other.
+
+/// Two sharers of `first` (ten numbers) that share a key: `(larger ID, smaller ID)`, each with
+/// its echo kept alive. Neither knows the other yet.
+async fn clashing(first: u16) -> (TestService, TestService, rapp_wire::Key, Vec<tokio::task::JoinHandle<()>>) {
+    let (p1, e1) = echo().await;
+    let (p2, e2) = echo().await;
+    let (x, key) = start_sharing_opts(|home| share_file(home, json!([{"port": p1}])), (first, 10), false, None).await;
+    let y = start_sharing_opts(|home| share_file(home, json!([{"port": p2}])), (first, 10), false, Some(key.to_string().parse().unwrap())).await.0;
+    for (s, p) in [(&x, p1), (&y, p2)] {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(6);
+        while row(s, p).await["local"] != first {
+            assert!(tokio::time::Instant::now() < deadline, "never numbered");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+    let larger = |a: &str, b: &str| a.parse::<u64>().unwrap() > b.parse::<u64>().unwrap();
+    let (l, s) = if larger(&x.id, &y.id) { (x, y) } else { (y, x) };
+    (l, s, key, vec![e1, e2])
+}
+
+/// Each of `a` and `b` knows the other, as `name`, by its LAN address.
+fn introduce(a: &TestService, an: &str, b: &TestService, bn: &str) {
+    for (me, other, name) in [(a, b, bn), (b, a, an)] {
+        let hosts = json!([{"id": other.id, "name": name, "lan": [a_addr(&other.svc).to_string()]}]);
+        std::fs::write(me.home.path().join("hosts.json"), hosts.to_string()).unwrap();
+    }
+}
+
+/// The own row of whichever share of `t` has `port`, after `t` has read `other`'s table.
+async fn read(t: &TestService, other: &TestService) {
+    table_of(t, other).await;
+}
+
+/// The only own share of `t`.
+async fn only(t: &TestService) -> Value {
+    let r = ipc(t, json!({"cmd":"shares"})).await;
+    r["shares"][0].clone()
+}
+
+#[tokio::test]
+async fn two_sharers_on_one_number_the_larger_id_moves() {
+    let (l, s, _key, _echoes) = clashing(29720).await;
+    introduce(&l, "larger", &s, "smaller");
+    read(&l, &s).await;
+    read(&s, &l).await;
+    let r = only(&l).await;
+    assert_eq!(r["local"], 29721, "{r}");
+    assert_eq!(r["renumbered"], json!({"from": 29720, "with": "smaller"}), "{r}");
+    let r = only(&s).await;
+    assert_eq!(r["local"], 29720, "{r}");
+    assert!(r.get("renumbered").is_none(), "{r}");
+}
+
+#[tokio::test]
+async fn a_bare_share_clears_the_notice() {
+    let (l, s, _key, _echoes) = clashing(29730).await;
+    introduce(&l, "larger", &s, "smaller");
+    read(&l, &s).await;
+    let r = only(&l).await;
+    assert_eq!(r["renumbered"], json!({"from": 29730, "with": "smaller"}), "{r}");
+    let port = r["port"].clone();
+    let r = ipc(&l, json!({"cmd":"share","ports":[port]})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    let r = only(&l).await;
+    assert!(r.get("renumbered").is_none(), "{r}");
+    assert_eq!(r["local"], 29731, "{r}");
+}
+
+#[tokio::test]
+async fn the_visitor_follows_a_renumbered_share() {
+    let (l, s, key, _echoes) = clashing(29740).await;
+    let c = visiting(29740, &key, &l).await;
+    let lport = only(&l).await["port"].as_u64().unwrap() as u16;
+    assert_eq!(their_row(&c, &l, lport).await["local"], 29740);
+    introduce(&l, "larger", &s, "smaller");
+    // C keeps knowing only L.
+    let hosts = json!([{"id": l.id, "name": "a", "lan": [a_addr(&l.svc).to_string()]}]);
+    std::fs::write(c.home.path().join("hosts.json"), hosts.to_string()).unwrap();
+    // Only L reads: were S to read L's table too, S would map L's share onto 29741 on this one
+    // machine, and C could not take it.
+    read(&l, &s).await;
+    assert_eq!(only(&l).await["local"], 29741);
+    let r = their_row(&c, &l, lport).await;
+    assert_eq!((&r["local"], &r["addr"]), (&json!(29741), &json!("http://localhost:29741")), "{r}");
+    assert!(r.get("wanted").is_none(), "{r}");
+    refuses(29740).await;
+}

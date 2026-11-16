@@ -82,6 +82,8 @@ pub fn share(state: &State, req: &Value, allow: Allow, by: &By) -> Result<Vec<Sh
     let done = state.shares.share_all(&ports, &patch, &|used| crate::numbers::pick(state, used)).map_err(|e| format!("{e:#}"))?;
     for d in &done {
         let (port, allow) = (d.share.port, &d.share.allow);
+        // Sharing a port again is how the user says they saw that it moved.
+        state.numbers.clear_renumbered(port);
         state.log.event(Lvl::Info, "share", by.fields(json!({"port": port, "allow": allow.len()})));
         if d.allow_changed {
             state.forwards.cut(port);
