@@ -356,6 +356,8 @@ async fn serve_relayed(state: Arc<State>, stream: Pipe, from: String, prio: Prio
     let mut pipe = pipe;
     match Op::deserialize(&v) {
         Ok(Op::Mux) if state.channels => {
+            // Requests on the channel's substreams are paced with it and never count as sessions
+            // (the hub never sends `Open` over a channel).
             let pipe = state.pacer.wrap(pipe);
             return crate::channel::serve(state, pipe, prio, peer).await;
         }

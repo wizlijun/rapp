@@ -1,5 +1,6 @@
-//! Forward pacing (spec §5.3): a delay-based rate controller. Pure logic, no clocks or I/O;
-//! time comes in as the `now` argument.
+//! Forward pacing (spec §5.3). [`Control`] is the delay-based rate controller: pure logic, no
+//! clocks or I/O, time comes in as the `now` argument. [`Pacer`] counts sessions, steps the
+//! controller on the relay link's tick and paces wrapped forward pipes with one token bucket.
 
 use std::collections::VecDeque;
 use std::future::Future;
@@ -76,8 +77,10 @@ impl Control {
                 self.last_change = Some(now);
             }
         } else if due {
+            // The cap stops growth past what is actually sent, but never cuts the rate: a forward
+            // that went idle keeps its rate for the next burst (a stale one is halved by queueing).
             let cap = (sent_bps / 4 * 5 + sent_bps % 4 * 5 / 4).max(FLOOR_BPS);
-            rate = (rate + rate / 20).min(cap).max(FLOOR_BPS);
+            rate = (rate + rate / 20).min(cap.max(rate)).max(FLOOR_BPS);
             self.last_change = Some(now);
         }
         if rate == FLOOR_BPS && queue > TARGET {
@@ -261,11 +264,12 @@ impl Pacer {
 
     /// How many of `want` bytes may go now, or how long to wait for a worthwhile chunk.
     fn take(&self, want: usize) -> Take {
+        // No session: full speed, without touching the lock.
+        if self.sessions.load(Ordering::SeqCst) == 0 {
+            return Take::Go(want, false);
+        }
         let mut st = self.state.lock().unwrap();
-        let rate = match st.rate {
-            Some(r) if self.sessions.load(Ordering::SeqCst) > 0 => r,
-            _ => return Take::Go(want, false),
-        };
+        let Some(rate) = st.rate else { return Take::Go(want, false) };
         let now = tokio::time::Instant::now();
         let per_sec = rate as f64 / 8.0;
         let dt = now.saturating_duration_since(st.last).as_secs_f64();
@@ -389,6 +393,22 @@ mod tests {
             assert!(last <= 5_000_000);
         }
         assert_eq!(last, 5_000_000);
+    }
+
+    #[test]
+    fn idle_holds_the_rate() {
+        let t0 = Instant::now();
+        let mut c = started(t0, 4_000_000);
+        let mut grown = 0;
+        for i in 1..=5u64 {
+            grown = c.step(t0 + TICK * i as u32, ms(30), 4_000_000, true).unwrap();
+        }
+        assert!(grown > 4_000_000, "{grown}");
+        // The forward goes idle: nothing sent, no queue. The rate neither grows nor drops.
+        for i in 6..=40u64 {
+            assert_eq!(c.step(t0 + TICK * i as u32, ms(30), 0, true), Some(grown));
+            assert_eq!(c.step(t0 + TICK * i as u32 + ms(50), ms(35), 0, true), Some(grown));
+        }
     }
 
     #[test]
