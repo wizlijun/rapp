@@ -710,7 +710,9 @@ fn focus_region_shared_sample() {
         .map(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).unwrap())
         .collect();
     assert_eq!(bytes[0], 0x24);
-    match decode(36, &bytes[5..]).unwrap() {
+    let (message, consumed) = read_message(&mut &bytes[..]).unwrap();
+    assert_eq!(consumed, bytes.len());
+    match message {
         Incoming::FocusRegion { window, rects } => {
             assert_eq!(window, 7);
             assert_eq!(rects.len(), 1);

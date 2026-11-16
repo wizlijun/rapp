@@ -317,7 +317,9 @@ pub fn read_message(input: &mut impl Read) -> Result<(Incoming, usize)> {
     let mut h = [0; 5];
     input.read_exact(&mut h).context("host disconnected")?;
     ensure!(
-        [2, 3, 4, 13, 17, 19, 21, 26, 28, 29, 32, 33, 34].contains(&h[0]),
+        // Main-connection host messages in RappCore/Protocol.swift, including
+        // v12 focusRegion. Side-transfer and client-to-host types stay rejected.
+        [2, 3, 4, 13, 17, 19, 21, 26, 28, 29, 32, 33, 34, 36].contains(&h[0]),
         "unexpected host message type {}",
         h[0]
     );
