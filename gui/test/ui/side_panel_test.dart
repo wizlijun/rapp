@@ -560,4 +560,53 @@ void main() {
       expect(p.didExceedMaxLines, isFalse, reason: 'tab-$k is ellipsized');
     }
   });
+
+  testWidgets('all four navigation labels remain readable with Linux desktop text scaling', (tester) async {
+    await tester.pumpWidget(wrap(MediaQuery(
+      data: const MediaQueryData(size: Size(800, 600), textScaler: TextScaler.linear(1.2222)),
+      child: panel(),
+    )));
+    for (final k in ['sessions', 'devices', 'projects', 'resources']) {
+      final label = find.descendant(of: find.byKey(Key('tab-$k')), matching: find.byType(RichText));
+      final paragraph = tester.renderObject<RenderParagraph>(label);
+      expect(paragraph.didExceedMaxLines, isFalse, reason: 'tab-$k hides its label at desktop text scale');
+    }
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final theme in RappTheme.values) {
+    for (final scale in [1.2222, 1.5, 2.0]) {
+      for (final width in [360.0, 800.0]) {
+        testWidgets('navigation labels fit ${theme.name} at $scale text scale and $width width', (tester) async {
+          await tester.binding.setSurfaceSize(Size(width, 700));
+          addTearDown(() => tester.binding.setSurfaceSize(null));
+          await tester.pumpWidget(wrap(MediaQuery(
+            data: MediaQueryData(size: Size(width, 700), textScaler: TextScaler.linear(scale)),
+            child: panel(),
+          ), theme: theme));
+          for (final k in ['sessions', 'devices', 'projects', 'resources']) {
+            final tab = find.byKey(Key('tab-$k'));
+            final paragraph = tester.renderObject<RenderParagraph>(find.descendant(of: tab, matching: find.byType(RichText)));
+            expect(paragraph.didExceedMaxLines, isFalse, reason: 'tab-$k label must remain complete');
+            final bounds = tester.getRect(tab);
+            expect(bounds.width, greaterThanOrEqualTo(48));
+            expect(bounds.height, greaterThanOrEqualTo(48));
+            expect(bounds.right, lessThanOrEqualTo(width));
+          }
+          final first = tester.getRect(find.byKey(const Key('tab-sessions')));
+          final last = tester.getRect(find.byKey(const Key('tab-resources')));
+          if (width == 360 && scale == 2) {
+            expect(last.top, greaterThan(first.top), reason: 'whole tabs should wrap in the constrained window');
+          }
+          await tester.tap(find.byKey(const Key('tab-devices')));
+          await tester.pump();
+          expect(find.text('devices-body'), findsOneWidget);
+          await tester.tap(find.byKey(const Key('tab-sessions')));
+          await tester.pump();
+          expect(s.panel, PanelTab.sessions);
+          expect(tester.takeException(), isNull);
+        });
+      }
+    }
+  }
 }

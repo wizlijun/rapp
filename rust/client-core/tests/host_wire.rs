@@ -203,8 +203,11 @@ fn read_client(socket: &mut TcpStream, expected: u8) -> Vec<u8> {
 fn real_worker_smart_stream_keeps_focus_events_frames_and_clear_then_rejects_unknown() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     listener.set_nonblocking(true).unwrap();
+    // Reuse the same regression against the assembled/installed release worker.
+    let executable = std::env::var_os("RAPP_TEST_SESSION_BIN")
+        .unwrap_or_else(|| env!("CARGO_BIN_EXE_rapp-session").into());
     let mut worker = Worker(
-        Command::new(env!("CARGO_BIN_EXE_rapp-session"))
+        Command::new(executable)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())

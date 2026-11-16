@@ -37,13 +37,17 @@ class SidePanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
     final mq = MediaQuery.sizeOf(context);
+    final tabWidth = _minimumTabWidth(context);
     return ListenableBuilder(
       listenable: state,
       builder: (context, _) {
         final devices = state.panel == PanelTab.devices;
         final projects = state.panel == PanelTab.projects;
         final resources = state.panel == PanelTab.resources;
-        final width = math.min(devices || projects || resources ? 720.0 : 330.0, mq.width);
+        // Keep the Mac layout at the default size, but reserve enough logical
+        // width for the actual font metrics/text scale on every desktop.
+        final navigationWidth = 4 * tabWidth + 3 * 6 + 48 + 22;
+        final width = math.min(math.max(devices || projects || resources ? 720.0 : 330.0, navigationWidth), mq.width);
         return Container(
           width: width,
           decoration: BoxDecoration(
@@ -62,27 +66,34 @@ class SidePanel extends StatelessWidget {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(10, 10, 10, 0),
                     child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         // The tabs share the row; the close button keeps its own 48 px.
                         Expanded(
-                          child: Row(
-                            children: [
-                              for (final (i, tab) in tabOrder(state.prefs.first).indexed) ...[
-                                if (i > 0) const SizedBox(width: 6),
-                                Flexible(
-                                  child: ConstrainedBox(
-                                    constraints: const BoxConstraints(maxWidth: 96),
-                                    child: TabChip(
-                                      key: Key('tab-${tab.name}'),
-                                      label: _tabLabel(tab),
-                                      selected: _selected(tab),
-                                      onTap: () => _tab(tab),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
+                          child: LayoutBuilder(builder: (context, available) {
+                            final tabs = tabOrder(state.prefs.first);
+                            Widget chip(PanelTab tab) => TabChip(
+                              key: Key('tab-${tab.name}'), label: _tabLabel(tab),
+                              selected: _selected(tab), onTap: () => _tab(tab),
+                            );
+                            if (available.maxWidth >= tabs.length * tabWidth + (tabs.length - 1) * 6) {
+                              return Row(children: [
+                                for (final (i, tab) in tabs.indexed) ...[
+                                  if (i > 0) const SizedBox(width: 6),
+                                  Flexible(child: ConstrainedBox(
+                                    constraints: BoxConstraints(maxWidth: math.max(96, tabWidth)), child: chip(tab))),
+                                ],
+                              ]);
+                            }
+                            // A narrow window cannot grow with the text. Wrap
+                            // whole tabs instead of ellipsizing their only labels.
+                            final fitting = ((available.maxWidth + 6) / (tabWidth + 6)).floor();
+                            final columns = fitting >= tabs.length ? tabs.length : fitting >= 2 ? 2 : 1;
+                            final width = (available.maxWidth - (columns - 1) * 6) / columns;
+                            return Wrap(spacing: 6, runSpacing: 6, children: [
+                              for (final tab in tabs) SizedBox(width: width, child: chip(tab)),
+                            ]);
+                          }),
                         ),
                         IconButton(
                           key: const Key('panel-close'),
@@ -117,6 +128,24 @@ class SidePanel extends StatelessWidget {
         );
       },
     );
+  }
+
+  double _minimumTabWidth(BuildContext context) {
+    var width = 48.0;
+    for (final tab in PanelTab.values) {
+      // Selected and unselected glyphs can have different widths with real fonts.
+      for (final weight in [FontWeight.w400, FontWeight.w600]) {
+        final painter = TextPainter(
+          text: TextSpan(text: _tabLabel(tab), style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: weight)),
+          textDirection: Directionality.of(context), textScaler: MediaQuery.textScalerOf(context),
+          locale: Localizations.maybeLocaleOf(context), maxLines: 1,
+        )..layout();
+        // TabChip has 12px padding and a 1px border on each side.
+        width = math.max(width, (painter.width + 26).ceilToDouble());
+        painter.dispose();
+      }
+    }
+    return width;
   }
 
   bool _selected(PanelTab tab) => tab == PanelTab.sessions
