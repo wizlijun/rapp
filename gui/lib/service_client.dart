@@ -47,6 +47,7 @@ class ServiceStatus {
     this.relayError,
     this.hasKey = false,
     this.fp,
+    this.capabilities,
   });
 
   final String? id;
@@ -83,6 +84,7 @@ class ServiceStatus {
 
   /// This device's fingerprint.
   final String? fp;
+  final Map<String, dynamic>? capabilities;
 
   /// The relay can be used: an address and a valid key (an address alone, e.g. with 0.5.5's key, is not).
   bool get relaySet => hasKey && relayAddr != null;
@@ -109,6 +111,7 @@ class ServiceStatus {
       relayError: (m['relay_error']?.toString() ?? '').isEmpty ? null : m['relay_error'].toString(),
       hasKey: m['has_key'] == true,
       fp: m['fp']?.toString(),
+      capabilities: m['capabilities'] is Map ? Map<String, dynamic>.from(m['capabilities']) : null,
       sessions: (m['sessions'] as List? ?? const [])
           .whereType<Map>()
           .map((s) => ServiceSession(s['sid'] as Object, '${s['peer'] ?? ''}', '${s['app'] ?? ''}',

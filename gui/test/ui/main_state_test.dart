@@ -2174,7 +2174,9 @@ void main() {
       st.stageSize(const Size(800, 600));
       st.selectWindow(7);
       st.detach();
+      a.flushMicrotasks();
       st.toggleDetach();
+      a.flushMicrotasks();
       a.elapse(const Duration(seconds: 1));
       final extra = port.calls.skip(calls).map((c) => c.$1).toList();
       expect(extra, isEmpty);
@@ -2274,17 +2276,90 @@ void main() {
       expect(port.calls.last.$2, equals(args));
     }
 
+    test('native sends enter the shared queue exactly once and retry its failed remainder', () {
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(1, [rw(7)]));
+        port.emit(const DetachedEvent(1, true));
+        port.emit(const ComposerDraftEvent(1, text: 'native words', send: true));
+        a.flushMicrotasks();
+        expect(port.calls.where((c) => c.$1 == 'composer_send'), hasLength(1));
+        final model = st.remote[1]!.composer;
+        expect(model.draft, '');
+        expect(model.inFlight!.text, 'native words');
+        port.emit(const ComposerStateEvent(1, done: ComposerDone(0, 'refused')));
+        expect(model.failed.single.text, 'native words');
+        port.emit(const ComposerDraftEvent(1, retry: true));
+        a.flushMicrotasks();
+        expect(port.calls.where((c) => c.$1 == 'composer_send'), hasLength(2));
+        port.emit(const ComposerStateEvent(1, done: ComposerDone(1, null)));
+        expect(model.failed, isEmpty);
+        expect(model.sending, false);
+      });
+    });
+
+    test('disconnect during a native submit keeps the taken text as a failed send', () {
+      env((a, t, port, st, hints) {
+        final editor = _DelayedTakeEditor();
+        final model = st.remote[1]!.composer;
+        model.attach(editor);
+        port.emit(const ComposerDraftEvent(1, text: 'not sent', send: true));
+        a.flushMicrotasks();
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        editor.gate.complete();
+        a.flushMicrotasks();
+        expect(port.calls.where((c) => c.$1 == 'composer_send'), isEmpty);
+        expect(model.sending, false);
+        expect(model.failed.single.text, 'not sent');
+      });
+    });
+
+    test('native local edits during reconnect survive the sid swap and never send', () {
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(1, [rw(3)]));
+        port.emit(const DetachedEvent(1, true));
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        st.reconnect('111/a');
+        a.flushMicrotasks();
+        port.emit(const ComposerDraftEvent(1, text: 'written offline', send: true));
+        expect(st.remote[1]!.composer.draft, 'written offline');
+        expect(port.calls.where((c) => c.$1 == 'composer_send'), isEmpty);
+        port.emit(WindowsEvent(11, [rw(3)]));
+        a.flushMicrotasks();
+        expect(st.remote[11]!.composer.draft, 'written offline');
+      });
+    });
+
+    test('detach waits for an already requested clipboard or file insertion', () {
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(1, [rw(7)]));
+        final model = st.remote[1]!.composer;
+        final editor = FakeEditor();
+        model.attach(editor);
+        editor.value = 'before ';
+        final result = Completer<PasteResult>();
+        model.applyPending(result.future);
+        st.detach();
+        a.flushMicrotasks();
+        expect(port.calls.where((c) => c.$1 == 'detach'), isEmpty);
+        result.complete(const PasteResult(text: 'late paste', blocks: [BlockChip(3, 'file')]));
+        a.flushMicrotasks();
+        lastCall(port, 'detach', {'sid': 1, 'text': 'before late paste', 'blocks': [{'n': 3, 'label': 'file'}]});
+      });
+    });
+
     test('detach and attach keep the sid and send no open', () {
       env((a, t, port, st, hints) {
         port.emit(const ReadyEvent(1, 'Calculator'));
         port.emit(WindowsEvent(1, [rw(7), rw(9, kind: WindowKind.menu)]));
         st.toggleDetach();
+        a.flushMicrotasks();
         lastCall(port, 'detach', {'sid': 1, 'text': '', 'blocks': []});
         expect(st.currentRemote!.detached, false); // only the runner's word moves it
         port.emit(const DetachedEvent(1, true));
         expect(st.currentRemote!.detached, true);
         expect(t.sent.last, {'cmd': 'note', 'sid': 1, 'what': 'detach', 'windows': 1});
         st.toggleDetach();
+        a.flushMicrotasks();
         lastCall(port, 'attach', {'sid': 1});
         port.emit(const DetachedEvent(1, false, current: 7));
         expect(t.sent.last, {'cmd': 'note', 'sid': 1, 'what': 'attach', 'windows': 1});
@@ -2302,16 +2377,19 @@ void main() {
         port.emit(WindowsEvent(2, [rw(8)]));
         st.select('111/a');
         st.detach();
+        a.flushMicrotasks();
         lastCall(port, 'detach', {'sid': 1, 'text': '', 'blocks': []});
         st.attach();
         lastCall(port, 'attach', {'sid': 1});
         st.select('111/aa');
         st.toggleDetach();
+        a.flushMicrotasks();
         lastCall(port, 'detach', {'sid': 2, 'text': '', 'blocks': []});
         // Nothing to move yet (no window table): no detach goes out.
         port.emit(const WindowsEvent(2, []));
         final n = port.calls.length;
         st.detach();
+        a.flushMicrotasks();
         expect(port.calls.length, n);
       }, sessions: 2);
     });
@@ -3116,12 +3194,13 @@ void main() {
         move((a, t, port, st, hints, reopens) {
           st.select('111/a');
           port.emit(const DetachedEvent(1, true));
+          st.remote[1]!.composer.setDraft('retained draft');
           a.flushMicrotasks();
           path(a, t, 'lan');
           answer(a, t, reopens[0], 11, 'lan');
           picture(a, port, 11);
           expect(st.recordFor('111/a')!.sid, 11);
-          expect(port.calls.where((c) => c.$1 == 'detach').last.$2, {'sid': 11});
+          expect(port.calls.where((c) => c.$1 == 'detach').last.$2, {'sid': 11, 'text': 'retained draft', 'blocks': []});
           port.emit(const DetachedEvent(11, true));
           a.flushMicrotasks();
           expect(st.currentRemote!.detached, true);
@@ -3135,14 +3214,15 @@ void main() {
           path(a, t, 'lan');
           answer(a, t, reopens[0], 11, 'lan');
           st.detach();
+          a.flushMicrotasks();
           expect(port.calls.last.$1, 'detach');
-          expect(port.calls.last.$2, {'sid': 1});
+          expect(port.calls.last.$2, {'sid': 1, 'text': '', 'blocks': []});
           port.emit(const DetachedEvent(1, true));
           a.flushMicrotasks();
           expect(t.sent.any((m) => m['cmd'] == 'note' && m['sid'] == 1 && m['what'] == 'detach'), true);
           expect(st.pictureFocused, isNull);
           picture(a, port, 11);
-          expect(port.calls.where((c) => c.$1 == 'detach').last.$2, {'sid': 11});
+          expect(port.calls.where((c) => c.$1 == 'detach').last.$2, {'sid': 11, 'text': '', 'blocks': []});
           expect(st.pictureFocused, isNull, reason: 'no keys go to a detached session');
         });
       });
@@ -4995,6 +5075,7 @@ void main() {
     });
 
     test('openText opens the new session right away', () async {
+      await termsOf([]);
       t.onSend = (m) {
         switch (m['cmd']) {
           case 'open_term':
@@ -5024,6 +5105,7 @@ void main() {
     });
 
     test('openText gives a refusal to the caller and opens nothing', () async {
+      await termsOf([]);
       t.onSend = (m) {
         if (m['cmd'] == 'open_term') t.emit({'event': 'error', 'req': m['req'], 'error': 'no such directory: /x'});
       };
@@ -5064,5 +5146,14 @@ class _GatedFetchPort extends FakeSessionPort {
     calls.add((method, args));
     gate = Completer<Map<String, Object?>>();
     return gate.future;
+  }
+}
+
+class _DelayedTakeEditor extends FakeEditor {
+  final gate = Completer<void>();
+  @override
+  Future<String> take() async {
+    await gate.future;
+    return super.take();
   }
 }

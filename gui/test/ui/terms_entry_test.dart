@@ -9,6 +9,12 @@ void main() {
       TermRow('term:tmux:$name', name, 'zsh', null, 1, 0, activity, false, false);
   TermHost local(List<String> launchers, {List<TermShell>? shells}) => TermHost(null, launchers: launchers, shells: shells);
 
+  test('a device without graphics never invents a macOS terminal', () {
+    expect(termsTarget(mode: 'text', list: const TermList('linux'), apps: const [], graphical: false), isA<NoTerminal>());
+    expect(termsTarget(mode: 'pixels', list: const TermList('linux'), apps: const [], graphical: false), isA<NoTerminal>());
+    expect(termsTarget(mode: 'text', list: TermList('linux', hosts: [local(['ghostty'])]), apps: const [], graphical: false), isA<NewText>());
+  });
+
   test('desktop first and terminal apps folded when the entry shows', () {
     final apps = [app('com.apple.Safari'), app('com.apple.Terminal'), app('desktop:'), app('com.googlecode.iterm2')];
     expect(orderApps(apps, entry: true).map((a) => a.app), ['desktop:', 'com.apple.Safari']);

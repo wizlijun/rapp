@@ -183,7 +183,8 @@ class _DevicesTabState extends State<DevicesTab> {
     final p = state.probes[id];
     final apps = p?.apps;
     final name = state.deviceName(id);
-    final missing = missingPermissions(apps?.permissions);
+    final graphical = apps?.capabilities?['graphical'] != false;
+    final missing = graphical ? missingPermissions(apps?.permissions) : <Permission>[];
     final forced = state.forcedRelay(id);
     final pathWord = routeWord(state.pathOf(id), forced: forced);
     final terms = state.hub?.termLists[id];
@@ -237,7 +238,7 @@ class _DevicesTabState extends State<DevicesTab> {
       if (apps != null && apps.apps.isEmpty)
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Text('对方没有可共享的窗口', style: TextStyle(color: t.muted)),
+          child: Text(apps.capabilities?['graphical'] == false ? '这台设备支持文本终端和端口分享，暂不提供应用画面' : '对方没有可共享的窗口', style: TextStyle(color: t.muted)),
         ),
       // 桌面 first, 终端 second (spec §2.1), the rest in their order.
       if (ordered.firstOrNull?.app == 'desktop:') _appRow(context, id, ordered.first),
@@ -246,7 +247,7 @@ class _DevicesTabState extends State<DevicesTab> {
         if (a.app != 'desktop:') _appRow(context, id, a),
       if (widget.shares != null) SharesSection(key: ValueKey('shares-$id'), api: widget.shares!, to: id),
       const SizedBox(height: 8),
-      Row(
+      if (graphical) Row(
         children: [
           Expanded(
             child: TextField(

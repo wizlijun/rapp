@@ -53,6 +53,27 @@ void main() {
 
   tearDown(() => m.dispose());
 
+  test('a late editor detach read does not overwrite a native draft', () async {
+    final old = _SlowReadEditor();
+    await m.attach(old);
+    final detached = m.detach(old);
+    m.setDraft('native typing');
+    m.setDraft(''); // ABA: equal text does not make the old read current again.
+    m.setDraft('native typing');
+    old.gate.complete('old stage');
+    await detached;
+    expect(m.draft, 'native typing');
+  });
+
+  test('native handoff waits for the editor composition snapshot', () async {
+    final old = _SlowReadEditor();
+    await m.attach(old);
+    final read = m.readDraft();
+    old.gate.complete('刚组好的字');
+    expect(await read, '刚组好的字');
+    expect(m.draft, '刚组好的字');
+  });
+
   test('reopening waits for the previous native draft read before initializing the editor', () async {
     final old = _SlowReadEditor();
     await m.attach(old);

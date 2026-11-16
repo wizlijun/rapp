@@ -549,7 +549,9 @@ class _LocalSectionState extends State<LocalSection> {
             _row('会话', '${st.sessions.length} 个被访问中'),
           ],
           if (_platform == TargetPlatform.linux) ...[
-            const Text('本机为 Linux 客户端，暂不支持被远程控制。'),
+            Text(st?.capabilities == null
+              ? '本机为 Linux 控制端；启动或更新后台服务后，可提供文本终端和端口分享。'
+              : '本机支持端口分享${st?.capabilities?['terminal'] == true ? '和文本终端' : ''}；暂不支持应用和桌面画面被控。'),
             Padding(padding: const EdgeInsets.symmetric(vertical: 8),
               child: LinuxUpdateSection(openPage: widget.openPage)),
           ],

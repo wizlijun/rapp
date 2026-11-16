@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/linux_session_port.dart';
 import 'package:rapp/embed/session_port.dart';
+import 'package:rapp/embed/session_protocol.dart';
 
 Uint8List u32(int n) => (ByteData(4)..setUint32(0, n, Endian.little)).buffer.asUint8List();
 Uint8List u16(int n) => (ByteData(2)..setUint16(0, n, Endian.little)).buffer.asUint8List();
@@ -17,7 +18,7 @@ List<int> packet(int type, List<int> bytes) => [type, ...u32(bytes.length), ...b
 const full = [120,156,98,100,0,129,31,0,0,0,0,255,255];
 const delta = [98,4,145,15,216,1,0,0,0,255,255];
 List<int> frame(bool first) => packet(4, [2, ...f32(0), ...f32(0), ...f32(4), ...f32(4),
-    ...u16(4), ...u16(4), first ? 1 : 0, ...(first ? full : delta)]);
+    ...u16(4), ...u16(4), first ? 7 : 6, if (!first) ...[...u32(0), ...u32(0)], ...(first ? full : delta)]);
 
 Future<SessionEvent> nextWhere(StreamIterator<SessionEvent> it, bool Function(SessionEvent) match) async {
   while (await it.moveNext().timeout(const Duration(seconds: 8))) {
@@ -28,6 +29,12 @@ Future<SessionEvent> nextWhere(StreamIterator<SessionEvent> it, bool Function(Se
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('side connections track the strict Rust protocol version', () {
+    final source = File('../rust/client-core/src/protocol.rs').readAsStringSync();
+    final version = RegExp(r'pub const VERSION: u8 = ([0-9]+);').firstMatch(source)!;
+    expect(sessionProtocolVersion, int.parse(version.group(1)!));
+  });
+
   test('worker packet framing handles fragmentation, multiple packets and rejects truncation', () async {
     final bytes = [ ...u32(3), 0, 5, 7, ...u32(2), 1, 8 ];
     expect(await sessionPackets(Stream.fromIterable(bytes.map((b) => [b]))).toList(), [[0,5,7],[1,8]]);
@@ -262,7 +269,7 @@ void main() {
         messages.add((received[i], received.sublist(i+5, i+5+n))); i += 5+n;
       }
       expect(messages.map((m) => m.$1), containsAllInOrder([1,6,6,7,7,9,11,15,30,14,20]));
-      expect(messages.first.$2.first, 8);
+      expect(messages.first.$2.first, 12);
       expect(messages.firstWhere((m) => m.$1 == 15).$2, u32(1));
       expect(messages.firstWhere((m) => m.$1 == 30).$2, string(''));
       expect(utf8.decode(messages.last.$2.sublist(7)), '你好');
@@ -538,7 +545,7 @@ void main() {
       peer = await accepted; healthy = await acceptedSecond;
       peer.listen((_) {}); healthy.listen((_) {});
       peer.add(packet(2, [...string('Fixture'), ...u16(4), ...u16(4)]));
-      peer.add(packet(4, [2,...f32(0),...f32(0),...f32(4),...f32(4),...u16(4),...u16(4),1,0]));
+      peer.add(packet(4, [2,...f32(0),...f32(0),...f32(4),...f32(4),...u16(4),...u16(4),7,0]));
       final end = await nextWhere(events, (e) => e is DisconnectedEvent) as DisconnectedEvent;
       expect(end.sid, 9); expect(end.reason, contains('zlib'));
       healthy.add(packet(2, [...string('Healthy'), ...u16(4), ...u16(4)]));

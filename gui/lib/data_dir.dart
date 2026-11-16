@@ -99,8 +99,6 @@ bool prepareDataDir(String root, String legacy) {
     _copyIfMissing('$legacy/$old', nu);
   }
   writePrivate('$loc/$migratedFrom', utf8.encode('$legacy\n'));
-  // Last (R4): its presence means the migration finished.
-  _copyIfMissing(oldService, '$loc/service.json');
   return true;
 }
 

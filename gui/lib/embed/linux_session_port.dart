@@ -176,16 +176,19 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
           args['mode'] as String,
           args['density'] as String,
           args['fps'] as int,
+          smart: args['smart'] == true,
         ),
       );
-      await invoke(call.method, args);
     } else if (call.method == 'draft') {
       _emit(ComposerDraftEvent(s.sid, text: args['text'] as String?));
     } else if (call.method == 'composer_send') {
       _emit(
         ComposerDraftEvent(s.sid, text: args['text'] as String?, send: true),
       );
-      await invoke(call.method, args);
+    } else if (call.method == 'composer_action') {
+      _emit(ComposerDraftEvent(s.sid, text: args['text'] as String?, action: args['action'] as String?));
+    } else if (call.method == 'composer_retry') {
+      _emit(ComposerDraftEvent(s.sid, retry: true));
     } else if (call.method == 'composer_drop_block') {
       _emit(ComposerDraftEvent(s.sid, drop: args['block'] as int?));
       await invoke(call.method, args);
@@ -225,6 +228,22 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) _releaseFocus(clear: false);
   }
+
+  @override
+  void nativeComposerOptions(Object sid, {required bool allowed, required bool compose, required double scale}) {
+    final s = _sessions[sid];
+    if (s == null) return;
+    s.composerOptions = {'sid': sid, 'allowed': allowed, 'compose': compose, 'scale': scale};
+    if (s.detached) _nativeCall('composer_options', s.composerOptions);
+  }
+
+  @override
+  void nativeComposerDraft(Object sid, String text) {
+    if (_sessions[sid]?.detached == true) _nativeCall('composer_draft', {'sid': sid, 'text': text});
+  }
+
+  @override
+  void freeze(Object sid, String reason) => _sessions[sid]?.disconnect(reason);
 
   @override
   void dropTarget(Object? sid) {
@@ -298,7 +317,7 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
   /// A focused session over [process] without the worker handshake.
   @visibleForTesting
   void seedSessionForTest(Object sid, Process process) {
-    _sessions[sid] = _Session(sid, process, _emit, _framePresented, 0, '');
+    _sessions[sid] = _Session(sid, process, _emit, _framePresented, 0, '', downloads, desktop);
     _focused = sid;
   }
 
@@ -452,24 +471,40 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
       }
     }
     if (s == null) return null;
-    if (!['close', 'attach', 'raise_detached'].contains(method) &&
+    if (!['close', 'attach', 'raise_detached', 'set_hidden', 'set_banner', 'composer_paste', 'composer_attach', 'composer_drop_block', 'composer_submitted'].contains(method) &&
         s.disconnected) {
       return null;
     }
     switch (method) {
       case 'detach':
         if (!_native || s.detached) return null;
-        await desktop.channel.invokeMethod<void>('detach', {
-          'sid': sid,
-          'text': args['text'],
-          'blocks': args['blocks'],
-        });
-        s.detached = true;
-        await s.nativeWindows();
-        s.nativeClips();
-        _nativeCall('stream', {'sid': sid, ...s.stream});
-        await s.nativeFrame();
-        _emit(DetachedEvent(s.sid, true));
+        try {
+          await desktop.channel.invokeMethod<void>('detach', {
+            'sid': sid,
+            'text': args['text'],
+            'blocks': args['blocks'],
+          });
+          if (_disposed || s.closed || !identical(_sessions[sid], s)) {
+            await desktop.channel.invokeMethod<void>('attach', {'sid': sid});
+            return null;
+          }
+          if (s.disconnected) throw StateError('连接已断开');
+          s.detached = true;
+          await s.nativeWindows();
+          if (_disposed || s.closed || !identical(_sessions[sid], s)) return null;
+          s.nativeClips();
+          _nativeCall('stream', {'sid': sid, ...s.stream});
+          await s.nativeFrame();
+          if (_disposed || s.closed || !identical(_sessions[sid], s)) return null;
+          s.nativeFocus();
+          _nativeCall('composer_options', {'sid': sid, ...s.composerOptions});
+          if (s.banner.isNotEmpty) _nativeCall('banner', {'sid': sid, 'text': s.banner});
+          _emit(DetachedEvent(s.sid, true));
+        } catch (_) {
+          s.detached = false;
+          await desktop.channel.invokeMethod<void>('attach', {'sid': sid}).catchError((Object _) {});
+          rethrow;
+        }
       case 'attach':
         if (!s.detached) return null;
         await desktop.channel.invokeMethod<void>('attach', {'sid': sid});
@@ -477,6 +512,14 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
         _emit(DetachedEvent(s.sid, false, current: s.selected));
       case 'raise_detached':
         if (s.detached) _nativeCall('raise', {'sid': sid});
+      case 'set_hidden':
+        s.hidden = Set<int>.from(args['windows'] as List);
+        await s.nativeWindows();
+      case 'set_banner':
+        s.banner = args['text'] as String;
+        if (s.detached) _nativeCall('banner', {'sid': sid, 'text': s.banner});
+      case 'composer_submitted':
+        if (s.detached) _nativeCall(method, args);
       case 'close':
         if (_focused == sid) _releaseFocus();
         s.close('closed');
@@ -486,7 +529,11 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
           'mode': args['mode'],
           'fps': args['fps'],
           'density': args['density'],
+          'smart': args['focus'] == true,
         };
+        s.focusWanted = args['focus'] == true;
+        if (!s.focusWanted) s.focusRegion = null;
+        s.nativeFocus();
         if (s.detached) _nativeCall('stream', {'sid': sid, ...s.stream});
         s.send({'cmd': method, ...args, 'density': _density(args['density'])});
       case 'select_window':
@@ -565,7 +612,7 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
         } catch (e) {
           s.showStatus(
             '取用没成功：${e is StateError && e.message == 'unknown clip'
-                ? '太旧了，A 已不保留'
+                ? '太旧了，远端已不保留'
                 : e is StateError
                 ? e.message
                 : e}',
@@ -657,6 +704,19 @@ class _Session {
   late final LinuxTransfers transfers;
   final LinuxDesktop desktop;
   bool detached = false;
+  Map<String, Object?> composerOptions = {};
+  Set<int> hidden = {};
+  String banner = '';
+  bool focusWanted = false;
+  FocusRegionEvent? focusRegion;
+  void nativeFocus() {
+    if (!detached) return;
+    final f = focusWanted ? focusRegion : null;
+    unawaited(desktop.channel.invokeMethod<void>('focus', {
+      'sid': sid, 'window': f?.window ?? 0,
+      'rects': [for (final r in f?.rects ?? <ui.Rect>[]) [r.left, r.top, r.width, r.height]],
+    }).catchError((Object _) {}));
+  }
   Map<String, Object?> stream = {
     'mode': 'color16',
     'density': 'adaptive',
@@ -686,11 +746,12 @@ class _Session {
   List<dynamic> nativeWindowTable = [];
   List<dynamic> nativeMenuTable = [];
   Future<void> nativeWindows() async {
-    if (detached) {
+    if (detached && !closed) {
       await desktop.channel.invokeMethod<void>('windows', {
         'sid': sid,
-        'windows': nativeWindowTable,
+        'windows': [for (final w in nativeWindowTable) if (!hidden.contains(w['id'])) w],
       });
+      if (closed) return;
       await desktop.channel.invokeMethod<void>('menus', {
         'sid': sid,
         'items': nativeMenuTable,
@@ -699,7 +760,7 @@ class _Session {
   }
 
   Future<void> nativeFrame() async {
-    if (detached && lastNativeFrame != null) {
+    if (detached && !closed && lastNativeFrame != null) {
       await desktop.channel.invokeMethod<void>('frame', {
         'sid': sid,
         'bytes': lastNativeFrame,
@@ -1024,6 +1085,15 @@ class _Session {
             if (e is WindowsEvent) {
               nativeWindowTable = m['windows'] as List;
               await nativeWindows();
+              final f = focusRegion;
+              if (f != null) {
+                final old = windows.where((w) => w.id == f.window).firstOrNull;
+                final now = e.windows.where((w) => w.id == f.window).firstOrNull;
+                if (now == null || old?.rect.size != now.rect.size) {
+                  focusRegion = null;
+                  nativeFocus();
+                }
+              }
               windows = e.windows;
               for (final id in _pictures.keys.toList()) {
                 if (!windows.any((w) => w.id == id)) {
@@ -1035,6 +1105,10 @@ class _Session {
               }
               publish();
             } else if (e != null) {
+              if (e is FocusRegionEvent && focusWanted) {
+                focusRegion = e;
+                nativeFocus();
+              }
               emit(e);
             }
           }

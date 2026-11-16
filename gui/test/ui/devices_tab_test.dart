@@ -21,6 +21,7 @@ void main() {
   late MainState s;
   late Directory tmp;
   Map<String, dynamic>? appsPermissions;
+  Map<String, dynamic>? capabilities;
   String? openError;
   bool offline = false;
   bool holdApps = false;
@@ -36,6 +37,7 @@ void main() {
 
   setUp(() async {
     appsPermissions = null;
+    capabilities = null;
     openError = null;
     offline = false;
     holdApps = false;
@@ -89,6 +91,7 @@ void main() {
               {'app': 'com.apple.Safari', 'name': 'Safari'},
             ],
             'permissions': ?appsPermissions,
+            'capabilities': ?capabilities,
           });
         case 'terms':
           if (termsOff) return t.emit({'event': 'terms', 'req': req, 'id': cmd['id'], 'off': true});
@@ -166,6 +169,19 @@ void main() {
     expect(find.text('用屏幕共享打开'), findsNothing);
     expect(find.text('桌面'), findsOneWidget);
     expect(find.byKey(const Key('fav-desktop:')), findsOneWidget);
+  });
+
+  testWidgets('Linux terminal device hides graphical controls and macOS permission hints', (tester) async {
+    capabilities = {'graphical': false, 'terminal': true, 'ports': true};
+    remoteApps = [];
+    termHosts = [{'host': null, 'launchers': ['kitty']}];
+    await pumpTab(tester);
+    await selectMini(tester);
+    expect(find.byKey(const Key('bundle-id')), findsNothing);
+    expect(find.byKey(const Key('open-bundle')), findsNothing);
+    expect(find.textContaining('暂不提供应用画面'), findsOneWidget);
+    expect(find.textContaining('屏幕录制'), findsNothing);
+    expect(find.text('终端'), findsWidgets);
   });
 
   testWidgets('typed add form text survives switching device chips', (tester) async {

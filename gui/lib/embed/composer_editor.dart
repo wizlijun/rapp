@@ -79,3 +79,8 @@ abstract class ComposerEditor {
   Future<String> take();
   void dispose();
 }
+
+/// Editors that can relinquish input synchronously during native-window handoff.
+abstract class HandoffEditor {
+  void setHandoff(bool active);
+}

@@ -45,7 +45,7 @@ void main() {
         expect(await input.moveNext(), true);
         expect(input.current.$1, 23);
         expect(input.current.$2, [
-          6,
+          12,
           ...wire.string('secret'),
           ...wire.u32(7),
           2,

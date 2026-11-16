@@ -8,7 +8,7 @@ import 'package:flutter/services.dart';
 
 import 'composer_editor.dart';
 
-class FlutterEditor implements ComposerEditor {
+class FlutterEditor implements ComposerEditor, HandoffEditor {
   FlutterEditor() {
     _controller.addListener(_controllerChanged);
     _focus.addListener(_focusChanged);
@@ -21,6 +21,7 @@ class FlutterEditor implements ComposerEditor {
   final _focus = FocusNode(debugLabel: 'composer');
   String _seen = '';
   bool _disposed = false;
+  bool _handoff = false;
 
   /// setText / insert calls that arrived while the input method was composing.
   final _pending = <void Function()>[];
@@ -159,6 +160,13 @@ class FlutterEditor implements ComposerEditor {
   @override
   void unfocus() => _focus.unfocus();
 
+  @override
+  void setHandoff(bool active) {
+    _handoff = active;
+    _focus.canRequestFocus = !active;
+    if (active) _focus.unfocus();
+  }
+
   void _setNow(String text) {
     _controller.value = TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length));
   }
@@ -193,7 +201,20 @@ class FlutterEditor implements ComposerEditor {
   }
 
   @override
-  Future<String> read() => SynchronousFuture(_controller.text);
+  Future<String> read() {
+    if (!_handoff || !_composing) return SynchronousFuture(_controller.text);
+    // Unfocus commits the local preedit. Read after that commit and any queued
+    // insertions, before the native window becomes the draft's editor.
+    final done = Completer<String>();
+    _readers.add(done);
+    _pending.add(() {
+      _readers.remove(done);
+      done.complete(_controller.text);
+    });
+    return done.future;
+  }
+
+  final _readers = <Completer<String>>[];
 
   @override
   bool get isEmpty => _controller.text.isEmpty && _pending.isEmpty;
@@ -228,6 +249,10 @@ class FlutterEditor implements ComposerEditor {
       c.complete(_controller.text);
     }
     _takers.clear();
+    for (final c in _readers) {
+      c.complete(_controller.text);
+    }
+    _readers.clear();
     _controller.removeListener(_controllerChanged);
     _focus.removeListener(_focusChanged);
     _controller.dispose();

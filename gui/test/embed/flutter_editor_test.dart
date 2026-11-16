@@ -54,6 +54,37 @@ void main() {
   });
   tearDown(() => ed.dispose());
 
+  testWidgets('native handoff prevents the old editor from regaining input', (tester) async {
+    await tester.pumpWidget(_host(ed));
+    ed.setText('retained draft');
+    ed.focus();
+    await tester.pump();
+    ed.setHandoff(true);
+    await tester.pump();
+    ed.focus();
+    await tester.tap(find.byType(TextField));
+    await tester.pump();
+    expect(tester.widget<TextField>(find.byType(TextField)).focusNode!.hasFocus, false);
+    expect(await ed.read(), 'retained draft');
+    ed.setHandoff(false);
+    ed.focus();
+    await tester.pump();
+    expect(tester.widget<TextField>(find.byType(TextField)).focusNode!.hasFocus, true);
+  });
+
+  testWidgets('handoff snapshot includes an insertion queued behind IME composition', (tester) async {
+    await tester.pumpWidget(_host(ed));
+    ed.focus();
+    await tester.pump();
+    tester.testTextInput.updateEditingValue(const TextEditingValue(
+        text: 'ni', selection: TextSelection.collapsed(offset: 2), composing: TextRange(start: 0, end: 2)));
+    ed.insert(' pasted');
+    ed.setHandoff(true);
+    final snapshot = ed.read();
+    await tester.pump();
+    expect(await snapshot, 'ni pasted');
+  });
+
   testWidgets('Enter reports, Shift+Enter is a newline, both stay with the IME while composing', (tester) async {
     await tester.pumpWidget(_host(ed));
     ed.focus();

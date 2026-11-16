@@ -9,6 +9,78 @@ import 'linux_session_port_test.dart' as wire;
 void main() {
   final binding = TestWidgetsFlutterBinding.ensureInitialized();
   const channel = MethodChannel('rapp/linux');
+  test('closing during pending native detach removes the native session', () async {
+    final calls = <MethodCall>[];
+    final gate = Completer<void>();
+    final entered = Completer<void>();
+    binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      if (call.method == 'init') return true;
+      if (call.method == 'detach') {
+        entered.complete();
+        await gate.future;
+      }
+      return null;
+    });
+    final process = await Process.start('cat', const []);
+    final port = LinuxSessionPort('/bin/cat', framePresented: () async {});
+    final events = <SessionEvent>[];
+    final sub = port.events.listen(events.add);
+    try {
+      await port.init();
+      port.seedSessionForTest(91, process);
+      final pending = port.detach(91, text: 'keep draft');
+      await entered.future;
+      await port.invoke('close', {'sid': 91});
+      gate.complete();
+      await pending;
+      await Future<void>.delayed(Duration.zero);
+      expect(calls.where((c) => c.method == 'attach'), hasLength(1));
+      expect(calls.where((c) => c.method == 'windows'), isEmpty);
+      expect(events.whereType<DetachedEvent>(), isEmpty);
+    } finally {
+      port.dispose();
+      await sub.cancel();
+      process.kill();
+      binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
+    }
+  });
+  test('disconnecting during pending native detach returns to the frozen stage', () async {
+    final calls = <MethodCall>[];
+    final gate = Completer<void>();
+    final entered = Completer<void>();
+    binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      if (call.method == 'init') return true;
+      if (call.method == 'detach') {
+        entered.complete();
+        await gate.future;
+      }
+      return null;
+    });
+    final process = await Process.start('cat', const []);
+    final port = LinuxSessionPort('/bin/cat', framePresented: () async {});
+    final events = <SessionEvent>[];
+    final sub = port.events.listen(events.add);
+    try {
+      await port.init();
+      port.seedSessionForTest(91, process);
+      final pending = port.detach(91, text: 'keep draft');
+      await entered.future;
+      port.freeze(91, 'lost connection');
+      gate.complete();
+      await expectLater(pending, throwsStateError);
+      await Future<void>.delayed(Duration.zero);
+      expect(calls.where((c) => c.method == 'attach'), hasLength(1));
+      expect(calls.where((c) => c.method == 'windows'), isEmpty);
+      expect(events.whereType<DetachedEvent>(), isEmpty);
+    } finally {
+      port.dispose();
+      await sub.cancel();
+      process.kill();
+      binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
+    }
+  });
   test(
     'native detach/attach shares connection, frames, draft and stream settings',
     () async {

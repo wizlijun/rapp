@@ -265,7 +265,7 @@ class RemoteSession extends ChangeNotifier {
   void apply(SessionEvent e) {
     switch (e) {
       case StreamChoiceEvent():
-        choice = StreamChoice(e.mode, e.density, e.fps);
+        setChoice(StreamChoice(e.mode, e.density, e.fps, smart: e.smart), manual: true);
       case ReadyEvent():
         ready = true;
         appName = e.appName;
@@ -318,9 +318,8 @@ class RemoteSession extends ChangeNotifier {
         final d = e.done;
         if (d != null) composer.done(d.sent, d.failure);
       case ComposerDraftEvent():
-        if (e.text != null) composer.text = e.text!;
+        if (e.text != null) composer.setDraft(e.text!);
         if (e.drop != null) composer.removeBlock(e.drop!);
-        if (e.send) composer.send();
       case ComposerInsertEvent():
         // A clip's 「插入」: into the draft, which opens to show it.
         composer.apply(e.insert);

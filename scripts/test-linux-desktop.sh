@@ -1,11 +1,31 @@
 #!/usr/bin/env bash
-# GTK3 runner smoke test; use a graphical session or a GTK Broadway display.
+# GTK3 runner smoke test on a private, headless Broadway display.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ephemeral="$PWD/gui/linux/flutter/ephemeral"
-binary=$(mktemp /tmp/rapp-desktop-test.XXXXXX)
-trap 'rm -f "$binary"' EXIT
+work=$(mktemp -d /tmp/rapp-desktop-test.XXXXXX)
+desktop_pid=
+cleanup() {
+  if [[ -n "$desktop_pid" ]]; then
+    kill "$desktop_pid" 2>/dev/null || true
+    wait "$desktop_pid" 2>/dev/null || true
+  fi
+  rm -rf "$work"
+}
+trap cleanup EXIT
 clang++ -std=c++17 -Wall -Wextra -Wno-unused-parameter gui/linux/tests/windows_smoke.cc \
   -I"$ephemeral" $(pkg-config --cflags --libs gtk+-3.0) \
-  -L"$ephemeral" -lflutter_linux_gtk -Wl,-rpath,"$ephemeral" -o "$binary"
-G_DEBUG=fatal-criticals "$binary"
+  -L"$ephemeral" -lflutter_linux_gtk -Wl,-rpath,"$ephemeral" -o "$work/test"
+display=:$((100 + $$ % 50000))
+broadwayd --unixsocket="$work/http.sock" "$display" > "$work/broadway.log" 2>&1 &
+desktop_pid=$!
+for ((i=0; i<50; i++)); do
+  [[ -S "$work/http.sock" ]] && break
+  if ! kill -0 "$desktop_pid" 2>/dev/null; then
+    cat "$work/broadway.log" >&2
+    exit 1
+  fi
+  sleep 0.02
+done
+env -u DISPLAY -u WAYLAND_DISPLAY GDK_BACKEND=broadway BROADWAY_DISPLAY="$display" \
+  G_DEBUG=fatal-criticals "$work/test"

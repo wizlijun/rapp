@@ -64,10 +64,11 @@ struct Session;
 struct Window {
   Session *session;
   int id = 0, parent = 0;
-  bool popup = false, resizable = false;
+  bool popup = false, resizable = false, focused = false;
   double x = 0, y = 0, w = 1, h = 1, bar = 0;
   GtkWidget *shell = nullptr, *area = nullptr, *chips = nullptr,
-            *status = nullptr, *menubar = nullptr, *tools = nullptr;
+            *status = nullptr, *menubar = nullptr, *tools = nullptr,
+            *editor = nullptr, *send = nullptr, *retry = nullptr, *banner = nullptr, *composer = nullptr;
   guint resize_timer = 0;
   int aw = 0, ah = 0;
   bool allocated = false;
@@ -86,20 +87,26 @@ struct Session {
   std::map<int, std::unique_ptr<Window>> windows;
   GtkTextBuffer *buffer = gtk_text_buffer_new(nullptr);
   std::vector<Block> blocks, sent_blocks;
-  std::string sent_text, status;
+  std::string sent_text, status, banner;
   cairo_surface_t *surface = nullptr;
-  std::vector<guint8> pixels;
+  std::vector<guint8> pixels, gray_pixels;
+  cairo_surface_t *gray = nullptr;
+  int focus_window = 0;
+  std::vector<std::vector<double>> focus_rects;
   double x = 0, y = 0, w = 1, h = 1;
   int selected = 0;
   FlValue *menus = nullptr;
   FlValue *clips = nullptr;
   std::string mode = "color16", density = "adaptive";
   int fps = 15;
+  bool smart = false, composer_allowed = true, compose = false, recalling = false;
+  double composer_scale = 1;
   ~Session() {
     closing = true;
     windows.clear();
     if (surface)
       cairo_surface_destroy(surface);
+    if (gray) cairo_surface_destroy(gray);
     if (menus)
       fl_value_unref(menus);
     if (clips)
@@ -237,16 +244,31 @@ void mouse(Window *w, const char *kind, guint button, double x, double y,
   setint(a, "clicks", clicks);
   w->session->emit("mouse", a);
 }
+void composer_action(Session *s, const char *action) {
+  auto *args = fl_value_new_map();
+  settext(args, "action", action);
+  settext(args, "text", s->draft());
+  s->emit("composer_action", args);
+}
+void composer_options(Window *w) {
+  auto *s = w->session;
+  if (!w->editor) return;
+  gtk_widget_set_visible(w->composer, s->composer_allowed);
+  gtk_widget_set_visible(w->chips, s->composer_allowed);
+  auto *css = gtk_css_provider_new();
+  const auto rule = "textview { font-size: " + std::to_string(15 * s->composer_scale) + "px; }";
+  gtk_css_provider_load_from_data(css, rule.c_str(), -1, nullptr);
+  auto *old = static_cast<GtkStyleProvider *>(g_object_get_data(G_OBJECT(w->editor), "composer-css"));
+  auto *context = gtk_widget_get_style_context(w->editor);
+  if (old) gtk_style_context_remove_provider(context, old);
+  gtk_style_context_add_provider(context, GTK_STYLE_PROVIDER(css), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+  g_object_set_data_full(G_OBJECT(w->editor), "composer-css", css, g_object_unref);
+}
 void refresh_chips(Session *s);
 void send_draft(Session *s) {
   if (s->sending || s->disconnected)
     return;
   auto draft = s->draft();
-  if (draft.empty() && s->blocks.empty()) {
-    key(s, 36, 0, true);
-    key(s, 36, 0, false);
-    return;
-  }
   s->sending = true;
   s->sent_text = draft;
   s->sent_blocks = s->blocks;
@@ -410,6 +432,12 @@ void tools_menu(Window *w) {
   };
   choice("最省流", "duogray", "adaptive", 1);
   choice("最清晰", "color16", "original", 15);
+  auto *smart = fl_value_new_map();
+  settext(smart, "mode", "color16");
+  settext(smart, "density", "adaptive");
+  setint(smart, "fps", 15);
+  put(smart, "smart", fl_value_new_bool(true));
+  tool_item(menu, s->smart ? "✓ 智能" : "智能", s, "set_stream", smart);
   const std::pair<const char *, const char *> modes[] = {
       {"duogray", "双色 · 灰度"},
       {"duocolor", "双色 · 彩色"},
@@ -479,6 +507,8 @@ std::unique_ptr<Window> create_window(Session *s, int id, bool popup,
                                gtk_window_get_application(s->main));
     auto *root = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
     gtk_container_add(GTK_CONTAINER(w->shell), root);
+    w->banner = gtk_label_new(s->banner.c_str());
+    gtk_box_pack_start(GTK_BOX(root), w->banner, FALSE, FALSE, 0);
     w->menubar = gtk_menu_bar_new();
     gtk_box_pack_start(GTK_BOX(root), w->menubar, FALSE, FALSE, 0);
     auto *toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
@@ -520,11 +550,13 @@ std::unique_ptr<Window> create_window(Session *s, int id, bool popup,
     w->chips = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
     gtk_box_pack_start(GTK_BOX(root), w->chips, FALSE, FALSE, 0);
     auto *input = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+    w->composer = input;
     gtk_box_pack_start(GTK_BOX(root), input, FALSE, FALSE, 0);
     auto *scroll = gtk_scrolled_window_new(nullptr, nullptr);
     gtk_widget_set_size_request(scroll, -1, 60);
     gtk_box_pack_start(GTK_BOX(input), scroll, TRUE, TRUE, 0);
     auto *editor = gtk_text_view_new_with_buffer(s->buffer);
+    w->editor = editor;
     gtk_container_add(GTK_CONTAINER(scroll), editor);
     gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(editor), GTK_WRAP_WORD_CHAR);
     g_signal_connect(
@@ -538,15 +570,38 @@ std::unique_ptr<Window> create_window(Session *s, int id, bool popup,
         editor, "key-press-event",
         reinterpret_cast<GCallback>(+[](GtkWidget *v, GdkEventKey *e,
                                         gpointer p) -> gboolean {
+          auto *w = static_cast<Window *>(p);
+          auto *s = w->session;
+          if (gtk_text_view_im_context_filter_keypress(GTK_TEXT_VIEW(v), e)) return TRUE;
+          const bool ctrl = e->state & GDK_CONTROL_MASK;
+          if (ctrl && !(e->state & (GDK_SHIFT_MASK | GDK_MOD1_MASK)) &&
+              (e->keyval == GDK_KEY_Return || e->keyval == GDK_KEY_KP_Enter)) {
+            if (!s->disconnected) gtk_widget_grab_focus(w->area);
+            return TRUE;
+          }
+          if (ctrl && (e->keyval == GDK_KEY_equal || e->keyval == GDK_KEY_plus ||
+                       e->keyval == GDK_KEY_minus || e->keyval == GDK_KEY_0)) {
+            composer_action(s, e->keyval == GDK_KEY_minus ? "zoom-" : e->keyval == GDK_KEY_0 ? "zoom0" : "zoom+");
+            return TRUE;
+          }
+          if (!(e->state & (GDK_CONTROL_MASK | GDK_MOD1_MASK | GDK_SHIFT_MASK)) &&
+              (e->keyval == GDK_KEY_Up || e->keyval == GDK_KEY_Down)) {
+            GtkTextIter at;
+            gtk_text_buffer_get_iter_at_mark(s->buffer, &at, gtk_text_buffer_get_insert(s->buffer));
+            if ((e->keyval == GDK_KEY_Up && gtk_text_iter_get_line(&at) == 0) ||
+                (e->keyval == GDK_KEY_Down && gtk_text_iter_get_line(&at) == gtk_text_buffer_get_line_count(s->buffer) - 1)) {
+              if (s->recalling || (e->keyval == GDK_KEY_Up && s->draft().empty())) {
+                composer_action(s, e->keyval == GDK_KEY_Up ? "up" : "down");
+                return TRUE;
+              }
+            }
+          }
           if (e->keyval == GDK_KEY_Return || e->keyval == GDK_KEY_KP_Enter) {
-            if (gtk_text_view_im_context_filter_keypress(GTK_TEXT_VIEW(v), e))
-              return TRUE;
             if (!(e->state & GDK_SHIFT_MASK)) {
-              send_draft(static_cast<Session *>(p));
+              send_draft(s);
               return TRUE;
             }
           }
-          auto *s = static_cast<Session *>(p);
           if ((e->state & GDK_CONTROL_MASK) &&
               gdk_keyval_to_lower(e->keyval) == GDK_KEY_q) {
             s->emit("close");
@@ -555,29 +610,25 @@ std::unique_ptr<Window> create_window(Session *s, int id, bool popup,
           if ((e->state & GDK_CONTROL_MASK) &&
               gdk_keyval_to_lower(e->keyval) == GDK_KEY_v)
             return FALSE;
-          if (s->draft().empty() &&
-              !(e->state & (GDK_SUPER_MASK | GDK_META_MASK)) &&
-              ((e->state & GDK_CONTROL_MASK) || e->keyval == GDK_KEY_Tab ||
-               (e->keyval >= GDK_KEY_Home && e->keyval <= GDK_KEY_Down) ||
-               e->keyval == GDK_KEY_Escape || e->keyval == GDK_KEY_BackSpace)) {
-            int code = keycode(e->keyval);
-            if (code >= 0) {
-              key(s, code, modifiers(e->state), true);
-              key(s, code, modifiers(e->state), false);
-              return TRUE;
-            }
-          }
           return FALSE;
         }),
-        s);
+        w.get());
     install_drop(editor, s);
     auto *send = gtk_button_new_with_label("发送 ⏎");
+    w->send = send;
     gtk_box_pack_start(GTK_BOX(input), send, FALSE, FALSE, 0);
     g_signal_connect(send, "clicked",
                      reinterpret_cast<GCallback>(+[](GtkButton *, gpointer p) {
                        send_draft(static_cast<Session *>(p));
                      }),
                      s);
+    w->retry = gtk_button_new_with_label("重试失败内容");
+    gtk_box_pack_start(GTK_BOX(input), w->retry, FALSE, FALSE, 0);
+    g_signal_connect(w->retry, "clicked",
+      reinterpret_cast<GCallback>(+[](GtkButton *, gpointer p) {
+        auto *s = static_cast<Session *>(p);
+        if (!s->sending && !s->disconnected) { s->sending = true; s->emit("composer_retry"); }
+      }), s);
     w->status = gtk_label_new(s->status.c_str());
     gtk_box_pack_start(GTK_BOX(root), w->status, FALSE, FALSE, 0);
     g_signal_connect(w->shell, "delete-event",
@@ -623,8 +674,38 @@ std::unique_ptr<Window> create_window(Session *s, int id, bool popup,
         cairo_translate(cr, s->x - w->x, s->y - w->y - w->bar);
         cairo_scale(cr, s->w / cairo_image_surface_get_width(s->surface),
                     s->h / cairo_image_surface_get_height(s->surface));
-        cairo_set_source_surface(cr, s->surface, 0, 0);
+        const bool focused = w->focused && s->focus_window == w->id && !s->focus_rects.empty();
+        if (focused && !s->gray) {
+          s->gray_pixels = s->pixels;
+          for (size_t i = 0; i + 3 < s->gray_pixels.size(); i += 4) {
+            auto *v = &s->gray_pixels[i];
+            const guint8 l = (77 * v[2] + 150 * v[1] + 29 * v[0]) / 256;
+            v[0] = v[1] = v[2] = l;
+          }
+          s->gray = cairo_image_surface_create_for_data(s->gray_pixels.data(), CAIRO_FORMAT_ARGB32,
+            cairo_image_surface_get_width(s->surface), cairo_image_surface_get_height(s->surface),
+            cairo_image_surface_get_stride(s->surface));
+        }
+        cairo_set_source_surface(cr, focused ? s->gray : s->surface, 0, 0);
         cairo_paint(cr);
+        if (focused) {
+          const double sx = cairo_image_surface_get_width(s->surface) / s->w;
+          const double sy = cairo_image_surface_get_height(s->surface) / s->h;
+          cairo_save(cr);
+          for (const auto &r : s->focus_rects)
+            cairo_rectangle(cr, (w->x + r[0] - s->x) * sx, (w->y + r[1] - s->y) * sy, r[2] * sx, r[3] * sy);
+          cairo_clip(cr);
+          cairo_set_source_surface(cr, s->surface, 0, 0);
+          cairo_paint(cr);
+          cairo_restore(cr);
+          // Same temporary debug frames as Flutter's focus_gray.dart.
+          cairo_set_source_rgb(cr, 0, .784, .325);
+          cairo_set_line_width(cr, 2 * sx / z);
+          for (const auto &r : s->focus_rects) {
+            cairo_rectangle(cr, (w->x + r[0] - s->x) * sx, (w->y + r[1] - s->y) * sy, r[2] * sx, r[3] * sy);
+            cairo_stroke(cr);
+          }
+        }
         return TRUE;
       }),
       raw);
@@ -700,6 +781,25 @@ std::unique_ptr<Window> create_window(Session *s, int id, bool popup,
                      if ((e->state & GDK_CONTROL_MASK) &&
                          gdk_keyval_to_lower(e->keyval) == GDK_KEY_q) {
                        w->session->emit("close");
+                       return TRUE;
+                     }
+                     const bool ctrl_enter = (e->state & GDK_CONTROL_MASK) &&
+                       !(e->state & (GDK_SHIFT_MASK | GDK_MOD1_MASK)) &&
+                       (e->keyval == GDK_KEY_Return || e->keyval == GDK_KEY_KP_Enter);
+                     const auto letter = gdk_keyval_to_unicode(e->keyval);
+                     const bool compose_letter = w->session->compose &&
+                       !(e->state & (GDK_CONTROL_MASK | GDK_MOD1_MASK)) && g_unichar_isalpha(letter);
+                     if (w->editor && w->session->composer_allowed && (ctrl_enter || compose_letter)) {
+                       release(w);
+                       gtk_widget_grab_focus(w->editor);
+                       composer_action(w->session, compose_letter ? "compose" : "open");
+                       if (compose_letter) {
+                         if (!gtk_text_view_im_context_filter_keypress(GTK_TEXT_VIEW(w->editor), e)) {
+                           char text[7] = {};
+                           g_unichar_to_utf8(letter, text);
+                           gtk_text_buffer_insert_at_cursor(w->session->buffer, text, -1);
+                         }
+                       }
                        return TRUE;
                      }
                      if (e->keyval == GDK_KEY_F11 && !w->popup) {
@@ -787,7 +887,9 @@ bool rapp_windows_method(RappWindows *manager, FlMethodCall *call) {
   if (method != "detach" && method != "attach" && method != "windows" &&
       method != "frame" && method != "raise" && method != "menus" &&
       method != "composer_insert" && method != "composer_done" &&
-      method != "status" && method != "stream" && method != "clips")
+      method != "status" && method != "stream" && method != "clips" &&
+      method != "focus" && method != "banner" && method != "composer_submitted" &&
+      method != "composer_options" && method != "composer_draft")
     return false;
   auto *args = fl_method_call_get_args(call);
   auto sid = integer(get(args, "sid"));
@@ -810,6 +912,7 @@ bool rapp_windows_method(RappWindows *manager, FlMethodCall *call) {
         reinterpret_cast<GCallback>(+[](GtkTextBuffer *, gpointer p) {
           auto *s = static_cast<Session *>(p);
           auto *a = fl_value_new_map();
+          s->recalling = false;
           settext(a, "text", s->draft());
           s->emit("draft", a);
         }),
@@ -864,6 +967,8 @@ bool rapp_windows_method(RappWindows *manager, FlMethodCall *call) {
         w->bar = number(get(m, "titleBar"));
         auto *r = get(m, "resizable");
         w->resizable = r && fl_value_get_bool(r);
+        auto *focused = get(m, "focused");
+        w->focused = focused && fl_value_get_bool(focused);
         if (!popup) {
           gtk_window_set_title(GTK_WINDOW(w->shell), text(get(m, "title")));
           gtk_window_set_resizable(GTK_WINDOW(w->shell), w->resizable);
@@ -880,6 +985,7 @@ bool rapp_windows_method(RappWindows *manager, FlMethodCall *call) {
           gtk_widget_set_size_request(w->area, w->w, w->h - w->bar);
         }
         gtk_widget_show_all(w->shell);
+        composer_options(w);
         gtk_widget_queue_draw(w->area);
       }
     // Destroy popups first; their GTK parent may otherwise destroy them twice.
@@ -907,6 +1013,7 @@ bool rapp_windows_method(RappWindows *manager, FlMethodCall *call) {
               24 + static_cast<size_t>(width) * height * 4) {
         if (s->surface)
           cairo_surface_destroy(s->surface);
+        if (s->gray) { cairo_surface_destroy(s->gray); s->gray = nullptr; }
         s->pixels.assign(bytes + 24, bytes + fl_value_get_length(value));
         s->surface = cairo_image_surface_create_for_data(
             s->pixels.data(), CAIRO_FORMAT_ARGB32, width, height, width * 4);
@@ -929,6 +1036,8 @@ bool rapp_windows_method(RappWindows *manager, FlMethodCall *call) {
       s->mode = text(get(args, "mode"));
       s->density = text(get(args, "density"));
       s->fps = integer(get(args, "fps"));
+      auto *smart = get(args, "smart");
+      s->smart = smart && fl_value_get_bool(smart);
     } else {
       if (s->clips)
         fl_value_unref(s->clips);
@@ -936,6 +1045,23 @@ bool rapp_windows_method(RappWindows *manager, FlMethodCall *call) {
     }
     for (auto &w : s->windows)
       tools_menu(w.second.get());
+  } else if (method == "focus") {
+    s->focus_window = integer(get(args, "window"));
+    s->focus_rects.clear();
+    auto *rects = get(args, "rects");
+    if (rects) for (size_t i = 0; i < fl_value_get_length(rects); i++) {
+      auto *r = fl_value_get_list_value(rects, i);
+      if (fl_value_get_type(r) != FL_VALUE_TYPE_LIST || fl_value_get_length(r) != 4) continue;
+      std::vector<double> v;
+      for (size_t k = 0; k < 4; k++) v.push_back(number(fl_value_get_list_value(r, k)));
+      if (std::all_of(v.begin(), v.end(), [](double x) { return std::isfinite(x); }) && v[2] > 0 && v[3] > 0)
+        s->focus_rects.push_back(v);
+    }
+    for (auto &w : s->windows) gtk_widget_queue_draw(w.second->area);
+  } else if (method == "banner") {
+    s->banner = text(get(args, "text"));
+    for (auto &w : s->windows) if (w.second->banner)
+      gtk_label_set_text(GTK_LABEL(w.second->banner), s->banner.c_str());
   } else if (method == "status") {
     s->status = text(get(args, "text"));
     auto *disconnected = get(args, "disconnected");
@@ -944,9 +1070,11 @@ bool rapp_windows_method(RappWindows *manager, FlMethodCall *call) {
       for (auto &w : s->windows)
         release(w.second.get());
     }
-    for (auto &w : s->windows)
-      if (w.second->status)
-        gtk_label_set_text(GTK_LABEL(w.second->status), s->status.c_str());
+    for (auto &w : s->windows) {
+      if (w.second->status) gtk_label_set_text(GTK_LABEL(w.second->status), s->status.c_str());
+      if (w.second->send) gtk_widget_set_sensitive(w.second->send, !s->disconnected);
+      if (w.second->retry) gtk_widget_set_sensitive(w.second->retry, !s->disconnected);
+    }
   } else if (method == "composer_insert") {
     gtk_text_buffer_insert_at_cursor(s->buffer, text(get(args, "text")), -1);
     auto *bs = get(args, "blocks");
@@ -957,21 +1085,29 @@ bool rapp_windows_method(RappWindows *manager, FlMethodCall *call) {
             {static_cast<int>(integer(get(b, "n"))), text(get(b, "label"))});
       }
     refresh_chips(s);
-  } else if (method == "composer_done") {
-    int sent = integer(get(args, "sent"));
-    int n = std::min(sent, static_cast<int>(s->sent_blocks.size()));
-    bool same = s->blocks.size() >= static_cast<size_t>(n);
-    for (int i = 0; same && i < n; i++)
-      same = s->blocks[i].n == s->sent_blocks[i].n;
-    auto draft = s->draft();
-    bool text_sent = sent > static_cast<int>(s->sent_blocks.size());
-    if (same && (!text_sent ||
-                 draft.compare(0, s->sent_text.size(), s->sent_text) == 0)) {
-      s->blocks.erase(s->blocks.begin(), s->blocks.begin() + n);
-      if (text_sent)
-        gtk_text_buffer_set_text(s->buffer,
-                                 draft.substr(s->sent_text.size()).c_str(), -1);
+  } else if (method == "composer_options") {
+    auto *allowed = get(args, "allowed"), *compose = get(args, "compose");
+    if (allowed) s->composer_allowed = fl_value_get_bool(allowed);
+    if (compose) s->compose = fl_value_get_bool(compose);
+    if (get(args, "scale")) s->composer_scale = std::clamp(number(get(args, "scale")), 1., 3.);
+    for (auto &w : s->windows) composer_options(w.second.get());
+  } else if (method == "composer_draft") {
+    gtk_text_buffer_set_text(s->buffer, text(get(args, "text")), -1);
+    s->recalling = !s->draft().empty();
+  } else if (method == "composer_submitted") {
+    auto *taken = get(args, "taken"), *retry = get(args, "retry");
+    if (!taken || !fl_value_get_bool(taken)) {
+      s->sending = false;
+    } else if (!retry || !fl_value_get_bool(retry)) {
+      const auto draft = s->draft();
+      if (draft.compare(0, s->sent_text.size(), s->sent_text) == 0)
+        gtk_text_buffer_set_text(s->buffer, draft.substr(s->sent_text.size()).c_str(), -1);
+      for (const auto &b : s->sent_blocks)
+        s->blocks.erase(std::remove_if(s->blocks.begin(), s->blocks.end(),
+          [&](const Block &v) { return v.n == b.n; }), s->blocks.end());
+      refresh_chips(s);
     }
+  } else if (method == "composer_done") {
     s->status = text(get(args, "failure"));
     for (auto &w : s->windows)
       if (w.second->status)

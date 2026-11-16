@@ -162,7 +162,8 @@ sealed class SessionEvent {
 }
 
 class StreamChoiceEvent extends SessionEvent {
-  const StreamChoiceEvent(super.sid, this.mode, this.density, this.fps);
+  const StreamChoiceEvent(super.sid, this.mode, this.density, this.fps, {this.smart = false});
+  final bool smart;
   final String mode, density;
   final int fps;
 }
@@ -256,7 +257,9 @@ class ComposeKeyEvent extends SessionEvent {
 
 /// Edits made in a native detached composer's draft, shared with the stage.
 class ComposerDraftEvent extends SessionEvent {
-  const ComposerDraftEvent(super.sid, {this.text, this.drop, this.send = false});
+  const ComposerDraftEvent(super.sid, {this.text, this.drop, this.send = false, this.retry = false, this.action});
+  final String? action;
+  final bool retry;
   final String? text;
   final int? drop;
   final bool send;
@@ -504,6 +507,13 @@ abstract class SessionPort {
     });
   }
 
+  /// Stop a local worker when the hub loses the link before the worker notices.
+  void freeze(Object sid, String reason) {}
+
+  /// Native Linux windows mirror the shared writing-panel preferences.
+  void nativeComposerOptions(Object sid, {required bool allowed, required bool compose, required double scale}) {}
+  void nativeComposerDraft(Object sid, String text) {}
+
   void close(Object sid) => _send('close', {'sid': sid});
 
   /// `kind`: `down|up|drag|move`; `button`: `left|right`; A points from the window's top-left.
@@ -576,6 +586,9 @@ abstract class SessionPort {
   /// `pieces`: `{'text': …}` or `{'block': n}`, in send order.
   void composerSend(Object sid, List<Map<String, Object>> pieces) =>
       _send('composer_send', {'sid': sid, 'pieces': pieces});
+
+  void nativeComposerSubmitted(Object sid, {bool taken = true, bool retry = false}) =>
+      _send('composer_submitted', {'sid': sid, 'taken': taken, 'retry': retry});
 
   void composerDropBlock(Object sid, int block) => _send('composer_drop_block', {'sid': sid, 'block': block});
 
@@ -652,10 +665,12 @@ abstract class SessionPort {
     }
   }
 
-  void detach(Object sid, {String text = '', List<BlockChip> blocks = const []}) => _send('detach', {
-    'sid': sid, 'text': text,
-    'blocks': [for (final b in blocks) {'n': b.n, 'label': b.label}],
-  });
+  Future<void> detach(Object sid, {String text = '', List<BlockChip> blocks = const []}) async {
+    await invoke('detach', {
+      'sid': sid, 'text': text,
+      'blocks': [for (final b in blocks) {'n': b.n, 'label': b.label}],
+    });
+  }
 
   void attach(Object sid) => _send('attach', {'sid': sid});
 

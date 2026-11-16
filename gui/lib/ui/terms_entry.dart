@@ -52,9 +52,13 @@ class NewText extends TermsTarget {
   final String? shell;
 }
 
+class NoTerminal extends TermsTarget {
+  const NoTerminal();
+}
+
 /// [mode] is `text` or `pixels`. Text mode opens the latest text terminal, else a new one when this
 /// machine has launchers; text mode that can open nothing is treated as pixels.
-TermsTarget termsTarget({required String mode, required TermList list, required List<HubApp> apps}) {
+TermsTarget termsTarget({required String mode, required TermList list, required List<HubApp> apps, bool graphical = true}) {
   if (mode == 'text') {
     TermRow? latest(String backend) {
       TermRow? out;
@@ -73,5 +77,6 @@ TermsTarget termsTarget({required String mode, required TermList list, required 
     }
   }
   final first = terminalAppsOf(apps).firstOrNull;
+  if (first == null && !graphical) return const NoTerminal();
   return first == null ? const OpenPixels('com.apple.Terminal', 'Terminal') : OpenPixels(first.app, first.name);
 }

@@ -72,7 +72,9 @@ class ComposerModel extends ChangeNotifier {
   /// The text while no editor is attached; the last copy otherwise.
   String get draft => _draft;
   String _draft = '';
+  int _draftEpoch = 0;
   set draft(String v) {
+    _draftEpoch++;
     if (_draft == v) return;
     _draft = v;
     onDraftChanged?.call(v);
@@ -194,8 +196,10 @@ class ComposerModel extends ChangeNotifier {
     editorFocused = false;
     _idleTimer?.cancel();
     final ready = _attached;
+    final epoch = _draftEpoch;
     Future<void> copy() async {
-      draft = await e.read();
+      final text = await e.read();
+      if (_draftEpoch == epoch) draft = text;
       if (!_disposed) _checkDeclined();
     }
     final work = ready == null ? copy() : ready.then((_) => copy());
@@ -204,6 +208,43 @@ class ComposerModel extends ChangeNotifier {
       if (identical(_detaching, pending)) _detaching = null;
     });
     return _detaching = pending;
+  }
+
+  /// Stop user input before reading; the two editors must never both accept edits.
+  void handoff(bool active) {
+    final e = _editor;
+    if (e is HandoffEditor) (e as HandoffEditor).setHandoff(active);
+  }
+
+  Future<void>? _inserting;
+
+  /// Clipboard/file-picker results belong to the draft even across a window handoff.
+  /// Preserve request order and let the handoff wait until they are reflected in the editor.
+  Future<void> applyPending(Future<PasteResult> result) {
+    final previous = _inserting;
+    final work = () async {
+      if (previous != null) await previous.catchError((Object _) {});
+      apply(await result);
+    }();
+    late final Future<void> pending;
+    pending = work.whenComplete(() {
+      if (identical(_inserting, pending)) _inserting = null;
+    });
+    return _inserting = pending;
+  }
+
+  /// Flush the current editor before handing the draft to a native detached window.
+  Future<String> readDraft() async {
+    await _inserting;
+    await _attached;
+    await _detaching;
+    final e = _editor;
+    final epoch = _draftEpoch;
+    if (e != null) {
+      final text = await e.read();
+      if (identical(_editor, e) && _draftEpoch == epoch && !_disposed) draft = text;
+    }
+    return draft;
   }
 
   /// Replaces the text: into the editor if attached, else the draft.
@@ -261,6 +302,7 @@ class ComposerModel extends ChangeNotifier {
     } finally {
       _setTaking(false);
     }
+    if (_disposed) return SubmitNothing();
     if (sending || _inFlight != null) {
       // Another round started while the take waited: the text goes back, nothing is sent twice.
       if (_editor != null) draft = '';

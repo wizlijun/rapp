@@ -1,9 +1,11 @@
-// Protocol v5/v6 side connections. One queue per session, bounded chunks, disk
+// Protocol v12 side connections. One queue per session, bounded chunks, disk
 // streaming and resumable uploads/downloads. Never runs on the picture pipe.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+
+import 'session_protocol.dart';
 
 const linuxMemoryLimit = 256 * 1024 * 1024;
 const linuxChunkSize = 256 * 1024;
@@ -196,7 +198,7 @@ class LinuxTransfers {
       try {
         await _retry(j, (w) async {
           await w.send(23, [
-            6,
+            sessionProtocolVersion,
             ...wireString(token),
             ...wireInt(item, 4),
             code,
@@ -263,7 +265,7 @@ class LinuxTransfers {
       var changed = false;
       await _retry(j, (w) async {
         await w.send(22, [
-          6,
+          sessionProtocolVersion,
           ...wireString(token),
           ...wireInt(clip, 4),
           ...wireInt(index, 2),
