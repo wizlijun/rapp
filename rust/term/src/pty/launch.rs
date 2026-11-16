@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+pub const START_TIMEOUT: &str = "terminal launcher did not respond within 5 s";
 pub const NO_DESKTOP: &str = "no graphical desktop session is available";
 const LINUX_APPS: &[&str] = &["ghostty", "kitty", "alacritty", "foot", "wezterm", "gnome-terminal", "konsole", "xterm"];
 const DESKTOP_ENV: &[&str] = &["DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "XAUTHORITY"];
@@ -61,27 +62,35 @@ fn desktop_env() -> BTreeMap<String, String> {
 
 /// An unavailable user bus must not hang terminal lists or watches. Read stdout
 /// concurrently so an unusually large manager environment cannot fill the pipe.
+#[derive(Debug, PartialEq)]
+enum CommandFailure { Failed, TimedOut }
+
 fn bounded_output(cmd: &mut Command, limit: Duration) -> Option<Vec<u8>> {
-    let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().ok()?;
-    let stdout = child.stdout.take()?;
+    bounded_command(cmd, limit).ok()
+}
+
+fn bounded_command(cmd: &mut Command, limit: Duration) -> Result<Vec<u8>, CommandFailure> {
+    let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn()
+        .map_err(|_| CommandFailure::Failed)?;
+    let stdout = child.stdout.take().ok_or(CommandFailure::Failed)?;
     let reader = std::thread::spawn(move || {
         let mut out = Vec::new();
         stdout.take(1024 * 1024).read_to_end(&mut out).map(|_| out)
     });
     let end = Instant::now() + limit;
-    let success = loop {
+    let status = loop {
         match child.try_wait() {
-            Ok(Some(status)) => break status.success(),
+            Ok(Some(status)) => break if status.success() { Ok(()) } else { Err(CommandFailure::Failed) },
             Ok(None) if Instant::now() < end => std::thread::sleep(Duration::from_millis(10)),
-            _ => {
+            result => {
                 let _ = child.kill();
                 let _ = child.wait();
-                break false;
+                break Err(if result.is_err() { CommandFailure::Failed } else { CommandFailure::TimedOut });
             }
         }
     };
-    let out = reader.join().ok()?.ok()?;
-    success.then_some(out)
+    let out = reader.join().map_err(|_| CommandFailure::Failed)?.map_err(|_| CommandFailure::Failed)?;
+    status.map(|()| out)
 }
 
 fn has_desktop(env: &BTreeMap<String, String>) -> bool {
@@ -149,6 +158,13 @@ pub fn open(app: &str, file: &Path, launch_with: Option<&Path>) -> anyhow::Resul
             c
         }
     };
+    if cfg!(target_os = "linux") && launch_with.is_none() {
+        return match bounded_command(&mut c, Duration::from_secs(5)) {
+            Ok(_) => Ok(()),
+            Err(CommandFailure::TimedOut) => bail!(START_TIMEOUT),
+            Err(CommandFailure::Failed) => bail!("the program that opens the window failed"),
+        };
+    }
     let status = c.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
         .status().context("cannot start the program that opens the window")?;
     if !status.success() { bail!("the program that opens the window failed"); }
@@ -194,6 +210,14 @@ mod tests {
         let began = Instant::now();
         assert!(bounded_output(&mut c, Duration::from_millis(20)).is_none());
         assert!(began.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn a_stuck_launcher_is_killed_and_failure_is_distinct_from_timeout() {
+        let mut sleep = Command::new("sleep");
+        sleep.arg("30");
+        assert_eq!(bounded_command(&mut sleep, Duration::from_millis(20)), Err(CommandFailure::TimedOut));
+        assert_eq!(bounded_command(&mut Command::new("false"), Duration::from_secs(2)), Err(CommandFailure::Failed));
     }
 
     #[cfg(target_os = "macos")]

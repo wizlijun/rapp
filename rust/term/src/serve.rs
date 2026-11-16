@@ -348,7 +348,7 @@ impl Worker {
         write_private(&file, &body).map_err(|_| FAILED)?;
         let res = self.wait_for(&file, app, &ticket, dir, &token).await;
         // A window that is slow to start may still read it after the wait: that one is left for the sweep.
-        if !matches!(&res, Err(e) if e == NOT_STARTED) {
+        if !matches!(&res, Err(e) if e == NOT_STARTED || e == launch::START_TIMEOUT) {
             let _ = std::fs::remove_file(&file);
         }
         res
@@ -367,6 +367,7 @@ impl Worker {
         match started {
             Ok(Ok(())) => {}
             Ok(Err(e)) if e.to_string() == launch::NO_DESKTOP => return Err(launch::NO_DESKTOP.into()),
+            Ok(Err(e)) if e.to_string() == launch::START_TIMEOUT => return Err(launch::START_TIMEOUT.into()),
             _ => return Err("could not open the terminal window".into()),
         }
         let end = tokio::time::Instant::now() + OPEN_WAIT;
