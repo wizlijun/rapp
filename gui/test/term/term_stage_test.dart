@@ -271,6 +271,23 @@ void main() {
     expect((s.anchor.y, s.anchor.x, s.head.y, s.head.x), (1, 0, 1, 1));
   });
 
+  testWidgets('a stage squeezed to nothing mid-drag keeps scale 1 and does not throw', (t) async {
+    for (final (w, h) in [(800.0, 0.0), (0.0, 480.0), (0.0, 0.0)]) {
+      model.apply(scr(['abc', 'def', 'ghi', 'jkl']));
+      await show(t);
+      final g = await t.startGesture(cell(t, 1, 0), kind: PointerDeviceKind.mouse);
+      await g.moveTo(cell(t, 1, 2));
+      await show(t, w: w, h: h);
+      expect(painter(t).scale, 1.0, reason: '$w x $h');
+      await g.moveTo(const Offset(5, 500));
+      // The edge-scroll timer ticks on a stage with no size too.
+      await t.pump(const Duration(milliseconds: 120));
+      await g.up();
+      await t.pump();
+      expect(t.takeException(), isNull, reason: '$w x $h');
+    }
+  });
+
   testWidgets('only rows that changed are recorded again', (t) async {
     model.apply(scr(['a', 'b', 'c', 'd']));
     await show(t);

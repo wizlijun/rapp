@@ -625,7 +625,8 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
       final shown = m != null && m.screen.isNotEmpty;
       final gridW = shown ? m.cols * cw : 0.0, gridH = shown ? m.rows * ch : 0.0;
       // The pane keeps the device's rows and columns; it is scaled to fit the stage, up as well as down.
-      _scale = shown ? math.min(w / gridW, h / gridH) : 1.0;
+      // A stage with no size, or a pane with none, keeps scale 1 (a scale of 0 would make every pointer position infinite).
+      _scale = shown && w > 0 && h > 0 && gridW > 0 && gridH > 0 ? math.min(w / gridW, h / gridH) : 1.0;
 
       if (m != null && _linksVer != _ver) {
         _linksVer = _ver;
