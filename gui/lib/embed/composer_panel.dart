@@ -1,6 +1,6 @@
 // The writing panel (spec §3, W1–W16): a 720-wide box at the bottom of the stage, one line to
 // start, growing upward to half the stage. From the top: the outgoing items, the hint line,
-// the box with [blocks / editor] [＋] [发送]. The editor owns the text; the model copies it out
+// the box with [editor] [＋] [发送]. The editor owns the text; the model copies it out
 // at send, session switch, 1 s idle and collapse (spec §5). The draft is the session's (R18).
 import 'dart:math' as math;
 
@@ -327,26 +327,6 @@ class _ComposerPanelState extends State<ComposerPanel> {
     );
   }
 
-  Widget _chip(BlockChip b, RappTokens t) => Semantics(
-        button: true,
-        label: '移除 ${b.label}',
-        excludeSemantics: true,
-        child: InkWell(
-          onTap: () => _m.removeBlock(b.n),
-          borderRadius: BorderRadius.circular(t.r),
-          child: CustomPaint(
-            foregroundPainter: DashedOutline(t.line, t.r),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(minHeight: _line * _k),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Center(widthFactor: 1, child: Text(b.label, style: TextStyle(color: t.text))),
-              ),
-            ),
-          ),
-        ),
-      );
-
   BoxDecoration _seeThrough(RappTokens t) {
     final d = t.floatBox();
     Color f(Color c) => c.withValues(alpha: c.a * composerFillOpacity);
@@ -465,22 +445,8 @@ class _ComposerPanelState extends State<ComposerPanel> {
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            if (_m.blocks.isNotEmpty)
-                              ConstrainedBox(
-                                constraints: BoxConstraints(maxHeight: math.max(0, inner - line - 2 * pad)),
-                                child: SingleChildScrollView(
-                                  child: Padding(
-                                    padding: const EdgeInsets.only(top: 8),
-                                    child: Wrap(
-                                      spacing: 8,
-                                      runSpacing: 8,
-                                      children: [for (final b in _m.blocks) _chip(b, t)],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            // What is left after the blocks row, never under one line; [_pad] above and
-                            // below it, so one line is as tall as ＋ and 发送 with their margins.
+                            // Never under one line; [_pad] above and below it, so one line is as tall as ＋
+                            // and 发送 with their margins. Blocks sit in the text as chips (composer_model.dart).
                             Flexible(
                               child: Padding(
                                 padding: EdgeInsets.symmetric(vertical: pad),

@@ -216,7 +216,7 @@ class InputRecorder {
       _unhook(s);
     }
     final on = enabled() && (record ?? rs?.recordsInput ?? d.meta['record'] != false);
-    if (rs != null) d.text = rs.composer.draft;
+    if (rs != null) d.text = rs.composer.draftText;
     await Future.wait([...d.busy]);
     if (!on || !await _flush(d)) {
       await _persist(d);

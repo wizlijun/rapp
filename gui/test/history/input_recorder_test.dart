@@ -57,8 +57,8 @@ void main() {
 
   // What the writing panel does on a send: submit, then hand the pieces to the port.
   Future<Outgoing?> send(RemoteSession rs, String text, {List<BlockChip> blocks = const []}) async {
-    rs.composer.blocks.addAll(blocks);
     rs.composer.setDraft(text);
+    rs.composer.apply(PasteResult(blocks: blocks)); // after the text
     final r = await rs.composer.submit();
     if (r is SubmitPieces) port.composerSend(rs.sid, r.pieces);
     return rs.composer.inFlight;

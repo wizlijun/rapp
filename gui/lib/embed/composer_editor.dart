@@ -2,6 +2,17 @@
 // through this interface at send, session switch, 1 s idle and collapse (spec §5).
 import 'package:flutter/widgets.dart';
 
+/// A pasted block (image, file, long text) stands in the editor's text as one character, at the spot it
+/// was pasted, so the text around it keeps its order. One UTF-16 unit: a caret, a selection and a
+/// Backspace treat it like a letter. The 32 noncharacters U+FDD0–U+FDEF come first (Unicode keeps them for
+/// a program's own use: no pasted text has them); after those, a stretch of the Private Use Area that the
+/// icon fonts terminals use (Nerd Fonts 3) leave free. A character there means a block only while the
+/// composer holds a block with that mark; otherwise it is plain text.
+final blockMarks = List<int>.unmodifiable([
+  for (var u = 0xFDD0; u <= 0xFDEF; u++) u,
+  for (var u = 0xE900; u <= 0xEA5F; u++) u,
+]);
+
 /// What the editor reports; it never carries the text (规格 §5).
 /// The writing panel's zoom keys: ⌘= (also ⌘+), ⌘-, ⌘0; Ctrl instead of ⌘ off macOS.
 enum ZoomKey { bigger, smaller, reset }
@@ -61,6 +72,11 @@ abstract class ComposerEditor {
   Widget view(BuildContext context, {required EditorStyle style, required String hint, required double maxHeight});
   void focus();
   void unfocus();
+
+  /// The chips' labels by mark (a UTF-16 unit from [blockMarks]), replacing the ones before. Each
+  /// mark in the text with a label shows as a chip with it; given before the [setText] or [insert]
+  /// that brings the mark in. [read] and [take] give a chip back as its mark.
+  void chips(Map<int, String> labels);
 
   /// Replaces all text, caret at the end. While composing: applied after the commit.
   void setText(String text);

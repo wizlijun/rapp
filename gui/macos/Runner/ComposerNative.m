@@ -18,9 +18,52 @@
 @property(nonatomic) BOOL reserveRow;
 @property(nonatomic,strong) NSMutableArray<void (^)(void)> *pending;
 @property(nonatomic,copy) void (^pendingFocus)(id);
+@property(nonatomic,copy) NSDictionary<NSNumber *, NSString *> *chipLabels;
 - (void)changed;
 - (void)drain;
 - (void)measure;
+@end
+
+// The block mark (a UTF-16 unit) a chip's attachment character stands for.
+static NSAttributedStringKey const RappChipMark=@"RappChipMark";
+
+/// A block in the text: its label in a dashed outline, one character wide for carets, Backspace and undo.
+@interface RappChipCell : NSTextAttachmentCell
+@property(nonatomic,copy) NSString *label;
+@property(nonatomic,weak) RappComposerView *owner;
+@end
+
+@implementation RappChipCell
+- (NSDictionary *)labelAttributes {
+    RappComposerView *owner=self.owner;
+    return @{NSFontAttributeName:owner.attributes[NSFontAttributeName]?:[NSFont systemFontOfSize:15],
+             NSForegroundColorAttributeName:owner.attributes[NSForegroundColorAttributeName]?:NSColor.textColor};
+}
+- (NSFont *)font {return [self labelAttributes][NSFontAttributeName];}
+- (NSSize)cellSize {
+    NSFont *font=self.font;
+    NSSize text=[self.label sizeWithAttributes:[self labelAttributes]];
+    return NSMakeSize(ceil(MIN(text.width,240))+16,ceil(font.ascender-font.descender)+2);
+}
+// Sits on the baseline like the letters around it (its bottom at the descender).
+- (NSPoint)cellBaselineOffset {return NSMakePoint(0,floor(self.font.descender)-1);}
+- (BOOL)wantsToTrackMouse {return NO;}
+- (void)drawWithFrame:(NSRect)frame inView:(NSView *)view {
+    RappComposerView *owner=self.owner;
+    NSRect box=NSInsetRect(frame,2.5,.5);
+    NSBezierPath *path=[NSBezierPath bezierPathWithRoundedRect:box xRadius:4 yRadius:4];
+    CGFloat dash[]={4,4};[path setLineDash:dash count:2 phase:0];path.lineWidth=1;
+    [(owner.hintColor?:NSColor.secondaryLabelColor) setStroke];[path stroke];
+    NSDictionary *attrs=[self labelAttributes];
+    NSMutableParagraphStyle *clip=[NSMutableParagraphStyle new];clip.lineBreakMode=NSLineBreakByTruncatingTail;
+    NSMutableDictionary *a=[attrs mutableCopy];a[NSParagraphStyleAttributeName]=clip;
+    NSSize text=[self.label sizeWithAttributes:attrs];
+    NSRect line=NSMakeRect(NSMinX(box)+6,NSMidY(box)-text.height/2,NSWidth(box)-12,text.height);
+    [self.label drawWithRect:line options:NSStringDrawingUsesLineFragmentOrigin|NSStringDrawingTruncatesLastVisibleLine
+                  attributes:a context:nil];
+}
+- (void)drawWithFrame:(NSRect)frame inView:(NSView *)view characterIndex:(NSUInteger)index
+         layoutManager:(NSLayoutManager *)layout {[self drawWithFrame:frame inView:view];}
 @end
 
 @interface RappComposerText : NSTextView
@@ -30,6 +73,13 @@
 @end
 
 @implementation RappComposerText
+// The caret right after a chip picks up its attributes; what is typed there is text, not another chip.
+- (void)setTypingAttributes:(NSDictionary<NSAttributedStringKey,id> *)attributes {
+    if(!attributes[NSAttachmentAttributeName] && !attributes[RappChipMark]){[super setTypingAttributes:attributes];return;}
+    NSMutableDictionary *plain=[attributes mutableCopy];
+    [plain removeObjectsForKeys:@[NSAttachmentAttributeName,RappChipMark]];
+    [super setTypingAttributes:plain];
+}
 - (NSArray<NSAttributedStringKey> *)validAttributesForMarkedText {
     RappComposerView *owner=self.owner;
     NSArray *base=[super validAttributesForMarkedText];
@@ -89,6 +139,25 @@
     BOOL wasEditing=self.editingIME;self.editingIME=YES;
     [super unmarkText];self.editingIME=wasEditing;[self restoreSelection];
     if(!self.editingIME)[owner drain];
+}
+// Copy, cut and drag write text only: a chip is the composer's block, which another app cannot take and
+// a paste here would not bring back (the host reads the clipboard). Cut's delete stays undoable.
+- (BOOL)writeSelectionToPasteboard:(NSPasteboard *)pasteboard types:(NSArray<NSPasteboardType> *)types {
+    NSMutableArray *parts=[NSMutableArray new];
+    for(NSValue *range in self.selectedRanges){
+        NSRange r=range.rangeValue;if(!r.length)continue;
+        NSMutableString *s=[[self.textStorage.string substringWithRange:r] mutableCopy];
+        [self.textStorage enumerateAttribute:RappChipMark inRange:r options:NSAttributedStringEnumerationReverse
+                                  usingBlock:^(id mark,NSRange at,BOOL *stop){
+            if(!mark)return;
+            for(NSUInteger i=NSMaxRange(at);i-->at.location;)
+                if([s characterAtIndex:i-r.location]==NSAttachmentCharacter)[s deleteCharactersInRange:NSMakeRange(i-r.location,1)];
+        }];
+        [parts addObject:s];
+    }
+    if(!parts.count)return NO;
+    [pasteboard declareTypes:@[NSPasteboardTypeString] owner:nil];
+    return [pasteboard setString:[parts componentsJoinedByString:@"\n"] forType:NSPasteboardTypeString];
 }
 - (void)paste:(id)sender {
     RappComposerView *owner=self.owner;if(owner.event)owner.event(@"paste",nil,nil);}
@@ -340,22 +409,67 @@ static NSColor *ComposerColor(NSNumber *argb) {
     __weak RappComposerView *weak=self;
     [self.pending addObject:^{
         RappComposerView *view=weak;if(!view){reply(nil);return;}
-        if([method isEqual:@"read"]){reply([view.text.string copy]);return;}
+        if([method isEqual:@"read"]){reply([view marked]);return;}
         if([method isEqual:@"take"]){
-            NSString *text=[view.text.string copy];
+            NSString *text=[view marked];
             [view.text setString:@""];[view.text.undoManager removeAllActions];
             view.text.typingAttributes=view.attributes;[view changed];reply(text);return;
         }
         if([method isEqual:@"set"]){
             view.text.editable=YES;
-            view.text.string=value?:@"";
-            [view.text.textStorage setAttributes:view.attributes range:NSMakeRange(0,view.text.textStorage.length)];
+            [view.text.textStorage setAttributedString:[view chipped:value?:@""]];
             [view.text setSelectedRange:NSMakeRange(view.text.textStorage.length,0)];
             [view.text.undoManager removeAllActions];view.text.typingAttributes=view.attributes;[view changed];
-        }else if([method isEqual:@"insert"]){[view.text insertText:value?:@"" replacementRange:view.text.selectedRange];}
+        }else if([method isEqual:@"insert"]){
+            // Straight into the storage (insertText: would flatten a chip), as one undoable edit.
+            NSAttributedString *add=[view chipped:value?:@""];NSRange at=view.text.selectedRange;
+            if(add.length && [view.text shouldChangeTextInRange:at replacementString:add.string]){
+                BOOL wasEditing=view.text.editingIME;view.text.editingIME=YES; // drained by the loop running this
+                [view.text.textStorage replaceCharactersInRange:at withAttributedString:add];
+                [view.text setSelectedRange:NSMakeRange(at.location+add.length,0)];
+                [view.text didChangeText];view.text.editingIME=wasEditing;
+                view.text.typingAttributes=view.attributes;
+            }
+        }
         reply(nil);
     }];
     [self drain];
+}
+- (void)setChips:(NSDictionary<NSNumber *, NSString *> *)labels {self.chipLabels=labels;}
+/// [s] in the editor's attributes, each mark with a label as its chip.
+- (NSAttributedString *)chipped:(NSString *)s {
+    NSMutableAttributedString *out=[NSMutableAttributedString new];
+    NSUInteger start=0;
+    for(NSUInteger i=0;i<s.length;i++){
+        unichar u=[s characterAtIndex:i];NSString *label=self.chipLabels[@(u)];
+        if(!label)continue;
+        if(i>start)[out appendAttributedString:[[NSAttributedString alloc]
+            initWithString:[s substringWithRange:NSMakeRange(start,i-start)] attributes:self.attributes]];
+        start=i+1;
+        RappChipCell *cell=[RappChipCell new];cell.label=label;cell.owner=self;
+        NSTextAttachment *attachment=[NSTextAttachment new];attachment.attachmentCell=cell;
+        NSMutableAttributedString *chip=[[NSAttributedString attributedStringWithAttachment:attachment] mutableCopy];
+        [chip addAttributes:self.attributes range:NSMakeRange(0,chip.length)];
+        [chip addAttribute:RappChipMark value:@(u) range:NSMakeRange(0,chip.length)];
+        [out appendAttributedString:chip];
+    }
+    if(s.length>start)[out appendAttributedString:[[NSAttributedString alloc]
+        initWithString:[s substringFromIndex:start] attributes:self.attributes]];
+    return out;
+}
+/// The text with each chip back as its mark.
+- (NSString *)marked {
+    NSTextStorage *storage=self.text.textStorage;
+    NSMutableString *s=[storage.string mutableCopy];
+    [storage enumerateAttribute:RappChipMark inRange:NSMakeRange(0,storage.length) options:NSAttributedStringEnumerationReverse
+                     usingBlock:^(NSNumber *mark,NSRange at,BOOL *stop){
+        if(!mark)return;
+        // Only the attachment characters: text typed or dropped next to a chip may carry its attribute.
+        unichar u=mark.unsignedShortValue;NSString *m=[NSString stringWithCharacters:&u length:1];
+        for(NSUInteger i=NSMaxRange(at);i-->at.location;)
+            if([s characterAtIndex:i]==NSAttachmentCharacter)[s replaceCharactersInRange:NSMakeRange(i,1) withString:m];
+    }];
+    return s;
 }
 - (void)close {
     if(self.pendingFocus){self.pendingFocus(nil);self.pendingFocus=nil;}

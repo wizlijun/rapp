@@ -301,14 +301,15 @@ void main() {
       expect(text(tester), 'hello');
       expect(find.text('A 上贴不进去'), findsNothing);
 
-      // The block went, the text did not: 重试 sends what is left.
+      // A block pasted at the caret, after the text; the text went, the block did not: 重试 sends what
+      // is left.
       rs.composer.apply(const PasteResult(blocks: [BlockChip(1, '[图片 #1 10×20]')]));
       await tester.pump();
       await tester.tap(find.byKey(const Key('composer-send')));
       await tester.pump();
       expect(callsOf('composer_send').last['pieces'], [
-        {'block': 1},
         {'text': 'hello'},
+        {'block': 1},
       ]);
       rs.apply(const ComposerStateEvent(1, done: ComposerDone(1, 'boom')));
       await tester.pump();
@@ -318,7 +319,7 @@ void main() {
       final sent = callsOf('composer_send');
       expect(sent.length, 3);
       expect(sent.last['pieces'], [
-        {'text': 'hello'},
+        {'block': 1},
       ]);
       expect(find.text('boom'), findsNothing);
       expect(find.text('发送中'), findsOneWidget);
@@ -352,19 +353,30 @@ void main() {
       expect(retry().onPressed, isNull); // sending
     });
 
-    testWidgets('tapping a block removes it; blocks sit above the text inside the box', (tester) async {
+    testWidgets('blocks sit in the text as chips; one deleted goes at send, the rest in their places',
+        (tester) async {
+      rs.composer.setDraft('看');
       rs.composer.apply(const PasteResult(blocks: [BlockChip(1, '[图片 #1 10×20]'), BlockChip(2, '[文件 a 1 B]')]));
       await tester.pumpWidget(wrap(panel()));
       await tester.pump();
-      final box = rect(tester, 'composer-box');
-      final chip = tester.getRect(find.text('[图片 #1 10×20]'));
       final f = tester.getRect(fieldFinder);
-      expect(box.contains(chip.topLeft) && box.contains(chip.bottomRight), isTrue);
-      expect(chip.bottom, lessThanOrEqualTo(f.top));
-      await tester.tap(find.text('[图片 #1 10×20]'));
+      final chip = tester.getRect(find.text('[图片 #1 10×20]'));
+      expect(f.contains(chip.topLeft) && f.contains(chip.bottomRight), isTrue, reason: 'in the text, not above it');
+      expect(find.text('[文件 a 1 B]'), findsOneWidget);
+      final t = text(tester);
+      expect(t, hasLength(3));
+      // Backspace over the image, then more typing.
+      await tester.enterText(fieldFinder, '看${t[2]}吧');
       await tester.pump();
       expect(find.text('[图片 #1 10×20]'), findsNothing);
-      expect(find.text('[文件 a 1 B]'), findsOneWidget);
+      expect(callsOf('composer_drop_block'), isEmpty, reason: 'an undo can bring it back until the send');
+      await tester.tap(find.byKey(const Key('composer-send')));
+      await tester.pump();
+      expect(callsOf('composer_send').last['pieces'], [
+        {'text': '看'},
+        {'block': 2},
+        {'text': '吧'},
+      ]);
       expect(callsOf('composer_drop_block'), [
         equals({'sid': 1, 'block': 1}),
       ]);
@@ -834,22 +846,21 @@ void main() {
       });
     });
 
-    testWidgets('M3.1: the editor leaves room for the blocks row inside the box', (tester) async {
+    testWidgets('M3.1: long text with chips in it stays inside the box', (tester) async {
       big(tester);
-      rs.composer.apply(const PasteResult(blocks: [BlockChip(1, '[图片 #1 10×20]'), BlockChip(2, '[文件 a 1 B]')]));
       rs.composer.setDraft(List.generate(40, (i) => 'line $i').join('\n'));
+      rs.composer.apply(const PasteResult(blocks: [BlockChip(1, '[图片 #1 10×20]'), BlockChip(2, '[文件 a 1 B]')]));
       await tester.pumpWidget(layer());
       await tester.pump();
       final box = rect(tester, 'composer-box');
       expect(box.height, lessThanOrEqualTo(350));
-      final chip = tester.getRect(find.text('[图片 #1 10×20]'));
       final f = tester.getRect(fieldFinder);
-      expect(chip.bottom, lessThanOrEqualTo(f.top));
       expect(f.bottom, lessThanOrEqualTo(box.bottom));
       expect(f.height, greaterThanOrEqualTo(48));
+      expect(find.text('[文件 a 1 B]'), findsOneWidget);
     });
 
-    testWidgets('M3.1: a self-sizing editor is handed what the blocks row leaves, at least 48', (tester) async {
+    testWidgets('M3.1: a self-sizing editor is handed the whole box, blocks or not', (tester) async {
       final ed = FakeEditor()..selfSizing = true;
       Widget withEditor() => wrap(SizedBox(
           width: 720, child: ComposerPanel(state: es, session: rs, port: port, maxHeight: 350, editor: () => ed)));
@@ -858,20 +869,15 @@ void main() {
       expect(ed.lastMaxHeight, 340); // 350 less the border and 4 above and below
       rs.composer.apply(const PasteResult(blocks: [BlockChip(1, '[图片 #1 10×20]'), BlockChip(2, '[文件 a 1 B]')]));
       await tester.pump();
-      final row = tester.getSize(find.byType(SingleChildScrollView)).height;
-      expect(row, greaterThan(0));
-      expect(ed.lastMaxHeight, 340 - row);
-      final box = rect(tester, 'composer-box');
-      final edRect = tester.getRect(find.byKey(const Key('fake-editor')));
-      expect(box.height, lessThanOrEqualTo(350));
-      expect(edRect.height + row, lessThanOrEqualTo(box.height - 2));
+      expect(ed.lastMaxHeight, 340, reason: 'no blocks row above the text any more');
+      expect(ed.labels.values, ['[图片 #1 10×20]', '[文件 a 1 B]']);
+      expect(ed.shown, '[[图片 #1 10×20]][[文件 a 1 B]]');
     });
 
     testWidgets('M3.1: the editor is never handed under one line', (tester) async {
       final ed = FakeEditor()..selfSizing = true;
-      rs.composer.apply(const PasteResult(blocks: [BlockChip(1, '[图片 #1 10×20]')]));
       await tester.pumpWidget(wrap(SizedBox(
-          width: 600, child: ComposerPanel(state: es, session: rs, port: port, maxHeight: 60, editor: () => ed))));
+          width: 600, child: ComposerPanel(state: es, session: rs, port: port, maxHeight: 30, editor: () => ed))));
       await tester.pump();
       expect(ed.lastMaxHeight, 48);
     });
