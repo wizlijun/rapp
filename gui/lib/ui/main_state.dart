@@ -1090,6 +1090,9 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// [sid] is what a frozen record keeps on the stage: its writing panel sends nothing (offline-freeze).
+  bool sendBlocked(Object sid) => _records.values.any((r) => r.frozen && (r.lastSid ?? r.sid) == sid);
+
   String _sourceOf(SessionRecord r) => '${r.appName} @ ${deviceName(r.id)}';
 
   /// The link of [r] ended with [raw] (the runner's or the hub's words): the record stays, with its
@@ -1129,6 +1132,7 @@ class MainState extends ChangeNotifier {
     final rs = sid == null ? null : remote[sid];
     r.phase = Phase.disconnected;
     r.reason = r.userDisconnect ? 'user' : raw;
+    r.frozen = autoReconnects(r.reason);
     r.seq = ++_seq;
     if (rs != null) {
       r.choice = rs.choice;
@@ -1372,6 +1376,7 @@ class MainState extends ChangeNotifier {
     final start = _starts.remove(old);
     if (start != null) resources.linkDown(start); // what it was still sending ends 没传完
     r.lastSid = null;
+    r.frozen = false;
     if (_reroutes.containsKey(r)) {
       if (pictureFocused == old) {
         // A move: the keys typed into the old picture go on into the new one.

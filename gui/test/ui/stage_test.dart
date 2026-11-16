@@ -18,6 +18,7 @@ import 'package:rapp/ui/backdrop.dart';
 import 'package:rapp/ui/controls.dart';
 import 'package:rapp/ui/disconnected_stage.dart';
 import 'package:rapp/ui/lamp.dart';
+import 'package:rapp/ui/lifecycle.dart' show Phase;
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/stage.dart';
@@ -539,6 +540,74 @@ void main() {
       await tester.pump();
       es.toggleDetach();
       expect(port.calls.where((c) => c.$1 == 'mouse' || c.$1 == 'detach' || c.$1 == 'picture_focus'), isEmpty);
+    });
+
+    testWidgets('a network drop freezes the record; a user disconnect does not', (tester) async {
+      await shown(tester);
+      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      await tester.pump();
+      expect(es.currentRecord!.frozen, true);
+      expect(es.sendBlocked(1), true);
+      expect(es.sendBlocked(99), false);
+      es.stopReconnectCurrent();
+    });
+
+    testWidgets('a user disconnect does not freeze', (tester) async {
+      await shown(tester);
+      port.emit(const DisconnectedEvent(1, 'user'));
+      await tester.pump();
+      expect(es.currentRecord!.frozen, false);
+      expect(es.sendBlocked(1), false);
+    });
+
+    testWidgets('a frozen record stays frozen while it reconnects, and thaws on the swap', (tester) async {
+      await shown(tester);
+      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      await tester.pump();
+      await tester.runAsync(() async {
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            t.emit({
+              'event': 'opened', 'sid': 11, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+              'port': 5011, 'token': 'tk', 'req': m['req'],
+            });
+          }
+        };
+        es.reconnectCurrent();
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      await tester.pump();
+      expect(es.currentRecord!.frozen, true);
+      expect(es.sendBlocked(1), true);
+      expect(es.sendBlocked(11), false);
+      port.emit(const ReadyEvent(11, 'Safari'));
+      port.emit(WindowsEvent(11, [rw(5, 400, 328)]));
+      await tester.pump();
+      expect(es.currentRecord!.frozen, false);
+      expect(es.currentRecord!.lastSid, isNull);
+      expect(es.sendBlocked(11), false);
+    });
+
+    testWidgets('a reconnect that fails for a non-network reason thaws', (tester) async {
+      await shown(tester);
+      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      await tester.pump();
+      await tester.runAsync(() async {
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            t.emit({'event': 'error', 'req': m['req'], 'error': 'bad password'});
+          }
+        };
+        es.reconnectCurrent();
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      await tester.pump();
+      expect(es.currentRecord!.frozen, false);
+      expect(es.currentRecord!.phase, Phase.disconnected);
     });
 
     testWidgets('reconnect is off when the hub is gone', (tester) async {

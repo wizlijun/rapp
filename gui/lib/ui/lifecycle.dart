@@ -32,6 +32,10 @@ class SessionRecord {
   int seq = 0;
   bool userDisconnect = false;
 
+  /// Down for a network reason: the stage keeps its picture, frozen, until the reconnect's new
+  /// session swaps in (offline-freeze spec).
+  bool frozen = false;
+
   /// Ended while reconnecting (R14).
   bool ending = false;
   StreamChoice choice = startChoice;
@@ -118,6 +122,15 @@ String disconnectWord(String? raw) {
 }
 
 /// The link dropped for a reason the network explains: worth trying again by itself.
+/// The bar's words for a record that is down or coming back; [waiting] replaces the plain
+/// "network down" line (e.g. the peer is offline).
+String offlineWords(SessionRecord r, {String? waiting}) {
+  if (r.phase != Phase.disconnected) return '正在重连…';
+  if (waiting != null) return waiting;
+  final w = disconnectWord(r.reason);
+  return r.retry != null ? '$w，正在重连…' : w;
+}
+
 bool autoReconnects(String? raw) {
   final w = disconnectWord(raw);
   return w == '网络断了' || w == '连接超时' || w == '中继连不上' || w == '对方离线';
