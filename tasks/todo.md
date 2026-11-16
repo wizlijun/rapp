@@ -376,3 +376,19 @@
   - 规格 §10 的十个场景：§5 的七个例子；鼠标横穿不换焦点；停住约半秒换一次；写作面板发送期间键盘面板不变；弹出菜单和对话框全是彩色；拖边改窗口大小后焦点跟着走；触屏点和滑；智能与最清晰来回切；智能下关掉"网络差时自动省流量"仍会降档；开着智能用半天 A 端 app 不卡（重点 Electron 三个）
   - 真实 app 构建编译 `gui/macos/Runner/SessionPlugin.swift`（只有真机构建才编译它）
   - `BackdropFilter` 灰度叠在 `Texture` 上的真机效果
+
+## 端口分享：用本机端口访问（规格 `docs/superpowers/specs/2026-11-16-rapp-port-sharing-local-ports-design.md`，分支 feat/port-map，2026-11-16 按用户要求并进 main，U152）
+- [x] `rust/service/src/maps.rs`：给（设备，端口）分配 28000–28999 里的本机端口，监听 `127.0.0.1` 和 `::1`，连进来的走 `pipe::open`；存 `local/maps.json`，启动时恢复
+- [x] IPC `shares`（带 `to`）、`hosts` 的回复带 `local` 和 `addr`（`http://localhost:<端口>`、`ssh -p <端口> localhost`）；`url` 字段去掉
+- [x] `rapp hosts` 每个端口一行带地址；`rapp share` 不再打印 `.rapp` 地址
+- [x] 面板：地址照服务给的显示，"打开"直接可用；去掉"还没有启用 .rapp 域名"
+- 验证（Linux arm64，rustc 1.100）：`cargo test --workspace --exclude rapp-client-gtk` 里 testkit 的 `maps` 10、`share_set` 18、`forward` 65 全过，`rapp-service` 单元测试里 `maps` 12 条全过，`rapp-cli` 10 条全过；`cargo clippy -p rapp-service -p rapp-cli -p rapp-testkit --all-targets` 没有警告。这台机器上本来就不过的 3 条（`data::tests::a_rebase_that_cannot_start_is_an_error_and_retried`，`rapp-term` 的 `open_without_shell_uses_the_default`、`open_runs_the_shell_as_a_login_shell`）在 `main` 上同样不过，和这次改动无关
+
+- 交接：`docs/superpowers/plans/2026-11-16-port-sharing-local-ports-handoff.md`（东西在哪、验证到哪、下一步）
+
+### 未经实机验证
+- [ ] `cd gui && flutter analyze && flutter test`：界面的改动和测试没有跑过（做这次改动的机器上没有 Flutter）
+- [ ] macOS 上 `cd rust && cargo test -p rapp-service maps:: && cargo test -p rapp-testkit --test maps --test share_set --test forward`
+- [ ] 真机：两台设备，一台分享 Jupyter / Ollama / Vite / sshd，另一台在面板里点"打开"、用 `curl http://localhost:<端口>`、`ssh -p <端口> localhost`；经 relay 和局域网各一次
+- [ ] 真机：访问方的服务重启后，不打开面板，原来的地址还能用
+- [ ] macOS：别的程序在"所有地址"上监听 28000 时，rapp 跳过它
