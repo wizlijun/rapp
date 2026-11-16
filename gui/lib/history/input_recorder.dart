@@ -67,10 +67,11 @@ class SessionMeta {
 }
 
 /// A sent piece whose round has not finished: its text stays in the draft file until then, and a
-/// crash meanwhile brings it back.
+/// crash meanwhile brings it back. Private pieces only track ownership in memory.
 class _Piece {
-  _Piece(this.text, this.owner, this.rs);
+  _Piece(this.text, this.owner, this.rs, {this.private = false});
   final String text;
+  bool private;
 
   /// The send it is (an adopted row after a swap); null for one read back from a file, or whose
   /// session went with no other to take it.
@@ -86,6 +87,9 @@ class _Draft {
   _Draft(this.key);
   final String key;
   String text = '';
+  // Once password text entered this draft, edits do not make it public again.
+  // Emptying/submitting the draft starts a new one.
+  bool privateText = false;
   final pieces = <_Piece>[];
 
   /// Records of finished rounds whose write failed, oldest first: appended by a later write.
@@ -131,6 +135,7 @@ class InputRecorder {
 
   /// What each send's record says of its session: taken when it was handed off.
   final _handed = Expando<SessionMeta>();
+  final _private = Expando<bool>();
 
   /// A failure was said and no write has gone since.
   bool _failSaid = false;
@@ -146,7 +151,7 @@ class InputRecorder {
     final d = _drafts[m.key] ??= _load(m.key);
     _attached[rs] = (key: m.key, meta: meta);
     final c = rs.composer;
-    final back = [for (final p in d.pieces) if (p.owner == null && !p.finishing) p];
+    final back = [for (final p in d.pieces) if (!p.private && p.owner == null && !p.finishing) p];
     if (restore && (back.isNotEmpty || d.text.isNotEmpty)) {
       final t = _join([for (final p in back) p.text], d.text);
       d.pieces.removeWhere(back.contains);
@@ -155,22 +160,32 @@ class InputRecorder {
       _save(d, rs);
     }
     c.onDraftChanged = (t) {
+      final privateBack = d.pieces.any((p) => p.private && _wentBack(p));
+      d.privateText = c.draft.isNotEmpty && (d.privateText || rs.secureFocus || privateBack);
       d.text = t;
       // A row put back is in the editor text now: not pending as well. (Not while the text is
       // cleared: a submit asks before the composer marks its row in flight.)
-      if (t.isNotEmpty) d.pieces.removeWhere(_wentBack);
+      if (c.draft.isNotEmpty) d.pieces.removeWhere(_wentBack);
       _save(d, rs);
     };
     c.onSubmitted = (o) {
       _handed[o] = meta();
-      if (o.text.isEmpty) return;
+      // submit has not installed its inFlight row yet; retry has, and its
+      // unrelated editor draft must keep its own privacy state.
+      final submitting = !identical(c.inFlight, o);
+      final private = _private[o] == true || rs.secureFocus || (submitting && d.privateText);
+      _private[o] = private;
+      if (private && submitting) d.privateText = true;
+      if (o.text.isEmpty && !private) return;
       // An adopted row's retry: its text is pending once already.
       final p = d.pieces.where((p) => identical(p.owner, o)).firstOrNull;
       if (p != null) {
         p.rs = rs;
+        p.private = private;
+        _save(d, rs);
         return;
       }
-      d.pieces.add(_Piece(o.text, o, rs));
+      d.pieces.add(_Piece(o.text, o, rs, private: private));
       _save(d, rs);
     };
     c.onFinished = (o, {required all}) {
@@ -188,6 +203,9 @@ class InputRecorder {
   void detach(RemoteSession rs, {RemoteSession? to, Map<Outgoing, Outgoing>? moved}) {
     final a = _attached.remove(rs);
     if (a == null) return;
+    for (final e in (moved ?? <Outgoing, Outgoing>{}).entries) {
+      if (_private[e.key] == true) _private[e.value] = true;
+    }
     _unhook(rs);
     final d = _drafts[a.key];
     if (d == null) return;
@@ -216,13 +234,17 @@ class InputRecorder {
       _unhook(s);
     }
     final on = enabled() && (record ?? rs?.recordsInput ?? d.meta['record'] != false);
-    if (rs != null) d.text = rs.composer.draftText;
+    if (rs != null) {
+      d.privateText = d.privateText || rs.secureFocus;
+      d.text = rs.composer.draftText;
+    }
     await Future.wait([...d.busy]);
     if (!on || !await _flush(d)) {
       await _persist(d);
       return;
     }
-    final text = _join([for (final p in d.pieces) if (!p.finishing && !_wentBack(p)) p.text], d.text);
+    final text = _join([for (final p in d.pieces) if (!p.private && !p.finishing && !_wentBack(p)) p.text],
+        d.privateText ? '' : d.text);
     if (text.isNotEmpty) {
       final at = _clock();
       if (!await _write(null, _draftRecord(meta, text, at), at)) {
@@ -310,8 +332,8 @@ class InputRecorder {
   Future<void> _persist(_Draft d) => _store
       .save(DraftFile(
           key: d.key,
-          text: d.text,
-          pending: [for (final p in d.pieces) p.text],
+          text: d.privateText ? '' : d.text,
+          pending: [for (final p in d.pieces) if (!p.private) p.text],
           records: [...d.stored],
           meta: d.meta))
       .catchError((Object e) => _log('rapp: 输入记录 草稿没存上：${_reason(e)}'));
@@ -323,8 +345,14 @@ class InputRecorder {
     final p = d.pieces.where((p) => identical(p.owner, o)).firstOrNull;
     final a = _attached[rs];
     var changed = false;
+    final private = _private[o] == true || rs.secureFocus;
+    _private[o] = private;
+    if (p != null) {
+      changed = p.private != private;
+      p.private = private;
+    }
     // Sent into a password field on A (v13 secure_focus): never kept in the record.
-    if (a != null && enabled() && rs.recordsInput && !rs.secureFocus) {
+    if (a != null && enabled() && rs.recordsInput && !private) {
       final at = o.at ?? _clock();
       final rec = _sentRecord(_handed[o] ?? a.meta(), o, all, rs.profile.afterSend, at);
       p?.finishing = true;
@@ -335,7 +363,8 @@ class InputRecorder {
         changed = true;
       }
     }
-    if (p != null && d.pieces.remove(p)) changed = true;
+    // Keep failed private owners only in memory so putBack can taint the new draft.
+    if (p != null && !(private && rs.composer.failed.contains(o)) && d.pieces.remove(p)) changed = true;
     if (changed) _save(d, rs);
   }
 

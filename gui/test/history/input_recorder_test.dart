@@ -82,6 +82,106 @@ void main() {
 
   Future<void> settle() => Future<void>.delayed(const Duration(milliseconds: 100));
 
+  test('secure drafts and pending sends never reach disk, even when ACK arrives after blur', () async {
+    final rec = recorder();
+    final rs = session(1, 'com.a')..secureFocus = true;
+    rec.attach(rs, () => meta('h1', 'com.a'), restore: true);
+    rs.composer.setDraft('synthetic private draft');
+    await settle();
+    expect(drafts().load('h1/com.a'), isNull);
+    await send(rs, 'synthetic private send', blocks: const [
+      BlockChip(1, 'private block label', kind: 'text', text: 'synthetic private block'),
+    ]);
+    await settle();
+    expect(drafts().load('h1/com.a'), isNull);
+    rs.secureFocus = false;
+    rs.composer.done(2, null);
+    await settle();
+    expect(lines(), isEmpty);
+    expect(drafts().load('h1/com.a'), isNull);
+    await send(rs, 'ordinary input');
+    rs.composer.done(1, null);
+    await until(() => lines().isNotEmpty);
+    expect(lines().single['text'], 'ordinary input');
+  });
+
+  test('secure draft remains private after blur and session end, also with history off', () async {
+    for (final on in [true, false]) {
+      enabled = on;
+      final rec = recorder();
+      final rs = session(1, 'com.a')..secureFocus = true;
+      rec.attach(rs, () => meta('h1', 'com.a'), restore: true);
+      rs.composer.setDraft('synthetic private draft');
+      rs.secureFocus = false;
+      rs.composer.setDraft('synthetic private draft edited');
+      await settle();
+      expect(drafts().load('h1/com.a'), isNull);
+      await rec.sessionEnded(rs, meta('h1', 'com.a'));
+      expect(lines(), isEmpty);
+      expect(drafts().load('h1/com.a'), isNull);
+    }
+  });
+
+  test('private failed sends stay private across retry, adoption and putBack', () async {
+    final rec = recorder();
+    final old = session(1, 'com.a')..secureFocus = true;
+    final fresh = session(2, 'com.a');
+    rec.attach(old, () => meta('h1', 'com.a'), restore: true);
+    rec.attach(fresh, () => meta('h1', 'com.a'), restore: false);
+    final row = (await send(old, 'synthetic private send'))!;
+    old.secureFocus = false;
+    old.composer.done(0, 'synthetic failure');
+    expect(old.composer.retry(row), isNotNull);
+    old.composer.done(0, 'synthetic failure');
+    final moved = fresh.composer.adoptFrom(old.composer);
+    rec.detach(old, to: fresh, moved: moved);
+    final adopted = fresh.composer.failed.single;
+    expect(fresh.composer.retry(adopted), isNotNull);
+    fresh.composer.done(0, 'synthetic failure');
+    fresh.composer.putBack(adopted);
+    await settle();
+    expect(fresh.composer.draftText, 'synthetic private send');
+    expect(lines(), isEmpty);
+    expect(drafts().load('h1/com.a'), isNull);
+    final submitted = await fresh.composer.submit();
+    expect(submitted, isA<SubmitPieces>());
+    fresh.composer.done(1, null);
+    await rec.sessionEnded(fresh, meta('h1', 'com.a'));
+    expect(lines(), isEmpty);
+    expect(drafts().load('h1/com.a'), isNull);
+  });
+
+  test('private blocks remain private when a failed block-only send goes back into the editor', () async {
+    final rec = recorder();
+    final rs = session(1, 'com.a')..secureFocus = true;
+    rec.attach(rs, () => meta('h1', 'com.a'), restore: true);
+    final row = (await send(rs, '', blocks: const [
+      BlockChip(1, 'private block label', kind: 'text', text: 'synthetic private block'),
+    ]))!;
+    rs.secureFocus = false;
+    rs.composer.done(0, 'synthetic failure');
+    rs.composer.putBack(row);
+    await rs.composer.submit();
+    rs.composer.done(1, null);
+    await settle();
+    expect(lines(), isEmpty);
+    expect(drafts().load('h1/com.a'), isNull);
+  });
+
+  test('retrying a private row does not taint a separate ordinary draft', () async {
+    final rec = recorder();
+    final rs = session(1, 'com.a')..secureFocus = true;
+    rec.attach(rs, () => meta('h1', 'com.a'), restore: true);
+    final row = (await send(rs, 'synthetic private send'))!;
+    rs.secureFocus = false;
+    rs.composer.done(0, 'synthetic failure');
+    rs.composer.setDraft('ordinary unsent draft');
+    rs.composer.retry(row);
+    rs.composer.done(1, null);
+    await rec.sessionEnded(rs, meta('h1', 'com.a'));
+    expect(lines().single['text'], 'ordinary unsent draft');
+  });
+
   test('three sends to two sessions make three lines with every field', () async {
     final rec = recorder();
     final written = <Map<String, Object?>>[];
