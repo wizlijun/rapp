@@ -486,7 +486,7 @@ class _PictureState extends State<Picture> {
                         if (f == null || f.window != win.id || f.rects.isEmpty || pic.isEmpty) {
                           return const SizedBox.shrink();
                         }
-                        return focusGray(pic.size, [
+                        return focusGray(pic.size, frameColor: t.on, [
                           for (final r in f.rects) fromRemoteRect(r, fit, win).shift(-pic.topLeft),
                         ]);
                       },
