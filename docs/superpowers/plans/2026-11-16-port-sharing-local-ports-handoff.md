@@ -11,17 +11,17 @@
 用户要求访问方不再用 `http://<id>.rapp:<端口>`，改成 `http://localhost:<本机端口>`（反馈文档 U151）。**代码、测试、文档都写完了，Rust 这边验证过，界面这边没有跑过测试。用户随后要求合并（U152："合并到 main 里"），已经提交并并进 `main`。**
 
 - 用户的原话：`docs/superpowers/specs/2026-11-12-rapp-requirements-feedback.md` 的 U151。
-- 设计：`docs/superpowers/specs/2026-11-16-rapp-port-sharing-local-ports-design.md`（状态：试做，已实现，待用户确认）。
+- 设计：`docs/superpowers/specs/2026-11-16-rapp-port-sharing-local-ports-design.md`（状态：已实现，已并进 `main`）。
 - 待办和真机检查单：`tasks/todo.md` 最后一节。
 
 ## 2. 东西在哪
 
 | 什么 | 在哪 |
 |---|---|
-| 工作树 | `/Users/bruce/git/rapp/.claude/worktrees/port-map` |
+| 工作树 | `/Users/bruce/git/rapp/.claude/worktrees/port-map`（合并以后内容和 `main` 相同，可以收掉，见 §7 第 6 步） |
 | 分支 | `feat/port-map`，起点是 `main` 的 `e6d0894`（release: 0.12.1） |
 | 提交 | 三个，作者都是 `Claude <noreply@anthropic.com>`：`fda0f49`（服务、命令行、测试，15 个文件）、`f8db16c`（界面，6 个文件）、再一个文档提交（8 个文件，含这份文档） |
-| `main` | 用 `--no-ff` 把 `feat/port-map` 合并进来了。合并提交用 `git log --merges -1 main` 看 |
+| `main` | 用 `--no-ff` 把 `feat/port-map` 合并进来了，合并提交 `3e6e43d` |
 | 推送 | 没有 |
 
 **关于这个工作树**：它是我从 Mac 上的 Linux 命令行环境里用 `git worktree add` 建的，建完把两处路径改成了 Mac 的路径（`.git/worktrees/port-map/gitdir` 和工作树里的 `.git` 文件），和仓库里别的工作树写法一样。我没有在 macOS 的 git 里验证过它。如果 `git worktree list` 里它不正常，在仓库根目录运行 `git worktree repair .claude/worktrees/port-map`。
@@ -111,13 +111,13 @@
 - `claude/rapp-port-sharing-panel-design.md`（§6.2 开头多一段）
 - `claude/rapp-requirements-feedback.md`（多 U151 一行、修订一行）
 
-**这次会话里出过的一个岔子，已经处理：** 我替换 `rust/service/src/ipc.rs` 的 `hosts` 函数时，把 `pipe` 函数上方的一行文档注释一起删掉了。已经补回去，补完后重新跑过 clippy（0 警告）和 `--test maps`（10 条过）。现在 `ipc.rs` 相对 `main` 只删掉了一行，就是 `hosts` 里被换掉的那一行。
+**这次会话里出过的一个岔子，已经处理：** 我替换 `rust/service/src/ipc.rs` 的 `hosts` 函数时，把 `pipe` 函数上方的一行文档注释一起删掉了。已经补回去，补完后重新跑过 clippy（0 警告）和 `--test maps`（10 条过）。这次改动里 `ipc.rs` 只删掉了一行，就是 `hosts` 里被换掉的那一行。
 
 ## 7. 下一步，按顺序
 
 1. 在 Mac 上跑界面：
    ```
-   cd /Users/bruce/git/rapp/.claude/worktrees/port-map/gui
+   cd /Users/bruce/git/rapp/gui
    flutter analyze
    flutter test test/shares_test.dart test/ui/shares_section_test.dart test/ui/allow_dialog_test.dart
    flutter test
@@ -125,7 +125,7 @@
    最可能出问题的地方：`test/ui/shares_section_test.dart` 里新加的两条（"open works with nothing to switch on first"、"a share with no address on this computer cannot be opened or copied"），以及有没有别处还在用已经删掉的 `rappNames`（我搜过 `gui/lib` 和 `gui/test`，没有）。
 2. 在 Mac 上跑 Rust：
    ```
-   cd /Users/bruce/git/rapp/.claude/worktrees/port-map/rust
+   cd /Users/bruce/git/rapp/rust
    cargo test -p rapp-service maps::
    cargo test -p rapp-testkit --test maps --test share_set --test forward
    cargo test -p rapp-cli
@@ -133,7 +133,7 @@
    ```
 3. 真机检查（`tasks/todo.md` 末尾那一节的"未经实机验证"）。
 4. **用户已经要求合并（U152），代码在 `main` 上了。合并不等于验证过：** 上面第 1 到 3 步都还没有做，发版之前要做完。
-   - 界面或真机出了问题要退回：`git revert -m 1 <合并提交>`。
+   - 界面或真机出了问题要退回：`git revert -m 1 3e6e43d`。
    - 没有问题：按 §8 改主规格的正文。
 5. 把 §6 列的三份 Project 副本补上。
 6. 工作树和分支可以收掉了：`git worktree remove .claude/worktrees/port-map`、`git branch -d feat/port-map`。我没有删。
