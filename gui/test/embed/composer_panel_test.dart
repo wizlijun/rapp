@@ -83,7 +83,7 @@ void main() {
         SizedBox(width: 720, child: ComposerPanel(state: es, session: rs, port: port, maxHeight: 300, editor: FlutterEditor.new));
 
     // A 1000×700 stage with the composer layer on it.
-    Widget layer({RemoteSession? s}) => wrap(SizedBox(
+    Widget layer({RemoteSession? s, RappTheme theme = RappTheme.matrix}) => wrap(theme: theme, SizedBox(
         key: const Key('host'),
         width: 1000,
         height: 700,
@@ -143,6 +143,19 @@ void main() {
       expect(style.fontSize, 15);
       expect(style.height, 22 / 15);
       expect(style.shadows, isEmpty);
+    });
+
+    testWidgets('the box is 30% see-through in every theme: the float fill at 0.7 of its alpha', (tester) async {
+      big(tester);
+      for (final theme in RappTheme.values) {
+        await tester.pumpWidget(layer(theme: theme));
+        await tester.pump(const Duration(seconds: 1));
+        final d = tester.widget<Container>(find.byKey(const Key('composer-box'))).decoration! as BoxDecoration;
+        final fill = d.color != null ? [d.color!] : (d.gradient! as LinearGradient).colors;
+        final want = [for (final c in tokensFor(theme).float) c.withValues(alpha: c.a * composerFillOpacity)];
+        expect(fill, want, reason: theme.name);
+        expect(fill.every((c) => c.a < 1), isTrue, reason: theme.name);
+      }
     });
 
     testWidgets('＋ and 发送: 40 square with an even 8 all round, inside the one-line box', (tester) async {
