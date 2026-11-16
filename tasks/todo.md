@@ -359,3 +359,17 @@
   - 线索里「等你」的个数只有单元测试，现在没有会话会亮 Lamp.waiting
 - [x] 收尾（分支 fix/spheres-followups）：项目外的会话打开失败不再离开项目；在别的项目卡片上点「全部打开」先切到它；项目里没有开着的会话时线索显示在顶栏项目名下面；成员很多的窄卡片上灯会折行，标题行不再溢出
 - 仍然留着：在项目里选会话后不到 1 秒就强退，这次选择可能没记住（位置 1 秒后才写盘）
+
+## 智能预设与焦点面板第 1 步（规格 `docs/superpowers/specs/2026-11-16-rapp-focus-pane-rules.md`，计划 `docs/superpowers/plans/2026-11-16-rapp-focus-pane.md`，T0–T12，分支 feat/focus-pane）
+- [x] T1–T11：协议 v12、A 端无障碍读焦点面板、「智能」预设、app 配置 `focusPane`、B 端把焦点外变灰
+- [x] T12 文档与收尾
+- 交付说明：
+  - 自动测试：`scripts/check.sh` EXIT=0（Swift 453 项通过、1 项跳过）；`cargo test -p rapp-client-core` 全过、`cargo build -p rapp-client-gtk` 通过；`flutter analyze` 干净，`flutter test` 1655 项通过、8 项跳过
+  - `scripts/focus-loopback.py` 在 T6 时对假宿主的回环里通过
+  - 规格 §10 的十个场景没有一个在真机上看过，全部留给用户
+  - T0 探查没跑：门槛仍是起步值（40 层 / 85% / 15% / 240×160 / 50 ms）；探查文档和调门槛等用户的真机结果
+  - `AXManualAccessibility` 第 1 步没有在任何地方设置；Electron 和 Chrome 不给控件树时整窗保持彩色
+- 未经实机验证：
+  - 规格 §10 的十个场景：§5 的七个例子；鼠标横穿不换焦点；停住约半秒换一次；写作面板发送期间键盘面板不变；弹出菜单和对话框全是彩色；拖边改窗口大小后焦点跟着走；触屏点和滑；智能与最清晰来回切；智能下关掉"网络差时自动省流量"仍会降档；开着智能用半天 A 端 app 不卡（重点 Electron 三个）
+  - 真实 app 构建编译 `gui/macos/Runner/SessionPlugin.swift`（只有真机构建才编译它）
+  - `BackdropFilter` 灰度叠在 `Texture` 上的真机效果

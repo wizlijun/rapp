@@ -1,6 +1,6 @@
 # rapp「智能」预设与焦点面板：规格
 
-日期：2026-11-16。状态：**第 2 稿，可以实施第 0 步和第 1 步**。本文不改代码。
+日期：2026-11-16。状态：**第 1 步已实现（T0 探查与 §10 实机场景待验证）**。
 
 来由（需求反馈文档 U146–U150）：用户想让串流只把"焦点所在的那一块"按彩色传，其余保持黑白的低流量模式；焦点要智能判断，"例如输入框的父容器，可能就是主要的内容范围"；"暂时不需要 ai 判断"；入口是串流菜单预设中间的一条「智能」，"选中后，不仅使用以前智能带宽适应的策略，还应用这个 focus 的策略"；最后要求"写成本地 spec，准备给其他 agent 实施"。
 
@@ -350,6 +350,25 @@ Electron 的三个和 Chrome：先不设 `AXManualAccessibility` 看一遍，再
 - `Texture` 那条画法下怎么只把一部分画灰。
 - `smart` 存在会话记录的哪个字段里。
 - 两端共用的协议样例字节放在哪。
+
+### 第 1 步实现时的取法（计划 §14）
+
+- 编码器：`FrameEncoder.lastReport: EncodeReport?`，每次 `encodeSlices` 都填，`PacedSender.onEncoded` 转出去。
+- 窗口内的点：画布点 = `region.x + 像素 / scale`（`scale = width / region.w`），再减 `window.rect` 左上角；含标题栏，和 `mouse` 一致。B 端用 `toRemote` 的逆（`fromRemoteRect`）。
+- `AXObserver`：每次 `focus` 打开时为当前 pid 建，挂主 run loop，关掉或会话结束时拆；app 换了 pid 时 `FocusSession` 重建 reader。
+- 画灰：`pic` 上叠一层 `BackdropFilter(ColorFilter.matrix(灰度))`，灰色范围是整画面减去所有焦点矩形的并集（不是 even-odd，两个矩形重叠的部分仍是彩色）。
+- `smart` 在 `StreamChoice` 里，随会话的串流选择（`SessionRecord.choice`）保存；只按会话记，不进「记为默认」，不进 app 配置。app 配置里只有 `focusPane`（默认真）。
+- 协议样例：Swift 和 Rust 测试各放一份同样的十六进制字面量。
+- 协议为 v12（`focus` 位与 `focusRegion`，类型 36）。
+
+### 第 1 步实现后的事实
+
+- **T0 探查没有在真机上跑。** 门槛仍是规格起步值（40 层 / 85% / 15% / 240×160 / 50 ms），探查文档和门槛调整等用户的真机结果。
+- **`AXManualAccessibility` 第 1 步没有在任何地方设置**（§3、§13 第 6 项）：A 只读。Electron 和 Chrome 不给控件树时，读取结果是"被挡"，整窗保持彩色。
+- 宿主没有无障碍授权时，读取同样被挡，整窗保持彩色。
+- B 在焦点窗口大小变化时清掉焦点矩形；退出智能时清掉，之后迟到的 `focusRegion` 丢掉。只有焦点窗口正在显示、并且有矩形时才画灰；弹出窗口不叠灰。
+- `scripts/focus-loopback.py` 在 T6 时对假宿主的回环里通过。
+- §10 的十个场景，没有一个在真机上看过。另外未验证：真实 app 构建会编译 `gui/macos/Runner/SessionPlugin.swift`（只有真机构建才编译它）；`BackdropFilter` 灰度叠在 `Texture` 上的真机效果。
 
 ## 15. 做完后要跟着改的文档
 
