@@ -27,6 +27,9 @@ pub const INSTALL_LEVEL: u32 = 1;
 /// Where the installer writes its level.
 pub const INSTALL_LEVEL_FILE: &str = "/Library/Application Support/rapp/install-level";
 /// Where to get the pkg when the running app needs it run again.
+/// Where the pkg links the bundled rapp-cli. ps shows a process started through it by this path,
+/// not the bundle's, so the in-use check (K17) looks for it too.
+pub const CLI_LINK: &str = "/usr/local/bin/rapp";
 pub const RELEASES_PAGE: &str = "https://github.com/wizlijun/rapp/releases/latest";
 
 /// True when the installer that ran here is older than this build: no level file, one that is not

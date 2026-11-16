@@ -487,6 +487,20 @@ async fn gui_process_blocks_auto_install() {
 }
 
 #[tokio::test]
+async fn a_pipe_through_the_rapp_link_blocks_auto_install() {
+    let mut e = Env::new(Knobs::default());
+    // ps names a process started as /usr/local/bin/rapp by the link, not the bundle path.
+    e.ps_extra.lock().unwrap().push(format!("  777   776 {}", rapp_update::CLI_LINK));
+    e.start().await;
+    e.wait_state("ready").await;
+    e.no_restart_for(POLL * 4).await;
+    assert_eq!(marker_of(&e.bundle), "current");
+    e.ps_extra.lock().unwrap().clear();
+    e.wait_restart().await;
+    assert_eq!(marker_of(&e.bundle), "new");
+}
+
+#[tokio::test]
 async fn ps_failure_counts_as_in_use() {
     let mut e = Env::new(Knobs::default());
     e.ps_code.store(1, Ordering::SeqCst);

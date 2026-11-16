@@ -502,7 +502,8 @@ pub async fn in_use(state: &State) -> Option<String> {
 }
 
 /// A process from the bundle other than this service and its own children (session workers are
-/// its children). A ps that fails, or whose output doesn't show this service, counts as in use.
+/// its children), or one started through the `rapp` link (an `ssh <id>.rapp` pipe). A ps that
+/// fails, or whose output doesn't show this service, counts as in use.
 async fn procs_in_use(state: &State) -> Option<String> {
     let o = state.update_opts.as_ref()?;
     let prefix = format!("{}/Contents/", o.bundle.display());
@@ -516,7 +517,9 @@ async fn procs_in_use(state: &State) -> Option<String> {
     if !procs.iter().any(|&(pid, _, comm)| pid == me && comm.starts_with(&prefix)) {
         return Some("看不懂进程表".into());
     }
-    let other = procs.iter().any(|&(pid, ppid, comm)| comm.starts_with(&prefix) && pid != me && ppid != me);
+    let other = procs
+        .iter()
+        .any(|&(pid, ppid, comm)| (comm.starts_with(&prefix) && pid != me && ppid != me) || comm == up::CLI_LINK);
     other.then(|| STILL_OPEN.to_string())
 }
 

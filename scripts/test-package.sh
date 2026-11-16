@@ -71,7 +71,8 @@ signs_with_ids() {
 check "signing loop passes -i from EXPECTED_IDS" signs_with_ids scripts/package-macos.sh
 check "postinstall waits for the old agent to leave" grep -q 'while launchctl print "gui/$USER_ID/$LABEL"' scripts/pkg/postinstall
 check "package script builds and bundles rapp-cli" bash -c 'grep -q -- "-p rapp-cli" scripts/package-macos.sh && grep -q "release/rapp-cli \"\$APP/Contents/MacOS/\"" scripts/package-macos.sh'
-check "postinstall links the rapp command" grep -q 'ln -sfn "$APP/Contents/MacOS/rapp-cli" /usr/local/bin/rapp' scripts/pkg/postinstall
+check "postinstall links the rapp command" bash -c 'grep -q "^CLI=/usr/local/bin/rapp$" scripts/pkg/postinstall && grep -q "ln -sfn \"\$APP/Contents/MacOS/rapp-cli\" \"\$CLI\"" scripts/pkg/postinstall'
+check "uninstall removes the link and ssh settings" bash -c 'grep -q "rm -f /usr/local/bin/rapp" scripts/uninstall-macos.sh && grep -q "ssh_config.d/rapp.conf" scripts/uninstall-macos.sh' 
 check "postinstall writes the ssh proxy" grep -q 'ProxyCommand /usr/local/bin/rapp pipe %h %p' scripts/pkg/postinstall
 pkg_level=$(sed -n 's/^INSTALL_LEVEL=\([0-9]*\)$/\1/p' scripts/pkg/postinstall)
 rust_level=$(sed -n 's/^pub const INSTALL_LEVEL: u32 = \([0-9]*\);$/\1/p' rust/update/src/lib.rs)
