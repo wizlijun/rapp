@@ -66,7 +66,7 @@ async fn a_share_gets_a_number_and_the_sharer_listens_on_it() {
     let (port, _echo) = echo().await;
     let (a, _) = numbered(json!([{"port": port}]), 29500).await;
     let r = row(&a, port).await;
-    assert_eq!((&r["local"], &r["addr"]), (&json!(29500), &json!("http://localhost:29500")), "{r}");
+    assert_eq!((&r["local"], &r["addr"]), (&json!(29500), &json!("tcp://localhost:29500")), "{r}");
     assert_eq!(through(29500, b"hi").await, b"hi");
     assert_eq!(saved(a.home.path())[0]["local"], 29500);
 }
@@ -81,7 +81,7 @@ async fn a_new_share_gets_the_next_number() {
     let s = &r["shared"][0];
     assert_eq!(
         (&s["local"], &s["proto"], &s["proto_auto"], &s["addr"]),
-        (&json!(29511), &json!("http"), &json!(true), &json!("http://localhost:29511")),
+        (&json!(29511), &json!("tcp"), &json!(true), &json!("tcp://localhost:29511")),
         "{r}"
     );
     assert_eq!(through(29511, b"x").await, b"x");
@@ -93,10 +93,10 @@ async fn list_shares_and_shares_carry_the_number_and_protocol() {
     let (a, key) = numbered(json!([{"port": port}]), 29520).await;
     let b = visitor();
     let (r, ..) = ask(&a, &key, &b, json!({"op":"list_shares"})).await;
-    assert_eq!((&r["shares"][0]["local"], &r["shares"][0]["proto"]), (&json!(29520), &json!("http")), "{r}");
+    assert_eq!((&r["shares"][0]["local"], &r["shares"][0]["proto"]), (&json!(29520), &json!("tcp")), "{r}");
     let (r, ..) = ask(&a, &key, &b, json!({"op":"shares"})).await;
     let s = &r["shares"][0];
-    assert_eq!((&s["local"], &s["proto"], &s["proto_auto"]), (&json!(29520), &json!("http"), &json!(true)), "{r}");
+    assert_eq!((&s["local"], &s["proto"], &s["proto_auto"]), (&json!(29520), &json!("tcp"), &json!(true)), "{r}");
 }
 
 #[tokio::test]
@@ -246,11 +246,11 @@ async fn a_visitor_uses_the_share_number_and_a_second_one_yields() {
     let r = table_of(&b, &a).await;
     assert_eq!(r["old"], false, "{r}");
     let s = &r["shares"][0];
-    assert_eq!((&s["local"], &s["addr"], &s["proto"], &s["proto_auto"]), (&json!(29600), &json!("http://localhost:29600"), &json!("http"), &json!(true)), "{r}");
+    assert_eq!((&s["local"], &s["addr"], &s["proto"], &s["proto_auto"]), (&json!(29600), &json!("tcp://localhost:29600"), &json!("tcp"), &json!(true)), "{r}");
     assert!(s.get("wanted").is_none(), "{r}");
     assert_eq!(through(29600, b"hi").await, b"hi");
     let s = their_row(&c, &a, port).await;
-    assert_eq!((&s["local"], &s["wanted"], &s["addr"]), (&json!(29601), &json!(29600), &json!("http://localhost:29601")), "{s}");
+    assert_eq!((&s["local"], &s["wanted"], &s["addr"]), (&json!(29601), &json!(29600), &json!("tcp://localhost:29601")), "{s}");
     assert_eq!(through(29601, b"too").await, b"too");
 }
 
@@ -265,7 +265,7 @@ async fn the_yielded_visitor_moves_back() {
     b.svc.stop();
     refuses(29610).await;
     let s = their_row(&c, &a, port).await;
-    assert_eq!((&s["local"], &s["addr"]), (&json!(29610), &json!("http://localhost:29610")), "{s}");
+    assert_eq!((&s["local"], &s["addr"]), (&json!(29610), &json!("tcp://localhost:29610")), "{s}");
     assert!(s.get("wanted").is_none(), "{s}");
     assert_eq!(through(29610, b"back").await, b"back");
     refuses(29611).await;
@@ -295,7 +295,7 @@ async fn an_old_sharer_still_works() {
     let b = visiting(29630, &key, &a).await;
     let r = table_of(&b, &a).await;
     let s = &r["shares"][0];
-    assert_eq!((&s["local"], &s["addr"]), (&json!(29630), &json!("http://localhost:29630")), "{r}");
+    assert_eq!((&s["local"], &s["addr"]), (&json!(29630), &json!("tcp://localhost:29630")), "{r}");
     assert!(s.get("wanted").is_none(), "{r}");
     assert_eq!(through(29630, b"old").await, b"old");
     let s = hosts_item(&b, &a, port).await;
@@ -383,10 +383,10 @@ async fn a_number_outside_the_visitors_range_is_ignored() {
     let (a, key) = sharer_on(port, 29700).await;
     let b = visiting(29710, &key, &a).await;
     let s = their_row(&b, &a, port).await;
-    assert_eq!((&s["local"], &s["addr"]), (&json!(29710), &json!("http://localhost:29710")), "{s}");
+    assert_eq!((&s["local"], &s["addr"]), (&json!(29710), &json!("tcp://localhost:29710")), "{s}");
     assert!(s.get("wanted").is_none(), "{s}");
     let s = hosts_item(&b, &a, port).await;
-    assert_eq!((&s["local"], &s["addr"]), (&json!(29710), &json!("http://localhost:29710")), "{s}");
+    assert_eq!((&s["local"], &s["addr"]), (&json!(29710), &json!("tcp://localhost:29710")), "{s}");
     assert!(s.get("wanted").is_none(), "{s}");
     assert_eq!(through(29710, b"x").await, b"x");
     refuses(29700).await;
@@ -477,7 +477,58 @@ async fn the_visitor_follows_a_renumbered_share() {
     read(&l, &s).await;
     assert_eq!(only(&l).await["local"], 29741);
     let r = their_row(&c, &l, lport).await;
-    assert_eq!((&r["local"], &r["addr"]), (&json!(29741), &json!("http://localhost:29741")), "{r}");
+    assert_eq!((&r["local"], &r["addr"]), (&json!(29741), &json!("tcp://localhost:29741")), "{r}");
     assert!(r.get("wanted").is_none(), "{r}");
     refuses(29740).await;
+}
+
+// Task 5: the protocol of a share is detected when it is shared, and again when its port starts
+// accepting later.
+
+/// An HTTP service on `127.0.0.1:<port>` that answers every request `HTTP/1.0 200 OK`; the flag
+/// says it was sent a `HEAD /`, which only detection sends.
+async fn http_on(port: u16) -> (std::sync::Arc<std::sync::atomic::AtomicBool>, tokio::task::JoinHandle<()>) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let l = tokio::net::TcpListener::bind(("127.0.0.1", port)).await.unwrap();
+    let headed = std::sync::Arc::new(AtomicBool::new(false));
+    let seen = headed.clone();
+    let task = tokio::spawn(async move {
+        while let Ok((mut c, _)) = l.accept().await {
+            let seen = seen.clone();
+            tokio::spawn(async move {
+                let mut buf = [0u8; 4096];
+                if let Ok(n) = c.read(&mut buf).await {
+                    if buf[..n].starts_with(b"HEAD / ") {
+                        seen.store(true, Ordering::SeqCst);
+                    }
+                }
+                let _ = c.write_all(b"HTTP/1.0 200 OK\r\nContent-Length: 0\r\n\r\n").await;
+                let _ = c.shutdown().await;
+            });
+        }
+    });
+    (headed, task)
+}
+
+#[tokio::test]
+async fn a_share_of_an_echo_is_detected_as_tcp() {
+    let (port, _echo) = echo().await;
+    let (a, _) = start_sharing_opts(|_| {}, (29750, 5), false, None).await;
+    let r = ipc(&a, json!({"cmd":"share","ports":[port]})).await;
+    let s = &r["shared"][0];
+    assert_eq!(
+        (&s["local"], &s["proto"], &s["proto_auto"], &s["addr"]),
+        (&json!(29750), &json!("tcp"), &json!(true), &json!("tcp://localhost:29750")),
+        "{r}"
+    );
+    assert_eq!(row(&a, port).await["proto"], "tcp");
+
+    // Nothing listens on 29758 yet: the guess stays, and the port is probed again once it accepts.
+    let r = ipc(&a, json!({"cmd":"share","ports":[29758]})).await;
+    let s = &r["shared"][0];
+    assert_eq!((&s["proto"], &s["proto_auto"], &s["addr"]), (&json!("http"), &json!(true), &json!("http://localhost:29751")), "{r}");
+    let (headed, _http) = http_on(29758).await;
+    let r = row(&a, 29758).await;
+    assert_eq!((&r["proto"], &r["listening"]), (&json!("http"), &json!(true)), "{r}");
+    assert!(headed.load(std::sync::atomic::Ordering::SeqCst), "never probed");
 }

@@ -228,16 +228,18 @@ pub async fn share(state: &State, cmd: &Value) -> Value {
         Ok(done) => done,
         Err(e) => return err(&e),
     };
-    let shared: Vec<Value> = done
+    // Before the reply, so that it gives the address with the protocol detected.
+    let shared: Vec<Value> = sharing::settled(state, &done)
+        .await
         .iter()
-        .map(|d| {
-            let (port, allow) = (d.share.port, &d.share.allow);
-            let proto = d.share.protocol();
+        .map(|s| {
+            let (port, allow) = (s.port, &s.allow);
+            let proto = s.protocol();
             let mut v = json!({
-                "port": port, "proto": proto.as_str(), "proto_auto": d.share.proto_auto,
-                "addr": d.share.local.map(|l| addr(proto, l)).unwrap_or_default(),
+                "port": port, "proto": proto.as_str(), "proto_auto": s.proto_auto,
+                "addr": s.local.map(|l| addr(proto, l)).unwrap_or_default(),
             });
-            if let Some(local) = d.share.local {
+            if let Some(local) = s.local {
                 v["local"] = json!(local);
             }
             if !allow.is_empty() {

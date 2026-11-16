@@ -122,7 +122,8 @@ pub fn without_local(mut reply: Value) -> Value {
                 assert!(wanted.as_u64().is_some_and(|w| w != local), "{wanted}");
             }
             let addr = s.remove("addr").expect("an address");
-            let want = [format!("http://localhost:{local}"), format!("ssh -p {local} localhost")];
+            let want = ["http", "https", "tcp"].map(|p| format!("{p}://localhost:{local}"));
+            let want = [&want[..], &[format!("ssh -p {local} localhost")]].concat();
             assert!(want.iter().any(|w| addr == w.as_str()), "{addr}");
         }
     }

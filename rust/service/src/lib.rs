@@ -14,6 +14,7 @@ mod own;
 mod pace;
 mod peer;
 mod pipe;
+mod probe;
 mod relay_link;
 mod share_cmds;
 mod sharing;
@@ -190,6 +191,7 @@ impl Service {
             maps,
             numbers: numbers::Numbers::new(),
             own: own::Own::new(opts.own_ports),
+            probed: probe::Probed::default(),
             forwards: forward::Forwards::new(),
             forward_priority: opts.forward_priority,
             channels: opts.channels,

@@ -20,6 +20,7 @@ rapp-wire.workspace = true
 rapp-conn.workspace = true
 rapp-update.workspace = true
 rapp-term.workspace = true
+rustls.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

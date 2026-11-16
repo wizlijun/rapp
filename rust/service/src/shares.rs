@@ -253,10 +253,12 @@ impl Shares {
 
     /// Records what the share of `port` speaks and whether that was detected (`auto`). True when
     /// that changed the share; false (and no write) when it already was so, or is not shared.
+    /// A detection (`auto`) never replaces a protocol the sharer chose: the check is made under
+    /// the same lock as the write, since the sharer may choose one while a detection runs.
     pub fn set_proto(&self, port: u16, proto: Proto, auto: bool) -> Result<bool> {
         let mut items = self.items.lock().unwrap();
         let Some(now) = items.0.iter().find(|s| s.port == port) else { return Ok(false) };
-        if now.protocol() == proto && now.proto_auto == auto {
+        if (now.protocol() == proto && now.proto_auto == auto) || (auto && !now.proto_auto) {
             return Ok(false);
         }
         let mut next = items.0.clone();
@@ -528,6 +530,7 @@ mod tests {
         assert!(s.set_proto(8000, Proto::Https, true).unwrap());
         assert!(!s.set_proto(8000, Proto::Https, true).unwrap());
         assert!(s.set_proto(8000, Proto::Https, false).unwrap());
+        assert!(!s.set_proto(8000, Proto::Tcp, true).unwrap()); // the sharer chose
         assert!(!s.set_proto(9, Proto::Tcp, true).unwrap()); // not shared
         let got = Shares::load(d.path()).0.get(8000).unwrap();
         assert_eq!((got.proto, got.proto_auto), (Some(Proto::Https), false));

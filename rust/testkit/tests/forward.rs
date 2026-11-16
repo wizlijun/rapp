@@ -414,7 +414,7 @@ async fn silent_lan_addresses_cost_one_wait_and_the_relay_still_answers() {
     let hosts = json!([{"id": a.id, "name": "a", "lan": lan}]);
     std::fs::write(b.home.path().join("hosts.json"), hosts.to_string()).unwrap();
     let r = without_local(ipc_once(&b.svc, b.home.path(), json!({"cmd":"hosts"})).await);
-    assert_eq!(r, json!({"ok":true,"hosts":[{"id": a.id, "name": "a", "shares": [{"port": port, "proto": "http", "proto_auto": true, "web": true}]}]}));
+    assert_eq!(r, json!({"ok":true,"hosts":[{"id": a.id, "name": "a", "shares": [{"port": port, "proto": "tcp", "proto_auto": true, "web": false}]}]}));
 }
 
 #[tokio::test]
@@ -481,7 +481,7 @@ async fn share_then_shares_then_unshare() {
     let r = c.call(json!({"cmd":"share","ports":[port]})).await;
     assert_eq!(r["ok"], true, "{r}");
     // The default range has no number to give: no address.
-    assert_eq!(r["shared"], json!([{"port": port, "proto": "http", "proto_auto": true, "addr": ""}]), "{r}");
+    assert_eq!(r["shared"], json!([{"port": port, "proto": "tcp", "proto_auto": true, "addr": ""}]), "{r}");
     assert!(r["shared"][0].get("warn").is_none(), "{r}");
     let r = c.call(json!({"cmd":"shares"})).await;
     assert_eq!((&r["ok"], &r["id"]), (&json!(true), &json!(a.id)), "{r}");
@@ -579,7 +579,7 @@ async fn allow_names_a_known_device_or_is_refused() {
     assert_eq!(l["allow"], 1, "{l}");
     // B may use it; the fingerprint prefix means B too
     let (r, _, _conn) = ask(&a, &key, &b, json!({"op":"list_shares"})).await;
-    assert_eq!(r, json!({"ok":true,"shares":[{"port":port,"proto":"http"}]}));
+    assert_eq!(r, json!({"ok":true,"shares":[{"port":port,"proto":"tcp"}]}));
     let prefix = &b.id.fp.to_string()[..8].to_ascii_uppercase();
     assert_eq!(c.call(json!({"cmd":"share","ports":[port],"allow":[prefix]})).await["ok"], true);
     assert_eq!(c.call(json!({"cmd":"share","ports":[port],"allow":["nobody"]})).await,
@@ -661,7 +661,7 @@ async fn sharing_again_without_allow_keeps_the_restriction() {
     let (r, _, _conn) = ask(&a, &key, &b, json!({"op":"list_shares"})).await;
     assert_eq!(r["ok"], true, "{r}");
     let mut c = ipc(&a).await;
-    let restricted = json!([{"port": port, "allow": ["test-b"], "proto": "http", "proto_auto": true, "addr": ""}]);
+    let restricted = json!([{"port": port, "allow": ["test-b"], "proto": "tcp", "proto_auto": true, "addr": ""}]);
     let r = c.call(json!({"cmd":"share","ports":[port],"allow":["test-b"],"note":"模型","raw":true})).await;
     assert_eq!((&r["ok"], &r["shared"]), (&json!(true), &restricted), "{r}");
     let (r, mut s, _conn) = forward(&a, &key, &b, port).await;
@@ -671,7 +671,7 @@ async fn sharing_again_without_allow_keeps_the_restriction() {
     let r = c.call(json!({"cmd":"share","ports":[port]})).await;
     assert_eq!((&r["ok"], &r["shared"]), (&json!(true), &restricted), "{r}");
     let saved = || -> Value { serde_json::from_slice(&std::fs::read(a.home.path().join("shares.json")).unwrap()).unwrap() };
-    assert_eq!(saved(), json!([{"port": port, "note": "模型", "allow": [b.id.fp.to_string()], "raw": true}]));
+    assert_eq!(saved(), json!([{"port": port, "note": "模型", "allow": [b.id.fp.to_string()], "raw": true, "proto": "tcp"}]));
     let r = c.call(json!({"cmd":"shares"})).await;
     assert_eq!((&r["shares"][0]["allow"], &r["shares"][0]["note"]), (&json!([{"fp": b.id.fp.to_string(), "name": "test-b"}]), &json!("模型")), "{r}");
     // Another device is still kept out, and B's forward was not cut: `allow` did not change.
@@ -686,7 +686,7 @@ async fn sharing_again_without_allow_keeps_the_restriction() {
     // A field that is given replaces that field only.
     let r = c.call(json!({"cmd":"share","ports":[port],"note":"","raw":false})).await;
     assert_eq!((&r["ok"], &r["shared"]), (&json!(true), &restricted), "{r}");
-    assert_eq!(saved(), json!([{"port": port, "allow": [b.id.fp.to_string()]}]));
+    assert_eq!(saved(), json!([{"port": port, "allow": [b.id.fp.to_string()], "proto": "tcp"}]));
     // A port that was not shared starts open to every trusted device: no `allow` in the reply.
     let r = c.call(json!({"cmd":"share","ports":[port, 8000]})).await;
     assert_eq!(r["shared"][0], restricted[0], "{r}");
@@ -741,7 +741,7 @@ async fn pipe_carries_the_port_and_bytes_right_behind_the_command() {
     assert_eq!(rest, b" world");
     // and B's hosts lists what A offers B
     let r = without_local(ipc_once(&b.svc, b.home.path(), json!({"cmd":"hosts"})).await);
-    assert_eq!(r, json!({"ok":true,"hosts":[{"id": a.id, "name": "a", "shares": [{"port": port, "proto": "http", "proto_auto": true, "web": true}]}]}));
+    assert_eq!(r, json!({"ok":true,"hosts":[{"id": a.id, "name": "a", "shares": [{"port": port, "proto": "tcp", "proto_auto": true, "web": false}]}]}));
 }
 
 #[tokio::test]
@@ -1013,7 +1013,7 @@ async fn hosts_lists_what_each_device_offers_this_one() {
     let r = without_local(ipc_once(&b.svc, b.home.path(), json!({"cmd":"hosts"})).await);
     assert_eq!(r["ok"], true, "{r}");
     let entry = |id: &str| r["hosts"].as_array().unwrap().iter().find(|h| h["id"] == id).cloned().unwrap_or_else(|| panic!("{id}: {r}"));
-    assert_eq!(entry(&a.id), json!({"id": a.id, "name": "a", "shares": [{"port": p, "proto": "http", "proto_auto": true, "web": true}]}));
+    assert_eq!(entry(&a.id), json!({"id": a.id, "name": "a", "shares": [{"port": p, "proto": "tcp", "proto_auto": true, "web": false}]}));
     assert_eq!(entry(made_up), json!({"id": made_up, "name": "ghost", "error": "offline"}));
     assert_eq!(r["hosts"].as_array().unwrap().len(), 2, "{r}");
 }
@@ -1100,7 +1100,7 @@ async fn the_cli_shares_and_pipes() {
     // One line per port A shares; this one's ends with where it is reached.
     let line = text.lines().find(|l| l.contains(&format!("  {port}  "))).unwrap_or_else(|| panic!("{text:?}"));
     let addr = line.split_whitespace().last().unwrap_or("").to_string();
-    assert!(addr.starts_with("http://localhost:"), "{line:?}");
+    assert!(addr.starts_with("tcp://localhost:"), "{line:?}");
     let local: u16 = addr.rsplit(':').next().unwrap().parse().unwrap();
     let mut tcp = tokio::net::TcpStream::connect(("127.0.0.1", local)).await.unwrap();
     tcp.write_all(b"by hand").await.unwrap();

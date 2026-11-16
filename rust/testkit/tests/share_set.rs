@@ -357,8 +357,8 @@ async fn set_through_the_relay() {
     let r = b_ipc(&b, json!({"cmd":"shares","to":a.id})).await;
     assert_eq!((&r["ok"], &r["shares"]), (&json!(true), &json!([])), "{r}");
     let r = b_ipc(&b, json!({"cmd":"share","to":a.id,"ports":[port],"note":"relayed"})).await;
-    assert_eq!(r, json!({"ok":true,"shared":[{"port":port,"proto":"http","proto_auto":true}]}));
-    assert_eq!(saved_port(a.home.path(), port), json!({"port":port,"note":"relayed"}));
+    assert_eq!(r, json!({"ok":true,"shared":[{"port":port,"proto":"tcp","proto_auto":true}]}));
+    assert_eq!(saved_port(a.home.path(), port), json!({"port":port,"note":"relayed","proto":"tcp"}));
     let r = b_ipc(&b, json!({"cmd":"shares","to":a.id})).await;
     assert_eq!((&r["shares"][0]["port"], &r["shares"][0]["note"]), (&json!(port), &json!("relayed")), "{r}");
     // The relay records a stream when it ends, and B's requests share one channel: close it first.

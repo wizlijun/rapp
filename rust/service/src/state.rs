@@ -102,6 +102,8 @@ pub struct State {
     pub numbers: crate::numbers::Numbers,
     /// This device's own shares, served on their numbers.
     pub own: crate::own::Own,
+    /// The shared ports whose protocol was detected in this run (`sharing::settle`).
+    pub probed: crate::probe::Probed,
     /// The forwards running now.
     pub forwards: crate::forward::Forwards,
     /// See `Opts::forward_priority`.

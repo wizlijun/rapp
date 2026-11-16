@@ -77,8 +77,8 @@ async fn a_share_of_a_is_reached_on_a_local_port_of_b() {
     let r = row(&b, &a, port).await;
     assert_eq!(
         r,
-        json!({"port": port, "note": "echo", "allow": [], "addr": "http://localhost:29300", "local": 29300,
-               "web": true, "listening": true, "mine": true, "proto": "http", "proto_auto": true})
+        json!({"port": port, "note": "echo", "allow": [], "addr": "tcp://localhost:29300", "local": 29300,
+               "web": false, "listening": true, "mine": true, "proto": "tcp", "proto_auto": true})
     );
     assert_eq!(through(29300, b"hello").await, b"hello");
     assert_eq!(saved_maps(b.home.path()), json!([{"id": a.id, "port": port, "local": 29300}]));
