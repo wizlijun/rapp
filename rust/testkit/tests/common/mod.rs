@@ -21,6 +21,13 @@ use tokio::net::TcpStream;
 pub const PASSWORD: &str = "a-pass-1";
 pub const WAIT: Duration = Duration::from_secs(10);
 
+/// The share numbers and local ports a test service hands out unless its test gives a range of
+/// its own: off rapp's real range (`rapp_service::MAP_PORTS`, 28000-28999), so that a test never
+/// listens on, or probes, the numbers of a rapp running on the developer's machine. Wide enough
+/// for every test of one binary at once; the per-test ranges of `share_numbers.rs`, `maps.rs`
+/// and `share_set.rs` sit below it.
+pub const TEST_PORTS: (u16, u16) = (29800, 100);
+
 /// A temp dir with `rapp-host` / `rapp-client` symlinked to the fake workers.
 pub fn bins() -> TempDir {
     let dir = tempfile::tempdir().unwrap();
@@ -109,7 +116,7 @@ pub async fn start_service_with(
         forward_priority: rapp_conn::relay::FORWARD_PRIORITY,
         channels: true,
         pacing: true,
-        map_ports: rapp_service::MAP_PORTS,
+        map_ports: TEST_PORTS,
         own_ports: true,
     })
     .await
@@ -564,7 +571,7 @@ pub async fn service_on_relay_with(
         forward_priority: rapp_conn::relay::FORWARD_PRIORITY,
         channels: true,
         pacing: true,
-        map_ports: rapp_service::MAP_PORTS,
+        map_ports: TEST_PORTS,
         own_ports: true,
     };
     tune(&mut opts);
@@ -580,7 +587,7 @@ pub fn hub_relay(home: &Path, addr: &str, key: &rapp_wire::Key) {
 
 /// A service on `rig` (registering `lan`; None: its own addresses), once it is connected there.
 pub async fn a_on_relay(rig: &RelayRig, lan: Option<Vec<String>>) -> TestService {
-    a_on_relay_ports(rig, lan, rapp_service::MAP_PORTS).await
+    a_on_relay_ports(rig, lan, TEST_PORTS).await
 }
 
 /// `a_on_relay`, with the local ports of other devices' shares (and the share numbers) from `map_ports`.

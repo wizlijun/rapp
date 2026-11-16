@@ -128,11 +128,11 @@ async fn a_share_number_another_program_has_on_the_sharer_stays() {
 #[tokio::test]
 async fn unshare_closes_the_number() {
     let (port, _echo) = echo().await;
-    let (a, _) = numbered(json!([{"port": port}]), 29545).await;
-    assert_eq!(through(29545, b"x").await, b"x");
+    let (a, _) = numbered(json!([{"port": port}]), 29660).await;
+    assert_eq!(through(29660, b"x").await, b"x");
     let r = ipc(&a, json!({"cmd":"unshare","port":port})).await;
     assert_eq!(r["was"], true, "{r}");
-    refuses(29545).await;
+    refuses(29660).await;
 }
 
 #[tokio::test]

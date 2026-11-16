@@ -108,11 +108,11 @@ pub async fn forward(a: &TestService, key: &rapp_wire::Key, b: &Visitor, port: u
 }
 
 /// A `hosts` reply without each share's `local`, `addr` and `wanted`, after checking them: a
-/// local port from the real service's range, and an address that names it. `wanted` is there
-/// when the sharer runs on the same machine and listens on its share number itself, so that
-/// the visitor yields; that says nothing about what these tests look at.
+/// local port from the test services' range (`TEST_PORTS`), and an address that names it.
+/// `wanted` is there when the sharer runs on the same machine and listens on its share number
+/// itself, so that the visitor yields; that says nothing about what these tests look at.
 pub fn without_local(mut reply: Value) -> Value {
-    let (first, count) = rapp_service::MAP_PORTS;
+    let (first, count) = TEST_PORTS;
     for h in reply.get_mut("hosts").and_then(Value::as_array_mut).into_iter().flatten() {
         for s in h.get_mut("shares").and_then(Value::as_array_mut).into_iter().flatten() {
             let s = s.as_object_mut().unwrap();
