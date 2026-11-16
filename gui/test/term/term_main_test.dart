@@ -475,6 +475,52 @@ void main() {
     expect(tester.widget<TermStage>(find.byType(TermStage)).frozen, isFalse);
     final v = term.calls.where((c) => c.$1 == 'view').last.$2;
     expect((v['sid'], v['window']), (2, 3));
+    expect(tester.element(find.byType(TermStage)), same(before));
+  });
+
+  testWidgets('a recovery does not pull the focus into the terminal', (tester) async {
+    await tester.pumpWidget(wrap(window()));
+    await openTerm(tester, two);
+    await drop(tester);
+    await tester.tap(find.byKey(const Key('composer-open')));
+    await tester.pump();
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('composer-field')));
+    await tester.pump();
+    FocusNode? primary() => FocusManager.instance.primaryFocus;
+    expect(primary()?.debugLabel, 'composer');
+    final tick = s.termFocusTick;
+    term.paneLists[2] = two;
+    await tester.runAsync(() async {
+      s.reconnectCurrent();
+      for (var i = 0; i < 4; i++) {
+        await flush();
+      }
+    });
+    term.play(windowsOf(2, two));
+    await settle(tester);
+    expect(find.byKey(const Key('offline-bar')), findsNothing);
+    expect(s.termFocusTick, tick); // the terminal was not asked for the keys
+    expect(find.byKey(const Key('composer-panel')), findsOneWidget);
+    expect(primary()?.debugLabel, isNot('term-stage'));
+    expect(primary()?.debugLabel, 'composer');
+  });
+
+  testWidgets('a terminal that never showed a screen keeps the disconnected stage on a network drop', (tester) async {
+    await tester.pumpWidget(wrap(window()));
+    term.paneLists[1] = two;
+    await tester.runAsync(() async {
+      s.openOrSwitch('111', app, 'work');
+      for (var i = 0; i < 4; i++) {
+        await flush();
+      }
+    });
+    await tester.pump();
+    term.play(const ReadyEvent(1, 'claude'));
+    term.play(const DisconnectedEvent(1, 'connection closed'));
+    await settle(tester);
+    expect(find.byType(DisconnectedStage), findsOneWidget);
+    expect(find.byKey(const Key('offline-bar')), findsNothing);
   });
 
   testWidgets('a reconnected terminal takes the stage again and is viewed', (tester) async {

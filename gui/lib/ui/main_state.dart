@@ -1375,10 +1375,20 @@ class MainState extends ChangeNotifier {
     final shows = termPort?.owns(fresh) == true ? rs?.windows.isNotEmpty : rs?.windows.any((w) => w.hasPicture);
     if (rs == null || shows != true) return;
     final detached = remote[old]?.detached ?? false;
+    // A frozen stage keeps its writing panel: open (and focused) before, open (and focused) after.
+    final oldComposer = remote[old]?.composer;
+    final keepOpen = r.frozen && oldComposer?.open == true;
+    final keepFocus = keepOpen && oldComposer?.editorFocused == true;
     portOf(old)?.close(old);
     _dropOld(old, fresh);
+    if (keepOpen) {
+      rs.composer.open = true;
+      if (keepFocus) rs.composer.wantFocus();
+    }
     final start = _starts.remove(old);
     if (start != null) resources.linkDown(start); // what it was still sending ends 没传完
+    // A frozen terminal's stage element is reused: it keeps its focus, so the fresh sid is not newly staged.
+    if (r.frozen && termPort?.owns(fresh) == true && identical(r, currentRecord)) _stagedTerm = fresh;
     r.lastSid = null;
     r.frozen = false;
     if (_reroutes.containsKey(r)) {
