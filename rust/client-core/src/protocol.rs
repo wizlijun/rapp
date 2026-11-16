@@ -1,7 +1,7 @@
 use anyhow::{bail, ensure, Context, Result};
 use std::{collections::HashSet, io::Read};
 
-pub const VERSION: u8 = 11;
+pub const VERSION: u8 = 12;
 
 /// The longest unlock password a client may send (bytes, v11).
 pub const UNLOCK_PASSWORD_LIMIT: usize = 1024;
@@ -33,6 +33,11 @@ pub struct Menu {
 }
 #[derive(Debug)]
 pub enum Incoming {
+    /// v12: rectangles (window points) the host wants kept in view.
+    FocusRegion {
+        window: u32,
+        rects: Vec<Rect>,
+    },
     Ready(String, u16, u16),
     Error(String),
     Frame {
@@ -212,10 +217,11 @@ pub fn frame_ack(processing_ms: u16) -> Vec<u8> {
 }
 /// Stream settings (type 11). `pinned`: the user picked them, so the host must
 /// not switch to the weak-network tier on its own.
-pub fn stream(mode: u8, fps: u8, density: f32, pinned: bool) -> Vec<u8> {
+/// `focus` (bit 1): the host also sends focusRegion messages.
+pub fn stream(mode: u8, fps: u8, density: f32, pinned: bool, focus: bool) -> Vec<u8> {
     let mut p = vec![mode, fps];
     p.extend(density.to_le_bytes());
-    p.push(pinned as u8);
+    p.push(pinned as u8 | (focus as u8) << 1);
     packet(11, p)
 }
 pub fn menu_pick(path: &[u16]) -> Vec<u8> {
@@ -466,6 +472,16 @@ pub fn decode(kind: u8, p: &[u8]) -> Result<Incoming> {
             let v = r.u8()?;
             ensure!(v <= 1, "invalid locked flag");
             Incoming::ScreenLocked(v == 1)
+        }
+        36 => {
+            let window = r.u32()?;
+            let count = r.u8()?;
+            ensure!(count <= 3, "too many focus rectangles");
+            let mut rects = Vec::new();
+            for _ in 0..count {
+                rects.push(r.rect()?);
+            }
+            Incoming::FocusRegion { window, rects }
         }
         _ => bail!("unknown host message type {kind}"),
     };

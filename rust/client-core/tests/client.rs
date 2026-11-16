@@ -21,7 +21,7 @@ fn hello_matches_swift_wire_layout() {
         None,
     )
     .unwrap();
-    let mut expected = vec![11, 3, 0, b'a', b'b', b'c', 15, 0];
+    let mut expected = vec![12, 3, 0, b'a', b'b', b'c', 15, 0];
     expected.extend(b"com.example.App");
     expected.extend([2, 5, 0, 0, 128, 63]);
     assert_eq!(a.hello(1.), packet(1, expected));
@@ -294,7 +294,7 @@ fn menu_and_window_validation() {
 #[test]
 fn v5_clipboard_bounds_and_legacy_selection() {
     let address = Address::parse("rapp://host/?token=x", None).unwrap();
-    assert_eq!(address.hello(1.)[5], 11);
+    assert_eq!(address.hello(1.)[5], 12);
     let text = "中文 clipboard";
     let mut payload = 1u32.to_le_bytes().to_vec();
     payload.extend([0, 0]);
@@ -470,9 +470,9 @@ fn stream_always_carries_pinned() {
     let mut payload = vec![3, 1];
     payload.extend(1f32.to_le_bytes());
     payload.push(1);
-    assert_eq!(stream(3, 1, 1., true), packet(11, payload.clone()));
+    assert_eq!(stream(3, 1, 1., true, false), packet(11, payload.clone()));
     *payload.last_mut().unwrap() = 0;
-    assert_eq!(stream(3, 1, 1., false), packet(11, payload));
+    assert_eq!(stream(3, 1, 1., false, false), packet(11, payload));
 }
 #[test]
 fn decodes_weak_strictly() {
@@ -505,9 +505,9 @@ fn unlock_wire_format() {
     assert_eq!(unlock("ab"), vec![35, 4, 0, 0, 0, 2, 0, b'a', b'b']);
 }
 #[test]
-fn hello_announces_version_11() {
+fn hello_announces_version_12() {
     let a = Address::parse("rapp://host/?token=x", None).unwrap();
-    assert_eq!(a.hello(1.)[5], 11);
+    assert_eq!(a.hello(1.)[5], 12);
 }
 #[test]
 fn desktop_addresses_parse() {
@@ -702,4 +702,30 @@ fn scroll_copy_fixture_matches_swift() {
         }
     }
     assert!(counted && canvases > 15);
+}
+#[test]
+fn focus_region_shared_sample() {
+    let hex = "2415000000070000000100002041" .to_owned() + "0000a04100009643" + "00004843";
+    let bytes: Vec<u8> = (0..hex.len() / 2)
+        .map(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).unwrap())
+        .collect();
+    assert_eq!(bytes[0], 0x24);
+    match decode(36, &bytes[5..]).unwrap() {
+        Incoming::FocusRegion { window, rects } => {
+            assert_eq!(window, 7);
+            assert_eq!(rects.len(), 1);
+            assert_eq!((rects[0].x, rects[0].y, rects[0].w, rects[0].h), (10., 20., 300., 200.));
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(decode(36, &[7, 0, 0, 0, 4]).is_err());
+    match decode(36, &[7, 0, 0, 0, 0]).unwrap() {
+        Incoming::FocusRegion { window, rects } => assert_eq!((window, rects.len()), (7, 0)),
+        other => panic!("{other:?}"),
+    }
+}
+#[test]
+fn stream_focus_bit() {
+    assert_eq!(stream(4, 15, 1., false, true).last(), Some(&2));
+    assert_eq!(stream(4, 15, 1., true, true).last(), Some(&3));
 }

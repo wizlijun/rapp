@@ -112,7 +112,8 @@ fn command(v: &Value) -> Result<Vec<u8>> {
             let fps = number(v, "fps")?;
             ensure!([1, 5, 15, 30].contains(&fps), "invalid fps");
             let pinned = v["pinned"].as_bool().unwrap_or(false);
-            p::stream(mode, fps as u8, float(v, "density")?.clamp(0.1, 8.), pinned)
+            let focus = v["focus"].as_bool().unwrap_or(false);
+            p::stream(mode, fps as u8, float(v, "density")?.clamp(0.1, 8.), pinned, focus)
         }
         "menu_pick" => {
             let path: Vec<u16> = v["path"]
@@ -353,6 +354,10 @@ fn read_loop(
                 out,
                 json!({"event":"input_source","id":id,"name":name,"ascii":ascii}),
             )?,
+            Incoming::FocusRegion { window, rects } => {
+                let rects: Vec<_> = rects.iter().map(|r| [r.x, r.y, r.w, r.h]).collect();
+                event(out, json!({"event":"focus","window":window,"rects":rects}))?
+            }
             Incoming::ScreenLocked(locked) => {
                 event(out, json!({"event":"screen_locked","locked":locked}))?
             }
@@ -470,9 +475,14 @@ mod tests {
     #[test]
     fn set_stream_pinned() {
         let v = json!({"cmd":"set_stream","mode":"duogray","fps":1,"density":1.,"pinned":true});
-        assert_eq!(command(&v).unwrap(), p::stream(3, 1, 1., true));
+        assert_eq!(command(&v).unwrap(), p::stream(3, 1, 1., true, false));
         let v = json!({"cmd":"set_stream","mode":"duogray","fps":1,"density":1.});
-        assert_eq!(command(&v).unwrap(), p::stream(3, 1, 1., false));
+        assert_eq!(command(&v).unwrap(), p::stream(3, 1, 1., false, false));
+    }
+    #[test]
+    fn set_stream_focus() {
+        let v = json!({"cmd":"set_stream","mode":"duogray","fps":1,"density":1.,"focus":true});
+        assert_eq!(command(&v).unwrap(), p::stream(3, 1, 1., false, true));
     }
     #[derive(Clone, Default)]
     struct Sink(Arc<std::sync::Mutex<Vec<u8>>>);

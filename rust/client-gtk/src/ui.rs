@@ -597,6 +597,7 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
                     notice_deadline = Some(Instant::now() + Duration::from_secs(1));
                     emit(json_mode, json!({"event":"input_blocked","by":by}));
                 }
+                Event::Message(Incoming::FocusRegion { .. }) => {}
                 Event::Message(Incoming::ScreenLocked(locked)) => {
                     if locked {
                         info.set_text("远程电脑已锁屏，鼠标和键盘只能操作锁屏界面；请打开「桌面」输入密码解锁");
@@ -726,7 +727,7 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
             // What the user picked is the ceiling; this client has no switch for automatic
             // saving, so it stays on (pinned false) and the host may save below the pick.
             if stream::changed(s.last_stream, next) {
-                s.send(p::stream(next.0, next.1, next.2, false));
+                s.send(p::stream(next.0, next.1, next.2, false, false));
                 s.last_stream = Some(next);
             }
         }
