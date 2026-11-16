@@ -68,6 +68,11 @@ fn is_true(b: &bool) -> bool {
     *b
 }
 
+/// serde for `Share.proto`: a known spelling, else None (see the field).
+fn proto_or_none<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Proto>, D::Error> {
+    Ok(Option::<String>::deserialize(d)?.as_deref().and_then(Proto::parse))
+}
+
 /// Gives a share number: the lowest one free, given the numbers the share table already uses.
 /// None when there is none left.
 pub type Pick<'a> = &'a dyn Fn(&[u16]) -> Option<u16>;
@@ -92,8 +97,9 @@ pub struct Share {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local: Option<u16>,
     /// What the share speaks, as the sharer set it or detection found it. None: not known, so
-    /// `protocol` guesses from the port.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// `protocol` guesses from the port. A spelling this does not know (one a later version added)
+    /// reads as None rather than making the whole file unreadable, so a rollback keeps the share.
+    #[serde(default, deserialize_with = "proto_or_none", skip_serializing_if = "Option::is_none")]
     pub proto: Option<Proto>,
     /// True: `proto` was detected (or never set) and may be replaced by a later detection;
     /// false: the sharer chose it and it stays.
@@ -596,6 +602,16 @@ mod tests {
         s.add(share(8001)).unwrap();
         assert!(!d.path().join("shares.json.bad").exists());
         assert_eq!(Shares::load(d.path()).0.list(), [kept, share(8001)]);
+    }
+
+    #[test]
+    fn a_protocol_it_does_not_know_is_dropped_and_the_share_kept() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("shares.json"), r#"[{"port":8000,"proto":"udp","local":29000}]"#).unwrap();
+        let (s, why) = Shares::load(d.path());
+        assert_eq!(why, None);
+        assert_eq!(s.list(), [Share { local: Some(29000), ..share(8000) }]);
+        assert_eq!(s.list()[0].protocol(), Proto::Http);
     }
 
     #[test]
