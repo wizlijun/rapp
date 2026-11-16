@@ -117,7 +117,7 @@ void main() {
   });
 
   test('a reinstall is said over everything but work in progress', () {
-    const line = '这一版要重新运行一次安装包，才能用上命令行 rapp 和 ssh 的 .rapp 设置';
+    const line = '这一版要重新运行一次安装包，才能在终端里用 rapp 命令';
     for (final u in [
       info('idle', latest: null, needsReinstall: true),
       info('up_to_date', latest: '0.4.1', needsReinstall: true),

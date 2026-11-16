@@ -80,7 +80,7 @@ enum UpdateAction { check, apply, applyAnyway, dismiss, openPage, reinstall }
   }
   // Running the pkg again also brings whatever is waiting or failed, so it is said before them.
   if (u.needsReinstall) {
-    return (line: '这一版要重新运行一次安装包，才能用上命令行 rapp 和 ssh 的 .rapp 设置', actions: const [UpdateAction.reinstall]);
+    return (line: '这一版要重新运行一次安装包，才能在终端里用 rapp 命令', actions: const [UpdateAction.reinstall]);
   }
   if (u.state == 'failed') return (line: '升级没有完成：${u.error ?? ''}', actions: check);
   if (u.dismissed && u.latest != null) return (line: '$cur · $v 先不装', actions: check);

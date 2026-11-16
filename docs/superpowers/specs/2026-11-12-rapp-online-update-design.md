@@ -168,7 +168,7 @@
 - 新版连 service 都起不来时，到 release 页面下载上一版 pkg 手动装。
 
 **⑦ 要重新运行 pkg 的版本**（补，2026-11-16，见 `2026-11-16-rapp-install-level-design.md`）
-- zip 升级不跑 pkg 的安装脚本。安装脚本每多一步（第一次是 `/usr/local/bin/rapp` 和 ssh 的 `.rapp` 设置），批次号加一，写在 `/Library/Application Support/rapp/install-level`；service 里的 `rapp_update::INSTALL_LEVEL` 同步加一。
+- zip 升级不跑 pkg 的安装脚本。安装脚本每多一步（第一次是 `/usr/local/bin/rapp`），批次号加一，写在 `/Library/Application Support/rapp/install-level`；service 里的 `rapp_update::INSTALL_LEVEL` 同步加一。
 - 装好的 app 读到的批次号比自己的小（或者文件不在）时，`update_status` 带 `needs_reinstall: true` 和 `reinstall_page`，GUI 在版本与升级那一行提醒「这一版要重新运行一次安装包…」，给「下载安装包」按钮，侧栏「本机」亮小点。重装后提醒自己消失。
 
 ### 4.4 IPC（新增，旧 GUI 不认识就忽略）

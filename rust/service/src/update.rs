@@ -502,7 +502,7 @@ pub async fn in_use(state: &State) -> Option<String> {
 }
 
 /// A process from the bundle other than this service and its own children (session workers are
-/// its children), or one started through the `rapp` link (an `ssh <id>.rapp` pipe). A ps that
+/// its children), or one started through the `rapp` link (a `rapp pipe`). A ps that
 /// fails, or whose output doesn't show this service, counts as in use.
 async fn procs_in_use(state: &State) -> Option<String> {
     let o = state.update_opts.as_ref()?;

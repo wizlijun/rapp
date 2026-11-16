@@ -79,7 +79,7 @@ void main() {
         latest: '0.12.2',
         needsReinstall: true,
         reinstallPage: 'https://github.com/wizlijun/rapp/releases/latest')));
-    expect(find.text('这一版要重新运行一次安装包，才能用上命令行 rapp 和 ssh 的 .rapp 设置'), findsOneWidget);
+    expect(find.text('这一版要重新运行一次安装包，才能在终端里用 rapp 命令'), findsOneWidget);
     expect(find.text('检查更新'), findsNothing);
     await tester.tap(find.text('下载安装包'));
     await tester.pump();

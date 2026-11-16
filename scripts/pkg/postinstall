@@ -1,6 +1,6 @@
 #!/bin/bash
 # Runs as root after rapp.app lands in /Applications. Sets up what a zip upgrade
-# cannot (the `rapp` command, ssh's .rapp names, the install level), then the
+# cannot (the `rapp` command, the install level), then the
 # LaunchAgent for the console user (same plist the GUI's 启动 writes, §4),
 # starts it, and opens the GUI. The per-user part is skipped when nobody is logged in.
 set -u
@@ -20,15 +20,10 @@ esac
 if [ "$ours" = 1 ] || { [ ! -e "$CLI" ] && [ ! -L "$CLI" ]; }; then
     ln -sfn "$APP/Contents/MacOS/rapp-cli" "$CLI"
 fi
-# /etc/ssh/ssh_config includes ssh_config.d/*; a user's ~/.ssh/config still wins.
-mkdir -p /etc/ssh/ssh_config.d
-cat > /etc/ssh/ssh_config.d/rapp.conf <<'SSH'
-# Written by the rapp installer: `ssh <device>.rapp` goes through rapp.
-Host *.rapp
-    ProxyCommand /usr/local/bin/rapp pipe %h %p
-SSH
+# A test build once wrote ssh settings for .rapp names, which are given up (local ports instead).
+rm -f /etc/ssh/ssh_config.d/rapp.conf
 # The level says every step above took: only then does the GUI stop asking for a reinstall.
-if [ "$(readlink "$CLI")" = "$APP/Contents/MacOS/rapp-cli" ] && [ -f /etc/ssh/ssh_config.d/rapp.conf ]; then
+if [ "$(readlink "$CLI")" = "$APP/Contents/MacOS/rapp-cli" ]; then
     mkdir -p "/Library/Application Support/rapp"
     echo "$INSTALL_LEVEL" > "/Library/Application Support/rapp/install-level"
 fi
