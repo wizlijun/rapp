@@ -110,4 +110,14 @@ void main() {
     File('${tmp.path}/gui.json').writeAsStringSync('{"first":"sideways"}');
     expect(UiPrefs.load(tmp.path).first, FirstLayer.device);
   });
+  test('term_app round-trips and a missing launcher falls back to the first', () {
+    UiPrefs(termApp: {'d': 'iTerm', 'e': 'Terminal'}).save(tmp.path);
+    final p = UiPrefs.load(tmp.path);
+    expect(p.termApp, {'d': 'iTerm', 'e': 'Terminal'});
+    expect(p.termAppFor('d', ['Terminal', 'iTerm']), 'iTerm');
+    expect(p.termAppFor('d', ['Terminal']), 'Terminal');
+    expect(p.termAppFor('zzz', ['iTerm', 'Terminal']), 'iTerm');
+    File('${tmp.path}/gui.json').writeAsStringSync('{"term_app":{"a":"iTerm","b":3}}');
+    expect(UiPrefs.load(tmp.path).termApp, {'a': 'iTerm'});
+  });
 }

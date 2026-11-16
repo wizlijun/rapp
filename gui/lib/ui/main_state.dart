@@ -213,11 +213,6 @@ class MainState extends ChangeNotifier {
   /// Device ids that want the password dialog (the current session is locked and nothing could unlock it).
   Stream<String> get unlockAsks => _unlockAsks.stream;
 
-  final StreamController<String> _newTextAsks = StreamController<String>.broadcast();
-
-  /// Device ids whose 终端 entry was opened in text mode with no text terminal yet: the 新开文本终端 dialog.
-  Stream<String> get newTextAsks => _newTextAsks.stream;
-
   /// A session went away: the device's unlock check dies with it unless another session still carries it.
   void _releaseUnlockBusy(SessionRecord r) {
     final others = _records.values.any((x) =>
@@ -1676,14 +1671,14 @@ class MainState extends ChangeNotifier {
       list: hub?.termLists[id] ?? TermList(id),
       apps: probes[id]?.apps?.apps ?? const []);
 
-  /// The key of the session [m] opens; null for a 终端 entry that asks for a new text terminal.
+  /// The key of the session [m] opens; null for a 终端 entry that opens a new text terminal.
   String? _openedKey(Member m) {
     if (m.app.bundle != termsEntry) return m.key;
     final id = m.app.device;
     return switch (_termsTargetOf(id)) {
       OpenTerm(:final app) => '$id/$app',
       OpenPixels(:final bundle) => '$id/$bundle',
-      AskNewText() => null,
+      NewText() => null,
     };
   }
 
@@ -1695,16 +1690,23 @@ class MainState extends ChangeNotifier {
         return _open(id, app, name, select: select, quiet: quiet);
       case OpenPixels(:final bundle, :final name):
         return _open(id, bundle, name, select: select, quiet: quiet);
-      case AskNewText():
-        _newTextAsks.add(id);
+      case NewText(:final shell):
+        try {
+          await openText(id, shell: shell);
+        } catch (e) {
+          hint = '$e';
+          notifyListeners();
+        }
     }
   }
 
   /// Opens a text terminal window on [id], then switches to it without waiting for the session to connect; a
   /// refusal is thrown with the hub's words.
-  Future<void> openText(String id, {String? cwd, String? name, String? command, required String app}) async {
+  Future<void> openText(String id, {String? shell}) async {
     if (!hubUsable) return;
-    final term = await hub!.openTerm(id, cwd: cwd, name: name, command: command, app: app);
+    final launchers = hub?.termLists[id]?.hosts.where((h) => h.host == null).firstOrNull?.launchers ?? const <String>[];
+    final app = prefs.termAppFor(id, launchers.isEmpty ? const ['Terminal'] : launchers);
+    final term = await hub!.openTerm(id, shell: shell, app: app);
     try {
       await hub?.terms(id);
     } catch (_) {}
@@ -2398,6 +2400,12 @@ class MainState extends ChangeNotifier {
     _save();
   }
 
+  /// The 终端 app a new text terminal on [device] opens in; saved.
+  void setTermApp(String device, String app) {
+    prefs.termApp[device] = app;
+    _save();
+  }
+
   void _save() {
     try {
       final dir = data.prefsDir();
@@ -2967,7 +2975,6 @@ class MainState extends ChangeNotifier {
     }
     _unlockBusy.clear();
     unawaited(_unlockAsks.close());
-    unawaited(_newTextAsks.close());
     for (final t in _retryTimers.values) {
       t.cancel();
     }

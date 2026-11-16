@@ -424,11 +424,49 @@ void main() {
     });
 
     test('openTerm sends open_term and answers the new id', () async {
-      final f = hub.openTerm('d1', command: 'claude', app: 'Terminal');
+      final f = hub.openTerm('d1', shell: '/bin/zsh', app: 'Terminal');
       final cmd = t.sent.last;
-      expect(cmd, {'cmd': 'open_term', 'id': 'd1', 'command': 'claude', 'app': 'Terminal', 'req': anything});
+      expect(cmd, {'cmd': 'open_term', 'id': 'd1', 'shell': '/bin/zsh', 'app': 'Terminal', 'req': anything});
       t.emit({'event': 'term_created', 'id': 'd1', 'term': 'term:pty:claude', 'req': cmd['req']});
       expect(await f, 'term:pty:claude');
+    });
+
+    test('openTerm without a shell sends none', () async {
+      final f = hub.openTerm('d1', app: 'Terminal');
+      expect(t.sent.last, {'cmd': 'open_term', 'id': 'd1', 'app': 'Terminal', 'req': anything});
+      t.emit({'event': 'term_created', 'id': 'd1', 'term': 'term:pty:zsh', 'req': t.sent.last['req']});
+      await f;
+    });
+
+    test('shells are parsed and absent means null', () async {
+      t.emit({
+        'event': 'terms',
+        'id': 'S',
+        'terms': [],
+        'hosts': [
+          {
+            'host': null,
+            'launchers': ['Terminal'],
+            'shells': [
+              {'name': 'zsh', 'path': '/bin/zsh', 'default': true},
+              {'name': 'bash', 'path': '/bin/bash'},
+              {'name': 3},
+            ],
+          },
+        ],
+      });
+      t.emit({
+        'event': 'terms',
+        'id': 'OLD',
+        'terms': [],
+        'hosts': [
+          {'host': null, 'launchers': ['Terminal']},
+        ],
+      });
+      await Future<void>.delayed(Duration.zero);
+      final sh = hub.termLists['S']!.hosts.single.shells!;
+      expect(sh.map((x) => (x.name, x.path, x.isDefault)), [('zsh', '/bin/zsh', true), ('bash', '/bin/bash', false)]);
+      expect(hub.termLists['OLD']!.hosts.single.shells, isNull);
     });
 
     test('openTerm fails on an error reply', () async {

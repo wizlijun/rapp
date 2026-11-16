@@ -56,8 +56,6 @@ class _MainWindowState extends State<MainWindow> {
   bool _full = false;
   StreamSubscription<bool>? _sub;
   StreamSubscription<String>? _asks;
-  StreamSubscription<String>? _textAsks;
-  bool _askingText = false;
   bool _asking = false;
 
   MainState get state => widget.state;
@@ -72,7 +70,6 @@ class _MainWindowState extends State<MainWindow> {
       if (mounted) setState(() => _full = v);
     });
     _asks = state.unlockAsks.listen(_onAsk);
-    _textAsks = state.newTextAsks.listen(_onTextAsk);
     widget.monitor.addListener(_onMonitor);
     // After the first frame: a change notifies MainState's listeners, never during a build.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -94,24 +91,10 @@ class _MainWindowState extends State<MainWindow> {
     }
   }
 
-  /// 终端 opened in text mode with no text terminal: the device's panel behind the 新开文本终端 dialog, one at a time.
-  Future<void> _onTextAsk(String device) async {
-    if (_askingText || !mounted) return;
-    _askingText = true;
-    try {
-      state.showPanel(PanelTab.devices);
-      state.selectDevice(device);
-      await showNewTextDialog(context, state, device);
-    } finally {
-      _askingText = false;
-    }
-  }
-
   @override
   void dispose() {
     widget.monitor.removeListener(_onMonitor);
     _asks?.cancel();
-    _textAsks?.cancel();
     _sub?.cancel();
     super.dispose();
   }

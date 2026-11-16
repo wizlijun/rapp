@@ -4836,29 +4836,33 @@ void main() {
     Map<String, dynamic> ptyRow(String name, int activity) =>
         {'id': 'term:pty:$name', 'name': name, 'command': 'zsh', 'activity': activity};
 
-    Future<void> termsOf(List<Map<String, dynamic>> terms, {List<String> launchers = const ['Terminal']}) async {
+    Future<void> termsOf(List<Map<String, dynamic>> terms,
+        {List<String> launchers = const ['Terminal'], List<Map<String, dynamic>>? shells}) async {
       t.emit({
         'event': 'terms',
         'id': '111',
         'path': 'lan',
         'terms': terms,
         'hosts': [
-          {'host': null, 'launchers': launchers},
+          {'host': null, 'launchers': launchers, 'shells': ?shells},
         ],
       });
       await pump();
     }
 
-    test('opening terms: in text mode with none pushes a new-text ask', () async {
-      await termsOf([]);
-      final asks = <String>[];
-      final sub = s.newTextAsks.listen(asks.add);
-      addTearDown(sub.cancel);
+    test('opening terms: in text mode with none opens the default shell in the chosen app', () async {
+      t.onSend = (m) {
+        if (m['cmd'] == 'open_term') t.emit({'event': 'term_created', 'req': m['req'], 'id': '111', 'term': 'term:pty:zsh'});
+        if (m['cmd'] == 'terms') t.emit({'event': 'terms', 'req': m['req'], 'id': '111', 'terms': [], 'hosts': []});
+      };
+      await termsOf([], launchers: ['Terminal', 'iTerm'], shells: [
+        {'name': 'zsh', 'path': '/bin/zsh', 'default': true}
+      ]);
+      s.setTermApp('111', 'iTerm');
       await s.openOrSwitch('111', 'terms:', '终端');
       await pump();
-      expect(asks, ['111']);
-      expect(opens(), 0);
-      expect(s.currentKey, isNull);
+      expect(t.sent.firstWhere((m) => m['cmd'] == 'open_term'),
+          {'cmd': 'open_term', 'id': '111', 'shell': '/bin/zsh', 'app': 'iTerm', 'req': anything});
     });
 
     test('opening terms: in text mode opens the latest text terminal', () async {
@@ -4873,6 +4877,13 @@ void main() {
       s.setTermOpen('111', 'pixels');
       s.openOrSwitch('111', 'terms:', '终端');
       expect(t.sent.lastWhere((m) => m['cmd'] == 'open')['app'], 'com.apple.Terminal');
+    });
+
+    test('setTermApp is saved per device', () {
+      Directory('${tmp.path}/local').createSync(recursive: true);
+      File('${tmp.path}/local/service.json').writeAsStringSync('{"id":"dev1"}');
+      s.setTermApp('111', 'iTerm');
+      expect(UiPrefs.load(s.data.prefsDir()!).termApp, {'111': 'iTerm'});
     });
 
     test('setTermOpen is saved per device', () {
@@ -4921,10 +4932,10 @@ void main() {
             t.emit({...opened(1, '111', 'term:pty:c'), 'req': m['req']});
         }
       };
-      await s.openText('111', command: 'claude', app: 'Terminal');
+      await s.openText('111', shell: '/bin/zsh');
       await pump();
       final ot = t.sent.firstWhere((m) => m['cmd'] == 'open_term');
-      expect(ot, {'cmd': 'open_term', 'id': '111', 'command': 'claude', 'app': 'Terminal', 'req': anything});
+      expect(ot, {'cmd': 'open_term', 'id': '111', 'shell': '/bin/zsh', 'app': 'Terminal', 'req': anything});
       expect(t.sent.map((m) => m['cmd']), containsAllInOrder(['open_term', 'terms', 'open']));
       expect(t.sent.lastWhere((m) => m['cmd'] == 'open')['app'], 'term:pty:c');
       expect(s.currentKey, '111/term:pty:c');
@@ -4935,7 +4946,7 @@ void main() {
       t.onSend = (m) {
         if (m['cmd'] == 'open_term') t.emit({'event': 'error', 'req': m['req'], 'error': 'no such directory: /x'});
       };
-      await expectLater(s.openText('111', cwd: '/x', app: 'Terminal'),
+      await expectLater(s.openText('111', shell: '/x'),
           throwsA(isA<HubException>().having((e) => e.message, 'message', 'no such directory: /x')));
       expect(opens(), 0);
     });

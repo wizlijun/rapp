@@ -46,12 +46,13 @@ class OpenPixels extends TermsTarget {
   final String bundle, name;
 }
 
-/// Text mode with no text terminal yet: the 新开文本终端 dialog.
-class AskNewText extends TermsTarget {
-  const AskNewText();
+/// Text mode with no text terminal yet: open one with [shell], the default shell's path (null for an old device).
+class NewText extends TermsTarget {
+  const NewText(this.shell);
+  final String? shell;
 }
 
-/// [mode] is `text` or `pixels`. Text mode opens the latest text terminal, else asks for a new one when this
+/// [mode] is `text` or `pixels`. Text mode opens the latest text terminal, else a new one when this
 /// machine has launchers; text mode that can open nothing is treated as pixels.
 TermsTarget termsTarget({required String mode, required TermList list, required List<HubApp> apps}) {
   if (mode == 'text') {
@@ -67,7 +68,9 @@ TermsTarget termsTarget({required String mode, required TermList list, required 
     final pty = latest('pty');
     if (pty != null) return OpenTerm(pty.id, termDisplayName(pty.name, pty.host));
     final local = list.hosts.where((h) => h.host == null).firstOrNull;
-    if (local != null && local.launchers.isNotEmpty) return const AskNewText();
+    if (local != null && local.launchers.isNotEmpty) {
+      return NewText(local.shells?.where((s) => s.isDefault).firstOrNull?.path);
+    }
   }
   final first = terminalAppsOf(apps).firstOrNull;
   return first == null ? const OpenPixels('com.apple.Terminal', 'Terminal') : OpenPixels(first.app, first.name);

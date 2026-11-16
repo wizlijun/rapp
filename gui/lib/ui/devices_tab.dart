@@ -50,6 +50,10 @@ class _DevicesTabState extends State<DevicesTab> {
   final _bundle = TextEditingController();
   final _requested = <String>{};
 
+  /// Per device: the shell button being opened, and the words of the last refused open.
+  final _shellBusy = <String, String>{};
+  final _shellErrors = <String, String>{};
+
   MainState get state => widget.state;
 
   @override
@@ -286,13 +290,15 @@ class _DevicesTabState extends State<DevicesTab> {
     if (!showsTermsEntry(list)) return const [];
     final launchers = list!.hosts.where((h) => h.host == null).firstOrNull?.launchers ?? const <String>[];
     final mode = state.prefs.termOpenFor(id);
-    Widget button(Key key, String label, VoidCallback? onPressed) => Padding(
-          padding: const EdgeInsets.only(bottom: 6),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: RappButton.secondary(key: key, label: label, onPressed: onPressed),
-          ),
-        );
+    final termApp = launchers.isEmpty ? null : state.prefs.termAppFor(id, launchers);
+    final shells = list.hosts.where((h) => h.host == null).firstOrNull?.shells;
+    // (key, label, path); an old device lists none and gets one 默认 shell that sends no shell.
+    final shellButtons = shells == null
+        ? const [('default', '默认 shell', null as String?)]
+        : [
+            for (final x in [...shells.where((x) => x.isDefault), ...shells.where((x) => !x.isDefault)])
+              (x.name, x.name, x.path as String?),
+          ];
     return [
       Padding(
         padding: const EdgeInsets.only(bottom: 6),
@@ -337,9 +343,48 @@ class _DevicesTabState extends State<DevicesTab> {
                   onOpen: () => state.openOrSwitch(id, a.app, a.name),
                 ),
               ),
-            if (launchers.isNotEmpty)
-              button(const Key('new-text-term'), '新开文本终端…',
-                  state.hubUsable ? () => showNewTextDialog(context, state, id) : null),
+            if (launchers.isNotEmpty) ...[
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text('新开', style: TextStyle(color: t.text)),
+                    for (final (key, label, path) in shellButtons)
+                      RappButton.secondary(
+                        key: Key('new-shell-$key'),
+                        label: label,
+                        onPressed: state.hubUsable && !_shellBusy.containsKey(id) ? () => _openShell(id, key, path) : null,
+                      ),
+                  ],
+                ),
+              ),
+              if (_shellErrors[id] != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text(_shellErrors[id]!, key: const Key('new-shell-error'), style: TextStyle(color: t.accent)),
+                ),
+              if (launchers.length > 1)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Wrap(
+                    spacing: 12,
+                    runSpacing: 6,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Text('终端 app', style: TextStyle(color: t.text)),
+                      for (final l in launchers)
+                        _ModeChoice(
+                            key: Key('term-app-$l'),
+                            label: l,
+                            selected: termApp == l,
+                            onTap: () => state.setTermApp(id, l)),
+                    ],
+                  ),
+                ),
+            ],
             Row(
               children: [
                 Text('打开方式', style: TextStyle(color: t.text)),
@@ -361,6 +406,21 @@ class _DevicesTabState extends State<DevicesTab> {
         ),
       ),
     ];
+  }
+
+  /// Opens [path] (null: the device's default) on [id]; the button stays busy until the answer.
+  Future<void> _openShell(String id, String key, String? path) async {
+    setState(() {
+      _shellBusy[id] = key;
+      _shellErrors.remove(id);
+    });
+    try {
+      await state.openText(id, shell: path);
+    } catch (e) {
+      if (mounted) setState(() => _shellErrors[id] = e is HubException ? e.message : '$e');
+    } finally {
+      if (mounted) setState(() => _shellBusy.remove(id));
+    }
   }
 
   void _openBundle(String id) {
@@ -630,107 +690,6 @@ class _ModeChoice extends StatelessWidget {
           ]),
         ),
       ),
-    );
-  }
-}
-
-/// The 新开文本终端 dialog for device [id]; it opens the new terminal itself (from the panel or a [MainState.newTextAsks]).
-Future<void> showNewTextDialog(BuildContext context, MainState state, String id) {
-  final local = state.hub?.termLists[id]?.hosts.where((h) => h.host == null).firstOrNull;
-  return showDialog<void>(
-    context: context,
-    builder: (_) => _NewTextDialog(state: state, id: id, launchers: local?.launchers ?? const []),
-  );
-}
-
-class _NewTextDialog extends StatefulWidget {
-  const _NewTextDialog({required this.state, required this.id, required this.launchers});
-  final MainState state;
-  final String id;
-  final List<String> launchers;
-
-  @override
-  State<_NewTextDialog> createState() => _NewTextDialogState();
-}
-
-class _NewTextDialogState extends State<_NewTextDialog> {
-  final _cwd = TextEditingController(), _command = TextEditingController(), _name = TextEditingController();
-  late String _app = widget.launchers.firstOrNull ?? 'Terminal';
-  String? _error;
-  bool _busy = false;
-
-  @override
-  void dispose() {
-    _cwd.dispose();
-    _command.dispose();
-    _name.dispose();
-    super.dispose();
-  }
-
-  Future<void> _open() async {
-    if (_busy) return;
-    String? filled(TextEditingController c) => c.text.trim().isEmpty ? null : c.text.trim();
-    setState(() {
-      _busy = true;
-      _error = null;
-    });
-    try {
-      await widget.state.openText(widget.id,
-          cwd: filled(_cwd), name: filled(_name), command: filled(_command), app: _app);
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _busy = false;
-          _error = '$e';
-        });
-      }
-      return;
-    }
-    if (mounted) Navigator.of(context).pop();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RappTokens.of(context);
-    return AlertDialog(
-      title: const Text('新开文本终端'),
-      content: SizedBox(
-        width: 360,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-                key: const Key('new-text-cwd'),
-                controller: _cwd,
-                decoration: const InputDecoration(labelText: '目录（空着就是家目录）')),
-            TextField(
-                key: const Key('new-text-command'),
-                controller: _command,
-                decoration: const InputDecoration(labelText: '命令（如 claude；空着就是 shell）')),
-            TextField(
-                key: const Key('new-text-name'),
-                controller: _name,
-                decoration: const InputDecoration(labelText: '名字（可不填）')),
-            if (widget.launchers.length > 1)
-              DropdownButtonFormField<String>(
-                key: const Key('new-text-app'),
-                initialValue: _app,
-                decoration: const InputDecoration(labelText: '用哪个终端 app'),
-                items: [for (final l in widget.launchers) DropdownMenuItem(value: l, child: Text(l))],
-                onChanged: _busy ? null : (v) => setState(() => _app = v ?? _app),
-              ),
-            if (_error != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(_error!, key: const Key('new-text-error'), style: TextStyle(color: t.accent)),
-              ),
-          ],
-        ),
-      ),
-      actions: [
-        RappButton.secondary(key: const Key('new-text-cancel'), label: '取消', onPressed: () => Navigator.of(context).pop()),
-        RappButton.secondary(key: const Key('new-text-go'), label: '新开', onPressed: _busy ? null : _open),
-      ],
     );
   }
 }

@@ -128,11 +128,21 @@ class TermRow {
 /// The place sessions are listed from: the device itself (`host` null). An old device may also list SSH hosts; those
 /// rows are dropped.
 class TermHost {
-  const TermHost(this.host, {this.launchers = const []});
+  const TermHost(this.host, {this.launchers = const [], this.shells});
   final String? host;
 
   /// The local host row only: the terminal apps the device can open a text terminal in.
   final List<String> launchers;
+
+  /// The shells the device can open, the default marked; null when the row has no `shells` (an old device).
+  final List<TermShell>? shells;
+}
+
+/// A shell the device can open a text terminal with.
+class TermShell {
+  const TermShell(this.name, this.path, this.isDefault);
+  final String name, path;
+  final bool isDefault;
 }
 
 /// A device's terminal sessions as the hub last said; [off] means the device has them turned off.
@@ -165,7 +175,13 @@ TermList _termList(Map<String, dynamic> m, String fallbackId) {
       for (final h in (m['hosts'] as List? ?? const []).whereType<Map>())
         if (h['host'] == null)
           TermHost(null,
-              launchers: [for (final l in (h['launchers'] as List? ?? const [])) if (l is String) l]),
+              launchers: [for (final l in (h['launchers'] as List? ?? const [])) if (l is String) l],
+              shells: h['shells'] is List
+                  ? [
+                      for (final x in (h['shells'] as List).whereType<Map>())
+                        if (x['name'] is String && x['path'] is String) TermShell(x['name'], x['path'], x['default'] == true),
+                    ]
+                  : null),
     ],
   );
 }
@@ -287,10 +303,10 @@ class HubClient extends ChangeNotifier {
     return termLists[id] ?? _termList(m, id);
   }
 
-  /// Opens a text terminal window on device [id] in terminal app [app]; answers the new term id.
-  Future<String> openTerm(String id, {String? cwd, String? name, String? command, required String app}) async {
-    final m = await _request(
-        {'cmd': 'open_term', 'id': id, 'cwd': ?cwd, 'name': ?name, 'command': ?command, 'app': app}, 'term_created');
+  /// Opens a text terminal window on device [id] running [shell] (the device's default when null, and an old device
+  /// is sent none) in terminal app [app]; answers the new term id.
+  Future<String> openTerm(String id, {String? shell, required String app}) async {
+    final m = await _request({'cmd': 'open_term', 'id': id, 'shell': ?shell, 'app': app}, 'term_created');
     return '${m['term']}';
   }
 
