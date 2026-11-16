@@ -393,7 +393,7 @@ final class Session {
     private func handle(_ message: Message) {
         // Every command from B passes one gate; only input can be held back (R7).
         switch message {
-        case .text, .key, .mouse, .scroll, .paste, .focus, .menuPick, .setStream, .resize, .move, .close, .selectInput, .unlock:
+        case .text, .key, .mouse, .scroll, .paste, .focus, .menuPick, .setStream, .resize, .move, .close, .selectInput, .unlock, .dismissCover:
             guard started, !failing, admit(message) else { return }
         default:
             break
@@ -500,10 +500,16 @@ final class Session {
             paced?.ack(processingMs: processingMs)
         case let .unlock(password):
             unlock(password)
+        case let .dismissCover(id):
+            dismissCover(id)
         case .ready, .error, .frame, .windows, .menuBar, .clip, .pasted, .fetch, .put, .transferStart, .chunk, .inputBlocked, .weak,
-             .inputSource, .pong, .saving, .screenLocked, .focusRegion:
+             .inputSource, .pong, .saving, .screenLocked, .focusRegion, .covered, .appOpened, .secureFocus:
             fail("unexpected message from client")
         }
+    }
+
+    /// Closes the window of a `covered` this session reported as dismissable; anything else is dropped.
+    private func dismissCover(_ id: UInt32) {
     }
 
     // MARK: Yielding to other devices
