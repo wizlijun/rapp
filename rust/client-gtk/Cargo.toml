@@ -10,6 +10,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 serde_json.workspace = true
+rapp-net = { path = "../net" }
 rapp-client-core = { path = "../client-core" }
 
 [target.'cfg(target_os = "linux")'.dependencies]

@@ -116,6 +116,10 @@ impl Windows {
                         root.append(&self.editor.new_chips());
                         let input = gtk::Box::new(gtk::Orientation::Horizontal, 4);
                         let editor = gtk::TextView::with_buffer(&self.editor.buffer());
+                        self.editor.bind_property("editable", &editor, "editable").sync_create().build();
+                        editor.connect_editable_notify(|v| {
+                            if !v.is_editable() { v.reset_im_context(); }
+                        });
                         editor.set_wrap_mode(gtk::WrapMode::WordChar);
                         editor.set_height_request(60);
                         editor.set_hexpand(true);
@@ -142,6 +146,7 @@ impl Windows {
                         let state = self.state.clone();
                         let candidate_ime = Rc::downgrade(&panel);
                         key.connect_key_pressed(move |_, k, _, m| {
+                            if super::secure_key(&state, k, m) { return glib::Propagation::Stop; }
                             let ime = composing.get()
                                 || candidate_ime.upgrade().is_some_and(|p| p.composing());
                             if !ime
@@ -185,6 +190,7 @@ impl Windows {
                         });
                         editor.add_controller(key);
                         let send = gtk::Button::with_label("发送");
+                        editor.bind_property("editable", &send, "sensitive").sync_create().build();
                         let draft = self.editor.clone();
                         let candidate_ime = Rc::downgrade(&panel);
                         send.connect_clicked(move |_| {
@@ -338,7 +344,7 @@ fn install(
     json: bool,
 ) {
     let s = state.clone();
-    area.set_draw_func(move |_, cr, width, height| {
+    area.set_draw_func(move |widget, cr, width, height| {
         cr.set_source_rgb(0.03, 0.03, 0.04);
         let _ = cr.paint();
         let s = s.borrow();
@@ -369,7 +375,7 @@ fn install(
             s.region.w as f64 / surface.width() as f64,
             s.region.h as f64 / surface.height() as f64,
         );
-        s.paint(cr, surface);
+        s.paint(widget, cr, surface);
         let _ = cr.restore();
     });
     let pointer = Rc::new(Cell::new((0., 0.)));
@@ -547,7 +553,7 @@ fn install(
         });
     }
 }
-fn flags(mods: gdk::ModifierType) -> u64 {
+pub(super) fn flags(mods: gdk::ModifierType) -> u64 {
     (if mods.contains(gdk::ModifierType::CONTROL_MASK) {
         1 << 20
     } else {

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the real GTK worker against an independent Python v12 host fixture.
+"""Exercise the real GTK worker against an independent Python v13 host fixture.
 Requires a graphical session (or xvfb-run). No real host credentials are used.
 For isolated input with a rootful Xwayland server, set DISPLAY to that server
 and RAPP_TEST_NO_WM=1. Window-manager minimize/take-back checks are then omitted.
@@ -17,7 +17,7 @@ import time
 import tomllib
 import zlib
 
-PROTOCOL = 12
+PROTOCOL = 13
 NO_WM = os.environ.get("RAPP_TEST_NO_WM") == "1"
 
 def xdo_command(args):
@@ -146,6 +146,19 @@ def normal(s):
     s.p.stdin.flush()
     assert s.finish(0)["reason"] == "quit"
 
+def host_hints(s):
+    s.ready()
+    send(s.s, 37, struct.pack("<I", 42) + string("Fixture Cover") + string("test.cover") + b"\x01")
+    send(s.s, 39, string("test.opened") + string("Fixture Opened"))
+    send(s.s, 40, b"\x01")
+    assert s.event("secure_focus")["on"] is True
+    s.frame(zlib.compressobj(), True, 0xf800)
+    send(s.s, 40, b"\x00")
+    assert s.event("secure_focus")["on"] is False
+    s.p.stdin.write('{"cmd":"quit"}\n')
+    s.p.stdin.flush()
+    assert s.finish(0)["reason"] == "quit"
+
 def eof(s):
     s.ready()
     s.p.stdin.close()
@@ -161,6 +174,7 @@ def mismatch(s):
     assert "version mismatch" in s.finish(5)["reason"]
 
 case("full frame, delta, menus, adaptive stream, quit", normal)
+case("v13 host hints and secure focus around a frame", host_hints)
 case("hub closes stdin", eof)
 case("corrupt frame exits cleanly", malformed)
 case("protocol mismatch exit code", mismatch)

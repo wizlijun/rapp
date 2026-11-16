@@ -794,13 +794,14 @@ mod tests {
             .default_width(480)
             .default_height(180)
             .build();
-        let view = gtk::TextView::new();
+        let editor = super::super::editor::Editor::new();
+        let view: &gtk::TextView = &editor;
         view.buffer().set_text("unchanged draft");
         let scroll = gtk::ScrolledWindow::builder()
             .min_content_height(70)
-            .child(&view)
+            .child(view)
             .build();
-        let (box_, panel) = Panel::wrap(&view, &scroll);
+        let (box_, panel) = Panel::wrap(view, &scroll);
         let sibling = gtk::Entry::new();
         box_.append(&sibling);
         window.set_child(Some(&box_));
@@ -929,6 +930,30 @@ mod tests {
         view.grab_focus();
         until(|| panel.state.borrow().accepted);
         assert_ne!(panel.token.borrow().as_str(), token);
+        // Password focus preserves the draft, refuses local insert/send, and releases
+        // the real custom-candidate lease even though the widget still has focus.
+        let submitted = Rc::new(Cell::new(false));
+        let observed = submitted.clone();
+        editor.connect_activate(move |_| observed.set(true));
+        editor.set_secure(true);
+        assert!(!view.is_editable());
+        editor.insert(rapp_client_core::transfer::Copy::Text("synthetic test input".into()));
+        editor.emit_activate();
+        assert!(!submitted.get());
+        assert_eq!(editor.text().as_str(), "unchanged draft");
+        until(|| !panel.state.borrow().active && !panel.reserve.get());
+        editor.set_secure(false);
+        assert!(view.is_editable());
+        assert_eq!(editor.text().as_str(), "unchanged draft");
+        // An asynchronous clipboard read started before a password-focus round
+        // trip must not insert its late result into the preserved draft.
+        view.display().clipboard().set_text("synthetic stale clipboard");
+        editor.paste();
+        editor.set_secure(true);
+        editor.set_secure(false);
+        settle();
+        assert_eq!(editor.text().as_str(), "unchanged draft");
+        until(|| panel.state.borrow().accepted);
         // Losing the service must release this generation, not leave an empty
         // custom panel owning the input engine's presentation callback.
         gio::bus_unown_name(name);

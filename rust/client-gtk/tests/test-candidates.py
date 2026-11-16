@@ -10,10 +10,16 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 
 root = Path(__file__).resolve().parents[3]
+if sys.argv[1:] not in ([], ['--client-fixture']):
+    raise SystemExit('Usage: test-candidates.py [--client-fixture]')
+command = (['python3', 'scripts/test-linux-client.py', 'rust/target/debug/rapp-client']
+           if sys.argv[1:] else ['cargo', 'test', '--manifest-path', 'rust/Cargo.toml',
+           '-p', 'rapp-client-gtk', '--offline', 'isolated_candidates', '--', '--ignored', '--nocapture'])
 for tool in ['gtk4-broadwayd', 'chromium', 'dbus-run-session', 'cargo']:
     if shutil.which(tool) is None:
         raise SystemExit(f'Missing test tool: {tool}')
@@ -21,6 +27,13 @@ for tool in ['gtk4-broadwayd', 'chromium', 'dbus-run-session', 'cargo']:
 with tempfile.TemporaryDirectory(prefix='rapp-candidates-') as temporary:
     runtime = Path(temporary) / 'runtime'
     runtime.mkdir(mode=0o700)
+    # No service directories: the mock bus cannot autostart desktop portals,
+    # keyrings, or an installed fcitx instance during a client fixture.
+    bus_config = Path(temporary) / 'bus.conf'
+    bus_config.write_text('<busconfig><type>session</type>'
+        '<listen>unix:tmpdir=/tmp</listen><auth>EXTERNAL</auth>'
+        '<policy context="default"><allow send_destination="*"/>'
+        '<allow receive_sender="*"/><allow own="*"/></policy></busconfig>')
     env = {**os.environ, 'XDG_RUNTIME_DIR': str(runtime), 'GIO_USE_VFS': 'local',
            'DBUS_SESSION_BUS_ADDRESS': 'unix:path=/nonexistent-rapp-test-bus'}
     with socket.socket() as listener:
@@ -43,10 +56,9 @@ with tempfile.TemporaryDirectory(prefix='rapp-candidates-') as temporary:
             '--remote-debugging-port=0', f'http://127.0.0.1:{port}'], env=env,
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
         time.sleep(1)
-        result = subprocess.run(['dbus-run-session', '--', 'env', 'GDK_BACKEND=broadway',
+        result = subprocess.run(['dbus-run-session', f'--config-file={bus_config}', '--', 'env', 'GDK_BACKEND=broadway',
             'BROADWAY_DISPLAY=:1', 'GTK_A11Y=none', 'RAPP_CANDIDATE_TEST_PRIVATE_BUS=1',
-            'cargo', 'test', '--manifest-path', 'rust/Cargo.toml', '-p', 'rapp-client-gtk',
-            '--offline', 'isolated_candidates', '--', '--ignored', '--nocapture'],
+            *command],
             cwd=root, env=env, timeout=60)
     finally:
         if browser is not None:

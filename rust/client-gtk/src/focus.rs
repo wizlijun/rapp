@@ -1,5 +1,5 @@
 //! Native rendering of the same focus panes as Flutter: gray outside, colour inside.
-use gtk::cairo;
+use gtk::{cairo, gdk};
 use rapp_client_core::protocol::{Rect, Window};
 use std::collections::HashMap;
 
@@ -28,6 +28,7 @@ pub fn paint(
     region: Rect,
     windows: &[Window],
     panes: &HashMap<u32, Vec<Rect>>,
+    frame: &gdk::RGBA,
 ) {
     if cr.set_source_surface(colour, 0., 0.).is_err() {
         return;
@@ -68,7 +69,7 @@ pub fn paint(
             let _ = cr.paint();
             let _ = cr.restore();
             // Matches main's temporary focus debug frames.
-            cr.set_source_rgb(0., 200. / 255., 83. / 255.);
+            cr.set_source_rgba(frame.red() as f64, frame.green() as f64, frame.blue() as f64, frame.alpha() as f64);
             cr.set_line_width(2. * sx.min(sy));
             for r in rects {
                 cr.rectangle(
@@ -120,10 +121,11 @@ mod tests {
             1,
             vec![Rect { x: 10., y: 10., w: 40., h: 40. }, Rect { x: 30., y: 30., w: 40., h: 40. }],
         )]);
-        paint(&cr, &source, Some(&gray), region, &[popup, parent], &panes);
+        paint(&cr, &source, Some(&gray), region, &[popup, parent], &panes, &gdk::RGBA::BLUE);
         assert_eq!(pixel(&target, 5, 5), vec![76, 76, 76]);
         assert_eq!(pixel(&target, 40, 40), vec![0, 0, 255]);
         assert_eq!(pixel(&target, 90, 90), vec![0, 0, 255]);
+        assert_eq!(pixel(&target, 11, 11), vec![255, 0, 0]); // supplied theme frame colour
     }
     #[test]
     fn old_panes_do_not_gray_a_window_after_focus_moved_away() {
@@ -141,7 +143,7 @@ mod tests {
         let region = Rect { x: 0., y: 0., w: 100., h: 100. };
         let window = Window { id: 1, parent: 0, kind: 0, flags: 1, rect: region, title_bar: 0., title: String::new() };
         let panes = HashMap::from([(1, vec![Rect { x: 10., y: 10., w: 40., h: 40. }])]);
-        paint(&cr, &source, Some(&gray), region, &[window], &panes);
+        paint(&cr, &source, Some(&gray), region, &[window], &panes, &gdk::RGBA::BLUE);
         assert_eq!(pixel(&target, 5, 5), vec![0, 0, 255]);
     }
 }

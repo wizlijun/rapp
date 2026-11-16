@@ -19,6 +19,8 @@ struct Inner {
     next: Cell<u32>,
     activate: RefCell<Vec<Activate>>,
     preedit: Rc<Cell<bool>>,
+    secure: Cell<bool>,
+    input_epoch: Cell<u64>,
     candidates: RefCell<Option<Rc<super::candidates::Panel>>>,
 }
 impl Deref for Editor {
@@ -46,6 +48,8 @@ impl Editor {
             next: Cell::new(0x80000000),
             activate: RefCell::new(vec![]),
             preedit,
+            secure: Cell::new(false),
+            input_epoch: Cell::new(0),
             candidates: RefCell::new(None),
         }));
         let keys = gtk::EventControllerKey::new();
@@ -54,6 +58,7 @@ impl Editor {
         keys.connect_key_pressed(move |_, key, _, mods| {
             if let Some(inner) = weak.upgrade() {
                 let e = Editor(inner);
+                if e.secure() { return glib::Propagation::Proceed; }
                 if !e.ime_active()
                     && matches!(key, gdk::Key::Return | gdk::Key::KP_Enter)
                     && !mods.contains(gdk::ModifierType::SHIFT_MASK)
@@ -98,7 +103,7 @@ impl Editor {
         self.0.activate.borrow_mut().push(Box::new(f));
     }
     pub fn emit_activate(&self) {
-        if self.ime_active() {
+        if self.secure() || self.ime_active() {
             return;
         }
         for f in self.0.activate.borrow().iter() {
@@ -115,6 +120,17 @@ impl Editor {
     }
     pub fn preedit(&self) -> Rc<Cell<bool>> {
         self.0.preedit.clone()
+    }
+    pub fn secure(&self) -> bool { self.0.secure.get() }
+    /// Keep the existing draft, but never run local composition while A has a password focus.
+    pub fn set_secure(&self, secure: bool) {
+        if self.secure() != secure { self.0.input_epoch.set(self.0.input_epoch.get().wrapping_add(1)); }
+        self.0.secure.set(secure);
+        self.set_editable(!secure);
+        if secure {
+            self.reset_im_context();
+            self.0.preedit.set(false);
+        }
     }
     pub fn ime_active(&self) -> bool {
         self.0.preedit.get()
@@ -204,6 +220,7 @@ impl Editor {
         }
     }
     pub fn insert(&self, copy: Copy) {
+        if self.secure() { return; }
         self.set_error("");
         if let Copy::Text(t) = &copy {
             if t.chars().count() < 800 && t.split('\n').count() < 10 {
@@ -235,6 +252,8 @@ impl Editor {
         self.refresh();
     }
     pub fn attach(&self, window: &gtk::ApplicationWindow) {
+        if self.secure() { return; }
+        let epoch = self.0.input_epoch.get();
         let e = self.clone();
         let w = window.clone();
         glib::spawn_future_local(async move {
@@ -244,6 +263,7 @@ impl Editor {
                 .open_multiple_future(Some(&w))
                 .await
             {
+                if e.0.input_epoch.get() != epoch { return; }
                 let paths = files
                     .iter::<gio::File>()
                     .filter_map(|f| f.ok()?.path())
@@ -253,10 +273,14 @@ impl Editor {
         });
     }
     pub fn paste(&self) {
+        if self.secure() { return; }
+        let epoch = self.0.input_epoch.get();
         let e = self.clone();
         let cb = self.display().clipboard();
         glib::spawn_future_local(async move {
-            match read_clipboard(&cb).await {
+            let result = read_clipboard(&cb).await;
+            if e.0.input_epoch.get() != epoch { return; }
+            match result {
                 Ok(copy) => e.insert(copy),
                 Err(error) => e.set_error(&format!("粘贴没成功：{error}")),
             }

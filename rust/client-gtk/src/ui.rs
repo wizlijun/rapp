@@ -67,6 +67,7 @@ struct State {
     rtt: Option<u32>,
     saving: u8,
     input_ascii: bool,
+    remote_secure: bool,
     tx: Option<SyncSender<Vec<u8>>>,
     pending_text: Option<TextSend>,
     send_queue: std::collections::VecDeque<(Option<u32>, Copy)>,
@@ -108,8 +109,13 @@ impl State {
         self.gray_surface = if smart { self.surface.as_ref().and_then(focus::grayscale) } else { None };
         self.last_stream = None;
     }
-    fn paint(&self, cr: &cairo::Context, surface: &cairo::ImageSurface) {
-        focus::paint(cr, surface, self.gray_surface.as_ref(), self.region, &self.windows, &self.focus_regions);
+    // GTK 4.12 has no replacement for resolving a named theme colour.
+    #[allow(deprecated)]
+    fn paint(&self, widget: &gtk::DrawingArea, cr: &cairo::Context, surface: &cairo::ImageSurface) {
+        let colour = widget.style_context().lookup_color("accent_color")
+            .or_else(|| widget.style_context().lookup_color("theme_selected_bg_color"))
+            .unwrap_or_else(|| widget.color());
+        focus::paint(cr, surface, self.gray_surface.as_ref(), self.region, &self.windows, &self.focus_regions, &colour);
     }
     fn hit(&self, area: &gtk::DrawingArea, x: f64, y: f64, clamp: bool) -> Option<(u32, f32, f32)> {
         let (cx, cy) = geometry::zoom_point(
@@ -329,6 +335,7 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
         rtt: None,
         saving: 0,
         input_ascii: true,
+        remote_secure: false,
         tx: None,
         pending_text: None,
         send_queue: Default::default(),
@@ -390,6 +397,19 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
     let info = gtk::Label::new(Some("输入主机地址与口令，或从 rapp 管理界面打开远程应用"));
     info.set_wrap(true);
     root.append(&info);
+    let dismiss = gtk::Button::with_label("关掉遮挡窗口");
+    dismiss.set_visible(false);
+    let cover_id = Rc::new(Cell::new(None));
+    let id = cover_id.clone();
+    let s = state.clone();
+    dismiss.connect_clicked(move |b| {
+        if let Some(id) = id.take() {
+            let s = s.borrow();
+            if s.ready { s.send(p::dismiss_cover(id)); }
+        }
+        b.set_visible(false);
+    });
+    root.append(&dismiss);
     let area = gtk::DrawingArea::builder()
         .hexpand(true)
         .vexpand(true)
@@ -467,10 +487,10 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
         e.grab_focus();
     });
     let send_button = send.clone();
-    entry.connect_changed(move |entry| send_button.set_sensitive(entry.has_content()));
+    entry.connect_changed(move |entry| send_button.set_sensitive(!entry.secure() && entry.has_content()));
     window.set_child(Some(&root));
     let s = state.clone();
-    area.set_draw_func(move |_, cr, w, h| {
+    area.set_draw_func(move |widget, cr, w, h| {
         cr.set_source_rgb(0.06, 0.06, 0.07);
         let _ = cr.paint();
         let s = s.borrow();
@@ -482,7 +502,7 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
                 z * s.region.w as f64 / surface.width() as f64,
                 z * s.region.h as f64 / surface.height() as f64,
             );
-            s.paint(cr, surface);
+            s.paint(widget, cr, surface);
             let _ = cr.restore();
         }
     });
@@ -730,19 +750,37 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
                     emit(json_mode, json!({"event":"input_source","id":id,"name":name,"ascii":ascii}));
                     state.borrow_mut().input_ascii = ascii;
                 }
-                Event::Message(Incoming::Covered { name, bundle, .. }) => {
-                    let name = if name.is_empty() { bundle } else { name };
+                Event::Message(Incoming::Covered { id, name, bundle, dismissable }) => {
+                    let name = rapp_net::log::clean_name(if name.is_empty() { &bundle } else { &name });
+                    cover_id.set(dismissable.then_some(id));
+                    dismiss.set_visible(dismissable);
                     info.set_text(&format!("A 上「{name}」的弹窗挡住了点击；请打开「桌面」处理"));
                     info.set_visible(true);
                     notice_deadline = Some(Instant::now() + Duration::from_secs(8));
                 }
                 Event::Message(Incoming::AppOpened { bundle, name }) => {
-                    let name = if name.is_empty() { bundle } else { name };
+                    let name = rapp_net::log::clean_name(if name.is_empty() { &bundle } else { &name });
+                    cover_id.set(None);
+                    dismiss.set_visible(false);
                     info.set_text(&format!("A 上打开了「{name}」"));
                     info.set_visible(true);
                     notice_deadline = Some(Instant::now() + Duration::from_secs(8));
                 }
-                Event::Message(Incoming::SecureFocus(_)) => {}
+                Event::Message(Incoming::SecureFocus(secure)) => {
+                    {
+                        let mut s = state.borrow_mut();
+                        s.remote_secure = secure;
+                        if secure {
+                            if let Some(cancel) = s.upload.take() { cancel.cancel(); }
+                            s.pending_text = None;
+                            s.send_queue.clear();
+                        }
+                    }
+                    entry.set_secure(secure);
+                    attach.set_sensitive(!secure);
+                    send.set_sensitive(!secure && entry.has_content());
+                    emit(json_mode, json!({"event":"secure_focus","on":secure}));
+                }
                 Event::Message(Incoming::ScreenLocked(locked)) => {
                     if locked {
                         info.set_text("远程电脑已锁屏，鼠标和键盘只能操作锁屏界面；请打开「桌面」输入密码解锁");
@@ -927,6 +965,8 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
             && notice_deadline.is_some_and(|deadline| Instant::now() >= deadline)
         {
             notice_deadline = None;
+            cover_id.set(None);
+            dismiss.set_visible(false);
             if !state.borrow().windows.is_empty() {
                 info.set_visible(false);
             }
@@ -1143,7 +1183,7 @@ fn install_input(
     let s = state.clone();
     entry.connect_activate(move |e| {
         let mut s = s.borrow_mut();
-        if !s.ready || s.pending_text.is_some() {
+        if !s.ready || s.remote_secure || s.pending_text.is_some() {
             return;
         }
         if !s.input_ascii { s.send(p::select_input("")); }
@@ -1205,6 +1245,7 @@ fn install_input(
     let e = entry.clone();
     let app = app.clone();
     key.connect_key_pressed(move |_, key, _, mods| {
+        if secure_key(&s, key, mods) { return glib::Propagation::Stop; }
         if mods.intersects(gdk::ModifierType::SUPER_MASK | gdk::ModifierType::META_MASK) {
             return glib::Propagation::Proceed;
         }
@@ -1253,6 +1294,28 @@ fn install_input(
     });
     entry.add_controller(key);
 }
+/// Password focus bypasses the local IM context and draft, even when a draft already exists.
+fn secure_key(state: &Shared, key: gdk::Key, mods: gdk::ModifierType) -> bool {
+    let s = state.borrow();
+    if !s.remote_secure { return false; }
+    if s.ready {
+        if let Some(code) = secure_keycode(key.to_lower().into_glib()) {
+            let flags = windows::flags(mods);
+            s.send(p::key(code, flags, true));
+            s.send(p::key(code, flags, false));
+        }
+    }
+    true
+}
+fn secure_keycode(raw: u32) -> Option<u16> {
+    // GDK reports the shifted symbol, while the wire needs the unshifted Mac
+    // virtual key plus modifier flags (the same protocol as picture input).
+    let raw = "!@#$%^&*()_+{}|:\"<>?~".chars().position(|c| c as u32 == raw)
+        .and_then(|i| "1234567890-=[]\\;',./`".chars().nth(i))
+        .map_or(raw, |c| c as u32);
+    geometry::keycode(raw)
+}
+
 fn menus(items: &[Menu], state: &Shared) -> (gio::Menu, gio::SimpleActionGroup) {
     fn fill(
         items: &[Menu],
@@ -1350,4 +1413,17 @@ fn downloads_dir() -> std::path::PathBuf {
         .filter(|p| p.is_absolute())
         .unwrap_or_else(|| home.join("rapp"));
     root.join("files/transfers")
+}
+
+#[cfg(test)]
+mod secure_tests {
+    use super::*;
+    #[test]
+    fn password_keys_include_shifted_punctuation() {
+        for (shifted, plain) in "!@#$%^&*()_+{}|:\"<>?~".chars().zip("1234567890-=[]\\;',./`".chars()) {
+            assert_eq!(secure_keycode(shifted as u32), geometry::keycode(plain as u32));
+        }
+        assert_eq!(secure_keycode(gdk::Key::Return.into_glib()), Some(36));
+        assert_eq!(secure_keycode(gdk::Key::a.into_glib()), Some(0));
+    }
 }
