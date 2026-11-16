@@ -244,6 +244,20 @@ final class EmbeddedSessionTests: XCTestCase {
         XCTAssertTrue(events.contains { if case .focusRegion(5, let r) = $0 { return r == rects } else { return false } })
     }
 
+    func testHostHintsAreForwarded() {
+        let link = FakeLink()
+        var events: [SessionEvent] = []
+        let (_, q) = make(link) { events.append($0) }
+        link.feed(.covered(id: 9, name: "通知中心", bundleID: "com.apple.notificationcenterui", dismissable: true))
+        link.feed(.appOpened(bundleID: "com.apple.Safari", name: "Safari"))
+        link.feed(.secureFocus(true))
+        q.sync {}
+        XCTAssertTrue(events.contains(.covered(id: 9, name: "通知中心", bundleID: "com.apple.notificationcenterui",
+                                               dismissable: true)))
+        XCTAssertTrue(events.contains(.appOpened(bundleID: "com.apple.Safari", name: "Safari")))
+        XCTAssertTrue(events.contains(.secureFocus(true)))
+    }
+
     func testInconsistentFrameClosesNotCrashes() throws {
         let link = FakeLink()
         var events = [SessionEvent]()

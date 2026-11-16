@@ -62,6 +62,9 @@ final class SessionPlugin: NSObject, FlutterPlugin {
   private var keysHolder: Int64?
   /// Dart's `picture_focus` compose flag for `focusedSid`: a letter there opens the writing panel.
   private var composeOn = false
+  /// Sessions whose A focus is in a password field (v13 `secure_focus`): no type-to-compose there,
+  /// decided here so the very first key of a password never opens the panel.
+  private var secure = Set<Int64>()
   /// The compose letter and what followed it, until Dart asks for them back (`compose_replay`).
   private var hold = ComposeHold<NSEvent>()
   /// Re-dispatching held events: they go to rapp's window as they are.
@@ -235,6 +238,9 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     case let .unlock(sid, password):
       live[sid]?.session.send(.unlock(password: password))
       result(nil)
+    case let .dismissCover(sid, id):
+      live[sid]?.session.send(.dismissCover(id))
+      result(nil)
     case let .setBanner(sid, text):
       banners[sid] = text.isEmpty ? nil : text
       detached[sid]?.banner = banners[sid]
@@ -383,7 +389,8 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       }
       if let sid = composeStart(keyDown: down && event.type == .keyDown, composeOn: composeOn,
                                 targetSid: targetSid, characters: event.characters,
-                                flags: event.modifierFlags, isRepeat: event.isARepeat) {
+                                flags: event.modifierFlags, isRepeat: event.isARepeat,
+                                remoteSecure: targetSid.map(secure.contains) ?? false) {
         // Type-to-compose: the letter never reaches A; Dart opens the panel, then asks for it back.
         hold.start(sid: sid, event, now: now)
         channel.invokeMethod("compose_key", arguments: ["sid": sid])
@@ -460,6 +467,8 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       entry.windows = windows
       // The textures stay registered while detached: attaching shows the picture at once.
       detached[sid]?.update(detachedWindows(windows, hidden: hidden[sid] ?? []))
+    case let .secureFocus(on):
+      if on { secure.insert(sid) } else { secure.remove(sid) }
     case .disconnected:
       // The link is down but the last pictures stay; Dart decides when the session ends.
       panels.removeValue(forKey: sid)?.cancel(nil)
@@ -475,6 +484,7 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       live[sid] = nil
       hidden[sid] = nil
       banners[sid] = nil
+      secure.remove(sid)
       panels.removeValue(forKey: sid)?.cancel(nil)
       // Its windows go with it (the close button, 「结束会话」, A quitting): no attach is sent.
       detached.removeValue(forKey: sid)?.close()

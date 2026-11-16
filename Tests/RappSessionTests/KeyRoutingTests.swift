@@ -267,6 +267,13 @@ final class KeyTrackerRouteTests: XCTestCase {
         XCTAssertNil(start(c: "1"))             // not a letter
     }
 
+    func testComposeNeverStartsInARemotePasswordField() {
+        XCTAssertNil(composeStart(keyDown: true, composeOn: true, targetSid: 3, characters: "a", flags: [], isRepeat: false,
+                                  remoteSecure: true))
+        XCTAssertEqual(composeStart(keyDown: true, composeOn: true, targetSid: 3, characters: "a", flags: [], isRepeat: false,
+                                    remoteSecure: false), 3)
+    }
+
     func testHoldCap() {
         var h = ComposeHold<String>(cap: 3)
         h.start(sid: 7, "a", now: 0)

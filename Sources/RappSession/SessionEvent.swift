@@ -82,6 +82,12 @@ public enum SessionEvent: Equatable {
     case screenLocked(Bool)
     /// Which parts of a window have focus (v12); no rects means the whole window.
     case focusRegion(window: UInt32, rects: [CanvasRect])
+    /// A press was dropped under another process's window on A (v13); `dismissable`: B may ask A to close it.
+    case covered(id: UInt32, name: String, bundleID: String, dismissable: Bool)
+    /// Another app came to the front on A right after this session's input (v13).
+    case appOpened(bundleID: String, name: String)
+    /// A's keyboard focus is (true) or is no longer (false) in a password field (v13).
+    case secureFocus(Bool)
     /// The link dropped (or A sent garbage): the last pictures stay; `closed` follows when the GUI ends the session.
     case disconnected(reason: String)
     /// The session ended and its pictures are released.
