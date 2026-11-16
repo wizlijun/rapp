@@ -393,3 +393,29 @@
   - 2026-11-16（0.12.2）：用户报告别的机器经本机映射端口访问这台的 8007（Python display_server）成功。反方向：MacBook-M4-Pro 的 8007 没有服务在听，这台连 `localhost:28000` 时日志如实记 `map_refused … refused`。还差：sshd（22）、经 relay 和局域网各一次分开确认
 - [ ] 真机：访问方的服务重启后，不打开面板，原来的地址还能用
 - [ ] macOS：别的程序在"所有地址"上监听 28000 时，rapp 跳过它
+
+## 协议 v13：A 端提示（弹窗挡点击、点开了别的 app、密码框）（分支 feat/protocol-v13-host-hints，未合并、未推送）
+- [x] 协议 v12 → v13，四条新消息：`covered`(37)、`dismissCover`(38)、`appOpened`(39)、`secureFocus`(40)；Swift、RappSession、SessionPlugin → Dart、Rust client-core / rapp-session / client-gtk 一起改，两边用同一段十六进制样例测
+- [x] 问题 1（系统级弹窗挡点击）：无障碍复查不再只认程序坞。任何 app 的半透明窗口、或盖住所在屏幕 85% 以上的窗口，只有无障碍命中它（或什么都没命中）才算挡住；普通窗口不调无障碍。被挡的按下扔掉，A 发 `covered`（同一个 app 5 秒最多一次）
+  - B 顶上一条黄条：「A 上「名字」的弹窗挡住了点击」，按钮「在桌面会话里处理」（打开或切到 `desktop:`），A 说可以时再加「关掉它」，× 关掉，15 秒自己消失
+  - 「关掉它」只在 B 点了才做：A 先重新核对这个 app 能不能关，再用无障碍按取消 / 关闭按钮。SecurityAgent、loginwindow、CoreServicesUIAgent、通知授权、触控 ID、屏保，以及包名里带 security / auth / password / keychain / login / permission / privacy 的，一律不关，只给「在桌面会话里处理」
+- [x] 问题 2（点开的浏览器、预览没显示）：输入后 2 秒内别的普通 app 到了前台，A 发 `appOpened`（只 app 会话发；程序坞、通知中心、控制中心、聚焦搜索、rapp 自己等不算）。B 黄条「A 上打开了「名字」」，「打开」就是 openOrSwitch
+  - 已知：这台 B 在同一台 A 上开着两个 app 会话，在第一个里输入后 2 秒内切到第二个，第一个可能报第二个"被打开了"；点「打开」只是切过去
+  - 重新激活没改：在会话里打字时 A 仍会把会话的 app 拉回前台，盖住刚打开的浏览器。所以要看浏览器得点「打开」
+- [x] 问题 3②（密码框）：A 只读焦点控件的 role / subrole（`AXSecureTextField`），从不读内容，变化时发 `secureFocus`。B 在密码框里时：打字不再弹写作面板（macOS 在 SessionPlugin 里按键时就判，Linux 在 LinuxSessionPort 里判）；面板已开着时发出去的字不记进输入记录；断线时清掉
+- 自动测试（2026-11-17，Mac）：`swift build` 通过；`swift test` RappCoreTests 478 项通过（1 项跳过），RappSessionTests 171 项通过；`flutter analyze` 干净，`flutter test` 1703 项通过、8 项跳过；`flutter build macos --debug` 通过；`cargo test -p rapp-client-core` 全过
+- 没验证到的：
+  - `rust/client-gtk/src/ui.rs` 只在 Linux 编译，Mac 上 `cargo build -p rapp-client-gtk` 不编它，改动没编过
+  - LinuxSessionPort 的密码框开关没有单元测试
+  - 写作面板里已经打了没发的字，在密码框里仍会照常存进草稿文件（只是不记"已发送"）
+  - 分离出去的会话窗口不显示这条黄条
+- 实机检查：
+  - [ ] A 上弹出通知中心横幅 / 系统授权框挡住 app 窗口时，在 B 点被挡的地方：出黄条，名字对；授权框只给「在桌面会话里处理」，点了切到桌面会话
+  - [ ] 通知横幅点「关掉它」：横幅关掉，之后点击能到 app；日志里有 CoverCloser 的结果
+  - [ ] 半透明的悬浮窗（比如录屏工具的控制条）不挡点击时，点击照常到 app，不出黄条
+  - [ ] 在会话里点一个链接打开 Safari / Chrome，点图片打开预览：出「A 上打开了…」，点「打开」后在 B 上看到它
+  - [ ] 两个 app 会话之间快速切换，看会不会误报「打开了」
+  - [ ] 在会话里点进登录密码框（网页的、系统的）：直接打字不弹写作面板，字直接到 A；离开密码框后又会弹
+  - [ ] 写作面板开着时把焦点放进密码框发送：输入记录里没有这一条
+  - [ ] 桌面会话里的密码框（不装观察器，只靠每秒检查）：最多晚 1 秒生效
+  - [ ] 旧 B（v12）连新 A、新 B 连旧 A：版本不符的提示照常
