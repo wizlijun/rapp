@@ -94,27 +94,32 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     /// The display a desktop session shows (`desktop:` is the main one), with its number in
-    /// `orderedDisplays` (1 = main). Gives up after 10 seconds like `find`.
+    /// `orderedDisplays` (1 = main). A display that was asleep (the session's activity just woke it)
+    /// can take a moment to reach ScreenCaptureKit's list, so it is asked again for up to 5 seconds.
     static func findDisplay(_ target: DesktopTarget) async throws -> (SCDisplay, DesktopDisplay, number: Int) {
-        let content: SCShareableContent
-        do {
-            content = try await withTimeout(seconds: 10) {
-                try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        let deadline = Date().addingTimeInterval(5)
+        while true {
+            let content: SCShareableContent
+            do {
+                content = try await withTimeout(seconds: 10) {
+                    try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                }
+            } catch is TimeoutError {
+                throw HostError(windowLookupTimeoutText)
             }
-        } catch is TimeoutError {
-            throw HostError(windowLookupTimeoutText)
+            let displays = currentDisplays()
+            let id: CGDirectDisplayID
+            switch target {
+            case .main: id = displays.first(where: \.main)?.id ?? CGMainDisplayID()
+            case let .display(wanted): id = wanted
+            }
+            if let sc = content.displays.first(where: { $0.displayID == id }),
+               let index = displays.firstIndex(where: { $0.id == id }) {
+                return (sc, displays[index], index + 1)
+            }
+            guard Date() < deadline else { throw HostError("display \(id) is not connected") }
+            try await Task.sleep(nanoseconds: 300_000_000)
         }
-        let displays = currentDisplays()
-        let id: CGDirectDisplayID
-        switch target {
-        case .main: id = displays.first(where: \.main)?.id ?? CGMainDisplayID()
-        case let .display(wanted): id = wanted
-        }
-        guard let sc = content.displays.first(where: { $0.displayID == id }),
-              let index = displays.firstIndex(where: { $0.id == id }) else {
-            throw HostError("display \(id) is not connected")
-        }
-        return (sc, displays[index], index + 1)
     }
 
     /// A desktop session: the whole display, every window on it.
@@ -242,12 +247,14 @@ final class WindowCapture: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 }
 
-/// A's active displays in global points, in `orderedDisplays` order (main first, then left to right).
+/// A's online displays (asleep ones included) in global points, in `orderedDisplays` order (main first, then left to right).
 func currentDisplays() -> [DesktopDisplay] {
+    // Online, not active: an asleep display is not active, and A's display sleeps whenever no
+    // session holds it awake, which dropped 桌面 from the app list. Opening it wakes the display.
     var count: UInt32 = 0
-    guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
+    guard CGGetOnlineDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
     var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
-    guard CGGetActiveDisplayList(count, &ids, &count) == .success else { return [] }
+    guard CGGetOnlineDisplayList(count, &ids, &count) == .success else { return [] }
     let names: [CGDirectDisplayID: String] = Dictionary(NSScreen.screens.compactMap { screen in
         (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)
             .map { ($0.uint32Value, screen.localizedName) }
