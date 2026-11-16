@@ -62,7 +62,7 @@ const _echoWait = Duration(milliseconds: 300);
 const _scaledNoteH = 24.0;
 
 class TermStage extends StatefulWidget {
-  const TermStage({super.key, required this.state, required this.session, required this.port, this.attached});
+  const TermStage({super.key, required this.state, required this.session, required this.port, this.attached, this.frozen = false});
 
   final MainState state;
   final RemoteSession session;
@@ -70,6 +70,9 @@ class TermStage extends StatefulWidget {
 
   /// The device panel's `attached` for this session; null when unknown.
   final int? attached;
+
+  /// A network drop: the picture stays for reading and copying, but no input goes out.
+  final bool frozen;
 
   @override
   State<TermStage> createState() => _TermStageState();
@@ -536,7 +539,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     }
     // An exited pane (T4) takes nothing: nothing is sent or kept, and the window's own keys
     // (Esc, Ctrl+[ / ], Ctrl+O, F11) are the window's again.
-    if (!_canInput) return KeyEventResult.ignored;
+    if (!_canInput || widget.frozen) return KeyEventResult.ignored;
     switch (input) {
       case null:
         // Not the terminal's (Ctrl+Enter, macOS's other ⌘ chords): the window has it.

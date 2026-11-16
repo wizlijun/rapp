@@ -517,6 +517,8 @@ class MainState extends ChangeNotifier {
       return const TermPasted(); // no clipboard to read: nothing to paste
     }
     if (text == null || text.isEmpty) return const TermPasted();
+    // A drop during the clipboard read: nothing goes out after it.
+    if (sendBlocked(rs.sid)) return const TermPasted();
     if (!rs.composerAllowed || (!text.contains('\n') && !text.contains('\r'))) {
       final why = await tp.paste(rs.sid, text);
       return why == null ? const TermPasted(sent: true) : TermPasted(note: why);

@@ -81,6 +81,20 @@ class Stage extends StatelessWidget {
           // A network drop: the same Picture, frozen, under the offline bar (never input, never a resize).
           picture = true;
           body = Picture(state: state, session: rs, window: win, frozen: true);
+        } else if (rs != null && state.termPort?.owns(rs.sid) == true && ((rec?.phase == Phase.live && rec?.lastSid == null) || (rec?.frozen == true && !rs.detached))) {
+          // A terminal (live, or frozen by a network drop): its box lines need whole device pixels.
+          full = true;
+          term = true;
+          body = _PixelSnap(child: TermStage(
+              state: state,
+              session: rs,
+              port: state.termPort!,
+              frozen: rec?.frozen == true,
+              attached: [
+                for (final r in state.hub?.termLists[rec?.id]?.terms ?? const <TermRow>[])
+                  if (r.id == rec?.app) r.attached
+              ].firstOrNull,
+            ));
         } else if (rec != null && (rec.phase == Phase.disconnected || rec.lastSid != null)) {
           // Dead, or reconnecting until the new picture swaps in (R10): the old frame under stripes.
           // Never input, never a resize (R25).
@@ -97,19 +111,6 @@ class Stage extends StatelessWidget {
             onEnd: state.endCurrent,
             sessionKey: rec.key,
           );
-        } else if (rs != null && state.termPort?.owns(rs.sid) == true && rec?.phase == Phase.live && rec?.lastSid == null) {
-          // A terminal: its box lines need whole device pixels.
-          full = true;
-          term = true;
-          body = _PixelSnap(child: TermStage(
-              state: state,
-              session: rs,
-              port: state.termPort!,
-              attached: [
-                for (final r in state.hub?.termLists[rec?.id]?.terms ?? const <TermRow>[])
-                  if (r.id == rec?.app) r.attached
-              ].firstOrNull,
-            ));
         } else if (rs != null && !rs.detached && win != null) {
           picture = true;
           body = Picture(state: state, session: rs, window: win);
@@ -195,9 +196,11 @@ class Stage extends StatelessWidget {
             // would fight the panel's caret), and the lift never changes the size it lays out at (Z2). Nor does the
             // key row: it floats over the picture too.
             final keyRow = state.prefs.termKeyRow;
+            final bar = rec != null && rec.frozen ? offlineBarFor(state, rec) : null;
             return Stack(
               children: [
                 Positioned.fill(child: _lifted(state, rs, stage, keyRow: keyRow, narrow: c.maxWidth < keyRowWideAt)),
+                if (bar != null) Positioned(top: 0, left: 0, right: 0, child: bar),
                 ...composerLayer(state: state, session: rs, port: state.portOf(rs.sid)!,
                     keyRow: keyRow, editor: composerEditor),
               ],

@@ -1,12 +1,16 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' show PointerDeviceKind;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/paths.dart';
+import 'package:rapp/term/term_model.dart';
 import 'package:rapp/term/term_session_port.dart';
 import 'package:rapp/term/term_stage.dart';
 import 'package:rapp/term/term_wire.dart';
@@ -368,6 +372,109 @@ void main() {
     expect(find.widgetWithText(TabChip, '1.1 claude · 已退出'), findsOneWidget);
     expect(find.byType(TermStage), findsOneWidget);
     expect(s.currentRemote!.currentWindow, 3);
+  });
+
+  Future<void> drop(WidgetTester tester) async {
+    term.play(const DisconnectedEvent(1, 'connection closed'));
+    await settle(tester);
+  }
+
+  testWidgets('a network drop keeps the terminal on the stage with a bar', (tester) async {
+    await tester.pumpWidget(wrap(window()));
+    await openTerm(tester, two);
+    await drop(tester);
+    expect(find.byType(TermStage), findsOneWidget);
+    expect(find.byType(DisconnectedStage), findsNothing);
+    expect(find.byKey(const Key('offline-bar')), findsOneWidget);
+    expect(find.byKey(const Key('composer-open')), findsOneWidget);
+  });
+
+  testWidgets('a frozen terminal sends no keys, text or paste, but still copies', (tester) async {
+    final copied = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.setData') copied.add((call.arguments as Map)['text'] as String);
+      if (call.method == 'Clipboard.getData') return {'text': 'ls'};
+      return null;
+    });
+    addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
+    term.models[1] = TermModel()
+      ..expect('%3')
+      ..apply(TermScreen(
+          pane: '%3', rev: 1, cols: 40, rows: 8, cx: 0, cy: 0, cursor: true, alt: false, full: true, more: false,
+          lines: [for (var i = 0; i < 8; i++) (i, 'abcdef')]));
+    await tester.pumpWidget(wrap(window()));
+    await openTerm(tester, two);
+    await drop(tester);
+    term.calls.clear();
+    final grid = tester.getTopLeft(find.byKey(const Key('term-grid')));
+    final g = await tester.startGesture(grid + const Offset(2, 120), kind: PointerDeviceKind.mouse);
+    await g.moveTo(grid + const Offset(60, 120));
+    await g.up();
+    await tester.pump();
+    expect(find.byKey(const Key('term-copy')), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    final mac = defaultTargetPlatform == TargetPlatform.macOS;
+    await tester.sendKeyDownEvent(mac ? LogicalKeyboardKey.metaLeft : LogicalKeyboardKey.controlLeft);
+    if (!mac) await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+    if (!mac) await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyUpEvent(mac ? LogicalKeyboardKey.metaLeft : LogicalKeyboardKey.controlLeft);
+    await tester.runAsync(() => flush());
+    await tester.pump();
+    expect(term.calls.where((c) => {'keys', 'type', 'paste'}.contains(c.$1)), isEmpty);
+    await tester.sendKeyDownEvent(mac ? LogicalKeyboardKey.metaLeft : LogicalKeyboardKey.controlLeft);
+    if (!mac) await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    if (!mac) await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyUpEvent(mac ? LogicalKeyboardKey.metaLeft : LogicalKeyboardKey.controlLeft);
+    await tester.pump(const Duration(seconds: 2));
+    expect(copied, isNotEmpty);
+    expect(copied.first, startsWith('a'));
+  }, variant: TargetPlatformVariant.only(TargetPlatform.macOS)..values.add(TargetPlatform.linux));
+
+  testWidgets('a paste that read the clipboard before the drop sends nothing after it', (tester) async {
+    final read = Completer<Map<String, Object?>>();
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.getData') return read.future;
+      return null;
+    });
+    addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
+    await tester.pumpWidget(wrap(window()));
+    await openTerm(tester, two);
+    term.calls.clear();
+    final rs = s.currentRemote!;
+    final f = s.termPaste(rs);
+    await drop(tester);
+    read.complete({'text': 'rm -rf'});
+    await tester.runAsync(() async {
+      await f;
+      await flush();
+    });
+    expect(term.calls.where((c) => {'keys', 'type', 'paste'}.contains(c.$1)), isEmpty);
+  });
+
+  testWidgets('the frozen terminal element survives the drop and the reconnect swaps in a live one', (tester) async {
+    await tester.pumpWidget(wrap(window()));
+    await openTerm(tester, two);
+    final before = tester.element(find.byType(TermStage));
+    await drop(tester);
+    expect(tester.element(find.byType(TermStage)), same(before));
+    expect(tester.widget<TermStage>(find.byType(TermStage)).frozen, isTrue);
+    term.calls.clear();
+    term.paneLists[2] = two;
+    await tester.runAsync(() async {
+      s.reconnectCurrent();
+      for (var i = 0; i < 4; i++) {
+        await flush();
+      }
+    });
+    term.play(windowsOf(2, two));
+    await settle(tester);
+    expect(find.byKey(const Key('offline-bar')), findsNothing);
+    expect(tester.widget<TermStage>(find.byType(TermStage)).frozen, isFalse);
+    final v = term.calls.where((c) => c.$1 == 'view').last.$2;
+    expect((v['sid'], v['window']), (2, 3));
   });
 
   testWidgets('a reconnected terminal takes the stage again and is viewed', (tester) async {
