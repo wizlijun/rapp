@@ -573,6 +573,13 @@ async fn a_rename_reaches_a_watch_at_once() {
     assert_eq!(ask.next().await, json!({"ok": true}));
     let seen = watch.until_list(Duration::from_secs(1), |l| row_named(l, "new")).await;
     assert_eq!(seen["terms"][0]["id"], id.as_str());
+    // A second watch hears a second rename just as soon.
+    let mut watch2 = open(json!({"op": "watch"})).await;
+    watch2.until_list(WAIT, |l| row_named(l, "new")).await;
+    let mut ask = open(rename_req(&id, "newer")).await;
+    assert_eq!(ask.next().await, json!({"ok": true}));
+    watch.until_list(Duration::from_secs(1), |l| row_named(l, "newer")).await;
+    watch2.until_list(Duration::from_secs(1), |l| row_named(l, "newer")).await;
     let _ = stop.send(());
     let _ = server.await;
 }

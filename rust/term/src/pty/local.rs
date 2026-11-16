@@ -209,7 +209,7 @@ pub async fn scan(term_dir: &Path, token: &str) -> Vec<Status> {
             Err(_) => {}
         }
     }
-    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.key.cmp(&b.key)).then(a.pid.cmp(&b.pid)));
     out
 }
 

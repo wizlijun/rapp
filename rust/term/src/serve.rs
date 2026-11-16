@@ -97,8 +97,8 @@ pub struct Worker {
     launchers: Vec<String>,
     /// One `open` at a time.
     opening: tokio::sync::Mutex<()>,
-    /// Told when a rename is done, so a watch does not wait out its `poll` to show the new name.
-    rescan: Arc<Notify>,
+    /// Bumped when a rename is done, so every watch hears it and a watch does not wait out its `poll` to show the new name.
+    rescan: tokio::sync::watch::Sender<u64>,
 }
 
 /// Accept connections on `listener` until `stop` completes; then end every connection and return.
@@ -138,7 +138,7 @@ impl Worker {
             events,
             launchers: launch::launchers(),
             opening: Default::default(),
-            rescan: Default::default(),
+            rescan: tokio::sync::watch::channel(0).0,
         }
     }
 
@@ -237,7 +237,7 @@ impl Worker {
             self.opts.poll,
             pty.clone(),
             changed.clone(),
-            self.rescan.clone(),
+            self.rescan.subscribe(),
         ));
         let hosts = host_list(&self.launchers);
         let mut sent: Option<TermList> = None;
@@ -285,7 +285,7 @@ impl Worker {
         let token = local::token(&self.opts.pty_dir).map_err(|_| NO_TEXT_TERMINAL)?;
         match local::rename(&path, &token, &name).await {
             Ok(()) => {
-                self.rescan.notify_one();
+                self.rescan.send_modify(|g| *g += 1);
                 Ok(())
             }
             Err(local::Probe::Refused(e)) if e == "unsupported" => Err(OLD_RUN.into()),
@@ -526,7 +526,7 @@ fn pty_rows(unread: &Mutex<Unread>, statuses: &[Status], now: u64) -> Vec<TermRo
         .collect()
 }
 
-/// Scan for `run` sessions every `poll`, or at once when `rescan` is told; each answer goes in `rows`, and `changed`
+/// Scan for `run` sessions every `poll`, or at once when `rescan` changes; each answer goes in `rows`, and `changed`
 /// hears when it differs.
 async fn ask_pty(
     dir: PathBuf,
@@ -534,7 +534,7 @@ async fn ask_pty(
     poll: Duration,
     rows: Arc<Mutex<Option<Vec<TermRow>>>>,
     changed: Arc<Notify>,
-    rescan: Arc<Notify>,
+    mut rescan: tokio::sync::watch::Receiver<u64>,
 ) {
     loop {
         let got = pty_rows(&unread, &scan_pty(&dir).await, unix_now());
@@ -547,7 +547,7 @@ async fn ask_pty(
         }
         tokio::select! {
             _ = tokio::time::sleep(poll) => {}
-            _ = rescan.notified() => {}
+            _ = rescan.changed() => {}
         }
     }
 }

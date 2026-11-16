@@ -274,6 +274,11 @@ async fn two_runs_with_the_same_name_after_a_rename_stay_apart() {
     // Both are called `a` now; each id still reaches its own program.
     let statuses = local::scan(d.path(), &token).await;
     assert_eq!(statuses.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["a", "a"]);
+    // Equal names keep one order, scan after scan.
+    let order = |v: &[local::Status]| v.iter().map(|s| s.pid).collect::<Vec<_>>();
+    for _ in 0..10 {
+        assert_eq!(order(&local::scan(d.path(), &token).await), order(&statuses));
+    }
     assert_eq!(statuses.iter().find(|s| s.key.as_ref() == Some(&kb)).unwrap().pid, sb.pid);
     let mut vb = Viewer::connect_op_at(&socket_of(d.path(), sb.pid), d.path(), "view").await;
     vb.open().await;
