@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds the relay image: scripts/build-relay-image.sh <version> [--multi] [--push]
 #   (default)  this machine's architecture, loaded into the local Docker
-#   --multi    linux/amd64 + linux/arm64 with buildx (the foreign one runs under QEMU: slow, expected);
+#   --multi    linux/amd64 + linux/arm64 with buildx (cross-compiled on this machine, no QEMU compiling);
 #              without --push the result goes to an OCI archive in a temp dir
 #   --push     push to ghcr.io (implies --multi); log in first yourself
 set -euo pipefail

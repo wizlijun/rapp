@@ -173,7 +173,8 @@ Run as `docker exec rapp-relay rapp-relay <command>`. `--data <dir>` defaults to
   runs in a VM that does not forward UDP to the host, so the probe is built and run in a container that shares the
   relay container's network. It removes only container `rapp-relay-smoke` and volume `rapp-relay-smoke-data`.
 - `scripts/build-relay-image.sh <version> [--multi] [--push]` runs `cargo audit`, then builds. `--multi` builds
-  linux/amd64 and linux/arm64 with buildx; the foreign architecture runs under QEMU and is slow.
+  linux/amd64 and linux/arm64 with buildx. rustc and cc run on the build machine and cross-compile (clang + lld,
+  static musl), so both architectures take about a minute; only the final `mkdir` runs under emulation.
 - `cargo run -p rapp-relay --example probe -- <host:port> <key> [--wait]` enrolls a throwaway device and prints
   `enrolled from <address the relay saw>`.
 
