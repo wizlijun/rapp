@@ -1,7 +1,7 @@
-mod common;
+#[path = "common/pty.rs"]
+mod pty;
 
-use common::pty::{short_dir, Window};
-use common::Server;
+use pty::{short_dir, Window};
 use serde_json::{json, Value};
 use std::path::Path;
 use std::process::Stdio;
@@ -17,10 +17,8 @@ use tokio::time::timeout;
 const BIN: &str = env!("CARGO_BIN_EXE_rapp-term");
 const TOKEN: &str = "test-token-1";
 const WAIT: Duration = Duration::from_secs(5);
-/// For a target that cannot connect: a poll plus ssh failing, which waits on DNS.
-const SSH_WAIT: Duration = Duration::from_secs(15);
 
-/// A running `rapp-term serve` on a private tmux server.
+/// A running `rapp-term serve` with a `term.json` and a short directory of its own.
 struct Worker {
     child: Child,
     stdin: Option<ChildStdin>,
@@ -28,24 +26,13 @@ struct Worker {
     err: JoinHandle<String>,
     port: u16,
     dir: tempfile::TempDir,
-    ctl: CtlDir,
 }
 
-/// The worker's own ssh control directory, removed with it. `rapp-term` names it `/tmp/rapp-term-$USER`, so each
-/// worker is given a `USER` of its own rather than sharing the real one's.
-struct CtlDir(std::path::PathBuf);
-
-impl Drop for CtlDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
-fn command(socket: &str, config: &Path) -> Command {
+fn command(config: &Path) -> Command {
     let mut c = Command::new(BIN);
     c.args(["serve", "--bind", "127.0.0.1", "--port", "0", "--token-env", "RAPP_TOKEN", "--config"])
         .arg(config)
-        .args(["--json", "--socket", socket])
+        .arg("--json")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -108,34 +95,27 @@ fn row<'a>(list: &'a Value, id: &str) -> Option<&'a Value> {
     list["terms"].as_array()?.iter().find(|r| r["id"] == id)
 }
 
-/// Whether the row of `id` in `list` is unread.
-fn unread(list: &Value, id: &str) -> Option<bool> {
-    row(list, id)?["unread"].as_bool()
-}
-
 impl Worker {
-    async fn start(s: &Server, config: Option<&str>) -> Worker {
-        Worker::start_in(s, short_dir(), config, None).await
+    async fn start(config: Option<&str>) -> Worker {
+        Worker::start_in(short_dir(), config, None).await
     }
 
     /// Started in `dir` (short, so `term/pty/<pid>.sock` fits a unix socket address), with `PATH` set to `bin_path`.
-    async fn start_in(s: &Server, dir: tempfile::TempDir, config: Option<&str>, bin_path: Option<&Path>) -> Worker {
-        Worker::start_with(s, dir, config, bin_path, None).await
+    async fn start_in(dir: tempfile::TempDir, config: Option<&str>, bin_path: Option<&Path>) -> Worker {
+        Worker::start_with(dir, config, bin_path, None).await
     }
 
     /// Started with `--launch-with launcher`: the program `open` runs instead of macOS's `open -a`.
     async fn start_with(
-        s: &Server,
         dir: tempfile::TempDir,
         config: Option<&str>,
         bin_path: Option<&Path>,
         launch_with: Option<&Path>,
     ) -> Worker {
         let path = dir.path().join("term.json");
-        if let Some(c) = config {
-            std::fs::write(&path, c).unwrap();
-        }
-        let mut c = command(&s.socket, &path);
+        // `{"allow":true}` unless a test says otherwise.
+        std::fs::write(&path, config.unwrap_or(r#"{"allow":true}"#)).unwrap();
+        let mut c = command(&path);
         c.env("RAPP_TOKEN", TOKEN);
         if let Some(l) = launch_with {
             c.arg("--launch-with").arg(l);
@@ -143,9 +123,6 @@ impl Worker {
         if let Some(p) = bin_path {
             c.env("PATH", p);
         }
-        let user = format!("test{}", dir.path().file_name().unwrap().to_str().unwrap());
-        c.env("USER", &user);
-        let ctl = CtlDir(Path::new("/tmp").join(format!("rapp-term-{user}")));
         let mut child = c.spawn().unwrap();
         let stdin = child.stdin.take();
         let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
@@ -163,10 +140,9 @@ impl Worker {
             let _ = stderr.read_to_string(&mut s).await;
             s
         });
-        let mut w = Worker { child, stdin, out, err, port: 0, dir, ctl };
+        let mut w = Worker { child, stdin, out, err, port: 0, dir };
         let first = w.event().await;
         assert_eq!(first["event"], "listening", "{first}");
-        assert!(w.ctl.0.is_dir(), "no ssh control directory {}", w.ctl.0.display());
         w.port = first["port"].as_u64().unwrap() as u16;
         assert!(w.port > 0);
         w
@@ -181,12 +157,12 @@ impl Worker {
 
     /// Started with a launcher that runs the `.command` file in a pty of its own, as a window would. `script`
     /// gives up its window when its input ends, so the input is held open for 20 s, longer than any test here.
-    async fn start_launching(s: &Server) -> Worker {
+    async fn start_launching() -> Worker {
         let dir = short_dir();
         let script = dir.path().join("launch.sh");
         std::fs::write(&script, "#!/bin/sh\nsleep 20 | script -q /dev/null sh \"$2\" >/dev/null 2>&1 &\n").unwrap();
         std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
-        Worker::start_with(s, dir, None, None, Some(&script)).await
+        Worker::start_with(dir, None, None, Some(&script)).await
     }
 
     fn config(&self) -> std::path::PathBuf {
@@ -238,14 +214,9 @@ impl Worker {
     }
 }
 
-fn sessions(s: &Server) -> Vec<String> {
-    s.raw(&["list-sessions", "-F", "#{session_name}"]).lines().map(String::from).collect()
-}
-
 #[tokio::test]
 async fn serve_says_listening_and_exits_on_stdin_eof() {
-    let Some(s) = Server::start() else { return };
-    let w = Worker::start(&s, None).await;
+    let w = Worker::start(None).await;
     let (rest, _, code) = w.stop().await;
     let last: Value = serde_json::from_str(rest.last().expect("no exit event")).unwrap();
     assert_eq!((last["event"].as_str(), last["code"].as_i64()), (Some("exit"), Some(0)), "{last}");
@@ -256,7 +227,7 @@ async fn serve_says_listening_and_exits_on_stdin_eof() {
 async fn serve_without_its_token_is_an_argument_error() {
     let d = tempfile::tempdir().unwrap();
     for token in [None, Some("")] {
-        let mut c = command("unused", &d.path().join("term.json"));
+        let mut c = command(&d.path().join("term.json"));
         match token {
             None => c.env_remove("RAPP_TOKEN"),
             Some(t) => c.env("RAPP_TOKEN", t),
@@ -268,8 +239,7 @@ async fn serve_without_its_token_is_an_argument_error() {
 
 #[tokio::test]
 async fn a_bad_token_gets_one_error_line() {
-    let Some(s) = Server::start() else { return };
-    let w = Worker::start(&s, None).await;
+    let w = Worker::start(None).await;
     let v = w.ask_with(json!({"op": "list"}), "nope", WAIT).await;
     assert_eq!(v, [json!({"error": "bad token"})]);
     // A token that only starts like the right one is just as wrong.
@@ -280,215 +250,54 @@ async fn a_bad_token_gets_one_error_line() {
 
 #[tokio::test]
 async fn an_unknown_request_is_a_bad_request() {
-    let Some(s) = Server::start() else { return };
-    let w = Worker::start(&s, None).await;
-    for req in [json!({"op": "nope"}), json!({"op": "new"}), json!("list")] {
+    let w = Worker::start(None).await;
+    let new = json!({"op": "new", "host": null, "name": "n1", "command": ["sh"], "cols": 100, "rows": 30});
+    for req in [new, json!({"op": "nope"}), json!({"op": "new"}), json!("list")] {
         assert_eq!(w.ask(req.clone()).await, [json!({"error": "bad request"})], "{req}");
     }
     w.stop().await;
 }
 
 #[tokio::test]
-async fn list_shows_the_sessions_and_the_local_host() {
-    let Some(s) = Server::start() else { return };
-    s.raw(&["new-session", "-d", "-s", "a b", "-x", "80", "-y", "24", "cat"]);
-    s.wait_command("a b", "cat");
-    let w = Worker::start(&s, None).await;
-    let v = w.ask(json!({"op": "list"})).await;
-    assert_eq!(v.len(), 1, "{v:?}");
-    let terms = v[0]["terms"].as_array().unwrap();
-    let row = terms.iter().find(|r| r["id"] == "term:tmux:a b").expect("no row for the session");
-    assert_eq!((&row["host"], &row["name"], &row["unread"]), (&json!(null), &json!("a b"), &json!(false)));
-    assert_eq!((&row["command"], &row["panes"], &row["dead"]), (&json!("cat"), &json!(1), &json!(false)));
-    assert_eq!(plain(&v[0]["hosts"][0]), json!({"host": null}));
-    assert_eq!(v[0]["hosts"].as_array().unwrap().len(), 1);
-    w.stop().await;
-}
-
-#[tokio::test]
-async fn a_target_that_cannot_connect_is_reported_and_local_is_still_listed() {
-    let Some(s) = Server::start() else { return };
-    s.raw(&["new-session", "-d", "-s", "here", "-x", "80", "-y", "24", "cat"]);
-    let w = Worker::start(&s, Some(r#"{"targets":[{"name":"gone","target":"nohost.invalid"}]}"#)).await;
-    let t = Instant::now();
-    let v = w.ask(json!({"op": "list"})).await;
-    assert!(t.elapsed() < SSH_WAIT);
-    assert_eq!(v.len(), 1, "{v:?}");
-    let hosts = v[0]["hosts"].as_array().unwrap();
-    assert_eq!((hosts.len(), plain(&hosts[0])), (2, json!({"host": null})), "{hosts:?}");
-    assert_eq!((&hosts[1]["host"], &hosts[1]["target"]), (&json!("gone"), &json!("nohost.invalid")));
-    assert!(hosts[1]["error"].as_str().is_some_and(|e| !e.is_empty()), "{}", hosts[1]);
-    assert!(hosts[1].get("tmux").is_none());
-    assert!(v[0]["terms"].as_array().unwrap().iter().any(|r| r["id"] == "term:tmux:here"));
-    w.stop().await;
-}
-
-#[tokio::test]
-async fn view_pumps_the_session_and_reports_inputs_without_content() {
-    let Some(s) = Server::start() else { return };
-    s.raw(&["new-session", "-d", "-s", "w", "-x", "80", "-y", "24", "cat"]);
-    let mut w = Worker::start(&s, None).await;
-    let mut c = w.connect(&json!({"op": "view", "term": "term:tmux:w", "sid": 7}), TOKEN).await;
-    assert_eq!(c.next().await["t"], "hello");
-    let panes = c.until("panes").await;
-    let pane = panes["panes"][0]["id"].as_str().unwrap().to_string();
-    c.send(json!({"t": "type", "pane": pane, "text": "secret-word-1"})).await;
-    c.send(json!({"t": "keys", "pane": pane, "keys": ["Enter"]})).await;
-    // The pump has taken both inputs once the screen shows the typed text.
-    let end = Instant::now() + WAIT;
-    while !s.raw(&["capture-pane", "-p", "-t", "w"]).contains("secret-word-1") {
-        assert!(Instant::now() < end, "the typed text never reached the pane");
-        tokio::time::sleep(Duration::from_millis(50)).await;
+async fn view_of_a_bad_or_removed_id_is_an_error() {
+    let w = Worker::start(None).await;
+    for term in ["term:x", "term:tmux:w", "term:tmux@nope:x"] {
+        let v = w.ask(json!({"op": "view", "term": term, "sid": 1})).await;
+        assert_eq!(v, [json!({"t": "error", "error": "invalid term id"})], "{term}");
     }
-    drop(c);
-    let ended = w.event().await;
-    assert_eq!(ended, json!({"event": "ended", "sid": 7, "term": "term:tmux:w", "inputs": 2}));
-    let (rest, err, code) = w.stop().await;
-    assert_eq!(code, Some(0));
-    assert!(!rest.iter().any(|l| l.contains("secret-word-1")), "{rest:?}");
-    assert!(!err.contains("secret-word-1"), "{err}");
-}
-
-#[tokio::test]
-async fn view_without_a_sid_reports_nothing() {
-    let Some(s) = Server::start() else { return };
-    s.raw(&["new-session", "-d", "-s", "w", "-x", "80", "-y", "24", "cat"]);
-    let w = Worker::start(&s, None).await;
-    let mut c = w.connect(&json!({"op": "view", "term": "term:tmux:w"}), TOKEN).await;
-    assert_eq!(c.next().await["t"], "hello");
-    drop(c);
-    let (rest, _, code) = w.stop().await;
-    assert_eq!(code, Some(0));
-    assert_eq!(rest.len(), 1, "{rest:?}");
-}
-
-#[tokio::test]
-async fn view_of_an_unknown_host_or_a_bad_id_is_an_error() {
-    let Some(s) = Server::start() else { return };
-    let w = Worker::start(&s, None).await;
-    let v = w.ask(json!({"op": "view", "term": "term:tmux@nope:x", "sid": 1})).await;
-    assert_eq!(v, [json!({"t": "error", "error": "unknown host"})]);
-    let v = w.ask(json!({"op": "view", "term": "term:x"})).await;
-    assert_eq!(v, [json!({"t": "error", "error": "invalid term id"})]);
     let (rest, _, _) = w.stop().await;
     assert!(!rest.iter().any(|l| l.contains("ended")), "{rest:?}");
 }
 
 #[tokio::test]
-async fn new_makes_a_session_and_refuses_a_taken_name() {
-    let Some(s) = Server::start() else { return };
-    let w = Worker::start(&s, None).await;
-    let new = json!({"op": "new", "host": null, "name": "n1", "command": ["sh"], "cols": 100, "rows": 30});
-    assert_eq!(w.ask(new.clone()).await, [json!({"ok": true, "id": "term:tmux:n1"})]);
-    assert!(sessions(&s).contains(&"n1".to_string()), "{:?}", sessions(&s));
-    assert_eq!(w.ask(new).await, [json!({"error": "a session with that name already exists"})]);
-    let empty = json!({"op": "new", "host": null, "name": "n2", "command": [], "cols": 100, "rows": 30});
-    assert_eq!(w.ask(empty).await, [json!({"ok": true, "id": "term:tmux:n2"})]);
-    assert!(sessions(&s).contains(&"n2".to_string()), "{:?}", sessions(&s));
-    let far = json!({"op": "new", "host": "nope", "name": "n3", "command": ["sh"], "cols": 100, "rows": 30});
-    assert_eq!(w.ask(far).await, [json!({"error": "unknown host"})]);
-    // No name: the program's.
-    let unnamed = json!({"op": "new", "host": null, "command": ["/bin/sh"], "cols": 100, "rows": 30});
-    assert_eq!(w.ask(unnamed).await, [json!({"ok": true, "id": "term:tmux:sh"})]);
-    // No name for a typed command line: its first word's.
-    let line = json!({"op": "new", "host": null, "command": ["/bin/sleep 30 && true"], "cols": 100, "rows": 30});
-    assert_eq!(w.ask(line).await, [json!({"ok": true, "id": "term:tmux:sleep"})]);
-    assert!(sessions(&s).contains(&"sleep".to_string()), "{:?}", sessions(&s));
-    let (rest, err, _) = w.stop().await;
-    assert!(!rest.iter().any(|l| l.contains("/bin/sh")) && !err.contains("/bin/sh"), "{rest:?} {err}");
-}
-
-#[tokio::test]
-async fn stopping_leaves_no_control_client() {
-    let Some(s) = Server::start() else { return };
-    s.raw(&["new-session", "-d", "-s", "w", "-x", "80", "-y", "24", "cat"]);
-    let w = Worker::start(&s, None).await;
-    let mut c = w.connect(&json!({"op": "view", "term": "term:tmux:w", "sid": 3}), TOKEN).await;
-    assert_eq!(c.next().await["t"], "hello");
-    let pane = c.until("panes").await["panes"][0]["id"].as_str().unwrap().to_string();
-    c.send(json!({"t": "view", "pane": pane, "cols": 80, "rows": 24})).await;
-    c.until("screen").await;
-    assert!(!s.raw(&["list-clients"]).trim().is_empty(), "the view has no control client");
-    let (rest, _, code) = w.stop().await;
-    assert_eq!(code, Some(0));
-    let last: Value = serde_json::from_str(rest.last().unwrap()).unwrap();
-    assert_eq!(last["event"], "exit");
-    let end = Instant::now() + Duration::from_secs(2);
-    loop {
-        let clients = s.raw(&["list-clients"]);
-        if clients.trim().is_empty() {
-            break;
-        }
-        assert!(Instant::now() < end, "a control client is still there: {clients}");
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    // The worker closed the view.
-    assert!(c.line(WAIT).await.is_none());
-}
-
-#[tokio::test]
-async fn a_view_cut_off_by_stopping_is_still_reported() {
-    let Some(s) = Server::start() else { return };
-    s.raw(&["new-session", "-d", "-s", "w", "-x", "80", "-y", "24", "cat"]);
-    let w = Worker::start(&s, None).await;
-    let mut c = w.connect(&json!({"op": "view", "term": "term:tmux:w", "sid": 9}), TOKEN).await;
-    assert_eq!(c.next().await["t"], "hello");
-    let pane = c.until("panes").await["panes"][0]["id"].as_str().unwrap().to_string();
-    c.send(json!({"t": "type", "pane": pane, "text": "typed-before-stop"})).await;
-    let end = Instant::now() + WAIT;
-    while !s.raw(&["capture-pane", "-p", "-t", "w"]).contains("typed-before-stop") {
-        assert!(Instant::now() < end, "the typed text never reached the pane");
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    // The connection stays open: stopping the worker is what ends the view.
-    let (rest, _, code) = w.stop().await;
-    assert_eq!(code, Some(0));
-    let rest: Vec<Value> = rest.iter().map(|l| serde_json::from_str(l).unwrap()).collect();
-    assert_eq!(rest.len(), 2, "{rest:?}");
-    assert_eq!(rest[0], json!({"event": "ended", "sid": 9, "term": "term:tmux:w", "inputs": 1}));
-    assert_eq!(rest[1]["event"], "exit");
-    drop(c);
-}
-
-#[tokio::test]
 async fn terminals_off_in_the_config_refuse_everything() {
-    let Some(s) = Server::start() else { return };
-    s.raw(&["new-session", "-d", "-s", "w", "-x", "80", "-y", "24", "cat"]);
-    let w = Worker::start(&s, Some(r#"{"allow":false}"#)).await;
+    let w = Worker::start(Some(r#"{"allow":false}"#)).await;
     let off = json!({"error": "terminal sessions are off"});
     assert_eq!(w.ask(json!({"op": "list"})).await, std::slice::from_ref(&off));
     assert_eq!(w.ask(json!({"op": "watch"})).await, std::slice::from_ref(&off));
-    let new = json!({"op": "new", "host": null, "name": "n1", "command": ["sh"], "cols": 100, "rows": 30});
-    assert_eq!(w.ask(new).await, [off]);
-    let v = w.ask(json!({"op": "view", "term": "term:tmux:w", "sid": 1})).await;
+    let v = w.ask(json!({"op": "view", "term": "term:pty:w", "sid": 1})).await;
     assert_eq!(v, [json!({"t": "error", "error": "terminal sessions are off"})]);
-    assert!(!sessions(&s).contains(&"n1".to_string()));
     w.stop().await;
 }
 
 #[tokio::test]
 async fn an_unreadable_config_is_refused() {
-    let Some(s) = Server::start() else { return };
-    let w = Worker::start(&s, Some("{not json")).await;
+    let w = Worker::start(Some("{not json")).await;
     assert_eq!(w.ask(json!({"op": "list"})).await, [json!({"error": "term.json is invalid"})]);
     assert_eq!(w.ask(json!({"op": "watch"})).await, [json!({"error": "term.json is invalid"})]);
-    let v = w.ask(json!({"op": "view", "term": "term:tmux:w"})).await;
+    let v = w.ask(json!({"op": "view", "term": "term:pty:w"})).await;
     assert_eq!(v, [json!({"t": "error", "error": "term.json is invalid"})]);
     w.stop().await;
 }
 
 #[tokio::test]
 async fn watch_sends_a_list_now_then_only_changes() {
-    let Some(s) = Server::start() else { return };
-    let w = Worker::start(&s, None).await;
+    let w = Worker::start(None).await;
     let mut c = w.connect(&json!({"op": "watch"}), TOKEN).await;
     let first = c.next().await;
     assert_eq!((&first["terms"], plain(&first["hosts"][0])), (&json!([]), json!({"host": null})), "{first}");
-    // Output in the second the worker started does not count as unread.
-    tokio::time::sleep(Duration::from_millis(1100)).await;
-    s.raw(&["new-session", "-d", "-s", "w2", "-x", "80", "-y", "24", "cat"]);
-    c.until_list(WAIT, |l| row(l, "term:tmux:w2").is_some()).await;
-    c.until_list(Duration::from_secs(10), |l| unread(l, "term:tmux:w2") == Some(true)).await;
+    let _win = Window::start(&w.pty_dir(), &["--name", "w2", "--", "/bin/cat"]);
+    c.until_list(WAIT, |l| row(l, "term:pty:w2").is_some()).await;
     // Nothing changes from here, so nothing is sent.
     let more = timeout(Duration::from_secs(3), c.lines.next_line()).await;
     assert!(more.is_err(), "a line with no change: {more:?}");
@@ -496,45 +305,8 @@ async fn watch_sends_a_list_now_then_only_changes() {
 }
 
 #[tokio::test]
-async fn a_session_goes_unread_after_output_and_quiet_and_clears_when_viewed() {
-    let Some(s) = Server::start() else { return };
-    s.raw(&["new-session", "-d", "-s", "w", "-x", "80", "-y", "24", "cat"]);
-    let w = Worker::start(&s, None).await;
-    let mut c = w.connect(&json!({"op": "watch"}), TOKEN).await;
-    assert_eq!(unread(&c.next().await, "term:tmux:w"), Some(false));
-    // Output in the second the worker started does not count as unread.
-    tokio::time::sleep(Duration::from_millis(1100)).await;
-    s.raw(&["send-keys", "-t", "w", "echo hi", "Enter"]);
-    c.until_list(Duration::from_secs(10), |l| unread(l, "term:tmux:w") == Some(true)).await;
-    let mut v = w.connect(&json!({"op": "view", "term": "term:tmux:w"}), TOKEN).await;
-    assert_eq!(v.next().await["t"], "hello");
-    let pane = v.until("panes").await["panes"][0]["id"].as_str().unwrap().to_string();
-    v.send(json!({"t": "view", "pane": pane, "cols": 80, "rows": 24})).await;
-    v.until("screen").await;
-    // A line can go out between the view attaching (`attached` changes) and its first screen, so the one that
-    // clears unread is not always the very next.
-    c.until_list(WAIT, |l| unread(l, "term:tmux:w") == Some(false)).await;
-    drop(v);
-    w.stop().await;
-}
-
-#[tokio::test]
-async fn a_target_added_while_watching_shows_up() {
-    let Some(s) = Server::start() else { return };
-    let w = Worker::start(&s, None).await;
-    let mut c = w.connect(&json!({"op": "watch"}), TOKEN).await;
-    assert_eq!(plain(&c.next().await["hosts"][0]), json!({"host": null}));
-    std::fs::write(w.config(), r#"{"targets":[{"name":"gone","target":"nohost.invalid"}]}"#).unwrap();
-    let failed = |h: &Value| h["host"] == "gone" && h["error"].as_str().is_some_and(|e| !e.is_empty());
-    let l = c.until_list(SSH_WAIT, |l| l["hosts"].as_array().unwrap().iter().any(failed)).await;
-    assert_eq!((plain(&l["hosts"][0]), &l["hosts"][1]["target"]), (json!({"host": null}), &json!("nohost.invalid")));
-    w.stop().await;
-}
-
-#[tokio::test]
 async fn turning_terminals_off_ends_the_watch() {
-    let Some(s) = Server::start() else { return };
-    let w = Worker::start(&s, None).await;
+    let w = Worker::start(None).await;
     let mut c = w.connect(&json!({"op": "watch"}), TOKEN).await;
     c.next().await;
     std::fs::write(w.config(), r#"{"allow":false}"#).unwrap();
@@ -546,8 +318,7 @@ async fn turning_terminals_off_ends_the_watch() {
 
 #[tokio::test]
 async fn the_watch_ends_when_the_worker_stops() {
-    let Some(s) = Server::start() else { return };
-    let mut w = Worker::start(&s, None).await;
+    let mut w = Worker::start(None).await;
     let mut c = w.connect(&json!({"op": "watch"}), TOKEN).await;
     c.next().await;
     drop(w.stdin.take());
@@ -562,14 +333,14 @@ fn terms_of(v: &[Value]) -> Vec<String> {
 }
 
 #[tokio::test]
-async fn a_pty_session_is_listed_after_tmux_ones() {
-    let Some(s) = Server::start() else { return };
-    s.raw(&["new-session", "-d", "-s", "a", "-x", "80", "-y", "24", "cat"]);
-    let w = Worker::start(&s, None).await;
+async fn a_pty_session_is_listed() {
+    let w = Worker::start(None).await;
     let _win = Window::start(&w.pty_dir(), &["--name", "t", "--", "/bin/cat"]);
-    common::pty::wait_status(&w.pty_dir(), "t").await;
+    pty::wait_status(&w.pty_dir(), "t").await;
     let v = w.ask(json!({"op": "list"})).await;
-    assert_eq!(terms_of(&v), ["term:tmux:a", "term:pty:t"], "{v:?}");
+    assert_eq!(terms_of(&v), ["term:pty:t"], "{v:?}");
+    assert_eq!(v[0]["hosts"].as_array().unwrap().len(), 1);
+    assert_eq!(plain(&v[0]["hosts"][0]), json!({"host": null}));
     let t = row(&v[0], "term:pty:t").unwrap();
     assert_eq!((t["panes"].as_u64(), t["attached"].as_u64(), t["dead"].as_bool()), (Some(1), Some(0), Some(false)));
     assert_eq!((&t["host"], &t["name"], &t["command"]), (&json!(null), &json!("t"), &json!("/bin/cat")));
@@ -578,22 +349,8 @@ async fn a_pty_session_is_listed_after_tmux_ones() {
 }
 
 #[tokio::test]
-async fn pty_rows_are_listed_without_tmux() {
-    let Some(s) = Server::start() else { return };
-    let empty = tempfile::tempdir().unwrap();
-    let w = Worker::start_in(&s, short_dir(), None, Some(empty.path())).await;
-    let _win = Window::start(&w.pty_dir(), &["--name", "t", "--", "/bin/cat"]);
-    common::pty::wait_status(&w.pty_dir(), "t").await;
-    let v = w.ask(json!({"op": "list"})).await;
-    assert!(v[0]["hosts"][0]["error"].is_string(), "{v:?}");
-    assert_eq!(terms_of(&v), ["term:pty:t"], "{v:?}");
-    w.stop().await;
-}
-
-#[tokio::test]
 async fn a_watch_sees_a_pty_session_come_and_go() {
-    let Some(s) = Server::start() else { return };
-    let w = Worker::start(&s, None).await;
+    let w = Worker::start(None).await;
     let mut c = w.connect(&json!({"op": "watch"}), TOKEN).await;
     assert_eq!(c.next().await["terms"], json!([]));
     let _win = Window::start(&w.pty_dir(), &["--name", "t", "--", "/bin/cat"]);
@@ -608,10 +365,9 @@ async fn a_watch_sees_a_pty_session_come_and_go() {
 
 #[tokio::test]
 async fn viewing_a_pty_session_goes_through_serve() {
-    let Some(s) = Server::start() else { return };
-    let mut w = Worker::start(&s, None).await;
+    let mut w = Worker::start(None).await;
     let win = Window::start(&w.pty_dir(), &["--name", "t", "--", "/bin/cat"]);
-    common::pty::wait_status(&w.pty_dir(), "t").await;
+    pty::wait_status(&w.pty_dir(), "t").await;
     let mut c = w.connect(&json!({"op": "view", "term": "term:pty:t", "sid": 5}), TOKEN).await;
     let hello = c.next().await;
     assert_eq!((hello["t"].as_str(), hello["backend"].as_str()), (Some("hello"), Some("pty")), "{hello}");
@@ -629,9 +385,19 @@ async fn viewing_a_pty_session_goes_through_serve() {
 }
 
 #[tokio::test]
+async fn the_old_tmux_and_targets_fields_are_ignored() {
+    let cfg = r#"{"allow":true,"tmux":"/x","targets":[{"name":"g","target":"me@g"}]}"#;
+    let w = Worker::start_in(short_dir(), Some(cfg), Some(tempfile::tempdir().unwrap().path())).await;
+    let v = w.ask(json!({"op": "list"})).await;
+    assert_eq!(v.len(), 1, "{v:?}");
+    assert_eq!(v[0]["terms"], json!([]));
+    assert_eq!(v[0]["hosts"].as_array().unwrap().len(), 1, "{v:?}");
+    w.stop().await;
+}
+
+#[tokio::test]
 async fn an_unknown_text_terminal_is_an_error() {
-    let Some(s) = Server::start() else { return };
-    let w = Worker::start(&s, None).await;
+    let w = Worker::start(None).await;
     let v = w.ask(json!({"op": "view", "term": "term:pty:nope"})).await;
     assert_eq!(v, [json!({"t": "error", "error": "no such text terminal"})]);
     let v = w.ask(json!({"op": "view", "term": "term:pty@h:nope"})).await;
@@ -641,14 +407,13 @@ async fn an_unknown_text_terminal_is_an_error() {
 
 #[tokio::test]
 async fn restarting_serve_finds_the_session_again() {
-    let Some(s) = Server::start() else { return };
-    let first = Worker::start(&s, None).await;
+    let first = Worker::start(None).await;
     let mut win = Window::start(&first.pty_dir(), &["--name", "t", "--", "/bin/cat"]);
-    common::pty::wait_status(&first.pty_dir(), "t").await;
+    pty::wait_status(&first.pty_dir(), "t").await;
     let (_, _, code, dir) = first.stop_keeping().await;
     assert_eq!(code, Some(0));
     assert!(win.alive());
-    let second = Worker::start_in(&s, dir, None, None).await;
+    let second = Worker::start_in(dir, None, None).await;
     let v = second.ask(json!({"op": "list"})).await;
     assert_eq!(terms_of(&v), ["term:pty:t"], "{v:?}");
     assert!(win.alive());
@@ -657,13 +422,12 @@ async fn restarting_serve_finds_the_session_again() {
 
 #[tokio::test]
 async fn open_starts_a_window_and_answers_its_id() {
-    let Some(s) = Server::start() else { return };
-    let w = Worker::start_launching(&s).await;
+    let w = Worker::start_launching().await;
     let r = w.ask(json!({"op":"open","command":"/bin/cat","name":"c","app":"Terminal"})).await;
     assert_eq!(r, [json!({"id": "term:pty:c"})]);
     let list = &w.ask(json!({"op": "list"})).await[0];
     assert!(row(list, "term:pty:c").is_some(), "{list}");
-    let st = common::pty::wait_status(&w.pty_dir(), "c").await;
+    let st = pty::wait_status(&w.pty_dir(), "c").await;
     unsafe { libc::kill(st.pid as i32, libc::SIGTERM) };
     let launch = w.pty_dir().join("launch");
     assert!(std::fs::read_dir(launch).unwrap().next().is_none(), "the .command file is removed");
@@ -672,8 +436,7 @@ async fn open_starts_a_window_and_answers_its_id() {
 
 #[tokio::test]
 async fn open_refuses_a_missing_directory_and_an_unknown_app() {
-    let Some(s) = Server::start() else { return };
-    let w = Worker::start_launching(&s).await;
+    let w = Worker::start_launching().await;
     let r = w.ask(json!({"op":"open","cwd":"/no/such","app":"Terminal"})).await;
     assert_eq!(r, [json!({"error": "no such directory: /no/such"})]);
     let r = w.ask(json!({"op":"open","app":"Warp"})).await;
@@ -683,8 +446,7 @@ async fn open_refuses_a_missing_directory_and_an_unknown_app() {
 
 #[tokio::test]
 async fn open_gives_up_after_ten_seconds() {
-    let Some(s) = Server::start() else { return };
-    let w = Worker::start_with(&s, short_dir(), None, None, Some(Path::new("/usr/bin/true"))).await;
+    let w = Worker::start_with(short_dir(), None, None, Some(Path::new("/usr/bin/true"))).await;
     let r = w.ask(json!({"op":"open","app":"Terminal"})).await;
     assert_eq!(r, [json!({"error": "the terminal window did not start in 10 s"})]);
     // A window that is slow to start may still read it; a later open sweeps it once it is old.
@@ -696,8 +458,7 @@ async fn open_gives_up_after_ten_seconds() {
 #[cfg(target_os = "macos")]
 #[tokio::test]
 async fn this_machine_lists_its_launchers() {
-    let Some(s) = Server::start() else { return };
-    let w = Worker::start(&s, None).await;
+    let w = Worker::start(None).await;
     let list = &w.ask(json!({"op": "list"})).await[0];
     assert!(list["hosts"][0]["launchers"].as_array().unwrap().contains(&json!("Terminal")), "{list}");
     w.stop().await;

@@ -43,12 +43,12 @@ pub fn is_term(s: &str) -> bool {
 /// Whether `name` can be the host of a term id and read back the same: `a:b` would parse, but as host `a` and a
 /// name starting `b:`.
 pub fn valid_host(name: &str) -> bool {
-    let id = TermId { backend: "tmux".into(), host: Some(name.to_string()), name: "-".into() };
+    let id = TermId { backend: "pty".into(), host: Some(name.to_string()), name: "-".into() };
     matches!(TermId::parse(&id.to_string()), Ok(t) if t.host.as_deref() == Some(name))
 }
 
-/// A session name tmux keeps as given on every version: tmux before 3.5 turns `:` and `.` into `_`, so they are
-/// turned here; empty names and control characters are refused.
+/// A session name fit for a term id and a socket name: `:` and `.` are turned into `_`; empty names and control
+/// characters are refused.
 pub fn session_name(s: &str) -> Option<String> {
     if s.is_empty() || s.chars().any(char::is_control) {
         return None;
@@ -81,16 +81,16 @@ mod tests {
 
     #[test]
     fn parses_and_prints() {
-        let t = TermId::parse("term:tmux:work").unwrap();
-        assert_eq!((t.backend.as_str(), t.host.as_deref(), t.name.as_str()), ("tmux", None, "work"));
-        let t = TermId::parse("term:tmux@gpu1:训练 run:2").unwrap();
+        let t = TermId::parse("term:pty:work").unwrap();
+        assert_eq!((t.backend.as_str(), t.host.as_deref(), t.name.as_str()), ("pty", None, "work"));
+        let t = TermId::parse("term:pty@gpu1:训练 run:2").unwrap();
         assert_eq!((t.host.as_deref(), t.name.as_str()), (Some("gpu1"), "训练 run:2"));
-        assert_eq!(t.to_string(), "term:tmux@gpu1:训练 run:2");
+        assert_eq!(t.to_string(), "term:pty@gpu1:训练 run:2");
     }
 
     #[test]
     fn term_prefix_and_host_names() {
-        assert!(is_term("term:tmux:work") && !is_term("com.apple.Safari") && !is_term("term"));
+        assert!(is_term("term:pty:work") && !is_term("com.apple.Safari") && !is_term("term"));
         assert!(valid_host("gpu1") && valid_host("gpu-1.lab"));
         assert!(!valid_host("") && !valid_host("a:b") && !valid_host("a b") && !valid_host("a@b"));
     }
@@ -120,13 +120,13 @@ mod tests {
     #[test]
     fn rejects_malformed() {
         for bad in [
-            "tmux:work",
+            "pty:work",
             "term:",
             "term::x",
-            "term:tmux:",
-            "term:TMUX:x",
-            "term:tmux@:x",
-            "term:tmux@a b:x",
+            "term:pty:",
+            "term:PTY:x",
+            "term:pty@:x",
+            "term:pty@a b:x",
             "com.apple.Safari",
         ] {
             assert!(TermId::parse(bad).is_err(), "{bad}");

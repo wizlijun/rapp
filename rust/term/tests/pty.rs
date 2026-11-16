@@ -1,8 +1,9 @@
 //! `rapp-term run` in a terminal window of its own (a pty the test holds), seen through its local socket.
 
-mod common;
+#[path = "common/pty.rs"]
+mod pty;
 
-use common::pty::{process_exists, short_dir, socket_of, wait_status, Viewer, Window, BIN, WAIT};
+use pty::{process_exists, short_dir, socket_of, wait_status, Viewer, Window, BIN, WAIT};
 use rapp_term::pty::local;
 use serde_json::json;
 use std::process::{Command, Stdio};
@@ -96,7 +97,7 @@ async fn a_viewer_cannot_change_the_size() {
     v.open().await;
     v.send(json!({"t":"refit","pane":"%0","cols":50,"rows":10})).await;
     let seen = v.until(|_, m| m["t"] == "error").await;
-    assert_eq!(seen.last().unwrap()["error"], "the size follows the window on the host");
+    assert_eq!(seen.last().unwrap()["error"], "bad message");
     let s = wait_status(d.path(), "t").await;
     assert_eq!((s.cols, s.rows), (100, 30));
 }

@@ -1,39 +1,23 @@
-//! The `rapp-term` command: version, list, watch, new, run, serve.
+//! The `rapp-term` command: version, run, serve.
 //!
-//! Exit codes: 0 ok, 1 a runtime error (tmux missing or failing, the session not there or not made), 2 an
-//! argument error or `run` without a terminal. `run` otherwise exits as its program did (see `pty::holder`).
-//! Errors go to stderr as one line and never carry the command, the screen or the input.
+//! Exit codes: 0 ok, 1 a runtime error, 2 an argument error or `run` without a terminal. `run` otherwise exits as
+//! its program did (see `pty::holder`). Errors go to stderr as one line and never carry the command, the screen or
+//! the input.
 
-use rapp_term::id::{default_name, session_name, valid_host, TermId};
+use rapp_term::id::session_name;
 use rapp_term::proto::PROTO;
 use rapp_term::pty::holder::{self, NoTerminal, RunOpts};
 use rapp_term::pty::local;
-use rapp_term::runner::Runner;
 use rapp_term::serve::{self, ServeOpts};
-use rapp_term::session::{self, Opts};
-use rapp_term::list::{host_rows, TermRow};
-use rapp_term::tmux::{PaneInfo, Tmux};
-use rapp_term::unread::Unread;
 use serde::Serialize;
 use std::io::Write;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 const USAGE: &str = "\
 usage: rapp-term version [--json]
-       rapp-term list [--json] [--ssh <destination> --host <name>] [--tmux <path>]
-       rapp-term watch <term id> [--ssh <destination>] [--tmux <path>] [--json]
-       rapp-term new [--name <name>] [--size <cols>x<rows>] [--ssh <destination> --host <name>] [--tmux <path>] \
--- <command...>
        rapp-term run [--name N] [--cwd DIR] [--dir DIR] [--ticket T] [-- COMMAND...]
        rapp-term serve --token-env <variable> --config <path> [--bind <address>] [--port <port>] [--json]";
-
-/// The only backend this command serves.
-const BACKEND: &str = "tmux";
-/// The size of a new session when `--size` is not given.
-const DEFAULT_SIZE: (u16, u16) = (80, 24);
 
 /// Why the command stopped.
 enum Fail {
@@ -59,13 +43,7 @@ type Res<T> = Result<T, Fail>;
 #[derive(Default)]
 struct Args {
     json: bool,
-    ssh: Option<String>,
-    host: Option<String>,
-    tmux: Option<String>,
-    /// Hidden: a named tmux server (`tmux -L`), for tests.
-    socket: Option<String>,
     name: Option<String>,
-    size: Option<String>,
     token_env: Option<String>,
     config: Option<String>,
     bind: Option<String>,
@@ -109,12 +87,7 @@ fn parse_args(allowed: &[&str], argv: &[String]) -> Res<Args> {
             continue;
         }
         let slot = match opt {
-            "ssh" => &mut a.ssh,
-            "host" => &mut a.host,
-            "tmux" => &mut a.tmux,
-            "socket" => &mut a.socket,
             "name" => &mut a.name,
-            "size" => &mut a.size,
             "token-env" => &mut a.token_env,
             "config" => &mut a.config,
             "bind" => &mut a.bind,
@@ -125,97 +98,13 @@ fn parse_args(allowed: &[&str], argv: &[String]) -> Res<Args> {
             "launch-with" => &mut a.launch_with,
             _ => return Err(usage("unknown option")),
         };
-        // The value is the next argument whatever it looks like; `Runner::ssh` rejects a destination like `-o…`.
-        let Some(v) = it.next() else { return Err(usage(format!("--{opt} needs a value"))) };
+        // The value is the next argument whatever it looks like.
+        let Some(v) = it.next() else {
+            return Err(usage(format!("--{opt} needs a value")));
+        };
         *slot = Some(v.clone());
     }
     Ok(a)
-}
-
-/// `<cols>x<rows>`, both above zero.
-fn parse_size(s: &str) -> Option<(u16, u16)> {
-    let (c, r) = s.split_once('x')?;
-    let all_digits = |t: &str| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit());
-    if !all_digits(c) || !all_digits(r) {
-        return None;
-    }
-    let (c, r): (u16, u16) = (c.parse().ok()?, r.parse().ok()?);
-    (c > 0 && r > 0).then_some((c, r))
-}
-
-fn term_id(host: Option<&str>, name: &str) -> TermId {
-    TermId { backend: BACKEND.into(), host: host.map(str::to_string), name: name.to_string() }
-}
-
-/// `--host` must be something a term id can carry.
-fn check_host(a: &Args) -> Res<()> {
-    let Some(h) = &a.host else { return Ok(()) };
-    if a.ssh.is_none() {
-        return Err(usage("--host goes with --ssh"));
-    }
-    match valid_host(h) {
-        true => Ok(()),
-        false => Err(usage("invalid --host name")),
-    }
-}
-
-/// The ssh control-connection directory: `/tmp/rapp-term-<user>` on unix.
-fn ctl_dir() -> PathBuf {
-    let user = std::env::var("USER").or_else(|_| std::env::var("LOGNAME")).unwrap_or_default();
-    ctl_dir_for(&user)
-}
-
-fn ctl_dir_for(user: &str) -> PathBuf {
-    let user: String = user.chars().filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')).collect();
-    let user = if user.is_empty() { "user".to_string() } else { user };
-    // /tmp, not temp_dir(): macOS's TMPDIR (/var/folders/…/T/, ~49 bytes) plus `/%C` (40) and ssh's temporary
-    // suffix overflow the 104-byte unix socket path, and ssh then silently drops multiplexing.
-    #[cfg(unix)]
-    let base = PathBuf::from("/tmp");
-    #[cfg(not(unix))]
-    let base = std::env::temp_dir();
-    base.join(format!("rapp-term-{user}"))
-}
-
-/// Make `dir` (or keep it) readable by its owner only.
-fn private_dir(dir: &Path) -> std::io::Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-        match std::fs::DirBuilder::new().mode(0o700).create(dir) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
-            }
-            Err(e) => Err(e),
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        std::fs::create_dir_all(dir)
-    }
-}
-
-/// The tmux the options point at. Argument errors come before anything is made on disk.
-fn tmux_of(a: &Args) -> Res<Tmux> {
-    let runner = match &a.ssh {
-        None => Runner::Local,
-        Some(dest) => {
-            let dir = ctl_dir();
-            let r = Runner::ssh(dest, &dir).map_err(|_| usage("invalid --ssh destination"))?;
-            private_dir(&dir).map_err(|_| runtime("could not make the ssh control directory"))?;
-            r
-        }
-    };
-    Ok(Tmux { runner, bin: a.tmux.clone().unwrap_or_else(|| BACKEND.into()), socket: a.socket.clone() })
-}
-
-async fn check(tmux: &Tmux) -> Res<()> {
-    tmux.check().await.map_err(|e| runtime(format!("tmux is not usable: {e}")))
-}
-
-async fn list_panes(tmux: &Tmux) -> Res<Vec<PaneInfo>> {
-    tmux.list().await.map_err(|e| runtime(format!("could not list the tmux sessions: {e}")))
 }
 
 fn version(a: &Args) {
@@ -230,84 +119,6 @@ fn version(a: &Args) {
     } else {
         println!("rapp-term {} (protocol {PROTO})", env!("CARGO_PKG_VERSION"));
     }
-}
-
-async fn list(a: &Args) -> Res<()> {
-    if !a.pos.is_empty() {
-        return Err(usage("list takes no arguments"));
-    }
-    check_host(a)?;
-    let tmux = tmux_of(a)?;
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs());
-    // `Unread::new(now)`: a one-shot listing has no history, so nothing is unread.
-    let unread = Mutex::new(Unread::new(now));
-    let rows = host_rows(&tmux, a.host.as_deref(), &unread, now)
-        .await
-        .map_err(|e| runtime(format!("could not list the tmux sessions: {e}")))?;
-    if a.json {
-        #[derive(Serialize)]
-        struct L {
-            sessions: Vec<TermRow>,
-        }
-        println!("{}", serde_json::to_string(&L { sessions: rows }).expect("always serializes"));
-    } else {
-        for r in rows {
-            println!("{}\t{}\t{}", r.id, r.command, r.panes);
-        }
-    }
-    Ok(())
-}
-
-async fn watch(a: &Args) -> Res<()> {
-    let [id] = a.pos.as_slice() else { return Err(usage("watch takes one term id")) };
-    let id = TermId::parse(id).map_err(|_| usage("invalid term id"))?;
-    if id.backend != BACKEND {
-        return Err(usage("unsupported term backend"));
-    }
-    if id.host.is_some() && a.ssh.is_none() {
-        return Err(usage("the term id names a host: give --ssh"));
-    }
-    let tmux = tmux_of(a)?;
-    check(&tmux).await?;
-    if !list_panes(&tmux).await?.iter().any(|p| p.session == id.name) {
-        return Err(runtime("no such session"));
-    }
-    let unread = Arc::new(Mutex::new(Unread::default()));
-    let input = tokio::io::BufReader::new(tokio::io::stdin());
-    session::run(&tmux, &id.name, input, tokio::io::stdout(), unread, Opts::default())
-        .await
-        .map_err(|e| runtime(format!("watch stopped: {e}")))
-}
-
-async fn new(a: &Args) -> Res<()> {
-    if !a.pos.is_empty() {
-        return Err(usage("unexpected argument: the command goes after --"));
-    }
-    let command = match &a.command {
-        Some(c) if !c.is_empty() => c,
-        _ => return Err(usage("new needs a command after --")),
-    };
-    let (cols, rows) = match &a.size {
-        None => DEFAULT_SIZE,
-        Some(s) => parse_size(s).ok_or_else(|| usage("invalid --size: use <cols>x<rows>"))?,
-    };
-    let name = a.name.as_deref().unwrap_or_else(|| default_name(&command[0]));
-    let name = session_name(name).ok_or_else(|| usage("invalid session name"))?;
-    check_host(a)?;
-    let tmux = tmux_of(a)?;
-    check(&tmux).await?;
-    if list_panes(&tmux).await?.iter().any(|p| p.session == name) {
-        return Err(runtime("a session with that name already exists"));
-    }
-    // tmux's own words may quote the command, so they are not passed on.
-    tmux.new_session(&name, command, cols, rows).await.map_err(|_| runtime("could not create the session"))?;
-    let id = term_id(a.host.as_deref(), &name).to_string();
-    if a.json {
-        println!("{}", serde_json::json!({ "id": id }));
-    } else {
-        println!("{id}");
-    }
-    Ok(())
 }
 
 /// A program in a pty in this terminal window; the program's exit code.
@@ -369,15 +180,8 @@ async fn serve(a: &Args) -> Res<()> {
     };
     let listener = tokio::net::TcpListener::bind((ip, port)).await.map_err(|_| runtime("could not listen"))?;
     let port = listener.local_addr().map_err(|_| runtime("could not listen"))?.port();
-    let dir = ctl_dir();
-    if private_dir(&dir).is_err() {
-        eprintln!("rapp-term: could not make the ssh control directory");
-    }
-    let opts = ServeOpts {
-        socket: a.socket.clone(),
-        launch_with: a.launch_with.as_ref().map(PathBuf::from),
-        ..ServeOpts::new(PathBuf::from(config), dir)
-    };
+    let opts =
+        ServeOpts { launch_with: a.launch_with.as_ref().map(PathBuf::from), ..ServeOpts::new(PathBuf::from(config)) };
     event(a.json, &serde_json::json!({ "event": "listening", "port": port }));
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let json = a.json;
@@ -399,14 +203,13 @@ async fn serve(a: &Args) -> Res<()> {
 }
 
 fn dispatch(argv: &[String]) -> Res<i32> {
-    let Some((sub, rest)) = argv.split_first() else { return Err(usage("missing subcommand")) };
+    let Some((sub, rest)) = argv.split_first() else {
+        return Err(usage("missing subcommand"));
+    };
     let allowed: &[&str] = match sub.as_str() {
-        "version" => &["json", "socket"],
-        "list" => &["json", "ssh", "host", "tmux", "socket"],
-        "watch" => &["json", "ssh", "tmux", "socket"],
-        "new" => &["json", "name", "size", "ssh", "host", "tmux", "socket", "--"],
+        "version" => &["json"],
         "run" => &["name", "cwd", "dir", "ticket", "--"],
-        "serve" => &["json", "token-env", "config", "bind", "port", "socket", "launch-with"],
+        "serve" => &["json", "token-env", "config", "bind", "port", "launch-with"],
         "help" | "--help" | "-h" => {
             println!("{USAGE}");
             return Ok(0);
@@ -427,11 +230,8 @@ fn dispatch(argv: &[String]) -> Res<i32> {
         .map_err(|_| runtime("could not start the async runtime"))?;
     let res = rt.block_on(async {
         match sub.as_str() {
-            "list" => list(&a).await.map(|()| 0),
-            "watch" => watch(&a).await.map(|()| 0),
             "serve" => serve(&a).await.map(|()| 0),
-            "run" => run(&a).await,
-            _ => new(&a).await.map(|()| 0),
+            _ => run(&a).await,
         }
     });
     // Dropping the runtime would wait for tokio's blocking stdin read, which lasts as long as stdin stays open.
@@ -484,43 +284,12 @@ mod tests {
 
     #[test]
     fn options_take_the_next_argument_as_their_value() {
-        let a = parse_args(&["ssh", "json"], &s(&["--ssh", "-oProxyCommand=x", "--json"])).ok().unwrap();
-        assert_eq!((a.ssh.as_deref(), a.json), (Some("-oProxyCommand=x"), true));
-        assert!(parse_args(&["ssh"], &s(&["--ssh"])).is_err());
+        let a = parse_args(&["name", "json"], &s(&["--name", "-oProxyCommand=x", "--json"])).ok().unwrap();
+        assert_eq!((a.name.as_deref(), a.json), (Some("-oProxyCommand=x"), true));
+        assert!(parse_args(&["name"], &s(&["--name"])).is_err());
         assert!(parse_args(&["json"], &s(&["--name", "x"])).is_err());
         assert!(parse_args(&["json"], &s(&["--", "x"])).is_err());
         let a = parse_args(&["--", "name"], &s(&["--name", "n", "--", "sh", "--json"])).ok().unwrap();
         assert_eq!(a.command, Some(s(&["sh", "--json"])));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn control_socket_paths_fit_a_unix_socket_address() {
-        let dir = ctl_dir_for("firstname.lastname01");
-        assert_eq!(dir, Path::new("/tmp/rapp-term-firstname.lastname01"));
-        // `<dir>/%C` (40 hex characters), then ssh's temporary bind suffix (about 17), within sun_path's 104 bytes.
-        let len = dir.as_os_str().len() + 1 + 40 + 17;
-        assert!(len <= 104, "{len}");
-    }
-
-    #[test]
-    fn hosts_must_read_back_the_same_from_an_id() {
-        let host = |h: &str| Args { ssh: Some("d".into()), host: Some(h.into()), ..Args::default() };
-        for good in ["gpu1", "gpu1.lab", "my_host-2"] {
-            assert!(check_host(&host(good)).is_ok(), "{good}");
-        }
-        for bad in ["a:b", "", "a b", "a@b", "a/b"] {
-            assert!(matches!(check_host(&host(bad)), Err(Fail::Usage(_))), "{bad}");
-        }
-        let no_ssh = Args { host: Some("gpu1".into()), ..Args::default() };
-        assert!(matches!(check_host(&no_ssh), Err(Fail::Usage(_))));
-    }
-
-    #[test]
-    fn sizes_and_names() {
-        assert_eq!(parse_size("90x20"), Some((90, 20)));
-        for bad in ["axb", "90", "x20", "90x", "0x20", "90x0", "+9x20", "99999x20", "90x20x1"] {
-            assert_eq!(parse_size(bad), None, "{bad}");
-        }
     }
 }

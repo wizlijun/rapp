@@ -2,8 +2,21 @@
 //! list and history messages, and joining a paste that comes in chunks.
 
 use crate::proto::{self, Out, Pane};
-use crate::tmux::{HistoryRows, MAX_PASTE};
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
+
+/// The most text one paste may carry, in bytes.
+pub const MAX_PASTE: usize = 1_048_576;
+/// A slice of scrollback: `wrapped` holds indexes into `lines` (k: row k+1 continues row k); `size` is how many rows
+/// of scrollback the pane held when it was read.
+#[derive(Debug, Default, PartialEq)]
+pub struct HistoryRows {
+    pub lines: Vec<String>,
+    pub wrapped: Vec<u32>,
+    pub size: u32,
+}
+
+/// The most scrollback rows one `history` call reads.
+pub const MAX_HISTORY: u32 = 2000;
 
 /// The longest `In` line accepted, newline excluded: input lines are held to `proto::MAX_LINE` like output.
 /// A longer paste comes as several `Text` chunks.

@@ -1,5 +1,4 @@
-//! One viewer of a `rapp-term run`: speaks the session protocol over a local connection, from the emulator
-//! instead of from tmux.
+//! One viewer of a `rapp-term run`: speaks the session protocol over a local connection, from the emulator.
 
 use super::Shared;
 use crate::id::default_name;
@@ -251,10 +250,8 @@ impl<W: AsyncWrite + Unpin> Viewer<'_, W> {
         let target = match &m {
             In::View { pane: Some(p), .. }
             | In::Keys { pane: p, .. }
-            | In::NewWindow { pane: p }
             | In::Type { pane: p, .. }
-            | In::History { pane: p, .. }
-            | In::Refit { pane: p, .. } => Some(p),
+            | In::History { pane: p, .. } => Some(p),
             _ => None,
         };
         if target.is_some_and(|p| p != PANE) {
@@ -295,18 +292,9 @@ impl<W: AsyncWrite + Unpin> Viewer<'_, W> {
                 self.input(text.into_bytes()).await?;
             }
             In::Text { .. } => {}
-            In::NewWindow { .. } => self.error("a text terminal has one window").await?,
             In::History { before, lines, .. } => {
                 let rows = self.shared.emu.lock().unwrap_or_else(|e| e.into_inner()).history(before, lines);
                 self.put(&history_msg(PANE, before, rows)).await?;
-            }
-            In::Refit { .. } => {
-                self.error("the size follows the window on the host").await?;
-                if self.viewing {
-                    self.sender.switch(PANE);
-                    self.refresh().await?;
-                    return Ok(true);
-                }
             }
         }
         Ok(false)
@@ -318,7 +306,7 @@ mod tests {
     use super::*;
     use crate::pty::grid::Emu;
     use crate::pty::Meta;
-    use crate::tmux::MAX_PASTE;
+    use crate::wire::MAX_PASTE;
     use serde_json::{json, Value};
     use std::sync::atomic::{AtomicU32, AtomicU64};
     use std::sync::Mutex;
@@ -440,7 +428,10 @@ mod tests {
         }
         c.send(json!({"t":"text","pane":"%0","data":"y","enter":false,"more":false})).await;
         let r = c.next().await;
-        assert_eq!((r["t"].as_str(), r["ok"].as_bool(), r["error"].as_str()), (Some("pasted"), Some(false), Some(TOO_LONG)));
+        assert_eq!(
+            (r["t"].as_str(), r["ok"].as_bool(), r["error"].as_str()),
+            (Some("pasted"), Some(false), Some(TOO_LONG))
+        );
         assert!(input.try_recv().is_err());
     }
 
@@ -474,14 +465,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn refit_is_refused_and_the_size_stays() {
+    async fn refit_and_new_window_are_bad_messages_and_the_size_stays() {
         let (sh, _input) = shared(20, 5);
         let mut c = viewer(&sh);
         c.open().await;
         c.send(json!({"t":"refit","pane":"%0","cols":100,"rows":40})).await;
-        assert_eq!(c.next().await["error"], "the size follows the window on the host");
-        let s = c.next().await;
-        assert_eq!((s["cols"].as_u64(), s["full"].as_bool()), (Some(20), Some(true)));
+        assert_eq!(c.next().await["error"], "bad message");
+        c.send(json!({"t":"new_window","pane":"%0"})).await;
+        assert_eq!(c.next().await["error"], "bad message");
     }
 
     #[tokio::test]
@@ -489,8 +480,6 @@ mod tests {
         let (sh, mut input) = shared(20, 5);
         let mut c = viewer(&sh);
         c.open().await;
-        c.send(json!({"t":"new_window","pane":"%0"})).await;
-        assert_eq!(c.next().await["error"], "a text terminal has one window");
         c.send(json!({"t":"keys","pane":"%9","keys":["a"]})).await;
         assert_eq!(c.next().await["error"], "no such pane");
         c.send(json!({"t":"history","pane":"%0","before":0,"lines":10})).await;
