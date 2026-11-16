@@ -30,7 +30,7 @@ class NativeEditor implements ComposerEditor {
 
   // Commands are enqueued before the platform view is ready. Native text commands also queue
   // behind marked text, so read/take never overtake a pending set/insert.
-  Future<T?> _text<T>(String method, [String? value]) {
+  Future<T?> _text<T>(String method, [Object? value]) {
     final result = _tail.then((_) async => (await _ready.future).invokeMethod<T>(method, value));
     _tail = result.then<void>((_) {}, onError: (Object _, StackTrace _) {});
     return result;
@@ -104,6 +104,10 @@ class NativeEditor implements ComposerEditor {
     _wantFocus = false;
     if (_ready.isCompleted) unawaited(_ready.future.then((c) => c.invokeMethod<void>('unfocus')));
   }
+
+  // In line with the text commands, so the labels are there before the marks they draw.
+  @override
+  void chips(Map<int, String> labels) => unawaited(_text<void>('chips', Map.of(labels)));
 
   @override
   void setText(String text) {

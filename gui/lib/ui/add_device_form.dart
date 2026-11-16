@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../hub_client.dart';
 import 'controls.dart';
 import 'lifecycle.dart' show disconnectWord;
+import 'secure_text_field.dart';
 import 'tokens.dart';
 
 class AddDeviceForm extends StatefulWidget {
@@ -69,12 +70,9 @@ class _AddDeviceFormState extends State<AddDeviceForm> {
           decoration: InputDecoration(labelText: widget.relaySet ? '对方的 ID' : '对方的 ID@IP', isDense: true),
         ),
         const SizedBox(height: 8),
-        TextField(
+        SecureTextField(
           key: const Key('add-password'),
           controller: _pw,
-          obscureText: true,
-          enableSuggestions: false,
-          autocorrect: false,
           decoration: InputDecoration(
               labelText: '密码', hintText: widget.relaySet ? '有 key 时不用填' : null, isDense: true),
           onSubmitted: (_) => _add(),

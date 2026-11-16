@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:fake_async/fake_async.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/composer_editor.dart';
 import 'package:rapp/embed/composer_model.dart';
 import 'package:rapp/embed/session_port.dart';
 
@@ -66,9 +67,9 @@ void main() {
     expect(next.value, '刚完成的组字');
   });
 
-  test('submit takes the text: blocks first, then text; the editor is empty', () async {
+  test('submit takes the text with its blocks where they stand; the editor is empty', () async {
     m.apply(const PasteResult(blocks: [BlockChip(1, '图片 #1')]));
-    ed.value = 'hi';
+    ed.value += 'hi';
     final s = await m.submit() as SubmitPieces;
     expect(s.pieces, [
       {'block': 1},
@@ -78,6 +79,25 @@ void main() {
     expect(m.blocks, isEmpty);
     expect(m.inFlight!.text, 'hi');
     expect(m.sending, isTrue);
+  });
+
+  test('a block goes in at the caret, between the text around it (the user\'s order)', () async {
+    ed.value = 'ab';
+    ed.caret = 1;
+    m.apply(const PasteResult(blocks: [BlockChip(1, '图片 #1')]));
+    expect(ed.shown, 'a[图片 #1]b');
+    ed.caret = null;
+    m.apply(const PasteResult(text: 'c', blocks: [BlockChip(2, 'x.pdf')]));
+    expect(ed.shown, 'a[图片 #1]bc[x.pdf]');
+    final s = await m.submit() as SubmitPieces;
+    expect(s.pieces, [
+      {'text': 'a'},
+      {'block': 1},
+      {'text': 'bc'},
+      {'block': 2},
+    ]);
+    expect(m.inFlight!.text, 'abc');
+    expect([for (final b in m.inFlight!.blocks) b.n], [1, 2]);
   });
 
   test('blocks keep insert order', () async {
@@ -112,7 +132,7 @@ void main() {
 
   test('done with everything sent drops the item and its blocks', () async {
     m.apply(const PasteResult(blocks: [BlockChip(1, 'a')]));
-    ed.value = 'hi';
+    ed.value += 'hi';
     await m.submit();
     m.done(2, null);
     expect(dropped, [1]);
@@ -124,7 +144,7 @@ void main() {
 
   test('a partial send keeps the rest as a failed item; retry sends the rest', () async {
     m.apply(const PasteResult(blocks: [BlockChip(1, 'a'), BlockChip(2, 'b')]));
-    ed.value = 'x';
+    ed.value += 'x';
     await m.submit();
     m.done(1, 'A 上贴不进去');
     expect(m.failed.single.failure, 'A 上贴不进去');
@@ -167,16 +187,30 @@ void main() {
     expect(m.sending, isTrue);
   });
 
-  test('putBack: text into the editor at the caret, unsent blocks back in front', () async {
+  test('putBack: what did not go into the editor at the caret, in its order', () async {
+    ed.value = 'p';
     m.apply(const PasteResult(blocks: [BlockChip(1, 'a'), BlockChip(2, 'b')]));
-    ed.value = 'x';
+    ed.value += 'x';
+    m.apply(const PasteResult(blocks: [BlockChip(4, 'd')]));
     await m.submit();
-    m.done(1, 'no');
+    m.done(2, 'no'); // 'p' and block 1 went
+    ed.value = 'yz';
     m.apply(const PasteResult(blocks: [BlockChip(3, 'c')]));
+    ed.caret = 1;
     m.putBack(m.failed.single);
-    expect(ed.inserted, ['x']);
-    expect([for (final b in m.blocks) b.n], [2, 3]);
+    expect(ed.shown, 'y[b]x[d]z[c]');
+    expect([for (final b in m.blocks) b.n], [3, 2, 4]);
     expect(m.failed, isEmpty);
+    expect(dropped, [1]);
+    final s = await m.submit() as SubmitPieces;
+    expect(s.pieces, [
+      {'text': 'y'},
+      {'block': 2},
+      {'text': 'x'},
+      {'block': 4},
+      {'text': 'z'},
+      {'block': 3},
+    ]);
   });
 
   test('retry is null while sending', () async {
@@ -239,16 +273,18 @@ void main() {
   });
 
   test('adoptFrom: the draft and the text of failed and in-flight rows come over as failed (I3)', () async {
-    m.apply(const PasteResult(blocks: [BlockChip(1, 'a.png')]));
     ed.value = 'x';
+    m.apply(const PasteResult(blocks: [BlockChip(1, 'a.png')]));
+    ed.value += 'w';
     await m.submit();
-    m.done(0, 'boom'); // failed: block 1 and 'x'
+    m.done(0, 'boom'); // failed: 'x', block 1, 'w'
     m.apply(const PasteResult(blocks: [BlockChip(2, 'b.png')]));
     await m.submit();
     m.done(0, 'no'); // failed: a block only
     ed.value = 'y';
     await m.submit(); // in flight
-    ed.value = 'abc'; // typed after the last idle copy
+    m.apply(const PasteResult(blocks: [BlockChip(3, 'c.png')]));
+    ed.value += 'abc'; // typed after the last idle copy
     final fresh = ComposerModel();
     addTearDown(fresh.dispose);
     var notified = 0;
@@ -259,7 +295,7 @@ void main() {
     expect(made.values, fresh.failed);
     await Future<void>.delayed(Duration.zero); // the old editor's read
     expect(fresh.draft, 'abc');
-    expect([for (final o in fresh.failed) o.text], ['x', 'y']);
+    expect([for (final o in fresh.failed) o.text], ['xw', 'y']);
     expect([for (final o in fresh.failed) o.failure], ['boom', '没有发出去']);
     expect(fresh.failed.every((o) => o.blocks.isEmpty), isTrue);
     expect(fresh.inFlight, isNull);
@@ -267,7 +303,7 @@ void main() {
     expect(fresh.blocks, isEmpty);
     expect(notified, greaterThan(0));
     expect(fresh.retry(fresh.failed.first), [
-      {'text': 'x'},
+      {'text': 'xw'},
     ]);
   });
 
@@ -368,11 +404,94 @@ void main() {
     });
   });
 
-  test('a removed block is dropped in the runner', () {
+  test('a block deleted from the text (Backspace) is dropped in the runner at send, not before', () async {
     m.apply(const PasteResult(blocks: [BlockChip(1, 'a'), BlockChip(2, 'b')]));
-    m.removeBlock(1);
-    expect(m.blocks.map((b) => b.n), [2]);
+    final one = ed.value[0];
+    ed.value = '${ed.value.substring(1)}x';
+    expect(dropped, isEmpty, reason: 'an undo can bring it back');
+    expect(m.blocks.map((b) => b.n), [1, 2]);
+    final s = await m.submit() as SubmitPieces;
+    expect(s.pieces, [
+      {'block': 2},
+      {'text': 'x'},
+    ]);
     expect(dropped, [1]);
+    expect(m.blocks, isEmpty);
+    // The mark is plain text again: no block of that mark is held.
+    m.done(2, null);
+    ed.value = '${one}y';
+    expect((await m.submit() as SubmitPieces).pieces, [
+      {'text': '${one}y'},
+    ]);
+  });
+
+  test('a block deleted from the text is dropped when the editor goes; one kept comes back with it', () async {
+    m.apply(const PasteResult(blocks: [BlockChip(1, 'a'), BlockChip(2, 'b')]));
+    ed.value = '${ed.value.substring(1)}x';
+    await m.detach(ed);
+    expect(dropped, [1]);
+    expect(m.draftText, 'x');
+    final ed2 = FakeEditor();
+    m.attach(ed2);
+    expect(ed2.shown, '[b]x');
+  });
+
+  test('an empty send (only deleted blocks) drops them and is a Return', () async {
+    m.apply(const PasteResult(blocks: [BlockChip(1, 'a')]));
+    ed.value = '';
+    expect(await m.submit(), isA<SubmitReturn>());
+    expect(dropped, [1]);
+    expect(m.blocks, isEmpty);
+  });
+
+  test('a held block\'s mark in pasted text is left out; a second copy of a chip goes once', () async {
+    m.apply(const PasteResult(blocks: [BlockChip(1, 'a')]));
+    final mark = ed.value;
+    m.apply(PasteResult(text: 'q${mark}r'));
+    expect(ed.shown, '[a]qr');
+    ed.value += mark; // a copy the Flutter field made by hand
+    expect((await m.submit() as SubmitPieces).pieces, [
+      {'block': 1},
+      {'text': 'qr'},
+    ]);
+  });
+
+  test('the draft a record sees has no block marks', () {
+    fakeAsync((fa) {
+      final seen = <String>[];
+      m.onDraftChanged = seen.add;
+      ed.value = 'a';
+      m.apply(const PasteResult(blocks: [BlockChip(1, 'a.png')]));
+      ed.value += 'b';
+      m.editorChanged();
+      fa.elapse(const Duration(seconds: 2));
+      fa.flushMicrotasks();
+      expect(seen, ['ab']);
+      expect(m.draft, hasLength(3));
+      expect(m.draftText, 'ab');
+    });
+  });
+
+  test('a mark the text already has as a glyph is not given to a block', () async {
+    final first = String.fromCharCode(blockMarks[0]), second = String.fromCharCode(blockMarks[1]);
+    m.setDraft(first);
+    m.apply(PasteResult(text: second, blocks: const [BlockChip(1, 'a')]));
+    expect(ed.shown, '$first$second[a]');
+    expect((await m.submit() as SubmitPieces).pieces, [
+      {'text': '$first$second'},
+      {'block': 1},
+    ]);
+  });
+
+  test('more blocks than marks: the extra one is dropped and said', () {
+    for (var i = 0; i < blockMarks.length; i++) {
+      m.apply(PasteResult(blocks: [BlockChip(i, 'b$i')]));
+    }
+    expect(dropped, isEmpty);
+    m.apply(const PasteResult(blocks: [BlockChip(9999, '太多')]));
+    expect(dropped, [9999]);
+    expect(m.status, contains('太多'));
+    expect(m.blocks, hasLength(blockMarks.length));
   });
 
   test('onAllSent only after every piece went', () async {

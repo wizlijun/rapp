@@ -1,5 +1,6 @@
-// The composer's draft for one session (R18): the text, the block chips, open or not, and the
-// status line. The runner holds what the blocks stand for and does the sending.
+// The composer's draft for one session (R18): the text with its blocks in it (each a mark where it was
+// pasted, [blockMarks]), open or not, and the status line. The runner holds what the blocks stand for and
+// does the sending.
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -20,24 +21,31 @@ class SubmitPieces extends Submit {
   final List<Map<String, Object>> pieces;
 }
 
-/// One send: the blocks and text that were taken out of the editor.
+/// One send: what was taken out of the editor, in the editor's order: text runs ([String], never empty)
+/// and blocks ([BlockChip]). Each part is one piece.
 class Outgoing {
-  Outgoing(this.blocks, this.text);
-  final List<BlockChip> blocks;
-  final String text;
+  Outgoing(List<Object> parts) : parts = List.unmodifiable(parts) {
+    assert(parts.every((p) => p is BlockChip || (p is String && p.isNotEmpty)));
+  }
+  final List<Object> parts;
+
+  /// The blocks among [parts], in order.
+  List<BlockChip> get blocks => [for (final p in parts) if (p is BlockChip) p];
+
+  /// The text runs joined (a record's text, a row's first line).
+  String get text => parts.whereType<String>().join();
 
   /// When it was handed off (set by `submit` and `retry`).
   DateTime? at;
 
-  /// Pieces that went (blocks first, then text).
+  /// Leading pieces that went.
   int sent = 0;
 
   /// Null while in flight.
   String? failure;
 
   List<Map<String, Object>> pieces() => [
-        for (final b in blocks) {'block': b.n},
-        if (text.isNotEmpty) {'text': text},
+        for (final p in parts) p is BlockChip ? {'block': p.n} : {'text': p as String},
       ];
 
   /// [pieces] minus the first [sent].
@@ -59,7 +67,8 @@ class ComposerModel extends ChangeNotifier {
   final VoidCallback? onAllSent;
   final DateTime Function() _clock;
 
-  /// Called when [draft] becomes a different text.
+  /// Called when [draft] becomes a different text; with [draftText] (no block marks: the blocks do
+  /// not outlive the session).
   ValueChanged<String>? onDraftChanged;
 
   /// Called when a send hands [o] off (`submit`, and `retry` with the same one), while [draft]
@@ -69,14 +78,17 @@ class ComposerModel extends ChangeNotifier {
   /// Called once per send round after `done` updated `o.sent`; [all]: everything went by now.
   void Function(Outgoing o, {required bool all})? onFinished;
 
-  /// The text while no editor is attached; the last copy otherwise.
+  /// The text while no editor is attached; the last copy otherwise. A held block is in it as its mark.
   String get draft => _draft;
   String _draft = '';
   set draft(String v) {
     if (_draft == v) return;
     _draft = v;
-    onDraftChanged?.call(v);
+    onDraftChanged?.call(_plain(v));
   }
+
+  /// [draft] without the marks of the blocks held: what a record keeps.
+  String get draftText => _plain(_draft);
 
   ComposerEditor? _editor;
   Future<void>? _detaching;
@@ -86,8 +98,87 @@ class ComposerModel extends ChangeNotifier {
   /// Set by the panel from the editor's onFocus.
   bool editorFocused = false;
 
-  /// The chips, in the order they were added.
+  /// The blocks the draft holds, in the order they came; each stands in the text as its mark. One deleted
+  /// from the text (Backspace) stays held while an undo can bring it back: until the next send, detach
+  /// or [setDraft], which drop it in the runner.
   final List<BlockChip> blocks = [];
+
+  /// Block number → its mark (a unit of [blockMarks]), for each of [blocks].
+  final Map<int, int> _marks = {};
+
+  /// Holds [b] and gives its mark; null (and [b] dropped) when every mark is in use. [beside] is text
+  /// going in with it.
+  int? _hold(BlockChip b, [String beside = '']) {
+    final had = _marks[b.n];
+    if (had != null) return had;
+    // Nor one the text has as a plain character (a pasted icon glyph): it would turn into this chip.
+    final used = {..._marks.values, ..._draft.codeUnits, ...beside.codeUnits};
+    for (final u in blockMarks) {
+      if (used.contains(u)) continue;
+      blocks.add(b);
+      return _marks[b.n] = u;
+    }
+    onDrop?.call(b.n);
+    _show('块太多，${b.label} 没有放进去', const Duration(seconds: 5));
+    return null;
+  }
+
+  /// [s] without the marks of the blocks held.
+  String _plain(String s) {
+    if (_marks.isEmpty) return s;
+    final marks = _marks.values.toSet();
+    return String.fromCharCodes(s.codeUnits.where((u) => !marks.contains(u)));
+  }
+
+  /// [text] cut at the marks of the blocks held: text runs and blocks, in order. A second mark of one
+  /// block is left out (the runner sends a block once).
+  List<Object> _parts(String text) {
+    final byMark = {for (final b in blocks) _marks[b.n]!: b};
+    final out = <Object>[];
+    final seen = <int>{};
+    void add(String t) {
+      if (t.isEmpty) return;
+      if (out.isNotEmpty && out.last is String) {
+        out.last = (out.last as String) + t;
+      } else {
+        out.add(t);
+      }
+    }
+
+    var start = 0;
+    for (var i = 0; i < text.length; i++) {
+      final b = byMark[text.codeUnitAt(i)];
+      if (b == null) continue;
+      add(text.substring(start, i));
+      start = i + 1;
+      if (seen.add(b.n)) out.add(b);
+    }
+    add(text.substring(start));
+    return out;
+  }
+
+  /// Lets go of every held block; those not in [kept] leave the runner too.
+  void _release({Set<int> kept = const {}}) {
+    for (final b in blocks) {
+      if (!kept.contains(b.n)) onDrop?.call(b.n);
+    }
+    blocks.clear();
+    _marks.clear();
+  }
+
+  /// Lets go of the held blocks whose mark [text] no longer has (no undo can bring them back now).
+  void _dropMissing(String text) {
+    final units = text.codeUnits.toSet();
+    final gone = [for (final b in blocks) if (!units.contains(_marks[b.n])) b];
+    for (final b in gone) {
+      blocks.remove(b);
+      _marks.remove(b.n);
+      onDrop?.call(b.n);
+    }
+  }
+
+  /// The editor learns the chips' labels before text with their marks comes in.
+  void _showChips(ComposerEditor e) => e.chips({for (final b in blocks) _marks[b.n]!: b.label});
 
   bool _open = false;
   bool get open => _open;
@@ -133,7 +224,7 @@ class ComposerModel extends ChangeNotifier {
 
   /// Nothing sent (else no check), no chips, ASCII only, and either just the held letters or a quick close.
   bool _unused(String t, DateTime openedAt) {
-    if (blocks.isNotEmpty || t.runes.any((r) => r >= 128)) return false;
+    if (t.runes.any((r) => r >= 128)) return false; // a block's mark is not ASCII either
     final s = t.trim();
     return (s.length <= _heldLetters && !s.contains(' ')) || _clock().difference(openedAt) < _declineWithin;
   }
@@ -177,13 +268,17 @@ class ComposerModel extends ChangeNotifier {
     _editor = e;
     final previous = _detaching;
     if (previous == null) {
+      _showChips(e);
       e.setText(draft);
       _attached = null;
       return SynchronousFuture<void>(null);
     }
     // A native read may finish after the next panel mounts. Restore only after that read,
     // before the new editor takes focus; otherwise reopening can resurrect an older draft.
-    return _attached = previous.then((_) => e.setText(draft));
+    return _attached = previous.then((_) {
+      _showChips(e);
+      e.setText(draft);
+    });
   }
 
   /// The editor goes away: its text is copied into [draft]. It no longer has the focus (its
@@ -196,7 +291,9 @@ class ComposerModel extends ChangeNotifier {
     final ready = _attached;
     Future<void> copy() async {
       draft = await e.read();
-      if (!_disposed) _checkDeclined();
+      if (_disposed) return;
+      _dropMissing(draft); // the editor's undo goes with it
+      _checkDeclined();
     }
     final work = ready == null ? copy() : ready.then((_) => copy());
     late final Future<void> pending;
@@ -206,8 +303,10 @@ class ComposerModel extends ChangeNotifier {
     return _detaching = pending;
   }
 
-  /// Replaces the text: into the editor if attached, else the draft.
+  /// Replaces the text: into the editor if attached, else the draft. Held blocks [s] has no mark of are
+  /// dropped.
   void setDraft(String s) {
+    _dropMissing(s);
     draft = s;
     _editor?.setText(s);
   }
@@ -223,10 +322,12 @@ class ComposerModel extends ChangeNotifier {
     });
   }
 
-  /// Text at the caret, or at the end of the draft without an editor.
+  /// Text at the caret, or at the end of the draft without an editor. Marks in it stand for the
+  /// blocks held.
   void insert(String s) {
     final e = _editor;
     if (e != null) {
+      _showChips(e);
       e.insert(s);
     } else {
       draft += s;
@@ -243,7 +344,7 @@ class ComposerModel extends ChangeNotifier {
   /// Closes the panel; the text stays (W6).
   void collapse() => open = false;
 
-  /// The user pressed send (or Enter): takes the blocks and the text out of the composer.
+  /// The user pressed send (or Enter): takes the text with its blocks out of the composer.
   Future<Submit> submit() async {
     if (sending || _taking) return SubmitNothing();
     _letterOpenAt = null; // sent: the panel was wanted
@@ -268,17 +369,20 @@ class ComposerModel extends ChangeNotifier {
       return SubmitNothing();
     }
     final now = _clock();
-    if (blocks.isEmpty && text.isEmpty) {
+    final parts = _parts(text);
+    if (parts.isEmpty) {
+      _release();
       draft = '';
       final last = _lastSend;
       if (last != null && now.difference(last) < const Duration(seconds: 1)) return SubmitNothing();
       return SubmitReturn();
     }
     _lastSend = now;
-    final o = Outgoing(List.of(blocks), text)..at = now;
+    final o = Outgoing(parts)..at = now;
     onSubmitted?.call(o);
     draft = '';
-    blocks.clear();
+    // The row holds them now; the ones deleted from the text leave the runner.
+    _release(kept: {for (final b in o.blocks) b.n});
     _inFlight = o;
     sending = true;
     notifyListeners();
@@ -309,9 +413,8 @@ class ComposerModel extends ChangeNotifier {
     final before = o.sent;
     final after = (before + (sent < 0 ? 0 : sent)).clamp(0, total);
     o.sent = after;
-    final dropTo = after < o.blocks.length ? after : o.blocks.length;
-    for (var i = before; i < dropTo; i++) {
-      onDrop?.call(o.blocks[i].n);
+    for (final p in o.parts.sublist(before, after)) {
+      if (p is BlockChip) onDrop?.call(p.n);
     }
     final all = after >= total;
     if (!all) {
@@ -338,35 +441,45 @@ class ComposerModel extends ChangeNotifier {
     return o.remaining();
   }
 
-  /// A reconnect's swap: [old] was this window's session before. Its draft and the text of its
-  /// failed rows and of its in-flight row come over, all as failed rows (the in-flight one never
-  /// got its `done`). Blocks stay behind (the old runner held them); a row without text does not
-  /// come. With [old]'s editor still attached, its text is read for the draft. Returns each of
-  /// [old]'s rows that came over with the row made for it, in order.
+  /// A reconnect's swap: [old] was this window's session before. Its draft and the unsent text of
+  /// its failed rows and of its in-flight row come over, all as failed rows (the in-flight one never
+  /// got its `done`). Blocks stay behind (the old runner held them): their marks leave the draft, a
+  /// row's text runs join up, and a row without text does not come. With [old]'s editor still
+  /// attached, its text is read for the draft. Returns each of [old]'s rows that came over with the
+  /// row made for it, in order.
   Map<Outgoing, Outgoing> adoptFrom(ComposerModel old) {
     final made = <Outgoing, Outgoing>{
       for (final o in [...old._failed, ?old._inFlight])
-        if (o.text.isNotEmpty) o: Outgoing(const [], o.text)..failure = o.failure ?? '没有发出去',
+        if (o.parts.skip(o.sent).whereType<String>().join() case final t when t.isNotEmpty)
+          o: Outgoing([t])..failure = o.failure ?? '没有发出去',
     };
     _failed.insertAll(0, made.values);
-    if (draft.isEmpty) draft = old.draft;
+    if (draft.isEmpty) draft = old.draftText;
     final e = old._editor;
     if (e != null) {
       final before = draft;
       e.read().then((t) {
         // Only while nothing here moved on (the new panel attaches a frame later).
-        if (!_disposed && _editor == null && draft == before) draft = t;
+        if (!_disposed && _editor == null && draft == before) draft = old._plain(t);
       }, onError: (Object _) {});
     }
     notifyListeners();
     return made;
   }
 
-  /// [o] goes back into the composer: unsent blocks in front, unsent text at the caret.
+  /// [o] goes back into the composer: what did not go, at the caret, in its order.
   void putBack(Outgoing o) {
     if (!_failed.remove(o)) return;
-    blocks.insertAll(0, o.blocks.skip(o.sent));
-    if (o.sent <= o.blocks.length && o.text.isNotEmpty) insert(o.text);
+    final s = StringBuffer();
+    for (final p in o.parts.skip(o.sent)) {
+      if (p is BlockChip) {
+        final m = _hold(p, s.toString());
+        if (m != null) s.writeCharCode(m);
+      } else {
+        s.write(p);
+      }
+    }
+    if (s.isNotEmpty) insert(s.toString());
     notifyListeners();
   }
 
@@ -430,24 +543,19 @@ class ComposerModel extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// A paste, attach or insert result: text at the cursor, blocks as chips, a status shown.
+  /// A paste, attach or insert result at the caret: its text, then its blocks as chips; a status shown.
   /// Ignored once the session is gone (a runner answer can come after).
   void apply(PasteResult r) {
     if (_disposed) return;
-    final t = r.text;
-    if (t != null && t.isNotEmpty) insert(t);
-    blocks.addAll(r.blocks);
-    final s = r.status;
-    if (s != null) _show(s, const Duration(seconds: 5));
-    notifyListeners();
-  }
-
-  /// The user tapped chip [n] away.
-  void removeBlock(int n) {
-    final i = blocks.indexWhere((b) => b.n == n);
-    if (i < 0) return;
-    blocks.removeAt(i);
-    onDrop?.call(n);
+    // Pasted text never carries a held block's mark: it would stand for that block a second time.
+    final s = StringBuffer(_plain(r.text ?? ''));
+    for (final b in r.blocks) {
+      final m = _hold(b, s.toString());
+      if (m != null) s.writeCharCode(m);
+    }
+    if (s.isNotEmpty) insert(s.toString());
+    final status = r.status;
+    if (status != null) _show(status, const Duration(seconds: 5));
     notifyListeners();
   }
 

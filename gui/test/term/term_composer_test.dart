@@ -292,12 +292,14 @@ void main() {
     clipboard(tester, twelve);
     await chord(tester, [mod], LogicalKeyboardKey.keyV);
     await settle(tester);
-    expect(text(tester), isEmpty);
+    // The block stands in the text as one mark, shown as its chip.
+    final mark = text(tester);
+    expect(mark, hasLength(1));
     expect(find.text('[贴入文字 #1 +12 行]'), findsOneWidget);
-    await tester.enterText(fieldFinder, '看看这段');
+    await tester.enterText(fieldFinder, '看看$mark这段');
     term.calls.clear();
     await send(tester);
-    expect(callsOf('paste').single['data'], '$twelve看看这段');
+    expect(callsOf('paste').single['data'], '看看$twelve这段', reason: 'where it was pasted');
     expect(find.text('[贴入文字 #1 +12 行]'), findsNothing);
     // The sent block is let go: the port holds it no more.
     term.calls.clear();
@@ -430,7 +432,9 @@ void main() {
       });
       expect(events.whereType<ComposerStateEvent>().last.done!.failure, pasteFailed);
       final empty = await pasteOf('');
-      expect((empty.text, empty.blocks.length, empty.status), (null, 0, null));
+      // An image or files only (Flutter's clipboard sees no text): said, not a silent nothing.
+      expect((empty.text, empty.blocks.length, empty.status), (null, 0, termNoText));
+      expect(termNoText, contains('图片'));
     });
 
     testWidgets('composerAttach is not for terminals', (tester) async {

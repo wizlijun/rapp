@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'secure_text_field.dart';
+
 class UnlockCredential {
   const UnlockCredential(this.password, {required this.auto});
   final String password;
@@ -177,14 +179,10 @@ class _UnlockDialogState extends State<UnlockDialog> {
         children: [
           Text('输入远程电脑 ${widget.device} 的系统密码'),
           const SizedBox(height: 12),
-          TextField(
+          SecureTextField(
             controller: _password,
             autofocus: true,
             enabled: !_loading,
-            obscureText: true,
-            enableSuggestions: false,
-            autocorrect: false,
-            enableIMEPersonalizedLearning: false,
             decoration: InputDecoration(labelText: '系统密码', errorText: _error),
             onSubmitted: (_) => _submit(),
           ),

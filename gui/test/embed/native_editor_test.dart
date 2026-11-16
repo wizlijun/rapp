@@ -50,7 +50,8 @@ void main() {
       onFocus: focus.add,
       onArrow: (_) => false,
     );
-    editor.setText('草稿');
+    editor.chips({0xFDD0: '[图片 #1]'});
+    editor.setText('草稿﷐');
     editor.focus();
     await tester.pumpWidget(
       MaterialApp(
@@ -74,7 +75,10 @@ void main() {
     setDone.complete();
     await tester.pump();
     expect(await reading, '草稿');
-    expect(calls.where((c) => c.method == 'set' || c.method == 'read').map((c) => c.method), ['set', 'read']);
+    expect(calls.where((c) => {'chips', 'set', 'read'}.contains(c.method)).map((c) => c.method),
+        ['chips', 'set', 'read'],
+        reason: 'the labels come before the text that has their marks');
+    expect(calls.firstWhere((c) => c.method == 'chips').arguments, {0xFDD0: '[图片 #1]'});
     Future<void> event(String method, Object? arg) async {
       await messenger.handlePlatformMessage(
         channel.name,

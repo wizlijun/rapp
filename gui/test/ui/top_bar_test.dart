@@ -631,12 +631,12 @@ void main() {
           }
         });
         await tester.pump();
-        // Below the bare row plus the marker (5 icons, the traffic bars and 40) there is no room.
-        expect(find.byKey(const Key('net-marker')), w >= 5 * 48 + 48 + 40 ? findsOneWidget : findsNothing);
+        // Below the bare row plus the marker (5 icons, the traffic bars and 26) there is no room.
+        expect(find.byKey(const Key('net-marker')), w >= 5 * 48 + 48 + 26 ? findsOneWidget : findsNothing);
         // The line alone: the round trip is in its hover and atop the traffic menu, never in the bar.
         expect(find.textContaining('ms'), findsNothing);
         expect(tester.takeException(), isNull);
-        if (w < 5 * 48 + 48 + 40) return;
+        if (w < 5 * 48 + 48 + 26) return;
         final full = tester.getRect(find.byKey(const Key('fullscreen-button')));
         final barRect = tester.getRect(find.byType(TopBar));
         expect(full.right, lessThanOrEqualTo(barRect.right + 0.01));

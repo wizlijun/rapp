@@ -1,6 +1,6 @@
 // The writing panel (spec §3, W1–W16): a 720-wide box at the bottom of the stage, one line to
 // start, growing upward to half the stage. From the top: the outgoing items, the hint line,
-// the box with [blocks / editor] [＋] [发送]. The editor owns the text; the model copies it out
+// the box with [editor] [＋] [发送]. The editor owns the text; the model copies it out
 // at send, session switch, 1 s idle and collapse (spec §5). The draft is the session's (R18).
 import 'dart:math' as math;
 
@@ -42,6 +42,9 @@ const _edge = 8.0;
 
 /// The editor's extra room above and below, so its one line (48) fills those 56.
 const _pad = (40 + 2 * _edge - _line) / 2;
+
+/// The panel's boxes let the picture behind show through: the float fill 30% transparent.
+const composerFillOpacity = 0.7;
 
 class ComposerPanel extends StatefulWidget {
   const ComposerPanel({
@@ -324,25 +327,17 @@ class _ComposerPanelState extends State<ComposerPanel> {
     );
   }
 
-  Widget _chip(BlockChip b, RappTokens t) => Semantics(
-        button: true,
-        label: '移除 ${b.label}',
-        excludeSemantics: true,
-        child: InkWell(
-          onTap: () => _m.removeBlock(b.n),
-          borderRadius: BorderRadius.circular(t.r),
-          child: CustomPaint(
-            foregroundPainter: DashedOutline(t.line, t.r),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(minHeight: _line * _k),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Center(widthFactor: 1, child: Text(b.label, style: TextStyle(color: t.text))),
-              ),
-            ),
-          ),
-        ),
-      );
+  BoxDecoration _seeThrough(RappTokens t) {
+    final d = t.floatBox();
+    Color f(Color c) => c.withValues(alpha: c.a * composerFillOpacity);
+    final g = d.gradient;
+    return d.copyWith(
+      color: d.color == null ? null : f(d.color!),
+      gradient: g is LinearGradient
+          ? LinearGradient(begin: g.begin, end: g.end, stops: g.stops, colors: [for (final c in g.colors) f(c)])
+          : g,
+    );
+  }
 
   /// One outgoing item: 「发送中」 or why it failed, the text's first line, and for a failed
   /// one 「重试」 and 「放回输入框」.
@@ -353,7 +348,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Container(
-        decoration: t.floatBox(),
+        decoration: _seeThrough(t),
         constraints: BoxConstraints(minHeight: _line * _k + _border),
         padding: const EdgeInsets.only(left: 12),
         child: Row(
@@ -438,7 +433,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
               ?_hint(t), // W11
               Container(
                 key: const Key('composer-box'),
-                decoration: t.floatBox(),
+                decoration: _seeThrough(t),
                 constraints: BoxConstraints(maxHeight: inner + _border),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
@@ -450,22 +445,8 @@ class _ComposerPanelState extends State<ComposerPanel> {
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            if (_m.blocks.isNotEmpty)
-                              ConstrainedBox(
-                                constraints: BoxConstraints(maxHeight: math.max(0, inner - line - 2 * pad)),
-                                child: SingleChildScrollView(
-                                  child: Padding(
-                                    padding: const EdgeInsets.only(top: 8),
-                                    child: Wrap(
-                                      spacing: 8,
-                                      runSpacing: 8,
-                                      children: [for (final b in _m.blocks) _chip(b, t)],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            // What is left after the blocks row, never under one line; [_pad] above and
-                            // below it, so one line is as tall as ＋ and 发送 with their margins.
+                            // Never under one line; [_pad] above and below it, so one line is as tall as ＋
+                            // and 发送 with their margins. Blocks sit in the text as chips (composer_model.dart).
                             Flexible(
                               child: Padding(
                                 padding: EdgeInsets.symmetric(vertical: pad),

@@ -120,7 +120,12 @@ final class Paster {
         pb.clearContents()
         switch item {
         case let .text(text): pb.setString(text, forType: .string)
-        case let .image(bytes): pb.setData(Data(bytes), forType: NSPasteboard.PasteboardType(typePNG))
+        case let .image(bytes):
+            pb.setData(Data(bytes), forType: NSPasteboard.PasteboardType(typePNG))
+            // Many apps read only TIFF (AppKit's own image type) and paste nothing from PNG alone.
+            if let tiff = NSBitmapImageRep(data: Data(bytes))?.tiffRepresentation(using: .lzw, factor: 0) {
+                pb.setData(tiff, forType: NSPasteboard.PasteboardType(typeTIFF))
+            }
         case let .data(uti, bytes): pb.setData(Data(bytes), forType: NSPasteboard.PasteboardType(uti))
         case let .file(url): pb.writeObjects([url as NSURL])
         }
