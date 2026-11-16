@@ -364,6 +364,7 @@
 - [x] T1–T11：协议 v12、A 端无障碍读焦点面板、「智能」预设、app 配置 `focusPane`、B 端把焦点外变灰
 - [x] T12 文档与收尾
 - 交付说明：
+  - 第 1 步灰色只在 B 显示时画，不省流量，也不改帧格式；省流量是第 2 步
   - 自动测试：`scripts/check.sh` EXIT=0（Swift 453 项通过、1 项跳过）；`cargo test -p rapp-client-core` 全过、`cargo build -p rapp-client-gtk` 通过；`flutter analyze` 干净，`flutter test` 1655 项通过、8 项跳过
   - `scripts/focus-loopback.py` 在 T6 时对假宿主的回环里通过
   - 规格 §10 的十个场景没有一个在真机上看过，全部留给用户
