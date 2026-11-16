@@ -76,3 +76,16 @@ public func appOpenedWorthTelling(bundleID: String?, pid: Int32, regular: Bool, 
 public func isSecureField(role: String?, subrole: String?) -> Bool {
     subrole == "AXSecureTextField"
 }
+
+extension Message {
+    /// Input that may open another app on A (a click on a link, a typed shortcut, Return): the clock for
+    /// `appOpened` starts from it. Hovering, dragging and scrolling never do.
+    public var opensThings: Bool {
+        switch self {
+        case .text: return true
+        case let .key(_, _, down): return down
+        case let .mouse(kind, _, _, _, _, _): return kind == .down || kind == .up
+        default: return false
+        }
+    }
+}

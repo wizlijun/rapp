@@ -22,6 +22,9 @@ final class InputInjector {
     /// Keys and buttons posted down and not yet up, released on teardown.
     private var held = HeldInput()
     private var lastPoint = CGPoint.zero
+    /// A press was dropped under another process's window (not the lock screen): its pid, its owner name
+    /// as the window server gives it, and the press point in global points. Called on the caller's queue.
+    var onCovered: ((pid_t, String, CGPoint) -> Void)?
 
     init(app: NSRunningApplication?, display: CGRect, log: @escaping (String) -> Void) {
         self.app = app
@@ -139,8 +142,12 @@ final class InputInjector {
         usleep(50_000)
         let top = topOwner(at: point)
         if top.pid == app.processIdentifier { return true }
-        log(screenLocked(CGSessionCopyCurrentDictionary() as? [String: Any])
-            ? "click dropped: A is locked" : "click dropped: covered by \(top.name)")
+        if screenLocked(CGSessionCopyCurrentDictionary() as? [String: Any]) {
+            log("click dropped: A is locked")
+        } else {
+            log("click dropped: covered by \(top.name)")
+            if top.pid != 0 { onCovered?(top.pid, top.name, point) }
+        }
         return false
     }
 
@@ -157,13 +164,22 @@ final class InputInjector {
                                 alpha: entry[kCGWindowAlpha as String] as? Double ?? 1, frame: frame)
         }
         let dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first?.processIdentifier
-        return topWindowOwner(at: point, windows: windows, dockPID: dock) {
+        return topWindowOwner(at: point, windows: windows, dockPID: dock, displays: Self.displayBounds()) {
             var element: AXUIElement?
             guard AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(point.x), Float(point.y),
                                                    &element) == .success, let element else { return nil }
             var pid: pid_t = 0
             return AXUIElementGetPid(element, &pid) == .success ? pid : nil
         }
+    }
+
+    /// Every active display in global points, top-left origin (as CGWindowList's bounds).
+    private static func displayBounds() -> [CGRect] {
+        var count: UInt32 = 0
+        guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else { return [] }
+        var ids = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetActiveDisplayList(count, &ids, &count) == .success else { return [] }
+        return ids.prefix(Int(count)).map(CGDisplayBounds)
     }
 
     private func activateIfNeeded() {

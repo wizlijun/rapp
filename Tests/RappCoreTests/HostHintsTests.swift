@@ -80,3 +80,19 @@ final class HostHintsTests: XCTestCase {
 }
 
 private enum CGPointZeroish { static let point = CGPoint(x: 12, y: 34) }
+
+final class OpensThingsTests: XCTestCase {
+    func testPressesTypingAndKeyDownsOpenThings() {
+        XCTAssertTrue(Message.text("a").opensThings)
+        XCTAssertTrue(Message.key(keyCode: 36, modifiers: 0, down: true).opensThings)
+        XCTAssertTrue(Message.mouse(kind: .down, button: .left, window: 1, x: 0, y: 0, clickCount: 1).opensThings)
+        XCTAssertTrue(Message.mouse(kind: .up, button: .left, window: 1, x: 0, y: 0, clickCount: 1).opensThings)
+    }
+
+    func testHoverDragScrollAndKeyUpsDoNot() {
+        XCTAssertFalse(Message.key(keyCode: 36, modifiers: 0, down: false).opensThings)
+        XCTAssertFalse(Message.mouse(kind: .move, button: .left, window: 1, x: 0, y: 0, clickCount: 0).opensThings)
+        XCTAssertFalse(Message.mouse(kind: .drag, button: .left, window: 1, x: 0, y: 0, clickCount: 1).opensThings)
+        XCTAssertFalse(Message.scroll(window: 1, x: 0, y: 0, dx: 0, dy: 1).opensThings)
+    }
+}
