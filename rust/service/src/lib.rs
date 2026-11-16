@@ -8,6 +8,7 @@ mod data;
 mod forward;
 pub mod forward_log;
 mod ipc;
+mod pace;
 mod peer;
 mod pipe;
 mod relay_link;
