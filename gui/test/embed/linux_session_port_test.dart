@@ -205,6 +205,63 @@ void main() {
   }, skip: Platform.isWindows);
 
   final worker = File('../rust/target/release/rapp-session').absolute.path;
+  test('v13 hints survive real worker and reach detached native windows', () async {
+    const channel = MethodChannel('rapp/linux');
+    const codec = StandardMethodCodec();
+    final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    final calls = <MethodCall>[];
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      return call.method == 'init' ? true : null;
+    });
+    final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    final port = LinuxSessionPort(worker, framePresented: () async {});
+    final events = StreamIterator(port.events);
+    Socket? peer;
+    try {
+      await port.init();
+      final accepted = server.first;
+      await port.start(StartArgs(81, server.port, 'fixture', 'color16', 15, 'adaptive'));
+      peer = await accepted;
+      peer.listen((_) {});
+      peer.add(packet(2, [...string('Fixture'), ...u16(4), ...u16(4)]));
+      await nextWhere(events, (e) => e is ReadyEvent);
+      peer.add(packet(40, [1]));
+      expect((await nextWhere(events, (e) => e is SecureFocusEvent) as SecureFocusEvent).on, true);
+      await port.detach(81, text: '前\ue000后', blocks: [const BlockChip(1, '文件', mark: 0xe000)]);
+      await nextWhere(events, (e) => e is DetachedEvent);
+      expect((calls.lastWhere((c) => c.method == 'secure_focus').arguments as Map)['on'], true);
+      expect((calls.firstWhere((c) => c.method == 'detach').arguments as Map)['blocks'],
+          [{'n': 1, 'label': '文件', 'mark': 0xe000}]);
+      peer.add(packet(37, [...u32(77), ...string('提示'), ...string('bundle'), 1]));
+      expect((await nextWhere(events, (e) => e is CoveredEvent) as CoveredEvent).dismissable, true);
+      peer.add(packet(39, [...string('new.bundle'), ...string('新应用')]));
+      expect((await nextWhere(events, (e) => e is AppOpenedEvent) as AppOpenedEvent).bundle, 'new.bundle');
+      port.nativeHostNotice(81, epoch: 5, text: '提示', actions: [{'id': 'dismiss', 'label': '关闭'}]);
+      await messenger.handlePlatformMessage(channel.name,
+          codec.encodeMethodCall(const MethodCall('host_notice_action', {'sid': 81, 'action': 'dismiss', 'epoch': 5})), (_) {});
+      final action = await nextWhere(events, (e) => e is HostNoticeActionEvent) as HostNoticeActionEvent;
+      expect((action.sid, action.action, action.epoch), (81, 'dismiss', 5));
+      await messenger.handlePlatformMessage(channel.name,
+          codec.encodeMethodCall(const MethodCall('draft', {'sid': 81, 'text': '前\ue000后'})), (_) {});
+      expect((await nextWhere(events, (e) => e is ComposerDraftEvent) as ComposerDraftEvent).inline, true);
+      peer.add(packet(40, [0]));
+      await nextWhere(events, (e) => e is SecureFocusEvent);
+      expect((calls.lastWhere((c) => c.method == 'secure_focus').arguments as Map)['on'], false);
+      // The hints have not broken the following frame.
+      peer.add(packet(13, [...u16(1), ...u32(1), ...u32(0), 0, 2,
+          ...f32(0), ...f32(0), ...f32(4), ...f32(4), ...f32(1), ...string('Window')]));
+      peer.add(frame(true));
+      await nextWhere(events, (e) => e is WindowsEvent && e.windows.any((w) => w.image != null));
+    } finally {
+      port.dispose();
+      await events.cancel();
+      peer?.destroy();
+      await server.close();
+      messenger.setMockMethodCallHandler(channel, null);
+    }
+  }, skip: !Platform.isLinux || !File(worker).existsSync() ? 'Build rapp-session first on Linux' : false);
+
   test('real Linux worker decodes full/delta, crops titlebar, sends input and closes on EOF', () async {
     final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
     final port = LinuxSessionPort(worker, framePresented: () async {});
@@ -269,7 +326,7 @@ void main() {
         messages.add((received[i], received.sublist(i+5, i+5+n))); i += 5+n;
       }
       expect(messages.map((m) => m.$1), containsAllInOrder([1,6,6,7,7,9,11,15,30,14,20]));
-      expect(messages.first.$2.first, 12);
+      expect(messages.first.$2.first, sessionProtocolVersion);
       expect(messages.firstWhere((m) => m.$1 == 15).$2, u32(1));
       expect(messages.firstWhere((m) => m.$1 == 30).$2, string(''));
       expect(utf8.decode(messages.last.$2.sublist(7)), '你好');

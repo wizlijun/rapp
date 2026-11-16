@@ -81,7 +81,7 @@ They run in separate transient user services and survive a rapp-service restart.
 Run `rapp share`, `rapp unshare`, `rapp hosts`, or `rapp pipe` for CLI access.
 No arguments opens the GUI; `./rapp-gui` opens it explicitly.
 For direct LAN access, allow the service's UDP listener (default 22028) from the
-intended peers. TCP 22029 (IPC) and TCP 28000-28999 (port mappings) bind only to
+intended peers. TCP 22029 (IPC) and TCP 28000-28999 (share numbers and visitor mappings) bind only to
 localhost and do not need inbound LAN rules. UDP 22026 is for a separate relay.
 Use Local / 本机 for the actual port and read-only UFW diagnostics; an empty log
 does not prove that the network or firewall allows the connection.

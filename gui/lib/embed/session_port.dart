@@ -110,9 +110,11 @@ class MenuEntry {
 
 /// A composer block held by the runner (pasted image, long text, file…), shown as a chip.
 class BlockChip {
-  const BlockChip(this.n, this.label, {this.kind, this.bytes, this.text, this.name});
+  const BlockChip(this.n, this.label, {this.kind, this.bytes, this.text, this.name, this.mark});
   final int n;
   final String label;
+  /// A composer's local UTF-16 marker, used only for native editor handoff.
+  final int? mark;
 
   /// `text`, `image`, `data` or `file`; null from an older runner.
   final String? kind;
@@ -257,7 +259,9 @@ class ComposeKeyEvent extends SessionEvent {
 
 /// Edits made in a native detached composer's draft, shared with the stage.
 class ComposerDraftEvent extends SessionEvent {
-  const ComposerDraftEvent(super.sid, {this.text, this.drop, this.send = false, this.retry = false, this.action});
+  const ComposerDraftEvent(super.sid, {this.text, this.drop, this.send = false, this.retry = false, this.action,
+    this.inline = false});
+  final bool inline;
   final String? action;
   final bool retry;
   final String? text;
@@ -343,6 +347,13 @@ class AppOpenedEvent extends SessionEvent {
 class SecureFocusEvent extends SessionEvent {
   const SecureFocusEvent(super.sid, this.on);
   final bool on;
+}
+
+/// A button in a detached native window's current host notice.
+class HostNoticeActionEvent extends SessionEvent {
+  const HostNoticeActionEvent(super.sid, this.action, this.epoch);
+  final String action;
+  final int epoch;
 }
 
 class ClosedEvent extends SessionEvent {
@@ -541,8 +552,13 @@ abstract class SessionPort {
   void freeze(Object sid, String reason) {}
 
   /// Native Linux windows mirror the shared writing-panel preferences.
-  void nativeComposerOptions(Object sid, {required bool allowed, required bool compose, required double scale}) {}
+  bool get supportsInlineNativeComposer => false;
+  void nativeComposerOptions(Object sid, {required bool allowed, required bool compose, required double scale,
+    Map<String, Object> style = const {}}) {}
   void nativeComposerDraft(Object sid, String text) {}
+  void nativeComposerInsert(Object sid, String? text, List<BlockChip> blocks) {}
+  void nativeHostNotice(Object sid, {required int epoch, required String text,
+    required List<Map<String, String>> actions}) {}
 
   void close(Object sid) => _send('close', {'sid': sid});
 
@@ -701,7 +717,7 @@ abstract class SessionPort {
   Future<void> detach(Object sid, {String text = '', List<BlockChip> blocks = const []}) async {
     await invoke('detach', {
       'sid': sid, 'text': text,
-      'blocks': [for (final b in blocks) {'n': b.n, 'label': b.label}],
+      'blocks': [for (final b in blocks) {'n': b.n, 'label': b.label, if (b.mark != null) 'mark': b.mark}],
     });
   }
 

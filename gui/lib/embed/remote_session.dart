@@ -322,11 +322,11 @@ class RemoteSession extends ChangeNotifier {
         final d = e.done;
         if (d != null) composer.done(d.sent, d.failure);
       case ComposerDraftEvent():
-        // Detached, the other window holds the text and has no marks in it; it reports a chip it lost
-        // as `drop` instead. Attached, the text is ours and its marks say which blocks are still held.
+        // Linux native drafts preserve inline marks; legacy native drafts carry plain text and
+        // report removed chips separately. Attached drafts always use their marks.
         if (e.text != null) {
           if (detached) {
-            composer.setDetachedDraft(e.text!);
+            composer.setDetachedDraft(e.text!, inline: e.inline);
           } else {
             composer.setDraft(e.text!);
           }
@@ -370,6 +370,7 @@ class RemoteSession extends ChangeNotifier {
         secureFocus = e.on;
       case CoveredEvent():
       case AppOpenedEvent():
+      case HostNoticeActionEvent():
         break; // MainState's notice.
       case ClosedEvent():
         endReason = e.reason;

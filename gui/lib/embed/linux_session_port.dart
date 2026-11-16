@@ -103,6 +103,8 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
   @override
   bool get supportsDetach => _native;
   @override
+  bool get supportsInlineNativeComposer => true;
+  @override
   Stream<SessionEvent> get events => _events.stream;
 
   @override
@@ -124,14 +126,8 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
     if (_disposed) return;
     final s = _sessions[e.sid];
     if (_native && s?.detached == true) {
-      if (e is ComposerInsertEvent) {
-        _nativeCall('composer_insert', {
-          'sid': e.sid,
-          'text': e.insert.text,
-          'blocks': [
-            for (final b in e.insert.blocks) {'n': b.n, 'label': b.label},
-          ],
-        });
+      if (e is SecureFocusEvent) {
+        _nativeCall('secure_focus', {'sid': e.sid, 'on': e.on});
       }
       if (e is ComposerStateEvent && e.done != null) {
         _nativeCall('composer_done', {
@@ -145,6 +141,7 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
         _nativeCall('status', {'sid': e.sid, 'text': e.status ?? ''});
       }
       if (e is DisconnectedEvent) {
+        _nativeCall('secure_focus', {'sid': e.sid, 'on': false});
         _nativeCall('status', {
           'sid': e.sid,
           'text': '已断开：${e.reason}',
@@ -179,14 +176,18 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
           smart: args['smart'] == true,
         ),
       );
+    } else if (call.method == 'host_notice_action') {
+      if (args['action'] is String && args['epoch'] is int) {
+        _emit(HostNoticeActionEvent(s.sid, args['action'] as String, args['epoch'] as int));
+      }
     } else if (call.method == 'draft') {
-      _emit(ComposerDraftEvent(s.sid, text: args['text'] as String?));
+      _emit(ComposerDraftEvent(s.sid, text: args['text'] as String?, inline: true));
     } else if (call.method == 'composer_send') {
       _emit(
-        ComposerDraftEvent(s.sid, text: args['text'] as String?, send: true),
+        ComposerDraftEvent(s.sid, text: args['text'] as String?, inline: true, send: true),
       );
     } else if (call.method == 'composer_action') {
-      _emit(ComposerDraftEvent(s.sid, text: args['text'] as String?, action: args['action'] as String?));
+      _emit(ComposerDraftEvent(s.sid, text: args['text'] as String?, inline: true, action: args['action'] as String?));
     } else if (call.method == 'composer_retry') {
       _emit(ComposerDraftEvent(s.sid, retry: true));
     } else if (call.method == 'composer_drop_block') {
@@ -230,11 +231,31 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
   }
 
   @override
-  void nativeComposerOptions(Object sid, {required bool allowed, required bool compose, required double scale}) {
+  void nativeComposerOptions(Object sid, {required bool allowed, required bool compose, required double scale, Map<String, Object> style = const {}}) {
     final s = _sessions[sid];
     if (s == null) return;
-    s.composerOptions = {'sid': sid, 'allowed': allowed, 'compose': compose, 'scale': scale};
+    s.composerOptions = {'sid': sid, 'allowed': allowed, 'compose': compose, 'scale': scale, ...style};
     if (s.detached) _nativeCall('composer_options', s.composerOptions);
+  }
+
+  @override
+  void nativeComposerInsert(Object sid, String? text, List<BlockChip> blocks) {
+    if (_sessions[sid]?.detached == true) {
+      _nativeCall('composer_insert', {
+        'sid': sid, 'text': text,
+        'blocks': [for (final b in blocks) {'n': b.n, 'label': b.label, if (b.mark != null) 'mark': b.mark}],
+      });
+    }
+  }
+
+  @override
+  void nativeHostNotice(Object sid, {required int epoch, required String text,
+      required List<Map<String, String>> actions}) {
+    if (_sessions[sid]?.detached == true) {
+      _nativeCall('host_notice', {
+        'sid': sid, 'epoch': epoch, 'text': text, 'actions': actions,
+      });
+    }
   }
 
   @override
@@ -487,7 +508,7 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
             'blocks': args['blocks'],
           });
           if (_disposed || s.closed || !identical(_sessions[sid], s)) {
-            await desktop.channel.invokeMethod<void>('attach', {'sid': sid});
+            await desktop.channel.invokeMethod<void>('attach', {'sid': sid, 'discard': true});
             return null;
           }
           if (s.disconnected) throw StateError('连接已断开');
@@ -499,12 +520,13 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
           await s.nativeFrame();
           if (_disposed || s.closed || !identical(_sessions[sid], s)) return null;
           s.nativeFocus();
+          _nativeCall('secure_focus', {'sid': sid, 'on': s.secure});
           _nativeCall('composer_options', {'sid': sid, ...s.composerOptions});
           if (s.banner.isNotEmpty) _nativeCall('banner', {'sid': sid, 'text': s.banner});
           _emit(DetachedEvent(s.sid, true));
         } catch (_) {
           s.detached = false;
-          await desktop.channel.invokeMethod<void>('attach', {'sid': sid}).catchError((Object _) {});
+          await desktop.channel.invokeMethod<void>('attach', {'sid': sid, 'discard': true}).catchError((Object _) {});
           rethrow;
         }
       case 'attach':
@@ -1263,7 +1285,7 @@ class _Session {
     if (detached) {
       unawaited(
         desktop.channel
-            .invokeMethod<void>('attach', {'sid': sid})
+            .invokeMethod<void>('attach', {'sid': sid, 'discard': true})
             .catchError((Object _) {}),
       );
     }

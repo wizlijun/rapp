@@ -3,7 +3,8 @@ import 'package:flutter/services.dart';
 
 /// macOS: while a password field has focus, secure event input is on and an ASCII keyboard layout
 /// is selected (Flutter's `obscureText` leaves the input method on, so pinyin candidates would pop
-/// up over a password). Calls pair: one `end` per `begin`. Elsewhere nothing answers: a no-op.
+/// up over a password). Linux uses the toolkit's per-context password purpose and suppresses
+/// the candidate bridge while focused. Calls pair: one `end` per `begin`.
 abstract final class SecureInput {
   static const channel = MethodChannel('rapp/secure-input');
 
@@ -85,6 +86,9 @@ class _SecureTextFieldState extends State<SecureTextField> {
     autofocus: widget.autofocus,
     enabled: widget.enabled,
     obscureText: true,
+    // Flutter's Linux engine maps this type to GTK_INPUT_PURPOSE_PASSWORD;
+    // obscureText alone only masks glyphs and does not set the IM context purpose.
+    keyboardType: TextInputType.visiblePassword,
     enableSuggestions: false,
     autocorrect: false,
     enableIMEPersonalizedLearning: false,

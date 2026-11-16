@@ -119,6 +119,21 @@ class FakeTransport implements HubTransport {
 /// In-memory stand-in for the runner's `rapp/session` channel: records every call with its
 /// channel arguments and lets a test play runner events.
 class FakeSessionPort extends SessionPort {
+  bool inlineNative = false;
+  final nativeCalls = <(String, Map<String, Object?>)>[];
+  @override
+  bool get supportsInlineNativeComposer => inlineNative;
+  @override
+  void nativeHostNotice(Object sid, {required int epoch, required String text,
+      required List<Map<String, String>> actions}) =>
+      nativeCalls.add(('host_notice', {'sid': sid, 'epoch': epoch, 'text': text, 'actions': actions}));
+  @override
+  void nativeComposerInsert(Object sid, String? text, List<BlockChip> blocks) =>
+      nativeCalls.add(('composer_insert', {'sid': sid, 'text': text, 'blocks': blocks}));
+  @override
+  void nativeComposerOptions(Object sid, {required bool allowed, required bool compose,
+      required double scale, Map<String, Object> style = const {}}) =>
+      nativeCalls.add(('composer_options', {'sid': sid, 'allowed': allowed, 'compose': compose, 'scale': scale, ...style}));
   final calls = <(String, Map<String, Object?>)>[];
   final _events = StreamController<SessionEvent>.broadcast(sync: true);
 

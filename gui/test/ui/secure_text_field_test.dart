@@ -98,10 +98,11 @@ void main() {
     expect(field.obscureText, isTrue);
     expect(field.enableSuggestions, isFalse);
     expect(field.autocorrect, isFalse);
+    expect(field.keyboardType, TextInputType.visiblePassword);
     expect(field.enableIMEPersonalizedLearning, isFalse);
   });
 
-  testWidgets('no native side (Linux) is a quiet no-op', (tester) async {
+  testWidgets('a missing native side is a quiet no-op', (tester) async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(SecureInput.channel, null);
     await tester.pumpWidget(app(const SecureTextField(autofocus: true)));

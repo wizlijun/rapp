@@ -36,6 +36,7 @@ void main() {
       await pending;
       await Future<void>.delayed(Duration.zero);
       expect(calls.where((c) => c.method == 'attach'), hasLength(1));
+      expect((calls.firstWhere((c) => c.method == 'attach').arguments as Map)['discard'], true);
       expect(calls.where((c) => c.method == 'windows'), isEmpty);
       expect(events.whereType<DetachedEvent>(), isEmpty);
     } finally {
@@ -45,6 +46,41 @@ void main() {
       binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
     }
   });
+  test('native insertion reaches an existing window before detach acknowledgement', () async {
+    final calls = <MethodCall>[];
+    final gate = Completer<void>(), entered = Completer<void>();
+    binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      if (call.method == 'init') return true;
+      if (call.method == 'windows') { entered.complete(); await gate.future; }
+      return null;
+    });
+    final process = await Process.start('cat', const []);
+    final port = LinuxSessionPort('/bin/cat', framePresented: () async {});
+    final events = <SessionEvent>[];
+    final sub = port.events.listen(events.add);
+    try {
+      await port.init();
+      port.seedSessionForTest(91, process);
+      final pending = port.detach(91);
+      await entered.future;
+      expect(events.whereType<DetachedEvent>(), isEmpty);
+      port.nativeComposerInsert(91, 'late paste', [const BlockChip(1, 'file', mark: 0xe000)]);
+      await Future<void>.delayed(Duration.zero);
+      expect(calls.where((c) => c.method == 'composer_insert').single.arguments, {
+        'sid': 91, 'text': 'late paste', 'blocks': [{'n': 1, 'label': 'file', 'mark': 0xe000}],
+      });
+      gate.complete();
+      await pending;
+    } finally {
+      if (!gate.isCompleted) gate.complete();
+      port.dispose();
+      await sub.cancel();
+      process.kill();
+      binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
+    }
+  });
+
   test('disconnecting during pending native detach returns to the frozen stage', () async {
     final calls = <MethodCall>[];
     final gate = Completer<void>();
@@ -72,6 +108,7 @@ void main() {
       await expectLater(pending, throwsStateError);
       await Future<void>.delayed(Duration.zero);
       expect(calls.where((c) => c.method == 'attach'), hasLength(1));
+      expect((calls.firstWhere((c) => c.method == 'attach').arguments as Map)['discard'], true);
       expect(calls.where((c) => c.method == 'windows'), isEmpty);
       expect(events.whereType<DetachedEvent>(), isEmpty);
     } finally {

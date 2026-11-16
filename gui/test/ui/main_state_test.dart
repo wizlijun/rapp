@@ -1537,6 +1537,46 @@ void main() {
       });
     });
 
+    test('native host actions keep their sid and reject stale or unsafe dismissals', () {
+      env((a, t, port, st, hints) {
+        expect(st.currentKey, '111/aa');
+        port.emit(const CoveredEvent(1, 77, '通知中心', 'bundle', true));
+        final old = port.nativeCalls.where((c) => c.$1 == 'host_notice').last.$2;
+        port.emit(const CoveredEvent(1, 88, '新提示', 'bundle', true));
+        final fresh = port.nativeCalls.where((c) => c.$1 == 'host_notice').last.$2;
+        port.emit(HostNoticeActionEvent(1, 'dismiss', old['epoch'] as int));
+        expect(port.calls.where((c) => c.$1 == 'dismiss_cover'), isEmpty);
+        port.emit(HostNoticeActionEvent(1, 'dismiss', fresh['epoch'] as int));
+        expect(port.calls.where((c) => c.$1 == 'dismiss_cover').single.$2, {'sid': 1, 'id': 88});
+        expect(st.currentKey, '111/aa');
+        port.emit(const CoveredEvent(1, 99, '安全提示', 'bundle', false));
+        final unsafe = port.nativeCalls.where((c) => c.$1 == 'host_notice').last.$2;
+        expect((unsafe['actions'] as List).where((x) => x['id'] == 'dismiss'), isEmpty);
+        port.emit(HostNoticeActionEvent(1, 'dismiss', unsafe['epoch'] as int));
+        expect(port.calls.where((c) => c.$1 == 'dismiss_cover'), hasLength(1));
+        a.elapse(hostNoticeFor);
+        expect(port.nativeCalls.where((c) => c.$1 == 'host_notice').last.$2['text'], '');
+      }, sessions: 2);
+    });
+
+    test('insertion during native handoff carries marks before DetachedEvent and preserves edited order', () {
+      env((a, t, port, st, hints) {
+        port.inlineNative = true;
+        // The native window exists before its asynchronous detach acknowledgement.
+        port.emit(const ComposerInsertEvent(1, PasteResult(text: 'x', blocks: [BlockChip(1, 'file')])));
+        final sent = port.nativeCalls.where((c) => c.$1 == 'composer_insert').last.$2;
+        final blocks = sent['blocks'] as List<BlockChip>;
+        final mark = String.fromCharCode(blocks.single.mark!);
+        expect(sent['text'], 'x');
+        port.emit(const DetachedEvent(1, true));
+        port.emit(ComposerDraftEvent(1, text: '前$mark后', inline: true, send: true));
+        a.flushMicrotasks();
+        expect(st.remote[1]!.composer.inFlight!.pieces(), [
+          {'text': '前'}, {'block': 1}, {'text': '后'},
+        ]);
+      });
+    });
+
     test('an app opened on A shows 「打开」, which opens it here; × just closes', () {
       env((a, t, port, st, hints) {
         port.emit(const AppOpenedEvent(1, 'com.apple.Safari', 'Safari'));

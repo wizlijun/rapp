@@ -448,6 +448,35 @@ void main() {
     ]);
   });
 
+  test('inline native handoff preserves block order between text runs', () async {
+    m.apply(const PasteResult(text: 'before', blocks: [BlockChip(1, 'a'), BlockChip(2, 'b')]));
+    final marks = m.nativeBlocks.map((b) => String.fromCharCode(b.mark!)).toList();
+    expect(await m.readDraft(inline: true), 'before${marks[0]}${marks[1]}');
+    await m.detach(ed);
+    m.setDetachedDraft('前${marks[1]}中${marks[0]}后', inline: true);
+    final next = FakeEditor();
+    await m.attach(next);
+    expect(next.value, '前${marks[1]}中${marks[0]}后');
+    expect((await m.submit() as SubmitPieces).pieces, [
+      {'text': '前'}, {'block': 2}, {'text': '中'}, {'block': 1}, {'text': '后'},
+    ]);
+  });
+
+  test('deleted inline native anchors are not resurrected on attach or send', () async {
+    m.apply(const PasteResult(text: 'before', blocks: [BlockChip(1, 'a'), BlockChip(2, 'b')]));
+    final mark = String.fromCharCode(m.nativeBlocks[1].mark!);
+    await m.detach(ed);
+    m.setDetachedDraft('before${mark}after', inline: true);
+    expect(dropped, isEmpty, reason: 'native undo can still restore the anchor');
+    final next = FakeEditor();
+    await m.attach(next);
+    expect(dropped, [1]);
+    expect(next.value, 'before${mark}after');
+    expect((await m.submit() as SubmitPieces).pieces, [
+      {'text': 'before'}, {'block': 2}, {'text': 'after'},
+    ]);
+  });
+
   test('a chip tapped away in a native composer drops that block only, and its mark leaves the text', () async {
     m.apply(const PasteResult(text: 'hi', blocks: [BlockChip(1, 'a'), BlockChip(2, 'b')]));
     expect(m.blocks.map((b) => b.n), [1, 2]);

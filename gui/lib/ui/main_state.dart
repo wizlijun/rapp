@@ -665,9 +665,10 @@ class MainState extends ChangeNotifier {
     if (!_detaching.add(rs.sid)) return;
     rs.composer.handoff(true);
     try {
-      final text = await rs.composer.readDraft();
+      final inline = portOf(rs.sid)?.supportsInlineNativeComposer == true;
+      final text = await rs.composer.readDraft(inline: inline);
       if (identical(remote[rs.sid], rs) && _liveSid(rs.sid) && !rs.detached) {
-        await portOf(rs.sid)?.detach(rs.sid, text: text, blocks: List.of(rs.composer.blocks));
+        await portOf(rs.sid)?.detach(rs.sid, text: text, blocks: inline ? rs.composer.nativeBlocks : List.of(rs.composer.blocks));
       } else {
         rs.composer.handoff(false);
       }
@@ -1076,6 +1077,17 @@ class MainState extends ChangeNotifier {
     }
   }
 
+  void _applyPortEvent(RemoteSession rs, SessionEvent e) {
+    // Allocate marks in the shared model before handing an insertion to the native editor.
+    final text = e is ComposerInsertEvent ? rs.composer.plainText(e.insert.text ?? '') : null;
+    rs.apply(e);
+    if (e is ComposerInsertEvent && portOf(rs.sid)?.supportsInlineNativeComposer == true) {
+      final ids = e.insert.blocks.map((b) => b.n).toSet();
+      portOf(rs.sid)?.nativeComposerInsert(rs.sid, text,
+          rs.composer.nativeBlocks.where((b) => ids.contains(b.n)).toList());
+    }
+  }
+
   void _onPortEvent(SessionEvent e) {
     final rs = remote[e.sid];
     if (rs == null) return;
@@ -1085,7 +1097,7 @@ class MainState extends ChangeNotifier {
       // A reconnect keeps the old native editor visible until the first new frame.
       // Local edits still belong to that draft; they must never be sent to a dead link.
       if (moving?.frozen == true && (e is ComposerDraftEvent || e is ComposerInsertEvent || e is ComposerStateEvent)) {
-        rs.apply(e);
+        _applyPortEvent(rs, e);
         if (e is ComposerDraftEvent && e.action != null) _nativeAction(rs, e.action!);
         notifyListeners();
         return;
@@ -1096,7 +1108,7 @@ class MainState extends ChangeNotifier {
           if (moving.key == currentKey) _showBlocked(e.by);
           return;
         }
-        rs.apply(e);
+        _applyPortEvent(rs, e);
         if (e is WindowsEvent) _syncHidden(rs);
         final start = _starts[e.sid];
         if (start != null && e is ClipsEvent) {
@@ -1142,6 +1154,10 @@ class MainState extends ChangeNotifier {
       if (r.key == currentKey) _showBlocked(e.by);
       return;
     }
+    if (e is HostNoticeActionEvent) {
+      _nativeNoticeAction(r, e);
+      return;
+    }
     if (e is CoveredEvent) {
       final name = e.name.isEmpty ? e.bundle : e.name;
       _notify(r, HostNotice.covered(coveredText(name), coverId: e.id, dismissable: e.dismissable,
@@ -1159,7 +1175,7 @@ class MainState extends ChangeNotifier {
       return;
     }
     final wasLocked = rs.screenLocked;
-    rs.apply(e);
+    _applyPortEvent(rs, e);
     if (e is ComposerDraftEvent && e.action != null) _nativeAction(rs, e.action!);
     if (e is ComposerDraftEvent && (e.send || e.retry)) unawaited(_submitNative(rs, e));
     if (e is ScreenLockedEvent) {
@@ -1204,6 +1220,7 @@ class MainState extends ChangeNotifier {
       }
     } else if (e is DetachedEvent) {
       _syncHidden(rs);
+      if (e.detached) _syncNotice(r);
       // The hub logs one line per move (R10); keys typed on the stage no longer go to it.
       if (_reachable(r)) hub!.note(e.sid, e.detached ? 'detach' : 'attach', rs.tabs.tabs.length);
       if (e.detached && pictureFocused == e.sid) _blur();
@@ -1220,27 +1237,75 @@ class MainState extends ChangeNotifier {
   Timer? _blockedTimer;
 
   /// Each record's latest host notice (by record key: a reconnect keeps it), and its expiry.
-  final _notices = <String, ({HostNotice notice, Timer timer})>{};
+  final _notices = <String, ({HostNotice notice, Timer timer, int epoch})>{};
 
   /// The notice for what is on show, if any.
   HostNotice? get hostNotice => currentKey == null ? null : _notices[currentKey]?.notice;
 
+  int _noticeEpoch = 0;
+
   void _notify(SessionRecord r, HostNotice n) {
     _notices.remove(r.key)?.timer.cancel();
+    final epoch = ++_noticeEpoch;
     late final Timer t;
     t = Timer(hostNoticeFor, () {
       if (_disposed || !identical(_notices[r.key]?.timer, t)) return;
-      _notices.remove(r.key);
+      _clearHostNotice(r.key);
       notifyListeners();
     });
-    _notices[r.key] = (notice: n, timer: t);
+    _notices[r.key] = (notice: n, timer: t, epoch: epoch);
+    _syncNotice(r);
+  }
+
+  void _syncNotice(SessionRecord r) {
+    final entry = _notices[r.key], sid = r.sid;
+    if (entry == null || sid == null) return;
+    final n = entry.notice;
+    portOf(sid)?.nativeHostNotice(sid, epoch: entry.epoch, text: n.text, actions: [
+      if (n.dismissable && n.coverId != null) {'id': 'dismiss', 'label': '关掉它'},
+      if (n.desktop) {'id': 'desktop', 'label': '在桌面会话里处理'},
+      if (n.bundle != null) {'id': 'open', 'label': '打开'},
+      {'id': 'close', 'label': '关闭提示'},
+    ]);
+  }
+
+  void _clearHostNotice(String key) {
+    final entry = _notices.remove(key);
+    entry?.timer.cancel();
+    final sid = _records[key]?.sid;
+    if (entry != null && sid != null) {
+      portOf(sid)?.nativeHostNotice(sid, epoch: entry.epoch, text: '', actions: const []);
+    }
+  }
+
+  void _nativeNoticeAction(SessionRecord r, HostNoticeActionEvent e) {
+    final entry = _notices[r.key];
+    if (entry == null || entry.epoch != e.epoch || r.phase != Phase.live || r.ending) return;
+    final n = entry.notice;
+    switch (e.action) {
+      case 'dismiss':
+        if (!n.dismissable || n.coverId == null) return;
+        portOf(e.sid)?.dismissCover(e.sid, n.coverId!);
+      case 'desktop':
+        if (!n.desktop) return;
+        unawaited(openOrSwitch(r.id, 'desktop:', '桌面'));
+      case 'open':
+        if (n.bundle == null) return;
+        unawaited(openOrSwitch(r.id, n.bundle!, n.name!));
+      case 'close':
+        break;
+      default:
+        return;
+    }
+    _clearHostNotice(r.key);
+    notifyListeners();
   }
 
   /// The notice on show goes (its ×, or after one of its buttons).
   void closeHostNotice() {
     final k = currentKey;
     if (k == null) return;
-    _notices.remove(k)?.timer.cancel();
+    _clearHostNotice(k);
     notifyListeners();
   }
 
@@ -2058,10 +2123,17 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Sends the hidden window set to the runner when it changed, and logs how many (D9: no titles).
+  Map<String, Object> _nativeComposerStyle = const {};
+  void setNativeComposerStyle(Map<String, Object> style) {
+    if (mapEquals(style, _nativeComposerStyle)) return;
+    _nativeComposerStyle = Map.unmodifiable(style);
+    for (final rs in remote.values) { _syncHidden(rs); }
+  }
+
+  /// Sends native editor style and the hidden window set (D9: no titles in logs).
   void _syncHidden(RemoteSession rs) {
     portOf(rs.sid)?.nativeComposerOptions(rs.sid, allowed: rs.composerAllowed,
-        compose: rs.composerAllowed && rs.profile.typeToCompose && rs.composeArmed, scale: composerScale);
+        compose: rs.composerAllowed && rs.profile.typeToCompose && rs.composeArmed, scale: composerScale, style: _nativeComposerStyle);
     final ids = rs.hiddenIds.toList()..sort();
     final last = _sentHidden[rs.sid] ?? const <int>[];
     if (!listEquals(ids, last)) {

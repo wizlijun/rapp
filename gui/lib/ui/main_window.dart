@@ -61,6 +61,16 @@ class _MainWindowState extends State<MainWindow> {
   MainState get state => widget.state;
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final t = RappTokens.of(context);
+    state.setNativeComposerStyle({
+      'font_size': t.textSize, 'font_family': t.monoBody ? t.mono : t.font,
+      'background_color': t.bg.toARGB32(), 'text_color': t.text.toARGB32(), 'hint_color': t.muted.toARGB32(), 'focus_color': t.on.toARGB32(),
+    });
+  }
+
+  @override
   void initState() {
     super.initState();
     _sub = widget.fullscreen.changes.listen((v) {

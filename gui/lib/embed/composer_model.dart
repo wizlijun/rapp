@@ -107,6 +107,10 @@ class ComposerModel extends ChangeNotifier {
 
   /// Block number → its mark (a unit of [blockMarks]), for each of [blocks].
   final Map<int, int> _marks = {};
+  bool _inlineDetachedDraft = false;
+
+  List<BlockChip> get nativeBlocks => [for (final b in blocks)
+    BlockChip(b.n, b.label, mark: _marks[b.n], kind: b.kind, bytes: b.bytes, text: b.text, name: b.name)];
 
   /// Holds [b] and gives its mark; null (and [b] dropped) when every mark is in use. [beside] is text
   /// going in with it.
@@ -126,6 +130,8 @@ class ComposerModel extends ChangeNotifier {
   }
 
   /// [s] without the marks of the blocks held.
+  String plainText(String s) => _plain(s);
+
   String _plain(String s) {
     if (_marks.isEmpty) return s;
     final marks = _marks.values.toSet();
@@ -281,7 +287,12 @@ class ComposerModel extends ChangeNotifier {
 
   /// The editor takes the draft: its chips, then the text with their marks in it.
   void _start(ComposerEditor e) {
-    _restoreMarks();
+    if (_inlineDetachedDraft) {
+      _dropMissing(draft);
+      _inlineDetachedDraft = false;
+    } else {
+      _restoreMarks();
+    }
     _showChips(e);
     e.setText(draft);
   }
@@ -346,7 +357,7 @@ class ComposerModel extends ChangeNotifier {
   }
 
   /// Flush the current editor before handing the draft to a native detached window.
-  Future<String> readDraft() async {
+  Future<String> readDraft({bool inline = false}) async {
     await _inserting;
     await _attached;
     await _detaching;
@@ -356,12 +367,13 @@ class ComposerModel extends ChangeNotifier {
       final text = await e.read();
       if (identical(_editor, e) && _draftEpoch == epoch && !_disposed) draft = text;
     }
-    return draftText; // the marks stay here; the blocks go to the other window as chips
+    return inline ? draft : draftText;
   }
 
-  /// Text typed in a detached native composer. It carries no block marks — the chips are held here, and
-  /// that window reports a removed one as its own drop — so the held blocks are not judged by it.
-  void setDetachedDraft(String s) {
+  /// Native text updates keep held blocks until submission or handoff, so native undo can restore
+  /// deleted anchors. Legacy native editors send plain text and report chip removals separately.
+  void setDetachedDraft(String s, {bool inline = false}) {
+    _inlineDetachedDraft = inline;
     draft = s;
     _editor?.setText(s);
   }
@@ -369,6 +381,7 @@ class ComposerModel extends ChangeNotifier {
   /// Replaces the text: into the editor if attached, else the draft. Held blocks [s] has no mark of are
   /// dropped.
   void setDraft(String s) {
+    _inlineDetachedDraft = false;
     _dropMissing(s);
     draft = s;
     _editor?.setText(s);
