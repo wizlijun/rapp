@@ -236,7 +236,11 @@ class _LinuxCandidatesSurfaceState extends State<LinuxCandidatesSurface> with Wi
 
   @override
   Widget build(BuildContext context) {
-    final textStyle = widget.style.copyWith(shadows: const []);
+    // Resolve inheritance once: measuring a partial style while Text.rich merges
+    // the ambient style can make every allocated candidate narrower than its text.
+    final textStyle = DefaultTextStyle.of(
+      context,
+    ).style.merge(widget.style).copyWith(inherit: false, shadows: const []);
     final painter = TextPainter(
       text: TextSpan(text: '字Mg', style: textStyle),
       textDirection: TextDirection.ltr,
@@ -294,14 +298,34 @@ class _LinuxCandidatesSurfaceState extends State<LinuxCandidatesSurface> with Wi
   ) {
     final muted = style.copyWith(color: (style.color ?? const Color(0xff888888)).withValues(alpha: .65));
     final available = width - navigation;
+    final scaler = MediaQuery.textScalerOf(context);
+    final locale = Localizations.maybeLocaleOf(context);
     double measure(String text, TextStyle style) => (TextPainter(
       text: TextSpan(text: text, style: style),
       textDirection: TextDirection.ltr,
       textScaler: MediaQuery.textScalerOf(context),
     )..layout()).width;
     final gap = math.max(2.0, measure('  ', style));
+    TextSpan span(LinuxCandidate candidate) => TextSpan(
+      style: style,
+      children: [
+        TextSpan(text: '${candidate.label} ', style: muted),
+        TextSpan(
+          text: candidate.text,
+          style: style.copyWith(
+            decoration: candidate.index == current.cursor ? TextDecoration.underline : TextDecoration.none,
+          ),
+        ),
+      ],
+    );
     double natural(LinuxCandidate candidate) =>
-        measure('${candidate.label} ', muted) + measure(candidate.text, style) + gap;
+        (TextPainter(
+          text: span(candidate),
+          textDirection: TextDirection.ltr,
+          textScaler: scaler,
+          locale: locale,
+        )..layout()).width.ceilToDouble() +
+        gap;
     final pages = <List<LinuxCandidate>>[];
     var row = <LinuxCandidate>[], used = 0.0;
     for (final candidate in current.rows) {
@@ -379,19 +403,11 @@ class _LinuxCandidatesSurfaceState extends State<LinuxCandidatesSurface> with Wi
                           child: Padding(
                             padding: EdgeInsets.only(right: gap),
                             child: Text.rich(
-                              TextSpan(
-                                children: [
-                                  TextSpan(text: '${candidate.label} ', style: muted),
-                                  TextSpan(
-                                    text: candidate.text,
-                                    style: style.copyWith(
-                                      decoration: candidate.index == current.cursor
-                                          ? TextDecoration.underline
-                                          : TextDecoration.none,
-                                    ),
-                                  ),
-                                ],
-                              ),
+                              span(candidate),
+                              style: style,
+                              textDirection: TextDirection.ltr,
+                              textScaler: scaler,
+                              locale: locale,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               softWrap: false,

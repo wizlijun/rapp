@@ -1,15 +1,29 @@
+import 'dart:io';
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:rapp/embed/flutter_editor.dart';
 import 'package:rapp/embed/composer_editor.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/linux_candidates.dart';
+import 'package:rapp/ui/tokens.dart';
 
 void main() {
   const channel = MethodChannel('rapp/linux_candidates');
   const codec = StandardMethodCodec();
   final calls = <MethodCall>[];
   final binding = TestWidgetsFlutterBinding.ensureInitialized();
+  setUpAll(() async {
+    // Optional real-font run: no machine-specific paths in the test suite.
+    final path = Platform.environment['RAPP_TEST_CJK_FONT'];
+    if (path != null) {
+      final loader = FontLoader('CandidateRegressionCJK');
+      loader.addFont(File(path).readAsBytes().then(ByteData.sublistView));
+      await loader.load();
+    }
+  });
   late FocusNode focus;
   late TextEditingController controller;
   setUp(() {
@@ -28,19 +42,33 @@ void main() {
   });
   Map<Object?, Object?> state() =>
       (calls.lastWhere((c) => c.method == 'state').arguments as Map).cast<Object?, Object?>();
-  Future<void> mount(WidgetTester tester, {double width = 340, double height = 180}) async {
+  Future<void> mount(
+    WidgetTester tester, {
+    double width = 340,
+    double height = 180,
+    RappTheme? theme,
+    double scale = 1,
+    TextStyle? style,
+  }) async {
     await tester.pumpWidget(
       MaterialApp(
+        theme: theme == null ? null : themeDataFor(theme),
         home: Scaffold(
-          body: Center(
-            child: SizedBox(
-              width: width,
-              child: LinuxCandidatesSurface(
-                focus: focus,
-                controller: controller,
-                style: const TextStyle(fontSize: 15, height: 22 / 15, color: Colors.black),
-                maxHeight: height,
-                child: TextField(controller: controller, focusNode: focus),
+          body: MediaQuery(
+            data: MediaQueryData(textScaler: TextScaler.linear(scale)),
+            child: Center(
+              child: SizedBox(
+                width: width * scale,
+                child: RepaintBoundary(
+                  key: const Key('candidate-preview'),
+                  child: LinuxCandidatesSurface(
+                    focus: focus,
+                    controller: controller,
+                    style: style ?? const TextStyle(fontSize: 15, height: 22 / 15, color: Colors.black),
+                    maxHeight: height,
+                    child: TextField(controller: controller, focusNode: focus),
+                  ),
+                ),
               ),
             ),
           ),
@@ -89,6 +117,64 @@ void main() {
     await tester.pump();
   }
 
+  for (final theme in RappTheme.values) {
+    for (final scale in [1.0, 1.2222, 1.75]) {
+      for (final width in [220.0, 340.0]) {
+        testWidgets('candidate glyphs remain visible ${theme.name} $scale $width', (tester) async {
+          final t = tokensFor(theme);
+          await mount(
+            tester,
+            theme: theme,
+            scale: scale,
+            width: width,
+            style: TextStyle(
+              fontSize: 15,
+              height: 22 / 15,
+              color: t.text,
+              fontFamily: Platform.environment.containsKey('RAPP_TEST_CJK_FONT') ? 'CandidateRegressionCJK' : t.font,
+              fontFamilyFallback: t.fontFallback,
+            ),
+          );
+          await emit(
+            tester,
+            rows: [
+              {'index': 7, 'label': '1.', 'text': '你好'},
+              {'index': 19, 'label': '2.', 'text': '输入法'},
+            ],
+          );
+          final paragraphs = find.descendant(of: find.byType(LinuxCandidatesSurface), matching: find.byType(RichText));
+          var checked = 0;
+          for (final element in paragraphs.evaluate()) {
+            final p = element.renderObject! as RenderParagraph;
+            if (!['你好', '输入法'].any(p.text.toPlainText().contains)) continue;
+            expect(p.didExceedMaxLines, false, reason: '${p.text.toPlainText()} was ellipsized');
+            // Check each candidate glyph has a laid-out box, not just a TextSpan.
+            final full = p.text.toPlainText();
+            final start = full.indexOf(' ') + 1;
+            for (var i = start; i < full.length; i++) {
+              expect(p.getBoxesForSelection(TextSelection(baseOffset: i, extentOffset: i + 1)), isNotEmpty);
+            }
+            checked++;
+          }
+          expect(checked, greaterThan(0));
+          expect(tester.takeException(), isNull);
+          final imageDir = Platform.environment['RAPP_CANDIDATE_IMAGE_DIR'];
+          if (imageDir != null && scale == 1.2222 && width == 340) {
+            await tester.runAsync(() async {
+              final boundary = tester.renderObject<RenderRepaintBoundary>(find.byKey(const Key('candidate-preview')));
+              final image = await boundary.toImage(pixelRatio: 2);
+              final data = await image.toByteData(format: ui.ImageByteFormat.png);
+              await Directory(imageDir).create(recursive: true);
+              await File('$imageDir/${theme.name}.png').writeAsBytes(data!.buffer.asUint8List());
+              image.dispose();
+            });
+          }
+          await unmount(tester);
+        });
+      }
+    }
+  }
+
   testWidgets('paints before acknowledging and preserves unsigned serial/real index', (tester) async {
     await mount(tester);
     expect(state()['active'], true);
@@ -100,6 +186,15 @@ void main() {
     await emit(tester);
     expect(calls.where((c) => c.method == 'rendered'), isNotEmpty);
     expect(find.textContaining('候选词'), findsOneWidget);
+    for (final label in ['候选词', '第二个']) {
+      final rich = find.descendant(of: find.textContaining(label), matching: find.byType(RichText));
+      final paragraph = tester.renderObject<RenderParagraph>(rich);
+      expect(
+        paragraph.didExceedMaxLines,
+        false,
+        reason: '$label must actually be visible, not merely present in TextSpan',
+      );
+    }
     await tester.tap(find.textContaining('候选词'));
     final call = calls.lastWhere((c) => c.method == 'select');
     expect((call.arguments as Map)['index'], 7);
