@@ -221,6 +221,29 @@ final class EmbeddedSessionTests: XCTestCase {
         XCTAssertEqual(link.sent.count, n + 1)
     }
 
+    func testFocusReachesTheWire() {
+        let link = FakeLink()
+        let (s, q) = make(link) { _ in }
+        s.setStream(mode: .duogray, fps: 2, choice: .saver1x, pinned: false, focus: true)
+        q.sync {}
+        guard case let .setStream(_, _, _, _, focus)? = link.sent.last else { return XCTFail("sent \(link.sent)") }
+        XCTAssertTrue(focus)
+        let n = link.sent.count
+        s.setStream(mode: .duogray, fps: 2, choice: .saver1x, pinned: false, focus: true); q.sync {}
+        XCTAssertEqual(link.sent.count, n)
+        s.setStream(mode: .duogray, fps: 2, choice: .saver1x, pinned: false, focus: false); q.sync {}
+        XCTAssertEqual(link.sent.count, n + 1)
+    }
+
+    func testFocusRegionIsForwarded() {
+        let link = FakeLink()
+        var events: [SessionEvent] = []
+        let (_, q) = make(link) { events.append($0) }
+        let rects = [CanvasRect(x: 0.1, y: 0.2, w: 0.3, h: 0.4)]
+        link.feed(.focusRegion(window: 5, rects: rects)); q.sync {}
+        XCTAssertTrue(events.contains { if case .focusRegion(5, let r) = $0 { return r == rects } else { return false } })
+    }
+
     func testInconsistentFrameClosesNotCrashes() throws {
         let link = FakeLink()
         var events = [SessionEvent]()

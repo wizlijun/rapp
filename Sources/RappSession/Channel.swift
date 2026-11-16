@@ -27,7 +27,7 @@ public enum ChannelCommand: Equatable {
     case closeWindow(sid: Int64, window: UInt32)
     /// Select A's input source `id`; "" selects A's ASCII-capable layout (v8 hosts).
     case selectInput(sid: Int64, id: String)
-    case setStream(sid: Int64, mode: Mode, fps: UInt8, density: DensityChoice, pinned: Bool)
+    case setStream(sid: Int64, mode: Mode, fps: UInt8, density: DensityChoice, pinned: Bool, focus: Bool = false)
     /// Stop one transfer (`id`) or, without an id, all of them.
     case cancelTransfer(sid: Int64, id: UInt32?)
     /// Take a copy of A's clip `clip` onto B (answered with a `clipCopyReply`).
@@ -154,7 +154,7 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
         return .setBanner(sid: sid, text: try a.string("text"))
     case "set_stream":
         return .setStream(sid: sid, mode: try a.mode(), fps: try a.fps(), density: try a.density(),
-                          pinned: try a.optionalBool("pinned"))
+                          pinned: try a.optionalBool("pinned"), focus: try a.optionalBool("focus"))
     case "clip_pick":
         guard let clip = UInt32(exactly: try a.int("clip")) else { throw ChannelError.bad(method) }
         return .clipPick(sid: sid, clip: clip, insert: try a.bool("insert"))
@@ -376,6 +376,8 @@ public func eventPayload(_ e: SessionEvent, sid: Int64, textures: [UInt32: Int64
         return payload("input_source", ["id": id, "name": name, "ascii": ascii])
     case let .screenLocked(locked):
         return payload("screen_locked", ["locked": locked])
+    case let .focusRegion(window, rects):
+        return payload("focus", ["window": window, "rects": rects.map { [Double($0.x), Double($0.y), Double($0.w), Double($0.h)] }])
     case let .disconnected(reason):
         return payload("disconnected", ["reason": reason])
     case let .closed(reason):

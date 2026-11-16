@@ -148,8 +148,8 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       // Queued with the session's other messages: a composer send after it reaches A after the switch.
       live[sid]?.session.send(.selectInput(id: id))
       result(nil)
-    case let .setStream(sid, mode, fps, density, pinned):
-      live[sid]?.session.setStream(mode: mode, fps: fps, choice: density, pinned: pinned)
+    case let .setStream(sid, mode, fps, density, pinned, focus):
+      live[sid]?.session.setStream(mode: mode, fps: fps, choice: density, pinned: pinned, focus: focus)
       result(nil)
     case let .cancelTransfer(sid, id):
       if let id { live[sid]?.session.cancelTransfer(id: id) } else { live[sid]?.session.cancelTransfers() }
