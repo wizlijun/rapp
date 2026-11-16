@@ -81,6 +81,7 @@ fn command(v: &Value) -> Result<Vec<u8>> {
         ),
         "select_window" => p::id_packet(14, id()?),
         "close_window" => p::id_packet(15, id()?),
+        "dismiss_cover" => p::dismiss_cover(number(v, "id")?),
         "unlock" => {
             let password = v["password"].as_str().context("missing password")?;
             ensure!(
@@ -361,6 +362,19 @@ fn read_loop(
             Incoming::ScreenLocked(locked) => {
                 event(out, json!({"event":"screen_locked","locked":locked}))?
             }
+            Incoming::Covered {
+                id,
+                name,
+                bundle,
+                dismissable,
+            } => event(
+                out,
+                json!({"event":"covered","id":id,"name":name,"bundle":bundle,"dismissable":dismissable}),
+            )?,
+            Incoming::AppOpened { bundle, name } => {
+                event(out, json!({"event":"app_opened","bundle":bundle,"name":name}))?
+            }
+            Incoming::SecureFocus(on) => event(out, json!({"event":"secure_focus","on":on}))?,
         }
     }
 }
@@ -434,6 +448,10 @@ mod tests {
             vec![35, 4, 0, 0, 0, 2, 0, b'a', b'b']
         );
         assert_eq!(
+            command(&json!({"cmd":"dismiss_cover","id":412})).unwrap(),
+            vec![38, 4, 0, 0, 0, 0x9c, 1, 0, 0]
+        );
+        assert_eq!(
             command(&json!({"cmd":"unlock","password":"x".repeat(1024)})).unwrap().len(),
             7 + 1024
         );
@@ -468,6 +486,9 @@ mod tests {
             json!({"cmd":"unlock"}),
             json!({"cmd":"unlock","password":7}),
             json!({"cmd":"unlock","password":"x".repeat(1025)}),
+            json!({"cmd":"dismiss_cover"}),
+            json!({"cmd":"dismiss_cover","id":-1}),
+            json!({"cmd":"dismiss_cover","id":8589934592u64}),
         ] {
             assert!(command(&v).is_err());
         }

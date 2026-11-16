@@ -21,7 +21,7 @@ fn hello_matches_swift_wire_layout() {
         None,
     )
     .unwrap();
-    let mut expected = vec![12, 3, 0, b'a', b'b', b'c', 15, 0];
+    let mut expected = vec![13, 3, 0, b'a', b'b', b'c', 15, 0];
     expected.extend(b"com.example.App");
     expected.extend([2, 5, 0, 0, 128, 63]);
     assert_eq!(a.hello(1.), packet(1, expected));
@@ -294,7 +294,7 @@ fn menu_and_window_validation() {
 #[test]
 fn v5_clipboard_bounds_and_legacy_selection() {
     let address = Address::parse("rapp://host/?token=x", None).unwrap();
-    assert_eq!(address.hello(1.)[5], 12);
+    assert_eq!(address.hello(1.)[5], 13);
     let text = "中文 clipboard";
     let mut payload = 1u32.to_le_bytes().to_vec();
     payload.extend([0, 0]);
@@ -505,9 +505,41 @@ fn unlock_wire_format() {
     assert_eq!(unlock("ab"), vec![35, 4, 0, 0, 0, 2, 0, b'a', b'b']);
 }
 #[test]
-fn hello_announces_version_12() {
+fn hello_announces_version_13() {
     let a = Address::parse("rapp://host/?token=x", None).unwrap();
-    assert_eq!(a.hello(1.)[5], 12);
+    assert_eq!(a.hello(1.)[5], 13);
+}
+/// The same bytes as RappCoreTests.ProtocolTests.testHostHintsSharedSample.
+#[test]
+fn host_hints_shared_sample() {
+    let hex = concat!("250e00000009000000020041620300632e6400", "2706000000010078010059", "280100000001");
+    let bytes: Vec<u8> = (0..hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+        .collect();
+    let mut at = 0;
+    let mut got = vec![];
+    while at < bytes.len() {
+        let kind = bytes[at];
+        let len = u32::from_le_bytes(bytes[at + 1..at + 5].try_into().unwrap()) as usize;
+        got.push(decode(kind, &bytes[at + 5..at + 5 + len]).unwrap());
+        at += 5 + len;
+    }
+    assert!(matches!(&got[0], Incoming::Covered { id: 9, name, bundle, dismissable: false }
+        if name == "Ab" && bundle == "c.d"));
+    assert!(matches!(&got[1], Incoming::AppOpened { bundle, name } if bundle == "x" && name == "Y"));
+    assert!(matches!(got[2], Incoming::SecureFocus(true)));
+    assert_eq!(got.len(), 3);
+}
+#[test]
+fn host_hints_decode_strictly() {
+    assert!(decode(37, &[9, 0, 0, 0, 0, 0, 0, 0, 2]).is_err());
+    assert!(decode(37, &[9, 0, 0, 0, 0, 0, 0, 0, 1, 0]).is_err());
+    assert!(decode(40, &[2]).is_err());
+    assert!(decode(40, &[]).is_err());
+    assert!(decode(39, &[0, 0]).is_err());
+    assert!(matches!(decode(40, &[0]).unwrap(), Incoming::SecureFocus(false)));
+    assert_eq!(dismiss_cover(7), vec![38, 4, 0, 0, 0, 7, 0, 0, 0]);
 }
 #[test]
 fn desktop_addresses_parse() {

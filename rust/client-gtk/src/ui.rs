@@ -598,6 +598,19 @@ fn build(app: &gtk::Application, address: Option<Address>, json_mode: bool, stat
                     emit(json_mode, json!({"event":"input_blocked","by":by}));
                 }
                 Event::Message(Incoming::FocusRegion { .. }) => {}
+                Event::Message(Incoming::Covered { name, bundle, .. }) => {
+                    let name = if name.is_empty() { bundle } else { name };
+                    info.set_text(&format!("A 上「{name}」的弹窗挡住了点击；请打开「桌面」处理"));
+                    info.set_visible(true);
+                    notice_deadline = Some(Instant::now() + Duration::from_secs(8));
+                }
+                Event::Message(Incoming::AppOpened { bundle, name }) => {
+                    let name = if name.is_empty() { bundle } else { name };
+                    info.set_text(&format!("A 上打开了「{name}」"));
+                    info.set_visible(true);
+                    notice_deadline = Some(Instant::now() + Duration::from_secs(8));
+                }
+                Event::Message(Incoming::SecureFocus(_)) => {}
                 Event::Message(Incoming::ScreenLocked(locked)) => {
                     if locked {
                         info.set_text("远程电脑已锁屏，鼠标和键盘只能操作锁屏界面；请打开「桌面」输入密码解锁");
