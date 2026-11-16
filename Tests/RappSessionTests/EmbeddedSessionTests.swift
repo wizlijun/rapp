@@ -211,7 +211,7 @@ final class EmbeddedSessionTests: XCTestCase {
         let (s, q) = make(link) { _ in }
         s.setStream(mode: .duogray, fps: 2, choice: .saver1x, pinned: true)
         q.sync {}
-        guard case let .setStream(mode, fps, _, pinned)? = link.sent.last else { return XCTFail("sent \(link.sent)") }
+        guard case let .setStream(mode, fps, _, pinned, _)? = link.sent.last else { return XCTFail("sent \(link.sent)") }
         XCTAssertEqual(mode, .duogray); XCTAssertEqual(fps, 2); XCTAssertTrue(pinned)
         // Same stream, different pinned: sent again; identical: not.
         let n = link.sent.count
@@ -398,7 +398,7 @@ final class EmbeddedSessionTests: XCTestCase {
         s.setStream(mode: .color16, fps: 1, choice: .adaptive)
         q.sync {}
         XCTAssertEqual(streams().count, 2)
-        guard case let .setStream(_, fps, _, _)? = streams().last else { return XCTFail() }
+        guard case let .setStream(_, fps, _, _, _)? = streams().last else { return XCTFail() }
         XCTAssertEqual(fps, 1)
     }
 

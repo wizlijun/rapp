@@ -422,7 +422,7 @@ final class Session {
             injector?.handle(message, table: table)
             // Enabled items and check marks follow what the input did (a selection, an edit).
             if message.mayChangeMenus, menuBar != nil { scheduleMenuRead(after: 0.5) }
-        case let .setStream(mode, fps, density, pinned):
+        case let .setStream(mode, fps, density, pinned, _):  // focus: wired in a later task
             requestedMode = mode
             requestedDensity = density
             requestedFps = Int(fps)  // before setPinned/setSteps: their levelChanged must use the new ceiling
@@ -494,7 +494,7 @@ final class Session {
         case let .unlock(password):
             unlock(password)
         case .ready, .error, .frame, .windows, .menuBar, .clip, .pasted, .fetch, .put, .transferStart, .chunk, .inputBlocked, .weak,
-             .inputSource, .pong, .saving, .screenLocked:
+             .inputSource, .pong, .saving, .screenLocked, .focusRegion:
             fail("unexpected message from client")
         }
     }
