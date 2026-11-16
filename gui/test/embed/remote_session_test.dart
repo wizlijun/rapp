@@ -84,11 +84,24 @@ void main() {
       expect(rs.focus, isNull);
     });
 
-    test('an event for a window not in the table is ignored', () {
+    test('window 0 with no rects replaces an older focus and notifies', () {
       final rs = RemoteSession(1, 'Calc')..focusWanted = true;
       rs.apply(WindowsEvent(1, [w(7)]));
-      rs.apply(ev(9));
-      expect(rs.focus, isNull);
+      rs.apply(ev(7));
+      var n = 0;
+      rs.addListener(() => n++);
+      rs.apply(FocusRegionEvent(1, 0, const []));
+      expect(rs.focus!.window, 0);
+      expect(rs.focus!.rects, isEmpty);
+      expect(n, 1);
+    });
+
+    test('an event before its window is in the table is kept, and the table that lists it keeps it', () {
+      final rs = RemoteSession(1, 'Calc')..focusWanted = true;
+      rs.apply(ev(7));
+      expect(rs.focus!.window, 7);
+      rs.apply(WindowsEvent(1, [w(7)]));
+      expect(rs.focus!.window, 7);
     });
   });
 

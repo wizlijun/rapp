@@ -277,8 +277,10 @@ class RemoteSession extends ChangeNotifier {
           tabs.select(p);
         }
       case FocusRegionEvent():
-        // A late one (smart left, or its window gone) must not paint gray on a session that is not asking.
-        if (!_focusWanted || !windows.any((w) => w.id == e.window)) return;
+        // A late one (smart left) must not paint gray on a session that is not asking. Otherwise kept
+        // as A said it, window 0 (no focus window) and not-yet-listed windows included: the drawing
+        // only acts on the current window with rects.
+        if (!_focusWanted) return;
         focus = (window: e.window, rects: e.rects);
       case WeakEvent():
         weak = e.on;
