@@ -38,4 +38,5 @@ Rapp macOS 使用一行候选、局部分页、编辑器字体字号、透明背
 - 原生 C++ 候选连接增加 12 组私有总线检查，覆盖错误、超时、提前信号、过期请求、最大 uint64 序列、跨编辑器协调和实际总线关闭。动作失败后释放，不重试可能已经提交的选词。
 - GTK3 使用 `gui/linux/runner/tests/test-candidates-gtk.py` 启动独立 Broadway、临时 Chromium profile 和私有 D-Bus。真实窗口回归覆盖透明字形绘制、原始 index/serial 选择、草稿不变且不夺焦点、24px 字体缩放、长 Unicode 局部分页、共享草稿多视图交接、普通输入框隔离及销毁。纯布局测试另覆盖 1/1.2222/1.5/2 倍测量。
 - GTK4 使用 `rust/client-gtk/tests/test-candidates.py` 验证实际绘制和 GestureClick 选择、空候选行高与滚动区域保留、失焦后 D-Bus owner 消失、旧信号无效、重新聚焦新 token、服务消失回退。常规单测 7 条通过，原客户端 6 场景回归通过。
+- Flutter 候选、编辑器 IME FIFO、草稿交接及 composer 回归合计 153 条通过、1 条平台限定跳过。新增最大 uint64 序列、真实候选 index、旧 epoch、隐藏/销毁、行高保留、光标页跟随、窗口变窄重分页及 Linux 编辑器组字与 handoff 回归。
 - 自动测试没有操作用户桌面或重启输入法。真实 Wayland/fcitx 连续输入、输入法切换及跨设备提交仍需实际验收。Linux 协议无输入法端心跳：Flutter 渲染线程失联可由原生 watchdog 释放，但整个原生客户端主线程冻结时，不能承诺立即恢复系统候选。
