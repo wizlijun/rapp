@@ -177,6 +177,11 @@ class TermPainter extends CustomPainter {
   /// Input went out and no new screen came within 0.3 s (K6): an ellipsis one cell after the cursor.
   final bool waiting;
 
+  /// Device pixels per unit drawn here: drawing is under `canvas.scale(scale)`, so a device pixel is `1 / snapRatio` of
+  /// a unit. Everything is snapped to it, and the row pictures are recorded snapped to it.
+  @visibleForTesting
+  double get snapRatio => dpr * scale;
+
   /// The line at the top of the view (partly hidden while the offset is fractional).
   int get topY => (-model.offset).floor();
 
@@ -190,12 +195,11 @@ class TermPainter extends CustomPainter {
     canvas.drawRect(Offset.zero & size, Paint()..color = palette.bg);
     final m = model;
     if (m.screen.isEmpty) return;
-    cache._begin(metrics, palette, dpr);
+    final ratio = snapRatio;
+    cache._begin(metrics, palette, ratio);
     final cw = metrics.cellW, ch = metrics.cellH;
     final gridH = m.rows * ch;
-    // Snapping to device pixels only means something unscaled.
-    final px = scale == 1 ? dpr : 0.0;
-    double snap(double v) => px == 0 ? v : _snap(v, px);
+    double snap(double v) => _snap(v, ratio);
     canvas.save();
     if (scale != 1) canvas.scale(scale);
     canvas.clipRect(Rect.fromLTWH(0, 0, m.cols * cw, gridH));
@@ -296,5 +300,5 @@ class TermPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(TermPainter old) => old.version != version;
+  bool shouldRepaint(TermPainter old) => old.version != version || old.dpr != dpr || old.scale != scale;
 }
