@@ -431,6 +431,23 @@ void main() {
       expect(await f, 'term:pty:claude');
     });
 
+    test('renameTerm sends rename_term, waits for term_renamed, then asks for the list', () async {
+      final f = hub.renameTerm('d1', 'term:pty:a', 'b');
+      final cmd = t.sent.last;
+      expect(cmd, {'cmd': 'rename_term', 'id': 'd1', 'term': 'term:pty:a', 'name': 'b', 'req': anything});
+      t.emit({'event': 'term_renamed', 'id': 'd1', 'term': 'term:pty:a', 'req': cmd['req']});
+      await Future<void>.delayed(Duration.zero);
+      expect(t.sent.last['cmd'], 'terms');
+      t.emit({'event': 'terms', 'id': 'd1', 'terms': [], 'req': t.sent.last['req']});
+      await f;
+    });
+
+    test('renameTerm fails on an error reply', () async {
+      final f = hub.renameTerm('d1', 'term:pty:a', 'b');
+      t.emit({'event': 'error', 'req': t.sent.last['req'], 'error': 'invalid name'});
+      await expectLater(f, throwsA(isA<HubException>()));
+    });
+
     test('openTerm without a shell sends none', () async {
       final f = hub.openTerm('d1', app: 'Terminal');
       expect(t.sent.last, {'cmd': 'open_term', 'id': 'd1', 'app': 'Terminal', 'req': anything});

@@ -22,3 +22,17 @@ bool isPtyTerm(String app) => parseTermId(app)?.backend == 'pty';
 }
 
 String termDisplayName(String name, String? host) => host == null ? name : '$name @$host';
+
+/// The longest name a text terminal can be renamed to, in characters (code points).
+const termNameMax = 64;
+
+/// A name a text terminal can be renamed to, the same rule as the device's `clean_name`: trimmed, not empty, no
+/// control characters, at most [termNameMax] characters (Rust `chars()`, so code points, not UTF-16 units). Null
+/// when the name is refused.
+String? cleanTermName(String s) {
+  final t = s.trim();
+  if (t.isEmpty || t.runes.length > termNameMax) return null;
+  // Rust `char::is_control`: Unicode category Cc (C0, DEL, C1).
+  if (t.runes.any((r) => r < 0x20 || (r >= 0x7f && r <= 0x9f))) return null;
+  return t;
+}

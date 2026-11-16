@@ -8,6 +8,7 @@ import '../shares.dart';
 import '../term/term_id.dart';
 import 'add_device_form.dart';
 import 'controls.dart';
+import 'inline_edit.dart';
 import 'lamp.dart';
 import 'lifecycle.dart';
 import 'main_state.dart';
@@ -53,6 +54,9 @@ class _DevicesTabState extends State<DevicesTab> {
   /// Per device: the shell button being opened, and the words of the last refused open.
   final _shellBusy = <String, String>{};
   final _shellErrors = <String, String>{};
+
+  /// Per device: the words of the last refused rename.
+  final _renameErrors = <String, String>{};
 
   MainState get state => widget.state;
 
@@ -331,7 +335,13 @@ class _DevicesTabState extends State<DevicesTab> {
                   session: _session(id, r.id),
                   enabled: state.hubUsable && state.embeds,
                   onOpen: () => state.openOrSwitch(id, r.id, termDisplayName(r.name, r.host)),
+                  onRename: shells == null ? null : (v) => _rename(id, r, v),
                 ),
+              ),
+            if (_renameErrors[id] != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text(_renameErrors[id]!, key: const Key('rename-error'), style: TextStyle(color: t.accent)),
               ),
             for (final a in terminalAppsOf(apps))
               Padding(
@@ -406,6 +416,21 @@ class _DevicesTabState extends State<DevicesTab> {
         ),
       ),
     ];
+  }
+
+  /// Renames [r] on [id]; an unchanged name sends nothing, a refusal shows under the list.
+  Future<void> _rename(String id, TermRow r, String name) async {
+    if (name.trim() == r.name) {
+      if (_renameErrors.containsKey(id)) setState(() => _renameErrors.remove(id));
+      return;
+    }
+    setState(() => _renameErrors.remove(id));
+    try {
+      await state.renameTerm(id, r.id, name);
+    } catch (e) {
+      final words = e is HubException ? e.message : e is FormatException ? e.message : '$e';
+      if (mounted) setState(() => _renameErrors[id] = words);
+    }
   }
 
   /// Opens [path] (null: the device's default) on [id]; the button stays busy until the answer.
@@ -569,11 +594,14 @@ Lamp termLamp(TermRow r, int nowSecs) {
 }
 
 class _TermRow extends StatelessWidget {
-  const _TermRow({required this.row, required this.session, required this.enabled, required this.onOpen});
+  const _TermRow({required this.row, required this.session, required this.enabled, required this.onOpen, this.onRename});
   final TermRow row;
   final SessionEntry? session;
   final bool enabled;
   final VoidCallback onOpen;
+
+  /// Null on a device too old to rename: the name is then plain text.
+  final ValueChanged<String>? onRename;
 
   @override
   Widget build(BuildContext context) {
@@ -597,10 +625,18 @@ class _TermRow extends StatelessWidget {
               children: [
                 Row(children: [
                   Flexible(
-                    child: Text(name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: t.text, fontWeight: FontWeight.w600)),
+                    child: onRename == null
+                        ? Text(name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: t.text, fontWeight: FontWeight.w600))
+                        : InlineEdit(
+                            key: Key('term-name-${row.id}'),
+                            text: row.name,
+                            semanticLabel: '改名 $name',
+                            style: TextStyle(color: t.text, fontWeight: FontWeight.w600),
+                            onCommit: onRename!,
+                          ),
                   ),
                 ]),
                 Text(row.command, maxLines: 1, overflow: TextOverflow.ellipsis, style: _mono(t)),

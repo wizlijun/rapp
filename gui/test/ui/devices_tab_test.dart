@@ -27,6 +27,7 @@ void main() {
   var termsOff = false;
   String? openTermError;
   var holdOpenTerm = false;
+  String? renameError;
   var termHosts = <Map<String, dynamic>>[{'host': null}];
   var termRows = <Map<String, dynamic>>[];
   List<Map<String, dynamic>>? remoteApps;
@@ -41,6 +42,7 @@ void main() {
     termsOff = false;
     openTermError = null;
     holdOpenTerm = false;
+    renameError = null;
     termHosts = [{'host': null}];
     termRows = [];
     remoteApps = null;
@@ -96,6 +98,9 @@ void main() {
           if (openTermError != null) return t.emit({'event': 'error', 'req': req, 'error': openTermError});
           termRows = [...termRows, {'id': 'term:pty:c', 'name': 'c', 'command': 'claude', 'activity': 0}];
           t.emit({'event': 'term_created', 'req': req, 'id': cmd['id'], 'term': 'term:pty:c'});
+        case 'rename_term':
+          if (renameError != null) return t.emit({'event': 'error', 'req': req, 'error': renameError});
+          t.emit({'event': 'term_renamed', 'req': req, 'id': cmd['id'], 'term': cmd['term']});
         case 'set_route':
           for (final h in hosts) {
             if (h['id'] != cmd['id']) continue;
@@ -789,6 +794,54 @@ void main() {
     expect(tester.widget<Text>(find.byKey(const Key('new-shell-error'))).data, 'this shell is not found any more');
     expect(shellButton(tester, 'new-shell-bash').onPressed, isNotNull);
     expect(find.byKey(const Key('new-text-term')), findsNothing);
+  });
+
+  Future<void> showWork(WidgetTester tester, {List<Map<String, dynamic>>? shells = shellsZshBash}) async {
+    await pumpTab(tester);
+    await selectMini(tester);
+    await emitTerms(tester, [termRow('term:pty:work', 'work', 'claude')],
+        hosts: [{'host': null, 'launchers': ['Terminal'], 'shells': ?shells}]);
+    t.sent.clear();
+  }
+
+  Future<void> renameTo(WidgetTester tester, String text) async {
+    await tester.ensureVisible(find.byKey(const Key('term-name-term:pty:work')));
+    await tester.tap(find.byKey(const Key('term-name-term:pty:work')));
+    await tester.pump();
+    await tester.enterText(find.descendant(of: find.byKey(const Key('term-name-term:pty:work')), matching: find.byType(TextField)), text);
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    await tester.pump();
+  }
+
+  testWidgets('renaming a row sends rename_term with the trimmed name', (tester) async {
+    await showWork(tester);
+    await renameTo(tester, '  build  ');
+    final m = t.sent.firstWhere((m) => m['cmd'] == 'rename_term');
+    expect(m, {'cmd': 'rename_term', 'id': '111', 'term': 'term:pty:work', 'name': 'build', 'req': anything});
+    expect(t.sent.map((m) => m['cmd']), containsAllInOrder(['rename_term', 'terms']));
+    expect(find.byKey(const Key('rename-error')), findsNothing);
+  });
+
+  testWidgets('an invalid name is not sent and the old name stays', (tester) async {
+    await showWork(tester);
+    await renameTo(tester, '   ');
+    expect(t.sent.where((m) => m['cmd'] == 'rename_term'), isEmpty);
+    expect(find.text('work'), findsOneWidget);
+  });
+
+  testWidgets('a refusal shows under the list', (tester) async {
+    renameError = 'this text terminal is too old to rename';
+    await showWork(tester);
+    await renameTo(tester, 'build');
+    expect(tester.widget<Text>(find.byKey(const Key('rename-error'))).data, 'this text terminal is too old to rename');
+    expect(find.text('work'), findsOneWidget);
+  });
+
+  testWidgets('an old device has no inline edit', (tester) async {
+    await showWork(tester, shells: null);
+    expect(find.byKey(const Key('term-name-term:pty:work')), findsNothing);
+    expect(find.text('work'), findsOneWidget);
   });
 
   testWidgets('打开方式 is saved per device', (tester) async {

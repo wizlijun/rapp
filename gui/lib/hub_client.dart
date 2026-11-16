@@ -310,6 +310,15 @@ class HubClient extends ChangeNotifier {
     return '${m['term']}';
   }
 
+  /// Renames text terminal [term] of device [id] to [name] (already cleaned); the device's refusal is thrown with
+  /// its words. Refreshes the device's list afterwards so the new name shows.
+  Future<void> renameTerm(String id, String term, String name) async {
+    await _request({'cmd': 'rename_term', 'id': id, 'term': term, 'name': name}, 'term_renamed');
+    try {
+      await terms(id);
+    } catch (_) {}
+  }
+
   Future<HubSession> open(String id, String app, {bool embed = false, bool reconnect = false}) async {
     final m = await _request(
         {'cmd': 'open', 'id': id, 'app': app, if (embed) 'embed': true, if (reconnect) 'reconnect': true}, 'opened');

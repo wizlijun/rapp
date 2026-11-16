@@ -1715,6 +1715,13 @@ class MainState extends ChangeNotifier {
     unawaited(openOrSwitch(id, term, shown));
   }
 
+  /// Renames text terminal [term] of device [device]; an invalid name or the device's refusal is thrown.
+  Future<void> renameTerm(String device, String term, String name) async {
+    final clean = cleanTermName(name);
+    if (clean == null) throw const FormatException('名字不能为空，不能有控制字符，最长 64 个字符');
+    await hub!.renameTerm(device, term, clean);
+  }
+
   /// Opens [app] on [id], or switches to it if it is open. [select]: it becomes current and the
   /// panel closes; [quiet]: no 「已打开」 hint (failures still say why).
   Future<void> _open(String id, String app, String appName, {bool select = true, bool quiet = false}) async {
