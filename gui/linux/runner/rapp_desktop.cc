@@ -1,6 +1,7 @@
 #include "rapp_desktop.h"
 #include "rapp_windows.h"
 #include "rapp_candidates.h"
+#include "rapp_secure_input.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -256,6 +257,7 @@ void rapp_desktop_register(FlView *view, GtkWindow *window) {
       fl_engine_get_binary_messenger(fl_view_get_engine(view)), "rapp/linux",
       FL_METHOD_CODEC(codec));
   rapp::register_flutter_candidates(fl_engine_get_binary_messenger(fl_view_get_engine(view)), GTK_WIDGET(view), window);
+  rapp::register_secure_input(fl_engine_get_binary_messenger(fl_view_get_engine(view)), GTK_WIDGET(view));
   d->windows = rapp_windows_new(d->channel, window);
   fl_method_channel_set_method_call_handler(d->channel, method, d, nullptr);
   GtkTargetEntry targets[] = {{const_cast<char *>("text/uri-list"), 0, 0}};

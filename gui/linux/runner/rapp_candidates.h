@@ -51,5 +51,6 @@ private:
   CandidateSnapshot snapshot_;
 };
 // Installs a separate MethodChannel for Flutter editors; no text is sent through it.
+void set_flutter_candidates_secure(GtkWidget *view, bool secure);
 void register_flutter_candidates(FlBinaryMessenger *messenger, GtkWidget *view, GtkWindow *window);
 }

@@ -22,6 +22,7 @@ struct FlutterCandidates {
   GtkWidget *view;
   GtkWindow *window;
   std::map<std::string, Editor> editors;
+  bool secure = false;
   guint timer = 0;
   gulong activation = 0;
   void sync() {
@@ -30,7 +31,7 @@ struct FlutterCandidates {
       focused && (focused == view || gtk_widget_is_ancestor(focused, view));
     for (auto &item : editors) {
       auto &e = item.second;
-      e.lease->update(e.active && e.capacity && native_focus && g_get_monotonic_time() - e.alive < 1500000, !e.composing);
+      e.lease->update(!secure && e.active && e.capacity && native_focus && g_get_monotonic_time() - e.alive < 1500000, !e.composing);
     }
   }
   void changed(const std::string &id, const CandidateSnapshot &snapshot) {
@@ -109,6 +110,12 @@ void method(FlMethodChannel *, FlMethodCall *call, gpointer data) {
   }
   fl_method_call_respond_success(call, nullptr, nullptr);
 }
+}
+void set_flutter_candidates_secure(GtkWidget *view, bool secure) {
+  auto *owner = static_cast<FlutterCandidates *>(g_object_get_data(G_OBJECT(view), "rapp-candidates"));
+  if (!owner) return;
+  owner->secure = secure;
+  owner->sync();
 }
 void register_flutter_candidates(FlBinaryMessenger *messenger, GtkWidget *view, GtkWindow *window) {
   g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();

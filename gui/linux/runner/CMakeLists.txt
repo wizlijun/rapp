@@ -13,6 +13,7 @@ add_executable(${BINARY_NAME}
   "rapp_windows.cc"
   "rapp_candidates.cc"
   "rapp_flutter_candidates.cc"
+  "rapp_secure_input.cc"
   "rapp_candidates_gtk.cc"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
 )

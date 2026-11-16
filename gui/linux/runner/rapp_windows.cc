@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <deque>
 #include <map>
 #include <memory>
 #include <string>
@@ -62,14 +63,17 @@ std::vector<FlValue *> ordered_windows(FlValue *table) {
   return ordered;
 }
 struct Session;
+void schedule_composer(Session *s);
+bool composing(Session *s);
 struct Window {
   Session *session;
   int id = 0, parent = 0;
-  bool popup = false, resizable = false, focused = false;
+  bool popup = false, resizable = false, focused = false, preedit = false;
   double x = 0, y = 0, w = 1, h = 1, bar = 0;
   GtkWidget *shell = nullptr, *area = nullptr, *chips = nullptr,
             *status = nullptr, *menubar = nullptr, *tools = nullptr,
-            *editor = nullptr, *send = nullptr, *retry = nullptr, *banner = nullptr, *composer = nullptr;
+            *editor = nullptr, *send = nullptr, *retry = nullptr, *banner = nullptr, *composer = nullptr,
+            *notice = nullptr;
   guint resize_timer = 0;
   int aw = 0, ah = 0;
   bool allocated = false;
@@ -79,16 +83,28 @@ struct Window {
 struct Block {
   int n;
   std::string label;
+  gunichar mark = 0;
 };
 struct Session {
   FlMethodChannel *channel;
   GtkWindow *main;
   int64_t sid;
-  bool closing = false, disconnected = false, sending = false;
+  bool closing = false, disconnected = false, sending = false, secure = false;
   std::map<int, std::unique_ptr<Window>> windows;
   GtkTextBuffer *buffer = gtk_text_buffer_new(nullptr);
   std::vector<Block> blocks, sent_blocks;
-  std::string sent_text, status, banner;
+  unsigned editing = 0;
+  RappWindows *manager = nullptr;
+  std::deque<FlMethodCall *> pending;
+  guint pending_idle = 0;
+  bool draining = false, send_queued = false;
+  std::string sent_text, status, banner, notice_text;
+  std::vector<std::pair<std::string, std::string>> notice_actions;
+  int64_t notice_epoch = -1;
+  double font_size = 15;
+  std::string font_family;
+  GdkRGBA text_color{.9, .9, .9, 1}, hint_color{.6, .6, .6, 1}, focus_color{0, .784, .325, 1},
+          background_color{.035, .035, .04, 1};
   cairo_surface_t *surface = nullptr;
   std::vector<guint8> pixels, gray_pixels;
   cairo_surface_t *gray = nullptr;
@@ -104,6 +120,13 @@ struct Session {
   double composer_scale = 1;
   ~Session() {
     closing = true;
+    if (pending_idle) g_source_remove(pending_idle);
+    for (auto *call : pending) {
+      if (!call) continue; // a deferred send, not a platform method call
+      fl_method_call_respond_error(call, "closed", "The native composer closed", nullptr, nullptr);
+      g_object_unref(call);
+    }
+    pending.clear();
     windows.clear();
     if (surface)
       cairo_surface_destroy(surface);
@@ -125,15 +148,37 @@ struct Session {
     fl_value_unref(args);
   }
   std::string draft() {
-    GtkTextIter a, b;
-    gtk_text_buffer_get_bounds(buffer, &a, &b);
-    gchar *s = gtk_text_buffer_get_text(buffer, &a, &b, FALSE);
-    std::string out = s;
-    g_free(s);
+    if (blocks.empty()) {
+      GtkTextIter start, end;
+      gtk_text_buffer_get_bounds(buffer, &start, &end);
+      g_autofree gchar *plain = gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
+      return plain;
+    }
+    GtkTextIter at;
+    gtk_text_buffer_get_start_iter(buffer, &at);
+    std::string out;
+    while (!gtk_text_iter_is_end(&at)) {
+      auto *anchor = gtk_text_iter_get_child_anchor(&at);
+      const gunichar mark = anchor ? GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(anchor), "rapp-block-mark")) : 0;
+      char utf8[7] = {};
+      g_unichar_to_utf8(mark ? mark : gtk_text_iter_get_char(&at), utf8);
+      out += utf8;
+      gtk_text_iter_forward_char(&at);
+    }
     return out;
   }
+  void changed() {
+    if (editing) return;
+    recalling = false;
+    auto *args = fl_value_new_map();
+    settext(args, "text", draft());
+    emit("draft", args);
+  }
+
 };
 Window::~Window() {
+  preedit = false;
+  schedule_composer(session);
   if (resize_timer)
     g_source_remove(resize_timer);
   if (shell) {
@@ -251,41 +296,210 @@ void composer_action(Session *s, const char *action) {
   settext(args, "text", s->draft());
   s->emit("composer_action", args);
 }
+std::string css_color(const GdkRGBA &color) {
+  g_autofree gchar *value = gdk_rgba_to_string(&color);
+  return value;
+}
+GdkRGBA argb(FlValue *value) {
+  const auto color = static_cast<uint32_t>(integer(value));
+  return GdkRGBA{((color >> 16) & 255) / 255., ((color >> 8) & 255) / 255.,
+    (color & 255) / 255., ((color >> 24) & 255) / 255.};
+}
+std::string css_quote(const std::string &value) {
+  std::string out = "\"";
+  for (const auto c : value) {
+    if (c == '\\' || c == '\"') out += '\\';
+    if (static_cast<unsigned char>(c) >= 32) out += c;
+  }
+  return out + "\"";
+}
+// A mark remains one character to GTK carets/deletion, but its visible widget is
+// attached separately to every view of the shared buffer.
+struct DraftEdit {
+  Session *session;
+  explicit DraftEdit(Session *s) : session(s) {
+    if (!session->editing++) gtk_text_buffer_begin_user_action(session->buffer);
+  }
+  ~DraftEdit() {
+    if (!--session->editing) {
+      gtk_text_buffer_end_user_action(session->buffer);
+      session->changed();
+    }
+  }
+};
+Block parse_block(FlValue *value) {
+  const auto code = integer(get(value, "mark"));
+  const auto mark = ((code >= 0xfdd0 && code <= 0xfdef) || (code >= 0xe900 && code <= 0xea5f)) ? code : 0;
+  return {static_cast<int>(integer(get(value, "n"))), text(get(value, "label")), static_cast<gunichar>(mark)};
+}
+void add_blocks(Session *s, FlValue *blocks) {
+  if (!blocks || fl_value_get_type(blocks) != FL_VALUE_TYPE_LIST) return;
+  for (size_t i = 0; i < fl_value_get_length(blocks); ++i) {
+    const auto block = parse_block(fl_value_get_list_value(blocks, i));
+    // Dart may reuse a mark after a previous block was dropped by a recall or
+    // handoff. Its current metadata is authoritative; never show the old label.
+    if (block.mark) s->blocks.erase(std::remove_if(s->blocks.begin(), s->blocks.end(),
+      [&](const auto &b) { return b.mark == block.mark && b.n != block.n; }), s->blocks.end());
+    auto old = std::find_if(s->blocks.begin(), s->blocks.end(), [&](const auto &b) { return b.n == block.n; });
+    if (old == s->blocks.end()) s->blocks.push_back(block); else *old = block;
+  }
+}
+void style_chip(GtkWidget *chip, Session *s) {
+  auto *css = gtk_css_provider_new();
+  const auto rule = "button { background-color: transparent; background-image: none; box-shadow: none; "
+    "border: 1px dashed " + css_color(s->hint_color) + "; border-radius: 4px; padding: 1px 6px; margin: 1px 2px; "
+    "color: " + css_color(s->text_color) + "; font-size: " + std::to_string(s->font_size * s->composer_scale) + "px; " +
+    (s->font_family.empty() ? "" : "font-family: " + css_quote(s->font_family) + ";") + "}";
+  gtk_css_provider_load_from_data(css, rule.c_str(), -1, nullptr);
+  auto *context = gtk_widget_get_style_context(chip);
+  auto *old = static_cast<GtkStyleProvider *>(g_object_get_data(G_OBJECT(chip), "rapp-chip-css"));
+  if (old) gtk_style_context_remove_provider(context, old);
+  gtk_style_context_add_provider(context, GTK_STYLE_PROVIDER(css), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+  g_object_set_data_full(G_OBJECT(chip), "rapp-chip-css", css, g_object_unref);
+}
+void attach_chips(Window *w) {
+  if (!w->editor) return;
+  auto *s = w->session;
+  GtkTextIter at;
+  gtk_text_buffer_get_start_iter(s->buffer, &at);
+  while (!gtk_text_iter_is_end(&at)) {
+    auto *anchor = gtk_text_iter_get_child_anchor(&at);
+    if (anchor) {
+      const auto mark = GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(anchor), "rapp-block-mark"));
+      const auto block = std::find_if(s->blocks.begin(), s->blocks.end(), [&](const auto &b) { return b.mark == mark; });
+      if (mark && block != s->blocks.end()) {
+        GtkWidget *chip = nullptr;
+        GList *widgets = gtk_text_child_anchor_get_widgets(anchor);
+        for (auto *item = widgets; item; item = item->next)
+          if (gtk_widget_get_parent(GTK_WIDGET(item->data)) == w->editor) chip = GTK_WIDGET(item->data);
+        g_list_free(widgets);
+        if (!chip) {
+          chip = gtk_button_new_with_label(block->label.c_str());
+          gtk_widget_set_can_focus(chip, FALSE);
+          auto *label = gtk_bin_get_child(GTK_BIN(chip));
+          gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
+          gtk_label_set_max_width_chars(GTK_LABEL(label), 24);
+          g_object_set_data_full(G_OBJECT(chip), "rapp-chip-anchor", g_object_ref(anchor), g_object_unref);
+          g_signal_connect(chip, "clicked", G_CALLBACK(+[](GtkButton *button, gpointer data) {
+            auto *s = static_cast<Session *>(data);
+            auto *anchor = GTK_TEXT_CHILD_ANCHOR(g_object_get_data(G_OBJECT(button), "rapp-chip-anchor"));
+            if (gtk_text_child_anchor_get_deleted(anchor)) return;
+            DraftEdit edit(s);
+            GtkTextIter start;
+            GtkTextIter end;
+            gtk_text_buffer_get_iter_at_child_anchor(s->buffer, &start, anchor);
+            end = start; gtk_text_iter_forward_char(&end);
+            gtk_text_buffer_delete(s->buffer, &start, &end);
+          }), s);
+          gtk_text_view_add_child_at_anchor(GTK_TEXT_VIEW(w->editor), chip, anchor);
+          gtk_widget_show(chip);
+        }
+        style_chip(chip, s);
+      }
+    }
+    gtk_text_iter_forward_char(&at);
+  }
+}
+void insert_marked(Session *s, GtkTextIter *at, const std::string &value) {
+  for (const char *p = value.c_str(); *p;) {
+    const char *next = g_utf8_next_char(p);
+    const auto code = g_utf8_get_char(p);
+    const auto block = std::find_if(s->blocks.begin(), s->blocks.end(), [&](const auto &b) { return b.mark && b.mark == code; });
+    if (block != s->blocks.end()) {
+      auto *anchor = gtk_text_buffer_create_child_anchor(s->buffer, at);
+      g_object_set_data(G_OBJECT(anchor), "rapp-block-mark", GUINT_TO_POINTER(code));
+    } else {
+      gtk_text_buffer_insert(s->buffer, at, p, next - p);
+    }
+    p = next;
+  }
+}
+void set_draft(Session *s, const std::string &value) {
+  DraftEdit edit(s);
+  gtk_text_buffer_set_text(s->buffer, "", 0);
+  GtkTextIter at;
+  gtk_text_buffer_get_start_iter(s->buffer, &at);
+  insert_marked(s, &at, value);
+  gtk_text_buffer_place_cursor(s->buffer, &at);
+  for (auto &w : s->windows) attach_chips(w.second.get());
+}
+void copy_draft(GtkTextView *view, bool cut) {
+  auto *buffer = gtk_text_view_get_buffer(view);
+  GtkTextIter start, end;
+  if (gtk_text_buffer_get_selection_bounds(buffer, &start, &end)) {
+    // GTK get_text omits child anchors: external copy/cut cannot clone held blocks.
+    g_autofree gchar *plain = gtk_text_buffer_get_text(buffer, &start, &end, FALSE);
+    gtk_clipboard_set_text(gtk_widget_get_clipboard(GTK_WIDGET(view), GDK_SELECTION_CLIPBOARD), plain, -1);
+    if (cut) gtk_text_buffer_delete_selection(buffer, TRUE, TRUE);
+  }
+  g_signal_stop_emission_by_name(view, cut ? "cut-clipboard" : "copy-clipboard");
+}
+void refresh_notice(Window *w) {
+  if (!w->notice) return;
+  auto *s = w->session;
+  GList *children = gtk_container_get_children(GTK_CONTAINER(w->notice));
+  for (auto *at = children; at; at = at->next) gtk_widget_destroy(GTK_WIDGET(at->data));
+  g_list_free(children);
+  if (s->notice_text.empty()) { gtk_widget_hide(w->notice); return; }
+  auto *label = gtk_label_new(s->notice_text.c_str());
+  gtk_label_set_line_wrap(GTK_LABEL(label), TRUE);
+  gtk_label_set_xalign(GTK_LABEL(label), 0);
+  gtk_box_pack_start(GTK_BOX(w->notice), label, TRUE, TRUE, 4);
+  for (const auto &action : s->notice_actions) {
+    auto *button = gtk_button_new_with_label(action.second.c_str());
+    g_object_set_data_full(G_OBJECT(button), "rapp-notice-action", g_strdup(action.first.c_str()), g_free);
+    g_object_set_data_full(G_OBJECT(button), "rapp-notice-epoch", new int64_t(s->notice_epoch),
+      +[](gpointer p) { delete static_cast<int64_t *>(p); });
+    g_signal_connect(button, "clicked", G_CALLBACK(+[](GtkButton *button, gpointer data) {
+      auto *s = static_cast<Session *>(data);
+      auto *args = fl_value_new_map();
+      settext(args, "action", static_cast<const char *>(g_object_get_data(G_OBJECT(button), "rapp-notice-action")));
+      setint(args, "epoch", *static_cast<int64_t *>(g_object_get_data(G_OBJECT(button), "rapp-notice-epoch")));
+      s->emit("host_notice_action", args);
+    }), s);
+    gtk_box_pack_start(GTK_BOX(w->notice), button, FALSE, FALSE, 0);
+  }
+  gtk_widget_show_all(w->notice);
+}
 void composer_options(Window *w) {
   auto *s = w->session;
   if (!w->editor) return;
   gtk_widget_set_visible(w->composer, s->composer_allowed);
   gtk_widget_set_visible(w->chips, s->composer_allowed);
   auto *css = gtk_css_provider_new();
-  const auto rule = "textview { font-size: " + std::to_string(15 * s->composer_scale) + "px; }";
+  const auto rule = "textview, textview text { background-color: transparent; background-image: none; color: " +
+    css_color(s->text_color) + "; font-size: " + std::to_string(s->font_size * s->composer_scale) +
+    "px; " + (s->font_family.empty() ? "" : "font-family: " + css_quote(s->font_family) + "; ") + "}";
   gtk_css_provider_load_from_data(css, rule.c_str(), -1, nullptr);
   auto *old = static_cast<GtkStyleProvider *>(g_object_get_data(G_OBJECT(w->editor), "composer-css"));
   auto *context = gtk_widget_get_style_context(w->editor);
   if (old) gtk_style_context_remove_provider(context, old);
   gtk_style_context_add_provider(context, GTK_STYLE_PROVIDER(css), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
   g_object_set_data_full(G_OBJECT(w->editor), "composer-css", css, g_object_unref);
+  auto *background = gtk_css_provider_new();
+  const auto base = "#rapp-composer { background-color: " + css_color(s->background_color) + "; }";
+  gtk_css_provider_load_from_data(background, base.c_str(), -1, nullptr);
+  auto *container = gtk_widget_get_style_context(w->composer);
+  auto *previous = static_cast<GtkStyleProvider *>(g_object_get_data(G_OBJECT(w->composer), "composer-background"));
+  if (previous) gtk_style_context_remove_provider(container, previous);
+  gtk_style_context_add_provider(container, GTK_STYLE_PROVIDER(background), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+  g_object_set_data_full(G_OBJECT(w->composer), "composer-background", background, g_object_unref);
+  attach_chips(w);
 }
 void refresh_chips(Session *s);
 void send_draft(Session *s) {
-  if (s->sending || s->disconnected)
+  if (s->disconnected) return;
+  if (!s->draining && (composing(s) || !s->pending.empty())) {
+    if (!s->send_queued) { s->send_queued = true; s->pending.push_back(nullptr); }
+    schedule_composer(s);
     return;
+  }
+  if (s->sending) return;
   auto draft = s->draft();
   s->sending = true;
   s->sent_text = draft;
   s->sent_blocks = s->blocks;
   auto *a = fl_value_new_map();
-  auto *pieces = fl_value_new_list();
-  for (auto &b : s->blocks) {
-    auto *p = fl_value_new_map();
-    setint(p, "block", b.n);
-    fl_value_append_take(pieces, p);
-  }
-  if (!draft.empty()) {
-    auto *p = fl_value_new_map();
-    settext(p, "text", draft);
-    fl_value_append_take(pieces, p);
-  }
-  put(a, "pieces", pieces);
   settext(a, "text", draft);
   s->emit("composer_send", a);
 }
@@ -298,7 +512,9 @@ void refresh_chips(Session *s) {
     for (GList *c = children; c; c = c->next)
       gtk_widget_destroy(GTK_WIDGET(c->data));
     g_list_free(children);
+    attach_chips(w);
     for (const auto &b : s->blocks) {
+      if (b.mark) continue;
       auto *button = gtk_button_new_with_label((b.label + " ×").c_str());
       g_object_set_data(G_OBJECT(button), "block", GINT_TO_POINTER(b.n));
       g_signal_connect(
@@ -510,6 +726,8 @@ std::unique_ptr<Window> create_window(Session *s, int id, bool popup,
     gtk_container_add(GTK_CONTAINER(w->shell), root);
     w->banner = gtk_label_new(s->banner.c_str());
     gtk_box_pack_start(GTK_BOX(root), w->banner, FALSE, FALSE, 0);
+    w->notice = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+    gtk_box_pack_start(GTK_BOX(root), w->notice, FALSE, FALSE, 0);
     w->menubar = gtk_menu_bar_new();
     gtk_box_pack_start(GTK_BOX(root), w->menubar, FALSE, FALSE, 0);
     auto *toolbar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
@@ -552,6 +770,7 @@ std::unique_ptr<Window> create_window(Session *s, int id, bool popup,
     gtk_box_pack_start(GTK_BOX(root), w->chips, FALSE, FALSE, 0);
     auto *input = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
     w->composer = input;
+    gtk_widget_set_name(input, "rapp-composer");
     gtk_box_pack_start(GTK_BOX(root), input, FALSE, FALSE, 0);
     auto *scroll = gtk_scrolled_window_new(nullptr, nullptr);
     gtk_widget_set_size_request(scroll, -1, 60);
@@ -560,6 +779,13 @@ std::unique_ptr<Window> create_window(Session *s, int id, bool popup,
     gtk_container_add(GTK_CONTAINER(scroll), editor);
     gtk_text_view_set_wrap_mode(GTK_TEXT_VIEW(editor), GTK_WRAP_WORD_CHAR);
     gtk_box_pack_start(GTK_BOX(input), rapp::wrap_gtk_candidates(GTK_TEXT_VIEW(editor), scroll), TRUE, TRUE, 0);
+    g_signal_connect(editor, "preedit-changed", G_CALLBACK(+[](GtkTextView *, const gchar *value, gpointer data) {
+      auto *w = static_cast<Window *>(data);
+      w->preedit = value && *value;
+      if (!w->preedit) schedule_composer(w->session);
+    }), w.get());
+    g_signal_connect(editor, "copy-clipboard", G_CALLBACK(+[](GtkTextView *view, gpointer) { copy_draft(view, false); }), nullptr);
+    g_signal_connect(editor, "cut-clipboard", G_CALLBACK(+[](GtkTextView *view, gpointer) { copy_draft(view, true); }), nullptr);
     g_signal_connect(
         editor, "paste-clipboard",
         reinterpret_cast<GCallback>(+[](GtkTextView *v, gpointer p) {
@@ -700,7 +926,7 @@ std::unique_ptr<Window> create_window(Session *s, int id, bool popup,
           cairo_paint(cr);
           cairo_restore(cr);
           // Same temporary debug frames as Flutter's focus_gray.dart.
-          cairo_set_source_rgb(cr, 0, .784, .325);
+          gdk_cairo_set_source_rgba(cr, &s->focus_color);
           cairo_set_line_width(cr, 2 * sx / z);
           for (const auto &r : s->focus_rects) {
             cairo_rectangle(cr, (w->x + r[0] - s->x) * sx, (w->y + r[1] - s->y) * sy, r[2] * sx, r[3] * sy);
@@ -788,7 +1014,7 @@ std::unique_ptr<Window> create_window(Session *s, int id, bool popup,
                        !(e->state & (GDK_SHIFT_MASK | GDK_MOD1_MASK)) &&
                        (e->keyval == GDK_KEY_Return || e->keyval == GDK_KEY_KP_Enter);
                      const auto letter = gdk_keyval_to_unicode(e->keyval);
-                     const bool compose_letter = w->session->compose &&
+                     const bool compose_letter = w->session->compose && !w->session->secure &&
                        !(e->state & (GDK_CONTROL_MASK | GDK_MOD1_MASK)) && g_unichar_isalpha(letter);
                      if (w->editor && w->session->composer_allowed && (ctrl_enter || compose_letter)) {
                        release(w);
@@ -879,6 +1105,35 @@ struct RappWindows {
   GtkWindow *main;
   std::map<int64_t, std::unique_ptr<Session>> sessions;
 };
+namespace {
+bool composing(Session *s) {
+  return std::any_of(s->windows.begin(), s->windows.end(), [](const auto &w) { return w.second->preedit; });
+}
+void schedule_composer(Session *s) {
+  if (s->closing || s->pending.empty() || s->pending_idle || composing(s)) return;
+  s->pending_idle = g_idle_add_full(G_PRIORITY_DEFAULT_IDLE, +[](gpointer data) -> gboolean {
+    auto *s = static_cast<Session *>(data);
+    s->pending_idle = 0;
+    while (!s->pending.empty() && !composing(s)) {
+      g_autoptr(FlMethodCall) call = s->pending.front();
+      s->pending.pop_front();
+      if (!call) {
+        s->send_queued = false;
+        s->draining = true;
+        send_draft(s);
+        s->draining = false;
+        continue;
+      }
+      const bool attaching = std::string(fl_method_call_get_name(call)) == "attach";
+      s->draining = true;
+      rapp_windows_method(s->manager, call);
+      if (attaching) return G_SOURCE_REMOVE; // the session was destroyed
+      s->draining = false;
+    }
+    return G_SOURCE_REMOVE;
+  }, s, nullptr);
+}
+}
 RappWindows *rapp_windows_new(FlMethodChannel *channel, GtkWindow *main) {
   return new RappWindows{channel, main, {}};
 }
@@ -890,7 +1145,8 @@ bool rapp_windows_method(RappWindows *manager, FlMethodCall *call) {
       method != "composer_insert" && method != "composer_done" &&
       method != "status" && method != "stream" && method != "clips" &&
       method != "focus" && method != "banner" && method != "composer_submitted" &&
-      method != "composer_options" && method != "composer_draft")
+      method != "composer_options" && method != "composer_draft" &&
+      method != "secure_focus" && method != "host_notice")
     return false;
   auto *args = fl_method_call_get_args(call);
   auto sid = integer(get(args, "sid"));
@@ -898,24 +1154,18 @@ bool rapp_windows_method(RappWindows *manager, FlMethodCall *call) {
   if (method == "detach" && found == manager->sessions.end()) {
     auto s = std::make_unique<Session>();
     s->sid = sid;
+    s->manager = manager;
     s->channel = manager->channel;
     s->main = manager->main;
-    gtk_text_buffer_set_text(s->buffer, text(get(args, "text")), -1);
-    auto *bs = get(args, "blocks");
-    if (bs)
-      for (size_t i = 0; i < fl_value_get_length(bs); i++) {
-        auto *b = fl_value_get_list_value(bs, i);
-        s->blocks.push_back(
-            {static_cast<int>(integer(get(b, "n"))), text(get(b, "label"))});
-      }
+    add_blocks(s.get(), get(args, "blocks"));
+    ++s->editing;
+    set_draft(s.get(), text(get(args, "text")));
+    --s->editing;
     g_signal_connect(
         s->buffer, "changed",
         reinterpret_cast<GCallback>(+[](GtkTextBuffer *, gpointer p) {
           auto *s = static_cast<Session *>(p);
-          auto *a = fl_value_new_map();
-          s->recalling = false;
-          settext(a, "text", s->draft());
-          s->emit("draft", a);
+          s->changed();
         }),
         s.get());
     manager->sessions[sid] = std::move(s);
@@ -926,9 +1176,19 @@ bool rapp_windows_method(RappWindows *manager, FlMethodCall *call) {
     return true;
   }
   auto *s = found->second.get();
+  s->manager = manager;
+  const bool discard = method == "attach" && get(args, "discard") && fl_value_get_bool(get(args, "discard"));
+  const bool ordered_edit = method == "composer_insert" || method == "composer_draft" ||
+    method == "composer_submitted" || method == "composer_done" || (method == "attach" && !discard);
+  if (ordered_edit && !s->draining && (composing(s) || !s->pending.empty())) {
+    s->pending.push_back(FL_METHOD_CALL(g_object_ref(call)));
+    schedule_composer(s);
+    return true;
+  }
   if (method == "attach") {
+    if (!discard) s->changed(); // final marked draft precedes the response / Flutter ownership
     manager->sessions.erase(found);
-    gtk_window_present(manager->main);
+    if (!discard) gtk_window_present(manager->main);
   } else if (method == "raise") {
     for (auto &w : s->windows)
       if (!w.second->popup)
@@ -987,6 +1247,7 @@ bool rapp_windows_method(RappWindows *manager, FlMethodCall *call) {
         }
         gtk_widget_show_all(w->shell);
         composer_options(w);
+        refresh_notice(w);
         gtk_widget_queue_draw(w->area);
       }
     // Destroy popups first; their GTK parent may otherwise destroy them twice.
@@ -1077,32 +1338,88 @@ bool rapp_windows_method(RappWindows *manager, FlMethodCall *call) {
       if (w.second->retry) gtk_widget_set_sensitive(w.second->retry, !s->disconnected);
     }
   } else if (method == "composer_insert") {
-    gtk_text_buffer_insert_at_cursor(s->buffer, text(get(args, "text")), -1);
-    auto *bs = get(args, "blocks");
-    if (bs)
-      for (size_t i = 0; i < fl_value_get_length(bs); i++) {
-        auto *b = fl_value_get_list_value(bs, i);
-        s->blocks.push_back(
-            {static_cast<int>(integer(get(b, "n"))), text(get(b, "label"))});
+    DraftEdit edit(s);
+    auto *blocks = get(args, "blocks");
+    add_blocks(s, blocks);
+    gtk_text_buffer_delete_selection(s->buffer, TRUE, TRUE);
+    GtkTextIter at;
+    gtk_text_buffer_get_iter_at_mark(s->buffer, &at, gtk_text_buffer_get_insert(s->buffer));
+    const std::string value = text(get(args, "text"));
+    insert_marked(s, &at, value);
+    if (blocks && fl_value_get_type(blocks) == FL_VALUE_TYPE_LIST) {
+      for (size_t i = 0; i < fl_value_get_length(blocks); ++i) {
+        const auto block = parse_block(fl_value_get_list_value(blocks, i));
+        if (!block.mark || g_utf8_strchr(value.c_str(), -1, block.mark)) continue;
+        char mark[7] = {}; g_unichar_to_utf8(block.mark, mark);
+        insert_marked(s, &at, mark);
       }
+    }
+    gtk_text_buffer_place_cursor(s->buffer, &at);
     refresh_chips(s);
+  } else if (method == "secure_focus") {
+    s->secure = get(args, "on") && fl_value_get_bool(get(args, "on"));
+  } else if (method == "host_notice") {
+    const auto epoch = integer(get(args, "epoch"));
+    if (epoch < s->notice_epoch) { fl_method_call_respond_success(call, nullptr, nullptr); return true; }
+    s->notice_epoch = epoch;
+    s->notice_text = text(get(args, "text"));
+    s->notice_actions.clear();
+    auto *actions = get(args, "actions");
+    if (actions && fl_value_get_type(actions) == FL_VALUE_TYPE_LIST) {
+      for (size_t i = 0; i < std::min<size_t>(fl_value_get_length(actions), 4); ++i) {
+        auto *action = fl_value_get_list_value(actions, i);
+        const std::string id = text(get(action, "id"));
+        if (id == "dismiss" || id == "desktop" || id == "open" || id == "close")
+          s->notice_actions.emplace_back(id, text(get(action, "label")));
+      }
+    }
+    for (auto &w : s->windows) refresh_notice(w.second.get());
   } else if (method == "composer_options") {
     auto *allowed = get(args, "allowed"), *compose = get(args, "compose");
     if (allowed) s->composer_allowed = fl_value_get_bool(allowed);
     if (compose) s->compose = fl_value_get_bool(compose);
     if (get(args, "scale")) s->composer_scale = std::clamp(number(get(args, "scale")), 1., 3.);
-    for (auto &w : s->windows) composer_options(w.second.get());
+    if (get(args, "font_size")) {
+      const auto size = number(get(args, "font_size"));
+      if (std::isfinite(size)) s->font_size = std::clamp(size, 11., 40.);
+    }
+    if (get(args, "font_family")) s->font_family = text(get(args, "font_family"));
+    if (get(args, "text_color")) s->text_color = argb(get(args, "text_color"));
+    if (get(args, "hint_color")) s->hint_color = argb(get(args, "hint_color"));
+    if (get(args, "focus_color")) s->focus_color = argb(get(args, "focus_color"));
+    if (get(args, "background_color")) s->background_color = argb(get(args, "background_color"));
+    for (auto &w : s->windows) { composer_options(w.second.get()); gtk_widget_queue_draw(w.second->area); }
   } else if (method == "composer_draft") {
-    gtk_text_buffer_set_text(s->buffer, text(get(args, "text")), -1);
+    set_draft(s, text(get(args, "text")));
     s->recalling = !s->draft().empty();
   } else if (method == "composer_submitted") {
     auto *taken = get(args, "taken"), *retry = get(args, "retry");
     if (!taken || !fl_value_get_bool(taken)) {
       s->sending = false;
     } else if (!retry || !fl_value_get_bool(retry)) {
+      DraftEdit edit(s);
       const auto draft = s->draft();
-      if (draft.compare(0, s->sent_text.size(), s->sent_text) == 0)
-        gtk_text_buffer_set_text(s->buffer, draft.substr(s->sent_text.size()).c_str(), -1);
+      if (draft.compare(0, s->sent_text.size(), s->sent_text) == 0) {
+        GtkTextIter start, end;
+        gtk_text_buffer_get_start_iter(s->buffer, &start);
+        end = start;
+        gtk_text_iter_forward_chars(&end, g_utf8_strlen(s->sent_text.c_str(), -1));
+        gtk_text_buffer_delete(s->buffer, &start, &end);
+      } else {
+        // A taken block cannot be sent again, even if the user edited before its
+        // acknowledgement. Preserve their new text and unrelated new anchors.
+        GtkTextIter at;
+        gtk_text_buffer_get_start_iter(s->buffer, &at);
+        while (!gtk_text_iter_is_end(&at)) {
+          auto *anchor = gtk_text_iter_get_child_anchor(&at);
+          const auto mark = anchor ? GPOINTER_TO_UINT(g_object_get_data(G_OBJECT(anchor), "rapp-block-mark")) : 0;
+          const bool taken = mark && std::any_of(s->sent_blocks.begin(), s->sent_blocks.end(), [&](const auto &b) { return b.mark == mark; });
+          if (taken) {
+            auto end = at; gtk_text_iter_forward_char(&end);
+            gtk_text_buffer_delete(s->buffer, &at, &end);
+          } else gtk_text_iter_forward_char(&at);
+        }
+      }
       for (const auto &b : s->sent_blocks)
         s->blocks.erase(std::remove_if(s->blocks.begin(), s->blocks.end(),
           [&](const Block &v) { return v.n == b.n; }), s->blocks.end());
