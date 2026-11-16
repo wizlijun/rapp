@@ -181,7 +181,7 @@ pub fn free(local: u16) -> bool {
 
 /// Listeners on `local` of both loopback addresses (`localhost` may mean either). None when
 /// the port is not free: another program answers on it, or holds it on one of the two.
-fn listen(local: u16) -> Option<Vec<TcpListener>> {
+pub(crate) fn listen(local: u16) -> Option<Vec<TcpListener>> {
     if !free(local) {
         return None;
     }

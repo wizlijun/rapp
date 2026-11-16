@@ -2,9 +2,17 @@
 //! every device: a number is given out only when no other device is seen to use it.
 
 use crate::maps;
+use crate::pipe::{known_hosts, shares_of};
 use crate::state::State;
+use rapp_net::log::Lvl;
+use serde_json::json;
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tokio::task::JoinSet;
+
+/// How long the devices are given, all together, to say which numbers they use at start.
+const ASK_WAIT: Duration = Duration::from_secs(5);
 
 /// What this device knows of the numbers in use elsewhere.
 pub struct Numbers {
@@ -38,6 +46,39 @@ pub fn pick(state: &State, used: &[u16]) -> Option<u16> {
     let end = first.saturating_add(count.saturating_sub(1));
     let taken: Vec<u16> = state.maps.list().iter().map(|m| m.local).chain(state.numbers.seen()).collect();
     (first..=end).filter(|_| count > 0).find(|n| !used.contains(n) && !taken.contains(n) && maps::free(*n))
+}
+
+/// At start: numbers the shares that have none (a table from before numbers), then listens on
+/// every number. The devices in `hosts.json` are asked at once which numbers they use, so that
+/// one already in use is not given out again; one that does not answer in time is skipped (a
+/// clash with it is settled when it is seen later).
+pub async fn on_start(state: Arc<State>) {
+    if state.shares.list().iter().any(|s| s.local.is_none()) {
+        let me = state.cfg.lock().unwrap().id.clone();
+        let mut asks = JoinSet::new();
+        for h in known_hosts(&state.home).into_iter().filter(|h| Some(&h.id) != me.as_ref()) {
+            let state = state.clone();
+            asks.spawn(async move { (h.id.clone(), shares_of(&state, &h.id).await) });
+        }
+        let deadline = tokio::time::Instant::now() + ASK_WAIT;
+        while let Ok(Some(done)) = tokio::time::timeout_at(deadline, asks.join_next()).await {
+            // A device that is offline, refuses or is too old to say has no numbers to count.
+            if let Ok((id, Ok(shares))) = done {
+                let locals = shares.as_array().into_iter().flatten().filter_map(|s| s["local"].as_u64()?.try_into().ok()).collect();
+                state.numbers.set_seen(&id, locals);
+            }
+        }
+        asks.abort_all();
+        match state.shares.number_all(&|used| pick(&state, used)) {
+            Ok(done) => {
+                for s in done {
+                    state.log.event(Lvl::Info, "share_numbered", json!({"port": s.port, "local": s.local}));
+                }
+            }
+            Err(e) => state.log.event(Lvl::Warn, "shares_error", json!({"err": format!("{e:#}")})),
+        }
+    }
+    crate::sharing::sync_own(&state);
 }
 
 /// Of two sharers holding the same number, whether `me` gives it up: the larger ID, compared as

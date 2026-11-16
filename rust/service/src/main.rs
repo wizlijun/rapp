@@ -34,6 +34,7 @@ async fn main() {
         channels: true,
         pacing: true,
         map_ports: rapp_service::MAP_PORTS,
+        own_ports: true,
         update: std::env::current_exe().ok().and_then(|e| rapp_update::bundle_of(&e)).map(UpdateOpts::system),
     };
     match Service::start(opts).await {

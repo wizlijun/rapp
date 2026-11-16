@@ -103,11 +103,20 @@ pub async fn shares(state: &Arc<State>, cmd: &Value) -> Value {
     let Some((id, name)) = target else {
         let id = state.cfg.lock().unwrap().id.clone();
         let named = |fp: &Fp| shown(fp, &me, None, &state.paired.name_of(fp).unwrap_or_default());
-        // This device's own ports are reached on themselves.
+        // This device's own shares are reached on their numbers, which it listens on itself.
         let shares: Vec<Value> = sharing::table(state)
             .await
             .into_iter()
-            .map(|(s, listening)| row(&me, s.port, s.protocol(), &s.note, s.allow.iter().map(|fp| (*fp, named(fp))).collect(), listening, Some(s.port)))
+            .map(|(s, listening)| {
+                let allow = s.allow.iter().map(|fp| (*fp, named(fp))).collect();
+                let mut v = row(&me, s.port, s.protocol(), &s.note, allow, listening, s.local);
+                v["proto"] = json!(s.protocol().as_str());
+                v["proto_auto"] = json!(s.proto_auto);
+                if state.own.taken(s.port) {
+                    v["taken"] = json!(true);
+                }
+                v
+            })
             .collect();
         let mut known = vec![device(&me, "本机".into())];
         known.extend(state.paired.list().iter().filter(|(fp, _)| *fp != me).map(|(fp, _)| device(fp, named(fp))));
@@ -162,7 +171,8 @@ pub async fn share(state: &State, cmd: &Value) -> Value {
         Err(e) => return e,
         Ok(Some((id, _))) => {
             let note = cmd["note"].as_str().map(str::to_string);
-            let op = Op::Share { ports: cmd["ports"].clone(), note, allow: cmd["allow"].clone() };
+            let proto = cmd["proto"].as_str().map(str::to_string);
+            let op = Op::Share { ports: cmd["ports"].clone(), note, allow: cmd["allow"].clone(), proto };
             return match ask_there(state, &id, &op).await {
                 Ok((reply, _)) => ok(json!({"shared": reply["shared"]})),
                 Err(e) => e,
@@ -178,7 +188,14 @@ pub async fn share(state: &State, cmd: &Value) -> Value {
         .iter()
         .map(|d| {
             let (port, allow) = (d.share.port, &d.share.allow);
-            let mut v = json!({"port": port});
+            let proto = d.share.protocol();
+            let mut v = json!({
+                "port": port, "proto": proto.as_str(), "proto_auto": d.share.proto_auto,
+                "addr": d.share.local.map(|l| addr(proto, l)).unwrap_or_default(),
+            });
+            if let Some(local) = d.share.local {
+                v["local"] = json!(local);
+            }
             if !allow.is_empty() {
                 v["allow"] = json!(allow_names(state, allow));
             }

@@ -774,6 +774,7 @@ async fn service_with_a_data_dir_commits_its_device_json() {
         channels: true,
         pacing: true,
         map_ports: rapp_service::MAP_PORTS,
+        own_ports: true,
     })
     .await
     .unwrap();

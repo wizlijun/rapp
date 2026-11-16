@@ -59,6 +59,12 @@ pub async fn start_service(home: &Path, bins: &Path, idle: Duration) -> Service 
 /// `start_service`, giving other devices' shares local ports from `map_ports` (the first one,
 /// and how many): for a test that counts on which port it gets.
 pub async fn start_service_ports(home: &Path, bins: &Path, idle: Duration, map_ports: (u16, u16)) -> Service {
+    start_service_opts(home, bins, idle, map_ports, true).await
+}
+
+/// `start_service_ports`, with `own_ports` (whether this device serves its own share numbers):
+/// off for a sharer whose numbers a visitor on the same machine must be able to take.
+pub async fn start_service_opts(home: &Path, bins: &Path, idle: Duration, map_ports: (u16, u16), own_ports: bool) -> Service {
     Service::start(rapp_service::Opts {
         home: home.to_path_buf(),
         bin_dir: Some(bins.to_path_buf()),
@@ -75,6 +81,7 @@ pub async fn start_service_ports(home: &Path, bins: &Path, idle: Duration, map_p
         channels: true,
         pacing: true,
         map_ports,
+        own_ports,
     })
     .await
     .unwrap()
@@ -103,6 +110,7 @@ pub async fn start_service_with(
         channels: true,
         pacing: true,
         map_ports: rapp_service::MAP_PORTS,
+        own_ports: true,
     })
     .await
     .unwrap()
@@ -557,6 +565,7 @@ pub async fn service_on_relay_with(
         channels: true,
         pacing: true,
         map_ports: rapp_service::MAP_PORTS,
+        own_ports: true,
     };
     tune(&mut opts);
     let svc = Service::start(opts).await.unwrap();

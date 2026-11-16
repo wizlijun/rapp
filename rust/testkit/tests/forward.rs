@@ -53,7 +53,7 @@ async fn a_share_for_someone_else_is_not_allowed_and_not_listed() {
     let (r, _, _conn) = forward(&a, &key, &b, port).await;
     assert_eq!(r, json!({"ok":false,"error":"not allowed"}));
     let (r, _, _conn) = ask(&a, &key, &b, json!({"op":"list_shares"})).await;
-    assert_eq!(r, json!({"ok":true,"shares":[{"port":9}]}));
+    assert_eq!(r, json!({"ok":true,"shares":[{"port":9,"proto":"http"}]}));
 }
 
 #[tokio::test]
@@ -66,7 +66,7 @@ async fn list_shares_shows_the_note_and_what_is_allowed_to_this_device() {
     ]);
     let (a, key) = sharing(shares).await;
     let (r, _, _conn) = ask(&a, &key, &b, json!({"op":"list_shares"})).await;
-    assert_eq!(r, json!({"ok":true,"shares":[{"port":8000},{"port":11434,"note":"模型"}]}));
+    assert_eq!(r, json!({"ok":true,"shares":[{"port":8000,"proto":"http"},{"port":11434,"note":"模型","proto":"http"}]}));
 }
 
 #[tokio::test]
@@ -414,7 +414,7 @@ async fn silent_lan_addresses_cost_one_wait_and_the_relay_still_answers() {
     let hosts = json!([{"id": a.id, "name": "a", "lan": lan}]);
     std::fs::write(b.home.path().join("hosts.json"), hosts.to_string()).unwrap();
     let r = without_local(ipc_once(&b.svc, b.home.path(), json!({"cmd":"hosts"})).await);
-    assert_eq!(r, json!({"ok":true,"hosts":[{"id": a.id, "name": "a", "shares": [{"port": port}]}]}));
+    assert_eq!(r, json!({"ok":true,"hosts":[{"id": a.id, "name": "a", "shares": [{"port": port, "proto": "http"}]}]}));
 }
 
 #[tokio::test]
@@ -480,15 +480,15 @@ async fn share_then_shares_then_unshare() {
     let mut c = ipc(&a).await;
     let r = c.call(json!({"cmd":"share","ports":[port]})).await;
     assert_eq!(r["ok"], true, "{r}");
-    assert_eq!(r["shared"], json!([{"port": port}]), "{r}");
+    // The default range has no number to give: no address.
+    assert_eq!(r["shared"], json!([{"port": port, "proto": "http", "proto_auto": true, "addr": ""}]), "{r}");
     assert!(r["shared"][0].get("warn").is_none(), "{r}");
     let r = c.call(json!({"cmd":"shares"})).await;
     assert_eq!((&r["ok"], &r["id"]), (&json!(true), &json!(a.id)), "{r}");
     assert!(r["relay"].is_string(), "{r}");
     assert_eq!(ports_of(&r), [port as u64]);
-    // This device reaches its own port on itself.
-    let here = format!("http://localhost:{port}");
-    assert_eq!((&r["shares"][0]["listening"], &r["shares"][0]["addr"], &r["shares"][0]["local"]), (&json!(true), &json!(here), &json!(port)), "{r}");
+    // This device reaches its own share on its number; the default range gives none.
+    assert_eq!((&r["shares"][0]["listening"], &r["shares"][0]["addr"], &r["shares"][0]["local"]), (&json!(true), &json!(""), &Value::Null), "{r}");
     assert_eq!(r["shares"][0]["allow"], json!([]), "{r}");
     assert_eq!(saved_ports(a.home.path()), [port as u64]);
     assert_eq!(c.call(json!({"cmd":"unshare","port":port})).await, json!({"ok":true,"was":true}));
@@ -579,7 +579,7 @@ async fn allow_names_a_known_device_or_is_refused() {
     assert_eq!(l["allow"], 1, "{l}");
     // B may use it; the fingerprint prefix means B too
     let (r, _, _conn) = ask(&a, &key, &b, json!({"op":"list_shares"})).await;
-    assert_eq!(r, json!({"ok":true,"shares":[{"port":port}]}));
+    assert_eq!(r, json!({"ok":true,"shares":[{"port":port,"proto":"http"}]}));
     let prefix = &b.id.fp.to_string()[..8].to_ascii_uppercase();
     assert_eq!(c.call(json!({"cmd":"share","ports":[port],"allow":[prefix]})).await["ok"], true);
     assert_eq!(c.call(json!({"cmd":"share","ports":[port],"allow":["nobody"]})).await,
@@ -661,7 +661,7 @@ async fn sharing_again_without_allow_keeps_the_restriction() {
     let (r, _, _conn) = ask(&a, &key, &b, json!({"op":"list_shares"})).await;
     assert_eq!(r["ok"], true, "{r}");
     let mut c = ipc(&a).await;
-    let restricted = json!([{"port": port, "allow": ["test-b"]}]);
+    let restricted = json!([{"port": port, "allow": ["test-b"], "proto": "http", "proto_auto": true, "addr": ""}]);
     let r = c.call(json!({"cmd":"share","ports":[port],"allow":["test-b"],"note":"模型","raw":true})).await;
     assert_eq!((&r["ok"], &r["shared"]), (&json!(true), &restricted), "{r}");
     let (r, mut s, _conn) = forward(&a, &key, &b, port).await;
@@ -690,7 +690,7 @@ async fn sharing_again_without_allow_keeps_the_restriction() {
     // A port that was not shared starts open to every trusted device: no `allow` in the reply.
     let r = c.call(json!({"cmd":"share","ports":[port, 8000]})).await;
     assert_eq!(r["shared"][0], restricted[0], "{r}");
-    assert_eq!(r["shared"][1], json!({"port": 8000}), "{r}");
+    assert_eq!(r["shared"][1], json!({"port": 8000, "proto": "http", "proto_auto": true, "addr": ""}), "{r}");
     // The restriction goes with `unshare`, then `share`.
     assert_eq!(c.call(json!({"cmd":"unshare","port":port})).await, json!({"ok":true,"was":true}));
     let r = c.call(json!({"cmd":"share","ports":[port]})).await;
@@ -741,7 +741,7 @@ async fn pipe_carries_the_port_and_bytes_right_behind_the_command() {
     assert_eq!(rest, b" world");
     // and B's hosts lists what A offers B
     let r = without_local(ipc_once(&b.svc, b.home.path(), json!({"cmd":"hosts"})).await);
-    assert_eq!(r, json!({"ok":true,"hosts":[{"id": a.id, "name": "a", "shares": [{"port": port}]}]}));
+    assert_eq!(r, json!({"ok":true,"hosts":[{"id": a.id, "name": "a", "shares": [{"port": port, "proto": "http"}]}]}));
 }
 
 #[tokio::test]
@@ -1013,7 +1013,7 @@ async fn hosts_lists_what_each_device_offers_this_one() {
     let r = without_local(ipc_once(&b.svc, b.home.path(), json!({"cmd":"hosts"})).await);
     assert_eq!(r["ok"], true, "{r}");
     let entry = |id: &str| r["hosts"].as_array().unwrap().iter().find(|h| h["id"] == id).cloned().unwrap_or_else(|| panic!("{id}: {r}"));
-    assert_eq!(entry(&a.id), json!({"id": a.id, "name": "a", "shares": [{"port": p}]}));
+    assert_eq!(entry(&a.id), json!({"id": a.id, "name": "a", "shares": [{"port": p, "proto": "http"}]}));
     assert_eq!(entry(made_up), json!({"id": made_up, "name": "ghost", "error": "offline"}));
     assert_eq!(r["hosts"].as_array().unwrap().len(), 2, "{r}");
 }

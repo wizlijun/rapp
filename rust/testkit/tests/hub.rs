@@ -678,6 +678,7 @@ impl LanA {
                 channels: true,
                 pacing: true,
                 map_ports: rapp_service::MAP_PORTS,
+        own_ports: true,
             };
             match rapp_service::Service::start(opts).await {
                 Ok(s) => {

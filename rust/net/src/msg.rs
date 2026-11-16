@@ -53,6 +53,10 @@ pub enum Op {
         note: Option<String>,
         #[serde(default, skip_serializing_if = "Value::is_null")]
         allow: Value,
+        /// What the share speaks (`http`, `https`, `tcp`, `ssh`); a bad one is answered "bad proto".
+        /// Left out of the wire when None, so an older device sees the request it knows.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        proto: Option<String>,
     },
     Unshare {
         #[serde(default)]
@@ -91,15 +95,25 @@ mod tests {
         assert_eq!(serde_json::to_value(Op::Shares).unwrap(), json!({"op":"shares"}));
         assert_eq!(
             serde_json::from_value::<Op>(json!({"op":"share","ports":[8000],"note":"jupyter"})).unwrap(),
-            Op::Share { ports: json!([8000]), note: Some("jupyter".into()), allow: Value::Null }
+            Op::Share { ports: json!([8000]), note: Some("jupyter".into()), allow: Value::Null, proto: None }
         );
         // A bad port still parses: sharing.rs answers "bad port", not peer.rs "unknown op".
         assert!(serde_json::from_value::<Op>(json!({"op":"share","ports":[70000]})).is_ok());
         assert!(serde_json::from_value::<Op>(json!({"op":"unshare","port":"x"})).is_ok());
         assert_eq!(
-            serde_json::to_value(Op::Share { ports: json!([22]), note: None, allow: Value::Null }).unwrap(),
+            serde_json::to_value(Op::Share { ports: json!([22]), note: None, allow: Value::Null, proto: None }).unwrap(),
             json!({"op":"share","ports":[22]})
         );
+    }
+
+    /// A share request without a protocol is the one an older device knows: `proto` is not written.
+    #[test]
+    fn share_proto_is_written_only_when_given() {
+        let none = Op::Share { ports: json!([22]), note: None, allow: json!([]), proto: None };
+        assert_eq!(serde_json::to_value(none).unwrap(), json!({"op":"share","ports":[22],"allow":[]}));
+        let some = Op::Share { ports: json!([22]), note: None, allow: Value::Null, proto: Some("tcp".into()) };
+        assert_eq!(serde_json::to_value(&some).unwrap(), json!({"op":"share","ports":[22],"proto":"tcp"}));
+        assert_eq!(serde_json::from_value::<Op>(json!({"op":"share","ports":[22],"proto":"tcp"})).unwrap(), some);
     }
 
     #[test]

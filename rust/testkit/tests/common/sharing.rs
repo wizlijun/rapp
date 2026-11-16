@@ -45,12 +45,28 @@ pub async fn start_sharing(prepare: impl FnOnce(&Path)) -> (TestService, rapp_wi
 
 /// `start_sharing`, with the local ports of other devices' shares from `map_ports`.
 pub async fn start_sharing_ports(prepare: impl FnOnce(&Path), map_ports: (u16, u16)) -> (TestService, rapp_wire::Key) {
+    start_sharing_opts(prepare, map_ports, true, None).await
+}
+
+/// `start_sharing_ports`, with `own_ports` (see `start_service_opts`) and, when given, the `key`
+/// to trust instead of a new one: two devices of one test share a key to trust each other.
+pub async fn start_sharing_opts(
+    prepare: impl FnOnce(&Path),
+    map_ports: (u16, u16),
+    own_ports: bool,
+    key: Option<rapp_wire::Key>,
+) -> (TestService, rapp_wire::Key) {
     let (home, bins) = (tempfile::tempdir().unwrap(), bins());
     service_json(home.path());
+    if let Some(key) = &key {
+        // Before start: what the service asks other devices at start needs the key already.
+        let cfg = json!({"id": null, "name": "test-a", "password": PASSWORD, "port": 0, "ipc_port": 0, "key": key.to_string()});
+        rapp_net::config::write_json(&home.path().join("service.json"), &cfg).unwrap();
+    }
     prepare(home.path());
-    let svc = start_service_ports(home.path(), bins.path(), Duration::from_secs(60), map_ports).await;
+    let svc = start_service_opts(home.path(), bins.path(), Duration::from_secs(60), map_ports, own_ports).await;
     let id = ipc_once(&svc, home.path(), json!({"cmd":"status"})).await["id"].as_str().unwrap().to_string();
-    let key = rapp_wire::Key::new_local();
+    let key = key.unwrap_or_else(rapp_wire::Key::new_local);
     let r = ipc_once(&svc, home.path(), json!({"cmd":"set_relay","relay":"","key":key.to_string()})).await;
     assert_eq!(r["ok"], true, "{r}");
     (TestService { svc, home, bins, id }, key)

@@ -87,7 +87,20 @@ pub fn share(state: &State, req: &Value, allow: Allow, by: &By) -> Result<Vec<Sh
             state.forwards.cut(port);
         }
     }
+    sync_own(state);
     Ok(done)
+}
+
+/// Makes this device listen on the numbers of its shares as the table has them now. A number
+/// another program has is logged (`share_number_taken`) once per share and number, not on every
+/// call: the table asks again each time it is read, to take the number once it is free.
+pub fn sync_own(state: &State) {
+    for s in state.own.sync(&state.shares.list()) {
+        let Some(local) = s.local else { continue };
+        if state.own.first_taken(s.port, local) {
+            state.log.event(Lvl::Warn, "share_number_taken", json!({"port": s.port, "local": local}));
+        }
+    }
 }
 
 /// The devices the `allow` array names (an empty one: none, which means every trusted device).
@@ -127,12 +140,15 @@ pub fn unshare(state: &State, port: &Value, by: &By) -> Result<bool, String> {
     }
     // Also when it was not shared: a forward may still run from a share removed by hand.
     state.forwards.cut(port);
+    sync_own(state);
     Ok(was)
 }
 
 /// The whole share table, each share with whether something accepts on its port now: on the
 /// addresses a forward would reach (`127.0.0.1`, then `[::1]`). All ports are probed at once.
 pub async fn table(state: &Arc<State>) -> Vec<(Share, bool)> {
+    // Retries a number another program had.
+    sync_own(state);
     let list = state.shares.list();
     let probes: Vec<_> = list
         .iter()
@@ -177,14 +193,21 @@ async fn answer(state: &Arc<State>, op: &Op, peer: &Peer) -> Value {
                 .into_iter()
                 .map(|(s, listening)| {
                     let allow: Vec<Value> = s.allow.iter().map(|fp| device(fp, &state.paired.name_of(fp).unwrap_or_default())).collect();
-                    json!({"port": s.port, "note": s.note, "allow": allow, "listening": listening})
+                    let mut v = json!({
+                        "port": s.port, "note": s.note, "allow": allow, "listening": listening,
+                        "proto": s.protocol().as_str(), "proto_auto": s.proto_auto,
+                    });
+                    if let Some(local) = s.local {
+                        v["local"] = json!(local);
+                    }
+                    v
                 })
                 .collect();
             let known: Vec<Value> = state.paired.list().iter().map(|(fp, n)| device(fp, n)).collect();
             ok(json!({"shares": shares, "known": known}))
         }
-        Op::Share { ports, note, allow } => {
-            let mut req = json!({"ports": ports, "allow": allow});
+        Op::Share { ports, note, allow, proto } => {
+            let mut req = json!({"ports": ports, "allow": allow, "proto": proto});
             if let Some(note) = note {
                 req["note"] = json!(note);
             }
@@ -193,7 +216,10 @@ async fn answer(state: &Arc<State>, op: &Op, peer: &Peer) -> Value {
                     let shared: Vec<Value> = done
                         .iter()
                         .map(|d| {
-                            let mut v = json!({"port": d.share.port});
+                            let mut v = json!({"port": d.share.port, "proto": d.share.protocol().as_str(), "proto_auto": d.share.proto_auto});
+                            if let Some(local) = d.share.local {
+                                v["local"] = json!(local);
+                            }
                             if sensitive(d.share.port) {
                                 v["warn"] = json!(SENSITIVE_WARN);
                             }

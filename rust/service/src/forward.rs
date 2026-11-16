@@ -151,9 +151,13 @@ pub async fn serve_list(state: &Arc<State>, mut s: Pipe, peer: Peer) -> Result<(
     reply_and_finish(&mut s, &reply).await
 }
 
-/// What `list_shares` tells about one share: its port, and its note when there is one.
+/// What `list_shares` tells about one share: its port, its number when it has one, what it
+/// speaks, and its note when there is one.
 fn listed(share: &Share) -> Value {
-    let mut v = json!({"port": share.port});
+    let mut v = json!({"port": share.port, "proto": share.protocol().as_str()});
+    if let Some(local) = share.local {
+        v["local"] = json!(local);
+    }
     if !share.note.is_empty() {
         v["note"] = json!(share.note);
     }
