@@ -23,8 +23,9 @@ class ShareRow {
   final String note;
   final List<Device> allow;
 
-  /// What to type or open to reach it, exactly as the service says it: `ssh <id>.rapp` or
-  /// `http://<id>.rapp:8000`.
+  /// What to type or open on this computer to reach it, exactly as the service says it:
+  /// `http://localhost:28000` or `ssh -p 28001 localhost`. The port is a local one the service
+  /// listens on and carries to the device. Empty when this computer has no way to the share.
   final String addr;
   final bool web;
   final bool listening;
@@ -67,9 +68,6 @@ class Shared {
 }
 
 abstract class SharesApi {
-  /// The service names devices `<id>.rapp`.
-  bool get rappNames;
-
   /// [to] null is this device.
   Future<ShareTable> shares({String? to});
   Future<List<Shared>> share({String? to, required List<int> ports, String? note, List<String>? allow});

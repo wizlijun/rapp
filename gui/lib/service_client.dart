@@ -47,7 +47,6 @@ class ServiceStatus {
     this.relayError,
     this.hasKey = false,
     this.fp,
-    this.rappNames = false,
   });
 
   final String? id;
@@ -85,9 +84,6 @@ class ServiceStatus {
   /// This device's fingerprint.
   final String? fp;
 
-  /// Devices can be reached as `<id>.rapp`.
-  final bool rappNames;
-
   /// The relay can be used: an address and a valid key (an address alone, e.g. with 0.5.5's key, is not).
   bool get relaySet => hasKey && relayAddr != null;
 
@@ -113,7 +109,6 @@ class ServiceStatus {
       relayError: (m['relay_error']?.toString() ?? '').isEmpty ? null : m['relay_error'].toString(),
       hasKey: m['has_key'] == true,
       fp: m['fp']?.toString(),
-      rappNames: m['rapp_names'] == true,
       sessions: (m['sessions'] as List? ?? const [])
           .whereType<Map>()
           .map((s) => ServiceSession(s['sid'] as Object, '${s['peer'] ?? ''}', '${s['app'] ?? ''}',
@@ -374,9 +369,6 @@ class ServiceMonitor extends ChangeNotifier implements SharesApi {
       _then((c) => c.setUpdate(autoUpdate: autoUpdate, checkUpdates: checkUpdates));
   Future<Map<String, Object?>> setAutoLock(bool on) => _then((c) => c.setAutoLock(on));
   Future<Map<String, Object?>> permissionsReset() => _then((c) => c.permissionsReset());
-
-  @override
-  bool get rappNames => status?.rappNames ?? false;
 
   /// A call to another device can wait seconds for it, so these commands get a connection of their own,
   /// opened on first use and again after it breaks; the status connection never queues behind them.
