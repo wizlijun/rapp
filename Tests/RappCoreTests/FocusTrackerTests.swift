@@ -333,7 +333,8 @@ final class FocusTrackerTests: XCTestCase {
         XCTAssertEqual(t.generation, old + 2)
         XCTAssertEqual(t.result(.keyboard, generation: old + 1, .failure(.small), now: 6), [])
         XCTAssertEqual(t.result(.pointer(CGPoint(x: 700, y: 400)), generation: old + 1, pick(right), now: 6), [])
-        XCTAssertEqual(t.keyboardPanel, left)
+        XCTAssertNil(t.keyboardPanel)   // the resize dropped the old panel; the old answer did not bring it back
+        XCTAssertNil(t.keyboardMiss)
         XCTAssertNil(t.pointerPanel)
         XCTAssertEqual(t.tick(now: 7), [])
     }
@@ -343,14 +344,15 @@ final class FocusTrackerTests: XCTestCase {
         XCTAssertEqual(keyboard(t, pick(p), now: 1), [out([p], .on)])
         let narrow = CGSize(width: 800, height: 800)
         let clipped = CGRect(x: 600, y: 0, width: 200, height: 800)
+        // The resize sends the whole window until the fresh answer lands.
         XCTAssertEqual(t.window(id: 1, size: narrow, appeared: -10, now: 2),
-                       [.query(.keyboard, generation: t.generation), out([clipped], .resize)])
+                       [.query(.keyboard, generation: t.generation), out([], .resize)])
         // Even a pick wider than the window never leaves it.
-        XCTAssertEqual(keyboard(t, pick(p), now: 3), [])
+        XCTAssertEqual(keyboard(t, pick(p), now: 3), [out([clipped], .resize)])
         XCTAssertEqual(keyboard(t, pick(CGRect(x: 500, y: 0, width: 500, height: 800)), now: 4),
                        [out([CGRect(x: 500, y: 0, width: 300, height: 800)], .resize)])
     }
-    func testPointerPanelSurvivesResize() {
+    func testResizeRequeriesPointerAtLastPoint() {
         let t = started()
         _ = keyboard(t, .failure(.small), now: 0.5)
         _ = t.pointer(.click, at: CGPoint(x: 700, y: 400), now: 1)
@@ -359,33 +361,115 @@ final class FocusTrackerTests: XCTestCase {
         _ = t.tick(now: 1.2)
         XCTAssertEqual(t.window(id: 1, size: CGSize(width: 900, height: 800), appeared: -10, now: 2),
                        [.query(.keyboard, generation: t.generation),
-                        out([CGRect(x: 500, y: 0, width: 400, height: 800)], .resize)])
-        XCTAssertEqual(t.pointerPanel, right)
-        XCTAssertEqual(t.keyboardMiss, .small)
-        // Still inside the kept pointer panel: no query.
+                        .query(.pointer(CGPoint(x: 700, y: 400)), generation: t.generation),
+                        out([], .resize)])
+        XCTAssertNil(t.pointerPanel)
+        XCTAssertNil(t.keyboardMiss)
+        let fresh = CGRect(x: 450, y: 0, width: 450, height: 800)
+        XCTAssertEqual(t.result(.pointer(CGPoint(x: 700, y: 400)), generation: t.generation, pick(fresh), now: 2.3),
+                       [out([fresh], .resize)])
+        // Inside the fresh pointer panel: no query.
         XCTAssertEqual(t.pointer(.scroll, at: CGPoint(x: 700, y: 400), now: 3), [])
     }
-    func testFollowPanelSurvivesResize() {
+    func testFollowPanelDroppedOnResize() {
         let t = clicked()
         _ = t.frame(frame(tiles(cols: 5...9, rows: 0...7)), now: 1.2)
         let f = CGRect(x: 500, y: 0, width: 300, height: 400)
         _ = t.result(.follow(CGPoint(x: 750, y: 400)), generation: t.generation, pick(f), now: 1.3)
-        // 800x800 box of 1000x900: 71%, output unchanged, so only the keyboard requery.
         XCTAssertEqual(t.window(id: 1, size: CGSize(width: 1000, height: 900), appeared: -10, now: 2),
-                       [.query(.keyboard, generation: t.generation)])
-        XCTAssertEqual(t.followPanel, f)
-        XCTAssertEqual(t.pointerPanel, left)
+                       [.query(.keyboard, generation: t.generation),
+                        .query(.pointer(CGPoint(x: 100, y: 100)), generation: t.generation),
+                        out([], .resize)])
+        XCTAssertNil(t.followPanel)
+        XCTAssertNil(t.pointerPanel)
+        XCTAssertNil(t.keyboardPanel)
     }
-    func testCopyBoundsSurviveResize() {
+    func testCopyBoundsDroppedOnResize() {
         let t = started()
         _ = keyboard(t, .failure(.blocked), now: 0.5)
         let copy = CGRect(x: 300, y: 0, width: 600, height: 800)
         XCTAssertEqual(t.frame(frame([], copy: copy), now: 1), [out([copy], .scroll)])
+        // No pointer action yet, so only the keyboard requery; the old copy panel is gone.
         XCTAssertEqual(t.window(id: 1, size: CGSize(width: 1000, height: 900), appeared: -10, now: 2),
-                       [.query(.keyboard, generation: t.generation)])
+                       [.query(.keyboard, generation: t.generation), out([], .resize)])
+        // The fresh blocked answer alone shows nothing; the next frame's copy bounds bring it back.
+        XCTAssertEqual(keyboard(t, .failure(.blocked), now: 2.5), [])
+        let fresh = CGRect(x: 300, y: 0, width: 600, height: 900)
+        XCTAssertEqual(t.frame(frame([], copy: fresh), now: 3), [out([fresh], .scroll)])
         // A new window forgets it.
-        XCTAssertEqual(t.window(id: 2, size: win, appeared: -10, now: 3),
+        XCTAssertEqual(t.window(id: 2, size: win, appeared: -10, now: 4),
                        [.query(.keyboard, generation: t.generation), out([], .window, window: 2)])
+    }
+
+    // MARK: resize drops the old geometry (spec §10 scenario 6)
+
+    let sidebar = CGRect(x: 0, y: 0, width: 300, height: 800)
+    let editor = CGRect(x: 400, y: 0, width: 400, height: 800)
+
+    /// Keyboard on the editor, hover settled on the sidebar at (100,100): both sent by t=2.
+    func hoveredSidebar() -> T {
+        let t = started()
+        XCTAssertEqual(keyboard(t, pick(editor), now: 0.5), [out([editor], .on)])
+        XCTAssertEqual(t.pointer(.move, at: CGPoint(x: 100, y: 100), now: 1), [])
+        XCTAssertEqual(t.tick(now: 1.5), [.query(.pointer(CGPoint(x: 100, y: 100)), generation: t.generation)])
+        XCTAssertEqual(t.result(.pointer(CGPoint(x: 100, y: 100)), generation: t.generation, pick(sidebar), now: 1.6),
+                       [out([editor, sidebar], .hover)])
+        return t
+    }
+    func testResizeSendsOnlyFreshPanels() {
+        let t = hoveredSidebar()
+        let old = t.generation
+        let wide = CGSize(width: 1400, height: 800)
+        XCTAssertEqual(t.window(id: 1, size: wide, appeared: -10, now: 3),
+                       [.query(.keyboard, generation: old + 1),
+                        .query(.pointer(CGPoint(x: 100, y: 100)), generation: old + 1),
+                        out([], .resize)])
+        // The keyboard answer for the new size: only the new editor, never the old sidebar.
+        let editor2 = CGRect(x: 400, y: 0, width: 700, height: 800)
+        XCTAssertEqual(keyboard(t, pick(editor2), now: 3.1), [])   // throttled behind the resize send
+        XCTAssertEqual(t.tick(now: 3.3), [out([editor2], .resize)])
+        // An old-generation pointer answer is ignored.
+        XCTAssertEqual(t.result(.pointer(CGPoint(x: 100, y: 100)), generation: old, pick(sidebar), now: 3.4), [])
+        XCTAssertEqual(t.tick(now: 3.7), [])
+        // The fresh pointer answer adds the new sidebar.
+        let sidebar2 = CGRect(x: 0, y: 0, width: 350, height: 800)
+        XCTAssertEqual(t.result(.pointer(CGPoint(x: 100, y: 100)), generation: old + 1, pick(sidebar2), now: 3.8),
+                       [out([editor2, sidebar2], .resize)])
+    }
+    func testResizeSendsWholeAtOnce() {
+        let t = hoveredSidebar()   // last send at 1.6
+        // Even inside the 0.3 s send interval, the whole-window send goes out with the resize.
+        _ = t.keyboardChanged(now: 1.7)
+        XCTAssertEqual(keyboard(t, pick(sidebar), now: 1.7), [])   // throttled: [sidebar] waits
+        let a = t.window(id: 1, size: CGSize(width: 1400, height: 800), appeared: -10, now: 1.8)
+        XCTAssertEqual(sends(a), [T.Output(window: 1, rects: [], cause: .resize)])
+        XCTAssertEqual(queries(a), [.keyboard, .pointer(CGPoint(x: 100, y: 100))])
+        XCTAssertTrue(a.allSatisfy { if case .query(_, let g) = $0 { return g == t.generation }; return true })
+        XCTAssertNil(t.keyboardPanel)
+        XCTAssertNil(t.pointerPanel)
+        // During a drag every step sends the whole window again (B cleared on the size change anyway).
+        let b = t.window(id: 1, size: CGSize(width: 1410, height: 800), appeared: -10, now: 1.9)
+        XCTAssertEqual(sends(b), [T.Output(window: 1, rects: [], cause: .resize)])
+        // Nothing old comes back on the next ticks.
+        XCTAssertEqual(t.tick(now: 2.2), [])
+        XCTAssertEqual(t.tick(now: 2.5), [])
+    }
+    func testResizeKeepsPendingHoverPosition() {
+        let t = started()
+        _ = keyboard(t, pick(editor), now: 0.5)
+        _ = t.pointer(.move, at: CGPoint(x: 100, y: 100), now: 1)
+        // Resize before the hover settles: the pointer is queried at once and again when the hover settles,
+        // both with the new generation.
+        let a = t.window(id: 1, size: CGSize(width: 1400, height: 800), appeared: -10, now: 1.2)
+        XCTAssertEqual(queries(a), [.keyboard, .pointer(CGPoint(x: 100, y: 100))])
+        XCTAssertEqual(t.tick(now: 1.5), [.query(.pointer(CGPoint(x: 100, y: 100)), generation: t.generation)])
+    }
+    func testResizeSkipsPointOutsideNewBounds() {
+        let t = started()
+        _ = keyboard(t, pick(editor), now: 0.5)
+        _ = t.pointer(.click, at: CGPoint(x: 900, y: 400), now: 1)
+        let a = t.window(id: 1, size: CGSize(width: 800, height: 800), appeared: -10, now: 2)
+        XCTAssertEqual(queries(a), [.keyboard])
     }
     func testRectsRoundedOutward() {
         let t = started()

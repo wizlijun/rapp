@@ -831,8 +831,10 @@ final class Session {
                 output.log("windows: " + (next.isEmpty ? "none" : next.map { "\($0.kind) \($0.id)" }.joined(separator: ", ")))
             }
             table = next
-            focusSession?.windows(next)
+            // The table first: B clears the focus on a size change, so a focusRegion for the new
+            // size must arrive after it.
             send(.windows(next))
+            focusSession?.windows(next)
             let focused = next.first(where: \.focused)?.id
             if focused != focusedWindow {
                 focusedWindow = focused

@@ -50,6 +50,8 @@ public final class FocusTracker {
     private var recheckAt: TimeInterval?
     private var recheckCause = Cause.key
     private var hover: (point: CGPoint, at: TimeInterval)?
+    /// Where the last pointer action of this window happened; a resize asks for the pointer panel there again.
+    private var lastPointer: CGPoint?
     private var copyBounds: CGRect?
 
     /// Rule 5: the click or key that may still trigger a follow query.
@@ -78,12 +80,22 @@ public final class FocusTracker {
         windowID = id
         self.size = size
         generation += 1
-        // A resize keeps the panels (rects() clips them; rule 4 keeps the pointer panel) and only
-        // drops in-flight answers; a new window starts from nothing.
-        if resized { followAsked = nil } else { resetWindowState() }
+        // Any resize makes every panel rect stale: drop them all, show the whole window, and ask the
+        // keyboard and the last pointer point again (rules 3, 4). Positions and timers stay; a new
+        // window starts from nothing.
+        if resized { dropPanels() } else { resetWindowState() }
         let cause: Cause = resized ? .resize : .window
         guard started else { return [] }
-        return queryKeyboard(cause) + update(cause, now: now)
+        var actions = queryKeyboard(cause)
+        if resized {
+            if let p = lastPointer, CGRect(origin: .zero, size: size).contains(p) {
+                actions += queryPointer(p, .resize)
+            }
+            // B clears on the size change; send the whole window now, past the throttle, so A's
+            // last-sent output never claims old rects are showing.
+            sent = nil; sentAt = nil
+        }
+        return actions + update(cause, now: now)
     }
 
     public func locked(_ on: Bool, now: TimeInterval) -> [Action] {
@@ -93,6 +105,7 @@ public final class FocusTracker {
 
     public func pointer(_ kind: Pointer, at p: CGPoint, now: TimeInterval) -> [Action] {
         guard active else { return [] }
+        lastPointer = p
         if kind == .move {
             hover = (p, now)
             return []
@@ -168,11 +181,16 @@ public final class FocusTracker {
     private var active: Bool { started && windowID != nil }
 
     private func resetWindowState() {
+        dropPanels()
+        actionAt = nil; hover = nil; recheckAt = nil; lastPointer = nil
+    }
+
+    /// Forgets every rect that belongs to the old window geometry.
+    private func dropPanels() {
         keyboardPanel = nil; keyboardMiss = nil
         pointerPanel = nil; pointerMiss = nil
-        followPanel = nil; followAsked = nil
-        actionAt = nil; followTiles = []; followBox = .null
-        hover = nil; recheckAt = nil; copyBounds = nil
+        followPanel = nil; followAsked = nil; followTiles = []; followBox = .null
+        copyBounds = nil
     }
 
     private func queryKeyboard(_ cause: Cause) -> [Action] {
