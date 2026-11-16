@@ -277,6 +277,8 @@ class RemoteSession extends ChangeNotifier {
           tabs.select(p);
         }
       case FocusRegionEvent():
+        // A late one (smart left, or its window gone) must not paint gray on a session that is not asking.
+        if (!_focusWanted || !windows.any((w) => w.id == e.window)) return;
         focus = (window: e.window, rects: e.rects);
       case WeakEvent():
         weak = e.on;
@@ -348,6 +350,7 @@ class RemoteSession extends ChangeNotifier {
   /// The link is gone: no transfer or send round is running any more.
   void linkDown() {
     focus = null;
+    _focusWanted = false;
     transferStatus = null;
     rttMs = null;
     stalled = false;
@@ -360,6 +363,17 @@ class RemoteSession extends ChangeNotifier {
   /// A's focus region (§6 of the focus-pane spec): null until A says, and again when it can no longer
   /// be true (link down, its window gone, smart off). Empty rects mean the whole window.
   ({int window, List<Rect> rects})? focus;
+
+  bool _focusWanted = false;
+
+  /// Whether A is being asked for the focus region (MainState sets it with each `set_stream`).
+  /// While false, focus events are ignored; turning it off clears [focus].
+  bool get focusWanted => _focusWanted;
+  set focusWanted(bool v) {
+    if (_focusWanted == v) return;
+    _focusWanted = v;
+    if (!v) clearFocus();
+  }
 
   /// Forgets the focus region (smart left, or A is no longer asked) and tells the listeners.
   void clearFocus() {

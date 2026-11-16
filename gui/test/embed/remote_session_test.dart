@@ -39,7 +39,8 @@ void main() {
     FocusRegionEvent ev(int window) => FocusRegionEvent(1, window, const [Rect.fromLTWH(0, 0, 10, 10)]);
 
     test('the event is kept; linkDown and clearFocus drop it and notify', () {
-      final rs = RemoteSession(1, 'Calc');
+      final rs = RemoteSession(1, 'Calc')..focusWanted = true;
+      rs.apply(WindowsEvent(1, [w(7)]));
       var n = 0;
       rs.addListener(() => n++);
       expect(rs.focus, isNull);
@@ -49,6 +50,7 @@ void main() {
       expect(n, 1);
       rs.linkDown();
       expect(rs.focus, isNull);
+      rs.focusWanted = true;
       rs.apply(ev(7));
       n = 0;
       rs.clearFocus();
@@ -59,11 +61,33 @@ void main() {
     });
 
     test('focus cleared when its window leaves the table', () {
-      final rs = RemoteSession(1, 'Calc');
-      rs.apply(ev(7));
+      final rs = RemoteSession(1, 'Calc')..focusWanted = true;
       rs.apply(WindowsEvent(1, [w(7)]));
+      rs.apply(ev(7));
       expect(rs.focus, isNotNull);
       rs.apply(WindowsEvent(1, [w(8)]));
+      expect(rs.focus, isNull);
+    });
+  });
+
+  group('late focus events', () {
+    FocusRegionEvent ev(int window) => FocusRegionEvent(1, window, const [Rect.fromLTWH(0, 0, 10, 10)]);
+
+    test('an event after leaving smart is ignored, and leaving clears the stored one', () {
+      final rs = RemoteSession(1, 'Calc')..focusWanted = true;
+      rs.apply(WindowsEvent(1, [w(7)]));
+      rs.apply(ev(7));
+      expect(rs.focus, isNotNull);
+      rs.focusWanted = false;
+      expect(rs.focus, isNull);
+      rs.apply(ev(7));
+      expect(rs.focus, isNull);
+    });
+
+    test('an event for a window not in the table is ignored', () {
+      final rs = RemoteSession(1, 'Calc')..focusWanted = true;
+      rs.apply(WindowsEvent(1, [w(7)]));
+      rs.apply(ev(9));
       expect(rs.focus, isNull);
     });
   });

@@ -854,6 +854,10 @@ void main() {
     });
 
     group('smart preset asks A for the focus region', () {
+      RemoteWindow w(int id) => RemoteWindow(
+            id: id, parent: 0, kind: WindowKind.normal, title: 'w$id', rect: const Rect.fromLTWH(0, 0, 400, 300),
+            titleBar: 28, resizable: true, focused: false, texture: id, visible: const Rect.fromLTWH(0, 0, 1, 1),
+          );
       List<Map<String, Object?>> sets(FakeSessionPort port) => [for (final c in port.calls) if (c.$1 == 'set_stream') c.$2];
 
       test('smart is never pinned and asks for focus, even with automatic saving off', () {
@@ -875,6 +879,7 @@ void main() {
           final n = sets(port).length;
           st.setAutoSaveTraffic(true); // a no-op for the wire
           expect(sets(port).length, n);
+          rs.apply(WindowsEvent(1, [w(5)]));
           rs.apply(FocusRegionEvent(1, 5, const [Rect.fromLTWH(0, 0, 4, 4)]));
           expect(rs.focus, isNotNull);
           rs.setChoice(presetSmart.copyWith(), manual: true); // same numbers, smart off
@@ -891,6 +896,23 @@ void main() {
           st.currentRemote!.setChoice(presetSmart, manual: true);
           expect(sets(port).where((m) => m.containsKey('focus')), isEmpty);
           expect(sets(port).last['pinned'], isNot(true));
+        });
+      });
+
+      test('turning focusPane off for the app, mid-session, resends without focus and clears rs.focus', () {
+        final store = AppProfileStore('${tmp.path}/shared', mine: [], builtin: []);
+        env(profiles: store, (a, t, port, st, hints) {
+          final rs = st.currentRemote!;
+          rs.setChoice(presetSmart, manual: true);
+          expect(sets(port).last['focus'], true);
+          rs.apply(WindowsEvent(1, [w(5)]));
+          rs.apply(FocusRegionEvent(1, 5, const [Rect.fromLTWH(0, 0, 4, 4)]));
+          expect(rs.focus, isNotNull);
+          final n = sets(port).length;
+          store.put(AppProfile(ids: ['a'], focusPane: false));
+          expect(sets(port).length, n + 1);
+          expect(sets(port).last.containsKey('focus'), false);
+          expect(rs.focus, isNull);
         });
       });
 

@@ -162,6 +162,7 @@ class MainState extends ChangeNotifier {
       rs.setProfile(profiles.resolve(rs.appId));
       _syncHidden(rs);
     }
+    _applyFps();
     _entries = _mapEntries();
     unawaited(history.refresh());
     final old = oldRoot.endsWith('/') ? oldRoot : '$oldRoot/';
@@ -638,7 +639,7 @@ class MainState extends ChangeNotifier {
       // 「智能」 always saves traffic itself: never pinned, a desktop's manual pick included.
       final pin = !c.smart && (_pinned || (isDesktopApp(r.app) && rs.streamPinned));
       final focus = _wantsFocus(rs, r);
-      if (!focus) rs.clearFocus();
+      rs.focusWanted = focus;
       final now = (c.mode, fps, c.density, pin, focus);
       if (now == last) continue;
       _sentFps[rs.sid] = now;
@@ -1832,6 +1833,7 @@ class MainState extends ChangeNotifier {
       rs.setProfile(profiles.resolve(rs.appId));
       _syncHidden(rs);
     }
+    _applyFps(); // focusPane may have changed
     if (profiles.problem == appsSaveProblem) hint = appsSaveProblem;
     notifyListeners();
   }
