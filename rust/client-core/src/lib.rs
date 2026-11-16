@@ -1,4 +1,4 @@
-//! Portable v10 client protocol, image decoding, and canvas input geometry.
+//! Portable v12 client protocol, image decoding, and canvas input geometry.
 pub mod codec;
 pub mod geometry;
 pub mod probe;

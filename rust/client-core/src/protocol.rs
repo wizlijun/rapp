@@ -110,6 +110,8 @@ impl Address {
                 "token" if !v.is_empty() => token = v.into_owned(),
                 "mode" => mode = mode_number(&v).context("unknown color mode")?,
                 "fps" => fps = v.parse().context("invalid fps")?,
+                "protocol" => ensure!(v.parse::<u8>().ok() == Some(VERSION),
+                    "this client supports protocol {VERSION} only (update both sides)"),
                 _ => (),
             }
         }

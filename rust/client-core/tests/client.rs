@@ -729,3 +729,12 @@ fn stream_focus_bit() {
     assert_eq!(stream(4, 15, 1., false, true).last(), Some(&2));
     assert_eq!(stream(4, 15, 1., true, true).last(), Some(&3));
 }
+
+#[test]
+fn explicit_protocol_does_not_silently_ignore_an_old_host_request() {
+    assert!(Address::parse("rapp://host/?token=x&protocol=12", None).is_ok());
+    for old in ["4", "5", "6", "10", "11", "garbage"] {
+        let error = Address::parse(&format!("rapp://host/?token=x&protocol={old}"), None).unwrap_err();
+        assert!(error.to_string().contains("supports protocol 12 only"));
+    }
+}

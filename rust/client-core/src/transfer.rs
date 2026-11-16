@@ -142,7 +142,7 @@ pub fn upload(
     ensure!(kind == 2 || total <= MEMORY_LIMIT, "这一项超过 256 MB");
     retry(cancel, || {
         let mut s = cancel.connect(a)?;
-        let mut put = vec![a.version];
+        let mut put = vec![p::VERSION];
         p::string(&mut put, &a.token);
         put.extend(item.to_le_bytes());
         put.push(kind);
@@ -329,7 +329,7 @@ fn receive(
 ) -> Result<()> {
     retry(cancel, || {
         let mut s = cancel.connect(a)?;
-        let mut fetch = vec![a.version];
+        let mut fetch = vec![p::VERSION];
         p::string(&mut fetch, &a.token);
         fetch.extend(id.to_le_bytes());
         fetch.extend(index.to_le_bytes());
@@ -395,7 +395,7 @@ mod tests {
             let (k, b) = packet(&mut s);
             assert_eq!(k, 23);
             let mut r = Reader::new(&b);
-            assert_eq!(r.u8().unwrap(), 6);
+            assert_eq!(r.u8().unwrap(), p::VERSION);
             assert_eq!(r.string().unwrap(), "test");
             assert_eq!(r.u32().unwrap(), 123);
             assert_eq!(r.u8().unwrap(), 3);
@@ -438,6 +438,7 @@ mod tests {
                 let (mut s, _) = l.accept().unwrap();
                 let (k, b) = packet(&mut s);
                 assert_eq!(k, 22);
+                assert_eq!(b[0], p::VERSION);
                 assert_eq!(
                     u64::from_le_bytes(b[b.len() - 8..].try_into().unwrap()),
                     offset
