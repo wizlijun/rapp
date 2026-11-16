@@ -19,12 +19,19 @@ final class FocusReader {
         let ms: Int
     }
 
+    /// What a query found, and what it cost: layers walked and ms taken (also for a block).
+    struct Reading {
+        let result: Result<Chain, PanelMiss>
+        let ms: Int
+        let walked: Int
+    }
+
     /// A whole query, with its reply.
     private struct Job {
         let query: FocusTracker.Query
         let window: WindowInfo
         let display: CGRect
-        let done: (Result<Chain, PanelMiss>) -> Void
+        let done: (Reading) -> Void
     }
 
     static let budget: TimeInterval = 0.05
@@ -55,8 +62,8 @@ final class FocusReader {
     }
 
     func query(_ q: FocusTracker.Query, window: WindowInfo, display: CGRect,
-               done: @escaping (Result<Chain, PanelMiss>) -> Void) {
-        guard trusted else { done(.failure(.blocked)); return }
+               done: @escaping (Reading) -> Void) {
+        guard trusted else { done(Reading(result: .failure(.blocked), ms: 0, walked: 0)); return }
         let job = Job(query: q, window: window, display: display, done: done)
         lock.lock()
         let now = stopped ? nil : coalescer.submit(q.kind, job)
@@ -67,19 +74,25 @@ final class FocusReader {
     func stop() {
         lock.lock()
         stopped = true
-        lock.unlock()
-        if let observer {
-            CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .defaultMode)
-            self.observer = nil
-        }
-        observerBox?.release()
+        let observer = self.observer, box = observerBox
+        self.observer = nil
         observerBox = nil
+        lock.unlock()
+        // The observer's callouts run on the main thread: removing the source and releasing the refcon
+        // there serialises them with any callout already running.
+        DispatchQueue.main.async {
+            if let observer {
+                CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(observer), .defaultMode)
+            }
+            box?.release()
+        }
     }
+
+    private var isStopped: Bool { lock.lock(); defer { lock.unlock() }; return stopped }
 
     private func run(_ job: Job) {
         queue.async { [self] in
-            let result = read(job)
-            job.done(result)
+            job.done(read(job))
             lock.lock()
             let next = stopped ? nil : coalescer.finish()
             lock.unlock()
@@ -89,58 +102,65 @@ final class FocusReader {
 
     // MARK: Accessibility
 
-    private func read(_ job: Job) -> Result<Chain, PanelMiss> {
+    private func read(_ job: Job) -> Reading {
         let started = uptimeSeconds()
-        let deadline = started + Self.budget
-        let app = AXUIElementCreateApplication(pid)
-        func remaining() -> Float? {
-            let left = deadline - uptimeSeconds()
-            return left > 0.001 ? Float(left) : nil
+        let deadline = QueryDeadline(start: started, budget: Self.budget)
+        var walked = 0
+        func finish(_ r: Result<Chain, PanelMiss>) -> Reading {
+            Reading(result: r, ms: Int(((uptimeSeconds() - started) * 1000).rounded()), walked: walked)
         }
+        /// Gives the next call on `e` what is left of the budget; false when nothing is.
+        func arm(_ e: AXUIElement) -> Bool {
+            guard let left = deadline.remaining(now: uptimeSeconds()) else { return false }
+            AXUIElementSetMessagingTimeout(e, Float(left))
+            return true
+        }
+        let blocked = { finish(.failure(.blocked)) }
+        let app = AXUIElementCreateApplication(pid)
 
-        var start: AXUIElement?
+        var start: AXUIElement
         switch job.query {
         case .keyboard:
-            guard let t = remaining() else { return .failure(.blocked) }
-            AXUIElementSetMessagingTimeout(app, t)
+            guard arm(app) else { return blocked() }
             var value: CFTypeRef?
             guard AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &value) == .success,
-                  let v = value, CFGetTypeID(v) == AXUIElementGetTypeID() else { return .failure(.blocked) }
+                  let v = value, CFGetTypeID(v) == AXUIElementGetTypeID() else { return blocked() }
             start = (v as! AXUIElement)
         case .pointer(let p), .follow(let p):
             // Window points -> global points.
             let gx = job.display.minX + CGFloat(job.window.rect.x) + p.x
             let gy = job.display.minY + CGFloat(job.window.rect.y) + p.y
-            guard let t = remaining() else { return .failure(.blocked) }
-            AXUIElementSetMessagingTimeout(app, t)
+            guard arm(app) else { return blocked() }
             var el: AXUIElement?
             guard AXUIElementCopyElementAtPosition(app, Float(gx), Float(gy), &el) == .success, let e = el
-            else { return .failure(.blocked) }
+            else { return blocked() }
             start = e
         }
 
         var roles: [String] = []
         var rects: [CGRect] = []
-        var element = start
+        var element: AXUIElement? = start
         while let current = element, roles.count < FocusPane.maxDepth {
-            guard let t = remaining() else { return .failure(.blocked) }
-            AXUIElementSetMessagingTimeout(current, t)
-            guard let role = stringAttribute(current, kAXRoleAttribute),
-                  let global = frame(of: current) else { return .failure(.blocked) }
+            walked += 1
+            guard arm(current), let role = stringAttribute(current, kAXRoleAttribute),
+                  arm(current), let pos = pointAttribute(current),
+                  arm(current), let size = sizeAttribute(current) else { return blocked() }
             roles.append(role)
-            rects.append(FocusPane.windowRect(global: global, display: job.display, window: job.window.rect))
+            rects.append(FocusPane.windowRect(global: CGRect(origin: pos, size: size), display: job.display,
+                                              window: job.window.rect))
             if role == kAXWindowRole as String { break }
             // A missing parent ends the chain; any other error is a block.
+            guard arm(current) else { return blocked() }
             var parent: CFTypeRef?
             let err = AXUIElementCopyAttributeValue(current, kAXParentAttribute as CFString, &parent)
             if err == .noValue || err == .attributeUnsupported { break }
-            guard err == .success, let p = parent, CFGetTypeID(p) == AXUIElementGetTypeID() else {
-                return .failure(.blocked)
-            }
+            guard err == .success, let p = parent, CFGetTypeID(p) == AXUIElementGetTypeID() else { return blocked() }
             element = (p as! AXUIElement)
         }
-        guard !rects.isEmpty else { return .failure(.blocked) }
-        return .success(Chain(roles: roles, rects: rects, ms: Int(((uptimeSeconds() - started) * 1000).rounded())))
+        // A chain that finished after the deadline does not count.
+        guard !rects.isEmpty, !deadline.expired(now: uptimeSeconds()) else { return blocked() }
+        let reading = finish(.success(Chain(roles: roles, rects: rects, ms: 0)))
+        return Reading(result: .success(Chain(roles: roles, rects: rects, ms: reading.ms)), ms: reading.ms, walked: walked)
     }
 
     /// Role only (never a title or text).
@@ -150,16 +170,20 @@ final class FocusReader {
         return v as? String
     }
 
-    private func frame(of e: AXUIElement) -> CGRect? {
-        var pv: CFTypeRef?, sv: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(e, kAXPositionAttribute as CFString, &pv) == .success,
-              AXUIElementCopyAttributeValue(e, kAXSizeAttribute as CFString, &sv) == .success,
-              let pv, let sv, CFGetTypeID(pv) == AXValueGetTypeID(), CFGetTypeID(sv) == AXValueGetTypeID()
-        else { return nil }
-        var origin = CGPoint.zero, size = CGSize.zero
-        guard AXValueGetValue(pv as! AXValue, .cgPoint, &origin),
-              AXValueGetValue(sv as! AXValue, .cgSize, &size) else { return nil }
-        return CGRect(origin: origin, size: size)
+    private func pointAttribute(_ e: AXUIElement) -> CGPoint? {
+        var v: CFTypeRef?
+        var p = CGPoint.zero
+        guard AXUIElementCopyAttributeValue(e, kAXPositionAttribute as CFString, &v) == .success, let v,
+              CFGetTypeID(v) == AXValueGetTypeID(), AXValueGetValue(v as! AXValue, .cgPoint, &p) else { return nil }
+        return p
+    }
+
+    private func sizeAttribute(_ e: AXUIElement) -> CGSize? {
+        var v: CFTypeRef?
+        var z = CGSize.zero
+        guard AXUIElementCopyAttributeValue(e, kAXSizeAttribute as CFString, &v) == .success, let v,
+              CFGetTypeID(v) == AXValueGetTypeID(), AXValueGetValue(v as! AXValue, .cgSize, &z) else { return nil }
+        return z
     }
 
     // MARK: notification
@@ -174,7 +198,10 @@ final class FocusReader {
             log("focus: could not watch focus changes")
             return
         }
-        let box = Unmanaged.passRetained(Box { [weak self] in self?.onKeyboardChanged() })
+        let box = Unmanaged.passRetained(Box { [weak self] in
+            guard let self, !self.isStopped else { return }
+            self.onKeyboardChanged()
+        })
         let app = AXUIElementCreateApplication(pid)
         guard AXObserverAddNotification(obs, app, kAXFocusedUIElementChangedNotification as CFString,
                                         box.toOpaque()) == .success else {

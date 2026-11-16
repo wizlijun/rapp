@@ -114,28 +114,29 @@ final class FocusSession {
 
     private func ask(_ q: FocusTracker.Query, generation: Int) {
         guard let reader, let w = window else { return }
-        reader.query(q, window: w, display: display) { [weak self] result in
-            self?.queue.async { [weak self] in self?.answered(q, generation: generation, result) }
+        reader.query(q, window: w, display: display) { [weak self] reading in
+            self?.queue.async { [weak self] in self?.answered(q, generation: generation, reading) }
         }
     }
 
-    private func answered(_ q: FocusTracker.Query, generation: Int, _ result: Result<FocusReader.Chain, PanelMiss>) {
+    private func answered(_ q: FocusTracker.Query, generation: Int, _ reading: FocusReader.Reading) {
         guard !stopped, let w = window else { return }
         let size = CGSize(width: CGFloat(w.rect.w), height: CGFloat(w.rect.h))
         let picked: Result<PanelPick, PanelMiss>
-        switch result {
+        // depth= is the layers walked, for a pick, a miss and a block alike.
+        switch reading.result {
         case .failure(let miss):
             picked = .failure(miss)
-            found = Found(start: "-", picked: miss.rawValue)
+            found = Found(start: "-", picked: miss.rawValue, depth: reading.walked, share: 0, ms: reading.ms)
         case .success(let chain):
             picked = FocusPane.panel(chain: chain.rects, window: size)
             let start = chain.roles.first ?? "-"
             switch picked {
             case .success(let p):
                 found = Found(start: start, picked: chain.roles[min(p.depth, chain.roles.count - 1)],
-                              depth: p.depth, share: p.share, ms: chain.ms)
+                              depth: reading.walked, share: p.share, ms: reading.ms)
             case .failure(let miss):
-                found = Found(start: start, picked: miss.rawValue, depth: chain.roles.count, share: 0, ms: chain.ms)
+                found = Found(start: start, picked: miss.rawValue, depth: reading.walked, share: 0, ms: reading.ms)
             }
         }
         dispatch(tracker.result(q, generation: generation, picked, now: uptimeSeconds()))

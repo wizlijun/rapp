@@ -14,8 +14,7 @@ import json, os, select, shutil, signal, socket, struct, subprocess, sys, tempfi
 
 TOKEN = "runtest123"
 APP = "com.apple.calculator"
-HELLO, READY, ERROR, FRAME, MOUSE, SET_STREAM, FOCUS_REGION = 1, 2, 3, 4, 7, 11, 36
-MOVE, LEFT = 3, 0
+HELLO, READY, ERROR, SET_STREAM, FOCUS_REGION = 1, 2, 3, 11, 36
 
 
 def msg(mtype, payload=b""):
@@ -34,11 +33,6 @@ def hello(version=12, token=TOKEN):
 def set_stream(flags):
     # mode 2 (color16), fps 15, density 1.0, flag byte: bit0 pinned, bit1 focus
     return msg(SET_STREAM, bytes([2, 15]) + struct.pack("<f", 1.0) + bytes([flags]))
-
-
-def mouse_move():
-    # kind, button, window, x, y, clickCount; window 0 and a harmless point, dropped by the host anyway
-    return msg(MOUSE, bytes([MOVE, LEFT]) + struct.pack("<Iff", 0, 10.0, 10.0) + bytes([0]))
 
 
 def text_of(p):
@@ -79,33 +73,6 @@ def read_until(sock, wanted, timeout=15):
             raise AssertionError(f"host sent error {text_of(p)!r}")
         if time.time() > end:
             raise TimeoutError(f"no message of type {wanted}")
-
-
-def expect_closed(sock, timeout=5):
-    end = time.time() + timeout
-    while time.time() < end:
-        try:
-            if not select.select([sock], [], [], 0.2)[0]:
-                continue
-            if not sock.recv(65536):
-                return
-        except (ConnectionResetError, OSError):
-            return
-    raise AssertionError("connection was not closed")
-
-
-def watch(sock, seconds):
-    """Reads for `seconds`; returns (set of message types seen, whether the host closed it)."""
-    seen, end = set(), time.time() + seconds
-    while time.time() < end:
-        try:
-            t, _ = read_msg(sock, max(0.2, end - time.time()))
-            seen.add(t)
-        except TimeoutError:
-            break
-        except (EOFError, OSError):
-            return seen, True
-    return seen, False
 
 
 def connect(port):
@@ -205,7 +172,9 @@ def main():
 
         def off():
             sock.sendall(set_stream(0))
-            time.sleep(0.5)  # the host handles it; a message already in flight is not a failure
+            # A focusRegion already in flight when the host handles the bit is legitimate: ignore type 36
+            # for the first 0.3 s, then none may arrive for 3 s, and the host must not close.
+            drain(sock, 0.3)
             seen = watch_types(sock, 3)
             assert FOCUS_REGION not in seen, "focusRegion arrived after the focus bit went off"
             return f"none in 3 s (types seen: {sorted(seen)})"
@@ -254,13 +223,23 @@ def main():
     print("PASS")
 
 
+def drain(sock, seconds):
+    end = time.time() + seconds
+    while time.time() < end:
+        try:
+            read_msg(sock, max(0.1, end - time.time()))
+        except TimeoutError:
+            break
+        # EOFError/OSError propagate: the host must not close here
+
+
 def watch_types(sock, seconds):
     seen, end = set(), time.time() + seconds
     while time.time() < end:
         try:
             t, _ = read_msg(sock, max(0.2, end - time.time()))
             seen.add(t)
-        except (TimeoutError, EOFError, OSError):
+        except TimeoutError:
             break
     return seen
 
