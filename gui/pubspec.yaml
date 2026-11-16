@@ -25,3 +25,4 @@ flutter:
     - assets/tray_icon.png
     - assets/app_profiles.json
     - assets/themes/
+    - assets/net/

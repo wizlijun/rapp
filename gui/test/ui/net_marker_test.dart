@@ -1,6 +1,5 @@
-import 'dart:ui' as ui;
-
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/ui/net_marker.dart';
@@ -9,20 +8,22 @@ import 'package:rapp/ui/tokens.dart';
 import 'helpers.dart';
 
 void main() {
-  test('the four levels draw four different lines; only down is dashed and crossed', () {
-    final lines = NetLevel.values.map(netLine).toList();
-    for (var i = 0; i < lines.length; i++) {
-      for (var j = i + 1; j < lines.length; j++) {
-        expect(lines[i].points, isNot(equals(lines[j].points)), reason: '${NetLevel.values[i]} vs ${NetLevel.values[j]}');
-      }
-    }
+  test('each level has its own mark: cheetah, rabbit, tortoise, cracked egg', () {
+    final assets = NetLevel.values.map(netAsset).toList();
+    expect(assets, [
+      'assets/net/strong.png',
+      'assets/net/ok.png',
+      'assets/net/weak.png',
+      'assets/net/down.png',
+    ]);
+    expect(assets.toSet(), hasLength(NetLevel.values.length));
+  });
+
+  testWidgets('every level is in the asset bundle at 1x, 2x and 3x', (tester) async {
     for (final l in NetLevel.values) {
-      final line = netLine(l);
-      expect(line.dashed, l == NetLevel.down, reason: '$l');
-      expect(line.crossed, l == NetLevel.down, reason: '$l');
-      for (final p in line.points) {
-        expect(p.dx, inInclusiveRange(0, 1));
-        expect(p.dy, inInclusiveRange(0, 1));
+      for (final name in [netAsset(l), netAsset(l).replaceFirst('net/', 'net/2.0x/'), netAsset(l).replaceFirst('net/', 'net/3.0x/')]) {
+        final data = await rootBundle.load(name);
+        expect(data.lengthInBytes, greaterThan(0), reason: name);
       }
     }
   });
@@ -51,51 +52,33 @@ void main() {
     expect(netTooltip(const NetStatus(NetLevel.strong, null, 0)), '本机网络 · 强 · 丢包 0%');
   });
 
-  testWidgets('the line alone, no round trip; the words are its hover', (tester) async {
+  testWidgets('the mark alone, no round trip; the words are its hover', (tester) async {
     const n = NetStatus(NetLevel.strong, 42, 0);
     await tester.pumpWidget(wrap(const NetMarker(net: n)));
-    expect(find.byKey(const Key('net-line')), findsOneWidget);
+    expect(find.byKey(const Key('net-mark')), findsOneWidget);
     expect(find.text('42ms'), findsNothing);
     expect(tester.getSize(find.byKey(const Key('net-marker'))).width, NetMarker.width);
     expect(tester.getSemantics(find.byKey(const Key('net-marker'))).label, netTooltip(n));
     expect(find.byTooltip(netTooltip(n)), findsOneWidget);
   });
 
-  testWidgets('every level paints without error', (tester) async {
+  testWidgets('the mark keeps its whole 28×14 canvas and is tinted as a template', (tester) async {
+    late RappTokens t;
+    late ColorScheme cs;
     for (final l in NetLevel.values) {
-      await tester.pumpWidget(wrap(NetMarker(net: NetStatus(l, 500, 0.2))));
-      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(wrap(Builder(builder: (context) {
+        t = RappTokens.of(context);
+        cs = Theme.of(context).colorScheme;
+        return NetMarker(net: NetStatus(l, 500, 0.2));
+      })));
+      expect(tester.takeException(), isNull, reason: '$l');
+      final img = tester.widget<Image>(find.byKey(const Key('net-mark')));
+      expect((img.image as AssetImage).assetName, netAsset(l), reason: '$l');
+      expect(img.color, netColor(l, t, cs), reason: '$l');
+      expect(img.colorBlendMode ?? BlendMode.srcIn, BlendMode.srcIn, reason: '$l');
+      // No crop, no stretch: the canvas is the art's own size, drawn whole.
+      expect(img.fit, isNull, reason: '$l');
+      expect(tester.getSize(find.byKey(const Key('net-mark'))), const Size(28, 14), reason: '$l');
     }
   });
-
-  test('the gap under the cross is cleared inside its own layer, never through the bar', () {
-    for (final l in NetLevel.values) {
-      final c = _RecordingCanvas();
-      NetLinePainter(netLine(l), const Color(0xff00ff00)).paint(c, const Size(24, 14));
-      expect(c.clearOutsideLayer, isFalse, reason: '$l');
-      expect(c.depth, 0, reason: '$l: every saveLayer restored');
-    }
-  });
-}
-
-class _RecordingCanvas implements Canvas {
-  int depth = 0;
-  bool clearOutsideLayer = false;
-
-  void _check(Paint p) {
-    if (p.blendMode == ui.BlendMode.clear && depth == 0) clearOutsideLayer = true;
-  }
-
-  @override
-  void saveLayer(Rect? bounds, Paint paint) => depth++;
-  @override
-  void restore() => depth--;
-  @override
-  void drawRect(Rect rect, Paint paint) => _check(paint);
-  @override
-  void drawLine(Offset p1, Offset p2, Paint paint) => _check(paint);
-  @override
-  void drawPath(Path path, Paint paint) => _check(paint);
-  @override
-  dynamic noSuchMethod(Invocation invocation) => null;
 }

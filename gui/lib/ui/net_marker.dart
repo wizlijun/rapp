@@ -1,8 +1,7 @@
-// The top bar's network marker (spec 2026-11-14-rapp-network-status §4.1): a pulse line and the
-// round trip to the relay, left of the traffic label. Shape and colour both tell the four levels
-// apart, so the shape alone does for colour-blind eyes; nothing about it looks like a wifi fan.
-import 'dart:math' as math;
-
+// The top bar's network marker (spec 2026-11-14-rapp-network-status §4.1): the level's mark, left
+// of the traffic label. The four marks are four animals of their own speed — cheetah, rabbit,
+// tortoise, and a cracked egg for a link that never hatched — so the shape alone tells the levels
+// apart without colour, and nothing about it looks like a wifi fan.
 import 'package:flutter/material.dart';
 
 import '../hub_client.dart';
@@ -19,31 +18,10 @@ String netWord(NetLevel l) => switch (l) {
       NetLevel.down => '断开',
     };
 
-/// The line in a 1×1 box (x right, y down, 0.5 the baseline): strong one small beat, ok a
-/// taller up-and-down beat, weak jagged all along, down a dashed flat line crossed out.
-typedef NetLine = ({List<Offset> points, bool dashed, bool crossed});
-
-NetLine netLine(NetLevel l) => switch (l) {
-      NetLevel.strong => (
-          points: const [Offset(0, .5), Offset(.4, .5), Offset(.5, .25), Offset(.6, .5), Offset(1, .5)],
-          dashed: false,
-          crossed: false,
-        ),
-      NetLevel.ok => (
-          points: const [Offset(0, .5), Offset(.25, .5), Offset(.35, .15), Offset(.5, .85), Offset(.6, .5), Offset(1, .5)],
-          dashed: false,
-          crossed: false,
-        ),
-      NetLevel.weak => (
-          points: const [
-            Offset(0, .5), Offset(.1, .1), Offset(.22, .9), Offset(.34, .1), Offset(.46, .9), //
-            Offset(.58, .1), Offset(.7, .9), Offset(.82, .1), Offset(.94, .9), Offset(1, .5),
-          ],
-          dashed: false,
-          crossed: false,
-        ),
-      NetLevel.down => (points: const [Offset(0, .5), Offset(1, .5)], dashed: true, crossed: true),
-    };
+/// The level's mark: a 28×14 pt black-on-transparent PNG in `assets/net/`, with 2.0x and 3.0x
+/// variants beside it, drawn as a template image (tinted by [netColor], alpha kept). The art is
+/// optically sized inside the one canvas, so it is never cropped, stretched or scaled on its own.
+String netAsset(NetLevel l) => 'assets/net/${l.name}.png';
 
 /// Strong in the lamps' on colour, ok in the text colour, weak in the warning colour (the accent, as the
 /// lamps use it), down in the theme's error colour.
@@ -66,7 +44,7 @@ String netTooltip(NetStatus n, {String? path}) {
   return parts.join(' · ') + (off ? '\n当前会话走${routeWord(path)}，不经过中继' : '');
 }
 
-/// The line alone; the words (the tooltip's) are in its hover and atop the traffic menu.
+/// The mark alone; the words (the tooltip's) are in its hover and atop the traffic menu.
 class NetMarker extends StatelessWidget {
   const NetMarker({super.key, required this.net, this.path});
 
@@ -75,7 +53,8 @@ class NetMarker extends StatelessWidget {
   /// The current session's path, for the tooltip.
   final String? path;
 
-  static const lineSize = Size(28, 14);
+  /// The mark's canvas, the same for all four levels.
+  static const markSize = Size(28, 14);
 
   /// Width the marker takes in the top bar.
   static const width = 40.0;
@@ -95,68 +74,19 @@ class NetMarker extends StatelessWidget {
           width: width,
           padding: const EdgeInsets.symmetric(horizontal: 6),
           alignment: Alignment.centerLeft,
-          child: CustomPaint(
-            key: const Key('net-line'),
-            size: lineSize,
-            painter: NetLinePainter(netLine(net.level), color),
+          child: Image.asset(
+            netAsset(net.level),
+            key: const Key('net-mark'),
+            width: markSize.width,
+            height: markSize.height,
+            // Template rendering: the black art takes the level's colour, the transparent ground
+            // stays clear, so it sits right on a light or a dark bar.
+            color: color,
+            filterQuality: FilterQuality.medium,
+            excludeFromSemantics: true,
           ),
         ),
       ),
     );
   }
-}
-
-class NetLinePainter extends CustomPainter {
-  NetLinePainter(this.line, this.color);
-
-  final NetLine line;
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = 1.5
-      ..style = PaintingStyle.stroke
-      ..strokeJoin = StrokeJoin.round;
-    Offset at(Offset p) => Offset(p.dx * size.width, p.dy * size.height);
-    final pts = line.points.map(at).toList();
-    // The ✕ clears a gap in the line: in a layer of its own, or the clear would erase the bar.
-    if (line.crossed) canvas.saveLayer(Offset.zero & size, Paint());
-    if (line.dashed) {
-      for (var i = 0; i + 1 < pts.length; i++) {
-        _dash(canvas, pts[i], pts[i + 1], paint);
-      }
-    } else {
-      final path = Path()..moveTo(pts.first.dx, pts.first.dy);
-      for (final p in pts.skip(1)) {
-        path.lineTo(p.dx, p.dy);
-      }
-      canvas.drawPath(path, paint);
-    }
-    if (line.crossed) {
-      final c = size.center(Offset.zero);
-      final r = size.height * .3;
-      final cross = Paint()
-        ..color = color
-        ..strokeWidth = 1.8;
-      // A clear gap under the ✕ so it reads apart from the dashes.
-      canvas.drawRect(Rect.fromCircle(center: c, radius: r + 1.5), Paint()..blendMode = BlendMode.clear);
-      canvas.drawLine(c + Offset(-r, -r), c + Offset(r, r), cross);
-      canvas.drawLine(c + Offset(-r, r), c + Offset(r, -r), cross);
-      canvas.restore();
-    }
-  }
-
-  void _dash(Canvas canvas, Offset a, Offset b, Paint paint) {
-    const on = 3.0, off = 2.5;
-    final len = (b - a).distance;
-    final dir = (b - a) / math.max(len, 1e-6);
-    for (var d = 0.0; d < len; d += on + off) {
-      canvas.drawLine(a + dir * d, a + dir * math.min(d + on, len), paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(NetLinePainter old) => old.line != line || old.color != color;
 }

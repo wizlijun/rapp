@@ -456,7 +456,7 @@ class _StreamMenuState extends State<StreamMenu> {
     );
   }
 
-  /// What the top bar's bars and network line stand for, atop the traffic menu: the rate and what is
+  /// What the top bar's bars and network mark stand for, atop the traffic menu: the rate and what is
   /// weak (not on a dead session), then the link to the relay ([netTooltip]'s lines).
   List<Widget> _statusRows(bool reduced) {
     final net = widget.net;
