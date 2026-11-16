@@ -70,12 +70,20 @@ fn find_unix(os: Os, env: &Env) -> Vec<Shell> {
     if !shells.iter().any(|s| s.name == "sh") {
         shells.push(Shell { name: "sh".into(), path: "/bin/sh".into(), default: false });
     }
-    let login = env.login.filter(|p| (env.is_exec)(p));
+    // A login shell counts when it runs, is a shell (listed in /etc/shells or a candidate by name), and is not one of
+    // the "this account has no shell" programs.
+    let login = env.login.filter(|p| {
+        let name = p.rsplit('/').next().unwrap_or(p);
+        (env.is_exec)(p) && (listed.contains(p) || names.contains(&name)) && !["nologin", "false", "true"].contains(&name)
+    });
     let default = match login {
         Some(p) => {
             let name = p.rsplit('/').next().unwrap_or(p);
             match shells.iter().position(|s| s.name == name) {
-                Some(i) => i,
+                Some(i) => {
+                    shells[i].path = p.into();
+                    i
+                }
                 None => {
                     shells.push(Shell { name: name.into(), path: p.into(), default: false });
                     shells.len() - 1
@@ -240,9 +248,39 @@ mod tests {
 
     #[test]
     fn a_login_shell_outside_the_candidates_comes_first() {
-        let v = run(Os::Mac, "", "/bin", Some("/usr/local/bin/nu"), &["/usr/local/bin/nu", "/bin/zsh", "/bin/sh"]);
+        let v = run(
+            Os::Mac,
+            "/bin/sh\n/usr/local/bin/nu\n",
+            "/bin",
+            Some("/usr/local/bin/nu"),
+            &["/usr/local/bin/nu", "/bin/zsh", "/bin/sh"],
+        );
         assert_eq!(v[0], sh("nu", "/usr/local/bin/nu", true));
         assert_eq!(names(&v), ["nu", "zsh", "sh"]);
+    }
+
+    #[test]
+    fn a_login_shell_that_is_not_a_shell_is_not_the_default() {
+        for login in ["/usr/sbin/nologin", "/usr/bin/false", "/bin/true"] {
+            // Even when /etc/shells lists it.
+            let etc = format!("/bin/sh\n{login}\n");
+            let v = run(Os::Linux, &etc, "/bin", Some(login), &[login, "/bin/zsh", "/bin/sh"]);
+            assert_eq!(v[0], sh("sh", "/bin/sh", true), "{login}");
+            assert!(v.iter().all(|s| s.path != login), "{login}");
+        }
+    }
+
+    #[test]
+    fn an_unlisted_login_shell_outside_the_candidates_is_not_the_default() {
+        let v = run(Os::Mac, "/bin/sh\n", "/bin", Some("/opt/x/weird"), &["/opt/x/weird", "/bin/sh"]);
+        assert_eq!(v[0], sh("sh", "/bin/sh", true));
+        assert_eq!(names(&v), ["sh"]);
+    }
+
+    #[test]
+    fn a_login_shell_matched_by_name_keeps_its_own_path() {
+        let v = run(Os::Mac, "", "/bin", Some("/opt/homebrew/bin/bash"), &["/opt/homebrew/bin/bash", "/bin/bash", "/bin/sh"]);
+        assert_eq!(v[0], sh("bash", "/opt/homebrew/bin/bash", true));
     }
 
     #[test]
