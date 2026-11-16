@@ -1063,7 +1063,9 @@ fn cli_local(svc: &TestService) -> tempfile::TempDir {
 
 /// Runs `rapp-cli args` against `local`, feeding `stdin` and then closing it.
 async fn cli(local: &Path, args: &[&str], stdin: &[u8]) -> std::process::Output {
-    let mut child = tokio::process::Command::new(cli_bin())
+    // A cold build must not stop the single-thread runtime's relay keepalives.
+    let bin = tokio::task::spawn_blocking(cli_bin).await.unwrap();
+    let mut child = tokio::process::Command::new(bin)
         .args(args)
         .env("RAPP_LOCAL", local)
         .stdin(std::process::Stdio::piped())
