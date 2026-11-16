@@ -994,6 +994,7 @@ class MainState extends ChangeNotifier {
       final holder = e is ClosedEvent ? _recordOfLastSid(e.sid) : null;
       if (holder != null) {
         holder.lastSid = null; // the runner closed it itself: nothing left to close or restore
+        holder.frozen = false; // nothing frozen is left to swap out
         _dropOld(e.sid, holder.sid);
         final start = _starts.remove(e.sid);
         if (start != null) resources.linkDown(start); // what it was still sending ends 没传完
@@ -1135,7 +1136,8 @@ class MainState extends ChangeNotifier {
     final rs = sid == null ? null : remote[sid];
     r.phase = Phase.disconnected;
     r.reason = r.userDisconnect ? 'user' : raw;
-    r.frozen = autoReconnects(r.reason);
+    // Frozen only over something on show: a first open that failed has no picture to keep.
+    r.frozen = autoReconnects(r.reason) && rs != null;
     if (r.frozen) rs?.policy.cancel();
     r.seq = ++_seq;
     if (rs != null) {
@@ -1501,6 +1503,7 @@ class MainState extends ChangeNotifier {
     remote[s.sid] = rs;
     rs.addListener(_syncCompose);
     r.phase = Phase.live;
+    if (r.lastSid == null) r.frozen = false; // no old picture to swap out: nothing stays frozen
     final c = r.choice;
     try {
       final p = s.port, tk = s.token;

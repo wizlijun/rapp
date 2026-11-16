@@ -846,6 +846,78 @@ void main() {
       expect(es.currentRecord!.phase, Phase.disconnected);
     });
 
+    testWidgets('a first open that fails for a network reason, then reconnects, is not frozen', (tester) async {
+      await tester.pumpWidget(wrap(embedded()));
+      await tester.runAsync(() async {
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') t.emit({'event': 'error', 'req': m['req'], 'error': 'cannot reach the host'});
+        };
+        es.openOrSwitch('111', 'Safari', 'Safari');
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      await tester.pump();
+      expect(es.currentRecord!.phase, Phase.disconnected);
+      expect(es.currentRecord!.frozen, false);
+      await tester.runAsync(() async {
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            t.emit({
+              'event': 'opened', 'sid': 11, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+              'port': 5011, 'token': 'tk', 'req': m['req'],
+            });
+          }
+        };
+        es.reconnectCurrent();
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      await tester.pump();
+      port.emit(const ReadyEvent(11, 'Safari'));
+      port.emit(WindowsEvent(11, [rw(5, 400, 328)]));
+      await tester.pump();
+      await tester.pump();
+      expect(es.currentRecord!.phase, Phase.live);
+      expect(es.currentRecord!.frozen, false);
+      expect(es.sendBlocked(11), false);
+      expect(find.byKey(const Key('offline-bar')), findsNothing);
+      expect(tester.widget<Picture>(find.byType(Picture)).frozen, false);
+      es.currentRemote!.composer.open = true;
+      await tester.pump();
+      await tester.pump();
+      await tester.enterText(find.byKey(const Key('composer-field')), 'ls');
+      await tester.pump();
+      expect(tester.widget<RappButton>(find.byKey(const Key('composer-send'))).onPressed, isNotNull);
+    });
+
+    testWidgets('the old sid closing mid-reconnect leaves no frozen flag behind', (tester) async {
+      await shown(tester);
+      port.emit(const DisconnectedEvent(1, 'connection closed'));
+      await tester.pump();
+      await tester.runAsync(() async {
+        t.onSend = (m) {
+          if (m['cmd'] == 'open') {
+            t.emit({
+              'event': 'opened', 'sid': 11, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+              'port': 5011, 'token': 'tk', 'req': m['req'],
+            });
+          }
+        };
+        es.reconnectCurrent();
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      await tester.pump();
+      port.emit(const ClosedEvent(1, 'connection closed'));
+      await tester.pump();
+      expect(es.currentRecord!.lastSid, isNull);
+      expect(es.currentRecord!.frozen, false);
+      expect(es.sendBlocked(11), false);
+    });
+
     testWidgets('reconnect is off when the hub is gone', (tester) async {
       await shown(tester);
       port.emit(const DisconnectedEvent(1, 'user'));

@@ -14,6 +14,7 @@ import 'package:rapp/term/term_model.dart';
 import 'package:rapp/term/term_session_port.dart';
 import 'package:rapp/term/term_stage.dart';
 import 'package:rapp/term/term_wire.dart';
+import 'package:rapp/ui/controls.dart' show RappButton;
 import 'package:rapp/ui/disconnected_stage.dart';
 import 'package:rapp/ui/lifecycle.dart' show Phase;
 import 'package:rapp/ui/main_state.dart';
@@ -541,6 +542,46 @@ void main() {
     await settle(tester);
     expect(find.byType(DisconnectedStage), findsOneWidget);
     expect(find.byKey(const Key('offline-bar')), findsNothing);
+  });
+
+  testWidgets('a terminal whose first open failed for a network reason is not frozen once it reconnects', (tester) async {
+    await tester.pumpWidget(wrap(window()));
+    final ok = t.onSend;
+    t.onSend = (m) {
+      if (m['cmd'] == 'open') t.emit({'event': 'error', 'req': m['req'], 'error': 'cannot reach the host'});
+    };
+    await tester.runAsync(() async {
+      s.openOrSwitch('111', app, 'work');
+      for (var i = 0; i < 4; i++) {
+        await flush();
+      }
+    });
+    await tester.pump();
+    expect(s.currentRecord!.phase, Phase.disconnected);
+    expect(s.currentRecord!.frozen, isFalse);
+    t.onSend = ok;
+    term.paneLists[1] = two;
+    await tester.runAsync(() async {
+      s.reconnectCurrent();
+      for (var i = 0; i < 4; i++) {
+        await flush();
+      }
+    });
+    term.play(const ReadyEvent(1, 'claude'));
+    term.play(windowsOf(1, two));
+    term.play(const TrafficEvent(1, 0, 1));
+    await settle(tester);
+    expect(s.currentRecord!.phase, Phase.live);
+    expect(s.currentRecord!.frozen, isFalse);
+    expect(s.sendBlocked(1), isFalse);
+    expect(find.byKey(const Key('offline-bar')), findsNothing);
+    expect(tester.widget<TermStage>(find.byType(TermStage)).frozen, isFalse);
+    await tester.tap(find.byKey(const Key('composer-open')));
+    await tester.pump();
+    await tester.pump();
+    await tester.enterText(find.byKey(const Key('composer-field')), 'ls');
+    await tester.pump();
+    expect(tester.widget<RappButton>(find.byKey(const Key('composer-send'))).onPressed, isNotNull);
   });
 
   testWidgets('a reconnected terminal takes the stage again and is viewed', (tester) async {
