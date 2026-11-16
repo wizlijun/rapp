@@ -1,7 +1,5 @@
 //! Forward pacing (spec §5.3): a delay-based rate controller. Pure logic, no clocks or I/O;
 //! time comes in as the `now` argument.
-// Task 2/3 build the pacer and wire it into the relay link; until then only tests use this.
-#![cfg_attr(not(test), allow(dead_code))]
 
 use std::collections::VecDeque;
 use std::future::Future;
@@ -183,17 +181,24 @@ impl Pacer {
         Box::new(Paced { inner: pipe, pacer: self.clone(), wait: None })
     }
 
+    #[cfg(test)]
     pub(crate) fn rate_bps(&self) -> Option<u64> {
         self.state.lock().unwrap().rate
     }
 
-    /// A new relay connection: forget the base and the rate.
-    pub(crate) fn reset(&self) {
+    /// A new relay connection: forget the base and the rate. `Some(Off)` when pacing was on, so
+    /// every `On` is still paired with an `Off` across reconnects.
+    pub(crate) fn reset(&self, now: Instant) -> Option<PaceEvent> {
         let mut st = self.state.lock().unwrap();
+        let ev = st.rate.map(|_| PaceEvent::Off {
+            kbps: st.last_rate / 1000,
+            secs: st.since.map_or(0, |s| now.saturating_duration_since(s).as_secs()),
+        });
         st.control = Control::new();
         st.rate = None;
         st.history.clear();
         st.since = None;
+        ev
     }
 
     pub(crate) fn tick(&self, now: Instant, rtt: Duration) -> Option<PaceEvent> {
@@ -277,10 +282,13 @@ impl Pacer {
     }
 }
 
+/// Sleep until the bucket has a chunk, or until the last session guard drops.
+type Waiting = (Pin<Box<Sleep>>, Pin<Box<OwnedNotified>>);
+
 struct Paced {
     inner: rapp_conn::Pipe,
     pacer: Arc<Pacer>,
-    wait: Option<(Pin<Box<Sleep>>, Pin<Box<OwnedNotified>>)>,
+    wait: Option<Waiting>,
 }
 
 impl AsyncRead for Paced {
@@ -541,8 +549,9 @@ mod tests {
         let _g = p.session();
         p.tick(t0, ms(30));
         assert!(p.rate_bps().is_some());
-        p.reset();
+        assert_eq!(p.reset(t0 + ms(2500)), Some(PaceEvent::Off { kbps: 256, secs: 2 }));
         assert_eq!(p.rate_bps(), None);
+        assert_eq!(p.reset(t0 + ms(2600)), None);
         assert_eq!(p.tick(t0 + ms(100), ms(80)), Some(PaceEvent::On { kbps: 256, base_ms: 80 }));
     }
 }

@@ -772,6 +772,7 @@ async fn service_with_a_data_dir_commits_its_device_json() {
         forward_sum_every: Duration::from_secs(600),
         forward_priority: rapp_conn::relay::FORWARD_PRIORITY,
         channels: true,
+        pacing: true,
     })
     .await
     .unwrap();

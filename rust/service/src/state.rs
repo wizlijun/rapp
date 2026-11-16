@@ -102,6 +102,8 @@ pub struct State {
     pub forward_priority: i32,
     /// See `Opts::channels`.
     pub channels: bool,
+    /// Gives forwards way on the relay connection while a session runs (spec 5.3).
+    pub(crate) pacer: Arc<crate::pace::Pacer>,
     /// Sends requests to other devices (LAN first, then the relay).
     pub outbound: rapp_conn::dial::Outbound,
 }
