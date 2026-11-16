@@ -400,7 +400,8 @@ class MainState extends ChangeNotifier {
   }
 
   /// Ctrl+Enter: the panel opens with the caret; from the picture the caret comes back to the
-  /// editor; from the editor the keys go to the picture (the panel stays).
+  /// editor; from the editor the keys go to the picture (the panel stays). A frozen picture takes
+  /// no keys: the caret stays in the editor (offline-freeze spec).
   void composerKey() {
     final rs = currentRemote;
     if (overview || rs == null || !rs.composerAllowed) return; // no panel in the overview to take the caret
@@ -410,7 +411,7 @@ class MainState extends ChangeNotifier {
       c.wantFocus();
     } else if (!c.editorFocused) {
       c.wantFocus();
-    } else {
+    } else if (!sendBlocked(rs.sid)) {
       c.releaseFocus();
       if (!rs.detached) focusPicture(rs.sid);
     }

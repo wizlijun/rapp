@@ -796,6 +796,19 @@ void main() {
         expect(text(tester), 'git push');
       });
 
+      testWidgets('Ctrl+Enter from the editor while frozen keeps the caret in the panel', (tester) async {
+        await dropWithDraft(tester);
+        await tester.showKeyboard(field);
+        await tester.pump();
+        expect(tester.widget<TextField>(field).focusNode!.hasPrimaryFocus, isTrue);
+        es.composerKey();
+        await tester.pump();
+        await tester.pump();
+        expect(tester.widget<TextField>(field).focusNode!.hasPrimaryFocus, isTrue);
+        expect(es.currentRemote!.composer.open, isTrue);
+        expect(es.pictureFocused, isNull);
+      });
+
       int opens() => t.sent.where((m) => m['cmd'] == 'open').length;
 
       /// The bar after a 停止: frozen still, 重连 on it, the network words without 正在重连, no new try.
