@@ -35,6 +35,109 @@ RemoteWindow win(int id, WindowKind kind) => RemoteWindow(
     );
 
 void main() {
+  group('focus', () {
+    FocusRegionEvent ev(int window) => FocusRegionEvent(1, window, const [Rect.fromLTWH(0, 0, 10, 10)]);
+
+    test('the event is kept; linkDown and clearFocus drop it and notify', () {
+      final rs = RemoteSession(1, 'Calc')..focusWanted = true;
+      rs.apply(WindowsEvent(1, [w(7)]));
+      var n = 0;
+      rs.addListener(() => n++);
+      expect(rs.focus, isNull);
+      rs.apply(ev(7));
+      expect(rs.focus!.window, 7);
+      expect(rs.focus!.rects, const [Rect.fromLTWH(0, 0, 10, 10)]);
+      expect(n, 1);
+      rs.linkDown();
+      expect(rs.focus, isNull);
+      rs.focusWanted = true;
+      rs.apply(ev(7));
+      n = 0;
+      rs.clearFocus();
+      expect(rs.focus, isNull);
+      expect(n, 1);
+      rs.clearFocus();
+      expect(n, 1, reason: 'nothing to clear, nothing to tell');
+    });
+
+    test('focus cleared when its window leaves the table', () {
+      final rs = RemoteSession(1, 'Calc')..focusWanted = true;
+      rs.apply(WindowsEvent(1, [w(7)]));
+      rs.apply(ev(7));
+      expect(rs.focus, isNotNull);
+      rs.apply(WindowsEvent(1, [w(8)]));
+      expect(rs.focus, isNull);
+    });
+
+    RemoteWindow sized(int id, Rect r) => RemoteWindow(
+          id: id,
+          parent: 0,
+          kind: WindowKind.normal,
+          title: 'w$id',
+          rect: r,
+          titleBar: 28,
+          resizable: true,
+          focused: true,
+          texture: id,
+          visible: const Rect.fromLTWH(0, 0, 1, 1),
+        );
+
+    test('focus cleared, and listeners told, when its window is resized', () {
+      final rs = RemoteSession(1, 'Calc')..focusWanted = true;
+      rs.apply(WindowsEvent(1, [sized(7, const Rect.fromLTWH(0, 0, 800, 600))]));
+      rs.apply(ev(7));
+      expect(rs.focus, isNotNull);
+      var n = 0;
+      rs.addListener(() => n++);
+      rs.apply(WindowsEvent(1, [sized(7, const Rect.fromLTWH(0, 0, 900, 600))]));
+      expect(rs.focus, isNull);
+      expect(n, greaterThan(0));
+    });
+
+    test('focus kept when its window only moves', () {
+      final rs = RemoteSession(1, 'Calc')..focusWanted = true;
+      rs.apply(WindowsEvent(1, [sized(7, const Rect.fromLTWH(0, 0, 800, 600))]));
+      rs.apply(ev(7));
+      rs.apply(WindowsEvent(1, [sized(7, const Rect.fromLTWH(50, 40, 800, 600))]));
+      expect(rs.focus, isNotNull);
+    });
+  });
+
+  group('late focus events', () {
+    FocusRegionEvent ev(int window) => FocusRegionEvent(1, window, const [Rect.fromLTWH(0, 0, 10, 10)]);
+
+    test('an event after leaving smart is ignored, and leaving clears the stored one', () {
+      final rs = RemoteSession(1, 'Calc')..focusWanted = true;
+      rs.apply(WindowsEvent(1, [w(7)]));
+      rs.apply(ev(7));
+      expect(rs.focus, isNotNull);
+      rs.focusWanted = false;
+      expect(rs.focus, isNull);
+      rs.apply(ev(7));
+      expect(rs.focus, isNull);
+    });
+
+    test('window 0 with no rects replaces an older focus and notifies', () {
+      final rs = RemoteSession(1, 'Calc')..focusWanted = true;
+      rs.apply(WindowsEvent(1, [w(7)]));
+      rs.apply(ev(7));
+      var n = 0;
+      rs.addListener(() => n++);
+      rs.apply(FocusRegionEvent(1, 0, const []));
+      expect(rs.focus!.window, 0);
+      expect(rs.focus!.rects, isEmpty);
+      expect(n, 1);
+    });
+
+    test('an event before its window is in the table is kept, and the table that lists it keeps it', () {
+      final rs = RemoteSession(1, 'Calc')..focusWanted = true;
+      rs.apply(ev(7));
+      expect(rs.focus!.window, 7);
+      rs.apply(WindowsEvent(1, [w(7)]));
+      expect(rs.focus!.window, 7);
+    });
+  });
+
   test('weak event sets RemoteSession.weak', () {
     final rs = RemoteSession(1, 'Calc');
     var n = 0;

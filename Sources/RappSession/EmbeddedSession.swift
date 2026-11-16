@@ -47,6 +47,8 @@ public final class EmbeddedSession {
     private var sentStream: (mode: Mode, fps: UInt8, density: Float)?
     private var pinned = false
     private var sentPinned = false
+    private var focus = false
+    private var sentFocus = false
     private var bytes = 0
     private var frames = 0
     /// Pings A to measure the whole path (spec 2026-11-14-rapp-network-status §3.3).
@@ -104,9 +106,9 @@ public final class EmbeddedSession {
         }
     }
 
-    public func setStream(mode: Mode, fps: UInt8, choice: DensityChoice, pinned: Bool = false) {
+    public func setStream(mode: Mode, fps: UInt8, choice: DensityChoice, pinned: Bool = false, focus: Bool = false) {
         run {
-            self.mode = mode; self.fps = fps; self.choice = choice; self.pinned = pinned
+            self.mode = mode; self.fps = fps; self.choice = choice; self.pinned = pinned; self.focus = focus
             self.sendStreamIfChanged()
         }
     }
@@ -295,6 +297,8 @@ public final class EmbeddedSession {
             onEvent?(.inputSource(id: id, name: name, ascii: ascii))
         case let .screenLocked(locked):
             onEvent?(.screenLocked(locked))
+        case let .focusRegion(window, rects):
+            onEvent?(.focusRegion(window: window, rects: rects))
         default:
             break
         }
@@ -313,10 +317,11 @@ public final class EmbeddedSession {
     private func sendStreamIfChanged() {
         guard !linkDown else { return }
         let next = (mode: mode, fps: fps, density: captureDensity(zoom: 1, backingScale: backingScale, choice: choice))
-        guard streamChanged(from: sentStream, to: next) || pinned != sentPinned else { return }
+        guard streamChanged(from: sentStream, to: next) || pinned != sentPinned || focus != sentFocus else { return }
         sentStream = next
         sentPinned = pinned
-        link.send(.setStream(mode: next.mode, fps: next.fps, density: next.density, pinned: pinned))
+        sentFocus = focus
+        link.send(.setStream(mode: next.mode, fps: next.fps, density: next.density, pinned: pinned, focus: focus))
     }
 }
 

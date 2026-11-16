@@ -12,6 +12,25 @@ Map<String, Object?> win({Object? kind = 'normal', Object? texture = 42}) => {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('focus event parses to rects; more than 3 or a bad rect drops the whole event', () {
+    final e = parseSessionEvent('focus', {
+      'sid': 1,
+      'window': 7,
+      'rects': [
+        [1.0, 2.0, 30.0, 40.0],
+        [0, 0, 5, 5],
+      ],
+    }) as FocusRegionEvent;
+    expect(e.sid, 1);
+    expect(e.window, 7);
+    expect(e.rects, [const Rect.fromLTWH(1, 2, 30, 40), const Rect.fromLTWH(0, 0, 5, 5)]);
+    expect((parseSessionEvent('focus', {'sid': 1, 'window': 7, 'rects': []}) as FocusRegionEvent).rects, isEmpty);
+    final four = [for (var i = 0; i < 4; i++) [0.0, 0.0, 1.0, 1.0]];
+    expect(parseSessionEvent('focus', {'sid': 1, 'window': 7, 'rects': four}), isNull);
+    expect(parseSessionEvent('focus', {'sid': 1, 'window': 7, 'rects': [[1.0, 2.0, 3.0]]}), isNull);
+    expect(parseSessionEvent('focus', {'sid': 1, 'rects': []}), isNull);
+  });
+
   test('parses windows and ignores junk', () {
     final e = parseSessionEvent('windows', {'sid': 1, 'windows': [win()]});
     final w = (e as WindowsEvent).windows.single;
@@ -211,12 +230,14 @@ void main() {
     port.resize(1, 7, 800, 600);
     port.setStream(1, 'duogray', 1, 'adaptive');
     port.setStream(1, 'duogray', 1, 'adaptive', pinned: true);
+    port.setStream(1, 'color16', 15, 'adaptive', focus: true);
     final pasted = await port.composerPaste(1);
     expect(pasted.blocks.single.n, 2);
-    expect(calls.map((c) => c.method), ['init', 'resize', 'set_stream', 'set_stream', 'composer_paste']);
+    expect(calls.map((c) => c.method), ['init', 'resize', 'set_stream', 'set_stream', 'set_stream', 'composer_paste']);
     expect(calls[1].arguments, {'sid': 1, 'window': 7, 'w': 800, 'h': 600});
     expect(calls[2].arguments, {'sid': 1, 'mode': 'duogray', 'fps': 1, 'density': 'adaptive'});
     expect(calls[3].arguments, {'sid': 1, 'mode': 'duogray', 'fps': 1, 'density': 'adaptive', 'pinned': true});
+    expect(calls[4].arguments, {'sid': 1, 'mode': 'color16', 'fps': 15, 'density': 'adaptive', 'focus': true});
 
     final got = <SessionEvent>[];
     final sub = port.events.listen(got.add);

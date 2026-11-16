@@ -162,6 +162,7 @@ class MainState extends ChangeNotifier {
       rs.setProfile(profiles.resolve(rs.appId));
       _syncHidden(rs);
     }
+    _applyFps();
     _entries = _mapEntries();
     unawaited(history.refresh());
     final old = oldRoot.endsWith('/') ? oldRoot : '$oldRoot/';
@@ -584,8 +585,12 @@ class MainState extends ChangeNotifier {
   /// spec 2026-11-14-rapp-network-status §6.1). A manual pick is the ceiling either way.
   bool get _pinned => !prefs.autoSaveTraffic;
 
-  /// The (mode, fps, density, pinned) last sent per started session, so nothing is sent twice.
-  final Map<Object, (String, int, String, bool)> _sentFps = {};
+  /// The (mode, fps, density, pinned, focus) last sent per started session, so nothing is sent twice.
+  final Map<Object, (String, int, String, bool, bool)> _sentFps = {};
+
+  /// Under 「智能」 A is asked for the focus region: not for a desktop session, and not for an app
+  /// whose profile turned the focus pane off.
+  bool _wantsFocus(RemoteSession rs, SessionRecord r) => rs.choice.smart && !isDesktopApp(r.app) && rs.profile.focusPane;
 
   /// Sends each started session's effective rate when it differs from the last one sent: the
   /// chosen rate on the stage or detached, 1 fps otherwise. `session.choice` is never changed.
@@ -605,11 +610,14 @@ class MainState extends ChangeNotifier {
       // Pinned when the global traffic preference pins it. For a non-desktop session a
       // manual pick is only a ceiling (not a pin); desktop screens, however, share a
       // manual choice across siblings, so there a manual pin does pin the stream.
-      final pin = _pinned || (isDesktopApp(r.app) && rs.streamPinned);
-      final now = (c.mode, fps, c.density, pin);
+      // 「智能」 always saves traffic itself: never pinned, a desktop's manual pick included.
+      final pin = !c.smart && (_pinned || (isDesktopApp(r.app) && rs.streamPinned));
+      final focus = _wantsFocus(rs, r);
+      rs.focusWanted = focus;
+      final now = (c.mode, fps, c.density, pin, focus);
       if (now == last) continue;
       _sentFps[rs.sid] = now;
-      portOf(rs.sid)!.setStream(rs.sid, c.mode, fps, c.density, pinned: pin);
+      portOf(rs.sid)!.setStream(rs.sid, c.mode, fps, c.density, pinned: pin, focus: focus);
     }
   }
 
@@ -1547,8 +1555,8 @@ class MainState extends ChangeNotifier {
     r.retry = null;
     _syncWatch(r.id);
     // start carries no pin: with automatic saving off, the first set_stream says so.
-    _sentFps[s.sid] = (c.mode, c.fps, c.density, false);
-    if (_pinned) _applyFps();
+    _sentFps[s.sid] = (c.mode, c.fps, c.density, false, false);
+    if (_pinned || _wantsFocus(rs, r)) _applyFps();
     if (!reconnect && !quiet) hint = '已打开 ${r.appName} @ ${deviceName(r.id)}';
     if (isDesktopScreen(r.app)) {
       final main = _records['${r.id}/desktop:'];
@@ -1863,6 +1871,7 @@ class MainState extends ChangeNotifier {
       rs.setProfile(profiles.resolve(rs.appId));
       _syncHidden(rs);
     }
+    _applyFps(); // focusPane may have changed
     if (profiles.problem == appsSaveProblem) hint = appsSaveProblem;
     notifyListeners();
   }

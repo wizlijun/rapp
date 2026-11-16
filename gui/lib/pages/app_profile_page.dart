@@ -103,6 +103,7 @@ class _AppProfilePageState extends State<AppProfilePage> {
       _draft.composer == null &&
       _draft.recordInput == null &&
       _draft.typeToCompose == null &&
+      _draft.focusPane == null &&
       _draft.input == null &&
       _draft.windows == null &&
       _draft.tested == null &&
@@ -270,6 +271,7 @@ class _AppProfilePageState extends State<AppProfilePage> {
     final composer = d.composer ?? b.composer;
     final recordInput = d.recordInput ?? b.recordInput;
     final typeToCompose = d.typeToCompose ?? b.typeToCompose;
+    final focusPane = d.focusPane ?? b.focusPane;
     final rules = _rules;
     return Scaffold(
       backgroundColor: t.bg,
@@ -334,6 +336,13 @@ class _AppProfilePageState extends State<AppProfilePage> {
                   grey: d.fps == null,
                   onChanged: (v) => d.fps = v),
               t),
+          Row(children: [
+            Text('智能时按焦点分区', style: TextStyle(color: d.focusPane == null ? t.muted : t.text)),
+            Switch(
+                key: const Key('focus-pane-switch'),
+                value: focusPane,
+                onChanged: (v) => _set(() => d.focusPane = v)),
+          ]),
           _label(t, '发送后'),
           _radio(t, '只贴，不按回车', AfterSend.none, afterSend, d.afterSend == null),
           _radio(t, '贴完按回车并收起输入板', AfterSend.pressReturn, afterSend, d.afterSend == null),

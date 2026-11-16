@@ -211,7 +211,7 @@ final class EmbeddedSessionTests: XCTestCase {
         let (s, q) = make(link) { _ in }
         s.setStream(mode: .duogray, fps: 2, choice: .saver1x, pinned: true)
         q.sync {}
-        guard case let .setStream(mode, fps, _, pinned)? = link.sent.last else { return XCTFail("sent \(link.sent)") }
+        guard case let .setStream(mode, fps, _, pinned, _)? = link.sent.last else { return XCTFail("sent \(link.sent)") }
         XCTAssertEqual(mode, .duogray); XCTAssertEqual(fps, 2); XCTAssertTrue(pinned)
         // Same stream, different pinned: sent again; identical: not.
         let n = link.sent.count
@@ -219,6 +219,29 @@ final class EmbeddedSessionTests: XCTestCase {
         XCTAssertEqual(link.sent.count, n)
         s.setStream(mode: .duogray, fps: 2, choice: .saver1x, pinned: false); q.sync {}
         XCTAssertEqual(link.sent.count, n + 1)
+    }
+
+    func testFocusReachesTheWire() {
+        let link = FakeLink()
+        let (s, q) = make(link) { _ in }
+        s.setStream(mode: .duogray, fps: 2, choice: .saver1x, pinned: false, focus: true)
+        q.sync {}
+        guard case let .setStream(_, _, _, _, focus)? = link.sent.last else { return XCTFail("sent \(link.sent)") }
+        XCTAssertTrue(focus)
+        let n = link.sent.count
+        s.setStream(mode: .duogray, fps: 2, choice: .saver1x, pinned: false, focus: true); q.sync {}
+        XCTAssertEqual(link.sent.count, n)
+        s.setStream(mode: .duogray, fps: 2, choice: .saver1x, pinned: false, focus: false); q.sync {}
+        XCTAssertEqual(link.sent.count, n + 1)
+    }
+
+    func testFocusRegionIsForwarded() {
+        let link = FakeLink()
+        var events: [SessionEvent] = []
+        let (_, q) = make(link) { events.append($0) }
+        let rects = [CanvasRect(x: 0.1, y: 0.2, w: 0.3, h: 0.4)]
+        link.feed(.focusRegion(window: 5, rects: rects)); q.sync {}
+        XCTAssertTrue(events.contains { if case .focusRegion(5, let r) = $0 { return r == rects } else { return false } })
     }
 
     func testInconsistentFrameClosesNotCrashes() throws {
@@ -398,7 +421,7 @@ final class EmbeddedSessionTests: XCTestCase {
         s.setStream(mode: .color16, fps: 1, choice: .adaptive)
         q.sync {}
         XCTAssertEqual(streams().count, 2)
-        guard case let .setStream(_, fps, _, _)? = streams().last else { return XCTFail() }
+        guard case let .setStream(_, fps, _, _, _)? = streams().last else { return XCTFail() }
         XCTAssertEqual(fps, 1)
     }
 

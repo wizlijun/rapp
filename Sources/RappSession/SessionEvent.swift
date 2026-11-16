@@ -80,6 +80,8 @@ public enum SessionEvent: Equatable {
     case inputSource(id: String, name: String, ascii: Bool)
     /// A's screen is locked (v10): input reaches only the lock screen.
     case screenLocked(Bool)
+    /// Which parts of a window have focus (v12); no rects means the whole window.
+    case focusRegion(window: UInt32, rects: [CanvasRect])
     /// The link dropped (or A sent garbage): the last pictures stay; `closed` follows when the GUI ends the session.
     case disconnected(reason: String)
     /// The session ended and its pictures are released.

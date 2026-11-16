@@ -25,6 +25,18 @@ Offset toRemote(Offset local, Rect fit, RemoteWindow w) => Offset(
       w.titleBar + (local.dy - fit.top) / fit.height * (w.rect.height - w.titleBar),
     );
 
+/// A rect in A's window (title bar included) as a rect on the stage: the exact inverse of [toRemote].
+Rect fromRemoteRect(Rect r, Rect fit, RemoteWindow w) {
+  final cw = w.rect.width, ch = w.rect.height - w.titleBar;
+  if (cw <= 0 || ch <= 0) return Rect.zero;
+  return Rect.fromLTRB(
+    fit.left + r.left / cw * fit.width,
+    fit.top + (r.top - w.titleBar) / ch * fit.height,
+    fit.left + r.right / cw * fit.width,
+    fit.top + (r.bottom - w.titleBar) / ch * fit.height,
+  );
+}
+
 /// The window's content size: no title bar.
 Size contentSize(RemoteWindow w) => Size(w.rect.width, w.rect.height - w.titleBar);
 

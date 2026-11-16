@@ -181,6 +181,18 @@ void main() {
     });
   });
 
+  test('a desktop session on smart is neither pinned nor asked for focus', () {
+    env((a, e) {
+      final main = e.sid('desktop:');
+      e.state.remote[main]!.setChoice(const StreamChoice('duogray', 'original', 30), manual: true);
+      expect(e.calls('set_stream').lastWhere((c) => c['sid'] == main)['pinned'], true);
+      e.state.remote[main]!.setChoice(presetSmart, manual: true);
+      final m = e.calls('set_stream').lastWhere((c) => c['sid'] == main);
+      expect(m['pinned'], isNot(true));
+      expect(m.containsKey('focus'), false);
+    });
+  });
+
   test('disconnected secondary is removed without retries or hints', () {
     env((a, e) {
       final hint = e.state.hint;

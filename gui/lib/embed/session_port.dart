@@ -173,6 +173,14 @@ class WindowsEvent extends SessionEvent {
   final List<RemoteWindow> windows;
 }
 
+/// A's focus region for window [window] (only asked for under 「智能」): [rects] in A window points,
+/// at most 3; empty means the whole window.
+class FocusRegionEvent extends SessionEvent {
+  const FocusRegionEvent(super.sid, this.window, this.rects);
+  final int window;
+  final List<Rect> rects;
+}
+
 /// A says how far it lowered the stream below the choice: [level] 0 (not), 1 or 2 (§6.4).
 class WeakEvent extends SessionEvent {
   const WeakEvent(super.sid, this.on, [int? level]) : level = level ?? (on ? 2 : 0);
@@ -381,6 +389,15 @@ SessionEvent? parseSessionEvent(String method, Object? args) {
         return ReadyEvent(sid, _as<String>(m['appName']));
       case 'windows':
         return WindowsEvent(sid, _list(m['windows']).map(_window).toList());
+      case 'focus':
+        final raw = _list(m['rects']);
+        if (raw.length > 3) return null;
+        final rects = raw.map((r) {
+          final q = _list(r).map(_double).toList();
+          if (q.length != 4) throw const _Bad();
+          return Rect.fromLTWH(q[0], q[1], q[2], q[3]);
+        }).toList();
+        return FocusRegionEvent(sid, _as<int>(m['window']), rects);
       case 'traffic':
         return TrafficEvent(sid, _as<int>(m['bytes']), _as<int?>(m['frames']) ?? 0);
       case 'weak':
@@ -498,8 +515,12 @@ abstract class SessionPort {
 
   void selectWindow(Object sid, int window) => _send('select_window', {'sid': sid, 'window': window});
 
-  void setStream(Object sid, String mode, int fps, String density, {bool pinned = false}) =>
-      _send('set_stream', {'sid': sid, 'mode': mode, 'fps': fps, 'density': density, if (pinned) 'pinned': true});
+  void setStream(Object sid, String mode, int fps, String density, {bool pinned = false, bool focus = false}) =>
+      _send('set_stream', {
+        'sid': sid, 'mode': mode, 'fps': fps, 'density': density,
+        if (pinned) 'pinned': true,
+        if (focus) 'focus': true,
+      });
 
   void moveTopLeft(Object sid, int window) => _send('move_top_left', {'sid': sid, 'window': window});
 

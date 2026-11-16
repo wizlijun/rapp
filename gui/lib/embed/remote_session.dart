@@ -1,6 +1,6 @@
 // One embedded session as the GUI sees it: the state the runner's events build up.
 import 'package:flutter/foundation.dart';
-import 'package:flutter/painting.dart' show Offset;
+import 'package:flutter/painting.dart' show Offset, Rect;
 
 import 'app_profile.dart';
 import 'composer_model.dart';
@@ -268,13 +268,28 @@ class RemoteSession extends ChangeNotifier {
         ready = true;
         appName = e.appName;
       case WindowsEvent():
+        final old = windows;
         windows = e.windows;
+        if (focus != null) {
+          final f = focus!;
+          final now = windows.where((w) => w.id == f.window).firstOrNull;
+          final before = old.where((w) => w.id == f.window).firstOrNull;
+          // Gone, or resized: the rects are in the old size's points. Clear until A sends fresh ones
+          // (extra colour meanwhile, never wrong gray). Moving or a title bar change is harmless.
+          if (now == null || (before != null && before.rect.size != now.rect.size)) focus = null;
+        }
         _refilter();
         final p = _pendingCurrent;
         if (p != null && _isTab(p)) {
           _pendingCurrent = null;
           tabs.select(p);
         }
+      case FocusRegionEvent():
+        // A late one (smart left) must not paint gray on a session that is not asking. Otherwise kept
+        // as A said it, window 0 (no focus window) and not-yet-listed windows included: the drawing
+        // only acts on the current window with rects.
+        if (!_focusWanted) return;
+        focus = (window: e.window, rects: e.rects);
       case WeakEvent():
         weak = e.on;
         saving = e.on ? e.level : 0;
@@ -342,12 +357,36 @@ class RemoteSession extends ChangeNotifier {
 
   /// The link is gone: no transfer or send round is running any more.
   void linkDown() {
+    focus = null;
+    _focusWanted = false;
     transferStatus = null;
     rttMs = null;
     stalled = false;
     weak = false;
     saving = 0;
     composer.done(0, null);
+    notifyListeners();
+  }
+
+  /// A's focus region (§6 of the focus-pane spec): null until A says, and again when it can no longer
+  /// be true (link down, its window gone, smart off). Empty rects mean the whole window.
+  ({int window, List<Rect> rects})? focus;
+
+  bool _focusWanted = false;
+
+  /// Whether A is being asked for the focus region (MainState sets it with each `set_stream`).
+  /// While false, focus events are ignored; turning it off clears [focus].
+  bool get focusWanted => _focusWanted;
+  set focusWanted(bool v) {
+    if (_focusWanted == v) return;
+    _focusWanted = v;
+    if (!v) clearFocus();
+  }
+
+  /// Forgets the focus region (smart left, or A is no longer asked) and tells the listeners.
+  void clearFocus() {
+    if (focus == null) return;
+    focus = null;
     notifyListeners();
   }
 

@@ -128,6 +128,25 @@ final class ChannelTests: XCTestCase {
         XCTAssertThrowsError(try channelCommand("set_banner", ["sid": 2])) { XCTAssertEqual($0 as? ChannelError, .bad("set_banner")) }
     }
 
+    func testSetStreamFocusParsed() throws {
+        let base: [String: Any] = ["sid": 1, "mode": "duogray", "fps": 1, "density": "saver1x"]
+        XCTAssertEqual(try channelCommand("set_stream", base.merging(["focus": true]) { $1 }),
+                       .setStream(sid: 1, mode: .duogray, fps: 1, density: .saver1x, pinned: false, focus: true))
+        XCTAssertEqual(try channelCommand("set_stream", base),
+                       .setStream(sid: 1, mode: .duogray, fps: 1, density: .saver1x, pinned: false, focus: false))
+    }
+
+    func testFocusRegionPayload() throws {
+        let p = try XCTUnwrap(eventPayload(.focusRegion(window: 7, rects: [CanvasRect(x: 0.25, y: 0.5, w: 0.5, h: 0.125)]),
+                                           sid: 4, textures: [:]))
+        XCTAssertEqual(p.method, "focus")
+        XCTAssertEqual(p.args["window"] as? UInt32, 7)
+        XCTAssertEqual(p.args["rects"] as? [[Double]], [[0.25, 0.5, 0.5, 0.125]])
+        XCTAssertEqual(p.args["sid"] as? Int64, 4)
+        let e = try XCTUnwrap(eventPayload(.focusRegion(window: 7, rects: []), sid: 4, textures: [:]))
+        XCTAssertEqual((e.args["rects"] as? [[Double]])?.count, 0)
+    }
+
     func testScreenLockedPayload() throws {
         let p = try XCTUnwrap(eventPayload(.screenLocked(true), sid: 4, textures: [:]))
         XCTAssertEqual(p.method, "screen_locked")

@@ -64,6 +64,8 @@ public final class PacedSender {
 
     /// The saving level changed (0 = the ceiling).
     public var onLevelChange: ((Int) -> Void)?
+    /// What each encode sent, called right after it on the same thread.
+    public var onEncoded: ((EncodeReport) -> Void)?
     public var weak: Bool { tier.weak }
     public var level: Int { tier.level }
 
@@ -172,6 +174,7 @@ public final class PacedSender {
                 let started = now()
                 let slices = encoder.encodeSlices(samples: o.samples, raw: o.raw, width: o.width, height: o.height,
                                                   region: o.region, limit: Self.sliceLimit, firstLimit: first)
+                if let r = encoder.lastReport { onEncoded?(r) }
                 let ms = Int(((now() - started) * 1000).rounded())
                 encodeMsMax = max(encodeMsMax ?? 0, ms)
                 if slices.first?.isFull == true { fullFrames += 1 }

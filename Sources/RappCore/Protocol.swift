@@ -1,13 +1,17 @@
 import Foundation
 
-/// Protocol v11 = v10 (scroll copy: frame messages carry per-tile flags, see TileCodec; session
+/// Protocol v12 = v11 + focusRegion (host -> client: which part of a window has focus) and a focus bit
+/// in setStream's flag byte. v11 = v10 (scroll copy: frame messages carry per-tile flags, see TileCodec; session
 /// ping/pong and the saving ladder: B's setStream values are its ceiling and its pinned byte means
 /// "automatic saving off") + desktop sessions: screenLocked/unlock for the remote lock screen.
 /// The host and client must both speak exactly this version.
-public let protocolVersion: UInt8 = 11
+public let protocolVersion: UInt8 = 12
 
 /// The longest system password `unlock` carries, in UTF-8 bytes.
 public let unlockPasswordLimit = 1024
+
+/// The most rects one `focusRegion` carries.
+public let maxFocusRects = 3
 
 /// A client's `Hello` carried a different protocol version than this build speaks.
 public struct ProtocolVersionMismatch: Error, CustomStringConvertible {
@@ -99,7 +103,7 @@ public enum Message: Equatable {
     case mouse(kind: MouseKind, button: MouseButton, window: UInt32, x: Float, y: Float, clickCount: UInt8)  // 7
     case scroll(window: UInt32, x: Float, y: Float, dx: Float, dy: Float)                    // 8
     case resize(window: UInt32, width: UInt16, height: UInt16)                               // 9, client -> host (content points)
-    case setStream(mode: Mode, fps: UInt8, density: Float, pinned: Bool)                     // 11, client -> host; ends with the pinned byte (0 or 1)
+    case setStream(mode: Mode, fps: UInt8, density: Float, pinned: Bool, focus: Bool = false)  // 11, client -> host; ends with a flag byte: bit0 pinned, bit1 focus (v12)
     case windows([WindowInfo])                                                               // 13, host -> client, front to back
     case focus(UInt32)                                                                       // 14, client -> host
     case close(UInt32)                                                                       // 15, client -> host
@@ -129,6 +133,8 @@ public enum Message: Equatable {
     case screenLocked(Bool)                                                                  // 34, host -> client (v11)
     /// Type A's system password at the lock screen; the host drops it unless A is locked.
     case unlock(password: String)                                                            // 35, client -> host (v11)
+    /// The part(s) of `window` that hold keyboard focus, in canvas coordinates; no rects = the whole window.
+    case focusRegion(window: UInt32, rects: [CanvasRect])                                    // 36, host -> client (v12)
 
     public func encoded() -> [UInt8] {
         var w = Writer()
@@ -163,9 +169,14 @@ public enum Message: Equatable {
         case let .resize(window, width, height):
             type = 9
             w.u32(window); w.u16(width); w.u16(height)
-        case let .setStream(mode, fps, density, pinned):
+        case let .setStream(mode, fps, density, pinned, focus):
             type = 11
-            w.u8(mode.rawValue); w.u8(fps); w.f32(density); w.u8(pinned ? 1 : 0)
+            w.u8(mode.rawValue); w.u8(fps); w.f32(density); w.u8((pinned ? 1 : 0) | (focus ? 2 : 0))
+        case let .focusRegion(window, rects):
+            type = 36
+            precondition(rects.count <= maxFocusRects, "too many focus rects")
+            w.u32(window); w.u8(UInt8(rects.count))
+            for rect in rects { w.rect(rect) }
         case let .windows(items):
             type = 13
             w.u16(UInt16(clamping: items.count))
@@ -303,8 +314,8 @@ public enum Message: Equatable {
             guard let mode = Mode(rawValue: try r.u8()) else { throw CodecError("unknown mode") }
             let (fps, density) = try r.stream()
             let flag = try r.u8()
-            guard flag <= 1 else { throw CodecError("bad pinned flag") }
-            message = .setStream(mode: mode, fps: fps, density: density, pinned: flag == 1)
+            guard flag & ~3 == 0 else { throw CodecError("bad stream flags") }
+            message = .setStream(mode: mode, fps: fps, density: density, pinned: flag & 1 != 0, focus: flag & 2 != 0)
         case 13:
             message = .windows(try r.windows())
         case 14:
@@ -376,6 +387,11 @@ public enum Message: Equatable {
             let flag = try r.u8()
             guard flag <= 1 else { throw CodecError("bad locked flag") }
             message = .screenLocked(flag == 1)
+        case 36:
+            let window = try r.u32()
+            let count = Int(try r.u8())
+            guard count <= maxFocusRects else { throw CodecError("too many focus rects") }
+            message = .focusRegion(window: window, rects: try (0..<count).map { _ in try r.rect() })
         case 35:
             let password = try r.string()
             guard password.utf8.count <= unlockPasswordLimit else {
@@ -390,7 +406,7 @@ public enum Message: Equatable {
     }
 }
 
-private let knownTypes: Set<UInt8> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35]
+private let knownTypes: Set<UInt8> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36]
 
 /// Turns a byte stream into messages. Feed it whatever the socket delivers
 /// with `append`, then call `next()` until it returns nil.

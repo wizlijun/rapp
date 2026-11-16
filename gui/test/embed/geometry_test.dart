@@ -70,4 +70,17 @@ void main() {
     );
     expect(popupRect(popup, parent, const Rect.fromLTWH(0, 0, 400, 200)), const Rect.fromLTWH(100, 40, 40, 20));
   });
+
+  test('fromRemoteRect is the inverse of toRemote, title bar included', () {
+    const fit = Rect.fromLTWH(10, 100, 400, 200);
+    final win = w(200, 128);
+    for (final r in const [Rect.fromLTWH(0, 28, 200, 100), Rect.fromLTWH(20, 50, 60, 30), Rect.fromLTWH(0, 0, 200, 128)]) {
+      final back = fromRemoteRect(r, fit, win);
+      expect(toRemote(back.topLeft, fit, win).dx, closeTo(r.left, 1e-9));
+      expect(toRemote(back.topLeft, fit, win).dy, closeTo(r.top, 1e-9));
+      expect(toRemote(back.bottomRight, fit, win).dx, closeTo(r.right, 1e-9));
+      expect(toRemote(back.bottomRight, fit, win).dy, closeTo(r.bottom, 1e-9));
+    }
+    expect(fromRemoteRect(const Rect.fromLTWH(0, 28, 200, 100), fit, win), fit);
+  });
 }

@@ -143,6 +143,8 @@ agent 规则：**不直接改这个文件**。加、删设备走 GUI 的设备�
 
 格式和取值见《app 配置设计》§2，怎么写见《app 配置编写规范》。内置的一份在 `gui/assets/app_profiles.json`（随 GUI 发布，只在仓库里改；启动时由 `gui/lib/main.dart:82` 读出来）。没有机密。
 
+`focusPane`（布尔，没写时 `true`）：`false` 时这个 app 选了「智能」预设也不按焦点分区，整窗保持彩色（配置页开关「智能时按焦点分区」；见《智能预设与焦点面板》）。
+
 其中 `recordInput`（布尔，没写时 `true`）管输入记录：`false` 时，发给这个 app 的话不进 `devices/<id>/inputs/`，草稿照样在本机保存和恢复。密码管理器、网银这类 app 可以设成 `false`。取值见《app 配置设计》§2，规则见《输入记录》§8。
 
 `composerAt`（没写时底部居中、离底 8）是 app 窗口上写作面板的位置，`{"x": 0.5, "bottom": 8}` 这样的形状（和 `input` 一样）：用户拖动面板、松手时写一次；双击拖柄或设置页「回到默认」删掉。见《浮动写作面板》（`2026-11-15-rapp-floating-composer-design.md`）。
