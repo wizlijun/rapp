@@ -81,6 +81,13 @@ void main() {
     expect(AppProfile(ids: ['a']).toJson().containsKey('typeToCompose'), isFalse);
     expect(AppProfile(ids: ['a'], typeToCompose: false).toJson()['typeToCompose'], false);
     expect(AppProfile.fromJson(AppProfile(ids: ['a'], typeToCompose: false).toJson())!.typeToCompose, isFalse);
+    expect(r.focusPane, isTrue);
+    expect(resolveProfile('a', mine: [AppProfile(ids: ['a'], focusPane: false)], builtin: [AppProfile(ids: ['a'], focusPane: true)]).focusPane, isFalse);
+    expect(AppProfile(ids: ['a']).toJson().containsKey('focusPane'), isFalse);
+    expect(AppProfile(ids: ['a'], focusPane: false).toJson()['focusPane'], false);
+    expect(AppProfile.fromJson({'ids': ['a'], 'focusPane': false})!.focusPane, isFalse);
+    expect(AppProfile.fromJson({'ids': ['a']})!.focusPane, isNull);
+    expect(AppProfile(ids: ['a'], focusPane: false).copy().focusPane, isFalse);
     expect(resolveProfile('other', mine: mine, builtin: builtin), same(ResolvedProfile.generic));
     expect(ResolvedProfile.generic.stream, startChoice);
   });
