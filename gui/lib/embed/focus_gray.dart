@@ -36,11 +36,33 @@ class OutsideClipper extends CustomClipper<Path> {
   }
 }
 
+/// Debug: a green frame around each focus rect, to see what A picked. Hidden by default;
+/// on for now while the rules are being tuned on real apps. Set to false to hide it.
+const showFocusFrames = true;
+
 /// The gray layer over a picture of [size]: what is behind it, outside [rects], turns gray.
-Widget focusGray(Size size, List<Rect> rects) => IgnorePointer(
+/// With [frames], each rect also gets a green debug frame drawn just inside it.
+Widget focusGray(Size size, List<Rect> rects, {bool frames = showFocusFrames}) => IgnorePointer(
       key: const Key('focus-gray'),
-      child: ClipPath(
-        clipper: OutsideClipper(rects),
-        child: const BackdropFilter(filter: lumaFilter, child: SizedBox.expand()),
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: ClipPath(
+              clipper: OutsideClipper(rects),
+              child: const BackdropFilter(filter: lumaFilter, child: SizedBox.expand()),
+            ),
+          ),
+          if (frames)
+            for (final r in rects)
+              Positioned.fromRect(
+                rect: r,
+                child: const DecoratedBox(
+                  key: Key('focus-debug-frame'),
+                  decoration: BoxDecoration(
+                    border: Border.fromBorderSide(BorderSide(color: Color(0xFF00C853), width: 2)),
+                  ),
+                ),
+              ),
+        ],
       ),
     );
