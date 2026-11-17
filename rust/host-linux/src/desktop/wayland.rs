@@ -41,6 +41,14 @@ struct Output {
     transform: u32,
     logical: bool,
 }
+#[derive(Debug)]
+struct CompositorTimeout;
+impl std::fmt::Display for CompositorTimeout {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Wayland compositor timed out (check whether the desktop is locked or awaiting capture permission)")
+    }
+}
+impl std::error::Error for CompositorTimeout {}
 #[derive(Default)]
 struct State {
     outputs: BTreeMap<u32, Output>,
@@ -113,10 +121,9 @@ impl Wayland {
                 return Ok(());
             }
             self.conn.flush()?;
-            ensure!(
-                Instant::now() < end,
-                "Wayland compositor did not respond within 2 s"
-            );
+            if Instant::now() >= end {
+                return Err(CompositorTimeout.into());
+            }
             if let Some(read) = self.queue.prepare_read() {
                 let mut fd = libc::pollfd {
                     fd: self.conn.as_fd().as_raw_fd(),
@@ -136,7 +143,9 @@ impl Wayland {
                     }
                     return Err(e.into());
                 }
-                ensure!(n > 0, "Wayland compositor timed out");
+                if n == 0 {
+                    return Err(CompositorTimeout.into());
+                }
                 match read.read() {
                     Ok(_) => {}
                     Err(wayland_client::backend::WaylandError::Io(e))
@@ -203,6 +212,18 @@ impl Wayland {
         self.sync()
     }
     pub fn capture(&mut self) -> Result<Image> {
+        // A compositor can miss a render during output reconfiguration or GPU
+        // contention. Discard that frame and request a fresh one, retaining the
+        // session and decoder reference. Permission failures are never retried.
+        for attempt in 0..3 {
+            match self.capture_once() {
+                Err(e) if attempt < 2 && e.is::<CompositorTimeout>() => continue,
+                result => return result,
+            }
+        }
+        unreachable!()
+    }
+    fn capture_once(&mut self) -> Result<Image> {
         let d = self
             .selected
             .as_ref()
@@ -291,11 +312,12 @@ impl Wayland {
         let buffer = pool.create_buffer(0, w as i32, h as i32, stride as i32, format, &qh, ());
         // Keep the pool alive through the copy and let the compositor import the
         // shared-memory buffer before requesting its first render.
-        self.sync()?;
-        frame.copy(&buffer);
-        let result = self
-            .until(|s| s.ready || s.failed)
-            .context("waiting for captured pixels");
+        let result = (|| {
+            self.sync()?;
+            frame.copy(&buffer);
+            self.until(|s| s.ready || s.failed)
+                .context("waiting for captured pixels")
+        })();
         buffer.destroy();
         pool.destroy();
         result?;
