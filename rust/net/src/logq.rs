@@ -343,8 +343,7 @@ fn merged(dir: &Path, srcs: &[Src]) -> Merged<impl Iterator<Item = Line>> {
 }
 
 impl<I> Merged<I> {
-    /// Before the first `next`: each source's newest event, the only one a
-    /// later `repeat` line can still be added to.
+    /// Before the first `next`: each source's newest event.
     fn heads(&self) -> impl Iterator<Item = &Ev> {
         self.heads.iter().flatten()
     }
@@ -504,27 +503,50 @@ fn page(dir: &Path, q: &LogQuery, fill: &mut Fill) -> Option<String> {
     // or not (a `repeat` too), so the next poll reads only what came since.
     let top = evs.heads().max_by(|a, b| a.last_key().cmp(&b.last_key()));
     let newest = top.filter(|e| after.as_ref().is_none_or(|c| c.below_last(e))).map(|e| at(&e.last.0, e.src, e.last.1));
-    // A source's newest event older than the cursor with a `repeat` written
-    // since: sent again under `again`, to replace in place.
-    let mut grown: Vec<&Ev> = match &after {
-        Some(c) => evs.heads().filter(|e| e.repeat > 0 && !c.below(e) && c.below_last(e) && matches(e)).collect(),
-        None => Vec::new(),
-    };
-    grown.sort_by(|a, b| b.key().cmp(&a.key()));
-    let grown: Vec<Value> = grown.into_iter().map(Ev::entry).collect();
+    // Per source, the newest event not newer than the cursor: the only one a
+    // `repeat` written since can have been added to (the logger keeps one
+    // run per file; it ends a run with `repeat` and the next event at once).
+    // When one did grow, it is sent again under `again`, to replace in place.
+    let mut last_old: Vec<Option<Ev>> = srcs.iter().map(|_| None).collect();
+    let mut seen = vec![false; srcs.len()];
+    let slot = |ev: &Ev| srcs.iter().position(|&s| s == ev.src).unwrap_or(0);
+    let mut full = false;
     for ev in evs.by_ref() {
-        if after.as_ref().is_some_and(|c| ev.ts.as_str() < c.ts()) {
-            break;
+        if let Some(c) = &after {
+            if !c.below(&ev) {
+                let stop = ev.ts.as_str() < c.ts();
+                let i = slot(&ev);
+                if !std::mem::replace(&mut seen[i], true) {
+                    last_old[i] = Some(ev);
+                }
+                if stop {
+                    break;
+                }
+                continue;
+            }
         }
-        let keep = before.as_ref().is_none_or(|c| c.above(&ev)) && after.as_ref().is_none_or(|c| c.below(&ev)) && matches(&ev);
+        let keep = before.as_ref().is_none_or(|c| c.above(&ev)) && matches(&ev);
         if keep && !fill.push(ev.entry()) {
+            full = true;
             break;
         }
     }
-    // Older than every new row: after them, while there is room (else `gap`).
-    for e in grown {
-        if !fill.push_to(true, e) {
-            break;
+    if let (Some(c), false) = (&after, full) {
+        // The scan stops at the first event older than the cursor; another
+        // source's is then its head (already read, so no extra parsing).
+        for (i, h) in evs.heads.iter_mut().enumerate() {
+            if !seen[i] {
+                last_old[i] = h.take();
+            }
+        }
+        let mut grown: Vec<Ev> =
+            last_old.into_iter().flatten().filter(|e| e.repeat > 0 && c.below_last(e) && matches(e)).collect();
+        grown.sort_by(|a, b| b.key().cmp(&a.key()));
+        // Older than every new row: after them, while there is room (else `gap`).
+        for e in &grown {
+            if !fill.push_to(true, e.entry()) {
+                break;
+            }
         }
     }
     match before {
@@ -1133,6 +1155,47 @@ mod tests {
         let r3 = run(d.path(), after(&r2, LogQuery::default()));
         assert_eq!(ns(&r3), ["H2"]);
         assert_eq!(again(&r3), [("A".to_owned(), 6)]);
+    }
+
+    #[test]
+    fn a_repeat_written_with_the_next_event_is_sent_again() {
+        // The logger ends a run (< 60 s) with `repeat` and the next event in
+        // one call: the grown row is no longer a source's newest event.
+        let d = tempfile::tempdir().unwrap();
+        append(d.path(), "service.log", &[refused(&ts_at(-120), "A")]);
+        let r = run(d.path(), LogQuery::default());
+        assert_eq!(ns(&r), ["A"]);
+        append(d.path(), "service.log", &[rep(&ts_at(-60), 7), info(&ts_at(-60), "B")]);
+        let r2 = run(d.path(), after(&r, LogQuery::default()));
+        assert_eq!(ns(&r2), ["B"]);
+        assert_eq!(again(&r2), [("A".to_owned(), 7)]);
+        assert_eq!(r2["again"][0]["at"], evs(&r)[0]["at"]);
+        assert!(r2.get("gap").is_none());
+        let r3 = run(d.path(), after(&r2, LogQuery::default()));
+        assert!(evs(&r3).is_empty() && again(&r3).is_empty(), "{r3}");
+    }
+
+    #[test]
+    fn repeats_ended_in_both_sources_are_all_sent_again() {
+        // The cursor is hub's H; the scan stops at hub's older H0 before it
+        // reaches the service's A, which still must be checked.
+        let d = tempfile::tempdir().unwrap();
+        append(d.path(), "service.log", &[refused(&ts_at(-120), "A")]);
+        append(d.path(), "hub.log", &[info(&ts_at(-110), "H0"), info(&ts_at(-100), "H")]);
+        let r = run(d.path(), LogQuery::default());
+        assert_eq!(ns(&r), ["H", "H0", "A"]);
+        append(d.path(), "hub.log", &[rep(&ts_at(-50), 2), info(&ts_at(-50), "H2")]);
+        append(d.path(), "service.log", &[rep(&ts_at(-40), 3), info(&ts_at(-40), "S")]);
+        SCANNED.with(|c| c.set(0));
+        let r2 = run(d.path(), after(&r, LogQuery::default()));
+        let scanned = SCANNED.with(|c| c.get());
+        assert_eq!(ns(&r2), ["S", "H2"]);
+        assert_eq!(again(&r2), [("H".to_owned(), 2), ("A".to_owned(), 3)]);
+        assert!(r2.get("gap").is_none());
+        assert!(scanned < 10, "an after poll parsed {scanned} lines");
+        // No room for them: a gap, never a silent miss.
+        let r3 = run(d.path(), after(&r, LogQuery { limit: Some(2), ..Default::default() }));
+        assert_eq!(r3["gap"], true, "{r3}");
     }
 
     #[test]

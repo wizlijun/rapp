@@ -301,6 +301,22 @@ void main() {
     await end(t, m);
   });
 
+  testWidgets('one poll can bring a new row and grown rows of both sources', (t) async {
+    final b = ev('b', {'ev': 'auth_fail'}, kind: LogKind.refused);
+    final a = ev('a', {'ev': 'session_start'}, src: 'hub');
+    f.reply = (id, q) async => first(events: [b, a]);
+    final m = await show(t);
+    f.reply = (id, q) async => page([ev('c', {'ev': 'session_end'})], newer: 'c', again: [
+          ev('b', {'ev': 'auth_fail'}, kind: LogKind.refused, repeat: 7),
+          ev('a', {'ev': 'session_start'}, src: 'hub', repeat: 3),
+        ]);
+    await t.pump(const Duration(seconds: 5));
+    await t.pump();
+    expect(m.rows.map((e) => e.at), ['c', 'b', 'a']);
+    expect(m.rows.map((e) => e.repeat), [0, 7, 3]);
+    await end(t, m);
+  });
+
   testWidgets('a failing poll stops the polls until ⟳', (t) async {
     final m = await show(t);
     final n = f.calls.length;

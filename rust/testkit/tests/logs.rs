@@ -150,9 +150,18 @@ async fn a_grown_repeat_comes_back_as_again() {
         let mut f = std::fs::OpenOptions::new().append(true).open(dir.join("hub.log")).unwrap();
         std::io::Write::write_all(&mut f, format!("{rep}\n").as_bytes()).unwrap();
         q["after"] = r["newer"].clone();
-        let r2 = h.call(q).await;
+        let r2 = h.call(q.clone()).await;
         assert_eq!(r2["events"], json!([]), "{r2}");
         assert_eq!(r2["again"][0]["at"], row["at"], "{r2}");
         assert_eq!(r2["again"][0]["repeat"], 5, "{r2}");
+        // The logger ends a run with `repeat` and the next event in one write.
+        let rep = json!({"ts":at(0),"lvl":"info","ev":"repeat","repeat":3});
+        let next = json!({"ts":at(0),"lvl":"info","ev":"next_m"});
+        std::io::Write::write_all(&mut f, format!("{rep}\n{next}\n").as_bytes()).unwrap();
+        q["after"] = r2["newer"].clone();
+        let r3 = h.call(q).await;
+        assert!(r3["events"][0]["raw"].as_str().unwrap().contains("next_m"), "{r3}");
+        assert_eq!(r3["again"][0]["at"], row["at"], "{r3}");
+        assert_eq!(r3["again"][0]["repeat"], 8, "{r3}");
     }
 }
