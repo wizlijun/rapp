@@ -173,6 +173,12 @@ pub fn query(dir: &Path, q: &LogQuery, now: SystemTime) -> Value {
         reply["newer"] = n["at"].clone();
         reply["older"] = o["at"].clone();
     }
+    // An `after` page cut short leaves unsent rows between it and the cursor:
+    // `gap` (the GUI reloads the first page). `more` only means older rows.
+    if q.around.is_none() && q.after.is_some() && fill.more {
+        reply["gap"] = true.into();
+        fill.more = false;
+    }
     reply["more"] = fill.more.into();
     reply["events"] = fill.events.into();
     reply
@@ -229,9 +235,12 @@ impl Ev {
         }
         if self.text.len() > RAW_MAX {
             let mut v = self.val;
-            cut_strings(&mut v);
-            e["truncated"] = true.into();
-            e["raw"] = v.to_string().into();
+            if cut_strings(&mut v) {
+                e["truncated"] = true.into();
+                e["raw"] = v.to_string().into();
+            } else {
+                e["raw"] = self.text.into();
+            }
         } else {
             e["raw"] = self.text.into();
         }
@@ -249,12 +258,16 @@ fn cut(s: &mut String, max: usize) {
     }
 }
 
-fn cut_strings(v: &mut Value) {
+/// Cuts every string longer than `CUT`; true when any was cut.
+fn cut_strings(v: &mut Value) -> bool {
     match v {
-        Value::String(s) => cut(s, CUT),
-        Value::Array(a) => a.iter_mut().for_each(cut_strings),
-        Value::Object(m) => m.values_mut().for_each(cut_strings),
-        _ => {}
+        Value::String(s) if s.len() > CUT => {
+            cut(s, CUT);
+            true
+        }
+        Value::Array(a) => a.iter_mut().fold(false, |any, x| cut_strings(x) | any),
+        Value::Object(m) => m.values_mut().fold(false, |any, x| cut_strings(x) | any),
+        _ => false,
     }
 }
 
@@ -816,6 +829,35 @@ mod tests {
     }
 
     #[test]
+    fn after_over_limit_sets_gap() {
+        let d = tempfile::tempdir().unwrap();
+        append(d.path(), "service.log", &[info(&ts_at(-100), "old")]);
+        let r = run(d.path(), LogQuery::default());
+        append(d.path(), "service.log", &(0..30).map(|i| info(&ts_at(-50 + i), &format!("n{i}"))).collect::<Vec<_>>());
+        let after = Some(r["newer"].as_str().unwrap().into());
+        let r2 = run(d.path(), LogQuery { after, limit: Some(7), ..Default::default() });
+        assert_eq!(ns(&r2), ["n29", "n28", "n27", "n26", "n25", "n24", "n23"]);
+        assert_eq!((r2["gap"].as_bool(), r2["more"].as_bool()), (Some(true), Some(false)));
+    }
+
+    #[test]
+    fn after_within_limit_has_no_gap() {
+        let d = tempfile::tempdir().unwrap();
+        append(d.path(), "service.log", &[info(&ts_at(-100), "old")]);
+        let r = run(d.path(), LogQuery::default());
+        append(d.path(), "service.log", &(0..7).map(|i| info(&ts_at(-50 + i), &format!("n{i}"))).collect::<Vec<_>>());
+        let after = Some(r["newer"].as_str().unwrap().into());
+        let r2 = run(d.path(), LogQuery { after, limit: Some(7), ..Default::default() });
+        assert_eq!(ns(&r2).len(), 7);
+        assert!(r2.get("gap").is_none());
+        assert_eq!(r2["more"], false);
+        // A plain page over the limit has `more`, never `gap`.
+        let r3 = run(d.path(), LogQuery { limit: Some(3), ..Default::default() });
+        assert!(r3.get("gap").is_none());
+        assert_eq!(r3["more"], true);
+    }
+
+    #[test]
     fn after_keeps_same_ms_lines_of_the_other_source() {
         // service sorts before hub within one ms, so a hub line written later in
         // the same ms lands below the cursor; `after` must still return it.
@@ -1021,6 +1063,22 @@ mod tests {
         assert_eq!(v["ts"], ts_at(-2));
         assert!(evs(&r)[0].get("truncated").is_none());
         assert!(serde_json::to_string(&r).unwrap().len() < crate::line::MAX_LINE);
+    }
+
+    #[test]
+    fn long_raw_of_short_strings_is_not_flagged() {
+        let d = tempfile::tempdir().unwrap();
+        let mut body = json!({"lvl":"info","ev":"x","n":"many"});
+        for i in 0..300 {
+            body[format!("k{i}")] = "short value".into();
+        }
+        let l = line(&ts_at(-1), body);
+        assert!(l.len() > 4096);
+        append(d.path(), "hub.log", std::slice::from_ref(&l));
+        let r = run(d.path(), LogQuery::default());
+        let e = &evs(&r)[0];
+        assert!(e.get("truncated").is_none(), "{e}");
+        assert_eq!(e["raw"], l);
     }
 
     #[test]
