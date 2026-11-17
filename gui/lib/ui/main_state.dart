@@ -2017,7 +2017,8 @@ class MainState extends ChangeNotifier {
     if (!backgrounded) return;
     backgrounded = false;
     final h = hub;
-    h?.netSuspect();
+    // iOS took the hub's socket while the app was away: a new one, and every device asked again.
+    h?.netChanged();
     h?.pausePresence(false);
     bool closedByBackground(SessionRecord r) => r.phase == Phase.disconnected && r.reason == 'background';
     final cur = currentRecord;
@@ -2045,6 +2046,10 @@ class MainState extends ChangeNotifier {
     }
     notifyListeners();
   }
+
+  /// The network changed under the app (iOS `pathChanged`: Wi-Fi to another Wi-Fi, to cellular, back
+  /// after a loss): the hub starts over on a new socket.
+  void netChanged() => hub?.netChanged();
 
   /// The system is short of memory (iOS): frozen sessions off the stage let go of their pictures.
   /// The one on the stage keeps its last frame (spec §9.1).

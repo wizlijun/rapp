@@ -23,6 +23,7 @@ class BackgroundWatch {
     );
     _events = ios.events.listen((e) {
       if (e == 'memoryWarning') state.memoryWarning();
+      if (e == 'pathChanged') state.netChanged();
     });
     state.addListener(_sync);
     _sync();

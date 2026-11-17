@@ -286,6 +286,10 @@ class HubClient extends ChangeNotifier {
   /// A session's path looks broken: the hub probes the relay now.
   void netSuspect() => _send({'cmd': 'net_suspect'});
 
+  /// The app came back or the network changed (Wi-Fi, cellular): the hub takes a new UDP socket and asks
+  /// every device and the relay again at once; no reply.
+  void netChanged() => _send({'cmd': 'net_changed'});
+
   Future<List<HubHost>> refreshHosts() async {
     await _request({'cmd': 'hosts'}, 'hosts');
     return hosts;
