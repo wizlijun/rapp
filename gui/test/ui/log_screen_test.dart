@@ -270,6 +270,115 @@ void main() {
     await end(t, m);
   });
 
+  testWidgets('a quiet re-ask still out skips the next tick, then lands', (t) async {
+    f.reply = (id, q) async => first(events: const []);
+    final m = await show(t);
+    final n = f.calls.length;
+    final held = Completer<LogPage>();
+    f.reply = (id, q) => held.future;
+    await t.pump(const Duration(seconds: 5));
+    expect(f.calls.length, n + 1);
+    await t.pump(const Duration(seconds: 5));
+    await t.pump(const Duration(seconds: 5));
+    expect(f.calls.length, n + 1);
+    held.complete(first(events: [route]));
+    await t.pump();
+    await t.pump();
+    expect(m.rows.map((e) => e.at), ['u1']);
+    // With a row listed, the next tick asks for what is newer.
+    f.reply = (id, q) async => page([]);
+    await t.pump(const Duration(seconds: 5));
+    expect(f.calls.length, n + 2);
+    expect(f.last.after, 'u1');
+    await end(t, m);
+  });
+
+  testWidgets('after an error the first page is not asked for again until ⟳', (t) async {
+    f.reply = (id, q) async => throw HubException('connect timed out');
+    final m = await show(t);
+    expect(m.error, 'connect timed out');
+    final n = f.calls.length;
+    await t.pump(const Duration(seconds: 30));
+    expect(f.calls.length, n);
+    f.reply = (id, q) async => first(events: [route]);
+    unawaited(m.refresh());
+    await t.pump();
+    await t.pump();
+    expect(f.calls.length, n + 1);
+    expect(m.error, isNull);
+    expect(m.rows.map((e) => e.at), ['u1']);
+    await end(t, m);
+  });
+
+  testWidgets('a gap while scrolled keeps the place and waits behind the banner', (t) async {
+    f.reply = (id, q) async => first(events: plain(40));
+    final m = await show(t);
+    await t.drag(list(), const Offset(0, -300));
+    await t.pump();
+    final at = offset(t);
+    expect(at, greaterThan(0));
+    f.reply = (id, q) async => q.after != null ? page(plain(3, 'n'), gap: true) : first(events: [...plain(3, 'z'), ...plain(40)]);
+    await t.pump(const Duration(seconds: 5));
+    await t.pump();
+    await t.pump();
+    expect(f.last.after, isNull);
+    expect(m.loading, isFalse);
+    expect(find.text('读取中…'), findsNothing);
+    expect(offset(t), at);
+    expect(m.rows, hasLength(40));
+    expect(m.rows.first.at, 'r00');
+    expect(find.text('有 3 条新的'), findsOneWidget);
+    // The held page is the newest there is: no polls until it is shown.
+    final n = f.calls.length;
+    await t.pump(const Duration(seconds: 10));
+    expect(f.calls.length, n);
+    await t.tap(find.byKey(const Key('log-pending')));
+    await t.pump();
+    expect(m.rows.map((e) => e.at).take(4), ['z00', 'z01', 'z02', 'r00']);
+    expect(offset(t), 0);
+    f.reply = (id, q) async => page([]);
+    await t.pump(const Duration(seconds: 5));
+    expect(f.calls.length, n + 1);
+    expect(f.last.after, 'z00');
+    await end(t, m);
+  });
+
+  testWidgets('a poll still out when the device changes is dropped', (t) async {
+    final m = await show(t);
+    final held = Completer<LogPage>();
+    f.reply = (id, q) => q.after != null ? held.future : Future.value(first(events: [rejected]));
+    await t.pump(const Duration(seconds: 5));
+    expect(f.last.after, 'u1');
+    unawaited(m.open('111'));
+    await t.pump();
+    await t.pump();
+    expect(m.rows.map((e) => e.at), ['f1']);
+    held.complete(page([ev('zz', {'ev': 'service_start'})]));
+    await t.pump();
+    await t.pump();
+    expect(m.rows.map((e) => e.at), ['f1']);
+    expect(m.pendingNew, 0);
+    await end(t, m);
+  });
+
+  testWidgets('an older page still out when the list is refreshed is dropped', (t) async {
+    f.reply = (id, q) async => first(events: plain(40), more: true);
+    final m = await show(t);
+    final held = Completer<LogPage>();
+    f.reply = (id, q) => q.before != null ? held.future : Future.value(first(events: plain(3, 'q')));
+    unawaited(m.loadOlder());
+    expect(f.last.before, 'r39');
+    unawaited(m.refresh());
+    await t.pump();
+    await t.pump();
+    expect(m.rows.map((e) => e.at), ['q00', 'q01', 'q02']);
+    held.complete(page(plain(5, 'o')));
+    await t.pump();
+    await t.pump();
+    expect(m.rows.map((e) => e.at), ['q00', 'q01', 'q02']);
+    await end(t, m);
+  });
+
   testWidgets('poll does not jump when scrolled', (t) async {
     f.reply = (id, q) async => first(events: plain(40));
     final m = await show(t);

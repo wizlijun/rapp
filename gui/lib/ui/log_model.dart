@@ -48,6 +48,9 @@ class LogModel extends ChangeNotifier {
 
   /// New rows a poll brought while the list was scrolled down, newest first.
   List<LogEntry> _pending = const [];
+
+  /// A first page fetched after a `gap` while scrolled down: shown when the user goes back to the top.
+  LogPage? _held;
   bool _atTop = true;
 
   /// What is listed: the ±1 min window while it is open, else the timeline (newest first).
@@ -86,6 +89,7 @@ class LogModel extends ChangeNotifier {
     _aroundOf = null;
     _aroundRows = const [];
     _aroundToken = null;
+    _held = null;
     _timer?.cancel();
     _timer = Timer.periodic(_every, (_) => poll());
     return refresh();
@@ -112,45 +116,63 @@ class LogModel extends ChangeNotifier {
   /// The first page again, with the cards and the 启动输出; leaves the ±1 min window.
   Future<void> refresh() => _first(quiet: false);
 
-  /// [quiet]: a poll asking again while nothing is listed — no 读取中…, and the list stays where it is.
+  /// [quiet]: asked by a poll (nothing listed yet, or a `gap`). No 读取中…, the list keeps its place, and a
+  /// page that would replace rows the user has scrolled down to is held behind 「有 N 条新的」 instead.
+  /// It does not bump [_gen]: a refresh or a device switch after it still makes its reply stale.
   Future<void> _first({required bool quiet}) async {
-    final gen = ++_gen;
+    final gen = quiet ? _gen : ++_gen;
     final device = _device;
-    _olderToken = _pollToken = null;
-    _aroundOf = null;
-    _aroundRows = const [];
-    _aroundToken = null;
     if (!quiet) {
+      _olderToken = _pollToken = null;
+      _held = null;
+      _aroundOf = null;
+      _aroundRows = const [];
+      _aroundToken = null;
       _loading = true;
       _notify();
     }
     try {
       final p = await fetch(device, _query());
       if (_stale(gen, device)) return;
-      _rows = _dedupe(p.events);
-      _pending = const [];
-      _atTop = true;
-      _more = p.more;
-      _older = p.older;
-      _newer = p.newer;
       _counts = p.counts;
       _latest = p.latest;
       _launchd = p.launchd;
       _error = null;
-      if (!quiet) _resets++;
+      if (quiet && !_atTop && _rows.isNotEmpty) {
+        final seen = {for (final e in _rows) e.at};
+        _held = p;
+        _pending = [for (final e in _dedupe(p.events)) if (!seen.contains(e.at)) e];
+      } else {
+        _apply(p);
+        if (!quiet) _resets++;
+      }
     } catch (e) {
       if (_stale(gen, device)) return;
-      _rows = const [];
-      _pending = const [];
-      _more = false;
-      _older = _newer = null;
-      _counts = _latest = null;
-      _launchd = null;
       _error = _words(e);
-      if (!quiet) _resets++;
+      if (!quiet) {
+        _rows = const [];
+        _pending = const [];
+        _more = false;
+        _older = _newer = null;
+        _counts = _latest = null;
+        _launchd = null;
+        _resets++;
+      }
     }
-    _loading = false;
+    if (!quiet) _loading = false;
     _notify();
+  }
+
+  void _apply(LogPage p) {
+    // A loadOlder still out would append to the old rows' tail, leaving a hole under the new page.
+    _olderToken = null;
+    _rows = _dedupe(p.events);
+    _pending = const [];
+    _held = null;
+    _atTop = true;
+    _more = p.more;
+    _older = p.older;
+    _newer = p.newer;
   }
 
   /// The page before the oldest row shown.
@@ -176,27 +198,30 @@ class LogModel extends ChangeNotifier {
     }
   }
 
-  /// Rows newer than the newest shown: on top when at the top, else held in [pendingNew].
+  /// Rows newer than the newest shown: on top when at the top, else held in [pendingNew]. One request out at
+  /// a time: a tick while one is in flight is skipped.
   Future<void> poll() async {
-    if (_aroundOf != null || _loading || _pollToken != null || _disposed) return;
-    // Nothing shown yet, so nothing to jump: just ask for the first page again.
-    if (_newer == null) return _first(quiet: true);
+    if (_aroundOf != null || _loading || _pollToken != null || _held != null || _disposed) return;
     final token = _pollToken = Object();
-    final gen = _gen;
-    final device = _device;
     try {
+      if (_newer == null) {
+        // Nothing listed: ask for the first page again — but not after an error (⟳ or the picker retries),
+        // or an offline or old device would be asked for a full first page every tick.
+        if (_error == null) await _first(quiet: true);
+        return;
+      }
+      final gen = _gen;
+      final device = _device;
       final p = await fetch(device, _query(after: _newer));
       if (_stale(gen, device) || _pollToken != token) return;
-      if (p.gap) {
-        _pollToken = null;
-        return refresh();
-      }
+      // Rows were skipped: the first page again, keeping the user's place.
+      if (p.gap) return await _first(quiet: true);
       _merge(p.events);
       _newer = p.newer ?? _newer;
-      if (_error != null) _error = null;
+      _error = null;
       _notify();
     } catch (e) {
-      if (_stale(gen, device) || _pollToken != token) return;
+      if (_disposed || _pollToken != token) return;
       _error = _words(e);
       _notify();
     } finally {
@@ -228,6 +253,9 @@ class LogModel extends ChangeNotifier {
   }
 
   void _flush() {
+    // A gap page waiting behind the banner replaces the timeline as a whole.
+    final held = _held;
+    if (held != null) return _apply(held);
     if (_pending.isEmpty) return;
     _rows = [..._pending, ..._rows];
     _pending = const [];
@@ -242,7 +270,7 @@ class LogModel extends ChangeNotifier {
   void setAtTop(bool atTop) {
     if (_atTop == atTop) return;
     _atTop = atTop;
-    if (atTop && _pending.isNotEmpty) {
+    if (atTop && (_pending.isNotEmpty || _held != null)) {
       _flush();
       _notify();
     }
