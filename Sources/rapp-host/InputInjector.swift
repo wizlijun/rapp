@@ -22,8 +22,10 @@ final class InputInjector {
     /// Keys and buttons posted down and not yet up, released on teardown.
     private var held = HeldInput()
     private var lastPoint = CGPoint.zero
-    /// A press was dropped under another process's window (not the lock screen): its pid, its owner name
-    /// as the window server gives it, and the press point in global points. Called on the caller's queue.
+    /// A covered scroll burst must not wait for activation on every packet.
+    private var scrollRaiseAfter: TimeInterval = 0
+    /// A press or scroll was dropped under another process's window (not the lock screen): its pid,
+    /// its owner name and the input point in global points. Called on the caller's queue.
     var onCovered: ((pid_t, String, CGPoint) -> Void)?
 
     init(app: NSRunningApplication?, display: CGRect, log: @escaping (String) -> Void) {
@@ -45,11 +47,16 @@ final class InputInjector {
         case let .scroll(window, x, y, dx, dy):
             guard let target = table.first(where: { $0.id == window }) else { return }
             let point = globalPoint(target, x, y)
+            guard clearToPointerInput(at: point, window: target, scrolling: true) else { return }
             post(.mouseMoved, at: point, button: .left)
             let clamp: (Float) -> Int32 = { Int32(max(-10_000, min(10_000, $0.rounded()))) }
             guard let event = CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 2,
                                       wheel1: clamp(dy), wheel2: clamp(dx), wheel3: 0) else { return }
             event.flags = []
+            // Posting mouseMoved is asynchronous: the system pointer may still
+            // be elsewhere when this event is created. Address the wheel event
+            // explicitly, instead of inheriting that stale pointer position.
+            event.location = point
             event.post(tap: .cghidEventTap)
 
         case let .text(text):
@@ -95,7 +102,7 @@ final class InputInjector {
         }
         switch kind {
         case .down:
-            guard clearToClick(at: point, window: window, table: table) else {
+            guard clearToPointerInput(at: point, window: window) else {
                 droppedButtons.insert(button)
                 return
             }
@@ -130,22 +137,44 @@ final class InputInjector {
         }
     }
 
-    /// The top-window check before a press (spec §3.4): the window on top at
+    /// The top-window check before a press or scroll: the window on top at
     /// `point` must be the app's. If not, brings the app and the window to
-    /// the front, waits 50 ms and looks again; still covered drops the press.
-    private func clearToClick(at point: CGPoint, window: WindowInfo, table: [WindowInfo]) -> Bool {
+    /// the front and checks until ready (at most 50 ms); still covered drops the
+    /// input. Input already targeting the active app never sleeps. Polling avoids an unconditional
+    /// 50 ms delay when activation completes sooner.
+    private func clearToPointerInput(at point: CGPoint, window: WindowInfo, scrolling: Bool = false) -> Bool {
         guard let app else { return true }
-        if topOwner(at: point).pid == app.processIdentifier { return true }
+        // A wheel event does not activate an otherwise visible inactive app
+        // the way a mouse press does.
+        let ready: ((pid: pid_t, name: String)) -> Bool = {
+            $0.pid == app.processIdentifier && (!scrolling || app.isActive)
+        }
+        if ready(topOwner(at: point)) {
+            scrollRaiseAfter = 0
+            return true
+        }
+        if scrolling && ProcessInfo.processInfo.systemUptime < scrollRaiseAfter { return false }
         // Only decorated windows are raised (a popup has no AX window).
         WindowResizer.bringToFront(pid: app.processIdentifier,
                                    frame: window.kind.isDecorated ? window.globalFrame(display: display) : nil)
-        usleep(50_000)
-        let top = topOwner(at: point)
-        if top.pid == app.processIdentifier { return true }
+        let deadline = ProcessInfo.processInfo.systemUptime + 0.05
+        var top = topOwner(at: point)
+        while !ready(top) && ProcessInfo.processInfo.systemUptime < deadline {
+            usleep(5_000)
+            top = topOwner(at: point)
+        }
+        if ready(top) {
+            scrollRaiseAfter = 0
+            return true
+        }
+        if scrolling { scrollRaiseAfter = ProcessInfo.processInfo.systemUptime + 0.15 }
+        let input = scrolling ? "scroll" : "click"
         if screenLocked(CGSessionCopyCurrentDictionary() as? [String: Any]) {
-            log("click dropped: A is locked")
+            log("\(input) dropped: A is locked")
+        } else if top.pid == app.processIdentifier {
+            log("\(input) dropped: target app is not active yet")
         } else {
-            log("click dropped: covered by \(top.name)")
+            log("\(input) dropped: covered by \(top.name)")
             if top.pid != 0 { onCovered?(top.pid, top.name, point) }
         }
         return false

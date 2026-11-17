@@ -1376,6 +1376,70 @@ void main() {
       expect(mouse(), isEmpty);
     });
 
+    testWidgets('switching sessions raises A before the first trackpad scroll', (tester) async {
+      await tester.pumpWidget(wrap(embedded()));
+      await showWindow(tester, rw(7, 400, 328));
+      expect(port.calls.where((c) => c.$1 == 'select_window').map((c) => c.$2),
+          [{'sid': 1, 'window': 7}]);
+      await tester.runAsync(() async {
+        t.emit({'event': 'opened', 'sid': 2, 'id': '111', 'app': 'Notes', 'path': 'lan',
+          'port': 5002, 'token': 'tk'});
+        for (var i = 0; i < 4; i++) { await flush(); }
+      });
+      port.emit(const ReadyEvent(2, 'Notes'));
+      port.emit(WindowsEvent(2, [rw(8, 400, 328)]));
+      await tester.pump();
+      es.select('111/Notes');
+      await tester.pump();
+      port.calls.clear();
+
+      es.select('111/Safari');
+      // Activation is sent at selection, without waiting for a click or layout.
+      expect(port.calls.where((c) => c.$1 == 'select_window').single.$2,
+          {'sid': 1, 'window': 7});
+      await tester.pump();
+      final at = tester.getTopLeft(find.byKey(const Key('stage'))) + const Offset(200, 100);
+      final pad = TestPointer(9, PointerDeviceKind.trackpad);
+      await tester.sendEventToBinding(pad.panZoomStart(at));
+      await tester.sendEventToBinding(pad.panZoomUpdate(at, pan: const Offset(0, 12)));
+      await tester.sendEventToBinding(pad.panZoomEnd());
+      await tester.pump();
+      final input = port.calls.where((c) => c.$1 == 'select_window' || c.$1 == 'scroll').toList();
+      expect(input.map((c) => c.$1), ['select_window', 'scroll']);
+      expect(input.every((c) => c.$2['sid'] == 1 && c.$2['window'] == 7), isTrue);
+      expect(mouse(), isEmpty);
+    });
+
+    testWidgets('stage activation is not repeated by frames and resumes after overview', (tester) async {
+      await tester.pumpWidget(wrap(embedded()));
+      await showWindow(tester, rw(7, 400, 328));
+      port.calls.clear();
+      port.emit(WindowsEvent(1, [rw(7, 400, 328)]));
+      await tester.pump();
+      es.notifyListeners();
+      expect(port.calls.where((c) => c.$1 == 'select_window'), isEmpty);
+      es.toggleOverview();
+      es.notifyListeners();
+      expect(port.calls.where((c) => c.$1 == 'select_window'), isEmpty);
+      es.toggleOverview();
+      expect(port.calls.where((c) => c.$1 == 'select_window').single.$2,
+          {'sid': 1, 'window': 7});
+      port.calls.clear();
+      port.emit(const DetachedEvent(1, true));
+      await tester.pump();
+      es.select('111/Safari');
+      expect(port.calls.where((c) => c.$1 == 'select_window'), isEmpty);
+      port.emit(const DetachedEvent(1, false));
+      await tester.pump();
+      expect(port.calls.where((c) => c.$1 == 'select_window').single.$2,
+          {'sid': 1, 'window': 7});
+      port.calls.clear();
+      port.emit(const DisconnectedEvent(1, 'offline'));
+      await tester.pump();
+      es.select('111/Safari');
+      expect(port.calls.where((c) => c.$1 == 'select_window'), isEmpty);
+    });
+
     testWidgets('a held press is released on its own session when the stage switches session', (tester) async {
       await tester.pumpWidget(wrap(embedded()));
       await showWindow(tester, rw(7, 400, 328));

@@ -19,7 +19,16 @@ G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
-  gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
+  GtkWidget* window = gtk_widget_get_toplevel(GTK_WIDGET(view));
+  // Flutter's pages paint an opaque background on the GPU. Once a frame is
+  // available, skip the redundant GTK and FlView Cairo backgrounds: filling
+  // and uploading those full-window CPU surfaces is costly on HiDPI displays.
+  // GtkHeaderBar still paints itself. Keep the normal background during startup
+  // in case window_manager shows the window before Flutter's first frame.
+  gtk_widget_set_app_paintable(window, TRUE);
+  const GdkRGBA transparent = {0, 0, 0, 0};
+  fl_view_set_background_color(view, &transparent);
+  gtk_widget_show(window);
 }
 
 // Both roles live in one process, with at most one window/engine per role.
@@ -72,8 +81,7 @@ static void show_window(GApplication* application, gboolean connection_manager,
 
   FlView* view = fl_view_new(project);
   GdkRGBA background_color;
-  // Background defaults to black, override it here if necessary, e.g. #00000000
-  // for transparent.
+  // Retain a solid startup background until Flutter supplies its first frame.
   gdk_rgba_parse(&background_color, "#000000");
   fl_view_set_background_color(view, &background_color);
   gtk_widget_show(GTK_WIDGET(view));

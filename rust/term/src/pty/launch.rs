@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 pub const START_TIMEOUT: &str = "terminal launcher did not respond within 5 s";
 pub const NO_DESKTOP: &str = "no graphical desktop session is available";
 const LINUX_APPS: &[&str] = &["ghostty", "kitty", "alacritty", "foot", "wezterm", "gnome-terminal", "konsole", "xterm"];
-const DESKTOP_ENV: &[&str] = &["DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "XAUTHORITY", "PATH"];
+const DESKTOP_ENV: &[&str] = &["DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "XDG_SESSION_ID", "XDG_SESSION_TYPE", "DBUS_SESSION_BUS_ADDRESS", "XAUTHORITY", "PATH"];
 
 /// `s` in single quotes for `sh`.
 pub fn quote(s: &str) -> String {

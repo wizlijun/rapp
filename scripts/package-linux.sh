@@ -70,7 +70,12 @@ Remote applications render inside the app. The standalone `./rapp-client` is
 also available with native per-app windows. Embedded sessions can detach and
 reattach without reconnecting. Text, images, files and typed clipboard data can
 be pasted, transferred, cancelled and pinned; files stream to disk with resume.
-Folders cannot be attached. Linux graphical application/desktop hosting is not implemented.
+Folders cannot be attached. Other rapp clients can connect to this machine's Desktop
+on Omarchy/Hyprland, compatible wlroots compositors, and X11. Desktop hosting
+includes per-monitor capture, mouse, keyboard and text insertion. X11 text
+insertion requires xdotool. GNOME/KDE Wayland portals, individual application
+hosting, host clipboard/file transfers and automatic password entry are not
+implemented. Unlock locally if the compositor blocks capture while locked.
 Writing panels optionally render inline candidates with Fcitx5's sumicandidates
 addon (org.fcitx.Fcitx.SumiCandidates1). Without that separately installed addon,
 the system candidate window remains available. Rapp does not install or restart
@@ -115,7 +120,7 @@ arch=('x86_64')
 license=('GPL-3.0-only')
 url='https://github.com/wizlijun/rapp'
 depends=('glibc>=2.39' 'gcc-libs' 'gtk3' 'gtk4>=4.12' 'libayatana-appindicator' 'xdg-utils' 'systemd')
-optdepends=('git: data directory version history and remote synchronization')
+optdepends=('git: data directory version history and remote synchronization' 'xdotool: text insertion into an X11 host desktop')
 provides=('rapp=$version')
 conflicts=('rapp')
 options=('!strip' '!debug')
@@ -124,7 +129,7 @@ sha256sums=('$(sha256sum "$archive" | cut -d' ' -f1)')
 package() {
   install -d "\$pkgdir/opt/rapp" "\$pkgdir/usr/bin"
   cp -a "\$srcdir/$name/." "\$pkgdir/opt/rapp/"
-  for binary in rapp rapp-client rapp-hub rapp-service rapp-term rapp-cli; do
+  for binary in rapp rapp-client rapp-host rapp-hub rapp-service rapp-term rapp-cli; do
     ln -s "/opt/rapp/\$binary" "\$pkgdir/usr/bin/\$binary"
   done
   install -Dm644 "\$srcdir/$name/LICENSE" "\$pkgdir/usr/share/licenses/rapp-omarchy/LICENSE"

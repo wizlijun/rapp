@@ -531,7 +531,9 @@ class _LocalSectionState extends State<LocalSection> {
                   ),
                 ]),
               ),
-            if (_platform == TargetPlatform.macOS) _autoLockRow(st),
+            if (_platform == TargetPlatform.macOS || _platform == TargetPlatform.linux) _autoLockRow(st),
+            if (_platform == TargetPlatform.linux && st.capabilities?['desktop'] == true)
+              _row('桌面', st.desktopError ?? (st.screenRecording && st.accessibility ? '可供其他设备连接' : '未检测到可共享的桌面')),
             if (_platform == TargetPlatform.linux)
               LinuxFirewallSection(port: st.port, localAddresses: localFirewallAddresses(st.lanIds), check: widget.firewallCheck),
             if (_platform != TargetPlatform.macOS && _platform != TargetPlatform.linux)

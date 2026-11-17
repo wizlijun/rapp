@@ -1,0 +1,26 @@
+[package]
+name = "rapp-host-linux"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "rapp-host"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+serde_json.workspace = true
+rapp-client-core = { path = "../client-core" }
+flate2 = "1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+tempfile.workspace = true
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "unstable"] }
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }
+wayland-protocols-misc = { version = "0.3", features = ["client"] }
+x11rb = { version = "0.13", features = ["randr", "xtest", "xfixes"] }
+
+[dev-dependencies]
+tempfile.workspace = true
