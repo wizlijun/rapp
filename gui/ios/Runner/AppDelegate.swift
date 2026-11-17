@@ -15,5 +15,12 @@ import UIKit
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "IosPlugin") {
       IosPlugin.register(with: registrar)
     }
+    // The same plugins (and names) as the macOS runner's MainFlutterWindow.
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "RappUnlock") {
+      UnlockPlugin.register(with: registrar)
+    }
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "RappSession") {
+      SessionPlugin.register(with: registrar)
+    }
   }
 }

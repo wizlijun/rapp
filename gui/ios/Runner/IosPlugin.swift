@@ -29,7 +29,7 @@ final class IosPlugin: NSObject, FlutterPlugin {
   }
 
   /// The root controller; the storyboard makes it a `RappViewController`.
-  private var root: RappViewController? {
+  private static var root: RappViewController? {
     UIApplication.shared.connectedScenes
       .compactMap { ($0 as? UIWindowScene)?.windows.first(where: \.isKeyWindow)?.rootViewController as? RappViewController }
       .first
@@ -53,7 +53,7 @@ final class IosPlugin: NSObject, FlutterPlugin {
       UIApplication.shared.isIdleTimerDisabled = args["on"] as? Bool ?? false
       result(true)
     case "sessionActive":
-      root?.sessionActive = args["on"] as? Bool ?? false
+      Self.root?.sessionActive = args["on"] as? Bool ?? false
       result(true)
     case "beginBackground":
       beginBackground()
@@ -65,7 +65,7 @@ final class IosPlugin: NSObject, FlutterPlugin {
       guard let path = args["path"] as? String else {
         return result(FlutterError(code: "share", message: "missing path", details: nil))
       }
-      share(path)
+      Self.share(path)
       result(true)
     case "openUrl":
       guard let text = args["url"] as? String, let url = URL(string: text) else {
@@ -134,7 +134,8 @@ final class IosPlugin: NSObject, FlutterPlugin {
     background = .invalid
   }
 
-  private func share(_ path: String) {
+  /// The share sheet for one file (also SessionPlugin's 显示位置 on iOS).
+  static func share(_ path: String) {
     guard let top = root else { return }
     let sheet = UIActivityViewController(activityItems: [URL(fileURLWithPath: path)], applicationActivities: nil)
     if let popover = sheet.popoverPresentationController {

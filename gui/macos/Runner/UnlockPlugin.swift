@@ -1,4 +1,8 @@
+#if os(macOS)
 import FlutterMacOS
+#else
+import Flutter
+#endif
 import RappSession
 
 /// Password storage is separate from the session command/logging channel.
@@ -7,7 +11,12 @@ final class UnlockPlugin: NSObject, FlutterPlugin {
   private let queue = DispatchQueue(label: "rapp.unlock-store", qos: .utility)
 
   static func register(with registrar: FlutterPluginRegistrar) {
-    let channel = FlutterMethodChannel(name: "rapp/unlock", binaryMessenger: registrar.messenger)
+    #if os(macOS)
+    let messenger = registrar.messenger
+    #else
+    let messenger = registrar.messenger()
+    #endif
+    let channel = FlutterMethodChannel(name: "rapp/unlock", binaryMessenger: messenger)
     registrar.addMethodCallDelegate(UnlockPlugin(), channel: channel)
   }
 
@@ -44,9 +53,15 @@ final class UnlockPlugin: NSObject, FlutterPlugin {
         DispatchQueue.main.async { result(response) }
       } catch {
         DispatchQueue.main.async {
-          result(FlutterError(code: "keychain", message: "无法访问 macOS 钥匙串", details: nil))
+          result(FlutterError(code: "keychain", message: keychainError, details: nil))
         }
       }
     }
   }
 }
+
+#if os(macOS)
+private let keychainError = "无法访问 macOS 钥匙串"
+#else
+private let keychainError = "无法访问钥匙串"
+#endif

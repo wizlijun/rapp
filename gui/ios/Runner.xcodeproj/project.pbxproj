@@ -20,6 +20,8 @@
 		A1000000000000000000F004 /* RappViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000F003 /* RappViewController.swift */; };
 		A1000000000000000000F007 /* RappSession in Frameworks */ = {isa = PBXBuildFile; productRef = A1000000000000000000F006 /* RappSession */; };
 		A1000000000000000000F009 /* RappCore in Frameworks */ = {isa = PBXBuildFile; productRef = A1000000000000000000F008 /* RappCore */; };
+		A1000000000000000000F00B /* SessionPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000F00A /* SessionPlugin.swift */; };
+		A1000000000000000000F00D /* UnlockPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000F00C /* UnlockPlugin.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -65,6 +67,8 @@
 		97C147021CF9000F007C117D /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A1000000000000000000F001 /* IosPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IosPlugin.swift; sourceTree = "<group>"; };
 		A1000000000000000000F003 /* RappViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RappViewController.swift; sourceTree = "<group>"; };
+		A1000000000000000000F00A /* SessionPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionPlugin.swift; path = ../macos/Runner/SessionPlugin.swift; sourceTree = SOURCE_ROOT; };
+		A1000000000000000000F00C /* UnlockPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UnlockPlugin.swift; path = ../macos/Runner/UnlockPlugin.swift; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -133,6 +137,8 @@
 				7884E8672EC3CC0400C636F2 /* SceneDelegate.swift */,
 				A1000000000000000000F001 /* IosPlugin.swift */,
 				A1000000000000000000F003 /* RappViewController.swift */,
+				A1000000000000000000F00A /* SessionPlugin.swift */,
+				A1000000000000000000F00C /* UnlockPlugin.swift */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
 			);
 			path = Runner;
@@ -299,6 +305,8 @@
 				7884E8682EC3CC0700C636F2 /* SceneDelegate.swift in Sources */,
 				A1000000000000000000F002 /* IosPlugin.swift in Sources */,
 				A1000000000000000000F004 /* RappViewController.swift in Sources */,
+				A1000000000000000000F00B /* SessionPlugin.swift in Sources */,
+				A1000000000000000000F00D /* UnlockPlugin.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -12,8 +12,11 @@ final class RappViewController: FlutterViewController {
     }
   }
 
-  /// Hook for the shared SessionPlugin (Task 6): return true when the presses were consumed. Nil means not handled.
-  var pressHandler: ((Set<UIPress>, Bool) -> Bool)?
+  /// Where hardware-keyboard presses go first (`SessionPlugin.handlePresses`): true when the press was taken,
+  /// false or nil to let Flutter have it. Called one press at a time, so a set is never half taken.
+  var pressHandler: ((Set<UIPress>, Bool) -> Bool)? = { presses, began in
+    SessionPlugin.shared?.handlePresses(presses, began: began) ?? false
+  }
 
   override var preferredScreenEdgesDeferringSystemGestures: UIRectEdge {
     sessionActive ? .all : []
@@ -22,14 +25,14 @@ final class RappViewController: FlutterViewController {
   override var prefersHomeIndicatorAutoHidden: Bool { sessionActive }
 
   override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-    if pressHandler?(presses, true) != true { super.pressesBegan(presses, with: event) }
+    for press in presses where pressHandler?([press], true) != true { super.pressesBegan([press], with: event) }
   }
 
   override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-    if pressHandler?(presses, false) != true { super.pressesEnded(presses, with: event) }
+    for press in presses where pressHandler?([press], false) != true { super.pressesEnded([press], with: event) }
   }
 
   override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-    if pressHandler?(presses, false) != true { super.pressesCancelled(presses, with: event) }
+    for press in presses where pressHandler?([press], false) != true { super.pressesCancelled([press], with: event) }
   }
 }

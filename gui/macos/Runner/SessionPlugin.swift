@@ -1,6 +1,11 @@
+#if os(macOS)
 import Cocoa
-import CoreVideo
 import FlutterMacOS
+#else
+import Flutter
+import UIKit
+#endif
+import CoreVideo
 import RappCore
 import RappSession
 
@@ -19,15 +24,32 @@ final class SurfaceTexture: NSObject, FlutterTexture {
   }
 }
 
+#if os(iOS)
+/// One hardware-keyboard press held behind a type-to-compose letter (iOS's `ComposeHold` event).
+struct HeldPress {
+  let hid: Int
+  let characters: String
+  let modifiers: Int
+  let down: Bool
+}
+#endif
+
 /// The `rapp/session` channel: glue between Dart and the embedded sessions in `RappSession`.
 /// Parsing and encoding are `channelCommand` / `eventPayload`; this only owns the sessions,
-/// their textures, their detached windows and the main-thread hops.
+/// their textures, their detached windows and the main-thread hops. Shared by the macOS and
+/// iOS runners: what only exists on the Mac (detached windows, the key monitor, Finder, the
+/// open panel) is macOS-only; the iPad's hardware keyboard comes in through `handlePresses`.
 ///
-/// Threading, per entry point: `handle` (Flutter's platform thread, which is main on macOS),
-/// `deliver` (hopped onto main from each session's queue), the key monitor and every observer
-/// (main). So all of this object's state is main-only; a session is only reached through its
-/// queue-safe `send`/`close`/`setStream`…, or on its queue (`backingScale`).
+/// Threading, per entry point: `handle` (Flutter's platform thread, which is main),
+/// `deliver` (hopped onto main from each session's queue), the key monitor / `handlePresses`
+/// and every observer (main). So all of this object's state is main-only; a session is only
+/// reached through its queue-safe `send`/`close`/`setStream`…, or on its queue (`backingScale`).
 final class SessionPlugin: NSObject, FlutterPlugin {
+  #if os(iOS)
+  /// The registered plugin, for the root view controller's presses.
+  static weak var shared: SessionPlugin?
+  #endif
+
   private final class Live {
     let session: EmbeddedSession
     /// The session's own queue: its state (`backingScale` included) is only touched there.
@@ -48,39 +70,47 @@ final class SessionPlugin: NSObject, FlutterPlugin {
   private var downloads: URL { DataPaths.currentTransfers() }
   private let channel: FlutterMethodChannel
   private let registry: FlutterTextureRegistry
-  private weak var view: NSView?
   private var live = [Int64: Live]()
   private var ready = false
   private var timer: Timer?
-  private var scaleObserver: NSObjectProtocol?
   /// The session whose picture has keyboard focus (Dart's `picture_focus`).
   private var focusedSid: Int64?
-  /// What A has been sent presses for: released when focus leaves (R15). One tracker for the
-  /// stage and the detached windows, so a release always goes where its press went.
-  private var keys = KeyTracker()
-  /// The session `keys` holds presses for (the one they were sent to), if any.
+  /// The session the held keys were sent to (`keys` on macOS, `router` on iOS), if any.
   private var keysHolder: Int64?
   /// Dart's `picture_focus` compose flag for `focusedSid`: a letter there opens the writing panel.
   private var composeOn = false
   /// Sessions whose A focus is in a password field (v13 `secure_focus`): no type-to-compose there,
   /// decided here so the very first key of a password never opens the panel.
   private var secure = Set<Int64>()
+  /// Windows the GUI hides per session (set_hidden); detached windows leave them out.
+  private var hidden = [Int64: Set<UInt32>]()
+  /// The banner each session's detached windows show (Dart's `set_banner`), kept for a later detach.
+  private var banners = [Int64: String]()
+  private var resignObserver: NSObjectProtocol?
+  private var terminateObserver: NSObjectProtocol?
+  #if os(macOS)
+  private weak var view: NSView?
+  private var scaleObserver: NSObjectProtocol?
+  /// What A has been sent presses for: released when focus leaves (R15). One tracker for the
+  /// stage and the detached windows, so a release always goes where its press went.
+  private var keys = KeyTracker()
   /// The compose letter and what followed it, until Dart asks for them back (`compose_replay`).
   private var hold = ComposeHold<NSEvent>()
   /// Re-dispatching held events: they go to rapp's window as they are.
   private var replaying = false
   /// Sessions shown in their own windows instead of on the stage (R20).
   private var detached = [Int64: DetachedSession]()
-  /// Windows the GUI hides per session (set_hidden); detached windows leave them out.
-  private var hidden = [Int64: Set<UInt32>]()
-  /// The banner each session's detached windows show (Dart's `set_banner`), kept for a later detach.
-  private var banners = [Int64: String]()
   private var keyMonitor: Any?
-  private var resignObserver: NSObjectProtocol?
-  private var terminateObserver: NSObjectProtocol?
   /// 「附件」's open file picker, one per session.
   private var panels = [Int64: NSOpenPanel]()
+  #else
+  /// The hardware keyboard: what goes to A, what A holds (released on blur), the latched modifiers.
+  private var router = PressRouter()
+  /// The compose letter and the presses after it, until Dart asks for them back (`compose_replay`).
+  private var hold = ComposeHold<HeldPress>()
+  #endif
 
+  #if os(macOS)
   static func register(with registrar: FlutterPluginRegistrar) {
     let channel = FlutterMethodChannel(name: "rapp/session", binaryMessenger: registrar.messenger)
     let plugin = SessionPlugin(channel: channel, registry: registrar.textures, view: registrar.view)
@@ -92,17 +122,44 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     self.registry = registry
     self.view = view
   }
+  #else
+  static func register(with registrar: FlutterPluginRegistrar) {
+    let channel = FlutterMethodChannel(name: "rapp/session", binaryMessenger: registrar.messenger())
+    let plugin = SessionPlugin(channel: channel, registry: registrar.textures())
+    registrar.addMethodCallDelegate(plugin, channel: channel)
+    shared = plugin
+  }
+
+  private init(channel: FlutterMethodChannel, registry: FlutterTextureRegistry) {
+    self.channel = channel
+    self.registry = registry
+  }
+  #endif
 
   deinit {
     timer?.invalidate()
-    if let scaleObserver { NotificationCenter.default.removeObserver(scaleObserver) }
     if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
     if let terminateObserver { NotificationCenter.default.removeObserver(terminateObserver) }
+    #if os(macOS)
+    if let scaleObserver { NotificationCenter.default.removeObserver(scaleObserver) }
     if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+    #endif
   }
 
   private var backingScale: CGFloat {
+    #if os(macOS)
     view?.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+    #else
+    UIScreen.main.scale
+    #endif
+  }
+
+  private var doubleClickMs: Int {
+    #if os(macOS)
+    Int((NSEvent.doubleClickInterval * 1000).rounded())
+    #else
+    500
+    #endif
   }
 
   func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -119,7 +176,7 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     switch command {
     case .initialize:
       begin()
-      result(["doubleClickMs": Int((NSEvent.doubleClickInterval * 1000).rounded())])
+      result(["doubleClickMs": doubleClickMs])
     case let .start(sid, port, token, mode, fps, density):
       guard ready else {
         result(FlutterError(code: "not_ready", message: "init first", details: nil))
@@ -144,8 +201,14 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     case let .keyEvent(sid, keyCode, modifiers, down):
       live[sid]?.session.send(.key(keyCode: keyCode, modifiers: modifiers, down: down))
       result(nil)
+    #if os(macOS)
     case .latch:
       result(nil)  // external-keyboard latch is iOS only
+    #else
+    case let .latch(_, modifiers):
+      router.latched = modifiers  // the hardware keyboard's next key carries these
+      result(nil)
+    #endif
     case let .selectWindow(sid, window):
       live[sid]?.session.send(.focus(window))
       result(nil)
@@ -190,7 +253,11 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       // Only what rapp itself downloaded: inside the downloads dir in use.
       let root = downloads
       if let url = revealableURL(path, within: [root]) {
+        #if os(macOS)
         NSWorkspace.shared.activateFileViewerSelecting([url])
+        #else
+        IosPlugin.share(url.path)  // no Finder: the share sheet (save to Files, AirDrop…)
+        #endif
         result(true)
       } else {
         result(false)  // missing, or not in rapp's downloads dir
@@ -198,8 +265,13 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     case let .composerPaste(sid):
       // ⌘V on B: the user's own clipboard, read on main by the composer.
       result(pasteResultPayload(live[sid]?.session.composer.paste() ?? .nothing))
+    #if os(macOS)
     case let .composerAttach(sid):
       attach(sid: sid, result: result)
+    #else
+    case .composerAttach:
+      result(FlutterMethodNotImplemented)  // no file picker on iOS yet
+    #endif
     case let .composerSend(sid, pieces):
       live[sid]?.session.composer.send(pieces)
       result(nil)
@@ -227,10 +299,15 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       // The caret is in the panel and the picture blurred (Dart sent `picture_focus(nil)` first):
       // the held keys now reach Flutter's text input, and B's IME, in the order they were typed.
       let events = hold.take(sid: sid, now: ProcessInfo.processInfo.systemUptime)
+      #if os(macOS)
       replaying = true
       for e in events { NSApp.sendEvent(e) }
       replaying = false
+      #else
+      replay(events)
+      #endif
       result(nil)
+    #if os(macOS)
     case let .detach(sid):
       detachSession(sid)
       result(nil)
@@ -240,6 +317,12 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     case let .raiseDetached(sid):
       detached[sid]?.raise()
       result(nil)
+    #else
+    case .detach:
+      result(FlutterError(code: "detach", message: "not on iOS", details: nil))
+    case .attach, .raiseDetached:
+      result(nil)  // nothing is ever detached on iOS
+    #endif
     case let .unlock(sid, password):
       live[sid]?.session.send(.unlock(password: password))
       result(nil)
@@ -248,17 +331,22 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       result(nil)
     case let .setBanner(sid, text):
       banners[sid] = text.isEmpty ? nil : text
+      #if os(macOS)
       detached[sid]?.banner = banners[sid]
+      #endif
       result(nil)
     case let .setHidden(sid, windows):
       hidden[sid] = windows.isEmpty ? nil : Set(windows)
+      #if os(macOS)
       if let entry = live[sid] {
         detached[sid]?.update(detachedWindows(entry.windows, hidden: hidden[sid] ?? []))
       }
+      #endif
       result(nil)
     }
   }
 
+  #if os(macOS)
   /// On main: the session's windows leave the stage for their own (R20). Nothing to show (no
   /// decorated window), an unknown or an already detached session: nothing happens.
   private func detachSession(_ sid: Int64) {
@@ -315,6 +403,7 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       result(pasteResultPayload(composer.attach(panel.urls)))
     }
   }
+  #endif
 
   /// After Dart's `init`: the engine is up, so textures may be registered from now on.
   private func begin() {
@@ -326,6 +415,7 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     }
     RunLoop.main.add(timer, forMode: .common)
     self.timer = timer
+    #if os(macOS)
     keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { [weak self] event in
       guard let self else { return event }
       return self.route(event)
@@ -353,8 +443,22 @@ final class SessionPlugin: NSObject, FlutterPlugin {
         entry.queue.async { entry.session.backingScale = scale }
       }
     }
+    #else
+    // Leaving the foreground (app switcher, Control Centre, a call…): A gets the releases.
+    resignObserver = NotificationCenter.default.addObserver(
+      forName: UIApplication.willResignActiveNotification, object: nil, queue: .main
+    ) { [weak self] _ in
+      self?.releaseKeys()
+    }
+    terminateObserver = NotificationCenter.default.addObserver(
+      forName: UIApplication.willTerminateNotification, object: nil, queue: .main
+    ) { [weak self] _ in
+      self?.releaseKeys()
+    }
+    #endif
   }
 
+  #if os(macOS)
   /// On main, for every key event of the app: a key for A is sent to its session and swallowed
   /// (nil); everything else goes on unchanged. Which session is the event's window's: the main
   /// window's is the one whose picture has focus (`routeKey`), a detached window's is its own
@@ -427,16 +531,103 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     target.session.send(.key(keyCode: event.keyCode, modifiers: UInt64(event.modifierFlags.rawValue), down: down))
     return nil
   }
+  #endif
 
   /// A release for every key A still holds, to the session that got the presses (nothing stays stuck on A).
   private func releaseKeys() {
+    #if os(macOS)
     let held = keys.releaseAll()
+    #else
+    let held = router.blur().map(\.code)
+    #endif
     defer { keysHolder = nil }
     guard let sid = keysHolder, let entry = live[sid] else { return }
     for code in held {
       entry.session.send(.key(keyCode: code, modifiers: 0, down: false))
     }
   }
+
+  /// `sid`'s link is gone: what A held for it is forgotten, nothing is sent.
+  private func forgetKeys(of sid: Int64) {
+    guard keysHolder == sid else { return }
+    #if os(macOS)
+    _ = keys.releaseAll()
+    #else
+    _ = router.blur()
+    #endif
+    keysHolder = nil
+  }
+
+  #if os(iOS)
+  /// On main, for the root view controller's hardware-keyboard presses (`began`: pressesBegan, else
+  /// ended or cancelled): true when this took them (sent to A, or held for the writing panel), false to
+  /// let them go on to Flutter. Every press sent to A is in `router`, so `releaseKeys` lets go of it.
+  func handlePresses(_ presses: Set<UIPress>, began: Bool) -> Bool {
+    var took = false
+    for press in presses {
+      guard let key = press.key else { continue }
+      if handle(key, down: began) { took = true }
+    }
+    return took
+  }
+
+  private func handle(_ key: UIKey, down: Bool) -> Bool {
+    let press = HeldPress(hid: key.keyCode.rawValue, characters: key.characters, modifiers: key.modifierFlags.rawValue,
+                          down: down)
+    let now = ProcessInfo.processInfo.systemUptime
+    // Waiting for the panel to take the caret: everything typed meanwhile waits behind the letter.
+    switch hold.add(press, now: now) {
+    case .held: return true
+    case .dropped: releaseKeys()  // a release that sat in the hold is gone: nothing stays stuck on A
+    case .notHolding: break
+    }
+    let target = focusedSid.flatMap { live[$0] != nil ? $0 : nil }
+    router.focusedSid = target
+    let action = router.press(hidUsage: press.hid, uiModifiers: press.modifiers, down: down,
+                              characters: press.characters, composeOn: composeOn,
+                              remoteSecure: target.map(secure.contains) ?? false)
+    switch action {
+    case .local:
+      return false
+    case let .compose(sid):
+      // Type-to-compose: the letter never reaches A; Dart opens the panel, then asks for it back.
+      hold.start(sid: sid, press, now: now)
+      channel.invokeMethod("compose_key", arguments: ["sid": sid])
+      return true
+    case let .localAfterRelease(outs):
+      send(outs, to: keysHolder)
+      return false
+    case let .send(outs, latchUsed):
+      guard let sid = target else { return false }
+      keysHolder = sid
+      send(outs, to: sid)
+      if latchUsed { channel.invokeMethod("latch_used", arguments: ["sid": sid]) }
+      return true
+    }
+  }
+
+  private func send(_ outs: [KeyOut], to sid: Int64?) {
+    guard let sid, let entry = live[sid] else { return }
+    for o in outs { entry.session.send(.key(keyCode: o.code, modifiers: o.flags, down: o.down)) }
+  }
+
+  /// `compose_replay` on iOS: the held presses as text into the first responder (the panel's text input,
+  /// which has the caret now). Only typed text and ⌫ replay; ups, chords and special keys are dropped.
+  private func replay(_ presses: [HeldPress]) {
+    guard !presses.isEmpty else { return }
+    firstResponder = nil
+    UIApplication.shared.sendAction(#selector(UIResponder.rappFindFirstResponder(_:)), to: nil, from: nil, for: nil)
+    guard let input = firstResponder as? UIKeyInput else { return }
+    let chords = UIKeyModifierFlags([.command, .control, .alternate]).rawValue
+    for p in presses where p.down && p.modifiers & chords == 0 {
+      if p.hid == UIKeyboardHIDUsage.keyboardDeleteOrBackspace.rawValue {
+        input.deleteBackward()
+      } else if isTypedText(p.characters) {
+        input.insertText(p.characters)
+      }
+    }
+  }
+  #endif
 
   private func start(sid: Int64, port: UInt16, token: String, mode: Mode, fps: UInt8, density: DensityChoice) {
     let address = RemoteAddress(host: "127.0.0.1", port: port, bundleID: "", token: token, mode: mode, fps: fps)
@@ -459,7 +650,9 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       for id in ids {
         if let t = entry.textures[id] { registry.textureFrameAvailable(t.id) }
       }
+      #if os(macOS)
       detached[sid]?.surfacesUpdated(ids)
+      #endif
     case let .windows(windows):
       let change = textureChanges(have: Set(entry.textures.keys), windows: windows)
       for id in change.unregister {
@@ -470,17 +663,18 @@ final class SessionPlugin: NSObject, FlutterPlugin {
         entry.textures[id] = (registry.register(texture), texture)
       }
       entry.windows = windows
+      #if os(macOS)
       // The textures stay registered while detached: attaching shows the picture at once.
       detached[sid]?.update(detachedWindows(windows, hidden: hidden[sid] ?? []))
+      #endif
     case let .secureFocus(on):
       if on { secure.insert(sid) } else { secure.remove(sid) }
     case .disconnected:
       // The link is down but the last pictures stay; Dart decides when the session ends.
+      #if os(macOS)
       panels.removeValue(forKey: sid)?.cancel(nil)
-      if keysHolder == sid {
-        _ = keys.releaseAll()
-        keysHolder = nil
-      }
+      #endif
+      forgetKeys(of: sid)
       if focusedSid == sid { focusedSid = nil }
     case .closed:
       // Every texture goes before Dart hears the session ended.
@@ -490,13 +684,12 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       hidden[sid] = nil
       banners[sid] = nil
       secure.remove(sid)
+      #if os(macOS)
       panels.removeValue(forKey: sid)?.cancel(nil)
       // Its windows go with it (the close button, 「结束会话」, A quitting): no attach is sent.
       detached.removeValue(forKey: sid)?.close()
-      if keysHolder == sid {
-        _ = keys.releaseAll()
-        keysHolder = nil
-      }
+      #endif
+      forgetKeys(of: sid)
       if focusedSid == sid { focusedSid = nil }
     default:
       break
@@ -504,7 +697,24 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     if let payload = eventPayload(event, sid: sid, textures: entry.textures.mapValues(\.id)) {
       channel.invokeMethod(payload.method, arguments: payload.args)
     }
+    #if os(macOS)
     // A detached session that loses its link goes back to the main window (after Dart heard `disconnected`).
     if case .disconnected = event, detached[sid] != nil { attachSession(sid) }
+    #endif
   }
 }
+
+#if os(iOS)
+/// Where `rappFindFirstResponder` leaves the first responder (UIKit has no getter for it).
+private weak var firstResponder: UIResponder?
+
+extension UIResponder {
+  /// Sent down the responder chain with a nil target: the first responder records itself.
+  @objc func rappFindFirstResponder(_ sender: Any?) { firstResponder = self }
+}
+
+/// Text a press types: not empty, no control characters (⏎ ⇥ ⎋) and none of UIKit's named keys (arrows…).
+private func isTypedText(_ s: String) -> Bool {
+  !s.isEmpty && !s.hasPrefix("UIKeyInput") && !s.unicodeScalars.contains { CharacterSet.controlCharacters.contains($0) }
+}
+#endif
