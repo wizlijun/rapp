@@ -30,9 +30,13 @@ final class IosPlugin: NSObject, FlutterPlugin {
 
   /// The root controller; the storyboard makes it a `RappViewController`.
   private static var root: RappViewController? {
-    UIApplication.shared.connectedScenes
-      .compactMap { ($0 as? UIWindowScene)?.windows.first(where: \.isKeyWindow)?.rootViewController as? RappViewController }
-      .first
+    if let current = RappViewController.current { return current }
+    let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+    for scene in scenes {
+      let window = scene.keyWindow ?? scene.windows.first
+      if let top = window?.rootViewController as? RappViewController { return top }
+    }
+    return UIApplication.shared.delegate?.window??.rootViewController as? RappViewController
   }
 
   func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -55,10 +59,10 @@ final class IosPlugin: NSObject, FlutterPlugin {
       UIApplication.shared.isIdleTimerDisabled = args["on"] as? Bool ?? false
       result(true)
     case "sessionActive":
-      Self.root?.sessionActive = args["on"] as? Bool ?? false
+      RappViewController.wantsSessionActive = args["on"] as? Bool ?? false
       result(true)
     case "fullscreen":
-      Self.root?.fullscreen = args["on"] as? Bool ?? false
+      RappViewController.wantsFullscreen = args["on"] as? Bool ?? false
       result(true)
     case "beginBackground":
       beginBackground()
@@ -70,8 +74,9 @@ final class IosPlugin: NSObject, FlutterPlugin {
       guard let path = args["path"] as? String else {
         return result(FlutterError(code: "share", message: "missing path", details: nil))
       }
-      Self.share(path)
-      result(true)
+      if Self.share(path) { result(true) } else {
+        result(FlutterError(code: "share", message: "no view controller to present from", details: nil))
+      }
     case "openUrl":
       guard let text = args["url"] as? String, let url = URL(string: text) else {
         return result(FlutterError(code: "openUrl", message: "bad url", details: nil))
@@ -140,8 +145,9 @@ final class IosPlugin: NSObject, FlutterPlugin {
   }
 
   /// The share sheet for one file (also SessionPlugin's 显示位置 on iOS).
-  static func share(_ path: String) {
-    guard let top = root else { return }
+  @discardableResult
+  static func share(_ path: String) -> Bool {
+    guard let top = root else { return false }
     let sheet = UIActivityViewController(activityItems: [URL(fileURLWithPath: path)], applicationActivities: nil)
     if let popover = sheet.popoverPresentationController {
       popover.sourceView = top.view
@@ -149,6 +155,7 @@ final class IosPlugin: NSObject, FlutterPlugin {
       popover.permittedArrowDirections = []
     }
     (top.presentedViewController ?? top).present(sheet, animated: true)
+    return true
   }
 
   @objc private func memoryWarning() {
