@@ -35,9 +35,10 @@ void main() {
     ));
   });
 
-  TermPainter make(TermRowCache cache, {required double dpr, required double scale}) => TermPainter(
+  TermPainter make(TermRowCache cache, {required double dpr, required double scale, TermMetrics? at}) =>
+      TermPainter(
         model: model,
-        metrics: metrics,
+        metrics: at ?? metrics,
         palette: palette,
         cache: cache,
         version: 1,
@@ -77,6 +78,13 @@ void main() {
     expect(a.shouldRepaint(make(cache, dpr: 2, scale: 1)), isFalse);
     expect(a.shouldRepaint(make(cache, dpr: 2, scale: 2)), isTrue);
     expect(a.shouldRepaint(make(cache, dpr: 1, scale: 1)), isTrue);
+    cache.dispose();
+  });
+
+  test('a grid laid out at another font size repaints even when the version is the same', () {
+    final cache = TermRowCache();
+    final larger = TermMetrics.measure(metrics.style.copyWith(fontSize: 28));
+    expect(make(cache, dpr: 2, scale: 1).shouldRepaint(make(cache, dpr: 2, scale: 1, at: larger)), isTrue);
     cache.dispose();
   });
 }

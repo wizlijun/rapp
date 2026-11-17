@@ -300,5 +300,6 @@ class TermPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(TermPainter old) => old.version != version || old.dpr != dpr || old.scale != scale;
+  bool shouldRepaint(TermPainter old) =>
+      old.version != version || old.dpr != dpr || old.scale != scale || !identical(old.metrics, metrics);
 }
