@@ -1,5 +1,5 @@
 // The top bar's project control, ahead of the session list: one button naming what the list is
-// narrowed to, and a menu to switch: 全部, each project, then 未归类 (the sessions in no project).
+// narrowed to, and a menu to switch: 全部, each project, then 自由区 (the sessions in no project).
 // It shows once there is a project.
 import 'package:flutter/material.dart';
 
@@ -19,24 +19,24 @@ class ProjectMenu extends StatelessWidget {
   static const fullWidth = 160.0;
   static const compactWidth = 48.0;
 
-  /// Shown once there is a project: with it, 全部 and 未归类 are already three to pick from.
+  /// Shown once there is a project: with it, 全部 and 自由区 are already three to pick from.
   static bool shows(MainState state) => state.projects.isNotEmpty;
 
-  /// The menu's values for 全部 and 未归类; project ids never start with a NUL.
+  /// The menu's values for 全部 and 自由区; project ids never start with a NUL.
   static const allValue = '\u0000all';
-  static const inboxValue = '\u0000inbox';
+  static const freeZoneValue = '\u0000freeZone';
 
-  /// Each choice's icon: 全部 every app, a project a workspace, 未归类 an inbox.
+  /// Each choice's icon: 全部 every app, a project a workspace, 自由区 open land.
   static const allIcon = Icons.apps;
   static const projectIcon = Icons.workspaces_outlined;
-  static const inboxIcon = Icons.inbox_outlined;
+  static const freeZoneIcon = Icons.landscape_outlined;
 
   /// The button's icon: the working sphere, whatever it is narrowed to.
   static const buttonIcon = Icons.workspaces_outlined;
 
-  /// What the button names: the current project, 未归类, or 全部.
+  /// What the button names: the current project, 自由区, or 全部.
   static String labelOf(MainState state) {
-    if (state.inbox) return MainState.inboxLabel;
+    if (state.freeZone) return MainState.freeZoneLabel;
     return state.projects.where((p) => p.id == state.currentProject).firstOrNull?.name ?? MainState.allLabel;
   }
 
@@ -91,13 +91,13 @@ class ProjectMenu extends StatelessWidget {
     );
   }
 
-  /// The menu under the button: 全部, every project, 未归类, each with its icon. The current one is
+  /// The menu under the button: 全部, every project, 自由区, each with its icon. The current one is
   /// bold, the previous project marked 上一个.
   Future<void> _open(BuildContext context) async {
     final box = context.findRenderObject() as RenderBox;
     final at = box.localToGlobal(Offset(0, box.size.height));
     final t = RappTokens.of(context);
-    final now = state.inbox ? inboxValue : state.currentProject ?? allValue;
+    final now = state.freeZone ? freeZoneValue : state.currentProject ?? allValue;
     PopupMenuItem<String> row(String key, String value, IconData icon, String name, {bool previous = false}) =>
         PopupMenuItem<String>(
           key: Key(key),
@@ -128,12 +128,12 @@ class ProjectMenu extends StatelessWidget {
         row('project-row-all', allValue, allIcon, MainState.allLabel),
         for (final p in state.projects)
           row('project-row-${p.id}', p.id, projectIcon, p.name, previous: p.id == state.previousProject),
-        row('project-row-inbox', inboxValue, inboxIcon, MainState.inboxLabel),
+        row('project-row-free-zone', freeZoneValue, freeZoneIcon, MainState.freeZoneLabel),
       ],
     );
     if (pick == null || pick == now) return;
     if (pick == allValue) return state.leaveProject();
-    if (pick == inboxValue) return state.switchInbox();
+    if (pick == freeZoneValue) return state.switchFreeZone();
     state.switchProject(pick);
   }
 }
