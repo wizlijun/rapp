@@ -314,9 +314,15 @@ void main() {
     ]);
   });
 
-  testWidgets('the auto-lock switch is absent off macOS', (tester) async {
+  testWidgets('the auto-lock switch shows on Linux too, now that Linux can host', (tester) async {
     svc = FakeService('tok');
     await pump(tester, platform: TargetPlatform.linux);
+    expect(find.text(label), findsOneWidget);
+  });
+
+  testWidgets('the auto-lock switch is absent where no session can be hosted', (tester) async {
+    svc = FakeService('tok');
+    await pump(tester, platform: TargetPlatform.windows);
     expect(find.text(label), findsNothing);
   });
 }
