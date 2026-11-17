@@ -4,6 +4,12 @@ import RappCore
 @testable import RappSession
 
 final class ChannelTests: XCTestCase {
+    func testKeyEventAndLatchParse() throws {
+        XCTAssertEqual(try channelCommand("key_event", ["sid": 1, "keyCode": 48, "modifiers": 1048576, "down": false]),
+                       .keyEvent(sid: 1, keyCode: 48, modifiers: 1048576, down: false))
+        XCTAssertEqual(try channelCommand("latch", ["sid": 1, "modifiers": 1048576]), .latch(sid: 1, modifiers: 1048576))
+    }
+
     func testStartParses() throws {
         let c = try channelCommand("start", ["sid": 3, "port": 5000, "token": "t", "mode": "color16", "fps": 15, "density": "adaptive"])
         XCTAssertEqual(c, .start(sid: 3, port: 5000, token: "t", mode: .color16, fps: 15, density: .adaptive))
@@ -152,6 +158,11 @@ final class ChannelTests: XCTestCase {
         XCTAssertThrowsError(try channelCommand("dismiss_cover", ["sid": 2])) { XCTAssertEqual($0 as? ChannelError, .bad("dismiss_cover")) }
         XCTAssertThrowsError(try channelCommand("dismiss_cover", ["sid": 2, "id": -1]))
         XCTAssertThrowsError(try channelCommand("dismiss_cover", ["sid": 2, "id": 1 << 33]))
+    }
+
+    func testDropTexturesCommand() {
+        XCTAssertEqual(try channelCommand("drop_textures", ["sid": 3]), .dropTextures(sid: 3))
+        XCTAssertThrowsError(try channelCommand("drop_textures", [:])) { XCTAssertEqual($0 as? ChannelError, .bad("drop_textures")) }
     }
 
     func testHostHintPayloads() throws {

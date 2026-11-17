@@ -1,0 +1,160 @@
+// iOS entry: the hub runs in the app over dart:ffi, there is no service, tray or window manager. The data root is
+// Application Support/rapp; the relay and key are typed into the app at run time (AccessSetup), never built in.
+import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
+
+import 'data_dir.dart';
+import 'embed/session_port.dart';
+import 'hub_client.dart';
+import 'hub_ffi.dart';
+import 'ios_channel.dart';
+import 'paths.dart';
+import 'platform_caps.dart' show watchHardwareKeys;
+import 'term/term_session_port.dart';
+import 'ui/access_setup.dart';
+import 'ui/app_profile_store.dart';
+import 'ui/background.dart';
+import 'ui/fullscreen.dart';
+import 'ui/main_state.dart';
+import 'ui/main_window.dart';
+import 'ui/prefs.dart';
+import 'ui/system_font.dart' show fallbackTextSize;
+import 'ui/tokens.dart';
+
+void _log(String s) => stderr.writeln('rapp: $s');
+
+Future<void> mainIos() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  watchHardwareKeys(); // a hardware keyboard's Return sends from the writing panel (spec §8.4)
+  final IosPaths paths;
+  try {
+    paths = await iosChannel.paths();
+  } catch (e) {
+    runApp(_IosApp(home: Scaffold(body: Center(child: Text('找不到数据目录：$e')))));
+    return;
+  }
+  final root = paths.dataRoot;
+  try {
+    prepareDataDir(root, null);
+    Directory('$root/logs').createSync(recursive: true);
+  } catch (e) {
+    _log('数据目录 $root: $e');
+  }
+  final data = DataDir(root);
+
+  await _waitForNetwork();
+
+  var name = '';
+  try {
+    name = await iosChannel.deviceName();
+  } catch (_) {}
+  HubClient? hub;
+  String? hubError;
+  try {
+    hub = HubClient(FfiHubTransport.start(home: data.localDir, logDir: '$root/logs', name: name));
+  } catch (e) {
+    hubError = 'hub 起不来：$e';
+  }
+
+  final prefs = UiPrefs.load(data.prefsDir() ?? data.localDir);
+  SessionPort? port;
+  var doubleClick = const Duration(milliseconds: 500);
+  try {
+    final p = ChannelSessionPort();
+    doubleClick = Duration(milliseconds: await p.init());
+    port = p;
+  } catch (e) {
+    _log('embedded sessions unavailable: $e');
+  }
+  String? builtin;
+  try {
+    builtin = await rootBundle.loadString('assets/app_profiles.json');
+  } catch (_) {}
+  final state = MainState(
+      hub: hub,
+      hubError: hubError,
+      data: data,
+      prefs: prefs,
+      port: port,
+      termPort: TermSessionPort(),
+      doubleClick: doubleClick,
+      profiles: AppProfileStore.load(data.sharedDir, builtin),
+      log: _log);
+  state.overview = true;
+  // Background freezes and closes every session, coming back reconnects them; the screen stays awake while
+  // a session is live (spec §9). Lives as long as the app.
+  BackgroundWatch(state: state, ios: iosChannel);
+
+  // Out of fullscreen the status bar stays and MainWindow keeps the top bar below it and the stage off the home
+  // bar; in it the status bar goes and the picture fills the screen.
+  final fullscreen = IosFullscreen();
+  if (prefs.startFullscreen) {
+    try {
+      await fullscreen.setFullScreen(true);
+    } catch (e) {
+      _log('全屏: $e');
+    }
+  }
+  runApp(_IosApp(
+    state: state,
+    home: MainWindow(state: state, monitor: null, control: null, fullscreen: fullscreen),
+  ));
+}
+
+/// China-region devices ask 无线数据 on the first request; until it is allowed nothing gets out. Shows
+/// [AccessNotice] and tries again when the network changes or the app comes back from Settings.
+Future<void> _waitForNetwork() async {
+  Future<bool> ok() async {
+    try {
+      final n = await iosChannel.net();
+      if (!n.ok) _log('网络检查没通过：status ${n.status} ${n.error}');
+      return !n.blocked;
+    } catch (_) {
+      return true; // No answer from the runner: let the hub try for itself.
+    }
+  }
+
+  if (await ok()) return;
+  final done = Completer<void>();
+  var checking = false;
+  Future<void> retry() async {
+    if (checking || done.isCompleted) return;
+    checking = true;
+    try {
+      if (await ok() && !done.isCompleted) done.complete();
+    } finally {
+      checking = false;
+    }
+  }
+
+  final sub = iosChannel.events.where((e) => e == 'pathChanged').listen((_) => retry());
+  final life = AppLifecycleListener(onResume: retry);
+  runApp(_IosApp(home: Scaffold(body: AccessNotice(onSettings: () => iosChannel.openSettings()))));
+  await done.future;
+  await sub.cancel();
+  life.dispose();
+}
+
+class _IosApp extends StatelessWidget {
+  const _IosApp({required this.home, this.state});
+  final Widget home;
+  final MainState? state;
+
+  MaterialApp _app(RappTheme theme) => MaterialApp(
+        title: 'rapp',
+        debugShowCheckedModeBanner: false,
+        theme: themeDataFor(theme, textSize: fallbackTextSize),
+        themeMode: ThemeMode.dark,
+        home: home,
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final st = state;
+    if (st == null) return _app(RappTheme.matrix);
+    return ListenableBuilder(listenable: st, builder: (context, _) => _app(st.prefs.theme));
+  }
+}

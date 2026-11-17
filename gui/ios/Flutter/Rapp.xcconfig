@@ -1,0 +1,11 @@
+// Links the hub (rust/hub-ffi) into Runner; scripts/build-ios.sh builds it first.
+RAPP_RUST_TARGET = $(SRCROOT)/../../rust/target
+RAPP_HUB_LIB[sdk=iphoneos*] = $(RAPP_RUST_TARGET)/aarch64-apple-ios/release/librapp_hub_ffi.a
+RAPP_HUB_LIB[sdk=iphonesimulator*] = $(RAPP_RUST_TARGET)/aarch64-apple-ios-sim/release/librapp_hub_ffi.a
+// Nothing in Swift calls the hub, so release dead-stripping drops it unless the four C functions are roots.
+RAPP_HUB_ROOTS = -Wl,-u,_rapp_hub_start -Wl,-u,_rapp_hub_send -Wl,-u,_rapp_hub_stop -Wl,-u,_rapp_hub_free_line
+OTHER_LDFLAGS = $(inherited) -force_load $(RAPP_HUB_LIB) $(RAPP_HUB_ROOTS) -lc++ -framework Security -framework SystemConfiguration
+// The hub is built for arm64 simulators only, like Flutter's simulator engine.
+ARCHS[sdk=iphonesimulator*] = arm64
+// Release strips global symbols by default, and Dart looks the hub's C functions up by name (dlsym).
+STRIP_STYLE = non-global

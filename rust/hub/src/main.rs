@@ -23,6 +23,10 @@ async fn main() {
         log: log.clone(),
         presence_every: Some(std::time::Duration::from_secs(30)),
         upgrade: rapp_hub::UpgradeTimes::default(),
+        name: None,
+        owns_access: false,
+        embed_only: false,
+        dual_stack: false,
     };
     if let Err(e) = rapp_hub::run(opts, tokio::io::stdin(), tokio::io::stdout()).await {
         log.msg(Lvl::Error, format_args!("{e:#}"));

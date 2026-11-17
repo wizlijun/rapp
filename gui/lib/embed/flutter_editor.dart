@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../platform_caps.dart';
 import '../ui/controls.dart';
 import 'composer_editor.dart';
 import 'linux_candidates.dart';
@@ -136,6 +137,9 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
                 minLines: 1,
                 maxLines: null,
                 keyboardType: TextInputType.multiline,
+                // Only the soft keyboard (iPad): its Return is a newline and 发送 sends (spec §8.4). With a hardware
+                // keyboard the key rules above hold, as on the desktop.
+                textInputAction: hardwareKeyboard() ? null : TextInputAction.newline,
                 style: (_controller.style = style).text.copyWith(color: style.color, shadows: const []),
                 cursorColor: style.cursor,
                 decoration: InputDecoration(

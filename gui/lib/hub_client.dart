@@ -224,6 +224,28 @@ class NetStatus {
   String toString() => 'NetStatus($level, $rttMs, $loss)';
 }
 
+/// The hub's `access` event (iOS, where the hub owns `service.json`): the relay, whether a key is set, and the
+/// name this device introduces itself with. The key itself never comes back.
+class HubAccess {
+  const HubAccess(this.relay, this.hasKey, this.name);
+  final String? relay;
+  final bool hasKey;
+  final String name;
+
+  static HubAccess fromJson(Map<String, dynamic> m) =>
+      HubAccess(m['relay'] is String ? m['relay'] as String : null, m['has_key'] == true, '${m['name'] ?? ''}');
+
+  @override
+  bool operator ==(Object other) =>
+      other is HubAccess && other.relay == relay && other.hasKey == hasKey && other.name == name;
+
+  @override
+  int get hashCode => Object.hash(relay, hasKey, name);
+
+  @override
+  String toString() => 'HubAccess($relay, $hasKey, $name)';
+}
+
 class _Pending {
   _Pending(this.event);
   final String event; // the reply event that resolves this request
@@ -281,6 +303,27 @@ class HubClient extends ChangeNotifier {
 
   /// Points the hub at a moved data dir's `local/` (re-reads hosts.json).
   Future<void> setHome(String localDir) => _request({'cmd': 'set_home', 'dir': localDir}, 'home_set');
+
+  /// The last `access` event; null until one arrived.
+  HubAccess? lastAccess;
+
+  /// The last 4 characters of the key [setAccess] saved in this run, for 本机's 显示; never the whole key.
+  String? keyTail;
+
+  /// The relay and key state as the hub reads `service.json` (iOS only; elsewhere the service owns them).
+  Future<HubAccess> access() async => HubAccess.fromJson(await _request({'cmd': 'access'}, 'access'));
+
+  /// Saves [relay] and [key] in `service.json` and dials again; the hub's refusal (`missing relay`, `bad key`) is
+  /// thrown with its words.
+  Future<HubAccess> setAccess(String relay, String key) async {
+    final a = HubAccess.fromJson(await _request({'cmd': 'set_access', 'relay': relay, 'key': key}, 'access'));
+    final k = key.trim();
+    keyTail = k.length <= 4 ? null : k.substring(k.length - 4);
+    return a;
+  }
+
+  /// Pauses or resumes the hub's presence probe (iOS in the background); no reply.
+  void pausePresence(bool paused) => _send({'cmd': 'presence', 'paused': paused});
 
   Future<AppList> apps(String id) async {
     final m = await _request({'cmd': 'apps', 'id': id}, 'apps');
@@ -443,6 +486,8 @@ class HubClient extends ChangeNotifier {
         final rtt = m['rtt_ms'];
         final loss = m['loss'];
         net = level == null ? null : NetStatus(level, rtt is num ? rtt.round() : null, loss is num ? loss.toDouble() : 0);
+      case 'access':
+        lastAccess = HubAccess.fromJson(m);
       case 'home_set':
         // A new data dir: the hub dropped every link it had.
         hostPaths.clear();

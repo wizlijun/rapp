@@ -314,6 +314,10 @@ impl Hub {
             log: rapp_net::log::Log::file(&home.join("logs"), "hub.log"),
             presence_every: every,
             upgrade,
+            name: None,
+            owns_access: false,
+            embed_only: false,
+            dual_stack: false,
         };
         let task = tokio::spawn(rapp_hub::run(opts, cmd_r, out_w));
         Hub { w: cmd_w, lines: BufReader::new(out_r).lines(), task, home: home.to_path_buf(), paths: Vec::new(), nets: Vec::new() }

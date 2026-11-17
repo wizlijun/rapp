@@ -23,6 +23,7 @@ import 'package:rapp/ui/project_positions.dart';
 import 'package:rapp/ui/resources_state.dart';
 import 'package:rapp/ui/session_model.dart';
 import 'package:rapp/ui/tokens.dart';
+import 'package:rapp/ui/unlock.dart';
 import 'package:rapp/ui/workspace_store.dart';
 
 import '../fakes.dart';
@@ -554,12 +555,14 @@ void main() {
 
   group('embedded sessions', () {
     void env(void Function(FakeAsync a, FakeTransport t, FakeSessionPort port, MainState st, List<String> hints) body,
-        {int sessions = 1, bool withPort = true, AppProfileStore? profiles, void Function(String)? log, String? app, String path = 'lan'}) {
+        {int sessions = 1, bool withPort = true, AppProfileStore? profiles, void Function(String)? log, String? app, String path = 'lan',
+        UnlockStore? unlockStore}) {
       fakeAsync((a) {
         final t = FakeTransport();
         final hub = HubClient(t);
         final port = FakeSessionPort();
-        final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: withPort ? port : null, profiles: profiles, log: log);
+        final st = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: withPort ? port : null, profiles: profiles, log: log,
+            unlockStore: unlockStore);
         final hints = <String>[];
         var last = st.hint;
         st.addListener(() {
@@ -2151,6 +2154,272 @@ void main() {
         expect(st.currentRemote!.sid, 1);
         expect(st.remote.containsKey(11), false);
         expect(hints, isEmpty);
+      });
+    });
+
+    group('background (iPad spec §9)', () {
+      /// The hub answers `close` with `closed`, as rapp-hub does.
+      void hubCloses(FakeTransport t) {
+        final answer = t.onSend;
+        t.onSend = (m) {
+          answer?.call(m);
+          if (m['cmd'] == 'close') t.emit({'event': 'closed', 'sid': m['sid'], 'reason': ?m['reason']});
+        };
+      }
+
+      int openCount(FakeTransport t) => t.sent.where((m) => m['cmd'] == 'open').length;
+
+      test('background freezes and closes with reason background', () {
+        env((a, t, port, st, hints) {
+          port.emit(WindowsEvent(1, [rw(3)]));
+          var ended = 0;
+          unawaited(st.enterBackground(end: () async => ended++));
+          a.flushMicrotasks();
+          expect(st.backgrounded, true);
+          expect(t.sent.where((m) => m['cmd'] == 'presence').single, {'cmd': 'presence', 'paused': true});
+          expect(t.sent.where((m) => m['cmd'] == 'close').single, {'cmd': 'close', 'sid': 1, 'reason': 'background'});
+          final r = st.recordFor('111/a')!;
+          expect(r.phase, Phase.disconnected);
+          expect(r.frozen, true);
+          expect(disconnectWord(r.reason), '切到后台');
+          expect(r.retry, isNull);
+          expect(st.currentRemote!.sid, 1, reason: 'the last frame stays on the stage');
+          final before = openCount(t);
+          a.elapse(const Duration(seconds: 3));
+          expect(ended, 0, reason: 'the hub never said closed: it waits');
+          a.elapse(const Duration(seconds: 1));
+          expect(ended, 1, reason: 'at most 4 s');
+          a.elapse(const Duration(seconds: 60));
+          expect(openCount(t), before, reason: 'no automatic try while in the background');
+          expect(hints, isEmpty);
+        });
+      });
+
+      test('background ends the background time once the hub closed every sid', () {
+        env((a, t, port, st, hints) {
+          hubCloses(t);
+          var began = 0, ended = 0;
+          unawaited(st.enterBackground(begin: () async => began++, end: () async => ended++));
+          a.flushMicrotasks();
+          expect((began, ended), (1, 1));
+          expect(st.hub!.sessions, isEmpty);
+        }, sessions: 2);
+      });
+
+      test('shown again before the background time began: nothing closes, presence keeps going', () {
+        env((a, t, port, st, hints) {
+          port.emit(WindowsEvent(1, [rw(3)]));
+          final began = Completer<void>();
+          var ended = 0;
+          unawaited(st.enterBackground(begin: () => began.future, end: () async => ended++));
+          a.flushMicrotasks();
+          unawaited(st.enterForeground());
+          a.flushMicrotasks();
+          began.complete();
+          a.elapse(const Duration(seconds: 5));
+          expect(t.sent.where((m) => m['cmd'] == 'close'), isEmpty);
+          expect(t.sent.where((m) => m['cmd'] == 'presence' && m['paused'] == true), isEmpty);
+          final r = st.recordFor('111/a')!;
+          expect(r.phase, Phase.live);
+          expect(r.frozen, false);
+          expect(st.backgrounded, false);
+          expect(ended, 1, reason: 'the background time still ends');
+        });
+      });
+
+      test('a dead hub: background and foreground neither throw nor hang', () {
+        env((a, t, port, st, hints) {
+          port.emit(WindowsEvent(1, [rw(3)]));
+          unawaited(t.die());
+          a.flushMicrotasks();
+          var ended = 0;
+          Object? error;
+          st.enterBackground(end: () async => ended++).catchError((Object e) => error = e);
+          a.flushMicrotasks();
+          expect(ended, 1);
+          st.enterForeground().catchError((Object e) => error = e);
+          a.elapse(const Duration(seconds: 5));
+          expect(error, isNull);
+          expect(st.backgrounded, false);
+        });
+      });
+
+      test('foreground reconnects current first then others staggered', () {
+        env((a, t, port, st, hints) {
+          hubCloses(t);
+          port.emit(WindowsEvent(1, [rw(3)]));
+          port.emit(WindowsEvent(2, [rw(4)]));
+          st.select('111/aa'); // B
+          unawaited(st.enterBackground());
+          a.elapse(const Duration(seconds: 5));
+          expect(st.recordFor('111/a')!.frozen && st.recordFor('111/aa')!.frozen, true);
+          final n = t.sent.length;
+          unawaited(st.enterForeground());
+          a.flushMicrotasks();
+          List<Map<String, dynamic>> sent() => t.sent.skip(n).toList();
+          List<String> opened() => [for (final m in sent()) if (m['cmd'] == 'open') m['app'] as String];
+          expect(st.backgrounded, false);
+          expect(sent().take(2), [
+            {'cmd': 'net_suspect'},
+            {'cmd': 'presence', 'paused': false},
+          ]);
+          expect(opened(), ['aa']);
+          a.elapse(const Duration(milliseconds: 299));
+          expect(opened(), ['aa']);
+          a.elapse(const Duration(milliseconds: 1));
+          expect(opened(), ['aa', 'a']);
+          expect(sent().where((m) => m['cmd'] == 'open').every((m) => m['reconnect'] == true), true);
+          a.elapse(const Duration(seconds: 60));
+          expect(opened(), ['aa', 'a']);
+        }, sessions: 2);
+      });
+
+      test('draft survives background round trip', () {
+        env((a, t, port, st, hints) {
+          hubCloses(t);
+          port.emit(WindowsEvent(1, [rw(3)]));
+          st.remote[1]!.composer.setDraft('半句');
+          unawaited(st.enterBackground());
+          a.elapse(const Duration(seconds: 5));
+          expect(st.remote[1]!.composer.draft, '半句');
+          unawaited(st.enterForeground());
+          a.flushMicrotasks();
+          expect(st.currentReconnecting, true);
+          port.emit(WindowsEvent(11, [rw(3)]));
+          expect(st.currentRemote!.sid, 11);
+          expect(st.remote[11]!.composer.draft, '半句');
+          expect(st.recordFor('111/a')!.frozen, false);
+        });
+      });
+
+      test('foreground while opening does not open twice', () {
+        env((a, t, port, st, hints) {
+          hubCloses(t);
+          port.emit(WindowsEvent(1, [rw(3)]));
+          port.emit(const DisconnectedEvent(1, 'connection closed'));
+          final answer = t.onSend;
+          final held = <Map<String, dynamic>>[];
+          t.onSend = (m) => m['cmd'] == 'open' ? held.add(m) : answer?.call(m);
+          st.reconnect('111/a');
+          a.flushMicrotasks();
+          expect(st.recordFor('111/a')!.phase, Phase.connecting);
+          unawaited(st.enterBackground());
+          a.elapse(const Duration(seconds: 5));
+          final r = st.recordFor('111/a')!;
+          expect(r.phase, Phase.disconnected);
+          expect(r.frozen, true);
+          unawaited(st.enterForeground());
+          a.flushMicrotasks();
+          expect(held, hasLength(2), reason: 'one open after coming back');
+          // The try from before the background answers late: it is closed, never started, and the record is
+          // the new try's.
+          t.emit(embedOpened(21, held.first['req']));
+          a.flushMicrotasks();
+          expect(t.sent.last, {'cmd': 'close', 'sid': 21, 'reason': 'background'});
+          expect(port.calls.where((c) => c.$1 == 'start' && c.$2['sid'] == 21), isEmpty);
+          expect(r.phase, Phase.connecting);
+          t.emit(embedOpened(22, held.last['req']));
+          a.flushMicrotasks();
+          expect(port.calls.where((c) => c.$1 == 'start').map((c) => c.$2['sid']).toList(), [1, 22]);
+          port.emit(WindowsEvent(22, [rw(3)]));
+          expect(st.currentRemote!.sid, 22);
+          a.elapse(const Duration(seconds: 60));
+          expect(held, hasLength(2));
+          expect(st.sessionCount, 1);
+        });
+      });
+
+      test('an open answered while in the background is closed at once and never started', () {
+        env((a, t, port, st, hints) {
+          hubCloses(t);
+          port.emit(WindowsEvent(1, [rw(3)]));
+          port.emit(const DisconnectedEvent(1, 'connection closed'));
+          final answer = t.onSend;
+          final held = <Map<String, dynamic>>[];
+          t.onSend = (m) => m['cmd'] == 'open' ? held.add(m) : answer?.call(m);
+          st.reconnect('111/a');
+          a.flushMicrotasks();
+          unawaited(st.enterBackground());
+          a.flushMicrotasks();
+          t.emit(embedOpened(21, held.single['req']));
+          a.flushMicrotasks();
+          expect(t.sent.last, {'cmd': 'close', 'sid': 21, 'reason': 'background'});
+          expect(port.calls.where((c) => c.$1 == 'start' && c.$2['sid'] == 21), isEmpty);
+          expect(st.recordFor('111/a')!.phase, Phase.disconnected);
+          expect(st.currentRemote!.sid, 1);
+          a.elapse(const Duration(seconds: 60));
+          expect(held, hasLength(1));
+        });
+      });
+
+      test('a late event of the closed sid brings nothing back and nothing goes to it', () {
+        env((a, t, port, st, hints) {
+          hubCloses(t);
+          port.emit(WindowsEvent(1, [rw(3)]));
+          unawaited(st.enterBackground());
+          a.elapse(const Duration(seconds: 5));
+          final hubSent = t.sent.length, portSent = port.calls.length;
+          port.emit(WindowsEvent(1, [rw(3), rw(4)]));
+          port.emit(const TrafficEvent(1, 100, 1));
+          port.emit(const ScreenLockedEvent(1, true));
+          port.emit(const DisconnectedEvent(1, 'connection closed'));
+          a.flushMicrotasks();
+          final r = st.recordFor('111/a')!;
+          expect(r.phase, Phase.disconnected);
+          expect(disconnectWord(r.reason), '切到后台');
+          st.remote[1]!.composer.setDraft('x');
+          st.selectWindow(4);
+          a.elapse(const Duration(seconds: 60));
+          expect(t.sent.skip(hubSent), isEmpty);
+          expect(port.calls.skip(portSent).where((c) => c.$2['sid'] == 1), isEmpty);
+        });
+      });
+
+      test('memory warning drops the pictures of frozen sessions only, not the one on the stage', () {
+        env((a, t, port, st, hints) {
+          port.emit(WindowsEvent(1, [rw(3)]));
+          port.emit(WindowsEvent(2, [rw(4)]));
+          port.emit(WindowsEvent(3, [rw(5)]));
+          st.select('111/aaa');
+          port.emit(const DisconnectedEvent(1, 'connection closed'));
+          port.emit(const DisconnectedEvent(3, 'connection closed'));
+          a.flushMicrotasks();
+          st.memoryWarning();
+          expect([for (final c in port.calls) if (c.$1 == 'drop_textures') c.$2['sid']], [1]);
+        }, sessions: 3);
+      });
+
+      test('stageLive: a live session on the stage, not 全景, not in the background (§9.5)', () {
+        env((a, t, port, st, hints) {
+          port.emit(WindowsEvent(1, [rw(3)]));
+          expect(st.stageLive, true);
+          st.overview = true;
+          expect(st.stageLive, false);
+          st.overview = false;
+          unawaited(st.enterBackground());
+          a.flushMicrotasks();
+          expect(st.stageLive, false);
+        });
+      });
+
+      test('reconnect auto-unlocks when A locked and password remembered', () {
+        final store = UnlockStore(memory: true);
+        env((a, t, port, st, hints) {
+          unawaited(store.save('111', 'pw', auto: true));
+          a.flushMicrotasks();
+          hubCloses(t);
+          port.emit(WindowsEvent(1, [rw(3)]));
+          port.emit(const ScreenLockedEvent(1, false));
+          unawaited(st.enterBackground());
+          a.elapse(const Duration(seconds: 5));
+          unawaited(st.enterForeground());
+          a.flushMicrotasks();
+          port.emit(const ScreenLockedEvent(11, true));
+          a.flushMicrotasks();
+          expect([for (final c in port.calls) if (c.$1 == 'unlock') c.$2], [
+            {'sid': 11, 'password': 'pw'},
+          ]);
+        }, unlockStore: store);
       });
     });
 

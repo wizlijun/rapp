@@ -29,6 +29,14 @@ void main() {
       contains('"start_fullscreen"'),
     );
   });
+  test('keep_awake: on when missing or bad, saved when off', () {
+    File('${tmp.path}/gui.json').writeAsStringSync('{"keep_awake":"x"}');
+    expect(UiPrefs.load(tmp.path).keepAwake, isTrue);
+    expect(UiPrefs().keepAwake, isTrue);
+    UiPrefs(keepAwake: false).save(tmp.path);
+    expect(File('${tmp.path}/gui.json').readAsStringSync(), contains('"keep_awake":false'));
+    expect(UiPrefs.load(tmp.path).keepAwake, isFalse);
+  });
   test('auto_save_traffic: on when missing, saved when off', () {
     File('${tmp.path}/gui.json').writeAsStringSync('{"theme":"matrix","start_fullscreen":true}');
     expect(UiPrefs.load(tmp.path).autoSaveTraffic, isTrue);

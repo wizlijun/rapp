@@ -42,6 +42,13 @@ void main() {
     put('$d/previous/rapp.app/x', 'x');
   }
 
+  test('no legacy dir (iOS): the layout, and nothing to migrate', () {
+    expect(prepareDataDir(root, null), isFalse);
+    expect(Directory('$root/files/transfers').existsSync(), isTrue);
+    expect(File('$root/README.md').existsSync(), isTrue);
+    expect(File('$root/local/$migratedFrom').existsSync(), isFalse);
+  });
+
   test('fresh root gets the layout', () {
     expect(prepareDataDir(root, legacy), isFalse);
     for (final d in [

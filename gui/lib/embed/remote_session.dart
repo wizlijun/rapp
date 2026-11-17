@@ -39,6 +39,9 @@ class RemoteSession extends ChangeNotifier {
     };
   }
 
+  /// A terminal's key row ⌃ is lit: the next key goes with Ctrl (a letter as `Ctrl-<letter>`), then it goes out.
+  final termCtrl = ValueNotifier<bool>(false);
+
   /// Whether a typed letter opens the writing panel. A panel opened by a letter and closed unused means the
   /// user wants the app's own keys (vim, y/n, a password): off until they open the panel themselves.
   bool composeArmed = true;
@@ -372,6 +375,8 @@ class RemoteSession extends ChangeNotifier {
       case AppOpenedEvent():
       case HostNoticeActionEvent():
         break; // MainState's notice.
+      case LatchUsedEvent():
+        break; // MainState's key-row latch.
       case ClosedEvent():
         endReason = e.reason;
     }
@@ -431,6 +436,7 @@ class RemoteSession extends ChangeNotifier {
 
   @override
   void dispose() {
+    termCtrl.dispose();
     policy.dispose();
     composer.removeListener(_composerChanged);
     composer.dispose();

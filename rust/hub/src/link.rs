@@ -148,6 +148,8 @@ struct Dialer {
     identity: Arc<Identity>,
     name: String,
     key: Option<Arc<Key>>,
+    /// The endpoint is dual-stack: an IPv4 address goes out v4-mapped.
+    dual: bool,
 }
 
 impl Dialer {
@@ -161,6 +163,7 @@ impl Dialer {
         wait: Duration,
     ) -> Result<(Connection, Accepted)> {
         let cfg = device_client_config(&self.identity, ALPN_DEVICE)?;
+        let addr = if self.dual { rapp_net::quic::mapped(addr) } else { addr };
         let connecting = self.ep.connect_with(cfg, addr, SNI).map_err(|e| Unreachable(e.to_string()))?;
         let conn = match tokio::time::timeout(wait, connecting).await {
             Err(_) => return Err(Unreachable("timed out".into()).into()),
@@ -251,7 +254,7 @@ fn dial_order(lan: &[String]) -> Vec<&String> {
 
 impl Hub {
     fn dialer(&self, key: Option<Arc<Key>>) -> Dialer {
-        Dialer { ep: self.ep.clone(), identity: self.at_home().1, name: self.name.clone(), key }
+        Dialer { ep: self.ep.clone(), identity: self.at_home().1, name: self.name.clone(), key, dual: self.dual_stack }
     }
 
     /// The connection to the relay for the settings as they are now, dialed when there is none, it has
@@ -278,7 +281,7 @@ impl Hub {
             c.conn.close();
             *cache = None;
         }
-        let conn = RelayConn::dial(&self.ep, &addr, &key, &identity).await?;
+        let conn = RelayConn::dial_for(&self.ep, &addr, &key, &identity, self.dual_stack).await?;
         let key = Arc::new(key);
         *cache = Some(RelayCache { addr, key_text, fp: identity.fp, conn: conn.clone(), key: key.clone() });
         Ok(Some((conn, key)))
@@ -311,7 +314,7 @@ impl Hub {
         let (home, identity) = self.at_home();
         let settings = rapp_conn::settings::load(&home);
         let (Some(addr), Some(key)) = (settings.relay, settings.key) else { return Ok(None) };
-        Ok(Some(RelayConn::dial(&self.ep, &addr, &key, &identity).await?))
+        Ok(Some(RelayConn::dial_for(&self.ep, &addr, &key, &identity, self.dual_stack).await?))
     }
 
     /// Puts `new` (from `relay_fresh`) in place of `old` and closes `old`. False, and `new` is
@@ -685,6 +688,7 @@ impl Hub {
     /// Returns the auth reply too (password auth names the host: `id`, `name`).
     pub async fn dial(&self, addr: &str, wait: Duration, auth: &Op) -> Result<(Connection, Value)> {
         let addr: SocketAddr = addr.parse().with_context(|| format!("bad address {addr}"))?;
+        let addr = if self.dual_stack { rapp_net::quic::mapped(addr) } else { addr };
         let conn = connect(&self.ep, addr, ALPN_PEER, wait).await?;
         let (_, r) = exchange(&conn, &[auth]).await?;
         if r["ok"] != true {

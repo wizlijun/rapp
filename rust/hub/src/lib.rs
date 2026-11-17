@@ -3,6 +3,7 @@
 //! the relay), and through the relay when no address answers. A link off the LAN moves to the LAN
 //! when it answers (`upgrade`).
 
+mod access;
 mod hosts;
 mod link;
 mod netmon;
@@ -21,7 +22,7 @@ use rapp_net::msg::Op;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 pub use upgrade::UpgradeTimes;
@@ -35,6 +36,15 @@ pub struct Opts {
     pub presence_every: Option<std::time::Duration>,
     /// When links off the LAN are tried on it.
     pub upgrade: UpgradeTimes,
+    /// The name B introduces itself with; None = this machine's hostname.
+    pub name: Option<String>,
+    /// This hub owns `service.json`'s relay and key (iOS: no service process), so `access` and
+    /// `set_access` work. Off: they are refused.
+    pub owns_access: bool,
+    /// Windowed sessions are refused; only `open` with `embed` works.
+    pub embed_only: bool,
+    /// Dial both address families (read by the dialer).
+    pub dual_stack: bool,
 }
 
 /// One open session. `tx` is the writer of the client's stdin (None once closed).
@@ -85,6 +95,11 @@ pub(crate) struct Hub {
     log: Log,
     /// B's self-declared name in `auth` (spec §2): this machine's hostname.
     name: String,
+    owns_access: bool,
+    embed_only: bool,
+    dual_stack: bool,
+    /// `presence` with `paused`: the probe skips its ticks.
+    presence_paused: AtomicBool,
     /// One terminal-session watch per online host.
     terms: terms::Watches,
     /// The network monitor's level and last event (`netmon`).
@@ -102,7 +117,11 @@ where
     let identity = Arc::new(rapp_wire::Identity::load_or_create(&opts.home, "device").context("device key")?);
     let hub = Arc::new(Hub {
         at: RwLock::new(HomeState { home: opts.home.clone(), identity }),
-        ep: rapp_net::quic::client_endpoint(([0, 0, 0, 0], 0).into())?,
+        ep: if opts.dual_stack {
+            rapp_net::quic::client_endpoint_dual()?
+        } else {
+            rapp_net::quic::client_endpoint(([0, 0, 0, 0], 0).into())?
+        },
         links: Default::default(),
         relay: Default::default(),
         hosts: Hosts::load(&opts.home)?,
@@ -118,7 +137,11 @@ where
         kill: tokio::sync::watch::channel(false).0,
         bin_dir: opts.bin_dir,
         log: opts.log,
-        name: rapp_net::config::hostname(),
+        name: opts.name.clone().unwrap_or_else(rapp_net::config::hostname),
+        owns_access: opts.owns_access,
+        embed_only: opts.embed_only,
+        dual_stack: opts.dual_stack,
+        presence_paused: AtomicBool::new(false),
         terms: Default::default(),
         net: Default::default(),
         watches: Default::default(),
@@ -195,6 +218,13 @@ impl Hub {
     /// The name B introduces itself with.
     fn me(&self) -> Option<String> {
         Some(self.name.clone())
+    }
+
+    fn check_owns_access(&self) -> Result<()> {
+        if !self.owns_access {
+            bail!("service owns access");
+        }
+        Ok(())
     }
 
     fn host(&self, id: &str) -> Result<Host> {
@@ -288,6 +318,9 @@ impl Hub {
                 let embed = v.get("embed").and_then(Value::as_bool).unwrap_or(false);
                 let reconnect = v.get("reconnect").and_then(Value::as_bool).unwrap_or(false);
                 let app = s("app")?;
+                if self.embed_only && !embed {
+                    bail!("sessions open embedded only");
+                }
                 if rapp_term::id::is_term(app) && !embed {
                     bail!("terminal sessions open embedded only");
                 }
@@ -295,11 +328,7 @@ impl Hub {
                 return Ok(None);
             }
             Some("close") => {
-                let why = match v.get("reason") {
-                    None | Some(Value::Null) => None,
-                    Some(r) if r == "user" => Some("user"),
-                    Some(_) => bail!("bad reason"),
-                };
+                let why = parse_close_reason(v)?;
                 self.close(v.get("sid").and_then(Value::as_u64).context("missing sid")?, why)?;
                 return Ok(None);
             }
@@ -314,6 +343,24 @@ impl Hub {
                     bail!("bad note");
                 };
                 self.note(sid, what, windows)?;
+                return Ok(None);
+            }
+            Some("access") => {
+                self.check_owns_access()?;
+                access::read(&self.at_home().0, &self.name)
+            }
+            Some("set_access") => {
+                self.check_owns_access()?;
+                let home = self.at_home().0;
+                access::write(&home, s("relay")?, s("key")?)?;
+                self.log.msg(Lvl::Info, format_args!("access set (relay and key)"));
+                // The relay link was dialed with the old settings: dial again now.
+                self.net_suspect();
+                access::read(&home, &self.name)
+            }
+            Some("presence") => {
+                let paused = v.get("paused").and_then(Value::as_bool).context("missing paused")?;
+                self.presence_paused.store(paused, Ordering::Relaxed);
                 return Ok(None);
             }
             Some("net") => self.net_event(),
@@ -334,11 +381,36 @@ impl Hub {
     }
 }
 
+/// The `reason` of `close`: none, `user` or `background` (the app left the foreground).
+fn parse_close_reason(v: &Value) -> Result<Option<&'static str>> {
+    match v.get("reason") {
+        None | Some(Value::Null) => Ok(None),
+        Some(r) if r == "user" => Ok(Some("user")),
+        Some(r) if r == "background" => Ok(Some("background")),
+        Some(_) => bail!("bad reason"),
+    }
+}
+
 /// Where this hub's sids start: the wall clock in ms. Sids only need to be unique per GUI launch,
 /// and the GUI keeps old sids across 「重启服务」; starting from the clock keeps a restarted hub
 /// from reusing them.
 fn sid_seed() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
+
+#[cfg(test)]
+mod reason_tests {
+    use super::parse_close_reason;
+    use serde_json::json;
+
+    #[test]
+    fn close_reason_accepts_user_and_background() {
+        assert_eq!(parse_close_reason(&json!({})).unwrap(), None);
+        assert_eq!(parse_close_reason(&json!({"reason":null})).unwrap(), None);
+        assert_eq!(parse_close_reason(&json!({"reason":"user"})).unwrap(), Some("user"));
+        assert_eq!(parse_close_reason(&json!({"reason":"background"})).unwrap(), Some("background"));
+        assert!(parse_close_reason(&json!({"reason":"x"})).is_err());
+    }
 }
 
 #[cfg(test)]

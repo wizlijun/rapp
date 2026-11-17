@@ -1,10 +1,12 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/composer_editor.dart';
 import 'package:rapp/embed/flutter_editor.dart';
+import 'package:rapp/platform_caps.dart';
 
 import '../ui/helpers.dart';
 
@@ -391,5 +393,68 @@ void main() {
     expect(ed.isEmpty, isFalse);
     expect(await ed.take(), 'a');
     expect(ed.isEmpty, isTrue);
+  });
+
+  group('soft keyboard Return (iPad P1 task 9)', () {
+    TextInputAction? action(WidgetTester tester) =>
+        tester.widget<TextField>(find.byKey(const Key('composer-field'))).textInputAction;
+
+    tearDown(() => lastHardwareKey = null);
+
+    testWidgets('iOS with no hardware key: Return is a newline', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      try {
+        expect(hardwareKeyboard(), isFalse);
+        await tester.pumpWidget(_host(ed));
+        expect(action(tester), TextInputAction.newline);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+
+    testWidgets('iOS with a hardware key in the last 10 s: the desktop rules', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      try {
+        lastHardwareKey = DateTime.now();
+        expect(hardwareKeyboard(), isTrue);
+        await tester.pumpWidget(_host(ed));
+        expect(action(tester), isNull);
+        expect(hardwareKeyboard(now: DateTime.now().add(const Duration(seconds: 11))), isFalse);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+
+    testWidgets('iOS: a hardware key event marks the keyboard as there', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      try {
+        await tester.pumpWidget(_host(ed));
+        expect(hardwareKeyboard(), isFalse);
+        await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+        expect(hardwareKeyboard(), isTrue, reason: 'a key is down');
+        await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+        expect(lastHardwareKey, isNotNull);
+        expect(hardwareKeyboard(), isTrue, reason: 'pressed just now');
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+
+    testWidgets('the desktop always has a keyboard: no newline action, Return still sends', (tester) async {
+      for (final p in [TargetPlatform.macOS, TargetPlatform.linux, TargetPlatform.windows]) {
+        debugDefaultTargetPlatformOverride = p;
+        try {
+          expect(hardwareKeyboard(), isTrue, reason: '$p');
+          await tester.pumpWidget(_host(ed));
+          expect(action(tester), isNull, reason: '$p');
+        } finally {
+          debugDefaultTargetPlatformOverride = null;
+        }
+      }
+      ed.focus();
+      await tester.pump();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      expect(log.enter, 1);
+    });
   });
 }

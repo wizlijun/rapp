@@ -658,4 +658,11 @@ void main() {
     expect(find.text('unfinished device address'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  test('panelWidth: the design width, the window less 56; a 720 tab fills a window under 760 (iPad spec §7.2)', () {
+    expect(panelWidth(720, 1194), 720);
+    expect(panelWidth(720, 744), 744);
+    expect(panelWidth(330, 360), 304);
+    expect(panelWidth(330, 1194), 330);
+  });
 }

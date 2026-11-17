@@ -9,6 +9,7 @@ private func win(_ id: UInt32, _ kind: WindowKind, _ x: Float, _ y: Float, _ w: 
 }
 
 final class WindowsTests: XCTestCase {
+    #if os(macOS)
     // MARK: classifyWindow (spec §3.3)
 
     func testClassifyNormalLevelUsesAccessibility() {
@@ -37,6 +38,7 @@ final class WindowsTests: XCTestCase {
         XCTAssertEqual(classifyWindow(level: level(.popUpMenuWindow) + 1, role: nil, subrole: nil), .tooltip)
         XCTAssertEqual(classifyWindow(level: level(.helpWindow), role: nil, subrole: nil), .tooltip)
     }
+    #endif
 
     func testSmallChromelessWindowsAreDrawnInPlace() {
         let menu = CGSize(width: 220, height: 400)

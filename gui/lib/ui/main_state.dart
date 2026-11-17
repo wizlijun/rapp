@@ -19,6 +19,7 @@ import '../hub_client.dart';
 import '../permissions.dart';
 import '../embed/app_profile.dart';
 import '../embed/composer_model.dart';
+import '../embed/modifier_latch.dart';
 import '../term/term_id.dart';
 import '../term/term_session_port.dart';
 import '../term/term_wire.dart' show TermPane;
@@ -425,7 +426,10 @@ class MainState extends ChangeNotifier {
     if (corner == Corner.sessions && _entries.isEmpty) corner = null;
     _trackAttention();
     // Focus never stays on a session that is no longer current (mid-move, the old one is on the stage).
-    if (pictureFocused != null && (currentRemote?.sid ?? current?.sid) != pictureFocused) _blur();
+    if (pictureFocused != null && (currentRemote?.sid ?? current?.sid) != pictureFocused) {
+      appLatch.releaseAll(); // the old session's modifiers go up while its row still has its sid
+      _blur();
+    }
     _focusNewTerm();
     _syncPolicy();
     _syncDesktopTimer();
@@ -504,6 +508,10 @@ class MainState extends ChangeNotifier {
   /// The session whose picture has keyboard focus: its keys go to A (the runner routes them).
   Object? pictureFocused;
 
+  /// The app key row's sticky modifiers (iPad spec §8.3): one for the stage, released whenever the keys move to
+  /// another session. [ModifierLatch.releaseAll] is also what going to the background calls.
+  final appLatch = ModifierLatch();
+
   /// A press on [sid]'s picture: keys go to A from now on.
   void focusPicture(Object sid) {
     if (overview || !_liveSid(sid)) return;
@@ -515,6 +523,7 @@ class MainState extends ChangeNotifier {
     }
     panelHolds = null;
     if (pictureFocused == sid) return;
+    if (pictureFocused != null) appLatch.releaseAll(); // the keys move to another session
     pictureFocused = sid;
     _sendFocus(sid);
     notifyListeners();
@@ -1126,6 +1135,7 @@ class MainState extends ChangeNotifier {
   }
 
   void _onPortEvent(SessionEvent e) {
+    if (e is LatchUsedEvent) return; // the app key row's (AppKeyRow listens for its own session)
     final rs = remote[e.sid];
     if (rs == null) return;
     final r = _recordOfSid(e.sid);
@@ -1461,6 +1471,12 @@ class MainState extends ChangeNotifier {
   /// After [r] went down: schedules the next automatic try when it is due. True: it did.
   /// A failed open (the first one, or a manual reconnect) for a network reason waits too (§5.3.7).
   bool _planRetry(SessionRecord r) {
+    if (backgrounded) {
+      // The iPad app is in the background (spec §9): nothing reconnects until it comes back, which
+      // tries again whatever still waits.
+      _retryTimers.remove(r.key)?.cancel();
+      return false;
+    }
     final cur = r.retry;
     final int attempt;
     if (cur != null) {
@@ -1727,10 +1743,12 @@ class MainState extends ChangeNotifier {
       notifyListeners();
       return;
     }
+    final epoch = _backgroundEpoch;
     final HubSession s;
     try {
       s = await hub!.open(r.id, r.app, embed: true, reconnect: reconnect);
     } catch (e) {
+      if (!reroute && epoch != _backgroundEpoch) return; // the background already settled the record
       if (reroute) {
         if (_reroutes[r] == x) _rerouteFailed(r);
         notifyListeners();
@@ -1746,6 +1764,13 @@ class MainState extends ChangeNotifier {
       _disconnect(r, '$e',
           hint: true, hintText: missing == null ? null : remoteHint(deviceName(r.id), missing), failedOpen: true);
       notifyListeners();
+      return;
+    }
+    if (!reroute && epoch != _backgroundEpoch) {
+      // Opened from before the app went to the background (spec §9): the background disconnected the
+      // record meanwhile, and coming back opens anew. This session is not wanted, and it never starts.
+      _quiet.add(s.sid);
+      hub!.close(s.sid, reason: 'background');
       return;
     }
     if (r.ending || (reroute && (_reroutes[r] != x || !_movable(r) || r.sid != old))) {
@@ -1890,7 +1915,7 @@ class MainState extends ChangeNotifier {
   /// [auto]: the automatic retry's own try (it keeps the `retry` state); a manual one cancels it.
   Future<void> reconnect(String key, {bool auto = false}) async {
     final r = _records[key];
-    if (r == null || r.phase != Phase.disconnected || !hubUsable) return;
+    if (r == null || r.phase != Phase.disconnected || !hubUsable || backgrounded) return;
     if (!auto) _stopRetry(r);
     r.stopped = false;
     r.lastSid = r.sid;
@@ -1905,6 +1930,131 @@ class MainState extends ChangeNotifier {
   void reconnectCurrent() {
     final r = currentRecord;
     if (r != null) reconnect(r.key);
+  }
+
+  // ---- the iPad app in the background (iPad spec §9) ----
+  /// The app is in the background: every session was frozen on its last frame and closed, nothing
+  /// reconnects until [enterForeground].
+  bool backgrounded = false;
+
+  /// Bumped by each [enterBackground]: an open asked before it is not wanted when it answers.
+  int _backgroundEpoch = 0;
+
+  /// How long [enterBackground] waits for the hub to drop the closed sessions.
+  static const backgroundCloseWait = Duration(seconds: 4);
+
+  /// A live session is on the stage (not 全景, not in the background): the screen stays awake and the
+  /// edge gestures are held (spec §9.5).
+  bool get stageLive => !backgrounded && !overview && currentRecord?.phase == Phase.live;
+
+  /// The app went to the background (spec §9.1). Held modifiers are let go, presence pauses, and each
+  /// live or connecting session freezes on its last frame and is closed with reason `background`; then
+  /// it waits until the hub dropped them, at most [backgroundCloseWait]. [begin] and [end] bracket it
+  /// (the system's background time); their failures are not this one's.
+  Future<void> enterBackground({Future<void> Function()? begin, Future<void> Function()? end}) async {
+    if (backgrounded) return;
+    backgrounded = true;
+    final epoch = ++_backgroundEpoch;
+    try {
+      await begin?.call();
+    } catch (_) {}
+    try {
+      // Shown again while the background time was being asked for: nothing closes (`end` still runs).
+      if (!backgrounded || epoch != _backgroundEpoch) return;
+      // The ups go out over the sessions while they are still open.
+      appLatch.releaseAll();
+      final h = hub;
+      h?.pausePresence(true);
+      for (final t in _retryTimers.values) {
+        t.cancel();
+      }
+      _retryTimers.clear();
+      for (final r in _reroutes.keys.toList()) {
+        _rerouteFailed(r); // the old session of a move is the one that freezes below
+      }
+      final closing = <Object>{};
+      for (final r in _records.values.toList()) {
+        if (_records[r.key] != r || r.ending || r.phase == Phase.disconnected) continue;
+        final sids = {?r.sid, ?r.lastSid};
+        _disconnect(r, 'background', retry: false);
+        _stopRetry(r);
+        for (final sid in sids) {
+          if (!_hubHas(sid)) continue;
+          _quiet.add(sid);
+          closing.add(sid);
+          h!.close(sid, reason: 'background');
+        }
+      }
+      notifyListeners();
+      if (h != null && closing.isNotEmpty) await _hubDropped(h, closing);
+    } finally {
+      try {
+        await end?.call();
+      } catch (_) {}
+    }
+  }
+
+  /// Completes once the hub lists none of [sids] (or it is gone), at most [backgroundCloseWait].
+  Future<void> _hubDropped(HubClient h, Set<Object> sids) async {
+    bool gone() => !h.alive || !h.sessions.any((s) => sids.contains(s.sid));
+    if (gone()) return;
+    final done = Completer<void>();
+    void check() {
+      if (gone() && !done.isCompleted) done.complete();
+    }
+    h.addListener(check);
+    try {
+      await done.future.timeout(backgroundCloseWait, onTimeout: () {});
+    } finally {
+      h.removeListener(check);
+    }
+  }
+
+  /// The app is back (spec §9.2): the hub checks its network, presence resumes, and the sessions the
+  /// background closed reconnect, the selected one first, each next one [stagger] later. Those that
+  /// were waiting for an automatic try before go on waiting.
+  Future<void> enterForeground({Duration stagger = const Duration(milliseconds: 300)}) async {
+    if (!backgrounded) return;
+    backgrounded = false;
+    final h = hub;
+    h?.netSuspect();
+    h?.pausePresence(false);
+    bool closedByBackground(SessionRecord r) => r.phase == Phase.disconnected && r.reason == 'background';
+    final cur = currentRecord;
+    final list = [
+      if (cur != null && closedByBackground(cur)) cur,
+      for (final r in _records.values)
+        if (r != cur && closedByBackground(r)) r,
+    ];
+    for (final (i, r) in list.indexed) {
+      if (i == 0) {
+        unawaited(reconnect(r.key, auto: true));
+        continue;
+      }
+      _retryTimers.remove(r.key)?.cancel();
+      _retryTimers[r.key] = Timer(stagger * i, () {
+        _retryTimers.remove(r.key);
+        if (_disposed || backgrounded || _records[r.key] != r || !closedByBackground(r)) return;
+        reconnect(r.key, auto: true);
+      });
+    }
+    // Automatic tries the background held back start over.
+    for (final r in _records.values.toList()) {
+      if (r.phase != Phase.disconnected || r.retry == null || list.contains(r)) continue;
+      if (!_retryTimers.containsKey(r.key)) _planRetry(r);
+    }
+    notifyListeners();
+  }
+
+  /// The system is short of memory (iOS): frozen sessions off the stage let go of their pictures.
+  /// The one on the stage keeps its last frame (spec §9.1).
+  void memoryWarning() {
+    final cur = currentRecord;
+    for (final r in _records.values) {
+      if (!r.frozen || r == cur || r.phase != Phase.disconnected) continue;
+      final sid = r.sid;
+      if (sid != null) portOf(sid)?.dropTextures(sid);
+    }
   }
 
   // ---- moving to a new route (UX spec §3) ----
@@ -2803,6 +2953,9 @@ class MainState extends ChangeNotifier {
     _save();
   }
 
+  /// [prefs] changed outside a setter here (iOS 本机's 屏幕常亮): save them.
+  void savePrefs() => _save();
+
   void _save() {
     try {
       final dir = data.prefsDir();
@@ -3386,6 +3539,7 @@ class MainState extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     composerZoom.dispose();
+    appLatch.dispose();
     resources.removeListener(notifyListeners);
     resources.dispose();
     hub?.removeListener(_onHub);

@@ -21,6 +21,10 @@ public enum ChannelCommand: Equatable {
     case scroll(sid: Int64, Message)
     /// A press and a release, for the composer's key row.
     case key(sid: Int64, keyCode: UInt16, modifiers: UInt64)
+    /// One press or one release of a key (⌘Tab needs the held ⌘ across keys).
+    case keyEvent(sid: Int64, keyCode: UInt16, modifiers: UInt64, down: Bool)
+    /// An external keyboard's next key carries these modifiers too (the iOS runner uses it; macOS ignores it).
+    case latch(sid: Int64, modifiers: UInt64)
     case resize(sid: Int64, Message)
     case selectWindow(sid: Int64, window: UInt32)
     /// Press the close button of A's window `window` (the session stays up).
@@ -75,6 +79,8 @@ public enum ChannelCommand: Equatable {
     case setBanner(sid: Int64, text: String)
     /// Ask A to close the cover `id` of a dismissable `covered` (v13).
     case dismissCover(sid: Int64, id: UInt32)
+    /// The system is short of memory (iOS): a disconnected session off the stage lets go of its window textures.
+    case dropTextures(sid: Int64)
 }
 
 /// Longest input source id `select_input` passes on (hosts cut theirs to 1024 bytes).
@@ -84,12 +90,12 @@ public let maxInputSourceID = 1024
 /// `ChannelError.bad(method)`; sizes and click counts clamp to what the protocol carries.
 public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelCommand {
     if method == "init" { return .initialize }
-    let known: Set<String> = ["start", "close", "mouse", "scroll", "key", "resize", "select_window", "set_stream",
+    let known: Set<String> = ["start", "close", "mouse", "scroll", "key", "key_event", "latch", "resize", "select_window", "set_stream",
                               "cancel_transfer", "picture_focus", "compose_replay", "clip_pick", "menu_pick", "move_top_left",
                               "composer_paste", "composer_attach", "composer_send", "composer_drop_block",
                               "detach", "attach", "raise_detached", "fetch_clip", "copy_local", "drop_copy", "reveal",
                               "pin_save", "pin_load", "set_hidden", "close_window", "select_input",
-                              "unlock", "set_banner", "dismiss_cover"]
+                              "unlock", "set_banner", "dismiss_cover", "drop_textures"]
     guard known.contains(method) else { throw ChannelError.unknown(method) }
     guard let map = args as? [String: Any] else { throw ChannelError.bad(method) }
     let a = Args(method: method, map: map)
@@ -138,6 +144,14 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
             throw ChannelError.bad(method)
         }
         return .key(sid: sid, keyCode: code, modifiers: modifiers)
+    case "key_event":
+        guard let code = UInt16(exactly: try a.int("keyCode")), let modifiers = UInt64(exactly: try a.int("modifiers")) else {
+            throw ChannelError.bad(method)
+        }
+        return .keyEvent(sid: sid, keyCode: code, modifiers: modifiers, down: try a.bool("down"))
+    case "latch":
+        guard let modifiers = UInt64(exactly: try a.int("modifiers")) else { throw ChannelError.bad(method) }
+        return .latch(sid: sid, modifiers: modifiers)
     case "resize":
         return .resize(sid: sid, .resize(window: try a.window(), width: try a.size("w"), height: try a.size("h")))
     case "select_window":
@@ -157,6 +171,8 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
     case "dismiss_cover":
         guard let id = UInt32(exactly: try a.int("id")) else { throw ChannelError.bad(method) }
         return .dismissCover(sid: sid, id: id)
+    case "drop_textures":
+        return .dropTextures(sid: sid)
     case "set_stream":
         return .setStream(sid: sid, mode: try a.mode(), fps: try a.fps(), density: try a.density(),
                           pinned: try a.optionalBool("pinned"), focus: try a.optionalBool("focus"))

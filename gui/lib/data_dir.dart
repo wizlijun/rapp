@@ -60,9 +60,9 @@ const readmeMarker = '# rapp 数据目录';
 const migratedFrom = 'migrated-from';
 
 /// Makes the layout, writes the texts that are missing, and copies the old config in once.
-/// Returns whether this call migrated. Copies only; [legacy] is never changed.
+/// Returns whether this call migrated. Copies only; [legacy] is never changed. No [legacy] (iOS): nothing to copy.
 /// Throws [FileSystemException] on failure.
-bool prepareDataDir(String root, String legacy) {
+bool prepareDataDir(String root, String? legacy) {
   for (final d in ['shared', 'devices', 'agent', 'clipboard', 'files/transfers', 'files/clipboard']) {
     Directory('$root/$d').createSync(recursive: true);
   }
@@ -77,12 +77,11 @@ bool prepareDataDir(String root, String legacy) {
     final f = File(path);
     if (!f.existsSync()) f.writeAsStringSync(text);
   }
-  final oldService = '$legacy/service.json';
   // Client-only Linux installs may never have started rapp-service. Preserve
   // their saved hosts, projects and preferences even without a service.json.
   final currentId = _serviceId('$loc/service.json');
   if (currentId != null) _copyIfMissing('$loc/gui.json', '$root/devices/$currentId/gui.json');
-  if (File('$loc/$migratedFrom').existsSync()) return false;
+  if (legacy == null || File('$loc/$migratedFrom').existsSync()) return false;
   final table = <(String, String)>[
     ('hosts.json', '$loc/hosts.json'),
     ('update.json', '$loc/update.json'),
@@ -91,7 +90,7 @@ bool prepareDataDir(String root, String legacy) {
     ('workspace.json', '$root/shared/workspace.json'),
     ('apps.json', '$root/shared/apps.json'),
   ];
-  final id = currentId ?? _serviceId(oldService);
+  final id = currentId ?? _serviceId('$legacy/service.json');
   table.add(('gui.json', id == null ? '$loc/gui.json' : '$root/devices/$id/gui.json'));
   table.add(('service.json', '$loc/service.json'));
   if (!table.any((e) => File('$legacy/${e.$1}').existsSync())) return false;
@@ -157,7 +156,8 @@ void writePrivate(String path, List<int> data) {
 }
 
 void _chmod(String mode, String path) {
-  if (Platform.isWindows) return;
+  // iOS starts no processes; the app sandbox keeps the data private.
+  if (Platform.isWindows || Platform.isIOS) return;
   final r = Process.runSync('chmod', [mode, path]);
   if (r.exitCode != 0) throw FileSystemException('chmod $mode failed: ${r.stderr}'.trim(), path);
 }

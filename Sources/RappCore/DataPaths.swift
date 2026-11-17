@@ -32,6 +32,10 @@ public enum DataPaths {
 
     /// `transfers` for this process.
     public static func currentTransfers() -> URL {
-        transfers(env: ProcessInfo.processInfo.environment, home: FileManager.default.homeDirectoryForCurrentUser)
+        #if os(macOS)
+        return transfers(env: ProcessInfo.processInfo.environment, home: FileManager.default.homeDirectoryForCurrentUser)
+        #else
+        return URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Documents/传输", isDirectory: true)
+        #endif
     }
 }

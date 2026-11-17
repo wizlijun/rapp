@@ -188,9 +188,15 @@ pub struct RelayConn {
 impl RelayConn {
     /// Connects to the relay at `addr`, which must have the fingerprint `key.relay`. Does not enroll.
     pub async fn dial(ep: &quinn::Endpoint, addr: &str, key: &Key, id: &Identity) -> Result<RelayConn> {
+        Self::dial_for(ep, addr, key, id, false).await
+    }
+
+    /// `dial`; with `dual` the address is resolved for a dual-stack endpoint (the in-process hub,
+    /// possibly on an IPv6-only network).
+    pub async fn dial_for(ep: &quinn::Endpoint, addr: &str, key: &Key, id: &Identity, dual: bool) -> Result<RelayConn> {
         let Some(pin) = key.relay else { bail!("relay not set: add the host as id@ip") };
         let unreachable = |e: &dyn std::fmt::Display| anyhow!("relay unreachable: {e}");
-        let addr = rapp_net::quic::resolve(addr).await.map_err(|e| unreachable(&e))?;
+        let addr = rapp_net::quic::resolve_for(addr, dual).await.map_err(|e| unreachable(&e))?;
         let cc = tls::client_config(id, tls::ALPN_RELAY, Expect::Pin(pin))?;
         let connecting = ep.connect_with(cc, addr, tls::SNI).map_err(|e| unreachable(&e))?;
         let conn = match tokio::time::timeout(DIAL_WAIT, connecting).await {

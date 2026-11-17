@@ -1454,6 +1454,70 @@ void main() {
         expect(mouse(), isEmpty);
       });
 
+      testWidgets('two-finger tap is a right click at the midpoint', (tester) async {
+        final o = await setup(tester);
+        final f1 = await tester.createGesture(kind: PointerDeviceKind.touch, pointer: 11);
+        final f2 = await tester.createGesture(kind: PointerDeviceKind.touch, pointer: 12);
+        await f1.down(o + const Offset(100, 100), timeStamp: Duration.zero);
+        await f2.down(o + const Offset(140, 100), timeStamp: const Duration(milliseconds: 10));
+        await f1.up(timeStamp: const Duration(milliseconds: 90));
+        await f2.up(timeStamp: const Duration(milliseconds: 100));
+        await tester.pump(const Duration(milliseconds: 300));
+        // midpoint (120,100) on a stage drawn twice as big: A's (60, 50 + 28 title bar)
+        expect(mouse().map((c) => (c['kind'], c['button'], c['x'], c['y'])),
+            [('down', 'right', 60.0, 78.0), ('up', 'right', 60.0, 78.0)]);
+        expect(scrolls(), isEmpty);
+      });
+
+      testWidgets('two-finger move past 8px scrolls, no right click', (tester) async {
+        final o = await setup(tester);
+        final f1 = await tester.createGesture(kind: PointerDeviceKind.touch, pointer: 11);
+        final f2 = await tester.createGesture(kind: PointerDeviceKind.touch, pointer: 12);
+        await f1.down(o + const Offset(100, 100), timeStamp: Duration.zero);
+        await f2.down(o + const Offset(140, 100), timeStamp: Duration.zero);
+        final b = tester.binding;
+        // both fingers 6 px up: the centre moved 6 px, still held back
+        b.handlePointerEvent(PointerMoveEvent(pointer: 11, kind: PointerDeviceKind.touch, position: o + const Offset(100, 94)));
+        b.handlePointerEvent(PointerMoveEvent(pointer: 12, kind: PointerDeviceKind.touch, position: o + const Offset(140, 94)));
+        await tester.pump();
+        expect(scrolls(), isEmpty);
+        // 20 px in all: the 6 held back go out with the rest
+        b.handlePointerEvent(PointerMoveEvent(pointer: 11, kind: PointerDeviceKind.touch, position: o + const Offset(100, 80)));
+        b.handlePointerEvent(PointerMoveEvent(pointer: 12, kind: PointerDeviceKind.touch, position: o + const Offset(140, 80)));
+        await tester.pump();
+        await f1.up(timeStamp: const Duration(milliseconds: 50));
+        await f2.up(timeStamp: const Duration(milliseconds: 50));
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(scrolls().length, 1);
+        expect(scrolls()[0]['dy'], -10.0); // all 20 px of the centre, half in A's points
+        expect(mouse(), isEmpty);
+      });
+
+      testWidgets('two-finger hold over 250ms is not a right click', (tester) async {
+        final o = await setup(tester);
+        final f1 = await tester.createGesture(kind: PointerDeviceKind.touch, pointer: 11);
+        final f2 = await tester.createGesture(kind: PointerDeviceKind.touch, pointer: 12);
+        await f1.down(o + const Offset(100, 100), timeStamp: Duration.zero);
+        await f2.down(o + const Offset(140, 100), timeStamp: Duration.zero);
+        await f1.up(timeStamp: const Duration(milliseconds: 300));
+        await f2.up(timeStamp: const Duration(milliseconds: 300));
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(mouse(), isEmpty);
+        expect(scrolls(), isEmpty);
+      });
+
+      testWidgets('trackpad pan-zoom scrolls', (tester) async {
+        final o = await setup(tester);
+        final pad = TestPointer(9, PointerDeviceKind.trackpad);
+        await tester.sendEventToBinding(pad.panZoomStart(o + const Offset(200, 100)));
+        await tester.sendEventToBinding(pad.panZoomUpdate(o + const Offset(200, 100), pan: const Offset(0, 12)));
+        await tester.sendEventToBinding(pad.panZoomEnd());
+        await tester.pump();
+        expect(scrolls().length, 1);
+        expect(scrolls()[0]['dy'], 6.0);
+        expect(mouse(), isEmpty);
+      });
+
       testWidgets('a one-finger tap clicks where it landed', (tester) async {
         final o = await setup(tester);
         await tester.tapAt(o + const Offset(200, 100));

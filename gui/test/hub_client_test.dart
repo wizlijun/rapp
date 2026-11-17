@@ -385,6 +385,45 @@ void main() {
       expect(hub.lastError, isNotNull);
     });
 
+    test('access parses has_key', () async {
+      final f = hub.access();
+      final cmd = t.sent.last;
+      expect(cmd, {'cmd': 'access', 'req': anything});
+      t.emit({'event': 'access', 'relay': 'r:1', 'has_key': true, 'name': 'iPad', 'req': cmd['req']});
+      expect(await f, const HubAccess('r:1', true, 'iPad'));
+      expect(hub.lastAccess, const HubAccess('r:1', true, 'iPad'));
+    });
+
+    test('access with no relay set reads null and no key', () async {
+      final f = hub.access();
+      t.emit({'event': 'access', 'relay': null, 'has_key': false, 'name': 'iPad', 'req': t.sent.last['req']});
+      expect(await f, const HubAccess(null, false, 'iPad'));
+    });
+
+    test('setAccess sends relay and key, keeps only the last 4 of the key', () async {
+      final f = hub.setAccess('r:1', 'abcdefgh');
+      final cmd = t.sent.last;
+      expect(cmd, {'cmd': 'set_access', 'relay': 'r:1', 'key': 'abcdefgh', 'req': anything});
+      expect(hub.keyTail, isNull, reason: 'not before the hub took it');
+      t.emit({'event': 'access', 'relay': 'r:1', 'has_key': true, 'name': 'iPad', 'req': cmd['req']});
+      expect(await f, const HubAccess('r:1', true, 'iPad'));
+      expect(hub.keyTail, 'efgh');
+    });
+
+    test('setAccess fails on an error reply and keeps no tail', () async {
+      final f = hub.setAccess('r:1', 'nope');
+      t.emit({'event': 'error', 'error': 'bad key', 'req': t.sent.last['req']});
+      await expectLater(f, throwsA(isA<HubException>().having((e) => e.message, 'message', 'bad key')));
+      expect(hub.keyTail, isNull);
+    });
+
+    test('pausePresence sends presence with paused and waits for nothing', () {
+      hub.pausePresence(true);
+      expect(t.sent.last, {'cmd': 'presence', 'paused': true});
+      hub.pausePresence(false);
+      expect(t.sent.last, {'cmd': 'presence', 'paused': false});
+    });
+
     test('shutdown closes the transport', () async {
       await hub.shutdown();
       expect(t.closed, isTrue);

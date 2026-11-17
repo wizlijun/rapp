@@ -578,7 +578,7 @@ List<Widget> composerLayer(
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          if (keys && c.maxWidth < keyRowWideAt) TermKeyRow(port: term, sid: session.sid, split: false, blocked: state.sendBlocked(session.sid)),
+                          if (keys && c.maxWidth < keyRowWideAt) TermKeyRow(port: term, sid: session.sid, ctrl: session.termCtrl, split: false, blocked: state.sendBlocked(session.sid)),
                           Flexible(
                             // Keyed by session: a switch is a new panel, and the old one's dispose
                             // copies its text into its own session's draft.
@@ -611,7 +611,7 @@ List<Widget> composerLayer(
                       ? const SizedBox.shrink() // above the panel instead
                       : Align(
                           alignment: Alignment.bottomCenter,
-                          child: TermKeyRow(port: term, sid: session.sid, split: true, blocked: state.sendBlocked(session.sid)),
+                          child: TermKeyRow(port: term, sid: session.sid, ctrl: session.termCtrl, split: true, blocked: state.sendBlocked(session.sid)),
                         ),
                 )
               : const SizedBox.shrink(),

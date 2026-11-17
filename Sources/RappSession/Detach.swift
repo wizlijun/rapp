@@ -1,3 +1,4 @@
+#if canImport(AppKit)
 import AppKit
 import CoreGraphics
 import RappCore
@@ -121,7 +122,7 @@ public enum DetachedKeyRoute: Equatable {
 
 /// In a detached window only ⌃⌘D (attach) and ⌘Q (quit) are rapp's; every other key is A's.
 public func routeDetachedKey(keyCode: UInt16, flags: NSEvent.ModifierFlags) -> DetachedKeyRoute {
-    let mods = flags.intersection([.command, .control, .option, .shift])
+    let mods = KeyFlags(flags).intersection([.command, .control, .option, .shift])
     if keyCode == 2 && mods == [.control, .command] { return .attach }
     if keyCode == 12 && mods == [.command] { return .local }
     return .remote
@@ -142,3 +143,4 @@ extension KeyTracker {
 public func detachedPayload(sid: Int64, detached: Bool, current: UInt32?) -> (method: String, args: [String: Any]) {
     ("detached", ["sid": sid, "detached": detached, "current": current.map { Int($0) as Any } ?? NSNull()])
 }
+#endif

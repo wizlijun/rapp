@@ -356,6 +356,11 @@ class HostNoticeActionEvent extends SessionEvent {
   final int epoch;
 }
 
+/// A hardware key took the latched modifiers (iOS: the runner's key router): the once ones are used up.
+class LatchUsedEvent extends SessionEvent {
+  const LatchUsedEvent(super.sid);
+}
+
 class ClosedEvent extends SessionEvent {
   const ClosedEvent(super.sid, this.reason);
   final String reason;
@@ -508,6 +513,8 @@ SessionEvent? parseSessionEvent(String method, Object? args) {
         return AppOpenedEvent(sid, _as<String>(m['bundle']), _as<String>(m['name']));
       case 'secure_focus':
         return SecureFocusEvent(sid, _as<bool>(m['on']));
+      case 'latch_used':
+        return LatchUsedEvent(sid);
       case 'closed':
         return ClosedEvent(sid, _as<String>(m['reason']));
     }
@@ -551,6 +558,10 @@ abstract class SessionPort {
   /// Stop a local worker when the hub loses the link before the worker notices.
   void freeze(Object sid, String reason) {}
 
+  /// The system is short of memory (iOS): the disconnected [sid] off the stage lets go of its window
+  /// pictures. The runner ignores it elsewhere.
+  void dropTextures(Object sid) => _send('drop_textures', {'sid': sid});
+
   /// Native Linux windows mirror the shared writing-panel preferences.
   bool get supportsInlineNativeComposer => false;
   void nativeComposerOptions(Object sid, {required bool allowed, required bool compose, required double scale,
@@ -572,6 +583,14 @@ abstract class SessionPort {
   /// A press and a release of one key (macOS key code, CGEventFlags modifiers).
   void key(Object sid, int keyCode, int modifiers) =>
       _send('key', {'sid': sid, 'keyCode': keyCode, 'modifiers': modifiers});
+
+  /// Only the press ([down]) or only the release of one key; the runner does not track it, so every down sent needs
+  /// its up (a sticky modifier of the app key row).
+  void keyEvent(Object sid, int keyCode, int modifiers, {required bool down}) =>
+      _send('key_event', {'sid': sid, 'keyCode': keyCode, 'modifiers': modifiers, 'down': down});
+
+  /// The modifiers the hardware keyboard's next key carries (the key row's latch; iOS, a no-op on macOS).
+  void latch(Object sid, int modifiers) => _send('latch', {'sid': sid, 'modifiers': modifiers});
 
   /// The session whose picture has keyboard focus; null for none.
   /// [compose]: a letter on this picture opens the writing panel (sent only when true).

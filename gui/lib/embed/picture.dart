@@ -72,6 +72,15 @@ class _PictureState extends State<Picture> {
   static const _touchSlop = 8.0;
   static const _touchHold = Duration(milliseconds: 150);
 
+  // T8: two fingers that land, stay within 8 px of where their midpoint started and lift within
+  // 250 ms are a right click there; the motion held back until they move is not sent meanwhile.
+  static const _twoTapTime = Duration(milliseconds: 250);
+  static const _twoTapSlop = 8.0;
+  Duration _twoAt = Duration.zero;
+  Offset _twoStart = Offset.zero;
+  bool _twoMoved = false;
+  Offset _twoBuffer = Offset.zero;
+
   RemoteWindow get _win => widget.window;
   Object get _sid => widget.session.sid;
 
@@ -112,6 +121,13 @@ class _PictureState extends State<Picture> {
   bool _scrollQueued = false;
 
   void _touchScrollBy(Offset centre, Offset delta) {
+    if (!_twoMoved) {
+      _twoBuffer += delta;
+      if ((centre - _twoStart).distance <= _twoTapSlop) return;
+      _twoMoved = true;
+      delta = _twoBuffer;
+      _twoBuffer = Offset.zero;
+    }
     _scrollAcc += delta;
     _scrollAt = centre;
     if (_scrollQueued) return;
@@ -130,13 +146,20 @@ class _PictureState extends State<Picture> {
   }
 
   void _touchDown(PointerDownEvent e) {
-    if (_touchScroll) return; // T5: not counted, its moves and lift are ignored
+    if (_touchScroll) {
+      _twoMoved = true; // T5: not counted, its moves and lift are ignored; and no longer a two-finger tap
+      return;
+    }
     _touches[e.pointer] = e.localPosition;
     if (_pending != null || (_button == null && _touches.length > 1)) {
       // T1: a second finger while the first is held back (or rests in the letterbox, or stayed
       // after a press it was ignored for) — scroll; a held-back press never happened.
       _dropPending();
       _touchScroll = true;
+      _twoAt = e.timeStamp;
+      _twoStart = _centre;
+      _twoMoved = false;
+      _twoBuffer = Offset.zero;
       if (_at(_centre).pic.contains(_centre)) {
         _focus.requestFocus();
         widget.state.focusPicture(_sid); // T7
@@ -223,7 +246,10 @@ class _PictureState extends State<Picture> {
     if (e.kind == PointerDeviceKind.touch) {
       _touches.remove(e.pointer);
       if (_touchScroll) {
-        if (_touches.isEmpty) _touchScroll = false; // T4
+        if (_touches.isEmpty) {
+          _touchScroll = false; // T4
+          if (!_twoMoved && e is PointerUpEvent && e.timeStamp - _twoAt <= _twoTapTime) _twoTap();
+        }
         return;
       }
     }
@@ -244,6 +270,15 @@ class _PictureState extends State<Picture> {
     if (t.usable) _mouse('up', b, clampTo(at, t.fit), t);
   }
 
+  /// T8: a quick two-finger tap is a right click where the two fingers landed (not in the letterbox).
+  void _twoTap() {
+    final t = _at(_twoStart);
+    if (!t.usable || !t.pic.contains(_twoStart)) return;
+    _count = 1;
+    _mouse('down', 'right', _twoStart, t);
+    _mouse('up', 'right', _twoStart, t);
+  }
+
   void _hover(PointerHoverEvent e) {
     // Only menus and popovers (an address-bar list) track the pointer without a press.
     final t = _at(e.localPosition);
@@ -260,6 +295,9 @@ class _PictureState extends State<Picture> {
       _scroll(e.localPosition, wheelToRemote(e.scrollDelta));
     }
   }
+
+  // A trackpad gesture begins and ends with nothing carried over; the updates do the scrolling.
+  void _panReset(PointerEvent _) => _scrollAcc = Offset.zero;
 
   void _pan(PointerPanZoomUpdateEvent e) =>
       _scroll(e.localPosition, panToRemote(e.localPanDelta));
@@ -309,6 +347,7 @@ class _PictureState extends State<Picture> {
       _touches.clear();
       _touchScroll = false;
       _scrollAcc = Offset.zero;
+      _twoBuffer = Offset.zero;
       _button = null;
       _buttonPointer = null;
       _held = null;
@@ -466,7 +505,9 @@ class _PictureState extends State<Picture> {
             onPointerCancel: _up,
             onPointerHover: _hover,
             onPointerSignal: _signal,
+            onPointerPanZoomStart: _panReset,
             onPointerPanZoomUpdate: _pan,
+            onPointerPanZoomEnd: _panReset,
             child: ColoredBox(
               color: t.bg,
               child: Stack(

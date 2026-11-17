@@ -1,7 +1,10 @@
 // The stage: where the remote window sits; a placeholder while it is elsewhere (S1, detached).
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
+import '../embed/app_key_row.dart';
 import '../embed/composer_editor.dart';
 import '../embed/composer_panel.dart';
 import '../embed/picture.dart';
@@ -37,10 +40,45 @@ Widget offlineBarFor(MainState state, SessionRecord rec) => OfflineBar(
       connecting: rec.phase != Phase.disconnected,
     );
 
+/// The remote app picture's key row (iPad spec §8.3) is held back until the user redesigns it: it never shows,
+/// whatever `app_key_row` holds. The row, its latch and the pref stay. The terminal's key row is not this one.
+const showAppKeyRow = false;
+
+/// How far up the app key row sits off the stage's bottom: the soft keyboard's height. The keyboard's top edge is
+/// measured from the view's bottom, and out of [fullscreen] the stage stands above the home bar (MainWindow's safe
+/// area), so the bar's height comes off; in fullscreen the stage reaches the view's bottom, so nothing does.
+double appKeyRowLift(MediaQueryData mq, {required bool fullscreen}) =>
+    math.max(0.0, mq.viewInsets.bottom - (fullscreen ? 0.0 : mq.viewPadding.bottom));
+
 class Stage extends StatelessWidget {
-  const Stage({super.key, required this.state, this.composerEditor});
+  const Stage({super.key, required this.state, this.composerEditor, this.fullscreen = false});
   final MainState state;
+
+  /// MainWindow's fullscreen: the stage then runs to the view's bottom edge, under the home bar.
+  final bool fullscreen;
   final ComposerEditor Function()? composerEditor;
+
+  /// The app key row's place: [appKeyRowLift] up off the stage's bottom. Down on the stage's bottom
+  /// line it keeps off 「输入」 (12 + 48 + 8 from the right): centred while it fits between two such margins, else
+  /// from the left; beside the upload strip it goes up a line. Too narrow for all twelve, it scrolls.
+  Widget _appKeyRow(BuildContext context, RemoteSession rs, {required bool showsInput}) {
+    final kb = appKeyRowLift(MediaQuery.of(context), fullscreen: fullscreen);
+    final onLine = kb < 12 + 48;
+    final input = showsInput && onLine && rs.composerAllowed && !rs.composer.open;
+    final strip = showsInput && onLine && rs.transferStatus != null;
+    const reserve = 12 + 48 + 8.0;
+    return LayoutBuilder(builder: (context, c) {
+      final both = c.maxWidth - 2 * reserve >= appKeyRowWidth;
+      final right = input && !strip ? reserve : 0.0;
+      return Padding(
+        padding: EdgeInsets.only(left: both ? right : 0, right: right, bottom: strip ? kb + 12 + 48 + 8 : kb),
+        child: Align(
+          alignment: Alignment.bottomCenter,
+          child: AppKeyRow(state: state, sid: rs.sid, latch: state.appLatch),
+        ),
+      );
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -212,6 +250,24 @@ class Stage extends StatelessWidget {
               stage,
               if (!full && (picture || (rs != null && rs.detached)) && rs != null && port != null)
                 ...composerLayer(state: state, session: rs, port: port, editor: composerEditor),
+              // 按键排 over an app picture (iPad spec §8.3), while the picture has the keys or the writing panel is
+              // open: on the soft keyboard's top edge when it is up, floating over the stage (Z1: no resize). Not
+              // where the body fills the stage, as the writing panel's layer.
+              if (showAppKeyRow &&
+                  !full &&
+                  picture &&
+                  rs != null &&
+                  !rs.detached &&
+                  !(rec?.frozen ?? false) &&
+                  state.prefs.appKeyRow)
+                Positioned.fill(
+                  child: ListenableBuilder(
+                    listenable: Listenable.merge([rs, rs.composer]),
+                    builder: (context, _) => state.pictureFocused == rs.sid || rs.composer.open
+                        ? _appKeyRow(context, rs, showsInput: port != null)
+                        : const SizedBox.shrink(),
+                  ),
+                ),
               if (offline != null || banner != null || notice != null || screens.length > 1)
                 Positioned(
                   top: 0, left: 0, right: 0,

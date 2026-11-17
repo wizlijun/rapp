@@ -1,4 +1,6 @@
+#if canImport(AppKit)
 import AppKit
+#endif
 import RappCore
 import UniformTypeIdentifiers
 

@@ -24,9 +24,11 @@ import 'ui/main_state.dart';
 import 'ui/main_window.dart';
 import 'ui/prefs.dart';
 import 'ui/system_font.dart';
+import 'main_ios.dart';
 import 'ui/tokens.dart';
 
 Future<void> main(List<String> args) async {
+  if (Platform.isIOS) return mainIos();
   WidgetsFlutterBinding.ensureInitialized();
   await windowManager.ensureInitialized();
   final env = Platform.environment;

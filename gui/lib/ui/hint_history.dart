@@ -15,16 +15,19 @@ class HintAnchor extends StatelessWidget {
   /// Whether the line itself fits; without it only the ▾ is left.
   final bool showText;
 
-  /// The narrowest the area may be and still hold the ▾.
+  /// The narrowest the area may be and still hold the bare line.
   static const minWidth = 26.0;
+
+  /// The narrowest the history's button may be (a tap target, never under 48).
+  static const buttonWidth = 48.0;
 
   @override
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
     final text = showText ? state.hint : '';
     return LayoutBuilder(builder: (context, box) {
-      if (state.hintHistory.isEmpty || box.maxWidth < minWidth) {
-        // Nothing said yet (or no room): the bare line, as before, or nothing.
+      if (state.hintHistory.isEmpty || box.maxWidth < buttonWidth) {
+        // Nothing said yet (or no room for the button): the bare line, as before, or nothing.
         return Align(
           alignment: Alignment.centerRight,
           child: text.isEmpty || box.maxWidth < minWidth ? const SizedBox.shrink() : _line(t, text),
@@ -54,11 +57,12 @@ class HintAnchor extends StatelessWidget {
                 child: DecoratedBox(
                   decoration: open ? t.raiseBox(border: t.text) : BoxDecoration(borderRadius: radius),
                   child: ConstrainedBox(
-                    constraints: const BoxConstraints(minHeight: 48),
+                    constraints: const BoxConstraints(minWidth: buttonWidth, minHeight: 48),
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 4),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.end,
                         children: [
                           if (text.isNotEmpty) Flexible(child: _line(t, text)),
                           Icon(Icons.arrow_drop_down, key: const Key('hint-arrow'), size: 18, color: t.muted),

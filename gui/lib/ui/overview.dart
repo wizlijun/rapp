@@ -47,20 +47,29 @@ class Overview extends StatelessWidget {
         final projectsFirst = state.prefs.first == FirstLayer.project;
         return Stack(children: [
           Positioned.fill(child: OverviewArt(projectsFirst: projectsFirst)),
-          Column(key: const Key('overview'), crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            _CountsRow(state: state, counts: counts),
-            if (projectsFirst) _ThirdLayer(state: state),
-            Expanded(
-              child: ListView.separated(
-                key: const Key('wall'),
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: _gap),
-                itemCount: cols.length,
-                separatorBuilder: (_, _) => const SizedBox(width: _gap),
-                itemBuilder: (_, i) => _Column(state: state, col: cols[i]),
+          // The page scrolls up and down; the wall wraps its columns into rows when they do not fit across
+          // (iPad spec §7.2). With room to spare the project/resource row still sits at the bottom.
+          CustomScrollView(key: const Key('overview'), slivers: [
+            SliverToBoxAdapter(child: _CountsRow(state: state, counts: counts)),
+            if (projectsFirst) SliverToBoxAdapter(child: _ThirdLayer(state: state)),
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: _gap),
+              sliver: SliverToBoxAdapter(
+                child: Wrap(
+                  key: const Key('wall'),
+                  spacing: _gap,
+                  runSpacing: _gap,
+                  children: [for (final c in cols) _Column(state: state, col: c)],
+                ),
               ),
             ),
-            if (!projectsFirst) _ThirdLayer(state: state),
+            if (!projectsFirst)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: Align(alignment: Alignment.bottomCenter, child: _ThirdLayer(state: state)),
+              )
+            else
+              const SliverToBoxAdapter(child: SizedBox(height: _gap)),
           ]),
         ]);
       },
@@ -300,41 +309,40 @@ class _Column extends StatelessWidget {
             ]),
           ]),
         ),
-        Expanded(
-          // The sessions, then this device's favourites that are not open (one tap opens one).
-          child: ListView(children: [
-            if (col.entries.isEmpty) Text('没有打开的 app', style: TextStyle(color: t.muted)),
-            for (final (i, e) in col.entries.indexed) ...[
+        // The sessions, then this device's favourites that are not open (one tap opens one). The page scrolls,
+        // so the column is as tall as what it holds.
+        Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          if (col.entries.isEmpty) Text('没有打开的 app', style: TextStyle(color: t.muted)),
+          for (final (i, e) in col.entries.indexed) ...[
+            if (i > 0) const SizedBox(height: 8),
+            _Block(state: state, entry: e),
+          ],
+          if (favorites.isNotEmpty) ...[
+            Padding(
+              padding: const EdgeInsets.only(top: 14, bottom: 6),
+              child: Text('常用', style: small?.copyWith(color: t.muted, letterSpacing: t.labelSpacing * t.textSize)),
+            ),
+            for (final (i, f) in favorites.indexed) ...[
               if (i > 0) const SizedBox(height: 8),
-              _Block(state: state, entry: e),
-            ],
-            if (favorites.isNotEmpty) ...[
-              Padding(
-                padding: const EdgeInsets.only(top: 14, bottom: 6),
-                child: Text('常用', style: small?.copyWith(color: t.muted, letterSpacing: t.labelSpacing * t.textSize)),
-              ),
-              for (final (i, f) in favorites.indexed) ...[
-                if (i > 0) const SizedBox(height: 8),
-                _FavoriteBlock(
-                  favorite: f,
-                  label: state.labelOf(f),
-                  onTap: state.hubUsable && !col.offline ? () => state.openOrSwitch(f.device, f.bundle, f.name) : null,
-                ),
-              ],
-            ],
-            if (col.entries.isEmpty && id != null) ...[
-              const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: RappButton.secondary(
-                  key: Key('open-app-$id'),
-                  label: '打开 app',
-                  onPressed: () => state.showDevice(id),
-                ),
+              _FavoriteBlock(
+                favorite: f,
+                label: state.labelOf(f),
+                onTap: state.hubUsable && !col.offline ? () => state.openOrSwitch(f.device, f.bundle, f.name) : null,
               ),
             ],
-          ]),
-        ),
+          ],
+          if (col.entries.isEmpty && id != null) ...[
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: RappButton.secondary(
+                key: Key('open-app-$id'),
+                label: '打开 app',
+                onPressed: () => state.showDevice(id),
+              ),
+            ),
+          ],
+        ]),
       ]),
     );
   }
