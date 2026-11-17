@@ -901,13 +901,21 @@ fn finish((s, r): (Pipe, Value), path: &'static str) -> Result<(Pipe, Value, &'s
 
 #[cfg(test)]
 mod tests {
-    use super::{cacheable, dial_order, is_refusal, probe_asks_relay, unreached};
+    use super::{cacheable, finish, dial_order, is_refusal, probe_asks_relay, unreached};
     use crate::hosts::Host;
     use anyhow::anyhow;
 
     fn host(password: &str, lan: &[&str]) -> Host {
         let lan = lan.iter().map(|a| a.to_string()).collect();
         Host { id: "100000001".into(), name: "n".into(), password: password.into(), lan, fp: None, route: None }
+    }
+
+    /// An old peer's `{"ok":false,"error":"unknown op"}` reaches the GUI as the text `unknown op`.
+    #[test]
+    fn unknown_op_reply_becomes_its_error_text() {
+        let r = serde_json::json!({"ok":false,"error":"unknown op"});
+        let e = finish((Box::new(tokio::io::duplex(8).0), r), "lan").err().unwrap();
+        assert_eq!(e.to_string(), "unknown op");
     }
 
     /// An automatic connect that ends after the host was forced (or removed) is not cached.

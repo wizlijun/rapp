@@ -45,6 +45,8 @@ pub struct Opts {
     pub embed_only: bool,
     /// Dial both address families (read by the dialer).
     pub dual_stack: bool,
+    /// Where `hub.log` and `service.log` are read for the `logs` command; None: `logs` without `id` is refused.
+    pub log_dir: Option<PathBuf>,
 }
 
 /// One open session. `tx` is the writer of the client's stdin (None once closed).
@@ -97,6 +99,7 @@ pub(crate) struct Hub {
     name: String,
     owns_access: bool,
     embed_only: bool,
+    log_dir: Option<PathBuf>,
     dual_stack: bool,
     /// `presence` with `paused`: the probe skips its ticks.
     presence_paused: AtomicBool,
@@ -140,6 +143,7 @@ where
         name: opts.name.clone().unwrap_or_else(rapp_net::config::hostname),
         owns_access: opts.owns_access,
         embed_only: opts.embed_only,
+        log_dir: opts.log_dir,
         dual_stack: opts.dual_stack,
         presence_paused: AtomicBool::new(false),
         terms: Default::default(),
@@ -311,6 +315,33 @@ impl Hub {
                 }
                 if r["capabilities"].is_object() {
                     ev["capabilities"] = r["capabilities"].clone();
+                }
+                ev
+            }
+            Some("logs") => {
+                let q: rapp_net::logq::LogQuery = serde_json::from_value(v.clone()).context("bad logs query")?;
+                let (mut ev, r) = match v.get("id") {
+                    Some(id) if !id.is_string() => bail!("bad id"),
+                    Some(id) => {
+                        let id = id.as_str().unwrap_or_default();
+                        let (_, r, _) = self.request(&self.host(id)?, &Op::Logs(q)).await?;
+                        (json!({"event":"logs","id":id}), r)
+                    }
+                    None => {
+                        let dir = self.log_dir.clone().context("no log dir")?;
+                        let r = tokio::task::spawn_blocking(move || rapp_net::logq::query(&dir, &q, std::time::SystemTime::now()))
+                            .await?;
+                        (json!({"event":"logs"}), r)
+                    }
+                };
+                // Only the query's fields: not `ok`, nor anything a peer might add.
+                // A new reply key of `logq::query` must be added here or the GUI
+                // never sees it; a new query key must be a `LogQuery` field (the
+                // parse above drops any other) to reach this device or a peer.
+                for k in ["events", "again", "more", "older", "newer", "gap", "counts", "latest", "launchd"] {
+                    if let Some(x) = r.get(k) {
+                        ev[k] = x.clone();
+                    }
                 }
                 ev
             }

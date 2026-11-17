@@ -1847,6 +1847,72 @@ void main() {
     });
 
     group('overview', () {
+      test('openLogs closes the panel and takes the stage off', () {
+        env((a, t, port, st, hints) {
+          st.togglePanel();
+          st.openLogs();
+          expect(st.logs, true);
+          expect(st.panel, isNull);
+          st.closeLogs();
+          expect(st.logs, false);
+        }, sessions: 2);
+      });
+
+      test('select clears logs; so does toggleOverview', () {
+        env((a, t, port, st, hints) {
+          st.openLogs();
+          st.select('111/a');
+          expect(st.logs, false);
+          st.openLogs();
+          st.toggleOverview();
+          expect(st.logs, false);
+        }, sessions: 2);
+      });
+
+      test('全景 while logs are open from 全景 goes back to 全景, not the stage', () {
+        env((a, t, port, st, hints) {
+          st.toggleOverview();
+          expect(st.overview, true);
+          st.openLogs();
+          expect((st.logs, st.overview), (true, true));
+          st.toggleOverview();
+          expect((st.logs, st.overview), (false, true));
+          // From the stage too: 全景 ends on 全景.
+          st.toggleOverview();
+          expect(st.overview, false);
+          st.openLogs();
+          st.toggleOverview();
+          expect((st.logs, st.overview), (false, true));
+        }, sessions: 2);
+      });
+
+      test('with logs open Ctrl+Enter and focusPicture do nothing; the frame rate drops off-stage', () {
+        env((a, t, port, st, hints) {
+          port.emit(WindowsEvent(2, [rw(7)]));
+          st.remote[2]!.setChoice(const StreamChoice('color16', 'adaptive', 30));
+          expect(sets(port, 2).last['fps'], 30);
+          st.openLogs();
+          expect(sets(port, 2).last['fps'], 1);
+          st.composerKey();
+          expect(st.currentRemote!.composer.open, false);
+          st.focusPicture(2);
+          expect(st.pictureFocused, isNull);
+          st.closeLogs();
+          expect(sets(port, 2).last['fps'], 30);
+        }, sessions: 2);
+      });
+
+      test('stageLive is false while logs is open', () {
+        env((a, t, port, st, hints) {
+          port.emit(WindowsEvent(1, [rw(3)]));
+          expect(st.stageLive, true);
+          st.openLogs();
+          expect(st.stageLive, false);
+          st.closeLogs();
+          expect(st.stageLive, true);
+        }, sessions: 2);
+      });
+
       test('overview drops the current session to 1 fps', () {
         env((a, t, port, st, hints) {
           st.remote[2]!.setChoice(const StreamChoice('color16', 'adaptive', 30));

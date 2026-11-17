@@ -16,6 +16,8 @@ pub enum Op {
         name: Option<String>,
     },
     ListApps,
+    /// Read this device's logs (log screen spec §3); answered from `State::log_dir`.
+    Logs(crate::logq::LogQuery),
     /// Presence probe: answered ok, never logged, starts nothing.
     Ping,
     Open {
@@ -77,6 +79,16 @@ mod tests {
         assert_eq!(serde_json::to_value(Op::Ping).unwrap(), json!({"op":"ping"}));
         let op: Op = serde_json::from_value(json!({"op":"auth","password":"p"})).unwrap();
         assert_eq!(op, Op::Auth { password: Some("p".into()), name: None });
+    }
+
+    #[test]
+    fn logs_op_wire() {
+        use crate::logq::LogQuery;
+        assert_eq!(serde_json::to_value(Op::Logs(LogQuery::default())).unwrap(), json!({"op":"logs"}));
+        let q = LogQuery { limit: Some(5), problems: true, ..Default::default() };
+        let v = json!({"op":"logs","limit":5,"problems":true});
+        assert_eq!(serde_json::to_value(Op::Logs(q.clone())).unwrap(), v);
+        assert_eq!(serde_json::from_value::<Op>(v).unwrap(), Op::Logs(q));
     }
 
     #[test]

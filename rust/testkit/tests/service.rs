@@ -1239,3 +1239,34 @@ async fn linux_without_graphical_host_lists_capabilities_and_still_serves_terms_
     let perms = ipc_once(&svc, home.path(), json!({"cmd":"permissions","prompt":true})).await;
     assert_eq!(perms["permissions"], Value::Null);
 }
+
+#[tokio::test]
+async fn logs_over_the_peer_link() {
+    let a = service().await;
+    let dir = a.home.path().join("logs");
+    std::fs::create_dir_all(&dir).unwrap();
+    let at = |s: u64| rapp_net::log::timestamp(std::time::SystemTime::now() - Duration::from_secs(s));
+    let l1 = json!({"ts":at(2),"lvl":"info","ev":"first_marker"}).to_string();
+    let l2 = json!({"ts":at(1),"lvl":"info","ev":"second_marker"}).to_string();
+    std::fs::write(dir.join("service.log"), format!("{l1}\n{l2}\n")).unwrap();
+    let ep = b_endpoint();
+    let (conn, _) = direct(&ep, a_addr(&a.svc), json!({"op":"auth","password":PASSWORD})).await;
+    let r = req(&conn, json!({"op":"logs"})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    let raws: Vec<String> = r["events"].as_array().unwrap().iter().map(|e| e["raw"].to_string()).collect();
+    assert!(raws.iter().any(|x| x.contains("first_marker")), "{r}");
+    assert!(raws.iter().any(|x| x.contains("second_marker")), "{r}");
+    assert_eq!(req(&conn, json!({"op":"logs"})).await["ok"], true);
+    // A successful logs request writes nothing: polling must not fill the log it shows.
+    let text = std::fs::read_to_string(dir.join("service.log")).unwrap();
+    assert!(!text.contains("\"op\":\"logs\""), "{text}");
+}
+
+#[tokio::test]
+async fn logs_needs_auth() {
+    let a = service().await;
+    let ep = b_endpoint();
+    let conn = dial(&ep, a_addr(&a.svc), rapp_net::quic::ALPN_PEER).await;
+    let r = req(&conn, json!({"op":"logs"})).await;
+    assert_eq!(r["error"], "auth required");
+}

@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/hub_client.dart';
+import 'package:rapp/log_view.dart';
 
 import 'fakes.dart';
 
@@ -91,6 +92,49 @@ void main() {
       expect(t.sent.last, {'cmd': 'net_suspect'});
       hub.netChanged();
       expect(t.sent.last, {'cmd': 'net_changed'});
+    });
+
+    test('logs sends the query without id and parses the page', () async {
+      final f = hub.logs(query: const LogQuery(limit: 200, problems: true));
+      expect(t.sent.last, {'cmd': 'logs', 'limit': 200, 'problems': true, 'req': t.sent.last['req']});
+      t.emit({
+        'event': 'logs',
+        'req': t.sent.last['req'],
+        'events': [
+          {'src': 'hub', 'at': 'a1', 'kind': 'refused', 'raw': '{"ev":"rejected","reason":"wrong password"}'},
+        ],
+        'more': false,
+        'gap': true,
+        'older': 'a1',
+        'newer': 'a1',
+        'counts': {'unreachable': 2, 'refused': 1, 'fault': 0},
+        'latest': {
+          'refused': {'src': 'hub', 'at': 'a1', 'kind': 'refused', 'raw': '{"ev":"rejected","reason":"wrong password"}'},
+        },
+        'launchd': ['line one'],
+      });
+      final p = await f;
+      expect(p.events.single.kind, LogKind.refused);
+      expect(p.counts![LogKind.unreachable], 2);
+      expect(p.latest![LogKind.refused]!.fields['reason'], 'wrong password');
+      expect(p.launchd, ['line one']);
+      expect(p.gap, isTrue);
+      expect(p.more, isFalse);
+    });
+
+    test('logs carries the host id', () async {
+      final f = hub.logs(id: '111', query: const LogQuery(tailLaunchd: true, src: {'hub'}));
+      expect(t.sent.last['id'], '111');
+      expect(t.sent.last['tail_launchd'], true);
+      expect(t.sent.last['src'], ['hub']);
+      t.emit({'event': 'logs', 'req': t.sent.last['req'], 'events': [], 'more': false});
+      expect((await f).events, isEmpty);
+    });
+
+    test('logs on an old peer throws unknown op', () async {
+      final f = hub.logs(id: '111', query: const LogQuery());
+      t.emit({'event': 'error', 'req': t.sent.last['req'], 'error': 'unknown op'});
+      await expectLater(f, throwsA(isA<HubException>().having((e) => e.message, 'message', contains('unknown op'))));
     });
 
     test('apps carry the desktop entry\'s screens; bad screens are skipped', () async {
