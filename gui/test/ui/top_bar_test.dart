@@ -576,15 +576,87 @@ void main() {
       expect(tester.getSize(local).width, 48);
       expect(tester.getSize(remote).width, 48);
       expect(find.byTooltip('本机菜单：会话、剪贴板、输入法'), findsOneWidget);
-      // 远程 sits beside the window tabs, after 下一个; 本机 stays at the right, before the traffic bars.
+      // 远程 sits beside the window tabs, after 下一个; 本机 stays at the right, after the traffic bars.
       final next = tester.getRect(find.byKey(const Key('next')));
       final traffic = tester.getRect(find.byKey(const Key('traffic')));
       expect(tester.getRect(remote).left, greaterThanOrEqualTo(next.right));
       expect(tester.getRect(remote).right, lessThan(tester.getRect(local).left));
-      expect(tester.getRect(local).right, lessThanOrEqualTo(traffic.left + 0.01));
+      expect(tester.getRect(local).left, greaterThanOrEqualTo(traffic.right - 0.01));
       // The traffic label is the bars alone: the rate is atop its menu.
       expect(tester.getSize(find.byKey(const Key('traffic'))).width, 48);
       expect(find.textContaining('KB/s'), findsNothing);
+    });
+
+    testWidgets('the row: session, remote menu | hint, right-aligned | needs, net, traffic, 本机, fullscreen', (tester) async {
+      await tester.pumpWidget(wrap(Align(
+        alignment: Alignment.topLeft,
+        child: SizedBox(width: 1200, child: TopBar(state: es, fullscreen: false, onToggleFullscreen: () {})),
+      )));
+      await tester.runAsync(() async {
+        t.emit({'event': 'net', 'level': 'ok', 'rtt_ms': 160, 'loss': 0.03});
+        es.openOrSwitch('111', 'Safari', 'Safari');
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      es.hint = '已打开 Safari';
+      es.notifyListeners();
+      await tester.pump();
+      Rect r(String k) => tester.getRect(find.byKey(Key(k)));
+      expect(r('prev').right, lessThanOrEqualTo(r('session-block').left + 0.01));
+      expect(r('session-block').right, lessThanOrEqualTo(r('next').left + 0.01));
+      expect(r('next').right, lessThanOrEqualTo(r('remote-menu').left + 0.01));
+      expect(r('remote-menu').right, lessThan(r('hint-text').left));
+      // Right-aligned: the line and its ▾ end where 需要你 begins.
+      expect(r('hint-text').right, lessThan(r('hint-arrow').left + 0.01));
+      expect(r('hint-button').right, closeTo(r('needs-you').left, 0.01));
+      expect(r('needs-you').right, lessThanOrEqualTo(r('net-marker').left + 0.01));
+      expect(r('net-marker').right, lessThanOrEqualTo(r('traffic').left + 0.01));
+      expect(r('traffic').right, lessThanOrEqualTo(r('session-menu').left + 0.01));
+      expect(r('session-menu').right, lessThanOrEqualTo(r('fullscreen-button').left + 0.01));
+    });
+
+    testWidgets('the hint keeps a history this run; its ▾ stays after the line clears and lists it', (tester) async {
+      await tester.pumpWidget(wrap(Align(
+        alignment: Alignment.topLeft,
+        child: SizedBox(width: 1200, height: 800, child: TopBar(state: es, fullscreen: false, onToggleFullscreen: () {})),
+      )));
+      expect(find.byKey(const Key('hint-arrow')), findsNothing); // nothing said yet
+      es.hint = '已打开 Safari';
+      es.hint = '';
+      es.hint = '已切到 Notes';
+      es.hint = '已切到 Notes'; // the line it already shows: no new record
+      es.hint = '已切到 Notes；配置读不出来'; // appends to the shown line: replaces its record
+      es.hint = '';
+      es.notifyListeners();
+      await tester.pump();
+      expect(es.hintHistory.map((h) => h.text), ['已切到 Notes；配置读不出来', '已打开 Safari']);
+      expect(find.byKey(const Key('hint-text')), findsNothing);
+      expect(find.byKey(const Key('hint-arrow')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('hint-button')));
+      await tester.pump();
+      expect(es.corner, Corner.hints);
+      final list = find.byKey(const Key('hint-history'));
+      expect(find.descendant(of: list, matching: find.text('已切到 Notes；配置读不出来')), findsOneWidget);
+      expect(find.descendant(of: list, matching: find.text('已打开 Safari')), findsOneWidget);
+      expect(
+        tester.getRect(find.descendant(of: list, matching: find.text('已切到 Notes；配置读不出来'))).top,
+        lessThan(tester.getRect(find.descendant(of: list, matching: find.text('已打开 Safari'))).top),
+      );
+      expect(find.byKey(const Key('hints-scrim')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('hint-button')));
+      await tester.pump();
+      expect(es.corner, isNull);
+      expect(find.byKey(const Key('hint-history')), findsNothing);
+    });
+
+    test('the hint history keeps the newest 50', () {
+      for (var i = 0; i < 60; i++) {
+        es.hint = 'h$i';
+      }
+      expect(es.hintHistory, hasLength(MainState.hintHistoryMax));
+      expect(es.hintHistory.first.text, 'h59');
+      expect(es.hintHistory.last.text, 'h10');
     });
 
     testWidgets('the traffic menu starts with the rate and the link to the relay', (tester) async {

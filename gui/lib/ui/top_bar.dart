@@ -1,4 +1,6 @@
-// Top bar: panel button, prev/next, current session, hint, fullscreen.
+// Top bar, left to right: panel, overview, prev, the session (its list), next, the window menu,
+// the remote app's menu; then the hint, right-aligned (its ▾ opens the history); then 需要你, the
+// network marker, the traffic label (the stream menu), the session menu, 上一个项目, fullscreen.
 import 'package:flutter/material.dart';
 
 import '../embed/stream_menu.dart';
@@ -11,6 +13,7 @@ import 'needs_you.dart';
 import 'window_menu.dart';
 import 'net_marker.dart';
 import 'corner_popover.dart';
+import 'hint_history.dart';
 import 'projects.dart';
 import 'session_model.dart';
 import 'session_switcher.dart';
@@ -193,7 +196,27 @@ class TopBar extends StatelessWidget {
                     multi ? () => state.step(1) : null,
                   ),
                   SizedBox(width: gap),
+                  // One button for every window, hidden ones included: the title, and a menu to
+                  // switch. It is not flexible, so it can never push the rest of the row out.
+                  if (wmShow) ...[
+                    WindowMenu(state: state, term: term, compact: !wmFull),
+                    SizedBox(width: gap),
+                  ],
+                  // The remote app's own menu, after its window tabs.
+                  if (remoteButton) ...[
+                    _menu(context, cur, {MenuPart.remote}, Corner.remote),
+                    SizedBox(width: gap),
+                  ],
+                  // The hint, right-aligned against the right-hand group, with its history's ▾.
+                  Expanded(child: HintAnchor(state: state, showText: wide)),
+                  if (state.hub != null) NeedsYouAnchor(state: state),
+                  if (net != null) NetMarker(net: net, path: cur?.path),
+                  if (embedded) ...[
+                    _menu(context, cur, split ? {MenuPart.stream} : allMenuParts, Corner.stream),
+                    if (split) _menu(context, cur, {MenuPart.session}, Corner.session),
+                  ],
                   if (showPrevProject) ...[
+                    SizedBox(width: gap),
                     Semantics(
                       container: true,
                       excludeSemantics: true,
@@ -210,35 +233,6 @@ class TopBar extends StatelessWidget {
                         ),
                       ),
                     ),
-                    SizedBox(width: gap),
-                  ],
-                  // The remote app's own menu, beside its window tabs.
-                  if (remoteButton) ...[
-                    _menu(context, cur, {MenuPart.remote}, Corner.remote),
-                    SizedBox(width: gap),
-                  ],
-                  // One button for every window, hidden ones included: the title, and a menu to
-                  // switch. It is not flexible, so it can never push the rest of the row out.
-                  if (wmShow) ...[
-                    WindowMenu(state: state, term: term, compact: !wmFull),
-                    SizedBox(width: gap),
-                  ],
-                  if (wide)
-                    Expanded(
-                      child: Text(
-                        state.hint,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(color: t.muted),
-                      ),
-                    )
-                  else
-                    const Spacer(),
-                  if (state.hub != null) NeedsYouAnchor(state: state),
-                  if (net != null) NetMarker(net: net, path: cur?.path),
-                  if (embedded) ...[
-                    if (split) _menu(context, cur, {MenuPart.session}, Corner.session),
-                    _menu(context, cur, split ? {MenuPart.stream} : allMenuParts, Corner.stream),
                   ],
                   _icon(
                     'fullscreen-button',
