@@ -505,3 +505,13 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [x] 更新网站源码中的下载备用快照，8 项选择规则/快照测试通过；线上页面正常从 GitHub API 自动获取此版本，本轮未部署网站。
 
 产物在 `dist/linux-0.13.9/`。构建日志在主工作区 `.build-logs/package-linux-0139.log`，完整测试日志在发布 worktree 的 `.build-logs/*0139.log`。真实 macOS 对端及各终端模拟器的物理窗口/输入体验仍需设备验收。
+
+
+## Linux 桌面 host 与 0.14.1（2026-11-17）
+
+- [x] 新增 Rust `rapp-host`，复用现有 v13 协议，支持 Omarchy/Hyprland、兼容 wlroots 的 Wayland 和 X11 桌面被控端。包含显示器列表、逐屏会话、增量帧、键鼠/滚轮/Unicode 文本输入、鉴权、接管、让出输入、踢出、退出释放输入、帧确认背压。
+- [x] 服务启动 worker 前刷新图形会话环境；区分整桌面与单应用能力，Linux 的诊断不再显示 macOS 授权提示；构建与 Arch/便携打包包含 host。
+- [x] 原生采集、跨协议解码、错误 token、接管、踢出和 EOF 在 Omarchy 实测通过；隔离 Xvfb 与 headless labwc 验证输入坐标、快捷键、中文输入、修饰键释放与物理键映射恢复。可用 `python3 scripts/test-linux-host.py --current` 重现（需要 Xvfb、labwc、Xwayland）。
+- [x] 相关 GUI 112 项、service 集成 50 项回归通过，Flutter analyze 与新 host Clippy 无问题。端口映射测试在独立网络命名空间通过，避免运行中的服务占用测试端口。
+- [x] 完成实现后再次执行 `git pull --rebase`，main 已是上游最新。
+- 边界：GNOME/KDE Wayland portal、单应用共享、Linux host 的剪贴板/文件传输、自动输入解锁密码尚未实现。X11 文本输入依赖 `xdotool`；本轮无法在 Linux 构建或真机验收 macOS client。
