@@ -7,6 +7,9 @@
 // free it with rapp_hub_free_line.
 // name is the device name B introduces itself with. When the hub ends (normally or on error; the error is
 // in hub.log first) on_line is called once more with NULL, and rapp_hub_send then returns -3.
+// After the hub ended on its own, start keeps returning -1 until the caller calls rapp_hub_stop (call it on
+// seeing NULL, but from another thread: never call rapp_hub_stop from inside on_line, and on_line must not
+// block waiting on the thread that calls rapp_hub_stop).
 // 0 ok; -1 already running; -2 bad args (NULL / not UTF-8); -3 the runtime could not start.
 int32_t rapp_hub_start(const char *home, const char *log_dir, const char *name, void (*on_line)(const char *line));
 // Frees a line on_line handed over. NULL is ignored.

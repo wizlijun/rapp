@@ -25,6 +25,10 @@ struct Running {
 
 static HUB: Mutex<Option<Running>> = Mutex::new(None);
 
+/// Test hook: the next hub run panics instead of starting.
+#[cfg(test)]
+static FORCE_PANIC: AtomicBool = AtomicBool::new(false);
+
 fn text(p: *const c_char) -> Option<String> {
     if p.is_null() {
         return None;
@@ -84,8 +88,18 @@ pub extern "C" fn rapp_hub_start(
     let done = exited.clone();
     let hub = rt.spawn(async move {
         // Error first into hub.log, then all output lines, then the one NULL.
-        if let Err(e) = rapp_hub::run(opts, hub_in, hub_out).await {
-            log.msg(Lvl::Error, format_args!("{e:#}"));
+        // `run` is its own task so a panic in it is caught here and ends the hub like any other exit.
+        let run = tokio::spawn(async move {
+            #[cfg(test)]
+            if FORCE_PANIC.swap(false, Ordering::SeqCst) {
+                panic!("forced hub panic");
+            }
+            rapp_hub::run(opts, hub_in, hub_out).await
+        });
+        match run.await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => log.msg(Lvl::Error, format_args!("{e:#}")),
+            Err(e) => log.msg(Lvl::Error, format_args!("hub task failed: {e}")),
         }
         log.flush();
         done.store(true, Ordering::SeqCst);
@@ -232,6 +246,14 @@ mod tests {
         assert_eq!(start(home.path()), 0);
         assert_eq!(send(r#"{"cmd":"hosts"}"#), 0);
         rapp_hub_stop();
+        {
+            let lines = LINES.lock().unwrap();
+            assert!(
+                lines.iter().flatten().any(|l| l.contains(r#""event":"hosts""#)),
+                "the hosts answer was delivered before stop returned"
+            );
+            assert_eq!(lines.last(), Some(&None), "stop returns after the NULL");
+        }
         let before = count();
         std::thread::sleep(Duration::from_millis(100));
         assert_eq!(count(), before, "nothing arrives after stop returned");
@@ -247,6 +269,23 @@ mod tests {
             wait_for(|l| l.contains(r#""event":"access""#) && l.contains(r#""name":"iPad""#), Duration::from_secs(5)),
             "access event carries the name"
         );
+        rapp_hub_stop();
+    }
+
+    #[test]
+    fn hub_panic_signals_null_and_send_is_minus_three() {
+        let _g = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let home = tempfile::tempdir().unwrap();
+        FORCE_PANIC.store(true, Ordering::SeqCst);
+        assert_eq!(start(home.path()), 0);
+        let end = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < end && !matches!(LINES.lock().unwrap().last(), Some(None)) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(LINES.lock().unwrap().last(), Some(&None), "NULL after the hub panicked");
+        assert_eq!(send(r#"{"cmd":"hosts"}"#), -3);
+        let log = std::fs::read_to_string(home.path().join("logs").join("hub.log")).unwrap_or_default();
+        assert!(log.contains("panic"), "panic is in hub.log: {log}");
         rapp_hub_stop();
     }
 }
