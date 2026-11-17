@@ -54,6 +54,8 @@ RAPP_ALLOW_ADHOC=1 ./scripts/package-macos.sh
 
 生成 Linux 安装包：在干净的工作区运行 `./scripts/package-linux.sh`，另需 makepkg、fakeroot、zstd。产物输出到 `dist/`。
 
+实现范围和验证记录：[Linux 0.13.7 对齐](docs/superpowers/plans/2026-11-17-linux-0137-parity.md)。
+
 ## 许可证
 
 [GNU GPL v3](LICENSE)。
