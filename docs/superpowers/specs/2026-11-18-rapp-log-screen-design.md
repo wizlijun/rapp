@@ -57,7 +57,7 @@
 
 - 文件不存在就当空的（iPad 只有 `hub.log`；Linux、Windows 没有 `launchd.log`）。
 - **`launchd.log` 不并进时间线。** 它的大多数行（service 的 `eprintln!`、panic 输出）没有时间，只能靠文件修改时间去猜，而修改时间每写一行都会变，并进去会让翻页和定时补新的都乱掉。所以它单独提供：查询带 `tail_launchd:true` 时，回复里多一个 `launchd`，内容是这份文件的最后 100 行原文（字符串数组，单行超过 1 KB 截短）。界面上它是「启动输出」，见 §4.2。它不参与三张卡的计数。
-- 每条结果都带上 `src`：`service` / `hub`。日志里原有的 `src` 字段要保留，改名放到 `from` 里，不能被覆盖。`service.log` 里有 `"src":"host"` / `"term"`（worker 的 stderr），`hub.log` 里有 `"src":"client"`（`hub/src/session.rs`）。
+- 每条结果都带上 `src`：`service` / `hub`（哪份日志）。事件本身以原始行 `raw` 传回，界面自己解析；日志里原有的 `src` 字段（以下称 `from`）因此原样保留，不和外层的 `src` 冲突。`service.log` 里有 `"src":"host"` / `"term"`（worker 的 stderr），`hub.log` 里有 `"src":"client"`（`hub/src/session.rs`）。
 - 坏行跳过（和 `read_recent` 一样）。
 
 ### 3.2 归类：三张卡
@@ -109,7 +109,7 @@
 
 ```json
 {"ok":true,
- "events":[{…原事件字段…, "src":"service", "kind":"refused"}, …],
+ "events":[{"src":"service", "at":"<游标>", "kind":"refused", "repeat":2, "raw":"<日志里的原始一行>"}, …],
  "more":true, "older":"<游标>", "newer":"<游标>",
  "counts":{"unreachable":12, "refused":3, "fault":1},
  "latest":{"unreachable":{…一条事件…}, "refused":{…}, "fault":{…}}}
@@ -119,7 +119,7 @@
 - **游标，不用裸的 `ts`**：`ts` 只到毫秒，一阵连发的事件常常同一个毫秒，用 `ts` 做翻页边界会漏掉或重复。每条事件带一个 `at`，回复带 `older`（这一页最旧那条之前）和 `newer`（最新那条之后）。游标对界面是不透明的字符串，由 Rust 定义内容，例如 `ts`、来源和该行在文件里的位置。日志在两次查询之间轮转过（`.log` 变成 `.log.1`），游标对不上时按 `ts` 退回，宁可多给几条重复的，界面按 `at` 去重。
 - `more`：还有更早的没给（被 `limit` 或字节上限截断了）。
 - `counts` / `latest`：最近 24 小时内各类的条数（含重复次数）和最近一条。只在请求不带 `before`/`after`/`around` 时给（用来画三张卡），不受 `src`、`q`、`kind` 影响。
-- **字节上限**：JSON 行协议一行最多 64 KB（`rapp_net::line::MAX_LINE`）。回复必须小于它：凑满约 56 KB 就停，置 `more:true`。单条事件序列化后超过 4 KB 的，把 `msg` 等长字符串截短并加 `"truncated":true`。
+- **字节上限**：JSON 行协议一行最多 64 KB（`rapp_net::line::MAX_LINE`）。回复必须小于它：凑满约 56 KB 就停，置 `more:true`。单条 `raw` 超过 4 KB 的，解析后把每个超过 1 KB 的字符串值截短，重新序列化作 `raw`，并加 `"truncated":true`（`raw` 仍是合法 JSON）。`latest` 里的事件也是这个形状。
 - 读取要从文件尾部往前读，够数就停，不能每次把 10 MB 全读进来再筛（`read_recent` 现在是整份读入，要改或另写）。`counts` 需要扫完 24 小时，按时间往前扫到 24 小时前就停。
 - 这条查询在 service / hub 里放到阻塞线程池里跑，不占住 IPC 和会话的异步循环。
 
@@ -174,7 +174,7 @@
 ```
 
 - 字段表：已知字段用中文名（`peer` 来源地址、`path` 路径、`reason` 原因、`app`、`sid` 会话、`secs` 时长……），不认识的字段照原名列出。值照原样，不翻译（原因是英文就是英文）。
-- 原文是这条事件在日志文件里的原样 JSON（不含查询加上的 `src`、`kind`、`at`、`repeat`），等宽字体，能选中。所以查询要把原始行一起带回来（字段 `raw`），算进字节上限。
+- 原文就是 `raw`，等宽字体，能选中。
 - 「复制」复制原文这一行。
 - 「看前后 ±1 分钟」：发 `around` 查询，流水换成这两分钟内所有来源、所有级别的记录（按时间从旧到新），这一条高亮并滚到中间。顶上出现一条「前后 1 分钟 · 23:29:11–23:31:11  × 返回」，点 × 回到原来的流水和滚动位置。
 
