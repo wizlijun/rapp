@@ -860,15 +860,15 @@ class MainState extends ChangeNotifier {
   }
 
   /// The keys [step] may stop on: the current project's members, the open sessions in no project
-  /// ([inbox]), or null (any session).
+  /// ([freeZone]), or null (any session).
   List<String>? get _stepWithin {
-    if (inbox) return inboxKeys;
+    if (freeZone) return freeZoneKeys;
     final p = currentProject == null ? null : _project(currentProject!);
     return p == null ? null : projectKeys(p);
   }
 
   /// The open sessions that belong to no project, in list order.
-  List<String> get inboxKeys {
+  List<String> get freeZoneKeys {
     final inProject = {for (final p in projects) ...projectKeys(p)};
     return [for (final e in _entries) if (!inProject.contains(e.key)) e.key];
   }
@@ -2969,12 +2969,13 @@ class MainState extends ChangeNotifier {
   /// Where each project was left (`local/project_positions.json`).
   final ProjectPositions positions;
 
-  /// The current project's id; null when there is none (全部, or [inbox]).
+  /// The current project's id; null when there is none (全部, or [freeZone]).
   String? currentProject;
 
-  /// 未归类: the sessions in no project, as if they were one. Never with a [currentProject].
-  bool inbox = false;
-  static const inboxLabel = '未归类';
+  /// 自由区 (Free Zone): the sessions in no project, as if they were one: like a city's unplanned
+  /// zone, where work grows freely before it settles into a project. Never with a [currentProject].
+  bool freeZone = false;
+  static const freeZoneLabel = '自由区';
   static const allLabel = '全部';
   String? previousProject;
 
@@ -3022,9 +3023,9 @@ class MainState extends ChangeNotifier {
   /// there when the open fails (it retries), so they leave at once.
   void _followCurrentKey() {
     final id = currentProject, k = currentKey;
-    // A session in a project takes 未归类 back to 全部.
-    if (inbox && k != null && !_pending.containsKey(k) && projects.any((p) => p.members.any((m) => m.key == k))) {
-      inbox = false;
+    // A session in a project takes 自由区 back to 全部.
+    if (freeZone && k != null && !_pending.containsKey(k) && projects.any((p) => p.members.any((m) => m.key == k))) {
+      freeZone = false;
       return;
     }
     if (id == null || k == null) return;
@@ -3044,7 +3045,7 @@ class MainState extends ChangeNotifier {
   /// With a current project, only its members take part, so a session ending never leaves it.
   String? _nextAfterEnd(List<SessionGroup> oldGroups, String gone, bool Function(String key) stillOpen) {
     final p = currentProject == null ? null : _project(currentProject!);
-    final keys = inbox ? [for (final g in oldGroups) for (final e in g.entries) if (!_inAnyProject(e.key)) e.key] : (p == null ? null : projectKeys(p));
+    final keys = freeZone ? [for (final g in oldGroups) for (final e in g.entries) if (!_inAnyProject(e.key)) e.key] : (p == null ? null : projectKeys(p));
     final within = keys == null ? null : [for (final k in keys) if (k == gone || stillOpen(k)) k];
     final next = stepKey(oldGroups, gone, 1, within: within);
     return next != null && next != gone && stillOpen(next) ? next : null;
@@ -3103,7 +3104,7 @@ class MainState extends ChangeNotifier {
     if (p == null) return;
     final back = currentProject != id;
     if (currentProject != null && back) _leave();
-    inbox = false;
+    freeZone = false;
     if (previousProject == id) previousProject = null;
     final pos = positions.of(id);
     currentProject = id;
@@ -3139,20 +3140,20 @@ class MainState extends ChangeNotifier {
 
   /// 全部: back to no current project, every session.
   void leaveProject() {
-    if (currentProject == null && !inbox) return;
+    if (currentProject == null && !freeZone) return;
     _leave();
-    inbox = false;
+    freeZone = false;
     notifyListeners();
   }
 
-  /// 未归类: the sessions in no project, grouped by project so they sit together; it stops on the
+  /// 自由区: the sessions in no project, grouped by project so they sit together; it stops on the
   /// current session if it is one of them, else the first. Opens nothing.
-  void switchInbox() {
-    if (inbox) return;
+  void switchFreeZone() {
+    if (freeZone) return;
     _leave();
-    inbox = true;
+    freeZone = true;
     grouping = Grouping.project;
-    final keys = inboxKeys;
+    final keys = freeZoneKeys;
     if (!keys.contains(currentKey)) currentKey = keys.firstOrNull;
     panel = null;
     overview = false;
