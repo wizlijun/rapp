@@ -1248,6 +1248,10 @@ async fn logs_over_the_peer_link() {
     let raws: Vec<String> = r["events"].as_array().unwrap().iter().map(|e| e["raw"].to_string()).collect();
     assert!(raws.iter().any(|x| x.contains("first_marker")), "{r}");
     assert!(raws.iter().any(|x| x.contains("second_marker")), "{r}");
+    assert_eq!(req(&conn, json!({"op":"logs"})).await["ok"], true);
+    // A successful logs request writes nothing: polling must not fill the log it shows.
+    let text = std::fs::read_to_string(dir.join("service.log")).unwrap();
+    assert!(!text.contains("\"op\":\"logs\""), "{text}");
 }
 
 #[tokio::test]

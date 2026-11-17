@@ -200,7 +200,10 @@ pub async fn serve_value(state: &Arc<State>, mut s: Pipe, v: Value, peer: Peer) 
                 Ok(v) => ok(v),
                 Err(e) => err(&e.to_string()),
             };
-            log_request(state, &peer, json!({"op": "logs"}), &r);
+            // Read-only and polled: a success writes nothing (like ping); failures stay visible.
+            if r["ok"] != true {
+                log_request(state, &peer, json!({"op": "logs"}), &r);
+            }
             reply_and_finish(&mut s, r).await
         }
         // Presence probe: no access-log line (A's 访问记录 must not fill with probes).
