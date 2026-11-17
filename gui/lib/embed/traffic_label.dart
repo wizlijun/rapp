@@ -70,31 +70,42 @@ String formatRate(int bytes) {
   return '${(kb / 1000).toStringAsFixed(1)} MB/s';
 }
 
-/// The five bars alone: lit = `--on`, dark = `--line`.
+/// The five bars alone, in a 14×14 square like the network marker: lit = `--on`, dark = `--line`.
 class LevelBars extends StatelessWidget {
   const LevelBars(this.bytesPerSecond, {super.key});
 
   final int bytesPerSecond;
 
+  /// The square's side, the bars' width and the gap between them: 5 × 2 + 4 × 1 = 14.
+  static const size = 14.0;
+  static const barWidth = 2.0;
+  static const barGap = 1.0;
+
+  /// Bar [i]'s height: an even rise from 4 to the full 14.
+  static double barHeight(int i) => 4.0 + 2.5 * i;
+
   @override
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
     final lit = levelBars(bytesPerSecond);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        for (var i = 0; i < 5; i++)
-          Padding(
-            padding: EdgeInsets.only(right: i < 4 ? 2 : 0),
-            child: Container(
-              key: Key('bar$i'),
-              width: 3,
-              height: 4.0 + 2 * i,
-              color: i < lit ? t.on : t.line,
+    return SizedBox.square(
+      dimension: size,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          for (var i = 0; i < 5; i++)
+            Padding(
+              padding: EdgeInsets.only(right: i < 4 ? barGap : 0),
+              child: Container(
+                key: Key('bar$i'),
+                width: barWidth,
+                height: barHeight(i),
+                color: i < lit ? t.on : t.line,
+              ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 }

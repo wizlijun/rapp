@@ -76,6 +76,19 @@ void main() {
     expect(trafficRow(0, '本机网络弱'), '流量 0 KB/s · 本机网络弱');
   });
 
+  testWidgets('the bars are a 14×14 square, the tallest the full height', (tester) async {
+    await tester.pumpWidget(wrap(const LevelBars(50000)));
+    expect(tester.getSize(find.byType(LevelBars)), const Size.square(LevelBars.size));
+    final box = tester.getRect(find.byType(LevelBars));
+    final first = tester.getRect(find.byKey(const Key('bar0')));
+    final last = tester.getRect(find.byKey(const Key('bar4')));
+    expect(first.left, box.left);
+    expect(last.right, box.right);
+    expect(last.top, box.top);
+    expect(last.bottom, box.bottom);
+    expect(first.bottom, box.bottom);
+  });
+
   testWidgets('the label keeps one width whatever the rate, the word or open', (tester) async {
     final widths = <double>{};
     for (final bytes in [0, 1500, 12000, 999949, 2500000]) {
