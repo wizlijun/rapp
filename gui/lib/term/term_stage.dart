@@ -72,7 +72,7 @@ class TermStage extends StatefulWidget {
   State<TermStage> createState() => _TermStageState();
 }
 
-typedef _View = ({int window, int cols, int rows});
+typedef _View = ({int window, int cols, int rows, bool fit});
 
 class _TermStageState extends State<TermStage> with SingleTickerProviderStateMixin {
   final _focus = FocusNode(debugLabel: 'term-stage');
@@ -88,9 +88,17 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
   /// every MainState change, so they are compared by value, not identity.
   Object? _lookKey;
   late TermPalette _palette;
+
+  /// The metrics at the base size: they set the columns and rows the stage asks for.
   late TermMetrics _metrics;
+
+  /// The metrics the grid is drawn with: the font at the size that fits the pane to the stage. Hit-testing
+  /// and scrolling use them too.
+  late TermMetrics _drawn;
+
+  /// Metrics measured at other font sizes since the look last changed: measuring on every build is too slow.
+  final _sized = <double, TermMetrics>{};
   double _dpr = 1;
-  double _scale = 1;
 
   // Size (Z1).
   int _cols = 0, _rows = 0;
@@ -257,6 +265,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
 
   /// MainState asked for the keys to come here (`focusPicture`, a terminal opened or switched to).
   void _onState() {
+    if (widget.state.prefs.termFit != (_sent?.fit ?? widget.state.prefs.termFit)) setState(() {});
     final tick = widget.state.termFocusTick;
     if (tick == _focusSeen) return;
     _focusSeen = tick;
@@ -286,15 +295,15 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     if (!mounted) return;
     final win = widget.session.currentWindow;
     if (win == null || _model == null) return;
-    final v = (window: win, cols: _cols, rows: _rows);
+    final v = (window: win, cols: _cols, rows: _rows, fit: widget.state.prefs.termFit);
     final sent = _sent;
     if (v == sent) {
       _viewTimer?.cancel();
       _pending = null;
       return;
     }
-    // The first view of a pane goes at once; a new size waits until the stage stops changing.
-    if (sent == null || sent.window != win) {
+    // The first view of a pane, and a change of fit, go at once; a new size waits until the stage stops changing.
+    if (sent == null || sent.window != win || sent.fit != v.fit) {
       _viewTimer?.cancel();
       _pending = null;
       _sendView(v);
@@ -312,14 +321,14 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
 
   void _sendView(_View v) {
     _sent = v;
-    widget.port.view(widget.session.sid, v.window, v.cols, v.rows);
+    widget.port.view(widget.session.sid, v.window, v.cols, v.rows, fit: v.fit);
   }
 
   // ---- scrolling (H1, H2) ----
 
   void _scroll(double rows) {
     final m = _model;
-    if (m == null || m.alt || m.screen.isEmpty || rows == 0) return;
+    if (m == null || m.alt || m.screen.isEmpty || rows == 0 || !rows.isFinite) return;
     m.scrollBy(rows);
   }
 
@@ -327,7 +336,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     if (e is! PointerScrollEvent) return;
     GestureBinding.instance.pointerSignalResolver.register(e, (ev) {
       _stopFling();
-      _scroll(-(ev as PointerScrollEvent).scrollDelta.dy / _metrics.cellH);
+      _scroll(-(ev as PointerScrollEvent).scrollDelta.dy / _drawn.cellH);
     });
   }
 
@@ -338,14 +347,14 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
 
   void _onPanUpdate(PointerPanZoomUpdateEvent e) {
     _velocity?.addPosition(e.timeStamp, e.pan);
-    _scroll(e.panDelta.dy / _metrics.cellH);
+    _scroll(e.panDelta.dy / _drawn.cellH);
   }
 
   void _onPanEnd(PointerPanZoomEndEvent e) {
     final m = _model, vt = _velocity;
     _velocity = null;
     if (m == null || vt == null || m.alt) return;
-    final v = vt.getVelocity().pixelsPerSecond.dy / _metrics.cellH;
+    final v = vt.getVelocity().pixelsPerSecond.dy / _drawn.cellH;
     if (v.abs() < 1) return;
     _sim = FrictionSimulation(0.135, m.offset, v);
     _fling.start();
@@ -371,11 +380,10 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
   /// The cell under [local] (stage coordinates), clamped into the rows in view.
   TermPoint? _cellAt(Offset local) {
     final m = _model;
-    if (m == null || m.screen.isEmpty) return null;
-    final p = local / _scale;
+    if (m == null || m.screen.isEmpty || _drawn.cellW <= 0 || _drawn.cellH <= 0) return null;
     final top = (-m.offset).floor();
-    final int y = (p.dy / _metrics.cellH - m.offset).floor().clamp(top, math.max(top, m.rows - 1));
-    final int x = (p.dx / _metrics.cellW).floor().clamp(0, math.max(0, m.cols - 1));
+    final int y = (local.dy / _drawn.cellH - m.offset).floor().clamp(top, math.max(top, m.rows - 1));
+    final int x = (local.dx / _drawn.cellW).floor().clamp(0, math.max(0, m.cols - 1));
     return TermPoint(y, x);
   }
 
@@ -607,6 +615,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
       _lookKey = key;
       _palette = termPaletteFor(theme, t);
       _metrics = TermMetrics.measure(termTextStyle(t));
+      _sized.clear();
       _ver++;
     }
     final dpr = MediaQuery.devicePixelRatioOf(context);
@@ -614,6 +623,26 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
       _dpr = dpr;
       _ver++;
     }
+  }
+
+  /// The metrics at font [size], measured once per size.
+  TermMetrics _measured(double size) {
+    if (size == _metrics.style.fontSize) return _metrics;
+    final hit = _sized[size];
+    if (hit != null) return hit;
+    // Only the last few sizes are worth keeping: a resize goes through a new one every frame.
+    if (_sized.length >= 4) _sized.clear();
+    return _sized[size] = TermMetrics.measure(_metrics.style.copyWith(fontSize: size));
+  }
+
+  /// The metrics at font [size] for a [cols]×[rows] pane on a [w]×[h] stage. Glyph widths do not grow
+  /// exactly with the font, so a grid that comes out larger than the stage is measured once more, smaller.
+  TermMetrics _metricsAt(double size, int cols, int rows, double w, double h) {
+    final m = _measured(size);
+    if (w <= 0 || h <= 0 || cols <= 0 || rows <= 0) return m;
+    final gw = cols * m.cellW, gh = rows * m.cellH;
+    if (gw <= w + 0.5 && gh <= h + 0.5) return m;
+    return _measured(size * math.min(w / gw, h / gh));
   }
 
   @override
@@ -627,9 +656,10 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
       final m = _model;
       final shown = m != null && m.screen.isNotEmpty;
       final gridW = shown ? m.cols * cw : 0.0, gridH = shown ? m.rows * ch : 0.0;
-      // The pane keeps the device's rows and columns; it is scaled to fit the stage, up as well as down.
-      // A stage with no size, or a pane with none, keeps scale 1 (a scale of 0 would make every pointer position infinite).
-      _scale = shown && w > 0 && h > 0 && gridW > 0 && gridH > 0 ? math.min(w / gridW, h / gridH) : 1.0;
+      // The pane keeps the device's rows and columns; it is laid out at the font size that fits it to the
+      // stage, up as well as down, and drawn at that size rather than stretched.
+      final k = gridScale(w: w, h: h, gridW: gridW, gridH: gridH, up: !widget.state.prefs.termFit);
+      _drawn = shown ? _metricsAt(math.max(4.0, _metrics.style.fontSize! * k), m.cols, m.rows, w, h) : _metrics;
 
       if (m != null && _linksVer != _ver) {
         _linksVer = _ver;
@@ -649,12 +679,11 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
             ? null
             : TermPainter(
                 model: m,
-                metrics: _metrics,
+                metrics: _drawn,
                 palette: _palette,
                 cache: _cache,
                 version: _ver,
                 dpr: _dpr,
-                scale: _scale,
                 selection: s,
                 links: _links,
                 focused: _focus.hasFocus,

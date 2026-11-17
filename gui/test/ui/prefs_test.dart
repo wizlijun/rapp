@@ -45,6 +45,16 @@ void main() {
     expect(File('${tmp.path}/gui.json').readAsStringSync(), contains('"input_history":false'));
     expect(UiPrefs.load(tmp.path).inputHistory, isFalse);
   });
+  test('term_fit: on by default and when missing or bad, saved when off', () {
+    expect(UiPrefs().termFit, isTrue);
+    expect(UiPrefs.load(tmp.path).termFit, isTrue);
+    File('${tmp.path}/gui.json').writeAsStringSync('{"term_fit":"x"}');
+    expect(UiPrefs.load(tmp.path).termFit, isTrue);
+    UiPrefs(termFit: false).save(tmp.path);
+    expect(File('${tmp.path}/gui.json').readAsStringSync(), contains('"term_fit":false'));
+    expect(UiPrefs.load(tmp.path).termFit, isFalse);
+  });
+
   test('term_key_row: off by default and when bad, saved when on', () {
     expect(UiPrefs().termKeyRow, isFalse);
     expect(UiPrefs.load(tmp.path).termKeyRow, isFalse);

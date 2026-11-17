@@ -107,6 +107,18 @@ void main() {
     await pumpUntil(() => w.got.where((l) => l.contains('"view"')).length == 3);
   });
 
+  test('view dedupe includes fit', () async {
+    await begin(await Worker.start());
+    port.view(1, 3, 80, 24, fit: true);
+    port.view(1, 3, 80, 24, fit: true);
+    await pumpUntil(() => w.got.where((l) => l.contains('"view"')).length == 1);
+    port.view(1, 3, 80, 24);
+    await pumpUntil(() => w.got.where((l) => l.contains('"view"')).length == 2);
+    final views = w.got.where((l) => l.contains('"view"')).toList();
+    expect(views[0], contains('"fit":true'));
+    expect(views[1], contains('"fit":false'));
+  });
+
   test('a line split in the middle of a Chinese character is put back together', () async {
     final bytes = utf8.encode(line(screenJson('%3', rev: 1, text: '中文')));
     final cut = bytes.indexOf(utf8.encode('中')[0]) + 1;
@@ -226,7 +238,7 @@ void main() {
     port.view(1, 3, 80, 24);
     await started;
     await pumpUntil(() => w.got.any((l) => l.contains('"view"')));
-    expect(w.got.last, jsonEncode({'t': 'view', 'pane': '%3', 'cols': 80, 'rows': 24}));
+    expect(w.got.last, jsonEncode({'t': 'view', 'pane': '%3', 'cols': 80, 'rows': 24, 'fit': false}));
     expect(port.model(1)!.pane, '%3');
   });
 

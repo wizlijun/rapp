@@ -1,3 +1,4 @@
+pub mod fit;
 pub mod grid;
 pub mod holder;
 pub mod launch;
@@ -32,6 +33,8 @@ pub struct Shared {
     pub ended: watch::Sender<bool>,
     /// The Unix second of the last output.
     pub activity: AtomicU64,
+    /// Which viewer's size the host window follows.
+    pub fit: Mutex<fit::Fit>,
 }
 
 impl Meta {

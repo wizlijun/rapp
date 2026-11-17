@@ -5,11 +5,12 @@
 //! `run` ends only when the program exits, or on SIGHUP (the window was closed), SIGTERM, SIGINT or SIGQUIT sent
 //! to its pid (^C and ^\ typed in the window go to the program: the window is raw); never because of a viewer, a
 //! missing `serve` or a socket error. It answers none of the program's terminal queries (the window
-//! does), and viewers never change the pty's size.
+//! does). A viewer may ask the window to resize (`fit`), and the pty follows the window.
 //!
 //! The exit code is the program's, 1 when the program was killed by a signal; 128 + the signal when `run` itself
 //! got SIGHUP (129), SIGINT (130), SIGQUIT (131) or SIGTERM (143).
 
+use super::fit::Window;
 use super::grid::Emu;
 use super::{local, view, Meta, Shared};
 use crate::id::{clean_name, default_name, session_name};
@@ -100,6 +101,7 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
         viewers: AtomicU32::new(0),
         ended: watch::channel(false).0,
         activity: AtomicU64::new(now()),
+        fit: Mutex::default(),
     });
     let _ = std::fs::remove_file(&path);
     let listener = UnixListener::bind(&path).with_context(|| format!("cannot listen on {}", path.display()))?;
@@ -143,8 +145,9 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
     };
 
     let (drained_tx, drained) = oneshot::channel();
-    let sh = shared.clone();
-    std::thread::spawn(move || pump_output(from_pty, std::io::stdout(), &sh, drained_tx, Emu::feed));
+    let window = Arc::new(Mutex::new(Window::new(std::io::stdout()).tty(unsafe { libc::isatty(1) } == 1)));
+    let (sh, win) = (shared.clone(), window.clone());
+    std::thread::spawn(move || pump_output(from_pty, &win, &sh, drained_tx, Emu::feed));
     let to_window = shared.input.clone();
     // It may stay blocked on a read when run ends; the process exits under it.
     std::thread::spawn(move || pump_keyboard(to_window));
@@ -164,7 +167,10 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
             _ = int.recv() => break End::Signal(libc::SIGINT),
             _ = quit.recv() => break End::Signal(libc::SIGQUIT),
             _ = winch.recv() => resize(pair.master.as_ref(), &shared),
-            _ = tick.tick() => tick_sync(&shared, Emu::tick),
+            _ = tick.tick() => {
+                tick_sync(&shared, Emu::tick);
+                resize_window(&window, &shared);
+            }
         }
     };
     let code = match end {
@@ -242,11 +248,25 @@ fn tick_sync(shared: &Shared, tick: impl FnOnce(&mut Emu)) {
     }
 }
 
-/// The program's output: to the window first, then to the emulator through `feed`. Says so on `drained` when the
-/// pty is done.
-fn pump_output(
+/// A resize a viewer asked for, while the program's output is quiet. Never waits for the window: the output pump
+/// may be in a slow write to it, and this runs on the main loop; the next tick tries again.
+fn resize_window<W: Write>(window: &Mutex<Window<W>>, shared: &Shared) {
+    // Accepted risk: the ~12-byte write below can still block if the host terminal stops reading; rare, so not
+    // worth a thread of its own.
+    let mut w = match window.try_lock() {
+        Ok(w) => w,
+        Err(std::sync::TryLockError::Poisoned(e)) => e.into_inner(),
+        Err(std::sync::TryLockError::WouldBlock) => return,
+    };
+    // A window that is gone fails quietly, as its output does.
+    let _ = w.resize_if_idle(&shared.fit);
+}
+
+/// The program's output: to the window first, with any resize a viewer asked for once it is between sequences, then
+/// to the emulator through `feed`. Says so on `drained` when the pty is done.
+fn pump_output<W: Write>(
     mut pty: impl Read,
-    mut window: impl Write,
+    window: &Mutex<Window<W>>,
     shared: &Shared,
     drained: oneshot::Sender<()>,
     feed: impl Fn(&mut Emu, &[u8]),
@@ -260,7 +280,11 @@ fn pump_output(
             Err(_) => break,
         };
         // A window that is gone is no reason to stop: viewers still see the screen.
-        let _ = window.write_all(&b[..n]).and_then(|()| window.flush());
+        {
+            let mut w = window.lock().unwrap_or_else(|e| e.into_inner());
+            let _ = w.output(&b[..n]);
+            let _ = w.resize_if_idle(&shared.fit);
+        }
         guarded(shared, None, |emu| feed(emu, &b[..n]));
         shared.activity.store(now(), Ordering::Relaxed);
         shared.rev.send_modify(|r| *r += 1);
@@ -422,20 +446,21 @@ mod tests {
             viewers: AtomicU32::new(0),
             ended: watch::channel(false).0,
             activity: AtomicU64::new(0),
+            fit: Mutex::default(),
         }
     }
 
     #[test]
     fn an_emulator_panic_never_stops_the_window_s_output() {
         let sh = shared(30, 4);
-        let mut window = Vec::new();
+        let window = Mutex::new(Window::new(Vec::new()));
         let (tx, mut drained) = oneshot::channel();
         let pty = Chunks(VecDeque::from([&b"one "[..], b"boom ", b"two"]));
-        pump_output(pty, &mut window, &sh, tx, |emu: &mut Emu, b: &[u8]| {
+        pump_output(pty, &window, &sh, tx, |emu: &mut Emu, b: &[u8]| {
             assert!(!b.starts_with(b"boom"), "the emulator fell over");
             emu.feed(b);
         });
-        assert_eq!(window, b"one boom two");
+        assert_eq!(window.lock().unwrap().get_ref().as_slice(), b"one boom two");
         assert!(drained.try_recv().is_ok());
         // A fresh emulator, at the old size, with what came after.
         let s = sh.emu.lock().unwrap().screen();

@@ -22,6 +22,14 @@ class TermMetrics {
   final TextStyle style;
 }
 
+/// The scale that fits a [gridW]×[gridH] grid into a [w]×[h] stage, kept at most 1 unless [up]. A stage
+/// or a grid with no size gets 1 (a scale of 0 would make every pointer position infinite).
+double gridScale({required double w, required double h, required double gridW, required double gridH, required bool up}) {
+  if (w <= 0 || h <= 0 || gridW <= 0 || gridH <= 0) return 1;
+  final s = math.min(w / gridW, h / gridH);
+  return up ? s : math.min(s, 1);
+}
+
 enum GlyphKind { run, single, box }
 
 class GlyphRun {

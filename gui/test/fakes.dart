@@ -228,8 +228,8 @@ class FakeTermSessionPort extends TermSessionPort {
   @override
   TermPane? pane(Object sid, int window) => panes(sid).where((p) => p.number == window).firstOrNull;
   @override
-  void view(Object sid, int window, int cols, int rows) {
-    calls.add(('view', {'sid': sid, 'window': window, 'cols': cols, 'rows': rows}));
+  void view(Object sid, int window, int cols, int rows, {bool fit = false}) {
+    calls.add(('view', {'sid': sid, 'window': window, 'cols': cols, 'rows': rows, 'fit': fit}));
     lastCols = cols;
     lastRows = rows;
   }

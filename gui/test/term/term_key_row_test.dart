@@ -179,6 +179,21 @@ void main() {
     expect(key('Esc'), findsNothing);
   });
 
+  testWidgets('the traffic menu has 跟着我的窗口, ticked by default; a tap turns it off, saves term_fit and closes', (tester) async {
+    await openTerm(tester);
+    await openMenu(tester);
+    final item = find.byKey(const Key('term-fit'));
+    expect(find.text('跟着我的窗口'), findsOneWidget);
+    expect(find.descendant(of: item, matching: find.byIcon(Icons.check)), findsOneWidget);
+    await tester.tap(item);
+    await tester.pumpAndSettle();
+    expect(s.prefs.termFit, isFalse);
+    expect(guiJson(), contains('"term_fit":false'));
+    expect(find.byKey(const Key('term-fit')), findsNothing);
+    await openMenu(tester);
+    expect(find.descendant(of: find.byKey(const Key('term-fit')), matching: find.byIcon(Icons.check)), findsNothing);
+  });
+
   testWidgets('each key sends its name; the stage keeps the keyboard', (tester) async {
     await openTerm(tester);
     await toggleFromMenu(tester);

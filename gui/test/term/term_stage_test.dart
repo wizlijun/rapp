@@ -88,16 +88,18 @@ void main() {
   TermPainter painter(WidgetTester t) =>
       t.widget<CustomPaint>(find.byKey(const Key('term-grid'))).painter! as TermPainter;
 
-  // The centre of a cell on screen: the pane is scaled to fit the stage, so a cell is `scale` times its size.
+  // The centre of a cell on screen: the pane is laid out at the size that fits the stage, so a cell is the
+  // size the painter draws it.
   Offset cell(WidgetTester t, int y, int x) {
-    final k = painter(t).scale;
-    return t.getTopLeft(find.byKey(const Key('term-grid'))) + Offset((x + .5) * cw * k, (y + .5) * ch * k);
+    final m = painter(t).metrics;
+    return t.getTopLeft(find.byKey(const Key('term-grid'))) + Offset((x + .5) * m.cellW, (y + .5) * m.cellH);
   }
 
-  Future<void> wheel(WidgetTester t, double dy) async {
+  /// Scrolls the wheel by [rows] drawn rows (negative: back into history).
+  Future<void> wheel(WidgetTester t, double rows) async {
     final p = TestPointer(1, PointerDeviceKind.mouse);
     await t.sendEventToBinding(p.hover(cell(t, 1, 1)));
-    await t.sendEventToBinding(p.scroll(Offset(0, dy)));
+    await t.sendEventToBinding(p.scroll(Offset(0, rows * painter(t).metrics.cellH)));
     await t.pump();
   }
 
@@ -106,14 +108,14 @@ void main() {
     addTearDown(() => t.binding.setSurfaceSize(null));
     await show(t);
     expect(views(), [
-      {'sid': 1, 'window': 3, 'cols': (800 / cw).floor(), 'rows': (480 / ch).floor()},
+      {'sid': 1, 'window': 3, 'cols': (800 / cw).floor(), 'rows': (480 / ch).floor(), 'fit': true},
     ]);
     await show(t, w: 900);
     await t.pump(const Duration(milliseconds: 200));
     expect(views(), hasLength(1));
     await t.pump(const Duration(milliseconds: 150));
     expect(views(), hasLength(2));
-    expect(views().last, {'sid': 1, 'window': 3, 'cols': (900 / cw).floor(), 'rows': (480 / ch).floor()});
+    expect(views().last, {'sid': 1, 'window': 3, 'cols': (900 / cw).floor(), 'rows': (480 / ch).floor(), 'fit': true});
   });
 
   testWidgets('no view goes out before the session has a pane table', (t) async {
@@ -131,7 +133,7 @@ void main() {
     model.applyHistory(const TermHistory(pane: '%3', before: 0, lines: ['h-5', 'h-4', 'h-3', 'h-2', 'h-1'], hist: 5));
     await show(t);
     expect(find.byKey(const Key('term-latest')), findsNothing);
-    await wheel(t, -3 * ch);
+    await wheel(t, -3);
     expect(model.offset, 3);
     expect(find.text('正在看历史 · 回到最新'), findsOneWidget);
     final top = painter(t).lineAtRow(0)!.text;
@@ -271,7 +273,7 @@ void main() {
     expect((s.anchor.y, s.anchor.x, s.head.y, s.head.x), (1, 0, 1, 1));
   });
 
-  testWidgets('a stage squeezed to nothing mid-drag keeps scale 1 and does not throw', (t) async {
+  testWidgets('a stage squeezed to nothing mid-drag keeps the base size and does not throw', (t) async {
     for (final (w, h) in [(800.0, 0.0), (0.0, 480.0), (0.0, 0.0)]) {
       model.apply(scr(['abc', 'def', 'ghi', 'jkl']));
       await show(t);
@@ -279,12 +281,32 @@ void main() {
       await g.moveTo(cell(t, 1, 2));
       await show(t, w: w, h: h);
       expect(painter(t).scale, 1.0, reason: '$w x $h');
+      expect(painter(t).metrics.style.fontSize, 14, reason: '$w x $h');
       await g.moveTo(const Offset(5, 500));
       // The edge-scroll timer ticks on a stage with no size too.
       await t.pump(const Duration(milliseconds: 120));
       await g.up();
       await t.pump();
       expect(t.takeException(), isNull, reason: '$w x $h');
+    }
+  });
+
+  testWidgets('a stage squeezed to a sliver does not throw on drag or scroll', (t) async {
+    for (final (w, h) in [(800.0, 1.0), (1.0, 480.0)]) {
+      model.apply(scr(['abc', 'def', 'ghi', 'jkl']));
+      await show(t, w: w, h: h);
+      final before = model.offset;
+      final at = t.getCenter(find.byKey(const Key('term-grid')));
+      final g = await t.startGesture(at, kind: PointerDeviceKind.mouse);
+      await g.moveTo(at + const Offset(0, 0.4));
+      await t.pump(const Duration(milliseconds: 120));
+      await g.up();
+      final ptr = TestPointer(7, PointerDeviceKind.mouse);
+      await t.sendEventToBinding(ptr.hover(at));
+      await t.sendEventToBinding(ptr.scroll(const Offset(30, 0)));
+      await t.pump();
+      expect(t.takeException(), isNull, reason: '$w x $h');
+      expect(model.offset, before, reason: '$w x $h');
     }
   });
 
@@ -327,24 +349,64 @@ void main() {
         hist: 100, limit: 2000));
     await show(t);
     expect([for (final l in painter(t).links) (l.y, l.url)], [(5, 'https://example.com/x')]);
-    await wheel(t, -50 * ch);
+    await wheel(t, -50);
     expect(model.offset, 50);
     expect(painter(t).links, isEmpty);
-    await wheel(t, 46 * ch);
+    await wheel(t, 46);
     expect(model.offset, 4);
     expect([for (final l in painter(t).links) l.y], [5]);
   });
 
+  testWidgets('the view asks with fit by default', (t) async {
+    await show(t);
+    expect(views().first['fit'], true);
+  });
+
+  testWidgets('turning fit off sends a view at once', (t) async {
+    await show(t);
+    await t.pump(const Duration(milliseconds: 400));
+    state.setTermFit(false);
+    await show(t);
+    await t.pump();
+    expect(views().last['fit'], false);
+  });
+
+  testWidgets('fit on and the pane is the asked size draws at 14', (t) async {
+    model.apply(scr([for (var i = 0; i < 10; i++) 'r$i'], cols: 40));
+    await show(t, w: 40 * cw, h: 10 * ch);
+    expect(painter(t).metrics.style.fontSize, 14);
+  });
+
+  testWidgets('fit on and a smaller pane stays at 14', (t) async {
+    model.apply(scr(['r0', 'r1'], cols: 10));
+    await show(t, w: 40 * cw, h: 20 * ch);
+    expect(painter(t).metrics.style.fontSize, 14);
+  });
+
+  testWidgets('fit on and a larger pane is scaled down', (t) async {
+    model.apply(scr([for (var i = 0; i < 60; i++) 'r$i'], cols: 200));
+    await show(t, w: 600, h: 400);
+    expect(painter(t).metrics.style.fontSize, lessThan(14));
+  });
+
   testWidgets('a small pane is scaled up to fill', (t) async {
+    state.prefs.termFit = false;
     model.apply(scr([for (var i = 0; i < 2; i++) 'r$i'], cols: 10));
     await show(t, w: 40 * cw, h: 20 * ch);
-    expect(painter(t).scale, closeTo(4, 1e-6));
+    // Laid out at four times the font size, not stretched.
+    expect(painter(t).scale, 1);
+    expect(painter(t).metrics.style.fontSize, closeTo(56, 1));
+    expect(10 * painter(t).metrics.cellW, lessThanOrEqualTo(40 * cw + 0.5));
   });
 
   testWidgets('a large pane is scaled down', (t) async {
     model.apply(scr([for (var i = 0; i < 60; i++) 'r$i'], cols: 200));
     await show(t, w: 600, h: 400);
-    expect(painter(t).scale, lessThan(1));
+    final m = painter(t).metrics;
+    expect(painter(t).scale, 1);
+    expect(m.style.fontSize, lessThan(14));
+    expect(200 * m.cellW, lessThanOrEqualTo(600 + 0.5));
+    expect(60 * m.cellH, lessThanOrEqualTo(400 + 0.5));
   });
 
   testWidgets('no scaled note', (t) async {
@@ -357,9 +419,10 @@ void main() {
   });
 
   testWidgets('selection maps to cells when scaled up', (t) async {
+    state.prefs.termFit = false;
     model.apply(scr(['abcdefghij', 'klmnopqrst'], cols: 10));
     await show(t, w: 40 * cw, h: 20 * ch);
-    expect(painter(t).scale, closeTo(4, 1e-6));
+    expect(painter(t).metrics.style.fontSize, closeTo(56, 1));
     final g = await t.startGesture(cell(t, 0, 1), kind: PointerDeviceKind.mouse);
     await g.moveTo(cell(t, 0, 3));
     await g.up();
@@ -371,7 +434,7 @@ void main() {
   testWidgets('a scroll in the alternate screen does nothing', (t) async {
     model.apply(scr([for (var i = 0; i < 10; i++) 'row $i'], hist: 50, limit: 2000, alt: true));
     await show(t);
-    await wheel(t, -3 * ch);
+    await wheel(t, -3);
     expect(model.offset, 0);
     expect(find.byKey(const Key('term-latest')), findsNothing);
   });

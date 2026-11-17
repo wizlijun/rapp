@@ -85,6 +85,9 @@ pub enum In {
         pane: Option<String>,
         cols: u16,
         rows: u16,
+        /// The host window is to follow this console's size (`rapp-term run` only).
+        #[serde(default)]
+        fit: bool,
     },
     Ack {
         rev: u64,
@@ -236,7 +239,7 @@ mod tests {
         assert!(serde_json::from_str::<In>(r#"{"t":"new_window","pane":"%3"}"#).is_err());
         assert!(serde_json::from_str::<In>(r#"{"t":"refit","pane":"%3","cols":1,"rows":1}"#).is_err());
         let i: In = serde_json::from_str(r#"{"t":"view","pane":"%3","cols":118,"rows":38}"#).unwrap();
-        assert!(matches!(i, In::View { pane: Some(p), cols: 118, rows: 38 } if p == "%3"));
+        assert!(matches!(i, In::View { pane: Some(p), cols: 118, rows: 38, .. } if p == "%3"));
         let i: In = serde_json::from_str(r#"{"t":"view","pane":null,"cols":0,"rows":0}"#).unwrap();
         assert!(matches!(i, In::View { pane: None, .. }));
         assert!(serde_json::from_str::<In>(r#"{"t":"set_option"}"#).is_err());

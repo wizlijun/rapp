@@ -1,5 +1,6 @@
 //! One viewer of a `rapp-term run`: speaks the session protocol over a local connection, from the emulator.
 
+use super::fit::Conn;
 use super::Shared;
 use crate::id::default_name;
 use crate::keys;
@@ -17,19 +18,24 @@ const PANE: &str = "%0";
 /// The shortest time between two screens offered, so a busy program does not flood a viewer.
 const MIN_GAP: Duration = Duration::from_millis(50);
 
-/// Counts one viewer for as long as it lives, on every way out.
-struct Counted(Arc<Shared>);
+/// Counts one viewer, and its say in the window's size, for as long as it lives, on every way out.
+struct Counted {
+    shared: Arc<Shared>,
+    conn: Conn,
+}
 
 impl Counted {
     fn new(shared: &Arc<Shared>) -> Counted {
         shared.viewers.fetch_add(1, Ordering::Relaxed);
-        Counted(shared.clone())
+        let conn = shared.fit.lock().unwrap_or_else(|e| e.into_inner()).join();
+        Counted { shared: shared.clone(), conn }
     }
 }
 
 impl Drop for Counted {
     fn drop(&mut self) {
-        self.0.viewers.fetch_sub(1, Ordering::Relaxed);
+        self.shared.viewers.fetch_sub(1, Ordering::Relaxed);
+        self.shared.fit.lock().unwrap_or_else(|e| e.into_inner()).leave(self.conn);
     }
 }
 
@@ -39,11 +45,12 @@ where
     R: AsyncBufRead + Unpin,
     W: AsyncWrite + Unpin,
 {
-    let _count = Counted::new(&shared);
+    let count = Counted::new(&shared);
     let mut ended = shared.ended.subscribe();
     let mut rev = shared.rev.subscribe();
     let mut v = Viewer {
         shared: &shared,
+        conn: count.conn,
         w,
         panes: Vec::new(),
         viewing: false,
@@ -113,6 +120,8 @@ where
 
 struct Viewer<'a, W> {
     shared: &'a Shared,
+    /// Who this viewer is to `Shared::fit`.
+    conn: Conn,
     w: W,
     /// The pane list last written.
     panes: Vec<Pane>,
@@ -199,7 +208,8 @@ impl<W: AsyncWrite + Unpin> Viewer<'_, W> {
         }
     }
 
-    /// Bytes for the pty; false when nobody reads them any more, which means the program is gone.
+    /// Bytes for the pty; false when nobody reads them any more, which means the program is gone. Bytes that went
+    /// in are an operation, which may make this viewer's size the window's.
     async fn input(&mut self, bytes: Vec<u8>) -> std::io::Result<bool> {
         if bytes.is_empty() {
             return Ok(true);
@@ -208,6 +218,8 @@ impl<W: AsyncWrite + Unpin> Viewer<'_, W> {
             self.ended().await?;
             return Ok(false);
         }
+        let now = std::time::Instant::now();
+        self.shared.fit.lock().unwrap_or_else(|e| e.into_inner()).input(self.conn, now);
         Ok(true)
     }
 
@@ -259,9 +271,12 @@ impl<W: AsyncWrite + Unpin> Viewer<'_, W> {
             return Ok(false);
         }
         match m {
-            In::View { .. } => {
-                // The pane (null too) and the size are ignored: there is one pane and the size follows the host.
-                // A fresh sender sends the screen whole.
+            In::View { fit, cols, rows, .. } => {
+                // The pane (null too) is ignored: there is one pane. The size is only a wish: with `fit` the host
+                // window may be asked to take it, and the pty and every viewer follow the window. A fresh sender
+                // sends the screen whole.
+                let now = std::time::Instant::now();
+                self.shared.fit.lock().unwrap_or_else(|e| e.into_inner()).view(self.conn, fit, cols, rows, now);
                 self.sender.switch(PANE);
                 self.viewing = true;
                 self.refresh().await?;
@@ -324,6 +339,7 @@ mod tests {
             viewers: AtomicU32::new(0),
             ended: watch::channel(false).0,
             activity: AtomicU64::new(0),
+            fit: Mutex::default(),
         };
         (Arc::new(sh), rx)
     }

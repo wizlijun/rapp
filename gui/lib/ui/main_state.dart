@@ -2785,6 +2785,12 @@ class MainState extends ChangeNotifier {
     _save();
   }
 
+  /// 「跟着我的窗口」: the host's terminal window follows this console on or off; saved.
+  void setTermFit(bool v) {
+    prefs.termFit = v;
+    _save();
+  }
+
   /// 「打开方式」 of [device]'s 终端 entry (`text` or `pixels`); saved.
   void setTermOpen(String device, String mode) {
     prefs.termOpen[device] = mode;

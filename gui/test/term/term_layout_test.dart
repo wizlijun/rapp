@@ -37,6 +37,15 @@ void main() {
     expect(m.cellH, m.cellH.ceilToDouble());
     expect(m.cellW, greaterThan(0));
   });
+  test('gridScale fits the grid, up only when asked', () {
+    expect(gridScale(w: 400, h: 200, gridW: 100, gridH: 100, up: true), 2);
+    expect(gridScale(w: 400, h: 200, gridW: 100, gridH: 100, up: false), 1);
+    expect(gridScale(w: 50, h: 200, gridW: 100, gridH: 100, up: false), 0.5);
+    expect(gridScale(w: 0, h: 200, gridW: 100, gridH: 100, up: true), 1);
+    expect(gridScale(w: 400, h: 0, gridW: 100, gridH: 100, up: true), 1);
+    expect(gridScale(w: 400, h: 200, gridW: 0, gridH: 100, up: true), 1);
+    expect(gridScale(w: 400, h: 200, gridW: 100, gridH: 0, up: true), 1);
+  });
   testWidgets('box lines reach the cell edges', (t) async {
     await t.runAsync(() async {
       final h = await render(0x2500);

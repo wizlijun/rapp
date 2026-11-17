@@ -31,7 +31,8 @@ void main() {
     expect(tabLabels([p('%1', 'claude'), p('%2', 'logs', dead: true)]), {'%1': 'claude', '%2': 'logs · 已退出'});
   });
   test('messages to the worker use the wire names', () {
-    expect(viewMsg('%1', 120, 40), {'t': 'view', 'pane': '%1', 'cols': 120, 'rows': 40});
+    expect(viewMsg('%1', 120, 40), {'t': 'view', 'pane': '%1', 'cols': 120, 'rows': 40, 'fit': false});
+    expect(viewMsg('%0', 80, 24, fit: true), {'t': 'view', 'pane': '%0', 'cols': 80, 'rows': 24, 'fit': true});
     expect(historyReq('%1', 500, 500), {'t': 'history', 'pane': '%1', 'before': 500, 'lines': 500});
     expect(ackMsg(7), {'t': 'ack', 'rev': 7});
   });
