@@ -1,6 +1,7 @@
 // 访问记录 (observability spec §6): one `history` event as a display row.
 
-const _paths = {'lan': '局域网', 'direct': '直连', 'relay': '中继'};
+/// Path words shared with the 日志 screen.
+const pathWords = {'lan': '局域网', 'direct': '直连', 'relay': '中继'};
 
 class HistoryRow {
   const HistoryRow({
@@ -46,7 +47,7 @@ HistoryRow historyRow(Map<String, dynamic> ev) {
   return HistoryRow(
     time: _localTime(s('ts')),
     who: name.isEmpty ? peer : '$name（自称）· $peer',
-    path: _paths[s('path')] ?? s('path'),
+    path: pathWords[s('path')] ?? s('path'),
     app: s('op') == 'list_apps' ? '（列出应用）' : _appWord(s('app')),
     duration: ev['secs'] is int ? _duration(ev['secs'] as int) : '',
     result: result,

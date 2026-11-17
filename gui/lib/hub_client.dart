@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'log_view.dart';
 import 'term/term_id.dart';
 
 /// One JSON object per line, `\n`-terminated.
@@ -339,6 +340,10 @@ class HubClient extends ChangeNotifier {
         permissions: perms is Map ? Map<String, dynamic>.from(perms) : null,
         capabilities: m['capabilities'] is Map ? Map<String, dynamic>.from(m['capabilities']) : null);
   }
+
+  /// The 日志 screen's query, on this machine or on host [id]. An old peer answers `unknown op`.
+  Future<LogPage> logs({String? id, required LogQuery query}) async =>
+      LogPage.fromJson(await _request({'cmd': 'logs', 'id': ?id, ...query.toJson()}, 'logs'));
 
   /// Each device's latest terminal list, from a `terms` answer or the watch stream.
   final termLists = <String, TermList>{};
