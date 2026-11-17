@@ -14,47 +14,18 @@ import 'session_port.dart';
 import 'linux_transfer.dart';
 import 'linux_clipboard.dart';
 import '../paths.dart';
+import 'session_worker.dart';
 
-/// A bounded, streaming packet reader. Pausing here backpressures the worker's
-/// stdout instead of accumulating decoded frames in Dart. The worker keeps
-/// decoding the remote stream and replaces its pending complete canvas.
-Stream<Uint8List> sessionPackets(Stream<List<int>> stream) async* {
-  final iterator = StreamIterator(stream);
-  List<int> chunk = const [];
-  var offset = 0;
-  Future<Uint8List?> read(int n, {bool eof = false}) async {
-    final result = Uint8List(n);
-    var written = 0;
-    while (written < n) {
-      if (offset == chunk.length) {
-        if (!await iterator.moveNext()) {
-          if (eof && written == 0) return null;
-          throw const FormatException('Truncated session packet');
-        }
-        chunk = iterator.current;
-        offset = 0;
-        if (chunk.isEmpty) continue;
-      }
-      final take = (chunk.length - offset).clamp(0, n - written);
-      result.setRange(written, written + take, chunk, offset);
-      written += take;
-      offset += take;
-    }
-    return result;
-  }
+export 'session_worker.dart' show sessionPackets;
 
-  try {
-    while (true) {
-      final header = await read(4, eof: true);
-      if (header == null) break;
-      final n = ByteData.sublistView(header).getUint32(0, Endian.little);
-      if (n < 1 || n > 8192 * 8192 * 4 + 25) {
-        throw const FormatException('Invalid session packet size');
-      }
-      yield (await read(n))!;
-    }
-  } finally {
-    await iterator.cancel();
+// Opt-in timing only. Never include input text, clipboard data, tokens or pixels.
+final _traceStream =
+    Platform.environment['RAPP_STREAM_TRACE_DIR']?.isNotEmpty == true;
+void _streamTrace(int worker, String stage, String detail) {
+  if (_traceStream) {
+    stderr.writeln(
+      'stream-trace ${DateTime.now().microsecondsSinceEpoch} worker=$worker $stage $detail',
+    );
   }
 }
 
@@ -340,7 +311,16 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
   /// A focused session over [process] without the worker handshake.
   @visibleForTesting
   void seedSessionForTest(Object sid, Process process) {
-    _sessions[sid] = _Session(sid, process, _emit, _framePresented, 0, '', downloads, desktop);
+    _sessions[sid] = _Session(
+      sid,
+      SessionWorker.fromProcess(process),
+      _emit,
+      _framePresented,
+      0,
+      '',
+      downloads,
+      desktop,
+    );
     _focused = sid;
   }
 
@@ -427,9 +407,9 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
         throw StateError('Invalid session');
       }
       _starting.add(sid);
-      late final Process process;
+      late final SessionWorker process;
       try {
-        process = await Process.start(executable, const []);
+        process = await SessionWorker.start(executable);
       } catch (_) {
         _cancelledStarts.remove(sid);
         rethrow;
@@ -438,9 +418,8 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
       }
       final cancelled = _cancelledStarts.remove(sid);
       if (_disposed || cancelled) {
-        unawaited(process.stdout.drain<void>());
-        unawaited(process.stderr.drain<void>());
-        unawaited(process.stdin.close().catchError((Object _) {}));
+        unawaited(process.packets.drain<void>());
+        unawaited(process.closeInput().catchError((Object _) {}));
         process.kill(ProcessSignal.sigkill);
         throw StateError('Session start cancelled');
       }
@@ -460,9 +439,8 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
         'density': args['density'],
       };
       _sessions[sid] = s;
-      unawaited(process.stderr.drain<void>());
       unawaited(
-        process.stdin.done.catchError((Object _) {
+        process.inputDone.catchError((Object _) {
           s.disconnect('session worker stopped');
         }),
       );
@@ -513,6 +491,7 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
           }
           if (s.disconnected) throw StateError('连接已断开');
           s.detached = true;
+          s.wakeRenderer();
           await s.nativeWindows();
           if (_disposed || s.closed || !identical(_sessions[sid], s)) return null;
           s.nativeClips();
@@ -525,14 +504,14 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
           if (s.banner.isNotEmpty) _nativeCall('banner', {'sid': sid, 'text': s.banner});
           _emit(DetachedEvent(s.sid, true));
         } catch (_) {
-          s.detached = false;
+          s.restoreStage();
           await desktop.channel.invokeMethod<void>('attach', {'sid': sid, 'discard': true}).catchError((Object _) {});
           rethrow;
         }
       case 'attach':
         if (!s.detached) return null;
         await desktop.channel.invokeMethod<void>('attach', {'sid': sid});
-        s.detached = false;
+        s.restoreStage();
         _emit(DetachedEvent(s.sid, false, current: s.selected));
       case 'raise_detached':
         if (s.detached) _nativeCall('raise', {'sid': sid});
@@ -798,27 +777,56 @@ class _Session {
   final Future<void> Function() framePresented;
   final _closed = Completer<void>();
   final Object sid;
-  final Process process;
+  final SessionWorker process;
   final void Function(SessionEvent) emit;
   List<RemoteWindow> windows = [];
   final _pictures = <int, RemoteWindow>{};
   Uint8List? _pendingFrame;
+  int _receivedFrames = 0;
+  int _pendingSequence = 0;
+  bool _restorePending = false;
   bool _rendering = false;
   Completer<void>? _renderWait;
 
-  void queueFrame(Uint8List bytes) {
+  void wakeRenderer() {
+    final wait = _renderWait;
+    if (wait != null && !wait.isCompleted) wait.complete();
+  }
+
+  void restoreStage() {
+    detached = false;
+    wakeRenderer();
+    // Prefer an already queued newer canvas. Restoring also works when the
+    // remote is idle or disconnected and will not send another frame.
+    final bytes = _pendingFrame ?? lastNativeFrame;
+    if (!closed && bytes != null) queueFrame(bytes, restore: true);
+  }
+
+  void queueFrame(Uint8List bytes, {bool restore = false}) {
     // Latest-frame mailbox: decoding/display must never block control events.
     _pendingFrame = bytes;
+    _restorePending = restore;
+    _pendingSequence = ++_receivedFrames;
+    _streamTrace(
+      process.pid,
+      'pipe-frame',
+      'output=$_pendingSequence bytes=${bytes.length}',
+    );
     if (!_rendering) unawaited(drainFrames());
   }
 
   Future<void> drainFrames() async {
     _rendering = true;
     try {
-      while (!closed && !disconnected && _pendingFrame != null) {
+      while (!closed && (!disconnected || _restorePending) && _pendingFrame != null) {
         final bytes = _pendingFrame!;
+        final sequence = _pendingSequence;
+        final restore = _restorePending;
+        _restorePending = false;
         _pendingFrame = null;
-        await frame(bytes);
+        _streamTrace(process.pid, 'image-start', 'output=$sequence');
+        await frame(bytes, restore: restore);
+        _streamTrace(process.pid, 'image-ready', 'output=$sequence');
         if (!closed && !disconnected) {
           // Use a per-frame stop signal: registering on one long-lived future
           // would retain a callback for every displayed frame until disconnect.
@@ -831,6 +839,7 @@ class _Session {
             stop.future,
           ]);
           _renderWait = null;
+          _streamTrace(process.pid, 'flutter-frame', 'output=$sequence');
         }
       }
     } catch (e) {
@@ -1029,7 +1038,7 @@ class _Session {
   }
 
   void send(Map<String, Object?> args) {
-    if (!closed && !disconnected) process.stdin.writeln(jsonEncode(args));
+    if (!closed && !disconnected) process.send(jsonEncode(args));
   }
 
   void publish() {
@@ -1042,7 +1051,7 @@ class _Session {
 
   Future<void> read() async {
     try {
-      await for (final packet in sessionPackets(process.stdout)) {
+      await for (final packet in process.packets) {
         if (closed || disconnected) break;
         if (packet[0] == 1) {
           queueFrame(Uint8List.sublistView(packet, 1));
@@ -1150,7 +1159,7 @@ class _Session {
     }
   }
 
-  Future<void> frame(Uint8List bytes) async {
+  Future<void> frame(Uint8List bytes, {bool restore = false}) async {
     if (bytes.length < 24) throw const FormatException('Truncated frame');
     final b = ByteData.sublistView(bytes);
     final width = b.getUint32(0, Endian.little),
@@ -1171,6 +1180,9 @@ class _Session {
     }
     lastNativeFrame = bytes;
     await nativeFrame();
+    // Detached windows draw this canvas themselves. Building another full
+    // Flutter image here copies/uploads pixels for a stage that is not visible.
+    if (closed || detached || (disconnected && !restore)) return;
     final buffer = await ui.ImmutableBuffer.fromUint8List(
       Uint8List.sublistView(bytes, 24),
     );
@@ -1185,7 +1197,7 @@ class _Session {
     try {
       codec = await descriptor.instantiateCodec();
       image = (await codec.getNextFrame()).image;
-      if (closed || disconnected) return;
+      if (closed || detached || (disconnected && !restore)) return;
       var geometryChanged = false;
       for (final w in windows) {
         final content = ui.Rect.fromLTRB(
@@ -1262,9 +1274,10 @@ class _Session {
     }
     held.clear();
     _pendingFrame = null;
+    _restorePending = false;
     _closed.complete();
-    _renderWait?.complete();
-    unawaited(process.stdin.close().catchError((Object _) {}));
+    wakeRenderer();
+    unawaited(process.closeInput().catchError((Object _) {}));
     // EOF wakes the worker even if the host stopped producing frames.
     final timer = Timer(
       const Duration(seconds: 2),

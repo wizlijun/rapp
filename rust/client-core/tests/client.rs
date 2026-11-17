@@ -396,6 +396,39 @@ fn expanded_buffer_is_reused_for_delta_frames() {
 }
 
 #[test]
+fn deferred_canvas_is_owned_and_preserves_progressive_and_held_frames() {
+    use rapp_client_core::codec::{DecodedCanvas, END, FULL, START};
+    let mut d = Decoder::default();
+    let mut z = z();
+    let mut first = DecodedCanvas::default();
+    let mut latest = DecodedCanvas::default();
+    let mut pixels = Vec::new();
+    let tile = |v: u16| [vec![1, 0, 0, 0, 0], v.to_le_bytes().to_vec()].concat();
+
+    assert!(d.apply(2, 1, 1, FULL | START | END, 0, 0, &compress(&mut z, &tile(0xf800))).unwrap());
+    d.snapshot_into(&mut first);
+    // A partial delta can still be shown on a slow link, without waiting for END.
+    assert!(d.apply(2, 1, 1, START, 0, 0, &compress(&mut z, &tile(0x07e0))).unwrap());
+    d.snapshot_into(&mut latest);
+    assert!(d.apply(2, 1, 1, END, 0, 0, &compress(&mut z, &[0, 0])).unwrap());
+    first.expand_into(&mut pixels);
+    assert_eq!(pixels, [0, 0, 255, 255]);
+    latest.expand_into(&mut pixels);
+    assert_eq!(pixels, [0, 255, 0, 255]);
+
+    // A resized canvas stays hidden until its final slice; an earlier snapshot
+    // is unaffected by both the resize and a subsequent failed decode.
+    assert!(!d.apply(2, 2, 1, START, 0, 0, &compress(&mut z, &tile(0x001f))).unwrap());
+    assert!(d.apply(2, 2, 1, END, 0, 0, &compress(&mut z, &[0, 0])).unwrap());
+    d.snapshot_into(&mut latest);
+    assert!(d.apply(2, 2, 1, START | END, 0, 0, &[1, 2, 3]).is_err());
+    latest.expand_into(&mut pixels);
+    assert_eq!(pixels, [255, 0, 0, 255, 255, 0, 0, 255]);
+    first.expand_into(&mut pixels);
+    assert_eq!(pixels, [0, 0, 255, 255]);
+}
+
+#[test]
 fn v6_notifications_and_paste_confirmation_are_strict() {
     for by in ["", "客厅的 Mac"] {
         let mut payload = vec![];

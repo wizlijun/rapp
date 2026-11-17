@@ -210,8 +210,12 @@ void main() {
     const codec = StandardMethodCodec();
     final messenger = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     final calls = <MethodCall>[];
+    final firstNativeFrame = Completer<void>();
     messenger.setMockMethodCallHandler(channel, (call) async {
       calls.add(call);
+      if (call.method == 'frame' && !firstNativeFrame.isCompleted) {
+        firstNativeFrame.complete();
+      }
       return call.method == 'init' ? true : null;
     });
     final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
@@ -252,6 +256,10 @@ void main() {
       peer.add(packet(13, [...u16(1), ...u32(1), ...u32(0), 0, 2,
           ...f32(0), ...f32(0), ...f32(4), ...f32(4), ...f32(1), ...string('Window')]));
       peer.add(frame(true));
+      // Native presentation must not also upload an invisible Flutter image.
+      // Reattaching reconstructs it from the cached canvas without a new frame.
+      await firstNativeFrame.future.timeout(const Duration(seconds: 5));
+      await port.invoke('attach', {'sid': 81});
       await nextWhere(events, (e) => e is WindowsEvent && e.windows.any((w) => w.image != null));
     } finally {
       port.dispose();

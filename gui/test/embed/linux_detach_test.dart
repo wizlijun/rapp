@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/linux_session_port.dart';
@@ -118,14 +119,19 @@ void main() {
       binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
     }
   });
+  for (final disconnect in [false, true]) {
   test(
-    'native detach/attach shares connection, frames, draft and stream settings',
+    'native detach/attach restores latest frame without duplicate Flutter uploads (disconnected=$disconnect)',
     () async {
       final calls = <MethodCall>[];
+      Completer<void>? nativeFrame;
       binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
         call,
       ) async {
         calls.add(call);
+        if (call.method == 'frame' && nativeFrame?.isCompleted == false) {
+          nativeFrame!.complete();
+        }
         return call.method == 'init' ? true : null;
       });
       final server = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
@@ -135,9 +141,14 @@ void main() {
         connections++;
         if (!accepted.isCompleted) accepted.complete(peer);
       });
+      final presentationStarted = Completer<void>();
+      final stalledPresentation = Completer<void>();
       final port = LinuxSessionPort(
         File('../rust/target/release/rapp-session').absolute.path,
-        framePresented: () async {},
+        framePresented: () {
+          if (!presentationStarted.isCompleted) presentationStarted.complete();
+          return stalledPresentation.future;
+        },
       );
       final events = StreamIterator(port.events);
       Socket? peer;
@@ -194,10 +205,19 @@ void main() {
         );
         peer.add(wire.frame(true));
         await peer.flush();
-        await wire.nextWhere(
+        final first = await wire.nextWhere(
           events,
           (e) => e is WindowsEvent && e.windows.any((w) => w.image != null),
-        );
+        ) as WindowsEvent;
+        final frames = first.windows.single.frames!;
+        var flutterUpdates = 0;
+        final restored = Completer<void>();
+        void onFrame() {
+          flutterUpdates++;
+          if (!restored.isCompleted) restored.complete();
+        }
+        frames.addListener(onFrame);
+        await presentationStarted.future.timeout(const Duration(seconds: 5));
         await port.invoke('detach', {
           'sid': 91,
           'text': '中文草稿',
@@ -238,6 +258,17 @@ void main() {
           ['duogray', 'original', 5],
         );
         await native('select_window', {'sid': 91, 'window': 1});
+        nativeFrame = Completer<void>();
+        peer.add(wire.frame(false));
+        await peer.flush();
+        await nativeFrame.future.timeout(const Duration(seconds: 5));
+        // Let the native frame call and its rendering tick finish.
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        expect(flutterUpdates, 0, reason: 'the detached stage is hidden');
+        if (disconnect) {
+          peer.destroy();
+          await wire.nextWhere(events, (e) => e is DisconnectedEvent);
+        }
         await port.invoke('attach', {'sid': 91});
         final back =
             await wire.nextWhere(events, (e) => e is DetachedEvent)
@@ -245,9 +276,10 @@ void main() {
         expect(back.detached, false);
         expect(back.current, 1);
         expect(connections, 1);
-        // A delta after attach still uses the same stateful decoder.
-        peer.add(wire.frame(false));
-        await peer.flush();
+        await restored.future.timeout(const Duration(seconds: 5));
+        final pixels = await frames.value!.image.toByteData(format: ui.ImageByteFormat.rawRgba);
+        expect(pixels!.buffer.asUint8List().take(4), [0, 255, 0, 255]);
+        frames.removeListener(onFrame);
         await port.invoke('close', {'sid': 91});
       } finally {
         port.dispose();
@@ -259,4 +291,5 @@ void main() {
       }
     },
   );
+  }
 }

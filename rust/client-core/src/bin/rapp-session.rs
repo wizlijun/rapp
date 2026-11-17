@@ -2,6 +2,7 @@
 //! events (0 = JSON, 1 = BGRA frame with width/height and canvas rect). No GUI toolkit.
 //! Latest-frame output bounds display latency; EOF closes the remote socket.
 mod session_output;
+mod session_trace;
 use anyhow::{bail, ensure, Context, Result};
 use rapp_client_core::{
     codec::Decoder,
@@ -188,6 +189,8 @@ fn run(out: &Output) -> Result<()> {
                 let packet = command(&v)?;
                 // One whole packet per lock: acks from the read loop never interleave with it.
                 stdin_writer.lock().unwrap().write_all(&packet)?;
+                session_trace::record("input-written", format_args!("cmd={} kind={}",
+                    v["cmd"].as_str().unwrap_or(""), v["kind"].as_str().unwrap_or("")));
                 if is_input(&v) {
                     stdin_probe.input();
                 }
@@ -282,7 +285,7 @@ fn read_loop(
     probe: &Probe,
 ) -> Result<()> {
     let mut decoder = Decoder::default();
-    let mut pixels = Vec::new();
+    let mut sequence = 0u64;
     let mut ready = false;
     loop {
         let (message, size) = p::read_message(socket)?;
@@ -310,21 +313,25 @@ fn read_loop(
                 dy,
                 data,
             } => {
-                let show = decoder.decode_into(mode, width, height, flags, dx, dy, &data, &mut pixels)?;
+                sequence += 1;
+                session_trace::record("received", format_args!("frame={sequence} w={width} h={height} flags={flags} bytes={size}"));
+                let show = decoder.apply(mode, width, height, flags, dx, dy, &data)?;
+                session_trace::record("decoded", format_args!("frame={sequence} show={show}"));
                 let mut frame = Vec::with_capacity(24);
                 frame.extend((width as u32).to_le_bytes());
                 frame.extend((height as u32).to_le_bytes());
                 for f in [region.x, region.y, region.w, region.h] {
                     frame.extend(f.to_le_bytes());
                 }
-                // Decoding continues while stdout is slow. Only expanded, complete
-                // canvases may be replaced; compressed deltas must all be applied.
+                // Snapshot compact samples; the output thread expands only the
+                // canvas it selects. Compressed deltas must all be applied.
                 if show {
-                    out.frame(frame.try_into().unwrap(), &mut pixels)?;
+                    out.frame(frame.try_into().unwrap(), &decoder, sequence)?;
                 }
                 frames.fetch_add(1, Ordering::Relaxed);
                 let ms = u16::try_from(received.elapsed().as_millis()).unwrap_or(u16::MAX);
                 writer.lock().unwrap().write_all(&p::frame_ack(ms))?;
+                session_trace::record("acked", format_args!("frame={sequence} processing_ms={ms}"));
             }
             Incoming::Windows(windows) => {
                 let kinds = [

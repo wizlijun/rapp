@@ -1,6 +1,8 @@
 //! Bound stdout latency independently of the remote reader. Every compressed
-//! delta is decoded, but only the newest complete canvas waits for the pipe.
+//! delta is decoded, but only the newest compact canvas waits for the pipe.
+//! BGRA expansion happens here, after coalescing, never in the network reader.
 use anyhow::{ensure, Result};
+use rapp_client_core::codec::{DecodedCanvas, Decoder};
 use std::{
     collections::VecDeque,
     io::{self, Write},
@@ -12,13 +14,13 @@ const MAX_EVENTS: usize = 32;
 
 enum Packet {
     Event(Vec<u8>),
-    Frame([u8; 24], Vec<u8>),
+    Frame([u8; 24], DecodedCanvas, u64),
 }
 
 #[derive(Default)]
 struct State {
     pending: VecDeque<Packet>,
-    recycled: Vec<u8>,
+    recycled: DecodedCanvas,
     closing: bool,
 }
 
@@ -47,16 +49,16 @@ impl Output {
         Ok(())
     }
 
-    pub fn frame(&self, header: [u8; 24], pixels: &mut Vec<u8>) -> Result<()> {
+    pub fn frame(&self, header: [u8; 24], decoder: &Decoder, sequence: u64) -> Result<()> {
         let (mutex, wake) = &*self.0;
         let mut s = mutex.lock().unwrap();
         ensure!(!s.closing, "session output closed");
-        let reuse = if let Some(i) = s
+        let mut canvas = if let Some(i) = s
             .pending
             .iter()
             .position(|p| matches!(p, Packet::Frame(..)))
         {
-            let Some(Packet::Frame(_, old)) = s.pending.remove(i) else {
+            let Some(Packet::Frame(_, old, _)) = s.pending.remove(i) else {
                 unreachable!()
             };
             old
@@ -65,8 +67,8 @@ impl Output {
         };
         // Append after intervening metadata, never put a new canvas ahead of
         // the window table that describes it. Reuse the replaced allocation.
-        let latest = std::mem::replace(pixels, reuse);
-        s.pending.push_back(Packet::Frame(header, latest));
+        decoder.snapshot_into(&mut canvas);
+        s.pending.push_back(Packet::Frame(header, canvas, sequence));
         wake.notify_all();
         Ok(())
     }
@@ -83,13 +85,15 @@ impl Output {
         let mut s = mutex.lock().unwrap();
         s.closing = true;
         s.pending.clear();
-        s.recycled.clear();
+        s.recycled = DecodedCanvas::default();
         wake.notify_all();
         result
     }
 
     fn drain(&self, writer: &mut impl Write) -> io::Result<()> {
         let (mutex, wake) = &*self.0;
+        let mut pixels = Vec::new();
+        let mut output = 0u64;
         loop {
             let packet = {
                 let mut s = mutex.lock().unwrap();
@@ -108,12 +112,19 @@ impl Output {
                     writer.write_all(&[0])?;
                     writer.write_all(&bytes)?;
                 }
-                Packet::Frame(header, pixels) => {
+                Packet::Frame(header, canvas, sequence) => {
+                    output += 1;
+                    crate::session_trace::record("expand-start", format_args!("frame={sequence} output={output}"));
+                    // The reader can continue applying/acknowledging deltas and
+                    // replacing its pending snapshot during conversion and I/O.
+                    canvas.expand_into(&mut pixels);
+                    crate::session_trace::record("write-start", format_args!("frame={sequence} output={output}"));
                     writer.write_all(&((pixels.len() + 25) as u32).to_le_bytes())?;
                     writer.write_all(&[1])?;
                     writer.write_all(&header)?;
                     writer.write_all(&pixels)?;
-                    mutex.lock().unwrap().recycled = pixels;
+                    crate::session_trace::record("write-end", format_args!("frame={sequence} output={output}"));
+                    mutex.lock().unwrap().recycled = canvas;
                 }
             }
             writer.flush()?;
@@ -124,7 +135,18 @@ impl Output {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use flate2::{write::ZlibEncoder, Compression};
     use std::sync::mpsc;
+
+    fn decoder(value: u16) -> Decoder {
+        let mut z = ZlibEncoder::new(Vec::new(), Compression::fast());
+        z.write_all(&[1, 0, 0, 0, 0]).unwrap();
+        z.write_all(&value.to_le_bytes()).unwrap();
+        z.flush().unwrap();
+        let mut d = Decoder::default();
+        assert!(d.apply(2, 1, 1, 7, 0, 0, z.get_ref()).unwrap());
+        d
+    }
 
     struct GatedWriter {
         entered: Option<mpsc::SyncSender<()>>,
@@ -155,14 +177,14 @@ mod tests {
             release: gate,
             bytes: bytes.clone(),
         });
-        out.frame([1; 24], &mut vec![1; 4]).unwrap();
+        out.frame([1; 24], &decoder(0xf800), 1).unwrap();
         wait.recv_timeout(std::time::Duration::from_secs(2))
             .unwrap();
         for n in 2..100 {
-            out.frame([n; 24], &mut vec![n; 4]).unwrap();
+            out.frame([n; 24], &decoder(n.into()), n.into()).unwrap();
         }
         out.event(b"windows".to_vec()).unwrap();
-        out.frame([100; 24], &mut vec![100; 4]).unwrap();
+        out.frame([100; 24], &decoder(0x07e0), 100).unwrap();
         assert_eq!(out.0 .0.lock().unwrap().pending.len(), 2);
         out.finish();
         release.send(()).unwrap();
@@ -176,8 +198,8 @@ mod tests {
             at += n + 4;
         }
         assert_eq!(packets.len(), 3);
-        assert_eq!(packets[0], [vec![1], vec![1; 28]].concat());
+        assert_eq!(packets[0], [vec![1], vec![1; 24], vec![0, 0, 255, 255]].concat());
         assert_eq!(packets[1], [vec![0], b"windows".to_vec()].concat());
-        assert_eq!(packets[2], [vec![1], vec![100; 28]].concat());
+        assert_eq!(packets[2], [vec![1], vec![100; 24], vec![0, 255, 0, 255]].concat());
     }
 }

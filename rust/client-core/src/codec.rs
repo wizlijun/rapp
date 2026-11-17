@@ -9,6 +9,49 @@ pub const END: u8 = 4;
 pub const COPIES: u8 = 8;
 const KIND_COPY: u8 = 5;
 
+/// An owned, compact snapshot, independent of subsequent deltas or scroll-copy references.
+/// Keep these in the display mailbox and expand only the snapshot selected for output.
+#[derive(Default)]
+pub struct DecodedCanvas {
+    mode: u8,
+    samples: Vec<u16>,
+}
+
+impl DecodedCanvas {
+    pub fn expand_into(&self, pixels: &mut Vec<u8>) {
+        expand(self.mode, &self.samples, pixels);
+    }
+}
+
+fn expand(mode: u8, samples: &[u16], pixels: &mut Vec<u8>) {
+    pixels.resize(samples.len() * 4, 0);
+    // Select the conversion once, outside the pixel loop. Besides avoiding a
+    // branch per pixel, this lets LLVM vectorize the common gray and RGB565 paths.
+    let dst = pixels.as_chunks_mut::<4>().0;
+    match mode {
+        0 | 3 => {
+            for (pixel, &s) in dst.iter_mut().zip(samples) {
+                let v = ((s & 15) * 17) as u8;
+                *pixel = [v, v, v, 255];
+            }
+        }
+        1 => {
+            for (pixel, &s) in dst.iter_mut().zip(samples) {
+                *pixel = bgra(1, s);
+            }
+        }
+        _ => {
+            for (pixel, &s) in dst.iter_mut().zip(samples) {
+                let r = s >> 11;
+                let g = s >> 5 & 63;
+                let b = s & 31;
+                *pixel = [(b << 3 | b >> 2) as u8, (g << 2 | g >> 4) as u8,
+                          (r << 3 | r >> 2) as u8, 255];
+            }
+        }
+    }
+}
+
 /// Mirrors the Swift `FrameDecoder` state machine; see Sources/RappCore/TileCodec.swift.
 pub struct Decoder {
     z: Decompress,
@@ -95,15 +138,29 @@ impl Decoder {
         compressed: &[u8],
         pixels: &mut Vec<u8>,
     ) -> Result<bool> {
+        let show = self.apply(mode, w, h, flags, dx, dy, compressed)?;
+        if show {
+            expand(self.mode, &self.samples, pixels);
+        }
+        Ok(show)
+    }
+
+    /// Applies every compressed slice without expanding it to BGRA. The return
+    /// value preserves progressive display and the hold-until-END rule for moves
+    /// and replacement full frames. On error the canvas is invalidated.
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply(
+        &mut self,
+        mode: u8,
+        w: usize,
+        h: usize,
+        flags: u8,
+        dx: i32,
+        dy: i32,
+        compressed: &[u8],
+    ) -> Result<bool> {
         match self.decode_slice(mode, w, h, flags, dx, dy, compressed) {
-            Ok(true) => {
-                pixels.resize(self.samples.len() * 4, 0);
-                for (pixel, sample) in pixels.as_chunks_mut::<4>().0.iter_mut().zip(&self.samples) {
-                    pixel.copy_from_slice(&bgra(self.mode, *sample));
-                }
-                Ok(true)
-            }
-            Ok(false) => Ok(false),
+            Ok(show) => Ok(show),
             Err(e) => {
                 self.open = false;
                 self.hold = false;
@@ -114,6 +171,13 @@ impl Decoder {
                 Err(e)
             }
         }
+    }
+
+    /// Copies a displayable canvas after `apply` returned true. Reuses the
+    /// mailbox's allocation; no color conversion happens on the receiving thread.
+    pub fn snapshot_into(&self, canvas: &mut DecodedCanvas) {
+        canvas.mode = self.mode;
+        canvas.samples.clone_from(&self.samples);
     }
     /// The canvas as the Swift `FrameDecoder.samples`: 1 or 2 bytes per sample, little-endian.
     pub fn samples_le(&self) -> Vec<u8> {
@@ -351,4 +415,25 @@ pub fn bgra(mode: u8, s: u16) -> [u8; 4] {
         }
     };
     [b as u8, g as u8, r as u8, 255]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bulk_conversion_matches_every_wire_sample_in_all_modes() {
+        let mut pixels = Vec::new();
+        for mode in 0..=4 {
+            let samples: Vec<u16> = if mode == 2 || mode == 4 {
+                (0..=u16::MAX).collect()
+            } else {
+                (0..=255).collect()
+            };
+            expand(mode, &samples, &mut pixels);
+            for (pixel, &sample) in pixels.as_chunks::<4>().0.iter().zip(&samples) {
+                assert_eq!(*pixel, bgra(mode, sample), "mode {mode}, sample {sample}");
+            }
+        }
+    }
 }
