@@ -524,3 +524,12 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [x] 安装包与便携包 33 个文件逐一摘要一致，13 个 ELF 依赖解析通过；host 版本 0.14.1 / 协议 v13、BUILD-INFO 源码提交及 SHA256 匹配。
 - [x] [v0.14.1 Release](https://github.com/wizlijun/rapp/releases/tag/v0.14.1) 已公开：Arch 安装包、便携包、SHA256SUMS；GitHub 返回的大小和 SHA256 均与本地一致。发布使用 latest=false，保留 macOS 0.14.0 的 latest.json 更新入口。
 - [x] 从 GitHub 已公开数据刷新网站下载备用快照；未部署网站、未安装新包或重启本机服务。
+
+## Linux 0.14.3 发布（2026-11-18）
+
+- [x] 按用户要求重新拉取 main 至 `1e66efa`，纳入 0.14.2 修复及侧栏/设备选择界面合并；修正「本机」页仍声称 Linux 不能共享桌面的旧提示，按实际 capabilities 显示。
+- [x] 发布源码 `96e326015f0db97d04d3d033c92c006965353b04`，main 与 v0.14.3 标签已推送。干净 worktree `rapp-linux-0143` 构建；最终产物位于 `dist/linux-0.14.3-final/`。
+- [x] 相关 GUI 首轮 586 项通过、1 项既有跳过，1 项旧文案断言失败；修正断言并覆盖桌面能力提示后，受影响的 27 项复验全部通过。Flutter analyze、host/client-core 测试、host Clippy、构建路径夹具通过。
+- [x] 两种安装包 33 个文件摘要一致，13 个 ELF 依赖解析通过；host 0.14.3 / v13、BUILD-INFO 源码提交及 SHA256 校验通过。解包后的 hub → QUIC service → Omarchy 桌面采集及 CLI/分享端口检查连续三次通过。
+- [x] [v0.14.3 Release](https://github.com/wizlijun/rapp/releases/tag/v0.14.3) 已公开，包含 Arch 包、便携包和 SHA256SUMS；GitHub 端文件大小和 SHA256 与本地一致。latest=false 保留 macOS 0.14.2 更新入口。
+- [x] 根据 GitHub 公开数据更新网站备用快照；未部署网站、未安装或重启本机服务。本轮未进行 macOS/iOS 真机验收。
