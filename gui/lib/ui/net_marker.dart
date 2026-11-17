@@ -52,10 +52,11 @@ class NetMarker extends StatelessWidget {
   final String? path;
 
   /// The mark's canvas, the same for all four levels.
-  static const markSize = Size(14, 14);
+  /// 20, so the fan's ink (about 13 tall) matches the traffic bars' 13×13 beside it.
+  static const markSize = Size(20, 20);
 
   /// Width the marker takes in the top bar: the mark and 6 either side.
-  static const width = 26.0;
+  static const width = 32.0;
 
   @override
   Widget build(BuildContext context) {

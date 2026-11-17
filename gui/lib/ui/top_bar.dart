@@ -383,10 +383,13 @@ class TopBar extends StatelessWidget {
     );
   }
 
+  /// Every icon in the bar is drawn at this size (the network and traffic marks match its ink).
+  static const iconSize = 20.0;
+
   Widget _icon(String key, IconData icon, String tip, VoidCallback? onTap) {
     return IconButton(
       key: Key(key),
-      icon: Icon(icon),
+      icon: Icon(icon, size: iconSize),
       tooltip: tip,
       onPressed: onTap,
       constraints: const BoxConstraints(minWidth: 48, minHeight: 48),

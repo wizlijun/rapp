@@ -11,7 +11,7 @@ class ProjectMenu extends StatelessWidget {
 
   final MainState state;
 
-  /// No room for the name: the icon and the ▾ alone, the name in the tooltip.
+  /// No room for the name: its first character and the ▾, the name in the tooltip.
   final bool compact;
 
   /// The button's widest with the name, and its width without.
@@ -47,24 +47,21 @@ class ProjectMenu extends StatelessWidget {
                 child: Container(
                   // Hugs its content: a short name keeps a short button.
                   constraints: const BoxConstraints(minHeight: 48, maxHeight: 48, minWidth: 48),
-                  padding: EdgeInsets.only(left: compact ? 4 : 10, right: compact ? 2 : 6),
+                  padding: EdgeInsets.only(left: compact ? 6 : 10, right: compact ? 2 : 6),
                   decoration: BoxDecoration(borderRadius: radius, border: Border.all(color: t.line)),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.folder_outlined, size: 16, color: t.muted),
-                      if (!compact) ...[
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            label,
-                            key: const Key('project-menu-label'),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(color: current == null ? t.muted : t.text),
-                          ),
+                      Flexible(
+                        child: Text(
+                          // No room for the name: its first character, the name in the tooltip.
+                          compact ? label.characters.first : label,
+                          key: const Key('project-menu-label'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: current == null ? t.muted : t.text),
                         ),
-                      ],
+                      ),
                       Icon(Icons.arrow_drop_down, size: 18, color: t.muted),
                     ],
                   ),

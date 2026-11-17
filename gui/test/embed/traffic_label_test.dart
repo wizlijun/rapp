@@ -12,7 +12,7 @@ import '../ui/helpers.dart';
 
 void main() {
   test('level bars thresholds', () {
-    expect([0, 4999, 5000, 14999, 39999, 99999, 100000].map(levelBars), [0, 1, 2, 2, 3, 4, 5]);
+    expect([0, 4999, 5000, 29999, 30000, 99999, 100000].map(levelBars), [0, 1, 2, 2, 3, 3, 4]);
   });
 
   test('formatRate', () {
@@ -76,12 +76,13 @@ void main() {
     expect(trafficRow(0, '本机网络弱'), '流量 0 KB/s · 本机网络弱');
   });
 
-  testWidgets('the bars are a 14×14 square, the tallest the full height', (tester) async {
+  testWidgets('four bars in a 13×13 square, the tallest the full height', (tester) async {
     await tester.pumpWidget(wrap(const LevelBars(50000)));
     expect(tester.getSize(find.byType(LevelBars)), const Size.square(LevelBars.size));
     final box = tester.getRect(find.byType(LevelBars));
     final first = tester.getRect(find.byKey(const Key('bar0')));
-    final last = tester.getRect(find.byKey(const Key('bar4')));
+    expect(find.byKey(const Key('bar4')), findsNothing);
+    final last = tester.getRect(find.byKey(const Key('bar3')));
     expect(first.left, box.left);
     expect(last.right, box.right);
     expect(last.top, box.top);
