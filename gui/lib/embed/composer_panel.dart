@@ -46,6 +46,19 @@ const _pad = (40 + 2 * _edge - _line) / 2;
 /// The panel's boxes let the picture behind show through: the float fill 30% transparent.
 const composerFillOpacity = 0.7;
 
+/// The float box at [composerFillOpacity]: the composer's look, for anything else that sits on the picture.
+BoxDecoration seeThroughBox(RappTokens t) {
+  final d = t.floatBox();
+  Color f(Color c) => c.withValues(alpha: c.a * composerFillOpacity);
+  final g = d.gradient;
+  return d.copyWith(
+    color: d.color == null ? null : f(d.color!),
+    gradient: g is LinearGradient
+        ? LinearGradient(begin: g.begin, end: g.end, stops: g.stops, colors: [for (final c in g.colors) f(c)])
+        : g,
+  );
+}
+
 class ComposerPanel extends StatefulWidget {
   const ComposerPanel({
     super.key,
@@ -334,18 +347,6 @@ class _ComposerPanelState extends State<ComposerPanel> {
     );
   }
 
-  BoxDecoration _seeThrough(RappTokens t) {
-    final d = t.floatBox();
-    Color f(Color c) => c.withValues(alpha: c.a * composerFillOpacity);
-    final g = d.gradient;
-    return d.copyWith(
-      color: d.color == null ? null : f(d.color!),
-      gradient: g is LinearGradient
-          ? LinearGradient(begin: g.begin, end: g.end, stops: g.stops, colors: [for (final c in g.colors) f(c)])
-          : g,
-    );
-  }
-
   /// One outgoing item: 「发送中」 or why it failed, the text's first line, and for a failed
   /// one 「重试」 and 「放回输入框」.
   Widget _item(Outgoing o, RappTokens t) {
@@ -355,7 +356,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Container(
-        decoration: _seeThrough(t),
+        decoration: seeThroughBox(t),
         constraints: BoxConstraints(minHeight: _line * _k + _border),
         padding: const EdgeInsets.only(left: 12),
         child: Row(
@@ -440,7 +441,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
               ?_hint(t), // W11
               Container(
                 key: const Key('composer-box'),
-                decoration: _seeThrough(t),
+                decoration: seeThroughBox(t),
                 constraints: BoxConstraints(maxHeight: inner + _border),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
