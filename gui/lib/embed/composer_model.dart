@@ -370,6 +370,18 @@ class ComposerModel extends ChangeNotifier {
     return inline ? draft : draftText;
   }
 
+  /// The text as the editor has it now, without block marks; [draftText] without an editor (or when
+  /// it does not answer). For a session that is ending: it reads after [dispose] too.
+  Future<String> currentText() async {
+    final e = _editor;
+    if (e == null) return draftText;
+    try {
+      return _plain(await e.read().timeout(const Duration(seconds: 1)));
+    } catch (_) {
+      return draftText;
+    }
+  }
+
   /// Native text updates keep held blocks until submission or handoff, so native undo can restore
   /// deleted anchors. Legacy native editors send plain text and report chip removals separately.
   void setDetachedDraft(String s, {bool inline = false}) {

@@ -1033,6 +1033,7 @@ class MainState extends ChangeNotifier {
       }
       final text = index == null ? '' : list[index].text;
       if (index == null) { _nativeRecall.remove(rs.sid); } else { _nativeRecall[rs.sid] = (index, text); }
+      if (index != null) recorder.recalled(rs, text);
       rs.composer.setDraft(text);
       portOf(rs.sid)?.nativeComposerDraft(rs.sid, text);
     }
