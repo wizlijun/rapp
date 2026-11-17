@@ -1,3 +1,4 @@
+pub mod fit;
 pub mod grid;
 pub mod holder;
 pub mod launch;
