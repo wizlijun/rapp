@@ -104,7 +104,11 @@ class UnlockDialog extends StatefulWidget {
 
 class _UnlockDialogState extends State<UnlockDialog> {
   final _password = TextEditingController();
+  final _focus = FocusNode();
   bool _loading = true, _remember = false, _auto = false, _stored = false;
+  /// The field still holds the remembered password exactly as loaded. It is masked, so a caret at
+  /// its end would quietly add new typing to the old (maybe wrong) password: keep it all selected.
+  bool _savedText = false;
   String? _error;
 
   @override
@@ -121,14 +125,27 @@ class _UnlockDialogState extends State<UnlockDialog> {
       if (!mounted) return;
       if (saved != null) {
         _password.text = saved.password;
-        _remember = _stored = true;
+        _remember = _stored = _savedText = true;
         _auto = saved.auto;
       }
     } catch (_) {
       if (!mounted) return;
       _error = '无法读取钥匙串；可以手动输入密码';
     }
-    if (mounted) setState(() => _loading = false);
+    if (!mounted) return;
+    setState(() => _loading = false);
+    // The field was disabled while loading, so its autofocus came to nothing: focus it once it
+    // has rebuilt enabled (a disabled field ignores the request).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _focus.requestFocus();
+      _selectSaved();
+    });
+  }
+
+  void _selectSaved() {
+    if (!_savedText) return;
+    _password.selection = TextSelection(baseOffset: 0, extentOffset: _password.text.length);
   }
 
   Future<void> _forget() async {
@@ -137,7 +154,7 @@ class _UnlockDialogState extends State<UnlockDialog> {
       await widget.store.forget(widget.device);
       if (!mounted) return;
       _password.clear();
-      _stored = _remember = _auto = false;
+      _stored = _remember = _auto = _savedText = false;
       _error = null;
     } catch (_) {
       if (!mounted) return;
@@ -165,6 +182,7 @@ class _UnlockDialogState extends State<UnlockDialog> {
   void dispose() {
     _password.clear();
     _password.dispose();
+    _focus.dispose();
     super.dispose();
   }
 
@@ -181,8 +199,12 @@ class _UnlockDialogState extends State<UnlockDialog> {
           const SizedBox(height: 12),
           SecureTextField(
             controller: _password,
+            focusNode: _focus,
             autofocus: true,
             enabled: !_loading,
+            // Any edit makes the text the user's own; a click on the untouched one selects it again.
+            onChanged: (_) => _savedText = false,
+            onTap: _selectSaved,
             decoration: InputDecoration(labelText: '系统密码', errorText: _error),
             onSubmitted: (_) => _submit(),
           ),

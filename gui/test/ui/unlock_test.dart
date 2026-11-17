@@ -540,6 +540,28 @@ void main() {
     expect(result, isNull);
   });
 
+  testWidgets('a remembered password comes up selected, so typing replaces it instead of adding to it', (
+    tester,
+  ) async {
+    final store = MemoryUnlockStore()
+      ..credential = const UnlockCredential('wrong', auto: false);
+    await tester.pumpWidget(wrap(UnlockDialog(store: store, device: 'A')));
+    await tester.pumpAndSettle();
+    final field = tester.widget<TextField>(find.byType(TextField));
+    final all = const TextSelection(baseOffset: 0, extentOffset: 5);
+    expect(field.focusNode!.hasFocus, isTrue);
+    expect(field.controller!.selection, all);
+    // A click on the still-untouched password selects it again rather than parking the caret at its end.
+    await tester.tap(find.byType(TextField));
+    await tester.pumpAndSettle();
+    expect(field.controller!.selection, all);
+    // Once the text is the user's own, a click places the caret as usual.
+    await tester.enterText(find.byType(TextField), 'right');
+    await tester.tap(find.byType(TextField));
+    await tester.pumpAndSettle();
+    expect(field.controller!.selection.isCollapsed, isTrue);
+  }, variant: TargetPlatformVariant({TargetPlatform.macOS, TargetPlatform.iOS}));
+
   testWidgets('other platforms offer only manual input', (tester) async {
     final store = MemoryUnlockStore(supported: false);
     await tester.pumpWidget(wrap(UnlockDialog(store: store, device: 'A')));
