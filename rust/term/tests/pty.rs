@@ -103,6 +103,47 @@ async fn a_viewer_cannot_change_the_size() {
 }
 
 #[tokio::test]
+async fn a_view_without_fit_never_resizes_the_window() {
+    let d = short_dir();
+    let w = Window::start(d.path(), &["--name", "t", "--", "/bin/cat"]);
+    let mut v = Viewer::connect(d.path(), "t").await;
+    v.open().await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!w.output().contains("\x1b[8;"), "{:?}", w.output());
+}
+
+#[tokio::test]
+async fn a_fit_view_resizes_the_window() {
+    let d = short_dir();
+    let w = Window::start(d.path(), &["--name", "t", "--", "/bin/cat"]);
+    let mut v = Viewer::connect(d.path(), "t").await;
+    v.open().await;
+    v.send(json!({"t":"view","pane":"%0","cols":90,"rows":20,"fit":true})).await;
+    w.wait_output("\x1b[8;20;90t");
+}
+
+#[tokio::test]
+async fn typing_from_a_second_viewer_takes_over_after_two_seconds() {
+    let d = short_dir();
+    let w = Window::start(d.path(), &["--name", "t", "--", "/bin/cat"]);
+    let mut a = Viewer::connect(d.path(), "t").await;
+    a.open().await;
+    a.send(json!({"t":"view","pane":"%0","cols":90,"rows":20,"fit":true})).await;
+    w.wait_output("\x1b[8;20;90t");
+    // A seat taken by a view alone has no last operation: A operates, so it holds the seat for two seconds.
+    a.send(json!({"t":"keys","pane":"%0","keys":["a"]})).await;
+    let mut b = Viewer::connect(d.path(), "t").await;
+    b.open().await;
+    b.send(json!({"t":"view","pane":"%0","cols":70,"rows":15,"fit":true})).await;
+    b.send(json!({"t":"keys","pane":"%0","keys":["a"]})).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!w.output().contains("\x1b[8;15;70t"), "{:?}", w.output());
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    b.send(json!({"t":"keys","pane":"%0","keys":["a"]})).await;
+    w.wait_output("\x1b[8;15;70t");
+}
+
+#[tokio::test]
 async fn names_count_up() {
     let d = short_dir();
     let _a = Window::start(d.path(), &["--name", "t", "--", "/bin/cat"]);
