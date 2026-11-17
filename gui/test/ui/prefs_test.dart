@@ -45,6 +45,15 @@ void main() {
     expect(File('${tmp.path}/gui.json').readAsStringSync(), contains('"auto_save_traffic":false'));
     expect(UiPrefs.load(tmp.path).autoSaveTraffic, isFalse);
   });
+  test('settings_folded: open by default and when bad, saved when folded', () {
+    expect(UiPrefs().settingsFolded, isFalse);
+    File('${tmp.path}/gui.json').writeAsStringSync('{"settings_folded":"x"}');
+    expect(UiPrefs.load(tmp.path).settingsFolded, isFalse);
+    UiPrefs(settingsFolded: true).save(tmp.path);
+    expect(File('${tmp.path}/gui.json').readAsStringSync(), contains('"settings_folded":true'));
+    expect(UiPrefs.load(tmp.path).settingsFolded, isTrue);
+  });
+
   test('input_history: on by default and when bad, saved when off', () {
     expect(UiPrefs().inputHistory, isTrue);
     File('${tmp.path}/gui.json').writeAsStringSync('{"input_history":"x"}');
