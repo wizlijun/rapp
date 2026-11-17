@@ -44,7 +44,7 @@ void main() {
     expect(find.descendant(of: find.byType(GlobalSections), matching: find.byType(LinuxUpdateSection)), findsOneWidget);
     expect(find.text('检查更新'), findsOneWidget);
     expect(find.textContaining('屏幕录制'), findsNothing);
-    expect(find.textContaining('本机为 Linux 控制端'), findsOneWidget);
+    expect(find.textContaining('启动或更新后台服务后'), findsOneWidget);
   });
   testWidgets('missing Linux assets and network failures do not offer macOS installers', (tester) async {
     var fail = false;

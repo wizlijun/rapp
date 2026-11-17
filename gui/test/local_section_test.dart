@@ -315,9 +315,12 @@ void main() {
   });
 
   testWidgets('the auto-lock switch shows on Linux too, now that Linux can host', (tester) async {
-    svc = FakeService('tok');
+    svc = FakeService('tok')
+      ..extraStatus = {'capabilities': {'desktop': true, 'terminal': true, 'ports': true, 'applications': false}};
     await pump(tester, platform: TargetPlatform.linux);
     expect(find.text(label), findsOneWidget);
+    expect(find.text('本机支持桌面共享、端口分享和文本终端；暂不支持单应用共享。'), findsOneWidget);
+    expect(find.textContaining('暂不支持应用和桌面画面被控'), findsNothing);
   });
 
   testWidgets('the auto-lock switch is absent where no session can be hosted', (tester) async {
