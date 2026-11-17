@@ -1,5 +1,6 @@
 // Fullscreen control, abstracted so tests don't need a real window.
 import 'dart:async';
+import 'dart:ui' show Size;
 
 import 'package:window_manager/window_manager.dart';
 
@@ -62,6 +63,58 @@ class IosFullscreen implements FullscreenControl {
     _on = on;
     _changes.add(on);
   }
+}
+
+/// A window whose short side is under this is a folded Duo (its outer screen, either way up) or a phone: the
+/// Duo's inner screen is wider than this both ways up (iPad spec §7.1, F4).
+const foldedShortSide = 600.0;
+
+/// iOS: folding the Duo leaves fullscreen and unfolding it comes back. What is wanted unfolded is 启动时全屏 at
+/// first, then whatever the fullscreen button last set; folded, the status bar always shows. Window sizes and
+/// button presses are taken one at a time, in the order they came.
+class FoldFullscreen implements FullscreenControl {
+  FoldFullscreen(this._inner);
+
+  final FullscreenControl _inner;
+  bool _want = false;
+  bool? _folded;
+  Future<void> _queue = Future.value();
+
+  static bool _isFolded(Size s) => s.shortestSide < foldedShortSide;
+
+  Future<void> _then(Future<void> Function() f) => _queue = _queue.then((_) => f()).catchError((Object _) {});
+
+  /// The app's first window size and 启动时全屏: fullscreen now unless folded.
+  Future<void> start({required bool want, required Size size}) => _then(() async {
+        _want = want;
+        _folded = _isFolded(size);
+        if (want && !_folded!) await _inner.setFullScreen(true);
+      });
+
+  /// The window changed size (fold, unfold, rotation, Split View).
+  Future<void> windowSize(Size size) => _then(() async {
+        final folded = _isFolded(size);
+        if (folded == _folded) return;
+        _folded = folded;
+        if (folded) {
+          if (await _inner.isFullScreen()) await _inner.setFullScreen(false);
+        } else if (_want) {
+          await _inner.setFullScreen(true);
+        }
+      });
+
+  @override
+  Stream<bool> get changes => _inner.changes;
+
+  @override
+  Future<bool> isFullScreen() => _inner.isFullScreen();
+
+  /// The fullscreen button: also what unfolding comes back to.
+  @override
+  Future<void> setFullScreen(bool on) => _then(() async {
+        _want = on;
+        await _inner.setFullScreen(on);
+      });
 }
 
 /// No fullscreen control: MainWindow shows no fullscreen button.

@@ -187,6 +187,16 @@ pub fn client_endpoint_dual() -> Result<Endpoint> {
     .context("bind udp [::]:0")
 }
 
+/// Gives `ep` a fresh UDP socket of the same kind (`dual`: as `client_endpoint_dual`, else IPv4 on
+/// `0.0.0.0:0`) and returns its address. Live connections move to it; quinn tells their peers. iOS
+/// takes the sockets of a suspended app away, and a socket bound before a network change can keep
+/// sending into the old one: a new socket is what gets through again.
+pub fn rebind(ep: &Endpoint, dual: bool) -> Result<SocketAddr> {
+    let sock = if dual { sys::bind_dual().context("bind udp [::]:0")? } else { std::net::UdpSocket::bind("0.0.0.0:0").context("bind udp 0.0.0.0:0")? };
+    ep.rebind(sock).context("rebind udp")?;
+    Ok(ep.local_addr()?)
+}
+
 /// `resolve`, or with `dual` for a dual-stack endpoint (`client_endpoint_dual`): an IPv4 address
 /// with an IPv4 route comes back v4-mapped; without one the name is resolved again with
 /// `getaddrinfo(AI_DEFAULT)`, which synthesizes an IPv6 address on a NAT64 network.
@@ -440,6 +450,82 @@ mod tests {
         let seen = srv.await.unwrap();
         assert_eq!(seen.ip(), std::net::IpAddr::from([127, 0, 0, 1]));
         drop(conn);
+    }
+
+    /// What iOS does to a suspended app's sockets, near enough: the endpoint's fd stops reaching
+    /// anyone. Swapped for a UDP socket connected to a port nobody listens on.
+    #[cfg(unix)]
+    fn kill_socket(ep_fd: std::os::fd::RawFd) -> std::net::UdpSocket {
+        use std::os::fd::AsRawFd;
+        let dead = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        dead.connect("127.0.0.1:9").unwrap();
+        // SAFETY: both fds are open; dup2 swaps what ep_fd refers to.
+        assert!(unsafe { libc::dup2(dead.as_raw_fd(), ep_fd) } >= 0);
+        dead
+    }
+
+    #[cfg(unix)]
+    fn endpoint_with_fd() -> (Endpoint, std::os::fd::RawFd) {
+        use std::os::fd::AsRawFd;
+        let sock = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        let fd = sock.as_raw_fd();
+        let ep = Endpoint::new(quinn::EndpointConfig::default(), None, sock, Arc::new(quinn::TokioRuntime)).unwrap();
+        (ep, fd)
+    }
+
+    fn echo_server() -> SocketAddr {
+        let server = server_endpoint("127.0.0.1:0".parse().unwrap(), ALPN_PEER).unwrap();
+        let addr = server.local_addr().unwrap();
+        tokio::spawn(async move {
+            while let Some(inc) = server.accept().await {
+                tokio::spawn(async move {
+                    let Ok(conn) = inc.await else { return };
+                    while let Ok(s) = conn.accept_bi().await {
+                        let mut s = bi(s);
+                        if let Ok(v) = read_json(&mut s).await {
+                            let _ = write_json(&mut s, &json!({"echo": v})).await;
+                        }
+                    }
+                });
+            }
+        });
+        addr
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn rebind_revives_an_endpoint_whose_socket_died() {
+        let addr = echo_server();
+        let (ep, fd) = endpoint_with_fd();
+        let _dead = kill_socket(fd);
+        assert!(connect(&ep, addr, ALPN_PEER, Duration::from_millis(800)).await.is_err(), "a dead socket reaches nobody");
+        let before = ep.local_addr().unwrap();
+        let now = rebind(&ep, false).unwrap();
+        assert_ne!(now.port(), before.port());
+        let conn = connect(&ep, addr, ALPN_PEER, Duration::from_secs(2)).await.unwrap();
+        let mut s = bi(conn.open_bi().await.unwrap());
+        write_json(&mut s, &json!(2)).await.unwrap();
+        assert_eq!(read_json(&mut s).await.unwrap(), json!({"echo":2}));
+    }
+
+    #[tokio::test]
+    async fn a_live_connection_moves_to_the_new_socket() {
+        let addr = echo_server();
+        let ep = client_endpoint("127.0.0.1:0".parse().unwrap()).unwrap();
+        let conn = connect(&ep, addr, ALPN_PEER, Duration::from_secs(2)).await.unwrap();
+        rebind(&ep, false).unwrap();
+        let mut s = bi(conn.open_bi().await.unwrap());
+        write_json(&mut s, &json!(3)).await.unwrap();
+        let r = tokio::time::timeout(Duration::from_secs(3), read_json(&mut s)).await.unwrap().unwrap();
+        assert_eq!(r, json!({"echo":3}));
+    }
+
+    #[tokio::test]
+    async fn rebind_dual_stays_dual() {
+        let addr = echo_server();
+        let ep = client_endpoint_dual().unwrap();
+        assert!(rebind(&ep, true).unwrap().is_ipv6());
+        connect(&ep, mapped(addr), ALPN_PEER, Duration::from_secs(2)).await.unwrap();
     }
 
     #[tokio::test]

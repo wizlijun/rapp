@@ -433,6 +433,7 @@
 
 规格 `docs/superpowers/specs/2026-11-17-rapp-ipad-duo-design.md`，测量结果 `docs/superpowers/measurements/2026-11-17-rapp-ipad-p0.md`。探查代码在分支 `probe/ipad-p0`，不合并。
 
+- [ ] `scripts/build-ios.sh sim` 在这台 Mac 上失败（Xcode 27.2 / 27B52 + Flutter 3.44.1，framework 2026-05-29）：Xcode 自己编完（约 135 秒），之后 Flutter 报 `Xcode build is missing expected TARGET_BUILD_DIR build setting` 并以 1 退出，`Runner.app` 不生成。`device` 模式同机同版本是通的（已装到 Duo 上跑过），所以只有模拟器这条路受影响；疑似 Flutter 读 `xcodebuild -showBuildSettings` 跟不上新 Xcode，没有验证。先升 Flutter 再看
 - [ ] 查 A 没锁屏时窗口抓取不出帧（这台 Mac，macOS 27）：测试页在画、窗口在屏幕内，客户端还是 0 fps；锁屏后 29–30 fps
 - [ ] 上面查清后，补做手机和 macOS 的 CPU 对比（过关条件：不超过 macOS 同档的两倍），A 上不能有别的设备连着
 - [ ] Duo 真机：开合序列、外屏窗口大小、开合时 App 是否一直活动
@@ -504,3 +505,22 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [x] 更新网站源码中的下载备用快照，8 项选择规则/快照测试通过；线上页面正常从 GitHub API 自动获取此版本，本轮未部署网站。
 
 产物在 `dist/linux-0.13.9/`。构建日志在主工作区 `.build-logs/package-linux-0139.log`，完整测试日志在发布 worktree 的 `.build-logs/*0139.log`。真实 macOS 对端及各终端模拟器的物理窗口/输入体验仍需设备验收。
+
+
+## Linux 桌面 host 与 0.14.1（2026-11-17）
+
+- [x] 新增 Rust `rapp-host`，复用现有 v13 协议，支持 Omarchy/Hyprland、兼容 wlroots 的 Wayland 和 X11 桌面被控端。包含显示器列表、逐屏会话、增量帧、键鼠/滚轮/Unicode 文本输入、鉴权、接管、让出输入、踢出、退出释放输入、帧确认背压。
+- [x] 服务启动 worker 前刷新图形会话环境；区分整桌面与单应用能力，Linux 的诊断不再显示 macOS 授权提示；构建与 Arch/便携打包包含 host。
+- [x] 原生采集、跨协议解码、错误 token、接管、踢出和 EOF 在 Omarchy 实测通过；隔离 Xvfb 与 headless labwc 验证输入坐标、快捷键、中文输入、修饰键释放与物理键映射恢复。可用 `python3 scripts/test-linux-host.py --current` 重现（需要 Xvfb、labwc、Xwayland）。
+- [x] 相关 GUI 112 项、service 集成 50 项回归通过，Flutter analyze 与新 host Clippy 无问题。端口映射测试在独立网络命名空间通过，避免运行中的服务占用测试端口。
+- [x] 完成实现后再次执行 `git pull --rebase`，整合上游 `27f637e`（0.14.0 / iOS hub）；保留 hub-ffi 和 host-linux workspace 成员，Linux 发布顺延为 0.14.1。
+- 边界：GNOME/KDE Wayland portal、单应用共享、Linux host 的剪贴板/文件传输、自动输入解锁密码尚未实现。X11 文本输入依赖 `xdotool`；本轮无法在 Linux 构建或真机验收 macOS client。
+
+## Linux 0.14.1 发布验收（2026-11-17）
+
+- [x] 发布源码 `10f19766a54bd0bbb7e02e11bd168912117891df` 整合最新上游 0.14.0；main 和 v0.14.1 标签已推送 GitHub。干净 worktree 构建产物位于 `dist/linux-0.14.1/`。
+- [x] 合并后的相关 GUI 回归 471 项通过，1 项既有跳过；service 集成 50 项通过；client-core 与 host 测试、Flutter analyze、新 host Clippy 和 Linux 构建路径夹具通过。
+- [x] 隔离 Xvfb、headless labwc 验证采集、输入、中文、修饰键释放、鉴权和接管。本机 Omarchy debug 原生采集在并行构建期间出现过一次超时，随后复验通过；最终解包后的 hub → QUIC service → host 桌面采集连续四次通过。未以此代替真实 macOS/iOS 对端验收。
+- [x] 安装包与便携包 33 个文件逐一摘要一致，13 个 ELF 依赖解析通过；host 版本 0.14.1 / 协议 v13、BUILD-INFO 源码提交及 SHA256 匹配。
+- [x] [v0.14.1 Release](https://github.com/wizlijun/rapp/releases/tag/v0.14.1) 已公开：Arch 安装包、便携包、SHA256SUMS；GitHub 返回的大小和 SHA256 均与本地一致。发布使用 latest=false，保留 macOS 0.14.0 的 latest.json 更新入口。
+- [x] 从 GitHub 已公开数据刷新网站下载备用快照；未部署网站、未安装新包或重启本机服务。

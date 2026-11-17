@@ -5,16 +5,19 @@ Does not launch the GUI, install a service, contact a relay or use saved devices
 """
 import json
 import os
+import queue
 from pathlib import Path
 import re
 import socket
 import socketserver
+import struct
 import subprocess
 import sys
 import tempfile
 import threading
 import time
 import tomllib
+import zlib
 
 repo = Path(__file__).resolve().parents[1]
 bundle = Path(sys.argv[1] if len(sys.argv) > 1 else repo / 'gui/build/linux/x64/release/bundle').resolve()
@@ -22,7 +25,7 @@ version = tomllib.loads((repo / 'rust/Cargo.toml').read_text())['workspace']['pa
 protocol_source = (repo / 'rust/client-core/src/protocol.rs').read_text()
 protocol = re.search(r'^pub const VERSION: u8 = (\d+);$', protocol_source, re.MULTILINE)
 assert protocol, 'client protocol version declaration not found'
-for name in ['rapp', 'rapp-gui', 'rapp-cli', 'rapp-client', 'rapp-session', 'rapp-service', 'rapp-hub', 'rapp-term']:
+for name in ['rapp', 'rapp-gui', 'rapp-cli', 'rapp-client', 'rapp-session', 'rapp-host', 'rapp-service', 'rapp-hub', 'rapp-term']:
     assert (bundle / name).is_file() and os.access(bundle / name, os.X_OK), name
 assert subprocess.check_output([bundle / 'rapp', '--version'], text=True).strip() == f'rapp {version}'
 assert json.loads(subprocess.check_output([bundle / 'rapp-client', 'version', '--json'], text=True)) == {
@@ -81,7 +84,8 @@ with tempfile.TemporaryDirectory(prefix='rapp-bundle-') as td, EchoServer(('127.
         'port': 0, 'ipc_port': ipc_port, 'auto_lock': False, 'check_updates': False,
     }))
     env = {**os.environ, 'RAPP_HOME': str(root), 'RAPP_LOCAL': str(local),
-           'RAPP_BIN_DIR': str(bundle), 'RAPP_LOG_DIR': str(root / 'logs'), 'PATH': '/usr/bin:/bin'}
+           'RAPP_BIN_DIR': str(bundle), 'RAPP_LOG_DIR': str(root / 'logs'),
+           'RAPP_GUI': str(root / 'no-gui'), 'PATH': '/usr/bin:/bin'}
     port = shared.server_address[1]
     echo_thread = threading.Thread(target=shared.serve_forever, kwargs={'poll_interval': .05}, daemon=True)
     echo_thread.start()
@@ -117,8 +121,67 @@ with tempfile.TemporaryDirectory(prefix='rapp-bundle-') as td, EchoServer(('127.
                         pass
                     time.sleep(.1)
                 assert status and status.get('ok'), 'bundled service did not become ready'
-                assert status['capabilities'] == {'graphical': False, 'terminal': True, 'ports': True}, status['capabilities']
-                assert status['permissions'] is None, status['permissions']
+                assert status['capabilities'] == {'graphical': True, 'desktop': True, 'applications': False, 'terminal': True, 'ports': True}, status['capabilities']
+                assert status['permissions']['platform'] == 'linux', status['permissions']
+                # Exercise the real hub -> QUIC service -> Linux desktop worker path.
+                # Only capture is requested: no input, clipboard operation or screen lock.
+                if status['permissions']['screen_recording']:
+                    visitor = root / 'visitor'
+                    hub_env = {**env, 'RAPP_HOME': str(visitor), 'RAPP_LOCAL': str(visitor / 'local')}
+                    hub = subprocess.Popen([bundle / 'rapp-hub'], env=hub_env, stdin=subprocess.PIPE,
+                                           stdout=subprocess.PIPE, stderr=log, text=True)
+                    events = queue.Queue()
+                    def read_events():
+                        for line in hub.stdout:
+                            events.put(json.loads(line))
+                    threading.Thread(target=read_events, daemon=True).start()
+                    def ask(command):
+                        req = time.monotonic_ns()
+                        hub.stdin.write(json.dumps({**command, 'req': req}) + '\n')
+                        hub.stdin.flush()
+                        deadline = time.monotonic() + 15
+                        while True:
+                            event = events.get(timeout=max(.001, deadline - time.monotonic()))
+                            if event.get('req') == req:
+                                assert event['event'] != 'error', event
+                                return event
+                    try:
+                        host = status['id']
+                        ask({'cmd': 'add_host', 'id': f'{host}@127.0.0.1:{status["port"]}', 'password': 'test-only'})
+                        apps = ask({'cmd': 'apps', 'id': host})
+                        assert apps['capabilities']['applications'] is False, apps
+                        assert any(a['app'] == 'desktop:' and a['displays'] for a in apps['apps']), apps
+                        opened = ask({'cmd': 'open', 'id': host, 'app': 'desktop:', 'embed': True})
+                        with socket.create_connection(('127.0.0.1', opened['port']), timeout=10) as view:
+                            def string(value):
+                                value = value.encode()
+                                return struct.pack('<H', len(value)) + value
+                            hello = bytes([int(protocol[1])]) + string(opened['token']) + string('desktop:') + struct.pack('<BBf', 2, 5, 1.)
+                            view.sendall(bytes([1]) + struct.pack('<I', len(hello)) + hello)
+                            stream = view.makefile('rb')
+                            for _ in range(20):
+                                header = stream.read(5)
+                                assert len(header) == 5, 'desktop worker disconnected'
+                                kind, size = header[0], struct.unpack('<I', header[1:])[0]
+                                assert size <= 64 * 1024 * 1024
+                                payload = stream.read(size)
+                                assert len(payload) == size
+                                assert kind != 3, payload
+                                if kind == 4:
+                                    assert payload[21] & 7 == 7, 'first picture must be a full frame'
+                                    tiles = zlib.decompressobj().decompress(payload[22:])
+                                    assert struct.unpack('<H', tiles[:2])[0] > 0
+                                    break
+                            else:
+                                raise AssertionError('no desktop frame through the hub/service')
+                        print('PASS bundled hub -> service -> desktop capture over QUIC')
+                    finally:
+                        hub.stdin.close()
+                        try:
+                            hub.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            hub.kill()
+                            hub.wait(timeout=5)
                 cli('hosts')
                 cli('share', str(port), '--note', 'bundle smoke')
                 item = row()

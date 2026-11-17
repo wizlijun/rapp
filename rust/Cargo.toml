@@ -1,9 +1,9 @@
 [workspace]
 resolver = "2"
-members = ["wire", "conn", "relay", "net", "service", "hub", "hub-ffi", "testkit", "update", "term", "client-core", "client-gtk", "cli"]
+members = ["wire", "conn", "relay", "net", "service", "hub", "hub-ffi", "testkit", "update", "term", "client-core", "client-gtk", "cli", "host-linux"]
 
 [workspace.package]
-version = "0.13.10"
+version = "0.14.2"
 edition = "2021"
 publish = false
 

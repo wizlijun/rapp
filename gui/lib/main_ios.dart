@@ -89,19 +89,35 @@ Future<void> mainIos() async {
   BackgroundWatch(state: state, ios: iosChannel);
 
   // Out of fullscreen the status bar stays and MainWindow keeps the top bar below it and the stage off the home
-  // bar; in it the status bar goes and the picture fills the screen.
-  final fullscreen = IosFullscreen();
-  if (prefs.startFullscreen) {
-    try {
-      await fullscreen.setFullScreen(true);
-    } catch (e) {
-      _log('全屏: $e');
-    }
+  // bar; in it the status bar goes and the picture fills the screen. A folded Duo is never fullscreen; unfolding
+  // brings it back.
+  final fullscreen = FoldFullscreen(IosFullscreen());
+  try {
+    await fullscreen.start(want: prefs.startFullscreen, size: _windowSize());
+  } catch (e) {
+    _log('全屏: $e');
   }
+  WidgetsBinding.instance.addObserver(_WindowSize(() => unawaited(fullscreen.windowSize(_windowSize()))));
   runApp(_IosApp(
     state: state,
     home: MainWindow(state: state, monitor: null, control: null, fullscreen: fullscreen),
   ));
+}
+
+/// The app's window in logical points.
+Size _windowSize() {
+  final v = WidgetsBinding.instance.platformDispatcher.views.first;
+  return v.physicalSize / v.devicePixelRatio;
+}
+
+/// Calls [changed] when the window changes size: folding and unfolding the Duo, rotation, Split View.
+class _WindowSize with WidgetsBindingObserver {
+  _WindowSize(this.changed);
+
+  final VoidCallback changed;
+
+  @override
+  void didChangeMetrics() => changed();
 }
 
 /// China-region devices ask 无线数据 on the first request; until it is allowed nothing gets out. Shows

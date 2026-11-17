@@ -431,6 +431,7 @@ class MainState extends ChangeNotifier {
       _blur();
     }
     _focusNewTerm();
+    _raiseStagedSession();
     _syncPolicy();
     _syncDesktopTimer();
     // Every change of the current session or of detach state ends in a notify.
@@ -627,6 +628,25 @@ class MainState extends ChangeNotifier {
       if (w.id == rs.currentWindow) return w;
     }
     return null;
+  }
+
+  Object? _raisedStageSid;
+
+  /// Switching the local stage must also activate A's app. picture_focus only
+  /// routes B's keyboard; waiting for a click leaves wheel/trackpad input over
+  /// whichever app was previously on top. Do this as soon as its table arrives,
+  /// once per stage entry, not on every frame or focus-region update.
+  void _raiseStagedSession() {
+    final rs = currentRemote;
+    final w = rs == null ? null : _windowOf(rs);
+    if (overview || rs == null || rs.detached || !_liveSid(rs.sid) ||
+        isTermApp(rs.appId) || termPort?.owns(rs.sid) == true || w == null) {
+      _raisedStageSid = null;
+      return;
+    }
+    if (_raisedStageSid == rs.sid) return;
+    _raisedStageSid = rs.sid;
+    portOf(rs.sid)?.selectWindow(rs.sid, w.id);
   }
 
   /// A session that became current gets the stage size; its policy always knows the current window.
@@ -2017,7 +2037,8 @@ class MainState extends ChangeNotifier {
     if (!backgrounded) return;
     backgrounded = false;
     final h = hub;
-    h?.netSuspect();
+    // iOS took the hub's socket while the app was away: a new one, and every device asked again.
+    h?.netChanged();
     h?.pausePresence(false);
     bool closedByBackground(SessionRecord r) => r.phase == Phase.disconnected && r.reason == 'background';
     final cur = currentRecord;
@@ -2045,6 +2066,10 @@ class MainState extends ChangeNotifier {
     }
     notifyListeners();
   }
+
+  /// The network changed under the app (iOS `pathChanged`: Wi-Fi to another Wi-Fi, to cellular, back
+  /// after a loss): the hub starts over on a new socket.
+  void netChanged() => hub?.netChanged();
 
   /// The system is short of memory (iOS): frozen sessions off the stage let go of their pictures.
   /// The one on the stage keeps its last frame (spec §9.1).
@@ -2188,7 +2213,8 @@ class MainState extends ChangeNotifier {
       mode: prefs.termOpenFor(id),
       list: hub?.termLists[id] ?? TermList(id),
       apps: probes[id]?.apps?.apps ?? const [],
-      graphical: probes[id]?.apps?.capabilities?['graphical'] != false);
+      graphical: probes[id]?.apps?.capabilities?['graphical'] != false &&
+          probes[id]?.apps?.capabilities?['applications'] != false);
 
   /// The key of the session [m] opens; null for a 终端 entry that opens a new text terminal.
   String? _openedKey(Member m) {

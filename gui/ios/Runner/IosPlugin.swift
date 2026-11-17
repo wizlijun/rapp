@@ -162,13 +162,21 @@ final class IosPlugin: NSObject, FlutterPlugin {
     channel.invokeMethod("memoryWarning", arguments: nil)
   }
 
-  /// Tell Dart when the network stops being usable or changes interface, not on every path update.
+  /// Tell Dart when the network goes, comes back, or is a different one (Wi-Fi to cellular, one Wi-Fi to
+  /// another: a new gateway or interface), not on every path update. Each one makes the hub take a new socket.
   private func pathUpdated(_ path: NWPath) {
     defer { lastPath = path }
     guard let old = lastPath else { return }
     let lost = old.status == .satisfied && path.status != .satisfied
+    let regained = old.status != .satisfied && path.status == .satisfied
     let types: [NWInterface.InterfaceType] = [.wifi, .cellular, .wiredEthernet, .other]
     let changed = types.contains { old.usesInterfaceType($0) != path.usesInterfaceType($0) }
-    if lost || changed { channel.invokeMethod("pathChanged", arguments: nil) }
+    let moved = path.status == .satisfied && Self.place(old) != Self.place(path)
+    if lost || regained || changed || moved { channel.invokeMethod("pathChanged", arguments: nil) }
+  }
+
+  /// The interfaces in use and their gateways: what tells one Wi-Fi from the next.
+  private static func place(_ path: NWPath) -> [String] {
+    path.availableInterfaces.map { $0.name } + path.gateways.map { "\($0)" }
   }
 }

@@ -20,7 +20,9 @@ enum Permission {
 
 /// What a `{"screen_recording":…,"accessibility":…}` map lacks; nothing when there is no map.
 List<Permission> missingPermissions(Object? perms) =>
-    perms is Map ? [for (final p in Permission.values) if (perms[p.key] != true) p] : const [];
+    perms is Map && perms['platform'] != 'linux'
+        ? [for (final p in Permission.values) if (perms[p.key] != true) p]
+        : const [];
 
 /// What rapp-host's `missing permission: Screen Recording, Accessibility` names; null for other errors.
 List<Permission>? missingFromError(String error) {

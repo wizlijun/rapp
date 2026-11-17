@@ -26,6 +26,8 @@ class SecureTextField extends StatefulWidget {
     this.enabled,
     this.decoration = const InputDecoration(),
     this.onSubmitted,
+    this.onChanged,
+    this.onTap,
   });
 
   final TextEditingController? controller;
@@ -34,6 +36,9 @@ class SecureTextField extends StatefulWidget {
   final bool? enabled;
   final InputDecoration decoration;
   final ValueChanged<String>? onSubmitted;
+  final ValueChanged<String>? onChanged;
+  /// After the tap has placed the caret.
+  final GestureTapCallback? onTap;
 
   @override
   State<SecureTextField> createState() => _SecureTextFieldState();
@@ -94,5 +99,7 @@ class _SecureTextFieldState extends State<SecureTextField> {
     enableIMEPersonalizedLearning: false,
     decoration: widget.decoration,
     onSubmitted: widget.onSubmitted,
+    onChanged: widget.onChanged,
+    onTap: widget.onTap,
   );
 }

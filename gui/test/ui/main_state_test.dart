@@ -1227,6 +1227,14 @@ void main() {
         });
       });
 
+      test('a network change (iOS pathChanged) tells the hub', () {
+        env((a, t, port, st, hints) {
+          st.netChanged();
+          a.flushMicrotasks();
+          expect(t.sent.where((m) => m['cmd'] == 'net_changed').length, 1);
+        });
+      });
+
       test('a stalled picture asks the hub to probe the relay', () {
         env((a, t, port, st, hints) {
           port.emit(const StalledEvent(1, true));
@@ -2260,7 +2268,7 @@ void main() {
           List<String> opened() => [for (final m in sent()) if (m['cmd'] == 'open') m['app'] as String];
           expect(st.backgrounded, false);
           expect(sent().take(2), [
-            {'cmd': 'net_suspect'},
+            {'cmd': 'net_changed'},
             {'cmd': 'presence', 'paused': false},
           ]);
           expect(opened(), ['aa']);

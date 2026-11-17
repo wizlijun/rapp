@@ -199,6 +199,29 @@ void main() {
     expect(find.text('终端'), findsWidgets);
   });
 
+  testWidgets('Linux desktop host exposes desktop without Mac application controls', (tester) async {
+    capabilities = {'graphical': true, 'desktop': true, 'applications': false, 'terminal': true, 'ports': true};
+    appsPermissions = {'platform': 'linux', 'screen_recording': true, 'accessibility': true};
+    remoteApps = [{'app': 'desktop:', 'name': '桌面', 'displays': [
+      {'id': '71', 'name': 'eDP-1', 'main': true, 'width': 1280, 'height': 800},
+    ]}];
+    await pumpTab(tester);
+    await selectMini(tester);
+    expect(find.text('桌面'), findsOneWidget);
+    expect(find.byKey(const Key('bundle-id')), findsNothing);
+    expect(find.textContaining('屏幕录制'), findsNothing);
+  });
+
+  testWidgets('Linux backend failure explains the desktop requirement', (tester) async {
+    capabilities = {'graphical': true, 'desktop': true, 'applications': false};
+    appsPermissions = {'platform': 'linux', 'screen_recording': false, 'accessibility': false, 'error': 'no graphical desktop session is available'};
+    remoteApps = [];
+    await pumpTab(tester);
+    await selectMini(tester);
+    expect(find.text('no graphical desktop session is available'), findsOneWidget);
+    expect(find.textContaining('屏幕录制'), findsNothing);
+  });
+
   testWidgets('remote no-graphics capability makes a saved pixels choice open the existing text terminal', (tester) async {
     capabilities = {'graphical': false, 'terminal': true, 'ports': true};
     remoteApps = [];

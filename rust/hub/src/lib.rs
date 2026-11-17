@@ -373,6 +373,10 @@ impl Hub {
                 self.net_suspect();
                 return Ok(None);
             }
+            Some("net_changed") => {
+                self.net_changed();
+                return Ok(None);
+            }
             Some(c @ ("terms" | "open_term" | "rename_term")) => {
                 terms::command(self, c, v).await?
             }

@@ -10,6 +10,7 @@ void main() {
     // Hosts that do not report permissions (old, Windows, Omarchy) show nothing.
     expect(missingPermissions(null), isEmpty);
     expect(missingPermissions('x'), isEmpty);
+    expect(missingPermissions({'platform': 'linux', 'screen_recording': false, 'accessibility': false}), isEmpty);
   });
 
   test('missing permissions from an open error', () {
