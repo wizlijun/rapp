@@ -2924,6 +2924,12 @@ class MainState extends ChangeNotifier {
     _save();
   }
 
+  /// The side panel's 全局设置 folded or open: saved.
+  void setSettingsFolded(bool v) {
+    prefs.settingsFolded = v;
+    _save();
+  }
+
   /// 「记下写作面板发出去的话」: saved.
   void setInputHistory(bool v) {
     prefs.inputHistory = v;

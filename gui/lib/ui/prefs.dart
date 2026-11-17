@@ -25,6 +25,7 @@ class UiPrefs {
     this.keepAwake = true,
     this.first = FirstLayer.device,
     this.composerZoom = 0,
+    this.settingsFolded = false,
     Map<String, String>? termOpen,
     Map<String, String>? termApp,
   })  : appKeyRow = appKeyRow ?? Platform.isIOS,
@@ -56,6 +57,9 @@ class UiPrefs {
 
   /// 输入板缩放档 (`composer_zoom`): 0 is the default size, up to [composerZoomMax]. Missing or bad means 0.
   int composerZoom;
+
+  /// 全局设置折起 (`settings_folded`): the side panel's settings are folded away. Missing or bad means open.
+  bool settingsFolded;
 
   /// 排列 (`first`): the layer shown first. Missing or unknown means devices.
   FirstLayer first;
@@ -90,6 +94,7 @@ class UiPrefs {
       final ka = j['keep_awake'];
       final fl = j['first'];
       final cz = j['composer_zoom'];
+      final sf = j['settings_folded'];
       final to = j['term_open'];
       final ta = j['term_app'];
       return UiPrefs(
@@ -105,6 +110,7 @@ class UiPrefs {
         termFit: tf is bool ? tf : true,
         keepAwake: ka is bool ? ka : true,
         composerZoom: cz is int ? cz.clamp(0, composerZoomMax) : 0,
+        settingsFolded: sf is bool ? sf : false,
         first: FirstLayer.values.firstWhere(
           (v) => v.name == fl,
           orElse: () => FirstLayer.device,
@@ -140,6 +146,7 @@ class UiPrefs {
         'keep_awake': keepAwake,
         'first': first.name,
         'composer_zoom': composerZoom,
+        'settings_folded': settingsFolded,
         'term_open': termOpen,
         'term_app': termApp,
       }),

@@ -12,9 +12,10 @@ import 'inline_edit.dart';
 import 'lamp.dart';
 import 'lifecycle.dart';
 import 'main_state.dart';
+import 'rule_snack.dart';
 import 'session_model.dart';
-import 'shares_section.dart';
 import 'tab_chip.dart';
+import 'shares_section.dart';
 import 'terms_entry.dart';
 import 'tokens.dart';
 
@@ -49,6 +50,9 @@ class DevicesTab extends StatefulWidget {
 class _DevicesTabState extends State<DevicesTab> {
   final _bundle = TextEditingController();
   final _requested = <String>{};
+
+  /// The ＋ is open: the add form shows right under the top row.
+  bool _adding = false;
 
   /// Per device: the shell button being opened, and the words of the last refused open.
   final _shellBusy = <String, String>{};
@@ -100,38 +104,36 @@ class _DevicesTabState extends State<DevicesTab> {
             }
           });
         }
-        // Three fixed slots: the form's State must survive tab switches.
+        // Fixed, keyed slots: the add form's State (typed text, its error) must survive device switches.
         return ListView(
           padding: const EdgeInsets.all(10),
           children: [
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  // The dot is hidden from screen readers; the name says it instead.
-                  Semantics(
-                    container: true,
-                    button: true,
-                    selected: !known,
-                    label: widget.localBadge ? '本机，有新版本' : '本机',
-                    excludeSemantics: true,
-                    onTap: () => _select(null),
-                    child: TabChip(
-                      key: const Key('device-local'),
-                      label: '本机',
-                      selected: !known,
-                      leading: widget.localBadge ? const _UpdateDot() : null,
-                      onTap: () => _select(null),
-                    ),
+            _topRow(context, hosts, known ? sel : null),
+            if (_adding && state.hub != null)
+              Padding(
+                key: const ValueKey('add-slot'),
+                padding: const EdgeInsets.only(top: 10),
+                child: Container(
+                  key: const Key('add-device-box'),
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(RappTokens.of(context).r),
+                    border: Border.all(color: RappTokens.of(context).line),
                   ),
-                  for (final h in hosts) ...[
-                    const SizedBox(width: 6),
-                    _deviceChip(h.id, h.id == sel),
-                  ],
-                ],
+                  child: AddDeviceForm(
+                    hub: state.hub!,
+                    enabled: state.hubUsable,
+                    relaySet: state.relaySet,
+                    onAdded: (id) {
+                      setState(() => _adding = false);
+                      state.selectDevice(id);
+                      state.probe(id);
+                    },
+                  ),
+                ),
               ),
-            ),
             Column(
+              key: const ValueKey('device-body'),
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const SizedBox(height: 10),
@@ -139,33 +141,137 @@ class _DevicesTabState extends State<DevicesTab> {
                 const SizedBox(height: 16),
               ],
             ),
-            if (state.hub != null)
-              AddDeviceForm(
-                hub: state.hub!,
-                enabled: state.hubUsable,
-                relaySet: state.relaySet,
-                onAdded: (id) {
-                  state.selectDevice(id);
-                  state.probe(id);
-                },
-              ),
           ],
         );
       },
     );
   }
 
-  Widget _deviceChip(String id, bool selected) {
+  /// The device's name and its probe word, as the picker and its menu show it.
+  String _label(String id) {
     final p = state.probes[id];
-    final lamp = p?.lamp ?? Lamp.connecting;
     final name = state.deviceName(id);
-    return TabChip(
-      key: Key('device-$id'),
-      label: p == null ? name : '$name，${p.word}',
-      selected: selected,
-      leading: StatusLamp(lamp),
-      onTap: () => _select(id),
+    return p == null ? name : '$name，${p.word}';
+  }
+
+  /// 本机 first and on its own, then one picker for every other device (any number of them stays reachable, where
+  /// a row of chips ran off the panel's side), then the ＋ that opens the add form right under this row.
+  Widget _topRow(BuildContext context, List<HubHost> hosts, String? sel) {
+    final t = RappTokens.of(context);
+    final radius = BorderRadius.circular(t.r);
+    final label = sel == null ? (hosts.isEmpty ? '还没有其他设备' : '其他设备') : _label(sel);
+    final picker = Semantics(
+      container: true,
+      button: true,
+      label: '其他设备：$label',
+      excludeSemantics: true,
+      onTap: hosts.isEmpty ? null : () => _openPicker(context, hosts, sel),
+      child: Material(
+        type: MaterialType.transparency,
+        child: Builder(
+          builder: (btn) => InkWell(
+            key: const Key('device-picker'),
+            onTap: hosts.isEmpty ? null : () => _openPicker(btn, hosts, sel),
+            borderRadius: radius,
+            child: Container(
+              constraints: const BoxConstraints(minHeight: 48),
+              padding: const EdgeInsets.only(left: 12, right: 6),
+              decoration: sel == null
+                  ? BoxDecoration(borderRadius: radius, border: Border.all(color: t.line))
+                  : t.raiseBox(border: t.text),
+              child: Row(children: [
+                if (sel != null) ...[StatusLamp(_lamp(sel)), const SizedBox(width: 8)],
+                Expanded(
+                  child: Text(label,
+                      key: const Key('device-picker-label'),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: sel == null ? t.muted : t.text, fontWeight: sel == null ? null : FontWeight.w600)),
+                ),
+                if (hosts.isNotEmpty) ...[
+                  const SizedBox(width: 6),
+                  Text('${hosts.length} 台', style: TextStyle(color: t.muted)),
+                  Icon(Icons.arrow_drop_down, size: 20, color: t.muted),
+                ],
+              ]),
+            ),
+          ),
+        ),
+      ),
     );
+    return Row(children: [
+      // The dot is hidden from screen readers; the name says it instead.
+      Semantics(
+        container: true,
+        button: true,
+        selected: sel == null,
+        label: widget.localBadge ? '本机，有新版本' : '本机',
+        excludeSemantics: true,
+        onTap: () => _select(null),
+        child: TabChip(
+          key: const Key('device-local'),
+          label: '本机',
+          selected: sel == null,
+          leading: widget.localBadge ? const _UpdateDot() : null,
+          onTap: () => _select(null),
+        ),
+      ),
+      const SizedBox(width: 6),
+      Expanded(child: picker),
+      if (state.hub != null) ...[
+        const SizedBox(width: 6),
+        _adding
+            ? RappButton.secondary(
+                key: const Key('add-device-toggle'),
+                label: '收起添加设备',
+                semanticLabel: '收起添加设备',
+                icon: Icons.close,
+                onPressed: () => setState(() => _adding = false),
+              )
+            : RappButton.primary(
+                key: const Key('add-device-toggle'),
+                label: '添加设备',
+                semanticLabel: '添加设备',
+                icon: Icons.add,
+                onPressed: () => setState(() => _adding = true),
+              ),
+      ],
+    ]);
+  }
+
+  Lamp _lamp(String id) => state.probes[id]?.lamp ?? Lamp.connecting;
+
+  /// The menu under the picker: every other device with its lamp and word; it scrolls when long. Picking the one
+  /// already shown probes it again, as tapping its chip did.
+  Future<void> _openPicker(BuildContext context, List<HubHost> hosts, String? sel) async {
+    final box = context.findRenderObject() as RenderBox;
+    final at = box.localToGlobal(Offset(0, box.size.height));
+    PopupMenuItem<String> row(String key, String value, Widget lead, String name) =>
+        PopupMenuItem<String>(
+          key: Key(key),
+          value: value,
+          child: Row(children: [
+            lead,
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontWeight: value == sel ? FontWeight.w700 : null)),
+            ),
+          ]),
+        );
+    final pick = await showMenu<String>(
+      context: context,
+      position: menuAt(context, at),
+      constraints: BoxConstraints(minWidth: box.size.width, maxWidth: box.size.width),
+      items: [
+        for (final h in hosts) row('device-${h.id}', h.id, StatusLamp(_lamp(h.id)), _label(h.id)),
+      ],
+    );
+    if (!mounted || pick == null) return;
+    _select(pick);
   }
 
   SessionEntry? _session(String id, String app) {

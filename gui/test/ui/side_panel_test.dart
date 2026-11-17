@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:rapp/paths.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -121,7 +122,7 @@ void main() {
   testWidgets('the dropdown shows 设备在前 by default and switches the tab order', (tester) async {
     await tester.pumpWidget(wrap(panel(), disableAnimations: true));
     expect(find.descendant(of: find.byKey(const Key('first-dropdown')), matching: find.text('设备在前')), findsOneWidget);
-    expect(tester.getSize(find.byKey(const Key('first-dropdown'))).height, greaterThanOrEqualTo(48));
+    expect(tester.getSize(find.ancestor(of: find.byKey(const Key('first-dropdown')), matching: find.byType(Container)).first).height, 34);
     double x(String k) => tester.getTopLeft(find.byKey(Key(k))).dx;
     expect(x('tab-devices'), lessThan(x('tab-projects')));
     await tester.tap(find.byKey(const Key('first-dropdown')));
@@ -144,8 +145,8 @@ void main() {
 
   testWidgets('theme dropdown lists the three films in order', (tester) async {
     await tester.pumpWidget(wrap(panel(), disableAnimations: true));
-    expect(tester.getSize(find.byKey(const Key('theme-dropdown'))).height,
-        greaterThanOrEqualTo(48));
+    expect(tester.getSize(find.ancestor(of: find.byKey(const Key('theme-dropdown')), matching: find.byType(Container)).first).height,
+        34);
     await tester.tap(find.byKey(const Key('theme-dropdown')));
     await tester.pumpAndSettle();
     final labels = [for (final th in themeOrder) themeLabel(th)];
@@ -158,7 +159,7 @@ void main() {
     expect(ys.toSet().length, 3);
   });
 
-  testWidgets('footer controls share the text size and a 48px row height', (tester) async {
+  testWidgets('全局设置 sits a step under the text size, on 34px rows', (tester) async {
     await tester.pumpWidget(MaterialApp(
       theme: themeDataFor(RappTheme.matrix, textSize: 13),
       home: Scaffold(body: Center(child: panel())),
@@ -166,11 +167,29 @@ void main() {
     // A dropdown's own style used to replace the theme's: its label fell back to 14 and no font.
     for (final label in ['MATRIX', '设备在前', '启动时全屏', '网络差时自动省流量']) {
       final style = tester.widget<RichText>(find.descendant(of: find.text(label), matching: find.byType(RichText))).text.style!;
-      expect((style.fontSize, style.fontFamily), (13.0, 'JetBrains Mono'), reason: label);
+      expect((style.fontSize, style.fontFamily), (12.0, 'JetBrains Mono'), reason: label);
     }
-    for (final key in ['theme-dropdown', 'first-dropdown', 'start-fullscreen', 'auto-save-traffic']) {
+    for (final key in ['theme-dropdown', 'first-dropdown']) {
+      final box = find.ancestor(of: find.byKey(Key(key)), matching: find.byType(Container)).first;
+      expect(tester.getSize(box).height, 34, reason: key);
+    }
+    for (final key in ['start-fullscreen', 'auto-save-traffic', 'settings-fold']) {
+      expect(tester.getSize(find.byKey(Key(key))).height, 34, reason: key);
+    }
+    // The switch is scaled into a 38×24 box: measure the box, not the unscaled switch inside it.
+    expect(tester.getSize(find.ancestor(of: find.byType(Switch).first, matching: find.byType(SizedBox)).first), const Size(38, 24));
+  });
+
+  testWidgets('on the iPad 全局设置 keeps 48px touch rows', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    await tester.pumpWidget(wrap(panel()));
+    for (final key in ['start-fullscreen', 'auto-save-traffic', 'settings-fold']) {
       expect(tester.getSize(find.byKey(Key(key))).height, 48, reason: key);
     }
+    final box = find.ancestor(of: find.byKey(const Key('theme-dropdown')), matching: find.byType(Container)).first;
+    expect(tester.getSize(box).height, 48);
+    debugDefaultTargetPlatformOverride = null;
   });
 
   testWidgets('picking WESTWORLD changes prefs.theme', (tester) async {
@@ -350,7 +369,7 @@ void main() {
     expect(s.panel, isNull);
   });
 
-  testWidgets('projects tab is 720 wide on a big window', (tester) async {
+  testWidgets('projects tab is half the window wide', (tester) async {
     tester.view.physicalSize = const Size(1194, 834);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -359,11 +378,11 @@ void main() {
     await tester.pumpWidget(wrap(Stack(children: [
       Positioned(left: 0, top: 0, bottom: 0, child: panel()),
     ])));
-    expect(tester.getSize(find.byType(SidePanel)).width, 720);
+    expect(tester.getSize(find.byType(SidePanel)).width, 597);
     expect(find.byType(ProjectsTab), findsOneWidget);
   });
 
-  testWidgets('resources tab is the fourth tab and 720 wide', (tester) async {
+  testWidgets('resources tab is the fourth tab and as wide as the sessions', (tester) async {
     tester.view.physicalSize = const Size(1194, 834);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
@@ -372,11 +391,11 @@ void main() {
     await tester.pumpWidget(wrap(Stack(children: [
       Positioned(left: 0, top: 0, bottom: 0, child: panel()),
     ])));
-    expect(tester.getSize(find.byType(SidePanel)).width, 330);
+    expect(tester.getSize(find.byType(SidePanel)).width, 597);
     await tester.tap(find.byKey(const Key('tab-resources')));
     await tester.pump();
     expect(s.panel, PanelTab.resources);
-    expect(tester.getSize(find.byType(SidePanel)).width, 720);
+    expect(tester.getSize(find.byType(SidePanel)).width, 597);
     expect(find.byType(ResourcesTab), findsOneWidget);
   });
 
@@ -392,14 +411,43 @@ void main() {
     expect(tester.getSize(find.byType(SidePanel)).width, lessThanOrEqualTo(400));
   });
 
-  testWidgets('sessions panel is 330 wide on a big window', (tester) async {
+  testWidgets('every tab is half the window wide', (tester) async {
     tester.view.physicalSize = const Size(1200, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     s.togglePanel();
     await tester.pumpWidget(wrap(panel()));
-    expect(tester.getSize(find.byType(SidePanel)).width, 330);
+    for (final k in ['sessions', 'devices', 'projects', 'resources']) {
+      await tester.tap(find.byKey(Key('tab-$k')));
+      await tester.pump();
+      expect(tester.getSize(find.byType(SidePanel)).width, 600, reason: k);
+    }
+  });
+
+  testWidgets('全局设置 folds away, keeps the legend and totals, and the fold is saved', (tester) async {
+    await tester.pumpWidget(wrap(panel()));
+    expect(find.byKey(const Key('theme-dropdown')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('settings-fold')));
+    await tester.pump();
+    for (final k in ['theme-dropdown', 'first-dropdown', 'start-fullscreen', 'auto-save-traffic', 'input-history']) {
+      expect(find.byKey(Key(k)), findsNothing, reason: k);
+    }
+    expect(find.byKey(const Key('legend')), findsOneWidget);
+    expect(find.byKey(const Key('total-sessions')), findsOneWidget);
+    expect(s.prefs.settingsFolded, isTrue);
+    expect(UiPrefs.load('${tmp.path}/devices/dev1').settingsFolded, isTrue);
+    await tester.tap(find.byKey(const Key('settings-fold')));
+    await tester.pump();
+    expect(find.byKey(const Key('theme-dropdown')), findsOneWidget);
+    expect(UiPrefs.load('${tmp.path}/devices/dev1').settingsFolded, isFalse);
+  });
+
+  testWidgets('a saved fold opens folded', (tester) async {
+    s.prefs.settingsFolded = true;
+    await tester.pumpWidget(wrap(panel()));
+    expect(find.byKey(const Key('settings-fold')), findsOneWidget);
+    expect(find.byKey(const Key('theme-dropdown')), findsNothing);
   });
 
   testWidgets('a session in two projects shows in both groups', (tester) async {
@@ -659,10 +707,8 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  test('panelWidth: the design width, the window less 56; a 720 tab fills a window under 760 (iPad spec §7.2)', () {
-    expect(panelWidth(720, 1194), 720);
-    expect(panelWidth(720, 744), 744);
-    expect(panelWidth(330, 360), 304);
-    expect(panelWidth(330, 1194), 330);
+  test('panelWidth: half the window', () {
+    expect(panelWidth(1194), 597);
+    expect(panelWidth(744), 372);
   });
 }

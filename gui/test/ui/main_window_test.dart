@@ -416,7 +416,7 @@ void main() {
     }
   });
 
-  testWidgets('every tappable control is at least 48 tall', (tester) async {
+  testWidgets('every tappable control is at least 48 tall (全局设置 and its fold are compact with a pointer)', (tester) async {
     await pump(tester);
     t.emit({'event': 'opened', 'sid': 7, 'id': '111', 'app': 'com.apple.Safari', 'path': 'lan'});
     await settle(tester);
@@ -430,6 +430,10 @@ void main() {
       for (final e in finder.evaluate()) {
         final h = tester.getSize(find.byElementPredicate((x) => x == e)).height;
         if (e.widget is Switch) continue;
+        if (e.widget.key == const Key('settings-fold') ||
+            find.ancestor(of: find.byElementPredicate((x) => x == e), matching: find.byKey(const Key('global-settings'))).evaluate().isNotEmpty) {
+          continue;
+        }
         if (h < 48) {
           final a = <String>[];
           e.visitAncestorElements((x) {
@@ -439,7 +443,7 @@ void main() {
           fail('${e.widget.runtimeType} ${e.widget.key} h=$h in $tab: $a');
         }
       }
-      expect(tester.getSize(find.byKey(const Key('start-fullscreen'))).height, greaterThanOrEqualTo(48));
+      expect(tester.getSize(find.byKey(const Key('start-fullscreen'))).height, 34);
       if (tab == PanelTab.sessions) expect(find.byKey(const Key('session-111/com.apple.Safari')), findsOneWidget);
     }
   });

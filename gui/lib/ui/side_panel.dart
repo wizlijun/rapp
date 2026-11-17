@@ -28,15 +28,23 @@ String _tabLabel(PanelTab t) => switch (t) {
       PanelTab.resources => '资源',
     };
 
-/// The panel's width for its [design] width in a [window] this wide (iPad spec §7.2): a wide (720) panel takes
-/// the whole of a window under 760; otherwise it leaves at least 56 of the stage showing beside it.
-double panelWidth(double design, double window) =>
-    window < 760 && design == 720 ? window : math.min(design, window - 56);
+/// The panel's width in a [window] this wide: half of it, the same for every tab.
+double panelWidth(double window) => window / 2;
+
+/// 全局设置's rows (the dropdowns, the switch rows and the fold header): compact 34 with a pointer, the 48 touch
+/// target on the iPad.
+double settingsRowHeight(TargetPlatform p) => p == TargetPlatform.iOS ? 48 : 34;
+
+/// 全局设置's text size: one step under the panel's [text] size.
+double settingsTextSize(double text) => math.max(11, text - 1);
 
 class SidePanel extends StatelessWidget {
-  const SidePanel({super.key, required this.state, required this.devicesTab});
+  const SidePanel({super.key, required this.state, required this.devicesTab, this.settings});
   final MainState state;
   final Widget devicesTab;
+
+  /// More of 全局设置 under its switches (版本升级, 数据目录); folds with them.
+  final Widget? settings;
 
   @override
   Widget build(BuildContext context) {
@@ -53,8 +61,7 @@ class SidePanel extends StatelessWidget {
         // Keep the Mac layout at the default size, but reserve enough logical
         // width for the actual font metrics/text scale on every desktop.
         final navigationWidth = 4 * tabWidth + 3 * 6 + 48 + 22;
-        final design = devices || projects || resources ? 720.0 : 330.0;
-        final width = math.min(math.max(panelWidth(design, mq.width), navigationWidth), mq.width);
+        final width = math.min(math.max(panelWidth(mq.width), navigationWidth), mq.width);
         return Container(
           width: width,
           decoration: BoxDecoration(
@@ -134,7 +141,7 @@ class SidePanel extends StatelessWidget {
                   ),
                   ConstrainedBox(
                     constraints: BoxConstraints(maxHeight: footerHeight),
-                    child: SingleChildScrollView(child: _Footer(state: state)),
+                    child: SingleChildScrollView(child: _Footer(state: state, settings: settings)),
                   ),
                 ],
                 );
@@ -184,15 +191,78 @@ class SidePanel extends StatelessWidget {
 }
 
 class _Footer extends StatelessWidget {
-  const _Footer({required this.state});
+  const _Footer({required this.state, this.settings});
   final MainState state;
+  final Widget? settings;
 
   @override
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
-    // A dropdown's style replaces the theme's text style instead of merging into it: a colour-only
-    // style left the menus at Flutter's default size and font, bigger than everything around them.
-    final body = Theme.of(context).textTheme.bodyMedium!.copyWith(color: t.text);
+    // 全局设置 is secondary: a step smaller than the panel's text, on 34px rows. A dropdown's style replaces the
+    // theme's text style instead of merging into it, so the size and font are given in full.
+    final small = Theme.of(context).textTheme.bodyMedium!.copyWith(
+          color: t.text, fontSize: settingsTextSize(t.textSize), height: 1.3);
+    final folded = state.prefs.settingsFolded;
+    final rowHeight = settingsRowHeight(Theme.of(context).platform);
+    Widget box<T>(Key key, T value, List<(T, String)> items, void Function(T) onChanged) => Container(
+          height: rowHeight,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(t.r),
+            border: Border.all(color: t.line),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<T>(
+              key: key,
+              value: value,
+              isExpanded: true,
+              isDense: true,
+              iconSize: 18,
+              dropdownColor: t.bg,
+              iconEnabledColor: t.muted,
+              style: small,
+              items: [for (final (v, label) in items) DropdownMenuItem(value: v, child: Text(label))],
+              onChanged: (v) {
+                if (v != null) onChanged(v);
+              },
+            ),
+          ),
+        );
+    Widget toggle(Key key, String label, bool value, void Function(bool) onChanged, {String? note}) => InkWell(
+          key: key,
+          borderRadius: BorderRadius.circular(t.r),
+          onTap: () => onChanged(!value),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: rowHeight),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Row(children: [
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(label, style: small),
+                      if (note != null) Text(note, style: small.copyWith(color: t.muted)),
+                    ],
+                  ),
+                ),
+                // Material's switch is 52×32; at 0.7 it sits in the row like the dropdown arrows.
+                SizedBox(
+                  width: 38,
+                  height: 24,
+                  child: FittedBox(
+                    child: Switch(
+                      value: value,
+                      onChanged: onChanged,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  ),
+                ),
+              ]),
+            ),
+          ),
+        );
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
@@ -201,80 +271,35 @@ class _Footer extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(t.r),
-              border: Border.all(color: t.line),
-            ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<RappTheme>(
-                key: const Key('theme-dropdown'),
-                value: state.prefs.theme,
-                isExpanded: true,
-                itemHeight: 48,
-                dropdownColor: t.bg,
-                iconEnabledColor: t.text,
-                style: body,
-                items: [
-                  for (final th in themeOrder)
-                    DropdownMenuItem(value: th, child: Text(themeLabel(th))),
-                ],
-                onChanged: (v) {
-                  if (v != null) state.setTheme(v);
-                },
-              ),
+          // 全局设置 folds away; the legend and the totals below always show.
+          InkWell(
+            key: const Key('settings-fold'),
+            borderRadius: BorderRadius.circular(t.r),
+            onTap: () => state.setSettingsFolded(!folded),
+            child: SizedBox(
+              height: rowHeight,
+              child: Row(children: [
+                Icon(folded ? Icons.chevron_right : Icons.expand_more, color: t.muted, size: 18),
+                const SizedBox(width: 4),
+                Text('全局设置', style: small.copyWith(color: t.muted)),
+              ]),
             ),
           ),
-          const SizedBox(height: 6),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(t.r),
-              border: Border.all(color: t.line),
-            ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<FirstLayer>(
-                key: const Key('first-dropdown'),
-                value: state.prefs.first,
-                isExpanded: true,
-                itemHeight: 48,
-                dropdownColor: t.bg,
-                iconEnabledColor: t.text,
-                style: body,
-                items: const [
-                  DropdownMenuItem(value: FirstLayer.device, child: Text('设备在前')),
-                  DropdownMenuItem(value: FirstLayer.project, child: Text('项目在前')),
-                ],
-                onChanged: (v) {
-                  if (v != null) state.setFirst(v);
-                },
-              ),
-            ),
-          ),
-          const SizedBox(height: 6),
-          SwitchListTile(
-            key: const Key('start-fullscreen'),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-            title: Text('启动时全屏', style: TextStyle(color: t.text)),
-            value: state.prefs.startFullscreen,
-            onChanged: state.setStartFullscreen,
-          ),
-          SwitchListTile(
-            key: const Key('auto-save-traffic'),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-            title: Text('网络差时自动省流量', style: TextStyle(color: t.text)),
-            value: state.prefs.autoSaveTraffic,
-            onChanged: state.setAutoSaveTraffic,
-          ),
-          SwitchListTile(
-            key: const Key('input-history'),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-            title: Text('记下写作面板发出去的话', style: TextStyle(color: t.text)),
-            subtitle: Text('存在数据目录的 inputs/ 里，会随 git 同步', style: TextStyle(color: t.muted)),
-            value: state.prefs.inputHistory,
-            onChanged: state.setInputHistory,
-          ),
+          if (!folded) Column(key: const Key('global-settings'), crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            const SizedBox(height: 4),
+            box(const Key('theme-dropdown'), state.prefs.theme, [for (final th in themeOrder) (th, themeLabel(th))],
+                state.setTheme),
+            const SizedBox(height: 6),
+            box(const Key('first-dropdown'), state.prefs.first,
+                const [(FirstLayer.device, '设备在前'), (FirstLayer.project, '项目在前')], state.setFirst),
+            const SizedBox(height: 4),
+            toggle(const Key('start-fullscreen'), '启动时全屏', state.prefs.startFullscreen, state.setStartFullscreen),
+            toggle(const Key('auto-save-traffic'), '网络差时自动省流量', state.prefs.autoSaveTraffic,
+                state.setAutoSaveTraffic),
+            toggle(const Key('input-history'), '记下写作面板发出去的话', state.prefs.inputHistory, state.setInputHistory,
+                note: '存在数据目录的 inputs/ 里，会随 git 同步'),
+            if (settings != null) ...[const SizedBox(height: 8), settings!],
+          ]),
           const SizedBox(height: 6),
           // The legend explains shapes; motion is kept for things that need
           // you (design language §1), so its lamps stand still.

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:rapp/paths.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/pages/global_sections.dart';
 import 'package:rapp/pages/local_section.dart';
 import 'package:rapp/pages/permissions_panel.dart';
 import 'package:rapp/permissions.dart';
@@ -150,13 +151,20 @@ void main() {
         m.dispose();
         await tester.runAsync(svc.stop);
       });
+      // 本机 and, as in the side panel's 全局设置, 版本升级 and 数据目录 beside it.
       await tester.pumpWidget(wrap(SingleChildScrollView(
-        child: LocalSection(
+        child: Column(children: [
+        LocalSection(
           platform: TargetPlatform.macOS,
           monitor: m,
           control: null,
           data: DataDir(tmp.path),
           openSettings: (p) async => opened.add(p),
+        ),
+        GlobalSections(
+          platform: TargetPlatform.macOS,
+          monitor: m,
+          data: DataDir(tmp.path),
           hooks: useHooks
               ? hooks ??
                   UpdateHooks(
@@ -168,6 +176,7 @@ void main() {
                   )
               : null,
         ),
+        ]),
       )));
       await tester.pump();
     }
@@ -187,13 +196,23 @@ void main() {
 
     const ready = {'current': '0.4.1', 'state': 'ready', 'latest': '0.5.0', 'auto_update': true};
 
-    testWidgets('the update section sits under the permissions', (tester) async {
+    testWidgets('the update section is in 全局设置, not on 本机', (tester) async {
       svc = FakeService('tok')..update = {'current': '0.4.1', 'state': 'up_to_date', 'latest': '0.4.1'};
       await pump(tester);
       expect(find.text('版本与升级'), findsOneWidget);
       expect(find.text('当前 0.4.1 · 已是最新'), findsOneWidget);
-      expect(tester.getTopLeft(find.text('版本与升级')).dy,
-          greaterThan(tester.getTopLeft(find.text(Permission.accessibility.purpose)).dy));
+      expect(find.descendant(of: find.byType(LocalSection), matching: find.text('版本与升级')), findsNothing);
+      expect(find.descendant(of: find.byType(GlobalSections), matching: find.text('版本与升级')), findsOneWidget);
+    });
+
+    testWidgets('本机 opens with the service state and 启动 停止 重启', (tester) async {
+      svc = FakeService('tok');
+      await pump(tester);
+      final service = tester.getTopLeft(find.text('服务')).dy;
+      expect(service, lessThan(tester.getTopLeft(find.text('ID')).dy));
+      for (final b in ['启动', '停止', '重启']) {
+        expect(tester.getTopLeft(find.text(b)).dy, lessThan(tester.getTopLeft(find.text('ID')).dy), reason: b);
+      }
     });
 
     testWidgets('an older service without update shows no update section', (tester) async {

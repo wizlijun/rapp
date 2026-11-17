@@ -10,6 +10,7 @@ import '../pages/access_log_section.dart';
 import '../data_relocate.dart';
 import '../pages/app_profiles_section.dart';
 import '../pages/ios_local_section.dart';
+import '../pages/global_sections.dart';
 import '../pages/local_section.dart';
 import '../hub_client.dart';
 import '../ios_channel.dart';
@@ -175,8 +176,6 @@ class _MainWindowState extends State<MainWindow> {
           monitor: m,
           control: widget.control,
           data: widget.state.data,
-          relocate: widget.relocator,
-          hooks: widget.hooks,
         ),
       ),
       if (caps.showsPorts)
@@ -195,6 +194,7 @@ class _MainWindowState extends State<MainWindow> {
           logDir: m.status?.logDir,
           openFolder: _openFolder,
           reload: m,
+          limit: 5,
         ),
       ),
     ]);
@@ -218,6 +218,7 @@ class _MainWindowState extends State<MainWindow> {
         load: () async => const <Map<String, dynamic>>[],
         logDir: '${state.data.root}/logs',
         openFolder: _openFolder,
+        limit: 5,
       ),
     ]);
   }
@@ -320,6 +321,18 @@ class _MainWindowState extends State<MainWindow> {
                               state: state,
                               child: SidePanel(
                                 state: state,
+                                // 版本升级 and 数据目录 sit in 全局设置, not on 本机 (no service on iOS: neither).
+                                settings: !caps.hasService || widget.monitor == null
+                                    ? null
+                                    : ListenableBuilder(
+                                        listenable: state,
+                                        builder: (context, _) => GlobalSections(
+                                          monitor: widget.monitor!,
+                                          data: state.data,
+                                          relocate: widget.relocator,
+                                          hooks: widget.hooks,
+                                        ),
+                                      ),
                                 // The shell never pops anything up for an update: just the dot (K27).
                                 devicesTab: ListenableBuilder(
                                   listenable: widget.monitor ?? Listenable.merge(const []),
