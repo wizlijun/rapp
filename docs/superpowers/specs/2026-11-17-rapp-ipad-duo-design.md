@@ -163,7 +163,7 @@ rapp 的定位是"更多 Agent，一个 Pad"。现在控制端只有 macOS 和 O
 - `Opts`：`home` 是 §6.5 的本机目录；`bin_dir` 为空；`presence_every` 同桌面。
 - iOS 上不带 `embed` 的 `open`（要拉起 `rapp-client`）直接回错误；界面本来就只发带 `embed` 的。
 - **编译**：hub 连同 `rapp-term`、`portable-pty` 在两个 iOS 目标上原样编过（P0），不需要分 feature。
-- **子进程**：编得过不等于能用。hub 里起子进程的地方在 iOS 上都会失败：`rapp_net::config::hostname()` 调 `hostname` 命令，失败退回 `"rapp"`（所以 A 上这台设备叫"rapp"，见 §6.2）；`datadir.rs` 调 `git`（iPad 上不做 git，§6.5）；不带 `embed` 的 `open`（见上）。
+- **子进程**：编得过不等于能用。hub 里起子进程的地方在 iOS 上都会失败：`rapp_net::config::hostname()` 调 `hostname` 命令，失败退回 `"rapp"`（所以 A 上这台设备叫"rapp"，见 §6.2）；不带 `embed` 的 `open`（见上）。
 - 嵌入会话仍然是 hub 在 `127.0.0.1` 上开端口、`RappSession` 用 `NWConnection` 连过去。同一个进程里走回环是允许的，不需要"本地网络"权限。
 
 ### 6.2 接入设置和身份
