@@ -76,7 +76,7 @@ void main() {
     expect(trafficRow(0, '本机网络弱'), '流量 0 KB/s · 本机网络弱');
   });
 
-  testWidgets('four bars in a 16×16 square, the tallest the full height', (tester) async {
+  testWidgets('four bars in a 13×13 square, the tallest the full height', (tester) async {
     await tester.pumpWidget(wrap(const LevelBars(50000)));
     expect(tester.getSize(find.byType(LevelBars)), const Size.square(LevelBars.size));
     final box = tester.getRect(find.byType(LevelBars));

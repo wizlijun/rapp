@@ -43,7 +43,7 @@ void main() {
     expect(find.byTooltip(netTooltip(n)), findsOneWidget);
   });
 
-  testWidgets('the fan fills its 18×18 canvas in the icon colour, lit by level', (tester) async {
+  testWidgets('the fan fills its 20×20 canvas in the icon colour, lit by level', (tester) async {
     for (final l in NetLevel.values) {
       await tester.pumpWidget(wrap(IconTheme(
         data: const IconThemeData(color: Color(0xFF7DFF9E)),
