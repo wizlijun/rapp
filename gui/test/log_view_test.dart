@@ -43,7 +43,7 @@ void main() {
     expect(logLine(entry({'ev': 'zzz'})).summary, 'zzz');
   });
 
-  test('presence and update', () {
+  test('presence', () {
     expect(logLine(entry({'ev': 'presence', 'id': '1', 'online': true}), nameOf: (_) => 'mini').summary, 'mini 上线');
     expect(logLine(entry({'ev': 'presence', 'id': '1', 'online': false}), nameOf: (_) => 'mini').summary, 'mini 离线');
   });
@@ -88,5 +88,39 @@ void main() {
     expect(const LogQuery().toJson(), isEmpty);
     expect(const LogQuery(kind: LogKind.fault, before: 'b', q: 'x', limit: 5, problems: true, src: {'hub', 'service'}).toJson(),
         {'kind': 'fault', 'before': 'b', 'q': 'x', 'limit': 5, 'problems': true, 'src': ['hub', 'service']});
+  });
+
+  group('real emitter payloads', () {
+    String sum(Map<String, dynamic> ev, {LogKind? kind}) => logLine(entry(ev, kind: kind), nameOf: (id) => 'mini').summary;
+
+    test('request ok vs failed', () {
+      expect(sum({'ev': 'request', 'lvl': 'info', 'peer': '1.2.3.4:5', 'path': 'lan', 'op': 'open', 'app': 'Safari', 'result': 'ok'}), '请求 1.2.3.4:5 · open · Safari');
+      expect(sum({'ev': 'request', 'lvl': 'warn', 'peer': '1.2.3.4:5', 'op': 'open', 'result': 'no such app'}, kind: LogKind.refused),
+          '请求失败 1.2.3.4:5 · open · no such app');
+    });
+    test('update_applied', () {
+      expect(sum({'ev': 'update_applied', 'from': '0.13.1', 'to': '0.14.0', 'mode': 'upgrade'}), '更新已安装 0.13.1 → 0.14.0');
+    });
+    test('update_check', () {
+      expect(sum({'ev': 'update_check', 'result': 'available', 'latest': '0.14.0'}), '检查更新 有新版本 · 0.14.0');
+      expect(sum({'ev': 'update_check', 'result': 'up_to_date', 'latest': '0.14.0'}), '检查更新 已是最新 · 0.14.0');
+      expect(sum({'ev': 'update_check', 'lvl': 'warn', 'result': 'failed', 'reason': 'network'}), '检查更新失败 network');
+    });
+    test('update_failed has the stage', () {
+      expect(sum({'ev': 'update_failed', 'stage': 'install', 'reason': 'needs admin'}), '更新失败 install · needs admin');
+    });
+    test('worker_exit', () {
+      expect(sum({'ev': 'worker_exit', 'app': 'term:', 'code': 0, 'reason': 'exited'}), 'worker 退出 term: · exited');
+      expect(sum({'ev': 'worker_exit', 'app': 'term:', 'code': 2, 'reason': 'exited'}), 'worker 退出 term: · exited · 代码 2');
+    });
+    test('opened and closed', () {
+      expect(sum({'ev': 'opened', 'sid': 3, 'id': '111', 'app': 'Safari', 'path': 'relay', 'host_name': 'mac'}), '已打开 mac · Safari · 中继');
+      expect(sum({'ev': 'closed', 'sid': 3, 'id': '111', 'app': 'Safari', 'secs': 9, 'reason': 'user'}), '已关闭 mini · Safari · user');
+    });
+    test('map_refused', () {
+      expect(sum({'ev': 'map_refused', 'id': '111', 'port': 8080, 'local': 29350, 'reason': 'unreachable'}, kind: LogKind.refused),
+          '端口映射被拒绝 mini · 端口 8080 · unreachable');
+      expect(sum({'ev': 'map_refused', 'local': 29350, 'reason': 'gone'}), '端口映射被拒绝 本地 29350 · gone');
+    });
   });
 }

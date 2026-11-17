@@ -180,10 +180,16 @@ LogLine logLine(LogEntry e, {DateTime? now, String? Function(String id)? nameOf}
   var summary = switch (ev) {
     _ when f.isEmpty => e.raw,
     'auth_fail' || 'rejected' => head('拒绝', [s('peer'), s('reason')]),
-    'map_refused' => head('端口映射被拒绝', [s('peer'), s('reason')]),
+    'map_refused' => head('端口映射被拒绝', [
+        dev(),
+        s('port').isEmpty ? (s('local').isEmpty ? '' : '本地 ${s('local')}') : '端口 ${s('port')}',
+        s('reason'),
+      ]),
     'forward_refused' => head('端口转发被拒绝', [s('peer'), s('reason')]),
     'relay_revoked' => '中继撤销了本机',
-    'request' => head('请求失败', [s('peer'), s('op'), s('result')]),
+    'request' => s('result') == 'ok'
+        ? head('请求', [s('peer'), s('op'), s('app')])
+        : head('请求失败', [s('peer'), s('op'), s('result')]),
     'trust' => head(s('result') == 'refused' ? '信任被拒绝' : '信任', [dev().isEmpty ? s('peer') : dev(), s('reason')]),
     'route' => head('路由失败', [dev(), pathWords[s('path')] ?? s('path'), s('result').isEmpty ? s('reason') : s('result')]),
     'relay' => head('中继', [s('state') == 'error' ? '出错' : s('state'), s('error')]),
@@ -195,13 +201,22 @@ LogLine logLine(LogEntry e, {DateTime? now, String? Function(String id)? nameOf}
     'term_inputs' => head('终端输入', [s('inputs').isEmpty ? '' : '${s('inputs')} 次']),
     'service_start' => '服务启动',
     'service_stop' => '服务停止',
-    'update_check' => head('检查更新', [s('error'), s('msg')]),
-    'update_failed' => head('更新失败', [s('error'), s('reason'), s('msg')]),
-    'update_applied' => head('更新已安装', [s('version')]),
+    'update_check' => switch (s('result')) {
+        'available' => head('检查更新', ['有新版本', s('latest')]),
+        'up_to_date' => head('检查更新', ['已是最新', s('latest')]),
+        'failed' => head('检查更新失败', [s('reason')]),
+        _ => head('检查更新', [s('result'), s('reason')]),
+      },
+    'update_failed' => head('更新失败', [s('stage'), s('reason')]),
+    'update_applied' => head('更新已安装', [s('from').isEmpty && s('to').isEmpty ? '' : '${s('from')} → ${s('to')}']),
     'presence' => '${dev().isEmpty ? s('name') : dev()} ${f['online'] == false || s('state') == 'offline' ? '离线' : '上线'}',
-    'opened' => head('已打开', [s('app'), s('peer')]),
-    'closed' => head('已关闭', [s('app'), s('peer')]),
-    'worker_exit' => head('worker 退出', [s('app'), s('error')]),
+    'opened' => head('已打开', [s('host_name').isEmpty ? dev() : s('host_name'), s('app'), pathWords[s('path')] ?? s('path')]),
+    'closed' => head('已关闭', [dev(), s('app'), s('reason')]),
+    'worker_exit' => head('worker 退出', [
+        s('app'),
+        s('reason'),
+        if (f['code'] is num && f['code'] != 0) '代码 ${f['code']}',
+      ]),
     final other => join([other, s('msg')]),
   };
   if (e.repeat > 0) summary += '（又重复 ${e.repeat} 次）';
