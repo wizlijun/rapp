@@ -44,7 +44,14 @@ enum PanelTab { sessions, devices, projects, resources }
 
 /// The two top-bar corners; at most one is open.
 /// The top bar's popovers: the stream menu, 需要你, 本机, 远程, and the session list.
-enum Corner { stream, needs, session, remote, sessions }
+enum Corner { stream, needs, session, remote, sessions, hints }
+
+/// One line the top bar's hint showed, kept for its history.
+class HintRecord {
+  const HintRecord(this.text, this.at);
+  final String text;
+  final DateTime at;
+}
 
 enum NeedKind { session, device }
 
@@ -372,7 +379,28 @@ class MainState extends ChangeNotifier {
   String? _lastKey;
   Grouping grouping = Grouping.device;
   String? currentKey;
-  String hint = '';
+  String _hint = '';
+
+  /// The top bar's line about what just happened; '' when there is nothing to say.
+  String get hint => _hint;
+
+  /// Every line the hint showed this run, newest first, at most [hintHistoryMax]. Setting the
+  /// line it already shows adds nothing; a line that only appends to the shown one (`a；b`)
+  /// replaces its record; the same line after a clear is a new record.
+  set hint(String v) {
+    final was = _hint;
+    _hint = v;
+    if (v.isEmpty || v == was) return;
+    if (was.isNotEmpty && v.startsWith('$was；') && hintHistory.firstOrNull?.text == was) {
+      hintHistory[0] = HintRecord(v, hintHistory[0].at);
+      return;
+    }
+    hintHistory.insert(0, HintRecord(v, _now()));
+    if (hintHistory.length > hintHistoryMax) hintHistory.removeLast();
+  }
+
+  static const hintHistoryMax = 50;
+  final List<HintRecord> hintHistory = [];
   final Map<String, DeviceProbe> probes = {};
   String? deviceTab;
 
@@ -388,7 +416,7 @@ class MainState extends ChangeNotifier {
     // The session's menus belong to the session they were opened on; so does a marking.
     if (currentKey != _lastKey) {
       _lastKey = currentKey;
-      if (corner != null && corner != Corner.needs) corner = null;
+      if (corner != null && corner != Corner.needs && corner != Corner.hints) corner = null;
       markingInput = null;
       _followCurrentKey();
     }
