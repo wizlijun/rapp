@@ -9,6 +9,7 @@ import 'package:rapp/embed/modifier_latch.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/paths.dart';
+import 'package:rapp/ui/disconnected_stage.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/stage.dart';
@@ -382,6 +383,23 @@ void main() {
         }
       });
     }
+
+    testWidgets('the row only over a picture: gone once the body fills the stage (disconnected), as the composer layer',
+        (tester) async {
+      s.prefs.appKeyRow = true;
+      await mountStage(tester);
+      await openApp(tester, 'Safari');
+      s.focusPicture(1);
+      await tester.pump();
+      expect(find.byType(AppKeyRow), findsOneWidget, reason: 'a picture: not full');
+      expect(find.byKey(const Key('composer-open')), findsOneWidget);
+      port.emit(const DisconnectedEvent(1, 'user'));
+      await tester.pump();
+      await tester.pump();
+      expect(find.byType(DisconnectedStage), findsOneWidget, reason: 'the body fills the stage');
+      expect(find.byType(AppKeyRow), findsNothing);
+      expect(find.byKey(const Key('composer-open')), findsNothing);
+    });
 
     testWidgets('a switch to another session releases the old one\'s modifiers', (tester) async {
       s.prefs.appKeyRow = true;
