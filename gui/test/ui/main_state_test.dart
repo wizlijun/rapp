@@ -2206,6 +2206,27 @@ void main() {
         }, sessions: 2);
       });
 
+      test('shown again before the background time began: nothing closes, presence keeps going', () {
+        env((a, t, port, st, hints) {
+          port.emit(WindowsEvent(1, [rw(3)]));
+          final began = Completer<void>();
+          var ended = 0;
+          unawaited(st.enterBackground(begin: () => began.future, end: () async => ended++));
+          a.flushMicrotasks();
+          unawaited(st.enterForeground());
+          a.flushMicrotasks();
+          began.complete();
+          a.elapse(const Duration(seconds: 5));
+          expect(t.sent.where((m) => m['cmd'] == 'close'), isEmpty);
+          expect(t.sent.where((m) => m['cmd'] == 'presence' && m['paused'] == true), isEmpty);
+          final r = st.recordFor('111/a')!;
+          expect(r.phase, Phase.live);
+          expect(r.frozen, false);
+          expect(st.backgrounded, false);
+          expect(ended, 1, reason: 'the background time still ends');
+        });
+      });
+
       test('a dead hub: background and foreground neither throw nor hang', () {
         env((a, t, port, st, hints) {
           port.emit(WindowsEvent(1, [rw(3)]));

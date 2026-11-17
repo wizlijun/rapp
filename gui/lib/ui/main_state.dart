@@ -1954,11 +1954,13 @@ class MainState extends ChangeNotifier {
   Future<void> enterBackground({Future<void> Function()? begin, Future<void> Function()? end}) async {
     if (backgrounded) return;
     backgrounded = true;
-    _backgroundEpoch++;
+    final epoch = ++_backgroundEpoch;
     try {
       await begin?.call();
     } catch (_) {}
     try {
+      // Shown again while the background time was being asked for: nothing closes (`end` still runs).
+      if (!backgrounded || epoch != _backgroundEpoch) return;
       // The ups go out over the sessions while they are still open.
       appLatch.releaseAll();
       final h = hub;
