@@ -2213,7 +2213,8 @@ class MainState extends ChangeNotifier {
       mode: prefs.termOpenFor(id),
       list: hub?.termLists[id] ?? TermList(id),
       apps: probes[id]?.apps?.apps ?? const [],
-      graphical: probes[id]?.apps?.capabilities?['graphical'] != false);
+      graphical: probes[id]?.apps?.capabilities?['graphical'] != false &&
+          probes[id]?.apps?.capabilities?['applications'] != false);
 
   /// The key of the session [m] opens; null for a 终端 entry that opens a new text terminal.
   String? _openedKey(Member m) {

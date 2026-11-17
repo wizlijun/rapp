@@ -280,11 +280,13 @@ fn tccutil_calls(r: &rapp_update::fake::FakeRunner) -> Vec<Vec<String>> {
     r.calls().into_iter().filter(|(p, _)| p == rapp_update::runner::TCCUTIL).map(|(_, a)| a).collect()
 }
 
+#[cfg(not(target_os = "linux"))]
 fn strs(v: &[&str]) -> Vec<String> {
     v.iter().map(|s| s.to_string()).collect()
 }
 
 #[tokio::test]
+#[cfg(not(target_os = "linux"))]
 async fn permissions_reset_runs_tccutil_for_rapp_only() {
     let bins = bins();
     set_perms(bins.path(), &perms(true, true));
@@ -316,6 +318,7 @@ async fn permissions_reset_runs_tccutil_for_rapp_only() {
 }
 
 #[tokio::test]
+#[cfg(not(target_os = "linux"))]
 async fn accessibility_reset_failure_is_reported() {
     let bins = bins();
     set_perms(bins.path(), &perms(true, true));
@@ -339,11 +342,16 @@ async fn accessibility_reset_failure_is_reported() {
 async fn tccutil_missing_reports_false() {
     let bins = bins();
     set_perms(bins.path(), &perms(true, true));
-    let (svc, home, _) = with_tccutil(None, bins.path()).await;
+    let (svc, home, runner) = with_tccutil(None, bins.path()).await;
     let r = ipc_once(&svc, home.path(), json!({"cmd":"permissions_reset"})).await;
     assert_eq!(r["ok"], true, "{r}");
     assert_eq!((&r["screen_recording_reset"], &r["accessibility_reset"]), (&json!(false), &json!(false)), "{r}");
-    assert!(host_log(bins.path()).contains("check --prompt"));
+    if cfg!(target_os = "linux") {
+        assert!(tccutil_calls(&runner).is_empty());
+        assert!(!host_log(bins.path()).contains("check --prompt"));
+    } else {
+        assert!(host_log(bins.path()).contains("check --prompt"));
+    }
 }
 
 #[tokio::test]

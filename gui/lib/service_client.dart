@@ -36,6 +36,7 @@ class ServiceStatus {
     this.password = '',
     this.screenRecording = false,
     this.accessibility = false,
+    this.desktopError,
     this.sessions = const [],
     this.lanIds = const [],
     this.logDir,
@@ -56,6 +57,7 @@ class ServiceStatus {
   final String password;
   final bool screenRecording;
   final bool accessibility;
+  final String? desktopError;
   final List<ServiceSession> sessions;
 
   /// `id@ip[:port]`, one per local IPv4 (§3): what B types to add this machine.
@@ -104,6 +106,7 @@ class ServiceStatus {
       password: '${m['password'] ?? ''}',
       screenRecording: perms['screen_recording'] == true,
       accessibility: perms['accessibility'] == true,
+      desktopError: perms['platform'] == 'linux' ? perms['error'] as String? : null,
       lanIds: (m['lan_ids'] as List? ?? const []).map((e) => '$e').toList(),
       logDir: m['log_dir']?.toString(),
       update: UpdateInfo.fromJson(m['update']),

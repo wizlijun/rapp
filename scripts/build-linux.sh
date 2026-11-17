@@ -11,7 +11,7 @@ fi
 # Copy from that same directory so cached builds cannot bundle stale workers.
 target_dir=$(cargo metadata --manifest-path rust/Cargo.toml --locked --no-deps --format-version 1 |
   python3 -c 'import json, sys; print(json.load(sys.stdin)["target_directory"])')
-cargo build --manifest-path rust/Cargo.toml --release --locked -p rapp-client-core -p rapp-client-gtk -p rapp-hub -p rapp-service -p rapp-term -p rapp-cli
+cargo build --manifest-path rust/Cargo.toml --release --locked -p rapp-client-core -p rapp-client-gtk -p rapp-hub -p rapp-service -p rapp-term -p rapp-cli -p rapp-host-linux
 version=$(python3 -c 'import tomllib; print(tomllib.load(open("rust/Cargo.toml", "rb"))["workspace"]["package"]["version"])')
 (cd gui && "$flutter_bin" build linux --release --dart-define="RAPP_VERSION=$version")
 bundle=gui/build/linux/x64/release/bundle
@@ -19,7 +19,7 @@ bundle=gui/build/linux/x64/release/bundle
 mv -f "$bundle/rapp" "$bundle/rapp-gui"
 install -m755 scripts/linux/rapp "$bundle/rapp"
 # Replace workers atomically: an app/session may still be running this bundle.
-for binary in rapp-client rapp-session rapp-hub rapp-service rapp-term rapp-cli; do
+for binary in rapp-client rapp-session rapp-host rapp-hub rapp-service rapp-term rapp-cli; do
   staged=$(mktemp "$bundle/.$binary.XXXXXX")
   install -m755 "$target_dir/release/$binary" "$staged"
   mv -f "$staged" "$bundle/$binary"

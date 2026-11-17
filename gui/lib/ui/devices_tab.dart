@@ -183,6 +183,7 @@ class _DevicesTabState extends State<DevicesTab> {
     final apps = p?.apps;
     final name = state.deviceName(id);
     final graphical = apps?.capabilities?['graphical'] != false;
+    final applications = graphical && apps?.capabilities?['applications'] != false;
     final missing = graphical ? missingPermissions(apps?.permissions) : <Permission>[];
     final forced = state.forcedRelay(id);
     final pathWord = routeWord(state.pathOf(id), forced: forced);
@@ -233,6 +234,11 @@ class _DevicesTabState extends State<DevicesTab> {
           padding: const EdgeInsets.only(top: 6),
           child: Text(remoteHint(name, missing), style: TextStyle(color: t.accent)),
         ),
+      if (apps?.permissions?['platform'] == 'linux' && apps?.permissions?['error'] is String)
+        Padding(
+          padding: const EdgeInsets.only(top: 6),
+          child: Text(apps!.permissions!['error'] as String, style: TextStyle(color: t.accent)),
+        ),
       const SizedBox(height: 8),
       if (apps != null && apps.apps.isEmpty)
         Padding(
@@ -241,12 +247,12 @@ class _DevicesTabState extends State<DevicesTab> {
         ),
       // 桌面 first, 终端 second (spec §2.1), the rest in their order.
       if (ordered.firstOrNull?.app == 'desktop:') _appRow(context, id, ordered.first),
-      ..._termsEntry(context, id, terms, apps?.apps ?? const [], graphical: graphical),
+      ..._termsEntry(context, id, terms, apps?.apps ?? const [], graphical: applications),
       for (final a in ordered)
         if (a.app != 'desktop:') _appRow(context, id, a),
       if (widget.shares != null) SharesSection(key: ValueKey('shares-$id'), api: widget.shares!, to: id),
       const SizedBox(height: 8),
-      if (graphical) Row(
+      if (applications) Row(
         children: [
           Expanded(
             child: TextField(

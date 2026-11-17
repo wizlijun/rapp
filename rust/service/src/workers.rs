@@ -89,11 +89,18 @@ fn host_bin(state: &State) -> Result<PathBuf> {
 /// Installed capabilities, independent of whether a particular session is enabled.
 /// Linux can serve terminals and ports without a graphical host worker.
 pub fn capabilities(state: &State) -> Value {
-    json!({
+    let mut caps = json!({
         "graphical": host_bin(state).is_ok(),
         "terminal": rapp_net::bins::find("rapp-term", state.bin_dir.as_deref()).is_some(),
         "ports": true,
-    })
+    });
+    // Additional fields are advertised only by the new Linux desktop worker;
+    // older/native workers retain their existing capability contract.
+    if state.permissions.lock().unwrap()["platform"] == "linux" {
+        caps["desktop"] = json!(true);
+        caps["applications"] = json!(false);
+    }
+    caps
 }
 
 fn client_only_linux(state: &State) -> bool {
@@ -102,7 +109,9 @@ fn client_only_linux(state: &State) -> bool {
 
 /// Runs `rapp-host <args> --json` and returns its first non-event JSON line.
 async fn run_json(state: &State, args: &[&str]) -> Result<Value> {
-    let out = Command::new(host_bin(state)?).args(args).arg("--json").stdin(Stdio::null()).kill_on_drop(true).output();
+    let mut command = Command::new(host_bin(state)?);
+    desktop_environment(&mut command).await;
+    let out = command.args(args).arg("--json").stdin(Stdio::null()).kill_on_drop(true).output();
     let out = tokio::time::timeout(RUN_WAIT, out).await.map_err(|_| anyhow!("rapp-host {} timed out", args[0]))??;
     String::from_utf8_lossy(&out.stdout)
         .lines()
@@ -121,7 +130,12 @@ pub async fn lock(state: &State) -> Result<bool> {
 }
 
 fn permissions(v: &Value) -> Value {
-    json!({"screen_recording": v["screen_recording"] == true, "accessibility": v["accessibility"] == true})
+    let mut p = json!({"screen_recording": v["screen_recording"] == true, "accessibility": v["accessibility"] == true});
+    if v["platform"] == "linux" {
+        p["platform"] = json!("linux");
+        if let Some(error) = v["error"].as_str() { p["error"] = json!(error); }
+    }
+    p
 }
 
 /// `rapp-host check`; with `prompt`, macOS is asked for what is missing, so rapp shows up in System Settings.
@@ -150,8 +164,9 @@ pub async fn refresh_permissions(state: &State, prompt: bool) -> Value {
 /// prompt so rapp shows up in System Settings. A `_reset` is true only if tccutil exited 0 and the
 /// permission really reads as missing afterwards.
 pub async fn reset_permissions(state: &State) -> Value {
-    if client_only_linux(state) {
-        return json!({"screen_recording_reset": false, "accessibility_reset": false, "permissions": null});
+    if cfg!(target_os = "linux") {
+        let perms = refresh_permissions(state, false).await;
+        return json!({"screen_recording_reset": false, "accessibility_reset": false, "permissions": perms});
     }
     let mut ran = [false; 2];
     for (i, service) in ["ScreenCapture", "Accessibility"].into_iter().enumerate() {
@@ -253,8 +268,9 @@ async fn spawn(state: &Arc<State>, app: &str, gen: u64) -> Result<(u16, String, 
     let token = random_hex(16);
     let (name, args, tag) = worker_cmd(state, app);
     let bin = rapp_net::bins::find(name, state.bin_dir.as_deref()).ok_or_else(|| anyhow!("{name} not found"))?;
-    let mut child = Command::new(bin)
-        .args(args)
+    let mut command = Command::new(bin);
+    desktop_environment(&mut command).await;
+    let mut child = command.args(args)
         .env("RAPP_TOKEN", &token)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -322,6 +338,17 @@ async fn spawn(state: &Arc<State>, app: &str, gen: u64) -> Result<(u16, String, 
         }
     });
     Ok((port, token, tx))
+}
+
+/// A systemd service may precede graphical login or outlive a compositor restart.
+/// Query the user manager off the async runtime before every desktop-worker launch.
+async fn desktop_environment(command: &mut Command) {
+    #[cfg(target_os = "linux")]
+    if let Ok(env) = tokio::task::spawn_blocking(rapp_term::pty::launch::desktop_env).await {
+        command.envs(env);
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = command;
 }
 
 /// A worker's session-ended reason `taken over by N` → Some(Some(N)), `taken over` → Some(None).
