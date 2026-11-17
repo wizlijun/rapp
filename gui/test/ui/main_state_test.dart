@@ -4726,6 +4726,31 @@ void main() {
       expect(saved.leftAt!.isAtSameMomentAs(now), isTrue);
     });
 
+    test('未归类 narrows to the sessions in no project; one in a project takes it back to 全部', () async {
+      final st = make();
+      await open(['com.a', 'com.b', 'com.c', 'com.d']);
+      final p = project(st, 'P', ['com.a', 'com.c']);
+      st.switchProject(p.id);
+      st.switchInbox();
+      expect((st.inbox, st.currentProject, st.previousProject), (true, null, p.id));
+      expect(st.inboxKeys, ['111/com.b', '111/com.d']);
+      expect(st.currentKey, '111/com.b');
+      st.step(1);
+      expect(st.currentKey, '111/com.d');
+      st.step(1);
+      expect(st.currentKey, '111/com.b');
+      expect(st.steppableCount, 2);
+      // Picking a session in a project leaves 未归类 for 全部.
+      st.select('111/com.a');
+      expect((st.inbox, st.currentProject), (false, null));
+      st.switchInbox();
+      st.switchProject(p.id);
+      expect((st.inbox, st.currentProject), (false, p.id));
+      st.switchInbox();
+      st.leaveProject();
+      expect((st.inbox, st.currentProject), (false, null));
+    });
+
     test('stepping stays inside the current project', () async {
       final st = make();
       await open(['com.a', 'com.c', 'com.z']);
