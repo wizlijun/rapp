@@ -33,7 +33,7 @@ class TermRowCache {
 
   void _begin(TermMetrics m, TermPalette p, double dpr) {
     final km = _metrics;
-    if (km != null && km.cellW == m.cellW && km.cellH == m.cellH && identical(p, _palette) && dpr == _dpr) return;
+    if (km != null && km.cellW == m.cellW && km.cellH == m.cellH && km.style.fontSize == m.style.fontSize && identical(p, _palette) && dpr == _dpr) return;
     _clear();
     _metrics = m;
     _palette = p;

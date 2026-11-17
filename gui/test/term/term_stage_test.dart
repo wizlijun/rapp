@@ -291,6 +291,25 @@ void main() {
     }
   });
 
+  testWidgets('a stage squeezed to a sliver does not throw on drag or scroll', (t) async {
+    for (final (w, h) in [(800.0, 1.0), (1.0, 480.0)]) {
+      model.apply(scr(['abc', 'def', 'ghi', 'jkl']));
+      await show(t, w: w, h: h);
+      final before = model.offset;
+      final at = t.getCenter(find.byKey(const Key('term-grid')));
+      final g = await t.startGesture(at, kind: PointerDeviceKind.mouse);
+      await g.moveTo(at + const Offset(0, 0.4));
+      await t.pump(const Duration(milliseconds: 120));
+      await g.up();
+      final ptr = TestPointer(7, PointerDeviceKind.mouse);
+      await t.sendEventToBinding(ptr.hover(at));
+      await t.sendEventToBinding(ptr.scroll(const Offset(30, 0)));
+      await t.pump();
+      expect(t.takeException(), isNull, reason: '$w x $h');
+      expect(model.offset, before, reason: '$w x $h');
+    }
+  });
+
   testWidgets('only rows that changed are recorded again', (t) async {
     model.apply(scr(['a', 'b', 'c', 'd']));
     await show(t);

@@ -145,7 +145,7 @@ pub async fn run(opts: RunOpts) -> anyhow::Result<i32> {
     };
 
     let (drained_tx, drained) = oneshot::channel();
-    let window = Arc::new(Mutex::new(Window::new(std::io::stdout())));
+    let window = Arc::new(Mutex::new(Window::new(std::io::stdout()).tty(unsafe { libc::isatty(1) } == 1)));
     let (sh, win) = (shared.clone(), window.clone());
     std::thread::spawn(move || pump_output(from_pty, &win, &sh, drained_tx, Emu::feed));
     let to_window = shared.input.clone();
@@ -251,6 +251,8 @@ fn tick_sync(shared: &Shared, tick: impl FnOnce(&mut Emu)) {
 /// A resize a viewer asked for, while the program's output is quiet. Never waits for the window: the output pump
 /// may be in a slow write to it, and this runs on the main loop; the next tick tries again.
 fn resize_window<W: Write>(window: &Mutex<Window<W>>, shared: &Shared) {
+    // Accepted risk: the ~12-byte write below can still block if the host terminal stops reading; rare, so not
+    // worth a thread of its own.
     let mut w = match window.try_lock() {
         Ok(w) => w,
         Err(std::sync::TryLockError::Poisoned(e)) => e.into_inner(),

@@ -328,7 +328,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
 
   void _scroll(double rows) {
     final m = _model;
-    if (m == null || m.alt || m.screen.isEmpty || rows == 0) return;
+    if (m == null || m.alt || m.screen.isEmpty || rows == 0 || !rows.isFinite) return;
     m.scrollBy(rows);
   }
 
@@ -380,7 +380,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
   /// The cell under [local] (stage coordinates), clamped into the rows in view.
   TermPoint? _cellAt(Offset local) {
     final m = _model;
-    if (m == null || m.screen.isEmpty) return null;
+    if (m == null || m.screen.isEmpty || _drawn.cellW <= 0 || _drawn.cellH <= 0) return null;
     final top = (-m.offset).floor();
     final int y = (local.dy / _drawn.cellH - m.offset).floor().clamp(top, math.max(top, m.rows - 1));
     final int x = (local.dx / _drawn.cellW).floor().clamp(0, math.max(0, m.cols - 1));
@@ -659,7 +659,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
       // The pane keeps the device's rows and columns; it is laid out at the font size that fits it to the
       // stage, up as well as down, and drawn at that size rather than stretched.
       final k = gridScale(w: w, h: h, gridW: gridW, gridH: gridH, up: !widget.state.prefs.termFit);
-      _drawn = shown ? _metricsAt(_metrics.style.fontSize! * k, m.cols, m.rows, w, h) : _metrics;
+      _drawn = shown ? _metricsAt(math.max(4.0, _metrics.style.fontSize! * k), m.cols, m.rows, w, h) : _metrics;
 
       if (m != null && _linksVer != _ver) {
         _linksVer = _ver;

@@ -130,7 +130,8 @@ async fn typing_from_a_second_viewer_takes_over_after_two_seconds() {
     a.open().await;
     a.send(json!({"t":"view","pane":"%0","cols":90,"rows":20,"fit":true})).await;
     w.wait_output("\x1b[8;20;90t");
-    // A seat taken by a view alone has no last operation: A operates, so it holds the seat for two seconds.
+    // open() sent fit:false first, so A's fit view is already a false-to-true op; this extra keys is harmless and
+    // makes A's operation the latest, so A holds the seat for two seconds.
     a.send(json!({"t":"keys","pane":"%0","keys":["a"]})).await;
     let mut b = Viewer::connect(d.path(), "t").await;
     b.open().await;

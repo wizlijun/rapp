@@ -192,6 +192,8 @@ impl SeqTracker {
 pub struct Window<W: Write> {
     out: W,
     seq: SeqTracker,
+    /// False when the output is not a terminal: a resize request would only land in a file or pipe.
+    tty: bool,
 }
 
 impl<W: Write> Window<W> {
@@ -199,7 +201,14 @@ impl<W: Write> Window<W> {
         Self {
             out,
             seq: SeqTracker::default(),
+            tty: true,
         }
+    }
+
+    /// A window whose output is not a terminal never gets resize requests.
+    pub fn tty(mut self, tty: bool) -> Self {
+        self.tty = tty;
+        self
     }
 
     pub fn output(&mut self, bytes: &[u8]) -> std::io::Result<()> {
@@ -211,7 +220,7 @@ impl<W: Write> Window<W> {
 
     /// Writes `ESC[8;rows;colst` if the stream is idle and a size is pending.
     pub fn resize_if_idle(&mut self, fit: &Mutex<Fit>) -> std::io::Result<bool> {
-        if !self.seq.ground() {
+        if !self.tty || !self.seq.ground() {
             return Ok(false);
         }
         let size = fit.lock().unwrap_or_else(|e| e.into_inner()).take();
@@ -359,6 +368,15 @@ mod tests {
         w.output(b"hi").unwrap();
         assert!(w.resize_if_idle(&fit).unwrap());
         assert!(w.get_ref().ends_with(b"\x1b[8;30;100t"));
+    }
+
+    #[test]
+    fn resize_is_not_written_when_the_output_is_not_a_terminal() {
+        let fit = pending(100, 30);
+        let mut w = Window::new(Vec::new()).tty(false);
+        w.output(b"hi").unwrap();
+        assert!(!w.resize_if_idle(&fit).unwrap());
+        assert_eq!(w.get_ref().as_slice(), b"hi");
     }
 
     #[test]
