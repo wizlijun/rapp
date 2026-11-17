@@ -2918,6 +2918,8 @@ class MainState extends ChangeNotifier {
       _setCue('');
     }
     if (previousProject == id) previousProject = null;
+    // No project left: everything is 自由区, so there is nothing to narrow to.
+    if (workspace.projects.isEmpty) freeZone = false;
     if (positions.byProject.remove(id) != null) _savePositions();
     _saveWorkspace();
   }
