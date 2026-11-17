@@ -31,7 +31,7 @@ targets += [
 
 let package = Package(
     name: "rapp",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v14), .iOS(.v17)],
     products: products,
     targets: targets
 )

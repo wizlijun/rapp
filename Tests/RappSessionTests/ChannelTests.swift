@@ -4,6 +4,12 @@ import RappCore
 @testable import RappSession
 
 final class ChannelTests: XCTestCase {
+    func testKeyEventAndLatchParse() throws {
+        XCTAssertEqual(try channelCommand("key_event", ["sid": 1, "keyCode": 48, "modifiers": 1048576, "down": false]),
+                       .keyEvent(sid: 1, keyCode: 48, modifiers: 1048576, down: false))
+        XCTAssertEqual(try channelCommand("latch", ["sid": 1, "modifiers": 1048576]), .latch(sid: 1, modifiers: 1048576))
+    }
+
     func testStartParses() throws {
         let c = try channelCommand("start", ["sid": 3, "port": 5000, "token": "t", "mode": "color16", "fps": 15, "density": "adaptive"])
         XCTAssertEqual(c, .start(sid: 3, port: 5000, token: "t", mode: .color16, fps: 15, density: .adaptive))

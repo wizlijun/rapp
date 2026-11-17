@@ -1,3 +1,4 @@
+#if canImport(AppKit)
 import AppKit
 import CoreVideo
 import QuartzCore
@@ -151,3 +152,4 @@ public final class RemoteView: NSView {
         onMouse?(.scroll(window: windowID, x: p.x, y: p.y, dx: Float(dx), dy: Float(dy)))
     }
 }
+#endif

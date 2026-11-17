@@ -4,6 +4,7 @@ import Foundation
 // Window-table logic shared by the host and the client (multi-window spec §5).
 // Canvas coordinates are A points with the origin at the display's top-left.
 
+#if os(macOS)
 /// The kind of an A window, from its window level and, at the normal and
 /// floating levels, its Accessibility role and subrole (spec §3.3). A
 /// borderless window there (no Accessibility window, or one with no known
@@ -26,6 +27,7 @@ public func classifyWindow(level: Int, role: String?, subrole: String?) -> Windo
     default: return .normal
     }
 }
+#endif
 
 /// Largest size of a chromeless window drawn in place (see `demoteChromeless`).
 public let chromelessMax = CGSize(width: 640, height: 1000)

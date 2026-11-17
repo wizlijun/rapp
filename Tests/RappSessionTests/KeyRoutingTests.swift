@@ -3,6 +3,11 @@ import XCTest
 @testable import RappSession
 
 final class KeyRoutingTests: XCTestCase {
+    func testKeyFlagsMatchAppKit() {
+        let ns = NSEvent.ModifierFlags([.command, .shift])
+        XCTAssertEqual(KeyFlags(ns).rawValue, UInt64(ns.rawValue))
+    }
+
     func testRouteKey() {
         XCTAssertEqual(routeKey(keyCode: 3, flags: [.control, .command], pictureFocused: true), .local)   // ⌃⌘F
         XCTAssertEqual(routeKey(keyCode: 2, flags: [.control, .command], pictureFocused: true), .local)   // ⌃⌘D
@@ -60,8 +65,8 @@ final class KeyRoutingTests: XCTestCase {
 }
 
 final class KeyTrackerRouteTests: XCTestCase {
-    private func flags(_ f: NSEvent.ModifierFlags, device: UInt) -> NSEvent.ModifierFlags {
-        NSEvent.ModifierFlags(rawValue: f.rawValue | device)
+    private func flags(_ f: KeyFlags, device: UInt64) -> KeyFlags {
+        KeyFlags(rawValue: f.rawValue | device)
     }
 
     func testPressesWhileFocusedGoToAAndTheirReleasesFollow() {

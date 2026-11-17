@@ -1,3 +1,4 @@
+#if canImport(AppKit)
 import AppKit
 import RappCore
 
@@ -34,3 +35,4 @@ public final class PopupPanel: NSPanel {
         remoteView.sendsHover = new.kind == .menu || new.kind == .popover
     }
 }
+#endif

@@ -141,6 +141,11 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       live[sid]?.session.send(.key(keyCode: keyCode, modifiers: modifiers, down: true))
       live[sid]?.session.send(.key(keyCode: keyCode, modifiers: modifiers, down: false))
       result(nil)
+    case let .keyEvent(sid, keyCode, modifiers, down):
+      live[sid]?.session.send(.key(keyCode: keyCode, modifiers: modifiers, down: down))
+      result(nil)
+    case .latch:
+      result(nil)  // external-keyboard latch is iOS only
     case let .selectWindow(sid, window):
       live[sid]?.session.send(.focus(window))
       result(nil)
@@ -361,7 +366,7 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     case .keyDown: down = true
     case .keyUp: down = false
     case .flagsChanged:
-      guard let d = modifierKeyIsDown(keyCode: event.keyCode, flags: event.modifierFlags) else { return event }
+      guard let d = modifierKeyIsDown(keyCode: event.keyCode, flags: KeyFlags(event.modifierFlags)) else { return event }
       down = d
     default:
       return event
@@ -389,7 +394,7 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       }
       if let sid = composeStart(keyDown: down && event.type == .keyDown, composeOn: composeOn,
                                 targetSid: targetSid, characters: event.characters,
-                                flags: event.modifierFlags, isRepeat: event.isARepeat,
+                                flags: KeyFlags(event.modifierFlags), isRepeat: event.isARepeat,
                                 remoteSecure: targetSid.map(secure.contains) ?? false) {
         // Type-to-compose: the letter never reaches A; Dart opens the panel, then asks for it back.
         hold.start(sid: sid, event, now: now)
@@ -397,7 +402,7 @@ final class SessionPlugin: NSObject, FlutterPlugin {
         return nil
       }
       if targetSid != keysHolder { releaseKeys() }
-      decision = keys.route(keyCode: event.keyCode, down: down, flags: event.modifierFlags,
+      decision = keys.route(keyCode: event.keyCode, down: down, flags: KeyFlags(event.modifierFlags),
                             pictureFocused: targetSid != nil)
     case let .detached(sid):
       targetSid = sid

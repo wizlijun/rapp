@@ -1,4 +1,28 @@
+import Foundation
+#if canImport(AppKit)
 import AppKit
+#endif
+
+/// Modifier keys held with a key event. The bits match `NSEvent.ModifierFlags` and `CGEventFlags`
+/// (and the wire's `modifiers`); the device-dependent low bits are kept in `rawValue`.
+public struct KeyFlags: OptionSet, Sendable {
+    public let rawValue: UInt64
+    public init(rawValue: UInt64) { self.rawValue = rawValue }
+
+    public static let capsLock = KeyFlags(rawValue: 1 << 16)
+    public static let shift = KeyFlags(rawValue: 1 << 17)
+    public static let control = KeyFlags(rawValue: 1 << 18)
+    public static let option = KeyFlags(rawValue: 1 << 19)
+    public static let command = KeyFlags(rawValue: 1 << 20)
+    public static let numericPad = KeyFlags(rawValue: 1 << 21)
+    public static let function = KeyFlags(rawValue: 1 << 23)
+}
+
+#if canImport(AppKit)
+extension KeyFlags {
+    public init(_ f: NSEvent.ModifierFlags) { self.init(rawValue: UInt64(f.rawValue)) }
+}
+#endif
 
 /// Where a key event from the embedded picture goes: to rapp itself (Flutter) or to A.
 public enum KeyRoute: Equatable {
@@ -8,7 +32,7 @@ public enum KeyRoute: Equatable {
 
 /// While the picture has focus every key goes to A except ⌃⌘ chords (rapp's own shortcuts),
 /// ⌃↩ (the writing panel's) and plain ⌘Q (quit rapp); without focus every key stays with rapp.
-public func routeKey(keyCode: UInt16, flags: NSEvent.ModifierFlags, pictureFocused: Bool) -> KeyRoute {
+public func routeKey(keyCode: UInt16, flags: KeyFlags, pictureFocused: Bool) -> KeyRoute {
     let mods = flags.intersection([.command, .control, .option, .shift])
     if mods.contains([.control, .command]) { return .local }
     if mods == [.command] && keyCode == 12 { return .local }
@@ -21,9 +45,9 @@ public func routeKey(keyCode: UInt16, flags: NSEvent.ModifierFlags, pictureFocus
 /// releasing one of two held shifts reads as a release; fn and caps lock use their own bit. If
 /// an event carries no device bits for the pair, the device-independent bit decides. Nil for key
 /// codes that are not modifier keys (54–63).
-public func modifierKeyIsDown(keyCode: UInt16, flags: NSEvent.ModifierFlags) -> Bool? {
-    let bit: NSEvent.ModifierFlags
-    let device: (mine: UInt, pair: UInt)?
+public func modifierKeyIsDown(keyCode: UInt16, flags: KeyFlags) -> Bool? {
+    let bit: KeyFlags
+    let device: (mine: UInt64, pair: UInt64)?
     switch keyCode {
     case 55: (bit, device) = (.command, (0x8, 0x8 | 0x10))
     case 54: (bit, device) = (.command, (0x10, 0x8 | 0x10))
@@ -83,7 +107,7 @@ public struct KeyTracker {
     /// when A got the press, so both A and rapp always see matched pairs. A press that stays
     /// local while the picture has focus is a reserved chord (⌃⌘…, ⌘Q): whatever A holds (the
     /// chord's first modifiers) is released on A first, so nothing stays held there.
-    public mutating func route(keyCode: UInt16, down isDown: Bool, flags: NSEvent.ModifierFlags,
+    public mutating func route(keyCode: UInt16, down isDown: Bool, flags: KeyFlags,
                                pictureFocused: Bool) -> KeyDecision {
         route(keyCode: keyCode, down: isDown, to: routeKey(keyCode: keyCode, flags: flags, pictureFocused: pictureFocused),
               focused: pictureFocused)
@@ -107,7 +131,7 @@ public struct KeyTracker {
 /// Whether a key press on the picture opens the writing panel (type-to-compose): a first press
 /// (not a repeat) without ⌘ ⌃ ⌥ or Fn/Globe whose characters, under the current layout, are
 /// exactly one letter. Shift and caps lock are fine; judged by character, not key position.
-public func isComposeKey(characters: String?, flags: NSEvent.ModifierFlags, isRepeat: Bool) -> Bool {
+public func isComposeKey(characters: String?, flags: KeyFlags, isRepeat: Bool) -> Bool {
     guard !isRepeat, flags.intersection([.command, .control, .option, .function]).isEmpty,
           let chars = characters, chars.count == 1, let c = chars.first else { return false }
     return c.isLetter
@@ -118,7 +142,7 @@ public func isComposeKey(characters: String?, flags: NSEvent.ModifierFlags, isRe
 /// `remoteSecure`: A's focus is in a password field (v13 `secureFocus`): keys go straight to A, so a
 /// password is never shown in the panel or kept in the input record.
 public func composeStart(keyDown: Bool, composeOn: Bool, targetSid: Int64?, characters: String?,
-                         flags: NSEvent.ModifierFlags, isRepeat: Bool, remoteSecure: Bool = false) -> Int64? {
+                         flags: KeyFlags, isRepeat: Bool, remoteSecure: Bool = false) -> Int64? {
     guard keyDown, composeOn, !remoteSecure, let sid = targetSid,
           isComposeKey(characters: characters, flags: flags, isRepeat: isRepeat) else { return nil }
     return sid
