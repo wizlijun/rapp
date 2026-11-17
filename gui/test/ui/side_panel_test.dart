@@ -158,6 +158,21 @@ void main() {
     expect(ys.toSet().length, 3);
   });
 
+  testWidgets('footer controls share the text size and a 48px row height', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      theme: themeDataFor(RappTheme.matrix, textSize: 13),
+      home: Scaffold(body: Center(child: panel())),
+    ));
+    // A dropdown's own style used to replace the theme's: its label fell back to 14 and no font.
+    for (final label in ['MATRIX', '设备在前', '启动时全屏', '网络差时自动省流量']) {
+      final style = tester.widget<RichText>(find.descendant(of: find.text(label), matching: find.byType(RichText))).text.style!;
+      expect((style.fontSize, style.fontFamily), (13.0, 'JetBrains Mono'), reason: label);
+    }
+    for (final key in ['theme-dropdown', 'first-dropdown', 'start-fullscreen', 'auto-save-traffic']) {
+      expect(tester.getSize(find.byKey(Key(key))).height, 48, reason: key);
+    }
+  });
+
   testWidgets('picking WESTWORLD changes prefs.theme', (tester) async {
     await tester.pumpWidget(wrap(panel(), disableAnimations: true));
     await tester.tap(find.byKey(const Key('theme-dropdown')));

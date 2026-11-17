@@ -78,7 +78,11 @@ void main() {
         tt.bodyLarge, tt.bodyMedium, tt.bodySmall, tt.labelLarge, tt.labelMedium, tt.labelSmall,
       ]) {
         expect(s!.fontSize, 13, reason: '$th');
+        expect(s.height, 1.4, reason: '$th');
       }
+      // Switch and checkbox rows come out 48 tall, like the dropdowns and buttons.
+      expect(d.listTileTheme.visualDensity, VisualDensity.compact, reason: '$th');
+      expect(d.listTileTheme.minTileHeight, 48, reason: '$th');
     }
     expect(themeDataFor(RappTheme.matrix).textTheme.bodySmall!.fontSize, 15);
   });

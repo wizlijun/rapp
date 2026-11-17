@@ -268,9 +268,10 @@ RappTokens tokensFor(RappTheme theme) {
   }
 }
 
-/// Every text style at [size]: one text size throughout (the dashboard numbers set their own).
+/// Every text style at [size] and one line height: one text size throughout (the dashboard
+/// numbers set their own), and a switch row's title (bodyLarge, 1.5) no taller than the text beside it.
 TextTheme _oneSize(TextTheme tt, double size) {
-  TextStyle? z(TextStyle? x) => x?.copyWith(fontSize: size);
+  TextStyle? z(TextStyle? x) => x?.copyWith(fontSize: size, height: 1.4);
   return tt.copyWith(
     displayLarge: z(tt.displayLarge),
     displayMedium: z(tt.displayMedium),
@@ -339,6 +340,13 @@ ThemeData themeDataFor(RappTheme theme, {double textSize = fallbackTextSize}) {
     outlinedButtonTheme: OutlinedButtonThemeData(style: button),
     textButtonTheme: TextButtonThemeData(style: button),
     iconButtonTheme: IconButtonThemeData(style: button),
+    // Switch and checkbox rows as tall as a dropdown or a button (48), not Material's 56 / 72:
+    // with one small text size the taller rows looked out of proportion.
+    listTileTheme: const ListTileThemeData(
+      visualDensity: VisualDensity.compact,
+      minTileHeight: 48,
+      minVerticalPadding: 4,
+    ),
     extensions: [t],
   );
 }
