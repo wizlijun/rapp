@@ -1432,13 +1432,45 @@ void main() {
       expect(gone['net'], greaterThanOrEqualTo(gone['window']!), reason: '$gone');
     });
 
-    testWidgets('no window manager (iOS): no fullscreen button, the bar still fits', (tester) async {
+    testWidgets('iOS: the fullscreen button is there and the iPad widths still fit and keep the three', (tester) async {
       final was = caps;
       caps = PlatformCaps.forOs('ios');
       addTearDown(() => caps = was);
       await boot(tester);
-      for (final w in [1194.0, 507.0, 300.0]) {
+      for (final w in [1194.0, 1024.0, 834.0, 744.0, 600.0, 507.0]) {
         await at(tester, w);
+        await tester.pump();
+        expect(tester.takeException(), isNull, reason: '$w');
+        expect(find.byKey(const Key('fullscreen-button')), findsOneWidget, reason: '$w');
+        expect(find.byKey(const Key('session-block')), findsOneWidget, reason: '$w');
+        expect(find.byType(NeedsYouAnchor), findsOneWidget, reason: '$w');
+        expect(find.byKey(const Key('traffic')), findsOneWidget, reason: '$w');
+        final bar = find.byType(TopBar);
+        for (final f in [
+          find.descendant(of: bar, matching: find.byType(IconButton)),
+          find.descendant(of: bar, matching: find.byType(InkWell)),
+        ]) {
+          for (final e in f.evaluate()) {
+            final size = tester.getSize(find.byWidget(e.widget));
+            expect(size.width, greaterThanOrEqualTo(48), reason: '$w ${e.widget}');
+            expect(size.height, greaterThanOrEqualTo(48), reason: '$w ${e.widget}');
+          }
+        }
+      }
+      await at(tester, 300);
+      await tester.pump();
+      expect(tester.takeException(), isNull, reason: '300');
+      expect(find.byKey(const Key('traffic')), findsOneWidget, reason: '300');
+    });
+
+    testWidgets('no fullscreen control (onToggleFullscreen null): no fullscreen button, the bar still fits',
+        (tester) async {
+      await boot(tester);
+      for (final w in [1194.0, 507.0, 300.0]) {
+        await tester.pumpWidget(wrap(Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(width: w, child: TopBar(state: es, fullscreen: false, onToggleFullscreen: null)),
+        )));
         await tester.pump();
         expect(tester.takeException(), isNull, reason: '$w');
         expect(find.byKey(const Key('fullscreen-button')), findsNothing, reason: '$w');

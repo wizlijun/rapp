@@ -50,6 +50,9 @@ class IosChannel {
   Future<void> openSettings() => _channel.invokeMethod<void>('openSettings');
   Future<void> keepAwake(bool on) => _channel.invokeMethod<void>('keepAwake', {'on': on});
   Future<void> sessionActive(bool on) => _channel.invokeMethod<void>('sessionActive', {'on': on});
+
+  /// The status bar hidden and the home indicator fading out (RappViewController.fullscreen).
+  Future<void> fullscreen(bool on) => _channel.invokeMethod<void>('fullscreen', {'on': on});
   Future<void> beginBackground() => _channel.invokeMethod<void>('beginBackground');
   Future<void> endBackground() => _channel.invokeMethod<void>('endBackground');
 

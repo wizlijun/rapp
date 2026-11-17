@@ -1,6 +1,6 @@
 // Top bar, left to right: panel, overview, the project menu (with two projects or more), prev, the session (its list), next, the window menu,
 // the remote app's menu; then the hint, right-aligned (its ▾ opens the history); then 需要你, the
-// network marker, the traffic label (the stream menu), the session menu, fullscreen (where there is a window manager).
+// network marker, the traffic label (the stream menu), the session menu, fullscreen (where there is a fullscreen control).
 // Narrowing, it yields in this order (iPad spec §7.2): the hint's line (its ▾ stays), the 本机 button, the network
 // marker, the window title (the count stays).
 import 'package:flutter/material.dart';
@@ -8,7 +8,6 @@ import 'package:flutter/material.dart';
 import '../embed/stream_menu.dart';
 import '../embed/traffic_label.dart';
 import '../pages/app_profile_page.dart';
-import '../platform_caps.dart';
 import 'lamp.dart';
 import 'lifecycle.dart';
 import 'main_state.dart';
@@ -33,7 +32,9 @@ class TopBar extends StatelessWidget {
 
   final MainState state;
   final bool fullscreen;
-  final VoidCallback onToggleFullscreen;
+
+  /// Null where there is nothing to make fullscreen: no button then.
+  final VoidCallback? onToggleFullscreen;
 
   @override
   Widget build(BuildContext context) {
@@ -61,8 +62,8 @@ class TopBar extends StatelessWidget {
             // The 本机 button comes before it and the 远程 one before the window tabs when there is
             // room for them and a bit of the session block; else the traffic label's menu carries
             // all three parts.
-            // No window manager (iOS): no fullscreen button.
-            final fullscreenButton = caps.hasWindowManager;
+            final toggleFullscreen = onToggleFullscreen;
+            final fullscreenButton = toggleFullscreen != null;
             final baseIcons = (fullscreenButton ? 4 : 3) + (state.hub != null ? 1 : 0);
             final trafficW = embedded ? TrafficLabel.width : 0.0;
             // The project menu leads the session group while there are projects to switch
@@ -239,7 +240,7 @@ class TopBar extends StatelessWidget {
                       'fullscreen-button',
                       fullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
                       fullscreen ? '退出全屏' : '进入全屏',
-                      onToggleFullscreen,
+                      toggleFullscreen,
                     ),
                 ],
               ),

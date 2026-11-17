@@ -295,7 +295,8 @@ void main() {
       await tester.pump();
     }
 
-    Future<void> mountStage(WidgetTester tester, {double inset = 0, double width = 1100, double homeBar = 0}) async {
+    Future<void> mountStage(WidgetTester tester,
+        {double inset = 0, double width = 1100, double homeBar = 0, bool fullscreen = false}) async {
       tester.view.physicalSize = const Size(1200, 900);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
@@ -306,7 +307,7 @@ void main() {
           builder: (context) => MediaQuery(
             data: MediaQuery.of(context).copyWith(
                 viewInsets: EdgeInsets.only(bottom: inset), viewPadding: EdgeInsets.only(bottom: homeBar)),
-            child: Stage(state: s),
+            child: Stage(state: s, fullscreen: fullscreen),
           ),
         ),
       )));
@@ -360,6 +361,18 @@ void main() {
       await tester.pump();
       final stage = tester.getRect(find.byKey(const Key('stage')));
       expect(tester.getRect(find.byType(AppKeyRow)).bottom, stage.bottom - 280);
+    });
+
+    testWidgets('fullscreen: the stage runs to the bottom edge, so the row sits right on the soft keyboard',
+        (tester) async {
+      s.prefs.appKeyRow = true;
+      await mountStage(tester, inset: 300, homeBar: 20, fullscreen: true);
+      await openApp(tester, 'Safari');
+      s.focusPicture(1);
+      await tester.pump();
+      final stage = tester.getRect(find.byKey(const Key('stage')));
+      expect(stage.size, const Size(1100, 800));
+      expect(tester.getRect(find.byType(AppKeyRow)).bottom, stage.bottom - 300);
     });
 
     for (final w in [834.0, 744.0, 600.0, 507.0]) {

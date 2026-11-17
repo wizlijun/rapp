@@ -41,17 +41,21 @@ Widget offlineBarFor(MainState state, SessionRecord rec) => OfflineBar(
     );
 
 class Stage extends StatelessWidget {
-  const Stage({super.key, required this.state, this.composerEditor});
+  const Stage({super.key, required this.state, this.composerEditor, this.fullscreen = false});
   final MainState state;
+
+  /// MainWindow's fullscreen: the stage then runs to the view's bottom edge, under the home bar.
+  final bool fullscreen;
   final ComposerEditor Function()? composerEditor;
 
   /// The app key row's place. The keyboard's top edge is measured from the view's bottom, and the stage already
-  /// stands above the home bar (MainWindow's safe area), so the bar's height comes off. Down on the stage's bottom
+  /// stands above the home bar (MainWindow's safe area), so the bar's height comes off; in fullscreen the stage
+  /// reaches the view's bottom, so nothing does. Down on the stage's bottom
   /// line it keeps off 「输入」 (12 + 48 + 8 from the right): centred while it fits between two such margins, else
   /// from the left; beside the upload strip it goes up a line. Too narrow for all twelve, it scrolls.
   Widget _appKeyRow(BuildContext context, RemoteSession rs, {required bool showsInput}) {
     final mq = MediaQuery.of(context);
-    final kb = math.max(0.0, mq.viewInsets.bottom - mq.viewPadding.bottom);
+    final kb = math.max(0.0, mq.viewInsets.bottom - (fullscreen ? 0.0 : mq.viewPadding.bottom));
     final onLine = kb < 12 + 48;
     final input = showsInput && onLine && rs.composerAllowed && !rs.composer.open;
     final strip = showsInput && onLine && rs.transferStatus != null;

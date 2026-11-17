@@ -3,11 +3,20 @@ import UIKit
 
 /// The root view controller (the storyboard's initial one). While a session window is on screen it takes the
 /// screen-edge gestures and the home indicator away from the system, and it is where hardware-keyboard presses arrive.
+/// In rapp's fullscreen it hides the status bar and lets the home indicator fade (iOS never removes it for good).
 final class RappViewController: FlutterViewController {
   var sessionActive = false {
     didSet {
       guard sessionActive != oldValue else { return }
       setNeedsUpdateOfScreenEdgesDeferringSystemGestures()
+      setNeedsUpdateOfHomeIndicatorAutoHidden()
+    }
+  }
+
+  var fullscreen = false {
+    didSet {
+      guard fullscreen != oldValue else { return }
+      setNeedsStatusBarAppearanceUpdate()
       setNeedsUpdateOfHomeIndicatorAutoHidden()
     }
   }
@@ -22,7 +31,9 @@ final class RappViewController: FlutterViewController {
     sessionActive ? .all : []
   }
 
-  override var prefersHomeIndicatorAutoHidden: Bool { sessionActive }
+  override var prefersHomeIndicatorAutoHidden: Bool { sessionActive || fullscreen }
+
+  override var prefersStatusBarHidden: Bool { fullscreen }
 
   override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
     for press in presses where pressHandler?([press], true) != true { super.pressesBegan([press], with: event) }

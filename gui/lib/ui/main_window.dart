@@ -229,9 +229,13 @@ class _MainWindowState extends State<MainWindow> {
     // Safe areas (iPad spec §7.2): the top bar clears the status bar and the camera side; the stage clears the
     // home bar. The background (the scaffold's) still runs under them. The home bar's inset comes from the view
     // padding: with the soft keyboard up Flutter takes it out of the padding, and the stage never resizes (Z1).
-    // On the desktop all of it is 0.
+    // On the desktop all of it is 0. Fullscreen (iPad/Duo) lets the stage run to every screen edge, into the
+    // rounded corners and under the home bar; the top bar still clears what top inset is left.
     final pad = MediaQuery.paddingOf(context);
     final sides = EdgeInsets.only(left: pad.left, right: pad.right);
+    final stagePad = _full
+        ? EdgeInsets.zero
+        : sides.copyWith(bottom: math.max(pad.bottom, MediaQuery.viewPaddingOf(context).bottom));
     // On macOS only ⌃⌘ chords are rapp's: ⌘[ ⌘] belong to A while the picture has focus.
     final prefixOf = mac
         ? (LogicalKeyboardKey k) => SingleActivator(k, control: true, meta: true)
@@ -273,12 +277,16 @@ class _MainWindowState extends State<MainWindow> {
             child: Column(children: [
               Padding(
                 padding: sides.copyWith(top: pad.top),
-                child: _Blur(state: state, child: TopBar(state: state, fullscreen: _full, onToggleFullscreen: _toggleFull)),
+                child: _Blur(state: state, child: TopBar(
+                  state: state,
+                  fullscreen: _full,
+                  onToggleFullscreen: widget.fullscreen is NoFullscreen ? null : _toggleFull,
+                )),
               ),
               Padding(padding: sides, child: _Blur(state: state, child: _NarrowHint(state: state))),
               Expanded(
                 child: Padding(
-                  padding: sides.copyWith(bottom: math.max(pad.bottom, MediaQuery.viewPaddingOf(context).bottom)),
+                  padding: stagePad,
                   child: ListenableBuilder(
                     listenable: state,
                     builder: (context, _) {
@@ -289,7 +297,7 @@ class _MainWindowState extends State<MainWindow> {
                               ? AccessSetup(key: const Key('access-setup'), hub: state.hub!, onDone: _onAccessDone)
                               : state.overview
                                   ? Overview(state: state)
-                                  : Stage(state: state),
+                                  : Stage(state: state, fullscreen: _full),
                         ),
                         if (open)
                           Positioned.fill(

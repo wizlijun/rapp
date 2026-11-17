@@ -57,6 +57,9 @@ final class IosPlugin: NSObject, FlutterPlugin {
     case "sessionActive":
       Self.root?.sessionActive = args["on"] as? Bool ?? false
       result(true)
+    case "fullscreen":
+      Self.root?.fullscreen = args["on"] as? Bool ?? false
+      result(true)
     case "beginBackground":
       beginBackground()
       result(true)

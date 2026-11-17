@@ -88,10 +88,19 @@ Future<void> mainIos() async {
   // a session is live (spec §9). Lives as long as the app.
   BackgroundWatch(state: state, ios: iosChannel);
 
+  // Out of fullscreen the status bar stays and MainWindow keeps the top bar below it and the stage off the home
+  // bar; in it the status bar goes and the picture fills the screen.
+  final fullscreen = IosFullscreen();
+  if (prefs.startFullscreen) {
+    try {
+      await fullscreen.setFullScreen(true);
+    } catch (e) {
+      _log('全屏: $e');
+    }
+  }
   runApp(_IosApp(
     state: state,
-    // The status bar stays on iPad: MainWindow keeps its top bar below it and the stage off the home bar.
-    home: MainWindow(state: state, monitor: null, control: null, fullscreen: const NoFullscreen()),
+    home: MainWindow(state: state, monitor: null, control: null, fullscreen: fullscreen),
   ));
 }
 

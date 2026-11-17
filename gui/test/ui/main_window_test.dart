@@ -261,10 +261,10 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
-    testWidgets('no fullscreen button, and no 端口 on a device page', (tester) async {
+    testWidgets('a fullscreen button, and no 端口 on a device page', (tester) async {
       hasKey = true;
       await pumpIos(tester);
-      expect(find.byKey(const Key('fullscreen-button')), findsNothing);
+      expect(find.byKey(const Key('fullscreen-button')), findsOneWidget);
       expect(find.byType(TopBar), findsOneWidget);
       s.showDevice('111');
       await settle(tester);
@@ -273,6 +273,88 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
       await tester.pumpWidget(const SizedBox());
     });
+
+    testWidgets('no fullscreen control: no fullscreen button', (tester) async {
+      hasKey = true;
+      tester.view.physicalSize = const Size(1194, 834);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(wrap(
+        MainWindow(state: s, monitor: null, control: null, fullscreen: const NoFullscreen()),
+        disableAnimations: true,
+      ));
+      await settle(tester);
+      expect(find.byKey(const Key('fullscreen-button')), findsNothing);
+      expect(find.byType(TopBar), findsOneWidget);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    // Home bar 20, the camera on the left (20) in landscape, a rounded corner on the right (30).
+    MediaQueryData insets(MediaQueryData m, {bool keyboard = false}) => m.copyWith(
+          padding: EdgeInsets.only(left: 20, right: 30, bottom: keyboard ? 0 : 20),
+          viewPadding: const EdgeInsets.only(left: 20, right: 30, bottom: 20),
+          viewInsets: EdgeInsets.only(bottom: keyboard ? 300 : 0),
+        );
+
+    Future<void> pumpIosInsets(WidgetTester tester, {bool keyboard = false}) async {
+      tester.view.physicalSize = const Size(1194, 834);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(wrap(
+        Builder(
+          builder: (context) => MediaQuery(
+            data: insets(MediaQuery.of(context), keyboard: keyboard),
+            child: MainWindow(state: s, monitor: null, control: null, fullscreen: fs),
+          ),
+        ),
+        disableAnimations: true,
+      ));
+      await settle(tester);
+    }
+
+    testWidgets('fullscreen: the stage drops its safe areas and reaches the screen edges; the bar keeps its own',
+        (tester) async {
+      hasKey = true;
+      s.overview = false;
+      await pumpIosInsets(tester);
+      final inset = tester.getRect(find.byKey(const Key('stage')));
+      expect(inset.left, greaterThanOrEqualTo(20));
+      expect(inset.right, lessThanOrEqualTo(1194 - 30));
+      expect(inset.bottom, lessThanOrEqualTo(834 - 20));
+      await tester.tap(find.byKey(const Key('fullscreen-button')));
+      await settle(tester);
+      expect(fs.calls, [true]);
+      final full = tester.getRect(find.byKey(const Key('stage')));
+      expect(full.left, 0);
+      expect(full.right, 1194);
+      expect(full.bottom, 834);
+      final bar = tester.getRect(find.byType(TopBar));
+      expect(bar.left, greaterThanOrEqualTo(20), reason: 'the top bar still clears the camera side');
+      expect(bar.right, lessThanOrEqualTo(1194 - 30));
+      // And back.
+      await tester.tap(find.byKey(const Key('fullscreen-button')));
+      await settle(tester);
+      expect(fs.calls, [true, false]);
+      expect(tester.getRect(find.byKey(const Key('stage'))), inset);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    for (final on in [false, true]) {
+      testWidgets('fullscreen ${on ? 'on' : 'off'}: the soft keyboard never resizes the stage (Z1)', (tester) async {
+        hasKey = true;
+        s.overview = false;
+        fs.on = on;
+        await pumpIosInsets(tester);
+        final down = tester.getRect(find.byKey(const Key('stage')));
+        expect(down.bottom, on ? 834 : lessThanOrEqualTo(834 - 20));
+        await pumpIosInsets(tester, keyboard: true);
+        expect(tester.getRect(find.byKey(const Key('stage'))), down);
+        await tester.pump(const Duration(seconds: 1));
+        await tester.pumpWidget(const SizedBox());
+      });
+    }
   });
 
   testWidgets('desktop: a device page has its 端口 section', (tester) async {
