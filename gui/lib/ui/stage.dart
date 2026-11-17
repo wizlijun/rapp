@@ -40,6 +40,16 @@ Widget offlineBarFor(MainState state, SessionRecord rec) => OfflineBar(
       connecting: rec.phase != Phase.disconnected,
     );
 
+/// The remote app picture's key row (iPad spec §8.3) is held back until the user redesigns it: it never shows,
+/// whatever `app_key_row` holds. The row, its latch and the pref stay. The terminal's key row is not this one.
+const showAppKeyRow = false;
+
+/// How far up the app key row sits off the stage's bottom: the soft keyboard's height. The keyboard's top edge is
+/// measured from the view's bottom, and out of [fullscreen] the stage stands above the home bar (MainWindow's safe
+/// area), so the bar's height comes off; in fullscreen the stage reaches the view's bottom, so nothing does.
+double appKeyRowLift(MediaQueryData mq, {required bool fullscreen}) =>
+    math.max(0.0, mq.viewInsets.bottom - (fullscreen ? 0.0 : mq.viewPadding.bottom));
+
 class Stage extends StatelessWidget {
   const Stage({super.key, required this.state, this.composerEditor, this.fullscreen = false});
   final MainState state;
@@ -48,14 +58,11 @@ class Stage extends StatelessWidget {
   final bool fullscreen;
   final ComposerEditor Function()? composerEditor;
 
-  /// The app key row's place. The keyboard's top edge is measured from the view's bottom, and the stage already
-  /// stands above the home bar (MainWindow's safe area), so the bar's height comes off; in fullscreen the stage
-  /// reaches the view's bottom, so nothing does. Down on the stage's bottom
+  /// The app key row's place: [appKeyRowLift] up off the stage's bottom. Down on the stage's bottom
   /// line it keeps off 「输入」 (12 + 48 + 8 from the right): centred while it fits between two such margins, else
   /// from the left; beside the upload strip it goes up a line. Too narrow for all twelve, it scrolls.
   Widget _appKeyRow(BuildContext context, RemoteSession rs, {required bool showsInput}) {
-    final mq = MediaQuery.of(context);
-    final kb = math.max(0.0, mq.viewInsets.bottom - (fullscreen ? 0.0 : mq.viewPadding.bottom));
+    final kb = appKeyRowLift(MediaQuery.of(context), fullscreen: fullscreen);
     final onLine = kb < 12 + 48;
     final input = showsInput && onLine && rs.composerAllowed && !rs.composer.open;
     final strip = showsInput && onLine && rs.transferStatus != null;
@@ -246,7 +253,13 @@ class Stage extends StatelessWidget {
               // 按键排 over an app picture (iPad spec §8.3), while the picture has the keys or the writing panel is
               // open: on the soft keyboard's top edge when it is up, floating over the stage (Z1: no resize). Not
               // where the body fills the stage, as the writing panel's layer.
-              if (!full && picture && rs != null && !rs.detached && !(rec?.frozen ?? false) && state.prefs.appKeyRow)
+              if (showAppKeyRow &&
+                  !full &&
+                  picture &&
+                  rs != null &&
+                  !rs.detached &&
+                  !(rec?.frozen ?? false) &&
+                  state.prefs.appKeyRow)
                 Positioned.fill(
                   child: ListenableBuilder(
                     listenable: Listenable.merge([rs, rs.composer]),

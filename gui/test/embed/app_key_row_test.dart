@@ -9,6 +9,7 @@ import 'package:rapp/embed/modifier_latch.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/paths.dart';
+import 'package:rapp/platform_caps.dart';
 import 'package:rapp/ui/disconnected_stage.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
@@ -275,6 +276,30 @@ void main() {
     expect(UiPrefs.load(tmp.path).appKeyRow, isTrue);
   });
 
+  group('its lift off the stage bottom (appKeyRowLift)', () {
+    MediaQueryData mq({double inset = 0, double homeBar = 0}) =>
+        MediaQueryData(viewInsets: EdgeInsets.only(bottom: inset), viewPadding: EdgeInsets.only(bottom: homeBar));
+
+    test('no soft keyboard: on the stage bottom, home bar or not, fullscreen or not', () {
+      for (final full in [false, true]) {
+        expect(appKeyRowLift(mq(), fullscreen: full), 0);
+        expect(appKeyRowLift(mq(homeBar: 20), fullscreen: full), 0);
+      }
+    });
+
+    test('the soft keyboard up: its height', () {
+      expect(appKeyRowLift(mq(inset: 300), fullscreen: false), 300);
+    });
+
+    test('above the home bar the stage ends at the safe area: the bar comes off', () {
+      expect(appKeyRowLift(mq(inset: 300, homeBar: 20), fullscreen: false), 280);
+    });
+
+    test('fullscreen: the stage runs to the bottom edge, so the row sits right on the soft keyboard', () {
+      expect(appKeyRowLift(mq(inset: 300, homeBar: 20), fullscreen: true), 300);
+    });
+  });
+
   group('on the stage', () {
     Future<void> openApp(WidgetTester tester, String app) async {
       await tester.runAsync(() async {
@@ -322,155 +347,176 @@ void main() {
       expect(find.byType(AppKeyRow), findsNothing);
     });
 
-    testWidgets('on: the row floats over the picture while it has the keys, the stage keeps its size', (tester) async {
+    testWidgets('held back: a focused picture on iOS with app_key_row on still shows no row (showAppKeyRow)',
+        (tester) async {
+      final was = caps;
+      caps = PlatformCaps.forOs('ios');
+      addTearDown(() => caps = was);
       s.prefs.appKeyRow = true;
       await mountStage(tester);
       await openApp(tester, 'Safari');
       s.focusPicture(1);
       await tester.pump();
-      expect(find.byType(AppKeyRow), findsOneWidget);
-      final stage = tester.getRect(find.byKey(const Key('stage')));
-      expect(tester.getRect(find.byType(AppKeyRow)).bottom, stage.bottom);
-      expect(stage.size, const Size(1100, 800));
-      s.blurPicture();
-      await tester.pump();
-      expect(find.byType(AppKeyRow), findsNothing, reason: 'no focus and no panel');
+      expect(find.byType(Texture), findsOneWidget);
+      expect(s.pictureFocused, 1);
+      expect(find.byType(AppKeyRow), findsNothing);
       s.currentRemote!.composer.open = true;
       await tester.pump();
-      expect(find.byType(AppKeyRow), findsOneWidget, reason: 'the writing panel is open');
+      expect(find.byType(AppKeyRow), findsNothing, reason: 'nor with the writing panel open');
     });
 
-    testWidgets('with the soft keyboard up the row sits on its top edge; the stage keeps its size (Z1)',
-        (tester) async {
-      s.prefs.appKeyRow = true;
-      await mountStage(tester, inset: 300);
-      await openApp(tester, 'Safari');
-      s.focusPicture(1);
-      await tester.pump();
-      final stage = tester.getRect(find.byKey(const Key('stage')));
-      expect(stage.size, const Size(1100, 800));
-      expect(tester.getRect(find.byType(AppKeyRow)).bottom, stage.bottom - 300);
-    });
-
-    testWidgets('above the home bar the row still sits on the soft keyboard (the stage ends at the safe area)',
-        (tester) async {
-      s.prefs.appKeyRow = true;
-      await mountStage(tester, inset: 300, homeBar: 20);
-      await openApp(tester, 'Safari');
-      s.focusPicture(1);
-      await tester.pump();
-      final stage = tester.getRect(find.byKey(const Key('stage')));
-      expect(tester.getRect(find.byType(AppKeyRow)).bottom, stage.bottom - 280);
-    });
-
-    testWidgets('fullscreen: the stage runs to the bottom edge, so the row sits right on the soft keyboard',
-        (tester) async {
-      s.prefs.appKeyRow = true;
-      await mountStage(tester, inset: 300, homeBar: 20, fullscreen: true);
-      await openApp(tester, 'Safari');
-      s.focusPicture(1);
-      await tester.pump();
-      final stage = tester.getRect(find.byKey(const Key('stage')));
-      expect(stage.size, const Size(1100, 800));
-      expect(tester.getRect(find.byType(AppKeyRow)).bottom, stage.bottom - 300);
-    });
-
-    for (final w in [834.0, 744.0, 600.0, 507.0]) {
-      testWidgets('at $w the row keeps off 「输入」 and inside the stage (iPad split view)', (tester) async {
+    group('shown', skip: showAppKeyRow ? false : 'held back until the row is redesigned: showAppKeyRow (stage.dart)',
+        () {
+      testWidgets('on: the row floats over the picture while it has the keys, the stage keeps its size', (tester) async {
         s.prefs.appKeyRow = true;
-        await mountStage(tester, width: w);
+        await mountStage(tester);
         await openApp(tester, 'Safari');
         s.focusPicture(1);
         await tester.pump();
-        expect(tester.takeException(), isNull);
+        expect(find.byType(AppKeyRow), findsOneWidget);
         final stage = tester.getRect(find.byKey(const Key('stage')));
-        final row = tester.getRect(find.byType(AppKeyRow));
-        final input = tester.getRect(find.byKey(const Key('composer-open')));
-        expect(row.left, greaterThanOrEqualTo(stage.left));
-        expect(row.right, lessThanOrEqualTo(input.left), reason: 'row $row, 输入 $input');
-        // Too narrow for all twelve: the row scrolls to the rest, the first key still whole.
-        final esc = tester.getRect(key('Esc'));
-        expect(esc.left, greaterThanOrEqualTo(row.left));
-        if (w >= 744) {
-          expect(tester.getRect(key('Return')).right, lessThanOrEqualTo(row.right), reason: 'all twelve fit at $w');
-        }
+        expect(tester.getRect(find.byType(AppKeyRow)).bottom, stage.bottom);
+        expect(stage.size, const Size(1100, 800));
+        s.blurPicture();
+        await tester.pump();
+        expect(find.byType(AppKeyRow), findsNothing, reason: 'no focus and no panel');
+        s.currentRemote!.composer.open = true;
+        await tester.pump();
+        expect(find.byType(AppKeyRow), findsOneWidget, reason: 'the writing panel is open');
       });
-    }
 
-    testWidgets('the row only over a picture: gone once the body fills the stage (disconnected), as the composer layer',
-        (tester) async {
-      s.prefs.appKeyRow = true;
-      await mountStage(tester);
-      await openApp(tester, 'Safari');
-      s.focusPicture(1);
-      await tester.pump();
-      expect(find.byType(AppKeyRow), findsOneWidget, reason: 'a picture: not full');
-      expect(find.byKey(const Key('composer-open')), findsOneWidget);
-      port.emit(const DisconnectedEvent(1, 'user'));
-      await tester.pump();
-      await tester.pump();
-      expect(find.byType(DisconnectedStage), findsOneWidget, reason: 'the body fills the stage');
-      expect(find.byType(AppKeyRow), findsNothing);
-      expect(find.byKey(const Key('composer-open')), findsNothing);
-    });
+      testWidgets('with the soft keyboard up the row sits on its top edge; the stage keeps its size (Z1)',
+          (tester) async {
+        s.prefs.appKeyRow = true;
+        await mountStage(tester, inset: 300);
+        await openApp(tester, 'Safari');
+        s.focusPicture(1);
+        await tester.pump();
+        final stage = tester.getRect(find.byKey(const Key('stage')));
+        expect(stage.size, const Size(1100, 800));
+        expect(tester.getRect(find.byType(AppKeyRow)).bottom, stage.bottom - 300);
+      });
 
-    testWidgets('a switch to another session releases the old one\'s modifiers', (tester) async {
-      s.prefs.appKeyRow = true;
-      await mountStage(tester);
-      await openApp(tester, 'Safari');
-      s.focusPicture(1);
-      await tester.pump();
-      await tester.tap(key('Cmd'));
-      await tester.pump(const Duration(milliseconds: 50));
-      await tester.tap(key('Cmd'));
-      await tester.pump();
-      expect(s.appLatch.flags, latchCmd);
-      await openApp(tester, 'Notes');
-      expect(keys(sid: 1).last, ('up', 55, 0));
-      expect(s.appLatch.flags, 0);
-    });
+      testWidgets('above the home bar the row still sits on the soft keyboard (the stage ends at the safe area)',
+          (tester) async {
+        s.prefs.appKeyRow = true;
+        await mountStage(tester, inset: 300, homeBar: 20);
+        await openApp(tester, 'Safari');
+        s.focusPicture(1);
+        await tester.pump();
+        final stage = tester.getRect(find.byKey(const Key('stage')));
+        expect(tester.getRect(find.byType(AppKeyRow)).bottom, stage.bottom - 280);
+      });
 
-    testWidgets('going to the background lets go of a held ⌘ before the session closes (iPad spec §9.1)',
-        (tester) async {
-      s.prefs.appKeyRow = true;
-      await mountStage(tester);
-      await openApp(tester, 'Safari');
-      s.focusPicture(1);
-      await tester.pump();
-      await tester.tap(key('Cmd'));
-      await tester.pump(const Duration(milliseconds: 50));
-      await tester.tap(key('Cmd'));
-      await tester.pump();
-      expect(s.appLatch.flags, latchCmd);
-      port.calls.clear();
-      List<(String, Object?, Object?)>? atClose;
-      final answer = t.onSend;
-      t.onSend = (m) {
-        if (m['cmd'] == 'close') atClose ??= keys(sid: 1);
-        answer?.call(m);
-      };
-      unawaited(s.enterBackground());
-      await tester.pump();
-      expect(atClose, [('up', 55, 0)], reason: 'the up goes out before the close');
-      expect(s.appLatch.flags, 0);
-      await tester.pump(const Duration(seconds: 5)); // the wait for the hub's closed
-    });
+      testWidgets('fullscreen: the stage runs to the bottom edge, so the row sits right on the soft keyboard',
+          (tester) async {
+        s.prefs.appKeyRow = true;
+        await mountStage(tester, inset: 300, homeBar: 20, fullscreen: true);
+        await openApp(tester, 'Safari');
+        s.focusPicture(1);
+        await tester.pump();
+        final stage = tester.getRect(find.byKey(const Key('stage')));
+        expect(stage.size, const Size(1100, 800));
+        expect(tester.getRect(find.byType(AppKeyRow)).bottom, stage.bottom - 300);
+      });
 
-    testWidgets('the picture losing the keys with no panel open takes the row and its modifiers away',
-        (tester) async {
-      s.prefs.appKeyRow = true;
-      await mountStage(tester);
-      await openApp(tester, 'Safari');
-      s.focusPicture(1);
-      await tester.pump();
-      await tester.tap(key('Ctrl'));
-      await tester.pump();
-      expect(s.appLatch.flags, latchCtrl);
-      s.blurPicture();
-      await tester.pump();
-      expect(find.byType(AppKeyRow), findsNothing);
-      expect(keys(sid: 1).last, ('up', 59, 0));
-      expect(s.appLatch.flags, 0);
+      for (final w in [834.0, 744.0, 600.0, 507.0]) {
+        testWidgets('at $w the row keeps off 「输入」 and inside the stage (iPad split view)', (tester) async {
+          s.prefs.appKeyRow = true;
+          await mountStage(tester, width: w);
+          await openApp(tester, 'Safari');
+          s.focusPicture(1);
+          await tester.pump();
+          expect(tester.takeException(), isNull);
+          final stage = tester.getRect(find.byKey(const Key('stage')));
+          final row = tester.getRect(find.byType(AppKeyRow));
+          final input = tester.getRect(find.byKey(const Key('composer-open')));
+          expect(row.left, greaterThanOrEqualTo(stage.left));
+          expect(row.right, lessThanOrEqualTo(input.left), reason: 'row $row, 输入 $input');
+          // Too narrow for all twelve: the row scrolls to the rest, the first key still whole.
+          final esc = tester.getRect(key('Esc'));
+          expect(esc.left, greaterThanOrEqualTo(row.left));
+          if (w >= 744) {
+            expect(tester.getRect(key('Return')).right, lessThanOrEqualTo(row.right), reason: 'all twelve fit at $w');
+          }
+        });
+      }
+
+      testWidgets('the row only over a picture: gone once the body fills the stage (disconnected), as the composer layer',
+          (tester) async {
+        s.prefs.appKeyRow = true;
+        await mountStage(tester);
+        await openApp(tester, 'Safari');
+        s.focusPicture(1);
+        await tester.pump();
+        expect(find.byType(AppKeyRow), findsOneWidget, reason: 'a picture: not full');
+        expect(find.byKey(const Key('composer-open')), findsOneWidget);
+        port.emit(const DisconnectedEvent(1, 'user'));
+        await tester.pump();
+        await tester.pump();
+        expect(find.byType(DisconnectedStage), findsOneWidget, reason: 'the body fills the stage');
+        expect(find.byType(AppKeyRow), findsNothing);
+        expect(find.byKey(const Key('composer-open')), findsNothing);
+      });
+
+      testWidgets('a switch to another session releases the old one\'s modifiers', (tester) async {
+        s.prefs.appKeyRow = true;
+        await mountStage(tester);
+        await openApp(tester, 'Safari');
+        s.focusPicture(1);
+        await tester.pump();
+        await tester.tap(key('Cmd'));
+        await tester.pump(const Duration(milliseconds: 50));
+        await tester.tap(key('Cmd'));
+        await tester.pump();
+        expect(s.appLatch.flags, latchCmd);
+        await openApp(tester, 'Notes');
+        expect(keys(sid: 1).last, ('up', 55, 0));
+        expect(s.appLatch.flags, 0);
+      });
+
+      testWidgets('going to the background lets go of a held ⌘ before the session closes (iPad spec §9.1)',
+          (tester) async {
+        s.prefs.appKeyRow = true;
+        await mountStage(tester);
+        await openApp(tester, 'Safari');
+        s.focusPicture(1);
+        await tester.pump();
+        await tester.tap(key('Cmd'));
+        await tester.pump(const Duration(milliseconds: 50));
+        await tester.tap(key('Cmd'));
+        await tester.pump();
+        expect(s.appLatch.flags, latchCmd);
+        port.calls.clear();
+        List<(String, Object?, Object?)>? atClose;
+        final answer = t.onSend;
+        t.onSend = (m) {
+          if (m['cmd'] == 'close') atClose ??= keys(sid: 1);
+          answer?.call(m);
+        };
+        unawaited(s.enterBackground());
+        await tester.pump();
+        expect(atClose, [('up', 55, 0)], reason: 'the up goes out before the close');
+        expect(s.appLatch.flags, 0);
+        await tester.pump(const Duration(seconds: 5)); // the wait for the hub's closed
+      });
+
+      testWidgets('the picture losing the keys with no panel open takes the row and its modifiers away',
+          (tester) async {
+        s.prefs.appKeyRow = true;
+        await mountStage(tester);
+        await openApp(tester, 'Safari');
+        s.focusPicture(1);
+        await tester.pump();
+        await tester.tap(key('Ctrl'));
+        await tester.pump();
+        expect(s.appLatch.flags, latchCtrl);
+        s.blurPicture();
+        await tester.pump();
+        expect(find.byType(AppKeyRow), findsNothing);
+        expect(keys(sid: 1).last, ('up', 59, 0));
+        expect(s.appLatch.flags, 0);
+      });
     });
   });
 }
