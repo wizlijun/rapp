@@ -12,6 +12,7 @@ import 'package:rapp/embed/app_profile.dart';
 import 'package:rapp/ui/app_profile_store.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
+import 'package:rapp/ui/project_menu.dart';
 import 'package:rapp/ui/session_model.dart';
 import 'package:rapp/ui/session_switcher.dart';
 import 'package:rapp/ui/tokens.dart';
@@ -644,7 +645,7 @@ void main() {
         lessThan(tester.getRect(find.descendant(of: list, matching: find.text('已打开 Safari'))).top),
       );
       expect(find.byKey(const Key('hints-scrim')), findsOneWidget);
-      await tester.tap(find.byKey(const Key('hint-button')));
+      await tester.tap(find.byKey(const Key('hint-button')), warnIfMissed: false);
       await tester.pump();
       expect(es.corner, isNull);
       expect(find.byKey(const Key('hint-history')), findsNothing);
@@ -1202,27 +1203,42 @@ void main() {
       expect(find.text('mini · A'), findsOneWidget);
     });
 
-    testWidgets('上一个项目 appears only when there is one and goes back', (tester) async {
+    testWidgets('the project menu shows with two projects, ahead of the session list, and switches', (tester) async {
       await boot(tester);
       final a = s.createProject('写周报')!;
+      await tester.pump();
+      expect(find.byKey(const Key('project-menu')), findsNothing); // one project: nothing to switch
       final b = s.createProject('发版')!;
-      s.switchProject(a.id);
       await tester.pump();
-      expect(find.byKey(const Key('prev-project')), findsNothing);
-      s.switchProject(b.id);
-      await tester.pump();
-      final btn = find.byKey(const Key('prev-project'));
+      final btn = find.byKey(const Key('project-menu'));
       expect(btn, findsOneWidget);
-      expect(find.bySemanticsLabel('上一个项目：写周报'), findsOneWidget);
+      expect(find.text(ProjectMenu.noneLabel), findsOneWidget);
       expect(tester.getSize(btn).height, greaterThanOrEqualTo(48));
-      // Ahead of the session list: it is about projects.
+      // Ahead of the session list: it narrows what the list holds.
       expect(tester.getRect(btn).right, lessThanOrEqualTo(tester.getRect(find.byKey(const Key('prev'))).left + 0.01));
       expect(tester.getRect(btn).left, greaterThanOrEqualTo(tester.getRect(find.byKey(const Key('overview-button'))).right - 0.01));
-      await tester.tap(btn);
+      s.switchProject(a.id);
       await tester.pump();
-      expect(s.currentProject, a.id);
-      expect(find.byKey(const Key('prev-project')), findsOneWidget);
-      expect(find.bySemanticsLabel('上一个项目：发版'), findsOneWidget);
+      expect(find.byKey(const Key('project-menu-label')), findsOneWidget);
+      expect(tester.widget<Text>(find.byKey(const Key('project-menu-label'))).data, '写周报');
+      await tester.tap(btn);
+      await tester.pumpAndSettle();
+      expect(find.byKey(Key('project-row-${a.id}')), findsOneWidget);
+      expect(find.descendant(of: find.byKey(Key('project-row-${a.id}')), matching: find.byIcon(Icons.check)), findsOneWidget);
+      await tester.tap(find.byKey(Key('project-row-${b.id}')));
+      await tester.pumpAndSettle();
+      expect(s.currentProject, b.id);
+      expect(tester.widget<Text>(find.byKey(const Key('project-menu-label'))).data, '发版');
+      // The one left is marked 上一个.
+      await tester.tap(btn);
+      await tester.pumpAndSettle();
+      expect(find.descendant(of: find.byKey(Key('project-row-${a.id}')), matching: find.text('上一个')), findsOneWidget);
+      await tester.tapAt(Offset.zero);
+      await tester.pumpAndSettle();
+      s.deleteProject(a.id);
+      await tester.pump();
+      expect(find.byKey(const Key('project-menu')), findsNothing);
+      await tester.pump(MainState.undoFor);
       await tester.pump(MainState.cueFor);
     });
 
@@ -1257,18 +1273,6 @@ void main() {
       expect(b('next').onPressed, isNotNull);
     });
 
-    testWidgets('上一个项目 does not look like 撤销', (tester) async {
-      await boot(tester);
-      final a = s.createProject('写周报')!;
-      final b = s.createProject('发版')!;
-      s.switchProject(a.id);
-      s.switchProject(b.id);
-      await tester.pump();
-      final icon = tester.widget<Icon>(find.descendant(of: find.byKey(const Key('prev-project')), matching: find.byType(Icon)));
-      expect(icon.icon, Icons.swap_horiz);
-      await tester.pump(MainState.cueFor);
-    });
-
     testWidgets('with a current project and no session the bar names the project', (tester) async {
       await boot(tester);
       final a = s.createProject('写周报')!;
@@ -1289,13 +1293,13 @@ void main() {
       now = now.add(const Duration(minutes: 25));
       s.switchProject(a.id);
       await tester.pump();
-      expect(find.text('写周报'), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const Key('session-block')), matching: find.text('写周报')), findsOneWidget);
       final cue = find.byKey(const Key('return-cue'));
       expect(tester.widget<Text>(cue).data, '25 分钟前离开');
       expect(tester.widget<Text>(cue).style!.color, RappTokens.of(tester.element(cue)).muted);
       await tester.pump(MainState.cueFor);
       expect(find.byKey(const Key('return-cue')), findsNothing);
-      expect(find.text('写周报'), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const Key('session-block')), matching: find.text('写周报')), findsOneWidget);
     });
   });
 }

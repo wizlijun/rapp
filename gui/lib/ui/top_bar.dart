@@ -1,4 +1,4 @@
-// Top bar, left to right: panel, overview, 上一个项目 (once there is one), prev, the session (its list), next, the window menu,
+// Top bar, left to right: panel, overview, the project menu (with two projects or more), prev, the session (its list), next, the window menu,
 // the remote app's menu; then the hint, right-aligned (its ▾ opens the history); then 需要你, the
 // network marker, the traffic label (the stream menu), the session menu, fullscreen.
 import 'package:flutter/material.dart';
@@ -9,6 +9,7 @@ import '../pages/app_profile_page.dart';
 import 'lamp.dart';
 import 'lifecycle.dart';
 import 'main_state.dart';
+import 'project_menu.dart';
 import 'needs_you.dart';
 import 'window_menu.dart';
 import 'net_marker.dart';
@@ -59,12 +60,10 @@ class TopBar extends StatelessWidget {
             // all three parts.
             final baseIcons = 4 + (state.hub != null ? 1 : 0);
             final trafficW = embedded ? TrafficLabel.width : 0.0;
-            // 上一个项目 sits beside prev/next only when the bare row still has room for it.
-            final previous = state.previousProject == null
-                ? null
-                : state.projects.where((p) => p.id == state.previousProject).firstOrNull;
-            final showPrevProject = previous != null && box.maxWidth >= (baseIcons + 1) * 48 + trafficW;
-            final icons = baseIcons + (showPrevProject ? 1 : 0);
+            // The project menu leads the session group while there are projects to switch
+            // between and the bare row has room for its icon; it names the project further down.
+            final showProject = ProjectMenu.shows(state) && box.maxWidth >= (baseIcons + 1) * 48 + trafficW;
+            final icons = baseIcons + (showProject ? 1 : 0);
             final splitW = embedded ? (term ? 1 : 2) * 48.0 : 0.0;
             // The network marker, left of the stream anchor, while the hub has a relay to measure and
             // the bare row (no gaps, no overview button) has room for it; it goes before those do.
@@ -86,11 +85,16 @@ class TopBar extends StatelessWidget {
             final split = embedded && box.maxWidth >= (icons + 1) * 48 + trafficW + splitW + netW + 42 + 160 + wmW;
             final remoteButton = split && !term;
             final streamW = trafficW + (split ? splitW : 0.0) + netW;
+            // The project's name once everything else, the gaps and a fair session block fit.
+            final pmFull = showProject &&
+                box.maxWidth - (icons * 48 + streamW + wmW + 9 * 6) >= ProjectMenu.fullWidth - 48 + 200;
+            final pmExtra = pmFull ? ProjectMenu.fullWidth - 48 : 0.0;
             double fixed(double gap, bool overview) =>
                 (icons + (overview ? 1 : 0)) * 48 +
                 streamW +
                 wmW +
-                ((overview ? 7 : 6) + (showPrevProject ? 1 : 0) + (remoteButton ? 1 : 0) + (wmShow ? 1 : 0)) * gap;
+                pmExtra +
+                ((overview ? 7 : 6) + (showProject ? 1 : 0) + (remoteButton ? 1 : 0) + (wmShow ? 1 : 0)) * gap;
             // K11: never below 300.
             final showOverview = box.maxWidth >= 300 && box.maxWidth >= fixed(0, true);
             // Room for the gaps plus the session block's lamp (13) and its gap (8).
@@ -122,24 +126,9 @@ class TopBar extends StatelessWidget {
                     _overviewButton(t),
                     SizedBox(width: gap),
                   ],
-                  // 上一个项目, ahead of the session list: it is about projects.
-                  if (showPrevProject) ...[
-                    Semantics(
-                      container: true,
-                      excludeSemantics: true,
-                      button: true,
-                      label: '上一个项目：${previous.name}',
-                      onTap: state.backToPreviousProject,
-                      child: Tooltip(
-                        message: '上一个项目：${previous.name}',
-                        child: IconButton(
-                          key: const Key('prev-project'),
-                          icon: const Icon(Icons.swap_horiz),
-                          onPressed: state.backToPreviousProject,
-                          constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-                        ),
-                      ),
-                    ),
+                  // The project menu, ahead of the session list: it narrows what the list holds.
+                  if (showProject) ...[
+                    ProjectMenu(state: state, compact: !pmFull),
                     SizedBox(width: gap),
                   ],
                   _icon(
