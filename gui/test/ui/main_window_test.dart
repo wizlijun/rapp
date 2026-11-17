@@ -17,6 +17,7 @@ import 'package:rapp/hub_client.dart';
 import 'package:rapp/service_client.dart';
 import 'package:rapp/ui/fullscreen.dart';
 import 'package:rapp/ui/main_state.dart';
+import 'package:rapp/ui/log_screen.dart';
 import 'package:rapp/ui/main_window.dart';
 import 'package:rapp/ui/overview.dart';
 import 'package:rapp/ui/stage.dart';
@@ -274,6 +275,16 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     });
 
+    testWidgets('iPad: the local page has 更多 too', (tester) async {
+      hasKey = true;
+      s.overview = false;
+      s.togglePanel(PanelTab.devices);
+      await pumpIos(tester);
+      expect(find.byKey(const Key('access-log-more')), findsOneWidget);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpWidget(const SizedBox());
+    });
+
     testWidgets('no fullscreen control: no fullscreen button', (tester) async {
       hasKey = true;
       tester.view.physicalSize = const Size(1194, 834);
@@ -505,6 +516,36 @@ void main() {
     expect(s.overview, true);
     await chord();
     expect(s.overview, false);
+  });
+
+  testWidgets('更多 opens the log screen under the top bar; log-back returns; Esc order', (tester) async {
+    await pump(tester, h: 1600);
+    s.togglePanel(PanelTab.devices);
+    await settle(tester);
+    await tester.tap(find.byKey(const Key('access-log-more')));
+    await settle(tester);
+    expect(s.logs, true);
+    expect(s.panel, isNull);
+    expect(find.byType(LogScreen), findsOneWidget);
+    expect(find.byType(TopBar), findsOneWidget);
+    await tester.tap(find.byKey(const Key('log-back')));
+    await settle(tester);
+    expect(s.logs, false);
+    expect(find.byType(LogScreen), findsNothing);
+    // Esc: panel first, then the log screen, then the overview underneath.
+    s.toggleOverview();
+    s.openLogs();
+    s.togglePanel();
+    await settle(tester);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settle(tester);
+    expect(s.panel, isNull);
+    expect(s.logs, true);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settle(tester);
+    expect(s.logs, false);
+    expect(find.byType(LogScreen), findsNothing);
+    await tester.pump(const Duration(seconds: 1));
   });
 
   testWidgets('esc leaves overview after corners and panel', (tester) async {

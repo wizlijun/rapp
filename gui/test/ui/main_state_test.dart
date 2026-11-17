@@ -1839,6 +1839,39 @@ void main() {
     });
 
     group('overview', () {
+      test('openLogs closes the panel and takes the stage off', () {
+        env((a, t, port, st, hints) {
+          st.togglePanel();
+          st.openLogs();
+          expect(st.logs, true);
+          expect(st.panel, isNull);
+          st.closeLogs();
+          expect(st.logs, false);
+        }, sessions: 2);
+      });
+
+      test('select clears logs; so does toggleOverview', () {
+        env((a, t, port, st, hints) {
+          st.openLogs();
+          st.select('111/a');
+          expect(st.logs, false);
+          st.openLogs();
+          st.toggleOverview();
+          expect(st.logs, false);
+        }, sessions: 2);
+      });
+
+      test('stageLive is false while logs is open', () {
+        env((a, t, port, st, hints) {
+          port.emit(WindowsEvent(1, [rw(3)]));
+          expect(st.stageLive, true);
+          st.openLogs();
+          expect(st.stageLive, false);
+          st.closeLogs();
+          expect(st.stageLive, true);
+        }, sessions: 2);
+      });
+
       test('overview drops the current session to 1 fps', () {
         env((a, t, port, st, hints) {
           st.remote[2]!.setChoice(const StreamChoice('color16', 'adaptive', 30));

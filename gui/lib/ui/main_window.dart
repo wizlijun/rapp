@@ -22,6 +22,9 @@ import 'access_setup.dart';
 import 'backdrop.dart';
 import 'devices_tab.dart';
 import 'fullscreen.dart';
+import 'lamp.dart';
+import 'log_model.dart';
+import 'log_screen.dart';
 import 'main_state.dart';
 import 'overview.dart';
 import 'side_panel.dart';
@@ -91,6 +94,7 @@ class _MainWindowState extends State<MainWindow> {
       if (mounted) setState(() => _full = v);
     });
     _asks = state.unlockAsks.listen(_onAsk);
+    state.addListener(_onState);
     widget.monitor?.addListener(_onMonitor);
     if (widget.monitor == null) {
       state.hub?.addListener(_onAccess);
@@ -140,11 +144,46 @@ class _MainWindowState extends State<MainWindow> {
 
   @override
   void dispose() {
+    state.removeListener(_onState);
+    _log?.dispose();
+    _log = null;
     widget.monitor?.removeListener(_onMonitor);
     state.hub?.removeListener(_onAccess);
     _asks?.cancel();
     _sub?.cancel();
     super.dispose();
+  }
+
+  /// One model per opening of the 日志 screen: made on the first build with `logs` on, disposed when it closes.
+  LogModel? _log;
+
+  LogModel _logModel() =>
+      _log ??= LogModel(fetch: (id, q) => state.hub!.logs(id: id, query: q))..open(null);
+
+  void _onState() {
+    final m = _log;
+    if (state.logs || m == null) return;
+    _log = null;
+    // After the rebuild has dropped the screen that listens to it.
+    WidgetsBinding.instance.addPostFrameCallback((_) => m.dispose());
+  }
+
+  Widget _logScreen() {
+    final hosts = state.hub?.hosts ?? const <HubHost>[];
+    String label(String id) {
+      final p = state.probes[id];
+      final name = state.deviceName(id);
+      return p == null ? name : '$name，${p.word}';
+    }
+
+    return LogScreen(
+      key: const Key('log-screen'),
+      model: _logModel(),
+      devices: [for (final h in hosts) (h.id, label(h.id), state.probes[h.id]?.lamp ?? Lamp.connecting)],
+      onBack: state.closeLogs,
+      openFolder: _openFolder,
+      logDir: widget.monitor?.status?.logDir ?? '${state.data.root}/logs',
+    );
   }
 
   Future<void> _setFull(bool on) async {
@@ -159,6 +198,8 @@ class _MainWindowState extends State<MainWindow> {
       state.closeCorner();
     } else if (state.panel != null) {
       state.closePanel();
+    } else if (state.logs) {
+      state.closeLogs();
     } else if (state.overview) {
       state.toggleOverview();
     } else if (_full) {
@@ -195,6 +236,7 @@ class _MainWindowState extends State<MainWindow> {
           openFolder: _openFolder,
           reload: m,
           limit: 5,
+          onMore: state.openLogs,
         ),
       ),
     ]);
@@ -219,6 +261,7 @@ class _MainWindowState extends State<MainWindow> {
         logDir: '${state.data.root}/logs',
         openFolder: _openFolder,
         limit: 5,
+        onMore: state.openLogs,
       ),
     ]);
   }
@@ -296,6 +339,8 @@ class _MainWindowState extends State<MainWindow> {
                         Positioned.fill(
                           child: _needsAccess && state.hub != null
                               ? AccessSetup(key: const Key('access-setup'), hub: state.hub!, onDone: _onAccessDone)
+                              : state.logs
+                                  ? _logScreen()
                               : state.overview
                                   ? Overview(state: state)
                                   : Stage(state: state, fullscreen: _full),

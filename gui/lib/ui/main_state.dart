@@ -442,8 +442,25 @@ class MainState extends ChangeNotifier {
   /// The stage shows the overview wall instead of the current session's picture.
   bool overview = false;
 
+  /// The 日志 screen fills the stage (reached from 访问记录's 更多); no session is on stage meanwhile.
+  bool logs = false;
+
+  void openLogs() {
+    logs = true;
+    panel = null;
+    _blur();
+    notifyListeners();
+  }
+
+  void closeLogs() {
+    if (!logs) return;
+    logs = false;
+    notifyListeners();
+  }
+
   void toggleOverview() {
     overview = !overview;
+    logs = false;
     if (overview) _blur();
     notifyListeners();
   }
@@ -664,7 +681,7 @@ class MainState extends ChangeNotifier {
     if (p == null) return;
     _sentFps.removeWhere((sid, _) => !remote.containsKey(sid));
     // In overview no picture is on stage: every session runs at its off-stage rate (C4).
-    final onStage = overview ? null : currentRecord;
+    final onStage = overview || logs ? null : currentRecord;
     for (final rs in remote.values) {
       final last = _sentFps[rs.sid];
       if (last == null) continue; // not started yet: its start carries the rate
@@ -865,6 +882,7 @@ class MainState extends ChangeNotifier {
     currentKey = key;
     panel = null;
     overview = false;
+    logs = false;
     notifyListeners();
   }
 
@@ -1945,7 +1963,7 @@ class MainState extends ChangeNotifier {
 
   /// A live session is on the stage (not 全景, not in the background): the screen stays awake and the
   /// edge gestures are held (spec §9.5).
-  bool get stageLive => !backgrounded && !overview && currentRecord?.phase == Phase.live;
+  bool get stageLive => !backgrounded && !overview && !logs && currentRecord?.phase == Phase.live;
 
   /// The app went to the background (spec §9.1). Held modifiers are let go, presence pauses, and each
   /// live or connecting session freezes on its last frame and is closed with reason `background`; then
@@ -2264,6 +2282,7 @@ class MainState extends ChangeNotifier {
           currentKey = key;
           panel = null;
           overview = false;
+          logs = false;
         }
         hint = '已切到 $appName';
         notifyListeners();
@@ -2287,6 +2306,7 @@ class MainState extends ChangeNotifier {
       currentKey = key;
       panel = null;
       overview = false;
+      logs = false;
     }
     notifyListeners();
     try {
@@ -2468,6 +2488,7 @@ class MainState extends ChangeNotifier {
       currentKey = key;
       panel = null;
       overview = false;
+      logs = false;
     }
     if (r == null) {
       final fresh = SessionRecord(id, app, appName, '');
@@ -3279,6 +3300,7 @@ class MainState extends ChangeNotifier {
     currentKey = resumeKey(p, pos.last, (k) => entryFor(k) != null);
     panel = null;
     overview = false;
+    logs = false;
     if (back) {
       final leftAt = pos.leftAt;
       var needs = 0, disconnected = 0;
@@ -3324,6 +3346,7 @@ class MainState extends ChangeNotifier {
     if (!keys.contains(currentKey)) currentKey = keys.firstOrNull;
     panel = null;
     overview = false;
+    logs = false;
     notifyListeners();
   }
 
@@ -3368,6 +3391,7 @@ class MainState extends ChangeNotifier {
       currentKey = first;
       panel = null;
       overview = false;
+      logs = false;
     }
     notifyListeners();
   }

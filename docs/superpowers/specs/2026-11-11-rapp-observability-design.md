@@ -203,6 +203,7 @@ pub async fn splice_metered(a, b, meter: &Meter) -> io::Result<()>;
 - 再加一个按钮「打开日志文件夹」。macOS 上执行 `open <日志目录>`，Linux 用 `xdg-open`，Windows 用 `explorer`。
 - `status` 的回复里加 `log_dir`。
 - cm 小窗不改，它显示的是正在进行的会话。
+- 「更多」进日志界面（时间线、按设备和类型筛选），见《日志界面设计》（`2026-11-18-rapp-log-screen-design.md`）。
 
 ## 7 测试
 
