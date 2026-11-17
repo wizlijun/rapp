@@ -431,6 +431,7 @@ class MainState extends ChangeNotifier {
       _blur();
     }
     _focusNewTerm();
+    _raiseStagedSession();
     _syncPolicy();
     _syncDesktopTimer();
     // Every change of the current session or of detach state ends in a notify.
@@ -627,6 +628,25 @@ class MainState extends ChangeNotifier {
       if (w.id == rs.currentWindow) return w;
     }
     return null;
+  }
+
+  Object? _raisedStageSid;
+
+  /// Switching the local stage must also activate A's app. picture_focus only
+  /// routes B's keyboard; waiting for a click leaves wheel/trackpad input over
+  /// whichever app was previously on top. Do this as soon as its table arrives,
+  /// once per stage entry, not on every frame or focus-region update.
+  void _raiseStagedSession() {
+    final rs = currentRemote;
+    final w = rs == null ? null : _windowOf(rs);
+    if (overview || rs == null || rs.detached || !_liveSid(rs.sid) ||
+        isTermApp(rs.appId) || termPort?.owns(rs.sid) == true || w == null) {
+      _raisedStageSid = null;
+      return;
+    }
+    if (_raisedStageSid == rs.sid) return;
+    _raisedStageSid = rs.sid;
+    portOf(rs.sid)?.selectWindow(rs.sid, w.id);
   }
 
   /// A session that became current gets the stage size; its policy always knows the current window.
