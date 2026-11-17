@@ -1215,6 +1215,9 @@ void main() {
       expect(btn, findsOneWidget);
       expect(find.bySemanticsLabel('上一个项目：写周报'), findsOneWidget);
       expect(tester.getSize(btn).height, greaterThanOrEqualTo(48));
+      // Ahead of the session list: it is about projects.
+      expect(tester.getRect(btn).right, lessThanOrEqualTo(tester.getRect(find.byKey(const Key('prev'))).left + 0.01));
+      expect(tester.getRect(btn).left, greaterThanOrEqualTo(tester.getRect(find.byKey(const Key('overview-button'))).right - 0.01));
       await tester.tap(btn);
       await tester.pump();
       expect(s.currentProject, a.id);

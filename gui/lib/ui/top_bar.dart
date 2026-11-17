@@ -1,6 +1,6 @@
-// Top bar, left to right: panel, overview, prev, the session (its list), next, the window menu,
+// Top bar, left to right: panel, overview, 上一个项目 (once there is one), prev, the session (its list), next, the window menu,
 // the remote app's menu; then the hint, right-aligned (its ▾ opens the history); then 需要你, the
-// network marker, the traffic label (the stream menu), the session menu, 上一个项目, fullscreen.
+// network marker, the traffic label (the stream menu), the session menu, fullscreen.
 import 'package:flutter/material.dart';
 
 import '../embed/stream_menu.dart';
@@ -122,6 +122,26 @@ class TopBar extends StatelessWidget {
                     _overviewButton(t),
                     SizedBox(width: gap),
                   ],
+                  // 上一个项目, ahead of the session list: it is about projects.
+                  if (showPrevProject) ...[
+                    Semantics(
+                      container: true,
+                      excludeSemantics: true,
+                      button: true,
+                      label: '上一个项目：${previous.name}',
+                      onTap: state.backToPreviousProject,
+                      child: Tooltip(
+                        message: '上一个项目：${previous.name}',
+                        child: IconButton(
+                          key: const Key('prev-project'),
+                          icon: const Icon(Icons.swap_horiz),
+                          onPressed: state.backToPreviousProject,
+                          constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                        ),
+                      ),
+                    ),
+                    SizedBox(width: gap),
+                  ],
                   _icon(
                     'prev',
                     Icons.chevron_left,
@@ -214,25 +234,6 @@ class TopBar extends StatelessWidget {
                   if (embedded) ...[
                     _menu(context, cur, split ? {MenuPart.stream} : allMenuParts, Corner.stream),
                     if (split) _menu(context, cur, {MenuPart.session}, Corner.session),
-                  ],
-                  if (showPrevProject) ...[
-                    SizedBox(width: gap),
-                    Semantics(
-                      container: true,
-                      excludeSemantics: true,
-                      button: true,
-                      label: '上一个项目：${previous.name}',
-                      onTap: state.backToPreviousProject,
-                      child: Tooltip(
-                        message: '上一个项目：${previous.name}',
-                        child: IconButton(
-                          key: const Key('prev-project'),
-                          icon: const Icon(Icons.swap_horiz),
-                          onPressed: state.backToPreviousProject,
-                          constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-                        ),
-                      ),
-                    ),
                   ],
                   _icon(
                     'fullscreen-button',
