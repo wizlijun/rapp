@@ -1203,28 +1203,35 @@ void main() {
       expect(find.text('mini · A'), findsOneWidget);
     });
 
-    testWidgets('the project menu shows with two projects, ahead of the session list, and switches', (tester) async {
+    testWidgets('the project menu shows with a project, ahead of the session list: 全部, projects, 未归类', (tester) async {
       await boot(tester);
+      expect(find.byKey(const Key('project-menu')), findsNothing); // no project: nothing to narrow to
       final a = s.createProject('写周报')!;
-      await tester.pump();
-      expect(find.byKey(const Key('project-menu')), findsNothing); // one project: nothing to switch
       final b = s.createProject('发版')!;
       await tester.pump();
       final btn = find.byKey(const Key('project-menu'));
       expect(btn, findsOneWidget);
-      expect(find.text(ProjectMenu.noneLabel), findsOneWidget);
+      expect(tester.widget<Text>(find.byKey(const Key('project-menu-label'))).data, '全部');
+      expect(tester.widget<Icon>(find.byKey(const Key('project-menu-icon'))).icon, ProjectMenu.buttonIcon);
       expect(tester.getSize(btn).height, greaterThanOrEqualTo(48));
       // Ahead of the session list: it narrows what the list holds.
       expect(tester.getRect(btn).right, lessThanOrEqualTo(tester.getRect(find.byKey(const Key('prev'))).left + 0.01));
       expect(tester.getRect(btn).left, greaterThanOrEqualTo(tester.getRect(find.byKey(const Key('overview-button'))).right - 0.01));
       s.switchProject(a.id);
       await tester.pump();
-      expect(find.byKey(const Key('project-menu-label')), findsOneWidget);
       expect(tester.widget<Text>(find.byKey(const Key('project-menu-label'))).data, '写周报');
       await tester.tap(btn);
       await tester.pumpAndSettle();
-      expect(find.byKey(Key('project-row-${a.id}')), findsOneWidget);
-      expect(find.descendant(of: find.byKey(Key('project-row-${a.id}')), matching: find.byIcon(Icons.check)), findsOneWidget);
+      final rows = ['project-row-all', 'project-row-${a.id}', 'project-row-${b.id}', 'project-row-inbox'];
+      final ys = [for (final k in rows) tester.getRect(find.byKey(Key(k))).top];
+      expect([...ys]..sort(), ys, reason: '全部, the projects, then 未归类');
+      expect(find.descendant(of: find.byKey(const Key('project-row-all')), matching: find.text('全部')), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const Key('project-row-inbox')), matching: find.text('未归类')), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const Key('project-row-all')), matching: find.byIcon(ProjectMenu.allIcon)), findsOneWidget);
+      expect(find.descendant(of: find.byKey(Key('project-row-${b.id}')), matching: find.byIcon(ProjectMenu.projectIcon)), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const Key('project-row-inbox')), matching: find.byIcon(ProjectMenu.inboxIcon)), findsOneWidget);
+      final bold = tester.widget<Text>(find.descendant(of: find.byKey(Key('project-row-${a.id}')), matching: find.text('写周报')));
+      expect(bold.style!.fontWeight, FontWeight.w700, reason: 'the current one is bold');
       await tester.tap(find.byKey(Key('project-row-${b.id}')));
       await tester.pumpAndSettle();
       expect(s.currentProject, b.id);
@@ -1233,9 +1240,19 @@ void main() {
       await tester.tap(btn);
       await tester.pumpAndSettle();
       expect(find.descendant(of: find.byKey(Key('project-row-${a.id}')), matching: find.text('上一个')), findsOneWidget);
-      await tester.tapAt(Offset.zero);
+      await tester.tap(find.byKey(const Key('project-row-inbox')));
       await tester.pumpAndSettle();
+      expect((s.inbox, s.currentProject), (true, null));
+      expect(tester.widget<Text>(find.byKey(const Key('project-menu-label'))).data, '未归类');
+      expect(tester.widget<Icon>(find.byKey(const Key('project-menu-icon'))).icon, ProjectMenu.buttonIcon);
+      await tester.tap(btn);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('project-row-all')));
+      await tester.pumpAndSettle();
+      expect((s.inbox, s.currentProject), (false, null));
+      expect(tester.widget<Text>(find.byKey(const Key('project-menu-label'))).data, '全部');
       s.deleteProject(a.id);
+      s.deleteProject(b.id);
       await tester.pump();
       expect(find.byKey(const Key('project-menu')), findsNothing);
       await tester.pump(MainState.undoFor);
@@ -1280,7 +1297,7 @@ void main() {
       expect(find.text('没有选中的会话'), findsOneWidget);
       s.switchProject(a.id);
       await tester.pump();
-      expect(find.text('写周报'), findsOneWidget);
+      expect(find.descendant(of: find.byKey(const Key('session-block')), matching: find.text('写周报')), findsOneWidget);
       expect(find.text('没有选中的会话'), findsNothing);
     });
 

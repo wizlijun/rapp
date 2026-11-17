@@ -1,5 +1,6 @@
-// The top bar's project control, ahead of the session list: one button naming the current project,
-// and a menu to switch. It shows only when there are two projects or more to switch between.
+// The top bar's project control, ahead of the session list: one button naming what the list is
+// narrowed to, and a menu to switch: 全部, each project, then 未归类 (the sessions in no project).
+// It shows once there is a project.
 import 'package:flutter/material.dart';
 
 import 'main_state.dart';
@@ -11,23 +12,38 @@ class ProjectMenu extends StatelessWidget {
 
   final MainState state;
 
-  /// No room for the name: its first character and the ▾, the name in the tooltip.
+  /// No room for the name: the icon and the ▾, the name in the tooltip.
   final bool compact;
 
   /// The button's widest with the name, and its width without.
   static const fullWidth = 160.0;
   static const compactWidth = 48.0;
 
-  /// Shown only with something to switch between.
-  static bool shows(MainState state) => state.projects.length >= 2;
+  /// Shown once there is a project: with it, 全部 and 未归类 are already three to pick from.
+  static bool shows(MainState state) => state.projects.isNotEmpty;
 
-  static const noneLabel = '未选项目';
+  /// The menu's values for 全部 and 未归类; project ids never start with a NUL.
+  static const allValue = '\u0000all';
+  static const inboxValue = '\u0000inbox';
+
+  /// Each choice's icon: 全部 every app, a project a workspace, 未归类 an inbox.
+  static const allIcon = Icons.apps;
+  static const projectIcon = Icons.workspaces_outlined;
+  static const inboxIcon = Icons.inbox_outlined;
+
+  /// The button's icon: the working sphere, whatever it is narrowed to.
+  static const buttonIcon = Icons.workspaces_outlined;
+
+  /// What the button names: the current project, 未归类, or 全部.
+  static String labelOf(MainState state) {
+    if (state.inbox) return MainState.inboxLabel;
+    return state.projects.where((p) => p.id == state.currentProject).firstOrNull?.name ?? MainState.allLabel;
+  }
 
   @override
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
-    final current = state.projects.where((p) => p.id == state.currentProject).firstOrNull;
-    final label = current?.name ?? noneLabel;
+    final label = labelOf(state);
     final radius = BorderRadius.circular(t.r);
     return Tooltip(
       message: '项目：$label',
@@ -47,19 +63,20 @@ class ProjectMenu extends StatelessWidget {
                 child: Container(
                   // Hugs its content: a short name keeps a short button.
                   constraints: const BoxConstraints(minHeight: 48, maxHeight: 48, minWidth: 48),
-                  padding: EdgeInsets.only(left: compact ? 6 : 10, right: compact ? 2 : 6),
+                  padding: EdgeInsets.only(left: compact ? 4 : 10, right: compact ? 2 : 6),
                   decoration: BoxDecoration(borderRadius: radius, border: Border.all(color: t.line)),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Flexible(
+                      Icon(buttonIcon, key: const Key('project-menu-icon'), size: 18, color: t.muted),
+                      const SizedBox(width: 6),
+                      if (!compact) Flexible(
                         child: Text(
-                          // No room for the name: its first character, the name in the tooltip.
-                          compact ? label.characters.first : label,
+                          label,
                           key: const Key('project-menu-label'),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(color: current == null ? t.muted : t.text),
+                          style: TextStyle(color: t.text),
                         ),
                       ),
                       Icon(Icons.arrow_drop_down, size: 18, color: t.muted),
@@ -74,38 +91,49 @@ class ProjectMenu extends StatelessWidget {
     );
   }
 
-  /// The menu under the button: every project, the current one ticked, the previous one marked.
+  /// The menu under the button: 全部, every project, 未归类, each with its icon. The current one is
+  /// bold, the previous project marked 上一个.
   Future<void> _open(BuildContext context) async {
     final box = context.findRenderObject() as RenderBox;
     final at = box.localToGlobal(Offset(0, box.size.height));
     final t = RappTokens.of(context);
+    final now = state.inbox ? inboxValue : state.currentProject ?? allValue;
+    PopupMenuItem<String> row(String key, String value, IconData icon, String name, {bool previous = false}) =>
+        PopupMenuItem<String>(
+          key: Key(key),
+          value: value,
+          child: Row(
+            children: [
+              Icon(icon, size: 18, color: value == now ? t.text : t.muted),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontWeight: value == now ? FontWeight.w700 : null),
+                ),
+              ),
+              if (previous) ...[
+                const SizedBox(width: 12),
+                Text('上一个', style: TextStyle(color: t.muted)),
+              ],
+            ],
+          ),
+        );
     final pick = await showMenu<String>(
       context: context,
       position: menuAt(context, at),
       items: [
+        row('project-row-all', allValue, allIcon, MainState.allLabel),
         for (final p in state.projects)
-          PopupMenuItem<String>(
-            key: Key('project-row-${p.id}'),
-            value: p.id,
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 20,
-                  child: p.id == state.currentProject
-                      ? Icon(Icons.check, size: 16, color: Theme.of(context).colorScheme.onSurface)
-                      : null,
-                ),
-                Expanded(child: Text(p.name, maxLines: 1, overflow: TextOverflow.ellipsis)),
-                if (p.id == state.previousProject) ...[
-                  const SizedBox(width: 12),
-                  Text('上一个', style: TextStyle(color: t.muted)),
-                ],
-              ],
-            ),
-          ),
+          row('project-row-${p.id}', p.id, projectIcon, p.name, previous: p.id == state.previousProject),
+        row('project-row-inbox', inboxValue, inboxIcon, MainState.inboxLabel),
       ],
     );
-    if (pick == null || pick == state.currentProject) return;
+    if (pick == null || pick == now) return;
+    if (pick == allValue) return state.leaveProject();
+    if (pick == inboxValue) return state.switchInbox();
     state.switchProject(pick);
   }
 }
