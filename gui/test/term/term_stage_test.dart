@@ -106,14 +106,14 @@ void main() {
     addTearDown(() => t.binding.setSurfaceSize(null));
     await show(t);
     expect(views(), [
-      {'sid': 1, 'window': 3, 'cols': (800 / cw).floor(), 'rows': (480 / ch).floor()},
+      {'sid': 1, 'window': 3, 'cols': (800 / cw).floor(), 'rows': (480 / ch).floor(), 'fit': false},
     ]);
     await show(t, w: 900);
     await t.pump(const Duration(milliseconds: 200));
     expect(views(), hasLength(1));
     await t.pump(const Duration(milliseconds: 150));
     expect(views(), hasLength(2));
-    expect(views().last, {'sid': 1, 'window': 3, 'cols': (900 / cw).floor(), 'rows': (480 / ch).floor()});
+    expect(views().last, {'sid': 1, 'window': 3, 'cols': (900 / cw).floor(), 'rows': (480 / ch).floor(), 'fit': false});
   });
 
   testWidgets('no view goes out before the session has a pane table', (t) async {

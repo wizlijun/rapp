@@ -55,7 +55,7 @@ class _Term {
   final pastes = Queue<_Paste>();
 
   /// The latest view asked for, and whether this connection has been sent it.
-  ({String pane, int cols, int rows})? view;
+  ({String pane, int cols, int rows, bool fit})? view;
   bool viewSent = false;
 }
 
@@ -344,24 +344,25 @@ class TermSessionPort extends SessionPort {
     paste(sid, data.toString()).then(done, onError: (Object _) => done(pasteFailed));
   }
 
-  /// Shows pane [window] at [cols]x[rows]; the same parameters are not sent twice on one connection.
-  void view(Object sid, int window, int cols, int rows) {
+  /// Shows pane [window] at [cols]x[rows]; with [fit] the host resizes its window to that size.
+  /// The same parameters (fit included) are not sent twice on one connection.
+  void view(Object sid, int window, int cols, int rows, {bool fit = false}) {
     final t = _terms[sid];
     if (t == null) return;
     final id = pane(sid, window)?.id ?? '%$window';
-    final v = (pane: id, cols: cols, rows: rows);
+    final v = (pane: id, cols: cols, rows: rows, fit: fit);
     if (t.viewSent && t.view == v) return;
     t.view = v;
     if (t.link == null || t.disconnected) return;
     _sendView(t, v);
   }
 
-  void _sendView(_Term t, ({String pane, int cols, int rows}) v) {
+  void _sendView(_Term t, ({String pane, int cols, int rows, bool fit}) v) {
     t.viewSent = true;
     lastCols = v.cols;
     lastRows = v.rows;
     t.model.expect(v.pane);
-    t.link!.send(viewMsg(v.pane, v.cols, v.rows));
+    t.link!.send(viewMsg(v.pane, v.cols, v.rows, fit: v.fit));
   }
 
   /// Sends the next history request the model wants, if any.

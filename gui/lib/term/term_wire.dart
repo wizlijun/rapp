@@ -176,7 +176,8 @@ TermOut? _parse(Map m) {
   return null;
 }
 
-Map<String, Object?> viewMsg(String? pane, int cols, int rows) => {'t': 'view', 'pane': pane, 'cols': cols, 'rows': rows};
+Map<String, Object?> viewMsg(String? pane, int cols, int rows, {bool fit = false}) =>
+    {'t': 'view', 'pane': pane, 'cols': cols, 'rows': rows, 'fit': fit};
 Map<String, Object?> ackMsg(int rev) => {'t': 'ack', 'rev': rev};
 Map<String, Object?> historyReq(String pane, int before, int lines) =>
     {'t': 'history', 'pane': pane, 'before': before, 'lines': lines};
