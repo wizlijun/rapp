@@ -194,6 +194,15 @@ pub async fn serve_value(state: &Arc<State>, mut s: Pipe, v: Value, peer: Peer) 
             log_request(state, &peer, json!({"op": "list_apps"}), &r);
             reply_and_finish(&mut s, r).await
         }
+        Ok(Op::Logs(q)) => {
+            let dir = state.log_dir.clone();
+            let r = match tokio::task::spawn_blocking(move || rapp_net::logq::query(&dir, &q, std::time::SystemTime::now())).await {
+                Ok(v) => ok(v),
+                Err(e) => err(&e.to_string()),
+            };
+            log_request(state, &peer, json!({"op": "logs"}), &r);
+            reply_and_finish(&mut s, r).await
+        }
         // Presence probe: no access-log line (A's 访问记录 must not fill with probes).
         Ok(Op::Ping) => reply_and_finish(&mut s, ok(json!({}))).await,
         Ok(
