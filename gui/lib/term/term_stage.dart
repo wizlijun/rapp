@@ -72,7 +72,7 @@ class TermStage extends StatefulWidget {
   State<TermStage> createState() => _TermStageState();
 }
 
-typedef _View = ({int window, int cols, int rows});
+typedef _View = ({int window, int cols, int rows, bool fit});
 
 class _TermStageState extends State<TermStage> with SingleTickerProviderStateMixin {
   final _focus = FocusNode(debugLabel: 'term-stage');
@@ -265,6 +265,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
 
   /// MainState asked for the keys to come here (`focusPicture`, a terminal opened or switched to).
   void _onState() {
+    if (widget.state.prefs.termFit != (_sent?.fit ?? widget.state.prefs.termFit)) setState(() {});
     final tick = widget.state.termFocusTick;
     if (tick == _focusSeen) return;
     _focusSeen = tick;
@@ -294,15 +295,15 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     if (!mounted) return;
     final win = widget.session.currentWindow;
     if (win == null || _model == null) return;
-    final v = (window: win, cols: _cols, rows: _rows);
+    final v = (window: win, cols: _cols, rows: _rows, fit: widget.state.prefs.termFit);
     final sent = _sent;
     if (v == sent) {
       _viewTimer?.cancel();
       _pending = null;
       return;
     }
-    // The first view of a pane goes at once; a new size waits until the stage stops changing.
-    if (sent == null || sent.window != win) {
+    // The first view of a pane, and a change of fit, go at once; a new size waits until the stage stops changing.
+    if (sent == null || sent.window != win || sent.fit != v.fit) {
       _viewTimer?.cancel();
       _pending = null;
       _sendView(v);
@@ -320,7 +321,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
 
   void _sendView(_View v) {
     _sent = v;
-    widget.port.view(widget.session.sid, v.window, v.cols, v.rows);
+    widget.port.view(widget.session.sid, v.window, v.cols, v.rows, fit: v.fit);
   }
 
   // ---- scrolling (H1, H2) ----
@@ -657,7 +658,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
       final gridW = shown ? m.cols * cw : 0.0, gridH = shown ? m.rows * ch : 0.0;
       // The pane keeps the device's rows and columns; it is laid out at the font size that fits it to the
       // stage, up as well as down, and drawn at that size rather than stretched.
-      final k = gridScale(w: w, h: h, gridW: gridW, gridH: gridH, up: true);
+      final k = gridScale(w: w, h: h, gridW: gridW, gridH: gridH, up: !widget.state.prefs.termFit);
       _drawn = shown ? _metricsAt(_metrics.style.fontSize! * k, m.cols, m.rows, w, h) : _metrics;
 
       if (m != null && _linksVer != _ver) {

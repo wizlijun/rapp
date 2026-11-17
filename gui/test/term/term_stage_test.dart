@@ -108,14 +108,14 @@ void main() {
     addTearDown(() => t.binding.setSurfaceSize(null));
     await show(t);
     expect(views(), [
-      {'sid': 1, 'window': 3, 'cols': (800 / cw).floor(), 'rows': (480 / ch).floor(), 'fit': false},
+      {'sid': 1, 'window': 3, 'cols': (800 / cw).floor(), 'rows': (480 / ch).floor(), 'fit': true},
     ]);
     await show(t, w: 900);
     await t.pump(const Duration(milliseconds: 200));
     expect(views(), hasLength(1));
     await t.pump(const Duration(milliseconds: 150));
     expect(views(), hasLength(2));
-    expect(views().last, {'sid': 1, 'window': 3, 'cols': (900 / cw).floor(), 'rows': (480 / ch).floor(), 'fit': false});
+    expect(views().last, {'sid': 1, 'window': 3, 'cols': (900 / cw).floor(), 'rows': (480 / ch).floor(), 'fit': true});
   });
 
   testWidgets('no view goes out before the session has a pane table', (t) async {
@@ -338,7 +338,40 @@ void main() {
     expect([for (final l in painter(t).links) l.y], [5]);
   });
 
+  testWidgets('the view asks with fit by default', (t) async {
+    await show(t);
+    expect(views().first['fit'], true);
+  });
+
+  testWidgets('turning fit off sends a view at once', (t) async {
+    await show(t);
+    await t.pump(const Duration(milliseconds: 400));
+    state.setTermFit(false);
+    await show(t);
+    await t.pump();
+    expect(views().last['fit'], false);
+  });
+
+  testWidgets('fit on and the pane is the asked size draws at 14', (t) async {
+    model.apply(scr([for (var i = 0; i < 10; i++) 'r$i'], cols: 40));
+    await show(t, w: 40 * cw, h: 10 * ch);
+    expect(painter(t).metrics.style.fontSize, 14);
+  });
+
+  testWidgets('fit on and a smaller pane stays at 14', (t) async {
+    model.apply(scr(['r0', 'r1'], cols: 10));
+    await show(t, w: 40 * cw, h: 20 * ch);
+    expect(painter(t).metrics.style.fontSize, 14);
+  });
+
+  testWidgets('fit on and a larger pane is scaled down', (t) async {
+    model.apply(scr([for (var i = 0; i < 60; i++) 'r$i'], cols: 200));
+    await show(t, w: 600, h: 400);
+    expect(painter(t).metrics.style.fontSize, lessThan(14));
+  });
+
   testWidgets('a small pane is scaled up to fill', (t) async {
+    state.prefs.termFit = false;
     model.apply(scr([for (var i = 0; i < 2; i++) 'r$i'], cols: 10));
     await show(t, w: 40 * cw, h: 20 * ch);
     // Laid out at four times the font size, not stretched.
@@ -367,6 +400,7 @@ void main() {
   });
 
   testWidgets('selection maps to cells when scaled up', (t) async {
+    state.prefs.termFit = false;
     model.apply(scr(['abcdefghij', 'klmnopqrst'], cols: 10));
     await show(t, w: 40 * cw, h: 20 * ch);
     expect(painter(t).metrics.style.fontSize, closeTo(56, 1));
