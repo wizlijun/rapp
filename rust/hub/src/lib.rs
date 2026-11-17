@@ -320,8 +320,10 @@ impl Hub {
             }
             Some("logs") => {
                 let q: rapp_net::logq::LogQuery = serde_json::from_value(v.clone()).context("bad logs query")?;
-                let (mut ev, r) = match v.get("id").and_then(Value::as_str) {
+                let (mut ev, r) = match v.get("id") {
+                    Some(id) if !id.is_string() => bail!("bad id"),
                     Some(id) => {
+                        let id = id.as_str().unwrap_or_default();
                         let (_, r, _) = self.request(&self.host(id)?, &Op::Logs(q)).await?;
                         (json!({"event":"logs","id":id}), r)
                     }
