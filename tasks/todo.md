@@ -433,6 +433,7 @@
 
 规格 `docs/superpowers/specs/2026-11-17-rapp-ipad-duo-design.md`，测量结果 `docs/superpowers/measurements/2026-11-17-rapp-ipad-p0.md`。探查代码在分支 `probe/ipad-p0`，不合并。
 
+- [ ] `scripts/build-ios.sh sim` 在这台 Mac 上失败（Xcode 27.2 / 27B52 + Flutter 3.44.1，framework 2026-05-29）：Xcode 自己编完（约 135 秒），之后 Flutter 报 `Xcode build is missing expected TARGET_BUILD_DIR build setting` 并以 1 退出，`Runner.app` 不生成。`device` 模式同机同版本是通的（已装到 Duo 上跑过），所以只有模拟器这条路受影响；疑似 Flutter 读 `xcodebuild -showBuildSettings` 跟不上新 Xcode，没有验证。先升 Flutter 再看
 - [ ] 查 A 没锁屏时窗口抓取不出帧（这台 Mac，macOS 27）：测试页在画、窗口在屏幕内，客户端还是 0 fps；锁屏后 29–30 fps
 - [ ] 上面查清后，补做手机和 macOS 的 CPU 对比（过关条件：不超过 macOS 同档的两倍），A 上不能有别的设备连着
 - [ ] Duo 真机：开合序列、外屏窗口大小、开合时 App 是否一直活动
