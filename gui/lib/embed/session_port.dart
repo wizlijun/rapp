@@ -558,6 +558,10 @@ abstract class SessionPort {
   /// Stop a local worker when the hub loses the link before the worker notices.
   void freeze(Object sid, String reason) {}
 
+  /// The system is short of memory (iOS): the disconnected [sid] off the stage lets go of its window
+  /// pictures. The runner ignores it elsewhere.
+  void dropTextures(Object sid) => _send('drop_textures', {'sid': sid});
+
   /// Native Linux windows mirror the shared writing-panel preferences.
   bool get supportsInlineNativeComposer => false;
   void nativeComposerOptions(Object sid, {required bool allowed, required bool compose, required double scale,

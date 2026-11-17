@@ -329,6 +329,16 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     case let .dismissCover(sid, id):
       live[sid]?.session.send(.dismissCover(id))
       result(nil)
+    case let .dropTextures(sid):
+      #if os(iOS)
+      // A memory warning: Dart sends it only for frozen sessions off the stage. Their pictures go; the
+      // reconnect registers new ones.
+      if let entry = live[sid] {
+        entry.textures.values.forEach { registry.unregisterTexture($0.id) }
+        entry.textures = [:]
+      }
+      #endif
+      result(nil)
     case let .setBanner(sid, text):
       banners[sid] = text.isEmpty ? nil : text
       #if os(macOS)

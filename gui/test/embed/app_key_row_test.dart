@@ -1,4 +1,5 @@
 // The app key row (iPad P1 task 9): Esc Tab ⌘ ⌥ ⌃ ⇧ ← ↑ ↓ → ⌫ ⏎ over an app session's picture, the modifiers sticky.
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -362,6 +363,32 @@ void main() {
       await openApp(tester, 'Notes');
       expect(keys(sid: 1).last, ('up', 55, 0));
       expect(s.appLatch.flags, 0);
+    });
+
+    testWidgets('going to the background lets go of a held ⌘ before the session closes (iPad spec §9.1)',
+        (tester) async {
+      s.prefs.appKeyRow = true;
+      await mountStage(tester);
+      await openApp(tester, 'Safari');
+      s.focusPicture(1);
+      await tester.pump();
+      await tester.tap(key('Cmd'));
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(key('Cmd'));
+      await tester.pump();
+      expect(s.appLatch.flags, latchCmd);
+      port.calls.clear();
+      List<(String, Object?, Object?)>? atClose;
+      final answer = t.onSend;
+      t.onSend = (m) {
+        if (m['cmd'] == 'close') atClose ??= keys(sid: 1);
+        answer?.call(m);
+      };
+      unawaited(s.enterBackground());
+      await tester.pump();
+      expect(atClose, [('up', 55, 0)], reason: 'the up goes out before the close');
+      expect(s.appLatch.flags, 0);
+      await tester.pump(const Duration(seconds: 5)); // the wait for the hub's closed
     });
 
     testWidgets('the picture losing the keys with no panel open takes the row and its modifiers away',

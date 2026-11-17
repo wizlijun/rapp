@@ -96,6 +96,11 @@ void main() {
     expect(disconnectWord('host says: window gone'), 'window gone');
     expect(disconnectWord(null), '');
   });
+  test('going to the background reads 切到后台 and reconnects by itself (iPad spec §9.1)', () {
+    expect(disconnectWord('background'), '切到后台');
+    expect(autoReconnects('background'), true);
+    expect(stopsAutoReconnect('background'), false);
+  });
   test('a terminal session the device ended says so and stops automatic tries', () {
     expect(disconnectWord('session ended'), '这个会话已经结束了');
     expect(autoReconnects('session ended'), false);

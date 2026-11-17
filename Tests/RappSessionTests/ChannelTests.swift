@@ -160,6 +160,11 @@ final class ChannelTests: XCTestCase {
         XCTAssertThrowsError(try channelCommand("dismiss_cover", ["sid": 2, "id": 1 << 33]))
     }
 
+    func testDropTexturesCommand() {
+        XCTAssertEqual(try channelCommand("drop_textures", ["sid": 3]), .dropTextures(sid: 3))
+        XCTAssertThrowsError(try channelCommand("drop_textures", [:])) { XCTAssertEqual($0 as? ChannelError, .bad("drop_textures")) }
+    }
+
     func testHostHintPayloads() throws {
         let c = try XCTUnwrap(eventPayload(.covered(id: 9, name: "通知中心", bundleID: "com.apple.notificationcenterui",
                                                     dismissable: true), sid: 4, textures: [:]))

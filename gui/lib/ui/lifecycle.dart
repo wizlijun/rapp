@@ -83,6 +83,8 @@ String disconnectWord(String? raw) {
   if (raw == null || raw.isEmpty) return hubWord('');
   if (takenOver(raw)) return _takenWords(raw);
   if (raw == 'user') return '你断开了';
+  // The iPad app went to the background (iPad spec §9.1): the picture stays frozen, coming back reconnects.
+  if (raw == 'background') return '切到后台';
   if (raw.startsWith('host says: ') && raw.endsWith('quit')) return '远端关闭了 app';
   if (raw.contains('bad password')) return '密码不对';
   if (raw.contains('relay not set')) return '没设中继，请用 ID@IP 添加';
@@ -158,7 +160,7 @@ String offlineWords(SessionRecord r, {String? waiting}) {
 /// The link dropped for a reason the network explains: worth trying again by itself.
 bool autoReconnects(String? raw) {
   final w = disconnectWord(raw);
-  return w == '网络断了' || w == '连接超时' || w == '中继连不上' || w == '对方离线';
+  return w == '网络断了' || w == '连接超时' || w == '中继连不上' || w == '对方离线' || w == '切到后台';
 }
 
 /// What an automatic retry of [r] waits for, in place of the reason and 「正在重连…」 on the

@@ -16,6 +16,7 @@ import 'platform_caps.dart' show watchHardwareKeys;
 import 'term/term_session_port.dart';
 import 'ui/access_setup.dart';
 import 'ui/app_profile_store.dart';
+import 'ui/background.dart';
 import 'ui/fullscreen.dart';
 import 'ui/main_state.dart';
 import 'ui/main_window.dart';
@@ -83,6 +84,9 @@ Future<void> mainIos() async {
       profiles: AppProfileStore.load(data.sharedDir, builtin),
       log: _log);
   state.overview = true;
+  // Background freezes and closes every session, coming back reconnects them; the screen stays awake while
+  // a session is live (spec §9). Lives as long as the app.
+  BackgroundWatch(state: state, ios: iosChannel);
 
   runApp(_IosApp(
     state: state,
