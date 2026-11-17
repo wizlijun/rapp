@@ -82,12 +82,14 @@ rapp 的定位是"更多 Agent，一个 Pad"。现在控制端只有 macOS 和 O
 | F6 | Duo 上可以两个 App 并排 [S3]；iPad 上窗口可以任意缩放、分屏 | 窗口宽度随时会变，会跨过紧凑和常规的分界 |
 | F7 | 用 iOS 27.1 SDK 构建才能铺满内屏；更旧的 SDK 构建出来只是内屏里一块手机大小的画面 [S1] | 构建机要 Xcode 27.1 |
 | F8 | 铰链角度、姿态、折痕区域的接口在 iOS 27.1 SDK 里 [S1][S5] | 只有半折姿态用得上，本期不做（§7.6） |
-| F9 | Flutter 3.41 及以上配 Xcode 27.1 构建能铺满内屏，窗口大小和安全区随开合上报；但折痕和铰链在 iOS 上 Flutter 不上报（`MediaQuery.displayFeatures` 是空的），要自己写一小段原生桥 [S4][S5]（实测） | 排版只靠窗口大小就够；不写原生桥 |
+| F9 | Flutter 3.41 及以上配 Xcode 27.1 构建能铺满内屏，窗口大小和安全区随开合上报；但折痕和铰链在 iOS 上 Flutter 不上报（`MediaQuery.displayFeatures` 是空的），要自己写一小段原生桥 [S4][S5]（P0 在 iPad 模拟器和 iPhone 真机上核对过 `displayFeatures` 为空；开合没量到，等 Duo 真机） | 排版只靠窗口大小就够；不写原生桥 |
 | F10 | 用 iOS 27 SDK 构建的 Flutter App 必须用 UIScene 生命周期，否则起不来 [S6]（实测） | 新建 iOS 工程时就按 UIScene 建 |
 | F11 | 程序去读系统剪贴板，系统会弹"允许粘贴"；用户在文本框里自己粘贴不弹 | §8.6 |
 | F12 | 连局域网地址要用户同意"本地网络"权限 | §10 |
 | F13 | App Store 没有办法把 iPhone App 限定到某一款机型（据我所知） | 兼容 Duo = 发布一个 iPhone App，所有 iPhone 都能装，所以紧凑布局必须完整可用 |
 | F14 | 一部分键盘快捷键系统自己留着，App 收不到（⌘Tab、⌘空格、⌘H、地球键组合等） | §8.3 |
+| F15 | 国行 iPhone / iPad 上，App 在用户回答"无线数据"弹框之前没有网络；只有系统网络（`URLSession`、Network 框架）会让这个框弹出来，Rust 自己的 UDP 套接字不会，只会一直超时（P0 实测） | §10：hub 拨号前先发一个系统请求 |
+| F16 | iOS 上 Dart 的 `Platform.environment` 里没有 `HOME`（P0 实测） | 数据根由原生传进来（§6.5） |
 
 ## 4. 现状（代码里和本文有关的）
 
@@ -100,7 +102,7 @@ rapp 的定位是"更多 Agent，一个 Pad"。现在控制端只有 macOS 和 O
 - **Swift 包**：`RappCore`（5214 行）只依赖 Foundation、CoreGraphics、zlib。`RappSession` 有 6 个文件用了 AppKit：`Detach`、`KeyRouting`、`LocalPasteboard`、`PopupPanel`、`RemoteView`、`Sender`（共 733 行）。`Package.swift` 只声明了 `.macOS(.v14)`。
 - **输入板**：macOS 用原生 `NSTextView`（`ComposerPlugin.swift`、`ComposerNative.m`，Dart 侧 `native_editor.dart`）；别的平台用 `flutter_editor.dart`。
 - **接入设置**：接入点和 key 存在 `<home>/service.json`，由 `rapp-service` 写，hub 只读（`rust/conn/src/settings.rs`）。设备私钥由 hub 自己建（`Identity::load_or_create(home, "device")`）。
-- **只有桌面才有的依赖**：`tray_manager`、`window_manager`；`service_client.dart`（连 `127.0.0.1:22029` 的 `rapp-service`）；`main.dart` 里 16 处 `Platform.is…` 判断里有一部分是为了拉起子进程、打开文件夹。
+- **只有桌面才有的依赖**：`tray_manager`、`window_manager`；`service_client.dart`（连 `127.0.0.1:22029` 的 `rapp-service`）；`gui/lib` 里 16 处 `Platform.is…` 判断（`main.dart` 里 3 处）有一部分是为了拉起子进程、打开文件夹。`gui/lib/paths.dart` 等处读环境变量 `HOME`，iOS 上没有（F16）。
 - **hub 依赖 `rapp-term`**，后者带 `portable-pty` 和 `alacritty_terminal`。
 - **触摸**：`gui/lib/embed/picture.dart` 已经按触摸滚动规格实现了单指点按、拖动和双指滚动；真机检查还没做（那份规格写着"需要触摸屏 B"）。
 - **自动锁屏**：A 上最后一个看得到屏幕的会话结束 10 秒后锁屏；B 端记住的 Mac 密码存在 Keychain（`UnlockStore`）。
@@ -140,22 +142,28 @@ rapp 的定位是"更多 Agent，一个 Pad"。现在控制端只有 macOS 和 O
 
 ### 6.1 hub 在进程内运行
 
-- 新 crate `rust/hub-ffi`（`staticlib`，目标 `aarch64-apple-ios`、`aarch64-apple-ios-sim`），只导出三个 C 函数（名字我定的，实施者可改）：
+- 新 crate `rust/hub-ffi`（`staticlib`，目标 `aarch64-apple-ios`、`aarch64-apple-ios-sim`），导出四个 C 函数（P0 定的，见 `probe/ipad-p0` 的 `rust/hub-ffi/include/rapp_hub.h`）：
 
   ```c
   // 起一个 tokio 运行时，在它上面跑 rapp_hub::run。on_line 在 hub 的线程上被调用，每次一行（不带换行）。
+  // 这一行归接收方：可以在回调返回后再读，读完用 rapp_hub_free_line 释放。
   int32_t rapp_hub_start(const char *home, const char *log_dir, void (*on_line)(const char *line));
+  void    rapp_hub_free_line(char *line);
   // 送一行命令给 hub。可以在任何线程调用。
   int32_t rapp_hub_send(const char *line);
   // 等同于关 stdin：hub 关掉全部会话后结束。
   void rapp_hub_stop(void);
   ```
 
+  第四个函数是 P0 加的：`NativeCallable.listener` 在回调返回之后才在 Dart 里读那一行，借用的指针那时已经释放了（模拟器上 MTE 检查直接崩）。
+- **链接**（P0 实测，Release 才暴露）：Swift 里没人调这几个函数，死代码剥离会去掉它们，要用 `-Wl,-u,_rapp_hub_start` 等把四个都列成链接根；Release 默认剥掉全局符号，要 `STRIP_STYLE = non-global`，否则 Dart 的 `dlsym` 找不到。另外链接 `-lc++`、`Security`、`SystemConfiguration`。
+
 - 库里用一对内存管道接 `rapp_hub::run(opts, input, output)`，hub 本身的代码不改。
 - Dart 侧新增 `FfiHubTransport implements HubTransport`：用 `dart:ffi` 直接调上面三个函数，回调用 `NativeCallable.listener`（可以从别的线程回到 Dart）。不经过 Swift。
 - `Opts`：`home` 是 §6.5 的本机目录；`bin_dir` 为空；`presence_every` 同桌面。
 - iOS 上不带 `embed` 的 `open`（要拉起 `rapp-client`）直接回错误；界面本来就只发带 `embed` 的。
-- **要先解决的编译问题**：hub 依赖 `rapp-term`，后者带 `portable-pty`。P0 先试能不能在 iOS 目标上编过；编不过就把 hub 用到的那部分（配置常量和线格式）从 `rapp-term` 里分出一个不带伪终端的 feature。`tokio` 的 `process` 同理。
+- **编译**：hub 连同 `rapp-term`、`portable-pty` 在两个 iOS 目标上原样编过（P0），不需要分 feature。
+- **子进程**：编得过不等于能用。hub 里起子进程的地方在 iOS 上都会失败：`rapp_net::config::hostname()` 调 `hostname` 命令，失败退回 `"rapp"`（所以 A 上这台设备叫"rapp"，见 §6.2）；`datadir.rs` 调 `git`（iPad 上不做 git，§6.5）；不带 `embed` 的 `open`（见上）。
 - 嵌入会话仍然是 hub 在 `127.0.0.1` 上开端口、`RappSession` 用 `NWConnection` 连过去。同一个进程里走回环是允许的，不需要"本地网络"权限。
 
 ### 6.2 接入设置和身份
@@ -165,12 +173,12 @@ iPad 上没有 `rapp-service`，所以 `service.json` 没人写。做法（我�
 - hub 加两条命令：`access`（读：接入点、有没有 key、设备名）和 `set_access {relay, key}`（写 `service.json` 的 `relay` 和 `key` 两个字段，写法和 service 一致）。只在 iOS 的构建里打开；桌面上这个文件仍然只归 service 写。
 - 界面上"本机"那一页在 iPad 上换成精简版：接入点、key（默认遮住）、这台设备的名字、数据占用、版本。没有密码、权限、服务、更新、自动锁屏这几块。
 - 第一次启动没有 key 时，全景的位置显示接入引导：两个输入框（接入点、key）加一个"接入"按钮；key 支持粘贴和扫码（扫码放 P3）。
-- **留给实施者核对**：iPad 只往外拨、不被访问。经 relay 拨号时 relay 是否要求拨号方先登记；A 的访问记录和 `PeerNames` 里这台 iPad 显示成什么名字。如果必须登记，登记逻辑从 service 里抽一小块进 hub，仍然不带被访问的能力。
+- **P0 核对过**：只往外拨不用登记。hub 从不调 relay 的 `register`，拨号走 `dial → relay_to_at → enroll`，真机上 `add_host` 经 relay 710 ms 成功。A 上这台设备显示成"rapp"（`hostname()` 起不了子进程时的默认值），路径 relay。所以 hub 要一个由入口传进来的设备名（`Opts` 加一个字段，或 `set_access` 带上）；iOS 16 起 `UIDevice.name` 默认只给"iPad"、"iPhone"，要么用户在"本机"页里改，要么申请读真实名字的授权。
 
 ### 6.3 画面层：共用 Swift
 
 - `Package.swift`：`platforms` 加 `.iOS(.v17)`；`RappCore`、`RappSession` 两个库在 iOS 上也产出。`rapp-host`、`rapp-client`、`rapp-testpage` 仍然只在 macOS。
-- `RappCore` 不改代码，只要在 iOS 上编过、单元测试在 iOS 模拟器上跑过。
+- `RappCore` 改得很少（P0）：`DataPaths` 取家目录分平台（iOS 用 `NSHomeDirectory()`），`Windows.swift` 的 `classifyWindow` 和它的两个测试只在 macOS 编。单元测试在 iOS 模拟器上 476 个通过、1 个跳过。`xcodebuild test -scheme RappCore` 没有测试动作，`rapp-Package` 又带进 macOS 专有的可执行目标，P1 要提交一个能在 iOS 模拟器上跑测试的 scheme 或测试计划。
 - `RappSession` 的 6 个 AppKit 文件这样处理：
 
   | 文件 | iOS 上 |
@@ -426,8 +434,9 @@ iPad 接触控板或鼠标后，Flutter 报的是鼠标类指针：移动、左�
 
 ## 10. 网络和权限
 
+- **无线数据**（F15，国行设备）：hub 起来之前，原生一侧先用 `URLSession` 发一个请求（探查用的是 `https://captive.apple.com/hotspot-detect.html`），让系统弹出"无线数据"的框；请求通了再让 hub 拨号。用户拒绝时请求失败（`NSURLErrorNotConnectedToInternet`，路径 `Denied over Wi-Fi interface`），界面提示去"设置 → 无线数据"打开，带去设置的按钮。P0 实测：弹框 0.65 s 出现，允许后 6.4 s 网络通。
 - **本地网络**（F12）：Info.plist 里写用途说明（"连接同一网络里你自己的电脑"）。第一次走局域网直连时系统弹框。用户拒绝后局域网那条路不通，自动走中继；界面提示一次"没有本地网络权限，只能走中继"，带去系统设置的按钮。
-- **留给实施者核对**：hub 找局域网设备时有没有用广播或组播。只连已保存的地址（单播）就只需要上面的权限；用了组播还要向 Apple 申请专门的授权，那就改成不用。
+- **P0 核对过**：hub 没有用广播或组播，只连已保存的地址，不需要组播授权。
 - **只有 IPv6 的网络**：Apple 审核时会在这种网络下测。接入点写成域名时要经系统解析拿到合成的 IPv6 地址；写成 IPv4 数字地址在这种网络下连不上。hub 的拨号要支持 IPv6 套接字，并在说明里建议接入点用域名。待办里记着"只测了 IPv4"，P1 要在这种网络下实测（Mac 的互联网共享可以建一个）。
 - **网络切换**（Wi-Fi 和蜂窝之间，I5 的地铁、高铁场景）：原生一侧监听系统的网络路径变化，一变就给 hub 发 `net_suspect`，走现有的重连。P2 探查能不能让 QUIC 连接直接换到新网络上而不重连。
 - **蜂窝和低数据模式**（我定的）：当前网络是按流量计费或用户开了低数据模式时，新开的会话默认用「智能」档；流量标签上加一个蜂窝标记（用形状，不用颜色）。不自动改已经开着的会话。
@@ -469,12 +478,13 @@ relay 规格已经写明：key 是所有设备的总钥匙（T5）。iPad 和手
 | 包标识 | `com.rapphub.rapp`（我定的） |
 | 设备 | iPhone 和 iPad 通用 |
 | 最低系统 | iOS / iPadOS 17.0（我定的）。Duo 专有的接口都做可用性检查 |
-| 构建工具 | Xcode 27.1（F7）；Flutter 3.41 及以上（F9）。工程现在要求 Dart 3.12.1 以上，应当已经满足，P0 核对 |
-| 架构 | arm64 真机；arm64 模拟器 |
+| 构建工具 | Xcode 27.1 及以上（F7）；Flutter 3.41 及以上（F9）。P0 用的是 Xcode 27.2、Flutter 3.44.1、Dart 3.12.1，都够 |
+| 架构 | arm64 真机；arm64 模拟器（Flutter 3.44 的模拟器引擎只有 arm64，`ARCHS[sdk=iphonesimulator*] = arm64`） |
 | 版本号 | 和 Rust workspace、`pubspec.yaml` 同一个 |
 | 方向 | iPad 四个方向；iPhone 竖持加两个横持 |
 | 生命周期 | UIScene，单窗口（F10） |
 
+- 签名：P0 这台 Mac 的 Xcode 没登录账号，自动签名找不到描述文件，Xcode 也不肯手动用它自己管理的通配描述文件；探查是 `flutter build --no-codesign` 之后用脚本 `codesign`。P1 要么在 Xcode 里登录开发者账号，要么准备 CI 签名。Xcode 27.2 不接受 `IPHONEOS_DEPLOYMENT_TARGET` 13，Flutter 模板生成的工程要改成 17.0。
 - Rust：`scripts/build-ios.sh` 把 `hub-ffi` 编成两个目标的静态库，打成一个 xcframework 交给 Xcode 工程；然后 `flutter build ipa`。和 `package-macos.sh` 并列。
 - Swift：iOS Runner 像 macOS Runner 一样把仓库根当本地 Swift 包引用，链接 `RappSession`。
 - `scripts/check.sh`（或等价的检查）加一步：Rust 的 iOS 目标能编过、`RappCore` 在 iOS 模拟器上测试通过。这样桌面上的改动不会悄悄弄坏 iOS。
@@ -502,7 +512,7 @@ relay 规格已经写明：key 是所有设备的总钥匙（T5）。iPad 和手
 
 ### P0 探查（只出结论，不留产品代码）
 
-结论写进 `docs/superpowers/measurements/`。要回答的问题：
+结论写进 `docs/superpowers/measurements/`（已做，见 `2026-11-17-rapp-ipad-p0.md`；用 iPhone 12 mini 代替 iPad 真机；Duo 开合、和 macOS 的 CPU 对比没量）。要回答的问题：
 
 1. hub 和它的依赖能不能编到 iOS 目标；不能的地方各是什么、怎么绕（§6.1）。
 2. 一个空的 Flutter iOS App 里，经 `FfiHubTransport` 发 `hosts` 能不能收到回答（真机 iPad）。
@@ -570,7 +580,7 @@ relay 规格已经写明：key 是所有设备的总钥匙（T5）。iPad 和手
 ### 16.2 我定的（不同意就改）
 
 1. 路线 A：Flutter 加 iOS 目标，hub 进程内，苹果平台共用 Swift 画面层（§5.1）。
-2. hub 用 `dart:ffi` 直接接，不经 Swift；三个 C 函数（§6.1）。
+2. hub 用 `dart:ffi` 直接接，不经 Swift；四个 C 函数（§6.1，P0 从三个改成四个）。
 3. iOS 上由 hub 写 `service.json`，加 `access` / `set_access` 两条命令（§6.2）。
 4. Dart 里用一张"平台能力表"代替散落的平台判断；分档规则对桌面也生效（§6.4）。
 5. 分界是窗口宽 600；矮窗（高 < 480）收起顶栏（§7.1）。
@@ -595,7 +605,7 @@ relay 规格已经写明：key 是所有设备的总钥匙（T5）。iPad 和手
 - 桌面外壳（托盘、窗口管理）怎么从 `main.dart` 里分出去（§6.4）。
 - 顶栏让位的具体宽度门槛（§7.2）；两档共用同一个舞台实例的写法（Z5）。
 - 终端的字体名；紧凑档里终端比 A 窄时的显示（§11）。
-- §6.2、§10 里标了"留给实施者核对"的三件事。
+- §6.2、§10 里标了"留给实施者核对"的三件事（P0 已核对，结论写在原处）。
 
 ## 17. 资料
 

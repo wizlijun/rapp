@@ -428,3 +428,19 @@
 - [ ] 一个 tcp 服务（比如 Redis）用 `rapp share <端口> --proto tcp` 分享，`redis-cli -p <分享号>` 能用
 - [ ] 访问方上先让别的程序占住分享号，看到"这台上是 …（… 被占）"；退出那个程序后地址换回
 - [ ] 撞号要等设备 ID 大的那台读到另一台的分享表才解开：让 ID 大的那台当不开面板的分享方（只跑服务，不跑 `rapp hosts`），和另一台撞号，确认它读到对方的表之前不换号，读到之后（开一次面板或跑一次 `rapp hosts`）才换
+
+## iPad / Duo P0 探查留下的
+
+规格 `docs/superpowers/specs/2026-11-17-rapp-ipad-duo-design.md`，测量结果 `docs/superpowers/measurements/2026-11-17-rapp-ipad-p0.md`。探查代码在分支 `probe/ipad-p0`，不合并。
+
+- [ ] 查 A 没锁屏时窗口抓取不出帧（这台 Mac，macOS 27）：测试页在画、窗口在屏幕内，客户端还是 0 fps；锁屏后 29–30 fps
+- [ ] 上面查清后，补做手机和 macOS 的 CPU 对比（过关条件：不超过 macOS 同档的两倍），A 上不能有别的设备连着
+- [ ] Duo 真机：开合序列、外屏窗口大小、开合时 App 是否一直活动
+- [ ] iPad 真机：Q2–Q5 重量一遍
+- [ ] 点一下到画面变化的延迟（随 P1 触摸的真机检查一起量）
+- [ ] 6 个会话同时开着的内存，拔电时每小时耗电（§9.5）
+- [ ] "本地网络"弹框在哪一步弹出，被拒绝时怎么提示
+- [ ] 设备名由入口传给 hub（现在 A 上显示 "rapp"）
+- [ ] Dart 在 iOS 上没有 `HOME`：`gui/lib/paths.dart` 等改用原生传进来的家目录
+- [ ] RappCore 的 iOS 测试：提交一个 scheme 或测试计划
+- [ ] 签名：Xcode 登录账号或 CI 签名
