@@ -1222,9 +1222,9 @@ void main() {
       expect(tester.widget<Text>(find.byKey(const Key('project-menu-label'))).data, '写周报');
       await tester.tap(btn);
       await tester.pumpAndSettle();
-      final rows = ['project-row-all', 'project-row-${a.id}', 'project-row-${b.id}', 'project-row-free-zone'];
+      final rows = ['project-row-all', 'project-row-free-zone', 'project-row-${a.id}', 'project-row-${b.id}'];
       final ys = [for (final k in rows) tester.getRect(find.byKey(Key(k))).top];
-      expect([...ys]..sort(), ys, reason: '全部, the projects, then 自由区');
+      expect([...ys]..sort(), ys, reason: '全部, 自由区, then the projects');
       expect(find.descendant(of: find.byKey(const Key('project-row-all')), matching: find.text('全部')), findsOneWidget);
       expect(find.descendant(of: find.byKey(const Key('project-row-free-zone')), matching: find.text('自由区')), findsOneWidget);
       expect(find.descendant(of: find.byKey(const Key('project-row-all')), matching: find.byIcon(ProjectMenu.allIcon)), findsOneWidget);

@@ -1,5 +1,5 @@
 // The top bar's project control, ahead of the session list: one button naming what the list is
-// narrowed to, and a menu to switch: 全部, each project, then 自由区 (the sessions in no project).
+// narrowed to, and a menu to switch: 全部, 自由区 (the sessions in no project), then each project.
 // It shows once there is a project.
 import 'package:flutter/material.dart';
 
@@ -91,7 +91,7 @@ class ProjectMenu extends StatelessWidget {
     );
   }
 
-  /// The menu under the button: 全部, every project, 自由区, each with its icon. The current one is
+  /// The menu under the button: 全部, 自由区, every project, each with its icon. The current one is
   /// bold, the previous project marked 上一个.
   Future<void> _open(BuildContext context) async {
     final box = context.findRenderObject() as RenderBox;
@@ -126,9 +126,9 @@ class ProjectMenu extends StatelessWidget {
       position: menuAt(context, at),
       items: [
         row('project-row-all', allValue, allIcon, MainState.allLabel),
+        row('project-row-free-zone', freeZoneValue, freeZoneIcon, MainState.freeZoneLabel),
         for (final p in state.projects)
           row('project-row-${p.id}', p.id, projectIcon, p.name, previous: p.id == state.previousProject),
-        row('project-row-free-zone', freeZoneValue, freeZoneIcon, MainState.freeZoneLabel),
       ],
     );
     if (pick == null || pick == now) return;
