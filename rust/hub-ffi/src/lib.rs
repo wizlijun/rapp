@@ -111,8 +111,11 @@ pub extern "C" fn rapp_hub_start(
 }
 
 /// Frees a line `on_line` handed over. Null is ignored.
+///
+/// # Safety
+/// `line` must be null or a pointer `on_line` received, not yet freed. Anything else is a double or foreign free.
 #[no_mangle]
-pub extern "C" fn rapp_hub_free_line(line: *mut c_char) {
+pub unsafe extern "C" fn rapp_hub_free_line(line: *mut c_char) {
     if !line.is_null() {
         drop(unsafe { std::ffi::CString::from_raw(line) });
     }
@@ -162,7 +165,7 @@ mod tests {
             return;
         }
         let s = unsafe { CStr::from_ptr(line) }.to_string_lossy().into_owned();
-        rapp_hub_free_line(line as *mut c_char);
+        unsafe { rapp_hub_free_line(line as *mut c_char) };
         LINES.lock().unwrap().push(Some(s));
     }
 
