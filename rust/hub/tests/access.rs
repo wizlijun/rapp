@@ -22,6 +22,7 @@ fn opts(home: &Path) -> Opts {
         owns_access: true,
         embed_only: false,
         dual_stack: false,
+        log_dir: None,
     }
 }
 

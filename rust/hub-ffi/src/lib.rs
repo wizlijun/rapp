@@ -83,6 +83,7 @@ pub extern "C" fn rapp_hub_start(
         owns_access: true,
         embed_only: true,
         dual_stack: true,
+        log_dir: Some(PathBuf::from(&log_dir)),
     };
     let exited = Arc::new(AtomicBool::new(false));
     let done = exited.clone();

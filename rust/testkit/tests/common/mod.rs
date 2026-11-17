@@ -295,6 +295,11 @@ impl Hub {
         Hub::start_with(home, bins, None, Default::default())
     }
 
+    /// A hub that writes no log of its own and answers `logs` from `log_dir`.
+    pub fn start_reading_logs(home: &Path, bins: &Path, log_dir: &Path) -> Hub {
+        Hub::start_full(home, bins, None, Default::default(), rapp_net::log::Log::none(), log_dir.to_path_buf())
+    }
+
     /// Like `start`, with the presence probe running every `every`.
     pub fn start_with_presence(home: &Path, bins: &Path, every: Duration) -> Hub {
         Hub::start_with(home, bins, Some(every), Default::default())
@@ -306,18 +311,24 @@ impl Hub {
     }
 
     fn start_with(home: &Path, bins: &Path, every: Option<Duration>, upgrade: rapp_hub::UpgradeTimes) -> Hub {
+        let log = rapp_net::log::Log::file(&home.join("logs"), "hub.log");
+        Hub::start_full(home, bins, every, upgrade, log, home.join("logs"))
+    }
+
+    fn start_full(home: &Path, bins: &Path, every: Option<Duration>, upgrade: rapp_hub::UpgradeTimes, log: rapp_net::log::Log, log_dir: PathBuf) -> Hub {
         let (cmd_r, cmd_w) = tokio::io::duplex(1 << 16);
         let (out_r, out_w) = tokio::io::duplex(1 << 16);
         let opts = rapp_hub::Opts {
             home: home.to_path_buf(),
             bin_dir: Some(bins.to_path_buf()),
-            log: rapp_net::log::Log::file(&home.join("logs"), "hub.log"),
+            log,
             presence_every: every,
             upgrade,
             name: None,
             owns_access: false,
             embed_only: false,
             dual_stack: false,
+            log_dir: Some(log_dir),
         };
         let task = tokio::spawn(rapp_hub::run(opts, cmd_r, out_w));
         Hub { w: cmd_w, lines: BufReader::new(out_r).lines(), task, home: home.to_path_buf(), paths: Vec::new(), nets: Vec::new() }
