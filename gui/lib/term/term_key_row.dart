@@ -1,15 +1,12 @@
 // The key row (G5, W3): six big keys on a terminal's stage, so it can be interrupted and driven without a keyboard.
 // ⌃ Esc ⌃C Tab at the left, ↑ ↓ ⏎ at the right. ⌃ is sticky: the next key (one of the row's, or the keyboard's on
-// the stage) goes with Ctrl, a letter as `Ctrl-<letter>`, anything else as it is; then the ⌃ goes out. A tap sends the key to the pane being viewed and takes no focus:
-// the caret stays where it was, in the writing panel or on the stage.
+// the stage) goes with Ctrl, a letter as `Ctrl-<letter>`, anything else as it is; then the ⌃ goes out. A tap sends
+// the key to the pane being viewed and takes no focus: the caret stays where it was, in the writing panel or on the
+// stage.
 import 'package:flutter/material.dart';
 
 import '../ui/tokens.dart';
 import 'term_session_port.dart';
-
-/// A stage at least this wide has the row on the writing panel's line; a narrower one puts it on a line of its own
-/// right above the open panel.
-const keyRowWideAt = 1100.0;
 
 /// What a key of the row takes on screen.
 const keyRowKeySize = Size(52, 48);
@@ -17,12 +14,25 @@ const keyRowKeySize = Size(52, 48);
 /// Between two keys of a group.
 const keyRowGap = 4.0;
 
-/// One group of three keys, end to end.
+/// The right group (↑ ↓ ⏎), end to end.
 const keyRowGroupWidth = 3 * 52.0 + 2 * keyRowGap;
+
+/// The left group (⌃ Esc ⌃C Tab), end to end.
+const keyRowLeftWidth = 4 * 52.0 + 3 * keyRowGap;
 
 /// The row's distance from the stage's sides and bottom (on the panel's line: level with the panel's box).
 const keyRowInset = 12.0;
 const keyRowBottom = 9.0;
+
+/// The open terminal panel's width on a wide stage ([panelWidth] at scale 1).
+const _panelWide = 720.0;
+
+/// Between a corner group and the open panel on the panel's line.
+const _clear = 8.0;
+
+/// A stage at least this wide has the row on the writing panel's line; a narrower one puts it on a line of its own
+/// right above the open panel. Derived from the wider (left) group, so the centred panel never covers it.
+const keyRowWideAt = 2 * (keyRowInset + keyRowLeftWidth + _clear) + _panelWide;
 
 /// How much further the picture moves up while the row has a line of its own above the panel (48 and a gap of 8).
 const keyRowLift = 56.0;

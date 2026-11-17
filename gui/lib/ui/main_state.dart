@@ -1135,11 +1135,7 @@ class MainState extends ChangeNotifier {
   }
 
   void _onPortEvent(SessionEvent e) {
-    if (e is LatchUsedEvent) {
-      // A hardware key took the app key row's once modifiers (the row sends their ups).
-      appLatch.used();
-      return;
-    }
+    if (e is LatchUsedEvent) return; // the app key row's (AppKeyRow listens for its own session)
     final rs = remote[e.sid];
     if (rs == null) return;
     final r = _recordOfSid(e.sid);

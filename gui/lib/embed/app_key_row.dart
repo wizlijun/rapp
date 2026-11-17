@@ -2,6 +2,8 @@
 // keys a touch screen (or the system, F14) does not give. The modifiers are sticky ([ModifierLatch]): a tap holds one
 // down on A until the next key has gone (⌘ then the hardware keyboard's Tab is ⌘Tab on A), a double tap locks it.
 // A tap takes no focus: the keys stay where they were.
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../ui/main_state.dart';
@@ -49,6 +51,8 @@ class _AppKeyRowState extends State<AppKeyRow> {
   /// The modifiers A was sent a down for (and has not had the up of).
   int _held = 0;
 
+  StreamSubscription<SessionEvent>? _events;
+
   SessionPort? get _port => widget.state.portOf(_sid);
 
   @override
@@ -62,11 +66,23 @@ class _AppKeyRowState extends State<AppKeyRow> {
     _latch = widget.latch;
     _held = 0;
     _latch.addListener(_sync);
+    _events = _port?.events.listen(_onEvent);
     _sync();
+  }
+
+  /// The runner's key router sent a hardware key with the latch and dropped it (`latch_used`): the once modifiers go
+  /// up, and the locked ones go back to the runner for the next key. Another session's is not this row's.
+  void _onEvent(SessionEvent e) {
+    if (e is! LatchUsedEvent || e.sid != _sid) return;
+    final before = _latch.flags;
+    _latch.used(); // a change sends the new latch through _sync
+    if (_latch.flags == before && before != 0) _port?.latch(_sid, before);
   }
 
   /// Every down on A gets its up: whatever the latch held goes up for the session it went down for.
   void _unbind() {
+    _events?.cancel();
+    _events = null;
     _latch.releaseAll();
     _sync();
     _latch.removeListener(_sync);

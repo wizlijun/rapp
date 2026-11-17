@@ -306,10 +306,11 @@ void main() {
     expect(stageTop(tester), top - pictureLift);
   });
 
-  testWidgets('toggling the key row and crossing 1100 never sends a new view, never remounts the stage or panel '
+  testWidgets('toggling the key row and crossing keyRowWideAt never sends a new view, never remounts the stage or panel '
       '(Review Focus 5)', (tester) async {
-    // Both widths give the stage the same columns: any view now would be a remount's or the layout's own.
-    await openTerm(tester, width: 1104);
+    // Both widths (1 either side) give the stage the same columns: any view now would be a remount's or the
+    // layout's own.
+    await openTerm(tester, width: keyRowWideAt + 1);
     await pastViewPause(tester);
     final size = tester.getSize(find.byType(TermStage));
     final stageEl = tester.element(find.byType(TermStage));
@@ -321,16 +322,16 @@ void main() {
     await tester.enterText(fieldFinder, 'draft');
     final panelState = tester.state(find.byType(ComposerPanel));
     await pastViewPause(tester);
-    await tester.pumpWidget(wrap(window(1096), disableAnimations: true));
+    await tester.pumpWidget(wrap(window(keyRowWideAt - 1), disableAnimations: true));
     await pastViewPause(tester);
-    expect(tester.getSize(find.byType(TermStage)), Size(1096, size.height));
+    expect(tester.getSize(find.byType(TermStage)), Size(keyRowWideAt - 1, size.height));
     // Narrow now: the row went above the panel.
     expect(tester.getRect(key('Esc')).bottom, lessThanOrEqualTo(tester.getRect(find.byType(ComposerPanel)).top));
     await toggleFromMenu(tester);
     await pastViewPause(tester);
     await toggleFromMenu(tester);
     await pastViewPause(tester);
-    await tester.pumpWidget(wrap(window(1104), disableAnimations: true));
+    await tester.pumpWidget(wrap(window(keyRowWideAt + 1), disableAnimations: true));
     await pastViewPause(tester);
     expect(identical(tester.state(find.byType(ComposerPanel)), panelState), isTrue,
         reason: 'the panel was remounted');
@@ -457,5 +458,26 @@ void main() {
     expect(find.byType(AppKeyRow), findsNothing);
   });
 
-  test('keyRowWideAt is 1100', () => expect(keyRowWideAt, 1100));
+  test('keyRowWideAt leaves the 720 panel clear of the corner groups, with a gap', () {
+    expect(keyRowLeftWidth, keyRowLeft.length * keyRowKeySize.width + (keyRowLeft.length - 1) * keyRowGap + 52 + 4,
+        reason: 'the left group is ⌃ plus keyRowLeft');
+    expect(keyRowGroupWidth, keyRowRight.length * keyRowKeySize.width + (keyRowRight.length - 1) * keyRowGap);
+    expect(keyRowWideAt, greaterThanOrEqualTo(2 * (keyRowInset + keyRowLeftWidth) + 720));
+    expect(keyRowWideAt, 1200);
+  });
+
+  for (final w in [1100.0, 1150.0, 1199.0, 1200.0, 1260.0]) {
+    testWidgets('at stage width $w the open panel is clear of both groups', (tester) async {
+      await openTerm(tester, width: w);
+      await toggleFromMenu(tester);
+      await openPanel(tester);
+      final panel = tester.getRect(find.byType(ComposerPanel));
+      final l = group(tester, ['Ctrl', 'Esc', 'Ctrl-C', 'Tab']);
+      final r = group(tester, ['Up', 'Down', 'Enter']);
+      if (l.bottom <= panel.top) return; // narrow: the row is on its own line above the panel
+      expect(w, greaterThanOrEqualTo(keyRowWideAt));
+      expect(l.right, lessThan(panel.left), reason: 'the left group covers the panel');
+      expect(r.left, greaterThan(panel.right), reason: 'the right group covers the panel');
+    });
+  }
 }

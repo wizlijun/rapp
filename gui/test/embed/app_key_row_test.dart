@@ -231,6 +231,32 @@ void main() {
       expect(latches(), [524288]);
       expect(s.appLatch.of(latchOpt), LatchState.locked);
     });
+
+    testWidgets('⌘ locked, then a hardware key (latch_used): native gets ⌘ again for the next one', (tester) async {
+      await mountRow(tester);
+      await tester.tap(key('Cmd'));
+      await tester.pump(const Duration(milliseconds: 50));
+      await tester.tap(key('Cmd'));
+      await tester.pump();
+      port.calls.clear();
+      port.emit(const LatchUsedEvent(1));
+      await tester.pump();
+      expect(keys(), isEmpty, reason: 'a locked ⌘ stays down on A');
+      expect(latches(), [1048576]);
+      expect(s.appLatch.of(latchCmd), LatchState.locked);
+    });
+
+    testWidgets("another session's latch_used leaves the row's modifiers alone", (tester) async {
+      await mountRow(tester);
+      await tester.tap(key('Cmd'));
+      await tester.pump();
+      port.calls.clear();
+      port.emit(const LatchUsedEvent(2));
+      await tester.pump();
+      expect(keys(), isEmpty);
+      expect(latches(), isEmpty);
+      expect(s.appLatch.of(latchCmd), LatchState.once);
+    });
   });
 
   test('latch_used parses to LatchUsedEvent', () {
