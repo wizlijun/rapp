@@ -90,6 +90,10 @@ class _Draft {
   // Once password text entered this draft, edits do not make it public again.
   // Emptying/submitting the draft starts a new one.
   bool privateText = false;
+
+  /// What ↑ last put in from the record: left as it is, it is not new writing, so it makes no
+  /// draft file and no `draft` record (it is in the record already).
+  String? recalled;
   final pieces = <_Piece>[];
 
   /// Records of finished rounds whose write failed, oldest first: appended by a later write.
@@ -175,7 +179,12 @@ class InputRecorder {
       final submitting = !identical(c.inFlight, o);
       final private = _private[o] == true || rs.secureFocus || (submitting && d.privateText);
       _private[o] = private;
-      if (private && submitting) d.privateText = true;
+      // The draft went with this send: the next one starts public and unrecalled. (With an editor
+      // attached the copy can be empty already, so no onDraftChanged('') comes to clear these.)
+      if (submitting) {
+        d.privateText = false;
+        d.recalled = null;
+      }
       if (o.text.isEmpty && !private) return;
       // An adopted row's retry: its text is pending once already.
       final p = d.pieces.where((p) => identical(p.owner, o)).firstOrNull;
@@ -234,17 +243,21 @@ class InputRecorder {
       _unhook(s);
     }
     final on = enabled() && (record ?? rs?.recordsInput ?? d.meta['record'] != false);
+    Future<String>? typed;
     if (rs != null) {
       d.privateText = d.privateText || rs.secureFocus;
       d.text = rs.composer.draftText;
+      // The draft copy is up to a second behind the editor: what was typed last is read from it.
+      typed = rs.composer.currentText();
     }
+    if (typed != null) d.text = await typed;
     await Future.wait([...d.busy]);
     if (!on || !await _flush(d)) {
       await _persist(d);
       return;
     }
     final text = _join([for (final p in d.pieces) if (!p.private && !p.finishing && !_wentBack(p)) p.text],
-        d.privateText ? '' : d.text);
+        _ownText(d));
     if (text.isNotEmpty) {
       final at = _clock();
       if (!await _write(null, _draftRecord(meta, text, at), at)) {
@@ -309,6 +322,15 @@ class InputRecorder {
       ..onFinished = null;
   }
 
+  /// [d]'s text as a draft keeps it: none when it is private, or a record ↑ put in untouched.
+  static String _ownText(_Draft d) => d.privateText || d.text == d.recalled ? '' : d.text;
+
+  /// ↑ put [text] from the record into [rs]'s composer (R2). Left untouched it is no draft.
+  void recalled(RemoteSession rs, String text) {
+    final a = _attached[rs];
+    if (a != null) _drafts[a.key]?.recalled = text;
+  }
+
   /// [p]'s row went back into the editor (`putBack`): its text is in the draft now.
   static bool _wentBack(_Piece p) {
     final o = p.owner, rs = p.rs;
@@ -332,7 +354,7 @@ class InputRecorder {
   Future<void> _persist(_Draft d) => _store
       .save(DraftFile(
           key: d.key,
-          text: d.privateText ? '' : d.text,
+          text: _ownText(d),
           pending: [for (final p in d.pieces) if (!p.private) p.text],
           records: [...d.stored],
           meta: d.meta))
@@ -352,7 +374,9 @@ class InputRecorder {
       p.private = private;
     }
     // Sent into a password field on A (v13 secure_focus): never kept in the record.
+    var recorded = false;
     if (a != null && enabled() && rs.recordsInput && !private) {
+      recorded = true; // written now, or kept to be appended later
       final at = o.at ?? _clock();
       final rec = _sentRecord(_handed[o] ?? a.meta(), o, all, rs.profile.afterSend, at);
       p?.finishing = true;
@@ -363,8 +387,10 @@ class InputRecorder {
         changed = true;
       }
     }
-    // Keep failed private owners only in memory so putBack can taint the new draft.
-    if (p != null && !(private && rs.composer.failed.contains(o)) && d.pieces.remove(p)) changed = true;
+    // A failed row stays pending while nothing records it (the record off, or private: those only
+    // in memory, so putBack can taint the new draft): a crash or the session's end keeps its text.
+    final keep = rs.composer.failed.contains(o) && (private || !recorded);
+    if (p != null && !keep && d.pieces.remove(p)) changed = true;
     if (changed) _save(d, rs);
   }
 

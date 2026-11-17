@@ -668,4 +668,100 @@ void main() {
       }
     }
   });
+
+  // Sent straight from an attached editor, within the second before its idle copy: the composer's
+  // draft copy stays empty, so no onDraftChanged('') ever comes.
+  Future<void> sendTyped(RemoteSession rs, FakeEditor ed, String text, {int sent = 1}) async {
+    ed.value = text;
+    final r = await rs.composer.submit();
+    if (r is SubmitPieces) port.composerSend(rs.sid, r.pieces);
+    rs.composer.done(sent, sent > 0 ? null : 'link');
+    await settle();
+  }
+
+  test('one send into a password field does not stop the record of the sends after it', () async {
+    final rec = recorder();
+    final rs = session(1, 'com.a');
+    rec.attach(rs, () => meta('h1', 'com.a'), restore: true);
+    final ed = FakeEditor();
+    await rs.composer.attach(ed);
+    rs.secureFocus = true;
+    await sendTyped(rs, ed, 'synthetic secret');
+    rs.secureFocus = false;
+    await sendTyped(rs, ed, 'normal message');
+    await sendTyped(rs, ed, 'another one');
+    expect([for (final l in lines()) l['text']], ['normal message', 'another one']);
+    // And the draft after it is saved again.
+    ed.value = 'a draft';
+    rs.composer.editorChanged();
+    await Future<void>.delayed(const Duration(milliseconds: 1200));
+    expect(drafts().load('h1/com.a')?.text, 'a draft');
+  });
+
+  test('with the record off, a failed send comes back after a restart', () async {
+    enabled = false;
+    final rec = recorder();
+    final rs = session(1, 'com.a');
+    rec.attach(rs, () => meta('h1', 'com.a'), restore: true);
+    await send(rs, 'important text');
+    rs.composer.done(0, 'link');
+    await settle();
+    expect(rs.composer.failed, hasLength(1));
+    expect(drafts().load('h1/com.a')?.pending, ['important text']);
+    final rs2 = session(2, 'com.a');
+    recorder().attach(rs2, () => meta('h1', 'com.a'), restore: true);
+    expect(rs2.composer.draft, 'important text');
+  });
+
+  test('with the app not recording, a failed send survives the session end in the draft file', () async {
+    final rec = recorder();
+    final rs = session(1, 'com.a', record: false);
+    rec.attach(rs, () => meta('h1', 'com.a'), restore: true);
+    await send(rs, 'important text');
+    rs.composer.done(0, 'link');
+    await settle();
+    await rec.sessionEnded(rs, meta('h1', 'com.a'), record: false);
+    expect(drafts().load('h1/com.a')?.pending, ['important text']);
+    expect(lines(), isEmpty);
+  });
+
+  test('a record brought back with ↑ and left as it is is no draft', () async {
+    final rec = recorder();
+    final rs = session(1, 'com.a');
+    rec.attach(rs, () => meta('h1', 'com.a'), restore: true);
+    await send(rs, 'hello');
+    rs.composer.done(1, null);
+    await settle();
+    rec.recalled(rs, 'hello');
+    rs.composer.setDraft('hello'); // what ↑ does
+    await settle();
+    expect(drafts().load('h1/com.a'), isNull);
+    await rec.sessionEnded(rs, meta('h1', 'com.a'), record: true);
+    expect([for (final l in lines()) '${l['kind']}:${l['text']}'], ['sent:hello']);
+  });
+
+  test('a recalled record edited by hand is a draft again', () async {
+    final rec = recorder();
+    final rs = session(1, 'com.a');
+    rec.attach(rs, () => meta('h1', 'com.a'), restore: true);
+    rec.recalled(rs, 'hello');
+    rs.composer.setDraft('hello');
+    rs.composer.setDraft('hello there');
+    await rec.sessionEnded(rs, meta('h1', 'com.a'), record: true);
+    expect([for (final l in lines()) '${l['kind']}:${l['text']}'], ['draft:hello there']);
+  });
+
+  test('ending a session keeps what was typed in its last second', () async {
+    final rec = recorder();
+    final rs = session(1, 'com.a');
+    rec.attach(rs, () => meta('h1', 'com.a'), restore: true);
+    final ed = FakeEditor();
+    await rs.composer.attach(ed);
+    ed.value = 'typed just now';
+    rs.composer.editorChanged();
+    final ended = rec.sessionEnded(rs, meta('h1', 'com.a'), record: true);
+    rs.dispose(); // MainState disposes the session right after
+    await ended;
+    expect([for (final l in lines()) '${l['kind']}:${l['text']}'], ['draft:typed just now']);
+  });
 }

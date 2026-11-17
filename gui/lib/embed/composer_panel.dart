@@ -189,6 +189,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
     if (_browsing == i) return; // the oldest: up stays
     _browsing = i;
     _shown++;
+    widget.state.recorder.recalled(_s, list[i].text);
     _ed.setText(list[i].text);
   }
 
