@@ -264,6 +264,8 @@ class TopBar extends StatelessWidget {
       onClearInput: state.clearInputMark,
       termKeyRow: state.prefs.termKeyRow,
       onTermKeyRow: state.setTermKeyRow,
+      termFit: state.prefs.termFit,
+      onTermFit: state.setTermFit,
       open: state.corner == corner,
       onToggle: () => state.toggleCorner(corner),
       onClose: state.closeCorner,

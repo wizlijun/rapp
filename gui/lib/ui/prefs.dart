@@ -20,6 +20,7 @@ class UiPrefs {
     this.autoSaveTraffic = true,
     this.inputHistory = true,
     this.termKeyRow = false,
+    this.termFit = true,
     this.first = FirstLayer.device,
     this.composerZoom = 0,
     Map<String, String>? termOpen,
@@ -39,6 +40,9 @@ class UiPrefs {
 
   /// 按键排 (`term_key_row`): the six big keys on a terminal's stage, on this console. Missing or bad means off.
   bool termKeyRow;
+
+  /// 跟着我的窗口 (`term_fit`): the host's terminal window follows this console's size. Missing or bad means on.
+  bool termFit;
 
   /// 输入板缩放档 (`composer_zoom`): 0 is the default size, up to [composerZoomMax]. Missing or bad means 0.
   int composerZoom;
@@ -71,6 +75,7 @@ class UiPrefs {
       final save = j['auto_save_traffic'];
       final ih = j['input_history'];
       final kr = j['term_key_row'];
+      final tf = j['term_fit'];
       final fl = j['first'];
       final cz = j['composer_zoom'];
       final to = j['term_open'];
@@ -84,6 +89,7 @@ class UiPrefs {
         autoSaveTraffic: save is bool ? save : true,
         inputHistory: ih is bool ? ih : true,
         termKeyRow: kr is bool ? kr : false,
+        termFit: tf is bool ? tf : true,
         composerZoom: cz is int ? cz.clamp(0, composerZoomMax) : 0,
         first: FirstLayer.values.firstWhere(
           (v) => v.name == fl,
@@ -115,6 +121,7 @@ class UiPrefs {
         'auto_save_traffic': autoSaveTraffic,
         'input_history': inputHistory,
         'term_key_row': termKeyRow,
+        'term_fit': termFit,
         'first': first.name,
         'composer_zoom': composerZoom,
         'term_open': termOpen,
