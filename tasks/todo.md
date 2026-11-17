@@ -439,7 +439,10 @@
 - [ ] iPad 真机：Q2–Q5 重量一遍
 - [ ] 点一下到画面变化的延迟（随 P1 触摸的真机检查一起量）
 - [ ] 6 个会话同时开着的内存，拔电时每小时耗电（§9.5）
-- [ ] "本地网络"弹框在哪一步弹出，被拒绝时怎么提示
+- [ ] "本地网络"弹框在哪一步弹出，被拒绝时怎么提示；关掉本地网络再连一次，确认只走 relay 也能连上（记下 path）
+- [ ] FFI 接口：hub 自己退出时通知 Dart（`on_line(NULL)` 当结束标记，Dart 收到后让所有等待的请求失败），`rapp_hub_send` 区分"没启动"和"已退出"；`stop` 等输出转发线程读完再返回
+- [ ] 密钥不经 `--dart-define`：它会被抄进 Flutter 生成的 xcconfig 和 App.framework。改成运行时传入（启动参数/环境变量或 0600 文件）
+- [ ] iPad 多任务（分屏、侧拉、台前调度）下的窗口大小：探查带了 `UIRequiresFullScreen`，没量
 - [ ] 设备名由入口传给 hub（现在 A 上显示 "rapp"）
 - [ ] Dart 在 iOS 上没有 `HOME`：`gui/lib/paths.dart` 等改用原生传进来的家目录
 - [ ] RappCore 的 iOS 测试：提交一个 scheme 或测试计划
