@@ -51,6 +51,10 @@ const ENROLL_REFUSED_WAIT: Duration = Duration::from_secs(60);
 pub(crate) struct NetState {
     /// Something saw the relay not answer: probe now.
     suspect: AtomicBool,
+    /// The GUI said the network changed (`net_changed`): treated as new local addresses.
+    changed: AtomicBool,
+    /// Bumped on every rebind: presence and watches ask their hosts again at once.
+    pub(crate) wake: tokio::sync::watch::Sender<u64>,
     level: Mutex<Option<Level>>,
     /// The last `net` event pushed (None: none, or `none` was the last).
     last: Mutex<Option<Value>>,
@@ -60,6 +64,27 @@ impl Hub {
     /// A request to the relay timed out, or a session reports its path looks broken.
     pub(crate) fn net_suspect(&self) {
         self.net.suspect.store(true, Ordering::Release);
+    }
+
+    /// `{"cmd":"net_changed"}`: the app came back to the foreground, or Wi-Fi/cellular changed.
+    /// A new socket, the relay checked now as after an address change, every host asked again.
+    pub(crate) fn net_changed(&self) {
+        self.rebind();
+        self.net.changed.store(true, Ordering::Release);
+        self.net_suspect();
+    }
+
+    /// Moves the endpoint to a new UDP socket (iOS takes a suspended app's sockets away, and a socket
+    /// from before a network change may not get through). Sessions keep their connections, which
+    /// move with it; the link cache is emptied so the next request picks LAN or relay anew; presence
+    /// and watches ask their hosts at once.
+    pub(crate) fn rebind(&self) {
+        match rapp_net::quic::rebind(&self.ep, self.dual_stack) {
+            Ok(a) => self.log.event(Lvl::Info, "rebind", json!({"local": a.to_string()})),
+            Err(e) => self.log.event(Lvl::Warn, "rebind", json!({"error": format!("{e:#}")})),
+        }
+        self.links.lock().unwrap().clear();
+        self.net.wake.send_modify(|n| *n = n.wrapping_add(1));
     }
 
     /// The level of the link to the relay; None when no relay is set or nothing is known yet.
@@ -125,7 +150,12 @@ impl Monitor {
 
     async fn step(&mut self, hub: &Arc<Hub>, now: Instant) {
         let addrs = local_addrs();
-        if addrs != self.addrs {
+        let told = hub.net.changed.swap(false, Ordering::AcqRel);
+        if addrs != self.addrs || told {
+            // The in-process iOS hub moves to a new socket on its own too, in case nobody told it.
+            if addrs != self.addrs && !told && hub.dual_stack {
+                hub.rebind();
+            }
             self.addrs = addrs;
             self.wake(now);
             self.recheck = true;

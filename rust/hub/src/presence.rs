@@ -31,8 +31,13 @@ pub(crate) async fn run(hub: Arc<Hub>, every: Duration) {
     let mut tick = interval(every);
     tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut last: HashMap<String, bool> = HashMap::new();
+    let mut wake = hub.net.wake.subscribe();
     loop {
-        tick.tick().await;
+        // The network changed (`Hub::rebind`): a round now, and the next one `every` after it.
+        tokio::select! {
+            _ = tick.tick() => {}
+            _ = wake.changed() => tick.reset(),
+        }
         if hub.presence_paused.load(std::sync::atomic::Ordering::Relaxed) {
             continue;
         }
