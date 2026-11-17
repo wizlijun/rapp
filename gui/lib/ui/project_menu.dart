@@ -64,7 +64,6 @@ class ProjectMenu extends StatelessWidget {
                   // Hugs its content: a short name keeps a short button.
                   constraints: const BoxConstraints(minHeight: 48, maxHeight: 48, minWidth: 48),
                   padding: EdgeInsets.only(left: compact ? 4 : 10, right: compact ? 2 : 6),
-                  decoration: BoxDecoration(borderRadius: radius, border: Border.all(color: t.line)),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [

@@ -1251,10 +1251,12 @@ void main() {
       await tester.pumpAndSettle();
       expect((s.freeZone, s.currentProject), (false, null));
       expect(tester.widget<Text>(find.byKey(const Key('project-menu-label'))).data, '全部');
+      s.switchFreeZone();
       s.deleteProject(a.id);
       s.deleteProject(b.id);
       await tester.pump();
-      expect(find.byKey(const Key('project-menu')), findsNothing);
+      expect(find.byKey(const Key('project-menu')), findsNothing, reason: 'no project: all of it is 自由区');
+      expect(s.freeZone, isFalse);
       await tester.pump(MainState.undoFor);
       await tester.pump(MainState.cueFor);
     });
