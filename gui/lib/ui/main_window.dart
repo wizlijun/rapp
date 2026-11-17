@@ -1,6 +1,7 @@
 // The main window: top bar, stage, and a side panel that overlays the stage.
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -225,6 +226,12 @@ class _MainWindowState extends State<MainWindow> {
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
     final mac = Platform.isMacOS;
+    // Safe areas (iPad spec §7.2): the top bar clears the status bar and the camera side; the stage clears the
+    // home bar. The background (the scaffold's) still runs under them. The home bar's inset comes from the view
+    // padding: with the soft keyboard up Flutter takes it out of the padding, and the stage never resizes (Z1).
+    // On the desktop all of it is 0.
+    final pad = MediaQuery.paddingOf(context);
+    final sides = EdgeInsets.only(left: pad.left, right: pad.right);
     // On macOS only ⌃⌘ chords are rapp's: ⌘[ ⌘] belong to A while the picture has focus.
     final prefixOf = mac
         ? (LogicalKeyboardKey k) => SingleActivator(k, control: true, meta: true)
@@ -264,57 +271,63 @@ class _MainWindowState extends State<MainWindow> {
           body: Backdrop(
             theme: state.prefs.theme,
             child: Column(children: [
-              _Blur(state: state, child: TopBar(state: state, fullscreen: _full, onToggleFullscreen: _toggleFull)),
-              _Blur(state: state, child: _NarrowHint(state: state)),
+              Padding(
+                padding: sides.copyWith(top: pad.top),
+                child: _Blur(state: state, child: TopBar(state: state, fullscreen: _full, onToggleFullscreen: _toggleFull)),
+              ),
+              Padding(padding: sides, child: _Blur(state: state, child: _NarrowHint(state: state))),
               Expanded(
-                child: ListenableBuilder(
-                  listenable: state,
-                  builder: (context, _) {
-                    final open = state.panel != null;
-                    return Stack(children: [
-                      Positioned.fill(
-                        child: _needsAccess && state.hub != null
-                            ? AccessSetup(key: const Key('access-setup'), hub: state.hub!, onDone: _onAccessDone)
-                            : state.overview
-                                ? Overview(state: state)
-                                : Stage(state: state),
-                      ),
-                      if (open)
+                child: Padding(
+                  padding: sides.copyWith(bottom: math.max(pad.bottom, MediaQuery.viewPaddingOf(context).bottom)),
+                  child: ListenableBuilder(
+                    listenable: state,
+                    builder: (context, _) {
+                      final open = state.panel != null;
+                      return Stack(children: [
                         Positioned.fill(
-                          child: _Blur(
-                            state: state,
-                            child: GestureDetector(
-                              key: const Key('scrim'),
-                              behavior: HitTestBehavior.opaque,
-                              onTap: state.closePanel,
-                              child: ColoredBox(color: t.bg.withValues(alpha: .6)),
+                          child: _needsAccess && state.hub != null
+                              ? AccessSetup(key: const Key('access-setup'), hub: state.hub!, onDone: _onAccessDone)
+                              : state.overview
+                                  ? Overview(state: state)
+                                  : Stage(state: state),
+                        ),
+                        if (open)
+                          Positioned.fill(
+                            child: _Blur(
+                              state: state,
+                              child: GestureDetector(
+                                key: const Key('scrim'),
+                                behavior: HitTestBehavior.opaque,
+                                onTap: state.closePanel,
+                                child: ColoredBox(color: t.bg.withValues(alpha: .6)),
+                              ),
                             ),
                           ),
-                        ),
-                      if (open)
-                        Positioned(
-                          left: 0,
-                          top: 0,
-                          bottom: 0,
-                          child: _Blur(
-                            state: state,
-                            child: SidePanel(
+                        if (open)
+                          Positioned(
+                            left: 0,
+                            top: 0,
+                            bottom: 0,
+                            child: _Blur(
                               state: state,
-                              // The shell never pops anything up for an update: just the dot (K27).
-                              devicesTab: ListenableBuilder(
-                                listenable: widget.monitor ?? Listenable.merge(const []),
-                                builder: (context, _) => DevicesTab(
-                                  state: state,
-                                  local: _local(),
-                                  localBadge: caps.onlineUpdate && updateBadge(widget.monitor?.status?.update),
-                                  shares: caps.showsPorts ? widget.monitor : null,
+                              child: SidePanel(
+                                state: state,
+                                // The shell never pops anything up for an update: just the dot (K27).
+                                devicesTab: ListenableBuilder(
+                                  listenable: widget.monitor ?? Listenable.merge(const []),
+                                  builder: (context, _) => DevicesTab(
+                                    state: state,
+                                    local: _local(),
+                                    localBadge: caps.onlineUpdate && updateBadge(widget.monitor?.status?.update),
+                                    shares: caps.showsPorts ? widget.monitor : null,
+                                  ),
                                 ),
                               ),
                             ),
                           ),
-                        ),
-                    ]);
-                  },
+                      ]);
+                    },
+                  ),
                 ),
               ),
             ]),

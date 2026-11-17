@@ -260,6 +260,64 @@ void main() {
       await tester.pump(const Duration(seconds: 1));
       await tester.pumpWidget(const SizedBox());
     });
+
+    testWidgets('no fullscreen button, and no 端口 on a device page', (tester) async {
+      hasKey = true;
+      await pumpIos(tester);
+      expect(find.byKey(const Key('fullscreen-button')), findsNothing);
+      expect(find.byType(TopBar), findsOneWidget);
+      s.showDevice('111');
+      await settle(tester);
+      expect(s.deviceTab, '111');
+      expect(find.byType(SharesSection), findsNothing);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
+
+  testWidgets('desktop: a device page has its 端口 section', (tester) async {
+    await pump(tester);
+    s.showDevice('111');
+    await settle(tester);
+    expect(find.byKey(const ValueKey('shares-111')), findsOneWidget);
+  });
+
+  Future<void> pumpInsets(WidgetTester tester, MediaQueryData Function(MediaQueryData) edit) async {
+    tester.view.physicalSize = const Size(1194, 834);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(wrap(
+      Builder(
+        builder: (context) => MediaQuery(
+          data: edit(MediaQuery.of(context)),
+          child: MainWindow(state: s, monitor: monitor, control: null, fullscreen: fs),
+        ),
+      ),
+      disableAnimations: true,
+    ));
+    await settle(tester);
+  }
+
+  testWidgets('safe areas: the top bar clears the status bar and the camera side (iPad spec §7.2)', (tester) async {
+    await pumpInsets(tester, (m) => m.copyWith(padding: const EdgeInsets.only(top: 24, left: 20)));
+    final bar = tester.getRect(find.byType(TopBar));
+    expect(bar.top, greaterThanOrEqualTo(24));
+    expect(bar.left, greaterThanOrEqualTo(20));
+    expect(tester.getRect(find.byKey(const Key('stage'))).left, greaterThanOrEqualTo(20));
+  });
+
+  testWidgets('safe areas: the stage clears the home bar and keeps its size with the soft keyboard up (Z1)',
+      (tester) async {
+    await pumpInsets(tester,
+        (m) => m.copyWith(padding: const EdgeInsets.only(bottom: 20), viewPadding: const EdgeInsets.only(bottom: 20)));
+    final down = tester.getRect(find.byKey(const Key('stage')));
+    expect(down.bottom, lessThanOrEqualTo(834 - 20));
+    // The keyboard up: Flutter takes the home bar out of the padding, never out of the view padding.
+    await pumpInsets(tester, (m) => m.copyWith(
+        padding: EdgeInsets.zero,
+        viewPadding: const EdgeInsets.only(bottom: 20),
+        viewInsets: const EdgeInsets.only(bottom: 300)));
+    expect(tester.getRect(find.byKey(const Key('stage'))), down);
   });
 
   testWidgets('opening and closing the panel never changes the stage size', (tester) async {

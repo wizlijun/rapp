@@ -308,12 +308,11 @@ void main() {
     s.toggleOverview();
     await tester.pump();
     expect(s.entries.length, 16);
-    final scrollables = find.descendant(of: find.byKey(const Key('wall')), matching: find.byType(Scrollable));
-    expect(scrollables, findsWidgets);
-    for (final e in scrollables.evaluate()) {
-      expect((e as StatefulElement).state is ScrollableState, isTrue);
-      expect((e.state as ScrollableState).position.maxScrollExtent, 0);
-    }
+    // One run of four, and the page around it does not scroll.
+    final page = find.ancestor(of: find.byKey(const Key('wall')), matching: find.byType(Scrollable));
+    expect(page, findsOneWidget);
+    expect(tester.state<ScrollableState>(page).position.maxScrollExtent, 0);
+    expect(tester.getTopLeft(find.byKey(const Key('column-m4'))).dy, tester.getTopLeft(find.byKey(const Key('column-m1'))).dy);
     for (final e in s.entries) {
       expect(find.byKey(Key('block-${e.key}')), findsOneWidget);
     }
@@ -458,6 +457,32 @@ void main() {
     final top = tester.getTopLeft(find.byKey(Key('project-${ids.last}'))).dy;
     expect(top, inInclusiveRange(56, 834));
     expect(s.focusProject, isNull);
+  });
+
+  testWidgets('a 600-wide window wraps the wall and the page scrolls up and down (iPad spec §7.2)', (tester) async {
+    hosts = [for (var i = 1; i <= 5; i++) {'id': 'm$i', 'name': 'mac$i'}];
+    await boot(tester);
+    s.toggleOverview();
+    await tester.pumpWidget(wrap(Align(
+      alignment: Alignment.topLeft,
+      child: SizedBox(width: 600, height: 500, child: Overview(state: s)),
+    )));
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    double dy(String k) => tester.getTopLeft(find.byKey(Key(k))).dy;
+    expect(dy('column-m5'), greaterThan(dy('column-m1')));
+    for (final k in ['column-local', 'column-m1', 'column-m5']) {
+      expect(tester.getRect(find.byKey(Key(k))).right, lessThanOrEqualTo(600), reason: k);
+    }
+    final page = find.ancestor(of: find.byKey(const Key('wall')), matching: find.byType(Scrollable));
+    expect(page, findsOneWidget);
+    final pos = tester.state<ScrollableState>(page).position;
+    expect(pos.axis, Axis.vertical);
+    expect(pos.maxScrollExtent, greaterThan(0));
+    final before = dy('column-m1');
+    await tester.drag(find.byKey(const Key('wall')), const Offset(0, -200));
+    await tester.pump();
+    expect(dy('column-m1'), lessThan(before));
   });
 }
 

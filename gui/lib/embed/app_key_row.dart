@@ -32,6 +32,10 @@ const appKeyRowKeys = <AppKey>[
 /// What a key of the row takes on screen.
 const appKeySize = Size(48, 48);
 const _gap = 4.0;
+const _pad = 8.0;
+
+/// The row's whole width, all twelve keys showing; a narrower stage scrolls it.
+final appKeyRowWidth = appKeyRowKeys.length * appKeySize.width + (appKeyRowKeys.length - 1) * _gap + 2 * _pad;
 
 class AppKeyRow extends StatefulWidget {
   const AppKeyRow({super.key, required this.state, required this.sid, required this.latch});
@@ -136,7 +140,7 @@ class _AppKeyRowState extends State<AppKeyRow> {
         listenable: _latch,
         builder: (context, _) => SingleChildScrollView(
           scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.all(8),
+          padding: const EdgeInsets.all(_pad),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [

@@ -28,6 +28,11 @@ String _tabLabel(PanelTab t) => switch (t) {
       PanelTab.resources => '资源',
     };
 
+/// The panel's width for its [design] width in a [window] this wide (iPad spec §7.2): a wide (720) panel takes
+/// the whole of a window under 760; otherwise it leaves at least 56 of the stage showing beside it.
+double panelWidth(double design, double window) =>
+    window < 760 && design == 720 ? window : math.min(design, window - 56);
+
 class SidePanel extends StatelessWidget {
   const SidePanel({super.key, required this.state, required this.devicesTab});
   final MainState state;
@@ -48,7 +53,8 @@ class SidePanel extends StatelessWidget {
         // Keep the Mac layout at the default size, but reserve enough logical
         // width for the actual font metrics/text scale on every desktop.
         final navigationWidth = 4 * tabWidth + 3 * 6 + 48 + 22;
-        final width = math.min(math.max(devices || projects || resources ? 720.0 : 330.0, navigationWidth), mq.width);
+        final design = devices || projects || resources ? 720.0 : 330.0;
+        final width = math.min(math.max(panelWidth(design, mq.width), navigationWidth), mq.width);
         return Container(
           width: width,
           decoration: BoxDecoration(

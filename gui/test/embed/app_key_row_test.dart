@@ -294,16 +294,17 @@ void main() {
       await tester.pump();
     }
 
-    Future<void> mountStage(WidgetTester tester, {double inset = 0}) async {
+    Future<void> mountStage(WidgetTester tester, {double inset = 0, double width = 1100, double homeBar = 0}) async {
       tester.view.physicalSize = const Size(1200, 900);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.reset);
       await tester.pumpWidget(wrap(SizedBox(
-        width: 1100,
+        width: width,
         height: 800,
         child: Builder(
           builder: (context) => MediaQuery(
-            data: MediaQuery.of(context).copyWith(viewInsets: EdgeInsets.only(bottom: inset)),
+            data: MediaQuery.of(context).copyWith(
+                viewInsets: EdgeInsets.only(bottom: inset), viewPadding: EdgeInsets.only(bottom: homeBar)),
             child: Stage(state: s),
           ),
         ),
@@ -348,6 +349,39 @@ void main() {
       expect(stage.size, const Size(1100, 800));
       expect(tester.getRect(find.byType(AppKeyRow)).bottom, stage.bottom - 300);
     });
+
+    testWidgets('above the home bar the row still sits on the soft keyboard (the stage ends at the safe area)',
+        (tester) async {
+      s.prefs.appKeyRow = true;
+      await mountStage(tester, inset: 300, homeBar: 20);
+      await openApp(tester, 'Safari');
+      s.focusPicture(1);
+      await tester.pump();
+      final stage = tester.getRect(find.byKey(const Key('stage')));
+      expect(tester.getRect(find.byType(AppKeyRow)).bottom, stage.bottom - 280);
+    });
+
+    for (final w in [834.0, 744.0, 600.0, 507.0]) {
+      testWidgets('at $w the row keeps off 「输入」 and inside the stage (iPad split view)', (tester) async {
+        s.prefs.appKeyRow = true;
+        await mountStage(tester, width: w);
+        await openApp(tester, 'Safari');
+        s.focusPicture(1);
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+        final stage = tester.getRect(find.byKey(const Key('stage')));
+        final row = tester.getRect(find.byType(AppKeyRow));
+        final input = tester.getRect(find.byKey(const Key('composer-open')));
+        expect(row.left, greaterThanOrEqualTo(stage.left));
+        expect(row.right, lessThanOrEqualTo(input.left), reason: 'row $row, 输入 $input');
+        // Too narrow for all twelve: the row scrolls to the rest, the first key still whole.
+        final esc = tester.getRect(key('Esc'));
+        expect(esc.left, greaterThanOrEqualTo(row.left));
+        if (w >= 744) {
+          expect(tester.getRect(key('Return')).right, lessThanOrEqualTo(row.right), reason: 'all twelve fit at $w');
+        }
+      });
+    }
 
     testWidgets('a switch to another session releases the old one\'s modifiers', (tester) async {
       s.prefs.appKeyRow = true;

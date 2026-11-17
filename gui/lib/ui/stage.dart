@@ -1,4 +1,6 @@
 // The stage: where the remote window sits; a placeholder while it is elsewhere (S1, detached).
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
@@ -42,6 +44,30 @@ class Stage extends StatelessWidget {
   const Stage({super.key, required this.state, this.composerEditor});
   final MainState state;
   final ComposerEditor Function()? composerEditor;
+
+  /// The app key row's place. The keyboard's top edge is measured from the view's bottom, and the stage already
+  /// stands above the home bar (MainWindow's safe area), so the bar's height comes off. Down on the stage's bottom
+  /// line it keeps off 「输入」 (12 + 48 + 8 from the right): centred while it fits between two such margins, else
+  /// from the left; beside the upload strip it goes up a line. Too narrow for all twelve, it scrolls.
+  Widget _appKeyRow(BuildContext context, RemoteSession rs, {required bool showsInput}) {
+    final mq = MediaQuery.of(context);
+    final kb = math.max(0.0, mq.viewInsets.bottom - mq.viewPadding.bottom);
+    final onLine = kb < 12 + 48;
+    final input = showsInput && onLine && rs.composerAllowed && !rs.composer.open;
+    final strip = showsInput && onLine && rs.transferStatus != null;
+    const reserve = 12 + 48 + 8.0;
+    return LayoutBuilder(builder: (context, c) {
+      final both = c.maxWidth - 2 * reserve >= appKeyRowWidth;
+      final right = input && !strip ? reserve : 0.0;
+      return Padding(
+        padding: EdgeInsets.only(left: both ? right : 0, right: right, bottom: strip ? kb + 12 + 48 + 8 : kb),
+        child: Align(
+          alignment: Alignment.bottomCenter,
+          child: AppKeyRow(state: state, sid: rs.sid, latch: state.appLatch),
+        ),
+      );
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -214,16 +240,14 @@ class Stage extends StatelessWidget {
               if (!full && (picture || (rs != null && rs.detached)) && rs != null && port != null)
                 ...composerLayer(state: state, session: rs, port: port, editor: composerEditor),
               // 按键排 over an app picture (iPad spec §8.3), while the picture has the keys or the writing panel is
-              // open: on the soft keyboard's top edge when it is up, floating over the stage (Z1: no resize).
-              if (picture && rs != null && !rs.detached && !(rec?.frozen ?? false) && state.prefs.appKeyRow)
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: MediaQuery.viewInsetsOf(context).bottom,
+              // open: on the soft keyboard's top edge when it is up, floating over the stage (Z1: no resize). Not
+              // where the body fills the stage, as the writing panel's layer.
+              if (!full && picture && rs != null && !rs.detached && !(rec?.frozen ?? false) && state.prefs.appKeyRow)
+                Positioned.fill(
                   child: ListenableBuilder(
-                    listenable: rs.composer,
+                    listenable: Listenable.merge([rs, rs.composer]),
                     builder: (context, _) => state.pictureFocused == rs.sid || rs.composer.open
-                        ? Center(child: AppKeyRow(state: state, sid: rs.sid, latch: state.appLatch))
+                        ? _appKeyRow(context, rs, showsInput: port != null)
                         : const SizedBox.shrink(),
                   ),
                 ),

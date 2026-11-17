@@ -7,10 +7,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/embed/stream_menu.dart';
 import 'package:rapp/hub_client.dart';
+import 'package:rapp/platform_caps.dart';
 import 'package:rapp/ui/lamp.dart';
 import 'package:rapp/embed/app_profile.dart';
 import 'package:rapp/ui/app_profile_store.dart';
 import 'package:rapp/ui/main_state.dart';
+import 'package:rapp/ui/needs_you.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/project_menu.dart';
 import 'package:rapp/ui/session_model.dart';
@@ -1319,6 +1321,129 @@ void main() {
       await tester.pump(MainState.cueFor);
       expect(find.byKey(const Key('return-cue')), findsNothing);
       expect(find.descendant(of: find.byKey(const Key('session-block')), matching: find.text('写周报')), findsOneWidget);
+    });
+  });
+  // iPad spec §7.2: the bar yields in order as the window narrows, and never loses the three.
+  group('iPad widths', () {
+    late FakeSessionPort port;
+    late MainState es;
+
+    setUp(() {
+      port = FakeSessionPort();
+      t.onSend = (m) {
+        if (m['cmd'] == 'open') {
+          t.emit({
+            'event': 'opened', 'sid': 1, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+            'port': 5001, 'token': 'tk', 'req': m['req'],
+          });
+        }
+      };
+      s.dispose();
+      s = es = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port);
+    });
+
+    RemoteWindow rw(int id, String title) => RemoteWindow(
+          id: id, parent: 0, kind: WindowKind.normal, title: title, rect: const Rect.fromLTWH(0, 0, 400, 328),
+          titleBar: 28, resizable: true, focused: false, texture: id, visible: const Rect.fromLTWH(0, 0, 1, 1));
+
+    Future<void> at(WidgetTester tester, double w) => tester.pumpWidget(wrap(Align(
+          alignment: Alignment.topLeft,
+          child: SizedBox(width: w, child: TopBar(state: es, fullscreen: false, onToggleFullscreen: () {})),
+        )));
+
+    /// Everything the bar can carry: an embedded session with two windows, a measured relay, a hint.
+    Future<void> boot(WidgetTester tester) async {
+      // Wider than the default 800 surface, so the sweep is never clamped.
+      tester.view.physicalSize = const Size(1300, 600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await at(tester, 1200);
+      await tester.runAsync(() async {
+        t.emit({'event': 'net', 'level': 'ok', 'rtt_ms': 160, 'loss': 0.03});
+        es.openOrSwitch('111', 'Safari', 'Safari');
+        for (var i = 0; i < 4; i++) {
+          await flush();
+        }
+      });
+      await tester.pump();
+      es.stageSize(const Size(800, 600));
+      port.emit(const ReadyEvent(1, 'Safari'));
+      port.emit(WindowsEvent(1, [rw(1, 'One'), rw(2, 'Two')]));
+      es.hint = '已打开 Safari';
+      es.notifyListeners();
+      await tester.pump();
+    }
+
+    testWidgets('iPad widths fit and keep the three', (tester) async {
+      await boot(tester);
+      for (final w in [1194.0, 1024.0, 834.0, 744.0, 600.0, 507.0]) {
+        await at(tester, w);
+        await tester.pump();
+        expect(tester.takeException(), isNull, reason: '$w');
+        expect(find.byKey(const Key('session-block')), findsOneWidget, reason: '$w');
+        expect(find.byType(NeedsYouAnchor), findsOneWidget, reason: '$w');
+        expect(find.byKey(const Key('traffic')), findsOneWidget, reason: '$w');
+        final bar = find.byType(TopBar);
+        for (final f in [
+          find.descendant(of: bar, matching: find.byType(IconButton)),
+          find.descendant(of: bar, matching: find.byType(InkWell)),
+        ]) {
+          for (final e in f.evaluate()) {
+            final size = tester.getSize(find.byWidget(e.widget));
+            expect(size.width, greaterThanOrEqualTo(48), reason: '$w ${e.widget}');
+            expect(size.height, greaterThanOrEqualTo(48), reason: '$w ${e.widget}');
+          }
+        }
+      }
+    });
+
+    testWidgets('yield order', (tester) async {
+      await boot(tester);
+      bool full() {
+        final m = tester.widgetList<WindowMenu>(find.byType(WindowMenu));
+        return m.isNotEmpty && !m.single.compact;
+      }
+
+      final checks = <String, bool Function()>{
+        'hint': () => find.byKey(const Key('hint-text')).evaluate().isNotEmpty,
+        'split': () => find.byKey(const Key('session-menu')).evaluate().isNotEmpty,
+        'net': () => find.byKey(const Key('net-marker')).evaluate().isNotEmpty,
+        'window': full,
+      };
+      // The widest width each is gone at, sweeping up; each stays once it came.
+      final gone = {for (final k in checks.keys) k: 0.0};
+      final came = <String>{};
+      for (var w = 300.0; w <= 1200; w += 10) {
+        await at(tester, w);
+        await tester.pump();
+        expect(tester.takeException(), isNull, reason: '$w');
+        for (final MapEntry(:key, :value) in checks.entries) {
+          if (value()) {
+            came.add(key);
+          } else {
+            expect(came, isNot(contains(key)), reason: '$key came back off at $w');
+            gone[key] = w;
+          }
+        }
+      }
+      expect(came, checks.keys.toSet(), reason: 'all four at 1200');
+      expect(gone['hint'], greaterThanOrEqualTo(gone['split']!), reason: '$gone');
+      expect(gone['split'], greaterThanOrEqualTo(gone['net']!), reason: '$gone');
+      expect(gone['net'], greaterThanOrEqualTo(gone['window']!), reason: '$gone');
+    });
+
+    testWidgets('no window manager (iOS): no fullscreen button, the bar still fits', (tester) async {
+      final was = caps;
+      caps = PlatformCaps.forOs('ios');
+      addTearDown(() => caps = was);
+      await boot(tester);
+      for (final w in [1194.0, 507.0, 300.0]) {
+        await at(tester, w);
+        await tester.pump();
+        expect(tester.takeException(), isNull, reason: '$w');
+        expect(find.byKey(const Key('fullscreen-button')), findsNothing, reason: '$w');
+        expect(find.byKey(const Key('traffic')), findsOneWidget, reason: '$w');
+      }
     });
   });
 }

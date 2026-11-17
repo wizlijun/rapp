@@ -90,11 +90,8 @@ Future<void> mainIos() async {
 
   runApp(_IosApp(
     state: state,
-    // The status bar stays on iPad: the top bar goes below it.
-    home: SafeArea(
-      bottom: false,
-      child: MainWindow(state: state, monitor: null, control: null, fullscreen: const NoFullscreen()),
-    ),
+    // The status bar stays on iPad: MainWindow keeps its top bar below it and the stage off the home bar.
+    home: MainWindow(state: state, monitor: null, control: null, fullscreen: const NoFullscreen()),
   ));
 }
 

@@ -1,11 +1,14 @@
 // Top bar, left to right: panel, overview, the project menu (with two projects or more), prev, the session (its list), next, the window menu,
 // the remote app's menu; then the hint, right-aligned (its ▾ opens the history); then 需要你, the
-// network marker, the traffic label (the stream menu), the session menu, fullscreen.
+// network marker, the traffic label (the stream menu), the session menu, fullscreen (where there is a window manager).
+// Narrowing, it yields in this order (iPad spec §7.2): the hint's line (its ▾ stays), the 本机 button, the network
+// marker, the window title (the count stays).
 import 'package:flutter/material.dart';
 
 import '../embed/stream_menu.dart';
 import '../embed/traffic_label.dart';
 import '../pages/app_profile_page.dart';
+import '../platform_caps.dart';
 import 'lamp.dart';
 import 'lifecycle.dart';
 import 'main_state.dart';
@@ -58,7 +61,9 @@ class TopBar extends StatelessWidget {
             // The 本机 button comes before it and the 远程 one before the window tabs when there is
             // room for them and a bit of the session block; else the traffic label's menu carries
             // all three parts.
-            final baseIcons = 4 + (state.hub != null ? 1 : 0);
+            // No window manager (iOS): no fullscreen button.
+            final fullscreenButton = caps.hasWindowManager;
+            final baseIcons = (fullscreenButton ? 4 : 3) + (state.hub != null ? 1 : 0);
             final trafficW = embedded ? TrafficLabel.width : 0.0;
             // The project menu leads the session group while there are projects to switch
             // between and the bare row has room for its icon; it names the project further down.
@@ -66,9 +71,16 @@ class TopBar extends StatelessWidget {
             final icons = baseIcons + (showProject ? 1 : 0);
             final splitW = embedded ? (term ? 1 : 2) * 48.0 : 0.0;
             // The network marker, left of the stream anchor, while the hub has a relay to measure and
-            // the bare row (no gaps, no overview button) has room for it; it goes before those do.
+            // the bare row (no gaps, no overview button) has room for it; it goes before those do. With a window
+            // control to show it also leaves that its title: the marker goes first.
             const netWant = NetMarker.width;
-            final net = box.maxWidth >= icons * 48 + trafficW + netWant ? state.hub?.net : null;
+            final wmWants = rs != null && !rs.detached && WindowMenu.shows(state, term: term);
+            // The window title wants room for itself, the overview button, the gaps (eight of 6) and a bit of the
+            // session block (60), so the session block is never squeezed under a tap target (iPad spec §7.2).
+            const wmFullRoom = WindowMenu.fullWidth + 48 + 8 * 6 + 60;
+            final net = box.maxWidth >= icons * 48 + trafficW + netWant + (wmWants ? wmFullRoom : 0)
+                ? state.hub?.net
+                : null;
             final netW = net == null ? 0.0 : netWant;
             // The window control: one button, never a row that grows. What the bare row leaves it,
             // beside a bit of the session block, decides whether it carries a title or shrinks to
@@ -76,11 +88,8 @@ class TopBar extends StatelessWidget {
             // the only way back to them.
             final wmRoom = box.maxWidth - (icons * 48 + trafficW + netW);
             final wmHidden = rs != null && !rs.detached && WindowMenu.hiddenOf(state, term: term).isNotEmpty;
-            final wmShow = rs != null &&
-                !rs.detached &&
-                WindowMenu.shows(state, term: term) &&
-                (wmHidden || wmRoom >= WindowMenu.compactWidth + 60);
-            final wmFull = wmShow && wmRoom >= WindowMenu.fullWidth + 60;
+            final wmShow = wmWants && (wmHidden || wmRoom >= WindowMenu.compactWidth + 60);
+            final wmFull = wmShow && wmRoom >= wmFullRoom;
             final wmW = !wmShow ? 0.0 : (wmFull ? WindowMenu.fullWidth : WindowMenu.compactWidth);
             final split = embedded && box.maxWidth >= (icons + 1) * 48 + trafficW + splitW + netW + 42 + 160 + wmW;
             final remoteButton = split && !term;
@@ -217,19 +226,21 @@ class TopBar extends StatelessWidget {
                     SizedBox(width: gap),
                   ],
                   // The hint, right-aligned against the right-hand group, with its history's ▾.
-                  Expanded(child: HintAnchor(state: state, showText: wide)),
+                  // Its line goes first: never while 本机 has had to fold into the traffic menu.
+                  Expanded(child: HintAnchor(state: state, showText: wide && (split || !embedded))),
                   if (state.hub != null) NeedsYouAnchor(state: state),
                   if (net != null) NetMarker(net: net, path: cur?.path),
                   if (embedded) ...[
                     _menu(context, cur, split ? {MenuPart.stream} : allMenuParts, Corner.stream),
                     if (split) _menu(context, cur, {MenuPart.session}, Corner.session),
                   ],
-                  _icon(
-                    'fullscreen-button',
-                    fullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
-                    fullscreen ? '退出全屏' : '进入全屏',
-                    onToggleFullscreen,
-                  ),
+                  if (fullscreenButton)
+                    _icon(
+                      'fullscreen-button',
+                      fullscreen ? Icons.fullscreen_exit : Icons.fullscreen,
+                      fullscreen ? '退出全屏' : '进入全屏',
+                      onToggleFullscreen,
+                    ),
                 ],
               ),
             );
