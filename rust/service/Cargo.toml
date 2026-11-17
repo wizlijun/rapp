@@ -22,6 +22,9 @@ rapp-update.workspace = true
 rapp-term.workspace = true
 rustls.workspace = true
 
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 tempfile.workspace = true
 tokio = { workspace = true, features = ["test-util"] }

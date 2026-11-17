@@ -2,7 +2,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter/services.dart' show MethodChannel, rootBundle;
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -46,8 +46,20 @@ Future<void> main(List<String> args) async {
   if (args.contains('--cm')) {
     await _showWindow(const Size(400, 320), 'rapp 连接管理');
     await windowManager.setPreventClose(true);
-    windowManager.addListener(_QuitOnClose());
-    runApp(_App(textSize: textSize, home: CmPage(monitor: monitor, onQuit: () => exit(0))));
+    // Linux shares its process with the main window. Only destroy this window;
+    // exiting the process would also kill the main GUI and its active sessions.
+    var closingCm = false;
+    void closeCm() {
+      if (closingCm) return;
+      closingCm = true;
+      if (Platform.isLinux) {
+        const MethodChannel('rapp/linux').invokeMethod<void>('close_window');
+      } else {
+        exit(0);
+      }
+    }
+    windowManager.addListener(_QuitOnClose(closeCm));
+    runApp(_App(textSize: textSize, home: CmPage(monitor: monitor, onQuit: closeCm)));
     return;
   }
 
@@ -177,8 +189,10 @@ class _App extends StatelessWidget {
 }
 
 class _QuitOnClose with WindowListener {
+  _QuitOnClose(this.onClose);
+  final VoidCallback onClose;
   @override
-  void onWindowClose() => exit(0);
+  void onWindowClose() => onClose();
 }
 
 /// Close hides the window; the tray menu has 显示 / 退出.

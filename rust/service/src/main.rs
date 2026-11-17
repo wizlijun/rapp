@@ -5,12 +5,29 @@
 use rapp_service::{autolock, DataOpts, Opts, Service, SystemRunner, UpdateOpts, WORKER_IDLE};
 use std::sync::Arc;
 
+#[cfg(target_os = "linux")]
+mod instance;
+
 #[tokio::main]
 async fn main() {
     if std::env::args().len() > 1 {
         eprintln!("usage: rapp-service   (data root: $RAPP_HOME, data-root pointer or ~/rapp)");
         std::process::exit(2);
     }
+    // Claim ownership before migration, identity/token writes, or worker startup.
+    // Keep it until process exit, including service shutdown and child cleanup.
+    #[cfg(target_os = "linux")]
+    let _instance = match instance::acquire() {
+        Ok(Some(guard)) => guard,
+        Ok(None) => {
+            eprintln!("rapp-service: already running for this user");
+            return;
+        }
+        Err(e) => {
+            eprintln!("rapp-service: single-instance guard: {e}");
+            std::process::exit(1);
+        }
+    };
     let root = rapp_net::config::home();
     if let Err(e) = rapp_net::datadir::prepare(&root, &rapp_net::config::legacy_dir()) {
         eprintln!("rapp-service: 数据目录 {}: {e:#}", root.display());

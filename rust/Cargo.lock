@@ -1493,6 +1493,7 @@ name = "rapp-service"
 version = "0.13.7"
 dependencies = [
  "anyhow",
+ "libc",
  "quinn",
  "rand 0.9.5",
  "rapp-conn",

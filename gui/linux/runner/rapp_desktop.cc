@@ -234,6 +234,16 @@ void method(FlMethodChannel *, FlMethodCall *call, gpointer data) {
   auto *d = static_cast<Desktop *>(data);
   const std::string name = fl_method_call_get_name(call);
   FlValue *args = fl_method_call_get_args(call);
+  if (name == "close_window") {
+    // window_manager's destroy sends another delete-event, which Flutter may
+    // intercept. Explicitly dispose this engine/window without exiting the
+    // shared process. Respond before destroying the method channel's owner.
+    g_idle_add_full(G_PRIORITY_DEFAULT_IDLE, +[](gpointer window) -> gboolean {
+      gtk_widget_destroy(GTK_WIDGET(window));
+      return G_SOURCE_REMOVE;
+    }, g_object_ref(d->main), g_object_unref);
+    return success(call);
+  }
   if (name == "clipboard_read")
     return read_clip(call);
   if (name == "clipboard_write")
