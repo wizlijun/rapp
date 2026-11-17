@@ -184,6 +184,9 @@ class _Footer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
+    // A dropdown's style replaces the theme's text style instead of merging into it: a colour-only
+    // style left the menus at Flutter's default size and font, bigger than everything around them.
+    final body = Theme.of(context).textTheme.bodyMedium!.copyWith(color: t.text);
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
@@ -206,7 +209,7 @@ class _Footer extends StatelessWidget {
                 itemHeight: 48,
                 dropdownColor: t.bg,
                 iconEnabledColor: t.text,
-                style: TextStyle(color: t.text),
+                style: body,
                 items: [
                   for (final th in themeOrder)
                     DropdownMenuItem(value: th, child: Text(themeLabel(th))),
@@ -232,7 +235,7 @@ class _Footer extends StatelessWidget {
                 itemHeight: 48,
                 dropdownColor: t.bg,
                 iconEnabledColor: t.text,
-                style: TextStyle(color: t.text),
+                style: body,
                 items: const [
                   DropdownMenuItem(value: FirstLayer.device, child: Text('设备在前')),
                   DropdownMenuItem(value: FirstLayer.project, child: Text('项目在前')),

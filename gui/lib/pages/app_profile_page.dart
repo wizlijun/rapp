@@ -143,7 +143,8 @@ class _AppProfilePageState extends State<AppProfilePage> {
           isExpanded: true,
           dropdownColor: t.bg,
           iconEnabledColor: t.text,
-          style: TextStyle(color: color),
+          // Replaces the theme's text style rather than merging into it: start from the body style.
+          style: Theme.of(context).textTheme.bodyMedium!.copyWith(color: color),
           items: [
             for (final e in labels.entries)
               DropdownMenuItem<T>(value: e.key, child: Text(e.value, style: TextStyle(color: color))),
