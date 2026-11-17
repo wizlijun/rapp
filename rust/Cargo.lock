@@ -1456,6 +1456,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rapp-hub-ffi"
+version = "0.13.7"
+dependencies = [
+ "rapp-hub",
+ "rapp-net",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "rapp-net"
 version = "0.13.7"
 dependencies = [

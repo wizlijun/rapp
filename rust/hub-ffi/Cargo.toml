@@ -1,0 +1,17 @@
+[package]
+name = "rapp-hub-ffi"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+name = "rapp_hub_ffi"
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+rapp-hub.workspace = true
+rapp-net.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
