@@ -1861,6 +1861,22 @@ void main() {
         }, sessions: 2);
       });
 
+      test('with logs open Ctrl+Enter and focusPicture do nothing; the frame rate drops off-stage', () {
+        env((a, t, port, st, hints) {
+          port.emit(WindowsEvent(2, [rw(7)]));
+          st.remote[2]!.setChoice(const StreamChoice('color16', 'adaptive', 30));
+          expect(sets(port, 2).last['fps'], 30);
+          st.openLogs();
+          expect(sets(port, 2).last['fps'], 1);
+          st.composerKey();
+          expect(st.currentRemote!.composer.open, false);
+          st.focusPicture(2);
+          expect(st.pictureFocused, isNull);
+          st.closeLogs();
+          expect(sets(port, 2).last['fps'], 30);
+        }, sessions: 2);
+      });
+
       test('stageLive is false while logs is open', () {
         env((a, t, port, st, hints) {
           port.emit(WindowsEvent(1, [rw(3)]));

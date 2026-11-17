@@ -528,15 +528,23 @@ void main() {
     expect(s.panel, isNull);
     expect(find.byType(LogScreen), findsOneWidget);
     expect(find.byType(TopBar), findsOneWidget);
+    final first = tester.widget<LogScreen>(find.byType(LogScreen)).model;
     await tester.tap(find.byKey(const Key('log-back')));
     await settle(tester);
     expect(s.logs, false);
     expect(find.byType(LogScreen), findsNothing);
-    // Esc: panel first, then the log screen, then the overview underneath.
+    // Esc: corner, panel, the log screen, then the overview underneath.
     s.toggleOverview();
     s.openLogs();
     s.togglePanel();
+    s.toggleCorner(Corner.needs);
     await settle(tester);
+    final second = tester.widget<LogScreen>(find.byType(LogScreen)).model;
+    expect(second, isNot(same(first)), reason: 'a fresh model per opening');
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settle(tester);
+    expect(s.corner, isNull);
+    expect(s.panel, isNotNull);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await settle(tester);
     expect(s.panel, isNull);
@@ -544,7 +552,13 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await settle(tester);
     expect(s.logs, false);
+    expect(s.overview, true);
     expect(find.byType(LogScreen), findsNothing);
+    expect(() => second.addListener(() {}), throwsA(anything), reason: 'closing disposes the model');
+    expect(() => first.addListener(() {}), throwsA(anything));
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await settle(tester);
+    expect(s.overview, false);
     await tester.pump(const Duration(seconds: 1));
   });
 

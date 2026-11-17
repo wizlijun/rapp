@@ -477,7 +477,7 @@ class MainState extends ChangeNotifier {
   /// no keys: the caret stays in the editor (offline-freeze spec).
   void composerKey() {
     final rs = currentRemote;
-    if (overview || rs == null || !rs.composerAllowed) return; // no panel in the overview to take the caret
+    if (overview || logs || rs == null || !rs.composerAllowed) return; // no panel in the overview to take the caret
     final c = rs.composer;
     if (!c.open) {
       c.open = true;
@@ -531,7 +531,7 @@ class MainState extends ChangeNotifier {
 
   /// A press on [sid]'s picture: keys go to A from now on.
   void focusPicture(Object sid) {
-    if (overview || !_liveSid(sid)) return;
+    if (overview || logs || !_liveSid(sid)) return;
     if (termPort?.owns(sid) == true) {
       // A terminal's keys are the stage's own (its Focus), not the runner's.
       _wantTermFocus(sid);

@@ -95,6 +95,7 @@ class _MainWindowState extends State<MainWindow> {
     });
     _asks = state.unlockAsks.listen(_onAsk);
     state.addListener(_onState);
+    _onState();
     widget.monitor?.addListener(_onMonitor);
     if (widget.monitor == null) {
       state.hub?.addListener(_onAccess);
@@ -157,10 +158,12 @@ class _MainWindowState extends State<MainWindow> {
   /// One model per opening of the 日志 screen: made on the first build with `logs` on, disposed when it closes.
   LogModel? _log;
 
-  LogModel _logModel() =>
-      _log ??= LogModel(fetch: (id, q) => state.hub!.logs(id: id, query: q))..open(null);
-
+  /// Made (and opened, outside any build) when `logs` turns on; 更多 is hidden without a hub, so it is there.
   void _onState() {
+    final hub = state.hub;
+    if (state.logs && _log == null && hub != null) {
+      _log = LogModel(fetch: (id, q) => hub.logs(id: id, query: q))..open(null);
+    }
     final m = _log;
     if (state.logs || m == null) return;
     _log = null;
@@ -169,6 +172,7 @@ class _MainWindowState extends State<MainWindow> {
   }
 
   Widget _logScreen() {
+    if (_log == null) return const SizedBox.shrink();
     final hosts = state.hub?.hosts ?? const <HubHost>[];
     String label(String id) {
       final p = state.probes[id];
@@ -178,7 +182,7 @@ class _MainWindowState extends State<MainWindow> {
 
     return LogScreen(
       key: const Key('log-screen'),
-      model: _logModel(),
+      model: _log!,
       devices: [for (final h in hosts) (h.id, label(h.id), state.probes[h.id]?.lamp ?? Lamp.connecting)],
       onBack: state.closeLogs,
       openFolder: _openFolder,
@@ -236,7 +240,7 @@ class _MainWindowState extends State<MainWindow> {
           openFolder: _openFolder,
           reload: m,
           limit: 5,
-          onMore: state.openLogs,
+          onMore: state.hub == null ? null : state.openLogs,
         ),
       ),
     ]);
@@ -261,7 +265,7 @@ class _MainWindowState extends State<MainWindow> {
         logDir: '${state.data.root}/logs',
         openFolder: _openFolder,
         limit: 5,
-        onMore: state.openLogs,
+        onMore: state.hub == null ? null : state.openLogs,
       ),
     ]);
   }
