@@ -84,6 +84,23 @@ void main() {
     expect(l.fields, isEmpty);
   });
 
+  test('LogPage reads again; newer may come without events', () {
+    final p = LogPage.fromJson({
+      'events': [],
+      'more': false,
+      'newer': 'n~0~9',
+      'again': [
+        {'src': 'service', 'at': 'a~0~1', 'repeat': 7, 'raw': '{"ev":"auth_fail"}'},
+      ],
+    });
+    expect(p.events, isEmpty);
+    expect(p.newer, 'n~0~9');
+    expect(p.older, isNull);
+    expect(p.again.single.at, 'a~0~1');
+    expect(p.again.single.repeat, 7);
+    expect(LogPage.fromJson({'events': [], 'more': false}).again, isEmpty);
+  });
+
   test('LogQuery omits null and false', () {
     expect(const LogQuery().toJson(), isEmpty);
     expect(const LogQuery(kind: LogKind.fault, before: 'b', q: 'x', limit: 5, problems: true, src: {'hub', 'service'}).toJson(),

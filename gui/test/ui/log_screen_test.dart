@@ -52,12 +52,13 @@ LogPage first({
   );
 }
 
-LogPage page(List<LogEntry> e, {bool more = false, bool gap = false}) => LogPage(
+LogPage page(List<LogEntry> e, {bool more = false, bool gap = false, List<LogEntry> again = const [], String? newer}) => LogPage(
       events: e,
       more: more,
       gap: gap,
       older: e.isEmpty ? null : e.last.at,
-      newer: e.isEmpty ? null : e.first.at,
+      newer: newer ?? (e.isEmpty ? null : e.first.at),
+      again: again,
     );
 
 class Fake {
@@ -240,15 +241,146 @@ void main() {
     await end(t, m);
   });
 
-  testWidgets('a poll with a gap reloads the first page', (t) async {
+  testWidgets('a poll with a gap reloads the first page on the next tick', (t) async {
     final m = await show(t);
+    final n = f.calls.length;
     f.reply = (id, q) async => q.after != null ? page(plain(3, 'n'), gap: true) : first(events: plain(2, 'z'));
     await t.pump(const Duration(seconds: 5));
     await t.pump();
-    expect(f.calls[f.calls.length - 2].$2.after, 'u1');
+    // One request a tick: the gap reply only drops the cursor.
+    expect(f.calls.length, n + 1);
+    expect(f.last.after, 'u1');
+    await t.pump(const Duration(seconds: 5));
+    await t.pump();
+    expect(f.calls.length, n + 2);
     expect(f.last.after, isNull);
     expect(f.last.tailLaunchd, isTrue);
     expect(m.rows.map((e) => e.at), ['z00', 'z01']);
+    await end(t, m);
+  });
+
+  testWidgets('a first page with no match still gives a cursor: polls ask for what is newer', (t) async {
+    f.reply = (id, q) async => LogPage(events: const [], more: false, newer: 'n0', counts: const {});
+    final m = await show(t);
+    final n = f.calls.length;
+    f.reply = (id, q) async => page([], newer: 'n1');
+    await t.pump(const Duration(seconds: 5));
+    await t.pump();
+    expect(f.calls.length, n + 1);
+    expect(f.last.after, 'n0');
+    expect(f.last.tailLaunchd, isFalse);
+    // The cursor moves on even when nothing matched.
+    f.reply = (id, q) async => page([]);
+    await t.pump(const Duration(seconds: 5));
+    await t.pump();
+    expect(f.last.after, 'n1');
+    await t.pump(const Duration(seconds: 5));
+    expect(f.last.after, 'n1');
+    await end(t, m);
+  });
+
+  testWidgets('again replaces a shown or held row in place and never adds one', (t) async {
+    final b = ev('b', {'ev': 'auth_fail'}, kind: LogKind.refused);
+    final a = ev('a', {'ev': 'session_start'});
+    f.reply = (id, q) async => first(events: [b, a]);
+    final m = await show(t);
+    f.reply = (id, q) async => page([], newer: 'b+', again: [
+          ev('b', {'ev': 'auth_fail'}, kind: LogKind.refused, repeat: 7),
+          ev('zz', {'ev': 'auth_fail'}, kind: LogKind.refused, repeat: 2),
+        ]);
+    await t.pump(const Duration(seconds: 5));
+    await t.pump();
+    expect(m.rows.map((e) => e.at), ['b', 'a']);
+    expect(m.rows.first.repeat, 7);
+    expect(m.pendingNew, 0);
+    expect(find.textContaining('（又重复 7 次）'), findsOneWidget);
+    expect(f.last.after, 'b');
+    f.reply = (id, q) async => page([]);
+    await t.pump(const Duration(seconds: 5));
+    expect(f.last.after, 'b+');
+    await end(t, m);
+  });
+
+  testWidgets('a failing poll stops the polls until ⟳', (t) async {
+    final m = await show(t);
+    final n = f.calls.length;
+    f.reply = (id, q) async => throw HubException('connect timed out');
+    await t.pump(const Duration(seconds: 5));
+    await t.pump();
+    expect(f.calls.length, n + 1);
+    expect(m.error, 'connect timed out');
+    await t.pump(const Duration(seconds: 30));
+    expect(f.calls.length, n + 1);
+    f.reply = (id, q) async => first(events: [rejected]);
+    unawaited(m.refresh());
+    await t.pump();
+    await t.pump();
+    expect(f.calls.length, n + 2);
+    expect(m.error, isNull);
+    // Polling again.
+    f.reply = (id, q) async => page([]);
+    await t.pump(const Duration(seconds: 5));
+    expect(f.calls.length, n + 3);
+    expect(f.last.after, 'f1');
+    await end(t, m);
+  });
+
+  testWidgets('a failing gap re-ask makes one request a tick, then stops; a filter change starts again', (t) async {
+    final m = await show(t);
+    final n = f.calls.length;
+    f.reply = (id, q) async => q.after != null ? page(plain(3, 'n'), gap: true) : throw HubException('connect timed out');
+    await t.pump(const Duration(seconds: 5));
+    await t.pump();
+    expect(f.calls.length, n + 1);
+    await t.pump(const Duration(seconds: 5));
+    await t.pump();
+    expect(f.calls.length, n + 2);
+    expect(f.last.after, isNull);
+    expect(m.error, 'connect timed out');
+    await t.pump(const Duration(seconds: 30));
+    expect(f.calls.length, n + 2);
+    f.reply = (id, q) async => first(events: [rejected]);
+    m.toggleKind(LogKind.refused);
+    await t.pump();
+    await t.pump();
+    expect(f.calls.length, n + 3);
+    f.reply = (id, q) async => page([]);
+    await t.pump(const Duration(seconds: 5));
+    expect(f.calls.length, n + 4);
+    expect(f.last.after, 'f1');
+    await end(t, m);
+  });
+
+  testWidgets('⟳ while the first page is still out is ignored', (t) async {
+    final m = await show(t);
+    final n = f.calls.length;
+    final held = Completer<LogPage>();
+    f.reply = (id, q) => held.future;
+    unawaited(m.refresh());
+    unawaited(m.refresh());
+    await t.tap(find.byKey(const Key('log-refresh')));
+    await t.pump();
+    expect(f.calls.length, n + 1);
+    held.complete(first(events: [rejected]));
+    await t.pump();
+    await t.pump();
+    expect(m.rows.map((e) => e.at), ['f1']);
+    f.reply = (id, q) async => first(events: [route]);
+    unawaited(m.refresh());
+    await t.pump();
+    await t.pump();
+    expect(f.calls.length, n + 2);
+    // A filter change is a new query: never ignored.
+    final held2 = Completer<LogPage>();
+    f.reply = (id, q) => held2.future;
+    unawaited(m.refresh());
+    m.toggleKind(LogKind.fault);
+    await t.pump();
+    expect(f.calls.length, n + 4);
+    expect(f.last.kind, LogKind.fault);
+    held2.complete(first(events: [failed]));
+    await t.pump();
+    await t.pump();
     await end(t, m);
   });
 
@@ -318,6 +450,9 @@ void main() {
     final at = offset(t);
     expect(at, greaterThan(0));
     f.reply = (id, q) async => q.after != null ? page(plain(3, 'n'), gap: true) : first(events: [...plain(3, 'z'), ...plain(40)]);
+    await t.pump(const Duration(seconds: 5));
+    await t.pump();
+    expect(f.last.after, 'r00');
     await t.pump(const Duration(seconds: 5));
     await t.pump();
     await t.pump();

@@ -41,6 +41,10 @@ class LogModel extends ChangeNotifier {
   String? _error;
   bool _loading = false;
 
+  /// A poll or a quiet re-ask failed: no more polls until ⟳, the picker or a filter change (each failed
+  /// request to an offline device writes 本机's hub.log).
+  bool _halted = false;
+
   /// The ±1 min window, oldest first, while [aroundOf] is set.
   LogEntry? _aroundOf;
   List<LogEntry> _aroundRows = const [];
@@ -92,7 +96,7 @@ class LogModel extends ChangeNotifier {
     _held = null;
     _timer?.cancel();
     _timer = Timer.periodic(_every, (_) => poll());
-    return refresh();
+    return _first(quiet: false);
   }
 
   LogQuery _query({String? before, String? after}) => LogQuery(
@@ -113,8 +117,9 @@ class LogModel extends ChangeNotifier {
 
   bool _stale(int gen, String? device) => _disposed || gen != _gen || device != _device;
 
-  /// The first page again, with the cards and the 启动输出; leaves the ±1 min window.
-  Future<void> refresh() => _first(quiet: false);
+  /// ⟳: the first page again, with the cards and the 启动输出; leaves the ±1 min window. Ignored while a first
+  /// page is already on its way (each one costs the device a full read).
+  Future<void> refresh() => _loading ? Future.value() : _first(quiet: false);
 
   /// [quiet]: asked by a poll (nothing listed yet, or a `gap`). No 读取中…, the list keeps its place, and a
   /// page that would replace rows the user has scrolled down to is held behind 「有 N 条新的」 instead.
@@ -124,6 +129,7 @@ class LogModel extends ChangeNotifier {
     final device = _device;
     if (!quiet) {
       _olderToken = _pollToken = null;
+      _halted = false;
       _held = null;
       _aroundOf = null;
       _aroundRows = const [];
@@ -149,6 +155,7 @@ class LogModel extends ChangeNotifier {
     } catch (e) {
       if (_stale(gen, device)) return;
       _error = _words(e);
+      _halted = true;
       if (!quiet) {
         _rows = const [];
         _pending = const [];
@@ -198,31 +205,35 @@ class LogModel extends ChangeNotifier {
     }
   }
 
-  /// Rows newer than the newest shown: on top when at the top, else held in [pendingNew]. One request out at
-  /// a time: a tick while one is in flight is skipped.
+  /// Rows newer than the newest shown: on top when at the top, else held in [pendingNew]. One request a tick
+  /// at most: a tick while one is in flight is skipped, and none after a failure ([_halted]).
   Future<void> poll() async {
-    if (_aroundOf != null || _loading || _pollToken != null || _held != null || _disposed) return;
+    if (_aroundOf != null || _loading || _pollToken != null || _held != null || _halted || _disposed) return;
     final token = _pollToken = Object();
     try {
       if (_newer == null) {
-        // Nothing listed: ask for the first page again — but not after an error (⟳ or the picker retries),
-        // or an offline or old device would be asked for a full first page every tick.
-        if (_error == null) await _first(quiet: true);
+        // No cursor (an empty log, or a gap): the first page again, quietly.
+        await _first(quiet: true);
         return;
       }
       final gen = _gen;
       final device = _device;
       final p = await fetch(device, _query(after: _newer));
       if (_stale(gen, device) || _pollToken != token) return;
-      // Rows were skipped: the first page again, keeping the user's place.
-      if (p.gap) return await _first(quiet: true);
+      // Rows were skipped: the next tick asks for the first page again, keeping the user's place.
+      if (p.gap) {
+        _newer = null;
+        return;
+      }
       _merge(p.events);
+      _replace(p.again);
       _newer = p.newer ?? _newer;
       _error = null;
       _notify();
     } catch (e) {
       if (_disposed || _pollToken != token) return;
       _error = _words(e);
+      _halted = true;
       _notify();
     } finally {
       if (_pollToken == token) _pollToken = null;
@@ -250,6 +261,14 @@ class LogModel extends ChangeNotifier {
     _rows = rows;
     _pending = [...fresh, ...pending];
     if (_atTop) _flush();
+  }
+
+  /// `again`: a row shown or held whose `repeat` grew. One not listed (older than the rows loaded) stays out.
+  void _replace(List<LogEntry> again) {
+    if (again.isEmpty) return;
+    final byAt = {for (final e in again) e.at: e};
+    _rows = [for (final e in _rows) byAt[e.at] ?? e];
+    _pending = [for (final e in _pending) byAt[e.at] ?? e];
   }
 
   void _flush() {
@@ -316,13 +335,13 @@ class LogModel extends ChangeNotifier {
   void setProblemsOnly(bool v) {
     if (_problemsOnly == v) return;
     _problemsOnly = v;
-    refresh();
+    _first(quiet: false);
   }
 
   /// A card: only that kind; the same card again clears it.
   void toggleKind(LogKind k) {
     _kind = _kind == k ? null : k;
-    refresh();
+    _first(quiet: false);
   }
 
   /// A 来源 switch; the last one on stays on.
@@ -333,7 +352,7 @@ class LogModel extends ChangeNotifier {
     } else {
       _src = {..._src, s};
     }
-    refresh();
+    _first(quiet: false);
   }
 
   /// The search box: asks 300 ms after the last keystroke.
@@ -342,7 +361,7 @@ class LogModel extends ChangeNotifier {
     _debounce = Timer(const Duration(milliseconds: 300), () {
       if (q == _search) return;
       _search = q;
-      refresh();
+      _first(quiet: false);
     });
   }
 

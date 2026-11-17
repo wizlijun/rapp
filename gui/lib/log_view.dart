@@ -59,6 +59,7 @@ class LogPage {
     required this.events,
     required this.more,
     this.gap = false,
+    this.again = const [],
     this.older,
     this.newer,
     this.counts,
@@ -71,6 +72,9 @@ class LogPage {
 
   /// An `after` poll was cut short: refresh in full.
   final bool gap;
+
+  /// An `after` poll's rows sent before whose `repeat` grew: replace in place, never add.
+  final List<LogEntry> again;
   final String? older, newer;
   final Map<LogKind, int>? counts;
   final Map<LogKind, LogEntry>? latest;
@@ -89,6 +93,7 @@ class LogPage {
       events: [for (final e in j['events'] as List? ?? const []) if (e is Map) LogEntry.fromJson(Map<String, dynamic>.from(e))],
       more: j['more'] == true,
       gap: j['gap'] == true,
+      again: [for (final e in j['again'] as List? ?? const []) if (e is Map) LogEntry.fromJson(Map<String, dynamic>.from(e))],
       older: j['older'] as String?,
       newer: j['newer'] as String?,
       counts: byKind<int>(j['counts'], (v) => v is int ? v : null),
@@ -117,6 +122,8 @@ class LogQuery {
   final Set<String>? src;
   final int? limit;
 
+  /// A new key must also be a field of Rust's `LogQuery` (rust/net/src/logq.rs): the hub parses the command
+  /// into it, so any other key is dropped before it reaches this device or a peer.
   Map<String, dynamic> toJson() => {
         'before': ?before,
         'after': ?after,
