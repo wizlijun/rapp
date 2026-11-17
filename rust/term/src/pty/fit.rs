@@ -4,6 +4,8 @@
 //! and when they act; `take` says whether a resize request is due.
 
 use std::collections::HashMap;
+use std::io::Write;
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 pub type Conn = u64;
@@ -90,6 +92,134 @@ impl Fit {
         if let Some(w) = want.filter(|w| w.fit) {
             self.pending = Some((w.cols.max(MIN_COLS), w.rows.max(MIN_ROWS)));
         }
+    }
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum Seq {
+    #[default]
+    Ground,
+    Utf8(u8),
+    Esc,
+    Csi,
+    Str,
+    StrEsc,
+}
+
+/// Follows the program's output byte stream and says whether it is between
+/// escape sequences and UTF-8 characters, i.e. safe to insert bytes.
+#[derive(Default)]
+pub struct SeqTracker {
+    state: Seq,
+}
+
+impl SeqTracker {
+    pub fn feed(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.state = Self::step(self.state, b);
+        }
+    }
+
+    pub fn ground(&self) -> bool {
+        self.state == Seq::Ground
+    }
+
+    fn step(state: Seq, b: u8) -> Seq {
+        if b == 0x18 || b == 0x1A {
+            return Seq::Ground;
+        }
+        match state {
+            Seq::Ground => Self::from_ground(b),
+            Seq::Utf8(n) => {
+                if (0x80..=0xBF).contains(&b) {
+                    if n <= 1 {
+                        Seq::Ground
+                    } else {
+                        Seq::Utf8(n - 1)
+                    }
+                } else {
+                    Self::from_ground(b)
+                }
+            }
+            Seq::Esc => match b {
+                b'[' => Seq::Csi,
+                b']' | b'P' | b'X' | b'^' | b'_' => Seq::Str,
+                0x20..=0x2F => Seq::Esc,
+                _ => Seq::Ground,
+            },
+            Seq::Csi => {
+                if (0x40..=0x7E).contains(&b) {
+                    Seq::Ground
+                } else {
+                    Seq::Csi
+                }
+            }
+            Seq::Str => match b {
+                0x07 => Seq::Ground,
+                0x1B => Seq::StrEsc,
+                _ => Seq::Str,
+            },
+            Seq::StrEsc => {
+                if b == b'\\' {
+                    Seq::Ground
+                } else {
+                    Seq::Str
+                }
+            }
+        }
+    }
+
+    fn from_ground(b: u8) -> Seq {
+        match b {
+            0x1B => Seq::Esc,
+            0xC0..=0xDF => Seq::Utf8(1),
+            0xE0..=0xEF => Seq::Utf8(2),
+            0xF0..=0xF7 => Seq::Utf8(3),
+            _ => Seq::Ground,
+        }
+    }
+}
+
+/// The host window's stdout: program output passes through, and a resize
+/// request is only inserted between escape sequences.
+pub struct Window<W: Write> {
+    out: W,
+    seq: SeqTracker,
+}
+
+impl<W: Write> Window<W> {
+    pub fn new(out: W) -> Self {
+        Self {
+            out,
+            seq: SeqTracker::default(),
+        }
+    }
+
+    pub fn output(&mut self, bytes: &[u8]) -> std::io::Result<()> {
+        self.out.write_all(bytes)?;
+        self.out.flush()?;
+        self.seq.feed(bytes);
+        Ok(())
+    }
+
+    /// Writes `ESC[8;rows;colst` if the stream is idle and a size is pending.
+    pub fn resize_if_idle(&mut self, fit: &Mutex<Fit>) -> std::io::Result<bool> {
+        if !self.seq.ground() {
+            return Ok(false);
+        }
+        let size = fit.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let Some((cols, rows)) = size else {
+            return Ok(false);
+        };
+        self.out
+            .write_all(format!("\x1b[8;{rows};{cols}t").as_bytes())?;
+        self.out.flush()?;
+        Ok(true)
+    }
+
+    #[cfg(test)]
+    pub fn get_ref(&self) -> &W {
+        &self.out
     }
 }
 
@@ -206,5 +336,67 @@ mod tests {
         let a = f.join();
         f.view(a, true, 10, 3, Instant::now());
         assert_eq!(f.take(), Some((20, 5)));
+    }
+
+    fn pending(c: u16, r: u16) -> Mutex<Fit> {
+        let mut f = Fit::default();
+        let a = f.join();
+        f.view(a, true, c, r, Instant::now());
+        Mutex::new(f)
+    }
+
+    #[test]
+    fn resize_is_written_at_once_when_idle() {
+        let fit = pending(100, 30);
+        let mut w = Window::new(Vec::new());
+        w.output(b"hi").unwrap();
+        assert!(w.resize_if_idle(&fit).unwrap());
+        assert!(w.get_ref().ends_with(b"\x1b[8;30;100t"));
+    }
+
+    #[test]
+    fn resize_waits_for_an_open_sequence() {
+        let fit = pending(100, 30);
+        let mut w = Window::new(Vec::new());
+        w.output(b"a\x1b[3").unwrap();
+        assert!(!w.resize_if_idle(&fit).unwrap());
+        assert!(!w.get_ref().windows(2).any(|x| x == b"8;"));
+        w.output(b"1mX").unwrap();
+        assert!(w.resize_if_idle(&fit).unwrap());
+        assert_eq!(w.get_ref().as_slice(), b"a\x1b[31mX\x1b[8;30;100t");
+    }
+
+    #[test]
+    fn resize_waits_for_a_split_utf8_char() {
+        let fit = pending(100, 30);
+        let mut w = Window::new(Vec::new());
+        w.output(&[0xE4, 0xB8]).unwrap();
+        assert!(!w.resize_if_idle(&fit).unwrap());
+        assert_eq!(w.get_ref().as_slice(), &[0xE4, 0xB8]);
+        w.output(&[0xAD]).unwrap();
+        assert!(w.resize_if_idle(&fit).unwrap());
+        assert_eq!(w.get_ref().as_slice(), b"\xE4\xB8\xAD\x1b[8;30;100t");
+    }
+
+    #[test]
+    fn an_osc_title_holds_the_resize_until_bel_or_st() {
+        for end in [&b"\x07"[..], &b"\x1b\\"[..]] {
+            let fit = pending(100, 30);
+            let mut w = Window::new(Vec::new());
+            w.output(b"\x1b]0;t").unwrap();
+            assert!(!w.resize_if_idle(&fit).unwrap());
+            w.output(end).unwrap();
+            assert!(w.resize_if_idle(&fit).unwrap());
+            assert!(w.get_ref().ends_with(b"\x1b[8;30;100t"));
+        }
+    }
+
+    #[test]
+    fn nothing_pending_writes_nothing() {
+        let fit = Mutex::new(Fit::default());
+        let mut w = Window::new(Vec::new());
+        w.output(b"x").unwrap();
+        assert!(!w.resize_if_idle(&fit).unwrap());
+        assert_eq!(w.get_ref().as_slice(), b"x");
     }
 }
