@@ -440,13 +440,31 @@
 - [ ] 点一下到画面变化的延迟（随 P1 触摸的真机检查一起量）
 - [ ] 6 个会话同时开着的内存，拔电时每小时耗电（§9.5）
 - [ ] "本地网络"弹框在哪一步弹出，被拒绝时怎么提示；关掉本地网络再连一次，确认只走 relay 也能连上（记下 path）
-- [ ] FFI 接口：hub 自己退出时通知 Dart（`on_line(NULL)` 当结束标记，Dart 收到后让所有等待的请求失败），`rapp_hub_send` 区分"没启动"和"已退出"；`stop` 等输出转发线程读完再返回
-- [ ] 密钥不经 `--dart-define`：它会被抄进 Flutter 生成的 xcconfig 和 App.framework。改成运行时传入（启动参数/环境变量或 0600 文件）
+- [x] FFI 接口：hub 自己退出时通知 Dart（`on_line(NULL)` 当结束标记，Dart 收到后让所有等待的请求失败），`rapp_hub_send` 区分"没启动"和"已退出"；`stop` 等输出转发线程读完再返回
+- [x] 密钥不经 `--dart-define`：它会被抄进 Flutter 生成的 xcconfig 和 App.framework。改成运行时传入（启动参数/环境变量或 0600 文件）
 - [ ] iPad 多任务（分屏、侧拉、台前调度）下的窗口大小：探查带了 `UIRequiresFullScreen`，没量
-- [ ] 设备名由入口传给 hub（现在 A 上显示 "rapp"）
-- [ ] Dart 在 iOS 上没有 `HOME`：`gui/lib/paths.dart` 等改用原生传进来的家目录
-- [ ] RappCore 的 iOS 测试：提交一个 scheme 或测试计划
-- [ ] 签名：Xcode 登录账号或 CI 签名
+- [x] 设备名由入口传给 hub（现在 A 上显示 "rapp"）
+- [x] Dart 在 iOS 上没有 `HOME`：`gui/lib/paths.dart` 等改用原生传进来的家目录
+- [x] RappCore 的 iOS 测试：提交一个 scheme 或测试计划
+- [x] 签名：Xcode 登录账号或 CI 签名
+
+### P1 真机验收清单（分支 feat/ipad-p1，Duo 已装上，详见 `docs/superpowers/measurements/2026-11-17-rapp-ipad-p1.md`）
+
+- [ ] 接入引导出现；填接入点和 key 后看到设备，打开 app 会话和终端会话（横竖两个方向）
+- [ ] 手指：点、拖、双指滚动、双指轻点右键；控件不小于 48
+- [ ] 键盘和触控板：英文、⌘C/⌘V、方向键、悬停、右键、滚动；粘滞 ⌘ + Tab 切换 A 的 app
+- [ ] 拼音硬件键盘第一个字母、长按 ⌫/方向键、Caps Lock、分屏或台前失焦后没有卡键
+- [ ] 输入板：中文输入法一致、听写；软键盘弹收时 A 上窗口不改尺寸（看 A 的日志）
+- [ ] 切走 30 秒回来 2 秒内画面恢复，草稿还在；A 锁屏且记住密码同样
+- [ ] 关掉 Wi-Fi 再打开，与断网冻结规格一致
+- [ ] 只有 IPv6 的网络（Mac 互联网共享）下经 relay 连上
+- [ ] 无线数据被拒绝时的错误码是不是 -1009
+- [ ] 内存告警：只释放 Flutter 纹理，`EmbeddedSession.surfaces` 仍被持有，用 Instruments 看
+- [ ] keep-awake、`sessionActive`、UIScene 的 `onHide`/`onShow`
+- [ ] 外接键盘接上或拔掉后 textInputAction 的 10 秒滞后；`latch_used` 往返
+- [ ] 主窗口（带会话）在 Duo 上横竖屏、安全区、按键排不被遮挡
+- [ ] 换掉默认占位图标和启动图
+- [ ] TestFlight：确认 App Store Connect 有 App 记录后，用户决定上传方式（`rapp.ipa` 已能出，未上传）
 
 ## 终端跟着主控台窗口 真机检查（分支 feat/term-fit）
 
