@@ -2,6 +2,7 @@
 // Shows only; it takes no pointer or keyboard input, and never resizes the stage.
 import 'package:flutter/material.dart';
 
+import '../embed/composer_panel.dart' show seeThroughBox;
 import '../embed/geometry.dart';
 import '../embed/picture.dart' show windowSurface;
 import '../embed/remote_session.dart';
@@ -90,46 +91,52 @@ class _DisconnectedStageState extends State<DisconnectedStage> {
             }),
           if (stripes != null) DecoratedBox(decoration: stripes),
           Center(
-            child: widget.connecting
-                ? Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const StatusLamp(Lamp.connecting),
-                      const SizedBox(width: 8),
-                      Text(widget.retrying ? '正在重连…' : '正在连接', style: TextStyle(color: t.text)),
-                      if (widget.retrying) ...[
+            // The composer's see-through box: readable over the frozen frame, which still shows through.
+            child: Container(
+              key: const Key('disconnected-box'),
+              decoration: seeThroughBox(t),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              child: widget.connecting
+                  ? Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const StatusLamp(Lamp.connecting),
                         const SizedBox(width: 8),
-                        RappButton.accent(key: const Key('stop-reconnect-button'), label: '停止', onPressed: widget.onStop),
-                      ],
-                    ],
-                  )
-                : Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (widget.retrying)
-                            RappButton.accent(key: const Key('stop-reconnect-button'), label: '停止', onPressed: widget.onStop)
-                          else
-                            RappButton.accent(
-                                key: const Key('reconnect-button'), label: widget.reconnectWord, onPressed: widget.onReconnect),
+                        Text(widget.retrying ? '正在重连…' : '正在连接', style: TextStyle(color: t.text)),
+                        if (widget.retrying) ...[
                           const SizedBox(width: 8),
-                          KeyedSubtree(
-                            key: ValueKey(('end', widget.sessionKey)),
-                            child: ConfirmButton(
-                                key: const Key('disconnected-end-button'), label: '结束会话', onConfirmed: widget.onEnd),
-                          ),
+                          RappButton.accent(key: const Key('stop-reconnect-button'), label: '停止', onPressed: widget.onStop),
                         ],
-                      ),
-                      const SizedBox(height: 12),
-                      Text(widget.waiting ?? widget.reason, key: const Key('disconnect-reason'), style: TextStyle(color: t.text)),
-                      if (widget.retrying && widget.waiting == null) ...[
-                        const SizedBox(height: 4),
-                        Text('正在重连…', key: const Key('retrying-note'), style: TextStyle(color: t.text)),
                       ],
-                    ],
-                  ),
+                    )
+                  : Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (widget.retrying)
+                              RappButton.accent(key: const Key('stop-reconnect-button'), label: '停止', onPressed: widget.onStop)
+                            else
+                              RappButton.accent(
+                                  key: const Key('reconnect-button'), label: widget.reconnectWord, onPressed: widget.onReconnect),
+                            const SizedBox(width: 8),
+                            KeyedSubtree(
+                              key: ValueKey(('end', widget.sessionKey)),
+                              child: ConfirmButton(
+                                  key: const Key('disconnected-end-button'), label: '结束会话', onConfirmed: widget.onEnd),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Text(widget.waiting ?? widget.reason, key: const Key('disconnect-reason'), style: TextStyle(color: t.text)),
+                        if (widget.retrying && widget.waiting == null) ...[
+                          const SizedBox(height: 4),
+                          Text('正在重连…', key: const Key('retrying-note'), style: TextStyle(color: t.text)),
+                        ],
+                      ],
+                    ),
+            ),
           ),
         ],
       ),

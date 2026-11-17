@@ -25,6 +25,7 @@ import 'package:rapp/ui/lifecycle.dart' show Phase;
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/stage.dart';
+import 'package:rapp/embed/composer_panel.dart' show composerFillOpacity, seeThroughBox;
 import 'package:rapp/ui/tokens.dart';
 import 'package:rapp/ui/top_bar.dart';
 
@@ -1114,6 +1115,22 @@ void main() {
           width: 400, height: 300, child: DisconnectedStage(session: null, reason: '网络断了', connecting: false))));
       expect(tester.widget<RappButton>(find.byKey(const Key('reconnect-button'))).onPressed, isNull);
       expect(find.byType(Texture), findsNothing);
+    });
+
+    testWidgets('the reconnect controls sit in the composer\'s see-through box', (tester) async {
+      await tester.pumpWidget(wrap(const SizedBox(
+          width: 400, height: 300, child: DisconnectedStage(session: null, reason: '网络断了', connecting: false))));
+      final box = find.byKey(const Key('disconnected-box'));
+      expect(find.descendant(of: box, matching: find.byKey(const Key('reconnect-button'))), findsOneWidget);
+      expect(find.descendant(of: box, matching: find.byKey(const Key('disconnect-reason'))), findsOneWidget);
+      final d = tester.widget<Container>(box).decoration! as BoxDecoration;
+      final t = RappTokens.of(tester.element(box));
+      expect(d, seeThroughBox(t));
+      final fills = [?d.color, ...?d.gradient?.colors];
+      expect(fills, isNotEmpty);
+      for (final c in fills) {
+        expect(c.a, closeTo(composerFillOpacity, 0.01), reason: 'as see-through as the composer');
+      }
     });
 
     testWidgets('a retrying stage says so and offers 停止 instead of 重连', (tester) async {
