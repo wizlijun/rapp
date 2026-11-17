@@ -1,5 +1,6 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/ui/net_marker.dart';
@@ -7,23 +8,18 @@ import 'package:rapp/ui/net_marker.dart';
 import 'helpers.dart';
 
 void main() {
-  test('each level has its own mark: cheetah, rabbit, tortoise, cracked egg', () {
-    final assets = NetLevel.values.map(netAsset).toList();
-    expect(assets, [
-      'assets/net/strong.png',
-      'assets/net/ok.png',
-      'assets/net/weak.png',
-      'assets/net/down.png',
-    ]);
-    expect(assets.toSet(), hasLength(NetLevel.values.length));
+  test('each level lights its own count of the fan, from the bottom', () {
+    expect(NetLevel.values.map(netBars), [3, 2, 1, 0]);
   });
 
-  testWidgets('every level is in the asset bundle at 1x, 2x and 3x', (tester) async {
-    for (final l in NetLevel.values) {
-      for (final name in [netAsset(l), netAsset(l).replaceFirst('net/', 'net/2.0x/'), netAsset(l).replaceFirst('net/', 'net/3.0x/')]) {
-        final data = await rootBundle.load(name);
-        expect(data.lengthInBytes, greaterThan(0), reason: name);
-      }
+  test('bands and gaps look equally wide once the rounding stroke is on', () {
+    const round = 0.8;
+    final segs = WifiMarkPainter.segments;
+    // Seen widths: each shape grows by half the stroke on each side.
+    final bands = [for (final (a, b) in segs.skip(1)) (b - a) + round];
+    final gaps = [for (var i = 1; i < segs.length; i++) (segs[i].$1 - segs[i - 1].$2) - round];
+    for (final w in [...bands, ...gaps]) {
+      expect(w, closeTo(2.6, 1e-9));
     }
   });
 
@@ -47,17 +43,28 @@ void main() {
     expect(find.byTooltip(netTooltip(n)), findsOneWidget);
   });
 
-  testWidgets('the mark keeps its whole 14×14 canvas, in its own colours, unsmoothed', (tester) async {
+  testWidgets('the fan fills its 14×14 canvas in the icon colour, lit by level', (tester) async {
     for (final l in NetLevel.values) {
-      await tester.pumpWidget(wrap(NetMarker(net: NetStatus(l, 500, 0.2))));
+      await tester.pumpWidget(wrap(IconTheme(
+        data: const IconThemeData(color: Color(0xFF7DFF9E)),
+        child: NetMarker(net: NetStatus(l, 500, 0.2)),
+      )));
       expect(tester.takeException(), isNull, reason: '$l');
-      final img = tester.widget<Image>(find.byKey(const Key('net-mark')));
-      expect((img.image as AssetImage).assetName, netAsset(l), reason: '$l');
-      expect(img.color, isNull, reason: '$l'); // not a template: white and gray stay
-      expect(img.filterQuality, FilterQuality.none, reason: '$l');
-      // No crop, no stretch: the canvas is the art's own size, drawn whole.
-      expect(img.fit, isNull, reason: '$l');
+      final paint = tester.widget<CustomPaint>(find.byKey(const Key('net-mark')));
+      final p = paint.painter! as WifiMarkPainter;
+      expect(p.bars, netBars(l), reason: '$l');
+      expect(p.color, const Color(0xFF7DFF9E), reason: '$l');
       expect(tester.getSize(find.byKey(const Key('net-mark'))), const Size(14, 14), reason: '$l');
     }
+  });
+
+  test('the fan stays inside its 24-unit grid', () {
+    // The outer band is the widest and tallest: its ends at ±45° and its apex; the centre is lowest.
+    final r = WifiMarkPainter.segments.last.$2 + 0.4;
+    final half = r * math.sin(math.pi / 4);
+    expect(12 - half, greaterThanOrEqualTo(0));
+    expect(12 + half, lessThanOrEqualTo(24));
+    expect(19.4 - r, greaterThanOrEqualTo(0));
+    expect(19.4 + 0.4, lessThanOrEqualTo(24));
   });
 }
