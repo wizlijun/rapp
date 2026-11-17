@@ -67,7 +67,7 @@ void main() {
       await g;
     });
 
-    test('net: the level as pushed, none forgets it; askNet, watch and netSuspect send their commands', () async {
+    test('net: the level as pushed, none forgets it; askNet, watch, netSuspect and netChanged send their commands', () async {
       expect(hub.net, isNull);
       t.emit({'event': 'net', 'level': 'ok', 'rtt_ms': 160, 'loss': 0.03});
       await Future<void>.delayed(Duration.zero);
@@ -89,6 +89,8 @@ void main() {
       expect(t.sent.last, {'cmd': 'watch', 'id': '111', 'on': false});
       hub.netSuspect();
       expect(t.sent.last, {'cmd': 'net_suspect'});
+      hub.netChanged();
+      expect(t.sent.last, {'cmd': 'net_changed'});
     });
 
     test('apps carry the desktop entry\'s screens; bad screens are skipped', () async {

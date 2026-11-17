@@ -34,6 +34,9 @@ class _State extends MainState {
 
   @override
   void memoryWarning() => calls.add('memory');
+
+  @override
+  void netChanged() => calls.add('net');
 }
 
 class _Ios extends IosChannel {
@@ -111,11 +114,12 @@ void main() {
     expect(ios.sent, ['sessionActive false']);
   });
 
-  test('a memory warning goes to the state', () async {
+  test('a memory warning and a network change go to the state', () async {
     w = BackgroundWatch(state: s, ios: ios, listen: ({required onHide, required onShow}) => null);
     ios.events$.add('pathChanged');
     ios.events$.add('memoryWarning');
+    ios.events$.add('somethingElse');
     await Future<void>.delayed(Duration.zero);
-    expect(s.calls, ['memory']);
+    expect(s.calls, ['net', 'memory']);
   });
 }

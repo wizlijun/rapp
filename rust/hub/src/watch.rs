@@ -78,8 +78,13 @@ pub(crate) fn set(hub: &Arc<Hub>, id: &str, on: bool) {
 async fn watch(hub: &Arc<Hub>, id: &str) {
     let start = Instant::now();
     let mut limited = false;
+    let mut wake = hub.net.wake.subscribe();
     loop {
-        tokio::time::sleep(next_wait(start.elapsed(), limited)).await;
+        // The network changed: ask now rather than at the end of a wait of up to 30 s.
+        tokio::select! {
+            _ = tokio::time::sleep(next_wait(start.elapsed(), limited)) => {}
+            _ = wake.changed() => {}
+        }
         limited = false;
         if hub.net_level() == Some(Level::Down) {
             continue;
