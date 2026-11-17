@@ -4,7 +4,8 @@
 use anyhow::{bail, Context};
 use std::collections::BTreeMap;
 use std::ffi::OsString;
-use std::io::Read;
+use std::io::{ErrorKind, Read};
+use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -12,7 +13,7 @@ use std::time::{Duration, Instant};
 pub const START_TIMEOUT: &str = "terminal launcher did not respond within 5 s";
 pub const NO_DESKTOP: &str = "no graphical desktop session is available";
 const LINUX_APPS: &[&str] = &["ghostty", "kitty", "alacritty", "foot", "wezterm", "gnome-terminal", "konsole", "xterm"];
-const DESKTOP_ENV: &[&str] = &["DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "XAUTHORITY"];
+const DESKTOP_ENV: &[&str] = &["DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS", "XAUTHORITY", "PATH"];
 
 /// `s` in single quotes for `sh`.
 pub fn quote(s: &str) -> String {
@@ -28,7 +29,11 @@ pub fn command_file(bin: &Path, dir: &Path, ticket: &str, shell: &str) -> String
 }
 
 fn executable(name: &str) -> Option<PathBuf> {
-    std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+    executable_in(name, &std::env::var_os("PATH").unwrap_or_default())
+}
+
+fn executable_in(name: &str, path: &std::ffi::OsStr) -> Option<PathBuf> {
+    std::env::split_paths(path)
         .map(|p| p.join(name))
         .find(|p| {
             #[cfg(unix)]
@@ -44,7 +49,9 @@ fn executable(name: &str) -> Option<PathBuf> {
 
 /// A long-running service may have started before the desktop. Prefer the user
 /// manager's current session environment, without importing arbitrary variables.
-fn desktop_env() -> BTreeMap<String, String> {
+/// Also used when the service opens its connection manager after a later login.
+/// This can wait for the user manager; call it off the async I/O runtime.
+pub fn desktop_env() -> BTreeMap<String, String> {
     let mut env: BTreeMap<_, _> = DESKTOP_ENV.iter()
         .filter_map(|k| std::env::var(k).ok().filter(|v| !v.is_empty()).map(|v| ((*k).to_string(), v)))
         .collect();
@@ -53,7 +60,14 @@ fn desktop_env() -> BTreeMap<String, String> {
     if let Some(out) = bounded_output(&mut cmd, Duration::from_secs(2)) {
         if let Ok(values) = serde_json::from_slice::<BTreeMap<String, String>>(&out) {
             for (k, v) in values {
-                if DESKTOP_ENV.contains(&k.as_str()) && !v.is_empty() { env.insert(k, v); }
+                if DESKTOP_ENV.contains(&k.as_str()) && !v.is_empty() {
+                    // Include newly installed desktop tools, retaining explicit
+                    // service PATH overrides ahead of the manager's directories.
+                    let v = if k == "PATH" {
+                        env.get(&k).map_or(v.clone(), |old| format!("{old}:{v}"))
+                    } else { v };
+                    env.insert(k, v);
+                }
             }
         }
     }
@@ -61,7 +75,7 @@ fn desktop_env() -> BTreeMap<String, String> {
 }
 
 /// An unavailable user bus must not hang terminal lists or watches. Read stdout
-/// concurrently so an unusually large manager environment cannot fill the pipe.
+/// without blocking so descendants holding stdout open cannot outlive the deadline.
 #[derive(Debug, PartialEq)]
 enum CommandFailure { Failed, TimedOut }
 
@@ -72,25 +86,43 @@ fn bounded_output(cmd: &mut Command, limit: Duration) -> Option<Vec<u8>> {
 fn bounded_command(cmd: &mut Command, limit: Duration) -> Result<Vec<u8>, CommandFailure> {
     let mut child = cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn()
         .map_err(|_| CommandFailure::Failed)?;
-    let stdout = child.stdout.take().ok_or(CommandFailure::Failed)?;
-    let reader = std::thread::spawn(move || {
-        let mut out = Vec::new();
-        stdout.take(1024 * 1024).read_to_end(&mut out).map(|_| out)
-    });
+    let mut stdout = child.stdout.take().expect("piped stdout");
     let end = Instant::now() + limit;
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break if status.success() { Ok(()) } else { Err(CommandFailure::Failed) },
-            Ok(None) if Instant::now() < end => std::thread::sleep(Duration::from_millis(10)),
-            result => {
-                let _ = child.kill();
-                let _ = child.wait();
-                break Err(if result.is_err() { CommandFailure::Failed } else { CommandFailure::TimedOut });
-            }
+    let result = (|| {
+        // SAFETY: stdout owns this live pipe fd; no other code uses or changes it.
+        let fd = stdout.as_raw_fd();
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+        if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+            return Err(CommandFailure::Failed);
         }
-    };
-    let out = reader.join().map_err(|_| CommandFailure::Failed)?.map_err(|_| CommandFailure::Failed)?;
-    status.map(|()| out)
+        let mut out = Vec::new();
+        let mut eof = false;
+        let mut buf = [0; 8192];
+        loop {
+            if Instant::now() >= end { return Err(CommandFailure::TimedOut); }
+            match stdout.read(&mut buf) {
+                Ok(0) => eof = true,
+                Ok(n) => {
+                    if out.len() + n > 1024 * 1024 { return Err(CommandFailure::Failed); }
+                    out.extend_from_slice(&buf[..n]);
+                    continue;
+                }
+                Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+                Err(e) if e.kind() == ErrorKind::WouldBlock => {},
+                Err(_) => return Err(CommandFailure::Failed),
+            }
+            if let Some(status) = child.try_wait().map_err(|_| CommandFailure::Failed)? {
+                if !status.success() { return Err(CommandFailure::Failed); }
+                if eof { return Ok(out); }
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    })();
+    if result.is_err() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    result
 }
 
 fn has_desktop(env: &BTreeMap<String, String>) -> bool {
@@ -105,8 +137,10 @@ pub fn known(app: &str) -> bool {
 /// The terminal programs this machine can open a window with right now.
 pub fn launchers() -> Vec<String> {
     if cfg!(target_os = "linux") {
-        if !has_desktop(&desktop_env()) || executable("systemd-run").is_none() { return Vec::new(); }
-        return LINUX_APPS.iter().filter(|a| executable(a).is_some()).map(|a| (*a).into()).collect();
+        let env = desktop_env();
+        let path = std::ffi::OsStr::new(env.get("PATH").map(String::as_str).unwrap_or(""));
+        if !has_desktop(&env) || executable("systemd-run").is_none() { return Vec::new(); }
+        return LINUX_APPS.iter().filter(|a| executable_in(a, path).is_some()).map(|a| (*a).into()).collect();
     }
     if !cfg!(target_os = "macos") { return Vec::new(); }
     let mut v = vec!["Terminal".to_string()];
@@ -135,7 +169,8 @@ fn terminal_args(app: &str, file: &Path) -> anyhow::Result<Vec<OsString>> {
 fn linux_command(app: &str, file: &Path, env: &BTreeMap<String, String>) -> anyhow::Result<Command> {
     if !has_desktop(env) { bail!(NO_DESKTOP); }
     let args = terminal_args(app, file)?;
-    let terminal = executable(app).context("the terminal app is no longer installed")?;
+    let path = std::ffi::OsStr::new(env.get("PATH").map(String::as_str).unwrap_or(""));
+    let terminal = executable_in(app, path).context("the terminal app is no longer installed")?;
     let mut c = Command::new("systemd-run");
     c.args(["--user", "--quiet", "--collect", "--no-ask-password", "--service-type=exec", "--expand-environment=no"]);
     for (key, value) in env { c.arg(format!("--setenv={key}={value}")); }
@@ -218,6 +253,44 @@ mod tests {
         sleep.arg("30");
         assert_eq!(bounded_command(&mut sleep, Duration::from_millis(20)), Err(CommandFailure::TimedOut));
         assert_eq!(bounded_command(&mut Command::new("false"), Duration::from_secs(2)), Err(CommandFailure::Failed));
+    }
+
+    #[test]
+    fn a_descendant_holding_stdout_does_not_defeat_the_deadline() {
+        let mut c = Command::new("sh");
+        c.args(["-c", "sleep 1 & exit 0"]);
+        let began = Instant::now();
+        assert_eq!(bounded_command(&mut c, Duration::from_millis(30)), Err(CommandFailure::TimedOut));
+        assert!(began.elapsed() < Duration::from_millis(500));
+    }
+
+    #[test]
+    fn large_output_is_drained_and_excess_output_is_refused() {
+        let mut c = Command::new("head");
+        c.args(["-c", "131072", "/dev/zero"]);
+        assert_eq!(bounded_command(&mut c, Duration::from_secs(2)).unwrap().len(), 131072);
+        let mut c = Command::new("head");
+        c.args(["-c", "2097152", "/dev/zero"]);
+        assert_eq!(bounded_command(&mut c, Duration::from_secs(2)), Err(CommandFailure::Failed));
+    }
+
+    #[test]
+    fn a_terminal_installed_in_the_desktop_path_can_be_launched() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let terminal = dir.path().join("foot");
+        std::fs::write(&terminal, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&terminal, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let env = BTreeMap::from([
+            ("WAYLAND_DISPLAY".into(), "wayland-test".into()),
+            ("PATH".into(), dir.path().to_string_lossy().into_owned()),
+        ]);
+        let c = linux_command("foot", Path::new("/a b/session.command"), &env).unwrap();
+        let args: Vec<_> = c.get_args().collect();
+        assert!(args.contains(&terminal.canonicalize().unwrap().as_os_str()));
+        assert_eq!(args.last().unwrap(), &std::ffi::OsStr::new("/a b/session.command"));
+        std::fs::set_permissions(&terminal, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(linux_command("foot", Path::new("/a"), &env).is_err());
     }
 
     #[cfg(target_os = "macos")]
