@@ -3,6 +3,7 @@
 
 Requires gtk4-broadwayd, chromium and dbus-run-session. The headless browser is
 necessary for Broadway to give the test window real focus and render frames.
+With --client-fixture, RAPP_TEST_CLIENT_BIN selects a packaged client to verify.
 """
 import os
 from pathlib import Path
@@ -17,7 +18,8 @@ import time
 root = Path(__file__).resolve().parents[3]
 if sys.argv[1:] not in ([], ['--client-fixture']):
     raise SystemExit('Usage: test-candidates.py [--client-fixture]')
-command = (['python3', 'scripts/test-linux-client.py', 'rust/target/debug/rapp-client']
+command = (['python3', 'scripts/test-linux-client.py',
+            os.environ.get('RAPP_TEST_CLIENT_BIN', 'rust/target/debug/rapp-client')]
            if sys.argv[1:] else ['cargo', 'test', '--manifest-path', 'rust/Cargo.toml',
            '-p', 'rapp-client-gtk', '--offline', 'isolated_candidates', '--', '--ignored', '--nocapture'])
 for tool in ['gtk4-broadwayd', 'chromium', 'dbus-run-session', 'cargo']:
