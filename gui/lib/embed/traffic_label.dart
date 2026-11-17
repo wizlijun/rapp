@@ -1,11 +1,11 @@
-// The top bar's traffic label: the five bars (design language: bars lit = --on, dark = --line); the
+// The top bar's traffic label: the four bars (design language: bars lit = --on, dark = --line); the
 // rate and what is weak sit atop its menu, so the bar stays short.
 import 'package:flutter/material.dart';
 
 import 'dart:math' as math;
 
 import '../hub_client.dart';
-import '../ui/net_marker.dart' show weakRttMs;
+import '../ui/net_marker.dart' show netDimAlpha, weakRttMs;
 import '../ui/tokens.dart';
 
 /// The two segments of a relayed session's round trip (spec 2026-11-14-rapp-network-status §4.2):
@@ -52,14 +52,13 @@ String? pathDetail({required String path, int? wholeMs, NetStatus? net}) {
   return '整条路 ${seg.whole}ms（本机 ${seg.local} · 对方约 ${seg.peer}）';
 }
 
-/// How many of the five bars are lit for [bytesPerSecond] (KB = 1000 B).
+/// How many of the four bars are lit for [bytesPerSecond] (KB = 1000 B).
 int levelBars(int bytesPerSecond) {
   if (bytesPerSecond <= 0) return 0;
   if (bytesPerSecond < 5000) return 1;
-  if (bytesPerSecond < 15000) return 2;
-  if (bytesPerSecond < 40000) return 3;
-  if (bytesPerSecond < 100000) return 4;
-  return 5;
+  if (bytesPerSecond < 30000) return 2;
+  if (bytesPerSecond < 100000) return 3;
+  return 4;
 }
 
 /// "0 KB/s", "12.3 KB/s", "1.5 MB/s" (same as RappCore's `formatRate`).
@@ -70,19 +69,21 @@ String formatRate(int bytes) {
   return '${(kb / 1000).toStringAsFixed(1)} MB/s';
 }
 
-/// The five bars alone, in a 14×14 square like the network marker: lit = `--on`, dark = `--line`.
+/// The four bars alone, iOS-style in a 14×14 square like the network marker: rounded, rising
+/// evenly to the full height; lit = `--on`, the rest the same colour dimmed as the marker's are.
 class LevelBars extends StatelessWidget {
   const LevelBars(this.bytesPerSecond, {super.key});
 
   final int bytesPerSecond;
 
-  /// The square's side, the bars' width and the gap between them: 5 × 2 + 4 × 1 = 14.
+  /// The square's side, the bars' width and the gap between them: 4 × 2.6 + 3 × 1.2 = 14.
   static const size = 14.0;
-  static const barWidth = 2.0;
-  static const barGap = 1.0;
+  static const count = 4;
+  static const barWidth = 2.6;
+  static const barGap = 1.2;
 
-  /// Bar [i]'s height: an even rise from 4 to the full 14.
-  static double barHeight(int i) => 4.0 + 2.5 * i;
+  /// Bar [i]'s height: 5, 8, 11, 14.
+  static double barHeight(int i) => 5.0 + 3 * i;
 
   @override
   Widget build(BuildContext context) {
@@ -94,14 +95,17 @@ class LevelBars extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          for (var i = 0; i < 5; i++)
+          for (var i = 0; i < count; i++)
             Padding(
-              padding: EdgeInsets.only(right: i < 4 ? barGap : 0),
+              padding: EdgeInsets.only(right: i < count - 1 ? barGap : 0),
               child: Container(
                 key: Key('bar$i'),
                 width: barWidth,
                 height: barHeight(i),
-                color: i < lit ? t.on : t.line,
+                decoration: BoxDecoration(
+                  color: i < lit ? t.on : t.on.withValues(alpha: netDimAlpha),
+                  borderRadius: BorderRadius.circular(0.8),
+                ),
               ),
             ),
         ],
