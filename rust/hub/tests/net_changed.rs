@@ -23,6 +23,7 @@ fn opts(home: &Path, log: rapp_net::log::Log, presence_every: Option<Duration>) 
         owns_access: true,
         embed_only: false,
         dual_stack: true,
+        log_dir: None,
     }
 }
 
