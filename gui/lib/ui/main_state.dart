@@ -458,8 +458,9 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 全景 (⌃⌘O). With 日志 open it closes them and ends on 全景, whichever screen they were opened from.
   void toggleOverview() {
-    overview = !overview;
+    overview = logs || !overview;
     logs = false;
     if (overview) _blur();
     notifyListeners();

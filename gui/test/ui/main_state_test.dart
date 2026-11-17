@@ -1861,6 +1861,23 @@ void main() {
         }, sessions: 2);
       });
 
+      test('全景 while logs are open from 全景 goes back to 全景, not the stage', () {
+        env((a, t, port, st, hints) {
+          st.toggleOverview();
+          expect(st.overview, true);
+          st.openLogs();
+          expect((st.logs, st.overview), (true, true));
+          st.toggleOverview();
+          expect((st.logs, st.overview), (false, true));
+          // From the stage too: 全景 ends on 全景.
+          st.toggleOverview();
+          expect(st.overview, false);
+          st.openLogs();
+          st.toggleOverview();
+          expect((st.logs, st.overview), (false, true));
+        }, sessions: 2);
+      });
+
       test('with logs open Ctrl+Enter and focusPicture do nothing; the frame rate drops off-stage', () {
         env((a, t, port, st, hints) {
           port.emit(WindowsEvent(2, [rw(7)]));
