@@ -52,10 +52,10 @@ class NetMarker extends StatelessWidget {
   final String? path;
 
   /// The mark's canvas, the same for all four levels.
-  static const markSize = Size(14, 14);
+  static const markSize = Size(18, 18);
 
   /// Width the marker takes in the top bar: the mark and 6 either side.
-  static const width = 26.0;
+  static const width = 30.0;
 
   @override
   Widget build(BuildContext context) {

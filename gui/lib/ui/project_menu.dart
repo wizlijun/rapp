@@ -52,7 +52,7 @@ class ProjectMenu extends StatelessWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.folder_outlined, size: 16, color: t.muted),
+                      Icon(Icons.folder_outlined, size: 18, color: t.muted),
                       if (!compact) ...[
                         const SizedBox(width: 6),
                         Flexible(

@@ -86,7 +86,7 @@ class WindowMenu extends StatelessWidget {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.web_asset, size: 16, color: t.muted),
+                      Icon(Icons.web_asset, size: 18, color: t.muted),
                       SizedBox(width: compact ? 4 : 6),
                       Flexible(
                         child: Text(

@@ -69,21 +69,21 @@ String formatRate(int bytes) {
   return '${(kb / 1000).toStringAsFixed(1)} MB/s';
 }
 
-/// The four bars alone, iOS-style in a 14×14 square like the network marker: rounded, rising
+/// The four bars alone, iOS-style in a 16×16 square like the network marker: rounded, rising
 /// evenly to the full height; lit = `--on`, the rest the same colour dimmed as the marker's are.
 class LevelBars extends StatelessWidget {
   const LevelBars(this.bytesPerSecond, {super.key});
 
   final int bytesPerSecond;
 
-  /// The square's side, the bars' width and the gap between them: 4 × 2.6 + 3 × 1.2 = 14.
-  static const size = 14.0;
+  /// The square's side, the bars' width and the gap between them: 4 × 3 + 3 × 4/3 = 16.
+  static const size = 16.0;
   static const count = 4;
-  static const barWidth = 2.6;
-  static const barGap = 1.2;
+  static const barWidth = 3.0;
+  static const barGap = 4 / 3;
 
-  /// Bar [i]'s height: 5, 8, 11, 14.
-  static double barHeight(int i) => 5.0 + 3 * i;
+  /// Bar [i]'s height: 5.5, 9, 12.5, 16.
+  static double barHeight(int i) => 5.5 + 3.5 * i;
 
   @override
   Widget build(BuildContext context) {

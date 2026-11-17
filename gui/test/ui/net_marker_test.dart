@@ -43,7 +43,7 @@ void main() {
     expect(find.byTooltip(netTooltip(n)), findsOneWidget);
   });
 
-  testWidgets('the fan fills its 14×14 canvas in the icon colour, lit by level', (tester) async {
+  testWidgets('the fan fills its 18×18 canvas in the icon colour, lit by level', (tester) async {
     for (final l in NetLevel.values) {
       await tester.pumpWidget(wrap(IconTheme(
         data: const IconThemeData(color: Color(0xFF7DFF9E)),
@@ -54,7 +54,7 @@ void main() {
       final p = paint.painter! as WifiMarkPainter;
       expect(p.bars, netBars(l), reason: '$l');
       expect(p.color, const Color(0xFF7DFF9E), reason: '$l');
-      expect(tester.getSize(find.byKey(const Key('net-mark'))), const Size(14, 14), reason: '$l');
+      expect(tester.getSize(find.byKey(const Key('net-mark'))), NetMarker.markSize, reason: '$l');
     }
   });
 
