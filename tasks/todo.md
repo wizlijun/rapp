@@ -440,13 +440,14 @@
 - [ ] 点一下到画面变化的延迟（随 P1 触摸的真机检查一起量）
 - [ ] 6 个会话同时开着的内存，拔电时每小时耗电（§9.5）
 - [ ] "本地网络"弹框在哪一步弹出，被拒绝时怎么提示；关掉本地网络再连一次，确认只走 relay 也能连上（记下 path）
-- [x] FFI 接口：hub 自己退出时通知 Dart（`on_line(NULL)` 当结束标记，Dart 收到后让所有等待的请求失败），`rapp_hub_send` 区分"没启动"和"已退出"；`stop` 等输出转发线程读完再返回
-- [x] 密钥不经 `--dart-define`：它会被抄进 Flutter 生成的 xcconfig 和 App.framework。改成运行时传入（启动参数/环境变量或 0600 文件）
+- [x] FFI 接口（代码和 Rust 测试，68605e3、df442e0）：hub 退出后发 `on_line(NULL)` 当结束标记，`rapp_hub_send` 区分没启动和已退出（-3），`stop` 等转发线程读完再返回
+- [ ] FFI 接口真机部分：Dart 收到 NULL 后让所有等待的请求失败，在 Duo 上确认
+- [x] 密钥不经 `--dart-define`（493fca4：`scripts/build-ios.sh` 不传 `--dart-define`，Generated.xcconfig 里的 DART_DEFINES 只有 Flutter 自己的版本项；key 由 App 内填写）：它会被抄进 Flutter 生成的 xcconfig 和 App.framework。改成运行时传入（启动参数/环境变量或 0600 文件）
 - [ ] iPad 多任务（分屏、侧拉、台前调度）下的窗口大小：探查带了 `UIRequiresFullScreen`，没量
-- [x] 设备名由入口传给 hub（现在 A 上显示 "rapp"）
-- [x] Dart 在 iOS 上没有 `HOME`：`gui/lib/paths.dart` 等改用原生传进来的家目录
-- [x] RappCore 的 iOS 测试：提交一个 scheme 或测试计划
-- [x] 签名：Xcode 登录账号或 CI 签名
+- [x] 设备名由入口传给 hub（68605e3 加 name 参数，e21a731 `main_ios.dart` 传入；真机上 A 显示什么待查；原先 A 上显示 "rapp"）
+- [x] Dart 在 iOS 上没有 `HOME`（e21a731：`main_ios.dart` 用 `iosChannel.paths()` 的 dataRoot，不读 HOME）：`gui/lib/paths.dart` 等改用原生传进来的家目录
+- [x] RappCore 的 iOS 测试（1723bbc：`.swiftpm/.../RappCore-iOS.xcscheme`，`scripts/check.sh` 在 iPad 模拟器上跑）：提交一个 scheme 或测试计划
+- [x] 签名（215b2b1 Automatic，团队 T5G56DH47L，Task 12 在 Duo 上装机成功）：Xcode 登录账号或 CI 签名
 
 ### P1 真机验收清单（分支 feat/ipad-p1，Duo 已装上，详见 `docs/superpowers/measurements/2026-11-17-rapp-ipad-p1.md`）
 
