@@ -6,6 +6,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import '../data_relocate.dart';
+import '../ios_channel.dart';
+import '../platform_caps.dart';
 import '../paths.dart';
 import 'section_card.dart';
 
@@ -46,8 +48,9 @@ Map<String, dynamic>? readSyncStatus(DataDir d) {
   }
 }
 
-/// Opens [path] in the platform file manager.
+/// Opens [path] in the platform file manager (iOS: the share sheet).
 Future<void> openFolderDefault(String path) async {
+  if (caps.systemOpen) return iosChannel.share(path);
   final r = await Process.run(Platform.isMacOS ? 'open' : 'xdg-open', [path]);
   if (r.exitCode != 0) throw const FileSystemException('无法打开文件夹');
 }

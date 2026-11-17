@@ -2,6 +2,11 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:rapp/paths.dart';
+import 'package:rapp/pages/ios_local_section.dart';
+import 'package:rapp/pages/local_section.dart';
+import 'package:rapp/platform_caps.dart';
+import 'package:rapp/ui/access_setup.dart';
+import 'package:rapp/ui/shares_section.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -189,6 +194,72 @@ void main() {
     monitor.status = ServiceStatus.fromJson({'relay_addr': 'vps:22026', 'has_key': true});
     await pump(tester);
     expect(s.relaySet, isTrue);
+  });
+
+  group('iOS: the hub in process, no service', () {
+    late PlatformCaps was;
+    var hasKey = false;
+
+    setUp(() {
+      was = caps;
+      caps = PlatformCaps.forOs('ios');
+      hasKey = false;
+      final base = t.onSend!;
+      t.onSend = (cmd) {
+        switch (cmd['cmd']) {
+          case 'access':
+            t.emit({'event': 'access', 'relay': hasKey ? 'r:1' : null, 'has_key': hasKey, 'name': 'iPad', 'req': cmd['req']});
+          case 'set_access':
+            hasKey = true;
+            t.emit({'event': 'access', 'relay': cmd['relay'], 'has_key': true, 'name': 'iPad', 'req': cmd['req']});
+          default:
+            base(cmd);
+        }
+      };
+      s.overview = true;
+    });
+    tearDown(() => caps = was);
+
+    Future<void> pumpIos(WidgetTester tester) async {
+      tester.view.physicalSize = const Size(1194, 834);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(wrap(
+        MainWindow(state: s, monitor: null, control: null, fullscreen: fs),
+        disableAnimations: true,
+      ));
+      await settle(tester);
+    }
+
+    testWidgets('no key: AccessSetup stands where the overview was, until 接入 works', (tester) async {
+      await pumpIos(tester);
+      expect(find.byType(AccessSetup), findsOneWidget);
+      expect(find.byType(Overview), findsNothing);
+      expect(s.relaySet, isFalse);
+      await tester.enterText(find.byKey(const Key('access-relay')), 'r:1');
+      await tester.enterText(find.byKey(const Key('access-key')), 'k');
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('access-go')));
+      await settle(tester);
+      expect(find.byType(AccessSetup), findsNothing);
+      expect(find.byType(Overview), findsOneWidget);
+      expect(s.relaySet, isTrue);
+    });
+
+    testWidgets('a key: the overview, relaySet from has_key, and the slim 本机 without ports', (tester) async {
+      hasKey = true;
+      await pumpIos(tester);
+      expect(find.byType(AccessSetup), findsNothing);
+      expect(find.byType(Overview), findsOneWidget);
+      expect(s.relaySet, isTrue);
+      s.togglePanel(PanelTab.devices);
+      await settle(tester);
+      expect(find.byType(IosLocalSection), findsOneWidget);
+      expect(find.byType(LocalSection), findsNothing);
+      expect(find.byType(SharesSection), findsNothing);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpWidget(const SizedBox());
+    });
   });
 
   testWidgets('opening and closing the panel never changes the stage size', (tester) async {

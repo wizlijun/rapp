@@ -12,13 +12,13 @@ class UnlockCredential {
   final bool auto;
 }
 
-/// The macOS runner stores both fields in a local, non-syncing Keychain item.
+/// The macOS and iOS runners store both fields in a local, non-syncing Keychain item.
 /// Linux keeps them in memory for this run only; other platforms have no backend.
 class UnlockStore {
   UnlockStore({bool? supported, MethodChannel? channel, bool? memory})
     : memory = memory ?? Platform.isLinux,
       _channel = channel ?? const MethodChannel('rapp/unlock') {
-    this.supported = supported ?? (Platform.isMacOS || this.memory);
+    this.supported = supported ?? (Platform.isMacOS || Platform.isIOS || this.memory);
   }
   late final bool supported;
 

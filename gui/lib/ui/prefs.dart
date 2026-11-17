@@ -21,6 +21,7 @@ class UiPrefs {
     this.inputHistory = true,
     this.termKeyRow = false,
     this.termFit = true,
+    this.keepAwake = true,
     this.first = FirstLayer.device,
     this.composerZoom = 0,
     Map<String, String>? termOpen,
@@ -43,6 +44,9 @@ class UiPrefs {
 
   /// 跟着我的窗口 (`term_fit`): the host's terminal window follows this console's size. Missing or bad means on.
   bool termFit;
+
+  /// 屏幕常亮 (`keep_awake`, iOS): no auto-lock while a live session is on the stage. Missing or bad means on.
+  bool keepAwake;
 
   /// 输入板缩放档 (`composer_zoom`): 0 is the default size, up to [composerZoomMax]. Missing or bad means 0.
   int composerZoom;
@@ -76,6 +80,7 @@ class UiPrefs {
       final ih = j['input_history'];
       final kr = j['term_key_row'];
       final tf = j['term_fit'];
+      final ka = j['keep_awake'];
       final fl = j['first'];
       final cz = j['composer_zoom'];
       final to = j['term_open'];
@@ -90,6 +95,7 @@ class UiPrefs {
         inputHistory: ih is bool ? ih : true,
         termKeyRow: kr is bool ? kr : false,
         termFit: tf is bool ? tf : true,
+        keepAwake: ka is bool ? ka : true,
         composerZoom: cz is int ? cz.clamp(0, composerZoomMax) : 0,
         first: FirstLayer.values.firstWhere(
           (v) => v.name == fl,
@@ -122,6 +128,7 @@ class UiPrefs {
         'input_history': inputHistory,
         'term_key_row': termKeyRow,
         'term_fit': termFit,
+        'keep_awake': keepAwake,
         'first': first.name,
         'composer_zoom': composerZoom,
         'term_open': termOpen,

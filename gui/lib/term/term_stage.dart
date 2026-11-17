@@ -12,6 +12,8 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../embed/remote_session.dart';
+import '../ios_channel.dart';
+import '../platform_caps.dart';
 import '../ui/keep_focus.dart';
 import '../ui/main_state.dart';
 import '../ui/tokens.dart';
@@ -36,7 +38,9 @@ TextStyle termTextStyle(RappTokens t) => TextStyle(
 /// Opens [url] in this computer's browser.
 Future<void> openUrl(String url) async {
   try {
-    if (Platform.isMacOS) {
+    if (caps.systemOpen) {
+      await iosChannel.openUrl(url);
+    } else if (Platform.isMacOS) {
       await Process.start('open', [url], mode: ProcessStartMode.detached);
     } else if (Platform.isLinux) {
       await Process.start('xdg-open', [url], mode: ProcessStartMode.detached);

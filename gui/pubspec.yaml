@@ -8,6 +8,7 @@ environment:
   sdk: ^3.12.1
 
 dependencies:
+  ffi: ^2.2.0
   flutter:
     sdk: flutter
   tray_manager: ^0.5.3

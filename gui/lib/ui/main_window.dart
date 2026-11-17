@@ -8,10 +8,15 @@ import 'package:flutter/services.dart';
 import '../pages/access_log_section.dart';
 import '../data_relocate.dart';
 import '../pages/app_profiles_section.dart';
+import '../pages/ios_local_section.dart';
 import '../pages/local_section.dart';
+import '../hub_client.dart';
+import '../ios_channel.dart';
+import '../platform_caps.dart';
 import '../service_client.dart';
 import '../service_control.dart';
 import '../update.dart';
+import 'access_setup.dart';
 import 'backdrop.dart';
 import 'devices_tab.dart';
 import 'fullscreen.dart';
@@ -23,7 +28,9 @@ import 'shares_section.dart';
 import 'tokens.dart';
 import 'top_bar.dart';
 
+/// iOS has no file manager to open a folder in: the share sheet instead.
 Future<void> _openFolder(String dir) async {
+  if (caps.systemOpen) return iosChannel.share(dir);
   final c = openFolderCommand(dir, Platform.operatingSystem);
   await Process.run(c.exe, c.args);
 }
@@ -40,7 +47,9 @@ class MainWindow extends StatefulWidget {
   });
 
   final MainState state;
-  final ServiceMonitor monitor;
+
+  /// Null where there is no service (iOS): whether a relay is set then comes from the hub's `access`.
+  final ServiceMonitor? monitor;
   final ServiceController? control;
   final DataRelocator? relocator;
   final FullscreenControl fullscreen;
@@ -80,7 +89,11 @@ class _MainWindowState extends State<MainWindow> {
       if (mounted) setState(() => _full = v);
     });
     _asks = state.unlockAsks.listen(_onAsk);
-    widget.monitor.addListener(_onMonitor);
+    widget.monitor?.addListener(_onMonitor);
+    if (widget.monitor == null) {
+      state.hub?.addListener(_onAccess);
+      state.hub?.access().then((_) {}, onError: (_) {});
+    }
     // After the first frame: a change notifies MainState's listeners, never during a build.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _onMonitor();
@@ -88,7 +101,29 @@ class _MainWindowState extends State<MainWindow> {
   }
 
   /// Whether a relay is set lives in the service status; MainState keeps a copy for the device rows and the menu.
-  void _onMonitor() => state.setRelaySet(widget.monitor.status?.relaySet ?? false);
+  void _onMonitor() {
+    final m = widget.monitor;
+    if (m != null) state.setRelaySet(m.status?.relaySet ?? false);
+  }
+
+  /// The hub's last `access` (no service): null until it answered.
+  HubAccess? _access;
+
+  void _onAccess() {
+    final a = state.hub?.lastAccess;
+    if (a == null || a == _access || !mounted) return;
+    setState(() => _access = a);
+    state.setRelaySet(a.hasKey);
+  }
+
+  /// 接入 worked: the overview comes back and the device list is asked again.
+  void _onAccessDone(HubAccess a) {
+    _onAccess();
+    state.refreshDevices();
+  }
+
+  /// The in-process hub has no key yet: the access setup stands where the overview was.
+  bool get _needsAccess => caps.hubInProcess && _access?.hasKey == false;
 
   /// A locked session wants the password: one dialog at a time.
   Future<void> _onAsk(String device) async {
@@ -103,7 +138,8 @@ class _MainWindowState extends State<MainWindow> {
 
   @override
   void dispose() {
-    widget.monitor.removeListener(_onMonitor);
+    widget.monitor?.removeListener(_onMonitor);
+    state.hub?.removeListener(_onAccess);
     _asks?.cancel();
     _sub?.cancel();
     super.dispose();
@@ -128,35 +164,62 @@ class _MainWindowState extends State<MainWindow> {
     }
   }
 
-  Widget _local() => Column(children: [
+  Widget _local() {
+    final m = widget.monitor;
+    if (!caps.hasService || m == null) return _iosLocal();
+    return Column(children: [
+      ListenableBuilder(
+        listenable: widget.state,
+        builder: (context, _) => LocalSection(
+          monitor: m,
+          control: widget.control,
+          data: widget.state.data,
+          relocate: widget.relocator,
+          hooks: widget.hooks,
+        ),
+      ),
+      if (caps.showsPorts)
+        ListenableBuilder(
+          listenable: m,
+          builder: (context, _) => SharesSection(key: const ValueKey('shares-local'), api: m, online: m.running),
+        ),
+      ListenableBuilder(
+        listenable: widget.state,
+        builder: (context, _) => AppProfilesSection(store: widget.state.profiles, openFolder: _openFolder),
+      ),
+      ListenableBuilder(
+        listenable: m,
+        builder: (context, _) => AccessLogSection(
+          load: m.history,
+          logDir: m.status?.logDir,
+          openFolder: _openFolder,
+          reload: m,
+        ),
+      ),
+    ]);
+  }
+
+  /// No service (iOS): the slim 本机, the app profiles, and an access log nothing writes to (nobody reaches an iPad).
+  Widget _iosLocal() {
+    final hub = state.hub;
+    return Column(children: [
+      if (hub != null)
         ListenableBuilder(
           listenable: widget.state,
-          builder: (context, _) => LocalSection(
-            monitor: widget.monitor,
-            control: widget.control,
-            data: widget.state.data,
-            relocate: widget.relocator,
-            hooks: widget.hooks,
-          ),
+          builder: (context, _) =>
+              IosLocalSection(hub: hub, prefs: state.prefs, onPrefs: state.savePrefs, data: state.data),
         ),
-        ListenableBuilder(
-          listenable: widget.monitor,
-          builder: (context, _) => SharesSection(key: const ValueKey('shares-local'), api: widget.monitor, online: widget.monitor.running),
-        ),
-        ListenableBuilder(
-          listenable: widget.state,
-          builder: (context, _) => AppProfilesSection(store: widget.state.profiles, openFolder: _openFolder),
-        ),
-        ListenableBuilder(
-          listenable: widget.monitor,
-          builder: (context, _) => AccessLogSection(
-            load: widget.monitor.history,
-            logDir: widget.monitor.status?.logDir,
-            openFolder: _openFolder,
-            reload: widget.monitor,
-          ),
-        ),
-      ]);
+      ListenableBuilder(
+        listenable: widget.state,
+        builder: (context, _) => AppProfilesSection(store: widget.state.profiles, openFolder: _openFolder),
+      ),
+      AccessLogSection(
+        load: () async => const <Map<String, dynamic>>[],
+        logDir: '${state.data.root}/logs',
+        openFolder: _openFolder,
+      ),
+    ]);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -207,7 +270,13 @@ class _MainWindowState extends State<MainWindow> {
                   builder: (context, _) {
                     final open = state.panel != null;
                     return Stack(children: [
-                      Positioned.fill(child: state.overview ? Overview(state: state) : Stage(state: state)),
+                      Positioned.fill(
+                        child: _needsAccess && state.hub != null
+                            ? AccessSetup(key: const Key('access-setup'), hub: state.hub!, onDone: _onAccessDone)
+                            : state.overview
+                                ? Overview(state: state)
+                                : Stage(state: state),
+                      ),
                       if (open)
                         Positioned.fill(
                           child: _Blur(
@@ -231,12 +300,12 @@ class _MainWindowState extends State<MainWindow> {
                               state: state,
                               // The shell never pops anything up for an update: just the dot (K27).
                               devicesTab: ListenableBuilder(
-                                listenable: widget.monitor,
+                                listenable: widget.monitor ?? Listenable.merge(const []),
                                 builder: (context, _) => DevicesTab(
                                   state: state,
                                   local: _local(),
-                                  localBadge: updateBadge(widget.monitor.status?.update),
-                                  shares: widget.monitor,
+                                  localBadge: caps.onlineUpdate && updateBadge(widget.monitor?.status?.update),
+                                  shares: caps.showsPorts ? widget.monitor : null,
                                 ),
                               ),
                             ),

@@ -7,7 +7,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import '../ios_channel.dart';
 import '../permissions.dart';
+import '../platform_caps.dart';
 import '../service_client.dart';
 import '../ui/tokens.dart';
 import '../ui/lifecycle.dart' show disconnectWord;
@@ -41,6 +43,7 @@ class UpdateHooks {
 Future<void> openInstallerPage(String page) async {
   final uri = Uri.tryParse(page);
   if (uri == null || uri.scheme != 'https' || uri.host.isEmpty) throw const FormatException('安装包地址无效');
+  if (caps.systemOpen) return iosChannel.openUrl(page);
   final result = await Process.run(Platform.isMacOS ? 'open' : 'xdg-open', [page]);
   if (result.exitCode != 0) throw const FileSystemException('无法打开浏览器');
 }
@@ -534,7 +537,7 @@ class _LocalSectionState extends State<LocalSection> {
             if (_platform != TargetPlatform.macOS && _platform != TargetPlatform.linux)
               _row('权限',
                   '屏幕录制 ${st.screenRecording ? '✓' : '✗'}   辅助功能 ${st.accessibility ? '✓' : '✗'}'),
-            if (update != null && _platform != TargetPlatform.linux)
+            if (update != null && caps.onlineUpdate && _platform != TargetPlatform.linux)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: UpdateSection(

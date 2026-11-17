@@ -2803,6 +2803,9 @@ class MainState extends ChangeNotifier {
     _save();
   }
 
+  /// [prefs] changed outside a setter here (iOS 本机's 屏幕常亮): save them.
+  void savePrefs() => _save();
+
   void _save() {
     try {
       final dir = data.prefsDir();

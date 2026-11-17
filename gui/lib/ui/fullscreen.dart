@@ -36,3 +36,17 @@ class WindowManagerFullscreen with WindowListener implements FullscreenControl {
   @override
   Future<void> setFullScreen(bool on) => windowManager.setFullScreen(on);
 }
+
+/// No window to make fullscreen (iOS: the app is always the whole screen).
+class NoFullscreen implements FullscreenControl {
+  const NoFullscreen();
+
+  @override
+  Stream<bool> get changes => const Stream.empty();
+
+  @override
+  Future<bool> isFullScreen() async => false;
+
+  @override
+  Future<void> setFullScreen(bool on) async {}
+}
