@@ -33,6 +33,9 @@ pub(crate) async fn run(hub: Arc<Hub>, every: Duration) {
     let mut last: HashMap<String, bool> = HashMap::new();
     loop {
         tick.tick().await;
+        if hub.presence_paused.load(std::sync::atomic::Ordering::Relaxed) {
+            continue;
+        }
         let hosts = hub.hosts.all();
         terms::stop_gone(&hub, &hosts);
         for host in hosts {
