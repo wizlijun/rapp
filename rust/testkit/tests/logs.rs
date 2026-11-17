@@ -122,3 +122,37 @@ async fn no_secrets_in_logs_reply() {
         assert!(!text.contains(&key), "{text}");
     }
 }
+
+/// A `repeat` written after the newest row reaches the GUI as `again`, from
+/// this device and through a peer (the hub passes only known reply keys).
+#[tokio::test]
+async fn a_grown_repeat_comes_back_as_again() {
+    let a = service().await;
+    let home = tempfile::tempdir().unwrap();
+    let logs = tempfile::tempdir().unwrap();
+    let mut local = Hub::start_reading_logs(home.path(), a.bins.path(), logs.path());
+    let home2 = tempfile::tempdir().unwrap();
+    let mut hub = Hub::start(home2.path(), a.bins.path());
+    hub.call(json!({"cmd":"add_host","id":host_at(&a),"password":PASSWORD,"req":1})).await;
+    // `src: hub` keeps the service's own lines out of the peer's reply.
+    let cases = [(&mut local, logs.path().to_owned(), json!(null)), (&mut hub, a.home.path().join("logs"), json!(a.id))];
+    for (h, dir, id) in cases {
+        lines(&dir, "hub.log", &["first_m", "again_m"]);
+        let mut q = json!({"cmd":"logs","src":["hub"]});
+        if !id.is_null() {
+            q["id"] = id.clone();
+        }
+        let r = h.call(q.clone()).await;
+        assert_eq!(r["event"], "logs", "{r}");
+        let row = r["events"][0].clone();
+        assert!(row["raw"].as_str().unwrap().contains("again_m"), "{r}");
+        let rep = json!({"ts":at(1),"lvl":"info","ev":"repeat","repeat":5});
+        let mut f = std::fs::OpenOptions::new().append(true).open(dir.join("hub.log")).unwrap();
+        std::io::Write::write_all(&mut f, format!("{rep}\n").as_bytes()).unwrap();
+        q["after"] = r["newer"].clone();
+        let r2 = h.call(q).await;
+        assert_eq!(r2["events"], json!([]), "{r2}");
+        assert_eq!(r2["again"][0]["at"], row["at"], "{r2}");
+        assert_eq!(r2["again"][0]["repeat"], 5, "{r2}");
+    }
+}

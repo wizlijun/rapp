@@ -335,7 +335,10 @@ impl Hub {
                     }
                 };
                 // Only the query's fields: not `ok`, nor anything a peer might add.
-                for k in ["events", "more", "older", "newer", "gap", "counts", "latest", "launchd"] {
+                // A new reply key of `logq::query` must be added here or the GUI
+                // never sees it; a new query key must be a `LogQuery` field (the
+                // parse above drops any other) to reach this device or a peer.
+                for k in ["events", "again", "more", "older", "newer", "gap", "counts", "latest", "launchd"] {
                     if let Some(x) = r.get(k) {
                         ev[k] = x.clone();
                     }

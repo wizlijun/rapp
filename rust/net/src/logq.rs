@@ -107,7 +107,9 @@ pub fn classify(src: Src, ev: &Value) -> Option<Kind> {
     None
 }
 
-/// Query parameters (spec §3.4); every one may be left out.
+/// Query parameters (spec §3.4); every one may be left out. The hub parses a
+/// `logs` command into this, so a key that is not a field here never reaches
+/// a peer (and a new reply key must join the hub's list in `hub/src/lib.rs`).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct LogQuery {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -161,17 +163,23 @@ pub fn query(dir: &Path, q: &LogQuery, now: SystemTime) -> Value {
         }
     }
     let budget = BUDGET.saturating_sub(reply.to_string().len());
-    let mut fill = Fill { events: Vec::new(), used: 0, limit, budget, more: false };
-    match &q.around {
-        Some(c) => around(dir, &parse_cursor(c), &mut fill),
-        None => page(dir, q, &mut fill),
-    }
+    let mut fill = Fill { events: Vec::new(), again: Vec::new(), used: 0, limit, budget, more: false };
     // `around` is oldest first, everything else newest first.
-    let (first, last) = (fill.events.first(), fill.events.last());
-    let (newer, older) = if q.around.is_some() { (last, first) } else { (first, last) };
-    if let (Some(n), Some(o)) = (newer, older) {
-        reply["newer"] = n["at"].clone();
+    let (newer, older) = match &q.around {
+        Some(c) => {
+            around(dir, &parse_cursor(c).checked(dir), &mut fill);
+            (fill.events.last().map(|e| e["at"].clone()), fill.events.first())
+        }
+        None => (page(dir, q, &mut fill).map(Value::from), fill.events.last()),
+    };
+    if let Some(o) = older {
         reply["older"] = o["at"].clone();
+    }
+    if let Some(n) = newer {
+        reply["newer"] = n;
+    }
+    if !fill.again.is_empty() {
+        reply["again"] = std::mem::take(&mut fill.again).into();
     }
     // An `after` page cut short leaves unsent rows between it and the cursor:
     // `gap` (the GUI reloads the first page). `more` only means older rows.
@@ -215,6 +223,14 @@ struct Ev {
     val: Value,
     kind: Option<Kind>,
     repeat: u64,
+    /// The newest line folded into this event: its last `repeat` line, or
+    /// the event itself (`ts`, offset).
+    last: (String, u64),
+}
+
+/// `"{ts}~{rank}~{offset}"`, the `at` of a line.
+fn at(ts: &str, src: Src, offset: u64) -> String {
+    format!("{ts}~{}~{offset}", src.rank())
 }
 
 impl Ev {
@@ -223,10 +239,14 @@ impl Ev {
         (&self.ts, Reverse(self.src.rank()), self.offset)
     }
 
+    /// `key` of the newest line folded in (see `last`).
+    fn last_key(&self) -> (&str, Reverse<u8>, u64) {
+        (&self.last.0, Reverse(self.src.rank()), self.last.1)
+    }
+
     /// The event entry (spec §3.4); a long `raw` is cut, staying valid JSON.
-    fn entry(self) -> Value {
-        let at = format!("{}~{}~{}", self.ts, self.src.rank(), self.offset);
-        let mut e = json!({"src": self.src.name(), "at": at});
+    fn entry(&self) -> Value {
+        let mut e = json!({"src": self.src.name(), "at": at(&self.ts, self.src, self.offset)});
         if let Some(k) = self.kind {
             e["kind"] = k.as_str().into();
         }
@@ -234,16 +254,14 @@ impl Ev {
             e["repeat"] = self.repeat.into();
         }
         if self.text.len() > RAW_MAX {
-            let mut v = self.val;
+            let mut v = self.val.clone();
             if cut_strings(&mut v) {
                 e["truncated"] = true.into();
                 e["raw"] = v.to_string().into();
-            } else {
-                e["raw"] = self.text.into();
+                return e;
             }
-        } else {
-            e["raw"] = self.text.into();
         }
+        e["raw"] = self.text.as_str().into();
         e
     }
 }
@@ -277,37 +295,70 @@ struct Folded<I> {
     src: Src,
     lines: I,
     pending: u64,
+    /// The newest `repeat` line held (`ts`, offset).
+    pending_last: Option<(String, u64)>,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Lines parsed by `Folded` on this thread, to test what a query costs.
+    static SCANNED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 impl<I: Iterator<Item = Line>> Iterator for Folded<I> {
     type Item = Ev;
     fn next(&mut self) -> Option<Ev> {
         for l in self.lines.by_ref() {
+            #[cfg(test)]
+            SCANNED.with(|c| c.set(c.get() + 1));
             let Ok(val) = serde_json::from_str::<Value>(&l.text) else { continue };
             if val.get("ev").and_then(Value::as_str) == Some("repeat") {
                 self.pending += val.get("repeat").and_then(Value::as_u64).unwrap_or(0);
+                if let (None, Some(ts)) = (&self.pending_last, val.get("ts").and_then(Value::as_str)) {
+                    self.pending_last = Some((ts.to_owned(), l.offset));
+                }
                 continue;
             }
             let Some(ts) = val.get("ts").and_then(Value::as_str).map(str::to_owned) else { continue };
             let kind = classify(self.src, &val);
             let repeat = std::mem::take(&mut self.pending);
-            return Some(Ev { src: self.src, ts, offset: l.offset, text: l.text, val, kind, repeat });
+            let last = self.pending_last.take().unwrap_or_else(|| (ts.clone(), l.offset));
+            return Some(Ev { src: self.src, ts, offset: l.offset, text: l.text, val, kind, repeat, last });
         }
         None
     }
 }
 
 /// The sources' events merged newest first (by `Ev::key`), one head each.
-fn merged(dir: &Path, srcs: &[Src]) -> impl Iterator<Item = Ev> {
-    let mut streams: Vec<_> = srcs.iter().map(|&src| Folded { src, lines: lines_rev(dir, src), pending: 0 }).collect();
-    let mut heads: Vec<Option<Ev>> = streams.iter_mut().map(Iterator::next).collect();
-    std::iter::from_fn(move || {
-        let newest = heads.iter().enumerate().filter_map(|(i, h)| h.as_ref().map(|e| (i, e.key())));
+struct Merged<I> {
+    streams: Vec<Folded<I>>,
+    heads: Vec<Option<Ev>>,
+}
+
+fn merged(dir: &Path, srcs: &[Src]) -> Merged<impl Iterator<Item = Line>> {
+    let mut streams: Vec<_> =
+        srcs.iter().map(|&src| Folded { src, lines: lines_rev(dir, src), pending: 0, pending_last: None }).collect();
+    let heads = streams.iter_mut().map(Iterator::next).collect();
+    Merged { streams, heads }
+}
+
+impl<I> Merged<I> {
+    /// Before the first `next`: each source's newest event, the only one a
+    /// later `repeat` line can still be added to.
+    fn heads(&self) -> impl Iterator<Item = &Ev> {
+        self.heads.iter().flatten()
+    }
+}
+
+impl<I: Iterator<Item = Line>> Iterator for Merged<I> {
+    type Item = Ev;
+    fn next(&mut self) -> Option<Ev> {
+        let newest = self.heads.iter().enumerate().filter_map(|(i, h)| h.as_ref().map(|e| (i, e.key())));
         let i = newest.max_by(|a, b| a.1.cmp(&b.1))?.0;
-        let ev = heads[i].take();
-        heads[i] = streams[i].next();
+        let ev = self.heads[i].take();
+        self.heads[i] = self.streams[i].next();
         ev
-    })
+    }
 }
 
 /// `"{ts}~{rank}~{offset}"`; anything else is a bare `ts` (up to any `~`).
@@ -352,9 +403,18 @@ impl Cursor {
     /// source are always kept: one written later in that ms can sort on
     /// either side of the cursor, so a duplicate beats a gap.
     fn below(&self, ev: &Ev) -> bool {
+        self.below_line(&ev.ts, ev.src, ev.offset)
+    }
+
+    /// `below` for the newest line folded into `ev` (a `repeat` written since).
+    fn below_last(&self, ev: &Ev) -> bool {
+        self.below_line(&ev.last.0, ev.src, ev.last.1)
+    }
+
+    fn below_line(&self, l_ts: &str, l_src: Src, l_offset: u64) -> bool {
         match self {
-            Cursor::At { ts, src, offset } => ev.ts > *ts || (ev.ts == *ts && (ev.src != *src || ev.offset > *offset)),
-            Cursor::Ts(ts) => ev.ts >= *ts,
+            Cursor::At { ts, src, offset } => l_ts > ts.as_str() || (l_ts == ts && (l_src != *src || l_offset > *offset)),
+            Cursor::Ts(ts) => l_ts >= ts.as_str(),
         }
     }
 
@@ -394,6 +454,8 @@ fn line_ts(dir: &Path, src: Src, offset: u64) -> Option<String> {
 /// Collects event entries up to `limit` and the byte budget.
 struct Fill {
     events: Vec<Value>,
+    /// Rows already sent whose `repeat` grew since the `after` cursor.
+    again: Vec<Value>,
     used: usize,
     limit: usize,
     budget: usize,
@@ -404,18 +466,25 @@ impl Fill {
     /// Adds `e`, or marks `more` and returns false when full. The first event
     /// always goes in, so paging moves on.
     fn push(&mut self, e: Value) -> bool {
+        self.push_to(false, e)
+    }
+
+    /// `push`, into `again` when `again`; both share the limit and budget.
+    fn push_to(&mut self, again: bool, e: Value) -> bool {
         let n = e.to_string().len() + 1;
-        if self.events.len() >= self.limit || (!self.events.is_empty() && self.used + n > self.budget) {
+        let had = self.events.len() + self.again.len();
+        if had >= self.limit || (had > 0 && self.used + n > self.budget) {
             self.more = true;
             return false;
         }
         self.used += n;
-        self.events.push(e);
+        if again { &mut self.again } else { &mut self.events }.push(e);
         true
     }
 }
 
-fn page(dir: &Path, q: &LogQuery, fill: &mut Fill) {
+/// A first, `before` or `after` page into `fill`; returns `newer`.
+fn page(dir: &Path, q: &LogQuery, fill: &mut Fill) -> Option<String> {
     let srcs: Vec<Src> = match &q.src {
         None => vec![Src::Service, Src::Hub],
         Some(names) => [Src::Service, Src::Hub].into_iter().filter(|s| names.iter().any(|n| n == s.name())).collect(),
@@ -423,20 +492,44 @@ fn page(dir: &Path, q: &LogQuery, fill: &mut Fill) {
     // An unknown kind matches nothing.
     let kind = q.kind.as_deref().map(Kind::parse);
     let needle = q.q.as_deref().map(str::to_lowercase).filter(|s| !s.is_empty());
+    let matches = |ev: &Ev| {
+        (!q.problems || ev.kind.is_some())
+            && kind.is_none_or(|k| ev.kind.is_some() && ev.kind == k)
+            && needle.as_ref().is_none_or(|n| ev.text.to_lowercase().contains(n))
+    };
     let before = q.before.as_deref().map(parse_cursor);
     let after = q.after.as_deref().map(|c| parse_cursor(c).checked(dir));
-    for ev in merged(dir, &srcs) {
+    let mut evs = merged(dir, &srcs);
+    // `newer` of a first or `after` page is the newest line there is, matched
+    // or not (a `repeat` too), so the next poll reads only what came since.
+    let top = evs.heads().max_by(|a, b| a.last_key().cmp(&b.last_key()));
+    let newest = top.filter(|e| after.as_ref().is_none_or(|c| c.below_last(e))).map(|e| at(&e.last.0, e.src, e.last.1));
+    // A source's newest event older than the cursor with a `repeat` written
+    // since: sent again under `again`, to replace in place.
+    let mut grown: Vec<&Ev> = match &after {
+        Some(c) => evs.heads().filter(|e| e.repeat > 0 && !c.below(e) && c.below_last(e) && matches(e)).collect(),
+        None => Vec::new(),
+    };
+    grown.sort_by(|a, b| b.key().cmp(&a.key()));
+    let grown: Vec<Value> = grown.into_iter().map(Ev::entry).collect();
+    for ev in evs.by_ref() {
         if after.as_ref().is_some_and(|c| ev.ts.as_str() < c.ts()) {
             break;
         }
-        let keep = before.as_ref().is_none_or(|c| c.above(&ev))
-            && after.as_ref().is_none_or(|c| c.below(&ev))
-            && (!q.problems || ev.kind.is_some())
-            && kind.is_none_or(|k| ev.kind.is_some() && ev.kind == k)
-            && needle.as_ref().is_none_or(|n| ev.text.to_lowercase().contains(n));
+        let keep = before.as_ref().is_none_or(|c| c.above(&ev)) && after.as_ref().is_none_or(|c| c.below(&ev)) && matches(&ev);
         if keep && !fill.push(ev.entry()) {
             break;
         }
+    }
+    // Older than every new row: after them, while there is room (else `gap`).
+    for e in grown {
+        if !fill.push_to(true, e) {
+            break;
+        }
+    }
+    match before {
+        Some(_) => fill.events.first().and_then(|e| e["at"].as_str()).map(str::to_owned),
+        None => newest,
     }
 }
 
@@ -463,7 +556,7 @@ fn around(dir: &Path, c: &Cursor, fill: &mut Fill) {
             Cursor::Ts(ts) => e.ts >= *ts,
         })
         .unwrap_or(evs.len());
-    let entries: Vec<Value> = evs.into_iter().map(Ev::entry).collect();
+    let entries: Vec<Value> = evs.iter().map(Ev::entry).collect();
     let sizes: Vec<usize> = entries.iter().map(|e| e.to_string().len() + 1).collect();
     // Grow [a, b) from the middle, alternating sides.
     let (mut a, mut b, mut used, mut right) = (mid, mid, 0, true);
@@ -921,6 +1014,153 @@ mod tests {
         assert_eq!(ns(&r), ["B", "A", "Z"]);
         assert_eq!(evs(&r)[1]["repeat"], 4);
         assert_eq!(r["counts"]["refused"], 5);
+    }
+
+    fn rep(ts: &str, n: u64) -> String {
+        line(ts, json!({"lvl":"info","ev":"repeat","repeat":n}))
+    }
+
+    fn after(r: &Value, q: LogQuery) -> LogQuery {
+        LogQuery { after: Some(r["newer"].as_str().expect("newer").into()), ..q }
+    }
+
+    fn problems() -> LogQuery {
+        LogQuery { problems: true, ..Default::default() }
+    }
+
+    /// The `n` of each `again` entry, and its `repeat`.
+    fn again(r: &Value) -> Vec<(String, u64)> {
+        let a = r.get("again").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+        a.iter().map(|e| (raw(e)["n"].as_str().unwrap_or("").to_owned(), e["repeat"].as_u64().unwrap_or(0))).collect()
+    }
+
+    #[test]
+    fn filtered_first_page_with_no_match_still_returns_newer() {
+        let d = tempfile::tempdir().unwrap();
+        append(d.path(), "service.log", &[info(&ts_at(-30), "i0"), info(&ts_at(-20), "i1")]);
+        let r = run(d.path(), problems());
+        assert!(evs(&r).is_empty());
+        let newer = r["newer"].as_str().expect("newer on an empty filtered page").to_owned();
+        assert!(newer.starts_with(&format!("{}~0~", ts_at(-20))), "{newer}");
+        assert!(r.get("older").is_none());
+        assert_eq!(r["more"], false);
+        // New lines that do not match: nothing, but `newer` moves on.
+        append(d.path(), "service.log", &[info(&ts_at(-10), "i2")]);
+        let r2 = run(d.path(), after(&r, problems()));
+        assert!(evs(&r2).is_empty());
+        let newer2 = r2["newer"].as_str().unwrap();
+        assert!(newer2.starts_with(&format!("{}~0~", ts_at(-10))), "{newer2}");
+        // A match after that comes through.
+        append(d.path(), "hub.log", &[refused(&ts_at(-5), "r0")]);
+        let r3 = run(d.path(), after(&r2, problems()));
+        assert_eq!(ns(&r3), ["r0"]);
+        assert_eq!(r3["newer"], evs(&r3)[0]["at"]);
+        // Nothing new at all: empty, no cursors.
+        let r4 = run(d.path(), after(&r3, problems()));
+        assert!(evs(&r4).is_empty() && r4.get("newer").is_none() && r4.get("again").is_none(), "{r4}");
+    }
+
+    #[test]
+    fn after_poll_reads_only_what_came_since() {
+        let d = tempfile::tempdir().unwrap();
+        let old: Vec<String> = (0..3000).map(|i| info(&ts_at(-3000 + i), &format!("o{i}"))).collect();
+        append(d.path(), "service.log", &old);
+        append(d.path(), "hub.log", &old);
+        let r = run(d.path(), problems());
+        assert!(evs(&r).is_empty());
+        append(d.path(), "service.log", &[info(&ts_at(1), "n0"), info(&ts_at(2), "n1")]);
+        SCANNED.with(|c| c.set(0));
+        let r2 = run(d.path(), after(&r, problems()));
+        assert!(evs(&r2).is_empty());
+        let scanned = SCANNED.with(|c| c.get());
+        assert!(scanned < 10, "an after poll parsed {scanned} lines");
+        // And the next one again only what is new.
+        append(d.path(), "hub.log", &[refused(&ts_at(3), "r0")]);
+        SCANNED.with(|c| c.set(0));
+        let r3 = run(d.path(), after(&r2, problems()));
+        assert_eq!(ns(&r3), ["r0"]);
+        let scanned = SCANNED.with(|c| c.get());
+        assert!(scanned < 10, "an after poll parsed {scanned} lines");
+    }
+
+    #[test]
+    fn a_grown_repeat_is_sent_again() {
+        // The reviewer's repro: the newest row is the cursor; a `repeat` line
+        // written after it must reach the next `after` poll.
+        let d = tempfile::tempdir().unwrap();
+        append(d.path(), "service.log", &[info(&ts_at(-200), "old"), refused(&ts_at(-120), "A")]);
+        let r = run(d.path(), LogQuery::default());
+        assert_eq!(ns(&r), ["A", "old"]);
+        assert!(evs(&r)[0].get("repeat").is_none());
+        append(d.path(), "service.log", &[rep(&ts_at(-60), 7)]);
+        let r2 = run(d.path(), after(&r, LogQuery::default()));
+        assert!(evs(&r2).is_empty(), "{r2}");
+        assert_eq!(again(&r2), [("A".to_owned(), 7)]);
+        assert_eq!(r2["again"][0]["at"], evs(&r)[0]["at"], "the same row, to replace in place");
+        assert!(r2.get("gap").is_none());
+        // Nothing since: not sent again, and no new cursor (the GUI keeps r2's).
+        let r3 = run(d.path(), after(&r2, LogQuery::default()));
+        assert!(evs(&r3).is_empty() && again(&r3).is_empty() && r3.get("newer").is_none(), "{r3}");
+        // Grows again: the total.
+        append(d.path(), "service.log", &[rep(&ts_at(-30), 3)]);
+        let r4 = run(d.path(), after(&r2, LogQuery::default()));
+        assert_eq!(again(&r4), [("A".to_owned(), 10)]);
+        // A new row after it: the new row only.
+        append(d.path(), "service.log", &[info(&ts_at(-10), "B")]);
+        let r5 = run(d.path(), after(&r4, LogQuery::default()));
+        assert_eq!(ns(&r5), ["B"]);
+        assert!(again(&r5).is_empty());
+        // A first page has it folded in, never as `again`.
+        let r6 = run(d.path(), LogQuery::default());
+        assert_eq!(evs(&r6)[1]["repeat"], 10);
+        assert!(r6.get("again").is_none());
+    }
+
+    #[test]
+    fn a_grown_repeat_in_the_other_source_is_sent_again() {
+        let d = tempfile::tempdir().unwrap();
+        append(d.path(), "service.log", &[refused(&ts_at(-120), "A")]);
+        append(d.path(), "hub.log", &[info(&ts_at(-60), "H")]);
+        let r = run(d.path(), LogQuery::default());
+        assert_eq!(ns(&r), ["H", "A"]);
+        append(d.path(), "service.log", &[rep(&ts_at(-30), 4)]);
+        let r2 = run(d.path(), after(&r, LogQuery::default()));
+        assert!(evs(&r2).is_empty(), "{r2}");
+        assert_eq!(again(&r2), [("A".to_owned(), 4)]);
+        // Both a new row and a grown repeat: the new row in `events`.
+        append(d.path(), "hub.log", &[info(&ts_at(-20), "H2")]);
+        append(d.path(), "service.log", &[rep(&ts_at(-10), 2)]);
+        let r3 = run(d.path(), after(&r2, LogQuery::default()));
+        assert_eq!(ns(&r3), ["H2"]);
+        assert_eq!(again(&r3), [("A".to_owned(), 6)]);
+    }
+
+    #[test]
+    fn a_grown_repeat_the_filter_does_not_match_is_not_sent() {
+        let d = tempfile::tempdir().unwrap();
+        append(d.path(), "service.log", &[refused(&ts_at(-120), "A"), info(&ts_at(-100), "I")]);
+        let r = run(d.path(), problems());
+        assert_eq!(ns(&r), ["A"]);
+        append(d.path(), "service.log", &[rep(&ts_at(-30), 9)]);
+        let r2 = run(d.path(), after(&r, problems()));
+        assert!(evs(&r2).is_empty() && again(&r2).is_empty(), "{r2}");
+        assert!(r2["newer"].as_str().unwrap().starts_with(&format!("{}~0~", ts_at(-30))), "{r2}");
+    }
+
+    #[test]
+    fn around_after_rotation_centres_on_the_row() {
+        let d = tempfile::tempdir().unwrap();
+        let old: Vec<String> = (0..50).map(|i| info(&ts_at(-100), &format!("o{i}"))).collect();
+        append(d.path(), "service.log.1", &old);
+        append(d.path(), "service.log", &[info(&ts_at(-3), "a"), info(&ts_at(-2), "x"), info(&ts_at(-1), "b")]);
+        let r = run(d.path(), LogQuery::default());
+        let x = evs(&r).iter().find(|e| raw(e)["n"] == "x").unwrap()["at"].as_str().unwrap().to_owned();
+        assert_eq!(ns(&run(d.path(), LogQuery { around: Some(x.clone()), limit: Some(1), ..Default::default() })), ["x"]);
+        fs::rename(d.path().join("service.log"), d.path().join("service.log.1")).unwrap();
+        append(d.path(), "service.log", &(1..=5).map(|i| info(&ts_at(i), &format!("n{i}"))).collect::<Vec<_>>());
+        // `x`'s offset now points elsewhere: its bare ts still finds it.
+        let r = run(d.path(), LogQuery { around: Some(x), limit: Some(1), ..Default::default() });
+        assert_eq!(ns(&r), ["x"]);
     }
 
     fn filter_fixture() -> tempfile::TempDir {
