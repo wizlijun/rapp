@@ -97,7 +97,6 @@ pub(crate) struct Hub {
     name: String,
     owns_access: bool,
     embed_only: bool,
-    #[allow(dead_code)]
     dual_stack: bool,
     /// `presence` with `paused`: the probe skips its ticks.
     presence_paused: AtomicBool,
@@ -118,7 +117,11 @@ where
     let identity = Arc::new(rapp_wire::Identity::load_or_create(&opts.home, "device").context("device key")?);
     let hub = Arc::new(Hub {
         at: RwLock::new(HomeState { home: opts.home.clone(), identity }),
-        ep: rapp_net::quic::client_endpoint(([0, 0, 0, 0], 0).into())?,
+        ep: if opts.dual_stack {
+            rapp_net::quic::client_endpoint_dual()?
+        } else {
+            rapp_net::quic::client_endpoint(([0, 0, 0, 0], 0).into())?
+        },
         links: Default::default(),
         relay: Default::default(),
         hosts: Hosts::load(&opts.home)?,

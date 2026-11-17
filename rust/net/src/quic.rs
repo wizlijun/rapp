@@ -174,6 +174,138 @@ pub async fn resolve(hostport: &str) -> Result<SocketAddr> {
         .ok_or_else(|| anyhow!("cannot resolve {hostport}"))
 }
 
+/// A client endpoint on `[::]:0` that also reaches IPv4 peers (as v4-mapped addresses), for the
+/// in-process hub on a network that has only IPv6 (NAT64).
+pub fn client_endpoint_dual() -> Result<Endpoint> {
+    let sock = sys::bind_dual().context("bind udp [::]:0")?;
+    Endpoint::new(
+        quinn::EndpointConfig::default(),
+        None,
+        sock,
+        Arc::new(quinn::TokioRuntime),
+    )
+    .context("bind udp [::]:0")
+}
+
+/// `resolve`, or with `dual` for a dual-stack endpoint (`client_endpoint_dual`): an IPv4 address
+/// with an IPv4 route comes back v4-mapped; without one the name is resolved again with
+/// `getaddrinfo(AI_DEFAULT)`, which synthesizes an IPv6 address on a NAT64 network.
+pub async fn resolve_for(hostport: &str, dual: bool) -> Result<SocketAddr> {
+    if !dual {
+        return resolve(hostport).await;
+    }
+    let addrs: Vec<SocketAddr> = tokio::net::lookup_host(hostport).await.map(|i| i.collect()).unwrap_or_default();
+    if let Some(v4) = addrs.iter().find(|a| a.is_ipv4()) {
+        let routed = tokio::net::UdpSocket::bind("0.0.0.0:0").await?.connect(v4).await.is_ok();
+        if routed {
+            return Ok(mapped(*v4));
+        }
+    }
+    let (host, port) = hostport.rsplit_once(':').ok_or_else(|| anyhow!("cannot resolve {hostport}"))?;
+    let (host, port) = (host.trim_start_matches('[').trim_end_matches(']').to_string(), port.to_string());
+    let synthesized = tokio::task::spawn_blocking(move || sys::getaddrinfo_v6(&host, &port)).await?;
+    if let Some(a) = synthesized {
+        return Ok(a);
+    }
+    // No IPv4 route and nothing synthesized: an IPv6 answer of the first lookup still works.
+    addrs.iter().find(|a| a.is_ipv6()).copied().ok_or_else(|| anyhow!("cannot resolve {hostport}"))
+}
+
+/// An IPv4 address as the IPv6 address a dual-stack socket takes; others unchanged.
+pub fn mapped(a: SocketAddr) -> SocketAddr {
+    match a {
+        SocketAddr::V4(v4) => SocketAddr::new(v4.ip().to_ipv6_mapped().into(), v4.port()),
+        v6 => v6,
+    }
+}
+
+/// The libc calls behind the dual-stack pieces (no `socket2` in the tree). Only the iOS hub uses them.
+#[cfg(unix)]
+mod sys {
+    use std::ffi::CString;
+    use std::net::{Ipv6Addr, SocketAddr};
+    use std::os::fd::FromRawFd;
+
+    pub fn bind_dual() -> std::io::Result<std::net::UdpSocket> {
+        // SAFETY: plain socket/setsockopt/bind calls; the fd is closed on every error path and
+        // otherwise owned by the returned socket.
+        unsafe {
+            let fd = libc::socket(libc::AF_INET6, libc::SOCK_DGRAM, 0);
+            if fd < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            let off: libc::c_int = 0;
+            let mut addr: libc::sockaddr_in6 = std::mem::zeroed();
+            addr.sin6_family = libc::AF_INET6 as _;
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            {
+                addr.sin6_len = std::mem::size_of::<libc::sockaddr_in6>() as u8;
+            }
+            if libc::setsockopt(
+                fd,
+                libc::IPPROTO_IPV6,
+                libc::IPV6_V6ONLY,
+                &off as *const _ as *const libc::c_void,
+                std::mem::size_of::<libc::c_int>() as libc::socklen_t,
+            ) < 0
+                || libc::bind(fd, &addr as *const _ as *const libc::sockaddr, std::mem::size_of::<libc::sockaddr_in6>() as libc::socklen_t) < 0
+            {
+                let e = std::io::Error::last_os_error();
+                libc::close(fd);
+                return Err(e);
+            }
+            let sock = std::net::UdpSocket::from_raw_fd(fd);
+            sock.set_nonblocking(true)?;
+            Ok(sock)
+        }
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    const AI_FLAGS: libc::c_int = libc::AI_DEFAULT;
+    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+    const AI_FLAGS: libc::c_int = libc::AI_V4MAPPED | libc::AI_ADDRCONFIG;
+
+    /// The first IPv6 address `getaddrinfo` gives for `host:port` (Apple's synthesizes one from an
+    /// IPv4 literal on a NAT64 network).
+    pub fn getaddrinfo_v6(host: &str, port: &str) -> Option<SocketAddr> {
+        let (host, port) = (CString::new(host).ok()?, CString::new(port).ok()?);
+        // SAFETY: `hints` is zeroed and filled; the result list is read then freed.
+        unsafe {
+            let mut hints: libc::addrinfo = std::mem::zeroed();
+            hints.ai_family = libc::AF_INET6;
+            hints.ai_socktype = libc::SOCK_DGRAM;
+            hints.ai_flags = AI_FLAGS;
+            let mut res: *mut libc::addrinfo = std::ptr::null_mut();
+            if libc::getaddrinfo(host.as_ptr(), port.as_ptr(), &hints, &mut res) != 0 {
+                return None;
+            }
+            let mut found = None;
+            let mut p = res;
+            while !p.is_null() && found.is_none() {
+                let ai = &*p;
+                if ai.ai_family == libc::AF_INET6 && !ai.ai_addr.is_null() {
+                    let sin6 = &*(ai.ai_addr as *const libc::sockaddr_in6);
+                    let ip = Ipv6Addr::from(sin6.sin6_addr.s6_addr);
+                    found = Some(SocketAddr::new(ip.into(), u16::from_be(sin6.sin6_port)));
+                }
+                p = ai.ai_next;
+            }
+            libc::freeaddrinfo(res);
+            found
+        }
+    }
+}
+
+#[cfg(not(unix))]
+mod sys {
+    pub fn bind_dual() -> std::io::Result<std::net::UdpSocket> {
+        Err(std::io::Error::other("dual-stack endpoint is not supported here"))
+    }
+    pub fn getaddrinfo_v6(_: &str, _: &str) -> Option<std::net::SocketAddr> {
+        None
+    }
+}
+
 /// D8: no certificate verification. The ID/password check is the gate.
 #[derive(Debug)]
 struct AcceptAny(Arc<CryptoProvider>);
@@ -287,5 +419,34 @@ mod tests {
         });
         let client = client_endpoint("127.0.0.1:0".parse().unwrap()).unwrap();
         assert!(connect(&client, addr, ALPN_PEER, Duration::from_secs(2)).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn dual_endpoint_reaches_ipv4_server() {
+        let server = server_endpoint("127.0.0.1:0".parse().unwrap(), ALPN_PEER).unwrap();
+        let port = server.local_addr().unwrap().port();
+        let srv = tokio::spawn(async move {
+            let conn = server.accept().await.unwrap().await.unwrap();
+            let seen = conn.remote_address();
+            conn.close(0u32.into(), b"");
+            seen
+        });
+        let client = client_endpoint_dual().unwrap();
+        let addr = resolve_for(&format!("127.0.0.1:{port}"), true).await.unwrap();
+        let conn = connect(&client, addr, ALPN_PEER, Duration::from_secs(2)).await.unwrap();
+        let seen = srv.await.unwrap();
+        assert_eq!(seen.ip(), std::net::IpAddr::from([127, 0, 0, 1]));
+        drop(conn);
+    }
+
+    #[tokio::test]
+    async fn resolve_for_plain_matches_resolve() {
+        assert_eq!(resolve_for("localhost:1", false).await.unwrap(), resolve("localhost:1").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn resolve_for_dual_maps_v4() {
+        let a = resolve_for("127.0.0.1:9", true).await.unwrap();
+        assert_eq!(a.to_string(), "[::ffff:127.0.0.1]:9");
     }
 }
