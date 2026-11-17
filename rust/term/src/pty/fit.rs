@@ -128,6 +128,11 @@ impl SeqTracker {
         if b == 0x18 || b == 0x1A {
             return Seq::Ground;
         }
+        // ESC restarts a sequence from every state except inside a string,
+        // where it may begin the terminator.
+        if b == 0x1B && !matches!(state, Seq::Str | Seq::StrEsc) {
+            return Seq::Esc;
+        }
         match state {
             Seq::Ground => Self::from_ground(b),
             Seq::Utf8(n) => {
@@ -154,6 +159,8 @@ impl SeqTracker {
                     Seq::Csi
                 }
             }
+            // Known limit: an unterminated string holds resizes until BEL, ST,
+            // CAN or SUB (not capped, so long OSC 52 payloads stay intact).
             Seq::Str => match b {
                 0x07 => Seq::Ground,
                 0x1B => Seq::StrEsc,
@@ -163,7 +170,7 @@ impl SeqTracker {
                 if b == b'\\' {
                     Seq::Ground
                 } else {
-                    Seq::Str
+                    Self::step(Seq::Esc, b)
                 }
             }
         }
@@ -387,7 +394,44 @@ mod tests {
             assert!(!w.resize_if_idle(&fit).unwrap());
             w.output(end).unwrap();
             assert!(w.resize_if_idle(&fit).unwrap());
-            assert!(w.get_ref().ends_with(b"\x1b[8;30;100t"));
+            let mut want = b"\x1b]0;t".to_vec();
+            want.extend_from_slice(end);
+            want.extend_from_slice(b"\x1b[8;30;100t");
+            assert_eq!(w.get_ref().as_slice(), want.as_slice());
+        }
+    }
+
+    #[test]
+    fn the_tracker_follows_real_terminal_parsing() {
+        let cases: &[(&[u8], bool)] = &[
+            (b"\x1b\x1b", false),
+            (b"\x1b\x1b[", false),
+            (b"\x1b[3\x1b[", false),
+            (b"\x1b[3\x1b[m", true),
+            (b"\x1b[3\x1b]0;title", false),
+            (b"\x1b[3\x1b]0;title\x07", true),
+            (b"\x1b]0;t\x1b[0", false),
+            (b"\x1b]0;t\x1b[0m", true),
+            (b"\x1b]0;t\x1b[", false),
+            (b"\x1b]0;t\x1b\\", true),
+            (b"\x1b[3\x18", true),
+            (b"\x1b[3\x1a", true),
+            (b"\x1b]0;t\x18", true),
+            (b"\x1b]0;t\x1a", true),
+            (&[0xE4, 0x18], true),
+            (&[0xE4, 0x1A], true),
+            (b"\x1b(", false),
+            (b"\x1b(B", true),
+            (b"\x1bPq\x1b", false),
+            (b"\x1bPq\x1b\\", true),
+            (&[0xE4, 0x1B], false),
+            (&[0xE4, 0x1B, b'c'], true),
+            (b"abc\x1b", false),
+        ];
+        for (bytes, ground) in cases {
+            let mut t = SeqTracker::default();
+            t.feed(bytes);
+            assert_eq!(t.ground(), *ground, "{bytes:?}");
         }
     }
 
