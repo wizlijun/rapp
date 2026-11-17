@@ -208,7 +208,7 @@ pub async fn resolve_for(hostport: &str, dual: bool) -> Result<SocketAddr> {
         return Ok(a);
     }
     // No IPv4 route and nothing synthesized: an IPv6 answer of the first lookup still works.
-    addrs.iter().find(|a| a.is_ipv6()).copied().ok_or_else(|| anyhow!("cannot resolve {hostport}"))
+    addrs.iter().find(|a| matches!(a, SocketAddr::V6(v6) if v6.ip().to_ipv4_mapped().is_none())).copied().ok_or_else(|| anyhow!("cannot resolve {hostport}"))
 }
 
 /// An IPv4 address as the IPv6 address a dual-stack socket takes; others unchanged.
@@ -272,7 +272,7 @@ mod sys {
         // SAFETY: `hints` is zeroed and filled; the result list is read then freed.
         unsafe {
             let mut hints: libc::addrinfo = std::mem::zeroed();
-            hints.ai_family = libc::AF_INET6;
+            hints.ai_family = libc::AF_UNSPEC;
             hints.ai_socktype = libc::SOCK_DGRAM;
             hints.ai_flags = AI_FLAGS;
             let mut res: *mut libc::addrinfo = std::ptr::null_mut();
@@ -286,7 +286,10 @@ mod sys {
                 if ai.ai_family == libc::AF_INET6 && !ai.ai_addr.is_null() {
                     let sin6 = &*(ai.ai_addr as *const libc::sockaddr_in6);
                     let ip = Ipv6Addr::from(sin6.sin6_addr.s6_addr);
-                    found = Some(SocketAddr::new(ip.into(), u16::from_be(sin6.sin6_port)));
+                    // A v4-mapped address is not what NAT64 synthesizes; it cannot be reached there.
+                    if ip.to_ipv4_mapped().is_none() {
+                        found = Some(SocketAddr::new(ip.into(), u16::from_be(sin6.sin6_port)));
+                    }
                 }
                 p = ai.ai_next;
             }
@@ -448,5 +451,12 @@ mod tests {
     async fn resolve_for_dual_maps_v4() {
         let a = resolve_for("127.0.0.1:9", true).await.unwrap();
         assert_eq!(a.to_string(), "[::ffff:127.0.0.1]:9");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn getaddrinfo_v6_never_returns_a_v4_mapped_address() {
+        assert_eq!(sys::getaddrinfo_v6("127.0.0.1", "9"), None);
+        assert_eq!(sys::getaddrinfo_v6("::1", "9"), Some("[::1]:9".parse().unwrap()));
     }
 }
