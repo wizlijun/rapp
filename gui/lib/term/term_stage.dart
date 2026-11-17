@@ -546,6 +546,16 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     // An exited pane (T4) takes nothing: nothing is sent or kept, and the window's own keys
     // (Esc, Ctrl+[ / ], Ctrl+O, F11) are the window's again.
     if (!_canInput || widget.frozen) return KeyEventResult.ignored;
+    final ctrl = widget.session.termCtrl;
+    if (ctrl.value && input != null) {
+      // The key row's sticky ⌃: a letter goes as `Ctrl-<letter>`, anything else as it is; the ⌃ is used up.
+      ctrl.value = false;
+      if (input case TermText(:final text) when RegExp(r'^[a-zA-Z]$').hasMatch(text)) {
+        widget.port.sendKeys(widget.session.sid, ['Ctrl-${text.toUpperCase()}']);
+        _sentInput();
+        return KeyEventResult.handled;
+      }
+    }
     switch (input) {
       case null:
         // Not the terminal's (Ctrl+Enter, macOS's other ⌘ chords): the window has it.

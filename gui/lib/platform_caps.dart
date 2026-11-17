@@ -2,6 +2,9 @@
 // port panel, and how folders and links open. The call sites that differ on iOS ask here, not `Platform.isXxx`.
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+
 class PlatformCaps {
   const PlatformCaps({
     this.hubInProcess = false,
@@ -51,3 +54,31 @@ class PlatformCaps {
 
 /// This platform's capabilities; tests may replace it.
 PlatformCaps caps = PlatformCaps.forOs(Platform.operatingSystem);
+
+/// When the last hardware key event arrived (iOS: a keyboard is attached); null for never.
+DateTime? lastHardwareKey;
+
+/// A key event this long ago still means a hardware keyboard is there.
+const hardwareKeyFresh = Duration(seconds: 10);
+
+bool _onHardwareKey(KeyEvent _) {
+  lastHardwareKey = DateTime.now();
+  return false; // only watching: the event goes on
+}
+
+/// Keeps [lastHardwareKey] current; once is enough, again is harmless.
+void watchHardwareKeys() {
+  HardwareKeyboard.instance
+    ..removeHandler(_onHardwareKey)
+    ..addHandler(_onHardwareKey);
+}
+
+/// A hardware keyboard is there: always on macOS, Linux and Windows; on iOS a key is down now or a key event came in
+/// the last [hardwareKeyFresh] ([lastHardwareKey]). Without one the writing panel's Return is a newline (spec §8.4).
+bool hardwareKeyboard({DateTime? now}) {
+  if (defaultTargetPlatform != TargetPlatform.iOS) return true;
+  watchHardwareKeys();
+  if (HardwareKeyboard.instance.physicalKeysPressed.isNotEmpty) return true;
+  final last = lastHardwareKey;
+  return last != null && (now ?? DateTime.now()).difference(last) < hardwareKeyFresh;
+}

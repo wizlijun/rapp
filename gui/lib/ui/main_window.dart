@@ -258,6 +258,8 @@ class _MainWindowState extends State<MainWindow> {
       child: Focus(
         autofocus: true,
         child: Scaffold(
+          // Z1: the soft keyboard covers the stage; the stage never resizes for it (A's windows keep their size).
+          resizeToAvoidBottomInset: false,
           backgroundColor: t.bg,
           body: Backdrop(
             theme: state.prefs.theme,

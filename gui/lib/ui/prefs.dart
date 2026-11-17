@@ -20,13 +20,15 @@ class UiPrefs {
     this.autoSaveTraffic = true,
     this.inputHistory = true,
     this.termKeyRow = false,
+    bool? appKeyRow,
     this.termFit = true,
     this.keepAwake = true,
     this.first = FirstLayer.device,
     this.composerZoom = 0,
     Map<String, String>? termOpen,
     Map<String, String>? termApp,
-  })  : termOpen = termOpen ?? {},
+  })  : appKeyRow = appKeyRow ?? Platform.isIOS,
+        termOpen = termOpen ?? {},
         termApp = termApp ?? {};
 
   RappTheme theme;
@@ -41,6 +43,10 @@ class UiPrefs {
 
   /// 按键排 (`term_key_row`): the six big keys on a terminal's stage, on this console. Missing or bad means off.
   bool termKeyRow;
+
+  /// 按键排 over an app session (`app_key_row`, iPad spec §8.3): Esc Tab ⌘ ⌥ ⌃ ⇧ ← ↑ ↓ → 删除 回车 with sticky
+  /// modifiers. Missing or bad means on on iOS, off everywhere else.
+  bool appKeyRow;
 
   /// 跟着我的窗口 (`term_fit`): the host's terminal window follows this console's size. Missing or bad means on.
   bool termFit;
@@ -79,6 +85,7 @@ class UiPrefs {
       final save = j['auto_save_traffic'];
       final ih = j['input_history'];
       final kr = j['term_key_row'];
+      final ak = j['app_key_row'];
       final tf = j['term_fit'];
       final ka = j['keep_awake'];
       final fl = j['first'];
@@ -94,6 +101,7 @@ class UiPrefs {
         autoSaveTraffic: save is bool ? save : true,
         inputHistory: ih is bool ? ih : true,
         termKeyRow: kr is bool ? kr : false,
+        appKeyRow: ak is bool ? ak : null,
         termFit: tf is bool ? tf : true,
         keepAwake: ka is bool ? ka : true,
         composerZoom: cz is int ? cz.clamp(0, composerZoomMax) : 0,
@@ -127,6 +135,7 @@ class UiPrefs {
         'auto_save_traffic': autoSaveTraffic,
         'input_history': inputHistory,
         'term_key_row': termKeyRow,
+        'app_key_row': appKeyRow,
         'term_fit': termFit,
         'keep_awake': keepAwake,
         'first': first.name,

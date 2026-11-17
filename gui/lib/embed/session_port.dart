@@ -356,6 +356,11 @@ class HostNoticeActionEvent extends SessionEvent {
   final int epoch;
 }
 
+/// A hardware key took the latched modifiers (iOS: the runner's key router): the once ones are used up.
+class LatchUsedEvent extends SessionEvent {
+  const LatchUsedEvent(super.sid);
+}
+
 class ClosedEvent extends SessionEvent {
   const ClosedEvent(super.sid, this.reason);
   final String reason;
@@ -508,6 +513,8 @@ SessionEvent? parseSessionEvent(String method, Object? args) {
         return AppOpenedEvent(sid, _as<String>(m['bundle']), _as<String>(m['name']));
       case 'secure_focus':
         return SecureFocusEvent(sid, _as<bool>(m['on']));
+      case 'latch_used':
+        return LatchUsedEvent(sid);
       case 'closed':
         return ClosedEvent(sid, _as<String>(m['reason']));
     }
@@ -572,6 +579,14 @@ abstract class SessionPort {
   /// A press and a release of one key (macOS key code, CGEventFlags modifiers).
   void key(Object sid, int keyCode, int modifiers) =>
       _send('key', {'sid': sid, 'keyCode': keyCode, 'modifiers': modifiers});
+
+  /// Only the press ([down]) or only the release of one key; the runner does not track it, so every down sent needs
+  /// its up (a sticky modifier of the app key row).
+  void keyEvent(Object sid, int keyCode, int modifiers, {required bool down}) =>
+      _send('key_event', {'sid': sid, 'keyCode': keyCode, 'modifiers': modifiers, 'down': down});
+
+  /// The modifiers the hardware keyboard's next key carries (the key row's latch; iOS, a no-op on macOS).
+  void latch(Object sid, int modifiers) => _send('latch', {'sid': sid, 'modifiers': modifiers});
 
   /// The session whose picture has keyboard focus; null for none.
   /// [compose]: a letter on this picture opens the writing panel (sent only when true).

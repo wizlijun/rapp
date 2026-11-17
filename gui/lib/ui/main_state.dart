@@ -19,6 +19,7 @@ import '../hub_client.dart';
 import '../permissions.dart';
 import '../embed/app_profile.dart';
 import '../embed/composer_model.dart';
+import '../embed/modifier_latch.dart';
 import '../term/term_id.dart';
 import '../term/term_session_port.dart';
 import '../term/term_wire.dart' show TermPane;
@@ -425,7 +426,10 @@ class MainState extends ChangeNotifier {
     if (corner == Corner.sessions && _entries.isEmpty) corner = null;
     _trackAttention();
     // Focus never stays on a session that is no longer current (mid-move, the old one is on the stage).
-    if (pictureFocused != null && (currentRemote?.sid ?? current?.sid) != pictureFocused) _blur();
+    if (pictureFocused != null && (currentRemote?.sid ?? current?.sid) != pictureFocused) {
+      appLatch.releaseAll(); // the old session's modifiers go up while its row still has its sid
+      _blur();
+    }
     _focusNewTerm();
     _syncPolicy();
     _syncDesktopTimer();
@@ -504,6 +508,10 @@ class MainState extends ChangeNotifier {
   /// The session whose picture has keyboard focus: its keys go to A (the runner routes them).
   Object? pictureFocused;
 
+  /// The app key row's sticky modifiers (iPad spec §8.3): one for the stage, released whenever the keys move to
+  /// another session. [ModifierLatch.releaseAll] is also what going to the background calls.
+  final appLatch = ModifierLatch();
+
   /// A press on [sid]'s picture: keys go to A from now on.
   void focusPicture(Object sid) {
     if (overview || !_liveSid(sid)) return;
@@ -515,6 +523,7 @@ class MainState extends ChangeNotifier {
     }
     panelHolds = null;
     if (pictureFocused == sid) return;
+    if (pictureFocused != null) appLatch.releaseAll(); // the keys move to another session
     pictureFocused = sid;
     _sendFocus(sid);
     notifyListeners();
@@ -1126,6 +1135,11 @@ class MainState extends ChangeNotifier {
   }
 
   void _onPortEvent(SessionEvent e) {
+    if (e is LatchUsedEvent) {
+      // A hardware key took the app key row's once modifiers (the row sends their ups).
+      appLatch.used();
+      return;
+    }
     final rs = remote[e.sid];
     if (rs == null) return;
     final r = _recordOfSid(e.sid);
@@ -3389,6 +3403,7 @@ class MainState extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     composerZoom.dispose();
+    appLatch.dispose();
     resources.removeListener(notifyListeners);
     resources.dispose();
     hub?.removeListener(_onHub);

@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
+import '../embed/app_key_row.dart';
 import '../embed/composer_editor.dart';
 import '../embed/composer_panel.dart';
 import '../embed/picture.dart';
@@ -212,6 +213,20 @@ class Stage extends StatelessWidget {
               stage,
               if (!full && (picture || (rs != null && rs.detached)) && rs != null && port != null)
                 ...composerLayer(state: state, session: rs, port: port, editor: composerEditor),
+              // 按键排 over an app picture (iPad spec §8.3), while the picture has the keys or the writing panel is
+              // open: on the soft keyboard's top edge when it is up, floating over the stage (Z1: no resize).
+              if (picture && rs != null && !rs.detached && !(rec?.frozen ?? false) && state.prefs.appKeyRow)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: MediaQuery.viewInsetsOf(context).bottom,
+                  child: ListenableBuilder(
+                    listenable: rs.composer,
+                    builder: (context, _) => state.pictureFocused == rs.sid || rs.composer.open
+                        ? Center(child: AppKeyRow(state: state, sid: rs.sid, latch: state.appLatch))
+                        : const SizedBox.shrink(),
+                  ),
+                ),
               if (offline != null || banner != null || notice != null || screens.length > 1)
                 Positioned(
                   top: 0, left: 0, right: 0,

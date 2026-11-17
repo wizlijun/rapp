@@ -2,7 +2,9 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/app_key_row.dart';
 import 'package:rapp/embed/composer_panel.dart' show ComposerPanel, pictureLift;
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
@@ -20,7 +22,7 @@ import 'term_main_test.dart' show tp, windowsOf;
 
 const app = 'term:pty:work';
 
-const left = ['Esc', 'Ctrl-C', 'Tab'];
+const left = ['Ctrl', 'Esc', 'Ctrl-C', 'Tab'];
 const right = ['Up', 'Down', 'Enter'];
 
 void main() {
@@ -164,7 +166,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(s.prefs.termKeyRow, isTrue);
     expect(guiJson(), contains('"term_key_row":true'));
-    for (final (n, label) in [('Esc', 'Esc'), ('Ctrl-C', '⌃C'), ('Tab', 'Tab'), ('Up', '↑'), ('Down', '↓'), ('Enter', '⏎')]) {
+    for (final (n, label) in [('Ctrl', '⌃'), ('Esc', 'Esc'), ('Ctrl-C', '⌃C'), ('Tab', 'Tab'), ('Up', '↑'), ('Down', '↓'), ('Enter', '⏎')]) {
       expect(key(n), findsOneWidget, reason: n);
       expect(find.descendant(of: key(n), matching: find.text(label)), findsOneWidget, reason: label);
       expect(tester.getSize(key(n)), const Size(52, 48), reason: n);
@@ -385,6 +387,74 @@ void main() {
       s.closeCorner();
       await tester.pumpAndSettle();
     }
+  });
+
+  List<Object?> typed() => [for (final c in callsOf('type')) c['text']];
+
+  testWidgets('⌃ then C on the keyboard sends Ctrl-C; the ⌃ is used up', (tester) async {
+    await openTerm(tester);
+    await toggleFromMenu(tester);
+    await tester.tap(find.byKey(const Key('term-grid')));
+    await tester.pump();
+    term.calls.clear();
+    await tester.tap(key('Ctrl'));
+    await tester.pump();
+    expect(keys(), isEmpty, reason: 'the ⌃ alone sends nothing');
+    expect(stageFocused(tester), isTrue);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.pump();
+    expect(keys(), [
+      ['Ctrl-C'],
+    ]);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.pump();
+    expect(typed(), ['c'], reason: 'the next C is plain');
+  });
+
+  testWidgets('⌃ then a key of the row (↑): the key goes as it is and the ⌃ goes out', (tester) async {
+    await openTerm(tester);
+    await toggleFromMenu(tester);
+    term.calls.clear();
+    await tester.tap(key('Ctrl'));
+    await tester.pump();
+    await tester.tap(key('Up'));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('term-grid')));
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.pump();
+    expect(keys(), [
+      ['Up'],
+    ]);
+    expect(typed(), ['c']);
+  });
+
+  testWidgets('⌃ tapped twice is off again; while on it is outlined in the accent', (tester) async {
+    await openTerm(tester);
+    await toggleFromMenu(tester);
+    Color side() => (tester.widget<Material>(find.descendant(of: key('Ctrl'), matching: find.byType(Material))).shape!
+            as RoundedRectangleBorder)
+        .side
+        .color;
+    final off = side();
+    await tester.tap(key('Ctrl'));
+    await tester.pump();
+    expect(side(), isNot(off));
+    await tester.tap(key('Ctrl'));
+    await tester.pump();
+    expect(side(), off);
+    await tester.tap(find.byKey(const Key('term-grid')));
+    await tester.pump();
+    term.calls.clear();
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.pump();
+    expect(typed(), ['c']);
+  });
+
+  testWidgets('a terminal never has the app key row, even with it on', (tester) async {
+    s.prefs.appKeyRow = true;
+    await openTerm(tester);
+    expect(find.byType(AppKeyRow), findsNothing);
   });
 
   test('keyRowWideAt is 1100', () => expect(keyRowWideAt, 1100));

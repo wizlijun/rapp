@@ -12,6 +12,7 @@ import 'hub_client.dart';
 import 'hub_ffi.dart';
 import 'ios_channel.dart';
 import 'paths.dart';
+import 'platform_caps.dart' show watchHardwareKeys;
 import 'term/term_session_port.dart';
 import 'ui/access_setup.dart';
 import 'ui/app_profile_store.dart';
@@ -26,6 +27,7 @@ void _log(String s) => stderr.writeln('rapp: $s');
 
 Future<void> mainIos() async {
   WidgetsFlutterBinding.ensureInitialized();
+  watchHardwareKeys(); // a hardware keyboard's Return sends from the writing panel (spec §8.4)
   final IosPaths paths;
   try {
     paths = await iosChannel.paths();
