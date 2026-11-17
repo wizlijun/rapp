@@ -150,14 +150,29 @@ void main() {
     }
   }
 
-  Future<void> selectMini(WidgetTester tester) async {
-    await tester.tap(find.byKey(const Key('device-111')));
+  /// Opens the device picker and picks [key] (`device-local`, `device-<id>`) from its menu.
+  Future<void> pick(WidgetTester tester, String key) async {
+    await tester.ensureVisible(find.byKey(const Key('device-picker')));
+    await tester.tap(find.byKey(const Key('device-picker')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(Key(key)));
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> selectMini(WidgetTester tester) => pick(tester, 'device-111');
+
+  /// The ＋ at the top opens the add form right under it.
+  Future<void> openAdd(WidgetTester tester) async {
+    await tester.ensureVisible(find.byKey(const Key('add-device-toggle')));
+    await tester.tap(find.byKey(const Key('add-device-toggle')));
     await tester.pumpAndSettle();
   }
 
   testWidgets('lists saved devices from the hub on start', (tester) async {
     await pumpTab(tester);
     expect(t.sent.where((m) => m['cmd'] == 'hosts'), isNotEmpty);
+    await tester.tap(find.byKey(const Key('device-picker')));
+    await tester.pumpAndSettle();
     expect(find.byKey(const Key('device-111')), findsOneWidget);
     expect(find.textContaining('mini'), findsWidgets);
   });
@@ -214,13 +229,13 @@ void main() {
     expect(t.sent.lastWhere((m) => m['cmd'] == 'open')['app'], 'term:pty:c');
   });
 
-  testWidgets('typed add form text survives switching device chips', (tester) async {
+  testWidgets('typed add form text survives switching devices', (tester) async {
     await pumpTab(tester);
+    await openAdd(tester);
     await tester.enterText(find.byKey(const Key('add-id')), '999');
-    await tester.tap(find.byKey(const Key('device-111')));
-    await tester.pumpAndSettle();
+    await pick(tester, 'device-111');
     expect(tester.widget<TextField>(find.byKey(const Key('add-id'))).controller!.text, '999');
-    // Typing scrolled the form into view; with mini's 终端 group the chip row is off the top by then.
+    // Typing scrolled the form into view; with mini's 终端 group the picker is off the top by then.
     await tester.scrollUntilVisible(find.byKey(const Key('device-local')), -300.0,
         scrollable: find.byType(Scrollable).first);
     await tester.tap(find.byKey(const Key('device-local')));
@@ -228,7 +243,7 @@ void main() {
     expect(tester.widget<TextField>(find.byKey(const Key('add-id'))).controller!.text, '999');
   });
 
-  testWidgets('tapping an offline or the selected chip re-probes', (tester) async {
+  testWidgets('picking an offline or the shown device re-probes', (tester) async {
     offline = true;
     await pumpTab(tester);
     int n() => t.sent.where((m) => m['cmd'] == 'apps').length;
@@ -251,15 +266,19 @@ void main() {
     expect(first, 4); // setUp's state + the new one, for each of the two devices
     await tester.tap(find.byKey(const Key('device-local')));
     await tester.pump();
-    await tester.tap(find.byKey(const Key('device-111')));
+    await tester.tap(find.byKey(const Key('device-picker')));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.byKey(const Key('device-111')));
+    await tester.pump(const Duration(milliseconds: 300));
     s.probeAll();
     expect(n(), first);
   });
 
-  testWidgets('local chip shows a quiet dot', (tester) async {
+  testWidgets('本机 is its own chip ahead of the picker, with a quiet dot for a new version', (tester) async {
     await pumpTab(tester, localBadge: true);
     final chip = find.byKey(const Key('device-local'));
+    expect(tester.getTopLeft(chip).dx, lessThan(tester.getTopLeft(find.byKey(const Key('device-picker'))).dx));
     final dot = find.descendant(of: chip, matching: find.byKey(const Key('update-dot')));
     expect(dot, findsOneWidget);
     final t = RappTokens.of(tester.element(chip));
@@ -277,6 +296,24 @@ void main() {
     expect(tester.getSemantics(find.byKey(const Key('device-local'))).label, '本机');
   });
 
+  testWidgets('many devices stay reachable: the picker menu lists them all and scrolls', (tester) async {
+    await pumpTab(tester);
+    t.emit({
+      'event': 'hosts',
+      'hosts': [for (var i = 0; i < 30; i++) {'id': '${500 + i}', 'name': 'box$i'}],
+    });
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('device-picker')));
+    await tester.pumpAndSettle();
+    final last = find.byKey(const Key('device-529'));
+    expect(last.hitTestable(), findsNothing, reason: 'thirty devices do not fit the menu at once');
+    await tester.scrollUntilVisible(last, 200, scrollable: find.byType(Scrollable).last);
+    await tester.tap(last);
+    await tester.pumpAndSettle();
+    expect(s.deviceTab, '529');
+    expect(tester.widget<Text>(find.byKey(const Key('device-picker-label'))).data, startsWith('box29'));
+  });
+
   testWidgets('shows 本机 first and probes every device on start', (tester) async {
     await pumpTab(tester);
     expect(find.text('local-body'), findsOneWidget);
@@ -285,8 +322,23 @@ void main() {
     expect(s.probes['111']!.lamp, Lamp.active);
   });
 
+  testWidgets('the add form is folded behind the ＋ at the top, and opens right under it', (tester) async {
+    await pumpTab(tester);
+    expect(find.byKey(const Key('add-id')), findsNothing);
+    final plus = tester.getRect(find.byKey(const Key('add-device-toggle')));
+    expect(plus.top, lessThan(tester.getTopLeft(find.text('local-body')).dy));
+    await openAdd(tester);
+    final box = tester.getRect(find.byKey(const Key('add-device-box')));
+    expect(box.top, greaterThanOrEqualTo(plus.bottom));
+    expect(box.bottom, lessThan(tester.getTopLeft(find.text('local-body')).dy));
+    await tester.tap(find.byKey(const Key('add-device-toggle')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('add-id')), findsNothing);
+  });
+
   testWidgets('adds a device and switches to it', (tester) async {
     await pumpTab(tester);
+    await openAdd(tester);
     final before = t.sent.where((m) => m['cmd'] == 'apps').length;
     await tester.enterText(find.byKey(const Key('add-id')), '222');
     await tester.enterText(find.byKey(const Key('add-password')), 'pw');
@@ -299,24 +351,29 @@ void main() {
     expect(s.deviceTab, '222');
     expect(t.sent.where((m) => m['cmd'] == 'apps').length, before + 1);
     expect(t.sent.last, containsPair('id', '222'));
-    // form cleared
+    // the form folds away; opened again it is empty
+    expect(find.byKey(const Key('add-id')), findsNothing);
+    await openAdd(tester);
     expect(tester.widget<TextField>(find.descendant(of: find.byKey(const Key('add-password')), matching: find.byType(TextField))).controller!.text, '');
     expect(tester.widget<TextField>(find.byKey(const Key('add-id'))).controller!.text, '');
   });
 
   testWidgets('password field is obscured', (tester) async {
     await pumpTab(tester);
+    await openAdd(tester);
     expect(tester.widget<TextField>(find.descendant(of: find.byKey(const Key('add-password')), matching: find.byType(TextField))).obscureText, isTrue);
   });
 
-  testWidgets('add error is shown inline and nothing switches', (tester) async {
+  testWidgets('add error is shown inline, in the form\'s box, and nothing switches', (tester) async {
     await pumpTab(tester);
+    await openAdd(tester);
     await tester.enterText(find.byKey(const Key('add-id')), '333');
     await tester.enterText(find.byKey(const Key('add-password')), 'bad');
     await tester.ensureVisible(find.byKey(const Key('add-button')));
     await tester.tap(find.byKey(const Key('add-button')));
     await tester.pumpAndSettle();
-    expect(find.textContaining('密码不对'), findsOneWidget);
+    expect(find.descendant(of: find.byKey(const Key('add-device-box')), matching: find.textContaining('密码不对')),
+        findsOneWidget);
     expect(s.deviceTab, isNull);
   });
 
@@ -395,8 +452,7 @@ void main() {
     await tester.tap(find.byKey(const Key('remove-device')));
     await tester.pump();
     expect(find.text('再点一次确认'), findsOneWidget);
-    await tester.tap(find.byKey(const Key('device-222')));
-    await tester.pumpAndSettle();
+    await pick(tester, 'device-222');
     expect(find.text('再点一次确认'), findsNothing);
     await tester.tap(find.byKey(const Key('remove-device')));
     await tester.pumpAndSettle();
@@ -527,8 +583,7 @@ void main() {
     expect(s.hubUsable, isFalse);
     final b = find.descendant(of: find.byKey(const Key('open-com.apple.Safari')), matching: find.byType(OutlinedButton));
     expect(tester.widget<OutlinedButton>(b).onPressed, isNull);
-    // Below mini's 终端 group the form is past the list's cache extent: scrolled to, not just made visible.
-    await tester.scrollUntilVisible(find.byKey(const Key('add-button')), 300.0, scrollable: find.byType(Scrollable).first);
+    await openAdd(tester);
     final add = tester.widget<FilledButton>(
         find.descendant(of: find.byKey(const Key('add-button')), matching: find.byType(FilledButton)));
     expect(add.onPressed, isNull);

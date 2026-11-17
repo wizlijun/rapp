@@ -11,6 +11,8 @@ class AccessLogSection extends StatefulWidget {
     required this.logDir,
     required this.openFolder,
     this.reload,
+    this.limit,
+    this.onMore,
   });
 
   /// The service's `history` events, newest first.
@@ -22,6 +24,12 @@ class AccessLogSection extends StatefulWidget {
 
   /// Fires when the rows may have changed (the service's `changed` events).
   final Listenable? reload;
+
+  /// Show only the newest this many (still live); null shows them all.
+  final int? limit;
+
+  /// 更多: the whole record elsewhere (the log screen). No button when null.
+  final VoidCallback? onMore;
 
   @override
   State<AccessLogSection> createState() => _AccessLogSectionState();
@@ -73,15 +81,16 @@ class _AccessLogSectionState extends State<AccessLogSection> {
         else if (rows.isEmpty)
           const Text('（还没有记录）')
         else
-          for (final r in rows) _row(r, warn),
+          for (final r in widget.limit == null ? rows : rows.take(widget.limit!)) _row(r, warn),
         const SizedBox(height: 8),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: OutlinedButton(
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          if (widget.onMore != null)
+            OutlinedButton(key: const Key('access-log-more'), onPressed: widget.onMore, child: const Text('更多')),
+          OutlinedButton(
             onPressed: dir == null ? null : () => widget.openFolder(dir),
             child: const Text('打开日志文件夹'),
           ),
-        ),
+        ]),
       ],
     );
   }

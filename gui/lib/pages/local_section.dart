@@ -15,12 +15,8 @@ import '../ui/tokens.dart';
 import '../ui/lifecycle.dart' show disconnectWord;
 import '../ui/secure_text_field.dart';
 import '../service_control.dart';
-import '../data_relocate.dart';
-import 'data_section.dart';
 import 'permissions_panel.dart';
 import 'section_card.dart';
-import 'update_section.dart';
-import 'linux_update_section.dart';
 import 'linux_firewall_section.dart';
 import '../linux_firewall.dart';
 
@@ -54,10 +50,7 @@ class LocalSection extends StatefulWidget {
     required this.monitor,
     required this.control,
     required this.data,
-    this.relocate,
     this.openSettings = openSettingsPane,
-    this.hooks,
-    this.openPage = openInstallerPage,
     this.platform,
     this.firewallCheck = checkLinuxFirewall,
   });
@@ -68,12 +61,7 @@ class LocalSection extends StatefulWidget {
   final ServiceController? control;
   /// The current data root; the caller passes `state.data` and rebuilds when it changes.
   final DataDir data;
-  final DataRelocator? relocate;
   final Future<void> Function(Permission) openSettings;
-
-  /// Null (tests): the update buttons only send the command.
-  final UpdateHooks? hooks;
-  final Future<void> Function(String page) openPage;
 
   @override
   State<LocalSection> createState() => _LocalSectionState();
@@ -206,13 +194,6 @@ class _LocalSectionState extends State<LocalSection> {
   }
 
   /// The service installs once this app's connection closes, so ok means quit now (K28).
-  Future<void> _thenQuit(Future<Object?> Function() send) async {
-    final h = widget.hooks;
-    if (h != null && !await h.confirmQuit()) return;
-    await send();
-    await h?.quitNow();
-  }
-
   Future<void> _openSettings(Permission p) =>
       promptThenOpen(() => m.checkPermissions(prompt: true), () => widget.openSettings(p));
 
@@ -493,7 +474,6 @@ class _LocalSectionState extends State<LocalSection> {
     return ListenableBuilder(
       listenable: Listenable.merge([m, _resetFailed]),
       builder: (context, _) {
-        final update = m.status?.update;
         final st = m.status;
         final buttons = Wrap(spacing: 8, children: [
           for (final (a, label) in [
@@ -505,7 +485,9 @@ class _LocalSectionState extends State<LocalSection> {
         ]);
         return Column(children: [
         SectionCard(title: '本机', children: [
+          // The service's state and its 启动 / 停止 / 重启 come first: they decide whether the rest means anything.
           _row('服务', st == null ? '未运行（${m.error ?? '连接中'}）' : '运行中'),
+          Padding(padding: const EdgeInsets.only(top: 4, bottom: 8), child: buttons),
           if (st != null) ...[
             ..._idRows(st),
             _row('名称', st.name),
@@ -537,32 +519,14 @@ class _LocalSectionState extends State<LocalSection> {
             if (_platform != TargetPlatform.macOS && _platform != TargetPlatform.linux)
               _row('权限',
                   '屏幕录制 ${st.screenRecording ? '✓' : '✗'}   辅助功能 ${st.accessibility ? '✓' : '✗'}'),
-            if (update != null && caps.onlineUpdate && _platform != TargetPlatform.linux)
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: UpdateSection(
-                  info: update,
-                  onCheck: m.updateCheck,
-                  onApply: (confirm) => _thenQuit(() => m.updateApply(confirm: confirm)),
-                  onDismiss: m.updateDismiss,
-                  onRollback: () => _thenQuit(m.updateRollback),
-                  onSetAuto: (on) => m.setUpdate(autoUpdate: on),
-                  onOpenPage: (page) => widget.openPage(page).catchError((_) {}),
-                ),
-              ),
             _row('会话', '${st.sessions.length} 个被访问中'),
           ],
           if (_platform == TargetPlatform.linux) ...[
             Text(st?.capabilities == null
               ? '本机为 Linux 控制端；启动或更新后台服务后，可提供文本终端和端口分享。'
               : '本机支持端口分享${st?.capabilities?['terminal'] == true ? '和文本终端' : ''}；暂不支持应用和桌面画面被控。'),
-            Padding(padding: const EdgeInsets.symmetric(vertical: 8),
-              child: LinuxUpdateSection(openPage: widget.openPage)),
           ],
-          const SizedBox(height: 8),
-          buttons,
         ]),
-        DataSection(data: widget.data, relocate: widget.relocate),
         ]);
       },
     );

@@ -39,9 +39,12 @@ double settingsRowHeight(TargetPlatform p) => p == TargetPlatform.iOS ? 48 : 34;
 double settingsTextSize(double text) => math.max(11, text - 1);
 
 class SidePanel extends StatelessWidget {
-  const SidePanel({super.key, required this.state, required this.devicesTab});
+  const SidePanel({super.key, required this.state, required this.devicesTab, this.settings});
   final MainState state;
   final Widget devicesTab;
+
+  /// More of 全局设置 under its switches (版本升级, 数据目录); folds with them.
+  final Widget? settings;
 
   @override
   Widget build(BuildContext context) {
@@ -138,7 +141,7 @@ class SidePanel extends StatelessWidget {
                   ),
                   ConstrainedBox(
                     constraints: BoxConstraints(maxHeight: footerHeight),
-                    child: SingleChildScrollView(child: _Footer(state: state)),
+                    child: SingleChildScrollView(child: _Footer(state: state, settings: settings)),
                   ),
                 ],
                 );
@@ -188,8 +191,9 @@ class SidePanel extends StatelessWidget {
 }
 
 class _Footer extends StatelessWidget {
-  const _Footer({required this.state});
+  const _Footer({required this.state, this.settings});
   final MainState state;
+  final Widget? settings;
 
   @override
   Widget build(BuildContext context) {
@@ -294,6 +298,7 @@ class _Footer extends StatelessWidget {
                 state.setAutoSaveTraffic),
             toggle(const Key('input-history'), '记下写作面板发出去的话', state.prefs.inputHistory, state.setInputHistory,
                 note: '存在数据目录的 inputs/ 里，会随 git 同步'),
+            if (settings != null) ...[const SizedBox(height: 8), settings!],
           ]),
           const SizedBox(height: 6),
           // The legend explains shapes; motion is kept for things that need

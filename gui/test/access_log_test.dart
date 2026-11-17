@@ -148,4 +148,40 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('读取失败'), findsOneWidget);
   });
+
+  testWidgets('with a limit only the newest rows show, live, and 更多 hands over', (tester) async {
+    var events = [
+      for (var i = 0; i < 8; i++) {'ts': ts, 'ev': 'session_start', 'peer': '10.0.0.$i:5', 'name': 'peer$i', 'path': 'lan'},
+    ];
+    final reload = ChangeNotifier();
+    addTearDown(reload.dispose);
+    var more = 0;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        body: SingleChildScrollView(
+          child: AccessLogSection(
+            load: () async => events,
+            logDir: '/logs/rapp',
+            openFolder: (_) async {},
+            reload: reload,
+            limit: 5,
+            onMore: () => more++,
+          ),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    for (var i = 0; i < 5; i++) {
+      expect(find.textContaining('peer$i（自称）'), findsOneWidget, reason: 'row $i');
+    }
+    expect(find.textContaining('peer5（自称）'), findsNothing);
+    // A new row arrives first; the oldest of the five drops out.
+    events = [{'ts': ts, 'ev': 'session_start', 'peer': '10.0.0.99:5', 'name': 'fresh', 'path': 'lan'}, ...events];
+    reload.notifyListeners();
+    await tester.pumpAndSettle();
+    expect(find.textContaining('fresh（自称）'), findsOneWidget);
+    expect(find.textContaining('peer4（自称）'), findsNothing);
+    await tester.tap(find.byKey(const Key('access-log-more')));
+    expect(more, 1);
+  });
 }

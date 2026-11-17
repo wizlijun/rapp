@@ -1,5 +1,6 @@
 import 'package:rapp/paths.dart';
 import 'package:flutter/material.dart';
+import 'package:rapp/pages/global_sections.dart';
 import 'package:rapp/pages/local_section.dart';
 import 'package:rapp/service_client.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -32,12 +33,15 @@ void main() {
     expect(find.byType(Switch), findsNothing);
     expect(find.text('立即升级'), findsNothing);
   });
-  testWidgets('Linux local page offers updates with no service and no macOS permissions', (tester) async {
+  testWidgets('Linux: 本机 has no macOS permissions and no updates; 全局设置 offers updates with no service', (tester) async {
     final monitor = ServiceMonitor(readToken: () async => 'unused');
     addTearDown(monitor.dispose);
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body: SingleChildScrollView(
-      child: LocalSection(platform: TargetPlatform.linux, monitor: monitor, control: null, data: DataDir('/unused'), openPage: (_) async {})))));
-    expect(find.byType(LinuxUpdateSection), findsOneWidget);
+    await tester.pumpWidget(MaterialApp(home: Scaffold(body: SingleChildScrollView(child: Column(children: [
+      LocalSection(platform: TargetPlatform.linux, monitor: monitor, control: null, data: DataDir('/unused')),
+      GlobalSections(platform: TargetPlatform.linux, monitor: monitor, data: DataDir('/unused'), openPage: (_) async {}),
+    ])))));
+    expect(find.descendant(of: find.byType(LocalSection), matching: find.byType(LinuxUpdateSection)), findsNothing);
+    expect(find.descendant(of: find.byType(GlobalSections), matching: find.byType(LinuxUpdateSection)), findsOneWidget);
     expect(find.text('检查更新'), findsOneWidget);
     expect(find.textContaining('屏幕录制'), findsNothing);
     expect(find.textContaining('本机为 Linux 控制端'), findsOneWidget);
