@@ -513,5 +513,5 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [x] 服务启动 worker 前刷新图形会话环境；区分整桌面与单应用能力，Linux 的诊断不再显示 macOS 授权提示；构建与 Arch/便携打包包含 host。
 - [x] 原生采集、跨协议解码、错误 token、接管、踢出和 EOF 在 Omarchy 实测通过；隔离 Xvfb 与 headless labwc 验证输入坐标、快捷键、中文输入、修饰键释放与物理键映射恢复。可用 `python3 scripts/test-linux-host.py --current` 重现（需要 Xvfb、labwc、Xwayland）。
 - [x] 相关 GUI 112 项、service 集成 50 项回归通过，Flutter analyze 与新 host Clippy 无问题。端口映射测试在独立网络命名空间通过，避免运行中的服务占用测试端口。
-- [x] 完成实现后再次执行 `git pull --rebase`，main 已是上游最新。
+- [x] 完成实现后再次执行 `git pull --rebase`，整合上游 `27f637e`（0.14.0 / iOS hub）；保留 hub-ffi 和 host-linux workspace 成员，Linux 发布顺延为 0.14.1。
 - 边界：GNOME/KDE Wayland portal、单应用共享、Linux host 的剪贴板/文件传输、自动输入解锁密码尚未实现。X11 文本输入依赖 `xdotool`；本轮无法在 Linux 构建或真机验收 macOS client。
