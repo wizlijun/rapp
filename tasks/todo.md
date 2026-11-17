@@ -474,3 +474,14 @@
 - [x] 四组件 Clippy（所有 target，警告视为错误）通过；0.13.8 release 二进制输出在 `rust/target/release/`，再次通过四组件联调和真实 systemd cgroup 测试。未安装、未重启现有 rapp 服务。日志为 `.build-logs/components-linux-*.log`。
 
 Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便携包；macOS 的 TCC 权限、锁屏和 `.app` 自动替换/回滚不作为 Linux 四组件的实现接口。fit 请求会转发给终端窗口，实际窗口是否响应仍取决于终端模拟器，不能把伪终端验证当作所有模拟器的实机验收。
+
+## Linux 0.13.9 发布（2026-11-17）
+
+- [x] 按用户要求先拉取最新 main（`27010a0`），合并四组件适配 `271f9dc`；发布源码 `bb8434b921948ee88dedf2c1620977c6746a5584` 包含 v0.13.9 的全部变更，推送到 main 和 `linux/0.13.9`。
+- [x] 在干净 worktree `rapp-linux-0139` 完整构建；保留主工作区尚未提交的输入、舞台与性能诊断改动，未将其带入安装包。
+- [x] Rust workspace 1101 项通过、9 项显式跳过；Flutter 1879 项通过、3 项显式跳过，analyze 无问题。四组件 Clippy 所有 target 无警告。额外全 workspace Clippy 在既有 GTK `focus.rs` 的 `chunks_exact_mut(4)` 触发新工具链风格 lint；未为发版改变该逻辑。
+- [x] 安装包和便携包 33 个文件逐一摘要一致；12 个 ELF 依赖解析通过；GUI/worker 版本、BUILD-INFO 源码提交匹配。解包后通过 bundle smoke、四组件联调、真实 systemd cgroup 会话保留、GTK4 对端夹具与 GTK3 原生窗口/输入测试。
+- [x] 已上传到 [v0.13.9 Release](https://github.com/wizlijun/rapp/releases/tag/v0.13.9)：`rapp-omarchy-0.13.9-1-x86_64.pkg.tar.zst`、`rapp-0.13.9-omarchy-x86_64.tar.gz`、`rapp-0.13.9-omarchy-x86_64-SHA256SUMS`；GitHub 返回的大小和 SHA256 与本地产物一致。更新 Linux 发布说明，macOS 原附件摘要保持不变。
+- [x] 更新网站源码中的下载备用快照，8 项选择规则/快照测试通过；线上页面正常从 GitHub API 自动获取此版本，本轮未部署网站。
+
+产物在 `dist/linux-0.13.9/`。构建日志在主工作区 `.build-logs/package-linux-0139.log`，完整测试日志在发布 worktree 的 `.build-logs/*0139.log`。真实 macOS 对端及各终端模拟器的物理窗口/输入体验仍需设备验收。
