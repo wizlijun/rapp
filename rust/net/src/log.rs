@@ -171,7 +171,7 @@ impl Drop for Writer {
     }
 }
 
-fn old_path(path: &Path) -> PathBuf {
+pub(crate) fn old_path(path: &Path) -> PathBuf {
     let mut p = path.as_os_str().to_owned();
     p.push(".1");
     PathBuf::from(p)

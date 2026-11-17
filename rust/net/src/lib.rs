@@ -7,5 +7,6 @@ pub mod crypto;
 pub mod datadir;
 pub mod line;
 pub mod log;
+pub mod logq;
 pub mod msg;
 pub mod quic;
