@@ -515,3 +515,12 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [x] 相关 GUI 112 项、service 集成 50 项回归通过，Flutter analyze 与新 host Clippy 无问题。端口映射测试在独立网络命名空间通过，避免运行中的服务占用测试端口。
 - [x] 完成实现后再次执行 `git pull --rebase`，整合上游 `27f637e`（0.14.0 / iOS hub）；保留 hub-ffi 和 host-linux workspace 成员，Linux 发布顺延为 0.14.1。
 - 边界：GNOME/KDE Wayland portal、单应用共享、Linux host 的剪贴板/文件传输、自动输入解锁密码尚未实现。X11 文本输入依赖 `xdotool`；本轮无法在 Linux 构建或真机验收 macOS client。
+
+## Linux 0.14.1 发布验收（2026-11-17）
+
+- [x] 发布源码 `10f19766a54bd0bbb7e02e11bd168912117891df` 整合最新上游 0.14.0；main 和 v0.14.1 标签已推送 GitHub。干净 worktree 构建产物位于 `dist/linux-0.14.1/`。
+- [x] 合并后的相关 GUI 回归 471 项通过，1 项既有跳过；service 集成 50 项通过；client-core 与 host 测试、Flutter analyze、新 host Clippy 和 Linux 构建路径夹具通过。
+- [x] 隔离 Xvfb、headless labwc 验证采集、输入、中文、修饰键释放、鉴权和接管。本机 Omarchy debug 原生采集在并行构建期间出现过一次超时，随后复验通过；最终解包后的 hub → QUIC service → host 桌面采集连续四次通过。未以此代替真实 macOS/iOS 对端验收。
+- [x] 安装包与便携包 33 个文件逐一摘要一致，13 个 ELF 依赖解析通过；host 版本 0.14.1 / 协议 v13、BUILD-INFO 源码提交及 SHA256 匹配。
+- [x] [v0.14.1 Release](https://github.com/wizlijun/rapp/releases/tag/v0.14.1) 已公开：Arch 安装包、便携包、SHA256SUMS；GitHub 返回的大小和 SHA256 均与本地一致。发布使用 latest=false，保留 macOS 0.14.0 的 latest.json 更新入口。
+- [x] 从 GitHub 已公开数据刷新网站下载备用快照；未部署网站、未安装新包或重启本机服务。
