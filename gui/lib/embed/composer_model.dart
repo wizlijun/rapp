@@ -24,10 +24,13 @@ class SubmitPieces extends Submit {
 /// One send: what was taken out of the editor, in the editor's order: text runs ([String], never empty)
 /// and blocks ([BlockChip]). Each part is one piece.
 class Outgoing {
-  Outgoing(List<Object> parts) : parts = List.unmodifiable(parts) {
+  Outgoing(List<Object> parts, {this.draftless = false}) : parts = List.unmodifiable(parts) {
     assert(parts.every((p) => p is BlockChip || (p is String && p.isNotEmpty)));
   }
   final List<Object> parts;
+
+  /// Not taken from the draft (a voice send): the draft's privacy and recall state are not its own.
+  final bool draftless;
 
   /// The blocks among [parts], in order.
   List<BlockChip> get blocks => [for (final p in parts) if (p is BlockChip) p];
@@ -500,6 +503,31 @@ class ComposerModel extends ChangeNotifier {
     sending = true;
     notifyListeners();
     return SubmitPieces(o.pieces());
+  }
+
+  /// A round is running or a take is waiting: nothing else may start.
+  bool get busy => sending || _taking || _inFlight != null;
+
+  /// Sends [text] alone, as its own round: the draft, the editor and the held blocks stay as they
+  /// are. Nothing happens while [busy] or when [text] is blank.
+  Submit submitText(String text) {
+    final t = text.trim();
+    if (t.isEmpty || busy) return SubmitNothing();
+    final now = _clock();
+    _lastSend = now;
+    final o = Outgoing([t], draftless: true)..at = now;
+    onSubmitted?.call(o);
+    _inFlight = o;
+    sending = true;
+    notifyListeners();
+    return SubmitPieces(o.pieces());
+  }
+
+  /// Puts [text] at the end of the draft, on its own line (a voice send that did not go).
+  void keep(String text) {
+    final t = text.trim();
+    if (t.isEmpty) return;
+    insert(draft.isEmpty ? t : '\n$t');
   }
 
   /// The runner's `sending`; a stop before `done` is held until `done` comes.

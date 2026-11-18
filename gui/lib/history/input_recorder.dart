@@ -176,7 +176,8 @@ class InputRecorder {
       _handed[o] = meta();
       // submit has not installed its inFlight row yet; retry has, and its
       // unrelated editor draft must keep its own privacy state.
-      final submitting = !identical(c.inFlight, o);
+      // A draftless (voice) row did not come from the draft: no privacy or recall to take or reset.
+      final submitting = !identical(c.inFlight, o) && !o.draftless;
       final private = _private[o] == true || rs.secureFocus || (submitting && d.privateText);
       _private[o] = private;
       // The draft went with this send: the next one starts public and unrecalled. (With an editor

@@ -725,6 +725,50 @@ void main() {
     expect(lines(), isEmpty);
   });
 
+  test('a voice send is recorded like a panel send', () async {
+    final rec = recorder();
+    final rs = session(1, 'com.a');
+    rec.attach(rs, () => meta('h1', 'com.a'), restore: true);
+    final r = rs.composer.submitText('语音一句');
+    if (r is SubmitPieces) port.composerSend(rs.sid, r.pieces);
+    rs.composer.done(1, null);
+    await until(() => lines().isNotEmpty);
+    final l = lines().single;
+    expect(l['text'], '语音一句');
+    expect(l['kind'], 'sent');
+    expect(l['result'], 'sent');
+    expect(l['session'], 'h1/com.a');
+    expect(l['blocks'], isEmpty);
+  });
+
+  test('a voice send leaves the draft private and recalled state alone', () async {
+    final rec = recorder();
+    final rs = session(1, 'com.a')..secureFocus = true;
+    rec.attach(rs, () => meta('h1', 'com.a'), restore: true);
+    rs.composer.setDraft('synthetic private draft');
+    rs.secureFocus = false;
+    rs.composer.submitText('x');
+    rs.composer.done(1, null);
+    await until(() => lines().isNotEmpty);
+    expect(lines().single['text'], 'x');
+    await rec.sessionEnded(rs, meta('h1', 'com.a'), record: true);
+    expect([for (final l in lines()) '${l['kind']}:${l['text']}'], ['sent:x']);
+    expect(drafts().load('h1/com.a'), isNull);
+  });
+
+  test('a voice send leaves a recalled draft recalled', () async {
+    final rec = recorder();
+    final rs = session(1, 'com.a');
+    rec.attach(rs, () => meta('h1', 'com.a'), restore: true);
+    rec.recalled(rs, 'hello');
+    rs.composer.setDraft('hello');
+    rs.composer.submitText('x');
+    rs.composer.done(1, null);
+    await until(() => lines().isNotEmpty);
+    await rec.sessionEnded(rs, meta('h1', 'com.a'), record: true);
+    expect([for (final l in lines()) '${l['kind']}:${l['text']}'], ['sent:x']);
+  });
+
   test('a record brought back with ↑ and left as it is is no draft', () async {
     final rec = recorder();
     final rs = session(1, 'com.a');
