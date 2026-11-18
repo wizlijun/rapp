@@ -1,7 +1,7 @@
 use anyhow::{bail, ensure, Context, Result};
 use std::{collections::HashSet, io::Read};
 
-pub const VERSION: u8 = 13;
+pub const VERSION: u8 = 14;
 
 /// The longest unlock password a client may send (bytes, v11).
 pub const UNLOCK_PASSWORD_LIMIT: usize = 1024;

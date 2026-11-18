@@ -1,2 +1,2 @@
 // The strict wire version shared by picture and clipboard side connections.
-const sessionProtocolVersion = 13;
+const sessionProtocolVersion = 14;

@@ -513,6 +513,8 @@ final class Session {
             unlock(password)
         case let .dismissCover(id):
             dismissCover(id)
+        case .setView:
+            break  // v14: accepted; the host starts acting on it in a later task
         case .ready, .error, .frame, .windows, .menuBar, .clip, .pasted, .fetch, .put, .transferStart, .chunk, .inputBlocked, .weak,
              .inputSource, .pong, .saving, .screenLocked, .focusRegion, .covered, .appOpened, .secureFocus:
             fail("unexpected message from client")

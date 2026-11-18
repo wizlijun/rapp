@@ -21,7 +21,7 @@ fn hello_matches_swift_wire_layout() {
         None,
     )
     .unwrap();
-    let mut expected = vec![13, 3, 0, b'a', b'b', b'c', 15, 0];
+    let mut expected = vec![14, 3, 0, b'a', b'b', b'c', 15, 0];
     expected.extend(b"com.example.App");
     expected.extend([2, 5, 0, 0, 128, 63]);
     assert_eq!(a.hello(1.), packet(1, expected));
@@ -294,7 +294,7 @@ fn menu_and_window_validation() {
 #[test]
 fn v5_clipboard_bounds_and_legacy_selection() {
     let address = Address::parse("rapp://host/?token=x", None).unwrap();
-    assert_eq!(address.hello(1.)[5], 13);
+    assert_eq!(address.hello(1.)[5], 14);
     let text = "中文 clipboard";
     let mut payload = 1u32.to_le_bytes().to_vec();
     payload.extend([0, 0]);
@@ -538,9 +538,9 @@ fn unlock_wire_format() {
     assert_eq!(unlock("ab"), vec![35, 4, 0, 0, 0, 2, 0, b'a', b'b']);
 }
 #[test]
-fn hello_announces_version_13() {
+fn hello_announces_version_14() {
     let a = Address::parse("rapp://host/?token=x", None).unwrap();
-    assert_eq!(a.hello(1.)[5], 13);
+    assert_eq!(a.hello(1.)[5], 14);
 }
 /// The same bytes as RappCoreTests.ProtocolTests.testHostHintsSharedSample.
 #[test]
