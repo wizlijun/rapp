@@ -529,8 +529,6 @@ class _StreamMenuState extends State<StreamMenu> {
                   textInputAction: TextInputAction.done,
                   decoration: const InputDecoration(
                     hintText: '存成项目',
-                    isDense: true,
-                    contentPadding: EdgeInsets.symmetric(vertical: 16, horizontal: 8),
                   ),
                   onSubmitted: (v) {
                     if (v.trim().isEmpty) return;

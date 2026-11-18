@@ -151,12 +151,8 @@ class _AppProfilePageState extends State<AppProfilePage> {
       );
 
   InputDecoration _deco(RappTokens t, {String? hint, bool counter = false}) => InputDecoration(
-        isDense: true,
         hintText: hint,
-        hintStyle: TextStyle(color: t.muted),
         counterText: counter ? null : '',
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(t.r), borderSide: BorderSide(color: t.line)),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(t.r), borderSide: BorderSide(color: t.line)),
       );
 
   void _editRule(int i, WindowRule r) => _set(() => _editRules()[i] = r);
@@ -264,7 +260,7 @@ class _AppProfilePageState extends State<AppProfilePage> {
             controller: _name,
             maxLength: 40,
             style: TextStyle(color: d.name == null ? t.muted : t.text),
-            decoration: _deco(t, hint: widget.appName, counter: true).copyWith(labelText: '名字', labelStyle: TextStyle(color: t.muted)),
+            decoration: _deco(t, hint: widget.appName, counter: true).copyWith(labelText: '名字'),
             onChanged: (v) => _set(() => d.name = v.trim().isEmpty ? null : v),
           ),
           const SizedBox(height: 12),
@@ -273,11 +269,11 @@ class _AppProfilePageState extends State<AppProfilePage> {
             controller: _ids,
             readOnly: _builtin != null,
             style: TextStyle(color: _builtin != null ? t.muted : t.text),
-            decoration: _deco(t).copyWith(labelText: '标识（用逗号分开）', labelStyle: TextStyle(color: t.muted)),
+            decoration: _deco(t).copyWith(labelText: '标识（用逗号分开）'),
             onChanged: (_) => setState(() => _idsMissing = false),
           ),
           if (_idsMissing)
-            Padding(padding: const EdgeInsets.only(top: 4), child: Text('至少写一个标识', style: TextStyle(color: t.accent))),
+            Padding(padding: const EdgeInsets.only(top: 4), child: Text('至少写一个标识', style: TextStyle(color: Theme.of(context).colorScheme.error))),
           _label(t, '画面'),
           _field(
               '档位',

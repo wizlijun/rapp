@@ -219,7 +219,7 @@ class _SharesSectionState extends State<SharesSection> {
                 child: TextField(
                   key: const Key('share-port'),
                   controller: _port,
-                  decoration: const InputDecoration(hintText: '端口号', isDense: true),
+                  decoration: const InputDecoration(hintText: '端口号'),
                   onSubmitted: (_) => _busy ? null : _add(),
                 ),
               ),
@@ -228,7 +228,7 @@ class _SharesSectionState extends State<SharesSection> {
                 child: TextField(
                   key: const Key('share-note'),
                   controller: _note,
-                  decoration: const InputDecoration(hintText: '备注，可不填', isDense: true),
+                  decoration: const InputDecoration(hintText: '备注，可不填'),
                   onSubmitted: (_) => _busy ? null : _add(),
                 ),
               ),
@@ -239,7 +239,7 @@ class _SharesSectionState extends State<SharesSection> {
           if (_setError != null)
             Padding(
               padding: const EdgeInsets.only(top: 4),
-              child: Text(_setError!, key: const Key('share-error'), style: TextStyle(color: t.accent)),
+              child: Text(_setError!, key: const Key('share-error'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
             ),
         ],
       );

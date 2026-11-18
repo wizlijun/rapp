@@ -122,10 +122,7 @@ class _InputHistoryListState extends State<InputHistoryList> {
               style: TextStyle(color: t.text),
               decoration: InputDecoration(
                 hintText: '搜索输入过的内容',
-                hintStyle: TextStyle(color: t.muted),
-                isDense: true,
                 prefixIcon: Icon(Icons.search, size: 18, color: t.muted),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(t.r)),
               ),
             ),
             const SizedBox(height: 6),

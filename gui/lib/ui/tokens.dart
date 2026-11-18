@@ -386,7 +386,9 @@ ThemeData themeDataFor(RappTheme theme, {double textSize = fallbackTextSize, Tar
     ),
     inputDecorationTheme: InputDecorationTheme(
       isDense: true,
-      // A single line of text-size text plus this padding is as tall as a control.
+      // A single line is at least as tall as a control (a multi-line field just grows); the
+      // padding stays below that so the minimum decides, whatever the platform's text metrics.
+      constraints: BoxConstraints(minHeight: controlHeightFor(plat)),
       contentPadding: EdgeInsets.symmetric(
         horizontal: 12,
         vertical: (controlHeightFor(plat) - textSize * 1.4) / 2,

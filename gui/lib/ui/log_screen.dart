@@ -189,10 +189,7 @@ class _LogScreenState extends State<LogScreen> {
               onChanged: m.setSearch,
               decoration: InputDecoration(
                 hintText: '搜索…',
-                isDense: true,
-                constraints: const BoxConstraints(minHeight: 48),
                 prefixIcon: const Icon(Icons.search, size: 18),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(t.r)),
               ),
             ),
           ),

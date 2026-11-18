@@ -319,7 +319,6 @@ class _DevicesTabState extends State<DevicesTab> {
               controller: _bundle,
               decoration: const InputDecoration(
                 labelText: '其他 app 的包名（例：com.apple.TextEdit）',
-                isDense: true,
               ),
               onSubmitted: (_) => _openBundle(id),
             ),

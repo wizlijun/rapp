@@ -325,7 +325,7 @@ class _LocalSectionState extends State<LocalSection> {
             valueListenable: error,
             builder: (_, e, _) => e == null
                 ? const SizedBox.shrink()
-                : Padding(padding: const EdgeInsets.only(top: 8), child: Text(e, style: const TextStyle(color: Colors.red))),
+                : Padding(padding: const EdgeInsets.only(top: 8), child: Text(e, style: TextStyle(color: Theme.of(ctx).colorScheme.error))),
           ),
         ]),
         actions: [
@@ -407,7 +407,7 @@ class _LocalSectionState extends State<LocalSection> {
           ValueListenableBuilder<String?>(
             valueListenable: error,
             builder: (_, e, _) =>
-                e == null ? const SizedBox.shrink() : Padding(padding: const EdgeInsets.only(top: 8), child: Text(e, style: const TextStyle(color: Colors.red))),
+                e == null ? const SizedBox.shrink() : Padding(padding: const EdgeInsets.only(top: 8), child: Text(e, style: TextStyle(color: Theme.of(ctx).colorScheme.error))),
           ),
         ]),
         actions: [
