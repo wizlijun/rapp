@@ -554,7 +554,7 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [x] 合入 `feat/pinch-zoom`（73f9a77，协议 v13→v14、`setView` type 41、A 端按取景截局部、「还原」按钮、文本终端同手势）与 `fix/pasteboard-main`（103ca0d，`NSPasteboard` 只在主线程访问，修 0.14.5 的 abort）。另一台设备的 Linux 0.14.6 改了同一个 `rust/host-linux/src/wire.rs`，git 自动合并未报冲突，已逐条确认空标识握手、type 41 分支与三个新测试都在；`tasks/todo.md` 冲突保留两段。
 - [x] 合并后全套门禁：analyze 干净、Flutter 2150 通过 / 23 跳过、Swift 493 通过 / 1 跳过 / 0 失败、Rust 1171 通过（唯一失败为 `pty::local` 绑真端口的已知 load flake，隔离 3/3 通过）、clippy `-D warnings` 退出 0、`scripts/check.sh` 退出 0。
 - [x] [v0.14.7 Release](https://github.com/wizlijun/rapp/releases/tag/v0.14.7) 已公开并设为 Latest，pkg / zip / latest.json 三个资产的 GitHub 大小与 sha256 均与本地一致；网站备用快照刷新至 44 个 release（macOS → 0.14.7，Linux → 0.14.6）。
-- [ ] **Linux 侧仍是协议 v13**：v14 客户端暂时连不上 Linux 桌面会话，需要 Linux 侧出 v14 的包。
+- [x] Linux 协议 v14 安装包已随 0.14.8 发布，可与 0.14.7+ 客户端连接。
 - [ ] 网站未部署：`npx --yes wrangler@4.135.0 deploy --config website/wrangler.jsonc` 仍需 `CLOUDFLARE_API_TOKEN` 或交互登录（累计 14 版快照已提交未部署）。
 
 ## Linux host 卡顿与连接监控后台运行（2026-11-18，本机验证）
@@ -576,6 +576,7 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [x] 拉取并整合上游 main `5b7bf7a` / 0.14.7（含发布快照记录）（含 macOS NSPasteboard 主线程修复与协议 v14）。本次版本计划 0.14.8；对端需支持 v14，旧 v13 client 需更新。Linux 继续整桌面采集，兼容 v14 setView 消息但不声称实现局部截取。
 - [x] 合并后 host/client-core 78 项测试通过，host Clippy 通过；隔离 Xvfb/labwc 原生输入与串流通过。首次当前桌面采集超时，随后同测试原样复验通过，安装版只读串流采样亦通过；未放宽断言。
 - [x] Flutter 3.50.0 全量回归 2158 项通过、15 项既有跳过；analyze 无 error/warning，113 项 Flutter material 导入弃用 info，`--no-fatal-infos` 通过。Linux GUI 和全部 7 个 Rust worker 构建成功。
-- [ ] 反复开关/缩放/最大化压力测试与最终包验收。真实桌面焦点检查遇到锁屏/熄屏阻断，补充启动前检查，待解锁后验证；尚未把此超时当作新的程序崩溃。
+- [x] 真实桌面解锁后，最终解包 GUI 通过 20 轮关闭/重开、缩放、最大化及主窗口/CM 独立生命周期回归；自动 CM 不映射窗口、不抢焦点，无 EGL make-current 或 implicit-view removal 错误。最终包也通过本机 Omarchy 的 hub → QUIC service → host 完整串流。日志 `.build-logs/gui-0148-final-stress.log`、`.build-logs/bundle-0148-final-current.log`。
 - [x] 干净 worktree 从 `a7c482d` 构建 0.14.8-1；Arch/便携包 34 文件摘要一致、13 个 ELF 依赖解析通过，Flutter 3.50.0 / engine `371f77202a73e8dff57a8b3bff75bca55c090aee` 与实际引擎 SHA256 匹配。解包后隔离 headless Wayland 完整 hub → QUIC service → host 桌面串流通过；四组件终端/端口/重启联调通过。
-- [ ] GitHub 发布及本机安装最终版本。
+- [x] [v0.14.8 Release](https://github.com/wizlijun/rapp/releases/tag/v0.14.8) 已公开，三个附件大小/SHA256 与本地一致；latest=false 保留 macOS 0.14.7 的 latest.json 及原附件摘要。刷新网站备用下载快照，未部署网站。
+- [ ] 本机安装已启动，等待系统管理员认证；安装成功后重启服务并核对 34 个文件摘要及 IPC 桌面能力。
