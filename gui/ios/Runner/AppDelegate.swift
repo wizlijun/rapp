@@ -22,5 +22,8 @@ import UIKit
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "RappSession") {
       SessionPlugin.register(with: registrar)
     }
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "RappSpeech") {
+      SpeechPlugin.register(with: registrar)
+    }
   }
 }

@@ -22,6 +22,7 @@
 		A1000000000000000000F009 /* RappCore in Frameworks */ = {isa = PBXBuildFile; productRef = A1000000000000000000F008 /* RappCore */; };
 		A1000000000000000000F00B /* SessionPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000F00A /* SessionPlugin.swift */; };
 		A1000000000000000000F00D /* UnlockPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000F00C /* UnlockPlugin.swift */; };
+		A1000000000000000000F00F /* SpeechPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1000000000000000000F00E /* SpeechPlugin.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -69,6 +70,7 @@
 		A1000000000000000000F003 /* RappViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RappViewController.swift; sourceTree = "<group>"; };
 		A1000000000000000000F00A /* SessionPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = SessionPlugin.swift; path = ../macos/Runner/SessionPlugin.swift; sourceTree = SOURCE_ROOT; };
 		A1000000000000000000F00C /* UnlockPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = UnlockPlugin.swift; path = ../macos/Runner/UnlockPlugin.swift; sourceTree = SOURCE_ROOT; };
+		A1000000000000000000F00E /* SpeechPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpeechPlugin.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -139,6 +141,7 @@
 				A1000000000000000000F003 /* RappViewController.swift */,
 				A1000000000000000000F00A /* SessionPlugin.swift */,
 				A1000000000000000000F00C /* UnlockPlugin.swift */,
+				A1000000000000000000F00E /* SpeechPlugin.swift */,
 				74858FAD1ED2DC5600515810 /* Runner-Bridging-Header.h */,
 			);
 			path = Runner;
@@ -307,6 +310,7 @@
 				A1000000000000000000F004 /* RappViewController.swift in Sources */,
 				A1000000000000000000F00B /* SessionPlugin.swift in Sources */,
 				A1000000000000000000F00D /* UnlockPlugin.swift in Sources */,
+				A1000000000000000000F00F /* SpeechPlugin.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
