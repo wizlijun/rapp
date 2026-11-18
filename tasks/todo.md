@@ -679,6 +679,6 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [x] Flutter 3.50.0 全量 2396 项通过、15 项跳过；analyze 无 error/warning，124 项 SDK 弃用 info（`--no-fatal-infos` 通过）。Rust 实现相较已验证的 0.14.11 未变，本轮以正式 release workers 做集成验收，未重复全量 Rust 单元测试。
 - [x] 私有 Broadway GTK4 客户端 7 组 v14 场景、GTK3 原生窗口/弹窗/草稿/输入法 FIFO、启动器、构建路径和旧引擎拒绝检查通过。正式包单实例/崩溃恢复、终端与端口共享/pipe/half-close、重启后终端恢复通过。完整 hub → QUIC service → Omarchy 桌面串流首轮采集超时，构建结束后同一测试原样复验通过；未放宽断言。
 - [x] 干净 worktree `/home/bruce/git/rapp-build-01412` 从 `2d7eab9` 构建 0.14.12-1；Arch/便携包 34 文件摘要一致、13 个 ELF 依赖解析通过，BUILD-INFO 源码/Flutter 引擎及 SHA256SUMS 校验通过。产物在 `dist/linux-0.14.12/`，验证日志在主工作区 `.build-logs/*01412*` 及构建 worktree `.build-logs/`。
-- [ ] 将 Linux 附件发布到既有 v0.14.12 Release，并核对原 macOS 资产未变、Linux 远端摘要一致。
-- [ ] 更新并部署 `rapphub.com`：站点构建和 8 项下载选择测试通过；Wrangler 未登录，已打开有限 scope 的 OAuth 授权页面，等待用户完成 Cloudflare 授权。不能把更新仓库中的备用快照当作网站已部署。
+- [x] [v0.14.12 Release](https://github.com/wizlijun/rapp/releases/tag/v0.14.12) 已补齐 Linux 安装包、便携包和 SHA256SUMS；三个附件大小/SHA256 与本地一致，原 macOS 资产 ID/大小/摘要不变。网站备用下载快照已更新为两平台 0.14.12。
+- [ ] 更新并部署 `rapphub.com`：站点构建和 8 项下载选择测试通过；Wrangler 未登录；有限 scope 的浏览器 OAuth 等待超时，已改用设备授权入口等待用户登录。站点部署 dry-run 通过；不能把更新仓库中的备用快照当作网站已部署。
 - 本轮尚未新增 Linux 语音后端，未安装新包、未重启已安装服务，也未进行 macOS/iOS 对端及物理桌面输入验收。

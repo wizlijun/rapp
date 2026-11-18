@@ -15,7 +15,7 @@ Downloads are resolved independently per platform from the public GitHub release
 
 The Linux relay installer requires a running Docker installation and supports x86_64 / arm64. It pins the published `ghcr.io/wizlijun/rapp-relay:0.6.0` image, preserves the data volume, bounds readiness polling, and refuses to replace an existing container or rotate its key. It does not change the firewall or install Docker. Open UDP 22026 on the server and its cloud firewall. Keep the printed enrollment key; it is only shown once.
 
-E2E copy refers to the new relay path with rapp 0.6+ on both devices. The published Linux app is now 0.14.11 and supports that path, plus desktop hosting on Omarchy/Hyprland, compatible wlroots compositors and X11. The download page shows the legacy warning only when it selects an old Linux build such as 0.5.2. See the v0.6.0 release notes and `rust/conn/src/e2e.rs`.
+E2E copy refers to the new relay path with rapp 0.6+ on both devices. The published Linux app is now 0.14.12 and supports that path, plus desktop hosting on Omarchy/Hyprland, compatible wlroots compositors and X11. The download page shows the legacy warning only when it selects an old Linux build such as 0.5.2. See the v0.6.0 release notes and `rust/conn/src/e2e.rs`.
 
 The install script is served at https://rapphub.com/install-relay.sh. The build copies only the seven public website files to `dist/`; documentation, tests, and deployment configuration are excluded.
 
