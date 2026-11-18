@@ -347,7 +347,7 @@ class VoiceHold extends ChangeNotifier {
   }
 }
 
-/// The round voice button ([stageButtonSize]) at the bottom of the stage stack. It feeds [hold] and fades out while the disc grows from it.
+/// The square voice button ([stageButtonSize]) at the bottom of the stage stack. It feeds [hold] and fades out while the disc grows from it.
 Widget voiceButton(VoiceHold hold) => Builder(
   builder: (context) {
     RenderBox? stage() => hold.stageKey.currentContext?.findRenderObject() as RenderBox?;
@@ -378,7 +378,7 @@ Widget voiceButton(VoiceHold hold) => Builder(
       child: ValueListenableBuilder<double>(
         valueListenable: hold.buttonOpacity,
         builder: (context, o, child) => Opacity(opacity: o, child: child),
-        child: RappButton.round(
+        child: RappButton.stage(
           key: const Key('voice-hold'),
           label: '语音',
           icon: Icons.mic_none,
@@ -402,7 +402,7 @@ Widget voiceHint(VoiceHold hold, {double? maxWidth}) => Builder(
     final box = DecoratedBox(
       key: const Key('voice-hint'),
       decoration: BoxDecoration(
-        // The raise colour on the opaque float surface, as the round buttons: no picture shows through.
+        // The raise colour on the opaque float surface, as the stage buttons: no picture shows through.
         color: Color.alphaBlend(t.raise.first, t.float.first),
         border: Border.all(color: t.line),
         borderRadius: BorderRadius.circular(t.r),

@@ -645,7 +645,7 @@ List<Widget> composerLayer(
         ),
       ),
     if (defaultTargetPlatform == TargetPlatform.iOS)
-      // The round buttons in one edge stack; the key row, if on, sits below it. Hold to talk draws over the stage.
+      // The stage buttons in one edge stack; the key row, if on, sits below it. Hold to talk draws over the stage.
       Positioned.fill(
         child: _IosStage(
           key: ValueKey(session.sid),
@@ -683,7 +683,7 @@ List<Widget> composerLayer(
                     hidden: hold?.active ?? false,
                     upright: stage.maxHeight > stage.maxWidth,
                     input: button
-                        ? RappButton.round(
+                        ? RappButton.stage(
                             key: const Key('composer-open'),
                             label: '输入',
                             icon: Icons.keyboard_outlined,
@@ -692,7 +692,7 @@ List<Widget> composerLayer(
                           )
                         : null,
                     restore: zoomed
-                        ? RappButton.round(
+                        ? RappButton.stage(
                             key: const Key('zoom-reset'),
                             label: '还原',
                             icon: Icons.zoom_in_map,
@@ -807,7 +807,7 @@ List<Widget> composerLayer(
 
 /// The iOS stage's button stack plus hold to talk: owns the session's [VoiceHold] (none without
 /// `state.voice`) and lays [VoiceOverlay] over the whole stage.
-/// iOS's 语音 while the panel is open: the same round button, on the stack's line ([stageButtonsIn] in from the
+/// iOS's 语音 while the panel is open: the same stage button, on the stack's line ([stageButtonsIn] in from the
 /// stack's side), 8 above the panel's top, or its key row's when that rides above it; the panel moves (the keyboard,
 /// a drag), the button follows a frame behind. Never off the stage's top.
 class _VoiceAbovePanel extends StatelessWidget {

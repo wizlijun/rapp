@@ -11,7 +11,7 @@ RelativeRect menuAt(BuildContext context, Offset p) {
   return RelativeRect.fromLTRB(p.dx, p.dy, overlay.size.width - p.dx, overlay.size.height - p.dy);
 }
 
-enum _Kind { primary, secondary, accent, quiet, round }
+enum _Kind { primary, secondary, accent, quiet, stage }
 
 /// Button per design language section 8. Built on Material buttons, with a
 /// 0.97 press scale (80 ms) unless reduced motion is on.
@@ -61,16 +61,17 @@ class RappButton extends StatefulWidget {
        oneLine = false,
        size = 48;
 
-  /// A flat circle of [size] on the remote picture, icon only: the stage's edge buttons (iOS). No shadow. Half
-  /// see-through ([roundRestOpacity]) until a finger is on it, so it hides less of the picture (user 2026-11-18:
+  /// A flat square of [size] on the remote picture, icon only: the stage's edge buttons (iOS), in the Mac row's
+  /// shape (the theme corner, like [RappButton.secondary]; user 2026-11-18: 「和 macos 版本一样都改为方的」). No
+  /// shadow. Half see-through ([stageRestOpacity]) until a finger is on it, so it hides less of the picture (user 2026-11-18:
   /// 「未按时半透明显示」).
-  const RappButton.round({
+  const RappButton.stage({
     super.key,
     required this.label,
     required IconData this.icon,
     required this.size,
     this.onPressed,
-  }) : _kind = _Kind.round,
+  }) : _kind = _Kind.stage,
        semanticLabel = null,
        focusNode = null,
        onPicture = true,
@@ -100,8 +101,8 @@ class RappButton extends StatefulWidget {
   State<RappButton> createState() => _RappButtonState();
 }
 
-/// A round button's opacity while no finger is on it; solid while one is.
-const roundRestOpacity = 0.5;
+/// A stage button's opacity while no finger is on it; solid while one is.
+const stageRestOpacity = 0.5;
 
 class _RappButtonState extends State<RappButton> {
   bool _down = false;
@@ -151,7 +152,7 @@ class _RappButtonState extends State<RappButton> {
         ),
         child: child,
       ),
-      _Kind.round => OutlinedButton(
+      _Kind.stage => OutlinedButton(
         onPressed: widget.onPressed,
         style: OutlinedButton.styleFrom(
           backgroundColor: Color.alphaBlend(t.raise.first, t.float.first),
@@ -162,7 +163,7 @@ class _RappButtonState extends State<RappButton> {
           fixedSize: Size.square(widget.size),
           minimumSize: Size.square(widget.size),
           padding: EdgeInsets.zero,
-          shape: CircleBorder(side: BorderSide(color: t.line)),
+          shape: shape,
         ),
         child: child,
       ),
@@ -198,10 +199,10 @@ class _RappButtonState extends State<RappButton> {
     final name = widget.semanticLabel ?? (icon == null ? null : widget.label);
     final reduced =
         MediaQuery.disableAnimationsOf(context) || widget.onPressed == null;
-    final Widget look = widget._kind != _Kind.round
+    final Widget look = widget._kind != _Kind.stage
         ? button
         : AnimatedOpacity(
-            opacity: _down ? 1 : roundRestOpacity,
+            opacity: _down ? 1 : stageRestOpacity,
             duration: reduced ? Duration.zero : const Duration(milliseconds: 80),
             child: button,
           );

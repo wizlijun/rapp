@@ -14,6 +14,7 @@ import 'package:rapp/paths.dart';
 import 'package:rapp/term/term_key_row.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
+import 'package:rapp/ui/tokens.dart';
 
 import '../fakes.dart';
 import '../ui/helpers.dart';
@@ -120,6 +121,22 @@ void main() {
     expect(stageButtonSize, 56);
     expect(inStage(tester, open).size, const Size.square(stageButtonSize));
     expect(inStage(tester, reset).size, const Size.square(stageButtonSize));
+  });
+
+  iosTest('square like the Mac row (user 2026-11-18: 「和 macos 版本一样都改为方的」): the theme corner, no circle', (tester) async {
+    big(tester);
+    rs.dispose();
+    rs = zoomable();
+    await tester.pumpWidget(layer());
+    zoom();
+    await tester.pump();
+    final r = RappTokens.of(tester.element(open)).r;
+    for (final f in [open, reset]) {
+      final b = tester.widget<OutlinedButton>(find.descendant(of: f, matching: find.byType(OutlinedButton)));
+      final shape = b.style!.shape!.resolve({});
+      expect(shape, isA<RoundedRectangleBorder>());
+      expect((shape! as RoundedRectangleBorder).borderRadius, BorderRadius.circular(r));
+    }
   });
 
   iosTest('at rest the round buttons are half see-through; a finger on one makes it solid until it leaves', (tester) async {
