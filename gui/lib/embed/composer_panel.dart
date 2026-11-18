@@ -652,7 +652,8 @@ List<Widget> composerLayer(
           state: state,
           session: session,
           port: port,
-          buttons: (hold) => ListenableBuilder(
+          // Portrait by the stage itself, not what the keyboard leaves of it.
+          buttons: (hold) => LayoutBuilder(builder: (context, stage) => ListenableBuilder(
               listenable: Listenable.merge([both, session.zooms, ?hold]),
               builder: (context, _) {
                 final transfer = session.transferStatus;
@@ -680,6 +681,7 @@ List<Widget> composerLayer(
                     // Shown exactly when 输入 is (an open panel returned above).
                     voice: hold != null && button ? voiceButton(hold) : null,
                     hidden: hold?.active ?? false,
+                    upright: stage.maxHeight > stage.maxWidth,
                     input: button
                         ? RappButton.round(
                             key: const Key('composer-open'),
@@ -720,7 +722,7 @@ List<Widget> composerLayer(
                 ),
                 );
               },
-            ),
+            )),
         ),
       )
     else

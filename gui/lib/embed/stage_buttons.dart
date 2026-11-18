@@ -18,7 +18,12 @@ const _glide = Duration(milliseconds: 200);
 
 /// The stage's round buttons (iOS) as one vertical stack on a screen edge, bottom to top: [voice], [input],
 /// [restore]. [beside] widgets stack upward on the inner side, bottom-aligned with the stack's lowest button.
+///
 /// A horizontal drag on [input] or [restore] moves the stack to the other side once it passes the middle.
+///
+/// [upright] (a portrait stage) lays the buttons in a row instead, [voice] outermost and the others toward the
+/// middle, centred on one line; [beside] then stands above the row on its outer edge (user 2026-11-18:
+/// 「竖屏时，键盘在语音按钮靠中间的横排就行了」).
 ///
 /// [hidden] (recording) fades [input], [restore] and [beside] out, ignores their input and turns dragging
 /// off; [voice] keeps its place and draws itself.
@@ -32,6 +37,7 @@ class StageButtons extends StatefulWidget {
     this.restore,
     this.beside = const [],
     this.hidden = false,
+    this.upright = false,
   });
 
   final StageSide side;
@@ -41,6 +47,7 @@ class StageButtons extends StatefulWidget {
   final Widget? restore;
   final List<Widget> beside;
   final bool hidden;
+  final bool upright;
 
   @override
   State<StageButtons> createState() => _StageButtonsState();
@@ -67,7 +74,9 @@ class _StageButtonsState extends State<StageButtons>
     if (widget.hidden && !old.hidden && _dragging) {
       _dragging = false;
       _from = _dx;
-      _snap.duration = MediaQuery.disableAnimationsOf(context) ? Duration.zero : _glide;
+      _snap.duration = MediaQuery.disableAnimationsOf(context)
+          ? Duration.zero
+          : _glide;
       _snap.forward(from: 0);
     }
   }
@@ -151,17 +160,29 @@ class _StageButtonsState extends State<StageButtons>
       if (widget.input != null) _faded(_draggable(widget.input!), reduced),
       if (widget.restore != null) _faded(_draggable(widget.restore!), reduced),
     ];
-    final column = Column(
-      key: _column,
-      mainAxisSize: MainAxisSize.min,
-      verticalDirection: VerticalDirection.up,
-      children: [
-        for (var i = 0; i < stack.length; i++) ...[
-          if (i > 0) const SizedBox(height: _gap),
-          stack[i],
-        ],
+    final spaced = [
+      for (var i = 0; i < stack.length; i++) ...[
+        if (i > 0)
+          widget.upright
+              ? const SizedBox(width: _gap)
+              : const SizedBox(height: _gap),
+        stack[i],
       ],
-    );
+    ];
+    final column = widget.upright
+        ? Row(
+            key: _column,
+            mainAxisSize: MainAxisSize.min,
+            // Outermost first: on the right that reads right to left.
+            textDirection: left ? TextDirection.ltr : TextDirection.rtl,
+            children: spaced,
+          )
+        : Column(
+            key: _column,
+            mainAxisSize: MainAxisSize.min,
+            verticalDirection: VerticalDirection.up,
+            children: spaced,
+          );
     final beside = widget.beside.isEmpty
         ? null
         : _faded(
@@ -190,19 +211,32 @@ class _StageButtonsState extends State<StageButtons>
               padding: const EdgeInsets.symmetric(horizontal: stageButtonsIn),
               child: Transform.translate(
                 offset: Offset(_offset, 0),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    if (left && stack.isNotEmpty) column,
-                    if (beside != null) ...[
-                      if (!left) beside,
-                      if (stack.isNotEmpty) const SizedBox(width: _gap),
-                      if (left) beside,
-                    ],
-                    if (!left && stack.isNotEmpty) column,
-                  ],
-                ),
+                child: widget.upright
+                    ? Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: left
+                            ? CrossAxisAlignment.start
+                            : CrossAxisAlignment.end,
+                        children: [
+                          ?beside,
+                          if (beside != null && stack.isNotEmpty)
+                            const SizedBox(height: _gap),
+                          if (stack.isNotEmpty) column,
+                        ],
+                      )
+                    : Row(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          if (left && stack.isNotEmpty) column,
+                          if (beside != null) ...[
+                            if (!left) beside,
+                            if (stack.isNotEmpty) const SizedBox(width: _gap),
+                            if (left) beside,
+                          ],
+                          if (!left && stack.isNotEmpty) column,
+                        ],
+                      ),
               ),
             ),
           ),
