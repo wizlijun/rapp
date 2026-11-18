@@ -35,7 +35,7 @@ public final class ClipHistory {
             entries.insert((id, info), at: 0)
             if entries.count > limit { entries.removeLast(entries.count - limit) }
         }
-        if case let .text(text, _) = info, pasteboard.string != text { pasteboard.write(text: text) }
+        if case let .text(text, _) = info { pasteboard.follow(text: text) }
         onClip?()
     }
 
