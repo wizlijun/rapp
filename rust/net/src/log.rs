@@ -125,6 +125,39 @@ impl Log {
     }
 }
 
+/// The log `forward_lib_warnings` writes to: the newest one it was handed.
+static LIB_LOG: Mutex<Option<Log>> = Mutex::new(None);
+
+struct LibLog;
+
+impl ::log::Log for LibLog {
+    fn enabled(&self, m: &::log::Metadata) -> bool {
+        m.level() <= ::log::Level::Warn && m.target().starts_with("quinn")
+    }
+    fn log(&self, r: &::log::Record) {
+        if !self.enabled(r.metadata()) {
+            return;
+        }
+        let lvl = if r.level() == ::log::Level::Error { Lvl::Error } else { Lvl::Warn };
+        let log = LIB_LOG.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if let Some(log) = log {
+            log.event(lvl, "lib", json!({"target": r.target(), "msg": r.args().to_string()}));
+        }
+    }
+    fn flush(&self) {}
+}
+
+/// quinn and quinn-udp's warnings and errors go to `log` as `{"ev":"lib","target","msg"}`. They
+/// report there what they otherwise swallow: a `sendmsg` error (a datagram the system would not
+/// send, which only shows as a timeout), the endpoint driver stopping on a receive error.
+/// Process-wide; a later call moves them to the newer log.
+pub fn forward_lib_warnings(log: Log) {
+    *LIB_LOG.lock().unwrap_or_else(|e| e.into_inner()) = Some(log);
+    if ::log::set_logger(&LibLog).is_ok() {
+        ::log::set_max_level(::log::LevelFilter::Warn);
+    }
+}
+
 impl Writer {
     fn write_repeat(&mut self) {
         if self.repeat > 0 {
