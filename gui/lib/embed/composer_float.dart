@@ -18,7 +18,7 @@ const composerMargin = 8.0;
 /// The grip's hit area (spec: at least 48×20).
 const gripSize = Size(48, 20);
 
-/// The collapse ×'s hit area, right beside the grip.
+/// The room the collapse × takes in the grip row, so the grip stays centred.
 const _closeSize = Size(28, 20);
 
 /// Marks the panel's text area (a [MetaData] around the editor): there a mouse selects text and a
@@ -203,6 +203,10 @@ class _FloatingComposerState extends State<FloatingComposer> {
     );
     // A small × right beside the grip: collapses the panel (as Esc does), keeping the text.
     // Shown with the bar, and only pressable while shown, so an unseen one never takes a click.
+    // Its hit area is control-height square, hung from the panel's top edge (a hit outside the panel's own
+    // bounds would never arrive) and reaching down into the body; the × is drawn at the top of it, level
+    // with the grip, so the grip row stays gripSize.height tall.
+    final side = controlHeightOf(context);
     final close = AnimatedOpacity(
       opacity: shown ? 1 : 0,
       duration: const Duration(milliseconds: 120),
@@ -214,13 +218,19 @@ class _FloatingComposerState extends State<FloatingComposer> {
             button: true,
             label: '收起写作面板',
             excludeSemantics: true,
-            child: InkWell(
-              key: const Key('composer-grip-close'),
-              onTap: widget.session.composer.collapse,
-              borderRadius: BorderRadius.circular(t.r),
-              child: SizedBox.fromSize(
-                size: _closeSize,
-                child: Icon(Icons.close, size: 14, color: t.muted),
+            child: Material(
+              type: MaterialType.transparency,
+              child: InkWell(
+                key: const Key('composer-grip-close'),
+                onTap: widget.session.composer.collapse,
+                borderRadius: BorderRadius.circular(t.r),
+                child: SizedBox.square(
+                  dimension: side,
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    child: SizedBox(height: gripSize.height, child: Center(child: Icon(Icons.close, size: 14, color: t.muted))),
+                  ),
+                ),
               ),
             ),
           ),
@@ -271,21 +281,35 @@ class _FloatingComposerState extends State<FloatingComposer> {
                       ..onLongPressCancel = _cancel,
                   ),
                 },
-                child: Column(
-                  key: _box,
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                child: Stack(
                   children: [
-                    // The grip centred and the × right after it (a blank as wide before, keeping the grip centred).
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
+                    Column(
+                      key: _box,
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        SizedBox.fromSize(size: _closeSize),
-                        grip,
-                        Material(type: MaterialType.transparency, child: close),
+                        // The grip centred, with a blank each side as wide as the × (keeping the grip centred).
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [SizedBox.fromSize(size: _closeSize), grip, SizedBox.fromSize(size: _closeSize)],
+                        ),
+                        Flexible(child: widget.child),
                       ],
                     ),
-                    Flexible(child: widget.child),
+                    // The × over the blank right of the grip: a row [76 blank, hit area] centred puts the hit
+                    // area's middle 38 right of the panel's middle, where the blank's middle is.
+                    Positioned(
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          SizedBox(width: _closeSize.width + gripSize.width),
+                          close,
+                        ],
+                      ),
+                    ),
                   ],
                 ),
               ),

@@ -11,6 +11,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 import '../platform_caps.dart' show pinchZoom;
+import '../ui/controls.dart';
 import '../ui/keep_focus.dart';
 import '../ui/main_state.dart';
 import '../ui/rule_snack.dart';
@@ -373,7 +374,7 @@ class _PictureState extends State<Picture> implements TouchSink {
 
   /// A × at a sheet's or popover's top-right corner (they have no close button): Esc on A.
   Widget _popupClose(RappTokens t, _Target p, Size stage) {
-    const d = 28.0;
+    final d = controlHeightOf(context);
     final left = (p.pic.right - d / 2).clamp(0.0, (stage.width - d).clamp(0.0, double.infinity));
     final top = (p.pic.top - d / 2).clamp(0.0, (stage.height - d).clamp(0.0, double.infinity));
     return Positioned(
@@ -387,17 +388,22 @@ class _PictureState extends State<Picture> implements TouchSink {
           button: true,
           label: '关闭弹出窗口',
           excludeSemantics: true,
-          child: Material(
-            key: ValueKey('popup-close-${p.win.id}'),
-            color: t.accent,
-            shape: const CircleBorder(),
-            elevation: 2,
-            child: InkWell(
-              customBorder: const CircleBorder(),
-              onTap: () => widget.state.closeWindow(p.win.id),
-              onSecondaryTapUp: (e) => _popupMenu(e.globalPosition, p.win.id),
-              onLongPress: () => _popupMenu(_global(left + d / 2, top + d / 2), p.win.id),
-              child: Icon(Icons.close, size: 16, color: t.accentInk),
+          child: GestureDetector(
+            onSecondaryTapUp: (e) => _popupMenu(e.globalPosition, p.win.id),
+            onLongPress: () => _popupMenu(_global(left + d / 2, top + d / 2), p.win.id),
+            child: IconButton(
+              key: ValueKey('popup-close-${p.win.id}'),
+              onPressed: () => widget.state.closeWindow(p.win.id),
+              // A float-coloured disc behind the × so it reads over any picture; the hit area stays control-height.
+              icon: DecoratedBox(
+                key: ValueKey('popup-close-disc-${p.win.id}'),
+                decoration: BoxDecoration(shape: BoxShape.circle, color: t.float.first.withValues(alpha: .85)),
+                child: const SizedBox.square(dimension: 28, child: Icon(Icons.close, size: 18)),
+              ),
+              iconSize: 20,
+              color: t.text,
+              padding: EdgeInsets.zero,
+              constraints: BoxConstraints.tightFor(width: d, height: d),
             ),
           ),
         ),
@@ -414,10 +420,10 @@ class _PictureState extends State<Picture> implements TouchSink {
   /// ones like it from now on (a window rule of the app, with 撤销).
   Future<void> _popupMenu(Offset at, int window) async {
     final messenger = ScaffoldMessenger.maybeOf(context);
-    final pick = await showMenu<String>(
-      context: context,
+    final pick = await showRappMenu<String>(
+      context,
       position: menuAt(context, at),
-      items: const [PopupMenuItem(value: 'hide', child: Text('隐藏这类窗口'))],
+      items: const [RappMenuItem(value: 'hide', label: '隐藏这类窗口')],
     );
     if (pick != 'hide' || !mounted) return;
     final s = widget.state;

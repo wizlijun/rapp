@@ -12,7 +12,6 @@ import 'inline_edit.dart';
 import 'lamp.dart';
 import 'lifecycle.dart';
 import 'main_state.dart';
-import 'rule_snack.dart';
 import 'session_model.dart';
 import 'tab_chip.dart';
 import 'shares_section.dart';
@@ -158,48 +157,36 @@ class _DevicesTabState extends State<DevicesTab> {
   /// a row of chips ran off the panel's side), then the ＋ that opens the add form right under this row.
   Widget _topRow(BuildContext context, List<HubHost> hosts, String? sel) {
     final t = RappTokens.of(context);
-    final radius = BorderRadius.circular(t.r);
     final label = sel == null ? (hosts.isEmpty ? '还没有其他设备' : '其他设备') : _label(sel);
-    final picker = Semantics(
-      container: true,
-      button: true,
-      label: '其他设备：$label',
-      excludeSemantics: true,
-      onTap: hosts.isEmpty ? null : () => _openPicker(context, hosts, sel),
-      child: Material(
-        type: MaterialType.transparency,
-        child: Builder(
-          builder: (btn) => InkWell(
-            key: const Key('device-picker'),
-            onTap: hosts.isEmpty ? null : () => _openPicker(btn, hosts, sel),
-            borderRadius: radius,
-            child: Container(
-              constraints: const BoxConstraints(minHeight: 48),
-              padding: const EdgeInsets.only(left: 12, right: 6),
-              decoration: sel == null
-                  ? BoxDecoration(borderRadius: radius, border: Border.all(color: t.line))
-                  : t.raiseBox(border: t.text),
-              child: Row(children: [
-                if (sel != null) ...[StatusLamp(_lamp(sel)), const SizedBox(width: 8)],
-                Expanded(
-                  child: Text(label,
-                      key: const Key('device-picker-label'),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          color: sel == null ? t.muted : t.text, fontWeight: sel == null ? null : FontWeight.w600)),
-                ),
-                if (hosts.isNotEmpty) ...[
-                  const SizedBox(width: 6),
-                  Text('${hosts.length} 台', style: TextStyle(color: t.muted)),
-                  Icon(Icons.arrow_drop_down, size: 20, color: t.muted),
-                ],
-              ]),
+    final picker = RappDropdown<String>(
+        key: const Key('device-picker'),
+        expand: true,
+        menuConstraints: (w) => BoxConstraints(minWidth: w, maxWidth: w),
+        enabled: hosts.isNotEmpty,
+        arrow: hosts.isNotEmpty,
+        semanticLabel: '其他设备：$label',
+        selected: sel != null,
+        dim: sel == null,
+        current: sel,
+        label: Row(children: [
+          if (sel != null) ...[StatusLamp(_lamp(sel)), const SizedBox(width: 8)],
+          Expanded(child: Text(label, key: const Key('device-picker-label'))),
+          if (hosts.isNotEmpty) ...[
+            const SizedBox(width: 6),
+            Text('${hosts.length} 台', style: TextStyle(color: t.muted, fontWeight: FontWeight.normal)),
+          ],
+        ]),
+        items: [
+          for (final h in hosts)
+            RappMenuItem<String>(
+              key: Key('device-${h.id}'),
+              value: h.id,
+              label: _label(h.id),
+              lead: StatusLamp(_lamp(h.id)),
             ),
-          ),
-        ),
-      ),
-    );
+        ],
+        onSelected: _select,
+      );
     return Row(children: [
       // The dot is hidden from screen readers; the name says it instead.
       Semantics(
@@ -241,38 +228,6 @@ class _DevicesTabState extends State<DevicesTab> {
   }
 
   Lamp _lamp(String id) => state.probes[id]?.lamp ?? Lamp.connecting;
-
-  /// The menu under the picker: every other device with its lamp and word; it scrolls when long. Picking the one
-  /// already shown probes it again, as tapping its chip did.
-  Future<void> _openPicker(BuildContext context, List<HubHost> hosts, String? sel) async {
-    final box = context.findRenderObject() as RenderBox;
-    final at = box.localToGlobal(Offset(0, box.size.height));
-    PopupMenuItem<String> row(String key, String value, Widget lead, String name) =>
-        PopupMenuItem<String>(
-          key: Key(key),
-          value: value,
-          child: Row(children: [
-            lead,
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontWeight: value == sel ? FontWeight.w700 : null)),
-            ),
-          ]),
-        );
-    final pick = await showMenu<String>(
-      context: context,
-      position: menuAt(context, at),
-      constraints: BoxConstraints(minWidth: box.size.width, maxWidth: box.size.width),
-      items: [
-        for (final h in hosts) row('device-${h.id}', h.id, StatusLamp(_lamp(h.id)), _label(h.id)),
-      ],
-    );
-    if (!mounted || pick == null) return;
-    _select(pick);
-  }
 
   SessionEntry? _session(String id, String app) {
     for (final g in state.groups) {
@@ -366,7 +321,6 @@ class _DevicesTabState extends State<DevicesTab> {
               controller: _bundle,
               decoration: const InputDecoration(
                 labelText: '其他 app 的包名（例：com.apple.TextEdit）',
-                isDense: true,
               ),
               onSubmitted: (_) => _openBundle(id),
             ),
@@ -498,7 +452,7 @@ class _DevicesTabState extends State<DevicesTab> {
                     children: [
                       Text('终端 app', style: TextStyle(color: t.text)),
                       for (final l in launchers)
-                        _ModeChoice(
+                        RappChoice(
                             key: Key('term-app-$l'),
                             label: l,
                             selected: termApp == l,
@@ -511,14 +465,14 @@ class _DevicesTabState extends State<DevicesTab> {
               children: [
                 Text('打开方式', style: TextStyle(color: t.text)),
                 const SizedBox(width: 12),
-                _ModeChoice(
+                RappChoice(
                     key: const Key('term-open-text'),
                     label: '文本',
                     selected: mode == 'text',
                     onTap: () => state.setTermOpen(id, 'text')),
                 if (graphical) ...[
                   const SizedBox(width: 12),
-                  _ModeChoice(
+                  RappChoice(
                       key: const Key('term-open-pixels'),
                       label: '画面',
                       selected: mode == 'pixels',
@@ -657,7 +611,7 @@ class _AppRow extends StatelessWidget {
                       if (onProfile != null) ...[
                         IconButton(
                           key: Key('profile-$app'),
-                          icon: const Icon(Icons.more_horiz),
+                          icon: Icon(Icons.more_horiz, size: 20, color: t.text),
                           tooltip: 'app 配置',
                           constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
                           onPressed: onProfile,
@@ -810,35 +764,6 @@ class _PixelsRow extends StatelessWidget {
             onPressed: enabled && lamp != Lamp.connecting ? onOpen : null,
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// One of the two 打开方式 choices.
-class _ModeChoice extends StatelessWidget {
-  const _ModeChoice({super.key, required this.label, required this.selected, required this.onTap});
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RappTokens.of(context);
-    return Semantics(
-      inMutuallyExclusiveGroup: true,
-      checked: selected,
-      child: InkWell(
-        onTap: onTap,
-        child: SizedBox(
-          height: 48,
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(selected ? Icons.radio_button_checked : Icons.radio_button_unchecked,
-                size: 18, color: selected ? t.accent : t.muted),
-            const SizedBox(width: 6),
-            Text(label, style: TextStyle(color: t.text)),
-          ]),
-        ),
       ),
     );
   }

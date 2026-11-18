@@ -24,6 +24,7 @@ import 'package:rapp/ui/workspace_store.dart';
 
 import '../fakes.dart';
 import 'helpers.dart';
+import 'platform_helpers.dart';
 
 void main() {
   late FakeTransport t;
@@ -434,6 +435,27 @@ void main() {
       expect(find.text('Two'), findsNothing);
     });
 
+    for (final (p, min) in [(TargetPlatform.macOS, 40.0), (TargetPlatform.iOS, 48.0)]) {
+      testWidgets('the window menu × is at least $min square on $p', (tester) async {
+        await onPlatform(p, () async {
+          final (es, port) = await boot(tester);
+          port.emit(WindowsEvent(1, [rw(1, 'One'), rw(2, 'Two')]));
+          await tester.pump();
+          await tester.tap(find.byKey(const Key('window-menu')));
+          await settle(tester);
+          final s = tester.getSize(find.byKey(const Key('close-window-2')));
+          expect(s.width, greaterThanOrEqualTo(min));
+          expect(s.height, greaterThanOrEqualTo(min));
+          // A tap at the hit area's edge still closes.
+          final r = tester.getRect(find.byKey(const Key('close-window-2')));
+          port.calls.clear();
+          await tester.tapAt(r.topLeft + const Offset(1, 1));
+          await settle(tester);
+          expect(port.calls.any((c) => c.$1 == 'close_window' && c.$2['window'] == 2), isTrue);
+        });
+      });
+    }
+
     testWidgets('× in the menu closes that window, never the main one', (tester) async {
       final (es, port) = await boot(tester);
       port.emit(WindowsEvent(1, [rw(1, 'One'), rw(2, 'Two')]));
@@ -456,6 +478,9 @@ void main() {
           lessThanOrEqualTo(WindowMenu.compactWidth));
       expect(tester.widget<Text>(find.byKey(const Key('window-menu-label'))).data, '2');
       expect(find.byTooltip('A window with a long title（2 个窗口）'), findsOneWidget);
+      // The count sits in the middle of its box.
+      final box = tester.getRect(find.byKey(const Key('window-menu')));
+      expect((tester.getCenter(find.byKey(const Key('window-menu-label'))).dx - box.center.dx).abs(), lessThan(1));
       // The bar still fits: nothing overflowed.
       expect(tester.takeException(), isNull);
     });
@@ -1121,8 +1146,8 @@ void main() {
       await openMenu(tester);
       await tester.tap(find.byKey(const Key('window-row-1')), buttons: kSecondaryButton);
       await settle(tester);
-      final item = tester.widget<PopupMenuItem<Object?>>(
-          find.ancestor(of: find.text('隐藏这类窗口'), matching: find.byType(PopupMenuItem<Object?>)));
+      final item = tester.widget<PopupMenuItem<String>>(
+          find.ancestor(of: find.text('隐藏这类窗口'), matching: find.byType(PopupMenuItem<String>)));
       expect(item.enabled, isFalse);
     });
 
@@ -1216,6 +1241,15 @@ void main() {
       expect(tester.widget<Text>(find.byKey(const Key('project-menu-label'))).data, '全部');
       expect(tester.widget<Icon>(find.byKey(const Key('project-menu-icon'))).icon, ProjectMenu.buttonIcon);
       expect(tester.getSize(btn).height, greaterThanOrEqualTo(48));
+      // Compact: icon and arrow fit the 48 the top bar budgets for it, without an overflow.
+      await tester.pumpWidget(MaterialApp(
+        theme: themeDataFor(RappTheme.matrix),
+        home: Scaffold(body: Align(alignment: Alignment.topLeft, child: SizedBox(width: 48, child: ProjectMenu(state: s, compact: true)))),
+      ));
+      expect(tester.takeException(), isNull);
+      expect(tester.getSize(find.byKey(const Key('project-menu'))).width, ProjectMenu.compactWidth);
+      await tester.pumpWidget(Container());
+      await boot(tester);
       // Ahead of the session list: it narrows what the list holds.
       expect(tester.getRect(btn).right, lessThanOrEqualTo(tester.getRect(find.byKey(const Key('prev'))).left + 0.01));
       expect(tester.getRect(btn).left, greaterThanOrEqualTo(tester.getRect(find.byKey(const Key('overview-button'))).right - 0.01));
@@ -1232,8 +1266,10 @@ void main() {
       expect(find.descendant(of: find.byKey(const Key('project-row-all')), matching: find.byIcon(ProjectMenu.allIcon)), findsOneWidget);
       expect(find.descendant(of: find.byKey(Key('project-row-${b.id}')), matching: find.byIcon(ProjectMenu.projectIcon)), findsOneWidget);
       expect(find.descendant(of: find.byKey(const Key('project-row-free-zone')), matching: find.byIcon(ProjectMenu.freeZoneIcon)), findsOneWidget);
-      final bold = tester.widget<Text>(find.descendant(of: find.byKey(Key('project-row-${a.id}')), matching: find.text('写周报')));
-      expect(bold.style!.fontWeight, FontWeight.w700, reason: 'the current one is bold');
+      final current = tester.widget<Text>(find.descendant(of: find.byKey(Key('project-row-${a.id}')), matching: find.text('写周报')));
+      expect(current.style?.fontWeight, isNull, reason: 'the current one is ticked, not bold');
+      expect(find.byIcon(Icons.check), findsOneWidget);
+      expect(find.descendant(of: find.byKey(Key('project-row-${a.id}')), matching: find.byIcon(Icons.check)), findsOneWidget);
       await tester.tap(find.byKey(Key('project-row-${b.id}')));
       await tester.pumpAndSettle();
       expect(s.currentProject, b.id);

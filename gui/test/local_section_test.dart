@@ -6,10 +6,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/pages/local_section.dart';
 import 'package:rapp/paths.dart';
 import 'package:rapp/service_client.dart';
+import 'package:rapp/ui/controls.dart';
 import 'package:rapp/linux_firewall.dart';
 
 import 'service_client_test.dart' show FakeService, until;
 import 'ui/helpers.dart';
+import 'ui/platform_helpers.dart';
 
 void main() {
   late Directory tmp;
@@ -183,7 +185,7 @@ void main() {
       expect(find.text('⚠ 安全变更：中继换了 key'), findsOneWidget);
       expect(find.text('这台设备已经和中继断开。请向管理中继的人要新 key，再输入。'), findsOneWidget);
       expect(find.byKey(const Key('enter-new-key')), findsOneWidget);
-      expect(tester.widget(find.byKey(const Key('enter-new-key'))), isA<FilledButton>());
+      expect(tester.widget(find.byKey(const Key('enter-new-key'))), isA<RappButton>());
       expect(find.text('输入新 key'), findsOneWidget);
     });
 
@@ -243,6 +245,23 @@ void main() {
     });
   });
 
+  for (final (p, min) in [(TargetPlatform.macOS, 40.0), (TargetPlatform.iOS, 48.0)]) {
+    testWidgets('the LAN fold is at least $min tall on $p', (tester) async {
+      await onPlatform(p, () async {
+        svc = FakeService('tok')
+          ..extraStatus = {'relay_addr': 'vps:22026', 'has_key': true}
+          ..lanIds = ['123456789@192.168.1.5'];
+        await pump(tester); // the theme's platform sets the height; a Mac LocalSection would open its permission dialog
+        final fold = find.byKey(const Key('lan-fold'));
+        expect(tester.getSize(fold).height, greaterThanOrEqualTo(min));
+        final r = tester.getRect(fold);
+        await tester.tapAt(r.topLeft + const Offset(2, 2)); // the edge of the hit area
+        await tester.pump();
+        expect(find.text('▾ 局域网地址（1 个）'), findsOneWidget);
+      });
+    });
+  }
+
   testWidgets('with a relay the bare ID comes first and LAN IDs fold', (tester) async {
     svc = FakeService('tok')
       ..extraStatus = {'relay_addr': 'vps:22026', 'has_key': true}
@@ -297,6 +316,12 @@ void main() {
 
   const label = '远程 app 都关闭后自动锁屏';
   const note = '锁屏后，B 打开 app 时需要输入这台 Mac 的登录密码。';
+
+  testWidgets('the auto-lock row is bounded to 320 wide', (tester) async {
+    svc = FakeService('tok');
+    await pump(tester, platform: TargetPlatform.macOS);
+    expect(tester.getSize(find.byType(RappSwitchRow)).width, lessThanOrEqualTo(320));
+  });
 
   testWidgets('the auto-lock switch shows on macOS, reflects the status and sends set_auto_lock', (tester) async {
     svc = FakeService('tok');

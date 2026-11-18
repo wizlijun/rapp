@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/ui/tokens.dart';
 import 'package:rapp/access_log.dart';
 import 'package:rapp/pages/access_log_section.dart';
 
@@ -109,7 +110,7 @@ void main() {
 
   testWidgets('the section lists rows, colours refusals, and opens the log folder', (tester) async {
     final opened = <String>[];
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(MaterialApp(theme: themeDataFor(RappTheme.matrix), 
       home: Scaffold(
         body: AccessLogSection(
           load: () async => [
@@ -133,14 +134,14 @@ void main() {
   });
 
   testWidgets('an empty history says so; a load error is shown', (tester) async {
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(MaterialApp(theme: themeDataFor(RappTheme.matrix), 
       home: Scaffold(body: AccessLogSection(load: () async => [], logDir: null, openFolder: (_) async {})),
     ));
     await tester.pumpAndSettle();
     expect(find.text('（还没有记录）'), findsOneWidget);
     expect(tester.widget<OutlinedButton>(find.widgetWithText(OutlinedButton, '打开日志文件夹')).onPressed, isNull);
 
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(MaterialApp(theme: themeDataFor(RappTheme.matrix), 
       home: Scaffold(
           body: AccessLogSection(
               key: const ValueKey(2), load: () async => throw Exception('down'), logDir: null, openFolder: (_) async {})),
@@ -156,7 +157,7 @@ void main() {
     final reload = ChangeNotifier();
     addTearDown(reload.dispose);
     var more = 0;
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(MaterialApp(theme: themeDataFor(RappTheme.matrix), 
       home: Scaffold(
         body: SingleChildScrollView(
           child: AccessLogSection(

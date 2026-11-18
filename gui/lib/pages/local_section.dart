@@ -11,6 +11,7 @@ import '../ios_channel.dart';
 import '../permissions.dart';
 import '../platform_caps.dart';
 import '../service_client.dart';
+import '../ui/controls.dart';
 import '../ui/tokens.dart';
 import '../ui/lifecycle.dart' show disconnectWord;
 import '../ui/secure_text_field.dart';
@@ -182,11 +183,15 @@ class _LocalSectionState extends State<LocalSection> {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        MergeSemantics(
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Text('远程 app 都关闭后自动锁屏', style: TextStyle(color: t.text)),
-            Switch(key: const Key('auto-lock-switch'), value: st.autoLock, onChanged: _setAutoLock),
-          ]),
+        // Bounded, so the switch stays near its label.
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 320),
+          child: RappSwitchRow(
+            switchKey: const Key('auto-lock-switch'),
+            label: '远程 app 都关闭后自动锁屏',
+            value: st.autoLock,
+            onChanged: _setAutoLock,
+          ),
         ),
         Text('锁屏后，B 打开 app 时需要输入这台 Mac 的登录密码。', style: TextStyle(color: t.muted)),
       ]),
@@ -216,7 +221,7 @@ class _LocalSectionState extends State<LocalSection> {
   }
 
   Widget _icon(String key, String tip, IconData icon, VoidCallback onPressed) => IconButton(
-      key: Key(key), tooltip: tip, icon: Icon(icon, size: 18), visualDensity: VisualDensity.compact, onPressed: onPressed);
+      key: Key(key), tooltip: tip, icon: Icon(icon, size: 20, color: RappTokens.of(context).text), onPressed: onPressed);
 
   Widget _idRow(String label, String id, String key) =>
       _row(label, id, trailing: _icon(key, '复制 ID', Icons.copy, () => _copy(id, ' ID')));
@@ -241,7 +246,15 @@ class _LocalSectionState extends State<LocalSection> {
             InkWell(
               key: const Key('lan-fold'),
               onTap: () => setState(() => _lanOpen = !_lanOpen),
-              child: Text('${_lanOpen ? '▾' : '▸'} 局域网地址（${lan.length} 个）'),
+              borderRadius: BorderRadius.circular(RappTokens.of(context).r),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: controlHeightOf(context)),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  widthFactor: 1,
+                  child: Text('${_lanOpen ? '▾' : '▸'} 局域网地址（${lan.length} 个）'),
+                ),
+              ),
             ),
           ]),
         ),
@@ -302,8 +315,8 @@ class _LocalSectionState extends State<LocalSection> {
         padding: const EdgeInsets.only(left: 72),
         child: Align(
             alignment: Alignment.centerLeft,
-            child: FilledButton(
-                key: const Key('enter-new-key'), onPressed: () => _enterNewKey(st), child: const Text('输入新 key'))),
+            child: RappButton.primary(
+                key: const Key('enter-new-key'), label: '输入新 key', onPressed: () => _enterNewKey(st))),
       ),
     ]);
   }
@@ -324,12 +337,13 @@ class _LocalSectionState extends State<LocalSection> {
             valueListenable: error,
             builder: (_, e, _) => e == null
                 ? const SizedBox.shrink()
-                : Padding(padding: const EdgeInsets.only(top: 8), child: Text(e, style: const TextStyle(color: Colors.red))),
+                : Padding(padding: const EdgeInsets.only(top: 8), child: Text(e, style: TextStyle(color: Theme.of(ctx).colorScheme.error))),
           ),
         ]),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-          FilledButton(
+          RappButton.quiet(label: '取消', onPressed: () => Navigator.pop(ctx)),
+          RappButton.primary(
+            label: '保存',
             onPressed: () async {
               try {
                 await m.setRelay(st.relayAddr ?? '', key.text.trim());
@@ -344,7 +358,6 @@ class _LocalSectionState extends State<LocalSection> {
                 error.value = disconnectWord('$e');
               }
             },
-            child: const Text('保存'),
           ),
         ],
       ),
@@ -362,7 +375,7 @@ class _LocalSectionState extends State<LocalSection> {
         selectable: key != null,
         trailing: st.hasKey
             ? Row(mainAxisSize: MainAxisSize.min, children: [
-                TextButton(key: const Key('key-reveal'), onPressed: key == null ? _revealKey : _hideKey, child: Text(key == null ? '显示' : '隐藏')),
+                RappButton.quiet(key: const Key('key-reveal'), label: key == null ? '显示' : '隐藏', onPressed: key == null ? _revealKey : _hideKey),
                 if (key != null) _icon('copy-key', '复制 key', Icons.copy, () => _copy(key, ' key')),
               ])
             : null);
@@ -406,12 +419,13 @@ class _LocalSectionState extends State<LocalSection> {
           ValueListenableBuilder<String?>(
             valueListenable: error,
             builder: (_, e, _) =>
-                e == null ? const SizedBox.shrink() : Padding(padding: const EdgeInsets.only(top: 8), child: Text(e, style: const TextStyle(color: Colors.red))),
+                e == null ? const SizedBox.shrink() : Padding(padding: const EdgeInsets.only(top: 8), child: Text(e, style: TextStyle(color: Theme.of(ctx).colorScheme.error))),
           ),
         ]),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-          FilledButton(
+          RappButton.quiet(label: '取消', onPressed: () => Navigator.pop(ctx)),
+          RappButton.primary(
+            label: '保存',
             onPressed: () async {
               try {
                 await m.setRelay(addr.text.trim(), key.text.trim());
@@ -426,7 +440,6 @@ class _LocalSectionState extends State<LocalSection> {
                 error.value = disconnectWord('$e');
               }
             },
-            child: const Text('保存'),
           ),
         ],
       ),
@@ -451,8 +464,8 @@ class _LocalSectionState extends State<LocalSection> {
           title: Text(title),
           content: Column(mainAxisSize: MainAxisSize.min, children: fields),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('保存')),
+            RappButton.quiet(label: '取消', onPressed: () => Navigator.pop(ctx, false)),
+            RappButton.primary(label: '保存', onPressed: () => Navigator.pop(ctx, true)),
           ],
         ),
       );
@@ -481,7 +494,7 @@ class _LocalSectionState extends State<LocalSection> {
             (ServiceAction.stop, '停止'),
             (ServiceAction.restart, '重启'),
           ])
-            OutlinedButton(onPressed: _busy ? null : () => _control(a), child: Text(label)),
+            RappButton.secondary(label: label, onPressed: _busy ? null : () => _control(a)),
         ]);
         return Column(children: [
         SectionCard(title: '本机', children: [

@@ -326,13 +326,18 @@ class _ComposerPanelState extends State<ComposerPanel> {
                   Flexible(
                     child: InkWell(
                       onTap: () => _s.selectInput(''),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
+                      borderRadius: BorderRadius.circular(t.r),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(minHeight: controlHeightOf(context)),
+                        child: Align(
+                        alignment: Alignment.centerLeft,
+                        widthFactor: 1,
                         child: Text(
                           '远端在用输入法 ${src.name}，发送前会切到英文 · 点按现在就切',
                           maxLines: 1,
                           overflow: cut,
                           style: TextStyle(color: t.accent, fontWeight: FontWeight.w600),
+                        ),
                         ),
                       ),
                     ),

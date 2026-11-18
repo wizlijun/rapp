@@ -11,6 +11,7 @@ import 'prefs.dart' show FirstLayer;
 import 'projects_tab.dart';
 import 'resources_tab.dart';
 import 'sessions_tab.dart';
+import 'controls.dart';
 import 'tab_chip.dart';
 import 'tokens.dart';
 
@@ -31,9 +32,8 @@ String _tabLabel(PanelTab t) => switch (t) {
 /// The panel's width in a [window] this wide: half of it, the same for every tab.
 double panelWidth(double window) => window / 2;
 
-/// 全局设置's rows (the dropdowns, the switch rows and the fold header): compact 34 with a pointer, the 48 touch
-/// target on the iPad.
-double settingsRowHeight(TargetPlatform p) => p == TargetPlatform.iOS ? 48 : 34;
+/// 全局设置's rows (the dropdowns, the switch rows and the fold header): the same height as every control.
+double settingsRowHeight(TargetPlatform p) => controlHeightFor(p);
 
 /// 全局设置's text size: one step under the panel's [text] size.
 double settingsTextSize(double text) => math.max(11, text - 1);
@@ -124,7 +124,7 @@ class SidePanel extends StatelessWidget {
                             minWidth: 48,
                             minHeight: 48,
                           ),
-                          icon: Icon(Icons.chevron_left, color: t.text),
+                          icon: Icon(Icons.chevron_left, size: 20, color: t.text),
                           onPressed: state.closePanel,
                         ),
                       ],
@@ -204,65 +204,17 @@ class _Footer extends StatelessWidget {
           color: t.text, fontSize: settingsTextSize(t.textSize), height: 1.3);
     final folded = state.prefs.settingsFolded;
     final rowHeight = settingsRowHeight(Theme.of(context).platform);
-    Widget box<T>(Key key, T value, List<(T, String)> items, void Function(T) onChanged) => Container(
-          height: rowHeight,
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(t.r),
-            border: Border.all(color: t.line),
-          ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<T>(
-              key: key,
-              value: value,
-              isExpanded: true,
-              isDense: true,
-              iconSize: 18,
-              dropdownColor: t.bg,
-              iconEnabledColor: t.muted,
-              style: small,
-              items: [for (final (v, label) in items) DropdownMenuItem(value: v, child: Text(label))],
-              onChanged: (v) {
-                if (v != null) onChanged(v);
-              },
-            ),
-          ),
-        );
-    Widget toggle(Key key, String label, bool value, void Function(bool) onChanged, {String? note}) => InkWell(
+    Widget box<T>(Key key, T value, List<(T, String)> items, void Function(T) onChanged) => RappDropdown<T>(
           key: key,
-          borderRadius: BorderRadius.circular(t.r),
-          onTap: () => onChanged(!value),
-          child: ConstrainedBox(
-            constraints: BoxConstraints(minHeight: rowHeight),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Row(children: [
-                Expanded(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(label, style: small),
-                      if (note != null) Text(note, style: small.copyWith(color: t.muted)),
-                    ],
-                  ),
-                ),
-                // Material's switch is 52×32; at 0.7 it sits in the row like the dropdown arrows.
-                SizedBox(
-                  width: 38,
-                  height: 24,
-                  child: FittedBox(
-                    child: Switch(
-                      value: value,
-                      onChanged: onChanged,
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                  ),
-                ),
-              ]),
-            ),
-          ),
+          expand: true,
+          current: value,
+          textStyle: small,
+          label: Text(items.firstWhere((e) => e.$1 == value).$2),
+          items: [for (final (v, label) in items) RappMenuItem<T>(value: v, label: label)],
+          onSelected: onChanged,
         );
+    Widget toggle(Key key, String label, bool value, void Function(bool) onChanged, {String? note}) =>
+        RappSwitchRow(key: key, label: label, note: note, value: value, onChanged: onChanged, style: small);
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(

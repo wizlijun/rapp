@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../linux_update.dart';
+import '../ui/controls.dart';
 
 /// Available even with no local hosting service. Installation belongs to pacman.
 class LinuxUpdateSection extends StatefulWidget {
@@ -73,23 +74,23 @@ class _LinuxUpdateSectionState extends State<LinuxUpdateSection> {
         Wrap(
           spacing: 8,
           children: [
-            OutlinedButton(
+            RappButton.secondary(
+              label: '检查更新',
               onPressed: _busy ? null : _check,
-              child: const Text('检查更新'),
             ),
-            OutlinedButton(
+            RappButton.secondary(
+              label: '发布页面',
               onPressed: () => _open(release?.page ?? linuxReleasePage),
-              child: const Text('发布页面'),
             ),
             if (!older && release?.package != null)
-              OutlinedButton(
+              RappButton.secondary(
+                label: '下载 Linux 安装包',
                 onPressed: () => _open(release!.package!),
-                child: const Text('下载 Linux 安装包'),
               ),
             if (!older && release?.archive != null)
-              OutlinedButton(
+              RappButton.secondary(
+                label: '下载 Linux 便携包',
                 onPressed: () => _open(release!.archive!),
-                child: const Text('下载 Linux 便携包'),
               ),
           ],
         ),

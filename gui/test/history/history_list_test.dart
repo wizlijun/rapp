@@ -9,6 +9,7 @@ import 'package:rapp/history/input_history.dart';
 import 'package:rapp/paths.dart';
 
 import '../ui/helpers.dart';
+import '../ui/platform_helpers.dart';
 import 'input_history_test.dart' show rec;
 
 void main() {
@@ -51,6 +52,16 @@ void main() {
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
     await tester.pump();
   }
+
+  testWidgets('search field is 40 tall on macOS, like the log search', (tester) async {
+    await onPlatform(TargetPlatform.macOS, () async {
+      final h = await load(tester);
+      await show(tester, h);
+      expect(
+          tester.getSize(find.descendant(of: find.byKey(const Key('history-search')), matching: find.byType(InputDecorator))).height,
+          40);
+    });
+  });
 
   testWidgets('search finds a three-day-old entry and puts it into the editor', (tester) async {
     day('dev1', '2026-11-12', [rec('01A', '2026-11-12T10:30:00+09:00', '跑一下部署脚本\n第二行')]);

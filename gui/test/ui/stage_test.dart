@@ -32,6 +32,7 @@ import 'package:rapp/ui/top_bar.dart';
 
 import '../fakes.dart';
 import 'helpers.dart';
+import 'platform_helpers.dart';
 
 class _KeyboardPort extends FakeSessionPort {
   final keys = <KeyEvent>[];
@@ -2209,6 +2210,28 @@ void main() {
       expect(m['x'], 10.0);
       expect(m['y'], 10.0);
     });
+
+    for (final (p, min) in [(TargetPlatform.macOS, 40.0), (TargetPlatform.iOS, 48.0)]) {
+      testWidgets('a popup\'s × is an IconButton at least $min square on $p', (tester) async {
+        await onPlatform(p, () async {
+          await tester.pumpWidget(wrap(embedded()));
+          await showWindows(tester, [popup(9, WindowKind.popover, parent: 5), rw(5, 400, 328)]);
+          final close = find.byKey(const ValueKey('popup-close-9'));
+          expect(tester.widget(close), isA<IconButton>());
+          final s = tester.getSize(close);
+          expect(s.width, greaterThanOrEqualTo(min));
+          expect(s.height, greaterThanOrEqualTo(min));
+          expect(tester.widget<IconButton>(close).iconSize, 20);
+          // A float disc behind the × so it reads over a picture, 28 across, centred in the hit area.
+          final disc = find.byKey(const ValueKey('popup-close-disc-9'));
+          final deco = tester.widget<DecoratedBox>(disc).decoration as BoxDecoration;
+          expect(deco.shape, BoxShape.circle);
+          expect(deco.color, RappTokens.of(tester.element(close)).float.first.withValues(alpha: .85));
+          expect(tester.getSize(disc), const Size(28, 28));
+          expect(tester.getCenter(disc), tester.getCenter(close));
+        });
+      });
+    }
 
     testWidgets('right-click on a popup\'s ×: 隐藏这类窗口 closes it and hides the ones like it, with 撤销', (tester) async {
       await tester.pumpWidget(wrap(embedded()));

@@ -82,14 +82,14 @@ class _AddDeviceFormState extends State<AddDeviceForm> {
         TextField(
           key: const Key('add-id'),
           controller: _id,
-          decoration: InputDecoration(labelText: widget.relaySet ? '对方的 ID' : '对方的 ID@IP', isDense: true),
+          decoration: InputDecoration(labelText: widget.relaySet ? '对方的 ID' : '对方的 ID@IP'),
         ),
         const SizedBox(height: 8),
         SecureTextField(
           key: const Key('add-password'),
           controller: _pw,
           decoration: InputDecoration(
-              labelText: '密码', hintText: widget.relaySet ? '有 key 时不用填' : null, isDense: true),
+              labelText: '密码', hintText: widget.relaySet ? '有 key 时不用填' : null),
           onSubmitted: (_) => _add(),
         ),
         const SizedBox(height: 8),

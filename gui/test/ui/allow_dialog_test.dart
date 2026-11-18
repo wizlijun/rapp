@@ -67,7 +67,7 @@ void main() {
   testWidgets('one already allowed but not a candidate stays ticked', (t) async {
     List<String>? got;
     await open(t, [me, mini], [const Device(fp: 'x', name: 'abababab')], (v) => got = v);
-    expect(t.widget<CheckboxListTile>(find.byKey(const Key('allow-device-x'))).value, isTrue);
+    expect(t.widget<RappCheckRow>(find.byKey(const Key('allow-device-x'))).value, isTrue);
     expect(find.text('abababab'), findsOneWidget);
     await t.tap(find.text('保存'));
     await t.pumpAndSettle();

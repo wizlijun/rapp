@@ -219,7 +219,7 @@ class _SharesSectionState extends State<SharesSection> {
                 child: TextField(
                   key: const Key('share-port'),
                   controller: _port,
-                  decoration: const InputDecoration(hintText: '端口号', isDense: true),
+                  decoration: const InputDecoration(hintText: '端口号'),
                   onSubmitted: (_) => _busy ? null : _add(),
                 ),
               ),
@@ -228,7 +228,7 @@ class _SharesSectionState extends State<SharesSection> {
                 child: TextField(
                   key: const Key('share-note'),
                   controller: _note,
-                  decoration: const InputDecoration(hintText: '备注，可不填', isDense: true),
+                  decoration: const InputDecoration(hintText: '备注，可不填'),
                   onSubmitted: (_) => _busy ? null : _add(),
                 ),
               ),
@@ -239,7 +239,7 @@ class _SharesSectionState extends State<SharesSection> {
           if (_setError != null)
             Padding(
               padding: const EdgeInsets.only(top: 4),
-              child: Text(_setError!, key: const Key('share-error'), style: TextStyle(color: t.accent)),
+              child: Text(_setError!, key: const Key('share-error'), style: TextStyle(color: Theme.of(context).colorScheme.error)),
             ),
         ],
       );
@@ -290,20 +290,16 @@ class _ShareRowView extends StatelessWidget {
       ];
 
   /// The protocol control: a menu in the style of the window menu; picking the current one is a no-op.
-  Widget _protoPicker() => PopupMenuButton<String>(
-        key: Key('share-proto-${row.port}'),
-        tooltip: '协议',
-        enabled: !busy,
-        onSelected: (p) {
-          if (p != row.proto) onProto(p);
-        },
-        itemBuilder: (_) => [for (final p in _protos) PopupMenuItem<String>(value: p, child: Text(p))],
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Text(row.proto, style: TextStyle(color: t.text)),
-            Icon(Icons.arrow_drop_down, size: 16, color: t.muted),
-          ]),
+  Widget _protoPicker() => Tooltip(
+        message: '协议',
+        child: RappDropdown<String>(
+          key: Key('share-proto-${row.port}'),
+          enabled: !busy,
+          label: Text(row.proto),
+          items: [for (final p in _protos) RappMenuItem<String>(value: p, label: p)],
+          onSelected: (p) {
+            if (p != row.proto) onProto(p);
+          },
         ),
       );
 

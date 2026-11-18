@@ -26,6 +26,7 @@ import 'ui/prefs.dart';
 import 'ui/system_font.dart';
 import 'main_ios.dart';
 import 'ui/tokens.dart';
+import 'ui/controls.dart';
 
 Future<void> main(List<String> args) async {
   if (Platform.isIOS) return mainIos();
@@ -286,8 +287,8 @@ class _Shell with WindowListener, TrayListener {
         title: Text(title),
         content: Text(body),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('取消')),
-          FilledButton(onPressed: () => Navigator.pop(c, true), child: Text(ok)),
+          RappButton.quiet(label: '取消', onPressed: () => Navigator.pop(c, false)),
+          RappButton.primary(label: ok, onPressed: () => Navigator.pop(c, true)),
         ],
       ),
     );

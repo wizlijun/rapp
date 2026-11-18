@@ -285,9 +285,9 @@ class Stage extends StatelessWidget {
                           color: Theme.of(context).colorScheme.surface,
                           child: Wrap(spacing: 8, children: [
                             for (var i = 0; i < screens.length; i++)
-                              TextButton(
+                              RappButton.quiet(
+                                label: '屏幕 ${i + 1}',
                                 onPressed: () => state.openScreen(rec!.id, screens[i].id),
-                                child: Text('屏幕 ${i + 1}'),
                               ),
                           ]),
                         ),
@@ -298,6 +298,7 @@ class Stage extends StatelessWidget {
                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                             child: Row(children: [
                               Expanded(child: Text(banner.text, style: const TextStyle(color: Colors.black87))),
+                              // Raw TextButton on purpose: it sits on the yellow banner, so its ink is fixed black.
                               TextButton(
                                 style: TextButton.styleFrom(foregroundColor: Colors.black87),
                                 onPressed: () => requestUnlock(context, state, rec!.id),
@@ -326,6 +327,7 @@ class _HostNoticeBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Raw TextButtons on purpose: they sit on the yellow banner, so their ink is fixed black.
     final style = TextButton.styleFrom(foregroundColor: Colors.black87);
     return Material(
       key: const Key('host-notice'),

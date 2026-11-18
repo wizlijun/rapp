@@ -529,8 +529,6 @@ class _StreamMenuState extends State<StreamMenu> {
                   textInputAction: TextInputAction.done,
                   decoration: const InputDecoration(
                     hintText: '存成项目',
-                    isDense: true,
-                    contentPadding: EdgeInsets.symmetric(vertical: 16, horizontal: 8),
                   ),
                   onSubmitted: (v) {
                     if (v.trim().isEmpty) return;
@@ -705,11 +703,12 @@ class _Item extends StatelessWidget {
     final active = enabled && onTap != null;
     final color = enabled ? t.text : t.muted;
     final row = Container(
-      constraints: const BoxConstraints(minHeight: 48),
+      constraints: BoxConstraints(minHeight: controlHeightOf(context)),
       padding: EdgeInsets.only(left: 12 + indent, right: 12),
       child: Row(
         children: [
-          SizedBox(width: 24, child: checked ? Icon(Icons.check, size: 18, color: t.text) : null),
+          SizedBox(width: 18, child: checked ? Icon(Icons.check, size: 18, color: t.text) : null),
+          const SizedBox(width: 8),
           Expanded(child: Text(label, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: color))),
           ?trailing,
         ],
@@ -719,6 +718,6 @@ class _Item extends StatelessWidget {
       return Semantics(enabled: false, selected: checked, label: label, excludeSemantics: true, child: row);
     }
     // A trailing button sits beside the row's own tap target, not inside it.
-    return InkWell(onTap: onTap, child: row);
+    return InkWell(onTap: onTap, borderRadius: BorderRadius.circular(RappTokens.of(context).r), child: row);
   }
 }

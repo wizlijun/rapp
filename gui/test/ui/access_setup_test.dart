@@ -21,7 +21,8 @@ void main() {
     await tester.pumpWidget(wrap(AccessSetup(hub: hub, onDone: done.add)));
   }
 
-  FilledButton go(WidgetTester tester) => tester.widget<FilledButton>(find.byKey(const Key('access-go')));
+  FilledButton go(WidgetTester tester) =>
+      tester.widget<FilledButton>(find.descendant(of: find.byKey(const Key('access-go')), matching: find.byType(FilledButton)));
 
   testWidgets('接入 sends set_access with both fields and calls onDone', (tester) async {
     t.onSend = (cmd) {

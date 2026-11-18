@@ -9,6 +9,7 @@ import '../hub_client.dart';
 import '../ios_channel.dart';
 import '../paths.dart';
 import '../ui/access_setup.dart';
+import '../ui/controls.dart';
 import '../ui/prefs.dart';
 import '../ui/resources_state.dart' show sizeText;
 import 'local_section.dart' show keyMask;
@@ -119,11 +120,10 @@ class _IosLocalSectionState extends State<IosLocalSection> {
       // The key is not kept here: only the last 4 of one typed in this run can be shown.
       trailing: tail == null
           ? null
-          : TextButton(
+          : RappButton.quiet(
               key: const Key('ios-key-reveal'),
-              style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+              label: _showTail ? '隐藏' : '显示',
               onPressed: () => setState(() => _showTail = !_showTail),
-              child: Text(_showTail ? '隐藏' : '显示'),
             ),
     );
   }
@@ -138,21 +138,27 @@ class _IosLocalSectionState extends State<IosLocalSection> {
       _row('本机名', Text(a?.name ?? '')),
       _row('数据用量', Text(bytes == null ? '计算中…' : sizeText(bytes))),
       _row('版本', Text(_version ?? '')),
-      MergeSemantics(
-        child: _row(
-          '屏幕常亮',
-          const Text('有会话时屏幕不自动熄灭'),
-          trailing: Switch(key: const Key('keep-awake-switch'), value: widget.prefs.keepAwake, onChanged: _setKeepAwake),
+      // Bounded, so the switch stays near its label.
+      Align(
+        alignment: Alignment.centerLeft,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 320),
+          child: RappSwitchRow(
+            switchKey: const Key('keep-awake-switch'),
+            label: '屏幕常亮',
+            note: '有会话时屏幕不自动熄灭',
+            value: widget.prefs.keepAwake,
+            onChanged: _setKeepAwake,
+          ),
         ),
       ),
       const SizedBox(height: 8),
       Align(
         alignment: Alignment.centerLeft,
-        child: OutlinedButton(
+        child: RappButton.secondary(
           key: const Key('edit-access'),
-          style: OutlinedButton.styleFrom(minimumSize: const Size(48, 48)),
+          label: '修改接入',
           onPressed: _editAccess,
-          child: const Text('修改接入'),
         ),
       ),
     ]);

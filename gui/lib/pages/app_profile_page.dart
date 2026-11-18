@@ -131,31 +131,16 @@ class _AppProfilePageState extends State<AppProfilePage> {
       Padding(padding: const EdgeInsets.only(top: 18, bottom: 6), child: Text(s, style: TextStyle(color: t.text, fontWeight: FontWeight.w600)));
 
   Widget _dropdown<T>(RappTokens t,
-      {Key? key, required T value, required Map<T, String> labels, required bool grey, required ValueChanged<T> onChanged}) {
-    final color = grey ? t.muted : t.text;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      decoration: BoxDecoration(borderRadius: BorderRadius.circular(t.r), border: Border.all(color: t.line)),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<T>(
-          key: key,
-          value: value,
-          isExpanded: true,
-          dropdownColor: t.bg,
-          iconEnabledColor: t.text,
-          // Replaces the theme's text style rather than merging into it: start from the body style.
-          style: Theme.of(context).textTheme.bodyMedium!.copyWith(color: color),
-          items: [
-            for (final e in labels.entries)
-              DropdownMenuItem<T>(value: e.key, child: Text(e.value, style: TextStyle(color: color))),
-          ],
-          onChanged: (v) {
-            if (v is T) _set(() => onChanged(v));
-          },
-        ),
-      ),
-    );
-  }
+          {Key? key, required T value, required Map<T, String> labels, required bool grey, required ValueChanged<T> onChanged}) =>
+      RappDropdown<T>(
+        key: key,
+        expand: true,
+        dim: grey,
+        current: value,
+        label: Text(labels[value] ?? ''),
+        items: [for (final e in labels.entries) RappMenuItem<T>(value: e.key, label: e.value)],
+        onSelected: (v) => _set(() => onChanged(v)),
+      );
 
   Widget _field(String label, Widget child, RappTokens t) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
@@ -165,29 +150,9 @@ class _AppProfilePageState extends State<AppProfilePage> {
         ]),
       );
 
-  Widget _radio(RappTokens t, String label, AfterSend v, AfterSend current, bool grey) {
-    final on = v == current;
-    final color = grey ? t.muted : t.text;
-    return InkWell(
-      onTap: () => _set(() => _draft.afterSend = v),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Row(children: [
-          Icon(on ? Icons.radio_button_checked : Icons.radio_button_unchecked, size: 20, color: color),
-          const SizedBox(width: 8),
-          Text(label, style: TextStyle(color: color)),
-        ]),
-      ),
-    );
-  }
-
   InputDecoration _deco(RappTokens t, {String? hint, bool counter = false}) => InputDecoration(
-        isDense: true,
         hintText: hint,
-        hintStyle: TextStyle(color: t.muted),
         counterText: counter ? null : '',
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(t.r), borderSide: BorderSide(color: t.line)),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(t.r), borderSide: BorderSide(color: t.line)),
       );
 
   void _editRule(int i, WindowRule r) => _set(() => _editRules()[i] = r);
@@ -295,7 +260,7 @@ class _AppProfilePageState extends State<AppProfilePage> {
             controller: _name,
             maxLength: 40,
             style: TextStyle(color: d.name == null ? t.muted : t.text),
-            decoration: _deco(t, hint: widget.appName, counter: true).copyWith(labelText: '名字', labelStyle: TextStyle(color: t.muted)),
+            decoration: _deco(t, hint: widget.appName, counter: true).copyWith(labelText: '名字'),
             onChanged: (v) => _set(() => d.name = v.trim().isEmpty ? null : v),
           ),
           const SizedBox(height: 12),
@@ -304,11 +269,11 @@ class _AppProfilePageState extends State<AppProfilePage> {
             controller: _ids,
             readOnly: _builtin != null,
             style: TextStyle(color: _builtin != null ? t.muted : t.text),
-            decoration: _deco(t).copyWith(labelText: '标识（用逗号分开）', labelStyle: TextStyle(color: t.muted)),
+            decoration: _deco(t).copyWith(labelText: '标识（用逗号分开）'),
             onChanged: (_) => setState(() => _idsMissing = false),
           ),
           if (_idsMissing)
-            Padding(padding: const EdgeInsets.only(top: 4), child: Text('至少写一个标识', style: TextStyle(color: t.accent))),
+            Padding(padding: const EdgeInsets.only(top: 4), child: Text('至少写一个标识', style: TextStyle(color: Theme.of(context).colorScheme.error))),
           _label(t, '画面'),
           _field(
               '档位',
@@ -337,46 +302,50 @@ class _AppProfilePageState extends State<AppProfilePage> {
                   grey: d.fps == null,
                   onChanged: (v) => d.fps = v),
               t),
-          Row(children: [
-            Text('智能时按焦点分区', style: TextStyle(color: d.focusPane == null ? t.muted : t.text)),
-            Switch(
-                key: const Key('focus-pane-switch'),
-                value: focusPane,
-                onChanged: (v) => _set(() => d.focusPane = v)),
-          ]),
+          RappSwitchRow(
+            switchKey: const Key('focus-pane-switch'),
+            label: '智能时按焦点分区',
+            value: focusPane,
+            dim: d.focusPane == null,
+            onChanged: (v) => _set(() => d.focusPane = v),
+          ),
           _label(t, '发送后'),
-          _radio(t, '只贴，不按回车', AfterSend.none, afterSend, d.afterSend == null),
-          _radio(t, '贴完按回车并收起输入板', AfterSend.pressReturn, afterSend, d.afterSend == null),
+          RappChoice(
+            label: '只贴，不按回车',
+            selected: afterSend == AfterSend.none,
+            dim: d.afterSend == null,
+            onTap: () => _set(() => _draft.afterSend = AfterSend.none),
+          ),
+          RappChoice(
+            label: '贴完按回车并收起输入板',
+            selected: afterSend == AfterSend.pressReturn,
+            dim: d.afterSend == null,
+            onTap: () => _set(() => _draft.afterSend = AfterSend.pressReturn),
+          ),
           _label(t, '输入区'),
-          Row(children: [
-            Text('显示「输入」', style: TextStyle(color: d.composer == null ? t.muted : t.text)),
-            Switch(key: const Key('composer-switch'), value: composer, onChanged: (v) => _set(() => d.composer = v)),
-          ]),
-          Row(children: [
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('记下发给这个 app 的话', style: TextStyle(color: d.recordInput == null ? t.muted : t.text)),
-                Text('关掉后草稿只存在本机', style: TextStyle(color: t.muted)),
-              ]),
-            ),
-            Switch(
-                key: const Key('record-input-switch'),
-                value: recordInput,
-                onChanged: (v) => _set(() => d.recordInput = v)),
-          ]),
-          Row(children: [
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('在画面上按字母键时打开写作面板',
-                    style: TextStyle(color: d.typeToCompose == null ? t.muted : t.text)),
-                Text('关掉后字母直接发给这个 app，适合 Figma、游戏、密码管理器', style: TextStyle(color: t.muted)),
-              ]),
-            ),
-            Switch(
-                key: const Key('type-to-compose-switch'),
-                value: typeToCompose,
-                onChanged: (v) => _set(() => d.typeToCompose = v)),
-          ]),
+          RappSwitchRow(
+            switchKey: const Key('composer-switch'),
+            label: '显示「输入」',
+            value: composer,
+            dim: d.composer == null,
+            onChanged: (v) => _set(() => d.composer = v),
+          ),
+          RappSwitchRow(
+            switchKey: const Key('record-input-switch'),
+            label: '记下发给这个 app 的话',
+            note: '关掉后草稿只存在本机',
+            value: recordInput,
+            dim: d.recordInput == null,
+            onChanged: (v) => _set(() => d.recordInput = v),
+          ),
+          RappSwitchRow(
+            switchKey: const Key('type-to-compose-switch'),
+            label: '在画面上按字母键时打开写作面板',
+            note: '关掉后字母直接发给这个 app，适合 Figma、游戏、密码管理器',
+            value: typeToCompose,
+            dim: d.typeToCompose == null,
+            onChanged: (v) => _set(() => d.typeToCompose = v),
+          ),
           Row(children: [
             Expanded(
               child: Text(

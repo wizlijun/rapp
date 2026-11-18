@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/ui/tokens.dart';
 import 'package:rapp/linux_firewall.dart';
 import 'package:rapp/pages/linux_firewall_section.dart';
 import 'package:rapp/service_client.dart';
@@ -90,7 +91,7 @@ void main() {
   }, skip: !Platform.isLinux);
 
   Future<void> pump(WidgetTester tester, FirewallCheck check, {int port = 22028}) =>
-    tester.pumpWidget(MaterialApp(home: Scaffold(body: SingleChildScrollView(child:
+    tester.pumpWidget(MaterialApp(theme: themeDataFor(RappTheme.matrix), home: Scaffold(body: SingleChildScrollView(child:
       LinuxFirewallSection(port: port, localAddresses: const ['10.17.0.27'], check: check)))));
 
   testWidgets('known blocked peer prompts a scoped allow command without changing rules', (tester) async {

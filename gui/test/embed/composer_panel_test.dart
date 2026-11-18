@@ -17,6 +17,7 @@ import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/history/history_list.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/ui/controls.dart';
+import '../ui/platform_helpers.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/stage.dart';
@@ -782,18 +783,18 @@ void main() {
         await tester.pump();
         await openMenu(tester);
         final row = find.byKey(const Key('composer-plus-return'));
-        Icon box() => tester.widget<Icon>(find.descendant(of: row, matching: find.byType(Icon)));
+        bool on() => tester.widget<Switch>(find.descendant(of: row, matching: find.byType(Switch))).value;
         expect(find.descendant(of: row, matching: find.text('直接回车且隐藏')), findsOneWidget);
-        expect(box().icon, Icons.check_box);
+        expect(on(), isTrue);
         await tester.tap(row);
         await tester.pump();
         expect(menu, findsOneWidget);
         expect(es.profiles.resolve('com.x').afterSend, AfterSend.none);
-        expect(box().icon, Icons.check_box_outline_blank);
+        expect(on(), isFalse);
         await tester.tap(row);
         await tester.pump();
         expect(es.profiles.resolve('com.x').afterSend, AfterSend.pressReturn);
-        expect(box().icon, Icons.check_box);
+        expect(on(), isTrue);
       });
 
       testWidgets('直接回车且隐藏 is not offered for a session without an app id', (tester) async {
@@ -802,6 +803,26 @@ void main() {
         await tester.pump();
         await openMenu(tester);
         expect(find.byKey(const Key('composer-plus-return')), findsNothing);
+      });
+
+      testWidgets('a latched sticky key is a raise box with a 2 px accent border, not a text fill', (tester) async {
+        big(tester);
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        await openMenu(tester);
+        final key = find.byKey(const ValueKey('sticky-⌘'));
+        BoxDecoration look() =>
+            tester.widget<Container>(find.descendant(of: key, matching: find.byType(Container)).first).decoration! as BoxDecoration;
+        final t = RappTokens.of(tester.element(key));
+        expect((look().border! as Border).top.color, t.line);
+        await tester.tap(key);
+        await tester.pump();
+        final on = look();
+        expect((on.border! as Border).top.color, t.accent);
+        expect((on.border! as Border).top.width, 2);
+        expect(on.color, isNot(t.text));
+        expect(on.gradient, t.raiseBox().gradient);
+        expect(tester.getSize(key).height, controlHeightOf(tester.element(key)));
       });
 
       testWidgets('the sticky keys and the menu never carry over to another session', (tester) async {
@@ -1318,6 +1339,19 @@ void main() {
       expect(find.byKey(const Key('composer-panel')), findsNothing);
     });
 
+    for (final (p, min) in [(TargetPlatform.macOS, 40.0), (TargetPlatform.iOS, 48.0)]) {
+      testWidgets('the grip × is at least $min square on $p', (tester) async {
+        await onPlatform(p, () async {
+          await showPicture(tester);
+          await openPanel(tester);
+          final close = find.byKey(const Key('composer-grip-close'));
+          final s = tester.getSize(close);
+          expect(s.width, greaterThanOrEqualTo(min));
+          expect(s.height, greaterThanOrEqualTo(min));
+        });
+      });
+    }
+
     testWidgets('a small × right beside the grip shows with the bar and collapses the panel', (tester) async {
       await showPicture(tester);
       await openPanel(tester);
@@ -1331,9 +1365,17 @@ void main() {
       await tester.pump();
       expect(shown(), 1);
       final x = tester.getRect(close), p = panelRect(tester), g = tester.getRect(grip);
-      expect(x.bottom, lessThanOrEqualTo(p.top));
-      expect(x.center.dy, g.center.dy);
-      expect(x.left, g.right);
+      // The grip row is as tall as the grip: the panel starts right under it, as before the hit area grew.
+      expect(g.height, 20);
+      expect(p.top, g.bottom);
+      // The hit area is control-height square, hangs from the grip row's top and reaches down into the body
+      // (it has to stay inside the panel's own bounds); the drawn × is level with the grip, centred across it.
+      expect(x.size, Size.square(controlHeightOf(tester.element(close))));
+      expect(x.top, g.top);
+      final mark = tester.getCenter(find.descendant(of: close, matching: find.byIcon(Icons.close)));
+      expect(mark.dy, g.center.dy);
+      expect(mark.dx, x.center.dx);
+      expect(mark.dx - g.right, 14);
       expect(g.center.dx, p.center.dx);
       await mouse.moveTo(x.center);
       await tester.pump();

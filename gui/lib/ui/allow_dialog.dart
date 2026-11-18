@@ -39,27 +39,11 @@ class _AllowDialogState extends State<AllowDialog> {
           if (_ticked.contains(d.fp)) d.fp,
       ];
 
-  Widget _choice(RappTokens t, Key key, String label, bool selected, VoidCallback onTap) => InkWell(
-        key: key,
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
-          child: Row(children: [
-            Icon(selected ? Icons.radio_button_checked : Icons.radio_button_unchecked, size: 18, color: selected ? t.accent : t.muted),
-            const SizedBox(width: 8),
-            Text(label, style: TextStyle(color: t.text)),
-          ]),
-        ),
-      );
-
-  Widget _device(RappTokens t, Device d) => CheckboxListTile(
+  Widget _device(Device d) => RappCheckRow(
         key: Key('allow-device-${d.fp}'),
-        dense: true,
-        contentPadding: EdgeInsets.zero,
-        controlAffinity: ListTileControlAffinity.leading,
-        title: Text(d.name, style: TextStyle(color: _all ? t.muted : t.text)),
+        label: d.name,
         value: _ticked.contains(d.fp),
-        onChanged: _all ? null : (v) => setState(() => v == true ? _ticked.add(d.fp) : _ticked.remove(d.fp)),
+        onChanged: _all ? null : (v) => setState(() => v ? _ticked.add(d.fp) : _ticked.remove(d.fp)),
       );
 
   @override
@@ -75,10 +59,20 @@ class _AllowDialogState extends State<AllowDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _choice(t, const Key('allow-all'), '所有设备', _all, () => setState(() => _all = true)),
-              _choice(t, const Key('allow-some'), '只给勾选的设备', !_all, () => setState(() => _all = false)),
+              RappChoice(
+                key: const Key('allow-all'),
+                label: '所有设备',
+                selected: _all,
+                onTap: () => setState(() => _all = true),
+              ),
+              RappChoice(
+                key: const Key('allow-some'),
+                label: '只给勾选的设备',
+                selected: !_all,
+                onTap: () => setState(() => _all = false),
+              ),
               const SizedBox(height: 4),
-              for (final d in [...widget.candidates, ..._extras]) _device(t, d),
+              for (final d in [...widget.candidates, ..._extras]) _device(d),
               if (widget.candidates.length <= 1)
                 Padding(
                   padding: const EdgeInsets.only(top: 4),

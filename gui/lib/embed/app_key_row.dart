@@ -181,7 +181,7 @@ class _Key extends StatelessWidget {
     final once = state == LatchState.once, locked = state == LatchState.locked;
     final shape = RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(t.r),
-      side: BorderSide(color: once || locked ? t.accent : t.line, width: once ? 2 : 1),
+      side: BorderSide(color: once || locked ? t.accent : t.line, width: once || locked ? 2 : 1),
     );
     return Semantics(
       button: true,
@@ -192,7 +192,8 @@ class _Key extends StatelessWidget {
       child: SizedBox.fromSize(
         size: appKeySize,
         child: Material(
-          color: locked ? t.accent : t.raise.first,
+          // Locked adds a faint accent fill to the border it shares with once, so the two read apart.
+          color: locked ? Color.alphaBlend(t.accent.withValues(alpha: .18), t.raise.first) : t.raise.first,
           shape: shape,
           clipBehavior: Clip.antiAlias,
           // Never focusable: a tap leaves the keys where they were.
@@ -202,7 +203,7 @@ class _Key extends StatelessWidget {
             child: Center(
               child: Text(label,
                   style: TextStyle(
-                      color: locked ? t.accentInk : t.text, fontFamily: t.mono, fontFamilyFallback: t.monoFallback)),
+                      fontSize: 13, color: t.text, fontFamily: t.mono, fontFamilyFallback: t.monoFallback)),
             ),
           ),
         ),

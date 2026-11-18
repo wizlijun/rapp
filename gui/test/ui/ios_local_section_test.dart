@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/pages/ios_local_section.dart';
 import 'package:rapp/paths.dart';
+import 'package:rapp/ui/controls.dart';
 import 'package:rapp/ui/prefs.dart';
 
 import '../fakes.dart';
@@ -80,6 +81,11 @@ void main() {
     await tester.pump();
     expect(tester.widget<Text>(find.byKey(const Key('ios-key-value'))).data, '••••••WXYZ');
     expect(find.textContaining('secret'), findsNothing);
+  });
+
+  testWidgets('the keep-awake row is bounded to 320 wide', (tester) async {
+    await pump(tester);
+    expect(tester.getSize(find.byType(RappSwitchRow)).width, lessThanOrEqualTo(320));
   });
 
   testWidgets('the keep-awake switch flips prefs.keepAwake and saves', (tester) async {

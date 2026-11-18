@@ -345,6 +345,11 @@ void main() {
     expect(api.calls, contains('share null [8000] null null tcp'));
   });
 
+  testWidgets('the protocol picker has a 协议 tooltip', (t) async {
+    await show(t, table([row(8000)]));
+    expect(find.ancestor(of: find.byKey(const Key('share-proto-8000')), matching: find.byTooltip('协议')), findsOneWidget);
+  });
+
   testWidgets('choosing the proto already set does nothing', (t) async {
     final api = await show(t, table([row(8000)]));
     await t.tap(find.byKey(const Key('share-proto-8000')));

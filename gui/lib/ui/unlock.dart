@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'controls.dart';
 import 'secure_text_field.dart';
 
 class UnlockCredential {
@@ -209,42 +210,40 @@ class _UnlockDialogState extends State<UnlockDialog> {
             onSubmitted: (_) => _submit(),
           ),
           if (widget.store.supported) ...[
-            CheckboxListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(widget.store.memory ? '本次运行期间记住密码' : '记住密码'),
+            RappCheckRow(
+              label: widget.store.memory ? '本次运行期间记住密码' : '记住密码',
               value: _remember,
               onChanged: _loading
                   ? null
                   : (v) => setState(() {
-                      _remember = v!;
+                      _remember = v;
                       if (!_remember) _auto = false;
                     }),
             ),
-            CheckboxListTile(
-              contentPadding: EdgeInsets.zero,
-              title: const Text('连上时自动输入'),
+            RappCheckRow(
+              label: '连上时自动输入',
               value: _auto,
               onChanged: _loading || !_remember
                   ? null
-                  : (v) => setState(() => _auto = v!),
+                  : (v) => setState(() => _auto = v),
             ),
             if (_stored)
-              TextButton(
+              RappButton.quiet(
+                label: '忘记密码',
                 onPressed: _loading ? null : _forget,
-                child: const Text('忘记密码'),
               ),
           ],
         ],
       ),
     ),
     actions: [
-      TextButton(
+      RappButton.quiet(
+        label: '取消',
         onPressed: () => Navigator.of(context).pop(),
-        child: const Text('取消'),
       ),
-      FilledButton(
+      RappButton.primary(
+        label: '输入系统密码',
         onPressed: _loading ? null : _submit,
-        child: const Text('输入系统密码'),
       ),
     ],
   );

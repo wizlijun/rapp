@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../linux_firewall.dart';
+import '../ui/controls.dart';
 
 typedef FirewallCheck = Future<FirewallReport> Function({required int port,
   required List<String> localAddresses, bool authorize});
@@ -70,11 +71,11 @@ class _LinuxFirewallSectionState extends State<LinuxFirewallSection> {
           ],
         ))),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('关闭')),
-          TextButton(onPressed: command == null ? null : () async {
+          RappButton.quiet(label: '关闭', onPressed: () => Navigator.pop(context)),
+          RappButton.quiet(label: '复制命令', onPressed: command == null ? null : () async {
             await Clipboard.setData(ClipboardData(text: command));
             if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('已复制放行命令')));
-          }, child: const Text('复制命令')),
+          }),
         ],
       );
     }));
@@ -98,9 +99,8 @@ class _LinuxFirewallSectionState extends State<LinuxFirewallSection> {
             ? '未找到最近的 UFW 拦截记录，这不代表端口已放行。'
             : '尚未确认拦截记录；可授权检查系统日志。'),
         Wrap(spacing: 8, children: [
-          TextButton(onPressed: _busy ? null : () => _check(true),
-            child: Text(_busy ? '检查中…' : '授权检查拦截记录')),
-          TextButton(onPressed: _showHelp, child: const Text('放行方法')),
+          RappButton.quiet(label: _busy ? '检查中…' : '授权检查拦截记录', onPressed: _busy ? null : () => _check(true)),
+          RappButton.quiet(label: '放行方法', onPressed: _showHelp),
         ]),
         const Text('检查只读取最近的 UFW 日志，可能要求管理员认证，不会修改防火墙规则。', style: TextStyle(fontSize: 12)),
       ],

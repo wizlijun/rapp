@@ -135,9 +135,6 @@ class _NewProjectState extends State<_NewProject> {
           textInputAction: TextInputAction.done,
           decoration: InputDecoration(
             hintText: _saveOpen ? '存成项目' : '新建项目',
-            isDense: true,
-            contentPadding:
-                const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
           ),
           onSubmitted: _submit,
         ),
@@ -434,6 +431,7 @@ class _AddList extends StatelessWidget {
                 child: InkWell(
                   key: Key('add-${project.id}-${a.key}'),
                   onTap: () => state.addMember(project.id, a),
+                  borderRadius: BorderRadius.circular(t.r),
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(minHeight: 48),
                     child: Align(

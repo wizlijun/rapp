@@ -13,6 +13,7 @@ import 'package:rapp/ui/log_screen.dart';
 import 'package:rapp/ui/tokens.dart';
 
 import 'helpers.dart';
+import 'platform_helpers.dart';
 
 const _ts = '2026-11-18T10:00:00.000Z';
 
@@ -110,6 +111,14 @@ void main() {
   Finder list() => find.descendant(of: find.byKey(const Key('log-list')), matching: find.byType(Scrollable)).first;
   double offset(WidgetTester t) => t.state<ScrollableState>(list()).position.pixels;
   RappTokens tokens(WidgetTester t) => RappTokens.of(t.element(find.byType(LogScreen)));
+
+  testWidgets('search field is 40 tall on macOS', (t) async {
+    await onPlatform(TargetPlatform.macOS, () async {
+      final m = await show(t);
+      expect(t.getSize(find.descendant(of: find.byKey(const Key('log-search')), matching: find.byType(InputDecorator))).height, 40);
+      await end(t, m);
+    });
+  });
 
   testWidgets('opens on 本机 with problems only', (t) async {
     final m = await show(t);

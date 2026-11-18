@@ -10,6 +10,7 @@ import '../ios_channel.dart';
 import '../platform_caps.dart';
 import '../paths.dart';
 import 'section_card.dart';
+import '../ui/controls.dart';
 
 /// R14: the words for `local/sync.json`.
 String syncStatusText(Map<String, dynamic>? sync, {DateTime Function(String) parse = DateTime.parse}) {
@@ -123,8 +124,8 @@ class _DataSectionState extends State<DataSection> {
         title: const Text('新位置'),
         content: TextField(controller: c, autofocus: true, decoration: const InputDecoration(hintText: '文件夹的完整路径')),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('好')),
+          RappButton.quiet(label: '取消', onPressed: () => Navigator.pop(ctx)),
+          RappButton.primary(label: '好', onPressed: () => Navigator.pop(ctx, c.text.trim())),
         ],
       ),
     );
@@ -148,8 +149,8 @@ class _DataSectionState extends State<DataSection> {
         title: const Text('改数据目录的位置？'),
         content: Text(body),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('改')),
+          RappButton.quiet(label: '取消', onPressed: () => Navigator.pop(ctx, false)),
+          RappButton.primary(label: '改', onPressed: () => Navigator.pop(ctx, true)),
         ],
       ),
     );
@@ -163,9 +164,9 @@ class _DataSectionState extends State<DataSection> {
     if ((r.env['RAPP_HOME'] ?? '').isNotEmpty) return const [Text('位置由环境变量 RAPP_HOME 决定')];
     if (r.os == 'windows') return const [];
     return [
-      OutlinedButton(onPressed: () => _move(toDefault: false), child: const Text('更改位置…')),
+      RappButton.secondary(label: '更改位置…', onPressed: () => _move(toDefault: false)),
       if (widget.data.root != defaultDataRoot(r.env, r.os))
-        OutlinedButton(onPressed: () => _move(toDefault: true), child: const Text('改回默认')),
+        RappButton.secondary(label: '改回默认', onPressed: () => _move(toDefault: true)),
     ];
   }
 
@@ -186,7 +187,7 @@ class _DataSectionState extends State<DataSection> {
           spacing: 8,
           runSpacing: 8,
           crossAxisAlignment: WrapCrossAlignment.center,
-          children: [OutlinedButton(onPressed: _open, child: const Text('打开数据目录')), ..._moveButtons()],
+          children: [RappButton.secondary(label: '打开数据目录', onPressed: _open), ..._moveButtons()],
         ),
       ]);
 }

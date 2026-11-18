@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:rapp/paths.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/pages/app_profile_page.dart';
@@ -175,6 +176,19 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('device-111')), findsOneWidget);
     expect(find.textContaining('mini'), findsWidgets);
+  });
+
+  testWidgets('the picker is announced as 其他设备, keeps its arrow, and N 台 stays normal weight', (tester) async {
+    final handle = tester.ensureSemantics();
+    await pumpTab(tester);
+    expect(tester.getSemantics(find.byKey(const Key('device-picker'))).label, startsWith('其他设备：'));
+    expect(find.descendant(of: find.byKey(const Key('device-picker')), matching: find.byIcon(Icons.arrow_drop_down)), findsOneWidget);
+    await selectMini(tester);
+    final count = find.descendant(of: find.byKey(const Key('device-picker')), matching: find.textContaining(' 台'));
+    expect(tester.renderObject<RenderParagraph>(count).text.style!.fontWeight, FontWeight.normal);
+    final name = find.byKey(const Key('device-picker-label'));
+    expect(tester.renderObject<RenderParagraph>(name).text.style!.fontWeight, FontWeight.w600);
+    handle.dispose();
   });
 
   testWidgets('no 屏幕共享 button; 桌面 is an app row with a favourite star', (tester) async {

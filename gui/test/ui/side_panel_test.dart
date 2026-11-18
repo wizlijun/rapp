@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import 'package:rapp/paths.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -21,6 +20,7 @@ import 'package:rapp/ui/tokens.dart';
 
 import '../fakes.dart';
 import 'helpers.dart';
+import 'platform_helpers.dart';
 
 void main() {
   late FakeTransport t;
@@ -120,18 +120,20 @@ void main() {
   });
 
   testWidgets('the dropdown shows 设备在前 by default and switches the tab order', (tester) async {
-    await tester.pumpWidget(wrap(panel(), disableAnimations: true));
-    expect(find.descendant(of: find.byKey(const Key('first-dropdown')), matching: find.text('设备在前')), findsOneWidget);
-    expect(tester.getSize(find.ancestor(of: find.byKey(const Key('first-dropdown')), matching: find.byType(Container)).first).height, 34);
-    double x(String k) => tester.getTopLeft(find.byKey(Key(k))).dx;
-    expect(x('tab-devices'), lessThan(x('tab-projects')));
-    await tester.tap(find.byKey(const Key('first-dropdown')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('项目在前').last);
-    await tester.pumpAndSettle();
-    expect(s.prefs.first, FirstLayer.project);
-    expect(UiPrefs.load('${tmp.path}/devices/dev1').first, FirstLayer.project);
-    expect(x('tab-projects'), lessThan(x('tab-devices')));
+    await onPlatform(TargetPlatform.macOS, () async {
+      await tester.pumpWidget(wrap(panel(), disableAnimations: true));
+      expect(find.descendant(of: find.byKey(const Key('first-dropdown')), matching: find.text('设备在前')), findsOneWidget);
+      expect(tester.getSize(find.byKey(const Key('first-dropdown'))).height, 40);
+      double x(String k) => tester.getTopLeft(find.byKey(Key(k))).dx;
+      expect(x('tab-devices'), lessThan(x('tab-projects')));
+      await tester.tap(find.byKey(const Key('first-dropdown')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('项目在前').last);
+      await tester.pumpAndSettle();
+      expect(s.prefs.first, FirstLayer.project);
+      expect(UiPrefs.load('${tmp.path}/devices/dev1').first, FirstLayer.project);
+      expect(x('tab-projects'), lessThan(x('tab-devices')));
+    });
   });
 
   testWidgets('reordering the tabs keeps the open tab', (tester) async {
@@ -144,52 +146,67 @@ void main() {
   });
 
   testWidgets('theme dropdown lists the three films in order', (tester) async {
-    await tester.pumpWidget(wrap(panel(), disableAnimations: true));
-    expect(tester.getSize(find.ancestor(of: find.byKey(const Key('theme-dropdown')), matching: find.byType(Container)).first).height,
-        34);
-    await tester.tap(find.byKey(const Key('theme-dropdown')));
-    await tester.pumpAndSettle();
-    final labels = [for (final th in themeOrder) themeLabel(th)];
-    expect(labels, ['AVATAR', 'MATRIX', 'WESTWORLD']);
-    final ys = [
-      for (final l in labels)
-        tester.getTopLeft(find.text(l).last).dy,
-    ];
-    expect(ys, orderedEquals([...ys]..sort()));
-    expect(ys.toSet().length, 3);
+    await onPlatform(TargetPlatform.macOS, () async {
+      await tester.pumpWidget(wrap(panel(), disableAnimations: true));
+      expect(tester.getSize(find.byKey(const Key('theme-dropdown'))).height, 40);
+      await tester.tap(find.byKey(const Key('theme-dropdown')));
+      await tester.pumpAndSettle();
+      final labels = [for (final th in themeOrder) themeLabel(th)];
+      expect(labels, ['AVATAR', 'MATRIX', 'WESTWORLD']);
+      final ys = [
+        for (final l in labels)
+          tester.getTopLeft(find.text(l).last).dy,
+      ];
+      expect(ys, orderedEquals([...ys]..sort()));
+      expect(ys.toSet().length, 3);
+    });
   });
 
-  testWidgets('全局设置 sits a step under the text size, on 34px rows', (tester) async {
-    await tester.pumpWidget(MaterialApp(
-      theme: themeDataFor(RappTheme.matrix, textSize: 13),
-      home: Scaffold(body: Center(child: panel())),
-    ));
-    // A dropdown's own style used to replace the theme's: its label fell back to 14 and no font.
-    for (final label in ['MATRIX', '设备在前', '启动时全屏', '网络差时自动省流量']) {
-      final style = tester.widget<RichText>(find.descendant(of: find.text(label), matching: find.byType(RichText))).text.style!;
-      expect((style.fontSize, style.fontFamily), (12.0, 'JetBrains Mono'), reason: label);
-    }
-    for (final key in ['theme-dropdown', 'first-dropdown']) {
-      final box = find.ancestor(of: find.byKey(Key(key)), matching: find.byType(Container)).first;
-      expect(tester.getSize(box).height, 34, reason: key);
-    }
-    for (final key in ['start-fullscreen', 'auto-save-traffic', 'settings-fold']) {
-      expect(tester.getSize(find.byKey(Key(key))).height, 34, reason: key);
-    }
-    // The switch is scaled into a 38×24 box: measure the box, not the unscaled switch inside it.
-    expect(tester.getSize(find.ancestor(of: find.byType(Switch).first, matching: find.byType(SizedBox)).first), const Size(38, 24));
+  testWidgets('全局设置 sits a step under the text size, on 40px rows', (tester) async {
+    await onPlatform(TargetPlatform.macOS, () async {
+      await tester.pumpWidget(MaterialApp(
+        theme: themeDataFor(RappTheme.matrix, textSize: 13),
+        home: Scaffold(body: Center(child: panel())),
+      ));
+      // A dropdown's own style used to replace the theme's: its label fell back to 14 and no font.
+      for (final label in ['MATRIX', '设备在前', '启动时全屏', '网络差时自动省流量']) {
+        final style = tester.widget<RichText>(find.descendant(of: find.text(label), matching: find.byType(RichText))).text.style!;
+        expect((style.fontSize, style.fontFamily), (12.0, 'JetBrains Mono'), reason: label);
+      }
+      for (final key in ['theme-dropdown', 'first-dropdown']) {
+        expect(tester.getSize(find.byKey(Key(key))).height, 40, reason: key);
+      }
+      for (final key in ['start-fullscreen', 'auto-save-traffic', 'settings-fold']) {
+        expect(tester.getSize(find.byKey(Key(key))).height, 40, reason: key);
+      }
+      // The switch is scaled into a 38×24 box: measure the box, not the unscaled switch inside it.
+      expect(tester.getSize(find.ancestor(of: find.byType(Switch).first, matching: find.byType(SizedBox)).first), const Size(38, 24));
+    });
+  });
+
+  testWidgets('a settings dropdown keeps its small rows and goes semibold while open', (tester) async {
+    await onPlatform(TargetPlatform.macOS, () async {
+      await tester.pumpWidget(MaterialApp(
+        theme: themeDataFor(RappTheme.matrix, textSize: 13, platform: TargetPlatform.macOS),
+        home: Scaffold(body: Center(child: panel())),
+      ));
+      await tester.tap(find.byKey(const Key('theme-dropdown')));
+      await tester.pumpAndSettle();
+      final box = tester.renderObject<RenderParagraph>(find.text('MATRIX').first).text.style!;
+      expect((box.fontSize, box.fontWeight), (12.0, FontWeight.w600));
+      final row = tester.renderObject<RenderParagraph>(find.text('WESTWORLD')).text.style!;
+      expect(row.fontSize, 12);
+    });
   });
 
   testWidgets('on the iPad 全局设置 keeps 48px touch rows', (tester) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
-    addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    await tester.pumpWidget(wrap(panel()));
-    for (final key in ['start-fullscreen', 'auto-save-traffic', 'settings-fold']) {
-      expect(tester.getSize(find.byKey(Key(key))).height, 48, reason: key);
-    }
-    final box = find.ancestor(of: find.byKey(const Key('theme-dropdown')), matching: find.byType(Container)).first;
-    expect(tester.getSize(box).height, 48);
-    debugDefaultTargetPlatformOverride = null;
+    await onPlatform(TargetPlatform.iOS, () async {
+      await tester.pumpWidget(wrap(panel()));
+      for (final key in ['start-fullscreen', 'auto-save-traffic', 'settings-fold']) {
+        expect(tester.getSize(find.byKey(Key(key))).height, 48, reason: key);
+      }
+      expect(tester.getSize(find.byKey(const Key('theme-dropdown'))).height, 48);
+    });
   });
 
   testWidgets('picking WESTWORLD changes prefs.theme', (tester) async {
