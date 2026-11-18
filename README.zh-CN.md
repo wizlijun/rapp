@@ -54,7 +54,7 @@ RAPP_ALLOW_ADHOC=1 ./scripts/package-macos.sh
 
 生成 Linux 安装包：在干净的工作区运行 `./scripts/package-linux.sh`，另需 makepkg、fakeroot、zstd。产物输出到 `dist/`。
 
-实现范围和最新验证记录：[Linux 0.14.11 对齐](tasks/todo.md#linux-01411-功能对齐2026-11-18)。
+实现范围和最新验证记录：[Linux 0.14.12 同步与能力边界](tasks/todo.md#linux-01412-同步与能力边界2026-11-18)。
 
 ## 许可证
 
