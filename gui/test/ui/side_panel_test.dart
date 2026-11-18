@@ -124,7 +124,7 @@ void main() {
     await onPlatform(TargetPlatform.macOS, () async {
       await tester.pumpWidget(wrap(panel(), disableAnimations: true));
       expect(find.descendant(of: find.byKey(const Key('first-dropdown')), matching: find.text('设备在前')), findsOneWidget);
-      expect(tester.getSize(find.ancestor(of: find.byKey(const Key('first-dropdown')), matching: find.byType(Container)).first).height, 40);
+      expect(tester.getSize(find.byKey(const Key('first-dropdown'))).height, 40);
       double x(String k) => tester.getTopLeft(find.byKey(Key(k))).dx;
       expect(x('tab-devices'), lessThan(x('tab-projects')));
       await tester.tap(find.byKey(const Key('first-dropdown')));
@@ -149,8 +149,7 @@ void main() {
   testWidgets('theme dropdown lists the three films in order', (tester) async {
     await onPlatform(TargetPlatform.macOS, () async {
       await tester.pumpWidget(wrap(panel(), disableAnimations: true));
-      expect(tester.getSize(find.ancestor(of: find.byKey(const Key('theme-dropdown')), matching: find.byType(Container)).first).height,
-          40);
+      expect(tester.getSize(find.byKey(const Key('theme-dropdown'))).height, 40);
       await tester.tap(find.byKey(const Key('theme-dropdown')));
       await tester.pumpAndSettle();
       final labels = [for (final th in themeOrder) themeLabel(th)];
@@ -176,8 +175,7 @@ void main() {
         expect((style.fontSize, style.fontFamily), (12.0, 'JetBrains Mono'), reason: label);
       }
       for (final key in ['theme-dropdown', 'first-dropdown']) {
-        final box = find.ancestor(of: find.byKey(Key(key)), matching: find.byType(Container)).first;
-        expect(tester.getSize(box).height, 40, reason: key);
+        expect(tester.getSize(find.byKey(Key(key))).height, 40, reason: key);
       }
       for (final key in ['start-fullscreen', 'auto-save-traffic', 'settings-fold']) {
         expect(tester.getSize(find.byKey(Key(key))).height, 40, reason: key);
@@ -194,8 +192,7 @@ void main() {
     for (final key in ['start-fullscreen', 'auto-save-traffic', 'settings-fold']) {
       expect(tester.getSize(find.byKey(Key(key))).height, 48, reason: key);
     }
-    final box = find.ancestor(of: find.byKey(const Key('theme-dropdown')), matching: find.byType(Container)).first;
-    expect(tester.getSize(box).height, 48);
+    expect(tester.getSize(find.byKey(const Key('theme-dropdown'))).height, 48);
     debugDefaultTargetPlatformOverride = null;
   });
 

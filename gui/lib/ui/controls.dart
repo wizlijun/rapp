@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'rule_snack.dart' show menuAt;
 import 'tokens.dart';
 
 enum _Kind { primary, secondary, accent }
@@ -402,6 +403,194 @@ class RappChoice extends StatelessWidget {
             const SizedBox(width: 6),
             Text(label, style: TextStyle(color: dim ? t.muted : t.text)),
           ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// One row of a [RappDropdown] or [showRappMenu] menu. [lead] goes before the label (a lamp, an icon),
+/// [trailing] after it (a window's close ×). A disabled row is a caption: it is not picked and is muted.
+class RappMenuItem<T> {
+  const RappMenuItem({
+    required T this.value,
+    required this.label,
+    this.key,
+    this.lead,
+    this.trailing,
+    this.enabled = true,
+    this.onSecondaryTapUp,
+  }) : divider = false;
+
+  /// A thin rule between groups of rows.
+  const RappMenuItem.divider()
+    : value = null,
+      label = '',
+      key = null,
+      lead = null,
+      trailing = null,
+      enabled = false,
+      onSecondaryTapUp = null,
+      divider = true;
+
+  final T? value;
+  final String label;
+  final Key? key;
+  final Widget? lead;
+  final Widget? trailing;
+  final bool enabled;
+
+  /// A right-click on the row; [row] is a context inside it, for popping the menu with another result.
+  final void Function(BuildContext row, TapUpDetails details)? onSecondaryTapUp;
+  final bool divider;
+}
+
+/// Opens a menu of [items] at [position]. With a non-null [current] it is a pick-one menu: every row has
+/// an 18-wide tick column and the row whose value is [current] holds the tick. Without it, an action menu.
+/// Rows are at least a control high; the look comes from the theme's popup menu theme.
+Future<T?> showRappMenu<T>(
+  BuildContext c, {
+  required RelativeRect position,
+  required List<RappMenuItem<T>> items,
+  T? current,
+  BoxConstraints? constraints,
+}) {
+  final t = RappTokens.of(c);
+  final height = controlHeightOf(c);
+  return showMenu<T>(
+    context: c,
+    position: position,
+    constraints: constraints,
+    items: [
+      for (final it in items)
+        if (it.divider)
+          const PopupMenuDivider()
+        else
+          PopupMenuItem<T>(
+            key: it.key,
+            value: it.value,
+            enabled: it.enabled,
+            height: height,
+            child: Builder(builder: (row) {
+              final body = Row(children: [
+                if (current != null) ...[
+                  SizedBox(
+                    width: 18,
+                    child: it.value == current ? Icon(Icons.check, size: 18, color: t.text) : null,
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                if (it.lead != null) ...[it.lead!, const SizedBox(width: 10)],
+                Expanded(child: Text(it.label, maxLines: 1, overflow: TextOverflow.ellipsis)),
+                if (it.trailing != null) it.trailing!,
+              ]);
+              final secondary = it.onSecondaryTapUp;
+              if (secondary == null) return body;
+              return GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onSecondaryTapUp: (d) => secondary(row, d),
+                child: body,
+              );
+            }),
+          ),
+    ],
+  );
+}
+
+/// The dropdown box: [label] (which may lead with its own icon) with a down arrow. At rest a thin line border; while its
+/// menu is open, or when [selected], the raised fill, a text-colour border and semibold text. Opening calls
+/// [showRappMenu] under the box; with a non-null [current] it is a pick-one menu.
+class RappDropdown<T> extends StatefulWidget {
+  // [key] is handed to the InkWell, not to super, so a lookup by it finds one widget.
+  // ignore: use_key_in_widget_constructors
+  const RappDropdown({
+    Key? key,
+    required this.label,
+    this.current,
+    required this.items,
+    required this.onSelected,
+    this.selected = false,
+    this.minWidth,
+    this.dim = false,
+    this.expand = false,
+    this.arrow = true,
+    this.enabled = true,
+  }) : _boxKey = key;
+
+  final Key? _boxKey;
+  final Widget label;
+  final T? current;
+  final List<RappMenuItem<T>> items;
+  final ValueChanged<T> onSelected;
+  final bool selected;
+  final double? minWidth;
+
+  /// The label is drawn in muted (an inherited value).
+  final bool dim;
+
+  /// Fill the width the parent gives and put the arrow at its right end.
+  final bool expand;
+
+  /// Show the arrow; off where a short label has no room for it.
+  final bool arrow;
+
+  /// Off: the box is drawn but does not open.
+  final bool enabled;
+
+  @override
+  State<RappDropdown<T>> createState() => _RappDropdownState<T>();
+}
+
+class _RappDropdownState<T> extends State<RappDropdown<T>> {
+  bool _open = false;
+
+  Future<void> _show(BuildContext box) async {
+    final render = box.findRenderObject() as RenderBox;
+    final at = render.localToGlobal(Offset(0, render.size.height));
+    setState(() => _open = true);
+    final pick = await showRappMenu<T>(
+      box,
+      position: menuAt(box, at),
+      items: widget.items,
+      current: widget.current,
+      constraints: BoxConstraints(minWidth: render.size.width),
+    );
+    if (mounted) setState(() => _open = false);
+    if (pick != null && mounted) widget.onSelected(pick);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RappTokens.of(context);
+    final radius = BorderRadius.circular(t.r);
+    final strong = widget.selected || _open;
+    final color = widget.dim ? t.muted : t.text;
+    final label = DefaultTextStyle.merge(
+      style: TextStyle(color: color, fontWeight: strong ? FontWeight.w600 : null),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      child: widget.label,
+    );
+    return Semantics(
+      button: true,
+      selected: widget.selected,
+      child: Material(
+        type: MaterialType.transparency,
+        child: Builder(
+          builder: (box) => InkWell(
+            key: widget._boxKey,
+            onTap: widget.enabled ? () => _show(box) : null,
+            borderRadius: radius,
+            child: Container(
+              constraints: BoxConstraints(minHeight: controlHeightOf(context), minWidth: widget.minWidth ?? 0),
+              padding: const EdgeInsets.only(left: 12, right: 6),
+              decoration: strong ? t.raiseBox(border: t.text) : BoxDecoration(borderRadius: radius, border: Border.all(color: t.line)),
+              child: Row(mainAxisSize: widget.expand ? MainAxisSize.max : MainAxisSize.min, children: [
+                widget.expand ? Expanded(child: label) : Flexible(child: label),
+                if (widget.arrow) Icon(Icons.arrow_drop_down, size: 18, color: t.muted),
+              ]),
+            ),
+          ),
         ),
       ),
     );

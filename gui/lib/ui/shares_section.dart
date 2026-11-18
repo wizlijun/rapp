@@ -290,21 +290,14 @@ class _ShareRowView extends StatelessWidget {
       ];
 
   /// The protocol control: a menu in the style of the window menu; picking the current one is a no-op.
-  Widget _protoPicker() => PopupMenuButton<String>(
+  Widget _protoPicker() => RappDropdown<String>(
         key: Key('share-proto-${row.port}'),
-        tooltip: '协议',
         enabled: !busy,
+        label: Text(row.proto),
+        items: [for (final p in _protos) RappMenuItem<String>(value: p, label: p)],
         onSelected: (p) {
           if (p != row.proto) onProto(p);
         },
-        itemBuilder: (_) => [for (final p in _protos) PopupMenuItem<String>(value: p, child: Text(p))],
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Text(row.proto, style: TextStyle(color: t.text)),
-            Icon(Icons.arrow_drop_down, size: 16, color: t.muted),
-          ]),
-        ),
       );
 
   TextStyle get _mono => TextStyle(fontFamily: t.mono, fontFamilyFallback: t.monoFallback, color: t.muted);

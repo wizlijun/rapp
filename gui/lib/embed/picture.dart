@@ -11,6 +11,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 import '../platform_caps.dart' show pinchZoom;
+import '../ui/controls.dart';
 import '../ui/keep_focus.dart';
 import '../ui/main_state.dart';
 import '../ui/rule_snack.dart';
@@ -414,10 +415,10 @@ class _PictureState extends State<Picture> implements TouchSink {
   /// ones like it from now on (a window rule of the app, with 撤销).
   Future<void> _popupMenu(Offset at, int window) async {
     final messenger = ScaffoldMessenger.maybeOf(context);
-    final pick = await showMenu<String>(
-      context: context,
+    final pick = await showRappMenu<String>(
+      context,
       position: menuAt(context, at),
-      items: const [PopupMenuItem(value: 'hide', child: Text('隐藏这类窗口'))],
+      items: const [RappMenuItem(value: 'hide', label: '隐藏这类窗口')],
     );
     if (pick != 'hide' || !mounted) return;
     final s = widget.state;

@@ -705,11 +705,12 @@ class _Item extends StatelessWidget {
     final active = enabled && onTap != null;
     final color = enabled ? t.text : t.muted;
     final row = Container(
-      constraints: const BoxConstraints(minHeight: 48),
+      constraints: BoxConstraints(minHeight: controlHeightOf(context)),
       padding: EdgeInsets.only(left: 12 + indent, right: 12),
       child: Row(
         children: [
-          SizedBox(width: 24, child: checked ? Icon(Icons.check, size: 18, color: t.text) : null),
+          SizedBox(width: 18, child: checked ? Icon(Icons.check, size: 18, color: t.text) : null),
+          const SizedBox(width: 8),
           Expanded(child: Text(label, maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: color))),
           ?trailing,
         ],

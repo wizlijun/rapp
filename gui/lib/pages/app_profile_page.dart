@@ -131,31 +131,16 @@ class _AppProfilePageState extends State<AppProfilePage> {
       Padding(padding: const EdgeInsets.only(top: 18, bottom: 6), child: Text(s, style: TextStyle(color: t.text, fontWeight: FontWeight.w600)));
 
   Widget _dropdown<T>(RappTokens t,
-      {Key? key, required T value, required Map<T, String> labels, required bool grey, required ValueChanged<T> onChanged}) {
-    final color = grey ? t.muted : t.text;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      decoration: BoxDecoration(borderRadius: BorderRadius.circular(t.r), border: Border.all(color: t.line)),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<T>(
-          key: key,
-          value: value,
-          isExpanded: true,
-          dropdownColor: t.bg,
-          iconEnabledColor: t.text,
-          // Replaces the theme's text style rather than merging into it: start from the body style.
-          style: Theme.of(context).textTheme.bodyMedium!.copyWith(color: color),
-          items: [
-            for (final e in labels.entries)
-              DropdownMenuItem<T>(value: e.key, child: Text(e.value, style: TextStyle(color: color))),
-          ],
-          onChanged: (v) {
-            if (v is T) _set(() => onChanged(v));
-          },
-        ),
-      ),
-    );
-  }
+          {Key? key, required T value, required Map<T, String> labels, required bool grey, required ValueChanged<T> onChanged}) =>
+      RappDropdown<T>(
+        key: key,
+        expand: true,
+        dim: grey,
+        current: value,
+        label: Text(labels[value] ?? ''),
+        items: [for (final e in labels.entries) RappMenuItem<T>(value: e.key, label: e.value)],
+        onSelected: (v) => _set(() => onChanged(v)),
+      );
 
   Widget _field(String label, Widget child, RappTokens t) => Padding(
         padding: const EdgeInsets.only(bottom: 8),

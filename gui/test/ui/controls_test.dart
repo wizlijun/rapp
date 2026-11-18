@@ -215,4 +215,107 @@ void main() {
       });
     }
   });
+
+  group('RappDropdown', () {
+    Widget dd({int? current = 2, bool selected = false, ValueChanged<int>? on, Key? key}) => onP(
+          TargetPlatform.macOS,
+          RappDropdown<int>(
+            key: key ?? const Key('dd'),
+            label: const Text('甲'),
+            current: current,
+            selected: selected,
+            items: const [
+              RappMenuItem(value: 1, label: '一'),
+              RappMenuItem(value: 2, label: '二'),
+            ],
+            onSelected: on ?? (_) {},
+          ),
+        );
+    BoxDecoration box(WidgetTester t) => t
+        .widget<Container>(find.descendant(of: find.byKey(const Key('dd')), matching: find.byType(Container)).first)
+        .decoration! as BoxDecoration;
+
+    testWidgets('rests with a line border, then opens a menu ticking only the current row', (t) async {
+      await t.pumpWidget(dd());
+      expect((box(t).border! as Border).top.color, tk.line);
+      expect(find.byKey(const Key('dd')), findsOneWidget);
+      await t.tap(find.byKey(const Key('dd')));
+      await t.pumpAndSettle();
+      expect(find.byIcon(Icons.check), findsOneWidget);
+      final tick = t.getCenter(find.byIcon(Icons.check)).dy;
+      expect((tick - t.getCenter(find.text('二')).dy).abs() < 1, true);
+      expect(t.widget<Icon>(find.byIcon(Icons.check)).size, 18);
+      expect(t.widget<Text>(find.text('二')).style?.fontWeight, isNull);
+    });
+    testWidgets('while open the box uses the selected style', (t) async {
+      await t.pumpWidget(dd());
+      await t.tap(find.byKey(const Key('dd')));
+      await t.pumpAndSettle();
+      expect((box(t).border! as Border).top.color, tk.text);
+    });
+    testWidgets('selected uses the raised box with a text border', (t) async {
+      await t.pumpWidget(dd(selected: true));
+      expect(box(t).color, tk.raise.first);
+      expect((box(t).border! as Border).top.color, tk.text);
+    });
+    testWidgets('choosing a row calls onSelected with its value', (t) async {
+      final got = <int>[];
+      await t.pumpWidget(dd(on: got.add));
+      await t.tap(find.byKey(const Key('dd')));
+      await t.pumpAndSettle();
+      await t.tap(find.text('一'));
+      await t.pumpAndSettle();
+      expect(got, [1]);
+      expect(find.text('一'), findsNothing);
+    });
+    testWidgets('without current there is no tick column', (t) async {
+      await t.pumpWidget(dd(current: null));
+      await t.tap(find.byKey(const Key('dd')));
+      await t.pumpAndSettle();
+      expect(find.byIcon(Icons.check), findsNothing);
+      final x0 = t.getTopLeft(find.text('一')).dx;
+      await t.tapAt(const Offset(700, 500));
+      await t.pumpAndSettle();
+      await t.pumpWidget(dd());
+      await t.tap(find.byKey(const Key('dd')));
+      await t.pumpAndSettle();
+      expect(t.getTopLeft(find.text('一')).dx - x0, 26);
+    });
+    testWidgets('the popup has a text-colour side', (t) async {
+      await t.pumpWidget(dd());
+      await t.tap(find.byKey(const Key('dd')));
+      await t.pumpAndSettle();
+      expect(
+        find.byWidgetPredicate((w) => w is Material && w.shape is RoundedRectangleBorder && (w.shape! as RoundedRectangleBorder).side.color == tk.text),
+        findsOneWidget,
+      );
+    });
+    testWidgets('the arrow is 18 and muted', (t) async {
+      await t.pumpWidget(dd());
+      final a = t.widget<Icon>(find.byIcon(Icons.arrow_drop_down));
+      expect((a.size, a.color), (18.0, tk.muted));
+    });
+    for (final (p, h) in [(TargetPlatform.macOS, 40.0), (TargetPlatform.iOS, 48.0)]) {
+      testWidgets('box height $h on $p', (t) async {
+        await onPlatform(p, () async {
+          await t.pumpWidget(onP(p, Row(children: [
+            RappDropdown<int>(key: const Key('dd'), label: const Text('甲'), items: const [], onSelected: (_) {}),
+          ])));
+          expect(t.getSize(find.byKey(const Key('dd'))).height, h);
+        });
+      });
+    }
+    testWidgets('menu rows are control height', (t) async {
+      await onPlatform(TargetPlatform.iOS, () async {
+        await t.pumpWidget(onP(TargetPlatform.iOS, RappDropdown<int>(
+          label: const Text('甲'),
+          items: const [RappMenuItem(value: 1, label: '一')],
+          onSelected: (_) {},
+        )));
+        await t.tap(find.text('甲'));
+        await t.pumpAndSettle();
+        expect(t.getSize(find.ancestor(of: find.text('一'), matching: find.byType(InkWell)).first).height, 48);
+      });
+    });
+  });
 }

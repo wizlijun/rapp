@@ -7,7 +7,6 @@ import '../log_view.dart';
 import 'controls.dart';
 import 'lamp.dart';
 import 'log_model.dart';
-import 'rule_snack.dart';
 import 'tab_chip.dart';
 import 'tokens.dart';
 
@@ -217,67 +216,27 @@ class _LogScreenState extends State<LogScreen> {
         if (d.$1 == sel) (label, lamp) = (d.$2, d.$3);
       }
     }
-    final radius = BorderRadius.circular(t.r);
-    return Material(
-      type: MaterialType.transparency,
-      child: Builder(
-        builder: (btn) => InkWell(
-          key: const Key('log-device-picker'),
-          onTap: () => _openPicker(btn),
-          borderRadius: radius,
-          child: Container(
-            constraints: const BoxConstraints(minHeight: 48, minWidth: 96),
-            padding: const EdgeInsets.only(left: 12, right: 6),
-            decoration: t.raiseBox(border: t.text),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              if (lamp != null) ...[StatusLamp(lamp), const SizedBox(width: 8)],
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 180),
-                child: Text(label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: t.text, fontWeight: FontWeight.w600)),
-              ),
-              Icon(Icons.arrow_drop_down, size: 20, color: t.muted),
-            ]),
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// 本机 and every other device with its lamp, the way the devices tab's picker lists them.
-  Future<void> _openPicker(BuildContext context) async {
-    final box = context.findRenderObject() as RenderBox;
-    final at = box.localToGlobal(Offset(0, box.size.height));
-    final sel = m.device ?? '';
-    PopupMenuItem<String> row(String key, String value, Widget lead, String name) => PopupMenuItem<String>(
-          key: Key(key),
-          value: value,
-          child: Row(children: [
-            lead,
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontWeight: value == sel ? FontWeight.w700 : null)),
-            ),
-          ]),
-        );
-    final pick = await showMenu<String>(
-      context: context,
-      position: menuAt(context, at),
-      constraints: BoxConstraints(minWidth: box.size.width < 200 ? 200 : box.size.width),
+    return RappDropdown<String>(
+      key: const Key('log-device-picker'),
+      minWidth: 96,
+      selected: true,
+      current: m.device ?? '',
+      label: Row(mainAxisSize: MainAxisSize.min, children: [
+        if (lamp != null) ...[StatusLamp(lamp), const SizedBox(width: 8)],
+        ConstrainedBox(constraints: const BoxConstraints(maxWidth: 180), child: Text(label)),
+      ]),
+      // 本机 and every other device with its lamp, the way the devices tab's picker lists them.
       items: [
-        row('log-device-local', '', const SizedBox.square(dimension: 13), '本机'),
-        for (final d in widget.devices) row('log-device-${d.$1}', d.$1, StatusLamp(d.$3), d.$2),
+        const RappMenuItem<String>(
+            key: Key('log-device-local'), value: '', label: '本机', lead: SizedBox.square(dimension: 13)),
+        for (final d in widget.devices)
+          RappMenuItem<String>(key: Key('log-device-${d.$1}'), value: d.$1, label: d.$2, lead: StatusLamp(d.$3)),
       ],
+      onSelected: (pick) {
+        _launchdOpen = false;
+        m.open(pick.isEmpty ? null : pick);
+      },
     );
-    if (!mounted || pick == null) return;
-    final id = pick.isEmpty ? null : pick;
-    _launchdOpen = false;
-    m.open(id);
   }
 
   Widget _cards(RappTokens t, Map<LogKind, int> counts) => LayoutBuilder(builder: (context, c) {

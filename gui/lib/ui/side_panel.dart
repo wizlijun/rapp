@@ -204,29 +204,13 @@ class _Footer extends StatelessWidget {
           color: t.text, fontSize: settingsTextSize(t.textSize), height: 1.3);
     final folded = state.prefs.settingsFolded;
     final rowHeight = settingsRowHeight(Theme.of(context).platform);
-    Widget box<T>(Key key, T value, List<(T, String)> items, void Function(T) onChanged) => Container(
-          height: rowHeight,
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(t.r),
-            border: Border.all(color: t.line),
-          ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<T>(
-              key: key,
-              value: value,
-              isExpanded: true,
-              isDense: true,
-              iconSize: 18,
-              dropdownColor: t.bg,
-              iconEnabledColor: t.muted,
-              style: small,
-              items: [for (final (v, label) in items) DropdownMenuItem(value: v, child: Text(label))],
-              onChanged: (v) {
-                if (v != null) onChanged(v);
-              },
-            ),
-          ),
+    Widget box<T>(Key key, T value, List<(T, String)> items, void Function(T) onChanged) => RappDropdown<T>(
+          key: key,
+          expand: true,
+          current: value,
+          label: Text(items.firstWhere((e) => e.$1 == value).$2, style: small),
+          items: [for (final (v, label) in items) RappMenuItem<T>(value: v, label: label)],
+          onSelected: onChanged,
         );
     Widget toggle(Key key, String label, bool value, void Function(bool) onChanged, {String? note}) =>
         RappSwitchRow(key: key, label: label, note: note, value: value, onChanged: onChanged, style: small);

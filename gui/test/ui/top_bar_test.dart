@@ -1121,8 +1121,8 @@ void main() {
       await openMenu(tester);
       await tester.tap(find.byKey(const Key('window-row-1')), buttons: kSecondaryButton);
       await settle(tester);
-      final item = tester.widget<PopupMenuItem<Object?>>(
-          find.ancestor(of: find.text('隐藏这类窗口'), matching: find.byType(PopupMenuItem<Object?>)));
+      final item = tester.widget<PopupMenuItem<String>>(
+          find.ancestor(of: find.text('隐藏这类窗口'), matching: find.byType(PopupMenuItem<String>)));
       expect(item.enabled, isFalse);
     });
 
@@ -1232,8 +1232,10 @@ void main() {
       expect(find.descendant(of: find.byKey(const Key('project-row-all')), matching: find.byIcon(ProjectMenu.allIcon)), findsOneWidget);
       expect(find.descendant(of: find.byKey(Key('project-row-${b.id}')), matching: find.byIcon(ProjectMenu.projectIcon)), findsOneWidget);
       expect(find.descendant(of: find.byKey(const Key('project-row-free-zone')), matching: find.byIcon(ProjectMenu.freeZoneIcon)), findsOneWidget);
-      final bold = tester.widget<Text>(find.descendant(of: find.byKey(Key('project-row-${a.id}')), matching: find.text('写周报')));
-      expect(bold.style!.fontWeight, FontWeight.w700, reason: 'the current one is bold');
+      final current = tester.widget<Text>(find.descendant(of: find.byKey(Key('project-row-${a.id}')), matching: find.text('写周报')));
+      expect(current.style?.fontWeight, isNull, reason: 'the current one is ticked, not bold');
+      expect(find.byIcon(Icons.check), findsOneWidget);
+      expect(find.descendant(of: find.byKey(Key('project-row-${a.id}')), matching: find.byIcon(Icons.check)), findsOneWidget);
       await tester.tap(find.byKey(Key('project-row-${b.id}')));
       await tester.pumpAndSettle();
       expect(s.currentProject, b.id);
