@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'service_client.dart';
+import 'ui/controls.dart';
 
 /// Fires [onQuit] once the session count has been zero for [delay].
 /// Unknown counts (no status yet) never arm it.
@@ -89,7 +90,7 @@ class _CmPageState extends State<CmPage> {
                         leading: const Icon(Icons.desktop_windows_outlined),
                         title: Text(s.app),
                         subtitle: Text('${s.peer} · ${s.path}'),
-                        trailing: FilledButton.tonal(onPressed: () => _kick(s.sid), child: const Text('断开')),
+                        trailing: RappButton.secondary(label: '断开', onPressed: () => _kick(s.sid)),
                       ),
                   ],
                 ),

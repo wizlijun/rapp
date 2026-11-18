@@ -124,7 +124,7 @@ class SidePanel extends StatelessWidget {
                             minWidth: 48,
                             minHeight: 48,
                           ),
-                          icon: Icon(Icons.chevron_left, color: t.text),
+                          icon: Icon(Icons.chevron_left, size: 20, color: t.text),
                           onPressed: state.closePanel,
                         ),
                       ],

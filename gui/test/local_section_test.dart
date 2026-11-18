@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/pages/local_section.dart';
 import 'package:rapp/paths.dart';
 import 'package:rapp/service_client.dart';
+import 'package:rapp/ui/controls.dart';
 import 'package:rapp/linux_firewall.dart';
 
 import 'service_client_test.dart' show FakeService, until;
@@ -183,7 +184,7 @@ void main() {
       expect(find.text('⚠ 安全变更：中继换了 key'), findsOneWidget);
       expect(find.text('这台设备已经和中继断开。请向管理中继的人要新 key，再输入。'), findsOneWidget);
       expect(find.byKey(const Key('enter-new-key')), findsOneWidget);
-      expect(tester.widget(find.byKey(const Key('enter-new-key'))), isA<FilledButton>());
+      expect(tester.widget(find.byKey(const Key('enter-new-key'))), isA<RappButton>());
       expect(find.text('输入新 key'), findsOneWidget);
     });
 

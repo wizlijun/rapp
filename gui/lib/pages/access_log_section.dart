@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 
 import '../access_log.dart';
 import 'section_card.dart';
+import '../ui/controls.dart';
+import '../ui/tokens.dart';
 
 class AccessLogSection extends StatefulWidget {
   const AccessLogSection({
@@ -72,7 +74,7 @@ class _AccessLogSectionState extends State<AccessLogSection> {
     final rows = _rows;
     return SectionCard(
       title: '访问记录',
-      action: IconButton(tooltip: '刷新', icon: const Icon(Icons.refresh, size: 18), onPressed: _load),
+      action: IconButton(tooltip: '刷新', icon: Icon(Icons.refresh, size: 20, color: RappTokens.of(context).text), onPressed: _load),
       children: [
         if (_error != null)
           Text('读取失败：$_error', style: TextStyle(color: warn))
@@ -85,10 +87,10 @@ class _AccessLogSectionState extends State<AccessLogSection> {
         const SizedBox(height: 8),
         Wrap(spacing: 8, runSpacing: 8, children: [
           if (widget.onMore != null)
-            OutlinedButton(key: const Key('access-log-more'), onPressed: widget.onMore, child: const Text('更多')),
-          OutlinedButton(
+            RappButton.secondary(key: const Key('access-log-more'), label: '更多', onPressed: widget.onMore),
+          RappButton.secondary(
+            label: '打开日志文件夹',
             onPressed: dir == null ? null : () => widget.openFolder(dir),
-            child: const Text('打开日志文件夹'),
           ),
         ]),
       ],

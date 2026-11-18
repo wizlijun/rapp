@@ -228,22 +228,22 @@ class _UnlockDialogState extends State<UnlockDialog> {
                   : (v) => setState(() => _auto = v),
             ),
             if (_stored)
-              TextButton(
+              RappButton.quiet(
+                label: '忘记密码',
                 onPressed: _loading ? null : _forget,
-                child: const Text('忘记密码'),
               ),
           ],
         ],
       ),
     ),
     actions: [
-      TextButton(
+      RappButton.quiet(
+        label: '取消',
         onPressed: () => Navigator.of(context).pop(),
-        child: const Text('取消'),
       ),
-      FilledButton(
+      RappButton.primary(
+        label: '输入系统密码',
         onPressed: _loading ? null : _submit,
-        child: const Text('输入系统密码'),
       ),
     ],
   );

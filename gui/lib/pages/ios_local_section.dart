@@ -120,11 +120,10 @@ class _IosLocalSectionState extends State<IosLocalSection> {
       // The key is not kept here: only the last 4 of one typed in this run can be shown.
       trailing: tail == null
           ? null
-          : TextButton(
+          : RappButton.quiet(
               key: const Key('ios-key-reveal'),
-              style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+              label: _showTail ? '隐藏' : '显示',
               onPressed: () => setState(() => _showTail = !_showTail),
-              child: Text(_showTail ? '隐藏' : '显示'),
             ),
     );
   }
@@ -149,11 +148,10 @@ class _IosLocalSectionState extends State<IosLocalSection> {
       const SizedBox(height: 8),
       Align(
         alignment: Alignment.centerLeft,
-        child: OutlinedButton(
+        child: RappButton.secondary(
           key: const Key('edit-access'),
-          style: OutlinedButton.styleFrom(minimumSize: const Size(48, 48)),
+          label: '修改接入',
           onPressed: _editAccess,
-          child: const Text('修改接入'),
         ),
       ),
     ]);

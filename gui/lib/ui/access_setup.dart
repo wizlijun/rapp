@@ -5,9 +5,7 @@ import '../hub_client.dart';
 import 'lifecycle.dart' show disconnectWord;
 import 'secure_text_field.dart';
 import 'tokens.dart';
-
-/// Every tappable control here is at least this tall.
-const _minTap = Size(120, 48);
+import 'controls.dart';
 
 /// The page's frame: a narrow column in the middle of the stage.
 Widget _frame(BuildContext context, List<Widget> children) {
@@ -105,11 +103,10 @@ class _AccessSetupState extends State<AccessSetup> {
       ),
       const SizedBox(height: 20),
       Align(
-        child: FilledButton(
+        child: RappButton.primary(
           key: const Key('access-go'),
-          style: FilledButton.styleFrom(minimumSize: _minTap),
+          label: '接入',
           onPressed: _ready ? _go : null,
-          child: const Text('接入'),
         ),
       ),
       if (_error != null)
@@ -134,11 +131,10 @@ class AccessNotice extends StatelessWidget {
       Row(mainAxisAlignment: MainAxisAlignment.center, children: [
         Flexible(child: Text('没有网络权限', style: TextStyle(color: t.text))),
         const SizedBox(width: 12),
-        OutlinedButton(
+        RappButton.secondary(
           key: const Key('access-settings'),
-          style: OutlinedButton.styleFrom(minimumSize: const Size(48, 48)),
+          label: '设置',
           onPressed: onSettings,
-          child: const Text('设置'),
         ),
       ]),
     ]);

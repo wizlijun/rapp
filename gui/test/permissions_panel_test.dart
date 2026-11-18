@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:rapp/ui/tokens.dart';
 import 'package:rapp/paths.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -19,7 +20,7 @@ const manualSteps = '辅助功能的旧记录要在系统设置里删：选中 r
 void main() {
   testWidgets('each permission shows its purpose; missing ones get a settings button', (tester) async {
     final opened = <Permission>[];
-    await tester.pumpWidget(MaterialApp(
+    await tester.pumpWidget(MaterialApp(theme: themeDataFor(RappTheme.matrix), 
       home: Scaffold(
         body: PermissionsPanel(
           permissions: const {'screen_recording': false, 'accessibility': true},
@@ -45,7 +46,7 @@ void main() {
     expect(claimPermissionGuide(dir.path), isFalse);
   });
 
-  Widget guide(Map<String, dynamic>? perms, {Future<void> Function()? onRestart}) => MaterialApp(
+  Widget guide(Map<String, dynamic>? perms, {Future<void> Function()? onRestart}) => MaterialApp(theme: themeDataFor(RappTheme.matrix), 
         home: Scaffold(
           body: PermissionGuideDialog(permissions: perms, onOpenSettings: (_) async {}, onRestart: onRestart),
         ),

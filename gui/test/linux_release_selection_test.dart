@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/ui/tokens.dart';
 import 'package:rapp/linux_update.dart';
 import 'package:rapp/pages/linux_update_section.dart';
 
@@ -108,7 +109,7 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      MaterialApp(
+      MaterialApp(theme: themeDataFor(RappTheme.matrix), 
         home: Scaffold(
           body: LinuxUpdateSection(
             version: '0.12.2',
@@ -127,7 +128,7 @@ void main() {
     final opened = <String>[];
     final asset = LinuxRelease.fromJson(release('0.12.2', portable: true));
     await tester.pumpWidget(
-      MaterialApp(
+      MaterialApp(theme: themeDataFor(RappTheme.matrix), 
         home: Scaffold(
           body: LinuxUpdateSection(
             version: '0.5.2',

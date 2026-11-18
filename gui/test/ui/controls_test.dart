@@ -128,6 +128,41 @@ void main() {
   final tk = tokensFor(RappTheme.matrix);
   Color labelColor(WidgetTester t, String s) => t.widget<Text>(find.text(s)).style!.color!;
 
+  group('RappButton.quiet', () {
+    testWidgets('muted ink, no border, transparent fill', (t) async {
+      await t.pumpWidget(wrap(RappButton.quiet(label: '取消', onPressed: () {})));
+      final b = t.widget<TextButton>(find.byType(TextButton));
+      final st = b.style!;
+      expect(st.foregroundColor!.resolve({}), tk.muted);
+      expect(st.side, isNull);
+      expect(st.backgroundColor!.resolve({}), Colors.transparent);
+    });
+    for (final (p, h) in [(TargetPlatform.macOS, 40.0), (TargetPlatform.iOS, 48.0)]) {
+      testWidgets('height $h on $p', (t) async {
+        await onPlatform(p, () async {
+          await t.pumpWidget(onP(p, RappButton.quiet(key: const Key('q'), label: '取消', onPressed: () {})));
+          expect(t.getSize(find.byKey(const Key('q'))).height, h);
+        });
+      });
+    }
+    testWidgets('scales to 0.97 while pressed', (t) async {
+      await t.pumpWidget(wrap(RappButton.quiet(label: '取消', onPressed: () {})));
+      final g = await t.startGesture(t.getCenter(find.text('取消')));
+      await t.pump(const Duration(milliseconds: 100));
+      expect(t.widget<AnimatedScale>(find.byType(AnimatedScale)).scale, 0.97);
+      await g.up();
+      await t.pump(const Duration(milliseconds: 100));
+    });
+    for (final (p, h) in [(TargetPlatform.macOS, 40.0), (TargetPlatform.iOS, 48.0)]) {
+      testWidgets('icon button is square $h on $p', (t) async {
+        await onPlatform(p, () async {
+          await t.pumpWidget(onP(p, Center(child: RappButton.primary(key: const Key('i'), label: 'x', icon: Icons.add, onPressed: () {}))));
+          expect(t.getSize(find.byKey(const Key('i'))), Size(h, h));
+        });
+      });
+    }
+  });
+
   group('RappSwitchRow', () {
     testWidgets('tapping the label toggles', (t) async {
       bool? got;

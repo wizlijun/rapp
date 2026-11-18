@@ -47,7 +47,7 @@ class PermissionsPanel extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             missing.contains(p)
-                ? OutlinedButton(onPressed: () => onOpenSettings(p), child: const Text('打开系统设置'))
+                ? RappButton.secondary(label: '打开系统设置', onPressed: () => onOpenSettings(p))
                 : const Icon(Icons.check_circle, color: Colors.green),
           ]),
         ),
@@ -65,10 +65,10 @@ class PermissionsPanel extends StatelessWidget {
           child: Row(children: [
             const Expanded(child: Text('辅助功能的旧记录要在系统设置里删：选中 rapp，点「−」，再重新添加。')),
             const SizedBox(width: 8),
-            OutlinedButton(
+            RappButton.secondary(
               key: const Key('reset-open-accessibility'),
+              label: '打开系统设置',
               onPressed: () => onOpenSettings(Permission.accessibility),
-              child: const Text('打开系统设置'),
             ),
           ]),
         ),
@@ -116,9 +116,9 @@ class PermissionGuideDialog extends StatelessWidget {
               ),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('稍后')),
-        if (missing && onRestart != null) TextButton(onPressed: onRestart, child: const Text('重启服务')),
-        FilledButton(onPressed: missing ? null : () => Navigator.pop(context), child: const Text('完成')),
+        RappButton.quiet(label: '稍后', onPressed: () => Navigator.pop(context)),
+        if (missing && onRestart != null) RappButton.quiet(label: '重启服务', onPressed: onRestart),
+        RappButton.primary(label: '完成', onPressed: missing ? null : () => Navigator.pop(context)),
       ],
     );
   }

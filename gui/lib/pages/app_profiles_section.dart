@@ -23,8 +23,8 @@ class AppProfilesSection extends StatelessWidget {
         return SectionCard(
           title: 'app 配置',
           action: Wrap(spacing: 8, children: [
-            TextButton(onPressed: () => openAppProfilePage(context, store), child: const Text('新建')),
-            TextButton(onPressed: () => openFolder(store.dir), child: const Text('打开配置文件夹')),
+            RappButton.quiet(label: '新建', onPressed: () => openAppProfilePage(context, store)),
+            RappButton.quiet(label: '打开配置文件夹', onPressed: () => openFolder(store.dir)),
           ]),
           children: [
             if (problem != null)
@@ -56,9 +56,9 @@ class AppProfilesSection extends StatelessWidget {
             ]),
           ]),
         ),
-        TextButton(
+        RappButton.quiet(
+          label: '改',
           onPressed: () => openAppProfilePage(context, store, appId: row.ids.first, appName: row.name),
-          child: const Text('改'),
         ),
         if (row.source == ProfileSource.mine)
           ConfirmButton(label: '删除', onConfirmed: () => store.remove(row.mine!)),

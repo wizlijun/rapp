@@ -610,7 +610,7 @@ class _AppRow extends StatelessWidget {
                       if (onProfile != null) ...[
                         IconButton(
                           key: Key('profile-$app'),
-                          icon: const Icon(Icons.more_horiz),
+                          icon: Icon(Icons.more_horiz, size: 20, color: t.text),
                           tooltip: 'app 配置',
                           constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
                           onPressed: onProfile,

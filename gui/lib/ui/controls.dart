@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 import 'rule_snack.dart' show menuAt;
 import 'tokens.dart';
 
-enum _Kind { primary, secondary, accent }
+enum _Kind { primary, secondary, accent, quiet }
 
 /// Button per design language section 8. Built on Material buttons, with a
 /// 0.97 press scale (80 ms) unless reduced motion is on.
@@ -41,6 +41,17 @@ class RappButton extends StatefulWidget {
     this.focusNode,
     this.icon,
   }) : _kind = _Kind.accent,
+       onPicture = false,
+       oneLine = false,
+       size = 48;
+  const RappButton.quiet({
+    super.key,
+    required this.label,
+    this.onPressed,
+    this.semanticLabel,
+    this.focusNode,
+    this.icon,
+  }) : _kind = _Kind.quiet,
        onPicture = false,
        oneLine = false,
        size = 48;
@@ -124,6 +135,19 @@ class _RappButtonState extends State<RappButton> {
           backgroundColor: widget.onPicture ? Color.alphaBlend(t.raise.first, t.float.first) : t.raise.first,
           foregroundColor: t.text,
           side: BorderSide(color: t.line),
+          minimumSize: min,
+          tapTargetSize: tap,
+          padding: pad,
+          shape: shape,
+        ),
+        child: child,
+      ),
+      _Kind.quiet => TextButton(
+        onPressed: widget.onPressed,
+        focusNode: widget.focusNode,
+        style: TextButton.styleFrom(
+          backgroundColor: Colors.transparent,
+          foregroundColor: t.muted,
           minimumSize: min,
           tapTargetSize: tap,
           padding: pad,
@@ -220,16 +244,10 @@ class _ConfirmButtonState extends State<ConfirmButton> {
         focusNode: _focus,
       );
     }
-    final t = RappTokens.of(context);
-    return TextButton(
+    return RappButton.quiet(
+      label: widget.label,
       onPressed: enabled ? _tap : null,
       focusNode: _focus,
-      style: TextButton.styleFrom(
-        foregroundColor: t.muted,
-        minimumSize: const Size(48, 48),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(t.r)),
-      ),
-      child: Text(widget.label),
     );
   }
 }

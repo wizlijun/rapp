@@ -1,3 +1,4 @@
+import 'package:rapp/ui/tokens.dart';
 import 'package:rapp/paths.dart';
 import 'package:flutter/material.dart';
 import 'package:rapp/pages/global_sections.dart';
@@ -23,7 +24,7 @@ void main() {
   });
   testWidgets('Linux update works without a service and opens its own package', (tester) async {
     final opened = <String>[];
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body: LinuxUpdateSection(
+    await tester.pumpWidget(MaterialApp(theme: themeDataFor(RappTheme.matrix), home: Scaffold(body: LinuxUpdateSection(
       version: '0.4.1', check: () async => LinuxRelease.fromJson(release()),
       openPage: (page) async => opened.add(page)))));
     expect(find.text('当前 0.4.1 · Omarchy / Linux'), findsOneWidget);
@@ -36,7 +37,7 @@ void main() {
   testWidgets('Linux: 本机 has no macOS permissions and no updates; 全局设置 offers updates with no service', (tester) async {
     final monitor = ServiceMonitor(readToken: () async => 'unused');
     addTearDown(monitor.dispose);
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body: SingleChildScrollView(child: Column(children: [
+    await tester.pumpWidget(MaterialApp(theme: themeDataFor(RappTheme.matrix), home: Scaffold(body: SingleChildScrollView(child: Column(children: [
       LocalSection(platform: TargetPlatform.linux, monitor: monitor, control: null, data: DataDir('/unused')),
       GlobalSections(platform: TargetPlatform.linux, monitor: monitor, data: DataDir('/unused'), openPage: (_) async {}),
     ])))));
@@ -48,7 +49,7 @@ void main() {
   });
   testWidgets('missing Linux assets and network failures do not offer macOS installers', (tester) async {
     var fail = false;
-    await tester.pumpWidget(MaterialApp(home: Scaffold(body: LinuxUpdateSection(
+    await tester.pumpWidget(MaterialApp(theme: themeDataFor(RappTheme.matrix), home: Scaffold(body: LinuxUpdateSection(
       check: () async {
         if (fail) throw Exception('offline');
         return LinuxRelease.fromJson(release(name: 'rapp-0.5.0.pkg'));
