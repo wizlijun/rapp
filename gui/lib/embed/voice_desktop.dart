@@ -12,6 +12,7 @@ import '../ui/tokens.dart';
 import 'remote_session.dart';
 import 'session_port.dart';
 import 'voice_button.dart';
+import 'voice_input.dart';
 import 'voice_key_gate.dart';
 import 'voice_overlay.dart';
 import 'voice_ring.dart';
@@ -52,7 +53,7 @@ class DesktopVoice extends StatefulWidget {
   State<DesktopVoice> createState() => _DesktopVoiceState();
 }
 
-class _DesktopVoiceState extends State<DesktopVoice> {
+class _DesktopVoiceState extends State<DesktopVoice> with SingleTickerProviderStateMixin {
   late final VoiceHold _hold;
   StreamSubscription<(Object, VoiceKeyPhase)>? _keys;
   final _editBox = GlobalKey();
@@ -60,6 +61,14 @@ class _DesktopVoiceState extends State<DesktopVoice> {
   bool _mouse = false;
   int? _pointer;
   List<double> _levels = List.filled(_bars, 0);
+
+  // The column's exit after a release: 1 is fully there. [VoiceHold.showing] holds the rest of the row back meanwhile.
+  late final AnimationController _exit = AnimationController(vsync: this, duration: _rise, value: 1);
+  bool _up = false;
+  bool _gone = false;
+  bool _reduced = false;
+  VoicePick _released = VoicePick.send;
+  String _said = '';
 
   MainState get _state => widget.state;
   Object get _sid => widget.session.sid;
@@ -85,10 +94,23 @@ class _DesktopVoiceState extends State<DesktopVoice> {
     _hold.addListener(_onHold);
     voice.level.addListener(_onLevel);
     _keys = _state.voiceKeys.listen(_onKey);
+    _exit.addStatusListener(_onExit);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _reduced = MediaQuery.disableAnimationsOf(context);
+  }
+
+  void _onExit(AnimationStatus s) {
+    if (s == AnimationStatus.dismissed && !_up) _hold.showing = false;
   }
 
   @override
   void dispose() {
+    _gone = true;
+    _exit.dispose();
     _keys?.cancel();
     HardwareKeyboard.instance.removeHandler(_onKeyEvent);
     _state.voice?.level.removeListener(_onLevel);
@@ -98,14 +120,35 @@ class _DesktopVoiceState extends State<DesktopVoice> {
   }
 
   void _ended(VoicePick? p) {
+    final mouse = _mouse;
     _mouse = false;
     _pointer = null;
     HardwareKeyboard.instance.removeHandler(_onKeyEvent);
     _state.voiceEnd(_sid);
-    if (p == VoicePick.send || p == VoicePick.cancel) _state.focusPicture(_sid);
+    if (_gone) return; // a dispose cut it short: nothing to give focus back to
+    // A mouse press blurred the picture: it gets focus back unless the panel took it (R17).
+    // The hotkey never blurred it, so it only refocuses where it did before.
+    final panel = p == VoicePick.edit && widget.session.composer.open;
+    if (mouse ? !panel : (p == VoicePick.send || p == VoicePick.cancel)) _state.focusPicture(_sid);
   }
 
   void _onHold() {
+    if (_hold.holding && !_up) {
+      _up = true;
+      _levels = List.filled(_bars, 0);
+      _said = '';
+      _exit.value = 1;
+      if (_hold.showing) _hold.showing = false;
+    } else if (!_hold.holding && _up) {
+      _up = false;
+      _released = _hold.pick;
+      // Instant with reduced motion; else the column stays up, fading (a send also rises), while the row waits.
+      if (!_reduced) {
+        _hold.showing = true;
+        _exit.value = 1;
+        unawaited(_exit.reverse());
+      }
+    }
     if (!_hold.holding) _levels = List.filled(_bars, 0);
   }
 
@@ -152,6 +195,8 @@ class _DesktopVoiceState extends State<DesktopVoice> {
 
   void _down(PointerDownEvent e) {
     if (_pointer != null || _mouse || _hold.active || e.buttons & kPrimaryButton == 0) return;
+    // A recogniser still busy (an old stop out) would refuse the start and never end the press.
+    if (_state.voice!.phase != VoicePhase.idle) return;
     _pointer = e.pointer;
     _mouse = true;
     _state.holdForPanel(widget.session);
@@ -165,7 +210,7 @@ class _DesktopVoiceState extends State<DesktopVoice> {
     _hold.choose(c == null || ed == null ? VoicePick.send : desktopPick(e.position, c, ed));
   }
 
-  void _up(PointerEvent e) {
+  void _lift(PointerEvent e) {
     if (e.pointer != _pointer) return;
     _pointer = null;
     _hold.finish(e is PointerCancelEvent ? VoicePick.cancel : _hold.pick);
@@ -179,10 +224,12 @@ class _DesktopVoiceState extends State<DesktopVoice> {
       listenable: Listenable.merge([_hold, voice]),
       builder: (context, _) {
         final active = _hold.active;
-        return Stack(
-          clipBehavior: Clip.none,
-          alignment: Alignment.bottomRight,
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
           children: [
+            if (active) _column(context, reduced) else if (_hold.hint != null) voiceHint(_hold),
+            if (active || _hold.hint != null) const SizedBox(height: 8),
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -191,32 +238,33 @@ class _DesktopVoiceState extends State<DesktopVoice> {
                   duration: reduced ? Duration.zero : _fade,
                   child: IgnorePointer(
                     ignoring: active,
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [...widget.others, const SizedBox(width: 8)]),
+                    child: Listener(
+                      onPointerDown: (_) => _state.holdForPanel(widget.session),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [...widget.others, const SizedBox(width: 8)]),
+                    ),
                   ),
                 ),
                 Listener(
                   onPointerDown: _down,
                   onPointerMove: _move,
-                  onPointerUp: _up,
-                  onPointerCancel: _up,
-                  child: RappButton.secondary(
-                    key: const Key('voice-hold'),
-                    label: '按住说话',
-                    semanticLabel: '语音',
-                    icon: _hold.holding ? Icons.mic : Icons.mic_none,
-                    onPicture: true,
-                    // A no-op keeps the enabled look; the Listener does the work.
-                    onPressed: () {},
+                  onPointerUp: _lift,
+                  onPointerCancel: _lift,
+                  child: Tooltip(
+                    message: '按住说话',
+                    triggerMode: TooltipTriggerMode.manual,
+                    child: RappButton.secondary(
+                      key: const Key('voice-hold'),
+                      label: '按住说话',
+                      semanticLabel: '语音',
+                      icon: _hold.holding ? Icons.mic : Icons.mic_none,
+                      onPicture: true,
+                      // A no-op keeps the enabled look; the Listener does the work.
+                      onPressed: () {},
+                    ),
                   ),
                 ),
               ],
             ),
-            if (active || _hold.hint != null)
-              Positioned(
-                right: 0,
-                bottom: 48 + 8,
-                child: active ? _column(context, reduced) : voiceHint(_hold),
-              ),
           ],
         );
       },
@@ -225,15 +273,23 @@ class _DesktopVoiceState extends State<DesktopVoice> {
 
   Widget _column(BuildContext context, bool reduced) {
     final t = RappTokens.of(context);
-    final pick = _hold.pick;
+    final pick = _hold.holding ? _hold.pick : _released;
     final width = (widget.stageWidth - 32).clamp(0.0, 480.0);
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: reduced ? 1 : 0, end: 1),
       duration: reduced ? Duration.zero : _rise,
       curve: Curves.easeOut,
-      builder: (context, v, child) => Opacity(
-        opacity: v,
-        child: Transform.translate(offset: Offset(0, 8 * (1 - v)), child: child),
+      builder: (context, v, child) => AnimatedBuilder(
+        animation: _exit,
+        builder: (context, _) {
+          // Out: a send rises as it fades; 取消 and 编辑 fade where they are.
+          final o = _exit.value;
+          final rise = _hold.holding || pick != VoicePick.send ? 0.0 : -8 * (1 - o);
+          return Opacity(
+            opacity: v * o,
+            child: Transform.translate(offset: Offset(0, 8 * (1 - v) + rise), child: child),
+          );
+        },
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -244,9 +300,9 @@ class _DesktopVoiceState extends State<DesktopVoice> {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              _target(t, const Key('voice-edit'), _editBox, '编辑', 'Tab', pick == VoicePick.edit),
+              _target(t, const Key('voice-edit'), _editBox, Icons.edit_outlined, '编辑', 'Tab', pick == VoicePick.edit),
               const SizedBox(width: 8),
-              _target(t, const Key('voice-cancel'), _cancelBox, '取消', 'Esc', pick == VoicePick.cancel),
+              _target(t, const Key('voice-cancel'), _cancelBox, Icons.close, '取消', 'Esc', pick == VoicePick.cancel),
             ],
           ),
           const SizedBox(height: 4),
@@ -262,7 +318,7 @@ class _DesktopVoiceState extends State<DesktopVoice> {
     );
   }
 
-  Widget _target(RappTokens t, Key key, GlobalKey box, String label, String keyName, bool on) => KeyedSubtree(
+  Widget _target(RappTokens t, Key key, GlobalKey box, IconData icon, String label, String keyName, bool on) => KeyedSubtree(
     key: key,
     child: Container(
       key: box,
@@ -275,6 +331,8 @@ class _DesktopVoiceState extends State<DesktopVoice> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          Icon(icon, size: 16, color: on ? t.accentInk : t.text),
+          const SizedBox(width: 4),
           Text(label, style: TextStyle(color: on ? t.accentInk : t.text, fontSize: 15)),
           const SizedBox(width: 6),
           Text(keyName, style: TextStyle(color: on ? t.accentInk : t.muted, fontSize: 12)),
@@ -291,7 +349,8 @@ class _DesktopVoiceState extends State<DesktopVoice> {
       VoicePick.edit => (t.float.first, t.text, t.text),
     };
     final style = TextStyle(color: ink, fontSize: 17, height: 1.35);
-    final said = voice.text;
+    // Holding: the live words. Going out: the last of them (a cancel has cleared the recogniser's).
+    final said = _hold.holding ? (_said = voice.text) : _said;
     final words = said.isEmpty ? '正在听…' : voiceTail(said, style, width - 32, MediaQuery.textScalerOf(context));
     return CustomPaint(
       key: const Key('voice-bubble'),
@@ -304,7 +363,20 @@ class _DesktopVoiceState extends State<DesktopVoice> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(words, style: style),
+              pick == VoicePick.edit
+                  ? Text.rich(
+                      TextSpan(
+                        text: words,
+                        children: [
+                          WidgetSpan(
+                            alignment: PlaceholderAlignment.middle,
+                            child: SizedBox(width: 1.5, height: 20, child: ColoredBox(color: t.text)),
+                          ),
+                        ],
+                      ),
+                      style: style,
+                    )
+                  : Text(words, style: style),
               const SizedBox(height: 8),
               Align(
                 alignment: Alignment.centerRight,

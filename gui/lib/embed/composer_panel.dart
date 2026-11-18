@@ -753,19 +753,21 @@ List<Widget> composerLayer(
                 onPressed: () => session.composer.open = true,
               ),
           ];
+          // On the Mac the voice button is the row's right end; the rest fades while it holds, and it blurs the
+          // picture itself (a refused press must not).
+          if (button && defaultTargetPlatform == TargetPlatform.macOS && state.voice != null) {
+            return DesktopVoice(
+              key: ValueKey(session.sid),
+              state: state,
+              session: session,
+              port: port,
+              stageWidth: stage.maxWidth,
+              others: items,
+            );
+          }
           return Listener(
             onPointerDown: (_) => state.holdForPanel(session),
-            // On the Mac the voice button is the row's right end, and the rest fades while it holds.
-            child: button && defaultTargetPlatform == TargetPlatform.macOS && state.voice != null
-                ? DesktopVoice(
-                    key: ValueKey(session.sid),
-                    state: state,
-                    session: session,
-                    port: port,
-                    stageWidth: stage.maxWidth,
-                    others: items,
-                  )
-                : Row(mainAxisSize: MainAxisSize.min, children: items),
+            child: Row(mainAxisSize: MainAxisSize.min, children: items),
           );
         },
       ),

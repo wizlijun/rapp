@@ -31,11 +31,16 @@ enum VoiceSettings { none, privacy, language }
 const _microphoneUrl = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone';
 const _languageUrl = 'x-apple.systempreferences:com.apple.Localization-Settings.extension';
 
+/// What [openVoiceSettings] runs by default; tests replace it to see the button's tap arrive.
+@visibleForTesting
+Future<ProcessResult> Function(String, List<String>) voiceSettingsRunner = Process.run;
+
 /// Opens System Settings (macOS) at the pane [s] names, as `openSettingsPane` does. [run] is for tests.
 Future<void> openVoiceSettings(
   VoiceSettings s, {
-  Future<ProcessResult> Function(String, List<String>) run = Process.run,
+  Future<ProcessResult> Function(String, List<String>)? run,
 }) async {
+  run ??= voiceSettingsRunner;
   switch (s) {
     case VoiceSettings.none:
       return;
