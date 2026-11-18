@@ -313,6 +313,7 @@ class _PictureState extends State<Picture> implements TouchSink {
   void _settle() {
     if (!mounted || widget.frozen) return;
     final s = widget.state, rs = widget.session;
+    if (s.voiceHotkeyRecording) return;
     if (s.pictureFocused != null || s.overview || s.corner != null || s.markingInput != null) return;
     if (s.currentRemote?.sid != _sid || rs.detached) return;
     final c = rs.composer;

@@ -569,6 +569,9 @@ class MainState extends ChangeNotifier {
     blurPicture();
   }
 
+  /// The 语音快捷键 row is recording a key: the picture must not take the keys back meanwhile.
+  bool voiceHotkeyRecording = false;
+
   /// What the runner was last told about [pictureFocused]'s compose (type-to-compose).
   bool _composeSent = false;
 

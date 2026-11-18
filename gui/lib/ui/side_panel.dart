@@ -412,11 +412,15 @@ class _VoiceHotkeyRowState extends State<_VoiceHotkeyRow> {
 
   @override
   void dispose() {
+    widget.state.voiceHotkeyRecording = false;
     _focus.dispose();
     super.dispose();
   }
 
   void _start() {
+    // The keys must reach this row, not A: the picture lets go and stays away until recording ends.
+    widget.state.voiceHotkeyRecording = true;
+    widget.state.blurPicture();
     setState(() {
       _recorder = VoiceHotkeyRecorder();
       _rejected = false;
@@ -427,6 +431,7 @@ class _VoiceHotkeyRowState extends State<_VoiceHotkeyRow> {
   }
 
   void _stop() => setState(() {
+        widget.state.voiceHotkeyRecording = false;
         _recorder = null;
         _rejected = false;
       });
@@ -497,6 +502,9 @@ class _VoiceHotkeyRowState extends State<_VoiceHotkeyRow> {
       canRequestFocus: recording,
       skipTraversal: true,
       onKeyEvent: _onKey,
+      onFocusChange: (has) {
+        if (!has && _recorder != null && mounted) _stop();
+      },
       child: row,
     );
   }
