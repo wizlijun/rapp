@@ -523,11 +523,24 @@ class ComposerModel extends ChangeNotifier {
     return SubmitPieces(o.pieces());
   }
 
-  /// Puts [text] at the end of the draft, on its own line (a voice send that did not go).
-  void keep(String text) {
+  /// Puts [text] at the very end of the draft, on its own line (a voice send that did not go). With
+  /// an editor the live text is read and set back with it, so the caret does not matter.
+  Future<void> keep(String text) async {
     final t = text.trim();
     if (t.isEmpty) return;
-    insert(draft.isEmpty ? t : '\n$t');
+    final e = _editor;
+    if (e == null) {
+      draft = draft.isEmpty ? t : '$draft\n$t';
+      return;
+    }
+    final live = await e.read();
+    if (!identical(_editor, e) || _disposed) {
+      draft = draft.isEmpty ? t : '$draft\n$t'; // the editor went while reading
+      return;
+    }
+    _showChips(e);
+    e.setText(live.isEmpty ? t : '$live\n$t');
+    editorChanged();
   }
 
   /// The runner's `sending`; a stop before `done` is held until `done` comes.

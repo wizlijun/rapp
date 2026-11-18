@@ -81,14 +81,24 @@ void main() {
       expect(m.draft, 'keep');
     });
 
-    test('keep appends on a new line', () async {
+    test('keep appends on a new line without an editor', () async {
       await m.detach(ed); // no editor: the text goes straight into the draft
       m.draft = 'x';
-      m.keep(' y ');
+      await m.keep(' y ');
       expect(m.draft, 'x\ny');
       m.draft = '';
-      m.keep('y');
+      await m.keep('y');
       expect(m.draft, 'y');
+    });
+
+    test('keep with an editor attached lands at the end, not at the caret', () async {
+      ed.value = 'hello world';
+      ed.caret = 5;
+      await m.keep(' y ');
+      expect(ed.value, 'hello world\ny');
+      ed.value = '';
+      await m.keep('z');
+      expect(ed.value, 'z');
     });
 
     test('held blocks stay held after a voice send', () {
