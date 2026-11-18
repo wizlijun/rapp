@@ -138,6 +138,7 @@ class LinuxSpeechChannel extends MethodChannel
     String? executable,
     LinuxSpeechModel? model,
     String Function()? language,
+    Future<bool> Function()? isFocused,
     Future<Process> Function(String, List<String>)? spawn,
     this.startWait = const Duration(seconds: 30),
     this.finishWait = const Duration(seconds: 80),
@@ -147,12 +148,14 @@ class LinuxSpeechChannel extends MethodChannel
        model = model ?? LinuxSpeechModel(),
        language =
            language ?? (() => PlatformDispatcher.instance.locale.languageCode),
+       isFocused = isFocused ?? windowManager.isFocused,
        _spawn = spawn ?? ((exe, args) => Process.start(exe, args)),
        super('rapp/linux-speech');
 
   final String executable;
   final LinuxSpeechModel model;
   final String Function() language;
+  final Future<bool> Function() isFocused;
   final Future<Process> Function(String, List<String>) _spawn;
   final Duration startWait, finishWait;
   Future<dynamic> Function(MethodCall)? _handler;
@@ -242,6 +245,9 @@ class LinuxSpeechChannel extends MethodChannel
     final epoch = ++_epoch;
     final ready = _ready = Completer<String>();
     try {
+      // A delayed hold timer can fire after the main window has lost focus.
+      if (!await isFocused()) return 'cancelled';
+      if (epoch != _epoch || _disposed) return 'cancelled';
       final status = await model.readiness();
       if (epoch != _epoch || _disposed) return 'cancelled';
       if (status != 'ok') return status;
@@ -289,6 +295,10 @@ class LinuxSpeechChannel extends MethodChannel
     } on ProcessException {
       return 'unavailable';
     } on FileSystemException {
+      return 'unavailable';
+    } on PlatformException {
+      return 'unavailable';
+    } on MissingPluginException {
       return 'unavailable';
     } finally {
       if (identical(_ready, ready)) _ready = null;

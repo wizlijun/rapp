@@ -100,6 +100,7 @@ void main() {
       'import sys,json,time\njson.loads(sys.stdin.readline())\n$script',
     );
     return LinuxSpeechChannel(
+      isFocused: () async => true,
       model: m,
       executable: file.path,
       language: () => 'en',
@@ -144,6 +145,7 @@ print(json.dumps({'event':'final','text':'hello world'}),flush=True)
       await m.file.parent.create(recursive: true);
       await m.file.writeAsBytes(data);
       final c = LinuxSpeechChannel(
+        isFocused: () async => true,
         model: m,
         spawn: (_, _) async {
           final p = await Process.start('python3', [
@@ -172,6 +174,23 @@ print(json.dumps({'event':'final','text':'hello world'}),flush=True)
       c.setMethodCallHandler(null);
     },
   );
+
+  test('a delayed hotkey after window blur never spawns a recorder', () async {
+    var spawned = false;
+    final c = LinuxSpeechChannel(
+      model: model(),
+      isFocused: () async => false,
+      spawn: (_, _) async {
+        spawned = true;
+        throw StateError('must not spawn');
+      },
+    );
+    c.setMethodCallHandler((_) async {});
+    expect(await c.invokeMethod<String>('start'), 'cancelled');
+    expect(spawned, false);
+    expect(await c.model.file.parent.exists(), false);
+    c.setMethodCallHandler(null);
+  });
 
   test('worker death and startup timeout become unavailable', () async {
     for (final script in ['sys.exit(1)', 'time.sleep(30)']) {
