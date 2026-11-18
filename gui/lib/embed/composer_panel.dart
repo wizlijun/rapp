@@ -687,7 +687,7 @@ List<Widget> composerLayer(
                             key: const Key('composer-open'),
                             label: '输入',
                             icon: Icons.keyboard_outlined,
-                            size: 56,
+                            size: stageButtonSize,
                             onPressed: () => session.composer.open = true,
                           )
                         : null,
@@ -696,7 +696,7 @@ List<Widget> composerLayer(
                             key: const Key('zoom-reset'),
                             label: '还原',
                             icon: Icons.zoom_in_map,
-                            size: 48,
+                            size: stageButtonSize,
                             onPressed: session.restoreCurrent,
                           )
                         : null,
@@ -824,8 +824,8 @@ class _VoiceAbovePanel extends StatelessWidget {
           if (panel == null) return const SizedBox.shrink();
           final left = state.stageSide.value == StageSide.left;
           return LayoutBuilder(builder: (context, c) {
-            final bottom = math.min(c.maxHeight - panel.top + 8, c.maxHeight - 8 - 64);
-            final hint = hold.active || hold.hint == null ? null : voiceHint(hold, maxWidth: c.maxWidth - 2 * stageButtonsIn - 64 - 12);
+            final bottom = math.min(c.maxHeight - panel.top + 8, c.maxHeight - 8 - stageButtonSize);
+            final hint = hold.active || hold.hint == null ? null : voiceHint(hold, maxWidth: c.maxWidth - 2 * stageButtonsIn - stageButtonSize - 12);
             return Stack(children: [
               Positioned(
                 left: left ? stageButtonsIn : null,
