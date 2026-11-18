@@ -533,3 +533,8 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [x] 两种安装包 33 个文件摘要一致，13 个 ELF 依赖解析通过；host 0.14.3 / v13、BUILD-INFO 源码提交及 SHA256 校验通过。解包后的 hub → QUIC service → Omarchy 桌面采集及 CLI/分享端口检查连续三次通过。
 - [x] [v0.14.3 Release](https://github.com/wizlijun/rapp/releases/tag/v0.14.3) 已公开，包含 Arch 包、便携包和 SHA256SUMS；GitHub 端文件大小和 SHA256 与本地一致。latest=false 保留 macOS 0.14.2 更新入口。
 - [x] 根据 GitHub 公开数据更新网站备用快照；未部署网站、未安装或重启本机服务。本轮未进行 macOS/iOS 真机验收。
+
+## iPad 捏合缩放与局部串流（2026-11-18，feat/pinch-zoom）
+
+- [x] 协议 v14 `setView`、A 端按取景截局部、iOS 双指缩放（App 画面和文本终端）、底图、「还原」按钮已实现；规格 `docs/superpowers/specs/2026-11-18-rapp-pinch-zoom-design.md`，iPad 规格里的"不做捏合缩放"已改成指向它。
+- [ ] 真机验收 1–8（Duo 和 iPad 各一遍，条目见该规格 §8「真机验收」）：不放大时行为不变；捏合放大和平移、按住再拖选字；流量不超过不放大时；平移不露黑边；输入板和软键盘；断网重连后取景还在，且 App 和桌面会话（A 端）各自在 `setView` 之后都记了 `region:` 日志（第 6 项，Task 8 留下的检查）；「还原」按钮；文本终端的放大、平移、滚回历史、选字。
