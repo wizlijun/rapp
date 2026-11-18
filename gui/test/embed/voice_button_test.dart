@@ -259,6 +259,23 @@ void main() {
     expect(sends(), isEmpty);
   });
 
+  for (final right in [true, false]) {
+    iosTest('the hint line sits clear above both bands (right: $right)', (tester) async {
+      if (!right) es.setStageSide(StageSide.left);
+      await tester.pumpWidget(layer());
+      final r = ringOf(tester, right: right);
+      final g = await press(tester);
+      await g.moveTo(at(tester, r, VoicePick.edit));
+      await tester.pump();
+      final hint = tester.getRect(find.text('松手 改一改再发'));
+      final o = origin(tester);
+      for (final p in [VoicePick.edit, VoicePick.cancel]) {
+        expect(hint.bottom, lessThanOrEqualTo(r.segment(p).getBounds().top + o.dy), reason: '$p');
+      }
+      await lift(tester, g);
+    });
+  }
+
   iosTest('left side mirrors: 编辑 is still the vertical band', (tester) async {
     es.setStageSide(StageSide.left);
     await tester.pumpWidget(layer());

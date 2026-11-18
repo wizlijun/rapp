@@ -194,7 +194,8 @@ class _VoiceOverlayState extends State<VoiceOverlay> with SingleTickerProviderSt
     }
     final pick = _releasing ? _released : _hold.pick;
     final right = ring.right;
-    final outerAtAxis = ring.centre.dy - (ring.inner + ring.band) * math.cos(ring.axis);
+    // Above the higher of the two full bands: the 编辑 band climbs past the outer edge at the gap axis.
+    final bandTop = math.min(ring.segment(VoicePick.edit).getBounds().top, ring.segment(VoicePick.cancel).getBounds().top);
     final width = math.min(stage.width - 32, 600.0);
     return Stack(
       children: [
@@ -216,7 +217,7 @@ class _VoiceOverlayState extends State<VoiceOverlay> with SingleTickerProviderSt
           left: right ? null : 16,
           right: right ? 16 : null,
           width: width,
-          bottom: stage.height - (outerAtAxis - 24),
+          bottom: stage.height - (bandTop - 12),
           child: Opacity(
             opacity: bubble,
             child: Transform.translate(
