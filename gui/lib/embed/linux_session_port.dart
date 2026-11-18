@@ -308,6 +308,10 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
     return true;
   }
 
+  /// No zoomed view here: a terminal or a Linux host has nothing to narrow.
+  @override
+  void setView(Object sid, int window, Rect rect, double zoom) {}
+
   /// A focused session over [process] without the worker handshake.
   @visibleForTesting
   void seedSessionForTest(Object sid, Process process) {

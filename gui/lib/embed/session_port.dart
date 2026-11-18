@@ -33,6 +33,7 @@ class RemoteWindow {
     required this.focused,
     required this.texture,
     required this.visible,
+    this.baseTexture,
     ui.Image? image,
     Rect? source,
     this.frames,
@@ -55,6 +56,9 @@ class RemoteWindow {
 
   /// The Flutter texture showing this window; null if the runner has none for it.
   final int? texture;
+
+  /// The low-resolution texture of the whole window under a zoomed view (iOS); null without one.
+  final int? baseTexture;
 
   /// Linux frames share a decoded canvas image, cropped to this window.
   final ui.Image? _image;
@@ -400,6 +404,7 @@ RemoteWindow _window(Object? v) {
     resizable: _as<bool>(m['resizable']),
     focused: _as<bool>(m['focused']),
     texture: _as<int?>(m['texture']),
+    baseTexture: _as<int?>(m['base']),
     visible: Rect.fromLTWH(visible[0], visible[1], visible[2], visible[3]),
   );
 }
@@ -602,6 +607,10 @@ abstract class SessionPort {
 
   void resize(Object sid, int window, int w, int h) =>
       _send('resize', {'sid': sid, 'window': window, 'w': w, 'h': h});
+
+  /// Which part of [window] is seen ([rect] in content points, [zoom] the factor); window 0 = the whole of it.
+  void setView(Object sid, int window, Rect rect, double zoom) => _send(
+      'set_view', {'sid': sid, 'window': window, 'x': rect.left, 'y': rect.top, 'w': rect.width, 'h': rect.height, 'zoom': zoom});
 
   void selectWindow(Object sid, int window) => _send('select_window', {'sid': sid, 'window': window});
 

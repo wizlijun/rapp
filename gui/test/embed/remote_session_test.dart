@@ -2,6 +2,7 @@ import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/app_profile.dart';
+import 'package:rapp/embed/geometry.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/embed/stream_choice.dart';
@@ -35,6 +36,77 @@ RemoteWindow win(int id, WindowKind kind) => RemoteWindow(
     );
 
 void main() {
+  group('zoom', () {
+    test('a window gone from the table loses its zoom', () {
+      final rs = RemoteSession(1, 'Calc');
+      rs.apply(WindowsEvent(1, [w(7), w(8)]));
+      rs.zoomOf(7);
+      rs.zoomOf(8);
+      rs.apply(WindowsEvent(1, [w(8)]));
+      expect(rs.zoomIfAny(7), isNull);
+      expect(rs.zoomIfAny(8), isNotNull);
+    });
+
+    test('zooms notifies when a window zooms; currentZoomed follows the current tab', () {
+      final rs = RemoteSession(1, 'Calc');
+      rs.apply(WindowsEvent(1, [w(7)]));
+      var n = 0;
+      rs.zooms.addListener(() => n++);
+      expect(rs.currentZoomed, false);
+      const stage = Size(1000, 700);
+      final fit = fitRect(const Size(100, 100), stage);
+      rs.zoomOf(7).zoomTo(2, const Offset(500, 350), fit, stage);
+      expect(n, 1);
+      expect(rs.currentWindow, 7);
+      expect(rs.currentZoomed, true);
+    });
+
+    test('the view range is said again after Ready (a new link forgot it)', () {
+      final sent = <(int, Rect, double)>[];
+      final rs = RemoteSession(1, 'Calc', onView: (w, r, z) => sent.add((w, r, z)));
+      rs.view.settled(7, const Rect.fromLTWH(10, 10, 20, 20), const Size(100, 100), 2);
+      expect(sent.length, 1);
+      rs.apply(const ReadyEvent(1, 'Calc'));
+      expect(sent.length, 2);
+      expect(sent[1], sent[0]);
+    });
+
+    test('restoreCurrent tells A the whole window again', () {
+      final sent = <(int, Rect, double)>[];
+      final rs = RemoteSession(1, 'Calc', onView: (w, r, z) => sent.add((w, r, z)));
+      rs.apply(WindowsEvent(1, [w(7)]));
+      rs.view.settled(7, const Rect.fromLTWH(10, 10, 20, 20), const Size(100, 100), 2);
+      rs.restoreCurrent();
+      expect(sent.last, (0, Rect.zero, 1.0));
+    });
+
+    test('adoptZoom carries z and centre of shared windows over', () {
+      const stage = Size(1000, 700);
+      final fit = fitRect(const Size(100, 100), stage);
+      final old = RemoteSession(1, 'Calc')..apply(WindowsEvent(1, [w(7), w(9)]));
+      old.zoomOf(7).zoomTo(3, const Offset(300, 200), fit, stage);
+      final fresh = RemoteSession(2, 'Calc')..apply(WindowsEvent(2, [w(7)]));
+      fresh.adoptZoom(old);
+      expect(fresh.zoomIfAny(7)!.z, 3);
+      expect(fresh.zoomIfAny(7)!.centre, old.zoomIfAny(7)!.centre);
+      expect(fresh.zoomIfAny(9), isNull);
+    });
+  });
+
+  group('window payload', () {
+    Map<String, Object?> payload({int? base}) => {
+          'id': 1, 'parent': 0, 'kind': 'normal', 'title': 't', 'x': 0, 'y': 0, 'w': 10, 'h': 10,
+          'titleBar': 0, 'resizable': true, 'focused': false, 'texture': 3, 'visible': [0, 0, 1, 1],
+          'base': ?base,
+        };
+    test('base is the baseTexture, null when absent', () {
+      final a = parseSessionEvent('windows', {'sid': 1, 'windows': [payload(base: 5)]}) as WindowsEvent;
+      expect(a.windows.single.baseTexture, 5);
+      final b = parseSessionEvent('windows', {'sid': 1, 'windows': [payload()]}) as WindowsEvent;
+      expect(b.windows.single.baseTexture, isNull);
+    });
+  });
+
   group('focus', () {
     FocusRegionEvent ev(int window) => FocusRegionEvent(1, window, const [Rect.fromLTWH(0, 0, 10, 10)]);
 
