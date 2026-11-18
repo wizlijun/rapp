@@ -606,4 +606,4 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [x] 真实桌面解锁后，最终解包 GUI 通过 20 轮关闭/重开、缩放、最大化及主窗口/CM 独立生命周期回归；自动 CM 不映射窗口、不抢焦点，无 EGL make-current 或 implicit-view removal 错误。最终包也通过本机 Omarchy 的 hub → QUIC service → host 完整串流。日志 `.build-logs/gui-0148-final-stress.log`、`.build-logs/bundle-0148-final-current.log`。
 - [x] 干净 worktree 从 `a7c482d` 构建 0.14.8-1；Arch/便携包 34 文件摘要一致、13 个 ELF 依赖解析通过，Flutter 3.50.0 / engine `371f77202a73e8dff57a8b3bff75bca55c090aee` 与实际引擎 SHA256 匹配。解包后隔离 headless Wayland 完整 hub → QUIC service → host 桌面串流通过；四组件终端/端口/重启联调通过。
 - [x] [v0.14.8 Release](https://github.com/wizlijun/rapp/releases/tag/v0.14.8) 已公开，三个附件大小/SHA256 与本地一致；latest=false 保留 macOS 0.14.7 的 latest.json 及原附件摘要。刷新网站备用下载快照，未部署网站。
-- [ ] 本机安装已启动，等待系统管理员认证；安装成功后重启服务并核对 34 个文件摘要及 IPC 桌面能力。
+- [x] 本机已安装 `rapp-omarchy 0.14.8-1`；系统认证完成后重启 `rapp-service.service`，确认运行 `/opt/rapp/rapp-service`，34 个安装文件摘要与发布包一致，IPC 桌面/图形/终端/端口能力正常。
