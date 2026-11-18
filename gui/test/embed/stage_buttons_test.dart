@@ -96,13 +96,13 @@ void main() {
     return r;
   }
 
-  iosTest('iOS: 输入 is a 56 circle 12 from the right and 12 from the bottom; no text label', (tester) async {
+  iosTest('iOS: 输入 is a 56 circle 80 in from the right and 88 up, where a thumb reaches; no text label', (tester) async {
     big(tester);
     await tester.pumpWidget(layer());
     final r = inStage(tester, open);
     expect(r.size, const Size(56, 56));
-    expect(stage.width - r.right, 12);
-    expect(stage.height - r.bottom, 12);
+    expect(stage.width - r.right, 80);
+    expect(stage.height - r.bottom, 88);
     expect(find.text('输入'), findsNothing);
   });
 
@@ -136,7 +136,7 @@ void main() {
     await tester.pumpWidget(layer());
     await tester.drag(open, const Offset(-700, 0));
     await tester.pumpAndSettle();
-    expect(inStage(tester, open).left, 12);
+    expect(inStage(tester, open).left, 80);
     expect(es.prefs.stageButtonsSide, StageSide.left);
     expect(es.stageSide.value, StageSide.left);
     expect(rs.composer.open, isFalse);
@@ -147,7 +147,7 @@ void main() {
     await tester.pumpWidget(layer());
     await tester.drag(open, const Offset(-200, 0));
     await tester.pumpAndSettle();
-    expect(stage.width - inStage(tester, open).right, 12);
+    expect(stage.width - inStage(tester, open).right, 80);
     expect(es.prefs.stageButtonsSide, StageSide.right);
     expect(rs.composer.open, isFalse);
   });
@@ -182,12 +182,14 @@ void main() {
     expect(stage.height - inStage(tester, open).bottom, 312);
   });
 
-  iosTest('terminal key row on: the stack stands 8 above the key row', (tester) async {
+  iosTest('terminal key row on: the stack keeps its 88 (above the key row); with the keyboard up, 8 above the row', (tester) async {
     big(tester);
     final tport = FakeTermSessionPort();
     addTearDown(tport.dispose);
     await tester.pumpWidget(layer(p: tport, keyRow: true));
-    expect(stage.height - inStage(tester, open).bottom, keyRowBottom + keyRowKeySize.height + 8);
+    expect(stage.height - inStage(tester, open).bottom, 88);
+    await tester.pumpWidget(layer(p: tport, keyRow: true, keyboard: 300));
+    expect(stage.height - inStage(tester, open).bottom, 300 + keyRowBottom + keyRowKeySize.height + 8);
   });
 
   iosTest('hidden: 输入 fades out and ignores taps; dragging is off', (tester) async {
@@ -214,7 +216,7 @@ void main() {
     expect(sides, 0);
   });
 
-  iosTest('beside alone: the transfer strip sits 12 from the edge (no empty stack, no gap)', (tester) async {
+  iosTest('beside alone: the transfer strip sits 80 from the edge (no empty stack, no gap)', (tester) async {
     big(tester);
     await tester.pumpWidget(wrap(SizedBox(
         key: const Key('stage'),
@@ -225,7 +227,7 @@ void main() {
           onSide: (_) {},
           beside: const [SizedBox(key: Key('strip'), width: 100, height: 40)],
         ))));
-    expect(stage.width - inStage(tester, find.byKey(const Key('strip'))).right, 12);
+    expect(stage.width - inStage(tester, find.byKey(const Key('strip'))).right, 80);
   });
 
   iosTest('hidden mid-drag: the drag ends, the stack snaps back and stays put', (tester) async {
@@ -252,7 +254,7 @@ void main() {
     await g.up();
     await tester.pumpWidget(stack(false));
     await tester.pumpAndSettle();
-    expect(stage.width - inStage(tester, open).right, 12);
+    expect(stage.width - inStage(tester, open).right, 80);
     expect(sides, 0);
   });
 }

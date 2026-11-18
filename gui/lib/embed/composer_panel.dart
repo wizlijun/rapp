@@ -13,6 +13,7 @@ import '../term/term_key_row.dart';
 import '../term/term_session_port.dart';
 import '../ui/controls.dart';
 import '../ui/main_state.dart';
+import '../ui/prefs.dart' show StageSide;
 import '../ui/tokens.dart';
 import 'composer_editor.dart';
 import 'composer_float.dart';
@@ -21,6 +22,7 @@ import 'app_profile.dart';
 import 'composer_plus.dart';
 import 'flutter_editor.dart';
 import 'native_editor.dart';
+import 'panel_place.dart';
 import 'remote_session.dart';
 import 'session_port.dart';
 import 'stage_buttons.dart';
@@ -562,6 +564,8 @@ List<Widget> composerLayer(
   bool open() => session.composer.open && session.composerAllowed;
   return [
     Positioned.fill(
+      // The stage's origin for where the panel is (iOS's voice button stands above it).
+      child: StageMark(
       child: ListenableBuilder(
         listenable: both,
         builder: (context, _) => open()
@@ -574,6 +578,7 @@ List<Widget> composerLayer(
                         session: session,
                         scale: state.composerScale,
                         keyboard: keyboard,
+                        place: panelPlaceOf(session),
                         onPlace: (p) => state.placeComposer(session, p),
                         child: ComposerPanel(
                           editor: editor,
@@ -588,7 +593,9 @@ List<Widget> composerLayer(
                   alignment: Alignment.bottomCenter,
                   child: Padding(
                     padding: EdgeInsets.only(bottom: 8 + keyboard),
-                    child: SizedBox(
+                    child: PanelPlace(
+                      place: panelPlaceOf(session),
+                      child: SizedBox(
                       width: panelWidth(c.maxWidth, state.composerScale),
                       // The key row comes and goes before the panel; the panel stays the same element.
                       child: Column(
@@ -611,10 +618,12 @@ List<Widget> composerLayer(
                         ],
                       ),
                     ),
+                    ),
                   ),
                 ),
               )
             : const SizedBox.shrink(),
+      ),
       ),
     ),
     // A terminal's key row on the panel's line; always in the list, so toggling it moves nothing else.
@@ -643,18 +652,27 @@ List<Widget> composerLayer(
           state: state,
           session: session,
           port: port,
-          buttons: (hold) => Padding(
-            padding: EdgeInsets.only(bottom: (keys ? keyRowBottom + keyRowKeySize.height + 8 - stageButtonsEdge : 0) + keyboard),
-            child: ListenableBuilder(
+          buttons: (hold) => ListenableBuilder(
               listenable: Listenable.merge([both, session.zooms, ?hold]),
               builder: (context, _) {
                 final transfer = session.transferStatus;
                 final button = session.composerAllowed;
                 final zoomed = session.currentZoomed && !session.composer.open;
-                // The same rule as the row below: an open panel hides it; a disallowed one is hidden, so the strip shows here.
-                if ((session.composer.open && button) || (transfer == null && !button && !zoomed)) return const SizedBox.shrink();
+                // An open panel takes the stack, all but 语音, which stands above the panel (user 2026-11-18:
+                // 「输入版打开的时候不要隐藏这个语音输入」).
+                if (session.composer.open && button) {
+                  return hold == null ? const SizedBox.shrink() : _VoiceAbovePanel(state: state, session: session, hold: hold);
+                }
+                // A disallowed panel hides 输入, so the strip shows here.
+                if (transfer == null && !button && !zoomed) return const SizedBox.shrink();
                 final t = RappTokens.of(context);
-                return Listener(
+                // The key row, if on, is under the stack: its own 88 clears it; on the keyboard the row comes
+                // first.
+                final row = keys ? keyRowBottom + keyRowKeySize.height + 8 : 0.0;
+                return Padding(
+                  padding: EdgeInsets.only(
+                      bottom: keyboard > 0 ? keyboard + (keys ? row : stageButtonsEdge) : math.max(stageButtonsUp, row)),
+                  child: Listener(
                   onPointerDown: (_) => state.holdForPanel(session),
                   child: StageButtons(
                     side: state.stageSide.value,
@@ -699,10 +717,10 @@ List<Widget> composerLayer(
                         ),
                     ],
                   ),
+                ),
                 );
               },
             ),
-          ),
         ),
       )
     else
@@ -787,6 +805,48 @@ List<Widget> composerLayer(
 
 /// The iOS stage's button stack plus hold to talk: owns the session's [VoiceHold] (none without
 /// `state.voice`) and lays [VoiceOverlay] over the whole stage.
+/// iOS's 语音 while the panel is open: the same round button, on the stack's line ([stageButtonsIn] in from the
+/// stack's side), 8 above the panel's top, or its key row's when that rides above it; the panel moves (the keyboard,
+/// a drag), the button follows a frame behind. Never off the stage's top.
+class _VoiceAbovePanel extends StatelessWidget {
+  const _VoiceAbovePanel({required this.state, required this.session, required this.hold});
+
+  final MainState state;
+  final RemoteSession session;
+  final VoiceHold hold;
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<Rect?>(
+        valueListenable: panelPlaceOf(session),
+        builder: (context, panel, _) {
+          if (panel == null) return const SizedBox.shrink();
+          final left = state.stageSide.value == StageSide.left;
+          return LayoutBuilder(builder: (context, c) {
+            final bottom = math.min(c.maxHeight - panel.top + 8, c.maxHeight - 8 - 64);
+            final hint = hold.active || hold.hint == null ? null : voiceHint(hold, maxWidth: c.maxWidth - 2 * stageButtonsIn - 64 - 12);
+            return Stack(children: [
+              Positioned(
+                left: left ? stageButtonsIn : null,
+                right: left ? null : stageButtonsIn,
+                bottom: math.max(0, bottom),
+                child: Listener(
+                  onPointerDown: (_) => state.holdForPanel(session),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (left) voiceButton(hold),
+                      if (hint != null) ...[if (left) const SizedBox(width: 12), hint, if (!left) const SizedBox(width: 12)],
+                      if (!left) voiceButton(hold),
+                    ],
+                  ),
+                ),
+              ),
+            ]);
+          });
+        },
+      );
+}
+
 class _IosStage extends StatefulWidget {
   const _IosStage({super.key, required this.state, required this.session, required this.port, required this.buttons});
 

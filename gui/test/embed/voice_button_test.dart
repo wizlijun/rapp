@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/composer_float.dart' show gripSize;
 import 'package:rapp/embed/composer_model.dart';
 import 'package:rapp/embed/composer_panel.dart';
 import 'package:rapp/embed/flutter_editor.dart';
@@ -18,6 +19,7 @@ import 'package:rapp/embed/voice_overlay.dart';
 import 'package:rapp/embed/voice_ring.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/paths.dart';
+import 'package:rapp/term/term_key_row.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 
@@ -152,12 +154,14 @@ void main() {
         }
       });
 
-  Widget layer({RemoteSession? session, bool reduced = false}) => wrap(
+  Widget layer({RemoteSession? session, bool reduced = false, SessionPort? p, bool keyRow = false}) => wrap(
       SizedBox(
           key: const Key('stage'),
           width: stage.width,
           height: stage.height,
-          child: Stack(children: composerLayer(state: es, session: session ?? rs, port: port, editor: FlutterEditor.new))),
+          child: Stack(
+              children: composerLayer(
+                  state: es, session: session ?? rs, port: p ?? port, keyRow: keyRow, editor: FlutterEditor.new))),
       disableAnimations: reduced);
 
   final hold = find.byKey(const Key('voice-hold'));
@@ -165,6 +169,7 @@ void main() {
   final open = find.byKey(const Key('composer-open'));
 
   Offset origin(WidgetTester tester) => tester.getTopLeft(find.byKey(const Key('stage')));
+  Rect inStage(WidgetTester tester, Finder f) => tester.getRect(f).shift(-origin(tester));
   VoiceRing ringOf(WidgetTester tester, {bool right = true}) =>
       VoiceRing(stage: stage, thumb: tester.getCenter(hold) - origin(tester), right: right);
   Offset at(WidgetTester tester, VoiceRing r, VoicePick p) => r.probe(p) + origin(tester);
@@ -241,6 +246,40 @@ void main() {
     await lift(tester, g);
     expect(sends(), hasLength(1));
     expect(voice.cancelled, isFalse);
+  });
+
+  iosTest('panel open: 语音 stays, 8 above the panel on the stack\'s line; a hold there sends, the panel stays', (tester) async {
+    rs.composer.open = true;
+    await tester.pumpWidget(layer());
+    await tester.pump(); // the panel's place reaches the button a frame later
+    expect(open, findsNothing);
+    expect(hold, findsOneWidget);
+    final b = inStage(tester, hold);
+    expect(stage.width - b.right, 80);
+    expect(inStage(tester, find.byType(ComposerPanel)).top - gripSize.height - b.bottom, 8);
+    voice.stopResult = '你好';
+    final g = await press(tester);
+    await lift(tester, g);
+    expect(sends(), [
+      [
+        {'text': '你好'}
+      ]
+    ]);
+    expect(rs.composer.open, isTrue);
+    rs.composer.open = false;
+    await tester.pump();
+    expect(stage.height - inStage(tester, hold).bottom, 88);
+  });
+
+  iosTest('terminal, key row above the open panel: 语音 stands 8 above the key row', (tester) async {
+    final tport = FakeTermSessionPort();
+    addTearDown(tport.dispose);
+    rs.composer.open = true;
+    await tester.pumpWidget(layer(p: tport, keyRow: true));
+    await tester.pump();
+    final b = inStage(tester, hold);
+    expect(inStage(tester, find.byType(TermKeyRow)).top - b.bottom, 8);
+    expect(stage.width - b.right, 80);
   });
 
   iosTest('slide to 编辑: the text goes to the draft end and the composer opens; nothing sent', (tester) async {
