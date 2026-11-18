@@ -548,6 +548,17 @@ void main() {
       expect(f.calls, ['twoDown 120.0,100.0']);
     });
 
+    testWidgets('dropPending drops a held-back press but keeps the fingers counted', (tester) async {
+      final f = _Fingers();
+      f.down(1, const Offset(100, 100));
+      f.g.dropPending();
+      await _wait(tester, f, 300);
+      f.down(2, const Offset(140, 100)); // the first finger still counts: a two-finger gesture
+      f.up(2);
+      f.up(1);
+      expect(f.calls, ['twoDown 120.0,100.0', 'rightTap 120.0,100.0']);
+    });
+
     testWidgets('after dispose nothing more comes out', (tester) async {
       final f = _Fingers();
       f.down(1, const Offset(100, 100));

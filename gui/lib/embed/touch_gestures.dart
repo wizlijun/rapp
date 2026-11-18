@@ -317,6 +317,10 @@ class TouchGestures {
     sink.settled();
   }
 
+  /// Drops a first finger's press not yet sent (it belongs to the window it landed on) and keeps everything else:
+  /// the fingers counted, a press already out, a gesture going on.
+  void dropPending() => _dropPending();
+
   /// Drops everything in flight and emits nothing; fingers still down are ignored until they lift.
   void reset() {
     _dropPending();
