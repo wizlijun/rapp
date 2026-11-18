@@ -2,6 +2,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart' show Offset, Rect;
 
+import '../platform_caps.dart';
 import 'app_profile.dart';
 import 'composer_model.dart';
 import 'geometry.dart' show contentSize;
@@ -80,9 +81,11 @@ class RemoteSession extends ChangeNotifier {
   /// Where the click on the marked text box goes: a left click at A point [at] of [window].
   final void Function(int window, Offset at)? onClick;
 
-  /// 「直接回车且隐藏」: everything is in A, so the Return goes and the panel hides (the text stays,
-  /// W6; the picture takes the keys back).
+  /// Everything is in A. With only the soft keyboard (iPad, no hardware keyboard) the editor lets the caret go, so
+  /// the keyboard goes down and the panel with it; a hardware keyboard keeps typing.
+  /// 「直接回车且隐藏」: then the Return goes and the panel hides (the text stays, W6; the picture takes the keys back).
   void _allSent() {
+    if (!hardwareKeyboard()) composer.releaseFocus();
     if (profile.afterSend != AfterSend.pressReturn) return;
     onReturn?.call();
     composer.collapse();

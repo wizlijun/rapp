@@ -2,9 +2,11 @@ import 'dart:io';
 
 import 'package:rapp/paths.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/platform_caps.dart';
 import 'package:rapp/embed/app_profile.dart';
 import 'package:rapp/embed/composer_panel.dart';
 import 'package:rapp/embed/flutter_editor.dart';
@@ -227,6 +229,49 @@ void main() {
       expect(rs.composer.open, isTrue);
       expect(find.byKey(const Key('composer-panel')), findsOneWidget);
       expect(fieldFocused(tester), isTrue);
+    });
+
+    for (final hard in [false, true]) {
+      testWidgets('iOS ${hard ? 'with a hardware keyboard: the caret stays' : 'soft keyboard: it goes down'} once all is in',
+          (tester) async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+        addTearDown(() => lastHardwareKey = null);
+        try {
+          if (hard) lastHardwareKey = DateTime.now();
+          big(tester);
+          rs.setProfile(const ResolvedProfile(afterSend: AfterSend.none));
+          await tester.pumpWidget(layer());
+          await tester.pump();
+          await tester.enterText(fieldFinder, 'a');
+          await tester.tap(find.byKey(const Key('composer-send')));
+          await tester.pump();
+          expect(fieldFocused(tester), isTrue, reason: 'still sending');
+          rs.apply(const ComposerStateEvent(1, done: ComposerDone(1, null)));
+          await tester.pump();
+          expect(rs.composer.open, isTrue);
+          expect(fieldFocused(tester), hard);
+        } finally {
+          debugDefaultTargetPlatformOverride = null;
+        }
+      });
+    }
+
+    testWidgets('iOS soft keyboard: a send that did not all go in keeps the caret', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      try {
+        big(tester);
+        rs.setProfile(const ResolvedProfile(afterSend: AfterSend.none));
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        await tester.enterText(fieldFinder, 'a');
+        await tester.tap(find.byKey(const Key('composer-send')));
+        await tester.pump();
+        rs.apply(const ComposerStateEvent(1, done: ComposerDone(0, '没有发出去')));
+        await tester.pump();
+        expect(fieldFocused(tester), isTrue);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
     });
 
     testWidgets('the send button sends, and waits while a send runs', (tester) async {
