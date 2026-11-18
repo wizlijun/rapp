@@ -565,4 +565,5 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [x] host 10 项单元测试与 Clippy 通过；隔离 Xvfb、headless labwc 和本机 Omarchy 通过原生串流、输入、Unicode、接管、画质切换、踢出和 EOF。首次与编译并行时 labwc Unicode 事件检查失败，停止编译后原样复验通过，未弱化断言。四组件联调用不含 host 的独立二进制目录验证；完整 bundle 通过 hub → QUIC service → host 桌面串流。
 - [x] 新增只读 `scripts/benchmark-linux-host.py`。本机 3840×2400 / scale 3，15 fps、density 2，各采样 10 秒：host CPU 55.9% → 23.1%，Hyprland CPU 26.7% → 7.3%，ping P95 108.82 ms → 4.02 ms。画面内容可能变化，ping 衡量控制通路，不等于端到端画面延迟或用户实机验收。日志 `.build-logs/host-perf-{before,after}-nodelay.json`。
 - [x] 原生窗口回归发现并修复手动 CM 关闭/重开时的 SIGSEGV：栈位于 GDK 绘制末尾，日志出现 EGL context 失效；共享进程内改为隐藏/复用 CM，独立 CM 关闭则退出。实际 Omarchy 窗口回归覆盖自动后台不抢焦点、显式 CM、反复关闭/重开、CM-first 和独立退出，全部通过；CM 定时器 5 项测试和 Flutter analyze 通过。
-- [ ] 本机包安装后由用户复验两端流畅度与监控窗口行为；用户确认前不推送或发布。
+- [x] 本机验证包 `0.14.6-2` 从干净 worktree 构建，源码 `b46086e8a4b95c94352aaf0738974fa4ad4f7fb6`；Arch/便携包 33 文件摘要一致、13 个 ELF 依赖解析通过。解包后完整串流与原生 GUI 回归通过；系统认证后安装成功，33 个已安装文件与验证包一致。服务已重启，IPC 确认桌面能力；原先主 GUI 未运行，因此未主动弹出主窗口。产物在 `dist/linux-0146-local-responsive/`。
+- [ ] 用户复验两端流畅度与监控窗口行为；确认前不推送或发布。
