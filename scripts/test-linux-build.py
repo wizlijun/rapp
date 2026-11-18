@@ -39,8 +39,12 @@ else:
     cargo.chmod(0o755)
     flutter = root / 'tools/flutter fixture'
     flutter.write_text('''#!/usr/bin/env python3
+import json, os
 from pathlib import Path
 import sys
+if sys.argv[1:] == ['--version','--machine']:
+    print(json.dumps({'frameworkVersion': os.environ.get('TEST_FLUTTER_VERSION', '3.50.0')}))
+    sys.exit(0)
 assert sys.argv[1:] == ['build','linux','--release','--dart-define=RAPP_VERSION=0.13.0']
 bundle = Path('build/linux/x64/release/bundle')
 bundle.mkdir(parents=True, exist_ok=True)
@@ -61,7 +65,14 @@ path.chmod(0o755)
         bundle = root / 'gui/build/linux/x64/release/bundle'
         assert (bundle / 'rapp').read_bytes() == (root / 'scripts/linux/rapp').read_bytes()
         assert (bundle / 'rapp-gui').read_text() == 'fresh gui\n'
+        assert (bundle / 'FLUTTER-INFO.json').is_file()
         for name in workers:
             assert (bundle / name).read_text() == 'fresh ' + name + '\n', (target, name)
             assert os.access(bundle / name, os.X_OK)
+    for version in ['3.47.9', '3.50.0-0.1.pre', 'unknown']:
+        result = subprocess.run(['bash', 'scripts/build-linux.sh'], cwd=root,
+                                env={**env, 'TEST_FLUTTER_VERSION': version},
+                                capture_output=True, text=True)
+        assert result.returncode != 0 and 'require stable Flutter >= 3.50.0' in result.stderr
 print('PASS Linux staging uses the default, absolute and relative Cargo target directories; Flutter override preserves spaces')
+print('PASS old and prerelease Flutter engines are rejected before building')

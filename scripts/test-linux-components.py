@@ -236,7 +236,7 @@ Path({str(cm_log)!r}).write_text(json.dumps({{'args': sys.argv[1:], 'display': o
                                 break
                         assert time.monotonic() < end, 'remote input did not reach the screen'
             until(lambda: cm_log.exists())
-            assert json.loads(cm_log.read_text()) == {'args': ['--cm'], 'display': 'rapp-test-display'}
+            assert json.loads(cm_log.read_text()) == {'args': ['--cm', '--background'], 'display': 'rapp-test-display'}
             until(lambda: output.exists() and b'LINUX_ROUNDTRIP' in output.read_bytes())
             assert b'\x1b[8;24;80t' in output.read_bytes(), 'fit resize was not forwarded'
             print('PASS hub → service → real terminal: discover, open, rename, view, input, fit, current desktop environment')

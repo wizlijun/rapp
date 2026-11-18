@@ -51,7 +51,7 @@ RAPP_ALLOW_ADHOC=1 ./scripts/package-macos.sh
 
 Packages are written to `dist/`. Ad-hoc signing is allowed for local builds; see the [script](scripts/package-macos.sh) for signing and notarization options.
 
-**Omarchy / Arch:** x86_64, Python 3.11+, GTK4 ≥ 4.12, GTK3, clang, cmake, ninja, pkgconf, and libayatana-appindicator.
+**Omarchy / Arch:** x86_64, Python 3.11+, GTK4 ≥ 4.12, GTK3, clang, cmake, ninja, pkgconf, libayatana-appindicator, and stable Flutter ≥ 3.50.0. Set `FLUTTER=/path/to/flutter/bin/flutter` to select an isolated SDK. Older Linux engines have a GTK/OpenGL crash path fixed upstream in Flutter #192137. Packages record the selected SDK in `FLUTTER-INFO.json` and its engine digest in `BUILD-INFO.json`.
 
 ```sh
 ./scripts/build-linux.sh

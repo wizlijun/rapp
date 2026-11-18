@@ -4,7 +4,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs::File,
     io::{Read, Seek, SeekFrom, Write},
-    os::fd::{AsFd, AsRawFd},
+    os::fd::{AsFd, AsRawFd, FromRawFd},
     time::{Duration, Instant},
 };
 use wayland_client::{
@@ -64,6 +64,20 @@ struct State {
     ready: bool,
     failed: bool,
     inverted: bool,
+    buffer_in_use: Option<wayland_client::backend::ObjectId>,
+}
+struct CaptureBuffer {
+    shape: (wl_shm::Format, u32, u32, u32),
+    file: File,
+    raw: Vec<u8>,
+    pool: wl_shm_pool::WlShmPool,
+    buffer: wl_buffer::WlBuffer,
+}
+impl Drop for CaptureBuffer {
+    fn drop(&mut self) {
+        self.buffer.destroy();
+        self.pool.destroy();
+    }
 }
 pub struct Wayland {
     conn: Connection,
@@ -75,6 +89,7 @@ pub struct Wayland {
     held: BTreeSet<u32>,
     buttons: BTreeSet<u32>,
     began: Instant,
+    buffer: Option<CaptureBuffer>,
 }
 impl Wayland {
     pub fn connect() -> Result<Self> {
@@ -91,6 +106,7 @@ impl Wayland {
             held: BTreeSet::new(),
             buttons: BTreeSet::new(),
             began: Instant::now(),
+            buffer: None,
         };
         w.sync()?;
         w.sync()?;
@@ -211,19 +227,28 @@ impl Wayland {
         self.selected = Some(d.clone());
         self.sync()
     }
+    pub fn select_capture(&mut self, d: &Display) {
+        self.selected = Some(d.clone());
+    }
     pub fn capture(&mut self) -> Result<Image> {
+        self.capture_size(None)
+    }
+    pub fn capture_scaled(&mut self, density: f32) -> Result<Image> {
+        self.capture_size(Some(density))
+    }
+    fn capture_size(&mut self, density: Option<f32>) -> Result<Image> {
         // A compositor can miss a render during output reconfiguration or GPU
         // contention. Discard that frame and request a fresh one, retaining the
         // session and decoder reference. Permission failures are never retried.
         for attempt in 0..3 {
-            match self.capture_once() {
+            match self.capture_once(density) {
                 Err(e) if attempt < 2 && e.is::<CompositorTimeout>() => continue,
                 result => return result,
             }
         }
         unreachable!()
     }
-    fn capture_once(&mut self) -> Result<Image> {
+    fn capture_once(&mut self, density: Option<f32>) -> Result<Image> {
         let d = self
             .selected
             .as_ref()
@@ -255,11 +280,21 @@ impl Wayland {
             &self.queue.handle(),
             (),
         );
-        let result = self.read_frame(&frame, transform);
+        let result = self.read_frame(&frame, transform, density);
         frame.destroy();
+        if result.is_err() {
+            self.buffer = None;
+            self.state.buffer_in_use = None;
+        }
+        self.conn.flush()?;
         result
     }
-    fn read_frame(&mut self, frame: &ZwlrScreencopyFrameV1, transform: u32) -> Result<Image> {
+    fn read_frame(
+        &mut self,
+        frame: &ZwlrScreencopyFrameV1,
+        transform: u32,
+        density: Option<f32>,
+    ) -> Result<Image> {
         self.until(|s| {
             s.failed
                 || if frame.version() >= 3 {
@@ -300,79 +335,64 @@ impl Wayland {
             ),
             "unsupported Wayland pixel format: {format:?}"
         );
-        let mut file = tempfile::tempfile()?;
-        file.set_len(stride as u64 * h as u64)?;
-        let qh = self.queue.handle();
-        let pool = self.state.shm.as_ref().unwrap().create_pool(
-            file.as_fd(),
-            (stride * h) as i32,
-            &qh,
-            (),
-        );
-        let buffer = pool.create_buffer(0, w as i32, h as i32, stride as i32, format, &qh, ());
-        // Keep the pool alive through the copy and let the compositor import the
-        // shared-memory buffer before requesting its first render.
-        let result = (|| {
+        let shape = (format, w, h, stride);
+        if self.buffer.as_ref().is_none_or(|b| b.shape != shape) {
+            // Reuse the compositor import and physical pages between frames.
+            // memfd guarantees RAM-backed shared storage regardless of TMPDIR.
+            self.buffer = None;
+            self.state.buffer_in_use = None;
+            // SAFETY: a static NUL-terminated name; a successful fd is owned below.
+            let fd = unsafe { libc::memfd_create(c"rapp-capture".as_ptr(), libc::MFD_CLOEXEC) };
+            ensure!(
+                fd >= 0,
+                "cannot create capture memory: {}",
+                std::io::Error::last_os_error()
+            );
+            // SAFETY: memfd_create returned a new descriptor owned by this File.
+            let file = unsafe { File::from_raw_fd(fd) };
+            file.set_len(stride as u64 * h as u64)?;
+            let qh = self.queue.handle();
+            let pool = self.state.shm.as_ref().unwrap().create_pool(
+                file.as_fd(),
+                (stride * h) as i32,
+                &qh,
+                (),
+            );
+            let buffer = pool.create_buffer(0, w as i32, h as i32, stride as i32, format, &qh, ());
+            self.buffer = Some(CaptureBuffer {
+                shape,
+                file,
+                raw: vec![0; stride as usize * h as usize],
+                pool,
+                buffer,
+            });
             self.sync()?;
-            frame.copy(&buffer);
-            self.until(|s| s.ready || s.failed)
-                .context("waiting for captured pixels")
-        })();
-        buffer.destroy();
-        pool.destroy();
-        result?;
+        }
+        // ready makes pixels readable; wl_buffer.release makes the buffer
+        // reusable. Do not hand it back while the compositor still owns it.
+        self.until(|s| s.buffer_in_use.is_none())
+            .context("waiting for capture buffer release")?;
+        let buffer = &self.buffer.as_ref().unwrap().buffer;
+        self.state.buffer_in_use = Some(buffer.id());
+        frame.copy(buffer);
+        self.until(|s| s.ready || s.failed)
+            .context("waiting for captured pixels")?;
         ensure!(
             !self.state.failed,
             "desktop capture failed (screen may be locked)"
         );
-        let mut raw = vec![0; stride as usize * h as usize];
-        file.seek(SeekFrom::Start(0))?;
-        file.read_exact(&mut raw)?;
-        let (w, h, stride) = (w as usize, h as usize, stride as usize);
-        let (ow, oh) = if transform % 2 == 1 { (h, w) } else { (w, h) };
-        let mut pixels = vec![0; ow * oh * 4];
-        let swap = matches!(
-            format,
-            wl_shm::Format::Abgr8888
-                | wl_shm::Format::Xbgr8888
-                | wl_shm::Format::Xbgr2101010
-                | wl_shm::Format::Abgr2101010
-        );
-        let ten = matches!(
-            format,
-            wl_shm::Format::Xrgb2101010
-                | wl_shm::Format::Xbgr2101010
-                | wl_shm::Format::Argb2101010
-                | wl_shm::Format::Abgr2101010
-        );
-        for y in 0..oh {
-            for x in 0..ow {
-                let fx = if transform >= 4 { ow - 1 - x } else { x };
-                let (sx, sy) = match transform % 4 {
-                    1 => (y, h - 1 - fx),
-                    2 => (w - 1 - fx, h - 1 - y),
-                    3 => (w - 1 - y, fx),
-                    _ => (fx, y),
-                };
-                let sy = if self.state.inverted { h - 1 - sy } else { sy };
-                let src = &raw[sy * stride + sx * 4..sy * stride + sx * 4 + 4];
-                let mut p: [u8; 4] = if ten {
-                    let v = u32::from_le_bytes(src.try_into().unwrap());
-                    [(v >> 2) as u8, (v >> 12) as u8, (v >> 22) as u8, 255]
-                } else {
-                    [src[0], src[1], src[2], 255]
-                };
-                if swap {
-                    p.swap(0, 2);
-                }
-                pixels[(y * ow + x) * 4..(y * ow + x + 1) * 4].copy_from_slice(&p);
-            }
-        }
-        Ok(Image {
-            width: ow,
-            height: oh,
-            pixels,
-        })
+        let buffer = self.buffer.as_mut().unwrap();
+        buffer.file.seek(SeekFrom::Start(0))?;
+        buffer.file.read_exact(&mut buffer.raw)?;
+        let raw = &buffer.raw;
+        Ok(decode_frame(
+            raw,
+            shape,
+            transform,
+            self.state.inverted,
+            self.selected.as_ref().unwrap(),
+            density,
+        ))
     }
     fn time(&self) -> u32 {
         self.began.elapsed().as_millis() as u32
@@ -673,7 +693,22 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for State {
 }
 delegate_noop!(State: ignore wl_shm::WlShm);
 delegate_noop!(State: ignore wl_shm_pool::WlShmPool);
-delegate_noop!(State: ignore wl_buffer::WlBuffer);
+impl Dispatch<wl_buffer::WlBuffer, ()> for State {
+    fn event(
+        s: &mut Self,
+        buffer: &wl_buffer::WlBuffer,
+        event: wl_buffer::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if matches!(event, wl_buffer::Event::Release)
+            && s.buffer_in_use.as_ref() == Some(&buffer.id())
+        {
+            s.buffer_in_use = None;
+        }
+    }
+}
 delegate_noop!(State: ignore wl_seat::WlSeat);
 delegate_noop!(State: ignore ZwlrScreencopyManagerV1);
 delegate_noop!(State: ignore ZwlrVirtualPointerManagerV1);
@@ -681,3 +716,118 @@ delegate_noop!(State: ignore ZwlrVirtualPointerV1);
 delegate_noop!(State: ignore ZwpVirtualKeyboardManagerV1);
 delegate_noop!(State: ignore ZwpVirtualKeyboardV1);
 delegate_noop!(State: ignore ZxdgOutputManagerV1);
+
+// Scale while converting; do not first build a full 4K BGRA intermediate.
+fn decode_frame(
+    raw: &[u8],
+    shape: (wl_shm::Format, u32, u32, u32),
+    transform: u32,
+    inverted: bool,
+    display: &Display,
+    density: Option<f32>,
+) -> Image {
+    let (format, w, h, stride) = shape;
+    let (w, h, stride) = (w as usize, h as usize, stride as usize);
+    let (ow, oh) = if transform % 2 == 1 { (h, w) } else { (w, h) };
+    let (dw, dh) = density.map_or((ow, oh), |density| {
+        super::scaled_dimensions(ow, oh, display, density)
+    });
+    let mut pixels = vec![0; dw * dh * 4];
+    let swap = matches!(
+        format,
+        wl_shm::Format::Abgr8888
+            | wl_shm::Format::Xbgr8888
+            | wl_shm::Format::Xbgr2101010
+            | wl_shm::Format::Abgr2101010
+    );
+    let ten = matches!(
+        format,
+        wl_shm::Format::Xrgb2101010
+            | wl_shm::Format::Xbgr2101010
+            | wl_shm::Format::Argb2101010
+            | wl_shm::Format::Abgr2101010
+    );
+    // The horizontal sampling map repeats on every row. Avoid a variable-width
+    // integer division for every pixel on a large HiDPI output.
+    let xs: Vec<_> = (0..dw)
+        .map(|dx| {
+            let x = dx * ow / dw;
+            if transform >= 4 {
+                ow - 1 - x
+            } else {
+                x
+            }
+        })
+        .collect();
+    for dy in 0..dh {
+        let y = dy * oh / dh;
+        for (dx, &fx) in xs.iter().enumerate() {
+            let (sx, sy) = match transform % 4 {
+                1 => (y, h - 1 - fx),
+                2 => (w - 1 - fx, h - 1 - y),
+                3 => (w - 1 - y, fx),
+                _ => (fx, y),
+            };
+            let sy = if inverted { h - 1 - sy } else { sy };
+            let src = &raw[sy * stride + sx * 4..sy * stride + sx * 4 + 4];
+            let mut p: [u8; 4] = if ten {
+                let v = u32::from_le_bytes(src.try_into().unwrap());
+                [(v >> 2) as u8, (v >> 12) as u8, (v >> 22) as u8, 255]
+            } else {
+                [src[0], src[1], src[2], 255]
+            };
+            if swap {
+                p.swap(0, 2);
+            }
+            pixels[(dy * dw + dx) * 4..(dy * dw + dx + 1) * 4].copy_from_slice(&p);
+        }
+    }
+    Image {
+        width: dw,
+        height: dh,
+        pixels,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn scaled_conversion_matches_full_conversion_for_all_transforms_and_formats() {
+        let (w, h, stride) = (7, 5, 32);
+        let raw: Vec<u8> = (0..stride * h).map(|i| (i * 37) as u8).collect();
+        for format in [
+            wl_shm::Format::Argb8888,
+            wl_shm::Format::Xrgb8888,
+            wl_shm::Format::Abgr8888,
+            wl_shm::Format::Xbgr8888,
+            wl_shm::Format::Argb2101010,
+            wl_shm::Format::Xrgb2101010,
+            wl_shm::Format::Abgr2101010,
+            wl_shm::Format::Xbgr2101010,
+        ] {
+            for transform in 0..8 {
+                for inverted in [false, true] {
+                    let display = Display {
+                        id: 1,
+                        name: "test".into(),
+                        x: 0,
+                        y: 0,
+                        width: 3,
+                        height: 2,
+                        main: true,
+                    };
+                    for density in [0.5, 1., 2., 8.] {
+                        let shape = (format, w, h, stride);
+                        let full = decode_frame(&raw, shape, transform, inverted, &display, None)
+                            .scaled(&display, density);
+                        let scaled =
+                            decode_frame(&raw, shape, transform, inverted, &display, Some(density));
+                        assert_eq!((scaled.width, scaled.height), (full.width, full.height));
+                        assert_eq!(scaled.pixels, full.pixels, "{format:?} transform {transform} inverted {inverted} density {density}");
+                    }
+                }
+            }
+        }
+    }
+}

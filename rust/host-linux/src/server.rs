@@ -1,6 +1,6 @@
 use crate::{
+    capture::{self, CaptureWorker, Job},
     desktop::Desktop,
-    encode::Encoder,
     wire::{self, Input, Settings},
 };
 use anyhow::{bail, ensure, Context, Result};
@@ -12,7 +12,7 @@ use std::{
     net::{Shutdown, TcpListener, TcpStream},
     process::{Command, Stdio},
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
         mpsc, Arc,
     },
     time::{Duration, Instant},
@@ -113,14 +113,20 @@ enum Event {
 struct Live {
     socket: TcpStream,
     settings: Settings,
-    encoder: Encoder,
+    epoch: u64,
+    unchanged: u32,
     pending: Vec<u8>,
     next_frame: Instant,
+    active_after: Instant,
     awaiting: Option<Instant>,
     gate: crate::gate::Gate,
     locked: Option<bool>,
     next_lock_check: Instant,
     _inhibit: Option<std::process::Child>,
+}
+fn next_epoch() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
 }
 impl Drop for Live {
     fn drop(&mut self) {
@@ -210,6 +216,7 @@ pub fn serve(opts: Options) -> Result<()> {
     ensure!(!opts.token.is_empty(), "a token is required");
     let mut desktop = Desktop::connect()?;
     let display = desktop.select(&opts.app)?;
+    let mut capture = CaptureWorker::start(opts.app.clone(), display.clone());
     let title = format!("桌面 · {}", display.name);
     let listener = TcpListener::bind((opts.bind.as_str(), opts.port))?;
     let port = listener.local_addr()?.port();
@@ -307,9 +314,11 @@ pub fn serve(opts: Options) -> Result<()> {
                     let mut l = Live {
                         socket: a.socket,
                         settings: a.settings,
-                        encoder: Encoder::default(),
+                        epoch: next_epoch(),
+                        unchanged: 0,
                         pending: vec![],
                         next_frame: now,
+                        active_after: now,
                         awaiting: None,
                         gate: Default::default(),
                         locked: None,
@@ -328,8 +337,22 @@ pub fn serve(opts: Options) -> Result<()> {
                 }
             }
         }
+        let completed = capture.completed();
         if let Some(l) = &mut live {
             let result = (|| -> Result<()> {
+                if let Some(done) = completed.filter(|done| done.epoch == l.epoch) {
+                    if let Some(frame) = done.frame? {
+                        l.send(&frame)?;
+                        l.awaiting = Some(Instant::now());
+                        l.unchanged = 0;
+                    } else {
+                        l.unchanged = l.unchanged.saturating_add(1);
+                    }
+                    l.active_after =
+                        Instant::now() + capture::rest(l.settings.fps, done.elapsed, 0);
+                    l.next_frame =
+                        Instant::now() + capture::rest(l.settings.fps, done.elapsed, l.unchanged);
+                }
                 for input in l.read()? {
                     handle(l, &mut desktop, input)?;
                 }
@@ -354,18 +377,10 @@ pub fn serve(opts: Options) -> Result<()> {
                     );
                 }
                 if now >= l.next_frame && l.awaiting.is_none() {
-                    let image = desktop.capture()?.scaled(&display, l.settings.density);
-                    if let Some(frame) = l.encoder.frame(
-                        &image.pixels,
-                        image.width,
-                        image.height,
-                        (display.width, display.height),
-                        l.settings.mode,
-                    )? {
-                        l.send(&frame)?;
-                        l.awaiting = Some(Instant::now());
-                    }
-                    l.next_frame = now + Duration::from_secs_f32(1. / l.settings.fps as f32);
+                    capture.submit(Job {
+                        epoch: l.epoch,
+                        settings: l.settings,
+                    })?;
                 }
                 Ok(())
             })();
@@ -385,9 +400,11 @@ fn handle(l: &mut Live, desktop: &mut Desktop, input: Input) -> Result<()> {
         }
         Input::Stream(s) => {
             if l.settings.mode != s.mode || l.settings.density != s.density {
-                l.encoder.reset();
+                l.epoch = next_epoch();
             }
             l.settings = s;
+            l.unchanged = 0;
+            l.next_frame = Instant::now();
             return Ok(());
         }
         Input::Ignore => return Ok(()),
@@ -410,6 +427,8 @@ fn handle(l: &mut Live, desktop: &mut Desktop, input: Input) -> Result<()> {
     if decision.report {
         emit(json!({"event":"input"}));
     }
+    l.unchanged = 0;
+    l.next_frame = l.next_frame.min(Instant::now().max(l.active_after));
     match input {
         Input::Key(k, m, d) => desktop.key(k, m, d)?,
         Input::Mouse(k, b, x, y) => desktop.mouse(k, b, x, y)?,

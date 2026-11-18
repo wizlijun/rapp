@@ -2,11 +2,22 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 # Arch/Omarchy: rust, gtk4, clang, cmake, ninja, pkgconf,
-# gtk3, libayatana-appindicator, and Flutter with Dart >= 3.12.1.
+# gtk3, libayatana-appindicator, and Flutter >= 3.50.0.
 flutter_bin="${FLUTTER:-flutter}"
 if ! command -v "$flutter_bin" >/dev/null && [[ -x "$HOME/development/flutter/bin/flutter" ]]; then
   flutter_bin="$HOME/development/flutter/bin/flutter"
 fi
+# Older Linux engines clear the GL context before GTK finishes the frame.
+# 3.50 includes flutter/flutter#192137; do not silently ship the crash-prone
+# engine again when building from a different machine or an older default SDK.
+flutter_info=$("$flutter_bin" --version --machine)
+printf '%s' "$flutter_info" | python3 -c '
+import json,re,sys
+v=json.load(sys.stdin).get("frameworkVersion", "")
+m=re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", v)
+if not m or tuple(map(int,m.groups())) < (3,50,0):
+    sys.exit(f"Linux builds require stable Flutter >= 3.50.0 (found {v}); set FLUTTER to the matching SDK executable.")
+'
 # Cargo resolves custom/shared target directories, including relative paths.
 # Copy from that same directory so cached builds cannot bundle stale workers.
 target_dir=$(cargo metadata --manifest-path rust/Cargo.toml --locked --no-deps --format-version 1 |
@@ -24,4 +35,5 @@ for binary in rapp-client rapp-session rapp-host rapp-hub rapp-service rapp-term
   install -m755 "$target_dir/release/$binary" "$staged"
   mv -f "$staged" "$bundle/$binary"
 done
+printf '%s\n' "$flutter_info" > "$bundle/FLUTTER-INFO.json"
 printf 'Built %s/%s/rapp and rapp-client\n' "$PWD" "$bundle"

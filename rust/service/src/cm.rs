@@ -45,8 +45,13 @@ fn ensure_on_desktop(state: &State, env: &std::collections::BTreeMap<String, Str
 
 fn launch(state: &State, env: &std::collections::BTreeMap<String, String>) -> Option<std::process::Child> {
     gui_path(state).and_then(|p| {
-        Command::new(&p)
-            .arg("--cm")
+        let mut command = Command::new(&p);
+        command.arg("--cm");
+        // A remote connection must not map a tiled window or steal the local
+        // desktop's focus. Explicit `rapp --cm` still opens the manager.
+        #[cfg(target_os = "linux")]
+        command.arg("--background");
+        command
             .envs(env)
             .stdin(Stdio::null())
             .spawn()
