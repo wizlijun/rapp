@@ -115,4 +115,18 @@ void main() {
     expect(transferSummary([tr(false, 'x.txt', 0, 0)]), '上传 x.txt 0%');
     expect(transferSummary([tr(true, 'a', 1, 2), tr(true, 'b', 1, 2), tr(false, 'c', 1, 2)]), '3 个传输');
   });
+
+  test('each column carries its version: local from the hub, hosts from their app list, else none', () {
+    final cols = deviceColumns(
+      hosts: const [HubHost('m1', 'A'), HubHost('m2', 'B'), HubHost('m3', 'C')],
+      probes: {
+        'm1': DeviceProbe(Lamp.active, '在线', apps: const AppList('m1', 'lan', [], version: '0.14.8')),
+        'm2': DeviceProbe(Lamp.active, '在线', apps: const AppList('m2', 'lan', [])),
+      },
+      entries: [se('gone', Lamp.disconnected)],
+      name: (id) => id,
+      localVersion: '0.14.7',
+    );
+    expect(cols.map((c) => c.version), ['0.14.7', '0.14.8', null, null, null]);
+  });
 }

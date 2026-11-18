@@ -237,7 +237,7 @@ impl Hub {
     }
 
     fn hosts_event(&self) -> Value {
-        json!({"event":"hosts","hosts":self.hosts.summary()})
+        json!({"event":"hosts","hosts":self.hosts.summary(),"version":env!("CARGO_PKG_VERSION")})
     }
 
     async fn command(self: &Arc<Self>, line: &str) {
@@ -309,15 +309,7 @@ impl Hub {
             Some("apps") => {
                 let id = s("id")?;
                 let (_, r, path) = self.request(&self.host(id)?, &Op::ListApps).await?;
-                let mut ev = json!({"event":"apps","id":id,"path":path,"apps":r["apps"]});
-                // Only newer macOS hosts report what they are missing.
-                if r["permissions"].is_object() {
-                    ev["permissions"] = r["permissions"].clone();
-                }
-                if r["capabilities"].is_object() {
-                    ev["capabilities"] = r["capabilities"].clone();
-                }
-                ev
+                apps_event(id, path, &r)
             }
             Some("logs") => {
                 let q: rapp_net::logq::LogQuery = serde_json::from_value(v.clone()).context("bad logs query")?;
@@ -434,6 +426,23 @@ fn sid_seed() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
 }
 
+/// The `apps` event for host [id]: its apps, plus what newer hosts add to the reply (missing
+/// permissions, capabilities, and their rapp version).
+fn apps_event(id: &str, path: &str, r: &Value) -> Value {
+    let mut ev = json!({"event":"apps","id":id,"path":path,"apps":r["apps"]});
+    // Only newer macOS hosts report what they are missing.
+    if r["permissions"].is_object() {
+        ev["permissions"] = r["permissions"].clone();
+    }
+    if r["capabilities"].is_object() {
+        ev["capabilities"] = r["capabilities"].clone();
+    }
+    if r["version"].as_str().is_some_and(|v| !v.is_empty()) {
+        ev["version"] = r["version"].clone();
+    }
+    ev
+}
+
 #[cfg(test)]
 mod reason_tests {
     use super::parse_close_reason;
@@ -463,5 +472,24 @@ mod sid_tests {
         assert!(seed + 1000 >= now && seed <= now + 1000, "seed {seed} vs now {now}");
         // Stays exact as a JSON number / Dart int.
         assert!(seed < (1u64 << 53));
+    }
+}
+
+#[cfg(test)]
+mod apps_event_tests {
+    use super::apps_event;
+    use serde_json::json;
+
+    #[test]
+    fn apps_event_copies_version() {
+        let ev = apps_event("m1", "lan", &json!({"apps": [], "version": "0.14.8", "capabilities": {"ports": true}}));
+        assert_eq!(ev["event"], "apps");
+        assert_eq!(ev["version"], "0.14.8");
+        assert_eq!(ev["capabilities"]["ports"], true);
+        let ev = apps_event("m1", "lan", &json!({"apps": []}));
+        assert!(ev.get("version").is_none());
+        assert!(ev.get("capabilities").is_none());
+        let ev = apps_event("m1", "lan", &json!({"apps": [], "version": ""}));
+        assert!(ev.get("version").is_none());
     }
 }

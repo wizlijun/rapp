@@ -43,6 +43,7 @@ class Overview extends StatelessWidget {
           probes: state.probes,
           entries: entries,
           name: state.deviceName,
+          localVersion: state.hub?.version,
         );
         final projectsFirst = state.prefs.first == FirstLayer.project;
         return Stack(children: [
@@ -343,6 +344,11 @@ class _Column extends StatelessWidget {
             ),
           ],
         ]),
+        if (col.version case final v?)
+          Padding(
+            padding: const EdgeInsets.only(top: 14),
+            child: Text(v, key: Key('version-${id ?? 'local'}'), style: small?.copyWith(color: t.muted)),
+          ),
       ]),
     );
   }
