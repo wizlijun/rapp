@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../embed/voice_key_gate.dart';
 import 'tokens.dart';
 
 /// Which layer the window opens on (`first` in gui.json): the devices or the projects.
@@ -30,6 +31,8 @@ class UiPrefs {
     this.composerZoom = 0,
     this.stageButtonsSide = StageSide.right,
     this.settingsFolded = false,
+    this.voiceHotkey = VoiceHotkey.standard,
+    this.voiceLanguageHintShown = false,
     Map<String, String>? termOpen,
     Map<String, String>? termApp,
   })  : appKeyRow = appKeyRow ?? Platform.isIOS,
@@ -68,6 +71,12 @@ class UiPrefs {
   /// 全局设置折起 (`settings_folded`): the side panel's settings are folded away. Missing or bad means open.
   bool settingsFolded;
 
+  /// 语音输入快捷键 (`voice_hotkey`, macOS): hold to talk. Missing or bad means long-press Right Option.
+  VoiceHotkey voiceHotkey;
+
+  /// 语音语言提示已显示 (`voice_language_hint_shown`). Missing or bad means false.
+  bool voiceLanguageHintShown;
+
   /// 排列 (`first`): the layer shown first. Missing or unknown means devices.
   FirstLayer first;
 
@@ -103,6 +112,8 @@ class UiPrefs {
       final cz = j['composer_zoom'];
       final sb = j['stage_buttons_side'];
       final sf = j['settings_folded'];
+      final vh = j['voice_hotkey'];
+      final vl = j['voice_language_hint_shown'];
       final to = j['term_open'];
       final ta = j['term_app'];
       return UiPrefs(
@@ -120,6 +131,8 @@ class UiPrefs {
         composerZoom: cz is int ? cz.clamp(0, composerZoomMax) : 0,
         stageButtonsSide: sb == 'left' ? StageSide.left : StageSide.right,
         settingsFolded: sf is bool ? sf : false,
+        voiceHotkey: VoiceHotkey.fromJson(vh),
+        voiceLanguageHintShown: vl is bool ? vl : false,
         first: FirstLayer.values.firstWhere(
           (v) => v.name == fl,
           orElse: () => FirstLayer.device,
@@ -157,6 +170,8 @@ class UiPrefs {
         'composer_zoom': composerZoom,
         'stage_buttons_side': stageButtonsSide.name,
         'settings_folded': settingsFolded,
+        'voice_hotkey': voiceHotkey.toJson(),
+        'voice_language_hint_shown': voiceLanguageHintShown,
         'term_open': termOpen,
         'term_app': termApp,
       }),

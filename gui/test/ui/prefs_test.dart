@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/voice_key_gate.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/tokens.dart';
 
@@ -154,5 +155,18 @@ void main() {
     expect(UiPrefs.load(tmp.path).stageButtonsSide, StageSide.right);
     File('${tmp.path}/gui.json').writeAsStringSync('{"stage_buttons_side":"up"}');
     expect(UiPrefs.load(tmp.path).stageButtonsSide, StageSide.right);
+  });
+
+  test('voice_hotkey and voice_language_hint_shown round-trip, with fallbacks', () {
+    UiPrefs(voiceHotkey: const VoiceHotkey.holdCombo(49, 786432), voiceLanguageHintShown: true).save(tmp.path);
+    final p = UiPrefs.load(tmp.path);
+    expect(p.voiceHotkey, const VoiceHotkey.holdCombo(49, 786432));
+    expect(p.voiceLanguageHintShown, isTrue);
+    File('${tmp.path}/gui.json').writeAsStringSync('{"voice_hotkey":7}');
+    expect(UiPrefs.load(tmp.path).voiceHotkey, VoiceHotkey.standard);
+    File('${tmp.path}/gui.json').writeAsStringSync('{}');
+    final d = UiPrefs.load(tmp.path);
+    expect(d.voiceHotkey, VoiceHotkey.standard);
+    expect(d.voiceLanguageHintShown, isFalse);
   });
 }
