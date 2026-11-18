@@ -317,6 +317,12 @@ void main() {
   const label = '远程 app 都关闭后自动锁屏';
   const note = '锁屏后，B 打开 app 时需要输入这台 Mac 的登录密码。';
 
+  testWidgets('the auto-lock row is bounded to 320 wide', (tester) async {
+    svc = FakeService('tok');
+    await pump(tester, platform: TargetPlatform.macOS);
+    expect(tester.getSize(find.byType(RappSwitchRow)).width, lessThanOrEqualTo(320));
+  });
+
   testWidgets('the auto-lock switch shows on macOS, reflects the status and sends set_auto_lock', (tester) async {
     svc = FakeService('tok');
     svc.extraStatus = {'auto_lock': true};

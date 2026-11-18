@@ -3,7 +3,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/ui/inline_edit.dart';
 
+import 'package:rapp/ui/tokens.dart';
+
 import 'helpers.dart';
+import 'platform_helpers.dart';
 
 void main() {
   testWidgets('tap edits, enter commits once', (tester) async {
@@ -89,4 +92,31 @@ void main() {
       greaterThanOrEqualTo(48),
     );
   });
+
+  for (final p in [TargetPlatform.macOS, TargetPlatform.iOS]) {
+    testWidgets('editing does not grow the row it sits in on $p', (tester) async {
+      await onPlatform(p, () async {
+        await tester.pumpWidget(MaterialApp(
+          theme: themeDataFor(RappTheme.matrix, platform: p),
+          home: Scaffold(
+            body: Row(children: [
+              Expanded(
+                child: InlineEdit(
+                  key: const Key('ie'),
+                  text: 'a name',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                  onCommit: (_) {},
+                ),
+              ),
+            ]),
+          ),
+        ));
+        final resting = tester.getSize(find.byKey(const Key('ie')));
+        await tester.tap(find.text('a name'));
+        await tester.pump();
+        expect(tester.getSize(find.byKey(const Key('ie'))), resting);
+        expect(tester.takeException(), isNull);
+      });
+    });
+  }
 }
