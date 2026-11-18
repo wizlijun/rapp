@@ -61,7 +61,9 @@ class RappButton extends StatefulWidget {
        oneLine = false,
        size = 48;
 
-  /// A flat circle of [size] on the remote picture, icon only: the stage's edge buttons (iOS). No shadow.
+  /// A flat circle of [size] on the remote picture, icon only: the stage's edge buttons (iOS). No shadow. Half
+  /// see-through ([roundRestOpacity]) until a finger is on it, so it hides less of the picture (user 2026-11-18:
+  /// 「未按时半透明显示」).
   const RappButton.round({
     super.key,
     required this.label,
@@ -97,6 +99,9 @@ class RappButton extends StatefulWidget {
   @override
   State<RappButton> createState() => _RappButtonState();
 }
+
+/// A round button's opacity while no finger is on it; solid while one is.
+const roundRestOpacity = 0.5;
 
 class _RappButtonState extends State<RappButton> {
   bool _down = false;
@@ -193,6 +198,13 @@ class _RappButtonState extends State<RappButton> {
     final name = widget.semanticLabel ?? (icon == null ? null : widget.label);
     final reduced =
         MediaQuery.disableAnimationsOf(context) || widget.onPressed == null;
+    final Widget look = widget._kind != _Kind.round
+        ? button
+        : AnimatedOpacity(
+            opacity: _down ? 1 : roundRestOpacity,
+            duration: reduced ? Duration.zero : const Duration(milliseconds: 80),
+            child: button,
+          );
     return Listener(
       onPointerDown: (_) => _set(true),
       onPointerUp: (_) => _set(false),
@@ -201,14 +213,14 @@ class _RappButtonState extends State<RappButton> {
         scale: _down && !reduced ? .97 : 1,
         duration: reduced ? Duration.zero : const Duration(milliseconds: 80),
         child: name == null
-            ? button
+            ? look
             : Semantics(
                 label: name,
                 excludeSemantics: true,
                 button: true,
                 enabled: widget.onPressed != null,
                 onTap: widget.onPressed,
-                child: button,
+                child: look,
               ),
       ),
     );

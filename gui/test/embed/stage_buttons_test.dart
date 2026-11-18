@@ -100,13 +100,43 @@ void main() {
     big(tester);
     await tester.pumpWidget(layer());
     final r = inStage(tester, open);
-    expect(r.size, const Size(56, 56));
+    expect(r.size, const Size.square(stageButtonSize));
     expect(stage.width - r.right, 80);
     expect(stage.height - r.bottom, 88);
     expect(find.text('输入'), findsNothing);
   });
 
-  iosTest('zoomed: 还原 (48) sits 12 above 输入', (tester) async {
+  // The round buttons' own see-through: the nearest Opacity inside the button.
+  double look(WidgetTester tester, Finder f) =>
+      tester.widget<AnimatedOpacity>(find.descendant(of: f, matching: find.byType(AnimatedOpacity)).first).opacity;
+
+  iosTest('语音, 输入 and 还原 are one size: stageButtonSize (user 2026-11-18: 「按键能否改成一样大」)', (tester) async {
+    big(tester);
+    rs.dispose();
+    rs = zoomable();
+    await tester.pumpWidget(layer());
+    zoom();
+    await tester.pump();
+    expect(stageButtonSize, 56);
+    expect(inStage(tester, open).size, const Size.square(stageButtonSize));
+    expect(inStage(tester, reset).size, const Size.square(stageButtonSize));
+  });
+
+  iosTest('at rest the round buttons are half see-through; a finger on one makes it solid until it leaves', (tester) async {
+    big(tester);
+    await tester.pumpWidget(layer());
+    expect(look(tester, open), 0.5);
+    final g = await tester.startGesture(tester.getCenter(open));
+    await tester.pumpAndSettle();
+    expect(look(tester, open), 1);
+    // A lift would open the panel and take 输入 away; a cancelled touch ends the press the same way.
+    await g.cancel();
+    await tester.pumpAndSettle();
+    expect(look(tester, open), 0.5);
+    expect(rs.composer.open, isFalse);
+  });
+
+  iosTest('zoomed: 还原 sits 12 above 输入', (tester) async {
     big(tester);
     rs.dispose();
     rs = zoomable();
@@ -115,7 +145,6 @@ void main() {
     await tester.pump();
     final o = inStage(tester, open);
     final z = inStage(tester, reset);
-    expect(z.size, const Size(48, 48));
     expect(o.top - z.bottom, 12);
     expect(z.center.dx, o.center.dx);
   });

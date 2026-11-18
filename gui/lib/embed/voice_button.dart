@@ -14,6 +14,7 @@ import '../ui/tokens.dart';
 import 'composer_model.dart';
 import 'remote_session.dart';
 import 'session_port.dart';
+import 'stage_buttons.dart';
 import 'voice_input.dart';
 import 'voice_ring.dart';
 
@@ -346,7 +347,7 @@ class VoiceHold extends ChangeNotifier {
   }
 }
 
-/// The 64 voice button at the bottom of the stage stack. It feeds [hold] and fades out while the disc grows from it.
+/// The round voice button ([stageButtonSize]) at the bottom of the stage stack. It feeds [hold] and fades out while the disc grows from it.
 Widget voiceButton(VoiceHold hold) => Builder(
   builder: (context) {
     RenderBox? stage() => hold.stageKey.currentContext?.findRenderObject() as RenderBox?;
@@ -381,7 +382,7 @@ Widget voiceButton(VoiceHold hold) => Builder(
           key: const Key('voice-hold'),
           label: '语音',
           icon: Icons.mic_none,
-          size: 64,
+          size: stageButtonSize,
           // A no-op keeps the enabled look; the Listener above does the work.
           onPressed: () {},
         ),

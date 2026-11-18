@@ -7,6 +7,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
 import '../ui/tokens.dart';
+import 'stage_buttons.dart';
 import 'voice_button.dart';
 import 'voice_input.dart';
 import 'voice_ring.dart';
@@ -362,7 +363,7 @@ class VoiceRingPainter extends CustomPainter {
     final t = tokens;
     canvas.drawRect(Offset.zero & size, Paint()..color = t.bg.withValues(alpha: .6 * scrim));
     final centre = Offset.lerp(ring.thumb, ring.centre, progress)!;
-    final radius = ui.lerpDouble(32, ring.r, progress)!;
+    final radius = ui.lerpDouble(stageButtonSize / 2, ring.r, progress)!;
     final send = pick == VoicePick.send;
     canvas.drawCircle(centre, radius, Paint()..color = t.raise.first);
     canvas.drawCircle(
