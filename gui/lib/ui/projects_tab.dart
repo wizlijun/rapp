@@ -431,6 +431,7 @@ class _AddList extends StatelessWidget {
                 child: InkWell(
                   key: Key('add-${project.id}-${a.key}'),
                   onTap: () => state.addMember(project.id, a),
+                  borderRadius: BorderRadius.circular(t.r),
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(minHeight: 48),
                     child: Align(

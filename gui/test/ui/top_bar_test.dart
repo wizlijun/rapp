@@ -24,6 +24,7 @@ import 'package:rapp/ui/workspace_store.dart';
 
 import '../fakes.dart';
 import 'helpers.dart';
+import 'platform_helpers.dart';
 
 void main() {
   late FakeTransport t;
@@ -433,6 +434,27 @@ void main() {
       expect(find.text('One'), findsOneWidget);
       expect(find.text('Two'), findsNothing);
     });
+
+    for (final (p, min) in [(TargetPlatform.macOS, 40.0), (TargetPlatform.iOS, 48.0)]) {
+      testWidgets('the window menu × is at least $min square on $p', (tester) async {
+        await onPlatform(p, () async {
+          final (es, port) = await boot(tester);
+          port.emit(WindowsEvent(1, [rw(1, 'One'), rw(2, 'Two')]));
+          await tester.pump();
+          await tester.tap(find.byKey(const Key('window-menu')));
+          await settle(tester);
+          final s = tester.getSize(find.byKey(const Key('close-window-2')));
+          expect(s.width, greaterThanOrEqualTo(min));
+          expect(s.height, greaterThanOrEqualTo(min));
+          // A tap at the hit area's edge still closes.
+          final r = tester.getRect(find.byKey(const Key('close-window-2')));
+          port.calls.clear();
+          await tester.tapAt(r.topLeft + const Offset(1, 1));
+          await settle(tester);
+          expect(port.calls.any((c) => c.$1 == 'close_window' && c.$2['window'] == 2), isTrue);
+        });
+      });
+    }
 
     testWidgets('× in the menu closes that window, never the main one', (tester) async {
       final (es, port) = await boot(tester);

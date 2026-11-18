@@ -7,6 +7,7 @@ import '../embed/session_port.dart';
 import 'main_state.dart';
 import 'controls.dart';
 import 'rule_snack.dart';
+import 'tokens.dart';
 
 /// What the menu came back with: an action and the window it is about.
 typedef _Pick = (String, int);
@@ -98,7 +99,11 @@ class WindowMenu extends StatelessWidget {
                             child: InkWell(
                               key: Key('close-window-${w.id}'),
                               onTap: () => Navigator.pop(row, ('close', w.id)),
-                              child: const Padding(padding: EdgeInsets.all(4), child: Icon(Icons.close, size: 16)),
+                              borderRadius: BorderRadius.circular(RappTokens.of(row).r),
+                              child: SizedBox.square(
+                                dimension: controlHeightOf(row),
+                                child: const Icon(Icons.close, size: 16),
+                              ),
                             ),
                           ),
                         ),

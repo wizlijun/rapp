@@ -141,7 +141,7 @@ class _Key extends StatelessWidget {
             canRequestFocus: false,
             onTap: onTap,
             child: Center(
-              child: Text(label, style: TextStyle(color: onTap == null ? t.muted : t.text, fontFamily: t.mono, fontFamilyFallback: t.monoFallback)),
+              child: Text(label, style: TextStyle(fontSize: 13, color: onTap == null ? t.muted : t.text, fontFamily: t.mono, fontFamilyFallback: t.monoFallback)),
             ),
           ),
         ),

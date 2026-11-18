@@ -11,6 +11,7 @@ import 'package:rapp/linux_firewall.dart';
 
 import 'service_client_test.dart' show FakeService, until;
 import 'ui/helpers.dart';
+import 'ui/platform_helpers.dart';
 
 void main() {
   late Directory tmp;
@@ -243,6 +244,23 @@ void main() {
       expect(find.byKey(const Key('enter-new-key')), findsNothing);
     });
   });
+
+  for (final (p, min) in [(TargetPlatform.macOS, 40.0), (TargetPlatform.iOS, 48.0)]) {
+    testWidgets('the LAN fold is at least $min tall on $p', (tester) async {
+      await onPlatform(p, () async {
+        svc = FakeService('tok')
+          ..extraStatus = {'relay_addr': 'vps:22026', 'has_key': true}
+          ..lanIds = ['123456789@192.168.1.5'];
+        await pump(tester); // the theme's platform sets the height; a Mac LocalSection would open its permission dialog
+        final fold = find.byKey(const Key('lan-fold'));
+        expect(tester.getSize(fold).height, greaterThanOrEqualTo(min));
+        final r = tester.getRect(fold);
+        await tester.tapAt(r.topLeft + const Offset(2, 2)); // the edge of the hit area
+        await tester.pump();
+        expect(find.text('▾ 局域网地址（1 个）'), findsOneWidget);
+      });
+    });
+  }
 
   testWidgets('with a relay the bare ID comes first and LAN IDs fold', (tester) async {
     svc = FakeService('tok')

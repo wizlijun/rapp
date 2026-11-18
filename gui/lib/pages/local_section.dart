@@ -242,7 +242,15 @@ class _LocalSectionState extends State<LocalSection> {
             InkWell(
               key: const Key('lan-fold'),
               onTap: () => setState(() => _lanOpen = !_lanOpen),
-              child: Text('${_lanOpen ? '▾' : '▸'} 局域网地址（${lan.length} 个）'),
+              borderRadius: BorderRadius.circular(RappTokens.of(context).r),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(minHeight: controlHeightOf(context)),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  widthFactor: 1,
+                  child: Text('${_lanOpen ? '▾' : '▸'} 局域网地址（${lan.length} 个）'),
+                ),
+              ),
             ),
           ]),
         ),

@@ -718,6 +718,6 @@ class _Item extends StatelessWidget {
       return Semantics(enabled: false, selected: checked, label: label, excludeSemantics: true, child: row);
     }
     // A trailing button sits beside the row's own tap target, not inside it.
-    return InkWell(onTap: onTap, child: row);
+    return InkWell(onTap: onTap, borderRadius: BorderRadius.circular(RappTokens.of(context).r), child: row);
   }
 }

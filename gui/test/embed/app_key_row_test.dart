@@ -163,7 +163,7 @@ void main() {
       expect(keys(), [('down', 55, 1048576), ('up', 55, 0)]);
     });
 
-    testWidgets('once ⌘ is outlined in the accent, locked ⌘ filled with it', (tester) async {
+    testWidgets('once and locked ⌘ are both a 2 px accent border on the raise fill', (tester) async {
       await mountRow(tester);
       Material look() => tester.widget<Material>(find.descendant(of: key('Cmd'), matching: find.byType(Material)));
       Color side(Material m) => (m.shape! as RoundedRectangleBorder).side.color;
@@ -176,7 +176,9 @@ void main() {
       expect(look().color, off.color);
       await tester.tap(key('Cmd'));
       await tester.pump();
-      expect(look().color, accent);
+      expect(side(look()), accent);
+      expect((look().shape! as RoundedRectangleBorder).side.width, 2);
+      expect(look().color, off.color);
     });
 
     testWidgets('no key left held on A (Review Focus 4): the row going away releases its modifiers', (tester) async {

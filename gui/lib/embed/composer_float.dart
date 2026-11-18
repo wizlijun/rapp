@@ -18,8 +18,6 @@ const composerMargin = 8.0;
 /// The grip's hit area (spec: at least 48×20).
 const gripSize = Size(48, 20);
 
-/// The collapse ×'s hit area, right beside the grip.
-const _closeSize = Size(28, 20);
 
 /// Marks the panel's text area (a [MetaData] around the editor): there a mouse selects text and a
 /// touch scrolls or selects as usual, and only a touch held still ([_holdToMove]) moves the panel.
@@ -218,9 +216,13 @@ class _FloatingComposerState extends State<FloatingComposer> {
               key: const Key('composer-grip-close'),
               onTap: widget.session.composer.collapse,
               borderRadius: BorderRadius.circular(t.r),
-              child: SizedBox.fromSize(
-                size: _closeSize,
-                child: Icon(Icons.close, size: 14, color: t.muted),
+              // The hit area is control-height square and reaches up from the grip's line; the × stays where it was.
+              child: SizedBox.square(
+                dimension: controlHeightOf(context),
+                child: Align(
+                  alignment: Alignment.bottomCenter,
+                  child: SizedBox(height: gripSize.height, child: Center(child: Icon(Icons.close, size: 14, color: t.muted))),
+                ),
               ),
             ),
           ),
@@ -279,8 +281,9 @@ class _FloatingComposerState extends State<FloatingComposer> {
                     // The grip centred and the × right after it (a blank as wide before, keeping the grip centred).
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        SizedBox.fromSize(size: _closeSize),
+                        SizedBox(width: controlHeightOf(context)),
                         grip,
                         Material(type: MaterialType.transparency, child: close),
                       ],

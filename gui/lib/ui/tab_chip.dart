@@ -79,9 +79,8 @@ class TabChip extends StatelessWidget {
                       key: const Key('tab-close'),
                       onTap: onClose,
                       radius: 16,
-                      child: SizedBox(
-                        width: 32,
-                        height: 40,
+                      child: SizedBox.square(
+                        dimension: controlHeightOf(context),
                         child: Icon(Icons.close, size: 16, color: t.text),
                       ),
                     ),

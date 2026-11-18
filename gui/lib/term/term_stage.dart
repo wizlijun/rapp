@@ -927,22 +927,19 @@ class _Pill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = tokens;
-    Widget box = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: t.bg,
-        border: Border.all(color: t.text),
-        borderRadius: BorderRadius.circular(t.r),
+    final radius = BorderRadius.circular(t.r);
+    return Material(
+      color: t.bg,
+      shape: RoundedRectangleBorder(borderRadius: radius, side: BorderSide(color: t.text)),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: radius,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          child: Text(text, style: TextStyle(color: t.text)),
+        ),
       ),
-      child: Text(text, style: TextStyle(color: t.text)),
     );
-    final tap = onTap;
-    if (tap != null) {
-      box = MouseRegion(
-        cursor: SystemMouseCursors.click,
-        child: GestureDetector(onTap: tap, child: box),
-      );
-    }
-    return box;
   }
 }

@@ -243,20 +243,20 @@ class _ComposerPlusState extends State<ComposerPlus> {
         ),
       );
 
-  Widget _keyCell(RappTokens t, (String, int, int?) k) {
+  Widget _keyCell(BuildContext context, RappTokens t, (String, int, int?) k) {
     final (label, code, bit) = k;
-    return _cell(t, label, bit,
+    return _cell(context, t, label, bit,
         bit != null ? () => setState(() => _sticky ^= bit) : widget.blocked ? null : () => _key(code));
   }
 
-  Widget _termKeyCell(RappTokens t, (String, String) k) {
+  Widget _termKeyCell(BuildContext context, RappTokens t, (String, String) k) {
     final (label, name) = k;
-    return _cell(t, label, null,
+    return _cell(context, t, label, null,
         widget.blocked ? null : () => (widget.port as TermSessionPort).sendKeys(widget.session.sid, [name]));
   }
 
   /// A key; [bit] for a sticky one.
-  Widget _cell(RappTokens t, String label, int? bit, VoidCallback? onTap) {
+  Widget _cell(BuildContext context, RappTokens t, String label, int? bit, VoidCallback? onTap) {
     final on = bit != null && _sticky & bit != 0;
     return Semantics(
       button: true,
@@ -268,12 +268,10 @@ class _ComposerPlusState extends State<ComposerPlus> {
         onTap: onTap,
         borderRadius: BorderRadius.circular(t.r),
         child: Container(
-          height: 44,
+          height: controlHeightOf(context),
           alignment: Alignment.center,
-          decoration: on
-              ? BoxDecoration(color: t.text, borderRadius: BorderRadius.circular(t.r))
-              : t.raiseBox().copyWith(border: Border.all(color: t.line)),
-          child: Text(label, style: TextStyle(color: on ? t.bg : onTap == null ? t.muted : t.text)),
+          decoration: t.raiseBox().copyWith(border: on ? Border.all(color: t.accent, width: 2) : Border.all(color: t.line)),
+          child: Text(label, style: TextStyle(fontSize: 13, color: onTap == null ? t.muted : t.text)),
         ),
       ),
     );
@@ -285,8 +283,8 @@ class _ComposerPlusState extends State<ComposerPlus> {
     const rowGap = SizedBox(height: 6);
     final term = widget.terminal;
     final cells = term
-        ? [for (final k in termComposerKeys) _termKeyCell(t, k)]
-        : [for (final k in composerKeys) _keyCell(t, k)];
+        ? [for (final k in termComposerKeys) _termKeyCell(context, t, k)]
+        : [for (final k in composerKeys) _keyCell(context, t, k)];
     final rows = <Widget>[
       for (var i = 0; i < cells.length; i += 5)
         Row(

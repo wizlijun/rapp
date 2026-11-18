@@ -103,6 +103,7 @@ class _InlineEditState extends State<InlineEdit> {
       onTap: _start,
       child: InkWell(
         onTap: _start,
+        borderRadius: BorderRadius.circular(t.r),
         child: ConstrainedBox(
           constraints: const BoxConstraints(minHeight: 48),
           child: Align(

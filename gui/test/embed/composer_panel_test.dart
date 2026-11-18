@@ -17,6 +17,7 @@ import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/history/history_list.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/ui/controls.dart';
+import '../ui/platform_helpers.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/stage.dart';
@@ -804,6 +805,26 @@ void main() {
         expect(find.byKey(const Key('composer-plus-return')), findsNothing);
       });
 
+      testWidgets('a latched sticky key is a raise box with a 2 px accent border, not a text fill', (tester) async {
+        big(tester);
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        await openMenu(tester);
+        final key = find.byKey(const ValueKey('sticky-⌘'));
+        BoxDecoration look() =>
+            tester.widget<Container>(find.descendant(of: key, matching: find.byType(Container)).first).decoration! as BoxDecoration;
+        final t = RappTokens.of(tester.element(key));
+        expect((look().border! as Border).top.color, t.line);
+        await tester.tap(key);
+        await tester.pump();
+        final on = look();
+        expect((on.border! as Border).top.color, t.accent);
+        expect((on.border! as Border).top.width, 2);
+        expect(on.color, isNot(t.text));
+        expect(on.gradient, t.raiseBox().gradient);
+        expect(tester.getSize(key).height, controlHeightOf(tester.element(key)));
+      });
+
       testWidgets('the sticky keys and the menu never carry over to another session', (tester) async {
         big(tester);
         final rs2 = RemoteSession(2, 'Notes');
@@ -1318,6 +1339,19 @@ void main() {
       expect(find.byKey(const Key('composer-panel')), findsNothing);
     });
 
+    for (final (p, min) in [(TargetPlatform.macOS, 40.0), (TargetPlatform.iOS, 48.0)]) {
+      testWidgets('the grip × is at least $min square on $p', (tester) async {
+        await onPlatform(p, () async {
+          await showPicture(tester);
+          await openPanel(tester);
+          final close = find.byKey(const Key('composer-grip-close'));
+          final s = tester.getSize(close);
+          expect(s.width, greaterThanOrEqualTo(min));
+          expect(s.height, greaterThanOrEqualTo(min));
+        });
+      });
+    }
+
     testWidgets('a small × right beside the grip shows with the bar and collapses the panel', (tester) async {
       await showPicture(tester);
       await openPanel(tester);
@@ -1332,7 +1366,9 @@ void main() {
       expect(shown(), 1);
       final x = tester.getRect(close), p = panelRect(tester), g = tester.getRect(grip);
       expect(x.bottom, lessThanOrEqualTo(p.top));
-      expect(x.center.dy, g.center.dy);
+      // The hit area reaches up from the grip's line; the drawn × sits level with the grip.
+      expect(x.bottom, g.bottom);
+      expect(tester.getCenter(find.descendant(of: close, matching: find.byIcon(Icons.close))).dy, g.center.dy);
       expect(x.left, g.right);
       expect(g.center.dx, p.center.dx);
       await mouse.moveTo(x.center);
@@ -1368,10 +1404,10 @@ void main() {
     });
 
     testWidgets('double-tap on the grip goes back to the default', (tester) async {
-      es.profiles.setComposerAt('Safari', 'Safari', const InputPoint(0.5, 100));
+      es.profiles.setComposerAt('Safari', 'Safari', const InputPoint(0.5, 200));
       await showPicture(tester);
       await openPanel(tester);
-      expect(panelRect(tester).bottom, 100);
+      expect(panelRect(tester).bottom, 200);
       expect(panelRect(tester).center.dx, 400);
       await tester.tap(grip);
       await tester.pump(kDoubleTapMinTime);
@@ -1523,10 +1559,10 @@ void main() {
     });
 
     testWidgets('each app has its own place', (tester) async {
-      es.profiles.setComposerAt('Safari', 'Safari', const InputPoint(0.25, 100));
+      es.profiles.setComposerAt('Safari', 'Safari', const InputPoint(0.25, 200));
       await showPicture(tester);
       await openPanel(tester);
-      expect(panelRect(tester).bottom, 100);
+      expect(panelRect(tester).bottom, 200);
       await openEmbedded(tester, sid: 2, app: 'Notes');
       port.emit(const ReadyEvent(2, 'Notes'));
       port.emit(WindowsEvent(2, [rw(6, 800, 628)]));

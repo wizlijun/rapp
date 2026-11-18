@@ -374,7 +374,7 @@ class _PictureState extends State<Picture> implements TouchSink {
 
   /// A × at a sheet's or popover's top-right corner (they have no close button): Esc on A.
   Widget _popupClose(RappTokens t, _Target p, Size stage) {
-    const d = 28.0;
+    final d = controlHeightOf(context);
     final left = (p.pic.right - d / 2).clamp(0.0, (stage.width - d).clamp(0.0, double.infinity));
     final top = (p.pic.top - d / 2).clamp(0.0, (stage.height - d).clamp(0.0, double.infinity));
     return Positioned(
@@ -388,17 +388,17 @@ class _PictureState extends State<Picture> implements TouchSink {
           button: true,
           label: '关闭弹出窗口',
           excludeSemantics: true,
-          child: Material(
-            key: ValueKey('popup-close-${p.win.id}'),
-            color: t.accent,
-            shape: const CircleBorder(),
-            elevation: 2,
-            child: InkWell(
-              customBorder: const CircleBorder(),
-              onTap: () => widget.state.closeWindow(p.win.id),
-              onSecondaryTapUp: (e) => _popupMenu(e.globalPosition, p.win.id),
-              onLongPress: () => _popupMenu(_global(left + d / 2, top + d / 2), p.win.id),
-              child: Icon(Icons.close, size: 16, color: t.accentInk),
+          child: GestureDetector(
+            onSecondaryTapUp: (e) => _popupMenu(e.globalPosition, p.win.id),
+            onLongPress: () => _popupMenu(_global(left + d / 2, top + d / 2), p.win.id),
+            child: IconButton(
+              key: ValueKey('popup-close-${p.win.id}'),
+              onPressed: () => widget.state.closeWindow(p.win.id),
+              icon: const Icon(Icons.close),
+              iconSize: 20,
+              color: t.text,
+              padding: EdgeInsets.zero,
+              constraints: BoxConstraints.tightFor(width: d, height: d),
             ),
           ),
         ),
