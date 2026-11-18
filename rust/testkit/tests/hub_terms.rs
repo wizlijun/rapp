@@ -187,7 +187,7 @@ async fn removing_a_host_stops_its_watch() {
     let mut hub = presence_hub(&a, home.path()).await;
     pushed_terms(&mut hub).await;
     hub.send(json!({"cmd":"remove_host","id":a.id,"req":2})).await;
-    assert_eq!(reply(&mut hub, 2).await, json!({"event":"hosts","hosts":[],"req":2}));
+    assert_eq!(reply(&mut hub, 2).await, json!({"event":"hosts","hosts":[],"req":2,"version":env!("CARGO_PKG_VERSION")}));
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
     while !term_log(a.bins.path()).lines().any(|l| l == "watch closed") {

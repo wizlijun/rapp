@@ -68,7 +68,7 @@ async fn add_host_hosts_apps_open_close_remove() {
     assert!(h.get("password").is_none(), "{r}");
     let r = hub.call(json!({"cmd":"apps","id":a.id,"req":"x"})).await;
     let perms = json!({"screen_recording":true,"accessibility":true});
-    assert_eq!(r, json!({"event":"apps","id":a.id,"path":"lan","apps":apps(),"permissions":perms,"capabilities":{"graphical":true,"terminal":true,"ports":true},"req":"x"}));
+    assert_eq!(r, json!({"event":"apps","id":a.id,"path":"lan","apps":apps(),"permissions":perms,"capabilities":{"graphical":true,"terminal":true,"ports":true},"req":"x","version":env!("CARGO_PKG_VERSION")}));
 
     open_and_close(&mut hub, &a.id, "lan").await;
     // A's side of the session ends too.
@@ -84,7 +84,7 @@ async fn add_host_hosts_apps_open_close_remove() {
 
     let r = hub.call(json!({"cmd":"close","sid":999,"req":2})).await;
     assert_eq!(r, json!({"event":"error","req":2,"error":"unknown sid"}));
-    assert_eq!(hub.call(json!({"cmd":"remove_host","id":a.id})).await, json!({"event":"hosts","hosts":[]}));
+    assert_eq!(hub.call(json!({"cmd":"remove_host","id":a.id})).await, json!({"event":"hosts","hosts":[],"version":env!("CARGO_PKG_VERSION")}));
     let r = hub.call(json!({"cmd":"apps","id":a.id})).await;
     assert_eq!(r, json!({"event":"error","error":"unknown host"}));
     assert_eq!(hub.finish().await, Vec::<Value>::new());
@@ -133,7 +133,7 @@ async fn add_host_errors_are_reported_and_nothing_saved() {
     let mut hub = Hub::start(home.path(), a.bins.path());
     let r = hub.call(json!({"cmd":"add_host","id":at(&a),"password":"wrong","req":7})).await;
     assert_eq!(r, json!({"event":"error","req":7,"error":format!("{}: bad password", a_addr(&a.svc))}));
-    assert_eq!(hub.call(json!({"cmd":"hosts"})).await, json!({"event":"hosts","hosts":[]}));
+    assert_eq!(hub.call(json!({"cmd":"hosts"})).await, json!({"event":"hosts","hosts":[],"version":env!("CARGO_PKG_VERSION")}));
     assert!(!home.path().join("hosts.json").exists());
     assert_eq!(hub.call(json!({"cmd":"nope","req":1})).await, json!({"event":"error","req":1,"error":"unknown cmd"}));
     hub.send(json!("garbage")).await;
@@ -593,7 +593,7 @@ async fn removing_a_host_during_a_probe_keeps_it_removed() {
     let saved: Value = serde_json::from_slice(&std::fs::read(home.path().join("hosts.json")).unwrap()).unwrap();
     assert_eq!(saved, json!([]));
     let r = hub.call(json!({"cmd":"hosts"})).await;
-    assert_eq!(r, json!({"event":"hosts","hosts":[]}));
+    assert_eq!(r, json!({"event":"hosts","hosts":[],"version":env!("CARGO_PKG_VERSION")}));
 }
 
 #[tokio::test]
