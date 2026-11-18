@@ -171,5 +171,28 @@
     {"t": 900, "in": "up 49", "out": "swallow release"},
     {"t": 950, "in": "up 58", "out": "pass"},
     {"t": 960, "in": "up 59", "out": "pass"}
+  ]},
+  {"name": "hotkey-change-while-recording", "steps": [
+    {"t": 0, "in": "down 61 opt", "out": "swallow arm"},
+    {"t": 300, "in": "elapsed", "out": "start"},
+    {"t": 800, "in": "hotkey", "hotkey": "off", "out": "cancel"},
+    {"t": 900, "in": "up 61", "out": "swallow"},
+    {"t": 1000, "in": "ended", "out": "none"},
+    {"t": 1100, "in": "down 0", "out": "pass"},
+    {"t": 1150, "in": "up 0", "out": "pass"}
+  ]},
+  {"name": "hotkey-change-while-pending", "steps": [
+    {"t": 0, "in": "down 61 opt", "out": "swallow arm"},
+    {"t": 100, "in": "hotkey", "hotkey": {"kind": "hold_modifier", "key_code": 63}, "out": "none"},
+    {"t": 300, "in": "elapsed", "out": "none"},
+    {"t": 400, "in": "up 61", "out": "swallow"},
+    {"t": 500, "in": "down 0", "out": "pass"},
+    {"t": 550, "in": "up 0", "out": "pass"}
+  ]},
+  {"name": "hotkey-set-unchanged-while-recording", "steps": [
+    {"t": 0, "in": "down 61 opt", "out": "swallow arm"},
+    {"t": 300, "in": "elapsed", "out": "start"},
+    {"t": 800, "in": "hotkey", "hotkey": {"kind": "hold_modifier", "key_code": 61}, "out": "none"},
+    {"t": 900, "in": "up 61", "out": "swallow release"}
   ]}
 ]

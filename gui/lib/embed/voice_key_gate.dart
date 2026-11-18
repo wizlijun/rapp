@@ -201,12 +201,14 @@ enum _State {
 }
 
 class VoiceKeyGate {
-  VoiceKeyGate({this.hotkey = VoiceHotkey.standard});
+  VoiceKeyGate({VoiceHotkey hotkey = VoiceHotkey.standard}) : _hotkey = hotkey;
 
   /// How long a `hold_modifier` hotkey must be held before recording starts, in seconds.
   static const holdDelay = 0.3;
 
-  VoiceHotkey hotkey;
+  /// The hotkey in force; changed only through [setHotkey].
+  VoiceHotkey get hotkey => _hotkey;
+  VoiceHotkey _hotkey;
 
   var _state = _State.idle;
 
@@ -220,6 +222,19 @@ class VoiceKeyGate {
   final _swallowed = <int>{};
 
   bool get recording => _state == _State.recording;
+
+  /// The setting changes (关, 恢复默认 or a new key recorded) while keys may be held. A real change starts
+  /// over: a hold of the old key is no hold any more, and its up never reaches the hotkey rules, so a
+  /// recording is cancelled here (or it would end in `decided`, swallowing every key with no hotkey up to
+  /// return it). Held and swallowed keys are kept, so the old key's up stays away from the target. The
+  /// caller drops its hold timer and the held down. Setting the same hotkey does nothing.
+  VoiceGateStep setHotkey(VoiceHotkey h) {
+    if (h == _hotkey) return VoiceGateStep();
+    _hotkey = h;
+    final wasRecording = _state == _State.recording;
+    _state = _State.idle;
+    return VoiceGateStep(voice: wasRecording ? VoiceKeyPhase.cancel : null);
+  }
 
   /// The step for [i] at [ms] milliseconds; [ready] says whether a recording may start now.
   VoiceGateStep handle(VoiceGateInput i, {required int ms, required bool ready}) {

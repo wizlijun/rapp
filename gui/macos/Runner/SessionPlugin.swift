@@ -345,7 +345,17 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       result(nil)
     #if os(macOS)
     case let .setVoiceHotkey(hotkey):
-      gate.hotkey = hotkey
+      // A change mid-hold starts the gate over, as a resign does: the old key's hold timer and
+      // held down go, and a recording on it is cancelled (Dart ends the hold).
+      if hotkey != gate.hotkey {
+        gateTimer?.cancel()
+        gateTimer = nil
+        gateHeld = nil
+        let step = gate.setHotkey(hotkey)
+        if let phase = step.voice, let sid = gateSid {
+          channel.invokeMethod("voice_key", arguments: ["sid": sid, "phase": phase.rawValue])
+        }
+      }
       result(nil)
     case let .voiceEnd(sid):
       if sid == gateSid { _ = gate.handle(.ended, at: ProcessInfo.processInfo.systemUptime, ready: false) }

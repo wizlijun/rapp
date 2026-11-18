@@ -372,6 +372,17 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
 
   int get _gateMs => _gateClock.elapsedMilliseconds;
 
+  /// The gate takes the hotkey setting. A change mid-hold (关, 恢复默认 or a new key recorded) starts the gate
+  /// over: the old key's hold timer and held down go, and a recording on it is cancelled.
+  void _syncHotkey() {
+    final h = widget.state.prefs.voiceHotkey;
+    if (h == _gate.hotkey) return;
+    _gateTimer?.cancel();
+    _gateHeld = null;
+    final phase = _gate.setHotkey(h).voice;
+    if (phase != null) widget.state.voiceKey(widget.session.sid, phase);
+  }
+
   /// Feeds [i] to the gate and does what it says except passing the event on: the held hotkey down goes to the
   /// terminal first (flush), a pending hotkey arms the hold timer, a phase goes to MainState. Returns the step.
   VoiceGateStep _gateFeed(VoiceGateInput i, {KeyEvent? event, int? ms}) {
@@ -404,6 +415,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
 
   /// MainState asked for the keys to come here (`focusPicture`, a terminal opened or switched to).
   void _onState() {
+    _syncHotkey();
     if (widget.state.prefs.termFit != (_sent?.fit ?? widget.state.prefs.termFit)) setState(() {});
     final tick = widget.state.termFocusTick;
     if (tick == _focusSeen) return;
@@ -728,7 +740,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     if (!_gateOn) return _termKey(node, e);
     final code = macKeyCode(e.physicalKey);
     if (code == null) return _termKey(node, e);
-    _gate.hotkey = widget.state.prefs.voiceHotkey;
+    _syncHotkey();
     final input = switch (e) {
       KeyDownEvent() => VoiceGateInput.down(code, macFlags(HardwareKeyboard.instance)),
       KeyRepeatEvent() => VoiceGateInput.down(code, macFlags(HardwareKeyboard.instance), repeat: true),

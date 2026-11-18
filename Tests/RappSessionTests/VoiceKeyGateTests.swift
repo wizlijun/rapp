@@ -20,6 +20,12 @@ final class VoiceKeyGateTests: XCTestCase {
       for (i, s) in steps.enumerated() {
         let label = "\(name) step \(i) (\(s["t"] ?? "?"): \(s["in"] ?? "?"))"
         let ms = try XCTUnwrap((s["t"] as? NSNumber)?.doubleValue, label)
+        if s["in"] as? String == "hotkey" {
+          // The setting changes mid-stream: `hotkey` holds the new value, as gui.json stores it.
+          let want = try XCTUnwrap(Self.parseOutput(s["out"] as? String ?? "", input: .elapsed), label)
+          XCTAssertEqual(gate.setHotkey(VoiceHotkey(json: s["hotkey"])), want, label)
+          continue
+        }
         let input = try XCTUnwrap(Self.parseInput(s["in"] as? String ?? ""), label)
         let want = try XCTUnwrap(Self.parseOutput(s["out"] as? String ?? "", input: input), label)
         let got = gate.handle(input, at: ms / 1000, ready: s["ready"] as? Bool ?? caseReady)

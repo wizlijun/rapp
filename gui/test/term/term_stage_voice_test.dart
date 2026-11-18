@@ -226,6 +226,38 @@ void main() {
       expect(voiceKeys, isEmpty);
     }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
+    testWidgets('changing the hotkey while recording cancels and leaves no key swallowed', (t) async {
+      await show(t);
+      await down(t, LogicalKeyboardKey.altRight);
+      await t.pump(const Duration(milliseconds: 300));
+      expect(voiceKeys, [(1, VoiceKeyPhase.start)]);
+      state.setVoiceHotkey(VoiceHotkey.off); // 关 clicked in the side panel mid-hold
+      await t.pump();
+      expect(voiceKeys, [(1, VoiceKeyPhase.start), (1, VoiceKeyPhase.cancel)]);
+      state.voiceEnd(1);
+      await t.pump();
+      await up(t, LogicalKeyboardKey.altRight);
+      expect(sent(), isEmpty);
+      expect(bubbled, isEmpty);
+      await t.sendKeyEvent(LogicalKeyboardKey.keyA, platform: 'macos');
+      await t.pump();
+      expect(sent(), ['type:a']);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
+    testWidgets('changing the hotkey while pending drops the hold timer', (t) async {
+      await show(t);
+      await down(t, LogicalKeyboardKey.altRight);
+      await t.pump(const Duration(milliseconds: 100));
+      state.setVoiceHotkey(const VoiceHotkey.holdModifier(63));
+      await t.pump(const Duration(milliseconds: 400));
+      expect(voiceKeys, isEmpty);
+      await up(t, LogicalKeyboardKey.altRight);
+      await t.sendKeyEvent(LogicalKeyboardKey.keyA, platform: 'macos');
+      await t.pump();
+      expect(sent(), ['type:a']);
+      expect(voiceKeys, isEmpty);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
     testWidgets('voice_end returns the gate', (t) async {
       await show(t);
       await down(t, LogicalKeyboardKey.altRight);

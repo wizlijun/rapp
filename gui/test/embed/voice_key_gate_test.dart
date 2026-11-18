@@ -93,6 +93,13 @@ void main() {
       final steps = (c['steps'] as List).cast<Map<String, dynamic>>();
       for (final (i, s) in steps.indexed) {
         final label = '$name step $i (${s['t']}: ${s['in']})';
+        if (s['in'] == 'hotkey') {
+          // The setting changes mid-stream: `hotkey` holds the new value, as gui.json stores it.
+          final want = _parseOutput(s['out'] as String? ?? '', VoiceGateInput.elapsed);
+          expect(want, isNotNull, reason: label);
+          expect(gate.setHotkey(VoiceHotkey.fromJson(s['hotkey'])), want, reason: label);
+          continue;
+        }
         final input = _parseInput(s['in'] as String? ?? '');
         expect(input, isNotNull, reason: label);
         final want = _parseOutput(s['out'] as String? ?? '', input!);
@@ -103,7 +110,7 @@ void main() {
       }
       ran++;
     }
-    expect(ran, 26);
+    expect(ran, 29);
   });
 
   test('hotkey json round-trips', () {

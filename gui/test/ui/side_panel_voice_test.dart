@@ -116,6 +116,32 @@ void main() {
     expect(lastSet(), {'hotkey': {'kind': 'hold_modifier', 'key_code': 61}});
   });
 
+  for (final (key, want) in [
+    ('voice-hotkey-off', VoiceHotkey.off),
+    ('voice-hotkey-default', VoiceHotkey.standard),
+  ]) {
+    voiceTest('$key while recording ends recording', (tester) async {
+      await mount(tester, TargetPlatform.macOS);
+      if (want == VoiceHotkey.standard) {
+        s.setVoiceHotkey(const VoiceHotkey.holdModifier(58));
+        await tester.pump();
+      }
+      await tester.tap(find.byKey(const Key('voice-hotkey-change')));
+      await tester.pump();
+      expect(s.voiceHotkeyRecording, isTrue);
+      await tester.tap(find.byKey(Key(key)));
+      await tester.pump();
+      expect(s.voiceHotkeyRecording, isFalse);
+      expect(find.textContaining('请按下快捷键…'), findsNothing);
+      expect(s.prefs.voiceHotkey, want);
+      // The keys are no longer the row's: a plain key is not judged as a hotkey.
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyA);
+      await tester.pump();
+      expect(find.text('这个键不能用'), findsNothing);
+      expect(s.prefs.voiceHotkey, want);
+    });
+  }
+
   voiceTest('each 改 starts a fresh recorder', (tester) async {
     await mount(tester, TargetPlatform.macOS);
     // First recording ends on ⌃⌥Space; the keys come up after recording is over, so a reused

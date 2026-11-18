@@ -87,7 +87,7 @@ public struct VoiceKeyGate {
     /// How long a `hold_modifier` hotkey must be held before recording starts.
     public static let holdDelay = 0.3
 
-    public var hotkey: VoiceHotkey
+    public private(set) var hotkey: VoiceHotkey
 
     private enum State: Equatable {
         case idle
@@ -108,6 +108,20 @@ public struct VoiceKeyGate {
     public init(hotkey: VoiceHotkey = .standard) { self.hotkey = hotkey }
 
     public var recording: Bool { state == .recording }
+
+    /// The setting changes (关, 恢复默认 or a new key recorded) while keys may be held. A real change
+    /// starts over: a hold of the old key is no hold any more, and its up never reaches the hotkey
+    /// rules, so a recording is cancelled here (or it would end in `decided`, swallowing every key
+    /// with no hotkey up to return it). Held and swallowed keys are kept, so the old key's up stays
+    /// away from A. The caller drops its hold timer and the held down. Setting the same hotkey does
+    /// nothing.
+    public mutating func setHotkey(_ new: VoiceHotkey) -> VoiceGateStep {
+        guard new != hotkey else { return VoiceGateStep() }
+        hotkey = new
+        let wasRecording = state == .recording
+        state = .idle
+        return VoiceGateStep(voice: wasRecording ? .cancel : nil)
+    }
 
     public mutating func handle(_ input: VoiceGateInput, at seconds: Double, ready: Bool) -> VoiceGateStep {
         switch input {
