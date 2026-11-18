@@ -15,6 +15,7 @@ rapp 将远程 Mac 上的应用汇入一个工作台，让你在眼前这台电�
 | --- | --- |
 | macOS 14+ · Apple 芯片 | 下载并打开 `.pkg`。支持被控端和控制端。 |
 | Omarchy / Arch · x86_64 | 下载 `.pkg.tar.zst`，运行 `sudo pacman -U ./rapp-omarchy-*.pkg.tar.zst`。可控制 Mac 应用和桌面，也可提供文本终端及端口共享。 |
+| iPhone Duo · iOS / iPadOS | 已适配 iPhone Duo；iOS、iPadOS 版即将推出。 |
 
 在被控 Mac 和控制端电脑上安装 rapp。为被控端授予屏幕录制、辅助功能权限，并保持不睡眠。远程 app 全部关闭后，被控 Mac 会自动锁屏，下次打开 app 时在控制端输入被控 Mac 的系统密码解锁（可在「本机」里关掉）；开机后的登录窗口和睡眠仍不支持。在 rapp 中添加该设备，即可打开应用。
 

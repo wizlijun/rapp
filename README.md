@@ -15,6 +15,7 @@ Recommended: an Omarchy tablet.
 | --- | --- |
 | macOS 14+ · Apple silicon | Download and open the `.pkg`. Supports hosting and controlling apps. |
 | Omarchy / Arch · x86_64 | Install the matching `.pkg.tar.zst` with `sudo pacman -U ./rapp-omarchy-*.pkg.tar.zst`. Controls Mac apps and desktops; also serves text terminals and shared ports. |
+| iPhone Duo · iOS / iPadOS | Works on iPhone Duo. The iOS and iPadOS app is coming soon. |
 
 Install rapp on your Mac host and controlling computer. On the host, allow Screen Recording and Accessibility, and keep it awake. When the last remote app closes, the host locks itself; the next time you open an app, the controlling computer asks for the host's system password (or types the remembered one). Turn this off under This Mac (本机). The login window after a restart and sleep are still not supported. Add the host in rapp, then open an app.
 
