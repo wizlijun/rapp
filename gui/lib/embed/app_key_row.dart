@@ -192,7 +192,8 @@ class _Key extends StatelessWidget {
       child: SizedBox.fromSize(
         size: appKeySize,
         child: Material(
-          color: t.raise.first,
+          // Locked adds a faint accent fill to the border it shares with once, so the two read apart.
+          color: locked ? Color.alphaBlend(t.accent.withValues(alpha: .18), t.raise.first) : t.raise.first,
           shape: shape,
           clipBehavior: Clip.antiAlias,
           // Never focusable: a tap leaves the keys where they were.

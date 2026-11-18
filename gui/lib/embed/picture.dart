@@ -394,7 +394,12 @@ class _PictureState extends State<Picture> implements TouchSink {
             child: IconButton(
               key: ValueKey('popup-close-${p.win.id}'),
               onPressed: () => widget.state.closeWindow(p.win.id),
-              icon: const Icon(Icons.close),
+              // A float-coloured disc behind the × so it reads over any picture; the hit area stays control-height.
+              icon: DecoratedBox(
+                key: ValueKey('popup-close-disc-${p.win.id}'),
+                decoration: BoxDecoration(shape: BoxShape.circle, color: t.float.first.withValues(alpha: .85)),
+                child: const SizedBox.square(dimension: 28, child: Icon(Icons.close, size: 18)),
+              ),
               iconSize: 20,
               color: t.text,
               padding: EdgeInsets.zero,

@@ -2222,6 +2222,13 @@ void main() {
           expect(s.width, greaterThanOrEqualTo(min));
           expect(s.height, greaterThanOrEqualTo(min));
           expect(tester.widget<IconButton>(close).iconSize, 20);
+          // A float disc behind the × so it reads over a picture, 28 across, centred in the hit area.
+          final disc = find.byKey(const ValueKey('popup-close-disc-9'));
+          final deco = tester.widget<DecoratedBox>(disc).decoration as BoxDecoration;
+          expect(deco.shape, BoxShape.circle);
+          expect(deco.color, RappTokens.of(tester.element(close)).float.first.withValues(alpha: .85));
+          expect(tester.getSize(disc), const Size(28, 28));
+          expect(tester.getCenter(disc), tester.getCenter(close));
         });
       });
     }
