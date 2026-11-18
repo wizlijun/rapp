@@ -566,4 +566,15 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [x] 新增只读 `scripts/benchmark-linux-host.py`。本机 3840×2400 / scale 3，15 fps、density 2，各采样 10 秒：host CPU 55.9% → 23.1%，Hyprland CPU 26.7% → 7.3%，ping P95 108.82 ms → 4.02 ms。画面内容可能变化，ping 衡量控制通路，不等于端到端画面延迟或用户实机验收。日志 `.build-logs/host-perf-{before,after}-nodelay.json`。
 - [x] 原生窗口回归发现并修复手动 CM 关闭/重开时的 SIGSEGV：栈位于 GDK 绘制末尾，日志出现 EGL context 失效；共享进程内改为隐藏/复用 CM，独立 CM 关闭则退出。实际 Omarchy 窗口回归覆盖自动后台不抢焦点、显式 CM、反复关闭/重开、CM-first 和独立退出，全部通过；CM 定时器 5 项测试和 Flutter analyze 通过。
 - [x] 本机验证包 `0.14.6-2` 从干净 worktree 构建，源码 `b46086e8a4b95c94352aaf0738974fa4ad4f7fb6`；Arch/便携包 33 文件摘要一致、13 个 ELF 依赖解析通过。解包后完整串流与原生 GUI 回归通过；系统认证后安装成功，33 个已安装文件与验证包一致。服务已重启，IPC 确认桌面能力；原先主 GUI 未运行，因此未主动弹出主窗口。产物在 `dist/linux-0146-local-responsive/`。
-- [ ] 用户复验两端流畅度与监控窗口行为；确认前不推送或发布。
+- [x] 用户随后提供崩溃交接报告，并于本轮明确要求：解决后提交代码、发布新版本并安装；按新授权推进最终回归和发布。
+
+## Linux GUI 崩溃修复与 0.14.8（2026-11-18）
+
+- [x] 读取 `/home/bruce/Work/rapp-crash-2026-11-18.md`，对照 core 228221 和实际引擎提交：GTK 绘制末尾空 GL context 的证据成立。已安装引擎 `89c39edf...` 的 `fl_view_renderer_draw` 仍清空当前 context；Flutter 3.50.0 的源码包含上游 #192137 的保留 context 修复。独立 SDK 路径 `~/development/flutter-rapp-3.50.0`，原 SDK 保持原状。
+- [x] 加强压力测试后，0.14.6-2 于 PID 237036 再次崩溃：栈为 `wl_proxy_get_version → GDK make-current → gdk_cairo_draw_from_gl`，与先前空 context 栈不同。主窗口隐藏改为 GTK idle 回调，避免 Flutter 同步等帧期间处理平台消息时直接取消 Wayland 窗口映射。CM 的隐藏/复用和自动后台入口继续保留。
+- [x] Linux 构建要求稳定版 Flutter >= 3.50.0，拒绝旧版或预发布引擎；包内增加 `FLUTTER-INFO.json`，BUILD-INFO 记录实际引擎摘要。构建路径与版本拒绝夹具通过。
+- [x] 拉取并整合上游 main `1a7f071` / 0.14.7（含 macOS NSPasteboard 主线程修复与协议 v14）。本次版本计划 0.14.8；对端需支持 v14，旧 v13 client 需更新。Linux 继续整桌面采集，兼容 v14 setView 消息但不声称实现局部截取。
+- [x] 合并后 host/client-core 78 项测试通过，host Clippy 通过；隔离 Xvfb/labwc 原生输入与串流通过。首次当前桌面采集超时，随后同测试原样复验通过，安装版只读串流采样亦通过；未放宽断言。
+- [x] Flutter 3.50.0 全量回归 2158 项通过、15 项既有跳过；analyze 无 error/warning，113 项 Flutter material 导入弃用 info，`--no-fatal-infos` 通过。Linux GUI 和全部 7 个 Rust worker 构建成功。
+- [ ] 反复开关/缩放/最大化压力测试与最终包验收。真实桌面焦点检查遇到锁屏/熄屏阻断，补充启动前检查，待解锁后验证；尚未把此超时当作新的程序崩溃。
+- [ ] GitHub 发布及本机安装最终版本。

@@ -8,6 +8,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import re
 import socket
 import struct
 import subprocess
@@ -19,6 +20,10 @@ parser.add_argument('binary', type=Path)
 parser.add_argument('--seconds', type=float, default=10)
 parser.add_argument('--fps', type=int, choices=[1, 5, 15, 30], default=15)
 parser.add_argument('--density', type=float, default=2)
+protocol = int(re.search(r'pub const VERSION: u8 = (\d+);',
+               (Path(__file__).resolve().parents[1] / 'rust/client-core/src/protocol.rs').read_text())[1])
+parser.add_argument('--protocol', type=int, default=protocol,
+                    help='override when benchmarking a host built from older source')
 args = parser.parse_args()
 
 
@@ -52,7 +57,7 @@ try:
     assert hello['event'] == 'listening', hello
     peer = socket.create_connection(('127.0.0.1', hello['port']), timeout=10)
     peer.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-    peer.sendall(packet(1, bytes([13]) + string('benchmark-only') + string('') +
+    peer.sendall(packet(1, bytes([args.protocol]) + string('benchmark-only') + string('') +
                         struct.pack('<BBf', 2, args.fps, args.density)))
 
     def read():

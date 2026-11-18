@@ -52,6 +52,11 @@ def until(predicate):
 
 
 previous = hypr("activewindow").get("address")
+monitors = hypr("monitors")
+assert monitors and all(m.get("dpmsStatus", True) for m in monitors), \
+    "Unlock and wake the desktop before running GUI focus tests"
+assert not any("LOCK" in m.get("solitaryBlockedBy", []) for m in monitors), \
+    "Unlock the desktop before running GUI focus tests"
 with tempfile.TemporaryDirectory(prefix="rapp-single-gui-") as tmp:
     work = Path(tmp)
     # No service activation directories: tests must not spawn a second portal,
@@ -85,11 +90,14 @@ with tempfile.TemporaryDirectory(prefix="rapp-single-gui-") as tmp:
             return [w for w in hypr("clients") if w["pid"] == process.pid]
 
         def window(process, title):
-            found = until(lambda: next((w for w in windows(process) if w["title"] == title), None))
+            find = lambda: next((w for w in windows(process) if w["title"] == title), None)
+            until(find)
             # window_manager maps the shell before Dart has installed its close
             # listener and tray. Allow the first frame/startup callbacks to run.
             time.sleep(2)
-            return found
+            # Startup fullscreen changes may remap the Wayland surface; use the
+            # current compositor address after those callbacks have completed.
+            return until(find)
 
         def hubs(process):
             children = Path(f"/proc/{process.pid}/task/{process.pid}/children").read_text().split()
