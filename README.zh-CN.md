@@ -46,7 +46,7 @@ RAPP_ALLOW_ADHOC=1 ./scripts/package-macos.sh
 
 安装包输出到 `dist/`。本地构建允许 ad-hoc 签名；正式签名和公证选项见[打包脚本](scripts/package-macos.sh)。
 
-**Omarchy / Arch：** x86_64、Python 3.11+、GTK4 ≥ 4.12、GTK3、clang、cmake、ninja、pkgconf、libayatana-appindicator，以及稳定版 Flutter ≥ 3.50.0。可用 `FLUTTER=/path/to/flutter/bin/flutter` 指定独立 SDK。旧 Linux 引擎存在 GTK/OpenGL 崩溃路径，上游 Flutter #192137 已修复；安装包通过 `FLUTTER-INFO.json` 和 `BUILD-INFO.json` 记录实际 SDK、引擎提交及引擎文件摘要。
+**Omarchy / Arch：** 支持 SSE4.2 的 x86_64、Python 3.11+、GTK4 ≥ 4.12、GTK3、clang、cmake、ninja、pkgconf、libayatana-appindicator、libpulse，以及稳定版 Flutter ≥ 3.50.0。可用 `FLUTTER=/path/to/flutter/bin/flutter` 指定独立 SDK。旧 Linux 引擎存在 GTK/OpenGL 崩溃路径，上游 Flutter #192137 已修复；安装包通过 `FLUTTER-INFO.json` 和 `BUILD-INFO.json` 记录实际 SDK、引擎提交及引擎文件摘要。
 
 ```sh
 ./scripts/build-linux.sh
@@ -55,7 +55,7 @@ RAPP_ALLOW_ADHOC=1 ./scripts/package-macos.sh
 
 生成 Linux 安装包：在干净的工作区运行 `./scripts/package-linux.sh`，另需 makepkg、fakeroot、zstd。产物输出到 `dist/`。
 
-实现范围和最新验证记录：[Linux 0.14.11 对齐](tasks/todo.md#linux-01411-功能对齐2026-11-18)。
+Linux 0.14.13 在应用画面和文字终端支持本地按住说话：长按右 Alt 或语音按钮，松开发送、Esc 取消、Tab 编辑。首次使用下载约 142MB 的校验模型，录音不保存、不上传；识别语言跟随系统，需要 PulseAudio 或 PipeWire PulseAudio 服务。详见 [Linux 语音行为与验证边界](docs/superpowers/specs/2026-11-18-rapp-linux-voice-design.md)。
 
 ## 许可证
 

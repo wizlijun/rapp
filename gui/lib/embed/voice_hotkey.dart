@@ -31,10 +31,19 @@ const _keyNames = {
 };
 
 /// 「长按 右 ⌥」, 「按住 ⌃⌥Space」 or 「关」.
-String voiceHotkeyLabel(VoiceHotkey h) {
+String voiceHotkeyLabel(VoiceHotkey h, {bool linux = false}) {
   if (h.isOff) return '关';
-  if (h.isModifier) return '长按 ${_modifierNames[h.keyCode] ?? '键 ${h.keyCode}'}';
+  if (h.isModifier) {
+    var name = _modifierNames[h.keyCode] ?? '键 ${h.keyCode}';
+    if (linux) name = name.replaceAll('⌥', 'Alt').replaceAll('⌃', 'Ctrl').replaceAll('⇧', 'Shift').replaceAll('⌘', 'Super');
+    return '长按 $name';
+  }
   final m = h.modifiers;
+  if (linux) {
+    final keys = [if (m & _control != 0) 'Ctrl', if (m & _option != 0) 'Alt',
+      if (m & _shift != 0) 'Shift', if (m & _command != 0) 'Super', _keyNames[h.keyCode] ?? '键 ${h.keyCode}'];
+    return '按住 ${keys.join('+')}';
+  }
   final glyphs = '${m & _control != 0 ? '⌃' : ''}${m & _option != 0 ? '⌥' : ''}'
       '${m & _shift != 0 ? '⇧' : ''}${m & _command != 0 ? '⌘' : ''}';
   return '按住 $glyphs${_keyNames[h.keyCode] ?? '键 ${h.keyCode}'}';
@@ -65,6 +74,8 @@ class RecordAborted extends RecordOutcome {
 }
 
 class VoiceHotkeyRecorder {
+  VoiceHotkeyRecorder({this.linux = false});
+  final bool linux;
   /// A modifier that went down and nothing else has since: it becomes a hold on its release.
   int? _lone;
 
@@ -81,6 +92,13 @@ class VoiceHotkeyRecorder {
       _held.clear();
       _poisoned = false;
       return const RecordAborted();
+    }
+    // These keys belong to the Linux desktop or rapp's window navigation.
+    if (linux && (code == 54 || code == 55 || code == 103 || flags & _command != 0 ||
+        (flags & (_control | _option | _shift) == _control && {31, 33, 30}.contains(code)))) {
+      _lone = null;
+      _poisoned = true;
+      return const RecordRejected();
     }
     if (modifierCodes.contains(code)) {
       if (code == 57) {

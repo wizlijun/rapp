@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 
 source = Path(__file__).resolve().parent / 'build-linux.sh'
-workers = ['rapp-client', 'rapp-session', 'rapp-host', 'rapp-hub', 'rapp-service', 'rapp-term', 'rapp-cli']
+workers = ['rapp-client', 'rapp-session', 'rapp-host', 'rapp-hub', 'rapp-service', 'rapp-term', 'rapp-cli', 'rapp-speech']
 with tempfile.TemporaryDirectory(prefix='rapp-build-paths-') as temporary:
     root = Path(temporary)
     (root / 'scripts').mkdir()
@@ -31,7 +31,7 @@ if sys.argv[1] == 'metadata':
 else:
     assert sys.argv[1] == 'build' and '--release' in sys.argv
     (target / 'release').mkdir(parents=True, exist_ok=True)
-    for name in ['rapp-client','rapp-session', 'rapp-host','rapp-hub','rapp-service','rapp-term','rapp-cli']:
+    for name in ['rapp-client','rapp-session', 'rapp-host','rapp-hub','rapp-service','rapp-term','rapp-cli','rapp-speech']:
         path = target / 'release' / name
         path.write_text('fresh ' + name + '\\n')
         path.chmod(0o755)

@@ -52,7 +52,7 @@ RAPP_ALLOW_ADHOC=1 ./scripts/package-macos.sh
 
 Packages are written to `dist/`. Ad-hoc signing is allowed for local builds; see the [script](scripts/package-macos.sh) for signing and notarization options.
 
-**Omarchy / Arch:** x86_64, Python 3.11+, GTK4 ≥ 4.12, GTK3, clang, cmake, ninja, pkgconf, libayatana-appindicator, and stable Flutter ≥ 3.50.0. Set `FLUTTER=/path/to/flutter/bin/flutter` to select an isolated SDK. Older Linux engines have a GTK/OpenGL crash path fixed upstream in Flutter #192137. Packages record the selected SDK in `FLUTTER-INFO.json` and its engine digest in `BUILD-INFO.json`.
+**Omarchy / Arch:** x86_64 with SSE4.2, Python 3.11+, GTK4 ≥ 4.12, GTK3, clang, cmake, ninja, pkgconf, libayatana-appindicator, libpulse, and stable Flutter ≥ 3.50.0. Set `FLUTTER=/path/to/flutter/bin/flutter` to select an isolated SDK. Older Linux engines have a GTK/OpenGL crash path fixed upstream in Flutter #192137. Packages record the selected SDK in `FLUTTER-INFO.json` and its engine digest in `BUILD-INFO.json`.
 
 ```sh
 ./scripts/build-linux.sh
@@ -61,7 +61,7 @@ Packages are written to `dist/`. Ad-hoc signing is allowed for local builds; see
 
 To create Linux packages, run `./scripts/package-linux.sh` from a clean checkout; it also requires makepkg, fakeroot, and zstd. Outputs go to `dist/`. For a package-only revision, use `PKGREL=2 ./scripts/package-linux.sh`; revised artifacts go to `dist/pkgrel-2/`, retaining the earlier artifacts. `DIST_DIR` can override the output directory.
 
-Implementation scope and latest verification status: [Linux 0.14.11 alignment](tasks/todo.md#linux-01411-功能对齐2026-11-18).
+Linux 0.14.13 adds local hold-to-talk on app and terminal stages: hold Right Alt or the voice button, release to send, Esc to cancel, Tab to edit. First use downloads a verified ~142 MB model; audio is never saved or uploaded. Recognition follows the system language and needs PulseAudio or PipeWire PulseAudio. See [Linux voice behavior and verification limits](docs/superpowers/specs/2026-11-18-rapp-linux-voice-design.md).
 
 ## License
 

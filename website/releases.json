@@ -2,6 +2,30 @@
   {
     "assets": [
       {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.14.13/rapp-omarchy-0.14.13-1-x86_64.pkg.tar.zst",
+        "name": "rapp-omarchy-0.14.13-1-x86_64.pkg.tar.zst",
+        "size": 23002400
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.14.13/rapp-0.14.13-omarchy-x86_64.tar.gz",
+        "name": "rapp-0.14.13-omarchy-x86_64.tar.gz",
+        "size": 24106405
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.14.13/rapp-0.14.13-omarchy-x86_64-SHA256SUMS",
+        "name": "rapp-0.14.13-omarchy-x86_64-SHA256SUMS",
+        "size": 209
+      }
+    ],
+    "draft": false,
+    "html_url": "https://github.com/wizlijun/rapp/releases/tag/v0.14.13",
+    "prerelease": false,
+    "published_at": "2026-11-18T14:40:25Z",
+    "tag_name": "v0.14.13"
+  },
+  {
+    "assets": [
+      {
         "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.14.12/rapp-0.14.12-macos-arm64.zip",
         "name": "rapp-0.14.12-macos-arm64.zip",
         "size": 20687690
@@ -15,6 +39,21 @@
         "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.14.12/latest.json",
         "name": "latest.json",
         "size": 2798
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.14.12/rapp-omarchy-0.14.12-1-x86_64.pkg.tar.zst",
+        "name": "rapp-omarchy-0.14.12-1-x86_64.pkg.tar.zst",
+        "size": 22116225
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.14.12/rapp-0.14.12-omarchy-x86_64.tar.gz",
+        "name": "rapp-0.14.12-omarchy-x86_64.tar.gz",
+        "size": 23120239
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.14.12/rapp-0.14.12-omarchy-x86_64-SHA256SUMS",
+        "name": "rapp-0.14.12-omarchy-x86_64-SHA256SUMS",
+        "size": 209
       }
     ],
     "draft": false,

@@ -114,14 +114,14 @@ void main() {
     expect(desktopPick(const Offset(73, 50), cancel, edit), VoicePick.edit);
   });
 
-  macTest('the row has 按住说话 rightmost on macOS', (tester) async {
+  macTest('the row has 按住说话 rightmost on macOS and Linux', (tester) async {
     await view(tester);
     await tester.pumpWidget(layer());
     expect(hold, findsOneWidget);
     expect(tester.getCenter(hold).dx, greaterThan(tester.getCenter(open).dx));
     debugDefaultTargetPlatformOverride = TargetPlatform.linux;
     await tester.pumpWidget(layer(width: 999));
-    expect(hold, findsNothing);
+    expect(hold, findsOneWidget);
   });
 
   // User 2026-11-18: 「其他端同样的按钮透明度都修改 一致。修改为30%透明吧」.

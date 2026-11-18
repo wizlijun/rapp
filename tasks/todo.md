@@ -672,3 +672,26 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [x] 本机由 `rapp-omarchy 0.14.10-1` 升级至 `0.14.11-1`，系统管理员认证完成。已重启 `rapp-service.service`，进程运行 `/opt/rapp/rapp-service`，34 个安装文件摘要与正式包一致；CLI/host/client 版本 0.14.11、协议 v14，IPC 桌面/图形/终端/端口能力正常。安装前没有存活的主 GUI，未主动弹出主窗口。
 - [x] [v0.14.11 Release](https://github.com/wizlijun/rapp/releases/tag/v0.14.11) 已补齐 Linux 安装包、便携包及 SHA256SUMS，三个附件的 GitHub 大小和 SHA256 均与本地一致；原 macOS 资产 ID/大小/摘要保持不变。发布说明修正旧 Linux v13 表述并补充验证与安装步骤，网站备用下载快照更新到两平台 0.14.11，未部署网站。
 - 上传受当前代理线路反复 408/停滞影响，通过绑定物理网卡的临时进程代理完成；结束后临时进程及配置已清理，系统路由和全局代理选择未修改。
+
+## Linux 0.14.12 同步与能力边界（2026-11-18）
+
+- [x] `git pull --ff-only` 从 `1df423b` 更新至 `2d7eab9`，含 macOS 按住说话、快捷键、输入板及 iOS 按钮/语言修复。Linux 共享的 Flutter 输入板/按钮布局代码随之同步；Rust 仅 workspace 版本和 lockfile 从 0.14.11 更新为 0.14.12，协议仍为 v14。
+- [x] 逐项核对新增语音：`MainState.voice`、桌面语音按钮、设置行和终端 gate 仍按上游规格限于 macOS/iOS；Linux 没有 `rapp/speech` 实现。不能把共享 Dart 状态机的存在称为 Linux 已支持按住说话。本机 Superwhisper CLI 可用但服务未能启动，未修改它的设置、录音或启用云识别。已询问本轮是否扩展 Linux 语音，尚未获得范围选择。
+- [x] Flutter 3.50.0 全量 2396 项通过、15 项跳过；analyze 无 error/warning，124 项 SDK 弃用 info（`--no-fatal-infos` 通过）。Rust 实现相较已验证的 0.14.11 未变，本轮以正式 release workers 做集成验收，未重复全量 Rust 单元测试。
+- [x] 私有 Broadway GTK4 客户端 7 组 v14 场景、GTK3 原生窗口/弹窗/草稿/输入法 FIFO、启动器、构建路径和旧引擎拒绝检查通过。正式包单实例/崩溃恢复、终端与端口共享/pipe/half-close、重启后终端恢复通过。完整 hub → QUIC service → Omarchy 桌面串流首轮采集超时，构建结束后同一测试原样复验通过；未放宽断言。
+- [x] 干净 worktree `/home/bruce/git/rapp-build-01412` 从 `2d7eab9` 构建 0.14.12-1；Arch/便携包 34 文件摘要一致、13 个 ELF 依赖解析通过，BUILD-INFO 源码/Flutter 引擎及 SHA256SUMS 校验通过。产物在 `dist/linux-0.14.12/`，验证日志在主工作区 `.build-logs/*01412*` 及构建 worktree `.build-logs/`。
+- [x] [v0.14.12 Release](https://github.com/wizlijun/rapp/releases/tag/v0.14.12) 已补齐 Linux 安装包、便携包和 SHA256SUMS；三个附件大小/SHA256 与本地一致，原 macOS 资产 ID/大小/摘要不变。网站备用下载快照已更新为两平台 0.14.12。
+- [ ] 更新并部署 `rapphub.com`：站点构建和 8 项下载选择测试通过；Wrangler 未登录；有限 scope 的浏览器 OAuth 等待超时，已改用设备授权入口等待用户登录。站点部署 dry-run 通过；不能把更新仓库中的备用快照当作网站已部署。
+- 本轮尚未新增 Linux 语音后端，未安装新包、未重启已安装服务，也未进行 macOS/iOS 对端及物理桌面输入验收。
+
+## Linux 0.14.13 语音能力对齐（2026-11-18）
+
+- [x] 按用户“能力对齐”要求扩展 Linux 范围，新增本地 `rapp-speech`，复用桌面按钮、发送/编辑/取消、输入历史和热键 gate；应用画面与文字终端均接入，首次下载固定摘要模型，录音仅驻留内存。
+- [x] 主窗口失焦/后台、取消、断开、切会话停止录音；采集子进程绑定父进程死亡信号。普通 Alt 组合键保留，密码焦点不启动画面语音快捷键；Linux 提示与快捷键标签不再指向 Apple 设置。
+- [x] 最终源码 Flutter 全量 2420 项通过、15 项跳过；包含主窗口失焦/延迟热键取消及 Linux 快捷键补充用例。analyze 无 error/warning，124 项既有 material.dart 弃用 info。Rust 新 worker 2 项单测通过。
+- [x] 正式优化 worker 使用官方 base 模型和公开 JFK PCM 完成真实识别；静音返回空文本。假的 parec 验证 stop、cancel、SIGKILL 崩溃后三种采集进程退出；未调用用户麦克风。模型实际下载摘要匹配固定 SHA256。
+- [x] 构建路径/旧 SDK 拒绝测试通过；打包新增 worker、libpulse 依赖和上游许可。语音后端的 CPU 目标明确为 SSE4.2，禁用构建机专有指令和 AVX。
+- [x] 从干净提交 `98d14b1` 构建 0.14.13-1，37 文件在 Arch/便携包中摘要一致、14 个 ELF 依赖解析通过，源提交和 Flutter 引擎摘要匹配。打包 worker 的真实语音/静音/采集退出、hub → QUIC → 桌面串流、终端/CLI/共享/重启恢复和单服务实例测试通过；main 代码已推送。集成 fixture 使用私有网络 namespace 并启用 lo；终端专用 fixture 使用四个 worker 的独立副本，避免意外发现同目录的桌面 host。
+- [x] [v0.14.13](https://github.com/wizlijun/rapp/releases/tag/v0.14.13) 已发布 Linux 安装包、便携包及 SHA256SUMS；GitHub 三个附件大小和摘要与本地一致，匿名下载校验清单也一致。安装包 SHA256：`f9eb380c812bd494625be1efad53d3a2f5269c0b8c2e3eab89cd09f1a6ad1c77`。发布使用 `--latest=false`，核验 GitHub Latest 仍为 v0.14.12，保证 macOS 自动更新清单可用。网站 50 条发布快照和说明已更新，构建/8 项测试通过。
+- [ ] Cloudflare 静态部署未完成：两次设备授权均超时，本机无登录凭据，仓库无 Actions secret；最终正式部署命令因缺少 `CLOUDFLARE_API_TOKEN` 失败。线上静态快照仍是 v0.6.0；线上下载模块与仓库一致，配合已公开的发布列表可选中 Linux v0.14.13 / macOS v0.14.12，但不能称为备用静态快照已上线。需用户完成本机 `npx --yes wrangler@4.135.0 login` 后部署 `website/wrangler.jsonc` 并核验。
+- 验收边界：未用物理麦克风测试中文/多语言准确率，也未新增 macOS/iOS 真机对端验收；详情见 [Linux 语音规格](../docs/superpowers/specs/2026-11-18-rapp-linux-voice-design.md)。

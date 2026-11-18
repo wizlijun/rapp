@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/composer_panel.dart';
@@ -50,7 +51,7 @@ TermScreen _scr() => TermScreen(
     );
 
 void main() {
-  group('hold-to-talk hotkey on a text terminal (macOS)', () {
+  group('hold-to-talk hotkey on a text terminal (macOS and Linux)', () {
     late Directory tmp;
     late MainState state;
     late RemoteSession session;
@@ -103,8 +104,8 @@ void main() {
             if (c.$1 == 'keys') c.$2['keys'] else if (c.$1 == 'type') 'type:${c.$2['text']}',
         ];
 
-    Future<void> down(WidgetTester t, LogicalKeyboardKey k) => t.sendKeyDownEvent(k, platform: 'macos');
-    Future<void> up(WidgetTester t, LogicalKeyboardKey k) => t.sendKeyUpEvent(k, platform: 'macos');
+    Future<void> down(WidgetTester t, LogicalKeyboardKey k) => t.sendKeyDownEvent(k, platform: defaultTargetPlatform == TargetPlatform.linux ? 'linux' : 'macos');
+    Future<void> up(WidgetTester t, LogicalKeyboardKey k) => t.sendKeyUpEvent(k, platform: defaultTargetPlatform == TargetPlatform.linux ? 'linux' : 'macos');
 
     testWidgets('a quick tap of right option still reaches the terminal', (t) async {
       await show(t);
@@ -117,7 +118,7 @@ void main() {
       expect(bubbled.whereType<KeyUpEvent>().length, 1);
       expect(sent(), isEmpty);
       expect(voiceKeys, isEmpty);
-    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+    }, variant: const TargetPlatformVariant({TargetPlatform.macOS, TargetPlatform.linux}));
 
     testWidgets('flushed option reaches the terminal before the letter', (t) async {
       await show(t);
@@ -131,7 +132,7 @@ void main() {
         ['Alt-b'],
       ]);
       expect(voiceKeys, isEmpty);
-    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+    }, variant: const TargetPlatformVariant({TargetPlatform.macOS, TargetPlatform.linux}));
 
     testWidgets('the held option is flushed to the terminal handler before the letter', (t) async {
       await show(t);
@@ -142,21 +143,21 @@ void main() {
       expect(seen, isEmpty); // swallowed while pending
       await down(t, LogicalKeyboardKey.keyB);
       expect(seen, ['KeyDownEvent:Alt Right', 'KeyDownEvent:Key B']);
-    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+    }, variant: const TargetPlatformVariant({TargetPlatform.macOS, TargetPlatform.linux}));
 
     testWidgets('a mouse hold on the voice button keeps every key from the pane', (t) async {
       await show(t);
       state.voiceMouseHold = 1;
-      await t.sendKeyEvent(LogicalKeyboardKey.escape, platform: 'macos');
-      await t.sendKeyEvent(LogicalKeyboardKey.tab, platform: 'macos');
-      await t.sendKeyEvent(LogicalKeyboardKey.keyA, platform: 'macos');
+      await t.sendKeyEvent(LogicalKeyboardKey.escape, platform: defaultTargetPlatform == TargetPlatform.linux ? 'linux' : 'macos');
+      await t.sendKeyEvent(LogicalKeyboardKey.tab, platform: defaultTargetPlatform == TargetPlatform.linux ? 'linux' : 'macos');
+      await t.sendKeyEvent(LogicalKeyboardKey.keyA, platform: defaultTargetPlatform == TargetPlatform.linux ? 'linux' : 'macos');
       await t.pump();
       expect(sent(), isEmpty);
       state.voiceMouseHold = null;
-      await t.sendKeyEvent(LogicalKeyboardKey.keyA, platform: 'macos');
+      await t.sendKeyEvent(LogicalKeyboardKey.keyA, platform: defaultTargetPlatform == TargetPlatform.linux ? 'linux' : 'macos');
       await t.pump();
       expect(sent(), ['type:a']);
-    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+    }, variant: const TargetPlatformVariant({TargetPlatform.macOS, TargetPlatform.linux}));
 
     testWidgets('esc during a mouse hold cancels the voice and sends nothing to the pane', (t) async {
       await show(t);
@@ -179,8 +180,8 @@ void main() {
       await t.pump();
       await t.pump(const Duration(milliseconds: 200));
       expect(state.voiceMouseHold, 1);
-      await t.sendKeyEvent(LogicalKeyboardKey.keyA, platform: 'macos'); // during the hold
-      await t.sendKeyEvent(LogicalKeyboardKey.escape, platform: 'macos');
+      await t.sendKeyEvent(LogicalKeyboardKey.keyA, platform: defaultTargetPlatform == TargetPlatform.linux ? 'linux' : 'macos'); // during the hold
+      await t.sendKeyEvent(LogicalKeyboardKey.escape, platform: defaultTargetPlatform == TargetPlatform.linux ? 'linux' : 'macos');
       await t.pump(const Duration(milliseconds: 200));
       expect(voice.cancelled, isTrue);
       expect(sent(), isEmpty);
@@ -188,7 +189,7 @@ void main() {
       await t.pump(const Duration(milliseconds: 200));
       expect(state.voiceMouseHold, isNull);
       expect(sent(), isEmpty);
-    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+    }, variant: const TargetPlatformVariant({TargetPlatform.macOS, TargetPlatform.linux}));
 
     testWidgets('holding right option starts voice and swallows it', (t) async {
       await show(t);
@@ -200,7 +201,7 @@ void main() {
       expect(voiceKeys, [(1, VoiceKeyPhase.start), (1, VoiceKeyPhase.release)]);
       expect(sent(), isEmpty);
       expect(bubbled, isEmpty);
-    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+    }, variant: const TargetPlatformVariant({TargetPlatform.macOS, TargetPlatform.linux}));
 
     testWidgets('esc while recording cancels and nothing reaches the terminal', (t) async {
       await show(t);
@@ -213,7 +214,7 @@ void main() {
       expect(voiceKeys, [(1, VoiceKeyPhase.start), (1, VoiceKeyPhase.cancel)]);
       expect(sent(), isEmpty);
       expect(bubbled, isEmpty);
-    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+    }, variant: const TargetPlatformVariant({TargetPlatform.macOS, TargetPlatform.linux}));
 
     testWidgets('not ready with the panel open', (t) async {
       await show(t);
@@ -224,7 +225,7 @@ void main() {
       await up(t, LogicalKeyboardKey.altRight);
       await t.pump();
       expect(voiceKeys, isEmpty);
-    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+    }, variant: const TargetPlatformVariant({TargetPlatform.macOS, TargetPlatform.linux}));
 
     testWidgets('changing the hotkey while recording cancels and leaves no key swallowed', (t) async {
       await show(t);
@@ -239,10 +240,10 @@ void main() {
       await up(t, LogicalKeyboardKey.altRight);
       expect(sent(), isEmpty);
       expect(bubbled, isEmpty);
-      await t.sendKeyEvent(LogicalKeyboardKey.keyA, platform: 'macos');
+      await t.sendKeyEvent(LogicalKeyboardKey.keyA, platform: defaultTargetPlatform == TargetPlatform.linux ? 'linux' : 'macos');
       await t.pump();
       expect(sent(), ['type:a']);
-    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+    }, variant: const TargetPlatformVariant({TargetPlatform.macOS, TargetPlatform.linux}));
 
     testWidgets('changing the hotkey while pending drops the hold timer', (t) async {
       await show(t);
@@ -252,11 +253,11 @@ void main() {
       await t.pump(const Duration(milliseconds: 400));
       expect(voiceKeys, isEmpty);
       await up(t, LogicalKeyboardKey.altRight);
-      await t.sendKeyEvent(LogicalKeyboardKey.keyA, platform: 'macos');
+      await t.sendKeyEvent(LogicalKeyboardKey.keyA, platform: defaultTargetPlatform == TargetPlatform.linux ? 'linux' : 'macos');
       await t.pump();
       expect(sent(), ['type:a']);
       expect(voiceKeys, isEmpty);
-    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+    }, variant: const TargetPlatformVariant({TargetPlatform.macOS, TargetPlatform.linux}));
 
     testWidgets('switching the stage to another session drops a pending hold', (t) async {
       await show(t);
@@ -282,7 +283,7 @@ void main() {
       await up(t, LogicalKeyboardKey.altRight);
       await t.pump();
       expect(voiceKeys, isEmpty);
-    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+    }, variant: const TargetPlatformVariant({TargetPlatform.macOS, TargetPlatform.linux}));
 
     testWidgets('switching the stage to another session cancels a recording on the old one', (t) async {
       await show(t);
@@ -300,7 +301,7 @@ void main() {
       await up(t, LogicalKeyboardKey.altRight);
       await t.pump();
       expect(voiceKeys, [(1, VoiceKeyPhase.start), (1, VoiceKeyPhase.cancel)]);
-    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+    }, variant: const TargetPlatformVariant({TargetPlatform.macOS, TargetPlatform.linux}));
 
     testWidgets('voice_end returns the gate', (t) async {
       await show(t);
@@ -319,6 +320,6 @@ void main() {
       await up(t, LogicalKeyboardKey.keyA);
       await t.pump();
       expect(sent(), ['type:a']);
-    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+    }, variant: const TargetPlatformVariant({TargetPlatform.macOS, TargetPlatform.linux}));
   });
 }

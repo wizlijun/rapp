@@ -784,7 +784,7 @@ List<Widget> composerLayer(
           ];
           // On the Mac the voice button is the row's right end; the rest fades while it holds, and it blurs the
           // picture itself (a refused press must not).
-          if (button && defaultTargetPlatform == TargetPlatform.macOS && state.voice != null) {
+          if (button && (defaultTargetPlatform == TargetPlatform.macOS || defaultTargetPlatform == TargetPlatform.linux) && state.voice != null) {
             return DesktopVoice(
               key: ValueKey(session.sid),
               state: state,
