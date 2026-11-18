@@ -68,27 +68,46 @@ class VoiceHotkeyRecorder {
   /// A modifier that went down and nothing else has since: it becomes a hold on its release.
   int? _lone;
 
+  /// Modifier keys currently held.
+  final _held = <int>{};
+
+  /// A second modifier or another key went down during this hold: no lone tap until all
+  /// modifiers are up.
+  bool _poisoned = false;
+
   RecordOutcome down(int code, int flags) {
     if (code == 53) {
       _lone = null;
+      _held.clear();
+      _poisoned = false;
       return const RecordAborted();
     }
     if (modifierCodes.contains(code)) {
       if (code == 57) {
         _lone = null;
+        _poisoned = true;
         return const RecordRejected();
       }
-      // A second modifier while one is held is a chord, not a lone tap.
-      _lone = _lone == null ? code : null;
+      _held.add(code);
+      if (_held.length > 1 || _poisoned) {
+        _poisoned = true;
+        _lone = null;
+      } else {
+        _lone = code;
+      }
       return const RecordPending();
     }
     _lone = null;
+    if (_held.isNotEmpty) _poisoned = true;
     final mods = flags & (_control | _option | _shift | _command);
     return acceptsCombo(code, mods) ? RecordSet(VoiceHotkey.holdCombo(code, mods)) : const RecordRejected();
   }
 
   RecordOutcome up(int code) {
-    if (_lone != null && code == _lone) {
+    final lone = _lone;
+    _held.remove(code);
+    if (_held.isEmpty) _poisoned = false;
+    if (lone != null && code == lone) {
       _lone = null;
       return RecordSet(VoiceHotkey.holdModifier(code));
     }

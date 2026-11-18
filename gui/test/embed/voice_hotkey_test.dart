@@ -63,4 +63,25 @@ void main() {
     expect((r.down(0, _opt) as RecordSet).hotkey, const VoiceHotkey.holdCombo(0, _opt));
     expect(r.up(58), isA<RecordPending>());
   });
+
+  test('a chord of three modifiers is never a lone tap', () {
+    final r = VoiceHotkeyRecorder();
+    expect(r.down(59, _ctrl), isA<RecordPending>());
+    expect(r.down(58, _ctrl | _opt), isA<RecordPending>());
+    expect(r.down(55, _ctrl | _opt | _cmd), isA<RecordPending>());
+    expect(r.up(55), isA<RecordPending>());
+  });
+
+  test('re-pressing a modifier inside a chord does not re-arm', () {
+    final r = VoiceHotkeyRecorder();
+    r.down(59, _ctrl);
+    r.down(58, _ctrl | _opt);
+    expect(r.up(59), isA<RecordPending>());
+    expect(r.down(59, _ctrl | _opt), isA<RecordPending>());
+    expect(r.up(59), isA<RecordPending>());
+    expect(r.up(58), isA<RecordPending>());
+    // all up: a fresh lone tap works again
+    r.down(62, _ctrl);
+    expect((r.up(62) as RecordSet).hotkey, const VoiceHotkey.holdModifier(62));
+  });
 }
