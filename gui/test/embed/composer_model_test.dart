@@ -54,6 +54,68 @@ void main() {
 
   tearDown(() => m.dispose());
 
+  group('submitText', () {
+    test('sends the text alone and leaves the draft as it was', () {
+      m.draft = 'half written';
+      final r = m.submitText('  你好  ');
+      expect(r, isA<SubmitPieces>());
+      expect((r as SubmitPieces).pieces, [
+        {'text': '你好'}
+      ]);
+      expect(m.draft, 'half written');
+      expect(m.sending, true);
+      expect(m.inFlight!.draftless, true);
+    });
+
+    test('empty or blank text sends nothing', () {
+      expect(m.submitText('   '), isA<SubmitNothing>());
+      expect(m.sending, false);
+    });
+
+    test('while a round runs it sends nothing and busy says so', () {
+      m.draft = 'keep';
+      expect(m.busy, false);
+      m.submitText('a');
+      expect(m.busy, true);
+      expect(m.submitText('b'), isA<SubmitNothing>());
+      expect(m.draft, 'keep');
+    });
+
+    test('keep appends on a new line without an editor', () async {
+      await m.detach(ed); // no editor: the text goes straight into the draft
+      m.draft = 'x';
+      await m.keep(' y ');
+      expect(m.draft, 'x\ny');
+      m.draft = '';
+      await m.keep('y');
+      expect(m.draft, 'y');
+    });
+
+    test('keep with an editor attached lands at the end, not at the caret', () async {
+      ed.value = 'hello world';
+      ed.caret = 5;
+      await m.keep(' y ');
+      expect(ed.value, 'hello world\ny');
+      ed.value = '';
+      await m.keep('z');
+      expect(ed.value, 'z');
+    });
+
+    test('held blocks stay held after a voice send', () {
+      m.apply(const PasteResult(blocks: [BlockChip(1, '图片 #1')]));
+      m.submitText('t');
+      expect(m.blocks.map((b) => b.n), [1]);
+      expect(dropped, isEmpty);
+    });
+
+    test('done ends a voice round like any other', () {
+      m.submitText('t');
+      m.done(1, null);
+      expect(m.sending, false);
+      expect(allSent, 1);
+    });
+  });
+
   test('a late editor detach read does not overwrite a native draft', () async {
     final old = _SlowReadEditor();
     await m.attach(old);

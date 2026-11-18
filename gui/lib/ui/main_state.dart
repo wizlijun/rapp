@@ -12,6 +12,7 @@ import 'package:flutter/services.dart' show Clipboard;
 import '../embed/remote_session.dart';
 import '../embed/session_port.dart';
 import '../embed/stream_choice.dart';
+import '../embed/voice_input.dart';
 import '../embed/traffic_label.dart' show segments;
 import '../history/input_history.dart';
 import '../history/input_recorder.dart';
@@ -128,7 +129,9 @@ class MainState extends ChangeNotifier {
     AppProfileStore? profiles,
     UnlockStore? unlockStore,
     void Function(String line)? log,
+    VoiceInput? voice,
   })  : resources = ResourcesState(clock: clock),
+        voice = voice ?? (defaultTargetPlatform == TargetPlatform.iOS ? VoiceInput() : null),
         unlockStore = unlockStore ?? UnlockStore(),
         _now = clock ?? DateTime.now,
         positions = ProjectPositions.load(data.localDir),
@@ -229,6 +232,9 @@ class MainState extends ChangeNotifier {
   }
 
   final HubClient? hub;
+
+  /// Hold-to-talk speech recognition (iOS); null where there is no voice button.
+  final VoiceInput? voice;
   final String? hubError;
   /// The data root; mutable so a relocation can swap it.
   DataDir data;
@@ -2980,6 +2986,16 @@ class MainState extends ChangeNotifier {
     _save();
   }
 
+  /// The edge the iOS stage's button stack stands on. Its own notifier, like [composerZoom].
+  late final ValueNotifier<StageSide> stageSide = ValueNotifier(prefs.stageButtonsSide);
+
+  void setStageSide(StageSide s) {
+    if (s == stageSide.value) return;
+    stageSide.value = s;
+    prefs.stageButtonsSide = s;
+    _save();
+  }
+
   /// ⌘= / ⌘- / ⌘0 (Ctrl elsewhere) in the panel.
   void zoomKey(ZoomKey k) => setComposerZoom(switch (k) {
         ZoomKey.bigger => composerZoom.value + 1,
@@ -3599,7 +3615,9 @@ class MainState extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    voice?.dispose();
     composerZoom.dispose();
+    stageSide.dispose();
     appLatch.dispose();
     resources.removeListener(notifyListeners);
     resources.dispose();

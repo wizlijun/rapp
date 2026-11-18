@@ -30,6 +30,10 @@
 	<true/>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>连接同一网络里你自己的电脑</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>按住语音按钮说话时录音，转成文字发给远程程序</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>把你按住语音按钮时说的话转成文字</string>
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>
