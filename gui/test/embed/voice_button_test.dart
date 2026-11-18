@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/composer_model.dart';
 import 'package:rapp/embed/composer_panel.dart';
 import 'package:rapp/embed/flutter_editor.dart';
 import 'package:rapp/embed/remote_session.dart';
@@ -20,13 +23,17 @@ import 'package:rapp/ui/prefs.dart';
 import '../fakes.dart';
 import '../ui/helpers.dart';
 
-/// A scripted [VoiceInput]: `start` answers [startResult], `stop` answers [stopResult].
+/// A scripted [VoiceInput]: `start` answers [startResult], `stop` answers [stopResult]. With [startGate] the start
+/// stays `starting` until the test completes it; with [stopGate] the stop waits for it.
 class FakeVoice extends VoiceInput {
   FakeVoice() : super(channel: const MethodChannel('test/speech'));
 
   VoiceStart startResult = VoiceStart.ok;
   String stopResult = '';
   bool cancelled = false;
+  int starts = 0, stops = 0;
+  Completer<VoiceStart>? startGate;
+  Completer<String>? stopGate;
   VoicePhase _phase = VoicePhase.idle;
   String _text = '';
   final lv = ValueNotifier<double>(0);
@@ -45,14 +52,31 @@ class FakeVoice extends VoiceInput {
 
   @override
   Future<VoiceStart> start() async {
+    starts++;
     _text = '';
-    _phase = startResult == VoiceStart.ok ? VoicePhase.listening : VoicePhase.idle;
+    var r = startResult;
+    final gate = startGate;
+    if (gate != null) {
+      _phase = VoicePhase.starting;
+      notifyListeners();
+      r = await gate.future;
+      // Stopped or cancelled meanwhile: stays idle, as VoiceInput does.
+      if (_phase != VoicePhase.starting) return r;
+    }
+    _phase = r == VoiceStart.ok ? VoicePhase.listening : VoicePhase.idle;
     notifyListeners();
-    return startResult;
+    return r;
   }
 
   @override
   Future<String> stop() async {
+    stops++;
+    final gate = stopGate;
+    if (gate != null && _phase == VoicePhase.listening) {
+      _phase = VoicePhase.finishing;
+      notifyListeners();
+      stopResult = await gate.future;
+    }
     _phase = VoicePhase.idle;
     _text = stopResult;
     notifyListeners();
@@ -271,21 +295,233 @@ void main() {
     await tester.pump();
     final bars = tester.widget<CustomPaint>(find.byKey(const Key('voice-bars'))).painter! as VoiceBarsPainter;
     expect(bars.level, .8);
+    expect(bars.right, isTrue);
     await lift(tester, g);
   });
 
-  iosTest('blank result shows 没听清 for 1.5 s and sends nothing', (tester) async {
+  iosTest('left hand: the overlay builds the bars mirrored', (tester) async {
+    es.setStageSide(StageSide.left);
+    await tester.pumpWidget(layer());
+    final g = await press(tester);
+    final bars = tester.widget<CustomPaint>(find.byKey(const Key('voice-bars'))).painter! as VoiceBarsPainter;
+    expect(bars.right, isFalse);
+    await lift(tester, g);
+  });
+
+  test('the newest bar is at the thumb end: rightmost for the right hand, leftmost for the left', () {
+    for (final right in [true, false]) {
+      final levels = [...List.filled(23, 0.0), 1.0];
+      final rec = ui.PictureRecorder();
+      final canvas = _RectCanvas(Canvas(rec));
+      VoiceBarsPainter(level: 1, levels: levels, color: const Color(0xff000000), right: right)
+          .paint(canvas, const Size(24 * 4 - 2, 20));
+      rec.endRecording().dispose();
+      final tallest = canvas.rects.reduce((a, b) => b.height > a.height ? b : a);
+      expect(tallest.left, right ? 23 * 4.0 : 0.0, reason: 'right: $right');
+    }
+  });
+
+  iosTest('blank result shows 没听清 for 1.5 s from when it shows (the release end) and sends nothing', (tester) async {
     await tester.pumpWidget(layer());
     final g = await press(tester);
     voice.stopResult = '  ';
-    await lift(tester, g);
+    await g.up();
+    await tester.pump();
+    // The release ends here; the hint shows (the stack fades back in over 120 ms).
+    await tester.pump(const Duration(milliseconds: 200));
     expect(ringFinder, findsNothing);
     expect(find.descendant(of: find.byKey(const Key('voice-hint')), matching: find.text('没听清')), findsOneWidget);
     expect(sends(), isEmpty);
-    await tester.pump(const Duration(milliseconds: 1000));
+    await tester.pump(const Duration(milliseconds: 1400));
     expect(find.text('没听清'), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.text('没听清'), findsNothing);
+  });
+
+  iosTest('a put-back hint lasts about 2 s from the release end', (tester) async {
+    await tester.pumpWidget(layer());
+    final g = await press(tester);
+    voice.stopResult = '你好';
+    // A send that cannot go now: the busy put-back.
+    expect(rs.composer.submitText('先发的'), isA<SubmitPieces>());
+    await g.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(find.text('上一段还在发送，已放进输入板'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 1900));
+    expect(find.text('上一段还在发送，已放进输入板'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('上一段还在发送，已放进输入板'), findsNothing);
+  });
+
+  iosTest('a recogniser failure mid-hold shows 没听清; an interruption is silent', (tester) async {
+    await tester.pumpWidget(layer());
+    var g = await press(tester);
+    voice.partial('你好');
+    await tester.pump();
+    voice.onError!('failed');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(ringFinder, findsNothing);
+    expect(find.descendant(of: find.byKey(const Key('voice-hint')), matching: find.text('没听清')), findsOneWidget);
+    expect(sends(), isEmpty);
+    await g.up();
+    await tester.pump(const Duration(seconds: 2));
+    expect(find.byKey(const Key('voice-hint')), findsNothing);
+
+    g = await press(tester);
+    voice.onError!('interrupted');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(ringFinder, findsNothing);
+    expect(find.byKey(const Key('voice-hint')), findsNothing);
+    expect(sends(), isEmpty);
+    await g.up();
+    await tester.pump(const Duration(seconds: 2));
+  });
+
+  iosTest('a cancel release keeps the last words in the fading bubble, never 正在听…', (tester) async {
+    await tester.pumpWidget(layer());
+    final r = ringOf(tester);
+    final g = await press(tester);
+    voice.partial('你好');
+    await tester.pump();
+    await g.moveTo(at(tester, r, VoicePick.cancel));
+    await tester.pump();
+    await g.up();
+    await tester.pump();
+    expect(voice.cancelled, isTrue);
+    expect(find.text('你好'), findsOneWidget);
+    expect(find.text('正在听…'), findsNothing);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('你好'), findsOneWidget);
+    expect(find.text('正在听…'), findsNothing);
+    await tester.pump(const Duration(milliseconds: 220));
+    expect(ringFinder, findsNothing);
+  });
+
+  iosTest('a session switch while the stop is out puts the words in the original draft', (tester) async {
+    rs.composer.draft = 'x';
+    final other = RemoteSession(2, 'Notes');
+    addTearDown(other.dispose);
+    await tester.pumpWidget(layer());
+    final g = await press(tester);
+    voice.stopGate = Completer<String>();
+    await g.up();
+    await tester.pump();
+    await tester.pumpWidget(layer(session: other));
+    voice.stopGate!.complete('你好');
+    await tester.pump();
+    expect(rs.composer.draft, 'x\n你好');
+    expect(other.composer.draft, '');
+    expect(sends(), isEmpty);
+  });
+
+  iosTest('a session switch while an 编辑 stop is out also keeps the words; blank keeps nothing', (tester) async {
+    final other = RemoteSession(2, 'Notes');
+    addTearDown(other.dispose);
+    await tester.pumpWidget(layer());
+    final r = ringOf(tester);
+    var g = await press(tester);
+    await g.moveTo(at(tester, r, VoicePick.edit));
+    await tester.pump();
+    voice.stopGate = Completer<String>();
+    await g.up();
+    await tester.pump();
+    await tester.pumpWidget(layer(session: other));
+    voice.stopGate!.complete('好');
+    await tester.pump();
+    expect(rs.composer.draft, '好');
+    expect(rs.composer.open, isFalse);
+
+    await tester.pumpWidget(layer());
+    await tester.pump(const Duration(milliseconds: 400));
+    g = await press(tester);
+    voice.stopGate = Completer<String>();
+    await g.up();
+    await tester.pump();
+    await tester.pumpWidget(layer(session: other));
+    voice.stopGate!.complete('  ');
+    await tester.pump();
+    expect(rs.composer.draft, '好');
+  });
+
+  iosTest('release while starting: no disc, no hint, no send; the start is stopped', (tester) async {
+    for (final reply in [VoiceStart.ok, VoiceStart.unavailable, VoiceStart.cancelled]) {
+      voice.startGate = Completer<VoiceStart>();
+      voice.stops = 0;
+      await tester.pumpWidget(layer());
+      final g = await tester.startGesture(tester.getCenter(hold));
+      await tester.pump();
+      expect(voice.phase, VoicePhase.starting);
+      await g.up();
+      await tester.pump();
+      expect(voice.stops, 1, reason: '$reply');
+      voice.startGate!.complete(reply);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 240));
+      expect(ringFinder, findsNothing, reason: '$reply');
+      expect(find.byKey(const Key('voice-hint')), findsNothing, reason: '$reply');
+      expect(haptics, isNot(contains('HapticFeedbackType.mediumImpact')), reason: '$reply');
+      expect(sends(), isEmpty);
+      expect(holdOpacity(tester), 1);
+    }
+  });
+
+  iosTest('pointer cancel while starting cancels the start', (tester) async {
+    voice.startGate = Completer<VoiceStart>();
+    await tester.pumpWidget(layer());
+    final g = await tester.startGesture(tester.getCenter(hold));
+    await tester.pump();
+    await g.cancel();
+    await tester.pump();
+    expect(voice.cancelled, isTrue);
+    voice.startGate!.complete(VoiceStart.cancelled);
+    await tester.pump(const Duration(milliseconds: 240));
+    expect(ringFinder, findsNothing);
+    expect(find.byKey(const Key('voice-hint')), findsNothing);
+  });
+
+  iosTest('start cancelled (overtaken natively): no disc, no hint', (tester) async {
+    voice.startResult = VoiceStart.cancelled;
+    await tester.pumpWidget(layer());
+    final g = await press(tester);
+    expect(ringFinder, findsNothing);
+    expect(find.byKey(const Key('voice-hint')), findsNothing);
+    await lift(tester, g);
+    expect(find.byKey(const Key('voice-hint')), findsNothing);
+    expect(sends(), isEmpty);
+  });
+
+  iosTest('a second pointer on voice-hold, while starting or holding, is ignored', (tester) async {
+    voice.startGate = Completer<VoiceStart>();
+    voice.stopResult = '好';
+    await tester.pumpWidget(layer());
+    final g = await tester.startGesture(tester.getCenter(hold));
+    await tester.pump();
+    // While starting: another finger neither starts again nor ends this one.
+    final second = await tester.startGesture(tester.getCenter(hold), pointer: 7);
+    await tester.pump();
+    await second.up();
+    await tester.pump();
+    expect(voice.starts, 1);
+    expect(voice.stops, 0);
+    voice.startGate!.complete(VoiceStart.ok);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 240));
+    expect(painter(tester).progress, 1);
+    // While holding.
+    final third = await tester.startGesture(tester.getCenter(hold), pointer: 8);
+    await tester.pump();
+    await third.moveBy(const Offset(-400, -400));
+    await tester.pump();
+    await third.up();
+    await tester.pump();
+    expect(voice.starts, 1);
+    expect(voice.stops, 0);
+    expect(painter(tester).pick, VoicePick.send);
+    await lift(tester, g);
+    expect(sends(), hasLength(1));
   });
 
   iosTest('pointer cancel cancels', (tester) async {
@@ -470,4 +706,20 @@ void main() {
     await tester.pump(const Duration(milliseconds: 200));
     expect(ringFinder, findsNothing);
   });
+}
+
+/// Records the rects drawn, passing everything on.
+class _RectCanvas implements Canvas {
+  _RectCanvas(this._inner);
+  final Canvas _inner;
+  final rects = <Rect>[];
+
+  @override
+  void drawRect(Rect rect, Paint paint) {
+    rects.add(rect);
+    _inner.drawRect(rect, paint);
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation i) => throw UnimplementedError('${i.memberName}');
 }

@@ -788,6 +788,7 @@ class _IosStageState extends State<_IosStage> {
           unawaited(c.keep(text));
           c.open = true;
         },
+        composer: () => widget.session.composer,
       );
     }
   }

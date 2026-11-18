@@ -115,9 +115,72 @@ void main() {
     expect(v.phase, VoicePhase.starting);
     final f = v.stop();
     gate.complete('ok');
-    expect(await s, VoiceStart.ok);
+    // Aborted: silent, whatever native answered.
+    expect(await s, VoiceStart.cancelled);
     expect(await f, '');
     expect(calls, ['start', 'cancel']);
+    expect(v.phase, VoicePhase.idle);
+  });
+
+  test('a late final, partial or level from the last run while starting is not used by the next stop', () async {
+    final gate = Completer<Object?>();
+    mock((c) => c.method == 'start' ? gate.future : Future.value(null));
+    final v = VoiceInput();
+    addTearDown(v.dispose);
+    final s = v.start();
+    await Future<void>.delayed(Duration.zero);
+    expect(v.phase, VoicePhase.starting);
+    await v.handle(const MethodCall('final', {'text': '旧的'}));
+    await v.handle(const MethodCall('partial', {'text': '旧'}));
+    await v.handle(const MethodCall('level', {'value': .5}));
+    expect(v.text, '');
+    expect(v.level.value, 0);
+    gate.complete('ok');
+    expect(await s, VoiceStart.ok);
+    final f = v.stop();
+    await Future<void>.delayed(Duration.zero);
+    expect(calls, ['start', 'stop']);
+    expect(v.phase, VoicePhase.finishing);
+    await v.handle(const MethodCall('final', {'text': '新的'}));
+    expect(await f, '新的');
+  });
+
+  test('cancel while starting calls native cancel at once, before start answers', () async {
+    final gate = Completer<Object?>();
+    mock((c) => c.method == 'start' ? gate.future : Future.value(null));
+    final v = VoiceInput();
+    addTearDown(v.dispose);
+    final s = v.start();
+    await Future<void>.delayed(Duration.zero);
+    await v.cancel();
+    expect(calls, ['start', 'cancel']);
+    expect(gate.isCompleted, isFalse);
+    gate.complete('cancelled');
+    expect(await s, VoiceStart.cancelled);
+    expect(calls, ['start', 'cancel']);
+    expect(v.phase, VoicePhase.idle);
+  });
+
+  test('stop while starting also calls native cancel at once', () async {
+    final gate = Completer<Object?>();
+    mock((c) => c.method == 'start' ? gate.future : Future.value(null));
+    final v = VoiceInput();
+    addTearDown(v.dispose);
+    final s = v.start();
+    await Future<void>.delayed(Duration.zero);
+    final f = v.stop();
+    await Future<void>.delayed(Duration.zero);
+    expect(calls, ['start', 'cancel']);
+    gate.complete('unavailable');
+    expect(await s, VoiceStart.cancelled);
+    expect(await f, '');
+  });
+
+  test('start reply cancelled (overtaken natively) is a silent cancelled', () async {
+    mock((c) async => c.method == 'start' ? 'cancelled' : null);
+    final v = VoiceInput();
+    addTearDown(v.dispose);
+    expect(await v.start(), VoiceStart.cancelled);
     expect(v.phase, VoicePhase.idle);
   });
 

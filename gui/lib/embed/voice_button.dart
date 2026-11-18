@@ -52,19 +52,27 @@ String? sendVoice({
   }
 }
 
-/// How long each hint stays (plan Global Constraints; the preparing and unavailable ones as long as a put-back).
+/// How long each hint stays once it shows (plan Global Constraints; the preparing and unavailable ones as long
+/// as a put-back).
 Duration _life(String hint) => switch (hint) {
   voiceBlank => const Duration(milliseconds: 1500),
   voiceDenied => const Duration(seconds: 4),
   _ => const Duration(seconds: 2),
 };
 
+/// The stack's fade back in after a hold (stage_buttons.dart): a hint set then is fully there this much later.
+const _stackFadeIn = Duration(milliseconds: 120);
+
 /// One hold on the voice button: from the press, through the slide over the disc and the bands, to the release.
 /// Points are in the stage's coordinates (the box under [stageKey], which the overlay puts on its root).
 class VoiceHold extends ChangeNotifier {
-  VoiceHold({required this.voice, required this.send, required this.edit});
+  VoiceHold({required this.voice, required this.send, required this.edit, required this.composer});
 
   final VoiceInput voice;
+
+  /// The session's composer, read at each press: words that come back after this hold is gone (a session
+  /// switch while the stop is out) still go to the draft they were said for.
+  final ComposerModel Function() composer;
 
   /// Sends the text; returns a hint to show, or null.
   final String? Function(String text) send;
@@ -92,12 +100,16 @@ class VoiceHold extends ChangeNotifier {
   bool _disposed = false;
   int? _pointer;
   Timer? _hintTimer;
+  ComposerModel? _pressedFor;
 
   /// The overlay is up or still animating.
   bool get showing => _showing;
   set showing(bool v) {
     if (_showing == v) return;
     _showing = v;
+    // A hint set during the release starts its time now, as the stack fades back in with it.
+    final h = hint;
+    if (!active && h != null && _hintTimer == null) _hintTimer = Timer(_life(h) + _stackFadeIn, _clearHint);
     notifyListeners();
   }
 
@@ -107,21 +119,24 @@ class VoiceHold extends ChangeNotifier {
   Future<void> down(Offset thumb, Size stage, bool right) async {
     if (_pressed || holding || voice.phase != VoicePhase.idle) return;
     _pressed = true;
+    _pressedFor = composer();
     pick = VoicePick.send;
     ring = VoiceRing(stage: stage, thumb: thumb, right: right);
     _setHint(null);
     final r = await voice.start();
     if (_disposed) return;
+    // Let go while the start was on its way: that release already ended it, and there is nothing to show.
+    if (!_pressed) return;
     switch (r) {
       case VoiceStart.ok:
-        // Let go while the start was on its way: the stop that came then already ended it.
-        if (!_pressed) return;
         holding = true;
         voice.onMaxLength = _release;
-        voice.onError = (_) => _interrupted();
+        voice.onError = _interrupted;
         unawaited(HapticFeedback.mediumImpact());
         notifyListeners();
       case VoiceStart.asked:
+        _pressed = false;
+      case VoiceStart.cancelled:
         _pressed = false;
       case VoiceStart.denied:
         _pressed = false;
@@ -166,11 +181,13 @@ class VoiceHold extends ChangeNotifier {
     }
   }
 
-  // The recogniser stopped by itself (interrupted): nothing to send.
-  void _interrupted() {
+  // The recogniser stopped by itself: nothing to send. A call or leaving the app says nothing; a recogniser
+  // that failed lost the words, so 没听清.
+  void _interrupted(String code) {
     if (!holding) return;
     pick = VoicePick.cancel;
-    _release();
+    unawaited(_release());
+    if (code != 'interrupted') _setHint(voiceBlank);
   }
 
   Future<void> _release() async {
@@ -180,18 +197,21 @@ class VoiceHold extends ChangeNotifier {
     voice.onMaxLength = null;
     voice.onError = null;
     final which = pick;
+    final draft = _pressedFor;
     notifyListeners();
     switch (which) {
       case VoicePick.cancel:
         await voice.cancel();
-      case VoicePick.send:
+      case VoicePick.send || VoicePick.edit:
         final text = await voice.stop();
-        if (_disposed) return;
-        _setHint(send(text));
-      case VoicePick.edit:
-        final text = await voice.stop();
-        if (_disposed) return;
-        if (text.trim().isEmpty) {
+        if (_disposed) {
+          // The session switched meanwhile: keep the words in its draft rather than lose them.
+          if (draft != null) unawaited(draft.keep(text));
+          return;
+        }
+        if (which == VoicePick.send) {
+          _setHint(send(text));
+        } else if (text.trim().isEmpty) {
           _setHint(voiceBlank);
         } else {
           edit(text);
@@ -199,14 +219,18 @@ class VoiceHold extends ChangeNotifier {
     }
   }
 
+  /// While the stack is hidden (a hold, its release) the hint waits; its time starts when it shows.
   void _setHint(String? h, {bool settings = false}) {
     _hintTimer?.cancel();
+    _hintTimer = null;
     if (h == null && hint == null) return;
     hint = h;
     this.settings = h != null && settings;
-    if (h != null) _hintTimer = Timer(_life(h), () => _setHint(null));
+    if (h != null && !active) _hintTimer = Timer(_life(h), _clearHint);
     notifyListeners();
   }
+
+  void _clearHint() => _setHint(null);
 
   @override
   void dispose() {

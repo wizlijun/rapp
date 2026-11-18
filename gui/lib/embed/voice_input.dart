@@ -1,11 +1,13 @@
 // The Dart side of the `rapp/speech` channel (gui/ios/Runner, a later task): hold-to-talk speech recognition.
 // Dart calls `start` / `stop` / `cancel`; native answers with `partial` / `final` {text} and `error` {code} calls.
+// `start` replies `cancelled` when a cancel or an interruption overtook it natively.
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-enum VoiceStart { ok, asked, denied, unavailable, preparing }
+/// [cancelled]: a stop or cancel came while starting (or native was overtaken); nothing to show.
+enum VoiceStart { ok, asked, denied, unavailable, preparing, cancelled }
 
 enum VoicePhase { idle, starting, listening, finishing }
 
@@ -36,7 +38,8 @@ class VoiceInput extends ChangeNotifier {
   String _text = '';
   Timer? _maxTimer, _finalTimer;
   Completer<String>? _finalDone;
-  // A stop or cancel that arrived while `start` was pending; its stop() future (if any) waits here.
+  // A stop or cancel that arrived while `start` was pending (native cancel already sent); its stop() future
+  // (if any) waits here.
   bool _aborted = false;
   Completer<String>? _abortedStop;
   // A native `final` that arrived while still listening (the recogniser ended early); the next `stop` returns it.
@@ -70,6 +73,7 @@ class VoiceInput extends ChangeNotifier {
         'asked' => VoiceStart.asked,
         'denied' => VoiceStart.denied,
         'preparing' => VoiceStart.preparing,
+        'cancelled' => VoiceStart.cancelled,
         _ => VoiceStart.unavailable,
       };
     } on PlatformException {
@@ -82,10 +86,11 @@ class VoiceInput extends ChangeNotifier {
     _aborted = false;
     _abortedStop = null;
     if (aborted) {
-      if (r == VoiceStart.ok) await _nativeCancel();
+      // The native cancel went when the abort came, after this start on the same channel: an `ok` start
+      // was ended by it, a pending one was overtaken. Silent either way.
       _set(phase: VoicePhase.idle, text: '');
       waiting?.complete('');
-      return r;
+      return VoiceStart.cancelled;
     }
     if (r != VoiceStart.ok) {
       _set(phase: VoicePhase.idle);
@@ -98,7 +103,7 @@ class VoiceInput extends ChangeNotifier {
 
   Future<String> stop() async {
     if (_phase == VoicePhase.starting) {
-      _aborted = true;
+      unawaited(_abort());
       return (_abortedStop ??= Completer<String>()).future;
     }
     if (_phase != VoicePhase.listening) return _phase == VoicePhase.finishing ? _finalDone!.future : '';
@@ -123,13 +128,17 @@ class VoiceInput extends ChangeNotifier {
   }
 
   Future<void> cancel() async {
-    if (_phase == VoicePhase.starting) {
-      _aborted = true;
-      return;
-    }
+    if (_phase == VoicePhase.starting) return _abort();
     if (_phase == VoicePhase.idle) return;
     _maxTimer?.cancel();
     _finish('');
+    await _nativeCancel();
+  }
+
+  // Tells native at once, so a start still setting up (iOS 26) never turns the audio session on.
+  Future<void> _abort() async {
+    if (_aborted) return;
+    _aborted = true;
     await _nativeCancel();
   }
 
@@ -153,10 +162,11 @@ class VoiceInput extends ChangeNotifier {
     if (done != null && !done.isCompleted) done.complete(text);
   }
 
-  /// Native to Dart: `partial` / `final` {text}, `error` {code}. Ignored while idle.
+  /// Native to Dart: `partial` / `final` {text}, `level` {value}, `error` {code}. Ignored while idle, and while
+  /// starting: native sends nothing for a run before its `ok`, so anything then is a late one from the last run.
   @visibleForTesting
   Future<Object?> handle(MethodCall call) async {
-    if (_phase == VoicePhase.idle) return null;
+    if (_phase == VoicePhase.idle || _phase == VoicePhase.starting) return null;
     final args = call.arguments is Map ? call.arguments as Map : const {};
     switch (call.method) {
       case 'partial':

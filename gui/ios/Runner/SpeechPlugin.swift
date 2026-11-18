@@ -4,7 +4,8 @@ import Speech
 import UIKit
 
 /// The `rapp/speech` channel: hold-to-talk speech recognition for the voice button.
-/// Dart calls `start` (replies `ok` / `asked` / `denied` / `unavailable` / `preparing`), `stop` and `cancel`;
+/// Dart calls `start` (replies `ok` / `asked` / `denied` / `unavailable` / `preparing`, or `cancelled` when a
+/// cancel, another start or an interruption overtook it while it set up), `stop` and `cancel`;
 /// this side sends `partial` / `final` {text} and `error` {code}. Everything runs on the main thread except
 /// the audio tap, which only hands buffers to the recogniser. This plugin owns the app's AVAudioSession.
 /// iOS 26+ uses SpeechAnalyzer + SpeechTranscriber; older systems (or no transcriber for the locale) use
@@ -76,10 +77,10 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
     }
     if #available(iOS 26, *) {
       Task { @MainActor [weak self] in
-        guard let self else { return result("unavailable") }
+        guard let self else { return result("cancelled") }
         if let reply = await self.startAnalyzer(gen) { return result(reply) }
         // No transcriber for this device or locale: the older recogniser may still work.
-        result(gen == self.generation ? self.startRecognizer() : "unavailable")
+        result(gen == self.generation ? self.startRecognizer() : "cancelled")
       }
     } else {
       result(startRecognizer())
@@ -186,6 +187,8 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
     let session = AVAudioSession.sharedInstance()
     do {
       try session.setCategory(.record, mode: .measurement, options: [])
+      // Else iOS mutes haptics while recording: the press and each pick change are felt (spec §5.1).
+      try session.setAllowHapticsAndSystemSoundsDuringRecording(true)
       try session.setActive(true)
     } catch {
       return false
@@ -312,7 +315,7 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
     }
     guard gen == generation else {
       run.abort()
-      return "unavailable"
+      return "cancelled"
     }
     let started = startAudio { mic in
       if mic == format { return { input.yield(AnalyzerInput(buffer: $0)) } }

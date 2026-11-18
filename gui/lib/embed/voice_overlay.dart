@@ -44,6 +44,8 @@ class _VoiceOverlayState extends State<VoiceOverlay> with SingleTickerProviderSt
   double _fromSweep = 1;
   bool _reduced = false;
   List<double> _levels = List.filled(_bars, 0);
+  // The words as they were when the release began: the bubble keeps them while it fades (a cancel clears them).
+  String _said = '';
   (String, double, String)? _tailKey;
 
   VoiceHold get _hold => widget.hold;
@@ -89,6 +91,7 @@ class _VoiceOverlayState extends State<VoiceOverlay> with SingleTickerProviderSt
       _up = true;
       _releasing = false;
       _levels = List.filled(_bars, 0);
+      _said = '';
       _hold.showing = true;
       if (_reduced) {
         _c.value = 1;
@@ -244,7 +247,8 @@ class _VoiceOverlayState extends State<VoiceOverlay> with SingleTickerProviderSt
       VoicePick.edit => (t.float.first, t.text, t.text),
     };
     final style = TextStyle(color: ink, fontSize: 17, height: 1.35);
-    final said = widget.voice.text;
+    // Holding: the live words. Releasing: the last of them, kept (a native error has already cleared the text).
+    final said = _releasing ? _said : (_said = widget.voice.text);
     final words = said.isEmpty ? '正在听…' : _tailOf(said, style, width - 32, MediaQuery.textScalerOf(context));
     return CustomPaint(
       painter: _BubbleFrame(fill: fill, border: border, dashed: pick == VoicePick.edit, right: right, radius: t.r),
@@ -279,6 +283,7 @@ class _VoiceOverlayState extends State<VoiceOverlay> with SingleTickerProviderSt
                   levels: _levels,
                   color: ink,
                   still: pick == VoicePick.cancel,
+                  right: right,
                 ),
               ),
             ),
@@ -451,16 +456,16 @@ class VoiceRingPainter extends CustomPainter {
       old.bands != bands;
 }
 
-/// The 24 level bars in the bubble: the last 24 microphone levels, newest at the thumb's end. [still] (取消) lays
-/// them flat.
+/// The 24 level bars in the bubble: the last 24 microphone levels, newest at the thumb's end ([right]: the
+/// right hand, newest rightmost). [still] (取消) lays them flat.
 class VoiceBarsPainter extends CustomPainter {
-  VoiceBarsPainter({required this.level, required this.levels, required this.color, this.still = false});
+  VoiceBarsPainter({required this.level, required this.levels, required this.color, this.still = false, this.right = true});
 
   /// The microphone level now, 0–1.
   final double level;
   final List<double> levels;
   final Color color;
-  final bool still;
+  final bool still, right;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -470,14 +475,18 @@ class VoiceBarsPainter extends CustomPainter {
       // A fixed unevenness, so a steady voice still reads as a waveform.
       final shape = .55 + .45 * (math.sin(i * 1.7)).abs();
       final h = still ? 2.0 : math.max(2.0, size.height * (.12 + .88 * levels[i] * shape));
-      final x = i * 4.0;
+      final x = (right ? i : n - 1 - i) * 4.0;
       canvas.drawRect(Rect.fromLTWH(x, (size.height - h) / 2, 2, h), paint);
     }
   }
 
   @override
   bool shouldRepaint(VoiceBarsPainter old) =>
-      old.level != level || !identical(old.levels, levels) || old.color != color || old.still != still;
+      old.level != level ||
+      !identical(old.levels, levels) ||
+      old.color != color ||
+      old.still != still ||
+      old.right != right;
 }
 
 /// The bubble's shape: a rounded box with a small tail at the bottom on the thumb's side; filled, with an
