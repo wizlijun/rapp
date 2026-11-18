@@ -5,6 +5,7 @@ Temporarily opens test windows and switches to an empty workspace. Existing
 apps/data are untouched, and the original focused window is restored afterward.
 Usage: python3 scripts/test-linux-single-gui.py [path/to/rapp-gui]
 """
+import argparse
 import concurrent.futures
 import json
 import os
@@ -14,8 +15,14 @@ import sys
 import tempfile
 import time
 
-binary = Path(sys.argv[1] if len(sys.argv) > 1 else
-              "gui/build/linux/x64/release/bundle/rapp").resolve()
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("binary", nargs="?", default="gui/build/linux/x64/release/bundle/rapp")
+parser.add_argument("--stress-cycles", type=int, default=0,
+                    help="repeat close/reopen, resize and maximize on test windows only")
+parser.add_argument("--backend", choices=["wayland", "x11"], default="wayland")
+args = parser.parse_args()
+assert 0 <= args.stress_cycles <= 100
+binary = Path(args.binary).resolve()
 
 
 def hypr(query):
@@ -45,6 +52,11 @@ def until(predicate):
 
 
 previous = hypr("activewindow").get("address")
+monitors = hypr("monitors")
+assert monitors and all(m.get("dpmsStatus", True) for m in monitors), \
+    "Unlock and wake the desktop before running GUI focus tests"
+assert not any("LOCK" in m.get("solitaryBlockedBy", []) for m in monitors), \
+    "Unlock the desktop before running GUI focus tests"
 with tempfile.TemporaryDirectory(prefix="rapp-single-gui-") as tmp:
     work = Path(tmp)
     # No service activation directories: tests must not spawn a second portal,
@@ -59,8 +71,8 @@ with tempfile.TemporaryDirectory(prefix="rapp-single-gui-") as tmp:
     address = bus.stdout.readline().strip()
     env = dict(os.environ, DBUS_SESSION_BUS_ADDRESS=address,
                RAPP_HOME=str(work / "data"), XDG_CONFIG_HOME=str(work / "config"),
-               RAPP_BIN_DIR=str(Path("rust/target/release").resolve()),
-               GDK_BACKEND="wayland", GIO_USE_VFS="local", NO_AT_BRIDGE="1")
+               RAPP_BIN_DIR=str(binary.parent),
+               GDK_BACKEND=args.backend, GIO_USE_VFS="local", NO_AT_BRIDGE="1")
     processes = []
     with (work / "gui.log").open("w+") as log:
         def start(args=()):
@@ -69,6 +81,8 @@ with tempfile.TemporaryDirectory(prefix="rapp-single-gui-") as tmp:
             return process
 
         def launch(args=()):
+            if processes:
+                assert any(p.poll() is None for p in processes), "primary GUI exited before launch"
             result = subprocess.run([binary, *args], env=env, stdout=log, stderr=log, timeout=10)
             assert result.returncode == 0
 
@@ -76,11 +90,14 @@ with tempfile.TemporaryDirectory(prefix="rapp-single-gui-") as tmp:
             return [w for w in hypr("clients") if w["pid"] == process.pid]
 
         def window(process, title):
-            found = until(lambda: next((w for w in windows(process) if w["title"] == title), None))
+            find = lambda: next((w for w in windows(process) if w["title"] == title), None)
+            until(find)
             # window_manager maps the shell before Dart has installed its close
             # listener and tray. Allow the first frame/startup callbacks to run.
             time.sleep(2)
-            return found
+            # Startup fullscreen changes may remap the Wayland surface; use the
+            # current compositor address after those callbacks have completed.
+            return until(find)
 
         def hubs(process):
             children = Path(f"/proc/{process.pid}/task/{process.pid}/children").read_text().split()
@@ -94,6 +111,14 @@ with tempfile.TemporaryDirectory(prefix="rapp-single-gui-") as tmp:
             return found
 
         try:
+            # A fullscreen application on the user's workspace can intentionally
+            # refuse focus changes. Keep all test windows on an unused workspace.
+            used = {w["id"] for w in hypr("workspaces")}
+            empty = next(i for i in range(1, 11) if i not in used)
+            dispatch(f"hl.dsp.focus({{workspace={empty}}})")
+            # Automatic connection notifications must not create a process or
+            # engine that survives to map a monitor window on the desktop.
+            launch(["--cm", "--background"])
             with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
                 list(pool.map(lambda _: start(), range(4)))
             until(lambda: sum(p.poll() is None for p in processes) == 1)
@@ -105,6 +130,13 @@ with tempfile.TemporaryDirectory(prefix="rapp-single-gui-") as tmp:
             original_hubs = hubs(primary)
             print("PASS simultaneous launches create one GUI, main window and hub", flush=True)
 
+            focus(main["address"])
+            until(lambda: hypr("activewindow").get("address") == main["address"])
+            launch(["--cm", "--background"])
+            assert len(windows(primary)) == 1
+            assert hypr("activewindow").get("address") == main["address"]
+            print("PASS automatic connection manager stays hidden without stealing focus", flush=True)
+
             close(main["address"])
             until(lambda: not windows(primary))
             launch()
@@ -113,7 +145,7 @@ with tempfile.TemporaryDirectory(prefix="rapp-single-gui-") as tmp:
             print("PASS launch restores and focuses the hidden main window", flush=True)
 
             used = {w["id"] for w in hypr("workspaces")}
-            empty = next(i for i in range(90, 190) if i not in used)
+            empty = next(i for i in range(1, 11) if i not in used)
             dispatch(f"hl.dsp.focus({{workspace={empty}}})")
             launch()
             until(lambda: hypr("activewindow").get("address") == main["address"])
@@ -122,17 +154,53 @@ with tempfile.TemporaryDirectory(prefix="rapp-single-gui-") as tmp:
             launch(["--cm"])
             cm = window(primary, "rapp 连接管理")
             launch(["--cm"])
-            assert len(windows(primary)) == 2
+            assert len(windows(primary)) == 2, [(w["address"], w["title"]) for w in windows(primary)]
             launch()
             until(lambda: hypr("activewindow").get("address") == main["address"])
             close(cm["address"])
             until(lambda: len(windows(primary)) == 1 and windows(primary)[0]["title"] == "rapp")
             assert primary.poll() is None
             launch(["--cm"])
-            window(primary, "rapp 连接管理")
-            assert len(windows(primary)) == 2
+            cm = window(primary, "rapp 连接管理")
+            assert len(windows(primary)) == 2, [(w["address"], w["title"]) for w in windows(primary)]
             assert hubs(primary) == original_hubs
+            focus(cm["address"])
+            until(lambda: hypr("activewindow").get("address") == cm["address"])
+            launch(["--cm", "--background"])
+            assert hypr("activewindow").get("address") == cm["address"]
+            close(cm["address"])
+            until(lambda: len(windows(primary)) == 1 and windows(primary)[0]["title"] == "rapp")
+            assert primary.poll() is None
             print("PASS connection manager reuses the process and can close/reopen independently", flush=True)
+            if args.stress_cycles:
+                selector = json.dumps("address:" + main["address"])
+                dispatch(f'hl.dsp.window.float({{action="on",window={selector}}})')
+                for cycle in range(args.stress_cycles):
+                    launch(["--cm"])
+                    until(lambda: len(windows(primary)) == 2)
+                    cm = next(w for w in windows(primary) if w["title"] == "rapp 连接管理")
+                    selector = json.dumps("address:" + main["address"])
+                    for width, height in [(640, 480), (1000, 700), (800, 540)]:
+                        dispatch(f"hl.dsp.window.resize({{x={width},y={height},relative=false,window={selector}}})")
+                        time.sleep(.08)
+                    for action in ["set", "unset"]:
+                        dispatch(f'hl.dsp.window.fullscreen({{mode="maximized",action="{action}",window={selector}}})')
+                        time.sleep(.08)
+                    close(cm["address"])
+                    until(lambda: len(windows(primary)) == 1)
+                    close(main["address"])
+                    until(lambda: not windows(primary))
+                    launch(["--cm", "--background"])
+                    assert not windows(primary)
+                    launch()
+                    until(lambda: len(windows(primary)) == 1)
+                    assert primary.poll() is None, f"GUI exited in cycle {cycle}"
+                    main = windows(primary)[0]
+                    assert main["title"] == "rapp"
+                    assert hubs(primary) == original_hubs
+                time.sleep(1)
+                assert primary.poll() is None
+                print(f"PASS {args.stress_cycles} close/reopen, resize and maximize cycles", flush=True)
             primary.terminate()
             primary.wait(timeout=10)
 
@@ -146,6 +214,19 @@ with tempfile.TemporaryDirectory(prefix="rapp-single-gui-") as tmp:
             until(lambda: len(windows(primary)) == 1 and windows(primary)[0]["title"] == "rapp")
             assert primary.poll() is None
             print("PASS --cm-first startup still opens a unique main window", flush=True)
+            primary.terminate()
+            primary.wait(timeout=10)
+            primary = start(["--cm"])
+            cm = window(primary, "rapp 连接管理")
+            close(cm["address"])
+            assert primary.wait(timeout=10) == 0
+            print("PASS closing a standalone manager exits without a background engine", flush=True)
+            log.flush()
+            log.seek(0)
+            output = log.read()
+            for marker in ["eglMakeCurrent failed", "The implicit view cannot be removed"]:
+                assert marker not in output, marker
+            print("PASS no EGL make-current or implicit-view removal errors", flush=True)
         except BaseException:
             log.flush()
             log.seek(0)

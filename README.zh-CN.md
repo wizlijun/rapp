@@ -45,7 +45,7 @@ RAPP_ALLOW_ADHOC=1 ./scripts/package-macos.sh
 
 安装包输出到 `dist/`。本地构建允许 ad-hoc 签名；正式签名和公证选项见[打包脚本](scripts/package-macos.sh)。
 
-**Omarchy / Arch：** x86_64、Python 3.11+、GTK4 ≥ 4.12、GTK3、clang、cmake、ninja、pkgconf、libayatana-appindicator。
+**Omarchy / Arch：** x86_64、Python 3.11+、GTK4 ≥ 4.12、GTK3、clang、cmake、ninja、pkgconf、libayatana-appindicator，以及稳定版 Flutter ≥ 3.50.0。可用 `FLUTTER=/path/to/flutter/bin/flutter` 指定独立 SDK。旧 Linux 引擎存在 GTK/OpenGL 崩溃路径，上游 Flutter #192137 已修复；安装包通过 `FLUTTER-INFO.json` 和 `BUILD-INFO.json` 记录实际 SDK、引擎提交及引擎文件摘要。
 
 ```sh
 ./scripts/build-linux.sh

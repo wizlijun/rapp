@@ -549,10 +549,74 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [x] 协议 v14 `setView`、A 端按取景截局部、iOS 双指缩放（App 画面和文本终端）、底图、「还原」按钮已实现；规格 `docs/superpowers/specs/2026-11-18-rapp-pinch-zoom-design.md`，iPad 规格里的"不做捏合缩放"已改成指向它。
 - [ ] 真机验收 1–8（Duo 和 iPad 各一遍，条目见该规格 §8「真机验收」）：不放大时行为不变；捏合放大和平移、按住再拖选字；流量不超过不放大时；平移不露黑边；输入板和软键盘；断网重连后取景还在，且 App 和桌面会话（A 端）各自在 `setView` 之后都记了 `region:` 日志（第 6 项，Task 8 留下的检查）；「还原」按钮；文本终端的放大、平移、滚回历史、选字。
 
+## 按住说话（0.14.x，feat/voice-input）
+
+- [x] iOS 语音按钮：按住长出发送圆盘和「编辑」「取消」环带，气泡边说边出字，松手按所指的那段发送、放进草稿或取消；规格 `docs/superpowers/specs/2026-11-18-rapp-voice-input-design.md` §5.1、§5.2。
+- [ ] 真机验收（Duo 和 iPad 各一遍，条目见该规格 §8）：
+  - [ ] 1. 按住说中文：按钮长成圆盘、环带长出、气泡出字、音量条跟声音；松手圆盘缩回，A 收到这句并按设置补回车。
+  - [ ] 2. 输入板上翻历史能看到这句话。
+  - [ ] 3. 滑到「取消」段：亮起、轻震、「松手 取消」，松手 A 什么都没收到；滑回圆盘变回「松手 发送」。
+  - [ ] 3b. 滑到「编辑」段松手：输入板打开，草稿末尾是这句话，A 什么都没收到。
+  - [ ] 4. 按住不说话就松手：显示「没听清」，什么都没发。
+  - [ ] 5. 首次按下弹两个授权框；设置里关掉麦克风后再按，显示「需要麦克风和语音识别权限」和「去设置」。
+  - [ ] 6. 「输入」拖到左边整组吸左；杀掉 App 再开仍在左边；轻点「输入」仍能打开输入板。
+  - [ ] 7. 软键盘弹出时按钮组让开；文本终端按键行出现时，按钮组在按键行上方。
+  - [ ] 8. 断 Wi-Fi 让会话冻结，按住说话再松手：提示内容未发送，文字在输入板草稿里。
+  - [ ] 9. 深浅主题下三个按钮、圆盘、环带、气泡与舞台其它控件一致，没有发光和阴影。
+  - [ ] 10. 按钮组在左边时圆盘、环带、气泡全部镜像，「编辑」仍是靠屏幕边、偏上的那段。
+  - [ ] 11. 打开「减少动态效果」：按下和松手没有变形动画，直接出现和消失。
+  - [ ] 12. 按住时以及在圆盘和环带之间滑动时能感到轻震（录音中允许触感）。
+  - [ ] 13. iOS 26：后台放音乐时快速轻点语音按钮，音乐不被打断。
+  - [ ] 14. iOS 26：按下到圆盘出现的延迟；超过约 300 ms 再考虑按下即显示等待态。
+- [ ] 按住说话后续（终审留下的小项）：
+  - [ ] 语音发出后若 A 端失败，输入板关着时用户看不到，考虑给提示。
+  - [ ] 按住时连上 AirPods 会没声：监听 `AVAudioEngineConfigurationChange` 重接输入。
+  - [ ] 极快轻点时真正的「需要麦克风和语音识别权限」或「正在准备语音识别」被一并静默，可放行这两种回复。
+  - [ ] 松手等结果的 1 秒内再按被静默忽略，考虑轻提示。
+  - [ ] 提前松手时遮罩和气泡透明度跳变；松手后「输入」「还原」等动画结束才淡入。
+  - [ ] 语音按钮对 VoiceOver 没有动作；`voice_overlay.dart` 拆出气泡和音量条（现约 530 行）。
+
 ## 0.14.7 发布（2026-11-18，捏合缩放 + 协议 v14 + 剪贴板崩溃修复）
 
 - [x] 合入 `feat/pinch-zoom`（73f9a77，协议 v13→v14、`setView` type 41、A 端按取景截局部、「还原」按钮、文本终端同手势）与 `fix/pasteboard-main`（103ca0d，`NSPasteboard` 只在主线程访问，修 0.14.5 的 abort）。另一台设备的 Linux 0.14.6 改了同一个 `rust/host-linux/src/wire.rs`，git 自动合并未报冲突，已逐条确认空标识握手、type 41 分支与三个新测试都在；`tasks/todo.md` 冲突保留两段。
 - [x] 合并后全套门禁：analyze 干净、Flutter 2150 通过 / 23 跳过、Swift 493 通过 / 1 跳过 / 0 失败、Rust 1171 通过（唯一失败为 `pty::local` 绑真端口的已知 load flake，隔离 3/3 通过）、clippy `-D warnings` 退出 0、`scripts/check.sh` 退出 0。
 - [x] [v0.14.7 Release](https://github.com/wizlijun/rapp/releases/tag/v0.14.7) 已公开并设为 Latest，pkg / zip / latest.json 三个资产的 GitHub 大小与 sha256 均与本地一致；网站备用快照刷新至 44 个 release（macOS → 0.14.7，Linux → 0.14.6）。
-- [ ] **Linux 侧仍是协议 v13**：v14 客户端暂时连不上 Linux 桌面会话，需要 Linux 侧出 v14 的包。
+- [x] Linux 协议 v14 安装包已随 0.14.8 发布，可与 0.14.7+ 客户端连接。
 - [ ] 网站未部署：`npx --yes wrangler@4.135.0 deploy --config website/wrangler.jsonc` 仍需 `CLOUDFLARE_API_TOKEN` 或交互登录（累计 14 版快照已提交未部署）。
+
+## Linux host 卡顿与连接监控后台运行（2026-11-18，本机验证）
+
+- [x] 用户反馈本地桌面和远程端同时卡顿。Wayland 采集改为复用 RAM-backed shm buffer，遵守 compositor release 后再复用；融合缩放与像素转换，避免逐帧完整 4K 中间图像和重复页分配。
+- [x] 采集/编码移入独立线程，输入与 ping 不再等待采集；最多一个任务和一帧确认在途，按工作耗时保留桌面处理时间，静态画面退避，实际输入唤醒。接管、模式/密度切换使用独立 epoch 重建全帧参考。
+- [x] Linux service 自动启动连接管理时传入 `--cm --background`；原生入口不创建窗口或 Flutter engine，也不抢焦点；显式 `rapp --cm` 仍可查看连接。
+- [x] host 10 项单元测试与 Clippy 通过；隔离 Xvfb、headless labwc 和本机 Omarchy 通过原生串流、输入、Unicode、接管、画质切换、踢出和 EOF。首次与编译并行时 labwc Unicode 事件检查失败，停止编译后原样复验通过，未弱化断言。四组件联调用不含 host 的独立二进制目录验证；完整 bundle 通过 hub → QUIC service → host 桌面串流。
+- [x] 新增只读 `scripts/benchmark-linux-host.py`。本机 3840×2400 / scale 3，15 fps、density 2，各采样 10 秒：host CPU 55.9% → 23.1%，Hyprland CPU 26.7% → 7.3%，ping P95 108.82 ms → 4.02 ms。画面内容可能变化，ping 衡量控制通路，不等于端到端画面延迟或用户实机验收。日志 `.build-logs/host-perf-{before,after}-nodelay.json`。
+- [x] 原生窗口回归发现并修复手动 CM 关闭/重开时的 SIGSEGV：栈位于 GDK 绘制末尾，日志出现 EGL context 失效；共享进程内改为隐藏/复用 CM，独立 CM 关闭则退出。实际 Omarchy 窗口回归覆盖自动后台不抢焦点、显式 CM、反复关闭/重开、CM-first 和独立退出，全部通过；CM 定时器 5 项测试和 Flutter analyze 通过。
+- [x] 本机验证包 `0.14.6-2` 从干净 worktree 构建，源码 `b46086e8a4b95c94352aaf0738974fa4ad4f7fb6`；Arch/便携包 33 文件摘要一致、13 个 ELF 依赖解析通过。解包后完整串流与原生 GUI 回归通过；系统认证后安装成功，33 个已安装文件与验证包一致。服务已重启，IPC 确认桌面能力；原先主 GUI 未运行，因此未主动弹出主窗口。产物在 `dist/linux-0146-local-responsive/`。
+- [x] 用户随后提供崩溃交接报告，并于本轮明确要求：解决后提交代码、发布新版本并安装；按新授权推进最终回归和发布。
+
+## Linux GUI 崩溃修复与 0.14.8（2026-11-18）
+
+- [x] 读取 `/home/bruce/Work/rapp-crash-2026-11-18.md`，对照 core 228221 和实际引擎提交：GTK 绘制末尾空 GL context 的证据成立。已安装引擎 `89c39edf...` 的 `fl_view_renderer_draw` 仍清空当前 context；Flutter 3.50.0 的源码包含上游 #192137 的保留 context 修复。独立 SDK 路径 `~/development/flutter-rapp-3.50.0`，原 SDK 保持原状。
+- [x] 加强压力测试后，0.14.6-2 于 PID 237036 再次崩溃：栈为 `wl_proxy_get_version → GDK make-current → gdk_cairo_draw_from_gl`，与先前空 context 栈不同。主窗口隐藏改为 GTK idle 回调，避免 Flutter 同步等帧期间处理平台消息时直接取消 Wayland 窗口映射。CM 的隐藏/复用和自动后台入口继续保留。
+- [x] Linux 构建要求稳定版 Flutter >= 3.50.0，拒绝旧版或预发布引擎；包内增加 `FLUTTER-INFO.json`，BUILD-INFO 记录实际引擎摘要。构建路径与版本拒绝夹具通过。
+- [x] 拉取并整合上游 main `5b7bf7a` / 0.14.7（含发布快照记录）（含 macOS NSPasteboard 主线程修复与协议 v14）。本次版本计划 0.14.8；对端需支持 v14，旧 v13 client 需更新。Linux 继续整桌面采集，兼容 v14 setView 消息但不声称实现局部截取。
+- [x] 合并后 host/client-core 78 项测试通过，host Clippy 通过；隔离 Xvfb/labwc 原生输入与串流通过。首次当前桌面采集超时，随后同测试原样复验通过，安装版只读串流采样亦通过；未放宽断言。
+- [x] Flutter 3.50.0 全量回归 2158 项通过、15 项既有跳过；analyze 无 error/warning，113 项 Flutter material 导入弃用 info，`--no-fatal-infos` 通过。Linux GUI 和全部 7 个 Rust worker 构建成功。
+- [x] 真实桌面解锁后，最终解包 GUI 通过 20 轮关闭/重开、缩放、最大化及主窗口/CM 独立生命周期回归；自动 CM 不映射窗口、不抢焦点，无 EGL make-current 或 implicit-view removal 错误。最终包也通过本机 Omarchy 的 hub → QUIC service → host 完整串流。日志 `.build-logs/gui-0148-final-stress.log`、`.build-logs/bundle-0148-final-current.log`。
+- [x] 干净 worktree 从 `a7c482d` 构建 0.14.8-1；Arch/便携包 34 文件摘要一致、13 个 ELF 依赖解析通过，Flutter 3.50.0 / engine `371f77202a73e8dff57a8b3bff75bca55c090aee` 与实际引擎 SHA256 匹配。解包后隔离 headless Wayland 完整 hub → QUIC service → host 桌面串流通过；四组件终端/端口/重启联调通过。
+- [x] [v0.14.8 Release](https://github.com/wizlijun/rapp/releases/tag/v0.14.8) 已公开，三个附件大小/SHA256 与本地一致；latest=false 保留 macOS 0.14.7 的 latest.json 及原附件摘要。刷新网站备用下载快照，未部署网站。
+- [x] 本机已安装 `rapp-omarchy 0.14.8-1`；系统认证完成后重启 `rapp-service.service`，确认运行 `/opt/rapp/rapp-service`，34 个安装文件摘要与发布包一致，IPC 桌面/图形/终端/端口能力正常。
+
+## iOS 断开后连不上中继、重连全失败（2026-11-18，用户报告，diag/ios-net-errors）
+现象：断开后显示「连不上中继，通了自动重连」，自动和手动重连都失败，结束会话重启 app 才好。Duo hub.log：11-18 06:41、06:53、07:20 三次 `rebind`（net_changed 换新 UDP socket）之后，局域网和中继的每次拨号都 `timed out`，直到 `hub_start`；重启后同一网络立刻全通。日志里没有 `endpoint stopping`，所以 quinn 的 endpoint 驱动还活着，是新 socket 发不出或收不到。quinn-udp 吞掉发送错误，hub 看不到原因；之后只有再次回前台或本机 IPv4 变了才会再换 socket，手动「重连」不换。用户选「先只加诊断，确认原因再修」。
+- [x] 诊断：quinn/quinn-udp 的 warn/error（`sendmsg error`、驱动 `I/O error`）以 `{"ev":"lib"}` 写进 hub.log；`relay dial:` 失败从 debug 提到 warn。
+- [x] Duo 又坏了一次（11-18 07:54）：`lib` 行是 `sendmsg error: Os { code: 32, kind: BrokenPipe }`。iOS 收回了后台 app 的 socket，07:54:57 回前台换了新 socket，之后照样全部 `timed out`，新 socket 上没有任何发送错误。
+- [x] 根因（fix/quinn-recv-spin）：quinn 的 tokio socket 在 `poll_recv` 里用 `if let Ok(..) = try_io(..)` 吞掉收包错误，然后立刻重试。被收回的 socket 一直可读，recvmsg 每次都失败，endpoint 驱动就在它上面死循环（rebind 之后它是 `prev_socket`，每轮先收它），再也读不到新 socket，所以只有重启 app 才好。修法：`rapp_net::udp::Runtime` 换上自己的 socket，收包失败后清掉可读状态，等系统下次报可读再试，并以 `recvmsg error` 写进 hub.log。测试 `net/tests/recv_error.rs` 用一个有连接排队的 TCP 监听 socket 模拟（一直可读、recvmsg 一直 ENOTCONN），先红后绿。
+- [ ] 实机：Duo 切后台几分钟再回来，不用重启 app 就能自动连上；hub.log 里有 `recvmsg error` 行也没关系。
+- [ ] 以后可以做：rapp-service（`service/src/lib.rs`）和 relay 仍用 quinn 自带的 socket。macOS/Linux 上没见过这种情况，暂时不换。
+- [x] ~~另一个风险~~：quinn 的 tokio socket 根本不会把收包错误交给驱动（见上面的根因），驱动也就不会因此停掉；之前的实验走的是别的路径。原文：收包出错会让 quinn 的 endpoint 驱动永久停掉，`Endpoint::rebind` 救不回来，之后拨号立刻报 `endpoint stopping`。真要防只能重建 endpoint。
+## 重连时 A 报「first message must be hello」（2026-11-18，用户报告，fix/hello-first）
+现象：Duo 回前台换端口（rebind）后自动重连，局域网会话一连上就断（hub.log `opened` → `closed: connection closed`，0 秒），要点很多次才进得去；A 端报 `first message must be hello, fetch or put`。原因：`RappSession.Connection` 等 TCP `.ready` 才发 hello，而在此之前调用的 `send`（重连时马上补发的 `set_view`/`set_stream` 等）先进了 NWConnection 的发送队列，排到 hello 前面。0.14.7 捏合缩放加了 `set_view` 之后才常见。
+- [x] hello 在 `start()` 里随连接启动立刻排队，之后的消息都在它后面；测试 `ConnectionHelloFirstTests`（先红后绿）。
+- [ ] 实机：Duo 放大一个窗口后切到后台再回来，重连一次就进得去，A 不再报这个错。

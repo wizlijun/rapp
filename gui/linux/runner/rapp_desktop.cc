@@ -234,12 +234,27 @@ void method(FlMethodChannel *, FlMethodCall *call, gpointer data) {
   auto *d = static_cast<Desktop *>(data);
   const std::string name = fl_method_call_get_name(call);
   FlValue *args = fl_method_call_get_args(call);
-  if (name == "close_window") {
-    // window_manager's destroy sends another delete-event, which Flutter may
-    // intercept. Explicitly dispose this engine/window without exiting the
-    // shared process. Respond before destroying the method channel's owner.
+  if (name == "hide_window") {
+    // Platform messages can run inside Flutter's synchronous frame wait, nested
+    // within a GTK draw. Unmapping here would destroy the Wayland surface that
+    // GDK is still drawing into. Wait for the outer GTK loop instead.
     g_idle_add_full(G_PRIORITY_DEFAULT_IDLE, +[](gpointer window) -> gboolean {
-      gtk_widget_destroy(GTK_WIDGET(window));
+      gtk_widget_hide(GTK_WIDGET(window));
+      return G_SOURCE_REMOVE;
+    }, g_object_ref(d->main), g_object_unref);
+    return success(call);
+  }
+  if (name == "close_window") {
+    // Reuse a hidden connection manager while the main GUI is alive. Destroying
+    // and recreating a Flutter implicit view in the shared process can leave
+    // GDK drawing with an invalid EGL context. A CM-only process can quit.
+    g_idle_add_full(G_PRIORITY_DEFAULT_IDLE, +[](gpointer window) -> gboolean {
+      auto *app = gtk_window_get_application(GTK_WINDOW(window));
+      if (app && g_list_length(gtk_application_get_windows(app)) == 1) {
+        g_application_quit(G_APPLICATION(app));
+      } else {
+        gtk_widget_hide(GTK_WIDGET(window));
+      }
       return G_SOURCE_REMOVE;
     }, g_object_ref(d->main), g_object_unref);
     return success(call);

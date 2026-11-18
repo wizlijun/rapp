@@ -1408,7 +1408,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-cli"
-version = "0.14.7"
+version = "0.14.10"
 dependencies = [
  "anyhow",
  "rapp-net",
@@ -1418,7 +1418,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-client-core"
-version = "0.14.7"
+version = "0.14.10"
 dependencies = [
  "anyhow",
  "flate2",
@@ -1429,7 +1429,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-client-gtk"
-version = "0.14.7"
+version = "0.14.10"
 dependencies = [
  "anyhow",
  "gtk4",
@@ -1440,7 +1440,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-conn"
-version = "0.14.7"
+version = "0.14.10"
 dependencies = [
  "anyhow",
  "data-encoding",
@@ -1459,7 +1459,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-host-linux"
-version = "0.14.7"
+version = "0.14.10"
 dependencies = [
  "anyhow",
  "flate2",
@@ -1476,7 +1476,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-hub"
-version = "0.14.7"
+version = "0.14.10"
 dependencies = [
  "anyhow",
  "quinn",
@@ -1489,11 +1489,12 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "rapp-hub-ffi"
-version = "0.14.7"
+version = "0.14.10"
 dependencies = [
  "rapp-hub",
  "rapp-net",
@@ -1503,11 +1504,12 @@ dependencies = [
 
 [[package]]
 name = "rapp-net"
-version = "0.14.7"
+version = "0.14.10"
 dependencies = [
  "anyhow",
  "if-addrs",
  "libc",
+ "log",
  "quinn",
  "rand 0.9.5",
  "rcgen",
@@ -1516,11 +1518,12 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
 name = "rapp-relay"
-version = "0.14.7"
+version = "0.14.10"
 dependencies = [
  "anyhow",
  "data-encoding",
@@ -1537,7 +1540,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-service"
-version = "0.14.7"
+version = "0.14.10"
 dependencies = [
  "anyhow",
  "libc",
@@ -1557,7 +1560,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-term"
-version = "0.14.7"
+version = "0.14.10"
 dependencies = [
  "alacritty_terminal",
  "anyhow",
@@ -1572,7 +1575,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-testkit"
-version = "0.14.7"
+version = "0.14.10"
 dependencies = [
  "anyhow",
  "quinn",
@@ -1594,7 +1597,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-update"
-version = "0.14.7"
+version = "0.14.10"
 dependencies = [
  "anyhow",
  "rapp-net",
@@ -1606,7 +1609,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-wire"
-version = "0.14.7"
+version = "0.14.10"
 dependencies = [
  "anyhow",
  "data-encoding",
@@ -2190,6 +2193,7 @@ version = "0.1.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63e71662fa4b2a2c3a26f570f037eb95bb1f85397f3cd8076caed2f026a6d100"
 dependencies = [
+ "log",
  "pin-project-lite",
  "tracing-core",
 ]

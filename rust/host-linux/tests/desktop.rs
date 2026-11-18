@@ -139,6 +139,14 @@ fn native_desktop_stream_auth_takeover_ping_kick_and_eof() {
     assert!(
         matches!(until(&mut a, |m| matches!(m, Incoming::Error(_))), Incoming::Error(e) if e.contains("taken over"))
     );
+    // A capture already in flight for A must not become B's decoder reference.
+    let first = until(&mut b, |m| matches!(m, Incoming::Frame { .. }));
+    assert!(matches!(first, Incoming::Frame { flags, .. } if flags & 1 != 0));
+    b.write_all(&protocol::frame_ack(0)).unwrap();
+    b.write_all(&protocol::stream(0, 5, 0.5, true, false))
+        .unwrap();
+    let changed = until(&mut b, |m| matches!(m, Incoming::Frame { mode: 0, .. }));
+    assert!(matches!(changed, Incoming::Frame { flags, .. } if flags & 1 != 0));
     child
         .0
         .stdin

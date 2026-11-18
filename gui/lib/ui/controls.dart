@@ -11,7 +11,7 @@ RelativeRect menuAt(BuildContext context, Offset p) {
   return RelativeRect.fromLTRB(p.dx, p.dy, overlay.size.width - p.dx, overlay.size.height - p.dy);
 }
 
-enum _Kind { primary, secondary, accent, quiet }
+enum _Kind { primary, secondary, accent, quiet, round }
 
 /// Button per design language section 8. Built on Material buttons, with a
 /// 0.97 press scale (80 ms) unless reduced motion is on.
@@ -60,6 +60,19 @@ class RappButton extends StatefulWidget {
        onPicture = false,
        oneLine = false,
        size = 48;
+
+  /// A flat circle of [size] on the remote picture, icon only: the stage's edge buttons (iOS). No shadow.
+  const RappButton.round({
+    super.key,
+    required this.label,
+    required IconData this.icon,
+    required this.size,
+    this.onPressed,
+  }) : _kind = _Kind.round,
+       semanticLabel = null,
+       focusNode = null,
+       onPicture = true,
+       oneLine = false;
 
   final String label;
   final VoidCallback? onPressed;
@@ -130,6 +143,21 @@ class _RappButtonState extends State<RappButton> {
           tapTargetSize: tap,
           padding: pad,
           shape: shape,
+        ),
+        child: child,
+      ),
+      _Kind.round => OutlinedButton(
+        onPressed: widget.onPressed,
+        style: OutlinedButton.styleFrom(
+          backgroundColor: Color.alphaBlend(t.raise.first, t.float.first),
+          foregroundColor: t.text,
+          elevation: 0,
+          shadowColor: Colors.transparent,
+          side: BorderSide(color: t.line),
+          fixedSize: Size.square(widget.size),
+          minimumSize: Size.square(widget.size),
+          padding: EdgeInsets.zero,
+          shape: CircleBorder(side: BorderSide(color: t.line)),
         ),
         child: child,
       ),

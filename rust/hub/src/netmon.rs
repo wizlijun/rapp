@@ -226,7 +226,8 @@ impl Monitor {
             },
             Ok(Ok(None)) => {}
             Ok(Err(e)) => {
-                hub.log.msg(Lvl::Debug, format_args!("relay dial: {e:#}"));
+                // Warn, not debug: a redial failing again and again is what a dead socket looks like.
+                hub.log.msg(Lvl::Warn, format_args!("relay dial: {e:#}"));
                 self.failed(now);
             }
             Err(_) => self.failed(now),

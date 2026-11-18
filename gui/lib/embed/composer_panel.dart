@@ -2,6 +2,7 @@
 // start, growing upward to half the stage. From the top: the outgoing items, the hint line,
 // the box with [editor] [＋] [发送]. The editor owns the text; the model copies it out
 // at send, session switch, 1 s idle and collapse (spec §5). The draft is the session's (R18).
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -22,6 +23,9 @@ import 'flutter_editor.dart';
 import 'native_editor.dart';
 import 'remote_session.dart';
 import 'session_port.dart';
+import 'stage_buttons.dart';
+import 'voice_button.dart';
+import 'voice_overlay.dart';
 
 /// W1: 720 wide, or the stage less 16 when the stage is narrower than 736.
 /// Zoomed ([scale] above 1) it is 720 × [scale], never wider than the stage less 16.
@@ -549,7 +553,7 @@ List<Widget> composerLayer(
     bool keyRow = false,
     double keyboard = 0,
     ComposerEditor Function()? editor}) {
-  final both = Listenable.merge([session, session.composer, state.composerZoom]);
+  final both = Listenable.merge([session, session.composer, state.composerZoom, state.stageSide]);
   final term = port is TermSessionPort ? port : null;
   final keys = keyRow && term != null;
   bool open() => session.composer.open && session.composerAllowed;
@@ -628,6 +632,77 @@ List<Widget> composerLayer(
               : const SizedBox.shrink(),
         ),
       ),
+    if (defaultTargetPlatform == TargetPlatform.iOS)
+      // The round buttons in one edge stack; the key row, if on, sits below it. Hold to talk draws over the stage.
+      Positioned.fill(
+        child: _IosStage(
+          key: ValueKey(session.sid),
+          state: state,
+          session: session,
+          port: port,
+          buttons: (hold) => Padding(
+            padding: EdgeInsets.only(bottom: (keys ? keyRowBottom + keyRowKeySize.height + 8 - stageButtonsEdge : 0) + keyboard),
+            child: ListenableBuilder(
+              listenable: Listenable.merge([both, session.zooms, ?hold]),
+              builder: (context, _) {
+                final transfer = session.transferStatus;
+                final button = session.composerAllowed;
+                final zoomed = session.currentZoomed && !session.composer.open;
+                // The same rule as the row below: an open panel hides it; a disallowed one is hidden, so the strip shows here.
+                if ((session.composer.open && button) || (transfer == null && !button && !zoomed)) return const SizedBox.shrink();
+                final t = RappTokens.of(context);
+                return Listener(
+                  onPointerDown: (_) => state.holdForPanel(session),
+                  child: StageButtons(
+                    side: state.stageSide.value,
+                    onSide: state.setStageSide,
+                    // Shown exactly when 输入 is (an open panel returned above).
+                    voice: hold != null && button ? voiceButton(hold) : null,
+                    hidden: hold?.active ?? false,
+                    input: button
+                        ? RappButton.round(
+                            key: const Key('composer-open'),
+                            label: '输入',
+                            icon: Icons.keyboard_outlined,
+                            size: 56,
+                            onPressed: () => session.composer.open = true,
+                          )
+                        : null,
+                    restore: zoomed
+                        ? RappButton.round(
+                            key: const Key('zoom-reset'),
+                            label: '还原',
+                            icon: Icons.zoom_in_map,
+                            size: 48,
+                            onPressed: session.restoreCurrent,
+                          )
+                        : null,
+                    beside: [
+                      if (hold?.hint != null) voiceHint(hold!),
+                      if (transfer != null)
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            DecoratedBox(
+                              decoration: t.floatBox(),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                child: Text(transfer, style: TextStyle(color: t.muted)),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            RappButton.secondary(label: '取消', onPicture: true, onPressed: () => port.cancelTransfer(session.sid)),
+                          ],
+                        ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      )
+    else
     Positioned(
       right: keys ? keyRowInset + keyRowGroupWidth + 8 : 12,
       bottom: (keys ? keyRowBottom : 12) + keyboard,
@@ -685,4 +760,59 @@ List<Widget> composerLayer(
       ),
     ),
   ];
+}
+
+/// The iOS stage's button stack plus hold to talk: owns the session's [VoiceHold] (none without
+/// `state.voice`) and lays [VoiceOverlay] over the whole stage.
+class _IosStage extends StatefulWidget {
+  const _IosStage({super.key, required this.state, required this.session, required this.port, required this.buttons});
+
+  final MainState state;
+  final RemoteSession session;
+  final SessionPort port;
+  final Widget Function(VoiceHold? hold) buttons;
+
+  @override
+  State<_IosStage> createState() => _IosStageState();
+}
+
+class _IosStageState extends State<_IosStage> {
+  VoiceHold? _hold;
+
+  @override
+  void initState() {
+    super.initState();
+    final voice = widget.state.voice;
+    if (voice != null) {
+      _hold = VoiceHold(
+        voice: voice,
+        // The widget, not the first one: a rebuild may bring a new port for the same session.
+        send: (text) => sendVoice(state: widget.state, session: widget.session, port: widget.port, text: text),
+        edit: (text) {
+          final c = widget.session.composer;
+          unawaited(c.keep(text));
+          c.open = true;
+        },
+        composer: () => widget.session.composer,
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _hold?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hold = _hold;
+    final voice = widget.state.voice;
+    return Stack(
+      children: [
+        Positioned.fill(child: widget.buttons(hold)),
+        if (hold != null && voice != null) Positioned.fill(child: VoiceOverlay(hold: hold, voice: voice)),
+      ],
+    );
+  }
 }

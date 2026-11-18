@@ -43,12 +43,14 @@ cp gui/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_256.png "$stage/
 cp scripts/linux/rapp.desktop "$stage/rapp.desktop"
 cp LICENSE "$stage/LICENSE"
 python3 - "$stage" <<'PY'
-import json, platform, subprocess, sys
+import hashlib, json, platform, subprocess, sys
 from pathlib import Path
 stage=Path(sys.argv[1])
 commit=subprocess.check_output(['git','rev-parse','HEAD'],text=True).strip()
 info={'source_commit':commit,'source_url':f'https://github.com/wizlijun/rapp/tree/{commit}',
       'platform':'Omarchy / Arch Linux x86_64','architecture':platform.machine(),
+      'flutter':json.loads((stage/'FLUTTER-INFO.json').read_text()),
+      'flutter_engine_sha256':hashlib.sha256((stage/'lib/libflutter_linux_gtk.so').read_bytes()).hexdigest(),
       'rust':subprocess.check_output(['rustc','--version'],text=True).strip(),
       'runtime_packages':subprocess.check_output(['pacman','-Q','glibc','gtk3','gtk4','libayatana-appindicator'],text=True).splitlines()}
 (stage/'BUILD-INFO.json').write_text(json.dumps(info,ensure_ascii=False,indent=2)+'\n')

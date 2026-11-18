@@ -473,4 +473,14 @@ void main() {
       expect(t.widget<PopupMenuItem<int>>(find.widgetWithText(PopupMenuItem<int>, '说明')).value, isNull);
     });
   });
+  testWidgets('round: a minimal circle of the given size', (t) async {
+    await t.pumpWidget(wrap(RappButton.round(key: const Key('r'), label: '输入', icon: Icons.keyboard_outlined, size: 64, onPressed: () {})));
+    expect(t.getSize(find.byKey(const Key('r'))), const Size(64, 64));
+    final tokens = RappTokens.of(t.element(find.byKey(const Key('r'))));
+    final b = t.widget<OutlinedButton>(find.byType(OutlinedButton));
+    final shape = b.style!.shape!.resolve({}) as CircleBorder;
+    expect(shape.side, BorderSide(color: tokens.line));
+    expect(b.style!.elevation!.resolve({}), 0);
+    expect(find.bySemanticsLabel('输入'), findsOneWidget);
+  });
 }

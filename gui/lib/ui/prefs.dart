@@ -6,6 +6,9 @@ import 'tokens.dart';
 /// Which layer the window opens on (`first` in gui.json): the devices or the projects.
 enum FirstLayer { device, project }
 
+/// Which screen edge the stage's button stack (iOS) stands on.
+enum StageSide { left, right }
+
 /// Size factor of each writing-panel zoom step (⌘= / ⌘- / ⌘0): the default, then four larger.
 const composerZoomScales = [1.0, 1.15, 1.3, 1.5, 1.75];
 
@@ -25,6 +28,7 @@ class UiPrefs {
     this.keepAwake = true,
     this.first = FirstLayer.device,
     this.composerZoom = 0,
+    this.stageButtonsSide = StageSide.right,
     this.settingsFolded = false,
     Map<String, String>? termOpen,
     Map<String, String>? termApp,
@@ -57,6 +61,9 @@ class UiPrefs {
 
   /// 输入板缩放档 (`composer_zoom`): 0 is the default size, up to [composerZoomMax]. Missing or bad means 0.
   int composerZoom;
+
+  /// 按钮排的边 (`stage_buttons_side`, iOS): the edge the stage's button stack stands on. Missing or bad means right.
+  StageSide stageButtonsSide;
 
   /// 全局设置折起 (`settings_folded`): the side panel's settings are folded away. Missing or bad means open.
   bool settingsFolded;
@@ -94,6 +101,7 @@ class UiPrefs {
       final ka = j['keep_awake'];
       final fl = j['first'];
       final cz = j['composer_zoom'];
+      final sb = j['stage_buttons_side'];
       final sf = j['settings_folded'];
       final to = j['term_open'];
       final ta = j['term_app'];
@@ -110,6 +118,7 @@ class UiPrefs {
         termFit: tf is bool ? tf : true,
         keepAwake: ka is bool ? ka : true,
         composerZoom: cz is int ? cz.clamp(0, composerZoomMax) : 0,
+        stageButtonsSide: sb == 'left' ? StageSide.left : StageSide.right,
         settingsFolded: sf is bool ? sf : false,
         first: FirstLayer.values.firstWhere(
           (v) => v.name == fl,
@@ -146,6 +155,7 @@ class UiPrefs {
         'keep_awake': keepAwake,
         'first': first.name,
         'composer_zoom': composerZoom,
+        'stage_buttons_side': stageButtonsSide.name,
         'settings_folded': settingsFolded,
         'term_open': termOpen,
         'term_app': termApp,

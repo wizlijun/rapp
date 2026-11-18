@@ -15,6 +15,9 @@ serde_json.workspace = true
 rand.workspace = true
 if-addrs = "0.15.0"
 libc = "0.2"
+log = { version = "0.4", features = ["std"] }
+# quinn reports what it swallows only through `tracing`; `log` makes those reach `forward_lib_warnings`.
+tracing = { version = "0.1", default-features = false, features = ["std", "log"] }
 
 [dev-dependencies]
 tempfile.workspace = true
