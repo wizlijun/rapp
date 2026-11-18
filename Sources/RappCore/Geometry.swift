@@ -173,6 +173,19 @@ public func captureDensity(zoom: CGFloat, backingScale: CGFloat, choice: Density
     return min(8, max(0.01, d))
 }
 
+/// Capture density while B shows only `range` (A points) of a `content`-sized window at `zoom`:
+/// the density for `zoom`, but never more than keeps the partial frame within the pixel
+/// budget of the whole window at zoom 1 (pixels scale with area x density squared).
+public func viewDensity(zoom: CGFloat, backingScale: CGFloat, choice: DensityChoice,
+                        content: CGSize, range: CGSize) -> Float {
+    let d1 = captureDensity(zoom: 1, backingScale: backingScale, choice: choice)
+    let contentArea = Float(content.width * content.height), rangeArea = Float(range.width * range.height)
+    guard rangeArea > 0, contentArea > 0 else { return d1 }
+    let d = min(captureDensity(zoom: zoom, backingScale: backingScale, choice: choice),
+                d1 * (contentArea / rangeArea).squareRoot())
+    return min(8, max(0.01, d))
+}
+
 /// A one-click combination of mode, density and frame rate.
 public struct StreamPreset: Sendable {
     public let mode: Mode

@@ -118,17 +118,43 @@ public func captureRegion(windows: [WindowInfo], display: CGSize) -> CanvasRect?
         maxX = max(maxX, w.rect.x + w.rect.w)
         maxY = max(maxY, w.rect.y + w.rect.h)
     }
+    return clippedRoundedOut(minX: minX, minY: minY, maxX: maxX, maxY: maxY, display: display)
+}
+
+/// Clips the box to the display, rounds it out to multiples of 8 points and clips again.
+/// Nil when nothing of it is on the display.
+private func clippedRoundedOut(minX: Float, minY: Float, maxX: Float, maxY: Float, display: CGSize) -> CanvasRect? {
     let width = Float(display.width), height = Float(display.height)
-    minX = max(minX, 0)
-    minY = max(minY, 0)
-    maxX = min(maxX, width)
-    maxY = min(maxY, height)
+    var minX = max(minX, 0), minY = max(minY, 0)
+    var maxX = min(maxX, width), maxY = min(maxY, height)
     guard maxX > minX, maxY > minY else { return nil }
     minX = (minX / 8).rounded(.down) * 8
     minY = (minY / 8).rounded(.down) * 8
     maxX = min((maxX / 8).rounded(.up) * 8, width)
     maxY = min((maxY / 8).rounded(.up) * 8, height)
     return CanvasRect(x: minX, y: minY, w: maxX - minX, h: maxY - minY)
+}
+
+/// What A captures while B shows only `view.rect` (window content coordinates) of window
+/// `view.window`: that rectangle on the canvas plus the frames of the window's popups,
+/// inside the usual capture region, rounded out to 8 points. The whole capture region when
+/// there is no view, the window is unknown, or the view is wholly off the display.
+public func viewRegion(view: (window: UInt32, rect: CanvasRect)?, windows: [WindowInfo], display: CGSize) -> CanvasRect? {
+    let base = captureRegion(windows: windows, display: display)
+    guard let view, let base, let win = windows.first(where: { $0.id == view.window }) else { return base }
+    var minX = view.rect.x + win.rect.x, minY = view.rect.y + win.rect.y + win.titleBar
+    var maxX = minX + view.rect.w, maxY = minY + view.rect.h
+    for child in windows where child.parent == view.window && child.id != view.window {
+        minX = min(minX, child.rect.x)
+        minY = min(minY, child.rect.y)
+        maxX = max(maxX, child.rect.x + child.rect.w)
+        maxY = max(maxY, child.rect.y + child.rect.h)
+    }
+    minX = max(minX, base.x)
+    minY = max(minY, base.y)
+    maxX = min(maxX, base.x + base.w)
+    maxY = min(maxY, base.y + base.h)
+    return clippedRoundedOut(minX: minX, minY: minY, maxX: maxX, maxY: maxY, display: display) ?? base
 }
 
 /// Where a window's content (below its A title row) is in a frame of
