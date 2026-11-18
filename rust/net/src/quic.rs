@@ -148,11 +148,17 @@ pub fn client_config(alpn: &[u8]) -> Result<ClientConfig> {
 
 /// An endpoint that accepts connections with `alpn` and can also dial out.
 pub fn server_endpoint(addr: SocketAddr, alpn: &[u8]) -> Result<Endpoint> {
-    Endpoint::server(server_config(alpn)?, addr).with_context(|| format!("bind udp {addr}"))
+    endpoint(Some(server_config(alpn)?), addr)
 }
 
 pub fn client_endpoint(addr: SocketAddr) -> Result<Endpoint> {
-    Endpoint::client(addr).with_context(|| format!("bind udp {addr}"))
+    endpoint(None, addr)
+}
+
+/// An endpoint on `addr` over `crate::udp`'s socket.
+fn endpoint(server: Option<ServerConfig>, addr: SocketAddr) -> Result<Endpoint> {
+    let sock = std::net::UdpSocket::bind(addr).with_context(|| format!("bind udp {addr}"))?;
+    Endpoint::new(quinn::EndpointConfig::default(), server, sock, Arc::new(crate::udp::Runtime)).with_context(|| format!("bind udp {addr}"))
 }
 
 pub async fn connect(ep: &Endpoint, addr: SocketAddr, alpn: &[u8], wait: Duration) -> Result<Connection> {
@@ -182,7 +188,7 @@ pub fn client_endpoint_dual() -> Result<Endpoint> {
         quinn::EndpointConfig::default(),
         None,
         sock,
-        Arc::new(quinn::TokioRuntime),
+        Arc::new(crate::udp::Runtime),
     )
     .context("bind udp [::]:0")
 }
@@ -469,7 +475,7 @@ mod tests {
         use std::os::fd::AsRawFd;
         let sock = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
         let fd = sock.as_raw_fd();
-        let ep = Endpoint::new(quinn::EndpointConfig::default(), None, sock, Arc::new(quinn::TokioRuntime)).unwrap();
+        let ep = Endpoint::new(quinn::EndpointConfig::default(), None, sock, Arc::new(crate::udp::Runtime)).unwrap();
         (ep, fd)
     }
 

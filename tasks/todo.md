@@ -611,8 +611,11 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 ## iOS 断开后连不上中继、重连全失败（2026-11-18，用户报告，diag/ios-net-errors）
 现象：断开后显示「连不上中继，通了自动重连」，自动和手动重连都失败，结束会话重启 app 才好。Duo hub.log：11-18 06:41、06:53、07:20 三次 `rebind`（net_changed 换新 UDP socket）之后，局域网和中继的每次拨号都 `timed out`，直到 `hub_start`；重启后同一网络立刻全通。日志里没有 `endpoint stopping`，所以 quinn 的 endpoint 驱动还活着，是新 socket 发不出或收不到。quinn-udp 吞掉发送错误，hub 看不到原因；之后只有再次回前台或本机 IPv4 变了才会再换 socket，手动「重连」不换。用户选「先只加诊断，确认原因再修」。
 - [x] 诊断：quinn/quinn-udp 的 warn/error（`sendmsg error`、驱动 `I/O error`）以 `{"ev":"lib"}` 写进 hub.log；`relay dial:` 失败从 debug 提到 warn。
-- [ ] Duo 装上后等它再坏一次，取 hub.log 看 `rebind` 之后的 `lib` 行（哪个 errno），据此定修法。候选：中继连续拨不通时自动再换 socket、手动重连先换 socket、或整个 endpoint 重建。
-- [ ] 另一个风险（实验已证实，Duo 上没见到）：收包出错会让 quinn 的 endpoint 驱动永久停掉，`Endpoint::rebind` 救不回来，之后拨号立刻报 `endpoint stopping`。真要防只能重建 endpoint。
+- [x] Duo 又坏了一次（11-18 07:54）：`lib` 行是 `sendmsg error: Os { code: 32, kind: BrokenPipe }`。iOS 收回了后台 app 的 socket，07:54:57 回前台换了新 socket，之后照样全部 `timed out`，新 socket 上没有任何发送错误。
+- [x] 根因（fix/quinn-recv-spin）：quinn 的 tokio socket 在 `poll_recv` 里用 `if let Ok(..) = try_io(..)` 吞掉收包错误，然后立刻重试。被收回的 socket 一直可读，recvmsg 每次都失败，endpoint 驱动就在它上面死循环（rebind 之后它是 `prev_socket`，每轮先收它），再也读不到新 socket，所以只有重启 app 才好。修法：`rapp_net::udp::Runtime` 换上自己的 socket，收包失败后清掉可读状态，等系统下次报可读再试，并以 `recvmsg error` 写进 hub.log。测试 `net/tests/recv_error.rs` 用一个有连接排队的 TCP 监听 socket 模拟（一直可读、recvmsg 一直 ENOTCONN），先红后绿。
+- [ ] 实机：Duo 切后台几分钟再回来，不用重启 app 就能自动连上；hub.log 里有 `recvmsg error` 行也没关系。
+- [ ] 以后可以做：rapp-service（`service/src/lib.rs`）和 relay 仍用 quinn 自带的 socket。macOS/Linux 上没见过这种情况，暂时不换。
+- [x] ~~另一个风险~~：quinn 的 tokio socket 根本不会把收包错误交给驱动（见上面的根因），驱动也就不会因此停掉；之前的实验走的是别的路径。原文：收包出错会让 quinn 的 endpoint 驱动永久停掉，`Endpoint::rebind` 救不回来，之后拨号立刻报 `endpoint stopping`。真要防只能重建 endpoint。
 ## 重连时 A 报「first message must be hello」（2026-11-18，用户报告，fix/hello-first）
 现象：Duo 回前台换端口（rebind）后自动重连，局域网会话一连上就断（hub.log `opened` → `closed: connection closed`，0 秒），要点很多次才进得去；A 端报 `first message must be hello, fetch or put`。原因：`RappSession.Connection` 等 TCP `.ready` 才发 hello，而在此之前调用的 `send`（重连时马上补发的 `set_view`/`set_stream` 等）先进了 NWConnection 的发送队列，排到 hello 前面。0.14.7 捏合缩放加了 `set_view` 之后才常见。
 - [x] hello 在 `start()` 里随连接启动立刻排队，之后的消息都在它后面；测试 `ConnectionHelloFirstTests`（先红后绿）。
