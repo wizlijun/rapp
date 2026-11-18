@@ -156,7 +156,9 @@ with tempfile.TemporaryDirectory(prefix='rapp-bundle-') as td, EchoServer(('127.
                             def string(value):
                                 value = value.encode()
                                 return struct.pack('<H', len(value)) + value
-                            hello = bytes([int(protocol[1])]) + string(opened['token']) + string('desktop:') + struct.pack('<BBf', 2, 5, 1.)
+                            # Embedded Swift and Rust clients leave the app empty:
+                            # the authenticated tunnel is already bound to desktop:.
+                            hello = bytes([int(protocol[1])]) + string(opened['token']) + string('') + struct.pack('<BBf', 2, 5, 1.)
                             view.sendall(bytes([1]) + struct.pack('<I', len(hello)) + hello)
                             stream = view.makefile('rb')
                             for _ in range(20):

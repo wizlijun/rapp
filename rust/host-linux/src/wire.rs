@@ -36,7 +36,10 @@ pub fn hello(p: &[u8], token: &str, app: &str) -> Result<Settings> {
                 == 0,
         "invalid token"
     );
-    ensure!(r.string()? == app, "wrong desktop");
+    // Embedded clients leave this empty: the authenticated service tunnel
+    // already selects the worker's desktop. Match the macOS host contract.
+    let requested = r.string()?;
+    ensure!(requested.is_empty() || requested == app, "wrong desktop");
     let s = settings(&mut r)?;
     r.end()?;
     Ok(s)
@@ -190,5 +193,28 @@ mod tests {
         assert!(hello(&p, "secret", "desktop:2").is_err());
         p[0] -= 1;
         assert!(hello(&p, "secret", "desktop:").is_err());
+    }
+
+    #[test]
+    fn embedded_hello_uses_the_bound_desktop_without_an_app_id() {
+        // Both the Swift SessionPlugin and Rust rapp-session connect through a
+        // service-bound tunnel and leave the hello's app field empty.
+        let address = rapp_client_core::protocol::Address::parse(
+            "rapp://127.0.0.1:47800/?mode=color16&fps=15",
+            Some("secret".into()),
+        )
+        .unwrap();
+        let packet = address.hello(1.);
+        let payload = &packet[5..];
+        for bound in ["desktop:", "desktop:2"] {
+            assert!(hello(payload, "secret", bound).is_ok());
+            assert!(hello(payload, "wrong!", bound).is_err());
+        }
+        let mut old = payload.to_vec();
+        old[0] -= 1;
+        assert!(hello(&old, "secret", "desktop:").is_err());
+        let mut trailing = payload.to_vec();
+        trailing.push(0);
+        assert!(hello(&trailing, "secret", "desktop:").is_err());
     }
 }

@@ -20,13 +20,16 @@ impl Drop for Worker {
     }
 }
 fn connect(port: u16, token: &str) -> TcpStream {
+    connect_app(port, token, "")
+}
+fn connect_app(port: u16, token: &str, app: &str) -> TcpStream {
     let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
     s.set_read_timeout(Some(Duration::from_secs(8))).unwrap();
     let o = Address {
         host: "127.0.0.1".into(),
         port,
         token: token.into(),
-        app: "desktop:".into(),
+        app: app.into(),
         mode: 2,
         fps: 5,
     };
@@ -128,7 +131,7 @@ fn native_desktop_stream_auth_takeover_ping_kick_and_eof() {
         until(&mut a, |m| matches!(m, Incoming::Pong(_))),
         Incoming::Pong(1234)
     ));
-    let mut b = connect(port, "native-test-token");
+    let mut b = connect_app(port, "native-test-token", "desktop:");
     assert!(matches!(
         until(&mut b, |m| matches!(m, Incoming::Ready(..))),
         Incoming::Ready(..)
