@@ -1,3 +1,5 @@
+import 'dart:ui' show Tristate;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/ui/tab_chip.dart';
@@ -20,4 +22,13 @@ void main() {
       });
     });
   }
+
+  testWidgets('a tab chip without onTap is announced as disabled', (tester) async {
+    final h = tester.ensureSemantics();
+    await tester.pumpWidget(wrap(const TabChip(key: Key('c'), label: 'A', selected: false, onTap: null)));
+    expect(tester.getSemantics(find.byKey(const Key('c'))).getSemanticsData().flagsCollection.isEnabled, Tristate.isFalse);
+    await tester.pumpWidget(wrap(TabChip(key: const Key('c'), label: 'A', selected: false, onTap: () {})));
+    expect(tester.getSemantics(find.byKey(const Key('c'))).getSemanticsData().flagsCollection.isEnabled, Tristate.isTrue);
+    h.dispose();
+  });
 }

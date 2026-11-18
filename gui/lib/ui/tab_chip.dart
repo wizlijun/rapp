@@ -17,7 +17,8 @@ class TabChip extends StatelessWidget {
 
   final String label;
   final bool selected;
-  final VoidCallback onTap;
+  /// Null: the chip is disabled (no ripple, announced as disabled).
+  final VoidCallback? onTap;
 
   /// Optional decorative widget (a status lamp) before the label.
   final Widget? leading;
@@ -35,6 +36,7 @@ class TabChip extends StatelessWidget {
     return Semantics(
       button: true,
       selected: selected,
+      enabled: onTap != null,
       label: label,
       excludeSemantics: true,
       onTap: onTap,

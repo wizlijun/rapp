@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 
 import 'system_font.dart';
@@ -269,10 +269,13 @@ RappTokens tokensFor(RappTheme theme) {
   }
 }
 
+/// The one line height of every text style.
+const _lineHeight = 1.4;
+
 /// Every text style at [size] and one line height: one text size throughout (the dashboard
 /// numbers set their own), and a switch row's title (bodyLarge, 1.5) no taller than the text beside it.
 TextTheme _oneSize(TextTheme tt, double size) {
-  TextStyle? z(TextStyle? x) => x?.copyWith(fontSize: size, height: 1.4);
+  TextStyle? z(TextStyle? x) => x?.copyWith(fontSize: size, height: _lineHeight);
   return tt.copyWith(
     displayLarge: z(tt.displayLarge),
     displayMedium: z(tt.displayMedium),
@@ -349,7 +352,7 @@ ThemeData themeDataFor(RappTheme theme, {double textSize = fallbackTextSize, Tar
         )
         .copyWith(
           bodyMedium: TextStyle(
-            height: 1.4,
+            height: _lineHeight,
             color: t.text,
             fontFamily: family,
             fontFamilyFallback: fallback,
@@ -391,7 +394,7 @@ ThemeData themeDataFor(RappTheme theme, {double textSize = fallbackTextSize, Tar
       constraints: BoxConstraints(minHeight: controlHeightFor(plat)),
       contentPadding: EdgeInsets.symmetric(
         horizontal: 12,
-        vertical: (controlHeightFor(plat) - textSize * 1.4) / 2,
+        vertical: (controlHeightFor(plat) - textSize * _lineHeight) / 2,
       ),
       floatingLabelBehavior: FloatingLabelBehavior.always,
       border: outline(t.line),

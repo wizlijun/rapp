@@ -181,4 +181,41 @@ void main() {
       expect(d.sliderTheme.trackHeight, 3);
     }
   });
+
+  test('control sub-themes carry the sizes and the rest of the colours', () {
+    for (final theme in RappTheme.values) {
+      final t = tokensFor(theme);
+      for (final (p, h, density, tap) in [
+        (TargetPlatform.macOS, 40.0, VisualDensity.compact, MaterialTapTargetSize.shrinkWrap),
+        (TargetPlatform.iOS, 48.0, VisualDensity.standard, MaterialTapTargetSize.padded),
+      ]) {
+        final d = themeDataFor(theme, textSize: 14, platform: p);
+        expect(d.visualDensity, density, reason: '$theme $p');
+        expect(d.materialTapTargetSize, tap, reason: '$theme $p');
+        final i = d.inputDecorationTheme;
+        // The minimum is the control height; the padding is what is left round a 14 x 1.4 line.
+        expect(i.constraints, BoxConstraints(minHeight: h), reason: '$theme $p');
+        expect(i.contentPadding, EdgeInsets.symmetric(horizontal: 12, vertical: (h - 14 * 1.4) / 2), reason: '$theme $p');
+        expect(i.isDense, isTrue);
+      }
+      final d = themeDataFor(theme, platform: TargetPlatform.macOS);
+      expect(d.switchTheme.thumbColor!.resolve({WidgetState.selected}), t.accentInk);
+      expect(d.switchTheme.thumbColor!.resolve({}), t.muted);
+      expect(d.switchTheme.trackColor!.resolve({}), t.line);
+      expect(d.switchTheme.trackOutlineColor!.resolve({}), t.line);
+      expect(d.checkboxTheme.fillColor!.resolve({}), Colors.transparent);
+      expect(d.checkboxTheme.checkColor!.resolve({}), t.accentInk);
+      expect(d.checkboxTheme.side, BorderSide(color: t.line));
+      expect(d.popupMenuTheme.elevation, 8);
+      expect(d.popupMenuTheme.shadowColor, Colors.black);
+      final i = d.inputDecorationTheme;
+      expect(i.border, isA<OutlineInputBorder>());
+      expect((i.border! as OutlineInputBorder).borderSide.color, t.line);
+      expect((i.errorBorder! as OutlineInputBorder).borderSide.color, d.colorScheme.error);
+      expect((i.focusedErrorBorder! as OutlineInputBorder).borderSide.color, d.colorScheme.error);
+      expect(i.errorStyle!.color, d.colorScheme.error);
+      expect(d.sliderTheme.thumbColor, t.accent);
+      expect(d.sliderTheme.overlayShape, SliderComponentShape.noOverlay);
+    }
+  });
 }

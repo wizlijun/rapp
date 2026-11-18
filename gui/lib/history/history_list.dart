@@ -94,7 +94,7 @@ class _InputHistoryListState extends State<InputHistoryList> {
       opacity: go == null ? .4 : 1,
       child: IgnorePointer(
         ignoring: go == null,
-        child: TabChip(key: Key(key), label: label, selected: _scope == s, onTap: go ?? () {}),
+        child: TabChip(key: Key(key), label: label, selected: _scope == s, onTap: go),
       ),
     );
   }

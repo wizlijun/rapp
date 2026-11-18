@@ -201,14 +201,13 @@ void main() {
   });
 
   testWidgets('on the iPad 全局设置 keeps 48px touch rows', (tester) async {
-    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
-    addTearDown(() => debugDefaultTargetPlatformOverride = null);
-    await tester.pumpWidget(wrap(panel()));
-    for (final key in ['start-fullscreen', 'auto-save-traffic', 'settings-fold']) {
-      expect(tester.getSize(find.byKey(Key(key))).height, 48, reason: key);
-    }
-    expect(tester.getSize(find.byKey(const Key('theme-dropdown'))).height, 48);
-    debugDefaultTargetPlatformOverride = null;
+    await onPlatform(TargetPlatform.iOS, () async {
+      await tester.pumpWidget(wrap(panel()));
+      for (final key in ['start-fullscreen', 'auto-save-traffic', 'settings-fold']) {
+        expect(tester.getSize(find.byKey(Key(key))).height, 48, reason: key);
+      }
+      expect(tester.getSize(find.byKey(const Key('theme-dropdown'))).height, 48);
+    });
   });
 
   testWidgets('picking WESTWORLD changes prefs.theme', (tester) async {
