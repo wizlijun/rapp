@@ -112,7 +112,8 @@ class VoiceHold extends ChangeNotifier {
   /// did not give `ok`, on a quick tap, or when [dispose] cuts a press short.
   final void Function(VoicePick? pick)? onEnd;
 
-  /// True the first time a release has no other hint to show; [languageHintShown] then says it was shown.
+  /// True the first time a release has no other hint to show (on macOS a send only: an 编辑 hides it at once);
+  /// [languageHintShown] then says it was shown.
   final bool Function()? languageHintDue;
   final void Function()? languageHintShown;
 
@@ -307,7 +308,9 @@ class VoiceHold extends ChangeNotifier {
         } else {
           edit(text);
         }
-        if (hint == null && (languageHintDue?.call() ?? false)) {
+        // R14, narrowed on macOS: an 编辑 opens the panel, which takes the stage row in the same frame, so the
+        // hint could never paint there; it stays due for the next send.
+        if (hint == null && (which == VoicePick.send || _ios) && (languageHintDue?.call() ?? false)) {
           _setHint(voiceLanguageHint, settings: VoiceSettings.language);
           languageHintShown?.call();
         }

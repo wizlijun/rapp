@@ -9,7 +9,7 @@ import 'package:rapp/embed/flutter_editor.dart';
 import 'package:rapp/embed/composer_panel.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/voice_desktop.dart';
-import 'package:rapp/embed/voice_button.dart' show voiceSettingsRunner;
+import 'package:rapp/embed/voice_button.dart' show voiceLanguageHint, voiceSettingsRunner;
 import 'package:rapp/embed/voice_input.dart' show VoiceStart;
 import 'package:rapp/embed/voice_key_gate.dart';
 import 'package:rapp/embed/voice_ring.dart';
@@ -352,6 +352,31 @@ void main() {
     expect(ran, hasLength(1));
     expect(ran.single, contains('Privacy_Microphone'));
     await tester.pump(const Duration(seconds: 6));
+  });
+
+  macTest('a first use via 编辑 keeps the language hint for the next send', (tester) async {
+    await view(tester);
+    await goLive(tester);
+    await tester.pumpWidget(layer());
+    var g = await press(tester);
+    await g.moveTo(tester.getCenter(find.byKey(const Key('voice-edit'))));
+    await tester.pump();
+    voice.stopResult = '你好';
+    await g.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(rs.composer.open, isTrue); // the panel takes the stage row: no hint could paint
+    expect(es.prefs.voiceLanguageHintShown, isFalse);
+    rs.composer.open = false;
+    await tester.pump();
+    g = await press(tester);
+    voice.stopResult = '好的';
+    await g.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text(voiceLanguageHint), findsOneWidget);
+    expect(es.prefs.voiceLanguageHintShown, isTrue);
+    await tester.pump(const Duration(seconds: 7));
   });
 
   macTest('the targets carry icons and the button a tooltip', (tester) async {
