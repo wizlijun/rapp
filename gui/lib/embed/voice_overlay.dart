@@ -358,17 +358,25 @@ class VoiceRingPainter extends CustomPainter {
   @visibleForTesting
   Path bandPath(VoicePick which) => ring.segment(which, sweep: sweep);
 
+  /// The disc as drawn: at [progress] 0 the square voice button (its size and the theme corner), at 1 the full
+  /// round disc; the half side and the corner both grow to [VoiceRing.r] on the way.
+  @visibleForTesting
+  RRect get disc {
+    final centre = Offset.lerp(ring.thumb, ring.centre, progress)!;
+    final half = ui.lerpDouble(stageButtonSize / 2, ring.r, progress)!;
+    final corner = ui.lerpDouble(tokens.r, ring.r, progress)!;
+    return RRect.fromRectAndRadius(Rect.fromCircle(center: centre, radius: half), Radius.circular(corner));
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
     final t = tokens;
     canvas.drawRect(Offset.zero & size, Paint()..color = t.bg.withValues(alpha: .6 * scrim));
-    final centre = Offset.lerp(ring.thumb, ring.centre, progress)!;
-    final radius = ui.lerpDouble(stageButtonSize / 2, ring.r, progress)!;
+    final disc = this.disc;
     final send = pick == VoicePick.send;
-    canvas.drawCircle(centre, radius, Paint()..color = t.raise.first);
-    canvas.drawCircle(
-      centre,
-      radius,
+    canvas.drawRRect(disc, Paint()..color = t.raise.first);
+    canvas.drawRRect(
+      disc,
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = send ? 1.5 : 1

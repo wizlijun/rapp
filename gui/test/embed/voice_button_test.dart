@@ -930,6 +930,23 @@ void main() {
     });
   }
 
+  iosTest('the disc grows from the square 语音 (its size and theme corner) into the round disc', (tester) async {
+    await tester.pumpWidget(layer());
+    final square = tester.getRect(hold);
+    final g = await press(tester);
+    final p = painter(tester);
+    VoiceRingPainter at(double progress) =>
+        VoiceRingPainter(ring: p.ring, pick: p.pick, progress: progress, tokens: p.tokens);
+    final start = at(0).disc;
+    expect(start.outerRect.size, square.size);
+    expect(start.outerRect.center, p.ring.thumb);
+    expect(start.tlRadiusX, p.tokens.r);
+    final end = at(1).disc;
+    expect(end.outerRect, Rect.fromCircle(center: p.ring.centre, radius: p.ring.r));
+    expect(end.tlRadiusX, p.ring.r);
+    await lift(tester, g);
+  });
+
   iosTest('release mid-press: the bands go out from where they were, never jumping to the full sweep', (tester) async {
     await tester.pumpWidget(layer());
     final g = await tester.startGesture(tester.getCenter(hold));

@@ -9,7 +9,7 @@ import '../ui/prefs.dart';
 const stageButtonsIn = 80.0;
 const stageButtonsUp = 88.0;
 
-/// Every round stage button's diameter: 语音, 输入 and 还原 are one size (user 2026-11-18: 「按键能否改成一样大」).
+/// Every stage button's side: 语音, 输入 and 还原 are one size (user 2026-11-18: 「按键能否改成一样大」).
 const stageButtonSize = 56.0;
 
 /// The gap above whatever the stack stands on in place of the stage's bottom: the soft keyboard.
@@ -19,7 +19,7 @@ const _gap = 12.0;
 const _fade = Duration(milliseconds: 120);
 const _glide = Duration(milliseconds: 200);
 
-/// The stage's round buttons (iOS), each [stageButtonSize], as one vertical stack on a screen edge, bottom to top:
+/// The stage's square buttons (iOS), each [stageButtonSize], as one vertical stack on a screen edge, bottom to top:
 /// [voice], [input], [restore]. [beside] widgets stack upward on the inner side, bottom-aligned with the stack's lowest button.
 ///
 /// A horizontal drag on [input] or [restore] moves the stack to the other side once it passes the middle.
