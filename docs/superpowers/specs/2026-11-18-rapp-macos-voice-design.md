@@ -19,6 +19,8 @@ iOS 上已经有按住说话了（`2026-11-18-rapp-voice-input-design.md`，下�
 
 审阅时用户又定了一件：**文字终端也要支持**，鼠标按钮和快捷键都要有（见 §6.3）。
 
+之后用户又提出：「请考虑支持英文、欧洲语种、中文、日文、韩文这些国家」，并选定**识别语言跟着当前输入法走**（见 §4.1）。这条 iOS 和 macOS 共用。
+
 本规格改掉 iOS 规格里的两句：§2 的「macOS、Linux 客户端不加语音按钮，那一排按钮也不改」，以及 §6 的「macOS、Linux 界面不变」。Linux 仍然不做。
 
 ## 2. 目标、非目标、反目标
@@ -64,13 +66,33 @@ iOS 上已经有按住说话了（`2026-11-18-rapp-voice-input-design.md`，下�
 - 把 `gui/ios/Runner/SpeechPlugin.swift` 和 `SpeechLocales.swift` 移到 `gui/macos/Runner/`，iOS 工程改成引用这两个路径，和 `SessionPlugin.swift` 的做法一样。通道还叫 `rapp/speech`，方法和事件不变（iOS 规格 §5.4）。
 - 只有 iOS 才有的东西用 `#if os(iOS)` 隔开：`AVAudioSession` 的类别、激活和停用，中断通知，`UIApplication.willResignActiveNotification`。
 - macOS 上，当 rapp 的主窗口不再是 key window（`NSWindow.didResignKeyNotification`）时，按中断处理（`error {code: interrupted}`），Dart 侧按取消处理。注意不是整个 App 失去前台时才算。
-- macOS 26 及以上用 `SpeechAnalyzer` + `SpeechTranscriber`，14–25 用 `SFSpeechRecognizer`（部署目标是 macOS 14.0），用法和 iOS 一样：语言顺序、`preparing`、本机识别优先都照 iOS 规格 §5.4。
+- macOS 26 及以上用 `SpeechAnalyzer` + `SpeechTranscriber`，14–25 用 `SFSpeechRecognizer`（部署目标是 macOS 14.0），`preparing` 和本机识别优先都照 iOS 规格 §5.4。用哪种语言识别改按 §4.1，iOS 也一样。
 - 在 macOS 的 `AppDelegate` / `MainFlutterWindow` 里注册插件，位置和其它插件一样。
 - 权限：
   - 在 `gui/macos/Runner/Info.plist` 里加 `NSMicrophoneUsageDescription` 和 `NSSpeechRecognitionUsageDescription`，文案和 iOS 一样。
   - 在 `DebugProfile.entitlements` 和 `Release.entitlements` 里加 `com.apple.security.device.audio-input = true`。Developer ID 包是带 hardened runtime 签名的（`scripts/lib/sign-check.sh`），不加这一项的话，麦克风会被系统直接拒掉，而且不会弹授权框。
   - 被拒绝时，提示气泡显示「需要麦克风和语音识别权限」和「去设置」。macOS 上「去设置」打开系统设置的「隐私与安全性 → 麦克风」（用 `open` 打开 `x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone`，做法同 `openSettingsPane`）。
 - `MainState.voice` 在 macOS 上也要创建（现在只有 iOS 才创建）。
+
+### 4.1 识别语言：跟着当前输入法（用户定的，iOS 和 macOS 都适用）
+
+两种识别器每次录音都只能按一种语言来听，不能自动判断说的是哪种语言。所以每次按下时，按「当前输入法」选一种语言：
+
+- **app 画面**：看 **A 的**当前输入法，也就是顶栏上显示的那个（协议里已有的 `input_source`，`RemoteSession.inputSource`）。在舞台上打字时，按键原样发给 A，由 A 的输入法组字，所以用户心里的「当前输入法」就是这个。iOS 和 macOS 的 B 都能收到它，两端规则一样。
+- **文字终端**（没有 A 的输入法信息），以及 A 还没报过输入法时：
+  - macOS：看**本机**菜单栏上的当前输入法（`TISCopyCurrentKeyboardInputSource` 的 `kTISPropertyInputSourceLanguages` 第一项）。
+  - iOS：看本机最近一次在 rapp 里用过的键盘语言（`UITextInputMode.primaryLanguage`，监听 `currentInputModeDidChangeNotification` 记下最后一次）。
+- 例如：拼音、双拼、五笔、搜狗、微信输入法、鼠须管 → 简体中文；注音、仓颉 → 繁体中文；日文输入法（含 Google 日本語入力）→ 日文；韩文 → 韩文；ABC、U.S. → 英文；British → 英式英文；German → 德文；French → 法文；Spanish → 西班牙文；Italian → 意大利文；Portuguese / Brazilian → 葡萄牙文；以及其它欧洲语言的键盘布局（荷兰、瑞典、丹麦、挪威、芬兰、波兰、捷克、俄文、希腊、土耳其等）。
+- **（我定的）A 的输入法 id → 语言，在 B 上查表**，不改协议。A 只发了 id 和名称，没发语言。要让 A 把语言发过来就得升协议版本，A、B 两端和 Linux 客户端都要一起更新，代价大。这张表是纯 Dart 的映射，放在一个文件里，可以单独测试：
+  - 苹果自带的输入法按 id 前缀判断（`com.apple.inputmethod.SCIM.` 是简体，`TCIM.` 是繁体，`Kotoeri.` / `Japanese` 是日文，`Korean.` 是韩文；`com.apple.keylayout.<名字>` 按布局名判断）。
+  - 常见的第三方输入法（鼠须管 `im.rime.`、搜狗、微信输入法、百度、Google 日本語入力）单独列出。
+  - 查不到的（例如 Fcitx5 这种多语言框架，或表里没有的布局）按下面的「退路」处理。以后如果觉得表不够用，再考虑让 A 把 `kTISPropertyInputSourceLanguages` 一起发过来。
+- 语言 → 具体地区：先在设备的语言列表（`Locale.preferredLanguages`）里找同一种语言的那一项（例如列表里有 en-GB 就用 en-GB）。找不到就用识别器自己的匹配（`SpeechTranscriber.supportedLocale(equivalentTo:)`）。再不行就用默认地区：en-US、zh-CN、zh-TW、ja-JP、ko-KR、de-DE、fr-FR、es-ES、it-IT、pt-BR，其余语言用该语言最常见的地区。
+- **退路**：输入法对不上任何语言，或者那种语言这台设备识别不了，就照现在的做法（设备语言列表、中文优先、最后 zh-CN）。
+- Dart 在调用 `start` 时多传一个可选参数 `lang`（例如 `"ja"`、`"zh-Hant"`、`"en-GB"`）。不传，或者原生用它找不到识别器，原生就走退路；macOS 上原生会先试本机输入法。
+- 语言资源还没下载时，和现在一样返回 `preparing`，提示「正在准备语音识别，请稍后再试」，同时触发下载。
+- **（我定的）气泡上标出这次用的语言**：气泡左上角用 `t.muted` 小字写语言名，用这种语言自己的写法（「中文」「English」「日本語」「한국어」「Deutsch」…）。用户说话前切错了输入法，一眼就能看出来。iOS 的气泡也加这一项。
+- **（我定的）录音过程中切换输入法不跟着变**，下一次按下时才生效。
 
 ## 5. 鼠标：按钮和气泡
 
@@ -178,9 +200,9 @@ iOS 上已经有按住说话了（`2026-11-18-rapp-voice-input-design.md`，下�
 
 ## 7. 不变的东西
 
-- 协议不变，A 端和 relay 都不用改。
+- 协议不变，A 端和 relay 都不用改（语言靠 B 上查表，见 §4.1）。
 - 输入历史的格式不变。
-- iOS 的界面和交互不变。iOS 工程只是改成引用共用的 Swift 文件，行为不变。
+- iOS 的交互不变。iOS 工程改成引用共用的 Swift 文件；行为上只多两点：识别语言按 §4.1 跟着输入法走，气泡上标出语言。
 - Linux 界面不变。
 - 单独拿出去的窗口不变。
 
@@ -208,3 +230,7 @@ iOS 上已经有按住说话了（`2026-11-18-rapp-voice-input-design.md`，下�
 13. 在文字终端里（例如跑着 Claude Code）：鼠标按住说话和长按右 Option 都能发送；轻点右 Option、⌥ 组合键和以前一样。
 14. 长按右 Option 不到 0.3 秒就在画面上 ⌥点击：A 收到的是带 Option 的点击。说话过程中点画面：录音取消，点击照常生效。
 15. 用鼠标说完一句发出去以后，不点画面直接打字，字能到 A。
+16. A 上切到拼音说中文、切到 ABC 说英文、切到日文输入法说日文、切到韩文输入法说韩文、切到 German 布局说德文、切到 French 说法文：每次都按对应语言识别，气泡左上角标出的语言也对。Mac 和 Duo 上各试一遍。
+17. 在文字终端里：Mac 上切换本机菜单栏的输入法，识别语言跟着变。
+18. A 上用表里没有的输入法时，照旧按中文识别（退路），不报错。
+19. 某种语言第一次用、资源还没下载时，提示「正在准备语音识别」，下载完后再按就能识别。
