@@ -459,4 +459,228 @@ void main() {
     expect(focus.hasFocus, isTrue);
     expect(state.pictureFocused, isNull);
   });
+  testWidgets('a mouse drag in the strip below a short grid does not scroll', (t) async {
+    model.apply(scr(['r0', 'r1', 'r2', 'r3'], hist: 100, limit: 2000));
+    await show(t);
+    await wheel(t, -10);
+    expect(model.offset, 10);
+    final below = t.getTopLeft(find.byKey(const Key('term-grid'))) + Offset(5, 4 * ch + 200);
+    final g = await t.startGesture(cell(t, 1, 0), kind: PointerDeviceKind.mouse);
+    await g.moveTo(below);
+    await t.pump(const Duration(milliseconds: 220));
+    await g.up();
+    await t.pump();
+    expect(model.offset, 10);
+  });
+
+  group('touch (iOS)', () {
+    /// [body] as on an iPad; the override never outlives the test (Flutter asserts on a leaked one).
+    Future<void> onIOS(Future<void> Function() body) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      try {
+        await body();
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    }
+
+    // A pane that fills the 800x480 stage at the base size: row y is words `<letter><two digits>` 4 cells apart.
+    final cols = (800 / cw).floor(), rows = (480 / ch).floor();
+    String word(int y, int j) => '${String.fromCharCode(97 + y % 26)}${j.toString().padLeft(2, '0')}';
+    final lines = [
+      for (var y = 0; y < rows; y++) [for (var j = 0; j < cols ~/ 4; j++) word(y, j)].join(' '),
+    ];
+
+    /// Where the stage is on the screen: positions below are on the stage, as the zoom's are.
+    Offset origin(WidgetTester t) => t.getTopLeft(find.byType(TermStage));
+    Offset gridAt(WidgetTester t) => t.getTopLeft(find.byKey(const Key('term-grid'))) - origin(t);
+
+    /// Two fingers [from] each side of [at] (on the stage) spread (or close) to [to] each side in one event batch.
+    Future<void> pinch(WidgetTester t, {Offset at = const Offset(400, 240), double from = 100, double to = 200}) async {
+      at += origin(t);
+      final f1 = await t.createGesture(kind: PointerDeviceKind.touch, pointer: 21);
+      final f2 = await t.createGesture(kind: PointerDeviceKind.touch, pointer: 22);
+      await f1.down(at - Offset(from, 0));
+      await f2.down(at + Offset(from, 0));
+      final b = t.binding;
+      b.handlePointerEvent(PointerMoveEvent(pointer: 21, kind: PointerDeviceKind.touch, position: at - Offset(to, 0)));
+      b.handlePointerEvent(PointerMoveEvent(pointer: 22, kind: PointerDeviceKind.touch, position: at + Offset(to, 0)));
+      await t.pump();
+      await f1.up();
+      await f2.up();
+      await t.pump();
+    }
+
+    testWidgets('two fingers moving together scroll back through history', (t) async {
+      await onIOS(() async {
+        model.apply(scr([for (var i = 0; i < 10; i++) 'row $i'], hist: 100, limit: 2000));
+        await show(t);
+        final f1 = await t.createGesture(kind: PointerDeviceKind.touch, pointer: 11);
+        final f2 = await t.createGesture(kind: PointerDeviceKind.touch, pointer: 12);
+        await f1.down(const Offset(300, 100));
+        await f2.down(const Offset(400, 100));
+        final b = t.binding;
+        b.handlePointerEvent(
+            const PointerMoveEvent(pointer: 11, kind: PointerDeviceKind.touch, position: Offset(300, 160)));
+        b.handlePointerEvent(
+            const PointerMoveEvent(pointer: 12, kind: PointerDeviceKind.touch, position: Offset(400, 160)));
+        await t.pump();
+        await f1.up();
+        await f2.up();
+        await t.pump();
+        expect(model.offset, closeTo(60 / ch, 1e-9));
+        expect(find.byKey(const Key('term-copy')), findsNothing);
+      });
+    });
+
+    testWidgets('one finger held 150 ms then dragged still selects', (t) async {
+      await onIOS(() async {
+        model.apply(scr(['abcdefghij', 'klmnop'], cols: 10));
+        await show(t);
+        final g = await t.startGesture(cell(t, 0, 0), kind: PointerDeviceKind.touch);
+        await t.pump(const Duration(milliseconds: 160));
+        await g.moveTo(cell(t, 0, 2));
+        await g.moveTo(cell(t, 0, 3));
+        await g.up();
+        await t.pump();
+        expect(selectionText(painter(t).selection!, model.lineAt, model.wrappedAt), 'abcd');
+      });
+    });
+
+    testWidgets('zoomed: a one-finger drag pans, never selects', (t) async {
+      await onIOS(() async {
+        model.apply(scr(lines, cols: cols));
+        await show(t);
+        await pinch(t);
+        expect(session.zoomOf(3).z, 2.0);
+        final before = gridAt(t);
+        final g = await t.startGesture(origin(t) + const Offset(400, 240), kind: PointerDeviceKind.touch);
+        await g.moveTo(origin(t) + const Offset(380, 225));
+        await g.moveTo(origin(t) + const Offset(350, 200));
+        await g.up();
+        await t.pump();
+        expect(gridAt(t), offsetMoreOrLessEquals(before + const Offset(-50, -40)));
+        expect(painter(t).selection, isNull);
+        expect(find.byKey(const Key('term-copy')), findsNothing);
+      });
+    });
+
+    testWidgets('zoomed: hold 500 ms then drag selects', (t) async {
+      await onIOS(() async {
+        model.apply(scr(lines, cols: cols));
+        await show(t);
+        await pinch(t);
+        expect(session.zoomOf(3).z, 2.0);
+        final before = gridAt(t);
+        final g = await t.startGesture(origin(t) + const Offset(400, 240), kind: PointerDeviceKind.touch);
+        await t.pump(const Duration(milliseconds: 510));
+        await g.moveTo(origin(t) + const Offset(450, 240));
+        await g.moveTo(origin(t) + const Offset(500, 240));
+        await g.up();
+        await t.pump();
+        expect(gridAt(t), before);
+        expect(painter(t).selection, isNotNull);
+        expect(find.byKey(const Key('term-copy')), findsOneWidget);
+      });
+    });
+
+    testWidgets('zoomed: a tap hits the cell it shows', (t) async {
+      await onIOS(() async {
+        model.apply(scr(lines, cols: cols));
+        await show(t);
+        final base = painter(t).metrics;
+        await pinch(t);
+        // Pan, so the grid is no longer where 2x about the centre put it.
+        final g = await t.startGesture(origin(t) + const Offset(400, 240), kind: PointerDeviceKind.touch);
+        await g.moveTo(origin(t) + const Offset(440, 260));
+        await g.moveTo(origin(t) + const Offset(470, 290));
+        await g.up();
+        await t.pump();
+
+        // Where the cells are: the zoom's rect for the base grid, cut into cells at twice the font.
+        final zoom = session.zoomOf(3);
+        expect(zoom.z, 2.0);
+        final fit = Rect.fromLTWH(0, 0, cols * base.cellW, rows * base.cellH);
+        final zfit = zoom.zfit(fit, const Size(800, 480));
+        final big = TermMetrics.measure(base.style.copyWith(fontSize: base.style.fontSize! * 2));
+        const at = Offset(523, 311);
+        final y = ((at.dy - zfit.top) / big.cellH).floor(), x = ((at.dx - zfit.left) / big.cellW).floor();
+        // A word's cell, not a gap.
+        expect(x % 4, isNot(3));
+
+        // A double tap selects the word under it.
+        final p = TestPointer(31, PointerDeviceKind.touch);
+        await t.sendEventToBinding(p.down(origin(t) + at, timeStamp: const Duration(seconds: 10)));
+        await t.sendEventToBinding(p.up(timeStamp: const Duration(seconds: 10, milliseconds: 40)));
+        await t.pump();
+        await t.sendEventToBinding(p.down(origin(t) + at, timeStamp: const Duration(seconds: 10, milliseconds: 200)));
+        await t.sendEventToBinding(p.up(timeStamp: const Duration(seconds: 10, milliseconds: 240)));
+        await t.pump();
+        expect(selectionText(painter(t).selection!, model.lineAt, model.wrappedAt), word(y, x ~/ 4));
+        await t.pump(const Duration(seconds: 2));
+      });
+    });
+
+    testWidgets('zoomed: a drag above a grid shorter than the stage scrolls back', (t) async {
+      await onIOS(() async {
+        model.apply(scr(['r0', 'r1', 'r2', 'r3'], hist: 100, limit: 2000));
+        await show(t);
+        await wheel(t, -10);
+        expect(model.offset, 10);
+        await pinch(t);
+        expect(session.zoomOf(3).z, 2.0);
+        // Pan the 2x grid (4 rows, far shorter than the stage) down off the stage's top.
+        final g = await t.startGesture(origin(t) + const Offset(400, 240), kind: PointerDeviceKind.touch);
+        await g.moveTo(origin(t) + const Offset(400, 290));
+        await g.moveTo(origin(t) + const Offset(400, 340));
+        await g.up();
+        await t.pump();
+        final top = gridAt(t).dy;
+        expect(top, greaterThan(60));
+        // Held in the grid, then dragged above it (still on the stage): back into history, a row every 50 ms.
+        final d = await t.startGesture(origin(t) + Offset(400, top + 20), kind: PointerDeviceKind.touch);
+        await t.pump(const Duration(milliseconds: 510));
+        await d.moveTo(origin(t) + Offset(400, top - 10));
+        await d.moveTo(origin(t) + Offset(400, top - 40));
+        await t.pump(const Duration(milliseconds: 120));
+        await d.up();
+        await t.pump();
+        expect(model.offset, greaterThan(10));
+      });
+    });
+
+    testWidgets('zoomed: the grid drawn is exactly the zoom rect', (t) async {
+      await onIOS(() async {
+        // A pane laid out small: its font is not whole, its cells are rounded up.
+        final big = [for (var i = 0; i < 60; i++) 'r$i'];
+        model.apply(scr(big, cols: 110));
+        await show(t, w: 600, h: 400);
+        final base = painter(t).metrics;
+        expect(base.cellH, isNot(base.style.fontSize));
+        await pinch(t, at: const Offset(300, 200), to: 250);
+        final zoom = session.zoomOf(3);
+        expect(zoom.z, 2.5);
+        final zfit = zoom.zfit(Rect.fromLTWH(0, 0, 110 * base.cellW, 60 * base.cellH), const Size(600, 400));
+        final m = painter(t).metrics;
+        expect(60 * m.cellH, moreOrLessEquals(zfit.height));
+        expect(110 * m.cellW, moreOrLessEquals(zfit.width));
+        expect(gridAt(t), offsetMoreOrLessEquals(zfit.topLeft));
+      });
+    });
+
+    testWidgets('zooming never changes the requested rows and columns', (t) async {
+      await onIOS(() async {
+        model.apply(scr(lines, cols: cols));
+        await show(t);
+        await t.pump(const Duration(milliseconds: 400));
+        final asked = views();
+        expect(asked, isNotEmpty);
+        await pinch(t, to: 300);
+        expect(session.zoomOf(3).z, 3.0);
+        expect(painter(t).metrics.style.fontSize, 42);
+        await t.pump(const Duration(milliseconds: 400));
+        expect(views(), asked);
+      });
+    });
+  });
 }

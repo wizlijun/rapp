@@ -68,4 +68,44 @@ final class WindowSurfacesTests: XCTestCase {
         XCTAssertEqual(updated, [])
         XCTAssertNil(s.latest(1))
     }
+
+    private func decoder(width: Int, height: Int) throws -> FrameDecoder {
+        let enc = FrameEncoder(mode: .color16), dec = FrameDecoder(mode: .color16)
+        let samples = [UInt8](repeating: 0x55, count: width * height * 2)
+        try dec.decode(try XCTUnwrap(enc.encode(samples: samples, width: width, height: height)))
+        return dec
+    }
+
+    func testBaseKeepsTheLastWholeWindowPicture() throws {
+        let s = WindowSurfaces()
+        let a = win(1, x: 0, y: 0, w: 64, h: 32)
+        XCTAssertNil(s.base(1))
+        _ = try s.draw(table: [a], decoder: try decoder(), region: region)
+        let whole = try XCTUnwrap(s.base(1))
+        XCTAssertTrue(whole === s.latest(1))
+        // A frame of the left half only: latest moves on, the base stays the whole picture.
+        let half = CanvasRect(x: 0, y: 0, w: 32, h: 32)
+        _ = try s.draw(table: [a], decoder: try decoder(width: 32, height: 32), region: half)
+        XCTAssertEqual(try XCTUnwrap(s.visible(1)).width, 0.5)
+        XCTAssertFalse(try XCTUnwrap(s.latest(1)) === whole)
+        XCTAssertTrue(try XCTUnwrap(s.base(1)) === whole)
+    }
+
+    func testBaseGoesWhenTheWindowChangesSize() throws {
+        let s = WindowSurfaces()
+        _ = try s.draw(table: [win(1, x: 0, y: 0, w: 64, h: 32)], decoder: try decoder(), region: region)
+        XCTAssertNotNil(s.base(1))
+        let half = CanvasRect(x: 0, y: 0, w: 32, h: 32)
+        _ = try s.draw(table: [win(1, x: 0, y: 0, w: 128, h: 32)], decoder: try decoder(width: 32, height: 32), region: half)
+        XCTAssertLessThan(try XCTUnwrap(s.visible(1)).width, 1)
+        XCTAssertNil(s.base(1))
+    }
+
+    func testKeepOnlyDropsTheBase() throws {
+        let s = WindowSurfaces()
+        _ = try s.draw(table: [win(1, x: 0, y: 0, w: 64, h: 32)], decoder: try decoder(), region: region)
+        XCTAssertNotNil(s.base(1))
+        _ = s.keep(only: [])
+        XCTAssertNil(s.base(1))
+    }
 }

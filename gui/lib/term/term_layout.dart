@@ -18,6 +18,11 @@ class TermMetrics {
     return m;
   }
 
+  /// [base] zoomed [z] times: cells exactly [z] times as big (not measured again: a cell rounded up would round
+  /// up once more, and the grid would not be the zoom's rect), the font [z] times as big.
+  static TermMetrics scaled(TermMetrics base, double z) =>
+      TermMetrics._(base.cellW * z, base.cellH * z, base.style.copyWith(fontSize: base.style.fontSize! * z));
+
   final double cellW, cellH;
   final TextStyle style;
 }

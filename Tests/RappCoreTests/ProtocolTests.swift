@@ -71,7 +71,7 @@ final class ProtocolTests: XCTestCase {
         .inputSource(id: "com.apple.keylayout.ABC", name: "ABC", ascii: true),
         .selectInput(id: ""),
         .selectInput(id: "com.apple.keylayout.US"),
-        .hello(token: "t", bundleID: "b", mode: .gray4, fps: 15, density: 1, version: 13),
+        .hello(token: "t", bundleID: "b", mode: .gray4, fps: 15, density: 1, version: protocolVersion),
         .covered(id: 412, name: "通知中心", bundleID: "com.apple.notificationcenterui", dismissable: true),
         .covered(id: 0, name: "", bundleID: "", dismissable: false),
         .dismissCover(412),
@@ -114,7 +114,7 @@ final class ProtocolTests: XCTestCase {
     }
 
     func testScreenLockedAndUnlockWireFormat() throws {
-        XCTAssertEqual(protocolVersion, 13)
+        XCTAssertEqual(protocolVersion, 14)
         XCTAssertEqual(Message.screenLocked(true).encoded(), [34, 1, 0, 0, 0, 1])
         XCTAssertEqual(Message.unlock(password: "ab").encoded(), [35, 4, 0, 0, 0, 2, 0, 0x61, 0x62])
         XCTAssertThrowsError(try decodeOne([34, 1, 0, 0, 0, 2])) { XCTAssertEqual("\($0)", "bad locked flag") }
@@ -133,14 +133,14 @@ final class ProtocolTests: XCTestCase {
         p.append([1, UInt8(payload.count), 0, 0, 0] + payload)
         XCTAssertThrowsError(try p.next()) { error in
             XCTAssertEqual((error as? ProtocolVersionMismatch)?.client, 2)
-            XCTAssertEqual("\(error)", "protocol version mismatch: host 13, client 2 (update both sides)")
+            XCTAssertEqual("\(error)", "protocol version mismatch: host 14, client 2 (update both sides)")
         }
     }
 
-    func testHelloAcceptsOnlyVersion13() throws {
-        let m = Message.hello(token: "t", bundleID: "b", mode: .gray4, fps: 15, density: 1, version: 13)
+    func testHelloAcceptsOnlyVersion14() throws {
+        let m = Message.hello(token: "t", bundleID: "b", mode: .gray4, fps: 15, density: 1, version: protocolVersion)
         XCTAssertEqual(try decodeOne(m.encoded()), m)
-        for v: UInt8 in [11, 12] {
+        for v: UInt8 in [12, 13] {
             var bytes = m.encoded()
             bytes[5] = v
             XCTAssertThrowsError(try decodeOne(bytes)) { XCTAssertEqual(($0 as? ProtocolVersionMismatch)?.client, v) }
@@ -148,18 +148,18 @@ final class ProtocolTests: XCTestCase {
         var old = m.encoded()
         old[5] = 4
         XCTAssertThrowsError(try decodeOne(old)) {
-            XCTAssertEqual("\($0)", "protocol version mismatch: host 13, client 4 (update both sides)")
+            XCTAssertEqual("\($0)", "protocol version mismatch: host 14, client 4 (update both sides)")
         }
     }
 
-    func testFetchAndPutAcceptOnlyVersion13() throws {
+    func testFetchAndPutAcceptOnlyVersion14() throws {
         let f = Message.fetch(token: "t", clip: 1, file: 2, offset: 3).encoded()
         let q = Message.put(token: "t", item: 1, kind: .files, uti: "u", name: "n", total: 5).encoded()
-        XCTAssertEqual(f[5], 13)
-        XCTAssertEqual(q[5], 13)
+        XCTAssertEqual(f[5], 14)
+        XCTAssertEqual(q[5], 14)
         XCTAssertEqual(try decodeOne(f), .fetch(token: "t", clip: 1, file: 2, offset: 3))
         XCTAssertEqual(try decodeOne(q), .put(token: "t", item: 1, kind: .files, uti: "u", name: "n", total: 5))
-        for v: UInt8 in [11, 12] {
+        for v: UInt8 in [12, 13] {
             for var bytes in [f, q] {
                 bytes[5] = v
                 XCTAssertThrowsError(try decodeOne(bytes)) { XCTAssertEqual(($0 as? ProtocolVersionMismatch)?.client, v) }
@@ -209,6 +209,19 @@ final class ProtocolTests: XCTestCase {
         let bytes = Message.focusRegion(window: 7, rects: [CanvasRect(x: 10, y: 20, w: 300, h: 200)]).encoded()
         XCTAssertEqual(bytes.map { String(format: "%02x", $0) }.joined(),
                        "2415000000070000000100002041" + "0000a04100009643" + "00004843")
+    }
+
+    func testSetViewRoundTrip() throws {
+        for m in [Message.setView(window: 7, rect: CanvasRect(x: 10, y: 20, w: 300, h: 200)),
+                  Message.setView(window: 0, rect: CanvasRect(x: 0, y: 0, w: 0, h: 0))] {
+            let bytes = m.encoded()
+            XCTAssertEqual(bytes[0], 41)
+            XCTAssertEqual(try decodeOne(bytes), m)
+            var longer = Array(bytes)
+            longer[1] += 1
+            longer.append(0)
+            assertRejects(longer, "setView trailing byte")
+        }
     }
 
     func testHostHintsWireFormat() throws {

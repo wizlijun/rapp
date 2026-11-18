@@ -2,12 +2,15 @@ import 'dart:io';
 
 import 'package:rapp/paths.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/platform_caps.dart';
 import 'package:rapp/embed/app_profile.dart';
 import 'package:rapp/embed/composer_panel.dart';
 import 'package:rapp/embed/flutter_editor.dart';
+import 'package:rapp/embed/geometry.dart';
 import 'package:rapp/embed/picture.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
@@ -227,6 +230,49 @@ void main() {
       expect(rs.composer.open, isTrue);
       expect(find.byKey(const Key('composer-panel')), findsOneWidget);
       expect(fieldFocused(tester), isTrue);
+    });
+
+    for (final hard in [false, true]) {
+      testWidgets('iOS ${hard ? 'with a hardware keyboard: the caret stays' : 'soft keyboard: it goes down'} once all is in',
+          (tester) async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+        addTearDown(() => lastHardwareKey = null);
+        try {
+          if (hard) lastHardwareKey = DateTime.now();
+          big(tester);
+          rs.setProfile(const ResolvedProfile(afterSend: AfterSend.none));
+          await tester.pumpWidget(layer());
+          await tester.pump();
+          await tester.enterText(fieldFinder, 'a');
+          await tester.tap(find.byKey(const Key('composer-send')));
+          await tester.pump();
+          expect(fieldFocused(tester), isTrue, reason: 'still sending');
+          rs.apply(const ComposerStateEvent(1, done: ComposerDone(1, null)));
+          await tester.pump();
+          expect(rs.composer.open, isTrue);
+          expect(fieldFocused(tester), hard);
+        } finally {
+          debugDefaultTargetPlatformOverride = null;
+        }
+      });
+    }
+
+    testWidgets('iOS soft keyboard: a send that did not all go in keeps the caret', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      try {
+        big(tester);
+        rs.setProfile(const ResolvedProfile(afterSend: AfterSend.none));
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        await tester.enterText(fieldFinder, 'a');
+        await tester.tap(find.byKey(const Key('composer-send')));
+        await tester.pump();
+        rs.apply(const ComposerStateEvent(1, done: ComposerDone(0, '没有发出去')));
+        await tester.pump();
+        expect(fieldFocused(tester), isTrue);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
     });
 
     testWidgets('the send button sends, and waits while a send runs', (tester) async {
@@ -929,6 +975,101 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.text('重试'), findsOneWidget);
       expect(find.text('放回输入框'), findsOneWidget);
+    });
+  });
+
+  group('还原', () {
+    late RemoteSession rs;
+    late FakeSessionPort zport;
+    const stage = Size(1000, 700);
+
+    RemoteWindow zw(int id) => RemoteWindow(
+        id: id,
+        parent: 0,
+        kind: WindowKind.normal,
+        title: 'w$id',
+        rect: const Rect.fromLTWH(0, 0, 100, 100),
+        titleBar: 28,
+        resizable: true,
+        focused: true,
+        texture: id,
+        visible: const Rect.fromLTWH(0, 0, 1, 1));
+
+    RemoteSession make(SessionPort p) {
+      final r = RemoteSession(1, 'Safari', onView: (w, rect, z) => p.setView(1, w, rect, z));
+      r.apply(WindowsEvent(1, [zw(7)]));
+      return r;
+    }
+
+    Widget layerFor(SessionPort p) => wrap(SizedBox(
+        width: 1000,
+        height: 700,
+        child: Stack(children: composerLayer(state: es, session: rs, port: p, editor: FlutterEditor.new))));
+
+    // The restore runs on frame callbacks: the first only starts the clock, the tail timer keeps 1 s.
+    Future<void> restored(WidgetTester tester) async {
+      for (var i = 0; i < 4; i++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      await tester.pump(const Duration(seconds: 2));
+    }
+
+    void zoom() => rs.zoomOf(7).zoomTo(2, const Offset(500, 350), fitRect(const Size(100, 100), stage), stage);
+
+    setUp(() {
+      zport = FakeSessionPort();
+      rs = make(zport);
+    });
+    tearDown(() => rs.dispose());
+
+    testWidgets('zoom-reset shows only while the current window is zoomed', (tester) async {
+      await tester.pumpWidget(layerFor(zport));
+      expect(find.byKey(const Key('zoom-reset')), findsNothing);
+      zoom();
+      await tester.pump();
+      expect(find.byKey(const Key('zoom-reset')), findsOneWidget);
+      expect(tester.getRect(find.byKey(const Key('zoom-reset'))).right,
+          lessThan(tester.getRect(find.byKey(const Key('composer-open'))).left));
+      rs.zoomOf(7).restore();
+      await restored(tester);
+      expect(find.byKey(const Key('zoom-reset')), findsNothing);
+    });
+
+    testWidgets('zoom-reset restores and sends unlimited once', (tester) async {
+      await tester.pumpWidget(layerFor(zport));
+      rs.view.settled(7, const Rect.fromLTWH(10, 10, 20, 20), const Size(100, 100), 2);
+      zoom();
+      await tester.pump();
+      final before = zport.calls.where((c) => c.$1 == 'set_view').length;
+      await tester.tap(find.byKey(const Key('zoom-reset')));
+      await restored(tester);
+      expect(rs.zoomOf(7).z, 1);
+      final sent = zport.calls.where((c) => c.$1 == 'set_view').toList();
+      expect(sent.length, before + 1);
+      expect(sent.last.$2['window'], 0);
+    });
+
+    testWidgets('hidden while the writing panel is open', (tester) async {
+      zoom();
+      await tester.pumpWidget(layerFor(zport));
+      expect(find.byKey(const Key('zoom-reset')), findsOneWidget);
+      rs.composer.open = true;
+      await tester.pump();
+      expect(find.byKey(const Key('zoom-reset')), findsNothing);
+    });
+
+    testWidgets('terminal: zoom-reset restores the terminal zoom and sends nothing', (tester) async {
+      final tport = FakeTermSessionPort();
+      addTearDown(tport.dispose);
+      rs.dispose();
+      rs = make(tport);
+      await tester.pumpWidget(layerFor(tport));
+      zoom();
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('zoom-reset')));
+      await restored(tester);
+      expect(rs.zoomOf(7).z, 1);
+      expect(tport.calls.where((c) => c.$1 == 'set_view'), isEmpty);
     });
   });
 

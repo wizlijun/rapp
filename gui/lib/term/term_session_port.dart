@@ -100,6 +100,10 @@ class TermSessionPort extends SessionPort {
     return null;
   }
 
+  /// No zoomed view here: a terminal or a Linux host has nothing to narrow.
+  @override
+  void setView(Object sid, int window, Rect rect, double zoom) {}
+
   /// The latest view's columns and rows sent to any terminal.
   int? lastCols, lastRows;
 

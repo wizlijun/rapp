@@ -1,6 +1,7 @@
 import Foundation
 
-/// Protocol v13 = v12 + host hints: covered (a press was dropped because another app's window was on
+/// Protocol v14 = v13 + setView (client -> host: which part of a window B shows; window 0 = all).
+/// v13 = v12 + host hints: covered (a press was dropped because another app's window was on
 /// top) with dismissCover to close it, appOpened (another app came to the front right after B's
 /// input) and secureFocus (A's keyboard focus is in a password field).
 /// v12 = v11 + focusRegion (host -> client: which part of a window has focus) and a focus bit
@@ -8,7 +9,7 @@ import Foundation
 /// ping/pong and the saving ladder: B's setStream values are its ceiling and its pinned byte means
 /// "automatic saving off") + desktop sessions: screenLocked/unlock for the remote lock screen.
 /// The host and client must both speak exactly this version.
-public let protocolVersion: UInt8 = 13
+public let protocolVersion: UInt8 = 14
 
 /// The longest system password `unlock` carries, in UTF-8 bytes.
 public let unlockPasswordLimit = 1024
@@ -142,6 +143,7 @@ public enum Message: Equatable {
     /// the host may close it on `dismissCover`; never for system security or password prompts.
     case covered(id: UInt32, name: String, bundleID: String, dismissable: Bool)              // 37, host -> client (v13)
     /// Close the covering window of a `covered` that said dismissable; dropped otherwise.
+    case setView(window: UInt32, rect: CanvasRect)                                           // 41, client -> host (v14)
     case dismissCover(UInt32)                                                                // 38, client -> host (v13)
     /// Another regular app came to the front right after this session's input (a link, a preview).
     case appOpened(bundleID: String, name: String)                                           // 39, host -> client (v13)
@@ -277,6 +279,9 @@ public enum Message: Equatable {
         case let .covered(id, name, bundleID, dismissable):
             type = 37
             w.u32(id); w.string(name); w.string(bundleID); w.u8(dismissable ? 1 : 0)
+        case let .setView(window, rect):
+            type = 41
+            w.u32(window); w.rect(rect)
         case let .dismissCover(id):
             type = 38
             w.u32(id)
@@ -426,6 +431,8 @@ public enum Message: Equatable {
             let id = try r.u32(), name = try r.string(), bundleID = try r.string(), flag = try r.u8()
             guard flag <= 1 else { throw CodecError("bad dismissable flag") }
             message = .covered(id: id, name: name, bundleID: bundleID, dismissable: flag == 1)
+        case 41:
+            message = .setView(window: try r.u32(), rect: try r.rect())
         case 38:
             message = .dismissCover(try r.u32())
         case 39:
@@ -442,7 +449,7 @@ public enum Message: Equatable {
     }
 }
 
-private let knownTypes: Set<UInt8> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40]
+private let knownTypes: Set<UInt8> = [1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41]
 
 /// Turns a byte stream into messages. Feed it whatever the socket delivers
 /// with `append`, then call `next()` until it returns nil.

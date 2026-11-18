@@ -328,6 +328,8 @@ final class Session {
     private var table: [WindowInfo] = []
     /// The capture region last asked for (canvas points).
     private var region: CanvasRect?
+    /// The part of a window B shows (setView); nil captures the whole region.
+    private var view: (window: UInt32, rect: CanvasRect)?
     /// The canvas display in global points.
     private var display = CGRect.zero
 
@@ -402,7 +404,7 @@ final class Session {
     private func handle(_ message: Message) {
         // Every command from B passes one gate; only input can be held back (R7).
         switch message {
-        case .text, .key, .mouse, .scroll, .paste, .focus, .menuPick, .setStream, .resize, .move, .close, .selectInput, .unlock, .dismissCover:
+        case .text, .key, .mouse, .scroll, .paste, .focus, .menuPick, .setStream, .setView, .resize, .move, .close, .selectInput, .unlock, .dismissCover:
             guard started, !failing, admit(message) else { return }
         default:
             break
@@ -513,6 +515,9 @@ final class Session {
             unlock(password)
         case let .dismissCover(id):
             dismissCover(id)
+        case let .setView(window, rect):
+            view = viewFor(window: window, rect: rect)
+            applyRegion(table)
         case .ready, .error, .frame, .windows, .menuBar, .clip, .pasted, .fetch, .put, .transferStart, .chunk, .inputBlocked, .weak,
              .inputSource, .pong, .saving, .screenLocked, .focusRegion, .covered, .appOpened, .secureFocus:
             fail("unexpected message from client")
@@ -929,13 +934,18 @@ final class Session {
                 scheduleMenuRead(after: 0.5)
             }
         }
-        if let newRegion = captureRegion(windows: next, display: display.size), newRegion != region {
-            region = newRegion
-            // No encoder reset: each frame carries its own region and B keeps
-            // the decoded picture, so a diff against the previous frame stays
-            // correct; a new pixel size moves the canvas, and only a density change sends a full frame.
-            Task { await capture.setRegion(newRegion) }
-        }
+        applyRegion(next)
+    }
+
+    /// Follows the view and the windows with the capture region. No encoder reset: each frame
+    /// carries its own region and B keeps the decoded picture, so a diff against the previous
+    /// frame stays correct; a new pixel size moves the canvas, and only a density change sends a full frame.
+    private func applyRegion(_ windows: [WindowInfo]) {
+        guard !ended, let capture,
+              let new = regionChange(view: view, windows: windows, display: display.size, current: region) else { return }
+        region = new
+        output.log("region: \(Int(new.x)),\(Int(new.y)) \(Int(new.w))\u{00D7}\(Int(new.h))")
+        Task { await capture.setRegion(new) }
     }
 
     /// Runs on the capture queue.

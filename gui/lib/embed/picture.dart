@@ -1,12 +1,16 @@
 // The remote window's picture on the stage: the runner's texture, letterboxed. Presses, drags,
 // wheels and trackpad scrolls on it go to A; it holds the keys whenever nothing else wants them,
 // without a press. On a touchscreen a two-finger swipe scrolls A (P3, docs/superpowers/specs/2026-11-13-rapp-touch-scroll-design.md).
+// On an iPad two fingers pinch-zoom the picture on B; A is told only which part of the window shows
+// (docs/superpowers/specs/2026-11-18-rapp-pinch-zoom-design.md §6).
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
+import '../platform_caps.dart' show pinchZoom;
 import '../ui/keep_focus.dart';
 import '../ui/main_state.dart';
 import '../ui/rule_snack.dart';
@@ -16,7 +20,9 @@ import 'geometry.dart';
 import 'pointer.dart';
 import 'remote_session.dart';
 import 'session_port.dart';
+import 'touch_gestures.dart';
 import 'window_tabs.dart';
+import 'zoom_view.dart';
 
 class Picture extends StatefulWidget {
   const Picture({
@@ -25,6 +31,7 @@ class Picture extends StatefulWidget {
     required this.session,
     required this.window,
     this.frozen = false,
+    this.keyboard = 0,
   });
 
   /// Where focus and input go: `state.port`, `state.focusPicture`.
@@ -34,6 +41,10 @@ class Picture extends StatefulWidget {
 
   /// Offline: the last frame stays, and nothing reaches the port.
   final bool frozen;
+
+  /// How far the soft keyboard reaches up over the stage's bottom: a zoomed view can go up over it, and
+  /// what it covers is not seen.
+  final double keyboard;
 
   @override
   State<Picture> createState() => _PictureState();
@@ -48,13 +59,28 @@ class _Target {
   bool get usable => fit.width > 0 && fit.height > 0;
 }
 
-class _PictureState extends State<Picture> {
+class _PictureState extends State<Picture> implements TouchSink {
   final _focus = FocusNode();
   late final _clicks = ClickCounter(widget.state.doubleClick);
 
-  /// From the last layout: the window content's rect on the stage, and the texture's part of it.
+  /// From the last layout: the window content's rect on the stage (zoomed), and where a press on it counts:
+  /// the texture's part, or over the base picture all of the content on the stage.
   Rect _fit = Rect.zero;
   Rect _pic = Rect.zero;
+
+  /// From the last layout: the content's rect at z 1, the stage's size, the keyboard's reach and the
+  /// window's content size. Zoomed, a change of any of them shows another part of the window: A is told.
+  Rect _fit1 = Rect.zero;
+  Size _stage = Size.zero;
+  double _keyboard = 0;
+  Size _content = Size.zero;
+
+  /// The shown window's zoom (its session keeps it), and when A is told what of it shows: 150 ms after the
+  /// view stopped moving, and after the next layout once the window or session changed.
+  late ZoomView _zoom;
+  Timer? _settleTimer;
+  bool _viewDue = true;
+  static const _settleDelay = Duration(milliseconds: 150);
 
   /// The button held since a press on the picture (`left|right`), the pointer that pressed it,
   /// and that press's click count.
@@ -62,24 +88,13 @@ class _PictureState extends State<Picture> {
   int? _buttonPointer;
   int _count = 1;
 
-  /// Touch (P3): where each finger on the picture is now; a first finger's press not yet sent
-  /// (T1); and whether the fingers are scrolling (until all are up, T4).
-  final _touches = <int, Offset>{};
-  PointerDownEvent? _pending;
-  Timer? _pendingTimer;
-  bool _touchScroll = false;
+  /// Touch (P3): fingers on the picture, turned into presses, drags, scrolls and right taps (T1–T8).
+  late final _touch = TouchGestures(sink: this, zoom: () => _zoom.z, inside: _inside, zoomable: pinchZoom);
 
-  static const _touchSlop = 8.0;
-  static const _touchHold = Duration(milliseconds: 150);
-
-  // T8: two fingers that land, stay within 8 px of where their midpoint started and lift within
-  // 250 ms are a right click there; the motion held back until they move is not sent meanwhile.
-  static const _twoTapTime = Duration(milliseconds: 250);
-  static const _twoTapSlop = 8.0;
-  Duration _twoAt = Duration.zero;
-  Offset _twoStart = Offset.zero;
-  bool _twoMoved = false;
-  Offset _twoBuffer = Offset.zero;
+  bool _inside(Offset p) {
+    final t = _at(p);
+    return t.usable && t.pic.contains(p);
+  }
 
   RemoteWindow get _win => widget.window;
   Object get _sid => widget.session.sid;
@@ -115,80 +130,15 @@ class _PictureState extends State<Picture> {
     widget.state.port?.scroll(_sid, t.win.id, p.dx, p.dy, d.dx, d.dy);
   }
 
-  // T3: the fingers' moves of one event batch add up to the centre's move, sent once.
-  Offset _scrollAcc = Offset.zero;
-  Offset _scrollAt = Offset.zero;
-  bool _scrollQueued = false;
-
-  void _touchScrollBy(Offset centre, Offset delta) {
-    if (!_twoMoved) {
-      _twoBuffer += delta;
-      if ((centre - _twoStart).distance <= _twoTapSlop) return;
-      _twoMoved = true;
-      delta = _twoBuffer;
-      _twoBuffer = Offset.zero;
-    }
-    _scrollAcc += delta;
-    _scrollAt = centre;
-    if (_scrollQueued) return;
-    _scrollQueued = true;
-    scheduleMicrotask(() {
-      _scrollQueued = false;
-      final d = _scrollAcc;
-      _scrollAcc = Offset.zero;
-      if (mounted) _scroll(_scrollAt, panToRemote(d));
-    });
-  }
-
   void _down(PointerDownEvent e) {
-    if (e.kind == PointerDeviceKind.touch) return _touchDown(e);
+    if (e.kind == PointerDeviceKind.touch) return _touch.down(e);
     _press(e);
   }
 
-  void _touchDown(PointerDownEvent e) {
-    if (_touchScroll) {
-      _twoMoved = true; // T5: not counted, its moves and lift are ignored; and no longer a two-finger tap
-      return;
-    }
-    _touches[e.pointer] = e.localPosition;
-    if (_pending != null || (_button == null && _touches.length > 1)) {
-      // T1: a second finger while the first is held back (or rests in the letterbox, or stayed
-      // after a press it was ignored for) — scroll; a held-back press never happened.
-      _dropPending();
-      _touchScroll = true;
-      _twoAt = e.timeStamp;
-      _twoStart = _centre;
-      _twoMoved = false;
-      _twoBuffer = Offset.zero;
-      if (_at(_centre).pic.contains(_centre)) {
-        _focus.requestFocus();
-        widget.state.focusPicture(_sid); // T7
-      }
-      return;
-    }
-    if (_button != null) return; // T2
-    final t = _at(e.localPosition);
-    if (!t.usable || !t.pic.contains(e.localPosition)) return _press(e); // the letterbox: blurs now
-    _pending = e;
-    _pendingTimer = Timer(_touchHold, _flush);
-  }
+  @override
+  bool press(PointerDownEvent e) => _press(e);
 
-  /// Sends the held-back touch press (T1).
-  void _flush() {
-    final e = _pending;
-    _dropPending();
-    if (e != null) _press(e);
-  }
-
-  void _dropPending() {
-    _pendingTimer?.cancel();
-    _pendingTimer = null;
-    _pending = null;
-  }
-
-  Offset get _centre => _touches.values.reduce((a, b) => a + b) / _touches.length.toDouble();
-
-  void _press(PointerDownEvent e) {
+  bool _press(PointerDownEvent e) {
     final bit = e.buttons & kPrimaryButton != 0
         ? kPrimaryButton
         : e.buttons & kSecondaryButton != 0
@@ -200,7 +150,7 @@ class _PictureState extends State<Picture> {
       // The letterbox is outside the picture: like the top bar, a press there takes focus away.
       if (marking) widget.state.cancelMarkInput();
       widget.state.blurPicture();
-      return;
+      return false;
     }
     if (marking) {
       // 「标记输入区」: this click is the mark, A never sees it.
@@ -210,9 +160,9 @@ class _PictureState extends State<Picture> {
       } else {
         widget.state.cancelMarkInput();
       }
-      return;
+      return false;
     }
-    if (bit == 0 || _button != null) return;
+    if (bit == 0 || _button != null) return false;
     _focus.requestFocus();
     widget.state.focusPicture(_sid);
     _button = bit == kPrimaryButton ? 'left' : 'right';
@@ -220,48 +170,28 @@ class _PictureState extends State<Picture> {
     _held = t;
     _count = _clicks.down(e.localPosition, e.timeStamp, bit);
     _mouse('down', _button!, e.localPosition, t);
+    return true;
   }
 
   void _move(PointerMoveEvent e) {
-    if (e.kind == PointerDeviceKind.touch) {
-      final before = _touches[e.pointer];
-      if (before == null) return;
-      _touches[e.pointer] = e.localPosition;
-      if (_touchScroll) {
-        // T3: the centre moves by this finger's move over the number of fingers.
-        return _touchScrollBy(_centre, (e.localPosition - before) / _touches.length.toDouble());
-      }
-      final p = _pending;
-      if (p != null) {
-        if (p.pointer != e.pointer || (e.localPosition - p.localPosition).distance <= _touchSlop) return;
-        _flush();
-      }
-    }
+    if (e.kind == PointerDeviceKind.touch) return _touch.move(e);
+    drag(e);
+  }
+
+  @override
+  void drag(PointerMoveEvent e) {
     final b = _button, t = _held;
     if (b == null || t == null || !t.usable || e.pointer != _buttonPointer) return;
     _mouse('drag', b, clampTo(e.localPosition, t.fit), t);
   }
 
   void _up(PointerEvent e) {
-    if (e.kind == PointerDeviceKind.touch) {
-      _touches.remove(e.pointer);
-      if (_touchScroll) {
-        if (_touches.isEmpty) {
-          _touchScroll = false; // T4
-          if (!_twoMoved && e is PointerUpEvent && e.timeStamp - _twoAt <= _twoTapTime) _twoTap();
-        }
-        return;
-      }
-    }
-    var at = e.localPosition;
-    if (e.kind == PointerDeviceKind.touch) {
-      final p = _pending;
-      if (p?.pointer == e.pointer) {
-        if (e is PointerCancelEvent) return _dropPending(); // T6
-        at = p!.localPosition; // a tap: up where it landed, the jitter never reached A
-        _flush();
-      }
-    }
+    if (e.kind == PointerDeviceKind.touch) return _touch.up(e);
+    release(e.localPosition, e);
+  }
+
+  @override
+  void release(Offset at, PointerEvent e) {
     final b = _button, t = _held;
     if (b == null || t == null || e.pointer != _buttonPointer) return;
     _button = null;
@@ -270,13 +200,68 @@ class _PictureState extends State<Picture> {
     if (t.usable) _mouse('up', b, clampTo(at, t.fit), t);
   }
 
+  @override
+  void scroll(Offset centre, Offset delta) => _scroll(centre, panToRemote(delta));
+
+  /// T7: a second finger landed on the picture takes the keys.
+  @override
+  void twoDown(Offset centre) {
+    if (!_inside(centre)) return;
+    _focus.requestFocus();
+    widget.state.focusPicture(_sid);
+  }
+
+  /// The view moves on B only; A hears of it once it stops ([settled]).
+  @override
+  void pan(Offset delta) {
+    _settleTimer?.cancel();
+    if (_fit1.isEmpty) return;
+    _zoom.panBy(delta, _fit1, _stage, keyboard: widget.keyboard);
+  }
+
+  @override
+  void zoom(double z, Offset focal) {
+    _settleTimer?.cancel();
+    if (_fit1.isEmpty) return;
+    // A pinch back to where it started lands on exactly 1 (not a hair above it): unzoomed again.
+    _zoom.zoomTo((z - 1).abs() < 1e-9 ? 1 : z, focal, _fit1, _stage, keyboard: widget.keyboard);
+  }
+
+  @override
+  void settled() {
+    _settleTimer?.cancel();
+    _settleTimer = Timer(_settleDelay, _sendView);
+  }
+
+  /// Tells A the part of the window seen now: the stage above the keyboard, on the zoomed content, in A's
+  /// content points (at z 1: the whole window).
+  void _sendView() {
+    _settleTimer?.cancel();
+    if (!mounted || _fit.isEmpty) return;
+    final win = _win, c = contentSize(win), z = _fit;
+    final s = Rect.fromLTWH(0, 0, _stage.width, math.max(0.0, _stage.height - widget.keyboard)).intersect(z);
+    if (s.width <= 0 || s.height <= 0) return;
+    final seen = Rect.fromLTRB(
+      (s.left - z.left) / z.width * c.width,
+      (s.top - z.top) / z.height * c.height,
+      (s.right - z.left) / z.width * c.width,
+      (s.bottom - z.top) / z.height * c.height,
+    );
+    widget.session.view.settled(win.id, seen, c, _zoom.z);
+  }
+
+  void _zoomed() {
+    if (mounted) setState(() {});
+  }
+
   /// T8: a quick two-finger tap is a right click where the two fingers landed (not in the letterbox).
-  void _twoTap() {
-    final t = _at(_twoStart);
-    if (!t.usable || !t.pic.contains(_twoStart)) return;
+  @override
+  void rightTap(Offset at) {
+    final t = _at(at);
+    if (!t.usable || !t.pic.contains(at)) return;
     _count = 1;
-    _mouse('down', 'right', _twoStart, t);
-    _mouse('up', 'right', _twoStart, t);
+    _mouse('down', 'right', at, t);
+    _mouse('up', 'right', at, t);
   }
 
   void _hover(PointerHoverEvent e) {
@@ -296,15 +281,15 @@ class _PictureState extends State<Picture> {
     }
   }
 
-  // A trackpad gesture begins and ends with nothing carried over; the updates do the scrolling.
-  void _panReset(PointerEvent _) => _scrollAcc = Offset.zero;
-
-  void _pan(PointerPanZoomUpdateEvent e) =>
-      _scroll(e.localPosition, panToRemote(e.localPanDelta));
+  void _pan(PointerPanZoomUpdateEvent e) {
+    _touch.panZoomUpdate(e);
+    _scroll(e.localPosition, panToRemote(e.localPanDelta));
+  }
 
   @override
   void initState() {
     super.initState();
+    _zoom = widget.session.zoomOf(widget.window.id)..addListener(_zoomed);
     widget.session.composer.addListener(_settleSoon);
     FocusManager.instance.addListener(_settleSoon);
   }
@@ -343,11 +328,7 @@ class _PictureState extends State<Picture> {
     super.didUpdateWidget(old);
     if (!old.frozen && widget.frozen) {
       // Gestures in flight at the drop end here: nothing more reaches the port.
-      _dropPending();
-      _touches.clear();
-      _touchScroll = false;
-      _scrollAcc = Offset.zero;
-      _twoBuffer = Offset.zero;
+      _touch.reset();
       _button = null;
       _buttonPointer = null;
       _held = null;
@@ -357,7 +338,16 @@ class _PictureState extends State<Picture> {
       widget.session.composer.addListener(_settleSoon);
     }
     // A held-back press belongs to the window it landed on; never send it to another.
-    if (old.window.id != widget.window.id || old.session.sid != widget.session.sid) _dropPending();
+    if (old.window.id != widget.window.id || old.session.sid != widget.session.sid) _touch.dropPending();
+    if (old.window.id != widget.window.id || !identical(old.session, widget.session)) {
+      _zoom.removeListener(_zoomed);
+      _zoom = widget.session.zoomOf(widget.window.id)..addListener(_zoomed);
+      _settleTimer?.cancel();
+      // The old session's A shows its whole window again; the window shown now gets its own view (a
+      // reconnect's fresh session took the zoom over without telling A).
+      if (!identical(old.session, widget.session)) old.session.view.unlimited();
+      _viewDue = true;
+    }
     // A held button belongs to its session: release it there now, or A keeps it down.
     final b = _button, t = _held;
     if (old.session.sid != widget.session.sid && b != null && t != null) {
@@ -370,9 +360,13 @@ class _PictureState extends State<Picture> {
 
   @override
   void dispose() {
+    _settleTimer?.cancel();
+    _zoom.removeListener(_zoomed);
+    // Off the stage (全景, another screen): A's thumbnails want the whole window.
+    widget.session.view.unlimited();
     widget.session.composer.removeListener(_settleSoon);
     FocusManager.instance.removeListener(_settleSoon);
-    _dropPending();
+    _touch.dispose();
     _focus.dispose();
     super.dispose();
   }
@@ -456,14 +450,34 @@ class _PictureState extends State<Picture> {
     }
     return LayoutBuilder(
       builder: (context, c) {
-        final fit = fitRect(contentSize(win), c.biggest);
-        final pic = pictureRect(fit, win.visible);
-        _fit = fit;
-        _pic = pic;
+        final stage = c.biggest, content = contentSize(win);
+        // Rotation, Split View, a fold, the keyboard or A's resize: settled like a pan (a send due anyway wins).
+        if (_zoom.z > 1 && !_viewDue && (stage != _stage || widget.keyboard != _keyboard || content != _content)) {
+          settled();
+        }
+        _fit1 = fitRect(content, stage);
+        _stage = stage;
+        _keyboard = widget.keyboard;
+        _content = content;
+        final zfit = _zoom.zfit(_fit1, stage, keyboard: widget.keyboard);
+        final pic = pictureRect(zfit, win.visible);
+        _fit = zfit;
+        if (_viewDue) {
+          _viewDue = false;
+          WidgetsBinding.instance.addPostFrameCallback((_) => _sendView());
+        }
+        final base = win.baseTexture;
+        final backdrop = _zoom.backdrop && base != null && win.visible != _whole && !zfit.isEmpty;
+        final onStage = Offset.zero & stage;
+        // Zoomed, the base picture shows the window where the live one does not reach (yet): presses there go
+        // to A as well.
+        _pic = backdrop ? zfit.intersect(onStage) : pic;
+        final focusRect = _within(pic.inflate(1), onStage);
+        final markRect = _within(pic.inflate(2), onStage);
         final popups = <_Target>[];
-        if (fit.width > 0 && fit.height > 0) {
+        if (zfit.width > 0 && zfit.height > 0) {
           for (final p in popupsFor(widget.session.shown, win.id)) {
-            final frame = popupRect(p, win, fit);
+            final frame = popupRect(p, win, zfit);
             if (frame.width <= 0 || frame.height <= 0 || p.rect.width <= 0) {
               continue;
             }
@@ -492,7 +506,7 @@ class _PictureState extends State<Picture> {
               widget.state.blurPicture();
             }
           },
-          child: Stack(
+          child: ClipRect(child: Stack(
             children: [
               Positioned.fill(
                 child: IgnorePointer(
@@ -505,13 +519,16 @@ class _PictureState extends State<Picture> {
             onPointerCancel: _up,
             onPointerHover: _hover,
             onPointerSignal: _signal,
-            onPointerPanZoomStart: _panReset,
+            onPointerPanZoomStart: _touch.panZoomStart,
             onPointerPanZoomUpdate: _pan,
-            onPointerPanZoomEnd: _panReset,
+            onPointerPanZoomEnd: _touch.panZoomEnd,
             child: ColoredBox(
               color: t.bg,
               child: Stack(
                 children: [
+                  // Zoomed: the whole window's last low-res picture under the live part, for where the live
+                  // one does not reach (yet).
+                  if (backdrop) Positioned.fromRect(rect: zfit, child: Texture(textureId: base)),
                   Positioned.fromRect(
                     rect: pic,
                     child: windowSurface(win),
@@ -528,15 +545,15 @@ class _PictureState extends State<Picture> {
                           return const SizedBox.shrink();
                         }
                         return focusGray(pic.size, frameColor: t.on, [
-                          for (final r in f.rects) fromRemoteRect(r, fit, win).shift(-pic.topLeft),
+                          for (final r in f.rects) fromRemoteRect(r, zfit, win).shift(-pic.topLeft),
                         ]);
                       },
                     ),
                   ),
-                  if (focused)
+                  if (focused && focusRect != null)
                     // 1px outside the picture, kept on the stage when the picture fills it.
                     Positioned.fromRect(
-                      rect: pic.inflate(1).intersect(Offset.zero & c.biggest),
+                      rect: focusRect,
                       child: IgnorePointer(
                         key: const Key('picture-focus'),
                         child: DecoratedBox(
@@ -546,10 +563,10 @@ class _PictureState extends State<Picture> {
                         ),
                       ),
                     ),
-                  ?_inputMark(t, win, fit),
-                  if (widget.state.markingInput == _sid)
+                  ?_inputMark(t, win, zfit),
+                  if (widget.state.markingInput == _sid && markRect != null)
                     Positioned.fromRect(
-                      rect: pic.inflate(2).intersect(Offset.zero & c.biggest),
+                      rect: markRect,
                       child: IgnorePointer(
                         key: const Key('picture-marking'),
                         child: DecoratedBox(
@@ -572,11 +589,19 @@ class _PictureState extends State<Picture> {
                   if (p.win.kind == WindowKind.sheet || p.win.kind == WindowKind.popover)
                   _popupClose(t, p, c.biggest),
             ],
-          ),
+          )),
         ));
       },
     );
   }
+}
+
+const _whole = Rect.fromLTWH(0, 0, 1, 1);
+
+/// [r] cut to [stage]; null when nothing of it is on the stage (a zoomed picture panned away).
+Rect? _within(Rect r, Rect stage) {
+  final i = r.intersect(stage);
+  return i.width > 0 && i.height > 0 ? i : null;
 }
 
 /// The marked input box: a small ring on the main window's picture, where a send clicks first.

@@ -544,3 +544,7 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [x] 干净 worktree `rapp-linux-0146` 构建产物位于 `dist/linux-0.14.6/`。两包 33 个文件摘要一致，13 个 ELF 依赖解析通过；BUILD-INFO、版本/协议、SHA256 匹配。最终包空 app 握手与完整桌面串流连续三次通过。
 - [x] [v0.14.6 Release](https://github.com/wizlijun/rapp/releases/tag/v0.14.6) 已公开，Arch 安装包、便携包、SHA256SUMS 的 GitHub 大小与摘要均匹配本地；latest=false 保留 macOS 0.14.5 更新入口。网站备用下载快照已更新，未部署网站。
 - 本机继续运行用户已验证的 0.14.3-2 修复包；此次正式发布未再次替换本机程序。未在本机进行 macOS/iOS 真机验收。
+## iPad 捏合缩放与局部串流（2026-11-18，feat/pinch-zoom）
+
+- [x] 协议 v14 `setView`、A 端按取景截局部、iOS 双指缩放（App 画面和文本终端）、底图、「还原」按钮已实现；规格 `docs/superpowers/specs/2026-11-18-rapp-pinch-zoom-design.md`，iPad 规格里的"不做捏合缩放"已改成指向它。
+- [ ] 真机验收 1–8（Duo 和 iPad 各一遍，条目见该规格 §8「真机验收」）：不放大时行为不变；捏合放大和平移、按住再拖选字；流量不超过不放大时；平移不露黑边；输入板和软键盘；断网重连后取景还在，且 App 和桌面会话（A 端）各自在 `setView` 之后都记了 `region:` 日志（第 6 项，Task 8 留下的检查）；「还原」按钮；文本终端的放大、平移、滚回历史、选字。

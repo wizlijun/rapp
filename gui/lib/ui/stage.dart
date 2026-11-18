@@ -44,10 +44,11 @@ Widget offlineBarFor(MainState state, SessionRecord rec) => OfflineBar(
 /// whatever `app_key_row` holds. The row, its latch and the pref stay. The terminal's key row is not this one.
 const showAppKeyRow = false;
 
-/// How far up the app key row sits off the stage's bottom: the soft keyboard's height. The keyboard's top edge is
+/// How far the soft keyboard reaches up over the stage's bottom: the app key row and the writing panel's layer stand
+/// on its top edge. The keyboard's top edge is
 /// measured from the view's bottom, and out of [fullscreen] the stage stands above the home bar (MainWindow's safe
 /// area), so the bar's height comes off; in fullscreen the stage reaches the view's bottom, so nothing does.
-double appKeyRowLift(MediaQueryData mq, {required bool fullscreen}) =>
+double keyboardLift(MediaQueryData mq, {required bool fullscreen}) =>
     math.max(0.0, mq.viewInsets.bottom - (fullscreen ? 0.0 : mq.viewPadding.bottom));
 
 class Stage extends StatelessWidget {
@@ -58,11 +59,11 @@ class Stage extends StatelessWidget {
   final bool fullscreen;
   final ComposerEditor Function()? composerEditor;
 
-  /// The app key row's place: [appKeyRowLift] up off the stage's bottom. Down on the stage's bottom
+  /// The app key row's place: [keyboardLift] up off the stage's bottom. Down on the stage's bottom
   /// line it keeps off 「输入」 (12 + 48 + 8 from the right): centred while it fits between two such margins, else
   /// from the left; beside the upload strip it goes up a line. Too narrow for all twelve, it scrolls.
   Widget _appKeyRow(BuildContext context, RemoteSession rs, {required bool showsInput}) {
-    final kb = appKeyRowLift(MediaQuery.of(context), fullscreen: fullscreen);
+    final kb = keyboardLift(MediaQuery.of(context), fullscreen: fullscreen);
     final onLine = kb < 12 + 48;
     final input = showsInput && onLine && rs.composerAllowed && !rs.composer.open;
     final strip = showsInput && onLine && rs.transferStatus != null;
@@ -117,7 +118,8 @@ class Stage extends StatelessWidget {
             state.termPort?.owns(rs.sid) != true) {
           // A network drop: the same Picture, frozen, under the offline bar (never input, never a resize).
           picture = true;
-          body = Picture(state: state, session: rs, window: win, frozen: true);
+          body = Picture(state: state, session: rs, window: win, frozen: true,
+              keyboard: keyboardLift(MediaQuery.of(context), fullscreen: fullscreen));
         } else if (rs != null && state.termPort?.owns(rs.sid) == true && ((rec?.phase == Phase.live && rec?.lastSid == null) || (rec?.frozen == true && !rs.detached && rs.windows.isNotEmpty))) {
           // A terminal (live, or frozen by a network drop): its box lines need whole device pixels.
           full = true;
@@ -127,6 +129,7 @@ class Stage extends StatelessWidget {
               session: rs,
               port: state.termPort!,
               frozen: rec?.frozen == true,
+              keyboard: keyboardLift(MediaQuery.of(context), fullscreen: fullscreen),
             ));
         } else if (rec != null && (rec.phase == Phase.disconnected || rec.lastSid != null)) {
           // Dead, or reconnecting until the new picture swaps in (R10): the old frame under stripes.
@@ -146,7 +149,8 @@ class Stage extends StatelessWidget {
           );
         } else if (rs != null && !rs.detached && win != null) {
           picture = true;
-          body = Picture(state: state, session: rs, window: win);
+          body = Picture(state: state, session: rs, window: win,
+              keyboard: keyboardLift(MediaQuery.of(context), fullscreen: fullscreen));
         } else if (!(rs != null && rs.detached) && (cur.lamp == Lamp.connecting || rs != null)) {
           body = Row(
             mainAxisSize: MainAxisSize.min,
@@ -213,8 +217,9 @@ class Stage extends StatelessWidget {
           );
         }
         return LayoutBuilder(builder: (context, c) {
-          // The stage's size drives A's window size (R12); overlays never change it.
+          // The stage's size drives A's window size (R12); overlays never change it, nor does the soft keyboard.
           state.stageSize(c.biggest);
+          final keyboard = keyboardLift(MediaQuery.of(context), fullscreen: fullscreen);
           Widget stage = Container(
             key: const Key('stage'),
             alignment: Alignment.center,
@@ -235,7 +240,7 @@ class Stage extends StatelessWidget {
                 Positioned.fill(child: _lifted(state, rs, stage, keyRow: keyRow, narrow: c.maxWidth < keyRowWideAt)),
                 if (bar != null) Positioned(top: 0, left: 0, right: 0, child: bar),
                 ...composerLayer(state: state, session: rs, port: state.portOf(rs.sid)!,
-                    keyRow: keyRow, editor: composerEditor),
+                    keyRow: keyRow, keyboard: keyboard, editor: composerEditor),
               ],
             );
           }
@@ -249,7 +254,7 @@ class Stage extends StatelessWidget {
             children: [
               stage,
               if (!full && (picture || (rs != null && rs.detached)) && rs != null && port != null)
-                ...composerLayer(state: state, session: rs, port: port, editor: composerEditor),
+                ...composerLayer(state: state, session: rs, port: port, keyboard: keyboard, editor: composerEditor),
               // 按键排 over an app picture (iPad spec §8.3), while the picture has the keys or the writing panel is
               // open: on the soft keyboard's top edge when it is up, floating over the stage (Z1: no resize). Not
               // where the body fills the stage, as the writing panel's layer.

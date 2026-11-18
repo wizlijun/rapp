@@ -44,6 +44,8 @@ public final class EmbeddedSession {
     private var mode: Mode
     private var fps: UInt8
     private var choice: DensityChoice
+    /// What B shows of one window now (`setView`); nil for all of it.
+    private var view: (window: UInt32, range: CGSize, zoom: Float)?
     private var sentStream: (mode: Mode, fps: UInt8, density: Float)?
     private var pinned = false
     private var sentPinned = false
@@ -80,7 +82,7 @@ public final class EmbeddedSession {
         self.decoder = FrameDecoder(mode: address.mode)
         self.history = ClipHistory(pasteboard: pasteboard, limit: 50, log: { _ in })
         queue.setSpecific(key: queueKey, value: ())
-        link.density = captureDensity(zoom: 1, backingScale: backingScale, choice: choice)
+        link.density = viewDensity(zoom: 1, backingScale: backingScale, choice: choice, content: .zero, range: .zero)
         // The transfer queue reports on main; the runner hears it on the session queue, like every event.
         transfers.onStatus = { [weak self] status in self?.run { self?.showStatus(status) } }
         transfers.onProgress = { [weak self] in self?.post(.transferProgress($0)) }
@@ -109,6 +111,17 @@ public final class EmbeddedSession {
     public func setStream(mode: Mode, fps: UInt8, choice: DensityChoice, pinned: Bool = false, focus: Bool = false) {
         run {
             self.mode = mode; self.fps = fps; self.choice = choice; self.pinned = pinned; self.focus = focus
+            self.sendStreamIfChanged()
+        }
+    }
+
+    /// B now shows `rect` (A points) of window `window` at `zoom`: tells A, and keeps the pixel budget.
+    /// Window 0 lifts the limit (then `zoom` is 1).
+    public func setView(window: UInt32, rect: CanvasRect, zoom: Float) {
+        run {
+            guard !self.linkDown else { return }
+            self.link.send(.setView(window: window, rect: rect))
+            self.view = window == 0 ? nil : (window, CGSize(width: CGFloat(rect.w), height: CGFloat(rect.h)), zoom)
             self.sendStreamIfChanged()
         }
     }
@@ -320,9 +333,19 @@ public final class EmbeddedSession {
         table.map { SessionWindow(info: $0, visible: surfaces.visible($0.id) ?? CGRect(x: 0, y: 0, width: 1, height: 1)) }
     }
 
+    /// The capture density: the plain one, or (while a part of a known window is shown) the zoomed one
+    /// held to the pixel budget of the whole window.
+    private func streamDensity() -> Float {
+        guard let view, let info = table.first(where: { $0.id == view.window }) else {
+            return viewDensity(zoom: 1, backingScale: backingScale, choice: choice, content: .zero, range: .zero)
+        }
+        let content = CGSize(width: CGFloat(info.rect.w), height: CGFloat(info.rect.h - Float(info.titleBar)))
+        return viewDensity(zoom: CGFloat(view.zoom), backingScale: backingScale, choice: choice, content: content, range: view.range)
+    }
+
     private func sendStreamIfChanged() {
         guard !linkDown else { return }
-        let next = (mode: mode, fps: fps, density: captureDensity(zoom: 1, backingScale: backingScale, choice: choice))
+        let next = (mode: mode, fps: fps, density: streamDensity())
         guard streamChanged(from: sentStream, to: next) || pinned != sentPinned || focus != sentFocus else { return }
         sentStream = next
         sentPinned = pinned

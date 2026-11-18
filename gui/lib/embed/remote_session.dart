@@ -2,6 +2,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart' show Offset, Rect;
 
+import '../platform_caps.dart';
 import 'app_profile.dart';
 import 'composer_model.dart';
 import 'geometry.dart' show contentSize;
@@ -10,9 +11,15 @@ import 'session_port.dart';
 import 'stream_choice.dart';
 import 'window_rules.dart';
 import 'window_tabs.dart';
+import 'zoom_view.dart';
 
 /// Quiet seconds (no picture frame) after which a session that has shown one is idle.
 const idleAfter = 10;
+
+/// Tells when any window's zoom changed.
+class _Zooms extends ChangeNotifier {
+  void ping() => notifyListeners();
+}
 
 class RemoteSession extends ChangeNotifier {
   /// [onResize] is where the session's resize policy sends: window, width, height.
@@ -27,6 +34,7 @@ class RemoteSession extends ChangeNotifier {
       this.onReturn,
       this.onSelectInput,
       this.onClick,
+      this.onView,
       bool followNewTabs = true,
       DateTime Function()? clock})
       : policy = ResizePolicy(onResize ?? (_, _, _) {}),
@@ -80,9 +88,58 @@ class RemoteSession extends ChangeNotifier {
   /// Where the click on the marked text box goes: a left click at A point [at] of [window].
   final void Function(int window, Offset at)? onClick;
 
-  /// 「直接回车且隐藏」: everything is in A, so the Return goes and the panel hides (the text stays,
-  /// W6; the picture takes the keys back).
+  /// Where a view range goes (the runner's `set_view`): window, rect in content points, zoom.
+  final void Function(int window, Rect rect, double zoom)? onView;
+
+  /// When A is told which part of a window is seen.
+  late final ViewLink view = ViewLink((w, r, z) => onView?.call(w, r, z));
+
+  final Map<int, ZoomView> _zoomViews = {};
+  final _Zooms _zooms = _Zooms();
+
+  /// Notifies when any window's zoom does.
+  Listenable get zooms => _zooms;
+
+  /// The zoom of window [id], made on first use.
+  ZoomView zoomOf(int id) => _zoomViews.putIfAbsent(id, () => ZoomView()..addListener(_zooms.ping));
+  ZoomView? zoomIfAny(int id) => _zoomViews[id];
+
+  bool get currentZoomed {
+    final c = currentWindow;
+    return c != null && zoomIfAny(c)?.zoomed == true;
+  }
+
+  /// The current window goes back to its whole view, and A is told.
+  void restoreCurrent() {
+    final c = currentWindow;
+    if (c != null) zoomIfAny(c)?.restore();
+    view.unlimited();
+  }
+
+  /// A reconnect's new session takes over [old]'s zoomed windows.
+  void adoptZoom(RemoteSession old) {
+    // Every zoomed one: the fresh table may not be here yet (the old sid can close first); the next
+    // WindowsEvent drops those whose window is gone.
+    for (final e in old._zoomViews.entries) {
+      if (e.value.zoomed) zoomOf(e.key).adopt(e.value);
+    }
+  }
+
+  void _dropZooms() {
+    final ids = {for (final w in windows) w.id};
+    _zoomViews.removeWhere((id, z) {
+      if (ids.contains(id)) return false;
+      z.removeListener(_zooms.ping);
+      z.dispose();
+      return true;
+    });
+  }
+
+  /// Everything is in A. With only the soft keyboard (iPad, no hardware keyboard) the editor lets the caret go, so
+  /// the keyboard goes down and the panel with it; a hardware keyboard keeps typing.
+  /// 「直接回车且隐藏」: then the Return goes and the panel hides (the text stays, W6; the picture takes the keys back).
   void _allSent() {
+    if (!hardwareKeyboard()) composer.releaseFocus();
     if (profile.afterSend != AfterSend.pressReturn) return;
     onReturn?.call();
     composer.collapse();
@@ -276,9 +333,11 @@ class RemoteSession extends ChangeNotifier {
       case ReadyEvent():
         ready = true;
         appName = e.appName;
+        view.resend();
       case WindowsEvent():
         final old = windows;
         windows = e.windows;
+        _dropZooms();
         if (focus != null) {
           final f = focus!;
           final now = windows.where((w) => w.id == f.window).firstOrNull;
@@ -436,6 +495,11 @@ class RemoteSession extends ChangeNotifier {
 
   @override
   void dispose() {
+    for (final z in _zoomViews.values) {
+      z.removeListener(_zooms.ping);
+      z.dispose();
+    }
+    _zooms.dispose();
     termCtrl.dispose();
     policy.dispose();
     composer.removeListener(_composerChanged);

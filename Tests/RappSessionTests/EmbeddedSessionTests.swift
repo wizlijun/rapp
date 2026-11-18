@@ -439,6 +439,35 @@ final class EmbeddedSessionTests: XCTestCase {
         XCTAssertEqual(fps, 1)
     }
 
+    func testSetViewSendsViewAndBudgetedDensity() throws {
+        let link = FakeLink()
+        let (s, q) = make(link) { _ in }
+        let big = WindowInfo(id: 7, parent: 0, kind: .normal, resizable: true, focused: true,
+                             rect: CanvasRect(x: 0, y: 0, w: 800, h: 640), titleBar: 40, title: "Calc")
+        q.sync { link.feed(.windows([big])) }
+        func streams() -> [Float] {
+            link.sent.compactMap { if case let .setStream(_, _, d, _, _) = $0 { return d } else { return nil } }
+        }
+        func views() -> [Message] { link.sent.filter { if case .setView = $0 { return true } else { return false } } }
+        XCTAssertEqual(streams().last, captureDensity(zoom: 1, backingScale: 2, choice: .adaptive))
+        let rect = CanvasRect(x: 0, y: 0, w: 400, h: 300)
+        s.setView(window: 7, rect: rect, zoom: 2); q.sync {}
+        XCTAssertEqual(views(), [.setView(window: 7, rect: rect)])
+        let want = viewDensity(zoom: 2, backingScale: 2, choice: .adaptive,
+                               content: CGSize(width: 800, height: 600), range: CGSize(width: 400, height: 300))
+        XCTAssertEqual(streams().last, want)
+        XCTAssertNotEqual(want, captureDensity(zoom: 1, backingScale: 2, choice: .adaptive))
+        // The same view again: the stream is not re-sent (1 % rule).
+        let n = streams().count
+        s.setView(window: 7, rect: rect, zoom: 2); q.sync {}
+        XCTAssertEqual(streams().count, n)
+        // Window 0 lifts the limit: density back to the plain one.
+        let whole = CanvasRect(x: 0, y: 0, w: 0, h: 0)
+        s.setView(window: 0, rect: whole, zoom: 1); q.sync {}
+        XCTAssertEqual(streams().last, captureDensity(zoom: 1, backingScale: 2, choice: .adaptive))
+        XCTAssertEqual(views().last, .setView(window: 0, rect: whole))
+    }
+
     func testTrafficTicksAndResets() {
         let link = FakeLink()
         var events = [SessionEvent]()

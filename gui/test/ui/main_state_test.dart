@@ -2200,6 +2200,33 @@ void main() {
       });
     });
 
+    test('a reconnect keeps the zoom of the window (the new session takes it over)', () {
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(1, [rw(3)]));
+        st.remote[1]!.zoomOf(3).zoomTo(2, const Offset(100, 100), const Rect.fromLTWH(0, 0, 200, 200), const Size(200, 200));
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        st.reconnect('111/a');
+        a.flushMicrotasks();
+        port.emit(WindowsEvent(11, [rw(3)]));
+        expect(st.currentRemote!.sid, 11);
+        expect(st.remote[11]!.zoomIfAny(3)?.z, 2);
+        expect(st.remote[11]!.currentZoomed, true);
+      });
+    });
+
+    test('the old sid closing during a reconnect carries the zoom over before the fresh table arrives', () {
+      env((a, t, port, st, hints) {
+        port.emit(WindowsEvent(1, [rw(3)]));
+        st.remote[1]!.zoomOf(3).zoomTo(2, const Offset(100, 100), const Rect.fromLTWH(0, 0, 200, 200), const Size(200, 200));
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        st.reconnect('111/a');
+        a.flushMicrotasks();
+        port.emit(const ClosedEvent(1, 'quit'));
+        port.emit(WindowsEvent(11, [rw(3)]));
+        expect(st.remote[11]!.zoomIfAny(3)?.z, 2);
+      });
+    });
+
     test('the old sid closing during a reconnect carries its composer text over too (I3)', () {
       env((a, t, port, st, hints) {
         final c = st.remote[1]!.composer;

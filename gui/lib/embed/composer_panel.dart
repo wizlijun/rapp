@@ -534,11 +534,15 @@ class _ComposerPanelState extends State<ComposerPanel> {
 /// A terminal's [keyRow] (「按键排」) adds the six keys: on the panel's line at the stage's two bottom corners, with
 /// 「输入」 just left of the right group; on a stage narrower than [keyRowWideAt] with the panel open, a line of its
 /// own right above the panel.
+///
+/// With the soft keyboard up ([keyboard]: how far it reaches over the stage's bottom) all of it stands on the
+/// keyboard's top edge instead, the panel 8 above it; the picture under it stays as it is.
 List<Widget> composerLayer(
     {required MainState state,
     required RemoteSession session,
     required SessionPort port,
     bool keyRow = false,
+    double keyboard = 0,
     ComposerEditor Function()? editor}) {
   final both = Listenable.merge([session, session.composer, state.composerZoom]);
   final term = port is TermSessionPort ? port : null;
@@ -557,6 +561,7 @@ List<Widget> composerLayer(
                         key: ValueKey(session.sid),
                         session: session,
                         scale: state.composerScale,
+                        keyboard: keyboard,
                         onPlace: (p) => state.placeComposer(session, p),
                         child: ComposerPanel(
                           editor: editor,
@@ -570,7 +575,7 @@ List<Widget> composerLayer(
                     : Align(
                   alignment: Alignment.bottomCenter,
                   child: Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
+                    padding: EdgeInsets.only(bottom: 8 + keyboard),
                     child: SizedBox(
                       width: panelWidth(c.maxWidth, state.composerScale),
                       // The key row comes and goes before the panel; the panel stays the same element.
@@ -609,8 +614,9 @@ List<Widget> composerLayer(
               ? LayoutBuilder(
                   builder: (context, c) => open() && c.maxWidth < keyRowWideAt
                       ? const SizedBox.shrink() // above the panel instead
-                      : Align(
+                      : Container(
                           alignment: Alignment.bottomCenter,
+                          padding: EdgeInsets.only(bottom: keyboard),
                           child: TermKeyRow(port: term, sid: session.sid, ctrl: session.termCtrl, split: true, blocked: state.sendBlocked(session.sid)),
                         ),
                 )
@@ -619,14 +625,16 @@ List<Widget> composerLayer(
       ),
     Positioned(
       right: keys ? keyRowInset + keyRowGroupWidth + 8 : 12,
-      bottom: keys ? keyRowBottom : 12,
+      bottom: (keys ? keyRowBottom : 12) + keyboard,
       child: ListenableBuilder(
-        listenable: both,
+        listenable: Listenable.merge([both, session.zooms]),
         builder: (context, _) {
           final transfer = session.transferStatus;
           final button = session.composerAllowed;
+          final zoomed = session.currentZoomed && !session.composer.open;
           // An open panel hides it; a disallowed one is hidden, so the strip shows here.
-          if ((session.composer.open && button) || (transfer == null && !button)) return const SizedBox.shrink();
+          // 还原 shows even where 输入 is not allowed: else a zoomed such session could only be pinched back.
+          if ((session.composer.open && button) || (transfer == null && !button && !zoomed)) return const SizedBox.shrink();
           final t = RappTokens.of(context);
           return Listener(
             onPointerDown: (_) => state.holdForPanel(session),
@@ -644,6 +652,17 @@ List<Widget> composerLayer(
                   const SizedBox(width: 8),
                   RappButton.secondary(label: '取消', onPicture: true, onPressed: () => port.cancelTransfer(session.sid)),
                   const SizedBox(width: 8),
+                ],
+                if (zoomed) ...[
+                  RappButton.secondary(
+                    key: const Key('zoom-reset'),
+                    label: '还原',
+                    semanticLabel: '还原',
+                    icon: Icons.zoom_in_map,
+                    onPicture: true,
+                    onPressed: session.restoreCurrent,
+                  ),
+                  if (button) const SizedBox(width: 8),
                 ],
                 if (button)
                   RappButton.secondary(

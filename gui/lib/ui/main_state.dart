@@ -1725,6 +1725,7 @@ class MainState extends ChangeNotifier {
     if (gone == null) return;
     final to = fresh == null ? null : remote[fresh];
     final moved = to?.composer.adoptFrom(gone.composer);
+    to?.adoptZoom(gone);
     recorder.detach(gone, to: to, moved: moved);
     gone.dispose();
   }
@@ -1859,6 +1860,9 @@ class MainState extends ChangeNotifier {
           if (!_liveSid(s.sid)) return;
           portOf(s.sid)!.mouse(s.sid, w, 'down', 'left', at.dx, at.dy, 1);
           portOf(s.sid)!.mouse(s.sid, w, 'up', 'left', at.dx, at.dy, 1);
+        },
+        onView: (w, rect, z) {
+          if (_liveSid(s.sid)) portOf(s.sid)!.setView(s.sid, w, rect, z);
         },
         followNewTabs: !term);
     final prof = profiles.resolve(r.app);

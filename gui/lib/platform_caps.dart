@@ -55,6 +55,10 @@ class PlatformCaps {
 /// This platform's capabilities; tests may replace it.
 PlatformCaps caps = PlatformCaps.forOs(Platform.operatingSystem);
 
+/// Fingers and a trackpad's pinch zoom the picture and the terminal (pinch-zoom spec §6.2): iOS only, so macOS and
+/// Linux never zoom.
+bool get pinchZoom => defaultTargetPlatform == TargetPlatform.iOS;
+
 /// When the last hardware key event arrived (iOS: a keyboard is attached); null for never.
 DateTime? lastHardwareKey;
 
