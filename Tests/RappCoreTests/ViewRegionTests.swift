@@ -92,4 +92,49 @@ final class ViewRegionTests: XCTestCase {
             }
         }
     }
+
+    // MARK: what the host does with setView and table changes
+
+    private let rect = CanvasRect(x: 100, y: 100, w: 200, h: 150)
+
+    func testSetViewChangesRegionToViewRegion() {
+        let base = captureRegion(windows: [main], display: display)
+        let view = viewFor(window: 1, rect: rect)
+        XCTAssertEqual(view?.window, 1)
+        let new = regionChange(view: view, windows: [main], display: display, current: base)
+        XCTAssertEqual(new, viewRegion(view: view, windows: [main], display: display))
+        XCTAssertNotEqual(new, base)
+    }
+
+    func testTableChangeRecomputesWithSameView() {
+        let view = viewFor(window: 1, rect: rect)
+        let current = viewRegion(view: view, windows: [main], display: display)
+        let popup = win(2, .menu, 400, 120, 300, 200, parent: 1)
+        let table = [main, popup]
+        let new = regionChange(view: view, windows: table, display: display, current: current)
+        XCTAssertEqual(new, viewRegion(view: view, windows: table, display: display))
+        XCTAssertNotNil(new)
+        XCTAssertTrue(contains(new!, CanvasRect(x: 400, y: 120, w: 300, h: 200)))
+        // Nothing changed: no new region to apply.
+        XCTAssertNil(regionChange(view: view, windows: table, display: display, current: new))
+    }
+
+    func testWindowZeroReturnsToCaptureRegion() {
+        let view = viewFor(window: 1, rect: rect)
+        let zoomed = viewRegion(view: view, windows: [main], display: display)
+        let cleared = viewFor(window: 0, rect: rect)
+        XCTAssertNil(cleared)
+        XCTAssertEqual(regionChange(view: cleared, windows: [main], display: display, current: zoomed),
+                       captureRegion(windows: [main], display: display))
+    }
+
+    func testDesktopSessionHonoursSetView() {
+        let table = desktopTable(width: 1440, height: 900, title: "Desktop")
+        let full = CanvasRect(x: 0, y: 0, w: 1440, h: 900)
+        let view = viewFor(window: 1, rect: rect)
+        let new = regionChange(view: view, windows: table, display: display, current: full)
+        XCTAssertNotNil(new)
+        XCTAssertNotEqual(new, full)
+        XCTAssertTrue(contains(new!, rect))
+    }
 }

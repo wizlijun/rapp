@@ -157,6 +157,19 @@ public func viewRegion(view: (window: UInt32, rect: CanvasRect)?, windows: [Wind
     return clippedRoundedOut(minX: minX, minY: minY, maxX: maxX, maxY: maxY, display: display) ?? base
 }
 
+/// The view a `setView` leaves behind: window 0 clears it.
+public func viewFor(window: UInt32, rect: CanvasRect) -> (window: UInt32, rect: CanvasRect)? {
+    window == 0 ? nil : (window, rect)
+}
+
+/// The capture region to apply after the view or the window table changed;
+/// nil when it equals `current` (or there is no region), so nothing to apply.
+public func regionChange(view: (window: UInt32, rect: CanvasRect)?, windows: [WindowInfo], display: CGSize,
+                         current: CanvasRect?) -> CanvasRect? {
+    guard let next = viewRegion(view: view, windows: windows, display: display), next != current else { return nil }
+    return next
+}
+
 /// Where a window's content (below its A title row) is in a frame of
 /// `pixelWidth` x `pixelHeight` pixels covering `region`, in whole pixels
 /// from the frame's top-left (spec §4.4). Only the part inside the region;
