@@ -168,6 +168,48 @@ void main() {
       expect(f.calls.where((c) => !c.startsWith('scroll') && !c.startsWith('twoDown')), isEmpty);
     });
 
+    testWidgets('side by side fingers each swiping 14 px in one batch scroll', (tester) async {
+      // One finger's move alone (centre 7, distance 14) looks like a pinch; the whole batch does not.
+      final f = _Fingers();
+      f.down(1, const Offset(100, 100));
+      f.down(2, const Offset(140, 100));
+      f.moveBy(1, const Offset(14, 0));
+      f.moveBy(2, const Offset(14, 0));
+      await tester.pump();
+      expect(f.calls, ['twoDown 120.0,100.0', 'scroll 134.0,100.0 14.0,0.0']);
+      f.up(1);
+      f.up(2);
+      await _wait(tester, f, 300);
+      expect(f.calls.length, 2);
+    });
+
+    testWidgets('a symmetric spread of 17 px per finger in one batch pinches', (tester) async {
+      // One finger's move alone (centre 8.5) looks like a scroll; the whole batch leaves the centre where it was.
+      final f = _Fingers();
+      f.down(1, const Offset(100, 100));
+      f.down(2, const Offset(140, 100));
+      f.moveBy(1, const Offset(-17, 0));
+      f.moveBy(2, const Offset(17, 0)); // 74 apart
+      await tester.pump();
+      expect(f.calls, ['twoDown 120.0,100.0', 'zoom 1.85 120.0,100.0', 'pan 0.0,0.0']);
+      f.up(1);
+      f.up(2);
+      await _wait(tester, f, 300);
+      expect(f.calls.last, 'settled');
+    });
+
+    testWidgets('moves past the slop lifted in the same batch are not a right tap', (tester) async {
+      final f = _Fingers();
+      f.down(1, const Offset(100, 100));
+      f.down(2, const Offset(140, 100));
+      f.moveBy(1, const Offset(0, -20));
+      f.moveBy(2, const Offset(0, -20));
+      f.up(1);
+      f.up(2);
+      await _wait(tester, f, 300);
+      expect(f.calls, ['twoDown 120.0,100.0', 'scroll 120.0,80.0 0.0,-20.0']);
+    });
+
     testWidgets('a quick two-finger tap is a right tap at the start centre', (tester) async {
       final f = _Fingers();
       f.down(1, const Offset(100, 100));

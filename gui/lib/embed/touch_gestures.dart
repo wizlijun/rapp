@@ -93,13 +93,14 @@ class TouchGestures {
   /// The view moved during this gesture (a pan or a pinch): [TouchSink.settled] when all fingers are up.
   bool _viewMoved = false;
 
-  /// T3: one scroll (or one pinch step) per event batch; [_batch] goes up at every [reset], so a batch queued before
-  /// it is dropped.
+  /// T3: the fingers' moves of one event batch are taken together, once all of them are in: the scroll or pinch
+  /// decision, one scroll, one pinch step. iOS hands the moved fingers over one by one, so a single finger's move is
+  /// half a batch. [_batch] goes up at every [reset], so a batch queued before it is dropped.
   Offset _scrollAcc = Offset.zero;
   Offset _scrollAt = Offset.zero;
-  bool _scrollQueued = false;
+  bool _scrollPending = false;
   bool _pinchDirty = false;
-  bool _pinchQueued = false;
+  bool _batchQueued = false;
   int _batch = 0;
 
   /// A trackpad gesture: the zoom at its start, and whether it zoomed.
@@ -173,27 +174,62 @@ class TouchGestures {
     if (e.pointer == _pressed) sink.drag(e);
   }
 
-  /// One counted finger of a two-finger gesture moved; the centre moved by [delta].
+  /// One counted finger of a two-finger gesture moved; the centre moved by [delta]. Taken up at the batch's end.
   void _twoMove(Offset delta) {
-    if (_two == _Two.undecided) {
-      _twoBuffer += delta;
-      final centre = _centre;
-      if ((centre - _twoStart).distance > twoTapSlop) {
-        _two = _Two.scroll;
-      } else if (zoomable && _touches.length > 1 && _pinchDistanceChange() > pinchSlop) {
-        _two = _Two.pinch;
-        _pinchZoom = zoom();
-        _pinchCentre = _twoStart; // the first pan is the centre's whole move so far
-        _viewMoved = true;
-      } else {
+    switch (_two) {
+      case _Two.undecided:
+        _twoBuffer += delta;
+      case _Two.scroll:
+        _scrollAcc += delta;
+        _scrollPending = true;
+      case _Two.pinch:
+        _pinchDirty = true;
+      case null:
         return;
-      }
-      _twoMoved = true;
-      delta = _twoBuffer;
-      _twoBuffer = Offset.zero;
     }
-    if (_two == _Two.pinch) return _queuePinch();
-    _queueScroll(delta);
+    _scrollAt = _centre;
+    _queueBatch();
+  }
+
+  /// At the end of this event batch: decide (if still undecided), then one scroll or one pinch step for the batch.
+  void _queueBatch() {
+    if (_batchQueued) return;
+    _batchQueued = true;
+    final batch = _batch;
+    scheduleMicrotask(() {
+      if (batch != _batch) return;
+      _batchQueued = false;
+      if (_two == _Two.undecided) _decide();
+      if (_scrollPending) {
+        _scrollPending = false;
+        final d = _scrollAcc;
+        _scrollAcc = Offset.zero;
+        sink.scroll(_scrollAt, d);
+      }
+      _pinchStep();
+    });
+  }
+
+  /// An undecided two-finger gesture, from where its fingers are now: the centre moved past [twoTapSlop] → a scroll
+  /// (T3); else the fingers' distance changed by more than [pinchSlop] → a pinch. Either way the move held back so far
+  /// goes out with it.
+  void _decide() {
+    if (_touches.isEmpty) return;
+    if ((_centre - _twoStart).distance > twoTapSlop) {
+      _two = _Two.scroll;
+      _scrollAcc += _twoBuffer;
+      _scrollPending = true;
+    } else if (zoomable && _touches.length > 1 && _pinchDistanceChange() > pinchSlop) {
+      _two = _Two.pinch;
+      _pinchZoom = zoom();
+      _pinchCentre = _twoStart; // the first pan is the centre's whole move so far
+      _pinchDirty = true;
+      _viewMoved = true;
+    } else {
+      return;
+    }
+    _twoMoved = true;
+    _twoBuffer = Offset.zero;
   }
 
   /// The two counted fingers' distance now.
@@ -204,34 +240,6 @@ class TouchGestures {
 
   /// How far that distance is from where it started.
   double _pinchDistanceChange() => (_distance - _pinchDistance).abs();
-
-  // T3: the fingers' moves of one event batch add up to the centre's move, sent once.
-  void _queueScroll(Offset delta) {
-    _scrollAcc += delta;
-    _scrollAt = _centre;
-    if (_scrollQueued) return;
-    _scrollQueued = true;
-    final batch = _batch;
-    scheduleMicrotask(() {
-      if (batch != _batch) return;
-      _scrollQueued = false;
-      final d = _scrollAcc;
-      _scrollAcc = Offset.zero;
-      sink.scroll(_scrollAt, d);
-    });
-  }
-
-  void _queuePinch() {
-    _pinchDirty = true;
-    if (_pinchQueued) return;
-    _pinchQueued = true;
-    final batch = _batch;
-    scheduleMicrotask(() {
-      if (batch != _batch) return;
-      _pinchQueued = false;
-      _pinchStep();
-    });
-  }
 
   /// The pinch so far: the zoom from the fingers' distance (two fingers still on), and the pan from the centre.
   void _pinchStep() {
@@ -244,8 +252,11 @@ class TouchGestures {
   }
 
   void up(PointerEvent e) {
+    // Before the centre jumps to the fingers left: decide from this batch's moves not yet taken up (a right tap needs
+    // to know), and send a pinch's step for them.
+    if (_two == _Two.undecided && _batchQueued && _touches.containsKey(e.pointer)) _decide();
     if (_two == _Two.pinch && _touches.containsKey(e.pointer)) {
-      _pinchStep(); // this batch's moves so far, before the centre jumps to the fingers left
+      _pinchStep();
       _touches.remove(e.pointer);
       if (_touches.isNotEmpty) _pinchCentre = _centre;
     } else {
@@ -310,9 +321,9 @@ class TouchGestures {
     _twoBuffer = Offset.zero;
     _viewMoved = false;
     _scrollAcc = Offset.zero;
-    _scrollQueued = false;
+    _scrollPending = false;
     _pinchDirty = false;
-    _pinchQueued = false;
+    _batchQueued = false;
     _padZoomed = false;
     _batch++;
   }
