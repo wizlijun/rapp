@@ -810,11 +810,12 @@ void main() {
     });
   });
 
-  iosTest('macOS: no voice button', (tester) async {
+  iosTest('macOS: the Mac row button, not the 64 round one', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     await tester.pumpWidget(layer());
     expect(open, findsOneWidget);
-    expect(hold, findsNothing);
+    expect(tester.getSize(hold).width, lessThan(64));
+    expect(ringFinder, findsNothing);
   });
 
   for (final right in [true, false]) {

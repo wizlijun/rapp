@@ -17,7 +17,7 @@ const _bars = 24;
 const _segmentDeg = 19.0;
 const _tail = 6.0;
 
-String _hintLine(VoicePick p) => switch (p) {
+String voiceHintLine(VoicePick p) => switch (p) {
   VoicePick.send => '松手 发送',
   VoicePick.cancel => '松手 取消',
   VoicePick.edit => '松手 改一改再发',
@@ -230,7 +230,7 @@ class _VoiceOverlayState extends State<VoiceOverlay> with SingleTickerProviderSt
                   const SizedBox(height: 4),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 8),
-                    child: Text(_hintLine(pick), style: TextStyle(color: t.text, fontSize: 13, height: 1.4)),
+                    child: Text(voiceHintLine(pick), style: TextStyle(color: t.text, fontSize: 13, height: 1.4)),
                   ),
                 ],
               ),
@@ -252,7 +252,7 @@ class _VoiceOverlayState extends State<VoiceOverlay> with SingleTickerProviderSt
     final said = _releasing ? _said : (_said = widget.voice.text);
     final words = said.isEmpty ? '正在听…' : _tailOf(said, style, width - 32, MediaQuery.textScalerOf(context));
     return CustomPaint(
-      painter: _BubbleFrame(fill: fill, border: border, dashed: pick == VoicePick.edit, right: right, radius: t.r),
+      painter: VoiceBubbleFrame(fill: fill, border: border, dashed: pick == VoicePick.edit, right: right, radius: t.r),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 12 + _tail),
         child: Column(
@@ -294,40 +294,43 @@ class _VoiceOverlayState extends State<VoiceOverlay> with SingleTickerProviderSt
     );
   }
 
-  // At most 4 lines: the end of what was said, with … in front when the start is cut.
+  // At most 4 lines: the end of what was said (see [voiceTail]); the last answer is kept.
   String _tailOf(String s, TextStyle style, double width, TextScaler scaler) {
     final k = _tailKey;
     if (k != null && k.$1 == s && k.$2 == width) return k.$3;
-    bool fits(int from) {
-      final tp = TextPainter(
-        text: TextSpan(text: from == 0 ? s : '…${s.substring(from)}', style: style),
-        textDirection: TextDirection.ltr,
-        textScaler: scaler,
-        maxLines: 4,
-      )..layout(maxWidth: width);
-      final ok = !tp.didExceedMaxLines;
-      tp.dispose();
-      return ok;
-    }
-
-    var out = s;
-    if (!fits(0)) {
-      var lo = 1, hi = s.length;
-      while (lo < hi) {
-        final mid = (lo + hi) >> 1;
-        if (fits(mid)) {
-          hi = mid;
-        } else {
-          lo = mid + 1;
-        }
-      }
-      // Do not start in the middle of a surrogate pair.
-      if (lo < s.length && (s.codeUnitAt(lo) & 0xFC00) == 0xDC00) lo++;
-      out = '…${s.substring(lo)}';
-    }
+    final out = voiceTail(s, style, width, scaler);
     _tailKey = (s, width, out);
     return out;
   }
+}
+
+/// At most 4 lines: the end of what was said, with … in front when the start is cut.
+String voiceTail(String s, TextStyle style, double width, TextScaler scaler) {
+  bool fits(int from) {
+    final tp = TextPainter(
+      text: TextSpan(text: from == 0 ? s : '…${s.substring(from)}', style: style),
+      textDirection: TextDirection.ltr,
+      textScaler: scaler,
+      maxLines: 4,
+    )..layout(maxWidth: width);
+    final ok = !tp.didExceedMaxLines;
+    tp.dispose();
+    return ok;
+  }
+
+  if (fits(0)) return s;
+  var lo = 1, hi = s.length;
+  while (lo < hi) {
+    final mid = (lo + hi) >> 1;
+    if (fits(mid)) {
+      hi = mid;
+    } else {
+      lo = mid + 1;
+    }
+  }
+  // Do not start in the middle of a surrogate pair.
+  if (lo < s.length && (s.codeUnitAt(lo) & 0xFC00) == 0xDC00) lo++;
+  return '…${s.substring(lo)}';
 }
 
 /// The scrim, the send disc ([progress] 0 is the voice button, 1 the full disc) and the two bands.
@@ -492,28 +495,40 @@ class VoiceBarsPainter extends CustomPainter {
 
 /// The bubble's shape: a rounded box with a small tail at the bottom on the thumb's side; filled, with an
 /// optional 1 px border (dashed for 编辑).
-class _BubbleFrame extends CustomPainter {
-  _BubbleFrame({required this.fill, required this.border, required this.dashed, required this.right, required this.radius});
+class VoiceBubbleFrame extends CustomPainter {
+  VoiceBubbleFrame({
+    required this.fill,
+    required this.border,
+    required this.dashed,
+    required this.right,
+    required this.radius,
+    this.tail = true,
+  });
 
   final Color fill;
   final Color? border;
   final bool dashed, right;
   final double radius;
 
+  /// The small tail at the bottom; without it the bubble is a plain rounded box (the Mac's).
+  final bool tail;
+
   @override
   void paint(Canvas canvas, Size size) {
-    final box = Rect.fromLTWH(0, 0, size.width, size.height - _tail);
+    final box = Rect.fromLTWH(0, 0, size.width, size.height - (tail ? _tail : 0));
     final tx = right ? size.width - 24 : 24.0;
-    final tail = Path()
-      ..moveTo(tx - 6, box.bottom)
-      ..lineTo(tx, size.height)
-      ..lineTo(tx + 6, box.bottom)
-      ..close();
-    final shape = Path.combine(
-      PathOperation.union,
-      Path()..addRRect(RRect.fromRectAndRadius(box.deflate(.5), Radius.circular(radius))),
-      tail,
-    );
+    final body = Path()..addRRect(RRect.fromRectAndRadius(box.deflate(.5), Radius.circular(radius)));
+    final shape = !tail
+        ? body
+        : Path.combine(
+            PathOperation.union,
+            body,
+            Path()
+              ..moveTo(tx - 6, box.bottom)
+              ..lineTo(tx, size.height)
+              ..lineTo(tx + 6, box.bottom)
+              ..close(),
+          );
     canvas.drawPath(shape, Paint()..color = fill);
     final b = border;
     if (b == null) return;
@@ -533,6 +548,7 @@ class _BubbleFrame extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_BubbleFrame old) =>
+  bool shouldRepaint(VoiceBubbleFrame old) =>
+      old.tail != tail ||
       old.fill != fill || old.border != border || old.dashed != dashed || old.right != right || old.radius != radius;
 }

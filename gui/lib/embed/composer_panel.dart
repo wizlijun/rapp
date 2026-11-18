@@ -25,6 +25,7 @@ import 'remote_session.dart';
 import 'session_port.dart';
 import 'stage_buttons.dart';
 import 'voice_button.dart';
+import 'voice_desktop.dart';
 import 'voice_overlay.dart';
 
 /// W1: 720 wide, or the stage less 16 when the stage is narrower than 736.
@@ -698,9 +699,16 @@ List<Widget> composerLayer(
         ),
       )
     else
-    Positioned(
-      right: keys ? keyRowInset + keyRowGroupWidth + 8 : 12,
-      bottom: (keys ? keyRowBottom : 12) + keyboard,
+    Positioned.fill(
+      // The whole stage, so the Mac's voice bubble knows its width; the row sits in the corner as before.
+      child: LayoutBuilder(
+        builder: (context, stage) => Padding(
+      padding: EdgeInsets.only(
+        right: keys ? keyRowInset + keyRowGroupWidth + 8 : 12,
+        bottom: (keys ? keyRowBottom : 12) + keyboard,
+      ),
+      child: Align(
+      alignment: Alignment.bottomRight,
       child: ListenableBuilder(
         listenable: Listenable.merge([both, session.zooms]),
         builder: (context, _) {
@@ -711,47 +719,58 @@ List<Widget> composerLayer(
           // 还原 shows even where 输入 is not allowed: else a zoomed such session could only be pinched back.
           if ((session.composer.open && button) || (transfer == null && !button && !zoomed)) return const SizedBox.shrink();
           final t = RappTokens.of(context);
+          final items = <Widget>[
+            if (transfer != null) ...[
+              DecoratedBox(
+                decoration: t.floatBox(),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  child: Text(transfer, style: TextStyle(color: t.muted)),
+                ),
+              ),
+              const SizedBox(width: 8),
+              RappButton.secondary(label: '取消', onPicture: true, onPressed: () => port.cancelTransfer(session.sid)),
+              const SizedBox(width: 8),
+            ],
+            if (zoomed) ...[
+              RappButton.secondary(
+                key: const Key('zoom-reset'),
+                label: '还原',
+                semanticLabel: '还原',
+                icon: Icons.zoom_in_map,
+                onPicture: true,
+                onPressed: session.restoreCurrent,
+              ),
+              if (button) const SizedBox(width: 8),
+            ],
+            if (button)
+              RappButton.secondary(
+                key: const Key('composer-open'),
+                label: '输入',
+                semanticLabel: '输入',
+                icon: Icons.keyboard_outlined,
+                onPicture: true,
+                onPressed: () => session.composer.open = true,
+              ),
+          ];
           return Listener(
             onPointerDown: (_) => state.holdForPanel(session),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (transfer != null) ...[
-                  DecoratedBox(
-                    decoration: t.floatBox(),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      child: Text(transfer, style: TextStyle(color: t.muted)),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  RappButton.secondary(label: '取消', onPicture: true, onPressed: () => port.cancelTransfer(session.sid)),
-                  const SizedBox(width: 8),
-                ],
-                if (zoomed) ...[
-                  RappButton.secondary(
-                    key: const Key('zoom-reset'),
-                    label: '还原',
-                    semanticLabel: '还原',
-                    icon: Icons.zoom_in_map,
-                    onPicture: true,
-                    onPressed: session.restoreCurrent,
-                  ),
-                  if (button) const SizedBox(width: 8),
-                ],
-                if (button)
-                  RappButton.secondary(
-                    key: const Key('composer-open'),
-                    label: '输入',
-                    semanticLabel: '输入',
-                    icon: Icons.keyboard_outlined,
-                    onPicture: true,
-                    onPressed: () => session.composer.open = true,
-                  ),
-              ],
-            ),
+            // On the Mac the voice button is the row's right end, and the rest fades while it holds.
+            child: button && defaultTargetPlatform == TargetPlatform.macOS && state.voice != null
+                ? DesktopVoice(
+                    key: ValueKey(session.sid),
+                    state: state,
+                    session: session,
+                    port: port,
+                    stageWidth: stage.maxWidth,
+                    others: items,
+                  )
+                : Row(mainAxisSize: MainAxisSize.min, children: items),
           );
         },
+      ),
+      ),
+        ),
       ),
     ),
   ];
