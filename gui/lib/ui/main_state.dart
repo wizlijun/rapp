@@ -13,6 +13,7 @@ import '../embed/remote_session.dart';
 import '../embed/session_port.dart';
 import '../embed/stream_choice.dart';
 import '../embed/voice_input.dart';
+import '../embed/voice_key_gate.dart';
 import '../embed/traffic_label.dart' show segments;
 import '../history/input_history.dart';
 import '../history/input_recorder.dart';
@@ -131,7 +132,10 @@ class MainState extends ChangeNotifier {
     void Function(String line)? log,
     VoiceInput? voice,
   })  : resources = ResourcesState(clock: clock),
-        voice = voice ?? (defaultTargetPlatform == TargetPlatform.iOS ? VoiceInput() : null),
+        voice = voice ??
+            (defaultTargetPlatform == TargetPlatform.iOS || defaultTargetPlatform == TargetPlatform.macOS
+                ? VoiceInput()
+                : null),
         unlockStore = unlockStore ?? UnlockStore(),
         _now = clock ?? DateTime.now,
         positions = ProjectPositions.load(data.localDir),
@@ -144,6 +148,7 @@ class MainState extends ChangeNotifier {
     resources.addListener(notifyListeners);
     _portSub = port?.events.listen(_onPortEvent);
     _termSub = termPort?.events.listen(_onPortEvent);
+    if (defaultTargetPlatform == TargetPlatform.macOS) port?.setVoiceHotkey(prefs.voiceHotkey);
     hub?.addListener(_onHub);
     hub?.askNet();
     _lastError = hub?.lastError;
@@ -576,15 +581,28 @@ class MainState extends ChangeNotifier {
     return rs.composerAllowed && rs.profile.typeToCompose && rs.composeArmed;
   }
 
+  /// What the runner was last told about [pictureFocused]'s voice.
+  bool _voiceSent = false;
+
+  /// Hold-to-talk on [sid]'s picture (macOS): an app window on the stage, with no writing panel open to take the
+  /// voice (and the keys) itself.
+  bool _voiceFor(Object sid) {
+    if (defaultTargetPlatform != TargetPlatform.macOS || voice == null) return false;
+    final rs = remote[sid];
+    if (rs == null || rs.detached || termPort?.owns(sid) == true) return false;
+    return rs.composerAllowed && !rs.composer.open;
+  }
+
   void _sendFocus(Object sid) {
     _composeSent = _composeFor(sid);
-    portOf(sid)?.pictureFocus(sid, compose: _composeSent);
+    _voiceSent = _voiceFor(sid);
+    portOf(sid)?.pictureFocus(sid, compose: _composeSent, voice: _voiceSent);
   }
 
   /// A session changed (profile, current tab): the focused picture's compose is sent again if it moved.
   void _syncCompose() {
     final sid = pictureFocused;
-    if (sid == null || _composeFor(sid) == _composeSent) return;
+    if (sid == null || (_composeFor(sid) == _composeSent && _voiceFor(sid) == _voiceSent)) return;
     _sendFocus(sid);
   }
 
@@ -1181,6 +1199,10 @@ class MainState extends ChangeNotifier {
 
   void _onPortEvent(SessionEvent e) {
     if (e is LatchUsedEvent) return; // the app key row's (AppKeyRow listens for its own session)
+    if (e is VoiceKeyEvent) {
+      voiceKey(e.sid, e.phase);
+      return;
+    }
     final rs = remote[e.sid];
     if (rs == null) return;
     final r = _recordOfSid(e.sid);
@@ -1881,6 +1903,7 @@ class MainState extends ChangeNotifier {
     rs.preferWindow(r.window);
     remote[s.sid] = rs;
     rs.addListener(_syncCompose);
+    rs.composer.addListener(_syncCompose); // the panel opening or closing moves [_voiceFor]
     r.phase = Phase.live;
     if (r.lastSid == null) r.frozen = false; // no old picture to swap out: nothing stays frozen
     final c = r.choice;
@@ -3027,6 +3050,36 @@ class MainState extends ChangeNotifier {
     _save();
   }
 
+  final _voiceKeys = StreamController<(Object, VoiceKeyPhase)>.broadcast();
+  final _voiceEnds = StreamController<Object>.broadcast();
+
+  /// The hotkey's phases on app pictures (macOS), for the stage's voice button to follow.
+  Stream<(Object, VoiceKeyPhase)> get voiceKeys => _voiceKeys.stream;
+
+  void voiceKey(Object sid, VoiceKeyPhase p) => _voiceKeys.add((sid, p));
+
+  /// Voice input on terminal stages ended (the term gate listens); app pictures tell native instead.
+  Stream<Object> get voiceEnds => _voiceEnds.stream;
+
+  void voiceEnd(Object sid) {
+    if (termPort?.owns(sid) == true) {
+      _voiceEnds.add(sid);
+    } else {
+      portOf(sid)?.voiceEnd(sid);
+    }
+  }
+
+  void setVoiceHotkey(VoiceHotkey h) {
+    prefs.voiceHotkey = h;
+    port?.setVoiceHotkey(h);
+    _save(); // notifies
+  }
+
+  void voiceLanguageHintDone() {
+    prefs.voiceLanguageHintShown = true;
+    _save();
+  }
+
   /// [prefs] changed outside a setter here (iOS 本机's 屏幕常亮): save them.
   void savePrefs() => _save();
 
@@ -3616,6 +3669,8 @@ class MainState extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     voice?.dispose();
+    _voiceKeys.close();
+    _voiceEnds.close();
     composerZoom.dispose();
     stageSide.dispose();
     appLatch.dispose();
