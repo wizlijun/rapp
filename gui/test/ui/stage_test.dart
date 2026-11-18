@@ -1898,6 +1898,7 @@ void main() {
           expect(es.remote[1]!.zoomOf(7).z, 1.0);
           await tester.pump(const Duration(milliseconds: 200));
           expect(views(), [unlimited]);
+          await tester.pump(const Duration(seconds: 1)); // the backdrop's tail
         });
       });
 
@@ -1951,7 +1952,7 @@ void main() {
         });
       });
 
-      testWidgets('the base texture is drawn under the live one only while zoomed', (tester) async {
+      testWidgets('the base texture is drawn under the live one while zoomed and 1 s after', (tester) async {
         await onIOS(() async {
           const w = RemoteWindow(
             id: 7, parent: 0, kind: WindowKind.normal, title: 'w7', rect: Rect.fromLTWH(0, 0, 400, 328),
@@ -1965,8 +1966,32 @@ void main() {
           expect(textures(), [43, 42]);
           await pinch(tester, o, from: 200, to: 100);
           expect(es.remote[1]!.zoomOf(7).z, 1.0);
+          // Back at 1, A's live picture still covers only the old range until its whole frame comes (§6.4).
+          expect(textures(), [43, 42]);
+          await tester.pump(const Duration(milliseconds: 1100));
           expect(textures(), [42]);
+        });
+      });
+
+      testWidgets('zoomed, a tap on the base picture outside the live part reaches A', (tester) async {
+        await onIOS(() async {
+          const w = RemoteWindow(
+            id: 7, parent: 0, kind: WindowKind.normal, title: 'w7', rect: Rect.fromLTWH(0, 0, 400, 328),
+            titleBar: 28, resizable: true, focused: true, texture: 42, baseTexture: 43,
+            visible: Rect.fromLTWH(0.4, 0.4, 0.2, 0.2),
+          );
+          final o = await setup(tester, windows: [w]);
+          await pinch(tester, o);
           await tester.pump(const Duration(milliseconds: 200));
+          final stage = tester.getSize(find.byKey(const Key('stage')));
+          final zfit = es.remote[1]!.zoomOf(7).zfit(fitRect(contentSize(w), stage), stage);
+          expect(zfit, const Rect.fromLTWH(-400, -300, 1600, 1200)); // the live part: (240, 180, 320, 240)
+          port.calls.clear();
+          await tester.tapAt(o + const Offset(100, 100));
+          await tester.pump();
+          final p = toRemote(const Offset(100, 100), zfit, w);
+          expect(mouse().map((c) => (c['kind'], c['x'], c['y'])), [('down', p.dx, p.dy), ('up', p.dx, p.dy)]);
+          expect(port.calls.where((c) => c.$1 == 'picture_focus' && c.$2['sid'] == null), isEmpty);
         });
       });
 

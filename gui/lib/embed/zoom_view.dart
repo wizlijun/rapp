@@ -47,14 +47,17 @@ class ZoomView extends ChangeNotifier {
     _centre = Offset((stage.width / 2 - r.left) / r.width, (stage.height / 2 - r.top) / r.height);
   }
 
-  /// Zooms to [z] (clamped to 1–4) keeping the content point under [focal] where it is.
+  /// Zooms to [z] (clamped to 1–4) keeping the content point under [focal] where it is. Back to 1 from a
+  /// zoom, the backdrop stays 1 s more, as after [restore]: A's live picture still covers only the old range.
   void zoomTo(double z, Offset focal, Rect fit, Size stage, {double keyboard = 0}) {
     _stopRestore();
+    final was = zoomed;
     final before = zfit(fit, stage, keyboard: keyboard);
     final fx = (focal.dx - before.left) / before.width;
     final fy = (focal.dy - before.top) / before.height;
     _z = z.clamp(1.0, maxZoom).toDouble();
     if (_z == 1) {
+      if (was) _startTail();
       // A finished restore() deliberately keeps its centre; z 1 ignores the centre, so this reset is harmless.
       _centre = const Offset(0.5, 0.5);
     } else {
@@ -94,11 +97,7 @@ class ZoomView extends ChangeNotifier {
       if (t >= 1) {
         _z = 1;
         _restoring = false;
-        _tail = true;
-        _tailTimer = Timer(_backdropTail, () {
-          _tail = false;
-          if (!_disposed) notifyListeners();
-        });
+        _startTail();
       } else {
         _z = z0 + (1 - z0) * t;
         SchedulerBinding.instance.scheduleFrameCallback(frame);
@@ -108,6 +107,16 @@ class ZoomView extends ChangeNotifier {
 
     SchedulerBinding.instance.scheduleFrameCallback(frame);
     notifyListeners();
+  }
+
+  /// The backdrop stays [_backdropTail] after the view came back to 1.
+  void _startTail() {
+    _tailTimer?.cancel();
+    _tail = true;
+    _tailTimer = Timer(_backdropTail, () {
+      _tail = false;
+      if (!_disposed) notifyListeners();
+    });
   }
 
   /// Takes [other]'s z and centre as they are (no animation).

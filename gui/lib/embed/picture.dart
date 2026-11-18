@@ -63,7 +63,8 @@ class _PictureState extends State<Picture> implements TouchSink {
   final _focus = FocusNode();
   late final _clicks = ClickCounter(widget.state.doubleClick);
 
-  /// From the last layout: the window content's rect on the stage (zoomed), and the texture's part of it.
+  /// From the last layout: the window content's rect on the stage (zoomed), and where a press on it counts:
+  /// the texture's part, or over the base picture all of the content on the stage.
   Rect _fit = Rect.zero;
   Rect _pic = Rect.zero;
 
@@ -452,7 +453,6 @@ class _PictureState extends State<Picture> implements TouchSink {
         final zfit = _zoom.zfit(_fit1, stage, keyboard: widget.keyboard);
         final pic = pictureRect(zfit, win.visible);
         _fit = zfit;
-        _pic = pic;
         if (_viewDue) {
           _viewDue = false;
           WidgetsBinding.instance.addPostFrameCallback((_) => _sendView());
@@ -460,6 +460,9 @@ class _PictureState extends State<Picture> implements TouchSink {
         final base = win.baseTexture;
         final backdrop = _zoom.backdrop && base != null && win.visible != _whole && !zfit.isEmpty;
         final onStage = Offset.zero & stage;
+        // Zoomed, the base picture shows the window where the live one does not reach (yet): presses there go
+        // to A as well.
+        _pic = backdrop ? zfit.intersect(onStage) : pic;
         final focusRect = _within(pic.inflate(1), onStage);
         final markRect = _within(pic.inflate(2), onStage);
         final popups = <_Target>[];

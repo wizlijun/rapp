@@ -97,6 +97,22 @@ void main() {
       v.dispose();
     });
 
+    testWidgets('zoomTo from 2 back to 1 keeps the backdrop 1 s more', (tester) async {
+      final v = ZoomView()..zoomTo(2, stage.center(Offset.zero), fit, stage);
+      v.zoomTo(1, stage.center(Offset.zero), fit, stage);
+      expect(v.z, 1);
+      expect(v.zoomed, false);
+      expect(v.backdrop, true);
+      var n = 0;
+      v.addListener(() => n++);
+      await tester.pump(const Duration(milliseconds: 900));
+      expect(v.backdrop, true);
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(v.backdrop, false);
+      expect(n, 1);
+      v.dispose();
+    });
+
     test('adopt takes z and centre without animation', () {
       final a = ZoomView()..zoomTo(2, const Offset(300, 200), fit, stage);
       final b = ZoomView()..adopt(a);
