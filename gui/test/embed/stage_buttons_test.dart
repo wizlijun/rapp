@@ -97,7 +97,7 @@ void main() {
     return r;
   }
 
-  iosTest('iOS: 输入 is a 56 circle 80 in from the right and 88 up, where a thumb reaches; no text label', (tester) async {
+  iosTest('iOS: 输入 is a 56 square 80 in from the right and 88 up, where a thumb reaches; no text label', (tester) async {
     big(tester);
     await tester.pumpWidget(layer());
     final r = inStage(tester, open);
@@ -139,17 +139,17 @@ void main() {
     }
   });
 
-  iosTest('at rest the round buttons are half see-through; a finger on one makes it solid until it leaves', (tester) async {
+  iosTest('at rest the stage buttons are 30 % see-through; a finger on one makes it solid until it leaves', (tester) async {
     big(tester);
     await tester.pumpWidget(layer());
-    expect(look(tester, open), 0.5);
+    expect(look(tester, open), 0.7);
     final g = await tester.startGesture(tester.getCenter(open));
     await tester.pumpAndSettle();
     expect(look(tester, open), 1);
     // A lift would open the panel and take 输入 away; a cancelled touch ends the press the same way.
     await g.cancel();
     await tester.pumpAndSettle();
-    expect(look(tester, open), 0.5);
+    expect(look(tester, open), 0.7);
     expect(rs.composer.open, isFalse);
   });
 

@@ -274,6 +274,7 @@ class _DesktopVoiceState extends State<DesktopVoice> with SingleTickerProviderSt
                       semanticLabel: '语音',
                       icon: _hold.holding ? Icons.mic : Icons.mic_none,
                       onPicture: true,
+                      seeThrough: true,
                       // A no-op keeps the enabled look; the Listener does the work.
                       onPressed: () {},
                     ),
