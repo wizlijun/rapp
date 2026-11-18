@@ -1365,11 +1365,17 @@ void main() {
       await tester.pump();
       expect(shown(), 1);
       final x = tester.getRect(close), p = panelRect(tester), g = tester.getRect(grip);
-      expect(x.bottom, lessThanOrEqualTo(p.top));
-      // The hit area reaches up from the grip's line; the drawn × sits level with the grip.
-      expect(x.bottom, g.bottom);
-      expect(tester.getCenter(find.descendant(of: close, matching: find.byIcon(Icons.close))).dy, g.center.dy);
-      expect(x.left, g.right);
+      // The grip row is as tall as the grip: the panel starts right under it, as before the hit area grew.
+      expect(g.height, 20);
+      expect(p.top, g.bottom);
+      // The hit area is control-height square, hangs from the grip row's top and reaches down into the body
+      // (it has to stay inside the panel's own bounds); the drawn × is level with the grip, centred across it.
+      expect(x.size, Size.square(controlHeightOf(tester.element(close))));
+      expect(x.top, g.top);
+      final mark = tester.getCenter(find.descendant(of: close, matching: find.byIcon(Icons.close)));
+      expect(mark.dy, g.center.dy);
+      expect(mark.dx, x.center.dx);
+      expect(mark.dx - g.right, 14);
       expect(g.center.dx, p.center.dx);
       await mouse.moveTo(x.center);
       await tester.pump();
@@ -1404,10 +1410,10 @@ void main() {
     });
 
     testWidgets('double-tap on the grip goes back to the default', (tester) async {
-      es.profiles.setComposerAt('Safari', 'Safari', const InputPoint(0.5, 200));
+      es.profiles.setComposerAt('Safari', 'Safari', const InputPoint(0.5, 100));
       await showPicture(tester);
       await openPanel(tester);
-      expect(panelRect(tester).bottom, 200);
+      expect(panelRect(tester).bottom, 100);
       expect(panelRect(tester).center.dx, 400);
       await tester.tap(grip);
       await tester.pump(kDoubleTapMinTime);
@@ -1559,10 +1565,10 @@ void main() {
     });
 
     testWidgets('each app has its own place', (tester) async {
-      es.profiles.setComposerAt('Safari', 'Safari', const InputPoint(0.25, 200));
+      es.profiles.setComposerAt('Safari', 'Safari', const InputPoint(0.25, 100));
       await showPicture(tester);
       await openPanel(tester);
-      expect(panelRect(tester).bottom, 200);
+      expect(panelRect(tester).bottom, 100);
       await openEmbedded(tester, sid: 2, app: 'Notes');
       port.emit(const ReadyEvent(2, 'Notes'));
       port.emit(WindowsEvent(2, [rw(6, 800, 628)]));
