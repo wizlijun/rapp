@@ -112,11 +112,14 @@ public struct VoiceKeyGate {
     public mutating func handle(_ input: VoiceGateInput, at seconds: Double, ready: Bool) -> VoiceGateStep {
         switch input {
         case let .down(code, flags, isRepeat):
+            // A key already held whose down reached A: a swallowed repeat must not swallow its up
+            // too, or A keeps it down (a key held before a combo start).
+            let reachedA = down.contains(code) && !swallowed.contains(code)
             swallowed.remove(code)
             let step = keyDown(code, flags, isRepeat: isRepeat, at: seconds, ready: ready)
             down.insert(code)
             if step.flush { flushHotkey() }
-            if !step.pass { swallowed.insert(code) }
+            if !step.pass && !reachedA { swallowed.insert(code) }
             return step
         case let .up(code):
             let wasSwallowed = swallowed.remove(code) != nil

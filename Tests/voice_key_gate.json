@@ -159,5 +159,17 @@
     {"t": 400, "in": "up 49", "out": "swallow"},
     {"t": 450, "in": "up 58", "out": "pass"},
     {"t": 460, "in": "up 59", "out": "pass"}
+  ]},
+  {"name": "combo-with-key-already-down", "hotkey": {"kind": "hold_combo", "key_code": 49, "modifiers": 786432}, "steps": [
+    {"t": 0, "in": "down 0", "out": "pass"},
+    {"t": 20, "in": "down 59 ctrl", "out": "pass"},
+    {"t": 40, "in": "down 58 ctrl opt", "out": "pass"},
+    {"t": 60, "in": "down 49 ctrl opt", "out": "swallow start"},
+    {"t": 500, "in": "down 0 ctrl opt repeat", "out": "swallow"},
+    {"t": 550, "in": "down 0 ctrl opt repeat", "out": "swallow"},
+    {"t": 600, "in": "up 0", "out": "pass"},
+    {"t": 900, "in": "up 49", "out": "swallow release"},
+    {"t": 950, "in": "up 58", "out": "pass"},
+    {"t": 960, "in": "up 59", "out": "pass"}
   ]}
 ]
