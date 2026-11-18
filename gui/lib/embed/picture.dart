@@ -68,9 +68,12 @@ class _PictureState extends State<Picture> implements TouchSink {
   Rect _fit = Rect.zero;
   Rect _pic = Rect.zero;
 
-  /// From the last layout: the content's rect at z 1, and the stage's size.
+  /// From the last layout: the content's rect at z 1, the stage's size, the keyboard's reach and the
+  /// window's content size. Zoomed, a change of any of them shows another part of the window: A is told.
   Rect _fit1 = Rect.zero;
   Size _stage = Size.zero;
+  double _keyboard = 0;
+  Size _content = Size.zero;
 
   /// The shown window's zoom (its session keeps it), and when A is told what of it shows: 150 ms after the
   /// view stopped moving, and after the next layout once the window or session changed.
@@ -447,9 +450,15 @@ class _PictureState extends State<Picture> implements TouchSink {
     }
     return LayoutBuilder(
       builder: (context, c) {
-        final stage = c.biggest;
-        _fit1 = fitRect(contentSize(win), stage);
+        final stage = c.biggest, content = contentSize(win);
+        // Rotation, Split View, a fold, the keyboard or A's resize: settled like a pan (a send due anyway wins).
+        if (_zoom.z > 1 && !_viewDue && (stage != _stage || widget.keyboard != _keyboard || content != _content)) {
+          settled();
+        }
+        _fit1 = fitRect(content, stage);
         _stage = stage;
+        _keyboard = widget.keyboard;
+        _content = content;
         final zfit = _zoom.zfit(_fit1, stage, keyboard: widget.keyboard);
         final pic = pictureRect(zfit, win.visible);
         _fit = zfit;

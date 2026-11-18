@@ -1741,8 +1741,8 @@ void main() {
 
       Future<void> onIOS(Future<void> Function() body) => on(TargetPlatform.iOS, body);
 
-      Future<Offset> setup(WidgetTester tester, {List<RemoteWindow>? windows}) async {
-        await tester.pumpWidget(wrap(embedded()));
+      Future<Offset> setup(WidgetTester tester, {List<RemoteWindow>? windows, Widget? root}) async {
+        await tester.pumpWidget(wrap(root ?? embedded()));
         await openEmbedded(tester);
         port.emit(const ReadyEvent(1, 'Safari'));
         port.emit(WindowsEvent(1, windows ?? [rw(7, 400, 328)])); // 400x300 on 800x600: twice as big
@@ -1899,6 +1899,95 @@ void main() {
           await tester.pump(const Duration(milliseconds: 200));
           expect(views(), [unlimited]);
           await tester.pump(const Duration(seconds: 1)); // the backdrop's tail
+        });
+      });
+
+      /// The embedded stage at [w] x [h], with the soft keyboard [keyboard] up over its bottom.
+      Widget sized({double w = 800, double h = 600, double keyboard = 0}) => SizedBox(
+            width: w,
+            height: h,
+            child: Builder(
+              builder: (context) => MediaQuery(
+                data: MediaQuery.of(context).copyWith(viewInsets: EdgeInsets.only(bottom: keyboard)),
+                child: Backdrop(theme: RappTheme.matrix, child: Stage(state: es, composerEditor: FlutterEditor.new)),
+              ),
+            ),
+          );
+
+      testWidgets('zoomed, a new stage size (a rotation) tells A the view again', (tester) async {
+        await onIOS(() async {
+          final o = await setup(tester, root: sized());
+          await pinch(tester, o);
+          await tester.pump(const Duration(milliseconds: 200));
+          expect(views(), [view7(1)]);
+          port.calls.clear();
+          await tester.pumpWidget(wrap(sized(w: 600, h: 800)));
+          await tester.pump(const Duration(milliseconds: 200));
+          final v = views().single;
+          expect((v['window'], v['zoom']), (7, 2.0));
+          expect(v['h'] as double, greaterThan(225)); // the taller stage sees more of the window's height
+          await tester.pump(const Duration(seconds: 2));
+          expect(views(), [v]);
+        });
+      });
+
+      testWidgets('zoomed, the soft keyboard going away tells A the view again', (tester) async {
+        await onIOS(() async {
+          final o = await setup(tester, root: sized(keyboard: 300));
+          await pinch(tester, o, at: const Offset(400, 150));
+          await tester.pump(const Duration(milliseconds: 200));
+          final before = views().single;
+          port.calls.clear();
+          await tester.pumpWidget(wrap(sized()));
+          await tester.pump(const Duration(milliseconds: 200));
+          final v = views().single;
+          expect((v['window'], v['zoom']), (7, 2.0));
+          expect(v['h'] as double, greaterThan(before['h'] as double)); // the stage under the keyboard shows now
+        });
+      });
+
+      testWidgets('zoomed, A resizing the window tells A the view again', (tester) async {
+        await onIOS(() async {
+          final o = await setup(tester);
+          await pinch(tester, o);
+          await tester.pump(const Duration(milliseconds: 200));
+          expect(views(), [view7(1)]);
+          port.calls.clear();
+          port.emit(WindowsEvent(1, [rw(7, 400, 628)])); // content 400x600
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 200));
+          final v = views().single;
+          expect((v['window'], v['zoom']), (7, 2.0));
+          expect(v['h'] as double, greaterThan(225));
+        });
+      });
+
+      testWidgets('zoomed, a stage change that stays inside the told range sends nothing', (tester) async {
+        await onIOS(() async {
+          final o = await setup(tester, root: sized());
+          await pinch(tester, o);
+          await tester.pump(const Duration(milliseconds: 200));
+          expect(views(), [view7(1)]);
+          port.calls.clear();
+          await tester.pumpWidget(wrap(sized(w: 820)));
+          await tester.pump(const Duration(milliseconds: 200));
+          expect(views(), isEmpty);
+        });
+      });
+
+      testWidgets('at z 1, stage, keyboard and window size changes send no view', (tester) async {
+        await onIOS(() async {
+          await setup(tester, root: sized());
+          await tester.pump(const Duration(milliseconds: 200));
+          port.calls.clear();
+          await tester.pumpWidget(wrap(sized(w: 600, h: 800)));
+          await tester.pump(const Duration(milliseconds: 200));
+          await tester.pumpWidget(wrap(sized(w: 600, h: 800, keyboard: 300)));
+          await tester.pump(const Duration(milliseconds: 200));
+          port.emit(WindowsEvent(1, [rw(7, 400, 628)]));
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 200));
+          expect(views(), isEmpty);
         });
       });
 
