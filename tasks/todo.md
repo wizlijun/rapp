@@ -533,3 +533,14 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [x] 两种安装包 33 个文件摘要一致，13 个 ELF 依赖解析通过；host 0.14.3 / v13、BUILD-INFO 源码提交及 SHA256 校验通过。解包后的 hub → QUIC service → Omarchy 桌面采集及 CLI/分享端口检查连续三次通过。
 - [x] [v0.14.3 Release](https://github.com/wizlijun/rapp/releases/tag/v0.14.3) 已公开，包含 Arch 包、便携包和 SHA256SUMS；GitHub 端文件大小和 SHA256 与本地一致。latest=false 保留 macOS 0.14.2 更新入口。
 - [x] 根据 GitHub 公开数据更新网站备用快照；未部署网站、未安装或重启本机服务。本轮未进行 macOS/iOS 真机验收。
+
+## Linux 桌面空标识握手修复与 0.14.6（2026-11-18）
+
+- [x] 定位 `wrong desktop`：Swift SessionPlugin 与 Rust rapp-session 的内嵌连接发送空 app，代表使用已绑定的桌面；Linux host 原先强制要求 app 完全相同，与 macOS host 的约定不一致。修复后允许空标识，保留 token/协议校验及明确指定错误桌面的拒绝。
+- [x] 新增真实 Address 编码的回归用例，原生与 bundle 测试也改用空 app 握手。已安装的 0.14.3 原包能稳定复现报错，修复包通过 Wayland/X11、鉴权/接管、输入及完整串流验证。
+- [x] 先以本机包 `0.14.3-2` 安装修复、重启服务与 GUI，用户明确确认“可以连上了”；随后按约定发布。其他设备的 client 无需升级。
+- [x] 拉取并合入上游 `93a5ce6` / 0.14.5 日志界面，正式发布源码 `742991c6a2bc208e5d2bc1359c5e6b9a81299951`，main 与 v0.14.6 标签已推送 GitHub。
+- [x] GUI 相关回归 497 项通过、1 项既有跳过；analyze 无问题。Rust 相关测试首轮 274 项通过、2 项原生 opt-in 跳过；唯一“未安装 host”用例受到本机已安装 host 的 PATH 回退干扰，隔离 PATH 后复验通过。包含 7 项日志集成、52 项 service 集成用例；host Clippy 与 Linux 构建路径夹具通过。
+- [x] 干净 worktree `rapp-linux-0146` 构建产物位于 `dist/linux-0.14.6/`。两包 33 个文件摘要一致，13 个 ELF 依赖解析通过；BUILD-INFO、版本/协议、SHA256 匹配。最终包空 app 握手与完整桌面串流连续三次通过。
+- [x] [v0.14.6 Release](https://github.com/wizlijun/rapp/releases/tag/v0.14.6) 已公开，Arch 安装包、便携包、SHA256SUMS 的 GitHub 大小与摘要均匹配本地；latest=false 保留 macOS 0.14.5 更新入口。网站备用下载快照已更新，未部署网站。
+- 本机继续运行用户已验证的 0.14.3-2 修复包；此次正式发布未再次替换本机程序。未在本机进行 macOS/iOS 真机验收。
