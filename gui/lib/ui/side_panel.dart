@@ -2,9 +2,14 @@
 // theme picker, start-fullscreen switch, lamp legend and totals.
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../embed/traffic_label.dart' show formatRate;
+import '../embed/voice_hotkey.dart';
+import '../embed/voice_key_gate.dart';
+import 'controls.dart';
 import 'lamp.dart';
 import 'main_state.dart';
 import 'prefs.dart' show FirstLayer;
@@ -298,6 +303,7 @@ class _Footer extends StatelessWidget {
                 state.setAutoSaveTraffic),
             toggle(const Key('input-history'), '记下写作面板发出去的话', state.prefs.inputHistory, state.setInputHistory,
                 note: '存在数据目录的 inputs/ 里，会随 git 同步'),
+            if (defaultTargetPlatform == TargetPlatform.macOS) _VoiceHotkeyRow(state: state, style: small, minHeight: rowHeight),
             if (settings != null) ...[const SizedBox(height: 8), settings!],
           ]),
           const SizedBox(height: 6),
@@ -383,6 +389,115 @@ class _Total extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// 语音快捷键 (macOS): shows the hotkey, and records a new one from the next keys pressed.
+class _VoiceHotkeyRow extends StatefulWidget {
+  const _VoiceHotkeyRow({required this.state, required this.style, required this.minHeight});
+  final MainState state;
+  final TextStyle style;
+  final double minHeight;
+
+  @override
+  State<_VoiceHotkeyRow> createState() => _VoiceHotkeyRowState();
+}
+
+class _VoiceHotkeyRowState extends State<_VoiceHotkeyRow> {
+  /// Set only while recording. A new one for every recording: it keeps held-key state.
+  VoiceHotkeyRecorder? _recorder;
+  bool _rejected = false;
+  final _focus = FocusNode(debugLabel: 'voice-hotkey');
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
+
+  void _start() {
+    setState(() {
+      _recorder = VoiceHotkeyRecorder();
+      _rejected = false;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _recorder != null) _focus.requestFocus();
+    });
+  }
+
+  void _stop() => setState(() {
+        _recorder = null;
+        _rejected = false;
+      });
+
+  void _set(VoiceHotkey h) {
+    widget.state.setVoiceHotkey(h);
+    if (_recorder != null) _stop();
+  }
+
+  KeyEventResult _onKey(FocusNode node, KeyEvent e) {
+    final rec = _recorder;
+    if (rec == null) return KeyEventResult.ignored;
+    final code = macKeyCode(e.physicalKey);
+    if (code == null || e is KeyRepeatEvent) return KeyEventResult.handled;
+    final outcome = e is KeyDownEvent ? rec.down(code, macFlags(HardwareKeyboard.instance)) : rec.up(code);
+    switch (outcome) {
+      case RecordSet(:final hotkey):
+        _set(hotkey);
+      case RecordRejected():
+        setState(() => _rejected = true);
+      case RecordAborted():
+        _stop();
+      case RecordPending():
+        break;
+    }
+    return KeyEventResult.handled;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RappTokens.of(context);
+    final style = widget.style;
+    final recording = _recorder != null;
+    Widget button(String key, String label, VoidCallback onPressed) =>
+        RappButton.secondary(key: Key(key), label: label, onPressed: onPressed);
+    final row = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ConstrainedBox(
+            constraints: BoxConstraints(minHeight: widget.minHeight),
+            child: Row(children: [
+              Text('语音快捷键', style: style),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  recording ? '请按下快捷键…（Esc 取消）' : voiceHotkeyLabel(widget.state.prefs.voiceHotkey),
+                  textAlign: TextAlign.end,
+                  style: style.copyWith(color: t.muted),
+                ),
+              ),
+            ]),
+          ),
+          Wrap(spacing: 6, runSpacing: 6, children: [
+            button('voice-hotkey-change', '改', _start),
+            button('voice-hotkey-off', '关', () => _set(VoiceHotkey.off)),
+            button('voice-hotkey-default', '恢复默认', () => _set(VoiceHotkey.standard)),
+          ]),
+          if (recording && _rejected) Text('这个键不能用', style: style.copyWith(color: t.muted)),
+        ],
+      ),
+    );
+    return Focus(
+      key: const Key('voice-hotkey'),
+      focusNode: _focus,
+      autofocus: recording,
+      canRequestFocus: recording,
+      skipTraversal: true,
+      onKeyEvent: _onKey,
+      child: row,
     );
   }
 }
