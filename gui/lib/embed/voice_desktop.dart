@@ -1,6 +1,7 @@
 // Hold to talk on the Mac stage: the 按住说话 button at the right end of the composer row, the bubble above it,
 // the 编辑 / 取消 targets, and the hotkey's events driving the same hold. The hold itself is [VoiceHold].
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart' show kPrimaryButton;
 import 'package:flutter/material.dart';
@@ -28,6 +29,9 @@ const _fade = Duration(milliseconds: 120);
 const _rise = Duration(milliseconds: 160);
 const _bars = 24;
 
+/// What the bubble and the hint keep clear on the stage's left.
+const _leftClear = 20.0;
+
 /// The row's right end: [others] (the rest of the row) then the 按住说话 button. Owns the session's [VoiceHold].
 class DesktopVoice extends StatefulWidget {
   const DesktopVoice({
@@ -35,7 +39,7 @@ class DesktopVoice extends StatefulWidget {
     required this.state,
     required this.session,
     required this.port,
-    required this.stageWidth,
+    required this.maxWidth,
     required this.others,
   });
 
@@ -43,8 +47,10 @@ class DesktopVoice extends StatefulWidget {
   final RemoteSession session;
   final SessionPort port;
 
-  /// The stage's width: the bubble is at most 32 narrower.
-  final double stageWidth;
+  /// The width the row's column may take: the stage less the row's right inset (12, or the key row's).
+  /// The bubble and the hint keep 20 clear on the left, so without the key row the bubble is the spec's
+  /// `min(stage − 32, 480)`.
+  final double maxWidth;
 
   /// The row's other items, which fade out while a hold is on.
   final List<Widget> others;
@@ -235,7 +241,10 @@ class _DesktopVoiceState extends State<DesktopVoice> with SingleTickerProviderSt
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            if (active) _column(context, reduced) else if (_hold.hint != null) voiceHint(_hold),
+            if (active)
+              _column(context, reduced)
+            else if (_hold.hint != null)
+              voiceHint(_hold, maxWidth: math.max(0.0, widget.maxWidth - _leftClear)),
             if (active || _hold.hint != null) const SizedBox(height: 8),
             Row(
               mainAxisSize: MainAxisSize.min,
@@ -281,7 +290,7 @@ class _DesktopVoiceState extends State<DesktopVoice> with SingleTickerProviderSt
   Widget _column(BuildContext context, bool reduced) {
     final t = RappTokens.of(context);
     final pick = _hold.holding ? _hold.pick : _released;
-    final width = (widget.stageWidth - 32).clamp(0.0, 480.0);
+    final width = (widget.maxWidth - _leftClear).clamp(0.0, 480.0);
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: reduced ? 1 : 0, end: 1),
       duration: reduced ? Duration.zero : _rise,

@@ -379,6 +379,36 @@ void main() {
     await tester.pump(const Duration(seconds: 7));
   });
 
+  macTest('on a narrow stage the language hint wraps and 去设置 stays clickable', (tester) async {
+    await view(tester);
+    await goLive(tester);
+    final ran = <String>[];
+    final old = voiceSettingsRunner;
+    voiceSettingsRunner = (c, a) async {
+      ran.add('$c ${a.join(' ')}');
+      return ProcessResult(0, 0, '', '');
+    };
+    addTearDown(() => voiceSettingsRunner = old);
+    await tester.pumpWidget(layer(width: 420));
+    final g = await press(tester);
+    voice.stopResult = '你好';
+    await g.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text(voiceLanguageHint), findsOneWidget);
+    final stage = tester.getRect(find.byKey(const Key('stage')));
+    final hint = tester.getRect(find.byKey(const Key('voice-hint')));
+    expect(hint.left, greaterThanOrEqualTo(stage.left));
+    expect(hint.right, lessThanOrEqualTo(stage.right));
+    final settings = tester.getRect(find.byKey(const Key('voice-settings')));
+    expect(settings.right, lessThanOrEqualTo(hint.right));
+    await tester.tap(find.byKey(const Key('voice-settings')));
+    await tester.pump();
+    expect(ran, hasLength(1));
+    expect(ran.single, contains('Localization'));
+    await tester.pump(const Duration(seconds: 7));
+  });
+
   macTest('the targets carry icons and the button a tooltip', (tester) async {
     await view(tester);
     await goLive(tester);

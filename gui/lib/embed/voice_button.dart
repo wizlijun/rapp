@@ -391,12 +391,14 @@ Widget voiceButton(VoiceHold hold) => Builder(
 );
 
 /// The small bubble after a release (spec §5.1 「松手后的提示」): 没听清, a put-back, a permission or a not-yet.
-Widget voiceHint(VoiceHold hold) => Builder(
+/// With [maxWidth] (the Mac's stage row) the text wraps to fit, so 「去设置」 always stays in view.
+Widget voiceHint(VoiceHold hold, {double? maxWidth}) => Builder(
   builder: (context) {
     final t = RappTokens.of(context);
     // iOS only has a pane for the permission; the language one is a hint to read.
     final button = hold.settings == VoiceSettings.privacy || (hold.settings == VoiceSettings.language && !_ios);
-    return DecoratedBox(
+    final text = Text(hold.hint ?? '', style: TextStyle(color: t.text));
+    final box = DecoratedBox(
       key: const Key('voice-hint'),
       decoration: BoxDecoration(
         // The raise colour on the opaque float surface, as the round buttons: no picture shows through.
@@ -409,7 +411,7 @@ Widget voiceHint(VoiceHold hold) => Builder(
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(hold.hint ?? '', style: TextStyle(color: t.text)),
+            if (maxWidth != null) Flexible(child: text) else text,
             if (button) ...[
               const SizedBox(width: 8),
               RappButton.secondary(
@@ -423,5 +425,6 @@ Widget voiceHint(VoiceHold hold) => Builder(
         ),
       ),
     );
+    return maxWidth == null ? box : ConstrainedBox(constraints: BoxConstraints(maxWidth: maxWidth), child: box);
   },
 );

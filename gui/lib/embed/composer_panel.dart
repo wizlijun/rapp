@@ -552,6 +552,8 @@ List<Widget> composerLayer(
   final both = Listenable.merge([session, session.composer, state.composerZoom, state.stageSide]);
   final term = port is TermSessionPort ? port : null;
   final keys = keyRow && term != null;
+  // The stage row's right inset: clear of the terminal key row when it shows.
+  final rowRight = keys ? keyRowInset + keyRowGroupWidth + 8 : 12.0;
   bool open() => session.composer.open && session.composerAllowed;
   return [
     Positioned.fill(
@@ -704,7 +706,7 @@ List<Widget> composerLayer(
       child: LayoutBuilder(
         builder: (context, stage) => Padding(
       padding: EdgeInsets.only(
-        right: keys ? keyRowInset + keyRowGroupWidth + 8 : 12,
+        right: rowRight,
         bottom: (keys ? keyRowBottom : 12) + keyboard,
       ),
       child: Align(
@@ -761,7 +763,7 @@ List<Widget> composerLayer(
               state: state,
               session: session,
               port: port,
-              stageWidth: stage.maxWidth,
+              maxWidth: math.max(0.0, stage.maxWidth - rowRight),
               others: items,
             );
           }
