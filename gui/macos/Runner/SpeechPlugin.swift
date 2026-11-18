@@ -13,7 +13,7 @@ import FlutterMacOS
 /// Dart calls `start` (replies `ok` / `asked` / `denied` / `unavailable` / `preparing`, or `cancelled` when a
 /// cancel, another start or an interruption overtook it while it set up), `stop` and `cancel`;
 /// this side sends `partial` / `final` {text} and `error` {code}. Everything runs on the main thread except
-/// the audio tap, which only hands buffers to the recogniser. This plugin owns the app's AVAudioSession.
+/// the audio tap, which only hands buffers to the recogniser. On iOS this plugin owns the app's AVAudioSession; macOS has no shared session, so it only owns its audio engine.
 /// iOS 26+ uses SpeechAnalyzer + SpeechTranscriber; older systems (or no transcriber for the locale) use
 /// SFSpeechRecognizer.
 final class SpeechPlugin: NSObject, FlutterPlugin {
@@ -46,7 +46,25 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
     #endif
   }
 
+  #if os(macOS)
+  /// The app's main window: losing key status interrupts a live recording.
+  private var keyObserver: NSObjectProtocol?
+
+  /// macOS entry point: also watches `window` so that it resigning key ends a live recording.
+  static func register(with registrar: FlutterPluginRegistrar, window: NSWindow) {
+    let plugin = makePlugin(registrar)
+    plugin.keyObserver = NotificationCenter.default.addObserver(
+      forName: NSWindow.didResignKeyNotification, object: window, queue: .main
+    ) { [weak plugin] _ in plugin?.interrupt() }
+  }
+  #endif
+
   static func register(with registrar: FlutterPluginRegistrar) {
+    _ = makePlugin(registrar)
+  }
+
+  @discardableResult
+  private static func makePlugin(_ registrar: FlutterPluginRegistrar) -> SpeechPlugin {
     #if os(iOS)
     let messenger = registrar.messenger()
     #else
@@ -55,6 +73,7 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
     let channel = FlutterMethodChannel(name: "rapp/speech", binaryMessenger: messenger)
     let plugin = SpeechPlugin(channel: channel)
     registrar.addMethodCallDelegate(plugin, channel: channel)
+    return plugin
   }
 
   func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {

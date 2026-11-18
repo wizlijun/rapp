@@ -5,5 +5,7 @@
 	<!-- rapp spawns rapp-hub and opens local sockets; the App Sandbox is off. -->
 	<key>com.apple.security.app-sandbox</key>
 	<false/>
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
 </dict>
 </plist>
