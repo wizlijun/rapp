@@ -275,12 +275,12 @@ void main() {
   // A phone held upright (user 2026-11-18: 「竖屏时，键盘在语音按钮靠中间的横排就行了」).
   const upright = Size(393, 852);
 
-  iosTest('语音 is the same size as 输入, and half see-through at rest', (tester) async {
+  iosTest('语音 is the same size as 输入, and 30 % see-through at rest', (tester) async {
     await tester.pumpWidget(layer(size: upright));
     expect(inStage(tester, hold).size, const Size.square(stageButtonSize));
     expect(inStage(tester, open).size, const Size.square(stageButtonSize));
     final look = tester.widget<AnimatedOpacity>(find.descendant(of: hold, matching: find.byType(AnimatedOpacity)).first);
-    expect(look.opacity, 0.5);
+    expect(look.opacity, 0.7);
   });
 
   iosTest('portrait: 输入 sits in a row beside 语音, 12 toward the middle; 语音 keeps its 80 / 88', (tester) async {

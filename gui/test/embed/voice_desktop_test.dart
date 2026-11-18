@@ -2,11 +2,14 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/flutter_editor.dart';
 import 'package:rapp/embed/composer_panel.dart';
+import 'package:rapp/embed/geometry.dart';
+import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/voice_desktop.dart';
 import 'package:rapp/embed/voice_button.dart' show voiceLanguageHint, voiceSettingsRunner;
@@ -119,6 +122,48 @@ void main() {
     debugDefaultTargetPlatformOverride = TargetPlatform.linux;
     await tester.pumpWidget(layer(width: 999));
     expect(hold, findsNothing);
+  });
+
+  // User 2026-11-18: 「其他端同样的按钮透明度都修改 一致。修改为30%透明吧」.
+  macTest('the row\'s 还原, 输入 and 按住说话 are 30 % see-through at rest, solid under the mouse or a press', (tester) async {
+    await view(tester);
+    rs.apply(WindowsEvent(1, [
+      RemoteWindow(
+          id: 7,
+          parent: 0,
+          kind: WindowKind.normal,
+          title: 'w7',
+          rect: const Rect.fromLTWH(0, 0, 100, 100),
+          titleBar: 28,
+          resizable: true,
+          focused: true,
+          texture: 7,
+          visible: const Rect.fromLTWH(0, 0, 1, 1)),
+    ]));
+    rs.zoomOf(7).zoomTo(2, const Offset(500, 350), fitRect(const Size(100, 100), const Size(1000, 700)), const Size(1000, 700));
+    await tester.pumpWidget(layer());
+    final reset = find.byKey(const Key('zoom-reset'));
+    double look(Finder f) =>
+        tester.widget<AnimatedOpacity>(find.descendant(of: f, matching: find.byType(AnimatedOpacity)).first).opacity;
+    for (final f in [reset, open, hold]) {
+      expect(look(f), 0.7);
+    }
+    final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await mouse.addPointer(location: Offset.zero);
+    addTearDown(mouse.removePointer);
+    await mouse.moveTo(tester.getCenter(open));
+    await tester.pump();
+    expect(look(open), 1);
+    expect(look(reset), 0.7);
+    await mouse.moveTo(Offset.zero);
+    await tester.pump();
+    expect(look(open), 0.7);
+    final g = await tester.startGesture(tester.getCenter(reset));
+    await tester.pump();
+    expect(look(reset), 1);
+    await g.cancel();
+    await tester.pump();
+    expect(look(reset), 0.7);
   });
 
   macTest('press shows 正在听… then send', (tester) async {

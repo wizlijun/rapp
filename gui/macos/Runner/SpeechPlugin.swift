@@ -244,6 +244,9 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
       try session.setCategory(.record, mode: .measurement, options: [])
       // Else iOS mutes haptics while recording: the press and each pick change are felt (spec §5.1).
       try session.setAllowHapticsAndSystemSoundsDuringRecording(true)
+      // Small hardware buffers (~20 ms; iOS otherwise hands the tap ~100 ms at a time): audio reaches the
+      // recogniser sooner. A hint; iOS may round it.
+      try? session.setPreferredIOBufferDuration(0.02)
       try session.setActive(true)
     } catch {
       return false
@@ -317,8 +320,11 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
   private func startAnalyzer(_ gen: Int) async -> String? {
     guard SpeechTranscriber.isAvailable else { return nil }
     guard let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Self.locale) else { return nil }
+    // .fastResults: words show while being said instead of after the transcriber gathers more context (user
+    // 2026-11-18: 「实时显示不太即时……确保说完立即显示」); the finalised text still corrects them.
     let transcriber = SpeechTranscriber(
-      locale: locale, transcriptionOptions: [], reportingOptions: [.volatileResults], attributeOptions: [])
+      locale: locale, transcriptionOptions: [], reportingOptions: [.volatileResults, .fastResults],
+      attributeOptions: [])
 
     if assetsInstalling { return "preparing" }
     do {
@@ -415,6 +421,8 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
     guard let recognizer = SFSpeechRecognizer(locale: Self.locale), recognizer.isAvailable else { return "unavailable" }
     let request = SFSpeechAudioBufferRecognitionRequest()
     request.shouldReportPartialResults = true
+    // Dictation: partials come per word, not held for a whole query.
+    request.taskHint = .dictation
     request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
     guard startAudio({ _ in { request.append($0) } }) else { return "unavailable" }
 

@@ -766,6 +766,7 @@ List<Widget> composerLayer(
                 semanticLabel: '还原',
                 icon: Icons.zoom_in_map,
                 onPicture: true,
+                seeThrough: true,
                 onPressed: session.restoreCurrent,
               ),
               if (button) const SizedBox(width: 8),
@@ -777,6 +778,7 @@ List<Widget> composerLayer(
                 semanticLabel: '输入',
                 icon: Icons.keyboard_outlined,
                 onPicture: true,
+                seeThrough: true,
                 onPressed: () => session.composer.open = true,
               ),
           ];

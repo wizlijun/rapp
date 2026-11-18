@@ -25,6 +25,7 @@ class RappButton extends StatefulWidget {
     this.icon,
     this.size = 48,
   }) : _kind = _Kind.primary,
+       seeThrough = false,
        onPicture = false,
        oneLine = false;
   const RappButton.secondary({
@@ -37,6 +38,7 @@ class RappButton extends StatefulWidget {
     this.onPicture = false,
     this.size = 48,
     this.oneLine = false,
+    this.seeThrough = false,
   }) : _kind = _Kind.secondary;
   const RappButton.accent({
     super.key,
@@ -46,6 +48,7 @@ class RappButton extends StatefulWidget {
     this.focusNode,
     this.icon,
   }) : _kind = _Kind.accent,
+       seeThrough = false,
        onPicture = false,
        oneLine = false,
        size = 48;
@@ -57,13 +60,14 @@ class RappButton extends StatefulWidget {
     this.focusNode,
     this.icon,
   }) : _kind = _Kind.quiet,
+       seeThrough = false,
        onPicture = false,
        oneLine = false,
        size = 48;
 
   /// A flat square of [size] on the remote picture, icon only: the stage's edge buttons (iOS), in the Mac row's
   /// shape (the theme corner, like [RappButton.secondary]; user 2026-11-18: 「和 macos 版本一样都改为方的」). No
-  /// shadow. Half see-through ([stageRestOpacity]) until a finger is on it, so it hides less of the picture (user 2026-11-18:
+  /// shadow. See-through ([restOpacity]) until a finger is on it, so it hides less of the picture (user 2026-11-18:
   /// 「未按时半透明显示」).
   const RappButton.stage({
     super.key,
@@ -75,7 +79,8 @@ class RappButton extends StatefulWidget {
        semanticLabel = null,
        focusNode = null,
        onPicture = true,
-       oneLine = false;
+       oneLine = false,
+       seeThrough = true;
 
   final String label;
   final VoidCallback? onPressed;
@@ -95,17 +100,23 @@ class RappButton extends StatefulWidget {
 
   /// The label stays on one line and ends in … when the button is made narrower than it.
   final bool oneLine;
+
+  /// [restOpacity] until a pointer is on it: pressed, or (a mouse) hovering. The stage's own buttons on every
+  /// platform (user 2026-11-18: 「其他端同样的按钮透明度都修改 一致」); always on for [RappButton.stage].
+  final bool seeThrough;
   final _Kind _kind;
 
   @override
   State<RappButton> createState() => _RappButtonState();
 }
 
-/// A stage button's opacity while no finger is on it; solid while one is.
-const stageRestOpacity = 0.5;
+/// A [RappButton.seeThrough] button's opacity while no pointer is on it: 30 % see-through (user 2026-11-18:
+/// 「修改为30%透明吧」; was 0.5).
+const restOpacity = 0.7;
 
 class _RappButtonState extends State<RappButton> {
   bool _down = false;
+  bool _hover = false;
 
   void _set(bool v) {
     if (_down != v) setState(() => _down = v);
@@ -199,12 +210,16 @@ class _RappButtonState extends State<RappButton> {
     final name = widget.semanticLabel ?? (icon == null ? null : widget.label);
     final reduced =
         MediaQuery.disableAnimationsOf(context) || widget.onPressed == null;
-    final Widget look = widget._kind != _Kind.stage
+    final Widget look = !widget.seeThrough
         ? button
         : AnimatedOpacity(
-            opacity: _down ? 1 : stageRestOpacity,
+            opacity: _down || _hover ? 1 : restOpacity,
             duration: reduced ? Duration.zero : const Duration(milliseconds: 80),
-            child: button,
+            child: MouseRegion(
+              onEnter: (_) => setState(() => _hover = true),
+              onExit: (_) => setState(() => _hover = false),
+              child: button,
+            ),
           );
     return Listener(
       onPointerDown: (_) => _set(true),

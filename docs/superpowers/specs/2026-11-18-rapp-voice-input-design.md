@@ -64,7 +64,7 @@
 - 只有图标没有文字：语音 `Icons.mic_none`（录音中 `Icons.mic`），输入 `Icons.keyboard_outlined`，还原 `Icons.zoom_in_map`。读屏标签分别是「语音」「输入」「还原」。各自保留现在的 Key：`composer-open`、`zoom-reset`；语音按钮 Key `voice-hold`。
 - 样式**极简**（用户 2026-11-18）：圆形，只有图标；底色沿用 `RappButton.secondary(onPicture: true)` 在画面上的那套底（`Color.alphaBlend(t.raise.first, t.float.first)`），1 px `t.line` 描边，图标 `t.text`。没有阴影、发光、渐变，也没有按下以外的状态色。颜色全部取 `RappTokens`，深浅主题都对。实现上给 `RappButton` 加一个圆形图标变体；不要另起一套颜色。
 - **方的，和 Mac 一样**（用户 2026-11-18：「能不能和 macos 版本一样都改为方的。统一一下设计风格」）：三个按钮是方块，角用主题的圆角（和 Mac 那排按钮、输入板的 ＋ 和发送同一个角），底色、边线照旧。
-- **没按时半透明**（用户 2026-11-18：「未按时半透明显示」）：三个按钮平时整个按钮不透明度 0.5，少挡画面；手指按上去那一刻变成不透明，手指离开（松手或取消）后 80 ms 回到 0.5。语音按钮按住后照旧变成发送圆盘，圆盘本身不透明。
+- **没按时半透明**（用户 2026-11-18：「未按时半透明显示」）：三个按钮平时 30% 透明（不透明度 0.7；用户 2026-11-18：「修改为30%透明吧」，原来是 0.5），少挡画面；手指按上去那一刻变成不透明，手指离开（松手或取消）后 80 ms 回到 0.7。其他端同样的按钮一样（用户：「其他端同样的按钮透明度都修改 一致」）：macOS、Linux 画面右下角那排的还原、输入和 macOS 的按住说话也是平时 0.7，鼠标移上去或按下时不透明；传输的「取消」和断线时的「重连」「停止」不算这类按钮，不变。语音按钮按住后照旧变成发送圆盘，圆盘本身不透明。
 - 按住说话时语音按钮本身隐藏，变成发送圆盘（见 5.1 的动画），松手后再变回来。
 - 显示条件：输入板没开时，现在「输入」什么时候出现，语音就什么时候出现（`session.composerAllowed` 为真）；还原的条件不变。都不出现时整组不画。输入板打开时见 4.4。
 - 上传、下载进度那一行（`transferStatus` 文字 + 取消）放在按钮组内侧，和语音按钮同一高度；竖屏横排时改放在按钮行上方 12，靠外侧对齐。录音时它和「输入」「还原」一起淡出。
@@ -186,8 +186,9 @@
 - 方法：`start`（参数无；返回 `ok` / `asked`（首次弹了授权框）/ `denied` / `preparing`（资源还在下载）/ `unavailable` / `cancelled`（还没开始就被 `cancel` 或中断抢先，Dart 侧静默））、`stop`（结束录音，等最终结果）、`cancel`（丢弃）。事件经同一通道回调到 Dart：`partial {text}`、`final {text}`、`error {code}`、`level {value}`。`level` 是麦克风音量，0–1（每块音频的 RMS 换成分贝，−50 dB 到 0 dB 线性映射，夹在 0–1），每秒最多 20 次，只在录音时发。
 - 还按着时原生先给了 `final`（例如老接口到了 1 分钟）：Dart 侧记下这段字，松手时直接用，不再等 1 秒。
 - 语言（2026-11-18 起改为只用系统首选语言的第一项，见 `2026-11-18-rapp-macos-voice-design.md` §4.1；下面是原来的做法）：取设备的语言列表（`Locale.preferredLanguages`），中文项排前，其余按设备顺序，最后退回 `zh-CN`；逐个试到识别器支持的为止。不用 `Locale.current`：应用包只声明了英文，中文手机上它是 `en_CN`，中文会被当英文识别（0.14.8 实机发现）。
-- iOS 26+：`SpeechAnalyzer` + `SpeechTranscriber`（开启实时结果），需要的语言资源由系统 `AssetInventory` 准备；资源还没下好时本次返回 `preparing` 并触发下载，提示「正在准备语音识别，请稍后再试」。
-- iOS 17–25：`SFSpeechRecognizer` + `SFSpeechAudioBufferRecognitionRequest`，`shouldReportPartialResults = true`，`supportsOnDeviceRecognition` 为真时设 `requiresOnDeviceRecognition = true`。
+- iOS 录音会话设 `setPreferredIOBufferDuration(0.02)`（约 20 ms 一块，系统默认常是约 100 ms 一块），声音更早送到识别器。macOS 和 iOS 用同一份识别代码，以上参数两边一样。
+- iOS 26+：`SpeechAnalyzer` + `SpeechTranscriber`（开启实时结果 `.volatileResults` 和快速结果 `.fastResults`：字在说的时候就出来，不等更多上下文；用户 2026-11-18：「实时显示不太即时……确保说完立即显示」），需要的语言资源由系统 `AssetInventory` 准备；资源还没下好时本次返回 `preparing` 并触发下载，提示「正在准备语音识别，请稍后再试」。
+- iOS 17–25：`SFSpeechRecognizer` + `SFSpeechAudioBufferRecognitionRequest`，`shouldReportPartialResults = true`，`taskHint = .dictation`，`supportsOnDeviceRecognition` 为真时设 `requiresOnDeviceRecognition = true`。
 - 录音：App 里别处没有用 `AVAudioSession`（2026-11-18 查过 `gui/ios/Runner` 和 Dart 依赖），语音插件独占它。`AVAudioEngine` 输入节点；`AVAudioSession` 用 `.record`（不加 `.duckOthers`：SDK 说它只配别的类别），结束时 `setActive(false, options: .notifyOthersOnDeactivation)`。监听中断通知，中断时发 `error {code: interrupted}`。
 - Dart 侧一个小类（例如 `gui/lib/embed/voice_input.dart` 的 `VoiceInput`）包装通道，暴露状态（空闲 / 听 / 等结果）和当前文字，供按钮和气泡使用；测试里用假通道。
 
