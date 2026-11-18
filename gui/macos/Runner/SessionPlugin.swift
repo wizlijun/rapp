@@ -25,6 +25,22 @@ final class SurfaceTexture: NSObject, FlutterTexture {
 }
 
 #if os(iOS)
+/// One A window's full-window base picture (the last frame that showed all of it), which the zoom UI
+/// shows around a partial stream.
+final class BaseTexture: NSObject, FlutterTexture {
+  private let surfaces: WindowSurfaces
+  private let window: UInt32
+
+  init(surfaces: WindowSurfaces, window: UInt32) {
+    self.surfaces = surfaces
+    self.window = window
+  }
+
+  func copyPixelBuffer() -> Unmanaged<CVPixelBuffer>? {
+    surfaces.base(window).map { Unmanaged.passRetained($0) }
+  }
+}
+
 /// One hardware-keyboard press held behind a type-to-compose letter (iOS's `ComposeHold` event).
 struct HeldPress {
   let hid: Int
@@ -56,6 +72,10 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     let queue: DispatchQueue
     /// Window id → its registered texture.
     var textures = [UInt32: (id: Int64, texture: SurfaceTexture)]()
+    #if os(iOS)
+    /// Window id → its registered base-picture texture.
+    var bases = [UInt32: (id: Int64, texture: BaseTexture)]()
+    #endif
     /// A's latest window table, for a detach.
     var windows = [SessionWindow]()
     init(session: EmbeddedSession, queue: DispatchQueue) {
@@ -219,6 +239,9 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       // Queued with the session's other messages: a composer send after it reaches A after the switch.
       live[sid]?.session.send(.selectInput(id: id))
       result(nil)
+    case let .setView(sid, window, rect, zoom):
+      live[sid]?.session.setView(window: window, rect: rect, zoom: zoom)
+      result(nil)
     case let .setStream(sid, mode, fps, density, pinned, focus):
       live[sid]?.session.setStream(mode: mode, fps: fps, choice: density, pinned: pinned, focus: focus)
       result(nil)
@@ -336,6 +359,8 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       if let entry = live[sid] {
         entry.textures.values.forEach { registry.unregisterTexture($0.id) }
         entry.textures = [:]
+        entry.bases.values.forEach { registry.unregisterTexture($0.id) }
+        entry.bases = [:]
       }
       #endif
       result(nil)
@@ -659,6 +684,12 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     case let .surfaces(ids):
       for id in ids {
         if let t = entry.textures[id] { registry.textureFrameAvailable(t.id) }
+        #if os(iOS)
+        // The base picture changes only with a frame that covers the whole window.
+        if let b = entry.bases[id], let v = entry.session.surfaces.visible(id), WindowSurfaces.coversWindow(v) {
+          registry.textureFrameAvailable(b.id)
+        }
+        #endif
       }
       #if os(macOS)
       detached[sid]?.surfacesUpdated(ids)
@@ -667,10 +698,17 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       let change = textureChanges(have: Set(entry.textures.keys), windows: windows)
       for id in change.unregister {
         if let t = entry.textures.removeValue(forKey: id) { registry.unregisterTexture(t.id) }
+        #if os(iOS)
+        if let b = entry.bases.removeValue(forKey: id) { registry.unregisterTexture(b.id) }
+        #endif
       }
       for id in change.register {
         let texture = SurfaceTexture(surfaces: entry.session.surfaces, window: id)
         entry.textures[id] = (registry.register(texture), texture)
+        #if os(iOS)
+        let base = BaseTexture(surfaces: entry.session.surfaces, window: id)
+        entry.bases[id] = (registry.register(base), base)
+        #endif
       }
       entry.windows = windows
       #if os(macOS)
@@ -690,6 +728,10 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       // Every texture goes before Dart hears the session ended.
       entry.textures.values.forEach { registry.unregisterTexture($0.id) }
       entry.textures = [:]
+      #if os(iOS)
+      entry.bases.values.forEach { registry.unregisterTexture($0.id) }
+      entry.bases = [:]
+      #endif
       live[sid] = nil
       hidden[sid] = nil
       banners[sid] = nil
@@ -704,7 +746,12 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     default:
       break
     }
-    if let payload = eventPayload(event, sid: sid, textures: entry.textures.mapValues(\.id)) {
+    #if os(iOS)
+    let bases = entry.bases.mapValues(\.id)
+    #else
+    let bases = [UInt32: Int64]()
+    #endif
+    if let payload = eventPayload(event, sid: sid, textures: entry.textures.mapValues(\.id), bases: bases) {
       channel.invokeMethod(payload.method, arguments: payload.args)
     }
     #if os(macOS)

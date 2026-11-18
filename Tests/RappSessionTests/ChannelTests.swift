@@ -165,6 +165,29 @@ final class ChannelTests: XCTestCase {
         XCTAssertThrowsError(try channelCommand("drop_textures", [:])) { XCTAssertEqual($0 as? ChannelError, .bad("drop_textures")) }
     }
 
+    func testSetViewCommand() throws {
+        let args: [String: Any] = ["sid": 3, "window": 7, "x": 1.5, "y": 2.0, "w": 100.0, "h": 50.0, "zoom": 2.0]
+        XCTAssertEqual(try channelCommand("set_view", args),
+                       .setView(sid: 3, window: 7, rect: CanvasRect(x: 1.5, y: 2, w: 100, h: 50), zoom: 2))
+        for key in ["sid", "window", "x", "y", "w", "h", "zoom"] {
+            var bad = args
+            bad[key] = nil
+            XCTAssertThrowsError(try channelCommand("set_view", bad)) { XCTAssertEqual($0 as? ChannelError, .bad("set_view"), key) }
+        }
+    }
+
+    func testWindowsPayloadCarriesTheBaseTexture() throws {
+        let info = WindowInfo(id: 7, parent: 0, kind: .normal, resizable: true, focused: true,
+                              rect: CanvasRect(x: 0, y: 0, w: 64, h: 32), titleBar: 0, title: "Calc")
+        let ws = [SessionWindow(info: info, visible: CGRect(x: 0, y: 0, width: 1, height: 1))]
+        func first(_ bases: [UInt32: Int64]) throws -> [String: Any] {
+            let p = try XCTUnwrap(eventPayload(.windows(ws), sid: 1, textures: [7: 11], bases: bases))
+            return try XCTUnwrap((p.args["windows"] as? [[String: Any]])?.first)
+        }
+        XCTAssertEqual(try first([7: 12])["base"] as? Int64, 12)
+        XCTAssertNil(try first([:])["base"])
+    }
+
     func testHostHintPayloads() throws {
         let c = try XCTUnwrap(eventPayload(.covered(id: 9, name: "通知中心", bundleID: "com.apple.notificationcenterui",
                                                     dismissable: true), sid: 4, textures: [:]))

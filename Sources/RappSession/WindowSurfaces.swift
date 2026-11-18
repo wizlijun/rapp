@@ -13,6 +13,9 @@ public final class WindowSurfaces {
         var height: Int
         var latest: CVPixelBuffer?
         var visible: CGRect?
+        /// The last picture that covered the whole window, and the window size it was taken at.
+        var base: CVPixelBuffer?
+        var baseSize = CGSize.zero
     }
 
     private let lock = NSLock()
@@ -52,6 +55,12 @@ public final class WindowSurfaces {
             lock.lock()
             slots[info.id]?.latest = buffer
             slots[info.id]?.visible = visible
+            let size = CGSize(width: CGFloat(info.rect.w), height: CGFloat(info.rect.h))
+            if slots[info.id]?.baseSize != size { slots[info.id]?.base = nil }
+            if Self.coversWindow(visible) {
+                slots[info.id]?.base = buffer
+                slots[info.id]?.baseSize = size
+            }
             lock.unlock()
             updated.append(info.id)
         }
@@ -61,6 +70,17 @@ public final class WindowSurfaces {
     public func latest(_ id: UInt32) -> CVPixelBuffer? {
         lock.lock(); defer { lock.unlock() }
         return slots[id]?.latest
+    }
+
+    /// The latest picture that showed the whole window, if the window still has that size.
+    public func base(_ id: UInt32) -> CVPixelBuffer? {
+        lock.lock(); defer { lock.unlock() }
+        return slots[id]?.base
+    }
+
+    /// Whether `visible` (0...1 of the content) is all of it, within a thousandth.
+    public static func coversWindow(_ visible: CGRect) -> Bool {
+        abs(visible.minX) <= 0.001 && abs(visible.minY) <= 0.001 && abs(visible.width - 1) <= 0.001 && abs(visible.height - 1) <= 0.001
     }
 
     /// The part of the window's content the latest buffer shows, 0...1 from the top-left.
@@ -98,8 +118,9 @@ public final class WindowSurfaces {
         lock.lock(); defer { lock.unlock() }
         poolsCreated += 1
         var slot = slots[id].map { old in
-            Slot(pool: pool, width: width, height: height, latest: old.latest, visible: old.visible)
-        } ?? Slot(pool: pool, width: width, height: height, latest: nil, visible: nil)
+            Slot(pool: pool, width: width, height: height, latest: old.latest, visible: old.visible,
+                 base: old.base, baseSize: old.baseSize)
+        } ?? Slot(pool: pool, width: width, height: height, latest: nil, visible: nil, base: nil, baseSize: .zero)
         slot.pool = pool
         slots[id] = slot
         return pool

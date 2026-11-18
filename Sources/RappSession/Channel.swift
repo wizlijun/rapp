@@ -27,6 +27,8 @@ public enum ChannelCommand: Equatable {
     case latch(sid: Int64, modifiers: UInt64)
     case resize(sid: Int64, Message)
     case selectWindow(sid: Int64, window: UInt32)
+    /// The part of A's window `window` that B shows now (`rect`, A points) at `zoom`; window 0 lifts the limit.
+    case setView(sid: Int64, window: UInt32, rect: CanvasRect, zoom: Float)
     /// Press the close button of A's window `window` (the session stays up).
     case closeWindow(sid: Int64, window: UInt32)
     /// Select A's input source `id`; "" selects A's ASCII-capable layout (v8 hosts).
@@ -90,7 +92,7 @@ public let maxInputSourceID = 1024
 /// `ChannelError.bad(method)`; sizes and click counts clamp to what the protocol carries.
 public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelCommand {
     if method == "init" { return .initialize }
-    let known: Set<String> = ["start", "close", "mouse", "scroll", "key", "key_event", "latch", "resize", "select_window", "set_stream",
+    let known: Set<String> = ["start", "close", "mouse", "scroll", "key", "key_event", "latch", "resize", "select_window", "set_view", "set_stream",
                               "cancel_transfer", "picture_focus", "compose_replay", "clip_pick", "menu_pick", "move_top_left",
                               "composer_paste", "composer_attach", "composer_send", "composer_drop_block",
                               "detach", "attach", "raise_detached", "fetch_clip", "copy_local", "drop_copy", "reveal",
@@ -156,6 +158,10 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
         return .resize(sid: sid, .resize(window: try a.window(), width: try a.size("w"), height: try a.size("h")))
     case "select_window":
         return .selectWindow(sid: sid, window: try a.window())
+    case "set_view":
+        return .setView(sid: sid, window: try a.window(),
+                        rect: CanvasRect(x: try a.float("x"), y: try a.float("y"), w: try a.float("w"), h: try a.float("h")),
+                        zoom: try a.float("zoom"))
     case "close_window":
         return .closeWindow(sid: sid, window: try a.window())
     case "select_input":
@@ -336,7 +342,8 @@ public func channelName(_ kind: WindowKind) -> String {
 
 /// The Dart call for `e`, or nil for events with none (`.surfaces` only wakes textures).
 /// `textures` maps window ids to their Flutter texture ids; a window without one sends null.
-public func eventPayload(_ e: SessionEvent, sid: Int64, textures: [UInt32: Int64]) -> (method: String, args: [String: Any])? {
+/// `bases` does the same for the full-window base pictures (iOS only); a window without one sends no `base`.
+public func eventPayload(_ e: SessionEvent, sid: Int64, textures: [UInt32: Int64], bases: [UInt32: Int64] = [:]) -> (method: String, args: [String: Any])? {
     func payload(_ method: String, _ fields: [String: Any]) -> (method: String, args: [String: Any]) {
         (method, fields.merging(["sid": sid]) { $1 })
     }
@@ -346,13 +353,15 @@ public func eventPayload(_ e: SessionEvent, sid: Int64, textures: [UInt32: Int64
     case let .windows(windows):
         return payload("windows", ["windows": windows.map { w -> [String: Any] in
             let i = w.info
-            return [
+            var fields: [String: Any] = [
                 "id": Int(i.id), "parent": Int(i.parent), "kind": channelName(i.kind), "title": i.title,
                 "x": Double(i.rect.x), "y": Double(i.rect.y), "w": Double(i.rect.w), "h": Double(i.rect.h),
                 "titleBar": Double(i.titleBar), "resizable": i.resizable, "focused": i.focused,
                 "texture": textures[i.id].map { $0 as Any } ?? NSNull(),
                 "visible": [w.visible.minX, w.visible.minY, w.visible.width, w.visible.height].map { Double($0) },
             ]
+            if let base = bases[i.id] { fields["base"] = base }
+            return fields
         }])
     case .surfaces:
         return nil
