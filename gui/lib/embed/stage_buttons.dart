@@ -3,7 +3,13 @@ import 'package:flutter/material.dart';
 
 import '../ui/prefs.dart';
 
-/// The edge inset, and the bottom inset, of the stage's button stack.
+/// Where the stage's button stack rests: its outer edge [stageButtonsIn] in from the screen edge and its bottom
+/// [stageButtonsUp] up, so the voice button (the lowest) is where a thumb holding the phone reaches without
+/// stretching to the corner (user 2026-11-18: 「放在大拇指最容易单手按到的位置」).
+const stageButtonsIn = 80.0;
+const stageButtonsUp = 88.0;
+
+/// The gap above whatever the stack stands on in place of the stage's bottom: the soft keyboard.
 const stageButtonsEdge = 12.0;
 
 const _gap = 12.0;
@@ -81,8 +87,8 @@ class _StageButtonsState extends State<StageButtons>
 
   // The stack's centre when it rests on [s].
   double _rest(StageSide s, double w) => s == StageSide.left
-      ? stageButtonsEdge + w / 2
-      : _stageWidth - stageButtonsEdge - w / 2;
+      ? stageButtonsIn + w / 2
+      : _stageWidth - stageButtonsIn - w / 2;
 
   void _start(DragStartDetails _) {
     _dx = _offset;
@@ -180,12 +186,8 @@ class _StageButtonsState extends State<StageButtons>
           builder: (context, _) => Align(
             alignment: left ? Alignment.bottomLeft : Alignment.bottomRight,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(
-                stageButtonsEdge,
-                0,
-                stageButtonsEdge,
-                stageButtonsEdge,
-              ),
+              // The bottom is the caller's: it knows what the stack stands on.
+              padding: const EdgeInsets.symmetric(horizontal: stageButtonsIn),
               child: Transform.translate(
                 offset: Offset(_offset, 0),
                 child: Row(

@@ -10,6 +10,7 @@ import 'package:flutter/rendering.dart' show RenderMetaData;
 import '../ui/tokens.dart';
 import 'app_profile.dart';
 import 'composer_panel.dart' show panelWidth;
+import 'panel_place.dart';
 import 'remote_session.dart';
 
 /// The panel keeps this far from every stage edge.
@@ -95,7 +96,11 @@ class FloatingComposer extends StatefulWidget {
       required this.onPlace,
       required this.child,
       this.scale = 1,
-      this.keyboard = 0});
+      this.keyboard = 0,
+      this.place});
+
+  /// Told where the panel (with its grip) is, when given: iOS's voice button stands above it.
+  final ValueNotifier<Rect?>? place;
 
   /// The panel's zoom: its width is 720 × this.
   final double scale;
@@ -241,7 +246,7 @@ class _FloatingComposerState extends State<FloatingComposer> {
       _stage = c.biggest;
       return CustomSingleChildLayout(
         delegate: _Place(_drag ?? _at.inContent(_stage), panelWidth(_stage.width, widget.scale), widget.keyboard),
-        child: TapRegion(
+        child: _placed(TapRegion(
           onTapOutside: (_) {
             if (_touched) setState(() => _touched = false);
           },
@@ -315,10 +320,12 @@ class _FloatingComposerState extends State<FloatingComposer> {
               ),
             ),
           ),
-        ),
+        )),
       );
     });
   }
+
+  Widget _placed(Widget w) => widget.place == null ? w : PanelPlace(place: widget.place!, child: w);
 }
 
 class _Place extends SingleChildLayoutDelegate {
