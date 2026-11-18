@@ -154,11 +154,11 @@ void main() {
         }
       });
 
-  Widget layer({RemoteSession? session, bool reduced = false, SessionPort? p, bool keyRow = false}) => wrap(
+  Widget layer({RemoteSession? session, bool reduced = false, SessionPort? p, bool keyRow = false, Size size = stage}) => wrap(
       SizedBox(
           key: const Key('stage'),
-          width: stage.width,
-          height: stage.height,
+          width: size.width,
+          height: size.height,
           child: Stack(
               children: composerLayer(
                   state: es, session: session ?? rs, port: p ?? port, keyRow: keyRow, editor: FlutterEditor.new))),
@@ -269,6 +269,49 @@ void main() {
     rs.composer.open = false;
     await tester.pump();
     expect(stage.height - inStage(tester, hold).bottom, 88);
+  });
+
+  // A phone held upright (user 2026-11-18: 「竖屏时，键盘在语音按钮靠中间的横排就行了」).
+  const upright = Size(393, 852);
+
+  iosTest('portrait: 输入 sits in a row beside 语音, 12 toward the middle; 语音 keeps its 80 / 88', (tester) async {
+    await tester.pumpWidget(layer(size: upright));
+    final v = inStage(tester, hold);
+    final i = inStage(tester, open);
+    expect(upright.width - v.right, 80);
+    expect(upright.height - v.bottom, 88);
+    expect(v.left - i.right, 12);
+    expect(i.center.dy, v.center.dy);
+  });
+
+  iosTest('portrait, left side: the row mirrors, 输入 on 语音\'s right', (tester) async {
+    es.setStageSide(StageSide.left);
+    await tester.pumpWidget(layer(size: upright));
+    final v = inStage(tester, hold);
+    final i = inStage(tester, open);
+    expect(v.left, 80);
+    expect(i.left - v.right, 12);
+    expect(i.center.dy, v.center.dy);
+  });
+
+  iosTest('portrait: the transfer strip stands 12 above the row, on its outer edge', (tester) async {
+    rs.apply(const TransferStatusEvent(1, '传输中'));
+    await tester.pumpWidget(layer(size: upright));
+    final v = inStage(tester, hold);
+    final strip = inStage(tester, find.text('传输中'));
+    expect(strip.top, lessThan(v.top));
+    final row = find.ancestor(of: find.text('传输中'), matching: find.byType(Row)).first;
+    final r = inStage(tester, row);
+    expect(v.top - r.bottom, 12);
+    expect(r.right, v.right);
+  });
+
+  iosTest('landscape keeps the column: 输入 12 above 语音', (tester) async {
+    await tester.pumpWidget(layer());
+    final v = inStage(tester, hold);
+    final i = inStage(tester, open);
+    expect(v.top - i.bottom, 12);
+    expect(i.center.dx, v.center.dx);
   });
 
   iosTest('terminal, key row above the open panel: 语音 stands 8 above the key row', (tester) async {
