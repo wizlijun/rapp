@@ -548,3 +548,11 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 
 - [x] 协议 v14 `setView`、A 端按取景截局部、iOS 双指缩放（App 画面和文本终端）、底图、「还原」按钮已实现；规格 `docs/superpowers/specs/2026-11-18-rapp-pinch-zoom-design.md`，iPad 规格里的"不做捏合缩放"已改成指向它。
 - [ ] 真机验收 1–8（Duo 和 iPad 各一遍，条目见该规格 §8「真机验收」）：不放大时行为不变；捏合放大和平移、按住再拖选字；流量不超过不放大时；平移不露黑边；输入板和软键盘；断网重连后取景还在，且 App 和桌面会话（A 端）各自在 `setView` 之后都记了 `region:` 日志（第 6 项，Task 8 留下的检查）；「还原」按钮；文本终端的放大、平移、滚回历史、选字。
+
+## 0.14.7 发布（2026-11-18，捏合缩放 + 协议 v14 + 剪贴板崩溃修复）
+
+- [x] 合入 `feat/pinch-zoom`（73f9a77，协议 v13→v14、`setView` type 41、A 端按取景截局部、「还原」按钮、文本终端同手势）与 `fix/pasteboard-main`（103ca0d，`NSPasteboard` 只在主线程访问，修 0.14.5 的 abort）。另一台设备的 Linux 0.14.6 改了同一个 `rust/host-linux/src/wire.rs`，git 自动合并未报冲突，已逐条确认空标识握手、type 41 分支与三个新测试都在；`tasks/todo.md` 冲突保留两段。
+- [x] 合并后全套门禁：analyze 干净、Flutter 2150 通过 / 23 跳过、Swift 493 通过 / 1 跳过 / 0 失败、Rust 1171 通过（唯一失败为 `pty::local` 绑真端口的已知 load flake，隔离 3/3 通过）、clippy `-D warnings` 退出 0、`scripts/check.sh` 退出 0。
+- [x] [v0.14.7 Release](https://github.com/wizlijun/rapp/releases/tag/v0.14.7) 已公开并设为 Latest，pkg / zip / latest.json 三个资产的 GitHub 大小与 sha256 均与本地一致；网站备用快照刷新至 44 个 release（macOS → 0.14.7，Linux → 0.14.6）。
+- [ ] **Linux 侧仍是协议 v13**：v14 客户端暂时连不上 Linux 桌面会话，需要 Linux 侧出 v14 的包。
+- [ ] 网站未部署：`npx --yes wrangler@4.135.0 deploy --config website/wrangler.jsonc` 仍需 `CLOUDFLARE_API_TOKEN` 或交互登录（累计 14 版快照已提交未部署）。
