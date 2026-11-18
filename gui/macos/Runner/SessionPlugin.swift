@@ -99,6 +99,8 @@ final class SessionPlugin: NSObject, FlutterPlugin {
   private var keysHolder: Int64?
   /// Dart's `picture_focus` compose flag for `focusedSid`: a letter there opens the writing panel.
   private var composeOn = false
+  /// Dart's `picture_focus` voice flag for `focusedSid`: holding the voice hotkey there starts voice input (macOS).
+  private var voiceOn = false
   /// Sessions whose A focus is in a password field (v13 `secure_focus`): no type-to-compose there,
   /// decided here so the very first key of a password never opens the panel.
   private var secure = Set<Int64>()
@@ -123,6 +125,15 @@ final class SessionPlugin: NSObject, FlutterPlugin {
   private var keyMonitor: Any?
   /// 「附件」's open file picker, one per session.
   private var panels = [Int64: NSOpenPanel]()
+  /// Hold-to-talk on the stage picture: decides, in front of the main window's key routing, which
+  /// keys are the voice hotkey (and so never reach A) and when voice input starts and ends.
+  private var gate = VoiceKeyGate()
+  /// The hotkey down the gate swallowed while it waits to see a long press; A gets it on a flush.
+  private var gateHeld: NSEvent?
+  /// The session the gate's voice input is for (its `voice_key` calls carry it).
+  private var gateSid: Int64?
+  /// Feeds the gate `.elapsed` once the hotkey has been held `VoiceKeyGate.holdDelay`.
+  private var gateTimer: DispatchWorkItem?
   #else
   /// The hardware keyboard: what goes to A, what A holds (released on blur), the latched modifiers.
   private var router = PressRouter()
@@ -211,7 +222,20 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     case let .close(sid):
       live[sid]?.session.close(reason: "quit")
       result(nil)
-    case let .mouse(sid, message), let .scroll(sid, message), let .resize(sid, message):
+    case let .mouse(sid, message):
+      #if os(macOS)
+      // A press on the picture: a held hotkey was a modifier for the click, a recording is cancelled.
+      if case .mouse(kind: .down, _, _, _, _, _) = message { gateFeed(.pointer, targetSid: mainTargetSid) }
+      #endif
+      live[sid]?.session.send(message)
+      result(nil)
+    case let .scroll(sid, message):
+      #if os(macOS)
+      gateFeed(.scroll, targetSid: mainTargetSid)  // a held hotkey was a modifier for the scroll
+      #endif
+      live[sid]?.session.send(message)
+      result(nil)
+    case let .resize(sid, message):
       live[sid]?.session.send(message)
       result(nil)
     case let .key(sid, keyCode, modifiers):
@@ -310,14 +334,26 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     case let .moveTopLeft(sid, window):
       live[sid]?.session.moveToTopLeft(window: window)
       result(nil)
-    case let .pictureFocus(sid, compose):
+    case let .pictureFocus(sid, compose, voice):
       hold.focus(sid, compose: compose)
       if sid != focusedSid {
         releaseKeys()
         focusedSid = sid
       }
       composeOn = compose && sid != nil
+      voiceOn = voice && sid != nil
       result(nil)
+    #if os(macOS)
+    case let .setVoiceHotkey(hotkey):
+      gate.hotkey = hotkey
+      result(nil)
+    case let .voiceEnd(sid):
+      if sid == gateSid { _ = gate.handle(.ended, at: ProcessInfo.processInfo.systemUptime, ready: false) }
+      result(nil)
+    #else
+    case .setVoiceHotkey, .voiceEnd:
+      result(nil)  // hold-to-talk on a hotkey is macOS only
+    #endif
     case let .composeReplay(sid):
       // The caret is in the panel and the picture blurred (Dart sent `picture_focus(nil)` first):
       // the held keys now reach Flutter's text input, and B's IME, in the order they were typed.
@@ -460,7 +496,15 @@ final class SessionPlugin: NSObject, FlutterPlugin {
       forName: NSWindow.didResignKeyNotification, object: nil, queue: .main
     ) { [weak self] note in
       guard let self, let window = note.object as? NSWindow else { return }
-      guard window === self.view?.window || self.detached.values.contains(where: { $0.owns(window) }) else { return }
+      let main = window === self.view?.window
+      guard main || self.detached.values.contains(where: { $0.owns(window) }) else { return }
+      if main {
+        // The gate forgets what is held (a recording is cancelled); A never saw a swallowed hotkey down.
+        self.gateFeed(.resign, targetSid: self.mainTargetSid)
+        self.gateHeld = nil
+        self.gateTimer?.cancel()
+        self.gateTimer = nil
+      }
       self.releaseKeys()
     }
     // Quitting (⌘Q included): A gets the releases before the connections go.
@@ -516,40 +560,90 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     }
     let to = keyWindowRoute(window: event.window.map(ObjectIdentifier.init),
                             main: view?.window.map(ObjectIdentifier.init), detached: owners)
-    let targetSid: Int64?
-    let decision: KeyDecision
-    var attach = false
     switch to {
     case .local:
       return event
     case .main:
-      targetSid = focusedSid.flatMap { live[$0] != nil && detached[$0] == nil ? $0 : nil }
-      let now = ProcessInfo.processInfo.systemUptime
-      // Waiting for the panel to take the caret: everything typed meanwhile waits behind the letter.
-      switch hold.add(event, now: now) {
-      case .held: return nil
-      case .dropped: releaseKeys()  // a release that sat in the hold is gone: nothing stays stuck on A
-      case .notHolding: break
-      }
-      if let sid = composeStart(keyDown: down && event.type == .keyDown, composeOn: composeOn,
-                                targetSid: targetSid, characters: event.characters,
-                                flags: KeyFlags(event.modifierFlags), isRepeat: event.isARepeat,
-                                remoteSecure: targetSid.map(secure.contains) ?? false) {
-        // Type-to-compose: the letter never reaches A; Dart opens the panel, then asks for it back.
-        hold.start(sid: sid, event, now: now)
-        channel.invokeMethod("compose_key", arguments: ["sid": sid])
-        return nil
-      }
-      if targetSid != keysHolder { releaseKeys() }
-      decision = keys.route(keyCode: event.keyCode, down: down, flags: KeyFlags(event.modifierFlags),
-                            pictureFocused: targetSid != nil)
+      let targetSid = mainTargetSid
+      // The voice gate first: the hotkey held for voice input never reaches A.
+      let input: VoiceGateInput = down
+        ? .down(event.keyCode, KeyFlags(event.modifierFlags), isRepeat: event.type == .keyDown && event.isARepeat)
+        : .up(event.keyCode)
+      let step = gateFeed(input, targetSid: targetSid)
+      if step.arm { gateHeld = event }
+      return step.pass ? routeMain(event, down: down, targetSid: targetSid) : nil
     case let .detached(sid):
-      targetSid = sid
-      if targetSid != keysHolder { releaseKeys() }
-      decision = keys.routeDetached(keyCode: event.keyCode, down: down, flags: event.modifierFlags)
-      attach = down && event.type == .keyDown
+      if sid != keysHolder { releaseKeys() }
+      let decision = keys.routeDetached(keyCode: event.keyCode, down: down, flags: event.modifierFlags)
+      let attach = down && event.type == .keyDown
         && routeDetachedKey(keyCode: event.keyCode, flags: event.modifierFlags) == .attach
+      return sendKey(event, down: down, decision: decision, targetSid: sid, attach: attach)
     }
+  }
+
+  /// The session whose stage picture has keyboard focus, if it is live and on the stage.
+  private var mainTargetSid: Int64? {
+    focusedSid.flatMap { live[$0] != nil && detached[$0] == nil ? $0 : nil }
+  }
+
+  /// A main-window key event past the voice gate: the compose hold, type-to-compose, then A or rapp.
+  private func routeMain(_ event: NSEvent, down: Bool, targetSid: Int64?) -> NSEvent? {
+    let now = ProcessInfo.processInfo.systemUptime
+    // Waiting for the panel to take the caret: everything typed meanwhile waits behind the letter.
+    switch hold.add(event, now: now) {
+    case .held: return nil
+    case .dropped: releaseKeys()  // a release that sat in the hold is gone: nothing stays stuck on A
+    case .notHolding: break
+    }
+    if let sid = composeStart(keyDown: down && event.type == .keyDown, composeOn: composeOn,
+                              targetSid: targetSid, characters: event.characters,
+                              flags: KeyFlags(event.modifierFlags), isRepeat: event.isARepeat,
+                              remoteSecure: targetSid.map(secure.contains) ?? false) {
+      // Type-to-compose: the letter never reaches A; Dart opens the panel, then asks for it back.
+      hold.start(sid: sid, event, now: now)
+      channel.invokeMethod("compose_key", arguments: ["sid": sid])
+      return nil
+    }
+    if targetSid != keysHolder { releaseKeys() }
+    let decision = keys.route(keyCode: event.keyCode, down: down, flags: KeyFlags(event.modifierFlags),
+                              pictureFocused: targetSid != nil)
+    return sendKey(event, down: down, decision: decision, targetSid: targetSid, attach: false)
+  }
+
+  /// Feeds the voice gate one input and acts on its step, except for the event itself: a flush
+  /// sends the held hotkey down to A first, an arm marks the session and starts the hold timer,
+  /// a phase goes to Dart as `voice_key`. `targetSid`: the stage picture's session (`mainTargetSid`).
+  @discardableResult
+  private func gateFeed(_ input: VoiceGateInput, targetSid: Int64?) -> VoiceGateStep {
+    let step = gate.handle(input, at: ProcessInfo.processInfo.systemUptime, ready: voiceOn && targetSid != nil)
+    if step.flush {
+      gateTimer?.cancel()
+      gateTimer = nil
+      if let held = gateHeld {
+        gateHeld = nil
+        _ = routeMain(held, down: true, targetSid: targetSid)
+      }
+    }
+    // A hold_combo starts on its key down with no arm before it: the start names the session then.
+    if step.arm || (step.voice == .start && input != .elapsed) { gateSid = targetSid }
+    if step.arm {
+      gateTimer?.cancel()
+      let timer = DispatchWorkItem { [weak self] in
+        guard let self else { return }
+        self.gateTimer = nil
+        self.gateFeed(.elapsed, targetSid: self.mainTargetSid)
+      }
+      gateTimer = timer
+      DispatchQueue.main.asyncAfter(deadline: .now() + VoiceKeyGate.holdDelay, execute: timer)
+    }
+    if let phase = step.voice, let sid = gateSid {
+      channel.invokeMethod("voice_key", arguments: ["sid": sid, "phase": phase.rawValue])
+    }
+    return step
+  }
+
+  /// Sends a routed key event's releases and the event itself to the session it is for.
+  private func sendKey(_ event: NSEvent, down: Bool, decision: KeyDecision, targetSid: Int64?, attach: Bool) -> NSEvent? {
     // A held ⌃⌘D repeats: swallowed, and only its first press toggles.
     if attach, event.isARepeat { return nil }
     let target = targetSid.flatMap { live[$0] }

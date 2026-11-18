@@ -278,14 +278,39 @@ final class ChannelTests: XCTestCase {
     }
 
     func testPictureFocusTakesASidOrNull() throws {
-        XCTAssertEqual(try channelCommand("picture_focus", ["sid": 3]), .pictureFocus(sid: 3, compose: false))
-        XCTAssertEqual(try channelCommand("picture_focus", ["sid": 3, "compose": true]), .pictureFocus(sid: 3, compose: true))
-        XCTAssertEqual(try channelCommand("picture_focus", ["sid": 3, "compose": NSNull()]), .pictureFocus(sid: 3, compose: false))
-        XCTAssertEqual(try channelCommand("picture_focus", ["sid": NSNull()]), .pictureFocus(sid: nil, compose: false))
+        XCTAssertEqual(try channelCommand("picture_focus", ["sid": 3]), .pictureFocus(sid: 3, compose: false, voice: false))
+        XCTAssertEqual(try channelCommand("picture_focus", ["sid": 3, "compose": true]),
+                       .pictureFocus(sid: 3, compose: true, voice: false))
+        XCTAssertEqual(try channelCommand("picture_focus", ["sid": 3, "compose": NSNull()]),
+                       .pictureFocus(sid: 3, compose: false, voice: false))
+        XCTAssertEqual(try channelCommand("picture_focus", ["sid": NSNull()]), .pictureFocus(sid: nil, compose: false, voice: false))
         XCTAssertThrowsError(try channelCommand("picture_focus", [:]))
         XCTAssertThrowsError(try channelCommand("picture_focus", ["sid": "3"]))
         XCTAssertEqual(try channelCommand("compose_replay", ["sid": 5]), .composeReplay(sid: 5))
         XCTAssertThrowsError(try channelCommand("compose_replay", [:]))
+    }
+
+    func testPictureFocusVoice() throws {
+        XCTAssertEqual(try channelCommand("picture_focus", ["sid": 3, "compose": true, "voice": true]),
+                       .pictureFocus(sid: 3, compose: true, voice: true))
+        XCTAssertEqual(try channelCommand("picture_focus", ["sid": 3, "compose": true]),
+                       .pictureFocus(sid: 3, compose: true, voice: false))
+        XCTAssertEqual(try channelCommand("picture_focus", ["sid": 3, "voice": NSNull()]),
+                       .pictureFocus(sid: 3, compose: false, voice: false))
+        XCTAssertThrowsError(try channelCommand("picture_focus", ["sid": 3, "voice": 1]))
+    }
+
+    func testSetVoiceHotkey() throws {
+        XCTAssertEqual(try channelCommand("set_voice_hotkey", ["hotkey": "off"]), .setVoiceHotkey(.off))
+        XCTAssertEqual(try channelCommand("set_voice_hotkey", ["hotkey": 5]), .setVoiceHotkey(.standard))
+        XCTAssertEqual(try channelCommand("set_voice_hotkey", ["hotkey": ["kind": "hold_modifier", "key_code": 58]]),
+                       .setVoiceHotkey(.holdModifier(58)))
+        XCTAssertEqual(try channelCommand("set_voice_hotkey", [:]), .setVoiceHotkey(.standard))
+    }
+
+    func testVoiceEnd() throws {
+        XCTAssertEqual(try channelCommand("voice_end", ["sid": 3]), .voiceEnd(3))
+        XCTAssertNil(try? channelCommand("voice_end", [:]))
     }
 
     func testUnknownMethodIsNotImplemented() {
