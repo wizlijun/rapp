@@ -15,4 +15,13 @@ final class SpeechLanguageTests: XCTestCase {
   func testNoChineseFallback() {
     XCTAssertEqual(speechLocale(preferred: ["ja-JP"]).identifier, "ja-JP")
   }
+  /// iOS: an English UI with Chinese further down the list still listens in Chinese.
+  func testChineseFirstPicksChineseFromLaterInTheList() {
+    XCTAssertEqual(speechLocale(preferred: ["en-US", "zh-Hans-CN"], chineseFirst: true).identifier, "zh-CN")
+    XCTAssertEqual(speechLocale(preferred: ["en-US", "ja-JP", "zh-Hant-TW"], chineseFirst: true).identifier, "zh-TW")
+  }
+  func testChineseFirstWithoutChineseKeepsTheFirstLanguage() {
+    XCTAssertEqual(speechLocale(preferred: ["en-US", "ja-JP"], chineseFirst: true).identifier, "en-US")
+    XCTAssertEqual(speechLocale(preferred: [], chineseFirst: true).identifier, "en-US")
+  }
 }
