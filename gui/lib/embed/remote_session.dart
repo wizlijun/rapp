@@ -116,11 +116,12 @@ class RemoteSession extends ChangeNotifier {
     view.unlimited();
   }
 
-  /// A reconnect's new session takes over the zoom of the windows it shares with [old].
+  /// A reconnect's new session takes over [old]'s zoomed windows.
   void adoptZoom(RemoteSession old) {
-    final ids = {for (final w in windows) w.id};
+    // Every zoomed one: the fresh table may not be here yet (the old sid can close first); the next
+    // WindowsEvent drops those whose window is gone.
     for (final e in old._zoomViews.entries) {
-      if (e.value.zoomed && ids.contains(e.key)) zoomOf(e.key).adopt(e.value);
+      if (e.value.zoomed) zoomOf(e.key).adopt(e.value);
     }
   }
 

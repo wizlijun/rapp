@@ -55,6 +55,7 @@ class ZoomView extends ChangeNotifier {
     final fy = (focal.dy - before.top) / before.height;
     _z = z.clamp(1.0, maxZoom).toDouble();
     if (_z == 1) {
+      // A finished restore() deliberately keeps its centre; z 1 ignores the centre, so this reset is harmless.
       _centre = const Offset(0.5, 0.5);
     } else {
       final w = fit.width * _z, h = fit.height * _z;
