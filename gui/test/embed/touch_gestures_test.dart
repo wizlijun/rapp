@@ -10,8 +10,15 @@ String _o(Offset o) => '${_n(o.dx)},${_n(o.dy)}';
 /// Writes down every intent, one line each.
 class _Sink implements TouchSink {
   final calls = <String>[];
+
+  /// What [press] answers: false is a press the sink did not take (a 「标记输入区」 mark, no button bit).
+  bool takes = true;
   @override
-  void press(PointerDownEvent e) => calls.add('press ${_o(e.localPosition)}');
+  bool press(PointerDownEvent e) {
+    calls.add('press ${_o(e.localPosition)}');
+    return takes;
+  }
+
   @override
   void drag(PointerMoveEvent e) => calls.add('drag ${_o(e.localPosition)}');
   @override
@@ -214,6 +221,35 @@ void main() {
       f.up(1);
       await _wait(tester, f, 300);
       expect(f.calls, ['press 200.0,100.0', 'release 200.0,100.0']);
+    });
+
+    testWidgets('a press the sink did not take holds nothing: a second finger scrolls', (tester) async {
+      final f = _Fingers();
+      f.sink.takes = false;
+      f.down(1, const Offset(200, 100));
+      await _wait(tester, f, 200);
+      expect(f.calls, ['press 200.0,100.0']);
+      f.moveBy(1, const Offset(20, 0)); // not held: no drag
+      expect(f.calls, ['press 200.0,100.0']);
+      f.down(2, const Offset(260, 100));
+      expect(f.calls, ['press 200.0,100.0', 'twoDown 240.0,100.0']);
+      f.moveBy(1, const Offset(0, -20));
+      f.moveBy(2, const Offset(0, -20));
+      await tester.pump();
+      expect(f.calls.last, 'scroll 240.0,80.0 0.0,-20.0');
+      f.up(1);
+      f.up(2);
+      await _wait(tester, f, 300);
+      expect(f.calls.where((c) => c.startsWith('release') || c.startsWith('drag')), isEmpty);
+    });
+
+    testWidgets('a tap the sink did not take is not released', (tester) async {
+      final f = _Fingers();
+      f.sink.takes = false;
+      f.down(1, const Offset(200, 100));
+      f.up(1);
+      await _wait(tester, f, 300);
+      expect(f.calls, ['press 200.0,100.0']);
     });
 
     testWidgets('a finger left over after a press is lifted makes two with the next one', (tester) async {

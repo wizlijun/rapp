@@ -22,8 +22,11 @@ const twoTapSlop = 8.0;
 
 /// What fingers mean on a picture and on a terminal alike (pinch-zoom spec §6.2): one recognizer for both.
 abstract interface class TouchSink {
-  /// A finger press now; `e` is the finger's down event.
-  void press(PointerDownEvent e);
+  /// A finger press now; `e` is the finger's down event. True: the sink took a real press, and this finger is held
+  /// (its moves are [drag]s, its lift a [release], other fingers are ignored meanwhile, T2). False: nothing was
+  /// pressed (a 「标记输入区」 mark, no button bit), the finger is not held, and a second finger makes a two-finger
+  /// gesture. A press outside the picture is never held, whatever this returns.
+  bool press(PointerDownEvent e);
 
   /// The pressed finger moved.
   void drag(PointerMoveEvent e);
@@ -127,19 +130,20 @@ class TouchGestures {
     }
     if (_pressed != null) return; // T2
     final zoomed = zoom() > 1;
-    if (!zoomed && !inside(e.localPosition)) return sink.press(e); // outside: blurs now, holds nothing
+    if (!zoomed && !inside(e.localPosition)) {
+      sink.press(e); // outside: blurs now, holds nothing
+      return;
+    }
     _pending = e;
     _pendingZoomed = zoomed;
     _pendingTimer = Timer(zoomed ? zoomedHold : touchHold, _flush);
   }
 
-  /// Sends the held-back press (T1; zoomed: held still [zoomedHold]).
+  /// Sends the held-back press (T1; zoomed: held still [zoomedHold]); the finger is held if the sink took it.
   void _flush() {
     final e = _pending;
     _dropPending();
-    if (e == null) return;
-    _pressed = e.pointer;
-    sink.press(e);
+    if (e != null && sink.press(e)) _pressed = e.pointer;
   }
 
   void _dropPending() {
@@ -258,6 +262,7 @@ class TouchGestures {
     if (p?.pointer == e.pointer) {
       if (e is PointerCancelEvent) return _dropPending(); // T6
       _flush();
+      if (_pressed != e.pointer) return; // the sink pressed nothing: nothing to release
       _pressed = null;
       return sink.release(p!.localPosition, e); // a tap: up where it landed, the jitter never reached A
     }
