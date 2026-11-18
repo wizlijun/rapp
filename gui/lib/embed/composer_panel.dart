@@ -627,12 +627,14 @@ List<Widget> composerLayer(
       right: keys ? keyRowInset + keyRowGroupWidth + 8 : 12,
       bottom: (keys ? keyRowBottom : 12) + keyboard,
       child: ListenableBuilder(
-        listenable: both,
+        listenable: Listenable.merge([both, session.zooms]),
         builder: (context, _) {
           final transfer = session.transferStatus;
           final button = session.composerAllowed;
+          final zoomed = session.currentZoomed && !session.composer.open;
           // An open panel hides it; a disallowed one is hidden, so the strip shows here.
-          if ((session.composer.open && button) || (transfer == null && !button)) return const SizedBox.shrink();
+          // 还原 shows even where 输入 is not allowed: else a zoomed such session could only be pinched back.
+          if ((session.composer.open && button) || (transfer == null && !button && !zoomed)) return const SizedBox.shrink();
           final t = RappTokens.of(context);
           return Listener(
             onPointerDown: (_) => state.holdForPanel(session),
@@ -650,6 +652,17 @@ List<Widget> composerLayer(
                   const SizedBox(width: 8),
                   RappButton.secondary(label: '取消', onPicture: true, onPressed: () => port.cancelTransfer(session.sid)),
                   const SizedBox(width: 8),
+                ],
+                if (zoomed) ...[
+                  RappButton.secondary(
+                    key: const Key('zoom-reset'),
+                    label: '还原',
+                    semanticLabel: '还原',
+                    icon: Icons.zoom_in_map,
+                    onPicture: true,
+                    onPressed: session.restoreCurrent,
+                  ),
+                  if (button) const SizedBox(width: 8),
                 ],
                 if (button)
                   RappButton.secondary(
