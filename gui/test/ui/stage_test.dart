@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:rapp/paths.dart';
-import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
+import 'package:flutter/foundation.dart' show debugDefaultTargetPlatformOverride, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/services.dart';
 
 import 'package:flutter/gestures.dart';
@@ -11,6 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/app_profile.dart' show AfterSend, RuleAction, WindowRule;
 import 'package:rapp/embed/flutter_editor.dart' show FlutterEditor;
 import 'package:rapp/embed/composer_model.dart' show escKeyCode;
+import 'package:rapp/embed/geometry.dart' show contentSize, fitRect, toRemote;
 import 'package:rapp/embed/picture.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
@@ -1724,6 +1725,308 @@ void main() {
         await g.down(o + const Offset(200, 100));
         expect(mouse().map((c) => c['kind']), ['down']);
         await g.up();
+      });
+    });
+
+    group('pinch zoom', () {
+      /// [body] as on an iPad; the override never outlives the test (Flutter asserts on a leaked one).
+      Future<void> on(TargetPlatform p, Future<void> Function() body) async {
+        debugDefaultTargetPlatformOverride = p;
+        try {
+          await body();
+        } finally {
+          debugDefaultTargetPlatformOverride = null;
+        }
+      }
+
+      Future<void> onIOS(Future<void> Function() body) => on(TargetPlatform.iOS, body);
+
+      Future<Offset> setup(WidgetTester tester, {List<RemoteWindow>? windows}) async {
+        await tester.pumpWidget(wrap(embedded()));
+        await openEmbedded(tester);
+        port.emit(const ReadyEvent(1, 'Safari'));
+        port.emit(WindowsEvent(1, windows ?? [rw(7, 400, 328)])); // 400x300 on 800x600: twice as big
+        await tester.pump();
+        await tester.pump();
+        return tester.getTopLeft(find.byKey(const Key('stage')));
+      }
+
+      List<Map<String, Object?>> views() => port.calls.where((c) => c.$1 == 'set_view').map((c) => c.$2).toList();
+      List<Map<String, Object?>> scrolls() => port.calls.where((c) => c.$1 == 'scroll').map((c) => c.$2).toList();
+
+      /// Two fingers [from] each side of [at] spread (or close) to [to] each side in one event batch: the zoom
+      /// goes times to / from about [at]. Lifted unless [lift] is false; the fingers are returned.
+      Future<(TestGesture, TestGesture)> pinch(WidgetTester tester, Offset o,
+          {Offset at = const Offset(400, 300), double from = 100, double to = 200, bool lift = true}) async {
+        final f1 = await tester.createGesture(kind: PointerDeviceKind.touch, pointer: 21);
+        final f2 = await tester.createGesture(kind: PointerDeviceKind.touch, pointer: 22);
+        await f1.down(o + at - Offset(from, 0));
+        await f2.down(o + at + Offset(from, 0));
+        final b = tester.binding;
+        b.handlePointerEvent(PointerMoveEvent(pointer: 21, kind: PointerDeviceKind.touch, position: o + at - Offset(to, 0)));
+        b.handlePointerEvent(PointerMoveEvent(pointer: 22, kind: PointerDeviceKind.touch, position: o + at + Offset(to, 0)));
+        await tester.pump();
+        if (lift) {
+          await f1.up();
+          await f2.up();
+          await tester.pump();
+        }
+        return (f1, f2);
+      }
+
+      /// What A is told for window 7 zoomed 2x about the stage's centre: the middle 200x150 of its 400x300 content,
+      /// widened by 25 % each side.
+      Map<String, Object?> view7(Object sid, {int window = 7}) =>
+          {'sid': sid, 'window': window, 'x': 50.0, 'y': 37.5, 'w': 300.0, 'h': 225.0, 'zoom': 2.0};
+      const unlimited = {'sid': 1, 'window': 0, 'x': 0.0, 'y': 0.0, 'w': 0.0, 'h': 0.0, 'zoom': 1.0};
+
+      testWidgets('pinch zooms and sends nothing to A', (tester) async {
+        await onIOS(() async {
+          final o = await setup(tester);
+          await pinch(tester, o);
+          expect(es.remote[1]!.zoomOf(7).z, greaterThan(1));
+          expect(es.remote[1]!.zoomOf(7).z, 2.0);
+          expect(port.calls.where((c) => c.$1 == 'mouse' || c.$1 == 'scroll'), isEmpty);
+        });
+      });
+
+      testWidgets('zoomed tap lands where it shows', (tester) async {
+        await onIOS(() async {
+          final o = await setup(tester);
+          await pinch(tester, o);
+          await tester.pump(const Duration(milliseconds: 200));
+          port.calls.clear();
+          final win = es.remote[1]!.windows.single;
+          final stage = tester.getSize(find.byKey(const Key('stage')));
+          final zfit = es.remote[1]!.zoomOf(7).zfit(fitRect(contentSize(win), stage), stage);
+          expect(zfit, const Rect.fromLTWH(-400, -300, 1600, 1200));
+          await tester.tapAt(o + const Offset(200, 100));
+          await tester.pump();
+          final p = toRemote(const Offset(200, 100), zfit, win);
+          expect(p, const Offset(150, 128));
+          expect(mouse().map((c) => (c['kind'], c['x'], c['y'])), [('down', p.dx, p.dy), ('up', p.dx, p.dy)]);
+        });
+      });
+
+      testWidgets('zoomed drag pans only', (tester) async {
+        await onIOS(() async {
+          final o = await setup(tester);
+          await pinch(tester, o);
+          await tester.pump(const Duration(milliseconds: 200));
+          port.calls.clear();
+          final g = await tester.createGesture(kind: PointerDeviceKind.touch, pointer: 31);
+          await g.down(o + const Offset(300, 300));
+          await g.moveBy(const Offset(20, 0));
+          await g.moveBy(const Offset(30, 0));
+          await g.up();
+          await tester.pump();
+          expect(mouse(), isEmpty);
+          expect(scrolls(), isEmpty);
+          final z = es.remote[1]!.zoomOf(7);
+          expect(z.z, 2.0);
+          expect(z.zfit(const Rect.fromLTWH(0, 0, 800, 600), const Size(800, 600)).left, -350);
+        });
+      });
+
+      testWidgets('zoomed hold 500 ms then drag sends down, drag, up', (tester) async {
+        await onIOS(() async {
+          final o = await setup(tester);
+          await pinch(tester, o);
+          await tester.pump(const Duration(milliseconds: 200));
+          port.calls.clear();
+          final centre = es.remote[1]!.zoomOf(7).centre;
+          final g = await tester.createGesture(kind: PointerDeviceKind.touch, pointer: 31);
+          await g.down(o + const Offset(300, 300));
+          await tester.pump(const Duration(milliseconds: 499));
+          expect(mouse(), isEmpty);
+          await tester.pump(const Duration(milliseconds: 2));
+          await g.moveBy(const Offset(20, 0));
+          await g.up();
+          await tester.pump();
+          expect(mouse().map((c) => c['kind']), ['down', 'drag', 'up']);
+          expect(es.remote[1]!.zoomOf(7).centre, centre);
+        });
+      });
+
+      testWidgets('zoomed two-finger move scrolls', (tester) async {
+        await onIOS(() async {
+          final o = await setup(tester);
+          await pinch(tester, o);
+          await tester.pump(const Duration(milliseconds: 200));
+          port.calls.clear();
+          final f1 = await tester.createGesture(kind: PointerDeviceKind.touch, pointer: 31);
+          final f2 = await tester.createGesture(kind: PointerDeviceKind.touch, pointer: 32);
+          await f1.down(o + const Offset(300, 300));
+          await f2.down(o + const Offset(340, 300));
+          final b = tester.binding;
+          b.handlePointerEvent(PointerMoveEvent(pointer: 31, kind: PointerDeviceKind.touch, position: o + const Offset(300, 280)));
+          b.handlePointerEvent(PointerMoveEvent(pointer: 32, kind: PointerDeviceKind.touch, position: o + const Offset(340, 280)));
+          await tester.pump();
+          await f1.up();
+          await f2.up();
+          await tester.pump(const Duration(milliseconds: 300));
+          expect(scrolls().length, 1);
+          expect(scrolls()[0]['dy'], -5.0); // 20 B points on a picture drawn four times as big
+          expect(mouse(), isEmpty);
+          expect(es.remote[1]!.zoomOf(7).z, 2.0);
+        });
+      });
+
+      testWidgets('setView 150 ms after the fingers lift, not during', (tester) async {
+        await onIOS(() async {
+          final o = await setup(tester);
+          final (f1, f2) = await pinch(tester, o, lift: false);
+          await tester.pump(const Duration(milliseconds: 300));
+          expect(views(), isEmpty);
+          await f1.up();
+          await f2.up();
+          await tester.pump(const Duration(milliseconds: 149));
+          expect(views(), isEmpty);
+          await tester.pump(const Duration(milliseconds: 2));
+          expect(views(), [view7(1)]);
+        });
+      });
+
+      testWidgets('back to 1 sends the unlimited view', (tester) async {
+        await onIOS(() async {
+          final o = await setup(tester);
+          await pinch(tester, o);
+          await tester.pump(const Duration(milliseconds: 200));
+          expect(views(), [view7(1)]);
+          port.calls.clear();
+          await pinch(tester, o, from: 200, to: 100);
+          expect(es.remote[1]!.zoomOf(7).z, 1.0);
+          await tester.pump(const Duration(milliseconds: 200));
+          expect(views(), [unlimited]);
+        });
+      });
+
+      testWidgets('switching tab sends unlimited for an unzoomed window and the view for a zoomed one', (tester) async {
+        await onIOS(() async {
+          final o = await setup(tester, windows: [rw(7, 400, 328), rw(8, 400, 328)]);
+          expect(es.remote[1]!.currentWindow, 7);
+          await pinch(tester, o);
+          await tester.pump(const Duration(milliseconds: 200));
+          expect(views(), [view7(1)]);
+          port.calls.clear();
+          es.selectWindow(8);
+          await tester.pump();
+          await tester.pump();
+          expect(views(), [unlimited]);
+          port.calls.clear();
+          es.selectWindow(7);
+          await tester.pump();
+          await tester.pump();
+          expect(views(), [view7(1)]);
+        });
+      });
+
+      testWidgets('leaving the stage (overview) sends unlimited', (tester) async {
+        await onIOS(() async {
+          tester.view.physicalSize = const Size(1194, 834);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.reset);
+          await tester.pumpWidget(wrap(MainWindow(
+            state: es,
+            monitor: ServiceMonitor(readToken: () async => null),
+            control: null,
+            fullscreen: _NoFullscreen(),
+          )));
+          final size = tester.getSize(find.byKey(const Key('stage')));
+          await showWindow(tester, rw(7, size.width, size.height + 28));
+          final o = tester.getTopLeft(find.byKey(const Key('stage')));
+          await pinch(tester, o, at: Offset(size.width / 2, size.height / 2));
+          await tester.pump(const Duration(milliseconds: 200));
+          expect(views().single['window'], 7);
+          port.calls.clear();
+          es.toggleOverview();
+          await tester.pump();
+          await tester.pump();
+          expect(views(), [unlimited]);
+          port.calls.clear();
+          es.toggleOverview();
+          await tester.pump();
+          await tester.pump();
+          expect(views().single['window'], 7);
+        });
+      });
+
+      testWidgets('the base texture is drawn under the live one only while zoomed', (tester) async {
+        await onIOS(() async {
+          const w = RemoteWindow(
+            id: 7, parent: 0, kind: WindowKind.normal, title: 'w7', rect: Rect.fromLTWH(0, 0, 400, 328),
+            titleBar: 28, resizable: true, focused: true, texture: 42, baseTexture: 43,
+            visible: Rect.fromLTWH(0.25, 0.25, 0.5, 0.5),
+          );
+          final o = await setup(tester, windows: [w]);
+          List<int> textures() => tester.widgetList<Texture>(find.byType(Texture)).map((t) => t.textureId).toList();
+          expect(textures(), [42]);
+          await pinch(tester, o);
+          expect(textures(), [43, 42]);
+          await pinch(tester, o, from: 200, to: 100);
+          expect(es.remote[1]!.zoomOf(7).z, 1.0);
+          expect(textures(), [42]);
+          await tester.pump(const Duration(milliseconds: 200));
+        });
+      });
+
+      testWidgets('macOS: pinch never zooms', (tester) async {
+        await on(TargetPlatform.macOS, () async {
+          final o = await setup(tester);
+          final f1 = await tester.createGesture(kind: PointerDeviceKind.touch, pointer: 21);
+          final f2 = await tester.createGesture(kind: PointerDeviceKind.touch, pointer: 22);
+          await f1.down(o + const Offset(300, 300));
+          await f2.down(o + const Offset(500, 300));
+          // One finger spreads 13 px a batch: on an iPad the distance decides first (a pinch).
+          for (var i = 1; i <= 8; i++) {
+            tester.binding.handlePointerEvent(
+                PointerMoveEvent(pointer: 22, kind: PointerDeviceKind.touch, position: o + Offset(500 + 13.0 * i, 300)));
+            await tester.pump();
+          }
+          await f1.up();
+          await f2.up();
+          await tester.pump(const Duration(milliseconds: 300));
+          expect(scrolls(), isNotEmpty);
+          expect(es.remote[1]!.zoomOf(7).z, 1.0);
+          expect(views(), isEmpty);
+        });
+      });
+
+      testWidgets('a frozen reconnect at z 2 tells A the view once, for the fresh sid', (tester) async {
+        await onIOS(() async {
+          await shown(tester);
+          final o = tester.getTopLeft(find.byKey(const Key('stage')));
+          await pinch(tester, o);
+          await tester.pump(const Duration(milliseconds: 200));
+          expect(views(), [view7(1, window: 5)]);
+          port.emit(const DisconnectedEvent(1, 'connection closed'));
+          await tester.pump();
+          expect(tester.widget<Picture>(find.byType(Picture)).frozen, true);
+          await tester.runAsync(() async {
+            t.onSend = (m) {
+              if (m['cmd'] == 'open') {
+                t.emit({
+                  'event': 'opened', 'sid': 11, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+                  'port': 5011, 'token': 'tk', 'req': m['req'],
+                });
+              }
+            };
+            es.reconnectCurrent();
+            for (var i = 0; i < 4; i++) {
+              await flush();
+            }
+          });
+          await tester.pump();
+          port.calls.clear();
+          port.emit(const ReadyEvent(11, 'Safari'));
+          port.emit(WindowsEvent(11, [rw(5, 400, 328)]));
+          await tester.pump();
+          await tester.pump();
+          expect(es.currentRecord!.lastSid, isNull);
+          expect(tester.widget<Picture>(find.byType(Picture)).frozen, false);
+          expect(es.remote[11]!.zoomOf(5).z, 2.0);
+          expect(views(), [view7(11, window: 5)]);
+        });
       });
     });
 

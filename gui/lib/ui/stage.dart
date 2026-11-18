@@ -118,7 +118,8 @@ class Stage extends StatelessWidget {
             state.termPort?.owns(rs.sid) != true) {
           // A network drop: the same Picture, frozen, under the offline bar (never input, never a resize).
           picture = true;
-          body = Picture(state: state, session: rs, window: win, frozen: true);
+          body = Picture(state: state, session: rs, window: win, frozen: true,
+              keyboard: keyboardLift(MediaQuery.of(context), fullscreen: fullscreen));
         } else if (rs != null && state.termPort?.owns(rs.sid) == true && ((rec?.phase == Phase.live && rec?.lastSid == null) || (rec?.frozen == true && !rs.detached && rs.windows.isNotEmpty))) {
           // A terminal (live, or frozen by a network drop): its box lines need whole device pixels.
           full = true;
@@ -147,7 +148,8 @@ class Stage extends StatelessWidget {
           );
         } else if (rs != null && !rs.detached && win != null) {
           picture = true;
-          body = Picture(state: state, session: rs, window: win);
+          body = Picture(state: state, session: rs, window: win,
+              keyboard: keyboardLift(MediaQuery.of(context), fullscreen: fullscreen));
         } else if (!(rs != null && rs.detached) && (cur.lamp == Lamp.connecting || rs != null)) {
           body = Row(
             mainAxisSize: MainAxisSize.min,

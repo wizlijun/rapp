@@ -1,10 +1,16 @@
 // The remote window's picture on the stage: the runner's texture, letterboxed. Presses, drags,
 // wheels and trackpad scrolls on it go to A; it holds the keys whenever nothing else wants them,
 // without a press. On a touchscreen a two-finger swipe scrolls A (P3, docs/superpowers/specs/2026-11-13-rapp-touch-scroll-design.md).
+// On an iPad two fingers pinch-zoom the picture on B; A is told only which part of the window shows
+// (docs/superpowers/specs/2026-11-18-rapp-pinch-zoom-design.md §6).
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:flutter/gestures.dart';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 
+import '../platform_caps.dart' show pinchZoom;
 import '../ui/keep_focus.dart';
 import '../ui/main_state.dart';
 import '../ui/rule_snack.dart';
@@ -16,6 +22,7 @@ import 'remote_session.dart';
 import 'session_port.dart';
 import 'touch_gestures.dart';
 import 'window_tabs.dart';
+import 'zoom_view.dart';
 
 class Picture extends StatefulWidget {
   const Picture({
@@ -24,6 +31,7 @@ class Picture extends StatefulWidget {
     required this.session,
     required this.window,
     this.frozen = false,
+    this.keyboard = 0,
   });
 
   /// Where focus and input go: `state.port`, `state.focusPicture`.
@@ -33,6 +41,10 @@ class Picture extends StatefulWidget {
 
   /// Offline: the last frame stays, and nothing reaches the port.
   final bool frozen;
+
+  /// How far the soft keyboard reaches up over the stage's bottom: a zoomed view can go up over it, and
+  /// what it covers is not seen.
+  final double keyboard;
 
   @override
   State<Picture> createState() => _PictureState();
@@ -51,9 +63,20 @@ class _PictureState extends State<Picture> implements TouchSink {
   final _focus = FocusNode();
   late final _clicks = ClickCounter(widget.state.doubleClick);
 
-  /// From the last layout: the window content's rect on the stage, and the texture's part of it.
+  /// From the last layout: the window content's rect on the stage (zoomed), and the texture's part of it.
   Rect _fit = Rect.zero;
   Rect _pic = Rect.zero;
+
+  /// From the last layout: the content's rect at z 1, and the stage's size.
+  Rect _fit1 = Rect.zero;
+  Size _stage = Size.zero;
+
+  /// The shown window's zoom (its session keeps it), and when A is told what of it shows: 150 ms after the
+  /// view stopped moving, and after the next layout once the window or session changed.
+  late ZoomView _zoom;
+  Timer? _settleTimer;
+  bool _viewDue = true;
+  static const _settleDelay = Duration(milliseconds: 150);
 
   /// The button held since a press on the picture (`left|right`), the pointer that pressed it,
   /// and that press's click count.
@@ -62,7 +85,7 @@ class _PictureState extends State<Picture> implements TouchSink {
   int _count = 1;
 
   /// Touch (P3): fingers on the picture, turned into presses, drags, scrolls and right taps (T1–T8).
-  late final _touch = TouchGestures(sink: this, zoom: () => 1, inside: _inside);
+  late final _touch = TouchGestures(sink: this, zoom: () => _zoom.z, inside: _inside, zoomable: pinchZoom);
 
   bool _inside(Offset p) {
     final t = _at(p);
@@ -184,13 +207,48 @@ class _PictureState extends State<Picture> implements TouchSink {
     widget.state.focusPicture(_sid);
   }
 
-  // The zoom's intents come with the zoom (not zoomable yet).
+  /// The view moves on B only; A hears of it once it stops ([settled]).
   @override
-  void pan(Offset delta) {}
+  void pan(Offset delta) {
+    _settleTimer?.cancel();
+    if (_fit1.isEmpty) return;
+    _zoom.panBy(delta, _fit1, _stage, keyboard: widget.keyboard);
+  }
+
   @override
-  void zoom(double z, Offset focal) {}
+  void zoom(double z, Offset focal) {
+    _settleTimer?.cancel();
+    if (_fit1.isEmpty) return;
+    // A pinch back to where it started lands on exactly 1 (not a hair above it): unzoomed again.
+    _zoom.zoomTo((z - 1).abs() < 1e-9 ? 1 : z, focal, _fit1, _stage, keyboard: widget.keyboard);
+  }
+
   @override
-  void settled() {}
+  void settled() {
+    _settleTimer?.cancel();
+    _settleTimer = Timer(_settleDelay, _sendView);
+  }
+
+  /// Tells A the part of the window seen now: the stage above the keyboard, on the zoomed content, in A's
+  /// content points (at z 1: the whole window).
+  void _sendView() {
+    _settleTimer?.cancel();
+    if (!mounted || _fit.isEmpty) return;
+    final win = _win, c = contentSize(win), z = _fit;
+    final s = Rect.fromLTWH(0, 0, _stage.width, math.max(0.0, _stage.height - widget.keyboard)).intersect(z);
+    if (s.width <= 0 || s.height <= 0) return;
+    final seen = Rect.fromLTRB(
+      (s.left - z.left) / z.width * c.width,
+      (s.top - z.top) / z.height * c.height,
+      (s.right - z.left) / z.width * c.width,
+      (s.bottom - z.top) / z.height * c.height,
+    );
+    widget.session.view.settled(win.id, seen, c, _zoom.z);
+  }
+
+  void _zoomed() {
+    if (mounted) setState(() {});
+  }
 
   /// T8: a quick two-finger tap is a right click where the two fingers landed (not in the letterbox).
   @override
@@ -219,12 +277,15 @@ class _PictureState extends State<Picture> implements TouchSink {
     }
   }
 
-  void _pan(PointerPanZoomUpdateEvent e) =>
-      _scroll(e.localPosition, panToRemote(e.localPanDelta));
+  void _pan(PointerPanZoomUpdateEvent e) {
+    _touch.panZoomUpdate(e);
+    _scroll(e.localPosition, panToRemote(e.localPanDelta));
+  }
 
   @override
   void initState() {
     super.initState();
+    _zoom = widget.session.zoomOf(widget.window.id)..addListener(_zoomed);
     widget.session.composer.addListener(_settleSoon);
     FocusManager.instance.addListener(_settleSoon);
   }
@@ -274,6 +335,15 @@ class _PictureState extends State<Picture> implements TouchSink {
     }
     // A held-back press belongs to the window it landed on; never send it to another.
     if (old.window.id != widget.window.id || old.session.sid != widget.session.sid) _touch.dropPending();
+    if (old.window.id != widget.window.id || !identical(old.session, widget.session)) {
+      _zoom.removeListener(_zoomed);
+      _zoom = widget.session.zoomOf(widget.window.id)..addListener(_zoomed);
+      _settleTimer?.cancel();
+      // The old session's A shows its whole window again; the window shown now gets its own view (a
+      // reconnect's fresh session took the zoom over without telling A).
+      if (!identical(old.session, widget.session)) old.session.view.unlimited();
+      _viewDue = true;
+    }
     // A held button belongs to its session: release it there now, or A keeps it down.
     final b = _button, t = _held;
     if (old.session.sid != widget.session.sid && b != null && t != null) {
@@ -286,6 +356,10 @@ class _PictureState extends State<Picture> implements TouchSink {
 
   @override
   void dispose() {
+    _settleTimer?.cancel();
+    _zoom.removeListener(_zoomed);
+    // Off the stage (全景, another screen): A's thumbnails want the whole window.
+    widget.session.view.unlimited();
     widget.session.composer.removeListener(_settleSoon);
     FocusManager.instance.removeListener(_settleSoon);
     _touch.dispose();
@@ -372,14 +446,26 @@ class _PictureState extends State<Picture> implements TouchSink {
     }
     return LayoutBuilder(
       builder: (context, c) {
-        final fit = fitRect(contentSize(win), c.biggest);
-        final pic = pictureRect(fit, win.visible);
-        _fit = fit;
+        final stage = c.biggest;
+        _fit1 = fitRect(contentSize(win), stage);
+        _stage = stage;
+        final zfit = _zoom.zfit(_fit1, stage, keyboard: widget.keyboard);
+        final pic = pictureRect(zfit, win.visible);
+        _fit = zfit;
         _pic = pic;
+        if (_viewDue) {
+          _viewDue = false;
+          WidgetsBinding.instance.addPostFrameCallback((_) => _sendView());
+        }
+        final base = win.baseTexture;
+        final backdrop = _zoom.backdrop && base != null && win.visible != _whole && !zfit.isEmpty;
+        final onStage = Offset.zero & stage;
+        final focusRect = _within(pic.inflate(1), onStage);
+        final markRect = _within(pic.inflate(2), onStage);
         final popups = <_Target>[];
-        if (fit.width > 0 && fit.height > 0) {
+        if (zfit.width > 0 && zfit.height > 0) {
           for (final p in popupsFor(widget.session.shown, win.id)) {
-            final frame = popupRect(p, win, fit);
+            final frame = popupRect(p, win, zfit);
             if (frame.width <= 0 || frame.height <= 0 || p.rect.width <= 0) {
               continue;
             }
@@ -408,7 +494,7 @@ class _PictureState extends State<Picture> implements TouchSink {
               widget.state.blurPicture();
             }
           },
-          child: Stack(
+          child: ClipRect(child: Stack(
             children: [
               Positioned.fill(
                 child: IgnorePointer(
@@ -421,11 +507,16 @@ class _PictureState extends State<Picture> implements TouchSink {
             onPointerCancel: _up,
             onPointerHover: _hover,
             onPointerSignal: _signal,
+            onPointerPanZoomStart: _touch.panZoomStart,
             onPointerPanZoomUpdate: _pan,
+            onPointerPanZoomEnd: _touch.panZoomEnd,
             child: ColoredBox(
               color: t.bg,
               child: Stack(
                 children: [
+                  // Zoomed: the whole window's last low-res picture under the live part, for where the live
+                  // one does not reach (yet).
+                  if (backdrop) Positioned.fromRect(rect: zfit, child: Texture(textureId: base)),
                   Positioned.fromRect(
                     rect: pic,
                     child: windowSurface(win),
@@ -442,15 +533,15 @@ class _PictureState extends State<Picture> implements TouchSink {
                           return const SizedBox.shrink();
                         }
                         return focusGray(pic.size, frameColor: t.on, [
-                          for (final r in f.rects) fromRemoteRect(r, fit, win).shift(-pic.topLeft),
+                          for (final r in f.rects) fromRemoteRect(r, zfit, win).shift(-pic.topLeft),
                         ]);
                       },
                     ),
                   ),
-                  if (focused)
+                  if (focused && focusRect != null)
                     // 1px outside the picture, kept on the stage when the picture fills it.
                     Positioned.fromRect(
-                      rect: pic.inflate(1).intersect(Offset.zero & c.biggest),
+                      rect: focusRect,
                       child: IgnorePointer(
                         key: const Key('picture-focus'),
                         child: DecoratedBox(
@@ -460,10 +551,10 @@ class _PictureState extends State<Picture> implements TouchSink {
                         ),
                       ),
                     ),
-                  ?_inputMark(t, win, fit),
-                  if (widget.state.markingInput == _sid)
+                  ?_inputMark(t, win, zfit),
+                  if (widget.state.markingInput == _sid && markRect != null)
                     Positioned.fromRect(
-                      rect: pic.inflate(2).intersect(Offset.zero & c.biggest),
+                      rect: markRect,
                       child: IgnorePointer(
                         key: const Key('picture-marking'),
                         child: DecoratedBox(
@@ -486,11 +577,19 @@ class _PictureState extends State<Picture> implements TouchSink {
                   if (p.win.kind == WindowKind.sheet || p.win.kind == WindowKind.popover)
                   _popupClose(t, p, c.biggest),
             ],
-          ),
+          )),
         ));
       },
     );
   }
+}
+
+const _whole = Rect.fromLTWH(0, 0, 1, 1);
+
+/// [r] cut to [stage]; null when nothing of it is on the stage (a zoomed picture panned away).
+Rect? _within(Rect r, Rect stage) {
+  final i = r.intersect(stage);
+  return i.width > 0 && i.height > 0 ? i : null;
 }
 
 /// The marked input box: a small ring on the main window's picture, where a send clicks first.
