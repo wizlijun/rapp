@@ -4,9 +4,10 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/composer_panel.dart';
+import 'package:rapp/embed/flutter_editor.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
-import 'package:rapp/embed/voice_input.dart';
 import 'package:rapp/embed/voice_key_gate.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/paths.dart';
@@ -17,6 +18,7 @@ import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 
 import '../fakes.dart';
+import '../embed/voice_button_test.dart' show FakeVoice;
 import '../ui/helpers.dart';
 
 RemoteWindow _win(int id) => RemoteWindow(
@@ -57,6 +59,7 @@ void main() {
     late List<(Object, VoiceKeyPhase)> voiceKeys;
     late StreamSubscription<(Object, VoiceKeyPhase)> sub;
     late List<KeyEvent> bubbled;
+    late FakeVoice voice;
 
     setUp(() {
       tmp = Directory.systemTemp.createTempSync('term_stage_voice_test');
@@ -66,7 +69,7 @@ void main() {
           TermPane(
               id: '%3', win: '@3', window: 'claude', title: 'claude', command: 'claude', cols: 80, rows: 24, dead: false, active: true),
         ]);
-      state = MainState(hub: HubClient(FakeTransport()), data: DataDir(tmp.path), prefs: UiPrefs(), termPort: port, voice: VoiceInput());
+      state = MainState(hub: HubClient(FakeTransport()), data: DataDir(tmp.path), prefs: UiPrefs(), termPort: port, voice: voice = FakeVoice());
       session = RemoteSession(1, 'term')..apply(WindowsEvent(1, [_win(3)]));
       voiceKeys = [];
       sub = state.voiceKeys.listen(voiceKeys.add);
@@ -128,6 +131,63 @@ void main() {
         ['Alt-b'],
       ]);
       expect(voiceKeys, isEmpty);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
+    testWidgets('the held option is flushed to the terminal handler before the letter', (t) async {
+      await show(t);
+      final seen = <String>[];
+      debugTermKeySeen = (e) => seen.add('${e.runtimeType}:${e.physicalKey.debugName}');
+      addTearDown(() => debugTermKeySeen = null);
+      await down(t, LogicalKeyboardKey.altRight);
+      expect(seen, isEmpty); // swallowed while pending
+      await down(t, LogicalKeyboardKey.keyB);
+      expect(seen, ['KeyDownEvent:Alt Right', 'KeyDownEvent:Key B']);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
+    testWidgets('a mouse hold on the voice button keeps every key from the pane', (t) async {
+      await show(t);
+      state.voiceMouseHold = 1;
+      await t.sendKeyEvent(LogicalKeyboardKey.escape, platform: 'macos');
+      await t.sendKeyEvent(LogicalKeyboardKey.tab, platform: 'macos');
+      await t.sendKeyEvent(LogicalKeyboardKey.keyA, platform: 'macos');
+      await t.pump();
+      expect(sent(), isEmpty);
+      state.voiceMouseHold = null;
+      await t.sendKeyEvent(LogicalKeyboardKey.keyA, platform: 'macos');
+      await t.pump();
+      expect(sent(), ['type:a']);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
+    testWidgets('esc during a mouse hold cancels the voice and sends nothing to the pane', (t) async {
+      await show(t);
+      // The terminal stage with the composer row over it, as the app lays them out.
+      await t.pumpWidget(wrap(Focus(
+        autofocus: true,
+        child: SizedBox(
+          width: 800,
+          height: 480,
+          child: Stack(children: [
+            Positioned.fill(child: TermStage(state: state, session: session, port: port)),
+            ...composerLayer(state: state, session: session, port: port, editor: FlutterEditor.new),
+          ]),
+        ),
+      )));
+      await t.tap(find.byKey(const Key('term-grid')));
+      await t.pump();
+      port.calls.clear();
+      final g = await t.startGesture(t.getCenter(find.byKey(const Key('voice-hold'))));
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 200));
+      expect(state.voiceMouseHold, 1);
+      await t.sendKeyEvent(LogicalKeyboardKey.keyA, platform: 'macos'); // during the hold
+      await t.sendKeyEvent(LogicalKeyboardKey.escape, platform: 'macos');
+      await t.pump(const Duration(milliseconds: 200));
+      expect(voice.cancelled, isTrue);
+      expect(sent(), isEmpty);
+      await g.up();
+      await t.pump(const Duration(milliseconds: 200));
+      expect(state.voiceMouseHold, isNull);
+      expect(sent(), isEmpty);
     }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
     testWidgets('holding right option starts voice and swallows it', (t) async {

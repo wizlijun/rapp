@@ -113,6 +113,7 @@ class _DesktopVoiceState extends State<DesktopVoice> with SingleTickerProviderSt
     _exit.dispose();
     _keys?.cancel();
     HardwareKeyboard.instance.removeHandler(_onKeyEvent);
+    _clearMouseHold();
     _state.voice?.level.removeListener(_onLevel);
     _hold.removeListener(_onHold);
     _hold.dispose();
@@ -123,6 +124,7 @@ class _DesktopVoiceState extends State<DesktopVoice> with SingleTickerProviderSt
     final mouse = _mouse;
     _mouse = false;
     _pointer = null;
+    _clearMouseHold();
     HardwareKeyboard.instance.removeHandler(_onKeyEvent);
     _state.voiceEnd(_sid);
     if (_gone) return; // a dispose cut it short: nothing to give focus back to
@@ -130,6 +132,10 @@ class _DesktopVoiceState extends State<DesktopVoice> with SingleTickerProviderSt
     // The hotkey never blurred it, so it only refocuses where it did before.
     final panel = p == VoicePick.edit && widget.session.composer.open;
     if (mouse ? !panel : (p == VoicePick.send || p == VoicePick.cancel)) _state.focusPicture(_sid);
+  }
+
+  void _clearMouseHold() {
+    if (_state.voiceMouseHold == _sid) _state.voiceMouseHold = null;
   }
 
   void _onHold() {
@@ -199,6 +205,7 @@ class _DesktopVoiceState extends State<DesktopVoice> with SingleTickerProviderSt
     if (_state.voice!.phase != VoicePhase.idle) return;
     _pointer = e.pointer;
     _mouse = true;
+    _state.voiceMouseHold = _sid;
     _state.holdForPanel(widget.session);
     HardwareKeyboard.instance.addHandler(_onKeyEvent);
     unawaited(_hold.start());

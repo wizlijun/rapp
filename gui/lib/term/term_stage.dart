@@ -57,6 +57,10 @@ Future<void> openUrl(String url) async {
   }
 }
 
+/// Test probe: every key event the terminal's own key handling is given, in order (the gate's flush included).
+@visibleForTesting
+void Function(KeyEvent e)? debugTermKeySeen;
+
 const _viewPause = Duration(milliseconds: 300);
 const _multiClick = Duration(milliseconds: 500);
 const _multiClickSlop = 4.0;
@@ -719,6 +723,8 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
   }
 
   KeyEventResult _onKey(FocusNode node, KeyEvent e) {
+    // A mouse hold on the voice button owns the keyboard (its Esc and Tab end the hold): none of it is the pane's.
+    if (widget.state.voiceMouseHold == widget.session.sid) return KeyEventResult.handled;
     if (!_gateOn) return _termKey(node, e);
     final code = macKeyCode(e.physicalKey);
     if (code == null) return _termKey(node, e);
@@ -733,6 +739,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
   }
 
   KeyEventResult _termKey(FocusNode node, KeyEvent e) {
+    debugTermKeySeen?.call(e);
     if (e is KeyUpEvent) return KeyEventResult.ignored;
     final k = HardwareKeyboard.instance;
     // A selection first: its copy, and Esc only clears it (C2, C3).

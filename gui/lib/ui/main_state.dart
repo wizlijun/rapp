@@ -3056,6 +3056,10 @@ class MainState extends ChangeNotifier {
   /// The hotkey's phases on app pictures (macOS), for the stage's voice button to follow.
   Stream<(Object, VoiceKeyPhase)> get voiceKeys => _voiceKeys.stream;
 
+  /// The sid whose 按住说话 button is held with the mouse, if any: its terminal stage swallows every key meanwhile,
+  /// since the hold (not the pane) takes Esc, Tab and the letters (R19).
+  Object? voiceMouseHold;
+
   void voiceKey(Object sid, VoiceKeyPhase p) => _voiceKeys.add((sid, p));
 
   /// Voice input on terminal stages ended (the term gate listens); app pictures tell native instead.
