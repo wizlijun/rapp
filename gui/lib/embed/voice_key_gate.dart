@@ -201,7 +201,7 @@ enum _State {
 }
 
 class VoiceKeyGate {
-  VoiceKeyGate({VoiceHotkey hotkey = VoiceHotkey.standard}) : _hotkey = hotkey;
+  VoiceKeyGate({this._hotkey = VoiceHotkey.standard});
 
   /// How long a `hold_modifier` hotkey must be held before recording starts, in seconds.
   static const holdDelay = 0.3;
