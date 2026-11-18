@@ -180,6 +180,16 @@ pub async fn serve_request(state: &Arc<State>, mut s: Pipe, peer: Peer) -> Resul
     serve_value(state, s, v, peer).await
 }
 
+/// The `list_apps` reply: the apps, A's missing permissions (newer macOS hosts only), what this
+/// device can serve, and its rapp version (shown under its column in B's overview).
+fn list_apps_reply(apps: Value, perms: Option<Value>, caps: Value) -> Value {
+    let mut r = json!({"apps": apps, "capabilities": caps, "version": env!("CARGO_PKG_VERSION")});
+    if let Some(perms) = perms {
+        r["permissions"] = perms;
+    }
+    ok(r)
+}
+
 /// The request `v`, already read from `s`. `mux` is not served here (it is only meaningful as the
 /// first request of a relayed stream, `channel::serve`): on a direct connection, or inside a
 /// channel, it is an unknown op.
@@ -187,8 +197,7 @@ pub async fn serve_value(state: &Arc<State>, mut s: Pipe, v: Value, peer: Peer) 
     match serde_json::from_value(v) {
         Ok(Op::ListApps) => {
             let r = match workers::list_apps(state).await {
-                Ok((apps, Some(perms))) => ok(json!({"apps": apps, "permissions": perms, "capabilities": workers::capabilities(state)})),
-                Ok((apps, None)) => ok(json!({"apps": apps, "capabilities": workers::capabilities(state)})),
+                Ok((apps, perms)) => list_apps_reply(apps, perms, workers::capabilities(state)),
                 Err(e) => err(&e.to_string()),
             };
             log_request(state, &peer, json!({"op": "list_apps"}), &r);
@@ -349,4 +358,21 @@ async fn taken_over(
     let newer = state.newer_session(app, sid)?;
     let _ = tokio::time::timeout(TAKEOVER_WAIT, taken.notified()).await;
     state.taken_over(sid).or_else(|| (reason == "closed").then_some(newer.name))
+}
+
+#[cfg(test)]
+mod list_apps_tests {
+    use super::list_apps_reply;
+    use serde_json::json;
+
+    #[test]
+    fn list_apps_reply_carries_version() {
+        let r = list_apps_reply(json!([]), None, json!({"graphical": true}));
+        assert_eq!(r["version"], env!("CARGO_PKG_VERSION"));
+        assert!(r.get("permissions").is_none());
+        assert_eq!(r["capabilities"]["graphical"], true);
+        let r = list_apps_reply(json!([]), Some(json!({"accessibility": true})), json!({}));
+        assert_eq!(r["permissions"]["accessibility"], true);
+        assert_eq!(r["version"], env!("CARGO_PKG_VERSION"));
+    }
 }
