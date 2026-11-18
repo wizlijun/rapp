@@ -237,6 +237,11 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
       old.session.removeListener(_onSession);
       widget.session.addListener(_onSession);
       _focusIfWanted();
+      // The element is reused for the new session: a hold of the hotkey was on the old one, and ends there.
+      _gateTimer?.cancel();
+      _gateHeld = null;
+      final phase = _gate.handle(VoiceGateInput.resign, ms: _gateMs, ready: false).voice;
+      if (phase != null) widget.state.voiceKey(old.session.sid, phase);
     }
     if (!identical(old.session, widget.session) || !identical(old.port, widget.port)) {
       _sent = null;

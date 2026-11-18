@@ -258,6 +258,50 @@ void main() {
       expect(voiceKeys, isEmpty);
     }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
+    testWidgets('switching the stage to another session drops a pending hold', (t) async {
+      await show(t);
+      final model2 = TermModel()..expect('%4');
+      port.seed(2, model: model2, panes: [
+        TermPane(
+            id: '%4', win: '@4', window: 'shell', title: 'shell', command: 'zsh', cols: 80, rows: 24, dead: false, active: true),
+      ]);
+      final session2 = RemoteSession(2, 'term')..apply(WindowsEvent(2, [_win(4)]));
+      await down(t, LogicalKeyboardKey.altRight);
+      await t.pump(const Duration(milliseconds: 100));
+      // The same TermStage element now shows session 2.
+      await t.pumpWidget(wrap(Focus(
+        autofocus: true,
+        onKeyEvent: (_, e) {
+          bubbled.add(e);
+          return KeyEventResult.ignored;
+        },
+        child: SizedBox(width: 800, height: 480, child: TermStage(state: state, session: session2, port: port)),
+      )));
+      await t.pump(const Duration(milliseconds: 400));
+      expect(voiceKeys, isEmpty);
+      await up(t, LogicalKeyboardKey.altRight);
+      await t.pump();
+      expect(voiceKeys, isEmpty);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
+    testWidgets('switching the stage to another session cancels a recording on the old one', (t) async {
+      await show(t);
+      port.seed(2, model: TermModel()..expect('%4'));
+      final session2 = RemoteSession(2, 'term')..apply(WindowsEvent(2, [_win(4)]));
+      await down(t, LogicalKeyboardKey.altRight);
+      await t.pump(const Duration(milliseconds: 300));
+      expect(voiceKeys, [(1, VoiceKeyPhase.start)]);
+      await t.pumpWidget(wrap(Focus(
+        autofocus: true,
+        child: SizedBox(width: 800, height: 480, child: TermStage(state: state, session: session2, port: port)),
+      )));
+      await t.pump();
+      expect(voiceKeys, [(1, VoiceKeyPhase.start), (1, VoiceKeyPhase.cancel)]);
+      await up(t, LogicalKeyboardKey.altRight);
+      await t.pump();
+      expect(voiceKeys, [(1, VoiceKeyPhase.start), (1, VoiceKeyPhase.cancel)]);
+    }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
     testWidgets('voice_end returns the gate', (t) async {
       await show(t);
       await down(t, LogicalKeyboardKey.altRight);
