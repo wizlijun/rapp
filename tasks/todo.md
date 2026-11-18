@@ -620,3 +620,15 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 现象：Duo 回前台换端口（rebind）后自动重连，局域网会话一连上就断（hub.log `opened` → `closed: connection closed`，0 秒），要点很多次才进得去；A 端报 `first message must be hello, fetch or put`。原因：`RappSession.Connection` 等 TCP `.ready` 才发 hello，而在此之前调用的 `send`（重连时马上补发的 `set_view`/`set_stream` 等）先进了 NWConnection 的发送队列，排到 hello 前面。0.14.7 捏合缩放加了 `set_view` 之后才常见。
 - [x] hello 在 `start()` 里随连接启动立刻排队，之后的消息都在它后面；测试 `ConnectionHelloFirstTests`（先红后绿）。
 - [ ] 实机：Duo 放大一个窗口后切到后台再回来，重连一次就进得去，A 不再报这个错。
+
+## Linux 0.14.11 功能对齐（2026-11-18）
+
+- [x] `git pull --ff-only` 更新 main 至 `b2a14c4` / 0.14.11（Flutter `0.14.11+50`，应用协议 v14）。与 Linux 0.14.8 发布基线比较，本轮共享代码已包含统一 40px 桌面控件、设备列版本号、输入板追加与草稿修复，以及 QUIC 收包错误后的驱动恢复和网络诊断日志。
+- [x] 检查 Linux `rapp-session`：hello 在启动 stdin 写线程前同步发出，不存在 Swift 旧实现的握手消息乱序。iOS 语音与单手按钮按原规格仅用于 iOS；Linux host 仍整桌面采集，接收 v14 setView 但不实现局部截取。
+- [x] 独立 GTK 对端夹具从 v13 更新到 v14，保留独立协议常量校验，私有 Broadway 的 7 组场景通过；修正中英文 README 的协议说明和过期验证入口。服务单实例测试原先在 token 改写后立即发 SIGTERM，可能早于退出信号处理器注册；改为等待处理器就绪，保留退出码 0 的断言，正式包并发启动/跨目录互斥/崩溃恢复/正常退出复验通过。
+- [x] 构建路径、旧 Flutter 引擎拒绝、启动器参数保真，以及 GTK3 私有 Broadway 原生窗口/弹窗/共享草稿/输入法 FIFO 回归通过。
+- [x] Flutter 全量 2314 项通过、15 项跳过；analyze 无 error/warning，120 项现有 SDK 弃用 info（`--no-fatal-infos` 通过）。Rust 单元/集成共 1188 项通过、11 项显式跳过：workspace 首轮在 forward 目标结束时停止，随后补跑剩余 testkit 目标及 update/wire。首次 one-RTT 用例在编译和其他测试并行时收到 `stream reset by peer`，停下负载后原样单独复验通过，channel 串行/并行中位数 54.37 / 55.79 ms，75 ms 门槛不变；不推断单次失败的确定根因。缺少 host 用例受本机 PATH 中已安装的 host 干扰，隔离 PATH 后通过。此次未补跑整个 workspace 的 doctest。
+- [x] 独立干净 worktree `/home/bruce/git/rapp-build-01411` 从 `b2a14c4` 构建 0.14.11-1，使用 Flutter 3.50.0。安装包与便携包 34 个文件摘要一致，13 个 ELF 依赖解析通过，源码提交、引擎摘要及 SHA256SUMS 校验通过。文档及测试夹具改动留在主工作区，不影响包内程序代码。
+- [x] 正式 worker 的 hub → QUIC service → 当前 Omarchy 桌面只读串流通过；隔离网络命名空间的终端、端口共享、二进制 pipe/half-close、service/hub 重启后终端恢复全部通过。四组件验收使用实际复制的二进制（不能软链接回含 host 的完整包，否则 `current_exe` 回退会启用图形能力）。
+- 产物：`dist/linux-0.14.11/rapp-omarchy-0.14.11-1-x86_64.pkg.tar.zst`、`rapp-0.14.11-omarchy-x86_64.tar.gz` 及 `rapp-0.14.11-omarchy-x86_64-SHA256SUMS`。本轮未安装、未重启已安装服务、未上传 Release；未进行 macOS/iOS 对端及物理桌面输入验收。
+- 日志：主工作区 `.build-logs/{flutter-01411-*,rust-01411-*,linux-01411-*}`；构建 worktree `.build-logs/package.log`、`verify-package.log` 及 `verified/file-sha256.json`。原有未跟踪的 `scripts/__pycache__/` 保留。
