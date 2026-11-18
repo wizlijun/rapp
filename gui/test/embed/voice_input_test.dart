@@ -121,6 +121,48 @@ void main() {
     expect(v.phase, VoicePhase.idle);
   });
 
+  test('level follows native level while listening, clamped to 0..1', () async {
+    mock(ok);
+    final v = VoiceInput();
+    addTearDown(v.dispose);
+    await v.start();
+    await v.handle(const MethodCall('level', {'value': .4}));
+    expect(v.level.value, .4);
+    await v.handle(const MethodCall('level', {'value': 1.7}));
+    expect(v.level.value, 1.0);
+    await v.handle(const MethodCall('level', {'value': -1}));
+    expect(v.level.value, 0.0);
+  });
+
+  test('level is 0 and ignored when not listening', () async {
+    mock(ok);
+    final v = VoiceInput();
+    addTearDown(v.dispose);
+    await v.handle(const MethodCall('level', {'value': .5}));
+    expect(v.level.value, 0);
+    await v.start();
+    await v.handle(const MethodCall('level', {'value': .5}));
+    expect(v.level.value, .5);
+    await v.cancel();
+    expect(v.level.value, 0);
+  });
+
+  test('a final while listening makes stop return it at once', () {
+    fakeAsync((fa) {
+      mock(ok);
+      final v = VoiceInput();
+      v.start();
+      fa.flushMicrotasks();
+      v.handle(const MethodCall('final', {'text': '好'}));
+      String? got;
+      v.stop().then((t) => got = t);
+      fa.flushMicrotasks();
+      expect(got, '好');
+      expect(v.phase, VoicePhase.idle);
+      v.dispose();
+    });
+  });
+
   test('start maps replies', () async {
     for (final e in {
       'asked': VoiceStart.asked,

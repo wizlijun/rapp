@@ -185,13 +185,7 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
   private func startAudio(_ makeFeed: (AVAudioFormat) -> ((AVAudioPCMBuffer) -> Void)?) -> Bool {
     let session = AVAudioSession.sharedInstance()
     do {
-      // The SDK documents .duckOthers as valid only with other categories in the default mode; if this
-      // system rejects it, .record alone still works (it silences other audio anyway).
-      do {
-        try session.setCategory(.record, mode: .measurement, options: .duckOthers)
-      } catch {
-        try session.setCategory(.record, mode: .measurement, options: [])
-      }
+      try session.setCategory(.record, mode: .measurement, options: [])
       try session.setActive(true)
     } catch {
       return false
@@ -205,7 +199,19 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
       stopAudio()
       return false
     }
-    input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in feed(buffer) }
+    // The level goes to Dart at most every 50 ms; the tap is the only writer of `lastLevel`.
+    var lastLevel = Date.distantPast
+    input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+      feed(buffer)
+      let now = Date()
+      guard now.timeIntervalSince(lastLevel) >= 0.05, let rms = Self.rms(buffer) else { return }
+      lastLevel = now
+      let value = Self.level(rms: rms)
+      DispatchQueue.main.async {
+        guard let self, self.engine != nil else { return }
+        self.channel.invokeMethod("level", arguments: ["value": value])
+      }
+    }
     engine.prepare()
     do {
       try engine.start()
@@ -214,6 +220,20 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
       return false
     }
     return true
+  }
+
+  /// Microphone loudness 0...1: decibels of `rms`, -50 dB (or less) = 0, 0 dB = 1.
+  static func level(rms: Float) -> Double {
+    let db = 20 * log10(Double(max(rms, 1e-7)))
+    return min(max((db + 50) / 50, 0), 1)
+  }
+
+  /// RMS of channel 0, or nil when the buffer has no float samples.
+  private static func rms(_ buffer: AVAudioPCMBuffer) -> Float? {
+    guard let samples = buffer.floatChannelData?[0], buffer.frameLength > 0 else { return nil }
+    var sum: Float = 0
+    for i in 0..<Int(buffer.frameLength) { sum += samples[i] * samples[i] }
+    return (sum / Float(buffer.frameLength)).squareRoot()
   }
 
   private func stopAudio() {

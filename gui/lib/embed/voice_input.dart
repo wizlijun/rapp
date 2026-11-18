@@ -39,6 +39,12 @@ class VoiceInput extends ChangeNotifier {
   // A stop or cancel that arrived while `start` was pending; its stop() future (if any) waits here.
   bool _aborted = false;
   Completer<String>? _abortedStop;
+  // A native `final` that arrived while still listening (the recogniser ended early); the next `stop` returns it.
+  bool _earlyFinal = false;
+  final ValueNotifier<double> _level = ValueNotifier(0);
+
+  /// Microphone level, 0..1; 0 whenever the phase is not `listening`.
+  ValueListenable<double> get level => _level;
 
   VoicePhase get phase => _phase;
 
@@ -48,12 +54,14 @@ class VoiceInput extends ChangeNotifier {
   void _set({VoicePhase? phase, String? text}) {
     _phase = phase ?? _phase;
     _text = text ?? _text;
+    if (_phase != VoicePhase.listening) _level.value = 0;
     notifyListeners();
   }
 
   Future<VoiceStart> start() async {
     if (_phase != VoicePhase.idle) return VoiceStart.unavailable;
     _aborted = false;
+    _earlyFinal = false;
     _set(phase: VoicePhase.starting, text: '');
     VoiceStart r;
     try {
@@ -95,6 +103,12 @@ class VoiceInput extends ChangeNotifier {
     }
     if (_phase != VoicePhase.listening) return _phase == VoicePhase.finishing ? _finalDone!.future : '';
     _maxTimer?.cancel();
+    if (_earlyFinal) {
+      _earlyFinal = false;
+      final text = _text;
+      _finish(text);
+      return text;
+    }
     final done = _finalDone = Completer<String>();
     _set(phase: VoicePhase.finishing);
     _finalTimer = Timer(finalWait, () => _finish(_text));
@@ -151,7 +165,12 @@ class VoiceInput extends ChangeNotifier {
         if (_phase == VoicePhase.finishing) {
           _finish('${args['text'] ?? ''}');
         } else {
+          _earlyFinal = true;
           _set(text: '${args['text'] ?? ''}');
+        }
+      case 'level':
+        if (_phase == VoicePhase.listening) {
+          _level.value = ((args['value'] as num?)?.toDouble() ?? 0).clamp(0.0, 1.0);
         }
       case 'error':
         _finish('');
@@ -165,6 +184,7 @@ class VoiceInput extends ChangeNotifier {
     _maxTimer?.cancel();
     _finalTimer?.cancel();
     _channel.setMethodCallHandler(null);
+    _level.dispose();
     super.dispose();
   }
 }
