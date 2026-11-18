@@ -174,7 +174,7 @@
 ### 5.4 识别（原生）
 
 - 新建 `gui/ios/Runner/SpeechPlugin.swift`，通道 `rapp/speech`，在 `AppDelegate` 里和 `IosPlugin` 一样注册。
-- 方法：`start`（参数无；返回 `ok` / `denied` / `unavailable`）、`stop`（结束录音，等最终结果）、`cancel`（丢弃）。事件经同一通道回调到 Dart：`partial {text}`、`final {text}`、`error {code}`、`level {value}`。`level` 是麦克风音量，0–1（每块音频的 RMS 换成分贝，−50 dB 到 0 dB 线性映射，夹在 0–1），每秒最多 20 次，只在录音时发。
+- 方法：`start`（参数无；返回 `ok` / `asked`（首次弹了授权框）/ `denied` / `preparing`（资源还在下载）/ `unavailable` / `cancelled`（还没开始就被 `cancel` 或中断抢先，Dart 侧静默））、`stop`（结束录音，等最终结果）、`cancel`（丢弃）。事件经同一通道回调到 Dart：`partial {text}`、`final {text}`、`error {code}`、`level {value}`。`level` 是麦克风音量，0–1（每块音频的 RMS 换成分贝，−50 dB 到 0 dB 线性映射，夹在 0–1），每秒最多 20 次，只在录音时发。
 - 还按着时原生先给了 `final`（例如老接口到了 1 分钟）：Dart 侧记下这段字，松手时直接用，不再等 1 秒。
 - 语言：系统首选语言对应的识别区域（`Locale.current`），不支持时退回 `zh-CN`。
 - iOS 26+：`SpeechAnalyzer` + `SpeechTranscriber`（开启实时结果），需要的语言资源由系统 `AssetInventory` 准备；资源还没下好时本次返回 `preparing` 并触发下载，提示「正在准备语音识别，请稍后再试」。
