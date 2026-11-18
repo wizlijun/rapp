@@ -259,3 +259,151 @@ class DashedOutline extends CustomPainter {
   @override
   bool shouldRepaint(DashedOutline o) => o.color != color || o.radius != radius;
 }
+
+TextStyle _rowLabel(RappTokens t, TextStyle? style, bool muted) =>
+    (style ?? const TextStyle()).copyWith(color: muted ? t.muted : (style?.color ?? t.text));
+
+/// A label with a switch at the right end; the whole row toggles it. [switchKey] is the inner
+/// [Switch]'s key and [key] the row's. Without [onChanged] the row is inert and muted.
+class RappSwitchRow extends StatelessWidget {
+  // [key] is handed to the InkWell, not to super, so a lookup by it finds one widget.
+  // ignore: use_key_in_widget_constructors
+  const RappSwitchRow({
+    Key? key,
+    this.switchKey,
+    required this.label,
+    this.note,
+    required this.value,
+    this.onChanged,
+    this.dim = false,
+    this.style,
+  }) : _rowKey = key;
+
+  final Key? _rowKey;
+  final Key? switchKey;
+  final String label;
+
+  /// A second line under the label, in muted.
+  final String? note;
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+
+  /// The label is drawn in muted (an inherited value).
+  final bool dim;
+
+  /// Overrides the label style.
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RappTokens.of(context);
+    final on = onChanged;
+    final labelStyle = _rowLabel(t, style, dim || on == null);
+    return MergeSemantics(
+      child: InkWell(
+        key: _rowKey,
+        borderRadius: BorderRadius.circular(t.r),
+        onTap: on == null ? null : () => on(!value),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: controlHeightOf(context)),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Row(children: [
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(label, style: labelStyle),
+                    if (note != null) Text(note!, style: labelStyle.copyWith(color: t.muted)),
+                  ],
+                ),
+              ),
+              // Material's switch is 52×32; at 0.73 it sits in the row like the dropdown arrows.
+              SizedBox(
+                width: 38,
+                height: 24,
+                child: FittedBox(
+                  child: Switch(
+                    key: switchKey,
+                    value: value,
+                    onChanged: on,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A checkbox followed by its label; the whole row toggles it.
+class RappCheckRow extends StatelessWidget {
+  const RappCheckRow({super.key, required this.label, required this.value, this.onChanged, this.style});
+
+  final String label;
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RappTokens.of(context);
+    final on = onChanged;
+    return MergeSemantics(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(t.r),
+        onTap: on == null ? null : () => on(!value),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minHeight: controlHeightOf(context)),
+          child: Row(children: [
+            Checkbox(
+              value: value,
+              onChanged: on == null ? null : (v) => on(v ?? false),
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            const SizedBox(width: 4),
+            Expanded(child: Text(label, style: _rowLabel(t, style, on == null))),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// One of a set of mutually exclusive choices: a radio icon and a label.
+class RappChoice extends StatelessWidget {
+  const RappChoice({super.key, required this.label, required this.selected, this.onTap, this.dim = false});
+
+  final String label;
+  final bool selected;
+  final VoidCallback? onTap;
+
+  /// The label is drawn in muted (an inherited value).
+  final bool dim;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = RappTokens.of(context);
+    return Semantics(
+      inMutuallyExclusiveGroup: true,
+      checked: selected,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(t.r),
+        onTap: onTap,
+        child: SizedBox(
+          height: controlHeightOf(context),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(selected ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                size: 18, color: selected ? t.accent : t.muted),
+            const SizedBox(width: 6),
+            Text(label, style: TextStyle(color: dim ? t.muted : t.text)),
+          ]),
+        ),
+      ),
+    );
+  }
+}

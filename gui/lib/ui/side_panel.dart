@@ -11,6 +11,7 @@ import 'prefs.dart' show FirstLayer;
 import 'projects_tab.dart';
 import 'resources_tab.dart';
 import 'sessions_tab.dart';
+import 'controls.dart';
 import 'tab_chip.dart';
 import 'tokens.dart';
 
@@ -227,41 +228,8 @@ class _Footer extends StatelessWidget {
             ),
           ),
         );
-    Widget toggle(Key key, String label, bool value, void Function(bool) onChanged, {String? note}) => InkWell(
-          key: key,
-          borderRadius: BorderRadius.circular(t.r),
-          onTap: () => onChanged(!value),
-          child: ConstrainedBox(
-            constraints: BoxConstraints(minHeight: rowHeight),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Row(children: [
-                Expanded(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(label, style: small),
-                      if (note != null) Text(note, style: small.copyWith(color: t.muted)),
-                    ],
-                  ),
-                ),
-                // Material's switch is 52×32; at 0.7 it sits in the row like the dropdown arrows.
-                SizedBox(
-                  width: 38,
-                  height: 24,
-                  child: FittedBox(
-                    child: Switch(
-                      value: value,
-                      onChanged: onChanged,
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    ),
-                  ),
-                ),
-              ]),
-            ),
-          ),
-        );
+    Widget toggle(Key key, String label, bool value, void Function(bool) onChanged, {String? note}) =>
+        RappSwitchRow(key: key, label: label, note: note, value: value, onChanged: onChanged, style: small);
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(

@@ -1,9 +1,13 @@
+import 'dart:ui' show CheckedState;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/ui/controls.dart';
+import 'package:rapp/ui/tokens.dart';
 
 import 'helpers.dart';
+import 'platform_helpers.dart';
 
 void main() {
   testWidgets('ConfirmButton single tap does not fire', (t) async {
@@ -114,5 +118,101 @@ void main() {
     await t.pump(const Duration(milliseconds: 100));
     expect(t.widget<AnimatedScale>(find.byType(AnimatedScale)).scale, 1);
     await g.up();
+  });
+
+  Widget onP(TargetPlatform p, Widget child) => MaterialApp(
+        theme: themeDataFor(RappTheme.matrix, platform: p),
+        home: Scaffold(body: Align(alignment: Alignment.topLeft, child: SizedBox(width: 300, child: child))),
+      );
+  final tk = tokensFor(RappTheme.matrix);
+  Color labelColor(WidgetTester t, String s) => t.widget<Text>(find.text(s)).style!.color!;
+
+  group('RappSwitchRow', () {
+    testWidgets('tapping the label toggles', (t) async {
+      bool? got;
+      await t.pumpWidget(wrap(RappSwitchRow(label: '甲', value: false, onChanged: (v) => got = v)));
+      await t.tap(find.text('甲'));
+      expect(got, true);
+    });
+    testWidgets('tapping the switch calls once and the switch is 38x24', (t) async {
+      var n = 0;
+      await t.pumpWidget(wrap(RappSwitchRow(
+          switchKey: const Key('sw'), label: '甲', value: false, onChanged: (_) => n++)));
+      expect(t.getSize(find.ancestor(of: find.byKey(const Key('sw')), matching: find.byType(FittedBox))), const Size(38, 24));
+      await t.tap(find.byKey(const Key('sw')));
+      expect(n, 1);
+    });
+    testWidgets('onChanged null is inert and muted', (t) async {
+      await t.pumpWidget(wrap(const RappSwitchRow(label: '甲', value: false)));
+      await t.tap(find.text('甲'));
+      expect(labelColor(t, '甲'), tk.muted);
+    });
+    testWidgets('dim mutes the label and note is muted', (t) async {
+      await t.pumpWidget(wrap(RappSwitchRow(label: '甲', note: '乙', value: false, dim: true, onChanged: (_) {})));
+      expect(labelColor(t, '甲'), tk.muted);
+      expect(labelColor(t, '乙'), tk.muted);
+      await t.pumpWidget(wrap(RappSwitchRow(label: '甲', value: false, onChanged: (_) {})));
+      expect(labelColor(t, '甲'), tk.text);
+    });
+    for (final (p, h) in [(TargetPlatform.macOS, 40.0), (TargetPlatform.iOS, 48.0)]) {
+      testWidgets('row height $h on $p', (t) async {
+        await onPlatform(p, () async {
+          await t.pumpWidget(onP(p, RappSwitchRow(key: const Key('r'), label: '甲', value: false, onChanged: (_) {})));
+          expect(t.getSize(find.byKey(const Key('r'))).height, h);
+        });
+      });
+    }
+  });
+
+  group('RappCheckRow', () {
+    testWidgets('tapping the label toggles; checkbox is left of the label', (t) async {
+      bool? got;
+      await t.pumpWidget(wrap(RappCheckRow(label: '甲', value: false, onChanged: (v) => got = v)));
+      expect(t.getTopLeft(find.byType(Checkbox)).dx, lessThan(t.getTopLeft(find.text('甲')).dx));
+      await t.tap(find.text('甲'));
+      expect(got, true);
+    });
+    testWidgets('disabled is inert', (t) async {
+      await t.pumpWidget(wrap(const RappCheckRow(label: '甲', value: false)));
+      await t.tap(find.text('甲'));
+      expect(labelColor(t, '甲'), tk.muted);
+    });
+    for (final (p, h) in [(TargetPlatform.macOS, 40.0), (TargetPlatform.iOS, 48.0)]) {
+      testWidgets('row height $h on $p', (t) async {
+        await onPlatform(p, () async {
+          await t.pumpWidget(onP(p, RappCheckRow(key: const Key('r'), label: '甲', value: false, onChanged: (_) {})));
+          expect(t.getSize(find.byKey(const Key('r'))).height, h);
+        });
+      });
+    }
+  });
+
+  group('RappChoice', () {
+    testWidgets('icon colours and semantics', (t) async {
+      final h = t.ensureSemantics();
+      await t.pumpWidget(wrap(Column(mainAxisSize: MainAxisSize.min, children: [
+        RappChoice(key: const Key('a'), label: '甲', selected: true, onTap: () {}),
+        RappChoice(key: const Key('b'), label: '乙', selected: false, onTap: () {}),
+      ])));
+      Color ic(String k) => t.widget<Icon>(find.descendant(of: find.byKey(Key(k)), matching: find.byType(Icon))).color!;
+      expect(ic('a'), tk.accent);
+      expect(ic('b'), tk.muted);
+      final d = t.getSemantics(find.byKey(const Key('a')));
+      expect(d.flagsCollection.isInMutuallyExclusiveGroup, true);
+      expect(d.flagsCollection.isChecked, CheckedState.isTrue);
+      h.dispose();
+    });
+    testWidgets('dim mutes the label', (t) async {
+      await t.pumpWidget(wrap(RappChoice(label: '甲', selected: false, dim: true, onTap: () {})));
+      expect(labelColor(t, '甲'), tk.muted);
+    });
+    for (final (p, h) in [(TargetPlatform.macOS, 40.0), (TargetPlatform.iOS, 48.0)]) {
+      testWidgets('height $h on $p', (t) async {
+        await onPlatform(p, () async {
+          await t.pumpWidget(onP(p, Row(children: [RappChoice(key: const Key('r'), label: '甲', selected: true, onTap: () {})])));
+          expect(t.getSize(find.byKey(const Key('r'))).height, h);
+        });
+      });
+    }
   });
 }

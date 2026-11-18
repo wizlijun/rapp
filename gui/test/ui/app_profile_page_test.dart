@@ -49,6 +49,8 @@ void main() {
     expect(find.text('app 配置 · Google Chrome'), findsOneWidget);
     final mode = tester.widget<Text>(find.text('高彩').first);
     expect(mode.style?.color, RappTokens.of(tester.element(find.text('高彩').first)).muted);
+    // 显示「输入」 is not set on this profile, so its label is the muted inherited one.
+    expect(tester.widget<Text>(find.text('显示「输入」')).style?.color, RappTokens.of(tester.element(find.text('高彩').first)).muted);
     await pick(tester, const Key('fps-dd'), '5 fps');
     await tester.tap(find.text('保存'));
     await tester.pumpAndSettle();

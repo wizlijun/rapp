@@ -498,7 +498,7 @@ class _DevicesTabState extends State<DevicesTab> {
                     children: [
                       Text('终端 app', style: TextStyle(color: t.text)),
                       for (final l in launchers)
-                        _ModeChoice(
+                        RappChoice(
                             key: Key('term-app-$l'),
                             label: l,
                             selected: termApp == l,
@@ -511,14 +511,14 @@ class _DevicesTabState extends State<DevicesTab> {
               children: [
                 Text('打开方式', style: TextStyle(color: t.text)),
                 const SizedBox(width: 12),
-                _ModeChoice(
+                RappChoice(
                     key: const Key('term-open-text'),
                     label: '文本',
                     selected: mode == 'text',
                     onTap: () => state.setTermOpen(id, 'text')),
                 if (graphical) ...[
                   const SizedBox(width: 12),
-                  _ModeChoice(
+                  RappChoice(
                       key: const Key('term-open-pixels'),
                       label: '画面',
                       selected: mode == 'pixels',
@@ -810,35 +810,6 @@ class _PixelsRow extends StatelessWidget {
             onPressed: enabled && lamp != Lamp.connecting ? onOpen : null,
           ),
         ],
-      ),
-    );
-  }
-}
-
-/// One of the two 打开方式 choices.
-class _ModeChoice extends StatelessWidget {
-  const _ModeChoice({super.key, required this.label, required this.selected, required this.onTap});
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final t = RappTokens.of(context);
-    return Semantics(
-      inMutuallyExclusiveGroup: true,
-      checked: selected,
-      child: InkWell(
-        onTap: onTap,
-        child: SizedBox(
-          height: 48,
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(selected ? Icons.radio_button_checked : Icons.radio_button_unchecked,
-                size: 18, color: selected ? t.accent : t.muted),
-            const SizedBox(width: 6),
-            Text(label, style: TextStyle(color: t.text)),
-          ]),
-        ),
       ),
     );
   }

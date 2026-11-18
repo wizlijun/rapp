@@ -782,18 +782,18 @@ void main() {
         await tester.pump();
         await openMenu(tester);
         final row = find.byKey(const Key('composer-plus-return'));
-        Icon box() => tester.widget<Icon>(find.descendant(of: row, matching: find.byType(Icon)));
+        bool on() => tester.widget<Switch>(find.descendant(of: row, matching: find.byType(Switch))).value;
         expect(find.descendant(of: row, matching: find.text('直接回车且隐藏')), findsOneWidget);
-        expect(box().icon, Icons.check_box);
+        expect(on(), isTrue);
         await tester.tap(row);
         await tester.pump();
         expect(menu, findsOneWidget);
         expect(es.profiles.resolve('com.x').afterSend, AfterSend.none);
-        expect(box().icon, Icons.check_box_outline_blank);
+        expect(on(), isFalse);
         await tester.tap(row);
         await tester.pump();
         expect(es.profiles.resolve('com.x').afterSend, AfterSend.pressReturn);
-        expect(box().icon, Icons.check_box);
+        expect(on(), isTrue);
       });
 
       testWidgets('直接回车且隐藏 is not offered for a session without an app id', (tester) async {

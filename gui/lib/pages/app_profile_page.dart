@@ -165,22 +165,6 @@ class _AppProfilePageState extends State<AppProfilePage> {
         ]),
       );
 
-  Widget _radio(RappTokens t, String label, AfterSend v, AfterSend current, bool grey) {
-    final on = v == current;
-    final color = grey ? t.muted : t.text;
-    return InkWell(
-      onTap: () => _set(() => _draft.afterSend = v),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Row(children: [
-          Icon(on ? Icons.radio_button_checked : Icons.radio_button_unchecked, size: 20, color: color),
-          const SizedBox(width: 8),
-          Text(label, style: TextStyle(color: color)),
-        ]),
-      ),
-    );
-  }
-
   InputDecoration _deco(RappTokens t, {String? hint, bool counter = false}) => InputDecoration(
         isDense: true,
         hintText: hint,
@@ -337,46 +321,50 @@ class _AppProfilePageState extends State<AppProfilePage> {
                   grey: d.fps == null,
                   onChanged: (v) => d.fps = v),
               t),
-          Row(children: [
-            Text('智能时按焦点分区', style: TextStyle(color: d.focusPane == null ? t.muted : t.text)),
-            Switch(
-                key: const Key('focus-pane-switch'),
-                value: focusPane,
-                onChanged: (v) => _set(() => d.focusPane = v)),
-          ]),
+          RappSwitchRow(
+            switchKey: const Key('focus-pane-switch'),
+            label: '智能时按焦点分区',
+            value: focusPane,
+            dim: d.focusPane == null,
+            onChanged: (v) => _set(() => d.focusPane = v),
+          ),
           _label(t, '发送后'),
-          _radio(t, '只贴，不按回车', AfterSend.none, afterSend, d.afterSend == null),
-          _radio(t, '贴完按回车并收起输入板', AfterSend.pressReturn, afterSend, d.afterSend == null),
+          RappChoice(
+            label: '只贴，不按回车',
+            selected: afterSend == AfterSend.none,
+            dim: d.afterSend == null,
+            onTap: () => _set(() => _draft.afterSend = AfterSend.none),
+          ),
+          RappChoice(
+            label: '贴完按回车并收起输入板',
+            selected: afterSend == AfterSend.pressReturn,
+            dim: d.afterSend == null,
+            onTap: () => _set(() => _draft.afterSend = AfterSend.pressReturn),
+          ),
           _label(t, '输入区'),
-          Row(children: [
-            Text('显示「输入」', style: TextStyle(color: d.composer == null ? t.muted : t.text)),
-            Switch(key: const Key('composer-switch'), value: composer, onChanged: (v) => _set(() => d.composer = v)),
-          ]),
-          Row(children: [
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('记下发给这个 app 的话', style: TextStyle(color: d.recordInput == null ? t.muted : t.text)),
-                Text('关掉后草稿只存在本机', style: TextStyle(color: t.muted)),
-              ]),
-            ),
-            Switch(
-                key: const Key('record-input-switch'),
-                value: recordInput,
-                onChanged: (v) => _set(() => d.recordInput = v)),
-          ]),
-          Row(children: [
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('在画面上按字母键时打开写作面板',
-                    style: TextStyle(color: d.typeToCompose == null ? t.muted : t.text)),
-                Text('关掉后字母直接发给这个 app，适合 Figma、游戏、密码管理器', style: TextStyle(color: t.muted)),
-              ]),
-            ),
-            Switch(
-                key: const Key('type-to-compose-switch'),
-                value: typeToCompose,
-                onChanged: (v) => _set(() => d.typeToCompose = v)),
-          ]),
+          RappSwitchRow(
+            switchKey: const Key('composer-switch'),
+            label: '显示「输入」',
+            value: composer,
+            dim: d.composer == null,
+            onChanged: (v) => _set(() => d.composer = v),
+          ),
+          RappSwitchRow(
+            switchKey: const Key('record-input-switch'),
+            label: '记下发给这个 app 的话',
+            note: '关掉后草稿只存在本机',
+            value: recordInput,
+            dim: d.recordInput == null,
+            onChanged: (v) => _set(() => d.recordInput = v),
+          ),
+          RappSwitchRow(
+            switchKey: const Key('type-to-compose-switch'),
+            label: '在画面上按字母键时打开写作面板',
+            note: '关掉后字母直接发给这个 app，适合 Figma、游戏、密码管理器',
+            value: typeToCompose,
+            dim: d.typeToCompose == null,
+            onChanged: (v) => _set(() => d.typeToCompose = v),
+          ),
           Row(children: [
             Expanded(
               child: Text(

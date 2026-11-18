@@ -116,14 +116,14 @@ class _UpdateSectionState extends State<UpdateSection> {
         ),
       if (u.state != 'off')
         Wrap(spacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
-          MergeSemantics(
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
-              Text('自动升级', style: TextStyle(color: t.text)),
-              Switch(
-                value: u.autoUpdate,
-                onChanged: _busy ? null : (v) => _run(() => widget.onSetAuto(v)),
-              ),
-            ]),
+          // Bounded, so the switch at the row's right end stays near its label.
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 320),
+            child: RappSwitchRow(
+              label: '自动升级',
+              value: u.autoUpdate,
+              onChanged: _busy ? null : (v) => _run(() => widget.onSetAuto(v)),
+            ),
           ),
           if (u.canRollback)
             ConfirmButton(label: '回到上一版', onConfirmed: _busy ? null : () => _run(widget.onRollback)),

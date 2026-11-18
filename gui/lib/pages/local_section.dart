@@ -11,6 +11,7 @@ import '../ios_channel.dart';
 import '../permissions.dart';
 import '../platform_caps.dart';
 import '../service_client.dart';
+import '../ui/controls.dart';
 import '../ui/tokens.dart';
 import '../ui/lifecycle.dart' show disconnectWord;
 import '../ui/secure_text_field.dart';
@@ -182,11 +183,11 @@ class _LocalSectionState extends State<LocalSection> {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        MergeSemantics(
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Text('远程 app 都关闭后自动锁屏', style: TextStyle(color: t.text)),
-            Switch(key: const Key('auto-lock-switch'), value: st.autoLock, onChanged: _setAutoLock),
-          ]),
+        RappSwitchRow(
+          switchKey: const Key('auto-lock-switch'),
+          label: '远程 app 都关闭后自动锁屏',
+          value: st.autoLock,
+          onChanged: _setAutoLock,
         ),
         Text('锁屏后，B 打开 app 时需要输入这台 Mac 的登录密码。', style: TextStyle(color: t.muted)),
       ]),

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../ui/controls.dart';
+import '../ui/tab_chip.dart';
 import '../ui/tokens.dart';
 import 'input_history.dart';
 
@@ -89,9 +90,13 @@ class _InputHistoryListState extends State<InputHistoryList> {
               _limit = historyPage;
             })
         : null;
-    return _scope == s
-        ? RappButton.primary(key: Key(key), label: label, onPressed: go)
-        : RappButton.secondary(key: Key(key), label: label, onPressed: go);
+    return Opacity(
+      opacity: go == null ? .4 : 1,
+      child: IgnorePointer(
+        ignoring: go == null,
+        child: TabChip(key: Key(key), label: label, selected: _scope == s, onTap: go ?? () {}),
+      ),
+    );
   }
 
   @override

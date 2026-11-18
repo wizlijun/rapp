@@ -195,28 +195,12 @@ class _ComposerPlusState extends State<ComposerPlus> {
     listenable: widget.session,
     builder: (context, _) {
       final on = widget.session.profile.afterSend == AfterSend.pressReturn;
-      return Semantics(
-        checked: on,
-        child: InkWell(
-          key: const Key('composer-plus-return'),
-          onTap: () => widget.onReturnAfter!(!on),
-          borderRadius: BorderRadius.circular(t.r),
-          child: SizedBox(
-            height: 48,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Row(
-                children: [
-                  Text('直接回车且隐藏', style: TextStyle(color: t.text)),
-                  const SizedBox(width: 8),
-                  Text('贴完按回车再收起', style: TextStyle(color: t.muted)),
-                  const Spacer(),
-                  Icon(on ? Icons.check_box : Icons.check_box_outline_blank, size: 20, color: on ? t.accent : t.muted),
-                ],
-              ),
-            ),
-          ),
-        ),
+      return RappSwitchRow(
+        key: const Key('composer-plus-return'),
+        label: '直接回车且隐藏',
+        note: '贴完按回车再收起',
+        value: on,
+        onChanged: widget.onReturnAfter,
       );
     },
   );
