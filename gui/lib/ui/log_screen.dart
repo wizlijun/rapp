@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 // 日志: the whole stage below the top bar — three cards, the merged timeline, rows that open in place
 // (log screen spec §4).
 import 'package:flutter/material.dart';
@@ -219,6 +221,7 @@ class _LogScreenState extends State<LogScreen> {
     return RappDropdown<String>(
       key: const Key('log-device-picker'),
       minWidth: 96,
+      menuConstraints: (w) => BoxConstraints(minWidth: math.max(w, 200), maxWidth: math.max(w, 280)),
       selected: true,
       current: m.device ?? '',
       label: Row(mainAxisSize: MainAxisSize.min, children: [

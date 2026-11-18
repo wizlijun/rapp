@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -515,6 +516,8 @@ class RappDropdown<T> extends StatefulWidget {
     this.expand = false,
     this.arrow = true,
     this.enabled = true,
+    this.padding,
+    this.menuConstraints,
   }) : _boxKey = key;
 
   final Key? _boxKey;
@@ -537,6 +540,12 @@ class RappDropdown<T> extends StatefulWidget {
   /// Off: the box is drawn but does not open.
   final bool enabled;
 
+  /// Replaces the box's own padding (left 12, right 6).
+  final EdgeInsets? padding;
+
+  /// The menu's width bounds given the box's width. Default: at least 112 and the box, at most 280 or the box.
+  final BoxConstraints Function(double box)? menuConstraints;
+
   @override
   State<RappDropdown<T>> createState() => _RappDropdownState<T>();
 }
@@ -553,7 +562,8 @@ class _RappDropdownState<T> extends State<RappDropdown<T>> {
       position: menuAt(box, at),
       items: widget.items,
       current: widget.current,
-      constraints: BoxConstraints(minWidth: render.size.width),
+      constraints: widget.menuConstraints?.call(render.size.width) ??
+          BoxConstraints(minWidth: math.max(render.size.width, 112), maxWidth: math.max(render.size.width, 280)),
     );
     if (mounted) setState(() => _open = false);
     if (pick != null && mounted) widget.onSelected(pick);
@@ -563,7 +573,8 @@ class _RappDropdownState<T> extends State<RappDropdown<T>> {
   Widget build(BuildContext context) {
     final t = RappTokens.of(context);
     final radius = BorderRadius.circular(t.r);
-    final strong = widget.selected || _open;
+    // An action menu's box stays plain while its menu is open.
+    final strong = widget.selected || (_open && widget.current != null);
     final color = widget.dim ? t.muted : t.text;
     final label = DefaultTextStyle.merge(
       style: TextStyle(color: color, fontWeight: strong ? FontWeight.w600 : null),
@@ -583,7 +594,7 @@ class _RappDropdownState<T> extends State<RappDropdown<T>> {
             borderRadius: radius,
             child: Container(
               constraints: BoxConstraints(minHeight: controlHeightOf(context), minWidth: widget.minWidth ?? 0),
-              padding: const EdgeInsets.only(left: 12, right: 6),
+              padding: widget.padding ?? const EdgeInsets.only(left: 12, right: 6),
               decoration: strong ? t.raiseBox(border: t.text) : BoxDecoration(borderRadius: radius, border: Border.all(color: t.line)),
               child: Row(mainAxisSize: widget.expand ? MainAxisSize.max : MainAxisSize.min, children: [
                 widget.expand ? Expanded(child: label) : Flexible(child: label),

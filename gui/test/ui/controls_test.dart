@@ -1,6 +1,7 @@
 import 'dart:ui' show CheckedState;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/ui/controls.dart';
@@ -305,6 +306,27 @@ void main() {
         });
       });
     }
+    testWidgets('a long label stays within 280 wide and ellipsizes', (t) async {
+      await t.pumpWidget(onP(TargetPlatform.macOS, Row(children: [
+        RappDropdown<int>(
+          label: const Text('甲'),
+          items: [RappMenuItem(value: 1, label: '很长的标题' * 40)],
+          onSelected: (_) {},
+        ),
+      ])));
+      await t.tap(find.text('甲'));
+      await t.pumpAndSettle();
+      final row = find.ancestor(of: find.textContaining('很长的标题'), matching: find.byType(InkWell)).first;
+      expect(t.getSize(row).width, lessThanOrEqualTo(280));
+      expect(t.renderObject<RenderParagraph>(find.textContaining('很长的标题')).didExceedMaxLines, true);
+    });
+    testWidgets('an action menu box stays plain while its menu is open', (t) async {
+      await t.pumpWidget(dd(current: null));
+      await t.tap(find.byKey(const Key('dd')));
+      await t.pumpAndSettle();
+      expect((box(t).border! as Border).top.color, tk.line);
+      expect(DefaultTextStyle.of(t.element(find.text('甲'))).style.fontWeight, isNot(FontWeight.w600));
+    });
     testWidgets('menu rows are control height', (t) async {
       await onPlatform(TargetPlatform.iOS, () async {
         await t.pumpWidget(onP(TargetPlatform.iOS, RappDropdown<int>(

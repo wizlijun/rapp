@@ -1216,6 +1216,15 @@ void main() {
       expect(tester.widget<Text>(find.byKey(const Key('project-menu-label'))).data, '全部');
       expect(tester.widget<Icon>(find.byKey(const Key('project-menu-icon'))).icon, ProjectMenu.buttonIcon);
       expect(tester.getSize(btn).height, greaterThanOrEqualTo(48));
+      // Compact: icon and arrow fit the 48 the top bar budgets for it, without an overflow.
+      await tester.pumpWidget(MaterialApp(
+        theme: themeDataFor(RappTheme.matrix),
+        home: Scaffold(body: Align(alignment: Alignment.topLeft, child: SizedBox(width: 48, child: ProjectMenu(state: s, compact: true)))),
+      ));
+      expect(tester.takeException(), isNull);
+      expect(tester.getSize(find.byKey(const Key('project-menu'))).width, ProjectMenu.compactWidth);
+      await tester.pumpWidget(Container());
+      await boot(tester);
       // Ahead of the session list: it narrows what the list holds.
       expect(tester.getRect(btn).right, lessThanOrEqualTo(tester.getRect(find.byKey(const Key('prev'))).left + 0.01));
       expect(tester.getRect(btn).left, greaterThanOrEqualTo(tester.getRect(find.byKey(const Key('overview-button'))).right - 0.01));

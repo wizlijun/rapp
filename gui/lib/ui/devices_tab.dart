@@ -161,6 +161,7 @@ class _DevicesTabState extends State<DevicesTab> {
     final picker = RappDropdown<String>(
         key: const Key('device-picker'),
         expand: true,
+        menuConstraints: (w) => BoxConstraints(minWidth: w, maxWidth: w),
         enabled: hosts.isNotEmpty,
         selected: sel != null,
         dim: sel == null,

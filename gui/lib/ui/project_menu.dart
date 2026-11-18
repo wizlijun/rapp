@@ -17,7 +17,7 @@ class ProjectMenu extends StatelessWidget {
 
   /// The button's widest with the name, and its width without.
   static const fullWidth = 160.0;
-  static const compactWidth = 56.0;
+  static const compactWidth = 48.0;
 
   /// Shown once there is a project: with it, 全部 and 自由区 are already three to pick from.
   static bool shows(MainState state) => state.projects.isNotEmpty;
@@ -64,6 +64,7 @@ class ProjectMenu extends StatelessWidget {
           constraints: BoxConstraints(maxWidth: compact ? compactWidth : fullWidth),
           child: RappDropdown<String>(
             current: now,
+            padding: compact ? const EdgeInsets.only(left: 4, right: 2) : null,
             label: Row(mainAxisSize: MainAxisSize.min, children: [
               Icon(buttonIcon, key: const Key('project-menu-icon'), size: 18, color: t.muted),
               if (!compact) ...[
