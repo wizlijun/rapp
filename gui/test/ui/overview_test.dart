@@ -28,6 +28,8 @@ void main() {
   var hosts = <Map<String, String>>[];
   var sid = 0;
   var offline = <String>{};
+  String? hubVersion;
+  var versions = <String, String>{};
 
   Future<void> flush() => Future<void>.delayed(Duration.zero);
 
@@ -38,6 +40,8 @@ void main() {
     ];
     sid = 0;
     offline = {};
+    hubVersion = null;
+    versions = {};
   });
 
   tearDown(() {
@@ -55,11 +59,11 @@ void main() {
     port = FakeSessionPort();
     t.onSend = (m) {
       if (m['cmd'] == 'hosts') {
-        t.emit({'event': 'hosts', 'req': m['req'], 'hosts': hosts});
+        t.emit({'event': 'hosts', 'req': m['req'], 'hosts': hosts, 'version': ?hubVersion});
       } else if (m['cmd'] == 'apps') {
         t.emit(offline.contains(m['id'])
             ? {'event': 'error', 'req': m['req'], 'error': 'connect timed out'}
-            : {'event': 'apps', 'req': m['req'], 'id': m['id'], 'path': 'lan', 'apps': []});
+            : {'event': 'apps', 'req': m['req'], 'id': m['id'], 'path': 'lan', 'apps': [], 'version': ?versions[m['id']]});
       } else if (m['cmd'] == 'open') {
         t.emit({
           'event': 'opened', 'sid': ++sid, 'id': m['id'], 'app': m['app'], 'path': 'lan',
@@ -230,6 +234,25 @@ void main() {
     final title = tester.widget<Text>(inside('column-m2', find.text('air')));
     expect(title.style!.color, tokens(tester).muted);
     expect(inside('column-m2', find.text('离线')), findsOneWidget);
+  });
+
+  testWidgets('each column shows its version at the bottom in muted text; none when unknown', (tester) async {
+    hosts = [
+      {'id': 'm1', 'name': 'mini'},
+      {'id': 'm2', 'name': 'air'},
+    ];
+    hubVersion = '0.14.7';
+    versions = {'m1': '0.14.8'};
+    await boot(tester, apps: ['m1/a']);
+    await show(tester);
+    final m1 = tester.widget<Text>(find.byKey(const Key('version-m1')));
+    expect(m1.data, '0.14.8');
+    expect(m1.style!.color, tokens(tester).muted);
+    expect(tester.widget<Text>(find.byKey(const Key('version-local'))).data, '0.14.7');
+    expect(find.byKey(const Key('version-m2')), findsNothing);
+    // At the bottom: below the column's session block.
+    expect(tester.getTopLeft(find.byKey(const Key('version-m1'))).dy,
+        greaterThan(tester.getBottomLeft(inside('column-m1', find.byType(Text)).first).dy));
   });
 
   testWidgets('an empty host column offers 打开 app', (tester) async {

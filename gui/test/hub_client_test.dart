@@ -161,6 +161,27 @@ void main() {
       expect(apps.last.displays, isEmpty);
     });
 
+    test('the hosts event carries the hub version; an empty one is none', () async {
+      t.emit({'event': 'hosts', 'hosts': [], 'version': '0.14.8'});
+      await Future<void>.delayed(Duration.zero);
+      expect(hub.version, '0.14.8');
+      t.emit({'event': 'hosts', 'hosts': [], 'version': ''});
+      await Future<void>.delayed(Duration.zero);
+      expect(hub.version, isNull);
+    });
+
+    test('an apps reply fills AppList.version; an old host leaves it null', () async {
+      var f = hub.apps('111');
+      t.emit({'event': 'apps', 'id': '111', 'path': 'lan', 'apps': [], 'version': '0.14.8', 'req': t.sent.last['req']});
+      expect((await f).version, '0.14.8');
+      f = hub.apps('111');
+      t.emit({'event': 'apps', 'id': '111', 'path': 'lan', 'apps': [], 'req': t.sent.last['req']});
+      expect((await f).version, isNull);
+      f = hub.apps('111');
+      t.emit({'event': 'apps', 'id': '111', 'path': 'lan', 'apps': [], 'version': '', 'req': t.sent.last['req']});
+      expect((await f).version, isNull);
+    });
+
     test('presence is queued and drained', () async {
       final f = hub.apps('111');
       final req = t.sent.last['req'];

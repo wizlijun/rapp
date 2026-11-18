@@ -103,9 +103,15 @@ class HubApp {
   final List<RemoteDisplay> displays;
 }
 
+/// A `version` field: a non-empty string, else none.
+String? _version(Object? v) => v is String && v.isNotEmpty ? v : null;
+
 class AppList {
-  const AppList(this.id, this.path, this.apps, {this.permissions, this.capabilities});
+  const AppList(this.id, this.path, this.apps, {this.permissions, this.capabilities, this.version});
   final Map<String, dynamic>? capabilities;
+
+  /// A's rapp version; null from a host older than version labels.
+  final String? version;
   final String id;
   final String path;
   final List<HubApp> apps;
@@ -267,6 +273,10 @@ class HubClient extends ChangeNotifier {
   List<HubHost> hosts = const [];
   bool alive = true;
 
+  /// The hub's rapp version (the same install as this GUI), from its `hosts` events; null until
+  /// one carries it.
+  String? version;
+
   /// Last error not tied to a request (or the hub dying).
   String? lastError;
 
@@ -342,7 +352,8 @@ class HubClient extends ChangeNotifier {
     final perms = m['permissions'];
     return AppList('${m['id'] ?? id}', '${m['path'] ?? ''}', list,
         permissions: perms is Map ? Map<String, dynamic>.from(perms) : null,
-        capabilities: m['capabilities'] is Map ? Map<String, dynamic>.from(m['capabilities']) : null);
+        capabilities: m['capabilities'] is Map ? Map<String, dynamic>.from(m['capabilities']) : null,
+        version: _version(m['version']));
   }
 
   /// The 日志 screen's query, on this machine or on host [id]. An old peer answers `unknown op`.
@@ -454,6 +465,7 @@ class HubClient extends ChangeNotifier {
     final event = m['event'];
     switch (event) {
       case 'hosts':
+        version = _version(m['version']);
         hosts = (m['hosts'] as List? ?? const [])
             .whereType<Map>()
             .map((h) => HubHost('${h['id']}', '${h['name'] ?? ''}',

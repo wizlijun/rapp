@@ -29,6 +29,7 @@ class DeviceColumn {
     required this.word,
     required this.path,
     required this.entries,
+    this.version,
   });
 
   /// null = this Mac.
@@ -41,6 +42,9 @@ class DeviceColumn {
   final String path;
   final List<SessionEntry> entries;
 
+  /// The device's rapp version, shown under the column; null when unknown.
+  final String? version;
+
   bool get offline => lamp == Lamp.offline;
 }
 
@@ -50,6 +54,7 @@ List<DeviceColumn> deviceColumns({
   required Map<String, DeviceProbe> probes,
   required List<SessionEntry> entries,
   required String Function(String id) name,
+  String? localVersion,
 }) {
   String pathOf(List<SessionEntry> es) {
     for (final e in es) {
@@ -62,7 +67,7 @@ List<DeviceColumn> deviceColumns({
   List<SessionEntry> of(String id) => [for (final e in entries) if (e.id == id) e];
 
   final cols = <DeviceColumn>[
-    const DeviceColumn(id: null, name: '本机', lamp: Lamp.active, word: '在线', path: '', entries: []),
+    DeviceColumn(id: null, name: '本机', lamp: Lamp.active, word: '在线', path: '', entries: const [], version: localVersion),
   ];
   final known = <String>{};
   for (final h in hosts) {
@@ -76,6 +81,7 @@ List<DeviceColumn> deviceColumns({
       word: p?.word ?? '连接中',
       path: pathOf(es),
       entries: es,
+      version: p?.apps?.version,
     ));
   }
   for (final e in entries) {
