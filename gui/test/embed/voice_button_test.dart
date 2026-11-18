@@ -16,7 +16,6 @@ import 'package:rapp/hub_client.dart';
 import 'package:rapp/paths.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
-import 'package:rapp/ui/tokens.dart';
 
 import '../fakes.dart';
 import '../ui/helpers.dart';
@@ -170,6 +169,9 @@ void main() {
     expect(holdOpacity(tester), 1);
     final g = await press(tester);
     expect(painter(tester).progress, 1);
+    // The bands have finished sweeping in by the end of the 240 ms press.
+    expect(painter(tester).sweep, 1);
+    expect(painter(tester).bands, 1);
     expect(holdOpacity(tester), 0);
     expect(find.text('正在听…'), findsOneWidget);
     expect(find.text('松手 发送'), findsOneWidget);
@@ -253,6 +255,8 @@ void main() {
     final g = await tester.startGesture(tester.getCenter(hold));
     await tester.pump();
     expect(painter(tester).progress, 1);
+    expect(painter(tester).sweep, 1);
+    expect(painter(tester).bands, 1);
     expect(holdOpacity(tester), 0);
     await g.up();
     await tester.pump();
@@ -425,18 +429,45 @@ void main() {
     expect(hold, findsNothing);
   });
 
-  test('each band is drawn on the side pick maps it to, on both hands', () {
-    for (final right in [true, false]) {
-      final ring = VoiceRing(stage: stage, thumb: Offset(right ? 956 : 44, 656), right: right);
-      final p = VoiceRingPainter(ring: ring, pick: VoicePick.send, progress: 1, tokens: tokensFor(RappTheme.matrix));
+  for (final right in [true, false]) {
+    iosTest('each band is drawn on the side pick maps it to (right: $right), in the painter the overlay builds', (tester) async {
+      if (!right) es.setStageSide(StageSide.left);
+      await tester.pumpWidget(layer());
+      final g = await press(tester);
+      final p = painter(tester);
+      expect(p.sweep, 1);
+      final ring = p.ring;
+      expect(ring.right, right);
       for (final which in [VoicePick.edit, VoicePick.cancel]) {
         final metric = p.bandPath(which).computeMetrics().first;
         // Along the outer arc, near the far end.
         final far = metric.getTangentForOffset((ring.inner + ring.band) * 19 * math.pi / 180 * .9)!.position;
         final v = far - ring.centre;
         final pushed = ring.centre + v / v.distance * (ring.r + 5);
-        expect(ring.pick(pushed), which, reason: 'right: $right');
+        expect(ring.pick(pushed), which);
       }
-    }
+      await lift(tester, g);
+    });
+  }
+
+  iosTest('release mid-press: the bands go out from where they were, never jumping to the full sweep', (tester) async {
+    await tester.pumpWidget(layer());
+    final g = await tester.startGesture(tester.getCenter(hold));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 180));
+    final before = painter(tester);
+    expect(before.sweep, closeTo(.5, .01));
+    expect(before.bands, closeTo(.5, .01));
+    await g.up();
+    await tester.pump();
+    expect(painter(tester).sweep, closeTo(before.sweep, 1e-9));
+    expect(painter(tester).bands, lessThanOrEqualTo(before.bands));
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(painter(tester).sweep, closeTo(before.sweep, 1e-9));
+    expect(painter(tester).bands, closeTo(before.bands / 2, .01));
+    await tester.pump(const Duration(milliseconds: 60));
+    expect(painter(tester).bands, 0);
+    await tester.pump(const Duration(milliseconds: 200));
+    expect(ringFinder, findsNothing);
   });
 }

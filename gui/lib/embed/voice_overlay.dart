@@ -40,6 +40,8 @@ class _VoiceOverlayState extends State<VoiceOverlay> with SingleTickerProviderSt
   bool _up = false;
   bool _releasing = false;
   VoicePick _released = VoicePick.send;
+  double _fromValue = 1;
+  double _fromSweep = 1;
   bool _reduced = false;
   List<double> _levels = List.filled(_bars, 0);
   (String, double, String)? _tailKey;
@@ -97,6 +99,9 @@ class _VoiceOverlayState extends State<VoiceOverlay> with SingleTickerProviderSt
       _up = false;
       _releasing = true;
       _released = _hold.pick;
+      // The bands go out from where they are; a release mid-press does not finish their sweep first.
+      _fromValue = _c.value;
+      _fromSweep = _pressSweep(_c.value);
       if (_reduced) {
         _c.value = 0;
       } else {
@@ -105,6 +110,9 @@ class _VoiceOverlayState extends State<VoiceOverlay> with SingleTickerProviderSt
     }
     if (mounted) setState(() {});
   }
+
+  // The bands sweep in over the last 120 ms of the 240 ms press.
+  double _pressSweep(double v) => ((v * _press.inMilliseconds - 120) / 120).clamp(0.0, 1.0);
 
   void _onLevel() {
     // The bars stop while 取消 is picked.
@@ -163,21 +171,22 @@ class _VoiceOverlayState extends State<VoiceOverlay> with SingleTickerProviderSt
     final v = _c.value;
     final double morph, scrim, bubble, rise, sweep, bands;
     if (_releasing) {
-      final ms = (1 - v) * _release.inMilliseconds;
+      // Time since the release began (a release mid-press starts below 1).
+      final ms = (_fromValue - v) * _release.inMilliseconds;
       morph = 1 - Curves.easeInCubic.transform(1 - v);
       scrim = v;
       bubble = v;
       // Sent: the bubble rises as it fades, as if sent off; otherwise it fades where it is.
       rise = _released == VoicePick.send ? -8 * (1 - v) : 0;
-      sweep = 1;
-      bands = (1 - ms / 100).clamp(0.0, 1.0);
+      sweep = _fromSweep;
+      bands = _fromSweep * (1 - ms / 100).clamp(0.0, 1.0);
     } else {
       final ms = v * _press.inMilliseconds;
       morph = Curves.easeOutCubic.transform(v);
       scrim = (ms / 160).clamp(0.0, 1.0);
       bubble = ((ms - 80) / 160).clamp(0.0, 1.0);
       rise = 8 * (1 - bubble);
-      sweep = ((ms - 120) / 160).clamp(0.0, 1.0);
+      sweep = _pressSweep(v);
       bands = sweep;
     }
     final pick = _releasing ? _released : _hold.pick;
@@ -368,7 +377,7 @@ class VoiceRingPainter extends CustomPainter {
     final t = tokens;
     final path = bandPath(which);
     final on = pick == which;
-    final paint = Paint()..color = Color.fromRGBO(0, 0, 0, bands);
+    final paint = Paint();
     if (on) {
       paint.color = t.accent.withValues(alpha: t.accent.a * bands);
     } else {
@@ -383,7 +392,8 @@ class VoiceRingPainter extends CustomPainter {
         a0 += 2 * math.pi;
         a1 += 2 * math.pi;
       }
-      final c = t.raise.first;
+      // The band's opacity rides on the stops (a token colour, no literal paint colour).
+      final c = t.raise.first.withValues(alpha: t.raise.first.a * bands);
       final faded = c.withValues(alpha: c.a * .08);
       paint.shader = ui.Gradient.sweep(
         ring.centre,
