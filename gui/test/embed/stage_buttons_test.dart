@@ -213,6 +213,48 @@ void main() {
     expect(taps, 0);
     expect(sides, 0);
   });
+
+  iosTest('beside alone: the transfer strip sits 12 from the edge (no empty stack, no gap)', (tester) async {
+    big(tester);
+    await tester.pumpWidget(wrap(SizedBox(
+        key: const Key('stage'),
+        width: stage.width,
+        height: stage.height,
+        child: StageButtons(
+          side: StageSide.right,
+          onSide: (_) {},
+          beside: const [SizedBox(key: Key('strip'), width: 100, height: 40)],
+        ))));
+    expect(stage.width - inStage(tester, find.byKey(const Key('strip'))).right, 12);
+  });
+
+  iosTest('hidden mid-drag: the drag ends, the stack snaps back and stays put', (tester) async {
+    big(tester);
+    var sides = 0;
+    Widget stack(bool hidden) => wrap(SizedBox(
+        key: const Key('stage'),
+        width: stage.width,
+        height: stage.height,
+        child: StageButtons(
+          side: StageSide.right,
+          onSide: (_) => sides++,
+          hidden: hidden,
+          input: RappButtonProbe(onTap: () {}),
+        )));
+    await tester.pumpWidget(stack(false));
+    final g = await tester.startGesture(tester.getCenter(open));
+    await g.moveBy(const Offset(-30, 0));
+    await g.moveBy(const Offset(-170, 0));
+    await tester.pump();
+    expect(stage.width - inStage(tester, open).right, greaterThan(100));
+    await tester.pumpWidget(stack(true));
+    await g.moveBy(const Offset(-500, 0));
+    await g.up();
+    await tester.pumpWidget(stack(false));
+    await tester.pumpAndSettle();
+    expect(stage.width - inStage(tester, open).right, 12);
+    expect(sides, 0);
+  });
 }
 
 /// A stand-in for 输入 that counts taps.

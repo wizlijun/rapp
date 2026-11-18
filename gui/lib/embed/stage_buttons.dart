@@ -55,6 +55,18 @@ class _StageButtonsState extends State<StageButtons>
   double _stageWidth = 0;
 
   @override
+  void didUpdateWidget(StageButtons old) {
+    super.didUpdateWidget(old);
+    // Hiding drops the drag recognizer without an end: snap back to this side instead of freezing mid-way.
+    if (widget.hidden && !old.hidden && _dragging) {
+      _dragging = false;
+      _from = _dx;
+      _snap.duration = MediaQuery.disableAnimationsOf(context) ? Duration.zero : _glide;
+      _snap.forward(from: 0);
+    }
+  }
+
+  @override
   void dispose() {
     _snap.dispose();
     super.dispose();
@@ -180,13 +192,13 @@ class _StageButtonsState extends State<StageButtons>
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    if (left) column,
+                    if (left && stack.isNotEmpty) column,
                     if (beside != null) ...[
                       if (!left) beside,
-                      const SizedBox(width: _gap),
+                      if (stack.isNotEmpty) const SizedBox(width: _gap),
                       if (left) beside,
                     ],
-                    if (!left) column,
+                    if (!left && stack.isNotEmpty) column,
                   ],
                 ),
               ),
