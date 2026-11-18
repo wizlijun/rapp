@@ -1,0 +1,163 @@
+[
+  {"name": "tap", "steps": [
+    {"t": 0, "in": "down 61 opt", "out": "swallow arm"},
+    {"t": 120, "in": "up 61", "out": "flush pass"}
+  ]},
+  {"name": "option-arrow", "steps": [
+    {"t": 0, "in": "down 61 opt", "out": "swallow arm"},
+    {"t": 80, "in": "down 123 opt fn", "out": "flush pass"},
+    {"t": 150, "in": "up 123", "out": "pass"},
+    {"t": 200, "in": "up 61", "out": "pass"},
+    {"t": 300, "in": "elapsed", "out": "none"}
+  ]},
+  {"name": "hold-send", "steps": [
+    {"t": 0, "in": "down 61 opt", "out": "swallow arm"},
+    {"t": 300, "in": "elapsed", "out": "start"},
+    {"t": 2000, "in": "up 61", "out": "swallow release"}
+  ]},
+  {"name": "esc-cancels", "steps": [
+    {"t": 0, "in": "down 61 opt", "out": "swallow arm"},
+    {"t": 300, "in": "elapsed", "out": "start"},
+    {"t": 900, "in": "down 53 opt", "out": "swallow cancel"},
+    {"t": 950, "in": "up 53", "out": "swallow"},
+    {"t": 1000, "in": "down 0 opt", "out": "swallow"},
+    {"t": 1050, "in": "up 0", "out": "swallow"},
+    {"t": 1200, "in": "up 61", "out": "swallow"}
+  ]},
+  {"name": "tab-edits", "steps": [
+    {"t": 0, "in": "down 61 opt", "out": "swallow arm"},
+    {"t": 300, "in": "elapsed", "out": "start"},
+    {"t": 900, "in": "down 48 opt", "out": "swallow edit"},
+    {"t": 950, "in": "up 48", "out": "swallow"},
+    {"t": 1200, "in": "up 61", "out": "swallow"}
+  ]},
+  {"name": "keys-swallowed-while-recording", "steps": [
+    {"t": 0, "in": "down 61 opt", "out": "swallow arm"},
+    {"t": 300, "in": "elapsed", "out": "start"},
+    {"t": 500, "in": "down 0 opt", "out": "swallow"},
+    {"t": 520, "in": "down 0 opt repeat", "out": "swallow"},
+    {"t": 600, "in": "up 0", "out": "swallow"},
+    {"t": 900, "in": "up 61", "out": "swallow release"}
+  ]},
+  {"name": "other-key-already-down", "steps": [
+    {"t": 0, "in": "down 0", "out": "pass"},
+    {"t": 50, "in": "down 61 opt", "out": "pass"},
+    {"t": 400, "in": "up 0", "out": "pass"},
+    {"t": 450, "in": "up 61", "out": "pass"}
+  ]},
+  {"name": "left-option-held", "steps": [
+    {"t": 0, "in": "down 58 opt", "out": "pass"},
+    {"t": 50, "in": "down 61 opt", "out": "pass"},
+    {"t": 400, "in": "elapsed", "out": "none"},
+    {"t": 500, "in": "up 61", "out": "pass"},
+    {"t": 550, "in": "up 58", "out": "pass"}
+  ]},
+  {"name": "shift-held", "steps": [
+    {"t": 0, "in": "down 56 shift", "out": "pass"},
+    {"t": 50, "in": "down 61 shift opt", "out": "pass"},
+    {"t": 500, "in": "up 61", "out": "pass"},
+    {"t": 550, "in": "up 56", "out": "pass"}
+  ]},
+  {"name": "modifier-during-pending", "steps": [
+    {"t": 0, "in": "down 61 opt", "out": "swallow arm"},
+    {"t": 100, "in": "down 56 shift opt", "out": "flush pass"},
+    {"t": 300, "in": "elapsed", "out": "none"},
+    {"t": 400, "in": "up 56", "out": "pass"},
+    {"t": 450, "in": "up 61", "out": "pass"}
+  ]},
+  {"name": "pointer-during-pending", "steps": [
+    {"t": 0, "in": "down 61 opt", "out": "swallow arm"},
+    {"t": 100, "in": "pointer", "out": "flush pass"},
+    {"t": 300, "in": "elapsed", "out": "none"},
+    {"t": 400, "in": "up 61", "out": "pass"}
+  ]},
+  {"name": "scroll-during-pending", "steps": [
+    {"t": 0, "in": "down 61 opt", "out": "swallow arm"},
+    {"t": 100, "in": "scroll", "out": "flush pass"},
+    {"t": 500, "in": "up 61", "out": "pass"}
+  ]},
+  {"name": "pointer-while-recording", "steps": [
+    {"t": 0, "in": "down 61 opt", "out": "swallow arm"},
+    {"t": 300, "in": "elapsed", "out": "start"},
+    {"t": 800, "in": "pointer", "out": "pass cancel"},
+    {"t": 900, "in": "up 61", "out": "swallow"}
+  ]},
+  {"name": "scroll-while-recording", "steps": [
+    {"t": 0, "in": "down 61 opt", "out": "swallow arm"},
+    {"t": 300, "in": "elapsed", "out": "start"},
+    {"t": 800, "in": "scroll", "out": "pass"},
+    {"t": 900, "in": "up 61", "out": "swallow release"}
+  ]},
+  {"name": "stale-timer", "steps": [
+    {"t": 0, "in": "down 61 opt", "out": "swallow arm"},
+    {"t": 100, "in": "up 61", "out": "flush pass"},
+    {"t": 200, "in": "down 61 opt", "out": "swallow arm"},
+    {"t": 300, "in": "elapsed", "out": "none"},
+    {"t": 500, "in": "elapsed", "out": "start"},
+    {"t": 700, "in": "up 61", "out": "swallow release"}
+  ]},
+  {"name": "resign-pending", "steps": [
+    {"t": 0, "in": "down 61 opt", "out": "swallow arm"},
+    {"t": 100, "in": "resign", "out": "none"},
+    {"t": 200, "in": "up 61", "out": "swallow"}
+  ]},
+  {"name": "resign-recording", "steps": [
+    {"t": 0, "in": "down 61 opt", "out": "swallow arm"},
+    {"t": 300, "in": "elapsed", "out": "start"},
+    {"t": 800, "in": "resign", "out": "cancel"},
+    {"t": 900, "in": "up 61", "out": "swallow"}
+  ]},
+  {"name": "resign-then-fresh-press", "steps": [
+    {"t": 0, "in": "down 61 opt", "out": "swallow arm"},
+    {"t": 300, "in": "elapsed", "out": "start"},
+    {"t": 800, "in": "resign", "out": "cancel"},
+    {"t": 5000, "in": "down 61 opt", "out": "swallow arm"},
+    {"t": 5100, "in": "up 61", "out": "flush pass"}
+  ]},
+  {"name": "ended-then-up", "steps": [
+    {"t": 0, "in": "down 61 opt", "out": "swallow arm"},
+    {"t": 300, "in": "elapsed", "out": "start"},
+    {"t": 60300, "in": "ended", "out": "none"},
+    {"t": 60400, "in": "down 0 opt", "out": "swallow"},
+    {"t": 60450, "in": "up 0", "out": "swallow"},
+    {"t": 60500, "in": "up 61", "out": "swallow"}
+  ]},
+  {"name": "not-ready", "steps": [
+    {"t": 0, "in": "down 61 opt", "out": "pass", "ready": false},
+    {"t": 400, "in": "up 61", "out": "pass"}
+  ]},
+  {"name": "off", "hotkey": "off", "steps": [
+    {"t": 0, "in": "down 61 opt", "out": "pass"},
+    {"t": 400, "in": "up 61", "out": "pass"}
+  ]},
+  {"name": "fn-hold", "hotkey": {"kind": "hold_modifier", "key_code": 63}, "steps": [
+    {"t": 0, "in": "down 63 fn", "out": "swallow arm"},
+    {"t": 300, "in": "elapsed", "out": "start"},
+    {"t": 900, "in": "up 63", "out": "swallow release"}
+  ]},
+  {"name": "combo-hold", "hotkey": {"kind": "hold_combo", "key_code": 49, "modifiers": 786432}, "steps": [
+    {"t": 0, "in": "down 59 ctrl", "out": "pass"},
+    {"t": 20, "in": "down 58 ctrl opt", "out": "pass"},
+    {"t": 40, "in": "down 49 ctrl opt", "out": "swallow start"},
+    {"t": 300, "in": "down 49 ctrl opt repeat", "out": "swallow"},
+    {"t": 500, "in": "up 59", "out": "pass"},
+    {"t": 520, "in": "up 58", "out": "pass"},
+    {"t": 900, "in": "up 49", "out": "swallow release"}
+  ]},
+  {"name": "combo-wrong-mods", "hotkey": {"kind": "hold_combo", "key_code": 49, "modifiers": 786432}, "steps": [
+    {"t": 0, "in": "down 59 ctrl", "out": "pass"},
+    {"t": 20, "in": "down 49 ctrl", "out": "pass"},
+    {"t": 80, "in": "up 49", "out": "pass"},
+    {"t": 90, "in": "up 59", "out": "pass"}
+  ]},
+  {"name": "combo-esc", "hotkey": {"kind": "hold_combo", "key_code": 49, "modifiers": 786432}, "steps": [
+    {"t": 0, "in": "down 59 ctrl", "out": "pass"},
+    {"t": 20, "in": "down 58 ctrl opt", "out": "pass"},
+    {"t": 40, "in": "down 49 ctrl opt", "out": "swallow start"},
+    {"t": 300, "in": "down 53 ctrl opt", "out": "swallow cancel"},
+    {"t": 350, "in": "up 53", "out": "swallow"},
+    {"t": 400, "in": "up 49", "out": "swallow"},
+    {"t": 450, "in": "up 58", "out": "pass"},
+    {"t": 460, "in": "up 59", "out": "pass"}
+  ]}
+]
