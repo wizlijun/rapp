@@ -1408,7 +1408,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-cli"
-version = "0.14.11"
+version = "0.14.12"
 dependencies = [
  "anyhow",
  "rapp-net",
@@ -1418,7 +1418,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-client-core"
-version = "0.14.11"
+version = "0.14.12"
 dependencies = [
  "anyhow",
  "flate2",
@@ -1429,7 +1429,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-client-gtk"
-version = "0.14.11"
+version = "0.14.12"
 dependencies = [
  "anyhow",
  "gtk4",
@@ -1440,7 +1440,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-conn"
-version = "0.14.11"
+version = "0.14.12"
 dependencies = [
  "anyhow",
  "data-encoding",
@@ -1459,7 +1459,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-host-linux"
-version = "0.14.11"
+version = "0.14.12"
 dependencies = [
  "anyhow",
  "flate2",
@@ -1476,7 +1476,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-hub"
-version = "0.14.11"
+version = "0.14.12"
 dependencies = [
  "anyhow",
  "quinn",
@@ -1494,7 +1494,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-hub-ffi"
-version = "0.14.11"
+version = "0.14.12"
 dependencies = [
  "rapp-hub",
  "rapp-net",
@@ -1504,7 +1504,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-net"
-version = "0.14.11"
+version = "0.14.12"
 dependencies = [
  "anyhow",
  "if-addrs",
@@ -1523,7 +1523,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-relay"
-version = "0.14.11"
+version = "0.14.12"
 dependencies = [
  "anyhow",
  "data-encoding",
@@ -1540,7 +1540,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-service"
-version = "0.14.11"
+version = "0.14.12"
 dependencies = [
  "anyhow",
  "libc",
@@ -1560,7 +1560,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-term"
-version = "0.14.11"
+version = "0.14.12"
 dependencies = [
  "alacritty_terminal",
  "anyhow",
@@ -1575,7 +1575,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-testkit"
-version = "0.14.11"
+version = "0.14.12"
 dependencies = [
  "anyhow",
  "quinn",
@@ -1597,7 +1597,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-update"
-version = "0.14.11"
+version = "0.14.12"
 dependencies = [
  "anyhow",
  "rapp-net",
@@ -1609,7 +1609,7 @@ dependencies = [
 
 [[package]]
 name = "rapp-wire"
-version = "0.14.11"
+version = "0.14.12"
 dependencies = [
  "anyhow",
  "data-encoding",
