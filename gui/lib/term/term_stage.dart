@@ -1,5 +1,7 @@
 // The stage of a terminal session: draws the pane, asks for the size the stage can show (Z1), scrolls the
 // history (H1, H2), selects and copies (C1–C5), opens links (L1) and, with focus, sends the keyboard (K1–K6).
+// Fingers mean what they mean on the app picture (the shared recognizer); on an iPad they also pinch-zoom the
+// grid, purely on B: bigger cells, panned and clipped. A never hears of the zoom (pinch-zoom spec §6).
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
@@ -12,6 +14,8 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
 import '../embed/remote_session.dart';
+import '../embed/touch_gestures.dart';
+import '../embed/zoom_view.dart';
 import '../ios_channel.dart';
 import '../platform_caps.dart';
 import '../ui/keep_focus.dart';
@@ -63,7 +67,14 @@ const _copiedFor = Duration(seconds: 1);
 const _echoWait = Duration(milliseconds: 300);
 
 class TermStage extends StatefulWidget {
-  const TermStage({super.key, required this.state, required this.session, required this.port, this.frozen = false});
+  const TermStage({
+    super.key,
+    required this.state,
+    required this.session,
+    required this.port,
+    this.frozen = false,
+    this.keyboard = 0,
+  });
 
   final MainState state;
   final RemoteSession session;
@@ -72,13 +83,17 @@ class TermStage extends StatefulWidget {
   /// A network drop: the picture stays for reading and copying, but no input goes out.
   final bool frozen;
 
+  /// How far the soft keyboard reaches up over the stage's bottom: a zoomed grid can go up over it, and a drag
+  /// past its top edge scrolls.
+  final double keyboard;
+
   @override
   State<TermStage> createState() => _TermStageState();
 }
 
 typedef _View = ({int window, int cols, int rows, bool fit});
 
-class _TermStageState extends State<TermStage> with SingleTickerProviderStateMixin {
+class _TermStageState extends State<TermStage> with SingleTickerProviderStateMixin implements TouchSink {
   final _focus = FocusNode(debugLabel: 'term-stage');
   final _cache = TermRowCache();
   TermModel? _model;
@@ -99,6 +114,22 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
   /// The metrics the grid is drawn with: the font at the size that fits the pane to the stage. Hit-testing
   /// and scrolling use them too.
   late TermMetrics _drawn;
+
+  /// [_drawn] times the zoom: what the grid is drawn, hit-tested and scrolled with (at z 1, [_drawn] itself).
+  late TermMetrics _zoomed;
+
+  /// From the last layout: the stage's size, the grid at z 1 ([_drawn]'s cells from the stage's top left), and
+  /// where the zoom puts it on the stage.
+  Size _stage = Size.zero;
+  Rect _fit = Rect.zero;
+  Rect _zfit = Rect.zero;
+
+  /// The shown pane's zoom (its session keeps one per window); null before the session has a pane.
+  ZoomView? _zoom;
+  int? _zoomWindow;
+
+  /// Touch: fingers turned into presses, drags, scrolls and the zoom's pans and pinches (T1–T8).
+  late final _touch = TouchGestures(sink: this, zoom: () => _zoom?.z ?? 1, inside: (_) => true, zoomable: pinchZoom);
 
   /// Metrics measured at other font sizes since the look last changed: measuring on every build is too slow.
   final _sized = <double, TermMetrics>{};
@@ -159,6 +190,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     _focusSeen = widget.state.termFocusTick;
     widget.state.addListener(_onState);
     _bind();
+    _bindZoom();
     _focusIfWanted();
   }
 
@@ -179,6 +211,12 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
       _sent = null;
       _bind();
     }
+    if (!identical(old.session, widget.session)) _bindZoom(force: true);
+    if (!old.frozen && widget.frozen) {
+      // Gestures in flight at the drop end here.
+      _touch.reset();
+      _release(_dragPointer);
+    }
   }
 
   @override
@@ -187,6 +225,8 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     widget.state.removeListener(_onState);
     HardwareKeyboard.instance.removeHandler(_onKeys);
     _unbind();
+    _zoom?.removeListener(_onZoom);
+    _touch.dispose();
     _fling.dispose();
     _focus.dispose();
     _cache.dispose();
@@ -225,7 +265,26 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
   }
 
   /// The window or the model may have changed: build again to send the view.
-  void _onSession() => setState(_bind);
+  void _onSession() => setState(() {
+        _bind();
+        _bindZoom();
+      });
+
+  /// Follows the shown pane's zoom; [force]: the session changed, so its zooms are other ones.
+  void _bindZoom({bool force = false}) {
+    final win = widget.session.currentWindow;
+    if (!force && win == _zoomWindow) return;
+    // A press held back belongs to the pane it landed on; never press another.
+    _touch.dropPending();
+    _zoom?.removeListener(_onZoom);
+    _zoomWindow = win;
+    _zoom = win == null ? null : (widget.session.zoomOf(win)..addListener(_onZoom));
+  }
+
+  /// Laid out again: a pan only moves the grid, a new z brings new metrics (and so a repaint) with it.
+  void _onZoom() {
+    if (mounted) setState(() {});
+  }
 
   void _onShift(int d) {
     final m = _model, s = _sel, a = _anchor;
@@ -340,25 +399,29 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     if (e is! PointerScrollEvent) return;
     GestureBinding.instance.pointerSignalResolver.register(e, (ev) {
       _stopFling();
-      _scroll(-(ev as PointerScrollEvent).scrollDelta.dy / _drawn.cellH);
+      _scroll(-(ev as PointerScrollEvent).scrollDelta.dy / _zoomed.cellH);
     });
   }
 
+  // A trackpad's pinch is the recognizer's (the zoom); its pan scrolls, as ever.
   void _onPanStart(PointerPanZoomStartEvent e) {
     _stopFling();
+    _touch.panZoomStart(e);
     _velocity = VelocityTracker.withKind(PointerDeviceKind.trackpad);
   }
 
   void _onPanUpdate(PointerPanZoomUpdateEvent e) {
+    _touch.panZoomUpdate(e);
     _velocity?.addPosition(e.timeStamp, e.pan);
-    _scroll(e.panDelta.dy / _drawn.cellH);
+    _scroll(e.panDelta.dy / _zoomed.cellH);
   }
 
   void _onPanEnd(PointerPanZoomEndEvent e) {
+    _touch.panZoomEnd(e);
     final m = _model, vt = _velocity;
     _velocity = null;
     if (m == null || vt == null || m.alt) return;
-    final v = vt.getVelocity().pixelsPerSecond.dy / _drawn.cellH;
+    final v = vt.getVelocity().pixelsPerSecond.dy / _zoomed.cellH;
     if (v.abs() < 1) return;
     _sim = FrictionSimulation(0.135, m.offset, v);
     _fling.start();
@@ -383,11 +446,12 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
 
   /// The cell under [local] (stage coordinates), clamped into the rows in view.
   TermPoint? _cellAt(Offset local) {
-    final m = _model;
-    if (m == null || m.screen.isEmpty || _drawn.cellW <= 0 || _drawn.cellH <= 0) return null;
+    final m = _model, c = _zoomed;
+    if (m == null || m.screen.isEmpty || c.cellW <= 0 || c.cellH <= 0) return null;
+    final at = local - _zfit.topLeft;
     final top = (-m.offset).floor();
-    final int y = (local.dy / _drawn.cellH - m.offset).floor().clamp(top, math.max(top, m.rows - 1));
-    final int x = (local.dx / _drawn.cellW).floor().clamp(0, math.max(0, m.cols - 1));
+    final int y = (at.dy / c.cellH - m.offset).floor().clamp(top, math.max(top, m.rows - 1));
+    final int x = (at.dx / c.cellW).floor().clamp(0, math.max(0, m.cols - 1));
     return TermPoint(y, x);
   }
 
@@ -410,24 +474,29 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     _focus.requestFocus();
     widget.state.blurPicture();
     _stopFling();
+    if (e.kind == PointerDeviceKind.touch) return _touch.down(e);
     if (e.buttons != kPrimaryButton) return;
+    _pressAt(e.localPosition, e.timeStamp, e.pointer);
+  }
+
+  /// A primary press at [local]: a ⌘/Ctrl link opens, else a click (counted) starts or extends a selection.
+  /// True when [pointer] now drags it.
+  bool _pressAt(Offset local, Duration time, int pointer) {
     final m = _model;
-    final p = _cellAt(e.localPosition);
-    if (m == null || p == null) return;
+    final p = _cellAt(local);
+    if (m == null || p == null) return false;
     final link = _linkKey ? _linkAt(p) : null;
     if (link != null) {
       openUrl(link.url);
-      return;
+      return false;
     }
     final last = _lastClick;
-    final again = last != null &&
-        e.timeStamp - last <= _multiClick &&
-        (e.localPosition - _lastClickAt).distance <= _multiClickSlop;
+    final again = last != null && time - last <= _multiClick && (local - _lastClickAt).distance <= _multiClickSlop;
     _clicks = again ? (_clicks == 3 ? 1 : _clicks + 1) : 1;
-    _lastClick = e.timeStamp;
-    _lastClickAt = e.localPosition;
-    _dragPointer = e.pointer;
-    _dragAt = e.localPosition;
+    _lastClick = time;
+    _lastClickAt = local;
+    _dragPointer = pointer;
+    _dragAt = local;
     _dragBlock = HardwareKeyboard.instance.isAltPressed;
     final keys = HardwareKeyboard.instance;
     switch (_clicks) {
@@ -453,15 +522,22 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
         _setSel(select(a, b, m.lineAt));
     }
     setState(() => _ver++);
+    return true;
   }
 
   void _onMove(PointerMoveEvent e) {
-    if (e.pointer != _dragPointer || _clicks != 1) return;
-    _dragAt = e.localPosition;
+    if (e.kind == PointerDeviceKind.touch) return _touch.move(e);
+    _dragTo(e.localPosition, e.pointer);
+  }
+
+  void _dragTo(Offset local, int pointer) {
+    if (pointer != _dragPointer || _clicks != 1) return;
+    _dragAt = local;
     _extendTo(_dragAt);
-    // Past the top or bottom edge: scroll a row every 50 ms while the button is held (C1).
-    final h = context.size?.height ?? 0;
-    final out = _dragAt.dy < 0 || _dragAt.dy > h;
+    // Past the top or bottom edge of the grid seen (above the soft keyboard): scroll a row every 50 ms while the
+    // button is held (C1).
+    final seen = Rect.fromLTWH(0, 0, _stage.width, _stage.height - widget.keyboard).intersect(_zfit);
+    final out = _dragAt.dy < seen.top || _dragAt.dy > seen.bottom;
     if (!out) {
       _edgeTimer?.cancel();
       _edgeTimer = null;
@@ -485,11 +561,56 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
   }
 
   void _onUp(PointerEvent e) {
-    if (e.pointer != _dragPointer) return;
+    if (e.kind == PointerDeviceKind.touch) return _touch.up(e);
+    _release(e.pointer);
+  }
+
+  void _release(int? pointer) {
+    if (pointer == null || pointer != _dragPointer) return;
     _dragPointer = null;
     _edgeTimer?.cancel();
     _edgeTimer = null;
   }
+
+  // ---- touch (the recognizer's sink) ----
+
+  @override
+  bool press(PointerDownEvent e) => _pressAt(e.localPosition, e.timeStamp, e.pointer);
+
+  @override
+  void drag(PointerMoveEvent e) => _dragTo(e.localPosition, e.pointer);
+
+  @override
+  void release(Offset at, PointerEvent e) => _release(e.pointer);
+
+  /// Two fingers scroll the history as a trackpad does.
+  @override
+  void scroll(Offset centre, Offset delta) => _scroll(delta.dy / _zoomed.cellH);
+
+  /// The terminal has no right click.
+  @override
+  void rightTap(Offset at) {}
+
+  /// T7: a second finger takes the keys.
+  @override
+  void twoDown(Offset centre) => _focus.requestFocus();
+
+  @override
+  void pan(Offset delta) {
+    if (_fit.isEmpty) return;
+    _zoom?.panBy(delta, _fit, _stage, keyboard: widget.keyboard);
+  }
+
+  @override
+  void zoom(double z, Offset focal) {
+    if (_fit.isEmpty) return;
+    // A pinch back to where it started lands on exactly 1 (not a hair above it): unzoomed again.
+    _zoom?.zoomTo((z - 1).abs() < 1e-9 ? 1 : z, focal, _fit, _stage, keyboard: widget.keyboard);
+  }
+
+  /// Nothing to tell A: the zoom is B's alone.
+  @override
+  void settled() {}
 
   void _onHover(PointerHoverEvent e) {
     _hover = e.localPosition;
@@ -674,6 +795,13 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
       // stage, up as well as down, and drawn at that size rather than stretched.
       final k = gridScale(w: w, h: h, gridW: gridW, gridH: gridH, up: !widget.state.prefs.termFit);
       _drawn = shown ? _metricsAt(math.max(4.0, _metrics.style.fontSize! * k), m.cols, m.rows, w, h) : _metrics;
+      // The zoom (B's alone, never in the view asked for): the grid drawn at a bigger font, panned and clipped.
+      _stage = Size(w, h);
+      _fit = shown ? Rect.fromLTWH(0, 0, m.cols * _drawn.cellW, m.rows * _drawn.cellH) : Rect.zero;
+      final zoom = _zoom;
+      _zfit = zoom == null || !shown ? _fit : zoom.zfit(_fit, _stage, keyboard: widget.keyboard);
+      final z = shown ? zoom?.z ?? 1.0 : 1.0;
+      _zoomed = z == 1 ? _drawn : _measured(_drawn.style.fontSize! * z);
 
       if (m != null && _linksVer != _ver) {
         _linksVer = _ver;
@@ -693,7 +821,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
             ? null
             : TermPainter(
                 model: m,
-                metrics: _drawn,
+                metrics: _zoomed,
                 palette: _palette,
                 cache: _cache,
                 version: _ver,
@@ -721,7 +849,11 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
             _hover = null;
             _updateHand();
           },
-          child: grid,
+          child: ClipRect(
+            child: Stack(children: [
+              Positioned(left: _zfit.left, top: _zfit.top, right: 0, bottom: 0, child: grid),
+            ]),
+          ),
         ),
       );
 

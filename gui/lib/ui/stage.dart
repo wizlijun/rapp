@@ -129,6 +129,7 @@ class Stage extends StatelessWidget {
               session: rs,
               port: state.termPort!,
               frozen: rec?.frozen == true,
+              keyboard: keyboardLift(MediaQuery.of(context), fullscreen: fullscreen),
             ));
         } else if (rec != null && (rec.phase == Phase.disconnected || rec.lastSid != null)) {
           // Dead, or reconnecting until the new picture swaps in (R10): the old frame under stripes.
