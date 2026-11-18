@@ -14,8 +14,8 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
   /// How long after `stop` this side gives up on the recogniser and sends `final` with what it has.
   /// Dart waits 1 s, so this lands just before.
   private static let finalGrace: TimeInterval = 0.9
-  /// Used when the recogniser does not support `Locale.current`.
-  private static let fallbackLocale = Locale(identifier: "zh-CN")
+  /// The languages to try, best first (see `SpeechLocales`: not `Locale.current`, which is English here).
+  private static var locales: [Locale] { SpeechLocales.candidates(Locale.preferredLanguages) }
 
   private let channel: FlutterMethodChannel
   /// The recording in progress: live, or stopped and waiting for its final text.
@@ -258,8 +258,10 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
   @MainActor
   private func startAnalyzer(_ gen: Int) async -> String? {
     guard SpeechTranscriber.isAvailable else { return nil }
-    var found = await SpeechTranscriber.supportedLocale(equivalentTo: .current)
-    if found == nil { found = await SpeechTranscriber.supportedLocale(equivalentTo: Self.fallbackLocale) }
+    var found: Locale?
+    for candidate in Self.locales where found == nil {
+      found = await SpeechTranscriber.supportedLocale(equivalentTo: candidate)
+    }
     guard let locale = found else { return nil }
     let transcriber = SpeechTranscriber(
       locale: locale, transcriptionOptions: [], reportingOptions: [.volatileResults], attributeOptions: [])
@@ -356,7 +358,7 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
   // MARK: - Below iOS 26: SFSpeechRecognizer
 
   private func startRecognizer() -> String {
-    guard let recognizer = SFSpeechRecognizer(locale: .current) ?? SFSpeechRecognizer(locale: Self.fallbackLocale),
+    guard let recognizer = Self.locales.lazy.compactMap({ SFSpeechRecognizer(locale: $0) }).first,
           recognizer.isAvailable else { return "unavailable" }
     let request = SFSpeechAudioBufferRecognitionRequest()
     request.shouldReportPartialResults = true
