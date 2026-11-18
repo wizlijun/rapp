@@ -83,12 +83,13 @@ void main() {
     });
   });
 
-  test('linux sends no voice flag', () {
+  test('linux enables local speech and sends the voice flag', () {
     env(TargetPlatform.linux, (a, port, st) {
       port.emit(WindowsEvent(1, [rw(7)]));
       st.focusPicture(1);
-      expect(lastFocus(port).containsKey('voice'), false);
-      expect(st.voice, isNull);
+      expect(lastFocus(port)['voice'], true);
+      expect(st.voice, isNotNull);
+      expect(st.voice!.finalWait, const Duration(seconds: 90));
     });
   });
 

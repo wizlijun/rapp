@@ -682,3 +682,14 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [x] [v0.14.12 Release](https://github.com/wizlijun/rapp/releases/tag/v0.14.12) 已补齐 Linux 安装包、便携包和 SHA256SUMS；三个附件大小/SHA256 与本地一致，原 macOS 资产 ID/大小/摘要不变。网站备用下载快照已更新为两平台 0.14.12。
 - [ ] 更新并部署 `rapphub.com`：站点构建和 8 项下载选择测试通过；Wrangler 未登录；有限 scope 的浏览器 OAuth 等待超时，已改用设备授权入口等待用户登录。站点部署 dry-run 通过；不能把更新仓库中的备用快照当作网站已部署。
 - 本轮尚未新增 Linux 语音后端，未安装新包、未重启已安装服务，也未进行 macOS/iOS 对端及物理桌面输入验收。
+
+## Linux 0.14.13 语音能力对齐（2026-11-18）
+
+- [x] 按用户“能力对齐”要求扩展 Linux 范围，新增本地 `rapp-speech`，复用桌面按钮、发送/编辑/取消、输入历史和热键 gate；应用画面与文字终端均接入，首次下载固定摘要模型，录音仅驻留内存。
+- [x] 主窗口失焦/后台、取消、断开、切会话停止录音；采集子进程绑定父进程死亡信号。普通 Alt 组合键保留，密码焦点不启动画面语音快捷键；Linux 提示与快捷键标签不再指向 Apple 设置。
+- [x] Flutter 全量 2417 项通过、15 项跳过；后续主窗口失焦/快捷键补充及相关回归 77 项通过。analyze 无 error/warning，124 项既有 material.dart 弃用 info。Rust 新 worker 2 项单测通过。
+- [x] 正式优化 worker 使用官方 base 模型和公开 JFK PCM 完成真实识别；静音返回空文本。假的 parec 验证 stop、cancel、SIGKILL 崩溃后三种采集进程退出；未调用用户麦克风。模型实际下载摘要匹配固定 SHA256。
+- [x] 构建路径/旧 SDK 拒绝测试通过；打包新增 worker、libpulse 依赖和上游许可。语音后端的 CPU 目标明确为 SSE4.2，禁用构建机专有指令和 AVX。
+- [ ] 从干净提交构建并验收 0.14.13 安装包及便携包，推送 main，发布 Linux 附件和网站下载快照。
+- [ ] Cloudflare 静态部署仍受登录状态阻塞；需完成授权后实际部署与线上核验。不得把 GitHub 实时下载可见当作静态文件已部署。
+- 验收边界：未用物理麦克风测试中文/多语言准确率，也未新增 macOS/iOS 真机对端验收；详情见 [Linux 语音规格](../docs/superpowers/specs/2026-11-18-rapp-linux-voice-design.md)。

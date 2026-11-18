@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/linux_session_port.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/embed/session_protocol.dart';
+import 'package:rapp/embed/voice_key_gate.dart';
 
 Uint8List u32(int n) => (ByteData(4)..setUint32(0, n, Endian.little)).buffer.asUint8List();
 Uint8List u16(int n) => (ByteData(2)..setUint16(0, n, Endian.little)).buffer.asUint8List();
@@ -29,6 +30,57 @@ Future<SessionEvent> nextWhere(StreamIterator<SessionEvent> it, bool Function(Se
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  testWidgets('Linux picture voice holds cancel, edit and preserve ordinary Alt combinations', (t) async {
+    final port = LinuxSessionPort('unused', framePresented: () async {});
+    final proc = (await t.runAsync(() => Process.start('cat', const [])))!;
+    port.seedSessionForTest(3, proc);
+    final phases = <VoiceKeyPhase>[];
+    final sub = (await t.runAsync(() async => port.events.where((e) => e is VoiceKeyEvent).listen((e) => phases.add((e as VoiceKeyEvent).phase))))!;
+    bool route(KeyEvent e) => port.handleKeyEvent(3, e);
+    HardwareKeyboard.instance.addHandler(route);
+    await port.invoke('picture_focus', {'sid': 3, 'voice': true});
+    // A normal Alt+B flushes the delayed Alt down before B and sends both releases.
+    await t.sendKeyDownEvent(LogicalKeyboardKey.altRight);
+    await t.sendKeyDownEvent(LogicalKeyboardKey.keyB);
+    await t.sendKeyUpEvent(LogicalKeyboardKey.keyB);
+    await t.sendKeyUpEvent(LogicalKeyboardKey.altRight);
+    await t.pump(const Duration(milliseconds: 400));
+    expect(phases, isEmpty);
+    for (final decision in [LogicalKeyboardKey.escape, LogicalKeyboardKey.tab]) {
+      await t.sendKeyDownEvent(LogicalKeyboardKey.altRight);
+      await t.pump(const Duration(milliseconds: 301));
+      expect(phases.last, VoiceKeyPhase.start);
+      await t.sendKeyEvent(decision);
+      await t.sendKeyUpEvent(LogicalKeyboardKey.altRight);
+      await t.pump();
+      expect(phases.last, decision == LogicalKeyboardKey.escape ? VoiceKeyPhase.cancel : VoiceKeyPhase.edit);
+    }
+    // Losing permission to start before the hold deadline never starts the microphone.
+    final before = phases.length;
+    await t.sendKeyDownEvent(LogicalKeyboardKey.altRight);
+    await port.invoke('picture_focus', {'sid': 3});
+    await t.pump(const Duration(milliseconds: 400));
+    await t.sendKeyUpEvent(LogicalKeyboardKey.altRight);
+    expect(phases.length, before);
+    // Focus loss during an active hold cancels it.
+    await port.invoke('picture_focus', {'sid': 3, 'voice': true});
+    await t.sendKeyDownEvent(LogicalKeyboardKey.altRight);
+    await t.pump(const Duration(milliseconds: 301));
+    await port.invoke('picture_focus', {'sid': null});
+    await t.pump();
+    expect(phases.last, VoiceKeyPhase.cancel);
+    await t.sendKeyUpEvent(LogicalKeyboardKey.altRight);
+    HardwareKeyboard.instance.removeHandler(route);
+    await t.runAsync(sub.cancel);
+    final sent = await t.runAsync(() async {
+      await proc.stdin.close();
+      return utf8.decode(await proc.stdout.expand((b) => b).toList());
+    });
+    final keys = sent!.trim().split('\n').map((l) => jsonDecode(l) as Map).where((m) => m['cmd'] == 'key');
+    expect(keys.map((m) => (m['keyCode'], m['down'])).toList(), [(61, true), (11, true), (11, false), (61, false)]);
+    port.dispose();
+    await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+  }, skip: !Platform.isLinux);
   test('side connections track the strict Rust protocol version', () {
     final source = File('../rust/client-core/src/protocol.rs').readAsStringSync();
     final version = RegExp(r'pub const VERSION: u8 = ([0-9]+);').firstMatch(source)!;

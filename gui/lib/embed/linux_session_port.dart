@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import 'session_port.dart';
+import 'voice_key_gate.dart';
 import 'linux_transfer.dart';
 import 'linux_clipboard.dart';
 import '../paths.dart';
@@ -54,6 +55,41 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
   final _copies = <int, LinuxCopy>{};
   int _nextCopy = 1;
   Object? _focused;
+  final _voiceGate = VoiceKeyGate();
+  final _voiceClock = Stopwatch()..start();
+  Timer? _voiceTimer;
+  KeyEvent? _voiceHeld;
+  bool _voiceReady = false;
+
+  VoiceGateStep _voiceFeed(VoiceGateInput input, {KeyEvent? event, int? ms}) {
+    final sid = _focused;
+    final session = _sessions[sid];
+    final step = _voiceGate.handle(input, ms: ms ?? _voiceClock.elapsedMilliseconds,
+        ready: _voiceReady && session != null && !session.secure && !session.closed && !session.disconnected);
+    if (step.flush) {
+      final held = _voiceHeld;
+      _voiceHeld = null;
+      _voiceTimer?.cancel();
+      if (sid != null && held != null) _remoteKey(sid, held);
+    }
+    if (step.arm && event != null) {
+      _voiceHeld = event;
+      final at = _voiceClock.elapsedMilliseconds;
+      _voiceTimer?.cancel();
+      _voiceTimer = Timer(const Duration(milliseconds: 301), () {
+        _voiceFeed(VoiceGateInput.elapsed, ms: at + 301);
+      });
+    }
+    if (input == VoiceGateInput.resign) {
+      _voiceTimer?.cancel();
+      _voiceHeld = null;
+    }
+    if (sid != null && step.voice != null) {
+      if (step.voice == VoiceKeyPhase.start) _voiceHeld = null;
+      _emit(VoiceKeyEvent(sid, step.voice!));
+    }
+    return step;
+  }
 
   /// A letter on the focused picture opens the writing panel with it (`picture_focus` `compose`).
   bool _compose = false;
@@ -96,6 +132,9 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
   void _emit(SessionEvent e) {
     if (_disposed) return;
     final s = _sessions[e.sid];
+    if (e.sid == _focused && ((e is SecureFocusEvent && e.on) || e is DisconnectedEvent)) {
+      _voiceFeed(VoiceGateInput.resign);
+    }
     if (_native && s?.detached == true) {
       if (e is SecureFocusEvent) {
         _nativeCall('secure_focus', {'sid': e.sid, 'on': e.on});
@@ -243,6 +282,7 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
   }
 
   void _releaseFocus({bool clear = true}) {
+    _voiceFeed(VoiceGateInput.resign);
     final s = _sessions[_focused];
     if (s != null) {
       for (final code in s.held.toList()) {
@@ -263,6 +303,18 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
         event.logicalKey == LogicalKeyboardKey.f11) {
       return false;
     }
+    final code = macKeyCode(event.physicalKey);
+    if (code != null) {
+      final input = event is KeyUpEvent ? VoiceGateInput.up(code)
+          : VoiceGateInput.down(code, macFlags(HardwareKeyboard.instance), repeat: event is KeyRepeatEvent);
+      if (!_voiceFeed(input, event: event).pass) return true;
+    }
+    return _remoteKey(sid, event);
+  }
+
+  bool _remoteKey(Object sid, KeyEvent event) {
+    final s = _sessions[sid];
+    if (s == null || s.closed || s.disconnected) return false;
     final keyboard = HardwareKeyboard.instance;
     // Super belongs to the Linux desktop. Ctrl maps to the remote Mac's Command.
     if (keyboard.isMetaPressed) return false;
@@ -391,13 +443,29 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
         return false;
       }
     }
+    if (method == 'set_voice_hotkey') {
+      final hotkey = VoiceHotkey.fromJson(args['hotkey']);
+      if (hotkey != _voiceGate.hotkey) {
+        _voiceTimer?.cancel();
+        _voiceHeld = null;
+        final phase = _voiceGate.setHotkey(hotkey).voice;
+        if (phase != null && _focused != null) _emit(VoiceKeyEvent(_focused!, phase));
+      }
+      return null;
+    }
     final sid = args['sid'];
+    if (method == 'voice_end') {
+      if (sid == _focused) _voiceFeed(VoiceGateInput.ended);
+      return null;
+    }
     if (method == 'picture_focus') {
       if (_focused != sid) {
         _releaseFocus();
         _swallowed.clear(); // their releases now go elsewhere
       }
+      if (_voiceReady && args['voice'] != true) _voiceFeed(VoiceGateInput.resign);
       _focused = sid;
+      _voiceReady = sid != null && args['voice'] == true;
       _compose = sid != null && args['compose'] == true;
       _composing = false;
       if (sid != null) _dropSid = sid;
@@ -548,9 +616,12 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
         _dropSid = sid;
         s.send({'cmd': method, ...args});
       case 'mouse':
+        if (sid == _focused && args['kind'] == 'down') _voiceFeed(VoiceGateInput.pointer);
         if (args['kind'] == 'down') s.selected = args['window'] as int;
         s.send({'cmd': method, ...args});
       case 'scroll':
+        if (sid == _focused) _voiceFeed(VoiceGateInput.scroll);
+        s.send({'cmd': method, ...args});
       case 'key':
       case 'resize':
       case 'menu_pick':

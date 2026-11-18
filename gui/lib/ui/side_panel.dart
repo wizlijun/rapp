@@ -254,7 +254,7 @@ class _Footer extends StatelessWidget {
                 state.setAutoSaveTraffic),
             toggle(const Key('input-history'), '记下写作面板发出去的话', state.prefs.inputHistory, state.setInputHistory,
                 note: '存在数据目录的 inputs/ 里，会随 git 同步'),
-            if (defaultTargetPlatform == TargetPlatform.macOS) _VoiceHotkeyRow(state: state, style: small, minHeight: rowHeight),
+            if (defaultTargetPlatform == TargetPlatform.macOS || defaultTargetPlatform == TargetPlatform.linux) _VoiceHotkeyRow(state: state, style: small, minHeight: rowHeight),
             if (settings != null) ...[const SizedBox(height: 8), settings!],
           ]),
           const SizedBox(height: 6),
@@ -373,7 +373,7 @@ class _VoiceHotkeyRowState extends State<_VoiceHotkeyRow> {
     widget.state.voiceHotkeyRecording = true;
     widget.state.blurPicture();
     setState(() {
-      _recorder = VoiceHotkeyRecorder();
+      _recorder = VoiceHotkeyRecorder(linux: defaultTargetPlatform == TargetPlatform.linux);
       _rejected = false;
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -430,7 +430,7 @@ class _VoiceHotkeyRowState extends State<_VoiceHotkeyRow> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  recording ? '请按下快捷键…（Esc 取消）' : voiceHotkeyLabel(widget.state.prefs.voiceHotkey),
+                  recording ? '请按下快捷键…（Esc 取消）' : voiceHotkeyLabel(widget.state.prefs.voiceHotkey, linux: defaultTargetPlatform == TargetPlatform.linux),
                   textAlign: TextAlign.end,
                   style: style.copyWith(color: t.muted),
                 ),
@@ -442,6 +442,8 @@ class _VoiceHotkeyRowState extends State<_VoiceHotkeyRow> {
             button('voice-hotkey-off', '关', () => _set(VoiceHotkey.off)),
             button('voice-hotkey-default', '恢复默认', () => _set(VoiceHotkey.standard)),
           ]),
+          if (defaultTargetPlatform == TargetPlatform.linux)
+            Text('本机识别 · 首次使用下载约 142MB 模型', style: style.copyWith(color: t.muted)),
           if (recording && _rejected) Text('这个键不能用', style: style.copyWith(color: t.muted)),
         ],
       ),

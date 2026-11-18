@@ -18,6 +18,11 @@ import 'stage_buttons.dart';
 import 'voice_input.dart';
 import 'voice_ring.dart';
 
+const linuxVoicePreparing = '首次使用正在下载本地语音模型（约 142MB），请稍后再试';
+const linuxVoiceUnavailable = '本地语音不可用，请检查网络、麦克风和 libpulse，再重试';
+const linuxVoiceLanguageHint = '语音在本机识别，语言跟随系统；录音不保存、不上传';
+bool get _linux => defaultTargetPlatform == TargetPlatform.linux;
+
 const voiceBlank = '没听清';
 const voiceBlocked = '连接已断开或正在移动，内容尚未发送';
 const voiceBusy = '上一段还在发送，已放进输入板';
@@ -89,7 +94,8 @@ String? sendVoice({
 Duration _life(String hint) => switch (hint) {
   voiceBlank => const Duration(milliseconds: 1500),
   voiceDenied => const Duration(seconds: 4),
-  voiceLanguageHint => const Duration(seconds: 6),
+  voiceLanguageHint || linuxVoiceLanguageHint => const Duration(seconds: 6),
+  linuxVoicePreparing || linuxVoiceUnavailable => const Duration(seconds: 4),
   _ => const Duration(seconds: 2),
 };
 
@@ -207,11 +213,11 @@ class VoiceHold extends ChangeNotifier {
         _end(null);
       case VoiceStart.preparing:
         _pressed = false;
-        _setHint(voicePreparing);
+        _setHint(_linux ? linuxVoicePreparing : voicePreparing);
         _end(null);
       case VoiceStart.unavailable:
         _pressed = false;
-        _setHint(voiceUnavailable);
+        _setHint(_linux ? linuxVoiceUnavailable : voiceUnavailable);
         _end(null);
     }
   }
@@ -312,7 +318,7 @@ class VoiceHold extends ChangeNotifier {
         // R14, narrowed on macOS: an 编辑 opens the panel, which takes the stage row in the same frame, so the
         // hint could never paint there; it stays due for the next send.
         if (hint == null && (which == VoicePick.send || _ios) && (languageHintDue?.call() ?? false)) {
-          _setHint(voiceLanguageHint, settings: VoiceSettings.language);
+          _setHint(_linux ? linuxVoiceLanguageHint : voiceLanguageHint, settings: _linux ? VoiceSettings.none : VoiceSettings.language);
           languageHintShown?.call();
         }
     }

@@ -42,6 +42,7 @@ cp -a gui/build/linux/x64/release/bundle/. "$stage/"
 cp gui/macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_256.png "$stage/rapp.png"
 cp scripts/linux/rapp.desktop "$stage/rapp.desktop"
 cp LICENSE "$stage/LICENSE"
+cp -a rust/speech-linux/licenses "$stage/speech-licenses"
 python3 - "$stage" <<'PY'
 import hashlib, json, platform, subprocess, sys
 from pathlib import Path
@@ -54,7 +55,7 @@ info={'source_commit':commit,'source_url':f'https://github.com/wizlijun/rapp/tre
       'rust':subprocess.check_output(['rustc','--version'],text=True).strip(),
       'runtime_packages':subprocess.check_output(['pacman','-Q','glibc','gtk3','gtk4','libayatana-appindicator'],text=True).splitlines()}
 (stage/'BUILD-INFO.json').write_text(json.dumps(info,ensure_ascii=False,indent=2)+'\n')
-(stage/'README-LINUX.txt').write_text('''rapp for Omarchy / Arch Linux x86_64
+(stage/'README-LINUX.txt').write_text('''rapp for Omarchy / Arch Linux x86_64 (SSE4.2 CPU required for local speech)
 
 Recommended installation: download the matching .pkg.tar.zst release asset, then:
   sudo pacman -U ./rapp-omarchy-*.pkg.tar.zst
@@ -62,11 +63,17 @@ Open rapp from the application launcher or run `rapp`.
 Remove the installed package with `sudo pacman -R rapp-omarchy`.
 
 Portable bundle:
-  sudo pacman -S --needed gtk3 gtk4 libayatana-appindicator xdg-utils
+  sudo pacman -S --needed gtk3 gtk4 libayatana-appindicator xdg-utils libpulse
   ./rapp
 Keep the entire directory together (lib/, data/, and the worker executables).
 Requires glibc >= 2.39, GTK4 >= 4.12, and a graphical Wayland or X11 session.
 This build targets current Omarchy/Arch; it is not a generic all-distributions binary.
+
+Hold the voice button or Right Alt to dictate. First use downloads a verified
+142 MB Whisper base model to ~/.cache/rapp/speech (or XDG_CACHE_HOME).
+Recognition runs locally in the system language; audio stays in memory and is
+never saved or uploaded. Requires a PulseAudio-compatible server and libpulse.
+Esc cancels; Tab edits before sending. Change the shortcut in the sidebar.
 
 Remote applications render inside the app. The standalone `./rapp-client` is
 also available with native per-app windows. Embedded sessions can detach and
@@ -121,7 +128,7 @@ pkgdesc='Remote apps, text terminals and port sharing (Omarchy/Arch)'
 arch=('x86_64')
 license=('GPL-3.0-only')
 url='https://github.com/wizlijun/rapp'
-depends=('glibc>=2.39' 'gcc-libs' 'gtk3' 'gtk4>=4.12' 'libayatana-appindicator' 'xdg-utils' 'systemd')
+depends=('glibc>=2.39' 'gcc-libs' 'gtk3' 'gtk4>=4.12' 'libayatana-appindicator' 'xdg-utils' 'systemd' 'libpulse')
 optdepends=('git: data directory version history and remote synchronization' 'xdotool: text insertion into an X11 host desktop')
 provides=('rapp=$version')
 conflicts=('rapp')

@@ -8,6 +8,17 @@ const _opt = 1 << 19;
 const _cmd = 1 << 20;
 
 void main() {
+  test('Linux labels and recorder preserve desktop shortcuts', () {
+    expect(voiceHotkeyLabel(VoiceHotkey.standard, linux: true), '长按 右 Alt');
+    expect(voiceHotkeyLabel(const VoiceHotkey.holdCombo(49, _ctrl | _opt), linux: true), '按住 Ctrl+Alt+Space');
+    for (final (code, flags) in [(55, _cmd), (54, _cmd), (103, _ctrl), (31, _ctrl), (33, _ctrl), (30, _ctrl)]) {
+      expect(VoiceHotkeyRecorder(linux: true).down(code, flags), isA<RecordRejected>());
+    }
+    final r = VoiceHotkeyRecorder(linux: true);
+    expect(r.down(61, _opt), isA<RecordPending>());
+    expect((r.up(61) as RecordSet).hotkey, VoiceHotkey.standard);
+    expect(r.down(49, _ctrl | _opt), isA<RecordSet>());
+  });
   test('labels', () {
     expect(voiceHotkeyLabel(VoiceHotkey.standard), '长按 右 ⌥');
     expect(voiceHotkeyLabel(const VoiceHotkey.holdCombo(49, 786432)), '按住 ⌃⌥Space');

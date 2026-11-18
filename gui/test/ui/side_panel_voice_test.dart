@@ -59,9 +59,10 @@ void main() {
     expect(find.text('长按 右 ⌥'), findsOneWidget);
   });
 
-  voiceTest('Linux has no row', (tester) async {
+  voiceTest('Linux shows a configurable Right Alt shortcut', (tester) async {
     await mount(tester, TargetPlatform.linux);
-    expect(find.byKey(const Key('voice-hotkey')), findsNothing);
+    expect(find.byKey(const Key('voice-hotkey')), findsOneWidget);
+    expect(find.text('长按 右 Alt'), findsOneWidget);
   });
 
   voiceTest('record ⌃⌥Space', (tester) async {

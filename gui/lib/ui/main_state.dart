@@ -13,6 +13,7 @@ import '../embed/remote_session.dart';
 import '../embed/session_port.dart';
 import '../embed/stream_choice.dart';
 import '../embed/voice_input.dart';
+import '../embed/linux_speech.dart';
 import '../embed/voice_key_gate.dart';
 import '../embed/traffic_label.dart' show segments;
 import '../history/input_history.dart';
@@ -135,7 +136,9 @@ class MainState extends ChangeNotifier {
         voice = voice ??
             (defaultTargetPlatform == TargetPlatform.iOS || defaultTargetPlatform == TargetPlatform.macOS
                 ? VoiceInput()
-                : null),
+                : defaultTargetPlatform == TargetPlatform.linux
+                    ? VoiceInput(channel: LinuxSpeechChannel(), finalWait: const Duration(seconds: 90))
+                    : null),
         unlockStore = unlockStore ?? UnlockStore(),
         _now = clock ?? DateTime.now,
         positions = ProjectPositions.load(data.localDir),
@@ -148,7 +151,7 @@ class MainState extends ChangeNotifier {
     resources.addListener(notifyListeners);
     _portSub = port?.events.listen(_onPortEvent);
     _termSub = termPort?.events.listen(_onPortEvent);
-    if (defaultTargetPlatform == TargetPlatform.macOS) port?.setVoiceHotkey(prefs.voiceHotkey);
+    if (defaultTargetPlatform == TargetPlatform.macOS || defaultTargetPlatform == TargetPlatform.linux) port?.setVoiceHotkey(prefs.voiceHotkey);
     hub?.addListener(_onHub);
     hub?.askNet();
     _lastError = hub?.lastError;
@@ -590,7 +593,7 @@ class MainState extends ChangeNotifier {
   /// Hold-to-talk on [sid]'s picture (macOS): an app window on the stage, with no writing panel open to take the
   /// voice (and the keys) itself.
   bool _voiceFor(Object sid) {
-    if (defaultTargetPlatform != TargetPlatform.macOS || voice == null) return false;
+    if ((defaultTargetPlatform != TargetPlatform.macOS && defaultTargetPlatform != TargetPlatform.linux) || voice == null) return false;
     final rs = remote[sid];
     if (rs == null || rs.detached || termPort?.owns(sid) == true) return false;
     return rs.composerAllowed && !rs.composer.open;

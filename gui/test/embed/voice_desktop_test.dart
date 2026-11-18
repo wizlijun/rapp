@@ -111,14 +111,14 @@ void main() {
     expect(desktopPick(const Offset(73, 50), cancel, edit), VoicePick.edit);
   });
 
-  macTest('the row has 按住说话 rightmost on macOS', (tester) async {
+  macTest('the row has 按住说话 rightmost on macOS and Linux', (tester) async {
     await view(tester);
     await tester.pumpWidget(layer());
     expect(hold, findsOneWidget);
     expect(tester.getCenter(hold).dx, greaterThan(tester.getCenter(open).dx));
     debugDefaultTargetPlatformOverride = TargetPlatform.linux;
     await tester.pumpWidget(layer(width: 999));
-    expect(hold, findsNothing);
+    expect(hold, findsOneWidget);
   });
 
   macTest('press shows 正在听… then send', (tester) async {
