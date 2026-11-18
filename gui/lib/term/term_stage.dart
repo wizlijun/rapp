@@ -15,6 +15,7 @@ import 'package:flutter/services.dart';
 
 import '../embed/remote_session.dart';
 import '../embed/touch_gestures.dart';
+import '../embed/voice_key_gate.dart';
 import '../embed/zoom_view.dart';
 import '../ios_channel.dart';
 import '../platform_caps.dart';
@@ -185,6 +186,25 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
 
   bool get _mac => defaultTargetPlatform == TargetPlatform.macOS;
 
+  // Hold-to-talk hotkey (macOS): the same gate the app picture uses; off macOS it never runs.
+  final _gate = VoiceKeyGate();
+  final _gateClock = Stopwatch()..start();
+  KeyEvent? _gateHeld;
+  Timer? _gateTimer;
+  int _gateArmedAt = 0;
+  StreamSubscription<Object>? _voiceEnds;
+
+  /// A hotkey press may start voice now: macOS, a voice engine, the panel allowed and not open (it takes the
+  /// voice and the keys itself), and the stage has the keyboard.
+  bool get _voiceReady =>
+      _mac &&
+      widget.state.voice != null &&
+      widget.session.composerAllowed &&
+      !widget.session.composer.open &&
+      _focus.hasFocus;
+
+  bool get _gateOn => _mac && widget.state.voice != null;
+
   @override
   void initState() {
     super.initState();
@@ -194,6 +214,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     HardwareKeyboard.instance.addHandler(_onKeys);
     _focusSeen = widget.state.termFocusTick;
     widget.state.addListener(_onState);
+    _listenVoiceEnds();
     _bind();
     _bindZoom();
     _focusIfWanted();
@@ -206,6 +227,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
       old.state.removeListener(_onState);
       widget.state.addListener(_onState);
       _focusSeen = widget.state.termFocusTick;
+      _listenVoiceEnds();
     }
     if (!identical(old.session, widget.session)) {
       old.session.removeListener(_onSession);
@@ -229,6 +251,8 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     widget.session.removeListener(_onSession);
     widget.state.removeListener(_onState);
     HardwareKeyboard.instance.removeHandler(_onKeys);
+    _voiceEnds?.cancel();
+    _gateTimer?.cancel();
     _unbind();
     _zoom?.removeListener(_onZoom);
     _touch.dispose();
@@ -327,7 +351,50 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     });
   }
 
-  void _onFocus() => setState(() => _ver++);
+  void _onFocus() {
+    // Losing the keyboard interrupts a hold (R7).
+    if (!_focus.hasFocus && _gateOn) _gateFeed(VoiceGateInput.resign);
+    setState(() => _ver++);
+  }
+
+  // ---- hold-to-talk hotkey ----
+
+  void _listenVoiceEnds() {
+    _voiceEnds?.cancel();
+    _voiceEnds = widget.state.voiceEnds.listen((sid) {
+      if (sid == widget.session.sid) _gateFeed(VoiceGateInput.ended);
+    });
+  }
+
+  int get _gateMs => _gateClock.elapsedMilliseconds;
+
+  /// Feeds [i] to the gate and does what it says except passing the event on: the held hotkey down goes to the
+  /// terminal first (flush), a pending hotkey arms the hold timer, a phase goes to MainState. Returns the step.
+  VoiceGateStep _gateFeed(VoiceGateInput i, {KeyEvent? event, int? ms}) {
+    final step = _gate.handle(i, ms: ms ?? _gateMs, ready: _voiceReady);
+    if (step.flush) {
+      final held = _gateHeld;
+      _gateHeld = null;
+      _gateTimer?.cancel();
+      if (held != null) _termKey(_focus, held);
+    }
+    if (step.arm && event != null) {
+      _gateHeld = event;
+      _gateArmedAt = ms ?? _gateMs;
+      _gateTimer?.cancel();
+      _gateTimer = Timer(Duration(milliseconds: (VoiceKeyGate.holdDelay * 1000).round()), () {
+        // The timer is the hold: never earlier than the gate's own delay, whatever the wall clock says.
+        final at = math.max(_gateMs, _gateArmedAt + (VoiceKeyGate.holdDelay * 1000).round() + 1);
+        _gateFeed(VoiceGateInput.elapsed, ms: at);
+      });
+    }
+    final phase = step.voice;
+    if (phase != null) {
+      if (phase == VoiceKeyPhase.start) _gateHeld = null;
+      widget.state.voiceKey(widget.session.sid, phase);
+    }
+    return step;
+  }
 
   // ---- focus ----
 
@@ -402,6 +469,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
 
   void _onSignal(PointerSignalEvent e) {
     if (e is! PointerScrollEvent) return;
+    if (_gateOn) _gateFeed(VoiceGateInput.scroll);
     GestureBinding.instance.pointerSignalResolver.register(e, (ev) {
       _stopFling();
       _scroll(-(ev as PointerScrollEvent).scrollDelta.dy / _zoomed.cellH);
@@ -476,6 +544,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
   }
 
   void _onDown(PointerDownEvent e) {
+    if (_gateOn) _gateFeed(VoiceGateInput.pointer);
     _focus.requestFocus();
     widget.state.blurPicture();
     _stopFling();
@@ -650,6 +719,20 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
   }
 
   KeyEventResult _onKey(FocusNode node, KeyEvent e) {
+    if (!_gateOn) return _termKey(node, e);
+    final code = macKeyCode(e.physicalKey);
+    if (code == null) return _termKey(node, e);
+    _gate.hotkey = widget.state.prefs.voiceHotkey;
+    final input = switch (e) {
+      KeyDownEvent() => VoiceGateInput.down(code, macFlags(HardwareKeyboard.instance)),
+      KeyRepeatEvent() => VoiceGateInput.down(code, macFlags(HardwareKeyboard.instance), repeat: true),
+      _ => VoiceGateInput.up(code),
+    };
+    final step = _gateFeed(input, event: e);
+    return step.pass ? _termKey(node, e) : KeyEventResult.handled;
+  }
+
+  KeyEventResult _termKey(FocusNode node, KeyEvent e) {
     if (e is KeyUpEvent) return KeyEventResult.ignored;
     final k = HardwareKeyboard.instance;
     // A selection first: its copy, and Esc only clears it (C2, C3).
