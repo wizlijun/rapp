@@ -16,7 +16,6 @@ import 'prefs.dart' show FirstLayer;
 import 'projects_tab.dart';
 import 'resources_tab.dart';
 import 'sessions_tab.dart';
-import 'controls.dart';
 import 'tab_chip.dart';
 import 'tokens.dart';
 
