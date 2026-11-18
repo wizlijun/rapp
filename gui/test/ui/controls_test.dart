@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/ui/controls.dart';
+import 'package:rapp/ui/tokens.dart';
 
 import 'helpers.dart';
 
@@ -114,5 +115,15 @@ void main() {
     await t.pump(const Duration(milliseconds: 100));
     expect(t.widget<AnimatedScale>(find.byType(AnimatedScale)).scale, 1);
     await g.up();
+  });
+  testWidgets('round: a minimal circle of the given size', (t) async {
+    await t.pumpWidget(wrap(RappButton.round(key: const Key('r'), label: '输入', icon: Icons.keyboard_outlined, size: 64, onPressed: () {})));
+    expect(t.getSize(find.byKey(const Key('r'))), const Size(64, 64));
+    final tokens = RappTokens.of(t.element(find.byKey(const Key('r'))));
+    final b = t.widget<OutlinedButton>(find.byType(OutlinedButton));
+    final shape = b.style!.shape!.resolve({}) as CircleBorder;
+    expect(shape.side, BorderSide(color: tokens.line));
+    expect(b.style!.elevation!.resolve({}), 0);
+    expect(find.bySemanticsLabel('输入'), findsOneWidget);
   });
 }

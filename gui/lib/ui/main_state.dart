@@ -2980,6 +2980,16 @@ class MainState extends ChangeNotifier {
     _save();
   }
 
+  /// The edge the iOS stage's button stack stands on. Its own notifier, like [composerZoom].
+  late final ValueNotifier<StageSide> stageSide = ValueNotifier(prefs.stageButtonsSide);
+
+  void setStageSide(StageSide s) {
+    if (s == stageSide.value) return;
+    stageSide.value = s;
+    prefs.stageButtonsSide = s;
+    _save();
+  }
+
   /// ⌘= / ⌘- / ⌘0 (Ctrl elsewhere) in the panel.
   void zoomKey(ZoomKey k) => setComposerZoom(switch (k) {
         ZoomKey.bigger => composerZoom.value + 1,
@@ -3600,6 +3610,7 @@ class MainState extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     composerZoom.dispose();
+    stageSide.dispose();
     appLatch.dispose();
     resources.removeListener(notifyListeners);
     resources.dispose();

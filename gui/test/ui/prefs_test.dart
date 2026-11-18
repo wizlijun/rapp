@@ -147,4 +147,12 @@ void main() {
     File('${tmp.path}/gui.json').writeAsStringSync('{"term_app":{"a":"iTerm","b":3}}');
     expect(UiPrefs.load(tmp.path).termApp, {'a': 'iTerm'});
   });
+  test('stage_buttons_side round-trips; missing or bad is right', () {
+    UiPrefs(stageButtonsSide: StageSide.left).save(tmp.path);
+    expect(UiPrefs.load(tmp.path).stageButtonsSide, StageSide.left);
+    File('${tmp.path}/gui.json').writeAsStringSync('{}');
+    expect(UiPrefs.load(tmp.path).stageButtonsSide, StageSide.right);
+    File('${tmp.path}/gui.json').writeAsStringSync('{"stage_buttons_side":"up"}');
+    expect(UiPrefs.load(tmp.path).stageButtonsSide, StageSide.right);
+  });
 }

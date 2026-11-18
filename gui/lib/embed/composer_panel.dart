@@ -22,6 +22,7 @@ import 'flutter_editor.dart';
 import 'native_editor.dart';
 import 'remote_session.dart';
 import 'session_port.dart';
+import 'stage_buttons.dart';
 
 /// W1: 720 wide, or the stage less 16 when the stage is narrower than 736.
 /// Zoomed ([scale] above 1) it is 720 × [scale], never wider than the stage less 16.
@@ -544,7 +545,7 @@ List<Widget> composerLayer(
     bool keyRow = false,
     double keyboard = 0,
     ComposerEditor Function()? editor}) {
-  final both = Listenable.merge([session, session.composer, state.composerZoom]);
+  final both = Listenable.merge([session, session.composer, state.composerZoom, state.stageSide]);
   final term = port is TermSessionPort ? port : null;
   final keys = keyRow && term != null;
   bool open() => session.composer.open && session.composerAllowed;
@@ -623,6 +624,67 @@ List<Widget> composerLayer(
               : const SizedBox.shrink(),
         ),
       ),
+    if (defaultTargetPlatform == TargetPlatform.iOS)
+      // The round buttons in one edge stack; the key row, if on, sits below it.
+      Positioned.fill(
+        child: Padding(
+          padding: EdgeInsets.only(bottom: (keys ? keyRowBottom + keyRowKeySize.height + 8 - stageButtonsEdge : 0) + keyboard),
+          child: ListenableBuilder(
+            listenable: Listenable.merge([both, session.zooms]),
+            builder: (context, _) {
+              final transfer = session.transferStatus;
+              final button = session.composerAllowed;
+              final zoomed = session.currentZoomed && !session.composer.open;
+              // The same rule as the row below: an open panel hides it; a disallowed one is hidden, so the strip shows here.
+              if ((session.composer.open && button) || (transfer == null && !button && !zoomed)) return const SizedBox.shrink();
+              final t = RappTokens.of(context);
+              return Listener(
+                onPointerDown: (_) => state.holdForPanel(session),
+                child: StageButtons(
+                  side: state.stageSide.value,
+                  onSide: state.setStageSide,
+                  input: button
+                      ? RappButton.round(
+                          key: const Key('composer-open'),
+                          label: '输入',
+                          icon: Icons.keyboard_outlined,
+                          size: 56,
+                          onPressed: () => session.composer.open = true,
+                        )
+                      : null,
+                  restore: zoomed
+                      ? RappButton.round(
+                          key: const Key('zoom-reset'),
+                          label: '还原',
+                          icon: Icons.zoom_in_map,
+                          size: 48,
+                          onPressed: session.restoreCurrent,
+                        )
+                      : null,
+                  beside: [
+                    if (transfer != null)
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          DecoratedBox(
+                            decoration: t.floatBox(),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              child: Text(transfer, style: TextStyle(color: t.muted)),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          RappButton.secondary(label: '取消', onPicture: true, onPressed: () => port.cancelTransfer(session.sid)),
+                        ],
+                      ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+      )
+    else
     Positioned(
       right: keys ? keyRowInset + keyRowGroupWidth + 8 : 12,
       bottom: (keys ? keyRowBottom : 12) + keyboard,
