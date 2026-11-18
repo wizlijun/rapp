@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show TargetPlatform, defaultTargetPlatform;
 import 'package:flutter/material.dart';
 
 import 'system_font.dart';
@@ -291,8 +292,20 @@ TextTheme _oneSize(TextTheme tt, double size) {
   );
 }
 
+/// Whether [p] is driven by touch (iOS, Android) rather than a pointer.
+bool touchPlatform(TargetPlatform p) => p == TargetPlatform.iOS || p == TargetPlatform.android;
+
+/// The height of every clickable control: the 48 touch target, or 40 with a pointer.
+double controlHeightFor(TargetPlatform p) => touchPlatform(p) ? 48 : 40;
+
+/// [controlHeightFor] the platform of [c]'s theme.
+double controlHeightOf(BuildContext c) => controlHeightFor(Theme.of(c).platform);
+
 /// [textSize]: the system's text size ([systemTextSize]), used by every text style.
-ThemeData themeDataFor(RappTheme theme, {double textSize = fallbackTextSize}) {
+/// [platform]: sets the control height (see [controlHeightFor]); defaults to [defaultTargetPlatform].
+ThemeData themeDataFor(RappTheme theme, {double textSize = fallbackTextSize, TargetPlatform? platform}) {
+  final plat = platform ?? defaultTargetPlatform;
+  final touch = touchPlatform(plat);
   final t = tokensFor(theme).copyWith(textSize: textSize);
   final family = t.monoBody ? t.mono : t.font;
   final fallback = t.monoBody ? t.monoFallback : t.fontFallback;
@@ -306,6 +319,10 @@ ThemeData themeDataFor(RappTheme theme, {double textSize = fallbackTextSize}) {
     onSurface: t.text,
     onSurfaceVariant: t.muted,
   );
+  OutlineInputBorder outline(Color c) => OutlineInputBorder(
+        borderRadius: BorderRadius.circular(t.r),
+        borderSide: BorderSide(color: c),
+      );
   final button = ButtonStyle(
     minimumSize: const WidgetStatePropertyAll(Size(48, 48)),
     shape: WidgetStatePropertyAll(
@@ -315,6 +332,9 @@ ThemeData themeDataFor(RappTheme theme, {double textSize = fallbackTextSize}) {
   return ThemeData(
     useMaterial3: true,
     brightness: Brightness.dark,
+    platform: plat,
+    visualDensity: touch ? VisualDensity.standard : VisualDensity.compact,
+    materialTapTargetSize: touch ? MaterialTapTargetSize.padded : MaterialTapTargetSize.shrinkWrap,
     colorScheme: scheme,
     scaffoldBackgroundColor: t.bg,
     canvasColor: t.bg,
@@ -340,12 +360,51 @@ ThemeData themeDataFor(RappTheme theme, {double textSize = fallbackTextSize}) {
     outlinedButtonTheme: OutlinedButtonThemeData(style: button),
     textButtonTheme: TextButtonThemeData(style: button),
     iconButtonTheme: IconButtonThemeData(style: button),
-    // Switch and checkbox rows as tall as a dropdown or a button (48), not Material's 56 / 72:
-    // with one small text size the taller rows looked out of proportion.
-    listTileTheme: const ListTileThemeData(
-      visualDensity: VisualDensity.compact,
-      minTileHeight: 48,
-      minVerticalPadding: 4,
+    // Switch and checkbox rows as tall as a dropdown or a button (48 touch, 40 with a pointer via the
+    // density), not Material's 56 / 72.
+    listTileTheme: const ListTileThemeData(minTileHeight: 48, minVerticalPadding: 4),
+    switchTheme: SwitchThemeData(
+      thumbColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? t.accentInk : t.muted),
+      trackColor: WidgetStateProperty.resolveWith((s) => s.contains(WidgetState.selected) ? t.accent : t.line),
+      trackOutlineColor: WidgetStatePropertyAll(t.line),
+    ),
+    checkboxTheme: CheckboxThemeData(
+      fillColor: WidgetStateProperty.resolveWith(
+          (s) => s.contains(WidgetState.selected) ? t.accent : Colors.transparent),
+      checkColor: WidgetStatePropertyAll(t.accentInk),
+      side: BorderSide(color: t.line),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(t.r / 2)),
+    ),
+    popupMenuTheme: PopupMenuThemeData(
+      color: t.bg,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(t.r),
+        side: BorderSide(color: t.text),
+      ),
+      elevation: 8,
+      shadowColor: Colors.black,
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      isDense: true,
+      // A single line of text-size text plus this padding is as tall as a control.
+      contentPadding: EdgeInsets.symmetric(
+        horizontal: 12,
+        vertical: (controlHeightFor(plat) - textSize * 1.4) / 2,
+      ),
+      floatingLabelBehavior: FloatingLabelBehavior.always,
+      border: outline(t.line),
+      enabledBorder: outline(t.line),
+      focusedBorder: outline(t.text),
+      errorBorder: outline(scheme.error),
+      focusedErrorBorder: outline(scheme.error),
+      errorStyle: TextStyle(color: scheme.error),
+    ),
+    sliderTheme: SliderThemeData(
+      activeTrackColor: t.accent,
+      inactiveTrackColor: t.line,
+      thumbColor: t.accent,
+      overlayShape: SliderComponentShape.noOverlay,
+      trackHeight: 3,
     ),
     extensions: [t],
   );

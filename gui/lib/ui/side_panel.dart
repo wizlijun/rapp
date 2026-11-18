@@ -31,9 +31,8 @@ String _tabLabel(PanelTab t) => switch (t) {
 /// The panel's width in a [window] this wide: half of it, the same for every tab.
 double panelWidth(double window) => window / 2;
 
-/// 全局设置's rows (the dropdowns, the switch rows and the fold header): compact 34 with a pointer, the 48 touch
-/// target on the iPad.
-double settingsRowHeight(TargetPlatform p) => p == TargetPlatform.iOS ? 48 : 34;
+/// 全局设置's rows (the dropdowns, the switch rows and the fold header): the same height as every control.
+double settingsRowHeight(TargetPlatform p) => controlHeightFor(p);
 
 /// 全局设置's text size: one step under the panel's [text] size.
 double settingsTextSize(double text) => math.max(11, text - 1);

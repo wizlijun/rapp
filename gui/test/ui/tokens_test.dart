@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/ui/tokens.dart';
 
+import 'platform_helpers.dart';
+
 void main() {
   test('MATRIX token values match the design language table', () {
     final t = tokensFor(RappTheme.matrix);
@@ -80,8 +82,7 @@ void main() {
         expect(s!.fontSize, 13, reason: '$th');
         expect(s.height, 1.4, reason: '$th');
       }
-      // Switch and checkbox rows come out 48 tall, like the dropdowns and buttons.
-      expect(d.listTileTheme.visualDensity, VisualDensity.compact, reason: '$th');
+      // Switch and checkbox rows come out 48 tall on touch (40 with the mouse density), like the dropdowns and buttons.
       expect(d.listTileTheme.minTileHeight, 48, reason: '$th');
     }
     expect(themeDataFor(RappTheme.matrix).textTheme.bodySmall!.fontSize, 15);
@@ -119,5 +120,65 @@ void main() {
     }
     // AVATAR's glass panel stays see-through on its own backdrop.
     expect(tokensFor(RappTheme.avatar).panel.first.a, lessThan(1.0));
+  });
+
+  test('controlHeightFor: 48 on touch platforms, 40 with a mouse', () {
+    for (final p in [TargetPlatform.macOS, TargetPlatform.linux, TargetPlatform.windows]) {
+      expect(controlHeightFor(p), 40, reason: '$p');
+      expect(touchPlatform(p), isFalse, reason: '$p');
+    }
+    for (final p in [TargetPlatform.iOS, TargetPlatform.android]) {
+      expect(controlHeightFor(p), 48, reason: '$p');
+      expect(touchPlatform(p), isTrue, reason: '$p');
+    }
+  });
+
+  test('themeDataFor sets density, tap target and platform from the platform', () {
+    final mac = themeDataFor(RappTheme.values.first, platform: TargetPlatform.macOS);
+    expect(mac.visualDensity, VisualDensity.compact);
+    expect(mac.materialTapTargetSize, MaterialTapTargetSize.shrinkWrap);
+    expect(mac.platform, TargetPlatform.macOS);
+    final ios = themeDataFor(RappTheme.values.first, platform: TargetPlatform.iOS);
+    expect(ios.visualDensity, VisualDensity.standard);
+    expect(ios.materialTapTargetSize, MaterialTapTargetSize.padded);
+    expect(ios.platform, TargetPlatform.iOS);
+  });
+
+  for (final (p, h) in [(TargetPlatform.macOS, 40.0), (TargetPlatform.iOS, 48.0)]) {
+    testWidgets('a FilledButton is $h tall on $p', (tester) async {
+      await onPlatform(p, () async {
+        await tester.pumpWidget(MaterialApp(
+          theme: themeDataFor(RappTheme.values.first, platform: p),
+          home: Scaffold(body: Center(child: FilledButton(onPressed: () {}, child: const Text('x')))),
+        ));
+        expect(tester.getSize(find.byType(FilledButton)).height, h);
+      });
+    });
+  }
+
+  test('control sub-themes carry the token colours', () {
+    for (final theme in RappTheme.values) {
+      final t = tokensFor(theme);
+      final d = themeDataFor(theme, platform: TargetPlatform.macOS);
+      const sel = {WidgetState.selected};
+      expect(d.switchTheme.trackColor!.resolve(sel), t.accent);
+      expect(d.checkboxTheme.fillColor!.resolve(sel), t.accent);
+      final box = d.checkboxTheme.shape! as RoundedRectangleBorder;
+      expect(box.borderRadius, BorderRadius.circular(t.r / 2));
+      expect(d.popupMenuTheme.color, t.bg);
+      final pop = d.popupMenuTheme.shape! as RoundedRectangleBorder;
+      expect(pop.side.color, t.text);
+      expect(pop.borderRadius, BorderRadius.circular(t.r));
+      final i = d.inputDecorationTheme;
+      expect(i.isDense, isTrue);
+      expect(i.floatingLabelBehavior, FloatingLabelBehavior.always);
+      final en = i.enabledBorder! as OutlineInputBorder;
+      expect(en.borderSide.color, t.line);
+      expect(en.borderRadius, BorderRadius.circular(t.r));
+      expect((i.focusedBorder! as OutlineInputBorder).borderSide.color, t.text);
+      expect(d.sliderTheme.activeTrackColor, t.accent);
+      expect(d.sliderTheme.inactiveTrackColor, t.line);
+      expect(d.sliderTheme.trackHeight, 3);
+    }
   });
 }
