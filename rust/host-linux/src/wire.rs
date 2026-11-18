@@ -130,6 +130,14 @@ pub fn input(kind: u8, p: &[u8]) -> Result<Input> {
             r.string()?;
             Input::Ignore
         }
+        // setView (v14): window u32 + rect. Linux keeps capturing the whole desktop.
+        41 => {
+            r.u32()?;
+            for _ in 0..4 {
+                r.f32()?;
+            }
+            Input::Ignore
+        }
         _ => bail!("unexpected client message type {kind}"),
     };
     r.end()?;
@@ -177,6 +185,46 @@ mod tests {
         assert!(input(6, &[0; 10]).is_err());
         assert!(input(27, &[0, 0, 1]).is_err());
         assert!(input(22, &[]).is_err());
+    }
+    fn payload(window: u32, floats: &[f32]) -> Vec<u8> {
+        let mut p = window.to_le_bytes().to_vec();
+        for f in floats {
+            p.extend(f.to_le_bytes());
+        }
+        p
+    }
+    #[test]
+    fn set_view_is_ignored_with_full_window_capture_kept() {
+        // v14 setView: window u32 + rect (x, y, w, h) f32; window 0 clears the view.
+        let zoomed = payload(1, &[10., 20., 300., 200.]);
+        assert!(matches!(input(41, &zoomed), Ok(Input::Ignore)));
+        assert!(matches!(
+            input(41, &payload(0, &[0.; 4])),
+            Ok(Input::Ignore)
+        ));
+        assert!(input(41, &zoomed[..19]).is_err());
+    }
+    #[test]
+    fn every_app_only_client_message_decodes_without_bailing() {
+        let mut menu = vec![2];
+        menu.extend([0u8; 4]);
+        let mut select = vec![];
+        string(&mut select, "");
+        for (kind, p) in [
+            (9u8, vec![1, 0, 0, 0, 0, 0, 0, 0]),
+            (14, payload(1, &[])),
+            (15, payload(1, &[])),
+            (16, payload(1, &[1., 2.])),
+            (18, menu),
+            (30, select),
+            (38, payload(7, &[])),
+            (41, payload(1, &[0., 0., 100., 100.])),
+        ] {
+            assert!(
+                matches!(input(kind, &p), Ok(Input::Ignore)),
+                "client message type {kind} must decode to Ignore"
+            );
+        }
     }
     #[test]
     fn authentication_binds_version_token_and_desktop() {
