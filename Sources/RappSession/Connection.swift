@@ -41,14 +41,13 @@ public final class Connection: MessageLink {
     /// Capture pixels per A point announced in the hello; set before `start()`.
     public var density: Float = 2
 
-    /// Connects and introduces itself with a hello message.
+    /// Connects and introduces itself with a hello message. The hello is queued at once, so it goes out
+    /// before anything sent while the connection is still coming up (A rejects any other first message).
     public func start() {
         connection.stateUpdateHandler = { [weak self] state in
             guard let self else { return }
             switch state {
             case .ready:
-                self.send(.hello(token: self.address.token, bundleID: self.address.bundleID,
-                                 mode: self.address.mode, fps: self.address.fps, density: self.density))
                 self.receive()
             case let .waiting(error):
                 self.close("cannot reach \(self.address.host):\(self.address.port) (\(error.localizedDescription))")
@@ -61,6 +60,8 @@ public final class Connection: MessageLink {
             }
         }
         connection.start(queue: queue)
+        send(.hello(token: address.token, bundleID: address.bundleID, mode: address.mode, fps: address.fps,
+                    density: density))
     }
 
     public func send(_ message: Message) {

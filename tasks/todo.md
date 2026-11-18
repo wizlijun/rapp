@@ -613,3 +613,7 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [x] 诊断：quinn/quinn-udp 的 warn/error（`sendmsg error`、驱动 `I/O error`）以 `{"ev":"lib"}` 写进 hub.log；`relay dial:` 失败从 debug 提到 warn。
 - [ ] Duo 装上后等它再坏一次，取 hub.log 看 `rebind` 之后的 `lib` 行（哪个 errno），据此定修法。候选：中继连续拨不通时自动再换 socket、手动重连先换 socket、或整个 endpoint 重建。
 - [ ] 另一个风险（实验已证实，Duo 上没见到）：收包出错会让 quinn 的 endpoint 驱动永久停掉，`Endpoint::rebind` 救不回来，之后拨号立刻报 `endpoint stopping`。真要防只能重建 endpoint。
+## 重连时 A 报「first message must be hello」（2026-11-18，用户报告，fix/hello-first）
+现象：Duo 回前台换端口（rebind）后自动重连，局域网会话一连上就断（hub.log `opened` → `closed: connection closed`，0 秒），要点很多次才进得去；A 端报 `first message must be hello, fetch or put`。原因：`RappSession.Connection` 等 TCP `.ready` 才发 hello，而在此之前调用的 `send`（重连时马上补发的 `set_view`/`set_stream` 等）先进了 NWConnection 的发送队列，排到 hello 前面。0.14.7 捏合缩放加了 `set_view` 之后才常见。
+- [x] hello 在 `start()` 里随连接启动立刻排队，之后的消息都在它后面；测试 `ConnectionHelloFirstTests`（先红后绿）。
+- [ ] 实机：Duo 放大一个窗口后切到后台再回来，重连一次就进得去，A 不再报这个错。
