@@ -1,7 +1,9 @@
 // Hold to talk (iOS): the voice button, what a press, a slide and a release do, and where the words go
 // (voice-input spec §5.1, §5.2). The drawing is in voice_overlay.dart.
 import 'dart:async';
+import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -20,7 +22,36 @@ const voiceBlocked = '连接已断开或正在移动，内容尚未发送';
 const voiceBusy = '上一段还在发送，已放进输入板';
 const voiceDenied = '需要麦克风和语音识别权限';
 const voicePreparing = '正在准备语音识别，请稍后再试';
-const voiceUnavailable = '这台设备不能识别语音';
+const voiceUnavailable = '这种系统语言暂不支持语音识别，可以在系统设置里换一种';
+const voiceLanguageHint = '识别语言跟随系统。要换语言：系统设置 → 通用 → 语言与地区';
+
+/// What the hint's 「去设置」 opens (and whether it shows at all).
+enum VoiceSettings { none, privacy, language }
+
+const _microphoneUrl = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone';
+const _languageUrl = 'x-apple.systempreferences:com.apple.Localization-Settings.extension';
+
+/// What [openVoiceSettings] runs by default; tests replace it to see the button's tap arrive.
+@visibleForTesting
+Future<ProcessResult> Function(String, List<String>) voiceSettingsRunner = Process.run;
+
+/// Opens System Settings (macOS) at the pane [s] names, as `openSettingsPane` does. [run] is for tests.
+Future<void> openVoiceSettings(
+  VoiceSettings s, {
+  Future<ProcessResult> Function(String, List<String>)? run,
+}) async {
+  run ??= voiceSettingsRunner;
+  switch (s) {
+    case VoiceSettings.none:
+      return;
+    case VoiceSettings.privacy:
+      await run('open', [_microphoneUrl]);
+    case VoiceSettings.language:
+      await run('open', [_languageUrl]);
+  }
+}
+
+bool get _ios => defaultTargetPlatform == TargetPlatform.iOS;
 
 /// Sends [text] the way the writing panel does (spec §5.2). Returns the hint to show, or null when it went.
 /// A blocked or busy session keeps the text at the end of the draft instead; the panel stays as it is.
@@ -57,6 +88,7 @@ String? sendVoice({
 Duration _life(String hint) => switch (hint) {
   voiceBlank => const Duration(milliseconds: 1500),
   voiceDenied => const Duration(seconds: 4),
+  voiceLanguageHint => const Duration(seconds: 6),
   _ => const Duration(seconds: 2),
 };
 
@@ -66,7 +98,24 @@ const _stackFadeIn = Duration(milliseconds: 120);
 /// One hold on the voice button: from the press, through the slide over the disc and the bands, to the release.
 /// Points are in the stage's coordinates (the box under [stageKey], which the overlay puts on its root).
 class VoiceHold extends ChangeNotifier {
-  VoiceHold({required this.voice, required this.send, required this.edit, required this.composer});
+  VoiceHold({
+    required this.voice,
+    required this.send,
+    required this.edit,
+    required this.composer,
+    this.onEnd,
+    this.languageHintDue,
+    this.languageHintShown,
+  });
+
+  /// Called once per press when it is over: with the pick after a release has finished, with null when the start
+  /// did not give `ok`, on a quick tap, or when [dispose] cuts a press short.
+  final void Function(VoicePick? pick)? onEnd;
+
+  /// True the first time a release has no other hint to show (on macOS a send only: an 编辑 hides it at once);
+  /// [languageHintShown] then says it was shown.
+  final bool Function()? languageHintDue;
+  final void Function()? languageHintShown;
 
   final VoiceInput voice;
 
@@ -89,13 +138,14 @@ class VoiceHold extends ChangeNotifier {
   String? hint;
 
   /// The hint offers 「去设置」.
-  bool settings = false;
+  VoiceSettings settings = VoiceSettings.none;
   VoiceRing? ring;
 
   /// The voice button's own opacity, which the overlay drives while it morphs.
   final buttonOpacity = ValueNotifier<double>(1);
 
   bool _pressed = false;
+  bool _open = false; // a press whose onEnd has not been called
   bool _showing = false;
   bool _disposed = false;
   int? _pointer;
@@ -118,35 +168,77 @@ class VoiceHold extends ChangeNotifier {
 
   Future<void> down(Offset thumb, Size stage, bool right) async {
     if (_pressed || holding || voice.phase != VoicePhase.idle) return;
+    ring = VoiceRing(stage: stage, thumb: thumb, right: right);
+    await start();
+  }
+
+  /// The press without a ring (the Mac button and hotkey).
+  Future<void> start() async {
+    if (_pressed || holding || voice.phase != VoicePhase.idle) return;
     _pressed = true;
+    _open = true;
     _pressedFor = composer();
     pick = VoicePick.send;
-    ring = VoiceRing(stage: stage, thumb: thumb, right: right);
     _setHint(null);
     final r = await voice.start();
     if (_disposed) return;
     // Let go while the start was on its way: that release already ended it, and there is nothing to show.
-    if (!_pressed) return;
+    if (!_pressed) {
+      _end(null);
+      return;
+    }
     switch (r) {
       case VoiceStart.ok:
         holding = true;
         voice.onMaxLength = _release;
         voice.onError = _interrupted;
-        unawaited(HapticFeedback.mediumImpact());
+        if (_ios) unawaited(HapticFeedback.mediumImpact());
         notifyListeners();
       case VoiceStart.asked:
         _pressed = false;
+        _end(null);
       case VoiceStart.cancelled:
         _pressed = false;
+        _end(null);
       case VoiceStart.denied:
         _pressed = false;
-        _setHint(voiceDenied, settings: true);
+        _setHint(voiceDenied, settings: VoiceSettings.privacy);
+        _end(null);
       case VoiceStart.preparing:
         _pressed = false;
         _setHint(voicePreparing);
+        _end(null);
       case VoiceStart.unavailable:
         _pressed = false;
         _setHint(voiceUnavailable);
+        _end(null);
+    }
+  }
+
+  void _end(VoicePick? p) {
+    if (!_open) return;
+    _open = false;
+    onEnd?.call(p);
+  }
+
+  /// While holding, moves the pick (a key or the mouse on a band). No haptics.
+  void choose(VoicePick p) {
+    if (!holding || p == pick) return;
+    pick = p;
+    notifyListeners();
+  }
+
+  /// Ends the press on [p]: while holding, a release on it; before the hold, 取消 cancels and the rest is a release.
+  void finish(VoicePick p) {
+    if (holding) {
+      pick = p;
+      unawaited(_release());
+    } else if (_pressed) {
+      if (p == VoicePick.cancel) {
+        cancel();
+      } else {
+        up();
+      }
     }
   }
 
@@ -156,7 +248,7 @@ class VoiceHold extends ChangeNotifier {
     final n = r.pick(p);
     if (n == pick) return;
     pick = n;
-    unawaited(HapticFeedback.selectionClick());
+    if (_ios) unawaited(HapticFeedback.selectionClick());
     notifyListeners();
   }
 
@@ -216,16 +308,23 @@ class VoiceHold extends ChangeNotifier {
         } else {
           edit(text);
         }
+        // R14, narrowed on macOS: an 编辑 opens the panel, which takes the stage row in the same frame, so the
+        // hint could never paint there; it stays due for the next send.
+        if (hint == null && (which == VoicePick.send || _ios) && (languageHintDue?.call() ?? false)) {
+          _setHint(voiceLanguageHint, settings: VoiceSettings.language);
+          languageHintShown?.call();
+        }
     }
+    if (!_disposed) _end(which);
   }
 
   /// While the stack is hidden (a hold, its release) the hint waits; its time starts when it shows.
-  void _setHint(String? h, {bool settings = false}) {
+  void _setHint(String? h, {VoiceSettings settings = VoiceSettings.none}) {
     _hintTimer?.cancel();
     _hintTimer = null;
     if (h == null && hint == null) return;
     hint = h;
-    this.settings = h != null && settings;
+    this.settings = h != null ? settings : VoiceSettings.none;
     if (h != null && !active) _hintTimer = Timer(_life(h), _clearHint);
     notifyListeners();
   }
@@ -241,6 +340,7 @@ class VoiceHold extends ChangeNotifier {
       voice.onError = null;
       unawaited(voice.cancel());
     }
+    _end(null);
     buttonOpacity.dispose();
     super.dispose();
   }
@@ -291,10 +391,14 @@ Widget voiceButton(VoiceHold hold) => Builder(
 );
 
 /// The small bubble after a release (spec §5.1 「松手后的提示」): 没听清, a put-back, a permission or a not-yet.
-Widget voiceHint(VoiceHold hold) => Builder(
+/// With [maxWidth] (the Mac's stage row) the text wraps to fit, so 「去设置」 always stays in view.
+Widget voiceHint(VoiceHold hold, {double? maxWidth}) => Builder(
   builder: (context) {
     final t = RappTokens.of(context);
-    return DecoratedBox(
+    // iOS only has a pane for the permission; the language one is a hint to read.
+    final button = hold.settings == VoiceSettings.privacy || (hold.settings == VoiceSettings.language && !_ios);
+    final text = Text(hold.hint ?? '', style: TextStyle(color: t.text));
+    final box = DecoratedBox(
       key: const Key('voice-hint'),
       decoration: BoxDecoration(
         // The raise colour on the opaque float surface, as the round buttons: no picture shows through.
@@ -303,23 +407,24 @@ Widget voiceHint(VoiceHold hold) => Builder(
         borderRadius: BorderRadius.circular(t.r),
       ),
       child: Padding(
-        padding: EdgeInsets.fromLTRB(12, hold.settings ? 4 : 8, hold.settings ? 4 : 12, hold.settings ? 4 : 8),
+        padding: EdgeInsets.fromLTRB(12, button ? 4 : 8, button ? 4 : 12, button ? 4 : 8),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(hold.hint ?? '', style: TextStyle(color: t.text)),
-            if (hold.settings) ...[
+            if (maxWidth != null) Flexible(child: text) else text,
+            if (button) ...[
               const SizedBox(width: 8),
               RappButton.secondary(
                 key: const Key('voice-settings'),
                 label: '去设置',
                 onPicture: true,
-                onPressed: () => unawaited(iosChannel.openSettings()),
+                onPressed: () => unawaited(_ios ? iosChannel.openSettings() : openVoiceSettings(hold.settings)),
               ),
             ],
           ],
         ),
       ),
     );
+    return maxWidth == null ? box : ConstrainedBox(constraints: BoxConstraints(maxWidth: maxWidth), child: box);
   },
 );

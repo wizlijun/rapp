@@ -1,21 +1,27 @@
 import AVFoundation
-import Flutter
+import RappSession
 import Speech
+#if os(iOS)
+import Flutter
 import UIKit
+#else
+import AppKit
+import FlutterMacOS
+#endif
 
 /// The `rapp/speech` channel: hold-to-talk speech recognition for the voice button.
 /// Dart calls `start` (replies `ok` / `asked` / `denied` / `unavailable` / `preparing`, or `cancelled` when a
 /// cancel, another start or an interruption overtook it while it set up), `stop` and `cancel`;
 /// this side sends `partial` / `final` {text} and `error` {code}. Everything runs on the main thread except
-/// the audio tap, which only hands buffers to the recogniser. This plugin owns the app's AVAudioSession.
+/// the audio tap, which only hands buffers to the recogniser. On iOS this plugin owns the app's AVAudioSession; macOS has no shared session, so it only owns its audio engine.
 /// iOS 26+ uses SpeechAnalyzer + SpeechTranscriber; older systems (or no transcriber for the locale) use
 /// SFSpeechRecognizer.
 final class SpeechPlugin: NSObject, FlutterPlugin {
   /// How long after `stop` this side gives up on the recogniser and sends `final` with what it has.
   /// Dart waits 1 s, so this lands just before.
   private static let finalGrace: TimeInterval = 0.9
-  /// The languages to try, best first (see `SpeechLocales`: not `Locale.current`, which is English here).
-  private static var locales: [Locale] { SpeechLocales.candidates(Locale.preferredLanguages) }
+  /// The language to recognise: the system's first preferred language (not `Locale.current`, which is English here).
+  private static var locale: Locale { speechLocale(preferred: Locale.preferredLanguages) }
 
   private let channel: FlutterMethodChannel
   /// The recording in progress: live, or stopped and waiting for its final text.
@@ -30,18 +36,44 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
   init(channel: FlutterMethodChannel) {
     self.channel = channel
     super.init()
+    #if os(iOS)
     NotificationCenter.default.addObserver(
       self, selector: #selector(audioInterrupted(_:)),
       name: AVAudioSession.interruptionNotification, object: nil)
     NotificationCenter.default.addObserver(
       self, selector: #selector(resignActive),
       name: UIApplication.willResignActiveNotification, object: nil)
+    #endif
   }
 
+  #if os(macOS)
+  /// The app's main window: losing key status interrupts a live recording.
+  private var keyObserver: NSObjectProtocol?
+
+  /// macOS entry point: also watches `window` so that it resigning key ends a live recording.
+  static func register(with registrar: FlutterPluginRegistrar, window: NSWindow) {
+    let plugin = makePlugin(registrar)
+    plugin.keyObserver = NotificationCenter.default.addObserver(
+      forName: NSWindow.didResignKeyNotification, object: window, queue: .main
+    ) { [weak plugin] _ in plugin?.interrupt() }
+  }
+  #endif
+
   static func register(with registrar: FlutterPluginRegistrar) {
-    let channel = FlutterMethodChannel(name: "rapp/speech", binaryMessenger: registrar.messenger())
+    _ = makePlugin(registrar)
+  }
+
+  @discardableResult
+  private static func makePlugin(_ registrar: FlutterPluginRegistrar) -> SpeechPlugin {
+    #if os(iOS)
+    let messenger = registrar.messenger()
+    #else
+    let messenger = registrar.messenger
+    #endif
+    let channel = FlutterMethodChannel(name: "rapp/speech", binaryMessenger: messenger)
     let plugin = SpeechPlugin(channel: channel)
     registrar.addMethodCallDelegate(plugin, channel: channel)
+    return plugin
   }
 
   func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -75,7 +107,7 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
     case .granted:
       break
     }
-    if #available(iOS 26, *) {
+    if #available(iOS 26, macOS 26, *) {
       Task { @MainActor [weak self] in
         guard let self else { return result("cancelled") }
         if let reply = await self.startAnalyzer(gen) { return result(reply) }
@@ -134,6 +166,7 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
 
   // MARK: - Interruptions
 
+  #if os(iOS)
   @objc private func audioInterrupted(_ note: Notification) {
     guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
           AVAudioSession.InterruptionType(rawValue: raw) == .began else { return }
@@ -143,6 +176,8 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
   @objc private func resignActive() {
     DispatchQueue.main.async { [weak self] in self?.interrupt() }
   }
+
+  #endif
 
   /// A call, Siri, Control Center or leaving the app: a live recording is cancelled and Dart told so.
   /// A stopped one is only waiting for its text and keeps going.
@@ -159,18 +194,32 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
 
   private static func access() -> Access {
     let speech = SFSpeechRecognizer.authorizationStatus()
+    #if os(iOS)
     let mic = AVAudioApplication.shared.recordPermission
-    if speech == .denied || speech == .restricted || mic == .denied { return .denied }
-    if speech == .notDetermined || mic == .undetermined { return .ask }
+    let micDenied = mic == .denied
+    let micUndecided = mic == .undetermined
+    #else
+    let mic = AVCaptureDevice.authorizationStatus(for: .audio)
+    let micDenied = mic == .denied || mic == .restricted
+    let micUndecided = mic == .notDetermined
+    #endif
+    if speech == .denied || speech == .restricted || micDenied { return .denied }
+    if speech == .notDetermined || micUndecided { return .ask }
     return .granted
   }
 
   /// Asks for whatever is not yet decided: speech recognition first, then the microphone.
   private static func askAccess() {
     let askMic = {
+      #if os(iOS)
       if AVAudioApplication.shared.recordPermission == .undetermined {
         AVAudioApplication.requestRecordPermission { _ in }
       }
+      #else
+      if AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined {
+        AVCaptureDevice.requestAccess(for: .audio) { _ in }
+      }
+      #endif
     }
     if SFSpeechRecognizer.authorizationStatus() == .notDetermined {
       SFSpeechRecognizer.requestAuthorization { _ in DispatchQueue.main.async(execute: askMic) }
@@ -184,6 +233,7 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
   /// Activates the session and starts the engine. `makeFeed` gets the microphone's format and returns what
   /// each tapped buffer is handed to (on the audio thread), or nil to give up.
   private func startAudio(_ makeFeed: (AVAudioFormat) -> ((AVAudioPCMBuffer) -> Void)?) -> Bool {
+    #if os(iOS)
     let session = AVAudioSession.sharedInstance()
     do {
       try session.setCategory(.record, mode: .measurement, options: [])
@@ -193,6 +243,7 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
     } catch {
       return false
     }
+    #endif
     sessionActive = true
     let engine = AVAudioEngine()
     self.engine = engine
@@ -247,22 +298,20 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
     }
     if sessionActive {
       sessionActive = false
+      #if os(iOS)
       try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+      #endif
     }
   }
 
   // MARK: - iOS 26+: SpeechAnalyzer
 
   /// The reply for Dart, or nil when the transcriber cannot serve this device or locale.
-  @available(iOS 26, *)
+  @available(iOS 26, macOS 26, *)
   @MainActor
   private func startAnalyzer(_ gen: Int) async -> String? {
     guard SpeechTranscriber.isAvailable else { return nil }
-    var found: Locale?
-    for candidate in Self.locales where found == nil {
-      found = await SpeechTranscriber.supportedLocale(equivalentTo: candidate)
-    }
-    guard let locale = found else { return nil }
+    guard let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Self.locale) else { return nil }
     let transcriber = SpeechTranscriber(
       locale: locale, transcriptionOptions: [], reportingOptions: [.volatileResults], attributeOptions: [])
 
@@ -358,8 +407,7 @@ final class SpeechPlugin: NSObject, FlutterPlugin {
   // MARK: - Below iOS 26: SFSpeechRecognizer
 
   private func startRecognizer() -> String {
-    guard let recognizer = Self.locales.lazy.compactMap({ SFSpeechRecognizer(locale: $0) }).first,
-          recognizer.isAvailable else { return "unavailable" }
+    guard let recognizer = SFSpeechRecognizer(locale: Self.locale), recognizer.isAvailable else { return "unavailable" }
     let request = SFSpeechAudioBufferRecognitionRequest()
     request.shouldReportPartialResults = true
     request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition

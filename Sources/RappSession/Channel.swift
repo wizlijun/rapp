@@ -49,8 +49,13 @@ public enum ChannelCommand: Equatable {
     /// Show the file at `path` in Finder.
     case reveal(path: String)
     /// The session whose picture has keyboard focus; nil for none. `compose`: a letter key on it
-    /// opens the writing panel (type-to-compose) instead of going to A.
-    case pictureFocus(sid: Int64?, compose: Bool)
+    /// opens the writing panel (type-to-compose) instead of going to A. `voice`: holding the voice
+    /// hotkey on it starts voice input (macOS).
+    case pictureFocus(sid: Int64?, compose: Bool, voice: Bool)
+    /// Which key starts voice input on the stage picture (gui.json's value; macOS).
+    case setVoiceHotkey(VoiceHotkey)
+    /// Dart's voice input for `sid` ended on its own: the gate swallows until the hotkey is up (macOS).
+    case voiceEnd(Int64)
     /// Re-dispatch the key events held for `sid`'s compose letter into rapp's own window.
     case composeReplay(sid: Int64)
     /// Take A's clipboard entry `clip` onto B's clipboard, or (insert) into the composer.
@@ -97,7 +102,7 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
                               "composer_paste", "composer_attach", "composer_send", "composer_drop_block",
                               "detach", "attach", "raise_detached", "fetch_clip", "copy_local", "drop_copy", "reveal",
                               "pin_save", "pin_load", "set_hidden", "close_window", "select_input",
-                              "unlock", "set_banner", "dismiss_cover", "drop_textures"]
+                              "unlock", "set_banner", "dismiss_cover", "drop_textures", "set_voice_hotkey", "voice_end"]
     guard known.contains(method) else { throw ChannelError.unknown(method) }
     guard let map = args as? [String: Any] else { throw ChannelError.bad(method) }
     let a = Args(method: method, map: map)
@@ -105,9 +110,11 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
         // `sid` is required but may be null (Dart's null arrives as NSNull).
         guard let raw = map["sid"] else { throw ChannelError.bad(method) }
         let compose = map["compose"] is NSNull ? false : try a.optionalBool("compose")
-        return .pictureFocus(sid: raw is NSNull ? nil : try a.int("sid"), compose: compose)
+        let voice = map["voice"] is NSNull ? false : try a.optionalBool("voice")
+        return .pictureFocus(sid: raw is NSNull ? nil : try a.int("sid"), compose: compose, voice: voice)
     }
     switch method {
+    case "set_voice_hotkey": return .setVoiceHotkey(VoiceHotkey(json: map["hotkey"]))
     case "copy_local": return .copyLocal(copy: try a.block("copy"))
     case "drop_copy": return .dropCopy(copy: try a.block("copy"))
     case "pin_save":
@@ -179,6 +186,8 @@ public func channelCommand(_ method: String, _ args: Any?) throws -> ChannelComm
         return .dismissCover(sid: sid, id: id)
     case "drop_textures":
         return .dropTextures(sid: sid)
+    case "voice_end":
+        return .voiceEnd(sid)
     case "set_stream":
         return .setStream(sid: sid, mode: try a.mode(), fps: try a.fps(), density: try a.density(),
                           pinned: try a.optionalBool("pinned"), focus: try a.optionalBool("focus"))

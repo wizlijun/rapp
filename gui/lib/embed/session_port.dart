@@ -6,6 +6,8 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import 'voice_key_gate.dart';
+
 /// A window's kind on A, with the same names as RappCore's `WindowKind`.
 enum WindowKind {
   normal,
@@ -261,6 +263,13 @@ class ComposeKeyEvent extends SessionEvent {
   const ComposeKeyEvent(super.sid);
 }
 
+/// The voice hotkey on [sid]'s picture moved: [phase] is what the native gate decided (hold started, released,
+/// cancelled, or the held key was used as an edit key).
+class VoiceKeyEvent extends SessionEvent {
+  const VoiceKeyEvent(super.sid, this.phase);
+  final VoiceKeyPhase phase;
+}
+
 /// Edits made in a native detached composer's draft, shared with the stage.
 class ComposerDraftEvent extends SessionEvent {
   const ComposerDraftEvent(super.sid, {this.text, this.drop, this.send = false, this.retry = false, this.action,
@@ -493,6 +502,9 @@ SessionEvent? parseSessionEvent(String method, Object? args) {
         return ComposerInsertEvent(sid, _paste(m));
       case 'compose_key':
         return ComposeKeyEvent(sid);
+      case 'voice_key':
+        final phase = VoiceKeyPhase.values.asNameMap()[m['phase']];
+        return phase == null ? null : VoiceKeyEvent(sid, phase);
       case 'transfer_status':
         return TransferStatusEvent(sid, _as<String?>(m['status']));
       case 'transfer':
@@ -599,8 +611,14 @@ abstract class SessionPort {
 
   /// The session whose picture has keyboard focus; null for none.
   /// [compose]: a letter on this picture opens the writing panel (sent only when true).
-  void pictureFocus(Object? sid, {bool compose = false}) =>
-      _send('picture_focus', {'sid': sid, if (compose) 'compose': true});
+  void pictureFocus(Object? sid, {bool compose = false, bool voice = false}) =>
+      _send('picture_focus', {'sid': sid, if (compose) 'compose': true, if (voice) 'voice': true});
+
+  /// Tells native which key starts hold-to-talk on the picture (macOS).
+  void setVoiceHotkey(VoiceHotkey h) => _send('set_voice_hotkey', {'hotkey': h.toJson()});
+
+  /// The voice input for [sid]'s picture is over: native may go back to passing keys through.
+  void voiceEnd(Object sid) => _send('voice_end', {'sid': sid});
 
   /// The held compose letter goes back into rapp's window, now that the editor has the caret.
   void composeReplay(Object sid) => _send('compose_replay', {'sid': sid});

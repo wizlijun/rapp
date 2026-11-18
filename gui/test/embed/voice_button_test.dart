@@ -12,6 +12,7 @@ import 'package:rapp/embed/composer_panel.dart';
 import 'package:rapp/embed/flutter_editor.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
+import 'package:rapp/embed/voice_button.dart';
 import 'package:rapp/embed/voice_input.dart';
 import 'package:rapp/embed/voice_overlay.dart';
 import 'package:rapp/embed/voice_ring.dart';
@@ -623,14 +624,14 @@ void main() {
     expect(find.text('去设置'), findsNothing);
   });
 
-  iosTest('start unavailable: 这台设备不能识别语音', (tester) async {
+  iosTest('start unavailable: the system-language copy', (tester) async {
     voice.startResult = VoiceStart.unavailable;
     await tester.pumpWidget(layer());
     final g = await press(tester);
     await g.up();
     await tester.pump();
     expect(ringFinder, findsNothing);
-    expect(find.text('这台设备不能识别语音'), findsOneWidget);
+    expect(find.text(voiceUnavailable), findsOneWidget);
   });
 
   iosTest('60 s: acts as release on the current pick', (tester) async {
@@ -675,11 +676,146 @@ void main() {
     await lift(tester, g);
   });
 
-  iosTest('macOS: no voice button', (tester) async {
+  group('VoiceHold without a pointer', () {
+    late List<VoicePick?> ends;
+    late int shown;
+    var due = true;
+    late VoiceHold h;
+    setUp(() {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      ends = [];
+      shown = 0;
+      due = true;
+      h = VoiceHold(
+        voice: voice,
+        composer: () => rs.composer,
+        send: (text) => sendVoice(state: es, session: rs, port: port, text: text),
+        edit: (text) => rs.composer.keep(text),
+        onEnd: ends.add,
+        languageHintDue: () => due,
+        languageHintShown: () => shown++,
+      );
+    });
+    tearDown(() {
+      h.dispose();
+      debugDefaultTargetPlatformOverride = null;
+    });
+
+    test('start without a ring holds and finish(send) sends', () async {
+      voice.stopResult = '你好';
+      await h.start();
+      expect(h.holding, isTrue);
+      h.finish(VoicePick.send);
+      await Future<void>.delayed(Duration.zero);
+      expect(sends(), [
+        [
+          {'text': '你好'}
+        ]
+      ]);
+      expect(ends, [VoicePick.send]);
+    });
+
+    test('finish(cancel) drops the words', () async {
+      voice.stopResult = '你好';
+      await h.start();
+      h.finish(VoicePick.cancel);
+      await Future<void>.delayed(Duration.zero);
+      expect(sends(), isEmpty);
+      expect(ends, [VoicePick.cancel]);
+    });
+
+    test('finish(edit) puts the words in the draft', () async {
+      voice.stopResult = '你好';
+      await h.start();
+      h.finish(VoicePick.edit);
+      await Future<void>.delayed(Duration.zero);
+      expect(rs.composer.draft, contains('你好'));
+      expect(sends(), isEmpty);
+    });
+
+    test('choose changes the pick without haptics', () async {
+      final calls = <String>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform, (c) async {
+        calls.add(c.method);
+        return null;
+      });
+      addTearDown(() => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(SystemChannels.platform, null));
+      await h.start();
+      var n = 0;
+      h.addListener(() => n++);
+      h.choose(VoicePick.cancel);
+      expect(h.pick, VoicePick.cancel);
+      expect(n, 1);
+      h.choose(VoicePick.cancel);
+      expect(n, 1);
+      expect(calls.where((c) => c.startsWith('HapticFeedback')), isEmpty);
+    });
+
+    test('a refused start ends with null', () async {
+      voice.startResult = VoiceStart.denied;
+      await h.start();
+      expect(ends, [null]);
+      expect(h.hint, voiceDenied);
+      expect(h.settings, VoiceSettings.privacy);
+    });
+
+    test('language hint once, after the first hold', () async {
+      voice.stopResult = '你好';
+      await h.start();
+      h.finish(VoicePick.send);
+      await Future<void>.delayed(Duration.zero);
+      expect(h.hint, voiceLanguageHint);
+      expect(h.settings, VoiceSettings.language);
+      expect(shown, 1);
+      due = false;
+      h.dispose();
+      h = VoiceHold(voice: voice, composer: () => rs.composer, send: (t) => null, edit: (_) {}, languageHintDue: () => due);
+      voice.stopResult = '好';
+      await h.start();
+      h.finish(VoicePick.send);
+      await Future<void>.delayed(Duration.zero);
+      expect(h.hint, isNull);
+    });
+
+    test('a 没听清 release does not show the language hint', () async {
+      voice.stopResult = '';
+      await h.start();
+      h.finish(VoicePick.send);
+      await Future<void>.delayed(Duration.zero);
+      expect(h.hint, voiceBlank);
+      expect(shown, 0);
+    });
+
+    test('dispose mid-hold ends with null once', () async {
+      await h.start();
+      h.dispose();
+      expect(ends, [null]);
+      h = VoiceHold(voice: voice, composer: () => rs.composer, send: (t) => null, edit: (_) {});
+    });
+
+    test('macOS 去设置 opens the pane', () async {
+      final ran = <String>[];
+      Future<ProcessResult> run(String c, List<String> a) async {
+        ran.add('$c ${a.join(' ')}');
+        return ProcessResult(0, 0, '', '');
+      }
+      await openVoiceSettings(VoiceSettings.language, run: run);
+      await openVoiceSettings(VoiceSettings.privacy, run: run);
+      expect(ran, [
+        'open x-apple.systempreferences:com.apple.Localization-Settings.extension',
+        'open x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone',
+      ]);
+    });
+  });
+
+  iosTest('macOS: the Mac row button, not the 64 round one', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     await tester.pumpWidget(layer());
     expect(open, findsOneWidget);
-    expect(hold, findsNothing);
+    expect(tester.getSize(hold).width, lessThan(64));
+    expect(ringFinder, findsNothing);
   });
 
   for (final right in [true, false]) {

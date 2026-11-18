@@ -24,6 +24,8 @@ class MainFlutterWindow: NSWindow {
     SessionPlugin.register(with: flutterViewController.registrar(forPlugin: "RappSession"))
     SecureInputPlugin.register(with: flutterViewController.registrar(forPlugin: "RappSecureInput"), window: self)
 
+    SpeechPlugin.register(with: flutterViewController.registrar(forPlugin: "RappSpeech"), window: self)
+
     ComposerPlugin.register(with: flutterViewController.registrar(forPlugin: "RappComposer"))
 
     let system = FlutterMethodChannel(name: "rapp/system", binaryMessenger: flutterViewController.engine.binaryMessenger)
