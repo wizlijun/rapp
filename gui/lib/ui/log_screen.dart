@@ -220,6 +220,8 @@ class _LogScreenState extends State<LogScreen> {
       minWidth: 96,
       menuConstraints: (w) => BoxConstraints(minWidth: math.max(w, 200), maxWidth: math.max(w, 280)),
       selected: true,
+      // 本机 is the default, not a pick: only a chosen device is announced as selected.
+      semanticSelected: m.device != null,
       current: m.device ?? '',
       label: Row(mainAxisSize: MainAxisSize.min, children: [
         if (lamp != null) ...[StatusLamp(lamp), const SizedBox(width: 8)],

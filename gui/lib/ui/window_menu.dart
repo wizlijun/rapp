@@ -6,7 +6,7 @@ import 'package:flutter/material.dart';
 import '../embed/session_port.dart';
 import 'main_state.dart';
 import 'controls.dart';
-import 'rule_snack.dart';
+import 'rule_snack.dart' show ruleSnack;
 import 'tokens.dart';
 
 /// What the menu came back with: an action and the window it is about.
@@ -74,6 +74,8 @@ class WindowMenu extends StatelessWidget {
             selected: selected,
             // No room for the arrow when the title is already down to a count.
             arrow: canSwitch && !compact,
+            center: compact,
+            padding: compact ? EdgeInsets.zero : null,
             current: current == null ? null : ('select', current.id),
             label: Text(compact ? '${windows.length + hidden.length}' : label, key: const Key('window-menu-label')),
             items: [
@@ -110,9 +112,9 @@ class WindowMenu extends StatelessWidget {
                 ),
               if (hidden.isNotEmpty) ...[
                 const RappMenuItem<_Pick>.divider(),
-                RappMenuItem<_Pick>(value: ('', 0), enabled: false, label: '已隐藏 ${hidden.length} 个'),
+                RappMenuItem<_Pick>.caption(label: '已隐藏 ${hidden.length} 个'),
                 for (final w in hidden) ...[
-                  RappMenuItem<_Pick>(value: ('', w.id), enabled: false, label: titleOf(w)),
+                  RappMenuItem<_Pick>.caption(label: titleOf(w)),
                   RappMenuItem<_Pick>(value: ('show', w.id), label: '这次显示'),
                   RappMenuItem<_Pick>(value: ('unhide', w.id), label: '不再隐藏'),
                 ],

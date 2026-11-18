@@ -3,8 +3,13 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import 'rule_snack.dart' show menuAt;
 import 'tokens.dart';
+
+/// Where a menu opened at global point [p] goes, inside [context]'s overlay.
+RelativeRect menuAt(BuildContext context, Offset p) {
+  final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+  return RelativeRect.fromLTRB(p.dx, p.dy, overlay.size.width - p.dx, overlay.size.height - p.dy);
+}
 
 enum _Kind { primary, secondary, accent, quiet }
 
@@ -285,8 +290,10 @@ TextStyle _rowLabel(RappTokens t, TextStyle? style, bool muted) =>
 
 /// A label with a switch at the right end; the whole row toggles it. [switchKey] is the inner
 /// [Switch]'s key and [key] the row's. Without [onChanged] the row is inert and muted.
+///
+/// [key] goes on the inner [InkWell], not on the widget itself, so a finder by that key (a tap target in
+/// tests, a lookup in code) matches exactly one widget instead of the row and its tap target both.
 class RappSwitchRow extends StatelessWidget {
-  // [key] is handed to the InkWell, not to super, so a lookup by it finds one widget.
   // ignore: use_key_in_widget_constructors
   const RappSwitchRow({
     Key? key,
@@ -441,6 +448,16 @@ class RappMenuItem<T> {
     this.onSecondaryTapUp,
   }) : divider = false;
 
+  /// A caption row: text only, never picked, muted.
+  const RappMenuItem.caption({required this.label})
+    : value = null,
+      key = null,
+      lead = null,
+      trailing = null,
+      enabled = false,
+      onSecondaryTapUp = null,
+      divider = false;
+
   /// A thin rule between groups of rows.
   const RappMenuItem.divider()
     : value = null,
@@ -473,9 +490,19 @@ Future<T?> showRappMenu<T>(
   required List<RappMenuItem<T>> items,
   T? current,
   BoxConstraints? constraints,
+  TextStyle? textStyle,
 }) {
   final t = RappTokens.of(c);
   final height = controlHeightOf(c);
+  // Only the size and font: the colour stays the menu's, so a caption row stays muted.
+  final sized = textStyle == null
+      ? null
+      : TextStyle(
+          fontSize: textStyle.fontSize,
+          height: textStyle.height,
+          fontFamily: textStyle.fontFamily,
+          fontFamilyFallback: textStyle.fontFamilyFallback,
+        );
   return showMenu<T>(
     context: c,
     position: position,
@@ -504,12 +531,14 @@ Future<T?> showRappMenu<T>(
                 if (it.trailing != null) it.trailing!,
               ]);
               final secondary = it.onSecondaryTapUp;
-              if (secondary == null) return body;
-              return GestureDetector(
-                behavior: HitTestBehavior.opaque,
-                onSecondaryTapUp: (d) => secondary(row, d),
-                child: body,
-              );
+              final Widget row0 = secondary == null
+                  ? body
+                  : GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onSecondaryTapUp: (d) => secondary(row, d),
+                      child: body,
+                    );
+              return sized == null ? row0 : DefaultTextStyle.merge(style: sized, child: row0);
             }),
           ),
     ],
@@ -519,8 +548,10 @@ Future<T?> showRappMenu<T>(
 /// The dropdown box: [label] (which may lead with its own icon) with a down arrow. At rest a thin line border; while its
 /// menu is open, or when [selected], the raised fill, a text-colour border and semibold text. Opening calls
 /// [showRappMenu] under the box; with a non-null [current] it is a pick-one menu.
+///
+/// [key] goes on the inner [InkWell], not on the widget itself, so a finder by that key matches exactly one
+/// widget (the box's tap target) instead of the dropdown and its InkWell both.
 class RappDropdown<T> extends StatefulWidget {
-  // [key] is handed to the InkWell, not to super, so a lookup by it finds one widget.
   // ignore: use_key_in_widget_constructors
   const RappDropdown({
     Key? key,
@@ -536,6 +567,10 @@ class RappDropdown<T> extends StatefulWidget {
     this.enabled = true,
     this.padding,
     this.menuConstraints,
+    this.semanticLabel,
+    this.textStyle,
+    this.semanticSelected,
+    this.center = false,
   }) : _boxKey = key;
 
   final Key? _boxKey;
@@ -558,6 +593,19 @@ class RappDropdown<T> extends StatefulWidget {
   /// Off: the box is drawn but does not open.
   final bool enabled;
 
+  /// What assistive tech reads for the box; without it the label's own text is read.
+  final String? semanticLabel;
+
+  /// A text style for the label and the menu rows (size, height); the colour and the open-state weight stay
+  /// the box's own.
+  final TextStyle? textStyle;
+
+  /// Whether assistive tech hears "selected". Default: [selected] on a pick-one box whose [current] is set.
+  final bool? semanticSelected;
+
+  /// Centre the label in a box wider than it (a count with no arrow).
+  final bool center;
+
   /// Replaces the box's own padding (left 12, right 6).
   final EdgeInsets? padding;
 
@@ -572,6 +620,7 @@ class _RappDropdownState<T> extends State<RappDropdown<T>> {
   bool _open = false;
 
   Future<void> _show(BuildContext box) async {
+    if (widget.items.isEmpty) return;
     final render = box.findRenderObject() as RenderBox;
     final at = render.localToGlobal(Offset(0, render.size.height));
     setState(() => _open = true);
@@ -580,6 +629,7 @@ class _RappDropdownState<T> extends State<RappDropdown<T>> {
       position: menuAt(box, at),
       items: widget.items,
       current: widget.current,
+      textStyle: widget.textStyle,
       constraints: widget.menuConstraints?.call(render.size.width) ??
           BoxConstraints(minWidth: math.max(render.size.width, 112), maxWidth: math.max(render.size.width, 280)),
     );
@@ -595,14 +645,20 @@ class _RappDropdownState<T> extends State<RappDropdown<T>> {
     final strong = widget.selected || (_open && widget.current != null);
     final color = widget.dim ? t.muted : t.text;
     final label = DefaultTextStyle.merge(
-      style: TextStyle(color: color, fontWeight: strong ? FontWeight.w600 : null),
+      style: (widget.textStyle ?? const TextStyle()).copyWith(
+        color: color,
+        fontWeight: strong ? FontWeight.w600 : widget.textStyle?.fontWeight,
+      ),
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
       child: widget.label,
     );
     return Semantics(
       button: true,
-      selected: widget.selected,
+      enabled: widget.enabled,
+      label: widget.semanticLabel,
+      excludeSemantics: widget.semanticLabel != null,
+      selected: widget.semanticSelected ?? (widget.selected && widget.current != null),
       child: Material(
         type: MaterialType.transparency,
         child: Builder(
@@ -614,7 +670,10 @@ class _RappDropdownState<T> extends State<RappDropdown<T>> {
               constraints: BoxConstraints(minHeight: controlHeightOf(context), minWidth: widget.minWidth ?? 0),
               padding: widget.padding ?? const EdgeInsets.only(left: 12, right: 6),
               decoration: strong ? t.raiseBox(border: t.text) : BoxDecoration(borderRadius: radius, border: Border.all(color: t.line)),
-              child: Row(mainAxisSize: widget.expand ? MainAxisSize.max : MainAxisSize.min, children: [
+              child: Row(
+                  mainAxisSize: widget.expand ? MainAxisSize.max : MainAxisSize.min,
+                  mainAxisAlignment: widget.center ? MainAxisAlignment.center : MainAxisAlignment.start,
+                  children: [
                 widget.expand ? Expanded(child: label) : Flexible(child: label),
                 if (widget.arrow) Icon(Icons.arrow_drop_down, size: 18, color: t.muted),
               ]),

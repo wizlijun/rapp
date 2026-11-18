@@ -1,4 +1,4 @@
-import 'dart:ui' show CheckedState;
+import 'dart:ui' show CheckedState, Tristate;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -170,17 +170,27 @@ void main() {
       await t.tap(find.text('甲'));
       expect(got, true);
     });
-    testWidgets('tapping the switch calls once and the switch is 38x24', (t) async {
+    testWidgets('tapping the switch calls once', (t) async {
       var n = 0;
       await t.pumpWidget(wrap(RappSwitchRow(
           switchKey: const Key('sw'), label: '甲', value: false, onChanged: (_) => n++)));
-      expect(t.getSize(find.ancestor(of: find.byKey(const Key('sw')), matching: find.byType(FittedBox))), const Size(38, 24));
       await t.tap(find.byKey(const Key('sw')));
       expect(n, 1);
     });
+    testWidgets('the switch is exactly 38x24 on macOS', (t) async {
+      await onPlatform(TargetPlatform.macOS, () async {
+        await t.pumpWidget(onP(TargetPlatform.macOS,
+            RappSwitchRow(switchKey: const Key('sw'), label: '甲', value: false, onChanged: (_) {})));
+        expect(t.getSize(find.ancestor(of: find.byKey(const Key('sw')), matching: find.byType(FittedBox))),
+            const Size(38, 24));
+      });
+    });
     testWidgets('onChanged null is inert and muted', (t) async {
-      await t.pumpWidget(wrap(const RappSwitchRow(label: '甲', value: false)));
+      await t.pumpWidget(wrap(const RappSwitchRow(switchKey: Key('sw'), label: '甲', value: false)));
       await t.tap(find.text('甲'));
+      // Nothing to call: neither the row nor the switch has a handler.
+      expect(t.widget<InkWell>(find.byType(InkWell)).onTap, isNull);
+      expect(t.widget<Switch>(find.byKey(const Key('sw'))).onChanged, isNull);
       expect(labelColor(t, '甲'), tk.muted);
     });
     testWidgets('dim mutes the label and note is muted', (t) async {
@@ -208,9 +218,17 @@ void main() {
       await t.tap(find.text('甲'));
       expect(got, true);
     });
+    testWidgets('tapping the checkbox itself fires once', (t) async {
+      var n = 0;
+      await t.pumpWidget(wrap(RappCheckRow(label: '甲', value: false, onChanged: (_) => n++)));
+      await t.tap(find.byType(Checkbox));
+      expect(n, 1);
+    });
     testWidgets('disabled is inert', (t) async {
       await t.pumpWidget(wrap(const RappCheckRow(label: '甲', value: false)));
       await t.tap(find.text('甲'));
+      expect(t.widget<InkWell>(find.byType(InkWell)).onTap, isNull);
+      expect(t.widget<Checkbox>(find.byType(Checkbox)).onChanged, isNull);
       expect(labelColor(t, '甲'), tk.muted);
     });
     for (final (p, h) in [(TargetPlatform.macOS, 40.0), (TargetPlatform.iOS, 48.0)]) {
@@ -281,7 +299,7 @@ void main() {
       final tick = t.getCenter(find.byIcon(Icons.check)).dy;
       expect((tick - t.getCenter(find.text('二')).dy).abs() < 1, true);
       expect(t.widget<Icon>(find.byIcon(Icons.check)).size, 18);
-      expect(t.widget<Text>(find.text('二')).style?.fontWeight, isNull);
+      expect(t.renderObject<RenderParagraph>(find.text('二')).text.style?.fontWeight, isNot(FontWeight.w600));
     });
     testWidgets('while open the box uses the selected style', (t) async {
       await t.pumpWidget(dd());
@@ -362,17 +380,97 @@ void main() {
       expect((box(t).border! as Border).top.color, tk.line);
       expect(DefaultTextStyle.of(t.element(find.text('甲'))).style.fontWeight, isNot(FontWeight.w600));
     });
-    testWidgets('menu rows are control height', (t) async {
-      await onPlatform(TargetPlatform.iOS, () async {
-        await t.pumpWidget(onP(TargetPlatform.iOS, RappDropdown<int>(
-          label: const Text('甲'),
-          items: const [RappMenuItem(value: 1, label: '一')],
-          onSelected: (_) {},
-        )));
-        await t.tap(find.text('甲'));
-        await t.pumpAndSettle();
-        expect(t.getSize(find.ancestor(of: find.text('一'), matching: find.byType(InkWell)).first).height, 48);
+    for (final (p, h) in [(TargetPlatform.macOS, 40.0), (TargetPlatform.iOS, 48.0)]) {
+      testWidgets('menu rows are $h on $p', (t) async {
+        await onPlatform(p, () async {
+          await t.pumpWidget(onP(p, RappDropdown<int>(
+            label: const Text('甲'),
+            items: const [RappMenuItem(value: 1, label: '一')],
+            onSelected: (_) {},
+          )));
+          await t.tap(find.text('甲'));
+          await t.pumpAndSettle();
+          expect(t.getSize(find.ancestor(of: find.text('一'), matching: find.byType(InkWell)).first).height, h);
+        });
       });
+    }
+    testWidgets('empty items do not open a menu', (t) async {
+      await t.pumpWidget(onP(TargetPlatform.macOS,
+          RappDropdown<int>(key: const Key('dd'), label: const Text('甲'), items: const [], onSelected: (_) {})));
+      await t.tap(find.byKey(const Key('dd')));
+      await t.pumpAndSettle();
+      expect(find.byType(PopupMenuItem<int>), findsNothing);
+      expect(find.byType(Scrollable), findsNothing);
+    });
+    testWidgets('semantics: label, enabled, selected only with a set current', (t) async {
+      final h = t.ensureSemantics();
+      Future<SemanticsData> data(Widget w) async {
+        await t.pumpWidget(onP(TargetPlatform.macOS, w));
+        return t.getSemantics(find.byKey(const Key('dd'))).getSemanticsData();
+      }
+      RappDropdown<int> d({int? current, bool selected = false, bool enabled = true, String? label}) => RappDropdown<int>(
+            key: const Key('dd'),
+            label: const Text('甲'),
+            current: current,
+            selected: selected,
+            enabled: enabled,
+            semanticLabel: label,
+            items: const [RappMenuItem(value: 1, label: '一')],
+            onSelected: (_) {},
+          );
+      var s = await data(d(current: 1, selected: true, label: '设备'));
+      expect(s.label, '设备');
+      expect(s.flagsCollection.isSelected, Tristate.isTrue);
+      expect(s.flagsCollection.isEnabled, Tristate.isTrue);
+      s = await data(d(selected: true, enabled: false));
+      expect(s.flagsCollection.isSelected, isNot(Tristate.isTrue));
+      expect(s.flagsCollection.isEnabled, Tristate.isFalse);
+      h.dispose();
+    });
+    testWidgets('center puts the label in the middle of a wider box', (t) async {
+      await t.pumpWidget(onP(TargetPlatform.macOS, Row(children: [
+        RappDropdown<int>(
+            key: const Key('dd'),
+            minWidth: 48,
+            arrow: false,
+            center: true,
+            padding: EdgeInsets.zero,
+            label: const Text('9'),
+            items: const [RappMenuItem(value: 1, label: '一')],
+            onSelected: (_) {}),
+      ])));
+      final box = t.getRect(find.byKey(const Key('dd')));
+      expect((t.getCenter(find.text('9')).dx - box.center.dx).abs() < 0.5, true);
+    });
+    testWidgets('textStyle gives the box and the rows a size, and open w600 still applies', (t) async {
+      const small = TextStyle(fontSize: 11, fontWeight: FontWeight.w400);
+      await t.pumpWidget(onP(TargetPlatform.macOS, RappDropdown<int>(
+        key: const Key('dd'),
+        textStyle: small,
+        current: 1,
+        label: const Text('甲'),
+        items: const [RappMenuItem(value: 1, label: '一')],
+        onSelected: (_) {},
+      )));
+      await t.tap(find.byKey(const Key('dd')));
+      await t.pumpAndSettle();
+      final box = t.renderObject<RenderParagraph>(find.text('甲')).text.style!;
+      expect((box.fontSize, box.fontWeight), (11.0, FontWeight.w600));
+      expect(t.renderObject<RenderParagraph>(find.text('一')).text.style!.fontSize, 11);
+    });
+  });
+
+  group('RappMenuItem.caption', () {
+    testWidgets('is a disabled row with no value', (t) async {
+      await t.pumpWidget(onP(TargetPlatform.macOS, RappDropdown<int>(
+        label: const Text('甲'),
+        items: const [RappMenuItem<int>.caption(label: '说明'), RappMenuItem(value: 1, label: '一')],
+        onSelected: (_) {},
+      )));
+      await t.tap(find.text('甲'));
+      await t.pumpAndSettle();
+      expect(t.widget<PopupMenuItem<int>>(find.widgetWithText(PopupMenuItem<int>, '说明')).enabled, false);
+      expect(t.widget<PopupMenuItem<int>>(find.widgetWithText(PopupMenuItem<int>, '说明')).value, isNull);
     });
   });
 }

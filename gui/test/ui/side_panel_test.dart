@@ -185,6 +185,21 @@ void main() {
     });
   });
 
+  testWidgets('a settings dropdown keeps its small rows and goes semibold while open', (tester) async {
+    await onPlatform(TargetPlatform.macOS, () async {
+      await tester.pumpWidget(MaterialApp(
+        theme: themeDataFor(RappTheme.matrix, textSize: 13, platform: TargetPlatform.macOS),
+        home: Scaffold(body: Center(child: panel())),
+      ));
+      await tester.tap(find.byKey(const Key('theme-dropdown')));
+      await tester.pumpAndSettle();
+      final box = tester.renderObject<RenderParagraph>(find.text('MATRIX').first).text.style!;
+      expect((box.fontSize, box.fontWeight), (12.0, FontWeight.w600));
+      final row = tester.renderObject<RenderParagraph>(find.text('WESTWORLD')).text.style!;
+      expect(row.fontSize, 12);
+    });
+  });
+
   testWidgets('on the iPad 全局设置 keeps 48px touch rows', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
     addTearDown(() => debugDefaultTargetPlatformOverride = null);

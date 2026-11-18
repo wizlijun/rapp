@@ -478,6 +478,9 @@ void main() {
           lessThanOrEqualTo(WindowMenu.compactWidth));
       expect(tester.widget<Text>(find.byKey(const Key('window-menu-label'))).data, '2');
       expect(find.byTooltip('A window with a long title（2 个窗口）'), findsOneWidget);
+      // The count sits in the middle of its box.
+      final box = tester.getRect(find.byKey(const Key('window-menu')));
+      expect((tester.getCenter(find.byKey(const Key('window-menu-label'))).dx - box.center.dx).abs(), lessThan(1));
       // The bar still fits: nothing overflowed.
       expect(tester.takeException(), isNull);
     });

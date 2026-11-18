@@ -138,12 +138,19 @@ class _IosLocalSectionState extends State<IosLocalSection> {
       _row('本机名', Text(a?.name ?? '')),
       _row('数据用量', Text(bytes == null ? '计算中…' : sizeText(bytes))),
       _row('版本', Text(_version ?? '')),
-      RappSwitchRow(
-        switchKey: const Key('keep-awake-switch'),
-        label: '屏幕常亮',
-        note: '有会话时屏幕不自动熄灭',
-        value: widget.prefs.keepAwake,
-        onChanged: _setKeepAwake,
+      // Bounded, so the switch stays near its label.
+      Align(
+        alignment: Alignment.centerLeft,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 320),
+          child: RappSwitchRow(
+            switchKey: const Key('keep-awake-switch'),
+            label: '屏幕常亮',
+            note: '有会话时屏幕不自动熄灭',
+            value: widget.prefs.keepAwake,
+            onChanged: _setKeepAwake,
+          ),
+        ),
       ),
       const SizedBox(height: 8),
       Align(

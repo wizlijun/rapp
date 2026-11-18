@@ -163,6 +163,8 @@ class _DevicesTabState extends State<DevicesTab> {
         expand: true,
         menuConstraints: (w) => BoxConstraints(minWidth: w, maxWidth: w),
         enabled: hosts.isNotEmpty,
+        arrow: hosts.isNotEmpty,
+        semanticLabel: '其他设备：$label',
         selected: sel != null,
         dim: sel == null,
         current: sel,
@@ -171,7 +173,7 @@ class _DevicesTabState extends State<DevicesTab> {
           Expanded(child: Text(label, key: const Key('device-picker-label'))),
           if (hosts.isNotEmpty) ...[
             const SizedBox(width: 6),
-            Text('${hosts.length} 台', style: TextStyle(color: t.muted)),
+            Text('${hosts.length} 台', style: TextStyle(color: t.muted, fontWeight: FontWeight.normal)),
           ],
         ]),
         items: [

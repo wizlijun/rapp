@@ -208,7 +208,8 @@ class _Footer extends StatelessWidget {
           key: key,
           expand: true,
           current: value,
-          label: Text(items.firstWhere((e) => e.$1 == value).$2, style: small),
+          textStyle: small,
+          label: Text(items.firstWhere((e) => e.$1 == value).$2),
           items: [for (final (v, label) in items) RappMenuItem<T>(value: v, label: label)],
           onSelected: onChanged,
         );

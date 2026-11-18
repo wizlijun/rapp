@@ -183,11 +183,15 @@ class _LocalSectionState extends State<LocalSection> {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        RappSwitchRow(
-          switchKey: const Key('auto-lock-switch'),
-          label: '远程 app 都关闭后自动锁屏',
-          value: st.autoLock,
-          onChanged: _setAutoLock,
+        // Bounded, so the switch stays near its label.
+        ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 320),
+          child: RappSwitchRow(
+            switchKey: const Key('auto-lock-switch'),
+            label: '远程 app 都关闭后自动锁屏',
+            value: st.autoLock,
+            onChanged: _setAutoLock,
+          ),
         ),
         Text('锁屏后，B 打开 app 时需要输入这台 Mac 的登录密码。', style: TextStyle(color: t.muted)),
       ]),
