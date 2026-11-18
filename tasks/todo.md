@@ -573,8 +573,9 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [x] 读取 `/home/bruce/Work/rapp-crash-2026-11-18.md`，对照 core 228221 和实际引擎提交：GTK 绘制末尾空 GL context 的证据成立。已安装引擎 `89c39edf...` 的 `fl_view_renderer_draw` 仍清空当前 context；Flutter 3.50.0 的源码包含上游 #192137 的保留 context 修复。独立 SDK 路径 `~/development/flutter-rapp-3.50.0`，原 SDK 保持原状。
 - [x] 加强压力测试后，0.14.6-2 于 PID 237036 再次崩溃：栈为 `wl_proxy_get_version → GDK make-current → gdk_cairo_draw_from_gl`，与先前空 context 栈不同。主窗口隐藏改为 GTK idle 回调，避免 Flutter 同步等帧期间处理平台消息时直接取消 Wayland 窗口映射。CM 的隐藏/复用和自动后台入口继续保留。
 - [x] Linux 构建要求稳定版 Flutter >= 3.50.0，拒绝旧版或预发布引擎；包内增加 `FLUTTER-INFO.json`，BUILD-INFO 记录实际引擎摘要。构建路径与版本拒绝夹具通过。
-- [x] 拉取并整合上游 main `1a7f071` / 0.14.7（含 macOS NSPasteboard 主线程修复与协议 v14）。本次版本计划 0.14.8；对端需支持 v14，旧 v13 client 需更新。Linux 继续整桌面采集，兼容 v14 setView 消息但不声称实现局部截取。
+- [x] 拉取并整合上游 main `5b7bf7a` / 0.14.7（含发布快照记录）（含 macOS NSPasteboard 主线程修复与协议 v14）。本次版本计划 0.14.8；对端需支持 v14，旧 v13 client 需更新。Linux 继续整桌面采集，兼容 v14 setView 消息但不声称实现局部截取。
 - [x] 合并后 host/client-core 78 项测试通过，host Clippy 通过；隔离 Xvfb/labwc 原生输入与串流通过。首次当前桌面采集超时，随后同测试原样复验通过，安装版只读串流采样亦通过；未放宽断言。
 - [x] Flutter 3.50.0 全量回归 2158 项通过、15 项既有跳过；analyze 无 error/warning，113 项 Flutter material 导入弃用 info，`--no-fatal-infos` 通过。Linux GUI 和全部 7 个 Rust worker 构建成功。
 - [ ] 反复开关/缩放/最大化压力测试与最终包验收。真实桌面焦点检查遇到锁屏/熄屏阻断，补充启动前检查，待解锁后验证；尚未把此超时当作新的程序崩溃。
+- [x] 干净 worktree 从 `a7c482d` 构建 0.14.8-1；Arch/便携包 34 文件摘要一致、13 个 ELF 依赖解析通过，Flutter 3.50.0 / engine `371f77202a73e8dff57a8b3bff75bca55c090aee` 与实际引擎 SHA256 匹配。解包后隔离 headless Wayland 完整 hub → QUIC service → host 桌面串流通过；四组件终端/端口/重启联调通过。
 - [ ] GitHub 发布及本机安装最终版本。
