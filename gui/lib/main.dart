@@ -225,7 +225,15 @@ class _Shell with WindowListener, TrayListener {
   }
 
   @override
-  void onWindowClose() => windowManager.hide();
+  void onWindowClose() {
+    if (Platform.isLinux) {
+      // Flutter can deliver platform calls while GTK waits for a resized frame.
+      // Let the native GTK loop finish that draw before unmapping the window.
+      const MethodChannel('rapp/linux').invokeMethod<void>('hide_window');
+    } else {
+      windowManager.hide();
+    }
+  }
 
   @override
   void onTrayIconMouseDown() => trayManager.popUpContextMenu();
