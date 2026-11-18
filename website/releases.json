@@ -2,6 +2,30 @@
   {
     "assets": [
       {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.14.9/rapp-0.14.9.pkg",
+        "name": "rapp-0.14.9.pkg",
+        "size": 20590904
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.14.9/latest.json",
+        "name": "latest.json",
+        "size": 3391
+      },
+      {
+        "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.14.9/rapp-0.14.9-macos-arm64.zip",
+        "name": "rapp-0.14.9-macos-arm64.zip",
+        "size": 20614708
+      }
+    ],
+    "draft": false,
+    "html_url": "https://github.com/wizlijun/rapp/releases/tag/v0.14.9",
+    "prerelease": false,
+    "published_at": "2026-11-18T08:31:16Z",
+    "tag_name": "v0.14.9"
+  },
+  {
+    "assets": [
+      {
         "browser_download_url": "https://github.com/wizlijun/rapp/releases/download/v0.14.8/rapp-0.14.8-omarchy-x86_64-SHA256SUMS",
         "name": "rapp-0.14.8-omarchy-x86_64-SHA256SUMS",
         "size": 207
