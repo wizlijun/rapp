@@ -235,11 +235,16 @@ void method(FlMethodChannel *, FlMethodCall *call, gpointer data) {
   const std::string name = fl_method_call_get_name(call);
   FlValue *args = fl_method_call_get_args(call);
   if (name == "close_window") {
-    // window_manager's destroy sends another delete-event, which Flutter may
-    // intercept. Explicitly dispose this engine/window without exiting the
-    // shared process. Respond before destroying the method channel's owner.
+    // Reuse a hidden connection manager while the main GUI is alive. Destroying
+    // and recreating a Flutter implicit view in the shared process can leave
+    // GDK drawing with an invalid EGL context. A CM-only process can quit.
     g_idle_add_full(G_PRIORITY_DEFAULT_IDLE, +[](gpointer window) -> gboolean {
-      gtk_widget_destroy(GTK_WIDGET(window));
+      auto *app = gtk_window_get_application(GTK_WINDOW(window));
+      if (app && g_list_length(gtk_application_get_windows(app)) == 1) {
+        g_application_quit(G_APPLICATION(app));
+      } else {
+        gtk_widget_hide(GTK_WIDGET(window));
+      }
       return G_SOURCE_REMOVE;
     }, g_object_ref(d->main), g_object_unref);
     return success(call);

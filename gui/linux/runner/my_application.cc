@@ -114,6 +114,14 @@ static int my_application_command_line(GApplication* application,
   for (int i = 1; arguments[i] != nullptr; ++i) {
     if (g_str_equal(arguments[i], "--cm")) cm = TRUE;
   }
+  // Automatic service notifications need no Flutter engine or mapped window.
+  // The normal GUI already shows incoming sessions, and an explicit --cm can
+  // open the manager on demand. Do not alter an explicitly opened window.
+  if (cm) {
+    for (int i = 1; arguments[i] != nullptr; ++i) {
+      if (g_str_equal(arguments[i], "--background")) return 0;
+    }
+  }
   show_window(application, cm, arguments + 1);
   return 0;
 }

@@ -28,15 +28,7 @@ pub struct Image {
 }
 impl Image {
     pub fn scaled(self, display: &Display, density: f32) -> Self {
-        // Bound both memory and a worst-case uncompressible v13 message (<64 MiB).
-        let factor = (display.width as f32 * density / self.width as f32)
-            .min(display.height as f32 * density / self.height as f32)
-            .min(4096. / self.width.max(self.height) as f32)
-            .min(1.);
-        let (w, h) = (
-            ((self.width as f32 * factor).round() as usize).max(1),
-            ((self.height as f32 * factor).round() as usize).max(1),
-        );
+        let (w, h) = scaled_dimensions(self.width, self.height, display, density);
         if (w, h) == (self.width, self.height) {
             return self;
         }
@@ -54,6 +46,17 @@ impl Image {
             pixels,
         }
     }
+}
+// Bound both memory and the largest uncompressed v13 frame.
+pub fn scaled_dimensions(w: usize, h: usize, display: &Display, density: f32) -> (usize, usize) {
+    let factor = (display.width as f32 * density / w as f32)
+        .min(display.height as f32 * density / h as f32)
+        .min(4096. / w.max(h) as f32)
+        .min(1.);
+    (
+        ((w as f32 * factor).round() as usize).max(1),
+        ((h as f32 * factor).round() as usize).max(1),
+    )
 }
 pub enum Desktop {
     Wayland(Box<wayland::Wayland>),
@@ -77,6 +80,12 @@ impl Desktop {
         }
     }
     pub fn select(&mut self, app: &str) -> Result<Display> {
+        self.select_for(app, true)
+    }
+    pub fn select_capture(&mut self, app: &str) -> Result<Display> {
+        self.select_for(app, false)
+    }
+    fn select_for(&mut self, app: &str, input: bool) -> Result<Display> {
         let id = app
             .strip_prefix("desktop:")
             .ok_or_else(|| anyhow::anyhow!("Linux host supports desktop sessions only"))?;
@@ -91,7 +100,8 @@ impl Desktop {
         .ok_or_else(|| anyhow::anyhow!("display is no longer available"))?;
         ensure!(d.width > 0 && d.height > 0, "invalid display dimensions");
         match self {
-            Self::Wayland(b) => b.select(&d)?,
+            Self::Wayland(b) if input => b.select(&d)?,
+            Self::Wayland(b) => b.select_capture(&d),
             Self::X11(b) => b.selected = Some(d.clone()),
         }
         Ok(d)
@@ -100,6 +110,12 @@ impl Desktop {
         match self {
             Self::Wayland(d) => d.capture(),
             Self::X11(d) => d.capture(),
+        }
+    }
+    pub fn capture_scaled(&mut self, display: &Display, density: f32) -> Result<Image> {
+        match self {
+            Self::Wayland(d) => d.capture_scaled(density),
+            Self::X11(d) => Ok(d.capture()?.scaled(display, density)),
         }
     }
     pub fn key(&mut self, code: u16, flags: u64, down: bool) -> Result<()> {

@@ -556,3 +556,13 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [x] [v0.14.7 Release](https://github.com/wizlijun/rapp/releases/tag/v0.14.7) 已公开并设为 Latest，pkg / zip / latest.json 三个资产的 GitHub 大小与 sha256 均与本地一致；网站备用快照刷新至 44 个 release（macOS → 0.14.7，Linux → 0.14.6）。
 - [ ] **Linux 侧仍是协议 v13**：v14 客户端暂时连不上 Linux 桌面会话，需要 Linux 侧出 v14 的包。
 - [ ] 网站未部署：`npx --yes wrangler@4.135.0 deploy --config website/wrangler.jsonc` 仍需 `CLOUDFLARE_API_TOKEN` 或交互登录（累计 14 版快照已提交未部署）。
+
+## Linux host 卡顿与连接监控后台运行（2026-11-18，本机验证）
+
+- [x] 用户反馈本地桌面和远程端同时卡顿。Wayland 采集改为复用 RAM-backed shm buffer，遵守 compositor release 后再复用；融合缩放与像素转换，避免逐帧完整 4K 中间图像和重复页分配。
+- [x] 采集/编码移入独立线程，输入与 ping 不再等待采集；最多一个任务和一帧确认在途，按工作耗时保留桌面处理时间，静态画面退避，实际输入唤醒。接管、模式/密度切换使用独立 epoch 重建全帧参考。
+- [x] Linux service 自动启动连接管理时传入 `--cm --background`；原生入口不创建窗口或 Flutter engine，也不抢焦点；显式 `rapp --cm` 仍可查看连接。
+- [x] host 10 项单元测试与 Clippy 通过；隔离 Xvfb、headless labwc 和本机 Omarchy 通过原生串流、输入、Unicode、接管、画质切换、踢出和 EOF。首次与编译并行时 labwc Unicode 事件检查失败，停止编译后原样复验通过，未弱化断言。四组件联调用不含 host 的独立二进制目录验证；完整 bundle 通过 hub → QUIC service → host 桌面串流。
+- [x] 新增只读 `scripts/benchmark-linux-host.py`。本机 3840×2400 / scale 3，15 fps、density 2，各采样 10 秒：host CPU 55.9% → 23.1%，Hyprland CPU 26.7% → 7.3%，ping P95 108.82 ms → 4.02 ms。画面内容可能变化，ping 衡量控制通路，不等于端到端画面延迟或用户实机验收。日志 `.build-logs/host-perf-{before,after}-nodelay.json`。
+- [x] 原生窗口回归发现并修复手动 CM 关闭/重开时的 SIGSEGV：栈位于 GDK 绘制末尾，日志出现 EGL context 失效；共享进程内改为隐藏/复用 CM，独立 CM 关闭则退出。实际 Omarchy 窗口回归覆盖自动后台不抢焦点、显式 CM、反复关闭/重开、CM-first 和独立退出，全部通过；CM 定时器 5 项测试和 Flutter analyze 通过。
+- [ ] 本机包安装后由用户复验两端流畅度与监控窗口行为；用户确认前不推送或发布。

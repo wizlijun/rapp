@@ -48,12 +48,9 @@ Future<void> main(List<String> args) async {
   if (args.contains('--cm')) {
     await _showWindow(const Size(400, 320), 'rapp 连接管理');
     await windowManager.setPreventClose(true);
-    // Linux shares its process with the main window. Only destroy this window;
-    // exiting the process would also kill the main GUI and its active sessions.
-    var closingCm = false;
+    // Linux retains this window for reuse while the main GUI is alive. Closing
+    // it must not tear down an engine's GL context in the shared process.
     void closeCm() {
-      if (closingCm) return;
-      closingCm = true;
       if (Platform.isLinux) {
         const MethodChannel('rapp/linux').invokeMethod<void>('close_window');
       } else {

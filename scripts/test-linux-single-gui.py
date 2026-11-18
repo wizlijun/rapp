@@ -94,6 +94,9 @@ with tempfile.TemporaryDirectory(prefix="rapp-single-gui-") as tmp:
             return found
 
         try:
+            # Automatic connection notifications must not create a process or
+            # engine that survives to map a monitor window on the desktop.
+            launch(["--cm", "--background"])
             with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
                 list(pool.map(lambda _: start(), range(4)))
             until(lambda: sum(p.poll() is None for p in processes) == 1)
@@ -104,6 +107,11 @@ with tempfile.TemporaryDirectory(prefix="rapp-single-gui-") as tmp:
             until(lambda: len(hubs(primary)) == 1)
             original_hubs = hubs(primary)
             print("PASS simultaneous launches create one GUI, main window and hub", flush=True)
+
+            launch(["--cm", "--background"])
+            assert len(windows(primary)) == 1
+            assert hypr("activewindow").get("address") == main["address"]
+            print("PASS automatic connection manager stays hidden without stealing focus", flush=True)
 
             close(main["address"])
             until(lambda: not windows(primary))
@@ -122,16 +130,21 @@ with tempfile.TemporaryDirectory(prefix="rapp-single-gui-") as tmp:
             launch(["--cm"])
             cm = window(primary, "rapp 连接管理")
             launch(["--cm"])
-            assert len(windows(primary)) == 2
+            assert len(windows(primary)) == 2, [(w["address"], w["title"]) for w in windows(primary)]
             launch()
             until(lambda: hypr("activewindow").get("address") == main["address"])
             close(cm["address"])
             until(lambda: len(windows(primary)) == 1 and windows(primary)[0]["title"] == "rapp")
             assert primary.poll() is None
             launch(["--cm"])
-            window(primary, "rapp 连接管理")
-            assert len(windows(primary)) == 2
+            cm = window(primary, "rapp 连接管理")
+            assert len(windows(primary)) == 2, [(w["address"], w["title"]) for w in windows(primary)]
             assert hubs(primary) == original_hubs
+            launch(["--cm", "--background"])
+            assert hypr("activewindow").get("address") == cm["address"]
+            close(cm["address"])
+            until(lambda: len(windows(primary)) == 1 and windows(primary)[0]["title"] == "rapp")
+            assert primary.poll() is None
             print("PASS connection manager reuses the process and can close/reopen independently", flush=True)
             primary.terminate()
             primary.wait(timeout=10)
@@ -146,6 +159,13 @@ with tempfile.TemporaryDirectory(prefix="rapp-single-gui-") as tmp:
             until(lambda: len(windows(primary)) == 1 and windows(primary)[0]["title"] == "rapp")
             assert primary.poll() is None
             print("PASS --cm-first startup still opens a unique main window", flush=True)
+            primary.terminate()
+            primary.wait(timeout=10)
+            primary = start(["--cm"])
+            cm = window(primary, "rapp 连接管理")
+            close(cm["address"])
+            assert primary.wait(timeout=10) == 0
+            print("PASS closing a standalone manager exits without a background engine", flush=True)
         except BaseException:
             log.flush()
             log.seek(0)
