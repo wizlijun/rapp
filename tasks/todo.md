@@ -607,3 +607,9 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [x] 干净 worktree 从 `a7c482d` 构建 0.14.8-1；Arch/便携包 34 文件摘要一致、13 个 ELF 依赖解析通过，Flutter 3.50.0 / engine `371f77202a73e8dff57a8b3bff75bca55c090aee` 与实际引擎 SHA256 匹配。解包后隔离 headless Wayland 完整 hub → QUIC service → host 桌面串流通过；四组件终端/端口/重启联调通过。
 - [x] [v0.14.8 Release](https://github.com/wizlijun/rapp/releases/tag/v0.14.8) 已公开，三个附件大小/SHA256 与本地一致；latest=false 保留 macOS 0.14.7 的 latest.json 及原附件摘要。刷新网站备用下载快照，未部署网站。
 - [x] 本机已安装 `rapp-omarchy 0.14.8-1`；系统认证完成后重启 `rapp-service.service`，确认运行 `/opt/rapp/rapp-service`，34 个安装文件摘要与发布包一致，IPC 桌面/图形/终端/端口能力正常。
+
+## iOS 断开后连不上中继、重连全失败（2026-11-18，用户报告，diag/ios-net-errors）
+现象：断开后显示「连不上中继，通了自动重连」，自动和手动重连都失败，结束会话重启 app 才好。Duo hub.log：11-18 06:41、06:53、07:20 三次 `rebind`（net_changed 换新 UDP socket）之后，局域网和中继的每次拨号都 `timed out`，直到 `hub_start`；重启后同一网络立刻全通。日志里没有 `endpoint stopping`，所以 quinn 的 endpoint 驱动还活着，是新 socket 发不出或收不到。quinn-udp 吞掉发送错误，hub 看不到原因；之后只有再次回前台或本机 IPv4 变了才会再换 socket，手动「重连」不换。用户选「先只加诊断，确认原因再修」。
+- [x] 诊断：quinn/quinn-udp 的 warn/error（`sendmsg error`、驱动 `I/O error`）以 `{"ev":"lib"}` 写进 hub.log；`relay dial:` 失败从 debug 提到 warn。
+- [ ] Duo 装上后等它再坏一次，取 hub.log 看 `rebind` 之后的 `lib` 行（哪个 errno），据此定修法。候选：中继连续拨不通时自动再换 socket、手动重连先换 socket、或整个 endpoint 重建。
+- [ ] 另一个风险（实验已证实，Duo 上没见到）：收包出错会让 quinn 的 endpoint 驱动永久停掉，`Endpoint::rebind` 救不回来，之后拨号立刻报 `endpoint stopping`。真要防只能重建 endpoint。

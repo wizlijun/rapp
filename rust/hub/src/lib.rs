@@ -117,6 +117,7 @@ where
     W: AsyncWrite + Unpin + Send + 'static,
 {
     opts.log.event(Lvl::Info, "hub_start", json!({"version": env!("CARGO_PKG_VERSION")}));
+    rapp_net::log::forward_lib_warnings(opts.log.clone());
     let identity = Arc::new(rapp_wire::Identity::load_or_create(&opts.home, "device").context("device key")?);
     let hub = Arc::new(Hub {
         at: RwLock::new(HomeState { home: opts.home.clone(), identity }),
