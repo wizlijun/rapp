@@ -276,27 +276,27 @@ void main() {
     expect(UiPrefs.load(tmp.path).appKeyRow, isTrue);
   });
 
-  group('its lift off the stage bottom (appKeyRowLift)', () {
+  group('its lift off the stage bottom (keyboardLift)', () {
     MediaQueryData mq({double inset = 0, double homeBar = 0}) =>
         MediaQueryData(viewInsets: EdgeInsets.only(bottom: inset), viewPadding: EdgeInsets.only(bottom: homeBar));
 
     test('no soft keyboard: on the stage bottom, home bar or not, fullscreen or not', () {
       for (final full in [false, true]) {
-        expect(appKeyRowLift(mq(), fullscreen: full), 0);
-        expect(appKeyRowLift(mq(homeBar: 20), fullscreen: full), 0);
+        expect(keyboardLift(mq(), fullscreen: full), 0);
+        expect(keyboardLift(mq(homeBar: 20), fullscreen: full), 0);
       }
     });
 
     test('the soft keyboard up: its height', () {
-      expect(appKeyRowLift(mq(inset: 300), fullscreen: false), 300);
+      expect(keyboardLift(mq(inset: 300), fullscreen: false), 300);
     });
 
     test('above the home bar the stage ends at the safe area: the bar comes off', () {
-      expect(appKeyRowLift(mq(inset: 300, homeBar: 20), fullscreen: false), 280);
+      expect(keyboardLift(mq(inset: 300, homeBar: 20), fullscreen: false), 280);
     });
 
     test('fullscreen: the stage runs to the bottom edge, so the row sits right on the soft keyboard', () {
-      expect(appKeyRowLift(mq(inset: 300, homeBar: 20), fullscreen: true), 300);
+      expect(keyboardLift(mq(inset: 300, homeBar: 20), fullscreen: true), 300);
     });
   });
 
@@ -336,6 +336,21 @@ void main() {
           ),
         ),
       )));
+    }
+
+    for (final full in [false, true]) {
+      testWidgets('the soft keyboard pushes the app window\'s writing panel up to 8 above it (fullscreen $full)',
+          (tester) async {
+        await mountStage(tester, inset: 300, homeBar: 20, fullscreen: full);
+        await openApp(tester, 'Safari');
+        s.currentRemote!.composer.open = true;
+        await tester.pump();
+        await tester.pump();
+        final stage = tester.getRect(find.byKey(const Key('stage')));
+        // Out of fullscreen the stage stands on the home bar, which the keyboard covers too.
+        final keyboard = full ? 300 : 280;
+        expect(tester.getRect(find.byKey(const Key('composer-panel'))).bottom, stage.bottom - keyboard - 8);
+      });
     }
 
     testWidgets('off by default: no row over an app picture', (tester) async {

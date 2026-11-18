@@ -69,17 +69,20 @@ class _TextHold extends LongPressGestureRecognizer {
 }
 
 /// Top-left of a [panel]-sized box whose bottom centre is [bc], kept [composerMargin] inside
-/// [stage]. Where a range is empty (a panel larger than the stage), the left or top margin wins.
-Offset _topLeftOf(Offset bc, Size stage, Size panel) {
+/// [stage] and above the soft keyboard ([keyboard] up off the stage's bottom). Where a range is empty (a panel
+/// larger than the stage), the left or top margin wins.
+Offset _topLeftOf(Offset bc, Size stage, Size panel, [double keyboard = 0]) {
   const m = composerMargin;
   final left = math.max(m, math.min(bc.dx - panel.width / 2, stage.width - m - panel.width));
-  final bottom = math.max(m + panel.height, math.min(bc.dy, stage.height - m));
+  final bottom = math.max(m + panel.height, math.min(bc.dy, stage.height - m - keyboard));
   return Offset(left, bottom - panel.height);
 }
 
 /// Where a [panel]-sized writing panel placed at [at] (its bottom centre) sits on [stage]:
-/// its top-left, clamped inside the stage. The point itself is never changed by the clamp.
-Offset composerTopLeft(InputPoint at, Size stage, Size panel) => _topLeftOf(at.inContent(stage), stage, panel);
+/// its top-left, clamped inside the stage and above a [keyboard] that tall. The point itself is never changed by
+/// the clamp: the panel goes back down when the keyboard does.
+Offset composerTopLeft(InputPoint at, Size stage, Size panel, {double keyboard = 0}) =>
+    _topLeftOf(at.inContent(stage), stage, panel, keyboard);
 
 /// The writing panel ([child]) floating at the session's app's place, with the grip above it.
 /// A drag on it (on its text, only after a touch held still) moves it and, on release, [onPlace]
@@ -87,10 +90,18 @@ Offset composerTopLeft(InputPoint at, Size stage, Size panel) => _topLeftOf(at.i
 /// Either way the caret goes back to the editor.
 class FloatingComposer extends StatefulWidget {
   const FloatingComposer(
-      {super.key, required this.session, required this.onPlace, required this.child, this.scale = 1});
+      {super.key,
+      required this.session,
+      required this.onPlace,
+      required this.child,
+      this.scale = 1,
+      this.keyboard = 0});
 
   /// The panel's zoom: its width is 720 × this.
   final double scale;
+
+  /// How far the soft keyboard reaches up over the stage's bottom: the panel stays [composerMargin] above it.
+  final double keyboard;
 
   final RemoteSession session;
   final ValueChanged<InputPoint?> onPlace;
@@ -124,7 +135,7 @@ class _FloatingComposerState extends State<FloatingComposer> {
   /// Where the bottom centre is seen for a wanted one ([bc]): after the clamp.
   Offset _seen(Offset bc) {
     final p = _panel;
-    return _topLeftOf(bc, _stage, p) + Offset(p.width / 2, p.height);
+    return _topLeftOf(bc, _stage, p, widget.keyboard) + Offset(p.width / 2, p.height);
   }
 
   void _start() => setState(() => _drag = _seen(_at.inContent(_stage)));
@@ -219,7 +230,7 @@ class _FloatingComposerState extends State<FloatingComposer> {
     return LayoutBuilder(builder: (context, c) {
       _stage = c.biggest;
       return CustomSingleChildLayout(
-        delegate: _Place(_drag ?? _at.inContent(_stage), panelWidth(_stage.width, widget.scale)),
+        delegate: _Place(_drag ?? _at.inContent(_stage), panelWidth(_stage.width, widget.scale), widget.keyboard),
         child: TapRegion(
           onTapOutside: (_) {
             if (_touched) setState(() => _touched = false);
@@ -287,18 +298,20 @@ class _FloatingComposerState extends State<FloatingComposer> {
 }
 
 class _Place extends SingleChildLayoutDelegate {
-  _Place(this.bc, this.width);
+  _Place(this.bc, this.width, this.keyboard);
 
   final Offset bc;
   final double width;
+  final double keyboard;
 
+  // Only the room above the keyboard: a taller panel would reach under it.
   @override
   BoxConstraints getConstraintsForChild(BoxConstraints c) => BoxConstraints(
-      minWidth: width, maxWidth: width, maxHeight: math.max(0, c.maxHeight - 2 * composerMargin));
+      minWidth: width, maxWidth: width, maxHeight: math.max(0, c.maxHeight - 2 * composerMargin - keyboard));
 
   @override
-  Offset getPositionForChild(Size size, Size child) => _topLeftOf(bc, size, child);
+  Offset getPositionForChild(Size size, Size child) => _topLeftOf(bc, size, child, keyboard);
 
   @override
-  bool shouldRelayout(_Place old) => old.bc != bc || old.width != width;
+  bool shouldRelayout(_Place old) => old.bc != bc || old.width != width || old.keyboard != keyboard;
 }
