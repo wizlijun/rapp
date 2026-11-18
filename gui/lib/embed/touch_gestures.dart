@@ -101,6 +101,10 @@ class TouchGestures {
   bool _scrollPending = false;
   bool _pinchDirty = false;
   bool _batchQueued = false;
+
+  /// Undecided fingers moved since the last decision. Only those moves are judged, with the fingers that made them: a
+  /// lift decides before the centre jumps to the fingers left, so the batch's end must not judge the same moves again.
+  bool _toDecide = false;
   int _batch = 0;
 
   /// A trackpad gesture: the zoom at its start, and whether it zoomed.
@@ -179,6 +183,7 @@ class TouchGestures {
     switch (_two) {
       case _Two.undecided:
         _twoBuffer += delta;
+        _toDecide = true;
       case _Two.scroll:
         _scrollAcc += delta;
         _scrollPending = true;
@@ -199,7 +204,7 @@ class TouchGestures {
     scheduleMicrotask(() {
       if (batch != _batch) return;
       _batchQueued = false;
-      if (_two == _Two.undecided) _decide();
+      if (_two == _Two.undecided && _toDecide) _decide();
       if (_scrollPending) {
         _scrollPending = false;
         final d = _scrollAcc;
@@ -214,6 +219,7 @@ class TouchGestures {
   /// (T3); else the fingers' distance changed by more than [pinchSlop] → a pinch. Either way the move held back so far
   /// goes out with it.
   void _decide() {
+    _toDecide = false;
     if (_touches.isEmpty) return;
     if ((_centre - _twoStart).distance > twoTapSlop) {
       _two = _Two.scroll;
@@ -254,7 +260,7 @@ class TouchGestures {
   void up(PointerEvent e) {
     // Before the centre jumps to the fingers left: decide from this batch's moves not yet taken up (a right tap needs
     // to know), and send a pinch's step for them.
-    if (_two == _Two.undecided && _batchQueued && _touches.containsKey(e.pointer)) _decide();
+    if (_two == _Two.undecided && _toDecide && _touches.containsKey(e.pointer)) _decide();
     if (_two == _Two.pinch && _touches.containsKey(e.pointer)) {
       _pinchStep();
       _touches.remove(e.pointer);
@@ -324,6 +330,7 @@ class TouchGestures {
     _scrollPending = false;
     _pinchDirty = false;
     _batchQueued = false;
+    _toDecide = false;
     _padZoomed = false;
     _batch++;
   }

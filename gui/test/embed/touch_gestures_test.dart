@@ -210,6 +210,36 @@ void main() {
       expect(f.calls, ['twoDown 120.0,100.0', 'scroll 120.0,80.0 0.0,-20.0']);
     });
 
+    testWidgets('a jittery two-finger tap whose first lift comes in the moves\' batch is still a right tap', (
+      tester,
+    ) async {
+      // Judged after that lift, the 3 px would be measured from the finger left, ~20 px off the centre: a scroll.
+      final f = _Fingers();
+      f.down(1, const Offset(100, 100));
+      f.down(2, const Offset(140, 100));
+      f.moveBy(1, const Offset(3, 0));
+      f.moveBy(2, const Offset(3, 0));
+      f.up(1);
+      await _wait(tester, f, 10);
+      f.up(2);
+      await _wait(tester, f, 300);
+      expect(f.calls, ['twoDown 120.0,100.0', 'rightTap 120.0,100.0']);
+    });
+
+    testWidgets('a fast spread lifted in its own batch is a pinch, not a scroll or a right tap', (tester) async {
+      // Judged per finger it would be a scroll (one finger alone moves the centre 8.5); not judged at the lift, a
+      // right tap.
+      final f = _Fingers();
+      f.down(1, const Offset(100, 100));
+      f.down(2, const Offset(140, 100));
+      f.moveBy(1, const Offset(-17, 0));
+      f.moveBy(2, const Offset(17, 0));
+      f.up(1);
+      f.up(2);
+      await _wait(tester, f, 300);
+      expect(f.calls, ['twoDown 120.0,100.0', 'zoom 1.85 120.0,100.0', 'pan 0.0,0.0', 'settled']);
+    });
+
     testWidgets('a quick two-finger tap is a right tap at the start centre', (tester) async {
       final f = _Fingers();
       f.down(1, const Offset(100, 100));
