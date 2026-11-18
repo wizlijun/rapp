@@ -643,3 +643,21 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [ ] 18. 某种语言第一次用、资源还没下载时，提示「正在准备语音识别」，下载完后再按就能识别。
 - [ ] 19. 按住右 Option 说话时，用鼠标在侧栏点「关」（或「恢复默认」、录新快捷键），松开后打字：字照常送到 A，键盘不会一直被吞（这一条的原生部分没有自动化测试）。
 - [ ] 20. 窄窗口（约 420 px 宽）第一次发送后：语言提示换行显示，「去设置」看得见、点得到。
+## Linux 0.14.11 功能对齐（2026-11-18）
+
+- [x] `git pull --ff-only` 更新 main 至 `b2a14c4` / 0.14.11（Flutter `0.14.11+50`，应用协议 v14）。与 Linux 0.14.8 发布基线比较，本轮共享代码已包含统一 40px 桌面控件、设备列版本号、输入板追加与草稿修复，以及 QUIC 收包错误后的驱动恢复和网络诊断日志。
+- [x] 检查 Linux `rapp-session`：hello 在启动 stdin 写线程前同步发出，不存在 Swift 旧实现的握手消息乱序。iOS 语音与单手按钮按原规格仅用于 iOS；Linux host 仍整桌面采集，接收 v14 setView 但不实现局部截取。
+- [x] 独立 GTK 对端夹具从 v13 更新到 v14，保留独立协议常量校验，私有 Broadway 的 7 组场景通过；修正中英文 README 的协议说明和过期验证入口。服务单实例测试原先在 token 改写后立即发 SIGTERM，可能早于退出信号处理器注册；改为等待处理器就绪，保留退出码 0 的断言，正式包并发启动/跨目录互斥/崩溃恢复/正常退出复验通过。
+- [x] 构建路径、旧 Flutter 引擎拒绝、启动器参数保真，以及 GTK3 私有 Broadway 原生窗口/弹窗/共享草稿/输入法 FIFO 回归通过。
+- [x] Flutter 全量 2314 项通过、15 项跳过；analyze 无 error/warning，120 项现有 SDK 弃用 info（`--no-fatal-infos` 通过）。Rust 单元/集成共 1188 项通过、11 项显式跳过：workspace 首轮在 forward 目标结束时停止，随后补跑剩余 testkit 目标及 update/wire。首次 one-RTT 用例在编译和其他测试并行时收到 `stream reset by peer`，停下负载后原样单独复验通过，channel 串行/并行中位数 54.37 / 55.79 ms，75 ms 门槛不变；不推断单次失败的确定根因。缺少 host 用例受本机 PATH 中已安装的 host 干扰，隔离 PATH 后通过。此次未补跑整个 workspace 的 doctest。
+- [x] 独立干净 worktree `/home/bruce/git/rapp-build-01411` 从 `b2a14c4` 构建 0.14.11-1，使用 Flutter 3.50.0。安装包与便携包 34 个文件摘要一致，13 个 ELF 依赖解析通过，源码提交、引擎摘要及 SHA256SUMS 校验通过。文档及测试夹具改动留在主工作区，不影响包内程序代码。
+- [x] 正式 worker 的 hub → QUIC service → 当前 Omarchy 桌面只读串流通过；隔离网络命名空间的终端、端口共享、二进制 pipe/half-close、service/hub 重启后终端恢复全部通过。四组件验收使用实际复制的二进制（不能软链接回含 host 的完整包，否则 `current_exe` 回退会启用图形能力）。
+- 产物：`dist/linux-0.14.11/rapp-omarchy-0.14.11-1-x86_64.pkg.tar.zst`、`rapp-0.14.11-omarchy-x86_64.tar.gz` 及 `rapp-0.14.11-omarchy-x86_64-SHA256SUMS`。首轮仅生成产物；用户随后明确要求发布并安装。未进行 macOS/iOS 对端及物理桌面输入验收。
+- 日志：主工作区 `.build-logs/{flutter-01411-*,rust-01411-*,linux-01411-*}`；构建 worktree `.build-logs/package.log`、`verify-package.log` 及 `verified/file-sha256.json`。原有未跟踪的 `scripts/__pycache__/` 保留。
+
+## Linux 0.14.11 发布与安装（2026-11-18）
+
+- [x] 用户明确要求发布并安装。验证/测试修正提交 `18497f4` 已推送 main；二进制仍对应此前已验证的 `b2a14c4`，两个提交间不含程序实现改动。
+- [x] 本机由 `rapp-omarchy 0.14.10-1` 升级至 `0.14.11-1`，系统管理员认证完成。已重启 `rapp-service.service`，进程运行 `/opt/rapp/rapp-service`，34 个安装文件摘要与正式包一致；CLI/host/client 版本 0.14.11、协议 v14，IPC 桌面/图形/终端/端口能力正常。安装前没有存活的主 GUI，未主动弹出主窗口。
+- [x] [v0.14.11 Release](https://github.com/wizlijun/rapp/releases/tag/v0.14.11) 已补齐 Linux 安装包、便携包及 SHA256SUMS，三个附件的 GitHub 大小和 SHA256 均与本地一致；原 macOS 资产 ID/大小/摘要保持不变。发布说明修正旧 Linux v13 表述并补充验证与安装步骤，网站备用下载快照更新到两平台 0.14.11，未部署网站。
+- 上传受当前代理线路反复 408/停滞影响，通过绑定物理网卡的临时进程代理完成；结束后临时进程及配置已清理，系统路由和全局代理选择未修改。

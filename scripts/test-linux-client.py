@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the real GTK worker against an independent Python v13 host fixture.
+"""Exercise the real GTK worker against an independent Python v14 host fixture.
 Requires a graphical session (or xvfb-run). No real host credentials are used.
 For isolated input with a rootful Xwayland server, set DISPLAY to that server
 and RAPP_TEST_NO_WM=1. Window-manager minimize/take-back checks are then omitted.
@@ -17,7 +17,7 @@ import time
 import tomllib
 import zlib
 
-PROTOCOL = 13
+PROTOCOL = 14
 NO_WM = os.environ.get("RAPP_TEST_NO_WM") == "1"
 
 def xdo_command(args):
@@ -174,7 +174,7 @@ def mismatch(s):
     assert "version mismatch" in s.finish(5)["reason"]
 
 case("full frame, delta, menus, adaptive stream, quit", normal)
-case("v13 host hints and secure focus around a frame", host_hints)
+case("v14 host hints and secure focus around a frame", host_hints)
 case("hub closes stdin", eof)
 case("corrupt frame exits cleanly", malformed)
 case("protocol mismatch exit code", mismatch)

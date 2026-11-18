@@ -8,6 +8,7 @@ import concurrent.futures
 import json
 import os
 from pathlib import Path
+import signal
 import socket
 import subprocess
 import sys
@@ -34,6 +35,16 @@ def until(predicate):
             return
         time.sleep(0.05)
     raise AssertionError("timed out")
+
+
+def handles_termination(process):
+    # The IPC token is written during startup, before main installs its signal
+    # handler. Test graceful shutdown only after that handler is ready; SIGTERM
+    # during initialization can legitimately terminate with -SIGTERM instead.
+    assert process.poll() is None, "service exited before installing its signal handler"
+    status = Path(f"/proc/{process.pid}/status").read_text()
+    caught = next(line.split()[1] for line in status.splitlines() if line.startswith("SigCgt:"))
+    return int(caught, 16) & (1 << (signal.SIGTERM - 1)) != 0
 
 
 if not available():
@@ -76,6 +87,7 @@ with tempfile.TemporaryDirectory(prefix="rapp-single-service-") as tmp:
             processes.append(replacement)
             until(lambda: token.read_bytes() != original_token)
             assert replacement.poll() is None
+            until(lambda: handles_termination(replacement))
             replacement.terminate()
             assert replacement.wait(timeout=10) == 0
             assert available()
