@@ -27,4 +27,10 @@ void main() {
   test('a panel taller than the stage keeps its top on stage', () {
     expect(composerTopLeft(defaultComposerAt, const Size(800, 60), panel).dy, 8);
   });
+
+  test('the soft keyboard ([keyboard] up off the stage bottom) pushes the panel up to 8 above it', () {
+    expect(composerTopLeft(defaultComposerAt, stage, panel, keyboard: 300), const Offset(40, 600 - 300 - 8 - 70));
+    // A panel already clear of the keyboard stays where it is.
+    expect(composerTopLeft(const InputPoint(0.5, 0), stage, panel, keyboard: 300), const Offset(40, 8));
+  });
 }

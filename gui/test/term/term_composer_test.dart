@@ -68,7 +68,7 @@ void main() {
   });
 
   // The window's Ctrl+Enter as main_window.dart binds it (on every platform).
-  Widget window({double width = 1200}) => CallbackShortcuts(
+  Widget window({double width = 1200, double keyboard = 0}) => CallbackShortcuts(
         bindings: {
           const SingleActivator(LogicalKeyboardKey.enter, control: true, includeRepeats: false): s.composerKey,
         },
@@ -77,10 +77,15 @@ void main() {
           child: SizedBox(
             width: width,
             height: 700,
-            child: Column(children: [
-              TopBar(state: s, fullscreen: false, onToggleFullscreen: () {}),
-              Expanded(child: Stage(state: s, composerEditor: FlutterEditor.new)),
-            ]),
+            child: Builder(
+              builder: (context) => MediaQuery(
+                data: MediaQuery.of(context).copyWith(viewInsets: EdgeInsets.only(bottom: keyboard)),
+                child: Column(children: [
+                  TopBar(state: s, fullscreen: false, onToggleFullscreen: () {}),
+                  Expanded(child: Stage(state: s, composerEditor: FlutterEditor.new)),
+                ]),
+              ),
+            ),
           ),
         ),
       );
@@ -101,9 +106,9 @@ void main() {
     await tester.pump();
   }
 
-  Future<void> openTerm(WidgetTester tester, {bool disableAnimations = false}) async {
+  Future<void> openTerm(WidgetTester tester, {bool disableAnimations = false, double keyboard = 0}) async {
     big(tester);
-    await tester.pumpWidget(wrap(window(), disableAnimations: disableAnimations));
+    await tester.pumpWidget(wrap(window(keyboard: keyboard), disableAnimations: disableAnimations));
     final panes = [tp(3, 'claude', title: 'build-box', active: true), tp(4, '', title: 'sh')];
     // The session's name differs from the pane's command here, to tell the two apart.
     term.paneLists[1] = panes;
@@ -350,6 +355,13 @@ void main() {
     await tester.pump();
     expect(find.byKey(const Key('composer-panel')), findsOneWidget);
     expect(stageFocused(tester), isTrue);
+  });
+
+  testWidgets('with the soft keyboard up the panel sits 8 above it, not under it', (tester) async {
+    await openTerm(tester, keyboard: 300);
+    await openPanel(tester);
+    final stage = tester.getRect(find.byKey(const Key('stage')));
+    expect(tester.getRect(find.byKey(const Key('composer-panel'))).bottom, stage.bottom - 300 - 8);
   });
 
   for (final off in [false, true]) {

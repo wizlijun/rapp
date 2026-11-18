@@ -534,11 +534,15 @@ class _ComposerPanelState extends State<ComposerPanel> {
 /// A terminal's [keyRow] (「按键排」) adds the six keys: on the panel's line at the stage's two bottom corners, with
 /// 「输入」 just left of the right group; on a stage narrower than [keyRowWideAt] with the panel open, a line of its
 /// own right above the panel.
+///
+/// With the soft keyboard up ([keyboard]: how far it reaches over the stage's bottom) all of it stands on the
+/// keyboard's top edge instead, the panel 8 above it; the picture under it stays as it is.
 List<Widget> composerLayer(
     {required MainState state,
     required RemoteSession session,
     required SessionPort port,
     bool keyRow = false,
+    double keyboard = 0,
     ComposerEditor Function()? editor}) {
   final both = Listenable.merge([session, session.composer, state.composerZoom]);
   final term = port is TermSessionPort ? port : null;
@@ -557,6 +561,7 @@ List<Widget> composerLayer(
                         key: ValueKey(session.sid),
                         session: session,
                         scale: state.composerScale,
+                        keyboard: keyboard,
                         onPlace: (p) => state.placeComposer(session, p),
                         child: ComposerPanel(
                           editor: editor,
@@ -570,7 +575,7 @@ List<Widget> composerLayer(
                     : Align(
                   alignment: Alignment.bottomCenter,
                   child: Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
+                    padding: EdgeInsets.only(bottom: 8 + keyboard),
                     child: SizedBox(
                       width: panelWidth(c.maxWidth, state.composerScale),
                       // The key row comes and goes before the panel; the panel stays the same element.
@@ -609,8 +614,9 @@ List<Widget> composerLayer(
               ? LayoutBuilder(
                   builder: (context, c) => open() && c.maxWidth < keyRowWideAt
                       ? const SizedBox.shrink() // above the panel instead
-                      : Align(
+                      : Container(
                           alignment: Alignment.bottomCenter,
+                          padding: EdgeInsets.only(bottom: keyboard),
                           child: TermKeyRow(port: term, sid: session.sid, ctrl: session.termCtrl, split: true, blocked: state.sendBlocked(session.sid)),
                         ),
                 )
@@ -619,7 +625,7 @@ List<Widget> composerLayer(
       ),
     Positioned(
       right: keys ? keyRowInset + keyRowGroupWidth + 8 : 12,
-      bottom: keys ? keyRowBottom : 12,
+      bottom: (keys ? keyRowBottom : 12) + keyboard,
       child: ListenableBuilder(
         listenable: both,
         builder: (context, _) {
