@@ -37,6 +37,17 @@ void main() {
     expect(m.cellH, m.cellH.ceilToDouble());
     expect(m.cellW, greaterThan(0));
   });
+  test('scaled metrics are exactly the base cells times z, at the font times z', () {
+    // 13.3 is rounded up to a 14 high cell: measuring again at 13.3 x 2.5 would round up once more (34, not 35).
+    final m = TermMetrics.measure(const TextStyle(fontSize: 13.3, fontFamily: 'Roboto'));
+    expect(m.cellH, isNot(m.style.fontSize));
+    final s = TermMetrics.scaled(m, 2.5);
+    expect(s.cellW, m.cellW * 2.5);
+    expect(s.cellH, m.cellH * 2.5);
+    expect(s.style.fontSize, 13.3 * 2.5);
+    expect(s.style.fontFamily, 'Roboto');
+    expect(TermMetrics.measure(s.style).cellH, isNot(s.cellH));
+  });
   test('gridScale fits the grid, up only when asked', () {
     expect(gridScale(w: 400, h: 200, gridW: 100, gridH: 100, up: true), 2);
     expect(gridScale(w: 400, h: 200, gridW: 100, gridH: 100, up: false), 1);

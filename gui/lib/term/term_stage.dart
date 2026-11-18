@@ -117,6 +117,8 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
 
   /// [_drawn] times the zoom: what the grid is drawn, hit-tested and scrolled with (at z 1, [_drawn] itself).
   late TermMetrics _zoomed;
+  TermMetrics? _zoomedFrom;
+  double _zoomedZ = 1;
 
   /// From the last layout: the stage's size, the grid at z 1 ([_drawn]'s cells from the stage's top left), and
   /// where the zoom puts it on the stage.
@@ -155,6 +157,9 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
   int? _dragPointer;
   bool _dragBlock = false;
   Offset _dragAt = Offset.zero;
+
+  /// The drag's top and bottom edges (C1): past them the drag scrolls.
+  double _edgeTop = 0, _edgeBottom = 0;
   Timer? _edgeTimer;
   bool _copied = false;
   Timer? _copiedTimer;
@@ -534,17 +539,20 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     if (pointer != _dragPointer || _clicks != 1) return;
     _dragAt = local;
     _extendTo(_dragAt);
-    // Past the top or bottom edge of the grid seen (above the soft keyboard): scroll a row every 50 ms while the
-    // button is held (C1).
-    final seen = Rect.fromLTWH(0, 0, _stage.width, _stage.height - widget.keyboard).intersect(_zfit);
-    final out = _dragAt.dy < seen.top || _dragAt.dy > seen.bottom;
+    // Past the top or bottom edge of the stage above the soft keyboard (zoomed: of the grid seen there): scroll a
+    // row every 50 ms while the button is held (C1).
+    var seen = Rect.fromLTWH(0, 0, _stage.width, _stage.height - widget.keyboard);
+    if (_zoom?.zoomed == true) seen = seen.intersect(_zfit);
+    _edgeTop = seen.top;
+    _edgeBottom = seen.bottom;
+    final out = _dragAt.dy < _edgeTop || _dragAt.dy > _edgeBottom;
     if (!out) {
       _edgeTimer?.cancel();
       _edgeTimer = null;
     } else {
       _edgeTimer ??= Timer.periodic(_edgeEvery, (_) {
         if (!mounted) return;
-        _scroll(_dragAt.dy < 0 ? 1 : -1);
+        _scroll(_dragAt.dy < _edgeTop ? 1 : -1);
         _extendTo(_dragAt);
       });
     }
@@ -801,7 +809,12 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
       final zoom = _zoom;
       _zfit = zoom == null || !shown ? _fit : zoom.zfit(_fit, _stage, keyboard: widget.keyboard);
       final z = shown ? zoom?.z ?? 1.0 : 1.0;
-      _zoomed = z == 1 ? _drawn : _measured(_drawn.style.fontSize! * z);
+      // The same object while neither changes: the painter repaints on a new one.
+      if (!identical(_zoomedFrom, _drawn) || _zoomedZ != z) {
+        _zoomedFrom = _drawn;
+        _zoomedZ = z;
+        _zoomed = z == 1 ? _drawn : TermMetrics.scaled(_drawn, z);
+      }
 
       if (m != null && _linksVer != _ver) {
         _linksVer = _ver;
