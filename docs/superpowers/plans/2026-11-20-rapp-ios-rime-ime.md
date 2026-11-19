@@ -23,7 +23,7 @@
 - `gui/macos/Runner/SessionPlugin.swift` 是 macOS 和 iOS 共用的。改动只能放在 `#if os(iOS)` 里，并且不能 `import rapp_rime`。
 - 引擎包：`https://github.com/thomfang/LibrimeKit-iOS/releases/download/v0.2.2/Frameworks.tgz`，sha256 `43a0921538827fedb2679e5d26bb389dec3759d44ccdcfd439e8ec21a7f93223`。
 - 雾凇：仓库 `iDvel/rime-ice` 的提交 `927e1cf1d3eeb9bf4be85e3f684dba4dd485b6f6`（2026-11-11）。从 codeload 下载源码 tarball；sha256 第一次下载时算出来，写进脚本。不要用滚动更新的 `nightly`。
-- OpenCC 表：`https://github.com/rime/librime/releases/download/latest/rime-deps-bb56876-macOS-universal.tar.bz2`，sha256 `1fb4b34d4cca688306ca02cb76655350a5c6bd92cc17e51a673bd8cc451889d3`。
+- OpenCC 表：`https://github.com/rime/librime/releases/download/1.16.1/rime-deps-de4700e-macOS-universal.tar.bz2`，sha256 `087e753056f092f644cc4a470f64ecf2cd9de18e684b220e0588f86f6b91dfcc`。（2026-11-20 终审改：原来用的是滚动的 `latest`（nightly）里的 `rime-deps-bb56876-…`，sha256 `1fb4b34d…`，nightly 一动资产名就没了，干净构建会全挂；改成和 LibrimeKit 里 librime 同版本的 1.16.1 正式 release。）
 - 下载的东西都不进仓库，放在插件里 gitignore 掉的目录下。
 - 界面文字用中文，按设计文档原样写：「实体键盘用内置输入法」「内」「系」「中」「英」「部署中…」「就绪」「重新部署」「自带雾凇」「我的目录」。
 - flutter 在 `~/development/flutter/bin/flutter`，不在 PATH 上。

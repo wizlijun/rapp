@@ -38,7 +38,7 @@ keyboard can type Chinese in the input panel without the system IME. Design: `do
 
 ## 升级 librime
 
-Edit `KIT_URL` and `KIT_SHA` in `scripts/fetch.sh` (LibrimeKit-iOS release `Frameworks.tgz`), and `DEPS_URL`/`DEPS_SHA` if the OpenCC tables change. Delete the stale file in `vendor/dl/`, rerun `fetch.sh`.
+Edit `KIT_URL` and `KIT_SHA` in `scripts/fetch.sh` (LibrimeKit-iOS release `Frameworks.tgz`; delete the stale `vendor/dl/librimekit.tgz`), and `DEPS_URL`/`DEPS_SHA` to the same librime version's `rime-deps-<hash>-macOS-universal.tar.bz2` (only its OpenCC tables are used). Take the deps from a tagged librime release (`releases/download/<version>/…`), never the rolling `latest` nightly: its asset names change when it moves, and then every clean build fails. Rerun `fetch.sh`.
 
 ## 升级雾凇
 

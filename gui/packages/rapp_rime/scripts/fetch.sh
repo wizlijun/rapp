@@ -12,8 +12,10 @@ data=$ios/Sources/rapp_rime/RimeData
 
 KIT_URL=https://github.com/thomfang/LibrimeKit-iOS/releases/download/v0.2.2/Frameworks.tgz
 KIT_SHA=43a0921538827fedb2679e5d26bb389dec3759d44ccdcfd439e8ec21a7f93223
-DEPS_URL=https://github.com/rime/librime/releases/download/latest/rime-deps-bb56876-macOS-universal.tar.bz2
-DEPS_SHA=1fb4b34d4cca688306ca02cb76655350a5c6bd92cc17e51a673bd8cc451889d3
+# Only its share/opencc tables are used. A tagged release (librime 1.16.1, the version LibrimeKit-iOS v0.2.2
+# bundles), never the rolling `latest` nightly, whose asset names change when it moves.
+DEPS_URL=https://github.com/rime/librime/releases/download/1.16.1/rime-deps-de4700e-macOS-universal.tar.bz2
+DEPS_SHA=087e753056f092f644cc4a470f64ecf2cd9de18e684b220e0588f86f6b91dfcc
 ICE_COMMIT=927e1cf1d3eeb9bf4be85e3f684dba4dd485b6f6
 ICE_URL=https://codeload.github.com/iDvel/rime-ice/tar.gz/$ICE_COMMIT
 ICE_SHA=3c78386c45eba9bada065300e3e2ffcbc267d50e839892a34fa3116eae9e1817
@@ -30,21 +32,30 @@ mkdir -p "$v/dl"
 sha() { shasum -a 256 "$1" | cut -d' ' -f1; }
 fetch() { # file url sha
   local f=$v/dl/$1
-  [ -s "$f" ] || { curl -fsSL -m 900 -o "$f.part" "$2" && mv "$f.part" "$f"; }
+  if [ ! -s "$f" ]; then
+    if ! curl -fsSL -m 900 -o "$f.part" "$2"; then
+      rm -f "$f.part"
+      echo "下载 $1 失败（没联网，或者 GitHub 连不上）：$2" >&2
+      echo "联网后重跑：gui/packages/rapp_rime/scripts/fetch.sh（或者直接重跑 scripts/build-ios.sh）" >&2
+      exit 1
+    fi
+    mv "$f.part" "$f"
+  fi
   if [ "$(sha "$f")" != "$3" ]; then
     echo "sha256 mismatch for $1 (want $3); delete vendor/dl/$1 and rerun fetch.sh" >&2
     exit 1
   fi
 }
 fetch librimekit.tgz "$KIT_URL" "$KIT_SHA"
-fetch rime-deps.tar.bz2 "$DEPS_URL" "$DEPS_SHA"
+deps=$(basename "$DEPS_URL") # named after the asset, so a cache of an older one is not mistaken for it
+fetch "$deps" "$DEPS_URL" "$DEPS_SHA"
 fetch rime-ice.tgz "$ICE_URL" "$ICE_SHA"
 
 rm -rf "$v/src" "$fw" "$data" "$v/stamp"
 mkdir -p "$v/src/ice" "$v/src/deps" "$fw" "$inc" "$data"
 tar xzf "$v/dl/librimekit.tgz" -C "$fw"
 tar xzf "$v/dl/rime-ice.tgz" -C "$v/src/ice" --strip-components 1
-tar xjf "$v/dl/rime-deps.tar.bz2" -C "$v/src/deps" share/opencc
+tar xjf "$v/dl/$deps" -C "$v/src/deps" share/opencc
 
 for h in rime_api.h rime_api_deprecated.h rime_api_stdbool.h rime_levers_api.h; do
   cp "$fw/librime.xcframework/ios-arm64/Headers/$h" "$inc/"
