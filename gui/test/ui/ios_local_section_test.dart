@@ -161,6 +161,44 @@ void main() {
       expect(prefs.rimeDictionary, 'bundled');
     });
 
+    const hint = '把 Rime 目录放进「文件」→ rapp → Rime 后可选';
+
+    rimeTest('back from the Files app, 我的目录 becomes choosable once the folder is there', (tester) async {
+      prefs.rimeEnabled = true;
+      await pump(tester);
+      await tester.pump();
+      expect(find.text(hint), findsOneWidget);
+      ready = true; // the user put the folder in Files, then came back
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await tester.pump();
+      expect(find.text(hint), findsOneWidget, reason: 'asked again only on resume');
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      await tester.pump();
+      expect(find.text(hint), findsNothing);
+      await tester.tap(find.text('我的目录'));
+      await tester.pump();
+      expect(prefs.rimeDictionary, 'user');
+    });
+
+    rimeTest('重新部署 asks for the folder again', (tester) async {
+      prefs.rimeEnabled = true;
+      await pump(tester);
+      await tester.pump();
+      expect(find.text(hint), findsOneWidget);
+      ready = true;
+      final before = calls.where((c) => c.method == 'userFolder').length;
+      await tester.tap(find.byKey(const Key('rime-redeploy')));
+      await tester.pump();
+      await tester.pump();
+      expect(calls.where((c) => c.method == 'userFolder').length, before + 1);
+      expect(find.text(hint), findsNothing);
+    });
+
     rimeTest('我的目录 is choosable when ready; the status row follows the engine', (tester) async {
       ready = true;
       prefs.rimeEnabled = true;

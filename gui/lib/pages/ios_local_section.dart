@@ -59,7 +59,7 @@ class IosLocalSection extends StatefulWidget {
   State<IosLocalSection> createState() => _IosLocalSectionState();
 }
 
-class _IosLocalSectionState extends State<IosLocalSection> {
+class _IosLocalSectionState extends State<IosLocalSection> with WidgetsBindingObserver {
   bool _showTail = false;
   int? _bytes;
   String? _version;
@@ -69,6 +69,7 @@ class _IosLocalSectionState extends State<IosLocalSection> {
   void initState() {
     super.initState();
     widget.hub.addListener(_onHub);
+    WidgetsBinding.instance.addObserver(this);
     if (widget.hub.lastAccess == null) widget.hub.access().catchError((_) => const HubAccess(null, false, ''));
     dirBytesOffThread(widget.data.filesDir).then((n) {
       if (mounted) setState(() => _bytes = n);
@@ -81,8 +82,15 @@ class _IosLocalSectionState extends State<IosLocalSection> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     widget.hub.removeListener(_onHub);
     super.dispose();
+  }
+
+  /// Back from the Files app (where the Rime folder is added): ask again whether it is there.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && widget.prefs.rimeEnabled) _loadFolder();
   }
 
   HubAccess? _seen;
@@ -174,7 +182,10 @@ class _IosLocalSectionState extends State<IosLocalSection> {
             RappButton.secondary(
               key: const Key('rime-redeploy'),
               label: '重新部署',
-              onPressed: () => RappRime.instance.redeploy(),
+              onPressed: () {
+                RappRime.instance.redeploy();
+                _loadFolder();
+              },
             ),
             const SizedBox(width: 12),
             Expanded(child: Text(_statusText(RappRime.instance.status), key: const Key('rime-status'))),
