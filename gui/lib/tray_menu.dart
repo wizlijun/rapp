@@ -1,4 +1,4 @@
-// Tray and Dock menus: the open sessions grouped by host, then the idle 常用 grouped by host.
+// Tray and Dock menus: one group per host, its open sessions (marked ●) then its idle 常用.
 // The tray adds 显示 rapp and 退出 around them; the Dock has its own (system) items for those.
 import 'package:tray_manager/tray_manager.dart';
 
@@ -40,42 +40,46 @@ List<MenuItem> trayItems(List<SessionEntry> sessions, {List<MenuFavorite> favori
 List<MenuItem> dockItems(List<SessionEntry> sessions, {List<MenuFavorite> favorites = const []}) =>
     _body(sessions, favorites);
 
+/// One group per device, ordered by host name (stable). Within it the open sessions by title, each
+/// marked ●, then the idle favourites in favourite order. A host's header says （离线） when its
+/// favourites know it is offline; those are greyed, the sessions stay clickable.
 List<MenuItem> _body(List<SessionEntry> sessions, List<MenuFavorite> favorites) {
-  final groups = groupSessions(sessions, Grouping.device);
+  if (sessions.isEmpty && favorites.isEmpty) return [MenuItem(label: '没有打开的会话', disabled: true)];
+  final hosts = <String, _Host>{};
+  for (final g in groupSessions(sessions, Grouping.device)) {
+    for (final e in g.entries) {
+      hosts.putIfAbsent(e.id, () => _Host(e.device)).open.add(e);
+    }
+  }
+  for (final f in favorites) {
+    final h = hosts.putIfAbsent(f.app.device, () => _Host(f.host));
+    h.idle.add(f);
+    h.offline = h.offline || f.offline;
+  }
+  final order = hosts.values.toList();
+  final at = {for (var i = 0; i < order.length; i++) order[i]: i};
+  order.sort((a, b) {
+    final c = a.name.compareTo(b.name);
+    return c != 0 ? c : at[a]!.compareTo(at[b]!);
+  });
   return [
-    if (groups.isEmpty) MenuItem(label: '没有打开的会话', disabled: true),
-    for (final g in groups) ...[
-      MenuItem(label: g.title, disabled: true),
-      for (final e in g.entries)
+    for (final h in order) ...[
+      MenuItem(label: '${h.name}${h.offline ? '（离线）' : ''}', disabled: true),
+      for (final e in h.open)
         MenuItem(
           key: '$sessionKeyPrefix${e.key}',
-          label: '    ${e.title}${e.lamp == Lamp.disconnected ? '（已断开）' : ''}',
+          label: '  ● ${e.title}${e.lamp == Lamp.disconnected ? '（已断开）' : ''}',
         ),
+      for (final f in h.idle)
+        MenuItem(key: '$favKeyPrefix${f.app.key}', label: '     ${f.app.name}', disabled: f.offline),
     ],
-    ..._favorites(favorites),
   ];
 }
 
-/// 常用 by host (one group per device, ordered by host name, stable), favourite order within.
-List<MenuItem> _favorites(List<MenuFavorite> favorites) {
-  if (favorites.isEmpty) return const [];
-  final byDevice = <String, List<MenuFavorite>>{};
-  for (final f in favorites) {
-    byDevice.putIfAbsent(f.app.device, () => []).add(f);
-  }
-  final groups = byDevice.values.toList();
-  final order = [for (var i = 0; i < groups.length; i++) i]
-    ..sort((a, b) {
-      final c = groups[a].first.host.compareTo(groups[b].first.host);
-      return c != 0 ? c : a.compareTo(b);
-    });
-  return [
-    MenuItem.separator(),
-    MenuItem(label: '常用', disabled: true),
-    for (final i in order) ...[
-      MenuItem(label: '${groups[i].first.host}${groups[i].first.offline ? '（离线）' : ''}', disabled: true),
-      for (final f in groups[i])
-        MenuItem(key: '$favKeyPrefix${f.app.key}', label: '    ${f.app.name}', disabled: f.offline),
-    ],
-  ];
+class _Host {
+  _Host(this.name);
+  final String name;
+  final open = <SessionEntry>[];
+  final idle = <MenuFavorite>[];
+  bool offline = false;
 }
