@@ -207,13 +207,16 @@ public final class RappRimePlugin: NSObject, FlutterPlugin {
     return true
   }
 
-  /// A press type-to-compose held back, played into the editor once it has focus. True when the engine took it
-  /// (or it is printable text Dart inserts), so the caller must not insertText it. No repeat, no ledger.
+  /// A press type-to-compose held back, played into the editor once it has focus. True when the engine took it,
+  /// so the caller must not insertText it; false when the engine declined it, and the caller inserts (or deletes)
+  /// as usual, synchronously, which keeps the replayed keys in order. No repeat, no ledger.
   public func replay(hid: Int, characters: String, modifiers: Int) -> Bool {
     guard active, engine.ready, !RimeKeyMap.isModifier(hid: hid),
-          let k = RimeKeyMap.map(hid: hid, characters: characters, ignoringModifiers: characters, modifiers: modifiers)
+          let k = RimeKeyMap.map(hid: hid, characters: characters, ignoringModifiers: characters, modifiers: modifiers),
+          engine.process(k.keysym, k.mask)
     else { return false }
-    return send(k, text: RimeKeyMap.typedText(characters: characters, modifiers: modifiers))
+    push()
+    return true
   }
 
   private func pass(_ hid: Int) -> Bool {
