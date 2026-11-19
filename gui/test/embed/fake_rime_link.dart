@@ -3,7 +3,17 @@ import 'package:rapp_rime/rapp_rime.dart';
 
 /// A [RimeLink] with no engine: tests push updates by hand and read back what the editor asked for.
 class FakeRimeLink extends ChangeNotifier implements RimeLink {
-  FakeRimeLink({this.enabled = true, this.builtin = true, this.status = const RimeStatus(), this.ascii = false});
+  FakeRimeLink({
+    this.enabled = true,
+    this.builtin = true,
+    this.status = const RimeStatus(),
+    this.ascii = false,
+    this.delayed = false,
+  });
+
+  /// [flush] returns at once and the commit comes on a later microtask, just before the answer, as over
+  /// RappRime's channel. Otherwise the commit is pushed inside the call.
+  final bool delayed;
 
   @override
   bool enabled;
@@ -72,8 +82,12 @@ class FakeRimeLink extends ChangeNotifier implements RimeLink {
   @override
   Future<bool> flush() {
     calls.add('flush');
-    if (flushOk) push(RimeUpdate(commit: _input));
-    return Future.value(flushOk);
+    bool answer() {
+      if (flushOk) push(RimeUpdate(commit: _input));
+      return flushOk;
+    }
+
+    return delayed ? Future.microtask(answer) : Future.value(answer());
   }
 
   @override

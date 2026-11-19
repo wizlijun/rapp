@@ -10,7 +10,8 @@ abstract class RimeLink implements Listenable {
   RimeStatus get status;
   bool get ascii;
 
-  /// This editor becomes the one receiving updates (the previous one is replaced).
+  /// This editor becomes the one receiving updates (the previous one is replaced). A composition the
+  /// previous one still had is committed to it first.
   void attach(Object owner, void Function(RimeUpdate) onUpdate);
   void detach(Object owner);
   Future<void> setActive(Object owner, bool on);
@@ -35,6 +36,9 @@ class RappRime extends ChangeNotifier implements RimeLink {
   RimeStatus _status = const RimeStatus();
   Object? _owner;
   void Function(RimeUpdate)? _onUpdate;
+  // Where updates go: the owner's callback, or during a handover the previous owner's.
+  void Function(RimeUpdate)? _route;
+  bool _handingOver = false;
   bool _on = false; // what the current owner asked for
   String? _sentConfigure; // last configure sent, to skip duplicates
 
@@ -72,7 +76,7 @@ class RappRime extends ChangeNotifier implements RimeLink {
         if (update != null) {
           final changed = _ascii != update.ascii;
           _ascii = update.ascii;
-          _onUpdate?.call(update);
+          _route?.call(update);
           if (changed) notifyListeners();
         }
     }
@@ -110,9 +114,23 @@ class RappRime extends ChangeNotifier implements RimeLink {
 
   @override
   void attach(Object owner, void Function(RimeUpdate) onUpdate) {
-    if (_owner != null && !identical(_owner, owner)) _on = false;
+    final previous = _owner;
     _owner = owner;
     _onUpdate = onUpdate;
+    if (previous == null || identical(previous, owner)) {
+      if (!_handingOver) _route = onUpdate;
+      return;
+    }
+    _on = false;
+    // A new panel attaches before the old one lets go: the old one's composition is committed to the old
+    // one. Native answers a flush with its update before the reply, so until the reply every update is
+    // the old owner's. An attach meanwhile waits for the same flush, then the latest owner takes over.
+    if (_handingOver) return;
+    _handingOver = true;
+    flush().whenComplete(() {
+      _handingOver = false;
+      _route = _onUpdate;
+    });
   }
 
   @override
@@ -121,6 +139,7 @@ class RappRime extends ChangeNotifier implements RimeLink {
     final wasOn = _on;
     _owner = null;
     _onUpdate = null;
+    if (!_handingOver) _route = null;
     _on = false;
     if (wasOn) _sendActive();
   }

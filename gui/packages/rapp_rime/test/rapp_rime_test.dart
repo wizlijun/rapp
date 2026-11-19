@@ -122,6 +122,7 @@ void main() {
     final gotA = <RimeUpdate>[], gotB = <RimeUpdate>[];
     rime.attach(a, gotA.add);
     rime.attach(b, gotB.add);
+    await Future<void>.delayed(Duration.zero); // the handover flush answered
     final done = push('update', {'commit': 'z', 'ascii': true});
     expect(gotB.length, 1); // delivered before any await
     await done;
@@ -131,6 +132,54 @@ void main() {
     rime.detach(b);
     await push('update', {'commit': 'q'});
     expect(gotB.length, 1);
+  });
+
+  test('attach hands over: the old owner gets its flush\'s commit, then the new owner the rest', () async {
+    // Native: a flush pushes its update before it replies.
+    binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      if (call.method == 'flush') await push('update', {'commit': 'ni'});
+      return null;
+    });
+    final a = Object(), b = Object(), c = Object();
+    final gotA = <String>[], gotB = <String>[], gotC = <String>[];
+    rime.attach(a, (u) => gotA.add(u.commit));
+    rime.attach(a, (u) => gotA.add(u.commit)); // the same owner again: no handover
+    await Future<void>.delayed(Duration.zero);
+    expect(calls.map((c) => c.method), isNot(contains('flush')));
+    rime.attach(b, (u) => gotB.add(u.commit));
+    expect(calls.map((c) => c.method), ['flush']);
+    rime.attach(c, (u) => gotC.add(u.commit)); // mid-handover: no second flush, the latest takes over
+    await Future<void>.delayed(Duration.zero);
+    expect(calls.map((c) => c.method), ['flush']);
+    expect(gotA, ['ni']);
+    await push('update', {'commit': 'hao'});
+    expect(gotB, isEmpty);
+    expect(gotC, ['hao']);
+  });
+
+  test('a handover with no plugin still hands over', () async {
+    plugin = false;
+    final a = Object(), b = Object();
+    final gotA = <String>[], gotB = <String>[];
+    rime.attach(a, (u) => gotA.add(u.commit));
+    rime.attach(b, (u) => gotB.add(u.commit));
+    await Future<void>.delayed(Duration.zero);
+    await push('update', {'commit': 'x'});
+    expect(gotA, isEmpty);
+    expect(gotB, ['x']);
+  });
+
+  test('the new owner detaching mid-handover: nothing gets the later updates', () async {
+    final a = Object(), b = Object();
+    final gotA = <String>[], gotB = <String>[];
+    rime.attach(a, (u) => gotA.add(u.commit));
+    rime.attach(b, (u) => gotB.add(u.commit));
+    rime.detach(b);
+    await Future<void>.delayed(Duration.zero);
+    await push('update', {'commit': 'x'});
+    expect(gotA, isEmpty);
+    expect(gotB, isEmpty);
   });
 
   test('status messages are parsed and notify', () async {

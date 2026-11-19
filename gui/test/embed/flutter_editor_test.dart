@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -466,7 +467,7 @@ void main() {
 
     setUp(() {
       ed.dispose();
-      fake = FakeRimeLink();
+      fake = FakeRimeLink(delayed: true);
       ed = FlutterEditor(rime: fake);
       ed.handlers = log.handlers;
     });
@@ -556,10 +557,12 @@ void main() {
       await focused(tester);
       fake.push(const RimeUpdate(preedit: 'ni hao', input: 'nihao'));
       ed.insert('[语音]');
+      ed.insert('!');
+      expect(await ed.read(), '', reason: 'the commit is still on its way');
       await tester.pump();
-      expect(fake.calls.where((c) => c == 'flush'), hasLength(1));
-      expect(await ed.read(), 'nihao[语音]');
-      expect(drawn(tester).toPlainText(), 'nihao[语音]');
+      expect(fake.calls.where((c) => c == 'flush'), hasLength(1), reason: 'one flush in flight at a time');
+      expect(await ed.read(), 'nihao[语音]!');
+      expect(drawn(tester).toPlainText(), 'nihao[语音]!');
     });
 
     rimeTest('setText while composing commits first, then replaces', (tester) async {
@@ -680,6 +683,116 @@ void main() {
       expect(find.byType(RimeCandidateRow), findsNothing);
       expect(tester.state(find.byType(EditableText)), same(state), reason: 'the field keeps its state');
       expect(tester.widget<TextField>(find.byType(TextField)).focusNode!.hasFocus, isTrue);
+    });
+
+    rimeTest('a read while typing leaves the composition alone (the 1 s draft copy)', (tester) async {
+      await focused(tester);
+      tester.testTextInput.updateEditingValue(
+          const TextEditingValue(text: '你', selection: TextSelection.collapsed(offset: 1)));
+      fake.push(const RimeUpdate(preedit: 'hao', input: 'hao'));
+      await tester.pump();
+      expect(await ed.read(), '你');
+      await tester.pump();
+      expect(fake.calls, isNot(contains('flush')));
+      expect(drawn(tester).toPlainText(), '你hao');
+    });
+
+    rimeTest('read() once the field is gone commits the raw input first', (tester) async {
+      await focused(tester);
+      fake.push(const RimeUpdate(preedit: 'ni', input: 'ni'));
+      await tester.pumpWidget(const SizedBox()); // the panel closes while the field has the focus
+      final draft = ed.read();
+      await tester.pump();
+      expect(await draft, 'ni');
+      expect(fake.calls.where((c) => c == 'flush'), hasLength(1));
+    });
+
+    rimeTest('dispose after the closing read keeps the letters', (tester) async {
+      await focused(tester);
+      fake.push(const RimeUpdate(preedit: 'ni', input: 'ni'));
+      await tester.pumpWidget(const SizedBox());
+      // As ComposerPanel.dispose: the draft is read, then the editor goes.
+      String? draft;
+      ed.read().then((t) => draft = t).whenComplete(ed.dispose);
+      await tester.pump();
+      expect(draft, 'ni');
+      expect(fake.calls.last, 'detach');
+    });
+
+    rimeTest('two editors: B attaches while A composes, A keeps its letters', (tester) async {
+      // RappRime over a channel whose native side commits on flush, pushing the update before it answers.
+      const channel = MethodChannel('test/rime');
+      final messenger = tester.binding.defaultBinaryMessenger;
+      Future<void> native(String method, Object? args) => messenger.handlePlatformMessage(
+          channel.name, const StandardMethodCodec().encodeMethodCall(MethodCall(method, args)), (_) {});
+      var raw = '';
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'flush') {
+          final commit = raw;
+          raw = '';
+          await native('update', {'commit': commit});
+        }
+        return null;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      final link = RappRime(channel)
+        ..configure(enabled: true, builtin: true, dictionary: RimeDictionary.bundled, onBuiltin: (_) {});
+      final edA = FlutterEditor(rime: link);
+      await tester.pumpWidget(_host(edA));
+      edA.focus();
+      await tester.pump();
+      raw = 'ni';
+      await native('update', {'preedit': 'ni', 'input': 'ni'});
+      await tester.pump();
+      expect(drawn(tester).toPlainText(), 'ni');
+
+      // A session switch: the new panel's editor attaches before the old panel goes.
+      final edB = FlutterEditor(rime: link);
+      addTearDown(edB.dispose);
+      await tester.pumpWidget(_host(edB));
+      String? draftA;
+      edA.read().then((t) => draftA = t).whenComplete(edA.dispose);
+      await tester.pump();
+      await tester.pump();
+      expect(draftA, 'ni');
+      expect(await edB.read(), '');
+
+      // After the handover, updates are B's.
+      edB.focus();
+      await tester.pump();
+      await native('update', {'commit': '好'});
+      await tester.pump();
+      expect(await edB.read(), '好');
+    });
+
+    rimeTest('an update for an editor already disposed is dropped, not applied', (tester) async {
+      // A handover whose flush answer is late: meanwhile the old editor goes without a closing read.
+      const channel = MethodChannel('test/rime-late');
+      final messenger = tester.binding.defaultBinaryMessenger;
+      Future<void> native(String method, Object? args) => messenger.handlePlatformMessage(
+          channel.name, const StandardMethodCodec().encodeMethodCall(MethodCall(method, args)), (_) {});
+      final answer = Completer<void>();
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'flush') await answer.future;
+        return null;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      final link = RappRime(channel)
+        ..configure(enabled: true, builtin: true, dictionary: RimeDictionary.bundled, onBuiltin: (_) {});
+      final edA = FlutterEditor(rime: link);
+      final edB = FlutterEditor(rime: link); // handover: updates stay A's until the flush answers
+      addTearDown(edB.dispose);
+      edA.dispose();
+      // Routed to A: must not touch its disposed controller. A throw would come back as an error reply.
+      ByteData? reply;
+      await messenger.handlePlatformMessage(channel.name,
+          const StandardMethodCodec().encodeMethodCall(const MethodCall('update', {'commit': 'ni', 'preedit': 'hao'})),
+          (r) => reply = r);
+      expect(() => const StandardMethodCodec().decodeEnvelope(reply!), returnsNormally);
+      answer.complete();
+      await tester.pump();
+      await native('update', {'commit': '好'});
+      expect(await edB.read(), '好');
     });
 
     rimeTest('master switch off: no row, no attach side effects', (tester) async {

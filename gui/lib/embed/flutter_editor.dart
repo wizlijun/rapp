@@ -327,7 +327,11 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
 
   @override
   Future<String> read() {
-    if (!_handoff || !_composing) return SynchronousFuture(_controller.text);
+    // Rime's composition never ends on its own. Once the field is gone (the panel closing reads the draft
+    // with no blur first) or for the handoff, it is committed as typed before the read. While the field is
+    // there, a read (the model's 1 s draft copy) leaves it alone: committing it would cut a word in half.
+    final rime = _controller.rimePreedit.isNotEmpty && (_handoff || _fieldKey.currentContext == null);
+    if (!rime && (!_handoff || !_composing)) return SynchronousFuture(_controller.text);
     // Unfocus commits the local preedit. Read after that commit and any queued
     // insertions, before the native window becomes the draft's editor.
     final done = Completer<String>();
