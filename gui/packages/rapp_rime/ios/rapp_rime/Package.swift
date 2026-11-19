@@ -1,4 +1,5 @@
 // swift-tools-version: 5.9
+import Foundation
 import PackageDescription
 
 let libs = [
@@ -6,7 +7,19 @@ let libs = [
   "libglog", "libleveldb", "libmarisa", "libopencc", "libyaml-cpp",
 ]
 
-let package = Package(
+let keysOnly = ProcessInfo.processInfo.environment["RAPP_RIME_KEYS_ONLY"].map { !$0.isEmpty } ?? false
+
+let package = keysOnly
+  ? Package(
+    name: "rapp_rime",
+    platforms: [.macOS(.v13)],
+    products: [],
+    targets: [
+      .target(name: "RappRimeKeys", path: "Sources/RappRimeKeys"),
+      .testTarget(name: "RappRimeKeysTests", dependencies: ["RappRimeKeys"], path: "Tests/RappRimeKeysTests"),
+    ]
+  )
+  : Package(
   name: "rapp_rime",
   platforms: [.iOS("17.0")],
   products: [
@@ -19,6 +32,7 @@ let package = Package(
     // Headers only; the engine itself comes from the binary targets below (run scripts/fetch.sh first).
     .target(name: "CRime", path: "Sources/CRime"),
     .target(name: "RappRimeKeys", path: "Sources/RappRimeKeys"),
+    .testTarget(name: "RappRimeKeysTests", dependencies: ["RappRimeKeys"], path: "Tests/RappRimeKeysTests"),
     .target(
       name: "rapp_rime",
       dependencies: [
