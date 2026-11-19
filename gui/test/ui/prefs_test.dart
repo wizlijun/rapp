@@ -30,6 +30,17 @@ void main() {
       contains('"start_fullscreen"'),
     );
   });
+  test('rime fields: defaults, round trip, bad dictionary', () {
+    final d = UiPrefs();
+    expect([d.rimeEnabled, d.rimeBuiltin, d.rimeDictionary], [false, true, 'bundled']);
+    File('${tmp.path}/gui.json').writeAsStringSync('{"rime_enabled":"x","rime_builtin":1,"rime_dictionary":"x"}');
+    final bad = UiPrefs.load(tmp.path);
+    expect([bad.rimeEnabled, bad.rimeBuiltin, bad.rimeDictionary], [false, true, 'bundled']);
+    UiPrefs(rimeEnabled: true, rimeBuiltin: false, rimeDictionary: 'user').save(tmp.path);
+    final back = UiPrefs.load(tmp.path);
+    expect([back.rimeEnabled, back.rimeBuiltin, back.rimeDictionary], [true, false, 'user']);
+  });
+
   test('keep_awake: on when missing or bad, saved when off', () {
     File('${tmp.path}/gui.json').writeAsStringSync('{"keep_awake":"x"}');
     expect(UiPrefs.load(tmp.path).keepAwake, isTrue);
