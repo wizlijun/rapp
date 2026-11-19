@@ -88,6 +88,9 @@ void main() {
       try {
         e.open();
         a.flushMicrotasks();
+        // Both screens open, the main one on the stage: screen 2 opens only when picked.
+        e.screen(a, '22');
+        e.screen(a, '1');
         body(a, e, store);
       } finally {
         e.dispose();

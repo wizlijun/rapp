@@ -248,8 +248,6 @@ class Stage extends StatelessWidget {
           final banner = state.lockBanner;
           final notice = state.hostNotice;
           final offline = rec != null && rec.frozen && picture ? offlineBarFor(state, rec) : null;
-          final screens = rec != null && isDesktopApp(rec.app) && port?.supportsDetach == false
-              ? state.desktopScreens(rec.id) : const [];
           return Stack(
             children: [
               stage,
@@ -273,24 +271,13 @@ class Stage extends StatelessWidget {
                         : const SizedBox.shrink(),
                   ),
                 ),
-              if (offline != null || banner != null || notice != null || screens.length > 1)
+              if (offline != null || banner != null || notice != null)
                 Positioned(
                   top: 0, left: 0, right: 0,
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       ?offline,
-                      if (screens.length > 1)
-                        Material(
-                          color: Theme.of(context).colorScheme.surface,
-                          child: Wrap(spacing: 8, children: [
-                            for (var i = 0; i < screens.length; i++)
-                              RappButton.quiet(
-                                label: '屏幕 ${i + 1}',
-                                onPressed: () => state.openScreen(rec!.id, screens[i].id),
-                              ),
-                          ]),
-                        ),
                       if (banner != null)
                         Material(
                           color: const Color(0xffffe7a3),

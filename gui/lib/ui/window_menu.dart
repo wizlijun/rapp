@@ -1,6 +1,8 @@
 // The top bar's window control (spec 2026-11-16-rapp-window-menu-design): one button showing the
 // current window's title, and a menu to switch when there is more than one. It replaces the row of
 // tab chips, which had no width to live in, and swallows the 已隐藏 N 个 chip beside it.
+// A desktop on an A with several screens lists the screens here instead: each one is its own
+// session, and picking one puts it on the stage.
 import 'package:flutter/material.dart';
 
 import '../embed/session_port.dart';
@@ -40,12 +42,13 @@ class WindowMenu extends StatelessWidget {
 
   /// The bar shows the control while the session has a window or something hidden to get back.
   static bool shows(MainState state, {required bool term}) =>
-      windowsOf(state).isNotEmpty || hiddenOf(state, term: term).isNotEmpty;
+      windowsOf(state).isNotEmpty || hiddenOf(state, term: term).isNotEmpty || (!term && state.currentScreens.isNotEmpty);
 
   @override
   Widget build(BuildContext context) {
     final rs = state.currentRemote;
     if (rs == null) return const SizedBox.shrink();
+    if (!term && !rs.detached && state.currentScreens.isNotEmpty) return _screens(context);
     final windows = windowsOf(state);
     final hidden = hiddenOf(state, term: term);
     final app = state.current?.appName ?? '';
@@ -132,6 +135,43 @@ class WindowMenu extends StatelessWidget {
                   state.unhide(pick.$2);
               }
             },
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// The desktop of an A with several screens: 屏幕 1…N, the one on the stage selected.
+  Widget _screens(BuildContext context) {
+    final screens = state.currentScreens;
+    final at = state.currentScreenIndex;
+    final device = state.currentRecord!.id;
+    final label = at == null ? '屏幕' : '屏幕 ${at + 1}';
+    return Tooltip(
+      message: '$label（${screens.length} 块屏）',
+      child: Semantics(
+        key: const Key('window-menu'),
+        button: true,
+        label: label,
+        excludeSemantics: true,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: compact ? compactWidth : fullWidth),
+          child: RappDropdown<_Pick>(
+            minWidth: 48,
+            arrow: !compact,
+            center: compact,
+            padding: compact ? EdgeInsets.zero : null,
+            current: at == null ? null : ('screen', at),
+            label: Text(compact ? '${screens.length}' : label, key: const Key('window-menu-label')),
+            items: [
+              for (var i = 0; i < screens.length; i++)
+                RappMenuItem<_Pick>(
+                  key: Key('screen-row-${screens[i].id}'),
+                  value: ('screen', i),
+                  label: screens[i].main ? '屏幕 ${i + 1}（主屏）' : '屏幕 ${i + 1}',
+                ),
+            ],
+            onSelected: (pick) => state.openScreen(device, screens[pick.$2].id),
           ),
         ),
       ),
