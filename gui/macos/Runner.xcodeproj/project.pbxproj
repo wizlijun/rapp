@@ -35,6 +35,7 @@
 		A5E5510000000000000000B2 /* DetachedWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5E5510000000000000000B1 /* DetachedWindow.swift */; };
 		A5E5510000000000000000A5 /* RappSession in Frameworks */ = {isa = PBXBuildFile; productRef = A5E5510000000000000000A4 /* RappSession */; };
 		A5E552000000000000000002 /* ComposerPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A5E552000000000000000001 /* ComposerPlugin.swift */; };
+		D0C3E1000000000000000002 /* DockMenu.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0C3E1000000000000000001 /* DockMenu.swift */; };
 		A5E552000000000000000012 /* ComposerNative.m in Sources */ = {isa = PBXBuildFile; fileRef = A5E552000000000000000011 /* ComposerNative.m */; };
 /* End PBXBuildFile section */
 
@@ -94,6 +95,7 @@
 		A5E551000000000000000F13 /* SecureInputPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureInputPlugin.swift; sourceTree = "<group>"; };
 		A5E5510000000000000000B1 /* DetachedWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DetachedWindow.swift; sourceTree = "<group>"; };
 		A5E552000000000000000001 /* ComposerPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerPlugin.swift; sourceTree = "<group>"; };
+		D0C3E1000000000000000001 /* DockMenu.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DockMenu.swift; sourceTree = "<group>"; };
 		A5E552000000000000000011 /* ComposerNative.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ComposerNative.m; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -188,6 +190,7 @@
 				A5E5510000000000000000C1 /* SpeechPlugin.swift */,
 				A5E552000000000000000011 /* ComposerNative.m */,
 				A5E552000000000000000001 /* ComposerPlugin.swift */,
+				D0C3E1000000000000000001 /* DockMenu.swift */,
 				A5E551000000000000000F11 /* UnlockPlugin.swift */,
 				A5E551000000000000000F13 /* SecureInputPlugin.swift */,
 				A5E5510000000000000000B1 /* DetachedWindow.swift */,
@@ -384,6 +387,7 @@
 				A5E5510000000000000000C2 /* SpeechPlugin.swift in Sources */,
 				A5E552000000000000000012 /* ComposerNative.m in Sources */,
 				A5E552000000000000000002 /* ComposerPlugin.swift in Sources */,
+				D0C3E1000000000000000002 /* DockMenu.swift in Sources */,
 				A5E551000000000000000F12 /* UnlockPlugin.swift in Sources */,
 				A5E551000000000000000F14 /* SecureInputPlugin.swift in Sources */,
 				A5E5510000000000000000B2 /* DetachedWindow.swift in Sources */,

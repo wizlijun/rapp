@@ -27,6 +27,9 @@ class MainFlutterWindow: NSWindow {
     SpeechPlugin.register(with: flutterViewController.registrar(forPlugin: "RappSpeech"), window: self)
 
     ComposerPlugin.register(with: flutterViewController.registrar(forPlugin: "RappComposer"))
+    if !SingleInstance.isConnectionManager {
+      DockMenu.register(messenger: flutterViewController.engine.binaryMessenger)
+    }
 
     let system = FlutterMethodChannel(name: "rapp/system", binaryMessenger: flutterViewController.engine.binaryMessenger)
     system.setMethodCallHandler { call, result in

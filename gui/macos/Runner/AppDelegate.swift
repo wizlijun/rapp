@@ -23,6 +23,22 @@ class AppDelegate: FlutterAppDelegate {
     }
   }
 
+  override func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+    DockMenu.shared?.menu()
+  }
+
+  /// ⌘Q and the Dock's 退出 ask Dart first (remote windows open → a confirmation). Straight through:
+  /// the connection manager, before Dart has spoken, once Dart confirmed, and log out / restart / shut down.
+  override func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    guard let dock = DockMenu.shared, dock.dartReady, !dock.quitConfirmed,
+          !SingleInstance.isConnectionManager else { return .terminateNow }
+    // The system's quit Apple Event carries a reason (log out, restart, shut down); ⌘Q and the Dock do not.
+    let event = NSAppleEventManager.shared().currentAppleEvent
+    if event?.attributeDescriptor(forKeyword: AEKeyword(kAEQuitReason)) != nil { return .terminateNow }
+    dock.requestQuit()
+    return .terminateCancel
+  }
+
   func showMainWindow() {
     for window in NSApp.windows where window is MainFlutterWindow {
       window.makeKeyAndOrderFront(nil)
