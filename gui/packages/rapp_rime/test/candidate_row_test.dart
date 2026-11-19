@@ -78,6 +78,20 @@ void main() {
     expect(link.toggles, 1);
   });
 
+  testWidgets('the 内/系 toggle fills the row height and is at least 44 wide', (tester) async {
+    final link = FakeLink();
+    await tester.pumpWidget(host(link, menu));
+    final row = tester.getRect(find.byType(RimeCandidateRow));
+    final toggle = tester.getRect(find.byKey(const Key('rime-toggle')));
+    expect(toggle.height, row.height);
+    expect(toggle.top, row.top);
+    expect(toggle.width, greaterThanOrEqualTo(44));
+    expect(toggle.right, row.right);
+    // The bottom edge of the row (below the text line) still toggles.
+    await tester.tapAt(Offset(toggle.center.dx, row.bottom - 2));
+    expect(link.toggles, 1);
+  });
+
   testWidgets('system mode shows 系 and 中', (tester) async {
     final link = FakeLink()..builtin = false;
     await tester.pumpWidget(host(link, RimeMenu.empty));

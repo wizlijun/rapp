@@ -33,21 +33,23 @@ class RimeCandidateRow extends StatelessWidget {
       listenable: link,
       builder: (context, _) => SizedBox(
         height: height + 13,
-        child: Align(
-          alignment: Alignment.topLeft,
-          child: SizedBox(
-            height: height,
-            child: Row(
-              children: [
-                Expanded(child: _body(context, textStyle, height)),
-                _tail(textStyle),
-              ],
-            ),
-          ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(child: _line(height, _body(context, textStyle, height))),
+            ..._tail(textStyle, height),
+          ],
         ),
       ),
     );
   }
+
+  /// The text sits on the first [height] of the row; the 13 below are spacing.
+  static Widget _line(double height, Widget child) =>
+      Align(alignment: Alignment.topLeft, child: SizedBox(height: height, child: child));
+
+  /// The 内/系 toggle's least width: a finger-sized target.
+  static const toggleWidth = 44.0;
 
   Widget _body(BuildContext context, TextStyle textStyle, double height) {
     if (menu.rows.isNotEmpty) {
@@ -71,31 +73,41 @@ class RimeCandidateRow extends StatelessWidget {
 
   static TextStyle _muted(TextStyle s) => s.copyWith(color: (s.color ?? const Color(0xff888888)).withValues(alpha: .65));
 
-  Widget _tail(TextStyle textStyle) {
+  /// The 中/英 marker, then the toggle, which spans the whole row height and at least [toggleWidth].
+  List<Widget> _tail(TextStyle textStyle, double height) {
     final muted = _muted(textStyle);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
+    return [
+      _line(
+        height,
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 6),
-          child: Text(link.ascii ? '英' : '中', key: const Key('rime-ascii'), style: muted),
+          child: Center(
+            widthFactor: 1,
+            child: Text(link.ascii ? '英' : '中', key: const Key('rime-ascii'), style: muted),
+          ),
         ),
-        Semantics(
-          button: true,
-          label: '切换内置输入法',
-          excludeSemantics: true,
-          child: GestureDetector(
-            key: const Key('rime-toggle'),
-            behavior: HitTestBehavior.opaque,
-            onTap: link.toggleBuiltin,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              child: Text(link.builtin ? '内' : '系', style: textStyle),
+      ),
+      Semantics(
+        button: true,
+        label: '切换内置输入法',
+        excludeSemantics: true,
+        child: GestureDetector(
+          key: const Key('rime-toggle'),
+          behavior: HitTestBehavior.opaque,
+          onTap: link.toggleBuiltin,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: toggleWidth),
+            child: _line(
+              height,
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                child: Center(widthFactor: 1, child: Text(link.builtin ? '内' : '系', style: textStyle)),
+              ),
             ),
           ),
         ),
-      ],
-    );
+      ),
+    ];
   }
 }
 
