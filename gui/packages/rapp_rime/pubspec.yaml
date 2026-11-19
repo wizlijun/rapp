@@ -1,0 +1,18 @@
+name: rapp_rime
+description: "Built-in Rime (librime + 雾凇) input method for rapp on iOS/iPadOS."
+publish_to: none
+version: 0.0.1
+
+environment:
+  sdk: ^3.12.1
+  flutter: ">=3.44.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    platforms:
+      ios:
+        pluginClass: RappRimePlugin

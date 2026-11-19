@@ -12,6 +12,8 @@ dependencies:
   ffi: ^2.2.0
   flutter:
     sdk: flutter
+  rapp_rime:
+    path: packages/rapp_rime
   tray_manager: ^0.5.3
   window_manager: ^0.5.2
 

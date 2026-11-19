@@ -1,0 +1,5 @@
+vendor/
+ios/rapp_rime/Frameworks/
+ios/rapp_rime/Sources/CRime/include/*
+!ios/rapp_rime/Sources/CRime/include/.keep
+ios/rapp_rime/Sources/rapp_rime/RimeData/
