@@ -1,7 +1,9 @@
 # rapphub.com
 
 Published on Cloudflare Workers Static Assets: https://rapphub.com/ and https://www.rapphub.com/.
-Worker: `rapphub-site`. Initial production version: `fe3f4930-7b19-4652-b13d-d04ac7da8a3b` (2026-11-14).
+Worker: `rapphub-site`. Current production version: `15d374a6-5b80-4d62-813a-6fffae70c711` (2026-11-19).
+
+Both production domains were verified against the built release snapshot after deployment: macOS 0.14.12 and Linux 0.14.13. All eight release-selection tests and the JavaScript syntax check passed before deployment.
 
 Buildless HTML, CSS and JavaScript. Preview from the repository root:
 
@@ -11,7 +13,7 @@ python3 -m http.server 4173 --bind 127.0.0.1 --directory website
 
 Open http://127.0.0.1:4173/. English is the default; `?lang=ja` and `?lang=zh` link directly to the other languages. The theme selector offers MATRIX (default), WESTWORLD, and AVATAR from the existing app palettes.
 
-Downloads are resolved independently per platform from the public GitHub releases API, including pagination. Drafts and prereleases are excluded. Exact asset URLs are used, rather than `/releases/latest/download`, because macOS and Linux packages can belong to different releases. `releases.json` is a verified fallback snapshot from 2026-11-18; refresh it before publication. If GitHub cannot be reached, the version label says the list is saved. There is currently no Windows package. The Linux package is specifically for Omarchy / Arch x86_64, not all Linux distributions.
+Downloads are resolved independently per platform from the public GitHub releases API, including pagination. Drafts and prereleases are excluded. Exact asset URLs are used, rather than `/releases/latest/download`, because macOS and Linux packages can belong to different releases. `releases.json` is a verified fallback snapshot from 2026-11-19; refresh it before publication. If GitHub cannot be reached, the version label says the list is saved. There is currently no Windows package. The Linux package is specifically for Omarchy / Arch x86_64, not all Linux distributions.
 
 The Linux relay installer requires a running Docker installation and supports x86_64 / arm64. It pins the published `ghcr.io/wizlijun/rapp-relay:0.6.0` image, preserves the data volume, bounds readiness polling, and refuses to replace an existing container or rotate its key. It does not change the firewall or install Docker. Open UDP 22026 on the server and its cloud firewall. Keep the printed enrollment key; it is only shown once.
 
