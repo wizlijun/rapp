@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 
 import 'models.dart';
@@ -146,7 +147,31 @@ class RappRime extends ChangeNotifier implements RimeLink {
 
   Future<void> _sendActive() {
     final on = _on && _enabled && _builtin;
+    if (on) _watchClicks();
     return _invoke<void>('active', {'on': on});
+  }
+
+  bool _watching = false;
+
+  /// Shift (or Control) pressed and released with nothing in between toggles 中/英 in Rime. A click while it is
+  /// held never reaches the engine as a key, so the native side is told, and tells the engine something came
+  /// between. Registered on the first activation (the binding exists by then), for good.
+  void _watchClicks() {
+    if (_watching) return;
+    _watching = true;
+    GestureBinding.instance.pointerRouter.addGlobalRoute(_onPointer);
+  }
+
+  @override
+  void dispose() {
+    if (_watching) GestureBinding.instance.pointerRouter.removeGlobalRoute(_onPointer);
+    super.dispose();
+  }
+
+  void _onPointer(PointerEvent e) {
+    if (e is! PointerDownEvent || !(_on && _enabled && _builtin)) return;
+    final hw = HardwareKeyboard.instance;
+    if (hw.isShiftPressed || hw.isControlPressed) _invoke<void>('interrupt');
   }
 
   @override

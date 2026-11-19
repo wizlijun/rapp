@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp_rime/rapp_rime.dart';
@@ -35,6 +36,7 @@ void main() {
     rime = RappRime(channel);
   });
   tearDown(() {
+    rime.dispose();
     debugDefaultTargetPlatformOverride = null;
     binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
   });
@@ -196,6 +198,34 @@ void main() {
     expect(await rime.flush(), false);
     plugin = true;
     expect(await rime.flush(), true);
+  });
+
+  testWidgets('a click with Shift or Control held tells the engine, only while active', (tester) async {
+    final owner = Object();
+    configure();
+    rime.attach(owner, (_) {});
+    Future<void> click() async {
+      tester.binding.handlePointerEvent(const PointerDownEvent(kind: PointerDeviceKind.mouse, position: Offset(5, 5)));
+      tester.binding.handlePointerEvent(const PointerUpEvent(kind: PointerDeviceKind.mouse, position: Offset(5, 5)));
+      await tester.pump();
+    }
+
+    int interrupts() => calls.where((c) => c.method == 'interrupt').length;
+    await rime.setActive(owner, true);
+    await click();
+    expect(interrupts(), 0, reason: 'no modifier held');
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+    await click();
+    expect(interrupts(), 1);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await click();
+    expect(interrupts(), 2);
+    await rime.setActive(owner, false);
+    await click();
+    expect(interrupts(), 2, reason: 'not active: the engine never saw the modifier');
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    debugDefaultTargetPlatformOverride = null;
   });
 
   test('userFolder falls back on failure', () async {

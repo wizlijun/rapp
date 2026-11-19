@@ -809,6 +809,7 @@ void main() {
       addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
       final link = RappRime(channel)
         ..configure(enabled: true, builtin: true, dictionary: RimeDictionary.bundled, onBuiltin: (_) {});
+      addTearDown(link.dispose);
       final edA = FlutterEditor(rime: link);
       await tester.pumpWidget(_host(edA));
       edA.focus();
@@ -851,6 +852,7 @@ void main() {
       addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
       final link = RappRime(channel)
         ..configure(enabled: true, builtin: true, dictionary: RimeDictionary.bundled, onBuiltin: (_) {});
+      addTearDown(link.dispose);
       final edA = FlutterEditor(rime: link);
       final edB = FlutterEditor(rime: link); // handover: updates stay A's until the flush answers
       addTearDown(edB.dispose);

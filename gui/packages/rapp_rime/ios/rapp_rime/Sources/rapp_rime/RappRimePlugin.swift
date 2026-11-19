@@ -97,6 +97,10 @@ public final class RappRimePlugin: NSObject, FlutterPlugin {
       // Always answers with an update, even with no engine: Dart holds edits back until it comes.
       flush()
       result(nil)
+    case "interrupt":
+      // Dart saw a click while Shift or Control was held (`ChordPolicy`).
+      if active, engine.ready { interruptChord() }
+      result(nil)
     case "clear":
       engine.clear()
       push()
@@ -194,15 +198,16 @@ public final class RappRimePlugin: NSObject, FlutterPlugin {
       return orphans.remove(hid) != nil || swallowedPress
     }
     orphans.remove(hid)
+    guard active, engine.ready else { return pass(hid) }
     // A repeat of a key Flutter holds stays with Flutter, whatever changed since its first press.
-    guard active, engine.ready, !ledger.flutterHolds(hid: hid) else { return pass(hid) }
+    guard !ledger.flutterHolds(hid: hid) else { return missed(key) }
     if repeats.began(hid: hid) { stopRepeat() } // the system repeats on its own: never on top of it
     if RimeKeyMap.isModifier(hid: hid) {
       // To the engine, and on to Flutter, whose modifier state must stay right.
       if let k = rimeKey(key), engine.process(k.keysym, k.mask) || engine.ascii != lastAscii { push() }
       return pass(hid)
     }
-    guard let k = rimeKey(key) else { return pass(hid) }
+    guard let k = rimeKey(key) else { return missed(key) }
     let text = RimeKeyMap.typedText(characters: key.characters, modifiers: key.modifierFlags.rawValue)
     guard send(k, text: text) else { return pass(hid) }
     ledger.took(hid: hid)
@@ -237,6 +242,22 @@ public final class RappRimePlugin: NSObject, FlutterPlugin {
   private func pass(_ hid: Int) -> Bool {
     ledger.passed(hid: hid)
     return false
+  }
+
+  /// A press that goes on to Flutter without the engine seeing it. With Shift or Control held, the engine is
+  /// told something came between, or the modifier's release would toggle 中/英 (`ChordPolicy`).
+  private func missed(_ key: UIKey) -> Bool {
+    let hid = key.keyCode.rawValue
+    if ChordPolicy.interrupts(hid: hid, modifiers: key.modifierFlags.rawValue, reachedEngine: false) {
+      interruptChord()
+    }
+    return pass(hid)
+  }
+
+  private func interruptChord() {
+    let down = engine.process(ChordPolicy.voidSymbol, 0)
+    let up = engine.process(ChordPolicy.voidSymbol, RimeKeyMap.release)
+    if down || up || engine.ascii != lastAscii { push() }
   }
 
   private func rimeKey(_ key: UIKey) -> RimeKey? {
