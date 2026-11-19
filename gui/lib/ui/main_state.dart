@@ -2581,6 +2581,18 @@ class MainState extends ChangeNotifier {
     }
   }
 
+  /// For the tray and Dock menus: when [key] is a live detached session, raises its own windows and
+  /// says true; the current session stays as it is. Otherwise nothing is sent and it says false.
+  bool raiseIfDetached(String key) {
+    final e = _entries.where((e) => e.key == key).firstOrNull;
+    final sid = e?.sid;
+    if (e == null || sid == null || isTermApp(e.app) || e.lamp == Lamp.disconnected) return false;
+    final rs = remote[sid];
+    if (rs == null || !rs.detached) return false;
+    portOf(sid)!.raiseDetached(sid);
+    return true;
+  }
+
   /// 「切到窗口」: raises the session's own windows (a detached embedded session's, or S1's client).
   void focusCurrent() {
     if (embeds) {
