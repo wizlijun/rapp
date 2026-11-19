@@ -15,6 +15,7 @@ import 'data_dir.dart';
 import 'data_relocate.dart';
 import 'dock_channel.dart';
 import 'paths.dart';
+import 'quit_gate.dart';
 import 'service_client.dart';
 import 'service_control.dart';
 import 'term/term_session_port.dart';
@@ -137,11 +138,7 @@ Future<void> main(List<String> args) async {
       ),
       fullscreen: WindowManagerFullscreen(),
       hooks: UpdateHooks(
-        confirmQuit: () => shell._confirmQuit(
-          title: '升级 rapp？',
-          body: '还有 ${shell.openWindows} 个远程窗口，升级时会断开。',
-          ok: '升级',
-        ),
+        confirmQuit: shell._askUpgrade,
         quitNow: shell._quitNow,
       ),
     ),
@@ -208,8 +205,8 @@ class _Shell with WindowListener, TrayListener {
   String? _dockShape;
   bool _trayReady = false;
   DockChannel? _dock;
-  /// A quit confirmation is on screen: a second request (another ⌘Q, the tray) is dropped.
-  bool _quitAsking = false;
+  /// One quit (or upgrade) confirmation on screen at a time; a second request is dropped.
+  final _asking = OneAtATime();
 
   Future<void> setupTray() async {
     if (Platform.isMacOS) {
@@ -328,19 +325,18 @@ class _Shell with WindowListener, TrayListener {
   }
 
   /// The quit confirmation, shown once at a time: false for a request while one is already up.
-  Future<bool> _askQuit() async {
-    if (_quitAsking) return false;
-    _quitAsking = true;
-    try {
-      return await _confirmQuit(
+  Future<bool> _askQuit() => _asking.ask(() => _confirmQuit(
         title: '退出 rapp？',
         body: '还有 $openWindows 个远程窗口，退出后都会断开。',
         ok: '退出',
-      );
-    } finally {
-      _quitAsking = false;
-    }
-  }
+      ));
+
+  /// The upgrade's confirmation, behind the same gate as quitting.
+  Future<bool> _askUpgrade() => _asking.ask(() => _confirmQuit(
+        title: '升级 rapp？',
+        body: '还有 $openWindows 个远程窗口，升级时会断开。',
+        ok: '升级',
+      ));
 
   /// True straight away when no remote window is open; otherwise asks.
   Future<bool> _confirmQuit({required String title, required String body, required String ok}) async {
