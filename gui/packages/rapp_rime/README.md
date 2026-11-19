@@ -12,6 +12,15 @@ keyboard can type Chinese in the input panel without the system IME. Design: `do
 - `ios/rapp_rime/Sources/rapp_rime/RimeData/`: 雾凇 shared data plus OpenCC tables, bundled via `.copy("RimeData")`. Git-ignored. `rapp_rime_data_version` holds `<commit7>-<DATA_REV>`.
 - `vendor/`: download cache and stamp. Git-ignored.
 
+## 模拟器端到端（`tools/sim/`）
+
+`simkey.m` 发真实的 HID 按键（退格、Esc、单独的 Shift、按住连发都能发），`hwkb.m` 打开模拟器的实体键盘；两者用 CoreSimulator/SimulatorKit 的私有接口，只做测试工具，不进 app。`sim.sh` 第一次用到时自己编：`clang -fobjc-arc -framework Foundation -o simkey simkey.m`（`hwkb` 同理）。
+
+1. `scripts/build-ios.sh sim --install <udid>`
+2. `tools/sim/sim.sh <udid> prep`：把系统简体拼音设成模拟器的第一个输入源、重启模拟器、在 app 的 `local/gui.json` 里打开「实体键盘用内置输入法」，再启动 app。app 没有读启动参数的办法，所以开关这样打开；如果设备已经有 id（prefs 在 `devices/<id>/`），就在模拟器的设置里**手动打开一次开关**，之后一直开着。
+3. 手动：接入、打开一个会话、打开输入板（光标在里面，空的）。脚本不会点屏幕。
+4. `tools/sim/sim.sh <udid> <label> builtin repeat compose`，截图在 `tools/sim/out/<label>/`。每个场景该看到什么写在 `sim.sh` 开头。
+
 ## 升级 librime
 
 Edit `KIT_URL` and `KIT_SHA` in `scripts/fetch.sh` (LibrimeKit-iOS release `Frameworks.tgz`), and `DEPS_URL`/`DEPS_SHA` if the OpenCC tables change. Delete the stale file in `vendor/dl/`, rerun `fetch.sh`.

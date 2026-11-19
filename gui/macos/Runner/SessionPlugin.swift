@@ -64,6 +64,9 @@ final class SessionPlugin: NSObject, FlutterPlugin {
   #if os(iOS)
   /// The registered plugin, for the root view controller's presses.
   static weak var shared: SessionPlugin?
+  /// Tried first for each replayed press (the built-in input method, set by the iOS runner): true when it took
+  /// the press, which then is not typed as text.
+  static var replayHook: ((HeldPress) -> Bool)?
   #endif
 
   private final class Live {
@@ -759,6 +762,7 @@ final class SessionPlugin: NSObject, FlutterPlugin {
     guard let input = firstResponder as? UIKeyInput else { return }
     let chords = UIKeyModifierFlags([.command, .control, .alternate]).rawValue
     for p in presses where p.down && p.modifiers & chords == 0 {
+      if Self.replayHook?(p) == true { continue }
       if p.hid == UIKeyboardHIDUsage.keyboardDeleteOrBackspace.rawValue {
         input.deleteBackward()
       } else if isTypedText(p.characters) {
