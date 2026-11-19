@@ -13,6 +13,7 @@ import 'hub_client.dart';
 import 'pages/local_section.dart';
 import 'data_dir.dart';
 import 'data_relocate.dart';
+import 'dock_channel.dart';
 import 'paths.dart';
 import 'service_client.dart';
 import 'service_control.dart';
@@ -195,34 +196,104 @@ class _QuitOnClose with WindowListener {
   void onWindowClose() => onClose();
 }
 
-/// Close hides the window; the tray menu has 显示 / 退出.
+/// Close hides the window; the tray menu has 显示 / 退出. On macOS the Dock menu lists the same
+/// sessions and 常用, and ⌘Q / the Dock's 退出 ask first like the tray's 退出.
 class _Shell with WindowListener, TrayListener {
   _Shell(this.hub, this.port, this.state);
   final SessionPort? port;
   final HubClient? hub;
   final MainState state;
   final navigatorKey = GlobalKey<NavigatorState>();
-  String? _menuShape;
+  String? _trayShape;
+  String? _dockShape;
+  bool _trayReady = false;
+  DockChannel? _dock;
+  /// A quit confirmation is on screen: a second request (another ⌘Q, the tray) is dropped.
+  bool _quitAsking = false;
 
   Future<void> setupTray() async {
+    if (Platform.isMacOS) {
+      _dock = DockChannel(onClick: _menuClick, onQuitRequested: _dockQuit);
+    }
     try {
       await trayManager.setIcon('assets/tray_icon.png', isTemplate: true);
       // tray_manager does not implement setToolTip on Linux.
       if (!Platform.isLinux) await trayManager.setToolTip('rapp');
-      await _updateMenu();
-      state.addListener(_updateMenu);
+      _trayReady = true;
     } catch (e) {
       stderr.writeln('rapp: tray unavailable: $e');
     }
+    // The Dock does not depend on the tray: a tray that failed must not leave the Dock menu out.
+    if (!_trayReady && _dock == null) return;
+    await _updateMenu();
+    state.addListener(_updateMenu);
   }
 
-  /// The menu lists the open sessions by host; rebuilt only when that list changes.
+  static String _shapeOf(List<MenuItem> items) =>
+      [for (final i in items) '${i.type}|${i.key}|${i.label}|${i.disabled}'].join('\n');
+
+  /// Both menus list the open sessions and the idle 常用 by host; each is rebuilt only when it changes.
   Future<void> _updateMenu() async {
-    final items = trayItems(state.entries);
-    final shape = [for (final i in items) '${i.key}|${i.label}'].join('\n');
-    if (shape == _menuShape) return;
-    _menuShape = shape;
-    await trayManager.setContextMenu(Menu(items: items));
+    final favorites =
+        menuFavorites(state.idleFavorites, hostName: state.deviceName, offline: state.deviceOffline);
+    if (_trayReady) {
+      final items = trayItems(state.entries, favorites: favorites);
+      final shape = _shapeOf(items);
+      if (shape != _trayShape) {
+        _trayShape = shape;
+        try {
+          await trayManager.setContextMenu(Menu(items: items));
+        } catch (e) {
+          stderr.writeln('rapp: tray menu: $e');
+        }
+      }
+    }
+    final dock = _dock;
+    if (dock != null) {
+      final items = dockItems(state.entries, favorites: favorites);
+      final shape = _shapeOf(items);
+      if (shape != _dockShape) {
+        _dockShape = shape;
+        try {
+          await dock.setMenu(items);
+        } catch (e) {
+          stderr.writeln('rapp: dock menu: $e');
+        }
+      }
+    }
+  }
+
+  /// A tray or Dock item. A session item raises a detached session's own window, or shows the
+  /// main window on it; a 常用 item opens that app (or switches to it). Stale keys do nothing.
+  void _menuClick(String? key) {
+    switch (key) {
+      case 'show':
+        _show();
+        return;
+      case 'quit':
+        _quit();
+        return;
+    }
+    final session = sessionKeyOf(key);
+    if (session != null) {
+      if (!state.entries.any((e) => e.key == session)) return;
+      if (state.raiseIfDetached(session)) return;
+      _show();
+      state.select(session);
+      return;
+    }
+    final fav = favKeyOf(key);
+    if (fav != null) {
+      final f = state.favorites.where((a) => a.key == fav).firstOrNull;
+      if (f == null) return;
+      _show();
+      state.openOrSwitch(f.device, f.bundle, f.name);
+    }
+  }
+
+  /// ⌘Q or the Dock's 退出: asks like the tray's 退出, then lets the native side terminate.
+  Future<void> _dockQuit() async {
+    if (await _askQuit()) await _dock?.confirmQuit();
   }
 
   @override
@@ -243,20 +314,7 @@ class _Shell with WindowListener, TrayListener {
   void onTrayIconRightMouseDown() => trayManager.popUpContextMenu();
 
   @override
-  void onTrayMenuItemClick(MenuItem item) {
-    switch (item.key) {
-      case 'show':
-        _show();
-      case 'quit':
-        _quit();
-      default:
-        final key = sessionKeyOf(item.key);
-        if (key != null) {
-          _show();
-          state.select(key);
-        }
-    }
-  }
+  void onTrayMenuItemClick(MenuItem item) => _menuClick(item.key);
 
   Future<void> _show() async {
     await windowManager.show();
@@ -266,12 +324,21 @@ class _Shell with WindowListener, TrayListener {
   int get openWindows => hub?.sessions.length ?? 0;
 
   Future<void> _quit() async {
-    if (await _confirmQuit(
-      title: '退出 rapp？',
-      body: '还有 $openWindows 个远程窗口，退出后都会断开。',
-      ok: '退出',
-    )) {
-      await _quitNow();
+    if (await _askQuit()) await _quitNow();
+  }
+
+  /// The quit confirmation, shown once at a time: false for a request while one is already up.
+  Future<bool> _askQuit() async {
+    if (_quitAsking) return false;
+    _quitAsking = true;
+    try {
+      return await _confirmQuit(
+        title: '退出 rapp？',
+        body: '还有 $openWindows 个远程窗口，退出后都会断开。',
+        ok: '退出',
+      );
+    } finally {
+      _quitAsking = false;
     }
   }
 

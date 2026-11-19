@@ -13,9 +13,9 @@ class DockChannel {
   DockChannel({
     required void Function(String key) onClick,
     required Future<void> Function() onQuitRequested,
-    MethodChannel channel = const MethodChannel('rapp/dock'),
-  }) : _channel = channel {
-    _channel.setMethodCallHandler((call) async {
+    this.channel = const MethodChannel('rapp/dock'),
+  }) {
+    channel.setMethodCallHandler((call) async {
       switch (call.method) {
         case 'click':
           onClick(call.arguments as String);
@@ -27,11 +27,11 @@ class DockChannel {
     });
   }
 
-  final MethodChannel _channel;
+  final MethodChannel channel;
 
   /// What the Dock menu shows from now on.
-  Future<void> setMenu(List<MenuItem> items) => _channel.invokeMethod<void>('setMenu', dockPayload(items));
+  Future<void> setMenu(List<MenuItem> items) => channel.invokeMethod<void>('setMenu', dockPayload(items));
 
   /// The quit was confirmed: the native side lets it through and terminates.
-  Future<void> confirmQuit() => _channel.invokeMethod<void>('confirmQuit');
+  Future<void> confirmQuit() => channel.invokeMethod<void>('confirmQuit');
 }
