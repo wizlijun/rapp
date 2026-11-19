@@ -44,4 +44,11 @@ final class RimeKeyMapTests: XCTestCase {
     XCTAssertTrue(p.began(hid: 4)); XCTAssertFalse(p.ownRepeat)
     p.ended(hid: 4); XCTAssertFalse(p.began(hid: 4)); XCTAssertFalse(p.ownRepeat)  // once seen, stays off
   }
+
+  func testRepeatPolicyEndAll() {
+    var p = RepeatPolicy()
+    XCTAssertFalse(p.began(hid: 4)); XCTAssertFalse(p.began(hid: 5))
+    p.endAll()  // both releases were lost
+    XCTAssertFalse(p.began(hid: 4)); XCTAssertFalse(p.began(hid: 5)); XCTAssertTrue(p.ownRepeat)
+  }
 }

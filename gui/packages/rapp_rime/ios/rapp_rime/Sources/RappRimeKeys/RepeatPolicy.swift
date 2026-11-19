@@ -13,5 +13,8 @@ public struct RepeatPolicy {
     return false
   }
   public mutating func ended(hid: Int) { down.remove(hid) }
+  /// Every key stopped being down without its own release (deactivated, app resigned active): forget them all,
+  /// or the next press of a key whose release was lost would look like a system repeat.
+  public mutating func endAll() { down.removeAll() }
   public var ownRepeat: Bool { !systemSeen }
 }
