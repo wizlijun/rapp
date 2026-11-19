@@ -271,9 +271,13 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             field(math.max(0.0, maxHeight - row)),
-            ValueListenableBuilder<RimeMenu>(
-              valueListenable: _menu,
-              builder: (context, menu, _) => RimeCandidateRow(link: rime, menu: menu, style: rowStyle),
+            // Part of the field for taps: on iOS a mouse, trackpad or Pencil tap outside the field unfocuses it,
+            // which would commit the raw letters before the candidate's select arrives.
+            TextFieldTapRegion(
+              child: ValueListenableBuilder<RimeMenu>(
+                valueListenable: _menu,
+                builder: (context, menu, _) => RimeCandidateRow(link: rime, menu: menu, style: rowStyle),
+              ),
             ),
           ],
         );

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -732,6 +733,28 @@ void main() {
       expect(find.byType(RimeCandidateRow), findsNothing);
       expect(tester.state(find.byType(EditableText)), same(state), reason: 'the field keeps its state');
       expect(tester.widget<TextField>(find.byType(TextField)).focusNode!.hasFocus, isTrue);
+    });
+
+    rimeTest('a mouse or trackpad tap on the candidate row keeps the focus and the composition', (tester) async {
+      fake.status = const RimeStatus(state: RimeState.ready, keyboard: true);
+      await focused(tester);
+      fake.push(const RimeUpdate(
+          preedit: 'ni',
+          input: 'ni',
+          menu: RimeMenu(rows: [RimeCandidate(0, '1', '你'), RimeCandidate(1, '2', '尼')], cursor: 0)));
+      await tester.pump();
+      fake.calls.clear();
+      // On iOS a non-touch tap outside the field unfocuses it (EditableText's tap-outside action).
+      await tester.tap(find.textContaining('尼', findRichText: true), kind: PointerDeviceKind.mouse);
+      await tester.pump();
+      expect(tester.widget<TextField>(find.byType(TextField)).focusNode!.hasFocus, isTrue);
+      expect(fake.calls, ['select(1)'], reason: 'no setActive(false), no flush of the raw letters');
+      expect(await ed.read(), '');
+      expect(drawn(tester).toPlainText(), 'ni');
+      await tester.tap(find.byKey(const Key('rime-toggle')), kind: PointerDeviceKind.mouse);
+      await tester.pump();
+      expect(tester.widget<TextField>(find.byType(TextField)).focusNode!.hasFocus, isTrue);
+      expect(fake.calls, ['select(1)', 'toggleBuiltin', 'clear']);
     });
 
     rimeTest('a read while typing leaves the composition alone (the 1 s draft copy)', (tester) async {
