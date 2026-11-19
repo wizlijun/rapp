@@ -198,6 +198,7 @@ public final class RappRimePlugin: NSObject, FlutterPlugin {
       return orphans.remove(hid) != nil || swallowedPress
     }
     orphans.remove(hid)
+    if RepeatPolicy.stopsOwnRepeat(repeating: repeatHid, pressed: hid) { stopRepeat() }
     guard active, engine.ready else { return pass(hid) }
     // A repeat of a key Flutter holds stays with Flutter, whatever changed since its first press.
     guard !ledger.flutterHolds(hid: hid) else { return missed(key) }

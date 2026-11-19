@@ -17,4 +17,10 @@ public struct RepeatPolicy {
   /// or the next press of a key whose release was lost would look like a system repeat.
   public mutating func endAll() { down.removeAll() }
   public var ownRepeat: Bool { !systemSeen }
+
+  /// Our repeat of `repeating` ends when another key goes down, as the system's does, so a release that never
+  /// came cannot leave it running. A press of the repeating key itself is for `began` to judge.
+  public static func stopsOwnRepeat(repeating: Int?, pressed: Int) -> Bool {
+    repeating.map { $0 != pressed } ?? false
+  }
 }

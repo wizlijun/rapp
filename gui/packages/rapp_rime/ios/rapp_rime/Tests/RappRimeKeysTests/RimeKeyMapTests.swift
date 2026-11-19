@@ -61,6 +61,14 @@ final class RimeKeyMapTests: XCTestCase {
     p.ended(hid: 4); XCTAssertFalse(p.began(hid: 4)); XCTAssertFalse(p.ownRepeat)  // once seen, stays off
   }
 
+  /// As the system's own repeat: another key going down ends it, so a lost release cannot leave it running.
+  func testOwnRepeatStopsOnAnotherKey() {
+    XCTAssertTrue(RepeatPolicy.stopsOwnRepeat(repeating: 4, pressed: 5))
+    XCTAssertTrue(RepeatPolicy.stopsOwnRepeat(repeating: 4, pressed: 0xE1))  // a modifier too
+    XCTAssertFalse(RepeatPolicy.stopsOwnRepeat(repeating: 4, pressed: 4))    // its own press: began() decides
+    XCTAssertFalse(RepeatPolicy.stopsOwnRepeat(repeating: nil, pressed: 5))
+  }
+
   func testRepeatPolicyEndAll() {
     var p = RepeatPolicy()
     XCTAssertFalse(p.began(hid: 4)); XCTAssertFalse(p.began(hid: 5))
