@@ -553,6 +553,55 @@ void main() {
       expect(drawn(tester).toPlainText(), 'a你好我nib');
     });
 
+    Future<void> withText(WidgetTester tester, String text, {TextSelection? selection}) async {
+      tester.testTextInput.updateEditingValue(
+          TextEditingValue(text: text, selection: selection ?? TextSelection.collapsed(offset: text.length)));
+      await tester.pump();
+    }
+
+    rimeTest('a replayed ⌫ after a commit deletes the commit', (tester) async {
+      await focused(tester);
+      await withText(tester, 'abc');
+      fake.push(const RimeUpdate(commit: '你'));
+      fake.push(const RimeUpdate(delete: 1));
+      await tester.pump();
+      expect(await ed.read(), 'abc');
+    });
+
+    rimeTest('a replayed ⌫ after declined letters deletes the last one', (tester) async {
+      await focused(tester);
+      await withText(tester, 'x');
+      fake.push(const RimeUpdate(commit: 'h'));
+      fake.push(const RimeUpdate(commit: 'i'));
+      fake.push(const RimeUpdate(delete: 1));
+      await tester.pump();
+      expect(await ed.read(), 'xh');
+    });
+
+    rimeTest('a replayed ⌫ at the start does nothing', (tester) async {
+      await focused(tester);
+      await withText(tester, 'ab', selection: const TextSelection.collapsed(offset: 0));
+      fake.push(const RimeUpdate(delete: 1));
+      await tester.pump();
+      expect(await ed.read(), 'ab');
+    });
+
+    rimeTest('a replayed ⌫ with a selection deletes the selection only', (tester) async {
+      await focused(tester);
+      await withText(tester, 'abcd', selection: const TextSelection(baseOffset: 1, extentOffset: 3));
+      fake.push(const RimeUpdate(delete: 1));
+      await tester.pump();
+      expect(await ed.read(), 'ad');
+    });
+
+    rimeTest('a replayed ⌫ removes a whole grapheme', (tester) async {
+      await focused(tester);
+      await withText(tester, 'a👍🏽');
+      fake.push(const RimeUpdate(delete: 1));
+      await tester.pump();
+      expect(await ed.read(), 'a');
+    });
+
     rimeTest('insert while composing commits the raw input first', (tester) async {
       await focused(tester);
       fake.push(const RimeUpdate(preedit: 'ni hao', input: 'nihao'));

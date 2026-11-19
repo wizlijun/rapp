@@ -61,10 +61,15 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
   final _menu = ValueNotifier<RimeMenu>(RimeMenu.empty);
   final _fieldKey = GlobalKey(debugLabel: 'composer-field');
 
-  /// Synchronous to the end: the native side inserts declined keys right after an update, in order.
+  /// Synchronous to the end. While the engine is up every text edit of a key comes through here (commits,
+  /// declined printable keys, a replayed ⌫ as [RimeUpdate.delete]), in the order typed; only edits made here are
+  /// sent back to the iOS text input, so nothing native edits a stale copy behind them.
   void _onRime(RimeUpdate u) {
     if (_disposed) return;
     if (u.commit.isNotEmpty) _insertNow(u.commit);
+    for (var i = 0; i < u.delete; i++) {
+      _backspaceNow();
+    }
     final r = _rime!;
     final live = r.enabled && r.builtin;
     _menu.value = live ? u.menu : RimeMenu.empty;
@@ -294,6 +299,21 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
 
   void _setNow(String text) {
     _controller.value = TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length));
+  }
+
+  /// One ⌫ at the caret: a selection goes as a whole, else the grapheme before the caret; nothing at the start.
+  void _backspaceNow() {
+    final v = _controller.value;
+    final s = v.selection.isValid ? v.selection : TextSelection.collapsed(offset: v.text.length);
+    var start = s.start, end = s.end;
+    if (s.isCollapsed) {
+      if (end <= 0) return;
+      start = end - v.text.substring(0, end).characters.last.length;
+    }
+    _controller.value = TextEditingValue(
+      text: v.text.replaceRange(start, end, ''),
+      selection: TextSelection.collapsed(offset: start),
+    );
   }
 
   void _insertNow(String text) {

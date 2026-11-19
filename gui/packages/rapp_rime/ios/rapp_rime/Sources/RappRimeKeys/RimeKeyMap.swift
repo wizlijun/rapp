@@ -52,6 +52,9 @@ public enum RimeKeyMap {
 
   public static func isModifier(hid: Int) -> Bool { modifierKeys[hid] != nil }
 
+  /// The HID usage of ⌫ (Keyboard Delete/Backspace).
+  public static let backspaceHid = 0x2A
+
   public static func typedText(characters: String, modifiers: Int) -> String? {
     if modifiers & (flagControl | flagAlternate | flagCommand) != 0 { return nil }
     return ascii(characters) != nil ? characters : nil

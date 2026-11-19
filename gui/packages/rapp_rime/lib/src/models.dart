@@ -53,11 +53,15 @@ class RimeUpdate {
     this.input = '',
     this.ascii = false,
     this.menu = RimeMenu.empty,
+    this.delete = 0,
   });
   final String commit, preedit, input;
   final int caret;
   final bool ascii;
   final RimeMenu menu;
+
+  /// How many ⌫ to apply at the caret after [commit] (a ⌫ type-to-compose replayed with nothing composing).
+  final int delete;
 
   /// Null when [args] is not a map or a candidate row is malformed.
   static RimeUpdate? parse(Object? args) {
@@ -95,6 +99,7 @@ class RimeUpdate {
       input: str('input'),
       ascii: args['ascii'] == true,
       menu: menu,
+      delete: switch (args['delete']) { final int d when d > 0 => d, _ => 0 },
     );
   }
 }

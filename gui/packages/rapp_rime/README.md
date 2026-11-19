@@ -26,6 +26,7 @@ keyboard can type Chinese in the input panel without the system IME. Design: `do
 完整清单见设计文档 §7。这里补充模拟器跑不到的：
 
 - 补发的顺序：会话画面上、输入板关着，**快速**打 `n i 空格 1`，输入板打开后显示「你1」（不是「1」，也不是「1你」）。
+- 补发的退格：输入板里有「abc」，关上输入板，在会话画面上**快速**打 `n i 空格 ⌫` → 输入板里是「abc」；切到「英」再快速打 `h i ⌫` → 「abch」。
 
 ## 升级 librime
 

@@ -139,8 +139,10 @@ public final class RappRimePlugin: NSObject, FlutterPlugin {
     channel.invokeMethod("status", arguments: ["state": state, "message": message, "keyboard": keyboard])
   }
 
-  private func push(extra: String = "") {
-    let update = engine.update(extra: extra)
+  /// `delete`: how many ⌫ Dart applies at the caret after the commit (a declined replayed ⌫).
+  private func push(extra: String = "", delete: Int = 0) {
+    var update = engine.update(extra: extra)
+    if delete > 0 { update["delete"] = delete }
     lastAscii = update["ascii"] as? Bool
     channel.invokeMethod("update", arguments: update)
   }
@@ -208,18 +210,28 @@ public final class RappRimePlugin: NSObject, FlutterPlugin {
     return true
   }
 
-  /// A press type-to-compose held back, played into the editor once it has focus. True when it was taken: the
-  /// engine processed it, or declined it but it is printable text, which is then committed through Dart like a
-  /// live press (`send`). The caller must not insertText a taken press. False (⌫ and other non-text keys, engine
-  /// not active or not ready, unmapped keys): the caller inserts or deletes as usual, synchronously.
-  /// Declined text must not take the caller's insertText: the iOS text-input copy learns of a Dart-side commit
-  /// only through the async setEditingState, so an insertText right after one ("ni␣1": 你, then 1) would edit the
-  /// stale copy, and its full-state update would overwrite the 你. No repeat, no ledger.
+  /// A press type-to-compose held back, played into the editor once it has focus. True when it was taken (the
+  /// engine processed it; or it declined it and it is printable text, committed through Dart like a live press;
+  /// or a declined ⌫, which Dart applies at the caret), so the caller must not insertText or deleteBackward it.
+  /// False (other non-text keys, engine not active or not ready, modifiers, unmapped keys): the caller handles it
+  /// as before. Text edits must not take the caller's way once any edit went through Dart: the iOS text-input
+  /// copy learns of a Dart-side edit only through the async setEditingState, so a synchronous insertText or
+  /// deleteBackward right after one ("ni␣1": 你, then 1) edits the stale copy, and its full-state update
+  /// overwrites what Dart did (`ReplayPolicy`). No repeat, no ledger.
   public func replay(hid: Int, characters: String, modifiers: Int) -> Bool {
     guard active, engine.ready, !RimeKeyMap.isModifier(hid: hid),
           let k = RimeKeyMap.map(hid: hid, characters: characters, ignoringModifiers: characters, modifiers: modifiers)
     else { return false }
-    return send(k, text: RimeKeyMap.typedText(characters: characters, modifiers: modifiers))
+    let processed = engine.process(k.keysym, k.mask)
+    switch ReplayPolicy.decide(processed: processed,
+                               typedText: RimeKeyMap.typedText(characters: characters, modifiers: modifiers),
+                               isBackspace: hid == RimeKeyMap.backspaceHid) {
+    case .engine: push()
+    case let .dart(text): push(extra: text)
+    case .delete: push(delete: 1)
+    case .pass: return false
+    }
+    return true
   }
 
   private func pass(_ hid: Int) -> Bool {

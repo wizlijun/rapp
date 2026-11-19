@@ -65,4 +65,12 @@ void main() {
     expect(off.keyboard, false);
     expect(RimeStatus.parse({'state': 7, 'message': 3}).state, RimeState.off);
   });
+
+  test('RimeUpdate.parse reads delete; absent, non-int or negative is 0', () {
+    expect(RimeUpdate.parse({'delete': 2})!.delete, 2);
+    expect(RimeUpdate.parse({})!.delete, 0);
+    expect(RimeUpdate.parse({'delete': '1'})!.delete, 0);
+    expect(RimeUpdate.parse({'delete': 1.0})!.delete, 0);
+    expect(RimeUpdate.parse({'delete': -3})!.delete, 0);
+  });
 }
