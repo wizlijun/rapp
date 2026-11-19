@@ -54,6 +54,7 @@ public final class RappRimePlugin: NSObject, FlutterPlugin {
     let instance = RappRimePlugin(channel: channel)
     shared = instance
     registrar.addMethodCallDelegate(instance, channel: channel)
+    NSLog("rapp_rime: librime %@", instance.version)
   }
 
   private var version: String {
