@@ -20,6 +20,8 @@ final class DetachedWindow: NSWindow {
     // rapp places them beside the main window (R20); AppKit must not cascade or restore them.
     isRestorable = false
     tabbingMode = .disallowed
+    // Listed once, in the Dock menu's session list (rapp's own), not again in the system's window list.
+    isExcludedFromWindowsMenu = true
     // RemoteView hosts its own layer and takes no subviews: picture and banner share a plain container.
     let container = NSView(frame: content)
     remoteView.frame = content
@@ -195,6 +197,8 @@ final class DetachedSession: NSObject, NSWindowDelegate {
     for window in windows.values { window.orderFront(nil) }
     let key = lastKey.flatMap { windows[$0] } ?? windows.values.first
     key?.makeKeyAndOrderFront(nil)
+    // From the Dock or the tray rapp is not frontmost: without this the window would not take keys.
+    NSApp.activate(ignoringOtherApps: true)
   }
 
   /// Takes the windows away; the session goes on (attach) or is already ending (closed).

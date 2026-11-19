@@ -695,3 +695,19 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [x] [v0.14.13](https://github.com/wizlijun/rapp/releases/tag/v0.14.13) 已发布 Linux 安装包、便携包及 SHA256SUMS；GitHub 三个附件大小和摘要与本地一致，匿名下载校验清单也一致。安装包 SHA256：`f9eb380c812bd494625be1efad53d3a2f5269c0b8c2e3eab89cd09f1a6ad1c77`。发布使用 `--latest=false`，核验 GitHub Latest 仍为 v0.14.12，保证 macOS 自动更新清单可用。网站 50 条发布快照和说明已更新，构建/8 项测试通过。
 - [ ] Cloudflare 静态部署未完成：两次设备授权均超时，本机无登录凭据，仓库无 Actions secret；最终正式部署命令因缺少 `CLOUDFLARE_API_TOKEN` 失败。线上静态快照仍是 v0.6.0；线上下载模块与仓库一致，配合已公开的发布列表可选中 Linux v0.14.13 / macOS v0.14.12，但不能称为备用静态快照已上线。需用户完成本机 `npx --yes wrangler@4.135.0 login` 后部署 `website/wrangler.jsonc` 并核验。
 - 验收边界：未用物理麦克风测试中文/多语言准确率，也未新增 macOS/iOS 真机对端验收；详情见 [Linux 语音规格](../docs/superpowers/specs/2026-11-18-rapp-linux-voice-design.md)。
+
+
+## Dock 右键菜单（feat/dock-menu）实机检查
+
+- [ ] Dock 上右键 rapp 图标，能看到按主机分组的会话和「常用」
+- [ ] 点一个会话，主窗口切过去
+- [ ] 点一个已分离的会话，只提起它自己的独立窗口，主窗口不出来
+- [ ] 点一个常用，在对应主机上打开（已开着就切过去）
+- [ ] 离线主机的常用置灰，标题带「（离线）」
+- [ ] 托盘菜单的会话和常用与 Dock 一致
+- [ ] 分离窗口不在 Dock 菜单顶部的系统窗口列表里重复出现（菜单栏「窗口」里也不再有它们）
+- [ ] 有远程窗口时，Dock 的「退出」和 Cmd+Q 都先弹确认框；点取消后 rapp 不退出
+- [ ] 关机 / 重启 / 注销时不被确认框拦住
+- [ ] 确认框开着时再按 Cmd+Q，仍然只有一个确认框
+- [ ] 设置里「升级 rapp？」框开着时按 Cmd+Q，不再叠出第二个框
+- [ ] Cmd+` 仍能在主窗口和分离窗口之间切换（分离窗口已不在「窗口」菜单里；不通就回头商量）

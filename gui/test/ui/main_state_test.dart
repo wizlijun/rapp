@@ -2730,6 +2730,31 @@ void main() {
       expect(port.calls.last.$2, equals(args));
     }
 
+    test('raiseIfDetached raises a live detached session and leaves the current one alone', () {
+      env((a, t, port, st, hints) {
+        port.emit(const DetachedEvent(1, true));
+        a.flushMicrotasks();
+        final before = st.currentKey;
+        expect(st.raiseIfDetached('111/a'), isTrue);
+        lastCall(port, 'raise_detached', {'sid': 1});
+        expect(st.currentKey, before);
+      });
+    });
+
+    test('raiseIfDetached is false for an attached, disconnected or unknown session', () {
+      env((a, t, port, st, hints) {
+        final calls = port.calls.length;
+        expect(st.raiseIfDetached('111/a'), isFalse); // attached
+        expect(st.raiseIfDetached('999/x'), isFalse); // unknown
+        port.emit(const DetachedEvent(1, true));
+        port.emit(const DisconnectedEvent(1, 'connection closed'));
+        a.flushMicrotasks();
+        expect(st.remote[1]!.detached, isTrue);
+        expect(st.raiseIfDetached('111/a'), isFalse); // disconnected
+        expect(port.calls.skip(calls).where((c) => c.$1 == 'raise_detached'), isEmpty);
+      });
+    });
+
     test('native sends enter the shared queue exactly once and retry its failed remainder', () {
       env((a, t, port, st, hints) {
         port.emit(WindowsEvent(1, [rw(7)]));
