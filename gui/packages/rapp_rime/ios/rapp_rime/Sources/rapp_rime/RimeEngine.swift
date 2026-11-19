@@ -77,7 +77,7 @@ final class RimeEngine {
     loaded = d
     let (shared, user) = Self.dirs(d)
     if d == .user, !Self.userFolderReady {
-      state = .error("default.yaml not found in Documents/Rime")
+      state = .error("「文件」→ rapp → Rime 里没有 default.yaml")
       done()
       return
     }
@@ -127,7 +127,7 @@ final class RimeEngine {
           self.state = .error(error)
         } else {
           self.session = self.api.create_session!()
-          self.state = self.session != 0 ? .ready : .error("create_session failed")
+          self.state = self.session != 0 ? .ready : .error("建立会话失败")
         }
         done()
       }
@@ -149,7 +149,7 @@ final class RimeEngine {
 
   private func notified(_ type: String, _ value: String) {
     guard type == "deploy", value == "failure" else { return }
-    let message = "\(type) \(value)"
+    let message = "部署失败"
     if loading { deployError = message } else if initialized { state = .error(message) }
   }
 
