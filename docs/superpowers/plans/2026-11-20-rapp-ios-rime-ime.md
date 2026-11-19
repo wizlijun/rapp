@@ -326,7 +326,7 @@ public final class RappRimePlugin: NSObject, FlutterPlugin {
   | 方法 | 参数 | 返回 | 做什么 |
   |---|---|---|---|
   | `configure` | `{enabled: bool, dictionary: 'bundled'\|'user'}` | null | `enabled=false` 时释放引擎（`finalize`）；已经加载时换了词库，就重新加载 |
-  | `active` | `{on: bool}` | null | Dart 那边编辑区有焦点、总开关开着、选的是「内」。第一次 `on=true`、并且接着实体键盘时才加载引擎。`on=false` 时停掉连发 |
+  | `active` | `{on: bool}` | null | Dart 那边编辑区有焦点、总开关开着、选的是「内」。（终审改：引擎不再等第一次 `on=true`，`configure` 开着总开关、接着实体键盘，或者键盘接上时就加载，见规格 §6.6。）`on=false` 时停掉连发 |
   | `select` | `{index: int}` | null | 选当前页第 index 个候选 |
   | `page` | `{next: bool}` | null | 翻页 |
   | `flush` | — | null | 把原始输入（`get_input`）当作上屏文字，清掉组字，推一次 `update` |

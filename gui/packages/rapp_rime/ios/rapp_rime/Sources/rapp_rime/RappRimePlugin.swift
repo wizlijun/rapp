@@ -18,7 +18,8 @@ public final class RappRimePlugin: NSObject, FlutterPlugin {
   private var dictionary = RimeEngine.Dictionary.bundled
   /// The editor has focus, the switch is on and set to 「内」.
   private var active = false
-  /// Latched the first time `active` comes on with a hardware keyboard attached; the engine stays loaded after.
+  /// The engine should be loaded: latched once the switch is on with a hardware keyboard attached (at
+  /// `configure` or when one connects, not on first focus), then kept until the switch goes off (`LoadPolicy`).
   private var wanted = false
   private var redeployPending = false
 
@@ -73,7 +74,7 @@ public final class RappRimePlugin: NSObject, FlutterPlugin {
     case "configure":
       enabled = args["enabled"] as? Bool ?? false
       dictionary = (args["dictionary"] as? String).flatMap(RimeEngine.Dictionary.init(rawValue:)) ?? .bundled
-      if !enabled { wanted = false; deactivate() }
+      if !enabled { deactivate() }
       latch()
       reconcile()
       pushStatus()
@@ -84,7 +85,6 @@ public final class RappRimePlugin: NSObject, FlutterPlugin {
         active = on
         if !on { deactivate() }
       }
-      latch()
       reconcile()
       result(nil)
     case "select":
@@ -113,7 +113,7 @@ public final class RappRimePlugin: NSObject, FlutterPlugin {
   }
 
   private func latch() {
-    if enabled, active, keyboard { wanted = true }
+    wanted = LoadPolicy.wanted(was: wanted, enabled: enabled, keyboard: keyboard)
   }
 
   /// Brings the engine in line with what Dart wants. A load in progress finishes first, then this runs again.
