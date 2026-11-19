@@ -10,6 +10,7 @@ import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/stage.dart';
 import 'package:rapp/ui/unlock.dart';
+import 'package:rapp/ui/window_menu.dart';
 import '../fakes.dart';
 import 'helpers.dart';
 
@@ -81,6 +82,10 @@ class DesktopEnv {
     ],
   });
   void open() => state.openOrSwitch('111', 'desktop:', '桌面');
+  void screen(FakeAsync a, String id) {
+    state.openScreen('111', id);
+    a.flushMicrotasks();
+  }
   Object sid(String app) => state.recordFor('111/$app')!.sid!;
   Iterable<Map<String, Object?>> calls(String method) =>
       port.calls.where((c) => c.$1 == method).map((c) => c.$2);
@@ -106,51 +111,56 @@ void main() {
     });
   }
 
-  test(
-    'secondary screens detach once, stay hidden, and count in the desktop row',
-    () {
-      env((a, e) {
-        expect(e.calls('start'), hasLength(2));
-        expect(e.state.entries.single.appName, '桌面（2 块屏）');
-        final child = e.sid('desktop:22');
-        e.port.emit(WindowsEvent(child, const []));
-        expect(e.calls('detach'), isEmpty);
-        final windows = [
-          RemoteWindow(
-            id: 1,
-            parent: 0,
-            kind: WindowKind.normal,
-            title: '屏幕 2',
-            rect: const Rect.fromLTWH(0, 0, 1920, 1080),
-            titleBar: 0,
-            resizable: false,
-            focused: true,
-            texture: 1,
-            visible: const Rect.fromLTWH(0, 0, 1, 1),
-          ),
-        ];
-        e.port.emit(WindowsEvent(child, windows));
-        e.port.emit(WindowsEvent(child, windows));
-        expect(e.calls('detach').single['sid'], child);
-        expect(e.state.currentKey, '111/desktop:');
-        e.open();
-        a.flushMicrotasks();
-        expect(e.calls('start'), hasLength(2));
-      });
-    },
-  );
+  test('secondary screens are not opened by themselves, only picked, and never detached', () {
+    env((a, e) {
+      expect(e.calls('start'), hasLength(1));
+      expect(e.state.entries.single.appName, '桌面（2 块屏）');
+      expect(e.state.currentScreens, hasLength(2));
+      expect(e.state.currentScreenIndex, 0);
+      e.open();
+      a.flushMicrotasks();
+      expect(e.calls('start'), hasLength(1));
+      e.screen(a, '22');
+      expect(e.calls('start'), hasLength(2));
+      expect(e.state.currentKey, '111/desktop:22');
+      expect(e.state.currentScreenIndex, 1);
+      expect(e.state.entries, hasLength(1));
+      final windows = [
+        RemoteWindow(
+          id: 1,
+          parent: 0,
+          kind: WindowKind.normal,
+          title: '屏幕 2',
+          rect: const Rect.fromLTWH(0, 0, 1920, 1080),
+          titleBar: 0,
+          resizable: false,
+          focused: true,
+          texture: 1,
+          visible: const Rect.fromLTWH(0, 0, 1, 1),
+        ),
+      ];
+      e.port.emit(WindowsEvent(e.sid('desktop:22'), windows));
+      expect(e.calls('detach'), isEmpty);
+      // Back to the main screen: the other one stays open off the stage, so a switch back is instant.
+      e.screen(a, '1');
+      expect(e.state.currentKey, '111/desktop:');
+      e.screen(a, '22');
+      expect(e.calls('start'), hasLength(2));
+    });
+  });
 
   test(
     'closing a child is quiet, reopening restores it, main end cascades',
     () {
       env((a, e) {
+        e.screen(a, '22');
         final hint = e.state.hint;
         e.port.emit(ClosedEvent(e.sid('desktop:22'), 'quit'));
         expect(e.state.hint, hint);
-        expect(e.state.entries.single.appName, '桌面');
-        e.open();
-        a.flushMicrotasks();
+        expect(e.state.currentKey, '111/desktop:');
+        e.screen(a, '22');
         final child = e.sid('desktop:22');
+        e.screen(a, '1');
         e.state.endCurrent();
         expect(
           e.calls('close').map((c) => c['sid']),
@@ -165,6 +175,7 @@ void main() {
   test('desktop screens share stream choices, including screens opened later', () {
     env((a, e) {
       final main = e.sid('desktop:');
+      e.screen(a, '22');
       final child = e.sid('desktop:22');
       e.port.emit(DetachedEvent(child, true));
       e.state.remote[main]!.setChoice(const StreamChoice('duogray', 'original', 30), manual: true);
@@ -174,7 +185,7 @@ void main() {
       expect(update['fps'], 30);
       expect(update['pinned'], true);
       e.port.emit(ClosedEvent(child, 'quit'));
-      e.open(); a.flushMicrotasks();
+      e.screen(a, '22');
       final fresh = e.sid('desktop:22');
       expect(e.state.remote[fresh]!.choice, e.state.remote[main]!.choice);
       expect(e.state.remote[fresh]!.streamPinned, true);
@@ -195,6 +206,7 @@ void main() {
 
   test('disconnected secondary is removed without retries or hints', () {
     env((a, e) {
+      e.screen(a, '22');
       final hint = e.state.hint;
       e.port.emit(DisconnectedEvent(e.sid('desktop:22'), 'connection closed'));
       expect(e.state.recordFor('111/desktop:22'), isNull);
@@ -208,6 +220,7 @@ void main() {
     'poll removes vanished screens quietly and hints for additions once',
     () {
       env((a, e) {
+        e.screen(a, '22');
         final child = e.sid('desktop:22');
         final hint = e.state.hint;
         e.displays = ['1'];
@@ -216,17 +229,19 @@ void main() {
         expect(e.calls('close').last['sid'], child);
         e.port.emit(ClosedEvent(child, 'quit'));
         expect(e.state.hint, hint);
+        expect(e.state.currentKey, '111/desktop:');
+        expect(e.state.currentScreens, isEmpty);
         e.displays = ['1', '333'];
         a.elapse(const Duration(seconds: 30));
         a.flushMicrotasks();
-        expect(e.state.hint, 'A 多了一块屏，再点一次「桌面」打开它');
+        expect(e.state.hint, screenAddedHint);
         expect(e.state.recordFor('111/desktop:333'), isNull);
         e.state.hint = '其他提示';
         a.elapse(const Duration(seconds: 30));
         a.flushMicrotasks();
         expect(e.state.hint, '其他提示');
-        e.open();
-        a.flushMicrotasks();
+        expect(e.state.currentScreens, hasLength(2));
+        e.screen(a, '333');
         expect(e.state.recordFor('111/desktop:333'), isNotNull);
       });
     },
@@ -242,12 +257,12 @@ void main() {
       e.state.endCurrent();
       e.replyApps(req);
       a.flushMicrotasks();
-      expect(e.calls('start'), hasLength(2));
+      expect(e.calls('start'), hasLength(1));
     });
   });
 
   test(
-    'Linux opens screens on demand and keeps hidden current screen on stage',
+    'Linux opens screens on demand too and keeps the hidden current screen on stage',
     () {
       env((a, e) {
         expect(e.calls('start'), hasLength(1));
@@ -267,6 +282,8 @@ void main() {
   test('lock banners distinguish desktop and app and reach child windows', () {
     env((a, e) {
       final main = e.sid('desktop:');
+      e.screen(a, '22');
+      e.screen(a, '1');
       e.port.emit(ScreenLockedEvent(main, true));
       expect(e.state.lockBanner!.action, '输入系统密码');
       expect(e.calls('set_banner').last['text'], contains('主窗口'));
@@ -281,7 +298,7 @@ void main() {
     });
   });
 
-  testWidgets('app lock banner asks for the password; Linux switcher selects screen', (
+  testWidgets('app lock banner asks for the password; the window menu picks the screen', (
     tester,
   ) async {
     final e = DesktopEnv(detach: false);
@@ -300,10 +317,24 @@ void main() {
     await tester.runAsync(() => e.state.openOrSwitch('111', 'desktop:', '桌面'));
     await tester.pump();
     await tester.pump();
+    // The stage carries no row of screen buttons any more: the top bar's window menu has them.
+    expect(find.text('屏幕 1'), findsNothing);
+    await tester.pumpWidget(wrap(ListenableBuilder(
+      listenable: e.state,
+      builder: (_, _) => WindowMenu(state: e.state, term: false),
+    )));
+    expect(WindowMenu.shows(e.state, term: false), isTrue);
     expect(find.text('屏幕 1'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('window-menu')));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('屏幕 1（主屏）'), findsOneWidget);
     await tester.tap(find.text('屏幕 2'));
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
     expect(e.state.current!.app, 'desktop:22');
+    expect(tester.widget<Text>(find.byKey(const Key('window-menu-label'))).data, '屏幕 2');
+    await tester.pumpWidget(wrap(Stage(state: e.state)));
     expect(find.text('打开左侧面板，选一个会话或到设备里打开 app'), findsNothing);
     await tester.pumpWidget(const SizedBox());
     e.dispose();

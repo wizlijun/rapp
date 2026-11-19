@@ -118,6 +118,9 @@ String openedText(String name) => 'A 上打开了「$name」';
 const desktopLockText = '远程电脑已锁屏；输入系统密码解锁';
 const childLockText = '远程电脑已锁屏；请在主窗口输入系统密码解锁';
 
+/// A screen was plugged into A while its desktop is open: it is not opened by itself.
+const screenAddedHint = 'A 多了一块屏，在顶栏的屏幕菜单里切过去';
+
 class MainState extends ChangeNotifier {
   MainState({
     required this.hub,
@@ -312,7 +315,6 @@ class MainState extends ChangeNotifier {
   final Map<String, List<RemoteDisplay>> _desktopDisplays = {};
   final Map<String, Set<String>> _hintedScreens = {};
   final Map<SessionRecord, Future<AppList>> _displayRequests = {};
-  final Set<Object> _autoDetached = {};
   Timer? _desktopTimer;
   int _seq = 0;
   // Hub closed first: waiting up to 1 s for the runner's reason.
@@ -1346,10 +1348,6 @@ class MainState extends ChangeNotifier {
       if (e.detached && pictureFocused == e.sid) _blur();
     } else if (e is WindowsEvent) {
       _swapIfReady(r);
-      if (isDesktopScreen(r.app) && !r.ending && rs.tabs.tabs.isNotEmpty &&
-          port!.supportsDetach && _autoDetached.add(e.sid)) {
-        port!.detach(e.sid);
-      }
     }
     notifyListeners();
   }
@@ -1733,7 +1731,6 @@ class MainState extends ChangeNotifier {
     for (final sid in [r.sid, old]) {
       if (sid == null) continue;
       remote.remove(sid)?.dispose();
-      _autoDetached.remove(sid);
       _unlockSeen.remove(sid);
       _lockEpoch.remove(sid);
       _sentFps.remove(sid);
@@ -1970,7 +1967,7 @@ class MainState extends ChangeNotifier {
       if (remote[main?.sid]?.screenLocked == true) port!.setBanner(s.sid, childLockText);
     }
     notifyListeners();
-    if (r.app == 'desktop:') unawaited(_refreshDesktop(r, openMissing: true));
+    if (r.app == 'desktop:') unawaited(_refreshDesktop(r));
   }
 
   /// What an input record says of [r]'s session [rs] now (no window without one).
@@ -2579,7 +2576,7 @@ class MainState extends ChangeNotifier {
       if (!quiet) hint = '已切到 $appName';
       notifyListeners();
       if (r.app == 'desktop:' && !r.ending && r.phase == Phase.live) {
-        await _refreshDesktop(r, openMissing: true);
+        await _refreshDesktop(r);
       }
     }
   }
@@ -2789,11 +2786,31 @@ class MainState extends ChangeNotifier {
 
   // ---- desktop screens ----
   String _desktopName(String device) {
-    final n = _records.values.where((r) => r.id == device && isDesktopApp(r.app)).length;
+    final n = _desktopDisplays[device]?.length ?? 0;
     return n > 1 ? '桌面（$n 块屏）' : '桌面';
   }
 
   List<RemoteDisplay> desktopScreens(String device) => List.unmodifiable(_desktopDisplays[device] ?? const []);
+
+  /// The screens the top bar's window menu switches between: the current desktop's, when A has
+  /// more than one. Each screen is its own session; the menu is where the user picks one.
+  List<RemoteDisplay> get currentScreens {
+    final r = currentRecord;
+    if (r == null || !isDesktopApp(r.app)) return const [];
+    final screens = desktopScreens(r.id);
+    return screens.length > 1 ? screens : const [];
+  }
+
+  /// Which of [currentScreens] is on the stage: `desktop:` is the main screen, `desktop:<id>` that one.
+  int? get currentScreenIndex {
+    final r = currentRecord;
+    if (r == null) return null;
+    final screens = currentScreens;
+    final i = isDesktopScreen(r.app)
+        ? screens.indexWhere((d) => !d.main && r.app == 'desktop:${d.id}')
+        : screens.indexWhere((d) => d.main);
+    return i < 0 ? null : i;
+  }
 
   void openScreen(String device, String displayId) {
     final main = _records['$device/desktop:'];
@@ -2835,7 +2852,7 @@ class MainState extends ChangeNotifier {
     }
   }
 
-  Future<void> _refreshDesktop(SessionRecord r, {bool openMissing = false}) async {
+  Future<void> _refreshDesktop(SessionRecord r) async {
     if (!hubUsable || r.ending || r.phase != Phase.live) return;
     final sid = r.sid;
     final request = _displayRequests.putIfAbsent(r, () => hub!.apps(r.id));
@@ -2850,21 +2867,14 @@ class MainState extends ChangeNotifier {
       }
       final hinted = _hintedScreens.putIfAbsent(r.id, () => {});
       hinted.removeWhere((id) => !ids.contains(id));
-      if (!openMissing && before != null) {
+      if (before != null) {
         final oldIds = before.map((d) => d.id).toSet();
         for (final d in screens) {
-          if (!oldIds.contains(d.id) && hinted.add(d.id)) hint = 'A 多了一块屏，再点一次「桌面」打开它';
+          if (!oldIds.contains(d.id) && hinted.add(d.id)) hint = screenAddedHint;
         }
       }
       _desktopDisplays[r.id] = screens;
-      if (openMissing && port!.supportsDetach) {
-        for (var i = 0; i < screens.length; i++) {
-          final d = screens[i];
-          if (!d.main && !_records.containsKey('${r.id}/desktop:${d.id}')) {
-            unawaited(_openEmbedded(r.id, 'desktop:${d.id}', '桌面 · 屏幕 ${i + 1}', select: false, quiet: true));
-          }
-        }
-      }
+      _entries = _mapEntries();
       notifyListeners();
     } catch (_) {
       // A failed probe must not look like all displays were unplugged. Retry on the next tick.
