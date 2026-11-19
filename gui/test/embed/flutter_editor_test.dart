@@ -2,13 +2,16 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/composer_editor.dart';
 import 'package:rapp/embed/flutter_editor.dart';
 import 'package:rapp/platform_caps.dart';
+import 'package:rapp_rime/rapp_rime.dart';
 
 import '../ui/helpers.dart';
+import 'fake_rime_link.dart';
 
 class _Log {
   int enter = 0, escape = 0, paste = 0, changed = 0;
@@ -455,6 +458,242 @@ void main() {
       await tester.pump();
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       expect(log.enter, 1);
+    });
+  });
+
+  group('rime', () {
+    late FakeRimeLink fake;
+
+    setUp(() {
+      ed.dispose();
+      fake = FakeRimeLink();
+      ed = FlutterEditor(rime: fake);
+      ed.handlers = log.handlers;
+    });
+
+    void rimeTest(String name, Future<void> Function(WidgetTester) body) => testWidgets(name, (tester) async {
+          debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+          try {
+            await body(tester);
+          } finally {
+            debugDefaultTargetPlatformOverride = null;
+          }
+        });
+
+    // What the field draws: its text plus the composition.
+    InlineSpan drawn(WidgetTester tester) => tester.allRenderObjects.whereType<RenderEditable>().single.text!;
+    List<String> underlined(InlineSpan span) {
+      final out = <String>[];
+      span.visitChildren((s) {
+        if (s is TextSpan && s.text != null && s.style?.decoration == TextDecoration.underline) out.add(s.text!);
+        return true;
+      });
+      return out;
+    }
+
+    Future<void> focused(WidgetTester tester) async {
+      await tester.pumpWidget(_host(ed));
+      ed.focus();
+      await tester.pump();
+    }
+
+    rimeTest('attaches on construction, active with focus, detaches on dispose', (tester) async {
+      expect(fake.calls.first, 'attach');
+      expect(fake.owner, same(ed));
+      await focused(tester);
+      expect(fake.calls.last, 'setActive(true)');
+      final other = FlutterEditor(rime: FakeRimeLink());
+      other.dispose();
+      ed.dispose();
+      expect(fake.calls.last, 'detach');
+      expect(fake.owner, isNull);
+    });
+
+    rimeTest('rime preedit shows inline, underlined, not in the text', (tester) async {
+      await focused(tester);
+      fake.push(const RimeUpdate(preedit: 'ni hao', input: 'nihao'));
+      await tester.pump();
+      expect(find.text('ni hao'), findsNothing);
+      expect(find.text('写给 Safari'), findsNothing, reason: 'the hint does not cover the composition');
+      expect(await ed.read(), '');
+      expect(drawn(tester).toPlainText(), 'ni hao');
+      expect(underlined(drawn(tester)), ['ni hao']);
+    });
+
+    rimeTest('rime preedit sits at the caret, next to a chip', (tester) async {
+      await focused(tester);
+      ed.chips({0xFDD0: '[c]'});
+      tester.testTextInput.updateEditingValue(
+          const TextEditingValue(text: '﷐b', selection: TextSelection.collapsed(offset: 1)));
+      await tester.pump();
+      fake.push(const RimeUpdate(preedit: 'ni', input: 'ni'));
+      await tester.pump();
+      expect(find.text('[c]'), findsOneWidget);
+      final kids = (drawn(tester) as TextSpan).children!;
+      expect(kids.first, isA<WidgetSpan>());
+      expect((kids[1] as TextSpan).text, 'ni');
+      expect((kids[2] as TextSpan).text, 'b');
+      expect(underlined(drawn(tester)), ['ni']);
+      expect(await ed.read(), '﷐b');
+    });
+
+    rimeTest('rime commit lands at the caret', (tester) async {
+      await focused(tester);
+      tester.testTextInput.updateEditingValue(
+          const TextEditingValue(text: 'ab', selection: TextSelection.collapsed(offset: 1)));
+      await tester.pump();
+      fake.push(const RimeUpdate(commit: '你好'));
+      await tester.pump();
+      expect(await ed.read(), 'a你好b');
+      // A commit and the next composition in one update: the composition follows the commit.
+      fake.push(const RimeUpdate(commit: '我', preedit: 'ni', input: 'ni'));
+      await tester.pump();
+      expect(await ed.read(), 'a你好我b');
+      expect(drawn(tester).toPlainText(), 'a你好我nib');
+    });
+
+    rimeTest('insert while composing commits the raw input first', (tester) async {
+      await focused(tester);
+      fake.push(const RimeUpdate(preedit: 'ni hao', input: 'nihao'));
+      ed.insert('[语音]');
+      await tester.pump();
+      expect(fake.calls.where((c) => c == 'flush'), hasLength(1));
+      expect(await ed.read(), 'nihao[语音]');
+      expect(drawn(tester).toPlainText(), 'nihao[语音]');
+    });
+
+    rimeTest('setText while composing commits first, then replaces', (tester) async {
+      await focused(tester);
+      fake.push(const RimeUpdate(preedit: 'ni', input: 'ni'));
+      ed.setText('x');
+      await tester.pump();
+      expect(fake.calls, contains('flush'));
+      expect(await ed.read(), 'x');
+    });
+
+    rimeTest('take while composing returns the raw input', (tester) async {
+      await focused(tester);
+      fake.push(const RimeUpdate(preedit: 'ni', input: 'ni'));
+      expect(await ed.take(), 'ni');
+      await tester.pump();
+      expect(await ed.read(), '');
+      expect(drawn(tester).toPlainText(), '');
+    });
+
+    rimeTest('handoff read while composing includes the raw input', (tester) async {
+      await focused(tester);
+      fake.push(const RimeUpdate(preedit: 'ni', input: 'ni'));
+      ed.setHandoff(true);
+      final snapshot = ed.read();
+      await tester.pump();
+      expect(await snapshot, 'ni');
+      expect(fake.calls.where((c) => c == 'flush'), hasLength(1), reason: 'the blur does not commit it twice');
+    });
+
+    rimeTest('blur commits the composition', (tester) async {
+      await focused(tester);
+      fake.push(const RimeUpdate(preedit: 'wo', input: 'wo'));
+      await tester.pump();
+      ed.unfocus();
+      await tester.pump();
+      expect(fake.calls, containsAllInOrder(['setActive(false)', 'flush']));
+      expect(await ed.read(), 'wo');
+      expect(drawn(tester).toPlainText(), 'wo');
+      // Nothing composing: a blur sends no flush.
+      ed.focus();
+      await tester.pump();
+      fake.calls.clear();
+      ed.unfocus();
+      await tester.pump();
+      expect(fake.calls, ['setActive(false)']);
+    });
+
+    rimeTest('flush failing still runs pending edits', (tester) async {
+      await focused(tester);
+      fake.flushOk = false;
+      fake.push(const RimeUpdate(preedit: 'ni', input: 'ni'));
+      ed.setText('x');
+      await tester.pump();
+      expect(fake.calls, contains('flush'));
+      expect(await ed.read(), 'x');
+      expect(drawn(tester).toPlainText(), 'x', reason: 'the composition is gone');
+    });
+
+    rimeTest('a tap while rime composes cannot move the caret', (tester) async {
+      await focused(tester);
+      tester.testTextInput.updateEditingValue(
+          const TextEditingValue(text: 'abc', selection: TextSelection.collapsed(offset: 3)));
+      fake.push(const RimeUpdate(preedit: 'ni', input: 'ni'));
+      await tester.pump();
+      await tester.tapAt(tester.getTopLeft(find.byType(EditableText)) + const Offset(1, 5));
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(tester.widget<TextField>(find.byType(TextField)).controller!.selection,
+          const TextSelection.collapsed(offset: 3));
+    });
+
+    rimeTest('switching to 系 drops the composition', (tester) async {
+      await focused(tester);
+      fake.push(const RimeUpdate(preedit: 'ni', input: 'ni'));
+      await tester.pump();
+      expect(drawn(tester).toPlainText(), 'ni');
+      fake.set(builtin: false);
+      await tester.pump();
+      expect(drawn(tester).toPlainText(), '');
+      expect(await ed.read(), '');
+      expect(fake.calls, isNot(contains('flush')), reason: 'dropped, not committed');
+      ed.insert('x');
+      expect(await ed.read(), 'x', reason: 'nothing composing: edits apply at once');
+    });
+
+    rimeTest('turning the switch off drops the composition; on again while focused activates', (tester) async {
+      await focused(tester);
+      fake.push(const RimeUpdate(preedit: 'ni', input: 'ni'));
+      await tester.pump();
+      expect(drawn(tester).toPlainText(), 'ni');
+      fake.set(enabled: false);
+      await tester.pump();
+      expect(drawn(tester).toPlainText(), '');
+      expect(fake.calls.last, 'setActive(false)');
+      fake.set(enabled: true);
+      await tester.pump();
+      expect(fake.calls.last, 'setActive(true)');
+    });
+
+    rimeTest('candidate row is reserved while the keyboard is there', (tester) async {
+      fake.status = const RimeStatus(state: RimeState.ready, keyboard: true);
+      await focused(tester);
+      expect(find.byType(RimeCandidateRow), findsOneWidget);
+      final state = tester.state(find.byType(EditableText));
+      ed.setText(List.generate(40, (i) => 'line $i').join('\n'));
+      await tester.pump();
+      final row = tester.getSize(find.byType(RimeCandidateRow)).height;
+      expect(row, greaterThan(0));
+      expect(tester.getSize(find.byKey(const Key('composer-field'))).height + row, 200);
+      fake.push(const RimeUpdate(
+          preedit: 'ni',
+          input: 'ni',
+          menu: RimeMenu(rows: [RimeCandidate(0, '1', '你')], cursor: 0)));
+      await tester.pump();
+      expect(tester.widget<RimeCandidateRow>(find.byType(RimeCandidateRow)).menu.rows.single.text, '你');
+      fake.set(status: const RimeStatus(state: RimeState.ready));
+      await tester.pump();
+      expect(find.byType(RimeCandidateRow), findsNothing);
+      expect(tester.state(find.byType(EditableText)), same(state), reason: 'the field keeps its state');
+      expect(tester.widget<TextField>(find.byType(TextField)).focusNode!.hasFocus, isTrue);
+    });
+
+    rimeTest('master switch off: no row, no attach side effects', (tester) async {
+      fake.set(enabled: false, status: const RimeStatus(state: RimeState.ready, keyboard: true));
+      fake.calls.clear();
+      await focused(tester);
+      expect(find.byType(RimeCandidateRow), findsNothing);
+      expect(fake.calls.where((c) => c != 'setActive(false)'), isEmpty);
+      fake.push(const RimeUpdate(preedit: 'ni', input: 'ni'));
+      await tester.pump();
+      expect(drawn(tester).toPlainText(), '', reason: 'no composition while off');
+      ed.insert('x');
+      expect(await ed.read(), 'x');
+      expect(fake.calls, isNot(contains('flush')));
     });
   });
 }
