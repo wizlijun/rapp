@@ -208,16 +208,18 @@ public final class RappRimePlugin: NSObject, FlutterPlugin {
     return true
   }
 
-  /// A press type-to-compose held back, played into the editor once it has focus. True when the engine took it,
-  /// so the caller must not insertText it; false when the engine declined it, and the caller inserts (or deletes)
-  /// as usual, synchronously, which keeps the replayed keys in order. No repeat, no ledger.
+  /// A press type-to-compose held back, played into the editor once it has focus. True when it was taken: the
+  /// engine processed it, or declined it but it is printable text, which is then committed through Dart like a
+  /// live press (`send`). The caller must not insertText a taken press. False (⌫ and other non-text keys, engine
+  /// not active or not ready, unmapped keys): the caller inserts or deletes as usual, synchronously.
+  /// Declined text must not take the caller's insertText: the iOS text-input copy learns of a Dart-side commit
+  /// only through the async setEditingState, so an insertText right after one ("ni␣1": 你, then 1) would edit the
+  /// stale copy, and its full-state update would overwrite the 你. No repeat, no ledger.
   public func replay(hid: Int, characters: String, modifiers: Int) -> Bool {
     guard active, engine.ready, !RimeKeyMap.isModifier(hid: hid),
-          let k = RimeKeyMap.map(hid: hid, characters: characters, ignoringModifiers: characters, modifiers: modifiers),
-          engine.process(k.keysym, k.mask)
+          let k = RimeKeyMap.map(hid: hid, characters: characters, ignoringModifiers: characters, modifiers: modifiers)
     else { return false }
-    push()
-    return true
+    return send(k, text: RimeKeyMap.typedText(characters: characters, modifiers: modifiers))
   }
 
   private func pass(_ hid: Int) -> Bool {

@@ -37,6 +37,15 @@ final class RimeKeyMapTests: XCTestCase {
     XCTAssertNil(RimeKeyMap.typedText(characters: "ab", modifiers: 0))
     XCTAssertEqual(RimeKeyMap.typedText(characters: " ", modifiers: 0), " ")
   }
+  /// What a declined replayed key becomes: printable text goes through Dart, ⌫ and other non-text keys do not.
+  func testReplayTextDecision() {
+    XCTAssertEqual(RimeKeyMap.typedText(characters: "1", modifiers: 0), "1")
+    XCTAssertEqual(RimeKeyMap.typedText(characters: ",", modifiers: 0), ",")
+    XCTAssertNil(RimeKeyMap.typedText(characters: "\u{8}", modifiers: 0))   // ⌫
+    XCTAssertNil(RimeKeyMap.typedText(characters: "\u{7f}", modifiers: 0))  // delete
+    XCTAssertNil(RimeKeyMap.typedText(characters: "\u{1b}", modifiers: 0))  // Esc
+    XCTAssertNil(RimeKeyMap.typedText(characters: "", modifiers: 0))         // arrows and other keys with no text
+  }
   func testModifiers() { XCTAssertTrue(RimeKeyMap.isModifier(hid: 0xE1)); XCTAssertTrue(RimeKeyMap.isModifier(hid: 0x39)); XCTAssertFalse(RimeKeyMap.isModifier(hid: 0x04)) }
   func testRepeatPolicy() {
     var p = RepeatPolicy()

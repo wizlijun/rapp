@@ -21,6 +21,12 @@ keyboard can type Chinese in the input panel without the system IME. Design: `do
 3. 手动：接入、打开一个会话、打开输入板（光标在里面，空的）。脚本不会点屏幕。
 4. `tools/sim/sim.sh <udid> <label> builtin repeat compose`，截图在 `tools/sim/out/<label>/`。每个场景该看到什么写在 `sim.sh` 开头。
 
+## 真机检查（补充）
+
+完整清单见设计文档 §7。这里补充模拟器跑不到的：
+
+- 补发的顺序：会话画面上、输入板关着，**快速**打 `n i 空格 1`，输入板打开后显示「你1」（不是「1」，也不是「1你」）。
+
 ## 升级 librime
 
 Edit `KIT_URL` and `KIT_SHA` in `scripts/fetch.sh` (LibrimeKit-iOS release `Frameworks.tgz`), and `DEPS_URL`/`DEPS_SHA` if the OpenCC tables change. Delete the stale file in `vendor/dl/`, rerun `fetch.sh`.
