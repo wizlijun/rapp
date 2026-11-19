@@ -21,6 +21,14 @@ keyboard can type Chinese in the input panel without the system IME. Design: `do
 3. 手动：接入、打开一个会话、打开输入板（光标在里面，空的）。脚本不会点屏幕。
 4. `tools/sim/sim.sh <udid> <label> builtin repeat compose`，截图在 `tools/sim/out/<label>/`。每个场景该看到什么写在 `sim.sh` 开头。
 
+## 模拟器脚本
+
+`tools/sim/sim.sh` 的用法和步骤见上一节「模拟器端到端」，各场景该看到什么写在脚本开头注释里，这里只记几点：
+
+- 场景有 `prep`、`builtin`、`repeat`、`compose`。模拟器上没有会话，所以 `builtin`、`repeat`、`compose` 需要先手动接入并打开一个会话，`prep` 不需要。
+- `simkey` 和 `hwkb` 的编译命令（`clang -fobjc-arc -framework Foundation -o simkey simkey.m`）不是从探查版照搬的，是这一版 `sim.sh` 自己用的；它们已被 git 忽略，改了 `.m` 文件会自动重编。
+- 两者里写死了 Xcode 的路径 `/Applications/Xcode.app/...`（SimulatorKit 和开发者目录）。Xcode 装在别处或改了名，要自己改 `simkey.m` 和 `hwkb.m`。
+
 ## 真机检查（补充）
 
 完整清单见设计文档 §7。这里补充模拟器跑不到的：
