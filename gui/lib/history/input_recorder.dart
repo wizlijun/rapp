@@ -92,8 +92,11 @@ class _Draft {
   bool privateText = false;
 
   /// What ↑ last put in from the record: left as it is, it is not new writing, so it makes no
-  /// draft file and no `draft` record (it is in the record already).
+  /// draft file and no `draft` record (it is in the record already); [live] is kept instead.
   String? recalled;
+
+  /// The text being written that ↑ stepped away from (R2).
+  String live = '';
   final pieces = <_Piece>[];
 
   /// Records of finished rounds whose write failed, oldest first: appended by a later write.
@@ -147,6 +150,10 @@ class InputRecorder {
   /// Every record, once it is written.
   Stream<Map<String, Object?>> get written => _written.stream;
 
+  /// A send was handed off with text (session key, text, when), whatever the switches say; never one
+  /// into a password field. ↑ keeps these in memory for this run (R2).
+  void Function(String key, String text, DateTime at)? onSent;
+
   /// Follows [rs]'s composer from now on. [restore]: a new open (no older session hands its
   /// text over), so the unfinished pieces and the text go back into the composer; records left
   /// unwritten are appended, never put back.
@@ -173,7 +180,7 @@ class InputRecorder {
       _save(d, rs);
     };
     c.onSubmitted = (o) {
-      _handed[o] = meta();
+      final m = _handed[o] = meta();
       // submit has not installed its inFlight row yet; retry has, and its
       // unrelated editor draft must keep its own privacy state.
       // A draftless (voice) row did not come from the draft: no privacy or recall to take or reset.
@@ -185,7 +192,10 @@ class InputRecorder {
       if (submitting) {
         d.privateText = false;
         d.recalled = null;
+        d.live = '';
       }
+      // Once per send (a retry is the same one); a voice send too.
+      if (!private && !identical(c.inFlight, o) && o.text.isNotEmpty) onSent?.call(m.key, o.text, o.at ?? _clock());
       if (o.text.isEmpty && !private) return;
       // An adopted row's retry: its text is pending once already.
       final p = d.pieces.where((p) => identical(p.owner, o)).firstOrNull;
@@ -196,6 +206,11 @@ class InputRecorder {
         return;
       }
       d.pieces.add(_Piece(o.text, o, rs, private: private));
+      _save(d, rs);
+    };
+    c.onRecalled = (shown, live) {
+      d.recalled = shown;
+      d.live = live;
       _save(d, rs);
     };
     c.onFinished = (o, {required all}) {
@@ -320,17 +335,17 @@ class InputRecorder {
     rs.composer
       ..onDraftChanged = null
       ..onSubmitted = null
+      ..onRecalled = null
       ..onFinished = null;
   }
 
-  /// [d]'s text as a draft keeps it: none when it is private, or a record ↑ put in untouched.
-  static String _ownText(_Draft d) => d.privateText || d.text == d.recalled ? '' : d.text;
-
-  /// ↑ put [text] from the record into [rs]'s composer (R2). Left untouched it is no draft.
-  void recalled(RemoteSession rs, String text) {
-    final a = _attached[rs];
-    if (a != null) _drafts[a.key]?.recalled = text;
-  }
+  /// [d]'s text as a draft keeps it: none when it is private; for a record ↑ put in untouched, the
+  /// text being written that ↑ stepped away from.
+  static String _ownText(_Draft d) => d.privateText
+      ? ''
+      : d.recalled != null && d.text == d.recalled
+          ? d.live
+          : d.text;
 
   /// [p]'s row went back into the editor (`putBack`): its text is in the draft now.
   static bool _wentBack(_Piece p) {

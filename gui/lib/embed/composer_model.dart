@@ -2,6 +2,7 @@
 // pasted, [blockMarks]), open or not, and the status line. The runner holds what the blocks stand for and
 // does the sending.
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
@@ -80,6 +81,13 @@ class ComposerModel extends ChangeNotifier {
 
   /// Called once per send round after `done` updated `o.sent`; [all]: everything went by now.
   void Function(Outgoing o, {required bool all})? onFinished;
+
+  /// What ↑ brings back, newest first (R2); set by the app. Null or empty: ↑ is not taken.
+  List<String> Function()? recall;
+
+  /// ↑/↓ moved (R2): [shown] is the record put in as it was (null back on the text being written),
+  /// [live] the text being written, without block marks. A record left untouched is no draft of its own.
+  void Function(String? shown, String live)? onRecalled;
 
   /// The text while no editor is attached; the last copy otherwise. A held block is in it as its mark.
   String get draft => _draft;
@@ -179,7 +187,8 @@ class ComposerModel extends ChangeNotifier {
 
   /// Lets go of the held blocks whose mark [text] no longer has (no undo can bring them back now).
   void _dropMissing(String text) {
-    final units = text.codeUnits.toSet();
+    // The text ↑ stepped away from (and records edited on the way) comes back with its marks.
+    final units = {...text.codeUnits, for (final t in _kept.values) ...t.codeUnits};
     final gone = [for (final b in blocks) if (!units.contains(_marks[b.n])) b];
     for (final b in gone) {
       blocks.remove(b);
@@ -304,7 +313,8 @@ class ComposerModel extends ChangeNotifier {
   /// the blocks still held back at the end, so the editor can show them and a read cannot drop them.
   void _restoreMarks() {
     if (blocks.isEmpty) return;
-    final units = _draft.codeUnits.toSet();
+    // Not those of the text ↑ stepped away from: they come back with it.
+    final units = {..._draft.codeUnits, for (final t in _kept.values) ...t.codeUnits};
     final missing = [for (final b in blocks) if (!units.contains(_marks[b.n])) _marks[b.n]!];
     if (missing.isEmpty) return;
     draft = _draft + String.fromCharCodes(missing);
@@ -362,6 +372,7 @@ class ComposerModel extends ChangeNotifier {
   /// Flush the current editor before handing the draft to a native detached window.
   Future<String> readDraft({bool inline = false}) async {
     await _inserting;
+    if (_steps > 0) await _stepping;
     await _attached;
     await _detaching;
     final e = _editor;
@@ -459,7 +470,94 @@ class ComposerModel extends ChangeNotifier {
   /// Closes the panel; the text stays (W6).
   void collapse() => open = false;
 
-  /// The user pressed send (or Enter): takes the text with its blocks out of the composer.
+
+  // ── ↑/↓ through what was sent (R2) ──────────────────────────────────────────────────────────────
+  // A round starts with ↑ on the text being written and ends with a send. Each step reads the editor
+  // first, in line with its text commands, so what was typed a moment ago is kept: the text being
+  // written (slot -1) and every record edited on the way, until the send.
+
+  /// The records of this round, newest first ([recall] when it started).
+  List<String> _round = const [];
+
+  /// Which of [_round] the editor shows; -1: the text being written.
+  int _at = -1;
+
+  /// -1: the text being written, kept while a record is shown; i: record i as edited.
+  final Map<int, String> _kept = {};
+  Future<void> _stepping = Future<void>.value();
+
+  /// Steps not done yet: a send or a handoff waits for them (only then, so a take starts at once).
+  int _steps = 0;
+
+  /// A record is shown (↓ goes back toward the text being written).
+  bool get browsing => _at >= 0;
+
+  /// ↑ would be taken: a round is on, or there is something to bring back.
+  bool get canRecall => _at >= 0 || (recall?.call().isNotEmpty ?? false);
+
+  /// ↑ ([up]) or ↓ at the editor's first or last line; true when taken (the caret stays). ↑ takes the
+  /// newer record each time and stays on the oldest; ↓ goes back, and past the newest brings back the
+  /// text being written. [show]: a native window holding the text (no editor here); it gets the text.
+  bool arrow(bool up, {void Function(String text)? show}) {
+    if (_at < 0) {
+      if (!up) return false;
+      final list = recall?.call() ?? const <String>[];
+      if (list.isEmpty) return false;
+      if (!listEquals(list, _round)) {
+        _round = List.unmodifiable(list);
+        _kept.removeWhere((i, _) => i >= 0); // edits belong to the list they were made on
+      }
+      _step(0, show);
+      return true;
+    }
+    final to = up ? math.min(_at + 1, _round.length - 1) : _at - 1;
+    if (to != _at) _step(to, show);
+    return true;
+  }
+
+  void _step(int to, void Function(String)? show) {
+    final from = _at;
+    _at = to;
+    final round = _round;
+    // A fresh chain when none runs: one made in another zone (a test's setUp) may never run its steps.
+    final before = _steps > 0 ? _stepping : Future<void>.value();
+    _steps++;
+    _stepping = before.then((_) async {
+      final e = show == null ? _editor : null;
+      final now = e == null ? _draft : await e.read();
+      if (_disposed || !identical(round, _round)) return; // a send ended the round meanwhile
+      if (from < 0 || now != round[from]) {
+        _kept[from] = now;
+      } else {
+        _kept.remove(from);
+      }
+      final next = to < 0 ? (_kept.remove(-1) ?? '') : (_kept[to] ?? round[to]);
+      onRecalled?.call(to < 0 ? null : round[to], _plain(_kept[-1] ?? ''));
+      _idleTimer?.cancel();
+      draft = next;
+      if (show != null) {
+        show(next);
+      } else {
+        final ed = _editor;
+        if (ed != null) {
+          _showChips(ed);
+          ed.setText(next);
+        }
+      }
+    }).catchError((Object _) {}).whenComplete(() => _steps--);
+  }
+
+  /// Ends the round (a send): the text being written that ↑ stepped away from, if any.
+  String? _endRound() {
+    final live = _at >= 0 ? _kept[-1] : null;
+    _at = -1;
+    _round = const [];
+    _kept.clear();
+    return live;
+  }
+
+  /// The user pressed send (or Enter): takes the text with its blocks out of the composer. Sent from
+  /// a record ↑ brought back, the text being written comes back into the editor afterwards.
   Future<Submit> submit() async {
     if (sending || _taking) return SubmitNothing();
     _letterOpenAt = null; // sent: the panel was wanted
@@ -468,6 +566,7 @@ class ComposerModel extends ChangeNotifier {
     _setTaking(true);
     final String text;
     try {
+      if (_steps > 0) await _stepping; // a ↑ still putting its record in: that is what is sent
       final e = _editor;
       if (e != null) {
         text = await e.take();
@@ -486,9 +585,13 @@ class ComposerModel extends ChangeNotifier {
     }
     final now = _clock();
     final parts = _parts(text);
+    final live = _endRound();
+    final liveMarks = live == null ? const <int>{} : live.codeUnits.toSet();
+    final liveBlocks = {for (final b in blocks) if (liveMarks.contains(_marks[b.n])) b.n};
     if (parts.isEmpty) {
-      _release();
+      _releaseBut(const {}, liveBlocks);
       draft = '';
+      _restoreLive(live);
       final last = _lastSend;
       if (last != null && now.difference(last) < const Duration(seconds: 1)) return SubmitNothing();
       return SubmitReturn();
@@ -498,11 +601,44 @@ class ComposerModel extends ChangeNotifier {
     onSubmitted?.call(o);
     draft = '';
     // The row holds them now; the ones deleted from the text leave the runner.
-    _release(kept: {for (final b in o.blocks) b.n});
+    final liveBack = live == null ? null : _withoutMarksOf(live, o.blocks);
+    _releaseBut({for (final b in o.blocks) b.n}, liveBlocks);
+    _restoreLive(liveBack);
     _inFlight = o;
     sending = true;
     notifyListeners();
     return SubmitPieces(o.pieces());
+  }
+
+  /// [_release] for a send: [row]'s blocks go with the row, and the text being written that comes back
+  /// keeps holding those of [live] the row did not take.
+  void _releaseBut(Set<int> row, Set<int> live) {
+    final back = [for (final b in blocks) if (live.contains(b.n) && !row.contains(b.n)) b];
+    final marks = {for (final b in back) b.n: _marks[b.n]!};
+    _release(kept: {...row, ...live});
+    blocks.addAll(back);
+    _marks.addAll(marks);
+  }
+
+  void _restoreLive(String? live) {
+    if (live == null || live.isEmpty) return;
+    draft = live;
+    final e = _editor;
+    if (e != null) {
+      _showChips(e);
+      e.setText(live);
+    }
+  }
+
+  /// [s] without the marks [gone] stood for (the blocks went with the row).
+  String _withoutMarksOf(String s, List<BlockChip> gone) {
+    if (gone.isEmpty) return s;
+    final units = <int>{};
+    for (final b in gone) {
+      final m = _marks[b.n];
+      if (m != null) units.add(m);
+    }
+    return String.fromCharCodes(s.codeUnits.where((u) => !units.contains(u)));
   }
 
   /// A round is running or a take is waiting: nothing else may start.

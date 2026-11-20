@@ -151,6 +151,7 @@ class MainState extends ChangeNotifier {
         log: _log, clock: clock);
     history = InputHistory(data: () => data, log: _log);
     _writtenSub = recorder.written.listen(history.add);
+    recorder.onSent = history.remember;
     resources.addListener(notifyListeners);
     _portSub = port?.events.listen(_onPortEvent);
     _termSub = termPort?.events.listen(_onPortEvent);
@@ -190,7 +191,10 @@ class MainState extends ChangeNotifier {
   /// record claims.
   List<InputEntry> recallOf(RemoteSession rs) {
     final r = _recordOfSid(rs.sid) ?? _recordOfLastSid(rs.sid);
-    return r == null ? const [] : history.forSession(r.key);
+    if (r == null) return const [];
+    // A host's text terminals share one history (each keeps its own draft).
+    if (isTermApp(r.app)) return history.forSession('${r.key.substring(0, r.key.indexOf('/') + 1)}term:', prefix: true);
+    return history.forSession(r.key);
   }
 
   /// Switches to a moved data root: later reads and writes go there and `workspace.json` is reread.
@@ -1122,7 +1126,6 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
-  final Map<Object, (int, String)> _nativeRecall = {};
   void _nativeAction(RemoteSession rs, String action) {
     if (action == 'zoom+' || action == 'zoom-' || action == 'zoom0') {
       zoomKey(action == 'zoom+' ? ZoomKey.bigger : action == 'zoom-' ? ZoomKey.smaller : ZoomKey.reset);
@@ -1135,23 +1138,8 @@ class MainState extends ChangeNotifier {
     } else if (action == 'close') {
       rs.composer.collapse();
     } else if (action == 'up' || action == 'down') {
-      final list = recallOf(rs);
-      final previous = _nativeRecall[rs.sid];
-      final same = previous != null && previous.$2 == rs.composer.draft;
-      int? index;
-      if (!same) {
-        if (action != 'up' || rs.composer.draft.isNotEmpty || list.isEmpty) return;
-        index = 0;
-      } else if (action == 'up' && list.isNotEmpty) {
-        index = math.min(previous.$1 + 1, list.length - 1);
-      } else if (action == 'down' && previous.$1 > 0 && list.isNotEmpty) {
-        index = math.min(previous.$1 - 1, list.length - 1);
-      }
-      final text = index == null ? '' : list[index].text;
-      if (index == null) { _nativeRecall.remove(rs.sid); } else { _nativeRecall[rs.sid] = (index, text); }
-      if (index != null) recorder.recalled(rs, text);
-      rs.composer.setDraft(text);
-      portOf(rs.sid)?.nativeComposerDraft(rs.sid, text);
+      // The event's text is in the draft already; the native window gets what the step puts in.
+      rs.composer.arrow(action == 'up', show: (t) => portOf(rs.sid)?.nativeComposerDraft(rs.sid, t));
     }
   }
 
@@ -1179,6 +1167,8 @@ class MainState extends ChangeNotifier {
       case SubmitPieces(:final pieces):
         if (!identical(remote[rs.sid], rs)) return;
         port.nativeComposerSubmitted(rs.sid);
+        // Sent from a record ↑ brought back: the text being written comes back into the window.
+        if (rs.composer.draft.isNotEmpty) port.nativeComposerDraft(rs.sid, rs.composer.draft);
         if (!_liveSid(rs.sid) || sendBlocked(rs.sid)) {
           rs.composer.done(0, '连接已断开，内容尚未发送');
           return;
@@ -1900,6 +1890,7 @@ class MainState extends ChangeNotifier {
     rs.setProfile(prof);
     // Wired before any swap's adoptFrom; a reconnect's old session hands its text over itself.
     recorder.attach(rs, () => _metaOf(r, rs), restore: r.lastSid == null);
+    rs.composer.recall = () => [for (final e in recallOf(rs)) e.text];
     if (prof.name != null) _log('rapp: app 配置「${prof.name}」');
     rs.choice = r.choice;
     rs.streamPinned = r.pinned;

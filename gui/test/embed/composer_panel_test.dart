@@ -1922,36 +1922,60 @@ void main() {
       expect(await key(LogicalKeyboardKey.arrowDown), 'b');
     });
 
-    testWidgets('once edited, up and down move the caret', (tester) async {
+    testWidgets('a record edited on the way: up and down keep going, and the edit comes back', (tester) async {
       remember(['c', 'b', 'a']);
       final ed = await livePanel(tester);
       final h = ed.handlers!;
       expect(h.onArrow(true), isTrue);
+      await tester.pump();
       expect(ed.value, 'c');
       ed.value = 'cx';
       h.onChanged();
-      await tester.pump();
-      expect(h.onArrow(true), isFalse);
-      expect(h.onArrow(false), isFalse);
-      expect(ed.value, 'cx');
-
-      // Back to empty by hand: up brings the last one again.
-      ed.value = '';
-      h.onChanged();
-      await tester.pump();
       expect(h.onArrow(true), isTrue);
-      expect(ed.value, 'c');
+      await tester.pump();
+      expect(ed.value, 'b');
+      expect(h.onArrow(false), isTrue);
+      await tester.pump();
+      expect(ed.value, 'cx');
+      expect(h.onArrow(false), isTrue);
+      await tester.pump();
+      expect(ed.value, '');
+      expect(h.onArrow(false), isFalse);
     });
 
-    testWidgets('up on a draft never replaces it', (tester) async {
+    testWidgets('up on a draft keeps it, typed a moment ago or not; down brings it back', (tester) async {
       remember(['c']);
       final ed = await livePanel(tester);
       ed.value = '我写了一半';
-      ed.handlers!.onChanged();
+      ed.handlers!.onChanged(); // no idle copy yet: the step reads the editor itself
+      expect(ed.handlers!.onArrow(true), isTrue);
       await tester.pump();
-      expect(ed.handlers!.onArrow(true), isFalse);
-      expect(ed.handlers!.onArrow(false), isFalse);
+      expect(ed.value, 'c');
+      expect(ed.handlers!.onArrow(false), isTrue);
+      await tester.pump();
       expect(ed.value, '我写了一半');
+    });
+
+    testWidgets('a collapse while a record is shown loses nothing', (tester) async {
+      remember(['c']);
+      final ed = await livePanel(tester);
+      ed.value = '我写了一半';
+      expect(ed.handlers!.onArrow(true), isTrue);
+      await tester.pump();
+      final s = es.currentRemote!;
+      s.composer.collapse();
+      await tester.pumpWidget(wrap(const SizedBox()));
+      await tester.pump();
+      expect(s.composer.draft, 'c');
+      final ed2 = FakeEditor();
+      s.composer.open = true;
+      await tester.pumpWidget(wrap(SizedBox(
+          width: 720, child: ComposerPanel(state: es, session: s, port: port, maxHeight: 300, editor: () => ed2))));
+      await tester.pump();
+      expect(ed2.value, 'c');
+      expect(ed2.handlers!.onArrow(false), isTrue);
+      await tester.pump();
+      expect(ed2.value, '我写了一半');
     });
 
     testWidgets('up with no history is not taken', (tester) async {

@@ -8,7 +8,6 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import '../history/input_history.dart';
 import '../term/term_key_row.dart';
 import '../term/term_session_port.dart';
 import '../ui/controls.dart';
@@ -159,14 +158,6 @@ class _ComposerPanelState extends State<ComposerPanel> {
     super.dispose();
   }
 
-  /// R2: which of [_recall] the editor shows untouched; null while not browsing.
-  int? _browsing;
-
-  /// Bumped at each text put in: a read started before it says nothing of the text now.
-  int _shown = 0;
-
-  List<InputEntry> get _recall => widget.state.recallOf(_s);
-
   /// A terminal session's panel: what it sends is a paste into the pane.
   bool get _terminal => widget.port is TermSessionPort;
 
@@ -176,42 +167,11 @@ class _ComposerPanelState extends State<ComposerPanel> {
     return cmd.isEmpty ? _s.appName : cmd;
   }
 
-  void _changed() {
-    _m.editorChanged();
-    if (_browsing == null) return;
-    // The echo of what was put in, or a change by hand: that ends browsing.
-    final list = _recall, i = _browsing!, at = _shown;
-    final want = i < list.length ? list[i].text : null;
-    _ed.read().then((t) {
-      if (_browsing != null && _shown == at && t != want) _browsing = null;
-    }, onError: (Object _) {});
-  }
+  void _changed() => _m.editorChanged();
 
-  /// ↑ on an empty editor puts in the last record; while it shows one untouched, ↑ goes to the
-  /// one before (staying at the oldest), ↓ back, and ↓ from the last one empties the editor.
-  bool _arrow(bool up) {
-    final list = _recall;
-    final i = _browsing;
-    if (i == null) {
-      if (!up || list.isEmpty || !_ed.isEmpty) return false;
-      _show(0, list);
-    } else if (list.isEmpty || (!up && i == 0)) {
-      _browsing = null;
-      _shown++;
-      _ed.setText('');
-    } else {
-      _show(math.min(up ? i + 1 : i - 1, list.length - 1), list);
-    }
-    return true;
-  }
-
-  void _show(int i, List<InputEntry> list) {
-    if (_browsing == i) return; // the oldest: up stays
-    _browsing = i;
-    _shown++;
-    widget.state.recorder.recalled(_s, list[i].text);
-    _ed.setText(list[i].text);
-  }
+  /// R2: ↑ and ↓ at the first or last line go through what was sent (the session's model keeps the
+  /// round and the text being written, so a collapse or a session switch loses nothing).
+  bool _arrow(bool up) => _m.arrow(up);
 
   void _focused(bool on) {
     if (mounted) widget.state.composerFocusChanged(_s, on);
@@ -481,7 +441,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
                                       child: _ed.view(
                                         context,
                                         style: style,
-                                        hint: _recall.isEmpty ? '写给 $_to' : '写给 $_to · ↑ 上一条',
+                                        hint: _m.canRecall ? '写给 $_to · ↑ 上一条' : '写给 $_to',
                                         maxHeight: math.max(line, c.maxHeight),
                                       ),
                                     ),
