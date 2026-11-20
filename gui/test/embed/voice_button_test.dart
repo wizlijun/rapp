@@ -253,11 +253,16 @@ void main() {
     rs.composer.open = true;
     await tester.pumpWidget(layer());
     await tester.pump(); // the panel's place reaches the button a frame later
-    expect(open, findsNothing);
-    expect(hold, findsOneWidget);
+    // 输入 is now the toggle: it reads 收起 and stands with 语音 above the panel.
+    expect(open, findsOneWidget);
+    expect(find.descendant(of: open, matching: find.byIcon(Icons.keyboard_hide_outlined)), findsOneWidget);
+    final h = tester.ensureSemantics();
+    expect(tester.getSemantics(open).label, '收起');
+    h.dispose();
     final b = inStage(tester, hold);
     expect(stage.width - b.right, 80);
     expect(inStage(tester, find.byType(ComposerPanel)).top - gripSize.height - b.bottom, 8);
+    expect(inStage(tester, open).bottom, lessThan(b.top));
     voice.stopResult = '你好';
     final g = await press(tester);
     await lift(tester, g);
@@ -270,6 +275,54 @@ void main() {
     rs.composer.open = false;
     await tester.pump();
     expect(stage.height - inStage(tester, hold).bottom, 88);
+  });
+
+  iosTest('tap 收起: composer closes, draft kept, the key reads 输入 again', (tester) async {
+    final h = tester.ensureSemantics();
+    rs.composer.draft = '草稿';
+    rs.composer.open = true;
+    await tester.pumpWidget(layer());
+    await tester.pump();
+    await tester.tap(open);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(rs.composer.open, isFalse);
+    expect(rs.composer.draft, '草稿');
+    expect(open, findsOneWidget);
+    expect(find.descendant(of: open, matching: find.byIcon(Icons.keyboard_outlined)), findsOneWidget);
+    expect(tester.getSemantics(open).label, '输入');
+    h.dispose();
+  });
+
+  iosTest('open key is 56 square in both states', (tester) async {
+    await tester.pumpWidget(layer());
+    expect(inStage(tester, open).size, const Size.square(stageButtonSize));
+    rs.composer.open = true;
+    await tester.pump();
+    await tester.pump();
+    expect(inStage(tester, open).size, const Size.square(stageButtonSize));
+  });
+
+  iosTest('landscape: 收起 above 语音, both above the panel', (tester) async {
+    rs.composer.open = true;
+    await tester.pumpWidget(layer());
+    await tester.pump();
+    final v = inStage(tester, hold);
+    final i = inStage(tester, open);
+    final panelTop = inStage(tester, find.byType(ComposerPanel)).top - gripSize.height;
+    expect(v.top - i.bottom, 12);
+    expect(i.center.dx, v.center.dx);
+    expect(i.bottom, lessThan(panelTop));
+    expect(v.bottom, lessThan(panelTop));
+  });
+
+  iosTest('recording hides 收起', (tester) async {
+    rs.composer.open = true;
+    await tester.pumpWidget(layer());
+    await tester.pump();
+    final g = await press(tester);
+    expect(tester.widget<AnimatedOpacity>(find.ancestor(of: open, matching: find.byType(AnimatedOpacity)).first).opacity, 0);
+    await lift(tester, g);
   });
 
   // A phone held upright (user 2026-11-18: 「竖屏时，键盘在语音按钮靠中间的横排就行了」).

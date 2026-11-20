@@ -622,10 +622,10 @@ List<Widget> composerLayer(
                 final transfer = session.transferStatus;
                 final button = session.composerAllowed;
                 final zoomed = session.currentZoomed && !session.composer.open;
-                // An open panel takes the stack, all but 语音, which stands above the panel (user 2026-11-18:
-                // 「输入版打开的时候不要隐藏这个语音输入」).
+                // An open panel takes the stack, all but 语音 and 收起, which stand above the panel (user
+                // 2026-11-18: 「输入版打开的时候不要隐藏这个语音输入」).
                 if (session.composer.open && button) {
-                  return hold == null ? const SizedBox.shrink() : _VoiceAbovePanel(state: state, session: session, hold: hold);
+                  return _StackAbovePanel(state: state, session: session, hold: hold, upright: stage.maxHeight > stage.maxWidth);
                 }
                 // A disallowed panel hides 输入, so the strip shows here.
                 if (transfer == null && !button && !zoomed) return const SizedBox.shrink();
@@ -645,15 +645,7 @@ List<Widget> composerLayer(
                     voice: hold != null && button ? voiceButton(hold) : null,
                     hidden: hold?.active ?? false,
                     upright: stage.maxHeight > stage.maxWidth,
-                    input: button
-                        ? RappButton.stage(
-                            key: const Key('composer-open'),
-                            label: '输入',
-                            icon: Icons.keyboard_outlined,
-                            size: stageButtonSize,
-                            onPressed: () => session.composer.open = true,
-                          )
-                        : null,
+                    input: button ? _openToggle(session) : null,
                     restore: zoomed
                         ? RappButton.stage(
                             key: const Key('zoom-reset'),
@@ -845,9 +837,9 @@ class _TidyLayer extends StatelessWidget {
     final p = panelPlaceOf(session).value;
     double bottom;
     if (_open && p != null) {
-      // 语音's bottom, as _VoiceAbovePanel puts it.
-      final voice = math.max(0.0, math.min(stage.height - p.top + 8, stage.height - 8 - stageButtonSize));
-      bottom = voice + stageButtonSize + 12;
+      // The stack's top, as _StackAbovePanel puts it.
+      final h = _stackHeight(stage.height > stage.width);
+      bottom = math.max(0.0, math.min(stage.height - p.top + 8, stage.height - 8 - h)) + h + 12;
     } else {
       final row = keys ? keyRowBottom + keyRowKeySize.height + 8 : 0.0;
       final base = keyboard > 0 ? keyboard + (keys ? row : stageButtonsEdge) : math.max(stageButtonsUp, row);
@@ -885,43 +877,61 @@ class _TidyPlace extends SingleChildLayoutDelegate {
 
 /// The iOS stage's button stack plus hold to talk: owns the session's [VoiceHold] (none without
 /// `state.voice`) and lays [VoiceOverlay] over the whole stage.
-/// iOS's 语音 while the panel is open: the same stage button, on the stack's line ([stageButtonsIn] in from the
-/// stack's side), 8 above the panel's top, or its key row's when that rides above it; the panel moves (the keyboard,
-/// a drag), the button follows a frame behind. Never off the stage's top.
-class _VoiceAbovePanel extends StatelessWidget {
-  const _VoiceAbovePanel({required this.state, required this.session, required this.hold});
+/// 输入 and 收起 are one key: the keyboard to open the panel, the hiding keyboard to put it away.
+Widget _openToggle(RemoteSession session) {
+  final open = session.composer.open;
+  return RappButton.stage(
+    key: const Key('composer-open'),
+    label: open ? '收起' : '输入',
+    icon: open ? Icons.keyboard_hide_outlined : Icons.keyboard_outlined,
+    size: stageButtonSize,
+    active: open,
+    onPressed: open ? session.composer.collapse : () => session.composer.open = true,
+  );
+}
+
+/// The open stack's height: 语音 and 收起 in one row, or one above the other.
+double _stackHeight(bool upright) => upright ? stageButtonSize : 2 * stageButtonSize + 12;
+
+/// iOS's stage stack while the panel is open: 语音 (if [hold]) and 收起, on the stack's line ([stageButtonsIn] in
+/// from the stack's side), the lowest 8 above the panel's top, or its key row's when that rides above it; the
+/// panel moves (the keyboard, a drag), the stack follows a frame behind. Never off the stage's top. [upright]
+/// lays them in a row, 语音 outermost; else 收起 stands above 语音.
+class _StackAbovePanel extends StatelessWidget {
+  const _StackAbovePanel({required this.state, required this.session, required this.hold, required this.upright});
 
   final MainState state;
   final RemoteSession session;
-  final VoiceHold hold;
+  final VoiceHold? hold;
+  final bool upright;
 
   @override
   Widget build(BuildContext context) => ValueListenableBuilder<Rect?>(
         valueListenable: panelPlaceOf(session),
         builder: (context, panel, _) {
           if (panel == null) return const SizedBox.shrink();
-          final left = state.stageSide.value == StageSide.left;
           return LayoutBuilder(builder: (context, c) {
-            final bottom = math.min(c.maxHeight - panel.top + 8, c.maxHeight - 8 - stageButtonSize);
-            final hint = hold.active || hold.hint == null ? null : voiceHint(hold, maxWidth: c.maxWidth - 2 * stageButtonsIn - stageButtonSize - 12);
-            return Stack(children: [
-              Positioned(
-                left: left ? stageButtonsIn : null,
-                right: left ? null : stageButtonsIn,
-                bottom: math.max(0, bottom),
-                child: Listener(
-                  onPointerDown: (_) => state.holdForPanel(session),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (left) voiceButton(hold),
-                      if (hint != null) ...[if (left) const SizedBox(width: 12), hint, if (!left) const SizedBox(width: 12)],
-                      if (!left) voiceButton(hold),
-                    ],
-                  ),
+            final h = _stackHeight(upright);
+            final bottom = math.min(c.maxHeight - panel.top + 8, c.maxHeight - 8 - h);
+            final hold = this.hold;
+            final hint = hold == null || hold.active || hold.hint == null
+                ? null
+                : voiceHint(hold, maxWidth: c.maxWidth - 2 * stageButtonsIn - stageButtonSize - 12);
+            return Padding(
+              padding: EdgeInsets.only(bottom: math.max(0, bottom)),
+              child: Listener(
+                onPointerDown: (_) => state.holdForPanel(session),
+                child: StageButtons(
+                  side: state.stageSide.value,
+                  onSide: state.setStageSide,
+                  voice: hold == null ? null : voiceButton(hold),
+                  input: _openToggle(session),
+                  hidden: hold?.active ?? false,
+                  upright: upright,
+                  beside: [?hint],
                 ),
               ),
-            ]);
+            );
           });
         },
       );
