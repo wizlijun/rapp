@@ -6,10 +6,11 @@
 #        sim.sh <sim udid> <label> [scenario...]     scenarios: builtin repeat compose (default: all three, in order)
 #
 # prep: makes the system's 简体拼音 the simulator's first input source (so a system candidate bar would show if the
-# system input method ever got the keys), reboots the simulator, turns 「实体键盘用内置输入法」 on in the app's
-# prefs file and launches the app. The script cannot tap, so then, by hand: set up access, open a session, open the
-# writing panel (caret in it, empty), and run the scenarios. If the prefs file is somewhere else (the device has an
-# id), turn the switch on in 设置 by hand once; it stays on.
+# system input method ever got the keys), reboots the simulator, writes 「实体键盘用内置输入法」 on into the app's
+# prefs file (it is on by default; this only undoes an earlier off) and launches the app. The script cannot tap, so
+# then, by hand: set up access, open a session, open the writing panel (caret in it, empty), and run the scenarios.
+# If the prefs file is somewhere else (the device has an id) and the switch was turned off, turn it on in the side
+# panel's 全局设置 by hand once; the session's app profile must not have it off either.
 #
 # builtin  panel open: n i h a o → composition underlined, 「你好」 in the candidate row; 1 → 你好 committed.
 # repeat   panel open: hold ⌫ 1.5 s → several characters gone; hold a → several a in the composition.
