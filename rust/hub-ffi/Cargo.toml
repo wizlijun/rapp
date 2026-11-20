@@ -11,6 +11,7 @@ crate-type = ["staticlib", "rlib"]
 [dependencies]
 rapp-hub.workspace = true
 rapp-net.workspace = true
+rapp-ports.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]

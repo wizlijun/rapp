@@ -218,7 +218,7 @@ async fn reached(state: &Arc<State>, id: &str, name: &str, mut shares: Value) ->
     use crate::share_cmds::{addr, number, numbers, protocol, told};
     let list = shares.as_array_mut().map(std::mem::take).unwrap_or_default();
     crate::numbers::saw(state, id, name, &numbers(&list));
-    let wants: Vec<(u16, Option<u16>)> = list.iter().filter_map(|s| Some((crate::sharing::port_of(&s["port"])?, number(s)))).collect();
+    let wants = rapp_ports::wants(&list);
     state.maps.keep(id, &wants.iter().map(|(port, _)| *port).collect::<Vec<u16>>());
     let locals = crate::maps::ensure_all(state, id, &wants).await;
     let list = list

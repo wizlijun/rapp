@@ -24,6 +24,7 @@ fn opts(home: &Path, log: rapp_net::log::Log, presence_every: Option<Duration>) 
         embed_only: false,
         dual_stack: true,
         log_dir: None,
+        map_ports: None,
     }
 }
 

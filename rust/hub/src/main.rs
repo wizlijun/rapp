@@ -28,6 +28,8 @@ async fn main() {
         embed_only: false,
         dual_stack: false,
         log_dir: Some(rapp_net::log::log_dir()),
+        // The service on this machine listens on them, for the whole system.
+        map_ports: None,
     };
     if let Err(e) = rapp_hub::run(opts, tokio::io::stdin(), tokio::io::stdout()).await {
         log.msg(Lvl::Error, format_args!("{e:#}"));

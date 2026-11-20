@@ -1579,6 +1579,7 @@ dependencies = [
  "rand 0.9.5",
  "rapp-conn",
  "rapp-net",
+ "rapp-ports",
  "rapp-term",
  "rapp-wire",
  "serde",
@@ -1594,6 +1595,7 @@ version = "0.15.5"
 dependencies = [
  "rapp-hub",
  "rapp-net",
+ "rapp-ports",
  "tempfile",
  "tokio",
 ]
@@ -1615,6 +1617,19 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "rapp-ports"
+version = "0.15.5"
+dependencies = [
+ "rapp-conn",
+ "rapp-net",
+ "rapp-wire",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -1644,6 +1659,7 @@ dependencies = [
  "rand 0.9.5",
  "rapp-conn",
  "rapp-net",
+ "rapp-ports",
  "rapp-term",
  "rapp-update",
  "rapp-wire",

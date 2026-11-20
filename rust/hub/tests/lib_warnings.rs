@@ -20,6 +20,7 @@ async fn quinn_warnings_go_to_the_hub_log() {
         embed_only: false,
         dual_stack: true,
         log_dir: None,
+        map_ports: None,
     };
     let (cmd_r, _w) = tokio::io::duplex(1 << 16);
     let (_out_r, out_w) = tokio::io::duplex(1 << 16);
