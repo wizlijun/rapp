@@ -2003,6 +2003,7 @@ class MainState extends ChangeNotifier {
         onView: (w, rect, z) {
           if (_liveSid(s.sid)) portOf(s.sid)!.setView(s.sid, w, rect, z);
         },
+        onComposeKey: () => tidyIfAny(s.sid)?.closed(),
         followNewTabs: !term);
     final prof = profiles.resolve(r.app);
     rs.setProfile(prof);

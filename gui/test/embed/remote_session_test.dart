@@ -494,6 +494,18 @@ void main() {
     expect(rs.composer.takeReplay(), isFalse);
   });
 
+  test('compose_key tells onComposeKey before the panel opens, and not when it is refused', () {
+    final openAtCall = <bool>[];
+    late final RemoteSession rs;
+    rs = RemoteSession(1, 'x', onComposeKey: () => openAtCall.add(rs.composer.open));
+    rs.apply(const ComposeKeyEvent(1));
+    expect(openAtCall, [false]);
+    rs.composer.open = false;
+    rs.setProfile(const ResolvedProfile(name: 'X', composer: false));
+    rs.apply(const ComposeKeyEvent(1));
+    expect(openAtCall, [false]);
+  });
+
   test('compose_key does nothing when the panel is not allowed (the tab just became noComposer)', () {
     final rs = RemoteSession(1, 'x');
     rs.setProfile(const ResolvedProfile(name: 'X', composer: false));

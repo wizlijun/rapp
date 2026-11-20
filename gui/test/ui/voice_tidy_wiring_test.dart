@@ -315,6 +315,20 @@ void main() {
     st.dispose();
   });
 
+  test('a letter typed on the picture while tidying stops it: the original goes in the panel first (§8.2)',
+      () async {
+    final (st, _) = await start();
+    final rs = st.currentRemote!;
+    st.tidyOf(sid).begin(long, VoicePick.send);
+    rs.apply(ComposeKeyEvent(sid));
+    expect(api.calls.single.cancelled, isTrue);
+    expect(st.tidyOf(sid).phase, TidyPhase.idle);
+    expect(rs.composer.open, isTrue);
+    expect(rs.composer.draftText, long); // the letter comes after it, replayed into the editor
+    expect(rs.composer.takeReplay(), isTrue);
+    st.dispose();
+  });
+
   test('a tidy in the session on show leaves the hint to the card', () async {
     final (st, _) = await start();
     final before = st.hint;
