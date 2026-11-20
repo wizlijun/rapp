@@ -783,6 +783,19 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [ ] 10. 整理好、等发送时又按住说话：上一段 AI 文字先发出，再开始听新的一段。
 - [ ] 11. 短语音（10 个字以内）照旧：松手气泡上飘消失、直接发送，没有整理气泡。
 
+## 整理提速（feat/tidy-faster，2026-11-21）实机检查
+
+规格：`docs/superpowers/specs/2026-11-20-rapp-voice-ai-tidy-design.md` §9。热词要等 rapp-llm 的 feat/hotwords 合并、网关重启以后才有。
+
+- [ ] 1. 长语音松手后，AI 的字是一个一个冒出来的，不是一下子全出来；整理好的文字放完后约 1.5 秒发出。
+- [ ] 2. 「AI 整理时先思考」默认关；打开后整理明显慢一点，关掉恢复。
+- [ ] 3. 说一段话，中间停一下（约 1 秒）再说完松手：整理气泡出来后，AI 的字比以前快得多就开始冒（日志里有 `prefetched … ms ahead`）。
+- [ ] 4. 一口气说完马上松手：AI 的第一个字比以前早大约 1 秒（日志 `start` 那行带 `prefetched`）。
+- [ ] 5. 停顿后又改口、多说了几句：发出去的是整段话整理后的结果，不是停顿前那半句。
+- [ ] 6. 热词（macOS 26 / iOS 26）：说「Supabase」「Lovable」「n8n」「note.md」这类词，听写气泡里认得对，和没合并 feat/hotwords 时对比。
+- [ ] 7. 热词（旧系统，如 macOS 15）：同上，确认不报错、能认出。
+- [ ] 8. 停掉网关：按住说话照常能听写，没有卡住或报错。
+
 ## app 端口映射（feat/app-port-maps，2026-11-20）实机检查
 
 规格：`docs/superpowers/specs/2026-11-20-rapp-app-port-maps-design.md`。iOS app 里的 hub 自己开 `localhost:28000–28999`，只有 app 内能连；Mac、Linux 照旧由后台服务开。
