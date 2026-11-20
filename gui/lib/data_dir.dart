@@ -1,6 +1,7 @@
 // Creates the data root layout and copies the old config into it (spec §1-§2); mirrors rust/net/src/datadir.rs.
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 const dataReadme = r'''# rapp 数据目录
 
@@ -129,6 +130,50 @@ bool isRappDataDir(String dir) {
   } catch (_) {
     return false;
   }
+}
+
+/// This device's id when no rapp-service picks one (iOS): `local/service.json`'s `id`, made on the first
+/// start (9 digits, like `rapp_net::crypto::random_id`) with the file's other fields kept, plus
+/// `devices/<id>/device.json`. Input records and `gui.json` need it. An empty [name] keeps the one
+/// written before. Throws when `service.json` cannot be read as JSON (it holds the relay and key: never
+/// overwritten then) or a write fails.
+String ensureDeviceId(String root, {required String name, required String os}) {
+  final path = '$root/local/service.json';
+  final f = File(path);
+  final Map<String, Object?> svc;
+  if (f.existsSync()) {
+    final v = jsonDecode(f.readAsStringSync());
+    if (v is! Map<String, Object?>) throw FormatException('service.json is not an object', path);
+    svc = v;
+  } else {
+    svc = {};
+  }
+  var id = svc['id'];
+  if (id is! String || !RegExp(r'^[1-9][0-9]{8}$').hasMatch(id)) {
+    id = '${100000000 + Random.secure().nextInt(900000000)}';
+    svc['id'] = id;
+    writePrivate(path, utf8.encode(jsonEncode(svc)));
+  }
+  final dev = '$root/devices/$id/device.json';
+  var n = name;
+  if (n.isEmpty) {
+    try {
+      final old = jsonDecode(File(dev).readAsStringSync());
+      if (old is Map && old['name'] is String) n = old['name'] as String;
+    } catch (_) {}
+  }
+  final bytes = utf8.encode('${const JsonEncoder.withIndent('  ').convert({'id': id, 'name': n, 'os': os})}\n');
+  final d = File(dev);
+  if (!d.existsSync() || !_same(d.readAsBytesSync(), bytes)) writePrivate(dev, bytes);
+  return id;
+}
+
+bool _same(List<int> a, List<int> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
 }
 
 String? _serviceId(String path) {

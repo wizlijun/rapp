@@ -341,6 +341,10 @@
   - 真机上发送中强杀 rapp 再开，文字还在输入框里（§5.2、§10 H1 验收）
   - 两台主控台同步后，能看到对方 `devices/<id>/inputs/` 里的文件（§5.1）
   - 触屏上「＋」→ 输入历史的点按大小（§6 R4）
+- [x] 2026-11-21 iPad 上输入记录一直写不进去（用户报告）：iOS 没有 rapp-service，`local/service.json` 没有 `id`，每条都因「还不知道这台设备的 id」失败，`gui.json` 也从不保存。修复 fix/ios-device-id：启动时 `ensureDeviceId` 补 9 位 id 和 `devices/<id>/device.json`（模拟器上看过：生成、重开不变）
+  - [ ] iPad 实机：发一句话后杀掉 app 再开，↑ 能取回、「＋」→ 输入历史里有这条，来源显示 iPad 的名字
+  - [ ] iPad 实机：改一项全局设置（如主题）后杀掉 app 再开，设置还在
+  - 没做（要用户定）：iOS 没有 git 同步，iPad 和 Mac 的输入历史互相看不到
 
 ## 项目作为工作域（规格 `docs/superpowers/specs/2026-11-14-rapp-project-design.md`，计划 `docs/superpowers/plans/2026-11-14-rapp-project-working-spheres.md`，G1–G12）
 - [x] 2cc38b7 pinned

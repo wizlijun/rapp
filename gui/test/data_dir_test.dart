@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/data_dir.dart';
@@ -47,6 +48,51 @@ void main() {
     expect(Directory('$root/files/transfers').existsSync(), isTrue);
     expect(File('$root/README.md').existsSync(), isTrue);
     expect(File('$root/local/$migratedFrom').existsSync(), isFalse);
+  });
+
+  group('ensureDeviceId (iOS: no service picks the id)', () {
+    final idShape = RegExp(r'^[1-9][0-9]{8}$');
+
+    test('picks a 9-digit id, keeps relay and key, and writes device.json', () {
+      prepareDataDir(root, null);
+      put('$root/local/service.json', '{"relay":"vps:22026","key":"rappK"}');
+      final id = ensureDeviceId(root, name: 'iPad', os: 'ios');
+      expect(id, matches(idShape));
+      final svc = jsonDecode(read('$root/local/service.json')) as Map;
+      expect(svc, {'relay': 'vps:22026', 'key': 'rappK', 'id': id});
+      expect(jsonDecode(read('$root/devices/$id/device.json')), {'id': id, 'name': 'iPad', 'os': 'ios'});
+    });
+
+    test('no service.json yet: one is made with only the id', () {
+      prepareDataDir(root, null);
+      final id = ensureDeviceId(root, name: 'iPad', os: 'ios');
+      expect(jsonDecode(read('$root/local/service.json')), {'id': id});
+    });
+
+    test('the id stays the same on every start; a new name is written', () {
+      prepareDataDir(root, null);
+      final id = ensureDeviceId(root, name: 'iPad', os: 'ios');
+      expect(ensureDeviceId(root, name: 'Bruce 的 iPad', os: 'ios'), id);
+      expect((jsonDecode(read('$root/devices/$id/device.json')) as Map)['name'], 'Bruce 的 iPad');
+    });
+
+    test('an empty name keeps the one written before', () {
+      prepareDataDir(root, null);
+      final id = ensureDeviceId(root, name: 'iPad', os: 'ios');
+      ensureDeviceId(root, name: '', os: 'ios');
+      expect((jsonDecode(read('$root/devices/$id/device.json')) as Map)['name'], 'iPad');
+    });
+
+    test('a bad id is replaced; an unreadable file is left alone and throws', () {
+      prepareDataDir(root, null);
+      put('$root/local/service.json', '{"id":"012","relay":"r"}');
+      final id = ensureDeviceId(root, name: 'iPad', os: 'ios');
+      expect(id, matches(idShape));
+      expect((jsonDecode(read('$root/local/service.json')) as Map)['relay'], 'r');
+      put('$root/local/service.json', 'not json');
+      expect(() => ensureDeviceId(root, name: 'iPad', os: 'ios'), throwsA(isA<FormatException>()));
+      expect(read('$root/local/service.json'), 'not json');
+    });
   });
 
   test('fresh root gets the layout', () {

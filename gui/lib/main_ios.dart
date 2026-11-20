@@ -52,6 +52,12 @@ Future<void> mainIos() async {
   try {
     name = await iosChannel.deviceName();
   } catch (_) {}
+  // No service picks this device's id here: input records and gui.json wait on it. Before the prefs are read.
+  try {
+    ensureDeviceId(root, name: name, os: 'ios');
+  } catch (e) {
+    _log('设备 id: $e');
+  }
   HubClient? hub;
   String? hubError;
   try {
