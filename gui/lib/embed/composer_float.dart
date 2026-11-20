@@ -5,6 +5,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/rendering.dart' show RenderMetaData;
 
 import '../ui/tokens.dart';
@@ -49,9 +50,13 @@ bool _onText(PointerEvent e) {
   });
 }
 
+/// How far past the lowest place a pull must go to collapse the panel, and how fast a fling down (px/s) does it.
+const pullCloseDistance = 70.0;
+const pullCloseSpeed = 700.0;
+
 /// A drag that starts on the panel outside its text.
-class _PanelPan extends PanGestureRecognizer {
-  _PanelPan({super.debugOwner}) : super(supportedDevices: _dragDevices);
+class PanelPan extends PanGestureRecognizer {
+  PanelPan({super.debugOwner}) : super(supportedDevices: _dragDevices);
 
   @override
   bool isPointerAllowed(PointerEvent event) => super.isPointerAllowed(event) && !_onText(event);
@@ -97,7 +102,11 @@ class FloatingComposer extends StatefulWidget {
       required this.child,
       this.scale = 1,
       this.keyboard = 0,
-      this.place});
+      this.place,
+      this.onPullClose});
+
+  /// iOS: pulled down past its lowest place (or flung down there), the panel asks to collapse. Null: no pull.
+  final VoidCallback? onPullClose;
 
   /// Told where the panel (with its grip) is, when given: iOS's voice button stands above it.
   final ValueNotifier<Rect?>? place;
@@ -116,8 +125,34 @@ class FloatingComposer extends StatefulWidget {
   State<FloatingComposer> createState() => _FloatingComposerState();
 }
 
-class _FloatingComposerState extends State<FloatingComposer> {
+class _FloatingComposerState extends State<FloatingComposer> with SingleTickerProviderStateMixin {
   final _box = GlobalKey();
+
+  /// How far the finger has pulled down past the lowest place: the panel is drawn this far lower (and the stack
+  /// with it, which reads the panel's place). Never part of the saved place.
+  double _over = 0;
+  double _overFrom = 0;
+  late final AnimationController _spring = AnimationController(vsync: this, duration: const Duration(milliseconds: 200))
+    ..addListener(() => setState(() => _over = _overFrom * (1 - Curves.easeOut.transform(_spring.value))));
+
+  @override
+  void initState() {
+    super.initState();
+    _spring; // made now: a lazy one made in dispose() would look up a deactivated element
+    widget.session.composer.addListener(_reopen);
+  }
+
+  // Opened again while the pull-close was going: the panel comes back from where the finger left it.
+  void _reopen() {
+    if (widget.session.composer.open && _drag == null) _springBack();
+  }
+
+  @override
+  void dispose() {
+    widget.session.composer.removeListener(_reopen);
+    _spring.dispose();
+    super.dispose();
+  }
 
   /// The bottom centre while a drag is on, in stage coordinates; always where the panel is seen.
   Offset? _drag;
@@ -127,7 +162,7 @@ class _FloatingComposerState extends State<FloatingComposer> {
   bool _hover = false;
 
   /// A touch landed on the panel and no tap elsewhere since: a touch screen has no hover, so this
-  /// shows the bar and the × instead.
+  /// shows the bar (and, off iOS, the ×) instead.
   bool _touched = false;
 
   /// Where the held touch was last, for its moves.
@@ -143,25 +178,57 @@ class _FloatingComposerState extends State<FloatingComposer> {
     return _topLeftOf(bc, _stage, p, widget.keyboard) + Offset(p.width / 2, p.height);
   }
 
-  void _start() => setState(() => _drag = _seen(_at.inContent(_stage)));
+  /// Where the panel was seen when the drag began: a drop there writes no place (a default stays unwritten).
+  Offset? _from;
 
-  // Moved from where it is seen, so going past an edge and back has no dead zone.
-  void _move(Offset delta) => setState(() => _drag = _seen((_drag ?? _at.inContent(_stage)) + delta));
+  void _start() {
+    _spring.stop();
+    // A stale pull must never make this drag collapse by itself.
+    _over = 0;
+    setState(() => _from = _drag = _seen(_at.inContent(_stage)));
+  }
 
-  void _end() {
+  // Moved from where it is seen, so going past an edge and back has no dead zone. What the bottom clamp
+  // swallows of a downward move is the pull ([_over]).
+  void _move(Offset delta) {
+    final p = _panel;
+    final lowest = math.max(composerMargin + p.height, _stage.height - composerMargin - widget.keyboard);
+    final wanted = (_drag ?? _at.inContent(_stage)) + Offset(0, _over) + delta;
+    setState(() {
+      _drag = _seen(wanted);
+      if (widget.onPullClose != null) _over = math.max(0, wanted.dy - lowest);
+    });
+  }
+
+  void _end([Velocity? v]) {
     _held = null;
     final bc = _drag;
     if (bc == null) return;
-    final p = InputPoint.at(bc, _stage);
+    // Pulled past the bottom: the place is the lowest there is, not the keyboard-relative clamp.
+    final p = _over > 0 ? InputPoint(InputPoint.at(bc, _stage).x, composerMargin, fromBottom: true) : InputPoint.at(bc, _stage);
     // Dropped where it was: nothing to write (a default stays unwritten).
-    if (p != _at) widget.onPlace(p);
+    if (bc != _from && p != _at) widget.onPlace(p);
     setState(() => _drag = null);
+    final pull = widget.onPullClose;
+    if (pull != null && _over > 0 && (_over > pullCloseDistance || (v?.pixelsPerSecond.dy ?? 0) > pullCloseSpeed)) {
+      // The dock takes it from where the panel is.
+      pull();
+      return;
+    }
+    _springBack();
     widget.session.composer.wantFocus();
   }
 
   void _cancel() {
     _held = null;
     setState(() => _drag = null);
+    _springBack();
+  }
+
+  void _springBack() {
+    if (_over <= 0) return;
+    _overFrom = _over;
+    _spring.forward(from: 0);
   }
 
   void _reset() {
@@ -212,7 +279,8 @@ class _FloatingComposerState extends State<FloatingComposer> {
     // bounds would never arrive) and reaching down into the body; the × is drawn at the top of it, level
     // with the grip, so the grip row stays gripSize.height tall.
     final side = controlHeightOf(context);
-    final close = AnimatedOpacity(
+    final ios = defaultTargetPlatform == TargetPlatform.iOS;
+    final close = ios ? null : AnimatedOpacity(
       opacity: shown ? 1 : 0,
       duration: const Duration(milliseconds: 120),
       child: IgnorePointer(
@@ -246,7 +314,9 @@ class _FloatingComposerState extends State<FloatingComposer> {
       _stage = c.biggest;
       return CustomSingleChildLayout(
         delegate: _Place(_drag ?? _at.inContent(_stage), panelWidth(_stage.width, widget.scale), widget.keyboard),
-        child: _placed(TapRegion(
+        child: Transform.translate(
+          offset: Offset(0, _over),
+          child: _placed(TapRegion(
           onTapOutside: (_) {
             if (_touched) setState(() => _touched = false);
           },
@@ -261,13 +331,13 @@ class _FloatingComposerState extends State<FloatingComposer> {
               onExit: (_) => setState(() => _hover = false),
               child: RawGestureDetector(
                 gestures: {
-                  _PanelPan: GestureRecognizerFactoryWithHandlers<_PanelPan>(
-                    () => _PanelPan(debugOwner: this),
+                  PanelPan: GestureRecognizerFactoryWithHandlers<PanelPan>(
+                    () => PanelPan(debugOwner: this),
                     (r) => r
                       ..dragStartBehavior = DragStartBehavior.down
                       ..onStart = ((_) => _start())
                       ..onUpdate = ((d) => _move(d.delta))
-                      ..onEnd = ((_) => _end())
+                      ..onEnd = ((d) => _end(d.velocity))
                       ..onCancel = _cancel,
                   ),
                   _TextHold: GestureRecognizerFactoryWithHandlers<_TextHold>(
@@ -282,7 +352,7 @@ class _FloatingComposerState extends State<FloatingComposer> {
                         _held = d.globalPosition;
                         _move(d.globalPosition - from);
                       }
-                      ..onLongPressEnd = ((_) => _end())
+                      ..onLongPressEnd = ((d) => _end(d.velocity))
                       ..onLongPressCancel = _cancel,
                   ),
                 },
@@ -303,24 +373,26 @@ class _FloatingComposerState extends State<FloatingComposer> {
                     ),
                     // The × over the blank right of the grip: a row [76 blank, hit area] centred puts the hit
                     // area's middle 38 right of the panel's middle, where the blank's middle is.
-                    Positioned(
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          SizedBox(width: _closeSize.width + gripSize.width),
-                          close,
-                        ],
+                    // None on iOS: a pull down collapses there.
+                    if (!ios)
+                      Positioned(
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            SizedBox(width: _closeSize.width + gripSize.width),
+                            close!,
+                          ],
+                        ),
                       ),
-                    ),
                   ],
                 ),
               ),
             ),
           ),
-        )),
+        ))),
       );
     });
   }

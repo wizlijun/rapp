@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/composer_panel.dart';
 import 'package:rapp/embed/flutter_editor.dart';
 import 'package:rapp/embed/geometry.dart';
+import 'package:rapp/embed/key_bar.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/embed/stage_buttons.dart';
@@ -228,14 +229,18 @@ void main() {
     expect(stage.height - inStage(tester, open).bottom, 312);
   });
 
-  iosTest('terminal key row on: the stack keeps its 88 (above the key row); with the keyboard up, 8 above the row', (tester) async {
+  iosTest('terminal: the stack keeps its 88 (clear of the key bar); with the keyboard up, 12 above the bar on it', (tester) async {
     big(tester);
     final tport = FakeTermSessionPort();
     addTearDown(tport.dispose);
     await tester.pumpWidget(layer(p: tport, keyRow: true));
+    final bar = keyBarHeightOf(es, rs, stage.width);
+    expect(find.byType(TermKeyRow), findsNothing);
+    expect(stage.height - inStage(tester, find.byType(KeyBar)).bottom, 0);
     expect(stage.height - inStage(tester, open).bottom, 88);
     await tester.pumpWidget(layer(p: tport, keyRow: true, keyboard: 300));
-    expect(stage.height - inStage(tester, open).bottom, 300 + keyRowBottom + keyRowKeySize.height + 8);
+    expect(stage.height - inStage(tester, find.byType(KeyBar)).bottom, 300);
+    expect(stage.height - inStage(tester, open).bottom, 300 + bar + 12);
   });
 
   iosTest('hidden: 输入 fades out and ignores taps; dragging is off', (tester) async {

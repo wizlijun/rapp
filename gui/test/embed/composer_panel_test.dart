@@ -11,6 +11,8 @@ import 'package:rapp/embed/app_profile.dart';
 import 'package:rapp/embed/composer_panel.dart';
 import 'package:rapp/embed/flutter_editor.dart';
 import 'package:rapp/embed/geometry.dart';
+import 'package:rapp/embed/key_bar.dart';
+import 'package:rapp/embed/modifier_latch.dart';
 import 'package:rapp/embed/picture.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
@@ -271,6 +273,27 @@ void main() {
         rs.apply(const ComposerStateEvent(1, done: ComposerDone(0, '没有发出去')));
         await tester.pump();
         expect(fieldFocused(tester), isTrue);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+
+    testWidgets('iOS: ⌃ once + typed r sends Ctrl-R, draft empty; the next typed r goes into the draft', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      try {
+        big(tester);
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        keyLatchOf(es, rs).tap(latchCtrl);
+        await tester.enterText(fieldFinder, 'r');
+        await tester.pump();
+        expect(text(tester), '');
+        expect(callsOf('key').length, 1);
+        expect(callsOf('key').single['modifiers'], latchCtrl);
+        await tester.enterText(fieldFinder, 'r');
+        await tester.pump();
+        expect(text(tester), 'r');
+        expect(callsOf('key').length, 1);
       } finally {
         debugDefaultTargetPlatformOverride = null;
       }
@@ -677,6 +700,40 @@ void main() {
           expect(sameRow ? pos[i].dx > pos[i - 1].dx : pos[i].dy > pos[i - 1].dy, isTrue, reason: labels[i]);
         }
       }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
+
+      testWidgets('iOS ＋ menu: no 按键 grid, 附件/在远端复制/输入历史/直接回车/缩放/收起 present', (tester) async {
+        big(tester);
+        final x = RemoteSession(3, 'Notes', appId: 'com.x')..composer.open = true;
+        addTearDown(x.dispose);
+        await tester.pumpWidget(layer(s: x));
+        await tester.pump();
+        await openMenu(tester);
+        expect(find.text('按键 · 直接发给远端'), findsNothing);
+        for (final l in ['Tab', '⌘', '⌥', '删除', '←', '↓', '↑', '→', '回车']) {
+          expect(find.descendant(of: menu, matching: find.text(l)), findsNothing, reason: l);
+        }
+        expect(find.text('附件…'), findsOneWidget);
+        expect(find.text('在远端复制'), findsOneWidget);
+        expect(find.text('输入历史'), findsOneWidget);
+        expect(find.byKey(const Key('composer-plus-return')), findsOneWidget);
+        expect(find.text('大小'), findsOneWidget);
+        expect(find.byType(Slider), findsOneWidget);
+        expect(find.byKey(const Key('composer-plus-collapse')), findsOneWidget);
+        expect(find.text('收起'), findsOneWidget);
+      }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+      testWidgets('macOS ＋ menu unchanged: the 按键 grid stays', (tester) async {
+        big(tester);
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        await openMenu(tester);
+        expect(find.text('按键 · 直接发给远端'), findsOneWidget);
+        expect(find.text('⌘C'), findsOneWidget);
+        for (final l in ['Tab', '⌘', '⌥', '删除', '←', '↓', '↑', '→', '回车']) {
+          expect(find.descendant(of: menu, matching: find.text(l)), findsOneWidget, reason: l);
+        }
+        expect(find.text('收起'), findsOneWidget);
+      }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
 
       testWidgets('plus menu opens up from a panel at the bottom', (tester) async {
         big(tester);
@@ -1376,18 +1433,16 @@ void main() {
       expect(find.byKey(const Key('composer-panel')), findsNothing);
     });
 
-    for (final (p, min) in [(TargetPlatform.macOS, 40.0), (TargetPlatform.iOS, 48.0)]) {
-      testWidgets('the grip × is at least $min square on $p', (tester) async {
-        await onPlatform(p, () async {
-          await showPicture(tester);
-          await openPanel(tester);
-          final close = find.byKey(const Key('composer-grip-close'));
-          final s = tester.getSize(close);
-          expect(s.width, greaterThanOrEqualTo(min));
-          expect(s.height, greaterThanOrEqualTo(min));
-        });
+    // iOS has no × (a pull down collapses there, G4/G6).
+    testWidgets('the grip × is at least 40 square on macOS', (tester) async {
+      await onPlatform(TargetPlatform.macOS, () async {
+        await showPicture(tester);
+        await openPanel(tester);
+        final s = tester.getSize(find.byKey(const Key('composer-grip-close')));
+        expect(s.width, greaterThanOrEqualTo(40));
+        expect(s.height, greaterThanOrEqualTo(40));
       });
-    }
+    });
 
     testWidgets('a small × right beside the grip shows with the bar and collapses the panel', (tester) async {
       await showPicture(tester);

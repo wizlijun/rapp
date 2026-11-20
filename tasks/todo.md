@@ -817,3 +817,7 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [ ] 4. iPhone / iPad 主屏：新图标，圆角由系统裁，边缘没有多出来的一圈框。
 - [ ] 5. 装过旧版本的 Mac：升级后 Dock 里图标刷新（不刷新就 `killall Dock` 再看）。
 - [ ] 6. Linux 打包后的桌面图标、Windows 版 exe 图标也是新的。
+
+## iOS 输入/收起 + 按键区（feat/ios-input-toggle，2026-11-21）
+- 实机检查：规格 `docs/superpowers/specs/2026-11-21-rapp-ios-input-toggle-design.md` §7 第 1–22 条，Duo 和 iPad 各一遍
+- 以后再做：App 里 ⌃ 锁住时按「复制」发出的是 ⌃⌘C；AI 整理卡片开合时跟着 IosDock 的动画走，不跳；PullDown 和 FloatingComposer 的回弹代码合成一份；在 Caps Lock 下按 ⌥+字母大小写

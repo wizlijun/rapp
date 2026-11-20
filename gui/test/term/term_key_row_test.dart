@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:rapp/embed/app_key_row.dart';
 import 'package:rapp/embed/composer_panel.dart' show ComposerPanel, pictureLift;
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
@@ -450,12 +449,6 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
     await tester.pump();
     expect(typed(), ['c']);
-  });
-
-  testWidgets('a terminal never has the app key row, even with it on', (tester) async {
-    s.prefs.appKeyRow = true;
-    await openTerm(tester);
-    expect(find.byType(AppKeyRow), findsNothing);
   });
 
   test('keyRowWideAt leaves the 720 panel clear of the corner groups, with a gap', () {

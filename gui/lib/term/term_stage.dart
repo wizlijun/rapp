@@ -13,6 +13,8 @@ import 'package:flutter/physics.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
+import '../embed/key_bar.dart' show sendLatchedLetter, termWire;
+import '../embed/modifier_latch.dart';
 import '../embed/remote_session.dart';
 import '../embed/touch_gestures.dart';
 import '../embed/voice_key_gate.dart';
@@ -214,6 +216,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     super.initState();
     _fling = createTicker(_tick);
     widget.session.addListener(_onSession);
+    widget.session.termCopy = _copy;
     _focus.addListener(_onFocus);
     HardwareKeyboard.instance.addHandler(_onKeys);
     _focusSeen = widget.state.termFocusTick;
@@ -236,6 +239,8 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     if (!identical(old.session, widget.session)) {
       old.session.removeListener(_onSession);
       widget.session.addListener(_onSession);
+      if (old.session.termCopy == _copy) old.session.termCopy = null;
+      widget.session.termCopy = _copy;
       _focusIfWanted();
       // The element is reused for the new session: a hold of the hotkey was on the old one, and ends there.
       _gateTimer?.cancel();
@@ -258,6 +263,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
   @override
   void dispose() {
     widget.session.removeListener(_onSession);
+    if (widget.session.termCopy == _copy) widget.session.termCopy = null;
     widget.state.removeListener(_onState);
     HardwareKeyboard.instance.removeHandler(_onKeys);
     _voiceEnds?.cancel();
@@ -783,6 +789,23 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     // (Esc, Ctrl+[ / ], Ctrl+O, F11) are the window's again.
     if (!_canInput || widget.frozen) return KeyEventResult.ignored;
     final ctrl = widget.session.termCtrl;
+    // The key bar's sticky ⌃ ⌥: a letter goes as `Ctrl-<letter>` / `Alt-<letter>`, a named key with them added.
+    final latch = widget.session.keyLatch;
+    if (latch.flags & (latchCtrl | latchOpt) != 0 && input != null) {
+      if (input case TermText(:final text) when RegExp(r'^[a-zA-Z]$').hasMatch(text)) {
+        ctrl.value = false;
+        if (sendLatchedLetter(widget.state, widget.session, widget.port, text)) {
+          _sentInput();
+          return KeyEventResult.handled;
+        }
+      } else if (input case TermKeys(:final keys)) {
+        ctrl.value = false;
+        widget.port.sendKeys(widget.session.sid, [for (final k in keys) termWire(k, latch.flags)]);
+        latch.used();
+        _sentInput();
+        return KeyEventResult.handled;
+      }
+    }
     if (ctrl.value && input != null) {
       // The key row's sticky ⌃: a letter goes as `Ctrl-<letter>`, anything else as it is; the ⌃ is used up.
       ctrl.value = false;

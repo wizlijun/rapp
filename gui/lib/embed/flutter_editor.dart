@@ -31,6 +31,8 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
   @override
   EditorHandlers? handlers;
 
+  static final _letter = RegExp(r'^[a-zA-Z]$');
+
   final _controller = _ChipController();
   final _focus = FocusNode(debugLabel: 'composer');
   String _seen = '';
@@ -70,7 +72,9 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
   /// sent back to the iOS text input, so nothing native edits a stale copy behind them.
   void _onRime(RimeUpdate u) {
     if (_disposed) return;
-    if (u.commit.isNotEmpty) _insertNow(u.commit);
+    // A letter the engine declined (it was not composing): the same as one typed, so a latched ⌃ can take it.
+    final declined = u.commit.length == 1 && _letter.hasMatch(u.commit) && u.preedit.isEmpty && _controller.rimePreedit.isEmpty;
+    if (u.commit.isNotEmpty && !(declined && (handlers?.onLetter?.call(u.commit) ?? false))) _insertNow(u.commit);
     for (var i = 0; i < u.delete; i++) {
       _backspaceNow();
     }
@@ -156,6 +160,12 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
     if (e is! KeyDownEvent && e is! KeyRepeatEvent) return KeyEventResult.ignored;
     final k = e.logicalKey;
     final hw = HardwareKeyboard.instance;
+    if (e is KeyDownEvent && !_composing && !hw.isControlPressed && !hw.isAltPressed && !hw.isMetaPressed) {
+      final label = k.keyLabel;
+      if (_letter.hasMatch(label) && (handlers?.onLetter?.call(hw.isShiftPressed ? label.toUpperCase() : label.toLowerCase()) ?? false)) {
+        return KeyEventResult.handled;
+      }
+    }
     if (k == LogicalKeyboardKey.enter || k == LogicalKeyboardKey.numpadEnter) {
       // Ctrl+Enter is the window's (it moves the caret to the picture): neither a send nor a newline.
       if (!_composing && hw.isControlPressed && !hw.isShiftPressed && !hw.isAltPressed && !hw.isMetaPressed) {
@@ -238,6 +248,7 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
                   key: const Key('composer-field'),
                   controller: _controller,
                   focusNode: _focus,
+                  inputFormatters: [_LetterCatcher(this)],
                   contextMenuBuilder: _contextMenu,
                   minLines: 1,
                   maxLines: null,
@@ -604,4 +615,27 @@ class _UndoAll extends Action<UndoTextIntent> {
 
   @override
   Object? invoke(UndoTextIntent intent) => editor._undoAll() ? null : callingAction?.invoke(intent);
+}
+
+/// A latched modifier catches a letter typed at the caret: the new value is the old one with exactly one ASCII letter
+/// added there, inserted or as a fresh one-letter composing range. [EditorHandlers.onLetter] true: the old value stays.
+/// A single-letter paste or autocorrect insert cannot be told apart from typing.
+class _LetterCatcher extends TextInputFormatter {
+  _LetterCatcher(this.editor);
+
+  final FlutterEditor editor;
+
+  @override
+  TextEditingValue formatEditUpdate(TextEditingValue old, TextEditingValue now) {
+    final on = editor.handlers?.onLetter;
+    final c = now.selection.baseOffset;
+    if (on == null || !now.selection.isCollapsed || c < 1 || c > now.text.length) return now;
+    if (now.text.length != old.text.length + 1) return now;
+    final ch = now.text[c - 1];
+    if (!FlutterEditor._letter.hasMatch(ch) || now.text.replaceRange(c - 1, c, '') != old.text) return now;
+    final fresh = !old.composing.isValid || old.composing.isCollapsed;
+    final comp = now.composing;
+    if (!(comp.isCollapsed || (fresh && comp.start == c - 1 && comp.end == c))) return now;
+    return on(ch) ? old.copyWith(composing: TextRange.empty) : now;
+  }
 }

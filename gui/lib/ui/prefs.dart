@@ -24,7 +24,8 @@ class UiPrefs {
     this.autoSaveTraffic = true,
     this.inputHistory = true,
     this.termKeyRow = false,
-    bool? appKeyRow,
+    this.keyBarMore = false,
+    this.keyBarSlim = false,
     this.termFit = true,
     this.voiceAiTidy = true,
     this.voiceAiThink = false,
@@ -39,8 +40,7 @@ class UiPrefs {
     this.voiceLanguageHintShown = false,
     Map<String, String>? termOpen,
     Map<String, String>? termApp,
-  })  : appKeyRow = appKeyRow ?? Platform.isIOS,
-        termOpen = termOpen ?? {},
+  })  : termOpen = termOpen ?? {},
         termApp = termApp ?? {};
 
   RappTheme theme;
@@ -56,9 +56,11 @@ class UiPrefs {
   /// 按键排 (`term_key_row`): the six big keys on a terminal's stage, on this console. Missing or bad means off.
   bool termKeyRow;
 
-  /// 按键排 over an app session (`app_key_row`, iPad spec §8.3): Esc Tab ⌘ ⌥ ⌃ ⇧ ← ↑ ↓ → 删除 回车 with sticky
-  /// modifiers. Missing or bad means on on iOS, off everywhere else.
-  bool appKeyRow;
+  /// 按键区 (iOS): the second row is open (`key_bar_more`). Missing or bad means closed.
+  bool keyBarMore;
+
+  /// 按键区 (iOS): the bar is cut to Esc, ⇧Tab and ⊙ (`key_bar_slim`). Missing or bad means full.
+  bool keyBarSlim;
 
   /// 跟着我的窗口 (`term_fit`): the host's terminal window follows this console's size. Missing or bad means on.
   bool termFit;
@@ -124,7 +126,6 @@ class UiPrefs {
       final save = j['auto_save_traffic'];
       final ih = j['input_history'];
       final kr = j['term_key_row'];
-      final ak = j['app_key_row'];
       final tf = j['term_fit'];
       final vt = j['voice_ai_tidy'];
       final vk = j['voice_ai_think'];
@@ -148,7 +149,8 @@ class UiPrefs {
         autoSaveTraffic: save is bool ? save : true,
         inputHistory: ih is bool ? ih : true,
         termKeyRow: kr is bool ? kr : false,
-        appKeyRow: ak is bool ? ak : null,
+        keyBarMore: j['key_bar_more'] == true,
+        keyBarSlim: j['key_bar_slim'] == true,
         termFit: tf is bool ? tf : true,
         voiceAiTidy: vt is bool ? vt : true,
         voiceAiThink: vk is bool ? vk : false,
@@ -190,7 +192,8 @@ class UiPrefs {
         'auto_save_traffic': autoSaveTraffic,
         'input_history': inputHistory,
         'term_key_row': termKeyRow,
-        'app_key_row': appKeyRow,
+        'key_bar_more': keyBarMore,
+        'key_bar_slim': keyBarSlim,
         'term_fit': termFit,
         'voice_ai_tidy': voiceAiTidy,
         'voice_ai_think': voiceAiThink,

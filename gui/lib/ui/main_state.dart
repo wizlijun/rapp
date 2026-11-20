@@ -1305,7 +1305,7 @@ class MainState extends ChangeNotifier {
   }
 
   void _onPortEvent(SessionEvent e) {
-    if (e is LatchUsedEvent) return; // the app key row's (AppKeyRow listens for its own session)
+    if (e is LatchUsedEvent) return; // the key bar's (AppKeySender listens for its own session)
     if (e is VoiceKeyEvent) {
       voiceKey(e.sid, e.phase);
       return;
@@ -3197,6 +3197,18 @@ class MainState extends ChangeNotifier {
   /// 「按键排」: the terminal key row on or off; saved.
   void setTermKeyRow(bool v) {
     prefs.termKeyRow = v;
+    _save();
+  }
+
+  /// 按键区's ⋯: the second row open or closed; saved.
+  void setKeyBarMore(bool v) {
+    prefs.keyBarMore = v;
+    _save();
+  }
+
+  /// 按键区's ⊙: the bar cut to a narrow strip or whole again; saved.
+  void setKeyBarSlim(bool v) {
+    prefs.keyBarSlim = v;
     _save();
   }
 

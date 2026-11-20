@@ -1,5 +1,5 @@
-// The sticky modifiers of the app key row (iPad spec §8.3): a tap lights a modifier for the next key, a quick second
-// tap locks it, a tap on a locked one turns it off. Only the state lives here; AppKeyRow sends what it means to A.
+// The sticky modifiers of the key bar (iPad spec §8.3): a tap lights a modifier for the next key, a quick second
+// tap locks it, a tap on a locked one turns it off. Only the state lives here; AppKeySender sends what it means to A.
 import 'package:flutter/foundation.dart';
 
 enum LatchState { off, once, locked }

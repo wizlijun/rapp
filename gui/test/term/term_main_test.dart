@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart' show kSecondaryButton;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/key_bar.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/paths.dart';
@@ -362,6 +363,16 @@ void main() {
     expect(copied, isNotEmpty);
     expect(copied.first, startsWith('a'));
   }, variant: TargetPlatformVariant.only(TargetPlatform.macOS)..values.add(TargetPlatform.linux));
+
+  testWidgets('iOS terminal with prefs.termKeyRow true: no keyrow-*, KeyBar instead', (tester) async {
+    s.prefs.termKeyRow = true;
+    await tester.pumpWidget(wrap(window()));
+    await openTerm(tester, two);
+    await tester.pump();
+    expect(find.byWidgetPredicate((w) => w.key is ValueKey<String> && (w.key as ValueKey<String>).value.startsWith('keyrow-')),
+        findsNothing);
+    expect(find.byType(KeyBar), findsOneWidget);
+  }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
 
   testWidgets('a frozen key row and the panel keys grid send no keys', (tester) async {
     s.prefs.termKeyRow = true;

@@ -11,6 +11,7 @@ import 'package:rapp/embed/composer_float.dart' show gripSize;
 import 'package:rapp/embed/composer_model.dart';
 import 'package:rapp/embed/composer_panel.dart';
 import 'package:rapp/embed/flutter_editor.dart';
+import 'package:rapp/embed/key_bar.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/stage_buttons.dart';
 import 'package:rapp/embed/session_port.dart';
@@ -253,11 +254,16 @@ void main() {
     rs.composer.open = true;
     await tester.pumpWidget(layer());
     await tester.pump(); // the panel's place reaches the button a frame later
-    expect(open, findsNothing);
-    expect(hold, findsOneWidget);
+    // 输入 is now the toggle: it reads 收起 and stands with 语音 above the panel.
+    expect(open, findsOneWidget);
+    expect(find.descendant(of: open, matching: find.byIcon(Icons.keyboard_hide_outlined)), findsOneWidget);
+    final h = tester.ensureSemantics();
+    expect(tester.getSemantics(open).label, '收起');
+    h.dispose();
     final b = inStage(tester, hold);
     expect(stage.width - b.right, 80);
     expect(inStage(tester, find.byType(ComposerPanel)).top - gripSize.height - b.bottom, 8);
+    expect(inStage(tester, open).bottom, lessThan(b.top));
     voice.stopResult = '你好';
     final g = await press(tester);
     await lift(tester, g);
@@ -269,7 +275,92 @@ void main() {
     expect(rs.composer.open, isTrue);
     rs.composer.open = false;
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400)); // the stack eases back down with the panel
     expect(stage.height - inStage(tester, hold).bottom, 88);
+  });
+
+  iosTest('tap 收起: composer closes, draft kept, the key reads 输入 again', (tester) async {
+    final h = tester.ensureSemantics();
+    rs.composer.draft = '草稿';
+    rs.composer.open = true;
+    await tester.pumpWidget(layer());
+    await tester.pump();
+    await tester.tap(open);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(rs.composer.open, isFalse);
+    expect(rs.composer.draft, '草稿');
+    expect(open, findsOneWidget);
+    expect(find.descendant(of: open, matching: find.byIcon(Icons.keyboard_outlined)), findsOneWidget);
+    expect(tester.getSemantics(open).label, '输入');
+    h.dispose();
+  });
+
+  iosTest('open key is 56 square in both states', (tester) async {
+    await tester.pumpWidget(layer());
+    expect(inStage(tester, open).size, const Size.square(stageButtonSize));
+    rs.composer.open = true;
+    await tester.pump();
+    await tester.pump();
+    expect(inStage(tester, open).size, const Size.square(stageButtonSize));
+  });
+
+  iosTest('landscape: 收起 above 语音, both above the panel', (tester) async {
+    rs.composer.open = true;
+    await tester.pumpWidget(layer());
+    await tester.pump();
+    final v = inStage(tester, hold);
+    final i = inStage(tester, open);
+    final panelTop = inStage(tester, find.byType(ComposerPanel)).top - gripSize.height;
+    expect(v.top - i.bottom, 12);
+    expect(i.center.dx, v.center.dx);
+    expect(i.bottom, lessThan(panelTop));
+    expect(v.bottom, lessThan(panelTop));
+  });
+
+  iosTest('no voice, landscape: 收起 alone stands 8 above the panel top', (tester) async {
+    es.dispose();
+    // Built off iOS, where MainState makes no voice input of its own.
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    es = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port);
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    expect(es.voice, isNull);
+    rs.composer.open = true;
+    await tester.pumpWidget(layer());
+    await tester.pump();
+    expect(hold, findsNothing);
+    expect(inStage(tester, find.byType(ComposerPanel)).top - gripSize.height - inStage(tester, open).bottom, 8);
+  });
+
+  iosTest('portrait open: one row, 语音 outermost on the stage side', (tester) async {
+    const portrait = Size(393, 852);
+    for (final side in [StageSide.right, StageSide.left]) {
+      es.setStageSide(side);
+      rs.composer.open = true;
+      await tester.pumpWidget(layer(size: portrait));
+      await tester.pump();
+      final v = inStage(tester, hold);
+      final i = inStage(tester, open);
+      expect(i.center.dy, v.center.dy);
+      expect(v.left - i.right == 12 || i.left - v.right == 12, isTrue);
+      if (side == StageSide.right) {
+        expect(portrait.width - v.right, 80);
+        expect(i.right, lessThan(v.left));
+      } else {
+        expect(v.left, 80);
+        expect(i.left, greaterThan(v.right));
+      }
+      await tester.pumpWidget(const SizedBox());
+    }
+  });
+
+  iosTest('recording hides 收起', (tester) async {
+    rs.composer.open = true;
+    await tester.pumpWidget(layer());
+    await tester.pump();
+    final g = await press(tester);
+    expect(tester.widget<AnimatedOpacity>(find.ancestor(of: open, matching: find.byType(AnimatedOpacity)).first).opacity, 0);
+    await lift(tester, g);
   });
 
   // A phone held upright (user 2026-11-18: 「竖屏时，键盘在语音按钮靠中间的横排就行了」).
@@ -323,14 +414,18 @@ void main() {
     expect(i.center.dx, v.center.dx);
   });
 
-  iosTest('terminal, key row above the open panel: 语音 stands 8 above the key row', (tester) async {
+  iosTest('terminal, open panel: the key bar under it, not the key row; 语音 stands 8 above the panel', (tester) async {
     final tport = FakeTermSessionPort();
     addTearDown(tport.dispose);
     rs.composer.open = true;
     await tester.pumpWidget(layer(p: tport, keyRow: true));
     await tester.pump();
     final b = inStage(tester, hold);
-    expect(inStage(tester, find.byType(TermKeyRow)).top - b.bottom, 8);
+    expect(find.byType(TermKeyRow), findsNothing);
+    final bar = inStage(tester, find.byType(KeyBar));
+    expect(bar.bottom, stage.height);
+    expect(bar.top - inStage(tester, find.byType(ComposerPanel)).bottom, 8);
+    expect(inStage(tester, find.byType(ComposerPanel)).top - b.bottom, 8);
     expect(stage.width - b.right, 80);
   });
 

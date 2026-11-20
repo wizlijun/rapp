@@ -25,6 +25,7 @@ class RappButton extends StatefulWidget {
     this.icon,
     this.size = 48,
   }) : _kind = _Kind.primary,
+       active = false,
        seeThrough = false,
        onPicture = false,
        oneLine = false;
@@ -39,7 +40,8 @@ class RappButton extends StatefulWidget {
     this.size = 48,
     this.oneLine = false,
     this.seeThrough = false,
-  }) : _kind = _Kind.secondary;
+  }) : _kind = _Kind.secondary,
+       active = false;
   const RappButton.accent({
     super.key,
     required this.label,
@@ -48,6 +50,7 @@ class RappButton extends StatefulWidget {
     this.focusNode,
     this.icon,
   }) : _kind = _Kind.accent,
+       active = false,
        seeThrough = false,
        onPicture = false,
        oneLine = false,
@@ -60,6 +63,7 @@ class RappButton extends StatefulWidget {
     this.focusNode,
     this.icon,
   }) : _kind = _Kind.quiet,
+       active = false,
        seeThrough = false,
        onPicture = false,
        oneLine = false,
@@ -75,6 +79,7 @@ class RappButton extends StatefulWidget {
     required IconData this.icon,
     required this.size,
     this.onPressed,
+    this.active = false,
   }) : _kind = _Kind.stage,
        semanticLabel = null,
        focusNode = null,
@@ -84,6 +89,9 @@ class RappButton extends StatefulWidget {
 
   final String label;
   final VoidCallback? onPressed;
+
+  /// [RappButton.stage] only: the button is a switch that is on, drawn with the accent border.
+  final bool active;
   final String? semanticLabel;
   final FocusNode? focusNode;
 
@@ -134,7 +142,14 @@ class _RappButtonState extends State<RappButton> {
     final tap = widget.size < 48 ? MaterialTapTargetSize.shrinkWrap : null;
     final child = icon == null
         ? (widget.oneLine ? Text(widget.label, maxLines: 1, overflow: TextOverflow.ellipsis) : Text(widget.label))
-        : Icon(icon);
+        : widget._kind == _Kind.stage
+            // A new icon turns in over the old one (a toggle's two states).
+            ? AnimatedSwitcher(
+                duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : const Duration(milliseconds: 200),
+                transitionBuilder: (c, a) => RotationTransition(turns: Tween(begin: 0.75, end: 1.0).animate(a), child: FadeTransition(opacity: a, child: c)),
+                child: Icon(icon, key: ValueKey(icon)),
+              )
+            : Icon(icon);
     final pad = icon == null ? null : EdgeInsets.zero;
     final Widget button = switch (widget._kind) {
       _Kind.primary => FilledButton(
@@ -170,7 +185,7 @@ class _RappButtonState extends State<RappButton> {
           foregroundColor: t.text,
           elevation: 0,
           shadowColor: Colors.transparent,
-          side: BorderSide(color: t.line),
+          side: BorderSide(color: widget.active ? t.accent : t.line, width: widget.active ? 1.5 : 1),
           fixedSize: Size.square(widget.size),
           minimumSize: Size.square(widget.size),
           padding: EdgeInsets.zero,

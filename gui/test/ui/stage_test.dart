@@ -27,6 +27,7 @@ import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/stage.dart';
 import 'package:rapp/embed/composer_panel.dart' show composerFillOpacity, seeThroughBox;
+import 'package:rapp/embed/key_bar.dart' show keyBarHeightOf;
 import 'package:rapp/ui/tokens.dart';
 import 'package:rapp/ui/top_bar.dart';
 
@@ -207,6 +208,38 @@ void main() {
           height: 600,
           child: Backdrop(theme: theme, child: Stage(state: es, composerEditor: FlutterEditor.new)),
         );
+
+    for (final app in ['com.apple.Terminal', 'Safari']) {
+      testWidgets('iOS $app picture: lifted by its bar only, open or closed${app == 'Safari' ? ' (Safari: none)' : ''}',
+          (tester) async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+        try {
+          await tester.pumpWidget(wrap(embedded()));
+          await openEmbedded(tester, app: app);
+          port.emit(ReadyEvent(1, app));
+          port.emit(WindowsEvent(1, [rw(7, 400, 328)]));
+          await tester.pump();
+          await tester.pump();
+          final lifts = find.ancestor(of: find.byKey(const Key('stage')), matching: find.byType(Transform));
+          double lift() => lifts.evaluate().isEmpty
+              ? 0
+              : -tester.widget<Transform>(lifts.first).transform.getTranslation().y;
+          final rs = es.remote[1]!;
+          final bar = keyBarHeightOf(es, rs, 800);
+          expect(lift(), app == 'Safari' ? 0 : bar);
+          rs.composer.open = true;
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 400));
+          expect(lift(), app == 'Safari' ? 0 : bar); // an app: the bar only, open or closed
+          rs.composer.collapse();
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 400));
+          expect(lift(), app == 'Safari' ? 0 : bar);
+        } finally {
+          debugDefaultTargetPlatformOverride = null;
+        }
+      });
+    }
 
     testWidgets('stage shows connecting, then the texture', (tester) async {
       await tester.pumpWidget(wrap(embedded()));
