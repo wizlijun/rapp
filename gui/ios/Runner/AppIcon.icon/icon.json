@@ -3,8 +3,8 @@
     {
       "value": {
         "linear-gradient": [
-          "srgb:0.08235,0.09412,0.11765,1.00000",
-          "srgb:0.01176,0.01961,0.03529,1.00000"
+          "srgb:0.12941,0.40784,0.60000,1.00000",
+          "srgb:0.04706,0.18824,0.31765,1.00000"
         ],
         "orientation": {
           "start": {
@@ -22,8 +22,8 @@
       "appearance": "dark",
       "value": {
         "linear-gradient": [
-          "srgb:0.08235,0.09412,0.11765,1.00000",
-          "srgb:0.01176,0.01961,0.03529,1.00000"
+          "srgb:0.12941,0.40784,0.60000,1.00000",
+          "srgb:0.04706,0.18824,0.31765,1.00000"
         ],
         "orientation": {
           "start": {
@@ -92,61 +92,6 @@
       "shadow": {
         "kind": "neutral",
         "opacity": 0.1
-      }
-    },
-    {
-      "layers": [
-        {
-          "image-name": "01-GlassPad.svg",
-          "name": "Glass pad",
-          "fill-specializations": [
-            {
-              "value": {
-                "linear-gradient": [
-                  "srgb:0.12941,0.40784,0.60000,1.00000",
-                  "srgb:0.04706,0.18824,0.31765,1.00000"
-                ],
-                "orientation": {
-                  "start": {
-                    "x": 0.28,
-                    "y": 0.14
-                  },
-                  "stop": {
-                    "x": 0.72,
-                    "y": 0.94
-                  }
-                }
-              }
-            },
-            {
-              "appearance": "dark",
-              "value": {
-                "linear-gradient": [
-                  "srgb:0.12941,0.40784,0.60000,1.00000",
-                  "srgb:0.04706,0.18824,0.31765,1.00000"
-                ],
-                "orientation": {
-                  "start": {
-                    "x": 0.28,
-                    "y": 0.14
-                  },
-                  "stop": {
-                    "x": 0.72,
-                    "y": 0.94
-                  }
-                }
-              }
-            }
-          ]
-        }
-      ],
-      "translucency": {
-        "enabled": true,
-        "value": 0.55
-      },
-      "shadow": {
-        "kind": "neutral",
-        "opacity": 0.18
       }
     }
   ],
