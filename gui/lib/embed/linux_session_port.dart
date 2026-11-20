@@ -367,7 +367,9 @@ class LinuxSessionPort extends SessionPort with WidgetsBindingObserver {
     if (s == null) return;
     if (!zoom.isFinite || zoom <= 0 ||
         ![rect.left, rect.top, rect.width, rect.height].every((n) => n.isFinite) ||
-        (window != 0 && (rect.width <= 0 || rect.height <= 0))) return;
+        (window != 0 && (rect.width <= 0 || rect.height <= 0))) {
+      return;
+    }
     s.viewWindow = window;
     s.viewRect = rect;
     s.viewZoom = zoom;

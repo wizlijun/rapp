@@ -10,6 +10,8 @@ pub mod encode;
 pub mod gate;
 #[cfg(target_os = "linux")]
 pub mod input_source;
+// Shared so its tests run everywhere; only the Linux server uses it.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 mod pacing;
 #[cfg(target_os = "linux")]
 pub mod server;
