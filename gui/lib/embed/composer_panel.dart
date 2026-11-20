@@ -28,6 +28,7 @@ import 'stage_buttons.dart';
 import 'voice_button.dart';
 import 'voice_desktop.dart';
 import 'voice_overlay.dart';
+import 'voice_tidy_card.dart';
 
 /// W1: 720 wide, or the stage less 16 when the stage is narrower than 736.
 /// Zoomed ([scale] above 1) it is 720 × [scale], never wider than the stage less 16.
@@ -764,7 +765,108 @@ List<Widget> composerLayer(
         ),
       ),
     ),
+    // 长语音先让 AI 整理's card, over everything; only the card takes taps (spec §5.3).
+    Positioned.fill(
+      child: _TidyLayer(state: state, session: session, both: both, keys: keys, keyboard: keyboard, rowRight: rowRight),
+    ),
   ];
+}
+
+/// Where [VoiceTidyCard] stands. Desktop: right-aligned with the stage row, just above it; with the panel open,
+/// above the panel and right-aligned with it (below it, or the row's corner, when there is no room). iOS: on the
+/// stack's line above the stack; with the panel open, above 语音 (which stands above the panel).
+class _TidyLayer extends StatelessWidget {
+  const _TidyLayer(
+      {required this.state,
+      required this.session,
+      required this.both,
+      required this.keys,
+      required this.keyboard,
+      required this.rowRight});
+
+  final MainState state;
+  final RemoteSession session;
+  final Listenable both;
+  final bool keys;
+  final double keyboard;
+  final double rowRight;
+
+  @override
+  Widget build(BuildContext context) {
+    final tidy = state.tidyOf(session.sid);
+    final control = controlHeightOf(context);
+    return ListenableBuilder(
+      listenable: Listenable.merge([both, session.zooms, panelPlaceOf(session)]),
+      builder: (context, _) => LayoutBuilder(
+        builder: (context, c) => CustomSingleChildLayout(
+          delegate: _TidyPlace(
+            width: math.max(0.0, math.min(360.0, c.maxWidth - 24)),
+            place: (stage, card) => defaultTargetPlatform == TargetPlatform.iOS
+                ? _ios(stage, card)
+                : _desktop(stage, card, control),
+          ),
+          child: VoiceTidyCard(key: ValueKey(session.sid), tidy: tidy),
+        ),
+      ),
+    );
+  }
+
+  bool get _open => session.composer.open && session.composerAllowed;
+
+  Offset _desktop(Size stage, Size card, double control) {
+    final base = (keys ? keyRowBottom : 12) + keyboard;
+    final corner = Offset(stage.width - rowRight - card.width, stage.height - base - card.height);
+    if (!_open) return corner.translate(0, -(control + 8));
+    final p = panelPlaceOf(session).value;
+    if (p == null) return corner;
+    final x = p.right - card.width;
+    if (p.top - 8 - card.height >= 8) return Offset(x, p.top - 8 - card.height);
+    if (p.bottom + 8 + card.height <= stage.height - 8) return Offset(x, p.bottom + 8);
+    return corner;
+  }
+
+  Offset _ios(Size stage, Size card) {
+    final left = state.stageSide.value == StageSide.left;
+    final x = left ? stageButtonsIn : stage.width - stageButtonsIn - card.width;
+    final p = panelPlaceOf(session).value;
+    double bottom;
+    if (_open && p != null) {
+      // 语音's bottom, as _VoiceAbovePanel puts it.
+      final voice = math.max(0.0, math.min(stage.height - p.top + 8, stage.height - 8 - stageButtonSize));
+      bottom = voice + stageButtonSize + 12;
+    } else {
+      final row = keys ? keyRowBottom + keyRowKeySize.height + 8 : 0.0;
+      final base = keyboard > 0 ? keyboard + (keys ? row : stageButtonsEdge) : math.max(stageButtonsUp, row);
+      final button = session.composerAllowed;
+      final n = (button && state.voice != null ? 1 : 0) + (button ? 1 : 0) + (session.currentZoomed ? 1 : 0);
+      final upright = stage.height > stage.width;
+      final stack = n == 0 ? 0.0 : (upright ? stageButtonSize : n * stageButtonSize + (n - 1) * 12);
+      bottom = base + stack + 12;
+    }
+    return Offset(x, stage.height - bottom - card.height);
+  }
+}
+
+class _TidyPlace extends SingleChildLayoutDelegate {
+  _TidyPlace({required this.width, required this.place});
+
+  final double width;
+  final Offset Function(Size stage, Size card) place;
+
+  @override
+  BoxConstraints getConstraintsForChild(BoxConstraints constraints) =>
+      BoxConstraints(maxWidth: width, maxHeight: constraints.maxHeight);
+
+  // Never off the stage: 12 in from each side, 8 from the top.
+  @override
+  Offset getPositionForChild(Size size, Size child) {
+    final o = place(size, child);
+    return Offset(o.dx.clamp(12.0, math.max(12.0, size.width - 12 - child.width)),
+        o.dy.clamp(8.0, math.max(8.0, size.height - child.height)));
+  }
+
+  @override
+  bool shouldRelayout(_TidyPlace old) => true;
 }
 
 /// The iOS stage's button stack plus hold to talk: owns the session's [VoiceHold] (none without

@@ -1,0 +1,215 @@
+// The 整理 card on the stage (plan 2026-11-20-rapp-voice-ai-tidy Task 5).
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:rapp/embed/composer_panel.dart';
+import 'package:rapp/embed/flutter_editor.dart';
+import 'package:rapp/embed/remote_session.dart';
+import 'package:rapp/embed/stage_buttons.dart' show stageButtonsIn;
+import 'package:rapp/embed/voice_ring.dart' show VoicePick;
+import 'package:rapp/hub_client.dart';
+import 'package:rapp/llm_api.dart';
+import 'package:rapp/paths.dart';
+import 'package:rapp/ui/main_state.dart';
+import 'package:rapp/ui/prefs.dart';
+
+import '../fakes.dart';
+import '../ui/helpers.dart';
+import 'voice_button_test.dart' show FakeVoice;
+
+class _FakeApi extends LlmApi {
+  final calls = <LlmCall>[];
+
+  @override
+  LlmCall run(LlmEndpoint e, String app, String input,
+      {Map<String, String>? vars, void Function(String text)? onText, Duration firstByte = const Duration(seconds: 10)}) {
+    final c = LlmCall.manual();
+    calls.add(c);
+    return c;
+  }
+}
+
+const long = '嗯那个我门明天下午三点开会';
+
+void main() {
+  late FakeTransport t;
+  late FakeSessionPort port;
+  late MainState es;
+  late Directory tmp;
+  late _FakeApi api;
+
+  setUp(() async {
+    tmp = Directory.systemTemp.createTempSync('voice_tidy_card_test');
+    t = FakeTransport();
+    final hub = HubClient(t);
+    t.emit({
+      'event': 'hosts',
+      'hosts': [
+        {'id': '111', 'name': 'mini'},
+      ],
+    });
+    await Future<void>.delayed(Duration.zero);
+    port = FakeSessionPort();
+    api = _FakeApi();
+    es = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port, voice: FakeVoice(), llmApi: api);
+    es.setLlm(const LlmEndpoint(url: 'localhost:28001', key: 'k'));
+  });
+
+  tearDown(() {
+    es.dispose();
+    tmp.deleteSync(recursive: true);
+  });
+
+  Future<RemoteSession> goLive(WidgetTester tester) async {
+    await tester.runAsync(() async {
+      t.onSend = (m) {
+        if (m['cmd'] == 'open') {
+          t.emit({
+            'event': 'opened', 'sid': 1, 'id': m['id'], 'app': m['app'], 'path': 'lan',
+            'port': 5001, 'token': 'tk', 'req': m['req'],
+          });
+        }
+      };
+      es.openOrSwitch('111', 'Safari', 'Safari');
+      for (var i = 0; i < 4; i++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+    });
+    return es.remote[1]!;
+  }
+
+  Widget layer(RemoteSession s) => wrap(SizedBox(
+      key: const Key('stage'),
+      width: 1000,
+      height: 700,
+      child: Stack(children: composerLayer(state: es, session: s, port: port, editor: FlutterEditor.new))));
+
+  void macTest(String name, Future<void> Function(WidgetTester) body) => testWidgets(name, (tester) async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+        try {
+          tester.view.physicalSize = const Size(1200, 900);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.reset);
+          await body(tester);
+          // The tidy's 30 s cap must not outlive the test.
+          es.tidyIfAny(1)?.closed();
+          await tester.pumpWidget(const SizedBox());
+        } finally {
+          debugDefaultTargetPlatformOverride = null;
+        }
+      });
+
+  List<Object?> sends() => [for (final c in port.calls) if (c.$1 == 'composer_send') c.$2['pieces']];
+  final card = find.byKey(const Key('tidy-card'));
+  String text(String key) => (find.byKey(Key(key)).evaluate().single.widget as Text).data ?? '';
+  bool filled(WidgetTester tester, String key) =>
+      find.descendant(of: find.byKey(Key(key)), matching: find.byType(FilledButton)).evaluate().isNotEmpty;
+
+  macTest('the card shows while tidying and its buttons act', (tester) async {
+    final s = await goLive(tester);
+    await tester.pumpWidget(layer(s));
+    expect(card, findsNothing);
+    expect(es.tidyOf(1).begin(long, VoicePick.send), isTrue);
+    await tester.pump();
+    expect(card, findsOneWidget);
+    expect(text('tidy-title'), 'AI 整理中…');
+    expect(find.byKey(const Key('tidy-body')), findsOneWidget);
+    expect(filled(tester, 'tidy-send'), isTrue);
+    expect(filled(tester, 'tidy-edit'), isFalse);
+    await tester.tap(find.byKey(const Key('tidy-send')));
+    await tester.pumpAndSettle();
+    expect(sends(), [
+      [
+        {'text': long}
+      ]
+    ]);
+    expect(card, findsNothing);
+  });
+
+  macTest('failure shows the reason and the original', (tester) async {
+    final s = await goLive(tester);
+    await tester.pumpWidget(layer(s));
+    es.tidyOf(1).begin(long, VoicePick.send);
+    api.calls.single.complete(const LlmFailed('连不上 LLM 接入点'));
+    await tester.pump();
+    await tester.pump();
+    expect(text('tidy-title'), 'AI 整理失败');
+    expect(text('tidy-reason'), '连不上 LLM 接入点');
+    expect(text('tidy-body'), long);
+    await tester.tap(find.byKey(const Key('tidy-edit')));
+    await tester.pumpAndSettle();
+    expect(s.composer.open, isTrue);
+    expect(s.composer.draftText, contains(long));
+  });
+
+  macTest('stage buttons stay usable under the card', (tester) async {
+    final s = await goLive(tester);
+    await tester.pumpWidget(layer(s));
+    es.tidyOf(1).begin(long, VoicePick.send);
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('composer-open')));
+    await tester.pumpAndSettle();
+    expect(s.composer.open, isTrue);
+    expect(card, findsOneWidget);
+  });
+
+  macTest('the card shows with the panel open', (tester) async {
+    final s = await goLive(tester);
+    s.composer.open = true;
+    await tester.pumpWidget(layer(s));
+    await tester.pumpAndSettle();
+    es.tidyOf(1).begin(long, VoicePick.send);
+    await tester.pump();
+    await tester.pump();
+    expect(card, findsOneWidget);
+    // Above the panel, right-aligned with it (spec §5.3).
+    final panel = tester.getRect(find.byType(ComposerPanel));
+    final r = tester.getRect(card);
+    expect(r.bottom, lessThanOrEqualTo(panel.top - 8 + 0.5));
+    expect(r.right, closeTo(panel.right, 1));
+  });
+
+  testWidgets('on iOS the card stands above the stage buttons', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    try {
+      tester.view.physicalSize = const Size(1200, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final s = await goLive(tester);
+      await tester.pumpWidget(layer(s));
+      es.tidyOf(1).begin(long, VoicePick.send);
+      await tester.pump();
+      final r = tester.getRect(card), b = tester.getRect(find.byKey(const Key('composer-open')));
+      expect(r.bottom, lessThanOrEqualTo(b.top));
+      expect(r.right, closeTo(tester.getRect(find.byKey(const Key('stage'))).right - stageButtonsIn, 0.5));
+      es.tidyIfAny(1)?.closed();
+      await tester.pumpWidget(const SizedBox());
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  macTest('edit pick makes 编辑 primary', (tester) async {
+    final s = await goLive(tester);
+    await tester.pumpWidget(layer(s));
+    es.tidyOf(1).begin(long, VoicePick.edit);
+    await tester.pump();
+    expect(filled(tester, 'tidy-edit'), isTrue);
+    expect(filled(tester, 'tidy-send'), isFalse);
+  });
+
+  macTest('a done send shows 已用 AI 整理, then goes', (tester) async {
+    final s = await goLive(tester);
+    await tester.pumpWidget(layer(s));
+    es.tidyOf(1).begin(long, VoicePick.send);
+    api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
+    await tester.pump();
+    await tester.pump();
+    expect(text('tidy-note'), '已用 AI 整理');
+    await tester.pump(const Duration(milliseconds: 1500));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('tidy-note')), findsNothing);
+  });
+}
