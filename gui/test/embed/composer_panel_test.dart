@@ -11,6 +11,8 @@ import 'package:rapp/embed/app_profile.dart';
 import 'package:rapp/embed/composer_panel.dart';
 import 'package:rapp/embed/flutter_editor.dart';
 import 'package:rapp/embed/geometry.dart';
+import 'package:rapp/embed/key_bar.dart';
+import 'package:rapp/embed/modifier_latch.dart';
 import 'package:rapp/embed/picture.dart';
 import 'package:rapp/embed/remote_session.dart';
 import 'package:rapp/embed/session_port.dart';
@@ -271,6 +273,27 @@ void main() {
         rs.apply(const ComposerStateEvent(1, done: ComposerDone(0, '没有发出去')));
         await tester.pump();
         expect(fieldFocused(tester), isTrue);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+
+    testWidgets('iOS: ⌃ once + typed r sends Ctrl-R, draft empty; the next typed r goes into the draft', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      try {
+        big(tester);
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        keyLatchOf(es, rs).tap(latchCtrl);
+        await tester.enterText(fieldFinder, 'r');
+        await tester.pump();
+        expect(text(tester), '');
+        expect(callsOf('key').length, 1);
+        expect(callsOf('key').single['modifiers'], latchCtrl);
+        await tester.enterText(fieldFinder, 'r');
+        await tester.pump();
+        expect(text(tester), 'r');
+        expect(callsOf('key').length, 1);
       } finally {
         debugDefaultTargetPlatformOverride = null;
       }

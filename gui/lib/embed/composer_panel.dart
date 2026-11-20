@@ -20,6 +20,7 @@ import 'composer_model.dart';
 import 'app_profile.dart';
 import 'composer_plus.dart';
 import 'flutter_editor.dart';
+import 'key_bar.dart';
 import 'native_editor.dart';
 import 'panel_place.dart';
 import 'remote_session.dart';
@@ -128,6 +129,7 @@ class _ComposerPanelState extends State<ComposerPanel> {
       onFocus: _focused,
       onArrow: _arrow,
       onZoom: widget.state.zoomKey,
+      onLetter: (l) => defaultTargetPlatform == TargetPlatform.iOS && sendLatchedLetter(widget.state, _s, widget.port, l),
     );
     _attached = _m.attach(_ed);
     _focusSeen = _m.focusTick;

@@ -26,6 +26,7 @@ class EditorHandlers {
     required this.onFocus,
     required this.onArrow,
     this.onZoom,
+    this.onLetter,
   });
 
   /// The text changed (no text attached).
@@ -48,6 +49,10 @@ class EditorHandlers {
 
   /// ⌘= / ⌘- / ⌘0 (Ctrl elsewhere) with the caret here.
   final ValueChanged<ZoomKey>? onZoom;
+
+  /// A single ASCII letter about to go in by typing (soft keyboard, including a composing one; hardware key
+  /// before Rime). true: it is dropped.
+  final bool Function(String letter)? onLetter;
 }
 
 class EditorStyle {
