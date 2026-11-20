@@ -530,7 +530,8 @@ class InputRecorder {
       if (o.sent > 0 && o.sent < total) 'sentPieces': o.sent,
       // Return was pressed only when every piece went and nothing was said.
       'after': all && o.failure == null && after == AfterSend.pressReturn ? 'return' : 'none',
-      'source': 'typed',
+      'source': o.voice != null ? 'voice' : 'typed',
+      if (o.voice?.ai case final ai?) 'ai': ai.toJson(),
     };
   }
 

@@ -792,6 +792,17 @@ void main() {
       debugDefaultTargetPlatformOverride = null;
     });
 
+    test('sendVoice keeps AI text with pendingAi when busy', () async {
+      const ai = VoiceAi(app: 'dictation', original: '嗯那个我门明天开会', result: '我们明天开会。');
+      rs.composer.submitText('还在路上'); // in flight: busy
+      final hint = sendVoice(
+          state: es, session: rs, port: port, text: '我们明天开会。', voice: const VoiceOrigin(ai: ai));
+      await Future<void>.delayed(Duration.zero);
+      expect(hint, voiceBusy);
+      expect(rs.composer.draft, endsWith('我们明天开会。'));
+      expect(rs.composer.pendingAi, ai);
+    });
+
     test('start without a ring holds and finish(send) sends', () async {
       voice.stopResult = '你好';
       await h.start();

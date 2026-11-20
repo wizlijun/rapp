@@ -66,26 +66,26 @@ String? sendVoice({
   required RemoteSession session,
   required SessionPort port,
   required String text,
+  VoiceOrigin voice = const VoiceOrigin(),
 }) {
   final t = text.trim();
   if (t.isEmpty) return voiceBlank;
   final c = session.composer;
-  if (state.isDetaching(session.sid) || state.sendBlocked(session.sid)) {
+  String keep(String hint) {
     unawaited(c.keep(t));
-    return voiceBlocked;
+    if (voice.ai != null) c.pendingAi = voice.ai; // sent from the panel later, it is still the AI's text
+    return hint;
   }
-  if (c.busy) {
-    unawaited(c.keep(t));
-    return voiceBusy;
-  }
-  switch (c.submitText(t)) {
+
+  if (state.isDetaching(session.sid) || state.sendBlocked(session.sid)) return keep(voiceBlocked);
+  if (c.busy) return keep(voiceBusy);
+  switch (c.submitText(t, voice: voice)) {
     case SubmitPieces(:final pieces):
       session.prepareInput();
       port.composerSend(session.sid, pieces);
       return null;
     case _:
-      unawaited(c.keep(t));
-      return voiceBusy;
+      return keep(voiceBusy);
   }
 }
 

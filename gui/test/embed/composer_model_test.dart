@@ -919,4 +919,60 @@ void main() {
       expect(calls, ['newest|live', 'middle|live', 'newest|live', 'null|']);
     });
   });
+
+  group('voice and AI origin (voice AI tidy §5.4)', () {
+    const ai = VoiceAi(app: 'dictation', original: '嗯那个我门明天开会', result: '我们明天开会。');
+
+    test('submitText carries the voice origin', () {
+      Outgoing? got;
+      m.onSubmitted = (o) => got = o;
+      m.submitText('我们明天开会。', voice: const VoiceOrigin(ai: ai));
+      expect(got!.voice!.ai, ai);
+      expect(got!.draftless, isTrue);
+    });
+
+    test('a panel send takes pendingAi once', () async {
+      final got = <Outgoing>[];
+      m.onSubmitted = got.add;
+      m.pendingAi = ai;
+      ed.value = '我们明天开会。';
+      await m.submit();
+      expect(got.single.voice?.ai, ai);
+      expect(m.pendingAi, isNull);
+      m.done(1, null);
+      ed.value = '再说一句';
+      await m.submit();
+      expect(got.last.voice, isNull);
+    });
+
+    test('pendingAi goes when the draft is emptied', () {
+      m.draft = '我们明天开会。';
+      m.pendingAi = ai;
+      m.draft = '';
+      expect(m.pendingAi, isNull);
+    });
+
+    test('pendingAi goes when ↑ recalls another text', () async {
+      m.recall = () => ['older'];
+      ed.value = '我们明天开会。';
+      m.pendingAi = ai;
+      expect(m.arrow(true), isTrue);
+      await Future<void>.delayed(Duration.zero);
+      expect(ed.value, 'older');
+      expect(m.pendingAi, isNull);
+    });
+
+    test("adoptFrom carries pendingAi and each row's voice", () async {
+      await m.detach(ed);
+      m.draft = '我们明天开会。';
+      m.pendingAi = ai;
+      m.submitText('我们明天开会。', voice: const VoiceOrigin(ai: ai));
+      m.done(0, 'boom');
+      final fresh = ComposerModel();
+      addTearDown(fresh.dispose);
+      fresh.adoptFrom(m);
+      expect(fresh.pendingAi, ai);
+      expect(fresh.failed.single.voice?.ai, ai);
+    });
+  });
 }
