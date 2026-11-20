@@ -377,9 +377,12 @@ class _MainWindowState extends State<MainWindow> {
                               child: SidePanel(
                                 state: state,
                                 // 版本升级 and 数据目录 sit in 全局设置, not on 本机 (no service on iOS: neither; the
-                                // built-in input method's 词库, 重新部署 and status instead).
+                                // built-in input method's 词库, 重新部署 and status instead, while its switch is on:
+                                // none at all leaves no gap under the switch).
                                 settings: !caps.hasService || widget.monitor == null
-                                    ? (widget.rime == null ? null : RimeSettingsSection(glue: widget.rime!))
+                                    ? (widget.rime == null || !state.prefs.rimeEnabled
+                                        ? null
+                                        : RimeSettingsSection(glue: widget.rime!))
                                     : ListenableBuilder(
                                         listenable: state,
                                         builder: (context, _) => GlobalSections(

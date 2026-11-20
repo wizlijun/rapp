@@ -129,6 +129,24 @@ void main() {
     });
   });
 
+  test('a session whose app has no id keeps its 「内」/「系」 for as long as it lasts, in no profile', () {
+    env((a, st, glue, rime) {
+      st.openOrSwitch('111', '', '无名');
+      a.flushMicrotasks();
+      expect(st.currentRemote!.appId, '');
+      expect(rime.builtin, isTrue);
+      final before = st.profiles.mine.length;
+      rime.toggleBuiltin();
+      expect(rime.builtin, isFalse);
+      expect(st.profiles.mine.length, before, reason: 'no profile written');
+      st.select('111/$notes');
+      expect(rime.builtin, isTrue);
+      st.select('111/');
+      expect(st.currentRemote!.appId, '');
+      expect(rime.builtin, isFalse, reason: 'kept with the session');
+    });
+  });
+
   test('after dispose the glue no longer follows', () {
     env((a, st, glue, rime) {
       glue.dispose();
