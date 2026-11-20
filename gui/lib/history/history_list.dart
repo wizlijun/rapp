@@ -230,6 +230,20 @@ class _HistoryRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final touch = touchPlatform(Theme.of(context).platform);
+    // A pointer pauses on the row: the whole text. On touch a long press is the menu instead.
+    Widget row = LayoutBuilder(builder: (context, box) {
+      // The source takes up to 170 but never more than a third of the row; in a narrow panel (the 资源
+      // tab of a small window) it goes, so the text keeps its room.
+      final third = box.maxWidth / 3;
+      final sourceWidth = box.maxWidth < 400 ? 0.0 : (third < 170 ? third : 170.0);
+      return _line(context, sourceWidth);
+    });
+    if (!touch) row = Tooltip(message: _tip(entry.text), waitDuration: const Duration(milliseconds: 600), child: row);
+    return row;
+  }
+
+  Widget _line(BuildContext context, double sourceWidth) {
     final t = RappTokens.of(context);
     final e = entry, w = view.widget;
     final touch = touchPlatform(Theme.of(context).platform);
@@ -239,7 +253,7 @@ class _HistoryRow extends StatelessWidget {
     final muted = TextStyle(color: t.muted);
     final small = TextStyle(color: t.muted, fontSize: t.textSize - 1);
     final put = w.onPut;
-    Widget row = InkWell(
+    return InkWell(
       onTap: put == null ? null : () => put(e.text),
       onSecondaryTapUp: (d) => _menu(context, menuAt(context, d.globalPosition)),
       onLongPress: touch ? () => _menu(context, _under(context)) : null,
@@ -271,10 +285,10 @@ class _HistoryRow extends StatelessWidget {
                 child: Text('没发出', style: TextStyle(color: t.on, fontSize: t.textSize - 2)),
               ),
             ],
-            if (view._scope != _Scope.session) ...[
+            if (view._scope != _Scope.session && sourceWidth > 0) ...[
               const SizedBox(width: 10),
               ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 170),
+                constraints: BoxConstraints(maxWidth: sourceWidth),
                 child: Text(where, maxLines: 1, overflow: TextOverflow.ellipsis, style: small),
               ),
             ],
@@ -299,8 +313,5 @@ class _HistoryRow extends StatelessWidget {
         ),
       ),
     );
-    // A pointer pauses on the row: the whole text. On touch a long press is the menu instead.
-    if (!touch) row = Tooltip(message: _tip(e.text), waitDuration: const Duration(milliseconds: 600), child: row);
-    return row;
   }
 }

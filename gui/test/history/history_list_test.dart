@@ -41,10 +41,10 @@ void main() {
   }
 
   Future<void> show(WidgetTester tester, InputHistory h,
-      {String? session, String? host, void Function(String)? onPut}) async {
+      {String? session, String? host, void Function(String)? onPut, double width = 600}) async {
     // Opening the list refreshes, which is real IO: let it run in real time.
     await tester.runAsync(() => tester.pumpWidget(wrap(SizedBox(
-          width: 600,
+          width: width,
           height: 1600,
           child: SingleChildScrollView(
             child: InputHistoryList(history: h, session: session, host: host, onPut: onPut, clock: () => now),
@@ -138,6 +138,15 @@ void main() {
     await tester.tap(find.byKey(const Key('scope-host')));
     await tester.pump();
     expect(find.text('mac · 终端 · agent — zsh'), findsOneWidget);
+  });
+
+  testWidgets('in a narrow panel the source gives way to the text', (tester) async {
+    day('dev1', '2026-11-15', [rec('01A', '2026-11-15T09:00:00+09:00', 'the text')]);
+    final h = await load(tester);
+    await show(tester, h, width: 320);
+    expect(find.text('mac · 终端 · agent — zsh'), findsNothing);
+    expect(tester.getSize(find.text('the text')).width, greaterThan(60));
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('a pause on the row shows the whole text', (tester) async {
