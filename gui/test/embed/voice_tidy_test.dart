@@ -282,6 +282,40 @@ void main() {
     });
   });
 
+  test('opening the original to compare holds a done send until a click', () {
+    fakeAsync((a) {
+      final t = make();
+      t.begin(long, VoicePick.send);
+      api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
+      a.flushMicrotasks();
+      expect(t.comparing, isFalse);
+      t.compare();
+      expect(t.comparing, isTrue);
+      a.elapse(const Duration(seconds: 10));
+      expect(sent, isEmpty);
+      expect(t.phase, TidyPhase.ready);
+      t.sendNow();
+      expect(sent.single.$2, '我们明天下午三点开会。');
+      t.dispose();
+    });
+  });
+
+  test('comparing while the AI writes: the done send waits too; a new tidy starts closed', () {
+    fakeAsync((a) {
+      final t = make();
+      t.begin(long, VoicePick.send);
+      t.compare();
+      api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
+      a.flushMicrotasks();
+      a.elapse(const Duration(seconds: 10));
+      expect(sent, isEmpty);
+      t.sendNow();
+      t.begin(long, VoicePick.send);
+      expect(t.comparing, isFalse);
+      t.dispose();
+    });
+  });
+
   test('还原 does nothing before the AI is done', () {
     final t = make();
     t.begin(long, VoicePick.send);

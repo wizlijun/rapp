@@ -87,6 +87,10 @@ class VoiceTidy extends ChangeNotifier {
   Rect? get at => _at;
   Rect? _at;
 
+  /// The original is open under the AI's words to compare (user 2026-11-20): a done send waits for a click.
+  bool get comparing => _comparing;
+  bool _comparing = false;
+
   /// The AI's finished text (ready only).
   String? _result;
 
@@ -112,6 +116,7 @@ class VoiceTidy extends ChangeNotifier {
     _original = text.trim();
     _shown = '';
     _result = null;
+    _comparing = false;
     _pick = pick;
     _at = at;
     _phase = TidyPhase.tidying;
@@ -166,10 +171,12 @@ class VoiceTidy extends ChangeNotifier {
           _shown = t;
           _result = t;
           held?.call(sid, t);
-          _settleTimer = Timer(settle, () {
-            _settleTimer = null;
-            if (_phase == TidyPhase.ready) _sendResult();
-          });
+          if (!_comparing) {
+            _settleTimer = Timer(settle, () {
+              _settleTimer = null;
+              if (_phase == TidyPhase.ready) _sendResult();
+            });
+          }
           notifyListeners();
         }
     }
@@ -228,6 +235,16 @@ class VoiceTidy extends ChangeNotifier {
     final hint = send(sid, _original, const VoiceOrigin());
     _release();
     _endWith(hint);
+  }
+
+  /// The original opens under the AI's words; a done send no longer goes on its own.
+  void compare() {
+    if (!_waiting || _comparing) return;
+    _comparing = true;
+    _settleTimer?.cancel();
+    _settleTimer = null;
+    _log('compare');
+    notifyListeners();
   }
 
   /// 还原 while a done send waits: the original goes instead, unmarked.

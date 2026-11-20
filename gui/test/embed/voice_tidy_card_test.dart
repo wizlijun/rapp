@@ -191,6 +191,40 @@ void main() {
     expect(find.byKey(const Key('tidy-caret')), findsNothing);
   });
 
+  macTest('the original stays under the AI words in one line; a tap opens it and holds the send', (tester) async {
+    final s = await goLive(tester);
+    await tester.pumpWidget(layer(s));
+    es.tidyOf(1).begin(long, VoicePick.send);
+    await tester.pump();
+    // Before the first word the original is the body itself: no second copy.
+    expect(find.byKey(const Key('tidy-original')), findsNothing);
+    api.onText!('我们明天');
+    await tester.pump();
+    expect(text('tidy-body'), startsWith('我们明天'));
+    expect(text('tidy-body'), isNot(contains('下午')));
+    final line = tester.widget<Text>(find.byKey(const Key('tidy-original')));
+    expect(text('tidy-original'), contains(long));
+    expect(line.maxLines, 1);
+    api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
+    await tester.pump();
+    await tester.pump();
+    expect(text('tidy-original'), contains(long));
+    await tester.tap(find.byKey(const Key('tidy-original')));
+    await tester.pump();
+    expect(tester.widget<Text>(find.byKey(const Key('tidy-original'))).maxLines, greaterThan(1));
+    expect(find.byKey(const Key('tidy-drain')), findsNothing);
+    expect(text('tidy-title'), '整理好了');
+    await tester.pump(const Duration(seconds: 5));
+    expect(sends(), isEmpty);
+    await tester.tap(find.byKey(const Key('tidy-send')));
+    await tester.pumpAndSettle();
+    expect(sends(), [
+      [
+        {'text': '我们明天下午三点开会。'}
+      ]
+    ]);
+  });
+
   macTest('stage buttons stay usable under the card', (tester) async {
     final s = await goLive(tester);
     await tester.pumpWidget(layer(s));

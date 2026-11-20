@@ -94,10 +94,11 @@ class VoiceTidyCard extends StatelessWidget {
     final style = TextStyle(color: ink, fontSize: 17, height: 1.35);
     final rest = style.copyWith(color: ink.withValues(alpha: .55));
     final small = TextStyle(color: ink.withValues(alpha: .75), fontSize: 13, height: 20 / 13);
-    final status = phase == TidyPhase.ready ? '整理好了，马上发送' : 'AI 整理中…';
-    // The AI's words so far, then what is left of the heard ones after as many characters.
+    final ready = phase == TidyPhase.ready;
+    final status = !ready ? 'AI 整理中…' : (tidy.comparing ? '整理好了' : '整理好了，马上发送');
+    // Before the first word the heard words are the body; then the AI's take it, the heard ones kept under them
+    // in one faint line to compare (user 2026-11-20), the whole of them on a tap.
     final done = tidy.shown;
-    final left = phase == TidyPhase.ready ? '' : String.fromCharCodes(tidy.original.runes.skip(done.runes.length));
     final waiting = phase == TidyPhase.tidying && done.isEmpty;
     final caret = phase == TidyPhase.tidying && done.isNotEmpty;
     return CustomPaint(
@@ -114,11 +115,28 @@ class VoiceTidyCard extends StatelessWidget {
               builder: (context, c) {
                 final scaler = MediaQuery.textScalerOf(context);
                 // Before the first word the heard words stay readable, a little faint, a shimmer running over them.
-                if (waiting) return _Shimmer(child: _body('', left, style, style, c.maxWidth, scaler));
-                return _body(done, left, style, rest, c.maxWidth, scaler,
+                if (waiting) return _Shimmer(child: _body('', tidy.original, style, style, c.maxWidth, scaler));
+                return _body(done, '', style, rest, c.maxWidth, scaler,
                     caret: caret ? _Caret(color: ink, height: style.fontSize! * 1.1) : null);
               },
             ),
+            if (!waiting) ...[
+              const SizedBox(height: 6),
+              GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: tidy.compare,
+                child: Text.rich(
+                  TextSpan(children: [
+                    TextSpan(text: '原话 · ', style: small.copyWith(fontWeight: FontWeight.w600)),
+                    TextSpan(text: tidy.original),
+                  ]),
+                  key: const Key('tidy-original'),
+                  style: small.copyWith(color: ink.withValues(alpha: .55)),
+                  maxLines: tidy.comparing ? 8 : 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
             const SizedBox(height: 8),
             SizedBox(
               height: 20,
@@ -126,7 +144,7 @@ class VoiceTidyCard extends StatelessWidget {
                 children: [
                   Text(status, key: const Key('tidy-title'), style: small.copyWith(fontWeight: FontWeight.w600)),
                   const Spacer(),
-                  if (phase == TidyPhase.ready) _Drain(duration: tidy.settle, color: ink),
+                  if (ready && !tidy.comparing) _Drain(duration: tidy.settle, color: ink),
                 ],
               ),
             ),
