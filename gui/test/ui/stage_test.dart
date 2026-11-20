@@ -26,7 +26,7 @@ import 'package:rapp/ui/lifecycle.dart' show Phase;
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/stage.dart';
-import 'package:rapp/embed/composer_panel.dart' show composerFillOpacity, pictureLift, seeThroughBox;
+import 'package:rapp/embed/composer_panel.dart' show composerFillOpacity, seeThroughBox;
 import 'package:rapp/embed/key_bar.dart' show keyBarHeightOf;
 import 'package:rapp/ui/tokens.dart';
 import 'package:rapp/ui/top_bar.dart';
@@ -210,7 +210,7 @@ void main() {
         );
 
     for (final app in ['com.apple.Terminal', 'Safari']) {
-      testWidgets('iOS $app picture: lifted by its closed bar ${app == 'Safari' ? 'never' : 'and the open line'}',
+      testWidgets('iOS $app picture: lifted by its bar only, open or closed${app == 'Safari' ? ' (Safari: none)' : ''}',
           (tester) async {
         debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
         try {
@@ -230,7 +230,7 @@ void main() {
           rs.composer.open = true;
           await tester.pump();
           await tester.pump(const Duration(milliseconds: 400));
-          expect(lift(), app == 'Safari' ? 0 : pictureLift + bar);
+          expect(lift(), app == 'Safari' ? 0 : bar); // an app: the bar only, open or closed
           rs.composer.collapse();
           await tester.pump();
           await tester.pump(const Duration(milliseconds: 400));

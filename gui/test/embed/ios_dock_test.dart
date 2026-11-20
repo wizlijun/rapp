@@ -459,4 +459,22 @@ void main() {
       expect(rs.composer.open, isTrue);
     });
   }
+
+  iosTest('a composer notify mid-pull does not spring the panel back; release past 70 still collapses', (tester) async {
+    await openOn(tester, tsess);
+    final r = tester.getRect(panel);
+    final g = await tester.startGesture(r.topLeft + const Offset(3, 3));
+    await g.moveBy(const Offset(0, 40), timeStamp: const Duration(milliseconds: 16));
+    await tester.pump(frame);
+    await g.moveBy(const Offset(0, 40), timeStamp: const Duration(milliseconds: 32));
+    await tester.pump(frame);
+    final top = tester.getRect(panel).top;
+    tsess.composer.setSending(true); // any notify while the panel is open
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(tester.getRect(panel).top, closeTo(top, 0.5));
+    await g.up(timeStamp: const Duration(milliseconds: 32));
+    await tester.pump();
+    expect(tsess.composer.open, isFalse);
+  });
 }

@@ -205,6 +205,18 @@ void main() {
       expect(s.appLatch.flags, 0);
     });
 
+    iosTest('keyed session switch with ⌘ latched: the new sid gets no modifier events', (tester) async {
+      Widget keyed(RemoteSession rs) => KeyedSubtree(key: ValueKey(rs.sid), child: bar(rs, width: 900));
+      await tester.pumpWidget(keyed(app));
+      await tap(tester, 'cmd');
+      port.calls.clear();
+      await tester.pumpWidget(keyed(app2));
+      await tester.pump();
+      expect([for (final e in appKeys()) if (e.$2 == app2.sid) e], isEmpty);
+      expect(appKeys().first, ('up', 1, 55, 0));
+      expect(s.appLatch.flags, 0);
+    });
+
     iosTest('going away releases the modifiers', (tester) async {
       await tester.pumpWidget(bar(app, width: 900));
       await tap(tester, 'opt');
@@ -502,6 +514,13 @@ void main() {
       await tester.pump();
       expect([for (final id in barKeys.keys) if (k(id).evaluate().isNotEmpty) id], ['esc', 'stab', 'slim']);
       expect(tester.getSize(find.byType(KeyBar)).height, 54);
+    });
+
+    iosTest('⊙ stays once a hardware key was seen, after the 10 s window', (tester) async {
+      lastHardwareKey = DateTime.now().subtract(const Duration(seconds: 30));
+      expect(hardwareKeyboard(), isFalse);
+      await tester.pumpWidget(bar(tsess));
+      expect(k('slim'), findsOneWidget);
     });
 
     iosTest('the bar is as high as keyBarHeightOf says, one row wide and two narrow', (tester) async {

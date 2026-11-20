@@ -255,6 +255,9 @@ class PullDown extends StatefulWidget {
 
 class _PullDownState extends State<PullDown> with SingleTickerProviderStateMixin {
   double _over = 0, _from = 0;
+
+  /// A finger is on the pull: a notify then must not spring the panel back under it.
+  bool _dragging = false;
   late final AnimationController _spring = AnimationController(vsync: this, duration: const Duration(milliseconds: 200))
     ..addListener(() => setState(() => _over = _from * (1 - Curves.easeOut.transform(_spring.value))));
 
@@ -266,7 +269,18 @@ class _PullDownState extends State<PullDown> with SingleTickerProviderStateMixin
   }
 
   void _reopen() {
-    if (widget.composer.open) _back();
+    if (widget.composer.open && !_dragging) _back();
+  }
+
+  @override
+  void didUpdateWidget(PullDown old) {
+    super.didUpdateWidget(old);
+    if (old.composer == widget.composer) return;
+    old.composer.removeListener(_reopen);
+    widget.composer.addListener(_reopen);
+    _spring.stop();
+    _over = 0;
+    _dragging = false;
   }
 
   @override
@@ -298,12 +312,19 @@ class _PullDownState extends State<PullDown> with SingleTickerProviderStateMixin
               (r) => r
                 ..dragStartBehavior = DragStartBehavior.down
                 ..onStart = ((_) {
+                  _dragging = true;
                   _spring.stop();
                   _over = 0; // a stale pull must never close by itself
                 })
                 ..onUpdate = ((d) => setState(() => _over = math.max(0, _over + d.delta.dy)))
-                ..onEnd = ((d) => _end(d.velocity))
-                ..onCancel = _back,
+                ..onEnd = ((d) {
+                  _dragging = false;
+                  _end(d.velocity);
+                })
+                ..onCancel = (() {
+                  _dragging = false;
+                  _back();
+                }),
             ),
           },
           child: widget.child,

@@ -34,7 +34,7 @@ List<List<String?>> _rowsOf(MainState state, RemoteSession session, double width
       app: !_isTerm(state, session),
       more: state.prefs.keyBarMore,
       slim: state.prefs.keyBarSlim,
-      hardware: hardwareKeyboard(),
+      hardware: hardwareKeyboard() || lastHardwareKey != null, // sticky: once seen, the ⊙ stays
     );
 
 /// How high the bar is at [width], with the modes now on.
@@ -88,6 +88,9 @@ class AppKeySender {
   StreamSubscription<SessionEvent>? _events;
 
   void start() {
+    // A keyed switch builds the new bar before the old one is gone: whatever is still latched goes up for the old
+    // sid first (its own listener), so this sid is never sent a stray down.
+    if (latch.flags != 0) latch.releaseAll();
     _held = 0;
     latch.addListener(_sync);
     _events = port()?.events.listen(_onEvent);

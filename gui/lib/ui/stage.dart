@@ -232,7 +232,7 @@ class Stage extends StatelessWidget {
           final layer = !full && (picture || (rs != null && rs.detached)) && rs != null && port != null;
           // iOS: a terminal app keeps the key bar with the panel closed, so its picture goes up as a terminal's.
           if (_ios && layer && keyBarWhenClosed(rs, port)) {
-            stage = _lifted(state, rs, stage, bar: keyBarHeightOf(state, rs, c.maxWidth));
+            stage = _lifted(state, rs, stage, bar: keyBarHeightOf(state, rs, c.maxWidth), appBar: true);
           }
           return Stack(
             children: [
@@ -314,15 +314,16 @@ class _HostNoticeBar extends StatelessWidget {
 /// (at once without animations); Transform moves hit tests with it, so a click lands where the picture is seen.
 /// A terminal's [keyRow] lifts it the same line, panel open or not; on a [narrow] stage with both, the row has a
 /// line of its own above the panel and the picture goes [keyRowLift] further. On iOS the key bar ([bar] high, there
-/// panel open or not) lifts it instead of the row, and an app that keeps the bar goes up the same way.
+/// panel open or not) lifts it instead of the row; an app that keeps the bar goes up by the bar only ([appBar]: its panel
+/// floats over the picture, as on the desktop).
 Widget _lifted(MainState state, RemoteSession session, Widget child,
-        {bool keyRow = false, bool narrow = false, double? bar}) =>
+        {bool keyRow = false, bool narrow = false, double? bar, bool appBar = false}) =>
     ClipRect(
       child: ListenableBuilder(
         listenable: Listenable.merge([session, session.composer, state.composerZoom]),
         builder: (context, _) => TweenAnimationBuilder<double>(
           tween: Tween(
-              end: _lift(session.composer.open && session.composerAllowed, keyRow, narrow, state.composerScale, bar)),
+              end: _lift(session.composer.open && session.composerAllowed && !appBar, keyRow, narrow, state.composerScale, bar)),
           duration: MediaQuery.disableAnimationsOf(context) ? Duration.zero : const Duration(milliseconds: 150),
           curve: Curves.easeOut,
           builder: (_, v, child) => Transform.translate(offset: Offset(0, -v), child: child),
