@@ -351,8 +351,13 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// How long a done tidy's send waits for a click on 编辑.
+  @visibleForTesting
+  Duration tidySettle = const Duration(milliseconds: 1500);
+
   VoiceTidy _makeTidy(Object sid) => VoiceTidy(
         sid: sid,
+        settle: tidySettle,
         endpoint: () => llm,
         api: llmApi,
         allowed: (s) => prefs.voiceAiTidy && llm.configured && !(remote[s]?.secureFocus ?? true),

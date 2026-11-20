@@ -795,18 +795,30 @@ class _TidyLayer extends StatelessWidget {
   Widget build(BuildContext context) {
     final tidy = state.tidyOf(session.sid);
     final control = controlHeightOf(context);
+    final ios = defaultTargetPlatform == TargetPlatform.iOS;
     return ListenableBuilder(
-      listenable: Listenable.merge([both, session.zooms, panelPlaceOf(session)]),
+      listenable: Listenable.merge([both, session.zooms, panelPlaceOf(session), tidy, state.stageSide]),
       builder: (context, _) => LayoutBuilder(
-        builder: (context, c) => CustomSingleChildLayout(
-          delegate: _TidyPlace(
-            width: math.max(0.0, math.min(360.0, c.maxWidth - 24)),
-            place: (stage, card) => defaultTargetPlatform == TargetPlatform.iOS
-                ? _ios(stage, card)
-                : _desktop(stage, card, control),
-          ),
-          child: VoiceTidyCard(key: ValueKey(session.sid), tidy: tidy),
-        ),
+        builder: (context, c) {
+          // Where the voice bubble stood at the release: the card takes its place, its width and its top
+          // (user 2026-11-20); with the panel open, or none, its own place.
+          // Into the layer's own coordinates here, in the builder: the layout below may not read other boxes.
+          final at = _open ? null : tidy.at;
+          final b = context.findRenderObject() as RenderBox?;
+          final local = at != null && b != null && b.attached ? b.globalToLocal(at.topLeft) : null;
+          return CustomSingleChildLayout(
+            delegate: _TidyPlace(
+              width: math.max(0.0, math.min(local != null ? at!.width : 360.0, c.maxWidth - 24)),
+              place: (stage, card) => local ?? (ios ? _ios(stage, card) : _desktop(stage, card, control)),
+            ),
+            child: VoiceTidyCard(
+              key: ValueKey(session.sid),
+              tidy: tidy,
+              right: !ios || state.stageSide.value != StageSide.left,
+              tail: ios,
+            ),
+          );
+        },
       ),
     );
   }
@@ -943,7 +955,8 @@ class _IosStageState extends State<_IosStage> {
           c.open = true;
         },
         composer: () => widget.session.composer,
-        tidy: (text, pick) => widget.state.tidyOf(widget.session.sid).begin(text, pick),
+        tidy: (text, pick, at) => widget.state.tidyOf(widget.session.sid).begin(text, pick, at: at),
+        wouldTidy: (text) => widget.state.tidyOf(widget.session.sid).would(text),
         onPress: () => widget.state.tidyIfAny(widget.session.sid)?.interrupt(),
       );
     }

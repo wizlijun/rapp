@@ -64,6 +64,8 @@ class _DesktopVoiceState extends State<DesktopVoice> with SingleTickerProviderSt
   StreamSubscription<(Object, VoiceKeyPhase)>? _keys;
   final _editBox = GlobalKey();
   final _cancelBox = GlobalKey();
+  final _bubbleBox = GlobalKey();
+  bool _handing = false;
   bool _mouse = false;
   int? _pointer;
   List<double> _levels = List.filled(_bars, 0);
@@ -93,7 +95,8 @@ class _DesktopVoiceState extends State<DesktopVoice> with SingleTickerProviderSt
         c.open = true;
       },
       composer: () => widget.session.composer,
-      tidy: (text, pick) => widget.state.tidyOf(widget.session.sid).begin(text, pick),
+      tidy: (text, pick, at) => widget.state.tidyOf(widget.session.sid).begin(text, pick, at: at),
+      wouldTidy: (text) => widget.state.tidyOf(widget.session.sid).would(text),
       onPress: () => widget.state.tidyIfAny(widget.session.sid)?.interrupt(),
       onEnd: _ended,
       languageHintDue: () => !widget.state.prefs.voiceLanguageHintShown,
@@ -156,14 +159,37 @@ class _DesktopVoiceState extends State<DesktopVoice> with SingleTickerProviderSt
     } else if (!_hold.holding && _up) {
       _up = false;
       _released = _hold.pick;
-      // Instant with reduced motion; else the column stays up, fading (a send also rises), while the row waits.
-      if (!_reduced) {
+      _hold.bubbleAt = _rectOf(_bubbleBox);
+      if (_hold.handingOver) {
+        // The tidy will likely take the words: the bubble stays as it is until its card stands in its place.
+        _handing = true;
         _hold.showing = true;
         _exit.value = 1;
-        unawaited(_exit.reverse());
+      } else {
+        _goOut();
+      }
+    } else if (_handing && !_hold.handingOver) {
+      _handing = false;
+      if (_hold.handedOver) {
+        // The card is in this frame, where the bubble was.
+        _exit.value = 0;
+        _hold.showing = false;
+      } else {
+        _goOut();
       }
     }
     if (!_hold.holding) _levels = List.filled(_bars, 0);
+  }
+
+  // Instant with reduced motion; else the column stays up, fading (a send also rises), while the row waits.
+  void _goOut() {
+    if (_reduced) {
+      _hold.showing = false;
+      return;
+    }
+    _hold.showing = true;
+    _exit.value = 1;
+    unawaited(_exit.reverse());
   }
 
   void _onLevel() {
@@ -258,7 +284,10 @@ class _DesktopVoiceState extends State<DesktopVoice> with SingleTickerProviderSt
                     ignoring: active,
                     child: Listener(
                       onPointerDown: (_) => _state.holdForPanel(widget.session),
-                      child: Row(mainAxisSize: MainAxisSize.min, children: [...widget.others, const SizedBox(width: 8)]),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [...widget.others, const SizedBox(width: 8)],
+                      ),
                     ),
                   ),
                 ),
@@ -337,28 +366,29 @@ class _DesktopVoiceState extends State<DesktopVoice> with SingleTickerProviderSt
     );
   }
 
-  Widget _target(RappTokens t, Key key, GlobalKey box, IconData icon, String label, String keyName, bool on) => KeyedSubtree(
-    key: key,
-    child: Container(
-      key: box,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: on ? t.accent : Color.alphaBlend(t.raise.first, t.float.first),
-        border: Border.all(color: on ? t.accent : t.line),
-        borderRadius: BorderRadius.circular(t.r),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16, color: on ? t.accentInk : t.text),
-          const SizedBox(width: 4),
-          Text(label, style: TextStyle(color: on ? t.accentInk : t.text, fontSize: 15)),
-          const SizedBox(width: 6),
-          Text(keyName, style: TextStyle(color: on ? t.accentInk : t.muted, fontSize: 12)),
-        ],
-      ),
-    ),
-  );
+  Widget _target(RappTokens t, Key key, GlobalKey box, IconData icon, String label, String keyName, bool on) =>
+      KeyedSubtree(
+        key: key,
+        child: Container(
+          key: box,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: on ? t.accent : Color.alphaBlend(t.raise.first, t.float.first),
+            border: Border.all(color: on ? t.accent : t.line),
+            borderRadius: BorderRadius.circular(t.r),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 16, color: on ? t.accentInk : t.text),
+              const SizedBox(width: 4),
+              Text(label, style: TextStyle(color: on ? t.accentInk : t.text, fontSize: 15)),
+              const SizedBox(width: 6),
+              Text(keyName, style: TextStyle(color: on ? t.accentInk : t.muted, fontSize: 12)),
+            ],
+          ),
+        ),
+      );
 
   Widget _bubble(BuildContext context, RappTokens t, VoicePick pick, double width) {
     final voice = _state.voice!;
@@ -371,45 +401,55 @@ class _DesktopVoiceState extends State<DesktopVoice> with SingleTickerProviderSt
     // Holding: the live words. Going out: the last of them (a cancel has cleared the recogniser's).
     final said = _hold.holding ? (_said = voice.text) : _said;
     final words = said.isEmpty ? '正在听…' : voiceTail(said, style, width - 32, MediaQuery.textScalerOf(context));
-    return CustomPaint(
-      key: const Key('voice-bubble'),
-      painter: VoiceBubbleFrame(fill: fill, border: border, dashed: pick == VoicePick.edit, right: true, radius: t.r, tail: false),
-      child: SizedBox(
-        width: width,
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              pick == VoicePick.edit
-                  ? Text.rich(
-                      TextSpan(
-                        text: words,
-                        children: [
-                          WidgetSpan(
-                            alignment: PlaceholderAlignment.middle,
-                            child: SizedBox(width: 1.5, height: 20, child: ColoredBox(color: t.text)),
-                          ),
-                        ],
-                      ),
-                      style: style,
-                    )
-                  : Text(words, style: style),
-              const SizedBox(height: 8),
-              Align(
-                alignment: Alignment.centerRight,
-                child: CustomPaint(
-                  size: const Size(_bars * 4 - 2, 20),
-                  painter: VoiceBarsPainter(
-                    level: voice.level.value,
-                    levels: _levels,
-                    color: ink,
-                    still: pick == VoicePick.cancel,
+    return KeyedSubtree(
+      key: _bubbleBox,
+      child: CustomPaint(
+        key: const Key('voice-bubble'),
+        painter: VoiceBubbleFrame(
+          fill: fill,
+          border: border,
+          dashed: pick == VoicePick.edit,
+          right: true,
+          radius: t.r,
+          tail: false,
+        ),
+        child: SizedBox(
+          width: width,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                pick == VoicePick.edit
+                    ? Text.rich(
+                        TextSpan(
+                          text: words,
+                          children: [
+                            WidgetSpan(
+                              alignment: PlaceholderAlignment.middle,
+                              child: SizedBox(width: 1.5, height: 20, child: ColoredBox(color: t.text)),
+                            ),
+                          ],
+                        ),
+                        style: style,
+                      )
+                    : Text(words, style: style),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: CustomPaint(
+                    size: const Size(_bars * 4 - 2, 20),
+                    painter: VoiceBarsPainter(
+                      level: voice.level.value,
+                      levels: _levels,
+                      color: ink,
+                      still: pick == VoicePick.cancel,
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

@@ -509,6 +509,48 @@ void main() {
     expect(ringFinder, findsNothing);
   });
 
+  iosTest('a release the tidy takes keeps the bubble as it is until the stop is back, then hands over its place', (tester) async {
+    const said = '这是一段很长很长的语音输入文字';
+    final tookAt = <Rect?>[];
+    final h = VoiceHold(
+      voice: voice,
+      send: (_) => null,
+      edit: (_) {},
+      composer: () => rs.composer,
+      tidy: (text, pick, at) {
+        tookAt.add(at);
+        return true;
+      },
+      wouldTidy: (_) => true,
+    );
+    addTearDown(h.dispose);
+    await tester.pumpWidget(wrap(SizedBox(width: stage.width, height: stage.height, child: VoiceOverlay(hold: h, voice: voice))));
+    unawaited(h.down(const Offset(900, 600), stage, true));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 240));
+    voice.partial(said);
+    await tester.pump();
+    final words = find.text(said);
+    final before = tester.getRect(words);
+    double opacity() => tester.widget<Opacity>(find.ancestor(of: words, matching: find.byType(Opacity)).first).opacity;
+    voice.stopGate = Completer<String>();
+    h.finish(VoicePick.send);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 300));
+    // The disc and the bands are out; the bubble neither fades nor rises.
+    expect(words, findsOneWidget);
+    expect(opacity(), 1);
+    expect(tester.getRect(words), before);
+    expect(painter(tester).scrim, 0);
+    voice.stopGate!.complete(said);
+    await tester.pump();
+    await tester.pump();
+    expect(words, findsNothing);
+    expect(h.showing, isFalse);
+    expect(tookAt.single!.contains(before.center), isTrue);
+  });
+
   iosTest('a session switch while the stop is out puts the words in the original draft', (tester) async {
     rs.composer.draft = 'x';
     final other = RemoteSession(2, 'Notes');
@@ -838,7 +880,8 @@ void main() {
     group('tidy and onPress hooks (voice AI tidy §5.2)', () {
       late List<(String, VoicePick)> took;
       late List<String> sent, edited, order;
-      var take = true;
+      late List<Rect?> tookAt;
+      var take = true, would = false;
       VoiceHold hold() => VoiceHold(
             voice: voice,
             composer: () => rs.composer,
@@ -850,14 +893,18 @@ void main() {
             onEnd: ends.add,
             languageHintDue: () => true,
             languageHintShown: () => shown++,
-            tidy: (t, p) {
+            tidy: (t, p, at) {
               took.add((t, p));
+              tookAt.add(at);
               return take;
             },
+            wouldTidy: (t) => would,
             onPress: () => order.add('press:${voice.starts}'),
           );
       setUp(() {
         took = [];
+        tookAt = [];
+        would = false;
         sent = [];
         edited = [];
         order = [];
@@ -877,6 +924,33 @@ void main() {
         expect(ends, [VoicePick.send]);
         expect(h.hint, isNull);
         expect(shown, 0);
+      });
+
+      test('a release a tidy would take hands over: the bubble stays until the stop is back', () async {
+        would = true;
+        voice.stopGate = Completer<String>();
+        await h.start();
+        voice.partial('这是一段很长很长的语音输入文字');
+        h.bubbleAt = const Rect.fromLTWH(10, 20, 300, 80);
+        h.finish(VoicePick.send);
+        await Future<void>.delayed(Duration.zero);
+        expect(h.handingOver, isTrue);
+        voice.stopGate!.complete('这是一段很长很长的语音输入文字');
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+        expect(h.handingOver, isFalse);
+        expect(h.handedOver, isTrue);
+        expect(tookAt.single, const Rect.fromLTWH(10, 20, 300, 80));
+      });
+
+      test('a release no tidy would take does not hand over', () async {
+        take = false;
+        voice.stopResult = '你好';
+        await h.start();
+        h.finish(VoicePick.send);
+        expect(h.handingOver, isFalse);
+        await Future<void>.delayed(Duration.zero);
+        expect(h.handedOver, isFalse);
       });
 
       test('a declined release sends as before', () async {

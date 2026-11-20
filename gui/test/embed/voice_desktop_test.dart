@@ -17,6 +17,7 @@ import 'package:rapp/embed/voice_input.dart' show VoiceStart;
 import 'package:rapp/embed/voice_key_gate.dart';
 import 'package:rapp/embed/voice_ring.dart';
 import 'package:rapp/hub_client.dart';
+import 'package:rapp/llm_api.dart';
 import 'package:rapp/paths.dart';
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
@@ -25,8 +26,28 @@ import '../fakes.dart';
 import '../ui/helpers.dart';
 import 'voice_button_test.dart' show FakeVoice;
 
+class _Api extends LlmApi {
+  final calls = <LlmCall>[];
+  void Function(String)? onText;
+
+  @override
+  LlmCall run(LlmEndpoint e, String app, String input,
+      {Map<String, String>? vars, void Function(String text)? onText, Duration firstByte = const Duration(seconds: 10)}) {
+    this.onText = onText;
+    final c = LlmCall.manual();
+    calls.add(c);
+    return c;
+  }
+}
+
+String _plain(WidgetTester tester, Finder f) {
+  final w = tester.widget<Text>(f);
+  return w.data ?? w.textSpan!.toPlainText();
+}
+
 void main() {
   late FakeTransport t;
+  late _Api api;
   late HubClient hub;
   late FakeSessionPort port;
   late MainState es;
@@ -47,7 +68,8 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     port = FakeSessionPort();
     voice = FakeVoice();
-    es = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port, voice: voice);
+    api = _Api();
+    es = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), port: port, voice: voice, llmApi: api);
     rs = RemoteSession(1, 'Safari');
   });
 
@@ -503,5 +525,77 @@ void main() {
     await tester.pump();
     await tester.pump();
     expect(bubble, findsNothing);
+  });
+
+  macTest('a long send stays up where it was and becomes the tidy, which replaces the words, waits, then sends', (tester) async {
+    const said = '嗯那个我门明天下午三点开会';
+    await view(tester);
+    await goLive(tester);
+    es.setLlm(const LlmEndpoint(url: 'localhost:28001', key: 'k'));
+    await tester.pumpWidget(layer());
+    final g = await press(tester);
+    voice.partial(said);
+    await tester.pump();
+    final bubble = find.byKey(const Key('voice-bubble'));
+    final at = tester.getRect(bubble);
+    voice.stopGate = Completer<String>();
+    await g.up();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    // The stop is still out: the bubble neither fades nor rises.
+    expect(bubble, findsOneWidget);
+    expect(tester.getRect(bubble).topLeft, at.topLeft);
+    voice.stopGate!.complete(said);
+    await tester.pump();
+    await tester.pump();
+    final tidy = find.byKey(const Key('tidy-bubble'));
+    expect(bubble, findsNothing);
+    expect(tidy, findsOneWidget);
+    expect(tester.getRect(tidy).topLeft.dx, closeTo(at.left, 1));
+    expect(tester.getRect(tidy).topLeft.dy, closeTo(at.top, 1));
+    expect(tester.getSize(tidy).width, closeTo(at.width, 1));
+    // The AI's words take the place of the heard ones from the front.
+    api.onText!('我们明天');
+    await tester.pump();
+    expect(_plain(tester, find.byKey(const Key('tidy-body'))), '我们明天门明天下午三点开会');
+    api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
+    await tester.pump();
+    await tester.pump();
+    expect(_plain(tester, find.byKey(const Key('tidy-body'))), '我们明天下午三点开会。');
+    expect(find.text('整理好了，马上发送'), findsOneWidget);
+    expect(sends(), isEmpty);
+    await tester.pump(const Duration(milliseconds: 1500));
+    expect(sends(), [
+      [
+        {'text': '我们明天下午三点开会。'}
+      ]
+    ]);
+    await tester.pumpAndSettle();
+    expect(tidy, findsNothing);
+  });
+
+  macTest('编辑 while the tidy waits to send opens the panel with the AI text', (tester) async {
+    const said = '嗯那个我门明天下午三点开会';
+    await view(tester);
+    await goLive(tester);
+    es.setLlm(const LlmEndpoint(url: 'localhost:28001', key: 'k'));
+    await tester.pumpWidget(layer());
+    final g = await press(tester);
+    voice.partial(said);
+    voice.stopResult = said;
+    await g.up();
+    await tester.pump();
+    await tester.pump();
+    api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
+    await tester.pump();
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('tidy-edit')));
+    await tester.pump(const Duration(seconds: 2));
+    expect(sends(), isEmpty);
+    // The tidy writes to the state's session (the one the port is for).
+    final c = es.remote[1]!.composer;
+    expect(c.open, isTrue);
+    expect(c.draftText, contains('我们明天下午三点开会。'));
+    expect(c.pendingAi?.original, said);
   });
 }

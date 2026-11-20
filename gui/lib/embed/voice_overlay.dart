@@ -18,6 +18,9 @@ const _bars = 24;
 const _segmentDeg = 19.0;
 const _tail = 6.0;
 
+/// The height [VoiceBubbleFrame]'s tail adds at the bottom.
+const voiceBubbleTail = _tail;
+
 String voiceHintLine(VoicePick p) => switch (p) {
   VoicePick.send => '松手 发送',
   VoicePick.cancel => '松手 取消',
@@ -48,6 +51,9 @@ class _VoiceOverlayState extends State<VoiceOverlay> with SingleTickerProviderSt
   // The words as they were when the release began: the bubble keeps them while it fades (a cancel clears them).
   String _said = '';
   (String, double, String)? _tailKey;
+  final _bubbleBox = GlobalKey();
+  // A release the tidy will likely take: the bubble stays as it is (the rest goes out) until its card stands there.
+  bool _handing = false;
 
   VoiceHold get _hold => widget.hold;
 
@@ -106,10 +112,25 @@ class _VoiceOverlayState extends State<VoiceOverlay> with SingleTickerProviderSt
       // The bands go out from where they are; a release mid-press does not finish their sweep first.
       _fromValue = _c.value;
       _fromSweep = _pressSweep(_c.value);
+      final box = _bubbleBox.currentContext?.findRenderObject() as RenderBox?;
+      _hold.bubbleAt = box != null && box.attached && box.hasSize ? box.localToGlobal(Offset.zero) & box.size : null;
+      _handing = _hold.handingOver;
       if (_reduced) {
         _c.value = 0;
       } else {
         _c.reverse();
+      }
+    } else if (_handing && !_hold.handingOver) {
+      _handing = false;
+      if (_hold.handedOver) {
+        // The card is in this frame, where the bubble was: no fade.
+        _c.stop();
+        _releasing = false;
+        _c.value = 0;
+        _hold.buttonOpacity.value = 1;
+        _hold.showing = false;
+      } else if (_c.value == 0) {
+        _done();
       }
     }
     if (mounted) setState(() {});
@@ -144,6 +165,11 @@ class _VoiceOverlayState extends State<VoiceOverlay> with SingleTickerProviderSt
 
   void _done() {
     if (!_releasing) return;
+    if (_handing) {
+      // The rest is out; the bubble waits for the stop.
+      _hold.buttonOpacity.value = 1;
+      return;
+    }
     _releasing = false;
     _hold.buttonOpacity.value = 1;
     _hold.showing = false;
@@ -179,9 +205,9 @@ class _VoiceOverlayState extends State<VoiceOverlay> with SingleTickerProviderSt
       final ms = (_fromValue - v) * _release.inMilliseconds;
       morph = 1 - Curves.easeInCubic.transform(1 - v);
       scrim = v;
-      bubble = v;
+      bubble = _handing ? 1 : v;
       // Sent: the bubble rises as it fades, as if sent off; otherwise it fades where it is.
-      rise = _released == VoicePick.send ? -8 * (1 - v) : 0;
+      rise = _released == VoicePick.send && !_handing ? -8 * (1 - v) : 0;
       sweep = _fromSweep;
       bands = _fromSweep * (1 - ms / 100).clamp(0.0, 1.0);
     } else {
@@ -253,6 +279,7 @@ class _VoiceOverlayState extends State<VoiceOverlay> with SingleTickerProviderSt
     final said = _releasing ? _said : (_said = widget.voice.text);
     final words = said.isEmpty ? '正在听…' : _tailOf(said, style, width - 32, MediaQuery.textScalerOf(context));
     return CustomPaint(
+      key: _bubbleBox,
       painter: VoiceBubbleFrame(fill: fill, border: border, dashed: pick == VoicePick.edit, right: right, radius: t.r),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 12 + _tail),

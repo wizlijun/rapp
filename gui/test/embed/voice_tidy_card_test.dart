@@ -103,7 +103,10 @@ void main() {
 
   List<Object?> sends() => [for (final c in port.calls) if (c.$1 == 'composer_send') c.$2['pieces']];
   final card = find.byKey(const Key('tidy-card'));
-  String text(String key) => (find.byKey(Key(key)).evaluate().single.widget as Text).data ?? '';
+  String text(String key) {
+    final w = find.byKey(Key(key)).evaluate().single.widget as Text;
+    return w.data ?? w.textSpan?.toPlainText() ?? '';
+  }
   bool filled(WidgetTester tester, String key) =>
       find.descendant(of: find.byKey(Key(key)), matching: find.byType(FilledButton)).evaluate().isNotEmpty;
 
@@ -200,16 +203,36 @@ void main() {
     expect(filled(tester, 'tidy-send'), isFalse);
   });
 
-  macTest('a done send shows 已用 AI 整理, then goes', (tester) async {
+  macTest('a done send shows the AI text with 编辑 and 发送, then sends and goes', (tester) async {
     final s = await goLive(tester);
     await tester.pumpWidget(layer(s));
     es.tidyOf(1).begin(long, VoicePick.send);
     api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
     await tester.pump();
     await tester.pump();
-    expect(text('tidy-note'), '已用 AI 整理');
+    expect(text('tidy-title'), '整理好了，马上发送');
+    expect(text('tidy-body'), '我们明天下午三点开会。');
+    expect(find.descendant(of: find.byKey(const Key('tidy-send')), matching: find.text('发送')), findsOneWidget);
+    expect(find.byKey(const Key('tidy-edit')), findsOneWidget);
     await tester.pump(const Duration(milliseconds: 1500));
+    expect(sends(), [
+      [
+        {'text': '我们明天下午三点开会。'}
+      ]
+    ]);
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('tidy-note')), findsNothing);
+    expect(card, findsNothing);
+  });
+
+  macTest('the card stands where the voice bubble was', (tester) async {
+    final s = await goLive(tester);
+    await tester.pumpWidget(layer(s));
+    es.tidyOf(1).begin(long, VoicePick.send, at: const Rect.fromLTWH(300, 200, 420, 90));
+    await tester.pump();
+    await tester.pump();
+    final r = tester.getRect(find.byKey(const Key('tidy-bubble')));
+    expect(r.topLeft.dx, closeTo(300, 1));
+    expect(r.topLeft.dy, closeTo(200, 1));
+    expect(r.width, closeTo(420, 1));
   });
 }

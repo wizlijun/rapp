@@ -50,7 +50,11 @@ void main() {
   });
   tearDown(() => tmp.deleteSync(recursive: true));
 
-  Future<void> pump() => Future<void>.delayed(Duration.zero);
+  // Twice: a done send's wait (tidySettle zero here) is a timer of its own.
+  Future<void> pump() async {
+    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
+  }
   Future<void> settle() => Future<void>.delayed(const Duration(milliseconds: 100));
   Future<void> until(bool Function() ok) async {
     for (var i = 0; i < 200 && !ok(); i++) {
@@ -95,7 +99,8 @@ void main() {
       ],
     });
     await pump();
-    final st = MainState(hub: h, data: d, prefs: UiPrefs(), port: port, llmApi: api, log: log);
+    final st = MainState(hub: h, data: d, prefs: UiPrefs(), port: port, llmApi: api, log: log)
+      ..tidySettle = Duration.zero;
     if (endpoint) st.setLlm(const LlmEndpoint(url: 'localhost:28001', key: 'k'));
     var reconnects = 0;
     t.onSend = (m) {
@@ -253,7 +258,7 @@ void main() {
   test('a tidy that ended leaves nothing for the next open', () async {
     final (st, _) = await start();
     st.tidyOf(sid).begin(long, VoicePick.send);
-    st.tidyOf(sid).sendOriginal();
+    st.tidyOf(sid).sendNow();
     st.currentRemote!.composer.done(1, null);
     await until(() => lines().length == 1);
     st.dispose();
@@ -301,7 +306,7 @@ void main() {
     api.calls.last.complete(const LlmFailed('连不上 LLM 接入点'));
     await pump();
     expect(st.hint, 'A：AI 整理失败（连不上 LLM 接入点），回到这个窗口处理');
-    st.tidyOf(sid).editOriginal();
+    st.tidyOf(sid).editNow();
     st.tidyOf(sid).begin(long, VoicePick.edit);
     api.calls.last.complete(const LlmDone(tidied));
     await pump();
