@@ -34,6 +34,7 @@ import 'pin_files.dart';
 import 'prefs.dart';
 import '../embed/composer_editor.dart' show ZoomKey;
 import 'project_positions.dart';
+import '../llm_api.dart';
 import 'projects.dart';
 import 'resources_state.dart';
 import 'session_model.dart';
@@ -135,6 +136,7 @@ class MainState extends ChangeNotifier {
     UnlockStore? unlockStore,
     void Function(String line)? log,
     VoiceInput? voice,
+    LlmApi? llmApi,
   })  : resources = ResourcesState(clock: clock),
         voice = voice ??
             (defaultTargetPlatform == TargetPlatform.iOS || defaultTargetPlatform == TargetPlatform.macOS
@@ -145,6 +147,8 @@ class MainState extends ChangeNotifier {
         unlockStore = unlockStore ?? UnlockStore(),
         _now = clock ?? DateTime.now,
         positions = ProjectPositions.load(data.localDir),
+        llm = LlmEndpoint.load(data.localDir),
+        llmApi = llmApi ?? const LlmApi(),
         _log = log ?? ((_) {}) {
     recorder = InputRecorder(data: () => data, enabled: () => prefs.inputHistory,
         recordsApp: (a) => this.profiles.resolve(a).recordInput,
@@ -203,6 +207,7 @@ class MainState extends ChangeNotifier {
     _flushPositions();
     final oldRoot = data.root;
     data = d;
+    llm = LlmEndpoint.load(d.localDir);
     final loaded = loadWorkspace(d.sharedDir);
     workspace = loaded.workspace;
     if (loaded.problem != null) hint = loaded.problem!;
@@ -3113,6 +3118,22 @@ class MainState extends ChangeNotifier {
   void voiceLanguageHintDone() {
     prefs.voiceLanguageHintShown = true;
     _save();
+  }
+
+  /// The LLM gateway (全局设置 → LLM 接入点), `local/llm.json`; reread by [relocate].
+  LlmEndpoint llm;
+  final LlmApi llmApi;
+
+  /// Saves a changed endpoint; an unchanged one writes nothing.
+  void setLlm(LlmEndpoint e) {
+    if (e == llm) return;
+    llm = e;
+    try {
+      e.save(data.localDir);
+    } catch (x) {
+      hint = 'LLM 接入点没有保存：${_fsReason(x)}';
+    }
+    notifyListeners();
   }
 
   /// [prefs] changed outside a setter here (iOS 本机's 屏幕常亮): save them.

@@ -33,7 +33,7 @@
        agent/             用户和 agent 的内容（进 git），rapp 不动
        clipboard/         钉住的文字条目，一条一个 .md（进 git）
        files/             二进制，不进 git：transfers/（收发的文件）  clipboard/（钉住的图片和文件）
-       local/             本机私有，不进 git，0700：service.json  hosts.json  shares.json  maps.json  ipc.token  update.json  drafts/（没发出去的草稿，《输入记录》§5.2）  ……（§3）
+       local/             本机私有，不进 git，0700：service.json  hosts.json  shares.json  maps.json  ipc.token  update.json  llm.json  drafts/（没发出去的草稿，《输入记录》§5.2）  ……（§3）
      ```
    - **进 git 的**：`shared/`、`devices/`、`agent/`、`clipboard/`、`README.md`、`.gitignore`。**不进 git 的**：`files/`、`local/`（写在 `.gitignore` 里）。rapp-service 在改动后 60 秒内合成一次提交（`rust/service/src/data.rs:41`）。
    - **机密只在 `local/`**。rapp 自己不往 `shared/`、`devices/`、`agent/`、`clipboard/` 里写口令、key、secret、token；agent 往这些目录写东西时也一样。例外是用户自己的话：`devices/<id>/inputs/` 里是写作面板发出去的原话，rapp 保证不了里面没有密钥，可能含私事，和钉住的剪贴板同样对待（《输入记录》§8）。
@@ -221,6 +221,7 @@ agent 规则：加、删分享走 `rapp share` / `rapp unshare`（或 IPC 的 `s
 | `$ROOT/local/update-applied.json` | A | 上次升级的记录，用于回滚和授权提示（`rust/update/src/apply.rs:10`） | |
 | `$ROOT/local/previous/` | A | 升级前的旧版，用于回滚（`rust/service/src/update.rs:136`） | |
 | `$ROOT/local/last-dr` | A | 上次运行时的签名要求（一个字符串），升级时对照用（`rust/service/src/update.rs:242`） | |
+| `$ROOT/local/llm.json` | B | 全局设置「LLM 接入点」：`{"url","key"}`，虚拟网里 rapp-llm 网关的地址（如 `localhost:28001`，没写协议时当 `http://`）和它的 key（`gui/lib/llm_api.dart`）。GUI 在离开输入框、按回车或「测试」时整份写回（0600）。读不懂时当作没设置。「测试」带 key 请求 `GET /v1/apps` | key 是**机密** |
 | `$ROOT/local/sync.json` | A | rapp-service 写的 git 状态：`git`（`missing`、`local`、`synced`、`conflict`、`error`）、`last_commit`、`last_sync`、`error`（不含远端地址里的口令）；GUI 读（`rust/service/src/data.rs:49-55`） | |
 | `$ROOT/local/migrated-from` | A、B | 搬家时写的旧目录路径，只是记录（`rust/net/src/datadir.rs:12`） | |
 | `$ROOT/local/project_positions.json` | B | 每个项目上次停在哪个会话、什么时候离开的：`{"version":1,"projects":{"<id>":{"last":"<会话键>","left_at":"<UTC 时间>"}}}`。不同步；已删项目的条目在启动和搬数据目录时丢掉（`gui/lib/ui/project_positions.dart`） | |
