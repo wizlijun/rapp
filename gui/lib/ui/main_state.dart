@@ -366,6 +366,7 @@ class MainState extends ChangeNotifier {
         endpoint: () => llm,
         api: llmApi,
         allowed: (s) => prefs.voiceAiTidy && llm.configured && !(remote[s]?.secureFocus ?? true),
+        think: () => prefs.voiceAiThink,
         send: (s, text, voice) {
           final rs = remote[s], p = portOf(s);
           if (rs == null || p == null) {
@@ -3205,6 +3206,12 @@ class MainState extends ChangeNotifier {
   /// 「长语音先让 AI 整理」 on or off; saved.
   void setVoiceAiTidy(bool v) {
     prefs.voiceAiTidy = v;
+    _save();
+  }
+
+  /// 「AI 整理时先思考」 on or off; saved. The next tidy reads it.
+  void setVoiceAiThink(bool v) {
+    prefs.voiceAiThink = v;
     _save();
   }
 

@@ -11,13 +11,15 @@ import 'package:rapp/llm_api.dart';
 /// Records each run and hands back a call the test completes.
 class FakeLlmApi extends LlmApi {
   final runs = <(String app, String input)>[];
+  final thinks = <bool>[];
   final calls = <LlmCall>[];
   void Function(String)? onText;
 
   @override
   LlmCall run(LlmEndpoint e, String app, String input,
-      {Map<String, String>? vars, void Function(String text)? onText, Duration firstByte = const Duration(seconds: 10)}) {
+      {Map<String, String>? vars, void Function(String text)? onText, Duration firstByte = const Duration(seconds: 10), bool think = false}) {
     runs.add((app, input));
+    thinks.add(think);
     this.onText = onText;
     final c = LlmCall.manual();
     calls.add(c);
@@ -301,6 +303,25 @@ void main() {
       expect(edited, isEmpty);
       t.dispose();
     });
+  });
+
+  test('the tidy asks the AI to think only while the setting says so', () {
+    var think = false;
+    final t = VoiceTidy(
+        sid: 1,
+        endpoint: () => const LlmEndpoint(url: 'localhost:28001', key: 'k'),
+        api: api,
+        allowed: (_) => true,
+        send: (_, _, _) => null,
+        edit: (_, _, _) {},
+        keep: (_, _) {},
+        think: () => think);
+    t.begin(long, VoicePick.send);
+    t.interrupt();
+    think = true;
+    t.begin(long, VoicePick.send);
+    expect(api.thinks, [false, true]);
+    t.dispose();
   });
 
   test('a zero revealMax shows the words at once', () {

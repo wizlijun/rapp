@@ -198,7 +198,7 @@ class LlmApi {
 
   /// `POST /v1/apps/<app>` streamed. [onText] gets the whole text so far after each chunk. Completes with
   /// [LlmDone] only when the gateway finished normally; a non-200, a dropped stream or no first byte within
-  /// [firstByte] is [LlmFailed].
+  /// [firstByte] is [LlmFailed]. [think]: the app's think.* settings go up too (dictation: the model thinks first).
   LlmCall run(
     LlmEndpoint e,
     String app,
@@ -206,15 +206,16 @@ class LlmApi {
     Map<String, String>? vars,
     void Function(String text)? onText,
     Duration firstByte = const Duration(seconds: 10),
+    bool think = false,
   }) {
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 5);
     final call = LlmCall._(client);
-    unawaited(_run(call, client, e, app, input, vars, onText, firstByte));
+    unawaited(_run(call, client, e, app, input, vars, onText, firstByte, think));
     return call;
   }
 
   Future<void> _run(LlmCall call, HttpClient client, LlmEndpoint e, String app, String input,
-      Map<String, String>? vars, void Function(String)? onText, Duration firstByte) async {
+      Map<String, String>? vars, void Function(String)? onText, Duration firstByte, bool think) async {
     final base = e.base;
     if (base == null || e.key.isEmpty) return call._finish(const LlmFailed('没有设置 LLM 接入点'));
     try {
@@ -222,7 +223,7 @@ class LlmApi {
       req.headers
         ..set(HttpHeaders.authorizationHeader, 'Bearer ${e.key}')
         ..contentType = ContentType.json;
-      req.add(utf8.encode(jsonEncode({'input': input, 'stream': true, 'vars': ?vars})));
+      req.add(utf8.encode(jsonEncode({'input': input, 'stream': true, 'vars': ?vars, if (think) 'think': true})));
       // The gateway holds the status until upstream's first byte (or its own timeout): wait a little longer.
       final res = await req.close().timeout(firstByte + const Duration(seconds: 5));
       if (res.statusCode != 200) {

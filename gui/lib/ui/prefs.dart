@@ -27,6 +27,7 @@ class UiPrefs {
     bool? appKeyRow,
     this.termFit = true,
     this.voiceAiTidy = true,
+    this.voiceAiThink = false,
     this.keepAwake = true,
     this.rimeEnabled = true,
     this.rimeDictionary = 'bundled',
@@ -65,6 +66,10 @@ class UiPrefs {
   /// 长语音先让 AI 整理 (`voice_ai_tidy`): a voice text over 10 characters goes through the LLM 接入点 first.
   /// Missing or bad means on.
   bool voiceAiTidy;
+
+  /// AI 整理时先思考 (`voice_ai_think`): the tidy asks the model to think first; new names come out righter, the
+  /// first word about 1.5 s later (measured 2026-11-21). Missing or bad means off (user 2026-11-21).
+  bool voiceAiThink;
 
   /// 屏幕常亮 (`keep_awake`, iOS): no auto-lock while a live session is on the stage. Missing or bad means on.
   bool keepAwake;
@@ -122,6 +127,7 @@ class UiPrefs {
       final ak = j['app_key_row'];
       final tf = j['term_fit'];
       final vt = j['voice_ai_tidy'];
+      final vk = j['voice_ai_think'];
       final ka = j['keep_awake'];
       final re = j['rime_enabled'];
       final rd = j['rime_dictionary'];
@@ -145,6 +151,7 @@ class UiPrefs {
         appKeyRow: ak is bool ? ak : null,
         termFit: tf is bool ? tf : true,
         voiceAiTidy: vt is bool ? vt : true,
+        voiceAiThink: vk is bool ? vk : false,
         keepAwake: ka is bool ? ka : true,
         rimeEnabled: re is bool ? re : true,
         rimeDictionary: rd == 'user' ? 'user' : 'bundled',
@@ -186,6 +193,7 @@ class UiPrefs {
         'app_key_row': appKeyRow,
         'term_fit': termFit,
         'voice_ai_tidy': voiceAiTidy,
+        'voice_ai_think': voiceAiThink,
         'keep_awake': keepAwake,
         'rime_enabled': rimeEnabled,
         'rime_dictionary': rimeDictionary,

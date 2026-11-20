@@ -123,6 +123,20 @@ void main() {
       expect(seen.last, '我们明天开会。');
     });
 
+    test('run asks the gateway to think only when told', () async {
+      final seen = <Object?>[];
+      handler = (r) async {
+        final body = jsonDecode(await utf8.decoder.bind(r).join()) as Map;
+        seen.add(body.containsKey('think') ? body['think'] : 'absent');
+        r.response.headers.contentType = ContentType.text;
+        r.response.write('好');
+        await r.response.close();
+      };
+      await const LlmApi().run(ep, 'dictation', 'x').result;
+      await const LlmApi().run(ep, 'dictation', 'x', think: true).result;
+      expect(seen, ['absent', true]);
+    });
+
     test('run fails on a non-200', () async {
       handler = (r) => error(r, 502, 'upstream_unreachable');
       final res = await const LlmApi().run(ep, 'dictation', 'x').result;

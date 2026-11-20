@@ -37,13 +37,19 @@ class VoiceTidy extends ChangeNotifier {
     this.revealMax = const Duration(milliseconds: 600),
     this.log,
     this.held,
-  });
+    bool Function()? think,
+  }) : think = think ?? _no;
+
+  static bool _no() => false;
 
   final LlmEndpoint Function() endpoint;
   final LlmApi api;
 
   /// The switch is on, an endpoint is set and the focus is not a password field.
   final bool Function(Object sid) allowed;
+
+  /// 「AI 整理时先思考」, read at each start.
+  final bool Function() think;
 
   /// Sends the text as a voice send; returns the hint to show, or null when it went.
   final String? Function(Object sid, String text, VoiceOrigin voice) send;
@@ -144,7 +150,7 @@ class VoiceTidy extends ChangeNotifier {
       ..reset()
       ..start();
     late final LlmCall call;
-    call = api.run(endpoint(), tidyApp, _original, onText: (t) {
+    call = api.run(endpoint(), tidyApp, _original, think: think(), onText: (t) {
       if (!identical(_call, call)) return;
       _aim(t);
     });

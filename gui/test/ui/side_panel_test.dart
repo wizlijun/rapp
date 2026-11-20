@@ -251,6 +251,17 @@ void main() {
     expect(UiPrefs.load('${tmp.path}/devices/dev1').voiceAiTidy, false);
   });
 
+  testWidgets('the AI think switch is off by default and saves', (tester) async {
+    await tester.pumpWidget(wrap(panel()));
+    expect(find.text('AI 整理时先思考'), findsOneWidget);
+    expect(s.prefs.voiceAiThink, false);
+    await tester.ensureVisible(find.byKey(const Key('voice-ai-think')));
+    await tester.tap(find.byKey(const Key('voice-ai-think')));
+    await tester.pump();
+    expect(s.prefs.voiceAiThink, true);
+    expect(UiPrefs.load('${tmp.path}/devices/dev1').voiceAiThink, true);
+  });
+
   testWidgets('input history switch is on by default and saves', (tester) async {
     await tester.pumpWidget(wrap(panel()));
     expect(find.text('记下写作面板发出去的话'), findsOneWidget);

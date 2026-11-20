@@ -261,6 +261,8 @@ class _Footer extends StatelessWidget {
             if (defaultTargetPlatform == TargetPlatform.macOS || defaultTargetPlatform == TargetPlatform.linux) _VoiceHotkeyRow(state: state, style: small, minHeight: rowHeight),
             toggle(const Key('voice-ai-tidy'), '长语音先让 AI 整理', state.prefs.voiceAiTidy, state.setVoiceAiTidy,
                 note: '超过 10 个字时，先用 LLM 接入点整理再发'),
+            toggle(const Key('voice-ai-think'), 'AI 整理时先思考', state.prefs.voiceAiThink, state.setVoiceAiThink,
+                note: '新名词更准，出字慢 1～2 秒'),
             LlmSettingsRow(state: state, style: small),
             if (settings != null) ...[const SizedBox(height: 8), settings!],
           ]),

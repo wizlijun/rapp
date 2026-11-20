@@ -32,7 +32,7 @@ class _Api extends LlmApi {
 
   @override
   LlmCall run(LlmEndpoint e, String app, String input,
-      {Map<String, String>? vars, void Function(String text)? onText, Duration firstByte = const Duration(seconds: 10)}) {
+      {Map<String, String>? vars, void Function(String text)? onText, Duration firstByte = const Duration(seconds: 10), bool think = false}) {
     this.onText = onText;
     final c = LlmCall.manual();
     calls.add(c);

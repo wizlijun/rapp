@@ -18,12 +18,14 @@ import '../fakes.dart';
 
 class _FakeApi extends LlmApi {
   final calls = <LlmCall>[];
+  final thinks = <bool>[];
 
   @override
   LlmCall run(LlmEndpoint e, String app, String input,
-      {Map<String, String>? vars, void Function(String text)? onText, Duration firstByte = const Duration(seconds: 10)}) {
+      {Map<String, String>? vars, void Function(String text)? onText, Duration firstByte = const Duration(seconds: 10), bool think = false}) {
     final c = LlmCall.manual();
     calls.add(c);
+    thinks.add(think);
     return c;
   }
 }
@@ -161,6 +163,18 @@ void main() {
     expect(st.tidyOf(sid).begin(long, VoicePick.send), isFalse);
     expect(UiPrefs.load(d.deviceDir('dev1')).voiceAiTidy, isFalse);
     expect(jsonDecode(File('${d.deviceDir('dev1')}/gui.json').readAsStringSync())['voice_ai_tidy'], false);
+    st.dispose();
+  });
+
+  test('the think switch, off by default, goes with the tidy and is saved', () async {
+    final (st, _) = await start();
+    expect(st.prefs.voiceAiThink, isFalse);
+    st.tidyOf(sid).begin(long, VoicePick.send);
+    st.tidyOf(sid).interrupt();
+    st.setVoiceAiThink(true);
+    st.tidyOf(sid).begin(long, VoicePick.send);
+    expect(api.thinks, [false, true]);
+    expect(jsonDecode(File('${d.deviceDir('dev1')}/gui.json').readAsStringSync())['voice_ai_think'], true);
     st.dispose();
   });
 
