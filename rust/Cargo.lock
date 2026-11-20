@@ -1618,6 +1618,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "rapp-ports"
+version = "0.15.5"
+dependencies = [
+ "rapp-conn",
+ "rapp-net",
+ "rapp-wire",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "rapp-relay"
 version = "0.15.5"
 dependencies = [
@@ -1644,6 +1657,7 @@ dependencies = [
  "rand 0.9.5",
  "rapp-conn",
  "rapp-net",
+ "rapp-ports",
  "rapp-term",
  "rapp-update",
  "rapp-wire",

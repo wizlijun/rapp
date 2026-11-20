@@ -166,16 +166,7 @@ pub async fn shares(state: &Arc<State>, cmd: &Value) -> Value {
     ok(json!({"id": id, "me": me.to_string(), "shares": shares, "known": known, "old": old(items)}))
 }
 
-/// The share number an item of another device's table carries; None from a sharer from before
-/// numbers, or one that had no number to give.
-pub fn number(item: &Value) -> Option<u16> {
-    item["local"].as_u64()?.try_into().ok()
-}
-
-/// The share numbers of another device's table.
-pub fn numbers(items: &[Value]) -> Vec<u16> {
-    items.iter().filter_map(number).collect()
-}
+pub use rapp_ports::{number, numbers};
 
 /// What an item of another device's table speaks: what it says, or for a sharer from before
 /// protocols what its port suggests.
