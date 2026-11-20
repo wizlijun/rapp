@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:rapp/paths.dart';
+import 'package:rapp/llm_api.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -239,6 +240,17 @@ void main() {
     expect(UiPrefs.load('${tmp.path}/devices/dev1').autoSaveTraffic, false);
   });
 
+  testWidgets('the AI tidy switch saves', (tester) async {
+    await tester.pumpWidget(wrap(panel()));
+    expect(find.text('长语音先让 AI 整理'), findsOneWidget);
+    expect(s.prefs.voiceAiTidy, true);
+    await tester.ensureVisible(find.byKey(const Key('voice-ai-tidy')));
+    await tester.tap(find.byKey(const Key('voice-ai-tidy')));
+    await tester.pump();
+    expect(s.prefs.voiceAiTidy, false);
+    expect(UiPrefs.load('${tmp.path}/devices/dev1').voiceAiTidy, false);
+  });
+
   testWidgets('input history switch is on by default and saves', (tester) async {
     await tester.pumpWidget(wrap(panel()));
     expect(find.text('记下写作面板发出去的话'), findsOneWidget);
@@ -458,6 +470,51 @@ void main() {
     await tester.pump();
     expect(find.byKey(const Key('theme-dropdown')), findsOneWidget);
     expect(UiPrefs.load('${tmp.path}/devices/dev1').settingsFolded, isFalse);
+  });
+
+  testWidgets('LLM 接入点: typed values save to local/llm.json on 测试, and 测试 reports the gateway', (tester) async {
+    final probed = <LlmEndpoint>[];
+    s.dispose();
+    s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs(), llmApi: _FakeLlm(probed));
+    await tester.pumpWidget(wrap(panel()));
+    await tester.enterText(find.byKey(const Key('llm-url')), 'localhost:28001');
+    await tester.enterText(find.byKey(const Key('llm-key')), 'wrong');
+    await tester.ensureVisible(find.byKey(const Key('llm-test')));
+    await tester.tap(find.byKey(const Key('llm-test')));
+    await tester.pump();
+    expect(find.text('key 不对'), findsOneWidget);
+    expect(probed.single, const LlmEndpoint(url: 'localhost:28001', key: 'wrong'));
+    expect(LlmEndpoint.load('${tmp.path}/local').key, 'wrong');
+
+    await tester.enterText(find.byKey(const Key('llm-key')), 'rl-k');
+    await tester.pump();
+    expect(find.byKey(const Key('llm-status')), findsNothing, reason: 'an edit clears the old result');
+    await tester.tap(find.byKey(const Key('llm-test')));
+    await tester.pump();
+    expect(find.textContaining('已连通'), findsOneWidget);
+    expect(find.textContaining('dictation'), findsOneWidget);
+    expect(s.llm, const LlmEndpoint(url: 'localhost:28001', key: 'rl-k'));
+    expect(LlmEndpoint.load('${tmp.path}/local'), s.llm);
+  });
+
+  testWidgets('LLM 接入点: a field left by focus saves, and a saved endpoint shows on open', (tester) async {
+    const LlmEndpoint(url: 'localhost:28001', key: 'rl-old').save('${tmp.path}/local');
+    s.dispose();
+    s = MainState(hub: hub, data: DataDir(tmp.path), prefs: UiPrefs());
+    await tester.pumpWidget(wrap(panel()));
+    expect(find.text('localhost:28001'), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('llm-url')), 'localhost:28002');
+    await tester.showKeyboard(find.byKey(const Key('llm-key')));
+    await tester.pump();
+    expect(LlmEndpoint.load('${tmp.path}/local').url, 'localhost:28002');
+    await tester.enterText(find.byKey(const Key('llm-key')), 'rl-new');
+    await tester.ensureVisible(find.byKey(const Key('settings-fold')));
+    await tester.tap(find.byKey(const Key('settings-fold'))); // folds with the key still being typed
+    await tester.pump();
+    expect(s.prefs.settingsFolded, isTrue);
+    await tester.pump();
+    expect(tester.takeException(), isNull);
+    expect(s.llm.key, 'rl-new');
   });
 
   testWidgets('a saved fold opens folded', (tester) async {
@@ -728,4 +785,15 @@ void main() {
     expect(panelWidth(1194), 597);
     expect(panelWidth(744), 372);
   });
+}
+
+class _FakeLlm extends LlmApi {
+  _FakeLlm(this.probed);
+  final List<LlmEndpoint> probed;
+
+  @override
+  Future<LlmProbe> probe(LlmEndpoint e) async {
+    probed.add(e);
+    return e.key == 'rl-k' ? const LlmProbeOk(['dictation'], Duration(milliseconds: 12)) : const LlmProbeFailed('key 不对');
+  }
 }

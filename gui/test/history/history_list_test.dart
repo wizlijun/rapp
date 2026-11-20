@@ -275,6 +275,44 @@ void main() {
     expect(File('${data.inputsDir('dev1')}/2026-11-15.jsonl').readAsStringSync(), isNot(contains('01B')));
   });
 
+  Map<String, Object?> aiRec(String id, String text, String original) => {
+        ...rec(id, '2026-11-15T09:00:00+09:00', text),
+        'source': 'voice',
+        'ai': {'app': 'dictation', 'original': original, 'result': text},
+      };
+
+  testWidgets('an AI row shows the AI badge', (tester) async {
+    day('dev1', '2026-11-15', [aiRec('01A', '我们明天开会。', '嗯我门明天开会'), rec('01B', '2026-11-15T09:01:00+09:00', 'plain')]);
+    final h = await load(tester);
+    await show(tester, h);
+    expect(find.descendant(of: find.byKey(const Key('ai-01A')), matching: find.text('AI')), findsOneWidget);
+    expect(find.byKey(const Key('ai-01B')), findsNothing);
+  });
+
+  testWidgets('the menu puts and copies the original', (tester) async {
+    day('dev1', '2026-11-15', [aiRec('01A', '我们明天开会。', '嗯我门明天开会'), rec('01B', '2026-11-15T09:01:00+09:00', 'plain')]);
+    final h = await load(tester);
+    final puts = <String>[], copies = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+      if (call.method == 'Clipboard.setData') copies.add((call.arguments as Map)['text'] as String);
+      return null;
+    });
+    addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
+    await show(tester, h, onPut: puts.add);
+    await menu(tester, '01A');
+    expect(find.text('原话放进输入框'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('put-original-01A')));
+    await tester.pumpAndSettle();
+    expect(puts, ['嗯我门明天开会']);
+    await menu(tester, '01A');
+    await tester.tap(find.byKey(const Key('copy-original-01A')));
+    await tester.pumpAndSettle();
+    expect(copies, ['嗯我门明天开会']);
+    await menu(tester, '01B');
+    expect(find.byKey(const Key('put-original-01B')), findsNothing);
+    expect(find.byKey(const Key('copy-original-01B')), findsNothing);
+  });
+
   testWidgets('drafts are marked 没发出', (tester) async {
     day('dev1', '2026-11-15', [
       rec('01A', '2026-11-15T09:00:00+09:00', 'half', kind: 'draft'),

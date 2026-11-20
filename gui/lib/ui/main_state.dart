@@ -13,6 +13,8 @@ import '../embed/remote_session.dart';
 import '../embed/session_port.dart';
 import '../embed/stream_choice.dart';
 import '../embed/voice_input.dart';
+import '../embed/voice_button.dart' show sendVoice, voiceBlocked;
+import '../embed/voice_tidy.dart';
 import '../embed/linux_speech.dart';
 import '../embed/voice_key_gate.dart';
 import '../embed/traffic_label.dart' show segments;
@@ -34,6 +36,7 @@ import 'pin_files.dart';
 import 'prefs.dart';
 import '../embed/composer_editor.dart' show ZoomKey;
 import 'project_positions.dart';
+import '../llm_api.dart';
 import 'projects.dart';
 import 'resources_state.dart';
 import 'session_model.dart';
@@ -135,6 +138,7 @@ class MainState extends ChangeNotifier {
     UnlockStore? unlockStore,
     void Function(String line)? log,
     VoiceInput? voice,
+    LlmApi? llmApi,
   })  : resources = ResourcesState(clock: clock),
         voice = voice ??
             (defaultTargetPlatform == TargetPlatform.iOS || defaultTargetPlatform == TargetPlatform.macOS
@@ -145,6 +149,8 @@ class MainState extends ChangeNotifier {
         unlockStore = unlockStore ?? UnlockStore(),
         _now = clock ?? DateTime.now,
         positions = ProjectPositions.load(data.localDir),
+        llm = LlmEndpoint.load(data.localDir),
+        llmApi = llmApi ?? const LlmApi(),
         _log = log ?? ((_) {}) {
     recorder = InputRecorder(data: () => data, enabled: () => prefs.inputHistory,
         recordsApp: (a) => this.profiles.resolve(a).recordInput,
@@ -203,6 +209,7 @@ class MainState extends ChangeNotifier {
     _flushPositions();
     final oldRoot = data.root;
     data = d;
+    llm = LlmEndpoint.load(d.localDir);
     final loaded = loadWorkspace(d.sharedDir);
     workspace = loaded.workspace;
     if (loaded.problem != null) hint = loaded.problem!;
@@ -312,6 +319,56 @@ class MainState extends ChangeNotifier {
 
   /// Embedded sessions by hub sid.
   final Map<Object, RemoteSession> remote = {};
+
+  // 长语音先让 AI 整理: one per session, keyed by sid like [remote]; a reconnect's swap moves it ([_dropOld]).
+  final Map<Object, VoiceTidy> _tidies = {};
+
+  /// [sid]'s tidy, made on first use.
+  VoiceTidy tidyOf(Object sid) => _tidies[sid] ??= VoiceTidy(
+        sid: sid,
+        endpoint: () => llm,
+        api: llmApi,
+        allowed: (s) => prefs.voiceAiTidy && llm.configured && !(remote[s]?.secureFocus ?? true),
+        send: (s, text, voice) {
+          final rs = remote[s], p = portOf(s);
+          if (rs == null || p == null) {
+            if (rs != null) unawaited(rs.composer.keep(text));
+            return voiceBlocked;
+          }
+          return sendVoice(state: this, session: rs, port: p, text: text, voice: voice);
+        },
+        edit: (s, text, ai) {
+          final c = remote[s]?.composer;
+          if (c == null) return;
+          unawaited(c.keep(text));
+          if (ai != null) c.pendingAi = ai;
+          c.open = true;
+        },
+        keep: (s, text) {
+          final c = remote[s]?.composer;
+          if (c != null) unawaited(c.keep(text));
+        },
+        log: debugPrint,
+      );
+
+  /// [sid]'s tidy if one was made.
+  VoiceTidy? tidyIfAny(Object sid) => _tidies[sid];
+
+  // The session [sid] goes for good: its tidy stops and hands back the original it was waiting with,
+  // for the caller to keep where the session's text goes (review 2026-11-20 #1, #2).
+  String? _endTidy(Object sid) {
+    final t = _tidies.remove(sid);
+    if (t == null) return null;
+    final original = t.end();
+    t.dispose();
+    return original;
+  }
+
+  // [text] (if any) into the draft of [sid], a session that stays.
+  void _keepIn(Object? sid, String? text) {
+    final c = sid == null ? null : remote[sid]?.composer;
+    if (text != null && c != null) unawaited(c.keep(text));
+  }
 
   /// Embedded sessions by `id/app`, in the order they were first opened. A record outlives its
   /// link: a disconnected one stays here, with its last frame, until the user ends it.
@@ -1486,6 +1543,7 @@ class MainState extends ChangeNotifier {
       if (fresh != null) {
         final start = _starts.remove(fresh);
         if (start != null) resources.linkDown(start);
+        _keepIn(r.lastSid, _endTidy(fresh));
         remote.remove(fresh)?.dispose();
         _sentFps.remove(fresh);
         _waiting.remove(fresh)?.timer.cancel();
@@ -1713,10 +1771,15 @@ class MainState extends ChangeNotifier {
     final oldGroups = groups;
     final old = r.lastSid;
     if (old != null) portOf(old)?.close(old); // reconnected but not swapped yet: the old session is still open
-    // Before a swap the old session is the one on show, the one written in.
+    // Before a swap the old session is the one on show, the one written in. A waiting tidy's
+    // original goes after the editor's text is read (an editor makes a keep asynchronous).
+    final originals = [
+      for (final sid in [r.sid, old])
+        if (sid != null) ?_endTidy(sid),
+    ];
     final shown = remote[old] ?? remote[r.sid];
     unawaited(recorder.sessionEnded(shown, _metaOf(r, shown),
-        record: shown?.recordsInput ?? profiles.resolve(r.app).recordInput));
+        record: shown?.recordsInput ?? profiles.resolve(r.app).recordInput, extra: originals));
     _releaseUnlockBusy(r);
     for (final sid in [r.sid, old]) {
       if (sid == null) continue;
@@ -1745,6 +1808,19 @@ class MainState extends ChangeNotifier {
     final gone = remote.remove(old);
     if (gone == null) return;
     final to = fresh == null ? null : remote[fresh];
+    final tidy = _tidies.remove(old);
+    if (tidy != null) {
+      if (to != null) {
+        _tidies.remove(fresh)?.dispose();
+        _tidies[fresh!] = tidy..moveTo(fresh);
+      } else {
+        // No successor yet (the old end came before the new open): into the old draft, which the
+        // record keeps for the next open (review 2026-11-20 #1).
+        final original = tidy.end();
+        tidy.dispose();
+        if (original != null) gone.composer.keepNow(original);
+      }
+    }
     final moved = to?.composer.adoptFrom(gone.composer);
     to?.adoptZoom(gone);
     recorder.detach(gone, to: to, moved: moved);
@@ -1912,6 +1988,8 @@ class MainState extends ChangeNotifier {
         notifyListeners();
         return;
       }
+      final original = _endTidy(s.sid);
+      if (original != null) remote[s.sid]?.composer.keepNow(original); // the record's draft keeps it
       remote.remove(s.sid)?.dispose();
       _starts.remove(s.sid);
       _quiet.add(s.sid);
@@ -2182,6 +2260,7 @@ class MainState extends ChangeNotifier {
     if (fresh != null && r.sid == fresh && old != null) {
       final start = _starts.remove(fresh);
       if (start != null) resources.linkDown(start);
+      _keepIn(old, _endTidy(fresh));
       remote.remove(fresh)?.dispose();
       _sentFps.remove(fresh);
       _waiting.remove(fresh)?.timer.cancel();
@@ -3069,6 +3148,12 @@ class MainState extends ChangeNotifier {
     _save();
   }
 
+  /// 「长语音先让 AI 整理」 on or off; saved.
+  void setVoiceAiTidy(bool v) {
+    prefs.voiceAiTidy = v;
+    _save();
+  }
+
   /// 「打开方式」 of [device]'s 终端 entry (`text` or `pixels`); saved.
   void setTermOpen(String device, String mode) {
     prefs.termOpen[device] = mode;
@@ -3113,6 +3198,22 @@ class MainState extends ChangeNotifier {
   void voiceLanguageHintDone() {
     prefs.voiceLanguageHintShown = true;
     _save();
+  }
+
+  /// The LLM gateway (全局设置 → LLM 接入点), `local/llm.json`; reread by [relocate].
+  LlmEndpoint llm;
+  final LlmApi llmApi;
+
+  /// Saves a changed endpoint; an unchanged one writes nothing.
+  void setLlm(LlmEndpoint e) {
+    if (e == llm) return;
+    llm = e;
+    try {
+      e.save(data.localDir);
+    } catch (x) {
+      hint = 'LLM 接入点没有保存：${_fsReason(x)}';
+    }
+    notifyListeners();
   }
 
   /// [prefs] changed outside a setter here (iOS 本机's 屏幕常亮): save them.
@@ -3703,6 +3804,10 @@ class MainState extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    for (final t in _tidies.values) {
+      t.dispose();
+    }
+    _tidies.clear();
     voice?.dispose();
     _voiceKeys.close();
     _voiceEnds.close();

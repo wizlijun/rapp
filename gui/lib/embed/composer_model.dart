@@ -22,16 +22,43 @@ class SubmitPieces extends Submit {
   final List<Map<String, Object>> pieces;
 }
 
+/// What the voice-input tidy (`dictation` on the LLM gateway) made of a voice text: [original] as heard,
+/// [result] as sent or put in the panel.
+class VoiceAi {
+  const VoiceAi({required this.app, required this.original, required this.result});
+  final String app;
+  final String original;
+  final String result;
+
+  Map<String, Object> toJson() => {'app': app, 'original': original, 'result': result};
+
+  @override
+  bool operator ==(Object other) =>
+      other is VoiceAi && other.app == app && other.original == original && other.result == result;
+
+  @override
+  int get hashCode => Object.hash(app, original, result);
+}
+
+/// A send that came from voice input; [ai] when the text is the tidy's.
+class VoiceOrigin {
+  const VoiceOrigin({this.ai});
+  final VoiceAi? ai;
+}
+
 /// One send: what was taken out of the editor, in the editor's order: text runs ([String], never empty)
 /// and blocks ([BlockChip]). Each part is one piece.
 class Outgoing {
-  Outgoing(List<Object> parts, {this.draftless = false}) : parts = List.unmodifiable(parts) {
+  Outgoing(List<Object> parts, {this.draftless = false, this.voice}) : parts = List.unmodifiable(parts) {
     assert(parts.every((p) => p is BlockChip || (p is String && p.isNotEmpty)));
   }
   final List<Object> parts;
 
   /// Not taken from the draft (a voice send): the draft's privacy and recall state are not its own.
   final bool draftless;
+
+  /// From voice input (and the tidy, when [VoiceOrigin.ai] is set); null for typed text.
+  final VoiceOrigin? voice;
 
   /// The blocks among [parts], in order.
   List<BlockChip> get blocks => [for (final p in parts) if (p is BlockChip) p];
@@ -95,10 +122,15 @@ class ComposerModel extends ChangeNotifier {
   int _draftEpoch = 0;
   set draft(String v) {
     _draftEpoch++;
+    if (v.isEmpty) pendingAi = null;
     if (_draft == v) return;
     _draft = v;
     onDraftChanged?.call(_plain(v));
   }
+
+  /// The tidy's text was put in the draft (the edit pick, or a voice send that could not go): the next panel
+  /// send is marked AI with this. Goes when the draft empties, when ↑/↓ brings in another text, and on a send.
+  VoiceAi? pendingAi;
 
   /// [draft] without the marks of the blocks held: what a record keeps.
   String get draftText => _plain(_draft);
@@ -534,6 +566,7 @@ class ComposerModel extends ChangeNotifier {
       final next = to < 0 ? (_kept.remove(-1) ?? '') : (_kept[to] ?? round[to]);
       onRecalled?.call(to < 0 ? null : round[to], _plain(_kept[-1] ?? ''));
       _idleTimer?.cancel();
+      pendingAi = null;
       draft = next;
       if (show != null) {
         show(next);
@@ -564,6 +597,7 @@ class ComposerModel extends ChangeNotifier {
     _toCheck = null;
     _idleTimer?.cancel();
     _setTaking(true);
+    final ai = pendingAi; // before the take: an editor emptied by it clears it
     final String text;
     try {
       if (_steps > 0) await _stepping; // a ↑ still putting its record in: that is what is sent
@@ -597,7 +631,8 @@ class ComposerModel extends ChangeNotifier {
       return SubmitReturn();
     }
     _lastSend = now;
-    final o = Outgoing(parts)..at = now;
+    final o = Outgoing(parts, voice: ai == null ? null : VoiceOrigin(ai: ai))..at = now;
+    pendingAi = null;
     onSubmitted?.call(o);
     draft = '';
     // The row holds them now; the ones deleted from the text leave the runner.
@@ -646,12 +681,13 @@ class ComposerModel extends ChangeNotifier {
 
   /// Sends [text] alone, as its own round: the draft, the editor and the held blocks stay as they
   /// are. Nothing happens while [busy] or when [text] is blank.
-  Submit submitText(String text) {
+  /// [voice] marks it as voice input (and AI) in its record.
+  Submit submitText(String text, {VoiceOrigin? voice}) {
     final t = text.trim();
     if (t.isEmpty || busy) return SubmitNothing();
     final now = _clock();
     _lastSend = now;
-    final o = Outgoing([t], draftless: true)..at = now;
+    final o = Outgoing([t], draftless: true, voice: voice)..at = now;
     onSubmitted?.call(o);
     _inFlight = o;
     sending = true;
@@ -661,12 +697,19 @@ class ComposerModel extends ChangeNotifier {
 
   /// Puts [text] at the very end of the draft, on its own line (a voice send that did not go). With
   /// an editor the live text is read and set back with it, so the caret does not matter.
+  /// [text] after the draft copy at once, past any editor: for a session that is going, whose
+  /// editor is not read again.
+  void keepNow(String text) {
+    final t = text.trim();
+    if (t.isNotEmpty) draft = draft.isEmpty ? t : '$draft\n$t';
+  }
+
   Future<void> keep(String text) async {
     final t = text.trim();
     if (t.isEmpty) return;
     final e = _editor;
     if (e == null) {
-      draft = draft.isEmpty ? t : '$draft\n$t';
+      keepNow(t);
       return;
     }
     final live = await e.read();
@@ -741,10 +784,11 @@ class ComposerModel extends ChangeNotifier {
     final made = <Outgoing, Outgoing>{
       for (final o in [...old._failed, ?old._inFlight])
         if (o.parts.skip(o.sent).whereType<String>().join() case final t when t.isNotEmpty)
-          o: Outgoing([t])..failure = o.failure ?? '没有发出去',
+          o: Outgoing([t], voice: o.voice)..failure = o.failure ?? '没有发出去',
     };
     _failed.insertAll(0, made.values);
     if (draft.isEmpty) draft = old.draftText;
+    pendingAi ??= old.pendingAi;
     final e = old._editor;
     if (e != null) {
       final before = draft;

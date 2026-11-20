@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -848,5 +849,37 @@ void main() {
     rs.dispose(); // MainState disposes the session right after
     await ended;
     expect([for (final l in lines()) '${l['kind']}:${l['text']}'], ['draft:typed just now']);
+  });
+
+  group('voice and AI sources (voice AI tidy §5.4)', () {
+    Future<Map<String, Object?>> sendOne(void Function(RemoteSession rs) go) async {
+      final rec = recorder();
+      final a = session(1, 'com.a');
+      rec.attach(a, () => meta('h1', 'com.a'), restore: true);
+      go(a);
+      a.composer.done(1, null);
+      await until(() => lines().length == 1);
+      return lines().single;
+    }
+
+    test('a voice send records source voice', () async {
+      final r = await sendOne((a) => a.composer.submitText('我们明天开会', voice: const VoiceOrigin()));
+      expect(r['source'], 'voice');
+      expect(r.containsKey('ai'), isFalse);
+    });
+
+    test('an AI send records ai', () async {
+      final r = await sendOne((a) => a.composer.submitText('我们明天开会。',
+          voice: const VoiceOrigin(
+              ai: VoiceAi(app: 'dictation', original: '嗯那个我门明天开会', result: '我们明天开会。'))));
+      expect(r['source'], 'voice');
+      expect(r['ai'], {'app': 'dictation', 'original': '嗯那个我门明天开会', 'result': '我们明天开会。'});
+    });
+
+    test('a typed send stays typed', () async {
+      final r = await sendOne((a) => unawaited(send(a, '打的字')));
+      expect(r['source'], 'typed');
+      expect(r.containsKey('ai'), isFalse);
+    });
   });
 }

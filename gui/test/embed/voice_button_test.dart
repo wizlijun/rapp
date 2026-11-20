@@ -792,6 +792,17 @@ void main() {
       debugDefaultTargetPlatformOverride = null;
     });
 
+    test('sendVoice keeps AI text with pendingAi when busy', () async {
+      const ai = VoiceAi(app: 'dictation', original: '嗯那个我门明天开会', result: '我们明天开会。');
+      rs.composer.submitText('还在路上'); // in flight: busy
+      final hint = sendVoice(
+          state: es, session: rs, port: port, text: '我们明天开会。', voice: const VoiceOrigin(ai: ai));
+      await Future<void>.delayed(Duration.zero);
+      expect(hint, voiceBusy);
+      expect(rs.composer.draft, endsWith('我们明天开会。'));
+      expect(rs.composer.pendingAi, ai);
+    });
+
     test('start without a ring holds and finish(send) sends', () async {
       voice.stopResult = '你好';
       await h.start();
@@ -822,6 +833,84 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       expect(rs.composer.draft, contains('你好'));
       expect(sends(), isEmpty);
+    });
+
+    group('tidy and onPress hooks (voice AI tidy §5.2)', () {
+      late List<(String, VoicePick)> took;
+      late List<String> sent, edited, order;
+      var take = true;
+      VoiceHold hold() => VoiceHold(
+            voice: voice,
+            composer: () => rs.composer,
+            send: (t) {
+              sent.add(t);
+              return null;
+            },
+            edit: edited.add,
+            onEnd: ends.add,
+            languageHintDue: () => true,
+            languageHintShown: () => shown++,
+            tidy: (t, p) {
+              took.add((t, p));
+              return take;
+            },
+            onPress: () => order.add('press:${voice.starts}'),
+          );
+      setUp(() {
+        took = [];
+        sent = [];
+        edited = [];
+        order = [];
+        take = true;
+        h.dispose();
+        h = hold();
+      });
+
+      test('a taken release neither sends nor edits', () async {
+        voice.stopResult = '这是一段很长很长的语音输入文字';
+        await h.start();
+        h.finish(VoicePick.send);
+        await Future<void>.delayed(Duration.zero);
+        expect(took, [('这是一段很长很长的语音输入文字', VoicePick.send)]);
+        expect(sent, isEmpty);
+        expect(edited, isEmpty);
+        expect(ends, [VoicePick.send]);
+        expect(h.hint, isNull);
+        expect(shown, 0);
+      });
+
+      test('a declined release sends as before', () async {
+        take = false;
+        voice.stopResult = '你好';
+        await h.start();
+        h.finish(VoicePick.send);
+        await Future<void>.delayed(Duration.zero);
+        expect(sent, ['你好']);
+      });
+
+      test('tidy gets the edit pick', () async {
+        voice.stopResult = '这是一段很长很长的语音输入文字';
+        await h.start();
+        h.finish(VoicePick.edit);
+        await Future<void>.delayed(Duration.zero);
+        expect(took.single.$2, VoicePick.edit);
+        expect(edited, isEmpty);
+      });
+
+      test('blank text never reaches tidy', () async {
+        voice.stopResult = '  ';
+        await h.start();
+        h.finish(VoicePick.edit);
+        await Future<void>.delayed(Duration.zero);
+        expect(took, isEmpty);
+        expect(h.hint, voiceBlank);
+      });
+
+      test('a press calls onPress before start', () async {
+        await h.start();
+        expect(order, ['press:0']);
+        expect(voice.starts, 1);
+      });
     });
 
     test('choose changes the pick without haptics', () async {

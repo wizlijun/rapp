@@ -26,6 +26,7 @@ class UiPrefs {
     this.termKeyRow = false,
     bool? appKeyRow,
     this.termFit = true,
+    this.voiceAiTidy = true,
     this.keepAwake = true,
     this.rimeEnabled = true,
     this.rimeDictionary = 'bundled',
@@ -60,6 +61,10 @@ class UiPrefs {
 
   /// 跟着我的窗口 (`term_fit`): the host's terminal window follows this console's size. Missing or bad means on.
   bool termFit;
+
+  /// 长语音先让 AI 整理 (`voice_ai_tidy`): a voice text over 10 characters goes through the LLM 接入点 first.
+  /// Missing or bad means on.
+  bool voiceAiTidy;
 
   /// 屏幕常亮 (`keep_awake`, iOS): no auto-lock while a live session is on the stage. Missing or bad means on.
   bool keepAwake;
@@ -116,6 +121,7 @@ class UiPrefs {
       final kr = j['term_key_row'];
       final ak = j['app_key_row'];
       final tf = j['term_fit'];
+      final vt = j['voice_ai_tidy'];
       final ka = j['keep_awake'];
       final re = j['rime_enabled'];
       final rd = j['rime_dictionary'];
@@ -138,6 +144,7 @@ class UiPrefs {
         termKeyRow: kr is bool ? kr : false,
         appKeyRow: ak is bool ? ak : null,
         termFit: tf is bool ? tf : true,
+        voiceAiTidy: vt is bool ? vt : true,
         keepAwake: ka is bool ? ka : true,
         rimeEnabled: re is bool ? re : true,
         rimeDictionary: rd == 'user' ? 'user' : 'bundled',
@@ -178,6 +185,7 @@ class UiPrefs {
         'term_key_row': termKeyRow,
         'app_key_row': appKeyRow,
         'term_fit': termFit,
+        'voice_ai_tidy': voiceAiTidy,
         'keep_awake': keepAwake,
         'rime_enabled': rimeEnabled,
         'rime_dictionary': rimeDictionary,

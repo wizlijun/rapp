@@ -82,7 +82,8 @@
 | `blocks` | 块：种类、标签、大小、文件名。粘贴成块的长文字带全文（`text`）；图片和文件不带内容 |
 | `result` | `sent`、`partial`（带 `sentPieces`：发出了前几块）、`failed` |
 | `after` | 发完有没有补回车：`return` 或 `none` |
-| `source` | 现在都是 `typed`；留给以后的语音输入 |
+| `source` | `typed`（在写字板里打的、草稿）或 `voice`（按住说话直接发出的；写字板里发出的 AI 整理结果也是 `voice`）|
+| `ai` | 可选，只在发出的是 AI 整理结果时有：`{"app":"dictation","original":原话,"result":整理后}`（见 `2026-11-20-rapp-voice-ai-tidy-design.md` §5.4）|
 
 `kind: "draft"` 的记录没有 `result` 和 `after`。
 

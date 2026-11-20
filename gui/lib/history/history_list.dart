@@ -192,6 +192,7 @@ class _HistoryRow extends StatelessWidget {
     final e = entry, w = view.widget;
     final t = RappTokens.of(context);
     Icon icon(IconData i) => Icon(i, size: 16, color: t.muted);
+    final original = e.aiOriginal;
     final pick = await showRappMenu<String>(
       context,
       position: at,
@@ -202,6 +203,16 @@ class _HistoryRow extends StatelessWidget {
             label: '放进输入框',
             enabled: w.onPut != null,
             lead: icon(Icons.keyboard_return)),
+        if (original != null) ...[
+          RappMenuItem(
+              key: Key('put-original-${e.id}'),
+              value: 'put-original',
+              label: '原话放进输入框',
+              enabled: w.onPut != null,
+              lead: icon(Icons.record_voice_over_outlined)),
+          RappMenuItem(
+              key: Key('copy-original-${e.id}'), value: 'copy-original', label: '复制原话', lead: icon(Icons.copy_all)),
+        ],
         RappMenuItem(key: Key('copy-${e.id}'), value: 'copy', label: '复制到本机', lead: icon(Icons.copy)),
         if (e.mine) ...[
           const RappMenuItem.divider(),
@@ -215,6 +226,10 @@ class _HistoryRow extends StatelessWidget {
         w.onPut?.call(e.text);
       case 'copy':
         await Clipboard.setData(ClipboardData(text: e.text));
+      case 'put-original':
+        w.onPut?.call(original!);
+      case 'copy-original':
+        await Clipboard.setData(ClipboardData(text: original!));
       case 'remove':
         await w.history.remove(e);
     }
@@ -281,6 +296,16 @@ class _HistoryRow extends StatelessWidget {
                 ],
               ),
             ),
+            // The text is the AI's; the heard one is in the ⋮ menu.
+            if (e.aiOriginal != null) ...[
+              const SizedBox(width: 8),
+              Container(
+                key: Key('ai-${e.id}'),
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                decoration: BoxDecoration(border: Border.all(color: t.muted), borderRadius: BorderRadius.circular(t.r)),
+                child: Text('AI', style: TextStyle(color: t.on, fontSize: t.textSize - 2)),
+              ),
+            ],
             if (e.kind == 'draft') ...[
               const SizedBox(width: 8),
               Container(

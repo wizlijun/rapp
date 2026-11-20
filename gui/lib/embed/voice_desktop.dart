@@ -93,6 +93,8 @@ class _DesktopVoiceState extends State<DesktopVoice> with SingleTickerProviderSt
         c.open = true;
       },
       composer: () => widget.session.composer,
+      tidy: (text, pick) => widget.state.tidyOf(widget.session.sid).begin(text, pick),
+      onPress: () => widget.state.tidyIfAny(widget.session.sid)?.interrupt(),
       onEnd: _ended,
       languageHintDue: () => !widget.state.prefs.voiceLanguageHintShown,
       languageHintShown: widget.state.voiceLanguageHintDone,

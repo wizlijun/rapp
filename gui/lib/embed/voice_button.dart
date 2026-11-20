@@ -66,26 +66,26 @@ String? sendVoice({
   required RemoteSession session,
   required SessionPort port,
   required String text,
+  VoiceOrigin voice = const VoiceOrigin(),
 }) {
   final t = text.trim();
   if (t.isEmpty) return voiceBlank;
   final c = session.composer;
-  if (state.isDetaching(session.sid) || state.sendBlocked(session.sid)) {
+  String keep(String hint) {
     unawaited(c.keep(t));
-    return voiceBlocked;
+    if (voice.ai != null) c.pendingAi = voice.ai; // sent from the panel later, it is still the AI's text
+    return hint;
   }
-  if (c.busy) {
-    unawaited(c.keep(t));
-    return voiceBusy;
-  }
-  switch (c.submitText(t)) {
+
+  if (state.isDetaching(session.sid) || state.sendBlocked(session.sid)) return keep(voiceBlocked);
+  if (c.busy) return keep(voiceBusy);
+  switch (c.submitText(t, voice: voice)) {
     case SubmitPieces(:final pieces):
       session.prepareInput();
       port.composerSend(session.sid, pieces);
       return null;
     case _:
-      unawaited(c.keep(t));
-      return voiceBusy;
+      return keep(voiceBusy);
   }
 }
 
@@ -113,7 +113,16 @@ class VoiceHold extends ChangeNotifier {
     this.onEnd,
     this.languageHintDue,
     this.languageHintShown,
+    this.tidy,
+    this.onPress,
   });
+
+  /// Offered each non-blank text a release gives (send or edit pick); true means it took the text (the AI tidy
+  /// runs and ends the send or edit itself), and nothing else happens here.
+  final bool Function(String text, VoicePick pick)? tidy;
+
+  /// Called at each press, before the recognizer starts (a tidy still running gives way to it).
+  final VoidCallback? onPress;
 
   /// Called once per press when it is over: with the pick after a release has finished, with null when the start
   /// did not give `ok`, on a quick tap, or when [dispose] cuts a press short.
@@ -183,6 +192,7 @@ class VoiceHold extends ChangeNotifier {
   Future<void> start() async {
     if (_pressed || holding || voice.phase != VoicePhase.idle) return;
     _pressed = true;
+    onPress?.call();
     _open = true;
     _pressedFor = composer();
     pick = VoicePick.send;
@@ -308,7 +318,10 @@ class VoiceHold extends ChangeNotifier {
           if (draft != null) unawaited(draft.keep(text));
           return;
         }
-        if (which == VoicePick.send) {
+        // Taken by the tidy: it sends or edits when it is done, and no language hint shows over its card.
+        final taken = text.trim().isNotEmpty && (tidy?.call(text, which) ?? false);
+        if (taken) {
+        } else if (which == VoicePick.send) {
           _setHint(send(text));
         } else if (text.trim().isEmpty) {
           _setHint(voiceBlank);
@@ -317,7 +330,7 @@ class VoiceHold extends ChangeNotifier {
         }
         // R14, narrowed on macOS: an 编辑 opens the panel, which takes the stage row in the same frame, so the
         // hint could never paint there; it stays due for the next send.
-        if (hint == null && (which == VoicePick.send || _ios) && (languageHintDue?.call() ?? false)) {
+        if (!taken && hint == null && (which == VoicePick.send || _ios) && (languageHintDue?.call() ?? false)) {
           _setHint(_linux ? linuxVoiceLanguageHint : voiceLanguageHint, settings: _linux ? VoiceSettings.none : VoiceSettings.language);
           languageHintShown?.call();
         }
