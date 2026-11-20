@@ -81,6 +81,14 @@ void main() {
     expect(cc.mods, latchCtrl);
   });
 
+  test('macLetterCodes: 26 letters, each ⌃-letter key carries its code', () {
+    expect(macLetterCodes.length, 26);
+    const ctrlKeys = {'cc': 'c', 'cd': 'd', 'cr': 'r', 'co': 'o', 'ct': 't', 'cb': 'b'};
+    for (final e in ctrlKeys.entries) {
+      expect(barKeys[e.key]!.code, macLetterCodes[e.value], reason: e.key);
+    }
+  });
+
   test('key table: arrows swipe to their partner and repeat; non-send keys carry no wire or code', () {
     expect(barKeys['left']!.alt, 'home');
     expect(barKeys['up']!.alt, 'pgup');
