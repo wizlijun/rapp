@@ -37,6 +37,74 @@ const _pad = 8.0;
 /// The row's whole width, all twelve keys showing; a narrower stage scrolls it.
 final appKeyRowWidth = appKeyRowKeys.length * appKeySize.width + (appKeyRowKeys.length - 1) * _gap + 2 * _pad;
 
+/// What an app session's modifier keys send to A, by modifier bit (down and up, one key code each).
+const modifierCodes = <int, int>{latchCmd: 55, latchOpt: 58, latchCtrl: 59, latchShift: 56};
+
+/// Keeps A's modifiers in step with a [ModifierLatch] for one app session: a down for each modifier turned on, an up
+/// for each turned off, the hardware keyboard's latch told each change; and sends the plain keys with the latch.
+/// [start] binds it, [stop] lets go of everything held (every down on A gets its up).
+class AppKeySender {
+  AppKeySender({required this.sid, required this.latch, required this.port});
+
+  final Object sid;
+  final ModifierLatch latch;
+  final SessionPort? Function() port;
+
+  /// The modifiers A was sent a down for (and has not had the up of).
+  int _held = 0;
+
+  StreamSubscription<SessionEvent>? _events;
+
+  void start() {
+    _held = 0;
+    latch.addListener(_sync);
+    _events = port()?.events.listen(_onEvent);
+    _sync();
+  }
+
+  /// The runner's key router sent a hardware key with the latch and dropped it (`latch_used`): the once modifiers go
+  /// up, and the locked ones go back to the runner for the next key. Another session's is not this one's.
+  void _onEvent(SessionEvent e) {
+    if (e is! LatchUsedEvent || e.sid != sid) return;
+    final before = latch.flags;
+    latch.used(); // a change sends the new latch through _sync
+    if (latch.flags == before && before != 0) port()?.latch(sid, before);
+  }
+
+  /// Every down on A gets its up: whatever the latch held goes up for the session it went down for.
+  void stop() {
+    _events?.cancel();
+    _events = null;
+    latch.releaseAll();
+    _sync();
+    latch.removeListener(_sync);
+  }
+
+  /// Tells A the difference between what it holds and what the latch has on: a down for each modifier turned on,
+  /// an up for each turned off (each with the flags that are on after it), then the hardware keyboard's latch.
+  void _sync() {
+    final want = latch.flags;
+    if (want == _held) return;
+    final p = port();
+    var on = _held;
+    for (final e in modifierCodes.entries) {
+      final bit = e.key;
+      if ((on & bit != 0) == (want & bit != 0)) continue;
+      final down = want & bit != 0;
+      on = down ? on | bit : on & ~bit;
+      p?.keyEvent(sid, e.value, on, down: down);
+    }
+    _held = want;
+    p?.latch(sid, want);
+  }
+
+  /// A plain key: [code] goes with the modifiers on, which are then used up.
+  void press(int code, {int mods = 0}) {
+    port()?.key(sid, code, mods | latch.flags);
+    latch.used();
+  }
+}
+
 class AppKeyRow extends StatefulWidget {
   const AppKeyRow({super.key, required this.state, required this.sid, required this.latch});
 
@@ -49,15 +117,7 @@ class AppKeyRow extends StatefulWidget {
 }
 
 class _AppKeyRowState extends State<AppKeyRow> {
-  late Object _sid;
-  late ModifierLatch _latch;
-
-  /// The modifiers A was sent a down for (and has not had the up of).
-  int _held = 0;
-
-  StreamSubscription<SessionEvent>? _events;
-
-  SessionPort? get _port => widget.state.portOf(_sid);
+  late AppKeySender _sender;
 
   @override
   void initState() {
@@ -66,78 +126,37 @@ class _AppKeyRowState extends State<AppKeyRow> {
   }
 
   void _bind() {
-    _sid = widget.sid;
-    _latch = widget.latch;
-    _held = 0;
-    _latch.addListener(_sync);
-    _events = _port?.events.listen(_onEvent);
-    _sync();
-  }
-
-  /// The runner's key router sent a hardware key with the latch and dropped it (`latch_used`): the once modifiers go
-  /// up, and the locked ones go back to the runner for the next key. Another session's is not this row's.
-  void _onEvent(SessionEvent e) {
-    if (e is! LatchUsedEvent || e.sid != _sid) return;
-    final before = _latch.flags;
-    _latch.used(); // a change sends the new latch through _sync
-    if (_latch.flags == before && before != 0) _port?.latch(_sid, before);
-  }
-
-  /// Every down on A gets its up: whatever the latch held goes up for the session it went down for.
-  void _unbind() {
-    _events?.cancel();
-    _events = null;
-    _latch.releaseAll();
-    _sync();
-    _latch.removeListener(_sync);
+    final sid = widget.sid;
+    _sender = AppKeySender(sid: sid, latch: widget.latch, port: () => widget.state.portOf(sid))..start();
   }
 
   @override
   void didUpdateWidget(AppKeyRow old) {
     super.didUpdateWidget(old);
     if (old.sid != widget.sid || !identical(old.latch, widget.latch)) {
-      _unbind();
+      _sender.stop();
       _bind();
     }
   }
 
   @override
   void dispose() {
-    _unbind();
+    _sender.stop();
     super.dispose();
-  }
-
-  /// Tells A the difference between what it holds and what the latch has on: a down for each modifier turned on,
-  /// an up for each turned off (each with the flags that are on after it), then the hardware keyboard's latch.
-  void _sync() {
-    final want = _latch.flags;
-    if (want == _held) return;
-    final port = _port;
-    var on = _held;
-    for (final k in appKeyRowKeys) {
-      final bit = k.bit;
-      if (bit == null || (on & bit != 0) == (want & bit != 0)) continue;
-      final down = want & bit != 0;
-      on = down ? on | bit : on & ~bit;
-      port?.keyEvent(_sid, k.code, on, down: down);
-    }
-    _held = want;
-    port?.latch(_sid, want);
   }
 
   void _press(AppKey k) {
     final bit = k.bit;
     if (bit != null) {
-      _latch.tap(bit);
+      widget.latch.tap(bit);
       return;
     }
-    _port?.key(_sid, k.code, _latch.flags);
-    _latch.used();
+    _sender.press(k.code);
   }
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-        listenable: _latch,
+        listenable: widget.latch,
         builder: (context, _) => SingleChildScrollView(
           scrollDirection: Axis.horizontal,
           padding: const EdgeInsets.all(_pad),
@@ -151,7 +170,7 @@ class _AppKeyRowState extends State<AppKeyRow> {
                   label: k.label,
                   spoken: k.spoken,
                   modifier: k.bit != null,
-                  state: k.bit == null ? LatchState.off : _latch.of(k.bit!),
+                  state: k.bit == null ? LatchState.off : widget.latch.of(k.bit!),
                   onTap: () => _press(k),
                 ),
               ],

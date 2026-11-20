@@ -3191,6 +3191,18 @@ class MainState extends ChangeNotifier {
     _save();
   }
 
+  /// 按键区's ⋯: the second row open or closed; saved.
+  void setKeyBarMore(bool v) {
+    prefs.keyBarMore = v;
+    _save();
+  }
+
+  /// 按键区's ⊙: the bar cut to a narrow strip or whole again; saved.
+  void setKeyBarSlim(bool v) {
+    prefs.keyBarSlim = v;
+    _save();
+  }
+
   /// 「跟着我的窗口」: the host's terminal window follows this console on or off; saved.
   void setTermFit(bool v) {
     prefs.termFit = v;

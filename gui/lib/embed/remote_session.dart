@@ -6,6 +6,7 @@ import '../platform_caps.dart';
 import 'app_profile.dart';
 import 'composer_model.dart';
 import 'geometry.dart' show contentSize;
+import 'modifier_latch.dart';
 import 'resize_policy.dart';
 import 'session_port.dart';
 import 'stream_choice.dart';
@@ -50,6 +51,9 @@ class RemoteSession extends ChangeNotifier {
 
   /// A terminal's key row ⌃ is lit: the next key goes with Ctrl (a letter as `Ctrl-<letter>`), then it goes out.
   final termCtrl = ValueNotifier<bool>(false);
+
+  /// A terminal's key bar modifiers (⌃ ⌥, sticky); the app's live in [MainState.appLatch].
+  final keyLatch = ModifierLatch();
 
   /// Whether a typed letter opens the writing panel. A panel opened by a letter and closed unused means the
   /// user wants the app's own keys (vim, y/n, a password): off until they open the panel themselves.
@@ -508,6 +512,7 @@ class RemoteSession extends ChangeNotifier {
     }
     _zooms.dispose();
     termCtrl.dispose();
+    keyLatch.dispose();
     policy.dispose();
     composer.removeListener(_composerChanged);
     composer.dispose();

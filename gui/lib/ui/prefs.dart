@@ -24,6 +24,8 @@ class UiPrefs {
     this.autoSaveTraffic = true,
     this.inputHistory = true,
     this.termKeyRow = false,
+    this.keyBarMore = false,
+    this.keyBarSlim = false,
     bool? appKeyRow,
     this.termFit = true,
     this.voiceAiTidy = true,
@@ -54,6 +56,12 @@ class UiPrefs {
 
   /// 按键排 (`term_key_row`): the six big keys on a terminal's stage, on this console. Missing or bad means off.
   bool termKeyRow;
+
+  /// 按键区 (iOS): the second row is open (`key_bar_more`). Missing or bad means closed.
+  bool keyBarMore;
+
+  /// 按键区 (iOS): the bar is cut to Esc, ⇧Tab and ⊙ (`key_bar_slim`). Missing or bad means full.
+  bool keyBarSlim;
 
   /// 按键排 over an app session (`app_key_row`, iPad spec §8.3): Esc Tab ⌘ ⌥ ⌃ ⇧ ← ↑ ↓ → 删除 回车 with sticky
   /// modifiers. Missing or bad means on on iOS, off everywhere else.
@@ -142,6 +150,8 @@ class UiPrefs {
         autoSaveTraffic: save is bool ? save : true,
         inputHistory: ih is bool ? ih : true,
         termKeyRow: kr is bool ? kr : false,
+        keyBarMore: j['key_bar_more'] == true,
+        keyBarSlim: j['key_bar_slim'] == true,
         appKeyRow: ak is bool ? ak : null,
         termFit: tf is bool ? tf : true,
         voiceAiTidy: vt is bool ? vt : true,
@@ -183,6 +193,8 @@ class UiPrefs {
         'auto_save_traffic': autoSaveTraffic,
         'input_history': inputHistory,
         'term_key_row': termKeyRow,
+        'key_bar_more': keyBarMore,
+        'key_bar_slim': keyBarSlim,
         'app_key_row': appKeyRow,
         'term_fit': termFit,
         'voice_ai_tidy': voiceAiTidy,
