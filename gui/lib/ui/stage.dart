@@ -230,7 +230,7 @@ class Stage extends StatelessWidget {
           final notice = state.hostNotice;
           final offline = rec != null && rec.frozen && picture ? offlineBarFor(state, rec) : null;
           final layer = !full && (picture || (rs != null && rs.detached)) && rs != null && port != null;
-          // iOS: a terminal app keeps the key bar with the panel closed, so its picture goes up as a terminal's.
+          // iOS: a terminal app keeps the key bar with the panel closed, so its picture goes up by the bar height (never the open lift).
           if (_ios && layer && keyBarWhenClosed(rs, port)) {
             stage = _lifted(state, rs, stage, bar: keyBarHeightOf(state, rs, c.maxWidth), appBar: true);
           }

@@ -789,3 +789,7 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [ ] 4. 日志页能看到 `ports` 一行，里面有 `{"id","port","local":28001}`；回前台后能看到 `ports_relisten`。
 - [ ] 5. 杀掉 app 再开（Mac 先不动）：日志里第一行 `ports` 就带上次的映射（从 `maps.json` 读的），不用等问到。
 - [ ] 6. Mac 上的 hub 不开 28000 段（`lsof -iTCP:28001 -sTCP:LISTEN` 只有 rapp-service）。
+
+## iOS 输入/收起 + 按键区（feat/ios-input-toggle，2026-11-21）
+- 实机检查：规格 `docs/superpowers/specs/2026-11-21-rapp-ios-input-toggle-design.md` §7 第 1–22 条，Duo 和 iPad 各一遍
+- 以后再做：App 里 ⌃ 锁住时按「复制」发出的是 ⌃⌘C；AI 整理卡片开合时跟着 IosDock 的动画走，不跳；PullDown 和 FloatingComposer 的回弹代码合成一份；在 Caps Lock 下按 ⌥+字母大小写
