@@ -744,3 +744,11 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [x] 修复 GTK 分离窗口组字期间误召回历史、排队发送或执行快捷键；补草稿历史与 Linux 原生通道回写回归。
 - [x] Flutter 全量 2506 通过、15 跳过；analyze 无 error/warning。GTK 私有 Broadway、构建/启动器夹具通过；Linux GUI/全部 Rust 组件构建成功，14 个 ELF 依赖解析通过，无图形隔离 bundle 检查通过。
 - 产物在 `gui/build/linux/x64/release/bundle/`。本轮未发布或安装；真实 macOS 对端、物理输入法和多屏操作未验收。宿主既有限制及首轮 Wayland 采集超时的环境说明见 [对齐记录](../docs/superpowers/plans/2026-11-20-linux-0151-parity.md)。
+
+## Linux 0.15.2 发布与安装（2026-11-20）
+
+- [x] 用户要求发版并安装后，提交并推送 main `8ded36d2` 与 `v0.15.2` 标签。干净 worktree `rapp-build-0152` 构建，产物在 `dist/linux-0.15.2/`；Arch/便携包 37 个文件一致，14 个 ELF 依赖、源码提交、Flutter 引擎摘要及隔离 bundle 检查通过。
+- [x] [v0.15.2 Release](https://github.com/wizlijun/rapp/releases/tag/v0.15.2) 已公开，三个资产大小/SHA256 与本地一致，匿名下载校验清单一致。安装包 SHA256：`4c4d3c02a8ed4dcab60432db4171e28a4b3d690996342d2b10d6d359b0cc134d`。使用 `--latest=false`；macOS Latest 仍为 v0.15.1，三个 macOS 附件 ID/大小/摘要均未改变。
+- [x] 网站 56 条发布快照已推送（`d015091a`），构建及 8 项测试通过。线上 `releases.mjs` 与源码一致，用匿名 GitHub API 验证选中 Linux 0.15.2 / macOS 0.15.1。
+- [ ] 网站备用静态快照部署待 Cloudflare 授权：本机无登录凭据或 API token，正式 deploy 命令被拒绝；已发起设备授权。
+- [ ] 本机安装待管理员认证：已发起 `pkexec pacman -U`，尚未完成；当前已安装版本仍为 0.14.13-1，服务及 GUI 尚未重启。
