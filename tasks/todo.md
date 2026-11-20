@@ -751,4 +751,14 @@ Linux 服务生命周期使用 systemd，升级沿用系统安装包/完整便�
 - [x] [v0.15.2 Release](https://github.com/wizlijun/rapp/releases/tag/v0.15.2) 已公开，三个资产大小/SHA256 与本地一致，匿名下载校验清单一致。安装包 SHA256：`4c4d3c02a8ed4dcab60432db4171e28a4b3d690996342d2b10d6d359b0cc134d`。使用 `--latest=false`；macOS Latest 仍为 v0.15.1，三个 macOS 附件 ID/大小/摘要均未改变。
 - [x] 网站 56 条发布快照已推送（`d015091a`），构建及 8 项测试通过。线上 `releases.mjs` 与源码一致，用匿名 GitHub API 验证选中 Linux 0.15.2 / macOS 0.15.1。
 - [ ] 网站备用静态快照部署待 Cloudflare 授权：本机无登录凭据或 API token，正式 deploy 命令被拒绝；已发起设备授权。
-- [ ] 本机安装待管理员认证：已发起 `pkexec pacman -U`，尚未完成；当前已安装版本仍为 0.14.13-1，服务及 GUI 尚未重启。
+- [x] 随后管理员认证完成；下一轮核验本机已安装 0.15.2-1，67 个包文件无改动。服务当时仍是旧进程，GUI 已停止，服务重启纳入后续 0.15.4 安装流程。
+
+## Linux 0.15.4 对齐 macOS 0.15.3 与发布（2026-11-20）
+
+- [x] `git pull --ff-only` 更新至 `b248fc66`，同步单行输入历史、⋮ / 右键菜单、悬停全文和紧凑范围按钮；补 Linux 平台回归。
+- [x] 修复 320px 历史面板中多行草稿的 46px 溢出：时间列宽度不超过整行三分之一。Linux / macOS 菜单回填与全文复制回归通过，完整 Flutter 2518 通过、15 跳过；analyze 无 error/warning，GTK 原生回归通过。
+- [x] 源码 `98ab8551` 与 `v0.15.4` 标签已推送。干净 worktree `rapp-build-0154` 构建，产物在 `dist/linux-0.15.4/`；Arch/便携包 37 个文件一致、14 个 ELF 依赖、源码/引擎摘要及隔离 bundle 检查通过。
+- [x] [v0.15.4 Release](https://github.com/wizlijun/rapp/releases/tag/v0.15.4) 已公开，三个资产大小/SHA256 与本地一致，匿名下载校验清单一致。安装包 SHA256：`2e4f3fee9041564d9d85deb0079d0d0a8f061ed74d7085ad2a4efee50314030a`。macOS Latest 保持 v0.15.3，macOS 三个附件 ID/大小/摘要未变。
+- [x] 网站 58 条发布快照已推送（`1e778e01`），构建及 8 项测试通过；线上下载模块与源码一致，匿名 API 验证选中 Linux 0.15.4 / macOS 0.15.3。备用静态快照部署仍缺 Cloudflare 登录凭据。
+- [ ] 已发起 0.15.4 系统安装，等待本机管理员认证。临时用户服务 `rapp-finish-install-0154` 将在包安装完成后校验 37 个文件、运行 `pacman -Qkk` 并重启后台服务；结果写入 `.build-logs/linux-0154-install-result.json`。未获得成功结果前不声称安装完成。
+- 对齐范围与设备验收边界见 [记录](../docs/superpowers/plans/2026-11-20-linux-0154-parity.md)。
