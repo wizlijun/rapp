@@ -619,6 +619,7 @@ class _UndoAll extends Action<UndoTextIntent> {
 
 /// A latched modifier catches a letter typed at the caret: the new value is the old one with exactly one ASCII letter
 /// added there, inserted or as a fresh one-letter composing range. [EditorHandlers.onLetter] true: the old value stays.
+// A single-letter paste or autocorrect insert cannot be told apart from typing.
 class _LetterCatcher extends TextInputFormatter {
   _LetterCatcher(this.editor);
 

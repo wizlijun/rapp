@@ -113,6 +113,53 @@ void main() {
     });
   });
 
+  group('onLetter, hardware keys', () {
+    Future<TextField> open(WidgetTester tester) async {
+      await tester.pumpWidget(_host(ed));
+      ed.focus();
+      await tester.pump();
+      return tester.widget<TextField>(find.byType(TextField));
+    }
+
+    testWidgets('plain r is caught: onLetter r, the key is handled, text unchanged', (tester) async {
+      final f = await open(tester);
+      log.takeLetters = true;
+      expect(await simulateKeyDownEvent(LogicalKeyboardKey.keyR), isTrue);
+      await simulateKeyUpEvent(LogicalKeyboardKey.keyR);
+      expect(log.letters, ['r']);
+      expect(f.controller!.text, '');
+    });
+
+    testWidgets('Shift+r is caught as R', (tester) async {
+      await open(tester);
+      log.takeLetters = true;
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyR);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      expect(log.letters, ['R']);
+    });
+
+    testWidgets('Ctrl+r held is not caught', (tester) async {
+      await open(tester);
+      log.takeLetters = true;
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyR);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      expect(log.letters, isEmpty);
+    });
+
+    testWidgets('a letter while composing is not caught', (tester) async {
+      await open(tester);
+      log.takeLetters = true;
+      tester.testTextInput.updateEditingValue(const TextEditingValue(
+          text: 'ni', selection: TextSelection.collapsed(offset: 2), composing: TextRange(start: 0, end: 2)));
+      await tester.pump();
+      log.letters.clear();
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyR);
+      expect(log.letters, isEmpty);
+    });
+  });
+
   testWidgets('native handoff prevents the old editor from regaining input', (tester) async {
     await tester.pumpWidget(_host(ed));
     ed.setText('retained draft');
@@ -632,6 +679,31 @@ void main() {
       ed.dispose();
       expect(fake.calls.last, 'detach');
       expect(fake.owner, isNull);
+    });
+
+    rimeTest('a declined single letter with no preedit calls onLetter; true drops it, false inserts it', (tester) async {
+      await focused(tester);
+      log.takeLetters = true;
+      fake.push(const RimeUpdate(commit: 'r'));
+      await tester.pump();
+      expect(log.letters, ['r']);
+      expect(tester.widget<TextField>(find.byType(TextField)).controller!.text, '');
+      log.takeLetters = false;
+      fake.push(const RimeUpdate(commit: 'r'));
+      await tester.pump();
+      expect(log.letters, ['r', 'r']);
+      expect(tester.widget<TextField>(find.byType(TextField)).controller!.text, 'r');
+    });
+
+    rimeTest('a commit that follows a preedit does not call onLetter', (tester) async {
+      await focused(tester);
+      log.takeLetters = true;
+      fake.push(const RimeUpdate(preedit: 'r', input: 'r'));
+      await tester.pump();
+      fake.push(const RimeUpdate(commit: 'r'));
+      await tester.pump();
+      expect(log.letters, isEmpty);
+      expect(tester.widget<TextField>(find.byType(TextField)).controller!.text, 'r');
     });
 
     rimeTest('rime preedit shows inline, underlined, not in the text', (tester) async {
