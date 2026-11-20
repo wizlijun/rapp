@@ -1,5 +1,5 @@
 // The 「输入历史」 list (spec 2026-11-14-rapp-input-history R4, R5): search over every device's
-// input record, three scopes, and per entry 放进输入框 / 复制到本机 / 从记录里去掉.
+// input record, three scopes, one line per entry with 放进输入框 / 复制到本机 / 从记录里去掉 in its ⋮ menu.
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -83,6 +83,19 @@ class _InputHistoryListState extends State<InputHistoryList> {
     return t.year == now.year && t.month == now.month && t.day == now.day ? hm : '${t.month}月${t.day}日 $hm';
   }
 
+  /// The width of the longest time label in the current text style.
+  double _timeWidth(BuildContext context) {
+    final p = TextPainter(
+      text: TextSpan(text: '12月30日 23:59', style: DefaultTextStyle.of(context).style),
+      textDirection: TextDirection.ltr,
+      textScaler: MediaQuery.textScalerOf(context),
+      maxLines: 1,
+    )..layout();
+    final w = p.width.ceilToDouble() + 2;
+    p.dispose();
+    return w;
+  }
+
   Widget _scopeButton(_Scope s, String label, String key) {
     final VoidCallback? go = _can(s)
         ? () => setState(() {
@@ -94,7 +107,8 @@ class _InputHistoryListState extends State<InputHistoryList> {
       opacity: go == null ? .4 : 1,
       child: IgnorePointer(
         ignoring: go == null,
-        child: TabChip(key: Key(key), label: label, selected: _scope == s, onTap: go),
+        // As wide as its label: a bare TabChip fills the whole Wrap line, three stacked bars.
+        child: IntrinsicWidth(child: TabChip(key: Key(key), label: label, selected: _scope == s, onTap: go)),
       ),
     );
   }
@@ -111,6 +125,7 @@ class _InputHistoryListState extends State<InputHistoryList> {
           host: _scope == _Scope.host ? widget.host : null,
         );
         final shown = found.length > _limit ? found.sublist(0, _limit) : found;
+        final timeWidth = _timeWidth(context);
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
@@ -141,7 +156,8 @@ class _InputHistoryListState extends State<InputHistoryList> {
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 child: Text(_query.text.isEmpty ? '还没有输入记录' : '没有匹配的记录', style: TextStyle(color: t.muted)),
               ),
-            for (final e in shown) _HistoryRow(key: Key('history-${e.id}'), entry: e, view: this),
+            if (shown.isNotEmpty) Divider(height: 1, thickness: 1, color: t.line),
+            for (final e in shown) _HistoryRow(key: Key('history-${e.id}'), entry: e, view: this, timeWidth: timeWidth),
             if (found.length > shown.length)
               Align(
                 alignment: Alignment.centerRight,
@@ -158,66 +174,143 @@ class _InputHistoryListState extends State<InputHistoryList> {
   }
 }
 
+/// One entry on one line: time, the first line of the text (+N 行 when there is more), 没发出 for a
+/// draft, where it was written (not in 这个会话, where every row has the same), and ⋮ with the actions.
+/// A click on the row puts it into the editor; a right-click opens the ⋮ menu where the pointer is.
 class _HistoryRow extends StatelessWidget {
-  const _HistoryRow({super.key, required this.entry, required this.view});
+  const _HistoryRow({super.key, required this.entry, required this.view, required this.timeWidth});
   final InputEntry entry;
   final _InputHistoryListState view;
 
+  /// Wide enough for the longest time (`12月30日 23:59`), so the texts line up.
+  final double timeWidth;
+
+  /// The whole text as the tooltip; a very long one is cut.
+  static String _tip(String s) => s.length > 600 ? '${s.substring(0, 600)}…' : s;
+
+  Future<void> _menu(BuildContext context, RelativeRect at) async {
+    final e = entry, w = view.widget;
+    final t = RappTokens.of(context);
+    Icon icon(IconData i) => Icon(i, size: 16, color: t.muted);
+    final pick = await showRappMenu<String>(
+      context,
+      position: at,
+      items: [
+        RappMenuItem(
+            key: Key('put-${e.id}'),
+            value: 'put',
+            label: '放进输入框',
+            enabled: w.onPut != null,
+            lead: icon(Icons.keyboard_return)),
+        RappMenuItem(key: Key('copy-${e.id}'), value: 'copy', label: '复制到本机', lead: icon(Icons.copy)),
+        if (e.mine) ...[
+          const RappMenuItem.divider(),
+          RappMenuItem(key: Key('remove-${e.id}'), value: 'remove', label: '从记录里去掉', lead: icon(Icons.close)),
+          const RappMenuItem.caption(label: 'git 历史里还在'),
+        ],
+      ],
+    );
+    switch (pick) {
+      case 'put':
+        w.onPut?.call(e.text);
+      case 'copy':
+        await Clipboard.setData(ClipboardData(text: e.text));
+      case 'remove':
+        await w.history.remove(e);
+    }
+  }
+
+  /// Under the ⋮ button, its right edges lined up with the button's.
+  RelativeRect _under(BuildContext button) {
+    final box = button.findRenderObject() as RenderBox;
+    final overlay = Overlay.of(button).context.findRenderObject() as RenderBox;
+    final r = box.localToGlobal(Offset.zero, ancestor: overlay) & box.size;
+    return RelativeRect.fromLTRB(r.left, r.bottom, overlay.size.width - r.right, overlay.size.height - r.bottom);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final touch = touchPlatform(Theme.of(context).platform);
+    // A pointer pauses on the row: the whole text. On touch a long press is the menu instead.
+    Widget row = LayoutBuilder(builder: (context, box) {
+      // The source takes up to 170 but never more than a third of the row; in a narrow panel (the 资源
+      // tab of a small window) it goes, so the text keeps its room.
+      final third = box.maxWidth / 3;
+      final sourceWidth = box.maxWidth < 400 ? 0.0 : (third < 170 ? third : 170.0);
+      return _line(context, sourceWidth);
+    });
+    if (!touch) row = Tooltip(message: _tip(entry.text), waitDuration: const Duration(milliseconds: 600), child: row);
+    return row;
+  }
+
+  Widget _line(BuildContext context, double sourceWidth) {
     final t = RappTokens.of(context);
     final e = entry, w = view.widget;
+    final touch = touchPlatform(Theme.of(context).platform);
     final title = e.windowTitle;
     final where = [e.hostName, e.appName, if (title != null && title.isNotEmpty) title].join(' · ');
-    final first = e.text.split('\n').first;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(border: Border.all(color: t.line), borderRadius: BorderRadius.circular(t.r)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Text(view._when(e.ts), style: TextStyle(color: t.muted)),
+    final lines = e.text.split('\n');
+    final muted = TextStyle(color: t.muted);
+    final small = TextStyle(color: t.muted, fontSize: t.textSize - 1);
+    final put = w.onPut;
+    return InkWell(
+      onTap: put == null ? null : () => put(e.text),
+      onSecondaryTapUp: (d) => _menu(context, menuAt(context, d.globalPosition)),
+      onLongPress: touch ? () => _menu(context, _under(context)) : null,
+      hoverColor: t.tint,
+      child: Container(
+        height: controlHeightOf(context),
+        padding: const EdgeInsets.only(left: 8),
+        decoration: BoxDecoration(border: Border(bottom: BorderSide(color: t.line.withValues(alpha: .55)))),
+        child: Row(
+          children: [
+            SizedBox(width: timeWidth, child: Text(view._when(e.ts), maxLines: 1, style: muted)),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(lines.first, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.text)),
+                  ),
+                  if (lines.length > 1) ...[const SizedBox(width: 6), Text('+${lines.length - 1} 行', style: small)],
+                ],
+              ),
+            ),
+            if (e.kind == 'draft') ...[
               const SizedBox(width: 8),
-              Expanded(
-                child: Text(where, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.muted)),
+              Container(
+                key: Key('draft-${e.id}'),
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                decoration: BoxDecoration(border: Border.all(color: t.muted), borderRadius: BorderRadius.circular(t.r)),
+                child: Text('没发出', style: TextStyle(color: t.on, fontSize: t.textSize - 2)),
               ),
-              if (e.kind == 'draft')
-                Text('没发出', key: Key('draft-${e.id}'), style: TextStyle(color: t.text)),
             ],
-          ),
-          const SizedBox(height: 2),
-          Text(first, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: t.text)),
-          const SizedBox(height: 6),
-          Wrap(
-            alignment: WrapAlignment.end,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            spacing: 8,
-            runSpacing: 6,
-            children: [
-              RappButton.secondary(
-                key: Key('put-${e.id}'),
-                label: '放进输入框',
-                onPressed: w.onPut == null ? null : () => w.onPut!(e.text),
+            if (view._scope != _Scope.session && sourceWidth > 0) ...[
+              const SizedBox(width: 10),
+              ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: sourceWidth),
+                child: Text(where, maxLines: 1, overflow: TextOverflow.ellipsis, style: small),
               ),
-              RappButton.secondary(
-                key: Key('copy-${e.id}'),
-                label: '复制到本机',
-                onPressed: () => Clipboard.setData(ClipboardData(text: e.text)),
-              ),
-              if (e.mine) ...[
-                RappButton.secondary(
-                  key: Key('remove-${e.id}'),
-                  label: '从记录里去掉',
-                  onPressed: () => w.history.remove(e),
+            ],
+            const SizedBox(width: 4),
+            Builder(
+              builder: (button) => SizedBox(
+                width: 36,
+                height: 36,
+                child: InkResponse(
+                  key: Key('more-${e.id}'),
+                  radius: 18,
+                  onTap: () => _menu(button, _under(button)),
+                  child: Semantics(
+                    button: true,
+                    label: '更多操作',
+                    child: Icon(Icons.more_vert, size: 18, color: t.muted),
+                  ),
                 ),
-                Text('git 历史里还在', style: TextStyle(color: t.muted)),
-              ],
-            ],
-          ),
-        ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

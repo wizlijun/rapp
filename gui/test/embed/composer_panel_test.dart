@@ -1774,7 +1774,7 @@ void main() {
       expect(find.byKey(const Key('composer-plus-menu')), findsNothing);
       expect(find.byType(InputHistoryList), findsOneWidget);
       expect(find.byKey(const Key('history-01A')), findsOneWidget); // this session's, by default
-      await tester.tap(find.byKey(const Key('put-01A')));
+      await tester.tap(find.byKey(const Key('history-01A'))); // a click on the row puts it in
       await tester.pumpAndSettle();
       expect(find.byType(InputHistoryList), findsNothing);
       expect(es.currentRemote!.composer.open, isTrue);
