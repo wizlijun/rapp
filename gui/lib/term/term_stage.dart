@@ -216,6 +216,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     super.initState();
     _fling = createTicker(_tick);
     widget.session.addListener(_onSession);
+    widget.session.termCopy = _copy;
     _focus.addListener(_onFocus);
     HardwareKeyboard.instance.addHandler(_onKeys);
     _focusSeen = widget.state.termFocusTick;
@@ -238,6 +239,8 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
     if (!identical(old.session, widget.session)) {
       old.session.removeListener(_onSession);
       widget.session.addListener(_onSession);
+      if (old.session.termCopy == _copy) old.session.termCopy = null;
+      widget.session.termCopy = _copy;
       _focusIfWanted();
       // The element is reused for the new session: a hold of the hotkey was on the old one, and ends there.
       _gateTimer?.cancel();
@@ -260,6 +263,7 @@ class _TermStageState extends State<TermStage> with SingleTickerProviderStateMix
   @override
   void dispose() {
     widget.session.removeListener(_onSession);
+    if (widget.session.termCopy == _copy) widget.session.termCopy = null;
     widget.state.removeListener(_onState);
     HardwareKeyboard.instance.removeHandler(_onKeys);
     _voiceEnds?.cancel();

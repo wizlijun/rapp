@@ -19,7 +19,7 @@ import 'stage_buttons.dart';
 const dockMove = Duration(milliseconds: 340);
 const _curve = Curves.easeOutCubic;
 
-/// A closing panel fades out over its last this long.
+/// A closing panel fades out over its last this long; an opening one fades in as it comes up.
 const _fadeOut = Duration(milliseconds: 100);
 
 // The eased "shown" at which a close from fully open has [_fadeOut] left.
@@ -41,9 +41,10 @@ double closedStackBottom(double keyboard, double bar) => math.max(
 /// [closedStackBottom], over a bar only where [keyBarWhenClosed].
 ///
 /// A close keeps the panel until it has gone: it rides the falling keyboard, or with none goes down by its own
-/// height in [dockMove]; either way it fades out over the last 100 ms. Open again before that and the same panel comes
-/// back. The stack's place is one value eased between its closed and open ends by the same controller, each end
-/// following the keyboard.
+/// height in [dockMove]; either way it fades out over the last 100 ms. An open is the same move the other way: up by
+/// its own height when no keyboard is up yet (one that then rises lifts it further), fading in all the way. Open
+/// again before a close is over and the same panel comes back, from the place and the opacity it had. The stack's
+/// place is one value eased between its closed and open ends by the same controller, each end following the keyboard.
 class IosDock extends StatefulWidget {
   const IosDock(
       {super.key,
@@ -84,20 +85,27 @@ class IosDockState extends State<IosDock> with SingleTickerProviderStateMixin {
   late bool _open = _wanted;
   late final AnimationController _shown = AnimationController(vsync: this, duration: dockMove, value: _open ? 1 : 0);
 
-  // This close goes down by itself: no soft keyboard when it began.
+  // This move goes by itself (down, or up from below): no soft keyboard when it began from rest.
   bool _sink = false;
+
+  // The panel's opacity is a line in "shown" through (_fadeV, _fadeO), clamped to 0..1. A close from open is opaque
+  // down to [_fadeFrom], then goes to 0 with it; an open goes from where it is to 1 with "shown" at 1. A turn mid-move
+  // starts the new line from the opacity it had, so it never snaps.
+  double _fadeV = 0, _fadeO = 0, _fadeSlope = 1 / _fadeFrom;
   bool _reduced = false;
   double _bar = 0;
+  double _stage = 0;
 
   bool get _wanted => widget.session.composer.open && widget.session.composerAllowed;
 
   /// The panel's bottom offset off the stage's bottom, less the 8 it stands above that: the bar's top on the
-  /// keyboard, lowered by the panel's height (and the 8) times what is left of a close that goes down by itself.
+  /// keyboard, lowered by the panel's height (and the 8) times what is left of a move it makes by itself.
   double get panelBottom => widget.keyboard + _bar - _drop;
 
   double get _drop {
     if (!_sink) return 0;
-    final h = panelPlaceOf(widget.session).value?.height ?? 0;
+    // Before its first layout the panel's height is not known yet: it waits below the stage, out of sight.
+    final h = panelPlaceOf(widget.session).value?.height ?? _stage;
     return (1 - _shown.value) * (h + 8);
   }
 
@@ -121,21 +129,34 @@ class IosDockState extends State<IosDock> with SingleTickerProviderStateMixin {
     if (open == _open) return;
     _open = open;
     final c = widget.session.composer;
+    final v = _shown.value;
+    final o = _opacity(v);
     if (open) {
-      // Back before the close was over: the panel is the one still there, so it takes the caret itself.
-      if (!_shown.isDismissed) {
-        c.wantFocus();
+      if (_shown.isDismissed) {
+        _sink = widget.keyboard == 0;
       } else {
-        _sink = false;
+        // Back before the close was over: the panel is the one still there, so it takes the caret itself.
+        c.wantFocus();
       }
+      _fadeLine(v, o, v < 1 ? (1 - o) / (1 - v) : 0);
       _reduced ? _shown.value = 1 : _shown.animateTo(1, curve: _curve);
     } else {
-      _sink = widget.keyboard == 0;
+      if (_shown.isCompleted) _sink = widget.keyboard == 0;
+      final slope = o >= 1 ? 1 / math.max(math.min(v, _fadeFrom), 1e-6) : (v > 0 ? o / v : 1.0);
+      _fadeLine(0, 0, slope);
       // The keyboard goes down under the panel, which stays until it has gone.
       c.releaseFocus();
       _reduced ? _shown.value = 0 : _shown.animateBack(0, curve: _curve);
     }
   }
+
+  void _fadeLine(double v, double o, double slope) {
+    _fadeV = v;
+    _fadeO = o;
+    _fadeSlope = slope;
+  }
+
+  double _opacity(double v) => (_fadeO + (v - _fadeV) * _fadeSlope).clamp(0.0, 1.0);
 
   @override
   Widget build(BuildContext context) {
@@ -149,9 +170,12 @@ class IosDockState extends State<IosDock> with SingleTickerProviderStateMixin {
           final v = _shown.value;
           final shown = _open || !_shown.isDismissed;
           final stays = keyBarWhenClosed(s, widget.port);
+          // A terminal's 复制 copies its stage's selection here; an app's sends ⌘C.
+          final copy = widget.port is TermSessionPort ? () => s.termCopy?.call() : null;
           final barH = keyBarHeightOf(widget.state, s, c.maxWidth);
           _bar = shown || stays ? barH : 0;
-          final fade = _open ? 1.0 : math.min(1.0, v / _fadeFrom);
+          _stage = c.maxHeight;
+          final fade = _opacity(v);
           final drop = _drop;
           // The stack: closed over the bar it keeps, open 8 above the panel's top (a frame behind it), and never
           // off the stage's top; eased between the two.
@@ -187,7 +211,7 @@ class IosDockState extends State<IosDock> with SingleTickerProviderStateMixin {
                   right: 0,
                   bottom: k,
                   child: stays
-                      ? KeyBar(state: widget.state, session: s, port: widget.port)
+                      ? KeyBar(state: widget.state, session: s, port: widget.port, onCopy: copy)
                       : !shown
                           ? const SizedBox.shrink()
                           // A bar that goes with the panel goes the way it does.
@@ -197,7 +221,7 @@ class IosDockState extends State<IosDock> with SingleTickerProviderStateMixin {
                                 opacity: fade,
                                 child: Transform.translate(
                                   offset: Offset(0, _sink ? (1 - v) * barH : 0),
-                                  child: KeyBar(state: widget.state, session: s, port: widget.port),
+                                  child: KeyBar(state: widget.state, session: s, port: widget.port, onCopy: copy),
                                 ),
                               ),
                             ),

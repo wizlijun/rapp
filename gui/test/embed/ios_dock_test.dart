@@ -136,6 +136,7 @@ void main() {
     iosTest('$which: open with keyboard 300: bar bottom 300, panel bottom 300+bar+8, stack 8 above panel', (tester) async {
       keyboard(tester, 300);
       final rs = rsOf();
+      expect(barH(rs), 54, reason: 'one row at width 1000');
       await openOn(tester, rs);
       expect(bar, findsOneWidget);
       expect(tester.getSize(bar).width, stage.width);
@@ -146,6 +147,7 @@ void main() {
 
     iosTest('$which: open, no keyboard: bar at 0, panel 8 above it (G5)', (tester) async {
       final rs = rsOf();
+      expect(barH(rs), 54, reason: 'one row at width 1000');
       await openOn(tester, rs);
       expect(bottomOf(tester, bar), 0);
       expect(topOf(tester, bar), barH(rs));
@@ -153,6 +155,74 @@ void main() {
       expect(bottomOf(tester, toggle), topOf(tester, panel) + grip(rs) + 8);
     });
   }
+
+  iosTest('open, no keyboard: the panel rises 340ms from below while it fades in (G3)', (tester) async {
+    await tester.pumpWidget(layer(tsess));
+    tsess.composer.open = true;
+    await tester.pump();
+    await tester.pump(); // the panel's place, a frame behind
+    var last = -double.infinity;
+    var t = Duration.zero;
+    while (t < const Duration(milliseconds: 100)) {
+      await tester.pump(frame);
+      t += frame;
+      final p = bottomOf(tester, panel);
+      expect(p, greaterThanOrEqualTo(last), reason: 'the panel only goes up, at $t');
+      last = p;
+    }
+    final rest = barH(tsess) + 8;
+    expect(fade(tester), lessThan(1), reason: 'still fading in at $t');
+    expect(fade(tester), greaterThan(0));
+    expect(bottomOf(tester, panel), lessThan(rest - 1), reason: 'still rising at $t');
+    await settle(tester);
+    expect(fade(tester), 1);
+    expect(bottomOf(tester, panel), rest);
+  });
+
+  iosTest('open, keyboard rising 0→300 over frames: the stack never goes down and never jumps by more than one '
+      'frame\'s step', (tester) async {
+    await tester.pumpWidget(layer(tsess));
+    final b = barH(tsess);
+    var stack = bottomOf(tester, toggle);
+    tsess.composer.open = true;
+    await tester.pump();
+    double? panelHeight;
+    for (var i = 1; i <= 25; i++) {
+      final k = 300.0 * math.min(1.0, i / 15);
+      keyboard(tester, k);
+      await tester.pump(frame);
+      panelHeight ??= tester.getSize(panel).height;
+      final now = bottomOf(tester, toggle);
+      // easeOutCubic's steepest slope is 3 (of the whole way, the panel's rise in it), plus the keyboard's own step.
+      final step = 3 * frame.inMicroseconds / 340000 * (300 + b + 8 + panelHeight + 8 + 8) + 20 + 1;
+      expect(now, greaterThanOrEqualTo(stack - 0.01), reason: 'frame $i');
+      expect(now - stack, lessThanOrEqualTo(step), reason: 'frame $i');
+      stack = now;
+    }
+    await settle(tester);
+    expect(bottomOf(tester, panel), 300 + b + 8);
+    expect(bottomOf(tester, toggle), topOf(tester, panel) + 8);
+    expect(fade(tester), 1);
+  });
+
+  iosTest('close then open in its last 100 ms: the panel fades back in from where it was, no snap to opaque',
+      (tester) async {
+    await openOn(tester, tsess);
+    tsess.composer.collapse();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 290));
+    final o = fade(tester);
+    expect(o, lessThan(1));
+    tsess.composer.open = true;
+    await tester.pump();
+    expect(fade(tester), closeTo(o, 0.05));
+    await tester.pump(frame);
+    expect(fade(tester), lessThan(1));
+    expect(fade(tester), greaterThanOrEqualTo(o - 0.01));
+    await settle(tester);
+    expect(fade(tester), 1);
+    expect(bottomOf(tester, panel), barH(tsess) + 8);
+  });
 
   iosTest('close, keyboard falling 300→0 over frames: panel still mounted and its bottom follows keyboard+bar each '
       'frame; unmounted after the fade', (tester) async {

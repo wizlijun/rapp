@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -13,8 +14,10 @@ import 'package:rapp/embed/key_bar.dart';
 import 'package:rapp/embed/session_port.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/paths.dart';
+import 'package:rapp/term/term_model.dart';
 import 'package:rapp/term/term_session_port.dart';
 import 'package:rapp/term/term_stage.dart';
+import 'package:rapp/term/term_wire.dart' show TermScreen;
 import 'package:rapp/ui/main_state.dart';
 import 'package:rapp/ui/prefs.dart';
 import 'package:rapp/ui/stage.dart';
@@ -392,6 +395,38 @@ void main() {
       expect(callsOf('view'), isEmpty);
     });
   }
+
+  testWidgets('iOS key bar 复制 copies the terminal selection to the clipboard', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    try {
+      final copied = <String>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, (call) async {
+        if (call.method == 'Clipboard.setData') copied.add((call.arguments as Map)['text'] as String);
+        return null;
+      });
+      addTearDown(() => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(SystemChannels.platform, null));
+      term.models[1] = TermModel()
+        ..expect('%3')
+        ..apply(TermScreen(
+            pane: '%3', rev: 1, cols: 40, rows: 8, cx: 0, cy: 0, cursor: true, alt: false, full: true, more: false,
+            lines: [for (var i = 0; i < 8; i++) (i, 'abcdef')]));
+      await openTerm(tester);
+      final grid = tester.getTopLeft(find.byKey(const Key('term-grid')));
+      final g = await tester.startGesture(grid + const Offset(2, 200), kind: PointerDeviceKind.mouse);
+      await g.moveTo(grid + const Offset(400, 200));
+      await g.up();
+      await tester.pump();
+      expect(find.byKey(const Key('term-copy')), findsOneWidget);
+      term.calls.clear();
+      await tester.tap(find.byKey(const Key('bar-copy')));
+      await tester.pump();
+      expect(copied, ['abcdef']);
+      expect(callsOf('keys'), isEmpty);
+      await tester.pump(const Duration(seconds: 2));
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
 
   testWidgets('iOS stage lift: terminal closed with bar 54 → 54; open at scale 1 → 64+54', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.iOS;

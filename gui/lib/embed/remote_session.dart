@@ -52,6 +52,10 @@ class RemoteSession extends ChangeNotifier {
   /// A terminal's key row ⌃ is lit: the next key goes with Ctrl (a letter as `Ctrl-<letter>`), then it goes out.
   final termCtrl = ValueNotifier<bool>(false);
 
+  /// A terminal stage's copy of its selection to the clipboard, while one is mounted for this session (the key
+  /// bar's 复制 calls it).
+  VoidCallback? termCopy;
+
   /// A terminal's key bar modifiers (⌃ ⌥, sticky); the app's live in [MainState.appLatch].
   final keyLatch = ModifierLatch();
 
