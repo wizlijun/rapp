@@ -36,7 +36,7 @@ final class ComposerPlugin: NSObject, FlutterPlatformViewFactory {
         }
         view.setChips(labels)
         result(nil)
-      } else if ["focus", "unfocus", "set", "insert", "read", "take"].contains(call.method) {
+      } else if ["focus", "unfocus", "set", "insert", "replaceAll", "read", "take"].contains(call.method) {
         view.perform(call.method, text: call.arguments as? String, reply: result)
       } else {
         result(FlutterMethodNotImplemented)

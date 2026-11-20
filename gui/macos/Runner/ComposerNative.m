@@ -420,6 +420,17 @@ static NSColor *ComposerColor(NSNumber *argb) {
             [view.text.textStorage setAttributedString:[view chipped:value?:@""]];
             [view.text setSelectedRange:NSMakeRange(view.text.textStorage.length,0)];
             [view.text.undoManager removeAllActions];view.text.typingAttributes=view.attributes;[view changed];
+        }else if([method isEqual:@"replaceAll"]){
+            // The whole text at once, as one undoable edit: ⌘Z gives back what was there (a voice tidy's original).
+            NSAttributedString *add=[view chipped:value?:@""];NSRange all=NSMakeRange(0,view.text.textStorage.length);
+            [view.text breakUndoCoalescing];
+            if([view.text shouldChangeTextInRange:all replacementString:add.string]){
+                BOOL wasEditing=view.text.editingIME;view.text.editingIME=YES;
+                [view.text.textStorage replaceCharactersInRange:all withAttributedString:add];
+                [view.text setSelectedRange:NSMakeRange(add.length,0)];
+                [view.text didChangeText];view.text.editingIME=wasEditing;
+                view.text.typingAttributes=view.attributes;
+            }
         }else if([method isEqual:@"insert"]){
             // Straight into the storage (insertText: would flatten a chip), as one undoable edit.
             NSAttributedString *add=[view chipped:value?:@""];NSRange at=view.text.selectedRange;

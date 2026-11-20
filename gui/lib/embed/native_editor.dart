@@ -116,6 +116,12 @@ class NativeEditor implements ComposerEditor {
   }
 
   @override
+  void replaceAll(String text) {
+    _empty = text.isEmpty;
+    unawaited(_text<void>('replaceAll', text));
+  }
+
+  @override
   void insert(String text) {
     if (text.isNotEmpty) _empty = false;
     unawaited(_text<void>('insert', text));

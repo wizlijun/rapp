@@ -329,6 +329,20 @@ void main() {
     st.dispose();
   });
 
+  test('the edit pick: the AI text opens in the panel over the original, one undo away (§8.2)', () async {
+    final (st, _) = await start();
+    final rs = st.currentRemote!;
+    st.tidyOf(sid).begin(long, VoicePick.edit);
+    api.calls.single.complete(const LlmDone(tidied));
+    await pump();
+    expect(rs.composer.open, isTrue);
+    final e = FakeEditor();
+    await rs.composer.attach(e);
+    expect(e.value, tidied);
+    expect(e.undoTo, long.trim());
+    st.dispose();
+  });
+
   test('a tidy in the session on show leaves the hint to the card', () async {
     final (st, _) = await start();
     final before = st.hint;

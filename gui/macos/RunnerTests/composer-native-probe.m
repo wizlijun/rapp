@@ -127,5 +127,19 @@ int main(void) {@autoreleasepool {
     [v viewWillMoveToWindow:nil];
     check(detached!=nil && [detached hasSuffix:@"shi"],@"detach preserves visible preedit and drains draft read");
     [v close];CFRunLoopRemoveSource(CFRunLoopGetMain(),source,kCFRunLoopDefaultMode);CFRelease(source);CFMessagePortInvalidate(port);CFRelease(port);
+    {   // A voice tidy's result replaces the original in one step that ⌘Z takes back (spec voice-ai-tidy §8.2).
+        NSWindow *w=[[NSWindow alloc]initWithContentRect:NSMakeRect(0,0,500,48) styleMask:NSWindowStyleMaskTitled
+            backing:NSBackingStoreBuffered defer:YES];
+        w.releasedWhenClosed=NO;
+        RappComposerView *u=[[RappComposerView alloc]initWithFrame:NSMakeRect(0,0,500,48)];
+        [u configure:style(@0xff7dff9e)];[w.contentView addSubview:u];[w makeFirstResponder:u.text];
+        [u perform:@"set" text:@"嗯那个原话" reply:^(id _){}];
+        [u perform:@"replaceAll" text:@"原话。" reply:^(id _){}];
+        check([u.text.string isEqual:@"原话。"] && u.text.selectedRange.location==3,@"replaceAll: new text, caret at the end");
+        [u.text.undoManager undo];
+        check([u.text.string isEqual:@"嗯那个原话"],@"one undo after replaceAll gives the original back");
+        check(!u.text.undoManager.canUndo,@"set leaves nothing to undo before it");
+        [u close];[w close];
+    }
     printf("PASS: native composition/FIFO, theme inheritance, bridge handoff, stale/duplicate rejection, timeout, detach (%d changes)\n",changed);
 }return 0;}

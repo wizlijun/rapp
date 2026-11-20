@@ -377,7 +377,8 @@ class MainState extends ChangeNotifier {
         edit: (s, text, ai) {
           final c = remote[s]?.composer;
           if (c == null) return;
-          unawaited(c.keep(text));
+          // The AI's text over the original: one ⌘Z gives the original back (§8.2).
+          unawaited(c.keep(text, undo: ai?.original));
           if (ai != null) c.pendingAi = ai;
           c.open = true;
           if (ai != null) _tidyAside(s, 'AI 整理好了，放在写作面板里');

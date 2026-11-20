@@ -101,6 +101,38 @@ void main() {
       expect(ed.value, 'z');
     });
 
+    test('keep with undo and an editor: the original goes in first, then the text in one undoable step', () async {
+      ed.value = 'hello';
+      await m.keep(' 原话。 ', undo: '嗯原话');
+      expect(ed.value, 'hello\n原话。');
+      expect(ed.undoTo, 'hello\n嗯原话');
+    });
+
+    test('keep with undo and no editor: the panel opening puts the original in first, then the text', () async {
+      await m.detach(ed);
+      m.draft = 'x';
+      await m.keep('原话。', undo: '嗯原话');
+      expect(m.draft, 'x\n原话。');
+      final e2 = FakeEditor();
+      await m.attach(e2);
+      expect(e2.value, 'x\n原话。');
+      expect(e2.undoTo, 'x\n嗯原话');
+      await m.detach(e2);
+      final e3 = FakeEditor();
+      await m.attach(e3);
+      expect(e3.undoTo, isNull); // once only
+    });
+
+    test('a change to the draft before the panel opens drops the undo', () async {
+      await m.detach(ed);
+      await m.keep('原话。', undo: '嗯原话');
+      m.draft = '原话。改';
+      final e2 = FakeEditor();
+      await m.attach(e2);
+      expect(e2.value, '原话。改');
+      expect(e2.undoTo, isNull);
+    });
+
     test('held blocks stay held after a voice send', () {
       m.apply(const PasteResult(blocks: [BlockChip(1, '图片 #1')]));
       m.submitText('t');

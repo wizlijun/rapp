@@ -85,6 +85,10 @@ abstract class ComposerEditor {
   /// At the caret (replacing a selection). While composing: applied after the commit.
   void insert(String text);
 
+  /// Replaces all text, caret at the end, in one step that one undo (⌘Z, Ctrl+Z off macOS) takes back: a
+  /// voice tidy's result over its original. While composing: applied after the commit.
+  void replaceAll(String text);
+
   /// A copy of the whole text.
   Future<String> read();
 

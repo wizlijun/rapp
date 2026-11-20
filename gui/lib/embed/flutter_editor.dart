@@ -16,7 +16,7 @@ import 'linux_candidates.dart';
 class FlutterEditor implements ComposerEditor, HandoffEditor {
   /// [rime] defaults to the built-in input method on iOS and to none elsewhere.
   FlutterEditor({RimeLink? rime})
-      : _rime = rime ?? (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS ? RappRime.instance : null) {
+    : _rime = rime ?? (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS ? RappRime.instance : null) {
     _controller.addListener(_controllerChanged);
     _focus.addListener(_focusChanged);
     final r = _rime;
@@ -36,6 +36,10 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
   String _seen = '';
   bool _disposed = false;
   bool _handoff = false;
+
+  /// What one undo after [replaceAll] gives back, while the text is still the one it put in ([_undoAfter]).
+  TextEditingValue? _undoBefore;
+  String? _undoAfter;
 
   /// setText / insert calls that arrived while the input method was composing.
   final _pending = <void Function()>[];
@@ -130,6 +134,7 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
         f();
       }
     }
+    if (_undoAfter != null && _controller.text != _undoAfter) _undoBefore = _undoAfter = null;
     if (_controller.text != _seen) {
       _seen = _controller.text;
       handlers?.onChanged();
@@ -213,48 +218,51 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
       // Keeps the field's state when the candidate row comes and goes.
       key: _rime == null ? null : _fieldKey,
       constraints: BoxConstraints(maxHeight: maxHeight),
-      child: Focus(
-        canRequestFocus: false,
-        skipTraversal: true,
-        onKeyEvent: _onKey,
-        child: ValueListenableBuilder<TextEditingValue>(
-          valueListenable: _controller,
-          builder: (context, value, _) {
-            final rime = _controller.rimePreedit.isNotEmpty;
-            final composing = (value.composing.isValid && !value.composing.isCollapsed) || rime;
-            // A tap during composition moves the caret, and the input method then commits its
-            // preedit at the old spot and starts it again at the new one: every letter lands
-            // twice. While composing, taps cannot reposition the caret.
-            return AbsorbPointer(
-              absorbing: composing,
-              child: TextField(
-                key: const Key('composer-field'),
-                controller: _controller,
-                focusNode: _focus,
-                contextMenuBuilder: _contextMenu,
-                minLines: 1,
-                maxLines: null,
-                keyboardType: TextInputType.multiline,
-                // Only the soft keyboard (iPad): its Return is a newline and 发送 sends (spec §8.4). With a hardware
-                // keyboard the key rules above hold, as on the desktop.
-                textInputAction: hardwareKeyboard() ? null : TextInputAction.newline,
-                style: (_controller.style = style).text.copyWith(color: style.color, shadows: const []),
-                cursorColor: style.cursor,
-                // Rime's composition is drawn at the caret, which would sit before it.
-                showCursor: rime ? false : null,
-                decoration: InputDecoration(
-                  isCollapsed: true,
-                  // 13 + 22 (one line) + 13 = 48
-                  contentPadding: const EdgeInsets.symmetric(vertical: 13),
-                  border: InputBorder.none,
-                  enabledBorder: InputBorder.none,
-                  focusedBorder: InputBorder.none,
-                  hintText: rime ? null : hint,
-                  hintStyle: style.text.copyWith(color: style.hintColor, shadows: const []),
+      child: Actions(
+        actions: {UndoTextIntent: _UndoAll(this)},
+        child: Focus(
+          canRequestFocus: false,
+          skipTraversal: true,
+          onKeyEvent: _onKey,
+          child: ValueListenableBuilder<TextEditingValue>(
+            valueListenable: _controller,
+            builder: (context, value, _) {
+              final rime = _controller.rimePreedit.isNotEmpty;
+              final composing = (value.composing.isValid && !value.composing.isCollapsed) || rime;
+              // A tap during composition moves the caret, and the input method then commits its
+              // preedit at the old spot and starts it again at the new one: every letter lands
+              // twice. While composing, taps cannot reposition the caret.
+              return AbsorbPointer(
+                absorbing: composing,
+                child: TextField(
+                  key: const Key('composer-field'),
+                  controller: _controller,
+                  focusNode: _focus,
+                  contextMenuBuilder: _contextMenu,
+                  minLines: 1,
+                  maxLines: null,
+                  keyboardType: TextInputType.multiline,
+                  // Only the soft keyboard (iPad): its Return is a newline and 发送 sends (spec §8.4). With a hardware
+                  // keyboard the key rules above hold, as on the desktop.
+                  textInputAction: hardwareKeyboard() ? null : TextInputAction.newline,
+                  style: (_controller.style = style).text.copyWith(color: style.color, shadows: const []),
+                  cursorColor: style.cursor,
+                  // Rime's composition is drawn at the caret, which would sit before it.
+                  showCursor: rime ? false : null,
+                  decoration: InputDecoration(
+                    isCollapsed: true,
+                    // 13 + 22 (one line) + 13 = 48
+                    contentPadding: const EdgeInsets.symmetric(vertical: 13),
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    hintText: rime ? null : hint,
+                    hintStyle: style.text.copyWith(color: style.hintColor, shadows: const []),
+                  ),
                 ),
-              ),
-            );
-          },
+              );
+            },
+          ),
         ),
       ),
     );
@@ -345,8 +353,27 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
   }
 
   void _setNow(String text) {
+    _undoBefore = _undoAfter = null;
     _controller.value = TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length));
   }
+
+  void _replaceAllNow(String text) {
+    final before = _controller.value;
+    _setNow(text);
+    _undoBefore = before.copyWith(composing: TextRange.empty);
+    _undoAfter = text;
+  }
+
+  /// The undo after [replaceAll], if it is still due: false leaves the key to the field's own history.
+  bool _undoAll() {
+    final b = _undoBefore;
+    if (b == null || _composing || _controller.text != _undoAfter) return false;
+    _undoBefore = _undoAfter = null;
+    _controller.value = b;
+    return true;
+  }
+
+  bool get _canUndoAll => _undoBefore != null && !_composing && _controller.text == _undoAfter;
 
   /// One ⌫ at the caret: a selection goes as a whole, else the grapheme before the caret; nothing at the start.
   void _backspaceNow() {
@@ -380,6 +407,15 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
       _queue(() => _setNow(text));
     } else {
       _setNow(text);
+    }
+  }
+
+  @override
+  void replaceAll(String text) {
+    if (_composing) {
+      _queue(() => _replaceAllNow(text));
+    } else {
+      _replaceAllNow(text);
     }
   }
 
@@ -537,21 +573,35 @@ class _Chip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 2),
-        child: CustomPaint(
-          foregroundPainter: DashedOutline(look.hintColor, 4),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 240),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 6),
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: look.text.copyWith(color: look.color, shadows: const []),
-              ),
-            ),
+    padding: const EdgeInsets.symmetric(horizontal: 2),
+    child: CustomPaint(
+      foregroundPainter: DashedOutline(look.hintColor, 4),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 240),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: look.text.copyWith(color: look.color, shadows: const []),
           ),
         ),
-      );
+      ),
+    ),
+  );
+}
+
+/// ⌘Z (Ctrl+Z off macOS) right after [FlutterEditor.replaceAll] gives back the text before it; otherwise the
+/// field's own undo.
+class _UndoAll extends Action<UndoTextIntent> {
+  _UndoAll(this.editor);
+
+  final FlutterEditor editor;
+
+  @override
+  bool isEnabled(UndoTextIntent intent) => editor._canUndoAll || (callingAction?.isEnabled(intent) ?? true);
+
+  @override
+  Object? invoke(UndoTextIntent intent) => editor._undoAll() ? null : callingAction?.invoke(intent);
 }
