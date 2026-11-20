@@ -6,6 +6,7 @@
 // A bar too narrow for three buttons keeps the traffic label alone, with all three parts in it.
 // A terminal session (its port is a TermSessionPort) has 「跟着我的窗口」 and 「本机 · 按键排」 for traffic and only
 // the session group besides.
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 
 import '../hub_client.dart';
@@ -425,13 +426,15 @@ class _StreamMenuState extends State<StreamMenu> {
                     enabled: widget.onTermFit != null,
                     onTap: () => _then(() => widget.onTermFit!(!widget.termFit)),
                   ),
-                  _Item(
-                    '按键排',
-                    key: const Key('term-key-row'),
-                    checked: widget.termKeyRow,
-                    enabled: widget.onTermKeyRow != null,
-                    onTap: () => _then(() => widget.onTermKeyRow!(!widget.termKeyRow)),
-                  ),
+                  // iOS has the key bar instead.
+                  if (defaultTargetPlatform != TargetPlatform.iOS)
+                    _Item(
+                      '按键排',
+                      key: const Key('term-key-row'),
+                      checked: widget.termKeyRow,
+                      enabled: widget.onTermKeyRow != null,
+                      onTap: () => _then(() => widget.onTermKeyRow!(!widget.termKeyRow)),
+                    ),
                 ] else if (!reduced)
                   ..._streamGroups(t, c)
                 else if (!all)

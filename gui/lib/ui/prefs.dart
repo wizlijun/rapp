@@ -26,7 +26,6 @@ class UiPrefs {
     this.termKeyRow = false,
     this.keyBarMore = false,
     this.keyBarSlim = false,
-    bool? appKeyRow,
     this.termFit = true,
     this.voiceAiTidy = true,
     this.keepAwake = true,
@@ -40,8 +39,7 @@ class UiPrefs {
     this.voiceLanguageHintShown = false,
     Map<String, String>? termOpen,
     Map<String, String>? termApp,
-  })  : appKeyRow = appKeyRow ?? Platform.isIOS,
-        termOpen = termOpen ?? {},
+  })  : termOpen = termOpen ?? {},
         termApp = termApp ?? {};
 
   RappTheme theme;
@@ -62,10 +60,6 @@ class UiPrefs {
 
   /// 按键区 (iOS): the bar is cut to Esc, ⇧Tab and ⊙ (`key_bar_slim`). Missing or bad means full.
   bool keyBarSlim;
-
-  /// 按键排 over an app session (`app_key_row`, iPad spec §8.3): Esc Tab ⌘ ⌥ ⌃ ⇧ ← ↑ ↓ → 删除 回车 with sticky
-  /// modifiers. Missing or bad means on on iOS, off everywhere else.
-  bool appKeyRow;
 
   /// 跟着我的窗口 (`term_fit`): the host's terminal window follows this console's size. Missing or bad means on.
   bool termFit;
@@ -127,7 +121,6 @@ class UiPrefs {
       final save = j['auto_save_traffic'];
       final ih = j['input_history'];
       final kr = j['term_key_row'];
-      final ak = j['app_key_row'];
       final tf = j['term_fit'];
       final vt = j['voice_ai_tidy'];
       final ka = j['keep_awake'];
@@ -152,7 +145,6 @@ class UiPrefs {
         termKeyRow: kr is bool ? kr : false,
         keyBarMore: j['key_bar_more'] == true,
         keyBarSlim: j['key_bar_slim'] == true,
-        appKeyRow: ak is bool ? ak : null,
         termFit: tf is bool ? tf : true,
         voiceAiTidy: vt is bool ? vt : true,
         keepAwake: ka is bool ? ka : true,
@@ -195,7 +187,6 @@ class UiPrefs {
         'term_key_row': termKeyRow,
         'key_bar_more': keyBarMore,
         'key_bar_slim': keyBarSlim,
-        'app_key_row': appKeyRow,
         'term_fit': termFit,
         'voice_ai_tidy': voiceAiTidy,
         'keep_awake': keepAwake,

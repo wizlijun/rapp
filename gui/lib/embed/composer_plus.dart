@@ -280,6 +280,7 @@ class _ComposerPlusState extends State<ComposerPlus> {
   Widget _menu(BuildContext context) {
     final t = RappTokens.of(context);
     final mac = defaultTargetPlatform == TargetPlatform.macOS;
+    final ios = defaultTargetPlatform == TargetPlatform.iOS;
     const rowGap = SizedBox(height: 6);
     final term = widget.terminal;
     final cells = term
@@ -331,12 +332,15 @@ class _ComposerPlusState extends State<ComposerPlus> {
                     if (widget.history != null) ...[_row(t, '输入历史', null, _openHistory), rowGap],
                     if (widget.onReturnAfter != null) ...[_returnAfter(t), rowGap],
                     if (widget.zoom != null && widget.onZoom != null) ...[_zoomRow(t), rowGap],
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: Text('按键 · 直接发给远端', style: TextStyle(color: t.muted)),
-                    ),
-                    rowGap,
-                    for (final r in rows) ...[r, rowGap],
+                    // iOS has the key bar instead of the grid.
+                    if (!ios) ...[
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: Text('按键 · 直接发给远端', style: TextStyle(color: t.muted)),
+                      ),
+                      rowGap,
+                      for (final r in rows) ...[r, rowGap],
+                    ],
                     // On the right, next to ＋, so collapsing is a short move; Esc in the editor does the same.
                     InkWell(
                       key: const Key('composer-plus-collapse'),

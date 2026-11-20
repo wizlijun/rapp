@@ -11,7 +11,6 @@ import '../platform_caps.dart';
 import '../term/term_session_port.dart';
 import '../ui/main_state.dart';
 import '../ui/tokens.dart';
-import 'app_key_row.dart';
 import 'key_bar_keys.dart';
 import 'modifier_latch.dart';
 import 'remote_session.dart';
@@ -68,6 +67,74 @@ bool sendLatchedLetter(MainState state, RemoteSession session, SessionPort port,
   }
   latch.used();
   return true;
+}
+
+/// What an app session's modifier keys send to A, by modifier bit (down and up, one key code each).
+const appModifierCodes = <int, int>{latchCmd: 55, latchOpt: 58, latchCtrl: 59, latchShift: 56};
+
+/// Keeps A's modifiers in step with a [ModifierLatch] for one app session: a down for each modifier turned on, an up
+/// for each turned off, the hardware keyboard's latch told each change; and sends the plain keys with the latch.
+/// [start] binds it, [stop] lets go of everything held (every down on A gets its up).
+class AppKeySender {
+  AppKeySender({required this.sid, required this.latch, required this.port});
+
+  final Object sid;
+  final ModifierLatch latch;
+  final SessionPort? Function() port;
+
+  /// The modifiers A was sent a down for (and has not had the up of).
+  int _held = 0;
+
+  StreamSubscription<SessionEvent>? _events;
+
+  void start() {
+    _held = 0;
+    latch.addListener(_sync);
+    _events = port()?.events.listen(_onEvent);
+    _sync();
+  }
+
+  /// The runner's key router sent a hardware key with the latch and dropped it (`latch_used`): the once modifiers go
+  /// up, and the locked ones go back to the runner for the next key. Another session's is not this one's.
+  void _onEvent(SessionEvent e) {
+    if (e is! LatchUsedEvent || e.sid != sid) return;
+    final before = latch.flags;
+    latch.used(); // a change sends the new latch through _sync
+    if (latch.flags == before && before != 0) port()?.latch(sid, before);
+  }
+
+  /// Every down on A gets its up: whatever the latch held goes up for the session it went down for.
+  void stop() {
+    _events?.cancel();
+    _events = null;
+    latch.releaseAll();
+    _sync();
+    latch.removeListener(_sync);
+  }
+
+  /// Tells A the difference between what it holds and what the latch has on: a down for each modifier turned on,
+  /// an up for each turned off (each with the flags that are on after it), then the hardware keyboard's latch.
+  void _sync() {
+    final want = latch.flags;
+    if (want == _held) return;
+    final p = port();
+    var on = _held;
+    for (final e in appModifierCodes.entries) {
+      final bit = e.key;
+      if ((on & bit != 0) == (want & bit != 0)) continue;
+      final down = want & bit != 0;
+      on = down ? on | bit : on & ~bit;
+      p?.keyEvent(sid, e.value, on, down: down);
+    }
+    _held = want;
+    p?.latch(sid, want);
+  }
+
+  /// A plain key: [code] goes with the modifiers on, which are then used up.
+  void press(int code, {int mods = 0}) {
+    port()?.key(sid, code, mods | latch.flags);
+    latch.used();
+  }
 }
 
 class KeyBar extends StatefulWidget {

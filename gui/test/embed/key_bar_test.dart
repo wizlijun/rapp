@@ -222,6 +222,78 @@ void main() {
       expect(appKeys(), [('up', 1, 55, 0)]);
       expect(s.appLatch.flags, 0);
     });
+
+    iosTest('modifier codes: ⌥ 58, ⌃ 59, ⌘ 55; each down carries every flag on, the up what stays', (tester) async {
+      await tester.pumpWidget(bar(app, width: 900));
+      await tap(tester, 'opt');
+      await tap(tester, 'ctrl');
+      await tap(tester, 'cmd');
+      await tap(tester, 'enter');
+      await tester.pump(const Duration(milliseconds: 20));
+      const all = latchOpt | latchCtrl | latchCmd;
+      expect(appKeys(), [
+        ('down', 1, 58, latchOpt),
+        ('down', 1, 59, latchOpt | latchCtrl),
+        ('down', 1, 55, all),
+        ('key', 1, 36, all),
+        ('up', 1, 55, latchOpt | latchCtrl),
+        ('up', 1, 58, latchCtrl),
+        ('up', 1, 59, 0),
+      ]);
+    });
+
+    iosTest('releaseAll() (going to the background) sends the ups', (tester) async {
+      await tester.pumpWidget(bar(app, width: 900));
+      await tap(tester, 'ctrl');
+      port.calls.clear();
+      s.appLatch.releaseAll();
+      await tester.pump();
+      expect(appKeys(), [('up', 1, 59, 0)]);
+    });
+
+    iosTest('a hardware key took the once ⌘ with ⌥ locked: ⌘ goes up, ⌥ stays and native is told', (tester) async {
+      await tester.pumpWidget(bar(app, width: 900));
+      await tap(tester, 'cmd');
+      await tap(tester, 'opt');
+      await tester.pump(const Duration(milliseconds: 50));
+      await tap(tester, 'opt');
+      port.calls.clear();
+      port.emit(const LatchUsedEvent(1));
+      await tester.pump();
+      expect(appKeys(), [('up', 1, 55, latchOpt)]);
+      expect([for (final c in port.calls) if (c.$1 == 'latch') c.$2['modifiers']], [latchOpt]);
+      expect(s.appLatch.of(latchOpt), LatchState.locked);
+    });
+
+    iosTest('⌘ locked, then a hardware key (latch_used): native gets ⌘ again for the next one', (tester) async {
+      await tester.pumpWidget(bar(app, width: 900));
+      await tap(tester, 'cmd');
+      await tester.pump(const Duration(milliseconds: 50));
+      await tap(tester, 'cmd');
+      port.calls.clear();
+      port.emit(const LatchUsedEvent(1));
+      await tester.pump();
+      expect(appKeys(), isEmpty, reason: 'a locked ⌘ stays down on A');
+      expect([for (final c in port.calls) if (c.$1 == 'latch') c.$2['modifiers']], [latchCmd]);
+      expect(s.appLatch.of(latchCmd), LatchState.locked);
+    });
+
+    iosTest("another session's latch_used leaves the bar's modifiers alone", (tester) async {
+      await tester.pumpWidget(bar(app, width: 900));
+      await tap(tester, 'cmd');
+      port.calls.clear();
+      port.emit(const LatchUsedEvent(2));
+      await tester.pump();
+      expect(appKeys(), isEmpty);
+      expect([for (final c in port.calls) if (c.$1 == 'latch') c.$2['modifiers']], isEmpty);
+      expect(s.appLatch.of(latchCmd), LatchState.once);
+    });
+
+    test('latch_used parses to LatchUsedEvent', () {
+      final e = parseSessionEvent('latch_used', {'sid': 3});
+      expect(e, isA<LatchUsedEvent>());
+      expect(e!.sid, 3);
+    });
   });
 
   group('repeat and swipe', () {

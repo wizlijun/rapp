@@ -5,7 +5,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
-import '../embed/app_key_row.dart';
 import '../embed/composer_editor.dart';
 import '../embed/composer_panel.dart';
 import '../embed/ios_dock.dart';
@@ -43,11 +42,7 @@ Widget offlineBarFor(MainState state, SessionRecord rec) => OfflineBar(
       connecting: rec.phase != Phase.disconnected,
     );
 
-/// The remote app picture's key row (iPad spec §8.3) is held back until the user redesigns it: it never shows,
-/// whatever `app_key_row` holds. The row, its latch and the pref stay. The terminal's key row is not this one.
-const showAppKeyRow = false;
-
-/// How far the soft keyboard reaches up over the stage's bottom: the app key row and the writing panel's layer stand
+/// How far the soft keyboard reaches up over the stage's bottom: the key bar and the writing panel's layer stand
 /// on its top edge. The keyboard's top edge is
 /// measured from the view's bottom, and out of [fullscreen] the stage stands above the home bar (MainWindow's safe
 /// area), so the bar's height comes off; in fullscreen the stage reaches the view's bottom, so nothing does.
@@ -61,28 +56,6 @@ class Stage extends StatelessWidget {
   /// MainWindow's fullscreen: the stage then runs to the view's bottom edge, under the home bar.
   final bool fullscreen;
   final ComposerEditor Function()? composerEditor;
-
-  /// The app key row's place: [keyboardLift] up off the stage's bottom. Down on the stage's bottom
-  /// line it keeps off 「输入」 (12 + 48 + 8 from the right): centred while it fits between two such margins, else
-  /// from the left; beside the upload strip it goes up a line. Too narrow for all twelve, it scrolls.
-  Widget _appKeyRow(BuildContext context, RemoteSession rs, {required bool showsInput}) {
-    final kb = keyboardLift(MediaQuery.of(context), fullscreen: fullscreen);
-    final onLine = kb < 12 + 48;
-    final input = showsInput && onLine && rs.composerAllowed && !rs.composer.open;
-    final strip = showsInput && onLine && rs.transferStatus != null;
-    const reserve = 12 + 48 + 8.0;
-    return LayoutBuilder(builder: (context, c) {
-      final both = c.maxWidth - 2 * reserve >= appKeyRowWidth;
-      final right = input && !strip ? reserve : 0.0;
-      return Padding(
-        padding: EdgeInsets.only(left: both ? right : 0, right: right, bottom: strip ? kb + 12 + 48 + 8 : kb),
-        child: Align(
-          alignment: Alignment.bottomCenter,
-          child: AppKeyRow(state: state, sid: rs.sid, latch: state.appLatch),
-        ),
-      );
-    });
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -236,7 +209,7 @@ class Stage extends StatelessWidget {
             // The same tree whether the panel is open or not: the terminal stage is never remounted (its focus
             // would fight the panel's caret), and the lift never changes the size it lays out at (Z2). Nor does the
             // key row: it floats over the picture too.
-            final keyRow = state.prefs.termKeyRow;
+            final keyRow = !_ios && state.prefs.termKeyRow; // iOS: the key bar
             final bar = rec != null && rec.frozen ? offlineBarFor(state, rec) : null;
             return Stack(
               children: [
@@ -266,25 +239,6 @@ class Stage extends StatelessWidget {
               stage,
               if (layer)
                 ...composerLayer(state: state, session: rs, port: port, keyboard: keyboard, editor: composerEditor),
-              // 按键排 over an app picture (iPad spec §8.3), while the picture has the keys or the writing panel is
-              // open: on the soft keyboard's top edge when it is up, floating over the stage (Z1: no resize). Not
-              // where the body fills the stage, as the writing panel's layer. Never on iOS: the key bar is its.
-              if (showAppKeyRow &&
-                  !_ios &&
-                  !full &&
-                  picture &&
-                  rs != null &&
-                  !rs.detached &&
-                  !(rec?.frozen ?? false) &&
-                  state.prefs.appKeyRow)
-                Positioned.fill(
-                  child: ListenableBuilder(
-                    listenable: Listenable.merge([rs, rs.composer]),
-                    builder: (context, _) => state.pictureFocused == rs.sid || rs.composer.open
-                        ? _appKeyRow(context, rs, showsInput: port != null)
-                        : const SizedBox.shrink(),
-                  ),
-                ),
               if (offline != null || banner != null || notice != null)
                 Positioned(
                   top: 0, left: 0, right: 0,

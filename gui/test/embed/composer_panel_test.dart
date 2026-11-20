@@ -701,6 +701,40 @@ void main() {
         }
       }, variant: TargetPlatformVariant.only(TargetPlatform.windows));
 
+      testWidgets('iOS ＋ menu: no 按键 grid, 附件/在远端复制/输入历史/直接回车/缩放/收起 present', (tester) async {
+        big(tester);
+        final x = RemoteSession(3, 'Notes', appId: 'com.x')..composer.open = true;
+        addTearDown(x.dispose);
+        await tester.pumpWidget(layer(s: x));
+        await tester.pump();
+        await openMenu(tester);
+        expect(find.text('按键 · 直接发给远端'), findsNothing);
+        for (final l in ['Tab', '⌘', '⌥', '删除', '←', '↓', '↑', '→', '回车']) {
+          expect(find.descendant(of: menu, matching: find.text(l)), findsNothing, reason: l);
+        }
+        expect(find.text('附件…'), findsOneWidget);
+        expect(find.text('在远端复制'), findsOneWidget);
+        expect(find.text('输入历史'), findsOneWidget);
+        expect(find.byKey(const Key('composer-plus-return')), findsOneWidget);
+        expect(find.text('大小'), findsOneWidget);
+        expect(find.byType(Slider), findsOneWidget);
+        expect(find.byKey(const Key('composer-plus-collapse')), findsOneWidget);
+        expect(find.text('收起'), findsOneWidget);
+      }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
+
+      testWidgets('macOS ＋ menu unchanged: the 按键 grid stays', (tester) async {
+        big(tester);
+        await tester.pumpWidget(layer());
+        await tester.pump();
+        await openMenu(tester);
+        expect(find.text('按键 · 直接发给远端'), findsOneWidget);
+        expect(find.text('⌘C'), findsOneWidget);
+        for (final l in ['Tab', '⌘', '⌥', '删除', '←', '↓', '↑', '→', '回车']) {
+          expect(find.descendant(of: menu, matching: find.text(l)), findsOneWidget, reason: l);
+        }
+        expect(find.text('收起'), findsOneWidget);
+      }, variant: TargetPlatformVariant.only(TargetPlatform.macOS));
+
       testWidgets('plus menu opens up from a panel at the bottom', (tester) async {
         big(tester);
         await tester.pumpWidget(layer());
