@@ -7,6 +7,7 @@ mod access;
 mod hosts;
 mod link;
 mod netmon;
+mod ports;
 mod presence;
 mod session;
 mod terms;
@@ -47,6 +48,9 @@ pub struct Opts {
     pub dual_stack: bool,
     /// Where `hub.log` and `service.log` are read for the `logs` command; None: `logs` without `id` is refused.
     pub log_dir: Option<PathBuf>,
+    /// The local ports of other devices' shares, listened on by this hub (first, how many): an
+    /// app with no service (iOS). None: the service on this machine has them (a PC).
+    pub map_ports: Option<(u16, u16)>,
 }
 
 /// One open session. `tx` is the writer of the client's stdin (None once closed).
@@ -109,6 +113,8 @@ pub(crate) struct Hub {
     net: netmon::NetState,
     /// Offline hosts a session waits for (`watch`).
     watches: watch::Watches,
+    /// The local ports of other devices' shares, when this hub has them (`Opts.map_ports`).
+    ports: std::sync::OnceLock<Arc<ports::HubPorts>>,
 }
 
 pub async fn run<R, W>(opts: Opts, input: R, output: W) -> Result<()>
@@ -150,6 +156,12 @@ where
         terms: Default::default(),
         net: Default::default(),
         watches: Default::default(),
+        ports: Default::default(),
+    });
+    let maps = opts.map_ports.map(|range| {
+        let p = ports::start(&hub, range);
+        let _ = hub.ports.set(p.clone());
+        tokio::spawn(ports::run(hub.clone(), p))
     });
     let probe = opts.presence_every.map(|every| tokio::spawn(presence::run(hub.clone(), every)));
     let upgrade = tokio::spawn(upgrade::run(hub.clone()));
@@ -174,6 +186,13 @@ where
     let _ = upgrade.await;
     netmon.abort();
     let _ = netmon.await;
+    if let Some(m) = maps {
+        m.abort();
+        let _ = m.await;
+    }
+    if let Some(p) = hub.ports.get() {
+        p.stop();
+    }
     read?;
     hub.close_all().await;
     if let Some(c) = hub.relay.lock().await.take() {
@@ -220,6 +239,13 @@ impl Hub {
         Ok(())
     }
 
+    /// The host list changed: the devices are asked for their shares again.
+    fn poke_ports(&self) {
+        if let Some(p) = self.ports.get() {
+            p.poke();
+        }
+    }
+
     /// The name B introduces itself with.
     fn me(&self) -> Option<String> {
         Some(self.name.clone())
@@ -262,7 +288,9 @@ impl Hub {
             Some("hosts") => self.hosts_event(),
             Some("add_host") => {
                 let password = v.get("password").and_then(Value::as_str);
-                self.add_host(s("id")?, password).await?
+                let ev = self.add_host(s("id")?, password).await?;
+                self.poke_ports();
+                ev
             }
             Some("remove_host") => {
                 let id = s("id")?;
@@ -270,6 +298,7 @@ impl Hub {
                 self.forget(id);
                 // Its LAN tries go too, even one held after a failed move (`forget` keeps those).
                 self.schedule.lock().unwrap().remove(id);
+                self.poke_ports();
                 self.hosts_event()
             }
             Some("set_route") => {

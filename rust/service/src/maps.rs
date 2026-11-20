@@ -36,5 +36,6 @@ pub async fn ensure_all(state: &Arc<State>, id: &str, wants: &[(u16, Option<u16>
 
 /// The accept loop of a map's listener in the running service.
 pub fn serve(state: &Arc<State>) -> impl Fn(TcpListener, u16) -> JoinHandle<()> {
-    rapp_ports::serve(state.clone())
+    // Accept errors are waited out: a PC does not take a listener away.
+    rapp_ports::serve(state.clone(), None)
 }

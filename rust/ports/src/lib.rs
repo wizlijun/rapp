@@ -7,5 +7,5 @@ mod carry;
 mod maps;
 
 pub use ask::{known_hosts, known_ids, open, reply_err, request, shares_of, KnownHost, PipeErr, Way};
-pub use carry::{ensure_all, number, numbers, serve, wants, Carrier};
+pub use carry::{ensure_all, number, numbers, serve, wants, Carrier, OnDead, RELISTEN_AFTER};
 pub use maps::{free, listen, Map, Maps, Serve, COUNT, FIRST};

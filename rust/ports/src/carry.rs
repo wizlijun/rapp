@@ -37,22 +37,53 @@ where
     got
 }
 
+/// How many accept errors in a row end a listener that has an `OnDead`.
+pub const RELISTEN_AFTER: u32 = 5;
+
+/// Told the local port of a listener whose accept keeps failing (`RELISTEN_AFTER` in a row) and
+/// that has ended: iOS may take a suspended app's sockets away, and the listener is to be opened
+/// again.
+pub type OnDead = Arc<dyn Fn(u16) + Send + Sync>;
+
 /// The accept loop of a map's listener: every connection is carried to the device's port of
-/// the map that has `local` when it comes.
-pub fn serve<C: Carrier>(c: Arc<C>) -> impl Fn(TcpListener, u16) -> JoinHandle<()> + Send + Sync + 'static {
+/// the map that has `local` when it comes. Without `on_dead` (the service) accept errors are
+/// waited out, 100 ms each (out of file descriptors, most likely); with it, the loop ends after
+/// `RELISTEN_AFTER` of them in a row and tells it.
+pub fn serve<C: Carrier>(c: Arc<C>, on_dead: Option<OnDead>) -> impl Fn(TcpListener, u16) -> JoinHandle<()> + Send + Sync + 'static {
     move |l, local| {
-        let c = c.clone();
+        let (c, on_dead) = (c.clone(), on_dead.clone());
         tokio::spawn(async move {
-            loop {
-                let Ok((tcp, _)) = l.accept().await else {
-                    // Out of file descriptors, most likely: wait for some to come back.
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                    continue;
-                };
+            let l = &l;
+            let take = |(tcp, _)| {
                 let c = c.clone();
                 tokio::spawn(async move { carry(&*c, tcp, local).await });
-            }
+            };
+            accept_loop(move || l.accept(), local, on_dead.as_ref(), take).await;
         })
+    }
+}
+
+async fn accept_loop<T, A, Fut>(mut accept: A, local: u16, on_dead: Option<&OnDead>, mut take: impl FnMut(T))
+where
+    A: FnMut() -> Fut,
+    Fut: Future<Output = std::io::Result<T>>,
+{
+    let mut errors = 0;
+    loop {
+        match accept().await {
+            Ok(t) => {
+                errors = 0;
+                take(t);
+            }
+            Err(_) => {
+                errors += 1;
+                if let Some(dead) = on_dead.filter(|_| errors >= RELISTEN_AFTER) {
+                    dead(local);
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        }
     }
 }
 
@@ -151,7 +182,7 @@ mod tests {
     async fn a_connection_is_carried_to_the_maps_device_port() {
         let home = tempfile::tempdir().unwrap();
         let c = fake(home.path(), 29510, None);
-        let serve = serve(c.clone());
+        let serve = serve(c.clone(), None);
         assert_eq!(c.maps.ensure("123456789", 8101, Some(29510), &[], &[], &serve), Some(29510));
         assert_eq!(exchange(29510, b"hi").await, b"hi");
         assert_eq!(*c.asked.lock().unwrap(), vec![("123456789".to_string(), 8101)]);
@@ -162,7 +193,7 @@ mod tests {
     async fn a_refused_open_closes_the_connection_and_logs_map_refused() {
         let home = tempfile::tempdir().unwrap();
         let c = fake(home.path(), 29520, Some("not allowed"));
-        let serve = serve(c.clone());
+        let serve = serve(c.clone(), None);
         assert_eq!(c.maps.ensure("123456789", 8101, Some(29521), &[], &[], &serve), Some(29521));
         assert_eq!(exchange(29521, b"hi").await, b"");
         c.log.flush();
@@ -172,6 +203,36 @@ mod tests {
             assert_eq!(ev[k], want, "{ev}");
         }
         c.maps.stop();
+    }
+
+    /// An accept that always fails, counting its calls.
+    fn failing(calls: &Arc<Mutex<u32>>) -> impl FnMut() -> std::future::Ready<std::io::Result<()>> {
+        let calls = calls.clone();
+        move || {
+            *calls.lock().unwrap() += 1;
+            std::future::ready(Err(std::io::Error::other("no socket")))
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn accept_error_relistens() {
+        let (calls, dead) = (Arc::new(Mutex::new(0)), Arc::new(Mutex::new(Vec::new())));
+        let on_dead: OnDead = {
+            let dead = dead.clone();
+            Arc::new(move |local| dead.lock().unwrap().push(local))
+        };
+        let ended = tokio::time::timeout(Duration::from_secs(60), accept_loop(failing(&calls), 29530, Some(&on_dead), |_| {}));
+        ended.await.expect("the loop ends");
+        assert_eq!(*calls.lock().unwrap(), RELISTEN_AFTER);
+        assert_eq!(*dead.lock().unwrap(), vec![29530]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn without_on_dead_accept_errors_are_waited_out() {
+        let calls = Arc::new(Mutex::new(0));
+        let ended = tokio::time::timeout(Duration::from_secs(60), accept_loop(failing(&calls), 29531, None, |_| {}));
+        assert!(ended.await.is_err(), "the loop keeps going");
+        assert!(*calls.lock().unwrap() > RELISTEN_AFTER * 10);
     }
 
     #[test]

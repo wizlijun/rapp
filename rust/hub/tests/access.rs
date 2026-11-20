@@ -23,6 +23,7 @@ fn opts(home: &Path) -> Opts {
         embed_only: false,
         dual_stack: false,
         log_dir: None,
+        map_ports: None,
     }
 }
 

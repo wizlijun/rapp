@@ -1579,6 +1579,7 @@ dependencies = [
  "rand 0.9.5",
  "rapp-conn",
  "rapp-net",
+ "rapp-ports",
  "rapp-term",
  "rapp-wire",
  "serde",
@@ -1594,6 +1595,7 @@ version = "0.15.5"
 dependencies = [
  "rapp-hub",
  "rapp-net",
+ "rapp-ports",
  "tempfile",
  "tokio",
 ]

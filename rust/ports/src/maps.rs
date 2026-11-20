@@ -277,6 +277,25 @@ impl Maps {
         self.let_go(gone);
     }
 
+    /// Closes every listener and listens again (iOS may take a suspended app's sockets away,
+    /// and an accept loop that keeps failing ends). The maps whose port could not be listened
+    /// on again are returned, as by `start`.
+    pub async fn relisten<F>(&self, serve: &F) -> Vec<Map>
+    where
+        F: Fn(TcpListener, u16) -> JoinHandle<()> + Sync,
+    {
+        let tasks: Vec<JoinHandle<()>> = self.items.lock().unwrap().iter_mut().flat_map(|e| e.tasks.drain(..)).collect();
+        for t in &tasks {
+            t.abort();
+        }
+        // A task is dropped, and its listener with it, before its handle returns.
+        for t in tasks {
+            let _ = t.await;
+        }
+        self.closed().await;
+        self.start(None, serve)
+    }
+
     /// Stops listening everywhere; the table and the file stay.
     pub fn stop(&self) {
         for e in self.items.lock().unwrap().iter_mut() {
@@ -396,6 +415,19 @@ mod tests {
         let all = vec![map("111111111", 8000, 29100), map("111111111", 22, 29101), map("222222222", 8000, 29102)];
         assert_eq!(maps.list(), all);
         assert_eq!(saved(home.path()), all);
+    }
+
+    #[tokio::test]
+    async fn relisten_closes_every_listener_and_opens_it_again() {
+        let home = tempfile::tempdir().unwrap();
+        let (maps, _) = Maps::load(home.path(), 29240, 10);
+        let (first, second) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+        let local = maps.ensure("111111111", 8000, None, &[], &[], &counting(first.clone())).unwrap();
+        assert_eq!(maps.relisten(&counting(second.clone())).await, Vec::<Map>::new());
+        assert!(connects(local));
+        until("accepted by the new listener", || second.load(Ordering::SeqCst) >= 1).await;
+        assert_eq!(first.load(Ordering::SeqCst), 0, "the old listener is closed");
+        assert_eq!(maps.list(), vec![map("111111111", 8000, local)]);
     }
 
     #[tokio::test]

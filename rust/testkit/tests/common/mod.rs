@@ -297,7 +297,7 @@ impl Hub {
 
     /// A hub that writes no log of its own and answers `logs` from `log_dir`.
     pub fn start_reading_logs(home: &Path, bins: &Path, log_dir: &Path) -> Hub {
-        Hub::start_full(home, bins, None, Default::default(), rapp_net::log::Log::none(), Some(log_dir.to_path_buf()))
+        Hub::start_full(home, bins, None, Default::default(), rapp_net::log::Log::none(), Some(log_dir.to_path_buf()), None)
     }
 
     /// Like `start`, with the presence probe running every `every`.
@@ -312,15 +312,31 @@ impl Hub {
 
     /// A hub that has no log dir: `logs` without `id` is refused.
     pub fn start_without_log_dir(home: &Path, bins: &Path) -> Hub {
-        Hub::start_full(home, bins, None, Default::default(), rapp_net::log::Log::none(), None)
+        Hub::start_full(home, bins, None, Default::default(), rapp_net::log::Log::none(), None, None)
+    }
+
+    /// The hub of an app with no service (iOS): it listens on the local ports of other devices'
+    /// shares itself, from `map_ports`.
+    pub fn start_with_ports(home: &Path, bins: &Path, map_ports: (u16, u16)) -> Hub {
+        let log = rapp_net::log::Log::file(&home.join("logs"), "hub.log");
+        Hub::start_full(home, bins, None, Default::default(), log, Some(home.join("logs")), Some(map_ports))
     }
 
     fn start_with(home: &Path, bins: &Path, every: Option<Duration>, upgrade: rapp_hub::UpgradeTimes) -> Hub {
         let log = rapp_net::log::Log::file(&home.join("logs"), "hub.log");
-        Hub::start_full(home, bins, every, upgrade, log, Some(home.join("logs")))
+        Hub::start_full(home, bins, every, upgrade, log, Some(home.join("logs")), None)
     }
 
-    fn start_full(home: &Path, bins: &Path, every: Option<Duration>, upgrade: rapp_hub::UpgradeTimes, log: rapp_net::log::Log, log_dir: Option<PathBuf>) -> Hub {
+    #[allow(clippy::too_many_arguments)]
+    fn start_full(
+        home: &Path,
+        bins: &Path,
+        every: Option<Duration>,
+        upgrade: rapp_hub::UpgradeTimes,
+        log: rapp_net::log::Log,
+        log_dir: Option<PathBuf>,
+        map_ports: Option<(u16, u16)>,
+    ) -> Hub {
         let (cmd_r, cmd_w) = tokio::io::duplex(1 << 16);
         let (out_r, out_w) = tokio::io::duplex(1 << 16);
         let opts = rapp_hub::Opts {
@@ -334,6 +350,7 @@ impl Hub {
             embed_only: false,
             dual_stack: false,
             log_dir,
+            map_ports,
         };
         let task = tokio::spawn(rapp_hub::run(opts, cmd_r, out_w));
         Hub { w: cmd_w, lines: BufReader::new(out_r).lines(), task, home: home.to_path_buf(), paths: Vec::new(), nets: Vec::new() }
@@ -378,6 +395,19 @@ impl Hub {
             let v = tokio::time::timeout_at(deadline, self.next_any()).await.expect("net event in time");
             assert_ne!(v["event"], "error", "{v}");
             if v["event"] == "net" && pred(&v) {
+                return v;
+            }
+        }
+    }
+
+    /// Waits up to `within` for an `ev` event that `pred` accepts; other events read meanwhile
+    /// are dropped (none may be an error).
+    pub async fn wait_event(&mut self, ev: &str, within: Duration, pred: impl Fn(&Value) -> bool) -> Value {
+        let deadline = tokio::time::Instant::now() + within;
+        loop {
+            let v = tokio::time::timeout_at(deadline, self.next()).await.unwrap_or_else(|_| panic!("{ev} event in time"));
+            assert_ne!(v["event"], "error", "{v}");
+            if v["event"] == ev && pred(&v) {
                 return v;
             }
         }

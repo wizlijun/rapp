@@ -84,6 +84,8 @@ pub extern "C" fn rapp_hub_start(
         embed_only: true,
         dual_stack: true,
         log_dir: Some(PathBuf::from(&log_dir)),
+        // No service in the app: the hub listens on the share numbers itself, for the app only.
+        map_ports: Some((rapp_ports::FIRST, rapp_ports::COUNT)),
     };
     let exited = Arc::new(AtomicBool::new(false));
     let done = exited.clone();
