@@ -21,6 +21,7 @@ hub() { (cd "$repo/rust" && cargo build --release -p rapp-hub-ffi --target "$1")
 case $mode in
 sim)
   hub aarch64-apple-ios-sim
+  "$repo/gui/packages/rapp_rime/scripts/fetch.sh"
   (cd "$repo/gui" && "$flutter" build ios --simulator)
   if [ -n "$udid" ]; then
     xcrun simctl install "$udid" "$repo/gui/build/ios/iphonesimulator/Runner.app"
@@ -29,6 +30,7 @@ sim)
   ;;
 device|ipa)
   hub aarch64-apple-ios
+  "$repo/gui/packages/rapp_rime/scripts/fetch.sh"
   method=development
   [ "$mode" = ipa ] && method=app-store
   (cd "$repo/gui" && "$flutter" build ipa --export-method $method)

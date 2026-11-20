@@ -1,5 +1,6 @@
 // The form for one app's settings: stream, after-send, composer and window rules.
 // Fields still unset show the built-in / default value in grey; changing one writes it.
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../embed/app_profile.dart';
@@ -104,6 +105,7 @@ class _AppProfilePageState extends State<AppProfilePage> {
       _draft.recordInput == null &&
       _draft.typeToCompose == null &&
       _draft.focusPane == null &&
+      _draft.rime == null &&
       _draft.input == null &&
       _draft.windows == null &&
       _draft.tested == null &&
@@ -238,6 +240,7 @@ class _AppProfilePageState extends State<AppProfilePage> {
     final recordInput = d.recordInput ?? b.recordInput;
     final typeToCompose = d.typeToCompose ?? b.typeToCompose;
     final focusPane = d.focusPane ?? b.focusPane;
+    final rime = d.rime ?? b.rime;
     final rules = _rules;
     return Scaffold(
       backgroundColor: t.bg,
@@ -346,6 +349,16 @@ class _AppProfilePageState extends State<AppProfilePage> {
             dim: d.typeToCompose == null,
             onChanged: (v) => _set(() => d.typeToCompose = v),
           ),
+          // The built-in input method exists only on iOS; the field stays harmless in the file elsewhere.
+          if (defaultTargetPlatform == TargetPlatform.iOS)
+            RappSwitchRow(
+              switchKey: const Key('rime-profile-switch'),
+              label: '接实体键盘时用内置输入法',
+              note: '关掉后这个 app 的输入板用系统输入法',
+              value: rime,
+              dim: d.rime == null,
+              onChanged: (v) => _set(() => d.rime = v),
+            ),
           Row(children: [
             Expanded(
               child: Text(

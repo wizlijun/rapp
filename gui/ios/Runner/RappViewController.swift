@@ -1,5 +1,6 @@
 import Flutter
 import UIKit
+import rapp_rime
 
 /// The root view controller (the storyboard's initial one). While a session window is on screen it takes the
 /// screen-edge gestures and the home indicator away from the system, and it is where hardware-keyboard presses arrive.
@@ -51,10 +52,13 @@ final class RappViewController: FlutterViewController {
     setNeedsUpdateOfHomeIndicatorAutoHidden()
   }
 
-  /// Where hardware-keyboard presses go first (`SessionPlugin.handlePresses`): true when the press was taken,
-  /// false or nil to let Flutter have it. Called one press at a time, so a set is never half taken.
+  /// Where hardware-keyboard presses go first (`SessionPlugin.handlePresses`, then the built-in Rime input method
+  /// for what stays local): true when the press was taken, false or nil to let Flutter have it. Called one press
+  /// at a time, so a set is never half taken.
   var pressHandler: ((Set<UIPress>, Bool) -> Bool)? = { presses, began in
-    SessionPlugin.shared?.handlePresses(presses, began: began) ?? false
+    if SessionPlugin.shared?.handlePresses(presses, began: began) == true { return true }
+    guard let press = presses.first else { return false }
+    return RappRimePlugin.shared?.handlePress(press, began: began) ?? false
   }
 
   override var preferredScreenEdgesDeferringSystemGestures: UIRectEdge {

@@ -1,14 +1,19 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/embed/composer_editor.dart';
 import 'package:rapp/embed/flutter_editor.dart';
 import 'package:rapp/platform_caps.dart';
+import 'package:rapp_rime/rapp_rime.dart';
 
 import '../ui/helpers.dart';
+import 'fake_rime_link.dart';
 
 class _Log {
   int enter = 0, escape = 0, paste = 0, changed = 0;
@@ -455,6 +460,448 @@ void main() {
       await tester.pump();
       await tester.sendKeyEvent(LogicalKeyboardKey.enter);
       expect(log.enter, 1);
+    });
+  });
+
+  group('rime', () {
+    late FakeRimeLink fake;
+
+    setUp(() {
+      ed.dispose();
+      fake = FakeRimeLink(delayed: true);
+      ed = FlutterEditor(rime: fake);
+      ed.handlers = log.handlers;
+    });
+
+    void rimeTest(String name, Future<void> Function(WidgetTester) body) => testWidgets(name, (tester) async {
+          debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+          try {
+            await body(tester);
+          } finally {
+            debugDefaultTargetPlatformOverride = null;
+          }
+        });
+
+    // What the field draws: its text plus the composition.
+    InlineSpan drawn(WidgetTester tester) => tester.allRenderObjects.whereType<RenderEditable>().single.text!;
+    List<String> underlined(InlineSpan span) {
+      final out = <String>[];
+      span.visitChildren((s) {
+        if (s is TextSpan && s.text != null && s.style?.decoration == TextDecoration.underline) out.add(s.text!);
+        return true;
+      });
+      return out;
+    }
+
+    Future<void> focused(WidgetTester tester) async {
+      await tester.pumpWidget(_host(ed));
+      ed.focus();
+      await tester.pump();
+    }
+
+    rimeTest('attaches on construction, active with focus, detaches on dispose', (tester) async {
+      expect(fake.calls.first, 'attach');
+      expect(fake.owner, same(ed));
+      await focused(tester);
+      expect(fake.calls.last, 'setActive(true)');
+      final other = FlutterEditor(rime: FakeRimeLink());
+      other.dispose();
+      ed.dispose();
+      expect(fake.calls.last, 'detach');
+      expect(fake.owner, isNull);
+    });
+
+    rimeTest('rime preedit shows inline, underlined, not in the text', (tester) async {
+      await focused(tester);
+      fake.push(const RimeUpdate(preedit: 'ni hao', input: 'nihao'));
+      await tester.pump();
+      expect(find.text('ni hao'), findsNothing);
+      expect(find.text('写给 Safari'), findsNothing, reason: 'the hint does not cover the composition');
+      expect(await ed.read(), '');
+      expect(drawn(tester).toPlainText(), 'ni hao');
+      expect(underlined(drawn(tester)), ['ni hao']);
+    });
+
+    rimeTest('rime preedit sits at the caret, next to a chip', (tester) async {
+      await focused(tester);
+      ed.chips({0xFDD0: '[c]'});
+      tester.testTextInput.updateEditingValue(
+          const TextEditingValue(text: '﷐b', selection: TextSelection.collapsed(offset: 1)));
+      await tester.pump();
+      fake.push(const RimeUpdate(preedit: 'ni', input: 'ni'));
+      await tester.pump();
+      expect(find.text('[c]'), findsOneWidget);
+      final kids = (drawn(tester) as TextSpan).children!;
+      expect(kids.first, isA<WidgetSpan>());
+      expect((kids[1] as TextSpan).text, 'ni');
+      expect((kids[2] as TextSpan).text, 'b');
+      expect(underlined(drawn(tester)), ['ni']);
+      expect(await ed.read(), '﷐b');
+    });
+
+    rimeTest('rime commit lands at the caret', (tester) async {
+      await focused(tester);
+      tester.testTextInput.updateEditingValue(
+          const TextEditingValue(text: 'ab', selection: TextSelection.collapsed(offset: 1)));
+      await tester.pump();
+      fake.push(const RimeUpdate(commit: '你好'));
+      await tester.pump();
+      expect(await ed.read(), 'a你好b');
+      // A commit and the next composition in one update: the composition follows the commit.
+      fake.push(const RimeUpdate(commit: '我', preedit: 'ni', input: 'ni'));
+      await tester.pump();
+      expect(await ed.read(), 'a你好我b');
+      expect(drawn(tester).toPlainText(), 'a你好我nib');
+    });
+
+    Future<void> withText(WidgetTester tester, String text, {TextSelection? selection}) async {
+      tester.testTextInput.updateEditingValue(
+          TextEditingValue(text: text, selection: selection ?? TextSelection.collapsed(offset: text.length)));
+      await tester.pump();
+    }
+
+    rimeTest('a replayed ⌫ after a commit deletes the commit', (tester) async {
+      await focused(tester);
+      await withText(tester, 'abc');
+      fake.push(const RimeUpdate(commit: '你'));
+      fake.push(const RimeUpdate(delete: 1));
+      await tester.pump();
+      expect(await ed.read(), 'abc');
+    });
+
+    rimeTest('a replayed ⌫ after declined letters deletes the last one', (tester) async {
+      await focused(tester);
+      await withText(tester, 'x');
+      fake.push(const RimeUpdate(commit: 'h'));
+      fake.push(const RimeUpdate(commit: 'i'));
+      fake.push(const RimeUpdate(delete: 1));
+      await tester.pump();
+      expect(await ed.read(), 'xh');
+    });
+
+    rimeTest('a replayed ⌫ at the start does nothing', (tester) async {
+      await focused(tester);
+      await withText(tester, 'ab', selection: const TextSelection.collapsed(offset: 0));
+      fake.push(const RimeUpdate(delete: 1));
+      await tester.pump();
+      expect(await ed.read(), 'ab');
+    });
+
+    rimeTest('a replayed ⌫ with a selection deletes the selection only', (tester) async {
+      await focused(tester);
+      await withText(tester, 'abcd', selection: const TextSelection(baseOffset: 1, extentOffset: 3));
+      fake.push(const RimeUpdate(delete: 1));
+      await tester.pump();
+      expect(await ed.read(), 'ad');
+    });
+
+    rimeTest('a replayed ⌫ removes a whole grapheme', (tester) async {
+      await focused(tester);
+      await withText(tester, 'a👍🏽');
+      fake.push(const RimeUpdate(delete: 1));
+      await tester.pump();
+      expect(await ed.read(), 'a');
+    });
+
+    rimeTest('insert while composing commits the raw input first', (tester) async {
+      await focused(tester);
+      fake.push(const RimeUpdate(preedit: 'ni hao', input: 'nihao'));
+      ed.insert('[语音]');
+      ed.insert('!');
+      expect(await ed.read(), '', reason: 'the commit is still on its way');
+      await tester.pump();
+      expect(fake.calls.where((c) => c == 'flush'), hasLength(1), reason: 'one flush in flight at a time');
+      expect(await ed.read(), 'nihao[语音]!');
+      expect(drawn(tester).toPlainText(), 'nihao[语音]!');
+    });
+
+    rimeTest('setText while composing commits first, then replaces', (tester) async {
+      await focused(tester);
+      fake.push(const RimeUpdate(preedit: 'ni', input: 'ni'));
+      ed.setText('x');
+      await tester.pump();
+      expect(fake.calls, contains('flush'));
+      expect(await ed.read(), 'x');
+    });
+
+    rimeTest('take while composing returns the raw input', (tester) async {
+      await focused(tester);
+      fake.push(const RimeUpdate(preedit: 'ni', input: 'ni'));
+      expect(await ed.take(), 'ni');
+      await tester.pump();
+      expect(await ed.read(), '');
+      expect(drawn(tester).toPlainText(), '');
+    });
+
+    rimeTest('handoff read while composing includes the raw input', (tester) async {
+      await focused(tester);
+      fake.push(const RimeUpdate(preedit: 'ni', input: 'ni'));
+      ed.setHandoff(true);
+      final snapshot = ed.read();
+      await tester.pump();
+      expect(await snapshot, 'ni');
+      expect(fake.calls.where((c) => c == 'flush'), hasLength(1), reason: 'the blur does not commit it twice');
+    });
+
+    rimeTest('blur commits the composition', (tester) async {
+      await focused(tester);
+      fake.push(const RimeUpdate(preedit: 'wo', input: 'wo'));
+      await tester.pump();
+      ed.unfocus();
+      await tester.pump();
+      expect(fake.calls, containsAllInOrder(['setActive(false)', 'flush']));
+      expect(await ed.read(), 'wo');
+      expect(drawn(tester).toPlainText(), 'wo');
+      // Nothing composing: a blur sends no flush.
+      ed.focus();
+      await tester.pump();
+      fake.calls.clear();
+      ed.unfocus();
+      await tester.pump();
+      expect(fake.calls, ['setActive(false)']);
+    });
+
+    rimeTest('flush failing still runs pending edits', (tester) async {
+      await focused(tester);
+      fake.flushOk = false;
+      fake.push(const RimeUpdate(preedit: 'ni', input: 'ni'));
+      ed.setText('x');
+      await tester.pump();
+      expect(fake.calls, contains('flush'));
+      expect(await ed.read(), 'x');
+      expect(drawn(tester).toPlainText(), 'x', reason: 'the composition is gone');
+    });
+
+    rimeTest('a tap while rime composes cannot move the caret', (tester) async {
+      await focused(tester);
+      tester.testTextInput.updateEditingValue(
+          const TextEditingValue(text: 'abc', selection: TextSelection.collapsed(offset: 3)));
+      fake.push(const RimeUpdate(preedit: 'ni', input: 'ni'));
+      await tester.pump();
+      await tester.tapAt(tester.getTopLeft(find.byType(EditableText)) + const Offset(1, 5));
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(tester.widget<TextField>(find.byType(TextField)).controller!.selection,
+          const TextSelection.collapsed(offset: 3));
+    });
+
+    rimeTest('tapping 系 drops the composition', (tester) async {
+      await focused(tester);
+      fake.push(const RimeUpdate(preedit: 'ni', input: 'ni'));
+      await tester.pump();
+      expect(drawn(tester).toPlainText(), 'ni');
+      fake.toggleBuiltin();
+      await tester.pump();
+      expect(drawn(tester).toPlainText(), '');
+      expect(await ed.read(), '', reason: 'cleared, not committed');
+      expect(fake.calls, containsAllInOrder(['clear', 'flush']));
+      ed.insert('x');
+      expect(await ed.read(), 'x', reason: 'nothing composing: edits apply at once');
+    });
+
+    rimeTest('moving to a 系 session keeps the letters for the old panel\'s draft, however late they come', (tester) async {
+      await focused(tester);
+      fake.push(const RimeUpdate(preedit: 'ni', input: 'ni'));
+      await tester.pump();
+      fake.flushGate = Completer<void>();
+      fake.set(builtin: false); // configure from the session switch: 「内」 → 「系」, the switch still on
+      await tester.pump();
+      expect(fake.calls.where((c) => c == 'flush'), hasLength(1));
+      // As ComposerPanel.dispose on the switch: the field goes, the draft is read, then the editor goes.
+      await tester.pumpWidget(const SizedBox());
+      String? draft;
+      ed.read().then((t) => draft = t).whenComplete(ed.dispose);
+      await tester.pump();
+      expect(draft, isNull, reason: 'waits for the engine');
+      fake.flushGate!.complete();
+      await tester.pump();
+      expect(draft, 'ni');
+      expect(fake.calls.last, 'detach');
+    });
+
+    rimeTest('turning the switch off drops the composition; on again while focused activates', (tester) async {
+      await focused(tester);
+      fake.push(const RimeUpdate(preedit: 'ni', input: 'ni'));
+      await tester.pump();
+      expect(drawn(tester).toPlainText(), 'ni');
+      fake.set(enabled: false);
+      await tester.pump();
+      expect(drawn(tester).toPlainText(), '');
+      expect(fake.calls.last, 'setActive(false)');
+      fake.set(enabled: true);
+      await tester.pump();
+      expect(fake.calls.last, 'setActive(true)');
+    });
+
+    rimeTest('candidate row is reserved while the keyboard is there', (tester) async {
+      fake.status = const RimeStatus(state: RimeState.ready, keyboard: true);
+      await focused(tester);
+      expect(find.byType(RimeCandidateRow), findsOneWidget);
+      final state = tester.state(find.byType(EditableText));
+      ed.setText(List.generate(40, (i) => 'line $i').join('\n'));
+      await tester.pump();
+      final row = tester.getSize(find.byType(RimeCandidateRow)).height;
+      expect(row, greaterThan(0));
+      expect(tester.getSize(find.byKey(const Key('composer-field'))).height + row, 200);
+      fake.push(const RimeUpdate(
+          preedit: 'ni',
+          input: 'ni',
+          menu: RimeMenu(rows: [RimeCandidate(0, '1', '你')], cursor: 0)));
+      await tester.pump();
+      expect(tester.widget<RimeCandidateRow>(find.byType(RimeCandidateRow)).menu.rows.single.text, '你');
+      fake.set(status: const RimeStatus(state: RimeState.ready));
+      await tester.pump();
+      expect(find.byType(RimeCandidateRow), findsNothing);
+      expect(tester.state(find.byType(EditableText)), same(state), reason: 'the field keeps its state');
+      expect(tester.widget<TextField>(find.byType(TextField)).focusNode!.hasFocus, isTrue);
+    });
+
+    rimeTest('a mouse or trackpad tap on the candidate row keeps the focus and the composition', (tester) async {
+      fake.status = const RimeStatus(state: RimeState.ready, keyboard: true);
+      await focused(tester);
+      fake.push(const RimeUpdate(
+          preedit: 'ni',
+          input: 'ni',
+          menu: RimeMenu(rows: [RimeCandidate(0, '1', '你'), RimeCandidate(1, '2', '尼')], cursor: 0)));
+      await tester.pump();
+      fake.calls.clear();
+      // On iOS a non-touch tap outside the field unfocuses it (EditableText's tap-outside action).
+      await tester.tap(find.textContaining('尼', findRichText: true), kind: PointerDeviceKind.mouse);
+      await tester.pump();
+      expect(tester.widget<TextField>(find.byType(TextField)).focusNode!.hasFocus, isTrue);
+      expect(fake.calls, ['select(1)'], reason: 'no setActive(false), no flush of the raw letters');
+      expect(await ed.read(), '');
+      expect(drawn(tester).toPlainText(), 'ni');
+      await tester.tap(find.byKey(const Key('rime-toggle')), kind: PointerDeviceKind.mouse);
+      await tester.pump();
+      expect(tester.widget<TextField>(find.byType(TextField)).focusNode!.hasFocus, isTrue);
+      // The flush after the clear commits nothing; its answer ends the composition shown.
+      expect(fake.calls, ['select(1)', 'toggleBuiltin', 'clear', 'flush']);
+    });
+
+    rimeTest('a read while typing leaves the composition alone (the 1 s draft copy)', (tester) async {
+      await focused(tester);
+      tester.testTextInput.updateEditingValue(
+          const TextEditingValue(text: '你', selection: TextSelection.collapsed(offset: 1)));
+      fake.push(const RimeUpdate(preedit: 'hao', input: 'hao'));
+      await tester.pump();
+      expect(await ed.read(), '你');
+      await tester.pump();
+      expect(fake.calls, isNot(contains('flush')));
+      expect(drawn(tester).toPlainText(), '你hao');
+    });
+
+    rimeTest('read() once the field is gone commits the raw input first', (tester) async {
+      await focused(tester);
+      fake.push(const RimeUpdate(preedit: 'ni', input: 'ni'));
+      await tester.pumpWidget(const SizedBox()); // the panel closes while the field has the focus
+      final draft = ed.read();
+      await tester.pump();
+      expect(await draft, 'ni');
+      expect(fake.calls.where((c) => c == 'flush'), hasLength(1));
+    });
+
+    rimeTest('dispose after the closing read keeps the letters', (tester) async {
+      await focused(tester);
+      fake.push(const RimeUpdate(preedit: 'ni', input: 'ni'));
+      await tester.pumpWidget(const SizedBox());
+      // As ComposerPanel.dispose: the draft is read, then the editor goes.
+      String? draft;
+      ed.read().then((t) => draft = t).whenComplete(ed.dispose);
+      await tester.pump();
+      expect(draft, 'ni');
+      expect(fake.calls.last, 'detach');
+    });
+
+    rimeTest('two editors: B attaches while A composes, A keeps its letters', (tester) async {
+      // RappRime over a channel whose native side commits on flush, pushing the update before it answers.
+      const channel = MethodChannel('test/rime');
+      final messenger = tester.binding.defaultBinaryMessenger;
+      Future<void> native(String method, Object? args) => messenger.handlePlatformMessage(
+          channel.name, const StandardMethodCodec().encodeMethodCall(MethodCall(method, args)), (_) {});
+      var raw = '';
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'flush') {
+          final commit = raw;
+          raw = '';
+          await native('update', {'commit': commit});
+        }
+        return null;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      final link = RappRime(channel)
+        ..configure(enabled: true, builtin: true, dictionary: RimeDictionary.bundled, onBuiltin: (_) {});
+      addTearDown(link.dispose);
+      final edA = FlutterEditor(rime: link);
+      await tester.pumpWidget(_host(edA));
+      edA.focus();
+      await tester.pump();
+      raw = 'ni';
+      await native('update', {'preedit': 'ni', 'input': 'ni'});
+      await tester.pump();
+      expect(drawn(tester).toPlainText(), 'ni');
+
+      // A session switch: the new panel's editor attaches before the old panel goes.
+      final edB = FlutterEditor(rime: link);
+      addTearDown(edB.dispose);
+      await tester.pumpWidget(_host(edB));
+      String? draftA;
+      edA.read().then((t) => draftA = t).whenComplete(edA.dispose);
+      await tester.pump();
+      await tester.pump();
+      expect(draftA, 'ni');
+      expect(await edB.read(), '');
+
+      // After the handover, updates are B's.
+      edB.focus();
+      await tester.pump();
+      await native('update', {'commit': '好'});
+      await tester.pump();
+      expect(await edB.read(), '好');
+    });
+
+    rimeTest('an update for an editor already disposed is dropped, not applied', (tester) async {
+      // A handover whose flush answer is late: meanwhile the old editor goes without a closing read.
+      const channel = MethodChannel('test/rime-late');
+      final messenger = tester.binding.defaultBinaryMessenger;
+      Future<void> native(String method, Object? args) => messenger.handlePlatformMessage(
+          channel.name, const StandardMethodCodec().encodeMethodCall(MethodCall(method, args)), (_) {});
+      final answer = Completer<void>();
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'flush') await answer.future;
+        return null;
+      });
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      final link = RappRime(channel)
+        ..configure(enabled: true, builtin: true, dictionary: RimeDictionary.bundled, onBuiltin: (_) {});
+      addTearDown(link.dispose);
+      final edA = FlutterEditor(rime: link);
+      final edB = FlutterEditor(rime: link); // handover: updates stay A's until the flush answers
+      addTearDown(edB.dispose);
+      edA.dispose();
+      // Routed to A: must not touch its disposed controller. A throw would come back as an error reply.
+      ByteData? reply;
+      await messenger.handlePlatformMessage(channel.name,
+          const StandardMethodCodec().encodeMethodCall(const MethodCall('update', {'commit': 'ni', 'preedit': 'hao'})),
+          (r) => reply = r);
+      expect(() => const StandardMethodCodec().decodeEnvelope(reply!), returnsNormally);
+      answer.complete();
+      await tester.pump();
+      await native('update', {'commit': '好'});
+      expect(await edB.read(), '好');
+    });
+
+    rimeTest('master switch off: no row, no attach side effects', (tester) async {
+      fake.set(enabled: false, status: const RimeStatus(state: RimeState.ready, keyboard: true));
+      fake.calls.clear();
+      await focused(tester);
+      expect(find.byType(RimeCandidateRow), findsNothing);
+      expect(fake.calls.where((c) => c != 'setActive(false)'), isEmpty);
+      fake.push(const RimeUpdate(preedit: 'ni', input: 'ni'));
+      await tester.pump();
+      expect(drawn(tester).toPlainText(), '', reason: 'no composition while off');
+      ed.insert('x');
+      expect(await ed.read(), 'x');
+      expect(fake.calls, isNot(contains('flush')));
     });
   });
 }

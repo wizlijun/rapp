@@ -1,5 +1,6 @@
 import Flutter
 import UIKit
+import rapp_rime
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
@@ -24,6 +25,10 @@ import UIKit
     }
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "RappSpeech") {
       SpeechPlugin.register(with: registrar)
+    }
+    // Type-to-compose's held keys go through the built-in input method first; what it declines is typed as text.
+    SessionPlugin.replayHook = { p in
+      RappRimePlugin.shared?.replay(hid: p.hid, characters: p.characters, modifiers: p.modifiers) ?? false
     }
   }
 }

@@ -1,0 +1,11 @@
+vendor/
+ios/rapp_rime/Frameworks/
+ios/rapp_rime/Sources/CRime/include/*
+!ios/rapp_rime/Sources/CRime/include/.keep
+ios/rapp_rime/Sources/rapp_rime/RimeData/
+pubspec.lock
+build/
+.dart_tool/
+tools/sim/out/
+tools/sim/simkey
+tools/sim/hwkb

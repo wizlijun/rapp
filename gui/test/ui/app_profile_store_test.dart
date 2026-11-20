@@ -190,4 +190,16 @@ void main() {
     s.setAfterSend('com.x', 'X', AfterSend.pressReturn);
     expect(s.resolve('com.x').afterSend, AfterSend.pressReturn);
   });
+
+  test('setRime: on by default; turning it off is remembered for that app only', () {
+    final s = AppProfileStore(dir.path);
+    expect(s.resolve('com.x').rime, isTrue);
+    s.setRime('com.x', 'X', false);
+    expect(s.resolve('com.x').rime, isFalse);
+    expect(s.resolve('com.y').rime, isTrue);
+    expect((jsonDecode(f('apps.json').readAsStringSync())['apps'] as List).single['rime'], false);
+    expect(AppProfileStore.load(dir.path, null).resolve('com.x').rime, isFalse);
+    s.setRime('com.x', 'X', true);
+    expect(s.resolve('com.x').rime, isTrue);
+  });
 }

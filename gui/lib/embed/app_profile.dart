@@ -136,6 +136,7 @@ class AppProfile {
     this.recordInput,
     this.typeToCompose,
     this.focusPane,
+    this.rime,
     this.input,
     this.composerAt,
     this.windows,
@@ -156,6 +157,10 @@ class AppProfile {
 
   /// Whether the 智能 preset grays what is outside the focused pane; null inherits (true).
   bool? focusPane;
+
+  /// Whether the built-in input method (iOS, hardware keyboard) types in this app's writing panel: 「内」 or
+  /// 「系」; null inherits (true).
+  bool? rime;
   InputPoint? input;
 
   /// Where the writing panel sits (its bottom centre); null: [defaultComposerAt].
@@ -181,6 +186,7 @@ class AppProfile {
         recordInput: recordInput,
         typeToCompose: typeToCompose,
         focusPane: focusPane,
+        rime: rime,
         input: input,
         composerAt: composerAt,
         windows: windows == null ? null : [...windows!],
@@ -201,6 +207,7 @@ class AppProfile {
         if (recordInput != null) 'recordInput': recordInput,
         if (typeToCompose != null) 'typeToCompose': typeToCompose,
         if (focusPane != null) 'focusPane': focusPane,
+        if (rime != null) 'rime': rime,
         if (input != null) 'input': input!.toJson(),
         if (composerAt != null) 'composerAt': composerAt!.toJson(),
         if (windows != null) 'windows': [for (final w in windows!) w.toJson()],
@@ -254,6 +261,7 @@ class AppProfile {
       recordInput: j['recordInput'] is bool ? j['recordInput'] as bool : null,
       typeToCompose: j['typeToCompose'] is bool ? j['typeToCompose'] as bool : null,
       focusPane: j['focusPane'] is bool ? j['focusPane'] as bool : null,
+      rime: j['rime'] is bool ? j['rime'] as bool : null,
       input: InputPoint.fromJson(j['input']),
       composerAt: InputPoint.fromJson(j['composerAt']),
       windows: windows,
@@ -288,6 +296,7 @@ class ResolvedProfile {
     this.recordInput = true,
     this.typeToCompose = true,
     this.focusPane = true,
+    this.rime = true,
     this.input,
     this.composerAt,
     this.windows = const [],
@@ -309,6 +318,9 @@ class ResolvedProfile {
 
   /// Whether the 智能 preset grays what is outside the focused pane.
   final bool focusPane;
+
+  /// Whether the built-in input method types in the writing panel (iOS, with 实体键盘用内置输入法 on).
+  final bool rime;
 
   /// The marked text box; null when none is marked.
   final InputPoint? input;
@@ -359,6 +371,7 @@ ResolvedProfile resolveProfile(String appId, {required List<AppProfile> mine, re
     recordInput: pick((p) => p.recordInput) ?? true,
     typeToCompose: pick((p) => p.typeToCompose) ?? true,
     focusPane: pick((p) => p.focusPane) ?? true,
+    rime: pick((p) => p.rime) ?? true,
     input: pick((p) => p.input),
     composerAt: pick((p) => p.composerAt),
     windows: pick((p) => p.windows) ?? const [],

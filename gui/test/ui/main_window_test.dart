@@ -3,6 +3,9 @@ import 'dart:io';
 
 import 'package:rapp/paths.dart';
 import 'package:rapp/pages/ios_local_section.dart';
+import 'package:rapp/pages/rime_settings_section.dart';
+import 'package:rapp/embed/rime_glue.dart';
+import 'package:rapp_rime/rapp_rime.dart';
 import 'package:rapp/pages/local_section.dart';
 import 'package:rapp/platform_caps.dart';
 import 'package:rapp/ui/access_setup.dart';
@@ -258,6 +261,33 @@ void main() {
       expect(find.byType(IosLocalSection), findsOneWidget);
       expect(find.byType(LocalSection), findsNothing);
       expect(find.byType(SharesSection), findsNothing);
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('全局设置 has the built-in input method\'s block while its switch is on, and nothing (no gap) when off',
+        (tester) async {
+      hasKey = true;
+      final rime = RappRime(const MethodChannel('rapp/rime-main-window-test'));
+      final glue = RimeGlue(s, rime: rime);
+      addTearDown(() {
+        glue.dispose();
+        rime.dispose();
+      });
+      tester.view.physicalSize = const Size(1194, 834);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      s.togglePanel(PanelTab.devices);
+      await tester.pumpWidget(wrap(
+        MainWindow(state: s, monitor: null, control: null, fullscreen: fs, rime: glue),
+        disableAnimations: true,
+      ));
+      await settle(tester);
+      expect(find.byType(RimeSettingsSection), findsOneWidget);
+      s.setRimeEnabled(false);
+      await settle(tester);
+      expect(find.byType(RimeSettingsSection), findsNothing);
+      expect(tester.widget<SidePanel>(find.byType(SidePanel)).settings, isNull);
       await tester.pump(const Duration(seconds: 1));
       await tester.pumpWidget(const SizedBox());
     });

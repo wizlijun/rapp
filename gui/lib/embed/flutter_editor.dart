@@ -1,10 +1,12 @@
 // The Flutter implementation of the writing panel's editing area: a TextField that owns its
 // controller and focus node and only reports to [EditorHandlers].
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:rapp_rime/rapp_rime.dart';
 
 import '../platform_caps.dart';
 import '../ui/controls.dart';
@@ -12,9 +14,18 @@ import 'composer_editor.dart';
 import 'linux_candidates.dart';
 
 class FlutterEditor implements ComposerEditor, HandoffEditor {
-  FlutterEditor() {
+  /// [rime] defaults to the built-in input method on iOS and to none elsewhere.
+  FlutterEditor({RimeLink? rime})
+      : _rime = rime ?? (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS ? RappRime.instance : null) {
     _controller.addListener(_controllerChanged);
     _focus.addListener(_focusChanged);
+    final r = _rime;
+    if (r != null) {
+      _live = r.enabled && r.builtin;
+      r.attach(this, _onRime);
+      r.addListener(_rimeChanged);
+      _sendActive(); // attaching leaves the native side's idea of "active" stale: say it once
+    }
   }
 
   @override
@@ -29,9 +40,85 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
   /// setText / insert calls that arrived while the input method was composing.
   final _pending = <void Function()>[];
 
+  /// The system input method's composing range, or Rime's composition (never part of the text).
   bool get _composing {
     final c = _controller.value.composing;
-    return c.isValid && !c.isCollapsed;
+    return (c.isValid && !c.isCollapsed) || _controller.rimePreedit.isNotEmpty;
+  }
+
+  /// Holds [f] back until the composition is over. Rime's never ends on its own: it is committed as typed.
+  void _queue(void Function() f) {
+    _pending.add(f);
+    if (_controller.rimePreedit.isNotEmpty) _flushRime();
+  }
+
+  // ---- Rime (iOS, hardware keyboard). With no link, or the switch off, nothing here runs or shows.
+
+  final RimeLink? _rime;
+  bool _live = false; // switch on and 「内」
+  bool? _active; // what setActive last said
+  bool _flushing = false;
+  final _menu = ValueNotifier<RimeMenu>(RimeMenu.empty);
+  final _fieldKey = GlobalKey(debugLabel: 'composer-field');
+
+  /// Synchronous to the end. While the engine is up every text edit of a key comes through here (commits,
+  /// declined printable keys, a replayed ⌫ as [RimeUpdate.delete]), in the order typed; only edits made here are
+  /// sent back to the iOS text input, so nothing native edits a stale copy behind them.
+  void _onRime(RimeUpdate u) {
+    if (_disposed) return;
+    if (u.commit.isNotEmpty) _insertNow(u.commit);
+    for (var i = 0; i < u.delete; i++) {
+      _backspaceNow();
+    }
+    final r = _rime!;
+    final live = r.enabled && r.builtin;
+    _menu.value = live ? u.menu : RimeMenu.empty;
+    _controller.rimePreedit = live ? u.preedit : ''; // an empty one lets the pending edits run
+  }
+
+  void _rimeChanged() {
+    if (_disposed) return;
+    final r = _rime!;
+    final live = r.enabled && r.builtin;
+    if (_live && !live) {
+      // To 「系」 with the switch on: the app moving to a 「系」 session (configure flushes: the letters are
+      // committed as typed), or the user's tap (toggleBuiltin cleared the engine's first: nothing comes). The
+      // composition stays until the engine answers, so a read in between (the old panel's closing draft) waits
+      // for the letters. Switched off: the engine stops and the composition goes.
+      if (r.enabled && _controller.rimePreedit.isNotEmpty) {
+        _menu.value = RimeMenu.empty;
+        _flushRime();
+      } else {
+        _dropRime();
+      }
+    }
+    _live = live;
+    _sendActive();
+  }
+
+  void _sendActive() {
+    final r = _rime!;
+    final on = _focus.hasFocus && r.enabled;
+    if (on == _active) return;
+    _active = on;
+    r.setActive(this, on);
+  }
+
+  /// Commits the composition as typed; its update lands through [_onRime]. If that never comes (no plugin,
+  /// no engine, a lost update), the composition is dropped here so the pending edits still run.
+  void _flushRime() {
+    final r = _rime;
+    if (r == null || _flushing) return;
+    _flushing = true;
+    r.flush().catchError((Object _) => false).then((_) {
+      _flushing = false;
+      if (!_disposed && _controller.rimePreedit.isNotEmpty) _dropRime();
+    });
+  }
+
+  void _dropRime() {
+    _menu.value = RimeMenu.empty;
+    _controller.rimePreedit = '';
   }
 
   void _controllerChanged() {
@@ -49,7 +136,14 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
     }
   }
 
-  void _focusChanged() => handlers?.onFocus(_focus.hasFocus);
+  void _focusChanged() {
+    if (_rime != null) {
+      _sendActive();
+      // Tapping the picture, closing the panel, the handoff: the letters typed so far stay.
+      if (!_focus.hasFocus && _controller.rimePreedit.isNotEmpty) _flushRime();
+    }
+    handlers?.onFocus(_focus.hasFocus);
+  }
 
   // Enter and Esc belong to the input method while it composes (and never reach the window's
   // shortcuts, where Esc leaves fullscreen).
@@ -115,7 +209,9 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
 
   @override
   Widget view(BuildContext context, {required EditorStyle style, required String hint, required double maxHeight}) {
-    final field = ConstrainedBox(
+    Widget field(double maxHeight) => ConstrainedBox(
+      // Keeps the field's state when the candidate row comes and goes.
+      key: _rime == null ? null : _fieldKey,
       constraints: BoxConstraints(maxHeight: maxHeight),
       child: Focus(
         canRequestFocus: false,
@@ -124,7 +220,8 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
         child: ValueListenableBuilder<TextEditingValue>(
           valueListenable: _controller,
           builder: (context, value, _) {
-            final composing = value.composing.isValid && !value.composing.isCollapsed;
+            final rime = _controller.rimePreedit.isNotEmpty;
+            final composing = (value.composing.isValid && !value.composing.isCollapsed) || rime;
             // A tap during composition moves the caret, and the input method then commits its
             // preedit at the old spot and starts it again at the new one: every letter lands
             // twice. While composing, taps cannot reposition the caret.
@@ -142,6 +239,8 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
                 textInputAction: hardwareKeyboard() ? null : TextInputAction.newline,
                 style: (_controller.style = style).text.copyWith(color: style.color, shadows: const []),
                 cursorColor: style.cursor,
+                // Rime's composition is drawn at the caret, which would sit before it.
+                showCursor: rime ? false : null,
                 decoration: InputDecoration(
                   isCollapsed: true,
                   // 13 + 22 (one line) + 13 = 48
@@ -149,7 +248,7 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
                   border: InputBorder.none,
                   enabledBorder: InputBorder.none,
                   focusedBorder: InputBorder.none,
-                  hintText: hint,
+                  hintText: rime ? null : hint,
                   hintStyle: style.text.copyWith(color: style.hintColor, shadows: const []),
                 ),
               ),
@@ -165,10 +264,35 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
         controller: _controller,
         style: style.text.copyWith(color: style.color),
         maxHeight: maxHeight,
-        child: field,
+        child: field(maxHeight),
       );
     }
-    return field;
+    final rime = _rime;
+    if (rime == null) return field(maxHeight);
+    return ListenableBuilder(
+      listenable: rime,
+      builder: (context, _) {
+        if (!rime.enabled || !rime.status.keyboard) return field(maxHeight);
+        // The row stays while the keyboard is there, empty or not: the panel does not jump as candidates come.
+        final rowStyle = style.text.copyWith(color: style.color, shadows: const []);
+        final row = RimeCandidateRow.heightFor(context, rowStyle);
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            field(math.max(0.0, maxHeight - row)),
+            // Part of the field for taps: on iOS a mouse, trackpad or Pencil tap outside the field unfocuses it,
+            // which would commit the raw letters before the candidate's select arrives.
+            TextFieldTapRegion(
+              child: ValueListenableBuilder<RimeMenu>(
+                valueListenable: _menu,
+                builder: (context, menu, _) => RimeCandidateRow(link: rime, menu: menu, style: rowStyle),
+              ),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   @override
@@ -191,6 +315,21 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
     _controller.value = TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length));
   }
 
+  /// One ⌫ at the caret: a selection goes as a whole, else the grapheme before the caret; nothing at the start.
+  void _backspaceNow() {
+    final v = _controller.value;
+    final s = v.selection.isValid ? v.selection : TextSelection.collapsed(offset: v.text.length);
+    var start = s.start, end = s.end;
+    if (s.isCollapsed) {
+      if (end <= 0) return;
+      start = end - v.text.substring(0, end).characters.last.length;
+    }
+    _controller.value = TextEditingValue(
+      text: v.text.replaceRange(start, end, ''),
+      selection: TextSelection.collapsed(offset: start),
+    );
+  }
+
   void _insertNow(String text) {
     final v = _controller.value;
     final s = v.selection;
@@ -205,7 +344,7 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
   @override
   void setText(String text) {
     if (_composing) {
-      _pending.add(() => _setNow(text));
+      _queue(() => _setNow(text));
     } else {
       _setNow(text);
     }
@@ -214,7 +353,7 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
   @override
   void insert(String text) {
     if (_composing) {
-      _pending.add(() => _insertNow(text));
+      _queue(() => _insertNow(text));
     } else {
       _insertNow(text);
     }
@@ -222,12 +361,16 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
 
   @override
   Future<String> read() {
-    if (!_handoff || !_composing) return SynchronousFuture(_controller.text);
+    // Rime's composition never ends on its own. Once the field is gone (the panel closing reads the draft
+    // with no blur first) or for the handoff, it is committed as typed before the read. While the field is
+    // there, a read (the model's 1 s draft copy) leaves it alone: committing it would cut a word in half.
+    final rime = _controller.rimePreedit.isNotEmpty && (_handoff || _fieldKey.currentContext == null);
+    if (!rime && (!_handoff || !_composing)) return SynchronousFuture(_controller.text);
     // Unfocus commits the local preedit. Read after that commit and any queued
     // insertions, before the native window becomes the draft's editor.
     final done = Completer<String>();
     _readers.add(done);
-    _pending.add(() {
+    _queue(() {
       _readers.remove(done);
       done.complete(_controller.text);
     });
@@ -245,7 +388,7 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
     // Dart writes only after the commit: the take waits in line behind earlier edits.
     final done = Completer<String>();
     _takers.add(done);
-    _pending.add(() {
+    _queue(() {
       _takers.remove(done);
       done.complete(_takeNow());
     });
@@ -275,6 +418,9 @@ class FlutterEditor implements ComposerEditor, HandoffEditor {
     _readers.clear();
     _controller.removeListener(_controllerChanged);
     _focus.removeListener(_focusChanged);
+    _rime?.removeListener(_rimeChanged);
+    _rime?.detach(this);
+    _menu.dispose();
     _controller.dispose();
     _focus.dispose();
   }
@@ -292,10 +438,20 @@ class _ChipController extends TextEditingController {
 
   EditorStyle? style;
 
+  /// Rime's composition: drawn at the caret, underlined, never part of [text].
+  String get rimePreedit => _rimePreedit;
+  String _rimePreedit = '';
+  set rimePreedit(String v) {
+    if (v == _rimePreedit) return;
+    _rimePreedit = v;
+    notifyListeners();
+  }
+
   @override
   TextSpan buildTextSpan({required BuildContext context, TextStyle? style, required bool withComposing}) {
-    final t = text, look = this.style;
-    if (look == null || _labels.isEmpty || !t.codeUnits.any(_labels.containsKey)) {
+    final t = text, look = this.style, pre = _rimePreedit;
+    final chips = look != null && _labels.isNotEmpty && t.codeUnits.any(_labels.containsKey);
+    if (!chips && pre.isEmpty) {
       return super.buildTextSpan(context: context, style: style, withComposing: withComposing);
     }
     final c = value.composing;
@@ -312,15 +468,30 @@ class _ChipController extends TextEditingController {
       if (b > ce) out.add(TextSpan(text: t.substring(ce, b)));
     }
 
+    // Rime's composition goes in once, at the caret (the end when there is none).
+    final s = value.selection;
+    var at = pre.isEmpty ? -1 : (s.isValid ? s.start.clamp(0, t.length) : t.length);
+    void segment(int a, int b) {
+      if (a <= at && at <= b) {
+        final p = at;
+        at = -1;
+        run(a, p);
+        out.add(TextSpan(text: pre, style: under));
+        run(p, b);
+      } else {
+        run(a, b);
+      }
+    }
+
     var start = 0;
-    for (var i = 0; i < t.length; i++) {
+    for (var i = 0; chips && i < t.length; i++) {
       final label = _labels[t.codeUnitAt(i)];
       if (label == null) continue;
-      run(start, i);
+      segment(start, i);
       start = i + 1;
       out.add(WidgetSpan(alignment: PlaceholderAlignment.middle, child: _Chip(label, look)));
     }
-    run(start, t.length);
+    segment(start, t.length);
     return TextSpan(style: style, children: out);
   }
 }
