@@ -1,15 +1,12 @@
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rapp/hub_client.dart';
 import 'package:rapp/pages/ios_local_section.dart';
 import 'package:rapp/paths.dart';
 import 'package:rapp/ui/controls.dart';
 import 'package:rapp/ui/prefs.dart';
-import 'package:rapp_rime/rapp_rime.dart';
 
 import '../fakes.dart';
 import 'helpers.dart';
@@ -88,7 +85,7 @@ void main() {
 
   testWidgets('the keep-awake row is bounded to 320 wide', (tester) async {
     await pump(tester);
-    expect(tester.getSize(find.ancestor(of: find.byKey(const Key('keep-awake-switch')), matching: find.byType(RappSwitchRow))).width, lessThanOrEqualTo(320));
+    expect(tester.getSize(find.byType(RappSwitchRow)).width, lessThanOrEqualTo(320));
   });
 
   testWidgets('the keep-awake switch flips prefs.keepAwake and saves', (tester) async {
@@ -103,130 +100,5 @@ void main() {
     await tester.pump();
     expect(prefs.keepAwake, isTrue);
     expect(saved, 2);
-  });
-
-  group('built-in IME rows', () {
-    const channel = MethodChannel('rapp/rime');
-    late List<MethodCall> calls;
-
-    // The platform override must be unset before the binding checks its invariants.
-    void rimeTest(String name, Future<void> Function(WidgetTester) body) => testWidgets(name, (tester) async {
-          try {
-            await body(tester);
-          } finally {
-            debugDefaultTargetPlatformOverride = null;
-          }
-        });
-    var ready = false;
-
-    setUp(() {
-      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
-      calls = [];
-      ready = false;
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
-        calls.add(call);
-        if (call.method == 'userFolder') return {'path': '/x/Rime', 'ready': ready};
-        return null;
-      });
-    });
-    tearDown(() {
-      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
-      RappRime.instance.configure(
-          enabled: false, builtin: true, dictionary: RimeDictionary.bundled, onBuiltin: (_) {});
-    });
-
-    rimeTest('off by default; the switch saves, shows the rows and configures', (tester) async {
-      await pump(tester);
-      expect(find.byKey(const Key('rime-switch')), findsOneWidget);
-      expect(find.byKey(const Key('rime-redeploy')), findsNothing);
-      await tester.tap(find.byKey(const Key('rime-switch')));
-      await tester.pump();
-      expect(prefs.rimeEnabled, isTrue);
-      expect(saved, 1);
-      expect(find.byKey(const Key('rime-redeploy')), findsOneWidget);
-      expect(find.byKey(const Key('rime-dictionary')), findsOneWidget);
-      expect(calls.where((c) => c.method == 'configure').single.arguments, {'enabled': true, 'dictionary': 'bundled'});
-    });
-
-    rimeTest('我的目录 is not choosable until the folder is ready, and says why', (tester) async {
-      prefs.rimeEnabled = true;
-      await pump(tester);
-      await tester.pump();
-      expect(find.text('把 Rime 目录放进「文件」→ rapp → Rime 后可选'), findsOneWidget);
-      await tester.tap(find.text('我的目录'));
-      await tester.pump();
-      expect(prefs.rimeDictionary, 'bundled');
-      await tester.tap(find.text('自带雾凇'));
-      await tester.pump();
-      expect(prefs.rimeDictionary, 'bundled');
-    });
-
-    const hint = '把 Rime 目录放进「文件」→ rapp → Rime 后可选';
-
-    rimeTest('back from the Files app, 我的目录 becomes choosable once the folder is there', (tester) async {
-      prefs.rimeEnabled = true;
-      await pump(tester);
-      await tester.pump();
-      expect(find.text(hint), findsOneWidget);
-      ready = true; // the user put the folder in Files, then came back
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
-      await tester.pump();
-      expect(find.text(hint), findsOneWidget, reason: 'asked again only on resume');
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-      await tester.pump();
-      await tester.pump();
-      expect(find.text(hint), findsNothing);
-      await tester.tap(find.text('我的目录'));
-      await tester.pump();
-      expect(prefs.rimeDictionary, 'user');
-    });
-
-    rimeTest('重新部署 asks for the folder again', (tester) async {
-      prefs.rimeEnabled = true;
-      await pump(tester);
-      await tester.pump();
-      expect(find.text(hint), findsOneWidget);
-      ready = true;
-      final before = calls.where((c) => c.method == 'userFolder').length;
-      await tester.tap(find.byKey(const Key('rime-redeploy')));
-      await tester.pump();
-      await tester.pump();
-      expect(calls.where((c) => c.method == 'userFolder').length, before + 1);
-      expect(find.text(hint), findsNothing);
-    });
-
-    rimeTest('我的目录 is choosable when ready; the status row follows the engine', (tester) async {
-      ready = true;
-      prefs.rimeEnabled = true;
-      await pump(tester);
-      await tester.pump();
-      expect(find.text('把 Rime 目录放进「文件」→ rapp → Rime 后可选'), findsNothing);
-      await tester.tap(find.text('我的目录'));
-      await tester.pump();
-      expect(prefs.rimeDictionary, 'user');
-      expect(saved, 1);
-      expect(find.text('就绪'), findsNothing);
-      await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.handlePlatformMessage(
-        'rapp/rime',
-        const StandardMethodCodec().encodeMethodCall(const MethodCall('status', {'state': 'starting'})),
-        (_) {},
-      );
-      await tester.pump();
-      expect(find.text('部署中…'), findsOneWidget);
-      await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.handlePlatformMessage(
-        'rapp/rime',
-        const StandardMethodCodec().encodeMethodCall(const MethodCall('status', {'state': 'error', 'message': '没有 default.yaml'})),
-        (_) {},
-      );
-      await tester.pump();
-      expect(find.text('出错：没有 default.yaml'), findsOneWidget);
-      await tester.tap(find.byKey(const Key('rime-redeploy')));
-      await tester.pump();
-      expect(calls.map((c) => c.method), contains('redeploy'));
-    });
   });
 }

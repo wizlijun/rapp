@@ -5,9 +5,9 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
-import 'package:rapp_rime/rapp_rime.dart';
 
 import 'data_dir.dart';
+import 'embed/rime_glue.dart';
 import 'embed/session_port.dart';
 import 'hub_client.dart';
 import 'hub_ffi.dart';
@@ -85,15 +85,8 @@ Future<void> mainIos() async {
       profiles: AppProfileStore.load(data.sharedDir, builtin),
       log: _log);
   state.overview = true;
-  RappRime.instance.configure(
-    enabled: prefs.rimeEnabled,
-    builtin: prefs.rimeBuiltin,
-    dictionary: prefs.rimeDictionary == 'user' ? RimeDictionary.user : RimeDictionary.bundled,
-    onBuiltin: (b) {
-      prefs.rimeBuiltin = b;
-      state.savePrefs();
-    },
-  );
+  // The built-in input method follows 全局设置 and the session on the stage. Lives as long as the app.
+  final rime = RimeGlue(state);
   // Background freezes and closes every session, coming back reconnects them; the screen stays awake while
   // a session is live (spec §9). Lives as long as the app.
   BackgroundWatch(state: state, ios: iosChannel);
@@ -110,7 +103,7 @@ Future<void> mainIos() async {
   WidgetsBinding.instance.addObserver(_WindowSize(() => unawaited(fullscreen.windowSize(_windowSize()))));
   runApp(_IosApp(
     state: state,
-    home: MainWindow(state: state, monitor: null, control: null, fullscreen: fullscreen),
+    home: MainWindow(state: state, monitor: null, control: null, fullscreen: fullscreen, rime: rime),
   ));
 }
 

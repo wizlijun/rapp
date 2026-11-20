@@ -27,8 +27,7 @@ class UiPrefs {
     bool? appKeyRow,
     this.termFit = true,
     this.keepAwake = true,
-    this.rimeEnabled = false,
-    this.rimeBuiltin = true,
+    this.rimeEnabled = true,
     this.rimeDictionary = 'bundled',
     this.first = FirstLayer.device,
     this.composerZoom = 0,
@@ -65,11 +64,9 @@ class UiPrefs {
   /// 屏幕常亮 (`keep_awake`, iOS): no auto-lock while a live session is on the stage. Missing or bad means on.
   bool keepAwake;
 
-  /// 实体键盘用内置输入法 (`rime_enabled`, iOS): the master switch. Missing or bad means off.
+  /// 实体键盘用内置输入法 (`rime_enabled`, iOS): the master switch; each session's app profile can still turn it
+  /// off for that app (`rime`). Missing or bad means on.
   bool rimeEnabled;
-
-  /// 「内」/「系」 (`rime_builtin`, iOS): the built-in input method is the one typing. Missing or bad means on.
-  bool rimeBuiltin;
 
   /// 词库 (`rime_dictionary`, iOS): `'bundled'` (自带雾凇) or `'user'` (我的目录). Anything else means `'bundled'`.
   String rimeDictionary;
@@ -121,7 +118,6 @@ class UiPrefs {
       final tf = j['term_fit'];
       final ka = j['keep_awake'];
       final re = j['rime_enabled'];
-      final rb = j['rime_builtin'];
       final rd = j['rime_dictionary'];
       final fl = j['first'];
       final cz = j['composer_zoom'];
@@ -143,8 +139,7 @@ class UiPrefs {
         appKeyRow: ak is bool ? ak : null,
         termFit: tf is bool ? tf : true,
         keepAwake: ka is bool ? ka : true,
-        rimeEnabled: re is bool ? re : false,
-        rimeBuiltin: rb is bool ? rb : true,
+        rimeEnabled: re is bool ? re : true,
         rimeDictionary: rd == 'user' ? 'user' : 'bundled',
         composerZoom: cz is int ? cz.clamp(0, composerZoomMax) : 0,
         stageButtonsSide: sb == 'left' ? StageSide.left : StageSide.right,
@@ -185,7 +180,6 @@ class UiPrefs {
         'term_fit': termFit,
         'keep_awake': keepAwake,
         'rime_enabled': rimeEnabled,
-        'rime_builtin': rimeBuiltin,
         'rime_dictionary': rimeDictionary,
         'first': first.name,
         'composer_zoom': composerZoom,

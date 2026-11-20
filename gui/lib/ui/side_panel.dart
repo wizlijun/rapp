@@ -254,6 +254,9 @@ class _Footer extends StatelessWidget {
                 state.setAutoSaveTraffic),
             toggle(const Key('input-history'), '记下写作面板发出去的话', state.prefs.inputHistory, state.setInputHistory,
                 note: '存在数据目录的 inputs/ 里，会随 git 同步'),
+            if (defaultTargetPlatform == TargetPlatform.iOS)
+              toggle(const Key('rime-switch'), '实体键盘用内置输入法', state.prefs.rimeEnabled, state.setRimeEnabled,
+                  note: 'Rime 雾凇拼音，候选在文字下一行'),
             if (defaultTargetPlatform == TargetPlatform.macOS || defaultTargetPlatform == TargetPlatform.linux) _VoiceHotkeyRow(state: state, style: small, minHeight: rowHeight),
             if (settings != null) ...[const SizedBox(height: 8), settings!],
           ]),

@@ -3010,6 +3010,18 @@ class MainState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 「实体键盘用内置输入法」 (iOS): saved; the built-in input method follows (`RimeGlue` listens here).
+  void setRimeEnabled(bool v) {
+    prefs.rimeEnabled = v;
+    _save();
+  }
+
+  /// 词库 (iOS): `'bundled'` or `'user'`; saved, and followed like [setRimeEnabled].
+  void setRimeDictionary(String d) {
+    prefs.rimeDictionary = d;
+    _save();
+  }
+
   /// The writing panel's zoom step (0 is the default), for every panel. Its own notifier: the panel follows
   /// it without rebuilding on every other change here.
   late final ValueNotifier<int> composerZoom = ValueNotifier(prefs.composerZoom.clamp(0, composerZoomMax));

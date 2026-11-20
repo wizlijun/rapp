@@ -8,10 +8,12 @@ import 'package:flutter/services.dart';
 
 import '../pages/access_log_section.dart';
 import '../data_relocate.dart';
+import '../embed/rime_glue.dart';
 import '../pages/app_profiles_section.dart';
 import '../pages/ios_local_section.dart';
 import '../pages/global_sections.dart';
 import '../pages/local_section.dart';
+import '../pages/rime_settings_section.dart';
 import '../hub_client.dart';
 import '../ios_channel.dart';
 import '../platform_caps.dart';
@@ -49,6 +51,7 @@ class MainWindow extends StatefulWidget {
     this.relocator,
     required this.fullscreen,
     this.hooks,
+    this.rime,
   });
 
   final MainState state;
@@ -61,6 +64,9 @@ class MainWindow extends StatefulWidget {
 
   /// How the update buttons quit rapp (K28).
   final UpdateHooks? hooks;
+
+  /// The built-in input method's settings (iOS only); null elsewhere.
+  final RimeGlue? rime;
 
   @override
   State<MainWindow> createState() => _MainWindowState();
@@ -370,9 +376,10 @@ class _MainWindowState extends State<MainWindow> {
                               state: state,
                               child: SidePanel(
                                 state: state,
-                                // 版本升级 and 数据目录 sit in 全局设置, not on 本机 (no service on iOS: neither).
+                                // 版本升级 and 数据目录 sit in 全局设置, not on 本机 (no service on iOS: neither; the
+                                // built-in input method's 词库, 重新部署 and status instead).
                                 settings: !caps.hasService || widget.monitor == null
-                                    ? null
+                                    ? (widget.rime == null ? null : RimeSettingsSection(glue: widget.rime!))
                                     : ListenableBuilder(
                                         listenable: state,
                                         builder: (context, _) => GlobalSections(

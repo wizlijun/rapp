@@ -4,7 +4,6 @@ import 'dart:io';
 import 'dart:isolate';
 
 import 'package:flutter/material.dart';
-import 'package:rapp_rime/rapp_rime.dart';
 
 import '../hub_client.dart';
 import '../ios_channel.dart';
@@ -59,22 +58,19 @@ class IosLocalSection extends StatefulWidget {
   State<IosLocalSection> createState() => _IosLocalSectionState();
 }
 
-class _IosLocalSectionState extends State<IosLocalSection> with WidgetsBindingObserver {
+class _IosLocalSectionState extends State<IosLocalSection> {
   bool _showTail = false;
   int? _bytes;
   String? _version;
-  bool _folderReady = false;
 
   @override
   void initState() {
     super.initState();
     widget.hub.addListener(_onHub);
-    WidgetsBinding.instance.addObserver(this);
     if (widget.hub.lastAccess == null) widget.hub.access().catchError((_) => const HubAccess(null, false, ''));
     dirBytesOffThread(widget.data.filesDir).then((n) {
       if (mounted) setState(() => _bytes = n);
     });
-    _loadFolder();
     (widget.version ?? iosChannel.version)().then((v) {
       if (mounted) setState(() => _version = v);
     }, onError: (_) {});
@@ -82,15 +78,8 @@ class _IosLocalSectionState extends State<IosLocalSection> with WidgetsBindingOb
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
     widget.hub.removeListener(_onHub);
     super.dispose();
-  }
-
-  /// Back from the Files app (where the Rime folder is added): ask again whether it is there.
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && widget.prefs.rimeEnabled) _loadFolder();
   }
 
   HubAccess? _seen;
@@ -104,95 +93,6 @@ class _IosLocalSectionState extends State<IosLocalSection> with WidgetsBindingOb
   void _setKeepAwake(bool on) {
     setState(() => widget.prefs.keepAwake = on);
     widget.onPrefs();
-  }
-
-  Future<void> _loadFolder() async {
-    final f = await RappRime.instance.userFolder();
-    if (mounted) setState(() => _folderReady = f.ready);
-  }
-
-  void _applyRime() {
-    final p = widget.prefs;
-    RappRime.instance.configure(
-      enabled: p.rimeEnabled,
-      builtin: p.rimeBuiltin,
-      dictionary: p.rimeDictionary == 'user' ? RimeDictionary.user : RimeDictionary.bundled,
-      onBuiltin: (b) {
-        p.rimeBuiltin = b;
-        widget.onPrefs();
-      },
-    );
-  }
-
-  void _setRime(bool on) {
-    setState(() => widget.prefs.rimeEnabled = on);
-    widget.onPrefs();
-    _applyRime();
-    if (on) _loadFolder();
-  }
-
-  void _setDictionary(String d) {
-    setState(() => widget.prefs.rimeDictionary = d);
-    widget.onPrefs();
-    _applyRime();
-  }
-
-  String _statusText(RimeStatus s) => switch (s.state) {
-        RimeState.off => '',
-        RimeState.starting => '部署中…',
-        RimeState.ready => '就绪',
-        RimeState.error => '出错：${s.message}',
-      };
-
-  Widget _rimeRows() {
-    final user = widget.prefs.rimeDictionary == 'user';
-    return ListenableBuilder(
-      listenable: RappRime.instance,
-      builder: (context, _) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Align(
-          alignment: Alignment.centerLeft,
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 320),
-            child: RappSwitchRow(
-              switchKey: const Key('rime-switch'),
-              label: '实体键盘用内置输入法',
-              note: 'Rime 雾凇拼音，候选在文字下一行',
-              value: widget.prefs.rimeEnabled,
-              onChanged: _setRime,
-            ),
-          ),
-        ),
-        if (widget.prefs.rimeEnabled) ...[
-          Row(key: const Key('rime-dictionary'), mainAxisSize: MainAxisSize.min, children: [
-            RappChoice(label: '自带雾凇', selected: !user, onTap: () => _setDictionary('bundled')),
-            const SizedBox(width: 16),
-            RappChoice(
-              label: '我的目录',
-              selected: user,
-              dim: !_folderReady,
-              onTap: _folderReady ? () => _setDictionary('user') : null,
-            ),
-          ]),
-          if (!_folderReady)
-            const Padding(
-              padding: EdgeInsets.only(bottom: 4),
-              child: Text('把 Rime 目录放进「文件」→ rapp → Rime 后可选', style: TextStyle(color: Colors.grey, fontSize: 12)),
-            ),
-          Row(children: [
-            RappButton.secondary(
-              key: const Key('rime-redeploy'),
-              label: '重新部署',
-              onPressed: () {
-                RappRime.instance.redeploy();
-                _loadFolder();
-              },
-            ),
-            const SizedBox(width: 12),
-            Expanded(child: Text(_statusText(RappRime.instance.status), key: const Key('rime-status'))),
-          ]),
-        ],
-      ]),
-    );
   }
 
   Future<void> _editAccess() => Navigator.of(context).push(MaterialPageRoute<void>(
@@ -252,7 +152,6 @@ class _IosLocalSectionState extends State<IosLocalSection> with WidgetsBindingOb
           ),
         ),
       ),
-      _rimeRows(),
       const SizedBox(height: 8),
       Align(
         alignment: Alignment.centerLeft,
