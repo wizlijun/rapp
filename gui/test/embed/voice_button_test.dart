@@ -881,6 +881,7 @@ void main() {
       late List<(String, VoicePick)> took;
       late List<String> sent, edited, order;
       late List<Rect?> tookAt;
+      late List<String?> ahead;
       var take = true, would = false;
       VoiceHold hold() => VoiceHold(
             voice: voice,
@@ -900,10 +901,13 @@ void main() {
             },
             wouldTidy: (t) => would,
             onPress: () => order.add('press:${voice.starts}'),
+            prefetch: ahead.add,
+            pauseFor: const Duration(milliseconds: 20),
           );
       setUp(() {
         took = [];
         tookAt = [];
+        ahead = [];
         would = false;
         sent = [];
         edited = [];
@@ -978,6 +982,54 @@ void main() {
         await Future<void>.delayed(Duration.zero);
         expect(took, isEmpty);
         expect(h.hint, voiceBlank);
+      });
+
+      test('a pause while holding prefetches the words so far; new words wait for the next pause', () async {
+        await h.start();
+        voice.partial('这是一段');
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        voice.partial('这是一段很长很长的');
+        await Future<void>.delayed(const Duration(milliseconds: 10));
+        expect(ahead, isEmpty);
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        expect(ahead, ['这是一段很长很长的']);
+        // The same words again (a final for the partial) start no second one.
+        voice.partial('这是一段很长很长的');
+        await Future<void>.delayed(const Duration(milliseconds: 40));
+        expect(ahead, ['这是一段很长很长的']);
+      });
+
+      test('the release prefetches at once, before the stop is back', () async {
+        voice.stopGate = Completer<String>();
+        await h.start();
+        voice.partial('这是一段很长很长的语音输入文字');
+        h.finish(VoicePick.send);
+        await Future<void>.delayed(Duration.zero);
+        expect(ahead, ['这是一段很长很长的语音输入文字']);
+        expect(took, isEmpty);
+        voice.stopGate!.complete('这是一段很长很长的语音输入文字。');
+        await Future<void>.delayed(Duration.zero);
+        await Future<void>.delayed(Duration.zero);
+        expect(took.single.$1, '这是一段很长很长的语音输入文字。');
+        await Future<void>.delayed(const Duration(milliseconds: 40));
+        expect(ahead, hasLength(1));
+      });
+
+      test('a cancel or a declined release drops the prefetch', () async {
+        await h.start();
+        voice.partial('这是一段很长很长的语音输入文字');
+        h.finish(VoicePick.cancel);
+        await Future<void>.delayed(Duration.zero);
+        expect(ahead, [null]);
+        take = false;
+        ahead.clear();
+        voice.stopResult = '你好';
+        await h.start();
+        voice.partial('你好');
+        h.finish(VoicePick.send);
+        await Future<void>.delayed(Duration.zero);
+        expect(ahead, ['你好', null]);
+        expect(sent, ['你好']);
       });
 
       test('a press calls onPress before start', () async {

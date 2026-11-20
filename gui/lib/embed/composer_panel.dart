@@ -958,6 +958,9 @@ class _IosStageState extends State<_IosStage> {
         tidy: (text, pick, at) => widget.state.tidyOf(widget.session.sid).begin(text, pick, at: at),
         wouldTidy: (text) => widget.state.tidyOf(widget.session.sid).would(text),
         onPress: () => widget.state.tidyIfAny(widget.session.sid)?.interrupt(),
+        prefetch: (t) => t == null
+            ? widget.state.tidyIfAny(widget.session.sid)?.prefetch(null)
+            : widget.state.tidyOf(widget.session.sid).prefetch(t),
       );
     }
   }

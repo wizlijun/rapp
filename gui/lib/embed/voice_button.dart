@@ -116,7 +116,16 @@ class VoiceHold extends ChangeNotifier {
     this.tidy,
     this.wouldTidy,
     this.onPress,
+    this.prefetch,
+    this.pauseFor = const Duration(milliseconds: 800),
   });
+
+  /// 边说边整理 (user 2026-11-21): the words so far, for the tidy to start on unseen while they are still being
+  /// said — after each [pauseFor] without new words while holding, and at once at a release (松手立刻发), before
+  /// the stop is back. Null: drop it (a cancel, a release the tidy did not take). The tidy takes it at [tidy]
+  /// when the final words are the same.
+  final void Function(String? text)? prefetch;
+  final Duration pauseFor;
 
   /// Offered each non-blank text a release gives (send or edit pick) and where the bubble stood ([bubbleAt]);
   /// true means it took the text (the AI tidy runs and ends the send or edit itself), and nothing else happens
@@ -183,6 +192,8 @@ class VoiceHold extends ChangeNotifier {
   bool _disposed = false;
   int? _pointer;
   Timer? _hintTimer;
+  Timer? _pauseTimer;
+  String _heard = '';
   ComposerModel? _pressedFor;
 
   /// The overlay is up or still animating.
@@ -226,6 +237,8 @@ class VoiceHold extends ChangeNotifier {
         holding = true;
         voice.onMaxLength = _release;
         voice.onError = _interrupted;
+        _heard = voice.text;
+        if (prefetch != null) voice.addListener(_onWords);
         if (_ios) unawaited(HapticFeedback.mediumImpact());
         notifyListeners();
       case VoiceStart.asked:
@@ -316,13 +329,36 @@ class VoiceHold extends ChangeNotifier {
     if (code != 'interrupted') _setHint(voiceBlank);
   }
 
+  // New words while holding: the prefetch waits for the next pause.
+  void _onWords() {
+    if (!holding || voice.text == _heard) return;
+    _heard = voice.text;
+    _pauseTimer?.cancel();
+    _pauseTimer = Timer(pauseFor, () {
+      _pauseTimer = null;
+      if (holding && _heard.trim().isNotEmpty) prefetch?.call(_heard);
+    });
+  }
+
+  void _stopListening() {
+    _pauseTimer?.cancel();
+    _pauseTimer = null;
+    voice.removeListener(_onWords);
+  }
+
   Future<void> _release() async {
     if (!holding) return;
     holding = false;
     _pressed = false;
     voice.onMaxLength = null;
     voice.onError = null;
+    _stopListening();
     final which = pick;
+    if (which == VoicePick.cancel) {
+      prefetch?.call(null);
+    } else if (voice.text.trim().isNotEmpty) {
+      prefetch?.call(voice.text);
+    }
     final draft = _pressedFor;
     _handedOver = false;
     _handingOver = which != VoicePick.cancel && tidy != null && (wouldTidy?.call(voice.text) ?? false);
@@ -334,11 +370,13 @@ class VoiceHold extends ChangeNotifier {
         final text = await voice.stop();
         if (_disposed) {
           // The session switched meanwhile: keep the words in its draft rather than lose them.
+          prefetch?.call(null);
           if (draft != null) unawaited(draft.keep(text));
           return;
         }
         // Taken by the tidy: it sends or edits when it is done, and no language hint shows over its card.
         final taken = text.trim().isNotEmpty && (tidy?.call(text, which, bubbleAt) ?? false);
+        if (!taken) prefetch?.call(null);
         _handedOver = taken;
         if (_handingOver) {
           _handingOver = false;
@@ -379,6 +417,8 @@ class VoiceHold extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _hintTimer?.cancel();
+    _stopListening();
+    if (holding || _pressed) prefetch?.call(null);
     if (holding || _pressed) {
       voice.onMaxLength = null;
       voice.onError = null;

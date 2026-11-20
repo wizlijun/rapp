@@ -13,6 +13,7 @@ class FakeLlmApi extends LlmApi {
   final runs = <(String app, String input)>[];
   final thinks = <bool>[];
   final calls = <LlmCall>[];
+  final texts = <void Function(String)?>[];
   void Function(String)? onText;
 
   @override
@@ -21,6 +22,7 @@ class FakeLlmApi extends LlmApi {
     runs.add((app, input));
     thinks.add(think);
     this.onText = onText;
+    texts.add(onText);
     final c = LlmCall.manual();
     calls.add(c);
     return c;
@@ -68,6 +70,102 @@ void main() {
     kept = [];
     logs = [];
     sendHint = null;
+  });
+
+  group('prefetch (边说边整理)', () {
+    const heard = '嗯，那个我门明天下午三点开会。';
+
+    test('a release with the same words takes it: no second call, its words show at once', () {
+      fakeAsync((a) {
+        final t = make();
+        t.prefetch(long);
+        expect(api.runs.single, ('dictation', long));
+        expect(t.phase, TidyPhase.idle);
+        api.texts.single!('我们明天');
+        expect(t.shown, '');
+        // The punctuation and white space aside, the release's words are the prefetch's.
+        expect(t.begin(heard, VoicePick.send), isTrue);
+        expect(api.runs, hasLength(1));
+        expect(t.original, heard);
+        out(a, t);
+        expect(t.shown, '我们明天');
+        api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
+        out(a, t);
+        a.elapse(const Duration(milliseconds: 1500));
+        expect(sent.single.$2, '我们明天下午三点开会。');
+        expect(sent.single.$3.ai, const VoiceAi(app: 'dictation', original: heard, result: '我们明天下午三点开会。'));
+        expect(logs.where((l) => l.contains('prefetched')), hasLength(1));
+        t.dispose();
+      });
+    });
+
+    test('a prefetch already done is taken whole', () {
+      fakeAsync((a) {
+        final t = make();
+        t.prefetch(long);
+        api.texts.single!('我们明天下午三点开会。');
+        api.calls.single.complete(const LlmDone('我们明天下午三点开会。'));
+        a.flushMicrotasks();
+        expect(t.begin(long, VoicePick.send), isTrue);
+        out(a, t);
+        expect(t.phase, TidyPhase.ready);
+        expect(t.shown, '我们明天下午三点开会。');
+        expect(api.runs, hasLength(1));
+        t.dispose();
+      });
+    });
+
+    test('a release with other words drops the prefetch and asks again', () {
+      fakeAsync((a) {
+        final t = make();
+        t.prefetch(long);
+        expect(t.begin('$long好吧', VoicePick.send), isTrue);
+        expect(api.runs.map((r) => r.$2), [long, '$long好吧']);
+        expect(api.calls.first.cancelled, isTrue);
+        api.texts.first!('旧的');
+        out(a, t);
+        expect(t.shown, '');
+        t.dispose();
+      });
+    });
+
+    test('new words replace the prefetch; the same words again keep it', () {
+      final t = make();
+      t.prefetch(long);
+      t.prefetch('$long。');
+      expect(api.runs, hasLength(1));
+      t.prefetch('$long好吧');
+      expect(api.runs, hasLength(2));
+      expect(api.calls.first.cancelled, isTrue);
+      t.dispose();
+      expect(api.calls.last.cancelled, isTrue);
+    });
+
+    test('null drops it; short words or not allowed start nothing', () {
+      final t = make();
+      t.prefetch('你好');
+      allowed = false;
+      t.prefetch(long);
+      expect(api.runs, isEmpty);
+      allowed = true;
+      t.prefetch(long);
+      t.prefetch(null);
+      expect(api.calls.single.cancelled, isTrue);
+      t.dispose();
+    });
+
+    test('a failed prefetch is not taken', () {
+      fakeAsync((a) {
+        final t = make();
+        t.prefetch(long);
+        api.calls.single.complete(const LlmFailed('LLM 出错'));
+        a.flushMicrotasks();
+        expect(t.begin(long, VoicePick.send), isTrue);
+        expect(api.runs, hasLength(2));
+        expect(t.phase, TidyPhase.tidying);
+        t.dispose();
+      });
+    });
   });
 
   test('long counts non-space characters', () {

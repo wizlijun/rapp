@@ -120,6 +120,7 @@ class VoiceTidy extends ChangeNotifier {
   Timer? _ticker;
 
   LlmCall? _call;
+  _Ahead? _ahead;
   Timer? _cap;
   Timer? _settleTimer;
   Timer? _noteTimer;
@@ -134,8 +135,63 @@ class VoiceTidy extends ChangeNotifier {
   /// [begin] would take [text] now.
   bool would(String text) => !_disposed && long(text) && allowed(sid);
 
+  /// 边说边整理 (user 2026-11-21): while the words are still being said, a call on them so far, unseen; [begin]
+  /// takes it when the release's words are the same, punctuation and white space aside, and the AI is seconds
+  /// ahead. New words replace it; null, short words or a tidy not allowed drop it.
+  void prefetch(String? text) {
+    final a = _ahead;
+    if (text == null || _disposed || !long(text) || !allowed(sid)) return _dropAhead();
+    final key = _key(text);
+    if (a != null && a.key == key && a.result is! LlmFailed) return;
+    _dropAhead();
+    _ahead = _Ahead(key, _run(text.trim()));
+    _log('prefetch (${text.trim().runes.length} chars)');
+  }
+
+  static String _key(String t) => t.replaceAll(RegExp(r'[\s\p{P}\p{S}]', unicode: true), '').toLowerCase();
+
+  void _dropAhead() {
+    final a = _ahead;
+    _ahead = null;
+    a?.call.cancel();
+  }
+
+  // The prefetch, when it is on [text] and has not failed; it is no longer a prefetch either way.
+  _Ahead? _takeAhead(String text) {
+    final a = _ahead;
+    if (a == null || a.key != _key(text) || a.result is LlmFailed || a.result is LlmCancelled) {
+      _dropAhead();
+      return null;
+    }
+    _ahead = null;
+    return a;
+  }
+
+  // One call to the gateway: its words and its end go to the tidy when it is [_call], else to the prefetch.
+  LlmCall _run(String input) {
+    late final LlmCall call;
+    call = api.run(endpoint(), tidyApp, input, think: think(), onText: (t) {
+      if (identical(_call, call)) {
+        _aim(t);
+      } else if (identical(_ahead?.call, call)) {
+        _ahead!.text = t;
+      }
+    });
+    unawaited(call.result.then((r) {
+      if (identical(_call, call)) {
+        _ended(call, r);
+      } else if (identical(_ahead?.call, call)) {
+        _ahead!.result = r;
+      }
+    }));
+    return call;
+  }
+
   bool begin(String text, VoicePick pick, {Rect? at}) {
-    if (_disposed || !long(text) || !allowed(sid)) return false;
+    if (_disposed || !long(text) || !allowed(sid)) {
+      _dropAhead();
+      return false;
+    }
     if (_phase != TidyPhase.idle) interrupt();
     _clearNote();
     _original = text.trim();
@@ -149,11 +205,8 @@ class VoiceTidy extends ChangeNotifier {
     _watch
       ..reset()
       ..start();
-    late final LlmCall call;
-    call = api.run(endpoint(), tidyApp, _original, think: think(), onText: (t) {
-      if (!identical(_call, call)) return;
-      _aim(t);
-    });
+    final ahead = _takeAhead(_original);
+    final call = ahead?.call ?? _run(_original);
     _call = call;
     _cap = Timer(overall, () {
       if (!identical(_call, call)) return;
@@ -161,10 +214,14 @@ class VoiceTidy extends ChangeNotifier {
       _log('timeout');
       _fail(tidyTooSlow);
     });
-    unawaited(call.result.then((r) => _ended(call, r)));
     held?.call(sid, _original);
-    _log('start (${_original.runes.length} chars)');
+    _log('start (${_original.runes.length} chars${ahead == null ? '' : ', prefetched ${ahead.age.elapsedMilliseconds} ms ahead'})');
     notifyListeners();
+    if (ahead != null) {
+      if (ahead.text.isNotEmpty) _aim(ahead.text);
+      final r = ahead.result;
+      if (r != null) _ended(call, r);
+    }
     return true;
   }
 
@@ -437,7 +494,18 @@ class VoiceTidy extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _stop();
+    _dropAhead();
     _clearNote();
     super.dispose();
   }
+}
+
+/// A [VoiceTidy.prefetch]: the words it is on (as compared), its call, and what has come back so far.
+class _Ahead {
+  _Ahead(this.key, this.call);
+  final String key;
+  final LlmCall call;
+  final age = Stopwatch()..start();
+  String text = '';
+  LlmResult? result;
 }
